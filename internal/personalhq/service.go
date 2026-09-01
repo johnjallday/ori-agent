@@ -105,6 +105,11 @@ type Status struct {
 	// eligible, accessible workspace (Valid is true).
 	Workspace *session.Workspace `json:"workspace,omitempty"`
 
+	// EntryAgentInstanceID and EntryAgentName project the canonical workspace
+	// entry point without asking clients to infer identity from display order.
+	EntryAgentInstanceID string `json:"entry_agent_instance_id,omitempty"`
+	EntryAgentName       string `json:"entry_agent_name,omitempty"`
+
 	// Valid is true only when WorkspaceID is set and resolves to an
 	// eligible workspace. A user with no designation at all is not "valid"
 	// but is also not "invalid" — see HasDesignation/NeedsRepair.
@@ -302,6 +307,13 @@ func (s *Service) Status(ctx context.Context, userID string) (*Status, error) {
 		} else {
 			out.Valid = true
 			out.Workspace = ws
+			for _, instance := range ws.AgentInstances {
+				if instance.EntryPoint {
+					out.EntryAgentInstanceID = instance.ID
+					out.EntryAgentName = instance.Name
+					break
+				}
+			}
 		}
 	}
 	return out, nil

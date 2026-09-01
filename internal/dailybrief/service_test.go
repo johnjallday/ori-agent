@@ -77,6 +77,51 @@ func TestService_UpdateConfigValidatesAndPersists(t *testing.T) {
 	}
 }
 
+func TestService_FirstAssignmentBriefUsesFirstOpenThenIdempotentManualRefresh(t *testing.T) {
+	store := newServiceTestStore(t)
+	gen := &fakeGenerator{result: GenerationResult{Status: GenerationSucceeded, ContentJSON: `{"opening_summary":"ok"}`}}
+	svc := NewService(store, gen)
+	ctx := context.Background()
+	seedConfig(t, store, "ws-1")
+
+	cfg, trigger, err := svc.PlanFirstAssignmentBrief(ctx, "ws-1")
+	if err != nil || trigger != TriggerFirstOpen {
+		t.Fatalf("initial plan trigger=%q err=%v", trigger, err)
+	}
+	claim, first, err := svc.GenerateFirstAssignmentBrief(ctx, *cfg, "local", trigger, "first-assignment-brief-1")
+	if err != nil || claim.ID != "first-assignment-brief-1" || first == nil {
+		t.Fatalf("first claim=%#v revision=%#v err=%v", claim, first, err)
+	}
+	cfg, trigger, err = svc.PlanFirstAssignmentBrief(ctx, "ws-1")
+	if err != nil || trigger != TriggerManual {
+		t.Fatalf("refresh plan trigger=%q err=%v", trigger, err)
+	}
+	claim, refreshed, err := svc.GenerateFirstAssignmentBrief(ctx, *cfg, "local", trigger, "first-assignment-brief-2")
+	if err != nil || claim.ID != "first-assignment-brief-2" || refreshed == nil || refreshed.ID == first.ID {
+		t.Fatalf("manual claim=%#v revision=%#v err=%v", claim, refreshed, err)
+	}
+	replayedClaim, replayed, err := svc.GenerateFirstAssignmentBrief(ctx, *cfg, "local", trigger, "first-assignment-brief-2")
+	if err != nil || replayedClaim.ID != claim.ID || replayed.ID != refreshed.ID || gen.callCount() != 2 {
+		t.Fatalf("manual replay claim=%#v revision=%#v calls=%d err=%v", replayedClaim, replayed, gen.callCount(), err)
+	}
+}
+
+func TestService_IdentifiedFailedBriefReplaysWithoutSecondGeneration(t *testing.T) {
+	store := newServiceTestStore(t)
+	gen := &fakeGenerator{err: errors.New("snapshot failed")}
+	svc := NewService(store, gen)
+	ctx := context.Background()
+	cfg := seedConfig(t, store, "ws-1")
+	claim, revision, err := svc.GenerateFirstAssignmentBrief(ctx, cfg, "local", TriggerFirstOpen, "failed-request")
+	if err == nil || claim == nil || revision == nil || claim.Status != GenerationFailed {
+		t.Fatalf("failed claim=%#v revision=%#v err=%v", claim, revision, err)
+	}
+	_, _, err = svc.GenerateFirstAssignmentBrief(ctx, cfg, "local", TriggerFirstOpen, "failed-request")
+	if !errors.Is(err, ErrGenerationFailed) || gen.callCount() != 1 {
+		t.Fatalf("failed replay calls=%d err=%v", gen.callCount(), err)
+	}
+}
+
 func TestService_RequestGeneration_FirstOpenSucceedsAndBecomesCurrent(t *testing.T) {
 	store := newServiceTestStore(t)
 	gen := &fakeGenerator{result: GenerationResult{Status: GenerationSucceeded, ContentJSON: `{"summary":"hi"}`}}

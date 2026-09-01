@@ -97,6 +97,7 @@ type templateAgentPlanItem struct {
 	Provider        string                        `json:"provider,omitempty"`
 	ReasoningEffort string                        `json:"reasoning_effort,omitempty"`
 	SystemPrompt    string                        `json:"system_prompt,omitempty"`
+	Appearance      *types.AgentAppearance        `json:"appearance,omitempty"`
 	ModelSource     string                        `json:"model_source,omitempty"`
 	Tools           projecttemplates.ToolDefaults `json:"tools,omitempty"`
 	Warning         string                        `json:"warning,omitempty"`
@@ -318,6 +319,7 @@ func (h *Handler) templateAgentCreateConfig(spec projecttemplates.AgentSpec) (*s
 		LLMProvider:     provider,
 		ReasoningEffort: reasoningEffort,
 		SystemPrompt:    spec.SystemPrompt,
+		Appearance:      spec.Appearance.Clone(),
 	}, modelSource
 }
 
@@ -535,6 +537,7 @@ func (h *Handler) buildTemplateAgentPlanItem(spec projecttemplates.AgentSpec, en
 			item.Provider = strings.TrimSpace(ag.Settings.Provider)
 			item.ReasoningEffort = strings.TrimSpace(ag.Settings.EffectiveReasoningEffort(ag.Settings.Provider))
 			item.SystemPrompt = strings.TrimSpace(ag.Settings.SystemPrompt)
+			item.Appearance = ag.Appearance.Clone()
 			item.ModelSource = "existing"
 			item.Tools = projecttemplates.ToolDefaults{}
 			item.Warning = fmt.Sprintf("Reusing existing agent %q - its saved prompt, model, and tools are used, not the template's.", name)
@@ -559,6 +562,7 @@ func (h *Handler) buildTemplateAgentPlanItem(spec projecttemplates.AgentSpec, en
 	item.Provider = strings.TrimSpace(cfg.LLMProvider)
 	item.ReasoningEffort = strings.TrimSpace(cfg.ReasoningEffort)
 	item.SystemPrompt = strings.TrimSpace(cfg.SystemPrompt)
+	item.Appearance = cfg.Appearance.Clone()
 	item.ModelSource = modelSource
 	if item.Model == "" {
 		item.Warning = fmt.Sprintf("Agent %q has no template or system model; it will use the app's default agent model.", name)

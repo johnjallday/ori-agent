@@ -47,6 +47,24 @@ Some hand-written context the user added.
 - [fact, not-a-date, user] bad date means unstructured
 `
 
+func TestMemoryStoreAppendUnique_IsIdempotentAcrossInstances(t *testing.T) {
+	first, dir := newTestMemoryStore(t)
+	second := NewMemoryStore(staticFolderResolver{folders: map[string]string{"ws1": dir}})
+	entry := MemoryEntry{Type: MemoryTypeFact, Date: "2026-09-01", Provenance: "user", Text: "Maya owns the launch review"}
+	created, err := first.AppendUnique("ws1", entry)
+	if err != nil || !created {
+		t.Fatalf("first append created=%v err=%v", created, err)
+	}
+	created, err = second.AppendUnique("ws1", entry)
+	if err != nil || created {
+		t.Fatalf("replay append created=%v err=%v", created, err)
+	}
+	doc, err := first.Read("ws1")
+	if err != nil || len(doc.Entries()) != 1 {
+		t.Fatalf("memory entries=%+v err=%v", doc.Entries(), err)
+	}
+}
+
 func TestParseMemoryDocument_RoundTripPreservesContent(t *testing.T) {
 	doc := ParseMemoryDocument(handEditedMemory)
 	if got := doc.Render(); got != handEditedMemory {

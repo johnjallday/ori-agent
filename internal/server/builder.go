@@ -47,6 +47,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/personalassistanthttp"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/personalhqhttp"
 	"github.com/johnjallday/ori-agent/internal/platform"
@@ -291,6 +293,14 @@ type ServerBuilder struct {
 	// User profile API
 	userHandler *userhttp.Handler
 
+	// Personal Assistant relationship/read projection.
+	personalAssistantStore   *personalassistant.SQLiteStore
+	personalAssistantService *personalassistant.Service
+	personalAssistantHire    *personalassistant.HireCoordinator
+	personalAssistantMemory  *personalassistant.MemoryService
+	personalAssignment       *personalassistant.AssignmentService
+	personalAssistantHandler *personalassistanthttp.Handler
+
 	// Personal HQ designation and onboarding state
 	personalHQService *personalhq.Service
 	personalHQHandler *personalhqhttp.Handler
@@ -491,6 +501,8 @@ func (b *ServerBuilder) createDomainFacades() {
 		b.userProvider,
 		b.onboardingMgr,
 		b.locationManager,
+		b.personalAssistantService,
+		b.personalAssistantMemory,
 		b.personalHQService,
 	)
 
@@ -561,6 +573,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		ExternalAgents:        b.externalAgentsHandler,
 		Skills:                b.skillsHandler,
 		User:                  b.userHandler,
+		PersonalAssistant:     b.personalAssistantHandler,
 		PersonalHQ:            b.personalHQHandler,
 		DailyBrief:            b.dailyBriefHandler,
 		Characters:            b.characterHandler,

@@ -279,6 +279,10 @@ const (
 // client can refresh rather than silently overwrite.
 var ErrTicketVersionConflict = errors.New("ticket was modified by someone else; reload and try again")
 
+// ErrTicketSourceConflict protects an idempotency key from being reused for a
+// different normalized creation payload.
+var ErrTicketSourceConflict = errors.New("ticket source key already belongs to different content")
+
 // ErrTicketNotFound is returned when a Ticket ID does not resolve inside its
 // claimed owning workspace. Foreign IDs are rejected the same way as unknown
 // ones so a roll-up view can never be used to probe another workspace.

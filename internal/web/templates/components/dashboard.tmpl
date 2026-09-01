@@ -1,5 +1,44 @@
 <!-- Ori Dashboard — Command Bridge -->
 <div class="home-command-bridge" data-first-run="{{if .Extra.IsFirstRun}}true{{else}}false{{end}}">
+  <!-- Server-authoritative PAF Home region. Hidden until the status read proves
+       eligibility, so legacy Home never flashes or inherits assistant copy. -->
+  <section id="personalAssistantToday" class="personal-assistant-today" data-state="loading"
+           aria-labelledby="personalAssistantTodayTitle" hidden>
+    <header class="personal-assistant-today__header">
+      <div>
+        <span id="personalAssistantTodayEyebrow" class="personal-assistant-today__eyebrow">Today from your assistant</span>
+        <h1 id="personalAssistantTodayTitle" class="personal-assistant-today__title">Today</h1>
+        <p id="personalAssistantTodayMeta" class="personal-assistant-today__meta"></p>
+      </div>
+      <nav class="personal-assistant-today__links" aria-label="Personal assistant details">
+        <a id="personalAssistantTodayHQ" href="/" hidden>Personal HQ</a>
+        <a id="personalAssistantTodayAgreement" href="/" hidden>Working agreement</a>
+        <a id="personalAssistantTodayMemory" href="/" hidden>Memory</a>
+        <a id="personalAssistantTodayAdvanced" href="/agents">Advanced</a>
+      </nav>
+    </header>
+    <div id="personalAssistantTodayBanner" class="personal-assistant-today__banner" role="status" aria-live="polite"></div>
+    <div id="personalAssistantTodayBriefMount"></div>
+    <div id="personalAssistantTodaySections" class="personal-assistant-today__sections">
+      <section aria-labelledby="personalAssistantTodayDecisionsTitle">
+        <h2 id="personalAssistantTodayDecisionsTitle">Decisions</h2>
+        <ul id="personalAssistantTodayDecisions"></ul>
+      </section>
+      <section aria-labelledby="personalAssistantTodayPrioritiesTitle">
+        <h2 id="personalAssistantTodayPrioritiesTitle">Priorities</h2>
+        <ul id="personalAssistantTodayPriorities"></ul>
+      </section>
+      <section aria-labelledby="personalAssistantTodayFollowUpsTitle">
+        <h2 id="personalAssistantTodayFollowUpsTitle">Follow-ups</h2>
+        <ul id="personalAssistantTodayFollowUps"></ul>
+      </section>
+      <section aria-labelledby="personalAssistantTodayResultsTitle">
+        <h2 id="personalAssistantTodayResultsTitle">Results to review</h2>
+        <ul id="personalAssistantTodayResults"></ul>
+      </section>
+    </div>
+  </section>
+
   <!--
     Home's command strip used to sit here: a second composer, labelled
     Workspace Manager, beside the global Ask Ori launcher. Issue #350 retired
@@ -11,6 +50,67 @@
        as mutually exclusive peer views). Issue #366 moved selected context to
        the on-demand modal after this grid, so the theatre always owns the full
        cockpit width. The Ask Ori command bridge stays visible in both views. -->
+  <section id="personalAssistantContinuity" class="pa-continuity" role="dialog" aria-modal="false"
+           aria-labelledby="personalAssistantContinuityTitle" hidden>
+    <header class="pa-continuity__header">
+      <div>
+        <p class="home-command__eyebrow">Working agreement</p>
+        <h2 id="personalAssistantContinuityTitle">How your assistant works with you</h2>
+        <p id="personalAssistantContinuitySummary">Review the mandate, Daily Brief rhythm, memory, and optional sources.</p>
+      </div>
+      <button type="button" id="personalAssistantContinuityClose" class="pa-continuity__close" aria-label="Close working agreement">×</button>
+    </header>
+    <div id="personalAssistantContinuityStatus" class="pa-continuity__status" role="status" aria-live="polite"></div>
+    <form id="personalAssistantContinuityForm" class="pa-continuity__form"
+          aria-describedby="personalAssistantContinuityStatus">
+      <label>Assistant name
+        <input id="personalAssistantContinuityName" type="text" maxlength="100" autocomplete="off">
+      </label>
+      <label>Mandate
+        <textarea id="personalAssistantContinuityMandate" maxlength="1000" rows="3"></textarea>
+      </label>
+      <label>Focus areas <span>Comma-separated</span>
+        <input id="personalAssistantContinuityFocus" type="text" autocomplete="off">
+      </label>
+      <div class="pa-continuity__rhythm">
+        <label>Timezone
+          <input id="personalAssistantContinuityTimezone" type="text" autocomplete="off" placeholder="America/New_York">
+        </label>
+        <label>Days <span>mon, tue, wed…</span>
+          <input id="personalAssistantContinuityDays" type="text" autocomplete="off">
+        </label>
+        <label>Brief time
+          <input id="personalAssistantContinuityTime" type="time">
+        </label>
+      </div>
+      <label>Brief scope
+        <select id="personalAssistantContinuityScope">
+          <option value="all">All current workspaces</option>
+          <option value="personal_hq">Personal HQ only</option>
+          <option value="selected">Keep the current selected workspace set</option>
+        </select>
+      </label>
+      <label class="pa-continuity__check"><input id="personalAssistantContinuityFuture" type="checkbox"> Include workspaces I create in the future</label>
+      <label class="pa-continuity__check"><input id="personalAssistantContinuityEnabled" type="checkbox"> Generate the Daily Brief on this schedule</label>
+      <label class="pa-continuity__check"><input id="personalAssistantContinuityNotify" type="checkbox"> Add an Action Center notice when a scheduled brief is ready</label>
+      <p id="personalAssistantContinuityNext" class="pa-continuity__next"></p>
+      <div class="pa-continuity__actions">
+        <button id="personalAssistantContinuitySave" type="submit" class="btn btn-primary">Save working agreement</button>
+        <button id="personalAssistantContinuityPause" type="button" class="btn btn-outline-secondary">Pause proactive routine</button>
+      </div>
+    </form>
+    <nav class="pa-continuity__links" aria-label="Assistant context links">
+      <a id="personalAssistantContinuityProfile" href="/profile">Inspect global Profile</a>
+      <a id="personalAssistantContinuityMemory" href="/">Inspect Personal HQ Memory</a>
+      <a href="/agents">Advanced agent details</a>
+    </nav>
+    <section aria-labelledby="personalAssistantCapabilitiesTitle">
+      <h3 id="personalAssistantCapabilitiesTitle">Optional information sources</h3>
+      <p>Missing connections never block your assistant or deterministic Daily Brief.</p>
+      <div id="personalAssistantCapabilities" class="pa-capabilities" aria-live="polite"></div>
+    </section>
+  </section>
+
   <div class="home-cockpit" id="homeCockpit" data-view="map" data-state="loading">
     <section class="cockpit-workspace-area" id="cockpitWorkspaceArea" aria-labelledby="cockpitWorkspaceAreaTitle">
       <!--
@@ -289,10 +389,13 @@
                     <h3 id="questFirstMissionTitle" class="quest-log-first-mission-title" data-role="first-mission-title">Build My HQ</h3>
                     <p class="quest-log-first-mission-why" data-role="first-mission-why"></p>
                   </div>
-                  <a class="quest-log-first-mission-action" data-role="first-mission-action" href="/?focus=personal-hq">
-                    <span data-role="first-mission-action-label">Build My HQ</span>
-                    <span aria-hidden="true">&#8594;</span>
-                  </a>
+                  <div class="quest-log-first-mission-actions">
+                    <a class="quest-log-first-mission-action" data-role="first-mission-action" href="/?focus=personal-hq">
+                      <span data-role="first-mission-action-label">Build My HQ</span>
+                      <span aria-hidden="true">&#8594;</span>
+                    </a>
+                    <button type="button" class="quest-log-first-mission-skip" data-role="first-mission-skip" hidden>Do this later</button>
+                  </div>
                 </div>
               </section>
               <ul class="quest-log-list" data-role="quests"></ul>

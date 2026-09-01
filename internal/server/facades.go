@@ -32,6 +32,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/personalassistanthttp"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/personalhqhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
@@ -82,6 +84,9 @@ type StorageSystemFacade struct {
 	UserProvider    userprofile.UserProvider
 	OnboardingMgr   *onboarding.Manager
 	LocationManager *location.Manager
+	// PersonalAssistant is the user-owned relationship/read service.
+	PersonalAssistant       *personalassistant.Service
+	PersonalAssistantMemory *personalassistant.MemoryService
 	// PersonalHQ is the raw domain service (not the HTTP handler), so
 	// non-HTTP callers like serveIndex's first-run classification can read
 	// onboarding status directly.
@@ -183,6 +188,7 @@ type HandlerFacade struct {
 	// actions, verification, and capability-scoped grant delegation.
 	RuntimeCapabilities *runtimecapabilityhttp.Handler
 	User                *userhttp.Handler
+	PersonalAssistant   *personalassistanthttp.Handler
 	PersonalHQ          *personalhqhttp.Handler
 	DailyBrief          *dailybriefhttp.Handler
 	// OriGuide serves the setup-and-navigation guide. It is deliberately a
@@ -222,18 +228,22 @@ func NewStorageSystemFacade(
 	userProvider userprofile.UserProvider,
 	onboardingMgr *onboarding.Manager,
 	locationManager *location.Manager,
+	personalAssistant *personalassistant.Service,
+	personalAssistantMemory *personalassistant.MemoryService,
 	personalHQ *personalhq.Service,
 ) *StorageSystemFacade {
 	return &StorageSystemFacade{
-		AgentStore:      agentStore,
-		AgentStorePath:  agentStorePath,
-		WorkspaceStore:  workspaceStore,
-		SessionStore:    sessionStore,
-		UserStore:       userStore,
-		UserProvider:    userProvider,
-		OnboardingMgr:   onboardingMgr,
-		LocationManager: locationManager,
-		PersonalHQ:      personalHQ,
+		AgentStore:              agentStore,
+		AgentStorePath:          agentStorePath,
+		WorkspaceStore:          workspaceStore,
+		SessionStore:            sessionStore,
+		UserStore:               userStore,
+		UserProvider:            userProvider,
+		OnboardingMgr:           onboardingMgr,
+		LocationManager:         locationManager,
+		PersonalAssistant:       personalAssistant,
+		PersonalAssistantMemory: personalAssistantMemory,
+		PersonalHQ:              personalHQ,
 	}
 }
 

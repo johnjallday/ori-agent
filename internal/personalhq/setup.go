@@ -10,6 +10,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
 
@@ -17,6 +18,9 @@ import (
 // workspace from. Frozen per PRD FR120 — the internal template ID never
 // changes even though its display name is Personal HQ (task 2.0).
 const PersonalHQTemplateID = "personal-ops"
+
+// ErrAssistantNameConflict marks a pre-creation global profile collision.
+var ErrAssistantNameConflict = errors.New("personal hq: assistant name conflict")
 
 // briefConfigSharedDataKey is where the provisional Daily Brief
 // configuration captured during setup is stored on the HQ workspace's
@@ -37,6 +41,34 @@ var ErrInvalidTimezone = errors.New("personal hq: invalid IANA timezone")
 // constructor (PRD FR128). Implemented by sessionhttp.Handler.
 type WorkspaceCreator interface {
 	CreateFromTemplate(ctx context.Context, name, templateID string) (workspaceID string, err error)
+}
+
+// AssistantCreationOptions are trusted, server-owned Personal Assistant
+// substitutions applied to a private copy of the personal-ops template before
+// any workspace or agent is created. They are not accepted by the generic
+// workspace HTTP API.
+type AssistantCreationOptions struct {
+	AssistantID          string
+	RequestID            string
+	DisplayName          string
+	Appearance           *types.AgentAppearance
+	Role                 types.AgentRole
+	SystemPromptFragment string
+}
+
+// AssistantWorkspaceResult identifies the actual canonical records created by
+// the template path; callers must persist these IDs rather than re-resolving by
+// mutable display name.
+type AssistantWorkspaceResult struct {
+	WorkspaceID            string
+	EntryAgentInstanceID   string
+	GlobalAgentProfileName string
+}
+
+// AssistantWorkspaceCreator is the PAF-only extension implemented by
+// sessionhttp.Handler. The legacy WorkspaceCreator method remains unchanged.
+type AssistantWorkspaceCreator interface {
+	CreatePersonalAssistantHQ(ctx context.Context, workspaceName string, options AssistantCreationOptions) (*AssistantWorkspaceResult, error)
 }
 
 // WorkspaceWriter is the narrow write contract Setup needs beyond

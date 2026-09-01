@@ -268,6 +268,16 @@ async function installFixtureRoutes(page: Page) {
       });
       return;
     }
+    // The personal-assistant panel probes eligibility on every page. README's
+    // accepted fictional scenario predates that opt-in rollout, so keep it on
+    // the truthful legacy surface instead of introducing an unmanifested
+    // assistant or allowing the fixture request to escape to the server.
+    if (url.pathname === '/api/personal-assistant') {
+      await json(route, {
+        personal_assistant: { state: 'ineligible', availability: {} }
+      });
+      return;
+    }
     if (url.pathname === '/api/settings/workspace-root') {
       await json(route, {
         workspace_root: '',

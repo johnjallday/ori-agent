@@ -15,6 +15,10 @@ import (
 // caller should poll rather than retry immediately.
 var ErrGenerationInProgress = errors.New("dailybrief: a generation is already in progress for this workspace")
 
+// ErrGenerationFailed is returned when an identified request is replayed
+// after its durable attempt failed. A caller may plan a fresh retry ID.
+var ErrGenerationFailed = errors.New("dailybrief: generation failed")
+
 // MinRetentionDays is the minimum number of distinct local dates of brief
 // history retained per workspace (PRD FR67: at least 30 days).
 const MinRetentionDays = 30
@@ -127,12 +131,55 @@ func (s *Service) RequestGenerationNow(ctx context.Context, workspaceID, userID 
 //
 // Manual refresh (Trigger=TriggerManual) always creates a new revision.
 func (s *Service) RequestGeneration(ctx context.Context, cfg Config, userID string, trigger Trigger, localDate string) (*Revision, error) {
+	return s.requestGeneration(ctx, cfg, userID, trigger, localDate, "")
+}
+
+// PlanFirstAssignmentBrief chooses first-open only when today's HQ lifecycle
+// has no generation/revision claim; otherwise newly confirmed records require
+// a manual refresh.
+func (s *Service) PlanFirstAssignmentBrief(ctx context.Context, workspaceID string) (*Config, Trigger, error) {
+	cfg, err := s.store.GetConfig(ctx, workspaceID)
+	if err != nil {
+		return nil, "", err
+	}
+	localDate, err := TodayLocalDate(*cfg)
+	if err != nil {
+		return nil, "", err
+	}
+	latest, err := s.store.GetLatestClaim(ctx, workspaceID, localDate)
+	if err != nil {
+		return nil, "", err
+	}
+	trigger := TriggerFirstOpen
+	if latest != nil {
+		trigger = TriggerManual
+	}
+	return cfg, trigger, nil
+}
+
+// GenerateFirstAssignmentBrief executes one preplanned trigger using a stable
+// claim ID, making even a manual refresh restart-safe.
+func (s *Service) GenerateFirstAssignmentBrief(ctx context.Context, cfg Config, userID string, trigger Trigger, requestID string) (*GenerationRequest, *Revision, error) {
+	localDate, err := TodayLocalDate(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	revision, generationErr := s.requestGeneration(ctx, cfg, userID, trigger, localDate, requestID)
+	claim, claimErr := s.store.GetGenerationRequest(ctx, requestID)
+	if claimErr != nil {
+		return nil, revision, generationErr
+	}
+	return claim, revision, generationErr
+}
+
+func (s *Service) requestGeneration(ctx context.Context, cfg Config, userID string, trigger Trigger, localDate, requestID string) (*Revision, error) {
 	if !s.tryLockWorkspace(cfg.WorkspaceID) {
 		return nil, ErrGenerationInProgress
 	}
 	defer s.unlockWorkspace(cfg.WorkspaceID)
 
 	claim, isNew, err := s.store.ClaimGeneration(ctx, &GenerationRequest{
+		ID:          requestID,
 		WorkspaceID: cfg.WorkspaceID,
 		UserID:      userID,
 		LocalDate:   localDate,
@@ -148,6 +195,12 @@ func (s *Service) RequestGeneration(ctx context.Context, cfg Config, userID stri
 				return s.store.GetRevision(ctx, claim.RevisionID)
 			}
 			return s.store.GetCurrentRevision(ctx, cfg.WorkspaceID)
+		case GenerationFailed:
+			if claim.RevisionID != "" {
+				revision, _ := s.store.GetRevision(ctx, claim.RevisionID)
+				return revision, ErrGenerationFailed
+			}
+			return nil, ErrGenerationFailed
 		default:
 			return nil, ErrGenerationInProgress
 		}
@@ -235,6 +288,11 @@ func (s *Service) runGeneration(ctx context.Context, cfg Config, claim *Generati
 // ErrRevisionNotFound if no brief has ever been generated.
 func (s *Service) GetCurrent(ctx context.Context, workspaceID string) (*Revision, error) {
 	return s.store.GetCurrentRevision(ctx, workspaceID)
+}
+
+// GetRevision returns one stable revision for bounded result projections.
+func (s *Service) GetRevision(ctx context.Context, revisionID string) (*Revision, error) {
+	return s.store.GetRevision(ctx, revisionID)
 }
 
 // GetHistory returns up to limit collapsed per-date history entries.

@@ -91,6 +91,165 @@ body.home-command-page .home-command-bridge * {
   font-family: "Chakra Petch", system-ui, sans-serif;
 }
 
+.home-command-bridge:has(.personal-assistant-today:not([hidden])) {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.home-command-bridge:has(.pa-continuity:not([hidden])) {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.home-command-bridge:has(.personal-assistant-today:not([hidden])):has(
+    .pa-continuity:not([hidden])
+  ) {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.personal-assistant-today {
+  min-width: 0;
+  overflow: hidden;
+  padding: clamp(14px, 2vw, 22px);
+  border: 1px solid var(--hc-line);
+  border-radius: 18px;
+  background: linear-gradient(145deg, var(--hc-panel-raised), var(--hc-panel));
+  box-shadow: var(--hc-shadow);
+}
+
+.personal-assistant-today[hidden] {
+  display: none;
+}
+
+.personal-assistant-today__header {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.personal-assistant-today__eyebrow {
+  color: var(--hc-signal);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.personal-assistant-today__title {
+  margin: 2px 0;
+  color: var(--hc-ink);
+  font-family: "Fraunces", Georgia, serif;
+  font-size: clamp(25px, 3vw, 38px);
+}
+
+.personal-assistant-today__meta {
+  margin: 0;
+  color: var(--hc-ink-dim);
+  font-size: 13px;
+}
+
+.personal-assistant-today__links {
+  display: flex;
+  max-width: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px 14px;
+}
+
+.personal-assistant-today__links a,
+.personal-assistant-today__sections a,
+.personal-assistant-today__banner a {
+  color: var(--hc-signal);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.personal-assistant-today__banner {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--hc-signal);
+  background: color-mix(in srgb, var(--hc-signal-deep) 32%, transparent);
+  color: var(--hc-ink);
+}
+
+.personal-assistant-today[data-state="partial"] .personal-assistant-today__banner,
+.personal-assistant-today[data-state="unavailable"] .personal-assistant-today__banner,
+.personal-assistant-today[data-state="repair_needed"] .personal-assistant-today__banner {
+  border-left-color: var(--hc-alert);
+}
+
+.personal-assistant-today__sections {
+  display: grid;
+  min-width: 0;
+  margin-top: 14px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.personal-assistant-today__sections > section {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--hc-line);
+  background: color-mix(in srgb, var(--hc-panel-raised) 72%, transparent);
+}
+
+.personal-assistant-today__sections h2 {
+  margin: 0 0 8px;
+  color: var(--hc-ink);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.personal-assistant-today__sections ul {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  gap: 7px;
+  list-style: none;
+}
+
+.personal-assistant-today__sections li {
+  min-width: 0;
+  color: var(--hc-ink);
+  overflow-wrap: anywhere;
+}
+
+.personal-assistant-today__sections li > span {
+  display: block;
+  color: var(--hc-ink-dim);
+  font-size: 12px;
+}
+
+.personal-assistant-today__empty {
+  color: var(--hc-ink-dim) !important;
+  font-size: 12px;
+}
+
+.personal-assistant-today #homeDailyBrief {
+  margin-top: 14px;
+}
+
+@media (max-width: 900px) {
+  .personal-assistant-today__sections {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .personal-assistant-today__header {
+    flex-direction: column;
+  }
+
+  .personal-assistant-today__links {
+    justify-content: flex-start;
+  }
+
+  .personal-assistant-today__sections {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .home-command-strip,
 .home-section,
 .quest-log,
@@ -930,6 +1089,13 @@ body.home-command-page .home-command-bridge * {
   min-width: 0;
 }
 
+.quest-log-first-mission-actions {
+  display: flex;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 4px;
+}
+
 /* The mission title is a server-supplied name, and it renders directly above a
    button carrying the SAME text. Uppercase here would have shown one string in
    two casings side by side. Names keep their author's casing. */
@@ -976,6 +1142,22 @@ body.home-command-page .home-command-bridge * {
   color: var(--hc-panel-deep);
   outline: 0;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--hc-signal) 18%, transparent);
+}
+
+.quest-log-first-mission-skip {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--hc-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 8px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.quest-log-first-mission-skip:hover,
+.quest-log-first-mission-skip:focus-visible {
+  color: var(--hc-ink);
 }
 
 .quest-log-first-mission.is-paused {
@@ -1176,6 +1358,26 @@ a.quest-title:focus-visible {
     min-height: 0;
     flex: 1;
   }
+
+  /* Assistant-first Home adds a real Today section above the Map. The legacy
+     cockpit can lock itself to one viewport because it has only the Map row;
+     keeping that lock after Today mounts clips the Map below the fold while
+     the main element's overflow:hidden prevents the page from reaching it.
+     Let this cohort use normal document scrolling and give the cockpit a full
+     working viewport once the user reaches it. */
+  body.home-command-page:has(.personal-assistant-today:not([hidden])) .main-content-wrapper,
+  body.home-command-page:has(.personal-assistant-today:not([hidden])) .home-command-main {
+    height: auto;
+    min-height: calc(100dvh - var(--navbar-offset, 76px));
+  }
+
+  body.home-command-page:has(.personal-assistant-today:not([hidden])) .home-command-main {
+    overflow: visible;
+  }
+
+  .home-command-bridge:has(.personal-assistant-today:not([hidden])) .home-cockpit {
+    min-height: max(520px, calc(100dvh - var(--navbar-offset, 76px) - 24px));
+  }
 }
 
 @media (max-width: 1199px), (max-height: 679px) {
@@ -1218,8 +1420,13 @@ a.quest-title:focus-visible {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .quest-log-first-mission-actions,
   .quest-log-first-mission-action {
     width: 100%;
+  }
+
+  .quest-log-first-mission-skip {
+    align-self: center;
   }
 
   .home-command-execute.modern-btn {
@@ -1587,8 +1794,125 @@ a.quest-title:focus-visible {
   color: var(--hc-ink-faint);
 }
 
+.pa-continuity {
+  margin: 0 0 1rem;
+  padding: clamp(1rem, 2vw, 1.5rem);
+  border: 1px solid color-mix(in srgb, var(--primary-color) 24%, var(--border-color));
+  border-radius: var(--radius-lg);
+  background: var(--surface-color);
+  box-shadow: var(--shadow-sm);
+}
+
+.pa-continuity[hidden] {
+  display: none;
+}
+
+.pa-continuity__header,
+.pa-continuity__actions,
+.pa-continuity__links {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.pa-continuity__header h2,
+.pa-continuity h3,
+.pa-capability h4 {
+  margin: 0;
+}
+
+.pa-continuity__close {
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 1.5rem;
+}
+
+.pa-continuity__status {
+  min-height: 1.5rem;
+  margin: 0.75rem 0;
+  color: var(--text-secondary);
+}
+
+.pa-continuity__status[data-tone="error"],
+.pa-continuity__status[data-tone="warning"] {
+  color: var(--warning-color, #8a4b08);
+  font-weight: 600;
+}
+
+.pa-continuity__status[data-tone="success"] {
+  color: var(--success-color, #287a54);
+}
+
+.pa-continuity__form,
+.pa-continuity__form label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.pa-continuity__form {
+  gap: 0.8rem;
+}
+
+.pa-continuity__form input[type="text"],
+.pa-continuity__form input[type="time"],
+.pa-continuity__form select,
+.pa-continuity__form textarea {
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--input-bg, var(--surface-color));
+  color: var(--text-primary);
+}
+
+.pa-continuity__form label > span,
+.pa-continuity__next,
+.pa-continuity section > p,
+.pa-capability p {
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+}
+
+.pa-continuity__rhythm,
+.pa-capabilities {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.pa-continuity__check {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  justify-content: start;
+}
+
+.pa-continuity__links {
+  justify-content: flex-start;
+  margin: 1rem 0;
+}
+
+.pa-capability {
+  padding: 0.9rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-color) 92%, var(--primary-color));
+}
+
+.pa-capability[data-status="unavailable"],
+.pa-capability[data-status="revoked"] {
+  border-style: dashed;
+}
+
 @media (max-width: 720px) {
   .home-daily-brief-header {
     flex-direction: column;
+  }
+
+  .pa-continuity__rhythm,
+  .pa-capabilities {
+    grid-template-columns: 1fr;
   }
 }

@@ -438,6 +438,147 @@
   color: var(--ori-ink);
 }
 
+/* ---- hired personal assistant ------------------------------------------------------ */
+
+.ori-guide__role,
+.personal-assistant-panel__role,
+.personal-assistant-launcher__role {
+  margin: 2px 0 0;
+  color: var(--ori-accent-strong);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.personal-assistant-launcher {
+  display: flex;
+  max-width: min(280px, calc(100vw - 40px));
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--ori-accent-strong) 55%, var(--ori-line));
+  border-radius: 999px;
+  background: var(--ori-surface);
+  color: var(--ori-ink);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
+  cursor: pointer;
+}
+
+.personal-assistant-launcher[hidden],
+.personal-assistant-panel[hidden] {
+  display: none;
+}
+
+.personal-assistant-launcher__avatar,
+.personal-assistant-panel__avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+}
+
+.personal-assistant-launcher__copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.15;
+}
+
+.personal-assistant-launcher__name {
+  max-width: 190px;
+  overflow: hidden;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personal-assistant-panel {
+  width: min(430px, calc(100vw - 40px));
+  max-height: min(680px, calc(100vh - 110px));
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid var(--ori-line);
+  border-radius: 16px;
+  background: var(--ori-surface);
+  color: var(--ori-ink);
+  box-shadow: 0 16px 44px rgb(0 0 0 / 28%);
+}
+
+.personal-assistant-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.personal-assistant-panel__header > div:nth-child(2) {
+  min-width: 0;
+  flex: 1;
+}
+
+.personal-assistant-panel__title {
+  overflow: hidden;
+  margin: 0;
+  font-size: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personal-assistant-panel__close {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 24px;
+  cursor: pointer;
+}
+
+.personal-assistant-panel__form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.personal-assistant-panel__input {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  border: 1px solid var(--ori-line);
+  border-radius: 10px;
+  background: var(--ori-paper);
+  color: var(--ori-ink);
+  padding: 10px 12px;
+}
+
+.personal-assistant-panel__send {
+  align-self: end;
+  min-height: 42px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--ori-accent-strong);
+  color: #fff;
+  font-weight: 700;
+}
+
+.personal-assistant-panel__send:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.personal-assistant-panel__status {
+  min-height: 1.4em;
+  margin: 8px 0;
+  font-size: 12px;
+  opacity: 0.82;
+}
+
+.personal-assistant-panel__activity .ask-ori-activity {
+  position: static;
+  width: 100%;
+  max-width: none;
+}
+
 /* ---- narrow layout ---------------------------------------------------------------- */
 
 /* Below this width the panel becomes a bottom sheet spanning the viewport,
@@ -450,13 +591,23 @@
     align-items: stretch;
   }
 
-  .ori-guide__launcher {
+  .ori-guide__launcher,
+  .personal-assistant-launcher {
     align-self: flex-end;
   }
 
-  .ori-guide__panel {
+  .ori-guide__panel,
+  .personal-assistant-panel {
     width: 100%;
     max-height: min(70vh, calc(100vh - 100px));
+  }
+
+  .personal-assistant-panel__form {
+    grid-template-columns: 1fr;
+  }
+
+  .personal-assistant-panel__send {
+    width: 100%;
   }
 }
 

@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"errors"
+	"sync"
 	"testing"
 	"time"
 )
@@ -53,6 +55,84 @@ func TestTicketService_Create_RequiresExplicitCaptureState(t *testing.T) {
 	}
 	if _, err := svc.Create(TicketCreateInput{State: TicketStateBacklog, Title: "no workspace"}); err == nil {
 		t.Fatalf("expected creation without studio_id to fail")
+	}
+}
+
+func TestTicketService_CreateIdempotent_SourceKeyConvergesAcrossConcurrentRetries(t *testing.T) {
+	svc, store := newTicketTestService(t)
+	ws := newTicketTestWorkspace(t, store, "Idempotent")
+	input := TicketCreateInput{
+		WorkspaceID: ws.ID, State: TicketStateReady, Title: "Review launch",
+		Source: TicketSourceAssistant, SourceID: "personal-assistant:first-assignment:item-1",
+		Actor: TicketActorAssistant, ActorID: "assistant-1",
+	}
+	const attempts = 12
+	ids := make(chan string, attempts)
+	created := make(chan bool, attempts)
+	errs := make(chan error, attempts)
+	var wg sync.WaitGroup
+	for range attempts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ticket, wasCreated, err := svc.CreateIdempotent(input)
+			if err != nil {
+				errs <- err
+				return
+			}
+			ids <- ticket.ID
+			created <- wasCreated
+		}()
+	}
+	wg.Wait()
+	close(ids)
+	close(created)
+	close(errs)
+	for err := range errs {
+		t.Fatalf("CreateIdempotent: %v", err)
+	}
+	unique := map[string]struct{}{}
+	for id := range ids {
+		unique[id] = struct{}{}
+	}
+	createdCount := 0
+	for value := range created {
+		if value {
+			createdCount++
+		}
+	}
+	if len(unique) != 1 || createdCount != 1 {
+		t.Fatalf("unique IDs=%v created count=%d", unique, createdCount)
+	}
+	saved, err := store.Get(ws.ID)
+	if err != nil || len(saved.Tasks) != 1 || !saved.Tasks[0].AwaitingExecutionIntent {
+		t.Fatalf("saved tickets=%#v, %v", saved.Tasks, err)
+	}
+
+	input.Title = "A collision cannot rewrite the original"
+	if _, _, err := svc.CreateIdempotent(input); !errors.Is(err, ErrTicketSourceConflict) {
+		t.Fatalf("changed-payload collision error = %v", err)
+	}
+	unrelated, wasCreated, err := svc.CreateIdempotent(TicketCreateInput{
+		WorkspaceID: ws.ID, State: TicketStateReady, Title: "Unrelated",
+		Source: TicketSourceAssistant, SourceID: "personal-assistant:first-assignment:item-2",
+	})
+	if err != nil || !wasCreated || unrelated.ID == "" {
+		t.Fatalf("unrelated = %#v created=%t err=%v", unrelated, wasCreated, err)
+	}
+	saved, err = store.Get(ws.ID)
+	if err != nil || len(saved.Tasks) != 2 {
+		t.Fatalf("unrelated source affected existing records: count=%d err=%v", len(saved.Tasks), err)
+	}
+}
+
+func TestTicketService_CreateIdempotent_RequiresSourceKey(t *testing.T) {
+	svc, store := newTicketTestService(t)
+	ws := newTicketTestWorkspace(t, store, "No source")
+	if _, _, err := svc.CreateIdempotent(TicketCreateInput{
+		WorkspaceID: ws.ID, State: TicketStateBacklog, Title: "Missing source ID",
+	}); err == nil {
+		t.Fatal("CreateIdempotent accepted an empty source_id")
 	}
 }
 

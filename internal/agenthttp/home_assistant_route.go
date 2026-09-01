@@ -27,11 +27,13 @@ type CalendarOpsPreference interface {
 }
 
 type HomeAssistantRouteHandler struct {
-	State                 store.Store
-	WorkspaceResolver     *HomeAssistantWorkspaceResolver
-	IntakeTraceStore      HomeAssistantIntakeTraceStore
-	CalendarOpsPreference CalendarOpsPreference
-	RuntimeResolver       interface {
+	State                    store.Store
+	WorkspaceResolver        *HomeAssistantWorkspaceResolver
+	IntakeTraceStore         HomeAssistantIntakeTraceStore
+	CalendarOpsPreference    CalendarOpsPreference
+	PersonalAssistantContext PersonalAssistantContextProvider
+	UserID                   string
+	RuntimeResolver          interface {
 		ResolveAgentForWorkspace(agentName, workspaceID, nodeID string) (*workspace.ResolvedAgentRuntime, error)
 	}
 	SystemModelReader interface {
@@ -42,6 +44,13 @@ type HomeAssistantRouteHandler struct {
 // SetCalendarOpsPreference wires the Calendar Ops preference read (FR53).
 func (h *HomeAssistantRouteHandler) SetCalendarOpsPreference(pref CalendarOpsPreference) {
 	h.CalendarOpsPreference = pref
+}
+
+// SetPersonalAssistantContextProvider makes eligible pre-hire requests stop at
+// setup while preserving this router unchanged for legacy users.
+func (h *HomeAssistantRouteHandler) SetPersonalAssistantContextProvider(provider PersonalAssistantContextProvider, userID string) {
+	h.PersonalAssistantContext = provider
+	h.UserID = strings.TrimSpace(userID)
 }
 
 type resolvedRouteAgent struct {
@@ -94,22 +103,24 @@ type HomeAssistantRouteContext struct {
 }
 
 type HomeAssistantRouteResponse struct {
-	Intent               string                            `json:"intent"`
-	IntentVariant        string                            `json:"intent_variant,omitempty"`
-	IntentLabel          string                            `json:"intent_label"`
-	RoutingPolicy        string                            `json:"routing_policy"`
-	ContextMode          string                            `json:"context_mode"`
-	HandoffPolicy        string                            `json:"handoff_policy"`
-	MatchedAgent         string                            `json:"matched_agent,omitempty"`
-	Score                int                               `json:"score"`
-	RequiresCreation     bool                              `json:"requires_creation"`
-	WorkspaceRecommended bool                              `json:"workspace_recommended"`
-	WorkspaceResolution  *HomeAssistantWorkspaceResolution `json:"workspace_resolution,omitempty"`
-	RouteMode            string                            `json:"route_mode"`
-	TargetSurface        string                            `json:"target_surface"`
-	Reasons              []string                          `json:"reasons,omitempty"`
-	SuggestedAgentName   string                            `json:"suggested_agent_name"`
-	SuggestedAgentType   string                            `json:"suggested_agent_type"`
+	Intent                 string                            `json:"intent"`
+	PersonalAssistantState string                            `json:"personal_assistant_state,omitempty"`
+	AssistantName          string                            `json:"assistant_name,omitempty"`
+	IntentVariant          string                            `json:"intent_variant,omitempty"`
+	IntentLabel            string                            `json:"intent_label"`
+	RoutingPolicy          string                            `json:"routing_policy"`
+	ContextMode            string                            `json:"context_mode"`
+	HandoffPolicy          string                            `json:"handoff_policy"`
+	MatchedAgent           string                            `json:"matched_agent,omitempty"`
+	Score                  int                               `json:"score"`
+	RequiresCreation       bool                              `json:"requires_creation"`
+	WorkspaceRecommended   bool                              `json:"workspace_recommended"`
+	WorkspaceResolution    *HomeAssistantWorkspaceResolution `json:"workspace_resolution,omitempty"`
+	RouteMode              string                            `json:"route_mode"`
+	TargetSurface          string                            `json:"target_surface"`
+	Reasons                []string                          `json:"reasons,omitempty"`
+	SuggestedAgentName     string                            `json:"suggested_agent_name"`
+	SuggestedAgentType     string                            `json:"suggested_agent_type"`
 }
 
 var errHomeAssistantPromptRequired = errors.New("prompt is required")
@@ -319,6 +330,22 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(ctx context.Context, prompt stri
 		return nil, errHomeAssistantPromptRequired
 	}
 
+	workContext, err := h.resolvePersonalAssistantRouteContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if workContext != nil && workContext.NeedsHireOrRepair() {
+		return &HomeAssistantRouteResponse{
+			Intent: "personal_assistant_setup", IntentLabel: "personal assistant setup",
+			PersonalAssistantState: workContext.State,
+			RoutingPolicy:          homeAssistantPolicyAssistantOnly, ContextMode: homeAssistantContextDirect,
+			HandoffPolicy: homeAssistantHandoffAssistant, RequiresCreation: false,
+			RouteMode: "personal_assistant_hire", TargetSurface: "hire",
+			SuggestedAgentName: "Personal Assistant", SuggestedAgentType: "personal_assistant",
+			Reasons: []string{"eligible relationship is not ready for work"},
+		}, nil
+	}
+
 	routeContext := normalizeHomeAssistantRouteContext(context)
 	intent := h.classifyHomeIntent(prompt)
 	intentVariant := detectHomeAssistantIntentVariant(prompt, intent, routeContext)
@@ -364,6 +391,10 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(ctx context.Context, prompt stri
 		SuggestedAgentName:   intent.SuggestedName,
 		SuggestedAgentType:   intent.DefaultType,
 	}
+	if workContext != nil && workContext.ReadyForWork() {
+		resp.PersonalAssistantState = workContext.State
+		resp.AssistantName = boundedContextText(workContext.DisplayName, 100)
+	}
 
 	if match != nil {
 		resp.MatchedAgent = match.Name
@@ -373,6 +404,24 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(ctx context.Context, prompt stri
 	}
 
 	return resp, nil
+}
+
+func (h *HomeAssistantRouteHandler) resolvePersonalAssistantRouteContext(ctx context.Context) (*PersonalAssistantWorkContext, error) {
+	if h == nil || h.PersonalAssistantContext == nil {
+		return nil, nil
+	}
+	userID := strings.TrimSpace(h.UserID)
+	if userID == "" {
+		userID = "local"
+	}
+	resolved, err := h.PersonalAssistantContext.ResolvePersonalAssistantContext(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if resolved == nil || !resolved.Eligible {
+		return nil, nil
+	}
+	return resolved, nil
 }
 
 // calendarOpsPreferredMatch prefers the user's Calendar Ops Scheduler for a

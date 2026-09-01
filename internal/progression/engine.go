@@ -65,6 +65,12 @@ func WithOnComplete(fn func(Quest)) Option {
 	return func(e *Engine) { e.onComplete = fn }
 }
 
+// WithQuests replaces the default graph with a freshly copied cohort-specific
+// graph. It is intended for startup-time configuration only.
+func WithQuests(quests []Quest) Option {
+	return func(e *Engine) { e.quests = append([]Quest(nil), quests...) }
+}
+
 // questByID returns the quest with the given ID, or false.
 func (e *Engine) questByID(id string) (Quest, bool) {
 	for _, q := range e.quests {

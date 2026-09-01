@@ -7,10 +7,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
+	"github.com/johnjallday/ori-agent/internal/followup"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -51,6 +54,59 @@ func newDailyBriefTestServer(t *testing.T) (*ServerBuilder, http.Handler) {
 		t.Fatal("expected dailyBriefService to be wired")
 	}
 	return builder, srv.Handler()
+}
+
+func TestDailyBrief_FollowUpSourceIsWiredAndGroundedWithoutModel(t *testing.T) {
+	builder, handler := newDailyBriefTestServer(t)
+	ctx := context.Background()
+	setupReq := httptest.NewRequest(http.MethodPost, "/api/personal-hq/setup", bytes.NewBufferString(`{"name":"Personal HQ"}`))
+	setupReq.Header.Set("Content-Type", "application/json")
+	setupRec := httptest.NewRecorder()
+	handler.ServeHTTP(setupRec, setupReq)
+	if setupRec.Code != http.StatusOK {
+		t.Fatalf("setup status=%d body=%s", setupRec.Code, setupRec.Body.String())
+	}
+	var setup struct {
+		Status struct {
+			WorkspaceID string `json:"workspace_id"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(setupRec.Body.Bytes(), &setup); err != nil || setup.Status.WorkspaceID == "" {
+		t.Fatalf("setup response=%s err=%v", setupRec.Body.String(), err)
+	}
+	if _, err := builder.dailyBriefService.UpdateConfig(ctx, dailybrief.Config{
+		WorkspaceID: setup.Status.WorkspaceID, UserID: "local", Timezone: "UTC",
+		Scope: dailybrief.ScopeAll, IncludeFutureWorkspaces: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	due := time.Now().Add(-time.Hour)
+	captured, err := builder.followUpService.Capture(ctx, followup.CaptureInput{
+		UserID: "local", WorkspaceID: setup.Status.WorkspaceID,
+		Category: followup.CategoryIOwe, Direction: followup.DirectionOutbound,
+		Title: "Send the signed form", DueAt: &due, Provenance: followup.ProvenanceExplicit,
+		Source: followup.SourceRef{Type: "personal_assistant_first_assignment", ID: "item-1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision, err := builder.dailyBriefService.RequestGenerationNow(ctx, setup.Status.WorkspaceID, "local", dailybrief.TriggerFirstOpen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var content dailybrief.BriefContent
+	if err := json.Unmarshal([]byte(revision.ContentJSON), &content); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, item := range content.NeedsAttention {
+		if item.Ref.EntityType == "follow_up" && item.Ref.EntityID == captured.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("grounded follow-up absent from brief: %#v", content)
+	}
 }
 
 // TestDailyBrief_ScheduledSuccessCreatesExactlyOneActionCenterNotification
@@ -145,6 +201,115 @@ func TestDailyBrief_ScheduledSuccessCreatesExactlyOneActionCenterNotification(t 
 // proves it end-to-end through the real HTTP surface (which resolves
 // "current HQ" dynamically via personalhq.Status on every call) rather than
 // only at the storage layer.
+func TestPersonalAssistantContextReadsMemoryEditsAndDeletesOnNextTurn(t *testing.T) {
+	t.Setenv("ORI_PERSONAL_ASSISTANT_ROLLOUT", "true")
+	builder, handler := newDailyBriefTestServer(t)
+	hireReq := httptest.NewRequest(http.MethodPost, "/api/personal-assistant/hire", bytes.NewBufferString(`{"request_id":"memory-hire","if_version":0,"display_name":"Atlas","mandate":"Keep commitments visible.","focus_areas":["plan_my_day"],"timezone":"UTC","schedule_days":["mon"],"schedule_time":"08:00","notify_on_ready":false}`))
+	hireReq.Header.Set("Content-Type", "application/json")
+	hireRec := httptest.NewRecorder()
+	handler.ServeHTTP(hireRec, hireReq)
+	if hireRec.Code != http.StatusCreated {
+		t.Fatalf("hire status=%d body=%s", hireRec.Code, hireRec.Body.String())
+	}
+	state, err := builder.personalAssistantStore.GetState(context.Background(), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	memory := workspace.NewMemoryStore(builder.workspaceFileStore)
+	if err := memory.Append(state.HQWorkspaceID, workspace.MemoryEntry{Type: workspace.MemoryTypeFact, Date: "2026-09-01", Provenance: "user", Text: "Launch review is Thursday"}); err != nil {
+		t.Fatal(err)
+	}
+	adapter := personalAssistantContextAdapter{
+		relationship: builder.personalAssistantService, profiles: builder.userStore, workspaces: builder.workspaceStore,
+	}
+	first, err := adapter.ResolvePersonalAssistantContext(context.Background(), "local")
+	if err != nil || !strings.Contains(first.HQMemory, "Launch review is Thursday") {
+		t.Fatalf("first memory context=%+v err=%v", first, err)
+	}
+	if err := memory.EditAt(state.HQWorkspaceID, 0, workspace.MemoryEntry{Type: workspace.MemoryTypeFact, Date: "2026-09-01", Provenance: "user", Text: "Launch review moved to Wednesday"}); err != nil {
+		t.Fatal(err)
+	}
+	second, err := adapter.ResolvePersonalAssistantContext(context.Background(), "local")
+	if err != nil || strings.Contains(second.HQMemory, "Thursday") || !strings.Contains(second.HQMemory, "Wednesday") {
+		t.Fatalf("edited memory context=%+v err=%v", second, err)
+	}
+	if _, err := memory.Forget(state.HQWorkspaceID, "Launch review moved to Wednesday"); err != nil {
+		t.Fatal(err)
+	}
+	third, err := adapter.ResolvePersonalAssistantContext(context.Background(), "local")
+	if err != nil || strings.Contains(third.HQMemory, "Launch review") {
+		t.Fatalf("deleted memory was resurrected: context=%+v err=%v", third, err)
+	}
+}
+
+type schedulerEligibility struct{ version int }
+
+func (e *schedulerEligibility) IsPersonalAssistantEligible() bool { return e.version > 0 }
+func (e *schedulerEligibility) PersonalAssistantEligibilityVersion() int {
+	return e.version
+}
+
+func TestPersonalHQWorkspaceLister_ExcludesPausedPAFButKeepsLegacySchedule(t *testing.T) {
+	builder, handler := newDailyBriefTestServer(t)
+	ctx := context.Background()
+	setupReq := httptest.NewRequest(http.MethodPost, "/api/personal-hq/setup", bytes.NewBufferString(`{"name":"Personal HQ"}`))
+	setupReq.Header.Set("Content-Type", "application/json")
+	setupRec := httptest.NewRecorder()
+	handler.ServeHTTP(setupRec, setupReq)
+	if setupRec.Code != http.StatusOK {
+		t.Fatalf("setup status=%d body=%s", setupRec.Code, setupRec.Body.String())
+	}
+	status, err := builder.personalHQService.Status(ctx, "local")
+	if err != nil || status == nil || !status.Valid {
+		t.Fatalf("HQ status=%+v err=%v", status, err)
+	}
+	eligibility := &schedulerEligibility{}
+	lister := &personalHQWorkspaceLister{
+		service: builder.personalHQService, relationship: builder.personalAssistantStore, eligibility: eligibility,
+	}
+	var entry *session.AgentInstance
+	for i := range status.Workspace.AgentInstances {
+		if status.Workspace.AgentInstances[i].EntryPoint {
+			entry = &status.Workspace.AgentInstances[i]
+			break
+		}
+	}
+	if entry == nil {
+		t.Fatal("Personal HQ entry missing")
+	}
+	state := personalassistant.NewState("local")
+	if _, err := builder.personalAssistantStore.CreateState(ctx, state); err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := lister.ListScheduledWorkspaces(ctx)
+	if err != nil || len(legacy) != 1 {
+		t.Fatalf("legacy HQ with an ineligible state row must keep its schedule: %+v err=%v", legacy, err)
+	}
+	persisted, _ := builder.personalAssistantStore.GetState(ctx, "local")
+	persisted.Status = personalassistant.StatusPaused
+	persisted.DisplayName = entry.Name
+	persisted.GlobalAgentProfileName = entry.Name
+	persisted.HQWorkspaceID = status.WorkspaceID
+	persisted.HQEntryAgentInstanceID = entry.ID
+	if _, err := builder.personalAssistantStore.UpdateState(ctx, persisted, persisted.StateVersion); err != nil {
+		t.Fatal(err)
+	}
+	eligibility.version = personalassistant.CurrentRolloutVersion
+	paused, err := lister.ListScheduledWorkspaces(ctx)
+	if err != nil || len(paused) != 0 {
+		t.Fatalf("paused PAF was scheduled: %+v err=%v", paused, err)
+	}
+	persisted, _ = builder.personalAssistantStore.GetState(ctx, "local")
+	persisted.Status = personalassistant.StatusActive
+	if _, err := builder.personalAssistantStore.UpdateState(ctx, persisted, persisted.StateVersion); err != nil {
+		t.Fatal(err)
+	}
+	active, err := lister.ListScheduledWorkspaces(ctx)
+	if err != nil || len(active) != 1 || active[0].WorkspaceID != status.WorkspaceID {
+		t.Fatalf("resumed PAF was not scheduled: %+v err=%v", active, err)
+	}
+}
+
 func TestReplaceNeverCopiesBriefHistoryToNewHQ(t *testing.T) {
 	builder, handler := newDailyBriefTestServer(t)
 	ctx := context.Background()

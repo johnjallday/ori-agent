@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/promptvars"
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 // ErrInvalidPromptVariable reports a template agent whose system prompt uses a
@@ -36,13 +37,14 @@ const MaxTemplateAgents = 10
 // keeping this file-copy engine domain-blind. The first surviving entry becomes
 // the workspace's primary routing agent; the rest are workspace specialists.
 type AgentSpec struct {
-	Name         string       `json:"name"`
-	Role         string       `json:"role,omitempty"`
-	Type         string       `json:"type,omitempty"`
-	SystemPrompt string       `json:"system_prompt,omitempty"`
-	Model        string       `json:"model,omitempty"`
-	Provider     string       `json:"provider,omitempty"`
-	Tools        ToolDefaults `json:"tools"`
+	Name         string                 `json:"name"`
+	Role         string                 `json:"role,omitempty"`
+	Type         string                 `json:"type,omitempty"`
+	SystemPrompt string                 `json:"system_prompt,omitempty"`
+	Model        string                 `json:"model,omitempty"`
+	Provider     string                 `json:"provider,omitempty"`
+	Appearance   *types.AgentAppearance `json:"appearance,omitempty"`
+	Tools        ToolDefaults           `json:"tools"`
 }
 
 // normalizeAgentSpecs cleans a raw roster: it trims string fields, drops entries
@@ -67,6 +69,10 @@ func normalizeAgentSpecs(specs []AgentSpec) []AgentSpec {
 			continue
 		}
 		seen[key] = struct{}{}
+		appearance := s.Appearance.Clone()
+		if appearance != nil {
+			appearance.Normalize()
+		}
 		out = append(out, AgentSpec{
 			Name:         name,
 			Role:         strings.TrimSpace(s.Role),
@@ -74,6 +80,7 @@ func normalizeAgentSpecs(specs []AgentSpec) []AgentSpec {
 			SystemPrompt: strings.TrimSpace(s.SystemPrompt),
 			Model:        strings.TrimSpace(s.Model),
 			Provider:     strings.TrimSpace(s.Provider),
+			Appearance:   appearance,
 			Tools:        normalizeToolDefaults(s.Tools),
 		})
 		if len(out) >= MaxTemplateAgents {

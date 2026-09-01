@@ -71,6 +71,17 @@ func TestDesignateThenStatusResolvesWorkspace(t *testing.T) {
 	svc, _, workspaces := newTestHarness(t)
 	ctx := context.Background()
 	createWorkspace(t, workspaces, "ws-1", "local", session.WorkspaceKindWorkspace, session.WorkspaceStatusActive)
+	workspace, err := workspaces.GetWorkspace(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	workspace.AgentInstances = []session.AgentInstance{
+		{ID: "assistant-instance", Name: "Assistant", EntryPoint: true},
+		{ID: "journal-instance", Name: "Journal"},
+	}
+	if err := workspaces.UpdateWorkspace(ctx, workspace); err != nil {
+		t.Fatalf("UpdateWorkspace agents: %v", err)
+	}
 
 	status, err := svc.Designate(ctx, "local", "ws-1")
 	if err != nil {
@@ -78,6 +89,9 @@ func TestDesignateThenStatusResolvesWorkspace(t *testing.T) {
 	}
 	if !status.Valid || status.Workspace == nil || status.Workspace.ID != "ws-1" {
 		t.Fatalf("expected valid resolved designation, got %#v", status)
+	}
+	if status.EntryAgentInstanceID != "assistant-instance" || status.EntryAgentName != "Assistant" {
+		t.Fatalf("entry-agent projection = %#v", status)
 	}
 
 	// Renaming the workspace must not affect the designation: the relation

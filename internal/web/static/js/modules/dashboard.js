@@ -430,6 +430,7 @@
     conversationCollapsed: false,
     automationMode: 'semi_auto',
     workspacePromptMode: 'task',
+    personalAssistantDisplayName: '',
     workspaceEntryAgentName: '',
     workspaceEntryWorkspaceId: ''
   };
@@ -1393,6 +1394,9 @@
     var els = getHomeAssistantElements();
     var label = els.identityName ? String(els.identityName.textContent || '').trim() : '';
     if (label) return label;
+    if (homeAssistantState.personalAssistantDisplayName) {
+      return homeAssistantState.personalAssistantDisplayName;
+    }
     if (homeAssistantState.workspaceEntryAgentName) return getWorkspaceHomeAssistantDisplayName();
     return 'Ask Ori';
   }
@@ -13722,6 +13726,11 @@
   window.OriAskRouting.buildRouteContext = normalizeHomeRouteContext;
   window.OriAskRouting.refreshWorkspaceIdentity = refreshHomeAssistantWorkspaceIdentity;
   window.OriAskRouting.setMode = setHomeAssistantWorkspacePromptMode;
+  window.OriAskRouting.setPersonalAssistantIdentity = function (name) {
+    homeAssistantState.personalAssistantDisplayName = String(name || '').trim();
+    syncHomeAssistantModalHeading();
+    syncHomeAssistantLauncher();
+  };
   window.OriAskRouting.getState = function () {
     return {
       busy: Boolean(homeAssistantState.busy),

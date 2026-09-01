@@ -155,7 +155,19 @@ func (s *SQLiteStore) ClaimGeneration(ctx context.Context, req *GenerationReques
 		req.Status = status
 		return req, true, nil
 	}
-	if !isUniqueConstraintError(err) || req.Trigger == TriggerManual {
+	if !isUniqueConstraintError(err) {
+		return nil, false, fmt.Errorf("failed to claim daily brief generation: %w", err)
+	}
+	// A caller-supplied claim ID is an idempotency key for manual and
+	// non-manual generation alike. It may only replay the exact same claim.
+	if existingByID, getErr := s.GetGenerationRequest(ctx, req.ID); getErr == nil {
+		if existingByID.WorkspaceID != req.WorkspaceID || existingByID.LocalDate != req.LocalDate ||
+			existingByID.Trigger != req.Trigger {
+			return nil, false, fmt.Errorf("dailybrief: generation request ID belongs to different input")
+		}
+		return existingByID, false, nil
+	}
+	if req.Trigger == TriggerManual {
 		return nil, false, fmt.Errorf("failed to claim daily brief generation: %w", err)
 	}
 	// A non-manual claim already exists for this workspace/date: return it.

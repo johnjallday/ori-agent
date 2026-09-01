@@ -201,17 +201,22 @@ type ProgressionState struct {
 
 // AppState tracks application-level state (persisted separately from agent data)
 type AppState struct {
-	Onboarding        OnboardingState    `json:"onboarding"`
-	Device            DeviceInfo         `json:"device"`
-	UserProfile       *InferredProfile   `json:"user_profile,omitempty"`       // User's inferred profile from onboarding
-	AssistantProgress *AssistantProgress `json:"assistant_progress,omitempty"` // Global progression state for evolution features
-	Progression       *ProgressionState  `json:"progression,omitempty"`        // Onboarding quest-log progression
-	UserName          string             `json:"user_name,omitempty"`          // Optional user-provided display name
-	AssistantName     string             `json:"assistant_name,omitempty"`     // Optional assistant name chosen during onboarding
-	Timezone          string             `json:"timezone,omitempty"`           // User's preferred IANA timezone
-	Version           string             `json:"version"`
-	Theme             string             `json:"theme,omitempty"`   // "light" or "dark", defaults to "light"
-	MenuBar           *MenuBarSettings   `json:"menubar,omitempty"` // Menu bar app settings
+	// PersonalAssistantRolloutVersion is assigned only when a truly new state
+	// file is first initialized while the server rollout gate is enabled. Zero
+	// is an explicit legacy/ineligible marker and is preserved by onboarding
+	// resets; it must never be inferred from other defaults.
+	PersonalAssistantRolloutVersion int                `json:"personal_assistant_rollout_version"`
+	Onboarding                      OnboardingState    `json:"onboarding"`
+	Device                          DeviceInfo         `json:"device"`
+	UserProfile                     *InferredProfile   `json:"user_profile,omitempty"`       // User's inferred profile from onboarding
+	AssistantProgress               *AssistantProgress `json:"assistant_progress,omitempty"` // Global progression state for evolution features
+	Progression                     *ProgressionState  `json:"progression,omitempty"`        // Onboarding quest-log progression
+	UserName                        string             `json:"user_name,omitempty"`          // Optional user-provided display name
+	AssistantName                   string             `json:"assistant_name,omitempty"`     // Optional assistant name chosen during onboarding
+	Timezone                        string             `json:"timezone,omitempty"`           // User's preferred IANA timezone
+	Version                         string             `json:"version"`
+	Theme                           string             `json:"theme,omitempty"`   // "light" or "dark", defaults to "light"
+	MenuBar                         *MenuBarSettings   `json:"menubar,omitempty"` // Menu bar app settings
 	// NotesOpenBehavior controls how clicking a note in the UI opens it.
 	// "modal" (default) preserves the v1 behavior; "page" navigates to the
 	// focused note page; "page-new-tab" opens it in a new browser tab.

@@ -206,6 +206,137 @@ export function recommendOnboardingStart({ intent = '', description = '', templa
   };
 }
 
+export function personalAssistantResumeMessage(state = {}) {
+  const name = String(state.display_name || '').trim();
+  const hasAssistant = Boolean(state.assistant_id || name);
+  const hasHQ = Boolean(state.hq_workspace_id);
+  if (hasAssistant && hasHQ) {
+    return `${name || 'Your assistant'} and Personal HQ are already saved. Retry to finish the remaining setup step.`;
+  }
+  if (hasHQ) return 'Personal HQ is already saved. Retry to finish the remaining setup step.';
+  if (hasAssistant) {
+    return `${name || 'Your assistant'} is already saved. Retry to finish the remaining setup step.`;
+  }
+  return 'This hire is already in progress. Retry to finish the remaining setup step.';
+}
+
+export function buildPersonalAssistantHirePayload({
+  requestId,
+  ifVersion = 0,
+  displayName = 'Assistant',
+  appearance = null,
+  mandate = '',
+  focusAreas = [],
+  timezone = 'UTC',
+  scheduleDays = [],
+  scheduleTime = '08:00',
+  notifyOnReady = false
+} = {}) {
+  return {
+    request_id: String(requestId || '').trim(),
+    if_version: Number(ifVersion) || 0,
+    display_name: String(displayName || '').trim(),
+    appearance: appearance || { mode: 'generated', generated: {} },
+    mandate: String(mandate || '').trim(),
+    focus_areas: Array.from(new Set((focusAreas || []).map(value => String(value).trim()))).filter(
+      Boolean
+    ),
+    timezone: String(timezone || 'UTC').trim() || 'UTC',
+    schedule_days: Array.from(
+      new Set((scheduleDays || []).map(value => String(value).trim().toLowerCase()))
+    ).filter(Boolean),
+    schedule_time: String(scheduleTime || '08:00').trim() || '08:00',
+    notify_on_ready: notifyOnReady === true
+  };
+}
+
+const firstAssignmentTypes = new Set(['priority', 'i_owe', 'waiting_on', 'fixed_commitment']);
+
+export function normalizeFirstAssignmentRows(rows = []) {
+  return (Array.isArray(rows) ? rows : [])
+    .map(row => ({
+      type: String(row?.type || '')
+        .trim()
+        .toLowerCase(),
+      title: String(row?.title || '').trim(),
+      action: String(row?.action || '').trim(),
+      detail: String(row?.detail || '').trim(),
+      counterparty: String(row?.counterparty || '').trim(),
+      due: String(row?.due || '').trim()
+    }))
+    .filter(
+      row =>
+        firstAssignmentTypes.has(row.type) &&
+        Boolean(row.title || row.action || row.detail || row.counterparty || row.due)
+    );
+}
+
+export function buildFirstAssignmentPreviewPayload(ifVersion, rows) {
+  return {
+    if_version: Number(ifVersion) || 0,
+    rows: normalizeFirstAssignmentRows(rows)
+  };
+}
+
+export function buildFirstAssignmentApplyPayload({ preview, stateVersion, applyRequestId } = {}) {
+  return {
+    preview_id: String(preview?.preview_id || '').trim(),
+    preview_version: Number(preview?.assignment_version) || 0,
+    payload_hash: String(preview?.payload_hash || '').trim(),
+    if_version: Number(stateVersion) || 0,
+    apply_request_id: String(applyRequestId || '').trim()
+  };
+}
+
+export function canSubmitFirstAssignment({ confirmed = false, inFlight = false, preview } = {}) {
+  return (
+    confirmed === true && inFlight !== true && Boolean(String(preview?.preview_id || '').trim())
+  );
+}
+
+export function firstAssignmentResumeView(current = {}) {
+  const status = String(current.status || '').trim();
+  return {
+    stage:
+      status === 'completed'
+        ? 'complete'
+        : status === 'applying'
+          ? 'partial'
+          : current.preview
+            ? 'preview'
+            : 'form',
+    stateVersion: Number(current.state_version) || 0,
+    preview: current.preview || null,
+    applyRequestId: String(current.apply_request_id || '').trim(),
+    brief: current.brief || null
+  };
+}
+
+export function firstAssignmentResultView(result = {}) {
+  const total = Math.max(0, Number(result.total_count) || 0);
+  const applied = Math.max(0, Number(result.applied_count) || 0);
+  const outcome = String(result.outcome || '').trim();
+  const brief = result.brief || null;
+  return {
+    complete: outcome === 'complete' || outcome === 'complete_empty',
+    empty: outcome === 'complete_empty' || total === 0,
+    partialBrief: outcome === 'records_saved_brief_failed',
+    retryable: result.retryable === true,
+    summary:
+      total === 0
+        ? 'Nothing was created. Your brief honestly reflects an empty first assignment.'
+        : `${applied} of ${total} confirmed record${total === 1 ? '' : 's'} saved.`,
+    topItems: Array.isArray(brief?.top_items)
+      ? brief.top_items
+          .slice(0, 3)
+          .map(item => String(typeof item === 'string' ? item : item?.title || '').trim())
+          .filter(Boolean)
+      : [],
+    nextCheckIn: String(brief?.next_scheduled_check_in || ''),
+    route: String(brief?.route || '/api/personal-hq/brief/current')
+  };
+}
+
 export function onboardingStartDestination(recommendation) {
   switch (recommendation?.kind) {
     case 'template': {
@@ -260,6 +391,20 @@ export class OnboardingManager {
     this.startTemplates = [];
     this.startIntent = '';
     this.startRecommendation = recommendOnboardingStart();
+    this.personalAssistantEligible = false;
+    this.personalAssistantState = null;
+    this.personalAssistantAppearanceEditor = null;
+    this.hireRequestId = '';
+    this.hireStep = 0;
+    this.modelConfigured = null;
+    this.assignmentPreview = null;
+    this.assignmentStep = 0;
+    this.assignmentQuestMode = false;
+    this.assignmentRows = [];
+    this.assignmentStateVersion = 0;
+    this.assignmentApplyRequestId = '';
+    this.assignmentApplying = false;
+    this.assignmentPreviewing = false;
   }
 
   async init() {
@@ -279,10 +424,16 @@ export class OnboardingManager {
     this.userName = status.user_name || '';
     this.assistantName = status.assistant_name || 'Ori';
     this.timezone = status.timezone || this.detectTimezone();
+    this.personalAssistantEligible = status.personal_assistant_eligible === true;
+    if (this.personalAssistantEligible) {
+      await this.loadPersonalAssistantState();
+    }
     this.populateTimezoneSelect();
     if (status.needs_onboarding) {
       await this.loadWorkspaceRoot();
       setTimeout(() => this.showOnboarding(), 500);
+    } else if (this.shouldOpenFirstAssignmentQuest()) {
+      setTimeout(() => this.showFirstAssignmentQuest(), 100);
     }
   }
 
@@ -333,6 +484,65 @@ export class OnboardingManager {
     if (doneBackBtn) {
       doneBackBtn.addEventListener('click', () => this.showPhase(1));
     }
+
+    document
+      .getElementById('pafHireBackBtn')
+      ?.addEventListener('click', () => this.backPersonalAssistantHire());
+    document
+      .getElementById('pafHireNextBtn')
+      ?.addEventListener('click', () => this.advancePersonalAssistantHire());
+    document.getElementById('pafHireBtn')?.addEventListener('click', () => this.hireAssistant());
+    document
+      .getElementById('pafHireConfirm')
+      ?.addEventListener('change', () => this.updateHireButtonState());
+    document.getElementById('pafAssistantName')?.addEventListener('input', event => {
+      this.personalAssistantAppearanceEditor?.setAgentName(event.target.value);
+      this.updateHireButtonState();
+    });
+    document
+      .getElementById('pafAssistantMandate')
+      ?.addEventListener('input', () => this.updateHireButtonState());
+    document
+      .querySelectorAll('[name="pafFocus"], [name="pafBriefDay"]')
+      .forEach(input => input.addEventListener('change', () => this.updateHireButtonState()));
+    document
+      .getElementById('pafBriefTime')
+      ?.addEventListener('change', () => this.updateHireButtonState());
+
+    document.querySelectorAll('[data-paf-add-row]').forEach(button => {
+      button.addEventListener('click', () => this.addAssignmentRow(button.dataset.pafAddRow));
+    });
+    document
+      .getElementById('pafAssignmentBackBtn')
+      ?.addEventListener('click', () => this.backFirstAssignmentStep());
+    document
+      .getElementById('pafPreviewAssignmentBtn')
+      ?.addEventListener('click', () => this.advanceFirstAssignmentStep());
+    document.getElementById('pafAssignmentForm')?.addEventListener('input', () => {
+      this.updateAssignmentStepNavigation();
+    });
+    document.getElementById('pafEditAssignmentBtn')?.addEventListener('click', () => {
+      this.showAssignmentStep(0);
+    });
+    document
+      .getElementById('pafReplacePreviewBtn')
+      ?.addEventListener('click', () => this.saveAssignmentPreview(this.readEditedPreviewRows()));
+    document.getElementById('pafAssignmentConfirm')?.addEventListener('change', event => {
+      const apply = document.getElementById('pafApplyAssignmentBtn');
+      if (apply) apply.disabled = !event.target.checked || this.assignmentApplying;
+    });
+    document
+      .getElementById('pafApplyAssignmentBtn')
+      ?.addEventListener('click', () => this.applyFirstAssignment());
+    document.getElementById('pafOpenTodayBtn')?.addEventListener('click', () => {
+      window.location.href = '/?view=today';
+    });
+    this.modal.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && this.assignmentQuestMode) {
+        event.preventDefault();
+        this.deferFirstAssignmentQuest();
+      }
+    });
 
     // Skip link
     const skipLink = document.getElementById('skipOnboardingLink');
@@ -436,6 +646,25 @@ export class OnboardingManager {
 
   async checkOnboardingStatus() {
     return loadOnboardingStatus();
+  }
+
+  async loadPersonalAssistantState() {
+    try {
+      const response = await fetch('/api/personal-assistant', {
+        headers: { Accept: 'application/json' }
+      });
+      if (!response.ok) throw new Error(`Personal assistant request failed (${response.status})`);
+      const payload = await response.json();
+      this.personalAssistantState = payload?.personal_assistant || null;
+      this.hireRequestId = String(this.personalAssistantState?.hire_request_id || '').trim();
+      const modelStatus = this.personalAssistantState?.availability?.model?.status;
+      if (modelStatus) this.modelConfigured = modelStatus === 'available';
+      return this.personalAssistantState;
+    } catch (error) {
+      console.warn('Could not load personal assistant setup state:', error);
+      this.personalAssistantState = null;
+      return null;
+    }
   }
 
   async saveNames() {
@@ -1002,12 +1231,822 @@ export class OnboardingManager {
     }
   }
 
+  // --- Personal Assistant hire -------------------------------------------
+
+  shouldOpenFirstAssignmentQuest() {
+    const requested = new URLSearchParams(window.location.search).get('quest');
+    if (requested !== 'plan-first-day' || !this.personalAssistantEligible) return false;
+    const state = this.personalAssistantState || {};
+    return (
+      ['active', 'paused'].includes(state.state) && state.first_assignment_status !== 'completed'
+    );
+  }
+
+  showHireStep(index, { focus = true } = {}) {
+    this.hireStep = Math.max(0, Math.min(2, Number(index) || 0));
+    document.querySelectorAll('[data-paf-hire-step]').forEach(panel => {
+      panel.classList.toggle('d-none', Number(panel.dataset.pafHireStep) !== this.hireStep);
+    });
+    const labels = ['Meet your assistant', 'Choose the focus', 'Set the rhythm'];
+    const label = document.getElementById('pafHireStepLabel');
+    if (label) label.textContent = `Hire step ${this.hireStep + 1} of 3 · ${labels[this.hireStep]}`;
+    const bar = document.getElementById('pafHireStepBar');
+    const track = bar?.parentElement;
+    if (bar) bar.style.width = `${((this.hireStep + 1) / 3) * 100}%`;
+    if (track) track.setAttribute('aria-valuenow', String(this.hireStep + 1));
+
+    const back = document.getElementById('pafHireBackBtn');
+    if (back) back.textContent = 'Back';
+    document.getElementById('pafHireNextBtn')?.classList.toggle('d-none', this.hireStep === 2);
+    document.getElementById('pafHireBtn')?.classList.toggle('d-none', this.hireStep !== 2);
+    this.updateHireButtonState();
+
+    if (focus) label?.focus();
+  }
+
+  hireStepIsValid(step = this.hireStep) {
+    const name = document.getElementById('pafAssistantName')?.value?.trim() || '';
+    const mandate = document.getElementById('pafAssistantMandate')?.value?.trim() || '';
+    const focusCount = document.querySelectorAll('[name="pafFocus"]:checked').length;
+    const dayCount = document.querySelectorAll('[name="pafBriefDay"]:checked').length;
+    const confirmed = document.getElementById('pafHireConfirm')?.checked === true;
+    if (step === 0) return !!name;
+    if (step === 1) return !!mandate || focusCount > 0;
+    return dayCount > 0 && confirmed;
+  }
+
+  advancePersonalAssistantHire() {
+    if (!this.hireStepIsValid() || this.hireStep >= 2) return;
+    this.showHireStep(this.hireStep + 1);
+  }
+
+  backPersonalAssistantHire() {
+    if (this.hireStep > 0) {
+      this.showHireStep(this.hireStep - 1);
+      return;
+    }
+    document.getElementById('onboardingProgressShell')?.classList.remove('d-none');
+    this.showPhase(1);
+  }
+
+  showPersonalAssistantHire() {
+    document.getElementById('onboardingLegacyFinalPhase')?.classList.add('d-none');
+    document.getElementById('onboardingPersonalAssistantAssignment')?.classList.add('d-none');
+    document.getElementById('onboardingPersonalAssistantHire')?.classList.remove('d-none');
+    if (this.personalAssistantState?.state === 'active') this.hireStep = 2;
+    document.getElementById('welcomeAssistantReveal')?.classList.add('d-none');
+    document.getElementById('onboardingProgressShell')?.classList.add('d-none');
+    this.assignmentQuestMode = false;
+
+    const state = this.personalAssistantState || {};
+    const nameInput = document.getElementById('pafAssistantName');
+    if (nameInput && state.display_name) nameInput.value = state.display_name;
+    const mandate = document.getElementById('pafAssistantMandate');
+    if (mandate && state.mandate) mandate.value = state.mandate;
+    if (Array.isArray(state.focus_areas) && state.focus_areas.length) {
+      const selected = new Set(state.focus_areas);
+      document.querySelectorAll('[name="pafFocus"]').forEach(input => {
+        input.checked = selected.has(input.value);
+      });
+    }
+    if (state.daily_brief) {
+      const selectedDays = new Set(state.daily_brief.schedule_days || []);
+      document.querySelectorAll('[name="pafBriefDay"]').forEach(input => {
+        input.checked = selectedDays.has(input.value);
+      });
+      const timeInput = document.getElementById('pafBriefTime');
+      if (timeInput && state.daily_brief.schedule_time) {
+        timeInput.value = state.daily_brief.schedule_time;
+      }
+      const notifications = document.getElementById('pafNotifyOnReady');
+      if (notifications) notifications.checked = state.daily_brief.notify_on_ready === true;
+    }
+
+    const host = document.getElementById('pafAssistantAppearance');
+    if (host && window.AgentAppearanceEditor && !this.personalAssistantAppearanceEditor) {
+      this.personalAssistantAppearanceEditor = window.AgentAppearanceEditor.create({
+        host,
+        idPrefix: 'pafAssistantAppearance',
+        mode: 'create',
+        allowedModes: ['generated', 'character'],
+        appearance: state.appearance || { mode: 'generated', generated: {} },
+        agent: {
+          name: nameInput?.value || 'Assistant',
+          source: 'user',
+          role: 'orchestrator'
+        },
+        onChange: () => this.updateHireButtonState()
+      });
+    }
+
+    const modelNote = document.getElementById('pafHireModelNote');
+    if (modelNote) {
+      if (this.modelConfigured === false) {
+        modelNote.innerHTML =
+          'No model is configured. Hiring, Personal HQ, and structured planning still work. <a href="/settings#system-model">Choose a model in Settings</a> when you want conversational answers.';
+      } else {
+        modelNote.textContent =
+          'You can change the model later without changing this assistant relationship.';
+      }
+    }
+    const status = document.getElementById('pafHireStatus');
+    if (status) {
+      status.textContent =
+        state.state === 'repair_needed'
+          ? personalAssistantResumeMessage(state)
+          : state.state === 'hiring'
+            ? personalAssistantResumeMessage(state)
+            : state.state === 'active'
+              ? `${state.display_name || 'Your assistant'} is hired. Continue to finish onboarding.`
+              : '';
+    }
+    const button = document.getElementById('pafHireBtn');
+    if (button && ['repair_needed', 'hiring', 'active'].includes(state.state)) {
+      button.textContent = state.state === 'active' ? 'Finish onboarding' : 'Finish setup';
+      const confirmation = document.getElementById('pafHireConfirm');
+      if (confirmation) confirmation.checked = true;
+      this.hireStep = 2;
+    }
+    this.showHireStep(this.hireStep);
+  }
+
+  updateHireButtonState() {
+    const hire = document.getElementById('pafHireBtn');
+    const next = document.getElementById('pafHireNextBtn');
+    if (next) next.disabled = !this.hireStepIsValid(this.hireStep);
+    if (hire) {
+      hire.disabled =
+        !this.hireStepIsValid(0) || !this.hireStepIsValid(1) || !this.hireStepIsValid(2);
+    }
+  }
+
+  getHireRequestId() {
+    if (this.hireRequestId) return this.hireRequestId;
+    const storageKey = 'ori.personalAssistantHireRequestId';
+    try {
+      this.hireRequestId = String(window.localStorage.getItem(storageKey) || '').trim();
+    } catch (_) {
+      this.hireRequestId = '';
+    }
+    if (!this.hireRequestId) {
+      this.hireRequestId =
+        globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
+          ? globalThis.crypto.randomUUID()
+          : `hire-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      try {
+        window.localStorage.setItem(storageKey, this.hireRequestId);
+      } catch (_) {
+        // The durable server operation remains authoritative when storage is unavailable.
+      }
+    }
+    return this.hireRequestId;
+  }
+
+  personalAssistantHirePayload() {
+    const focusAreas = Array.from(
+      document.querySelectorAll('[name="pafFocus"]:checked'),
+      input => input.value
+    );
+    const scheduleDays = Array.from(
+      document.querySelectorAll('[name="pafBriefDay"]:checked'),
+      input => input.value
+    );
+    return buildPersonalAssistantHirePayload({
+      requestId: this.getHireRequestId(),
+      ifVersion: this.personalAssistantState?.state_version || 0,
+      displayName: document.getElementById('pafAssistantName')?.value || 'Assistant',
+      appearance: this.personalAssistantAppearanceEditor?.createRequest(),
+      mandate: document.getElementById('pafAssistantMandate')?.value || '',
+      focusAreas,
+      timezone: this.timezone || this.detectTimezone() || 'UTC',
+      scheduleDays,
+      scheduleTime: document.getElementById('pafBriefTime')?.value || '08:00',
+      notifyOnReady: document.getElementById('pafNotifyOnReady')?.checked === true
+    });
+  }
+
+  showHireError(message) {
+    const error = document.getElementById('pafHireError');
+    if (!error) return;
+    error.textContent = message || '';
+    error.classList.toggle('d-none', !message);
+  }
+
+  async hireAssistant() {
+    const button = document.getElementById('pafHireBtn');
+    const originalLabel = button?.textContent || 'Hire Assistant';
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Creating Personal HQ…';
+      button.setAttribute('aria-busy', 'true');
+    }
+    const status = document.getElementById('pafHireStatus');
+    if (status)
+      status.textContent = 'Creating one assistant and Personal HQ. Keep this window open.';
+    this.showHireError('');
+    try {
+      const response = await fetch('/api/personal-assistant/hire', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(this.personalAssistantHirePayload())
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (payload.durable_result) {
+          this.personalAssistantState = {
+            ...this.personalAssistantState,
+            ...payload.durable_result,
+            state: 'repair_needed',
+            repair_step: payload.repair_step
+          };
+          const status = document.getElementById('pafHireStatus');
+          if (status)
+            status.textContent = personalAssistantResumeMessage(this.personalAssistantState);
+          if (button) button.textContent = 'Finish setup';
+        }
+        if (response.status === 409) await this.loadPersonalAssistantState();
+        throw new Error(payload.error || 'Could not finish hiring. Retry this same request.');
+      }
+
+      this.personalAssistantState = payload.personal_assistant || this.personalAssistantState;
+      if (status) {
+        if (this.modelConfigured === false) {
+          status.innerHTML =
+            '<strong>Hired — choose a model to chat.</strong> Structured planning is ready now. <a href="/settings#system-model">Choose a model in Settings</a> later.';
+          await new Promise(resolve => setTimeout(resolve, 350));
+        } else {
+          status.textContent = 'Assistant hired. Personal HQ is ready.';
+        }
+      }
+      this.assignmentStateVersion = Number(this.personalAssistantState?.state_version) || 0;
+      try {
+        window.localStorage.removeItem('ori.personalAssistantHireRequestId');
+      } catch (_) {
+        // Storage cleanup is not part of the durable hire transaction.
+      }
+      await this.completePersonalAssistantOnboarding();
+    } catch (error) {
+      console.error('Error hiring personal assistant:', error);
+      this.showHireError(error.message || 'Could not finish hiring. Retry this same request.');
+      if (button) {
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        if (button.textContent === 'Creating Personal HQ…') button.textContent = originalLabel;
+      }
+    }
+  }
+
+  async completePersonalAssistantOnboarding() {
+    await this.completeStep('step-done');
+    const response = await fetch('/api/onboarding/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (!response.ok) {
+      throw new Error('Your assistant is hired, but onboarding could not be closed. Retry safely.');
+    }
+    const status = document.getElementById('pafHireStatus');
+    if (status) status.textContent = 'Assistant hired. Your first quest is ready on Home.';
+    this.modalInstance?.hide();
+    window.location.href = '/';
+  }
+
+  // --- First assignment quest -------------------------------------------
+
+  async showFirstAssignmentQuest() {
+    this.assignmentQuestMode = true;
+    this.showPhase(2);
+    document.getElementById('onboardingProgressShell')?.classList.add('d-none');
+    await this.showFirstAssignment();
+    this.modal.addEventListener(
+      'shown.bs.modal',
+      () => {
+        document.querySelector(`[data-paf-assignment-step="${this.assignmentStep}"]`)?.focus();
+      },
+      { once: true }
+    );
+    this.modalInstance?.show();
+  }
+
+  async showFirstAssignment() {
+    document.getElementById('onboardingLegacyFinalPhase')?.classList.add('d-none');
+    document.getElementById('onboardingPersonalAssistantHire')?.classList.add('d-none');
+    document.getElementById('onboardingPersonalAssistantAssignment')?.classList.remove('d-none');
+    document.getElementById('pafAssignmentPreview')?.classList.add('d-none');
+    document.getElementById('pafAssignmentResult')?.classList.add('d-none');
+    document.getElementById('pafAssignmentForm')?.classList.remove('d-none');
+    this.seedAssignmentRows();
+    this.showAssignmentStep(this.assignmentStep, { focus: false });
+    try {
+      const response = await fetch('/api/personal-assistant/first-assignment', {
+        headers: { Accept: 'application/json' }
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || 'Could not resume the first assignment.');
+      const current = payload.first_assignment || {};
+      const resume = firstAssignmentResumeView(current);
+      this.assignmentStateVersion = resume.stateVersion || this.assignmentStateVersion;
+      if (resume.applyRequestId) this.assignmentApplyRequestId = resume.applyRequestId;
+      if (resume.preview) {
+        this.assignmentPreview = resume.preview;
+        this.renderAssignmentPreview(resume.preview);
+      }
+      if (resume.stage === 'partial') {
+        this.setAssignmentStatus(
+          'Some records are already saved. Confirm Retry to continue safely.'
+        );
+        const apply = document.getElementById('pafApplyAssignmentBtn');
+        if (apply) apply.textContent = 'Retry and finish';
+      } else if (resume.stage === 'complete') {
+        this.renderAssignmentResult({
+          outcome: Number(current.preview?.count) === 0 ? 'complete_empty' : 'complete',
+          applied_count: Number(current.preview?.count) || 0,
+          total_count: Number(current.preview?.count) || 0,
+          brief: resume.brief || null
+        });
+      }
+    } catch (error) {
+      this.showAssignmentError(error.message || 'Could not resume the first assignment.');
+    }
+  }
+
+  showAssignmentStep(index, { focus = true } = {}) {
+    this.assignmentStep = Math.max(0, Math.min(2, Number(index) || 0));
+    document.getElementById('pafAssignmentForm')?.classList.remove('d-none');
+    document.getElementById('pafAssignmentPreview')?.classList.add('d-none');
+    document.getElementById('pafAssignmentResult')?.classList.add('d-none');
+    document.querySelectorAll('[data-paf-assignment-step]').forEach(panel => {
+      panel.classList.toggle(
+        'd-none',
+        Number(panel.dataset.pafAssignmentStep) !== this.assignmentStep
+      );
+    });
+    const labels = ['Today’s priorities', 'Owed and waiting', 'Fixed commitments'];
+    const label = document.getElementById('pafAssignmentStepLabel');
+    if (label) {
+      label.textContent = `Quest step ${this.assignmentStep + 1} of 4 · ${labels[this.assignmentStep]}`;
+    }
+    const bar = document.getElementById('pafAssignmentStepBar');
+    const track = bar?.parentElement;
+    if (bar) bar.style.width = `${((this.assignmentStep + 1) / 4) * 100}%`;
+    if (track) track.setAttribute('aria-valuenow', String(this.assignmentStep + 1));
+    this.updateAssignmentStepNavigation();
+    if (focus) {
+      document.querySelector(`[data-paf-assignment-step="${this.assignmentStep}"]`)?.focus();
+    }
+  }
+
+  assignmentStepHasContent(step = this.assignmentStep) {
+    const stepTypes = [
+      new Set(['priority']),
+      new Set(['i_owe', 'waiting_on']),
+      new Set(['fixed_commitment'])
+    ];
+    return Array.from(document.querySelectorAll('[data-paf-assignment-row]')).some(row => {
+      if (!stepTypes[step]?.has(row.dataset.pafAssignmentRow)) return false;
+      return !!row.querySelector('[data-field="title"]')?.value?.trim();
+    });
+  }
+
+  updateAssignmentStepNavigation() {
+    const back = document.getElementById('pafAssignmentBackBtn');
+    const next = document.getElementById('pafPreviewAssignmentBtn');
+    if (back) back.textContent = this.assignmentStep === 0 ? 'Do this later' : 'Back';
+    if (next) {
+      next.textContent =
+        this.assignmentStep === 2
+          ? 'Review plan'
+          : this.assignmentStepHasContent()
+            ? 'Continue'
+            : 'Skip for now';
+    }
+  }
+
+  advanceFirstAssignmentStep() {
+    if (this.assignmentStep < 2) {
+      this.showAssignmentStep(this.assignmentStep + 1);
+      return;
+    }
+    this.saveAssignmentPreview(this.readAssignmentRows());
+  }
+
+  backFirstAssignmentStep() {
+    if (this.assignmentStep > 0) {
+      this.showAssignmentStep(this.assignmentStep - 1);
+      return;
+    }
+    this.deferFirstAssignmentQuest();
+  }
+
+  async deferFirstAssignmentQuest() {
+    if (!this.assignmentQuestMode) return;
+    const button = document.getElementById('pafAssignmentBackBtn');
+    const errorTarget = document
+      .getElementById('pafAssignmentPreview')
+      ?.classList.contains('d-none')
+      ? 'pafAssignmentError'
+      : 'pafAssignmentApplyError';
+    if (button) button.disabled = true;
+    this.showAssignmentError('', errorTarget);
+    try {
+      const response = await fetch('/api/progression/skip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ quest_id: 't1-plan-first-day' })
+      });
+      if (!response.ok) throw new Error('Could not save this quest for later. Try again.');
+      this.modalInstance?.hide();
+      window.history?.replaceState?.({}, '', '/');
+      this.assignmentQuestMode = false;
+      window.dispatchEvent(new CustomEvent('ori:progression-refresh'));
+    } catch (error) {
+      this.showAssignmentError(
+        error.message || 'Could not save this quest for later.',
+        errorTarget
+      );
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  seedAssignmentRows() {
+    if (document.querySelector('[data-paf-assignment-row]')) return;
+    this.addAssignmentRow('priority');
+    this.addAssignmentRow('i_owe');
+    this.addAssignmentRow('waiting_on');
+    this.addAssignmentRow('fixed_commitment');
+  }
+
+  addAssignmentRow(type, values = {}) {
+    const targets = {
+      priority: 'pafPriorityRows',
+      i_owe: 'pafCommitmentRows',
+      waiting_on: 'pafCommitmentRows',
+      fixed_commitment: 'pafFixedRows'
+    };
+    const container = document.getElementById(targets[type]);
+    if (!container || !firstAssignmentTypes.has(type)) return;
+    const row = document.createElement('div');
+    row.className = 'paf-assignment-row';
+    row.dataset.pafAssignmentRow = type;
+
+    const titleWrap = document.createElement('label');
+    titleWrap.className = 'form-label mb-0';
+    titleWrap.textContent =
+      type === 'priority'
+        ? 'Priority'
+        : type === 'i_owe'
+          ? 'I owe'
+          : type === 'waiting_on'
+            ? 'Waiting on'
+            : 'Commitment';
+    const title = document.createElement('input');
+    title.className = 'form-control';
+    title.maxLength = 200;
+    title.placeholder =
+      type === 'fixed_commitment' ? 'Commitment or time to keep visible' : 'What is it?';
+    title.value = values.title || '';
+    title.dataset.field = 'title';
+    titleWrap.appendChild(title);
+    row.appendChild(titleWrap);
+
+    if (type === 'i_owe' || type === 'waiting_on') {
+      const partyWrap = document.createElement('label');
+      partyWrap.className = 'form-label mb-0';
+      partyWrap.textContent = 'Person (optional)';
+      const party = document.createElement('input');
+      party.className = 'form-control';
+      party.maxLength = 200;
+      party.value = values.counterparty || '';
+      party.dataset.field = 'counterparty';
+      partyWrap.appendChild(party);
+      row.appendChild(partyWrap);
+    }
+    if (type === 'fixed_commitment') {
+      const actionWrap = document.createElement('label');
+      actionWrap.className = 'form-label mb-0';
+      actionWrap.textContent = 'Action (optional)';
+      const action = document.createElement('input');
+      action.className = 'form-control';
+      action.maxLength = 200;
+      action.placeholder = 'Leave blank if a decision is needed';
+      action.value = values.action || '';
+      action.dataset.field = 'action';
+      actionWrap.appendChild(action);
+      row.appendChild(actionWrap);
+    }
+
+    const dueWrap = document.createElement('label');
+    dueWrap.className = 'form-label mb-0';
+    dueWrap.textContent = 'Due (optional)';
+    const due = document.createElement('input');
+    due.type = 'date';
+    due.className = 'form-control';
+    due.value = values.due || '';
+    due.dataset.field = 'due';
+    dueWrap.appendChild(due);
+    row.appendChild(dueWrap);
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'btn btn-sm btn-outline-secondary';
+    remove.textContent = 'Remove';
+    remove.addEventListener('click', () => {
+      row.remove();
+      this.updateAssignmentStepNavigation();
+    });
+    row.appendChild(remove);
+    container.appendChild(row);
+    this.updateAssignmentStepNavigation();
+  }
+
+  readAssignmentRows() {
+    return normalizeFirstAssignmentRows(
+      Array.from(document.querySelectorAll('[data-paf-assignment-row]'), row => ({
+        type: row.dataset.pafAssignmentRow,
+        title: row.querySelector('[data-field="title"]')?.value || '',
+        action: row.querySelector('[data-field="action"]')?.value || '',
+        counterparty: row.querySelector('[data-field="counterparty"]')?.value || '',
+        due: row.querySelector('[data-field="due"]')?.value || ''
+      }))
+    );
+  }
+
+  readEditedPreviewRows() {
+    return normalizeFirstAssignmentRows(
+      Array.from(document.querySelectorAll('[data-paf-preview-index]'), row => {
+        const index = Number(row.dataset.pafPreviewIndex) || 0;
+        const item = this.assignmentPreview?.items?.[index] || {};
+        const editedTitle = row.querySelector('[data-field="title"]')?.value || item.title || '';
+        const due = row.querySelector('[data-field="due"]')?.value || '';
+        const base = this.assignmentRows[index] || {};
+        if (item.input_type === 'fixed_commitment' && item.record_type === 'ticket') {
+          const fixedTitle = String(item.detail || '')
+            .split('\n')[0]
+            .replace(/^Fixed commitment:\s*/i, '')
+            .trim();
+          return {
+            ...base,
+            type: item.input_type,
+            title: base.title || fixedTitle || editedTitle,
+            action: editedTitle,
+            due
+          };
+        }
+        return { ...base, type: item.input_type, title: editedTitle, due, action: '' };
+      })
+    );
+  }
+
+  showAssignmentError(message, targetId = 'pafAssignmentError') {
+    const error = document.getElementById(targetId);
+    if (!error) return;
+    error.textContent = message || '';
+    error.classList.toggle('d-none', !message);
+  }
+
+  setAssignmentStatus(message) {
+    const status = document.getElementById('pafAssignmentStatus');
+    if (status) status.textContent = message || '';
+  }
+
+  async saveAssignmentPreview(rows) {
+    if (this.assignmentPreviewing || this.assignmentApplying) return;
+    this.assignmentPreviewing = true;
+    const button = document.getElementById('pafPreviewAssignmentBtn');
+    const replace = document.getElementById('pafReplacePreviewBtn');
+    if (button) button.disabled = true;
+    if (replace) replace.disabled = true;
+    this.showAssignmentError('');
+    this.showAssignmentError('', 'pafAssignmentApplyError');
+    try {
+      const normalized = normalizeFirstAssignmentRows(rows);
+      const response = await fetch('/api/personal-assistant/first-assignment/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(
+          buildFirstAssignmentPreviewPayload(this.assignmentStateVersion, normalized)
+        )
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (response.status === 409 && payload.state_version) {
+          this.assignmentStateVersion =
+            Number(payload.state_version) || this.assignmentStateVersion;
+        }
+        throw new Error(payload.error || 'Could not save this preview. Refresh and try again.');
+      }
+      const result = payload.first_assignment || {};
+      this.assignmentRows = normalized;
+      this.assignmentPreview = result.preview || null;
+      this.assignmentStateVersion = Number(result.state_version) || this.assignmentStateVersion;
+      this.assignmentApplyRequestId = '';
+      this.renderAssignmentPreview(this.assignmentPreview);
+    } catch (error) {
+      const target = document.getElementById('pafAssignmentPreview')?.classList.contains('d-none')
+        ? 'pafAssignmentError'
+        : 'pafAssignmentApplyError';
+      this.showAssignmentError(error.message || 'Could not save this preview.', target);
+    } finally {
+      this.assignmentPreviewing = false;
+      if (button) button.disabled = false;
+      if (replace) replace.disabled = false;
+    }
+  }
+
+  renderAssignmentPreview(preview) {
+    if (!preview) return;
+    document.getElementById('pafAssignmentForm')?.classList.add('d-none');
+    document.getElementById('pafAssignmentResult')?.classList.add('d-none');
+    document.getElementById('pafAssignmentPreview')?.classList.remove('d-none');
+    const count = document.getElementById('pafAssignmentPreviewCount');
+    if (count) {
+      count.textContent =
+        preview.count === 0
+          ? 'No records will be created. You can still confirm an honestly empty first brief.'
+          : `${preview.count} canonical record${preview.count === 1 ? '' : 's'} will be created.`;
+    }
+    const host = document.getElementById('pafAssignmentPreviewRows');
+    if (host) {
+      host.replaceChildren();
+      (preview.items || []).forEach((item, index) => {
+        const row = document.createElement('div');
+        row.className = 'paf-assignment-preview-row';
+        row.dataset.pafPreviewIndex = String(index);
+        const titleWrap = document.createElement('label');
+        titleWrap.className = 'form-label mb-0';
+        titleWrap.textContent =
+          item.record_type === 'ticket'
+            ? 'Personal HQ Ticket'
+            : `Follow-up · ${String(item.category || '').replaceAll('_', ' ')}`;
+        const title = document.createElement('input');
+        title.className = 'form-control';
+        title.maxLength = 200;
+        title.value = item.title || '';
+        title.dataset.field = 'title';
+        titleWrap.appendChild(title);
+        row.appendChild(titleWrap);
+        const dueWrap = document.createElement('label');
+        dueWrap.className = 'form-label mb-0';
+        dueWrap.textContent = 'Due';
+        const due = document.createElement('input');
+        due.type = 'date';
+        due.className = 'form-control';
+        due.value = item.due || '';
+        due.dataset.field = 'due';
+        dueWrap.appendChild(due);
+        row.appendChild(dueWrap);
+        const state = document.createElement('span');
+        state.className = 'paf-assignment-state';
+        state.textContent =
+          item.record_type === 'ticket' && item.awaiting_execution_intent
+            ? 'Ready · not started'
+            : item.state;
+        row.appendChild(state);
+        host.appendChild(row);
+      });
+    }
+    const confirmation = document.getElementById('pafAssignmentConfirm');
+    if (confirmation) confirmation.checked = false;
+    const apply = document.getElementById('pafApplyAssignmentBtn');
+    if (apply) {
+      apply.disabled = true;
+      apply.textContent = 'Create these items';
+    }
+    this.setAssignmentStatus('Preview saved. Nothing has been created yet.');
+    document.querySelector('#pafAssignmentPreview h3')?.focus();
+  }
+
+  getAssignmentApplyRequestId() {
+    if (this.assignmentApplyRequestId) return this.assignmentApplyRequestId;
+    const previewId = this.assignmentPreview?.preview_id || 'pending';
+    const key = `ori.personalAssistantApplyRequestId.${previewId}`;
+    try {
+      this.assignmentApplyRequestId = String(window.localStorage.getItem(key) || '').trim();
+    } catch (_) {
+      this.assignmentApplyRequestId = '';
+    }
+    if (!this.assignmentApplyRequestId) {
+      this.assignmentApplyRequestId =
+        globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
+          ? globalThis.crypto.randomUUID()
+          : `apply-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      try {
+        window.localStorage.setItem(key, this.assignmentApplyRequestId);
+      } catch (_) {
+        // The durable server request ID remains authoritative.
+      }
+    }
+    return this.assignmentApplyRequestId;
+  }
+
+  async applyFirstAssignment() {
+    if (
+      !canSubmitFirstAssignment({
+        confirmed: document.getElementById('pafAssignmentConfirm')?.checked === true,
+        inFlight: this.assignmentApplying,
+        preview: this.assignmentPreview
+      })
+    )
+      return;
+    this.assignmentApplying = true;
+    const apply = document.getElementById('pafApplyAssignmentBtn');
+    if (apply) {
+      apply.disabled = true;
+      apply.textContent = 'Saving records…';
+      apply.setAttribute('aria-busy', 'true');
+    }
+    this.showAssignmentError('', 'pafAssignmentApplyError');
+    this.setAssignmentStatus('Saving confirmed Personal HQ records…');
+    const briefTimer = window.setTimeout(
+      () => this.setAssignmentStatus('Records are saved. Generating your first Daily Brief…'),
+      250
+    );
+    try {
+      const response = await fetch('/api/personal-assistant/first-assignment/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(
+          buildFirstAssignmentApplyPayload({
+            preview: this.assignmentPreview,
+            stateVersion: this.assignmentStateVersion,
+            applyRequestId: this.getAssignmentApplyRequestId()
+          })
+        )
+      });
+      const payload = await response.json().catch(() => ({}));
+      const result = payload.first_assignment || null;
+      if (result?.state_version) this.assignmentStateVersion = Number(result.state_version);
+      if (!response.ok) {
+        if (result?.retryable) {
+          const view = firstAssignmentResultView(result);
+          this.setAssignmentStatus(
+            view.partialBrief
+              ? 'Your records are saved. Daily Brief generation needs a safe retry.'
+              : 'Some records are saved. Retry to continue from the durable checkpoint.'
+          );
+          if (apply) apply.textContent = 'Retry and finish';
+        }
+        throw new Error(payload.error || 'Could not finish the first assignment. Retry safely.');
+      }
+      this.renderAssignmentResult(result);
+      window.dispatchEvent(new CustomEvent('ori:progression-refresh'));
+    } catch (error) {
+      this.showAssignmentError(
+        error.message || 'Could not finish the first assignment.',
+        'pafAssignmentApplyError'
+      );
+    } finally {
+      window.clearTimeout(briefTimer);
+      this.assignmentApplying = false;
+      if (apply) {
+        apply.disabled = document.getElementById('pafAssignmentConfirm')?.checked !== true;
+        apply.removeAttribute('aria-busy');
+        if (apply.textContent === 'Saving records…') apply.textContent = 'Create these items';
+      }
+    }
+  }
+
+  renderAssignmentResult(result) {
+    const view = firstAssignmentResultView(result);
+    document.getElementById('pafAssignmentForm')?.classList.add('d-none');
+    document.getElementById('pafAssignmentPreview')?.classList.add('d-none');
+    const panel = document.getElementById('pafAssignmentResult');
+    panel?.classList.remove('d-none');
+    const title = document.getElementById('pafAssignmentResultTitle');
+    if (title)
+      title.textContent = view.empty
+        ? 'Your first brief is honestly empty'
+        : 'Your first Daily Brief is ready';
+    const summary = document.getElementById('pafAssignmentResultSummary');
+    if (summary) summary.textContent = view.summary;
+    const list = document.getElementById('pafAssignmentResultItems');
+    if (list) {
+      list.replaceChildren();
+      view.topItems.forEach(item => {
+        const li = document.createElement('li');
+        li.textContent = item;
+        list.appendChild(li);
+      });
+      list.classList.toggle('d-none', view.topItems.length === 0);
+    }
+    const next = document.getElementById('pafAssignmentNextCheckIn');
+    if (next) {
+      next.textContent = view.nextCheckIn
+        ? `Next scheduled check-in: ${new Date(view.nextCheckIn).toLocaleString()}`
+        : 'No scheduled check-in is enabled. You can refresh Today whenever you want.';
+    }
+    title?.focus();
+  }
+
   // --- Phase navigation ---
 
   showOnboarding() {
     if (!this.modalInstance) return;
 
     this.currentPhase = 0;
+    this.assignmentQuestMode = false;
+    document.getElementById('onboardingProgressShell')?.classList.remove('d-none');
 
     // Pre-fill names if returning
     const nameInput = document.getElementById('onboardingUserName');
@@ -1017,6 +2056,10 @@ export class OnboardingManager {
     const assistantInput = document.getElementById('onboardingAssistantName');
     if (assistantInput && this.assistantName) {
       assistantInput.value = this.assistantName;
+    }
+    if (this.personalAssistantEligible) {
+      document.getElementById('welcomeAssistantReveal')?.classList.add('d-none');
+      if (assistantInput) assistantInput.value = 'Ori';
     }
     const timezoneInput = document.getElementById('onboardingTimezone');
     if (timezoneInput) {
@@ -1151,7 +2194,14 @@ export class OnboardingManager {
         return;
       }
     }
+    this.modelConfigured = !skipModel;
     await this.completeStep('step-model');
+
+    if (this.personalAssistantEligible) {
+      this.showPhase(2);
+      this.showPersonalAssistantHire();
+      return;
+    }
 
     // End setup with one bounded intent question. Ori recommends from the live
     // ready catalog; it does not infer or persist a durable user profile.

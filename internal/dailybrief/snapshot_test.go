@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/followup"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -39,6 +40,19 @@ func (f *fakeSessionSource) ListSessions(ctx context.Context, filter *session.Se
 		items = items[:opts.Limit]
 	}
 	return items, nil
+}
+
+type fakeFollowUpSource struct {
+	items  []*followup.FollowUp
+	err    error
+	filter followup.Filter
+	calls  int
+}
+
+func (f *fakeFollowUpSource) List(_ context.Context, filter followup.Filter) ([]*followup.FollowUp, error) {
+	f.calls++
+	f.filter = filter
+	return f.items, f.err
 }
 
 // slimListingWorkspaceSource models the SQLite workspace list path, which
@@ -312,6 +326,65 @@ func TestBuildSnapshot_OnlyIncludesOpenOpportunities(t *testing.T) {
 	}
 }
 
+func TestBuildSnapshot_FollowUpsAreHQScopedBoundedAndDueFirst(t *testing.T) {
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	items := []*followup.FollowUp{
+		{ID: "healthy", UserID: "local", WorkspaceID: "hq", Category: followup.CategoryIOwe, Direction: followup.DirectionOutbound, Title: "Healthy", Status: followup.StatusActive, UpdatedAt: now},
+		{ID: "stale", UserID: "local", WorkspaceID: "hq", Category: followup.CategoryWaitingOn, Direction: followup.DirectionInbound, Title: "Stale", Status: followup.StatusActive, UpdatedAt: now.Add(-8 * 24 * time.Hour)},
+		{ID: "candidate", UserID: "local", WorkspaceID: "hq", Title: "Candidate", Status: followup.StatusCandidate, UpdatedAt: now},
+		{ID: "closed", UserID: "local", WorkspaceID: "hq", Title: "Closed", Status: followup.StatusCompleted, UpdatedAt: now},
+		{ID: "other-user", UserID: "other", WorkspaceID: "hq", Title: "Other", Status: followup.StatusActive, UpdatedAt: now},
+		{ID: "other-hq", UserID: "local", WorkspaceID: "other", Title: "Other HQ", Status: followup.StatusActive, UpdatedAt: now},
+	}
+	for i := 0; i < maxFollowUpsPerBrief; i++ {
+		due := now.Add(time.Duration(i+1) * time.Hour)
+		items = append(items, &followup.FollowUp{
+			ID: "due-" + string(rune('a'+i)), UserID: "local", WorkspaceID: "hq",
+			Category: followup.CategoryIOwe, Direction: followup.DirectionOutbound,
+			Title: "Due", Status: followup.StatusReopened, DueAt: &due, UpdatedAt: now.Add(-time.Duration(i) * time.Minute),
+		})
+	}
+	source := &fakeFollowUpSource{items: items}
+	snap := BuildSnapshot(context.Background(), SnapshotSources{
+		Workspaces: workspace.NewInMemoryStore(), FollowUps: source,
+	}, Config{Scope: ScopeAll, WorkspaceID: "hq"}, "local", now)
+	if source.calls != 1 || source.filter.UserID != "local" || source.filter.WorkspaceID != "hq" || len(source.filter.Statuses) != 2 {
+		t.Fatalf("follow-up filter = %#v calls=%d", source.filter, source.calls)
+	}
+	if len(snap.FollowUps) != maxFollowUpsPerBrief {
+		t.Fatalf("follow-ups = %d, want cap %d", len(snap.FollowUps), maxFollowUpsPerBrief)
+	}
+	if snap.FollowUps[0].Ref.EntityID != "stale" || !snap.FollowUps[0].Stale || snap.FollowUps[0].Ref.EntityType != "follow_up" {
+		t.Fatalf("due/stale ordering = %#v", snap.FollowUps)
+	}
+	for _, item := range snap.FollowUps {
+		if item.Ref.EntityID == "candidate" || item.Ref.EntityID == "closed" || item.Ref.EntityID == "other-user" || item.Ref.EntityID == "other-hq" {
+			t.Fatalf("unauthorized or inactive follow-up included: %#v", item)
+		}
+	}
+	if _, ok := snap.AllRefs()[snap.FollowUps[0].Ref.Key()]; !ok {
+		t.Fatal("follow-up ref missing from allowlist")
+	}
+}
+
+func TestBuildSnapshot_FollowUpNotConfiguredEmptyAndFailureAreDistinct(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	source := &fakeFollowUpSource{}
+	notConfigured := BuildSnapshot(context.Background(), SnapshotSources{Workspaces: store, FollowUps: source}, Config{Scope: ScopeAll}, "local", time.Now())
+	if source.calls != 0 || len(notConfigured.Gaps) != 0 {
+		t.Fatalf("not configured calls=%d gaps=%v", source.calls, notConfigured.Gaps)
+	}
+	healthy := BuildSnapshot(context.Background(), SnapshotSources{Workspaces: store, FollowUps: source}, Config{Scope: ScopeAll, WorkspaceID: "hq"}, "local", time.Now())
+	if source.calls != 1 || len(healthy.FollowUps) != 0 || len(healthy.Gaps) != 0 {
+		t.Fatalf("healthy empty calls=%d followups=%v gaps=%v", source.calls, healthy.FollowUps, healthy.Gaps)
+	}
+	source.err = errors.New("database unavailable")
+	failed := BuildSnapshot(context.Background(), SnapshotSources{Workspaces: store, FollowUps: source}, Config{Scope: ScopeAll, WorkspaceID: "hq"}, "local", time.Now())
+	if len(failed.Gaps) != 1 || failed.Gaps[0] != "Personal HQ follow-ups could not be read" {
+		t.Fatalf("failed gaps=%v", failed.Gaps)
+	}
+}
+
 func TestSnapshot_AllRefsCollectsEveryEntity(t *testing.T) {
 	snap := Snapshot{Workspaces: []WorkspaceSnapshot{
 		{
@@ -321,9 +394,9 @@ func TestSnapshot_AllRefsCollectsEveryEntity(t *testing.T) {
 			ScheduledTasks: []ScheduledTaskSnapshot{{Ref: SourceRef{WorkspaceID: "ws-1", EntityType: "scheduled_task", EntityID: "st1"}}},
 			RecentSessions: []SessionSnapshot{{Ref: SourceRef{WorkspaceID: "ws-1", EntityType: "session", EntityID: "s1"}}},
 		},
-	}}
+	}, FollowUps: []FollowUpSnapshot{{Ref: SourceRef{WorkspaceID: "hq", EntityType: "follow_up", EntityID: "f1"}}}}
 	refs := snap.AllRefs()
-	if len(refs) != 4 {
-		t.Fatalf("expected 4 refs, got %d: %+v", len(refs), refs)
+	if len(refs) != 5 {
+		t.Fatalf("expected 5 refs, got %d: %+v", len(refs), refs)
 	}
 }

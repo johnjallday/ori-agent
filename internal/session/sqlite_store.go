@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -124,6 +125,22 @@ func (s *SQLiteStore) DeleteSession(ctx context.Context, id string) error {
 	}
 
 	return nil
+}
+
+// RenameSessionsByAgent preserves session history while an agent profile is
+// renamed. It is idempotent: a retry after the first update affects zero rows.
+func (s *SQLiteStore) RenameSessionsByAgent(ctx context.Context, oldName, newName string) (int, error) {
+	oldName = strings.TrimSpace(oldName)
+	newName = strings.TrimSpace(newName)
+	if oldName == "" || newName == "" {
+		return 0, errors.New("both session agent names are required")
+	}
+	result, err := s.db.ExecContext(ctx, "UPDATE sessions SET agent_name = ?, updated_at = ? WHERE agent_name = ?", newName, time.Now().UTC(), oldName)
+	if err != nil {
+		return 0, fmt.Errorf("failed to rename session agent: %w", err)
+	}
+	count, err := result.RowsAffected()
+	return int(count), err
 }
 
 // DeleteSessionsByAgent removes every session whose agent_name matches the

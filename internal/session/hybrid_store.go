@@ -174,6 +174,17 @@ func (h *hybridStore) DeleteSession(ctx context.Context, id string) error {
 	return h.sqlite.DeleteSession(ctx, id)
 }
 
+// RenameSessionsByAgent preserves session history under a renamed profile and
+// clears the bounded cache so the next read cannot resurrect the old name.
+func (h *hybridStore) RenameSessionsByAgent(ctx context.Context, oldName, newName string) (int, error) {
+	count, err := h.sqlite.RenameSessionsByAgent(ctx, oldName, newName)
+	if err != nil {
+		return 0, err
+	}
+	h.cache.Clear()
+	return count, nil
+}
+
 // DeleteSessionsByAgent removes all sessions owned by the given agent and
 // evicts any cached copies. Returns the number of sessions removed.
 func (h *hybridStore) DeleteSessionsByAgent(ctx context.Context, agentName string) (int, error) {

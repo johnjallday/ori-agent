@@ -149,6 +149,7 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	agentHandler.ActivityLogger = s.Handlers.ActivityLogger
 	agentHandler.SetCLIAgentRegistry(s.Handlers.CLIAgentRegistry)
 	agentHandler.SetWorkspaceStore(s.Storage.WorkspaceStore)
+	agentHandler.SetPersonalAssistantSupport(s.Storage.PersonalAssistant, s.Storage.UserProvider)
 	if s.Storage.SessionStore != nil {
 		agentHandler.SetSessionPurger(s.Storage.SessionStore)
 	}
@@ -175,6 +176,7 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	dashboardHandler.ActivityLogger = s.Handlers.ActivityLogger
 	dashboardHandler.SetCLIAgentRegistry(s.Handlers.CLIAgentRegistry)
 	dashboardHandler.SetWorkspaceStore(s.Storage.WorkspaceStore)
+	dashboardHandler.SetPersonalAssistantSupport(s.Storage.PersonalAssistant, s.Storage.UserProvider)
 	if s.Handlers.ExternalAgents != nil {
 		dashboardHandler.SetClaudeSyncProvider(s.Handlers.ExternalAgents.ClaudeSyncData)
 		dashboardHandler.SetCodexSyncProvider(s.Handlers.ExternalAgents.CodexSyncData)
@@ -270,6 +272,13 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	}
 	homeAssistantRouteHandler.SetWorkspaceResolver(homeAssistantWorkspaceResolver)
 	homeAssistantRouteHandler.SetCalendarOpsPreference(s.Handlers.CalendarOps)
+	if s.Storage.PersonalAssistant != nil {
+		homeAssistantRouteHandler.SetPersonalAssistantContextProvider(personalAssistantContextAdapter{
+			relationship: s.Storage.PersonalAssistant,
+			profiles:     s.Storage.UserStore,
+			workspaces:   s.Storage.WorkspaceStore,
+		}, "local")
+	}
 	if s.Storage != nil && s.Integration != nil {
 		homeAssistantRouteHandler.SetRuntimeResolver(
 			workspace.NewAgentRuntimeResolver(
@@ -401,6 +410,7 @@ func registerOnboardingRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/user/profile", s.Handlers.User.Profile)
 	}
 
+	registerPersonalAssistantRoutes(mux, s)
 	registerPersonalHQRoutes(mux, s)
 	registerDailyBriefRoutes(mux, s)
 
@@ -959,6 +969,23 @@ func registerTriggerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/triggers/{triggerID}/regenerate-token", s.Handlers.Triggers.RegenerateToken)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/triggers/{triggerID}/test-fire", s.Handlers.Triggers.TestFire)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/triggers/{triggerID}/fires", s.Handlers.Triggers.Fires)
+	}
+}
+
+// registerPersonalAssistantRoutes registers the user-owned assistant API.
+func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
+	if s != nil && s.Handlers != nil && s.Handlers.PersonalAssistant != nil {
+		mux.HandleFunc("GET /api/personal-assistant", s.Handlers.PersonalAssistant.GetState)
+		mux.HandleFunc("GET /api/personal-assistant/today", s.Handlers.PersonalAssistant.GetToday)
+		mux.HandleFunc("GET /api/personal-assistant/capabilities", s.Handlers.PersonalAssistant.GetCapabilities)
+		mux.HandleFunc("PATCH /api/personal-assistant/working-agreement", s.Handlers.PersonalAssistant.UpdateWorkingAgreement)
+		mux.HandleFunc("POST /api/personal-assistant/pause", s.Handlers.PersonalAssistant.Pause)
+		mux.HandleFunc("POST /api/personal-assistant/resume", s.Handlers.PersonalAssistant.Resume)
+		mux.HandleFunc("POST /api/personal-assistant/rename", s.Handlers.PersonalAssistant.Rename)
+		mux.HandleFunc("POST /api/personal-assistant/hire", s.Handlers.PersonalAssistant.Hire)
+		mux.HandleFunc("GET /api/personal-assistant/first-assignment", s.Handlers.PersonalAssistant.GetFirstAssignment)
+		mux.HandleFunc("POST /api/personal-assistant/first-assignment/preview", s.Handlers.PersonalAssistant.PreviewFirstAssignment)
+		mux.HandleFunc("POST /api/personal-assistant/first-assignment/apply", s.Handlers.PersonalAssistant.ApplyFirstAssignment)
 	}
 }
 

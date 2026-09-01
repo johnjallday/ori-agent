@@ -11,13 +11,14 @@ import (
 type CreateAgentConfig struct {
 	Type            string // Agent type: "tool-calling", "general", "research"
 	Role            types.AgentRole
-	Model           string  // Model to use
-	Temperature     float64 // Temperature (0.0-2.0)
-	SystemPrompt    string  // Custom system prompt
-	LLMProvider     string  // Provider backing the model (openai, anthropic, ollama, etc.)
-	ReasoningEffort string  // Optional reasoning effort for providers that support it
-	MaxOutputTokens int     // Optional max tokens for responses
-	AllowWebSearch  *bool   // Optional web utility permission (nil defaults to allowed)
+	Model           string                 // Model to use
+	Temperature     float64                // Temperature (0.0-2.0)
+	SystemPrompt    string                 // Custom system prompt
+	LLMProvider     string                 // Provider backing the model (openai, anthropic, ollama, etc.)
+	ReasoningEffort string                 // Optional reasoning effort for providers that support it
+	MaxOutputTokens int                    // Optional max tokens for responses
+	AllowWebSearch  *bool                  // Optional web utility permission (nil defaults to allowed)
+	Appearance      *types.AgentAppearance // Optional validated visual identity
 }
 
 type Store interface {

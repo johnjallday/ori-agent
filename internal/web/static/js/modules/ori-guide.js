@@ -67,6 +67,11 @@
     coachmarkEl: null,
     coachmarkRoute: '',
     actions: [],
+    // PAF turns this controller into Help-only. Work remains a typed handoff
+    // preview and is never delegated from Ori's draft/transcript.
+    helpOnly: false,
+    assistantAvailable: false,
+    assistantName: 'your personal assistant',
     // Survives close/reopen: closing the panel is presentation only and must
     // never cancel submitted work or lose what the user had typed (FR13/FR45).
     activity: [],
@@ -152,10 +157,15 @@
     }
 
     if (type === 'handoff') {
+      var handoffText = String(action.handoff_text || action.handoffText || '').slice(0, 400);
       return {
         type: type,
-        label: String(action.label || 'Send this as work'),
-        handoffText: String(action.handoff_text || action.handoffText || '')
+        label: state.helpOnly
+          ? state.assistantAvailable
+            ? 'Send to ' + state.assistantName
+            : 'Hire your personal assistant'
+          : String(action.label || 'Send this as work'),
+        handoffText: handoffText
       };
     }
 
@@ -674,7 +684,7 @@
 
     // An explicit command goes straight to the work controller: the user has
     // already said what they want, so nothing may reinterpret it (FR24).
-    if (!silent && question && isExplicitCommand(question)) {
+    if (!state.helpOnly && !silent && question && isExplicitCommand(question)) {
       if (hasWorkController()) {
         reportWorkFailure(delegateWork(question, seq), seq, 'explicit-command-failed');
         setPending(false, silent);
@@ -709,6 +719,17 @@
         // A real question the guide did not own goes to routing instead of being
         // rendered as "I don't know" (FR22/FR38).
         if (!silent && question && needsWorkRouting(resp)) {
+          // In PAF, Ori is Help-only. Render the guide-owned handoff preview;
+          // never route, plan, or submit from this draft/transcript.
+          if (state.helpOnly) {
+            setPending(false, silent);
+            render(resp);
+            emit('handoff-preview', {
+              available: state.assistantAvailable,
+              chars: String(question).length
+            });
+            return Promise.resolve();
+          }
           // Where the full work controller exists, it does the real thing:
           // planning, agent selection, confirmations, workspace sessions.
           if (hasWorkController()) {
@@ -846,6 +867,27 @@
   // to travel to, so a handoff no longer navigates anywhere — which also means
   // it can no longer strand the request on a page that lacks the old Home input.
   function handoff(text) {
+    if (state.helpOnly) {
+      if (
+        state.assistantAvailable &&
+        window.PersonalAssistantPanel &&
+        typeof window.PersonalAssistantPanel.prefill === 'function'
+      ) {
+        close();
+        window.PersonalAssistantPanel.prefill(String(text || '').slice(0, 400));
+        emit('handoff', { assistant: state.assistantName, submitted: false });
+        return true;
+      }
+      if (state.els && state.els.reply) {
+        state.els.reply.insertAdjacentHTML(
+          'beforeend',
+          '<p class="ori-guide__answer ori-guide__answer--note">Hire or repair your personal assistant before sending work. Nothing was submitted.</p>'
+        );
+      }
+      emit('handoff', { available: false, submitted: false });
+      return false;
+    }
+
     var els = state.els;
     if (els && els.input) {
       prefillWorkSurface(els.input, text);
@@ -901,6 +943,12 @@
 
   function open(trigger) {
     if (state.open) return;
+    if (
+      window.PersonalAssistantPanel &&
+      typeof window.PersonalAssistantPanel.close === 'function'
+    ) {
+      window.PersonalAssistantPanel.close();
+    }
     state.open = true;
     state.lastTrigger = trigger || document.activeElement || null;
 
@@ -955,6 +1003,27 @@
   function toggle(trigger) {
     if (state.open) close();
     else open(trigger);
+  }
+
+  /* ---- PAF Help-only mode -------------------------------------------------------------- */
+
+  function setHelpOnly(options) {
+    var opts = options || {};
+    state.helpOnly = true;
+    state.assistantAvailable = opts.available === true;
+    state.assistantName = String(opts.assistantName || 'your personal assistant').trim();
+    var els = state.els;
+    if (!els) return;
+    if (els.title) els.title.textContent = 'Ori';
+    if (els.role) els.role.hidden = false;
+    if (els.launcherName) els.launcherName.textContent = 'Ori Help';
+    if (els.input) {
+      els.input.placeholder = 'Ask Ori about the app';
+      els.input.maxLength = 400;
+      els.input.setAttribute('aria-label', 'Ask Ori about the app');
+    }
+    if (els.launcher) els.launcher.setAttribute('aria-label', 'Open Ori Help — App Guide');
+    emit('help-only', { assistantAvailable: state.assistantAvailable });
   }
 
   /* ---- wiring ------------------------------------------------------------------------- */
@@ -1015,6 +1084,12 @@
       reply: document.getElementById('oriGuideReply'),
       close: document.getElementById('oriGuideClose'),
       context: document.getElementById('oriGuideContext'),
+      title: document.getElementById('oriGuideTitle'),
+      role: document.getElementById('oriGuideRole'),
+      launcherName:
+        typeof launcher.querySelector === 'function'
+          ? launcher.querySelector('.ori-guide__launcher-name')
+          : null,
       activity: document.getElementById('oriGuideActivity'),
       launcherStatus: document.getElementById('oriGuideLauncherStatus'),
       // The work controller's render target, hidden until there is work to show.
@@ -1068,6 +1143,7 @@
     ask: ask,
     // The seam page modules use to contribute context the URL cannot carry.
     setContext: setContext,
+    setHelpOnly: setHelpOnly,
     isOpen: function () {
       return state.open;
     },

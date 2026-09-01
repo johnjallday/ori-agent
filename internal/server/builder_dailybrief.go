@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,6 +11,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/dailybriefhttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/personalassistanthttp"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
@@ -50,6 +53,39 @@ type systemModelChatCompleter struct {
 	llmFactory    *llm.Factory
 }
 
+// personalAssistantModelReader reports capability only; it never returns model
+// names, credentials, or provider errors through the PAF API.
+type personalAssistantModelReader struct {
+	configManager *config.Manager
+	llmFactory    *llm.Factory
+}
+
+func (r *personalAssistantModelReader) PersonalAssistantModelAvailability() personalassistant.SourceAvailability {
+	if r == nil || r.configManager == nil || r.llmFactory == nil {
+		return personalassistant.SourceAvailability{
+			Status: personalassistant.AvailabilityDependencyError, Reason: "service_unavailable",
+		}
+	}
+	if !r.configManager.IsSystemModelConfigured() {
+		return personalassistant.SourceAvailability{
+			Status: personalassistant.AvailabilityNotConfigured, Reason: "model_not_configured",
+		}
+	}
+	providerName, modelName := r.configManager.GetSystemModel()
+	result, err := r.llmFactory.GetSystemModelProvider(providerName, modelName)
+	if err != nil || result.Provider == nil {
+		return personalassistant.SourceAvailability{
+			Status: personalassistant.AvailabilityUnavailable, Reason: "configured_model_unavailable",
+		}
+	}
+	if checker, ok := result.Provider.(llm.ModelPresenceChecker); ok && !checker.HasModel(result.Model) {
+		return personalassistant.SourceAvailability{
+			Status: personalassistant.AvailabilityUnavailable, Reason: "configured_model_unavailable",
+		}
+	}
+	return personalassistant.SourceAvailability{Available: true, Status: personalassistant.AvailabilityAvailable}
+}
+
 func (c *systemModelChatCompleter) Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
 	if c.configManager == nil || c.llmFactory == nil {
 		return nil, fmt.Errorf("dailybrief: system model is not configured")
@@ -69,7 +105,9 @@ func (c *systemModelChatCompleter) Chat(ctx context.Context, req llm.ChatRequest
 // designation — that's the personalhq repair flow's job, not the
 // scheduler's).
 type personalHQWorkspaceLister struct {
-	service *personalhq.Service
+	service      *personalhq.Service
+	relationship personalassistant.Store
+	eligibility  personalassistant.EligibilityReader
 }
 
 func (l *personalHQWorkspaceLister) ListScheduledWorkspaces(ctx context.Context) ([]dailybrief.ScheduledWorkspace, error) {
@@ -82,6 +120,19 @@ func (l *personalHQWorkspaceLister) ListScheduledWorkspaces(ctx context.Context)
 	}
 	if !status.Valid {
 		return nil, nil
+	}
+	if l.relationship != nil && l.eligibility != nil && l.eligibility.PersonalAssistantEligibilityVersion() > 0 {
+		state, stateErr := l.relationship.GetState(ctx, userprofile.LocalUserID)
+		if stateErr == nil &&
+			(state.Status != personalassistant.StatusActive || state.RenameStep != personalassistant.RenameNone) {
+			return nil, nil
+		}
+		if errors.Is(stateErr, personalassistant.ErrNotFound) {
+			return nil, nil
+		}
+		if stateErr != nil {
+			return nil, stateErr
+		}
 	}
 	return []dailybrief.ScheduledWorkspace{{WorkspaceID: status.WorkspaceID, UserID: userprofile.LocalUserID}}, nil
 }
@@ -109,7 +160,8 @@ func (b *ServerBuilder) initializeDailyBrief() {
 			Sessions:      sessionSource,
 			// Read lazily off the builder: the mailbox source is wired during
 			// vault init, which runs before this resolver is ever invoked.
-			Mailbox: b.dailyBriefMailbox,
+			Mailbox:   b.dailyBriefMailbox,
+			FollowUps: b.followUpService,
 		}
 		snap := dailybrief.BuildSnapshot(ctx, sources, cfg, req.UserID, time.Now())
 		previous, err := store.GetCurrentRevision(ctx, cfg.WorkspaceID)
@@ -158,5 +210,54 @@ func (b *ServerBuilder) initializeDailyBrief() {
 
 	b.dailyBriefService = briefService
 	b.dailyBriefHandler = dailybriefhttp.NewHandler(briefService, b.personalHQService, b.userProvider)
-	b.dailyBriefScheduler = dailybrief.NewScheduler(briefService, &personalHQWorkspaceLister{service: b.personalHQService}, dailyBriefSchedulerPollInterval)
+
+	// PAF reads aggregate the relationship, HQ, Daily Brief configuration, and
+	// model capability through narrow interfaces. Construction happens here so
+	// it reuses this exact Daily Brief store rather than creating a parallel
+	// routine source.
+	b.personalAssistantStore = personalassistant.NewSQLiteStore(b.sessionStore.DB())
+	b.personalAssistantService = personalassistant.NewService(
+		b.onboardingMgr,
+		b.personalAssistantStore,
+		b.personalHQService,
+		store,
+		&personalAssistantModelReader{configManager: b.configManager, llmFactory: b.llmFactory},
+	)
+	b.personalAssistantHire = personalassistant.NewHireCoordinator(
+		b.onboardingMgr, b.personalAssistantStore, b.sessionHandler,
+		b.personalHQService, briefService,
+	)
+	b.personalAssignment = personalassistant.NewAssignmentService(b.personalAssistantStore)
+	assignmentTickets := workspace.NewTicketService(b.workspaceStore)
+	assignmentTickets.SetEventBus(b.eventBus)
+	assignmentWriter := personalassistant.NewCanonicalWriter(assignmentTickets)
+	assignmentWriter.SetFollowUpService(b.followUpService)
+	b.personalAssignment.SetCanonicalWriter(assignmentWriter)
+	b.personalAssignment.SetBriefService(briefService)
+	b.personalAssistantHandler = personalassistanthttp.NewHandler(b.personalAssistantService, b.userProvider)
+	b.personalAssistantHandler.SetHireService(b.personalAssistantHire)
+	b.personalAssistantHandler.SetAssignmentService(b.personalAssignment)
+	continuity := personalassistant.NewContinuityService(
+		b.personalAssistantStore, b.personalHQService, briefService, b.personalAssistantService,
+	)
+	b.personalAssistantMemory = personalassistant.NewMemoryService(
+		b.personalAssistantStore, b.personalHQService, b.userStore, workspace.NewMemoryStore(b.workspaceFileStore),
+	)
+	b.personalAssistantHandler.SetContinuityService(continuity)
+	renameCoordinator := personalassistant.NewRenameCoordinator(
+		continuity, newPersonalAssistantAgentProfiles(b.st), b.workspaceStore,
+	)
+	if sessionRenamer, ok := b.sessionStore.(personalassistant.AssistantSessionRenamer); ok {
+		renameCoordinator.SetSessionRenamer(sessionRenamer)
+	}
+	b.personalAssistantHandler.SetRenameService(renameCoordinator)
+	b.personalAssistantHandler.SetCapabilityService(personalassistant.NewCapabilityService(
+		b.personalAssistantService, b.workspaceStore, personalAssistantEmailCapability{readiness: b.emailReadiness},
+	))
+	b.personalAssistantHandler.SetTodayService(personalassistant.NewTodayService(
+		b.personalAssistantService, briefService, b.workspaceStore, b.followUpService,
+	))
+	b.dailyBriefScheduler = dailybrief.NewScheduler(briefService, &personalHQWorkspaceLister{
+		service: b.personalHQService, relationship: b.personalAssistantStore, eligibility: b.onboardingMgr,
+	}, dailyBriefSchedulerPollInterval)
 }

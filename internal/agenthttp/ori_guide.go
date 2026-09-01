@@ -141,8 +141,8 @@ func (h *GuideHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	question := strings.TrimSpace(req.Question)
-	if len(question) > maxGuideQuestion {
-		question = question[:maxGuideQuestion]
+	if runes := []rune(question); len(runes) > maxGuideQuestion {
+		question = string(runes[:maxGuideQuestion])
 	}
 	route := sanitizeGuideRoute(req.Route)
 

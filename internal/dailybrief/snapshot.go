@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/followup"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -18,6 +19,9 @@ const (
 	maxTasksPerWorkspace         = 20
 	maxOpportunitiesPerWorkspace = 10
 	maxSessionsPerWorkspace      = 5
+	// maxFollowUpsPerBrief bounds Personal HQ commitments globally rather
+	// than once per workspace; follow-ups belong only to the designated HQ.
+	maxFollowUpsPerBrief = 10
 )
 
 // SourceRef is a stable reference to the entity a brief item came from:
@@ -98,6 +102,18 @@ type WorkspaceSnapshot struct {
 // upstream by the mailbox runtime; the brief treats them as untrusted display
 // text (task 4.6). Email is HQ-scoped, so these live at the Snapshot top level
 // rather than per-workspace.
+// FollowUpSnapshot is the bounded Personal HQ commitment projection. Detail
+// and source content are intentionally excluded.
+type FollowUpSnapshot struct {
+	Ref       SourceRef
+	Category  string
+	Direction string
+	Title     string
+	Status    string
+	DueAt     *time.Time
+	Stale     bool
+}
+
 type EmailThreadSnapshot struct {
 	Ref           SourceRef
 	Subject       string
@@ -115,6 +131,9 @@ type Snapshot struct {
 	// Personal HQ (empty when no HQ, no connected account, or a healthy-empty
 	// inbox — distinct from an unreadable source, which appends a Gap).
 	EmailThreads []EmailThreadSnapshot
+	// FollowUps contains only active/reopened records owned by the current
+	// user and designated HQ. Nil/empty is healthy when not configured.
+	FollowUps []FollowUpSnapshot
 	// Gaps names data sources that could not be read (an inaccessible
 	// workspace, a failed opportunity/session query, a failed email read, ...)
 	// so a missing source is never silently presented as "no activity"
@@ -142,6 +161,9 @@ func (s Snapshot) AllRefs() map[string]SourceRef {
 	}
 	for _, e := range s.EmailThreads {
 		out[e.Ref.Key()] = e.Ref
+	}
+	for _, followUp := range s.FollowUps {
+		out[followUp.Ref.Key()] = followUp.Ref
 	}
 	return out
 }
@@ -182,6 +204,11 @@ type MailboxSource interface {
 	BriefEmailThreads(ctx context.Context, userID string) ([]EmailThreadSnapshot, error)
 }
 
+// FollowUpSource is the narrow canonical follow-up read used by snapshots.
+type FollowUpSource interface {
+	List(ctx context.Context, filter followup.Filter) ([]*followup.FollowUp, error)
+}
+
 // ErrEmailNotConfigured signals that email is simply not set up for this user's
 // HQ (no designation or no connected account), so the brief shows no email
 // section and appends NO gap — distinct from an email source that failed to read.
@@ -197,6 +224,9 @@ type SnapshotSources struct {
 	// Mailbox is optional; nil means the brief has no email integration wired
 	// (no email section, no gap).
 	Mailbox MailboxSource
+	// FollowUps is optional. Nil or an empty Config.WorkspaceID means not
+	// configured and is distinct from a configured source read failure.
+	FollowUps FollowUpSource
 }
 
 func isGroupWorkspace(ws *workspace.Workspace) bool {
@@ -292,6 +322,45 @@ func BuildSnapshot(ctx context.Context, sources SnapshotSources, cfg Config, use
 	// mailbox is NOT a gap; only a selected source that fails to read is
 	// (task 4.3). Email failure degrades only this source — it never blocks the
 	// rest of the brief.
+	if sources.FollowUps != nil && strings.TrimSpace(cfg.WorkspaceID) != "" {
+		items, err := sources.FollowUps.List(ctx, followup.Filter{
+			UserID: userID, WorkspaceID: cfg.WorkspaceID,
+			Statuses: []followup.Status{followup.StatusActive, followup.StatusReopened},
+		})
+		if err != nil {
+			snap.Gaps = append(snap.Gaps, "Personal HQ follow-ups could not be read")
+		} else {
+			for _, item := range items {
+				if item == nil || item.UserID != userID || item.WorkspaceID != cfg.WorkspaceID ||
+					(item.Status != followup.StatusActive && item.Status != followup.StatusReopened) {
+					continue
+				}
+				dueAt := item.DueAt
+				snap.FollowUps = append(snap.FollowUps, FollowUpSnapshot{
+					Ref:      SourceRef{WorkspaceID: cfg.WorkspaceID, EntityType: "follow_up", EntityID: item.ID, Timestamp: item.UpdatedAt},
+					Category: string(item.Category), Direction: string(item.Direction), Title: followup.Truncate(item.Title, followup.MaxTitleLen),
+					Status: string(item.Status), DueAt: dueAt, Stale: item.IsStale(now),
+				})
+			}
+			sort.SliceStable(snap.FollowUps, func(i, j int) bool {
+				left, right := snap.FollowUps[i], snap.FollowUps[j]
+				if left.Stale != right.Stale {
+					return left.Stale
+				}
+				if left.DueAt != nil && right.DueAt != nil && !left.DueAt.Equal(*right.DueAt) {
+					return left.DueAt.Before(*right.DueAt)
+				}
+				if (left.DueAt != nil) != (right.DueAt != nil) {
+					return left.DueAt != nil
+				}
+				return left.Ref.Timestamp.Before(right.Ref.Timestamp)
+			})
+			if len(snap.FollowUps) > maxFollowUpsPerBrief {
+				snap.FollowUps = snap.FollowUps[:maxFollowUpsPerBrief]
+			}
+		}
+	}
+
 	if sources.Mailbox != nil {
 		threads, err := sources.Mailbox.BriefEmailThreads(ctx, userID)
 		switch {

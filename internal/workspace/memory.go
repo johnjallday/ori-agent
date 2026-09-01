@@ -391,6 +391,39 @@ func (s *MemoryStore) Append(workspaceID string, entry MemoryEntry) error {
 	return s.write(workspaceID, doc)
 }
 
+// AppendUnique adds an entry only when the same normalized type, provenance,
+// and text are not already present. The check and append share memoryMu, making
+// confirmation retries idempotent even across MemoryStore instances.
+func (s *MemoryStore) AppendUnique(workspaceID string, entry MemoryEntry) (bool, error) {
+	text, err := ValidateMemoryText(entry.Text)
+	if err != nil {
+		return false, err
+	}
+	entry.Text = text
+	entry.Type = NormalizeMemoryEntryType(string(entry.Type))
+	entry.Provenance = strings.TrimSpace(entry.Provenance)
+
+	memoryMu.Lock()
+	defer memoryMu.Unlock()
+	doc, err := s.Read(workspaceID)
+	if err != nil {
+		return false, err
+	}
+	for _, existing := range doc.Entries() {
+		if existing.Type == entry.Type && strings.EqualFold(existing.Provenance, entry.Provenance) && existing.Text == entry.Text {
+			return false, nil
+		}
+	}
+	if len(doc.lines) == 0 {
+		doc.lines = append(doc.lines, memoryLine{raw: "# Workspace Memory"}, memoryLine{raw: ""})
+	}
+	doc.lines = append(doc.lines, memoryLine{raw: entry.Render(), entry: &entry})
+	if err := s.write(workspaceID, doc); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // Forget removes exactly one entry. An exact text match wins; otherwise a
 // case-insensitive substring match must identify a single entry, or the call
 // fails with ErrMemoryAmbiguousMatch listing the candidates.
