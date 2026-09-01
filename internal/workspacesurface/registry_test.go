@@ -213,3 +213,54 @@ func TestRegistryReturnsDefensiveCopies(t *testing.T) {
 		t.Fatalf("trusted binding was mutated: %#v", freshBinding.Operations)
 	}
 }
+
+func TestValidateOwnerAcceptsUserKind(t *testing.T) {
+	owner := Owner{Kind: OwnerUser, ID: "workspace-dashboard", Version: "1", Generation: 1, ProtocolMin: 1, ProtocolMax: 1}
+	if err := validateOwner(owner); err != nil {
+		t.Fatalf("validateOwner(user) error = %v", err)
+	}
+	if key := owner.key(); key != "user:workspace-dashboard" {
+		t.Fatalf("user owner key = %q", key)
+	}
+	if err := validateOwner(Owner{Kind: "anything", ID: "x", Version: "1", Generation: 1, ProtocolMin: 1}); err == nil {
+		t.Fatal("validateOwner() accepted an unknown owner kind")
+	}
+}
+
+// The process-global registry has no workspace in its owner key, so admitting a
+// user-authored surface there would expose one workspace's dashboard to every
+// other workspace. The refusal must not depend on the rest of the registration
+// being malformed, so this one is otherwise entirely valid.
+func TestRegisterTrustedRefusesUserOwnedSurfaces(t *testing.T) {
+	registry := NewRegistry()
+	registration := Registration{
+		Owner: Owner{
+			Kind: OwnerUser, ID: "workspace-dashboard", Version: "1", Generation: 1,
+			ProtocolMin: 1, ProtocolMax: 1,
+		},
+		Capabilities: []Capability{{
+			ID: "dashboard", Version: 1,
+			Display: Display{Name: "Dashboard"},
+			Surfaces: []Surface{{
+				ID: "main", Label: "Dashboard", Icon: Icon{Kind: "host", Value: "puzzle"},
+				Placement: "map_modal", Modal: Modal{Width: 720, Height: 560},
+				Polling: Polling{MapSeconds: 5, OpenSeconds: 1},
+			}},
+		}},
+		Bindings: []Binding{{
+			CapabilityID: "dashboard", SurfaceID: "main", AssetRoot: t.TempDir(),
+			AssetVersion: "fixture-v1", EntryAsset: "index.html",
+			Operations: map[string]Operation{}, Runtime: &testRuntime{},
+		}},
+	}
+
+	if err := registry.RegisterTrusted(registration); err == nil || !strings.Contains(err.Error(), "cannot be registered in the trusted registry") {
+		t.Fatalf("RegisterTrusted(user) error = %v", err)
+	}
+	if len(registry.Surfaces()) != 0 {
+		t.Fatalf("refused user registration published surfaces: %#v", registry.Surfaces())
+	}
+	if _, ok := registry.Surface(SurfaceKey(registration.Owner, "dashboard", "main")); ok {
+		t.Fatal("refused user registration is resolvable from the global registry")
+	}
+}

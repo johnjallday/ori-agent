@@ -6,7 +6,8 @@ const HOST_ICON_CLASSES = Object.freeze({
   sliders: 'bi-sliders2-vertical',
   waveform: 'bi-soundwave',
   folder: 'bi-folder2-open',
-  compass: 'bi-compass'
+  compass: 'bi-compass',
+  grid: 'bi-grid-1x2'
 });
 
 const STATE_TONES = Object.freeze({

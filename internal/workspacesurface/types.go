@@ -37,11 +37,20 @@ type OwnerKind string
 const (
 	OwnerPlugin  OwnerKind = "plugin"
 	OwnerBuiltin OwnerKind = "builtin"
+	// OwnerUser marks a surface authored by the workspace's own user — an HTML
+	// file in the workspace folder. It is NOT trusted: its assets are attacker
+	// -controlled bytes served into a sandboxed, `connect-src 'none'` frame, and
+	// its owner identity is scoped to one workspace rather than the process.
+	// RegisterTrusted refuses this kind; user surfaces are resolved per request
+	// from the workspace folder instead.
+	OwnerUser OwnerKind = "user"
 )
 
-// Owner identifies the globally trusted contribution that owns a capability.
-// Generation changes whenever its executable contribution changes or its
-// lifecycle invalidates existing surface sessions.
+// Owner identifies the contribution that owns a capability. Plugin and builtin
+// owners are globally trusted and live in the process-wide Registry; user owners
+// are not trusted and are scoped to a single workspace. Generation changes
+// whenever its executable contribution changes or its lifecycle invalidates
+// existing surface sessions.
 type Owner struct {
 	Kind        OwnerKind `json:"kind"`
 	ID          string    `json:"id"`
@@ -312,7 +321,7 @@ func validateRegistration(reg Registration) error {
 }
 
 func validateOwner(owner Owner) error {
-	if owner.Kind != OwnerPlugin && owner.Kind != OwnerBuiltin {
+	if owner.Kind != OwnerPlugin && owner.Kind != OwnerBuiltin && owner.Kind != OwnerUser {
 		return fmt.Errorf("workspace surface owner kind %q is invalid", owner.Kind)
 	}
 	if err := validateID("owner", owner.ID); err != nil {

@@ -10,6 +10,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacedashboard"
 	"github.com/johnjallday/ori-agent/internal/workspacesurface"
 	"github.com/johnjallday/ori-agent/internal/workspacesurfacehttp"
 )
@@ -128,6 +129,15 @@ func (b *ServerBuilder) wireWorkspaceSurfaces() {
 	b.workspaceSurfaceHandler.SetAgentRuntimeService(b.runtimeCapabilityService)
 	state := workspacesurface.NewStateStore(filepath.Join(config.DefaultDataDir(), "plugins", "state"))
 	b.workspaceSurfaceHandler.SetStateStore(state)
+
+	// User-authored dashboards resolve from each workspace's own folder. They
+	// never enter the registry above, so a workspace without one is unaffected.
+	if b.workspaceFileStore != nil {
+		b.workspaceSurfaceHandler.SetDashboardSource(workspacedashboard.NewSource(
+			workspace.NewDashboardStore(b.workspaceFileStore),
+			workspacedashboard.NewRuntime(),
+		))
+	}
 
 	// Plugin install/update/disable/uninstall and request execution share one
 	// registry and process manager. Restore trusted inert projections on startup.
