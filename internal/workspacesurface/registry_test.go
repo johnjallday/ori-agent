@@ -214,6 +214,48 @@ func TestRegistryReturnsDefensiveCopies(t *testing.T) {
 	}
 }
 
+// workspace_view renders a surface as a permanent full-panel view mode. v1
+// reserves it for user-authored dashboards; a plugin must not be able to claim
+// one by declaring the placement.
+func TestWorkspaceViewPlacementIsReservedForUserSurfaces(t *testing.T) {
+	inlineSurface := Surface{
+		ID: "main", Label: "Dashboard", Icon: Icon{Kind: "host", Value: "grid"},
+		Placement: PlacementWorkspaceView, Modal: Modal{Width: 1200, Height: 800},
+		Polling: Polling{MapSeconds: 60, OpenSeconds: 60},
+	}
+	registrationFor := func(kind OwnerKind) Registration {
+		return Registration{
+			Owner: Owner{Kind: kind, ID: "claimant", Version: "1", Generation: 1, ProtocolMin: 1, ProtocolMax: 1},
+			Capabilities: []Capability{{
+				ID: "dashboard", Version: 1, Display: Display{Name: "Dashboard"},
+				Surfaces: []Surface{inlineSurface},
+			}},
+			Bindings: []Binding{{
+				CapabilityID: "dashboard", SurfaceID: "main", AssetRoot: "/tmp",
+				AssetVersion: "v1", EntryAsset: "index.html",
+				Operations: map[string]Operation{}, Runtime: &testRuntime{},
+			}},
+		}
+	}
+
+	for _, kind := range []OwnerKind{OwnerPlugin, OwnerBuiltin} {
+		err := ValidateRegistration(registrationFor(kind))
+		if err == nil || !strings.Contains(err.Error(), "reserved for user-authored surfaces") {
+			t.Fatalf("%s owner claimed the workspace_view placement: %v", kind, err)
+		}
+	}
+	if err := ValidateRegistration(registrationFor(OwnerUser)); err != nil {
+		t.Fatalf("user owner was refused the workspace_view placement: %v", err)
+	}
+
+	// The placement restriction must not weaken the general placement check.
+	unknown := registrationFor(OwnerUser)
+	unknown.Capabilities[0].Surfaces[0].Placement = "somewhere_else"
+	if err := ValidateRegistration(unknown); err == nil || !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("unknown placement error = %v", err)
+	}
+}
+
 func TestValidateOwnerAcceptsUserKind(t *testing.T) {
 	owner := Owner{Kind: OwnerUser, ID: "workspace-dashboard", Version: "1", Generation: 1, ProtocolMin: 1, ProtocolMax: 1}
 	if err := validateOwner(owner); err != nil {

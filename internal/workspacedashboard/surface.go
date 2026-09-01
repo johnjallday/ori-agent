@@ -45,9 +45,9 @@ const (
 	// IconToken must be one of the host icon tokens the surface host maps.
 	IconToken = "grid"
 
-	// Placement is the inline workspace-view placement. Until the inline
-	// placement exists, this is a modal placement so the surface validates.
-	Placement = "map_modal"
+	// Placement renders the dashboard inline as its own workspace view mode,
+	// beside Details, Map, and Tickets, rather than as a modal.
+	Placement = workspacesurface.PlacementWorkspaceView
 )
 
 // ErrDashboardUnavailable reports a dashboard that exists but cannot currently

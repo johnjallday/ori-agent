@@ -10,6 +10,15 @@ const HOST_ICON_CLASSES = Object.freeze({
   grid: 'bi-grid-1x2'
 });
 
+// Bridge request types an inline-mounted surface may not use. They act on the
+// modal surface the user is looking at, which an inline surface is not.
+const INLINE_UNAVAILABLE_REQUESTS = new Set([
+  'ori.surface.host.ask_ori',
+  'ori.surface.host.create_task',
+  'ori.surface.host.open_setup',
+  'ori.surface.host.close'
+]);
+
 const STATE_TONES = Object.freeze({
   checking: 'loading',
   ready: 'clear',
@@ -48,7 +57,17 @@ export class WorkspaceSurfaceHost {
       options.schedule || ((callback, delay) => this.window?.setTimeout?.(callback, delay));
     this.cancelSchedule = options.cancelSchedule || (timer => this.window?.clearTimeout?.(timer));
     this.surfaces = [];
+    // Whether the catalog has completed at least one load. An empty `surfaces`
+    // is otherwise ambiguous — "this workspace has none" and "we have not asked
+    // yet" look identical, and callers gating UI on it need to tell them apart.
+    this.catalogLoaded = false;
     this.active = null;
+    // A surface mounted inline as a workspace view mode. Independent of
+    // this.active so a modal can open over a dashboard without tearing it down.
+    this.inline = null;
+    // In-flight mount, so concurrent mount requests serialize instead of each
+    // appending their own frame.
+    this.inlineMounting = null;
     this.loading = null;
     this.mapVisible = false;
     this.documentVisible = this.document?.visibilityState !== 'hidden';
@@ -85,6 +104,10 @@ export class WorkspaceSurfaceHost {
       })
       .finally(() => {
         this.loading = null;
+        // Set on failure too: a failed catalog load is a definitive "we asked
+        // and there is nothing to show", not a permanent unknown that would
+        // leave optimistic UI hanging.
+        this.catalogLoaded = true;
       });
     return this.loading;
   }
@@ -233,6 +256,7 @@ export class WorkspaceSurfaceHost {
   setDocumentVisible(visible) {
     this.documentVisible = Boolean(visible);
     this.active?.bridge?.visibility(this.documentVisible);
+    this.inline?.bridge?.visibility(this.documentVisible);
     this._schedulePolling();
   }
 
@@ -353,23 +377,154 @@ export class WorkspaceSurfaceHost {
     return true;
   }
 
-  async _handleFrameRequest(request) {
-    const active = this.active;
+  /**
+   * Mount a surface inline, into a container the caller owns, instead of as a
+   * modal. Used by workspace_view surfaces — currently user dashboards.
+   *
+   * The frame is built with exactly the same isolation as the modal path:
+   * `sandbox="allow-scripts"` (no allow-same-origin, so the document has an
+   * opaque origin and cannot reach parent DOM or cookies), `credentialless`,
+   * and `referrerpolicy="no-referrer"`. Any divergence here would quietly make
+   * the inline path weaker than the modal one.
+   *
+   * Mounting is idempotent: re-mounting the same surface into the same still-
+   * populated container is a no-op. The caller can therefore call this on every
+   * render without reloading the frame or dropping its bridge.
+   */
+  async mountInline(surfaceKey, container) {
+    if (!container || !this.document || !this.fetch) return false;
+    // Mounts are serialized. render() can fire again while the first mount is
+    // still awaiting its session response, and two concurrent mounts would each
+    // see an empty slot and append their own frame — leaving two live
+    // dashboards stacked in the container, only one of them tracked.
+    const previous = this.inlineMounting;
+    const attempt = (async () => {
+      if (previous) await previous.catch(() => {});
+      return this._mountInlineOnce(surfaceKey, container);
+    })();
+    this.inlineMounting = attempt;
+    try {
+      return await attempt;
+    } finally {
+      if (this.inlineMounting === attempt) this.inlineMounting = null;
+    }
+  }
+
+  async _mountInlineOnce(surfaceKey, container) {
+    const surface = this.surfaces.find(item => item?.key === surfaceKey);
+    if (!surface || surface.available === false) return false;
+
+    const mounted = this.inline;
+    if (
+      mounted &&
+      mounted.surface?.key === surfaceKey &&
+      mounted.container === container &&
+      mounted.frame?.parentNode === container
+    ) {
+      return true;
+    }
+    await this.unmountInline();
+
+    const opened = await this._request(
+      '/api/workspaces/' +
+        encodeURIComponent(this.workspaceId) +
+        '/surfaces/' +
+        encodeURIComponent(surface.key) +
+        '/sessions',
+      { method: 'POST' }
+    );
+    if (!opened?.session || !opened?.frame_url) return false;
+
+    const frame = createElement(this.document, 'iframe', 'workspace-surface-frame-inline');
+    frame.title = text(surface.label);
+    frame.setAttribute('sandbox', 'allow-scripts');
+    frame.setAttribute('credentialless', '');
+    frame.setAttribute('referrerpolicy', 'no-referrer');
+    frame.src = opened.frame_url;
+    // Belt and braces: never leave an untracked frame behind in the container.
+    for (const child of Array.from(container.children || [])) {
+      if (child?.tagName === 'IFRAME') child.remove();
+    }
+    container.appendChild(frame);
+
+    const features = surface.features || {};
+    const record = { surface, session: opened.session, frame, container, bridge: null };
+    record.bridge = new this.Bridge({
+      frameWindow: frame.contentWindow,
+      eventTarget: this.window,
+      surface: {
+        key: text(surface.key),
+        plugin_id: text(surface.plugin?.id),
+        capability_id: text(surface.capability_id),
+        surface_id: text(surface.surface_id),
+        label: text(surface.label)
+      },
+      features: {
+        operation: true,
+        confirmation: Boolean(features.confirmation),
+        state: Boolean(features.state),
+        ask_ori: Boolean(features.ask_ori),
+        create_task: Boolean(features.create_task),
+        open_setup: Boolean(features.open_setup),
+        close: Boolean(features.close)
+      },
+      // Requests are bound to this record, not to this.active, so an inline
+      // surface and a modal surface cannot be confused for one another.
+      onRequest: request => this._handleFrameRequest(request, record)
+    });
+
+    this.inline = record;
+    frame.addEventListener('load', () => record.bridge.start(), { once: true });
+    this._schedulePolling();
+    return true;
+  }
+
+  async unmountInline() {
+    const mounted = this.inline;
+    if (!mounted) return false;
+    this.inline = null;
+    mounted.bridge?.destroy();
+    mounted.frame?.remove();
+    this._schedulePolling();
+    if (mounted.session && this.fetch) {
+      void this.fetch('/api/workspace-surfaces/sessions', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: mounted.session })
+      }).catch(() => {});
+    }
+    return true;
+  }
+
+  /** The surface currently mounted inline, if any. */
+  inlineSurfaceKey() {
+    return text(this.inline?.surface?.key);
+  }
+
+  async _handleFrameRequest(request, mounted = null) {
+    const active = mounted || this.active;
     if (!active)
       return this._bridgeError(
         'session_invalidated',
         'This plugin surface is no longer available.'
       );
     const payload = request.payload || {};
+    // Host intents (Ask Ori, create task, setup, close) are modal-surface
+    // affordances and address this.active. An inline surface must not be able
+    // to reach them by name, or it would act on whichever modal happens to be
+    // open. v1 inline surfaces declare none of these features anyway.
+    if (mounted && INLINE_UNAVAILABLE_REQUESTS.has(request.type)) {
+      return this._bridgeError('host_intent_unavailable', 'That host action is unavailable.');
+    }
     switch (request.type) {
       case 'ori.surface.operation.invoke':
-        return this._invokeOperation(text(payload.operation_id), payload.input || {});
+        return this._invokeOperation(text(payload.operation_id), payload.input || {}, active);
       case 'ori.surface.state.get':
-        return this._state('get', payload);
+        return this._state('get', payload, active);
       case 'ori.surface.state.set':
-        return this._state('set', payload);
+        return this._state('set', payload, active);
       case 'ori.surface.state.delete':
-        return this._state('delete', payload);
+        return this._state('delete', payload, active);
       case 'ori.surface.host.ask_ori':
         return this._askOri(text(payload.context));
       case 'ori.surface.host.create_task':
@@ -387,8 +542,7 @@ export class WorkspaceSurfaceHost {
     }
   }
 
-  async _invokeOperation(operationId, input) {
-    const active = this.active;
+  async _invokeOperation(operationId, input, active = this.active) {
     const invoke = confirmationToken =>
       this._request('/api/workspace-surfaces/operations', {
         method: 'POST',
@@ -443,13 +597,13 @@ export class WorkspaceSurfaceHost {
     }
   }
 
-  async _state(action, payload) {
+  async _state(action, payload, active = this.active) {
     try {
       const result = await this._request('/api/workspace-surfaces/state', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session: this.active.session,
+          session: active.session,
           action,
           key: text(payload.key),
           ...(action === 'set'
@@ -605,6 +759,7 @@ export class WorkspaceSurfaceHost {
   }
 
   _reconcileActiveSurface() {
+    this._reconcileInlineSurface();
     if (!this.active) return;
     const current = this.surfaces.find(surface => surface?.key === this.active.surface?.key);
     if (
@@ -619,12 +774,26 @@ export class WorkspaceSurfaceHost {
     this.active.surface = current;
   }
 
+  // A dashboard deleted from the workspace folder while it is open disappears
+  // from the catalog. Tear the frame down rather than leaving a live bridge
+  // pointed at a surface the server no longer resolves.
+  _reconcileInlineSurface() {
+    if (!this.inline) return;
+    const current = this.surfaces.find(surface => surface?.key === this.inline.surface?.key);
+    if (!current || current.available === false) {
+      this.inline.bridge?.invalidate?.('session_invalidated');
+      void this.unmountInline();
+      return;
+    }
+    this.inline.surface = current;
+  }
+
   _schedulePolling() {
     if (this.pollTimer) {
       this.cancelSchedule?.(this.pollTimer);
       this.pollTimer = null;
     }
-    if (!this.documentVisible || (!this.mapVisible && !this.active)) return;
+    if (!this.documentVisible || (!this.mapVisible && !this.active && !this.inline)) return;
     const seconds = this.active
       ? Math.max(1, Math.min(60, Number(this.active.surface?.polling?.open_seconds || 1)))
       : Math.max(
