@@ -110,10 +110,15 @@ func TestSourceReportsNoDashboardWithoutError(t *testing.T) {
 	}
 }
 
-// A dashboard that exists but cannot be served stays visible and unavailable.
-// Hiding it would leave the user with no signal that Ori saw their file at all.
+// FR26/FR27: a dashboard whose file is present but unusable stays visible and
+// unavailable, and its description names the file. Hiding it would leave the
+// user with no signal that Ori saw their file at all — and no way to find out
+// what is wrong with it, since the frame gives them nothing.
 func TestSourceSurfacesABrokenDashboardAsUnavailable(t *testing.T) {
-	source := NewSource(failingFinder{}, NewRuntime(nil, nil, nil))
+	folder := t.TempDir()
+	assetRoot := writeDashboard(t, folder, "")
+	source := newTestSource(t, map[string]string{"ws1": folder})
+
 	surface, binding, ok, err := source.Resolve("ws1")
 	if !ok {
 		t.Fatal("a broken dashboard was hidden instead of reported")
@@ -127,9 +132,38 @@ func TestSourceSurfacesABrokenDashboardAsUnavailable(t *testing.T) {
 	if surface.UnavailableCode == "" {
 		t.Fatal("unavailable dashboard carries no code")
 	}
+	entryPath := filepath.Join(assetRoot, workspace.CustomDashboardEntryAsset)
+	if !strings.Contains(surface.Surface.Description, entryPath) {
+		t.Fatalf("description %q does not name the entry file %q", surface.Surface.Description, entryPath)
+	}
+	if !strings.Contains(strings.ToLower(surface.Surface.Description), "empty") {
+		t.Fatalf("description %q does not say why", surface.Surface.Description)
+	}
+	// The description is shown to the user, so it must satisfy the same text
+	// validation any surface description does.
+	if err := workspacesurface.ValidateRegistration(workspacesurface.Registration{
+		Owner:           surface.Owner,
+		Capabilities:    []workspacesurface.Capability{surface.Capability},
+		UnavailableCode: surface.UnavailableCode,
+	}); err != nil {
+		t.Fatalf("the unavailable descriptor does not validate: %v", err)
+	}
 	// No binding: a failed resolution must not be openable.
 	if binding.Runtime != nil || binding.AssetRoot != "" {
 		t.Fatalf("broken dashboard returned a usable binding: %+v", binding)
+	}
+}
+
+// An unresolvable workspace folder is different: there is no dashboard identity
+// to show, and nothing useful to say about a file that was never found.
+func TestSourceHidesTheSurfaceWhenTheFolderIsUnresolvable(t *testing.T) {
+	source := NewSource(failingFinder{}, NewRuntime(nil, nil, nil))
+	surface, _, ok, err := source.Resolve("ws1")
+	if ok || surface.Key != "" {
+		t.Fatalf("Resolve() = %v, %+v; want nothing shown", ok, surface)
+	}
+	if !errors.Is(err, ErrDashboardUnavailable) {
+		t.Fatalf("error = %v", err)
 	}
 }
 

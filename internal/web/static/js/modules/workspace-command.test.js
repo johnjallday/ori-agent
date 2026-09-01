@@ -2444,9 +2444,12 @@ test('the Dashboard tab appears only when the workspace has a dashboard', () => 
     assert.match(switcher, />Dashboard</);
   });
 
-  // A dashboard the server marked unavailable is not an offer to switch to it.
+  // FR26: a dashboard the server refused still gets a tab. The user put a file
+  // in the folder; hiding the tab would leave them no way to learn what is
+  // wrong with it.
   withSurfaceHost([{ key: DASHBOARD_SURFACE_KEY, available: false }], () => {
-    assert.equal(commandView.hasCustomDashboard(), false);
+    assert.equal(commandView.hasCustomDashboard(), true);
+    assert.match(commandView.commandViewSwitchHTML(), /data-cmd-view-mode="dashboard"/);
   });
 });
 
@@ -2520,6 +2523,92 @@ test('the dashboard mode renders no body inside the rebuilt command container', 
     'the dashboard mode must render an empty body like Tickets'
   );
   assert.equal(commandView.viewMode, 'dashboard');
+});
+
+// FR26/FR27: a refused dashboard shows the host's explanation — which names the
+// file — instead of mounting a frame, and never leaves a stale frame behind.
+test('a refused dashboard renders the reason instead of a frame', () => {
+  const unmounted = [];
+  const mounted = [];
+  const statusNode = { textContent: '', hidden: true };
+  const containerNode = {
+    cleared: 0,
+    replaceChildren() {
+      this.cleared += 1;
+    }
+  };
+  const surfaceNode = {
+    hidden: true,
+    style: {},
+    querySelector(selector) {
+      if (selector === '[data-cmd-dashboard-status]') return statusNode;
+      if (selector === '[data-cmd-dashboard-host]') return containerNode;
+      return null;
+    }
+  };
+
+  const originalDocument = globalThis.document;
+  const originalWindow = globalThis.window;
+  globalThis.document = {
+    getElementById: id => (id === 'workspace-detail-dashboard-surface' ? surfaceNode : null)
+  };
+  globalThis.window = {
+    WorkspaceSurfaceHost: {
+      catalogLoaded: true,
+      surfaces: [
+        {
+          key: DASHBOARD_SURFACE_KEY,
+          available: false,
+          description: 'Ori could not open /ws/.ori/dashboard/index.html. It is empty.'
+        }
+      ],
+      mountInline: key => {
+        mounted.push(key);
+        return Promise.resolve(true);
+      },
+      unmountInline: () => {
+        unmounted.push(true);
+        return Promise.resolve(true);
+      }
+    }
+  };
+
+  try {
+    const commandView = dashboardCommandView({ viewMode: 'dashboard' });
+    commandView.syncDashboardView();
+
+    assert.equal(surfaceNode.hidden, false, 'the dashboard view was not shown');
+    assert.equal(statusNode.hidden, false, 'no explanation was rendered');
+    assert.match(statusNode.textContent, /\/ws\/\.ori\/dashboard\/index\.html/);
+    assert.match(statusNode.textContent, /empty/);
+    assert.deepEqual(mounted, [], 'a refused dashboard was mounted anyway');
+    assert.deepEqual(unmounted, [true], 'a previously mounted frame was left behind');
+    assert.equal(containerNode.cleared, 1);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.window = originalWindow;
+  }
+});
+
+// FR26: a failing dashboard must not take the other view modes down with it.
+test('the other view modes are untouched by a failing dashboard', () => {
+  const originalDocument = globalThis.document;
+  globalThis.document = { getElementById: () => null };
+  try {
+    withSurfaceHost([{ key: DASHBOARD_SURFACE_KEY, available: false }], () => {
+      const commandView = dashboardCommandView({ viewMode: 'details' });
+      // syncDashboardView runs on every render, including in Details.
+      commandView.syncDashboardView();
+      const switcher = commandView.commandViewSwitchHTML();
+      for (const mode of ['details', 'map', 'tickets']) {
+        assert.match(switcher, new RegExp(`data-cmd-view-mode="${mode}"`));
+      }
+      assert.equal(commandView.normalizeCommandViewMode('map'), 'map');
+      assert.equal(commandView.normalizeCommandViewMode('tickets'), 'tickets');
+    });
+  } finally {
+    globalThis.document = originalDocument;
+  }
 });
 
 // PRD open question 4: the dashboard view is linkable.

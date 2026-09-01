@@ -17,6 +17,7 @@ package workspacedashboard
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacesurface"
@@ -105,7 +106,13 @@ func (s *Source) Resolve(workspaceID string) (workspacesurface.RegisteredSurface
 	}
 	dashboard, ok, err := s.dashboards.Find(workspaceID)
 	if err != nil {
-		return unavailableSurface(), workspacesurface.Binding{}, true,
+		if !ok {
+			// The folder itself is unresolvable; there is no dashboard identity
+			// to show and nothing useful to say about a file we never found.
+			return workspacesurface.RegisteredSurface{}, workspacesurface.Binding{}, false,
+				fmt.Errorf("%w: %v", ErrDashboardUnavailable, err)
+		}
+		return unavailableSurface(explain(dashboard, err)), workspacesurface.Binding{}, true,
 			fmt.Errorf("%w: %v", ErrDashboardUnavailable, err)
 	}
 	if !ok {
@@ -144,7 +151,7 @@ func (s *Source) Resolve(workspaceID string) (workspacesurface.RegisteredSurface
 		Bindings: []workspacesurface.Binding{binding},
 	}
 	if err := workspacesurface.ValidateRegistration(registration); err != nil {
-		return unavailableSurface(), workspacesurface.Binding{}, true,
+		return unavailableSurface(explain(dashboard, err)), workspacesurface.Binding{}, true,
 			fmt.Errorf("%w: %v", ErrDashboardUnavailable, err)
 	}
 
@@ -153,13 +160,53 @@ func (s *Source) Resolve(workspaceID string) (workspacesurface.RegisteredSurface
 	}, binding, true, nil
 }
 
+// maxReasonBytes bounds the failure text. Surface.Description is validated at
+// 500 bytes, and a path plus a reason has to fit inside that.
+const maxReasonBytes = 400
+
+// explain turns a resolution failure into text a user can act on. It names the
+// entry file, because that is the one thing they can go and look at — the frame
+// is opaque and gives them no other signal.
+func explain(dashboard workspace.CustomDashboard, err error) string {
+	path := dashboard.EntryPath()
+	reason := "Ori could not open this workspace dashboard."
+	if path != "" {
+		reason = "Ori could not open " + path + "."
+	}
+
+	// The error already names the path and carries an internal sentence stem
+	// ("workspace dashboard entry file is unusable: <path> is empty"). Strip
+	// both so the user reads one sentence about their file, not the plumbing.
+	detail := err.Error()
+	for _, noise := range []string{
+		workspace.ErrDashboardEntryUnusable.Error(),
+		ErrDashboardUnavailable.Error(),
+		path,
+	} {
+		if noise != "" {
+			detail = strings.ReplaceAll(detail, noise, "")
+		}
+	}
+	detail = strings.Trim(strings.Join(strings.Fields(detail), " "), " :.,")
+	if detail != "" {
+		reason += " It " + detail + "."
+	}
+	if len(reason) > maxReasonBytes {
+		reason = strings.TrimSpace(reason[:maxReasonBytes]) + "…"
+	}
+	return reason
+}
+
 // unavailableSurface is the dashboard's identity with no working binding behind
 // it. It carries the same key as a healthy dashboard so the host renders it in
-// the same place, marked unavailable.
-func unavailableSurface() workspacesurface.RegisteredSurface {
+// the same place, marked unavailable, with reason as its description.
+func unavailableSurface(reason string) workspacesurface.RegisteredSurface {
 	owner := Owner()
+	if strings.TrimSpace(reason) == "" {
+		reason = SurfaceDescription
+	}
 	surface := workspacesurface.Surface{
-		ID: SurfaceID, Label: SurfaceLabel, Description: SurfaceDescription,
+		ID: SurfaceID, Label: SurfaceLabel, Description: reason,
 		Icon:      workspacesurface.Icon{Kind: "host", Value: IconToken},
 		Placement: Placement,
 		Modal:     workspacesurface.Modal{Width: 1200, Height: 800},

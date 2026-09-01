@@ -51,6 +51,15 @@ const (
 // is not an error.
 var ErrDashboardFolderUnavailable = errors.New("workspace dashboard folder is unavailable")
 
+// ErrDashboardEntryUnusable reports a dashboard whose entry file is present but
+// cannot be served: empty, too large, or unreadable.
+//
+// This is deliberately distinct from absence. A workspace with no dashboard
+// shows nothing, but a user who put a file there and got it wrong must be told
+// which file and why — they are debugging their own HTML with no devtools
+// access into an opaque frame, so the host's message is their only signal.
+var ErrDashboardEntryUnusable = errors.New("workspace dashboard entry file is unusable")
+
 // CustomDashboard is a discovered user-authored dashboard: where its files live
 // and which one is the entry point.
 //
@@ -93,9 +102,17 @@ func NewDashboardStore(resolver FolderResolver) *DashboardStore {
 }
 
 // Find reports whether workspaceID has a custom dashboard and, if so, where it
-// is. A workspace with no dashboard returns ok=false and a nil error — absence
-// is the common case, not a failure. A non-nil error means the workspace folder
-// itself could not be resolved.
+// is. The three outcomes are distinct:
+//
+//   - ok=false, err=nil — no dashboard. The common case, not a failure.
+//   - ok=true, err=nil — a usable dashboard, with its asset version filled in.
+//   - ok=true, err!=nil — the entry file is there but unusable (empty, too
+//     large, unreadable). The dashboard is still returned so the caller can name
+//     the path in the message it shows the user; the error wraps
+//     ErrDashboardEntryUnusable.
+//
+// A folder that cannot be resolved at all returns ok=false with
+// ErrDashboardFolderUnavailable.
 //
 // Presence requires the dashboard directory to be a real directory and the entry
 // file to be a real regular file, neither of them a symlink. Those are exactly
@@ -125,17 +142,31 @@ func (s *DashboardStore) Find(workspaceID string) (CustomDashboard, bool, error)
 	if err != nil || !rootInfo.IsDir() || rootInfo.Mode()&os.ModeSymlink != 0 {
 		return CustomDashboard{}, false, nil
 	}
-	entryInfo, err := os.Lstat(filepath.Join(assetRoot, CustomDashboardEntryAsset))
+	entryPath := filepath.Join(assetRoot, CustomDashboardEntryAsset)
+	entryInfo, err := os.Lstat(entryPath)
 	if err != nil || !entryInfo.Mode().IsRegular() {
 		return CustomDashboard{}, false, nil
 	}
+	found := CustomDashboard{AssetRoot: assetRoot, EntryAsset: CustomDashboardEntryAsset}
+
+	// The file exists, so from here on every failure is reported against it
+	// rather than hidden. An empty file would render as a blank panel with no
+	// explanation, and an oversized one is refused by the asset server anyway —
+	// both are better caught here where the reason can be named.
+	switch {
+	case entryInfo.Size() == 0:
+		return found, true, fmt.Errorf("%w: %s is empty", ErrDashboardEntryUnusable, entryPath)
+	case entryInfo.Size() > MaxDashboardEntryHashBytes:
+		return found, true, fmt.Errorf("%w: %s is %d bytes, over the %d-byte limit",
+			ErrDashboardEntryUnusable, entryPath, entryInfo.Size(), MaxDashboardEntryHashBytes)
+	}
+
 	version, err := dashboardAssetVersion(assetRoot)
 	if err != nil {
-		return CustomDashboard{}, false, err
+		return found, true, fmt.Errorf("%w: %s: %v", ErrDashboardEntryUnusable, entryPath, err)
 	}
-	return CustomDashboard{
-		AssetRoot: assetRoot, EntryAsset: CustomDashboardEntryAsset, AssetVersion: version,
-	}, true, nil
+	found.AssetVersion = version
+	return found, true, nil
 }
 
 // dashboardAssetVersion fingerprints a dashboard directory.

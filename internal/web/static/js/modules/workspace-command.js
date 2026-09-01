@@ -255,21 +255,27 @@ export class WorkspaceCommandView {
     return Boolean(surfaceHost?.catalogLoaded);
   }
 
+  /** This workspace's dashboard catalog entry, if the catalog has one. */
+  customDashboardSurface() {
+    const surfaceHost = typeof window === 'undefined' ? null : window.WorkspaceSurfaceHost;
+    const surfaces = Array.isArray(surfaceHost?.surfaces) ? surfaceHost.surfaces : [];
+    return surfaces.find(surface => surface?.key === CUSTOM_DASHBOARD_SURFACE_KEY) || null;
+  }
+
   /**
    * Whether this workspace has a user-authored dashboard, according to the
    * surface catalog the host has already loaded. The file's presence is
    * re-read server-side on every catalog request, so this follows the disk.
    *
-   * Strict: false while the catalog is still loading. The view switcher uses
-   * this, and an optimistic answer would flash a Dashboard tab onto every
-   * workspace for the duration of the first catalog request.
+   * A dashboard the server marked unavailable still counts. The user put a file
+   * in the folder and got something wrong; hiding the tab would leave them with
+   * no way to find out what (FR26). The tab opens onto the reason instead.
+   *
+   * Strict about loading, though: false while the catalog is still in flight,
+   * so no Dashboard tab flashes onto a workspace that turns out not to have one.
    */
   hasCustomDashboard() {
-    const surfaceHost = typeof window === 'undefined' ? null : window.WorkspaceSurfaceHost;
-    const surfaces = Array.isArray(surfaceHost?.surfaces) ? surfaceHost.surfaces : [];
-    return surfaces.some(
-      surface => surface?.key === CUSTOM_DASHBOARD_SURFACE_KEY && surface.available !== false
-    );
+    return this.customDashboardSurface() !== null;
   }
 
   readCommandViewModePreference() {
@@ -1980,6 +1986,18 @@ export class WorkspaceCommandView {
       fail('The dashboard host is unavailable on this page.');
       return;
     }
+
+    // The server resolved the dashboard but refused it — an empty, oversized,
+    // or unreadable file. Its description names the file and the reason, which
+    // is the only debugging signal the user gets from an opaque frame.
+    const entry = this.customDashboardSurface();
+    if (entry && entry.available === false) {
+      void host.unmountInline();
+      if (container.replaceChildren) container.replaceChildren();
+      fail(entry.description || 'Ori could not open this workspace dashboard.');
+      return;
+    }
+
     if (status) {
       status.textContent = '';
       status.hidden = true;

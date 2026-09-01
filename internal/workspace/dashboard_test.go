@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -306,9 +307,60 @@ func TestDashboardAssetVersionRejectsOversizedTrees(t *testing.T) {
 		}
 	}
 	store := newTestDashboardStore(t, map[string]string{"ws1": folder})
-	if _, ok, err := store.Find("ws1"); ok || err == nil {
-		t.Fatalf("Find() = %v, %v; want an error for an oversized dashboard tree", ok, err)
+	// The dashboard is still reported as present so the host can name the file
+	// in its error; only the version resolution fails.
+	dashboard, ok, err := store.Find("ws1")
+	if !ok || !errors.Is(err, ErrDashboardEntryUnusable) {
+		t.Fatalf("Find() = %v, %v; want a present-but-unusable dashboard", ok, err)
 	}
+	if !strings.Contains(err.Error(), dashboard.EntryPath()) {
+		t.Fatalf("error %v does not name the entry file %q", err, dashboard.EntryPath())
+	}
+}
+
+// FR26/FR27: a file the user put there but got wrong must be reported against
+// that file, not silently hidden the way a missing dashboard is.
+func TestDashboardStoreReportsAnUnusableEntryFile(t *testing.T) {
+	t.Run("empty entry file", func(t *testing.T) {
+		folder := t.TempDir()
+		writeDashboard(t, folder, "")
+		store := newTestDashboardStore(t, map[string]string{"ws1": folder})
+
+		dashboard, ok, err := store.Find("ws1")
+		if !ok {
+			t.Fatal("an empty dashboard was hidden instead of reported")
+		}
+		if !errors.Is(err, ErrDashboardEntryUnusable) {
+			t.Fatalf("error = %v, want ErrDashboardEntryUnusable", err)
+		}
+		if !strings.Contains(err.Error(), dashboard.EntryPath()) {
+			t.Fatalf("error %v does not name the entry file", err)
+		}
+		if !strings.Contains(err.Error(), "empty") {
+			t.Fatalf("error %v does not say the file is empty", err)
+		}
+	})
+
+	t.Run("oversized entry file", func(t *testing.T) {
+		folder := t.TempDir()
+		assetRoot := writeDashboard(t, folder, "<p>placeholder</p>")
+		huge := make([]byte, MaxDashboardEntryHashBytes+1)
+		for i := range huge {
+			huge[i] = 'x'
+		}
+		if err := os.WriteFile(filepath.Join(assetRoot, CustomDashboardEntryAsset), huge, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		store := newTestDashboardStore(t, map[string]string{"ws1": folder})
+
+		_, ok, err := store.Find("ws1")
+		if !ok || !errors.Is(err, ErrDashboardEntryUnusable) {
+			t.Fatalf("Find() = %v, %v; want a present-but-oversized dashboard", ok, err)
+		}
+		if !strings.Contains(err.Error(), "limit") {
+			t.Fatalf("error %v does not explain the size limit", err)
+		}
+	})
 }
 
 // canonicalDashboardVersion mirrors workspacesurface.canonicalAssetVersion,
