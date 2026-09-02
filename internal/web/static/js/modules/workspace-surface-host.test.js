@@ -608,3 +608,205 @@ test('frame close intent receives a response before host teardown is scheduled',
   await Promise.resolve();
   assert.equal(host.active, null);
 });
+
+const DASHBOARD_KEY = 'user:ori.dashboard:dashboard:main';
+
+function dashboardSurface(overrides = {}) {
+  return {
+    key: DASHBOARD_KEY,
+    plugin: { id: 'ori.dashboard', version: '1', generation: '1' },
+    capability_id: 'dashboard',
+    surface_id: 'main',
+    label: 'Dashboard',
+    description: 'Your own dashboard for this workspace.',
+    icon: { kind: 'host', value: 'grid' },
+    placement: 'workspace_view',
+    modal: { width: 1200, height: 800 },
+    status: { state: 'ready', value: 'Ready', description: 'Ready.' },
+    available: true,
+    polling: { map_seconds: 60, open_seconds: 60 },
+    features: {
+      confirmation: false,
+      state: false,
+      ask_ori: false,
+      create_task: false,
+      open_setup: false,
+      close: false
+    },
+    ...overrides
+  };
+}
+
+async function mountedDashboard(overrides = {}) {
+  const context = makeHost();
+  await context.host.loadCatalog();
+  context.host.surfaces = [...context.host.surfaces, dashboardSurface(overrides)];
+  const container = new NodeFake('div');
+  const ok = await context.host.mountInline(DASHBOARD_KEY, container);
+  return { ...context, container, ok };
+}
+
+// The inline path must be exactly as sandboxed as the modal path. A divergence
+// here would silently make a user-authored dashboard less isolated than a
+// plugin surface.
+test('inline mount carries the same isolation attributes as the modal path', async () => {
+  const { host, container, ok } = await mountedDashboard();
+  assert.equal(ok, true);
+
+  const inlineFrame = find(container, 'iframe');
+  assert.ok(inlineFrame, 'no iframe was mounted into the container');
+  assert.equal(inlineFrame.getAttribute('sandbox'), 'allow-scripts');
+  assert.equal(inlineFrame.getAttribute('credentialless'), '');
+  assert.equal(inlineFrame.getAttribute('referrerpolicy'), 'no-referrer');
+
+  await host.open('plugin:workspace-surface-demo:demo-tools:main', new NodeFake('button'));
+  const modalFrame = find(host.active.modal, 'iframe');
+  for (const attribute of ['sandbox', 'credentialless', 'referrerpolicy']) {
+    assert.equal(
+      inlineFrame.getAttribute(attribute),
+      modalFrame.getAttribute(attribute),
+      `inline and modal frames disagree on ${attribute}`
+    );
+  }
+});
+
+// FR24/FR25: the command view re-renders constantly. Re-mounting must not
+// reload the frame or drop its bridge, or the dashboard would reset under the
+// user on every background refresh.
+test('re-mounting the same inline surface does not reload the frame', async () => {
+  const { host, container, calls } = await mountedDashboard();
+  const firstFrame = find(container, 'iframe');
+  const firstBridge = host.inline.bridge;
+  const sessionCalls = () =>
+    calls.filter(call => call.path.includes('/sessions') && call.options.method === 'POST').length;
+  const openedOnce = sessionCalls();
+
+  assert.equal(await host.mountInline(DASHBOARD_KEY, container), true);
+  assert.equal(sessionCalls(), openedOnce, 'a second session was opened for the same mount');
+  assert.equal(find(container, 'iframe'), firstFrame, 'the frame was replaced');
+  assert.equal(host.inline.bridge, firstBridge, 'the bridge was replaced');
+  assert.equal(firstBridge.destroyed, false);
+});
+
+// Regression: the command view calls syncDashboardView on every render, and a
+// second render can arrive while the first mount is still awaiting its session.
+// Both calls used to see an empty slot and append a frame, stacking two live
+// dashboards in the container with only one of them tracked.
+test('concurrent inline mounts produce exactly one frame', async () => {
+  const context = makeHost();
+  await context.host.loadCatalog();
+  context.host.surfaces = [...context.host.surfaces, dashboardSurface()];
+  const container = new NodeFake('div');
+
+  const results = await Promise.all([
+    context.host.mountInline(DASHBOARD_KEY, container),
+    context.host.mountInline(DASHBOARD_KEY, container),
+    context.host.mountInline(DASHBOARD_KEY, container)
+  ]);
+
+  assert.deepEqual(results, [true, true, true]);
+  const frames = container.children.filter(child => child.tagName === 'IFRAME');
+  assert.equal(frames.length, 1, `expected one frame, found ${frames.length}`);
+  assert.equal(context.host.inline.frame, frames[0]);
+  const sessionOpens = context.calls.filter(
+    call => call.path.includes('/sessions') && call.options.method === 'POST'
+  ).length;
+  assert.equal(sessionOpens, 1, 'more than one session was opened');
+});
+
+test('unmounting an inline surface tears down the frame, bridge, and session', async () => {
+  const { host, container, calls } = await mountedDashboard();
+  const bridge = host.inline.bridge;
+
+  assert.equal(await host.unmountInline(), true);
+  assert.equal(host.inline, null);
+  assert.equal(bridge.destroyed, true);
+  assert.equal(find(container, 'iframe'), null);
+  assert.equal(await host.unmountInline(), false);
+
+  const closed = calls.filter(
+    call => call.path === '/api/workspace-surfaces/sessions' && call.options.method === 'DELETE'
+  );
+  assert.equal(closed.length, 1);
+});
+
+// Operations must resolve against the inline record, not this.active. With no
+// modal open, an inline operation that read this.active would fail outright.
+test('inline operations use the inline session with no modal open', async () => {
+  const { host, calls } = await mountedDashboard();
+  assert.equal(host.active, null);
+
+  const result = await host.inline.bridge.options.onRequest({
+    type: 'ori.surface.operation.invoke',
+    payload: { operation_id: 'greeting.create', input: { name: 'Ori' } }
+  });
+  assert.equal(result.ok, true);
+
+  const invoked = calls.filter(call => call.path === '/api/workspace-surfaces/operations');
+  assert.equal(invoked.length, 1);
+  assert.equal(JSON.parse(invoked[0].options.body).session, host.inline.session);
+});
+
+// Host intents act on the modal the user is looking at. An inline surface must
+// not be able to reach them, even while a modal happens to be open.
+test('inline surfaces cannot reach modal host intents', async () => {
+  const { host } = await mountedDashboard();
+  await host.open('plugin:workspace-surface-demo:demo-tools:main', new NodeFake('button'));
+  const modalBefore = host.active;
+
+  for (const type of [
+    'ori.surface.host.ask_ori',
+    'ori.surface.host.create_task',
+    'ori.surface.host.open_setup',
+    'ori.surface.host.close'
+  ]) {
+    const result = await host.inline.bridge.options.onRequest({ type, payload: {} });
+    assert.equal(result.ok, false, `${type} was allowed from an inline surface`);
+    assert.equal(result.error.code, 'host_intent_unavailable');
+  }
+  assert.equal(host.active, modalBefore, 'an inline request disturbed the open modal');
+});
+
+// A dashboard deleted from the workspace folder leaves the catalog. The live
+// frame must not be left pointed at a surface the server no longer resolves.
+test('an inline surface that leaves the catalog is unmounted', async () => {
+  const { host, container } = await mountedDashboard();
+  const bridge = host.inline.bridge;
+
+  host.surfaces = host.surfaces.filter(surface => surface.key !== DASHBOARD_KEY);
+  host._reconcileActiveSurface();
+  await Promise.resolve();
+
+  assert.equal(host.inline, null);
+  assert.equal(bridge.destroyed, true);
+  assert.equal(find(container, 'iframe'), null);
+});
+
+test('an unavailable or unknown surface never mounts inline', async () => {
+  const { host } = makeHost();
+  await host.loadCatalog();
+  const container = new NodeFake('div');
+  assert.equal(await host.mountInline(DASHBOARD_KEY, container), false);
+
+  host.surfaces = [...host.surfaces, dashboardSurface({ available: false })];
+  assert.equal(await host.mountInline(DASHBOARD_KEY, container), false);
+  assert.equal(host.inline, null);
+  assert.equal(find(container, 'iframe'), null);
+});
+
+// A modal opening over a dashboard must not tear the dashboard down; the two
+// slots are independent.
+test('opening and closing a modal leaves an inline mount intact', async () => {
+  const { host, container } = await mountedDashboard();
+  const frame = find(container, 'iframe');
+  const bridge = host.inline.bridge;
+
+  await host.open('plugin:workspace-surface-demo:demo-tools:main', new NodeFake('button'));
+  assert.equal(host.inline?.bridge, bridge);
+  await host.close();
+  await Promise.resolve();
+
+  assert.equal(host.inline?.bridge, bridge, 'closing a modal tore down the inline mount');
+  assert.equal(bridge.destroyed, false);
+  assert.equal(find(container, 'iframe'), frame);
+});

@@ -164,7 +164,7 @@ One command covers the human issue workflow:
 ./scripts/devops.sh decisions          # label: needs-decision
 ./scripts/devops.sh backlog            # label: backlog
 ./scripts/devops.sh proposals          # label: feature-proposal
-./scripts/devops.sh status             # which group each task list is on
+./scripts/devops.sh status             # checked-out feature implementation overview
 ./scripts/devops.sh release            # what has merged to dev since the latest release
 ./scripts/devops.sh view <number>      # one Issue in full
 ./scripts/devops.sh new <title>                         # quick title-only capture
@@ -180,9 +180,10 @@ One command covers the human issue workflow:
 ```
 
 `ready` is the view worth living in: feature proposals plus backlog Issues that
-are neither already covered by a proposal (`bundled`) nor already chosen
-(`approved`). It exists so the same work never appears twice — once as a bundle
-and again as its members.
+are neither already covered by a proposal (`bundled`), already chosen
+(`approved`), nor represented by an existing local branch/worktree. It exists
+so the same work never appears twice — as a bundle and its members, or as both a
+pickable Issue and an ongoing implementation.
 
 In a terminal, the colorful picker uses `↑/↓` or `j/k` to select an Issue,
 `←/→` or `h/l` to change views, and the same `1`–`5` view order shown by the
@@ -199,8 +200,10 @@ Claude/Pi model/thinking selection before creating and planning one Ready Issue.
 It never adds `approved`. `o` approves an existing Issue, and `s` plans the
 selected Ready row. In Ready, Space marks/unmarks ordinary backlog rows and `b` plans at least two
 marks together; cursor and marks render separately and the header shows the
-count. Marks survive view changes. `r` refreshes and visibly prunes marks that
-vanished or became ineligible; `?` shows help and `q` quits. At the new-Issue body
+count. Marks survive view changes. The dashboard above the Issue list embeds
+the shared checked-out-feature implementation table; `w` opens its full report.
+`r` refreshes implementations, release status, and Issues and visibly prunes
+marks that vanished or became ineligible; `?` shows help and `q` quits. At the new-Issue body
 prompt, a blank line keeps capture title-only and `:edit` opens `$VISUAL` or
 `$EDITOR` for multiline Markdown.
 
@@ -233,30 +236,25 @@ with a clear message outside the Ready view or on an empty list; the
 opened-Issue bar gives the same clear refusal for a non-Ready Issue or a label
 read that fails, and never offers `[s] Plan` when it would refuse.
 
-**In-flight status.** A second column shows whether work has already started and
-how far it has got — `2/7 wt` means two of seven task-list groups are done and a
-worktree is checked out; `br` means only a branch exists. `./scripts/devops.sh
-status` prints the same thing for every task list at once:
+**Implementation status.** Issue rows retain a short local `wt`/`br` indicator
+so duplicate Plan/Start actions can fail closed without a remote read. Ready
+also excludes those rows. Exact generated snapshot headers in either dev or the
+active feature worktree attach every member of an Issue bundle to the same
+flight; numberless legacy branches still resolve by slug.
 
-```
-  0/8     worktree           workspace-ticket-management
-  3/3     branch    #339     339-workspace-map-camera-framing
-  2/5     worktree  #123,#456 123-456-camera-workflow
-  5/6     -                  build-my-hq-button-fix
-```
+The dashboard and `./scripts/devops.sh status` deliberately do not expand that
+small Bash model. They render the same normalized snapshot as `wt status
+--implementations`, restricted to checked-out feature worktrees and including
+`Merged (cleanup)` until `wt done` removes the checkout. The shared table reads
+the active worktree's task list as authoritative and joins hierarchical
+progress, Git divergence/dirty state, GitHub PR checks, live Herdr agents, and
+attention findings. The dashboard preserves the overview's semantic colors even
+though it captures the table before rendering; `NO_COLOR` still opts out. A
+failed collector produces an explicit incomplete or unavailable dashboard state
+rather than hiding the Issue list.
 
-This is **entirely local** — plain `git worktree list`, `git branch`, and the
-task files on disk. It is deliberately *not* a Herdr integration:
-`scripts/wt-herd.test.sh` asserts this script never reaches for the devflow
-bridge, which is the whole point of the REPL having replaced that helper. The
-Issue-number-first convention and generated snapshot header encode the link.
-For a bundle, every attached row shows the same progress and branch/worktree
-state while `status` prints one feature row with all member numbers. No network,
-second contract, or `wt` dependency is needed. Numberless legacy branches still
-resolve by slug.
-
-Task files are gitignored and live in one place, the dev worktree's `tasks/`, so
-progress is read from disk rather than from anything pushed. That is
+Task files remain gitignored, so the shared overview reads progress directly
+from the checked-out implementation copy rather than anything pushed. That is
 deliberately fresher: checkboxes get ticked while you work, but a pushed copy
 would only update when you commit. It also means the numbers are exactly as
 honest as the file — a shipped feature whose boxes were never ticked will read
@@ -264,7 +262,7 @@ honest as the file — a shipped feature whose boxes were never ticked will read
 
 **`release` — what has not shipped yet.** `./scripts/devops.sh release` prints
 the latest GitHub Release's tag and publish time, plus how many PRs have merged
-into `main` strictly after that instant:
+into `dev` strictly after that instant:
 
 ```
 Latest release: v0.0.106 (published 2026-08-15T10:00:00Z)
@@ -411,7 +409,8 @@ Herdr guard still runs before archival, Issue closure, or Git removal, and
 wt status                      # compact, active-work-only overview
 wt status --all                # same table, full history included
 wt status --feature <slug>     # one feature in detail, active or not
-wt status --json               # complete normalized snapshot (schema v2), every feature
+wt status --json               # complete normalized snapshot (schema v3), every feature
+wt status --implementations    # checked-out feature worktrees, including cleanup owed
 wt status --watch              # live board, active-only by default
 wt status --all --watch        # live board, full history
 wt status --no-color           # plain text; NO_COLOR is honored too
@@ -428,7 +427,9 @@ executing work; unselected ideas live in GitHub Issues and are listed by
 By default the table hides `Shipped`, `Merged (cleanup)`, and `Unknown` rows —
 settled or unplaced work is not what you're looking at right now. `--all`
 restores every row, which matters because `Merged (cleanup)` is the only
-standing reminder that a `wt done` is still owed. The filter is display-only:
+standing reminder that a `wt done` is still owed. `--implementations` instead
+shows every checked-out feature worktree and retains that cleanup phase because
+the local checkout still exists. The filter is display-only:
 `wt status --json` always emits every feature regardless of `--all`, and
 `wt status --feature <slug>` still finds an inactive feature's full detail.
 The compact PLAN cell also names the active parent Group (for example

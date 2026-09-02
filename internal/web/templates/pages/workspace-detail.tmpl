@@ -120,6 +120,25 @@
           list and detail from the canonical Ticket API and renders nothing on
           failure but an error state.
         -->
+        <!--
+          Custom Dashboard: a user-authored HTML file in the workspace folder
+          (.ori/dashboard/index.html), rendered inside a sandboxed frame.
+
+          Like Tickets, this is a VIEW MODE that lives OUTSIDE
+          #workspaceCommandView. That is load-bearing, not stylistic: the
+          command container is rebuilt with innerHTML on every render, and a
+          re-render inside it would destroy and reload the iframe, dropping the
+          live postMessage bridge and any state the dashboard holds. Every
+          background workspace refresh would reset the user's dashboard.
+
+          The frame itself is created by workspace-surface-host.js, which owns
+          the sandbox attributes and the bridge. Nothing here is user content:
+          the host mounts the frame into this container.
+        -->
+        <div id="workspace-detail-dashboard-surface" class="ws-cmd-dashboard-surface" role="region" aria-label="Workspace dashboard" hidden>
+          <div class="ws-cmd-dashboard-status" data-cmd-dashboard-status hidden></div>
+          <div class="ws-cmd-dashboard-frame-host" data-cmd-dashboard-host></div>
+        </div>
         <div id="workspace-detail-tickets-surface" class="hub-tickets-container" hidden>
           <div class="hub-tickets-header">
             <div class="hub-tickets-title-row">

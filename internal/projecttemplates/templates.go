@@ -302,7 +302,13 @@ type Template struct {
 	BuiltinVersion int `json:"builtin_version,omitempty"`
 	// HasSkeleton reports whether the template has instantiable files beyond
 	// template.json. A metadata-only template (false) creates no project folder.
+	// A template's `dashboard/` folder does not count: it is installed into the
+	// workspace's sidecar rather than scaffolded as project content.
 	HasSkeleton bool `json:"has_skeleton"`
+	// HasDashboard reports whether the template ships a custom workspace
+	// dashboard (`<template>/dashboard/index.html`), copied into the new
+	// workspace's `.ori/dashboard/` at creation.
+	HasDashboard bool `json:"has_dashboard"`
 	// Path is the template folder's absolute path on disk.
 	Path string `json:"-"`
 	// Onboarding is the verbatim legacy `onboarding` block from template.json,
@@ -517,6 +523,7 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 	t.Builtin = m.Builtin || IsBuiltinStarterID(t.ID)
 	t.BuiltinVersion = m.BuiltinVersion
 	t.HasSkeleton = hasSkeletonFiles(t.Path)
+	t.HasDashboard = HasDashboard(t.Path)
 	t.Onboarding = m.Onboarding
 	projectEntry, projectEntryErr := normalizeManifestProjectEntry(t.Path, m.ProjectEntry)
 	t.ProjectEntry = projectEntry
@@ -645,6 +652,13 @@ func hasSkeletonFiles(dir string) bool {
 	}
 	for _, entry := range entries {
 		if entry.Name() == ManifestFileName {
+			continue
+		}
+		// The dashboard is installed into the workspace folder's .ori sidecar,
+		// not scaffolded as project content. A template carrying only a
+		// dashboard is still metadata-only, and must not start creating an
+		// otherwise empty project folder.
+		if entry.Name() == DashboardDirName && entry.IsDir() {
 			continue
 		}
 		return true

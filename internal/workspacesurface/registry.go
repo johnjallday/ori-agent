@@ -32,9 +32,17 @@ func NewRegistry() *Registry {
 // RegisterTrusted publishes one already-verified installed contribution. Only
 // plugin lifecycle/server wiring should call it in production; manifests and
 // workspace files never receive a Registry reference.
+//
+// OwnerUser is refused outright. This registry is process-global, keyed by an
+// owner key with no workspace in it, so a user surface admitted here would be
+// resolvable from every other workspace. User-authored surfaces are resolved per
+// request from their own workspace folder instead.
 func (r *Registry) RegisterTrusted(registration Registration) error {
 	if r == nil {
 		return fmt.Errorf("workspace surface registry is not initialized")
+	}
+	if registration.Owner.Kind == OwnerUser {
+		return fmt.Errorf("workspace surface owner kind %q cannot be registered in the trusted registry", OwnerUser)
 	}
 	if err := validateRegistration(registration); err != nil {
 		return err
@@ -89,6 +97,15 @@ func (r *Registry) RegisterTrusted(registration Registration) error {
 		r.order = append(r.order, key)
 	}
 	return nil
+}
+
+// ValidateRegistration applies exactly the checks RegisterTrusted applies,
+// without publishing anything. A surface resolved per workspace rather than
+// registered process-globally still has to satisfy every descriptor, binding,
+// and operation rule; this keeps it on the same validation code instead of a
+// parallel implementation that could drift.
+func ValidateRegistration(registration Registration) error {
+	return validateRegistration(registration)
 }
 
 // UnregisterOwner atomically removes one exact owner generation. Requiring the

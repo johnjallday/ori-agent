@@ -2403,6 +2403,233 @@ test('the workspace view switch offers Plans as a real link', () => {
   assert.match(switcher, /<a class="ws-cmd-view-btn ws-cmd-view-link"/);
 });
 
+const DASHBOARD_SURFACE_KEY = 'user:ori.dashboard:dashboard:main';
+
+// catalogLoaded defaults to true: these tests are about steady state, after the
+// surface catalog has answered. The loading window has its own test below.
+function withSurfaceHost(surfaces, body, catalogLoaded = true) {
+  const originalWindow = globalThis.window;
+  globalThis.window = { WorkspaceSurfaceHost: { surfaces, catalogLoaded } };
+  try {
+    return body();
+  } finally {
+    globalThis.window = originalWindow;
+  }
+}
+
+function dashboardCommandView(extra = {}) {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    viewMode: 'details',
+    page: { workspaceId: 'workspace-uuid', workspaceSlug: 'marketing-site' },
+    ...extra
+  });
+  return commandView;
+}
+
+// FR4/FR23: a workspace without a dashboard file must look exactly as it did
+// before this feature existed — no tab, no reachable mode.
+test('the Dashboard tab appears only when the workspace has a dashboard', () => {
+  const commandView = dashboardCommandView();
+
+  withSurfaceHost([], () => {
+    assert.equal(commandView.hasCustomDashboard(), false);
+    assert.ok(!commandView.commandViewSwitchHTML().includes('data-cmd-view-mode="dashboard"'));
+  });
+
+  withSurfaceHost([{ key: DASHBOARD_SURFACE_KEY, available: true }], () => {
+    assert.equal(commandView.hasCustomDashboard(), true);
+    const switcher = commandView.commandViewSwitchHTML();
+    assert.match(switcher, /data-cmd-view-mode="dashboard"/);
+    assert.match(switcher, />Dashboard</);
+  });
+
+  // FR26: a dashboard the server refused still gets a tab. The user put a file
+  // in the folder; hiding the tab would leave them no way to learn what is
+  // wrong with it.
+  withSurfaceHost([{ key: DASHBOARD_SURFACE_KEY, available: false }], () => {
+    assert.equal(commandView.hasCustomDashboard(), true);
+    assert.match(commandView.commandViewSwitchHTML(), /data-cmd-view-mode="dashboard"/);
+  });
+});
+
+// A stored preference or a shared ?mode=dashboard link must not strand the user
+// on an empty view after the dashboard file is deleted.
+test('the dashboard view mode falls back to details without a dashboard', () => {
+  const commandView = dashboardCommandView();
+
+  withSurfaceHost([], () => {
+    assert.equal(commandView.normalizeCommandViewMode('dashboard'), 'details');
+  });
+  withSurfaceHost([{ key: DASHBOARD_SURFACE_KEY, available: true }], () => {
+    assert.equal(commandView.normalizeCommandViewMode('dashboard'), 'dashboard');
+  });
+  // Unrelated modes are unaffected either way.
+  withSurfaceHost([], () => {
+    assert.equal(commandView.normalizeCommandViewMode('map'), 'map');
+    assert.equal(commandView.normalizeCommandViewMode('tickets'), 'tickets');
+    assert.equal(commandView.normalizeCommandViewMode('nonsense'), 'details');
+  });
+});
+
+// Regression: a ?mode=dashboard link is resolved during boot, before the first
+// surface-catalog response arrives. Deciding availability then dropped every
+// deep link, because an unloaded catalog is indistinguishable from an empty one.
+test('a dashboard deep link survives until the surface catalog answers', () => {
+  const commandView = dashboardCommandView();
+
+  // Catalog still loading: hold the mode rather than guessing it away.
+  withSurfaceHost(
+    [],
+    () => {
+      assert.equal(commandView.surfaceCatalogLoaded(), false);
+      assert.equal(commandView.normalizeCommandViewMode('dashboard'), 'dashboard');
+      // The tab stays strict while loading, so no Dashboard tab flashes onto a
+      // workspace that turns out not to have one.
+      assert.ok(!commandView.commandViewSwitchHTML().includes('data-cmd-view-mode="dashboard"'));
+    },
+    false
+  );
+
+  // Catalog answered, dashboard present: the mode resolves.
+  withSurfaceHost([{ key: DASHBOARD_SURFACE_KEY, available: true }], () => {
+    assert.equal(commandView.normalizeCommandViewMode('dashboard'), 'dashboard');
+  });
+
+  // Catalog answered, no dashboard: settle falls back and stops.
+  const settling = dashboardCommandView({
+    viewMode: 'dashboard',
+    persisted: [],
+    persistCommandViewMode(mode) {
+      this.persisted.push(mode);
+    },
+    syncURLState() {}
+  });
+  withSurfaceHost([], () => {
+    settling.settleDashboardViewMode();
+    assert.equal(settling.viewMode, 'details');
+    assert.deepEqual(settling.persisted, ['details']);
+  });
+});
+
+// FR24: the dashboard frame lives outside the container render() rebuilds, so
+// the dashboard mode must contribute nothing to that container's innerHTML.
+test('the dashboard mode renders no body inside the rebuilt command container', () => {
+  const commandView = dashboardCommandView({ viewMode: 'dashboard' });
+  const source = readFileSync(new URL('./workspace-command.js', import.meta.url), 'utf8');
+  assert.match(
+    source,
+    /this\.viewMode === 'tickets' \|\| this\.viewMode === 'dashboard'\s*\?\s*''/,
+    'the dashboard mode must render an empty body like Tickets'
+  );
+  assert.equal(commandView.viewMode, 'dashboard');
+});
+
+// FR26/FR27: a refused dashboard shows the host's explanation — which names the
+// file — instead of mounting a frame, and never leaves a stale frame behind.
+test('a refused dashboard renders the reason instead of a frame', () => {
+  const unmounted = [];
+  const mounted = [];
+  const statusNode = { textContent: '', hidden: true };
+  const containerNode = {
+    cleared: 0,
+    replaceChildren() {
+      this.cleared += 1;
+    }
+  };
+  const surfaceNode = {
+    hidden: true,
+    style: {},
+    querySelector(selector) {
+      if (selector === '[data-cmd-dashboard-status]') return statusNode;
+      if (selector === '[data-cmd-dashboard-host]') return containerNode;
+      return null;
+    }
+  };
+
+  const originalDocument = globalThis.document;
+  const originalWindow = globalThis.window;
+  globalThis.document = {
+    getElementById: id => (id === 'workspace-detail-dashboard-surface' ? surfaceNode : null)
+  };
+  globalThis.window = {
+    WorkspaceSurfaceHost: {
+      catalogLoaded: true,
+      surfaces: [
+        {
+          key: DASHBOARD_SURFACE_KEY,
+          available: false,
+          description: 'Ori could not open /ws/.ori/dashboard/index.html. It is empty.'
+        }
+      ],
+      mountInline: key => {
+        mounted.push(key);
+        return Promise.resolve(true);
+      },
+      unmountInline: () => {
+        unmounted.push(true);
+        return Promise.resolve(true);
+      }
+    }
+  };
+
+  try {
+    const commandView = dashboardCommandView({ viewMode: 'dashboard' });
+    commandView.syncDashboardView();
+
+    assert.equal(surfaceNode.hidden, false, 'the dashboard view was not shown');
+    assert.equal(statusNode.hidden, false, 'no explanation was rendered');
+    assert.match(statusNode.textContent, /\/ws\/\.ori\/dashboard\/index\.html/);
+    assert.match(statusNode.textContent, /empty/);
+    assert.deepEqual(mounted, [], 'a refused dashboard was mounted anyway');
+    assert.deepEqual(unmounted, [true], 'a previously mounted frame was left behind');
+    assert.equal(containerNode.cleared, 1);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.window = originalWindow;
+  }
+});
+
+// FR26: a failing dashboard must not take the other view modes down with it.
+test('the other view modes are untouched by a failing dashboard', () => {
+  const originalDocument = globalThis.document;
+  globalThis.document = { getElementById: () => null };
+  try {
+    withSurfaceHost([{ key: DASHBOARD_SURFACE_KEY, available: false }], () => {
+      const commandView = dashboardCommandView({ viewMode: 'details' });
+      // syncDashboardView runs on every render, including in Details.
+      commandView.syncDashboardView();
+      const switcher = commandView.commandViewSwitchHTML();
+      for (const mode of ['details', 'map', 'tickets']) {
+        assert.match(switcher, new RegExp(`data-cmd-view-mode="${mode}"`));
+      }
+      assert.equal(commandView.normalizeCommandViewMode('map'), 'map');
+      assert.equal(commandView.normalizeCommandViewMode('tickets'), 'tickets');
+    });
+  } finally {
+    globalThis.document = originalDocument;
+  }
+});
+
+// PRD open question 4: the dashboard view is linkable.
+test('the dashboard view mode is carried in the URL', () => {
+  assert.deepEqual(
+    dashboardCommandView({
+      viewMode: 'dashboard',
+      taskDrawerOpen: false,
+      backlogDrawerOpen: false,
+      statModalSection: '',
+      selectedAgentKey: '',
+      taskDrawerSelectedId: '',
+      trackedRunTaskId: ''
+    }).currentURLState().mode,
+    'dashboard'
+  );
+  assert.equal(dashboardCommandView({ viewMode: 'map' }).currentURLState().mode, 'map');
+  assert.equal(dashboardCommandView({ viewMode: 'details' }).currentURLState().mode, null);
+  assert.equal(dashboardCommandView({ viewMode: 'tickets' }).currentURLState().mode, null);
+});
+
 test('full task links use the slug while their return target preserves route state', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {

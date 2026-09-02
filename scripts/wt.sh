@@ -519,7 +519,7 @@ function wt_status {
     --worktrees)
       worktrees=1
       ;;
-    --json | --no-color | --watch | --all)
+    --json | --no-color | --color | --watch | --all | --implementations)
       forward+=("$arg")
       ;;
     --feature)
@@ -568,7 +568,8 @@ function wt_status {
 
 function wt_status_help {
   echo "Usage: wt status [--feature <slug>] [--json] [--no-color] [--watch] [--all]"
-  echo "       wt status --worktrees   # the Git-only worktree table"
+  echo "       wt status --implementations [--color]   # checked-out feature worktrees only"
+  echo "       wt status --worktrees         # the Git-only worktree table"
   echo
   echo "Feature-first overview of every feature in this repository, joining"
   echo "planning artifacts, worktrees, Git, GitHub, and Herdr."
@@ -577,6 +578,9 @@ function wt_status_help {
   echo "By default the table hides Shipped, Merged (cleanup), and Unknown rows"
   echo "so only active work is on screen. Pass --all to see full history,"
   echo "including the Merged (cleanup) rows that still owe a 'wt done'."
+  echo "--implementations shows only checked-out feature worktrees and retains"
+  echo "Merged (cleanup), because that checkout still owes local cleanup. Use"
+  echo "--color to preserve table colors when embedding or piping the overview."
   echo "--json always emits every feature, complete history included, whether"
   echo "or not --all is given; --feature <slug> also finds an inactive feature."
   echo

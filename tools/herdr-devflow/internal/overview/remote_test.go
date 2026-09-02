@@ -51,7 +51,7 @@ func TestMatchRemoteRequiresAnExactSlug(t *testing.T) {
 func TestMatchRemoteAcceptsEveryWorkBranchPrefix(t *testing.T) {
 	// PRs have landed from fix/ and feat/ branches; the slug identifies the
 	// feature, the prefix only records intent.
-	for _, head := range []string{"feature/x", "feat/x", "fix/x", "refactor/x", "docs/x", "test/x", "chore/x"} {
+	for _, head := range []string{"feature/x", "feat/x", "fix/x", "refactor/x", "design/x", "docs/x", "test/x", "chore/x"} {
 		row, _ := matchOne(t, "x", pull(7, head, "open"))
 		if row.Remote.PullRequest == nil {
 			t.Fatalf("head %q was not matched", head)

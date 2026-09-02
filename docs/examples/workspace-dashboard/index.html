@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Workspace dashboard</title>
+    <!--
+      IMPORTANT: styles and scripts must live in SEPARATE FILES.
+
+      The dashboard frame is served with
+        script-src 'self'; style-src 'self'; connect-src 'none'
+      and no 'unsafe-inline'. An inline <script> or <style> — or a style="..."
+      attribute — is blocked by the browser and silently does nothing. Put CSS
+      in a .css file and JavaScript in a .js file beside this one; both are
+      served from the same dashboard folder.
+    -->
+    <link rel="stylesheet" href="dashboard.css" />
+  </head>
+  <body>
+    <h1 id="title">Loading…</h1>
+    <p class="sub" id="subtitle"></p>
+
+    <div class="cards" id="cards"></div>
+
+    <section>
+      <h2>Open tasks</h2>
+      <ul id="tasks">
+        <li class="empty">Loading…</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Notes</h2>
+      <ul id="notes">
+        <li class="empty">Loading…</li>
+      </ul>
+    </section>
+
+    <script src="ori-bridge.js"></script>
+    <script src="dashboard.js"></script>
+  </body>
+</html>
