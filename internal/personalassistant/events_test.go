@@ -12,6 +12,7 @@ func TestPersonalAssistantEventsUseClosedPrivacySafeSchema(t *testing.T) {
 	all := []EventType{
 		EventStateViewed, EventHireStarted, EventHireCompleted, EventPreviewCreated,
 		EventFirstResultDone, EventTodayViewed, EventPaused, EventResumed, EventRecoverableFailure,
+		EventHQQuestStarted, EventHQQuestDeferred, EventHQSetupStarted, EventHQActivated,
 	}
 	for _, event := range all {
 		fields, err := eventFields(event, EventData{
@@ -60,5 +61,61 @@ func TestRecordEventEmitsOnlySanitizedFields(t *testing.T) {
 		if !eventFieldAllowlist[key] || strings.Contains(fmt.Sprint(value), "remember that") {
 			t.Fatalf("unsafe event field %s=%v", key, value)
 		}
+	}
+}
+
+func TestHQQuestEventsCarryNoNamesScheduleOrQuestCopy(t *testing.T) {
+	var captured []logger.Fields
+	original := emitPersonalAssistantEvent
+	emitPersonalAssistantEvent = func(_ EventType, fields logger.Fields) {
+		captured = append(captured, fields)
+	}
+	t.Cleanup(func() { emitPersonalAssistantEvent = original })
+
+	RecordHQQuestStarted("assistant-1", "hq_not_built")
+	RecordHQQuestDeferred("assistant-1")
+	RecordHQSetupStarted("assistant-1")
+	RecordHQActivated("assistant-1", "ws-1", 420)
+
+	if len(captured) != 4 {
+		t.Fatalf("emitted %d events; want 4", len(captured))
+	}
+	// Everything a quest could plausibly leak: the assistant's chosen name, the
+	// HQ name, a schedule, the mandate, a path, and the on-screen copy.
+	forbidden := []string{
+		"Atlas", "Personal HQ", "08:00", "mon", "America/New_York",
+		"home base", "Let's give", "/Users/", "Build My HQ",
+	}
+	for _, fields := range captured {
+		for key, value := range fields {
+			if !eventFieldAllowlist[key] {
+				t.Fatalf("non-allowlisted key %q", key)
+			}
+			rendered := fmt.Sprint(value)
+			for _, leak := range forbidden {
+				if strings.Contains(rendered, leak) {
+					t.Fatalf("event field %s=%q leaked %q", key, rendered, leak)
+				}
+			}
+		}
+	}
+
+	states := []string{
+		fmt.Sprint(captured[0][eventFieldState]),
+		fmt.Sprint(captured[1][eventFieldState]),
+		fmt.Sprint(captured[2][eventFieldState]),
+		fmt.Sprint(captured[3][eventFieldState]),
+	}
+	want := []string{"awaiting_hq", "awaiting_hq", "provisioning_hq", "active"}
+	for i, state := range states {
+		if state != want[i] {
+			t.Fatalf("event %d state = %q; want %q", i, state, want[i])
+		}
+	}
+	if captured[3][eventFieldWorkspaceID] != "ws-1" || captured[3][eventFieldDurationMS] != int64(420) {
+		t.Fatalf("activation event = %v", captured[3])
+	}
+	if captured[1][eventFieldReasonCode] != "user_deferred" || captured[1][eventFieldRecoverable] != true {
+		t.Fatalf("defer event = %v", captured[1])
 	}
 }

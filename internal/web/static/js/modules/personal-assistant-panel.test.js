@@ -30,6 +30,30 @@ test('personal assistant panel covers unavailable, pre-hire, active, paused, and
   assert.equal(repair.available, false);
 });
 
+test('a hired assistant with no HQ is named but disabled, unlike needsHire', () => {
+  const needsHQ = personalAssistantPanelView({ state: 'needs_hq', display_name: 'Atlas' });
+  assert.equal(needsHQ.known, true);
+  assert.equal(needsHQ.available, false, 'submission must stay closed before HQ exists');
+  assert.equal(needsHQ.needsHQ, true);
+  assert.equal(needsHQ.needsHire, false);
+  assert.equal(needsHQ.name, 'Atlas');
+  // Unlike needsHire, the launcher may show this real identity.
+  assert.equal(needsHQ.visible, true);
+  assert.match(needsHQ.placeholder, /Build Atlas.s Personal HQ/);
+
+  const provisioning = personalAssistantPanelView({
+    state: 'provisioning_hq',
+    display_name: 'Atlas'
+  });
+  assert.equal(provisioning.needsHQ, true);
+  assert.equal(provisioning.available, false);
+  assert.equal(provisioning.visible, true);
+
+  // needsHire still has nothing trustworthy to show.
+  const preHire = personalAssistantPanelView({ state: 'needs_hire' });
+  assert.equal(preHire.visible, false);
+});
+
 test('handoff text is exact, trimmed, unicode-safe, and bounded without submitting', () => {
   assert.equal(boundedAssistantHandoff('  send the notes  '), 'send the notes');
   assert.equal(Array.from(boundedAssistantHandoff('🦊'.repeat(500))).length, 400);

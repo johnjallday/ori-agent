@@ -423,6 +423,45 @@
   }
 }
 
+/* ---- pointer ------------------------------------------------------------------- */
+
+/* The game-style "click here" hand that nudges toward the marked control. It is
+   decoration on top of the coachmark, never instead of it: the outline still
+   marks the control and the panel copy still names it, so a user who cannot see
+   or does not get the animation loses nothing (FR-118). Pointer-events are off
+   so it can never intercept the click it is pointing at. */
+.ori-pointer {
+  position: absolute;
+  z-index: 10200;
+  pointer-events: none;
+  color: var(--ori-accent-strong, #8a5a12);
+  filter: drop-shadow(0 2px 3px rgb(0 0 0 / 35%));
+  animation: ori-pointer-tap 1.2s ease-in-out infinite;
+}
+
+.ori-pointer__hand {
+  display: block;
+}
+
+/* A short tap toward the control, the way a finger meets a button. */
+@keyframes ori-pointer-tap {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-9px);
+  }
+}
+
+/* Reduced motion keeps the pointer — it is a useful static "here" marker — and
+   drops only the movement. */
+@media (prefers-reduced-motion: reduce) {
+  .ori-pointer {
+    animation: none;
+  }
+}
+
 /* ---- dark theme ----------------------------------------------------------------- */
 
 [data-bs-theme="dark"] .ori-guide {

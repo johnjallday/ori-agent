@@ -144,6 +144,30 @@ func TestHandlerWorkingAgreement_PinsPatchFieldsAndConflictProjection(t *testing
 	}
 }
 
+// TestHandlerWorkingAgreement_NeedsHQGetsSetupCodeNotRepair pins that a hired
+// assistant with no Personal HQ gets a distinct, honest response — never the
+// repair_required code, which would misdescribe an expected setup stage.
+func TestHandlerWorkingAgreement_NeedsHQGetsSetupCodeNotRepair(t *testing.T) {
+	current := &personalassistant.Projection{State: personalassistant.APIStateNeedsHQ, StateVersion: 3, DisplayName: "Atlas"}
+	continuity := &fakeContinuityService{projection: current, err: personalassistant.ErrNeedsHQ}
+	handler := NewHandler(&fakeStateReader{projection: current}, fakeUserProvider{userID: "local"})
+	handler.SetContinuityService(continuity)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPatch, "/api/personal-assistant/working-agreement", strings.NewReader(`{"if_version":3}`))
+	handler.UpdateWorkingAgreement(recorder, request)
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d; want 409", recorder.Code)
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"code":"personal_hq_required"`) {
+		t.Fatalf("body = %s; want code personal_hq_required", body)
+	}
+	if strings.Contains(body, "repair") {
+		t.Fatalf("body reused repair language for an expected setup stage: %s", body)
+	}
+}
+
 func TestHandlerPauseResumeRequireVersionAndPreserveProjection(t *testing.T) {
 	projection := &personalassistant.Projection{State: personalassistant.APIStatePaused, StateVersion: 10}
 	continuity := &fakeContinuityService{projection: projection}
@@ -241,6 +265,71 @@ func TestHandlerGetToday_UsesCurrentUserAndDoesNotLeakReadErrors(t *testing.T) {
 			t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 		}
 	})
+}
+
+func TestHandlerHire_FreshHireReturnsNeedsHQWithoutHQOrBriefClaims(t *testing.T) {
+	hirer := &fakeHireService{result: &personalassistant.HireResult{
+		State: &personalassistant.State{
+			Status: personalassistant.StatusAwaitingHQ, AssistantID: "assistant-1",
+			DisplayName: "Atlas", Appearance: types.NewAgentAppearance(),
+			GlobalAgentProfileName: "Atlas", StateVersion: 2,
+			FirstAssignmentStatus: personalassistant.FirstAssignmentNotStarted,
+		},
+	}}
+	handler := NewHandler(&fakeStateReader{}, fakeUserProvider{userID: "user-a"})
+	handler.SetHireService(hirer)
+	body := `{"request_id":"request-1","if_version":0,"display_name":"Atlas","mandate":"Help me plan.","focus_areas":["plan my day"]}`
+	recorder := httptest.NewRecorder()
+	handler.Hire(recorder, httptest.NewRequest(http.MethodPost, "/api/personal-assistant/hire", strings.NewReader(body)))
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	var response struct {
+		PersonalAssistant map[string]any `json:"personal_assistant"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	assistant := response.PersonalAssistant
+	if assistant["status"] != "awaiting_hq" || assistant["state"] != "needs_hq" ||
+		assistant["next_action"] != "build_hq" {
+		t.Fatalf("hire response state = %v", assistant)
+	}
+	if assistant["assistant_id"] != "assistant-1" || assistant["display_name"] != "Atlas" ||
+		assistant["global_agent_profile_name"] != "Atlas" || assistant["appearance"] == nil ||
+		assistant["state_version"] != float64(2) {
+		t.Fatalf("hire response identity = %v", assistant)
+	}
+	// A fresh hire has no HQ and no Daily Brief, so it must claim neither.
+	for _, key := range []string{"hq_workspace_id", "hq_entry_agent_instance_id", "daily_brief"} {
+		if _, present := assistant[key]; present {
+			t.Fatalf("fresh hire response advertised %s: %v", key, assistant)
+		}
+	}
+}
+
+func TestHandlerHire_AcceptsButIgnoresStaleRhythmFields(t *testing.T) {
+	hirer := &fakeHireService{result: &personalassistant.HireResult{
+		State: &personalassistant.State{
+			Status: personalassistant.StatusAwaitingHQ, AssistantID: "assistant-1",
+			DisplayName: "Atlas", GlobalAgentProfileName: "Atlas", StateVersion: 2,
+		},
+	}}
+	handler := NewHandler(&fakeStateReader{}, fakeUserProvider{userID: "user-a"})
+	handler.SetHireService(hirer)
+	// A stale client still sends the rhythm. The request must be accepted, and
+	// the coordinator is the one that drops it.
+	body := `{"request_id":"request-1","display_name":"Atlas","focus_areas":["plan my day"],` +
+		`"timezone":"UTC","schedule_days":["mon"],"schedule_time":"08:00","notify_on_ready":true}`
+	recorder := httptest.NewRecorder()
+	handler.Hire(recorder, httptest.NewRequest(http.MethodPost, "/api/personal-assistant/hire", strings.NewReader(body)))
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if hirer.calls != 1 || hirer.request.RequestID != "request-1" || hirer.request.DisplayName != "Atlas" {
+		t.Fatalf("forwarded request = %#v calls=%d", hirer.request, hirer.calls)
+	}
 }
 
 func TestHandlerHire_ReturnsCanonicalResultAndForwardsBoundedInput(t *testing.T) {

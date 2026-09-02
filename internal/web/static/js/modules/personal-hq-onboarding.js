@@ -213,6 +213,55 @@ export function journalPromptView(proposal) {
   };
 }
 
+// hqBuildTarget decides WHICH server consequence a Build My HQ submission is.
+//
+// There are two, and they are not interchangeable:
+//   - A hired assistant with no home base builds HQ through the PAF endpoint,
+//     which reuses that assistant as the HQ entry agent and activates the
+//     relationship. It requires the current state version and a stable request
+//     ID so a retry finishes the same operation instead of starting a second.
+//   - Everything else keeps the legacy endpoint exactly as it was. That path has
+//     no relationship to attach and must not gain one.
+//
+// The relationship is read from the server at open and submit time; this helper
+// only classifies it.
+export function hqBuildTarget(relationship) {
+  const state = String(relationship?.state || '').trim();
+  if (state === 'needs_hq' || state === 'provisioning_hq') {
+    return {
+      paf: true,
+      endpoint: '/api/personal-assistant/hq',
+      stateVersion: Number(relationship?.state_version) || 0,
+      assistantName: String(relationship?.display_name || '').trim(),
+      // A resumable setup is finishing an operation the user already confirmed.
+      resuming: state === 'provisioning_hq'
+    };
+  }
+  return { paf: false, endpoint: '/api/personal-hq/setup', stateVersion: 0, assistantName: '' };
+}
+
+// hqBuildAssistantCopy is the assistant-aware copy for the build form. It states
+// plainly what confirming will do, and it is only used on the PAF path.
+export function hqBuildAssistantCopy(target) {
+  if (!target?.paf) return { show: false };
+  const who = target.assistantName || 'Your assistant';
+  return {
+    show: true,
+    title: `Build ${who}’s Personal HQ`,
+    intro: `This workspace becomes ${who}’s Personal HQ — where your daily brief is prepared and your follow-ups are tracked. Nothing is created until you confirm.`,
+    submitLabel: target.resuming ? 'Finish building HQ' : 'Build My HQ'
+  };
+}
+
+// hqBuildRequestPayload builds the body for whichever endpoint was chosen. The
+// PAF path adds only the request ID and version; it never sends assistant,
+// profile, or workspace identity — the server owns those.
+export function hqBuildRequestPayload(target, form, requestID) {
+  const body = { ...form };
+  if (!target?.paf) return body;
+  return { ...body, request_id: String(requestID || '').trim(), if_version: target.stateVersion };
+}
+
 export function hqWorkspaceRootView(state) {
   const source = String(state?.source || 'unconfirmed')
     .trim()
@@ -310,12 +359,40 @@ export function followUpView(f) {
     ]);
   }
 
+  // The reserved HQ site names the assistant it belongs to, so the Map needs
+  // the bounded relationship facts. This module already owns the HQ status
+  // handoff, so it carries this one too rather than adding a second fetcher.
+  // A failure is silent: the site falls back to its generic copy.
+  async function refreshMapPersonalAssistant() {
+    if (
+      !window.OriWorkspaceMap ||
+      typeof window.OriWorkspaceMap.setPersonalAssistant !== 'function'
+    ) {
+      return;
+    }
+    try {
+      const res = await fetch('/api/personal-assistant', {
+        headers: { Accept: 'application/json' }
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      window.OriWorkspaceMap.setPersonalAssistant(data && data.personal_assistant);
+    } catch (_) {
+      /* generic HQ site copy is the safe fallback */
+    }
+  }
+
   async function refreshHQStatus() {
     statusPromise = null;
     const status = await fetchStatus();
     if (window.OriWorkspaceMap && typeof window.OriWorkspaceMap.setHQStatus === 'function') {
       window.OriWorkspaceMap.setHQStatus(status);
     }
+    void refreshMapPersonalAssistant();
+    // setHQStatus re-mounts the Map, which destroys any element Ori's
+    // walkthrough had marked. Say so, so the walkthrough can re-present its
+    // current step rather than keep a mark on a detached node.
+    emitHQQuestSignal('hq-status-changed', { valid: !!(status && status.valid) });
     return status;
   }
 
@@ -521,11 +598,106 @@ export function followUpView(f) {
         })
       );
     tasks.push(loadBuildWorkspaceRoot().catch(error => showBuildWorkspaceRootError(error.message)));
+    // Load authoritative relationship state before showing the form, so its copy
+    // and its eventual submit target agree with the server rather than with
+    // whatever the page happened to know earlier.
+    tasks.push(refreshBuildTarget());
     await Promise.all(tasks);
+    applyBuildAssistantCopy();
     const errorBox = document.getElementById('hqBuildError');
     if (errorBox) errorBox.hidden = true;
     const modal = requireModal('hqBuildModal');
     if (modal) modal.show();
+    // Observational: Ori's HQ walkthrough uses this to advance to its final
+    // step, where the existing form owns all editing and confirmation.
+    if (modal) emitHQQuestSignal('build-form-opened');
+  }
+
+  // The submit target for the form that is currently open. Refreshed at open and
+  // again at submit, because the relationship can change under a form left open.
+  let buildTarget = hqBuildTarget(null);
+
+  async function refreshBuildTarget() {
+    try {
+      const res = await fetch('/api/personal-assistant', {
+        headers: { Accept: 'application/json' }
+      });
+      if (!res.ok) {
+        buildTarget = hqBuildTarget(null);
+        return buildTarget;
+      }
+      const data = await res.json();
+      buildTarget = hqBuildTarget(data && data.personal_assistant);
+    } catch (_) {
+      // An unreadable relationship falls back to the legacy consequence, which
+      // creates a workspace without claiming to attach an assistant to it.
+      buildTarget = hqBuildTarget(null);
+    }
+    return buildTarget;
+  }
+
+  function applyBuildAssistantCopy() {
+    const copy = hqBuildAssistantCopy(buildTarget);
+    const title = document.getElementById('hqBuildModalTitle');
+    const intro = document.getElementById('hqBuildAssistantIntro');
+    const submit = document.getElementById('hqBuildSubmitBtn');
+    if (intro) {
+      // textContent, not innerHTML: the assistant's name is user-controlled.
+      intro.textContent = copy.show ? copy.intro : '';
+      intro.hidden = !copy.show;
+    }
+    if (title) title.textContent = copy.show ? copy.title : 'Build My HQ';
+    if (submit) submit.textContent = copy.show ? copy.submitLabel : 'Build My HQ';
+  }
+
+  // A stable per-browser HQ request ID, so a retry after a timeout or a reload
+  // finishes the SAME operation instead of starting a second one. It is cleared
+  // only once the server has returned an active relationship.
+  const HQ_REQUEST_ID_KEY = 'ori.personalAssistantHQRequestId';
+
+  function hqRequestID() {
+    let id = '';
+    try {
+      id = String(window.localStorage.getItem(HQ_REQUEST_ID_KEY) || '').trim();
+    } catch (_) {
+      id = '';
+    }
+    if (!id) {
+      id =
+        globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
+          ? globalThis.crypto.randomUUID()
+          : `hq-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      try {
+        window.localStorage.setItem(HQ_REQUEST_ID_KEY, id);
+      } catch (_) {
+        // The durable server operation remains authoritative without storage.
+      }
+    }
+    return id;
+  }
+
+  function clearHQRequestID() {
+    try {
+      window.localStorage.removeItem(HQ_REQUEST_ID_KEY);
+    } catch (_) {
+      // Storage cleanup is not part of the durable setup transaction.
+    }
+  }
+
+  // Bounded local notices for Ori's deterministic HQ walkthrough.
+  //
+  // They are diagnostics, not a control channel: every one of them is safe to
+  // ignore, and removing the walkthrough leaves this module unchanged. They
+  // carry a stage name only — never the HQ name, the schedule, or any other
+  // form data.
+  function emitHQQuestSignal(stage, detail = {}) {
+    try {
+      window.dispatchEvent(
+        new CustomEvent('ori:hq-quest-signal', { detail: { stage, ...detail } })
+      );
+    } catch (_) {
+      // Never let a diagnostic break the build flow.
+    }
   }
 
   function collectBuildRequest() {
@@ -582,14 +754,34 @@ export function followUpView(f) {
       try {
         const workspaceRootSaved = await saveBuildWorkspaceRoot();
         if (!workspaceRootSaved) return;
-        const result = await postJSON('/api/personal-hq/setup', collectBuildRequest());
+
+        // Re-read the relationship at submit time: a form left open while the
+        // relationship changed must not post to the wrong consequence.
+        const target = await refreshBuildTarget();
+        const requestID = target.paf ? hqRequestID() : '';
+        const result = await postJSON(
+          target.endpoint,
+          hqBuildRequestPayload(target, collectBuildRequest(), requestID)
+        );
+
         const modal = bootstrapModal('hqBuildModal');
         if (modal) modal.hide();
-        toast('Your Personal HQ is ready.', 'Personal HQ built');
-        window.setTimeout(() => {
-          window.location.href = '/';
-        }, 700);
-        void result;
+        emitHQQuestSignal('setup-succeeded');
+
+        if (!target.paf) {
+          // Legacy path: unchanged, including its reload.
+          toast('Your Personal HQ is ready.', 'Personal HQ built');
+          window.setTimeout(() => {
+            window.location.href = '/';
+          }, 700);
+          return;
+        }
+
+        // The PAF path transitions in place. Only clear the request ID once the
+        // server has actually returned an active relationship.
+        const relationship = result && result.personal_assistant;
+        if (relationship && relationship.state === 'active') clearHQRequestID();
+        await completePAFHQTransition(relationship);
       } catch (err) {
         if (errorBox) {
           errorBox.textContent =
@@ -600,6 +792,73 @@ export function followUpView(f) {
         submitBtn.disabled = false;
       }
     });
+  }
+
+  /*
+   * completePAFHQTransition refreshes the surfaces the new HQ changes, in place.
+   *
+   * A hard reload here would be a lie about what happened: it would look
+   * identical whether the build succeeded or the page simply navigated. So each
+   * surface is refreshed through its existing seam, and if a refresh fails the
+   * user is told the HQ *was* built and only the view is stale — never invited
+   * to create a second one.
+   */
+  async function completePAFHQTransition(relationship) {
+    const assistant = String(relationship?.display_name || '').trim() || 'Your assistant';
+    let refreshFailed = false;
+
+    // Personal HQ status drives the Map: the reserved site gives way to the real
+    // workspace once this lands.
+    try {
+      await refreshHQStatus();
+    } catch (_) {
+      refreshFailed = true;
+    }
+    // The shared cockpit workspace tree and progression refresh through the
+    // real event names those modules actually listen for.
+    for (const event of [
+      'ori:personal-hq-changed',
+      'ori:workspaces-changed',
+      'ori:progression-refresh'
+    ]) {
+      try {
+        window.dispatchEvent(new CustomEvent(event, { detail: { source: 'personal_hq_setup' } }));
+      } catch (_) {
+        refreshFailed = true;
+      }
+    }
+    try {
+      if (window.OriHomeCockpit && typeof window.OriHomeCockpit.refresh === 'function') {
+        await window.OriHomeCockpit.refresh();
+      }
+    } catch (_) {
+      refreshFailed = true;
+    }
+    // The launcher/Today identity surfaces re-fetch through their own seam and
+    // fan out via the personal-assistant:status event they already emit.
+    try {
+      if (
+        window.PersonalAssistantPanel &&
+        typeof window.PersonalAssistantPanel.refresh === 'function'
+      ) {
+        await window.PersonalAssistantPanel.refresh();
+      }
+    } catch (_) {
+      refreshFailed = true;
+    }
+
+    if (refreshFailed) {
+      toast(
+        'HQ was built; reload to refresh the Map.',
+        `${assistant}’s Personal HQ is ready`,
+        'warning'
+      );
+      return;
+    }
+    toast(
+      `${assistant} now has a home base. Plan my first day is ready on Home.`,
+      `${assistant}’s Personal HQ is ready`
+    );
   }
 
   async function fetchUpgradePreview() {

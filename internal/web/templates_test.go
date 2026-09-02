@@ -659,15 +659,25 @@ func TestHomeCockpitLoadsMapBeforeCoordinator(t *testing.T) {
 	}
 
 	const (
+		buildingArtJS  = `/js/modules/workspace-building-art.js`
+		blueprintUIJS  = `/js/modules/project-templates-manage.js`
 		mapJS          = `/js/modules/workspace-map.js`
 		updateHelperJS = `/js/modules/plugin-update-notifications.js`
 		cockpitJS      = `/js/modules/home-workspace-cockpit.js`
 		homeUpdatesJS  = `/js/modules/home-plugin-updates.js`
 	)
+	buildingArtAt := strings.Index(html, buildingArtJS)
+	blueprintUIAt := strings.Index(html, blueprintUIJS)
 	mapAt := strings.Index(html, mapJS)
 	helperAt := strings.Index(html, updateHelperJS)
 	cockpitAt := strings.Index(html, cockpitJS)
 	homeUpdatesAt := strings.Index(html, homeUpdatesJS)
+	if buildingArtAt < 0 {
+		t.Fatalf("Home page does not load %s", buildingArtJS)
+	}
+	if blueprintUIAt < 0 {
+		t.Fatalf("Home page does not load %s", blueprintUIJS)
+	}
 	if mapAt < 0 {
 		t.Fatalf("Home page does not load %s", mapJS)
 	}
@@ -679,6 +689,12 @@ func TestHomeCockpitLoadsMapBeforeCoordinator(t *testing.T) {
 	}
 	if homeUpdatesAt < 0 {
 		t.Fatalf("Home page does not load %s", homeUpdatesJS)
+	}
+	if buildingArtAt > blueprintUIAt {
+		t.Errorf("Home loads %s after %s; catalog artwork must be defined first", buildingArtJS, blueprintUIJS)
+	}
+	if buildingArtAt > mapAt {
+		t.Errorf("Home loads %s after %s; map artwork must be defined first", buildingArtJS, mapJS)
 	}
 	if mapAt > cockpitAt {
 		t.Errorf("Home loads %s after %s; the map must be defined first", mapJS, cockpitJS)
@@ -693,6 +709,9 @@ func TestHomeCockpitLoadsMapBeforeCoordinator(t *testing.T) {
 	// The map script must be a classic deferred script, not a module: module
 	// scripts execute after ALL deferred classics, which would invert the
 	// ordering this test just proved.
+	if !strings.Contains(html, `<script defer src="`+buildingArtJS+`">`) {
+		t.Errorf("%s must load as a classic deferred script to keep the ordering guarantee", buildingArtJS)
+	}
 	if !strings.Contains(html, `<script defer src="`+mapJS+`">`) {
 		t.Errorf("%s must load as a classic deferred script to keep the ordering guarantee", mapJS)
 	}

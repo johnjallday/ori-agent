@@ -453,7 +453,7 @@
     if (!status || status.valid) return { show: false };
     var repair = !!status.workspace_id;
     var onboardingState = String(status.hq_onboarding_state || 'unseen');
-    return {
+    var view = {
       show: true,
       repair: repair,
       onboardingState: onboardingState,
@@ -462,8 +462,63 @@
       detail: repair
         ? 'The workspace previously designated as your Personal HQ is no longer available. Build a replacement or choose another workspace.'
         : 'Create a home base for your daily brief, follow-ups, and a clear place to resume work.',
-      showSkip: !repair && onboardingState !== 'skipped'
+      showSkip: !repair && onboardingState !== 'skipped',
+      // Import remains available in every ordinary state. It is withdrawn only
+      // during the guided stage below, where importing a workspace would
+      // silently rebind an existing one as the hired assistant's HQ.
+      showImport: true,
+      assistantName: ''
     };
+
+    // A hired assistant with no home base yet. The site names its subject and
+    // offers only the safe build path. Every other state — repair, import,
+    // legacy, skipped outside this stage — keeps its existing copy exactly.
+    if (!repair && personalAssistantNeedsHQ()) {
+      var who = String((personalAssistant && personalAssistant.displayName) || '').trim();
+      view.guided = true;
+      view.assistantName = who;
+      view.statusLabel = 'Not created';
+      view.title = who ? 'Build ' + who + '’s Personal HQ' : 'Build your assistant’s Personal HQ';
+      view.detail = who
+        ? who +
+          ' is hired and has no home base yet. This becomes ' +
+          who +
+          '’s Personal HQ: where your daily brief is prepared, follow-ups are tracked, and you resume work.'
+        : 'Your assistant is hired and has no home base yet. This becomes its Personal HQ: where your daily brief is prepared, follow-ups are tracked, and you resume work.';
+      view.showImport = false;
+      // showSkip is unchanged from the generic case: an already-deferred quest
+      // has nothing left to defer, and Home carries the Resume mission.
+    }
+    return view;
+  }
+
+  // Bounded relationship facts the site needs to name its subject. Set by
+  // personal-hq-onboarding.js, which already owns the HQ status handoff. The map
+  // never fetches this itself and never holds anything beyond these two fields.
+  var personalAssistant = null;
+
+  function personalAssistantNeedsHQ() {
+    if (!personalAssistant) return false;
+    return personalAssistant.state === 'needs_hq' || personalAssistant.state === 'provisioning_hq';
+  }
+
+  function setPersonalAssistant(relationship) {
+    var next = relationship
+      ? {
+          state: String(relationship.state || '').trim(),
+          displayName: String(relationship.display_name || relationship.displayName || '').trim()
+        }
+      : null;
+    var changed =
+      (!personalAssistant && next) ||
+      (personalAssistant && !next) ||
+      (personalAssistant &&
+        next &&
+        (personalAssistant.state !== next.state ||
+          personalAssistant.displayName !== next.displayName));
+    personalAssistant = next;
+    // The site's copy and actions depend on this, so a change must re-render.
+    if (changed && lastMount) setHQStatus(hqStatus);
   }
 
   function hasHQFocusIntent() {
@@ -1685,11 +1740,17 @@
   var lastWorldLayout = null;
   var cameraSaveTimer = null;
 
+  // measured:false marks the DEFAULT_VIEWPORT fallback. Panning and drawing are
+  // happy with a placeholder size, but framing is not: a fit computed against
+  // the fallback is latched by ensureCamera and never recomputed, so it has to
+  // be able to tell a real measurement from a stand-in.
   function viewportSize(canvas) {
     var width = (canvas && canvas.clientWidth) || 0;
     var height = (canvas && canvas.clientHeight) || 0;
-    if (width <= 0 || height <= 0) return DEFAULT_VIEWPORT;
-    return { width: width, height: height };
+    if (width <= 0 || height <= 0) {
+      return { width: DEFAULT_VIEWPORT.width, height: DEFAULT_VIEWPORT.height, measured: false };
+    }
+    return { width: width, height: height, measured: true };
   }
 
   function setCamera(next, container) {
@@ -1797,7 +1858,14 @@
       return;
     }
     var canvas = container && container.querySelector && container.querySelector('.ws-map-canvas');
-    var fitted = fitBounds(lastWorldLayout.bounds, framedViewport(canvas));
+    var viewport = framedViewport(canvas);
+    // Wait for a real measurement. Mounting can run before the canvas has been
+    // laid out, and framing against the placeholder size latches a zoom that no
+    // later resize recomputes — the map then simply opens at the wrong scale,
+    // differently depending on how the frames fell. watchResize re-enters here
+    // when the canvas acquires its size, so the framing is deferred, not lost.
+    if (!viewport.measured) return;
+    var fitted = fitBounds(lastWorldLayout.bounds, viewport);
     // Fit All zooms in when there is little content; the opening view does not.
     // Landing at 200% on a two-workspace map is disorienting, and the button is
     // right there for anyone who wants it.
@@ -1942,6 +2010,17 @@
     var mode = opsModeLabel(ws.ops_mode);
     var hasKeeper = String(ws.entry_agent_name || '').trim() !== '';
     var isHQ = !!hqWorkspaceId && ws.id === hqWorkspaceId;
+    var buildingArt = window.OriWorkspaceBuildingArt;
+    var buildingVariant = isHQ
+      ? 'hq'
+      : buildingArt && typeof buildingArt.variantForWorkspace === 'function'
+        ? buildingArt.variantForWorkspace(ws)
+        : '';
+    var blueprintStructure =
+      buildingVariant && buildingArt && typeof buildingArt.svgForVariant === 'function'
+        ? buildingArt.svgForVariant(buildingVariant, { context: 'map' })
+        : '';
+    var structure = blueprintStructure || (isHQ ? structSVGHQ() : structSVG(pal));
     var isSel = selectedId && ws.id === selectedId;
     var selected = isSel ? ' is-selected' : '';
     var isMulti = !!multiSelected[ws.id];
@@ -2012,7 +2091,7 @@
       '</span>' +
       (hasKeeper ? '<span class="ws-map-tile-crest" title="Commander (locked)">★</span>' : '') +
       (isHQ ? '<span class="ws-map-tile-hq-badge" title="Personal HQ">HQ</span>' : '') +
-      (isHQ ? structSVGHQ() : structSVG(pal)) +
+      structure +
       '<span class="ws-map-tile-name">' +
       escapeHtml(ws.name || 'Workspace') +
       '</span>' +
@@ -2835,11 +2914,15 @@
       '<button type="button" class="ws-map-hq-action ws-map-hq-action-primary" data-hq-action="build">' +
       escapeHtml(primaryLabel) +
       ' ▸</button>' +
-      '<button type="button" class="ws-map-hq-action ws-map-hq-action-secondary" data-hq-action="import">Import HQ</button>' +
+      (view.showImport === false
+        ? ''
+        : '<button type="button" class="ws-map-hq-action ws-map-hq-action-secondary" data-hq-action="import">Import HQ</button>') +
       (view.repair
         ? '<button type="button" class="ws-map-hq-action ws-map-hq-action-quiet" data-hq-action="clear">Clear broken HQ link</button>'
         : view.showSkip
-          ? '<button type="button" class="ws-map-hq-action ws-map-hq-action-quiet" data-hq-action="skip">Not now</button>'
+          ? '<button type="button" class="ws-map-hq-action ws-map-hq-action-quiet" data-hq-action="skip">' +
+            (view.guided ? 'Do this later' : 'Not now') +
+            '</button>'
           : '') +
       '</div>'
     );
@@ -2987,7 +3070,13 @@
     // an animating rail costs one applyCamera per painted frame — a single
     // style write, no re-render.
     resizeObserver = new ResizeObserver(function () {
-      if (lastMount && lastMount.container === container) applyCamera(container);
+      if (!lastMount || lastMount.container !== container) return;
+      // A resize is also how the canvas first acquires a real size. ensureCamera
+      // defers its one framing until it can measure honestly, so this is the
+      // callback that lets it happen; it is a no-op once the camera is set, and
+      // deliberately never refits a camera the user has since moved (FR-106).
+      ensureCamera(container);
+      applyCamera(container);
     });
     resizeObserver.observe(container);
   }
@@ -4687,6 +4776,7 @@
     return {
       width: viewport.width,
       height: Math.max(CELL_H, viewport.height - CONTROL_STRIP_HEIGHT),
+      measured: viewport.measured,
       full: viewport
     };
   }
@@ -7494,6 +7584,9 @@
     hqSiteHTML: hqSiteHTML,
     hqOverviewHTML: hqOverviewHTML,
     setHQStatus: setHQStatus,
+    // Bounded relationship facts so the reserved site can name the hired
+    // assistant it belongs to. Presentation only.
+    setPersonalAssistant: setPersonalAssistant,
     // The one reconciled layout state both surfaces read. Exposed so Home and
     // the /workspaces launcher can reflect "positions cannot be saved right
     // now" without each keeping its own copy (FR-4, FR-105).

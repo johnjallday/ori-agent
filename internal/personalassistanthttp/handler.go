@@ -26,6 +26,13 @@ type StateReader interface {
 	Get(ctx context.Context, userID string) (*personalassistant.Projection, error)
 }
 
+// HQSetupService is the sole consequential Personal HQ boundary used by this
+// package. It is separate from HireService because the two consequences now
+// happen at different times and under different confirmations.
+type HQSetupService interface {
+	Setup(ctx context.Context, userID string, request personalassistant.HQSetupRequest) (*personalassistant.HQSetupResult, error)
+}
+
 // HireService is the sole consequential hire boundary used by this package.
 type HireService interface {
 	Hire(ctx context.Context, userID string, request personalassistant.HireRequest) (*personalassistant.HireResult, error)
@@ -62,6 +69,7 @@ type CapabilityReader interface {
 type Handler struct {
 	service                    StateReader
 	hirer                      HireService
+	hqSetup                    HQSetupService
 	assignments                AssignmentPreviewService
 	today                      TodayReader
 	continuity                 ContinuityService
@@ -83,6 +91,13 @@ func NewHandler(service StateReader, provider userprofile.UserProvider) *Handler
 func (h *Handler) SetHireService(hirer HireService) {
 	if h != nil {
 		h.hirer = hirer
+	}
+}
+
+// SetHQSetupService adds the post-hire Personal HQ mutation boundary.
+func (h *Handler) SetHQSetupService(hqSetup HQSetupService) {
+	if h != nil {
+		h.hqSetup = hqSetup
 	}
 }
 
@@ -171,26 +186,35 @@ func (h *Handler) GetToday(w http.ResponseWriter, r *http.Request) {
 }
 
 type hireRequest struct {
-	RequestID      string                 `json:"request_id"`
-	IfVersion      int64                  `json:"if_version"`
-	DisplayName    string                 `json:"display_name"`
-	Appearance     *types.AgentAppearance `json:"appearance"`
-	Mandate        string                 `json:"mandate"`
-	FocusAreas     []string               `json:"focus_areas"`
-	Timezone       string                 `json:"timezone"`
-	ScheduleDays   []string               `json:"schedule_days"`
-	ScheduleTime   string                 `json:"schedule_time"`
-	NotifyOnReady  bool                   `json:"notify_on_ready"`
-	SpecialistSlug string                 `json:"specialist_slug"`
+	RequestID   string                 `json:"request_id"`
+	IfVersion   int64                  `json:"if_version"`
+	DisplayName string                 `json:"display_name"`
+	Appearance  *types.AgentAppearance `json:"appearance"`
+	Mandate     string                 `json:"mandate"`
+	FocusAreas  []string               `json:"focus_areas"`
+
+	// Deprecated: a fresh hire collects no Daily Brief rhythm — the Map's HQ
+	// build form owns it, where it can be written against a real workspace ID.
+	// These fields are still decoded so a stale client's request is accepted and
+	// ignored rather than rejected outright; the coordinator drops them.
+	Timezone      string   `json:"timezone,omitempty"`
+	ScheduleDays  []string `json:"schedule_days,omitempty"`
+	ScheduleTime  string   `json:"schedule_time,omitempty"`
+	NotifyOnReady bool     `json:"notify_on_ready,omitempty"`
 }
 
+// hireResponse reports the durable identity a hire produced. HQ and Daily Brief
+// fields are omitted when empty: a fresh hire has neither, and claiming an empty
+// HQ would be exactly the fabrication the needs_hq state exists to avoid.
 type hireResponse struct {
 	Status                 personalassistant.RelationshipStatus    `json:"status"`
+	State                  personalassistant.APIState              `json:"state"`
+	NextAction             string                                  `json:"next_action"`
 	AssistantID            string                                  `json:"assistant_id"`
 	DisplayName            string                                  `json:"display_name"`
 	Appearance             *types.AgentAppearance                  `json:"appearance,omitempty"`
-	HQWorkspaceID          string                                  `json:"hq_workspace_id"`
-	HQEntryAgentInstanceID string                                  `json:"hq_entry_agent_instance_id"`
+	HQWorkspaceID          string                                  `json:"hq_workspace_id,omitempty"`
+	HQEntryAgentInstanceID string                                  `json:"hq_entry_agent_instance_id,omitempty"`
 	GlobalAgentProfileName string                                  `json:"global_agent_profile_name"`
 	StateVersion           int64                                   `json:"state_version"`
 	FirstAssignmentStatus  personalassistant.FirstAssignmentStatus `json:"first_assignment_status"`
@@ -232,12 +256,11 @@ func (h *Handler) Hire(w http.ResponseWriter, r *http.Request) {
 		Mandate: body.Mandate, FocusAreas: body.FocusAreas,
 		Timezone: body.Timezone, ScheduleDays: body.ScheduleDays,
 		ScheduleTime: body.ScheduleTime, NotifyOnReady: body.NotifyOnReady,
-		SpecialistSlug: body.SpecialistSlug,
 	})
 	if err != nil {
 		switch {
 		case errors.Is(err, personalassistant.ErrValidation):
-			writeHireError(w, http.StatusBadRequest, "invalid_hire_request", "Check the assistant name, working agreement, appearance, and Daily Brief rhythm.", false, nil)
+			writeHireError(w, http.StatusBadRequest, "invalid_hire_request", "Check the assistant name, working agreement, and appearance.", false, nil)
 		case errors.Is(err, personalassistant.ErrConflict), errors.Is(err, personalhq.ErrAssistantNameConflict):
 			writeHireError(w, http.StatusConflict, "hire_conflict", "This hire conflicts with the current assistant relationship. Refresh and try again.", false, nil)
 		default:
@@ -256,6 +279,110 @@ func (h *Handler) Hire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	orihttp.Created(w, map[string]any{"personal_assistant": response})
+}
+
+// hqSetupRequest is the bounded Build My HQ submission.
+//
+// Note what it cannot say: there is no assistant, profile, workspace, or
+// instance field. Those come from the server's own relationship record, so a
+// client cannot aim this operation at records it does not own.
+type hqSetupRequest struct {
+	RequestID string `json:"request_id"`
+	IfVersion int64  `json:"if_version"`
+
+	Name                    string   `json:"name"`
+	Timezone                string   `json:"timezone"`
+	ScheduleDays            []string `json:"schedule_days"`
+	ScheduleTime            string   `json:"schedule_time"`
+	Scope                   string   `json:"scope"`
+	SelectedWorkspaceIDs    []string `json:"selected_workspace_ids"`
+	IncludeFutureWorkspaces bool     `json:"include_future_workspaces"`
+	NotifyOnReady           bool     `json:"notify_on_ready"`
+}
+
+type hqSetupErrorResponse struct {
+	Error         string                       `json:"error"`
+	Code          string                       `json:"code"`
+	Retryable     bool                         `json:"retryable"`
+	RepairStep    personalassistant.RepairStep `json:"repair_step,omitempty"`
+	DurableResult *hireResponse                `json:"durable_result,omitempty"`
+}
+
+// SetupHQ handles POST /api/personal-assistant/hq: the one confirmed
+// consequence of the guided Map walkthrough.
+func (h *Handler) SetupHQ(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h == nil || h.hqSetup == nil || h.provider == nil {
+		orihttp.ServiceUnavailable(w, "personal assistant hq setup is unavailable")
+		return
+	}
+	var body hqSetupRequest
+	if err := decodeBoundedRequest(w, r, &body); err != nil {
+		writeHQSetupError(w, http.StatusBadRequest, "invalid_hq_setup_request",
+			"The Personal HQ request is invalid.", false, nil)
+		return
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+
+	result, err := h.hqSetup.Setup(r.Context(), userID, personalassistant.HQSetupRequest{
+		RequestID: body.RequestID, IfVersion: body.IfVersion,
+		HQName: body.Name, Timezone: body.Timezone,
+		ScheduleDays: body.ScheduleDays, ScheduleTime: body.ScheduleTime,
+		Scope: body.Scope, SelectedIDs: body.SelectedWorkspaceIDs,
+		IncludeFuture: body.IncludeFutureWorkspaces, NotifyOnReady: body.NotifyOnReady,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, personalassistant.ErrValidation):
+			writeHQSetupError(w, http.StatusBadRequest, "invalid_hq_setup_request",
+				"Check the Personal HQ name and the daily rhythm.", false, nil)
+		case errors.Is(err, personalassistant.ErrConflict), errors.Is(err, personalhq.ErrAssistantNameConflict):
+			writeHQSetupError(w, http.StatusConflict, "hq_setup_conflict",
+				"This request conflicts with your current Personal HQ setup. Refresh and try again.", false, nil)
+		case errors.Is(err, personalassistant.ErrRepairNeeded):
+			writeHQSetupError(w, http.StatusConflict, "hq_setup_repair_needed",
+				"Your Personal HQ setup needs repair before it can continue.", false, nil)
+		default:
+			var partial *personalassistant.PartialHQSetupError
+			if errors.As(err, &partial) {
+				// Durable partial: some canonical records exist. Retrying the SAME
+				// request finishes it, so this must never read as "start over".
+				writeHQSetupError(w, http.StatusServiceUnavailable, "hq_setup_partial",
+					"Part of your Personal HQ is already saved. Retry to finish setup.", true, partial)
+				return
+			}
+			writeHQSetupError(w, http.StatusServiceUnavailable, "hq_setup_unavailable",
+				"Building Personal HQ is temporarily unavailable. Retry this same request.", true, nil)
+		}
+		return
+	}
+
+	response := responseFromResult(&personalassistant.HireResult{
+		State: result.State, BriefConfig: result.BriefConfig, Resumed: result.Resumed,
+	})
+	if result.Resumed {
+		orihttp.Success(w, map[string]any{"personal_assistant": response})
+		return
+	}
+	orihttp.Created(w, map[string]any{"personal_assistant": response})
+}
+
+func writeHQSetupError(
+	w http.ResponseWriter, status int, code, message string,
+	retryable bool, partial *personalassistant.PartialHQSetupError,
+) {
+	response := hqSetupErrorResponse{Error: message, Code: code, Retryable: retryable}
+	if partial != nil {
+		response.RepairStep = partial.Step
+		response.DurableResult = responseFromResult(
+			&personalassistant.HireResult{State: partial.State, Resumed: true})
+	}
+	_ = orihttp.RespondJSON(w, status, response)
 }
 
 type assignmentPreviewRequest struct {
@@ -565,6 +692,10 @@ func (h *Handler) writeContinuityServiceError(w http.ResponseWriter, r *http.Req
 			current, _ = h.service.Get(r.Context(), userID)
 		}
 		writeContinuityError(w, http.StatusConflict, "state_conflict", "The assistant changed. Review the current values before applying your edit again.", current)
+	case errors.Is(err, personalassistant.ErrNeedsHQ):
+		// An expected setup stage, not corruption: never reuse repair language
+		// for a relationship that just has no Personal HQ yet.
+		writeContinuityError(w, http.StatusConflict, "personal_hq_required", "Build Personal HQ before changing this setting.", nil)
 	case errors.Is(err, personalassistant.ErrRepairNeeded), errors.Is(err, personalassistant.ErrNotFound):
 		writeContinuityError(w, http.StatusConflict, "repair_required", "The assistant relationship needs repair before this change can continue.", nil)
 	default:
@@ -610,7 +741,9 @@ func responseFromResult(result *personalassistant.HireResult) *hireResponse {
 	}
 	state := result.State
 	return &hireResponse{
-		Status: state.Status, AssistantID: state.AssistantID,
+		Status: state.Status, State: hireAPIState(state.Status),
+		NextAction:  hireNextAction(state.Status),
+		AssistantID: state.AssistantID,
 		DisplayName: state.DisplayName, Appearance: state.Appearance.Clone(),
 		HQWorkspaceID:          state.HQWorkspaceID,
 		HQEntryAgentInstanceID: state.HQEntryAgentInstanceID,
@@ -619,6 +752,47 @@ func responseFromResult(result *personalassistant.HireResult) *hireResponse {
 		FirstAssignmentStatus:  state.FirstAssignmentStatus,
 		SpecialistSlug:         state.SpecialistSlug,
 		HiredAt:                state.HiredAt, DailyBrief: result.BriefConfig, Resumed: result.Resumed,
+	}
+}
+
+// hireAPIState maps the durable status to the same public vocabulary
+// GET /api/personal-assistant uses, so a client never has to learn two names
+// for one stage.
+func hireAPIState(status personalassistant.RelationshipStatus) personalassistant.APIState {
+	switch status {
+	case personalassistant.StatusAwaitingHQ:
+		return personalassistant.APIStateNeedsHQ
+	case personalassistant.StatusProvisioningHQ:
+		return personalassistant.APIStateProvisioningHQ
+	case personalassistant.StatusActive:
+		return personalassistant.APIStateActive
+	case personalassistant.StatusPaused:
+		return personalassistant.APIStatePaused
+	case personalassistant.StatusRepairNeeded:
+		return personalassistant.APIStateRepairNeeded
+	case personalassistant.StatusNotHired:
+		return personalassistant.APIStateNeedsHire
+	default:
+		return personalassistant.APIStateHiring
+	}
+}
+
+func hireNextAction(status personalassistant.RelationshipStatus) string {
+	switch status {
+	case personalassistant.StatusAwaitingHQ:
+		return personalassistant.NextActionBuildHQ
+	case personalassistant.StatusProvisioningHQ:
+		return personalassistant.NextActionResumeHQ
+	case personalassistant.StatusActive:
+		return personalassistant.NextActionAsk
+	case personalassistant.StatusPaused:
+		return personalassistant.NextActionResume
+	case personalassistant.StatusRepairNeeded:
+		return personalassistant.NextActionRepair
+	case personalassistant.StatusNotHired:
+		return personalassistant.NextActionHire
+	default:
+		return personalassistant.NextActionResumeHire
 	}
 }
 

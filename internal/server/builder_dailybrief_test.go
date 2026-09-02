@@ -195,6 +195,66 @@ func TestDailyBrief_ScheduledSuccessCreatesExactlyOneActionCenterNotification(t 
 	}
 }
 
+// activateTestRelationshipWithHQ builds a real Personal HQ through the legacy
+// Build My HQ endpoint and binds the already-hired relationship to it, leaving
+// the relationship active.
+//
+// It stands in for the guided Map quest so tests whose subject is something
+// else — a context adapter, a brief projection — do not have to drive the whole
+// walkthrough. It is a fixture, not a claim about how HQ is really created:
+// the canonical path is POST /api/personal-assistant/hq.
+func activateTestRelationshipWithHQ(t *testing.T, builder *ServerBuilder, handler http.Handler, userID string) *personalassistant.State {
+	t.Helper()
+	ctx := context.Background()
+
+	setupReq := httptest.NewRequest(http.MethodPost, "/api/personal-hq/setup", bytes.NewBufferString(`{"name":"Personal HQ"}`))
+	setupReq.Header.Set("Content-Type", "application/json")
+	setupRec := httptest.NewRecorder()
+	handler.ServeHTTP(setupRec, setupReq)
+	if setupRec.Code != http.StatusOK {
+		t.Fatalf("build hq status = %d body=%s", setupRec.Code, setupRec.Body.String())
+	}
+	var setupResp struct {
+		Status struct {
+			WorkspaceID string `json:"workspace_id"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(setupRec.Body.Bytes(), &setupResp); err != nil {
+		t.Fatalf("decode build hq response: %v", err)
+	}
+
+	workspaceID := setupResp.Status.WorkspaceID
+	created, err := builder.sessionStore.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("load created hq: %v", err)
+	}
+	var entry session.AgentInstance
+	for _, instance := range created.AgentInstances {
+		if instance.EntryPoint {
+			entry = instance
+			break
+		}
+	}
+	if entry.ID == "" {
+		t.Fatal("created hq has no entry agent instance")
+	}
+
+	state, err := builder.personalAssistantStore.GetState(ctx, userID)
+	if err != nil {
+		t.Fatalf("load relationship: %v", err)
+	}
+	next := state.Clone()
+	next.Status = personalassistant.StatusActive
+	next.HQWorkspaceID = workspaceID
+	next.HQEntryAgentInstanceID = entry.ID
+	next.GlobalAgentProfileName = entry.Name
+	updated, err := builder.personalAssistantStore.UpdateState(ctx, next, state.StateVersion)
+	if err != nil {
+		t.Fatalf("bind relationship to hq: %v", err)
+	}
+	return updated
+}
+
 // TestReplaceNeverCopiesBriefHistoryToNewHQ covers task 8.4: replacing the
 // designated HQ must never carry the former HQ's brief config/history onto
 // the new one — dailybrief.Store keys everything by WorkspaceID, but this
@@ -203,17 +263,18 @@ func TestDailyBrief_ScheduledSuccessCreatesExactlyOneActionCenterNotification(t 
 // only at the storage layer.
 func TestPersonalAssistantContextReadsMemoryEditsAndDeletesOnNextTurn(t *testing.T) {
 	builder, handler := newDailyBriefTestServer(t)
-	hireReq := httptest.NewRequest(http.MethodPost, "/api/personal-assistant/hire", bytes.NewBufferString(`{"request_id":"memory-hire","if_version":0,"display_name":"Atlas","mandate":"Keep commitments visible.","focus_areas":["plan_my_day"],"timezone":"UTC","schedule_days":["mon"],"schedule_time":"08:00","notify_on_ready":false}`))
+	hireReq := httptest.NewRequest(http.MethodPost, "/api/personal-assistant/hire", bytes.NewBufferString(`{"request_id":"memory-hire","if_version":0,"display_name":"Atlas","mandate":"Keep commitments visible.","focus_areas":["plan_my_day"]}`))
 	hireReq.Header.Set("Content-Type", "application/json")
 	hireRec := httptest.NewRecorder()
 	handler.ServeHTTP(hireRec, hireReq)
 	if hireRec.Code != http.StatusCreated {
 		t.Fatalf("hire status=%d body=%s", hireRec.Code, hireRec.Body.String())
 	}
-	state, err := builder.personalAssistantStore.GetState(context.Background(), "local")
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Hiring no longer creates Personal HQ: that is the guided Map quest's
+	// separate, user-confirmed consequence. This test is about the context
+	// adapter reading HQ memory, so it takes the relationship to active state
+	// directly rather than driving the whole quest.
+	state := activateTestRelationshipWithHQ(t, builder, handler, "local")
 	memory := workspace.NewMemoryStore(builder.workspaceFileStore)
 	if err := memory.Append(state.HQWorkspaceID, workspace.MemoryEntry{Type: workspace.MemoryTypeFact, Date: "2026-09-01", Provenance: "user", Text: "Launch review is Thursday"}); err != nil {
 		t.Fatal(err)

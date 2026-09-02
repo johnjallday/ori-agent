@@ -733,9 +733,17 @@ func TestConcurrentLifecycleChangesAreSafeDuringCatalogAssetStatusAndOperationRe
 		}
 	}
 	wait.Add(5)
+	// 410 is as correct here as 404. The lifecycle goroutine below keeps
+	// retiring and re-registering the owner, so a request can arrive holding a
+	// session whose generation has just been superseded — which FrameAsset and
+	// Operation answer with session_invalidated rather than session_unknown.
+	// Both are the contract under this race; only a status outside the set is a
+	// defect.
 	go runRequests("catalog/status", http.MethodGet, catalogPath, "", http.StatusOK)
-	go runRequests("asset", http.MethodGet, opened.FrameURL, "", http.StatusOK, http.StatusNotFound)
-	go runRequests("operation", http.MethodPost, "/api/workspace-surfaces/operations", operationBody, http.StatusOK, http.StatusNotFound)
+	go runRequests("asset", http.MethodGet, opened.FrameURL, "",
+		http.StatusOK, http.StatusNotFound, http.StatusGone)
+	go runRequests("operation", http.MethodPost, "/api/workspace-surfaces/operations", operationBody,
+		http.StatusOK, http.StatusNotFound, http.StatusGone)
 	go runRequests("session", http.MethodPost, openPath, "", http.StatusCreated, http.StatusNotFound)
 	go func() {
 		defer wait.Done()

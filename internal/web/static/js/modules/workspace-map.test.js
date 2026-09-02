@@ -4,6 +4,10 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const source = readFileSync(new URL('./workspace-map.js', import.meta.url), 'utf8');
+const buildingArtSource = readFileSync(
+  new URL('./workspace-building-art.js', import.meta.url),
+  'utf8'
+);
 const portraitSource = readFileSync(
   new URL('./workspace-agent-portrait.js', import.meta.url),
   'utf8'
@@ -19,6 +23,7 @@ function loadComputeLayout() {
   const window = {};
   const sandbox = { window, document: {} };
   vm.runInNewContext(portraitSource, sandbox, { filename: 'workspace-agent-portrait.js' });
+  vm.runInNewContext(buildingArtSource, sandbox, { filename: 'workspace-building-art.js' });
   vm.runInNewContext(source, sandbox, { filename: 'workspace-map.js' });
   return window.OriWorkspaceMap.computeLayout;
 }
@@ -28,6 +33,7 @@ function loadOriWorkspaceMap() {
   const window = {};
   const sandbox = { window, document: {} };
   vm.runInNewContext(portraitSource, sandbox, { filename: 'workspace-agent-portrait.js' });
+  vm.runInNewContext(buildingArtSource, sandbox, { filename: 'workspace-building-art.js' });
   vm.runInNewContext(source, sandbox, { filename: 'workspace-map.js' });
   return window.OriWorkspaceMap;
 }
@@ -1488,6 +1494,99 @@ test('hqOverviewHTML offers setup actions, hides Not now after skip, and offers 
   assert.doesNotMatch(repair, /data-hq-action="skip"/);
 });
 
+test('the reserved site names the hired assistant while it has no home base', () => {
+  const map = loadOriWorkspaceMap();
+  map.setPersonalAssistant({ state: 'needs_hq', display_name: 'Atlas' });
+
+  const view = map.hqSiteView({ valid: false, hq_onboarding_state: 'unseen' });
+  assert.equal(view.show, true);
+  assert.equal(view.guided, true);
+  assert.equal(view.assistantName, 'Atlas');
+  assert.match(view.title, /Build Atlas’s Personal HQ/);
+  assert.match(view.detail, /Atlas is hired and has no home base yet/);
+  assert.match(view.detail, /daily brief/);
+
+  const html = map.hqOverviewHTML(view);
+  assert.match(html, /data-hq-action="build"/);
+  assert.match(html, /Build My HQ/);
+  // Do this later, not "Not now": the walkthrough's own wording.
+  assert.match(html, /data-hq-action="skip"/);
+  assert.match(html, /Do this later/);
+  // Import would silently rebind an existing workspace as the hired
+  // assistant's HQ, so it is withdrawn during the guided stage only.
+  assert.doesNotMatch(html, /data-hq-action="import"/);
+});
+
+test('an already-deferred guided site keeps Build but drops Do this later', () => {
+  const map = loadOriWorkspaceMap();
+  map.setPersonalAssistant({ state: 'needs_hq', display_name: 'Atlas' });
+  const view = map.hqSiteView({ valid: false, hq_onboarding_state: 'skipped' });
+  // Still the guided stage — the assistant still has no home base — so the copy
+  // still names it and Build is still the only creation path.
+  assert.equal(view.guided, true);
+  assert.match(view.title, /Build Atlas’s Personal HQ/);
+  const html = map.hqOverviewHTML(view);
+  assert.match(html, /data-hq-action="build"/);
+  assert.doesNotMatch(html, /data-hq-action="import"/);
+  // There is nothing left to defer; Home carries the Resume mission instead.
+  assert.doesNotMatch(html, /data-hq-action="skip"/);
+});
+
+test('a resumable HQ setup is treated as the same guided stage', () => {
+  const map = loadOriWorkspaceMap();
+  map.setPersonalAssistant({ state: 'provisioning_hq', display_name: 'Atlas' });
+  assert.equal(map.hqSiteView({ valid: false, hq_onboarding_state: 'unseen' }).guided, true);
+});
+
+test('the reserved site keeps its existing copy outside the guided stage', () => {
+  const map = loadOriWorkspaceMap();
+  const generic = map.hqSiteView({ valid: false, hq_onboarding_state: 'unseen' });
+  assert.equal(generic.guided, undefined);
+  assert.equal(generic.title, 'Personal HQ has not been created');
+  assert.match(map.hqOverviewHTML(generic), /data-hq-action="import"/);
+  assert.match(map.hqOverviewHTML(generic), /Not now/);
+
+  for (const state of ['active', 'needs_hire', 'hiring', 'repair_needed']) {
+    map.setPersonalAssistant({ state, display_name: 'Atlas' });
+    const view = map.hqSiteView({ valid: false, hq_onboarding_state: 'unseen' });
+    assert.equal(view.guided, undefined, `${state} was treated as the guided stage`);
+    assert.equal(view.title, 'Personal HQ has not been created');
+    assert.match(map.hqOverviewHTML(view), /data-hq-action="import"/);
+  }
+});
+
+test('a broken HQ keeps repair copy even for a hired assistant', () => {
+  // Repair is a different problem from "never built", and the guided stage must
+  // not paper over it with build-a-home-base copy.
+  const map = loadOriWorkspaceMap();
+  map.setPersonalAssistant({ state: 'needs_hq', display_name: 'Atlas' });
+  const repair = map.hqSiteView({ valid: false, workspace_id: 'gone' });
+  assert.equal(repair.guided, undefined);
+  assert.equal(repair.title, 'Personal HQ needs repair');
+  const html = map.hqOverviewHTML(repair);
+  assert.match(html, /Build replacement HQ/);
+  assert.match(html, /data-hq-action="clear"/);
+});
+
+test('a hostile assistant name is escaped in the reserved site markup', () => {
+  const map = loadOriWorkspaceMap();
+  map.setPersonalAssistant({
+    state: 'needs_hq',
+    display_name: '<img src=x onerror=alert(1)>'
+  });
+  const html = map.hqOverviewHTML(map.hqSiteView({ valid: false, hq_onboarding_state: 'unseen' }));
+  assert.doesNotMatch(html, /<img/);
+  assert.match(html, /&lt;img/);
+});
+
+test('clearing the relationship returns the reserved site to generic copy', () => {
+  const map = loadOriWorkspaceMap();
+  map.setPersonalAssistant({ state: 'needs_hq', display_name: 'Atlas' });
+  assert.equal(map.hqSiteView({ valid: false }).guided, true);
+  map.setPersonalAssistant(null);
+  assert.equal(map.hqSiteView({ valid: false }).guided, undefined);
+});
+
 // #367: the ordinary New Workspace pad used to take an anchor of its own from
 // the same placement scan. Removing it has to remove the ANCHOR too, not just
 // the markup: an allocated-but-undrawn site would keep pushing Fit all and the
@@ -1528,6 +1627,52 @@ test('tileHTML meta line reflects enriched agent/task counts with correct plural
     row: 0
   });
   assert.match(singular, /ws-map-tile-meta">1 agent · 1 task</);
+});
+
+test('tileHTML uses built-in blueprint provenance for a specialized building', () => {
+  const { tileHTML } = loadOriWorkspaceMap();
+  const html = tileHTML({
+    ws: {
+      id: 'mail-1',
+      name: 'Email Ops',
+      blueprint_id: 'email-ops',
+      blueprint_builtin: true
+    },
+    col: 0,
+    row: 0
+  });
+
+  assert.match(html, /data-building-variant="mail"/);
+  assert.match(html, /data-building-emblem="mail"/);
+});
+
+test('tileHTML keeps custom and unknown blueprints on the generic building', () => {
+  const { tileHTML } = loadOriWorkspaceMap();
+  const custom = tileHTML({
+    ws: {
+      id: 'custom-1',
+      name: 'Custom Email',
+      blueprint_id: 'email-ops',
+      blueprint_builtin: false
+    },
+    col: 0,
+    row: 0
+  });
+  const unknown = tileHTML({
+    ws: {
+      id: 'unknown-1',
+      name: 'Future',
+      blueprint_id: 'future-blueprint',
+      blueprint_builtin: true
+    },
+    col: 0,
+    row: 0
+  });
+
+  assert.doesNotMatch(custom, /data-building-variant=/);
+  assert.match(custom, /<svg class="ws-map-struct"/);
+  assert.doesNotMatch(unknown, /data-building-variant=/);
+  assert.match(unknown, /<svg class="ws-map-struct"/);
 });
 
 test('tileHTML LED and entry-agent crest reflect active state and entry_agent_name', () => {
@@ -2028,6 +2173,8 @@ test('tileHTML marks the designated Personal HQ workspace with a badge, aria-lab
   const hqTile = api.tileHTML({ ws: { id: 'ws-hq', name: 'Command Post' }, col: 0, row: 0 });
   assert.match(hqTile, /ws-map-tile is-hq/);
   assert.match(hqTile, /ws-map-tile-hq-badge/);
+  assert.match(hqTile, /data-building-variant="hq"/);
+  assert.match(hqTile, /data-building-emblem="hq"/);
   assert.match(hqTile, />HQ</);
   assert.match(hqTile, /, Personal HQ/);
 
@@ -3172,6 +3319,9 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
   return {
     container,
     world,
+    // Exposed so a test can model a canvas that has not been laid out yet and
+    // then give it a size, which is how the real page behaves on first mount.
+    canvas,
     styleProps,
     classes,
     control,
@@ -3227,6 +3377,60 @@ test('a saved camera is restored instead of refitting (FR-43, FR-45)', async () 
 
   assert.deepEqual({ ...map.getCamera() }, { centerX: 640, centerY: 480, zoom: 1.5 });
   assert.match(harness.world.style.transform, /scale\(1\.5\)/);
+});
+
+test('the opening framing waits for a real measurement instead of latching a guess (FR-106)', async () => {
+  // ensureCamera frames exactly once and nothing refits afterwards, so framing
+  // against the placeholder size used for an unlaid-out canvas would leave the
+  // map permanently at the wrong zoom — and at a different wrong zoom depending
+  // on whether layout happened to have run, which is how it reached CI as a
+  // non-deterministic screenshot rather than as a visible bug.
+  const map = loadMapWithFetch(() =>
+    jsonResponse({ schema_version: 1, positions: { 'ws-1': { x: 4000, y: 3000 } } })
+  );
+  const harness = createCameraHarness({ width: 1000, height: 600, tiles: ['ws-1'] });
+  harness.canvas.clientWidth = 0;
+  harness.canvas.clientHeight = 0;
+
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+  const unmeasured = map.getCamera();
+
+  // The canvas is laid out and the map reconciles into it.
+  harness.canvas.clientWidth = 1000;
+  harness.canvas.clientHeight = 600;
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+  const measured = map.getCamera();
+
+  assert.notDeepEqual(
+    { ...measured },
+    { ...unmeasured },
+    'the framing must happen on the honest measurement, not before it'
+  );
+  // And it framed the content that exists, rather than a default corner.
+  const screen = map.camera.worldToScreen({ x: 4000, y: 3000 }, measured, {
+    width: 1000,
+    height: 600
+  });
+  assert.ok(screen.x > 0 && screen.x < 1000, 'x on screen: ' + screen.x);
+  assert.ok(screen.y > 0 && screen.y < 600, 'y on screen: ' + screen.y);
+});
+
+test('a camera framed on a real measurement is not refitted by a later mount (FR-106)', async () => {
+  const map = loadMapWithFetch(() =>
+    jsonResponse({ schema_version: 1, positions: { 'ws-1': { x: 4000, y: 3000 } } })
+  );
+  const harness = createCameraHarness({ width: 1000, height: 600, tiles: ['ws-1'] });
+
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+  const first = map.getCamera();
+
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+
+  assert.deepEqual({ ...map.getCamera() }, { ...first }, 'the camera survives a re-mount');
 });
 
 test('an invalid saved camera opens on a sensible view instead of nowhere (FR-45)', async () => {

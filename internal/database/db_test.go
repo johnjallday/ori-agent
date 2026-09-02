@@ -733,6 +733,7 @@ func TestMigration046CreatesPersonalAssistantFoundationSchema(t *testing.T) {
 		"last_hire_request_id": false, "hire_payload_hash": false,
 		"hire_payload_json": false, "repair_step": false,
 		"rename_from_name": false, "rename_to_name": false, "rename_step": false, "state_version": false,
+		"last_hq_request_id": false, "hq_payload_hash": false, "hq_payload_json": false,
 		"hired_at": false, "created_at": false, "updated_at": false,
 	}
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(personal_assistant_state)`)

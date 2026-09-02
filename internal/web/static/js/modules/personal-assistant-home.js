@@ -9,6 +9,9 @@ export function personalAssistantTodayView(today) {
     paused: state === 'paused',
     partial: state === 'partial',
     needsHire: state === 'needs_hire',
+    // A real hire with no home base yet. The name/appearance are already
+    // trustworthy at this point — only the HQ-backed sections are missing.
+    needsHQ: state === 'needs_hq',
     repair: state === 'repair_needed',
     unavailable: state === 'unavailable',
     modelUnavailable: state === 'model_unavailable',
@@ -185,6 +188,14 @@ function renderToday(today) {
   if (view.repair) {
     els.banner.textContent =
       'Your existing assistant or Personal HQ needs repair before work can continue.';
+  } else if (view.needsHQ) {
+    els.banner.replaceChildren(
+      `${view.displayName} is hired and needs a home base before Today can prepare a brief. `
+    );
+    const link = document.createElement('a');
+    link.href = '/?quest=build-hq';
+    link.textContent = 'Build Personal HQ';
+    els.banner.append(link);
   } else if (view.needsHire) {
     els.banner.textContent = 'Hire your personal assistant to start Today.';
   } else if (view.unavailable) {
@@ -223,8 +234,15 @@ function renderRelationship(personalAssistant, view) {
   }
   els.root.hidden = false;
   els.root.dataset.state = 'loading';
-  els.eyebrow.textContent = view.available ? `Today from ${view.name}` : 'Your personal assistant';
-  els.title.textContent = view.available ? 'Loading Today…' : 'Hire your personal assistant';
+  // A hired assistant with no HQ yet already has a real, trustworthy name —
+  // unlike needsHire, where nothing has been chosen yet.
+  const named = view.available || view.needsHQ;
+  els.eyebrow.textContent = named ? `Today from ${view.name}` : 'Your personal assistant';
+  els.title.textContent = view.available
+    ? 'Loading Today…'
+    : view.needsHQ
+      ? `Build ${view.name}’s Personal HQ`
+      : 'Hire your personal assistant';
   els.meta.textContent = '';
   els.sections.hidden = !view.available;
   if (view.repair) {
@@ -234,6 +252,17 @@ function renderRelationship(personalAssistant, view) {
     link.href = '/?hire=1';
     link.textContent = 'Repair personal assistant';
     els.banner.append('Your existing assistant or Personal HQ needs repair. ', link);
+    return;
+  }
+  if (view.needsHQ) {
+    els.banner.replaceChildren();
+    const link = document.createElement('a');
+    link.href = '/?quest=build-hq';
+    link.textContent = 'Build Personal HQ';
+    els.banner.append(
+      `${view.name} is hired and needs a home base before Today can prepare a brief. `,
+      link
+    );
     return;
   }
   if (!view.available) {

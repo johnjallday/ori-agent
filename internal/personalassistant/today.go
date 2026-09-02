@@ -175,6 +175,13 @@ func (s *TodayService) Get(ctx context.Context, userID string) (*TodayProjection
 	case APIStateNeedsHire, APIStateHiring:
 		out.State = "needs_hire"
 		return out, nil
+	case APIStateNeedsHQ, APIStateProvisioningHQ:
+		// A genuinely hired assistant with no HQ. Today must not fetch or imply
+		// an empty HQ record — there is nothing to fetch yet — and it must not
+		// read as broken: this is an expected setup stage.
+		out.State = "needs_hq"
+		out.Links = TodayLinks{PersonalHQ: "/?quest=build-hq", Advanced: "/agents"}
+		return out, nil
 	case APIStateRepairNeeded:
 		out.State = "repair_needed"
 		return out, nil

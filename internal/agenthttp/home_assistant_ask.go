@@ -213,13 +213,13 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		}
 	}
 	if workContext != nil && workContext.NeedsHireOrRepair() {
-		label := "Hire your personal assistant"
-		if workContext.State == "hiring" || workContext.State == "repair_needed" {
-			label = "Resume personal assistant setup"
-		}
+		guidance := personalAssistantSetupGuidance(workContext)
 		return HomeAssistantAskResponse{
-			Response: "Finish personal assistant setup before sending work. Nothing has been routed or changed.", Intent: intent,
-			Actions: []HomeAction{{ID: "nav-personal-assistant-setup", Type: HomeActionNavigate, Label: label, Href: "/?hire=1"}},
+			Response: guidance.Response, Intent: intent,
+			Actions: []HomeAction{{
+				ID: guidance.ActionID, Type: guidance.ActionType,
+				Label: guidance.Label, Href: guidance.Href,
+			}},
 		}
 	}
 	identity := homeAssistantIdentity(workContext)

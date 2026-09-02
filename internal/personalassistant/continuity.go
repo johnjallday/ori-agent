@@ -173,6 +173,9 @@ func (s *ContinuityService) mutableState(ctx context.Context, userID string, ifV
 	if state.StateVersion != ifVersion {
 		return nil, fmt.Errorf("%w: expected state version %d", ErrConflict, ifVersion)
 	}
+	if state.Status == StatusAwaitingHQ || state.Status == StatusProvisioningHQ {
+		return nil, ErrNeedsHQ
+	}
 	if state.Status != StatusActive && state.Status != StatusPaused {
 		return nil, ErrRepairNeeded
 	}

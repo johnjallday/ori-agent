@@ -297,6 +297,7 @@ type ServerBuilder struct {
 	personalAssistantStore   *personalassistant.SQLiteStore
 	personalAssistantService *personalassistant.Service
 	personalAssistantHire    *personalassistant.HireCoordinator
+	personalAssistantHQSetup *personalassistant.HQSetupCoordinator
 	personalAssistantMemory  *personalassistant.MemoryService
 	personalAssignment       *personalassistant.AssignmentService
 	personalAssistantHandler *personalassistanthttp.Handler

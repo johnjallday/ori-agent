@@ -2,6 +2,8 @@ package database
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -10,7 +12,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 52
+const schemaVersion = 53
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -168,7 +170,9 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 	case 51:
 		return db.migration051PersonalAssistantRenameJournal(ctx)
 	case 52:
-		return db.migration052PersonalAssistantSpecialist(ctx)
+		return db.migration052PersonalAssistantHQSetup(ctx)
+	case 53:
+		return db.migration053PersonalAssistantSpecialist(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -1794,22 +1798,144 @@ func (db *DB) migration051PersonalAssistantRenameJournal(ctx context.Context) er
 	return nil
 }
 
-// migration052PersonalAssistantSpecialist records which domain specialist the
-// user accepted during the hire, so post-hire surfaces can shape themselves
-// without re-running application detection.
+// migration052PersonalAssistantHQSetup makes hiring and Personal HQ creation
+// two separate consequences.
 //
-// The column is additive and defaults to empty: every existing relationship
-// reads as "no specialist" and keeps today's behaviour with no backfill. The
-// table remains one row per user; nothing about its identity changes.
-func (db *DB) migration052PersonalAssistantSpecialist(ctx context.Context) error {
+// It widens the closed personal_assistant_state.status constraint with the two
+// post-hire setup stages (awaiting_hq, provisioning_hq) and adds the bounded HQ
+// setup operation journal used to make one confirmed Build My HQ request
+// idempotent and restart-resumable.
+//
+// The journal stores only a request ID, a normalized payload hash, and the
+// provisional normalized payload. The payload is cleared back to its receipt
+// once the canonical workspace and Daily Brief configuration exist, so PAF
+// never keeps a permanent duplicate of the Daily Brief schedule.
+//
+// SQLite cannot alter a CHECK constraint in place, so the parent table is
+// rebuilt. Every existing row, timestamp, state version, and bounded operation
+// field is copied verbatim; the child assignment journal keeps its foreign key
+// because it references the table by name, and foreign_key_check verifies that
+// before the rebuild is accepted.
+func (db *DB) migration052PersonalAssistantHQSetup(ctx context.Context) error {
 	exists, err := db.tableExists(ctx, "personal_assistant_state")
 	if err != nil || !exists {
 		return err
 	}
-	if _, execErr := db.ExecContext(ctx, `
-		ALTER TABLE personal_assistant_state ADD COLUMN specialist_slug TEXT NOT NULL DEFAULT ''
-	`); execErr != nil && !isDuplicateColumnError(execErr) {
-		return fmt.Errorf("failed to add personal_assistant_state.specialist_slug column: %w", execErr)
+
+	// The pool is pinned to a single connection, so these pragmas apply to the
+	// same session as the rebuild below.
+	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		return fmt.Errorf("failed to suspend foreign keys for personal assistant hq setup: %w", err)
+	}
+	restore := func() error {
+		if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
+			return fmt.Errorf("failed to restore foreign keys after personal assistant hq setup: %w", err)
+		}
+		return nil
+	}
+
+	columns := `user_id, assistant_id, status, display_name, appearance_json,
+		hq_workspace_id, hq_entry_agent_instance_id, global_agent_profile_name,
+		mandate, focus_areas_json, first_assignment_status,
+		last_hire_request_id, hire_payload_hash, hire_payload_json, repair_step,
+		rename_from_name, rename_to_name, rename_step,
+		state_version, hired_at, created_at, updated_at`
+
+	statements := []string{
+		`CREATE TABLE personal_assistant_state_v52 (
+			user_id TEXT PRIMARY KEY,
+			assistant_id TEXT NOT NULL UNIQUE,
+			status TEXT NOT NULL DEFAULT 'not_hired'
+				CHECK (status IN ('not_hired', 'hiring', 'awaiting_hq', 'provisioning_hq',
+					'active', 'paused', 'repair_needed')),
+			display_name TEXT NOT NULL DEFAULT '',
+			appearance_json TEXT NOT NULL DEFAULT '{}',
+			hq_workspace_id TEXT NOT NULL DEFAULT '',
+			hq_entry_agent_instance_id TEXT NOT NULL DEFAULT '',
+			global_agent_profile_name TEXT NOT NULL DEFAULT '',
+			mandate TEXT NOT NULL DEFAULT '',
+			focus_areas_json TEXT NOT NULL DEFAULT '[]',
+			first_assignment_status TEXT NOT NULL DEFAULT 'not_started'
+				CHECK (first_assignment_status IN ('not_started', 'previewed', 'applying', 'completed', 'failed')),
+			last_hire_request_id TEXT NOT NULL DEFAULT '',
+			hire_payload_hash TEXT NOT NULL DEFAULT '',
+			hire_payload_json TEXT NOT NULL DEFAULT '',
+			repair_step TEXT NOT NULL DEFAULT '',
+			rename_from_name TEXT NOT NULL DEFAULT '',
+			rename_to_name TEXT NOT NULL DEFAULT '',
+			rename_step TEXT NOT NULL DEFAULT '',
+			last_hq_request_id TEXT NOT NULL DEFAULT '',
+			hq_payload_hash TEXT NOT NULL DEFAULT '',
+			hq_payload_json TEXT NOT NULL DEFAULT '',
+			state_version INTEGER NOT NULL DEFAULT 1 CHECK (state_version > 0),
+			hired_at DATETIME,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			UNIQUE (user_id, assistant_id)
+		)`,
+		`INSERT INTO personal_assistant_state_v52 (` + columns + `)
+			SELECT ` + columns + ` FROM personal_assistant_state`,
+		`DROP TABLE personal_assistant_state`,
+		`ALTER TABLE personal_assistant_state_v52 RENAME TO personal_assistant_state`,
+	}
+	// The rebuild runs as one transaction so a failure between DROP and RENAME
+	// cannot leave the relationship table missing. The pragma above is
+	// deliberately outside it — foreign_keys is a no-op inside a transaction.
+	if txErr := db.InTransaction(ctx, func(tx *sql.Tx) error {
+		for _, statement := range statements {
+			if _, execErr := tx.ExecContext(ctx, statement); execErr != nil {
+				return execErr
+			}
+		}
+		return nil
+	}); txErr != nil {
+		_ = restore()
+		return fmt.Errorf("failed to rebuild personal_assistant_state for hq setup: %w", txErr)
+	}
+
+	var orphanTable, orphanParent sql.NullString
+	var orphanRowID, orphanFKID sql.NullInt64
+	row := db.QueryRowContext(ctx, `PRAGMA foreign_key_check`)
+	switch scanErr := row.Scan(&orphanTable, &orphanRowID, &orphanParent, &orphanFKID); {
+	case scanErr == nil:
+		_ = restore()
+		return fmt.Errorf("personal assistant hq setup rebuild orphaned rows in %s", orphanTable.String)
+	case errors.Is(scanErr, sql.ErrNoRows):
+		// No violations: the child journal still resolves to the rebuilt parent.
+	default:
+		_ = restore()
+		return fmt.Errorf("failed to verify personal assistant foreign keys: %w", scanErr)
+	}
+
+	return restore()
+}
+
+// migration053PersonalAssistantSpecialist records the domain specialist offer's
+// outcome, so post-hire surfaces can shape themselves without re-running
+// application detection.
+//
+// Both columns are additive and default to empty: every existing relationship
+// reads as "never offered, no specialist" and keeps today's behaviour with no
+// backfill. The table remains one row per user; nothing about its identity
+// changes.
+func (db *DB) migration053PersonalAssistantSpecialist(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "personal_assistant_state")
+	if err != nil || !exists {
+		return err
+	}
+	for _, statement := range []struct {
+		sql, label string
+	}{
+		// The accepted domain, "" when none was accepted.
+		{`ALTER TABLE personal_assistant_state ADD COLUMN specialist_slug TEXT NOT NULL DEFAULT ''`, "specialist_slug"},
+		// Whether the offer has been answered at all: "" (not yet), "accepted",
+		// or "declined". Kept separate from the slug so a decline is remembered
+		// and never re-asked, which an empty slug alone cannot express.
+		{`ALTER TABLE personal_assistant_state ADD COLUMN specialist_offer_state TEXT NOT NULL DEFAULT ''`, "specialist_offer_state"},
+	} {
+		if _, execErr := db.ExecContext(ctx, statement.sql); execErr != nil && !isDuplicateColumnError(execErr) {
+			return fmt.Errorf("failed to add personal_assistant_state.%s column: %w", statement.label, execErr)
+		}
 	}
 	return nil
 }

@@ -363,6 +363,7 @@
   <script defer src="/js/modules/sessions.js"></script>
   <script defer src="/js/modules/plugin-lifecycle.js"></script>
   <script defer src="/js/modules/blueprint-readiness.js"></script>
+  <script defer src="/js/modules/workspace-building-art.js"></script>
   <script defer src="/js/modules/project-templates-manage.js"></script>
   <script defer src="/js/modules/toast.js"></script>
   <script defer src="/js/modules/voice-input.js"></script>
@@ -389,5 +390,19 @@
   <script type="module" src="/js/modules/home-calendar-ops-portal.js"></script>
   <script type="module" src="/js/modules/progression-widget.js"></script>
   <script type="module" src="/js/modules/personal-hq-onboarding.js"></script>
+  <!--
+    Ori's Personal HQ walkthrough. Loaded last on purpose: it reads
+    window.OriHomeCockpit and window.OriGuide, and listens to events the Map and
+    the Personal HQ controller above emit.
+
+    type="module", NOT defer: every deferred classic script runs BEFORE the first
+    module, so a deferred walkthrough would initialize while OriHomeCockpit was
+    still undefined and would silently fail to open Map view. Modules run in
+    document order, so being last here means being last overall.
+
+    It is purely additive — removing this one line leaves the Map and Build My HQ
+    fully functional.
+  -->
+  <script type="module" src="/js/modules/personal-hq-quest.js"></script>
 </body>
 </html>

@@ -1,6 +1,7 @@
 package agenthttp
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -183,7 +184,7 @@ func (h *Handler) HandleBulk(w http.ResponseWriter, r *http.Request) {
 // a per-agent result. Eligibility is re-checked here (not trusted from the
 // client preview) immediately before deletion (PRD FR40).
 func (h *Handler) bulkDeleteOne(r *http.Request, name string) bulkResult {
-	if code, msg := h.checkAgentDeletable(name); code != "" {
+	if code, msg := h.checkAgentDeletable(r.Context(), name); code != "" {
 		return bulkResult{Name: name, Status: bulkStatusSkipped, ReasonCode: code, Message: msg}
 	}
 	if err := h.performAgentDeletion(r.Context(), name); err != nil {
@@ -283,7 +284,7 @@ func (h *Handler) persistMetadataMutation(name string, ag *agent.Agent, fields [
 // stable reason code + message identifying why it must be skipped. Shared by the
 // single-agent DELETE handler's guard intent and the bulk delete path so the two
 // cannot drift (PRD FR36–FR38).
-func (h *Handler) checkAgentDeletable(name string) (reasonCode, message string) {
+func (h *Handler) checkAgentDeletable(ctx context.Context, name string) (reasonCode, message string) {
 	if isSystemAssistantAgent(name) {
 		return reasonProtectedAgent, "The system assistant cannot be deleted."
 	}
@@ -292,6 +293,12 @@ func (h *Handler) checkAgentDeletable(name string) (reasonCode, message string) 
 	}
 	if _, ok := h.State.GetAgent(name); !ok {
 		return reasonAgentNotFound, "Agent not found."
+	}
+	// A hired assistant with no Personal HQ yet is attached to nothing, so the
+	// membership check below cannot protect it. Bulk delete must not be the way
+	// around the single-agent guard.
+	if h.support.protectsHiredProfile(ctx, name) {
+		return reasonProtectedAgent, hiredProfileGuardMessage
 	}
 	if m := workspace.WorkspaceMembershipFor(h.workspaceStore, name); m.Count > 0 {
 		return reasonAttachedAgent, fmt.Sprintf("Attached to %d workspace(s); detach it before deleting.", m.Count)

@@ -9,8 +9,120 @@ import {
   followUpView,
   followUpCategoryLabel,
   journalPromptView,
-  hqWorkspaceRootView
+  hqWorkspaceRootView,
+  hqBuildTarget,
+  hqBuildAssistantCopy,
+  hqBuildRequestPayload
 } from './personal-hq-onboarding.js';
+
+test('hqBuildTarget routes a hired assistant with no home base to the PAF endpoint', () => {
+  const target = hqBuildTarget({
+    state: 'needs_hq',
+    display_name: 'Atlas',
+    state_version: 4
+  });
+  assert.equal(target.paf, true);
+  assert.equal(target.endpoint, '/api/personal-assistant/hq');
+  assert.equal(target.stateVersion, 4);
+  assert.equal(target.assistantName, 'Atlas');
+  assert.equal(target.resuming, false);
+});
+
+test('hqBuildTarget treats a resumable setup as the same endpoint, marked resuming', () => {
+  const target = hqBuildTarget({
+    state: 'provisioning_hq',
+    display_name: 'Atlas',
+    state_version: 6
+  });
+  assert.equal(target.paf, true);
+  assert.equal(target.endpoint, '/api/personal-assistant/hq');
+  assert.equal(target.resuming, true);
+});
+
+test('hqBuildTarget keeps every other state on the unchanged legacy endpoint', () => {
+  for (const state of ['active', 'paused', 'needs_hire', 'hiring', 'repair_needed', '']) {
+    const target = hqBuildTarget({ state, display_name: 'Atlas', state_version: 9 });
+    assert.equal(target.paf, false, `${state} was routed to the PAF endpoint`);
+    assert.equal(target.endpoint, '/api/personal-hq/setup');
+    assert.equal(target.stateVersion, 0);
+  }
+  // An unreadable relationship falls back to legacy, which creates a workspace
+  // without claiming to attach an assistant to it.
+  assert.equal(hqBuildTarget(null).endpoint, '/api/personal-hq/setup');
+  assert.equal(hqBuildTarget(undefined).paf, false);
+});
+
+test('hqBuildAssistantCopy names the relationship and states the confirmation boundary', () => {
+  const copy = hqBuildAssistantCopy(hqBuildTarget({ state: 'needs_hq', display_name: 'Atlas' }));
+  assert.equal(copy.show, true);
+  assert.match(copy.title, /Build Atlas’s Personal HQ/);
+  assert.match(copy.intro, /becomes Atlas’s Personal HQ/);
+  assert.match(copy.intro, /Nothing is created until you confirm/);
+  assert.equal(copy.submitLabel, 'Build My HQ');
+
+  const resuming = hqBuildAssistantCopy(
+    hqBuildTarget({ state: 'provisioning_hq', display_name: 'Atlas' })
+  );
+  assert.equal(resuming.submitLabel, 'Finish building HQ');
+});
+
+test('hqBuildAssistantCopy falls back to a neutral subject and hides on legacy', () => {
+  const unnamed = hqBuildAssistantCopy(hqBuildTarget({ state: 'needs_hq' }));
+  assert.match(unnamed.title, /Build Your assistant’s Personal HQ/);
+  assert.doesNotMatch(unnamed.intro, /undefined|null/);
+  assert.equal(hqBuildAssistantCopy(hqBuildTarget({ state: 'active' })).show, false);
+  assert.equal(hqBuildAssistantCopy(null).show, false);
+});
+
+test('hqBuildRequestPayload adds only a request id and version on the PAF path', () => {
+  const form = {
+    name: 'Command Post',
+    timezone: 'America/New_York',
+    schedule_days: ['mon'],
+    schedule_time: '07:30',
+    scope: 'all',
+    include_future_workspaces: true,
+    notify_on_ready: false
+  };
+  const paf = hqBuildRequestPayload(
+    hqBuildTarget({ state: 'needs_hq', display_name: 'Atlas', state_version: 4 }),
+    form,
+    ' hq-request-1 '
+  );
+  assert.equal(paf.request_id, 'hq-request-1');
+  assert.equal(paf.if_version, 4);
+  assert.equal(paf.name, 'Command Post');
+  assert.equal(paf.schedule_time, '07:30');
+  // The client never names assistant, profile, workspace, or instance identity.
+  for (const key of [
+    'assistant_id',
+    'global_agent_profile_name',
+    'hq_workspace_id',
+    'hq_entry_agent_instance_id',
+    'user_id'
+  ]) {
+    assert.equal(key in paf, false, `payload carried ${key}`);
+  }
+
+  // The legacy body is byte-for-byte the form, with nothing added.
+  const legacy = hqBuildRequestPayload(hqBuildTarget({ state: 'active' }), form, 'hq-request-1');
+  assert.deepEqual(legacy, form);
+  assert.equal('request_id' in legacy, false);
+  assert.equal('if_version' in legacy, false);
+});
+
+test('hqBuildRequestPayload keeps the form as the only source of HQ fields', () => {
+  // The Daily Brief rhythm lives here now, so whatever the form collected must
+  // reach the server unaltered.
+  const form = { name: 'HQ', schedule_days: ['sat', 'sun'], schedule_time: '19:00' };
+  const payload = hqBuildRequestPayload(
+    hqBuildTarget({ state: 'needs_hq', state_version: 1 }),
+    form,
+    'hq-1'
+  );
+  assert.deepEqual(payload.schedule_days, ['sat', 'sun']);
+  assert.equal(payload.schedule_time, '19:00');
+});
 
 test('hqWorkspaceRootView requires confirmation before Build My HQ', () => {
   const view = hqWorkspaceRootView({

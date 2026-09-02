@@ -43,30 +43,79 @@ var (
 	// ErrConflict means a compare-and-swap version or uniqueness check failed.
 	ErrConflict = errors.New("personal assistant: state conflict")
 	// ErrRepairNeeded means a durable relationship has an invalid canonical link.
-	ErrRepairNeeded    = errors.New("personal assistant: repair needed")
+	ErrRepairNeeded = errors.New("personal assistant: repair needed")
+	// ErrNeedsHQ means a genuinely hired relationship has no Personal HQ yet.
+	// This is an expected setup stage, not corruption — callers must never map
+	// it onto repair language or a generic "hire" prompt.
+	ErrNeedsHQ         = errors.New("personal assistant: personal hq is not built yet")
 	htmlLikeTagPattern = regexp.MustCompile(`<\s*/?\s*[A-Za-z][^>]*>`)
 )
 
 // RelationshipStatus is the durable hire lifecycle.
+//
+// The setup sequence is:
+//
+//	not_hired -> hiring -> awaiting_hq -> provisioning_hq -> active
+//
+// Per-status invariants, enforced by ValidateStateInvariants:
+//
+//   - not_hired: no owned profile, no HQ, no entry instance, no HiredAt.
+//   - hiring: a confirmed hire is creating or finalizing the assistant profile
+//     and the relationship row. It never means "creating a workspace".
+//   - awaiting_hq: the owned global profile exists and HiredAt is set. HQ
+//     workspace and entry-instance IDs are still empty — Build My HQ has not
+//     been confirmed. This is an expected setup stage, not corruption.
+//   - provisioning_hq: a confirmed HQ setup is partially applied. It is entered
+//     only after the HQ operation is claimed, so the profile still exists and
+//     the canonical IDs fill in as each checkpoint returns them.
+//   - active/paused: the complete validated linkage (profile -> entry instance
+//     -> HQ workspace) plus a Daily Brief source resolves.
+//   - repair_needed: a durable result exists whose known safe continuation
+//     failed. It is never used for the ordinary pre-HQ stage.
 type RelationshipStatus string
 
 const (
-	StatusNotHired     RelationshipStatus = "not_hired"
-	StatusHiring       RelationshipStatus = "hiring"
-	StatusActive       RelationshipStatus = "active"
-	StatusPaused       RelationshipStatus = "paused"
-	StatusRepairNeeded RelationshipStatus = "repair_needed"
+	StatusNotHired RelationshipStatus = "not_hired"
+	StatusHiring   RelationshipStatus = "hiring"
+	// StatusAwaitingHQ means a real assistant profile and relationship exist and
+	// the user has not yet confirmed Build My HQ on the guided Map quest.
+	StatusAwaitingHQ RelationshipStatus = "awaiting_hq"
+	// StatusProvisioningHQ means a confirmed HQ setup request is claimed and
+	// partially applied, so a restart projects a resumable operation rather than
+	// inviting a second create.
+	StatusProvisioningHQ RelationshipStatus = "provisioning_hq"
+	StatusActive         RelationshipStatus = "active"
+	StatusPaused         RelationshipStatus = "paused"
+	StatusRepairNeeded   RelationshipStatus = "repair_needed"
 )
 
 // NormalizeRelationshipStatus returns a canonical closed-enum value.
 func NormalizeRelationshipStatus(raw string) (RelationshipStatus, error) {
 	status := RelationshipStatus(strings.ToLower(strings.TrimSpace(raw)))
 	switch status {
-	case StatusNotHired, StatusHiring, StatusActive, StatusPaused, StatusRepairNeeded:
+	case StatusNotHired, StatusHiring, StatusAwaitingHQ, StatusProvisioningHQ,
+		StatusActive, StatusPaused, StatusRepairNeeded:
 		return status, nil
 	default:
 		return "", fmt.Errorf("personal assistant: invalid relationship status %q", raw)
 	}
+}
+
+// HasOwnedProfile reports whether the status guarantees that a durable global
+// agent profile is owned by this relationship.
+func (s RelationshipStatus) HasOwnedProfile() bool {
+	switch s {
+	case StatusAwaitingHQ, StatusProvisioningHQ, StatusActive, StatusPaused:
+		return true
+	default:
+		return false
+	}
+}
+
+// RequiresHQ reports whether the status requires a complete validated HQ
+// linkage. Pre-HQ stages deliberately do not.
+func (s RelationshipStatus) RequiresHQ() bool {
+	return s == StatusActive || s == StatusPaused
 }
 
 // FirstAssignmentStatus is the durable first-value lifecycle.
@@ -207,7 +256,13 @@ func NormalizeSpecialistSlug(raw string) (string, error) {
 type RepairStep string
 
 const (
-	RepairNone             RepairStep = ""
+	RepairNone RepairStep = ""
+	// RepairProfileCreation means the hire could not create or take ownership of
+	// the global assistant profile.
+	RepairProfileCreation RepairStep = "profile_creation"
+	// RepairHQCreation means a claimed HQ setup could not create the workspace
+	// through the canonical template path.
+	RepairHQCreation       RepairStep = "hq_creation"
 	RepairDesignation      RepairStep = "designation"
 	RepairDailyBriefConfig RepairStep = "daily_brief_config"
 	RepairFinalization     RepairStep = "relationship_finalization"
@@ -217,7 +272,8 @@ const (
 func NormalizeRepairStep(raw string) (RepairStep, error) {
 	step := RepairStep(strings.TrimSpace(raw))
 	switch step {
-	case RepairNone, RepairDesignation, RepairDailyBriefConfig, RepairFinalization:
+	case RepairNone, RepairProfileCreation, RepairHQCreation,
+		RepairDesignation, RepairDailyBriefConfig, RepairFinalization:
 		return step, nil
 	default:
 		return "", fmt.Errorf("personal assistant: invalid repair step %q", raw)
@@ -257,22 +313,30 @@ type State struct {
 	GlobalAgentProfileName string
 	Mandate                string
 	FocusAreas             []FocusArea
-	// SpecialistSlug is the domain specialist the user accepted during the
-	// hire, or "" for the generic relationship. It is a stable machine identity
-	// from the built-in mapping, never user-authored text.
+	// SpecialistSlug is the domain specialist the user accepted, or "" for the
+	// generic relationship. It is a stable machine identity from the built-in
+	// mapping, never user-authored text.
 	SpecialistSlug        string
 	FirstAssignmentStatus FirstAssignmentStatus
 	LastHireRequestID     string
 	HirePayloadHash       string
 	HirePayloadJSON       string
-	RepairStep            RepairStep
-	RenameFromName        string
-	RenameToName          string
-	RenameStep            RenameStep
-	StateVersion          int64
-	HiredAt               *time.Time
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
+	// HQ setup operation journal. These are provisional recovery fields for one
+	// confirmed Build My HQ request: enough to make a replay idempotent and a
+	// restart resumable, and nothing more. The payload is reduced to its receipt
+	// (request ID plus hash) once the canonical workspace and Daily Brief config
+	// exist, so PAF never holds a permanent duplicate of the brief schedule.
+	LastHQRequestID string
+	HQPayloadHash   string
+	HQPayloadJSON   string
+	RepairStep      RepairStep
+	RenameFromName  string
+	RenameToName    string
+	RenameStep      RenameStep
+	StateVersion    int64
+	HiredAt         *time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 // NewState constructs a fresh relationship with a generated stable ID.
@@ -297,6 +361,60 @@ func (s *State) Clone() *State {
 		out.HiredAt = &hiredAt
 	}
 	return &out
+}
+
+// ValidateStateInvariants rejects persisted or in-flight combinations that no
+// legal transition can produce. It is deliberately structural: it never infers
+// a profile, HQ, or entry instance from a display name, and it never repairs a
+// malformed row into a plausible-looking one.
+func (s *State) ValidateStateInvariants() error {
+	if s == nil {
+		return errors.New("personal assistant: nil state")
+	}
+	profile := strings.TrimSpace(s.GlobalAgentProfileName)
+	workspace := strings.TrimSpace(s.HQWorkspaceID)
+	instance := strings.TrimSpace(s.HQEntryAgentInstanceID)
+
+	if s.Status.HasOwnedProfile() && profile == "" {
+		return fmt.Errorf("personal assistant: %s requires an owned global profile", s.Status)
+	}
+	if s.Status.HasOwnedProfile() && s.HiredAt == nil {
+		return fmt.Errorf("personal assistant: %s requires a hire timestamp", s.Status)
+	}
+	switch s.Status {
+	case StatusNotHired:
+		if profile != "" || workspace != "" || instance != "" || s.HiredAt != nil {
+			return errors.New("personal assistant: not_hired must carry no durable result")
+		}
+	case StatusAwaitingHQ:
+		// Build My HQ has not been confirmed, so no canonical HQ ID can exist.
+		if workspace != "" || instance != "" {
+			return errors.New("personal assistant: awaiting_hq must not carry hq identifiers")
+		}
+	case StatusProvisioningHQ:
+		// The operation claim is written before any creation, so the request ID
+		// is the one thing that must already be present.
+		if strings.TrimSpace(s.LastHQRequestID) == "" {
+			return errors.New("personal assistant: provisioning_hq requires an hq request id")
+		}
+		if instance != "" && workspace == "" {
+			return errors.New("personal assistant: entry instance without an hq workspace")
+		}
+	case StatusActive, StatusPaused:
+		if workspace == "" || instance == "" {
+			return fmt.Errorf("personal assistant: %s requires complete hq linkage", s.Status)
+		}
+	case StatusHiring, StatusRepairNeeded:
+		// Bounded partial results are the point of these states; the remaining
+		// checks below still apply.
+	}
+	if instance != "" && workspace == "" {
+		return errors.New("personal assistant: entry instance without an hq workspace")
+	}
+	if workspace != "" && profile == "" {
+		return errors.New("personal assistant: hq workspace without an owned global profile")
+	}
+	return nil
 }
 
 // CanonicalRef points to a record created by an assignment apply.

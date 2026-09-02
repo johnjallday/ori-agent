@@ -226,3 +226,66 @@ func TestRoute_PreHireStopsAtHire(t *testing.T) {
 		t.Fatalf("pre-hire route=%+v err=%v", resp, err)
 	}
 }
+
+// TestRoute_NeedsHQStopsAtBuildHQNotHire pins that a genuinely hired assistant
+// with no Personal HQ gets deterministic setup guidance naming the real gap —
+// never the "hire" story, which would misdescribe an already-hired identity.
+func TestRoute_NeedsHQStopsAtBuildHQNotHire(t *testing.T) {
+	for _, state := range []string{"needs_hq", "provisioning_hq"} {
+		t.Run(state, func(t *testing.T) {
+			h := newHomeAssistantWorkspaceFixtureHandler(t)
+			h.SetPersonalAssistantContextProvider(&stubPersonalAssistantContextProvider{
+				context: &PersonalAssistantWorkContext{State: state, DisplayName: "Atlas"},
+			}, "user-a")
+			resp, err := h.RoutePrompt(context.Background(), "create a workspace", nil)
+			if err != nil {
+				t.Fatalf("RoutePrompt: %v", err)
+			}
+			if resp.RouteMode != "personal_assistant_build_hq" || resp.TargetSurface != "build_hq" {
+				t.Fatalf("route=%+v", resp)
+			}
+			if resp.PersonalAssistantState != state {
+				t.Fatalf("state = %q; want %q", resp.PersonalAssistantState, state)
+			}
+			for _, reason := range resp.Reasons {
+				if strings.Contains(reason, "not ready for work") {
+					t.Fatalf("reused the generic pre-hire reason for a hired relationship: %v", resp.Reasons)
+				}
+			}
+		})
+	}
+}
+
+// TestAsk_NeedsHQNamesTheRealGapAndRoutesToTheGuidedQuest pins the same
+// distinction on the Ask surface: no "Hire your personal assistant" for an
+// identity that already exists, and no prompt/model/tool path runs.
+func TestAsk_NeedsHQNamesTheRealGapAndRoutesToTheGuidedQuest(t *testing.T) {
+	h := newAskHandlerWithProvider(t, "unused")
+	mutator := &fakeMutator{}
+	h.SetMutator(mutator)
+	h.SetPersonalAssistantContextProvider(&stubPersonalAssistantContextProvider{
+		context: &PersonalAssistantWorkContext{State: "needs_hq", DisplayName: "Atlas"},
+	}, "user-a")
+
+	resp := h.Ask(context.Background(), HomeAssistantAskRequest{
+		Prompt: "help me plan today", Intent: "general_task",
+	})
+	if strings.Contains(strings.ToLower(resp.Response), "hire") {
+		t.Fatalf("response reused hire language for an already-hired identity: %q", resp.Response)
+	}
+	if len(resp.Actions) != 1 || resp.Actions[0].Href != "/?quest=build-hq" {
+		t.Fatalf("actions = %+v; want the guided quest route", resp.Actions)
+	}
+	if resp.Identity != nil {
+		t.Fatalf("identity should not read as ready for work: %+v", resp.Identity)
+	}
+
+	// Confirming an action must not bypass the gate: nothing may mutate.
+	confirmed := h.Ask(context.Background(), HomeAssistantAskRequest{
+		Intent:          "general_task",
+		ConfirmedAction: &HomeAction{Type: HomeActionCreateWorkspace, Arguments: map[string]any{"name": "Must Not Exist"}},
+	})
+	if mutator.created != "" || confirmed.RequiresConfirmation {
+		t.Fatalf("needs_hq confirmed action mutated: created=%q response=%+v", mutator.created, confirmed)
+	}
+}

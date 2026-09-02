@@ -64,18 +64,18 @@ export function personalAssistantResumeMessage(state = {}) {
   return 'This hire is already in progress. Retry to finish the remaining setup step.';
 }
 
+// buildPersonalAssistantHirePayload builds the hire request body.
+//
+// It carries no Daily Brief rhythm: hiring creates the assistant profile and the
+// relationship only. The schedule belongs to the Map's Build My HQ form, where
+// it can be written against a real workspace ID.
 export function buildPersonalAssistantHirePayload({
   requestId,
   ifVersion = 0,
   displayName = 'Assistant',
   appearance = null,
   mandate = '',
-  focusAreas = [],
-  timezone = 'UTC',
-  scheduleDays = [],
-  scheduleTime = '08:00',
-  notifyOnReady = false,
-  specialistSlug = ''
+  focusAreas = []
 } = {}) {
   return {
     request_id: String(requestId || '').trim(),
@@ -85,22 +85,24 @@ export function buildPersonalAssistantHirePayload({
     mandate: String(mandate || '').trim(),
     focus_areas: Array.from(new Set((focusAreas || []).map(value => String(value).trim()))).filter(
       Boolean
-    ),
-    timezone: String(timezone || 'UTC').trim() || 'UTC',
-    schedule_days: Array.from(
-      new Set((scheduleDays || []).map(value => String(value).trim().toLowerCase()))
-    ).filter(Boolean),
-    schedule_time: String(scheduleTime || '08:00').trim() || '08:00',
-    notify_on_ready: notifyOnReady === true,
-    specialist_slug: String(specialistSlug || '').trim()
+    )
   };
 }
 
-// --- Domain specialist offer -------------------------------------------
+// The route Ori's deterministic Personal HQ walkthrough activates on.
+export const HQ_QUEST_ROUTE = '/?quest=build-hq';
+
+// personalAssistantNeedsHQ reports whether a relationship is hired but has no
+// Personal HQ yet, in either the idle or the resumable-setup stage.
+export function personalAssistantNeedsHQ(state = {}) {
+  return ['needs_hq', 'provisioning_hq'].includes(String(state?.state || '').trim());
+}
+
+// --- Domain specialist wording -----------------------------------------
 //
 // The generic constants below are today's shipped wording, kept here so the
 // specialist path can be swapped in and out without the generic path ever
-// depending on a mapping being present. A user with no detected specialist
+// depending on a mapping being present. A user with no accepted specialist
 // renders from these and sees no behavioural difference.
 
 export const GENERIC_FOCUS_AREAS = Object.freeze([
@@ -424,17 +426,8 @@ export class OnboardingManager {
       .getElementById('pafAssistantMandate')
       ?.addEventListener('input', () => this.updateHireButtonState());
     document
-      .getElementById('pafSpecialistAcceptBtn')
-      ?.addEventListener('click', () => this.acceptSpecialistOffer());
-    document
-      .getElementById('pafSpecialistDeclineBtn')
-      ?.addEventListener('click', () => this.declineSpecialistOffer());
-    document
-      .querySelectorAll('[name="pafFocus"], [name="pafBriefDay"]')
+      .querySelectorAll('[name="pafFocus"]')
       .forEach(input => input.addEventListener('change', () => this.updateHireButtonState()));
-    document
-      .getElementById('pafBriefTime')
-      ?.addEventListener('change', () => this.updateHireButtonState());
 
     document.querySelectorAll('[data-paf-add-row]').forEach(button => {
       button.addEventListener('click', () => this.addAssignmentRow(button.dataset.pafAddRow));
@@ -1322,7 +1315,7 @@ export class OnboardingManager {
     document.querySelectorAll('[data-paf-hire-step]').forEach(panel => {
       panel.classList.toggle('d-none', Number(panel.dataset.pafHireStep) !== this.hireStep);
     });
-    const labels = ['Meet your assistant', 'Choose the focus', 'Set the rhythm'];
+    const labels = ['Meet your assistant', 'Choose the focus', 'Confirm the hire'];
     const label = document.getElementById('pafHireStepLabel');
     if (label) label.textContent = `Hire step ${this.hireStep + 1} of 3 · ${labels[this.hireStep]}`;
     const bar = document.getElementById('pafHireStepBar');
@@ -1347,11 +1340,11 @@ export class OnboardingManager {
     const name = document.getElementById('pafAssistantName')?.value?.trim() || '';
     const mandate = document.getElementById('pafAssistantMandate')?.value?.trim() || '';
     const focusCount = document.querySelectorAll('[name="pafFocus"]:checked').length;
-    const dayCount = document.querySelectorAll('[name="pafBriefDay"]:checked').length;
     const confirmed = document.getElementById('pafHireConfirm')?.checked === true;
     if (step === 0) return !!name;
     if (step === 1) return !!mandate || focusCount > 0;
-    return dayCount > 0 && confirmed;
+    // The explicit confirmation remains the sole gate on the hire consequence.
+    return confirmed;
   }
 
   advancePersonalAssistantHire() {
@@ -1387,19 +1380,6 @@ export class OnboardingManager {
         input.checked = selected.has(input.value);
       });
     }
-    if (state.daily_brief) {
-      const selectedDays = new Set(state.daily_brief.schedule_days || []);
-      document.querySelectorAll('[name="pafBriefDay"]').forEach(input => {
-        input.checked = selectedDays.has(input.value);
-      });
-      const timeInput = document.getElementById('pafBriefTime');
-      if (timeInput && state.daily_brief.schedule_time) {
-        timeInput.value = state.daily_brief.schedule_time;
-      }
-      const notifications = document.getElementById('pafNotifyOnReady');
-      if (notifications) notifications.checked = state.daily_brief.notify_on_ready === true;
-    }
-
     const host = document.getElementById('pafAssistantAppearance');
     if (host && window.AgentAppearanceEditor && !this.personalAssistantAppearanceEditor) {
       this.personalAssistantAppearanceEditor = window.AgentAppearanceEditor.create({
@@ -1421,19 +1401,20 @@ export class OnboardingManager {
     if (modelNote) {
       if (this.modelConfigured === false) {
         modelNote.innerHTML =
-          'No model is configured. Hiring, Personal HQ, and structured planning still work. <a href="/settings#system-model">Choose a model in Settings</a> when you want conversational answers.';
+          'No model is configured. Hiring, building Personal HQ, and structured planning still work. <a href="/settings#system-model">Choose a model in Settings</a> when you want conversational answers.';
       } else {
         modelNote.textContent =
           'You can change the model later without changing this assistant relationship.';
       }
     }
+    const hired = personalAssistantNeedsHQ(state);
     const status = document.getElementById('pafHireStatus');
     if (status) {
       status.textContent =
-        state.state === 'repair_needed'
+        state.state === 'repair_needed' || state.state === 'hiring'
           ? personalAssistantResumeMessage(state)
-          : state.state === 'hiring'
-            ? personalAssistantResumeMessage(state)
+          : hired
+            ? `${state.display_name || 'Your assistant'} is hired. Continue to give them a home base.`
             : state.state === 'active'
               ? `${state.display_name || 'Your assistant'} is hired. Continue to finish onboarding.`
               : '';
@@ -1441,6 +1422,14 @@ export class OnboardingManager {
     const button = document.getElementById('pafHireBtn');
     if (button && ['repair_needed', 'hiring', 'active'].includes(state.state)) {
       button.textContent = state.state === 'active' ? 'Finish onboarding' : 'Finish setup';
+      const confirmation = document.getElementById('pafHireConfirm');
+      if (confirmation) confirmation.checked = true;
+      this.hireStep = 2;
+    }
+    if (button && hired) {
+      // The hire is durable. The only thing left is to close onboarding and hand
+      // the user to Ori's HQ quest — never to post a second hire.
+      button.textContent = 'Continue to HQ quest';
       const confirmation = document.getElementById('pafHireConfirm');
       if (confirmation) confirmation.checked = true;
       this.hireStep = 2;
@@ -1485,22 +1474,13 @@ export class OnboardingManager {
       document.querySelectorAll('[name="pafFocus"]:checked'),
       input => input.value
     );
-    const scheduleDays = Array.from(
-      document.querySelectorAll('[name="pafBriefDay"]:checked'),
-      input => input.value
-    );
     return buildPersonalAssistantHirePayload({
       requestId: this.getHireRequestId(),
       ifVersion: this.personalAssistantState?.state_version || 0,
       displayName: document.getElementById('pafAssistantName')?.value || 'Assistant',
       appearance: this.personalAssistantAppearanceEditor?.createRequest(),
       mandate: document.getElementById('pafAssistantMandate')?.value || '',
-      focusAreas,
-      timezone: this.timezone || this.detectTimezone() || 'UTC',
-      scheduleDays,
-      scheduleTime: document.getElementById('pafBriefTime')?.value || '08:00',
-      notifyOnReady: document.getElementById('pafNotifyOnReady')?.checked === true,
-      specialistSlug: this.activeSpecialist()?.slug || ''
+      focusAreas
     });
   }
 
@@ -1514,14 +1494,24 @@ export class OnboardingManager {
   async hireAssistant() {
     const button = document.getElementById('pafHireBtn');
     const originalLabel = button?.textContent || 'Hire Assistant';
+    // A durable relationship already exists: close onboarding and hand over to
+    // Ori's HQ quest rather than posting a second hire.
+    if (personalAssistantNeedsHQ(this.personalAssistantState)) {
+      try {
+        await this.completePersonalAssistantOnboarding();
+      } catch (error) {
+        console.error('Error completing onboarding after hire:', error);
+        this.showHireError(error.message || 'Could not close onboarding. Retry safely.');
+      }
+      return;
+    }
     if (button) {
       button.disabled = true;
-      button.textContent = 'Creating Personal HQ…';
+      button.textContent = 'Hiring your assistant…';
       button.setAttribute('aria-busy', 'true');
     }
     const status = document.getElementById('pafHireStatus');
-    if (status)
-      status.textContent = 'Creating one assistant and Personal HQ. Keep this window open.';
+    if (status) status.textContent = 'Hiring one assistant. Keep this window open.';
     this.showHireError('');
     try {
       const response = await fetch('/api/personal-assistant/hire', {
@@ -1548,21 +1538,25 @@ export class OnboardingManager {
       }
 
       this.personalAssistantState = payload.personal_assistant || this.personalAssistantState;
+      const assistantName = this.personalAssistantState?.display_name || 'Your assistant';
       if (status) {
         if (this.modelConfigured === false) {
           status.innerHTML =
-            '<strong>Hired — choose a model to chat.</strong> Structured planning is ready now. <a href="/settings#system-model">Choose a model in Settings</a> later.';
+            '<strong>Hired — choose a model to chat.</strong> Building Personal HQ and structured planning work now. <a href="/settings#system-model">Choose a model in Settings</a> later.';
           await new Promise(resolve => setTimeout(resolve, 350));
         } else {
-          status.textContent = 'Assistant hired. Personal HQ is ready.';
+          status.textContent = `${assistantName} is hired. Next, let’s give them a home base.`;
         }
       }
       this.assignmentStateVersion = Number(this.personalAssistantState?.state_version) || 0;
+      // Only clear the browser's request ID once the server has returned the
+      // durable relationship; otherwise a retry could not replay this same hire.
       try {
         window.localStorage.removeItem('ori.personalAssistantHireRequestId');
       } catch (_) {
         // Storage cleanup is not part of the durable hire transaction.
       }
+      this.hireRequestId = '';
       await this.completePersonalAssistantOnboarding();
     } catch (error) {
       console.error('Error hiring personal assistant:', error);
@@ -1570,24 +1564,42 @@ export class OnboardingManager {
       if (button) {
         button.disabled = false;
         button.removeAttribute('aria-busy');
-        if (button.textContent === 'Creating Personal HQ…') button.textContent = originalLabel;
+        if (button.textContent === 'Hiring your assistant…') button.textContent = originalLabel;
       }
     }
   }
 
+  // completePersonalAssistantOnboarding closes ordinary onboarding and hands the
+  // user to Ori's HQ quest. The hire is already durable at this point, so a
+  // failure here offers Continue to HQ quest rather than another hire.
   async completePersonalAssistantOnboarding() {
-    await this.completeStep('step-done');
-    const response = await fetch('/api/onboarding/complete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    });
-    if (!response.ok) {
-      throw new Error('Your assistant is hired, but onboarding could not be closed. Retry safely.');
-    }
     const status = document.getElementById('pafHireStatus');
-    if (status) status.textContent = 'Assistant hired. Your first quest is ready on Home.';
+    try {
+      await this.completeStep('step-done');
+      const response = await fetch('/api/onboarding/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (!response.ok) throw new Error('onboarding completion failed');
+    } catch (_) {
+      // Reload authoritative server state before offering the recovery action,
+      // so the button reflects what actually got saved.
+      await this.loadPersonalAssistantState().catch(() => {});
+      const button = document.getElementById('pafHireBtn');
+      if (button) {
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        button.textContent = 'Continue to HQ quest';
+      }
+      throw new Error(
+        'Your assistant is hired, but onboarding could not be closed. Continue to the HQ quest — this will not hire a second assistant.'
+      );
+    }
+    if (status) status.textContent = 'Assistant hired. Ori will help you build their home base.';
     this.modalInstance?.hide();
-    window.location.href = '/';
+    window.location.href = personalAssistantNeedsHQ(this.personalAssistantState)
+      ? HQ_QUEST_ROUTE
+      : '/';
   }
 
   // --- First assignment quest -------------------------------------------

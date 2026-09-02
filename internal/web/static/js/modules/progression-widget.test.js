@@ -263,6 +263,115 @@ test('firstMissionView turns a skipped HQ quest into a resumable mission', () =>
   assert.equal(view.showAction, true);
 });
 
+// pafStatus builds a personal-assistant-cohort status: the first-day quest is
+// what distinguishes the cohort from a legacy install.
+function pafStatus(buildHQFields, firstDayFields = {}) {
+  return {
+    tiers: [
+      tier({
+        tier: 1,
+        quests: [
+          quest({
+            id: 't1-plan-first-day',
+            title: 'Plan my first day',
+            status: 'available',
+            optional: true,
+            action_url: '/?quest=plan-first-day',
+            action_label: 'Start first quest',
+            ...firstDayFields
+          })
+        ]
+      }),
+      tier({
+        tier: 2,
+        quests: [
+          quest({
+            id: 't2-build-hq',
+            title: 'Build My HQ',
+            why: 'Give your assistant a home base.',
+            optional: true,
+            action_url: '/?quest=build-hq',
+            action_label: 'Build My HQ',
+            ...buildHQFields
+          })
+        ]
+      })
+    ]
+  };
+}
+
+test('firstMissionView features Build My HQ before Plan my first day', () => {
+  // Hiring creates the assistant but no home base, so HQ is the mission first.
+  const view = firstMissionView(pafStatus({ status: 'available' }));
+  assert.equal(view.questID, 't2-build-hq');
+  assert.equal(view.title, 'Build My HQ');
+  assert.equal(view.actionLabel, 'Build My HQ');
+  // The guided route carries no focus parameter: the user selects the landmark.
+  assert.equal(view.actionURL, '/?quest=build-hq');
+  assert.doesNotMatch(view.actionURL, /focus=/);
+  assert.equal(view.showAction, true);
+  assert.equal(view.showSkip, true, 'Do this later must be offered');
+});
+
+test('firstMissionView keeps a deferred guided HQ quest prominent and resumable', () => {
+  const view = firstMissionView(pafStatus({ status: 'skipped' }));
+  assert.equal(view.questID, 't2-build-hq', 'a deferred HQ must not hand over to first day');
+  assert.equal(view.statusLabel, 'Saved for later');
+  assert.equal(view.actionLabel, 'Resume quest');
+  assert.equal(view.actionURL, '/?quest=build-hq');
+  assert.equal(view.showAction, true);
+  assert.equal(view.showSkip, false, 'an already-deferred quest cannot be deferred again');
+});
+
+test('firstMissionView advances to Plan my first day only once HQ is completed', () => {
+  for (const status of ['available', 'locked-tier', 'skipped']) {
+    assert.equal(
+      firstMissionView(pafStatus({ status })).questID,
+      't2-build-hq',
+      `HQ status ${status} should keep HQ featured`
+    );
+  }
+  const view = firstMissionView(pafStatus({ status: 'completed' }));
+  assert.equal(view.questID, 't1-plan-first-day');
+  assert.equal(view.actionLabel, 'Start first quest');
+});
+
+test('firstMissionView keeps both featured missions out of the tier rows', () => {
+  const status = pafStatus({ status: 'available' });
+  for (const tierEntry of status.tiers) {
+    for (const row of tierQuestRows(tierEntry)) {
+      assert.ok(
+        !['t1-plan-first-day', 't2-build-hq'].includes(row.id),
+        `featured mission ${row.id} duplicated into a tier row`
+      );
+    }
+  }
+});
+
+test('firstMissionView leaves a legacy install its own Build My HQ presentation', () => {
+  // No first-day quest: this is not the personal-assistant cohort, so the copy
+  // and destination must be exactly what they were before.
+  const status = {
+    tiers: [
+      tier({
+        quests: [
+          quest({
+            id: 't2-build-hq',
+            status: 'skipped',
+            action_url: '/?focus=personal-hq',
+            action_label: 'Build My HQ'
+          })
+        ]
+      })
+    ]
+  };
+  const view = firstMissionView(status);
+  assert.equal(view.statusLabel, 'Not set up');
+  assert.equal(view.actionLabel, 'Build My HQ');
+  assert.equal(view.actionURL, '/?focus=personal-hq');
+  assert.equal(view.showSkip, false);
+});
+
 test('firstMissionView keeps completion visible without a redundant action', () => {
   const status = {
     tiers: [tier({ quests: [quest({ id: 't2-build-hq', status: 'completed' })] })]

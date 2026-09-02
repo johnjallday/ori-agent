@@ -335,14 +335,22 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(ctx context.Context, prompt stri
 		return nil, err
 	}
 	if workContext != nil && workContext.NeedsHireOrRepair() {
+		routeMode, targetSurface, reason := "personal_assistant_hire", "hire", "personal assistant relationship is not ready for work"
+		if workContext.NeedsHQ() {
+			// Deterministic and honest: this relationship is already hired, so
+			// the guidance names the real gap and the guided quest route rather
+			// than reusing "hire" for a state that already has an identity.
+			routeMode, targetSurface = "personal_assistant_build_hq", "build_hq"
+			reason = "personal assistant is hired but has no Personal HQ yet"
+		}
 		return &HomeAssistantRouteResponse{
 			Intent: "personal_assistant_setup", IntentLabel: "personal assistant setup",
 			PersonalAssistantState: workContext.State,
 			RoutingPolicy:          homeAssistantPolicyAssistantOnly, ContextMode: homeAssistantContextDirect,
 			HandoffPolicy: homeAssistantHandoffAssistant, RequiresCreation: false,
-			RouteMode: "personal_assistant_hire", TargetSurface: "hire",
+			RouteMode: routeMode, TargetSurface: targetSurface,
 			SuggestedAgentName: "Personal Assistant", SuggestedAgentType: "personal_assistant",
-			Reasons: []string{"personal assistant relationship is not ready for work"},
+			Reasons: []string{reason},
 		}, nil
 	}
 
