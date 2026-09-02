@@ -15,6 +15,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/onboarding/configurator"
 	"github.com/johnjallday/ori-agent/internal/onboarding/detector"
 	"github.com/johnjallday/ori-agent/internal/onboarding/profiler"
+	"github.com/johnjallday/ori-agent/internal/specialist"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
@@ -54,6 +55,25 @@ type DetectResponse struct {
 	Apps     []detector.DetectedApp `json:"apps"`
 	Platform string                 `json:"platform"`
 	Message  string                 `json:"message,omitempty"`
+	// Specialist is the single domain specialist suggested by the detected
+	// apps, or nil when nothing matched. It carries the domain's own copy so
+	// the hire wizard renders the offer without hardcoding any one app's name.
+	Specialist *specialist.Entry `json:"specialist,omitempty"`
+}
+
+// MatchSpecialist returns the one specialist suggested by a set of detected
+// apps, or nil. Detection is a prior, not a fact: no match simply means the
+// generic flow, and callers must never treat nil as an error.
+func MatchSpecialist(apps []detector.DetectedApp) *specialist.Entry {
+	candidates := make([]specialist.App, 0, len(apps))
+	for _, app := range apps {
+		candidates = append(candidates, specialist.App{Name: app.Name, LastUsed: app.LastUsed})
+	}
+	entry, ok := specialist.Match(candidates)
+	if !ok {
+		return nil
+	}
+	return &entry
 }
 
 // ProfileResponse represents the profile inference response.
@@ -122,9 +142,27 @@ func (h *SmartOnboardingHandler) Detect(w http.ResponseWriter, r *http.Request) 
 	}
 
 	h.sendJSON(w, DetectResponse{
-		Success:  true,
-		Apps:     apps,
-		Platform: det.Platform(),
+		Success:    true,
+		Apps:       apps,
+		Platform:   det.Platform(),
+		Specialist: MatchSpecialist(apps),
+	})
+}
+
+// Specialists returns the built-in specialist mapping.
+// GET /api/onboarding/specialists
+//
+// Detection is slow and may not answer at all; this read is instant and
+// static. It is what lets the hire wizard render a manual route into a domain
+// the moment the focus step opens, without waiting for or depending on a scan.
+func (h *SmartOnboardingHandler) Specialists(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+	h.sendJSON(w, map[string]any{
+		"success":     true,
+		"specialists": specialist.All(),
 	})
 }
 

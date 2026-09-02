@@ -398,6 +398,7 @@ func registerOnboardingRoutes(mux *http.ServeMux, s *Server) {
 
 	// Smart onboarding endpoints (AI-powered profile inference)
 	mux.HandleFunc("/api/onboarding/detect", s.Handlers.SmartOnboarding.Detect)
+	mux.HandleFunc("/api/onboarding/specialists", s.Handlers.SmartOnboarding.Specialists)
 	mux.HandleFunc("/api/onboarding/profile", s.Handlers.SmartOnboarding.InferProfile)
 	mux.HandleFunc("/api/onboarding/describe", s.Handlers.SmartOnboarding.Describe)
 	mux.HandleFunc("/api/onboarding/config", s.Handlers.SmartOnboarding.GenerateConfig)

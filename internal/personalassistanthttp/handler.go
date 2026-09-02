@@ -171,16 +171,17 @@ func (h *Handler) GetToday(w http.ResponseWriter, r *http.Request) {
 }
 
 type hireRequest struct {
-	RequestID     string                 `json:"request_id"`
-	IfVersion     int64                  `json:"if_version"`
-	DisplayName   string                 `json:"display_name"`
-	Appearance    *types.AgentAppearance `json:"appearance"`
-	Mandate       string                 `json:"mandate"`
-	FocusAreas    []string               `json:"focus_areas"`
-	Timezone      string                 `json:"timezone"`
-	ScheduleDays  []string               `json:"schedule_days"`
-	ScheduleTime  string                 `json:"schedule_time"`
-	NotifyOnReady bool                   `json:"notify_on_ready"`
+	RequestID      string                 `json:"request_id"`
+	IfVersion      int64                  `json:"if_version"`
+	DisplayName    string                 `json:"display_name"`
+	Appearance     *types.AgentAppearance `json:"appearance"`
+	Mandate        string                 `json:"mandate"`
+	FocusAreas     []string               `json:"focus_areas"`
+	Timezone       string                 `json:"timezone"`
+	ScheduleDays   []string               `json:"schedule_days"`
+	ScheduleTime   string                 `json:"schedule_time"`
+	NotifyOnReady  bool                   `json:"notify_on_ready"`
+	SpecialistSlug string                 `json:"specialist_slug"`
 }
 
 type hireResponse struct {
@@ -230,6 +231,7 @@ func (h *Handler) Hire(w http.ResponseWriter, r *http.Request) {
 		Mandate: body.Mandate, FocusAreas: body.FocusAreas,
 		Timezone: body.Timezone, ScheduleDays: body.ScheduleDays,
 		ScheduleTime: body.ScheduleTime, NotifyOnReady: body.NotifyOnReady,
+		SpecialistSlug: body.SpecialistSlug,
 	})
 	if err != nil {
 		switch {

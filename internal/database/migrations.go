@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 51
+const schemaVersion = 52
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -167,6 +167,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration050PersonalAssistantFirstBrief(ctx)
 	case 51:
 		return db.migration051PersonalAssistantRenameJournal(ctx)
+	case 52:
+		return db.migration052PersonalAssistantSpecialist(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -1788,6 +1790,26 @@ func (db *DB) migration051PersonalAssistantRenameJournal(ctx context.Context) er
 		if _, execErr := db.ExecContext(ctx, statement.sql); execErr != nil && !isDuplicateColumnError(execErr) {
 			return fmt.Errorf("failed to add personal_assistant_state.%s column: %w", statement.label, execErr)
 		}
+	}
+	return nil
+}
+
+// migration052PersonalAssistantSpecialist records which domain specialist the
+// user accepted during the hire, so post-hire surfaces can shape themselves
+// without re-running application detection.
+//
+// The column is additive and defaults to empty: every existing relationship
+// reads as "no specialist" and keeps today's behaviour with no backfill. The
+// table remains one row per user; nothing about its identity changes.
+func (db *DB) migration052PersonalAssistantSpecialist(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "personal_assistant_state")
+	if err != nil || !exists {
+		return err
+	}
+	if _, execErr := db.ExecContext(ctx, `
+		ALTER TABLE personal_assistant_state ADD COLUMN specialist_slug TEXT NOT NULL DEFAULT ''
+	`); execErr != nil && !isDuplicateColumnError(execErr) {
+		return fmt.Errorf("failed to add personal_assistant_state.specialist_slug column: %w", execErr)
 	}
 	return nil
 }

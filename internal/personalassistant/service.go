@@ -84,6 +84,7 @@ type Projection struct {
 	GlobalAgentProfile string                 `json:"global_agent_profile_name,omitempty"`
 	Mandate            string                 `json:"mandate,omitempty"`
 	FocusAreas         []FocusArea            `json:"focus_areas,omitempty"`
+	SpecialistSlug     string                 `json:"specialist_slug,omitempty"`
 	FirstAssignment    FirstAssignmentStatus  `json:"first_assignment_status,omitempty"`
 	RepairStep         RepairStep             `json:"repair_step,omitempty"`
 	NextAction         string                 `json:"next_action"`
@@ -197,6 +198,7 @@ func (s *Service) Get(ctx context.Context, userID string) (*Projection, error) {
 		projection.GlobalAgentProfile = ""
 		projection.Mandate = ""
 		projection.FocusAreas = nil
+		projection.SpecialistSlug = ""
 		return projection, nil
 	}
 
@@ -205,6 +207,7 @@ func (s *Service) Get(ctx context.Context, userID string) (*Projection, error) {
 	projection.GlobalAgentProfile = state.GlobalAgentProfileName
 	projection.Mandate = state.Mandate
 	projection.FocusAreas = append([]FocusArea(nil), state.FocusAreas...)
+	projection.SpecialistSlug = state.SpecialistSlug
 	if state.RenameStep != RenameNone {
 		projection.State = APIStateRepairNeeded
 		projection.NextAction = "retry_rename"

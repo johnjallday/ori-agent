@@ -18,6 +18,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/sensitive"
+	"github.com/johnjallday/ori-agent/internal/specialist"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -123,6 +124,13 @@ const (
 	FocusKeepProjectsMoving FocusArea = "keep_projects_moving"
 	FocusHelpWithEmail      FocusArea = "help_with_email"
 	FocusSomethingElse      FocusArea = "something_else"
+
+	// Domain focus areas. A specialist mapping offers these in place of the
+	// generic set above; the enum stays closed and server-validated either way.
+	FocusTrackSongsInProgress      FocusArea = "track_songs_in_progress"
+	FocusChaseCollaboratorHandoffs FocusArea = "chase_collaborator_handoffs"
+	FocusKeepReleaseDatesVisible   FocusArea = "keep_release_dates_visible"
+	FocusOrganizeProjectFiles      FocusArea = "organize_project_files"
 )
 
 var focusAliases = map[string]FocusArea{
@@ -134,6 +142,15 @@ var focusAliases = map[string]FocusArea{
 	"keep_projects_moving": FocusKeepProjectsMoving, "keep projects moving": FocusKeepProjectsMoving,
 	"help_with_email": FocusHelpWithEmail, "help with email": FocusHelpWithEmail,
 	"something_else": FocusSomethingElse, "something else": FocusSomethingElse,
+
+	"track_songs_in_progress":     FocusTrackSongsInProgress,
+	"track songs in progress":     FocusTrackSongsInProgress,
+	"chase_collaborator_handoffs": FocusChaseCollaboratorHandoffs,
+	"chase collaborator handoffs": FocusChaseCollaboratorHandoffs,
+	"keep_release_dates_visible":  FocusKeepReleaseDatesVisible,
+	"keep release dates visible":  FocusKeepReleaseDatesVisible,
+	"organize_project_files":      FocusOrganizeProjectFiles,
+	"organize project files":      FocusOrganizeProjectFiles,
 }
 
 // NormalizeFocusAreas validates, canonicalizes, and de-duplicates focus areas.
@@ -164,6 +181,25 @@ func NormalizeFocusAreas(raw []string) ([]FocusArea, error) {
 		return nil, fmt.Errorf("personal assistant: too many focus areas")
 	}
 	return out, nil
+}
+
+// NormalizeSpecialistSlug validates an accepted domain specialist against the
+// built-in mapping. An empty slug is valid and means the generic relationship.
+//
+// This is the input boundary: an unknown slug is rejected here rather than
+// persisted. Persisted rows are deliberately not re-checked against the
+// registry on read, so a future mapping change can never make an existing
+// relationship unreadable — an unrecognised persisted slug simply reads as no
+// specialist.
+func NormalizeSpecialistSlug(raw string) (string, error) {
+	slug := strings.TrimSpace(raw)
+	if slug == "" {
+		return "", nil
+	}
+	if _, ok := specialist.Get(slug); !ok {
+		return "", fmt.Errorf("personal assistant: unknown specialist %q", raw)
+	}
+	return slug, nil
 }
 
 // RepairStep is a closed, safe provisioning step code. It never contains a
@@ -221,18 +257,22 @@ type State struct {
 	GlobalAgentProfileName string
 	Mandate                string
 	FocusAreas             []FocusArea
-	FirstAssignmentStatus  FirstAssignmentStatus
-	LastHireRequestID      string
-	HirePayloadHash        string
-	HirePayloadJSON        string
-	RepairStep             RepairStep
-	RenameFromName         string
-	RenameToName           string
-	RenameStep             RenameStep
-	StateVersion           int64
-	HiredAt                *time.Time
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	// SpecialistSlug is the domain specialist the user accepted during the
+	// hire, or "" for the generic relationship. It is a stable machine identity
+	// from the built-in mapping, never user-authored text.
+	SpecialistSlug        string
+	FirstAssignmentStatus FirstAssignmentStatus
+	LastHireRequestID     string
+	HirePayloadHash       string
+	HirePayloadJSON       string
+	RepairStep            RepairStep
+	RenameFromName        string
+	RenameToName          string
+	RenameStep            RenameStep
+	StateVersion          int64
+	HiredAt               *time.Time
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
 // NewState constructs a fresh relationship with a generated stable ID.

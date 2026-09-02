@@ -44,6 +44,9 @@ type HireRequest struct {
 	ScheduleDays  []string
 	ScheduleTime  string
 	NotifyOnReady bool
+	// SpecialistSlug is the domain offer the user accepted, or "" when they
+	// declined, ignored it, or nothing was detected. It never gates the hire.
+	SpecialistSlug string
 }
 
 // HireResult contains canonical durable identities, never inferred names.
@@ -103,16 +106,17 @@ func NewHireCoordinator(store Store, creator personalhq.AssistantWorkspaceCreato
 }
 
 type normalizedHireRequest struct {
-	RequestID     string                 `json:"request_id"`
-	DisplayName   string                 `json:"display_name"`
-	Appearance    *types.AgentAppearance `json:"appearance"`
-	Mandate       string                 `json:"mandate"`
-	FocusAreas    []FocusArea            `json:"focus_areas"`
-	Timezone      string                 `json:"timezone"`
-	ScheduleDays  []string               `json:"schedule_days"`
-	ScheduleTime  string                 `json:"schedule_time"`
-	NotifyOnReady bool                   `json:"notify_on_ready"`
-	Hash          string                 `json:"-"`
+	RequestID      string                 `json:"request_id"`
+	DisplayName    string                 `json:"display_name"`
+	Appearance     *types.AgentAppearance `json:"appearance"`
+	Mandate        string                 `json:"mandate"`
+	FocusAreas     []FocusArea            `json:"focus_areas"`
+	Timezone       string                 `json:"timezone"`
+	ScheduleDays   []string               `json:"schedule_days"`
+	ScheduleTime   string                 `json:"schedule_time"`
+	NotifyOnReady  bool                   `json:"notify_on_ready"`
+	SpecialistSlug string                 `json:"specialist_slug,omitempty"`
+	Hash           string                 `json:"-"`
 }
 
 // Hire validates all user-controlled input before any persistence or
@@ -239,6 +243,7 @@ func (c *HireCoordinator) claimOperation(ctx context.Context, userID string, ifV
 		state.Appearance = request.Appearance.Clone()
 		state.Mandate = request.Mandate
 		state.FocusAreas = append([]FocusArea(nil), request.FocusAreas...)
+		state.SpecialistSlug = request.SpecialistSlug
 		state.FirstAssignmentStatus = FirstAssignmentNotStarted
 		state.LastHireRequestID = request.RequestID
 		state.HirePayloadHash = request.Hash
@@ -384,6 +389,10 @@ func normalizeHireRequest(input HireRequest) (normalizedHireRequest, error) {
 		return out, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 	out.FocusAreas, err = NormalizeFocusAreas(input.FocusAreas)
+	if err != nil {
+		return out, fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+	out.SpecialistSlug, err = NormalizeSpecialistSlug(input.SpecialistSlug)
 	if err != nil {
 		return out, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
