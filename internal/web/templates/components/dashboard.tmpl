@@ -18,6 +18,24 @@
       </nav>
     </header>
     <div id="personalAssistantTodayBanner" class="personal-assistant-today__banner" role="status" aria-live="polite"></div>
+    <!-- The domain offer, made once the assistant exists rather than during the
+         hire. Filled from the server-side specialist mapping when a detected
+         app suggests a domain: no app or domain name is hardcoded here, and an
+         empty mapping leaves the whole region hidden. -->
+    <section id="personalAssistantSpecialistOffer" class="pa-specialist-offer" data-decision="unanswered"
+             aria-labelledby="personalAssistantSpecialistOfferHeadline" hidden>
+      <p id="personalAssistantSpecialistOfferHeadline" class="pa-specialist-offer__headline"></p>
+      <p id="personalAssistantSpecialistOfferQuestion" class="pa-specialist-offer__question"></p>
+      <p id="personalAssistantSpecialistOfferAccepted" class="pa-specialist-offer__accepted" role="status" aria-live="polite" hidden></p>
+      <div id="personalAssistantSpecialistOfferActions" class="pa-specialist-offer__actions">
+        <button type="button" class="btn btn-sm btn-primary" id="personalAssistantSpecialistAcceptBtn">Yes</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="personalAssistantSpecialistDeclineBtn">No thanks</button>
+      </div>
+      <p id="personalAssistantSpecialistOfferError" class="pa-specialist-offer__error" role="alert" hidden></p>
+    </section>
+    <!-- Detection is a prior, not a fact: a producer whose DAW is on another
+         machine reaches the same domain from here. -->
+    <p id="personalAssistantSpecialistManual" class="pa-specialist-manual" hidden></p>
     <div id="personalAssistantTodayBriefMount"></div>
     <div id="personalAssistantTodaySections" class="personal-assistant-today__sections">
       <section aria-labelledby="personalAssistantTodayDecisionsTitle">

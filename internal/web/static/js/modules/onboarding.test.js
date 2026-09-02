@@ -17,8 +17,6 @@ import {
   normalizeFirstAssignmentRows,
   personalAssistantNeedsHQ,
   personalAssistantResumeMessage,
-  specialistFocusOptions,
-  specialistOfferView,
   workspaceRootSetupView
 } from './onboarding.js';
 import { resetOnboardingGateForTests } from './onboarding-gate.js';
@@ -425,48 +423,10 @@ const musicEntry = Object.freeze({
   assignment_steps: [{ index: 0, title: 'Songs in progress', legend: 'What are you on now?' }]
 });
 
-test('specialistOfferView offers help rather than asking whether the app is used', () => {
-  const view = specialistOfferView(musicEntry);
-  assert.equal(view.visible, true);
-  assert.equal(view.decision, 'unanswered');
-  assert.equal(view.showActions, true);
-  assert.equal(view.headline, 'I found REAPER on this Mac.');
-  assert.equal(view.question, 'Want me to help with your music projects?');
-  // The install is already known; the copy must never put it to the user as a
-  // question of fact.
-  assert.doesNotMatch(view.question, /do you use|are you a/i);
-});
-
-test('specialistOfferView keeps a declined offer from ever coming back', () => {
-  const declined = specialistOfferView(musicEntry, 'declined');
-  assert.equal(declined.visible, false);
-  assert.equal(declined.showActions, false);
-});
-
-test('specialistOfferView confirms acceptance without implying it can direct the specialist', () => {
-  const accepted = specialistOfferView(musicEntry, 'accepted');
-  assert.equal(accepted.visible, true);
-  assert.equal(accepted.decision, 'accepted');
-  assert.equal(accepted.showActions, false);
-  assert.equal(accepted.acceptedNote, 'Your assistant will keep an eye on your music projects.');
-});
-
-test('specialistOfferView renders nothing when no specialist matched', () => {
-  for (const entry of [null, undefined, {}, { slug: '' }]) {
-    const view = specialistOfferView(entry);
-    assert.equal(view.visible, false, `expected no offer for ${JSON.stringify(entry)}`);
-    assert.equal(view.showActions, false);
-  }
-});
-
-// PRD FR 32: a user with no detected specialist must see today's flow. These
-// three assertions are the regression guard — focus areas, assignment labels,
-// and step wording must all resolve to the shipped generic values.
-test('the generic path is byte-for-byte unchanged when no specialist matches', () => {
-  assert.deepEqual(
-    specialistFocusOptions(null),
-    GENERIC_FOCUS_AREAS.map(option => ({ ...option }))
-  );
+// A user with no accepted specialist must see today's flow. Focus areas,
+// assignment labels, and step wording must all resolve to the shipped
+// generic values.
+test('the generic path is byte-for-byte unchanged when no specialist is accepted', () => {
   assert.deepEqual(
     assignmentLabelsFor(null),
     GENERIC_ASSIGNMENT_LABELS.map(label => ({ ...label }))
@@ -495,18 +455,6 @@ test('the generic path is byte-for-byte unchanged when no specialist matches', (
   assert.deepEqual(
     GENERIC_ASSIGNMENT_STEPS.map(step => step.title),
     ['Today’s priorities', 'Owed and waiting', 'Fixed commitments']
-  );
-});
-
-test('specialistFocusOptions uses the domain options and falls back to the generic six', () => {
-  assert.deepEqual(specialistFocusOptions(musicEntry), [
-    { value: 'plan_my_day', label: 'Plan my studio day', selected: true },
-    { value: 'track_songs_in_progress', label: 'Track songs in progress', selected: true }
-  ]);
-  // A mapping row with unusable focus areas must not empty the step.
-  assert.deepEqual(
-    specialistFocusOptions({ slug: 'x', focus_areas: [{ value: '', label: '' }] }),
-    GENERIC_FOCUS_AREAS.map(option => ({ ...option }))
   );
 });
 
@@ -562,77 +510,6 @@ test('declining resolves assignment copy back to the generic labels', () => {
   );
 });
 
-test('detection failure, an empty scan, and no match all resolve to no offer', async () => {
-  const priorFetch = globalThis.fetch;
-  const cases = [
-    { name: 'network error', impl: async () => Promise.reject(new Error('offline')) },
-    {
-      name: 'server error',
-      impl: async () => ({ ok: false, status: 500, json: async () => ({}) })
-    },
-    {
-      name: 'empty scan',
-      impl: async () => ({ ok: true, json: async () => ({ success: true, apps: [] }) })
-    },
-    {
-      name: 'no match',
-      impl: async () => ({
-        ok: true,
-        json: async () => ({ success: true, apps: [{ name: 'Safari' }] })
-      })
-    },
-    {
-      name: 'malformed specialist',
-      impl: async () => ({ ok: true, json: async () => ({ specialist: { slug: '' } }) })
-    }
-  ];
-  try {
-    for (const testCase of cases) {
-      globalThis.fetch = testCase.impl;
-      const manager = new OnboardingManager();
-      assert.equal(await manager.detectSpecialist(), null, testCase.name);
-      assert.equal(specialistOfferView(await manager.detectSpecialist()).visible, false);
-    }
-  } finally {
-    globalThis.fetch = priorFetch;
-  }
-});
-
-test('a slow scan never blocks the wizard and still renders when it lands', async () => {
-  const priorFetch = globalThis.fetch;
-  const priorDocument = globalThis.document;
-  let releaseScan = null;
-  globalThis.fetch = async url => {
-    if (String(url).includes('/specialists')) {
-      return { ok: true, json: async () => ({ specialists: [musicEntry] }) };
-    }
-    await new Promise(resolve => {
-      releaseScan = resolve;
-    });
-    return { ok: true, json: async () => ({ specialist: musicEntry }) };
-  };
-  // The wizard is DOM-driven; render is a no-op without a document, which is
-  // exactly the "nothing on screen yet" state this test is about.
-  globalThis.document = { getElementById: () => null, querySelector: () => null };
-  try {
-    const manager = new OnboardingManager();
-    const detection = manager.startSpecialistDetection();
-    // The step is reachable and answerable while the scan is outstanding.
-    manager.hireStep = 1;
-    assert.equal(manager.specialistOffer, null);
-    assert.equal(specialistOfferView(manager.specialistOffer).visible, false);
-    assert.equal(manager.activeSpecialist(), null);
-
-    releaseScan();
-    const offer = await detection;
-    assert.equal(offer.slug, 'music_production');
-    assert.equal(manager.specialistDecision, 'unanswered');
-  } finally {
-    globalThis.fetch = priorFetch;
-    globalThis.document = priorDocument;
-  }
-});
-
 test('the first-assignment quest recovers the domain from the persisted slug', async () => {
   const priorFetch = globalThis.fetch;
   let catalogReads = 0;
@@ -668,25 +545,5 @@ test('the first-assignment quest recovers the domain from the persisted slug', a
     assert.equal(await stale.resolvePersistedSpecialist(), null);
   } finally {
     globalThis.fetch = priorFetch;
-  }
-});
-
-test('a scan landing after the user answered never overrides their answer', async () => {
-  const priorFetch = globalThis.fetch;
-  const priorDocument = globalThis.document;
-  globalThis.fetch = async url =>
-    String(url).includes('/specialists')
-      ? { ok: true, json: async () => ({ specialists: [] }) }
-      : { ok: true, json: async () => ({ specialist: musicEntry }) };
-  globalThis.document = { getElementById: () => null, querySelector: () => null };
-  try {
-    const manager = new OnboardingManager();
-    manager.specialistDecision = 'declined';
-    await manager.startSpecialistDetection();
-    assert.equal(manager.specialistOffer, null);
-    assert.equal(manager.activeSpecialist(), null);
-  } finally {
-    globalThis.fetch = priorFetch;
-    globalThis.document = priorDocument;
   }
 });

@@ -53,16 +53,16 @@ func (s *SQLiteStore) CreateState(ctx context.Context, state *State) (*State, er
 		INSERT INTO personal_assistant_state (
 			user_id, assistant_id, status, display_name, appearance_json,
 			hq_workspace_id, hq_entry_agent_instance_id, global_agent_profile_name,
-			mandate, focus_areas_json, specialist_slug, first_assignment_status,
+			mandate, focus_areas_json, specialist_slug, specialist_offer_state, first_assignment_status,
 			last_hire_request_id, hire_payload_hash, hire_payload_json, repair_step,
 			rename_from_name, rename_to_name, rename_step,
 			last_hq_request_id, hq_payload_hash, hq_payload_json,
 			state_version, hired_at, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
 	`, normalized.UserID, normalized.AssistantID, normalized.Status, normalized.DisplayName,
 		appearanceJSON, normalized.HQWorkspaceID, normalized.HQEntryAgentInstanceID,
 		normalized.GlobalAgentProfileName, normalized.Mandate, focusJSON,
-		normalized.SpecialistSlug,
+		normalized.SpecialistSlug, normalized.SpecialistOfferState,
 		normalized.FirstAssignmentStatus, normalized.LastHireRequestID,
 		normalized.HirePayloadHash, normalized.HirePayloadJSON, normalized.RepairStep,
 		normalized.RenameFromName, normalized.RenameToName, normalized.RenameStep,
@@ -89,7 +89,7 @@ func (s *SQLiteStore) GetState(ctx context.Context, userID string) (*State, erro
 	return s.scanState(ctx, `
 		SELECT user_id, assistant_id, status, display_name, appearance_json,
 			hq_workspace_id, hq_entry_agent_instance_id, global_agent_profile_name,
-			mandate, focus_areas_json, specialist_slug, first_assignment_status,
+			mandate, focus_areas_json, specialist_slug, specialist_offer_state, first_assignment_status,
 			last_hire_request_id, hire_payload_hash, hire_payload_json, repair_step,
 			rename_from_name, rename_to_name, rename_step,
 			last_hq_request_id, hq_payload_hash, hq_payload_json,
@@ -115,7 +115,7 @@ func (s *SQLiteStore) UpdateState(ctx context.Context, state *State, expectedVer
 		UPDATE personal_assistant_state SET
 			status = ?, display_name = ?, appearance_json = ?, hq_workspace_id = ?,
 			hq_entry_agent_instance_id = ?, global_agent_profile_name = ?, mandate = ?,
-			focus_areas_json = ?, specialist_slug = ?,
+			focus_areas_json = ?, specialist_slug = ?, specialist_offer_state = ?,
 			first_assignment_status = ?, last_hire_request_id = ?,
 			hire_payload_hash = ?, hire_payload_json = ?, repair_step = ?,
 			rename_from_name = ?, rename_to_name = ?, rename_step = ?,
@@ -124,7 +124,8 @@ func (s *SQLiteStore) UpdateState(ctx context.Context, state *State, expectedVer
 		WHERE user_id = ? AND assistant_id = ? AND state_version = ?
 	`, normalized.Status, normalized.DisplayName, appearanceJSON, normalized.HQWorkspaceID,
 		normalized.HQEntryAgentInstanceID, normalized.GlobalAgentProfileName,
-		normalized.Mandate, focusJSON, normalized.SpecialistSlug, normalized.FirstAssignmentStatus,
+		normalized.Mandate, focusJSON, normalized.SpecialistSlug, normalized.SpecialistOfferState,
+		normalized.FirstAssignmentStatus,
 		normalized.LastHireRequestID, normalized.HirePayloadHash, normalized.HirePayloadJSON, normalized.RepairStep,
 		normalized.RenameFromName, normalized.RenameToName, normalized.RenameStep,
 		normalized.LastHQRequestID, normalized.HQPayloadHash, normalized.HQPayloadJSON,
@@ -147,12 +148,12 @@ func (s *SQLiteStore) UpdateState(ctx context.Context, state *State, expectedVer
 
 func (s *SQLiteStore) scanState(ctx context.Context, query string, args ...any) (*State, error) {
 	var state State
-	var status, firstStatus, appearanceJSON, focusJSON, renameStep string
+	var status, firstStatus, appearanceJSON, focusJSON, renameStep, offerState string
 	var hiredAt sql.NullTime
 	err := s.db.QueryRowContext(ctx, query, args...).Scan(
 		&state.UserID, &state.AssistantID, &status, &state.DisplayName, &appearanceJSON,
 		&state.HQWorkspaceID, &state.HQEntryAgentInstanceID, &state.GlobalAgentProfileName,
-		&state.Mandate, &focusJSON, &state.SpecialistSlug, &firstStatus, &state.LastHireRequestID,
+		&state.Mandate, &focusJSON, &state.SpecialistSlug, &offerState, &firstStatus, &state.LastHireRequestID,
 		&state.HirePayloadHash, &state.HirePayloadJSON, &state.RepairStep,
 		&state.RenameFromName, &state.RenameToName, &renameStep,
 		&state.LastHQRequestID, &state.HQPayloadHash, &state.HQPayloadJSON,
@@ -173,6 +174,10 @@ func (s *SQLiteStore) scanState(ctx context.Context, query string, args ...any) 
 		return nil, fmt.Errorf("personal assistant: malformed persisted state: %w", err)
 	}
 	state.RenameStep, err = NormalizeRenameStep(renameStep)
+	if err != nil {
+		return nil, fmt.Errorf("personal assistant: malformed persisted state: %w", err)
+	}
+	state.SpecialistOfferState, err = NormalizeSpecialistOfferState(offerState)
 	if err != nil {
 		return nil, fmt.Errorf("personal assistant: malformed persisted state: %w", err)
 	}
@@ -620,6 +625,9 @@ func normalizeState(input *State) (*State, string, string, error) {
 	// Bounded here, not checked against the mapping: an unrecognised persisted
 	// slug must degrade to "no specialist", never make the row unreadable.
 	if state.SpecialistSlug, err = validateOpaqueID("specialist slug", state.SpecialistSlug, false); err != nil {
+		return nil, "", "", err
+	}
+	if state.SpecialistOfferState, err = NormalizeSpecialistOfferState(string(state.SpecialistOfferState)); err != nil {
 		return nil, "", "", err
 	}
 	if state.HirePayloadHash, err = validateOpaqueID("hire payload hash", state.HirePayloadHash, false); err != nil {

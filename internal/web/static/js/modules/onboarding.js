@@ -141,41 +141,6 @@ export const GENERIC_ASSIGNMENT_STEPS = Object.freeze([
   { index: 2, title: 'Fixed commitments', legend: 'Fixed commitments to keep visible' }
 ]);
 
-// specialistOfferView is the whole render decision for the in-wizard offer.
-// It carries no domain wording of its own: every user-visible string comes
-// from the server-side mapping entry, so a second domain is copy plus a row.
-export function specialistOfferView(entry, decision = 'unanswered') {
-  const copy = entry?.offer_copy || {};
-  const answered = decision === 'accepted' || decision === 'declined';
-  return {
-    // A declined offer is never shown again in the same onboarding.
-    visible: Boolean(entry?.slug) && decision !== 'declined',
-    decision: answered ? decision : 'unanswered',
-    slug: String(entry?.slug || ''),
-    headline: String(copy.headline || ''),
-    question: String(copy.question || ''),
-    acceptLabel: String(copy.accept_label || 'Yes'),
-    declineLabel: String(copy.decline_label || 'No thanks'),
-    acceptedNote: String(copy.accepted_note || ''),
-    showActions: Boolean(entry?.slug) && decision === 'unanswered'
-  };
-}
-
-// specialistFocusOptions returns the focus checkboxes to render. The generic
-// six are the default and the fallback: a mapping entry with no usable focus
-// areas must not leave the step empty.
-export function specialistFocusOptions(entry) {
-  const options = Array.isArray(entry?.focus_areas) ? entry.focus_areas : [];
-  const usable = options
-    .map(option => ({
-      value: String(option?.value || '').trim(),
-      label: String(option?.label || '').trim(),
-      selected: option?.selected === true
-    }))
-    .filter(option => option.value && option.label);
-  return usable.length > 0 ? usable : GENERIC_FOCUS_AREAS.map(option => ({ ...option }));
-}
-
 // assignmentLabelsFor merges a domain's wording over the generic labels. The
 // item types are the durable payload values and are never rewritten — only the
 // label, placeholder, and add-button text a user reads.
@@ -348,14 +313,11 @@ export class OnboardingManager {
     this.assignmentApplyRequestId = '';
     this.assignmentApplying = false;
     this.assignmentPreviewing = false;
-    // Domain specialist offer. detectionPromise is started when the modal opens
-    // and is never awaited on the critical path: the scan is allowed 30s and
-    // the wizard must stay usable the whole time.
-    this.specialistDetection = null;
+    // The domain the relationship records, resolved lazily for the
+    // first-assignment quest. The offer that sets it is made on Home.
     this.specialistOffer = null;
     this.specialistCatalog = [];
     this.specialistDecision = 'unanswered';
-    this.genericFocusMarkup = '';
     this.assignmentLabels = GENERIC_ASSIGNMENT_LABELS.map(label => ({ ...label }));
     this.assignmentSteps = GENERIC_ASSIGNMENT_STEPS.map(step => ({ ...step }));
   }
@@ -1085,46 +1047,12 @@ export class OnboardingManager {
     }
   }
 
-  // --- Domain specialist offer -------------------------------------------
-
-  // startSpecialistDetection kicks off the application scan and the static
-  // mapping read. Neither is ever awaited on the wizard's critical path, and
-  // every failure mode — timeout, network error, empty result, no match —
-  // resolves to no offer, which is the generic flow.
-  startSpecialistDetection() {
-    if (this.specialistDetection) return this.specialistDetection;
-    this.specialistDetection = (async () => {
-      const [catalog, detected] = await Promise.all([
-        this.loadSpecialistCatalog(),
-        this.detectSpecialist()
-      ]);
-      this.specialistCatalog = catalog;
-      if (detected && this.specialistDecision === 'unanswered') {
-        this.specialistOffer = detected;
-      }
-      // Late arrivals still render, but only while the user is on the step the
-      // answer changes and has not already answered.
-      this.renderSpecialistOffer();
-      return this.specialistOffer;
-    })();
-    return this.specialistDetection;
-  }
-
-  async detectSpecialist() {
-    try {
-      const response = await fetch('/api/onboarding/detect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' }
-      });
-      if (!response.ok) return null;
-      const payload = await response.json();
-      const entry = payload?.specialist;
-      return entry && entry.slug ? entry : null;
-    } catch (_) {
-      // Detection failing is never an error the user sees.
-      return null;
-    }
-  }
+  // --- Domain specialist wording -----------------------------------------
+  //
+  // The offer itself is not here. It is made after hiring, on Home, so the
+  // wizard asks about work in general and nothing else. What remains is the
+  // wording the first-assignment quest needs, resolved from the domain the
+  // relationship already records.
 
   async loadSpecialistCatalog() {
     try {
@@ -1144,112 +1072,6 @@ export class OnboardingManager {
   // only an accepted offer, never a pending or declined one.
   activeSpecialist() {
     return this.specialistDecision === 'accepted' ? this.specialistOffer : null;
-  }
-
-  renderSpecialistOffer() {
-    const host = document.getElementById('pafSpecialistOffer');
-    if (!host) return;
-    const view = specialistOfferView(this.specialistOffer, this.specialistDecision);
-    host.hidden = !view.visible || this.hireStep !== 1;
-    host.dataset.decision = view.decision;
-    const headline = document.getElementById('pafSpecialistOfferHeadline');
-    const question = document.getElementById('pafSpecialistOfferQuestion');
-    const accepted = document.getElementById('pafSpecialistOfferAccepted');
-    const actions = document.getElementById('pafSpecialistOfferActions');
-    const accept = document.getElementById('pafSpecialistAcceptBtn');
-    const decline = document.getElementById('pafSpecialistDeclineBtn');
-    if (headline) headline.textContent = view.headline;
-    if (question) {
-      question.textContent = view.question;
-      question.hidden = view.decision === 'accepted';
-    }
-    if (accepted) {
-      accepted.textContent = view.acceptedNote;
-      accepted.hidden = view.decision !== 'accepted' || !view.acceptedNote;
-    }
-    if (actions) actions.hidden = !view.showActions;
-    if (accept) accept.textContent = view.acceptLabel;
-    if (decline) decline.textContent = view.declineLabel;
-    this.renderSpecialistManualPath();
-  }
-
-  // renderSpecialistManualPath offers a domain the scan did not find. It is a
-  // peer of the focus checkboxes, not a fallback: the DAW may simply live on
-  // another machine. Hidden once an offer is on screen or already answered.
-  renderSpecialistManualPath() {
-    const host = document.getElementById('pafSpecialistManual');
-    if (!host) return;
-    const offered = new Set();
-    if (this.specialistOffer?.slug) offered.add(this.specialistOffer.slug);
-    const candidates = (this.specialistCatalog || []).filter(
-      entry => !offered.has(entry.slug) && String(entry?.offer_copy?.manual_label || '').trim()
-    );
-    const show =
-      this.hireStep === 1 && this.specialistDecision === 'unanswered' && candidates.length > 0;
-    host.hidden = !show;
-    host.replaceChildren();
-    if (!show) return;
-    candidates.forEach(entry => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'btn btn-sm btn-link p-0';
-      button.dataset.pafSpecialistManual = entry.slug;
-      button.textContent = String(entry.offer_copy.manual_label).trim();
-      button.addEventListener('click', () => this.acceptSpecialistOffer(entry));
-      host.appendChild(button);
-    });
-  }
-
-  // acceptSpecialistOffer records the slug and shapes the rest of the hire.
-  // It creates no workspace and runs no setup wizard: the hire transaction
-  // stays exactly as heavy as it is on the generic path.
-  acceptSpecialistOffer(entry = null) {
-    const accepted = entry || this.specialistOffer;
-    if (!accepted?.slug) return;
-    this.specialistOffer = accepted;
-    this.specialistDecision = 'accepted';
-    this.applySpecialistFocusAreas(accepted);
-    this.applySpecialistAssignmentCopy(accepted);
-    this.renderSpecialistOffer();
-    this.updateHireButtonState();
-  }
-
-  // declineSpecialistOffer is one click, restores the generic focus areas
-  // immediately, and is never re-asked in the same onboarding.
-  declineSpecialistOffer() {
-    this.specialistDecision = 'declined';
-    this.restoreGenericFocusAreas();
-    this.applySpecialistAssignmentCopy(null);
-    this.renderSpecialistOffer();
-    this.updateHireButtonState();
-  }
-
-  applySpecialistFocusAreas(entry) {
-    const grid = document.querySelector('.paf-hire-focus-grid');
-    if (!grid) return;
-    if (!this.genericFocusMarkup) this.genericFocusMarkup = grid.innerHTML;
-    grid.replaceChildren();
-    specialistFocusOptions(entry).forEach(option => {
-      const label = document.createElement('label');
-      const input = document.createElement('input');
-      input.type = 'checkbox';
-      input.name = 'pafFocus';
-      input.value = option.value;
-      input.checked = option.selected === true;
-      input.addEventListener('change', () => this.updateHireButtonState());
-      label.appendChild(input);
-      label.append(` ${option.label}`);
-      grid.appendChild(label);
-    });
-  }
-
-  restoreGenericFocusAreas() {
-    const grid = document.querySelector('.paf-hire-focus-grid');
-    if (!grid || !this.genericFocusMarkup) return;
-    grid.innerHTML = this.genericFocusMarkup;
-    grid
-      .querySelectorAll('[name="pafFocus"]')
-      .forEach(input => input.addEventListener('change', () => this.updateHireButtonState()));
   }
 
   // applySpecialistAssignmentCopy resolves the wording the first-assignment
@@ -1327,10 +1149,6 @@ export class OnboardingManager {
     if (back) back.textContent = 'Back';
     document.getElementById('pafHireNextBtn')?.classList.toggle('d-none', this.hireStep === 2);
     document.getElementById('pafHireBtn')?.classList.toggle('d-none', this.hireStep !== 2);
-    // The offer lives on the focus step because that is what its answer
-    // changes. If the scan has not answered yet, this renders nothing and the
-    // step is fully usable on the generic path.
-    this.renderSpecialistOffer();
     this.updateHireButtonState();
 
     if (focus) label?.focus();
@@ -2132,10 +1950,6 @@ export class OnboardingManager {
 
     this.currentPhase = 0;
     this.assignmentQuestMode = false;
-    // Started here, at the very top of onboarding, so the common case (a scan
-    // that finishes in a second or two) has already answered by the time the
-    // focus step is reached. Deliberately not awaited anywhere.
-    this.startSpecialistDetection();
     document.getElementById('onboardingProgressShell')?.classList.remove('d-none');
 
     // Pre-fill names if returning

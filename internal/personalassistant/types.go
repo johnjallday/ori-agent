@@ -232,6 +232,32 @@ func NormalizeFocusAreas(raw []string) ([]FocusArea, error) {
 	return out, nil
 }
 
+// SpecialistOfferState is the closed lifecycle of the post-hire domain offer.
+//
+// The offer is made once the relationship exists, not during the hire: a user
+// naming their assistant has not yet been given a reason to care about a
+// second one, and the hire's own steps are the wrong place to introduce it.
+type SpecialistOfferState string
+
+const (
+	// SpecialistOfferUnanswered means the offer has not been made or answered
+	// yet. Detection may still show it.
+	SpecialistOfferUnanswered SpecialistOfferState = ""
+	SpecialistOfferAccepted   SpecialistOfferState = "accepted"
+	SpecialistOfferDeclined   SpecialistOfferState = "declined"
+)
+
+// NormalizeSpecialistOfferState validates a persisted or submitted answer.
+func NormalizeSpecialistOfferState(raw string) (SpecialistOfferState, error) {
+	state := SpecialistOfferState(strings.ToLower(strings.TrimSpace(raw)))
+	switch state {
+	case SpecialistOfferUnanswered, SpecialistOfferAccepted, SpecialistOfferDeclined:
+		return state, nil
+	default:
+		return "", fmt.Errorf("personal assistant: invalid specialist offer state %q", raw)
+	}
+}
+
 // NormalizeSpecialistSlug validates an accepted domain specialist against the
 // built-in mapping. An empty slug is valid and means the generic relationship.
 //
@@ -316,7 +342,11 @@ type State struct {
 	// SpecialistSlug is the domain specialist the user accepted, or "" for the
 	// generic relationship. It is a stable machine identity from the built-in
 	// mapping, never user-authored text.
-	SpecialistSlug        string
+	SpecialistSlug string
+	// SpecialistOfferState records whether the post-hire domain offer has been
+	// answered at all. An empty slug cannot say the difference between "never
+	// asked" and "asked and declined", and a decline has to survive a reload.
+	SpecialistOfferState  SpecialistOfferState
 	FirstAssignmentStatus FirstAssignmentStatus
 	LastHireRequestID     string
 	HirePayloadHash       string

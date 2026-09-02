@@ -897,45 +897,6 @@
     border-radius: 10px;
   }
 
-  /* The detected-domain offer. It sits above the focus question because that
-     is the answer it changes; it never gates progress. */
-  .paf-specialist-offer {
-    display: grid;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
-    padding: 0.9rem;
-    border: 1px solid var(--accent-primary, #1f6b4e);
-    border-radius: 12px;
-    background: color-mix(in srgb, var(--accent-primary, #1f6b4e) 8%, transparent);
-  }
-
-  .paf-specialist-offer__headline {
-    margin: 0;
-    font-weight: 700;
-  }
-
-  .paf-specialist-offer__question,
-  .paf-specialist-offer__accepted {
-    margin: 0;
-    color: var(--text-secondary);
-  }
-
-  .paf-specialist-offer__actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-  }
-
-  .paf-specialist-manual {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.5rem;
-    margin: 0;
-    color: var(--text-secondary);
-    font-size: 0.84rem;
-  }
-
   .paf-assignment-card,
   .paf-assignment-list,
   .paf-assignment-preview-list {
@@ -1251,20 +1212,9 @@
               </div>
 
               <div data-paf-hire-step="1" class="d-none" tabindex="-1">
-              <!-- Filled from the server-side specialist mapping when a detected
-                   app suggests a domain. No app or domain name is hardcoded here;
-                   an empty mapping leaves this region hidden and the generic
-                   focus areas below untouched. -->
-              <section id="pafSpecialistOffer" class="paf-specialist-offer" data-decision="unanswered" aria-live="polite" hidden>
-                <p id="pafSpecialistOfferHeadline" class="paf-specialist-offer__headline"></p>
-                <p id="pafSpecialistOfferQuestion" class="paf-specialist-offer__question"></p>
-                <p id="pafSpecialistOfferAccepted" class="paf-specialist-offer__accepted" hidden></p>
-                <div id="pafSpecialistOfferActions" class="paf-specialist-offer__actions">
-                  <button type="button" class="btn btn-sm btn-primary onboarding-next-btn" id="pafSpecialistAcceptBtn">Yes</button>
-                  <button type="button" class="btn btn-sm btn-outline-secondary" id="pafSpecialistDeclineBtn">No thanks</button>
-                </div>
-              </section>
-
+              <!-- The hire asks about work in general. The domain offer is
+                   deliberately not here: it is made on Home once the assistant
+                   exists, so hiring stays one decision. -->
               <fieldset>
                 <legend class="h6">What should your assistant help with?</legend>
                 <div class="paf-hire-focus-grid">
@@ -1275,9 +1225,6 @@
                   <label><input type="checkbox" name="pafFocus" value="help_with_email"> Help with email</label>
                   <label><input type="checkbox" name="pafFocus" value="something_else"> Something else</label>
                 </div>
-                <!-- Detection is a prior, not a fact: a producer whose DAW is on
-                     another machine reaches the same path from here. -->
-                <p id="pafSpecialistManual" class="paf-specialist-manual" hidden></p>
               </fieldset>
 
               <div>

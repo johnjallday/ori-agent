@@ -106,12 +106,16 @@ type Projection struct {
 	Mandate            string                 `json:"mandate,omitempty"`
 	FocusAreas         []FocusArea            `json:"focus_areas,omitempty"`
 	SpecialistSlug     string                 `json:"specialist_slug,omitempty"`
-	FirstAssignment    FirstAssignmentStatus  `json:"first_assignment_status,omitempty"`
-	RepairStep         RepairStep             `json:"repair_step,omitempty"`
-	NextAction         string                 `json:"next_action"`
-	Availability       Availability           `json:"availability"`
-	DailyBrief         *BriefConfigProjection `json:"daily_brief,omitempty"`
-	Rename             *RenameProjection      `json:"rename,omitempty"`
+	// SpecialistOffer says whether the post-hire domain offer still needs an
+	// answer. Clients switch on this rather than inferring it from an empty
+	// slug, which cannot distinguish "not asked" from "declined".
+	SpecialistOffer SpecialistOfferState   `json:"specialist_offer_state,omitempty"`
+	FirstAssignment FirstAssignmentStatus  `json:"first_assignment_status,omitempty"`
+	RepairStep      RepairStep             `json:"repair_step,omitempty"`
+	NextAction      string                 `json:"next_action"`
+	Availability    Availability           `json:"availability"`
+	DailyBrief      *BriefConfigProjection `json:"daily_brief,omitempty"`
+	Rename          *RenameProjection      `json:"rename,omitempty"`
 }
 
 // PersonalHQReader is implemented by personalhq.Service.
@@ -238,6 +242,7 @@ func (s *Service) Get(ctx context.Context, userID string) (*Projection, error) {
 		projection.Mandate = ""
 		projection.FocusAreas = nil
 		projection.SpecialistSlug = ""
+		projection.SpecialistOffer = SpecialistOfferUnanswered
 		return projection, nil
 	}
 
@@ -247,6 +252,7 @@ func (s *Service) Get(ctx context.Context, userID string) (*Projection, error) {
 	projection.Mandate = state.Mandate
 	projection.FocusAreas = append([]FocusArea(nil), state.FocusAreas...)
 	projection.SpecialistSlug = state.SpecialistSlug
+	projection.SpecialistOffer = state.SpecialistOfferState
 	if state.RenameStep != RenameNone {
 		projection.State = APIStateRepairNeeded
 		projection.NextAction = NextActionRetryRename
@@ -318,6 +324,10 @@ func (s *Service) projectPreHQ(state *State, projection *Projection) (*Projectio
 	projection.GlobalAgentProfile = provenance.Name
 	projection.Mandate = state.Mandate
 	projection.FocusAreas = append([]FocusArea(nil), state.FocusAreas...)
+	// The relationship exists, so the domain offer applies here too — a hired
+	// assistant without HQ yet is still someone who can be asked.
+	projection.SpecialistSlug = state.SpecialistSlug
+	projection.SpecialistOffer = state.SpecialistOfferState
 	projection.Availability.PersonalHQ = notConfiguredSource(reason)
 	projection.Availability.AgentInstance = notConfiguredSource(reason)
 	projection.Availability.DailyBrief = notConfiguredSource(reason)

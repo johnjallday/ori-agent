@@ -226,6 +226,67 @@ body.home-command-page .home-command-bridge * {
   font-size: 12px;
 }
 
+/* The post-hire domain offer. It sits under the banner, above the sections it
+   reshapes, and never blocks anything on this page. */
+.pa-specialist-offer {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--hc-signal);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--hc-signal) 8%, transparent);
+}
+
+/* Match the page's own primary action rather than Bootstrap's blue. */
+.pa-specialist-offer .btn-primary {
+  border-color: var(--hc-signal);
+  background-color: var(--hc-signal);
+  color: var(--cozy-paper, #fff);
+}
+
+.pa-specialist-offer .btn-primary:hover,
+.pa-specialist-offer .btn-primary:focus,
+.pa-specialist-offer .btn-primary:active {
+  border-color: var(--hc-signal-deep);
+  background-color: var(--hc-signal-deep);
+  color: var(--cozy-paper, #fff);
+}
+
+.pa-specialist-offer__headline {
+  margin: 0;
+  color: var(--hc-ink);
+  font-weight: 700;
+}
+
+.pa-specialist-offer__question,
+.pa-specialist-offer__accepted {
+  margin: 0;
+  color: var(--hc-ink-dim);
+}
+
+.pa-specialist-offer__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pa-specialist-offer__error {
+  margin: 0;
+  color: var(--hc-alert);
+  font-size: 12px;
+}
+
+.pa-specialist-manual {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+  color: var(--hc-ink-dim);
+  font-size: 12px;
+}
+
 /* Who did the work. Distinct from a row's detail line so the agent's name
    reads as a name rather than as more description. */
 .personal-assistant-today__attribution {
