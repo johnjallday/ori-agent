@@ -183,6 +183,43 @@ test('declining is one click, restores the generic focus areas, and is not re-as
   await expect(page.locator('#pafSpecialistOffer')).toBeHidden();
 });
 
+test('ignoring the offer entirely completes the hire on the generic path', async ({ page }) => {
+  await page.route('**/api/onboarding/detect', route =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, apps: [], specialist: musicOffer })
+    })
+  );
+
+  await openHireFocusStep(page);
+  await expect(page.locator('#pafSpecialistOffer')).toHaveAttribute('data-decision', 'unanswered');
+
+  // Neither button is touched. The wizard must still walk all the way to a
+  // ready Hire button, on the generic focus areas.
+  await expect(page.locator('#pafHireNextBtn')).toBeEnabled();
+  await page.locator('#pafHireNextBtn').click();
+  await expect(page.locator('#pafHireStepLabel')).toContainText('Hire step 3 of 3');
+  await page.locator('#pafHireConfirm').check();
+  await expect(page.locator('#pafHireBtn')).toBeEnabled();
+
+  // And the payload it sends carries no specialist. The request is answered
+  // here rather than let through, so this case leaves no durable hire behind
+  // and the ordering of the rest of the file is unaffected.
+  let sentSlug: string | undefined;
+  await page.route('**/api/personal-assistant/hire', route => {
+    sentSlug = JSON.parse(route.request().postData() || '{}').specialist_slug;
+    return route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'not part of this case', retryable: true })
+    });
+  });
+  await page.screenshot({ path: `${SHOTS}/07-offer-ignored.png`, fullPage: true });
+  await page.locator('#pafHireBtn').click();
+  await expect.poll(() => sentSlug).toBe('');
+});
+
 test('an empty mapping leaves the focus step exactly as it ships today', async ({ page }) => {
   await page.route('**/api/onboarding/detect', route =>
     route.fulfill({

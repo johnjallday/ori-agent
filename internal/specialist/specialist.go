@@ -109,50 +109,8 @@ type Entry struct {
 	CapabilityOrder []string `json:"capability_order"`
 }
 
-// registry is the built-in mapping. v1 ships exactly one entry.
-var registry = []Entry{
-	{
-		Slug:           "music_production",
-		AppPatterns:    [][]string{{"reaper"}},
-		DisplayName:    "music projects",
-		SpecialistName: "Reaper Producer",
-		OfferCopy: OfferCopy{
-			Headline:     "I found REAPER on this Mac.",
-			Question:     "Want me to help with your music projects?",
-			AcceptLabel:  "Yes, help with my music",
-			DeclineLabel: "No thanks",
-			AcceptedNote: "Your assistant will keep an eye on your music projects and tell you what Reaper Producer has done.",
-			ManualLabel:  "I work on music",
-		},
-		FocusAreas: []FocusOption{
-			{Value: "plan_my_day", Label: "Plan my studio day", Selected: true},
-			{Value: "track_songs_in_progress", Label: "Track songs in progress", Selected: true},
-			{Value: "chase_collaborator_handoffs", Label: "Chase collaborator handoffs", Selected: true},
-			{Value: "keep_release_dates_visible", Label: "Keep release and session dates visible"},
-			{Value: "organize_project_files", Label: "Keep project files organized"},
-			{Value: "something_else", Label: "Something else"},
-		},
-		AssignmentLabels: []AssignmentLabel{
-			{Type: ItemPriority, Label: "Song or project in progress", Placeholder: "Which track are you on?", AddLabel: "Add a song or project"},
-			{Type: ItemIOwe, Label: "Something I owe a collaborator", Placeholder: "What did you promise?", AddLabel: "Add something I owe"},
-			{Type: ItemWaitingOn, Label: "Waiting on (mix, master, feature)", Placeholder: "What are you waiting for?", AddLabel: "Add something I’m waiting on"},
-			{Type: ItemFixedCommitment, Label: "Release or session date", Placeholder: "Release, session, or deadline to keep visible", AddLabel: "Add a release or session date"},
-		},
-		AssignmentSteps: []AssignmentStep{
-			{Index: 0, Title: "Songs in progress", Legend: "What are you working on right now?"},
-			{Index: 1, Title: "Owed and waiting", Legend: "What do you owe a collaborator—or what are you waiting on?"},
-			{Index: 2, Title: "Release and session dates", Legend: "Dates to keep visible"},
-		},
-		SuggestedTemplateID: "reaper-song",
-		Suggestion: Suggestion{
-			Title:       "Set up your studio workspace",
-			Body:        "The Reaper Song blueprint brings in Reaper Producer, the named expert who handles studio work. Your assistant reports on what it does.",
-			ActionLabel: "Create the studio workspace",
-			ActionRoute: "/?create=1&blueprint=reaper-song",
-		},
-		CapabilityOrder: []string{"projects", "folders", "calendar", "email"},
-	},
-}
+// The mapping's entries live in domains.go, which is data only. Nothing in
+// this file names an application.
 
 // All returns a copy of the built-in mapping.
 func All() []Entry {
@@ -234,9 +192,9 @@ func entryMatches(entry Entry, tokens []string) bool {
 }
 
 // hasPrefixTokens reports whether the app's tokens begin with the pattern's
-// tokens. Anchoring at the start is what keeps "REAPER 7" a match while
-// "Grim Reaper" is not — a detected app whose name merely contains a pattern
-// word is a different product.
+// tokens. Anchoring at the start is what lets a pattern match an app plus its
+// version text while rejecting an unrelated product that merely happens to
+// contain the pattern word later in its name.
 func hasPrefixTokens(tokens, pattern []string) bool {
 	if len(pattern) == 0 || len(tokens) < len(pattern) {
 		return false
@@ -252,8 +210,8 @@ func hasPrefixTokens(tokens, pattern []string) bool {
 // nameTokens lowercases an application name, drops a trailing ".app", splits on
 // anything that is not a letter or digit, and strips a trailing digit run from
 // each token. That is what makes matching tolerant of the version text vendors
-// bake into the bundle name: REAPER, REAPER64, and "Reaper 7" all reduce to a
-// leading "reaper" token.
+// bake into a bundle name: "Foo", "FOO64", and "Foo 7" all reduce to a leading
+// "foo" token.
 func nameTokens(name string) []string {
 	lowered := strings.ToLower(strings.TrimSpace(name))
 	lowered = strings.TrimSuffix(lowered, ".app")
@@ -284,7 +242,7 @@ func (e Entry) FocusValues() []string {
 
 // MatchesTemplate reports whether a workspace's template ID is this entry's
 // suggested blueprint. A blueprint published by a plugin carries a namespaced
-// ID ("plugin:reaper-plugin:reaper-song"), so the bare blueprint ID is compared
+// ID ("plugin:<plugin>:<blueprint>"), so the bare blueprint ID is compared
 // against the last segment as well.
 func (e Entry) MatchesTemplate(templateID string) bool {
 	suggested := strings.TrimSpace(e.SuggestedTemplateID)

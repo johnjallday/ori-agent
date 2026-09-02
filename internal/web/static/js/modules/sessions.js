@@ -7115,7 +7115,7 @@ const sessionManager = {
       const selectedId = selected ? String(selected.id || '') : '';
       if (selectedId === id || selectedId.endsWith(`:${id}`)) return; // stuck — done
       // A blueprint published by a plugin carries a namespaced template ID
-      // ("plugin:reaper-plugin:reaper-song"), so a deep link naming the bare
+      // ("plugin:<plugin>:<blueprint>"), so a deep link naming the bare
       // blueprint ID also matches the card whose ID ends with it.
       const card =
         document.querySelector(

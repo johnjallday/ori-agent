@@ -1324,7 +1324,77 @@ tree_digest() {
     xargs -0 shasum 2>/dev/null | sed "s|  \./|  |")
 }
 
+# --- Domain-specialist onboarding (tasks/prd-domain-specialist-onboarding.md)
+#
+# serve is the isolated-demo launch from CLAUDE.md > Smoke Testing, as one
+# stable token. `wt demo` is the normal way in, but it needs an interactive
+# shell and uses `mktemp -d`, which an agent sandbox denies silently — an empty
+# SMOKE_DIR then resolves HOME and ORI_DATA_DIR to the working directory and
+# the server writes its state into the worktree. This uses $TMPDIR, always set
+# and always writable, and starts the server from inside the sandbox so the
+# plugin store is isolated too.
+serve_isolated() {
+  local port="${1:-8931}" name="${2:-default}"
+  local dir="${TMPDIR:-/tmp}/ori-smoke-${name}"
+  mkdir -p "$dir" || fail "could not create $dir"
+  [[ -d "$dir" ]] || fail "sandbox $dir does not exist"
+  local binary
+  binary="$(cd "$(dirname "$0")/.." && pwd -P)/bin/ori-agent"
+  [[ -x "$binary" ]] || fail "build first: ./scripts/build-server.sh"
+  echo "sandbox: $dir"
+  echo "url:     http://localhost:${port}"
+  cd "$dir" || fail "could not enter $dir"
+  HOME="$dir" ORI_DATA_DIR="$dir" PORT="$port" exec "$binary"
+}
+
+# smoke_specialist checks the server side of the detected-app offer. The
+# browser paths are covered by tests/domain-specialist-onboarding.spec.ts.
+smoke_specialist() {
+  local catalog detect
+  echo "== specialist mapping =="
+  expect_status 200 GET "$BASE_URL/api/onboarding/specialists"
+  expect_status 405 POST "$BASE_URL/api/onboarding/specialists"
+
+  catalog=$(curl -s "$BASE_URL/api/onboarding/specialists")
+  local slug template manual
+  slug=$(printf '%s' "$catalog" | json_field 'specialists.0.slug')
+  template=$(printf '%s' "$catalog" | json_field 'specialists.0.suggested_template_id')
+  manual=$(printf '%s' "$catalog" | json_field 'specialists.0.offer_copy.manual_label')
+  [[ -n "$slug" ]] || fail "catalog returned no specialist slug"
+  [[ -n "$template" ]] || fail "specialist $slug has no suggested template"
+  [[ -n "$manual" ]] || fail "specialist $slug has no manual path label"
+  echo "ok   catalog: $slug -> $template (manual: $manual)"
+
+  # Detection is allowed 30s and may legitimately match nothing on this host.
+  # Either answer is correct; a malformed one is not.
+  echo "== detection =="
+  detect=$(curl -s -m 40 -X POST "$BASE_URL/api/onboarding/detect")
+  local detected
+  detected=$(printf '%s' "$detect" | json_field 'specialist.slug')
+  if [[ -n "$detected" ]]; then
+    local headline question
+    headline=$(printf '%s' "$detect" | json_field 'specialist.offer_copy.headline')
+    question=$(printf '%s' "$detect" | json_field 'specialist.offer_copy.question')
+    [[ -n "$headline" && -n "$question" ]] || fail "matched $detected with incomplete offer copy"
+    case "$question" in
+    "Do you use"* | "Are you a"*) fail "offer asks what is already known: $question" ;;
+    esac
+    echo "ok   detected $detected: $headline $question"
+  else
+    echo "ok   nothing matched on this host — generic path"
+  fi
+
+  # An unknown slug is rejected before anything is persisted. This is a
+  # validation probe: it never completes a hire.
+  echo "== unknown slug is refused =="
+  expect_status 400 POST "$BASE_URL/api/personal-assistant/hire" \
+    '{"request_id":"smoke-invalid-specialist","if_version":0,"display_name":"Smoke","mandate":"probe","focus_areas":["plan_my_day"],"timezone":"UTC","schedule_days":["mon"],"schedule_time":"08:00","specialist_slug":"not_a_domain"}'
+  echo "PASS specialist"
+}
+
 case "${1:-}" in
+serve) serve_isolated "${2:-8931}" "${3:-default}" ;;
+specialist) smoke_specialist ;;
 seed) seed_demo ;;
 rootswitch) smoke_rootswitch "${3:-}" ;;
 slot) smoke_slot "${3:-}" ;;
@@ -1340,6 +1410,8 @@ materialize) smoke_materialize "${3:-}" ;;
 execution) smoke_execution "${3:-}" ;;
 *)
   echo "usage:" >&2
+  echo "  $0 serve [port] [sandbox-name]           # run an ISOLATED demo server (Ctrl-C to stop)" >&2
+  echo "  $0 specialist <base-url>                 # domain-specialist onboarding API checks" >&2
   echo "  $0 seed <base-url>                       # seed plans and print URLs to review" >&2
   echo "  $0 {plans|drafting|review|materialize|execution|slot|reconcile|policy|boundary|hardening|packaged} <base-url> <workspace-id>" >&2
   exit 2

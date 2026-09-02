@@ -2,10 +2,12 @@ package personalassistant
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 func TestSpecialistSlugSurvivesAStoreRoundTrip(t *testing.T) {
@@ -207,6 +209,75 @@ func TestAcceptingASpecialistDoesNotChangeTheHireTransaction(t *testing.T) {
 	if producer.State.HQWorkspaceID != generic.State.HQWorkspaceID {
 		t.Fatalf("producer hire produced a different HQ: %q vs %q",
 			producer.State.HQWorkspaceID, generic.State.HQWorkspaceID)
+	}
+}
+
+// This feature is for new hires. A relationship that predates it must be
+// completely untouched: nothing backfills it, nothing offers it a specialist
+// after the fact, and every post-hire read behaves exactly as it did before.
+func TestExistingRelationshipsAreNeverRetrofitted(t *testing.T) {
+	ctx := context.Background()
+
+	// A relationship as it exists before this feature: an active hire with no
+	// specialist column value at all.
+	service, store, _, _, _ := serviceMatrixFixture(StatusActive)
+	store.state.SpecialistSlug = ""
+
+	projection, err := service.Get(ctx, "local")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if projection.SpecialistSlug != "" {
+		t.Fatalf("relationship read invented a specialist: %q", projection.SpecialistSlug)
+	}
+
+	// The capability projection is the pre-feature order with no suggestion.
+	workspaces := workspace.NewInMemoryStore()
+	hq := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Personal HQ"})
+	hq.ID, hq.FolderSlug, hq.OwnerUserID = "hq-local", "personal-hq", "local"
+	if err := workspaces.Save(hq); err != nil {
+		t.Fatal(err)
+	}
+	capabilities, err := NewCapabilityService(service, workspaces, nil).Get(ctx, "local")
+	if err != nil {
+		t.Fatalf("capabilities: %v", err)
+	}
+	if got := capabilityKeys(capabilities.Cards); !slices.Equal(got, []string{"email", "calendar", "projects", "folders"}) {
+		t.Fatalf("existing relationship card order = %v", got)
+	}
+	if capabilities.Suggestion != nil {
+		t.Fatalf("existing relationship was offered a workspace: %+v", capabilities.Suggestion)
+	}
+
+	// Even with a domain workspace already on disk, no specialist surfaces:
+	// the offer is the only thing that records one, and it is only shown
+	// during a hire.
+	studio := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Ivory"})
+	studio.ID, studio.FolderSlug, studio.OwnerUserID = "studio-1", "ivory", "local"
+	studio.SetTemplateProvenance(&workspace.TemplateProvenance{TemplateID: "reaper-song"})
+	if err := workspaces.Save(studio); err != nil {
+		t.Fatal(err)
+	}
+	today, err := NewTodayService(
+		stubTodayRelationship{projection: projection},
+		stubTodayBrief{err: dailybrief.ErrRevisionNotFound},
+		workspaces,
+		stubTodayFollowUps{},
+	).Get(ctx, "local")
+	if err != nil {
+		t.Fatalf("today: %v", err)
+	}
+	if today.Studio != nil {
+		t.Fatalf("existing relationship got a studio section: %+v", today.Studio)
+	}
+
+	// And the persisted row is still what it was.
+	persisted, err := store.GetState(ctx, "local")
+	if err != nil {
+		t.Fatalf("GetState: %v", err)
+	}
+	if persisted.SpecialistSlug != "" {
+		t.Fatalf("persisted specialist = %q, want empty", persisted.SpecialistSlug)
 	}
 }
 

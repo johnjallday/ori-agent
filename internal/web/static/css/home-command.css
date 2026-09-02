@@ -226,7 +226,7 @@ body.home-command-page .home-command-bridge * {
   font-size: 12px;
 }
 
-/* Who did the work. Distinct from a row's detail line so "Reaper Producer"
+/* Who did the work. Distinct from a row's detail line so the agent's name
    reads as a name rather than as more description. */
 .personal-assistant-today__attribution {
   font-weight: 650;
