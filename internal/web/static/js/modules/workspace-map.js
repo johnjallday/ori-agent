@@ -1740,11 +1740,17 @@
   var lastWorldLayout = null;
   var cameraSaveTimer = null;
 
+  // measured:false marks the DEFAULT_VIEWPORT fallback. Panning and drawing are
+  // happy with a placeholder size, but framing is not: a fit computed against
+  // the fallback is latched by ensureCamera and never recomputed, so it has to
+  // be able to tell a real measurement from a stand-in.
   function viewportSize(canvas) {
     var width = (canvas && canvas.clientWidth) || 0;
     var height = (canvas && canvas.clientHeight) || 0;
-    if (width <= 0 || height <= 0) return DEFAULT_VIEWPORT;
-    return { width: width, height: height };
+    if (width <= 0 || height <= 0) {
+      return { width: DEFAULT_VIEWPORT.width, height: DEFAULT_VIEWPORT.height, measured: false };
+    }
+    return { width: width, height: height, measured: true };
   }
 
   function setCamera(next, container) {
@@ -1852,7 +1858,14 @@
       return;
     }
     var canvas = container && container.querySelector && container.querySelector('.ws-map-canvas');
-    var fitted = fitBounds(lastWorldLayout.bounds, framedViewport(canvas));
+    var viewport = framedViewport(canvas);
+    // Wait for a real measurement. Mounting can run before the canvas has been
+    // laid out, and framing against the placeholder size latches a zoom that no
+    // later resize recomputes — the map then simply opens at the wrong scale,
+    // differently depending on how the frames fell. watchResize re-enters here
+    // when the canvas acquires its size, so the framing is deferred, not lost.
+    if (!viewport.measured) return;
+    var fitted = fitBounds(lastWorldLayout.bounds, viewport);
     // Fit All zooms in when there is little content; the opening view does not.
     // Landing at 200% on a two-workspace map is disorienting, and the button is
     // right there for anyone who wants it.
@@ -3046,7 +3059,13 @@
     // an animating rail costs one applyCamera per painted frame — a single
     // style write, no re-render.
     resizeObserver = new ResizeObserver(function () {
-      if (lastMount && lastMount.container === container) applyCamera(container);
+      if (!lastMount || lastMount.container !== container) return;
+      // A resize is also how the canvas first acquires a real size. ensureCamera
+      // defers its one framing until it can measure honestly, so this is the
+      // callback that lets it happen; it is a no-op once the camera is set, and
+      // deliberately never refits a camera the user has since moved (FR-106).
+      ensureCamera(container);
+      applyCamera(container);
     });
     resizeObserver.observe(container);
   }
@@ -4746,6 +4765,7 @@
     return {
       width: viewport.width,
       height: Math.max(CELL_H, viewport.height - CONTROL_STRIP_HEIGHT),
+      measured: viewport.measured,
       full: viewport
     };
   }

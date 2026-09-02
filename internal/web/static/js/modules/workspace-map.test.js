@@ -3265,6 +3265,9 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
   return {
     container,
     world,
+    // Exposed so a test can model a canvas that has not been laid out yet and
+    // then give it a size, which is how the real page behaves on first mount.
+    canvas,
     styleProps,
     classes,
     control,
@@ -3320,6 +3323,60 @@ test('a saved camera is restored instead of refitting (FR-43, FR-45)', async () 
 
   assert.deepEqual({ ...map.getCamera() }, { centerX: 640, centerY: 480, zoom: 1.5 });
   assert.match(harness.world.style.transform, /scale\(1\.5\)/);
+});
+
+test('the opening framing waits for a real measurement instead of latching a guess (FR-106)', async () => {
+  // ensureCamera frames exactly once and nothing refits afterwards, so framing
+  // against the placeholder size used for an unlaid-out canvas would leave the
+  // map permanently at the wrong zoom — and at a different wrong zoom depending
+  // on whether layout happened to have run, which is how it reached CI as a
+  // non-deterministic screenshot rather than as a visible bug.
+  const map = loadMapWithFetch(() =>
+    jsonResponse({ schema_version: 1, positions: { 'ws-1': { x: 4000, y: 3000 } } })
+  );
+  const harness = createCameraHarness({ width: 1000, height: 600, tiles: ['ws-1'] });
+  harness.canvas.clientWidth = 0;
+  harness.canvas.clientHeight = 0;
+
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+  const unmeasured = map.getCamera();
+
+  // The canvas is laid out and the map reconciles into it.
+  harness.canvas.clientWidth = 1000;
+  harness.canvas.clientHeight = 600;
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+  const measured = map.getCamera();
+
+  assert.notDeepEqual(
+    { ...measured },
+    { ...unmeasured },
+    'the framing must happen on the honest measurement, not before it'
+  );
+  // And it framed the content that exists, rather than a default corner.
+  const screen = map.camera.worldToScreen({ x: 4000, y: 3000 }, measured, {
+    width: 1000,
+    height: 600
+  });
+  assert.ok(screen.x > 0 && screen.x < 1000, 'x on screen: ' + screen.x);
+  assert.ok(screen.y > 0 && screen.y < 600, 'y on screen: ' + screen.y);
+});
+
+test('a camera framed on a real measurement is not refitted by a later mount (FR-106)', async () => {
+  const map = loadMapWithFetch(() =>
+    jsonResponse({ schema_version: 1, positions: { 'ws-1': { x: 4000, y: 3000 } } })
+  );
+  const harness = createCameraHarness({ width: 1000, height: 600, tiles: ['ws-1'] });
+
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+  const first = map.getCamera();
+
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+
+  assert.deepEqual({ ...map.getCamera() }, { ...first }, 'the camera survives a re-mount');
 });
 
 test('an invalid saved camera opens on a sensible view instead of nowhere (FR-45)', async () => {
