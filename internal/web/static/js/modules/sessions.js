@@ -7112,10 +7112,18 @@ const sessionManager = {
     const step = () => {
       const picker = typeof window !== 'undefined' ? window.ProjectTemplateCard : null;
       const selected = picker && picker.getSelectedTemplate ? picker.getSelectedTemplate() : null;
-      if (selected && String(selected.id || '') === id) return; // stuck — done
-      const card = document.querySelector(
-        `.workspace-template-card[data-template-id="${id}"], .workspace-template-row[data-template-id="${id}"]`
-      );
+      const selectedId = selected ? String(selected.id || '') : '';
+      if (selectedId === id || selectedId.endsWith(`:${id}`)) return; // stuck — done
+      // A blueprint published by a plugin carries a namespaced template ID
+      // ("plugin:reaper-plugin:reaper-song"), so a deep link naming the bare
+      // blueprint ID also matches the card whose ID ends with it.
+      const card =
+        document.querySelector(
+          `.workspace-template-card[data-template-id="${id}"], .workspace-template-row[data-template-id="${id}"]`
+        ) ||
+        document.querySelector(
+          `.workspace-template-card[data-template-id$=":${id}"], .workspace-template-row[data-template-id$=":${id}"]`
+        );
       if (card) card.click();
       if (attempts++ < 40) setTimeout(step, 75);
     };

@@ -1906,6 +1906,13 @@ a.quest-title:focus-visible {
   border-style: dashed;
 }
 
+/* The post-hire domain workspace suggestion. It leads the capability list
+   because it is the one thing here the user has not done yet. */
+.pa-capability--suggested {
+  border-color: var(--primary-color);
+  background: color-mix(in srgb, var(--primary-color) 10%, var(--surface-color));
+}
+
 @media (max-width: 720px) {
   .home-daily-brief-header {
     flex-direction: column;

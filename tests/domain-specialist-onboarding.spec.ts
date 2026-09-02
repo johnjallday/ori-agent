@@ -325,4 +325,41 @@ test('the first assignment is re-worded for the domain without changing its item
   await page.locator('#pafPreviewAssignmentBtn').click();
   const body = JSON.parse((await preview).postData() || '{}');
   expect(body.rows.map((row: { type: string }) => row.type)).toEqual(['priority']);
+
+  // The accepted domain also survives the round trip to the relationship read,
+  // which is what every post-hire surface reads.
+  const relationship = await page.request.get('/api/personal-assistant');
+  const payload = await relationship.json();
+  expect((payload.personal_assistant || payload.data?.personal_assistant).specialist_slug).toBe(
+    'music_production'
+  );
+});
+
+test('the post-hire surface leads with the domain and suggests its workspace', async ({ page }) => {
+  // Runs after the producer hire above, so the relationship already carries
+  // the accepted slug.
+  const capabilities = await page.request.get('/api/personal-assistant/capabilities');
+  const payload = await capabilities.json();
+  const projection = payload.capabilities || payload.data?.capabilities;
+
+  // Producer order: their own work before email and calendar.
+  expect(projection.cards.map((card: { key: string }) => card.key)).toEqual([
+    'projects',
+    'folders',
+    'calendar',
+    'email'
+  ]);
+  expect(projection.suggestion.template_id).toBe('reaper-song');
+  expect(projection.suggestion.action_route.startsWith('/')).toBe(true);
+
+  await page.goto('/?personal-assistant=working-agreement');
+  const suggestion = page.locator('[data-role="capability-suggestion"]');
+  await expect(suggestion).toBeVisible();
+  await expect(suggestion.locator('h4')).toHaveText('Set up your studio workspace');
+  // Nothing here may imply the assistant can hand work to the specialist.
+  await expect(suggestion).not.toContainText(/assign|delegate|tell it to|hand off/i);
+  const cards = page.locator('#personalAssistantCapabilities .pa-capability');
+  await expect(cards.first()).toHaveAttribute('data-role', 'capability-suggestion');
+  await expect(cards.nth(1).locator('h4')).toContainText('Projects and workspaces');
+  await page.screenshot({ path: `${SHOTS}/10-post-hire-capabilities.png`, fullPage: true });
 });
