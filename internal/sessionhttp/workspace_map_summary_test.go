@@ -38,6 +38,10 @@ func seedMapSummaryFixture(t *testing.T, fileStore *agentworkspace.FileStore, wo
 	ws.MCPBindings = []agentworkspace.MCPBinding{{}, {}}
 	ws.SkillBindings = []agentworkspace.SkillBinding{{}}
 	ws.SharedData = workspacesettings.Store(map[string]any{}, settings)
+	ws.SetTemplateProvenance(&agentworkspace.TemplateProvenance{
+		TemplateID: "email-ops",
+		Builtin:    true,
+	})
 
 	if err := fileStore.Save(ws); err != nil {
 		t.Fatalf("failed to save fixture for workspace %q: %v", workspaceID, err)
@@ -71,6 +75,12 @@ func assertMapSummaryFields(t *testing.T, entry map[string]any) {
 	}
 	if got, ok := entry["active"].(bool); !ok || !got {
 		t.Errorf("active = %v, want true (workspace has an in-progress task)", entry["active"])
+	}
+	if got := entry["blueprint_id"]; got != "email-ops" {
+		t.Errorf("blueprint_id = %v, want %q", got, "email-ops")
+	}
+	if got, ok := entry["blueprint_builtin"].(bool); !ok || !got {
+		t.Errorf("blueprint_builtin = %v, want true", entry["blueprint_builtin"])
 	}
 }
 

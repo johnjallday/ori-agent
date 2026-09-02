@@ -1550,6 +1550,16 @@ func (h *Handler) hydrateWorkspaceMetadataInto(workspace *session.Workspace) {
 	workspace.SkillCount = mapFields.SkillCount
 	workspace.OpsMode = mapFields.OpsMode
 	workspace.Active = mapFields.Active
+
+	// Blueprint identity is inert provenance from the canonical workspace
+	// record. Expose only the stable ID and built-in ownership bit needed to
+	// choose curated artwork; never infer identity from names or live activity.
+	workspace.BlueprintID = ""
+	workspace.BlueprintBuiltin = false
+	if provenance := diskWorkspace.GetTemplateProvenance(); provenance != nil {
+		workspace.BlueprintID = provenance.TemplateID
+		workspace.BlueprintBuiltin = provenance.Builtin
+	}
 }
 
 func mergeWorkspaceJSONField(target *json.RawMessage, fallback json.RawMessage) {

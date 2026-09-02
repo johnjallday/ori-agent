@@ -185,6 +185,10 @@ function installDom() {
 }
 
 const READINESS_SOURCE = readFileSync(new URL('./blueprint-readiness.js', import.meta.url), 'utf8');
+const BUILDING_ART_SOURCE = readFileSync(
+  new URL('./workspace-building-art.js', import.meta.url),
+  'utf8'
+);
 const LIFECYCLE_SOURCE = readFileSync(new URL('./plugin-lifecycle.js', import.meta.url), 'utf8');
 const PICKER_SOURCE = readFileSync(
   new URL('./project-templates-manage.js', import.meta.url),
@@ -245,6 +249,7 @@ function loadModules() {
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(READINESS_SOURCE, sandbox, { filename: 'blueprint-readiness.js' });
+  vm.runInContext(BUILDING_ART_SOURCE, sandbox, { filename: 'workspace-building-art.js' });
   vm.runInContext(LIFECYCLE_SOURCE, sandbox, { filename: 'plugin-lifecycle.js' });
   vm.runInContext(PICKER_SOURCE, sandbox, { filename: 'project-templates-manage.js' });
   // The page's own startup, so the modal's show/hidden handlers are wired the
@@ -301,6 +306,16 @@ test('a ready blueprint card carries no badge and no description', async () => {
   assert.equal(card.querySelector('.workspace-template-readiness-badge'), null);
   assert.equal(card.getAttribute('aria-describedby'), null);
   assert.equal(card.dataset.readinessState, 'ready');
+});
+
+test('a built-in blueprint card previews the same specialized building as the map', async () => {
+  await setup([template('calendar-ops')]);
+  const card = optionById('calendar-ops');
+  const icon = card.querySelector('.workspace-template-card-icon');
+
+  assert.ok(icon.classList.contains('has-building-art'));
+  assert.match(icon.innerHTML, /data-building-variant="calendar"/);
+  assert.match(icon.innerHTML, /data-building-emblem="calendar"/);
 });
 
 test('a recoverable card says setup is required and describes why', async () => {

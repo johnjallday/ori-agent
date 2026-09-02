@@ -354,6 +354,12 @@ type Workspace struct {
 	OpsMode             string `json:"ops_mode,omitempty"`
 	Active              bool   `json:"active"`
 
+	// BlueprintID and BlueprintBuiltin are inert template provenance projected
+	// from workspace.json for visual identity in the Build Catalog and Workspace
+	// Map. They grant no tools, connections, setup state, or runtime behavior.
+	BlueprintID      string `json:"blueprint_id,omitempty"`
+	BlueprintBuiltin bool   `json:"blueprint_builtin,omitempty"`
+
 	// CreatedAt is when the workspace was created.
 	CreatedAt time.Time `json:"created_at"`
 
