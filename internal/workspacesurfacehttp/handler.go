@@ -42,6 +42,22 @@ func (f AttachmentCheckerFunc) Attached(ctx context.Context, workspaceID string,
 	return f != nil && f(ctx, workspaceID, surface)
 }
 
+// DashboardSource resolves the user-authored dashboard surface for one
+// workspace, synthesized from that workspace's folder rather than looked up in
+// the process-global registry.
+//
+// It is a separate seam from Registry on purpose. Registry holds globally
+// trusted contributions keyed without a workspace; a dashboard belongs to
+// exactly one workspace and is re-read from disk on every request, so it has no
+// registration to hold and no generation lifecycle to track.
+//
+// ok is false with a nil error when the workspace has no dashboard. A non-nil
+// error means one exists but cannot be served, which the host surfaces to the
+// user instead of hiding.
+type DashboardSource interface {
+	Resolve(workspaceID string) (workspacesurface.RegisteredSurface, workspacesurface.Binding, bool, error)
+}
+
 // ContextResolver injects canonical host paths/scopes after ownership and
 // attachment validation. A browser request cannot supply these fields.
 type ContextResolver interface {
@@ -78,6 +94,7 @@ type Handler struct {
 	workspaces    WorkspaceStore
 	users         userprofile.UserProvider
 	attachments   AttachmentChecker
+	dashboards    DashboardSource
 	contexts      ContextResolver
 	authorizer    OperationAuthorizer
 	runtime       AgentRuntimeService
@@ -114,6 +131,14 @@ func (h *Handler) SetStateStore(store *workspacesurface.StateStore) {
 func (h *Handler) SetOperationAuthorizer(authorizer OperationAuthorizer) {
 	if h != nil {
 		h.authorizer = authorizer
+	}
+}
+
+// SetDashboardSource installs per-workspace user dashboard resolution. Without
+// one, the handler behaves exactly as it did before user dashboards existed.
+func (h *Handler) SetDashboardSource(dashboards DashboardSource) {
+	if h != nil {
+		h.dashboards = dashboards
 	}
 }
 
@@ -176,17 +201,65 @@ func (h *Handler) Catalog(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := catalogResponse{Surfaces: []catalogSurface{}}
-	for _, surface := range h.registry.Surfaces() {
-		if h.attachments == nil || !h.attachments.Attached(r.Context(), workspaceID, surface) {
-			continue
-		}
-		item := h.catalogItem(r.Context(), workspaceID, surface)
-		response.Surfaces = append(response.Surfaces, item)
+	for _, entry := range h.composedSurfaces(r.Context(), workspaceID) {
+		response.Surfaces = append(response.Surfaces, h.catalogItem(r.Context(), workspaceID, entry.surface, entry.binding))
 	}
 	_ = orihttp.RespondSuccess(w, response)
 }
 
-func (h *Handler) catalogItem(ctx context.Context, workspaceID string, surface workspacesurface.RegisteredSurface) catalogSurface {
+// composedSurface pairs an inert descriptor with the binding resolved alongside
+// it, so a caller never has to look the binding up through a second, possibly
+// disagreeing, path.
+type composedSurface struct {
+	surface workspacesurface.RegisteredSurface
+	binding workspacesurface.Binding
+}
+
+// composedSurfaces is the single surface source for this workspace: globally
+// registered plugin and builtin surfaces this workspace has attached, plus its
+// own user-authored dashboard.
+//
+// eligibleSurface resolves individual keys through the same two sources in the
+// same order. The two must agree — a surface that is listed but cannot be opened
+// is the specific failure this composition exists to prevent.
+func (h *Handler) composedSurfaces(ctx context.Context, workspaceID string) []composedSurface {
+	var composed []composedSurface
+	for _, surface := range h.registry.Surfaces() {
+		if h.attachments == nil || !h.attachments.Attached(ctx, workspaceID, surface) {
+			continue
+		}
+		// A missing or unavailable binding is not skipped: catalogItem renders it
+		// as unavailable, which is how it behaved before composition.
+		binding, _ := h.registry.Binding(surface.Key)
+		composed = append(composed, composedSurface{surface: surface, binding: binding})
+	}
+	if surface, binding, ok := h.dashboardSurface(workspaceID); ok {
+		composed = append(composed, composedSurface{surface: surface, binding: binding})
+	}
+	return composed
+}
+
+// dashboardSurface resolves this workspace's dashboard. A dashboard that exists
+// but cannot be served is returned as an unavailable surface rather than
+// dropped: the user authored the file and needs to see that Ori found it and
+// rejected it, not an empty view switcher.
+func (h *Handler) dashboardSurface(workspaceID string) (workspacesurface.RegisteredSurface, workspacesurface.Binding, bool) {
+	if h == nil || h.dashboards == nil {
+		return workspacesurface.RegisteredSurface{}, workspacesurface.Binding{}, false
+	}
+	surface, binding, ok, err := h.dashboards.Resolve(workspaceID)
+	if !ok {
+		return workspacesurface.RegisteredSurface{}, workspacesurface.Binding{}, false
+	}
+	if err != nil {
+		// The source marks the surface unavailable and returns no binding; the
+		// binding is dropped here too so a failed resolution can never be opened.
+		return surface, workspacesurface.Binding{}, true
+	}
+	return surface, binding, true
+}
+
+func (h *Handler) catalogItem(ctx context.Context, workspaceID string, surface workspacesurface.RegisteredSurface, binding workspacesurface.Binding) catalogSurface {
 	item := catalogSurface{
 		Key:          surface.Key,
 		Plugin:       catalogPlugin{ID: surface.Owner.ID, Version: surface.Owner.Version, Generation: strconv.FormatUint(surface.Owner.Generation, 10)},
@@ -213,10 +286,11 @@ func (h *Handler) catalogItem(ctx context.Context, workspaceID string, surface w
 		}, h.clock())
 		return item
 	}
-	binding, ok := h.registry.Binding(surface.Key)
-	if !ok || binding.Runtime == nil {
+	if binding.Runtime == nil {
 		item.Available = false
-		item.Unavailable = "surface_unavailable"
+		if item.Unavailable == "" {
+			item.Unavailable = "surface_unavailable"
+		}
 		item.Status = unavailableStatus(h.clock())
 		return item
 	}
@@ -693,8 +767,22 @@ func (h *Handler) CloseSession(w http.ResponseWriter, r *http.Request) {
 	orihttp.RespondNoContent(w)
 }
 
+// eligibleSurface resolves one key for one workspace through the same two
+// sources, in the same order, that composedSurfaces lists. Catalog and this
+// function must never disagree about whether a surface exists.
+//
+// The dashboard is checked first and deliberately does not consult
+// AttachmentChecker: attachment is the plugin-capability lifecycle, and a user
+// dashboard has none. Its eligibility is simply that the file is in this
+// workspace's own folder, which the source has just re-read from disk.
 func (h *Handler) eligibleSurface(ctx context.Context, workspaceID, key string) (workspacesurface.RegisteredSurface, workspacesurface.Binding, bool) {
-	surface, ok := h.registry.Surface(strings.TrimSpace(key))
+	key = strings.TrimSpace(key)
+	if surface, binding, ok := h.dashboardSurface(workspaceID); ok && surface.Key == key {
+		// An unavailable dashboard resolves with no binding, so callers that
+		// require a runtime reject it exactly as they would a broken plugin.
+		return surface, binding, surface.Available
+	}
+	surface, ok := h.registry.Surface(key)
 	if !ok || h.attachments == nil || !h.attachments.Attached(ctx, workspaceID, surface) {
 		return workspacesurface.RegisteredSurface{}, workspacesurface.Binding{}, false
 	}

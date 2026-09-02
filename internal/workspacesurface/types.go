@@ -27,6 +27,22 @@ const (
 	maxTaskInstructionsBytes = 16 << 10
 )
 
+// Surface placements. A surface is rendered by exactly one of these.
+const (
+	// PlacementMapModal opens the surface as a modal from the workspace map.
+	PlacementMapModal = "map_modal"
+	// PlacementProjectEntry opens the surface from a project entry point.
+	PlacementProjectEntry = "project_entry"
+	// PlacementWorkspaceView renders the surface inline, as its own workspace
+	// view mode beside Details, Map, and Tickets, rather than as a modal.
+	//
+	// v1 restricts this placement to OwnerUser. Plugin surfaces already have two
+	// working placements, and giving an installed plugin a permanent full-panel
+	// view is a larger product decision than this feature needs to make; keeping
+	// the restriction confines the blast radius to user-authored dashboards.
+	PlacementWorkspaceView = "workspace_view"
+)
+
 var (
 	idPattern                = regexp.MustCompile(`^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$`)
 	qualifiedProviderPattern = regexp.MustCompile(`^plugin:[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*:[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$`)
@@ -37,11 +53,20 @@ type OwnerKind string
 const (
 	OwnerPlugin  OwnerKind = "plugin"
 	OwnerBuiltin OwnerKind = "builtin"
+	// OwnerUser marks a surface authored by the workspace's own user — an HTML
+	// file in the workspace folder. It is NOT trusted: its assets are attacker
+	// -controlled bytes served into a sandboxed, `connect-src 'none'` frame, and
+	// its owner identity is scoped to one workspace rather than the process.
+	// RegisterTrusted refuses this kind; user surfaces are resolved per request
+	// from the workspace folder instead.
+	OwnerUser OwnerKind = "user"
 )
 
-// Owner identifies the globally trusted contribution that owns a capability.
-// Generation changes whenever its executable contribution changes or its
-// lifecycle invalidates existing surface sessions.
+// Owner identifies the contribution that owns a capability. Plugin and builtin
+// owners are globally trusted and live in the process-wide Registry; user owners
+// are not trusted and are scoped to a single workspace. Generation changes
+// whenever its executable contribution changes or its lifecycle invalidates
+// existing surface sessions.
 type Owner struct {
 	Kind        OwnerKind `json:"kind"`
 	ID          string    `json:"id"`
@@ -277,6 +302,11 @@ func validateRegistration(reg Registration) error {
 			if _, duplicate := surfaces[localKey]; duplicate {
 				return fmt.Errorf("workspace surface %q/%q is registered twice", capability.ID, surface.ID)
 			}
+			// Placement is validated without the owner in validateSurface;
+			// workspace_view additionally depends on who owns the surface.
+			if surface.Placement == PlacementWorkspaceView && reg.Owner.Kind != OwnerUser {
+				return fmt.Errorf("workspace surface %q placement %q is reserved for user-authored surfaces", surface.ID, PlacementWorkspaceView)
+			}
 			surfaces[localKey] = surface
 		}
 	}
@@ -312,7 +342,7 @@ func validateRegistration(reg Registration) error {
 }
 
 func validateOwner(owner Owner) error {
-	if owner.Kind != OwnerPlugin && owner.Kind != OwnerBuiltin {
+	if owner.Kind != OwnerPlugin && owner.Kind != OwnerBuiltin && owner.Kind != OwnerUser {
 		return fmt.Errorf("workspace surface owner kind %q is invalid", owner.Kind)
 	}
 	if err := validateID("owner", owner.ID); err != nil {
@@ -383,7 +413,7 @@ func validateSurface(surface Surface) error {
 	if surface.Icon.Kind != "host" || validateID("host icon", surface.Icon.Value) != nil {
 		return fmt.Errorf("surface %q must use a valid host icon token", surface.ID)
 	}
-	if surface.Placement != "map_modal" && surface.Placement != "project_entry" {
+	if surface.Placement != PlacementMapModal && surface.Placement != PlacementProjectEntry && surface.Placement != PlacementWorkspaceView {
 		return fmt.Errorf("surface %q placement %q is unsupported", surface.ID, surface.Placement)
 	}
 	if surface.Modal.Width < 320 || surface.Modal.Width > 1600 || surface.Modal.Height < 240 || surface.Modal.Height > 1200 {

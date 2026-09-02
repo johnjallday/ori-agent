@@ -20,7 +20,10 @@ import (
 const (
 	AssistantLearningSidecarVersion = 1
 	AssistantLearningSidecarName    = "assistant-program-learnings-v1.json"
-	AssistantLearningSidecarDir     = ".ori"
+	// AssistantLearningSidecarDir is retained as the name this store has always
+	// used; SidecarDirName is the same directory, shared by every Ori sidecar
+	// that lives inside a workspace folder.
+	AssistantLearningSidecarDir = SidecarDirName
 )
 
 var (

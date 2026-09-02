@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Inbox command post</title>
+    <!--
+      Styles and scripts must be separate files: the dashboard frame is served
+      script-src 'self'; style-src 'self' with no 'unsafe-inline', so inline
+      code is blocked and silently does nothing. See
+      docs/features/custom-workspace-dashboard.md.
+    -->
+    <link rel="stylesheet" href="dashboard.css" />
+  </head>
+  <body>
+    <header>
+      <p class="eyebrow">📬 Inbox command post</p>
+      <h1 id="title">Loading…</h1>
+      <p class="sub" id="subtitle"></p>
+    </header>
+
+    <div class="cards">
+      <div class="card">
+        <div class="value" id="openCount">—</div>
+        <div class="label">Needs you</div>
+      </div>
+      <div class="card">
+        <div class="value" id="crewCount">—</div>
+        <div class="label">Crew</div>
+      </div>
+      <div class="card">
+        <div class="value" id="noteCount">—</div>
+        <div class="label">Notes</div>
+      </div>
+      <div class="card">
+        <div class="value" id="sessionCount">—</div>
+        <div class="label">Conversations</div>
+      </div>
+    </div>
+
+    <section>
+      <h2>Waiting on you</h2>
+      <ul id="tasks">
+        <li class="empty">Loading…</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Crew</h2>
+      <ul id="crew">
+        <li class="empty">Loading…</li>
+      </ul>
+    </section>
+
+    <p class="hint">
+      Edit this dashboard at <code>.ori/dashboard/</code> in this workspace's folder, then reload
+      the page.
+    </p>
+
+    <script src="ori-bridge.js"></script>
+    <script src="dashboard.js"></script>
+  </body>
+</html>

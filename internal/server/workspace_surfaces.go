@@ -9,7 +9,9 @@ import (
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/plugin"
+	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacedashboard"
 	"github.com/johnjallday/ori-agent/internal/workspacesurface"
 	"github.com/johnjallday/ori-agent/internal/workspacesurfacehttp"
 )
@@ -128,6 +130,27 @@ func (b *ServerBuilder) wireWorkspaceSurfaces() {
 	b.workspaceSurfaceHandler.SetAgentRuntimeService(b.runtimeCapabilityService)
 	state := workspacesurface.NewStateStore(filepath.Join(config.DefaultDataDir(), "plugins", "state"))
 	b.workspaceSurfaceHandler.SetStateStore(state)
+
+	// User-authored dashboards resolve from each workspace's own folder. They
+	// never enter the registry above, so a workspace without one is unaffected.
+	//
+	// The runtime reads through the same narrow note/session summary adapter the
+	// task prompt uses, which returns identity and titles rather than bodies or
+	// transcripts. Nothing here can reach the vault or agent prompts.
+	if b.workspaceFileStore != nil {
+		var (
+			notes    workspacedashboard.NoteReader
+			sessions workspacedashboard.SessionReader
+		)
+		if b.sessionStore != nil {
+			adapter := session.NewWorkspaceTaskContextAdapter(b.sessionStore)
+			notes, sessions = adapter, adapter
+		}
+		b.workspaceSurfaceHandler.SetDashboardSource(workspacedashboard.NewSource(
+			workspace.NewDashboardStore(b.workspaceFileStore),
+			workspacedashboard.NewRuntime(b.workspaceStore, notes, sessions),
+		))
+	}
 
 	// Plugin install/update/disable/uninstall and request execution share one
 	// registry and process manager. Restore trusted inert projections on startup.

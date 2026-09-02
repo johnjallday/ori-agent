@@ -160,6 +160,18 @@ test('resolveEffectiveMode: URL wins over local preference, which wins over the 
   );
 });
 
+// A user dashboard view is shareable and reload-safe. This module cannot know
+// whether a given workspace has a dashboard, so it only validates the shape;
+// workspace-command.js drops the mode when the workspace has no dashboard.
+test('the dashboard view mode round-trips through the URL', () => {
+  assert.equal(parseWorkspaceURLState('?mode=dashboard').mode, MODE.DASHBOARD);
+  assert.equal(serializeWorkspaceURLState({ mode: MODE.DASHBOARD }), 'mode=dashboard');
+  assert.equal(resolveEffectiveMode(MODE.DASHBOARD, MODE.MAP), MODE.DASHBOARD);
+  assert.equal(sanitizeWorkspaceURLState({ mode: MODE.DASHBOARD }).state.mode, MODE.DASHBOARD);
+  // Tickets has never been URL-addressable and is unchanged by this feature.
+  assert.equal(parseWorkspaceURLState('?mode=tickets').mode, null);
+});
+
 test('buildReturnTarget produces a relative, workspace-scoped path (FR92)', () => {
   const target = buildReturnTarget('ws-1', { mode: MODE.MAP, panel: 'tasks', task: 't1' });
   assert.equal(target, '/workspaces/ws-1?mode=map&panel=tasks&task=t1');

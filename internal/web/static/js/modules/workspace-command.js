@@ -39,7 +39,15 @@ const AGENT_TAB_KEYS = ['overview', 'tasks', 'loadout', 'recent'];
 // (tasks/prd-workspace-ticket-management.md FR-65): it is the destination
 // where durable work is managed, so it sits beside Details and Map rather than
 // one click deeper inside a modal.
-const COMMAND_VIEW_MODES = ['details', 'map', 'tickets'];
+// 'dashboard' is conditional: it is only reachable when this workspace actually
+// has a user-authored dashboard. It stays in this list so a saved or shared URL
+// naming it survives sanitization; hasCustomDashboard() gates the tab and
+// resolveViewMode() falls back when the dashboard is gone.
+const COMMAND_VIEW_MODES = ['details', 'map', 'tickets', 'dashboard'];
+
+// The surface key every user dashboard resolves under. Identical for every
+// workspace by design: scoping comes from resolving per workspace, not the key.
+const CUSTOM_DASHBOARD_SURFACE_KEY = 'user:ori.dashboard:dashboard:main';
 
 function escapeHtml(value) {
   return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
@@ -225,7 +233,49 @@ export class WorkspaceCommandView {
     const normalized = String(mode || '')
       .trim()
       .toLowerCase();
-    return COMMAND_VIEW_MODES.includes(normalized) ? normalized : 'details';
+    if (!COMMAND_VIEW_MODES.includes(normalized)) return 'details';
+    // The dashboard mode exists only while the workspace has a dashboard file,
+    // so a stored preference or a shared link naming it must fall back rather
+    // than strand the user on an empty view.
+    //
+    // But only once we actually know. The surface catalog loads asynchronously,
+    // and a `?mode=dashboard` link is resolved during boot, before the first
+    // catalog response arrives — deciding then would drop every deep link. The
+    // mode is kept until the catalog answers, and ensureSurfaceStations
+    // re-normalizes when it does.
+    if (normalized === 'dashboard' && this.surfaceCatalogLoaded() && !this.hasCustomDashboard()) {
+      return 'details';
+    }
+    return normalized;
+  }
+
+  /** Whether the surface catalog has answered at least once. */
+  surfaceCatalogLoaded() {
+    const surfaceHost = typeof window === 'undefined' ? null : window.WorkspaceSurfaceHost;
+    return Boolean(surfaceHost?.catalogLoaded);
+  }
+
+  /** This workspace's dashboard catalog entry, if the catalog has one. */
+  customDashboardSurface() {
+    const surfaceHost = typeof window === 'undefined' ? null : window.WorkspaceSurfaceHost;
+    const surfaces = Array.isArray(surfaceHost?.surfaces) ? surfaceHost.surfaces : [];
+    return surfaces.find(surface => surface?.key === CUSTOM_DASHBOARD_SURFACE_KEY) || null;
+  }
+
+  /**
+   * Whether this workspace has a user-authored dashboard, according to the
+   * surface catalog the host has already loaded. The file's presence is
+   * re-read server-side on every catalog request, so this follows the disk.
+   *
+   * A dashboard the server marked unavailable still counts. The user put a file
+   * in the folder and got something wrong; hiding the tab would leave them with
+   * no way to find out what (FR26). The tab opens onto the reason instead.
+   *
+   * Strict about loading, though: false while the catalog is still in flight,
+   * so no Dashboard tab flashes onto a workspace that turns out not to have one.
+   */
+  hasCustomDashboard() {
+    return this.customDashboardSurface() !== null;
   }
 
   readCommandViewModePreference() {
@@ -337,7 +387,11 @@ export class WorkspaceCommandView {
 
     if (!this.boundWorkspaceSurfacesChanged) {
       this.boundWorkspaceSurfacesChanged = () => {
-        if (this.active) this.render();
+        if (!this.active) return;
+        // Now that the catalog has answered, a dashboard mode held optimistically
+        // through boot either resolves or falls back.
+        this.settleDashboardViewMode();
+        this.render();
       };
       if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
         document.addEventListener(
@@ -350,8 +404,23 @@ export class WorkspaceCommandView {
     if (this.workspaceSurfaceCatalogRequested) return;
     this.workspaceSurfaceCatalogRequested = true;
     void Promise.resolve(host.loadCatalog()).then(() => {
+      this.settleDashboardViewMode();
       if (this.active) this.render();
     });
+  }
+
+  /**
+   * Resolve a dashboard view mode that was held while the surface catalog was
+   * still loading. A `?mode=dashboard` link on a workspace whose dashboard was
+   * deleted lands on Details instead of an empty view.
+   */
+  settleDashboardViewMode() {
+    if (this.viewMode !== 'dashboard') return;
+    const settled = this.normalizeCommandViewMode('dashboard');
+    if (settled === this.viewMode) return;
+    this.viewMode = settled;
+    this.persistCommandViewMode(settled);
+    this.syncURLState({ replace: true });
   }
 
   /** Re-render if active — called by the page after its data loads/refreshes. */
@@ -477,7 +546,11 @@ export class WorkspaceCommandView {
       window.Toast.info('Some link details were out of date and were ignored.');
     }
 
-    const effectiveMode = resolveEffectiveMode(state.mode, this.viewMode, this.viewMode);
+    // normalizeCommandViewMode, not the raw resolution: `?mode=dashboard` on a
+    // workspace with no dashboard must land on Details rather than an empty view.
+    const effectiveMode = this.normalizeCommandViewMode(
+      resolveEffectiveMode(state.mode, this.viewMode, this.viewMode)
+    );
     if (effectiveMode !== this.viewMode) {
       this.viewMode = effectiveMode;
       this.persistCommandViewMode(effectiveMode);
@@ -533,9 +606,9 @@ export class WorkspaceCommandView {
   currentURLState() {
     return {
       // 'details' is the historical default; omit it so a details-mode URL
-      // stays clean (no ?mode=details noise) and only an explicit `map` needs
-      // to survive reload/sharing.
-      mode: this.viewMode === 'map' ? 'map' : null,
+      // stays clean (no ?mode=details noise) and only an explicit `map` or
+      // `dashboard` needs to survive reload/sharing.
+      mode: this.viewMode === 'map' || this.viewMode === 'dashboard' ? this.viewMode : null,
       // `settings` is last: it names an open modal, so a drawer underneath it
       // still owns the URL. It is reported at all so that the Plans page's
       // "Open Workspace Settings" link survives a reload instead of
@@ -635,7 +708,9 @@ export class WorkspaceCommandView {
     );
     this._lastSyncedURLState = state;
 
-    const effectiveMode = resolveEffectiveMode(state.mode, this.viewMode, this.viewMode);
+    const effectiveMode = this.normalizeCommandViewMode(
+      resolveEffectiveMode(state.mode, this.viewMode, this.viewMode)
+    );
     if (
       (effectiveMode !== 'map' || (state.agent && state.agent !== this.selectedAgentKey)) &&
       this.capabilityInspector?.open
@@ -874,6 +949,9 @@ export class WorkspaceCommandView {
       { key: 'map', label: 'Map' },
       { key: 'tickets', label: 'Tickets' }
     ];
+    // Shown only when this workspace actually has a dashboard, so a workspace
+    // without one looks exactly as it did before the feature existed (FR4).
+    if (this.hasCustomDashboard()) modes.push({ key: 'dashboard', label: 'Dashboard' });
     return (
       '<div class="ws-cmd-view-switch" role="group" aria-label="Workspace view">' +
       modes
@@ -1333,7 +1411,7 @@ export class WorkspaceCommandView {
     // outside avoids that dance entirely, and with it the orphaning risk of
     // forgetting to restore a moved node.
     const body =
-      this.viewMode === 'tickets'
+      this.viewMode === 'tickets' || this.viewMode === 'dashboard'
         ? ''
         : this.viewMode === 'map'
           ? this.renderOperationsMap()
@@ -1359,12 +1437,13 @@ export class WorkspaceCommandView {
     this.bindMissionPanel();
     if (this.viewMode === 'map') {
       this.bindOperationsMap();
-    } else if (this.viewMode !== 'tickets') {
+    } else if (this.viewMode !== 'tickets' && this.viewMode !== 'dashboard') {
       this.bindGarrison();
       this.bindRail();
     }
     this.bindLoadoutAddModal();
     this.syncTicketsView();
+    this.syncDashboardView();
     this.mountCommandTagInput();
     this.syncMissionPanel();
     this.syncSharedSurfaces();
@@ -1870,6 +1949,72 @@ export class WorkspaceCommandView {
     Promise.resolve(tickets.load()).catch(() => {
       /* the module renders its own error state */
     });
+  }
+
+  /**
+   * Show or hide the custom dashboard view.
+   *
+   * Like Tickets, the dashboard surface lives OUTSIDE the command container and
+   * is only shown or hidden — never moved, never rebuilt. render() replaces the
+   * command container's innerHTML on every workspace refresh; if the frame lived
+   * in there it would be destroyed and reloaded each time, dropping the bridge
+   * and whatever state the dashboard was holding (FR24).
+   *
+   * Mounting is idempotent in the host, so calling this on every render costs
+   * nothing after the first: switching to Details and back keeps the same frame
+   * and the same live session within a page visit (FR25).
+   */
+  syncDashboardView() {
+    if (typeof document === 'undefined') return;
+    const surface = document.getElementById('workspace-detail-dashboard-surface');
+    if (!surface) return;
+
+    const active = this.viewMode === 'dashboard';
+    surface.hidden = !active;
+    if (surface.style) surface.style.display = active ? '' : 'none';
+    if (!active) return;
+
+    const host = typeof window === 'undefined' ? null : window.WorkspaceSurfaceHost;
+    const container = surface.querySelector('[data-cmd-dashboard-host]');
+    const status = surface.querySelector('[data-cmd-dashboard-status]');
+    const fail = message => {
+      if (!status) return;
+      status.textContent = message;
+      status.hidden = false;
+    };
+    if (!host || typeof host.mountInline !== 'function' || !container) {
+      fail('The dashboard host is unavailable on this page.');
+      return;
+    }
+
+    // The server resolved the dashboard but refused it — an empty, oversized,
+    // or unreadable file. Its description names the file and the reason, which
+    // is the only debugging signal the user gets from an opaque frame.
+    const entry = this.customDashboardSurface();
+    if (entry && entry.available === false) {
+      void host.unmountInline();
+      if (container.replaceChildren) container.replaceChildren();
+      fail(entry.description || 'Ori could not open this workspace dashboard.');
+      return;
+    }
+
+    if (status) {
+      status.textContent = '';
+      status.hidden = true;
+    }
+    Promise.resolve(host.mountInline(CUSTOM_DASHBOARD_SURFACE_KEY, container))
+      .then(mounted => {
+        if (mounted) return;
+        // The user authored this file; naming the path is the only debugging
+        // signal they get from an opaque frame.
+        fail(
+          'Ori could not open this workspace dashboard. Check that ' +
+            '.ori/dashboard/index.html exists in the workspace folder and is readable.'
+        );
+      })
+      .catch(() => {
+        fail('Ori could not open this workspace dashboard.');
+      });
   }
 
   // Mount the live Workspace config surface into the open MCP/Skills stat modal, showing
