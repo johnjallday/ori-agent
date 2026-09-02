@@ -144,6 +144,30 @@ func TestHandlerWorkingAgreement_PinsPatchFieldsAndConflictProjection(t *testing
 	}
 }
 
+// TestHandlerWorkingAgreement_NeedsHQGetsSetupCodeNotRepair pins that a hired
+// assistant with no Personal HQ gets a distinct, honest response — never the
+// repair_required code, which would misdescribe an expected setup stage.
+func TestHandlerWorkingAgreement_NeedsHQGetsSetupCodeNotRepair(t *testing.T) {
+	current := &personalassistant.Projection{State: personalassistant.APIStateNeedsHQ, StateVersion: 3, DisplayName: "Atlas"}
+	continuity := &fakeContinuityService{projection: current, err: personalassistant.ErrNeedsHQ}
+	handler := NewHandler(&fakeStateReader{projection: current}, fakeUserProvider{userID: "local"})
+	handler.SetContinuityService(continuity)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPatch, "/api/personal-assistant/working-agreement", strings.NewReader(`{"if_version":3}`))
+	handler.UpdateWorkingAgreement(recorder, request)
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d; want 409", recorder.Code)
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"code":"personal_hq_required"`) {
+		t.Fatalf("body = %s; want code personal_hq_required", body)
+	}
+	if strings.Contains(body, "repair") {
+		t.Fatalf("body reused repair language for an expected setup stage: %s", body)
+	}
+}
+
 func TestHandlerPauseResumeRequireVersionAndPreserveProjection(t *testing.T) {
 	projection := &personalassistant.Projection{State: personalassistant.APIStatePaused, StateVersion: 10}
 	continuity := &fakeContinuityService{projection: projection}

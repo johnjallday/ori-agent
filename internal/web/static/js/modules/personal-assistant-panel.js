@@ -16,9 +16,18 @@ export function personalAssistantPanelView(personalAssistant) {
     paused: state === 'paused',
     repair: state === 'repair_needed',
     needsHire: state === 'needs_hire' || state === 'hiring',
+    // A real hire with no home base yet. The launcher may show this identity —
+    // unlike needsHire, where no name is trustworthy yet — but normal
+    // submission stays closed until HQ exists.
+    needsHQ: state === 'needs_hq' || state === 'provisioning_hq',
+    // Launcher visibility: shown once there is a real identity to show, even
+    // before HQ exists; submission itself is gated by `available` alone.
+    visible: available || state === 'needs_hq' || state === 'provisioning_hq',
     placeholder: available
       ? `Ask ${name} a question or describe what you want help with`
-      : 'Finish personal assistant setup before sending work'
+      : state === 'needs_hq' || state === 'provisioning_hq'
+        ? `Build ${name}’s Personal HQ before sending work`
+        : 'Finish personal assistant setup before sending work'
   };
 }
 
@@ -56,7 +65,7 @@ function assistantAvatarMarkup(name, appearance) {
 function renderIdentity() {
   const { els, view, personalAssistant } = state;
   if (!els) return;
-  els.launcher.hidden = !view.available;
+  els.launcher.hidden = !view.visible;
   els.launcherName.textContent = view.name;
   els.title.textContent = view.name;
   els.input.placeholder = view.placeholder;
@@ -68,6 +77,12 @@ function renderIdentity() {
   els.panel.dataset.relationshipState = view.state;
   if (view.paused) {
     setStatus('Paused proactively. Direct questions still use the same confirmation gates.');
+  } else if (view.needsHQ && els.status) {
+    els.status.replaceChildren(`${view.name} needs a home base before you can work together. `);
+    const link = document.createElement('a');
+    link.href = '/?quest=build-hq';
+    link.textContent = 'Build Personal HQ';
+    els.status.append(link);
   }
 }
 
@@ -87,7 +102,8 @@ function applyPersonalAssistant(personalAssistant) {
   if (state.view.helpOnly && window.OriGuide?.setHelpOnly) {
     window.OriGuide.setHelpOnly({
       available: state.view.available,
-      assistantName: state.view.name
+      assistantName: state.view.name,
+      needsHQ: state.view.needsHQ
     });
   }
   renderIdentity();

@@ -74,7 +74,7 @@ func newPreHQService(t *testing.T, profiles ProfileReader) (*Service, *readTrack
 }
 
 func TestServiceGet_PreHQValidatesOwnedProfileThroughProvenanceSeam(t *testing.T) {
-	profiles := ownedProfileReader("Atlas", "assistant-a")
+	profiles := ownedProfileReader()
 	service, _ := newPreHQService(t, profiles)
 
 	projection, err := service.Get(context.Background(), "local")

@@ -228,7 +228,10 @@
     // closing it later pauses the presentation without skipping the quest.
     if (g && typeof g.open === 'function' && typeof g.isOpen === 'function' && !g.isOpen()) {
       try {
-        g.open();
+        // skipGreeting: present() below renders the quest step immediately
+        // after. Without this, open()'s own async default-greeting fetch lands
+        // after present() and silently overwrites the quest step.
+        g.open(null, { skipGreeting: true });
       } catch (_) {
         /* the step still renders into the panel body */
       }

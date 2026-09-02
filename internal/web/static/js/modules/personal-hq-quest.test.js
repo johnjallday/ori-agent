@@ -31,8 +31,9 @@ function load({ search = '', responses = eligibleResponses(), guideOverrides = {
   const listeners = { window: {}, document: {} };
 
   const guide = {
-    open: () => {
+    open: (trigger, options) => {
       calls.opened += 1;
+      calls.openOptions = options;
     },
     isOpen: () => false,
     presentQuestStep: step => {
@@ -147,6 +148,15 @@ test('the walkthrough starts on the quest route for a hired assistant with no HQ
   assert.equal(step.choices.length, 1);
   assert.equal(step.choices[0].id, 'defer');
   assert.equal(step.choices[0].label, 'Do this later');
+});
+
+test('opening the guide skips its default greeting, since the walkthrough presents its own step immediately after', async () => {
+  const { calls } = load({ search: '?quest=build-hq' });
+  await settle();
+  assert.equal(calls.opened, 1);
+  // Without this, ori-guide.js's own async default-greeting fetch would land
+  // after present() and silently overwrite the quest step.
+  assert.equal(calls.openOptions && calls.openOptions.skipGreeting, true);
 });
 
 test('the walkthrough forces Map view without rewriting the URL or history', async () => {

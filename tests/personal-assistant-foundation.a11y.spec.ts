@@ -244,4 +244,175 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await expect(page.locator('#pafHireConfirm')).toHaveAttribute('type', 'checkbox');
     await expect(page.locator('#pafAssignmentStatus')).toHaveAttribute('aria-live', 'polite');
   });
+
+  // Reduced motion is the ambient condition for this whole describe block
+  // (beforeEach), so completing the guided quest here also proves it needs no
+  // pulse animation: outline/focus/text carry the walkthrough on their own.
+  test('the guided HQ quest is keyboard-only operable under reduced motion, with a fixed Ori identity and a restrained live region', async ({
+    page
+  }) => {
+    let relationshipState = 'needs_hq';
+    let hqValid = false;
+    let hqSetupCalls = 0;
+    await mockCompletedOnboarding(page);
+    await page.route(/\/api\/personal-assistant$/, route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          personal_assistant: {
+            state: relationshipState,
+            state_version: 2,
+            next_action: relationshipState === 'needs_hq' ? 'build_hq' : 'ask',
+            assistant_id: 'assistant-stable',
+            display_name: 'Atlas',
+            global_agent_profile_name: 'Atlas',
+            hq_workspace_id: relationshipState === 'active' ? 'hq-1' : undefined,
+            hq_entry_agent_instance_id: relationshipState === 'active' ? 'entry-1' : undefined,
+            availability: { model: { status: 'not_configured', available: false } }
+          }
+        })
+      })
+    );
+    await page.route('**/api/personal-hq/status', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          status: { user_id: 'local', valid: hqValid, hq_onboarding_state: hqValid ? 'completed' : 'unseen' }
+        })
+      })
+    );
+    await page.route('**/api/personal-assistant/hq', async route => {
+      hqSetupCalls += 1;
+      relationshipState = 'active';
+      hqValid = true;
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          personal_assistant: {
+            state: 'active',
+            next_action: 'ask',
+            assistant_id: 'assistant-stable',
+            display_name: 'Atlas',
+            global_agent_profile_name: 'Atlas',
+            hq_workspace_id: 'hq-1',
+            hq_entry_agent_instance_id: 'entry-1',
+            state_version: 3,
+            daily_brief: { timezone: 'UTC', schedule_days: ['mon'], schedule_time: '08:00' },
+            resumed: false
+          }
+        })
+      });
+    });
+    await page.route('**/api/settings/workspace-root', async route => {
+      const confirmed = route.request().method() === 'POST';
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: confirmed || undefined,
+          workspace_root: '/tmp/paf-workspaces',
+          effective_workspace_root: '/tmp/paf-workspaces',
+          default_workspace_root: '/tmp/paf-workspaces',
+          source: confirmed ? 'settings' : 'unconfirmed',
+          confirmed
+        })
+      });
+    });
+    await page.route('**/api/progression', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          current_tier: 1,
+          total_tiers: 6,
+          total_count: 17,
+          completed_count: relationshipState === 'active' ? 1 : 0,
+          resolved_count: relationshipState === 'active' ? 1 : 0,
+          all_complete: false,
+          dismissed: false,
+          tiers: [
+            {
+              tier: 2,
+              name: 'Establish a Base',
+              complete: false,
+              quests: [
+                {
+                  id: 't2-build-hq',
+                  tier: 2,
+                  title: 'Build My HQ',
+                  status: relationshipState === 'active' ? 'completed' : 'available',
+                  action_url: '/?quest=build-hq',
+                  action_label: 'Build My HQ',
+                  optional: true
+                }
+              ]
+            }
+          ]
+        })
+      })
+    );
+
+    await page.goto('/?quest=build-hq');
+    await expect(page.locator('#onboardingModal')).toBeHidden();
+
+    // Fixed Ori/app-guide identity: this is the deterministic guide, not the
+    // hired assistant, and it says so.
+    await expect(page.locator('#oriGuidePanel')).toBeVisible();
+    await expect(page.locator('#oriGuideTitle')).toHaveText('Ori');
+    await expect(page.locator('#oriGuideRole')).toBeVisible();
+    await expect(page.locator('#oriGuideRole')).toHaveText('App Guide');
+
+    // Live-region restraint: the reply is a single polite status region, not an
+    // assertive one that would interrupt the user for routine step copy.
+    await expect(page.locator('#oriGuideReply')).toHaveAttribute('role', 'status');
+    await expect(page.locator('#oriGuideReply')).toHaveAttribute('aria-live', 'polite');
+
+    // Step 1: focus lands on the reserved site without a click.
+    const hqSite = page.locator('[data-hq-site]');
+    await expect(hqSite).toBeVisible();
+    await expect(hqSite).toBeFocused();
+    await expect(page.locator('#oriGuideReply')).toContainText('Atlas is hired');
+
+    // The pointer is decoration over the coachmark: hidden from assistive tech,
+    // not focusable, and unable to swallow the click it points at. The outline
+    // and the panel copy still carry the meaning without it.
+    const hand = page.locator('.ori-pointer');
+    await expect(hand).toHaveAttribute('aria-hidden', 'true');
+    await expect(hand).toHaveCSS('pointer-events', 'none');
+    expect(await hand.evaluate(el => el.contains(document.activeElement))).toBe(false);
+    // Under reduced motion it stays as a static "here" marker, without movement.
+    expect(await hand.evaluate(el => getComputedStyle(el).animationName)).toBe('none');
+
+    // Keyboard-only from here: Enter selects the site.
+    await page.keyboard.press('Enter');
+    const buildAction = page.locator('[data-hq-action="build"]');
+    await expect(buildAction).toBeVisible();
+    await expect(page.locator('#oriGuideReply')).toContainText('open Build My HQ');
+
+    // Keyboard-only: Tab to the Build action (or activate it directly if
+    // already focused by the coachmark) and press Enter/Space to open the form.
+    if (!(await buildAction.evaluate(el => el === document.activeElement))) {
+      await buildAction.focus();
+    }
+    await page.keyboard.press('Enter');
+
+    await expect(page.locator('#hqBuildModal')).toBeVisible();
+    await expect(page.locator('#oriGuideReply')).toContainText('Nothing is created until you confirm');
+
+    // Keyboard-only completion of the form itself.
+    await page.locator('#hqBuildName').focus();
+    await page.keyboard.press('Control+A');
+    await page.keyboard.type('Command Post');
+    await page.locator('#hqBuildSubmitBtn').focus();
+    await page.keyboard.press('Enter');
+
+    await expect.poll(() => hqSetupCalls).toBe(1);
+    await expect(page.locator('#hqBuildModal')).toBeHidden();
+
+    // Nothing here relied on the pulse/scroll animation reduced motion turns
+    // off: every assertion above was outline, focus, or text.
+  });
 });

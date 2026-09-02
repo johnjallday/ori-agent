@@ -2,6 +2,7 @@ package sessionhttp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -359,6 +360,49 @@ func TestCreatePersonalAssistantHQReusesTheHiredProfileAsEntryAgent(t *testing.T
 	}
 	if metadata["assistant_id"] != "assistant-id" || metadata["request_id"] != "hq-request-1" {
 		t.Fatalf("workspace provenance = %#v", metadata)
+	}
+
+	// Hiring and HQ creation grant no new permission surface: no MCP binding, no
+	// directory/filesystem reference beyond the template's own defaults, and the
+	// reused profile's tags carry only the two PAF provenance markers.
+	// The template's own workspace-scoped filesystem binding is expected —
+	// every workspace gets one rooted at its own folder. What must NOT appear is
+	// any binding to an external server, a root outside the workspace's own
+	// folder, or a native MCP/CLI opt-in beyond the template default.
+	var bindings []map[string]any
+	if err := json.Unmarshal(workspace.MCPBindingsJSON, &bindings); err != nil {
+		t.Fatalf("decode mcp bindings: %v", err)
+	}
+	for _, binding := range bindings {
+		if binding["server_name"] != "filesystem" {
+			t.Fatalf("hq creation attached an unexpected mcp server: %#v", binding)
+		}
+		config, _ := binding["config"].(map[string]any)
+		roots, _ := config["roots"].([]any)
+		for _, root := range roots {
+			rootPath, _ := root.(string)
+			if !strings.HasSuffix(rootPath, "/personal-hq") {
+				t.Fatalf("hq creation widened filesystem scope beyond its own folder: %q", rootPath)
+			}
+		}
+	}
+	// Likewise, the template's own directory reference to the workspace's own
+	// folder is expected; anything else is a filesystem-scope expansion.
+	var directories []map[string]any
+	if err := json.Unmarshal(workspace.DirectoryReferencesJSON, &directories); err != nil {
+		t.Fatalf("decode directory references: %v", err)
+	}
+	for _, dir := range directories {
+		path, _ := dir["path"].(string)
+		if !strings.HasSuffix(path, "/personal-hq") {
+			t.Fatalf("hq creation widened filesystem scope beyond its own folder: %q", path)
+		}
+	}
+	if workspace.AllowNativeMCPCLI {
+		t.Fatal("hq creation enabled native MCP/CLI beyond the template default")
+	}
+	if len(after.Metadata.Tags) != 2 {
+		t.Fatalf("hq creation added unexpected profile tags: %v", after.Metadata.Tags)
 	}
 }
 

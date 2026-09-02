@@ -250,6 +250,28 @@ mirrored on the server and the browser, and a key resolves only to a
 hand-written selector (`[data-hq-site]`, the active visible build action); a
 selector is never accepted from API, model, or user input.
 
+A coachmark carries a decorative pointer that taps at the marked control, so the
+step's "click this next" reads without having to be parsed out of the copy. The
+pointer is presentation only and is bound by the same focus-only rule: it is
+`aria-hidden`, never focusable, `pointer-events: none` so it cannot intercept the
+click it indicates, and never the sole signal — the outline and the panel copy
+still name the control, and under `prefers-reduced-motion` the pointer remains as
+a static marker with its motion dropped.
+
+Two properties keep a mark truthful against a live page:
+
+- **Re-anchoring.** The Map re-mounts its tiles when HQ status arrives, swapping
+  the marked node for an identical new one. A mark re-resolves onto the live node
+  from the key it was made with, and is dropped only when the control is gone for
+  good. Without this a mark silently survives as a detached node: invisible, and
+  positioning its pointer at an all-zero rect.
+- **A bounded wait for a mounting control.** A step is presented in the same tick
+  as the dialog that mounts the control it names, so a walkthrough step may wait
+  a bounded number of short retries for its target before degrading to words.
+  This is opt-in per call and set only by walkthrough steps, which know a control
+  is about to exist; an ordinary guide answer still reports an absent control
+  immediately, because there it really is absent.
+
 The quest is observational. Removing the quest controller entirely must leave
 the Map, the site context dialog, and the HQ build flow fully functional.
 

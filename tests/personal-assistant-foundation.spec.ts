@@ -10,9 +10,14 @@ test.describe('Personal Assistant Foundation first value', () => {
     let currentPreview: any = null;
     let applyCalls = 0;
     let onboardingComplete = false;
+    // needs_hq is the state between hire and a built Personal HQ: hiring no
+    // longer creates HQ in the same transaction (guided-hq-map-quest).
     let relationshipState = 'not_hired';
+    let hqValid = false;
+    let hqSetupCalls = 0;
     let firstAssignmentCompleted = false;
     let firstQuestDeferred = false;
+    let hqQuestDeferred = false;
     const externalWrites: string[] = [];
 
     page.on('request', request => {
@@ -83,6 +88,17 @@ test.describe('Personal Assistant Foundation first value', () => {
     await page.route('**/api/project-templates', route =>
       route.fulfill({ status: 200, contentType: 'application/json', body: '{"templates":[]}' })
     );
+    // A real hire creates the identity immediately, so assistant_id/display_name
+    // are populated from the moment relationshipState leaves not_hired — only
+    // the HQ fields wait for a confirmed Build My HQ.
+    const hired = () => relationshipState !== 'not_hired';
+    const active = () => relationshipState === 'active';
+    const nextAction = () =>
+      relationshipState === 'not_hired'
+        ? 'hire'
+        : relationshipState === 'needs_hq'
+          ? 'build_hq'
+          : 'ask';
     await page.route('**/api/personal-assistant', route =>
       route.fulfill({
         status: 200,
@@ -91,10 +107,16 @@ test.describe('Personal Assistant Foundation first value', () => {
           personal_assistant: {
             state: relationshipState,
             state_version: relationshipVersion,
-            assistant_id: relationshipState === 'active' ? 'assistant-1' : undefined,
-            display_name: relationshipState === 'active' ? 'Atlas' : undefined,
-            hq_workspace_id: relationshipState === 'active' ? 'hq-1' : undefined,
+            next_action: nextAction(),
+            assistant_id: hired() ? 'assistant-1' : undefined,
+            display_name: hired() ? 'Atlas' : undefined,
+            global_agent_profile_name: hired() ? 'Atlas' : undefined,
+            hq_workspace_id: active() ? 'hq-1' : undefined,
+            hq_entry_agent_instance_id: active() ? 'entry-1' : undefined,
             first_assignment_status: firstAssignmentCompleted ? 'completed' : 'not_started',
+            daily_brief: active()
+              ? { timezone: 'UTC', schedule_days: ['mon'], schedule_time: '08:00' }
+              : undefined,
             availability: {
               model: { status: 'not_configured', available: false },
               calendar: { status: 'not_configured', available: false },
@@ -106,23 +128,72 @@ test.describe('Personal Assistant Foundation first value', () => {
     );
     await page.route('**/api/personal-assistant/hire', async route => {
       relationshipVersion += 1;
+      relationshipState = 'needs_hq';
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          personal_assistant: {
+            status: 'awaiting_hq',
+            state: 'needs_hq',
+            next_action: 'build_hq',
+            assistant_id: 'assistant-1',
+            display_name: 'Atlas',
+            global_agent_profile_name: 'Atlas',
+            state_version: relationshipVersion,
+            first_assignment_status: 'not_started',
+            resumed: false
+          }
+        })
+      });
+    });
+    // The guided quest's sole consequence. The client supplies no assistant,
+    // profile, or workspace identity — only the bounded form fields plus a
+    // request id and the current version.
+    await page.route('**/api/personal-assistant/hq', async route => {
+      hqSetupCalls += 1;
+      relationshipVersion += 1;
       relationshipState = 'active';
+      hqValid = true;
       await route.fulfill({
         status: 201,
         contentType: 'application/json',
         body: JSON.stringify({
           personal_assistant: {
             status: 'active',
+            state: 'active',
+            next_action: 'ask',
             assistant_id: 'assistant-1',
             display_name: 'Atlas',
+            global_agent_profile_name: 'Atlas',
             hq_workspace_id: 'hq-1',
             hq_entry_agent_instance_id: 'entry-1',
             state_version: relationshipVersion,
             first_assignment_status: 'not_started',
-            daily_brief: { timezone: 'UTC', schedule_days: ['mon'], schedule_time: '08:00' }
+            daily_brief: { timezone: 'UTC', schedule_days: ['mon'], schedule_time: '08:00' },
+            resumed: false
           }
         })
       });
+    });
+    await page.route('**/api/personal-hq/status', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          status: {
+            user_id: 'local',
+            valid: hqValid,
+            workspace_id: hqValid ? 'hq-1' : undefined,
+            hq_onboarding_state: hqValid ? 'completed' : hqQuestDeferred ? 'skipped' : 'unseen'
+          }
+        })
+      })
+    );
+    await page.route('**/api/personal-hq/onboarding-state', async route => {
+      const body = route.request().postDataJSON();
+      if (body && body.state === 'skipped') hqQuestDeferred = true;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{"success":true}' });
     });
     await page.route('**/api/progression', route =>
       route.fulfill({
@@ -181,7 +252,12 @@ test.describe('Personal Assistant Foundation first value', () => {
                   id: 't2-build-hq',
                   tier: 2,
                   title: 'Build My HQ',
-                  status: 'completed',
+                  why: 'Give your assistant a home base.',
+                  // Only a real designation completes this — never hiring,
+                  // opening the quest, or selecting the site.
+                  status: active() ? 'completed' : hqQuestDeferred ? 'skipped' : 'available',
+                  action_url: '/?quest=build-hq',
+                  action_label: 'Build My HQ',
                   optional: true
                 }
               ]
@@ -191,7 +267,9 @@ test.describe('Personal Assistant Foundation first value', () => {
       })
     );
     await page.route('**/api/progression/skip', async route => {
-      firstQuestDeferred = true;
+      const body = route.request().postDataJSON();
+      if (body && body.quest_id === 't2-build-hq') hqQuestDeferred = true;
+      else firstQuestDeferred = true;
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -334,8 +412,48 @@ test.describe('Personal Assistant Foundation first value', () => {
     await page.locator('#pafHireConfirm').check();
     await page.locator('#pafHireBtn').click();
 
-    await expect(page).toHaveURL(/\/$/);
+    // A confirmed hire hands off to Ori's guided HQ quest, never straight to an
+    // active Home — hiring created no HQ. The quest itself clears ?quest= from
+    // the URL bar once it starts (so Back/reload can't restart it), so the
+    // durable evidence is the quest's own presentation, not the transient URL.
     await expect(page.locator('#onboardingModal')).toBeHidden();
+    expect(hqSetupCalls).toBe(0);
+
+    // Step 1: Ori explains and highlights the reserved site. Approved framing
+    // names the hired assistant; nothing is created by opening the quest.
+    await expect(page.locator('#oriGuidePanel')).toBeVisible();
+    await expect(page.locator('#oriGuideReply')).toContainText('Atlas is hired');
+    await expect(page.locator('#oriGuideReply')).toContainText('Step 1 of 3');
+    const hqSite = page.locator('[data-hq-site]');
+    await expect(hqSite).toBeVisible();
+    await expect(hqSite).toBeFocused();
+    expect(relationshipState).toBe('needs_hq');
+
+    // The user selects the site with the keyboard — never the walkthrough.
+    await hqSite.press('Enter');
+
+    // Step 2: the context dialog is open; Ori highlights Build My HQ.
+    const buildAction = page.locator('[data-hq-action="build"]');
+    await expect(buildAction).toBeVisible();
+    await expect(page.locator('#oriGuideReply')).toContainText('open Build My HQ');
+    await expect(page.locator('#oriGuideReply')).toContainText('Step 2 of 3');
+    expect(hqSetupCalls).toBe(0);
+
+    await buildAction.click();
+
+    // Step 3: the existing form owns editing and confirmation from here.
+    await expect(page.locator('#hqBuildModal')).toBeVisible();
+    await expect(page.locator('#oriGuideReply')).toContainText('Nothing is created until you confirm');
+    await expect(page.locator('#hqBuildAssistantIntro')).toContainText('Atlas');
+    expect(hqSetupCalls).toBe(0);
+
+    await page.locator('#hqBuildName').fill('Command Post');
+    await page.locator('#hqBuildSubmitBtn').click();
+
+    await expect.poll(() => hqSetupCalls).toBe(1);
+    expect(relationshipState).toBe('active');
+    await expect(page.locator('#hqBuildModal')).toBeHidden();
+
     await expect(page.locator('#cockpitQuestsToggle')).toBeVisible();
     await page.locator('#cockpitQuestsToggle').click();
     await expect(page.locator('[data-role="first-mission-title"]')).toHaveText('Plan my first day');

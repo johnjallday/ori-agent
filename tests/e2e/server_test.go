@@ -400,9 +400,54 @@ func hirePersonalAssistant(t *testing.T, client *http.Client) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("Failed to read hire response: %v", err)
+	}
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		t.Fatalf("Failed to hire personal assistant (status %d): %s", resp.StatusCode, body)
+	}
+
+	var decoded struct {
+		PersonalAssistant struct {
+			StateVersion int64 `json:"state_version"`
+		} `json:"personal_assistant"`
+	}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("Failed to decode hire response: %v: %s", err, body)
+	}
+
+	// Hiring alone leaves the relationship at needs_hq (guided-hq-map-quest):
+	// building HQ is the guided Map quest's own, separate confirmed step. This
+	// helper drives it too, so callers that need an ACTIVE relationship (the
+	// only state general routing treats as ready for work) get one.
+	buildPersonalAssistantHQ(t, client, decoded.PersonalAssistant.StateVersion)
+}
+
+func buildPersonalAssistantHQ(t *testing.T, client *http.Client, ifVersion int64) {
+	t.Helper()
+
+	payload, err := json.Marshal(map[string]any{
+		"request_id":    "e2e-personal-assistant-hq",
+		"if_version":    ifVersion,
+		"name":          "Personal HQ",
+		"timezone":      "UTC",
+		"schedule_days": []string{"mon", "tue", "wed", "thu", "fri"},
+		"schedule_time": "08:00",
+	})
+	if err != nil {
+		t.Fatalf("Failed to encode personal assistant hq setup: %v", err)
+	}
+
+	resp, err := client.Post(baseURL+"/api/personal-assistant/hq", "application/json", bytes.NewBuffer(payload))
+	if err != nil {
+		t.Fatalf("Failed to build personal hq: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("Failed to hire personal assistant (status %d): %s", resp.StatusCode, body)
+		t.Fatalf("Failed to build personal hq (status %d): %s", resp.StatusCode, body)
 	}
 }
 

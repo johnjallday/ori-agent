@@ -30,11 +30,23 @@ function makeElement(id, overrides = {}) {
       },
       contains(c) {
         return this._set.has(c);
+      },
+      toggle(c, on) {
+        if (on) this._set.add(c);
+        else this._set.delete(c);
+        return this._set.has(c);
       }
     },
     attributes: {},
     innerHTML: '',
     focused: false,
+    style: {},
+    // Rect far enough from the left edge that the pointer's default (left of
+    // the control) placement applies; tests that need the flipped placement
+    // override this.
+    getBoundingClientRect() {
+      return { left: 400, right: 500, top: 200, bottom: 240, width: 100, height: 40 };
+    },
     setAttribute(k, v) {
       this.attributes[k] = v;
     },
@@ -62,10 +74,41 @@ function makeElement(id, overrides = {}) {
 function load({ route = '/', elements = {}, session = {} } = {}) {
   const registry = {};
   const store = { ...session };
+  // Listeners the module parks on window, so a test can prove they are removed
+  // again rather than leaking onto the page.
+  const windowListeners = [];
+  const timers = [];
+  const frames = [];
   const sandbox = {
     window: {
       location: { pathname: route },
-      addEventListener() {},
+      pageXOffset: 0,
+      pageYOffset: 0,
+      addEventListener(type, fn) {
+        windowListeners.push({ type, fn });
+      },
+      removeEventListener(type, fn) {
+        const at = windowListeners.findIndex(l => l.type === type && l.fn === fn);
+        if (at >= 0) windowListeners.splice(at, 1);
+      },
+      // Controllable timers: a test drives the coachmark's bounded wait with
+      // runTimers() rather than sleeping.
+      setTimeout(fn) {
+        timers.push(fn);
+        return timers.length;
+      },
+      clearTimeout(id) {
+        if (id >= 1 && id <= timers.length) timers[id - 1] = null;
+      },
+      // The pointer's tracking loop. Frames are only run when a test asks, so
+      // the loop never spins here.
+      requestAnimationFrame(fn) {
+        frames.push(fn);
+        return frames.length;
+      },
+      cancelAnimationFrame(id) {
+        if (id >= 1 && id <= frames.length) frames[id - 1] = null;
+      },
       sessionStorage: {
         getItem: k => (Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null),
         setItem: (k, v) => {
@@ -86,9 +129,30 @@ function load({ route = '/', elements = {}, session = {} } = {}) {
       querySelector(sel) {
         return registry[sel] || null;
       },
+      createElement(tag) {
+        const el = makeElement(tag);
+        el.parentNode = null;
+        return el;
+      },
+      body: {
+        children: [],
+        appendChild(el) {
+          this.children.push(el);
+          el.parentNode = this;
+          return el;
+        },
+        removeChild(el) {
+          const at = this.children.indexOf(el);
+          if (at >= 0) this.children.splice(at, 1);
+          el.parentNode = null;
+          return el;
+        }
+      },
       addEventListener() {},
-      contains() {
-        return true;
+      // A test marks an element `_detached` to model the page re-rendering the
+      // control out from under a mark.
+      contains(el) {
+        return !(el && el._detached);
       },
       readyState: 'complete',
       activeElement: null
@@ -113,6 +177,31 @@ function load({ route = '/', elements = {}, session = {} } = {}) {
     guide: sandbox.window.OriGuide,
     coachmarks: sandbox.window.OriGuideCoachmarks,
     sandbox,
+    windowListeners,
+    // Drains pending timers, up to a bound, so a scheduled retry chain runs.
+    runTimers(max = 20) {
+      for (let i = 0; i < max; i += 1) {
+        const at = timers.findIndex(Boolean);
+        if (at < 0) return;
+        const fn = timers[at];
+        timers[at] = null;
+        fn();
+      }
+    },
+    pendingTimers: () => timers.filter(Boolean).length,
+    // Runs one pending animation frame (the pointer reschedules itself, so a
+    // test that drained them all would never terminate).
+    runFrame() {
+      const at = frames.findIndex(Boolean);
+      if (at < 0) return false;
+      const fn = frames[at];
+      frames[at] = null;
+      fn();
+      return true;
+    },
+    pendingFrames: () => frames.filter(Boolean).length,
+    // The decorative pointer, if the module has one parked on the page.
+    pointer: () => sandbox.document.body.children.find(c => c.className === 'ori-pointer') || null,
     registerSelector(sel, el) {
       registry[sel] = el;
     }
@@ -174,6 +263,47 @@ test('PAF Help-only handoff refuses a missing hired assistant without routing', 
   assert.equal(action.label, 'Hire your personal assistant');
   assert.equal(guide._handoff(action.handoffText), false);
   assert.equal(submits, 0);
+});
+
+test('PAF Help-only handoff for a hired assistant with no HQ routes to the guided quest, not another hire', () => {
+  const { guide, sandbox } = load();
+  let submits = 0;
+  let prefills = 0;
+  sandbox.window.OriAskRouting = {
+    submit() {
+      submits += 1;
+    }
+  };
+  sandbox.window.PersonalAssistantPanel = {
+    prefill() {
+      prefills += 1;
+      return true;
+    }
+  };
+  guide.setHelpOnly({ available: false, assistantName: 'Atlas', needsHQ: true });
+
+  const action = guide._validateAction({ type: 'handoff', handoff_text: 'plan today' });
+  assert.equal(action.type, 'navigate');
+  assert.equal(action.href, '/?quest=build-hq');
+  assert.equal(action.label, 'Build Personal HQ');
+
+  // The work is never silently submitted or prefilled anywhere.
+  assert.equal(submits, 0);
+  assert.equal(prefills, 0);
+});
+
+test('needsHQ never changes the ready-for-work handoff, and clears on the next relationship read', () => {
+  const { guide } = load();
+  guide.setHelpOnly({ available: true, assistantName: 'Atlas', needsHQ: true });
+  const ready = guide._validateAction({ type: 'handoff', handoff_text: 'plan today' });
+  assert.equal(ready.type, 'handoff');
+  assert.equal(ready.label, 'Send to Atlas');
+
+  // A subsequent read that omits needsHQ must not leave a stale flag behind.
+  guide.setHelpOnly({ available: false, assistantName: 'Personal assistant' });
+  const stale = guide._validateAction({ type: 'handoff', handoff_text: 'plan today' });
+  assert.equal(stale.type, 'handoff');
+  assert.equal(stale.label, 'Hire your personal assistant');
 });
 
 test('a navigate action requires a safe same-origin path', () => {
@@ -394,6 +524,287 @@ test('clearing a quest step drops the coachmark without touching the server ques
   assert.equal(site.classList.contains('is-ori-coachmark'), false);
   assert.equal(reply.dataset.status, '');
   assert.equal(guide._state.quest, null);
+});
+
+/* ---- pointer (game-style "click here" affordance) --------------------------- */
+
+test('a resolved coachmark parks an animated pointer at the control it marks', () => {
+  const site = makeElement('hq-site');
+  const { guide, pointer } = questGuide({ selectors: { '[data-hq-site]': site } });
+  guide.presentQuestStep({
+    quest: 'build-hq',
+    answer: 'Select the highlighted site.',
+    coachmark: 'personal_hq_site'
+  });
+
+  const hand = pointer();
+  assert.ok(hand, 'a resolved coachmark should place a pointer');
+  // Decoration only: never announced, never focusable, never clickable.
+  assert.equal(hand.getAttribute('aria-hidden'), 'true');
+  assert.equal(hand.getAttribute('tabindex'), null);
+  // Parked inside the control's own box, in page coordinates: a hand
+  // overlapping the target reads as "this one", and staying inside the box
+  // keeps it off a modal's backdrop when the target is a dialog button.
+  assert.equal(hand.style.left, '450px', 'inset from the leading edge (400 + 100/2)');
+  assert.equal(hand.style.top, '228px', 'at the control’s lower edge (240 - 12)');
+});
+
+test('the pointer’s inset is capped so it stays near a wide control’s leading edge', () => {
+  const wide = makeElement('hq-build', {
+    getBoundingClientRect: () => ({
+      left: 300,
+      right: 900,
+      top: 700,
+      bottom: 740,
+      width: 600,
+      height: 40
+    })
+  });
+  const { guide, pointer } = questGuide({ selectors: { '[data-hq-action="build"]': wide } });
+  guide.presentQuestStep({
+    quest: 'build-hq',
+    answer: 'Now open Build My HQ.',
+    coachmark: 'personal_hq_build'
+  });
+
+  const hand = pointer();
+  assert.ok(hand);
+  // Half of 600 would strand it mid-button; the cap keeps it at the edge it
+  // is pointing from.
+  assert.equal(hand.style.left, '352px', 'capped inset (300 + 52)');
+  assert.equal(hand.style.top, '728px');
+});
+
+test('an unresolved coachmark places no pointer, since there is nothing to point at', () => {
+  const { guide, pointer } = questGuide();
+  const result = guide.presentQuestStep({
+    quest: 'build-hq',
+    answer: 'Opening the Map.',
+    coachmark: 'personal_hq_site'
+  });
+  assert.equal(result.coachmarkResolved, false);
+  assert.equal(pointer(), null);
+});
+
+test('advancing to the next step moves the pointer instead of stacking a second one', () => {
+  const site = makeElement('hq-site');
+  const build = makeElement('hq-build', {
+    getBoundingClientRect: () => ({
+      left: 600,
+      right: 700,
+      top: 300,
+      bottom: 340,
+      width: 100,
+      height: 40
+    })
+  });
+  const { guide, sandbox } = questGuide({
+    selectors: { '[data-hq-site]': site, '[data-hq-action="build"]': build }
+  });
+
+  guide.presentQuestStep({
+    quest: 'build-hq',
+    answer: 'Select the site.',
+    coachmark: 'personal_hq_site'
+  });
+  guide.presentQuestStep({
+    quest: 'build-hq',
+    answer: 'Now build it.',
+    coachmark: 'personal_hq_build'
+  });
+
+  const hands = sandbox.document.body.children.filter(c => c.className === 'ori-pointer');
+  assert.equal(hands.length, 1, 'exactly one pointer may exist at a time');
+  assert.equal(hands[0].style.left, '650px', 'it followed the new target (600 + 100/2)');
+  assert.equal(site.classList.contains('is-ori-coachmark'), false);
+  assert.ok(build.classList.contains('is-ori-coachmark'));
+});
+
+test('the pointer follows a target that moves after it was placed', () => {
+  // The Map animates its camera into place after mount, which moves the tile
+  // without firing scroll or resize. A pointer positioned once would be left
+  // behind at wherever the tile was mid-animation.
+  let rect = { left: 40, right: 140, top: 20, bottom: 60, width: 100, height: 40 };
+  const site = makeElement('hq-site', { getBoundingClientRect: () => rect });
+  const { guide, pointer, runFrame } = questGuide({ selectors: { '[data-hq-site]': site } });
+  guide.presentQuestStep({
+    quest: 'build-hq',
+    answer: 'Select the highlighted site.',
+    coachmark: 'personal_hq_site'
+  });
+  const hand = pointer();
+  assert.equal(hand.style.left, '90px', 'placed against the pre-animation rect');
+
+  // The camera settles and the tile lands somewhere else.
+  rect = { left: 620, right: 720, top: 480, bottom: 520, width: 100, height: 40 };
+  runFrame();
+
+  assert.equal(hand.style.left, '670px', 'the pointer caught up (620 + 100/2)');
+  assert.equal(hand.style.top, '508px');
+});
+
+test('the mark re-anchors when the page re-renders the control under it', () => {
+  // The Map re-mounts its tiles when HQ status arrives, swapping the marked
+  // node for an identical new one. Holding the old node would leave the mark
+  // invisible and the pointer parked on a detached rect in the page corner.
+  const stale = makeElement('hq-site-old');
+  const fresh = makeElement('hq-site-new', {
+    getBoundingClientRect: () => ({
+      left: 700,
+      right: 800,
+      top: 90,
+      bottom: 130,
+      width: 100,
+      height: 40
+    })
+  });
+  const ctx = questGuide({ selectors: { '[data-hq-site]': stale } });
+  const { guide, pointer, registerSelector, runFrame } = ctx;
+
+  guide.presentQuestStep({
+    quest: 'build-hq',
+    answer: 'Select the highlighted site.',
+    coachmark: 'personal_hq_site'
+  });
+  assert.ok(stale.classList.contains('is-ori-coachmark'));
+
+  // The Map re-mounts: the marked node leaves the document, an identical one
+  // takes its place.
+  stale._detached = true;
+  registerSelector('[data-hq-site]', fresh);
+  runFrame();
+
+  assert.equal(stale.classList.contains('is-ori-coachmark'), false, 'the ghost is unmarked');
+  assert.ok(fresh.classList.contains('is-ori-coachmark'), 'the live control is marked instead');
+  assert.equal(pointer().style.left, '750px', 'and the pointer followed it (700 + 100/2)');
+});
+
+test('a marked control that is removed for good drops the mark and the pointer', () => {
+  const site = makeElement('hq-site');
+  const { guide, pointer, registerSelector, runFrame, pendingFrames } = questGuide({
+    selectors: { '[data-hq-site]': site }
+  });
+  guide.presentQuestStep({
+    quest: 'build-hq',
+    answer: 'Select the highlighted site.',
+    coachmark: 'personal_hq_site'
+  });
+
+  site._detached = true;
+  registerSelector('[data-hq-site]', null);
+  runFrame();
+
+  assert.equal(pointer(), null, 'nothing to point at means no pointer');
+  assert.equal(site.classList.contains('is-ori-coachmark'), false);
+  assert.equal(pendingFrames(), 0, 'the tracking loop stops with it');
+});
+
+test('clearing a quest step removes the pointer and stops its tracking loop', () => {
+  const site = makeElement('hq-site');
+  const { guide, pointer, runFrame, pendingFrames } = questGuide({
+    selectors: { '[data-hq-site]': site }
+  });
+  guide.presentQuestStep({
+    quest: 'build-hq',
+    answer: 'Select the highlighted site.',
+    coachmark: 'personal_hq_site'
+  });
+  assert.ok(pointer());
+  assert.equal(pendingFrames(), 1, 'the pointer tracks its target while it is up');
+
+  guide.clearQuestStep();
+  assert.equal(pointer(), null, 'an orphaned pointer would aim at a control that is gone');
+  // Any frame already queued must no-op rather than resurrect the loop.
+  runFrame();
+  assert.equal(pendingFrames(), 0, 'the tracking loop must not keep rescheduling itself');
+});
+
+/* ---- coachmarks that mount a frame late ------------------------------------- */
+
+test('a quest step waits for a control that is still mounting, then marks and points at it', () => {
+  // The step that names Build My HQ is presented in the same tick as the dialog
+  // that mounts it, so resolving once would miss a control that is about to
+  // exist.
+  const build = makeElement('hq-build');
+  const ctx = questGuide();
+  const { guide, reply, pointer, registerSelector, runTimers } = ctx;
+
+  const result = guide.presentQuestStep({
+    quest: 'build-hq',
+    answer: 'Now open Build My HQ.',
+    coachmark: 'personal_hq_build'
+  });
+  // Honest synchronously: it is not marked yet.
+  assert.equal(result.coachmarkResolved, false);
+  assert.equal(pointer(), null);
+  assert.doesNotMatch(reply.innerHTML, /cannot point at that control/i);
+
+  // The dialog mounts, and the pending wait finds it.
+  registerSelector('[data-hq-action="build"]', build);
+  runTimers();
+
+  assert.ok(build.classList.contains('is-ori-coachmark'), 'the late control is marked');
+  assert.ok(pointer(), 'and the pointer follows it');
+  assert.doesNotMatch(reply.innerHTML, /cannot point at that control/i);
+});
+
+test('a control that never mounts still degrades to words, just not prematurely', () => {
+  const { guide, reply, pointer, runTimers } = questGuide();
+  guide.presentQuestStep({
+    quest: 'build-hq',
+    answer: 'Now open Build My HQ.',
+    coachmark: 'personal_hq_build'
+  });
+  assert.doesNotMatch(reply.innerHTML, /cannot point at that control/i);
+
+  runTimers();
+
+  assert.match(reply.innerHTML, /cannot point at that control/i);
+  assert.equal(pointer(), null);
+});
+
+test('the wait is bounded and stops rescheduling once it gives up', () => {
+  const { guide, runTimers, pendingTimers } = questGuide();
+  guide.presentQuestStep({
+    quest: 'build-hq',
+    answer: 'Now open Build My HQ.',
+    coachmark: 'personal_hq_build'
+  });
+  runTimers(100);
+  assert.equal(pendingTimers(), 0, 'a missing control must not retry forever');
+});
+
+test('clearing a quest step cancels a pending wait rather than marking later', () => {
+  const build = makeElement('hq-build');
+  const { guide, pointer, registerSelector, runTimers } = questGuide();
+  guide.presentQuestStep({
+    quest: 'build-hq',
+    answer: 'Now open Build My HQ.',
+    coachmark: 'personal_hq_build'
+  });
+
+  guide.clearQuestStep();
+  // The control turns up after the walkthrough was dismissed.
+  registerSelector('[data-hq-action="build"]', build);
+  runTimers();
+
+  assert.equal(
+    build.classList.contains('is-ori-coachmark'),
+    false,
+    'a dismissed step must not mark a control afterwards'
+  );
+  assert.equal(pointer(), null);
+});
+
+test('a guide answer still degrades immediately, without waiting on a control', () => {
+  // Only walkthrough steps know a control is about to mount. For an ordinary
+  // answer an absent control really is absent, and the honest reply is now.
+  const els = guideEls();
+  const ctx = load({ route: '/agents', elements: els });
+  const applied = ctx.guide._applyCoachmark('new_agent');
+  assert.equal(applied, false);
+  assert.match(els.oriGuideReply.innerHTML, /cannot point at that control/i);
+  assert.equal(ctx.pendingTimers(), 0, 'no wait should have been scheduled');
 });
 
 test('a quest step with no registered coachmark still presents its copy', () => {
@@ -1055,6 +1466,41 @@ test('closing keeps the draft and reopening restores it', () => {
   els.oriGuideInput.value = '';
   guide.open();
   assert.equal(els.oriGuideInput.value, 'half-written request');
+});
+
+test('open(trigger, {skipGreeting:true}) never fires the default-greeting ask, so a caller presenting its own content is never raced', async () => {
+  const els = guideEls();
+  const ctx = load({ route: '/', elements: els });
+  let asks = 0;
+  ctx.sandbox.fetch = () => {
+    asks += 1;
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ status: 'answered', topic_key: 'agents', answer: 'greeting' })
+    });
+  };
+
+  ctx.guide.open(null, { skipGreeting: true });
+  assert.equal(asks, 0, 'skipGreeting still fired the default ask');
+
+  // The panel is otherwise fully opened: input focus, launcher state, emit.
+  assert.equal(els.oriGuidePanel.hidden, false);
+});
+
+test('a normal open() still greets when nothing else is about to render', async () => {
+  const els = guideEls();
+  const ctx = load({ route: '/', elements: els });
+  let asks = 0;
+  ctx.sandbox.fetch = () => {
+    asks += 1;
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ status: 'answered', topic_key: 'agents', answer: 'greeting' })
+    });
+  };
+
+  ctx.guide.open();
+  assert.equal(asks, 1, 'an ordinary open() should still greet a fresh panel');
 });
 
 test('reopening does not re-greet over a reply the user came back to read', async () => {

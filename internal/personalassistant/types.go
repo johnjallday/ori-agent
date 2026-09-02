@@ -42,7 +42,11 @@ var (
 	// ErrConflict means a compare-and-swap version or uniqueness check failed.
 	ErrConflict = errors.New("personal assistant: state conflict")
 	// ErrRepairNeeded means a durable relationship has an invalid canonical link.
-	ErrRepairNeeded    = errors.New("personal assistant: repair needed")
+	ErrRepairNeeded = errors.New("personal assistant: repair needed")
+	// ErrNeedsHQ means a genuinely hired relationship has no Personal HQ yet.
+	// This is an expected setup stage, not corruption — callers must never map
+	// it onto repair language or a generic "hire" prompt.
+	ErrNeedsHQ         = errors.New("personal assistant: personal hq is not built yet")
 	htmlLikeTagPattern = regexp.MustCompile(`<\s*/?\s*[A-Za-z][^>]*>`)
 )
 

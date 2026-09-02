@@ -162,7 +162,9 @@ type fakeProfileReader struct {
 	reads    int
 }
 
-func ownedProfileReader(name, assistantID string) *fakeProfileReader {
+func ownedProfileReader() *fakeProfileReader {
+	const name = "Atlas"
+	const assistantID = "assistant-a"
 	return &fakeProfileReader{profiles: map[string]ProfileProvenance{
 		name: {Name: name, AssistantID: assistantID, HireRequestID: "hire-req-1"},
 	}}
@@ -180,7 +182,7 @@ func TestServiceGet_AwaitingHQProjectsNamedButUnbuilt(t *testing.T) {
 	briefs := &fakeBriefReader{}
 	service := NewService(store, hq, briefs,
 		fakeModelReader{availability: SourceAvailability{Available: true, Status: AvailabilityAvailable}}).
-		WithProfileReader(ownedProfileReader("Atlas", "assistant-a"))
+		WithProfileReader(ownedProfileReader())
 
 	projection, err := service.Get(context.Background(), "local")
 	if err != nil {
@@ -224,7 +226,7 @@ func TestServiceGet_ProvisioningHQProjectsResumable(t *testing.T) {
 	store := &readTrackingStore{state: state}
 	service := NewService(store, &fakeHQReader{}, &fakeBriefReader{},
 		fakeModelReader{availability: SourceAvailability{Available: true, Status: AvailabilityAvailable}}).
-		WithProfileReader(ownedProfileReader("Atlas", "assistant-a"))
+		WithProfileReader(ownedProfileReader())
 
 	projection, err := service.Get(context.Background(), "local")
 	if err != nil {
@@ -247,7 +249,7 @@ func TestServiceGet_MalformedPreHQStateIsBoundedRepairNotFabrication(t *testing.
 	store := &readTrackingStore{state: state}
 	service := NewService(store, &fakeHQReader{}, &fakeBriefReader{},
 		fakeModelReader{availability: SourceAvailability{Available: true, Status: AvailabilityAvailable}}).
-		WithProfileReader(ownedProfileReader("Atlas", "assistant-a"))
+		WithProfileReader(ownedProfileReader())
 
 	projection, err := service.Get(context.Background(), "local")
 	if err != nil {

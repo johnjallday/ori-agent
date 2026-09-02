@@ -528,8 +528,9 @@ func TestHireCoordinator_RejectsMissingDependenciesBeforeReadingOrWriting(t *tes
 // seedLegacyAutoHQOperation persists a hiring relationship carrying a
 // pre-amendment hire payload: no version field, and the Daily Brief rhythm the
 // hire step used to collect.
-func seedLegacyAutoHQOperation(t *testing.T, store Store, userID string, withWorkspace bool) *State {
+func seedLegacyAutoHQOperation(t *testing.T, store Store, withWorkspace bool) *State {
 	t.Helper()
+	const userID = "local"
 	legacy := map[string]any{
 		"request_id":   "hire-request-1",
 		"display_name": DefaultAssistantName,
@@ -572,7 +573,7 @@ func seedLegacyAutoHQOperation(t *testing.T, store Store, userID string, withWor
 func TestHireCoordinator_ResumesPreAmendmentOperationWithARecordedWorkspace(t *testing.T) {
 	ctx := context.Background()
 	store, _ := newTestStore(t)
-	seeded := seedLegacyAutoHQOperation(t, store, "local", true)
+	seeded := seedLegacyAutoHQOperation(t, store, true)
 	fixture := newHireFixture(t, store)
 
 	// The client has been upgraded, so it submits a modern profile-only request.
@@ -608,7 +609,7 @@ func TestHireCoordinator_ResumesPreAmendmentOperationWithARecordedWorkspace(t *t
 func TestHireCoordinator_PreAmendmentOperationWithNoDurableResultCannotAdoptByName(t *testing.T) {
 	ctx := context.Background()
 	store, _ := newTestStore(t)
-	seedLegacyAutoHQOperation(t, store, "local", false)
+	seedLegacyAutoHQOperation(t, store, false)
 	fixture := newHireFixture(t, store)
 	// The old operation recorded no workspace. Its creator is the only thing that
 	// can resolve one, and it does so by assistant/request provenance metadata —
@@ -672,7 +673,7 @@ func TestHireCoordinator_PreAmendmentPartialFailuresReplayToOneActiveRelationshi
 			ctx := context.Background()
 			sqliteStore, db := newTestStore(t)
 			store := &failOnceStateStore{Store: sqliteStore}
-			seedLegacyAutoHQOperation(t, store, "local", true)
+			seedLegacyAutoHQOperation(t, store, true)
 			fixture := newHireFixture(t, store)
 			test.configure(store, fixture.hq, fixture.briefs)
 
@@ -707,7 +708,7 @@ func TestHireCoordinator_PreAmendmentPartialFailuresReplayToOneActiveRelationshi
 func TestHireCoordinator_PreAmendmentRestartUsesDurableOriginalRhythm(t *testing.T) {
 	ctx := context.Background()
 	store, _ := newTestStore(t)
-	seedLegacyAutoHQOperation(t, store, "local", true)
+	seedLegacyAutoHQOperation(t, store, true)
 	fixture := newHireFixture(t, store)
 	fixture.briefs.updateErr = errors.New("injected config failure")
 

@@ -66,6 +66,16 @@
     lastTrigger: null,
     coachmarkEl: null,
     coachmarkRoute: '',
+    // The decorative animated pointer that bobs at the marked control, plus the
+    // listeners that keep it parked there. Presentation only: it never receives
+    // focus, is never announced, and never carries meaning the copy lacks.
+    pointerEl: null,
+    pointerTrack: null,
+    // Timer for a walkthrough step waiting on a control that is still mounting.
+    coachmarkWait: null,
+    // The key the current mark came from, so the mark can re-anchor onto a
+    // fresh node when the page re-renders the control under it.
+    coachmarkKey: '',
     actions: [],
     // The active deterministic walkthrough step, if any: { quest, choices }.
     // Presentation only — the server owns whether the quest is done or deferred.
@@ -74,6 +84,9 @@
     // preview and is never delegated from Ori's draft/transcript.
     helpOnly: false,
     assistantAvailable: false,
+    // A hired assistant with no Personal HQ yet: distinct from "never hired" so
+    // the handoff decline can route to the guided quest instead of Hire.
+    needsHQ: false,
     assistantName: 'your personal assistant',
     // Survives close/reopen: closing the panel is presentation only and must
     // never cancel submitted work or lose what the user had typed (FR13/FR45).
@@ -161,6 +174,12 @@
 
     if (type === 'handoff') {
       var handoffText = String(action.handoff_text || action.handoffText || '').slice(0, 400);
+      // A hired assistant with no home base yet is not "hire" — it already has
+      // an identity. Route to the guided quest instead of offering a second
+      // hire or silently submitting the work nowhere.
+      if (state.helpOnly && !state.assistantAvailable && state.needsHQ) {
+        return { type: 'navigate', label: 'Build Personal HQ', href: '/?quest=build-hq' };
+      }
       return {
         type: type,
         label: state.helpOnly
@@ -786,11 +805,98 @@
 
   /* ---- coachmarks ---------------------------------------------------------------- */
 
+  // The pointer is decoration layered over the page, so it has to be torn down
+  // as deliberately as it is built: an orphaned pointer would sit over the UI
+  // aiming at a control that is no longer there.
+  function clearPointer() {
+    if (state.pointerTrack) {
+      state.pointerTrack.stopped = true;
+      if (typeof window.cancelAnimationFrame === 'function' && state.pointerTrack.frame) {
+        window.cancelAnimationFrame(state.pointerTrack.frame);
+      }
+      state.pointerTrack = null;
+    }
+    if (state.pointerEl) {
+      if (state.pointerEl.parentNode) {
+        state.pointerEl.parentNode.removeChild(state.pointerEl);
+      }
+      state.pointerEl = null;
+    }
+  }
+
+  // Parks the pointer against the target, in page coordinates, so it survives
+  // scrolling without being re-created.
+  //
+  // Just inside the control's lower edge, near its leading edge rather than its
+  // middle: a hand overlapping the thing it points at reads as "this one" the
+  // way a hand floating in the margin does not, and staying inside the control's
+  // own box keeps it off a modal's backdrop when the target is a dialog button.
+  function positionPointer(el) {
+    if (!state.pointerEl || !el || typeof el.getBoundingClientRect !== 'function') return;
+    var rect = el.getBoundingClientRect();
+    var scrollX = window.pageXOffset || 0;
+    var scrollY = window.pageYOffset || 0;
+    var inset = Math.min(rect.width / 2, 52);
+    var x = rect.left + scrollX + inset;
+    var y = rect.bottom + scrollY - 12;
+    state.pointerEl.style.left = Math.max(0, x) + 'px';
+    state.pointerEl.style.top = Math.max(0, y) + 'px';
+  }
+
+  // Keeps the pointer parked on its target for as long as it is up.
+  //
+  // A frame loop rather than scroll/resize listeners: the Map animates its
+  // camera into place after mount and pans/zooms under its own transform, none
+  // of which fires a scroll or resize event. A pointer positioned once would be
+  // left behind at wherever the tile happened to be mid-animation.
+  function trackPointer() {
+    if (typeof window.requestAnimationFrame !== 'function') return;
+    var track = { stopped: false, frame: 0 };
+    state.pointerTrack = track;
+    var step = function () {
+      if (track.stopped || state.pointerTrack !== track) return;
+      if (state.coachmarkEl) {
+        // The Map re-mounts its tiles when HQ status arrives, which swaps the
+        // marked node for an identical new one. Left alone, the mark would hold
+        // a detached node whose rect is all zeros and the pointer would sit in
+        // the page corner aiming at nothing.
+        if (!reanchorCoachmark()) return;
+        positionPointer(state.coachmarkEl);
+      }
+      track.frame = window.requestAnimationFrame(step);
+    };
+    track.frame = window.requestAnimationFrame(step);
+  }
+
+  // A game-style "click here" hand at the marked control. It is aria-hidden and
+  // never focusable: the panel copy already names the control in words, so the
+  // pointer adds emphasis, never the only signal (FR-118).
+  function applyPointer(el) {
+    clearPointer();
+    if (!el || !document.body) return;
+    var pointer = document.createElement('div');
+    pointer.className = 'ori-pointer';
+    pointer.setAttribute('aria-hidden', 'true');
+    pointer.innerHTML =
+      '<span class="ori-pointer__hand">' +
+      '<svg viewBox="0 0 24 24" width="26" height="26" focusable="false" aria-hidden="true">' +
+      '<path fill="currentColor" d="M9 11.5V5.2a1.7 1.7 0 0 1 3.4 0v5.1h.8V7.1a1.6 1.6 0 0 1 3.2 0v3.2h.8V8.6a1.5 1.5 0 0 1 3 0v6.6a5.3 5.3 0 0 1-5.3 5.3h-2.2a5 5 0 0 1-3.8-1.8l-3.3-4a1.5 1.5 0 0 1 2.1-2.1z"/>' +
+      '</svg>' +
+      '</span>';
+    document.body.appendChild(pointer);
+    state.pointerEl = pointer;
+    positionPointer(el);
+    trackPointer();
+  }
+
   function clearCoachmark() {
+    cancelCoachmarkWait();
+    clearPointer();
     if (state.coachmarkEl) {
       state.coachmarkEl.classList.remove('is-ori-coachmark');
       state.coachmarkEl = null;
       state.coachmarkRoute = '';
+      state.coachmarkKey = '';
     }
   }
 
@@ -807,39 +913,120 @@
     }
   }
 
-  // Mark and focus. Never click, never submit, never change a value (FR-42).
-  function applyCoachmark(key) {
-    clearCoachmark();
-    var registry = window.OriGuideCoachmarks;
-    var el = registry && registry.resolve(key, currentRoute(), document);
+  function coachmarkMissNote() {
+    if (!state.els) return;
+    state.els.reply.insertAdjacentHTML(
+      'beforeend',
+      '<p class="ori-guide__answer ori-guide__answer--note">' +
+        'I cannot point at that control from this view. Use the destination above instead.' +
+        '</p>'
+    );
+  }
 
-    if (!el) {
-      // A stale or absent target degrades to an explanation rather than
-      // silently doing nothing (FR-43).
-      if (state.els) {
-        state.els.reply.insertAdjacentHTML(
-          'beforeend',
-          '<p class="ori-guide__answer ori-guide__answer--note">' +
-            'I cannot point at that control from this view. Use the destination above instead.' +
-            '</p>'
-        );
-      }
-      emit('coachmark', { key: key, resolved: false });
+  function cancelCoachmarkWait() {
+    if (state.coachmarkWait) {
+      if (typeof window.clearTimeout === 'function') window.clearTimeout(state.coachmarkWait);
+      state.coachmarkWait = null;
+    }
+  }
+
+  // Keeps the mark on the live node when the page re-renders the control under
+  // it. Returns false when the control is genuinely gone, in which case the
+  // mark (and its pointer) are dropped rather than left pointing at a ghost.
+  function reanchorCoachmark() {
+    var el = state.coachmarkEl;
+    if (!el) return false;
+    if (typeof document.contains !== 'function' || document.contains(el)) return true;
+
+    var registry = window.OriGuideCoachmarks;
+    var fresh =
+      state.coachmarkKey &&
+      registry &&
+      registry.resolve(state.coachmarkKey, currentRoute(), document);
+    if (!fresh || fresh === el) {
+      clearCoachmark();
       return false;
     }
+    el.classList.remove('is-ori-coachmark');
+    fresh.classList.add('is-ori-coachmark');
+    state.coachmarkEl = fresh;
+    return true;
+  }
 
+  function markCoachmark(key, el) {
+    state.coachmarkKey = key;
     el.classList.add('is-ori-coachmark');
     state.coachmarkEl = el;
     // The route the mark belongs to. If the page's route changes underneath it,
     // the mark is stale and gets cleared rather than left pointing at whatever
     // now occupies that selector (FR-43).
     state.coachmarkRoute = currentRoute();
+    applyPointer(el);
     emit('coachmark', { key: key, resolved: true });
     if (typeof el.focus === 'function') el.focus({ preventScroll: false });
     if (typeof el.scrollIntoView === 'function') {
       el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
-    return true;
+  }
+
+  // How long a walkthrough step will wait for a control it knows is about to
+  // mount. Bounded: an absent control still degrades to words, just not before
+  // the UI it names has had a chance to render.
+  var COACHMARK_WAIT_MS = 120;
+  var COACHMARK_WAIT_TRIES = 8;
+
+  // Mark and focus. Never click, never submit, never change a value (FR-42).
+  //
+  // opts.awaitTarget: retry briefly for a control that is not in the document
+  // yet. Walkthrough steps set this because the step that names a control is
+  // presented in the same tick as the dialog that mounts it — resolving once,
+  // immediately, would degrade to "I cannot point at that" for a control that
+  // appears a frame later. Guide answers do not set it: there, an absent
+  // control really is absent, and the honest answer is the immediate one.
+  function applyCoachmark(key, opts) {
+    clearCoachmark();
+    var registry = window.OriGuideCoachmarks;
+    var el = registry && registry.resolve(key, currentRoute(), document);
+
+    if (el) {
+      markCoachmark(key, el);
+      return true;
+    }
+
+    var canWait = opts && opts.awaitTarget && typeof window.setTimeout === 'function';
+    if (!canWait) {
+      // A stale or absent target degrades to an explanation rather than
+      // silently doing nothing (FR-43).
+      coachmarkMissNote();
+      emit('coachmark', { key: key, resolved: false });
+      return false;
+    }
+
+    // The route this wait belongs to. Resolving onto a different page would
+    // mark whatever now happens to match the selector.
+    var waitRoute = currentRoute();
+    var tries = 0;
+    var attempt = function () {
+      state.coachmarkWait = null;
+      if (currentRoute() !== waitRoute) {
+        emit('coachmark', { key: key, resolved: false });
+        return;
+      }
+      var found = registry && registry.resolve(key, currentRoute(), document);
+      if (found) {
+        markCoachmark(key, found);
+        return;
+      }
+      tries += 1;
+      if (tries >= COACHMARK_WAIT_TRIES) {
+        coachmarkMissNote();
+        emit('coachmark', { key: key, resolved: false });
+        return;
+      }
+      state.coachmarkWait = window.setTimeout(attempt, COACHMARK_WAIT_MS);
+    };
+    state.coachmarkWait = window.setTimeout(attempt, COACHMARK_WAIT_MS);
+    return false;
   }
 
   /* ---- work handoff ---------------------------------------------------------------- */
@@ -944,7 +1131,7 @@
 
   /* ---- open / close ------------------------------------------------------------------ */
 
-  function open(trigger) {
+  function open(trigger, options) {
     if (state.open) return;
     if (
       window.PersonalAssistantPanel &&
@@ -967,8 +1154,10 @@
 
     // Only greet on a genuinely fresh panel. Re-greeting would wipe a reply the
     // user reopened specifically to read, and would fire a request for a
-    // question nobody asked.
-    if (!state.activity.length && !state.pending) {
+    // question nobody asked. A caller about to present its own fixed content
+    // (the guided HQ quest) opts out via skipGreeting — the async greeting
+    // fetch would otherwise land after and silently overwrite that content.
+    if (!state.activity.length && !state.pending && !(options && options.skipGreeting)) {
       // Silent: this is the panel greeting itself, not a question the user asked.
       ask('', { silent: true });
     }
@@ -1014,6 +1203,7 @@
     var opts = options || {};
     state.helpOnly = true;
     state.assistantAvailable = opts.available === true;
+    state.needsHQ = opts.needsHQ === true;
     state.assistantName = String(opts.assistantName || 'your personal assistant').trim();
     var els = state.els;
     if (!els) return;
@@ -1105,7 +1295,9 @@
 
     var coachmarkResolved = false;
     if (step.coachmark) {
-      coachmarkResolved = applyCoachmark(String(step.coachmark));
+      // awaitTarget: a step is presented in the same tick as the dialog whose
+      // control it names, so the control may be one frame away from existing.
+      coachmarkResolved = applyCoachmark(String(step.coachmark), { awaitTarget: true });
     } else {
       clearCoachmark();
     }

@@ -48,7 +48,7 @@ func newHQFixture(t *testing.T, store Store) *hqFixture {
 		creator:     &fakeAssistantCreator{},
 		hq:          &fakeHireHQ{},
 		briefs:      &fakeHireBriefs{getErr: dailybrief.ErrConfigNotFound},
-		profiles:    ownedProfileReader("Atlas", "assistant-a"),
+		profiles:    ownedProfileReader(),
 		assistantID: seeded.AssistantID,
 		version:     seeded.StateVersion,
 	}
@@ -520,7 +520,7 @@ func TestHQSetup_RefusesRelationshipsThatCannotBuildHQ(t *testing.T) {
 			coordinator := NewHQSetupCoordinator(
 				store, creator, &fakeHireHQ{},
 				&fakeHireBriefs{getErr: dailybrief.ErrConfigNotFound},
-				ownedProfileReader("Atlas", "assistant-a"))
+				ownedProfileReader())
 
 			if _, err := coordinator.Setup(ctx, "local", validHQSetupRequest()); !errors.Is(err, ErrConflict) {
 				t.Fatalf("%s error = %v; want conflict", status, err)
@@ -539,7 +539,7 @@ func TestHQSetup_RefusesWhenNoRelationshipExists(t *testing.T) {
 	coordinator := NewHQSetupCoordinator(
 		store, creator, &fakeHireHQ{},
 		&fakeHireBriefs{getErr: dailybrief.ErrConfigNotFound},
-		ownedProfileReader("Atlas", "assistant-a"))
+		ownedProfileReader())
 
 	if _, err := coordinator.Setup(ctx, "local", validHQSetupRequest()); !errors.Is(err, ErrConflict) {
 		t.Fatalf("error = %v; want conflict", err)

@@ -227,6 +227,24 @@ test('OnboardingManager opens the first quest for an active incomplete relations
   }
 });
 
+test('?quest=plan-first-day never opens while a hired assistant has no HQ', () => {
+  const priorWindow = globalThis.window;
+  globalThis.window = { location: { search: '?quest=plan-first-day' } };
+  try {
+    const manager = new OnboardingManager();
+    for (const state of ['needs_hq', 'provisioning_hq', 'needs_hire', 'hiring', 'repair_needed']) {
+      manager.personalAssistantState = { state, first_assignment_status: 'not_started' };
+      assert.equal(
+        manager.shouldOpenFirstAssignmentQuest(),
+        false,
+        `${state} incorrectly opened the first-day quest`
+      );
+    }
+  } finally {
+    globalThis.window = priorWindow;
+  }
+});
+
 // stubHireDom gives the OnboardingManager just enough DOM to run the hire and
 // onboarding-completion paths without a browser.
 function stubHireDom() {

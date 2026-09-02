@@ -814,13 +814,12 @@ export function followUpView(f) {
     } catch (_) {
       refreshFailed = true;
     }
-    // The shared cockpit workspace tree, progression, and any PAF-aware surface
-    // refresh through the events they already listen to.
+    // The shared cockpit workspace tree and progression refresh through the
+    // real event names those modules actually listen for.
     for (const event of [
       'ori:personal-hq-changed',
       'ori:workspaces-changed',
-      'ori:personal-assistant-changed',
-      'ori:progression-changed'
+      'ori:progression-refresh'
     ]) {
       try {
         window.dispatchEvent(new CustomEvent(event, { detail: { source: 'personal_hq_setup' } }));
@@ -831,6 +830,18 @@ export function followUpView(f) {
     try {
       if (window.OriHomeCockpit && typeof window.OriHomeCockpit.refresh === 'function') {
         await window.OriHomeCockpit.refresh();
+      }
+    } catch (_) {
+      refreshFailed = true;
+    }
+    // The launcher/Today identity surfaces re-fetch through their own seam and
+    // fan out via the personal-assistant:status event they already emit.
+    try {
+      if (
+        window.PersonalAssistantPanel &&
+        typeof window.PersonalAssistantPanel.refresh === 'function'
+      ) {
+        await window.PersonalAssistantPanel.refresh();
       }
     } catch (_) {
       refreshFailed = true;

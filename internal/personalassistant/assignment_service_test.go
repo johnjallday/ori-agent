@@ -119,3 +119,36 @@ func TestAssignmentService_RequiresActiveCurrentRelationshipBeforeValidationWrit
 		t.Fatalf("paused relationship wrote a preview: %v", err)
 	}
 }
+
+// TestAssignmentService_RejectsPreHQStateWithoutCreatingAnything pins that a
+// hired assistant with no Personal HQ cannot preview or apply a first
+// assignment — no preview, Ticket, follow-up, or brief may be created.
+func TestAssignmentService_RejectsPreHQStateWithoutCreatingAnything(t *testing.T) {
+	for _, status := range []RelationshipStatus{StatusAwaitingHQ, StatusProvisioningHQ} {
+		t.Run(string(status), func(t *testing.T) {
+			ctx := context.Background()
+			store, _ := newTestStore(t)
+			state := awaitingHQTestState("local", "assistant-1")
+			state.Status = status
+			if status == StatusProvisioningHQ {
+				state.LastHQRequestID = "hq-req-1"
+			}
+			created, err := store.CreateState(ctx, state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			service := NewAssignmentService(store)
+			if _, err := service.Preview(ctx, "local", created.StateVersion, previewInput("No write")); !errors.Is(err, ErrConflict) {
+				t.Fatalf("%s Preview error = %v; want conflict", status, err)
+			}
+			if _, err := store.GetLatestAssignment(ctx, "local", "assistant-1"); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("%s relationship wrote a preview: %v", status, err)
+			}
+			if _, err := service.Apply(ctx, "local", AssignmentApplyRequest{
+				PreviewID: "nonexistent", PreviewVersion: 1, IfVersion: created.StateVersion,
+			}); err == nil {
+				t.Fatalf("%s Apply succeeded without a valid preview", status)
+			}
+		})
+	}
+}
