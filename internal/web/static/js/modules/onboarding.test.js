@@ -394,7 +394,10 @@ test('detection failure, an empty scan, and no match all resolve to no offer', a
   const priorFetch = globalThis.fetch;
   const cases = [
     { name: 'network error', impl: async () => Promise.reject(new Error('offline')) },
-    { name: 'server error', impl: async () => ({ ok: false, status: 500, json: async () => ({}) }) },
+    {
+      name: 'server error',
+      impl: async () => ({ ok: false, status: 500, json: async () => ({}) })
+    },
     {
       name: 'empty scan',
       impl: async () => ({ ok: true, json: async () => ({ success: true, apps: [] }) })
@@ -455,6 +458,44 @@ test('a slow scan never blocks the wizard and still renders when it lands', asyn
   } finally {
     globalThis.fetch = priorFetch;
     globalThis.document = priorDocument;
+  }
+});
+
+test('the first-assignment quest recovers the domain from the persisted slug', async () => {
+  const priorFetch = globalThis.fetch;
+  let catalogReads = 0;
+  globalThis.fetch = async url => {
+    if (!String(url).includes('/specialists')) throw new Error(`unexpected fetch ${url}`);
+    catalogReads += 1;
+    return { ok: true, json: async () => ({ specialists: [musicEntry] }) };
+  };
+  try {
+    // The quest is normally opened from Home, in a session where no detection
+    // ran at all. The wording has to come from the slug on the relationship.
+    const manager = new OnboardingManager();
+    manager.personalAssistantState = { state: 'active', specialist_slug: 'music_production' };
+    const resolved = await manager.resolvePersistedSpecialist();
+    assert.equal(resolved.slug, 'music_production');
+    assert.equal(catalogReads, 1);
+
+    // The catalog is read once, then reused.
+    await manager.resolvePersistedSpecialist();
+    assert.equal(catalogReads, 1);
+
+    // A relationship with no specialist stays on the generic wording, and does
+    // not even read the catalog.
+    const generic = new OnboardingManager();
+    generic.personalAssistantState = { state: 'active' };
+    assert.equal(await generic.resolvePersistedSpecialist(), null);
+    assert.equal(catalogReads, 1);
+
+    // A persisted slug the mapping no longer knows degrades to generic rather
+    // than breaking the quest.
+    const stale = new OnboardingManager();
+    stale.personalAssistantState = { state: 'active', specialist_slug: 'retired_domain' };
+    assert.equal(await stale.resolvePersistedSpecialist(), null);
+  } finally {
+    globalThis.fetch = priorFetch;
   }
 });
 

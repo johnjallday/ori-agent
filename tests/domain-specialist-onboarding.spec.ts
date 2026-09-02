@@ -7,6 +7,11 @@ import { test, expect, Page } from '@playwright/test';
 // The generic case stubs the mapping empty rather than relying on the host
 // machine having no creative app installed.
 
+// One server, one relationship. `POST /api/onboarding/reset` reopens the
+// wizard but deliberately does not delete the durable hire, so the case that
+// actually completes a hire runs last and the file runs in order.
+test.describe.configure({ mode: 'serial' });
+
 const SHOTS = 'test-results/domain-specialist';
 
 const musicOffer = {
@@ -245,4 +250,79 @@ test('a detection scan that never answers leaves the wizard fully usable', async
   await page.locator('#pafHireNextBtn').click();
   await expect(page.locator('#pafHireStepLabel')).toContainText('Hire step 3 of 3');
   await page.screenshot({ path: `${SHOTS}/06-slow-scan-generic.png`, fullPage: true });
+});
+
+// Last: this is the only case that completes a durable hire, and the hire is
+// not undone by an onboarding reset.
+test('the first assignment is re-worded for the domain without changing its item types', async ({
+  page
+}) => {
+  await page.route('**/api/onboarding/detect', route =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, apps: [], specialist: musicOffer })
+    })
+  );
+
+  await openHireFocusStep(page);
+  await page.locator('#pafSpecialistAcceptBtn').click();
+  await page.locator('#pafHireNextBtn').click();
+  await page.locator('#pafHireConfirm').check();
+  await page.locator('#pafHireBtn').click();
+
+  // Hiring lands on Home; the quest is opened from there, in a fresh page
+  // load where nothing was detected — the wording comes from the persisted
+  // slug via the mapping.
+  await expect(page.locator('#onboardingModal')).toBeHidden();
+  await page.goto('/?quest=plan-first-day');
+  await expect(page.locator('#onboardingPersonalAssistantAssignment')).toBeVisible();
+
+  await expect(page.locator('#pafAssignmentStepLabel')).toContainText('Songs in progress');
+  await expect(page.locator('[data-paf-assignment-legend="0"]')).toHaveText(
+    'What are you working on right now?'
+  );
+  await expect(page.locator('[data-paf-add-row="priority"]')).toHaveText('Add a song or project');
+  const priorityRow = page.locator('[data-paf-assignment-row="priority"]').first();
+  await expect(priorityRow.locator('label').first()).toContainText('Song or project in progress');
+  await expect(priorityRow.locator('[data-field="title"]')).toHaveAttribute(
+    'placeholder',
+    'Which track are you on?'
+  );
+  await page.screenshot({ path: `${SHOTS}/07-producer-assignment-step-1.png`, fullPage: true });
+
+  // The durable item types behind the re-worded steps are untouched.
+  for (const type of ['priority', 'i_owe', 'waiting_on', 'fixed_commitment']) {
+    await expect(page.locator(`[data-paf-assignment-row="${type}"]`)).toHaveCount(1);
+  }
+
+  await priorityRow.locator('[data-field="title"]').fill('Finish the bridge on Ivory');
+  await page.locator('#pafPreviewAssignmentBtn').click();
+  await expect(page.locator('[data-paf-assignment-legend="1"]')).toHaveText(
+    'What do you owe a collaborator—or what are you waiting on?'
+  );
+  await expect(page.locator('[data-paf-add-row="waiting_on"]')).toHaveText(
+    'Add something I’m waiting on'
+  );
+  await page.screenshot({ path: `${SHOTS}/08-producer-assignment-step-2.png`, fullPage: true });
+
+  await page.locator('#pafPreviewAssignmentBtn').click();
+  await expect(page.locator('#pafAssignmentStepLabel')).toContainText('Release and session dates');
+  await expect(page.locator('[data-paf-assignment-legend="2"]')).toHaveText(
+    'Dates to keep visible'
+  );
+  await expect(page.locator('[data-paf-add-row="fixed_commitment"]')).toHaveText(
+    'Add a release or session date'
+  );
+  await page.screenshot({ path: `${SHOTS}/09-producer-assignment-step-3.png`, fullPage: true });
+
+  // The payload the server receives carries the unchanged types.
+  const preview = page.waitForRequest(
+    request =>
+      request.url().includes('/api/personal-assistant/first-assignment/preview') &&
+      request.method() === 'POST'
+  );
+  await page.locator('#pafPreviewAssignmentBtn').click();
+  const body = JSON.parse((await preview).postData() || '{}');
+  expect(body.rows.map((row: { type: string }) => row.type)).toEqual(['priority']);
 });

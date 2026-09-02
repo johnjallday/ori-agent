@@ -194,6 +194,7 @@ type hireResponse struct {
 	GlobalAgentProfileName string                                  `json:"global_agent_profile_name"`
 	StateVersion           int64                                   `json:"state_version"`
 	FirstAssignmentStatus  personalassistant.FirstAssignmentStatus `json:"first_assignment_status"`
+	SpecialistSlug         string                                  `json:"specialist_slug,omitempty"`
 	HiredAt                *time.Time                              `json:"hired_at,omitempty"`
 	DailyBrief             *dailybrief.Config                      `json:"daily_brief,omitempty"`
 	Resumed                bool                                    `json:"resumed"`
@@ -616,6 +617,7 @@ func responseFromResult(result *personalassistant.HireResult) *hireResponse {
 		GlobalAgentProfileName: state.GlobalAgentProfileName,
 		StateVersion:           state.StateVersion,
 		FirstAssignmentStatus:  state.FirstAssignmentStatus,
+		SpecialistSlug:         state.SpecialistSlug,
 		HiredAt:                state.HiredAt, DailyBrief: result.BriefConfig, Resumed: result.Resumed,
 	}
 }

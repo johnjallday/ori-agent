@@ -1265,6 +1265,40 @@ export class OnboardingManager {
   applySpecialistAssignmentCopy(entry) {
     this.assignmentLabels = assignmentLabelsFor(entry);
     this.assignmentSteps = assignmentStepsFor(entry);
+    this.renderAssignmentCopy();
+  }
+
+  // renderAssignmentCopy re-words the three step legends and the add-row
+  // buttons in place. The buttons keep their data-paf-add-row type, which is
+  // what the payload is built from, so only what a user reads changes.
+  renderAssignmentCopy() {
+    if (typeof document === 'undefined') return;
+    (this.assignmentSteps || GENERIC_ASSIGNMENT_STEPS).forEach(step => {
+      const legend = document.querySelector(`[data-paf-assignment-legend="${step.index}"]`);
+      if (legend) legend.textContent = step.legend;
+    });
+    document.querySelectorAll('[data-paf-add-row]').forEach(button => {
+      const copy = this.assignmentLabelFor(button.dataset.pafAddRow);
+      if (copy?.add_label) button.textContent = copy.add_label;
+    });
+  }
+
+  // resolvePersistedSpecialist recovers the accepted domain on a page load that
+  // did not run the hire — the first-assignment quest is normally opened from
+  // Home, in a session where no detection ever ran. The slug is read from the
+  // relationship; the copy comes from the mapping.
+  async resolvePersistedSpecialist() {
+    // An offer accepted in this same session is authoritative before the
+    // relationship read has caught up.
+    const active = this.activeSpecialist();
+    if (active) return active;
+    const slug = String(this.personalAssistantState?.specialist_slug || '').trim();
+    if (!slug) return null;
+    if (this.specialistOffer?.slug === slug) return this.specialistOffer;
+    if (!this.specialistCatalog.length) {
+      this.specialistCatalog = await this.loadSpecialistCatalog();
+    }
+    return this.specialistCatalog.find(entry => entry.slug === slug) || null;
   }
 
   assignmentLabelFor(type) {
@@ -1579,6 +1613,9 @@ export class OnboardingManager {
     document.getElementById('pafAssignmentPreview')?.classList.add('d-none');
     document.getElementById('pafAssignmentResult')?.classList.add('d-none');
     document.getElementById('pafAssignmentForm')?.classList.remove('d-none');
+    // Resolve the domain wording before the rows are seeded, so a producer
+    // never sees the generic labels flash first.
+    this.applySpecialistAssignmentCopy(await this.resolvePersistedSpecialist());
     this.seedAssignmentRows();
     this.showAssignmentStep(this.assignmentStep, { focus: false });
     try {
@@ -1625,10 +1662,10 @@ export class OnboardingManager {
         Number(panel.dataset.pafAssignmentStep) !== this.assignmentStep
       );
     });
-    const labels = ['Today’s priorities', 'Owed and waiting', 'Fixed commitments'];
+    const steps = this.assignmentSteps || GENERIC_ASSIGNMENT_STEPS;
     const label = document.getElementById('pafAssignmentStepLabel');
     if (label) {
-      label.textContent = `Quest step ${this.assignmentStep + 1} of 4 · ${labels[this.assignmentStep]}`;
+      label.textContent = `Quest step ${this.assignmentStep + 1} of 4 · ${steps[this.assignmentStep]?.title || ''}`;
     }
     const bar = document.getElementById('pafAssignmentStepBar');
     const track = bar?.parentElement;
@@ -1734,21 +1771,14 @@ export class OnboardingManager {
     row.className = 'paf-assignment-row';
     row.dataset.pafAssignmentRow = type;
 
+    const copy = this.assignmentLabelFor(type);
     const titleWrap = document.createElement('label');
     titleWrap.className = 'form-label mb-0';
-    titleWrap.textContent =
-      type === 'priority'
-        ? 'Priority'
-        : type === 'i_owe'
-          ? 'I owe'
-          : type === 'waiting_on'
-            ? 'Waiting on'
-            : 'Commitment';
+    titleWrap.textContent = copy?.label || '';
     const title = document.createElement('input');
     title.className = 'form-control';
     title.maxLength = 200;
-    title.placeholder =
-      type === 'fixed_commitment' ? 'Commitment or time to keep visible' : 'What is it?';
+    title.placeholder = copy?.placeholder || '';
     title.value = values.title || '';
     title.dataset.field = 'title';
     titleWrap.appendChild(title);
