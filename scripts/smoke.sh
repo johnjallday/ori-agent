@@ -1384,11 +1384,16 @@ smoke_specialist() {
     echo "ok   nothing matched on this host — generic path"
   fi
 
-  # An unknown slug is rejected before anything is persisted. This is a
-  # validation probe: it never completes a hire.
-  echo "== unknown slug is refused =="
-  expect_status 400 POST "$BASE_URL/api/personal-assistant/hire" \
-    '{"request_id":"smoke-invalid-specialist","if_version":0,"display_name":"Smoke","mandate":"probe","focus_areas":["plan_my_day"],"timezone":"UTC","schedule_days":["mon"],"schedule_time":"08:00","specialist_slug":"not_a_domain"}'
+  # The offer's own write. A bad answer is rejected before anything is
+  # persisted, so these are validation probes: none of them records an answer.
+  echo "== bad answers are refused =="
+  expect_status 400 POST "$BASE_URL/api/personal-assistant/specialist" \
+    '{"decision":"accepted","slug":"not_a_domain"}'
+  expect_status 400 POST "$BASE_URL/api/personal-assistant/specialist" \
+    '{"decision":"accepted"}'
+  expect_status 400 POST "$BASE_URL/api/personal-assistant/specialist" \
+    '{"decision":"maybe"}'
+  expect_status 400 POST "$BASE_URL/api/personal-assistant/specialist" '{}'
   echo "PASS specialist"
 }
 
