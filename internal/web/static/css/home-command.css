@@ -226,6 +226,13 @@ body.home-command-page .home-command-bridge * {
   font-size: 12px;
 }
 
+/* Who did the work. Distinct from a row's detail line so "Reaper Producer"
+   reads as a name rather than as more description. */
+.personal-assistant-today__attribution {
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
 .personal-assistant-today #homeDailyBrief {
   margin-top: 14px;
 }

@@ -1,4 +1,6 @@
-import { test, expect, Page } from '@playwright/test';
+import { test, expect, APIRequestContext, Page } from '@playwright/test';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 // The domain-specialist offer inside the canonical hire wizard.
 //
@@ -362,4 +364,154 @@ test('the post-hire surface leads with the domain and suggests its workspace', a
   await expect(cards.first()).toHaveAttribute('data-role', 'capability-suggestion');
   await expect(cards.nth(1).locator('h4')).toContainText('Projects and workspaces');
   await page.screenshot({ path: `${SHOTS}/10-post-hire-capabilities.png`, fullPage: true });
+});
+
+// --- Specialist presence ------------------------------------------------
+
+// The blueprint the REAPER plugin publishes, reduced to what presence needs:
+// the workspace name, the template ID the mapping matches on, and the seeded
+// specialist. The real blueprint's setup wizard and starter tasks are
+// deliberately left out — this feature changes neither, and an auto-starting
+// setup task would cover the surface being captured.
+const REAPER_SONG_MANIFEST = {
+  name: 'Reaper Song',
+  description: 'Produce one song end to end.',
+  tags: ['music'],
+  agents: [
+    {
+      name: 'Reaper Producer',
+      role: 'orchestrator',
+      system_prompt: 'You own studio work for this song.'
+    }
+  ]
+};
+
+let installedTemplateDir = '';
+
+async function installReaperSongBlueprint(request: APIRequestContext) {
+  const res = await request.get('/api/project-templates');
+  expect(res.ok(), await res.text()).toBeTruthy();
+  const body = await res.json();
+  const root = (body.templates_root || body.data?.templates_root) as string;
+  expect(root, 'server did not report its templates root').toBeTruthy();
+  installedTemplateDir = join(root, 'reaper-song');
+  mkdirSync(installedTemplateDir, { recursive: true });
+  writeFileSync(
+    join(installedTemplateDir, 'template.json'),
+    JSON.stringify(REAPER_SONG_MANIFEST, null, 2)
+  );
+}
+
+test.afterAll(() => {
+  if (installedTemplateDir) rmSync(installedTemplateDir, { recursive: true, force: true });
+});
+
+test('the seeded specialist renders with the one shared workspace portrait', async ({
+  page,
+  request
+}) => {
+  await installReaperSongBlueprint(request);
+  const created = await request.post('/api/workspaces', {
+    data: {
+      name: `Ivory ${Date.now()}`,
+      description: '',
+      template_id: 'reaper-song',
+      create_template_agents: true
+    }
+  });
+  expect(created.ok(), await created.text()).toBeTruthy();
+  const body = await created.json();
+  const slug = (body.folder?.folder_slug ||
+    body.workspace?.folder_slug ||
+    body.folder?.slug) as string;
+  expect(slug, `no folder slug in ${JSON.stringify(body)}`).toBeTruthy();
+
+  await page.goto(`/workspaces/${slug}`);
+  // The shared renderer's own element. FR 22 is about there being exactly one
+  // portrait system, so this asserts the specialist uses it — not that some
+  // portrait happens to be on screen.
+  const portrait = page.locator('.ws-map-av', { hasText: 'Reaper Producer' }).first();
+  await expect(portrait).toBeVisible();
+  // The workspace page fades in and re-mounts its agent list, so anything
+  // holding a node across that swap detaches. Settle first, then act.
+  await page.waitForTimeout(900);
+  await expect(portrait.locator('.ws-map-av-figure')).toHaveCount(1);
+  await expect(portrait.locator('.ws-map-av-label')).toHaveText('Reaper Producer');
+  await page.screenshot({ path: `${SHOTS}/11-specialist-portrait.png`, fullPage: true });
+  await portrait.screenshot({ path: `${SHOTS}/11b-specialist-portrait-closeup.png` });
+});
+
+test('Today names the specialist that did the studio work and links straight to it', async ({
+  page
+}) => {
+  // The projection itself is covered against real workspace records in
+  // internal/personalassistant/today_studio_test.go — a task only reaches
+  // "review" with a result by being executed, which needs a model the demo
+  // sandbox deliberately does not have. This drives the rendering.
+  await page.route('**/api/personal-assistant/today', route =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        today: {
+          state: 'active',
+          relationship_state: 'active',
+          display_name: 'Atlas',
+          hq_workspace_id: 'hq-1',
+          model: { available: true, status: 'available' },
+          brief: { health: { status: 'healthy_empty' }, items: [] },
+          decisions: { health: { status: 'healthy_empty' }, items: [] },
+          priorities: { health: { status: 'healthy_empty' }, items: [] },
+          follow_ups: { health: { status: 'healthy_empty' }, items: [] },
+          results: { health: { status: 'healthy_empty' }, items: [] },
+          studio: {
+            health: { status: 'available' },
+            domain: 'music projects',
+            specialist_name: 'Reaper Producer',
+            workspace_name: 'Ivory',
+            route: '/workspaces/ivory',
+            items: [
+              {
+                id: 'studio-1',
+                kind: 'studio_result',
+                title: 'Bounced a rough mix of Ivory',
+                attribution: 'Reaper Producer',
+                route: '/workspaces/ivory?ticket=studio-1'
+              },
+              {
+                id: 'studio-2',
+                kind: 'studio_result',
+                title: 'Tagged the session takes',
+                attribution: 'Reaper Producer',
+                route: '/workspaces/ivory?ticket=studio-2'
+              }
+            ]
+          },
+          links: { advanced: '/agents' },
+          generated_at: new Date().toISOString()
+        }
+      })
+    })
+  );
+
+  await page.goto('/');
+  const section = page.locator('#personalAssistantTodayStudioSection');
+  await expect(section).toBeVisible();
+  await expect(page.locator('#personalAssistantTodayStudioTitle')).toHaveText('From Ivory');
+
+  const rows = page.locator('#personalAssistantTodayStudio li');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.first()).toContainText('Bounced a rough mix of Ivory');
+  await expect(rows.first().locator('.personal-assistant-today__attribution')).toHaveText(
+    'Reaper Producer'
+  );
+
+  // The direct route to the specialist, offered plainly.
+  const note = page.locator('#personalAssistantTodayStudioNote');
+  await expect(note).toContainText('ask Reaper Producer directly');
+  await expect(note.locator('a')).toHaveAttribute('href', '/workspaces/ivory');
+  await expect(note.locator('a')).toHaveText('Open Ivory');
+  // And nothing claiming the assistant can hand it work.
+  await expect(section).not.toContainText(/delegate|assign|on your behalf|instead|workaround/i);
+  await page.screenshot({ path: `${SHOTS}/12-today-studio-attribution.png`, fullPage: true });
 });

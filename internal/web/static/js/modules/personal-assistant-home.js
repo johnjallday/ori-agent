@@ -29,8 +29,32 @@ export function todaySectionRows(section) {
     kind: String(item?.kind || 'item'),
     title: String(item?.title || '').trim(),
     detail: String(item?.detail || '').trim(),
+    attribution: String(item?.attribution || '').trim(),
     route: safeTodayRoute(item?.route) ? String(item.route) : ''
   }));
+}
+
+// studioSectionView decides whether the studio region appears at all and what
+// it says. It only ever describes watching and reporting: the assistant cannot
+// hand work to the specialist, and addressing that agent directly in its own
+// workspace is the first-class route, never a fallback.
+export function studioSectionView(studio) {
+  if (!studio) return { visible: false, heading: '', note: '', route: '' };
+  const specialist = String(studio.specialist_name || '').trim();
+  const domain = String(studio.domain || '').trim();
+  const workspace = String(studio.workspace_name || '').trim();
+  const route = safeTodayRoute(studio.route) ? String(studio.route) : '';
+  const who = specialist || 'your specialist';
+  return {
+    visible: true,
+    heading: workspace ? `From ${workspace}` : domain ? `From your ${domain}` : 'From your studio',
+    note: route
+      ? `${who} works in this workspace. Open it to ask ${who} directly:`
+      : `${who} works in its own workspace.`,
+    route,
+    linkLabel: workspace ? `Open ${workspace}` : 'Open the workspace',
+    section: { health: studio.health, items: studio.items }
+  };
 }
 
 export function safeTodayRoute(value) {
@@ -60,6 +84,10 @@ function elements() {
     priorities: document.getElementById('personalAssistantTodayPriorities'),
     followUps: document.getElementById('personalAssistantTodayFollowUps'),
     results: document.getElementById('personalAssistantTodayResults'),
+    studioSection: document.getElementById('personalAssistantTodayStudioSection'),
+    studioTitle: document.getElementById('personalAssistantTodayStudioTitle'),
+    studio: document.getElementById('personalAssistantTodayStudio'),
+    studioNote: document.getElementById('personalAssistantTodayStudioNote'),
     briefMount: document.getElementById('personalAssistantTodayBriefMount'),
     links: {
       personal_hq: document.getElementById('personalAssistantTodayHQ'),
@@ -89,8 +117,41 @@ function renderRows(list, section) {
       detail.textContent = row.detail;
       li.appendChild(detail);
     }
+    if (row.attribution) {
+      // Who did it, by name. Deliberately text: the shared portrait renderer
+      // (OriWorkspaceAgentPortrait) draws a 76x64 card with its own name label,
+      // which is right on the Map and the workspace page — where this agent
+      // already renders — and wrong in a list row. Shrinking it here would be
+      // a second portrait system, which is exactly what must not happen.
+      const by = document.createElement('span');
+      by.className = 'personal-assistant-today__attribution';
+      by.textContent = row.attribution;
+      li.appendChild(by);
+    }
     list.appendChild(li);
   });
+}
+
+function renderStudio(els, studio) {
+  if (!els.studioSection) return;
+  const view = studioSectionView(studio);
+  els.studioSection.hidden = !view.visible;
+  if (!view.visible) return;
+  if (els.studioTitle) els.studioTitle.textContent = view.heading;
+  renderRows(els.studio, view.section);
+  if (!els.studioNote) return;
+  els.studioNote.replaceChildren();
+  if (!view.route) {
+    els.studioNote.textContent = view.note;
+    return;
+  }
+  // The link is the direct route to the specialist, offered as a peer of
+  // everything else here — not as a workaround for something the assistant
+  // cannot do.
+  const link = document.createElement('a');
+  link.href = view.route;
+  link.textContent = view.linkLabel;
+  els.studioNote.append(view.note, ' ', link);
 }
 
 function setLink(link, route) {
@@ -148,6 +209,7 @@ function renderToday(today) {
   renderRows(els.priorities, today?.priorities);
   renderRows(els.followUps, today?.follow_ups);
   renderRows(els.results, today?.results);
+  renderStudio(els, today?.studio);
   Object.entries(els.links).forEach(([key, link]) => setLink(link, today?.links?.[key]));
   if (view.active || view.paused || view.partial) moveDailyBrief(els);
 }

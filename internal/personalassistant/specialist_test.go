@@ -56,6 +56,58 @@ func TestRelationshipWithoutASpecialistReadsAsGeneric(t *testing.T) {
 	}
 }
 
+// The specialist is a workspace agent, not a second personal-assistant
+// relationship. Recording one must not create a second row, a second
+// assistant identity, or a second relationship of any kind.
+func TestSpecialistDoesNotCreateASecondRelationship(t *testing.T) {
+	ctx := context.Background()
+	store, db := newTestStore(t)
+
+	first := activeTestState("user-one", "assistant-one")
+	first.SpecialistSlug = "music_production"
+	if _, err := store.CreateState(ctx, first); err != nil {
+		t.Fatalf("CreateState: %v", err)
+	}
+
+	// A second relationship for the same user is refused, specialist or not.
+	second := activeTestState("user-one", "assistant-two")
+	second.SpecialistSlug = ""
+	if _, err := store.CreateState(ctx, second); err == nil {
+		t.Fatal("expected a second relationship for the same user to be refused")
+	}
+
+	var rows int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM personal_assistant_state WHERE user_id = ?`, "user-one",
+	).Scan(&rows); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if rows != 1 {
+		t.Fatalf("personal_assistant_state rows for one user = %d, want 1", rows)
+	}
+
+	// user_id is still the primary key, and specialist_slug is an ordinary
+	// nullable-free additive column beside it.
+	var pkColumns, slugColumns int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM pragma_table_info('personal_assistant_state') WHERE pk > 0`,
+	).Scan(&pkColumns); err != nil {
+		t.Fatalf("read primary key: %v", err)
+	}
+	if pkColumns != 1 {
+		t.Fatalf("primary key columns = %d, want 1 (user_id)", pkColumns)
+	}
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM pragma_table_info('personal_assistant_state')
+		 WHERE name = 'specialist_slug' AND pk = 0 AND "notnull" = 1`,
+	).Scan(&slugColumns); err != nil {
+		t.Fatalf("read specialist column: %v", err)
+	}
+	if slugColumns != 1 {
+		t.Fatal("specialist_slug must be an additive NOT NULL non-key column")
+	}
+}
+
 func TestNormalizeSpecialistSlugRejectsUnknownValues(t *testing.T) {
 	if got, err := NormalizeSpecialistSlug(""); err != nil || got != "" {
 		t.Fatalf("empty slug = %q, %v; want the generic relationship", got, err)

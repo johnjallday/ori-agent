@@ -36,6 +36,16 @@
         <h2 id="personalAssistantTodayResultsTitle">Results to review</h2>
         <ul id="personalAssistantTodayResults"></ul>
       </section>
+      <!-- Present only when a domain specialist's workspace exists. Your
+           assistant reports what happened here and names who did it; it cannot
+           hand work to that agent, so nothing in this section may suggest it
+           can. Addressing the specialist directly is the first-class route and
+           the link below is exactly that, not a workaround. -->
+      <section id="personalAssistantTodayStudioSection" aria-labelledby="personalAssistantTodayStudioTitle" hidden>
+        <h2 id="personalAssistantTodayStudioTitle">From your studio</h2>
+        <ul id="personalAssistantTodayStudio"></ul>
+        <p id="personalAssistantTodayStudioNote" class="personal-assistant-today__meta"></p>
+      </section>
     </div>
   </section>
 

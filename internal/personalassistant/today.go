@@ -13,6 +13,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/followup"
+	"github.com/johnjallday/ori-agent/internal/specialist"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -40,15 +41,19 @@ type TodaySourceHealth struct {
 }
 
 type TodayItem struct {
-	ID       string               `json:"id"`
-	Kind     string               `json:"kind"`
-	Title    string               `json:"title"`
-	Detail   string               `json:"detail,omitempty"`
-	State    string               `json:"state,omitempty"`
-	Route    string               `json:"route"`
-	Ref      dailybrief.SourceRef `json:"ref"`
-	DueAt    *time.Time           `json:"due_at,omitempty"`
-	SourceAt time.Time            `json:"source_at,omitempty"`
+	ID     string `json:"id"`
+	Kind   string `json:"kind"`
+	Title  string `json:"title"`
+	Detail string `json:"detail,omitempty"`
+	State  string `json:"state,omitempty"`
+	// Attribution names the agent whose work this is, so the user can see who
+	// did it. It is the assignee recorded on the canonical record and is empty
+	// when no agent is recorded — never inferred.
+	Attribution string               `json:"attribution,omitempty"`
+	Route       string               `json:"route"`
+	Ref         dailybrief.SourceRef `json:"ref"`
+	DueAt       *time.Time           `json:"due_at,omitempty"`
+	SourceAt    time.Time            `json:"source_at,omitempty"`
 }
 
 type TodaySection struct {
@@ -64,6 +69,25 @@ type TodayBriefProjection struct {
 	Degraded       bool              `json:"degraded,omitempty"`
 	DataGaps       []string          `json:"data_gaps,omitempty"`
 	Items          []TodayItem       `json:"items"`
+}
+
+// TodayStudioProjection reports what the user's domain specialist has done.
+//
+// It is a read, and only a read. The assistant can see across workspaces via
+// its bounded overview, but it cannot act across them — `agentcomm.DelegateTask`
+// requires both agents in one workspace, and the specialist lives in its own.
+// So this section names who did the work and links to the workspace where the
+// user can address that agent directly. Nothing here implies the assistant can
+// hand work to it.
+type TodayStudioProjection struct {
+	Health TodaySourceHealth `json:"health"`
+	// Domain is the user's own words for this work, e.g. "music projects".
+	Domain string `json:"domain,omitempty"`
+	// SpecialistName is the named expert the domain's workspace template seeds.
+	SpecialistName string      `json:"specialist_name,omitempty"`
+	WorkspaceName  string      `json:"workspace_name,omitempty"`
+	Route          string      `json:"route,omitempty"`
+	Items          []TodayItem `json:"items"`
 }
 
 type TodayLinks struct {
@@ -89,9 +113,13 @@ type TodayProjection struct {
 	Priorities      TodaySection           `json:"priorities"`
 	FollowUps       TodaySection           `json:"follow_ups"`
 	Results         TodaySection           `json:"results"`
-	NextCheckIn     *time.Time             `json:"next_check_in,omitempty"`
-	Links           TodayLinks             `json:"links"`
-	GeneratedAt     time.Time              `json:"generated_at"`
+	// Studio is present only when the user accepted a domain specialist and a
+	// workspace built from its blueprint exists. Otherwise there is nothing
+	// honest to report and the section is absent rather than empty.
+	Studio      *TodayStudioProjection `json:"studio,omitempty"`
+	NextCheckIn *time.Time             `json:"next_check_in,omitempty"`
+	Links       TodayLinks             `json:"links"`
+	GeneratedAt time.Time              `json:"generated_at"`
 }
 
 type todayRelationshipReader interface {
@@ -191,9 +219,87 @@ func (s *TodayService) Get(ctx context.Context, userID string) (*TodayProjection
 	} else {
 		out.Decisions = decisionsFromFollowUps(followUpsByID, route, now)
 	}
+	out.Studio = s.loadStudio(userID, relationship.SpecialistSlug, relationship.HQWorkspaceID)
 	out.NextCheckIn = nextTodayCheckIn(relationship, now)
 	out.State = todayOverallState(relationship, out)
 	return out, nil
+}
+
+// loadStudio reports the domain specialist's finished work, attributed by name.
+// It returns nil when the user has no specialist, when the mapping no longer
+// knows the persisted slug, or when no workspace from the domain's blueprint
+// exists yet — in all three cases there is nothing to report, which is not the
+// same as a source being unavailable.
+func (s *TodayService) loadStudio(userID, slug, hqID string) *TodayStudioProjection {
+	entry, ok := specialist.Get(slug)
+	if !ok {
+		return nil
+	}
+	if s.workspaces == nil {
+		return nil
+	}
+	workspaces, err := s.workspaces.ListActive()
+	if err != nil {
+		return &TodayStudioProjection{
+			Health: todayUnavailable("read_failed"), Domain: entry.DisplayName,
+			SpecialistName: entry.SpecialistName, Items: []TodayItem{},
+		}
+	}
+	var studio *workspace.Workspace
+	for _, ws := range workspaces {
+		if ws == nil || strings.TrimSpace(ws.ID) == strings.TrimSpace(hqID) {
+			continue
+		}
+		if owner := strings.TrimSpace(ws.OwnerUserID); owner != "" && owner != strings.TrimSpace(userID) {
+			continue
+		}
+		if ws.TemplateProvenance == nil || !entry.MatchesTemplate(ws.TemplateProvenance.TemplateID) {
+			continue
+		}
+		studio = ws
+		break
+	}
+	if studio == nil {
+		return nil
+	}
+	out := &TodayStudioProjection{
+		Domain: entry.DisplayName, SpecialistName: entry.SpecialistName,
+		WorkspaceName: truncateRunes(studio.Name, 100), Items: []TodayItem{},
+	}
+	slugPath := strings.TrimSpace(studio.FolderSlug)
+	if !todaySafeSlug.MatchString(slugPath) {
+		out.Health = todayUnavailable("workspace_slug_invalid")
+		return out
+	}
+	route := "/workspaces/" + url.PathEscape(slugPath)
+	out.Route = route
+
+	results := make([]workspace.Task, 0)
+	for _, task := range studio.Tasks {
+		if task.CanonicalState() != workspace.TicketStateReview || strings.TrimSpace(task.Result) == "" {
+			continue
+		}
+		results = append(results, task)
+	}
+	sort.SliceStable(results, func(i, j int) bool {
+		left, right := taskSourceTime(results[i]), taskSourceTime(results[j])
+		if !left.Equal(right) {
+			return left.After(right)
+		}
+		return results[i].ID < results[j].ID
+	})
+	section := taskTodaySection(results, route, "studio_result", todayResultCap)
+	for i, task := range results {
+		if i >= len(section.Items) {
+			break
+		}
+		// Who did it comes from the record, never from the mapping: an
+		// unassigned task is reported without a name rather than credited to
+		// the specialist by assumption.
+		section.Items[i].Attribution = truncateRunes(strings.TrimSpace(task.To), 100)
+	}
+	out.Health, out.Items = section.Health, section.Items
+	return out
 }
 
 func (s *TodayService) loadHQ(workspaceID string) (*workspace.Workspace, string, error) {
@@ -499,6 +605,12 @@ func todayOverallState(relationship *Projection, out *TodayProjection) string {
 	}
 	health := []TodaySourceHealth{out.Brief.Health, out.Decisions.Health, out.Priorities.Health, out.FollowUps.Health, out.Results.Health}
 	unavailable, itemCount := false, len(out.Brief.Items)+len(out.Decisions.Items)+len(out.Priorities.Items)+len(out.FollowUps.Items)+len(out.Results.Items)
+	// Studio counts only when it is actually being reported. An absent studio
+	// is not a degraded source, so it must not turn Today "partial".
+	if out.Studio != nil {
+		health = append(health, out.Studio.Health)
+		itemCount += len(out.Studio.Items)
+	}
 	for _, source := range health {
 		if source.Status == TodaySectionUnavailable {
 			unavailable = true
