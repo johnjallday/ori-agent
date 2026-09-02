@@ -64,18 +64,19 @@ Usage:
   ./scripts/devops.sh approve <issue-number> [--yes]
   ./scripts/devops.sh unapprove <issue-number> [--yes]
 
-With no arguments in a terminal, the script opens a keyboard-driven Issue picker.
-In a pipe or redirected shell, it lists every open Issue and starts the line REPL.
-One-shot commands print their result and exit.
+With no arguments in a terminal, the script opens a keyboard-driven dashboard:
+checked-out feature implementations above the Issue picker. In a pipe or
+redirected shell, it lists every open Issue and starts the line REPL. One-shot
+commands print their result and exit.
 
 `ready` is what you can actually pick up now: feature proposals plus backlog
 Issues that are neither already covered by a proposal (`bundled`) nor already
 chosen (`approved`).
 
-`status` answers "what am I part-way through": every task list on disk with its
-done/total parent groups, and whether its branch has a worktree checked out. It
-is entirely local - no network, no Herdr - and reads the dev worktree's
-gitignored tasks/, so ticked checkboxes show up before you commit them.
+`status` answers "what am I implementing": every checked-out feature worktree
+with its authoritative task progress, Git/PR state, live agent, and attention
+findings. It renders the same read-only feature overview as `wt status
+--implementations`, so the Issue picker and worktree workflow cannot disagree.
 
 `release` answers "what have I not shipped yet": the latest GitHub Release's
 tag and publish time, plus how many PRs have merged into `dev` strictly after
@@ -209,18 +210,13 @@ other_labels_of() {
 }
 
 # ---------------------------------------------------------------------------
-# In-flight status, from plain git and the filesystem.
+# In-flight Issue guards, from plain Git and trusted local snapshots.
 #
-# Deliberately NOT a Herdr integration: scripts/wt-herd.test.sh asserts this
-# file never reaches for the devflow bridge, which is the whole point of the
-# REPL replacing that helper. Issue-number-first identity plus the generated
-# snapshot header maps each attached member to its shared task list and branch,
-# so local Git answers "am I implementing this?" with no network and no second
-# contract.
-#
-# Task files are gitignored and live in ONE place - the dev worktree's tasks/ -
-# so progress is read from disk. That is deliberately fresher than anything
-# pushed: checkboxes get ticked while you work, a pushed copy only at commit.
+# These small helpers answer only whether an Issue already has a branch or
+# worktree, so Ready and Plan never offer duplicate work. The richer worktree
+# summary below comes from feature-overview, the same normalized snapshot that
+# powers `wt status`; lifecycle, progress, PR, and agent state are not derived a
+# second time in this shell.
 # ---------------------------------------------------------------------------
 
 # Resolve an Issue to the one exact local task list attached to it. This stays
@@ -345,60 +341,46 @@ flight_cell_of() {
   fi
 }
 
+issue_is_in_flight() {
+  [[ -n "$(flight_state_of "$1")" ]]
+}
+
+implementation_summary=""
+implementation_summary_error=""
+load_implementation_summary() {
+  local output status=0
+
+  implementation_summary=""
+  implementation_summary_error=""
+  # The summary is captured before the dashboard renders, so stdout is a pipe
+  # rather than a TTY. Force the overview's own semantic palette; NO_COLOR still
+  # disables it for users who prefer plain output.
+  output="$(devflow_helper feature-overview --implementations --summary --color 2>/dev/null)" || status=$?
+  if [[ -n "$output" ]]; then
+    implementation_summary="$output"
+  fi
+  if [[ "$status" -ne 0 ]]; then
+    if [[ -n "$implementation_summary" ]]; then
+      implementation_summary_error="Implementation snapshot is incomplete — press r to retry."
+    else
+      implementation_summary_error="Implementation status unavailable — press r to retry."
+    fi
+  elif [[ -z "$implementation_summary" ]]; then
+    implementation_summary_error="Implementation status unavailable — press r to retry."
+  fi
+}
+
+implementation_report() {
+  devflow_helper feature-overview --implementations
+}
+
 list_status() {
-  local file slug progress state number member members_cell rows=0
-
-  resolve_tasks_dir
-  load_flight_index
-
-  if [[ -z "$tasks_dir" ]]; then
-    printf '\nNo tasks/ directory found in any worktree.\n'
-    return 0
-  fi
-
-  printf '\nIn flight  %s\n\n' "$tasks_dir"
-  for file in "$tasks_dir"/tasks-*.md; do
-    [[ -f "$file" ]] || continue
-    slug="${file##*/}"
-    slug="${slug#tasks-}"
-    slug="${slug%.md}"
-    progress="$(task_groups_of_file "$file")"
-    number=""
-    members_cell=""
-    if load_feature_members "$slug"; then
-      for member in "${feature_members[@]}"; do
-        if [[ -z "$members_cell" ]]; then
-          members_cell="#$member"
-        else
-          members_cell="$members_cell,#$member"
-        fi
-      done
-      number="${feature_members[0]:-}"
-    elif [[ -f "$tasks_dir/issue-$slug.md" ]]; then
-      members_cell="invalid"
-    fi
-    # Slug first: it also covers features whose branch carries no Issue number.
-    state="$(flight_state_of "$slug")"
-    if [[ -z "$state" && -n "$number" ]]; then
-      state="$(flight_state_of "$number")"
-    fi
-    printf '  %-7s %-9s %-8s %s\n' \
-      "${progress:--}" \
-      "${state:--}" \
-      "$members_cell" \
-      "$slug"
-    rows=$((rows + 1))
-  done
-
-  if [[ "$rows" -eq 0 ]]; then
-    printf '  no task lists yet\n'
-  fi
-  printf '\ngroups done/total  •  where the branch is  •  attached Issue(s)  •  feature\n'
+  implementation_report
 }
 
 list_issues() {
   local filter="$1"
-  local heading label search output status
+  local heading label search output status line number rows=0
   local -a args
 
   label=""
@@ -439,7 +421,25 @@ list_issues() {
 
   printf '\n%s\n\n' "$heading"
   if output="$(gh "${args[@]}")"; then
-    if [[ -n "$output" ]]; then
+    if [[ "$filter" == ready && -n "$output" ]]; then
+      # GitHub labels define workflow readiness; local branch/worktree evidence
+      # removes work that has already crossed into implementation. Preserve gh's
+      # own table rows byte-for-byte for everything that remains.
+      resolve_tasks_dir
+      load_flight_index
+      while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        number="${line%%$'\t'*}"
+        if [[ "$number" =~ ^[1-9][0-9]*$ ]] && issue_is_in_flight "$number"; then
+          continue
+        fi
+        printf '%s\n' "$line"
+        rows=$((rows + 1))
+      done <<< "$output"
+      if [[ "$rows" -eq 0 ]]; then
+        printf 'Nothing ready to build.\n'
+      fi
+    elif [[ -n "$output" ]]; then
       printf '%s\n' "$output"
     elif [[ -n "$label" ]]; then
       printf 'No open issues labeled %s.\n' "$label"
@@ -551,10 +551,17 @@ confirm_write() {
   [[ "$reply" == y || "$reply" == Y ]]
 }
 
+devflow_helper() {
+  # The checked-in Go helper owns normalized read models and config mutation.
+  # Callers below constrain it to read-only feature-overview or the separately
+  # confirm-gated agent-defaults command.
+  bash "$script_dir/herdr-devflow.sh" "$@"
+}
+
 agent_defaults_helper() {
-  # The Go helper owns TOML parsing, validation, and atomic replacement. This
-  # shell only transports separate arguments and confirms the local write.
-  HERDR_DEVFLOW_USE_SOURCE=1 bash "$script_dir/herdr-devflow.sh" "$@"
+  # Config edits always use this checkout's parser rather than any previously
+  # built helper binary that may predate the current TOML contract.
+  HERDR_DEVFLOW_USE_SOURCE=1 devflow_helper "$@"
 }
 
 agent_defaults_primary_kind=""
@@ -1445,7 +1452,7 @@ bundle_mark_is_live_eligible() {
   local number="$1" index
   for index in ${all_issue_numbers[@]+"${!all_issue_numbers[@]}"}; do
     if [[ "${all_issue_numbers[$index]}" == "$number" ]]; then
-      bundle_labels_are_eligible "${all_issue_labels[$index]}"
+      bundle_labels_are_eligible "${all_issue_labels[$index]}" && ! issue_is_in_flight "$number"
       return $?
     fi
   done
@@ -1491,8 +1498,22 @@ load_picker_release_status() {
   esac
 }
 
+picker_load_dir=""
+cleanup_picker_load_dir() {
+  if [[ -n "$picker_load_dir" && -d "$picker_load_dir" ]]; then
+    rm -f -- \
+      "$picker_load_dir/implementation" \
+      "$picker_load_dir/implementation-error" \
+      "$picker_load_dir/release-summary" \
+      "$picker_load_dir/release-error" \
+      "$picker_load_dir/release-count"
+    rmdir -- "$picker_load_dir" 2>/dev/null || true
+  fi
+  picker_load_dir=""
+}
+
 load_picker_index() {
-  local output number title labels updated
+  local output number title labels updated issue_status=0 implementation_pid release_pid
   local -a args
 
   all_issue_numbers=()
@@ -1505,19 +1526,48 @@ load_picker_index() {
   issue_updates=()
   picker_error=""
 
-  # Local state and release status are refreshed on initial load and explicit
-  # refresh rather than on every render or view change. That keeps the banner
-  # current without turning arrow-key navigation into network traffic.
+  # Local state, the shared implementation overview, and release status are
+  # refreshed on initial load and explicit refresh rather than on every render
+  # or view change. Independent network reads run concurrently so composing the
+  # dashboard does not add their latencies together.
   resolve_tasks_dir
   load_flight_index
-  load_picker_release_status
+  cleanup_picker_load_dir
+  picker_load_dir="$(mktemp -d "${TMPDIR:-/tmp}/ori-devops-load.XXXXXX")" || return $?
+  chmod 700 "$picker_load_dir" || { cleanup_picker_load_dir; return 1; }
+
+  (
+    load_implementation_summary
+    printf '%s' "$implementation_summary" > "$picker_load_dir/implementation"
+    printf '%s' "$implementation_summary_error" > "$picker_load_dir/implementation-error"
+  ) &
+  implementation_pid=$!
+
+  (
+    load_picker_release_status
+    printf '%s' "$picker_release_summary" > "$picker_load_dir/release-summary"
+    printf '%s' "$picker_release_error" > "$picker_load_dir/release-error"
+    printf '%s' "$picker_release_count" > "$picker_load_dir/release-count"
+  ) &
+  release_pid=$!
 
   args=(issue list --state open --limit "$issue_limit")
   args+=(--json number,title,labels,updatedAt --template '{{range .}}{{printf "%v\t%s\t" .number .title}}{{range $i,$label := .labels}}{{if $i}}, {{end}}{{.name}}{{end}}{{printf "\t%s\n" .updatedAt}}{{end}}')
 
-  if ! output="$(gh "${args[@]}")"; then
+  output="$(gh "${args[@]}")" || issue_status=$?
+  wait "$implementation_pid" || true
+  wait "$release_pid" || true
+
+  implementation_summary="$(<"$picker_load_dir/implementation")"
+  implementation_summary_error="$(<"$picker_load_dir/implementation-error")"
+  picker_release_summary="$(<"$picker_load_dir/release-summary")"
+  picker_release_error="$(<"$picker_load_dir/release-error")"
+  picker_release_count="$(<"$picker_load_dir/release-count")"
+  cleanup_picker_load_dir
+
+  if [[ "$issue_status" -ne 0 ]]; then
     picker_error="GitHub query failed. Press r to retry or q to quit."
-    return 1
+    return "$issue_status"
   fi
 
   while IFS=$'\t' read -r number title labels updated; do
@@ -1538,6 +1588,12 @@ apply_picker_filter() {
   issue_updates=()
   for index in "${!all_issue_numbers[@]}"; do
     if row_matches_filter "$filter" "${all_issue_labels[$index]}"; then
+      # Ready means pickable now, not merely labelled for planning. An existing
+      # local branch or worktree has already crossed that boundary and belongs
+      # in the implementation summary instead.
+      if [[ "$filter" == ready ]] && issue_is_in_flight "${all_issue_numbers[$index]}"; then
+        continue
+      fi
       issue_numbers+=("${all_issue_numbers[$index]}")
       issue_titles+=("${all_issue_titles[$index]}")
       issue_labels+=("${all_issue_labels[$index]}")
@@ -1555,7 +1611,19 @@ render_picker() {
   printf '\033[H\033[2J'
   style '1;36' 'Ori DevOps'
   printf '  '
-  style '2' 'open GitHub Issues'
+  style '2' 'implementation worktrees + open GitHub Issues'
+  printf '\n\n'
+  style '2' 'Ongoing implementations'
+  printf '  '
+  style '2' '[w] full details'
+  printf '\n'
+  if [[ -n "$implementation_summary" ]]; then
+    printf '%s\n' "$implementation_summary"
+  fi
+  if [[ -n "$implementation_summary_error" ]]; then
+    style '1;31' "$implementation_summary_error"
+    printf '\n'
+  fi
   printf '\n'
   style '2' 'Release'
   printf '  '
@@ -1680,7 +1748,9 @@ render_picker() {
   printf '\n'
   style '2' '↑/↓ or j/k select  •  ←/→ or h/l change view  •  Space mark/unmark  •  b plan marked bundle'
   printf '\n'
-  style '2' 'Enter open  •  c decide  •  n capture  •  p new & plan  •  o approve  •  s plan selected  •  i start implementation  •  g agent defaults  •  r refresh  •  ? help  •  q quit'
+  style '2' 'Enter open  •  c decide  •  n capture  •  p new & plan  •  o approve  •  s plan selected  •  i start implementation'
+  printf '\n'
+  style '2' 'w implementation details  •  g agent defaults  •  r refresh  •  ? help  •  q quit'
   printf '\n'
 }
 
@@ -1696,6 +1766,7 @@ read_picker_key() {
 }
 
 restore_terminal() {
+  cleanup_picker_load_dir
   if [[ -n "${picker_stty:-}" ]]; then
     stty "$picker_stty"
   fi
@@ -1755,9 +1826,10 @@ Picker keys
   s             Plan the selected existing Ready Issue with Claude/Pi options
   i             Start implementation from a completed local plan; choose Claude,
                 Codex, Pi, worktree-only, or cancel
+  w             Show the full checked-out feature implementation overview
   g             Read or change persistent primary and role agent defaults
                 (local config only; no GitHub or Herdr call)
-  r             Refresh from GitHub
+  r             Refresh implementations, release status, and GitHub Issues
   ?             Show this help
   q             Quit
 
@@ -1812,6 +1884,11 @@ prompt_open_issue() {
   if labels="$(issue_labels_of "$issue_number")"; then
     labels_contain "$labels" "needs-decision" || can_decide=0
     labels_are_ready "$labels" && can_plan=1
+  fi
+  # A branch/worktree is stronger local evidence than a still-Ready label. This
+  # keeps an Issue opened from All or Backlog from offering duplicate planning.
+  if issue_is_in_flight "$issue_number"; then
+    can_plan=0
   fi
 
   while true; do
@@ -2704,11 +2781,20 @@ run_picker() {
         with_normal_terminal start_plan "${picker_filters[$filter_index]}" "$count" "${issue_numbers[$selected_index]:-}"
         ;;
       i)
-        # Planning is asynchronous. Re-read only local artifacts when the owner
-        # returns, then let wt own the selected implementation handoff.
+        # Planning is asynchronous. Re-read local flight state and the shared
+        # overview after wt returns so a newly created checkout moves out of
+        # Ready and into Ongoing without requiring a manual refresh.
         if [[ "$count" -gt 0 ]]; then
           with_normal_terminal start_issue_implementation "${issue_numbers[$selected_index]}"
+          resolve_tasks_dir
+          load_flight_index
+          load_implementation_summary
+          apply_picker_filter "${picker_filters[$filter_index]}"
         fi
+        ;;
+      w)
+        with_normal_terminal implementation_report
+        load_implementation_summary
         ;;
       '?')
         with_normal_terminal print_picker_help

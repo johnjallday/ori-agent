@@ -79,17 +79,18 @@ For the PRD and task-list workflows below, create planning artifacts in this dev
 
 Ideas are captured as GitHub Issues. `./scripts/devops.sh` is the human
 interface: with no arguments in a terminal it opens a colorful Issue picker
-whose top banner includes the unreleased PR count; one-shot commands expose the
-same views and release status to scripts and agents.
+whose top dashboard includes checked-out feature implementations and the
+unreleased PR count; one-shot commands expose the same views and status to
+scripts and agents.
 
 | Command | Does |
 |---|---|
 | `./scripts/devops.sh` or `./scripts/devops.sh all` | reads every open Issue |
-| `./scripts/devops.sh ready` | reads what is pickable now: proposals + backlog that is neither `bundled` nor `approved` |
+| `./scripts/devops.sh ready` | reads what is pickable now: proposals + backlog that is neither `bundled`, `approved`, nor already represented by a local branch/worktree |
 | `./scripts/devops.sh decisions` | reads open Issues labeled `needs-decision` |
 | `./scripts/devops.sh backlog` | reads open Issues labeled `backlog` |
 | `./scripts/devops.sh proposals` | reads open Issues labeled `feature-proposal` |
-| `./scripts/devops.sh status` | reads which group each task list is on, and whether its branch has a worktree — local only |
+| `./scripts/devops.sh status` | reads the shared feature overview for checked-out implementation worktrees: task progress, Git/PR, agent, and attention state |
 | `./scripts/devops.sh release` | reads the latest Release's tag/publish time and counts delivery PRs merged into `dev` strictly after it |
 | `./scripts/devops.sh agent-defaults` | reads or confirm-gates persistent primary and role-fallback kind/model pairs in `.herdr/devflow.toml` — local only |
 | `./scripts/devops.sh view <n>` | reads one Issue in full |
@@ -100,17 +101,20 @@ same views and release status to scripts and agents.
 
 The Issue commands delegate directly to `gh issue list`, `gh issue view`,
 `gh issue create`, `gh issue comment` and `gh issue edit`. Their filters are
-literal GitHub labels, not Project columns, and every read is fresh. The
-`agent-defaults` action is the exception: it needs no `gh`, calls only the local
-Go config command, and never contacts Herdr.
+literal GitHub labels, not Project columns, and every read is fresh. Ready then
+removes Issues with local branch/worktree evidence. The picker and `status`
+also consume the read-only Go feature overview used by `wt status`; the separate
+`agent-defaults` action needs no `gh`, calls only the local Go config command,
+and never contacts Herdr.
 
 `release` additionally delegates to `gh release view` and `gh pr list --base
 dev --state merged`. Feature delivery targets `dev`, while Releases snapshot
 `main`, so this is the queue that has landed but not shipped. It compares each
 PR's `mergedAt` against the release's `publishedAt` as an exact timestamp, so a PR
 merged earlier the same day as the release is correctly excluded. The picker
-loads this count once on entry and again on `r`; a failed banner refresh says
-release status is unavailable without hiding the Issue list. The one-shot
+loads this count and the implementation overview once on entry and again on
+`r`; either dashboard section can report itself unavailable without hiding the
+Issue list. The one-shot
 command remains strict: either read failing exits non-zero with `gh`'s own
 message rather than reporting a misleading zero count.
 
@@ -177,13 +181,14 @@ closes any other Issue the merged PR body names with
 `Closes`/`Fixes`/`Resolves #N`. A failure on any attached member preserves the
 worktree for retry; `--keep-issue-open` skips all Issue mutations intentionally.
 
-`status` and the picker's in-flight column resolve an Issue to work-in-progress
-through the naming convention above plus the exact generated snapshot header.
-For a bundle, every attached member maps to the same task list and branch while
-`status` prints one feature row. Both views read local Git and `tasks/` only —
-never GitHub or Herdr — so checkbox progress appears before it is committed.
-Task files are gitignored and shared out of the dev worktree's `tasks/`; they
-are never pushed.
+The picker's in-flight column and Ready guard resolve an Issue to local work
+through the naming convention above plus exact generated snapshot headers from
+the dev or active feature worktree. For a bundle, every attached member maps to
+the same branch/worktree. The richer dashboard and `devops.sh status` render
+the same read-only normalized snapshot as `wt status --implementations`, using
+the active worktree's task list as authoritative and joining Git, GitHub PR,
+and Herdr agent state. Press `w` for the full implementation report; `r`
+refreshes it with Issues and release status.
 
 Work selected from an Issue uses the Issue number at the front of its identity:
 

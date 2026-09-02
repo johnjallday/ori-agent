@@ -216,8 +216,26 @@ index_attached_plan_flights() {
   done
 }
 
+# Once implementation starts, the active worktree's generated Issue snapshot is
+# the durable attachment source. Index it directly so every member of a bundle
+# remains in flight even when the dev worktree no longer has planning copies.
+index_worktree_attachment_flight() {
+  local path="$1" branch="$2" slug snapshot member
+  case "$branch" in
+    */*) slug="${branch#*/}" ;;
+    *) return 0 ;;
+  esac
+  [[ -n "$path" && -n "$slug" ]] || return 0
+  snapshot="$path/tasks/issue-$slug.md"
+  [[ -f "$snapshot" ]] || return 0
+  read_snapshot_members "$snapshot" || return 0
+  for member in "${snapshot_members[@]}"; do
+    remember_flight "$member" worktree "$branch"
+  done
+}
+
 load_flight_index() {
-  local line branch normalized
+  local line branch normalized path=""
 
   flight_numbers=()
   flight_states=()
@@ -228,9 +246,13 @@ load_flight_index() {
 
   while IFS= read -r line; do
     case "$line" in
+      "worktree "*)
+        path="${line#worktree }"
+        ;;
       "branch refs/heads/"*)
         branch="${line#branch refs/heads/}"
         remember_branch_flight "$branch" worktree "$branch"
+        index_worktree_attachment_flight "$path" "$branch"
         ;;
     esac
   done < <(git worktree list --porcelain 2>/dev/null)

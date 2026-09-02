@@ -141,6 +141,48 @@ func TestRenderCompactAllFilteredIsHonestNotEmpty(t *testing.T) {
 	}
 }
 
+func TestRenderCompactImplementationsShowsOnlyCheckedOutFeatures(t *testing.T) {
+	implementing := feature("implementing", withWorktree("/w/implementing"))
+	implementing.Phase = PhaseState{Phase: PhaseImplementing, Confirmed: true}
+	cleanup := feature("cleanup-owed", withWorktree("/w/cleanup-owed"))
+	cleanup.Phase = PhaseState{Phase: PhaseMergedCleanup, Confirmed: true}
+	ready := feature("ready-without-worktree", withPlan(AvailabilityAvailable, AvailabilityAvailable))
+	ready.Phase = PhaseState{Phase: PhaseReady, Confirmed: true}
+	shipped := feature("shipped-without-worktree")
+	shipped.Phase = PhaseState{Phase: PhaseShipped, Confirmed: true}
+
+	var out strings.Builder
+	options := RenderOptions{NoColor: true, OnlyImplementations: true, HideFooter: true}
+	if err := RenderCompact(&out, baseSnapshot(implementing, cleanup, ready, shipped), options); err != nil {
+		t.Fatalf("RenderCompact: %v", err)
+	}
+	output := out.String()
+	for _, want := range []string{"implementing", "cleanup-owed", "Merged (cleanup)"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("implementation summary omitted %q:\n%s", want, output)
+		}
+	}
+	for _, unwanted := range []string{"ready-without-worktree", "shipped-without-worktree", "Snapshot:"} {
+		if strings.Contains(output, unwanted) {
+			t.Fatalf("implementation summary unexpectedly included %q:\n%s", unwanted, output)
+		}
+	}
+}
+
+func TestRenderCompactImplementationsExplainsAnEmptySet(t *testing.T) {
+	ready := feature("ready-without-worktree", withPlan(AvailabilityAvailable, AvailabilityAvailable))
+	ready.Phase = PhaseState{Phase: PhaseReady, Confirmed: true}
+
+	var out strings.Builder
+	options := RenderOptions{NoColor: true, OnlyImplementations: true, HideFooter: true}
+	if err := RenderCompact(&out, baseSnapshot(ready), options); err != nil {
+		t.Fatalf("RenderCompact: %v", err)
+	}
+	if got := out.String(); got != "No feature implementation worktrees are currently checked out.\n" {
+		t.Fatalf("empty implementation summary = %q", got)
+	}
+}
+
 func TestRenderCompactAllFilteredStillShowsUnscopedAgentsAndFooter(t *testing.T) {
 	// The footer and the "agents outside a feature" summary are both
 	// repository-wide facts, not per-feature ones — filtering every feature

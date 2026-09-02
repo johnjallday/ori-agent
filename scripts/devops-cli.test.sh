@@ -572,6 +572,43 @@ flight_numbers=()
 flight_states=()
 check "cell is empty when nothing is in flight" "$(flight_cell_of 999)" ""
 
+# Label-ready work that already has a branch/worktree belongs in the ongoing
+# implementation summary, not in the pickable Ready view.
+all_issue_numbers=(320 339)
+all_issue_titles=("Already building" "Still ready")
+all_issue_labels=("backlog, size:quick" "feature-proposal, size:planned")
+all_issue_updates=("2026-08-08" "2026-08-09")
+flight_numbers=()
+flight_states=()
+remember_branch_flight "feature/320-already-building" worktree
+apply_picker_filter ready
+check "Ready picker excludes an in-flight Issue" "${issue_numbers[*]}" "339"
+ready_list_output="$(
+  gh() {
+    printf '320\tOPEN\tAlready building\tbacklog, size:quick\t2026-08-08T00:00:00Z\n'
+    printf '339\tOPEN\tStill ready\tfeature-proposal, size:planned\t2026-08-09T00:00:00Z\n'
+  }
+  resolve_tasks_dir() { tasks_dir=""; }
+  load_flight_index() {
+    flight_numbers=()
+    flight_states=()
+    remember_branch_flight "feature/320-already-building" worktree
+  }
+  list_issues ready
+)"
+check "Ready one-shot excludes an in-flight Issue" \
+  "$(grep -c $'^320\t' <<< "$ready_list_output" || true)" "0"
+check "Ready one-shot retains pickable work" \
+  "$(grep -c $'^339\t' <<< "$ready_list_output" || true)" "1"
+all_issue_numbers=()
+all_issue_titles=()
+all_issue_labels=()
+all_issue_updates=()
+issue_numbers=()
+issue_titles=()
+issue_labels=()
+issue_updates=()
+
 cat > "$fixture_root/tasks-801-802-803-shared.md" <<'MD'
 ## Tasks
 - [x] 1.0 First group
@@ -588,19 +625,57 @@ check "bundle first member cell shares progress" "$(flight_cell_of 801)" "1/2 br
 check "bundle middle member cell shares progress" "$(flight_cell_of 802)" "1/2 br"
 check "bundle last member cell shares progress" "$(flight_cell_of 803)" "1/2 br"
 
-bundle_status_output="$(
-  (
-    resolve_tasks_dir() { tasks_dir="$fixture_root"; }
-    load_flight_index() { :; }
-    list_status
-  ) 2>/dev/null
-)"
-check "status reports one row for a bundle feature" \
-  "$(grep -c '801-802-803-shared' <<< "$bundle_status_output")" "1"
-if [[ "$bundle_status_output" != *"#801,#802,#803"* ]]; then
-  printf 'FAIL status did not display every bundle member:\n%s\n' "$bundle_status_output" >&2
-  failures=$((failures + 1))
-fi
+# The active worktree carries the trusted snapshot after implementation starts.
+# Every bundle member must remain in flight even if dev's planning copy is gone.
+active_bundle="$fixture_root/active-bundle"
+mkdir -p "$active_bundle/tasks"
+cp "$fixture_root/issue-bundle.md" \
+  "$active_bundle/tasks/issue-801-802-803-shared.md"
+flight_numbers=()
+flight_states=()
+index_worktree_attachment_flight "$active_bundle" "feature/801-802-803-shared"
+check "active bundle snapshot indexes first member" "$(flight_state_of 801)" "worktree"
+check "active bundle snapshot indexes middle member" "$(flight_state_of 802)" "worktree"
+check "active bundle snapshot indexes last member" "$(flight_state_of 803)" "worktree"
+
+# DevOps consumes the Go-owned implementation table as an opaque summary; it
+# does not recreate lifecycle, PR, or agent cells in Bash.
+implementation_overview_calls="$fixture_root/implementation-overview-calls"
+devflow_helper() {
+  printf '<%s>\n' "$@" > "$implementation_overview_calls"
+  printf '%s\n' \
+    'FEATURE  PHASE         PLAN   GIT    REMOTE  AGENT            ATTENTION' \
+    'demo     Implementing  1/2    dirty  no PR   builder working  ok'
+}
+load_implementation_summary
+check "implementation summary uses the checked-out-worktree selector" \
+  "$(<"$implementation_overview_calls")" \
+  $'<feature-overview>\n<--implementations>\n<--summary>\n<--color>'
+check "implementation summary preserves the shared table" \
+  "$(grep -c 'demo     Implementing' <<< "$implementation_summary")" "1"
+check "successful implementation summary has no error" "$implementation_summary_error" ""
+
+devflow_helper() {
+  printf 'demo  Implementing\n'
+  return 1
+}
+load_implementation_summary
+check "partial implementation facts survive a degraded collector" \
+  "$implementation_summary" "demo  Implementing"
+check "degraded implementation snapshot is explicit" \
+  "$implementation_summary_error" "Implementation snapshot is incomplete — press r to retry."
+
+devflow_helper() {
+  printf '<%s>\n' "$@" > "$implementation_overview_calls"
+  printf '%s\n' \
+    'FEATURE  PHASE         PLAN   GIT    REMOTE  AGENT            ATTENTION' \
+    'demo     Implementing  1/2    dirty  no PR   builder working  ok'
+}
+list_status > "$fixture_root/implementation-report"
+check "status requests the full implementation report" \
+  "$(<"$implementation_overview_calls")" \
+  $'<feature-overview>\n<--implementations>'
+grep -Fq 'demo     Implementing' "$fixture_root/implementation-report"
 
 tasks_dir=""
 
@@ -1199,13 +1274,13 @@ wt_calls="$fixture_root/wt-calls"
 
 cat > "$fake_bin/gh" <<'SH'
 #!/bin/sh
-{
-  printf 'CALL'
-  for argument in "$@"; do
-    printf '\t%s' "$argument"
-  done
-  printf '\n'
-} >> "$GH_CALLS"
+tab="$(printf '\t')"
+call_line="CALL"
+for argument in "$@"; do
+  call_line="$call_line$tab$argument"
+done
+# One append keeps concurrent picker collectors from interleaving call records.
+printf '%s\n' "$call_line" >> "$GH_CALLS"
 if [ -n "${GH_ARGV:-}" ]; then
   {
     printf 'CALL\n'
@@ -1388,6 +1463,26 @@ MODELS
 SH
 chmod +x "$fake_bin/pi"
 
+# The picker embeds the read-only Go feature overview. This binary records no
+# state and emits the same bounded compact table for summary and detail paths.
+cat > "$fake_bin/herdr-devflow" <<'SH'
+#!/bin/sh
+if [ "${1:-}" = "--repo-root" ]; then
+  shift 2
+fi
+if [ "${1:-}" != "feature-overview" ] || [ "${2:-}" != "--implementations" ]; then
+  printf 'unexpected devflow invocation: %s\n' "$*" >&2
+  exit 98
+fi
+printf '%s\n' \
+  'FEATURE  PHASE         PLAN   GIT    REMOTE  AGENT            ATTENTION' \
+  'demo     Implementing  1/2    dirty  no PR   builder working  ok'
+if [ "${3:-}" != "--summary" ]; then
+  printf '\nSnapshot: complete\n'
+fi
+SH
+chmod +x "$fake_bin/herdr-devflow"
+
 export PATH="$fake_bin:$PATH"
 export GH_CALLS="$gh_calls"
 export GH_BODY="$gh_body"
@@ -1554,6 +1649,11 @@ HERDR_DEVFLOW_CONFIG="$agent_defaults_config" "$script" agent-defaults \
 assert_no_github "agent-defaults one-shot read"
 assert_output_has "agent-defaults current read" "$fixture_root/agent-defaults-current-output" "Primary:       kind=pi"
 
+# All remaining full-script picker/status fixtures use the hermetic read-only
+# implementation overview above. Agent-defaults forced the checked-in source
+# explicitly, so its contract tests were unaffected by this binary override.
+export HERDR_DEVFLOW_BINARY="$fake_bin/herdr-devflow"
+
 gh_call_sequence() {
   awk '/^CALL/ {printf "%s %s;", $2, $3}' "$gh_calls"
 }
@@ -1664,12 +1764,14 @@ if grep -Eq -- '--author|api[[:space:]]+graphql|project' "$gh_calls"; then
   exit 1
 fi
 
-# `status` is entirely local: it reads git and the filesystem, and must never
-# reach GitHub. That is what makes it usable offline and instant.
+# `status` is now the same checked-out-worktree overview as wt status rather
+# than a second dev-tasks-only model in Bash. The hermetic helper stands in for
+# its GitHub/Herdr collectors here.
 : > "$gh_calls"
 "$script" status > "$fixture_root/status-output"
-grep -Fq "In flight" "$fixture_root/status-output"
-assert_no_github "status"
+grep -Fq "demo     Implementing" "$fixture_root/status-output"
+grep -Fq "Snapshot: complete" "$fixture_root/status-output"
+assert_no_github "status shell (the overview helper owns remote reads)"
 
 # `release` reads the latest GitHub Release, then counts PRs merged into
 # `dev` strictly after its publish instant. Two calls, both reads.
@@ -1698,14 +1800,21 @@ assert_no_github_write "release"
 GH_PR_EMPTY=1 "$script" release > "$fixture_root/release-zero-output"
 grep -Fq "No PRs merged into dev since v0.0.106." "$fixture_root/release-zero-output"
 
-# The full-screen picker's top banner reuses the exact same timestamp count.
-# Loading happens once per refresh; rendering itself makes no network call.
+# The full-screen picker embeds the shared implementation table and reuses the
+# exact same release timestamp count. Loading happens once per refresh;
+# rendering itself makes no network call.
 : > "$gh_calls"
+load_implementation_summary
+check "picker implementation summary loads the shared table" \
+  "$(grep -c 'demo     Implementing' <<< "$implementation_summary")" "1"
 load_picker_release_status
 check "picker release summary uses the exact merged-PR count" \
   "$picker_release_summary" "2 PRs merged into dev since v0.0.106."
 check "picker release summary retains the numeric count" "$picker_release_count" "2"
 render_picker 0 0 0 > "$fixture_root/picker-release-output"
+grep -Fq "Ongoing implementations  [w] full details" \
+  "$fixture_root/picker-release-output"
+grep -Fq "demo     Implementing" "$fixture_root/picker-release-output"
 grep -Fq "Release  2 PRs merged into dev since v0.0.106." \
   "$fixture_root/picker-release-output"
 check "picker release refresh makes exactly two reads" "$(count_gh_calls)" "2"
@@ -2727,7 +2836,9 @@ if [[ -z "$b_branch" ]] || grep -Eq 'load_picker_index|apply_picker_filter|reloa
 fi
 
 # The later `i` action starts from current local planning artifacts in any view.
-# Like Plan it must leave the cached Issue index and selection untouched.
+# After wt returns it refreshes only local flight state and the shared
+# implementation summary, then reapplies the cached view without querying
+# GitHub.
 if ! grep -Fq 'with_normal_terminal start_issue_implementation "${issue_numbers[$selected_index]}"' "$script"; then
   printf 'the picker i key is not wired to the selected Issue number\n' >&2
   exit 1
@@ -2741,8 +2852,23 @@ if [[ -z "$i_branch" ]]; then
   printf 'could not read the picker i) branch\n' >&2
   exit 1
 fi
-if grep -Eq 'load_picker_index|apply_picker_filter|reload=1|issue_labels_of|\bgh\b' <<< "$i_branch"; then
-  printf 'the i key re-queries GitHub or resets the view: %s\n' "$i_branch" >&2
+if grep -Eq 'load_picker_index|reload=1|issue_labels_of|\bgh\b' <<< "$i_branch" || \
+   ! grep -Fq 'load_implementation_summary' <<< "$i_branch" || \
+   ! grep -Fq 'apply_picker_filter "${picker_filters[$filter_index]}"' <<< "$i_branch"; then
+  printf 'the i key does not refresh cached implementation state safely: %s\n' "$i_branch" >&2
+  exit 1
+fi
+
+# w opens the full shared implementation report and refreshes only that cached
+# summary on return.
+if ! grep -Fq 'with_normal_terminal implementation_report' "$script" || \
+   ! grep -Fq 'w implementation details' "$script"; then
+  printf 'the picker w key is not wired or documented\n' >&2
+  exit 1
+fi
+w_branch="$(awk '/^      w\)$/{inside=1} inside{print} inside && /^        ;;$/{exit}' "$script")"
+if [[ -z "$w_branch" ]] || grep -Eq 'load_picker_index|issue_labels_of|\bgh\b' <<< "$w_branch"; then
+  printf 'the w key is missing or re-queries the Issue index: %s\n' "$w_branch" >&2
   exit 1
 fi
 

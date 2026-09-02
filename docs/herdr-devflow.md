@@ -635,7 +635,7 @@ lists every open Issue before prompting for another view.
 ./scripts/devops.sh decisions          # label: needs-decision
 ./scripts/devops.sh backlog            # label: backlog
 ./scripts/devops.sh proposals          # label: feature-proposal
-./scripts/devops.sh status             # which group each task list is on
+./scripts/devops.sh status             # checked-out feature implementation overview
 ./scripts/devops.sh release            # what has merged to dev since the latest release
 ./scripts/devops.sh agent-defaults     # local persistent kind/model fallback pairs
 ./scripts/devops.sh view <number>      # one Issue in full
@@ -650,9 +650,10 @@ lists every open Issue before prompting for another view.
 ./scripts/devops.sh approve <n>        # add `approved`, confirm-gated
 ~~~
 
-In a terminal, the colorful picker shows the number of PRs merged into `dev`
-since the latest Release directly below its heading; `r` refreshes that banner
-and the Issue data. It accepts `↑/↓` or `j/k` to select an Issue, `←/→` or `h/l`
+In a terminal, the colorful picker shows the shared checked-out-feature
+implementation table and the number of PRs merged into `dev` since the latest
+Release directly above the Issue views; `w` opens the full implementation
+report and `r` refreshes both dashboard sections with the Issue data. It accepts `↑/↓` or `j/k` to select an Issue, `←/→` or `h/l`
 for those five list views, and `1`–`5` in the same order as the line REPL.
 `Enter` opens an Issue with an action bar where `c` decides, `s` starts Claude/Pi
 planning, `i` starts implementation from a completed local plan, `r` refreshes
@@ -724,14 +725,19 @@ write fails, the command warns that the receipt is missing but returns the
 successfully posted comment as the answer of record; the opened Issue still
 refreshes so that durable answer is visible.
 
-`status`, and the picker's in-flight column, deliberately do **not** call
-Herdr. The sole Go-helper boundary in `devops.sh` is the local
-`config agent-defaults` operation; it neither reads GitHub nor calls the Herdr
-runtime. `scripts/wt-herd.test.sh` enforces that separation and rejects any
-other bridge reach. Status instead reads `git worktree list`, `git branch
---all`, and the task files on disk, resolving an Issue to work via
-the naming convention: branch `fix/339-slug`, task file `tasks-339-slug.md`.
-Branches predating the number-first convention resolve by slug.
+The picker's short in-flight cell and Ready guard remain local: `git worktree
+list`, `git branch --all`, and trusted generated Issue snapshots resolve an
+Issue to an existing branch/worktree without a remote read. Active worktree
+snapshots preserve every member of an Issue bundle even when dev no longer has
+a planning copy. Branches predating the number-first convention resolve by
+slug.
+
+The dashboard and `devops.sh status` use the read-only
+`feature-overview --implementations` surface instead of deriving a second
+lifecycle in Bash. It reads the active worktree's task list as authoritative and
+joins Git, GitHub PR, and Herdr agent state exactly as `wt status` does. The
+other permitted Go-helper boundary remains the local, confirm-gated `config
+agent-defaults` operation.
 
 `release` answers a different question than `status`: not "what am I part-way
 through" but "what has landed in `dev` since we last shipped." Feature PRs
@@ -746,17 +752,16 @@ Either read failing — no release exists yet or the PR query errors — exits
 non-zero with `gh`'s own
 message rather than reporting a misleading zero count.
 
-Task files are gitignored and shared out of the dev worktree's `tasks/`, never
-pushed, so progress reflects ticked checkboxes immediately rather than at the
-next commit. `wt status` remains the richer, Herdr-backed feature/delivery
-snapshot; `devops.sh status` is the cheap local glance.
+Task files are gitignored and never pushed, so progress comes from the active
+checked-out copy and reflects ticked checkboxes immediately rather than at the
+next commit. `wt status --implementations` and `devops.sh status` are the same
+feature/delivery view.
 
 The Issue commands run `gh issue list`, `gh issue view`, `gh issue create`,
-`gh issue comment`, or `gh issue edit` directly from the checkout. `status` and
-`agent-defaults` contact GitHub not at all; `agent-defaults` also works when
-`gh` is not installed.
-The terminal picker fetches the complete open-Issue index and release count
-once and filters Issues locally until `r` refreshes both. It does not persist a
+`gh issue comment`, or `gh issue edit` directly from the checkout.
+`agent-defaults` also works when `gh` is not installed. The terminal picker
+fetches the complete open-Issue index, implementation overview, and release
+count once and filters Issues locally until `r` refreshes all three. It does not persist a
 cache or define a JSON contract. Its eligible `s`/`b` actions keep the planner
 model, thinking level, and Issue numbers as separate arguments while starting
 `wt plan` in two constrained zsh children; the later local-ready `i` action starts `wt start` in
@@ -826,6 +831,8 @@ wt status                          # compact, active-work-only overview
 wt status --all                    # same table, full history included
 wt status --feature <slug>         # one feature in detail, active or not
 wt status --json                   # the complete normalized snapshot, every feature
+wt status --implementations        # checked-out feature worktrees, including cleanup owed
+wt status --implementations --color # preserve semantic colors when output is captured or piped
 wt status --watch                  # live board, active-only by default
 wt status --all --watch            # live board, full history
 wt status --worktrees              # the legacy Git-only worktree table
@@ -841,9 +848,14 @@ The compact table hides `shipped`, `merged_cleanup`, and `unknown` rows by
 default: settled or unplaced work is not what an operator opening `wt status`
 is looking for. `--all` restores every row, and matters in particular for
 `merged_cleanup` — it is the only standing reminder that a `wt done` is still
-owed for that feature.
+owed for that feature. `--implementations` is a second compact-table filter for
+the DevOps dashboard: it shows only features with a checked-out worktree and
+retains `merged_cleanup`, because that checkout remains ongoing local work.
+The DevOps picker captures this table before rendering, so it requests
+`--color` to preserve the overview's semantic palette; `NO_COLOR` and
+`--no-color` remain authoritative opt-outs.
 
-The filter is display-only and applies to the compact table alone:
+The filters are display-only and apply to the compact table alone:
 `wt status --json` always emits every feature regardless of `--all` (see
 "JSON contract" below), and `wt status --feature <slug>` still finds an
 inactive feature's full detail. A repository whose only features are history
@@ -915,7 +927,7 @@ That last point is deliberate: a green exit code is how scripts decide nothing
 is wrong. Run `wt herd doctor` to check `gh` installation and authentication.
 
 Branch prefix records intent, not size, so `feature/`, `feat/`, `fix/`,
-`refactor/`, `docs/`, `test/`, and `chore/` branches are all matched — on the
+`refactor/`, `design/`, `docs/`, `test/`, and `chore/` branches are all matched — on the
 exact slug after the prefix. A pull request whose head branch does not match a
 feature's slug exactly is never attributed to it.
 

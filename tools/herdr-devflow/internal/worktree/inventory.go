@@ -42,7 +42,7 @@ func ValidSlug(value string) bool { return featureSlug.MatchString(value) }
 // a large one `fix/` — so the slug, not the prefix, identifies the feature.
 // Matching only `feature/` would silently miss delivered work: PRs have landed
 // from `fix/` and `feat/` branches.
-var BranchPrefixes = []string{"feature/", "feat/", "fix/", "refactor/", "docs/", "test/", "chore/"}
+var BranchPrefixes = []string{"feature/", "feat/", "fix/", "refactor/", "design/", "docs/", "test/", "chore/"}
 
 // SlugFromBranch extracts the exact feature slug from a known branch
 // namespace. It never guesses at a bare or unrecognized branch name.

@@ -1144,6 +1144,52 @@ func TestParseOverviewArgsAcceptsAll(t *testing.T) {
 	}
 }
 
+func TestParseOverviewArgsAcceptsImplementationSummary(t *testing.T) {
+	parsed, err := parseOverviewArgs([]string{"--implementations", "--summary", "--color"})
+	if err != nil {
+		t.Fatalf("parseOverviewArgs(implementation summary): %v", err)
+	}
+	if !parsed.implementations || !parsed.summary || !parsed.forceColor {
+		t.Fatalf("parseOverviewArgs(implementation summary) = %#v", parsed)
+	}
+
+	for _, args := range [][]string{
+		{"--summary"},
+		{"--color", "--no-color"},
+		{"--implementations", "--feature", "bridge"},
+		{"--implementations", "--json"},
+		{"--implementations", "--watch"},
+		{"--implementations", "--all"},
+	} {
+		if _, err := parseOverviewArgs(args); err == nil {
+			t.Fatalf("parseOverviewArgs(%v) unexpectedly succeeded", args)
+		}
+	}
+}
+
+func TestForcedStatusColorWorksThroughAPipeAndStillHonorsOptOuts(t *testing.T) {
+	application := New(Dependencies{
+		Stdout:    &bytes.Buffer{},
+		LookupEnv: func(string) (string, bool) { return "", false },
+	})
+	if !application.statusColorEnabledFor(false, true) {
+		t.Fatal("forced color was disabled for a captured implementation summary")
+	}
+	if application.statusColorEnabledFor(true, true) {
+		t.Fatal("--no-color did not override forced color")
+	}
+
+	noColorApplication := New(Dependencies{
+		Stdout: &bytes.Buffer{},
+		LookupEnv: func(key string) (string, bool) {
+			return "", key == "NO_COLOR"
+		},
+	})
+	if noColorApplication.statusColorEnabledFor(false, true) {
+		t.Fatal("NO_COLOR did not override forced color")
+	}
+}
+
 func TestFeatureOverviewAllDoesNotChangeJSON(t *testing.T) {
 	primary, feature := createLinkedFeatureWorktree(t)
 	home := filepath.Join(t.TempDir(), "runtime")

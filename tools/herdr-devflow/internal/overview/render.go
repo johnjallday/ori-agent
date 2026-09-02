@@ -18,6 +18,13 @@ type RenderOptions struct {
 	// (RenderExpanded, RenderDetail, and the JSON contract) is unaffected: the
 	// filter belongs to the compact table only, per Issue #348.
 	ShowAll bool
+	// OnlyImplementations narrows the compact table to features with a checked-out
+	// worktree. Unlike the normal active filter, it retains Merged (cleanup): the
+	// checkout is still ongoing work until `wt done` removes it.
+	OnlyImplementations bool
+	// HideFooter omits repository-wide snapshot metadata from an embedded compact
+	// summary. It never changes which facts were collected or their exit status.
+	HideFooter bool
 }
 
 const (
@@ -99,10 +106,14 @@ func RenderCompact(out io.Writer, snapshot Snapshot, options RenderOptions) erro
 			return err
 		}
 	}
-	// The table is feature-first by design, so agents belonging to no feature
-	// get one honest summary line rather than being left out of the count.
-	if err := renderUnscopedAgentsCompact(out, colors, snapshot); err != nil {
-		return err
+	// The normal table is feature-first by design, so agents belonging to no
+	// feature get one honest summary line rather than being left out of the
+	// count. The implementation-only embedding deliberately omits them: its
+	// contract is checked-out feature worktrees, not the repository roster.
+	if !options.OnlyImplementations {
+		if err := renderUnscopedAgentsCompact(out, colors, snapshot); err != nil {
+			return err
+		}
 	}
 	return renderFooter(out, snapshot, options)
 }
@@ -125,6 +136,16 @@ func isHistoryPhase(phase Phase) bool {
 // them. This is a display-only filter — it never touches the snapshot itself,
 // so JSON and RenderDetail keep seeing every feature regardless.
 func activeFeatures(features []Feature, options RenderOptions) []Feature {
+	if options.OnlyImplementations {
+		visible := make([]Feature, 0, len(features))
+		for _, feature := range features {
+			if feature.Git.WorktreePath == "" {
+				continue
+			}
+			visible = append(visible, feature)
+		}
+		return visible
+	}
 	if options.ShowAll {
 		return features
 	}
@@ -160,6 +181,12 @@ func renderUnscopedAgentsCompact(out io.Writer, colors palette, snapshot Snapsho
 // message would be a lie here, and a bare header row with nothing under it
 // would look like a bug rather than a fact.
 func renderNoActiveFeatures(out io.Writer, snapshot Snapshot, options RenderOptions) error {
+	if options.OnlyImplementations {
+		if _, err := fmt.Fprintln(out, "No feature implementation worktrees are currently checked out."); err != nil {
+			return err
+		}
+		return renderFooter(out, snapshot, options)
+	}
 	colors := newPalette(options)
 	if _, err := fmt.Fprintf(out,
 		"No active features: all %d feature(s) are history (shipped or merged with cleanup pending). Run wt status --all to see them.\n",
@@ -403,6 +430,12 @@ func renderUnscopedAgents(write func(string, ...any) error, colors palette, snap
 }
 
 func renderEmpty(out io.Writer, snapshot Snapshot, options RenderOptions) error {
+	if options.OnlyImplementations {
+		if _, err := fmt.Fprintln(out, "No feature implementation worktrees are currently checked out."); err != nil {
+			return err
+		}
+		return renderFooter(out, snapshot, options)
+	}
 	if _, err := fmt.Fprintln(out, "No features were found in this repository."); err != nil {
 		return err
 	}
@@ -427,6 +460,9 @@ func renderEmpty(out io.Writer, snapshot Snapshot, options RenderOptions) error 
 // renderFooter states the snapshot's completeness and every repository-scoped
 // finding. An incomplete snapshot must say so; silence would read as health.
 func renderFooter(out io.Writer, snapshot Snapshot, options RenderOptions) error {
+	if options.HideFooter {
+		return nil
+	}
 	colors := newPalette(options)
 	if _, err := fmt.Fprintln(out); err != nil {
 		return err
