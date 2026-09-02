@@ -695,7 +695,7 @@
     .folio-primary:hover { background: #173e30; }
 
     /* Context mode replaces the folio without changing the map's information
-       architecture: selecting a finished station returns to normal operation. */
+       architecture: selecting a finished building returns to normal operation. */
     .context-panel {
       display: grid;
       grid-template-rows: auto auto minmax(0, 1fr) auto;
@@ -829,8 +829,9 @@
   </style>
 </head>
 <body>
-  <!-- Curated, inert silhouettes. They communicate workspace type only; live
-       status remains text + LEDs outside the artwork. -->
+  <!-- Curated, inert silhouettes pair distinct rooflines with readable facade
+       emblems. They communicate workspace type only; live status remains text
+       plus LEDs outside the artwork. -->
   <svg class="svg-defs" aria-hidden="true">
     <defs>
       <symbol id="facility-hq" viewBox="0 0 120 88">
@@ -845,6 +846,10 @@
         <path d="M60 7l15 5-15 5z" fill="currentColor"/>
         <circle cx="60" cy="4" r="2.4" fill="currentColor"/>
         <path d="M27 60v11M93 60v11M45 55v18M75 55v18" fill="none" stroke="currentColor" stroke-width="2" opacity=".7"/>
+        <g data-emblem="hq">
+          <circle cx="60" cy="50" r="10" fill="#f6f0df" stroke="#101619" stroke-width="1.5"/>
+          <path d="M60 42l2.2 5.8 5.8 2.2-5.8 2.2L60 58l-2.2-5.8L52 50l5.8-2.2z" fill="#101619"/>
+        </g>
       </symbol>
       <symbol id="facility-mail" viewBox="0 0 120 88">
         <polygon points="60 51 110 69 60 87 10 69" fill="currentColor" opacity=".13" stroke="currentColor" stroke-opacity=".42"/>
@@ -855,18 +860,25 @@
         <polygon points="74 57 90 52 90 65 74 70" fill="#0d1718" opacity=".58"/>
         <polygon points="30 52 45 57 45 67 30 62" fill="#0d1718" opacity=".42"/>
         <path d="M94 32V16h9M97 18h10v8H97" fill="none" stroke="currentColor" stroke-width="2"/>
+        <g data-emblem="mail">
+          <rect x="42" y="27" width="36" height="24" rx="2" fill="#f6f0df" stroke="#101619" stroke-width="1.5"/>
+          <path d="M45 31l15 11 15-11M45 48l10-9M75 48l-10-9" fill="none" stroke="#101619" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
       </symbol>
       <symbol id="facility-calendar" viewBox="0 0 120 88">
         <polygon points="60 52 109 70 60 87 11 70" fill="currentColor" opacity=".13" stroke="currentColor" stroke-opacity=".45"/>
         <polygon points="17 48 60 61 60 79 17 66" fill="currentColor" opacity=".38"/>
         <polygon points="103 48 60 61 60 79 103 66" fill="currentColor" opacity=".58"/>
         <polygon points="17 48 60 35 103 48 60 62" fill="currentColor" opacity=".76"/>
-        <polygon points="46 21 60 26 60 62 46 57" fill="currentColor" opacity=".9"/>
-        <polygon points="74 21 60 26 60 62 74 57" fill="currentColor" opacity=".58"/>
-        <polygon points="60 10 78 20 60 28 42 20" fill="currentColor"/>
-        <circle cx="60" cy="36" r="7" fill="#101619" stroke="currentColor" stroke-width="1.4"/>
-        <path d="M60 31v5l4 2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        <polygon points="44 21 60 26 60 62 44 57" fill="currentColor" opacity=".9"/>
+        <polygon points="76 21 60 26 60 62 76 57" fill="currentColor" opacity=".58"/>
+        <polygon points="60 10 79 20 60 28 41 20" fill="currentColor"/>
         <path d="M60 10V3" stroke="currentColor" stroke-width="2"/>
+        <g data-emblem="calendar">
+          <rect x="46" y="28" width="28" height="27" rx="2" fill="#f6f0df" stroke="#101619" stroke-width="1.5"/>
+          <path d="M46 36h28M53 25v7M67 25v7" fill="none" stroke="#101619" stroke-width="2" stroke-linecap="round"/>
+          <path d="M52 41h5v4h-5zM63 41h5v4h-5zM52 48h5v4h-5zM63 48h5v4h-5z" fill="#101619"/>
+        </g>
       </symbol>
       <symbol id="facility-research" viewBox="0 0 120 88">
         <polygon points="60 54 109 70 60 87 11 70" fill="currentColor" opacity=".13" stroke="currentColor" stroke-opacity=".45"/>
@@ -877,6 +889,11 @@
         <path d="M42 38c3-11 10-18 18-18 9 0 16 7 18 18M60 17v21" fill="none" stroke="#101619" stroke-opacity=".7" stroke-width="1.5"/>
         <path d="M71 22l18-9 4 7-18 10" fill="currentColor"/>
         <circle cx="92" cy="16" r="3" fill="currentColor" opacity=".7"/>
+        <g data-emblem="research">
+          <path d="M56 24v9l-8 14c-2 4 0 7 4 7h16c4 0 6-3 4-7l-8-14v-9" fill="#f6f0df" stroke="#101619" stroke-width="1.6" stroke-linejoin="round"/>
+          <path d="M54 24h12M52 44h16" fill="none" stroke="#101619" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="58" cy="48" r="1.5" fill="#101619"/><circle cx="64" cy="50" r="1.2" fill="#101619"/>
+        </g>
       </symbol>
       <symbol id="facility-studio" viewBox="0 0 120 88">
         <polygon points="60 53 109 70 60 87 11 70" fill="currentColor" opacity=".13" stroke="currentColor" stroke-opacity=".45"/>
@@ -886,6 +903,11 @@
         <path d="M37 25v10M58 19v10M79 14v11" stroke="#101619" stroke-opacity=".58" stroke-width="2"/>
         <polygon points="70 56 91 49 91 65 70 72" fill="#101619" opacity=".55"/>
         <path d="M74 59l13-4M74 64l13-4" stroke="currentColor" stroke-width="1.4" opacity=".7"/>
+        <g data-emblem="publishing">
+          <rect x="42" y="31" width="34" height="25" rx="2" fill="#f6f0df" stroke="#101619" stroke-width="1.5"/>
+          <path d="M49 38h18M49 44h14M49 50h10" stroke="#101619" stroke-width="2" stroke-linecap="round"/>
+          <path d="M65 50l11-11 3 3-11 11-5 1z" fill="currentColor" stroke="#101619" stroke-width="1.3" stroke-linejoin="round"/>
+        </g>
       </symbol>
       <symbol id="facility-depot" viewBox="0 0 120 88">
         <polygon points="60 54 110 70 60 87 10 70" fill="currentColor" opacity=".13" stroke="currentColor" stroke-opacity=".45"/>
@@ -895,6 +917,10 @@
         <path d="M29 46v20M39 50v20M49 53v20M71 53v20M81 50v20M91 46v20" stroke="#101619" stroke-opacity=".5" stroke-width="2"/>
         <rect x="48" y="17" width="24" height="10" fill="currentColor"/>
         <path d="M52 22h16" stroke="#101619" stroke-width="2"/>
+        <g data-emblem="folder">
+          <path d="M41 31h16l5 5h18v20H41z" fill="#f6f0df" stroke="#101619" stroke-width="1.6" stroke-linejoin="round"/>
+          <path d="M47 43h27M60 39v12M55 47l5 5 5-5" fill="none" stroke="#101619" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
       </symbol>
       <symbol id="facility-issues" viewBox="0 0 120 88">
         <polygon points="60 52 108 70 60 87 12 70" fill="currentColor" opacity=".13" stroke="currentColor" stroke-opacity=".45"/>
@@ -903,17 +929,23 @@
         <polygon points="25 38 43 24 77 24 95 38 60 52" fill="currentColor" opacity=".88"/>
         <polygon points="43 24 50 13 70 13 77 24" fill="currentColor"/>
         <path d="M34 47l17 6v12l-17-6zM69 53l17-6v12l-17 6z" fill="#101619" opacity=".54"/>
-        <circle cx="60" cy="33" r="5" fill="#101619" opacity=".58"/>
-        <circle cx="60" cy="33" r="1.4" fill="currentColor"/>
+        <g data-emblem="issue">
+          <path d="M45 27h30v25l-4-3-4 3-4-3-4 3-4-3-4 3-6-4z" fill="#f6f0df" stroke="#101619" stroke-width="1.6" stroke-linejoin="round"/>
+          <path d="M60 33v9" stroke="#101619" stroke-width="3" stroke-linecap="round"/>
+          <circle cx="60" cy="46" r="1.8" fill="#101619"/>
+        </g>
       </symbol>
       <symbol id="facility-travel" viewBox="0 0 120 88">
         <polygon points="60 54 109 70 60 87 11 70" fill="currentColor" opacity=".13" stroke="currentColor" stroke-opacity=".45"/>
         <polygon points="22 45 60 57 60 79 22 67" fill="currentColor" opacity=".4"/>
         <polygon points="98 45 60 57 60 79 98 67" fill="currentColor" opacity=".58"/>
         <polygon points="22 45 60 32 98 45 60 58" fill="currentColor" opacity=".84"/>
-        <polygon points="48 20 60 15 72 20 72 50 60 55 48 50" fill="currentColor" opacity=".9"/>
-        <path d="M60 15V4M60 7l18 6-18 5" fill="none" stroke="currentColor" stroke-width="2"/>
-        <path d="M52 31l8-4 8 4-8 4z" fill="#101619" opacity=".6"/>
+        <polygon points="46 20 60 14 74 20 74 51 60 56 46 51" fill="currentColor" opacity=".9"/>
+        <path d="M60 14V4M60 7l18 6-18 5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <g data-emblem="travel">
+          <rect x="49" y="29" width="22" height="20" rx="3" fill="#f6f0df" stroke="#101619" stroke-width="1.6"/>
+          <path d="M55 29v-4h10v4M55 34v11M65 34v11M49 38h22" fill="none" stroke="#101619" stroke-width="1.8" stroke-linecap="round"/>
+        </g>
       </symbol>
       <symbol id="facility-custom" viewBox="0 0 120 88">
         <polygon points="60 53 108 70 60 87 12 70" fill="currentColor" opacity=".13" stroke="currentColor" stroke-opacity=".45"/>
@@ -949,14 +981,14 @@
           <div class="map-heading">
             <div class="eyebrow">Workspace architecture · 04 active</div>
             <h1 id="campusTitle">Your Ori Campus</h1>
-            <p>Each station is a workspace. Its blueprint defines the crew, tools, and operating boundary.</p>
+            <p>Each building is a workspace. Its blueprint defines the crew, tools, and operating boundary.</p>
           </div>
           <div class="map-actions">
             <div class="view-switch" aria-label="Workspace view">
               <button class="is-active" type="button" aria-pressed="true">Map</button>
               <button type="button" aria-pressed="false">Directory</button>
             </div>
-            <button id="openCatalog" class="build-button" type="button">＋ Build station</button>
+            <button id="openCatalog" class="build-button" type="button">＋ Build workspace</button>
           </div>
         </header>
 
@@ -977,30 +1009,30 @@
             <span class="facility-status">Ready</span>
           </button>
 
-          <button class="facility" data-facility="mail" data-variant="mail" data-status="setup" style="--x:56%;--y:28%" type="button" aria-label="Mailroom, setup required">
+          <button class="facility" data-facility="mail" data-variant="mail" data-status="setup" style="--x:56%;--y:28%" type="button" aria-label="Email Ops, setup required">
             <svg class="facility-art" aria-hidden="true"><use href="#facility-mail"></use></svg>
-            <span class="facility-name">Mailroom</span>
-            <span class="facility-type">Email Ops · 2 crew</span>
+            <span class="facility-name">Email Ops</span>
+            <span class="facility-type">Everyday · 2 crew</span>
             <span class="facility-status">Setup required</span>
           </button>
 
-          <button class="facility" data-facility="research" data-variant="research" data-status="ready" style="--x:25%;--y:73%" type="button" aria-label="Research Lab, ready">
+          <button class="facility" data-facility="research" data-variant="research" data-status="ready" style="--x:25%;--y:73%" type="button" aria-label="Research Project, ready">
             <svg class="facility-art" aria-hidden="true"><use href="#facility-research"></use></svg>
-            <span class="facility-name">Research Lab</span>
+            <span class="facility-name">Research Project</span>
             <span class="facility-type">Project · 3 crew</span>
             <span class="facility-status">Ready</span>
           </button>
 
-          <button class="facility" data-facility="studio" data-variant="studio" data-status="ready" style="--x:55%;--y:73%" type="button" aria-label="Publishing Studio, ready">
+          <button class="facility" data-facility="studio" data-variant="studio" data-status="ready" style="--x:55%;--y:73%" type="button" aria-label="Content Production, ready">
             <svg class="facility-art" aria-hidden="true"><use href="#facility-studio"></use></svg>
-            <span class="facility-name">Publishing Studio</span>
+            <span class="facility-name">Content Production</span>
             <span class="facility-type">Project · 4 crew</span>
             <span class="facility-status">Ready</span>
           </button>
 
           <div id="buildPreview" class="build-preview" data-variant="calendar" aria-hidden="true">
             <svg class="facility-art"><use id="previewUse" href="#facility-calendar"></use></svg>
-            <span id="previewLabel" class="preview-label">Schedule Station · preview</span>
+            <span id="previewLabel" class="preview-label">Calendar Ops · preview</span>
           </div>
         </div>
 
@@ -1010,7 +1042,7 @@
             <span class="setup"><i></i>Setup required</span>
             <span>Dashed site = placement preview</span>
           </div>
-          <span>Blueprints shape workspaces · status stays explicit</span>
+          <span>Blueprints shape buildings · status stays explicit</span>
           <div class="map-controls" aria-label="Map controls">
             <button type="button" aria-label="Zoom out">−</button>
             <button type="button" aria-label="Reset zoom">100</button>
@@ -1037,8 +1069,8 @@
             <div class="detail-copy">
               <div class="detail-kicker">Selected blueprint</div>
               <div class="detail-title-row">
-                <h3 id="detailName">Schedule Station</h3>
-                <span id="detailSubtitle">Calendar Ops</span>
+                <h3 id="detailName">Calendar Ops</h3>
+                <span id="detailSubtitle">Everyday blueprint</span>
               </div>
               <p id="detailDescription" class="detail-description">See your day and week, spot conflicts, find open windows, and prepare for meetings.</p>
               <div id="detailFacts" class="detail-facts">
@@ -1065,7 +1097,7 @@
             </div>
             <div class="folio-actions">
               <button id="blueprintDetails" class="folio-secondary" type="button">Review crew &amp; access</button>
-              <button id="buildSelected" class="folio-primary" type="button">Build Schedule Station</button>
+              <button id="buildSelected" class="folio-primary" type="button">Build Calendar Ops</button>
             </div>
           </footer>
         </section>
@@ -1074,7 +1106,7 @@
           <header class="context-head">
             <div class="context-head-top">
               <div>
-                <div class="eyebrow">Workspace station</div>
+                <div class="eyebrow">Workspace building</div>
                 <h2 id="contextTitle">Personal HQ</h2>
               </div>
               <button id="contextMenu" class="folio-close" type="button" aria-label="More workspace actions">···</button>
@@ -1087,7 +1119,7 @@
           <div class="context-body">
             <div id="contextStatus" class="context-status">Ready · Daily orientation available</div>
             <section class="context-section">
-              <h3>Station architecture</h3>
+              <h3>Workspace architecture</h3>
               <div class="context-list">
                 <div class="context-row"><span>Blueprint</span><strong id="contextBlueprint">Personal HQ</strong></div>
                 <div class="context-row"><span>Crew</span><strong id="contextCrew">Chief of Staff + Journal</strong></div>
@@ -1098,7 +1130,7 @@
           </div>
           <footer class="context-foot">
             <button class="context-open" type="button">Open workspace</button>
-            <button id="contextBuild" class="context-build" type="button">＋ Build another</button>
+            <button id="contextBuild" class="context-build" type="button">＋ Build workspace</button>
           </footer>
         </section>
       </aside>
@@ -1117,49 +1149,49 @@
         crew: "Chief of Staff + Journal", connections: "Cross-workspace summaries", rule: "Routes specialist work"
       },
       {
-        id: "mail", name: "Mailroom", subtitle: "Email Ops", category: "everyday", variant: "mail",
+        id: "mail", name: "Email Ops", subtitle: "Everyday blueprint", category: "everyday", variant: "mail",
         description: "Triage what needs a reply, prepare drafts for review, and keep email follow-ups visible.",
         facts: ["2 crew", "Mailbox connection", "Confirm-gated send"], built: 1, repeatable: true,
         access: "Choosing this blueprint connects nothing. Setup links one mailbox. Message content stays untrusted, and no message is sent without confirmation.",
         crew: "Postmaster + Inbox", connections: "One approved mailbox", rule: "Never sends without confirmation"
       },
       {
-        id: "calendar", name: "Schedule Station", subtitle: "Calendar Ops", category: "everyday", variant: "calendar",
+        id: "calendar", name: "Calendar Ops", subtitle: "Everyday blueprint", category: "everyday", variant: "calendar",
         description: "See your day and week, spot conflicts, find open windows, and prepare for meetings.",
         facts: ["2 crew", "Calendar connector", "Recommended"], built: 0, repeatable: true,
         access: "Choosing this blueprint connects nothing. During setup you choose which calendars it may read; creating or changing an event remains explicitly confirmed.",
         crew: "Scheduler + Meeting Prep", connections: "Selected calendars", rule: "Writes stay explicitly confirmed"
       },
       {
-        id: "research", name: "Research Lab", subtitle: "Research Project", category: "projects", variant: "research",
+        id: "research", name: "Research Project", subtitle: "Project blueprint", category: "projects", variant: "research",
         description: "Maintain a synthesis, source index, open questions, and a recurring reading rhythm.",
         facts: ["3 crew", "Source-aware", "Repeatable"], built: 1, repeatable: true,
-        access: "A Research Lab starts with workspace-local context. Web or document access is added deliberately as equipment, never inferred from the silhouette.",
+        access: "A Research Project starts with workspace-local context. Web or document access is added deliberately as equipment, never inferred from the silhouette.",
         crew: "Research Lead + 2 specialists", connections: "Optional sources", rule: "Cites evidence and gaps"
       },
       {
-        id: "studio", name: "Publishing Studio", subtitle: "Content Production", category: "projects", variant: "studio",
+        id: "studio", name: "Content Production", subtitle: "Project blueprint", category: "projects", variant: "studio",
         description: "Hold the brand voice, turn briefs into drafts, review them, and plan distribution.",
         facts: ["4 crew", "Brand context", "Repeatable"], built: 1, repeatable: true,
         access: "Publishing tools are optional equipment. Drafting is local to the workspace until a publishing connection is deliberately attached.",
         crew: "Content Lead + 3 specialists", connections: "Optional publishing tools", rule: "Review before distribution"
       },
       {
-        id: "depot", name: "Sorting Depot", subtitle: "Downloads Janitor", category: "utilities", variant: "depot",
+        id: "depot", name: "Downloads Janitor", subtitle: "Utility blueprint", category: "utilities", variant: "depot",
         description: "Prepare a review batch for one approved folder and file only what the user approves.",
         facts: ["1 crew", "One folder", "Approval required"], built: 0, repeatable: true,
-        access: "Setup grants one folder only. The station reads names and metadata by default; every move or Trash action requires user approval.",
+        access: "Setup grants one folder only. The workspace reads names and metadata by default; every move or Trash action requires user approval.",
         crew: "Downloads Curator", connections: "One approved folder", rule: "Never moves files autonomously"
       },
       {
-        id: "issues", name: "Issue Desk", subtitle: "GitHub Ops", category: "utilities", variant: "issues",
+        id: "issues", name: "GitHub Ops", subtitle: "Utility blueprint", category: "utilities", variant: "issues",
         description: "Triage one repository's issues and prepare comments, labels, or closes for review.",
         facts: ["1 crew", "One repository", "No code access"], built: 0, repeatable: true,
-        access: "Setup binds exactly one repository. The station needs issue access, not code access, and every GitHub write is explicitly confirmed.",
+        access: "Setup binds exactly one repository. The workspace needs issue access, not code access, and every GitHub write is explicitly confirmed.",
         crew: "Triage Lead", connections: "One repository", rule: "Proposes; user confirms"
       },
       {
-        id: "travel", name: "Travel Desk", subtitle: "Trip Planning", category: "projects", variant: "travel",
+        id: "travel", name: "Travels", subtitle: "Project blueprint", category: "projects", variant: "travel",
         description: "Keep one trip's dates, options, confirmations, and itinerary in a durable workspace.",
         facts: ["2 crew", "Trip context", "Repeatable"], built: 0, repeatable: true,
         access: "Travel search and booking tools are optional equipment. A blueprint selection never grants access or makes a purchase.",
@@ -1173,15 +1205,15 @@
         status: "Ready · Daily orientation available", blueprint: "Personal HQ", crew: "Chief of Staff + Journal", connections: "Cross-workspace summaries", rule: "Routes specialist work"
       },
       mail: {
-        title: "Mailroom", variant: "mail", description: "Dedicated inbox operations with a bounded mailbox connection and confirm-gated replies.",
+        title: "Email Ops", variant: "mail", description: "Dedicated inbox operations with a bounded mailbox connection and confirm-gated replies.",
         status: "Setup required · Connect one mailbox", blueprint: "Email Ops", crew: "Postmaster + Inbox", connections: "Not connected", rule: "Never sends without confirmation"
       },
       research: {
-        title: "Research Lab", variant: "research", description: "A durable home for one research question, its sources, synthesis, and open gaps.",
+        title: "Research Project", variant: "research", description: "A durable home for one research question, its sources, synthesis, and open gaps.",
         status: "Ready · Weekly reading scheduled", blueprint: "Research Project", crew: "Research Lead + 2 specialists", connections: "Web search", rule: "Cites evidence and gaps"
       },
       studio: {
-        title: "Publishing Studio", variant: "studio", description: "Brand context, drafts, editorial review, and distribution planning in one project workspace.",
+        title: "Content Production", variant: "studio", description: "Brand context, drafts, editorial review, and distribution planning in one project workspace.",
         status: "Ready · 3 drafts awaiting review", blueprint: "Content Production", crew: "Content Lead + 3 specialists", connections: "No publisher attached", rule: "Review before distribution"
       }
     };

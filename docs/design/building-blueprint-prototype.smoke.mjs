@@ -25,9 +25,29 @@ try {
     await page.locator('[data-blueprint="calendar"]').evaluate(element =>
       element.classList.contains("is-selected")
     ),
-    "Schedule Station should be the initial recommended selection"
+    "Calendar Ops should be the initial recommended selection"
   );
   assert(await page.locator("#buildPreview").isVisible(), "Selected blueprint should preview on the map");
+
+  for (const [variant, emblem] of [
+    ["hq", "hq"],
+    ["mail", "mail"],
+    ["calendar", "calendar"],
+    ["research", "research"],
+    ["studio", "publishing"],
+    ["depot", "folder"],
+    ["issues", "issue"],
+    ["travel", "travel"]
+  ]) {
+    assert(
+      (await page.locator(`#facility-${variant} [data-emblem="${emblem}"]`).count()) === 1,
+      `${variant} silhouette should carry its own readable emblem`
+    );
+  }
+  assert(
+    (await page.locator('[data-facility="mail"] .facility-name').textContent()) === "Email Ops",
+    "Map labels should preserve workspace names instead of renaming buildings"
+  );
 
   await page.locator('[data-category="utilities"]').click();
   assert(
@@ -35,8 +55,8 @@ try {
     "Utilities category should show the two utility blueprints"
   );
   assert(
-    (await page.locator("#blueprintGrid").textContent()).includes("Sorting Depot"),
-    "Utilities should include Sorting Depot"
+    (await page.locator("#blueprintGrid").textContent()).includes("Downloads Janitor"),
+    "Utilities should preserve the Downloads Janitor blueprint name"
   );
 
   await page.locator('[data-category="all"]').click();
@@ -53,15 +73,15 @@ try {
   });
 
   await page.locator("#buildSelected").click();
-  assert(await page.locator("#contextPanel").isVisible(), "Building should return to station context");
+  assert(await page.locator("#contextPanel").isVisible(), "Building should return to workspace context");
   assert(
-    (await page.locator("#contextTitle").textContent()) === "Schedule Station",
-    "The built station should become the selected context"
+    (await page.locator("#contextTitle").textContent()) === "Calendar Ops",
+    "The built workspace should retain its blueprint name in context"
   );
   assert(
     (await page.locator('[data-facility="calendar"] .facility-status').textContent()) ===
       "Setup required",
-    "A new station must be explicit that guided setup is still required"
+    "A new building must be explicit that guided setup is still required"
   );
   assert(
     (await page.locator("#toastStack").textContent()).includes("connections stay off"),
@@ -71,7 +91,7 @@ try {
   await page.locator("#contextBuild").click();
   assert(await page.locator("#catalogPanel").isVisible(), "Context should reopen the Build Catalog");
   await page.locator("#closeCatalog").click();
-  assert(await page.locator("#contextPanel").isVisible(), "Closing catalog should restore station context");
+  assert(await page.locator("#contextPanel").isVisible(), "Closing catalog should restore workspace context");
   assert(!(await page.locator("#buildPreview").isVisible()), "Closing catalog should clear placement preview");
 
   const desktopViewport = await page.evaluate(() => ({
@@ -103,7 +123,7 @@ try {
   }));
   assert(!mobileViewport.horizontalOverflow, "Mobile prototype should not overflow horizontally");
 
-  console.log("PASS: building blueprint catalog, placement, build receipt, and responsive layout");
+  console.log("PASS: named workspace buildings, functional emblems, placement, receipt, and responsive layout");
 } finally {
   await browser.close();
 }
