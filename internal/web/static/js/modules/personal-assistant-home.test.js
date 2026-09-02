@@ -16,6 +16,16 @@ test('Today view distinguishes active, paused, partial, no-model, empty, and fat
   assert.equal(personalAssistantTodayView({ state: 'unavailable' }).unavailable, true);
 });
 
+test('Today distinguishes a hired assistant with no HQ from needs_hire and does not claim active/paused', () => {
+  const view = personalAssistantTodayView({ state: 'needs_hq', display_name: 'Atlas' });
+  assert.equal(view.needsHQ, true);
+  assert.equal(view.needsHire, false);
+  assert.equal(view.active, false);
+  assert.equal(view.paused, false);
+  assert.equal(view.partial, false);
+  assert.equal(view.displayName, 'Atlas');
+});
+
 test('Today section never turns unavailable into a healthy empty all-clear', () => {
   assert.match(
     todaySectionRows({ health: { status: 'unavailable' }, items: [] })[0].title,

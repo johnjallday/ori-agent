@@ -94,9 +94,25 @@ func onWorkspaceAction(action string) func(ws.Event) bool {
 	}
 }
 
-// PersonalAssistantQuests returns the cohort-specific graph. Hiring already
-// builds Personal HQ, so the first useful mission is planning the user's day.
-// The legacy graph remains byte-for-byte unchanged for ineligible installs.
+// BuildHQQuestID is the optional Personal HQ objective. In the personal-assistant
+// cohort it is the first featured mission: hiring creates the assistant but not
+// its home base, so building HQ is what the user does next.
+const BuildHQQuestID = "t2-build-hq"
+
+// GuidedBuildHQActionURL opens Ori's deterministic Personal HQ walkthrough.
+//
+// It deliberately carries no focus parameter. A focus would preselect the
+// reserved landmark; the quest highlights it and waits for the user's own
+// selection, which is the first real interaction of the walkthrough.
+const GuidedBuildHQActionURL = "/?quest=build-hq"
+
+// PersonalAssistantQuests returns the cohort-specific graph.
+//
+// Hiring creates the assistant profile and relationship only, so the featured
+// order is Build My HQ and then Plan my first day. Build My HQ is the ordinary
+// optional t2-build-hq record — this cohort only points its action at Ori's
+// guided walkthrough. The legacy graph remains byte-for-byte unchanged for
+// ineligible installs.
 func PersonalAssistantQuests() []Quest {
 	firstDay := Quest{
 		ID: PersonalAssistantFirstDayQuestID, Tier: 1,
@@ -107,7 +123,17 @@ func PersonalAssistantQuests() []Quest {
 		ActionLabel: "Start first quest",
 		Optional:    true,
 	}
-	return append([]Quest{firstDay}, BuiltinQuests()...)
+	quests := append([]Quest{firstDay}, BuiltinQuests()...)
+	for i := range quests {
+		if quests[i].ID != BuildHQQuestID {
+			continue
+		}
+		// Only the destination changes. Completion still comes from a real
+		// designation, never from opening the quest.
+		quests[i].ActionURL = GuidedBuildHQActionURL
+		quests[i].Why = "Give your assistant a home base — where it prepares your daily brief, tracks follow-ups, and helps you resume work."
+	}
+	return quests
 }
 
 // BuiltinQuests returns the ordered built-in quest graph. The slice is freshly

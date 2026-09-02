@@ -63,8 +63,20 @@ func (h *Handler) CreatePersonalAssistantHQ(ctx context.Context, workspaceName s
 	} else if found {
 		return existing, nil
 	}
-	if _, exists := h.agentStore.GetAgent(name); exists {
-		return nil, fmt.Errorf("%w: %q collides with an existing global agent", personalhq.ErrAssistantNameConflict, name)
+	// A profile under this name normally means a collision. But the assistant is
+	// hired before HQ is built, so its own profile is expected to be here — and
+	// reusing it is the whole point: the HQ entry agent must BE the hired
+	// assistant, not a second agent that shares its name.
+	//
+	// Reuse is permitted only on provable bounded provenance. An unrelated
+	// same-named profile, or one owned by another relationship, stays a conflict.
+	// The template path then attaches the existing profile as-is, preserving its
+	// saved prompt, model, and appearance rather than recreating or mutating it
+	// from this request.
+	if existing, exists := h.agentStore.GetAgent(name); exists {
+		if _, err := assertProfileOwnedByAssistant(name, existing, options.AssistantID); err != nil {
+			return nil, err
+		}
 	}
 
 	workspaceID, err := h.createFromTemplate(

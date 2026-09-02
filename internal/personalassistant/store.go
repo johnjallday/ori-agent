@@ -56,14 +56,16 @@ func (s *SQLiteStore) CreateState(ctx context.Context, state *State) (*State, er
 			mandate, focus_areas_json, first_assignment_status,
 			last_hire_request_id, hire_payload_hash, hire_payload_json, repair_step,
 			rename_from_name, rename_to_name, rename_step,
+			last_hq_request_id, hq_payload_hash, hq_payload_json,
 			state_version, hired_at, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
 	`, normalized.UserID, normalized.AssistantID, normalized.Status, normalized.DisplayName,
 		appearanceJSON, normalized.HQWorkspaceID, normalized.HQEntryAgentInstanceID,
 		normalized.GlobalAgentProfileName, normalized.Mandate, focusJSON,
 		normalized.FirstAssignmentStatus, normalized.LastHireRequestID,
 		normalized.HirePayloadHash, normalized.HirePayloadJSON, normalized.RepairStep,
 		normalized.RenameFromName, normalized.RenameToName, normalized.RenameStep,
+		normalized.LastHQRequestID, normalized.HQPayloadHash, normalized.HQPayloadJSON,
 		normalized.HiredAt, normalized.CreatedAt, normalized.UpdatedAt)
 	if err != nil {
 		if isConstraintError(err) {
@@ -89,6 +91,7 @@ func (s *SQLiteStore) GetState(ctx context.Context, userID string) (*State, erro
 			mandate, focus_areas_json, first_assignment_status,
 			last_hire_request_id, hire_payload_hash, hire_payload_json, repair_step,
 			rename_from_name, rename_to_name, rename_step,
+			last_hq_request_id, hq_payload_hash, hq_payload_json,
 			state_version, hired_at, created_at, updated_at
 		FROM personal_assistant_state WHERE user_id = ?
 	`, userID)
@@ -114,6 +117,7 @@ func (s *SQLiteStore) UpdateState(ctx context.Context, state *State, expectedVer
 			focus_areas_json = ?, first_assignment_status = ?, last_hire_request_id = ?,
 			hire_payload_hash = ?, hire_payload_json = ?, repair_step = ?,
 			rename_from_name = ?, rename_to_name = ?, rename_step = ?,
+			last_hq_request_id = ?, hq_payload_hash = ?, hq_payload_json = ?,
 			state_version = state_version + 1, hired_at = ?, updated_at = ?
 		WHERE user_id = ? AND assistant_id = ? AND state_version = ?
 	`, normalized.Status, normalized.DisplayName, appearanceJSON, normalized.HQWorkspaceID,
@@ -121,6 +125,7 @@ func (s *SQLiteStore) UpdateState(ctx context.Context, state *State, expectedVer
 		normalized.Mandate, focusJSON, normalized.FirstAssignmentStatus,
 		normalized.LastHireRequestID, normalized.HirePayloadHash, normalized.HirePayloadJSON, normalized.RepairStep,
 		normalized.RenameFromName, normalized.RenameToName, normalized.RenameStep,
+		normalized.LastHQRequestID, normalized.HQPayloadHash, normalized.HQPayloadJSON,
 		normalized.HiredAt, now, normalized.UserID, normalized.AssistantID, expectedVersion)
 	if err != nil {
 		return nil, fmt.Errorf("personal assistant: update state: %w", err)
@@ -148,6 +153,7 @@ func (s *SQLiteStore) scanState(ctx context.Context, query string, args ...any) 
 		&state.Mandate, &focusJSON, &firstStatus, &state.LastHireRequestID,
 		&state.HirePayloadHash, &state.HirePayloadJSON, &state.RepairStep,
 		&state.RenameFromName, &state.RenameToName, &renameStep,
+		&state.LastHQRequestID, &state.HQPayloadHash, &state.HQPayloadJSON,
 		&state.StateVersion, &hiredAt, &state.CreatedAt, &state.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -614,6 +620,33 @@ func normalizeState(input *State) (*State, string, string, error) {
 	}
 	if len(state.HirePayloadJSON) > MaxAssignmentJSONBytes || (state.HirePayloadJSON != "" && !json.Valid([]byte(state.HirePayloadJSON))) {
 		return nil, "", "", errors.New("personal assistant: invalid hire operation payload")
+	}
+	if state.LastHQRequestID, err = validateOpaqueID("last hq request id", state.LastHQRequestID, false); err != nil {
+		return nil, "", "", err
+	}
+	if state.HQPayloadHash, err = validateOpaqueID("hq payload hash", state.HQPayloadHash, false); err != nil {
+		return nil, "", "", err
+	}
+	if len(state.HQPayloadJSON) > MaxAssignmentJSONBytes || (state.HQPayloadJSON != "" && !json.Valid([]byte(state.HQPayloadJSON))) {
+		return nil, "", "", errors.New("personal assistant: invalid hq operation payload")
+	}
+	// The provisional payload only exists to make one in-flight HQ request
+	// replay-safe. Without a claimed request ID it is orphaned data, and a
+	// completed setup keeps the receipt (request ID plus hash) only — the
+	// canonical Daily Brief config owns the schedule from then on.
+	if state.LastHQRequestID == "" && (state.HQPayloadHash != "" || state.HQPayloadJSON != "") {
+		return nil, "", "", errors.New("personal assistant: hq operation payload without a request id")
+	}
+	if state.Status == StatusActive || state.Status == StatusPaused {
+		state.HQPayloadJSON = ""
+	}
+	// Enforce the post-hire setup invariants at the write boundary. This is
+	// scoped to the two new statuses on purpose: they have no pre-amendment
+	// writers, so tightening them cannot reject a row an older release wrote.
+	if state.Status == StatusAwaitingHQ || state.Status == StatusProvisioningHQ {
+		if err := state.ValidateStateInvariants(); err != nil {
+			return nil, "", "", err
+		}
 	}
 	if state.RepairStep, err = NormalizeRepairStep(string(state.RepairStep)); err != nil {
 		return nil, "", "", err

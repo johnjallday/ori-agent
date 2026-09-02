@@ -243,3 +243,31 @@ func TestRenameCoordinator_AllowsCaseOnlyRename(t *testing.T) {
 		t.Fatalf("case-only profile rename missing: %+v", profiles.agents)
 	}
 }
+
+// TestRenameCoordinator_PreHQRelationshipReportsNeedsHQNotRepair pins that
+// renaming a hired assistant with no Personal HQ yet is refused with the
+// honest setup signal, never the repair-needed story.
+func TestRenameCoordinator_PreHQRelationshipReportsNeedsHQNotRepair(t *testing.T) {
+	ctx := context.Background()
+	sqliteStore, _ := newTestStore(t)
+	store := &renameStateStore{Store: sqliteStore}
+	state := awaitingHQTestState("local", "assistant-a")
+	if _, err := store.CreateState(ctx, state); err != nil {
+		t.Fatal(err)
+	}
+	hq := &fakeHQReader{}
+	briefs := &continuityBriefs{}
+	read := NewService(store, hq, briefs,
+		fakeModelReader{availability: SourceAvailability{Available: true, Status: AvailabilityAvailable}})
+	continuity := NewContinuityService(store, hq, briefs, read)
+	profiles := &renameProfiles{agents: map[string]*agent.Agent{"Atlas": {}}}
+	coordinator := NewRenameCoordinator(continuity, profiles, workspace.NewInMemoryStore())
+	coordinator.SetSessionRenamer(&renameSessions{})
+
+	if _, err := coordinator.Rename(ctx, "local", "Nova", 1); !errors.Is(err, ErrNeedsHQ) {
+		t.Fatalf("Rename error = %v; want ErrNeedsHQ", err)
+	}
+	if _, ok := profiles.agents["Nova"]; ok {
+		t.Fatal("a refused rename still touched the global profile")
+	}
+}

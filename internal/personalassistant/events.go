@@ -15,14 +15,25 @@ import (
 type EventType string
 
 const (
-	EventStateViewed        EventType = "personal_assistant.state_viewed"
-	EventHireStarted        EventType = "personal_assistant.hire_started"
-	EventHireCompleted      EventType = "personal_assistant.hire_completed"
-	EventPreviewCreated     EventType = "personal_assistant.preview_created"
-	EventFirstResultDone    EventType = "personal_assistant.first_result_completed"
-	EventTodayViewed        EventType = "personal_assistant.today_viewed"
-	EventPaused             EventType = "personal_assistant.paused"
-	EventResumed            EventType = "personal_assistant.resumed"
+	EventStateViewed     EventType = "personal_assistant.state_viewed"
+	EventHireStarted     EventType = "personal_assistant.hire_started"
+	EventHireCompleted   EventType = "personal_assistant.hire_completed"
+	EventPreviewCreated  EventType = "personal_assistant.preview_created"
+	EventFirstResultDone EventType = "personal_assistant.first_result_completed"
+	EventTodayViewed     EventType = "personal_assistant.today_viewed"
+	EventPaused          EventType = "personal_assistant.paused"
+	EventResumed         EventType = "personal_assistant.resumed"
+
+	// Guided Personal HQ Map quest lifecycle. These carry the same closed
+	// vocabulary as every other PAF event: stable IDs, closed state names,
+	// counts, durations, and reason codes. They never carry the assistant's
+	// name, the HQ name, Daily Brief schedule fields, mandate text, a filesystem
+	// path, or any quest copy.
+	EventHQQuestStarted  EventType = "personal_assistant.hq_quest_started"
+	EventHQQuestDeferred EventType = "personal_assistant.hq_quest_deferred"
+	EventHQSetupStarted  EventType = "personal_assistant.hq_setup_started"
+	EventHQActivated     EventType = "personal_assistant.hq_activated"
+
 	EventRecoverableFailure EventType = "personal_assistant.recoverable_failure"
 )
 
@@ -43,6 +54,8 @@ var (
 		EventStateViewed: true, EventHireStarted: true, EventHireCompleted: true,
 		EventPreviewCreated: true, EventFirstResultDone: true, EventTodayViewed: true,
 		EventPaused: true, EventResumed: true, EventRecoverableFailure: true,
+		EventHQQuestStarted: true, EventHQQuestDeferred: true,
+		EventHQSetupStarted: true, EventHQActivated: true,
 	}
 	eventFieldAllowlist = map[string]bool{
 		eventFieldName: true, eventFieldAssistantID: true, eventFieldWorkspaceID: true,
@@ -51,6 +64,7 @@ var (
 	}
 	eventStates = map[string]bool{
 		"needs_hire": true, "not_hired": true, "hiring": true,
+		"awaiting_hq": true, "provisioning_hq": true, "needs_hq": true,
 		"active": true, "paused": true, "repair_needed": true, "not_started": true,
 		"previewed": true, "applying": true, "completed": true, "failed": true,
 		"superseded": true,
@@ -58,6 +72,9 @@ var (
 	eventReasonCodes = map[string]bool{
 		"assignment_partial": true, "hq_creation": true, "designation": true,
 		"daily_brief_config": true, "relationship_finalization": true,
+		"profile_creation": true, "hq_not_built": true, "hq_setup_incomplete": true,
+		// Why a walkthrough ended, as a code rather than as quest copy.
+		"user_deferred": true, "quest_resumed": true,
 	}
 )
 
@@ -85,6 +102,41 @@ func RecordStateViewed(projection *Projection) {
 	}
 	recordEvent(EventStateViewed, EventData{
 		AssistantID: projection.AssistantID, WorkspaceID: projection.HQWorkspaceID, State: string(projection.State),
+	})
+}
+
+// RecordHQQuestStarted notes that the guided Map quest was opened or resumed.
+// Opening the quest is not a consequence: nothing is created, and nothing about
+// the assistant's name or the quest copy is recorded.
+func RecordHQQuestStarted(assistantID, reasonCode string) {
+	recordEvent(EventHQQuestStarted, EventData{
+		AssistantID: assistantID, State: string(StatusAwaitingHQ), ReasonCode: reasonCode,
+	})
+}
+
+// RecordHQQuestDeferred notes an explicit Do this later. The quest remains
+// resumable, so this is recorded as a recoverable lifecycle step.
+func RecordHQQuestDeferred(assistantID string) {
+	recordEvent(EventHQQuestDeferred, EventData{
+		AssistantID: assistantID, State: string(StatusAwaitingHQ),
+		ReasonCode: "user_deferred", Recoverable: true,
+	})
+}
+
+// RecordHQSetupStarted notes one claimed Build My HQ operation.
+func RecordHQSetupStarted(assistantID string) {
+	recordEvent(EventHQSetupStarted, EventData{
+		AssistantID: assistantID, State: string(StatusProvisioningHQ),
+	})
+}
+
+// RecordHQActivated notes that a confirmed HQ setup finished and the
+// relationship became active. workspaceID is the canonical HQ ID, never its
+// name or folder path.
+func RecordHQActivated(assistantID, workspaceID string, durationMS int64) {
+	recordEvent(EventHQActivated, EventData{
+		AssistantID: assistantID, WorkspaceID: workspaceID,
+		State: string(StatusActive), DurationMS: durationMS,
 	})
 }
 

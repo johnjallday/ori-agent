@@ -130,3 +130,44 @@ func TestContinuity_PauseResumePreservesRoutineAndRecordsAcrossRestart(t *testin
 		t.Fatalf("resume=%+v err=%v", resumed, err)
 	}
 }
+
+// TestContinuity_PreHQRelationshipReportsNeedsHQNotRepair pins that a genuinely
+// hired assistant with no Personal HQ gets a bounded setup response — never the
+// repair-needed story, which would misdescribe an expected setup stage.
+func TestContinuity_PreHQRelationshipReportsNeedsHQNotRepair(t *testing.T) {
+	store, _ := newTestStore(t)
+	ctx := context.Background()
+	state := awaitingHQTestState("local", "assistant-a")
+	created, err := store.CreateState(ctx, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hq := &fakeHQReader{}
+	briefs := &continuityBriefs{}
+	read := NewService(store, hq, briefs,
+		fakeModelReader{availability: SourceAvailability{Available: true, Status: AvailabilityAvailable}})
+	service := NewContinuityService(store, hq, briefs, read)
+
+	mandate := "Keep this week visible."
+	if _, err := service.UpdateWorkingAgreement(ctx, "local", WorkingAgreementUpdate{
+		IfVersion: created.StateVersion, Mandate: &mandate,
+	}); !errors.Is(err, ErrNeedsHQ) {
+		t.Fatalf("UpdateWorkingAgreement error = %v; want ErrNeedsHQ", err)
+	}
+	if _, err := service.Pause(ctx, "local", created.StateVersion); !errors.Is(err, ErrNeedsHQ) {
+		t.Fatalf("Pause error = %v; want ErrNeedsHQ", err)
+	}
+	if _, err := service.Resume(ctx, "local", created.StateVersion); !errors.Is(err, ErrNeedsHQ) {
+		t.Fatalf("Resume error = %v; want ErrNeedsHQ", err)
+	}
+	if briefs.updateHits != 0 {
+		t.Fatalf("a refused mutation still touched the brief store (%d hits)", briefs.updateHits)
+	}
+	persisted, err := store.GetState(ctx, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != StatusAwaitingHQ || persisted.StateVersion != created.StateVersion {
+		t.Fatalf("a refused mutation changed the relationship: %+v", persisted)
+	}
+}

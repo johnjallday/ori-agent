@@ -92,20 +92,32 @@ const featuredMissionIDs = new Set([
   FIRST_MISSION_QUEST_ID
 ]);
 
-// Mission 01 is intentionally featured independently of the current tier. PAF
-// installs receive Plan my first day; legacy installs retain Build My HQ. Both
-// are ordinary server-owned quest records—the helper changes presentation only.
+// Mission 01 is intentionally featured independently of the current tier.
+//
+// Ordering: Build My HQ comes first and stays featured while it is available or
+// skipped, because the hired assistant has no home base until the user builds
+// one. Plan my first day is featured only once HQ is genuinely complete — a
+// designation, never merely opening the quest. Legacy installs carry no
+// first-day quest and so keep their existing Build My HQ presentation.
 export function firstMissionView(status) {
   const quests = (status?.tiers || []).flatMap(tier => tier.quests || []);
-  const quest =
-    quests.find(candidate => candidate.id === PERSONAL_ASSISTANT_FIRST_MISSION_QUEST_ID) ||
-    quests.find(candidate => candidate.id === FIRST_MISSION_QUEST_ID);
+  const buildHQ = quests.find(candidate => candidate.id === FIRST_MISSION_QUEST_ID);
+  const firstDay = quests.find(
+    candidate => candidate.id === PERSONAL_ASSISTANT_FIRST_MISSION_QUEST_ID
+  );
 
+  // While HQ is unresolved or deliberately deferred it remains the mission.
+  const quest = buildHQ && buildHQ.status !== 'completed' ? buildHQ : firstDay || buildHQ;
   if (!quest || status?.all_complete) return { visible: false };
 
   const completed = quest.status === 'completed';
   const skipped = quest.status === 'skipped';
   const personalFirstDay = quest.id === PERSONAL_ASSISTANT_FIRST_MISSION_QUEST_ID;
+  // A first-day quest in the graph is what identifies the personal-assistant
+  // cohort; legacy installs must keep their own copy and destination.
+  const guidedHQ = quest.id === FIRST_MISSION_QUEST_ID && !!firstDay;
+  const resumable = personalFirstDay || guidedHQ;
+
   return {
     visible: true,
     questID: quest.id,
@@ -116,19 +128,21 @@ export function firstMissionView(status) {
     statusLabel: completed
       ? 'Complete'
       : skipped
-        ? personalFirstDay
+        ? resumable
           ? 'Saved for later'
           : 'Not set up'
         : 'Ready',
     actionLabel:
-      skipped && personalFirstDay
-        ? 'Resume first quest'
+      skipped && resumable
+        ? personalFirstDay
+          ? 'Resume first quest'
+          : 'Resume quest'
         : quest.action_label || (personalFirstDay ? 'Start first quest' : 'Build My HQ'),
     actionURL:
       quest.action_url ||
       (personalFirstDay ? '/?quest=plan-first-day' : '/workspaces?view=map&focus=personal-hq'),
     showAction: !completed,
-    showSkip: personalFirstDay && !!quest.optional && !completed && !skipped
+    showSkip: resumable && !!quest.optional && !completed && !skipped
   };
 }
 

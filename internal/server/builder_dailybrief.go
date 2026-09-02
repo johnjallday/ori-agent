@@ -220,10 +220,21 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		b.personalHQService,
 		store,
 		&personalAssistantModelReader{configManager: b.configManager, llmFactory: b.llmFactory},
-	)
+	).WithProfileReader(personalassistant.NewAgentStoreProfileReader(b.st))
+	// The session handler implements both creation seams: the profile-only one a
+	// fresh hire uses, and the combined HQ one that only finishes operations
+	// persisted before hiring and HQ creation were split.
 	b.personalAssistantHire = personalassistant.NewHireCoordinator(
+		b.personalAssistantStore, b.sessionHandler, b.sessionHandler,
+		b.personalHQService, briefService,
+	)
+	// The guided Map quest's consequence. It reuses this exact Daily Brief
+	// service and Personal HQ service, so there is one canonical owner of the
+	// schedule and one owner of the designation.
+	b.personalAssistantHQSetup = personalassistant.NewHQSetupCoordinator(
 		b.personalAssistantStore, b.sessionHandler,
 		b.personalHQService, briefService,
+		personalassistant.NewAgentStoreProfileReader(b.st),
 	)
 	b.personalAssignment = personalassistant.NewAssignmentService(b.personalAssistantStore)
 	assignmentTickets := workspace.NewTicketService(b.workspaceStore)
@@ -234,6 +245,7 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	b.personalAssignment.SetBriefService(briefService)
 	b.personalAssistantHandler = personalassistanthttp.NewHandler(b.personalAssistantService, b.userProvider)
 	b.personalAssistantHandler.SetHireService(b.personalAssistantHire)
+	b.personalAssistantHandler.SetHQSetupService(b.personalAssistantHQSetup)
 	b.personalAssistantHandler.SetAssignmentService(b.personalAssignment)
 	continuity := personalassistant.NewContinuityService(
 		b.personalAssistantStore, b.personalHQService, briefService, b.personalAssistantService,

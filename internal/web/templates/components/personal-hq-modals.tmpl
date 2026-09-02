@@ -15,6 +15,13 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
+        <!--
+          hqBuildAssistantIntro is filled in by personal-hq-onboarding.js only
+          when a hired assistant is waiting for a home base. It names the
+          relationship this workspace will belong to. Hidden otherwise, so the
+          legacy Build My HQ flow is unchanged.
+        -->
+        <p class="hq-build-intro hq-build-assistant-intro" id="hqBuildAssistantIntro" hidden></p>
         <p class="hq-build-intro">
           Your HQ uses a curated snapshot of your workspaces for its daily brief — it does
           not automatically get every project's tools or files.

@@ -50,6 +50,52 @@ func (c *PersonalAssistantWorkContext) NeedsHireOrRepair() bool {
 	return c != nil && !c.ReadyForWork()
 }
 
+// NeedsHQ reports a genuinely hired relationship that has no Personal HQ yet.
+// It is honest, not "hire": the assistant profile already exists.
+func (c *PersonalAssistantWorkContext) NeedsHQ() bool {
+	return c != nil && (c.State == "needs_hq" || c.State == "provisioning_hq")
+}
+
+// PersonalAssistantSetupGuidance is the deterministic, no-model response for a
+// relationship that is not ready for work. It never says "hire" for a
+// relationship that has already been hired, and it never invents another
+// generic "repair" message when the real gap is a missing Personal HQ.
+type PersonalAssistantSetupGuidance struct {
+	Response   string
+	ActionID   string
+	ActionType string
+	Label      string
+	Href       string
+}
+
+// personalAssistantSetupGuidance classifies a not-ready-for-work relationship
+// into the one honest thing to tell the user and where to send them. It is the
+// single source both /api/home-assistant/ask and RoutePrompt draw from, so the
+// two surfaces cannot drift into different stories about the same state.
+func personalAssistantSetupGuidance(c *PersonalAssistantWorkContext) PersonalAssistantSetupGuidance {
+	if c != nil && c.NeedsHQ() {
+		label := "Build Personal HQ"
+		response := "Give your assistant a home base before sending work. Nothing has been routed or changed."
+		if c.State == "provisioning_hq" {
+			response = "Finish building your Personal HQ before sending work. Nothing has been routed or changed."
+			label = "Finish building Personal HQ"
+		}
+		return PersonalAssistantSetupGuidance{
+			Response: response, ActionID: "nav-personal-assistant-build-hq",
+			ActionType: HomeActionNavigate, Label: label, Href: "/?quest=build-hq",
+		}
+	}
+	label := "Hire your personal assistant"
+	if c != nil && (c.State == "hiring" || c.State == "repair_needed") {
+		label = "Resume personal assistant setup"
+	}
+	return PersonalAssistantSetupGuidance{
+		Response: "Finish personal assistant setup before sending work. Nothing has been routed or changed.",
+		ActionID: "nav-personal-assistant-setup", ActionType: HomeActionNavigate,
+		Label: label, Href: "/?hire=1",
+	}
+}
+
 // PersonalAssistantContextProvider is implemented by the server over the PAF,
 // user-profile, and designated-HQ memory read stores. Ori Guide deliberately
 // does not receive this dependency.

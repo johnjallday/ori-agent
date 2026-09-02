@@ -65,10 +65,31 @@ type AssistantWorkspaceResult struct {
 	GlobalAgentProfileName string
 }
 
+// AssistantProfileResult identifies the durable global agent profile a hire
+// created or took ownership of. There is no workspace: hiring an assistant and
+// building Personal HQ are two separate consequences, and this is the first.
+type AssistantProfileResult struct {
+	GlobalAgentProfileName string
+	// Reused is true when the profile already existed and was provably owned by
+	// this relationship — the replay/restart path, not a name match.
+	Reused bool
+}
+
 // AssistantWorkspaceCreator is the PAF-only extension implemented by
 // sessionhttp.Handler. The legacy WorkspaceCreator method remains unchanged.
 type AssistantWorkspaceCreator interface {
 	CreatePersonalAssistantHQ(ctx context.Context, workspaceName string, options AssistantCreationOptions) (*AssistantWorkspaceResult, error)
+}
+
+// AssistantProfileCreator creates the hired assistant's global agent profile
+// from the canonical personal-ops entry specification without creating a
+// workspace, Journal, membership, tool binding, or any permission change.
+//
+// It is separate from AssistantWorkspaceCreator because the two consequences
+// now happen at different times: hiring creates the profile, and the guided Map
+// quest later builds HQ around it.
+type AssistantProfileCreator interface {
+	CreatePersonalAssistantProfile(ctx context.Context, options AssistantCreationOptions) (*AssistantProfileResult, error)
 }
 
 // WorkspaceWriter is the narrow write contract Setup needs beyond

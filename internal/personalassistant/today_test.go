@@ -186,6 +186,61 @@ func TestTodayService_IndependentFailuresAndStatesRemainTruthful(t *testing.T) {
 	}
 }
 
+// panicTodayBrief/panicTodayFollowUps fail the test loudly if the pre-HQ path
+// ever reaches a canonical store it has no HQ workspace ID to read from.
+type panicTodayBrief struct{}
+
+func (panicTodayBrief) GetCurrent(context.Context, string) (*dailybrief.Revision, error) {
+	panic("today: brief store reached with no hq workspace")
+}
+
+type panicTodayFollowUps struct{}
+
+func (panicTodayFollowUps) List(context.Context, followup.Filter) ([]*followup.FollowUp, error) {
+	panic("today: follow-up store reached with no hq workspace")
+}
+
+func TestTodayService_HiredAssistantWithNoHQNeverFetchesOrImpliesAnEmptyHQ(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	// No workspace store row for hq-1 at all: this proves the service never
+	// tries to load one for a relationship that has no HQ yet.
+	store := workspace.NewInMemoryStore()
+	briefs := panicTodayBrief{}
+	followUps := panicTodayFollowUps{}
+
+	for _, state := range []APIState{APIStateNeedsHQ, APIStateProvisioningHQ} {
+		t.Run(string(state), func(t *testing.T) {
+			projection := &Projection{
+				State: state, StateVersion: 3, DisplayName: "Atlas",
+				Appearance: types.NewAgentAppearance(), Availability: Availability{Model: availableSource()},
+			}
+			service := NewTodayService(stubTodayRelationship{projection: projection}, briefs, store, followUps)
+			service.now = func() time.Time { return now }
+			got, err := service.Get(context.Background(), "local")
+			if err != nil {
+				t.Fatalf("Get: %v", err)
+			}
+			if got.State != "needs_hq" {
+				t.Fatalf("state = %q; want needs_hq", got.State)
+			}
+			if got.DisplayName != "Atlas" || got.StateVersion != 3 {
+				t.Fatalf("hired identity dropped: %+v", got)
+			}
+			if got.HQWorkspaceID != "" || got.HQWorkspaceSlug != "" {
+				t.Fatalf("a nonexistent hq was implied: %+v", got)
+			}
+			if got.Links.PersonalHQ != "/?quest=build-hq" {
+				t.Fatalf("links = %+v; want the guided quest route", got.Links)
+			}
+			// The relationship never had an HQ workspace, so nothing here may
+			// have touched the brief or follow-up stores.
+			if len(got.Brief.Items) != 0 {
+				t.Fatalf("brief fabricated items: %+v", got.Brief)
+			}
+		})
+	}
+}
+
 func TestTodayService_DistinguishesHealthyEmptyAndModelUnavailable(t *testing.T) {
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
 	store := workspace.NewInMemoryStore()

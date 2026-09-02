@@ -15,11 +15,32 @@ import (
 type APIState string
 
 const (
-	APIStateNeedsHire    APIState = "needs_hire"
-	APIStateHiring       APIState = "hiring"
-	APIStateActive       APIState = "active"
-	APIStatePaused       APIState = "paused"
-	APIStateRepairNeeded APIState = "repair_needed"
+	APIStateNeedsHire APIState = "needs_hire"
+	APIStateHiring    APIState = "hiring"
+	// APIStateNeedsHQ is a healthy-but-incomplete relationship: a real assistant
+	// was hired and no Personal HQ has been built yet. The named identity is
+	// fully readable; HQ-backed sources report not_configured/hq_not_built.
+	APIStateNeedsHQ APIState = "needs_hq"
+	// APIStateProvisioningHQ is a confirmed HQ setup that is partially applied
+	// and resumable through the same HQ request ID.
+	APIStateProvisioningHQ APIState = "provisioning_hq"
+	APIStateActive         APIState = "active"
+	APIStatePaused         APIState = "paused"
+	APIStateRepairNeeded   APIState = "repair_needed"
+)
+
+// Stable next_action values. Clients switch on these rather than on copy.
+const (
+	NextActionHire          = "hire"
+	NextActionResumeHire    = "resume_hire"
+	NextActionBuildHQ       = "build_hq"
+	NextActionResumeHQ      = "resume_hq_setup"
+	NextActionRepair        = "repair"
+	NextActionRetryRename   = "retry_rename"
+	NextActionResume        = "resume"
+	NextActionAsk           = "ask"
+	ReasonHQNotBuilt        = "hq_not_built"
+	ReasonHQSetupIncomplete = "hq_setup_incomplete"
 )
 
 // AvailabilityStatus explains one canonical dependency without fabricating an
@@ -114,6 +135,7 @@ type Service struct {
 	personalHQ PersonalHQReader
 	briefs     BriefConfigReader
 	models     ModelAvailabilityReader
+	profiles   ProfileReader
 }
 
 // NewService constructs the read service. Optional sources are reported as
@@ -122,9 +144,20 @@ func NewService(store Store, hq PersonalHQReader, briefs BriefConfigReader, mode
 	return &Service{store: store, personalHQ: hq, briefs: briefs, models: models}
 }
 
+// WithProfileReader attaches the narrow global-profile provenance seam used to
+// validate a hired assistant that has no Personal HQ yet. Before HQ exists
+// there is no workspace or entry instance to validate against, so the profile
+// marker is the only thing that proves the relationship still owns a real agent.
+func (s *Service) WithProfileReader(profiles ProfileReader) *Service {
+	if s != nil {
+		s.profiles = profiles
+	}
+	return s
+}
+
 // Get projects the current relationship without mutating any dependency.
 func (s *Service) Get(ctx context.Context, userID string) (*Projection, error) {
-	projection := &Projection{State: APIStateNeedsHire, NextAction: "hire"}
+	projection := &Projection{State: APIStateNeedsHire, NextAction: NextActionHire}
 	if s != nil {
 		projection.Availability.Model = s.modelAvailability()
 	}
@@ -134,7 +167,7 @@ func (s *Service) Get(ctx context.Context, userID string) (*Projection, error) {
 	state, err := s.store.GetState(ctx, strings.TrimSpace(userID))
 	if errors.Is(err, ErrNotFound) {
 		projection.State = APIStateNeedsHire
-		projection.NextAction = "hire"
+		projection.NextAction = NextActionHire
 		projection.Availability.PersonalHQ = notConfiguredSource("not_hired")
 		projection.Availability.AgentInstance = notConfiguredSource("not_hired")
 		projection.Availability.DailyBrief = notConfiguredSource("not_hired")
@@ -158,14 +191,14 @@ func (s *Service) Get(ctx context.Context, userID string) (*Projection, error) {
 	switch state.Status {
 	case StatusNotHired:
 		projection.State = APIStateNeedsHire
-		projection.NextAction = "hire"
+		projection.NextAction = NextActionHire
 		projection.Availability.PersonalHQ = notConfiguredSource("not_hired")
 		projection.Availability.AgentInstance = notConfiguredSource("not_hired")
 		projection.Availability.DailyBrief = notConfiguredSource("not_hired")
 		return projection, nil
 	case StatusHiring:
 		projection.State = APIStateHiring
-		projection.NextAction = "resume_hire"
+		projection.NextAction = NextActionResumeHire
 		projection.HQWorkspaceID = state.HQWorkspaceID
 		projection.HQAgentInstanceID = state.HQEntryAgentInstanceID
 		projection.GlobalAgentProfile = state.GlobalAgentProfileName
@@ -173,9 +206,15 @@ func (s *Service) Get(ctx context.Context, userID string) (*Projection, error) {
 		projection.Availability.AgentInstance = notConfiguredSource("hire_incomplete")
 		projection.Availability.DailyBrief = notConfiguredSource("hire_incomplete")
 		return projection, nil
+	case StatusAwaitingHQ, StatusProvisioningHQ:
+		// A genuinely hired assistant with no HQ. The identity is real and is
+		// reported in full; the HQ-backed sources are honestly not_configured
+		// rather than unavailable (which would read as breakage) or healthy-empty
+		// (which would be a fabrication).
+		return s.projectPreHQ(state, projection)
 	case StatusRepairNeeded:
 		projection.State = APIStateRepairNeeded
-		projection.NextAction = "repair"
+		projection.NextAction = NextActionRepair
 		projection.Availability.PersonalHQ = unavailableSource("persisted_repair_state")
 		projection.Availability.AgentInstance = unavailableSource("persisted_repair_state")
 		projection.Availability.DailyBrief = unavailableSource("persisted_repair_state")
@@ -189,7 +228,7 @@ func (s *Service) Get(ctx context.Context, userID string) (*Projection, error) {
 
 	if !s.validateHQ(ctx, userID, state, projection) {
 		projection.State = APIStateRepairNeeded
-		projection.NextAction = "repair"
+		projection.NextAction = NextActionRepair
 		// Do not expose mandate, memory-adjacent focus, or a possibly foreign HQ
 		// ID when canonical ownership/linkage does not validate.
 		projection.HQWorkspaceID = ""
@@ -207,15 +246,78 @@ func (s *Service) Get(ctx context.Context, userID string) (*Projection, error) {
 	projection.FocusAreas = append([]FocusArea(nil), state.FocusAreas...)
 	if state.RenameStep != RenameNone {
 		projection.State = APIStateRepairNeeded
-		projection.NextAction = "retry_rename"
+		projection.NextAction = NextActionRetryRename
 	} else if state.Status == StatusPaused {
 		projection.State = APIStatePaused
-		projection.NextAction = "resume"
+		projection.NextAction = NextActionResume
 	} else {
 		projection.State = APIStateActive
-		projection.NextAction = "ask"
+		projection.NextAction = NextActionAsk
 	}
 	s.loadBrief(ctx, userID, state.HQWorkspaceID, projection)
+	return projection, nil
+}
+
+// projectPreHQ reports a hired assistant that has no Personal HQ yet.
+//
+// Invariant: this path must never advertise an HQ workspace ID, an entry
+// instance ID, or a Daily Brief configuration, because none of them can exist
+// before the user confirms Build My HQ. It must also never degrade into
+// repair_needed for the ordinary case — only a genuinely missing or foreign
+// owned profile does that.
+func (s *Service) projectPreHQ(state *State, projection *Projection) (*Projection, error) {
+	preHQRepair := func(source func(string) SourceAvailability, reason string) (*Projection, error) {
+		projection.State = APIStateRepairNeeded
+		projection.NextAction = NextActionRepair
+		projection.HQWorkspaceID = ""
+		projection.HQAgentInstanceID = ""
+		projection.GlobalAgentProfile = ""
+		projection.Mandate = ""
+		projection.FocusAreas = nil
+		projection.Availability.PersonalHQ = source(reason)
+		projection.Availability.AgentInstance = source(reason)
+		projection.Availability.DailyBrief = source(reason)
+		return projection, nil
+	}
+
+	if err := state.ValidateStateInvariants(); err != nil {
+		// A malformed persisted combination is a bounded repair, not something to
+		// smooth over by guessing which half is right.
+		return preHQRepair(unavailableSource, "invalid_persisted_state")
+	}
+	if s.profiles == nil {
+		// Without the provenance seam the owned profile cannot be validated, and
+		// an unvalidated identity is exactly what this state must never invent.
+		return preHQRepair(dependencyErrorSource, "profile_reader_unavailable")
+	}
+	provenance, ok := s.profiles.PersonalAssistantProfileProvenance(state.GlobalAgentProfileName)
+	if !ok {
+		return preHQRepair(unavailableSource, "assistant_profile_missing")
+	}
+	if !provenance.OwnedBy(state.AssistantID) {
+		// A same-named profile owned by someone else — or by nobody — is never a
+		// fallback. Resolving by name is the failure mode this seam exists to stop.
+		return preHQRepair(unavailableSource, "assistant_profile_conflict")
+	}
+
+	reason := ReasonHQNotBuilt
+	projection.State = APIStateNeedsHQ
+	projection.NextAction = NextActionBuildHQ
+	if state.Status == StatusProvisioningHQ {
+		reason = ReasonHQSetupIncomplete
+		projection.State = APIStateProvisioningHQ
+		projection.NextAction = NextActionResumeHQ
+	}
+
+	// The hired identity is validated, so it is returned in full. The profile's
+	// current name comes from the store rather than the PAF row so a rename
+	// outside PAF is reported truthfully instead of as a stale duplicate.
+	projection.GlobalAgentProfile = provenance.Name
+	projection.Mandate = state.Mandate
+	projection.FocusAreas = append([]FocusArea(nil), state.FocusAreas...)
+	projection.Availability.PersonalHQ = notConfiguredSource(reason)
+	projection.Availability.AgentInstance = notConfiguredSource(reason)
+	projection.Availability.DailyBrief = notConfiguredSource(reason)
 	return projection, nil
 }
 
