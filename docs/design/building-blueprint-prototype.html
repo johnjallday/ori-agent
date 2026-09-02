@@ -1,0 +1,1374 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Ori — Building Blueprint Prototype</title>
+  <style>
+    @font-face {
+      font-family: "Chakra Petch";
+      src: url("../../internal/web/static/fonts/chakra-petch-500.woff2") format("woff2");
+      font-weight: 500;
+    }
+    @font-face {
+      font-family: "Chakra Petch";
+      src: url("../../internal/web/static/fonts/chakra-petch-700.woff2") format("woff2");
+      font-weight: 700;
+    }
+    @font-face {
+      font-family: "JetBrains Mono";
+      src: url("../../internal/web/static/fonts/jetbrains-mono-400.woff2") format("woff2");
+      font-weight: 400;
+    }
+    @font-face {
+      font-family: "JetBrains Mono";
+      src: url("../../internal/web/static/fonts/jetbrains-mono-500.woff2") format("woff2");
+      font-weight: 500;
+    }
+
+    :root {
+      --night: #090b0d;
+      --night-2: #0f1316;
+      --night-3: #171c20;
+      --line: #283137;
+      --line-strong: #3f4c53;
+      --ink: #eef1ed;
+      --dim: #9da7a2;
+      --faint: #68736f;
+      --ori: #46d39a;
+      --ori-deep: #0c3c2c;
+      --gold: #e8b54b;
+      --amber: #e3a847;
+      --red: #e76c58;
+      --cyan: #56c5dc;
+      --violet: #9b8ee8;
+      --paper: #e9e4d5;
+      --paper-2: #f4f0e5;
+      --paper-line: #bab4a4;
+      --paper-ink: #19282d;
+      --paper-dim: #5d6968;
+      --display: "Chakra Petch", sans-serif;
+      --mono: "JetBrains Mono", monospace;
+      --shadow: 0 24px 56px -30px rgba(0, 0, 0, .94);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; min-width: 320px; min-height: 100%; }
+    body {
+      margin: 0;
+      overflow: hidden;
+      color: var(--ink);
+      font-family: var(--display);
+      background: var(--night);
+    }
+    button { font: inherit; }
+    button, [role="button"] { -webkit-tap-highlight-color: transparent; }
+    button:focus-visible {
+      outline: 2px solid var(--ori);
+      outline-offset: 3px;
+    }
+    [hidden] { display: none !important; }
+
+    .svg-defs {
+      position: absolute;
+      width: 0;
+      height: 0;
+      overflow: hidden;
+    }
+
+    .prototype {
+      display: grid;
+      grid-template-rows: 58px minmax(0, 1fr);
+      width: 100%;
+      height: 100vh;
+      min-height: 680px;
+      background:
+        radial-gradient(circle at 18% 0%, rgba(70, 211, 154, .09), transparent 28rem),
+        var(--night);
+    }
+
+    /* Global shell: intentionally close to Ori's application chrome so the
+       experiment is about the workspace metaphor, not a fictional new app. */
+    .topbar {
+      position: relative;
+      z-index: 50;
+      display: grid;
+      grid-template-columns: 240px minmax(0, 1fr) 240px;
+      align-items: center;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(12, 15, 17, .97);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, .24);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: max-content;
+      border: 0;
+      background: transparent;
+      color: var(--ori);
+      cursor: pointer;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: .12em;
+    }
+    .brand-mark {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      border: 1px solid rgba(70, 211, 154, .5);
+      background: var(--ori-deep);
+      clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+      font: 700 12px/1 var(--mono);
+    }
+    .primary-nav {
+      display: flex;
+      align-self: stretch;
+      justify-content: center;
+      gap: 28px;
+    }
+    .nav-item {
+      position: relative;
+      display: grid;
+      place-items: center;
+      border: 0;
+      background: transparent;
+      color: var(--dim);
+      cursor: pointer;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+    .nav-item.is-active { color: var(--ink); }
+    .nav-item.is-active::after {
+      position: absolute;
+      right: 18%;
+      bottom: 0;
+      left: 18%;
+      height: 2px;
+      background: var(--ori);
+      box-shadow: 0 0 9px rgba(70, 211, 154, .62);
+      content: "";
+    }
+    .top-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    .prototype-badge,
+    .local-badge {
+      border: 1px solid var(--line);
+      color: var(--faint);
+      background: #111517;
+      font: 500 8px/1 var(--mono);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .prototype-badge { padding: 7px 9px; border-color: rgba(232, 181, 75, .3); color: var(--gold); }
+    .local-badge { display: flex; align-items: center; gap: 7px; padding: 8px 10px; }
+    .local-badge::before {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--ori);
+      box-shadow: 0 0 8px var(--ori);
+      content: "";
+    }
+
+    .workspace-shell {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 438px;
+      min-height: 0;
+      padding: 14px;
+      gap: 14px;
+    }
+
+    /* Map */
+    .map-panel {
+      position: relative;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      background: var(--night-2);
+      clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+      box-shadow: var(--shadow);
+    }
+    .map-header {
+      position: relative;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      min-height: 88px;
+      padding: 15px 18px;
+      border-bottom: 1px solid var(--line);
+      background:
+        linear-gradient(100deg, rgba(70, 211, 154, .07), transparent 30%),
+        var(--night-3);
+    }
+    .map-heading { min-width: 0; }
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin: 0 0 5px;
+      color: var(--ori);
+      font: 500 9px/1.2 var(--mono);
+      letter-spacing: .15em;
+      text-transform: uppercase;
+    }
+    .eyebrow::before {
+      width: 5px;
+      height: 5px;
+      background: currentColor;
+      content: "";
+      transform: rotate(45deg);
+    }
+    .map-heading h1 {
+      margin: 0;
+      color: #f1f4f0;
+      font-size: clamp(22px, 2.1vw, 31px);
+      line-height: 1;
+      letter-spacing: .035em;
+      text-transform: uppercase;
+    }
+    .map-heading p {
+      margin: 6px 0 0;
+      color: var(--dim);
+      font-size: 12px;
+    }
+    .map-actions { display: flex; align-items: center; gap: 8px; }
+    .view-switch {
+      display: flex;
+      padding: 3px;
+      border: 1px solid var(--line);
+      background: var(--night);
+    }
+    .view-switch button {
+      min-height: 34px;
+      padding: 0 12px;
+      border: 0;
+      color: var(--faint);
+      background: transparent;
+      cursor: pointer;
+      font: 500 9px/1 var(--mono);
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+    .view-switch button.is-active { color: var(--ink); background: var(--night-3); }
+    .build-button {
+      min-height: 42px;
+      padding: 0 16px;
+      border: 1px solid var(--ori-deep);
+      color: var(--ori);
+      background: rgba(70, 211, 154, .08);
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .05em;
+      clip-path: polygon(9px 0, 100% 0, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%, 0 9px);
+    }
+    .build-button:hover { color: #06130e; background: var(--ori); }
+
+    .campus-map {
+      position: relative;
+      min-height: 0;
+      overflow: hidden;
+      isolation: isolate;
+      background:
+        linear-gradient(rgba(255, 255, 255, .038) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, .028) 1px, transparent 1px),
+        radial-gradient(circle at 48% 44%, rgba(70, 211, 154, .055), transparent 43%),
+        linear-gradient(135deg, #111619, #0b0e10);
+      background-size: 38px 38px, 38px 38px, auto, auto;
+    }
+    .campus-map::after {
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      opacity: .3;
+      background:
+        linear-gradient(115deg, transparent 0 45%, rgba(255,255,255,.035) 45% 45.5%, transparent 45.5% 100%),
+        linear-gradient(18deg, transparent 0 61%, rgba(255,255,255,.025) 61% 61.4%, transparent 61.4% 100%);
+      content: "";
+      pointer-events: none;
+    }
+    .district-label {
+      position: absolute;
+      z-index: 1;
+      padding: 5px 8px;
+      border: 1px solid rgba(70, 211, 154, .18);
+      color: rgba(70, 211, 154, .62);
+      background: rgba(9, 11, 13, .82);
+      font: 400 8px/1 var(--mono);
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    .district-label.personal { top: 7%; left: 6%; }
+    .district-label.work { right: 6%; bottom: 8%; color: rgba(155, 142, 232, .72); border-color: rgba(155, 142, 232, .2); }
+    .map-routes {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      width: 100%;
+      height: 100%;
+      color: #435149;
+      pointer-events: none;
+    }
+    .map-routes path {
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.1;
+      stroke-dasharray: 3 6;
+      vector-effect: non-scaling-stroke;
+    }
+    .map-routes circle { fill: var(--night); stroke: currentColor; stroke-width: 1; }
+
+    .facility {
+      --facility-color: var(--ori);
+      position: absolute;
+      z-index: 4;
+      left: var(--x);
+      top: var(--y);
+      display: grid;
+      width: 150px;
+      padding: 0;
+      border: 0;
+      color: var(--facility-color);
+      background: transparent;
+      cursor: pointer;
+      text-align: center;
+      transform: translate(-50%, -50%);
+      transition: transform .16s ease, filter .16s ease;
+    }
+    .facility:hover { z-index: 8; transform: translate(-50%, calc(-50% - 5px)); filter: brightness(1.12); }
+    .facility.is-selected::before {
+      position: absolute;
+      top: 41px;
+      left: 50%;
+      width: 126px;
+      height: 58px;
+      border: 1px solid var(--facility-color);
+      border-radius: 50%;
+      box-shadow: 0 0 26px color-mix(in srgb, var(--facility-color) 28%, transparent);
+      content: "";
+      transform: translate(-50%, -50%);
+    }
+    .facility-art {
+      position: relative;
+      z-index: 1;
+      justify-self: center;
+      width: 120px;
+      height: 84px;
+      overflow: visible;
+      filter: drop-shadow(0 13px 8px rgba(0, 0, 0, .56));
+    }
+    .facility-name {
+      position: relative;
+      z-index: 2;
+      overflow: hidden;
+      margin-top: -2px;
+      color: #edf0ec;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .07em;
+      text-overflow: ellipsis;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .facility-type {
+      margin-top: 2px;
+      color: var(--faint);
+      font: 400 8px/1 var(--mono);
+      letter-spacing: .11em;
+      text-transform: uppercase;
+    }
+    .facility-status {
+      display: inline-flex;
+      justify-self: center;
+      align-items: center;
+      gap: 5px;
+      margin-top: 6px;
+      padding: 4px 7px;
+      border: 1px solid var(--line);
+      color: var(--dim);
+      background: rgba(9, 11, 13, .88);
+      font: 400 8px/1 var(--mono);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .facility-status::before {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--ori);
+      box-shadow: 0 0 7px var(--ori);
+      content: "";
+    }
+    .facility[data-status="setup"] .facility-status { color: var(--gold); border-color: rgba(232, 181, 75, .28); }
+    .facility[data-status="setup"] .facility-status::before { background: var(--gold); box-shadow: 0 0 7px var(--gold); }
+    .facility[data-variant="hq"] { --facility-color: var(--gold); }
+    .facility[data-variant="mail"] { --facility-color: #68c8b6; }
+    .facility[data-variant="calendar"] { --facility-color: #65bce5; }
+    .facility[data-variant="research"] { --facility-color: var(--violet); }
+    .facility[data-variant="studio"] { --facility-color: #e5966b; }
+    .facility[data-variant="depot"] { --facility-color: #c3b56d; }
+    .facility[data-variant="issues"] { --facility-color: #8fb3cc; }
+    .facility[data-variant="travel"] { --facility-color: #65c6cb; }
+
+    .build-preview {
+      --facility-color: #65bce5;
+      position: absolute;
+      z-index: 6;
+      left: 79%;
+      top: 45%;
+      display: grid;
+      width: 156px;
+      justify-items: center;
+      color: var(--facility-color);
+      pointer-events: none;
+      transform: translate(-50%, -50%);
+    }
+    .build-preview::before {
+      position: absolute;
+      top: 13px;
+      width: 140px;
+      height: 82px;
+      border: 1px dashed currentColor;
+      background: repeating-linear-gradient(45deg, color-mix(in srgb, currentColor 5%, transparent) 0 6px, transparent 6px 12px);
+      clip-path: polygon(50% 0, 100% 34%, 100% 67%, 50% 100%, 0 67%, 0 34%);
+      content: "";
+    }
+    .build-preview .facility-art { opacity: .42; filter: grayscale(.15) drop-shadow(0 12px 7px rgba(0, 0, 0, .4)); }
+    .preview-label {
+      position: relative;
+      z-index: 2;
+      margin-top: 2px;
+      padding: 5px 8px;
+      border: 1px dashed currentColor;
+      color: currentColor;
+      background: rgba(9, 11, 13, .9);
+      font: 500 8px/1 var(--mono);
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+    .build-preview[data-variant="mail"] { --facility-color: #68c8b6; }
+    .build-preview[data-variant="calendar"] { --facility-color: #65bce5; }
+    .build-preview[data-variant="research"] { --facility-color: var(--violet); }
+    .build-preview[data-variant="studio"] { --facility-color: #e5966b; }
+    .build-preview[data-variant="depot"] { --facility-color: #c3b56d; }
+    .build-preview[data-variant="issues"] { --facility-color: #8fb3cc; }
+    .build-preview[data-variant="travel"] { --facility-color: #65c6cb; }
+
+    .map-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      min-height: 48px;
+      padding: 8px 14px;
+      border-top: 1px solid var(--line);
+      color: var(--faint);
+      background: #101417;
+      font: 400 8px/1.4 var(--mono);
+      letter-spacing: .07em;
+      text-transform: uppercase;
+    }
+    .legend { display: flex; flex-wrap: wrap; gap: 15px; }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .legend i { width: 6px; height: 6px; border-radius: 50%; background: var(--ori); box-shadow: 0 0 6px currentColor; }
+    .legend .setup i { background: var(--gold); }
+    .map-controls { display: flex; gap: 5px; }
+    .map-controls button {
+      min-width: 30px;
+      height: 28px;
+      border: 1px solid var(--line);
+      color: var(--dim);
+      background: var(--night);
+      cursor: pointer;
+      font: 500 10px/1 var(--mono);
+    }
+
+    /* Blueprint folio. The warm drafting paper makes "choosing architecture"
+       feel materially different from operating the finished campus. */
+    .side-panel {
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      color: var(--paper-ink);
+      border: 1px solid #aaa492;
+      background:
+        linear-gradient(rgba(31, 55, 60, .055) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(31, 55, 60, .04) 1px, transparent 1px),
+        var(--paper);
+      background-size: 20px 20px, 20px 20px, auto;
+      clip-path: polygon(0 0, calc(100% - 15px) 0, 100% 15px, 100% 100%, 15px 100%, 0 calc(100% - 15px));
+      box-shadow: var(--shadow);
+    }
+    .folio {
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr) auto;
+      height: 100%;
+      min-height: 0;
+    }
+    .folio-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 17px 18px 13px;
+      border-bottom: 1px solid var(--paper-line);
+      background: rgba(244, 240, 229, .72);
+    }
+    .folio-index {
+      margin-bottom: 6px;
+      color: #367458;
+      font: 500 8px/1 var(--mono);
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    .folio-head h2 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1;
+      letter-spacing: .03em;
+      text-transform: uppercase;
+    }
+    .folio-head p { margin: 7px 0 0; color: var(--paper-dim); font-size: 11px; line-height: 1.35; }
+    .folio-close {
+      display: grid;
+      width: 32px;
+      height: 32px;
+      flex: 0 0 auto;
+      place-items: center;
+      border: 1px solid var(--paper-line);
+      color: var(--paper-dim);
+      background: rgba(255,255,255,.22);
+      cursor: pointer;
+      font: 500 14px/1 var(--mono);
+    }
+    .folio-close:hover { color: var(--paper-ink); border-color: var(--paper-ink); }
+
+    .blueprint-detail {
+      display: grid;
+      grid-template-columns: 92px minmax(0, 1fr);
+      gap: 12px;
+      padding: 13px 18px 14px;
+      border-bottom: 1px solid var(--paper-line);
+      background: rgba(244, 240, 229, .56);
+    }
+    .detail-drawing {
+      position: relative;
+      display: grid;
+      min-height: 102px;
+      place-items: center;
+      border: 1px solid #7e948e;
+      color: #246d55;
+      background:
+        linear-gradient(rgba(36, 109, 85, .09) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(36, 109, 85, .07) 1px, transparent 1px),
+        rgba(255,255,255,.19);
+      background-size: 11px 11px;
+    }
+    .detail-drawing::after {
+      position: absolute;
+      right: 5px;
+      bottom: 4px;
+      color: #47766a;
+      content: "ELEV. 01";
+      font: 400 6px/1 var(--mono);
+      letter-spacing: .08em;
+    }
+    .detail-drawing .facility-art { width: 83px; height: 64px; filter: none; }
+    .detail-copy { min-width: 0; }
+    .detail-kicker { color: #47766a; font: 500 7px/1 var(--mono); letter-spacing: .13em; text-transform: uppercase; }
+    .detail-title-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin-top: 3px; }
+    .detail-title-row h3 { margin: 0; font-size: 17px; line-height: 1.05; text-transform: uppercase; }
+    .detail-title-row span { color: var(--paper-dim); font: 400 8px/1 var(--mono); text-transform: uppercase; }
+    .detail-description { margin: 6px 0 8px; color: var(--paper-dim); font-size: 10px; line-height: 1.45; }
+    .detail-facts { display: flex; flex-wrap: wrap; gap: 5px; }
+    .detail-facts span {
+      padding: 3px 5px;
+      border: 1px solid var(--paper-line);
+      color: #435452;
+      background: rgba(255,255,255,.18);
+      font: 400 7px/1 var(--mono);
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    .catalog-area { min-height: 0; overflow: auto; padding: 13px 14px 16px; }
+    .category-tabs { display: flex; gap: 5px; margin-bottom: 11px; overflow-x: auto; padding: 1px; }
+    .category-tabs button {
+      min-height: 29px;
+      padding: 0 9px;
+      white-space: nowrap;
+      border: 1px solid var(--paper-line);
+      color: var(--paper-dim);
+      background: rgba(255,255,255,.18);
+      cursor: pointer;
+      font: 500 7px/1 var(--mono);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .category-tabs button.is-active { color: #f4f1e6; border-color: #275d4b; background: #275d4b; }
+    .blueprint-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .blueprint-card {
+      position: relative;
+      display: grid;
+      grid-template-columns: 51px minmax(0, 1fr);
+      min-height: 80px;
+      gap: 8px;
+      padding: 8px;
+      overflow: hidden;
+      border: 1px solid var(--paper-line);
+      color: var(--paper-ink);
+      background: rgba(249, 246, 237, .5);
+      cursor: pointer;
+      text-align: left;
+      clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+    }
+    .blueprint-card:hover { border-color: #658178; background: rgba(255,255,255,.45); }
+    .blueprint-card.is-selected { border-color: #27684f; box-shadow: inset 3px 0 0 #27684f; background: rgba(70, 145, 109, .1); }
+    .card-drawing {
+      display: grid;
+      align-self: stretch;
+      min-height: 56px;
+      place-items: center;
+      border-right: 1px solid rgba(116, 113, 104, .28);
+      color: #376e5d;
+    }
+    .card-drawing .facility-art { width: 51px; height: 47px; filter: none; }
+    .card-copy { min-width: 0; align-self: center; }
+    .card-copy strong { display: block; overflow: hidden; font-size: 10px; letter-spacing: .025em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+    .card-copy small { display: block; margin-top: 3px; color: var(--paper-dim); font: 400 7px/1.3 var(--mono); }
+    .card-state { display: inline-flex; margin-top: 6px; padding: 2px 4px; border: 1px solid #7f8e88; color: #4d605a; font: 500 6px/1 var(--mono); letter-spacing: .07em; text-transform: uppercase; }
+    .card-state.recommended { color: #286148; border-color: #5e8b78; }
+    .card-state.built { color: #5f665f; border-style: dashed; }
+
+    .folio-foot {
+      padding: 12px 15px 14px;
+      border-top: 1px solid var(--paper-line);
+      background: var(--paper-2);
+    }
+    .access-note {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 9px;
+      align-items: start;
+      margin-bottom: 10px;
+      padding: 8px 9px;
+      border: 1px solid #c1b27b;
+      background: rgba(232, 181, 75, .1);
+      color: #5b553f;
+      font-size: 9px;
+      line-height: 1.4;
+    }
+    .access-note b { color: #69571e; font: 500 8px/1.4 var(--mono); text-transform: uppercase; }
+    .folio-actions { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+    .folio-secondary,
+    .folio-primary {
+      min-height: 40px;
+      padding: 0 13px;
+      cursor: pointer;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .035em;
+    }
+    .folio-secondary { border: 1px solid var(--paper-line); color: var(--paper-dim); background: transparent; }
+    .folio-primary {
+      border: 1px solid #245b47;
+      color: #f4f1e6;
+      background: #245b47;
+      clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+    }
+    .folio-primary:hover { background: #173e30; }
+
+    /* Context mode replaces the folio without changing the map's information
+       architecture: selecting a finished station returns to normal operation. */
+    .context-panel {
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr) auto;
+      height: 100%;
+      min-height: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 30% 0%, rgba(70, 211, 154, .08), transparent 22rem),
+        var(--night-3);
+    }
+    .context-head { padding: 18px; border-bottom: 1px solid var(--line); }
+    .context-head-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .context-head h2 { margin: 4px 0 0; font-size: 24px; letter-spacing: .03em; text-transform: uppercase; }
+    .context-head p { margin: 7px 0 0; color: var(--dim); font-size: 11px; line-height: 1.45; }
+    .context-art {
+      display: grid;
+      min-height: 150px;
+      place-items: center;
+      border-bottom: 1px solid var(--line);
+      color: var(--cyan);
+      background:
+        linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px),
+        #111619;
+      background-size: 22px 22px;
+    }
+    .context-art .facility-art { width: 166px; height: 118px; }
+    .context-body { min-height: 0; overflow: auto; padding: 16px 18px; }
+    .context-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 14px;
+      padding: 10px;
+      border: 1px solid rgba(232, 181, 75, .28);
+      color: var(--gold);
+      background: rgba(232, 181, 75, .07);
+      font: 500 9px/1.4 var(--mono);
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+    .context-section { margin-top: 16px; }
+    .context-section h3 { margin: 0 0 7px; color: var(--faint); font: 500 8px/1 var(--mono); letter-spacing: .13em; text-transform: uppercase; }
+    .context-list { display: grid; gap: 7px; }
+    .context-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); color: var(--dim); font-size: 10px; }
+    .context-row strong { color: var(--ink); font-weight: 500; text-align: right; }
+    .context-foot { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 14px 18px 18px; border-top: 1px solid var(--line); }
+    .context-foot button { min-height: 42px; cursor: pointer; font-size: 10px; font-weight: 700; }
+    .context-open { border: 1px solid var(--ori-deep); color: #06130e; background: var(--ori); }
+    .context-build { border: 1px solid var(--line-strong); color: var(--ink); background: var(--night); }
+
+    .toast-stack {
+      position: fixed;
+      z-index: 100;
+      right: 22px;
+      bottom: 20px;
+      display: grid;
+      gap: 8px;
+      pointer-events: none;
+    }
+    .toast {
+      min-width: 280px;
+      max-width: 390px;
+      padding: 12px 14px;
+      border: 1px solid rgba(70, 211, 154, .4);
+      color: var(--ink);
+      background: rgba(13, 18, 17, .97);
+      box-shadow: 0 18px 35px rgba(0,0,0,.42);
+      font-size: 10px;
+      line-height: 1.45;
+      animation: toast-in .2s ease-out both;
+    }
+    .toast strong { color: var(--ori); }
+    @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
+    }
+
+    @media (max-width: 980px) {
+      body { overflow: auto; }
+      .prototype { height: auto; min-height: 100vh; }
+      .topbar { grid-template-columns: 1fr auto; }
+      .primary-nav { display: none; }
+      .workspace-shell { display: block; min-height: calc(100vh - 58px); padding: 8px; }
+      .map-panel { min-height: 620px; height: calc(100vh - 74px); }
+      .side-panel {
+        position: fixed;
+        z-index: 60;
+        inset: 58px 0 0;
+        width: auto;
+        border: 0;
+        clip-path: none;
+      }
+      .side-panel[data-mobile-hidden="true"] { display: none; }
+      .blueprint-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .prototype-badge { display: none; }
+    }
+
+    @media (max-width: 650px) {
+      .prototype { min-height: 720px; }
+      .topbar { padding: 0 12px; }
+      .local-badge { display: none; }
+      .workspace-shell { padding: 0; }
+      .map-panel { min-height: 662px; height: calc(100vh - 58px); border-inline: 0; clip-path: none; }
+      .map-header { min-height: 96px; padding: 12px; align-items: flex-start; }
+      .map-heading p { max-width: 230px; }
+      .view-switch { display: none; }
+      .build-button { padding: 0 11px; }
+      .campus-map { min-height: 510px; }
+      .facility { width: 125px; transform: translate(-50%, -50%) scale(.86); }
+      .facility:hover { transform: translate(-50%, -50%) scale(.86); }
+      .facility[style*="--x: 64%"] { --x: 72% !important; }
+      .build-preview { left: 73%; top: 48%; transform: translate(-50%, -50%) scale(.82); }
+      .district-label { display: none; }
+      .map-footer { padding: 8px 10px; }
+      .map-footer > span { display: none; }
+      .legend { gap: 9px; }
+      .side-panel { inset: 58px 0 0; overflow: auto; background-color: var(--paper); }
+      .folio { min-height: 780px; height: auto; }
+      .folio-head { position: sticky; top: 0; z-index: 3; }
+      .blueprint-detail { grid-template-columns: 78px minmax(0, 1fr); }
+      .detail-drawing { min-height: 94px; }
+      .catalog-area { overflow: visible; }
+      .blueprint-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .folio-foot { position: sticky; bottom: 0; z-index: 3; box-shadow: 0 -12px 22px rgba(55, 50, 38, .08); }
+      .context-panel { min-height: calc(100vh - 58px); }
+      .toast-stack { right: 12px; bottom: 12px; left: 12px; }
+      .toast { min-width: 0; width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Curated, inert silhouettes. They communicate workspace type only; live
+       status remains text + LEDs outside the artwork. -->
+  <svg class="svg-defs" aria-hidden="true">
+    <defs>
+      <symbol id="facility-hq" viewBox="0 0 120 88">
+        <polygon points="60 50 112 70 60 87 8 70" fill="currentColor" opacity=".16" stroke="currentColor" stroke-opacity=".52"/>
+        <polygon points="20 54 60 70 60 84 20 68" fill="currentColor" opacity=".45"/>
+        <polygon points="100 54 60 70 60 84 100 68" fill="currentColor" opacity=".28"/>
+        <polygon points="60 40 100 54 60 70 20 54" fill="currentColor" opacity=".7"/>
+        <polygon points="38 31 60 40 60 67 38 58" fill="currentColor" opacity=".88"/>
+        <polygon points="82 31 60 40 60 67 82 58" fill="currentColor" opacity=".56"/>
+        <polygon points="60 20 84 30 60 42 36 30" fill="currentColor"/>
+        <path d="M60 21V5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <path d="M60 7l15 5-15 5z" fill="currentColor"/>
+        <circle cx="60" cy="4" r="2.4" fill="currentColor"/>
+        <path d="M27 60v11M93 60v11M45 55v18M75 55v18" fill="none" stroke="currentColor" stroke-width="2" opacity=".7"/>
+      </symbol>
+      <symbol id="facility-mail" viewBox="0 0 120 88">
+        <polygon points="60 51 110 69 60 87 10 69" fill="currentColor" opacity=".13" stroke="currentColor" stroke-opacity=".42"/>
+        <polygon points="20 42 60 55 60 78 20 65" fill="currentColor" opacity=".38"/>
+        <polygon points="100 42 60 55 60 78 100 65" fill="currentColor" opacity=".62"/>
+        <polygon points="60 27 104 41 60 57 16 41" fill="currentColor" opacity=".88"/>
+        <path d="M30 38l30 11 30-11M30 38l30-3 30 3" fill="none" stroke="#0d1718" stroke-opacity=".72" stroke-width="2"/>
+        <polygon points="74 57 90 52 90 65 74 70" fill="#0d1718" opacity=".58"/>
+        <polygon points="30 52 45 57 45 67 30 62" fill="#0d1718" opacity=".42"/>
+        <path d="M94 32V16h9M97 18h10v8H97" fill="none" stroke="currentColor" stroke-width="2"/>
+      </symbol>
+      <symbol id="facility-calendar" viewBox="0 0 120 88">
+        <polygon points="60 52 109 70 60 87 11 70" fill="currentColor" opacity=".13" stroke="currentColor" stroke-opacity=".45"/>
+        <polygon points="17 48 60 61 60 79 17 66" fill="currentColor" opacity=".38"/>
+        <polygon points="103 48 60 61 60 79 103 66" fill="currentColor" opacity=".58"/>
+        <polygon points="17 48 60 35 103 48 60 62" fill="currentColor" opacity=".76"/>
+        <polygon points="46 21 60 26 60 62 46 57" fill="currentColor" opacity=".9"/>
+        <polygon points="74 21 60 26 60 62 74 57" fill="currentColor" opacity=".58"/>
+        <polygon points="60 10 78 20 60 28 42 20" fill="currentColor"/>
+        <circle cx="60" cy="36" r="7" fill="#101619" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M60 31v5l4 2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M60 10V3" stroke="currentColor" stroke-width="2"/>
+      </symbol>
+      <symbol id="facility-research" viewBox="0 0 120 88">
+        <polygon points="60 54 109 70 60 87 11 70" fill="currentColor" opacity=".13" stroke="currentColor" stroke-opacity=".45"/>
+        <polygon points="26 48 60 59 60 79 26 68" fill="currentColor" opacity=".38"/>
+        <polygon points="94 48 60 59 60 79 94 68" fill="currentColor" opacity=".58"/>
+        <polygon points="26 48 60 37 94 48 60 60" fill="currentColor" opacity=".72"/>
+        <path d="M39 39c0-14 10-25 21-25s21 11 21 25z" fill="currentColor" opacity=".9"/>
+        <path d="M42 38c3-11 10-18 18-18 9 0 16 7 18 18M60 17v21" fill="none" stroke="#101619" stroke-opacity=".7" stroke-width="1.5"/>
+        <path d="M71 22l18-9 4 7-18 10" fill="currentColor"/>
+        <circle cx="92" cy="16" r="3" fill="currentColor" opacity=".7"/>
+      </symbol>
+      <symbol id="facility-studio" viewBox="0 0 120 88">
+        <polygon points="60 53 109 70 60 87 11 70" fill="currentColor" opacity=".13" stroke="currentColor" stroke-opacity=".45"/>
+        <polygon points="20 41 60 55 60 78 20 65" fill="currentColor" opacity=".4"/>
+        <polygon points="100 41 60 55 60 78 100 65" fill="currentColor" opacity=".6"/>
+        <path d="M17 41l20-16 0 10 21-16 0 10 21-15 0 11 24 16-43 15z" fill="currentColor" opacity=".9"/>
+        <path d="M37 25v10M58 19v10M79 14v11" stroke="#101619" stroke-opacity=".58" stroke-width="2"/>
+        <polygon points="70 56 91 49 91 65 70 72" fill="#101619" opacity=".55"/>
+        <path d="M74 59l13-4M74 64l13-4" stroke="currentColor" stroke-width="1.4" opacity=".7"/>
+      </symbol>
+      <symbol id="facility-depot" viewBox="0 0 120 88">
+        <polygon points="60 54 110 70 60 87 10 70" fill="currentColor" opacity=".13" stroke="currentColor" stroke-opacity=".45"/>
+        <polygon points="18 41 60 56 60 79 18 64" fill="currentColor" opacity=".4"/>
+        <polygon points="102 41 60 56 60 79 102 64" fill="currentColor" opacity=".58"/>
+        <polygon points="18 41 60 26 102 41 60 57" fill="currentColor" opacity=".88"/>
+        <path d="M29 46v20M39 50v20M49 53v20M71 53v20M81 50v20M91 46v20" stroke="#101619" stroke-opacity=".5" stroke-width="2"/>
+        <rect x="48" y="17" width="24" height="10" fill="currentColor"/>
+        <path d="M52 22h16" stroke="#101619" stroke-width="2"/>
+      </symbol>
+      <symbol id="facility-issues" viewBox="0 0 120 88">
+        <polygon points="60 52 108 70 60 87 12 70" fill="currentColor" opacity=".13" stroke="currentColor" stroke-opacity=".45"/>
+        <polygon points="25 38 60 51 60 78 25 65" fill="currentColor" opacity=".4"/>
+        <polygon points="95 38 60 51 60 78 95 65" fill="currentColor" opacity=".58"/>
+        <polygon points="25 38 43 24 77 24 95 38 60 52" fill="currentColor" opacity=".88"/>
+        <polygon points="43 24 50 13 70 13 77 24" fill="currentColor"/>
+        <path d="M34 47l17 6v12l-17-6zM69 53l17-6v12l-17 6z" fill="#101619" opacity=".54"/>
+        <circle cx="60" cy="33" r="5" fill="#101619" opacity=".58"/>
+        <circle cx="60" cy="33" r="1.4" fill="currentColor"/>
+      </symbol>
+      <symbol id="facility-travel" viewBox="0 0 120 88">
+        <polygon points="60 54 109 70 60 87 11 70" fill="currentColor" opacity=".13" stroke="currentColor" stroke-opacity=".45"/>
+        <polygon points="22 45 60 57 60 79 22 67" fill="currentColor" opacity=".4"/>
+        <polygon points="98 45 60 57 60 79 98 67" fill="currentColor" opacity=".58"/>
+        <polygon points="22 45 60 32 98 45 60 58" fill="currentColor" opacity=".84"/>
+        <polygon points="48 20 60 15 72 20 72 50 60 55 48 50" fill="currentColor" opacity=".9"/>
+        <path d="M60 15V4M60 7l18 6-18 5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <path d="M52 31l8-4 8 4-8 4z" fill="#101619" opacity=".6"/>
+      </symbol>
+      <symbol id="facility-custom" viewBox="0 0 120 88">
+        <polygon points="60 53 108 70 60 87 12 70" fill="currentColor" opacity=".13" stroke="currentColor" stroke-opacity=".45"/>
+        <polygon points="30 42 60 53 60 78 30 67" fill="currentColor" opacity=".4"/>
+        <polygon points="90 42 60 53 60 78 90 67" fill="currentColor" opacity=".58"/>
+        <polygon points="60 19 97 41 60 55 23 41" fill="currentColor" opacity=".88"/>
+        <path d="M46 55v18M74 55v18" stroke="#101619" stroke-opacity=".55" stroke-width="4"/>
+      </symbol>
+    </defs>
+  </svg>
+
+  <div class="prototype">
+    <header class="topbar">
+      <button class="brand" type="button" aria-label="Ori home">
+        <span class="brand-mark">O</span>
+        <span>ORI AGENT</span>
+      </button>
+      <nav class="primary-nav" aria-label="Primary navigation">
+        <button class="nav-item is-active" type="button">Home</button>
+        <button class="nav-item" type="button">Agents</button>
+        <button class="nav-item" type="button">Action Center</button>
+        <button class="nav-item" type="button">Vaults</button>
+      </nav>
+      <div class="top-actions">
+        <span class="prototype-badge">Design prototype</span>
+        <span class="local-badge">Local</span>
+      </div>
+    </header>
+
+    <main class="workspace-shell">
+      <section class="map-panel" aria-labelledby="campusTitle">
+        <header class="map-header">
+          <div class="map-heading">
+            <div class="eyebrow">Workspace architecture · 04 active</div>
+            <h1 id="campusTitle">Your Ori Campus</h1>
+            <p>Each station is a workspace. Its blueprint defines the crew, tools, and operating boundary.</p>
+          </div>
+          <div class="map-actions">
+            <div class="view-switch" aria-label="Workspace view">
+              <button class="is-active" type="button" aria-pressed="true">Map</button>
+              <button type="button" aria-pressed="false">Directory</button>
+            </div>
+            <button id="openCatalog" class="build-button" type="button">＋ Build station</button>
+          </div>
+        </header>
+
+        <div id="campusMap" class="campus-map" aria-label="Workspace campus map">
+          <span class="district-label personal">Personal operations</span>
+          <span class="district-label work">Project district</span>
+          <svg class="map-routes" viewBox="0 0 1000 620" preserveAspectRatio="none" aria-hidden="true">
+            <path d="M180 180 C300 110 430 120 555 175 S710 270 800 300"/>
+            <path d="M180 180 C245 290 225 390 255 465 S410 500 550 465"/>
+            <path d="M550 465 C640 410 735 370 800 300"/>
+            <circle cx="180" cy="180" r="4"/><circle cx="555" cy="175" r="4"/><circle cx="255" cy="465" r="4"/><circle cx="550" cy="465" r="4"/>
+          </svg>
+
+          <button class="facility is-selected" data-facility="hq" data-variant="hq" data-status="ready" style="--x:18%;--y:29%" type="button" aria-label="Personal HQ, ready">
+            <svg class="facility-art" aria-hidden="true"><use href="#facility-hq"></use></svg>
+            <span class="facility-name">Personal HQ</span>
+            <span class="facility-type">Foundation · 2 crew</span>
+            <span class="facility-status">Ready</span>
+          </button>
+
+          <button class="facility" data-facility="mail" data-variant="mail" data-status="setup" style="--x:56%;--y:28%" type="button" aria-label="Mailroom, setup required">
+            <svg class="facility-art" aria-hidden="true"><use href="#facility-mail"></use></svg>
+            <span class="facility-name">Mailroom</span>
+            <span class="facility-type">Email Ops · 2 crew</span>
+            <span class="facility-status">Setup required</span>
+          </button>
+
+          <button class="facility" data-facility="research" data-variant="research" data-status="ready" style="--x:25%;--y:73%" type="button" aria-label="Research Lab, ready">
+            <svg class="facility-art" aria-hidden="true"><use href="#facility-research"></use></svg>
+            <span class="facility-name">Research Lab</span>
+            <span class="facility-type">Project · 3 crew</span>
+            <span class="facility-status">Ready</span>
+          </button>
+
+          <button class="facility" data-facility="studio" data-variant="studio" data-status="ready" style="--x:55%;--y:73%" type="button" aria-label="Publishing Studio, ready">
+            <svg class="facility-art" aria-hidden="true"><use href="#facility-studio"></use></svg>
+            <span class="facility-name">Publishing Studio</span>
+            <span class="facility-type">Project · 4 crew</span>
+            <span class="facility-status">Ready</span>
+          </button>
+
+          <div id="buildPreview" class="build-preview" data-variant="calendar" aria-hidden="true">
+            <svg class="facility-art"><use id="previewUse" href="#facility-calendar"></use></svg>
+            <span id="previewLabel" class="preview-label">Schedule Station · preview</span>
+          </div>
+        </div>
+
+        <footer class="map-footer">
+          <div class="legend" aria-label="Map status legend">
+            <span><i></i>Ready</span>
+            <span class="setup"><i></i>Setup required</span>
+            <span>Dashed site = placement preview</span>
+          </div>
+          <span>Blueprints shape workspaces · status stays explicit</span>
+          <div class="map-controls" aria-label="Map controls">
+            <button type="button" aria-label="Zoom out">−</button>
+            <button type="button" aria-label="Reset zoom">100</button>
+            <button type="button" aria-label="Zoom in">＋</button>
+          </div>
+        </footer>
+      </section>
+
+      <aside id="sidePanel" class="side-panel" aria-live="polite">
+        <section id="catalogPanel" class="folio" aria-labelledby="catalogTitle">
+          <header class="folio-head">
+            <div>
+              <div class="folio-index">Architectural folio · Built-in blueprints</div>
+              <h2 id="catalogTitle">Build Catalog</h2>
+              <p>Choose an operating boundary first. Tailor its team and connections before anything is created.</p>
+            </div>
+            <button id="closeCatalog" class="folio-close" type="button" aria-label="Close Build Catalog">×</button>
+          </header>
+
+          <section class="blueprint-detail" aria-label="Selected blueprint">
+            <div id="detailDrawing" class="detail-drawing">
+              <svg class="facility-art" aria-hidden="true"><use id="detailUse" href="#facility-calendar"></use></svg>
+            </div>
+            <div class="detail-copy">
+              <div class="detail-kicker">Selected blueprint</div>
+              <div class="detail-title-row">
+                <h3 id="detailName">Schedule Station</h3>
+                <span id="detailSubtitle">Calendar Ops</span>
+              </div>
+              <p id="detailDescription" class="detail-description">See your day and week, spot conflicts, find open windows, and prepare for meetings.</p>
+              <div id="detailFacts" class="detail-facts">
+                <span>2 crew</span><span>Calendar connector</span><span>Recommended</span>
+              </div>
+            </div>
+          </section>
+
+          <div class="catalog-area">
+            <div id="categoryTabs" class="category-tabs" role="tablist" aria-label="Blueprint categories">
+              <button class="is-active" type="button" data-category="all" role="tab" aria-selected="true">All</button>
+              <button type="button" data-category="foundation" role="tab" aria-selected="false">Foundation</button>
+              <button type="button" data-category="everyday" role="tab" aria-selected="false">Everyday</button>
+              <button type="button" data-category="projects" role="tab" aria-selected="false">Projects</button>
+              <button type="button" data-category="utilities" role="tab" aria-selected="false">Utilities</button>
+            </div>
+            <div id="blueprintGrid" class="blueprint-grid" role="list" aria-label="Workspace blueprints"></div>
+          </div>
+
+          <footer class="folio-foot">
+            <div class="access-note">
+              <b>Access boundary</b>
+              <span id="accessText">Choosing this blueprint connects nothing. During setup you choose which calendars it may read; creating or changing an event remains explicitly confirmed.</span>
+            </div>
+            <div class="folio-actions">
+              <button id="blueprintDetails" class="folio-secondary" type="button">Review crew &amp; access</button>
+              <button id="buildSelected" class="folio-primary" type="button">Build Schedule Station</button>
+            </div>
+          </footer>
+        </section>
+
+        <section id="contextPanel" class="context-panel" aria-labelledby="contextTitle" hidden>
+          <header class="context-head">
+            <div class="context-head-top">
+              <div>
+                <div class="eyebrow">Workspace station</div>
+                <h2 id="contextTitle">Personal HQ</h2>
+              </div>
+              <button id="contextMenu" class="folio-close" type="button" aria-label="More workspace actions">···</button>
+            </div>
+            <p id="contextDescription">Your daily orientation and routing workspace. HQ keeps priorities visible without inheriting every specialist connection.</p>
+          </header>
+          <div id="contextArt" class="context-art">
+            <svg class="facility-art" aria-hidden="true"><use id="contextUse" href="#facility-hq"></use></svg>
+          </div>
+          <div class="context-body">
+            <div id="contextStatus" class="context-status">Ready · Daily orientation available</div>
+            <section class="context-section">
+              <h3>Station architecture</h3>
+              <div class="context-list">
+                <div class="context-row"><span>Blueprint</span><strong id="contextBlueprint">Personal HQ</strong></div>
+                <div class="context-row"><span>Crew</span><strong id="contextCrew">Chief of Staff + Journal</strong></div>
+                <div class="context-row"><span>Connections</span><strong id="contextConnections">Cross-workspace summaries</strong></div>
+                <div class="context-row"><span>Operating rule</span><strong id="contextRule">Routes specialist work</strong></div>
+              </div>
+            </section>
+          </div>
+          <footer class="context-foot">
+            <button class="context-open" type="button">Open workspace</button>
+            <button id="contextBuild" class="context-build" type="button">＋ Build another</button>
+          </footer>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <div id="toastStack" class="toast-stack" aria-live="polite"></div>
+
+  <script>
+    const blueprints = [
+      {
+        id: "hq", name: "Personal HQ", subtitle: "Foundation", category: "foundation", variant: "hq",
+        description: "Daily orientation, follow-through, and dependable routing into specialist workspaces.",
+        facts: ["2 crew", "Cross-workspace summaries", "Singleton"], built: 1, repeatable: false,
+        access: "HQ is already designated. It receives bounded summaries and findings; it does not automatically inherit specialist account access.",
+        crew: "Chief of Staff + Journal", connections: "Cross-workspace summaries", rule: "Routes specialist work"
+      },
+      {
+        id: "mail", name: "Mailroom", subtitle: "Email Ops", category: "everyday", variant: "mail",
+        description: "Triage what needs a reply, prepare drafts for review, and keep email follow-ups visible.",
+        facts: ["2 crew", "Mailbox connection", "Confirm-gated send"], built: 1, repeatable: true,
+        access: "Choosing this blueprint connects nothing. Setup links one mailbox. Message content stays untrusted, and no message is sent without confirmation.",
+        crew: "Postmaster + Inbox", connections: "One approved mailbox", rule: "Never sends without confirmation"
+      },
+      {
+        id: "calendar", name: "Schedule Station", subtitle: "Calendar Ops", category: "everyday", variant: "calendar",
+        description: "See your day and week, spot conflicts, find open windows, and prepare for meetings.",
+        facts: ["2 crew", "Calendar connector", "Recommended"], built: 0, repeatable: true,
+        access: "Choosing this blueprint connects nothing. During setup you choose which calendars it may read; creating or changing an event remains explicitly confirmed.",
+        crew: "Scheduler + Meeting Prep", connections: "Selected calendars", rule: "Writes stay explicitly confirmed"
+      },
+      {
+        id: "research", name: "Research Lab", subtitle: "Research Project", category: "projects", variant: "research",
+        description: "Maintain a synthesis, source index, open questions, and a recurring reading rhythm.",
+        facts: ["3 crew", "Source-aware", "Repeatable"], built: 1, repeatable: true,
+        access: "A Research Lab starts with workspace-local context. Web or document access is added deliberately as equipment, never inferred from the silhouette.",
+        crew: "Research Lead + 2 specialists", connections: "Optional sources", rule: "Cites evidence and gaps"
+      },
+      {
+        id: "studio", name: "Publishing Studio", subtitle: "Content Production", category: "projects", variant: "studio",
+        description: "Hold the brand voice, turn briefs into drafts, review them, and plan distribution.",
+        facts: ["4 crew", "Brand context", "Repeatable"], built: 1, repeatable: true,
+        access: "Publishing tools are optional equipment. Drafting is local to the workspace until a publishing connection is deliberately attached.",
+        crew: "Content Lead + 3 specialists", connections: "Optional publishing tools", rule: "Review before distribution"
+      },
+      {
+        id: "depot", name: "Sorting Depot", subtitle: "Downloads Janitor", category: "utilities", variant: "depot",
+        description: "Prepare a review batch for one approved folder and file only what the user approves.",
+        facts: ["1 crew", "One folder", "Approval required"], built: 0, repeatable: true,
+        access: "Setup grants one folder only. The station reads names and metadata by default; every move or Trash action requires user approval.",
+        crew: "Downloads Curator", connections: "One approved folder", rule: "Never moves files autonomously"
+      },
+      {
+        id: "issues", name: "Issue Desk", subtitle: "GitHub Ops", category: "utilities", variant: "issues",
+        description: "Triage one repository's issues and prepare comments, labels, or closes for review.",
+        facts: ["1 crew", "One repository", "No code access"], built: 0, repeatable: true,
+        access: "Setup binds exactly one repository. The station needs issue access, not code access, and every GitHub write is explicitly confirmed.",
+        crew: "Triage Lead", connections: "One repository", rule: "Proposes; user confirms"
+      },
+      {
+        id: "travel", name: "Travel Desk", subtitle: "Trip Planning", category: "projects", variant: "travel",
+        description: "Keep one trip's dates, options, confirmations, and itinerary in a durable workspace.",
+        facts: ["2 crew", "Trip context", "Repeatable"], built: 0, repeatable: true,
+        access: "Travel search and booking tools are optional equipment. A blueprint selection never grants access or makes a purchase.",
+        crew: "Trip Planner + Scout", connections: "Optional travel tools", rule: "Ranks choices, never purchases"
+      }
+    ];
+
+    const facilities = {
+      hq: {
+        title: "Personal HQ", variant: "hq", description: "Your daily orientation and routing workspace. HQ keeps priorities visible without inheriting every specialist connection.",
+        status: "Ready · Daily orientation available", blueprint: "Personal HQ", crew: "Chief of Staff + Journal", connections: "Cross-workspace summaries", rule: "Routes specialist work"
+      },
+      mail: {
+        title: "Mailroom", variant: "mail", description: "Dedicated inbox operations with a bounded mailbox connection and confirm-gated replies.",
+        status: "Setup required · Connect one mailbox", blueprint: "Email Ops", crew: "Postmaster + Inbox", connections: "Not connected", rule: "Never sends without confirmation"
+      },
+      research: {
+        title: "Research Lab", variant: "research", description: "A durable home for one research question, its sources, synthesis, and open gaps.",
+        status: "Ready · Weekly reading scheduled", blueprint: "Research Project", crew: "Research Lead + 2 specialists", connections: "Web search", rule: "Cites evidence and gaps"
+      },
+      studio: {
+        title: "Publishing Studio", variant: "studio", description: "Brand context, drafts, editorial review, and distribution planning in one project workspace.",
+        status: "Ready · 3 drafts awaiting review", blueprint: "Content Production", crew: "Content Lead + 3 specialists", connections: "No publisher attached", rule: "Review before distribution"
+      }
+    };
+
+    let selectedBlueprint = blueprints.find(item => item.id === "calendar");
+    let activeCategory = "all";
+    let selectedFacility = "hq";
+
+    const sidePanel = document.getElementById("sidePanel");
+    const catalogPanel = document.getElementById("catalogPanel");
+    const contextPanel = document.getElementById("contextPanel");
+    const grid = document.getElementById("blueprintGrid");
+    const preview = document.getElementById("buildPreview");
+
+    function symbol(variant) { return `#facility-${variant || "custom"}`; }
+
+    function renderBlueprints() {
+      grid.innerHTML = "";
+      blueprints
+        .filter(item => activeCategory === "all" || item.category === activeCategory)
+        .forEach(item => {
+          const card = document.createElement("button");
+          card.type = "button";
+          card.className = "blueprint-card" + (item.id === selectedBlueprint.id ? " is-selected" : "");
+          card.dataset.blueprint = item.id;
+          card.setAttribute("role", "listitem");
+          card.setAttribute("aria-pressed", item.id === selectedBlueprint.id ? "true" : "false");
+          const state = item.built
+            ? `<span class="card-state built">${item.repeatable ? `${item.built} built · add another` : "Built · singleton"}</span>`
+            : `<span class="card-state ${item.id === "calendar" ? "recommended" : ""}">${item.id === "calendar" ? "Recommended" : "Available"}</span>`;
+          card.innerHTML = `
+            <span class="card-drawing"><svg class="facility-art" aria-hidden="true"><use href="${symbol(item.variant)}"></use></svg></span>
+            <span class="card-copy"><strong>${item.name}</strong><small>${item.subtitle}</small>${state}</span>`;
+          card.addEventListener("click", () => selectBlueprint(item.id));
+          grid.appendChild(card);
+        });
+    }
+
+    function selectBlueprint(id) {
+      selectedBlueprint = blueprints.find(item => item.id === id) || blueprints[0];
+      document.getElementById("detailUse").setAttribute("href", symbol(selectedBlueprint.variant));
+      document.getElementById("detailName").textContent = selectedBlueprint.name;
+      document.getElementById("detailSubtitle").textContent = selectedBlueprint.subtitle;
+      document.getElementById("detailDescription").textContent = selectedBlueprint.description;
+      document.getElementById("detailFacts").innerHTML = selectedBlueprint.facts.map(fact => `<span>${fact}</span>`).join("");
+      document.getElementById("accessText").textContent = selectedBlueprint.access;
+      const button = document.getElementById("buildSelected");
+      if (selectedBlueprint.built && !selectedBlueprint.repeatable) {
+        button.textContent = `Open ${selectedBlueprint.name}`;
+      } else {
+        button.textContent = `${selectedBlueprint.built ? "Build another" : "Build"} ${selectedBlueprint.name}`;
+      }
+      const showPreview = !selectedBlueprint.built || selectedBlueprint.repeatable;
+      preview.hidden = !showPreview;
+      if (showPreview) {
+        preview.dataset.variant = selectedBlueprint.variant;
+        document.getElementById("previewUse").setAttribute("href", symbol(selectedBlueprint.variant));
+        document.getElementById("previewLabel").textContent = `${selectedBlueprint.name} · preview`;
+      }
+      renderBlueprints();
+    }
+
+    function openCatalog() {
+      catalogPanel.hidden = false;
+      contextPanel.hidden = true;
+      sidePanel.dataset.mobileHidden = "false";
+      selectBlueprint(selectedBlueprint.id);
+    }
+
+    function closeCatalog() {
+      catalogPanel.hidden = true;
+      contextPanel.hidden = false;
+      sidePanel.dataset.mobileHidden = window.innerWidth <= 980 ? "true" : "false";
+      preview.hidden = true;
+      showFacilityContext(selectedFacility);
+    }
+
+    function showFacilityContext(id) {
+      const facility = facilities[id];
+      if (!facility) return;
+      selectedFacility = id;
+      document.querySelectorAll(".facility").forEach(node => node.classList.toggle("is-selected", node.dataset.facility === id));
+      document.getElementById("contextTitle").textContent = facility.title;
+      document.getElementById("contextDescription").textContent = facility.description;
+      document.getElementById("contextUse").setAttribute("href", symbol(facility.variant));
+      document.getElementById("contextArt").style.color = getComputedStyle(document.querySelector(`[data-facility="${id}"]`)).getPropertyValue("--facility-color");
+      document.getElementById("contextStatus").textContent = facility.status;
+      document.getElementById("contextBlueprint").textContent = facility.blueprint;
+      document.getElementById("contextCrew").textContent = facility.crew;
+      document.getElementById("contextConnections").textContent = facility.connections;
+      document.getElementById("contextRule").textContent = facility.rule;
+    }
+
+    function buildSelected() {
+      if (selectedBlueprint.built && !selectedBlueprint.repeatable) {
+        closeCatalog();
+        showFacilityContext(selectedBlueprint.id);
+        return;
+      }
+
+      const id = selectedBlueprint.id === "calendar" && !facilities.calendar
+        ? "calendar"
+        : `${selectedBlueprint.id}-${Date.now()}`;
+      const map = document.getElementById("campusMap");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "facility";
+      button.dataset.facility = id;
+      button.dataset.variant = selectedBlueprint.variant;
+      button.dataset.status = "setup";
+      button.style.cssText = "--x:79%;--y:45%";
+      button.setAttribute("aria-label", `${selectedBlueprint.name}, setup required`);
+      button.innerHTML = `
+        <svg class="facility-art" aria-hidden="true"><use href="${symbol(selectedBlueprint.variant)}"></use></svg>
+        <span class="facility-name">${selectedBlueprint.name}</span>
+        <span class="facility-type">${selectedBlueprint.subtitle} · ${selectedBlueprint.facts[0]}</span>
+        <span class="facility-status">Setup required</span>`;
+      map.insertBefore(button, preview);
+      facilities[id] = {
+        title: selectedBlueprint.name,
+        variant: selectedBlueprint.variant,
+        description: selectedBlueprint.description,
+        status: "Setup required · Complete the blueprint's guided setup",
+        blueprint: selectedBlueprint.subtitle,
+        crew: selectedBlueprint.crew,
+        connections: "Not connected",
+        rule: selectedBlueprint.rule
+      };
+      selectedBlueprint.built += 1;
+      button.addEventListener("click", () => {
+        catalogPanel.hidden = true;
+        contextPanel.hidden = false;
+        showFacilityContext(id);
+      });
+      selectedFacility = id;
+      catalogPanel.hidden = true;
+      contextPanel.hidden = false;
+      preview.hidden = true;
+      sidePanel.dataset.mobileHidden = "false";
+      showFacilityContext(id);
+      toast(`<strong>${selectedBlueprint.name} built.</strong> The workspace exists, but its connections stay off until guided setup is completed.`);
+    }
+
+    function toast(message) {
+      const node = document.createElement("div");
+      node.className = "toast";
+      node.innerHTML = message;
+      document.getElementById("toastStack").appendChild(node);
+      window.setTimeout(() => node.remove(), 4200);
+    }
+
+    document.getElementById("openCatalog").addEventListener("click", openCatalog);
+    document.getElementById("contextBuild").addEventListener("click", openCatalog);
+    document.getElementById("closeCatalog").addEventListener("click", closeCatalog);
+    document.getElementById("buildSelected").addEventListener("click", buildSelected);
+    document.getElementById("blueprintDetails").addEventListener("click", () => {
+      toast(`<strong>${selectedBlueprint.name}</strong> includes ${selectedBlueprint.crew}. ${selectedBlueprint.access}`);
+    });
+    document.querySelectorAll(".facility").forEach(button => {
+      button.addEventListener("click", () => {
+        catalogPanel.hidden = true;
+        contextPanel.hidden = false;
+        sidePanel.dataset.mobileHidden = "false";
+        preview.hidden = true;
+        showFacilityContext(button.dataset.facility);
+      });
+    });
+    document.getElementById("categoryTabs").addEventListener("click", event => {
+      const button = event.target.closest("[data-category]");
+      if (!button) return;
+      activeCategory = button.dataset.category;
+      document.querySelectorAll("[data-category]").forEach(item => {
+        const active = item === button;
+        item.classList.toggle("is-active", active);
+        item.setAttribute("aria-selected", active ? "true" : "false");
+      });
+      renderBlueprints();
+    });
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape" && !catalogPanel.hidden) closeCatalog();
+    });
+    window.addEventListener("resize", () => {
+      if (window.innerWidth > 980) sidePanel.dataset.mobileHidden = "false";
+    });
+
+    renderBlueprints();
+    selectBlueprint("calendar");
+  </script>
+</body>
+</html>
