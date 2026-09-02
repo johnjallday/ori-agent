@@ -1185,6 +1185,12 @@ wt status --all > /dev/null
 wt status --all --json > /dev/null
 [[ "$(<"$fixture_root/overview-calls")" == "feature-overview --all --json" ]]
 
+# The implementation view is the shared checked-out-worktree summary consumed
+# by devops.sh; wt forwards the selector without reimplementing it in shell.
+> "$fixture_root/overview-calls"
+wt status --implementations --color > /dev/null
+[[ "$(<"$fixture_root/overview-calls")" == "feature-overview --implementations --color" ]]
+
 # The helper's exit status is the command's exit status: an incomplete
 # snapshot must not be reported to a script as success.
 function wt_herd {
@@ -1592,9 +1598,9 @@ for herdr_free_command in pr merge demo backlog cd ls; do
   fi
 done
 
-# Reading GitHub Issues must never need a running Herdr. The one DevOps
-# entrypoint calls `gh` directly. Its sole Go-helper boundary is the local
-# config agent-defaults command, which makes no Herdr call.
+# GitHub Issue operations still call `gh` directly. DevOps now also embeds the
+# same read-only checked-out-feature overview as `wt status`, while its only
+# mutating Go-helper boundary remains confirm-gated agent-defaults.
 devops_entrypoint="$repo_root/scripts/devops.sh"
 if [[ ! -x "$devops_entrypoint" ]]; then
   print -r -- "scripts/devops.sh is missing or not executable" >&2
@@ -1609,8 +1615,9 @@ if rg -q 'wt_herd|devflow_exec|devflow-bootstrap' "$devops_entrypoint"; then
   exit 1
 fi
 if [[ "$(rg -c 'bash "\$script_dir/herdr-devflow\.sh" "\$@"' "$devops_entrypoint" || true)" != "1" ]] || \
-   ! rg -q 'agent_defaults_helper config agent-defaults' "$devops_entrypoint"; then
-  print -r -- "scripts/devops.sh local helper boundary is not limited to config agent-defaults" >&2
+   ! rg -q 'agent_defaults_helper config agent-defaults' "$devops_entrypoint" || \
+   ! rg -q 'devflow_helper feature-overview --implementations' "$devops_entrypoint"; then
+  print -r -- "scripts/devops.sh does not constrain its helper boundary to implementation reads and agent-defaults" >&2
   exit 1
 fi
 # The picker has exactly three bash-to-zsh bridges: `s` delegates one-Issue
