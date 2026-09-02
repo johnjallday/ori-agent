@@ -228,6 +228,14 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		b.personalAssistantStore, b.sessionHandler, b.sessionHandler,
 		b.personalHQService, briefService,
 	)
+	// The guided Map quest's consequence. It reuses this exact Daily Brief
+	// service and Personal HQ service, so there is one canonical owner of the
+	// schedule and one owner of the designation.
+	b.personalAssistantHQSetup = personalassistant.NewHQSetupCoordinator(
+		b.personalAssistantStore, b.sessionHandler,
+		b.personalHQService, briefService,
+		personalassistant.NewAgentStoreProfileReader(b.st),
+	)
 	b.personalAssignment = personalassistant.NewAssignmentService(b.personalAssistantStore)
 	assignmentTickets := workspace.NewTicketService(b.workspaceStore)
 	assignmentTickets.SetEventBus(b.eventBus)
@@ -237,6 +245,7 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	b.personalAssignment.SetBriefService(briefService)
 	b.personalAssistantHandler = personalassistanthttp.NewHandler(b.personalAssistantService, b.userProvider)
 	b.personalAssistantHandler.SetHireService(b.personalAssistantHire)
+	b.personalAssistantHandler.SetHQSetupService(b.personalAssistantHQSetup)
 	b.personalAssistantHandler.SetAssignmentService(b.personalAssignment)
 	continuity := personalassistant.NewContinuityService(
 		b.personalAssistantStore, b.personalHQService, briefService, b.personalAssistantService,

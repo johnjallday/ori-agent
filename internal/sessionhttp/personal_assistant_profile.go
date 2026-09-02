@@ -72,19 +72,36 @@ func (h *Handler) CreatePersonalAssistantProfile(ctx context.Context, options pe
 	return &personalhq.AssistantProfileResult{GlobalAgentProfileName: name}, nil
 }
 
-// resolveOwnedPersonalAssistantProfile decides whether an existing profile is
-// this relationship's own, previously-created profile.
-func resolveOwnedPersonalAssistantProfile(name string, existing *agent.Agent, options personalhq.AssistantCreationOptions) (*personalhq.AssistantProfileResult, error) {
+// assertProfileOwnedByAssistant checks the one thing that makes an existing
+// profile safe to reuse: bounded provenance proving this relationship owns it.
+//
+// Both creation paths need this. Neither may fall back to a name match: an
+// unrelated user-created agent, or another relationship's assistant, is a
+// conflict rather than something to adopt.
+func assertProfileOwnedByAssistant(name string, existing *agent.Agent, assistantID string) (personalassistant.ProfileProvenance, error) {
 	var tags []string
 	if existing != nil && existing.Metadata != nil {
 		tags = existing.Metadata.Tags
 	}
 	provenance := personalassistant.ProfileProvenanceFromTags(name, tags)
-	if !provenance.OwnedBy(options.AssistantID) {
-		// Either an unrelated user-created agent or another relationship's
-		// assistant. Adopting it by name is exactly the failure this guards.
-		return nil, fmt.Errorf("%w: %q collides with an existing global agent",
+	if !provenance.OwnedBy(assistantID) {
+		return provenance, fmt.Errorf("%w: %q collides with an existing global agent",
 			personalhq.ErrAssistantNameConflict, name)
+	}
+	return provenance, nil
+}
+
+// resolveOwnedPersonalAssistantProfile decides whether an existing profile is
+// this relationship's own, previously-created profile.
+//
+// On the hire path the request ID is the hire request, and the profile records
+// the hire that created it, so a mismatch means two different hires are fighting
+// over one name. (The HQ path carries an HQ request ID instead and therefore
+// checks assistant ownership only — see assertProfileOwnedByAssistant.)
+func resolveOwnedPersonalAssistantProfile(name string, existing *agent.Agent, options personalhq.AssistantCreationOptions) (*personalhq.AssistantProfileResult, error) {
+	provenance, err := assertProfileOwnedByAssistant(name, existing, options.AssistantID)
+	if err != nil {
+		return nil, err
 	}
 	if provenance.HireRequestID != "" && provenance.HireRequestID != options.RequestID {
 		return nil, fmt.Errorf("%w: %q was created by a different hire request",

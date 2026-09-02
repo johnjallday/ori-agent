@@ -3,6 +3,7 @@ package sessionhttp
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -269,6 +270,183 @@ func TestCreatePersonalAssistantProfileRejectsSmuggledAppearance(t *testing.T) {
 	}
 	if _, created := handler.agentStore.GetAgent("Atlas"); created {
 		t.Fatal("rejected appearance still created a profile")
+	}
+}
+
+// --- HQ creation around an already-hired profile ---------------------------
+
+func TestCreatePersonalAssistantHQReusesTheHiredProfileAsEntryAgent(t *testing.T) {
+	handler, cleanup := profileTestHandler(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Hire first: one profile, no workspace.
+	hire := profileOptions("Atlas")
+	if _, err := handler.CreatePersonalAssistantProfile(ctx, hire); err != nil {
+		t.Fatalf("hire: %v", err)
+	}
+	before, _ := handler.agentStore.GetAgent("Atlas")
+	beforePrompt := before.Settings.SystemPrompt
+	beforeModel := before.Settings.Model
+	beforeTags := append([]string(nil), before.Metadata.Tags...)
+
+	// Then build HQ under a DIFFERENT request id — the HQ request, not the hire.
+	build := profileOptions("Atlas")
+	build.RequestID = "hq-request-1"
+	result, err := handler.CreatePersonalAssistantHQ(ctx, "Personal HQ", build)
+	if err != nil {
+		t.Fatalf("CreatePersonalAssistantHQ: %v", err)
+	}
+	if result.WorkspaceID == "" || result.EntryAgentInstanceID == "" ||
+		result.GlobalAgentProfileName != "Atlas" {
+		t.Fatalf("result = %#v", result)
+	}
+
+	// Exactly one global profile: the hired one, reused rather than duplicated.
+	names := handler.agentStore.ListAgents()
+	atlasCount := 0
+	for _, name := range names {
+		if name == "Atlas" {
+			atlasCount++
+		}
+		if name == "Personal Chief of Staff" {
+			t.Fatal("HQ creation created a Personal Chief of Staff profile")
+		}
+	}
+	if atlasCount != 1 {
+		t.Fatalf("expected one Atlas profile, found %d in %v", atlasCount, names)
+	}
+
+	// The reused profile is preserved, not rewritten from the HQ request.
+	after, _ := handler.agentStore.GetAgent("Atlas")
+	if after.Settings.SystemPrompt != beforePrompt || after.Settings.Model != beforeModel {
+		t.Fatal("HQ creation mutated the hired profile's saved prompt or model")
+	}
+	if len(after.Metadata.Tags) != len(beforeTags) {
+		t.Fatalf("HQ creation changed the profile's provenance markers: %v -> %v",
+			beforeTags, after.Metadata.Tags)
+	}
+
+	// The workspace carries the hired assistant as its stable entry instance,
+	// plus the Journal support instance exactly once.
+	workspace, err := handler.store.GetWorkspace(ctx, result.WorkspaceID)
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	var entries, journals int
+	for _, instance := range workspace.AgentInstances {
+		if instance.EntryPoint {
+			entries++
+			if instance.ID != result.EntryAgentInstanceID || instance.Name != "Atlas" {
+				t.Fatalf("entry instance = %#v", instance)
+			}
+		}
+		if instance.Name == "Journal" {
+			journals++
+		}
+		if instance.Name == "Personal Chief of Staff" {
+			t.Fatal("HQ workspace attached a Personal Chief of Staff instance")
+		}
+	}
+	if entries != 1 || journals != 1 {
+		t.Fatalf("entry=%d journal=%d instances=%#v", entries, journals, workspace.AgentInstances)
+	}
+
+	// Restart-safe lookup is by stable assistant/request identity, not name.
+	metadata, ok := workspace.SharedData[personalAssistantSupportSharedDataKey].(map[string]any)
+	if !ok {
+		t.Fatal("workspace carries no personal-assistant provenance metadata")
+	}
+	if metadata["assistant_id"] != "assistant-id" || metadata["request_id"] != "hq-request-1" {
+		t.Fatalf("workspace provenance = %#v", metadata)
+	}
+}
+
+func TestCreatePersonalAssistantHQReplayReturnsTheSameCanonicalRecords(t *testing.T) {
+	handler, cleanup := profileTestHandler(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if _, err := handler.CreatePersonalAssistantProfile(ctx, profileOptions("Atlas")); err != nil {
+		t.Fatalf("hire: %v", err)
+	}
+	build := profileOptions("Atlas")
+	build.RequestID = "hq-request-1"
+
+	first, err := handler.CreatePersonalAssistantHQ(ctx, "Personal HQ", build)
+	if err != nil {
+		t.Fatalf("first build: %v", err)
+	}
+	second, err := handler.CreatePersonalAssistantHQ(ctx, "Ignored on replay", build)
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("replay = %#v; want %#v", second, first)
+	}
+	workspaces, err := handler.store.ListWorkspaces(ctx)
+	if err != nil {
+		t.Fatalf("ListWorkspaces: %v", err)
+	}
+	if len(workspaces) != 1 {
+		t.Fatalf("replay created %d workspaces", len(workspaces))
+	}
+}
+
+func TestCreatePersonalAssistantHQRejectsAForeignSameNamedProfile(t *testing.T) {
+	handler, cleanup := profileTestHandler(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// An unrelated user-created agent that happens to share the name.
+	if err := handler.agentStore.CreateAgent("Atlas", nil); err != nil {
+		t.Fatalf("seed unrelated agent: %v", err)
+	}
+	build := profileOptions("Atlas")
+	build.RequestID = "hq-request-1"
+	if _, err := handler.CreatePersonalAssistantHQ(ctx, "Personal HQ", build); !errors.Is(err, personalhq.ErrAssistantNameConflict) {
+		t.Fatalf("error = %v; want a name conflict", err)
+	}
+	workspaces, err := handler.store.ListWorkspaces(ctx)
+	if err != nil {
+		t.Fatalf("ListWorkspaces: %v", err)
+	}
+	if len(workspaces) != 0 {
+		t.Fatal("a rejected build still created a workspace")
+	}
+}
+
+func TestCreatePersonalAssistantHQRejectsAnotherRelationshipsProfile(t *testing.T) {
+	handler, cleanup := profileTestHandler(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	other := profileOptions("Atlas")
+	other.AssistantID = "another-assistant"
+	if _, err := handler.CreatePersonalAssistantProfile(ctx, other); err != nil {
+		t.Fatalf("seed foreign profile: %v", err)
+	}
+	build := profileOptions("Atlas")
+	build.RequestID = "hq-request-1"
+	if _, err := handler.CreatePersonalAssistantHQ(ctx, "Personal HQ", build); !errors.Is(err, personalhq.ErrAssistantNameConflict) {
+		t.Fatalf("error = %v; want a name conflict", err)
+	}
+}
+
+func TestCreatePersonalAssistantHQStillWorksWithoutAPriorProfile(t *testing.T) {
+	// The legacy single-transaction path: no profile exists yet, so the template
+	// creates one. This must remain unchanged for pre-amendment operations.
+	handler, cleanup := profileTestHandler(t)
+	defer cleanup()
+
+	build := profileOptions("Atlas")
+	build.RequestID = "hire-request-id"
+	result, err := handler.CreatePersonalAssistantHQ(context.Background(), "Personal HQ", build)
+	if err != nil {
+		t.Fatalf("CreatePersonalAssistantHQ with no prior profile: %v", err)
+	}
+	if result.GlobalAgentProfileName != "Atlas" || result.EntryAgentInstanceID == "" {
+		t.Fatalf("result = %#v", result)
 	}
 }
 

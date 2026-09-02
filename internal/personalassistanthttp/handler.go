@@ -26,6 +26,13 @@ type StateReader interface {
 	Get(ctx context.Context, userID string) (*personalassistant.Projection, error)
 }
 
+// HQSetupService is the sole consequential Personal HQ boundary used by this
+// package. It is separate from HireService because the two consequences now
+// happen at different times and under different confirmations.
+type HQSetupService interface {
+	Setup(ctx context.Context, userID string, request personalassistant.HQSetupRequest) (*personalassistant.HQSetupResult, error)
+}
+
 // HireService is the sole consequential hire boundary used by this package.
 type HireService interface {
 	Hire(ctx context.Context, userID string, request personalassistant.HireRequest) (*personalassistant.HireResult, error)
@@ -62,6 +69,7 @@ type CapabilityReader interface {
 type Handler struct {
 	service                    StateReader
 	hirer                      HireService
+	hqSetup                    HQSetupService
 	assignments                AssignmentPreviewService
 	today                      TodayReader
 	continuity                 ContinuityService
@@ -83,6 +91,13 @@ func NewHandler(service StateReader, provider userprofile.UserProvider) *Handler
 func (h *Handler) SetHireService(hirer HireService) {
 	if h != nil {
 		h.hirer = hirer
+	}
+}
+
+// SetHQSetupService adds the post-hire Personal HQ mutation boundary.
+func (h *Handler) SetHQSetupService(hqSetup HQSetupService) {
+	if h != nil {
+		h.hqSetup = hqSetup
 	}
 }
 
@@ -263,6 +278,110 @@ func (h *Handler) Hire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	orihttp.Created(w, map[string]any{"personal_assistant": response})
+}
+
+// hqSetupRequest is the bounded Build My HQ submission.
+//
+// Note what it cannot say: there is no assistant, profile, workspace, or
+// instance field. Those come from the server's own relationship record, so a
+// client cannot aim this operation at records it does not own.
+type hqSetupRequest struct {
+	RequestID string `json:"request_id"`
+	IfVersion int64  `json:"if_version"`
+
+	Name                    string   `json:"name"`
+	Timezone                string   `json:"timezone"`
+	ScheduleDays            []string `json:"schedule_days"`
+	ScheduleTime            string   `json:"schedule_time"`
+	Scope                   string   `json:"scope"`
+	SelectedWorkspaceIDs    []string `json:"selected_workspace_ids"`
+	IncludeFutureWorkspaces bool     `json:"include_future_workspaces"`
+	NotifyOnReady           bool     `json:"notify_on_ready"`
+}
+
+type hqSetupErrorResponse struct {
+	Error         string                       `json:"error"`
+	Code          string                       `json:"code"`
+	Retryable     bool                         `json:"retryable"`
+	RepairStep    personalassistant.RepairStep `json:"repair_step,omitempty"`
+	DurableResult *hireResponse                `json:"durable_result,omitempty"`
+}
+
+// SetupHQ handles POST /api/personal-assistant/hq: the one confirmed
+// consequence of the guided Map walkthrough.
+func (h *Handler) SetupHQ(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h == nil || h.hqSetup == nil || h.provider == nil {
+		orihttp.ServiceUnavailable(w, "personal assistant hq setup is unavailable")
+		return
+	}
+	var body hqSetupRequest
+	if err := decodeBoundedRequest(w, r, &body); err != nil {
+		writeHQSetupError(w, http.StatusBadRequest, "invalid_hq_setup_request",
+			"The Personal HQ request is invalid.", false, nil)
+		return
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+
+	result, err := h.hqSetup.Setup(r.Context(), userID, personalassistant.HQSetupRequest{
+		RequestID: body.RequestID, IfVersion: body.IfVersion,
+		HQName: body.Name, Timezone: body.Timezone,
+		ScheduleDays: body.ScheduleDays, ScheduleTime: body.ScheduleTime,
+		Scope: body.Scope, SelectedIDs: body.SelectedWorkspaceIDs,
+		IncludeFuture: body.IncludeFutureWorkspaces, NotifyOnReady: body.NotifyOnReady,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, personalassistant.ErrValidation):
+			writeHQSetupError(w, http.StatusBadRequest, "invalid_hq_setup_request",
+				"Check the Personal HQ name and the daily rhythm.", false, nil)
+		case errors.Is(err, personalassistant.ErrConflict), errors.Is(err, personalhq.ErrAssistantNameConflict):
+			writeHQSetupError(w, http.StatusConflict, "hq_setup_conflict",
+				"This request conflicts with your current Personal HQ setup. Refresh and try again.", false, nil)
+		case errors.Is(err, personalassistant.ErrRepairNeeded):
+			writeHQSetupError(w, http.StatusConflict, "hq_setup_repair_needed",
+				"Your Personal HQ setup needs repair before it can continue.", false, nil)
+		default:
+			var partial *personalassistant.PartialHQSetupError
+			if errors.As(err, &partial) {
+				// Durable partial: some canonical records exist. Retrying the SAME
+				// request finishes it, so this must never read as "start over".
+				writeHQSetupError(w, http.StatusServiceUnavailable, "hq_setup_partial",
+					"Part of your Personal HQ is already saved. Retry to finish setup.", true, partial)
+				return
+			}
+			writeHQSetupError(w, http.StatusServiceUnavailable, "hq_setup_unavailable",
+				"Building Personal HQ is temporarily unavailable. Retry this same request.", true, nil)
+		}
+		return
+	}
+
+	response := responseFromResult(&personalassistant.HireResult{
+		State: result.State, BriefConfig: result.BriefConfig, Resumed: result.Resumed,
+	})
+	if result.Resumed {
+		orihttp.Success(w, map[string]any{"personal_assistant": response})
+		return
+	}
+	orihttp.Created(w, map[string]any{"personal_assistant": response})
+}
+
+func writeHQSetupError(
+	w http.ResponseWriter, status int, code, message string,
+	retryable bool, partial *personalassistant.PartialHQSetupError,
+) {
+	response := hqSetupErrorResponse{Error: message, Code: code, Retryable: retryable}
+	if partial != nil {
+		response.RepairStep = partial.Step
+		response.DurableResult = responseFromResult(
+			&personalassistant.HireResult{State: partial.State, Resumed: true})
+	}
+	_ = orihttp.RespondJSON(w, status, response)
 }
 
 type assignmentPreviewRequest struct {
