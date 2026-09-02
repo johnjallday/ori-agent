@@ -2,6 +2,7 @@ package progression
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -52,6 +53,82 @@ func TestPersonalAssistantQuests_FeatureFirstDayWithoutChangingLegacyGraph(t *te
 	}
 	if paf.Status().TotalCount != legacy.Status().TotalCount+1 {
 		t.Fatalf("PAF total = %d, legacy total = %d", paf.Status().TotalCount, legacy.Status().TotalCount)
+	}
+}
+
+func TestPersonalAssistantQuests_PointBuildHQAtTheGuidedWalkthrough(t *testing.T) {
+	paf := New(&fakeStore{}, WithQuests(PersonalAssistantQuests()))
+	buildHQ := questView(paf, BuildHQQuestID)
+	if buildHQ == nil {
+		t.Fatal("the personal-assistant graph is missing the Build My HQ quest")
+	}
+	if buildHQ.ActionURL != GuidedBuildHQActionURL {
+		t.Fatalf("Build My HQ action = %q; want %q", buildHQ.ActionURL, GuidedBuildHQActionURL)
+	}
+	// A focus parameter would preselect the reserved landmark. The walkthrough
+	// highlights it and waits for the user's own selection instead.
+	if strings.Contains(buildHQ.ActionURL, "focus=") {
+		t.Fatalf("guided action URL preselects the site: %q", buildHQ.ActionURL)
+	}
+	if !buildHQ.Optional {
+		t.Fatal("Build My HQ must stay optional so Do this later is allowed")
+	}
+
+	// The legacy graph keeps its own destination byte-for-byte.
+	legacy := questView(New(&fakeStore{}), BuildHQQuestID)
+	if legacy == nil || legacy.ActionURL != "/?focus=personal-hq" {
+		t.Fatalf("legacy Build My HQ action changed: %+v", legacy)
+	}
+}
+
+func TestPersonalAssistantQuests_BuildHQCompletesOnlyOnRealDesignation(t *testing.T) {
+	e := New(&fakeStore{}, WithQuests(PersonalAssistantQuests()))
+	if completed(e, BuildHQQuestID) {
+		t.Fatal("Build My HQ started completed")
+	}
+
+	// Hiring, creating the profile, opening the quest, selecting the site, and
+	// opening the modal are all state the engine can observe only as events or a
+	// backfill snapshot. None of them may resolve this quest.
+	for _, event := range []ws.Event{
+		{Type: ws.EventMessageSent},
+		{Type: ws.EventWorkspaceUpdated},
+	} {
+		e.HandleEvent(event)
+	}
+	if err := e.Backfill(ScannerFunc(func() Snapshot {
+		// A hired assistant with no HQ: a profile exists, HQ does not.
+		return Snapshot{Agents: 1, HasPersonalHQ: false}
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if completed(e, BuildHQQuestID) {
+		t.Fatal("Build My HQ completed without a Personal HQ designation")
+	}
+
+	// Only the designation completes it.
+	e.Complete(BuildHQQuestID)
+	if !completed(e, BuildHQQuestID) {
+		t.Fatal("designation did not complete Build My HQ")
+	}
+}
+
+func TestPersonalAssistantQuests_DeferredBuildHQStaysResumable(t *testing.T) {
+	e := New(&fakeStore{}, WithQuests(PersonalAssistantQuests()))
+	if err := e.Skip(BuildHQQuestID); err != nil {
+		t.Fatalf("Do this later was rejected: %v", err)
+	}
+	view := questView(e, BuildHQQuestID)
+	if view == nil || view.Status != StatusSkipped {
+		t.Fatalf("deferred quest = %+v", view)
+	}
+	// Skipping records a deferral, never a completion.
+	if completed(e, BuildHQQuestID) {
+		t.Fatal("Do this later was recorded as a completion")
+	}
+	// It remains reachable, which is what keeps Resume quest on Home.
+	if view.ActionURL != GuidedBuildHQActionURL {
+		t.Fatalf("deferred quest lost its action: %+v", view)
 	}
 }
 

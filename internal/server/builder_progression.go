@@ -46,9 +46,13 @@ func (b *ServerBuilder) initializeProgression() {
 	// this fires for both Build My HQ (a new workspace) and designating an
 	// existing workspace (PRD FR48/FR49), so t2-build-hq completes either
 	// way without replaying unrelated quests.
+	//
+	// Designation is the ONLY thing that completes this quest. Hiring, creating
+	// the assistant profile, opening the guided quest, selecting the reserved
+	// site, and opening the build form all deliberately leave it open.
 	if b.personalHQService != nil {
 		b.personalHQService.SetOnDesignated(func(ctx context.Context, userID, workspaceID string) {
-			engine.Complete("t2-build-hq")
+			engine.Complete(progression.BuildHQQuestID)
 		})
 	}
 

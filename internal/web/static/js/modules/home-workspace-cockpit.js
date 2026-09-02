@@ -1954,6 +1954,25 @@ import {
     renderRail({ announceChange: true });
     publishRouteContext();
     if (openModal) showContextModal({ invoker });
+    // Observational only: Ori's HQ walkthrough listens for this to advance from
+    // "select the site" to "open Build My HQ". Nothing here depends on a
+    // listener existing, so removing the walkthrough leaves this flow intact.
+    emitHQSiteSelected(openModal);
+  }
+
+  // Bounded local notice that the user selected the reserved Personal HQ site.
+  // It carries whether the context dialog opened and nothing else — no names,
+  // no form data, no workspace contents.
+  function emitHQSiteSelected(dialogOpened) {
+    try {
+      window.dispatchEvent(
+        new CustomEvent('ori:hq-site-selected', {
+          detail: { dialogOpened: dialogOpened === true }
+        })
+      );
+    } catch (_) {
+      // Diagnostics must never break selection.
+    }
   }
 
   /** Show cross-workspace Summary while remembering valid selected context. */

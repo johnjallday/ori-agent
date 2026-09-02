@@ -67,6 +67,9 @@
     coachmarkEl: null,
     coachmarkRoute: '',
     actions: [],
+    // The active deterministic walkthrough step, if any: { quest, choices }.
+    // Presentation only — the server owns whether the quest is done or deferred.
+    quest: null,
     // PAF turns this controller into Help-only. Work remains a typed handoff
     // preview and is never delegated from Ori's draft/transcript.
     helpOnly: false,
@@ -1026,7 +1029,117 @@
     emit('help-only', { assistantAvailable: state.assistantAvailable });
   }
 
+  /* ---- fixed quest presentation ------------------------------------------------------- */
+
+  /*
+   * A fixed quest is a deterministic, host-authored walkthrough presented
+   * through Ori's own panel: the Personal HQ setup quest is the first one.
+   *
+   * It is deliberately its own narrow API rather than a call into ask():
+   *   - the user did not ask a question, so pretending they did would put words
+   *     in their mouth and record a turn that never happened;
+   *   - no request reaches /api/ori-guide and no model is involved, so a quest
+   *     step works with no provider configured at all; and
+   *   - a step's vocabulary is copy plus one registered coachmark plus labelled
+   *     choices. There is no field able to express a click, a submit, a form
+   *     open, a navigation, or any other mutation — the caller is told which
+   *     choice the user pressed and does the work itself, under its own gates.
+   *
+   * Copy is escaped on the way in, so a user-controlled assistant name renders
+   * as text and can never become markup.
+   */
+  function presentQuestStep(step) {
+    var els = state.els;
+    if (!els || !step || typeof step !== 'object') return { rendered: false };
+
+    var quest = String(step.quest || '').trim();
+    if (!quest) return { rendered: false };
+
+    var index = Number(step.index);
+    var total = Number(step.total);
+    var html = '';
+    if (isFinite(index) && isFinite(total) && index > 0 && total > 0) {
+      html +=
+        '<p class="ori-guide__quest-step">Step ' +
+        esc(String(index)) +
+        ' of ' +
+        esc(String(total)) +
+        '</p>';
+    }
+    html += '<p class="ori-guide__answer">' + esc(String(step.answer || '')) + '</p>';
+    if (step.note) {
+      html +=
+        '<p class="ori-guide__answer ori-guide__answer--note">' + esc(String(step.note)) + '</p>';
+    }
+
+    var choices = Array.isArray(step.choices) ? step.choices : [];
+    var rendered = [];
+    var choicesHTML = '';
+    for (var i = 0; i < choices.length; i++) {
+      var id = String((choices[i] && choices[i].id) || '').trim();
+      var label = String((choices[i] && choices[i].label) || '').trim();
+      if (!id || !label) continue;
+      rendered.push(id);
+      choicesHTML +=
+        '<button type="button" class="ori-guide__action ori-guide__quest-choice" ' +
+        'data-ori-quest="' +
+        esc(quest) +
+        '" data-ori-quest-choice="' +
+        esc(id) +
+        '">' +
+        esc(label) +
+        '</button>';
+    }
+    if (choicesHTML) {
+      html += '<div class="ori-guide__actions">' + choicesHTML + '</div>';
+    }
+
+    // A fixed step owns the panel body, so any leftover answer or action from an
+    // earlier turn cannot be mistaken for part of the walkthrough.
+    state.actions = [];
+    els.reply.innerHTML = html;
+    els.reply.dataset.status = 'quest';
+    els.reply.dataset.topic = '';
+    els.reply.dataset.quest = quest;
+    state.quest = { quest: quest, choices: rendered };
+
+    var coachmarkResolved = false;
+    if (step.coachmark) {
+      coachmarkResolved = applyCoachmark(String(step.coachmark));
+    } else {
+      clearCoachmark();
+    }
+    emit('quest-step', { quest: quest, index: index, coachmark: coachmarkResolved });
+    return { rendered: true, coachmarkResolved: coachmarkResolved };
+  }
+
+  // clearQuestStep ends the presentation: the mark goes away and the panel stops
+  // claiming to be mid-walkthrough. It says nothing about the server-side quest,
+  // which is only ever completed by a real designation or skipped explicitly.
+  function clearQuestStep() {
+    clearCoachmark();
+    state.quest = null;
+    if (state.els && state.els.reply && state.els.reply.dataset.status === 'quest') {
+      state.els.reply.innerHTML = '';
+      state.els.reply.dataset.status = '';
+      state.els.reply.dataset.quest = '';
+    }
+  }
+
   /* ---- wiring ------------------------------------------------------------------------- */
+
+  function onQuestChoiceClick(event) {
+    var el = event.target.closest('[data-ori-quest-choice]');
+    if (!el) return;
+    event.preventDefault();
+    var id = el.getAttribute('data-ori-quest-choice');
+    var quest = el.getAttribute('data-ori-quest');
+    // Only a choice this panel actually rendered for the active quest counts, so
+    // stale markup cannot fire a step the controller is no longer waiting on.
+    if (!state.quest || state.quest.quest !== quest) return;
+    if (state.quest.choices.indexOf(id) === -1) return;
+    emit('quest-choice', { quest: quest, choice: id });
+  }
 
   function onActionClick(event) {
     var el = event.target.closest('[data-ori-action]');
@@ -1114,6 +1227,7 @@
     }
     panel.addEventListener('click', onActionClick);
     panel.addEventListener('click', onTopicClick);
+    panel.addEventListener('click', onQuestChoiceClick);
     document.addEventListener('keydown', onKeydown);
     window.addEventListener('popstate', clearCoachmarkIfRouteChanged);
     // A route change must repaint the visible context before the next request is
@@ -1144,6 +1258,10 @@
     // The seam page modules use to contribute context the URL cannot carry.
     setContext: setContext,
     setHelpOnly: setHelpOnly,
+    // Deterministic host-authored walkthroughs. See presentQuestStep above for
+    // why this is separate from ask() and what it deliberately cannot express.
+    presentQuestStep: presentQuestStep,
+    clearQuestStep: clearQuestStep,
     isOpen: function () {
       return state.open;
     },
@@ -1160,6 +1278,7 @@
     _refreshContextLabel: refreshContextLabel,
     _state: state,
     _validateAction: validateAction,
+    _onQuestChoiceClick: onQuestChoiceClick,
     _isSafeHref: isSafeHref,
     _handoff: handoff,
     _applyCoachmark: applyCoachmark,

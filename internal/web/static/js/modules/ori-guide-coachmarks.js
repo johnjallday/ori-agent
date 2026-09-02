@@ -65,6 +65,21 @@
       routes: ['/mcp'],
       selector: '#addServerBtn',
       label: 'Add MCP Server'
+    },
+    // The guided Personal HQ walkthrough. Both selectors are hand-written
+    // attributes on Home's own markup; the walkthrough sends only these keys.
+    personal_hq_site: {
+      routes: ['/'],
+      selector: '[data-hq-site]',
+      label: 'the reserved Personal HQ site'
+    },
+    personal_hq_build: {
+      routes: ['/'],
+      // The Build action inside the HQ site's context dialog. Present only once
+      // the user has selected the site, which resolve() handles: an absent
+      // target yields no mark rather than a mark on something else.
+      selector: '[data-hq-action="build"]',
+      label: 'Build My HQ'
     }
     // Deliberately absent:
     //

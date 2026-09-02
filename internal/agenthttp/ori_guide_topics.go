@@ -26,6 +26,14 @@ const (
 	CoachmarkAgentToolbox    CoachmarkKey = "agent_toolbox"
 	CoachmarkActionCenter    CoachmarkKey = "action_center_review"
 	CoachmarkAddMCPServer    CoachmarkKey = "add_mcp_server"
+
+	// The guided Personal HQ walkthrough marks exactly two controls, in order:
+	// the reserved site on the Map, then the Build My HQ action inside the
+	// site's context dialog. Both are focus-only, like every other coachmark —
+	// marking the site must not select it, and marking Build My HQ must not
+	// open the form. The user performs both actions.
+	CoachmarkPersonalHQSite  CoachmarkKey = "personal_hq_site"
+	CoachmarkPersonalHQBuild CoachmarkKey = "personal_hq_build"
 )
 
 // registeredCoachmarkKeys is the complete set the browser knows how to resolve.
@@ -41,6 +49,8 @@ var registeredCoachmarkKeys = []CoachmarkKey{
 	CoachmarkAgentToolbox,
 	CoachmarkActionCenter,
 	CoachmarkAddMCPServer,
+	CoachmarkPersonalHQSite,
+	CoachmarkPersonalHQBuild,
 }
 
 // SetupStep is the closed set of app-setup actions Ori may offer.

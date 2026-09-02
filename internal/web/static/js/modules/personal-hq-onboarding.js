@@ -310,12 +310,40 @@ export function followUpView(f) {
     ]);
   }
 
+  // The reserved HQ site names the assistant it belongs to, so the Map needs
+  // the bounded relationship facts. This module already owns the HQ status
+  // handoff, so it carries this one too rather than adding a second fetcher.
+  // A failure is silent: the site falls back to its generic copy.
+  async function refreshMapPersonalAssistant() {
+    if (
+      !window.OriWorkspaceMap ||
+      typeof window.OriWorkspaceMap.setPersonalAssistant !== 'function'
+    ) {
+      return;
+    }
+    try {
+      const res = await fetch('/api/personal-assistant', {
+        headers: { Accept: 'application/json' }
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      window.OriWorkspaceMap.setPersonalAssistant(data && data.personal_assistant);
+    } catch (_) {
+      /* generic HQ site copy is the safe fallback */
+    }
+  }
+
   async function refreshHQStatus() {
     statusPromise = null;
     const status = await fetchStatus();
     if (window.OriWorkspaceMap && typeof window.OriWorkspaceMap.setHQStatus === 'function') {
       window.OriWorkspaceMap.setHQStatus(status);
     }
+    void refreshMapPersonalAssistant();
+    // setHQStatus re-mounts the Map, which destroys any element Ori's
+    // walkthrough had marked. Say so, so the walkthrough can re-present its
+    // current step rather than keep a mark on a detached node.
+    emitHQQuestSignal('hq-status-changed', { valid: !!(status && status.valid) });
     return status;
   }
 
@@ -526,6 +554,25 @@ export function followUpView(f) {
     if (errorBox) errorBox.hidden = true;
     const modal = requireModal('hqBuildModal');
     if (modal) modal.show();
+    // Observational: Ori's HQ walkthrough uses this to advance to its final
+    // step, where the existing form owns all editing and confirmation.
+    if (modal) emitHQQuestSignal('build-form-opened');
+  }
+
+  // Bounded local notices for Ori's deterministic HQ walkthrough.
+  //
+  // They are diagnostics, not a control channel: every one of them is safe to
+  // ignore, and removing the walkthrough leaves this module unchanged. They
+  // carry a stage name only — never the HQ name, the schedule, or any other
+  // form data.
+  function emitHQQuestSignal(stage, detail = {}) {
+    try {
+      window.dispatchEvent(
+        new CustomEvent('ori:hq-quest-signal', { detail: { stage, ...detail } })
+      );
+    } catch (_) {
+      // Never let a diagnostic break the build flow.
+    }
   }
 
   function collectBuildRequest() {
@@ -585,6 +632,7 @@ export function followUpView(f) {
         const result = await postJSON('/api/personal-hq/setup', collectBuildRequest());
         const modal = bootstrapModal('hqBuildModal');
         if (modal) modal.hide();
+        emitHQQuestSignal('setup-succeeded');
         toast('Your Personal HQ is ready.', 'Personal HQ built');
         window.setTimeout(() => {
           window.location.href = '/';

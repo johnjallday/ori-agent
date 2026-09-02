@@ -226,6 +226,196 @@ test('a coachmark valid on another route is dropped on this one', () => {
   assert.equal(guide._validateAction({ type: 'coachmark', coachmark: 'new_agent' }), null);
 });
 
+/* ---- fixed quest presentation (guided HQ walkthrough) ------------------------ */
+
+// questGuide builds a guide with a panel wired up, ready to present a step.
+function questGuide({ route = '/', selectors = {} } = {}) {
+  const reply = makeElement('oriGuideReply');
+  const input = makeElement('oriGuideInput');
+  const loaded = load({
+    route,
+    elements: {
+      oriGuidePanel: makeElement('oriGuidePanel'),
+      oriGuideReply: reply,
+      oriGuideInput: input,
+      oriGuideClose: makeElement('oriGuideClose'),
+      oriGuideLauncher: makeElement('oriGuideLauncher')
+    }
+  });
+  for (const [selector, el] of Object.entries(selectors)) {
+    loaded.registerSelector(selector, el);
+  }
+  // The guide reports steps and choices as DOM events; the base sandbox has no
+  // CustomEvent, so emit() would silently no-op.
+  const events = [];
+  loaded.sandbox.CustomEvent = function CustomEvent(type, init) {
+    this.type = type;
+    this.detail = (init && init.detail) || {};
+  };
+  loaded.sandbox.document.dispatchEvent = event => {
+    events.push({ type: event.type, detail: event.detail });
+    return true;
+  };
+  loaded.guide.init();
+  return { ...loaded, reply, input, events };
+}
+
+test('a fixed quest step presents host copy with no network call and no model', () => {
+  let fetches = 0;
+  const site = makeElement('hq-site');
+  const { guide, reply, sandbox } = questGuide({ selectors: { '[data-hq-site]': site } });
+  sandbox.fetch = () => {
+    fetches += 1;
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+  };
+
+  const result = guide.presentQuestStep({
+    quest: 'build-hq',
+    index: 1,
+    total: 3,
+    answer: 'Atlas is hired. Let’s give Atlas a home base.',
+    coachmark: 'personal_hq_site',
+    choices: [{ id: 'defer', label: 'Do this later' }]
+  });
+
+  assert.equal(result.rendered, true);
+  assert.equal(result.coachmarkResolved, true);
+  assert.equal(fetches, 0, 'a fixed step must not call /api/ori-guide');
+  assert.match(reply.innerHTML, /Atlas is hired/);
+  assert.match(reply.innerHTML, /Step 1 of 3/);
+  assert.match(reply.innerHTML, /data-ori-quest-choice="defer"/);
+  // Focus-only: the site is marked and focused, never activated.
+  assert.ok(site.classList.contains('is-ori-coachmark'));
+  assert.equal(site.focused, true);
+});
+
+test('a fixed quest step renders a user-controlled name as text, never markup', () => {
+  const { guide, reply } = questGuide();
+  guide.presentQuestStep({
+    quest: 'build-hq',
+    answer: '<img src=x onerror=alert(1)> is hired.',
+    note: '<b>bold</b>'
+  });
+  assert.doesNotMatch(reply.innerHTML, /<img/);
+  assert.doesNotMatch(reply.innerHTML, /<b>/);
+  assert.match(reply.innerHTML, /&lt;img/);
+});
+
+test('a fixed quest step cannot express a click, submit, or navigation', () => {
+  const { guide, reply } = questGuide();
+  guide.presentQuestStep({
+    quest: 'build-hq',
+    answer: 'Select the highlighted site.',
+    // Fields the walkthrough has no vocabulary for. If any were honoured they
+    // would appear in the rendered panel.
+    href: '/api/personal-assistant/hq',
+    click: '[data-hq-action="build"]',
+    submit: true,
+    actions: [{ type: 'navigate', href: '/settings' }],
+    choices: [{ id: 'defer', label: 'Do this later' }]
+  });
+
+  assert.doesNotMatch(reply.innerHTML, /href/);
+  assert.doesNotMatch(reply.innerHTML, /data-ori-action/);
+  assert.doesNotMatch(reply.innerHTML, /personal-assistant\/hq/);
+  assert.equal(guide._state.actions.length, 0);
+});
+
+test('a quest choice reports the user press without acting on it', () => {
+  const { guide, reply, events: seen } = questGuide();
+  guide.presentQuestStep({
+    quest: 'build-hq',
+    answer: 'Select the highlighted site.',
+    choices: [{ id: 'defer', label: 'Do this later' }]
+  });
+
+  // Simulate the press through the panel's own delegated handler.
+  const button = makeElement('choice');
+  button.setAttribute('data-ori-quest-choice', 'defer');
+  button.setAttribute('data-ori-quest', 'build-hq');
+  guide._onQuestChoiceClick({
+    target: { closest: sel => (sel === '[data-ori-quest-choice]' ? button : null) },
+    preventDefault() {}
+  });
+
+  const choice = seen.find(event => event.type === 'ori-guide:quest-choice');
+  assert.ok(choice, 'pressing a choice should report it to the controller');
+  // Field-wise: the detail object is created inside the vm context, so its
+  // prototype differs from the host's and deepEqual would reject it.
+  assert.equal(choice.detail.quest, 'build-hq');
+  assert.equal(choice.detail.choice, 'defer');
+  assert.match(
+    reply.innerHTML,
+    /Do this later/,
+    'the step stays rendered; the guide acts on nothing'
+  );
+});
+
+test('a quest choice from a stale step or unknown id is ignored', () => {
+  const { guide, events } = questGuide();
+  guide.presentQuestStep({
+    quest: 'build-hq',
+    answer: 'Select the highlighted site.',
+    choices: [{ id: 'defer', label: 'Do this later' }]
+  });
+  events.length = 0;
+  const seen = events.map(event => event.type);
+
+  const press = (quest, id) => {
+    const button = makeElement('choice');
+    button.setAttribute('data-ori-quest-choice', id);
+    button.setAttribute('data-ori-quest', quest);
+    guide._onQuestChoiceClick({
+      target: { closest: sel => (sel === '[data-ori-quest-choice]' ? button : null) },
+      preventDefault() {}
+    });
+  };
+  press('some-other-quest', 'defer');
+  press('build-hq', 'not-a-choice');
+  assert.deepEqual(
+    events.map(event => event.type),
+    [],
+    'a stale or unknown choice must not be reported'
+  );
+  assert.deepEqual(seen, []);
+});
+
+test('clearing a quest step drops the coachmark without touching the server quest', () => {
+  const site = makeElement('hq-site');
+  const { guide, reply } = questGuide({ selectors: { '[data-hq-site]': site } });
+  guide.presentQuestStep({
+    quest: 'build-hq',
+    answer: 'Select the highlighted site.',
+    coachmark: 'personal_hq_site'
+  });
+  assert.ok(site.classList.contains('is-ori-coachmark'));
+
+  guide.clearQuestStep();
+  assert.equal(site.classList.contains('is-ori-coachmark'), false);
+  assert.equal(reply.dataset.status, '');
+  assert.equal(guide._state.quest, null);
+});
+
+test('a quest step with no registered coachmark still presents its copy', () => {
+  // Async Map readiness: the site may not be in the DOM yet. The step must not
+  // fail closed into silence.
+  const { guide, reply } = questGuide();
+  const result = guide.presentQuestStep({
+    quest: 'build-hq',
+    answer: 'Opening the Map.',
+    coachmark: 'personal_hq_site'
+  });
+  assert.equal(result.rendered, true);
+  assert.equal(result.coachmarkResolved, false);
+  assert.match(reply.innerHTML, /Opening the Map/);
+});
+
+test('a quest step is rejected without a quest id', () => {
+  const { guide } = questGuide();
+  assert.equal(guide.presentQuestStep({ answer: 'orphaned' }).rendered, false);
+  assert.equal(guide.presentQuestStep(null).rendered, false);
+});
+
 /* ---- coachmark registry (FR-41/FR-43) ---------------------------------------- */
 
 test('every registered coachmark key is a plain token, never a selector', () => {
@@ -248,10 +438,51 @@ test('the registry matches the keys the server knows about', () => {
     'new_workspace',
     'agent_toolbox',
     'action_center_review',
-    'add_mcp_server'
+    'add_mcp_server',
+    'personal_hq_site',
+    'personal_hq_build'
   ].sort();
 
   assert.deepEqual([...coachmarks.keys()].sort(), expected);
+});
+
+// The guided Personal HQ walkthrough resolves only hand-written Home selectors,
+// and marking either control must never act on it.
+test('the guided HQ coachmarks are focus-only Home selectors', () => {
+  const { coachmarks } = load();
+  for (const key of ['personal_hq_site', 'personal_hq_build']) {
+    assert.ok(coachmarks.supports(key, '/'), `${key} should be honoured on Home`);
+    for (const elsewhere of ['/agents', '/workspaces', '/mcp', '/settings']) {
+      assert.ok(!coachmarks.supports(key, elsewhere), `${key} leaked onto ${elsewhere}`);
+    }
+  }
+  assert.equal(coachmarks.REGISTRY.personal_hq_site.selector, '[data-hq-site]');
+  assert.equal(coachmarks.REGISTRY.personal_hq_build.selector, '[data-hq-action="build"]');
+});
+
+test('an unselected HQ site yields no Build coachmark rather than a wrong one', () => {
+  const { coachmarks, sandbox, registerSelector } = load();
+  // Only the site exists yet: the Build action lives inside the context dialog
+  // the user's own selection opens.
+  registerSelector('[data-hq-site]', makeElement('hq-site'));
+  assert.ok(coachmarks.resolve('personal_hq_site', '/', sandbox.document));
+  assert.equal(
+    coachmarks.resolve('personal_hq_build', '/', sandbox.document),
+    null,
+    'Build was marked before the dialog existed'
+  );
+
+  registerSelector('[data-hq-action="build"]', makeElement('hq-build'));
+  assert.ok(
+    coachmarks.resolve('personal_hq_build', '/', sandbox.document),
+    'the Build action should resolve once the dialog has rendered'
+  );
+});
+
+test('a hidden HQ site is treated as absent rather than marked', () => {
+  const { coachmarks, sandbox, registerSelector } = load();
+  registerSelector('[data-hq-site]', makeElement('hq-site', { hidden: true }));
+  assert.equal(coachmarks.resolve('personal_hq_site', '/', sandbox.document), null);
 });
 
 test('every registry entry names at least one route and a selector', () => {
