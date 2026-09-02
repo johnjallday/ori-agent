@@ -4,6 +4,10 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const source = readFileSync(new URL('./workspace-map.js', import.meta.url), 'utf8');
+const buildingArtSource = readFileSync(
+  new URL('./workspace-building-art.js', import.meta.url),
+  'utf8'
+);
 const portraitSource = readFileSync(
   new URL('./workspace-agent-portrait.js', import.meta.url),
   'utf8'
@@ -19,6 +23,7 @@ function loadComputeLayout() {
   const window = {};
   const sandbox = { window, document: {} };
   vm.runInNewContext(portraitSource, sandbox, { filename: 'workspace-agent-portrait.js' });
+  vm.runInNewContext(buildingArtSource, sandbox, { filename: 'workspace-building-art.js' });
   vm.runInNewContext(source, sandbox, { filename: 'workspace-map.js' });
   return window.OriWorkspaceMap.computeLayout;
 }
@@ -28,6 +33,7 @@ function loadOriWorkspaceMap() {
   const window = {};
   const sandbox = { window, document: {} };
   vm.runInNewContext(portraitSource, sandbox, { filename: 'workspace-agent-portrait.js' });
+  vm.runInNewContext(buildingArtSource, sandbox, { filename: 'workspace-building-art.js' });
   vm.runInNewContext(source, sandbox, { filename: 'workspace-map.js' });
   return window.OriWorkspaceMap;
 }
@@ -1623,6 +1629,52 @@ test('tileHTML meta line reflects enriched agent/task counts with correct plural
   assert.match(singular, /ws-map-tile-meta">1 agent · 1 task</);
 });
 
+test('tileHTML uses built-in blueprint provenance for a specialized building', () => {
+  const { tileHTML } = loadOriWorkspaceMap();
+  const html = tileHTML({
+    ws: {
+      id: 'mail-1',
+      name: 'Email Ops',
+      blueprint_id: 'email-ops',
+      blueprint_builtin: true
+    },
+    col: 0,
+    row: 0
+  });
+
+  assert.match(html, /data-building-variant="mail"/);
+  assert.match(html, /data-building-emblem="mail"/);
+});
+
+test('tileHTML keeps custom and unknown blueprints on the generic building', () => {
+  const { tileHTML } = loadOriWorkspaceMap();
+  const custom = tileHTML({
+    ws: {
+      id: 'custom-1',
+      name: 'Custom Email',
+      blueprint_id: 'email-ops',
+      blueprint_builtin: false
+    },
+    col: 0,
+    row: 0
+  });
+  const unknown = tileHTML({
+    ws: {
+      id: 'unknown-1',
+      name: 'Future',
+      blueprint_id: 'future-blueprint',
+      blueprint_builtin: true
+    },
+    col: 0,
+    row: 0
+  });
+
+  assert.doesNotMatch(custom, /data-building-variant=/);
+  assert.match(custom, /<svg class="ws-map-struct"/);
+  assert.doesNotMatch(unknown, /data-building-variant=/);
+  assert.match(unknown, /<svg class="ws-map-struct"/);
+});
+
 test('tileHTML LED and entry-agent crest reflect active state and entry_agent_name', () => {
   const { tileHTML } = loadOriWorkspaceMap();
   const working = tileHTML({
@@ -2121,6 +2173,8 @@ test('tileHTML marks the designated Personal HQ workspace with a badge, aria-lab
   const hqTile = api.tileHTML({ ws: { id: 'ws-hq', name: 'Command Post' }, col: 0, row: 0 });
   assert.match(hqTile, /ws-map-tile is-hq/);
   assert.match(hqTile, /ws-map-tile-hq-badge/);
+  assert.match(hqTile, /data-building-variant="hq"/);
+  assert.match(hqTile, /data-building-emblem="hq"/);
   assert.match(hqTile, />HQ</);
   assert.match(hqTile, /, Personal HQ/);
 

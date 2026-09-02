@@ -2010,6 +2010,17 @@
     var mode = opsModeLabel(ws.ops_mode);
     var hasKeeper = String(ws.entry_agent_name || '').trim() !== '';
     var isHQ = !!hqWorkspaceId && ws.id === hqWorkspaceId;
+    var buildingArt = window.OriWorkspaceBuildingArt;
+    var buildingVariant = isHQ
+      ? 'hq'
+      : buildingArt && typeof buildingArt.variantForWorkspace === 'function'
+        ? buildingArt.variantForWorkspace(ws)
+        : '';
+    var blueprintStructure =
+      buildingVariant && buildingArt && typeof buildingArt.svgForVariant === 'function'
+        ? buildingArt.svgForVariant(buildingVariant, { context: 'map' })
+        : '';
+    var structure = blueprintStructure || (isHQ ? structSVGHQ() : structSVG(pal));
     var isSel = selectedId && ws.id === selectedId;
     var selected = isSel ? ' is-selected' : '';
     var isMulti = !!multiSelected[ws.id];
@@ -2080,7 +2091,7 @@
       '</span>' +
       (hasKeeper ? '<span class="ws-map-tile-crest" title="Commander (locked)">★</span>' : '') +
       (isHQ ? '<span class="ws-map-tile-hq-badge" title="Personal HQ">HQ</span>' : '') +
-      (isHQ ? structSVGHQ() : structSVG(pal)) +
+      structure +
       '<span class="ws-map-tile-name">' +
       escapeHtml(ws.name || 'Workspace') +
       '</span>' +

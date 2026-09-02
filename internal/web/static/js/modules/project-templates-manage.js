@@ -581,7 +581,17 @@ function ptcCard(template) {
   const icon = document.createElement('span');
   icon.className = 'workspace-template-card-icon';
   icon.setAttribute('aria-hidden', 'true');
-  icon.textContent = template.icon || '📁';
+  const buildingArt = window.OriWorkspaceBuildingArt;
+  const buildingVariant = buildingArt?.variantForBlueprint?.(template.id, template.builtin);
+  const buildingSVG = buildingVariant
+    ? buildingArt.svgForVariant?.(buildingVariant, { context: 'catalog' })
+    : '';
+  if (buildingSVG) {
+    icon.classList.add('has-building-art');
+    icon.innerHTML = buildingSVG;
+  } else {
+    icon.textContent = template.icon || '📁';
+  }
   const label = document.createElement('span');
   label.className = 'workspace-template-card-label';
   label.textContent = template.label || template.name || template.id;

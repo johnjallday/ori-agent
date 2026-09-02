@@ -1072,6 +1072,22 @@ body.workspace-page .workspace-setup-card {
   line-height: 1;
 }
 
+.workspace-template-card-icon.has-building-art {
+  display: block;
+  width: 76px;
+  height: 56px;
+  margin: -0.2rem 0 0.1rem;
+  font-size: 0;
+}
+
+.workspace-template-building-art {
+  display: block;
+  width: 76px;
+  height: 56px;
+  overflow: visible;
+  filter: drop-shadow(0 7px 5px rgb(0 0 0 / 30%));
+}
+
 .workspace-template-card-label {
   font-size: 0.86rem;
   font-weight: 600;
