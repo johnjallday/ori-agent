@@ -132,9 +132,38 @@
       }
     }
 
+    // renderSuggestion is the post-hire workspace recommendation, rendered
+    // above the capability cards because it is the one thing on this surface
+    // the user has not done yet. It is server-owned: absent for a generic
+    // relationship, and gone once the workspace exists.
+    function renderSuggestion(projection) {
+      const suggestion = projection && projection.suggestion;
+      if (!suggestion || !suggestion.title) return;
+      const route = String(suggestion.action_route || '');
+      const article = doc.createElement('article');
+      article.className = 'pa-capability pa-capability--suggested';
+      article.dataset.role = 'capability-suggestion';
+      const heading = doc.createElement('h4');
+      heading.textContent = suggestion.title;
+      article.appendChild(heading);
+      if (suggestion.body) {
+        const body = doc.createElement('p');
+        body.textContent = suggestion.body;
+        article.appendChild(body);
+      }
+      if (route.startsWith('/') && !route.startsWith('//')) {
+        const link = doc.createElement('a');
+        link.href = route;
+        link.textContent = suggestion.action_label || 'Create the workspace';
+        article.appendChild(link);
+      }
+      els.capabilities.appendChild(article);
+    }
+
     function renderCapabilities(projection) {
       if (!els.capabilities) return;
       els.capabilities.replaceChildren();
+      renderSuggestion(projection);
       const cards = projection && Array.isArray(projection.cards) ? projection.cards : [];
       if (!cards.length) {
         const empty = doc.createElement('p');

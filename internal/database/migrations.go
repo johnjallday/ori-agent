@@ -12,7 +12,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 52
+const schemaVersion = 53
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -171,6 +171,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration051PersonalAssistantRenameJournal(ctx)
 	case 52:
 		return db.migration052PersonalAssistantHQSetup(ctx)
+	case 53:
+		return db.migration053PersonalAssistantSpecialist(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -1906,6 +1908,36 @@ func (db *DB) migration052PersonalAssistantHQSetup(ctx context.Context) error {
 	}
 
 	return restore()
+}
+
+// migration053PersonalAssistantSpecialist records the domain specialist offer's
+// outcome, so post-hire surfaces can shape themselves without re-running
+// application detection.
+//
+// Both columns are additive and default to empty: every existing relationship
+// reads as "never offered, no specialist" and keeps today's behaviour with no
+// backfill. The table remains one row per user; nothing about its identity
+// changes.
+func (db *DB) migration053PersonalAssistantSpecialist(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "personal_assistant_state")
+	if err != nil || !exists {
+		return err
+	}
+	for _, statement := range []struct {
+		sql, label string
+	}{
+		// The accepted domain, "" when none was accepted.
+		{`ALTER TABLE personal_assistant_state ADD COLUMN specialist_slug TEXT NOT NULL DEFAULT ''`, "specialist_slug"},
+		// Whether the offer has been answered at all: "" (not yet), "accepted",
+		// or "declined". Kept separate from the slug so a decline is remembered
+		// and never re-asked, which an empty slug alone cannot express.
+		{`ALTER TABLE personal_assistant_state ADD COLUMN specialist_offer_state TEXT NOT NULL DEFAULT ''`, "specialist_offer_state"},
+	} {
+		if _, execErr := db.ExecContext(ctx, statement.sql); execErr != nil && !isDuplicateColumnError(execErr) {
+			return fmt.Errorf("failed to add personal_assistant_state.%s column: %w", statement.label, execErr)
+		}
+	}
+	return nil
 }
 
 func (db *DB) migration050PersonalAssistantFirstBrief(ctx context.Context) error {

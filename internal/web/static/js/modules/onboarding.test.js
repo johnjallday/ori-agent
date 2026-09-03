@@ -1,7 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  GENERIC_ASSIGNMENT_LABELS,
+  GENERIC_ASSIGNMENT_STEPS,
+  GENERIC_FOCUS_AREAS,
   OnboardingManager,
+  assignmentLabelsFor,
+  assignmentStepsFor,
   buildFirstAssignmentApplyPayload,
   buildFirstAssignmentPreviewPayload,
   buildPersonalAssistantHirePayload,
@@ -388,4 +393,157 @@ test('OnboardingManager consumes the shared memoized status gate', async () => {
   assert.equal(first.needs_onboarding, true);
   assert.equal(second, first);
   assert.equal(calls, 1);
+});
+
+// --- Domain specialist offer -------------------------------------------
+
+const musicEntry = Object.freeze({
+  slug: 'music_production',
+  display_name: 'music projects',
+  offer_copy: {
+    headline: 'I found REAPER on this Mac.',
+    question: 'Want me to help with your music projects?',
+    accept_label: 'Yes, help with my music',
+    decline_label: 'No thanks',
+    accepted_note: 'Your assistant will keep an eye on your music projects.',
+    manual_label: 'I work on music'
+  },
+  focus_areas: [
+    { value: 'plan_my_day', label: 'Plan my studio day', selected: true },
+    { value: 'track_songs_in_progress', label: 'Track songs in progress', selected: true }
+  ],
+  assignment_labels: [
+    {
+      type: 'priority',
+      label: 'Song or project in progress',
+      placeholder: 'Which track are you on?',
+      add_label: 'Add a song or project'
+    }
+  ],
+  assignment_steps: [{ index: 0, title: 'Songs in progress', legend: 'What are you on now?' }]
+});
+
+// A user with no accepted specialist must see today's flow. Focus areas,
+// assignment labels, and step wording must all resolve to the shipped
+// generic values.
+test('the generic path is byte-for-byte unchanged when no specialist is accepted', () => {
+  assert.deepEqual(
+    assignmentLabelsFor(null),
+    GENERIC_ASSIGNMENT_LABELS.map(label => ({ ...label }))
+  );
+  assert.deepEqual(
+    assignmentStepsFor(null),
+    GENERIC_ASSIGNMENT_STEPS.map(step => ({ ...step }))
+  );
+
+  // The exact shipped strings, spelled out so a silent copy edit fails here.
+  assert.deepEqual(
+    GENERIC_FOCUS_AREAS.map(option => option.value),
+    [
+      'plan_my_day',
+      'track_commitments_and_follow_ups',
+      'prepare_for_meetings',
+      'keep_projects_moving',
+      'help_with_email',
+      'something_else'
+    ]
+  );
+  assert.deepEqual(
+    GENERIC_ASSIGNMENT_LABELS.map(label => label.label),
+    ['Priority', 'I owe', 'Waiting on', 'Commitment']
+  );
+  assert.deepEqual(
+    GENERIC_ASSIGNMENT_STEPS.map(step => step.title),
+    ['Today’s priorities', 'Owed and waiting', 'Fixed commitments']
+  );
+});
+
+test('assignment labels are re-worded while the durable item types are not', () => {
+  const labels = assignmentLabelsFor(musicEntry);
+  assert.deepEqual(
+    labels.map(label => label.type),
+    GENERIC_ASSIGNMENT_LABELS.map(label => label.type)
+  );
+  assert.equal(labels[0].label, 'Song or project in progress');
+  assert.equal(labels[0].placeholder, 'Which track are you on?');
+  // Types the domain did not override keep the generic wording.
+  assert.equal(labels[1].label, 'I owe');
+  assert.equal(labels[3].placeholder, 'Commitment or time to keep visible');
+
+  const steps = assignmentStepsFor(musicEntry);
+  assert.equal(steps[0].title, 'Songs in progress');
+  assert.equal(steps[1].title, 'Owed and waiting');
+});
+
+// The hire itself carries no specialist: the offer is answered after hiring,
+// on Home, against the durable relationship.
+test('the hire payload never carries a specialist', () => {
+  const payload = buildPersonalAssistantHirePayload({ requestId: 'r' });
+  assert.equal('specialist_slug' in payload, false);
+});
+
+test('only an accepted offer counts as the active specialist', () => {
+  const manager = new OnboardingManager();
+  assert.equal(manager.activeSpecialist(), null);
+
+  manager.specialistOffer = musicEntry;
+  // A pending offer is not an answer.
+  assert.equal(manager.activeSpecialist(), null);
+
+  manager.specialistDecision = 'accepted';
+  assert.equal(manager.activeSpecialist().slug, 'music_production');
+
+  manager.specialistDecision = 'declined';
+  assert.equal(manager.activeSpecialist(), null);
+});
+
+test('declining resolves assignment copy back to the generic labels', () => {
+  const manager = new OnboardingManager();
+  manager.applySpecialistAssignmentCopy(musicEntry);
+  assert.equal(manager.assignmentLabelFor('priority').label, 'Song or project in progress');
+
+  manager.applySpecialistAssignmentCopy(null);
+  assert.equal(manager.assignmentLabelFor('priority').label, 'Priority');
+  assert.deepEqual(
+    manager.assignmentLabels,
+    GENERIC_ASSIGNMENT_LABELS.map(label => ({ ...label }))
+  );
+});
+
+test('the first-assignment quest recovers the domain from the persisted slug', async () => {
+  const priorFetch = globalThis.fetch;
+  let catalogReads = 0;
+  globalThis.fetch = async url => {
+    if (!String(url).includes('/specialists')) throw new Error(`unexpected fetch ${url}`);
+    catalogReads += 1;
+    return { ok: true, json: async () => ({ specialists: [musicEntry] }) };
+  };
+  try {
+    // The quest is normally opened from Home, in a session where no detection
+    // ran at all. The wording has to come from the slug on the relationship.
+    const manager = new OnboardingManager();
+    manager.personalAssistantState = { state: 'active', specialist_slug: 'music_production' };
+    const resolved = await manager.resolvePersistedSpecialist();
+    assert.equal(resolved.slug, 'music_production');
+    assert.equal(catalogReads, 1);
+
+    // The catalog is read once, then reused.
+    await manager.resolvePersistedSpecialist();
+    assert.equal(catalogReads, 1);
+
+    // A relationship with no specialist stays on the generic wording, and does
+    // not even read the catalog.
+    const generic = new OnboardingManager();
+    generic.personalAssistantState = { state: 'active' };
+    assert.equal(await generic.resolvePersistedSpecialist(), null);
+    assert.equal(catalogReads, 1);
+
+    // A persisted slug the mapping no longer knows degrades to generic rather
+    // than breaking the quest.
+    const stale = new OnboardingManager();
+    stale.personalAssistantState = { state: 'active', specialist_slug: 'retired_domain' };
+    assert.equal(await stale.resolvePersistedSpecialist(), null);
+  } finally {
+    globalThis.fetch = priorFetch;
+  }
 });
