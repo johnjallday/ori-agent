@@ -3739,6 +3739,7 @@ const sessionManager = {
 
     // Every open starts from a clean team draft; nothing staged in a previous
     // (possibly cancelled) session may leak into this one.
+    this.clearWorkspaceTeamBlockAttention();
     this.discardWorkspaceTeamDraft();
     this.clearWorkspaceNameError();
     this.clearWorkspaceCreateError();
@@ -5437,6 +5438,51 @@ const sessionManager = {
     }
   },
 
+  // Clears the short-lived visual guide used after Team refuses to advance.
+  // The class is state-neutral: it identifies where to act without changing the
+  // blocker, button availability, or draft.
+  clearWorkspaceTeamBlockAttention() {
+    if (this.workspaceTeamBlockAttentionTimer) {
+      clearTimeout(this.workspaceTeamBlockAttentionTimer);
+      this.workspaceTeamBlockAttentionTimer = null;
+    }
+    document
+      .querySelectorAll('#wizardStep3 .is-blocking-attention')
+      .forEach(element => element.classList.remove('is-blocking-attention'));
+  },
+
+  // When Review is blocked, bring the exact corrective control into view and
+  // briefly pulse it together with its roster row. Focus and the live-region
+  // message provide the same direction without motion; reduced-motion users
+  // receive a static outline instead of the pulse.
+  signalWorkspaceTeamBlock(target, message) {
+    if (!target) return;
+    this.clearWorkspaceTeamBlockAttention();
+
+    const owner = target.closest?.('.workspace-team-row, .workspace-team-issue');
+    const attentionTargets = Array.from(new Set([target, owner].filter(Boolean)));
+    // Force style recalculation so clicking Review repeatedly restarts the cue.
+    void target.offsetWidth;
+    attentionTargets.forEach(element => element.classList.add('is-blocking-attention'));
+
+    const reduceMotion = Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches);
+    target.focus({ preventScroll: true });
+    target.scrollIntoView?.({
+      behavior: reduceMotion ? 'auto' : 'smooth',
+      block: 'center',
+      inline: 'nearest'
+    });
+    this.announceWorkspaceTeamChange(
+      `${message || 'This team needs attention before review.'} Focus moved to the required control.`
+    );
+
+    this.workspaceTeamBlockAttentionTimer = setTimeout(() => {
+      this.workspaceTeamBlockAttentionTimer = null;
+      attentionTargets.forEach(element => element.classList.remove('is-blocking-attention'));
+    }, 2000);
+  },
+  workspaceTeamBlockAttentionTimer: null,
+
   // Announces a team change without moving focus.
   //
   // One interaction can produce several changes — adding an agent can also hand
@@ -5746,28 +5792,27 @@ const sessionManager = {
     if (!this.importModeEnabled && targetStep > 3 && this.wizardStep === 3) {
       if (this.hasBlockingTeamIssue()) {
         this.refreshWizardChrome();
-        const assistantNameIssue = this.teamView()?.issues.some(
+        const blockers = this.teamView()?.blockingIssues || [];
+        const assistantNameIssue = blockers.find(
           issue => issue.id === 'assistant-name' || issue.anchor === 'assistantProgramCreateName'
         );
-        const setupIssue = this.teamView()?.blockingIssues.find(
-          issue => issue.id === 'template-agent-setup-required'
-        );
-        const changedIssue = this.teamView()?.blockingIssues.find(
-          issue => issue.id === 'template-agent-plan-changed'
-        );
-        const creationIssue = this.teamView()?.blockingIssues.find(
-          issue => issue.id === 'template-agent-creation-failed'
-        );
-        if (assistantNameIssue) document.getElementById('assistantProgramCreateName')?.focus();
+        const setupIssue = blockers.find(issue => issue.id === 'template-agent-setup-required');
+        const changedIssue = blockers.find(issue => issue.id === 'template-agent-plan-changed');
+        const creationIssue = blockers.find(issue => issue.id === 'template-agent-creation-failed');
+        const activeIssue =
+          assistantNameIssue || changedIssue || creationIssue || setupIssue || blockers[0];
+        let target = null;
+        if (assistantNameIssue) target = document.getElementById('assistantProgramCreateName');
         else if (changedIssue && Number.isInteger(changedIssue.templateAgentIndex)) {
-          document.getElementById(`team-agent-setup-${changedIssue.templateAgentIndex}`)?.focus();
+          target = document.getElementById(`team-agent-setup-${changedIssue.templateAgentIndex}`);
         } else if (creationIssue) {
-          document.getElementById(`team-agent-retry-${creationIssue.templateAgentIndex}`)?.focus();
+          target = document.getElementById(`team-agent-retry-${creationIssue.templateAgentIndex}`);
         } else if (setupIssue) {
-          document.getElementById(`team-agent-setup-${setupIssue.templateAgentIndex}`)?.focus();
+          target = document.getElementById(`team-agent-setup-${setupIssue.templateAgentIndex}`);
         } else {
-          document.querySelector('#workspaceTeamIssues .workspace-team-issue.is-blocking')?.focus();
+          target = document.querySelector('#workspaceTeamIssues .workspace-team-issue.is-blocking');
         }
+        this.signalWorkspaceTeamBlock(target, activeIssue?.message);
         return;
       }
     }

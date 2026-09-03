@@ -1062,6 +1062,45 @@
 .workspace-create-modal .workspace-team-issue.is-blocking .workspace-team-issue-label {
   color: #f57b72;
 }
+/* A blocked Review click should not leave the user hunting through the roster.
+   This finite beacon travels with the exact next control for the first blocker;
+   its owner row pulses more quietly to preserve visual context. */
+.workspace-create-modal .workspace-team-row.is-blocking-attention,
+.workspace-create-modal .workspace-team-issue.is-blocking-attention {
+  border-color: var(--wc-keeper);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--wc-keeper) 34%, transparent);
+  animation: workspace-team-blocked-row 1.6s ease-out;
+}
+.workspace-create-modal .workspace-wizard-inline-action.is-blocking-attention,
+.workspace-create-modal .modern-input.is-blocking-attention {
+  border-radius: 2px;
+  outline: 2px solid var(--wc-keeper);
+  outline-offset: 4px;
+  background: color-mix(in srgb, var(--wc-keeper) 14%, transparent);
+  color: var(--wc-ink-heading);
+  animation: workspace-team-blocked-action 1.6s ease-out;
+}
+@keyframes workspace-team-blocked-row {
+  0%,
+  100% {
+    background: rgba(4, 8, 12, 0.24);
+  }
+  22%,
+  58% {
+    background: color-mix(in srgb, var(--wc-keeper) 10%, var(--wc-panel-2));
+  }
+}
+@keyframes workspace-team-blocked-action {
+  0%,
+  42%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--wc-keeper) 52%, transparent);
+  }
+  24%,
+  66% {
+    box-shadow: 0 0 0 8px transparent;
+  }
+}
 .workspace-create-modal .workspace-team-issue.is-advisory {
   border-left-color: var(--wc-keeper);
 }
@@ -1516,6 +1555,9 @@
   .workspace-create-modal .workspace-template-card,
   .workspace-create-modal .workspace-template-row {
     transition: none;
+  }
+  .workspace-create-modal .is-blocking-attention {
+    animation: none !important;
   }
   .workspace-create-modal .workspace-template-card:hover,
   .workspace-create-modal .workspace-template-row:hover {

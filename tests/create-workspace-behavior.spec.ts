@@ -842,9 +842,15 @@ test('proposed agent setup stays inside Create Workspace and submits one strict 
   await expect(row.locator('[data-team-agent-setup]')).toHaveText('Set up agent');
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep3')).toBeVisible();
-  await expect(row.locator('[data-team-agent-setup]')).toBeFocused();
+  const requiredSetupAction = row.locator('[data-team-agent-setup]');
+  await expect(requiredSetupAction).toBeFocused();
+  await expect(requiredSetupAction).toHaveClass(/is-blocking-attention/);
+  await expect(row).toHaveClass(/is-blocking-attention/);
+  await expect(page.locator('#workspaceTeamLiveRegion')).toContainText(
+    'Focus moved to the required control.'
+  );
 
-  await row.locator('[data-team-agent-setup]').click();
+  await requiredSetupAction.click();
   await expect(page.locator('#workspaceTeamLayout')).toBeHidden();
   await expect(page.locator('#workspaceAgentSetupView')).toBeVisible();
   await expect(page.locator('#addFolderModal .modal.show')).toHaveCount(0);
