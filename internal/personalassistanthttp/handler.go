@@ -38,6 +38,12 @@ type HireService interface {
 	Hire(ctx context.Context, userID string, request personalassistant.HireRequest) (*personalassistant.HireResult, error)
 }
 
+// RecoveryService reconnects a server-validated orphan identity. The request
+// carries no profile, assistant, workspace, or instance ID.
+type RecoveryService interface {
+	Repair(ctx context.Context, userID string, ifVersion int64) (*personalassistant.State, error)
+}
+
 // AssignmentPreviewService persists deterministic first-assignment previews.
 type AssignmentPreviewService interface {
 	Current(ctx context.Context, userID string) (*personalassistant.AssignmentCurrentResult, error)
@@ -74,6 +80,7 @@ type SpecialistOfferService interface {
 type Handler struct {
 	service                    StateReader
 	hirer                      HireService
+	recovery                   RecoveryService
 	hqSetup                    HQSetupService
 	assignments                AssignmentPreviewService
 	today                      TodayReader
@@ -97,6 +104,13 @@ func NewHandler(service StateReader, provider userprofile.UserProvider) *Handler
 func (h *Handler) SetHireService(hirer HireService) {
 	if h != nil {
 		h.hirer = hirer
+	}
+}
+
+// SetRecoveryService adds the explicit orphan-reconnection boundary.
+func (h *Handler) SetRecoveryService(recovery RecoveryService) {
+	if h != nil {
+		h.recovery = recovery
 	}
 }
 
@@ -291,6 +305,67 @@ func (h *Handler) Hire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	orihttp.Created(w, map[string]any{"personal_assistant": response})
+}
+
+type recoveryRequest struct {
+	IfVersion *int64 `json:"if_version"`
+}
+
+type recoveryErrorResponse struct {
+	Error string `json:"error"`
+	Code  string `json:"code"`
+}
+
+// Repair reconnects one independently validated orphan profile/HQ identity.
+// Identity fields are intentionally absent from recoveryRequest: the server
+// re-runs the complete inspection immediately before inserting the missing row.
+func (h *Handler) Repair(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h == nil || h.recovery == nil || h.service == nil || h.provider == nil {
+		orihttp.ServiceUnavailable(w, "personal assistant recovery is unavailable")
+		return
+	}
+	var body recoveryRequest
+	if err := decodeBoundedRequest(w, r, &body); err != nil || body.IfVersion == nil {
+		writeRecoveryError(w, http.StatusBadRequest, "invalid_recovery_request",
+			"The recovery request is invalid.")
+		return
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	if _, err := h.recovery.Repair(r.Context(), userID, *body.IfVersion); err != nil {
+		switch {
+		case errors.Is(err, personalassistant.ErrValidation):
+			writeRecoveryError(w, http.StatusBadRequest, "invalid_recovery_request",
+				"The recovery request is invalid.")
+		case errors.Is(err, personalassistant.ErrNotFound):
+			writeRecoveryError(w, http.StatusConflict, "recovery_not_available",
+				"No existing assistant relationship can be safely recovered.")
+		case errors.Is(err, personalassistant.ErrConflict):
+			writeRecoveryError(w, http.StatusConflict, "recovery_conflict",
+				"The assistant relationship changed. Refresh before trying again.")
+		case errors.Is(err, personalassistant.ErrRepairNeeded):
+			writeRecoveryError(w, http.StatusConflict, "recovery_blocked",
+				"Existing assistant records do not agree, so nothing was reconnected.")
+		default:
+			orihttp.ServiceUnavailable(w, "personal assistant recovery is temporarily unavailable")
+		}
+		return
+	}
+	projection, err := h.service.Get(r.Context(), userID)
+	if err != nil {
+		orihttp.ServiceUnavailable(w, "personal assistant recovery was saved; reload to verify it")
+		return
+	}
+	orihttp.Success(w, map[string]any{"personal_assistant": projection})
+}
+
+func writeRecoveryError(w http.ResponseWriter, status int, code, message string) {
+	_ = orihttp.RespondJSON(w, status, recoveryErrorResponse{Error: message, Code: code})
 }
 
 // hqSetupRequest is the bounded Build My HQ submission.

@@ -286,6 +286,13 @@ const (
 	// RepairProfileCreation means the hire could not create or take ownership of
 	// the global assistant profile.
 	RepairProfileCreation RepairStep = "profile_creation"
+	// RepairRelationshipRecovery means the relationship row is missing but one
+	// exact profile/HQ identity has been independently validated and may be
+	// reconnected after explicit confirmation.
+	RepairRelationshipRecovery RepairStep = "relationship_recovery"
+	// RepairRelationshipRecoveryBlocked means orphan evidence exists but is
+	// incomplete or contradictory. No automatic or name-based repair is allowed.
+	RepairRelationshipRecoveryBlocked RepairStep = "relationship_recovery_blocked"
 	// RepairHQCreation means a claimed HQ setup could not create the workspace
 	// through the canonical template path.
 	RepairHQCreation       RepairStep = "hq_creation"
@@ -298,7 +305,8 @@ const (
 func NormalizeRepairStep(raw string) (RepairStep, error) {
 	step := RepairStep(strings.TrimSpace(raw))
 	switch step {
-	case RepairNone, RepairProfileCreation, RepairHQCreation,
+	case RepairNone, RepairProfileCreation, RepairRelationshipRecovery,
+		RepairRelationshipRecoveryBlocked, RepairHQCreation,
 		RepairDesignation, RepairDailyBriefConfig, RepairFinalization:
 		return step, nil
 	default:

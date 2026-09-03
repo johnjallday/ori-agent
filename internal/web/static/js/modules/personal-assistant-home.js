@@ -443,12 +443,30 @@ function renderRelationship(personalAssistant, view) {
   els.meta.textContent = '';
   els.sections.hidden = !view.available;
   if (view.repair) {
-    els.title.textContent = 'Resume your personal assistant setup';
+    const repairStep = String(personalAssistant?.repair_step || '').trim();
+    const recoverable = repairStep === 'relationship_recovery';
+    const blocked = repairStep === 'relationship_recovery_blocked';
+    els.title.textContent = recoverable
+      ? `Reconnect ${view.name}`
+      : blocked
+        ? 'Assistant records need review'
+        : 'Resume your personal assistant setup';
     els.banner.replaceChildren();
     const link = document.createElement('a');
     link.href = '/?hire=1';
-    link.textContent = 'Repair personal assistant';
-    els.banner.append('Your existing assistant or Personal HQ needs repair. ', link);
+    link.textContent = recoverable
+      ? 'Review and reconnect'
+      : blocked
+        ? 'Review repair status'
+        : 'Repair personal assistant';
+    const message = recoverable
+      ? personalAssistant?.hq_workspace_id
+        ? 'Ori found the existing assistant and Personal HQ with matching stable IDs. '
+        : 'Ori found the existing assistant profile with its durable ownership marker. '
+      : blocked
+        ? 'Existing Personal Assistant records do not agree, so Ori will not guess or create a duplicate. '
+        : 'Your existing assistant or Personal HQ needs repair. ';
+    els.banner.append(message, link);
     return;
   }
   if (view.needsHQ) {

@@ -15,7 +15,9 @@ import {
   firstAssignmentResumeView,
   HQ_QUEST_ROUTE,
   normalizeFirstAssignmentRows,
+  personalAssistantCanOpenHireFlow,
   personalAssistantNeedsHQ,
+  personalAssistantRecoveryView,
   personalAssistantResumeMessage,
   workspaceRootSetupView
 } from './onboarding.js';
@@ -117,6 +119,34 @@ test('personalAssistantNeedsHQ recognizes the hired-but-unbuilt stages only', ()
     assert.equal(personalAssistantNeedsHQ({ state }), false, `${state} misread as pre-HQ`);
   }
   assert.equal(personalAssistantNeedsHQ(), false);
+});
+
+test('personalAssistantCanOpenHireFlow never reopens creation for a paused relationship', () => {
+  assert.equal(personalAssistantCanOpenHireFlow({ state: 'paused' }), false);
+  assert.equal(personalAssistantCanOpenHireFlow({ state: 'repair_needed' }), true);
+  assert.equal(personalAssistantCanOpenHireFlow({ state: 'needs_hire' }), true);
+});
+
+test('personalAssistantRecoveryView distinguishes reconnectable and blocked orphan evidence', () => {
+  assert.deepEqual(
+    personalAssistantRecoveryView({
+      state: 'repair_needed',
+      repair_step: 'relationship_recovery'
+    }),
+    { repair: true, available: true, blocked: false }
+  );
+  assert.deepEqual(
+    personalAssistantRecoveryView({
+      state: 'repair_needed',
+      repair_step: 'relationship_recovery_blocked'
+    }),
+    { repair: true, available: false, blocked: true }
+  );
+  assert.deepEqual(personalAssistantRecoveryView({ state: 'needs_hire' }), {
+    repair: false,
+    available: false,
+    blocked: false
+  });
 });
 
 test('the guided HQ quest route lets the user select the site themselves', () => {
@@ -271,6 +301,7 @@ function stubHireDom() {
   const priorDocument = globalThis.document;
   const priorWindow = globalThis.window;
   const navigations = [];
+  let reloads = 0;
   globalThis.document = {
     getElementById: id => elements.get(id) || null,
     querySelectorAll: () => [],
@@ -284,6 +315,9 @@ function stubHireDom() {
       },
       get href() {
         return navigations.at(-1) || '';
+      },
+      reload() {
+        reloads += 1;
       }
     },
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} }
@@ -291,6 +325,7 @@ function stubHireDom() {
   return {
     elements,
     navigations,
+    reloadCount: () => reloads,
     restore() {
       globalThis.document = priorDocument;
       globalThis.window = priorWindow;
@@ -317,6 +352,78 @@ test('a durable needs_hq relationship closes onboarding instead of hiring again'
     assert.equal(hirePosts, 0, 'a second hire was posted for a durable relationship');
     assert.equal(completePosts, 1);
     assert.equal(dom.navigations.at(-1), HQ_QUEST_ROUTE);
+  } finally {
+    globalThis.fetch = priorFetch;
+    dom.restore();
+  }
+});
+
+test('relationship recovery posts no client-selected identity and never starts a hire', async () => {
+  const dom = stubHireDom();
+  let repairBody = null;
+  let hirePosts = 0;
+  const priorFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options = {}) => {
+    const target = String(url);
+    if (target.includes('/api/personal-assistant/hire')) hirePosts += 1;
+    if (target.includes('/api/personal-assistant/repair')) {
+      repairBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({
+          personal_assistant: {
+            state: 'paused',
+            state_version: 1,
+            display_name: 'Assistant',
+            assistant_id: 'assistant-a'
+          }
+        })
+      };
+    }
+    return { ok: true, json: async () => ({}) };
+  };
+  try {
+    const manager = new OnboardingManager();
+    manager.personalAssistantState = {
+      state: 'repair_needed',
+      repair_step: 'relationship_recovery',
+      state_version: 0,
+      display_name: 'Assistant',
+      assistant_id: 'assistant-a',
+      hq_workspace_id: 'hq-a'
+    };
+    manager.modalInstance = { hide() {} };
+    await manager.hireAssistant();
+
+    assert.equal(hirePosts, 0);
+    assert.deepEqual(repairBody, { if_version: 0 });
+    assert.equal('assistant_id' in repairBody, false);
+    assert.equal('hq_workspace_id' in repairBody, false);
+    assert.deepEqual(dom.navigations, ['/']);
+    assert.equal(dom.reloadCount(), 0);
+  } finally {
+    globalThis.fetch = priorFetch;
+    dom.restore();
+  }
+});
+
+test('blocked relationship recovery cannot fall through to hire', async () => {
+  const dom = stubHireDom();
+  let calls = 0;
+  const priorFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { ok: true, json: async () => ({}) };
+  };
+  try {
+    const manager = new OnboardingManager();
+    manager.personalAssistantState = {
+      state: 'repair_needed',
+      repair_step: 'relationship_recovery_blocked'
+    };
+    await manager.hireAssistant();
+    assert.equal(calls, 0);
+    assert.match(dom.elements.get('pafHireError').textContent, /cannot safely reconnect/i);
   } finally {
     globalThis.fetch = priorFetch;
     dom.restore();
