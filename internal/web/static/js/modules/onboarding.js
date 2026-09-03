@@ -98,6 +98,87 @@ export function personalAssistantNeedsHQ(state = {}) {
   return ['needs_hq', 'provisioning_hq'].includes(String(state?.state || '').trim());
 }
 
+// --- Domain specialist wording -----------------------------------------
+//
+// The generic constants below are today's shipped wording, kept here so the
+// specialist path can be swapped in and out without the generic path ever
+// depending on a mapping being present. A user with no accepted specialist
+// renders from these and sees no behavioural difference.
+
+export const GENERIC_FOCUS_AREAS = Object.freeze([
+  { value: 'plan_my_day', label: 'Plan my day', selected: true },
+  {
+    value: 'track_commitments_and_follow_ups',
+    label: 'Track commitments and follow-ups',
+    selected: true
+  },
+  { value: 'prepare_for_meetings', label: 'Prepare for meetings', selected: false },
+  { value: 'keep_projects_moving', label: 'Keep projects moving', selected: true },
+  { value: 'help_with_email', label: 'Help with email', selected: false },
+  { value: 'something_else', label: 'Something else', selected: false }
+]);
+
+export const GENERIC_ASSIGNMENT_LABELS = Object.freeze([
+  { type: 'priority', label: 'Priority', placeholder: 'What is it?', add_label: 'Add priority' },
+  { type: 'i_owe', label: 'I owe', placeholder: 'What is it?', add_label: 'Add item I owe' },
+  {
+    type: 'waiting_on',
+    label: 'Waiting on',
+    placeholder: 'What is it?',
+    add_label: 'Add item I’m waiting on'
+  },
+  {
+    type: 'fixed_commitment',
+    label: 'Commitment',
+    placeholder: 'Commitment or time to keep visible',
+    add_label: 'Add fixed commitment'
+  }
+]);
+
+export const GENERIC_ASSIGNMENT_STEPS = Object.freeze([
+  { index: 0, title: 'Today’s priorities', legend: 'What must happen today?' },
+  { index: 1, title: 'Owed and waiting', legend: 'What do you owe—or what are you waiting on?' },
+  { index: 2, title: 'Fixed commitments', legend: 'Fixed commitments to keep visible' }
+]);
+
+// assignmentLabelsFor merges a domain's wording over the generic labels. The
+// item types are the durable payload values and are never rewritten — only the
+// label, placeholder, and add-button text a user reads.
+export function assignmentLabelsFor(entry) {
+  const overrides = new Map(
+    (Array.isArray(entry?.assignment_labels) ? entry.assignment_labels : [])
+      .filter(label => label && typeof label.type === 'string')
+      .map(label => [label.type, label])
+  );
+  return GENERIC_ASSIGNMENT_LABELS.map(generic => {
+    const override = overrides.get(generic.type);
+    if (!override) return { ...generic };
+    return {
+      type: generic.type,
+      label: String(override.label || '').trim() || generic.label,
+      placeholder: String(override.placeholder || '').trim() || generic.placeholder,
+      add_label: String(override.add_label || '').trim() || generic.add_label
+    };
+  });
+}
+
+export function assignmentStepsFor(entry) {
+  const overrides = new Map(
+    (Array.isArray(entry?.assignment_steps) ? entry.assignment_steps : [])
+      .filter(step => step && Number.isInteger(Number(step.index)))
+      .map(step => [Number(step.index), step])
+  );
+  return GENERIC_ASSIGNMENT_STEPS.map(generic => {
+    const override = overrides.get(generic.index);
+    if (!override) return { ...generic };
+    return {
+      index: generic.index,
+      title: String(override.title || '').trim() || generic.title,
+      legend: String(override.legend || '').trim() || generic.legend
+    };
+  });
+}
+
 const firstAssignmentTypes = new Set(['priority', 'i_owe', 'waiting_on', 'fixed_commitment']);
 
 export function normalizeFirstAssignmentRows(rows = []) {
@@ -232,6 +313,13 @@ export class OnboardingManager {
     this.assignmentApplyRequestId = '';
     this.assignmentApplying = false;
     this.assignmentPreviewing = false;
+    // The domain the relationship records, resolved lazily for the
+    // first-assignment quest. The offer that sets it is made on Home.
+    this.specialistOffer = null;
+    this.specialistCatalog = [];
+    this.specialistDecision = 'unanswered';
+    this.assignmentLabels = GENERIC_ASSIGNMENT_LABELS.map(label => ({ ...label }));
+    this.assignmentSteps = GENERIC_ASSIGNMENT_STEPS.map(step => ({ ...step }));
   }
 
   async init() {
@@ -959,6 +1047,80 @@ export class OnboardingManager {
     }
   }
 
+  // --- Domain specialist wording -----------------------------------------
+  //
+  // The offer itself is not here. It is made after hiring, on Home, so the
+  // wizard asks about work in general and nothing else. What remains is the
+  // wording the first-assignment quest needs, resolved from the domain the
+  // relationship already records.
+
+  async loadSpecialistCatalog() {
+    try {
+      const response = await fetch('/api/onboarding/specialists', {
+        headers: { Accept: 'application/json' }
+      });
+      if (!response.ok) return [];
+      const payload = await response.json();
+      const entries = payload?.specialists;
+      return Array.isArray(entries) ? entries.filter(entry => entry && entry.slug) : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  // activeSpecialist is the entry whose copy and ordering apply right now:
+  // only an accepted offer, never a pending or declined one.
+  activeSpecialist() {
+    return this.specialistDecision === 'accepted' ? this.specialistOffer : null;
+  }
+
+  // applySpecialistAssignmentCopy resolves the wording the first-assignment
+  // quest will use. Passing null resolves back to the generic labels. The four
+  // durable item types are untouched either way — only what a user reads.
+  applySpecialistAssignmentCopy(entry) {
+    this.assignmentLabels = assignmentLabelsFor(entry);
+    this.assignmentSteps = assignmentStepsFor(entry);
+    this.renderAssignmentCopy();
+  }
+
+  // renderAssignmentCopy re-words the three step legends and the add-row
+  // buttons in place. The buttons keep their data-paf-add-row type, which is
+  // what the payload is built from, so only what a user reads changes.
+  renderAssignmentCopy() {
+    if (typeof document === 'undefined') return;
+    (this.assignmentSteps || GENERIC_ASSIGNMENT_STEPS).forEach(step => {
+      const legend = document.querySelector(`[data-paf-assignment-legend="${step.index}"]`);
+      if (legend) legend.textContent = step.legend;
+    });
+    document.querySelectorAll('[data-paf-add-row]').forEach(button => {
+      const copy = this.assignmentLabelFor(button.dataset.pafAddRow);
+      if (copy?.add_label) button.textContent = copy.add_label;
+    });
+  }
+
+  // resolvePersistedSpecialist recovers the accepted domain on a page load that
+  // did not run the hire — the first-assignment quest is normally opened from
+  // Home, in a session where no detection ever ran. The slug is read from the
+  // relationship; the copy comes from the mapping.
+  async resolvePersistedSpecialist() {
+    // An offer accepted in this same session is authoritative before the
+    // relationship read has caught up.
+    const active = this.activeSpecialist();
+    if (active) return active;
+    const slug = String(this.personalAssistantState?.specialist_slug || '').trim();
+    if (!slug) return null;
+    if (this.specialistOffer?.slug === slug) return this.specialistOffer;
+    if (!this.specialistCatalog.length) {
+      this.specialistCatalog = await this.loadSpecialistCatalog();
+    }
+    return this.specialistCatalog.find(entry => entry.slug === slug) || null;
+  }
+
+  assignmentLabelFor(type) {
+    const labels = this.assignmentLabels || GENERIC_ASSIGNMENT_LABELS;
+    return labels.find(label => label.type === type) || null;
+  }
+
   // --- Personal Assistant hire -------------------------------------------
 
   shouldOpenFirstAssignmentQuest() {
@@ -1281,6 +1443,9 @@ export class OnboardingManager {
     document.getElementById('pafAssignmentPreview')?.classList.add('d-none');
     document.getElementById('pafAssignmentResult')?.classList.add('d-none');
     document.getElementById('pafAssignmentForm')?.classList.remove('d-none');
+    // Resolve the domain wording before the rows are seeded, so a producer
+    // never sees the generic labels flash first.
+    this.applySpecialistAssignmentCopy(await this.resolvePersistedSpecialist());
     this.seedAssignmentRows();
     this.showAssignmentStep(this.assignmentStep, { focus: false });
     try {
@@ -1327,10 +1492,10 @@ export class OnboardingManager {
         Number(panel.dataset.pafAssignmentStep) !== this.assignmentStep
       );
     });
-    const labels = ['Today’s priorities', 'Owed and waiting', 'Fixed commitments'];
+    const steps = this.assignmentSteps || GENERIC_ASSIGNMENT_STEPS;
     const label = document.getElementById('pafAssignmentStepLabel');
     if (label) {
-      label.textContent = `Quest step ${this.assignmentStep + 1} of 4 · ${labels[this.assignmentStep]}`;
+      label.textContent = `Quest step ${this.assignmentStep + 1} of 4 · ${steps[this.assignmentStep]?.title || ''}`;
     }
     const bar = document.getElementById('pafAssignmentStepBar');
     const track = bar?.parentElement;
@@ -1436,21 +1601,14 @@ export class OnboardingManager {
     row.className = 'paf-assignment-row';
     row.dataset.pafAssignmentRow = type;
 
+    const copy = this.assignmentLabelFor(type);
     const titleWrap = document.createElement('label');
     titleWrap.className = 'form-label mb-0';
-    titleWrap.textContent =
-      type === 'priority'
-        ? 'Priority'
-        : type === 'i_owe'
-          ? 'I owe'
-          : type === 'waiting_on'
-            ? 'Waiting on'
-            : 'Commitment';
+    titleWrap.textContent = copy?.label || '';
     const title = document.createElement('input');
     title.className = 'form-control';
     title.maxLength = 200;
-    title.placeholder =
-      type === 'fixed_commitment' ? 'Commitment or time to keep visible' : 'What is it?';
+    title.placeholder = copy?.placeholder || '';
     title.value = values.title || '';
     title.dataset.field = 'title';
     titleWrap.appendChild(title);

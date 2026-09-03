@@ -65,6 +65,11 @@ type CapabilityReader interface {
 	Get(ctx context.Context, userID string) (*personalassistant.CapabilityProjection, error)
 }
 
+// SpecialistOfferService records the post-hire domain offer's answer.
+type SpecialistOfferService interface {
+	Answer(ctx context.Context, userID string, request personalassistant.SpecialistOfferRequest) (*personalassistant.State, error)
+}
+
 // Handler serves /api/personal-assistant.
 type Handler struct {
 	service                    StateReader
@@ -75,6 +80,7 @@ type Handler struct {
 	continuity                 ContinuityService
 	renamer                    RenameService
 	capabilities               CapabilityReader
+	specialistOffers           SpecialistOfferService
 	provider                   userprofile.UserProvider
 	onFirstAssignmentCompleted func()
 }
@@ -139,6 +145,12 @@ func (h *Handler) SetRenameService(service RenameService) {
 func (h *Handler) SetCapabilityService(service CapabilityReader) {
 	if h != nil {
 		h.capabilities = service
+	}
+}
+
+func (h *Handler) SetSpecialistOfferService(service SpecialistOfferService) {
+	if h != nil {
+		h.specialistOffers = service
 	}
 }
 
@@ -218,6 +230,7 @@ type hireResponse struct {
 	GlobalAgentProfileName string                                  `json:"global_agent_profile_name"`
 	StateVersion           int64                                   `json:"state_version"`
 	FirstAssignmentStatus  personalassistant.FirstAssignmentStatus `json:"first_assignment_status"`
+	SpecialistSlug         string                                  `json:"specialist_slug,omitempty"`
 	HiredAt                *time.Time                              `json:"hired_at,omitempty"`
 	DailyBrief             *dailybrief.Config                      `json:"daily_brief,omitempty"`
 	Resumed                bool                                    `json:"resumed"`
@@ -560,6 +573,59 @@ type renameRequest struct {
 	Name      string `json:"name"`
 }
 
+type specialistOfferRequest struct {
+	IfVersion int64  `json:"if_version"`
+	Decision  string `json:"decision"`
+	Slug      string `json:"slug"`
+}
+
+// AnswerSpecialistOffer handles POST /api/personal-assistant/specialist.
+//
+// This is the post-hire domain offer's only write. It records an accept or a
+// decline on the existing relationship; it never creates a workspace, runs a
+// setup wizard, or changes anything about the hire itself.
+func (h *Handler) AnswerSpecialistOffer(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h == nil || h.specialistOffers == nil || h.service == nil || h.provider == nil {
+		orihttp.ServiceUnavailable(w, "personal assistant specialist offer is unavailable")
+		return
+	}
+	var body specialistOfferRequest
+	if err := decodeBoundedRequest(w, r, &body); err != nil {
+		orihttp.BadRequest(w, "The specialist answer is invalid.")
+		return
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	if _, err := h.specialistOffers.Answer(r.Context(), userID, personalassistant.SpecialistOfferRequest{
+		IfVersion: body.IfVersion, Decision: body.Decision, Slug: body.Slug,
+	}); err != nil {
+		switch {
+		case errors.Is(err, personalassistant.ErrValidation):
+			orihttp.BadRequest(w, "Check the specialist answer and try again.")
+		case errors.Is(err, personalassistant.ErrConflict):
+			orihttp.Conflict(w, "This answer conflicts with the current relationship. Refresh and try again.")
+		case errors.Is(err, personalassistant.ErrNotFound):
+			orihttp.BadRequest(w, "No assistant has been hired yet.")
+		default:
+			orihttp.ServiceUnavailable(w, "The specialist answer could not be saved. Try again.")
+		}
+		return
+	}
+	// Re-read rather than projecting the returned state, so the client gets the
+	// same shape every other personal-assistant read returns.
+	projection, err := h.service.Get(r.Context(), userID)
+	if err != nil {
+		orihttp.ServiceUnavailable(w, "personal assistant state is temporarily unavailable")
+		return
+	}
+	orihttp.Success(w, map[string]any{"personal_assistant": projection})
+}
+
 func (h *Handler) UpdateWorkingAgreement(w http.ResponseWriter, r *http.Request) {
 	if !orihttp.RequireMethod(w, r, http.MethodPatch) {
 		return
@@ -749,6 +815,7 @@ func responseFromResult(result *personalassistant.HireResult) *hireResponse {
 		GlobalAgentProfileName: state.GlobalAgentProfileName,
 		StateVersion:           state.StateVersion,
 		FirstAssignmentStatus:  state.FirstAssignmentStatus,
+		SpecialistSlug:         state.SpecialistSlug,
 		HiredAt:                state.HiredAt, DailyBrief: result.BriefConfig, Resumed: result.Resumed,
 	}
 }

@@ -1212,6 +1212,9 @@
               </div>
 
               <div data-paf-hire-step="1" class="d-none" tabindex="-1">
+              <!-- The hire asks about work in general. The domain offer is
+                   deliberately not here: it is made on Home once the assistant
+                   exists, so hiring stays one decision. -->
               <fieldset>
                 <legend class="h6">What should your assistant help with?</legend>
                 <div class="paf-hire-focus-grid">
@@ -1271,13 +1274,16 @@
                     <span id="pafAssignmentStepBar" style="width: 25%;"></span>
                   </div>
                 </div>
+                <!-- The three legends and the add-row buttons carry the generic
+                     wording as their default. A specialist mapping re-words them
+                     in place; the data-paf-add-row types never change. -->
                 <fieldset class="paf-assignment-group" data-paf-assignment-step="0" tabindex="-1">
-                  <legend class="h6">What must happen today?</legend>
+                  <legend class="h6" data-paf-assignment-legend="0">What must happen today?</legend>
                   <div id="pafPriorityRows" class="paf-assignment-list"></div>
                   <button type="button" class="btn btn-sm btn-outline-secondary mt-2" data-paf-add-row="priority">Add priority</button>
                 </fieldset>
                 <fieldset class="paf-assignment-group d-none" data-paf-assignment-step="1" tabindex="-1">
-                  <legend class="h6">What do you owe—or what are you waiting on?</legend>
+                  <legend class="h6" data-paf-assignment-legend="1">What do you owe—or what are you waiting on?</legend>
                   <div id="pafCommitmentRows" class="paf-assignment-list"></div>
                   <div class="d-flex flex-wrap gap-2 mt-2">
                     <button type="button" class="btn btn-sm btn-outline-secondary" data-paf-add-row="i_owe">Add item I owe</button>
@@ -1285,7 +1291,7 @@
                   </div>
                 </fieldset>
                 <fieldset class="paf-assignment-group d-none" data-paf-assignment-step="2" tabindex="-1">
-                  <legend class="h6">Fixed commitments to keep visible</legend>
+                  <legend class="h6" data-paf-assignment-legend="2">Fixed commitments to keep visible</legend>
                   <div id="pafFixedRows" class="paf-assignment-list"></div>
                   <button type="button" class="btn btn-sm btn-outline-secondary mt-2" data-paf-add-row="fixed_commitment">Add fixed commitment</button>
                   <p class="paf-hire-boundary mt-2 mb-0">This creates only Personal HQ records. It does not write to an external calendar.</p>

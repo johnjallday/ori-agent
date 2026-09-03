@@ -39,9 +39,17 @@ func TestCompiledDomainExtractionLeavesOnlyGenericHostProductionCode(t *testing.
 		if !strings.HasPrefix(clean, "internal/") && !strings.HasPrefix(clean, "cmd/") {
 			return nil
 		}
-		// Inert marketplace metadata may name external plugins; it registers no
-		// route, module, runtime, template, or capability implementation.
-		if clean == "internal/server/marketplace_cache_official.json" {
+		// Inert metadata may name external plugins; it registers no route,
+		// module, runtime, template, or capability implementation.
+		//
+		// The specialist mapping's data file is the same shape as the
+		// marketplace cache: onboarding copy, a card ordering, and the ID of a
+		// blueprint published by a plugin. Everything that acts on it —
+		// matching, the hire offer, capability ordering, persistence — is
+		// generic and lives elsewhere. The guard below keeps it that way by
+		// asserting the file stays data only.
+		if clean == "internal/server/marketplace_cache_official.json" ||
+			clean == "internal/specialist/domains.go" {
 			return nil
 		}
 		if strings.HasSuffix(clean, "_test.go") || strings.HasSuffix(clean, ".test.js") {
@@ -72,5 +80,26 @@ func TestCompiledDomainExtractionLeavesOnlyGenericHostProductionCode(t *testing.
 	}
 	if len(findings) != 0 {
 		t.Fatalf("compiled domain extraction audit failed:\n%s", strings.Join(findings, "\n"))
+	}
+}
+
+// The specialist mapping's data file is excepted from the audit above only
+// because it is data. This holds it to that: no imports, no functions, no
+// types — one package-level var of mapping entries. A domain that needs code
+// in the host is a domain implementation, and belongs in a plugin.
+func TestSpecialistDomainDataFileStaysDataOnly(t *testing.T) {
+	path := filepath.Join("..", "specialist", "domains.go")
+	data, err := os.ReadFile(filepath.Clean(path)) // #nosec G304 -- fixed repository-relative audit path
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	source := string(data)
+	for _, forbidden := range []string{"\nimport", "\nfunc ", "\ntype ", "\nconst "} {
+		if strings.Contains(source, forbidden) {
+			t.Errorf("internal/specialist/domains.go must stay data only; found %q", strings.TrimSpace(forbidden))
+		}
+	}
+	if strings.Count(source, "\nvar ") != 1 {
+		t.Error("internal/specialist/domains.go must declare exactly one var: the mapping entries")
 	}
 }

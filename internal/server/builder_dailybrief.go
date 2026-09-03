@@ -264,6 +264,9 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	b.personalAssistantHandler.SetCapabilityService(personalassistant.NewCapabilityService(
 		b.personalAssistantService, b.workspaceStore, personalAssistantEmailCapability{readiness: b.emailReadiness},
 	))
+	b.personalAssistantHandler.SetSpecialistOfferService(
+		personalassistant.NewSpecialistOfferService(b.personalAssistantStore),
+	)
 	b.personalAssistantHandler.SetTodayService(personalassistant.NewTodayService(
 		b.personalAssistantService, briefService, b.workspaceStore, b.followUpService,
 	))

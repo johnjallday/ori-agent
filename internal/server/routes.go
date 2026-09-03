@@ -398,6 +398,7 @@ func registerOnboardingRoutes(mux *http.ServeMux, s *Server) {
 
 	// Smart onboarding endpoints (AI-powered profile inference)
 	mux.HandleFunc("/api/onboarding/detect", s.Handlers.SmartOnboarding.Detect)
+	mux.HandleFunc("/api/onboarding/specialists", s.Handlers.SmartOnboarding.Specialists)
 	mux.HandleFunc("/api/onboarding/profile", s.Handlers.SmartOnboarding.InferProfile)
 	mux.HandleFunc("/api/onboarding/describe", s.Handlers.SmartOnboarding.Describe)
 	mux.HandleFunc("/api/onboarding/config", s.Handlers.SmartOnboarding.GenerateConfig)
@@ -978,6 +979,7 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET /api/personal-assistant", s.Handlers.PersonalAssistant.GetState)
 		mux.HandleFunc("GET /api/personal-assistant/today", s.Handlers.PersonalAssistant.GetToday)
 		mux.HandleFunc("GET /api/personal-assistant/capabilities", s.Handlers.PersonalAssistant.GetCapabilities)
+		mux.HandleFunc("POST /api/personal-assistant/specialist", s.Handlers.PersonalAssistant.AnswerSpecialistOffer)
 		mux.HandleFunc("PATCH /api/personal-assistant/working-agreement", s.Handlers.PersonalAssistant.UpdateWorkingAgreement)
 		mux.HandleFunc("POST /api/personal-assistant/pause", s.Handlers.PersonalAssistant.Pause)
 		mux.HandleFunc("POST /api/personal-assistant/resume", s.Handlers.PersonalAssistant.Resume)
