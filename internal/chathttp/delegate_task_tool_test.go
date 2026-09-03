@@ -3,6 +3,8 @@ package chathttp
 import (
 	"context"
 	"encoding/json"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -51,6 +53,67 @@ func TestDelegateTaskToolGatedToCoordinator(t *testing.T) {
 	}
 }
 
+// A solo coordinator has nobody to delegate to: every call it could make would
+// be rejected by the membership check, so the tool must not be offered at all.
+func TestDelegateTaskToolNotOfferedWithoutSpecialists(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	solo := &workspace.Workspace{
+		ID:     "ws-solo",
+		Status: workspace.StatusActive,
+		AgentInstances: []workspace.AgentInstance{
+			{Name: "Manager", NodeID: "manager-node-1", EntryPoint: true},
+		},
+	}
+	if err := store.Save(solo); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	p := NewWorkspaceToolProvider(nil, store, "ws-solo")
+	p.SetExecutingAgent("Manager")
+	if toolNames(p)["delegate_task"] {
+		t.Fatal("solo coordinator must not be offered delegate_task (no valid target)")
+	}
+}
+
+// The roster is bound into the schema so the model picks from agents that
+// actually exist instead of guessing a name and burning a turn on the rejection.
+func TestDelegateTaskToolSchemaCarriesRoster(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := delegateToolWorkspace()
+	ws.AgentInstances = append(ws.AgentInstances,
+		workspace.AgentInstance{Name: "Researcher", NodeID: "researcher-node-1"})
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	p := NewWorkspaceToolProvider(nil, store, "ws-1")
+	p.SetExecutingAgent("Manager")
+
+	specialists, ok := p.delegationSpecialists()
+	if !ok {
+		t.Fatal("coordinator with specialists should enable delegation")
+	}
+	for _, name := range []string{"Writer", "Researcher"} {
+		if !slices.Contains(specialists, name) {
+			t.Fatalf("roster %v is missing %s", specialists, name)
+		}
+	}
+	if slices.Contains(specialists, "Manager") {
+		t.Fatalf("roster %v must not include the coordinator itself", specialists)
+	}
+
+	def := p.delegateTaskTool(specialists).Definition()
+	props, _ := def.Parameters["properties"].(map[string]any)
+	agentProp, _ := props["agent"].(map[string]any)
+	enum, _ := agentProp["enum"].([]string)
+	if !slices.Equal(enum, specialists) {
+		t.Fatalf("agent enum %v should be the specialist roster %v", enum, specialists)
+	}
+	if !strings.Contains(def.Description, "Writer") || !strings.Contains(def.Description, "Researcher") {
+		t.Fatalf("tool description should name the specialists: %s", def.Description)
+	}
+}
+
 func TestDelegateTaskToolCreatesSubtask(t *testing.T) {
 	store := workspace.NewInMemoryStore()
 	ws := delegateToolWorkspace()
@@ -68,7 +131,7 @@ func TestDelegateTaskToolCreatesSubtask(t *testing.T) {
 	p.SetExecutingAgent("Manager")
 	p.SetTaskID("p1")
 
-	out, err := p.delegateTaskTool().Call(context.Background(),
+	out, err := p.delegateTaskTool([]string{"Writer"}).Call(context.Background(),
 		`{"agent":"Writer","instructions":"write the intro","reason":"Writer is the specialist"}`)
 	if err != nil {
 		t.Fatalf("Call: %v", err)

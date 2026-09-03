@@ -116,8 +116,15 @@ func buildCoordinatorAdaptPrompt(req CoordinatorAdaptRequest) string {
 		b.WriteString("\n")
 	}
 
+	if len(req.Specialists) > 0 {
+		fmt.Fprintf(&b, "Specialists you can delegate to: %s\n\n", strings.Join(req.Specialists, ", "))
+	} else {
+		b.WriteString("This workspace has no other agents, so there is nobody to delegate to — resolve it yourself or ask for input.\n\n")
+	}
+
 	b.WriteString("Decide how to resolve this:\n")
 	fmt.Fprintf(&b, "- To hand work to a specialist, call delegate_task with parent_task_id=%q.\n", req.FailedTask.ID)
+	b.WriteString("- Delegate only to an agent named above; any other name will be rejected.\n")
 	b.WriteString("- If you can resolve it yourself, do so and reply with the final result.\n")
 	b.WriteString("- A specialist cannot re-delegate, so delegate only from here when a different specialist is genuinely needed.\n")
 	return b.String()

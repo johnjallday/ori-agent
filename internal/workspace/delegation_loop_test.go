@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -41,6 +42,56 @@ func loopWorkspace(subtasks ...Task) *Workspace {
 		},
 		Tasks: subtasks,
 	}
+}
+
+// The coordinator is told who it may delegate to. Without this the model has to
+// guess an agent name, and a wrong guess costs a rejected call plus an iteration.
+func TestDelegationLoopPassesRosterToCoordinator(t *testing.T) {
+	store := NewInMemoryStore()
+	if err := store.Save(loopWorkspace()); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	spy := &rosterSpyAdapter{}
+	loop := NewDelegationLoop(store, &fakeExecutor{}, spy, DelegationCaps{})
+
+	if _, err := loop.Run(context.Background(), "ws", Task{ID: "t1", Description: "do x"},
+		DelegationTrigger{Trigger: true, Code: DelegationTriggerFailed}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if len(spy.seen) != 1 || spy.seen[0] != "Writer" {
+		t.Fatalf("coordinator should be handed the specialist roster, got %v", spy.seen)
+	}
+
+	// The same roster must reach the prompt text, not just the request struct.
+	prompt := buildCoordinatorAdaptPrompt(CoordinatorAdaptRequest{
+		Coordinator: "Manager",
+		FailedTask:  Task{ID: "t1", Description: "do x"},
+		Trigger:     DelegationTrigger{Trigger: true, Code: DelegationTriggerFailed},
+		Specialists: []string{"Writer"},
+	})
+	if !strings.Contains(prompt, "Writer") {
+		t.Fatalf("adapt prompt should name the specialists:\n%s", prompt)
+	}
+
+	soloPrompt := buildCoordinatorAdaptPrompt(CoordinatorAdaptRequest{
+		Coordinator: "Manager",
+		FailedTask:  Task{ID: "t1", Description: "do x"},
+		Trigger:     DelegationTrigger{Trigger: true, Code: DelegationTriggerFailed},
+	})
+	if !strings.Contains(soloPrompt, "nobody to delegate to") {
+		t.Fatalf("adapt prompt should say when there is no roster:\n%s", soloPrompt)
+	}
+}
+
+type rosterSpyAdapter struct {
+	seen []string
+}
+
+func (s *rosterSpyAdapter) Adapt(_ context.Context, req CoordinatorAdaptRequest) (CoordinatorAdaptResult, error) {
+	s.seen = req.Specialists
+	return CoordinatorAdaptResult{Resolved: true, DirectResult: "done"}, nil
 }
 
 func TestDelegationLoopResolvesImmediately(t *testing.T) {

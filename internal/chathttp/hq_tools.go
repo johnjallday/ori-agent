@@ -24,7 +24,7 @@ func (p *WorkspaceToolProvider) hqOverviewEnabled() bool {
 	if err != nil || !isHQ {
 		return false
 	}
-	return p.delegationEnabled()
+	return p.isWorkspaceCoordinator()
 }
 
 type hqOverviewResponse struct {
