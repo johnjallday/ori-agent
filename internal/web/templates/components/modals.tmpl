@@ -1,5 +1,8 @@
 <!-- Modal placeholders - will be filled with actual modal content later -->
 
+{{template "agent-create-form.tmpl" .}}
+<script defer src="/js/modules/agent-create-form.js"></script>
+
 <!-- Add Agent Modal (shared across pages with sidebar) -->
 <div class="modal fade" id="addAgentModal" tabindex="-1" aria-labelledby="addAgentModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
@@ -9,13 +12,25 @@
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
             <path d="M12 2C13.1 2 14 2.9 14 4C14 5.1 13.1 6 12 6C10.9 6 10 5.1 10 4C10 2.9 10.9 2 12 2ZM21 9V7L15 1L13.5 2.5L16.17 5.17L11.83 9.51C11.25 9.19 10.61 9 10 9C8.61 9 7.22 9.39 6 10.17L3 7.17L1.59 8.59L4.17 11.17C3.39 12.39 3 13.78 3 15.17C3 16.56 3.39 17.94 4.17 19.17L1.59 21.75L3 23.16L6 20.16C7.22 20.94 8.61 21.33 10 21.33C10.61 21.33 11.25 21.13 11.83 20.82L16.17 16.48L13.5 19.15L15 20.65L21 14.65V12.65L17.83 15.82L12.41 10.41C12.61 10.25 12.8 10.08 13 9.83L17.83 5L21 8.17V9Z"/>
           </svg>
-          Create New Agent
+          <span id="addAgentModalTitleText">Create New Agent</span>
         </h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" style="filter: invert(1);"></button>
       </div>
       <div class="modal-body">
+        <section id="agentCreateDraftContext" class="agent-create-draft-context" aria-labelledby="agentCreateDraftContextTitle" hidden>
+          <div class="agent-create-draft-heading">
+            <div id="agentCreateDraftPortrait" class="agent-create-draft-portrait" aria-hidden="true"></div>
+            <div>
+              <span class="agent-create-draft-eyebrow">Blueprint agent setup</span>
+              <strong id="agentCreateDraftContextTitle">Add this agent to the workspace team</strong>
+            </div>
+          </div>
+          <p id="agentCreateDraftContextText"></p>
+          <dl id="agentCreateDraftSummary"></dl>
+          <div id="agentCreateDraftError" class="agent-create-draft-error" role="alert" tabindex="-1" hidden></div>
+        </section>
         <form id="addAgentForm">
-          <div class="mb-3">
+          <div class="mb-3 agent-create-standalone-only">
             <div class="d-flex align-items-center gap-3">
               <label class="form-label mb-0" style="color: var(--text-primary);">Configuration Mode</label>
               <div class="btn-group" role="group" aria-label="Configuration mode toggle">
@@ -33,7 +48,7 @@
             </div>
             <small id="baseConfigModeHelp" class="text-muted d-none mt-1">Describe what you want this agent to do, and we'll configure it automatically.</small>
           </div>
-          <div id="baseAutoConfigSection" class="mb-3 d-none">
+          <div id="baseAutoConfigSection" class="mb-3 d-none agent-create-standalone-only">
             <label class="form-label" style="color: var(--text-primary);">Describe Your Agent</label>
             <textarea id="baseAutoConfigDescription" class="form-control" rows="3"
                       style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;"
@@ -48,51 +63,21 @@
               </button>
             </div>
           </div>
-          <div id="baseLlmNotAvailableWarning" class="alert alert-warning d-none mb-3" style="font-size: 0.875rem;">
+          <div id="baseLlmNotAvailableWarning" class="alert alert-warning d-none mb-3 agent-create-standalone-only" style="font-size: 0.875rem;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
               <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
             </svg>
             <span id="baseLlmWarningMessage">Auto-config requires an LLM provider. Please set up an API key or install Ollama in Settings.</span>
             <a href="/settings" class="alert-link ms-1">Go to Settings</a>
           </div>
-          <div id="baseAutoSelectedIndicator" class="alert alert-info d-none mb-3" style="font-size: 0.875rem; padding: 0.5rem 1rem;">
+          <div id="baseAutoSelectedIndicator" class="alert alert-info d-none mb-3 agent-create-standalone-only" style="font-size: 0.875rem; padding: 0.5rem 1rem;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
               <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
             </svg>
             <strong>Auto-configured</strong> - Settings below were selected based on your description. You can still adjust them manually.
           </div>
-          <div class="mb-3">
-            <label for="agentName" class="form-label required" style="color: var(--text-primary);">Agent Name</label>
-            <input type="text" id="agentName" class="modern-input w-100" placeholder="Enter agent name..." required minlength="2" maxlength="50" aria-describedby="agentNameHelp">
-            <small id="agentNameHelp" class="form-helper">Use letters, numbers, and hyphens. 2-50 characters.</small>
-          </div>
-          <div class="mb-3">
-            <label for="agentType" class="form-label" style="color: var(--text-primary);">Agent Type</label>
-            <select id="agentType" class="modern-input w-100">
-              <option value="tool-calling">Tool Calling (Cheapest - Optimized for tool use)</option>
-              <option value="general">General Purpose (Mid-tier - Balanced capability)</option>
-              <option value="orchestration">Orchestration (Advanced - Multi-agent coordination)</option>
-              <option value="research">Research (Expensive - Complex thinking)</option>
-            </select>
-          </div>
-          <div class="mb-3">
-            <label for="agentModel" class="form-label" style="color: var(--text-primary);">Model</label>
-            <select id="agentModel" class="modern-input w-100">
-              <option value="">Loading models...</option>
-            </select>
-            <small id="agentModelRecommendation" class="form-helper d-none"></small>
-          </div>
-          <div class="mb-3 d-none" id="agentReasoningField">
-            <label for="agentReasoning" class="form-label" style="color: var(--text-primary);">Reasoning Level</label>
-            <select id="agentReasoning" class="modern-input w-100" aria-describedby="agentReasoningHelp">
-              <option value="medium" selected>Medium (Recommended)</option>
-              <option value="high">High</option>
-              <option value="low">Low</option>
-              <option value="xhigh">Extra High</option>
-            </select>
-            <small id="agentReasoningHelp" class="form-helper">Codex only. Higher levels improve difficult reasoning at the cost of speed.</small>
-          </div>
-          <div class="mb-3">
+          <div id="agentCreateFormHost"></div>
+          <div class="mb-3 agent-create-standalone-only">
             <label for="agentTemperature" class="form-label" style="color: var(--text-primary);">
               Temperature: <span id="temperatureValue">1.0</span>
             </label>
@@ -104,20 +89,12 @@
               <span>Creative (2)</span>
             </div>
           </div>
-          <div class="mb-3">
-            <label for="agentSystemPrompt" class="form-label" style="color: var(--text-primary);">System Prompt</label>
-            <textarea id="agentSystemPrompt" class="form-control" rows="4" maxlength="4000"
-                      style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;"
-                      placeholder="Example: You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses."
-                      data-char-counter="true"></textarea>
-            <small class="form-helper">Define the agent's behavior, personality, and instructions. Max 4000 characters.</small>
-          </div>
-          <div class="mb-3 form-check">
+          <div class="mb-3 form-check agent-create-standalone-only">
             <input class="form-check-input" type="checkbox" id="agentAllowWebSearch" checked>
             <label class="form-check-label" for="agentAllowWebSearch" style="color: var(--text-primary);">Allow Web Tools</label>
             <div class="form-helper mt-1">If enabled, this agent can use <code>web_search</code>, <code>web_fetch</code>, and <code>browser</code>.</div>
           </div>
-          <section id="agentCreateCapabilitiesSection" class="agent-create-capabilities" aria-labelledby="agentCreateCapabilitiesTitle">
+          <section id="agentCreateCapabilitiesSection" class="agent-create-capabilities agent-create-standalone-only" aria-labelledby="agentCreateCapabilitiesTitle">
             <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
               <div>
                 <label id="agentCreateCapabilitiesTitle" class="form-label mb-1" style="color: var(--text-primary);">Review Skills</label>
@@ -161,7 +138,7 @@
         </form>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
-        <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" id="cancelAgentBtn" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
         <button type="button" id="createAgentBtn" class="modern-btn modern-btn-primary">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
             <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>

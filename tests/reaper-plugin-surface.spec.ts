@@ -63,6 +63,8 @@ test('Create Workspace hires the shared assistant roster from the Team step', as
     await expect(page.locator('#wizardStep3Title')).toHaveText('Hire your music producer');
     await expect(page.locator('#workspaceAssistantProgramCreate')).toBeVisible();
     await expect(page.locator('#existingAgentRosterPanel')).toBeHidden();
+    await expect(page.locator('[data-team-agent-setup]')).toHaveCount(0);
+    await expect(page.locator('[data-team-accept-all]')).toHaveCount(0);
     await expect(page.locator('#workspaceTeamRoster .workspace-team-row')).toHaveCount(3);
     await expect(page.locator('#workspaceTeamRoster')).toContainText('Mix Engineer');
     await expect(page.locator('#workspaceTeamRoster')).toContainText('Songwriter');
@@ -86,6 +88,9 @@ test('Create Workspace hires the shared assistant roster from the Team step', as
     await page.locator('#createFolderBtn').click();
     const createResponse = await createResponsePromise;
     expect(createResponse.ok(), await createResponse.text()).toBeTruthy();
+    const createPayload = createResponse.request().postDataJSON();
+    expect(createPayload.template_agent_review).toBeUndefined();
+    expect(createPayload.assistant_hire?.name).toBe(producerName);
     const created = await createResponse.json();
     workspaceID = created.folder.id;
     await page.waitForURL(`**/workspaces/${encodeURIComponent(created.folder.folder_slug)}`, {

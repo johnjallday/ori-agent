@@ -81,6 +81,12 @@ const sessionManager = {
   // Authoritative local team draft. Held here, never inferred from rendered
   // controls, and converted to request fields only at final submission.
   teamDraft: null,
+  workspaceAgentSetupIndex: null,
+  workspaceAgentSetupOpener: null,
+  workspaceAgentSetupForm: null,
+  workspaceAgentSetupCloseOptions: null,
+  workspaceAgentSetupCompletion: null,
+  workspaceAgentSetupFocusField: '',
 
   // Auto mode state
   chatAutoMode: false,
@@ -364,6 +370,7 @@ const sessionManager = {
       .getElementById('addFolderModal')
       ?.addEventListener('workspace-template-selected', event => {
         const template = event?.detail?.template || null;
+        this.closeWorkspaceAgentSetup({ restoreFocus: false, silent: true });
         this.workspaceTemplate = template;
         this.prefillTemplateValue(
           document.getElementById('folderNameInput'),
@@ -415,11 +422,67 @@ const sessionManager = {
     });
     // Roster actions are delegated: the list re-renders on every draft change,
     // so per-row listeners would have to be rebound each time.
+    document.getElementById('workspaceTeamBatchActions')?.addEventListener('click', event => {
+      if (event.target.closest('[data-team-accept-all]')) this.acceptAllWorkspaceAgentSetups();
+      if (event.target.closest('[data-team-undo-batch]')) this.undoBatchWorkspaceAgentSetups();
+    });
     document.getElementById('workspaceTeamRoster')?.addEventListener('click', event => {
+      const retry = event.target.closest('[data-team-agent-retry]');
+      if (retry) {
+        const index = Number.parseInt(retry.dataset.teamAgentRetry || '', 10);
+        if (Number.isInteger(index)) void this.retryWorkspaceAgentCreation(index);
+        return;
+      }
+      const reset = event.target.closest('[data-team-agent-reset]');
+      if (reset) {
+        const index = Number.parseInt(reset.dataset.teamAgentReset || '', 10);
+        if (Number.isInteger(index)) this.resetWorkspaceAgentSetup(index);
+        return;
+      }
+      const setup = event.target.closest('[data-team-agent-setup]');
+      if (setup) {
+        const index = Number.parseInt(setup.dataset.teamAgentSetup || '', 10);
+        if (Number.isInteger(index)) this.openWorkspaceAgentSetup(index, setup);
+        return;
+      }
       const remove = event.target.closest('[data-existing-agent-remove]');
       if (remove) this.removeExistingAgent(remove.dataset.existingAgentRemove || '');
       const primary = event.target.closest('[data-existing-agent-primary]');
       if (primary) this.requestExistingAgentPrimary(primary.dataset.existingAgentPrimary || '');
+    });
+    const addAgentDraftModal = document.getElementById('addAgentModal');
+    const submitWorkspaceAgentDraft = event => {
+      if (addAgentDraftModal?.dataset.agentCreateMode !== 'workspace-draft') return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      this.saveWorkspaceAgentSetup();
+    };
+    // Capture before agents.js's standalone handlers so draft mode can never
+    // fall through to POST /api/agents.
+    document
+      .getElementById('createAgentBtn')
+      ?.addEventListener('click', submitWorkspaceAgentDraft, true);
+    document
+      .getElementById('addAgentForm')
+      ?.addEventListener('submit', submitWorkspaceAgentDraft, true);
+    addAgentDraftModal?.addEventListener(
+      'click',
+      event => {
+        if (
+          addAgentDraftModal.dataset.agentCreateMode !== 'workspace-draft' ||
+          !event.target.closest('[data-bs-dismiss="modal"]')
+        )
+          return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        this.closeWorkspaceAgentSetup({ announce: true });
+      },
+      true
+    );
+    addAgentDraftModal?.addEventListener('hidden.bs.modal', () => {
+      if (addAgentDraftModal.dataset.agentCreateMode === 'workspace-draft') {
+        this.finishWorkspaceAgentSetupModal();
+      }
     });
     document.getElementById('workspaceReviewSummary')?.addEventListener('click', event => {
       const edit = event.target.closest('[data-wizard-edit-step]');
@@ -505,6 +568,19 @@ const sessionManager = {
     });
 
     const addFolderModal = document.getElementById('addFolderModal');
+    // Resuming after the sibling Agent modal is not a fresh Create Workspace
+    // open. Stop the normal show listeners (catalog reload, form reset, review
+    // reset) without cancelling Bootstrap's show itself, or they would erase
+    // the draft we suspended the modal to preserve.
+    addFolderModal?.addEventListener(
+      'show.bs.modal',
+      event => {
+        if (addFolderModal.dataset.resumingFromAgentSetup !== 'true') return;
+        delete addFolderModal.dataset.resumingFromAgentSetup;
+        event.stopImmediatePropagation();
+      },
+      true
+    );
     addFolderModal?.addEventListener('show.bs.modal', event => {
       const trigger = event?.relatedTarget || null;
       const pendingImportMode = String(addFolderModal.dataset.pendingImportMode || '') === 'true';
@@ -544,6 +620,9 @@ const sessionManager = {
     // request still in flight so a late response cannot repopulate a closed
     // wizard. Nothing was persisted, so nothing needs undoing (FR13).
     addFolderModal?.addEventListener('hidden.bs.modal', () => {
+      // Agent setup reuses the sibling Create New Agent modal. Suspending this
+      // modal is navigation inside one draft, not cancellation of the draft.
+      if (addFolderModal.dataset.suspendedForAgentSetup === 'true') return;
       this.discardWorkspaceTeamDraft();
       // Closing without creating leaves the map exactly as it was: no workspace,
       // no position record, no lingering placement mode (#292 FR-54). A pending
@@ -3694,6 +3773,7 @@ const sessionManager = {
 
     // Every open starts from a clean team draft; nothing staged in a previous
     // (possibly cancelled) session may leak into this one.
+    this.clearWorkspaceTeamBlockAttention();
     this.discardWorkspaceTeamDraft();
     this.clearWorkspaceNameError();
     this.clearWorkspaceCreateError();
@@ -3916,8 +3996,7 @@ const sessionManager = {
       return;
     }
     const toggle = document.getElementById('templateAgentReviewToggle');
-    if (toggle) toggle.checked = true;
-    this.syncIncludeBlueprintTeam(true);
+    if (toggle) toggle.checked = this.teamView()?.includeBlueprintTeam !== false;
     this.closeTeamCustomizeEditors();
     this.refreshWorkspaceReview();
   },
@@ -3937,6 +4016,10 @@ const sessionManager = {
     const badge = isPrimary
       ? '<span class="workspace-team-badge is-primary">Primary</span>'
       : '<span class="workspace-team-badge">Specialist</span>';
+    const readinessBadge =
+      isBlueprint && entry.setupState === 'needsSetup'
+        ? '<span class="workspace-team-readiness-badge is-missing" title="Agent setup is required">Missing</span>'
+        : '';
     const meta = (
       isAssistantRole
         ? [entry.name !== entry.role ? entry.role : '', entry.modelLabel]
@@ -3946,9 +4029,18 @@ const sessionManager = {
       .join(' · ');
 
     const actions = [];
-    if (entry.customizable) {
+    if (entry.creationFailure) {
       actions.push(
-        `<button type="button" class="workspace-wizard-inline-action" data-team-customize="${entry.templateAgentIndex}" aria-expanded="false" aria-controls="${rowId}-editor">Customize for this workspace</button>`
+        `<button type="button" id="team-agent-retry-${entry.templateAgentIndex}" class="workspace-wizard-inline-action" data-team-agent-retry="${entry.templateAgentIndex}">Retry</button>`
+      );
+    } else if (entry.customizable) {
+      actions.push(
+        `<button type="button" id="team-agent-setup-${entry.templateAgentIndex}" class="workspace-wizard-inline-action" data-team-agent-setup="${entry.templateAgentIndex}" aria-controls="addAgentModal">${this.escapeHtml(entry.actionLabel || 'Set up agent')}</button>`
+      );
+    }
+    if (entry.isCustomized && entry.setupAcknowledged) {
+      actions.push(
+        `<button type="button" class="workspace-wizard-inline-action" data-team-agent-reset="${entry.templateAgentIndex}">Reset to recommended</button>`
       );
     }
     if (entry.canMakePrimary) {
@@ -3971,14 +4063,14 @@ const sessionManager = {
         <div class="workspace-team-row-main">
           ${this.renderAgentAvatar(entry.identity, 'workspace-agent-avatar')}
           <div class="workspace-team-row-copy">
-            <strong>${this.escapeHtml(entry.name)}${badge}</strong>
-            <span class="workspace-team-row-lifecycle">${this.escapeHtml(entry.lifecycleLabel)}</span>
+            <strong>${this.escapeHtml(entry.name)}${badge}${readinessBadge}</strong>
+            <span class="workspace-team-row-lifecycle">${this.escapeHtml(entry.statusLabel || entry.lifecycleLabel)}</span>
+            ${isBlueprint ? `<small class="workspace-team-row-state">${this.escapeHtml(entry.sourceLabel)} · ${this.escapeHtml(entry.readinessLabel)} · ${this.escapeHtml(entry.futureActionLabel)}</small>` : ''}
             ${entry.description ? `<small>${this.escapeHtml(entry.description)}</small>` : ''}
             <small>${this.escapeHtml(meta)}</small>
           </div>
           <div class="workspace-team-row-actions">${actions.join('')}</div>
         </div>
-        <div class="workspace-team-customize" id="${rowId}-editor" hidden></div>
       </li>`;
   },
 
@@ -3997,14 +4089,6 @@ const sessionManager = {
       return;
     }
 
-    // Preserve which editors were open across a re-render; the roster re-renders
-    // on every draft change and reopening by hand would lose the user's place.
-    const openEditors = new Set(
-      Array.from(list.querySelectorAll('.workspace-team-customize'))
-        .filter(editor => !editor.hidden)
-        .map(editor => editor.id)
-    );
-
     list.innerHTML = view.roster
       .map((entry, index) => this.renderWorkspaceTeamRow(entry, index))
       .join('');
@@ -4018,15 +4102,54 @@ const sessionManager = {
     if (advanced) {
       advanced.hidden = view.isAssistantProgram || view.blueprintSummary.count === 0;
     }
+  },
 
-    list.querySelectorAll('[data-team-customize]').forEach(button => {
-      const index = Number.parseInt(button.dataset.teamCustomize || '', 10);
-      button.addEventListener('click', () => this.toggleTeamCustomizeEditor(index));
-    });
-    openEditors.forEach(editorId => {
-      const index = Number.parseInt(String(editorId).replace(/^team-agent-|-editor$/g, ''), 10);
-      if (Number.isInteger(index)) this.openTeamCustomizeEditor(index, { focus: false });
-    });
+  renderWorkspaceTeamBatchActions() {
+    const host = document.getElementById('workspaceTeamBatchActions');
+    const batch = this.teamView()?.batchSetup;
+    if (!host || !batch) return;
+    const controls = [];
+    if (batch.canAcceptAll) {
+      controls.push(
+        `<button type="button" class="btn btn-sm btn-outline-primary" data-team-accept-all>Use recommended setup for all ${batch.pendingCount}</button>`
+      );
+    }
+    if (batch.acceptedCount > 0) {
+      controls.push(
+        `<span>${batch.acceptedCount} recommended setup${batch.acceptedCount === 1 ? '' : 's'} accepted.</span>`,
+        '<button type="button" class="workspace-wizard-inline-action" data-team-undo-batch>Undo batch setup</button>'
+      );
+    }
+    host.innerHTML = controls.join('');
+    host.hidden = controls.length === 0;
+  },
+
+  acceptAllWorkspaceAgentSetups() {
+    const api = window.CreateWorkspaceTeamDraft;
+    const draft = this.ensureWorkspaceTeamDraft();
+    const accepted = api?.acceptAllRecommended?.(draft) || 0;
+    if (accepted === 0) return;
+    this.refreshWorkspaceReview();
+    this.announceWorkspaceTeamChange(
+      `${accepted} recommended agent setup${accepted === 1 ? '' : 's'} accepted.`
+    );
+    this.showToast(
+      `${accepted} agent${accepted === 1 ? '' : 's'} added to the team draft. ${accepted === 1 ? 'It will' : 'They will'} be created with the workspace.`,
+      'success'
+    );
+    document.querySelector('[data-team-undo-batch]')?.focus();
+  },
+
+  undoBatchWorkspaceAgentSetups() {
+    const api = window.CreateWorkspaceTeamDraft;
+    const draft = this.ensureWorkspaceTeamDraft();
+    const undone = api?.undoBatchRecommended?.(draft) || 0;
+    if (undone === 0) return;
+    this.refreshWorkspaceReview();
+    this.announceWorkspaceTeamChange(
+      `${undone} batch acceptance${undone === 1 ? '' : 's'} undone. Individual setup changes were kept.`
+    );
+    document.querySelector('[data-team-accept-all]')?.focus();
   },
 
   // Renders classified issues, blockers before advisories, each with the concrete
@@ -4099,6 +4222,12 @@ const sessionManager = {
         return 'Create without blueprint team';
       case 'retry-saved-roster':
         return 'Retry';
+      case 'review-template-agent-setup':
+        return 'Review setup';
+      case 'confirm-fresh-plan':
+        return 'Confirm updated plan';
+      case 'retry-creation':
+        return 'Retry creation';
       default:
         return '';
     }
@@ -4123,50 +4252,342 @@ const sessionManager = {
       case 'retry-saved-roster':
         void this.openExistingAgentRoster();
         break;
+      case 'review-template-agent-setup': {
+        const index = this.teamView()?.blockingIssues.find(
+          issue => issue.id === 'template-agent-setup-required'
+        )?.templateAgentIndex;
+        const opener = document.getElementById(`team-agent-setup-${index}`);
+        if (Number.isInteger(index)) this.openWorkspaceAgentSetup(index, opener);
+        break;
+      }
+      case 'retry-creation': {
+        const index = this.teamView()?.blockingIssues.find(
+          issue => issue.id === 'template-agent-creation-failed'
+        )?.templateAgentIndex;
+        if (Number.isInteger(index)) void this.retryWorkspaceAgentCreation(index);
+        break;
+      }
+      case 'confirm-fresh-plan': {
+        const api = window.CreateWorkspaceTeamDraft;
+        const draft = this.ensureWorkspaceTeamDraft();
+        if (api?.confirmFreshPlan?.(draft)) {
+          this.refreshWorkspaceReview();
+          this.announceWorkspaceTeamChange('Updated blueprint agent plan confirmed.');
+          document.getElementById('wizardNextBtn')?.focus();
+        } else {
+          const index = this.teamView()?.blockingIssues.find(
+            issue => issue.id === 'template-agent-setup-required'
+          )?.templateAgentIndex;
+          document.getElementById(`team-agent-setup-${index}`)?.focus();
+        }
+        break;
+      }
       default:
         break;
     }
   },
 
-  renderTemplateAgentModelOptions(agent, currentModel, currentProvider, inheritedLabel) {
-    const source = String(agent?.model_source || '').trim();
-    const inheritedText =
-      source === 'system'
-        ? `Use system model (${inheritedLabel})`
-        : `Use default (${inheritedLabel})`;
-    const options = [
-      `<option value="" data-provider=""${currentModel ? '' : ' selected'}>${this.escapeHtml(inheritedText)}</option>`
+  workspaceAgentSetupSummaryRows(entry) {
+    const setup = entry?.recommended || entry || {};
+    const tools = setup.tools && typeof setup.tools === 'object' ? setup.tools : {};
+    const values = key =>
+      (Array.isArray(tools[key]) ? tools[key] : [])
+        .map(value => String(value || '').trim())
+        .filter(Boolean);
+    return [
+      ['Role', setup.role || 'General'],
+      ['Reasoning', setup.reasoningEffort || 'Resolved by the selected model'],
+      ['Skills', values('skills').join(', ') || 'None'],
+      ['MCP servers', values('mcp_servers').join(', ') || 'None'],
+      ['Plugins', values('plugins').join(', ') || 'None']
     ];
-    let foundCurrent = !currentModel;
-    const providers = Array.isArray(this.editAgentProvidersData) ? this.editAgentProvidersData : [];
-    providers.forEach(provider => {
-      const models = Array.isArray(provider?.models) ? provider.models : [];
-      if (models.length === 0) return;
-      const groupOptions = [];
-      models.forEach(model => {
-        const value = String(model?.value || model?.id || '').trim();
-        if (!value) return;
-        const optionProvider = String(model?.provider || provider?.name || '').trim();
-        const label = String(model?.label || value).trim();
-        const selected = value === currentModel && optionProvider === currentProvider;
-        if (selected) foundCurrent = true;
-        groupOptions.push(
-          `<option value="${this.escapeHtml(value)}" data-provider="${this.escapeHtml(optionProvider)}"${selected ? ' selected' : ''}>${this.escapeHtml(label)}</option>`
-        );
-      });
-      if (groupOptions.length === 0) return;
-      options.push(
-        `<optgroup label="${this.escapeHtml(provider?.display_name || provider?.name || 'Provider')}">${groupOptions.join('')}</optgroup>`
-      );
-    });
-    if (currentModel && !foundCurrent) {
-      options.splice(
-        1,
-        0,
-        `<option value="${this.escapeHtml(currentModel)}" data-provider="${this.escapeHtml(currentProvider)}" selected>${this.escapeHtml(currentModel)} (current)</option>`
-      );
+  },
+
+  openWorkspaceAgentSetup(index, opener) {
+    const api = window.CreateWorkspaceTeamDraft;
+    const formApi = window.AgentCreateForm;
+    const draft = this.ensureWorkspaceTeamDraft();
+    const entry = this.teamView()?.roster.find(item => item.templateAgentIndex === index);
+    const workspaceModalElement = document.getElementById('addFolderModal');
+    const agentModalElement = document.getElementById('addAgentModal');
+    const host = document.getElementById('agentCreateFormHost');
+    if (
+      !api ||
+      !formApi ||
+      !draft ||
+      !entry ||
+      !workspaceModalElement ||
+      !agentModalElement ||
+      !host
+    )
+      return;
+
+    this.workspaceAgentSetupIndex = index;
+    this.workspaceAgentSetupOpener = opener || document.activeElement;
+    this.workspaceAgentSetupCloseOptions = null;
+    this.workspaceAgentSetupCompletion = null;
+    this.workspaceAgentSetupFocusField = '';
+
+    agentModalElement.dataset.agentCreateMode = 'workspace-draft';
+    agentModalElement.classList.add('is-workspace-agent-draft');
+    const title = document.getElementById('addAgentModalTitleText');
+    if (title) title.textContent = entry.actionLabel || 'Set up agent';
+
+    const context = document.getElementById('agentCreateDraftContext');
+    const contextTitle = document.getElementById('agentCreateDraftContextTitle');
+    const contextText = document.getElementById('agentCreateDraftContextText');
+    if (context) context.hidden = false;
+    if (contextTitle) contextTitle.textContent = `${entry.originalName} from the blueprint`;
+    const portrait = document.getElementById('agentCreateDraftPortrait');
+    if (portrait)
+      portrait.innerHTML = this.renderAgentAvatar(entry.identity, 'workspace-agent-avatar');
+    if (contextText) {
+      contextText.textContent = `${entry.originalName} is proposed by ${this.teamView()?.blueprintSummary.templateName || 'this blueprint'}. Changes stay in this workspace draft until final creation.`;
     }
-    return options.join('');
+    const summary = document.getElementById('agentCreateDraftSummary');
+    if (summary) {
+      summary.innerHTML = this.workspaceAgentSetupSummaryRows(entry)
+        .map(
+          ([label, value]) =>
+            `<div><dt>${this.escapeHtml(label)}</dt><dd>${this.escapeHtml(value)}</dd></div>`
+        )
+        .join('');
+    }
+    const error = document.getElementById('agentCreateDraftError');
+    if (error) {
+      error.hidden = true;
+      error.textContent = '';
+    }
+
+    const recommended = entry.recommended || entry;
+    const setupValues =
+      entry.lifecycle === 'reuse' && !entry.planChanged
+        ? {
+            name: `${entry.originalName} copy`,
+            type: recommended.type,
+            model: recommended.model,
+            provider: recommended.provider,
+            reasoningEffort: recommended.reasoningEffort,
+            systemPrompt: recommended.systemPrompt
+          }
+        : {
+            name: entry.name,
+            type: entry.type,
+            model: entry.model,
+            provider: entry.provider,
+            reasoningEffort: entry.reasoningEffort,
+            systemPrompt: entry.systemPrompt
+          };
+    this.workspaceAgentSetupForm = formApi.mount(host, {
+      idPrefix: 'agent',
+      profile: formApi.PROFILE_TEMPLATE,
+      providers: Array.isArray(this.editAgentProvidersData) ? this.editAgentProvidersData : [],
+      values: setupValues
+    });
+
+    const createButton = document.getElementById('createAgentBtn');
+    if (createButton) {
+      if (!createButton.dataset.workspaceDraftOriginalHtml) {
+        createButton.dataset.workspaceDraftOriginalHtml = createButton.innerHTML;
+      }
+      createButton.textContent = entry.setupAcknowledged ? 'Save setup' : 'Add to team';
+      createButton.disabled = false;
+    }
+
+    const showAgentModal = () => {
+      agentModalElement.addEventListener(
+        'shown.bs.modal',
+        () => this.workspaceAgentSetupForm?.focus(this.workspaceAgentSetupFocusField || 'name'),
+        { once: true }
+      );
+      bootstrap.Modal.getOrCreateInstance(agentModalElement).show();
+    };
+    workspaceModalElement.dataset.suspendedForAgentSetup = 'true';
+    if (workspaceModalElement.classList.contains('show')) {
+      workspaceModalElement.addEventListener('hidden.bs.modal', showAgentModal, { once: true });
+      bootstrap.Modal.getOrCreateInstance(workspaceModalElement).hide();
+    } else {
+      showAgentModal();
+    }
+  },
+
+  closeWorkspaceAgentSetup(options = {}) {
+    if (!Number.isInteger(this.workspaceAgentSetupIndex)) return;
+    const modalElement = document.getElementById('addAgentModal');
+    if (modalElement?.dataset.workspaceDraftClosing === 'true') return;
+    if (modalElement) modalElement.dataset.workspaceDraftClosing = 'true';
+    this.workspaceAgentSetupCloseOptions = {
+      announce: options.announce !== false && !options.silent,
+      restoreFocus: options.restoreFocus !== false
+    };
+    if (modalElement?.classList.contains('show')) {
+      const modal = bootstrap.Modal.getOrCreateInstance(modalElement);
+      modal.hide();
+      // Bootstrap ignores hide() while its opening transition is in flight.
+      // Queue one retry rather than leaving a fast Save/Cancel stranded.
+      if (modalElement.classList.contains('show')) {
+        modalElement.addEventListener('shown.bs.modal', () => modal.hide(), { once: true });
+      }
+    } else {
+      this.finishWorkspaceAgentSetupModal();
+    }
+  },
+
+  finishWorkspaceAgentSetupModal() {
+    const agentModalElement = document.getElementById('addAgentModal');
+    if (agentModalElement?.dataset.agentCreateMode !== 'workspace-draft') return;
+
+    const setupIndex = this.workspaceAgentSetupIndex;
+    const opener = this.workspaceAgentSetupOpener;
+    const completion = this.workspaceAgentSetupCompletion;
+    const closeOptions = this.workspaceAgentSetupCloseOptions || {
+      announce: true,
+      restoreFocus: true
+    };
+
+    agentModalElement.classList.remove('is-workspace-agent-draft');
+    delete agentModalElement.dataset.agentCreateMode;
+    delete agentModalElement.dataset.workspaceDraftClosing;
+    const title = document.getElementById('addAgentModalTitleText');
+    if (title) title.textContent = 'Create New Agent';
+    const context = document.getElementById('agentCreateDraftContext');
+    if (context) context.hidden = true;
+    const error = document.getElementById('agentCreateDraftError');
+    if (error) {
+      error.hidden = true;
+      error.textContent = '';
+    }
+    const createButton = document.getElementById('createAgentBtn');
+    if (createButton?.dataset.workspaceDraftOriginalHtml) {
+      createButton.innerHTML = createButton.dataset.workspaceDraftOriginalHtml;
+      delete createButton.dataset.workspaceDraftOriginalHtml;
+      createButton.disabled = false;
+    }
+    window.resetStandaloneAgentCreateForm?.();
+
+    this.workspaceAgentSetupIndex = null;
+    this.workspaceAgentSetupOpener = null;
+    this.workspaceAgentSetupForm = null;
+    this.workspaceAgentSetupCloseOptions = null;
+    this.workspaceAgentSetupCompletion = null;
+    this.workspaceAgentSetupFocusField = '';
+
+    const workspaceModalElement = document.getElementById('addFolderModal');
+    if (workspaceModalElement) delete workspaceModalElement.dataset.suspendedForAgentSetup;
+    this.refreshWorkspaceReview();
+
+    const afterResume = () => {
+      if (completion) {
+        this.announceWorkspaceTeamChange(completion.announcement);
+        this.showToast(completion.toast, 'success');
+      } else if (closeOptions.announce) {
+        this.announceWorkspaceTeamChange('Returned to the team without saving setup changes.');
+      }
+      if (closeOptions.restoreFocus) {
+        const currentOpener = document.getElementById(`team-agent-setup-${setupIndex}`) || opener;
+        currentOpener?.focus?.();
+      }
+    };
+    if (workspaceModalElement) {
+      workspaceModalElement.dataset.resumingFromAgentSetup = 'true';
+      workspaceModalElement.addEventListener('shown.bs.modal', afterResume, { once: true });
+      bootstrap.Modal.getOrCreateInstance(workspaceModalElement).show();
+    } else {
+      afterResume();
+    }
+  },
+
+  saveWorkspaceAgentSetup() {
+    const index = this.workspaceAgentSetupIndex;
+    const form = this.workspaceAgentSetupForm;
+    const api = window.CreateWorkspaceTeamDraft;
+    const draft = this.ensureWorkspaceTeamDraft();
+    const planAgent = this.planAgentAt(index);
+    const draftEntry = this.teamView()?.roster.find(item => item.templateAgentIndex === index);
+    if (!Number.isInteger(index) || !form || !api || !draft || !planAgent || !draftEntry) return;
+
+    const result = form.extract();
+    if (!result.valid) {
+      form.focus(Object.keys(result.errors)[0] || 'name');
+      return;
+    }
+    const values = result.values;
+    const originalName = String(planAgent.name || '').trim();
+    const isReuse = String(planAgent.action || '').toLowerCase() === 'reuse';
+    if (
+      draftEntry.staleOccupiedName &&
+      api.agentKey(values.name) === api.agentKey(draftEntry.staleOccupiedName)
+    ) {
+      const error = document.getElementById('agentCreateDraftError');
+      if (error) {
+        error.textContent = `“${draftEntry.staleOccupiedName}” now belongs to a saved agent. Choose a different name for this new definition.`;
+        error.hidden = false;
+      }
+      form.focus('name');
+      return;
+    }
+    if (
+      isReuse &&
+      !draftEntry.planChanged &&
+      api.agentKey(values.name) === api.agentKey(originalName)
+    ) {
+      const error = document.getElementById('agentCreateDraftError');
+      if (error) {
+        error.textContent = `Give this copy a different name from “${originalName}”. The saved agent is reused as-is and never modified.`;
+        error.hidden = false;
+      }
+      form.focus('name');
+      return;
+    }
+
+    const collision = (this.teamView()?.roster || []).some(
+      entry => entry.templateAgentIndex !== index && entry.key === api.agentKey(values.name)
+    );
+    if (collision) {
+      const error = document.getElementById('agentCreateDraftError');
+      if (error) {
+        error.textContent = `Another agent in this team is already called “${values.name}”. Choose another name.`;
+        error.hidden = false;
+      }
+      form.focus('name');
+      return;
+    }
+
+    const saveButton = document.getElementById('createAgentBtn');
+    if (saveButton?.disabled) return;
+    if (saveButton) saveButton.disabled = true;
+    api.saveSetup(draft, index, values);
+    const name = values.name;
+    this.workspaceAgentSetupCompletion = {
+      announcement:
+        isReuse && api.agentKey(name) !== api.agentKey(originalName)
+          ? `${name} is staged as a new agent; ${originalName} remains unchanged.`
+          : `${name} setup saved for this workspace.`,
+      toast: draftEntry.setupAcknowledged
+        ? `${name} setup updated in the workspace draft.`
+        : `${name} added to the team draft. It will be created with the workspace.`
+    };
+    this.closeWorkspaceAgentSetup({ restoreFocus: true, silent: true });
+  },
+
+  async retryWorkspaceAgentCreation(index) {
+    const api = window.CreateWorkspaceTeamDraft;
+    const draft = this.ensureWorkspaceTeamDraft();
+    if (!api?.clearCreationFailure?.(draft, index)) return;
+    this.refreshWorkspaceReview();
+    this.announceWorkspaceTeamChange('Retrying workspace and agent creation.');
+    this.goToWizardStep(4);
+    await this.createFolder();
+  },
+
+  resetWorkspaceAgentSetup(index) {
+    const api = window.CreateWorkspaceTeamDraft;
+    const draft = this.ensureWorkspaceTeamDraft();
+    const entry = this.teamView()?.roster.find(item => item.templateAgentIndex === index);
+    if (!api || !draft || !entry || !api.resetToRecommended(draft, index)) return;
+    this.refreshWorkspaceReview();
+    this.announceWorkspaceTeamChange(`${entry.originalName} reset to the recommended setup.`);
+    document.getElementById(`team-agent-setup-${index}`)?.focus();
   },
 
   // The blueprint plan entry a roster index refers to, before any staged
@@ -4179,205 +4600,7 @@ const sessionManager = {
   },
 
   closeTeamCustomizeEditors() {
-    document.querySelectorAll('#workspaceTeamRoster .workspace-team-customize').forEach(editor => {
-      editor.hidden = true;
-      editor.innerHTML = '';
-    });
-    document.querySelectorAll('#workspaceTeamRoster [data-team-customize]').forEach(button => {
-      button.setAttribute('aria-expanded', 'false');
-      button.textContent = 'Customize for this workspace';
-    });
-  },
-
-  toggleTeamCustomizeEditor(index) {
-    const editor = document.getElementById(`team-agent-${index}-editor`);
-    if (!editor) return;
-    if (editor.hidden) this.openTeamCustomizeEditor(index);
-    else this.closeTeamCustomizeEditor(index);
-  },
-
-  closeTeamCustomizeEditor(index) {
-    const editor = document.getElementById(`team-agent-${index}-editor`);
-    const button = document.querySelector(`[data-team-customize="${index}"]`);
-    if (editor) {
-      editor.hidden = true;
-      editor.innerHTML = '';
-    }
-    if (button) {
-      button.setAttribute('aria-expanded', 'false');
-      button.textContent = 'Customize for this workspace';
-      button.focus();
-    }
-  },
-
-  // Opens the staged-customization editor for one blueprint roster entry.
-  //
-  // Everything here writes to the team draft only — Save draft never contacts the
-  // server. Customizing a REUSED agent pre-fills a suggested copy name because
-  // the rename is what makes it an independent definition; the shared saved agent
-  // is left untouched either way.
-  openTeamCustomizeEditor(index, options = {}) {
-    const editor = document.getElementById(`team-agent-${index}-editor`);
-    const button = document.querySelector(`[data-team-customize="${index}"]`);
-    const api = window.CreateWorkspaceTeamDraft;
-    const draft = this.ensureWorkspaceTeamDraft();
-    const planAgent = this.planAgentAt(index);
-    if (!editor || !draft || !api || !planAgent) return;
-
-    const staged = api.getOverride(draft, index) || {};
-    const isReuse = String(planAgent.action || '').toLowerCase() === 'reuse';
-    const planName = String(planAgent.name || '').trim();
-    const hasStagedName = Object.prototype.hasOwnProperty.call(staged, 'name');
-    // A reused agent opens with a suggested copy name so the required rename is
-    // one keystroke away rather than a puzzle.
-    const nameValue = hasStagedName ? staged.name : isReuse ? `${planName} copy` : planName;
-
-    const planModel = String(planAgent.model || '').trim();
-    const planProvider = String(planAgent.provider || '').trim();
-    const hasStagedModel = Object.prototype.hasOwnProperty.call(staged, 'model');
-    const modelValue = hasStagedModel ? staged.model : planModel;
-    const providerValue = Object.prototype.hasOwnProperty.call(staged, 'provider')
-      ? staged.provider
-      : planProvider;
-    const inheritedLabel = planModel
-      ? `${planProvider ? `${planProvider} / ` : ''}${planModel}`
-      : 'App default';
-    const promptValue = Object.prototype.hasOwnProperty.call(staged, 'systemPrompt')
-      ? staged.systemPrompt
-      : String(planAgent.system_prompt || '');
-
-    editor.innerHTML = `
-      <p class="workspace-team-customize-note">${
-        isReuse
-          ? `This creates an independent reusable agent for this workspace. ${this.escapeHtml(planName)} stays exactly as it is in Your Agents.`
-          : 'These changes are staged for this workspace and saved when you create it.'
-      }</p>
-      <div class="workspace-team-customize-fields">
-        <label class="workspace-team-customize-field">
-          <span>Name</span>
-          <input type="text" class="modern-input" data-team-customize-name value="${this.escapeHtml(nameValue)}" maxlength="100" placeholder="Agent name">
-        </label>
-        <label class="workspace-team-customize-field">
-          <span>Model</span>
-          <select class="modern-input" data-team-customize-model>
-            ${this.renderTemplateAgentModelOptions(planAgent, modelValue, providerValue, inheritedLabel)}
-          </select>
-        </label>
-      </div>
-      <label class="workspace-team-customize-field">
-        <span>Instructions <em>optional</em></span>
-        <textarea class="modern-input" data-team-customize-prompt rows="4" placeholder="Use the blueprint instructions">${this.escapeHtml(promptValue)}</textarea>
-      </label>
-      <p class="workspace-team-customize-status" role="alert"></p>
-      <div class="workspace-team-customize-actions">
-        <button type="button" class="workspace-wizard-inline-action" data-team-customize-cancel>Cancel</button>
-        <button type="button" class="modern-btn modern-btn-primary" data-team-customize-save>Save draft</button>
-      </div>`;
-    editor.hidden = false;
-    if (button) {
-      button.setAttribute('aria-expanded', 'true');
-      button.textContent = 'Hide customization';
-    }
-
-    editor
-      .querySelector('[data-team-customize-save]')
-      ?.addEventListener('click', () => this.saveTeamCustomization(index));
-    editor
-      .querySelector('[data-team-customize-cancel]')
-      ?.addEventListener('click', () => this.closeTeamCustomizeEditor(index));
-
-    if (options.focus !== false) {
-      const nameInput = editor.querySelector('[data-team-customize-name]');
-      nameInput?.focus();
-      nameInput?.select?.();
-    }
-  },
-
-  // Stages the editor's values into the draft. Only fields that actually differ
-  // from the blueprint are staged, so an untouched form leaves the entry
-  // uncustomized — and an explicitly emptied model IS staged, because empty means
-  // "inherit the default" rather than "unchanged".
-  saveTeamCustomization(index) {
-    const editor = document.getElementById(`team-agent-${index}-editor`);
-    const api = window.CreateWorkspaceTeamDraft;
-    const draft = this.ensureWorkspaceTeamDraft();
-    const planAgent = this.planAgentAt(index);
-    if (!editor || !draft || !api || !planAgent) return;
-
-    const nameInput = editor.querySelector('[data-team-customize-name]');
-    const modelInput = editor.querySelector('[data-team-customize-model]');
-    const promptInput = editor.querySelector('[data-team-customize-prompt]');
-    const status = editor.querySelector('.workspace-team-customize-status');
-    const fail = message => {
-      if (status) status.textContent = message;
-      nameInput?.focus();
-    };
-
-    const name = String(nameInput?.value || '').trim();
-    const model = String(modelInput?.value || '').trim();
-    const provider = String(
-      modelInput?.selectedOptions?.[0]?.getAttribute('data-provider') || ''
-    ).trim();
-    const systemPrompt = String(promptInput?.value || '').trim();
-
-    if (!name) return fail('Enter a name for this agent.');
-    if (!/^[a-zA-Z0-9_\- ]+$/.test(name)) {
-      return fail('Names can use letters, numbers, spaces, underscores, and hyphens.');
-    }
-
-    const planName = String(planAgent.name || '').trim();
-    const isReuse = String(planAgent.action || '').toLowerCase() === 'reuse';
-    const planModel = String(planAgent.model || '').trim();
-    const planProvider = String(planAgent.provider || '').trim();
-    const planPrompt = String(planAgent.system_prompt || '').trim();
-    const renamed = api.agentKey(name) !== api.agentKey(planName);
-    const modelChanged = model !== planModel || provider !== planProvider;
-    const promptChanged = systemPrompt !== planPrompt;
-
-    // A shared saved agent is reused exactly as it is. Changing how it behaves
-    // means creating a separate definition, and that needs its own name.
-    if (isReuse && !renamed && (modelChanged || promptChanged)) {
-      return fail(
-        `Give this copy a different name from “${planName}”. Your saved agent is reused as-is and never modified.`
-      );
-    }
-
-    // The resulting name must be unique across the whole resulting roster, not
-    // just among blueprint entries — a collision with a selected saved agent is
-    // just as broken.
-    const collision = (this.teamView()?.roster || []).some(
-      entry => entry.templateAgentIndex !== index && entry.key === api.agentKey(name)
-    );
-    if (collision) {
-      return fail(`Another agent in this team is already called “${name}”. Choose another name.`);
-    }
-
-    const fields = {};
-    if (renamed || name !== planName) fields.name = name;
-    if (modelChanged) {
-      fields.model = model;
-      fields.provider = provider;
-    }
-    if (promptChanged) fields.systemPrompt = systemPrompt;
-    // Renaming a reused agent produces a brand-new definition, so it must carry
-    // the blueprint's role/type rather than inheriting them from a saved agent
-    // that is no longer involved.
-    if (isReuse && renamed) {
-      if (planAgent.role) fields.role = String(planAgent.role).trim();
-      if (planAgent.type) fields.type = String(planAgent.type).trim();
-      if (!Object.prototype.hasOwnProperty.call(fields, 'model')) {
-        fields.model = model;
-        fields.provider = provider;
-      }
-      if (!Object.prototype.hasOwnProperty.call(fields, 'systemPrompt')) {
-        fields.systemPrompt = systemPrompt;
-      }
-    }
-
-    api.stageOverride(draft, index, fields);
-    this.closeTeamCustomizeEditor(index);
-    this.refreshWorkspaceReview();
-    this.announceWorkspaceTeamChange(`${name} is staged for this workspace.`);
+    this.closeWorkspaceAgentSetup({ restoreFocus: false, silent: true });
   },
 
   // Clears the picker's own UI. The selections themselves live in the team draft
@@ -4781,6 +5004,7 @@ const sessionManager = {
       this.announceWorkspaceTeamChange(
         `${canonicalName} added. ${this.workspaceTeamSummaryText(this.teamView())}`
       );
+      this.showToast(`${canonicalName} added to the workspace draft.`, 'success');
     }
     this.announceResolvedPrimary();
   },
@@ -4929,6 +5153,7 @@ const sessionManager = {
     this.renderSetupPreview(selectedTemplate);
     this.renderWorkspaceTeamIssues();
     this.renderWorkspaceTeamIssues('workspaceReviewIssues');
+    this.renderWorkspaceTeamBatchActions();
     this.renderWorkspaceTeamRoster();
     this.renderBlueprintAgentSummary();
   },
@@ -5042,6 +5267,27 @@ const sessionManager = {
           : `${specialists.length} specialists`
       );
     }
+    if (!view?.isAssistantProgram) {
+      const savedCount = roster.filter(entry => entry.lifecycle === 'reuse').length;
+      const copyCount = roster.filter(entry => entry.lifecycle === 'customized-copy').length;
+      const newCount = roster.filter(entry => entry.lifecycle === 'create').length;
+      lines.push(
+        `${newCount} new · ${savedCount} saved · ${copyCount} customized cop${copyCount === 1 ? 'y' : 'ies'}`
+      );
+      roster.forEach(entry => {
+        lines.push(
+          [
+            entry.name,
+            entry.designation === 'primary' ? 'Primary' : 'Specialist',
+            entry.statusLabel || entry.lifecycleLabel,
+            entry.modelLabel,
+            entry.modelSourceLabel
+          ]
+            .filter(Boolean)
+            .join(' · ')
+        );
+      });
+    }
     lines.push(this.workspaceTeamSummaryText(view));
 
     return `
@@ -5051,7 +5297,7 @@ const sessionManager = {
           ${lines.map(line => `<span class="workspace-review-card-meta">${this.escapeHtml(line)}</span>`).join('')}
         </div>
         <div class="workspace-review-card-actions">
-          <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="3">Edit</button>
+          <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="3">Edit team</button>
         </div>
       </div>`;
   },
@@ -5116,6 +5362,46 @@ const sessionManager = {
       );
     }
     return parts.join(' · ');
+  },
+
+  // Converts the reviewed request into an authoritative success summary. A
+  // successful strict create means every `create` expectation became a new
+  // reusable definition and every `reuse`/existing selection was attached.
+  // Keep this aggregate so a large blueprint produces one useful toast instead
+  // of a burst of per-agent notifications.
+  workspaceTeamSuccessParts(teamPayload) {
+    const expectations = Array.isArray(teamPayload?.template_agent_review?.expectations)
+      ? teamPayload.template_agent_review.expectations
+      : [];
+    const created = [];
+    const attached = [];
+    const seenCreated = new Set();
+    const seenAttached = new Set();
+    const addName = (target, seen, rawName) => {
+      const name = String(rawName || '').trim();
+      const key = name.toLocaleLowerCase();
+      if (!name || seen.has(key)) return;
+      seen.add(key);
+      target.push(name);
+    };
+
+    for (const expectation of expectations) {
+      if (expectation?.action === 'create') {
+        addName(created, seenCreated, expectation.name);
+      } else if (expectation?.action === 'reuse') {
+        addName(attached, seenAttached, expectation.name);
+      }
+    }
+    for (const name of teamPayload?.existing_agent_names || []) {
+      addName(attached, seenAttached, name);
+    }
+
+    const parts = [];
+    if (created.length === 1) parts.push(`${created[0]} created and added`);
+    else if (created.length > 1) parts.push(`${created.length} agents created and added`);
+    if (attached.length === 1) parts.push(`${attached[0]} added`);
+    else if (attached.length > 1) parts.push(`${attached.length} saved agents added`);
+    return parts;
   },
 
   /**
@@ -5334,6 +5620,51 @@ const sessionManager = {
         return 'Setup step';
     }
   },
+
+  // Clears the short-lived visual guide used after Team refuses to advance.
+  // The class is state-neutral: it identifies where to act without changing the
+  // blocker, button availability, or draft.
+  clearWorkspaceTeamBlockAttention() {
+    if (this.workspaceTeamBlockAttentionTimer) {
+      clearTimeout(this.workspaceTeamBlockAttentionTimer);
+      this.workspaceTeamBlockAttentionTimer = null;
+    }
+    document
+      .querySelectorAll('#wizardStep3 .is-blocking-attention')
+      .forEach(element => element.classList.remove('is-blocking-attention'));
+  },
+
+  // When Review is blocked, bring the exact corrective control into view and
+  // briefly pulse it together with its roster row. Focus and the live-region
+  // message provide the same direction without motion; reduced-motion users
+  // receive a static outline instead of the pulse.
+  signalWorkspaceTeamBlock(target, message) {
+    if (!target) return;
+    this.clearWorkspaceTeamBlockAttention();
+
+    const owner = target.closest?.('.workspace-team-row, .workspace-team-issue');
+    const attentionTargets = Array.from(new Set([target, owner].filter(Boolean)));
+    // Force style recalculation so clicking Review repeatedly restarts the cue.
+    void target.offsetWidth;
+    attentionTargets.forEach(element => element.classList.add('is-blocking-attention'));
+
+    const reduceMotion = Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches);
+    target.focus({ preventScroll: true });
+    target.scrollIntoView?.({
+      behavior: reduceMotion ? 'auto' : 'smooth',
+      block: 'center',
+      inline: 'nearest'
+    });
+    this.announceWorkspaceTeamChange(
+      `${message || 'This team needs attention before review.'} Focus moved to the required control.`
+    );
+
+    this.workspaceTeamBlockAttentionTimer = setTimeout(() => {
+      this.workspaceTeamBlockAttentionTimer = null;
+      attentionTargets.forEach(element => element.classList.remove('is-blocking-attention'));
+    }, 2000);
+  },
+  workspaceTeamBlockAttentionTimer: null,
 
   // Announces a team change without moving focus.
   //
@@ -5644,12 +5975,27 @@ const sessionManager = {
     if (!this.importModeEnabled && targetStep > 3 && this.wizardStep === 3) {
       if (this.hasBlockingTeamIssue()) {
         this.refreshWizardChrome();
-        const assistantNameIssue = this.teamView()?.issues.some(
+        const blockers = this.teamView()?.blockingIssues || [];
+        const assistantNameIssue = blockers.find(
           issue => issue.id === 'assistant-name' || issue.anchor === 'assistantProgramCreateName'
         );
-        if (assistantNameIssue) document.getElementById('assistantProgramCreateName')?.focus();
-        else
-          document.querySelector('#workspaceTeamIssues .workspace-team-issue.is-blocking')?.focus();
+        const setupIssue = blockers.find(issue => issue.id === 'template-agent-setup-required');
+        const changedIssue = blockers.find(issue => issue.id === 'template-agent-plan-changed');
+        const creationIssue = blockers.find(issue => issue.id === 'template-agent-creation-failed');
+        const activeIssue =
+          assistantNameIssue || changedIssue || creationIssue || setupIssue || blockers[0];
+        let target = null;
+        if (assistantNameIssue) target = document.getElementById('assistantProgramCreateName');
+        else if (changedIssue && Number.isInteger(changedIssue.templateAgentIndex)) {
+          target = document.getElementById(`team-agent-setup-${changedIssue.templateAgentIndex}`);
+        } else if (creationIssue) {
+          target = document.getElementById(`team-agent-retry-${creationIssue.templateAgentIndex}`);
+        } else if (setupIssue) {
+          target = document.getElementById(`team-agent-setup-${setupIssue.templateAgentIndex}`);
+        } else {
+          target = document.querySelector('#workspaceTeamIssues .workspace-team-issue.is-blocking');
+        }
+        this.signalWorkspaceTeamBlock(target, activeIssue?.message);
         return;
       }
     }
@@ -5841,6 +6187,16 @@ const sessionManager = {
       nameInput?.focus();
       return;
     }
+    if (!importEnabled && (!confirmedTeamView || !confirmedTeamView.canContinueFromTeam)) {
+      this.goToWizardStep(3);
+      this.refreshWorkspaceReview();
+      const blocking = this.teamView()?.blockingIssues[0];
+      const owningControl = blocking?.anchor ? document.getElementById(blocking.anchor) : null;
+      if (owningControl) owningControl.focus();
+      else
+        document.querySelector('#workspaceTeamIssues .workspace-team-issue.is-blocking')?.focus();
+      return;
+    }
     if (!importEnabled) {
       // Re-read the blueprint's dependency state immediately before creating.
       // The catalog on screen can be minutes old, and a plugin disabled in
@@ -5955,6 +6311,15 @@ const sessionManager = {
         if (Array.isArray(teamPayload.template_agent_overrides)) {
           payload.template_agent_overrides = teamPayload.template_agent_overrides;
         }
+        if (teamPayload.template_agent_review) {
+          payload.template_agent_review = {
+            version: teamPayload.template_agent_review.version,
+            plan_revision: teamPayload.template_agent_review.plan_revision,
+            expectations: teamPayload.template_agent_review.expectations.map(expectation => ({
+              ...expectation
+            }))
+          };
+        }
         if (Array.isArray(teamPayload.existing_agent_names)) {
           payload.existing_agent_names = [...teamPayload.existing_agent_names];
         }
@@ -6010,6 +6375,96 @@ const sessionManager = {
           continue;
         }
 
+        if (
+          response.status === 409 &&
+          !importEnabled &&
+          result.conflict?.type === 'template_agent_plan' &&
+          result.template_agent_plan
+        ) {
+          const api = window.CreateWorkspaceTeamDraft;
+          const draft = this.ensureWorkspaceTeamDraft();
+          const blueprintKey = draft?.plan?.blueprintKey || '';
+          this.templateAgentPlan = result.template_agent_plan;
+          api?.setPlanReady?.(draft, blueprintKey, result.template_agent_plan);
+          api?.markPlanConflict?.(
+            draft,
+            'Blueprint changed—review the updated agent plan before creating this workspace. Nothing was created.',
+            result.conflict
+          );
+          this.goToWizardStep(3);
+          this.refreshWorkspaceReview();
+          this.announceWorkspaceTeamChange(
+            'Blueprint changed. Review the updated agent plan before creating this workspace.'
+          );
+          document.querySelector('[data-issue-id="template-agent-plan-changed"]')?.focus();
+          return;
+        }
+
+        if (
+          response.status === 400 &&
+          !importEnabled &&
+          result.conflict?.type === 'template_agent_override'
+        ) {
+          const index = Number(result.conflict?.index);
+          const serverField = String(result.conflict?.field || '').trim();
+          const field = serverField === 'system_prompt' ? 'systemPrompt' : serverField;
+          this.goToWizardStep(3);
+          this.refreshWorkspaceReview();
+          const opener = document.getElementById(`team-agent-setup-${index}`);
+          if (Number.isInteger(index)) this.openWorkspaceAgentSetup(index, opener);
+          const message = String(result.error || 'Review this agent setup and try again.').trim();
+          if (this.workspaceAgentSetupForm && field) {
+            this.workspaceAgentSetupFocusField = field;
+            this.workspaceAgentSetupForm.setError?.(field, message);
+            this.workspaceAgentSetupForm.focus?.(field);
+          } else {
+            const error = document.getElementById('agentCreateDraftError');
+            if (error) {
+              error.textContent = message;
+              error.hidden = false;
+              error.focus?.();
+            }
+          }
+          this.announceWorkspaceTeamChange(
+            'An agent setup needs attention before this workspace can be created.'
+          );
+          return;
+        }
+
+        if (
+          response.status === 400 &&
+          !importEnabled &&
+          result.conflict?.type === 'template_agent_review_invalid'
+        ) {
+          this.showWorkspaceCreateError(
+            `The reviewed agent setup is invalid. ${String(result.error || '').trim()}`.trim()
+          );
+          return;
+        }
+
+        if (
+          response.status >= 500 &&
+          !importEnabled &&
+          result.conflict?.type === 'template_agent_create'
+        ) {
+          const cleanup = Array.isArray(result.cleanup_errors)
+            ? ` Cleanup also needs attention: ${result.cleanup_errors.join('; ')}.`
+            : '';
+          const failureIndex = Number(result.conflict?.index);
+          const failureName = String(result.conflict?.name || '').trim();
+          const failureMessage = `${String(result.error || 'An agent could not be created.').trim()}${cleanup}`;
+          const api = window.CreateWorkspaceTeamDraft;
+          const draft = this.ensureWorkspaceTeamDraft();
+          api?.markCreationFailure?.(draft, failureIndex, failureName, failureMessage);
+          this.goToWizardStep(3);
+          this.refreshWorkspaceReview();
+          this.announceWorkspaceTeamChange(
+            `${failureName || 'Agent'} creation failed. Nothing was created; setup was preserved for retry.`
+          );
+          document.getElementById(`team-agent-retry-${failureIndex}`)?.focus();
+          return;
+        }
+
         if (response.status === 409 && !importEnabled && result.readiness) {
           // Blueprint readiness gate: the server re-derived the blueprint's
           // dependency state at create time and refused. It is rendered inline
@@ -6035,6 +6490,13 @@ const sessionManager = {
         throw new Error(result.error || fallbackMessage);
       }
 
+      const teamSuccessParts = importEnabled
+        ? []
+        : this.workspaceTeamSuccessParts(confirmedTeamPayload);
+      const hasReviewedTemplateAgentOutcome = Boolean(
+        confirmedTeamPayload?.template_agent_review?.expectations?.length
+      );
+
       // The workspace exists even when project-template instantiation failed;
       // surface the non-fatal warning.
       if (typeof result.project_warning === 'string' && result.project_warning) {
@@ -6048,7 +6510,7 @@ const sessionManager = {
       }
       // A roster entry matched an existing agent by name; the existing
       // definition was reused instead of the template's (PRD FR7).
-      if (Array.isArray(result.agent_reuse_notices)) {
+      if (Array.isArray(result.agent_reuse_notices) && !hasReviewedTemplateAgentOutcome) {
         result.agent_reuse_notices
           .filter(msg => typeof msg === 'string' && msg)
           .forEach(msg => this.showToast(msg, 'info'));
@@ -6169,9 +6631,10 @@ const sessionManager = {
         askOriSeedResult.tasksCreated > 0 ||
         askOriSeedResult.notesCreated > 0 ||
         seededStarterTasks > 0 ||
-        Array.isArray(assistantHireResult?.roster)
+        Array.isArray(assistantHireResult?.roster) ||
+        teamSuccessParts.length > 0
       ) {
-        const summaryParts = [];
+        const summaryParts = [...teamSuccessParts];
         if (bootstrapApplyResult.invitedAgents > 0)
           summaryParts.push(
             `${bootstrapApplyResult.invitedAgents} agent${bootstrapApplyResult.invitedAgents === 1 ? '' : 's'} invited`
@@ -6349,7 +6812,7 @@ const sessionManager = {
   // real recovery controls. Reducing "the plugin this blueprint needs is
   // disabled" to a sentence and two Edit links would hand the user a problem
   // with no way to act on it.
-  showWorkspaceCreateError(message, readiness) {
+  showWorkspaceCreateError(message, readiness, options = {}) {
     const host = document.getElementById('workspaceReviewError');
     if (!host) return;
     host.innerHTML = '';
@@ -6371,6 +6834,14 @@ const sessionManager = {
 
     const actions = document.createElement('div');
     actions.className = 'workspace-review-error-actions';
+    if (options.retry) {
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'btn btn-sm btn-outline-primary';
+      retry.textContent = 'Retry creation';
+      retry.addEventListener('click', () => this.createFolder());
+      actions.appendChild(retry);
+    }
     [
       { step: 1, label: 'Edit blueprint' },
       { step: 2, label: 'Edit details' },

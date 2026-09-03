@@ -313,6 +313,7 @@ func TestRenderCreateWorkspaceWizardReviewContract(t *testing.T) {
 		`id="existingAgentRosterPanel"`,
 		`id="existingAgentRosterSearch"`,
 		`id="workspaceTeamLiveRegion"`,
+		`id="workspaceTeamBatchActions"`,
 		`Resulting workspace team`,
 		`Advanced team options`,
 		// Review keeps the read-only post-create setup preview.
@@ -355,6 +356,12 @@ func TestRenderCreateWorkspaceWizardReviewContract(t *testing.T) {
 		`id="workspaceTemplateAgentSetup"`,
 		`id="workspaceTemplateAgentSetupForm"`,
 		`id="workspaceTemplateAgentSetupSave"`,
+		// Agent setup now reuses the sibling Create New Agent modal instead of
+		// rendering a second form or child view inside Create Workspace.
+		`id="workspaceAgentSetupView"`,
+		`id="workspaceAgentSetupFormHost"`,
+		`id="workspaceAgentSetupBack"`,
+		`id="workspaceAgentSetupSave"`,
 		`Create all defaults`,
 		`Save reusable agent`,
 		// The roster is one list: no nested "Blueprint agents" card, no separate
@@ -370,6 +377,54 @@ func TestRenderCreateWorkspaceWizardReviewContract(t *testing.T) {
 	} {
 		if strings.Contains(html, gone) {
 			t.Errorf("rendered Create Workspace wizard contains stale markup/copy %q", gone)
+		}
+	}
+}
+
+func TestSharedAgentCreateFormIsCanonicalAndLoadsBeforeConsumers(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatalf("LoadTemplates failed: %v", err)
+	}
+
+	pages := []string{"index", "workspaces", "workspace-detail", "workspace-canvas", "workspace-task"}
+	for _, page := range pages {
+		html, err := r.RenderTemplate(page, TemplateData{
+			Title: page + " - Ori Agent",
+			Extra: map[string]any{"WorkspaceID": "ws-1", "TaskID": "task-1"},
+		})
+		if err != nil {
+			t.Fatalf("RenderTemplate(%s) failed: %v", page, err)
+		}
+
+		for marker, want := range map[string]int{
+			`id="addAgentModal"`:                     1,
+			`id="addAgentModalTitleText"`:            1,
+			`id="addAgentForm"`:                      1,
+			`id="createAgentBtn"`:                    1,
+			`id="cancelAgentBtn"`:                    1,
+			`id="agentCreateDraftContext"`:           1,
+			`id="agentCreateDraftSummary"`:           1,
+			`id="agentCreateFormHost"`:               1,
+			`id="agentCreateFormTemplate"`:           1,
+			`src="/js/modules/agent-create-form.js"`: 1,
+		} {
+			if got := strings.Count(html, marker); got != want {
+				t.Errorf("page %s marker %q count = %d, want %d", page, marker, got, want)
+			}
+		}
+		for _, fieldID := range []string{"agentName", "agentType", "agentModel", "agentReasoning", "agentSystemPrompt"} {
+			if got := strings.Count(html, `id="`+fieldID+`"`); got != 0 {
+				t.Errorf("page %s preassigns shared field ID %q %d times; IDs must be mount-scoped", page, fieldID, got)
+			}
+		}
+
+		helperAt := strings.Index(html, `/js/modules/agent-create-form.js`)
+		for _, consumer := range []string{`/js/modules/agents.js`, `/js/modules/sessions.js`} {
+			consumerAt := strings.Index(html, consumer)
+			if consumerAt >= 0 && (helperAt < 0 || helperAt > consumerAt) {
+				t.Errorf("page %s loads shared form helper after consumer %s", page, consumer)
+			}
 		}
 	}
 }

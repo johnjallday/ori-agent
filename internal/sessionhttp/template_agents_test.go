@@ -222,7 +222,11 @@ func TestBuildTemplateAgentPlan_CreateReuseAndSystemModel(t *testing.T) {
 	}
 
 	tpl := rosterTemplate(
-		projecttemplates.AgentSpec{Name: "Shared", Model: "ignored-model"},
+		projecttemplates.AgentSpec{
+			Name: "Shared", Role: "researcher", Type: "research", Model: "ignored-model",
+			SystemPrompt: "blueprint shared prompt",
+			Tools:        projecttemplates.ToolDefaults{Skills: []string{"blueprint-research"}},
+		},
 		projecttemplates.AgentSpec{Name: "Fresh", Role: "orchestrator", SystemPrompt: "fresh prompt", Tools: projecttemplates.ToolDefaults{Skills: []string{"planning"}}},
 	)
 	tpl.ID = "launch"
@@ -244,6 +248,13 @@ func TestBuildTemplateAgentPlan_CreateReuseAndSystemModel(t *testing.T) {
 	}
 	if plan.Agents[0].SystemPrompt != "saved shared prompt" {
 		t.Fatalf("expected existing prompt to be surfaced, got %q", plan.Agents[0].SystemPrompt)
+	}
+	recommended := plan.Agents[0].Recommended
+	if recommended == nil || recommended.Role != "researcher" || recommended.Type != "research" || recommended.Model != "ignored-model" || recommended.SystemPrompt != "blueprint shared prompt" {
+		t.Fatalf("expected blueprint setup to remain available for a customized copy, got %+v", recommended)
+	}
+	if len(recommended.Tools.Skills) != 1 || recommended.Tools.Skills[0] != "blueprint-research" {
+		t.Fatalf("recommended blueprint tools = %+v", recommended.Tools)
 	}
 	if plan.Agents[1].Action != "create" || plan.Agents[1].Model != "gpt-5.3-codex" || plan.Agents[1].Provider != "codex" || plan.Agents[1].ModelSource != "system" {
 		t.Fatalf("unexpected created agent plan: %+v", plan.Agents[1])
@@ -373,6 +384,11 @@ func TestBlankWorkspaceTemplate_SeedsSingleEntryAgent(t *testing.T) {
 		t.Fatalf("expected exactly one blank roster agent, got %d", len(tpl.Agents))
 	}
 
+	before := handler.buildTemplateAgentPlan(tpl)
+	if before.Agents[0].Action != "create" {
+		t.Fatalf("blank plan without Ask Ori action = %q, want create", before.Agents[0].Action)
+	}
+
 	ws := &session.Workspace{ID: "ws-blank", Name: "Plain"}
 	res := handler.seedTemplateAgents(ws, tpl)
 
@@ -392,7 +408,7 @@ func TestBlankWorkspaceTemplate_SeedsSingleEntryAgent(t *testing.T) {
 
 	// The plan the review panel renders must advertise the single entry agent.
 	plan := handler.buildTemplateAgentPlan(blankWorkspaceTemplate())
-	if !plan.HasAgents || plan.EntryAgentName != blankWorkspaceEntryAgentName {
+	if !plan.HasAgents || plan.EntryAgentName != blankWorkspaceEntryAgentName || plan.Agents[0].Action != "reuse" {
 		t.Fatalf("expected plan entry %q, got has_agents=%v entry=%q",
 			blankWorkspaceEntryAgentName, plan.HasAgents, plan.EntryAgentName)
 	}
