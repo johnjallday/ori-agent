@@ -188,7 +188,7 @@ func (h *Handler) initializeSubHandlers() {
 	}
 
 	if h.templateManager != nil && h.orchestrator != nil {
-		h.templateHandler = NewTemplateHandler(h.agentStore, h.workspaceStore, h.templateManager, h.orchestrator, h.eventBus)
+		h.templateHandler = NewTemplateHandler(h.agentStore, h.workspaceStore, h.templateManager, h.eventBus)
 	}
 
 	if h.notificationService != nil {
@@ -219,7 +219,7 @@ func (h *Handler) SetTemplateManager(tm *templates.TemplateManager) {
 	h.templateManager = tm
 	// Initialize template handler if all dependencies are now available
 	if h.orchestrator != nil && h.eventBus != nil && h.templateHandler == nil {
-		h.templateHandler = NewTemplateHandler(h.agentStore, h.workspaceStore, h.templateManager, h.orchestrator, h.eventBus)
+		h.templateHandler = NewTemplateHandler(h.agentStore, h.workspaceStore, h.templateManager, h.eventBus)
 	}
 }
 
@@ -284,7 +284,7 @@ func (h *Handler) SetOrchestrator(orch *orchestration.Orchestrator) {
 // initializeTemplateHandlerLegacy initializes the template handler if all dependencies are available (legacy)
 func (h *Handler) initializeTemplateHandlerLegacy() {
 	if h.templateManager != nil && h.orchestrator != nil && h.eventBus != nil && h.templateHandler == nil {
-		h.templateHandler = NewTemplateHandler(h.agentStore, h.workspaceStore, h.templateManager, h.orchestrator, h.eventBus)
+		h.templateHandler = NewTemplateHandler(h.agentStore, h.workspaceStore, h.templateManager, h.eventBus)
 	}
 }
 

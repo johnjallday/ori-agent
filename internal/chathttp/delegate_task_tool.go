@@ -11,39 +11,76 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
-// delegationEnabled reports whether the delegate_task tool should be exposed:
-// only when the executing agent is the workspace coordinator. This gate is what
-// structurally enforces single-level delegation — specialists never receive the
-// tool, so a delegated specialist cannot delegate again.
-func (p *WorkspaceToolProvider) delegationEnabled() bool {
+// isWorkspaceCoordinator reports whether the executing agent is the workspace
+// coordinator (entry agent). It is the gate that structurally enforces
+// single-level delegation — specialists never receive delegate_task, so a
+// delegated specialist cannot delegate again.
+func (p *WorkspaceToolProvider) isWorkspaceCoordinator() bool {
+	_, ok := p.coordinatorRoster()
+	return ok
+}
+
+// coordinatorRoster returns the workspace roster when the executing agent is
+// the coordinator. The specialist list is what the delegate_task schema is
+// built from, so it is resolved here rather than left for the model to guess.
+func (p *WorkspaceToolProvider) coordinatorRoster() (workspace.CoordinatorRoster, bool) {
 	if p.workspaceStore == nil || p.executingAgent == "" {
-		return false
+		return workspace.CoordinatorRoster{}, false
 	}
 	ws, err := p.workspaceStore.Get(p.workspaceID)
 	if err != nil || ws == nil {
-		return false
+		return workspace.CoordinatorRoster{}, false
 	}
-	coordinator, source := ws.ResolveCoordinator()
-	if source == workspace.CoordinatorSourceMissing {
-		return false
+	roster := ws.BuildCoordinatorRoster()
+	if roster.CoordinatorSource == workspace.CoordinatorSourceMissing {
+		return workspace.CoordinatorRoster{}, false
 	}
-	return strings.EqualFold(strings.TrimSpace(coordinator), p.executingAgent)
+	if !strings.EqualFold(strings.TrimSpace(roster.Coordinator), p.executingAgent) {
+		return workspace.CoordinatorRoster{}, false
+	}
+	return roster, true
+}
+
+// delegationSpecialists returns the agents delegate_task may target, and
+// whether the tool should be exposed at all.
+//
+// A coordinator with no specialists does not get the tool: every call it could
+// make would be rejected by the membership check in agentcomm.DelegateTask, so
+// offering it only costs schema tokens and invites a failed call plus a retry
+// turn. This is the solo-workspace case, where the coordinator is resolved by
+// CoordinatorSourceSingleAgentDefault.
+func (p *WorkspaceToolProvider) delegationSpecialists() ([]string, bool) {
+	roster, ok := p.coordinatorRoster()
+	if !ok || len(roster.Specialists) == 0 {
+		return nil, false
+	}
+	return roster.Specialists, true
 }
 
 // delegateTaskTool lets the coordinator hand a subtask to a workspace specialist.
 // The subtask is persisted with dynamic_delegation provenance and a parent link
 // (via agentcomm.DelegateTask) before it is executed by the delegation loop.
-func (p *WorkspaceToolProvider) delegateTaskTool() toolapi.Tool {
+//
+// specialists is the workspace roster, and is bound into the schema as the
+// enum of the "agent" argument: the model picks from the agents that actually
+// exist instead of guessing a name and burning a turn on the rejection.
+func (p *WorkspaceToolProvider) delegateTaskTool(specialists []string) toolapi.Tool {
 	return &nativeUtilityTool{
 		definition: toolapi.ToolDefinition{
-			Name:        "delegate_task",
-			Description: "Delegate a subtask to a workspace specialist agent. Only the workspace coordinator can call this. The subtask is created under the current task and assigned to the chosen specialist; use it when a step needs an agent other than yourself.",
+			Name: "delegate_task",
+			Description: fmt.Sprintf(
+				"Delegate a subtask to a workspace specialist agent. Only the workspace coordinator can call this. "+
+					"The subtask is created under the current task and assigned to the chosen specialist; use it when a step needs an agent other than yourself. "+
+					"Specialists available in this workspace: %s.",
+				strings.Join(specialists, ", "),
+			),
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"agent": map[string]any{
 						"type":        "string",
-						"description": "Name of the workspace specialist agent to assign the subtask to.",
+						"description": "Name of the workspace specialist agent to assign the subtask to. Must be one of the workspace's current specialists.",
+						"enum":        specialists,
 					},
 					"instructions": map[string]any{
 						"type":        "string",

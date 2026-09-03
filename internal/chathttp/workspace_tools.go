@@ -228,8 +228,10 @@ func (p *WorkspaceToolProvider) Tools() []toolapi.Tool {
 	// Coordinator-only: the entry agent can delegate work to specialists.
 	// Exposing this solely to the coordinator structurally enforces single-level
 	// delegation (specialists never receive the tool, so they cannot re-delegate).
-	if p.delegationEnabled() {
-		tools = append(tools, p.delegateTaskTool())
+	// The roster is resolved here and bound into the tool schema, so a solo
+	// coordinator is not offered a tool with nobody to delegate to.
+	if specialists, ok := p.delegationSpecialists(); ok {
+		tools = append(tools, p.delegateTaskTool(specialists))
 	}
 
 	return tools

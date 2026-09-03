@@ -46,6 +46,12 @@ type CoordinatorAdaptRequest struct {
 	Iteration     int               // 1-based attempt number within the loop
 	MaxIterations int               // attempt budget, so the coordinator knows how many remain
 	PriorResults  map[string]string // delegated subtask id -> result text
+
+	// Specialists are the workspace members the coordinator may delegate to.
+	// They are named in the prompt so the coordinator reasons about who exists
+	// before it reaches for delegate_task, rather than guessing a name and
+	// spending an iteration on the rejection.
+	Specialists []string
 }
 
 // CoordinatorAdaptResult is the output of one coordinator reasoning step.
@@ -131,10 +137,11 @@ func (l *DelegationLoop) Run(ctx context.Context, workspaceID string, failed Tas
 		return DelegationLoopResult{}, fmt.Errorf("delegation loop: no task executor configured")
 	}
 
-	coordinator, err := l.resolveCoordinator(workspaceID)
+	roster, err := l.resolveRoster(workspaceID)
 	if err != nil {
 		return DelegationLoopResult{}, err
 	}
+	coordinator := roster.Coordinator
 
 	l.emit(EventDelegationStarted, workspaceID, failed.ID, coordinator, map[string]any{
 		"trigger_code":   trigger.Code,
@@ -163,6 +170,7 @@ func (l *DelegationLoop) Run(ctx context.Context, workspaceID string, failed Tas
 			Iteration:     iter,
 			MaxIterations: l.caps.MaxIterations,
 			PriorResults:  cloneStringMap(results),
+			Specialists:   roster.Specialists,
 		})
 		if aerr != nil {
 			l.emit(EventDelegationFailed, workspaceID, failed.ID, coordinator, map[string]any{"error": aerr.Error()})
@@ -215,16 +223,19 @@ func (l *DelegationLoop) Run(ctx context.Context, workspaceID string, failed Tas
 		l.capHit("exceeded the maximum number of delegation iterations", failed, trigger)
 }
 
-func (l *DelegationLoop) resolveCoordinator(workspaceID string) (string, error) {
+// resolveRoster returns the coordinator and the specialists it may delegate to.
+// Both come from one workspace read so the prompt can name the roster without a
+// second lookup per iteration.
+func (l *DelegationLoop) resolveRoster(workspaceID string) (CoordinatorRoster, error) {
 	ws, err := l.store.Get(workspaceID)
 	if err != nil {
-		return "", fmt.Errorf("delegation loop: workspace not found: %w", err)
+		return CoordinatorRoster{}, fmt.Errorf("delegation loop: workspace not found: %w", err)
 	}
-	name, source := ws.ResolveCoordinator()
-	if source == CoordinatorSourceMissing {
-		return "", ErrCoordinatorMissing
+	roster := ws.BuildCoordinatorRoster()
+	if roster.CoordinatorSource == CoordinatorSourceMissing {
+		return CoordinatorRoster{}, ErrCoordinatorMissing
 	}
-	return name, nil
+	return roster, nil
 }
 
 func (l *DelegationLoop) executeSubtask(ctx context.Context, workspaceID, taskID string) (string, error) {

@@ -4,12 +4,10 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
-	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -20,19 +18,20 @@ type TemplateHandler struct {
 	agentStore      store.Store
 	workspaceStore  workspace.Store
 	templateManager *templates.TemplateManager
-	orchestrator    *orchestration.Orchestrator
 	eventBus        *workspace.EventBus
 }
 
-// NewTemplateHandler creates a new template handler
+// NewTemplateHandler creates a new template handler.
+//
+// It takes no Orchestrator: instantiating a template writes workspace tasks,
+// and the workspace's own executor runs them from there.
 func NewTemplateHandler(agentStore store.Store, workspaceStore workspace.Store,
-	templateManager *templates.TemplateManager, orchestrator *orchestration.Orchestrator,
+	templateManager *templates.TemplateManager,
 	eventBus *workspace.EventBus) *TemplateHandler {
 	return &TemplateHandler{
 		agentStore:      agentStore,
 		workspaceStore:  workspaceStore,
 		templateManager: templateManager,
-		orchestrator:    orchestrator,
 		eventBus:        eventBus,
 	}
 }
@@ -159,6 +158,17 @@ func (th *TemplateHandler) InstantiateTemplateHandler(w http.ResponseWriter, r *
 		return
 	}
 
+	// A template is always instantiated into a workspace: the tasks it creates
+	// need a workspace to live in, an entry agent to coordinate them, and a
+	// surface the user can watch them on. Requests without one used to fall
+	// through to a separate engine that spun up a throwaway "collab-*"
+	// workspace and returned before any task had run; that path is gone, so an
+	// absent workspace_id is now the client error it always was.
+	if strings.TrimSpace(req.WorkspaceID) == "" {
+		orihttp.BadRequest(w, "workspace_id is required")
+		return
+	}
+
 	// Instantiate template
 	instance, err := th.templateManager.InstantiateTemplate(req.TemplateID, req.Parameters)
 	if err != nil {
@@ -167,52 +177,27 @@ func (th *TemplateHandler) InstantiateTemplateHandler(w http.ResponseWriter, r *
 		return
 	}
 
-	if strings.TrimSpace(req.WorkspaceID) != "" {
-		parentTask, subtasks, err := th.instantiateTemplateIntoWorkspace(req, instance)
-		if err != nil {
-			logger.Error("Failed to instantiate template into workspace", logger.Fields{
-				"templateid":   req.TemplateID,
-				"workspace_id": req.WorkspaceID,
-				"error":        err,
-			})
-			orihttp.InternalError(w, fmt.Sprintf("failed to instantiate template into workspace: %v", err))
-			return
-		}
-
-		logger.Info("Instantiated workflow template into workspace tasks", logger.Fields{
-			"templateid":    req.TemplateID,
-			"workspace_id":  req.WorkspaceID,
-			"parent_task":   parentTask.ID,
-			"subtask_count": len(subtasks),
-		})
-		orihttp.WriteJSON(w, map[string]any{
-			"instance":    instance,
-			"parent_task": parentTask,
-			"subtasks":    subtasks,
-		})
-		return
-	}
-
-	// Create collaborative task from instance
-	task := orchestration.CollaborativeTask{
-		Goal:          fmt.Sprintf("Execute workflow: %s", instance.TemplateName),
-		RequiredRoles: instance.RequiredRoles,
-		Context:       instance.Parameters,
-		MaxDuration:   30 * time.Minute,
-	}
-
-	// Execute collaborative task
-	result, err := th.orchestrator.ExecuteCollaborativeTask(r.Context(), req.AgentName, task)
+	parentTask, subtasks, err := th.instantiateTemplateIntoWorkspace(req, instance)
 	if err != nil {
-		logger.Error("Failed to execute collaborative task", logger.Fields{"error": err})
-		orihttp.InternalError(w, fmt.Sprintf("failed to execute workflow: %v", err))
+		logger.Error("Failed to instantiate template into workspace", logger.Fields{
+			"templateid":   req.TemplateID,
+			"workspace_id": req.WorkspaceID,
+			"error":        err,
+		})
+		orihttp.InternalError(w, fmt.Sprintf("failed to instantiate template into workspace: %v", err))
 		return
 	}
 
-	logger.Info("Instantiated and executed workflow from template", logger.Fields{"templateid": req.TemplateID})
+	logger.Info("Instantiated workflow template into workspace tasks", logger.Fields{
+		"templateid":    req.TemplateID,
+		"workspace_id":  req.WorkspaceID,
+		"parent_task":   parentTask.ID,
+		"subtask_count": len(subtasks),
+	})
 	orihttp.WriteJSON(w, map[string]any{
-		"instance": instance,
-		"result":   result,
+		"instance":    instance,
+		"parent_task": parentTask,
+		"subtasks":    subtasks,
 	})
 }
 
