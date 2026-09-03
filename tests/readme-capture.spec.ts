@@ -24,7 +24,8 @@ const captureAssets = {
   bootstrapIconsFont: path.join(
     repositoryRoot,
     'node_modules/bootstrap-icons/font/fonts/bootstrap-icons.woff2'
-  )
+  ),
+  oriGuideStatic: path.join(repositoryRoot, 'internal/web/static/characters/ori-guide/static.svg')
 };
 
 const sceneStatuses: Array<{ id: string; status: 'passed' | 'failed'; detail?: string }> = [];
@@ -242,6 +243,14 @@ async function installFixtureRoutes(page: Page) {
         return;
       }
       await route.fulfill({ status: 204, body: '' });
+      return;
+    }
+    if (url.pathname === '/characters/ori-guide/sprite.svg') {
+      // Chromium does not reliably propagate Playwright's emulated
+      // prefers-reduced-motion value into an SVG loaded as an image document.
+      // Serve Ori's real reduced-motion asset so the decorative head tilt
+      // cannot land on different frames between the two capture passes.
+      await route.fulfill({ path: captureAssets.oriGuideStatic, contentType: 'image/svg+xml' });
       return;
     }
     if (!url.pathname.startsWith('/api/')) {
