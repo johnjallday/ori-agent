@@ -51,7 +51,7 @@ Brief generation, workspace memory, and user-profile services remain canonical.
 | `active` | Binding, HQ, and entry-agent instance resolve | Chosen name and “Your personal assistant” | Ask, assign, pause, edit agreement/profile, open HQ |
 | `paused` | Relationship exists but proactive/background behavior is paused | “Assistant paused” | Resume, inspect/edit, deterministic manual assignment |
 | active with no model | Healthy hire but no chat-capable model resolves | **“Hired — choose a model to chat”** | Choose model; deterministic first assignment and deterministic Daily Brief remain available |
-| `repair_needed` | A durable result exists but its known safe continuation failed, or HQ/agent linkage is missing, foreign, or invalid | “Assistant setup needs repair” with no invented identity | Retry deterministic repair, choose replacement explicitly, or remain paused |
+| `repair_needed` | A durable result exists but its known safe continuation failed, HQ/agent linkage is missing, foreign, or invalid, or the relationship row is absent while PAF provenance remains | “Assistant setup needs repair” with no invented identity | Retry deterministic repair, explicitly reconnect one validated orphan, choose replacement explicitly, or remain paused |
 
 `hiring` stays scoped to creating and finalizing the assistant profile and the
 relationship row. It never means “creating a workspace”.
@@ -133,6 +133,7 @@ stable. A mismatch never falls back to a name search.
 | Hire preview | Pure bounded normalization; hash normalized payload. No workspace, agent, or state mutation. |
 | Hire apply/resume | Requires a request ID. `last_hire_request_id` returns the existing outcome on replay; state transitions use compare-and-swap `state_version`. Creates the owned profile and relationship only. Persisted pre-amendment auto-HQ operations are distinguishable by payload version and resume through their old safe finalization path; they are never abandoned or duplicated. |
 | HQ setup apply/resume | Requires the current `state_version` and a stable HQ request ID bound to a normalized payload hash. The client supplies only the bounded HQ form fields — never assistant, profile, or workspace identity. Replay returns the same canonical result; a changed payload under the same request ID, or a stale version, returns `409`. Partial results are durable, bounded, and resumable with a safe repair step code that carries no provider or database text. |
+| Missing-relationship recovery | `GET /api/personal-assistant` may project one server-discovered orphan as `repair_needed` without writing it. `POST /api/personal-assistant/repair` accepts only `if_version: 0`; clients cannot select assistant, profile, workspace, or instance IDs. Repair reruns the complete identity proof and inserts exactly one relationship only if no row exists. A complete HQ returns `paused`; a profile-only recovery returns `needs_hq`. Any stale, ambiguous, incomplete, or contradictory evidence fails closed. |
 | Pause/resume | Requires current `state_version`; stale writes return conflict and the current version. |
 | Profile/working-agreement edit | Requires current state version; profile and memory fields additionally use their canonical validators. |
 | First-assignment preview | Creates one journal row keyed by opaque preview ID and stores normalized payload/hash only. Repeated identical request IDs return that preview. |
@@ -317,9 +318,11 @@ rebound as the hired assistant's HQ. Legacy and import behavior — including
 unchanged outside this state.
 
 Personal-assistant onboarding is the only supported first-run path. No cohort
-marker is read or persisted: an installation without a relationship enters
-`needs_hire`. This project made that clean break before broad adoption, so no
-parallel legacy cohort or adoption wizard is maintained.
+marker is read or persisted: an installation without a relationship and without
+PAF provenance enters `needs_hire`. Durable PAF provenance is not a cohort
+marker: if it survives without its relationship row, the bounded recovery path
+runs instead of offering a duplicate hire. No parallel legacy adoption wizard
+is maintained.
 
 ## Surfaces and routing
 
@@ -425,6 +428,19 @@ names, Daily Brief schedule fields, mandate text, paths, or quest copy.
 - Repeated requests with the same idempotency key return the original result.
 - Restart rehydrates the binding from durable storage before universal surfaces
   advertise the assistant as available.
+- If the relationship row is absent, recovery enumerates bounded evidence only:
+  owned orchestrator profiles, Personal HQ presentation IDs, ownership,
+  designation, entry-agent instance IDs, Daily Brief ownership, and user ID.
+  Names, prompts, model settings, tools, credentials, and arbitrary workspace
+  metadata are not recovery evidence.
+- Exactly one valid owned profile may be recovered. A profile without HQ can be
+  reconnected into `needs_hq`. A complete HQ is accepted only when every stable
+  identity and owner agrees, and it is restored as `paused` so a database reset
+  never silently re-enables proactive routines.
+- Missing required evidence, multiple candidate profiles or HQs, a foreign
+  owner, stale designation, mismatched entry agent, or mismatched Daily Brief
+  owner projects `relationship_recovery_blocked`. Automatic repair and hire are
+  both unavailable; Ori never guesses by display name.
 
 ## Test matrix
 
@@ -433,7 +449,10 @@ The package/API/browser suites must pin at least these cases:
 | Case | Expected projection / invariant |
 |---|---|
 | Fresh state file | `needs_hire`, default field “Assistant” |
-| Existing state file without a relationship | `needs_hire`; no cohort marker or migration gate |
+| Existing state file without a relationship or PAF provenance | `needs_hire`; no cohort marker or migration gate |
+| Missing relationship with one owned profile and no HQ | `repair_needed` / `relationship_recovery`; repair restores `needs_hq` without creating a profile |
+| Missing relationship with one fully matching owned profile and HQ | `repair_needed` / `relationship_recovery`; repair restores the same IDs as `paused` without creating a profile or workspace |
+| Missing relationship with ambiguous or contradictory PAF provenance | `repair_needed` / `relationship_recovery_blocked`; no automatic repair and no hire |
 | Active binding | same chosen identity on Home, Ask Ori, and HQ |
 | Active binding with no model | “Hired — choose a model to chat”; deterministic assignment/brief actions enabled |
 | Paused binding | reads/profile edits allowed; proactive runs suppressed |
@@ -490,9 +509,9 @@ Its exact Personal Assistant Foundation effects are:
 |---|---|
 | Settings | Removes provider/preferences configuration only. The relationship, assistant profile, Personal HQ, and records remain; model readiness can become `not_configured`. |
 | Agents | Removes global agent profiles but not the relationship, Personal HQ, or its persisted entry-agent instance. The relationship read therefore keeps the same stable binding; profile-dependent management such as rename can report the missing profile and must never silently rebind by name. |
-| Sessions | Removes `sessions.db`, workspaces, and session files. This intentionally removes the PAF relationship journal and Personal HQ records, so the installation returns to `needs_hire`. |
+| Sessions | Removes `sessions.db` and session files, including the PAF relationship row. If the file-backed owned assistant profile and/or external Personal HQ provenance survives and is rediscovered, restart reports bounded relationship recovery instead of `needs_hire`. A complete validated relationship is explicitly restored as `paused`; a profile-only relationship resumes at `needs_hq`. |
 | Onboarding | Resets only onboarding progress. It preserves the relationship, stable IDs, agent, Personal HQ, records, and history. A `needs_hq` relationship survives the reset and resumes at the HQ quest rather than offering a second hire or creating another profile. |
-| All categories | Equivalent to the four effects above: local PAF records are deleted by Sessions/Agents and restarted onboarding offers a fresh hire. |
+| All categories | Applies every selected deletion. If no PAF provenance survives, restarted onboarding offers a fresh hire. Any surviving incomplete or contradictory provenance blocks automatic recovery and hire rather than guessing or creating a duplicate. |
 
 A reset response describes filesystem work completed in the current process;
 callers must not treat in-memory projections as rehydrated until the required
@@ -502,5 +521,7 @@ deletes external-provider data.
 ## Compatibility
 
 No legacy onboarding cohort is maintained. Existing Personal HQ, Daily Brief,
-Follow-Up, workspace, and protected system-assistant records remain valid, while
-a complete development profile reset intentionally returns to a fresh hire.
+Follow-Up, workspace, and protected system-assistant records remain valid. A
+complete development profile reset returns to a fresh hire only when no PAF
+provenance survives; otherwise bounded recovery or blocked review takes
+precedence.

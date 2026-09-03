@@ -141,6 +141,7 @@ type Service struct {
 	briefs     BriefConfigReader
 	models     ModelAvailabilityReader
 	profiles   ProfileReader
+	recovery   RelationshipRecoveryInspector
 }
 
 // NewService constructs the read service. Optional sources are reported as
@@ -160,6 +161,15 @@ func (s *Service) WithProfileReader(profiles ProfileReader) *Service {
 	return s
 }
 
+// WithRecoveryInspector adds the observational orphan check used only when no
+// canonical relationship row exists. The read path never performs the repair.
+func (s *Service) WithRecoveryInspector(recovery RelationshipRecoveryInspector) *Service {
+	if s != nil {
+		s.recovery = recovery
+	}
+	return s
+}
+
 // Get projects the current relationship without mutating any dependency.
 func (s *Service) Get(ctx context.Context, userID string) (*Projection, error) {
 	projection := &Projection{State: APIStateNeedsHire, NextAction: NextActionHire}
@@ -169,14 +179,10 @@ func (s *Service) Get(ctx context.Context, userID string) (*Projection, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("personal assistant: relationship store is unavailable")
 	}
-	state, err := s.store.GetState(ctx, strings.TrimSpace(userID))
+	userID = strings.TrimSpace(userID)
+	state, err := s.store.GetState(ctx, userID)
 	if errors.Is(err, ErrNotFound) {
-		projection.State = APIStateNeedsHire
-		projection.NextAction = NextActionHire
-		projection.Availability.PersonalHQ = notConfiguredSource("not_hired")
-		projection.Availability.AgentInstance = notConfiguredSource("not_hired")
-		projection.Availability.DailyBrief = notConfiguredSource("not_hired")
-		return projection, nil
+		return s.projectMissingRelationship(ctx, userID, projection)
 	}
 	if err != nil {
 		return nil, err
@@ -274,6 +280,47 @@ func (s *Service) Get(ctx context.Context, userID string) (*Projection, error) {
 // before the user confirms Build My HQ. It must also never degrade into
 // repair_needed for the ordinary case — only a genuinely missing or foreign
 // owned profile does that.
+func (s *Service) projectMissingRelationship(ctx context.Context, userID string, projection *Projection) (*Projection, error) {
+	setNeedsHire := func() (*Projection, error) {
+		projection.State = APIStateNeedsHire
+		projection.NextAction = NextActionHire
+		projection.Availability.PersonalHQ = notConfiguredSource("not_hired")
+		projection.Availability.AgentInstance = notConfiguredSource("not_hired")
+		projection.Availability.DailyBrief = notConfiguredSource("not_hired")
+		return projection, nil
+	}
+	if s.recovery == nil {
+		return setNeedsHire()
+	}
+	candidate, err := s.recovery.Inspect(ctx, userID)
+	if errors.Is(err, ErrNotFound) {
+		return setNeedsHire()
+	}
+	projection.State = APIStateRepairNeeded
+	projection.NextAction = NextActionRepair
+	projection.Availability.PersonalHQ = unavailableSource("relationship_state_missing")
+	projection.Availability.AgentInstance = unavailableSource("relationship_state_missing")
+	projection.Availability.DailyBrief = unavailableSource("relationship_state_missing")
+	if errors.Is(err, ErrRepairNeeded) {
+		projection.RepairStep = RepairRelationshipRecoveryBlocked
+		return projection, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if candidate == nil {
+		return nil, errors.New("personal assistant: recovery inspection returned no candidate")
+	}
+	projection.RepairStep = RepairRelationshipRecovery
+	projection.AssistantID = candidate.AssistantID
+	projection.DisplayName = candidate.DisplayName
+	projection.Appearance = candidate.Appearance.Clone()
+	projection.GlobalAgentProfile = candidate.GlobalAgentProfileName
+	projection.HQWorkspaceID = candidate.HQWorkspaceID
+	projection.HQAgentInstanceID = candidate.HQEntryAgentInstanceID
+	return projection, nil
+}
+
 func (s *Service) projectPreHQ(state *State, projection *Projection) (*Projection, error) {
 	preHQRepair := func(source func(string) SourceAvailability, reason string) (*Projection, error) {
 		projection.State = APIStateRepairNeeded
