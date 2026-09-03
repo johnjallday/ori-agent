@@ -844,6 +844,23 @@
   border-color: color-mix(in srgb, var(--wc-faction) 60%, var(--wc-line));
   color: var(--wc-faction);
 }
+/* Setup readiness is separate from Primary/Specialist designation. A compact,
+   text-bearing marker makes an incomplete blueprint row scannable before the
+   user reaches the explanatory lifecycle lines below it. */
+.workspace-create-modal .workspace-team-readiness-badge {
+  padding: 1px 6px;
+  border: 1px solid var(--wc-line-bright);
+  font-family: var(--wc-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+.workspace-create-modal .workspace-team-readiness-badge.is-missing {
+  border-color: color-mix(in srgb, var(--wc-alert) 68%, var(--wc-line));
+  background: color-mix(in srgb, var(--wc-alert) 9%, transparent);
+  color: #f57b72;
+}
 .workspace-create-modal .workspace-team-row-actions {
   display: flex;
   flex-wrap: wrap;

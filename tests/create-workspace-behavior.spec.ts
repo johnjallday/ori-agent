@@ -772,6 +772,8 @@ test('Team visualizes every included template agent and its lifecycle', async ({
   await expect(rows.nth(0)).toContainText('Your Agents · Ready · Will attach saved definition');
   await expect(rows.nth(2)).toContainText('New · Needs setup');
   await expect(rows.nth(2)).toContainText('Blueprint · Needs setup · Will create with workspace');
+  await expect(rows.nth(2).locator('.workspace-team-readiness-badge')).toHaveText('Missing');
+  await expect(rows.nth(0).locator('.workspace-team-readiness-badge')).toHaveCount(0);
   await expect(page.locator('#workspaceTeamRoster')).not.toContainText(
     'already saved and attached'
   );
@@ -868,6 +870,7 @@ test('proposed agent setup stays inside Create Workspace and submits one strict 
   await expect(page.locator('#workspaceTeamLayout')).toBeVisible();
   await expect(row).toContainText('Session Producer');
   await expect(row).toContainText('Customized · Will be created with workspace');
+  await expect(row.locator('.workspace-team-readiness-badge')).toHaveCount(0);
 
   let payload: Record<string, any> | undefined;
   await page.route('**/api/workspaces', async route => {

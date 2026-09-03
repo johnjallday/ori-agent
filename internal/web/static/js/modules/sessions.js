@@ -3982,6 +3982,10 @@ const sessionManager = {
     const badge = isPrimary
       ? '<span class="workspace-team-badge is-primary">Primary</span>'
       : '<span class="workspace-team-badge">Specialist</span>';
+    const readinessBadge =
+      isBlueprint && entry.setupState === 'needsSetup'
+        ? '<span class="workspace-team-readiness-badge is-missing" title="Agent setup is required">Missing</span>'
+        : '';
     const meta = (
       isAssistantRole
         ? [entry.name !== entry.role ? entry.role : '', entry.modelLabel]
@@ -4025,7 +4029,7 @@ const sessionManager = {
         <div class="workspace-team-row-main">
           ${this.renderAgentAvatar(entry.identity, 'workspace-agent-avatar')}
           <div class="workspace-team-row-copy">
-            <strong>${this.escapeHtml(entry.name)}${badge}</strong>
+            <strong>${this.escapeHtml(entry.name)}${badge}${readinessBadge}</strong>
             <span class="workspace-team-row-lifecycle">${this.escapeHtml(entry.statusLabel || entry.lifecycleLabel)}</span>
             ${isBlueprint ? `<small class="workspace-team-row-state">${this.escapeHtml(entry.sourceLabel)} · ${this.escapeHtml(entry.readinessLabel)} · ${this.escapeHtml(entry.futureActionLabel)}</small>` : ''}
             ${entry.description ? `<small>${this.escapeHtml(entry.description)}</small>` : ''}
