@@ -196,14 +196,6 @@ func (o *Orchestrator) HandleGatewayMessage(ctx context.Context, msg gateway.Mes
 	return o.gateway.Send(ctx, reply)
 }
 
-// CollaborativeTask represents a task requiring multiple agents
-type CollaborativeTask struct {
-	Goal          string            `json:"goal"`
-	RequiredRoles []types.AgentRole `json:"required_roles"`
-	Context       map[string]any    `json:"context"`
-	MaxDuration   time.Duration     `json:"max_duration"`
-}
-
 // CollaborativeResult represents the result of a collaborative task
 type CollaborativeResult struct {
 	WorkspaceID          string                      `json:"workspace_id"`
@@ -221,73 +213,9 @@ type CollaborativeResult struct {
 	PlanID string `json:"plan_id,omitempty"`
 }
 
-// ExecuteCollaborativeTask coordinates multiple agents to complete a task
-func (o *Orchestrator) ExecuteCollaborativeTask(ctx context.Context, mainAgent string, task CollaborativeTask) (*CollaborativeResult, error) {
-	startTime := time.Now()
-
-	logger.Debug("🚀 Starting collaborative task", logger.Fields{"task_id": task.Goal})
-
-	// 1. Create workspace
-	workspaceName := fmt.Sprintf("collab-%s-%d", mainAgent, time.Now().Unix())
-	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{
-		Name:        workspaceName,
-		Agents:      []string{mainAgent}, // Add main agent as first member
-		InitialData: task.Context,
-	})
-
-	if err := o.workspaceStore.Save(ws); err != nil {
-		return nil, fmt.Errorf("failed to create workspace: %w", err)
-	}
-
-	logger.Info("📦 Created workspace", logger.Fields{"workspace_name": workspaceName, "workspace_id": ws.ID})
-
-	// 2. Identify required agents based on roles
-	agents, err := o.findAgentsByRoles(task.RequiredRoles)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find agents: %w", err)
-	}
-
-	// Add agents to workspace
-	for _, agentName := range agents {
-		if err := ws.AddAgent(agentName); err != nil {
-			logger.Error("Failed to add agent", logger.Fields{"agent": agentName, "err": err})
-		}
-	}
-	if err := o.workspaceStore.Save(ws); err != nil {
-		return nil, fmt.Errorf("failed to save workspace: %w", err)
-	}
-
-	logger.Debug("👥 Selected agents", logger.Fields{"agent": agents})
-
-	// 3. Execute workflow based on required roles
-	result, err := o.executeWorkflow(ws, task, agents)
-	if err != nil {
-		ws.SetStatus(workspace.StatusFailed)
-		_ = o.workspaceStore.Save(ws) // Best effort save
-		return &CollaborativeResult{
-			WorkspaceID: ws.ID,
-			FinalOutput: "",
-			SubResults:  make(map[string]any),
-			Duration:    time.Since(startTime),
-			Status:      "failed",
-			Error:       err.Error(),
-		}, err
-	}
-
-	// 4. Mark workspace as completed
-	ws.SetStatus(workspace.StatusCompleted)
-	_ = o.workspaceStore.Save(ws) // Best effort save
-
-	result.WorkspaceID = ws.ID
-	result.Duration = time.Since(startTime)
-	result.Status = "completed"
-
-	logger.Info("Collaborative task completed in", logger.Fields{"task_id": result.Duration})
-
-	return result, nil
-}
-
-// findAgentsByRoles finds agents that match the required roles
+// findAgentsByRoles finds agents that match the required roles. It is the
+// role-resolution step of gateway routing (HandleGatewayMessage), which asks
+// for a single role at a time.
 func (o *Orchestrator) findAgentsByRoles(requiredRoles []types.AgentRole) ([]string, error) {
 	allAgents := o.agentStore.ListAgents()
 
@@ -335,134 +263,6 @@ func (o *Orchestrator) findAgentsByRoles(requiredRoles []types.AgentRole) ([]str
 	}
 
 	return agents, nil
-}
-
-// executeWorkflow executes the appropriate workflow based on required roles
-func (o *Orchestrator) executeWorkflow(ws *workspace.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
-	// Determine workflow type based on roles
-	hasResearcher := o.hasRole(task.RequiredRoles, types.RoleResearcher)
-	hasAnalyzer := o.hasRole(task.RequiredRoles, types.RoleAnalyzer)
-	hasSynthesizer := o.hasRole(task.RequiredRoles, types.RoleSynthesizer)
-
-	if hasResearcher && hasAnalyzer && hasSynthesizer {
-		// Full research pipeline
-		return o.executeResearchPipeline(ws, task, agents)
-	} else if hasResearcher {
-		// Simple research workflow
-		return o.executeResearchWorkflow(ws, task, agents)
-	} else {
-		// Generic parallel workflow
-		return o.executeParallelWorkflow(ws, task, agents)
-	}
-}
-
-// hasRole checks if a role is in the list
-func (o *Orchestrator) hasRole(roles []types.AgentRole, target types.AgentRole) bool {
-	for _, role := range roles {
-		if role == target {
-			return true
-		}
-	}
-	return false
-}
-
-// executeResearchWorkflow executes a simple research workflow
-func (o *Orchestrator) executeResearchWorkflow(ws *workspace.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
-	logger.Debug("📚 Executing research workflow", logger.Fields{})
-
-	subResults := make(map[string]any)
-
-	// Find researcher agent
-	var researcherAgent string
-	for _, agentName := range agents {
-		agent, _ := o.agentStore.GetAgent(agentName)
-		if agent != nil && agent.Role == types.RoleResearcher {
-			researcherAgent = agentName
-			break
-		}
-	}
-
-	if researcherAgent == "" {
-		return nil, fmt.Errorf("no researcher agent found")
-	}
-
-	// Use first agent as coordinator
-	agentNames := ws.AgentNames()
-	if len(agentNames) == 0 {
-		return nil, fmt.Errorf("no agents available in workspace")
-	}
-	coordinatorAgent := agentNames[0]
-
-	// Delegate research task
-	delegateTask, err := o.communicator.DelegateTask(agentcomm.DelegationRequest{
-		WorkspaceID: ws.ID,
-		From:        coordinatorAgent,
-		To:          researcherAgent,
-		Description: task.Goal,
-		Priority:    5,
-		Context:     task.Context,
-		Timeout:     task.MaxDuration,
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to delegate research task: %w", err)
-	}
-
-	logger.Debug("📋 Delegated research", logger.Fields{"agent": researcherAgent, "task_id": delegateTask.ID})
-
-	// Wait for completion (simplified - in production, this would be event-driven)
-	// For now, we'll return a status indicating the task is in progress
-	subResults["research_task_id"] = delegateTask.ID
-	subResults["researcher"] = researcherAgent
-
-	return &CollaborativeResult{
-		FinalOutput: fmt.Sprintf("Research task delegated to %s. Task ID: %s", researcherAgent, delegateTask.ID),
-		SubResults:  subResults,
-	}, nil
-}
-
-// executeParallelWorkflow executes tasks in parallel across agents
-func (o *Orchestrator) executeParallelWorkflow(ws *workspace.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
-	logger.Debug("⚡ Executing parallel workflow with agents", logger.Fields{"agent": len(agents)})
-
-	subResults := make(map[string]any)
-	taskIDs := make([]string, 0)
-
-	// Use first agent as coordinator
-	agentNames := ws.AgentNames()
-	if len(agentNames) == 0 {
-		return nil, fmt.Errorf("no agents available in workspace")
-	}
-	coordinatorAgent := agentNames[0]
-
-	// Delegate subtasks to each agent
-	for i, agentName := range agents {
-		subtaskDesc := fmt.Sprintf("%s (part %d of %d)", task.Goal, i+1, len(agents))
-
-		delegateTask, err := o.communicator.DelegateTask(agentcomm.DelegationRequest{
-			WorkspaceID: ws.ID,
-			From:        coordinatorAgent,
-			To:          agentName,
-			Description: subtaskDesc,
-			Priority:    3,
-			Context:     task.Context,
-			Timeout:     task.MaxDuration,
-		})
-
-		if err != nil {
-			logger.Error("Failed to delegate to", logger.Fields{"agentName": agentName, "err": err})
-			continue
-		}
-
-		taskIDs = append(taskIDs, delegateTask.ID)
-		subResults[agentName] = delegateTask.ID
-		logger.Debug("📋 Delegated task", logger.Fields{"agent": agentName, "task_id": delegateTask.ID})
-	}
-
-	return &CollaborativeResult{
-		FinalOutput: fmt.Sprintf("Tasks delegated to %d agents. Task IDs: %v", len(taskIDs), taskIDs),
-		SubResults:  subResults,
-	}, nil
 }
 
 // DetectOrchestrationNeed analyzes a message to determine if it requires orchestration
