@@ -861,61 +861,129 @@
   line-height: 1.4;
 }
 
-/* Staged customization editor */
-.workspace-create-modal .workspace-team-customize {
-  padding: 10px 9px 11px;
-  border-top: 1px dashed var(--wc-line-bright);
+/* Template-agent setup is a child view within Step 3, never a nested modal. */
+.workspace-create-modal .workspace-agent-setup-view {
+  display: grid;
+  gap: 14px;
+  max-width: 920px;
+  margin: 0 auto;
 }
-.workspace-create-modal .workspace-team-customize-note {
-  margin: 0 0 8px;
+.workspace-create-modal .workspace-agent-setup-back {
+  justify-self: start;
+}
+.workspace-create-modal .workspace-agent-setup-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--wc-line);
+}
+.workspace-create-modal .workspace-agent-setup-heading h3 {
+  margin: 2px 0 3px;
+  color: var(--wc-ink-heading);
+  font-size: 20px;
+}
+.workspace-create-modal .workspace-agent-setup-context {
+  margin: 0;
   color: var(--wc-ink-dim);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.45;
 }
-/* Deliberately one column at every width. A viewport-width media query is the
-   wrong instrument here: once the Team layout goes two-column the editor's own
-   container is only ~360px wide, so a "wide viewport" two-column field grid
-   clipped both the agent name and the model name. */
-.workspace-create-modal .workspace-team-customize-fields {
-  display: grid;
-  gap: 8px;
+.workspace-create-modal .workspace-agent-setup-summary {
+  padding: 11px;
+  border: 1px solid var(--wc-line);
+  background: rgba(4, 8, 12, 0.24);
 }
-.workspace-create-modal .workspace-team-customize-field {
-  display: grid;
-  gap: 3px;
-  margin-top: 8px;
-}
-.workspace-create-modal .workspace-team-customize-fields .workspace-team-customize-field {
-  margin-top: 0;
-}
-.workspace-create-modal .workspace-team-customize-field > span {
+.workspace-create-modal .workspace-agent-setup-summary h4 {
+  margin: 0 0 8px;
   color: var(--wc-ink-heading);
   font-family: var(--wc-font-mono);
   font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.9px;
+  letter-spacing: 1px;
   text-transform: uppercase;
 }
-.workspace-create-modal .workspace-team-customize-field > span em {
-  color: var(--wc-ink-dim);
-  font-style: normal;
-  font-weight: 500;
+.workspace-create-modal .workspace-agent-setup-summary dl {
+  display: grid;
+  gap: 6px;
+  margin: 0;
 }
-.workspace-create-modal .workspace-team-customize-status:empty {
-  display: none;
+.workspace-create-modal .workspace-agent-setup-summary dl > div {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.3fr) minmax(0, 1fr);
+  gap: 10px;
 }
-.workspace-create-modal .workspace-team-customize-status {
-  margin: 8px 0 0;
-  color: #f57b72;
+.workspace-create-modal .workspace-agent-setup-summary dt,
+.workspace-create-modal .workspace-agent-setup-summary dd {
+  margin: 0;
+  overflow-wrap: anywhere;
   font-size: 11px;
   line-height: 1.4;
 }
-.workspace-create-modal .workspace-team-customize-actions {
+.workspace-create-modal .workspace-agent-setup-summary dt {
+  color: var(--wc-ink-faint);
+}
+.workspace-create-modal .workspace-agent-setup-summary dd {
+  color: var(--wc-ink);
+}
+.workspace-create-modal .workspace-agent-setup-error {
+  padding: 9px 10px;
+  border: 1px solid var(--wc-alert);
+  color: var(--wc-alert);
+  font-size: 12px;
+}
+.workspace-create-modal.is-agent-setup-open .modal-footer {
+  display: none;
+}
+.workspace-create-modal .workspace-agent-setup-actions {
+  position: sticky;
+  bottom: -1px;
+  z-index: 2;
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 9px;
-  margin-top: 10px;
+  margin: 0 -2px -2px;
+  padding: 10px 2px 2px;
+  border-top: 1px solid var(--wc-line);
+  background: var(--wc-panel-2);
+}
+.workspace-create-modal .agent-create-form-core {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 12px;
+}
+.workspace-create-modal .agent-create-form-core [data-agent-create-section="systemPrompt"] {
+  grid-column: 1 / -1;
+}
+.workspace-create-modal .agent-create-form-core .form-label,
+.workspace-create-modal .agent-create-form-core .form-helper,
+.workspace-create-modal .agent-create-form-core .invalid-feedback {
+  font-family: var(--wc-font-display);
+  font-size: 11px;
+}
+.workspace-create-modal .agent-create-form-core textarea {
+  width: 100%;
+}
+.workspace-create-modal .agent-create-form-core :focus-visible,
+.workspace-create-modal .workspace-agent-setup-view :focus-visible {
+  outline: 2px solid var(--wc-faction);
+  outline-offset: 2px;
+}
+@media (max-width: 520px) {
+  .workspace-create-modal .agent-create-form-core {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .workspace-create-modal .agent-create-form-core [data-agent-create-section="systemPrompt"] {
+    grid-column: auto;
+  }
+  .workspace-create-modal .workspace-agent-setup-summary dl > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1px;
+  }
+  .workspace-create-modal .workspace-agent-setup-actions > * {
+    flex: 1 1 auto;
+  }
 }
 
 /* Authoritative create failure, shown on Review with a route back. */
@@ -941,8 +1009,18 @@
 
 /* Classified issues: severity is carried by the label text and the rule
    colour together, never by colour alone. */
-.workspace-create-modal .workspace-team-issues:empty {
+.workspace-create-modal .workspace-team-issues:empty,
+.workspace-create-modal .workspace-team-batch-actions:empty {
   display: none;
+}
+.workspace-create-modal .workspace-team-batch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 10px;
+  color: var(--wc-ink-dim);
+  font-size: 12px;
 }
 .workspace-create-modal .workspace-team-issues {
   display: grid;

@@ -42,6 +42,7 @@ type seedAgentsResult struct {
 }
 
 type templateAgentPlan struct {
+	Revision              string                        `json:"revision,omitempty"`
 	HasAgents             bool                          `json:"has_agents"`
 	TemplateID            string                        `json:"template_id,omitempty"`
 	TemplateName          string                        `json:"template_name,omitempty"`
@@ -88,9 +89,23 @@ type templateAgentPlanItem struct {
 	// template agent as workspace-only. Template agents are global reusable
 	// definitions; a workspace gets an attachment with its own role, context,
 	// and custom instructions.
-	Scope           string                        `json:"scope"`
-	Action          string                        `json:"action"`
-	EntryPoint      bool                          `json:"entry_point"`
+	Scope           string                         `json:"scope"`
+	Action          string                         `json:"action"`
+	EntryPoint      bool                           `json:"entry_point"`
+	Role            string                         `json:"role,omitempty"`
+	Type            string                         `json:"type,omitempty"`
+	Model           string                         `json:"model,omitempty"`
+	Provider        string                         `json:"provider,omitempty"`
+	ReasoningEffort string                         `json:"reasoning_effort,omitempty"`
+	SystemPrompt    string                         `json:"system_prompt,omitempty"`
+	Appearance      *types.AgentAppearance         `json:"appearance,omitempty"`
+	ModelSource     string                         `json:"model_source,omitempty"`
+	Tools           projecttemplates.ToolDefaults  `json:"tools,omitempty"`
+	Warning         string                         `json:"warning,omitempty"`
+	Recommended     *templateAgentRecommendedSetup `json:"recommended_setup,omitempty"`
+}
+
+type templateAgentRecommendedSetup struct {
 	Role            string                        `json:"role,omitempty"`
 	Type            string                        `json:"type,omitempty"`
 	Model           string                        `json:"model,omitempty"`
@@ -100,7 +115,6 @@ type templateAgentPlanItem struct {
 	Appearance      *types.AgentAppearance        `json:"appearance,omitempty"`
 	ModelSource     string                        `json:"model_source,omitempty"`
 	Tools           projecttemplates.ToolDefaults `json:"tools,omitempty"`
-	Warning         string                        `json:"warning,omitempty"`
 }
 
 type templateAgentOverride struct {
@@ -111,6 +125,26 @@ type templateAgentOverride struct {
 	Model        *string `json:"model,omitempty"`
 	Provider     *string `json:"provider,omitempty"`
 	SystemPrompt *string `json:"system_prompt,omitempty"`
+}
+
+type templateAgentOverrideValidationError struct {
+	Index int
+	Field string
+	Cause error
+}
+
+func (e *templateAgentOverrideValidationError) Error() string {
+	if e == nil || e.Cause == nil {
+		return "invalid template agent override"
+	}
+	return e.Cause.Error()
+}
+
+func (e *templateAgentOverrideValidationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
 }
 
 // blankWorkspaceEntryAgentName is the reusable entry agent seeded for the Blank
@@ -199,7 +233,7 @@ func applyTemplateAgentOverrides(tpl projecttemplates.Template, overrides []temp
 		if override.Name != nil {
 			name := strings.TrimSpace(*override.Name)
 			if err := validateTemplateAgentOverrideName(name); err != nil {
-				return tpl, err
+				return tpl, &templateAgentOverrideValidationError{Index: idx, Field: "name", Cause: err}
 			}
 			spec.Name = name
 		}
@@ -218,7 +252,7 @@ func applyTemplateAgentOverrides(tpl projecttemplates.Template, overrides []temp
 		if override.SystemPrompt != nil {
 			spec.SystemPrompt = strings.TrimSpace(*override.SystemPrompt)
 			if err := projecttemplates.ValidateAgentPrompts([]projecttemplates.AgentSpec{spec}); err != nil {
-				return tpl, err
+				return tpl, &templateAgentOverrideValidationError{Index: idx, Field: "system_prompt", Cause: err}
 			}
 		}
 		next.Agents[idx] = spec
@@ -400,22 +434,24 @@ func (h *Handler) seedTemplateAgents(ws *session.Workspace, tpl projecttemplates
 // concurrent operation happens to have created under the same name, because that
 // name was never added to OwnedNames in the first place.
 //
-// Best-effort: a delete that fails is logged rather than escalated. The create
-// has already failed and the user is being told so; turning cleanup trouble into
-// a second, different error would only obscure the real one.
-func (h *Handler) rollbackSeededAgents(seed seedAgentsResult) {
+// Best-effort: the primary create failure remains authoritative, while cleanup
+// failures are returned separately so strict callers can report both causes.
+func (h *Handler) rollbackSeededAgents(seed seedAgentsResult) []string {
 	if h == nil || h.agentStore == nil || len(seed.OwnedNames) == 0 {
-		return
+		return nil
 	}
+	var cleanupErrors []string
 	for _, name := range seed.OwnedNames {
 		if err := h.agentStore.DeleteAgent(name); err != nil {
 			logger.Warn("Failed to roll back a seeded agent after workspace creation failed",
 				logger.Fields{"agent": name, "error": err})
+			cleanupErrors = append(cleanupErrors, fmt.Sprintf("agent %q: %v", name, err))
 			continue
 		}
 		logger.Info("Rolled back agent seeded for a workspace that was not created",
 			logger.Fields{"agent": name})
 	}
+	return cleanupErrors
 }
 
 func (h *Handler) templateAgentModelDefaults(spec projecttemplates.AgentSpec) (model, provider, reasoningEffort, source string) {
@@ -499,10 +535,10 @@ func (h *Handler) buildTemplateAgentPlan(tpl projecttemplates.Template) template
 		}
 		plan.HasAgents = false
 		plan.AssistantProgram = assistantPlan
-		return plan
+		return finalizeTemplateAgentPlan(plan)
 	}
 	if !tpl.HasAgents() {
-		return plan
+		return finalizeTemplateAgentPlan(plan)
 	}
 
 	for i, spec := range tpl.Agents {
@@ -515,17 +551,41 @@ func (h *Handler) buildTemplateAgentPlan(tpl projecttemplates.Template) template
 		}
 		plan.Agents = append(plan.Agents, item)
 	}
-	return plan
+	return finalizeTemplateAgentPlan(plan)
 }
 
 func (h *Handler) buildTemplateAgentPlanItem(spec projecttemplates.AgentSpec, entryPoint bool) templateAgentPlanItem {
 	name := strings.TrimSpace(spec.Name)
+	cfg, modelSource := h.templateAgentCreateConfig(spec)
+	proposedType := strings.TrimSpace(cfg.Type)
+	if proposedType == "" {
+		if cfg.Model != "" {
+			proposedType = agent.GetTypeForModel(cfg.Model)
+		} else {
+			proposedType = agent.TypeToolCalling
+		}
+	}
+	proposedRole := strings.TrimSpace(string(cfg.Role))
+	if proposedRole == "" {
+		proposedRole = string(types.RoleGeneral)
+	}
 	item := templateAgentPlanItem{
 		Name:       name,
 		Scope:      "reusable",
 		Action:     "create",
 		EntryPoint: entryPoint,
 		Tools:      spec.Tools,
+		Recommended: &templateAgentRecommendedSetup{
+			Role:            proposedRole,
+			Type:            proposedType,
+			Model:           strings.TrimSpace(cfg.Model),
+			Provider:        strings.TrimSpace(cfg.LLMProvider),
+			ReasoningEffort: strings.TrimSpace(cfg.ReasoningEffort),
+			SystemPrompt:    strings.TrimSpace(cfg.SystemPrompt),
+			Appearance:      cfg.Appearance.Clone(),
+			ModelSource:     modelSource,
+			Tools:           spec.Tools,
+		},
 	}
 
 	if h != nil && h.agentStore != nil {
@@ -545,19 +605,8 @@ func (h *Handler) buildTemplateAgentPlanItem(spec projecttemplates.AgentSpec, en
 		}
 	}
 
-	cfg, modelSource := h.templateAgentCreateConfig(spec)
-	item.Type = strings.TrimSpace(cfg.Type)
-	if item.Type == "" {
-		if cfg.Model != "" {
-			item.Type = agent.GetTypeForModel(cfg.Model)
-		} else {
-			item.Type = agent.TypeToolCalling
-		}
-	}
-	item.Role = strings.TrimSpace(string(cfg.Role))
-	if item.Role == "" {
-		item.Role = string(types.RoleGeneral)
-	}
+	item.Type = proposedType
+	item.Role = proposedRole
 	item.Model = strings.TrimSpace(cfg.Model)
 	item.Provider = strings.TrimSpace(cfg.LLMProvider)
 	item.ReasoningEffort = strings.TrimSpace(cfg.ReasoningEffort)

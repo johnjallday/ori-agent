@@ -20,6 +20,7 @@ const Draft = loadDraftModule();
 function planResponse(agents, extra = {}) {
   return {
     has_agents: agents.length > 0,
+    revision: 'test-plan-revision',
     agents,
     warnings: [],
     ...extra
@@ -72,9 +73,9 @@ function assistantProgramPlan() {
   };
 }
 
-function readyDraft(agents, blueprintKey = 'template:downloads-janitor') {
+function readyDraft(agents, blueprintKey = 'template:downloads-janitor', extra = {}) {
   const draft = Draft.createDraft();
-  Draft.setPlanReady(draft, blueprintKey, planResponse(agents));
+  Draft.setPlanReady(draft, blueprintKey, planResponse(agents, extra));
   return draft;
 }
 
@@ -148,6 +149,8 @@ test('assistant programs become a named shared roster in Team instead of an empt
     ]
   );
   assert.ok(!view.issues.some(issue => issue.id === 'empty-team'));
+  assert.equal(view.batchSetup.canAcceptAll, false);
+  assert.equal(view.payload.template_agent_review, undefined);
   assert.deepEqual(view.payload.assistant_hire, { name: 'Producer', provider: '', model: '' });
 });
 
@@ -249,6 +252,288 @@ test('the declared primary sorts first and every other member is a specialist (F
   );
 });
 
+test('new blueprint agents require explicit setup acknowledgement before Team can advance', () => {
+  const draft = readyDraft([
+    planAgent('Brand New', { entry_point: true, action: 'create' }),
+    planAgent('Saved One', { action: 'reuse' })
+  ]);
+
+  let view = Draft.derive(draft);
+  const proposed = view.roster.find(entry => entry.originalName === 'Brand New');
+  const reused = view.roster.find(entry => entry.originalName === 'Saved One');
+
+  assert.equal(proposed.setupState, 'needsSetup');
+  assert.equal(proposed.statusLabel, 'New · Needs setup');
+  assert.equal(proposed.actionLabel, 'Set up agent');
+  assert.equal(reused.setupState, 'ready', 'exact-name reuse needs no acknowledgement');
+  assert.equal(view.canContinueFromTeam, false);
+  assert.equal(view.blockingIssues.length, 1, 'pending rows are aggregated into one blocker');
+  assert.equal(view.blockingIssues[0].id, 'template-agent-setup-required');
+  assert.equal(view.blockingIssues[0].templateAgentIndex, 0);
+
+  Draft.acceptRecommended(draft, 0);
+  view = Draft.derive(draft);
+  assert.equal(view.roster[0].setupState, 'ready');
+  assert.equal(view.roster[0].statusLabel, 'Ready · Will be created with workspace');
+  assert.equal(view.roster[0].actionLabel, 'Edit setup');
+  assert.equal(view.canContinueFromTeam, true);
+  assert.equal(view.blockingIssues.length, 0);
+});
+
+test('saving customized setup acknowledges the proposed agent and stages only changed fields', () => {
+  const draft = readyDraft([
+    planAgent('Brand New', {
+      entry_point: true,
+      action: 'create',
+      type: 'general',
+      model: 'gpt-5',
+      provider: 'openai',
+      system_prompt: 'Recommended prompt'
+    })
+  ]);
+
+  Draft.saveSetup(draft, 0, {
+    name: 'Brand New',
+    type: 'general',
+    model: 'gpt-5.1',
+    provider: 'openai',
+    systemPrompt: 'Custom prompt'
+  });
+
+  const view = Draft.derive(draft);
+  assert.equal(view.canContinueFromTeam, true);
+  assert.equal(view.roster[0].setupState, 'ready');
+  assert.equal(view.roster[0].statusLabel, 'Customized · Will be created with workspace');
+  assert.equal(view.roster[0].actionLabel, 'Edit setup');
+  assert.deepEqual(view.payload.template_agent_overrides, [
+    { index: 0, model: 'gpt-5.1', system_prompt: 'Custom prompt' }
+  ]);
+});
+
+test('an acknowledged ordinary blueprint serializes one strict expectation per roster index', () => {
+  const draft = Draft.createDraft();
+  Draft.setPlanReady(
+    draft,
+    'template:reviewed',
+    planResponse(
+      [
+        planAgent('New Lead', { action: 'create', entry_point: true }),
+        planAgent('Saved Scout', { action: 'reuse' })
+      ],
+      { revision: 'revision-123', template_id: 'reviewed' }
+    )
+  );
+  Draft.acceptRecommended(draft, 0);
+
+  assert.deepEqual(Draft.toCreatePayload(draft).template_agent_review, {
+    version: 1,
+    plan_revision: 'revision-123',
+    expectations: [
+      { index: 0, name: 'New Lead', action: 'create' },
+      { index: 1, name: 'Saved Scout', action: 'reuse' }
+    ]
+  });
+
+  Draft.stageOverride(draft, 1, { name: 'Saved Scout copy' });
+  assert.deepEqual(Draft.toCreatePayload(draft).template_agent_review.expectations[1], {
+    index: 1,
+    name: 'Saved Scout copy',
+    action: 'create'
+  });
+});
+
+test('strict review is omitted for pending, excluded, empty, and assistant-program teams', () => {
+  const pending = Draft.createDraft();
+  Draft.setPlanReady(
+    pending,
+    'template:pending',
+    planResponse([planAgent('New Lead')], { revision: 'pending-revision' })
+  );
+  assert.equal(Draft.toCreatePayload(pending).template_agent_review, undefined);
+  Draft.acceptRecommended(pending, 0);
+  Draft.setIncludeBlueprintTeam(pending, false);
+  assert.equal(Draft.toCreatePayload(pending).template_agent_review, undefined);
+
+  const empty = Draft.createDraft();
+  Draft.setPlanReady(empty, 'template:empty', planResponse([], { revision: 'empty-revision' }));
+  assert.equal(Draft.toCreatePayload(empty).template_agent_review, undefined);
+
+  const assistant = Draft.createDraft();
+  Draft.setPlanReady(
+    assistant,
+    'template:assistant',
+    planResponse([], {
+      revision: 'assistant-revision',
+      assistant_program: assistantProgramPlan()
+    })
+  );
+  assert.equal(Draft.toCreatePayload(assistant).template_agent_review, undefined);
+
+  const missingRevision = readyDraft(
+    [planAgent('No Revision', { entry_point: true })],
+    'template:no-revision',
+    { revision: '' }
+  );
+  Draft.acceptRecommended(missingRevision, 0);
+  const missingRevisionView = Draft.derive(missingRevision);
+  assert.equal(missingRevisionView.canContinueFromTeam, false);
+  assert.equal(missingRevisionView.blockingIssues[0].id, 'plan-revision-missing');
+  assert.equal(missingRevisionView.payload.template_agent_review, undefined);
+});
+
+test('recommended batch setup is idempotent and never overwrites individual work', () => {
+  const draft = readyDraft([
+    planAgent('One', { entry_point: true }),
+    planAgent('Saved', { action: 'reuse' }),
+    planAgent('Two'),
+    planAgent('Three')
+  ]);
+  Draft.saveSetup(draft, 2, { name: 'Two Custom' });
+
+  assert.equal(Draft.derive(draft).batchSetup.canAcceptAll, true);
+  assert.equal(Draft.acceptAllRecommended(draft), 2, 'only pending create rows are accepted');
+  assert.equal(Draft.acceptAllRecommended(draft), 0, 'a repeated batch click is a no-op');
+  let view = Draft.derive(draft);
+  assert.equal(view.canContinueFromTeam, true);
+  assert.equal(view.batchSetup.acceptedCount, 2);
+  assert.equal(
+    view.roster.find(row => row.originalName === 'Saved').statusLabel,
+    'Saved · Ready to attach'
+  );
+  assert.equal(view.roster.find(row => row.originalName === 'Two').name, 'Two Custom');
+
+  assert.equal(Draft.undoBatchRecommended(draft), 2);
+  view = Draft.derive(draft);
+  assert.equal(view.canContinueFromTeam, false);
+  assert.equal(view.batchSetup.pendingCount, 2);
+  assert.equal(view.roster.find(row => row.originalName === 'Two').name, 'Two Custom');
+  assert.equal(view.roster.find(row => row.originalName === 'Two').setupAcknowledged, true);
+  assert.equal(Draft.undoBatchRecommended(draft), 0, 'undo is idempotent too');
+});
+
+test('setup scales from one agent to a long multi-agent recommendation batch', () => {
+  const one = readyDraft([planAgent('A'.repeat(100), { entry_point: true })]);
+  assert.equal(Draft.derive(one).batchSetup.canAcceptAll, false);
+  assert.equal(Draft.acceptAllRecommended(one), 1);
+  assert.equal(Draft.toCreatePayload(one).template_agent_review.expectations.length, 1);
+
+  const manyAgents = Array.from({ length: 10 }, (_, index) =>
+    planAgent(`Specialist ${String(index + 1).padStart(2, '0')}`, {
+      entry_point: index === 0,
+      model: '',
+      provider: '',
+      system_prompt: ''
+    })
+  );
+  const many = readyDraft(manyAgents);
+  assert.equal(Draft.acceptAllRecommended(many), 10);
+  const payload = Draft.toCreatePayload(many);
+  assert.equal(payload.template_agent_review.expectations.length, 10);
+  assert.deepEqual(
+    payload.template_agent_review.expectations.map(expectation => expectation.index),
+    Array.from({ length: 10 }, (_, index) => index)
+  );
+});
+
+test('same-blueprint refresh preserves only byte-equivalent setup state', () => {
+  const draft = readyDraft([
+    planAgent('Stable', { entry_point: true, system_prompt: 'same' }),
+    planAgent('Changing', { system_prompt: 'before' }),
+    planAgent('Removed')
+  ]);
+  Draft.acceptRecommended(draft, 0);
+  Draft.saveSetup(draft, 1, { name: 'Changing Custom' });
+  Draft.acceptRecommended(draft, 2);
+
+  Draft.setPlanLoading(draft, 'template:downloads-janitor');
+  Draft.setPlanReady(
+    draft,
+    'template:downloads-janitor',
+    planResponse([
+      planAgent('Stable', { entry_point: true, system_prompt: 'same' }),
+      planAgent('Changing', { system_prompt: 'after' })
+    ])
+  );
+
+  const view = Draft.derive(draft);
+  assert.equal(view.roster.find(row => row.originalName === 'Stable').setupAcknowledged, true);
+  assert.equal(view.roster.find(row => row.originalName === 'Changing').setupAcknowledged, false);
+  assert.equal(view.roster.find(row => row.originalName === 'Changing').name, 'Changing');
+  assert.equal(draft.overrides.size, 0, 'changed and removed entry overrides are discarded');
+  assert.equal(draft.acknowledgements.size, 1, 'no acknowledgement transfers by array position');
+});
+
+test('stale-plan recovery blocks payloads until changed entries are reviewed and confirmed', () => {
+  const draft = readyDraft(
+    [planAgent('Lead', { entry_point: true, model: 'before' })],
+    'template:downloads-janitor',
+    { revision: 'revision-before' }
+  );
+  Draft.acceptRecommended(draft, 0);
+
+  Draft.setPlanReady(
+    draft,
+    'template:downloads-janitor',
+    planResponse([planAgent('Lead', { entry_point: true, model: 'after' })], {
+      revision: 'revision-after'
+    })
+  );
+  Draft.markPlanConflict(draft);
+  let view = Draft.derive(draft);
+  assert.equal(view.canContinueFromTeam, false);
+  assert.equal(view.blockingIssues[0].id, 'template-agent-plan-changed');
+  assert.equal(view.roster[0].statusLabel, 'Changed · Review setup');
+  assert.equal(view.roster[0].actionLabel, 'Review setup');
+  assert.equal(view.payload.template_agent_review, undefined);
+  assert.equal(Draft.confirmFreshPlan(draft), false, 'changed create entry still needs setup');
+
+  Draft.acceptRecommended(draft, 0);
+  assert.equal(Draft.confirmFreshPlan(draft), true);
+  view = Draft.derive(draft);
+  assert.equal(view.canContinueFromTeam, true);
+  assert.equal(view.payload.template_agent_review.plan_revision, 'revision-after');
+});
+
+test('a byte-equivalent stale plan keeps setup acknowledgement but still requires confirmation', () => {
+  const agent = planAgent('Stable', { entry_point: true, model: 'same' });
+  const draft = readyDraft([agent], 'template:downloads-janitor', {
+    revision: 'revision-before'
+  });
+  Draft.acceptRecommended(draft, 0);
+  Draft.setPlanReady(
+    draft,
+    'template:downloads-janitor',
+    planResponse([agent], {
+      revision: 'revision-after'
+    })
+  );
+  Draft.markPlanConflict(draft);
+
+  assert.equal(Draft.derive(draft).roster[0].setupAcknowledged, true);
+  assert.equal(Draft.confirmFreshPlan(draft), true);
+  assert.equal(Draft.toCreatePayload(draft).template_agent_review.plan_revision, 'revision-after');
+});
+
+test('fatal strict creation failure belongs to one row and is retryable without losing setup', () => {
+  const draft = readyDraft([planAgent('Lead', { entry_point: true })]);
+  Draft.saveSetup(draft, 0, { name: 'Reviewed Lead', systemPrompt: 'keep this' });
+  Draft.markCreationFailure(draft, 0, 'Reviewed Lead', 'Reviewed Lead could not be created.');
+
+  let view = Draft.derive(draft);
+  assert.equal(view.canContinueFromTeam, false);
+  assert.equal(view.roster[0].statusLabel, 'Missing · Creation failed');
+  assert.equal(view.roster[0].actionLabel, 'Retry');
+  assert.equal(view.blockingIssues[0].id, 'template-agent-creation-failed');
+  assert.equal(view.roster[0].name, 'Reviewed Lead');
+  assert.equal(view.roster[0].systemPrompt, 'keep this');
+
+  assert.equal(Draft.clearCreationFailure(draft, 0), true);
+  view = Draft.derive(draft);
+  assert.equal(view.canContinueFromTeam, true);
+  assert.equal(view.roster[0].statusLabel, 'Customized · Will be created with workspace');
+  assert.equal(view.payload.template_agent_review.expectations[0].name, 'Reviewed Lead');
+});
+
 test('lifecycle copy describes future behavior, never past attachment (FR37-FR39)', () => {
   const draft = readyDraft([
     planAgent('Saved One', { action: 'reuse', entry_point: true }),
@@ -266,6 +551,73 @@ test('lifecycle copy describes future behavior, never past attachment (FR37-FR39
       `lifecycle label must not claim completed attachment: ${entry.lifecycleLabel}`
     );
   });
+});
+
+test('exact reuse separates saved source, readiness, and future action', () => {
+  const draft = readyDraft([
+    planAgent('Shared Scout', {
+      action: 'reuse',
+      entry_point: true,
+      model: 'saved-model',
+      provider: 'saved-provider',
+      system_prompt: 'saved prompt'
+    })
+  ]);
+  const row = Draft.derive(draft).roster[0];
+  assert.equal(row.statusLabel, 'Saved · Ready to attach');
+  assert.equal(row.sourceLabel, 'Your Agents');
+  assert.equal(row.readinessLabel, 'Ready');
+  assert.equal(row.futureActionLabel, 'Will attach saved definition');
+  assert.equal(row.actionLabel, 'Customize as new agent');
+  assert.equal(row.model, 'saved-model');
+  assert.equal(row.systemPrompt, 'saved prompt');
+});
+
+test('a renamed reuse stages the recommended blueprint definition without mutating saved values', () => {
+  const appearance = { mode: 'character', character: { catalog_id: 'sable' } };
+  const draft = readyDraft([
+    planAgent('Shared Scout', {
+      action: 'reuse',
+      entry_point: true,
+      role: 'saved-role',
+      type: 'general',
+      model: 'saved-model',
+      provider: 'saved-provider',
+      system_prompt: 'saved prompt',
+      recommended_setup: {
+        role: 'researcher',
+        type: 'research',
+        model: 'blueprint-model',
+        provider: 'blueprint-provider',
+        system_prompt: 'blueprint prompt',
+        appearance,
+        tools: { skills: ['research-kit'] }
+      }
+    })
+  ]);
+
+  Draft.saveSetup(draft, 0, {
+    name: 'Shared Scout copy',
+    type: 'research',
+    model: 'blueprint-model',
+    provider: 'blueprint-provider',
+    systemPrompt: 'blueprint prompt'
+  });
+  let row = Draft.derive(draft).roster[0];
+  assert.equal(row.lifecycle, 'customized-copy');
+  assert.equal(row.statusLabel, 'Customized copy · Will be created with workspace');
+  assert.equal(row.role, 'researcher');
+  assert.equal(row.type, 'research');
+  assert.deepEqual(row.tools, { skills: ['research-kit'] });
+  assert.deepEqual(row.appearance, appearance);
+  assert.equal(row.identity.characterId, 'sable');
+
+  Draft.resetToRecommended(draft, 0);
+  row = Draft.derive(draft).roster[0];
+  assert.equal(row.lifecycle, 'reuse');
+  assert.equal(row.statusLabel, 'Saved · Ready to attach');
+  assert.equal(row.setupAcknowledged, true);
+  assert.equal(Draft.toCreatePayload(draft).template_agent_overrides, undefined);
 });
 
 test('renaming a reused agent stages a customized copy and leaves the original untouched (FR40-FR43)', () => {

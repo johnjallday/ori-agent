@@ -1,0 +1,62 @@
+{{define "agent-create-form.tmpl"}}
+<!--
+  Shared Create Agent form core. The inert template intentionally contains no
+  IDs: AgentCreateForm assigns every control, label, help, and error ID from the
+  mounting host's prefix. This allows the standalone modal and the Create
+  Workspace child view to exist in the same document without duplicate IDs.
+-->
+<template id="agentCreateFormTemplate">
+  <div class="agent-create-form-core" data-agent-create-root>
+    <div class="mb-3" data-agent-create-section="name">
+      <label class="form-label required" style="color: var(--text-primary);" data-agent-create-for="Name">Agent Name</label>
+      <input type="text" class="modern-input w-100" placeholder="Enter agent name…" required maxlength="100"
+             autocomplete="off" spellcheck="false" data-agent-create-id="Name" data-agent-create-field="name"
+             data-agent-create-describedby="NameHelp NameError">
+      <small class="form-helper" data-agent-create-id="NameHelp">Use 1–100 characters: letters, numbers, spaces, underscores, and hyphens.</small>
+      <div class="invalid-feedback" data-agent-create-id="NameError" data-agent-create-error="name" role="alert"></div>
+    </div>
+
+    <div class="mb-3" data-agent-create-section="type">
+      <label class="form-label" style="color: var(--text-primary);" data-agent-create-for="Type">Agent Type</label>
+      <select class="modern-input w-100" data-agent-create-id="Type" data-agent-create-field="type">
+        <option value="tool-calling">Tool Calling (Cheapest - Optimized for tool use)</option>
+        <option value="general">General Purpose (Mid-tier - Balanced capability)</option>
+        <option value="orchestration">Orchestration (Advanced - Multi-agent coordination)</option>
+        <option value="research">Research (Expensive - Complex thinking)</option>
+      </select>
+    </div>
+
+    <div class="mb-3" data-agent-create-section="model">
+      <label class="form-label" style="color: var(--text-primary);" data-agent-create-for="Model">Model</label>
+      <select class="modern-input w-100" data-agent-create-id="Model" data-agent-create-field="model"
+              data-agent-create-describedby="ModelRecommendation">
+        <option value="">Loading models…</option>
+      </select>
+      <small class="form-helper d-none" data-agent-create-id="ModelRecommendation"></small>
+    </div>
+
+    <div class="mb-3 d-none" data-agent-create-id="ReasoningField" data-agent-create-section="reasoningEffort">
+      <label class="form-label" style="color: var(--text-primary);" data-agent-create-for="Reasoning">Reasoning Level</label>
+      <select class="modern-input w-100" data-agent-create-id="Reasoning" data-agent-create-field="reasoningEffort"
+              data-agent-create-describedby="ReasoningHelp">
+        <option value="medium">Medium (Recommended)</option>
+        <option value="high">High</option>
+        <option value="low">Low</option>
+        <option value="xhigh">Extra High</option>
+      </select>
+      <small class="form-helper" data-agent-create-id="ReasoningHelp">Codex only. Higher levels improve difficult reasoning at the cost of speed.</small>
+    </div>
+
+    <div class="mb-3" data-agent-create-section="systemPrompt">
+      <label class="form-label" style="color: var(--text-primary);" data-agent-create-for="SystemPrompt">System Prompt</label>
+      <textarea class="form-control" rows="4" maxlength="4000"
+                style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;"
+                placeholder="Describe the agent's behavior, personality, and instructions."
+                data-char-counter="true" data-agent-create-id="SystemPrompt" data-agent-create-field="systemPrompt"
+                data-agent-create-describedby="SystemPromptHelp SystemPromptError"></textarea>
+      <small class="form-helper" data-agent-create-id="SystemPromptHelp">Define the agent's behavior, personality, and instructions. Max 4000 characters.</small>
+      <div class="invalid-feedback" data-agent-create-id="SystemPromptError" data-agent-create-error="systemPrompt" role="alert"></div>
+    </div>
+  </div>
+</template>
+{{end}}

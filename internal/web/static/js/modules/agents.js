@@ -11,6 +11,28 @@ let visibleAgentCount = 3;
 let availableProviders = []; // Cache for available providers and models
 let systemModelPreferencePromise = null;
 let cachedSystemModelPreference = null;
+let standaloneAgentCreateForm = null;
+
+function ensureStandaloneAgentCreateForm() {
+  const host = document.getElementById('agentCreateFormHost');
+  if (!host || !window.AgentCreateForm) return null;
+  if (!standaloneAgentCreateForm || standaloneAgentCreateForm.host !== host) {
+    standaloneAgentCreateForm = window.AgentCreateForm.mount(host, {
+      idPrefix: 'agent',
+      profile: window.AgentCreateForm.PROFILE_STANDALONE,
+      providers: availableProviders,
+      values: {
+        name: '',
+        type: 'tool-calling',
+        model: '',
+        provider: '',
+        reasoningEffort: 'medium',
+        systemPrompt: ''
+      }
+    });
+  }
+  return standaloneAgentCreateForm;
+}
 // The protected system assistant. One identity: the guide and the working
 // assistant merged under "Ask Ori" (Issue #350). This must match the canonical
 // name in internal/systemassistant — the backend migrates existing records to
@@ -182,6 +204,17 @@ async function loadAvailableProviders() {
 function populateModelSelect(modelSelect, selectedType = 'tool-calling') {
   if (!modelSelect || availableProviders.length === 0) return;
 
+  const sharedForm = ensureStandaloneAgentCreateForm();
+  if (sharedForm && sharedForm.get('model') === modelSelect) {
+    const selectedOption = modelSelect.selectedOptions?.[0];
+    sharedForm.setProviders(availableProviders, {
+      model: modelSelect.value,
+      provider: selectedOption?.getAttribute('data-provider') || ''
+    });
+    sharedForm.filterModels(selectedType);
+    return;
+  }
+
   // For orchestration agents, the user's configured system model is the right
   // default even when it wasn't categorized as "orchestration" (e.g. a local
   // Ollama model that defaults to tool-calling). Surface it in the dropdown so
@@ -261,30 +294,19 @@ function initializeAgentFormValidation() {
     FormValidation.initCharCounter(autoConfigDescription, { maxLength: 1000 });
   }
 
-  // Add real-time validation to agent name
-  const agentNameInput = document.getElementById('agentName');
-  if (agentNameInput) {
-    FormValidation.initInputValidation(agentNameInput, {
-      required: true,
-      requiredMessage: 'Agent name is required',
-      minLength: 2,
-      minLengthMessage: 'Name must be at least 2 characters',
-      maxLength: 50,
-      maxLengthMessage: 'Name cannot exceed 50 characters',
-      pattern: '^[a-zA-Z0-9][a-zA-Z0-9-_]*$',
-      patternMessage:
-        'Use letters, numbers, hyphens, and underscores. Must start with a letter or number.'
-    });
-  }
+  // Name validation is owned by AgentCreateForm so standalone creation and
+  // template-agent setup cannot drift to different character or length rules.
 }
 
 // Call initialization when DOM is ready
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
+    ensureStandaloneAgentCreateForm();
     initializeModels();
     initializeAgentFormValidation();
   });
 } else {
+  ensureStandaloneAgentCreateForm();
   initializeModels();
   initializeAgentFormValidation();
 }
@@ -1308,8 +1330,8 @@ function describeAgentCreationFollowUp(summary) {
 
 // Create new agent
 async function createNewAgent() {
+  const sharedForm = ensureStandaloneAgentCreateForm();
   const agentNameInput = document.getElementById('agentName');
-  const agentTypeInput = document.getElementById('agentType');
   const agentSystemPromptInput = document.getElementById('agentSystemPrompt');
   const agentModelInput = document.getElementById('agentModel');
   const agentReasoningInput = document.getElementById('agentReasoning');
@@ -1317,16 +1339,19 @@ async function createNewAgent() {
   const agentAllowWebSearchInput = document.getElementById('agentAllowWebSearch');
   const createBtn = document.getElementById('createAgentBtn');
 
-  if (!agentNameInput) return;
+  if (!sharedForm || !agentNameInput || !createBtn) return;
 
-  const agentName = agentNameInput.value.trim();
-  if (!agentName) {
+  const extracted = sharedForm.extract();
+  if (!extracted.valid) {
+    const firstField = Object.keys(extracted.errors)[0] || 'name';
     if (window.Toast) {
-      Toast.warning('Please enter an agent name', { title: 'Missing Name' });
+      Toast.warning(extracted.errors[firstField], { title: 'Check Agent Setup' });
     }
-    agentNameInput.focus();
+    sharedForm.focus(firstField);
     return;
   }
+  const formValues = extracted.values;
+  const agentName = formValues.name;
 
   // Set loading state
   const originalText = createBtn.textContent;
@@ -1341,27 +1366,25 @@ async function createNewAgent() {
       : true;
 
     // Add agent type if provided
-    if (agentTypeInput && agentTypeInput.value) {
-      requestBody.type = agentTypeInput.value;
-      const inferredRole = deriveAgentRoleForType(agentTypeInput.value);
+    if (formValues.type) {
+      requestBody.type = formValues.type;
+      const inferredRole = deriveAgentRoleForType(formValues.type);
       if (inferredRole) {
         requestBody.role = inferredRole;
       }
     }
 
     // Add model if provided
-    if (agentModelInput && agentModelInput.value) {
-      requestBody.model = agentModelInput.value;
-      const selectedModelOption = agentModelInput.selectedOptions?.[0];
-      const selectedProvider = selectedModelOption?.getAttribute('data-provider');
-      if (selectedProvider) {
-        requestBody.llm_provider = selectedProvider;
+    if (formValues.model) {
+      requestBody.model = formValues.model;
+      if (formValues.provider) {
+        requestBody.llm_provider = formValues.provider;
       }
       if (
-        supportsCodexReasoning(selectedProvider, agentModelInput.value) &&
-        agentReasoningInput?.value
+        supportsCodexReasoning(formValues.provider, formValues.model) &&
+        formValues.reasoningEffort
       ) {
-        requestBody.reasoning_effort = agentReasoningInput.value;
+        requestBody.reasoning_effort = formValues.reasoningEffort;
       }
     }
 
@@ -1371,8 +1394,8 @@ async function createNewAgent() {
     }
 
     // Add system prompt if provided
-    if (agentSystemPromptInput && agentSystemPromptInput.value.trim()) {
-      requestBody.system_prompt = agentSystemPromptInput.value.trim();
+    if (formValues.systemPrompt) {
+      requestBody.system_prompt = formValues.systemPrompt;
     }
 
     await API.post('/api/agents', requestBody);
@@ -2086,6 +2109,7 @@ async function refreshAgentList() {
 
 // Setup agent management event listeners
 function setupAgentManagement() {
+  ensureStandaloneAgentCreateForm();
   // Agent management buttons
   const addAgentBtn = document.getElementById('addAgentBtn');
   if (addAgentBtn) {

@@ -80,6 +80,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/components/search-palette.tmpl",
 		"templates/components/chat-area.tmpl",
 		"templates/components/task-modal.tmpl",
+		"templates/components/agent-create-form.tmpl",
 		"templates/components/modals.tmpl",
 		"templates/components/personal-hq-modals.tmpl",
 		"templates/components/navbar.tmpl",

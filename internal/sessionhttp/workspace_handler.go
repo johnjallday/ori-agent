@@ -231,6 +231,7 @@ type createWorkspaceRequest struct {
 	Tags                   []string                   `json:"tags,omitempty"`          // Optional initial tags; merged with template tags
 	CreateTemplateAgents   *bool                      `json:"create_template_agents,omitempty"`
 	TemplateAgentOverrides []templateAgentOverride    `json:"template_agent_overrides,omitempty"`
+	TemplateAgentReview    *templateAgentReview       `json:"template_agent_review,omitempty"`
 	Blank                  bool                       `json:"blank,omitempty"` // The Blank blueprint: seed the synthetic single-agent roster (no template, no project)
 }
 
@@ -335,13 +336,48 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	rawResolvedTemplate := resolvedTemplate
 	if templateResolved && createTemplateAgentsEnabled(req) && len(req.TemplateAgentOverrides) > 0 {
 		var err error
 		resolvedTemplate, err = applyTemplateAgentOverrides(resolvedTemplate, req.TemplateAgentOverrides)
 		if err != nil {
-			_ = orihttp.RespondBadRequest(w, err.Error())
+			if !respondTemplateAgentOverrideValidationError(w, err) {
+				_ = orihttp.RespondBadRequest(w, err.Error())
+			}
 			return
 		}
+	}
+
+	var strictTemplate *projecttemplates.Template
+	if req.TemplateAgentReview != nil {
+		if !createTemplateAgentsEnabled(req) {
+			_ = orihttp.RespondBadRequest(w, "template_agent_review cannot be used when the blueprint team is excluded")
+			return
+		}
+		var rawReviewTemplate, effectiveReviewTemplate projecttemplates.Template
+		switch {
+		case templateResolved && !rawResolvedTemplate.HasAssistantProgram():
+			rawReviewTemplate = rawResolvedTemplate
+			effectiveReviewTemplate = resolvedTemplate
+		case req.Blank && kind != session.WorkspaceKindGroup:
+			rawReviewTemplate = blankWorkspaceTemplate()
+			var applyErr error
+			effectiveReviewTemplate, applyErr = applyTemplateAgentOverrides(rawReviewTemplate, req.TemplateAgentOverrides)
+			if applyErr != nil {
+				if !respondTemplateAgentOverrideValidationError(w, applyErr) {
+					_ = orihttp.RespondBadRequest(w, applyErr.Error())
+				}
+				return
+			}
+		default:
+			_ = orihttp.RespondBadRequest(w, "template_agent_review requires an ordinary or Blank blueprint roster")
+			return
+		}
+		if err := h.validateTemplateAgentReview(req.TemplateAgentReview, rawReviewTemplate, effectiveReviewTemplate); err != nil {
+			respondTemplateAgentReviewError(w, err)
+			return
+		}
+		strictTemplate = &effectiveReviewTemplate
 	}
 
 	// Blueprint readiness gate. The catalog the user chose from was drawn at
@@ -387,7 +423,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	ws := buildCreateWorkspace(req, kind, requestedTags, resolvedTemplate, templateResolved)
 
-	seed, ok := h.selectCreateWorkspaceEntryAgent(w, ws, req, kind, resolvedTemplate, templateResolved)
+	seed, ok := h.selectCreateWorkspaceEntryAgent(w, ws, req, kind, resolvedTemplate, templateResolved, strictTemplate)
 	if !ok {
 		return
 	}
@@ -568,9 +604,26 @@ func buildCreateWorkspace(req createWorkspaceRequest, kind session.WorkspaceKind
 // explicit primary. This keeps creation atomic and never requires best-effort
 // post-create attachment requests.
 // Returns ok=false when an error response has already been written.
-func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *session.Workspace, req createWorkspaceRequest, kind session.WorkspaceKind, tmpl projecttemplates.Template, templateResolved bool) (seedAgentsResult, bool) {
+func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *session.Workspace, req createWorkspaceRequest, kind session.WorkspaceKind, tmpl projecttemplates.Template, templateResolved bool, strictTemplate *projecttemplates.Template) (seedAgentsResult, bool) {
 	var seed seedAgentsResult
 	usesExistingAgentRoster := req.ExistingAgentNames != nil
+
+	if strictTemplate != nil && req.TemplateAgentReview != nil {
+		var err error
+		seed, err = h.seedTemplateAgentsStrict(ws, *strictTemplate, tmpl, *req.TemplateAgentReview)
+		if err != nil {
+			h.respondStrictTemplateAgentSeedError(w, seed, err)
+			return seed, false
+		}
+		for _, name := range req.ExistingAgentNames {
+			attachWorkspaceSpecialist(ws, name)
+		}
+		if req.EntryAgentName != "" {
+			setWorkspaceEntryAgent(ws, req.EntryAgentName)
+			seed.EntrySet = true
+		}
+		return seed, true
+	}
 
 	if usesExistingAgentRoster {
 		switch {

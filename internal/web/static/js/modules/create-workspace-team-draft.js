@@ -63,6 +63,21 @@
     return text(name).toLocaleLowerCase();
   }
 
+  function normalizeRecommendedSetup(setup) {
+    if (!setup || typeof setup !== 'object') return null;
+    return {
+      role: text(setup.role),
+      type: text(setup.type),
+      model: text(setup.model),
+      provider: text(setup.provider),
+      reasoningEffort: text(setup.reasoning_effort),
+      systemPrompt: text(setup.system_prompt),
+      appearance: setup.appearance || null,
+      modelSource: text(setup.model_source),
+      tools: setup.tools || null
+    };
+  }
+
   function normalizePlanAgent(agent) {
     return {
       name: text(agent && agent.name),
@@ -72,11 +87,32 @@
       type: text(agent && agent.type),
       model: text(agent && agent.model),
       provider: text(agent && agent.provider),
+      reasoningEffort: text(agent && agent.reasoning_effort),
       systemPrompt: text(agent && agent.system_prompt),
+      appearance: (agent && agent.appearance) || null,
       modelSource: text(agent && agent.model_source),
       tools: (agent && agent.tools) || null,
-      warning: text(agent && agent.warning)
+      warning: text(agent && agent.warning),
+      recommended: normalizeRecommendedSetup(agent && agent.recommended_setup)
     };
+  }
+
+  function stableValue(value) {
+    if (Array.isArray(value)) return value.map(stableValue);
+    if (!value || typeof value !== 'object') return value;
+    return Object.keys(value)
+      .sort()
+      .reduce((result, key) => {
+        result[key] = stableValue(value[key]);
+        return result;
+      }, {});
+  }
+
+  // Acknowledgement belongs to the definition the person actually reviewed,
+  // not merely to an array slot. This lets a same-blueprint refresh retain a
+  // review only while every visible part of that entry is unchanged.
+  function planAgentIdentity(agent) {
+    return JSON.stringify(stableValue(agent || null));
   }
 
   function normalizeAssistantProgram(program) {
@@ -122,6 +158,7 @@
     const agents = rawAgents.map(normalizePlanAgent).filter(agent => agent.name !== '');
     return {
       hasAgents: Boolean(data && data.has_agents) && agents.length > 0,
+      revision: text(data && data.revision),
       templateId: text(data && data.template_id),
       templateName: text(data && data.template_name),
       declaredPrimary: text(data && data.entry_agent_name),
@@ -145,6 +182,11 @@
       plan: { status: PLAN_IDLE, blueprintKey: '', data: null, error: '' },
       includeBlueprintTeam: true,
       overrides: new Map(),
+      overrideIdentities: new Map(),
+      acknowledgements: new Map(),
+      reconciledPlanChanges: new Set(),
+      staleConflict: null,
+      creationFailures: new Map(),
       assistantHire: emptyAssistantHire(),
       savedSelections: [],
       savedRoster: { status: PLAN_IDLE, agents: [], error: '' },
@@ -169,6 +211,11 @@
   // only while it still names one of them.
   function discardBlueprintDerivedState(draft) {
     draft.overrides = new Map();
+    draft.overrideIdentities = new Map();
+    draft.acknowledgements = new Map();
+    draft.reconciledPlanChanges = new Set();
+    draft.staleConflict = null;
+    draft.creationFailures = new Map();
     draft.assistantHire = emptyAssistantHire();
     draft.includeBlueprintTeam = true;
     if (draft.explicitPrimary && !isSelected(draft, draft.explicitPrimary)) {
@@ -193,6 +240,23 @@
   function setPlanReady(draft, blueprintKey, data) {
     const key = applyBlueprintKey(draft, blueprintKey);
     const normalized = normalizePlan(data);
+    const changedIndexes = new Set();
+    for (const [index, acknowledgement] of draft.acknowledgements || []) {
+      const nextAgent = normalized.agents[index];
+      if (!nextAgent || acknowledgement.identity !== planAgentIdentity(nextAgent)) {
+        if (nextAgent) changedIndexes.add(index);
+        draft.acknowledgements.delete(index);
+      }
+    }
+    for (const [index, identity] of draft.overrideIdentities || []) {
+      const nextAgent = normalized.agents[index];
+      if (!nextAgent || identity !== planAgentIdentity(nextAgent)) {
+        if (nextAgent) changedIndexes.add(index);
+        draft.overrides.delete(index);
+        draft.overrideIdentities.delete(index);
+      }
+    }
+    draft.reconciledPlanChanges = changedIndexes;
     draft.plan = { status: PLAN_READY, blueprintKey: key, data: normalized, error: '' };
     const program = normalized.assistantProgram;
     if (program) {
@@ -223,6 +287,59 @@
     }
     draft.assistantHire = next;
     return draft;
+  }
+
+  function markPlanConflict(draft, message, details = {}) {
+    if (!draft) return false;
+    const changedIndexes = new Set(draft.reconciledPlanChanges || []);
+    const index = Number(details.index);
+    if (Number.isInteger(index) && planAgentAt(draft, index)) changedIndexes.add(index);
+    const occupiedNames = new Map();
+    if (
+      Number.isInteger(index) &&
+      text(details.expected_action) === 'create' &&
+      text(details.actual_action) === 'reuse'
+    ) {
+      occupiedNames.set(index, text(details.name));
+    }
+    draft.staleConflict = {
+      message: text(message) || 'Blueprint changed—review again before creating the workspace.',
+      changedIndexes,
+      occupiedNames
+    };
+    return true;
+  }
+
+  function confirmFreshPlan(draft) {
+    if (!draft || !draft.staleConflict) return false;
+    const pending = planAgents(draft).some(
+      (agent, index) => agent.action === 'create' && !isSetupAcknowledged(draft, index, agent)
+    );
+    const changed = (draft.staleConflict.changedIndexes?.size || 0) > 0;
+    if (draft.includeBlueprintTeam && (pending || changed)) return false;
+    draft.staleConflict = null;
+    return true;
+  }
+
+  function reviewChangedEntry(draft, index) {
+    if (!draft?.staleConflict?.changedIndexes?.has(index)) return false;
+    draft.staleConflict.changedIndexes.delete(index);
+    draft.staleConflict.occupiedNames?.delete(index);
+    return true;
+  }
+
+  function markCreationFailure(draft, index, name, message) {
+    if (!draft || !Number.isInteger(index) || !planAgentAt(draft, index)) return false;
+    if (!draft.creationFailures) draft.creationFailures = new Map();
+    draft.creationFailures.set(index, {
+      name: text(name),
+      message: text(message) || `Agent ${text(name)} could not be created.`
+    });
+    return true;
+  }
+
+  function clearCreationFailure(draft, index) {
+    return Boolean(draft?.creationFailures?.delete(index));
   }
 
   function setPlanError(draft, blueprintKey, message) {
@@ -300,14 +417,103 @@
 
     // An override that stages nothing is not an override; dropping it keeps the
     // request clean and isModifiedFromBlueprint honest.
-    if (Object.keys(next).length === 0) draft.overrides.delete(index);
-    else draft.overrides.set(index, next);
+    if (Object.keys(next).length === 0) {
+      draft.overrides.delete(index);
+      draft.overrideIdentities?.delete(index);
+    } else {
+      draft.overrides.set(index, next);
+      if (!draft.overrideIdentities) draft.overrideIdentities = new Map();
+      draft.overrideIdentities.set(index, planAgentIdentity(planAgent));
+    }
     return draft;
   }
 
   function clearOverride(draft, index) {
     if (draft && draft.overrides) draft.overrides.delete(index);
+    if (draft && draft.overrideIdentities) draft.overrideIdentities.delete(index);
     return draft;
+  }
+
+  function acknowledgeSetup(draft, index, provenance) {
+    const planAgent = planAgentAt(draft, index);
+    if (!draft || !planAgent) return false;
+    if (!draft.acknowledgements) draft.acknowledgements = new Map();
+    draft.acknowledgements.set(index, {
+      identity: planAgentIdentity(planAgent),
+      provenance: provenance === 'batch' ? 'batch' : 'individual'
+    });
+    reviewChangedEntry(draft, index);
+    clearCreationFailure(draft, index);
+    return true;
+  }
+
+  function isSetupAcknowledged(draft, index, planAgent) {
+    const acknowledgement = draft && draft.acknowledgements?.get(index);
+    return Boolean(acknowledgement && acknowledgement.identity === planAgentIdentity(planAgent));
+  }
+
+  function acceptRecommended(draft, index) {
+    return acknowledgeSetup(draft, index, 'individual');
+  }
+
+  function resetToRecommended(draft, index) {
+    const planAgent = planAgentAt(draft, index);
+    if (!draft || !planAgent) return false;
+    draft.overrides.delete(index);
+    draft.overrideIdentities?.delete(index);
+    return acknowledgeSetup(draft, index, 'individual');
+  }
+
+  function acceptAllRecommended(draft) {
+    if (!draft || !draft.includeBlueprintTeam) return 0;
+    let accepted = 0;
+    planAgents(draft).forEach((planAgent, index) => {
+      if (planAgent.action !== 'create' || isSetupAcknowledged(draft, index, planAgent)) return;
+      if (draft.overrides?.has(index)) return;
+      if (acknowledgeSetup(draft, index, 'batch')) accepted += 1;
+    });
+    return accepted;
+  }
+
+  function undoBatchRecommended(draft) {
+    if (!draft || !draft.acknowledgements) return 0;
+    let undone = 0;
+    for (const [index, acknowledgement] of draft.acknowledgements) {
+      if (acknowledgement.provenance !== 'batch' || draft.overrides?.has(index)) continue;
+      draft.acknowledgements.delete(index);
+      undone += 1;
+    }
+    return undone;
+  }
+
+  // Saves one editor as an authoritative replacement, rather than merging it
+  // into an older edit. Values equal to the current plan are intentionally
+  // omitted so the request carries only real changes, while acknowledgement is
+  // retained even when the recommendation is accepted unchanged.
+  function saveSetup(draft, index, fields) {
+    const planAgent = planAgentAt(draft, index);
+    if (!draft || !planAgent || !fields) return false;
+
+    const next = {};
+    Object.keys(OVERRIDE_FIELDS).forEach(field => {
+      if (!has(fields, field)) return;
+      const value = text(fields[field]);
+      const original = text(planAgent[field]);
+      const sameName =
+        field === 'name' && planAgent.action === 'reuse'
+          ? agentKey(value) === agentKey(original)
+          : value === original;
+      if (!sameName) next[field] = value;
+    });
+    if (Object.keys(next).length > 0) {
+      draft.overrides.set(index, next);
+      if (!draft.overrideIdentities) draft.overrideIdentities = new Map();
+      draft.overrideIdentities.set(index, planAgentIdentity(planAgent));
+    } else {
+      draft.overrides.delete(index);
+      draft.overrideIdentities?.delete(index);
+    }
+    return acknowledgeSetup(draft, index, 'individual');
   }
 
   function isAttachableSavedAgent(agent) {
@@ -351,13 +557,6 @@
       appearance: appearance,
       characterId: text(character.catalog_id)
     };
-  }
-
-  // Identity for a name as it stands in the draft right now. Renaming a
-  // blueprint agent re-seeds its fallback art, which is correct: the created
-  // agent will carry the new name.
-  function identityForName(draft, name) {
-    return identityFrom(name, findSavedAgent(draft, name));
   }
 
   // True when the blueprint already contributes this name under its ORIGINAL
@@ -447,10 +646,16 @@
   function resolveBlueprintEntry(draft, planAgent, index) {
     const override = draft.overrides.get(index) || {};
     const name = has(override, 'name') ? override.name : planAgent.name;
-    const model = has(override, 'model') ? override.model : planAgent.model;
-    const provider = has(override, 'provider') ? override.provider : planAgent.provider;
     const renamed = agentKey(name) !== agentKey(planAgent.name);
+    const recommended = planAgent.recommended || planAgent;
+    const definition = planAgent.action === 'reuse' && renamed ? recommended : planAgent;
+    const model = has(override, 'model') ? override.model : definition.model;
+    const provider = has(override, 'provider') ? override.provider : definition.provider;
     const customized = Object.keys(override).length > 0;
+    const acknowledged = isSetupAcknowledged(draft, index, planAgent);
+    const planChanged = Boolean(draft.staleConflict?.changedIndexes?.has(index));
+    const creationFailure = draft.creationFailures?.get(index) || null;
+    const staleOccupiedName = draft.staleConflict?.occupiedNames?.get(index) || '';
     // A reused definition only becomes a separate copy once it is renamed; an
     // unrenamed reuse row stays a plain attachment of the shared agent (FR41).
     const lifecycle =
@@ -459,18 +664,83 @@
       key: agentKey(name),
       name,
       source: 'blueprint',
-      identity: identityForName(draft, name),
+      identity: identityFrom(
+        name,
+        planAgent.action === 'reuse' && !renamed
+          ? findSavedAgent(draft, name) || {
+              role: planAgent.role,
+              appearance: planAgent.appearance
+            }
+          : {
+              role: definition.role,
+              appearance: definition.appearance
+            }
+      ),
       lifecycle,
       lifecycleLabel: LIFECYCLE_LABELS[lifecycle],
+      setupState: creationFailure
+        ? 'missing'
+        : planChanged
+          ? 'changed'
+          : planAgent.action === 'create' && !acknowledged
+            ? 'needsSetup'
+            : 'ready',
+      statusLabel: creationFailure
+        ? 'Missing · Creation failed'
+        : planChanged
+          ? 'Changed · Review setup'
+          : planAgent.action === 'reuse'
+            ? renamed
+              ? 'Customized copy · Will be created with workspace'
+              : 'Saved · Ready to attach'
+            : !acknowledged
+              ? 'New · Needs setup'
+              : customized
+                ? 'Customized · Will be created with workspace'
+                : 'Ready · Will be created with workspace',
+      actionLabel: creationFailure
+        ? 'Retry'
+        : planChanged
+          ? 'Review setup'
+          : planAgent.action === 'reuse' && !renamed
+            ? 'Customize as new agent'
+            : planAgent.action === 'create' && !acknowledged
+              ? 'Set up agent'
+              : 'Edit setup',
+      setupAcknowledged: acknowledged,
+      planChanged,
+      creationFailure,
+      staleOccupiedName,
+      sourceLabel: planAgent.action === 'reuse' && !renamed ? 'Your Agents' : 'Blueprint',
+      readinessLabel: creationFailure
+        ? 'Missing'
+        : planChanged
+          ? 'Changed'
+          : planAgent.action === 'create' && !acknowledged
+            ? 'Needs setup'
+            : customized
+              ? 'Customized'
+              : 'Ready',
+      futureActionLabel:
+        planAgent.action === 'reuse' && !renamed
+          ? 'Will attach saved definition'
+          : 'Will create with workspace',
+      model,
+      provider,
       modelLabel: modelLabel(model, provider),
       modelSourceLabel: has(override, 'model')
         ? text(override.model)
           ? 'Custom model'
           : 'Default model'
-        : modelSourceLabel(planAgent.modelSource),
+        : modelSourceLabel(definition.modelSource),
       inheritsModel: text(model) === '',
-      role: planAgent.role,
-      type: planAgent.type,
+      role: definition.role,
+      type: has(override, 'type') ? override.type : definition.type,
+      reasoningEffort: definition.reasoningEffort,
+      systemPrompt: has(override, 'systemPrompt') ? override.systemPrompt : definition.systemPrompt,
+      appearance: definition.appearance,
+      tools: definition.tools,
+      recommended,
       templateAgentIndex: index,
       declaredPrimary: planAgent.entryPoint,
       originalName: planAgent.name,
@@ -664,6 +934,21 @@
         anchor: 'team-roster'
       });
     }
+    if (
+      includeTeam &&
+      plan.status === PLAN_READY &&
+      !assistantProgram &&
+      allPlanAgents.length > 0 &&
+      !text(plan.data?.revision)
+    ) {
+      issues.push({
+        id: 'plan-revision-missing',
+        severity: 'blocking',
+        message: 'This blueprint agent plan is missing its review revision. Retry before creating.',
+        recovery: ['retry-plan'],
+        anchor: 'team-roster'
+      });
+    }
     if (plan.status === PLAN_ERROR && includeTeam) {
       // Blocking: the resulting roster cannot be reviewed, so no trustworthy
       // request can be built (FR94). Excluding the team removes the blocker.
@@ -675,6 +960,51 @@
           ? ['retry-plan', 'edit-blueprint']
           : ['retry-plan', 'edit-blueprint', 'exclude-blueprint-team'],
         anchor: 'team-roster'
+      });
+    }
+    const pendingSetups = roster.filter(
+      entry => entry.source === 'blueprint' && entry.setupState === 'needsSetup'
+    );
+    const changedEntry = roster.find(
+      entry => entry.source === 'blueprint' && entry.setupState === 'changed'
+    );
+    const failedEntry = roster.find(
+      entry => entry.source === 'blueprint' && entry.setupState === 'missing'
+    );
+    if (includeTeam && source.staleConflict) {
+      issues.push({
+        id: 'template-agent-plan-changed',
+        severity: 'blocking',
+        message: source.staleConflict.message,
+        recovery: ['confirm-fresh-plan', 'retry-plan'],
+        anchor: changedEntry
+          ? `team-agent-setup-${changedEntry.templateAgentIndex}`
+          : 'workspaceTeamIssues',
+        templateAgentIndex: changedEntry?.templateAgentIndex ?? null
+      });
+    }
+    if (failedEntry) {
+      issues.push({
+        id: 'template-agent-creation-failed',
+        severity: 'blocking',
+        message: failedEntry.creationFailure.message,
+        recovery: ['retry-creation'],
+        anchor: `team-agent-retry-${failedEntry.templateAgentIndex}`,
+        templateAgentIndex: failedEntry.templateAgentIndex
+      });
+    }
+    if (pendingSetups.length > 0) {
+      issues.push({
+        id: 'template-agent-setup-required',
+        severity: 'blocking',
+        message:
+          pendingSetups.length === 1
+            ? `Set up ${pendingSetups[0].name} before reviewing this workspace.`
+            : `Set up ${pendingSetups.length} proposed agents before reviewing this workspace.`,
+        recovery: ['review-template-agent-setup'],
+        anchor: `team-agent-setup-${pendingSetups[0].templateAgentIndex}`,
+        templateAgentIndex: pendingSetups[0].templateAgentIndex,
+        count: pendingSetups.length
       });
     }
     if (assistantProgram) {
@@ -756,6 +1086,25 @@
       if (includeTeam) {
         const overrides = serializeOverrides(source);
         if (overrides.length > 0) payload.template_agent_overrides = overrides;
+        if (
+          allPlanAgents.length > 0 &&
+          text(plan.data?.revision) &&
+          pendingSetups.length === 0 &&
+          !source.staleConflict
+        ) {
+          payload.template_agent_review = {
+            version: 1,
+            plan_revision: plan.data.revision,
+            expectations: blueprintEntries
+              .slice()
+              .sort((left, right) => left.templateAgentIndex - right.templateAgentIndex)
+              .map(entry => ({
+                index: entry.templateAgentIndex,
+                name: entry.name,
+                action: entry.lifecycle === 'reuse' ? 'reuse' : 'create'
+              }))
+          };
+        }
       }
       // Sent only when non-empty: the server treats a nil existing_agent_names as
       // a legacy request and keeps its original entry-agent behavior.
@@ -798,6 +1147,16 @@
       primaryIsAutomatic: Boolean(primary) && !text(source.explicitPrimary),
       specialists,
       shadowedSelections,
+      batchSetup: {
+        pendingCount: pendingSetups.length,
+        canAcceptAll: pendingSetups.length >= 2,
+        acceptedCount: Array.from(source.acknowledgements || []).filter(
+          ([index, acknowledgement]) =>
+            acknowledgement.provenance === 'batch' &&
+            activePlanAgents[index] &&
+            isSetupAcknowledged(source, index, activePlanAgents[index])
+        ).length
+      },
       issues,
       blockingIssues: issues.filter(issue => issue.severity === 'blocking'),
       advisoryIssues: issues.filter(issue => issue.severity === 'advisory'),
@@ -842,6 +1201,11 @@
     resetDraft,
     setPlanLoading,
     setPlanReady,
+    markPlanConflict,
+    confirmFreshPlan,
+    reviewChangedEntry,
+    markCreationFailure,
+    clearCreationFailure,
     setPlanError,
     clearPlan,
     normalizePlan,
@@ -850,6 +1214,12 @@
     stageOverride,
     clearOverride,
     getOverride,
+    acceptRecommended,
+    acceptAllRecommended,
+    undoBatchRecommended,
+    resetToRecommended,
+    saveSetup,
+    acknowledgeSetup,
     setSavedRosterLoading,
     setSavedRosterReady,
     setSavedRosterError,

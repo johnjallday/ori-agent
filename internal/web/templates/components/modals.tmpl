@@ -1,5 +1,8 @@
 <!-- Modal placeholders - will be filled with actual modal content later -->
 
+{{template "agent-create-form.tmpl" .}}
+<script defer src="/js/modules/agent-create-form.js"></script>
+
 <!-- Add Agent Modal (shared across pages with sidebar) -->
 <div class="modal fade" id="addAgentModal" tabindex="-1" aria-labelledby="addAgentModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
@@ -61,37 +64,7 @@
             </svg>
             <strong>Auto-configured</strong> - Settings below were selected based on your description. You can still adjust them manually.
           </div>
-          <div class="mb-3">
-            <label for="agentName" class="form-label required" style="color: var(--text-primary);">Agent Name</label>
-            <input type="text" id="agentName" class="modern-input w-100" placeholder="Enter agent name..." required minlength="2" maxlength="50" aria-describedby="agentNameHelp">
-            <small id="agentNameHelp" class="form-helper">Use letters, numbers, and hyphens. 2-50 characters.</small>
-          </div>
-          <div class="mb-3">
-            <label for="agentType" class="form-label" style="color: var(--text-primary);">Agent Type</label>
-            <select id="agentType" class="modern-input w-100">
-              <option value="tool-calling">Tool Calling (Cheapest - Optimized for tool use)</option>
-              <option value="general">General Purpose (Mid-tier - Balanced capability)</option>
-              <option value="orchestration">Orchestration (Advanced - Multi-agent coordination)</option>
-              <option value="research">Research (Expensive - Complex thinking)</option>
-            </select>
-          </div>
-          <div class="mb-3">
-            <label for="agentModel" class="form-label" style="color: var(--text-primary);">Model</label>
-            <select id="agentModel" class="modern-input w-100">
-              <option value="">Loading models...</option>
-            </select>
-            <small id="agentModelRecommendation" class="form-helper d-none"></small>
-          </div>
-          <div class="mb-3 d-none" id="agentReasoningField">
-            <label for="agentReasoning" class="form-label" style="color: var(--text-primary);">Reasoning Level</label>
-            <select id="agentReasoning" class="modern-input w-100" aria-describedby="agentReasoningHelp">
-              <option value="medium" selected>Medium (Recommended)</option>
-              <option value="high">High</option>
-              <option value="low">Low</option>
-              <option value="xhigh">Extra High</option>
-            </select>
-            <small id="agentReasoningHelp" class="form-helper">Codex only. Higher levels improve difficult reasoning at the cost of speed.</small>
-          </div>
+          <div id="agentCreateFormHost"></div>
           <div class="mb-3">
             <label for="agentTemperature" class="form-label" style="color: var(--text-primary);">
               Temperature: <span id="temperatureValue">1.0</span>
@@ -103,14 +76,6 @@
               <span>Balanced (1)</span>
               <span>Creative (2)</span>
             </div>
-          </div>
-          <div class="mb-3">
-            <label for="agentSystemPrompt" class="form-label" style="color: var(--text-primary);">System Prompt</label>
-            <textarea id="agentSystemPrompt" class="form-control" rows="4" maxlength="4000"
-                      style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;"
-                      placeholder="Example: You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses."
-                      data-char-counter="true"></textarea>
-            <small class="form-helper">Define the agent's behavior, personality, and instructions. Max 4000 characters.</small>
           </div>
           <div class="mb-3 form-check">
             <input class="form-check-input" type="checkbox" id="agentAllowWebSearch" checked>
