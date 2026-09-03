@@ -2,8 +2,8 @@
 <!--
   Shared Create Agent form core. The inert template intentionally contains no
   IDs: AgentCreateForm assigns every control, label, help, and error ID from the
-  mounting host's prefix. This allows the standalone modal and the Create
-  Workspace child view to exist in the same document without duplicate IDs.
+  mounting host's prefix. This lets standalone and workspace-draft callers
+  share one canonical form without duplicate IDs or cross-mode state.
 -->
 <template id="agentCreateFormTemplate">
   <div class="agent-create-form-core" data-agent-create-root>

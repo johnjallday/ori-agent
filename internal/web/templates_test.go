@@ -314,13 +314,6 @@ func TestRenderCreateWorkspaceWizardReviewContract(t *testing.T) {
 		`id="existingAgentRosterSearch"`,
 		`id="workspaceTeamLiveRegion"`,
 		`id="workspaceTeamBatchActions"`,
-		`id="workspaceAgentSetupView"`,
-		`id="workspaceAgentSetupFormHost"`,
-		`id="workspaceAgentSetupBack"`,
-		`id="workspaceAgentSetupSave"`,
-		`role="region"`,
-		`Back to team`,
-		`Add to team`,
 		`Resulting workspace team`,
 		`Advanced team options`,
 		// Review keeps the read-only post-create setup preview.
@@ -363,6 +356,12 @@ func TestRenderCreateWorkspaceWizardReviewContract(t *testing.T) {
 		`id="workspaceTemplateAgentSetup"`,
 		`id="workspaceTemplateAgentSetupForm"`,
 		`id="workspaceTemplateAgentSetupSave"`,
+		// Agent setup now reuses the sibling Create New Agent modal instead of
+		// rendering a second form or child view inside Create Workspace.
+		`id="workspaceAgentSetupView"`,
+		`id="workspaceAgentSetupFormHost"`,
+		`id="workspaceAgentSetupBack"`,
+		`id="workspaceAgentSetupSave"`,
 		`Create all defaults`,
 		`Save reusable agent`,
 		// The roster is one list: no nested "Blueprint agents" card, no separate
@@ -400,8 +399,12 @@ func TestSharedAgentCreateFormIsCanonicalAndLoadsBeforeConsumers(t *testing.T) {
 
 		for marker, want := range map[string]int{
 			`id="addAgentModal"`:                     1,
+			`id="addAgentModalTitleText"`:            1,
 			`id="addAgentForm"`:                      1,
 			`id="createAgentBtn"`:                    1,
+			`id="cancelAgentBtn"`:                    1,
+			`id="agentCreateDraftContext"`:           1,
+			`id="agentCreateDraftSummary"`:           1,
 			`id="agentCreateFormHost"`:               1,
 			`id="agentCreateFormTemplate"`:           1,
 			`src="/js/modules/agent-create-form.js"`: 1,

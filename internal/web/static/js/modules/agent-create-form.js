@@ -2,8 +2,8 @@
 //
 // The server-rendered <template> is inert and ID-free. Each mount clones it,
 // assigns IDs from a caller-owned prefix, and scopes all subsequent queries to
-// that mount. The standalone modal and Create Workspace child view can therefore
-// coexist without reading or mutating one another.
+// that mount. Standalone and Create Workspace draft modes can therefore reuse
+// the same canonical form without reading or retaining one another's state.
 (function () {
   'use strict';
 

@@ -55,7 +55,10 @@ async function advanceToReviewFromTeam(page: Page) {
     .filter({ hasText: 'New · Needs setup' });
   while ((await pendingRows.count()) > 0) {
     await pendingRows.first().locator('[data-team-agent-setup]').click();
-    await page.locator('#workspaceAgentSetupSave').click();
+    await expect(page.locator('#addAgentModal')).toBeVisible();
+    await page.locator('#createAgentBtn').click();
+    await expect(page.locator('#addAgentModal')).toBeHidden();
+    await expect(page.locator('#addFolderModal')).toBeVisible();
   }
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep4')).toBeVisible();
@@ -680,6 +683,11 @@ test('Team attaches a saved agent and submits the complete team atomically', asy
   await expect(page.locator('#existingAgentRosterPanel')).toBeVisible();
   const roster = page.locator('#workspaceTeamRoster');
   await page.locator('[data-existing-agent-add="Research Scout"]').click();
+  await expect(
+    page.locator('#toastContainer .toast').filter({
+      hasText: 'Research Scout added to the workspace draft.'
+    })
+  ).toBeVisible();
   await expect(roster.locator('.workspace-team-row').first()).toContainText('Research Scout');
   await expect(roster.locator('.workspace-team-badge.is-primary')).toHaveText('Primary');
   await expect(roster).toContainText('Saved agent · will be attached');
@@ -789,7 +797,7 @@ test('Team visualizes every included template agent and its lifecycle', async ({
   await expect(page.locator('#workspaceTeamRoster')).not.toContainText('Make a workspace copy');
 });
 
-test('proposed agent setup stays inside Create Workspace and submits one strict atomic request', async ({
+test('proposed setup reuses Create New Agent in draft mode and submits one strict atomic request', async ({
   page
 }) => {
   const unexpectedPosts: string[] = [];
@@ -853,21 +861,43 @@ test('proposed agent setup stays inside Create Workspace and submits one strict 
   );
 
   await requiredSetupAction.click();
-  await expect(page.locator('#workspaceTeamLayout')).toBeHidden();
-  await expect(page.locator('#workspaceAgentSetupView')).toBeVisible();
-  await expect(page.locator('#addFolderModal .modal.show')).toHaveCount(0);
-  await expect(page.locator('#workspaceAgentSetupTitle')).toHaveText('Set up agent');
-  await expect(page.locator('#workspaceAgentSetupName')).toHaveValue('Reaper Producer');
-  await expect(page.locator('#workspaceAgentSetupReasoning')).toBeDisabled();
-  await expect(page.locator('#workspaceAgentSetupSummary')).toContainText('reaper-session');
-  await expect(page.locator('#workspaceAgentSetupSystemPrompt')).toHaveValue(
-    'Produce the session.'
+  await expect(page.locator('#addFolderModal')).toBeHidden();
+  await expect(page.locator('#addAgentModal')).toBeVisible();
+  await expect(page.locator('.modal.show')).toHaveCount(1);
+  await expect(page.locator('#addAgentModalTitleText')).toHaveText('Set up agent');
+  await expect(page.locator('#agentName')).toHaveValue('Reaper Producer');
+  await expect(page.locator('#agentReasoning')).toBeDisabled();
+  await expect(page.locator('#agentCreateDraftSummary')).toContainText('reaper-session');
+  await expect(page.locator('#agentSystemPrompt')).toHaveValue('Produce the session.');
+  await expect(page.locator('#agentCreateCapabilitiesSection')).toBeHidden();
+
+  // Cancel discards only unsaved modal controls, restores the exact Team
+  // opener, and resets the shared shell before it is reused.
+  await page.locator('#agentName').fill('Unsaved Producer');
+  await page.locator('#cancelAgentBtn').click();
+  await expect(page.locator('#addAgentModal')).toBeHidden();
+  await expect(page.locator('#addFolderModal')).toBeVisible();
+  await expect(row).toContainText('Reaper Producer');
+  await expect(row).toContainText('New · Needs setup');
+  await expect(requiredSetupAction).toBeFocused();
+  await expect(page.locator('#addAgentModalTitleText')).toHaveText('Create New Agent');
+  await expect(page.locator('#addAgentModal')).not.toHaveAttribute(
+    'data-agent-create-mode',
+    /.+/
   );
 
-  await page.locator('#workspaceAgentSetupName').fill('Session Producer');
-  await page.locator('#workspaceAgentSetupSystemPrompt').fill('Produce this session carefully.');
-  await page.locator('#workspaceAgentSetupSave').click();
-  await expect(page.locator('#workspaceTeamLayout')).toBeVisible();
+  await requiredSetupAction.click();
+  await expect(page.locator('#addAgentModal')).toBeVisible();
+  await page.locator('#agentName').fill('Session Producer');
+  await page.locator('#agentSystemPrompt').fill('Produce this session carefully.');
+  await page.locator('#createAgentBtn').click();
+  await expect(
+    page.locator('#toastContainer .toast').filter({
+      hasText: 'Session Producer added to the team draft. It will be created with the workspace.'
+    })
+  ).toBeVisible();
+  await expect(page.locator('#addAgentModal')).toBeHidden();
+  await expect(page.locator('#addFolderModal')).toBeVisible();
   await expect(row).toContainText('Session Producer');
   await expect(row).toContainText('Customized · Will be created with workspace');
   await expect(row.locator('.workspace-team-readiness-badge')).toHaveCount(0);
@@ -886,8 +916,25 @@ test('proposed agent setup stays inside Create Workspace and submits one strict 
   });
   await advanceToReviewFromTeam(page);
   await expect(page.locator('#workspaceReviewSummary')).toContainText('Session Producer');
+  const successToasts: Array<{ message: string; type: string }> = [];
+  await page.exposeFunction('captureWorkspaceSuccessToast', (message: string, type: string) => {
+    successToasts.push({ message, type });
+  });
+  await page.evaluate(() => {
+    const target = window as unknown as {
+      notifyToast: (message: string, type: string) => void;
+      captureWorkspaceSuccessToast: (message: string, type: string) => void;
+    };
+    target.notifyToast = (message, type) => target.captureWorkspaceSuccessToast(message, type);
+  });
   await page.locator('#createFolderBtn').click();
   await expect.poll(() => payload).toBeTruthy();
+  await expect
+    .poll(() => successToasts)
+    .toContainEqual({
+      message: 'Workspace created with setup (Session Producer created and added).',
+      type: 'success'
+    });
 
   expect(payload?.template_agent_overrides).toEqual([
     expect.objectContaining({
@@ -946,9 +993,9 @@ test('agent setup remains keyboard-safe and readable at narrow widths in both th
       value => document.documentElement.setAttribute('data-bs-theme', value),
       theme
     );
-    await expect(page.locator('#workspaceAgentSetupView')).toBeVisible();
-    await expect(page.locator('#workspaceAgentSetupName')).toBeVisible();
-    const overflow = await page.locator('#addFolderModal .modal-content').evaluate(element => ({
+    await expect(page.locator('#addAgentModal')).toBeVisible();
+    await expect(page.locator('#agentName')).toBeVisible();
+    const overflow = await page.locator('#addAgentModal .modal-content').evaluate(element => ({
       scroll: element.scrollWidth,
       client: element.clientWidth
     }));
@@ -956,9 +1003,21 @@ test('agent setup remains keyboard-safe and readable at narrow widths in both th
   }
 
   await page.keyboard.press('Escape');
-  await expect(page.locator('#workspaceAgentSetupView')).toBeHidden();
-  await expect(page.locator('#workspaceTeamLayout')).toBeVisible();
+  await expect(page.locator('#addAgentModal')).toBeHidden();
+  await expect(page.locator('#addFolderModal')).toBeVisible();
   await expect(opener).toBeFocused();
+
+  await opener.click();
+  await page.locator('#createAgentBtn').click();
+  const toastBox = await page
+    .locator('#toastContainer .toast')
+    .filter({ hasText: 'Narrow Lead added to the team draft' })
+    .boundingBox();
+  expect(toastBox).not.toBeNull();
+  expect(toastBox?.x || 0).toBeGreaterThanOrEqual(0);
+  expect((toastBox?.x || 0) + (toastBox?.width || 0)).toBeLessThanOrEqual(380);
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#wizardStep4')).toBeVisible();
 });
 
 test('batch recommendation acceptance can be undone without losing individual setup', async ({
@@ -993,12 +1052,18 @@ test('batch recommendation acceptance can be undone without losing individual se
   );
 
   await rows.nth(0).locator('[data-team-agent-setup]').click();
-  await page.locator('#workspaceAgentSetupSystemPrompt').fill('Individually reviewed.');
-  await page.locator('#workspaceAgentSetupSave').click();
+  await page.locator('#agentSystemPrompt').fill('Individually reviewed.');
+  await page.locator('#createAgentBtn').click();
+  await expect(page.locator('#addFolderModal')).toBeVisible();
   await expect(page.locator('[data-team-accept-all]')).toHaveText(
     'Use recommended setup for all 2'
   );
   await page.locator('[data-team-accept-all]').click();
+  await expect(
+    page.locator('#toastContainer .toast').filter({
+      hasText: '2 agents added to the team draft. They will be created with the workspace.'
+    })
+  ).toBeVisible();
   await expect(rows).toContainText([
     /Customized · Will be created with workspace/,
     /Ready · Will be created with workspace/,
@@ -1087,7 +1152,8 @@ test('a stale reviewed plan returns to Team with fresh setup and preserves the d
   await page.locator('#folderNameInput').fill('Stale Draft');
   await advanceToTeam(page);
   await page.locator('[data-team-agent-setup="0"]').click();
-  await page.locator('#workspaceAgentSetupSave').click();
+  await page.locator('#createAgentBtn').click();
+  await expect(page.locator('#addFolderModal')).toBeVisible();
   await advanceToReviewFromTeam(page);
   await page.locator('#createFolderBtn').click();
 
@@ -1098,9 +1164,10 @@ test('a stale reviewed plan returns to Team with fresh setup and preserves the d
   await expect(page.locator('#folderNameInput')).toHaveValue('Stale Draft');
   await expect(page.locator('[data-team-agent-setup="0"]')).toHaveText('Review setup');
   await page.locator('[data-team-agent-setup="0"]').click();
-  await expect(page.locator('#workspaceAgentSetupModel')).toHaveValue('after-model');
-  await expect(page.locator('#workspaceAgentSetupSystemPrompt')).toHaveValue('After prompt');
-  await page.locator('#workspaceAgentSetupSave').click();
+  await expect(page.locator('#agentModel')).toHaveValue('after-model');
+  await expect(page.locator('#agentSystemPrompt')).toHaveValue('After prompt');
+  await page.locator('#createAgentBtn').click();
+  await expect(page.locator('#addFolderModal')).toBeVisible();
   await page.locator('#wizardStep3 [data-team-recovery="confirm-fresh-plan"]').click();
   await advanceToReviewFromTeam(page);
   await page.locator('#createFolderBtn').click();
@@ -1153,9 +1220,10 @@ test('fatal strict agent creation returns to the owning row and retries the pres
   await page.locator('#folderNameInput').fill('Retry Workspace');
   await advanceToTeam(page);
   await page.locator('[data-team-agent-setup="0"]').click();
-  await page.locator('#workspaceAgentSetupName').fill('Reviewed Lead');
-  await page.locator('#workspaceAgentSetupSystemPrompt').fill('Preserve this setup.');
-  await page.locator('#workspaceAgentSetupSave').click();
+  await page.locator('#agentName').fill('Reviewed Lead');
+  await page.locator('#agentSystemPrompt').fill('Preserve this setup.');
+  await page.locator('#createAgentBtn').click();
+  await expect(page.locator('#addFolderModal')).toBeVisible();
   await advanceToReviewFromTeam(page);
   await page.locator('#createFolderBtn').click();
 
@@ -1212,21 +1280,18 @@ test('server prompt validation returns to the owning setup field before any crea
   await page.locator('#folderNameInput').fill('Prompt Validation Workspace');
   await advanceToTeam(page);
   await page.locator('[data-team-agent-setup="0"]').click();
-  await page.locator('#workspaceAgentSetupSystemPrompt').fill('Use {{unknown}}.');
-  await page.locator('#workspaceAgentSetupSave').click();
+  await page.locator('#agentSystemPrompt').fill('Use {{unknown}}.');
+  await page.locator('#createAgentBtn').click();
+  await expect(page.locator('#addFolderModal')).toBeVisible();
   await advanceToReviewFromTeam(page);
   await page.locator('#createFolderBtn').click();
 
   await expect.poll(() => payloads).toHaveLength(1);
-  await expect(page.locator('#workspaceAgentSetupView')).toBeVisible();
-  await expect(page.locator('#workspaceAgentSetupSystemPrompt')).toBeFocused();
-  await expect(page.locator('#workspaceAgentSetupSystemPrompt')).toHaveAttribute(
-    'aria-invalid',
-    'true'
-  );
-  await expect(page.locator('#workspaceAgentSetupSystemPromptError')).toContainText(
-    'unknown prompt variable'
-  );
+  await expect(page.locator('#addFolderModal')).toBeHidden();
+  await expect(page.locator('#addAgentModal')).toBeVisible();
+  await expect(page.locator('#agentSystemPrompt')).toBeFocused();
+  await expect(page.locator('#agentSystemPrompt')).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.locator('#agentSystemPromptError')).toContainText('unknown prompt variable');
 });
 
 test('Team stages a customized copy without touching the reused agent (FR40-FR47)', async ({
@@ -1281,31 +1346,33 @@ test('Team stages a customized copy without touching the reused agent (FR40-FR47
   await expect(rows.nth(0)).toContainText('Saved · Ready to attach');
   await expect(rows.nth(0)).toContainText('saved-provider / saved-model');
   await rows.nth(0).locator('[data-team-agent-setup]').click();
-  await expect(page.locator('#workspaceAgentSetupName')).toHaveValue('Shared Lead copy');
-  await expect(page.locator('#workspaceAgentSetupModel')).toHaveValue('blueprint-model');
-  await expect(page.locator('#workspaceAgentSetupSummary')).toContainText('blueprint-skill');
+  await expect(page.locator('#agentName')).toHaveValue('Shared Lead copy');
+  await expect(page.locator('#agentModel')).toHaveValue('blueprint-model');
+  await expect(page.locator('#agentCreateDraftSummary')).toContainText('blueprint-skill');
 
   // The saved definition can only be reused unchanged. Behavioral edits need a
-  // real copy name, and roster collisions are rejected beside the child form.
-  await page.locator('#workspaceAgentSetupName').fill('Shared Lead');
-  await page.locator('#workspaceAgentSetupSystemPrompt').fill('Behave differently.');
-  await page.locator('#workspaceAgentSetupSave').click();
-  await expect(page.locator('#workspaceAgentSetupError')).toContainText(
+  // real copy name, and roster collisions are rejected in the shared modal.
+  await page.locator('#agentName').fill('Shared Lead');
+  await page.locator('#agentSystemPrompt').fill('Behave differently.');
+  await page.locator('#createAgentBtn').click();
+  await expect(page.locator('#agentCreateDraftError')).toContainText(
     'Give this copy a different name'
   );
-  await page.locator('#workspaceAgentSetupName').fill('brand new');
-  await page.locator('#workspaceAgentSetupSave').click();
-  await expect(page.locator('#workspaceAgentSetupError')).toContainText('already called');
+  await page.locator('#agentName').fill('brand new');
+  await page.locator('#createAgentBtn').click();
+  await expect(page.locator('#agentCreateDraftError')).toContainText('already called');
 
-  await page.locator('#workspaceAgentSetupName').fill('Shared Lead Studio');
-  await page.locator('#workspaceAgentSetupSave').click();
+  await page.locator('#agentName').fill('Shared Lead Studio');
+  await page.locator('#createAgentBtn').click();
+  await expect(page.locator('#addFolderModal')).toBeVisible();
   await expect(rows).toHaveCount(2);
   await expect(rows.nth(0)).toContainText('Shared Lead Studio');
   await expect(rows.nth(0)).toContainText('Customized copy · Will be created with workspace');
 
   // Review the other absent definition so the strict two-member roster can be submitted.
   await rows.nth(1).locator('[data-team-agent-setup]').click();
-  await page.locator('#workspaceAgentSetupSave').click();
+  await page.locator('#createAgentBtn').click();
+  await expect(page.locator('#addFolderModal')).toBeVisible();
 
   let payload: Record<string, any> | undefined;
   await page.route('**/api/workspaces', async route => {
@@ -2153,7 +2220,7 @@ test('the modal never scrolls horizontally at a narrow viewport (FR108)', async 
 
   const noHorizontalOverflow = async () =>
     page.evaluate(() => {
-      const body = document.getElementById('addFolderModal')?.querySelector('.modal-body');
+      const body = document.querySelector('.modal.show .modal-body');
       if (!body) return true;
       // 1px of tolerance for sub-pixel layout rounding.
       return body.scrollWidth <= body.clientWidth + 1;
@@ -2178,9 +2245,11 @@ test('the modal never scrolls horizontally at a narrow viewport (FR108)', async 
   expect(await noHorizontalOverflow()).toBe(true);
 
   await page.locator('#workspaceTeamRoster [data-team-agent-setup]').first().click();
+  await expect(page.locator('#addAgentModal')).toHaveCSS('opacity', '1');
   expect(await noHorizontalOverflow()).toBe(true);
   await page.keyboard.press('Escape');
-  await expect(page.locator('#workspaceTeamLayout')).toBeVisible();
+  await expect(page.locator('#addAgentModal')).toBeHidden();
+  await expect(page.locator('#addFolderModal')).toBeVisible();
 
   await advanceToReviewFromTeam(page);
   expect(await noHorizontalOverflow()).toBe(true);
@@ -2268,15 +2337,29 @@ test('the wizard never persists an agent before the workspace is created (FR68)'
   // Edit and review staged blueprint agents on Team: still no persistence request.
   const row = page.locator('#workspaceTeamRoster .workspace-team-row').first();
   await row.locator('[data-team-agent-setup]').click();
-  await page.locator('#workspaceAgentSetupName').fill('Renamed Producer');
-  await page.locator('#workspaceAgentSetupSave').click();
+  await page.locator('#agentName').fill('Renamed Producer');
+  await page.locator('#createAgentBtn').click();
+  await expect(page.locator('#addFolderModal')).toBeVisible();
   await page.locator('[data-team-agent-setup="1"]').click();
-  await page.locator('#workspaceAgentSetupSave').click();
+  await page.locator('#createAgentBtn').click();
+  await expect(page.locator('#addFolderModal')).toBeVisible();
   await advanceToReviewFromTeam(page);
 
   // Cancel the whole wizard from Review.
   await page.locator('#addFolderModal .modal-footer [data-bs-dismiss="modal"]').click();
   await expect(page.locator('#addFolderModal')).toBeHidden();
+
+  // The shared shell returns to its ordinary standalone contract after draft
+  // use; workspace-only context and labels cannot leak into Add Agent.
+  await page.evaluate(() =>
+    (window as unknown as { showAddAgentModal: () => void }).showAddAgentModal()
+  );
+  await expect(page.locator('#addAgentModal')).toBeVisible();
+  await expect(page.locator('#addAgentModalTitleText')).toHaveText('Create New Agent');
+  await expect(page.locator('#agentCreateDraftContext')).toBeHidden();
+  await expect(page.locator('#agentCreateCapabilitiesSection')).toBeVisible();
+  await page.locator('#cancelAgentBtn').click();
+  await expect(page.locator('#addAgentModal')).toBeHidden();
 
   expect(precreateCalls).toEqual([]);
 });

@@ -84,6 +84,9 @@ const sessionManager = {
   workspaceAgentSetupIndex: null,
   workspaceAgentSetupOpener: null,
   workspaceAgentSetupForm: null,
+  workspaceAgentSetupCloseOptions: null,
+  workspaceAgentSetupCompletion: null,
+  workspaceAgentSetupFocusField: '',
 
   // Auto mode state
   chatAutoMode: false,
@@ -447,15 +450,40 @@ const sessionManager = {
       const primary = event.target.closest('[data-existing-agent-primary]');
       if (primary) this.requestExistingAgentPrimary(primary.dataset.existingAgentPrimary || '');
     });
+    const addAgentDraftModal = document.getElementById('addAgentModal');
+    const submitWorkspaceAgentDraft = event => {
+      if (addAgentDraftModal?.dataset.agentCreateMode !== 'workspace-draft') return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      this.saveWorkspaceAgentSetup();
+    };
+    // Capture before agents.js's standalone handlers so draft mode can never
+    // fall through to POST /api/agents.
     document
-      .getElementById('workspaceAgentSetupBack')
-      ?.addEventListener('click', () => this.closeWorkspaceAgentSetup({ announce: true }));
+      .getElementById('createAgentBtn')
+      ?.addEventListener('click', submitWorkspaceAgentDraft, true);
     document
-      .getElementById('workspaceAgentSetupCancel')
-      ?.addEventListener('click', () => this.closeWorkspaceAgentSetup({ announce: true }));
-    document
-      .getElementById('workspaceAgentSetupSave')
-      ?.addEventListener('click', () => this.saveWorkspaceAgentSetup());
+      .getElementById('addAgentForm')
+      ?.addEventListener('submit', submitWorkspaceAgentDraft, true);
+    addAgentDraftModal?.addEventListener(
+      'click',
+      event => {
+        if (
+          addAgentDraftModal.dataset.agentCreateMode !== 'workspace-draft' ||
+          !event.target.closest('[data-bs-dismiss="modal"]')
+        )
+          return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        this.closeWorkspaceAgentSetup({ announce: true });
+      },
+      true
+    );
+    addAgentDraftModal?.addEventListener('hidden.bs.modal', () => {
+      if (addAgentDraftModal.dataset.agentCreateMode === 'workspace-draft') {
+        this.finishWorkspaceAgentSetupModal();
+      }
+    });
     document.getElementById('workspaceReviewSummary')?.addEventListener('click', event => {
       const edit = event.target.closest('[data-wizard-edit-step]');
       if (edit) this.goToWizardStep(Number(edit.dataset.wizardEditStep));
@@ -540,13 +568,16 @@ const sessionManager = {
     });
 
     const addFolderModal = document.getElementById('addFolderModal');
+    // Resuming after the sibling Agent modal is not a fresh Create Workspace
+    // open. Stop the normal show listeners (catalog reload, form reset, review
+    // reset) without cancelling Bootstrap's show itself, or they would erase
+    // the draft we suspended the modal to preserve.
     addFolderModal?.addEventListener(
-      'keydown',
+      'show.bs.modal',
       event => {
-        if (event.key !== 'Escape' || this.workspaceAgentSetupIndex === null) return;
-        event.preventDefault();
+        if (addFolderModal.dataset.resumingFromAgentSetup !== 'true') return;
+        delete addFolderModal.dataset.resumingFromAgentSetup;
         event.stopImmediatePropagation();
-        this.closeWorkspaceAgentSetup({ announce: true });
       },
       true
     );
@@ -589,6 +620,9 @@ const sessionManager = {
     // request still in flight so a late response cannot repopulate a closed
     // wizard. Nothing was persisted, so nothing needs undoing (FR13).
     addFolderModal?.addEventListener('hidden.bs.modal', () => {
+      // Agent setup reuses the sibling Create New Agent modal. Suspending this
+      // modal is navigation inside one draft, not cancellation of the draft.
+      if (addFolderModal.dataset.suspendedForAgentSetup === 'true') return;
       this.discardWorkspaceTeamDraft();
       // Closing without creating leaves the map exactly as it was: no workspace,
       // no position record, no lingering placement mode (#292 FR-54). A pending
@@ -4001,7 +4035,7 @@ const sessionManager = {
       );
     } else if (entry.customizable) {
       actions.push(
-        `<button type="button" id="team-agent-setup-${entry.templateAgentIndex}" class="workspace-wizard-inline-action" data-team-agent-setup="${entry.templateAgentIndex}" aria-controls="workspaceAgentSetupView">${this.escapeHtml(entry.actionLabel || 'Set up agent')}</button>`
+        `<button type="button" id="team-agent-setup-${entry.templateAgentIndex}" class="workspace-wizard-inline-action" data-team-agent-setup="${entry.templateAgentIndex}" aria-controls="addAgentModal">${this.escapeHtml(entry.actionLabel || 'Set up agent')}</button>`
       );
     }
     if (entry.isCustomized && entry.setupAcknowledged) {
@@ -4098,6 +4132,10 @@ const sessionManager = {
     this.refreshWorkspaceReview();
     this.announceWorkspaceTeamChange(
       `${accepted} recommended agent setup${accepted === 1 ? '' : 's'} accepted.`
+    );
+    this.showToast(
+      `${accepted} agent${accepted === 1 ? '' : 's'} added to the team draft. ${accepted === 1 ? 'It will' : 'They will'} be created with the workspace.`,
+      'success'
     );
     document.querySelector('[data-team-undo-batch]')?.focus();
   },
@@ -4270,28 +4308,43 @@ const sessionManager = {
     const formApi = window.AgentCreateForm;
     const draft = this.ensureWorkspaceTeamDraft();
     const entry = this.teamView()?.roster.find(item => item.templateAgentIndex === index);
-    const layout = document.getElementById('workspaceTeamLayout');
-    const view = document.getElementById('workspaceAgentSetupView');
-    const host = document.getElementById('workspaceAgentSetupFormHost');
-    if (!api || !formApi || !draft || !entry || !layout || !view || !host) return;
+    const workspaceModalElement = document.getElementById('addFolderModal');
+    const agentModalElement = document.getElementById('addAgentModal');
+    const host = document.getElementById('agentCreateFormHost');
+    if (
+      !api ||
+      !formApi ||
+      !draft ||
+      !entry ||
+      !workspaceModalElement ||
+      !agentModalElement ||
+      !host
+    )
+      return;
 
     this.workspaceAgentSetupIndex = index;
     this.workspaceAgentSetupOpener = opener || document.activeElement;
-    document.getElementById('addFolderModal')?.classList.add('is-agent-setup-open');
-    layout.hidden = true;
-    view.hidden = false;
+    this.workspaceAgentSetupCloseOptions = null;
+    this.workspaceAgentSetupCompletion = null;
+    this.workspaceAgentSetupFocusField = '';
 
-    const title = document.getElementById('workspaceAgentSetupTitle');
+    agentModalElement.dataset.agentCreateMode = 'workspace-draft';
+    agentModalElement.classList.add('is-workspace-agent-draft');
+    const title = document.getElementById('addAgentModalTitleText');
     if (title) title.textContent = entry.actionLabel || 'Set up agent';
-    const context = document.getElementById('workspaceAgentSetupContext');
-    if (context) {
-      context.textContent = `${entry.originalName} is proposed by ${this.teamView()?.blueprintSummary.templateName || 'this blueprint'}. Changes stay in this workspace draft until final creation.`;
-    }
-    const portrait = document.getElementById('workspaceAgentSetupPortrait');
+
+    const context = document.getElementById('agentCreateDraftContext');
+    const contextTitle = document.getElementById('agentCreateDraftContextTitle');
+    const contextText = document.getElementById('agentCreateDraftContextText');
+    if (context) context.hidden = false;
+    if (contextTitle) contextTitle.textContent = `${entry.originalName} from the blueprint`;
+    const portrait = document.getElementById('agentCreateDraftPortrait');
     if (portrait)
       portrait.innerHTML = this.renderAgentAvatar(entry.identity, 'workspace-agent-avatar');
-
-    const summary = document.getElementById('workspaceAgentSetupSummary');
+    if (contextText) {
+      contextText.textContent = `${entry.originalName} is proposed by ${this.teamView()?.blueprintSummary.templateName || 'this blueprint'}. Changes stay in this workspace draft until final creation.`;
+    }
+    const summary = document.getElementById('agentCreateDraftSummary');
     if (summary) {
       summary.innerHTML = this.workspaceAgentSetupSummaryRows(entry)
         .map(
@@ -4300,7 +4353,7 @@ const sessionManager = {
         )
         .join('');
     }
-    const error = document.getElementById('workspaceAgentSetupError');
+    const error = document.getElementById('agentCreateDraftError');
     if (error) {
       error.hidden = true;
       error.textContent = '';
@@ -4326,41 +4379,121 @@ const sessionManager = {
             systemPrompt: entry.systemPrompt
           };
     this.workspaceAgentSetupForm = formApi.mount(host, {
-      idPrefix: 'workspaceAgentSetup',
+      idPrefix: 'agent',
       profile: formApi.PROFILE_TEMPLATE,
       providers: Array.isArray(this.editAgentProvidersData) ? this.editAgentProvidersData : [],
       values: setupValues
     });
 
-    const save = document.getElementById('workspaceAgentSetupSave');
-    if (save) save.textContent = entry.setupAcknowledged ? 'Save setup' : 'Add to team';
-    for (const id of ['wizardBackBtn', 'wizardNextBtn', 'createFolderBtn']) {
-      const button = document.getElementById(id);
-      if (button) button.hidden = true;
+    const createButton = document.getElementById('createAgentBtn');
+    if (createButton) {
+      if (!createButton.dataset.workspaceDraftOriginalHtml) {
+        createButton.dataset.workspaceDraftOriginalHtml = createButton.innerHTML;
+      }
+      createButton.textContent = entry.setupAcknowledged ? 'Save setup' : 'Add to team';
+      createButton.disabled = false;
     }
-    title?.focus();
+
+    const showAgentModal = () => {
+      agentModalElement.addEventListener(
+        'shown.bs.modal',
+        () => this.workspaceAgentSetupForm?.focus(this.workspaceAgentSetupFocusField || 'name'),
+        { once: true }
+      );
+      bootstrap.Modal.getOrCreateInstance(agentModalElement).show();
+    };
+    workspaceModalElement.dataset.suspendedForAgentSetup = 'true';
+    if (workspaceModalElement.classList.contains('show')) {
+      workspaceModalElement.addEventListener('hidden.bs.modal', showAgentModal, { once: true });
+      bootstrap.Modal.getOrCreateInstance(workspaceModalElement).hide();
+    } else {
+      showAgentModal();
+    }
   },
 
   closeWorkspaceAgentSetup(options = {}) {
-    const view = document.getElementById('workspaceAgentSetupView');
-    const layout = document.getElementById('workspaceTeamLayout');
-    if (!view || view.hidden) return;
-    const opener = this.workspaceAgentSetupOpener;
+    if (!Number.isInteger(this.workspaceAgentSetupIndex)) return;
+    const modalElement = document.getElementById('addAgentModal');
+    if (modalElement?.dataset.workspaceDraftClosing === 'true') return;
+    if (modalElement) modalElement.dataset.workspaceDraftClosing = 'true';
+    this.workspaceAgentSetupCloseOptions = {
+      announce: options.announce !== false && !options.silent,
+      restoreFocus: options.restoreFocus !== false
+    };
+    if (modalElement?.classList.contains('show')) {
+      const modal = bootstrap.Modal.getOrCreateInstance(modalElement);
+      modal.hide();
+      // Bootstrap ignores hide() while its opening transition is in flight.
+      // Queue one retry rather than leaving a fast Save/Cancel stranded.
+      if (modalElement.classList.contains('show')) {
+        modalElement.addEventListener('shown.bs.modal', () => modal.hide(), { once: true });
+      }
+    } else {
+      this.finishWorkspaceAgentSetupModal();
+    }
+  },
+
+  finishWorkspaceAgentSetupModal() {
+    const agentModalElement = document.getElementById('addAgentModal');
+    if (agentModalElement?.dataset.agentCreateMode !== 'workspace-draft') return;
+
     const setupIndex = this.workspaceAgentSetupIndex;
-    document.getElementById('addFolderModal')?.classList.remove('is-agent-setup-open');
-    view.hidden = true;
-    if (layout) layout.hidden = false;
-    document.getElementById('workspaceAgentSetupFormHost')?.replaceChildren();
+    const opener = this.workspaceAgentSetupOpener;
+    const completion = this.workspaceAgentSetupCompletion;
+    const closeOptions = this.workspaceAgentSetupCloseOptions || {
+      announce: true,
+      restoreFocus: true
+    };
+
+    agentModalElement.classList.remove('is-workspace-agent-draft');
+    delete agentModalElement.dataset.agentCreateMode;
+    delete agentModalElement.dataset.workspaceDraftClosing;
+    const title = document.getElementById('addAgentModalTitleText');
+    if (title) title.textContent = 'Create New Agent';
+    const context = document.getElementById('agentCreateDraftContext');
+    if (context) context.hidden = true;
+    const error = document.getElementById('agentCreateDraftError');
+    if (error) {
+      error.hidden = true;
+      error.textContent = '';
+    }
+    const createButton = document.getElementById('createAgentBtn');
+    if (createButton?.dataset.workspaceDraftOriginalHtml) {
+      createButton.innerHTML = createButton.dataset.workspaceDraftOriginalHtml;
+      delete createButton.dataset.workspaceDraftOriginalHtml;
+      createButton.disabled = false;
+    }
+    window.resetStandaloneAgentCreateForm?.();
+
     this.workspaceAgentSetupIndex = null;
     this.workspaceAgentSetupOpener = null;
     this.workspaceAgentSetupForm = null;
-    this.refreshWizardChrome();
-    if (options.announce && !options.silent) {
-      this.announceWorkspaceTeamChange('Returned to the team without saving setup changes.');
-    }
-    if (options.restoreFocus !== false) {
-      const currentOpener = document.getElementById(`team-agent-setup-${setupIndex}`) || opener;
-      if (currentOpener && typeof currentOpener.focus === 'function') currentOpener.focus();
+    this.workspaceAgentSetupCloseOptions = null;
+    this.workspaceAgentSetupCompletion = null;
+    this.workspaceAgentSetupFocusField = '';
+
+    const workspaceModalElement = document.getElementById('addFolderModal');
+    if (workspaceModalElement) delete workspaceModalElement.dataset.suspendedForAgentSetup;
+    this.refreshWorkspaceReview();
+
+    const afterResume = () => {
+      if (completion) {
+        this.announceWorkspaceTeamChange(completion.announcement);
+        this.showToast(completion.toast, 'success');
+      } else if (closeOptions.announce) {
+        this.announceWorkspaceTeamChange('Returned to the team without saving setup changes.');
+      }
+      if (closeOptions.restoreFocus) {
+        const currentOpener = document.getElementById(`team-agent-setup-${setupIndex}`) || opener;
+        currentOpener?.focus?.();
+      }
+    };
+    if (workspaceModalElement) {
+      workspaceModalElement.dataset.resumingFromAgentSetup = 'true';
+      workspaceModalElement.addEventListener('shown.bs.modal', afterResume, { once: true });
+      bootstrap.Modal.getOrCreateInstance(workspaceModalElement).show();
+    } else {
+      afterResume();
     }
   },
 
@@ -4385,7 +4518,7 @@ const sessionManager = {
       draftEntry.staleOccupiedName &&
       api.agentKey(values.name) === api.agentKey(draftEntry.staleOccupiedName)
     ) {
-      const error = document.getElementById('workspaceAgentSetupError');
+      const error = document.getElementById('agentCreateDraftError');
       if (error) {
         error.textContent = `“${draftEntry.staleOccupiedName}” now belongs to a saved agent. Choose a different name for this new definition.`;
         error.hidden = false;
@@ -4398,7 +4531,7 @@ const sessionManager = {
       !draftEntry.planChanged &&
       api.agentKey(values.name) === api.agentKey(originalName)
     ) {
-      const error = document.getElementById('workspaceAgentSetupError');
+      const error = document.getElementById('agentCreateDraftError');
       if (error) {
         error.textContent = `Give this copy a different name from “${originalName}”. The saved agent is reused as-is and never modified.`;
         error.hidden = false;
@@ -4411,7 +4544,7 @@ const sessionManager = {
       entry => entry.templateAgentIndex !== index && entry.key === api.agentKey(values.name)
     );
     if (collision) {
-      const error = document.getElementById('workspaceAgentSetupError');
+      const error = document.getElementById('agentCreateDraftError');
       if (error) {
         error.textContent = `Another agent in this team is already called “${values.name}”. Choose another name.`;
         error.hidden = false;
@@ -4420,16 +4553,21 @@ const sessionManager = {
       return;
     }
 
+    const saveButton = document.getElementById('createAgentBtn');
+    if (saveButton?.disabled) return;
+    if (saveButton) saveButton.disabled = true;
     api.saveSetup(draft, index, values);
     const name = values.name;
-    this.closeWorkspaceAgentSetup({ restoreFocus: false, silent: true });
-    this.refreshWorkspaceReview();
-    this.announceWorkspaceTeamChange(
-      isReuse && api.agentKey(name) !== api.agentKey(originalName)
-        ? `${name} is staged as a new agent; ${originalName} remains unchanged.`
-        : `${name} setup saved for this workspace.`
-    );
-    document.getElementById(`team-agent-setup-${index}`)?.focus();
+    this.workspaceAgentSetupCompletion = {
+      announcement:
+        isReuse && api.agentKey(name) !== api.agentKey(originalName)
+          ? `${name} is staged as a new agent; ${originalName} remains unchanged.`
+          : `${name} setup saved for this workspace.`,
+      toast: draftEntry.setupAcknowledged
+        ? `${name} setup updated in the workspace draft.`
+        : `${name} added to the team draft. It will be created with the workspace.`
+    };
+    this.closeWorkspaceAgentSetup({ restoreFocus: true, silent: true });
   },
 
   async retryWorkspaceAgentCreation(index) {
@@ -4866,6 +5004,7 @@ const sessionManager = {
       this.announceWorkspaceTeamChange(
         `${canonicalName} added. ${this.workspaceTeamSummaryText(this.teamView())}`
       );
+      this.showToast(`${canonicalName} added to the workspace draft.`, 'success');
     }
     this.announceResolvedPrimary();
   },
@@ -5223,6 +5362,46 @@ const sessionManager = {
       );
     }
     return parts.join(' · ');
+  },
+
+  // Converts the reviewed request into an authoritative success summary. A
+  // successful strict create means every `create` expectation became a new
+  // reusable definition and every `reuse`/existing selection was attached.
+  // Keep this aggregate so a large blueprint produces one useful toast instead
+  // of a burst of per-agent notifications.
+  workspaceTeamSuccessParts(teamPayload) {
+    const expectations = Array.isArray(teamPayload?.template_agent_review?.expectations)
+      ? teamPayload.template_agent_review.expectations
+      : [];
+    const created = [];
+    const attached = [];
+    const seenCreated = new Set();
+    const seenAttached = new Set();
+    const addName = (target, seen, rawName) => {
+      const name = String(rawName || '').trim();
+      const key = name.toLocaleLowerCase();
+      if (!name || seen.has(key)) return;
+      seen.add(key);
+      target.push(name);
+    };
+
+    for (const expectation of expectations) {
+      if (expectation?.action === 'create') {
+        addName(created, seenCreated, expectation.name);
+      } else if (expectation?.action === 'reuse') {
+        addName(attached, seenAttached, expectation.name);
+      }
+    }
+    for (const name of teamPayload?.existing_agent_names || []) {
+      addName(attached, seenAttached, name);
+    }
+
+    const parts = [];
+    if (created.length === 1) parts.push(`${created[0]} created and added`);
+    else if (created.length > 1) parts.push(`${created.length} agents created and added`);
+    if (attached.length === 1) parts.push(`${attached[0]} added`);
+    else if (attached.length > 1) parts.push(`${attached.length} saved agents added`);
+    return parts;
   },
 
   /**
@@ -6235,10 +6414,11 @@ const sessionManager = {
           if (Number.isInteger(index)) this.openWorkspaceAgentSetup(index, opener);
           const message = String(result.error || 'Review this agent setup and try again.').trim();
           if (this.workspaceAgentSetupForm && field) {
+            this.workspaceAgentSetupFocusField = field;
             this.workspaceAgentSetupForm.setError?.(field, message);
             this.workspaceAgentSetupForm.focus?.(field);
           } else {
-            const error = document.getElementById('workspaceAgentSetupError');
+            const error = document.getElementById('agentCreateDraftError');
             if (error) {
               error.textContent = message;
               error.hidden = false;
@@ -6310,6 +6490,13 @@ const sessionManager = {
         throw new Error(result.error || fallbackMessage);
       }
 
+      const teamSuccessParts = importEnabled
+        ? []
+        : this.workspaceTeamSuccessParts(confirmedTeamPayload);
+      const hasReviewedTemplateAgentOutcome = Boolean(
+        confirmedTeamPayload?.template_agent_review?.expectations?.length
+      );
+
       // The workspace exists even when project-template instantiation failed;
       // surface the non-fatal warning.
       if (typeof result.project_warning === 'string' && result.project_warning) {
@@ -6323,7 +6510,7 @@ const sessionManager = {
       }
       // A roster entry matched an existing agent by name; the existing
       // definition was reused instead of the template's (PRD FR7).
-      if (Array.isArray(result.agent_reuse_notices)) {
+      if (Array.isArray(result.agent_reuse_notices) && !hasReviewedTemplateAgentOutcome) {
         result.agent_reuse_notices
           .filter(msg => typeof msg === 'string' && msg)
           .forEach(msg => this.showToast(msg, 'info'));
@@ -6444,9 +6631,10 @@ const sessionManager = {
         askOriSeedResult.tasksCreated > 0 ||
         askOriSeedResult.notesCreated > 0 ||
         seededStarterTasks > 0 ||
-        Array.isArray(assistantHireResult?.roster)
+        Array.isArray(assistantHireResult?.roster) ||
+        teamSuccessParts.length > 0
       ) {
-        const summaryParts = [];
+        const summaryParts = [...teamSuccessParts];
         if (bootstrapApplyResult.invitedAgents > 0)
           summaryParts.push(
             `${bootstrapApplyResult.invitedAgents} agent${bootstrapApplyResult.invitedAgents === 1 ? '' : 's'} invited`

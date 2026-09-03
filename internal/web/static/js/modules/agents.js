@@ -33,6 +33,16 @@ function ensureStandaloneAgentCreateForm() {
   }
   return standaloneAgentCreateForm;
 }
+
+// Create Workspace temporarily mounts the template profile into the same modal
+// host. Restore a fresh standalone controller when that draft-only use closes;
+// retaining the old controller would leave its profile pointed at replaced DOM.
+function resetStandaloneAgentCreateForm() {
+  const host = document.getElementById('agentCreateFormHost');
+  if (host) host.replaceChildren();
+  standaloneAgentCreateForm = null;
+  return ensureStandaloneAgentCreateForm();
+}
 // The protected system assistant. One identity: the guide and the working
 // assistant merged under "Ask Ori" (Issue #350). This must match the canonical
 // name in internal/systemassistant — the backend migrates existing records to
@@ -1330,6 +1340,12 @@ function describeAgentCreationFollowUp(summary) {
 
 // Create new agent
 async function createNewAgent() {
+  // In workspace-draft mode sessions.js owns this modal's submit and stages the
+  // values for the final atomic workspace request. This backstop ensures a
+  // listener-order regression can never persist an agent early.
+  if (document.getElementById('addAgentModal')?.dataset.agentCreateMode === 'workspace-draft') {
+    return;
+  }
   const sharedForm = ensureStandaloneAgentCreateForm();
   const agentNameInput = document.getElementById('agentName');
   const agentSystemPromptInput = document.getElementById('agentSystemPrompt');
@@ -2774,6 +2790,7 @@ async function loadAgentMCPServers(agentName, accordionId) {
 
 // Initialize agent management when DOM is ready
 window.showAddAgentModal = showAddAgentModal;
+window.resetStandaloneAgentCreateForm = resetStandaloneAgentCreateForm;
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', setupAgentManagement);
