@@ -37,6 +37,16 @@
     ];
   }
 
+  function assistantReturnView(trigger, assistantPanel) {
+    const fromAssistant = Boolean(
+      trigger?.closest?.('#personalAssistantPanel') && assistantPanel?._state?.open
+    );
+    return {
+      fromAssistant,
+      view: fromAssistant ? assistantPanel?._state?.activeView || 'today' : 'today'
+    };
+  }
+
   async function responseJSON(response) {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -78,6 +88,8 @@
     let state = null;
     let busy = false;
     let lastTrigger = null;
+    let returnToAssistant = false;
+    let returnAssistantView = 'today';
 
     function announce(message, tone) {
       if (!els.status) return;
@@ -335,11 +347,18 @@
 
     function open(trigger) {
       lastTrigger = trigger || doc.activeElement;
+      const assistantPanel = global.PersonalAssistantPanel;
+      const returnView = assistantReturnView(trigger, assistantPanel);
+      returnToAssistant = returnView.fromAssistant;
+      returnAssistantView = returnView.view;
+      if (returnToAssistant && typeof assistantPanel.close === 'function') {
+        assistantPanel.close({ restoreFocus: false });
+      }
       panel.hidden = false;
       load().catch(error =>
         announce(error.message || 'Working agreement is unavailable.', 'error')
       );
-      if (typeof panel.scrollIntoView === 'function') panel.scrollIntoView({ block: 'start' });
+      if (typeof panel.scrollTo === 'function') panel.scrollTo({ top: 0 });
       if (els.close && typeof els.close.focus === 'function') els.close.focus();
     }
 
@@ -347,7 +366,22 @@
       panel.hidden = true;
       const trigger = lastTrigger;
       lastTrigger = null;
-      if (trigger && doc.contains(trigger) && typeof trigger.focus === 'function') trigger.focus();
+      if (returnToAssistant && global.PersonalAssistantPanel?.open) {
+        returnToAssistant = false;
+        const launcher = doc.getElementById('personalAssistantLauncher');
+        global.PersonalAssistantPanel.open(launcher, {
+          view: returnAssistantView,
+          focusTab: true
+        });
+        return;
+      }
+      returnToAssistant = false;
+      if (trigger && doc.contains(trigger) && typeof trigger.focus === 'function') {
+        trigger.focus();
+        return;
+      }
+      const launcher = doc.getElementById('personalAssistantLauncher');
+      if (launcher && !launcher.hidden && typeof launcher.focus === 'function') launcher.focus();
     }
 
     if (els.close) els.close.addEventListener('click', close);
@@ -370,13 +404,17 @@
     }
 
     doc.addEventListener('keydown', event => {
-      if (event.key === 'Escape' && !panel.hidden) close();
+      const modalOpen = Boolean(
+        event.target?.closest?.('.modal') || doc.querySelector?.('.modal.show')
+      );
+      if (event.key !== 'Escape' || panel.hidden || modalOpen) return;
+      close();
     });
 
     return { open, close, load, renderState, renderCapabilities };
   }
 
-  const api = { mount, splitList, conflictView, capabilityCopy };
+  const api = { mount, splitList, conflictView, capabilityCopy, assistantReturnView };
   global.PersonalAssistantContinuity = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (global.document) {

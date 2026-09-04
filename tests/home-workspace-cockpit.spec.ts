@@ -674,7 +674,9 @@ test.describe('Home workspace cockpit', () => {
     await page.locator('#oriGuideMapTrigger').click();
     await page.locator('#oriGuideInput').fill('What needs attention today?');
     await page.locator('#oriGuideSend').click();
-    await expect(page.locator('#homeAssistantThinkingModal')).toBeVisible();
+    await expect(page.locator('#oriGuidePanel')).toBeVisible();
+    await expect(page.locator('#oriGuideReply')).not.toBeEmpty();
+    await expect(page.locator('#homeAssistantThinkingModal')).toBeHidden();
 
     await expect(page.locator('#cockpitContextModal')).toBeHidden();
     await expect(page.locator('.modal-backdrop')).toHaveCount(0);
@@ -1115,7 +1117,8 @@ test.describe('group Map layout context (#346)', () => {
     const district = page.locator(`.ws-map-district[data-group-id="${group}"]`);
     await district.waitFor({ timeout: 15000 });
     await page.waitForFunction(() => window.OriHomeCockpit?.getState?.()?.loading === false);
-    await district.locator('.ws-map-district-tag').click();
+    const districtTag = district.locator('.ws-map-district-tag');
+    await districtTag.evaluate((element: HTMLButtonElement) => element.click());
     await expect(page.locator('#cockpitContextModal')).toBeVisible({ timeout: 5000 });
     await expect(page.locator('[data-rail-map-layout]')).toBeVisible({ timeout: 5000 });
   }

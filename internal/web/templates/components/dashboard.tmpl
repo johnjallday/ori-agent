@@ -1,72 +1,5 @@
 <!-- Ori Dashboard — Command Bridge -->
 <div class="home-command-bridge" data-first-run="{{if .Extra.IsFirstRun}}true{{else}}false{{end}}">
-  <!-- Server-authoritative PAF Home region. Hidden until the status read proves
-       relationship status, so Home never flashes or inherits assistant copy. -->
-  <section id="personalAssistantToday" class="personal-assistant-today" data-state="loading"
-           aria-labelledby="personalAssistantTodayTitle" hidden>
-    <header class="personal-assistant-today__header">
-      <div>
-        <span id="personalAssistantTodayEyebrow" class="personal-assistant-today__eyebrow">Today from your assistant</span>
-        <h1 id="personalAssistantTodayTitle" class="personal-assistant-today__title">Today</h1>
-        <p id="personalAssistantTodayMeta" class="personal-assistant-today__meta"></p>
-      </div>
-      <nav class="personal-assistant-today__links" aria-label="Personal assistant details">
-        <a id="personalAssistantTodayHQ" href="/" hidden>Personal HQ</a>
-        <a id="personalAssistantTodayAgreement" href="/" hidden>Working agreement</a>
-        <a id="personalAssistantTodayMemory" href="/" hidden>Memory</a>
-        <a id="personalAssistantTodayAdvanced" href="/agents">Advanced</a>
-      </nav>
-    </header>
-    <div id="personalAssistantTodayBanner" class="personal-assistant-today__banner" role="status" aria-live="polite"></div>
-    <!-- The domain offer, made once the assistant exists rather than during the
-         hire. Filled from the server-side specialist mapping when a detected
-         app suggests a domain: no app or domain name is hardcoded here, and an
-         empty mapping leaves the whole region hidden. -->
-    <section id="personalAssistantSpecialistOffer" class="pa-specialist-offer" data-decision="unanswered"
-             aria-labelledby="personalAssistantSpecialistOfferHeadline" hidden>
-      <p id="personalAssistantSpecialistOfferHeadline" class="pa-specialist-offer__headline"></p>
-      <p id="personalAssistantSpecialistOfferQuestion" class="pa-specialist-offer__question"></p>
-      <p id="personalAssistantSpecialistOfferAccepted" class="pa-specialist-offer__accepted" role="status" aria-live="polite" hidden></p>
-      <div id="personalAssistantSpecialistOfferActions" class="pa-specialist-offer__actions">
-        <button type="button" class="btn btn-sm btn-primary" id="personalAssistantSpecialistAcceptBtn">Yes</button>
-        <button type="button" class="btn btn-sm btn-outline-secondary" id="personalAssistantSpecialistDeclineBtn">No thanks</button>
-      </div>
-      <p id="personalAssistantSpecialistOfferError" class="pa-specialist-offer__error" role="alert" hidden></p>
-    </section>
-    <!-- Detection is a prior, not a fact: a producer whose DAW is on another
-         machine reaches the same domain from here. -->
-    <p id="personalAssistantSpecialistManual" class="pa-specialist-manual" hidden></p>
-    <div id="personalAssistantTodayBriefMount"></div>
-    <div id="personalAssistantTodaySections" class="personal-assistant-today__sections">
-      <section aria-labelledby="personalAssistantTodayDecisionsTitle">
-        <h2 id="personalAssistantTodayDecisionsTitle">Decisions</h2>
-        <ul id="personalAssistantTodayDecisions"></ul>
-      </section>
-      <section aria-labelledby="personalAssistantTodayPrioritiesTitle">
-        <h2 id="personalAssistantTodayPrioritiesTitle">Priorities</h2>
-        <ul id="personalAssistantTodayPriorities"></ul>
-      </section>
-      <section aria-labelledby="personalAssistantTodayFollowUpsTitle">
-        <h2 id="personalAssistantTodayFollowUpsTitle">Follow-ups</h2>
-        <ul id="personalAssistantTodayFollowUps"></ul>
-      </section>
-      <section aria-labelledby="personalAssistantTodayResultsTitle">
-        <h2 id="personalAssistantTodayResultsTitle">Results to review</h2>
-        <ul id="personalAssistantTodayResults"></ul>
-      </section>
-      <!-- Present only when a domain specialist's workspace exists. Your
-           assistant reports what happened here and names who did it; it cannot
-           hand work to that agent, so nothing in this section may suggest it
-           can. Addressing the specialist directly is the first-class route and
-           the link below is exactly that, not a workaround. -->
-      <section id="personalAssistantTodayStudioSection" aria-labelledby="personalAssistantTodayStudioTitle" hidden>
-        <h2 id="personalAssistantTodayStudioTitle">From your studio</h2>
-        <ul id="personalAssistantTodayStudio"></ul>
-        <p id="personalAssistantTodayStudioNote" class="personal-assistant-today__meta"></p>
-      </section>
-    </div>
-  </section>
-
   <!--
     Home's command strip used to sit here: a second composer, labelled
     Workspace Manager, beside the global Ask Ori launcher. Issue #350 retired
@@ -78,67 +11,6 @@
        as mutually exclusive peer views). Issue #366 moved selected context to
        the on-demand modal after this grid, so the theatre always owns the full
        cockpit width. The Ask Ori command bridge stays visible in both views. -->
-  <section id="personalAssistantContinuity" class="pa-continuity" role="dialog" aria-modal="false"
-           aria-labelledby="personalAssistantContinuityTitle" hidden>
-    <header class="pa-continuity__header">
-      <div>
-        <p class="home-command__eyebrow">Working agreement</p>
-        <h2 id="personalAssistantContinuityTitle">How your assistant works with you</h2>
-        <p id="personalAssistantContinuitySummary">Review the mandate, Daily Brief rhythm, memory, and optional sources.</p>
-      </div>
-      <button type="button" id="personalAssistantContinuityClose" class="pa-continuity__close" aria-label="Close working agreement">×</button>
-    </header>
-    <div id="personalAssistantContinuityStatus" class="pa-continuity__status" role="status" aria-live="polite"></div>
-    <form id="personalAssistantContinuityForm" class="pa-continuity__form"
-          aria-describedby="personalAssistantContinuityStatus">
-      <label>Assistant name
-        <input id="personalAssistantContinuityName" type="text" maxlength="100" autocomplete="off">
-      </label>
-      <label>Mandate
-        <textarea id="personalAssistantContinuityMandate" maxlength="1000" rows="3"></textarea>
-      </label>
-      <label>Focus areas <span>Comma-separated</span>
-        <input id="personalAssistantContinuityFocus" type="text" autocomplete="off">
-      </label>
-      <div class="pa-continuity__rhythm">
-        <label>Timezone
-          <input id="personalAssistantContinuityTimezone" type="text" autocomplete="off" placeholder="America/New_York">
-        </label>
-        <label>Days <span>mon, tue, wed…</span>
-          <input id="personalAssistantContinuityDays" type="text" autocomplete="off">
-        </label>
-        <label>Brief time
-          <input id="personalAssistantContinuityTime" type="time">
-        </label>
-      </div>
-      <label>Brief scope
-        <select id="personalAssistantContinuityScope">
-          <option value="all">All current workspaces</option>
-          <option value="personal_hq">Personal HQ only</option>
-          <option value="selected">Keep the current selected workspace set</option>
-        </select>
-      </label>
-      <label class="pa-continuity__check"><input id="personalAssistantContinuityFuture" type="checkbox"> Include workspaces I create in the future</label>
-      <label class="pa-continuity__check"><input id="personalAssistantContinuityEnabled" type="checkbox"> Generate the Daily Brief on this schedule</label>
-      <label class="pa-continuity__check"><input id="personalAssistantContinuityNotify" type="checkbox"> Add an Action Center notice when a scheduled brief is ready</label>
-      <p id="personalAssistantContinuityNext" class="pa-continuity__next"></p>
-      <div class="pa-continuity__actions">
-        <button id="personalAssistantContinuitySave" type="submit" class="btn btn-primary">Save working agreement</button>
-        <button id="personalAssistantContinuityPause" type="button" class="btn btn-outline-secondary">Pause proactive routine</button>
-      </div>
-    </form>
-    <nav class="pa-continuity__links" aria-label="Assistant context links">
-      <a id="personalAssistantContinuityProfile" href="/profile">Inspect global Profile</a>
-      <a id="personalAssistantContinuityMemory" href="/">Inspect Personal HQ Memory</a>
-      <a href="/agents">Advanced agent details</a>
-    </nav>
-    <section aria-labelledby="personalAssistantCapabilitiesTitle">
-      <h3 id="personalAssistantCapabilitiesTitle">Optional information sources</h3>
-      <p>Missing connections never block your assistant or deterministic Daily Brief.</p>
-      <div id="personalAssistantCapabilities" class="pa-capabilities" aria-live="polite"></div>
-    </section>
-  </section>
-
   <div class="home-cockpit" id="homeCockpit" data-view="map" data-state="loading">
     <section class="cockpit-workspace-area" id="cockpitWorkspaceArea" aria-labelledby="cockpitWorkspaceAreaTitle">
       <!--
@@ -282,41 +154,6 @@
               </div>
             </header>
             <div id="homePluginUpdatesBody" class="home-plugin-updates-list"></div>
-          </section>
-
-          <!-- Daily Brief: the primary Home orientation region once a valid
-               Personal HQ is designated. Hidden entirely with no HQ — no
-               hidden brief store is created and no workspace is silently
-               selected. Populated/wired by home-daily-brief.js. -->
-          <section id="homeDailyBrief" class="home-daily-brief" data-state="loading" aria-labelledby="homeDailyBriefTitle" hidden>
-            <header class="home-daily-brief-header">
-              <div class="home-daily-brief-heading">
-                <span class="home-daily-brief-eyebrow">Daily Brief</span>
-                <h2 id="homeDailyBriefTitle" class="home-daily-brief-title">Today</h2>
-                <p id="homeDailyBriefMeta" class="home-daily-brief-meta"></p>
-              </div>
-              <!-- Refresh is the only action that earns permanent space in a
-                   ~320px flyout; Open My HQ and Brief settings live one
-                   disclosure away. A native <details> rather than a JS menu,
-                   so it costs no script and stays keyboard- and
-                   screen-reader-operable for free. -->
-              <div class="home-daily-brief-actions">
-                <button type="button" id="homeDailyBriefRefreshBtn" class="modern-btn modern-btn-primary modern-btn-sm">Refresh</button>
-                <details class="home-daily-brief-menu" id="homeDailyBriefMenu">
-                  <summary class="home-daily-brief-menu-toggle" aria-label="More Daily Brief actions" title="More actions">
-                    <span aria-hidden="true">&#8943;</span>
-                  </summary>
-                  <div class="home-daily-brief-menu-panel">
-                    <a id="homeDailyBriefOpenHQ" href="/" class="home-daily-brief-menu-item">Open My HQ</a>
-                    <button type="button" id="homeDailyBriefSettingsBtn" class="home-daily-brief-menu-item">Brief settings</button>
-                  </div>
-                </details>
-              </div>
-            </header>
-            <div id="homeDailyBriefBanner" class="home-daily-brief-banner" role="status" aria-live="polite" hidden></div>
-            <div id="homeDailyBriefBody" class="home-daily-brief-body" aria-live="polite">
-              <div class="home-daily-brief-placeholder">Loading your Daily Brief…</div>
-            </div>
           </section>
 
           <!-- Calendar Ops portal: a second, independent Home orientation
@@ -476,6 +313,70 @@
 
   </div>
 </div>
+
+<!-- Working Agreement is an on-demand overlay, not a Home cockpit row. Its
+     canonical controller and APIs remain unchanged while opening it can no
+     longer move or resize the Workspace Map. -->
+<section id="personalAssistantContinuity" class="pa-continuity" role="dialog" aria-modal="false"
+         aria-labelledby="personalAssistantContinuityTitle" hidden>
+  <header class="pa-continuity__header">
+    <div>
+      <p class="home-command__eyebrow">Working agreement</p>
+      <h2 id="personalAssistantContinuityTitle">How your assistant works with you</h2>
+      <p id="personalAssistantContinuitySummary">Review the mandate, Daily Brief rhythm, memory, and optional sources.</p>
+    </div>
+    <button type="button" id="personalAssistantContinuityClose" class="pa-continuity__close" aria-label="Close working agreement">×</button>
+  </header>
+  <div id="personalAssistantContinuityStatus" class="pa-continuity__status" role="status" aria-live="polite"></div>
+  <form id="personalAssistantContinuityForm" class="pa-continuity__form"
+        aria-describedby="personalAssistantContinuityStatus">
+    <label>Assistant name
+      <input id="personalAssistantContinuityName" type="text" maxlength="100" autocomplete="off">
+    </label>
+    <label>Mandate
+      <textarea id="personalAssistantContinuityMandate" maxlength="1000" rows="3"></textarea>
+    </label>
+    <label>Focus areas <span>Comma-separated</span>
+      <input id="personalAssistantContinuityFocus" type="text" autocomplete="off">
+    </label>
+    <div class="pa-continuity__rhythm">
+      <label>Timezone
+        <input id="personalAssistantContinuityTimezone" type="text" autocomplete="off" placeholder="America/New_York">
+      </label>
+      <label>Days <span>mon, tue, wed…</span>
+        <input id="personalAssistantContinuityDays" type="text" autocomplete="off">
+      </label>
+      <label>Brief time
+        <input id="personalAssistantContinuityTime" type="time">
+      </label>
+    </div>
+    <label>Brief scope
+      <select id="personalAssistantContinuityScope">
+        <option value="all">All current workspaces</option>
+        <option value="personal_hq">Personal HQ only</option>
+        <option value="selected">Keep the current selected workspace set</option>
+      </select>
+    </label>
+    <label class="pa-continuity__check"><input id="personalAssistantContinuityFuture" type="checkbox"> Include workspaces I create in the future</label>
+    <label class="pa-continuity__check"><input id="personalAssistantContinuityEnabled" type="checkbox"> Generate the Daily Brief on this schedule</label>
+    <label class="pa-continuity__check"><input id="personalAssistantContinuityNotify" type="checkbox"> Add an Action Center notice when a scheduled brief is ready</label>
+    <p id="personalAssistantContinuityNext" class="pa-continuity__next"></p>
+    <div class="pa-continuity__actions">
+      <button id="personalAssistantContinuitySave" type="submit" class="btn btn-primary">Save working agreement</button>
+      <button id="personalAssistantContinuityPause" type="button" class="btn btn-outline-secondary">Pause proactive routine</button>
+    </div>
+  </form>
+  <nav class="pa-continuity__links" aria-label="Assistant context links">
+    <a id="personalAssistantContinuityProfile" href="/profile">Inspect global Profile</a>
+    <a id="personalAssistantContinuityMemory" href="/">Inspect Personal HQ Memory</a>
+    <a href="/agents">Advanced agent details</a>
+  </nav>
+  <section aria-labelledby="personalAssistantCapabilitiesTitle">
+    <h3 id="personalAssistantCapabilitiesTitle">Optional information sources</h3>
+    <p>Missing connections never block your assistant or deterministic Daily Brief.</p>
+    <div id="personalAssistantCapabilities" class="pa-capabilities" aria-live="polite"></div>
+  </section>
+</section>
 
 <!-- Workspace context modal (Issue #366). It is outside #homeCockpit and
        #cockpitMap so Map remounts and modal visibility never alter the theatre

@@ -46,9 +46,11 @@ async function mockCompletedOnboarding(page: Page) {
 
 async function mockAssistantState(
   page: Page,
-  relationshipState: 'active' | 'paused' | 'repair_needed' = 'active',
+  relationshipState: 'active' | 'paused' | 'needs_hq' | 'repair_needed' = 'active',
   todayState = relationshipState,
-  modelAvailable = true
+  modelAvailable = true,
+  displayName = 'Atlas',
+  dense = false
 ) {
   await page.route(/\/api\/personal-assistant$/, route =>
     route.fulfill({
@@ -59,7 +61,7 @@ async function mockAssistantState(
           state: relationshipState,
           state_version: 7,
           assistant_id: 'assistant-stable',
-          display_name: 'Atlas',
+          display_name: displayName,
           hq_workspace_id: 'hq-1',
           mandate: 'Keep commitments visible.',
           focus_areas: ['plan_my_day'],
@@ -91,7 +93,7 @@ async function mockAssistantState(
         today: {
           state: todayState,
           relationship_state: relationshipState,
-          display_name: 'Atlas',
+          display_name: displayName,
           hq_workspace_id: 'hq-1',
           hq_workspace_slug: 'personal-hq',
           model: {
@@ -100,7 +102,16 @@ async function mockAssistantState(
           },
           brief: { health: { status: 'healthy_empty' }, items: [] },
           decisions: { health: { status: 'healthy_empty' }, items: [] },
-          priorities: { health: { status: 'healthy_empty' }, items: [] },
+          priorities: {
+            health: { status: dense ? 'available' : 'healthy_empty' },
+            items: dense
+              ? Array.from({ length: 10 }, (_, index) => ({
+                  title: `A deliberately long priority ${index + 1} that must wrap inside the assistant drawer without widening Home`,
+                  detail:
+                    'This supporting detail is intentionally verbose so short desktop and phone layouts must use internal scrolling.'
+                }))
+              : []
+          },
           follow_ups: { health: { status: 'healthy_empty' }, items: [] },
           results: { health: { status: 'healthy_empty' }, items: [] },
           links: {
@@ -140,6 +151,20 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await page.keyboard.press('Enter');
     const assistantDialog = page.getByRole('dialog', { name: 'Atlas' });
     await expect(assistantDialog).toBeVisible();
+    const todayTab = page.getByRole('tab', { name: 'Today' });
+    const askTab = page.getByRole('tab', { name: 'Ask' });
+    await expect(todayTab).toBeFocused();
+    await expect(todayTab).toHaveAttribute('aria-selected', 'true');
+    await todayTab.press('ArrowRight');
+    await expect(askTab).toBeFocused();
+    await expect(askTab).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#personalAssistantInput')).not.toBeFocused();
+    await askTab.press('Home');
+    await expect(todayTab).toBeFocused();
+    await todayTab.press('End');
+    await expect(askTab).toBeFocused();
+    await expect(page.locator('#personalAssistantInput')).not.toBeFocused();
+    await askTab.press('Enter');
     await expect(page.locator('#personalAssistantInput')).toBeFocused();
     await expect(page.locator('#personalAssistantPanelStatus')).toHaveAttribute(
       'aria-live',
@@ -151,6 +176,7 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await expect(assistantDialog).toBeHidden();
     await expect(launcher).toBeFocused();
 
+    await launcher.press('Enter');
     const agreementLink = page.getByRole('link', { name: 'Working agreement' });
     await agreementLink.focus();
     await page.keyboard.press('Enter');
@@ -165,7 +191,8 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     );
     await page.keyboard.press('Escape');
     await expect(agreement).toBeHidden();
-    await expect(agreementLink).toBeFocused();
+    await expect(assistantDialog).toBeVisible();
+    await expect(todayTab).toBeFocused();
   });
 
   for (const scenario of [
@@ -174,34 +201,42 @@ test.describe('Personal Assistant Foundation accessibility', () => {
       relationship: 'paused' as const,
       today: 'paused',
       model: true,
-      copy: /Paused/i
+      copy: /Paused/i,
+      cue: /Paused/i
     },
     {
       name: 'partial',
       relationship: 'active' as const,
       today: 'partial',
       model: true,
-      copy: /partial|unavailable|current/i
+      copy: /partial|unavailable|current/i,
+      cue: /Sources unavailable/i
     },
     {
       name: 'no model',
       relationship: 'active' as const,
       today: 'model_unavailable',
       model: false,
-      copy: /model|deterministic/i
+      copy: /model|deterministic/i,
+      cue: /Model unavailable/i
     },
     {
       name: 'repair',
       relationship: 'repair_needed' as const,
       today: 'repair_needed',
       model: true,
-      copy: /repair/i
+      copy: /repair/i,
+      cue: /Repair needed/i
     }
   ]) {
     test(`${scenario.name} state is stated in text and never color alone`, async ({ page }) => {
       await mockCompletedOnboarding(page);
       await mockAssistantState(page, scenario.relationship, scenario.today, scenario.model);
       await page.goto('/');
+      const launcher = page.locator('#personalAssistantLauncher');
+      await expect(launcher).toBeVisible();
+      await expect(page.locator('#personalAssistantLauncherStatus')).toContainText(scenario.cue);
+      await launcher.click();
       await expect(page.locator('#personalAssistantToday')).toBeVisible();
       await expect(page.locator('#personalAssistantToday')).toContainText(scenario.copy);
       const overflow = await page.evaluate(
@@ -210,6 +245,95 @@ test.describe('Personal Assistant Foundation accessibility', () => {
       expect(overflow).toBe(false);
     });
   }
+
+  test('drawer and bottom sheet stay bounded with long content at supported viewports', async ({
+    page
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await mockCompletedOnboarding(page);
+    await mockAssistantState(
+      page,
+      'active',
+      'active',
+      true,
+      'Atlas with a deliberately long assistant name that must wrap safely',
+      true
+    );
+    await page.goto('/');
+    await page.locator('#personalAssistantLauncher').click();
+    await expect(page.locator('#personalAssistantToday')).toBeVisible();
+
+    for (const viewport of [
+      { width: 1440, height: 900, mode: 'drawer' },
+      { width: 1280, height: 600, mode: 'drawer' },
+      { width: 900, height: 700, mode: 'drawer' },
+      { width: 390, height: 844, mode: 'sheet' }
+    ]) {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await page.evaluate(
+        () =>
+          new Promise<void>(resolve =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+          )
+      );
+      await expect
+        .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+        .toBeLessThanOrEqual(viewport.width + 1);
+      const layout = await page.evaluate(() => {
+        const panel = document.getElementById('personalAssistantPanel')!.getBoundingClientRect();
+        const close = document.getElementById('personalAssistantClose')!.getBoundingClientRect();
+        const navbar = document.querySelector('nav.navbar')!.getBoundingClientRect();
+        const view = document.getElementById('personalAssistantTodayPanel')!;
+        return {
+          panel: {
+            left: panel.left,
+            top: panel.top,
+            right: panel.right,
+            bottom: panel.bottom,
+            width: panel.width
+          },
+          close: { top: close.top, right: close.right, bottom: close.bottom },
+          navbarBottom: navbar.bottom,
+          internallyScrollable: view.scrollHeight > view.clientHeight,
+          pageWidth: document.documentElement.scrollWidth
+        };
+      });
+      expect(
+        layout.panel.top,
+        `${viewport.width}x${viewport.height} drawer must clear navbar at ${layout.navbarBottom}`
+      ).toBeGreaterThanOrEqual(layout.navbarBottom - 1);
+      expect(layout.panel.right).toBeLessThanOrEqual(viewport.width + 1);
+      expect(layout.panel.bottom).toBeLessThanOrEqual(viewport.height + 1);
+      expect(layout.close.top).toBeGreaterThanOrEqual(layout.panel.top);
+      expect(layout.close.right).toBeLessThanOrEqual(viewport.width);
+      expect(layout.close.bottom).toBeLessThanOrEqual(viewport.height);
+      expect(layout.pageWidth).toBeLessThanOrEqual(viewport.width + 1);
+      expect(layout.internallyScrollable).toBe(true);
+      if (viewport.mode === 'sheet') {
+        expect(layout.panel.left).toBeLessThanOrEqual(1);
+        expect(layout.panel.width).toBeGreaterThanOrEqual(viewport.width - 1);
+      } else {
+        expect(layout.panel.left).toBeGreaterThanOrEqual(Math.min(180, viewport.width * 0.2));
+      }
+    }
+  });
+
+  test('needs-HQ guidance opens from the named launcher without enabling Ask', async ({ page }) => {
+    await mockCompletedOnboarding(page);
+    await mockAssistantState(page, 'needs_hq');
+    await page.goto('/');
+
+    const launcher = page.locator('#personalAssistantLauncher');
+    await expect(launcher).toBeVisible();
+    await expect(page.locator('#personalAssistantLauncherStatus')).toHaveText('Build HQ');
+    await launcher.click();
+    await expect(page.locator('#personalAssistantToday')).toBeVisible();
+    await expect(page.locator('#personalAssistantTodayBanner')).toContainText('needs a home base');
+    await expect(page.getByRole('link', { name: 'Build Personal HQ' })).toHaveCount(1);
+    await page.locator('#personalAssistantAskTab').click();
+    await expect(page.locator('#personalAssistantInput')).toBeDisabled();
+    await expect(page.locator('#personalAssistantSend')).toBeDisabled();
+  });
 
   test('no-model onboarding exposes named, associated hire and preview controls', async ({
     page
@@ -279,7 +403,11 @@ test.describe('Personal Assistant Foundation accessibility', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          status: { user_id: 'local', valid: hqValid, hq_onboarding_state: hqValid ? 'completed' : 'unseen' }
+          status: {
+            user_id: 'local',
+            valid: hqValid,
+            hq_onboarding_state: hqValid ? 'completed' : 'unseen'
+          }
         })
       })
     );
@@ -400,7 +528,9 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await page.keyboard.press('Enter');
 
     await expect(page.locator('#hqBuildModal')).toBeVisible();
-    await expect(page.locator('#oriGuideReply')).toContainText('Nothing is created until you confirm');
+    await expect(page.locator('#oriGuideReply')).toContainText(
+      'Nothing is created until you confirm'
+    );
 
     // Keyboard-only completion of the form itself.
     await page.locator('#hqBuildName').focus();

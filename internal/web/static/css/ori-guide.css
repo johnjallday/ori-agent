@@ -81,7 +81,15 @@
 .ori-guide__close:focus-visible,
 .ori-guide__send:focus-visible,
 .ori-guide__action:focus-visible,
-.ori-guide__topic:focus-visible {
+.ori-guide__topic:focus-visible,
+.personal-assistant-launcher:focus-visible,
+.personal-assistant-panel__close:focus-visible,
+.personal-assistant-panel__tab:focus-visible,
+.personal-assistant-panel__input:focus-visible,
+.personal-assistant-panel__send:focus-visible,
+.personal-assistant-panel a:focus-visible,
+.personal-assistant-panel button:focus-visible,
+.personal-assistant-panel summary:focus-visible {
   outline: 3px solid var(--ori-accent);
   outline-offset: 2px;
 }
@@ -509,6 +517,10 @@
   display: none;
 }
 
+.ori-guide:has(.personal-assistant-panel:not([hidden])) .personal-assistant-launcher {
+  display: none;
+}
+
 .personal-assistant-launcher__avatar,
 .personal-assistant-panel__avatar {
   display: grid;
@@ -532,20 +544,35 @@
   white-space: nowrap;
 }
 
+.personal-assistant-launcher__status {
+  max-width: 190px;
+  overflow: hidden;
+  color: var(--ori-accent-strong);
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .personal-assistant-panel {
-  width: min(430px, calc(100vw - 40px));
-  max-height: min(680px, calc(100vh - 110px));
-  overflow: auto;
-  padding: 16px;
+  display: flex;
+  width: min(640px, calc(100vw - 48px));
+  height: min(760px, calc(100dvh - var(--ori-navbar-bottom, 60px) - 32px));
+  max-height: calc(100dvh - var(--ori-navbar-bottom, 60px) - 32px);
+  min-height: min(320px, calc(100dvh - var(--ori-navbar-bottom, 60px) - 32px));
+  overflow: hidden;
+  flex-direction: column;
+  padding: 18px;
   border: 1px solid var(--ori-line);
-  border-radius: 16px;
+  border-radius: 22px;
   background: var(--ori-surface);
   color: var(--ori-ink);
-  box-shadow: 0 16px 44px rgb(0 0 0 / 28%);
+  box-shadow: 0 20px 56px rgb(0 0 0 / 30%);
 }
 
 .personal-assistant-panel__header {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 10px;
   margin-bottom: 12px;
@@ -565,11 +592,63 @@
 }
 
 .personal-assistant-panel__close {
-  border: 0;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--ori-line);
+  border-radius: 10px;
   background: transparent;
   color: inherit;
   font-size: 24px;
   cursor: pointer;
+}
+
+.personal-assistant-panel__tabs {
+  display: grid;
+  flex: none;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 4px;
+  border: 1px solid var(--ori-line);
+  border-radius: 12px;
+  background: var(--ori-paper);
+}
+
+.personal-assistant-panel__tab {
+  min-height: 38px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ori-ink);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.personal-assistant-panel__tab[aria-selected="true"] {
+  background: var(--ori-surface);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 12%);
+  color: var(--ori-accent-strong);
+}
+
+.personal-assistant-panel__view {
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.personal-assistant-panel__view[hidden] {
+  display: none;
+}
+
+.personal-assistant-panel__view--ask {
+  padding: 2px;
 }
 
 .personal-assistant-panel__form {
@@ -620,25 +699,40 @@
 
 /* ---- narrow layout ---------------------------------------------------------------- */
 
-/* Below this width the panel becomes a bottom sheet spanning the viewport,
-   because a floating 380px card leaves no usable room beside it (FR-79). */
-@media (max-width: 560px) {
+/* Below this width the Personal Assistant becomes a full-width bottom sheet.
+   The launcher remains reachable above it while all long content scrolls inside
+   the sheet rather than widening or lengthening the page. */
+@media (max-width: 760px) {
   .ori-guide {
-    right: 12px;
-    bottom: 12px;
-    left: 12px;
+    right: 0;
+    bottom: 0;
+    left: 0;
     align-items: stretch;
   }
 
   .ori-guide__launcher,
   .personal-assistant-launcher {
     align-self: flex-end;
+    margin-right: 12px;
+    margin-bottom: 12px;
   }
 
-  .ori-guide__panel,
+  .ori-guide__panel {
+    width: calc(100% - 24px);
+    max-height: min(70dvh, calc(100dvh - 100px));
+    margin: 0 12px 12px;
+  }
+
   .personal-assistant-panel {
     width: 100%;
-    max-height: min(70vh, calc(100vh - 100px));
+    height: min(82dvh, calc(100dvh - var(--ori-navbar-bottom, 72px) - 8px));
+    max-height: calc(100dvh - var(--ori-navbar-bottom, 72px) - 8px);
+    min-height: min(420px, calc(100dvh - var(--ori-navbar-bottom, 72px) - 8px));
+    padding: 14px;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 20px 20px 0 0;
   }
 
   .personal-assistant-panel__form {
@@ -647,6 +741,12 @@
 
   .personal-assistant-panel__send {
     width: 100%;
+  }
+}
+
+@media (max-height: 520px) {
+  .personal-assistant-panel {
+    min-height: 0;
   }
 }
 

@@ -2,9 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  assistantPanelShouldCloseOnKey,
+  assistantPanelViewForOpen,
+  assistantTabViewAfterKey,
   boundedAssistantHandoff,
   canSubmitAssistantWork,
-  personalAssistantPanelView
+  personalAssistantPanelView,
+  restoreAssistantPanelFocus
 } from './personal-assistant-panel.js';
 
 test('personal assistant panel covers unavailable, pre-hire, active, paused, and repair states', () => {
@@ -25,9 +29,10 @@ test('personal assistant panel covers unavailable, pre-hire, active, paused, and
   assert.equal(paused.available, true);
   assert.equal(paused.paused, true);
 
-  const repair = personalAssistantPanelView({ state: 'repair_needed' });
+  const repair = personalAssistantPanelView({ state: 'repair_needed', display_name: 'Nova' });
   assert.equal(repair.repair, true);
   assert.equal(repair.available, false);
+  assert.equal(repair.visible, true, 'repair guidance stays reachable without enabling work');
 });
 
 test('a hired assistant with no HQ is named but disabled, unlike needsHire', () => {
@@ -64,4 +69,33 @@ test('assistant composer refuses empty, unavailable, pending, and double-click s
   assert.equal(canSubmitAssistantWork({ available: false, pending: false, text: 'help' }), false);
   assert.equal(canSubmitAssistantWork({ available: true, pending: true, text: 'help' }), false);
   assert.equal(canSubmitAssistantWork({ available: true, pending: false, text: '  ' }), false);
+});
+
+test('Home opens Today directly while non-Home and prefilled requests select Ask', () => {
+  assert.equal(assistantPanelViewForOpen('today', { hasToday: true }), 'today');
+  assert.equal(assistantPanelViewForOpen('today', { hasToday: false }), 'ask');
+  assert.equal(assistantPanelViewForOpen('ask', { hasToday: true }), 'ask');
+});
+
+test('Today and Ask tabs implement wrapping arrows plus Home and End', () => {
+  assert.equal(assistantTabViewAfterKey('today', 'ArrowRight'), 'ask');
+  assert.equal(assistantTabViewAfterKey('ask', 'ArrowRight'), 'today');
+  assert.equal(assistantTabViewAfterKey('today', 'ArrowLeft'), 'ask');
+  assert.equal(assistantTabViewAfterKey('ask', 'Home'), 'today');
+  assert.equal(assistantTabViewAfterKey('today', 'End'), 'ask');
+  assert.equal(assistantTabViewAfterKey('today', 'Enter'), 'today');
+});
+
+test('Escape closes only an open drawer and focus returns only to a connected trigger', () => {
+  assert.equal(assistantPanelShouldCloseOnKey('Escape', true), true);
+  assert.equal(assistantPanelShouldCloseOnKey('Escape', true, true), false);
+  assert.equal(assistantPanelShouldCloseOnKey('Escape', false), false);
+  assert.equal(assistantPanelShouldCloseOnKey('Enter', true), false);
+
+  let focused = false;
+  const trigger = { focus: () => (focused = true) };
+  assert.equal(restoreAssistantPanelFocus(trigger, { contains: value => value === trigger }), true);
+  assert.equal(focused, true);
+  assert.equal(restoreAssistantPanelFocus(trigger, { contains: () => false }), false);
+  assert.equal(restoreAssistantPanelFocus(null, { contains: () => true }), false);
 });

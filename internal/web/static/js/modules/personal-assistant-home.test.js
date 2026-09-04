@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  personalAssistantLauncherCue,
   personalAssistantTodayView,
   safeTodayRoute,
   specialistOfferIsOpen,
@@ -40,6 +41,30 @@ test('Today distinguishes a hired assistant with no HQ from needs_hire and does 
   assert.equal(view.paused, false);
   assert.equal(view.partial, false);
   assert.equal(view.displayName, 'Atlas');
+});
+
+test('launcher cues are textual, bounded, and derived only from canonical states', () => {
+  assert.equal(personalAssistantLauncherCue({ state: 'active' }, null), 'Loading Today');
+  assert.equal(
+    personalAssistantLauncherCue({ state: 'active' }, { state: 'healthy_empty' }),
+    'Today ready'
+  );
+  assert.equal(personalAssistantLauncherCue({ state: 'paused' }, { state: 'active' }), 'Paused');
+  assert.equal(personalAssistantLauncherCue({ state: 'needs_hq' }, null), 'Build HQ');
+  assert.equal(
+    personalAssistantLauncherCue({ state: 'active' }, { state: 'partial' }),
+    'Sources unavailable'
+  );
+  assert.equal(
+    personalAssistantLauncherCue({ state: 'active' }, { state: 'unavailable' }),
+    'Sources unavailable'
+  );
+  assert.equal(
+    personalAssistantLauncherCue({ state: 'active' }, { state: 'model_unavailable' }),
+    'Model unavailable'
+  );
+  assert.equal(personalAssistantLauncherCue({ state: 'repair_needed' }, null), 'Repair needed');
+  assert.equal(personalAssistantLauncherCue(null, null), '');
 });
 
 test('Today section never turns unavailable into a healthy empty all-clear', () => {

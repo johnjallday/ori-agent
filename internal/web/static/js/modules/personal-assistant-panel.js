@@ -21,8 +21,10 @@ export function personalAssistantPanelView(personalAssistant) {
     // submission stays closed until HQ exists.
     needsHQ: state === 'needs_hq' || state === 'provisioning_hq',
     // Launcher visibility: shown once there is a real identity to show, even
-    // before HQ exists; submission itself is gated by `available` alone.
-    visible: available || state === 'needs_hq' || state === 'provisioning_hq',
+    // before HQ exists or while its durable records need repair; submission
+    // itself is gated by `available` alone.
+    visible:
+      available || state === 'needs_hq' || state === 'provisioning_hq' || state === 'repair_needed',
     placeholder: available
       ? `Ask ${name} a question or describe what you want help with`
       : state === 'needs_hq' || state === 'provisioning_hq'
@@ -41,11 +43,39 @@ export function canSubmitAssistantWork({ available, pending, text }) {
   return available === true && pending !== true && String(text || '').trim().length > 0;
 }
 
+export function assistantPanelViewForOpen(requested, { hasToday = false } = {}) {
+  if (requested === 'ask') return 'ask';
+  return hasToday ? 'today' : 'ask';
+}
+
+export function assistantTabViewAfterKey(current, key) {
+  const views = ['today', 'ask'];
+  const index = Math.max(0, views.indexOf(current));
+  if (key === 'Home') return views[0];
+  if (key === 'End') return views[views.length - 1];
+  if (key === 'ArrowRight') return views[(index + 1) % views.length];
+  if (key === 'ArrowLeft') return views[(index - 1 + views.length) % views.length];
+  return current;
+}
+
+export function assistantPanelShouldCloseOnKey(key, open, topmostOverlayOpen = false) {
+  return key === 'Escape' && open === true && topmostOverlayOpen !== true;
+}
+
+export function restoreAssistantPanelFocus(trigger, ownerDocument) {
+  if (!trigger || !ownerDocument?.contains?.(trigger) || typeof trigger.focus !== 'function') {
+    return false;
+  }
+  trigger.focus();
+  return true;
+}
+
 const state = {
   view: personalAssistantPanelView(null),
   personalAssistant: null,
   pending: false,
   open: false,
+  activeView: 'ask',
   draft: '',
   lastTrigger: null,
   els: null
@@ -53,6 +83,15 @@ const state = {
 
 function setStatus(message) {
   if (state.els?.status) state.els.status.textContent = String(message || '');
+}
+
+function syncPanelViewport() {
+  if (!state.els?.root) return;
+  const navbar = document.querySelector?.('nav.navbar');
+  const bottom = navbar?.getBoundingClientRect?.().bottom;
+  if (Number.isFinite(bottom)) {
+    state.els.root.style.setProperty('--ori-navbar-bottom', `${Math.max(0, Math.ceil(bottom))}px`);
+  }
 }
 
 function assistantAvatarMarkup(name, appearance) {
@@ -96,6 +135,33 @@ function moveSharedWorkActivity() {
   activity.dataset.homeAssistantPanelScope = 'personal-assistant';
 }
 
+function selectView(requested, { focusTab = false, focusComposer = false } = {}) {
+  if (!state.els) return 'ask';
+  const hasToday = Boolean(state.els.todayTab && state.els.todayPanel);
+  const view = assistantPanelViewForOpen(requested, { hasToday });
+  state.activeView = view;
+  state.els.panel.dataset.view = view;
+
+  const pairs = [
+    ['today', state.els.todayTab, state.els.todayPanel],
+    ['ask', state.els.askTab, state.els.askPanel]
+  ];
+  pairs.forEach(([name, tab, panel]) => {
+    if (!panel) return;
+    const selected = name === view;
+    panel.hidden = !selected;
+    if (tab) {
+      tab.setAttribute('aria-selected', selected ? 'true' : 'false');
+      tab.tabIndex = selected ? 0 : -1;
+    }
+  });
+
+  const activeTab = view === 'today' ? state.els.todayTab : state.els.askTab;
+  if (focusComposer && view === 'ask') state.els.input?.focus();
+  else if (focusTab) activeTab?.focus();
+  return view;
+}
+
 function applyPersonalAssistant(personalAssistant) {
   state.personalAssistant = personalAssistant || null;
   state.view = personalAssistantPanelView(personalAssistant);
@@ -136,7 +202,7 @@ async function refresh() {
   }
 }
 
-function close() {
+function close(options = {}) {
   if (!state.open || !state.els) return;
   state.open = false;
   state.draft = state.els.input.value;
@@ -144,19 +210,27 @@ function close() {
   state.els.launcher.setAttribute('aria-expanded', 'false');
   const trigger = state.lastTrigger;
   state.lastTrigger = null;
-  if (trigger && document.contains(trigger) && trigger.focus) trigger.focus();
+  if (options?.restoreFocus !== false) restoreAssistantPanelFocus(trigger, document);
 }
 
-function open(trigger) {
-  if (!state.view.available || !state.els) return false;
+function open(trigger, options = {}) {
+  if (!state.view.visible || !state.els) return false;
   if (window.OriGuide?.close) window.OriGuide.close();
   moveSharedWorkActivity();
+  syncPanelViewport();
   state.open = true;
   state.lastTrigger = trigger || document.activeElement;
   state.els.panel.hidden = false;
   state.els.launcher.setAttribute('aria-expanded', 'true');
   state.els.input.value = state.draft;
-  state.els.input.focus();
+  const requested = options.view === 'ask' ? 'ask' : 'today';
+  const selected = selectView(requested, {
+    focusTab: options.focusTab !== false,
+    focusComposer: options.focusComposer === true
+  });
+  if (selected === 'ask' && !state.els.askTab && options.focusComposer !== false) {
+    state.els.input.focus();
+  }
   // Rename/pause/repair changes are server-owned. Refresh on every open rather
   // than trusting the hire-time name or local storage.
   void refresh();
@@ -164,7 +238,8 @@ function open(trigger) {
 }
 
 function prefill(text) {
-  if (!open(state.els?.launcher)) return false;
+  if (!state.view.available) return false;
+  if (!open(state.els?.launcher, { view: 'ask', focusComposer: true })) return false;
   const bounded = boundedAssistantHandoff(text);
   state.draft = bounded;
   state.els.input.value = bounded;
@@ -227,6 +302,7 @@ function init() {
   const launcher = document.getElementById('personalAssistantLauncher');
   if (!panel || !launcher) return;
   state.els = {
+    root: document.getElementById('oriGuideRoot'),
     panel,
     launcher,
     launcherName: document.getElementById('personalAssistantLauncherName'),
@@ -238,21 +314,58 @@ function init() {
     input: document.getElementById('personalAssistantInput'),
     send: document.getElementById('personalAssistantSend'),
     status: document.getElementById('personalAssistantPanelStatus'),
-    activityMount: document.getElementById('personalAssistantActivityMount')
+    activityMount: document.getElementById('personalAssistantActivityMount'),
+    todayTab: document.getElementById('personalAssistantTodayTab'),
+    askTab: document.getElementById('personalAssistantAskTab'),
+    todayPanel: document.getElementById('personalAssistantTodayPanel'),
+    askPanel: document.getElementById('personalAssistantAskPanel')
   };
-  launcher.addEventListener('click', () => (state.open ? close() : open(launcher)));
+  launcher.addEventListener('click', () =>
+    state.open ? close() : open(launcher, { view: 'today', focusTab: true })
+  );
   state.els.close?.addEventListener('click', close);
   state.els.form?.addEventListener('submit', submit);
+  state.els.todayTab?.addEventListener('click', () => selectView('today', { focusTab: true }));
+  state.els.askTab?.addEventListener('click', () => selectView('ask', { focusComposer: true }));
+  [state.els.todayTab, state.els.askTab].filter(Boolean).forEach(tab => {
+    tab.addEventListener('keydown', event => {
+      const next = assistantTabViewAfterKey(state.activeView, event.key);
+      if (
+        next === state.activeView ||
+        !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)
+      ) {
+        return;
+      }
+      event.preventDefault();
+      selectView(next, { focusTab: true });
+    });
+  });
   document.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && state.open) close();
+    // Bootstrap removes `.show` before this bubbling listener runs, so the
+    // event target is also part of the topmost-modal check.
+    const modalOpen = Boolean(
+      event.target?.closest?.('.modal') || document.querySelector?.('.modal.show')
+    );
+    if (assistantPanelShouldCloseOnKey(event.key, state.open, modalOpen)) close();
   });
   window.addEventListener('personal-assistant:status', event => {
     if (event.detail?.personalAssistant) applyPersonalAssistant(event.detail.personalAssistant);
   });
+  window.addEventListener('resize', syncPanelViewport);
+  syncPanelViewport();
   void refresh();
 }
 
-const api = { init, open, close, prefill, refresh, applyPersonalAssistant, _state: state };
+const api = {
+  init,
+  open,
+  close,
+  prefill,
+  refresh,
+  applyPersonalAssistant,
+  selectView,
+  _state: state
+};
 if (typeof window !== 'undefined') window.PersonalAssistantPanel = api;
 if (typeof document !== 'undefined') {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

@@ -277,12 +277,56 @@ async function installFixtureRoutes(page: Page) {
       });
       return;
     }
-    // Keep the README fixture deterministic without inventing a hired
-    // relationship or allowing the status request to escape to the server.
+    // Home's README scenes use the established Personal HQ relationship so
+    // the hero can intentionally photograph Today in its on-demand drawer.
+    // Other routes keep the unbound state and avoid changing their scenes.
     if (url.pathname === '/api/personal-assistant') {
+      const surfacePath = new URL(request.frame().url()).pathname;
       await json(route, {
-        personal_assistant: { state: 'needs_hire', next_action: 'hire', availability: {} }
+        personal_assistant:
+          surfacePath === '/'
+            ? {
+                state: 'active',
+                state_version: 7,
+                assistant_id: 'assistant-readme',
+                display_name: 'Mira',
+                hq_workspace_id: README_SCENES.personal_hq.id,
+                availability: { model: { status: 'available', available: true } }
+              }
+            : { state: 'needs_hire', next_action: 'hire', availability: {} }
       });
+      return;
+    }
+    if (url.pathname === '/api/personal-assistant/today') {
+      await json(route, {
+        today: {
+          state: 'active',
+          relationship_state: 'active',
+          display_name: 'Mira',
+          hq_workspace_id: README_SCENES.personal_hq.id,
+          hq_workspace_slug: 'northstar-personal-hq',
+          model: { status: 'available', available: true },
+          brief: { health: { status: 'available' }, items: [] },
+          decisions: { health: { status: 'healthy_empty' }, items: [] },
+          priorities: { health: { status: 'healthy_empty' }, items: [] },
+          follow_ups: { health: { status: 'healthy_empty' }, items: [] },
+          results: { health: { status: 'healthy_empty' }, items: [] },
+          links: {
+            personal_hq: '/workspaces/northstar-personal-hq',
+            working_agreement: '/?personal-assistant=working-agreement',
+            memory: '/workspaces/northstar-personal-hq#memory',
+            advanced: '/agents'
+          }
+        }
+      });
+      return;
+    }
+    if (url.pathname === '/api/onboarding/specialists') {
+      await json(route, { specialists: [] });
+      return;
+    }
+    if (url.pathname === '/api/onboarding/detect') {
+      await json(route, { specialist: null });
       return;
     }
     if (url.pathname === '/api/settings/workspace-root') {
@@ -893,7 +937,21 @@ test.afterAll(() => {
 });
 
 test('captures the Home command bridge and populated Personal HQ Daily Brief', async ({ page }) => {
-  await captureScene(page, 'hero', '/', '.home-command-bridge', 'Resolve launch readiness risks');
+  await captureScene(
+    page,
+    'hero',
+    '/',
+    '.home-command-bridge',
+    'Resolve launch readiness risks',
+    async scenePage => {
+      await scenePage.locator('#personalAssistantLauncher').click();
+      await expect(scenePage.locator('#personalAssistantTodayPanel')).toBeVisible();
+      await expect(scenePage.locator('#homeDailyBrief')).toBeVisible();
+      await expect(scenePage.locator('#homeDailyBrief')).toContainText(
+        'Resolve launch readiness risks'
+      );
+    }
+  );
 });
 
 test('captures exactly three Action Center findings', async ({ page }) => {

@@ -120,6 +120,15 @@ async function completeHire(page: Page, name: string) {
 
 const offer = (page: Page) => page.locator('#personalAssistantSpecialistOffer');
 
+async function openToday(page: Page) {
+  const launcher = page.locator('#personalAssistantLauncher');
+  await expect(launcher).toBeVisible();
+  if (await page.locator('#personalAssistantPanel').isHidden()) await launcher.click();
+  const todayTab = page.locator('#personalAssistantTodayTab');
+  if ((await todayTab.getAttribute('aria-selected')) !== 'true') await todayTab.click();
+  await expect(page.locator('#personalAssistantToday')).toBeVisible();
+}
+
 // buildHQ finishes setup the way the Map's Build My HQ form does. A fresh hire
 // now lands in needs_hq, and the capability projection only reports sources for
 // a relationship that is fully active.
@@ -175,12 +184,13 @@ test('Home offers help with the detected domain once setup is finished', async (
 
   // Straight after the hire, Home is running its guided HQ walkthrough. The
   // domain offer must not compete with the user's actual next step.
-  await expect(page.locator('#personalAssistantToday')).toBeVisible();
+  await openToday(page);
   await expect(offer(page)).toBeHidden();
   await page.screenshot({ path: `${SHOTS}/02a-offer-waits-for-hq.png`, fullPage: true });
 
   await buildHQ(page);
   await page.goto('/');
+  await openToday(page);
   await expect(offer(page)).toBeVisible();
   await expect(offer(page)).toHaveAttribute('data-decision', 'unanswered');
   await expect(page.locator('#personalAssistantSpecialistOfferHeadline')).toHaveText(
@@ -216,6 +226,7 @@ test('Home offers help with the detected domain once setup is finished', async (
   // is a one-time acknowledgement, not a banner that lives on Home forever.
   // What persists is the effect — focus areas, card order, the studio section.
   await page.goto('/');
+  await openToday(page);
   await expect(offer(page)).toBeHidden();
   await expect(page.locator('#personalAssistantSpecialistManual')).toBeHidden();
 });
@@ -348,6 +359,7 @@ test('Today names the specialist that did the studio work and links straight to 
   );
 
   await page.goto('/');
+  await openToday(page);
   const section = page.locator('#personalAssistantTodayStudioSection');
   await expect(section).toBeVisible();
   await expect(page.locator('#personalAssistantTodayStudioTitle')).toHaveText('From Ivory');
@@ -475,6 +487,7 @@ test('declining is one click and is never asked again', async ({ page }) => {
   await reopenTheOffer(page);
 
   await page.goto('/');
+  await openToday(page);
   await expect(offer(page)).toBeVisible();
   await page.locator('#personalAssistantSpecialistDeclineBtn').click();
   await expect(offer(page)).toBeHidden();
@@ -488,6 +501,7 @@ test('a domain that was not detected is still reachable by hand', async ({ page 
   await reopenTheOffer(page);
 
   await page.goto('/');
+  await openToday(page);
   await expect(offer(page)).toBeHidden();
   const manual = page
     .locator('#personalAssistantSpecialistManual button[data-specialist-manual]')
@@ -505,9 +519,15 @@ test('a scan that never answers leaves Home fully usable', async ({ page }) => {
   });
 
   await page.goto('/');
-  await expect(page.locator('#personalAssistantToday')).toBeVisible();
+  // Detection is still outstanding, but the Map remains independently usable.
+  await expect(page.locator('#cockpitMap')).toBeVisible();
+  await page.locator('[data-cockpit-view="tree"]').click();
+  await expect(page.locator('#cockpitTree')).toBeVisible();
+  await page.locator('[data-cockpit-view="map"]').click();
+  await expect(page.locator('#cockpitMap')).toBeVisible();
+
+  await openToday(page);
   await expect(offer(page)).toBeHidden();
-  // Home's own content is there and interactive.
   await expect(page.locator('#personalAssistantTodaySections')).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/10-slow-scan.png`, fullPage: true });
 });
@@ -518,7 +538,7 @@ test('a failing scan is never an error the user sees', async ({ page }) => {
       route.fulfill({ status: failure.status, contentType: 'application/json', body: '{}' })
     );
     await page.goto('/');
-    await expect(page.locator('#personalAssistantToday')).toBeVisible();
+    await openToday(page);
     await expect(offer(page)).toBeHidden();
     await expect(page.locator('#personalAssistantToday')).not.toContainText(
       /could not|failed|error/i
