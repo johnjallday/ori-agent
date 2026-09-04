@@ -140,7 +140,15 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await page.keyboard.press('Enter');
     const assistantDialog = page.getByRole('dialog', { name: 'Atlas' });
     await expect(assistantDialog).toBeVisible();
-    await expect(page.locator('#personalAssistantInput')).toBeFocused();
+    const todayTab = page.getByRole('tab', { name: 'Today' });
+    const askTab = page.getByRole('tab', { name: 'Ask' });
+    await expect(todayTab).toBeFocused();
+    await expect(todayTab).toHaveAttribute('aria-selected', 'true');
+    await todayTab.press('ArrowRight');
+    await expect(askTab).toBeFocused();
+    await expect(askTab).toHaveAttribute('aria-selected', 'true');
+    await askTab.press('Home');
+    await expect(todayTab).toBeFocused();
     await expect(page.locator('#personalAssistantPanelStatus')).toHaveAttribute(
       'aria-live',
       'polite'
@@ -151,6 +159,7 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await expect(assistantDialog).toBeHidden();
     await expect(launcher).toBeFocused();
 
+    await launcher.press('Enter');
     const agreementLink = page.getByRole('link', { name: 'Working agreement' });
     await agreementLink.focus();
     await page.keyboard.press('Enter');
@@ -165,7 +174,8 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     );
     await page.keyboard.press('Escape');
     await expect(agreement).toBeHidden();
-    await expect(agreementLink).toBeFocused();
+    await expect(assistantDialog).toBeVisible();
+    await expect(todayTab).toBeFocused();
   });
 
   for (const scenario of [
@@ -202,6 +212,10 @@ test.describe('Personal Assistant Foundation accessibility', () => {
       await mockCompletedOnboarding(page);
       await mockAssistantState(page, scenario.relationship, scenario.today, scenario.model);
       await page.goto('/');
+      const launcher = page.locator('#personalAssistantLauncher');
+      await expect(launcher).toBeVisible();
+      await expect(page.locator('#personalAssistantLauncherStatus')).not.toBeEmpty();
+      await launcher.click();
       await expect(page.locator('#personalAssistantToday')).toBeVisible();
       await expect(page.locator('#personalAssistantToday')).toContainText(scenario.copy);
       const overflow = await page.evaluate(
@@ -279,7 +293,11 @@ test.describe('Personal Assistant Foundation accessibility', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          status: { user_id: 'local', valid: hqValid, hq_onboarding_state: hqValid ? 'completed' : 'unseen' }
+          status: {
+            user_id: 'local',
+            valid: hqValid,
+            hq_onboarding_state: hqValid ? 'completed' : 'unseen'
+          }
         })
       })
     );
@@ -400,7 +418,9 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await page.keyboard.press('Enter');
 
     await expect(page.locator('#hqBuildModal')).toBeVisible();
-    await expect(page.locator('#oriGuideReply')).toContainText('Nothing is created until you confirm');
+    await expect(page.locator('#oriGuideReply')).toContainText(
+      'Nothing is created until you confirm'
+    );
 
     // Keyboard-only completion of the form itself.
     await page.locator('#hqBuildName').focus();

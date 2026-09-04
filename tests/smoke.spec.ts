@@ -730,7 +730,7 @@ test.describe('Home First Run', () => {
     }
   });
 
-  test('keeps the optional Daily Brief inside the Updates flyout, below the command strip', async ({
+  test('keeps Daily Brief in Personal Assistant Today while Updates retains its own sections', async ({
     page
   }) => {
     await page.setViewportSize({ width: 1512, height: 805 });
@@ -751,33 +751,27 @@ test.describe('Home First Run', () => {
 
     await page.goto('/');
     await expect(page.locator('#homeHQResume')).toHaveCount(0);
-    await page.locator('#homeDailyBrief').evaluate(element => {
-      element.hidden = false;
-    });
-
-    // The Daily Brief used to sit in its own row between the command strip
-    // and the Operations Board, then a Today section inside the cockpit
-    // rail. It now lives inside the Updates flyout (Issue #334), opened here
-    // explicitly since forcing the section's own `hidden` off does not reveal
-    // it through a still-closed ancestor flyout. What still matters: it is an
-    // Updates section, positioned below the command strip. It DOES overlap
-    // the workspace area underneath it now — that is the point of the
-    // flyout being an overlay rather than a side column (PRD FR21, FR75).
-    await page.locator('#cockpitRailToggle').click();
-    const layout = await page.evaluate(() => {
-      const command = document.getElementById('homeAssistantCard')?.getBoundingClientRect();
-      const brief = document.getElementById('homeDailyBrief')?.getBoundingClientRect();
+    const ownership = await page.evaluate(() => {
+      const brief = document.getElementById('homeDailyBrief');
+      const updates = document.getElementById('cockpitUpdatesFlyoutBody');
       return {
-        commandBottom: command?.bottom || 0,
-        briefTop: brief?.top || 0,
-        inUpdatesFlyout: !!document
-          .getElementById('homeDailyBrief')
-          ?.closest('#cockpitUpdatesFlyoutBody')
+        briefCount: document.querySelectorAll('#homeDailyBrief').length,
+        inToday: Boolean(brief?.closest('#personalAssistantTodayPanel')),
+        inUpdates: Boolean(brief?.closest('#cockpitUpdatesFlyoutBody')),
+        updatesOwnSections: [
+          'cockpitTodayAttention',
+          'cockpitTodayScheduled',
+          'homePluginUpdates',
+          'homeCalendarOpsPortal',
+          'homeRecentActivity'
+        ].every(id => updates?.contains(document.getElementById(id)))
       };
     });
 
-    expect(layout.inUpdatesFlyout).toBe(true);
-    expect(layout.briefTop).toBeGreaterThanOrEqual(layout.commandBottom);
+    expect(ownership.briefCount).toBe(1);
+    expect(ownership.inToday).toBe(true);
+    expect(ownership.inUpdates).toBe(false);
+    expect(ownership.updatesOwnSections).toBe(true);
   });
 
   test('surfaces cached plugin updates in Updates without applying them', async ({ page }) => {

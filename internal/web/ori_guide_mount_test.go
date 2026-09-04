@@ -120,6 +120,82 @@ func TestPAFPanelHasDistinctHiddenComposer(t *testing.T) {
 	}
 }
 
+func TestPAFPanelRendersHomeTodayAndAskExactlyOnce(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatalf("LoadTemplates failed: %v", err)
+	}
+	html, err := r.RenderTemplate("index", TemplateData{
+		Title:       "Ori Agent",
+		CurrentPage: "index",
+		Extra:       map[string]any{"HomeCommandBridge": true},
+	})
+	if err != nil {
+		t.Fatalf("RenderTemplate(index) failed: %v", err)
+	}
+
+	for _, id := range []string{
+		`id="personalAssistantLauncher"`, `id="personalAssistantPanel"`,
+		`id="personalAssistantTabs"`, `id="personalAssistantTodayTab"`,
+		`id="personalAssistantAskTab"`, `id="personalAssistantTodayPanel"`,
+		`id="personalAssistantAskPanel"`, `id="personalAssistantToday"`,
+		`id="homeDailyBrief"`, `id="personalAssistantForm"`,
+	} {
+		if got := strings.Count(html, id); got != 1 {
+			t.Errorf("rendered Home %s count = %d, want 1", id, got)
+		}
+	}
+	for _, relation := range []string{
+		`role="tablist"`,
+		`role="tab" aria-selected="true" aria-controls="personalAssistantTodayPanel"`,
+		`role="tab" aria-selected="false" aria-controls="personalAssistantAskPanel"`,
+		`role="tabpanel" aria-labelledby="personalAssistantTodayTab"`,
+		`role="tabpanel" aria-labelledby="personalAssistantAskTab" hidden`,
+	} {
+		if !strings.Contains(html, relation) {
+			t.Errorf("rendered Home drawer missing relationship %q", relation)
+		}
+	}
+
+	dashboard := readTemplate(t, "templates/components/dashboard.tmpl")
+	for _, moved := range []string{`id="personalAssistantToday"`, `id="homeDailyBrief"`} {
+		if strings.Contains(dashboard, moved) {
+			t.Errorf("dashboard still owns moved drawer markup %s", moved)
+		}
+	}
+}
+
+func TestPAFPanelKeepsNonHomePagesAskOnly(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatalf("LoadTemplates failed: %v", err)
+	}
+	html, err := r.RenderTemplate("settings", TemplateData{
+		Title:       "Settings - Ori Agent",
+		CurrentPage: "settings",
+		Extra:       map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("RenderTemplate(settings) failed: %v", err)
+	}
+	for _, absent := range []string{
+		`id="personalAssistantTabs"`, `id="personalAssistantTodayPanel"`,
+		`id="personalAssistantToday"`, `id="homeDailyBrief"`,
+	} {
+		if strings.Contains(html, absent) {
+			t.Errorf("non-Home assistant panel unexpectedly contains %s", absent)
+		}
+	}
+	for _, present := range []string{
+		`id="personalAssistantPanel"`, `id="personalAssistantAskPanel"`,
+		`id="personalAssistantForm"`,
+	} {
+		if got := strings.Count(html, present); got != 1 {
+			t.Errorf("non-Home %s count = %d, want 1", present, got)
+		}
+	}
+}
+
 func TestPAFPanelPresentsGuideAndAssistantRolesBeforeInput(t *testing.T) {
 	body := stripHTMLComments(readTemplate(t, "templates/components/ori-guide.tmpl"))
 	for _, want := range []string{

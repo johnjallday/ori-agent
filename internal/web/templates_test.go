@@ -539,7 +539,8 @@ func TestRenderHomeCockpitShell(t *testing.T) {
 	}
 
 	data := TemplateData{
-		Title: "Ori Agent",
+		Title:       "Ori Agent",
+		CurrentPage: "index",
 		Extra: map[string]any{
 			"HomeCommandBridge": true,
 			"WorkspaceCount":    3,
@@ -603,9 +604,9 @@ func TestRenderHomeCockpitShell(t *testing.T) {
 		// Creation reuses the existing modal contract (FR105).
 		`id="cockpitCreateWorkspaceBtn"`,
 		`data-bs-target="#addFolderModal"`,
-		// Today's sources survive both migrations — into the rail (FR77, FR81,
-		// FR82, FR84, FR86) and then out of it into the Updates flyout
-		// (Issue #334) — with the same element ids throughout.
+		// Home's Daily Brief now has one stable mount inside the on-demand
+		// Personal Assistant Today panel. Calendar and activity remain in Updates.
+		`id="personalAssistantTodayPanel"`,
 		`id="homeDailyBrief"`,
 		`id="homeCalendarOpsPortal"`,
 		`id="homeRecentActivity"`,

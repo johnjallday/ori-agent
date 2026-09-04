@@ -332,6 +332,15 @@ show the chosen assistant name and route work through the existing
 structurally read-only deterministic guide and may escalate to that same route;
 it is not a peer assistant.
 
+Home is Map-first: the Workspace Map/Tree occupies the available cockpit
+viewport without an always-visible Today row. Today remains a Home-owned
+projection and is available on demand through the existing launcher and panel
+for that same bound Personal Assistant; direct launcher activation on Home opens
+Today, while prefilled handoffs open the Ask composer. Other authenticated
+surfaces keep the existing Ask-only launcher behavior. This presentation change
+adds no Personal Assistant page or route and does not change identity,
+ownership, routing, confirmation, persistence, authorization, or API boundaries.
+
 Read surfaces degrade safely when the binding, workspace, or agent is missing:
 they return a bounded unavailable/repair state, never a fabricated identity.
 The personal-assistant service is a required part of the canonical server build.

@@ -193,7 +193,11 @@ test.describe('Personal Assistant Foundation first value', () => {
     await page.route('**/api/personal-hq/onboarding-state', async route => {
       const body = route.request().postDataJSON();
       if (body && body.state === 'skipped') hqQuestDeferred = true;
-      await route.fulfill({ status: 200, contentType: 'application/json', body: '{"success":true}' });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: '{"success":true}'
+      });
     });
     await page.route('**/api/progression', route =>
       route.fulfill({
@@ -443,7 +447,9 @@ test.describe('Personal Assistant Foundation first value', () => {
 
     // Step 3: the existing form owns editing and confirmation from here.
     await expect(page.locator('#hqBuildModal')).toBeVisible();
-    await expect(page.locator('#oriGuideReply')).toContainText('Nothing is created until you confirm');
+    await expect(page.locator('#oriGuideReply')).toContainText(
+      'Nothing is created until you confirm'
+    );
     await expect(page.locator('#hqBuildAssistantIntro')).toContainText('Atlas');
     expect(hqSetupCalls).toBe(0);
 
@@ -526,7 +532,9 @@ test.describe('Personal Assistant Foundation first value', () => {
     ).toHaveLength(2);
   });
 
-  test('assistant-first Home keeps Ori Help isolated and handoff confirmable', async ({ page }) => {
+  test('Map-first Home keeps Today on demand, Ori Help isolated, and handoff confirmable', async ({
+    page
+  }) => {
     let assistantName = 'Atlas';
     let relationshipState = 'active';
     let stateVersion = 7;
@@ -868,8 +876,34 @@ test.describe('Personal Assistant Foundation first value', () => {
     });
 
     await page.goto('/');
+    await expect(page.locator('#personalAssistantToday')).toBeHidden();
+    await expect(page.locator('.ws-map-canvas[data-ws-map-viewport]')).toBeInViewport();
+
+    const closedLayout = await page.evaluate(() => {
+      const cockpit = document.getElementById('homeCockpit')!.getBoundingClientRect();
+      return {
+        cockpit: { x: cockpit.x, y: cockpit.y, width: cockpit.width, height: cockpit.height },
+        viewportHeight: window.innerHeight,
+        documentHeight: document.documentElement.scrollHeight,
+        bodyHeight: document.body.scrollHeight,
+        mainOverflow: getComputedStyle(document.querySelector('.home-command-main')!).overflow
+      };
+    });
+    expect(closedLayout.documentHeight).toBeLessThanOrEqual(closedLayout.viewportHeight + 2);
+    expect(closedLayout.bodyHeight).toBeLessThanOrEqual(closedLayout.viewportHeight + 2);
+    expect(closedLayout.mainOverflow).toBe('hidden');
+
+    await expect(page.locator('#personalAssistantLauncher')).toBeVisible();
+    await expect(page.locator('#personalAssistantLauncherName')).toHaveText('Atlas');
+    await expect(page.locator('#personalAssistantLauncherAvatar .agent-avatar')).toHaveCount(1);
+    await page.locator('#personalAssistantLauncher').click();
+    await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+    await expect(page.locator('#personalAssistantTodayTab')).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
     await expect(page.locator('#personalAssistantToday')).toBeVisible();
-    await expect(page.locator('#personalAssistantTodayEyebrow')).toHaveText('Today from Atlas');
+    await expect(page.locator('#personalAssistantTodayTitle')).toHaveText('Today from Atlas');
     await expect(page.locator('#personalAssistantTodayPriorities')).toContainText(
       'Review launch plan'
     );
@@ -877,34 +911,12 @@ test.describe('Personal Assistant Foundation first value', () => {
       'href',
       '/workspaces/personal-hq'
     );
-    expect(
-      await page.evaluate(() => {
-        const today = document.getElementById('personalAssistantToday');
-        const map = document.getElementById('homeCockpit');
-        return Boolean(
-          today && map && today.compareDocumentPosition(map) & Node.DOCUMENT_POSITION_FOLLOWING
-        );
-      })
-    ).toBe(true);
+    const openCockpit = await page.evaluate(() => {
+      const cockpit = document.getElementById('homeCockpit')!.getBoundingClientRect();
+      return { x: cockpit.x, y: cockpit.y, width: cockpit.width, height: cockpit.height };
+    });
+    expect(openCockpit).toEqual(closedLayout.cockpit);
 
-    const todayBox = await page.locator('#personalAssistantToday').boundingBox();
-    const mapBox = await page.locator('#homeCockpit').boundingBox();
-    expect(todayBox && mapBox && todayBox.y + todayBox.height <= mapBox.y + 1).toBe(true);
-
-    const scrollState = await page.evaluate(() => ({
-      viewportHeight: window.innerHeight,
-      documentHeight: document.documentElement.scrollHeight,
-      mainOverflow: getComputedStyle(document.querySelector('.home-command-main')!).overflow
-    }));
-    expect(scrollState.documentHeight).toBeGreaterThan(scrollState.viewportHeight);
-    expect(scrollState.mainOverflow).not.toBe('hidden');
-    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
-    await expect(page.locator('.ws-map-canvas[data-ws-map-viewport]')).toBeInViewport();
-
-    await expect(page.locator('#personalAssistantLauncher')).toBeVisible();
-    await expect(page.locator('#personalAssistantLauncherName')).toHaveText('Atlas');
-    await expect(page.locator('#personalAssistantLauncherAvatar .agent-avatar')).toHaveCount(1);
     await page.locator('#oriGuideMapTrigger').click();
     await expect(page.locator('#oriGuidePanel')).toBeVisible();
     await expect(page.locator('#oriGuideRole')).toHaveText('App Guide');
@@ -922,6 +934,8 @@ test.describe('Personal Assistant Foundation first value', () => {
     await page.getByRole('button', { name: 'Send to Atlas' }).click();
     await expect(page.locator('#personalAssistantPanel')).toBeVisible();
     await expect(page.locator('#oriGuidePanel')).toBeHidden();
+    await expect(page.locator('#personalAssistantAskTab')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#personalAssistantInput')).toBeFocused();
     await expect(page.locator('#personalAssistantInput')).toHaveValue(handoffText);
     expect(routeCalls).toBe(0);
 
@@ -930,6 +944,12 @@ test.describe('Personal Assistant Foundation first value', () => {
     await page.locator('#personalAssistantClose').click();
     expect(routeCalls).toBe(0);
     await page.locator('#personalAssistantLauncher').click();
+    await expect(page.locator('#personalAssistantTodayTab')).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    await expect(page.locator('#personalAssistantInput')).toHaveValue(handoffText);
+    await page.locator('#personalAssistantAskTab').click();
     await expect(page.locator('#personalAssistantInput')).toHaveValue(handoffText);
     await expect(page.locator('#personalAssistantPanel #oriGuideActivity')).toHaveCount(0);
     await expect(page.locator('#oriGuidePanel #homeAssistantConversation')).toHaveCount(0);
@@ -941,6 +961,7 @@ test.describe('Personal Assistant Foundation first value', () => {
 
     // Working agreement edits reuse canonical schedule values, rename the same
     // stable identity, and survive reload.
+    await page.locator('#personalAssistantLauncher').click();
     await page.locator('#personalAssistantTodayAgreement').click();
     await expect(page.locator('#personalAssistantContinuity')).toBeVisible();
     await expect(page.locator('#personalAssistantCapabilities')).toContainText(
@@ -967,6 +988,7 @@ test.describe('Personal Assistant Foundation first value', () => {
 
     await page.reload();
     await expect(page.locator('#personalAssistantLauncherName')).toHaveText('Nova');
+    await page.locator('#personalAssistantLauncher').click();
     await page.locator('#personalAssistantTodayAgreement').click();
     await expect(page.locator('#personalAssistantContinuityName')).toHaveValue('Nova');
     await page.locator('#personalAssistantContinuityPause').click();
@@ -981,10 +1003,15 @@ test.describe('Personal Assistant Foundation first value', () => {
     );
     expect(relationshipState).toBe('active');
     await page.locator('#personalAssistantContinuityClose').click();
+    await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+    await expect(page.locator('#personalAssistantTodayTab')).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
 
     // Explicit memory is confirmation-gated. Cancel once, then confirm exactly
     // once; ordinary Help never receives or executes this action.
-    await page.locator('#personalAssistantLauncher').click();
+    await page.locator('#personalAssistantAskTab').click();
     await page
       .locator('#personalAssistantInput')
       .fill('remember that Friday launches need a Thursday review');

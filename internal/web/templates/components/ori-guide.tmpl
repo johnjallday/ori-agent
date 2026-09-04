@@ -110,6 +110,7 @@
     <span class="personal-assistant-launcher__copy">
       <span id="personalAssistantLauncherName" class="personal-assistant-launcher__name">Personal assistant</span>
       <span class="personal-assistant-launcher__role">Personal Assistant</span>
+      <span id="personalAssistantLauncherStatus" class="personal-assistant-launcher__status" hidden></span>
     </span>
   </button>
   <section id="personalAssistantPanel" class="personal-assistant-panel" role="dialog"
@@ -123,15 +124,33 @@
       <button type="button" id="personalAssistantClose" class="personal-assistant-panel__close"
               aria-label="Close personal assistant">&times;</button>
     </header>
-    <form id="personalAssistantForm" class="personal-assistant-panel__form">
-      <label class="visually-hidden" for="personalAssistantInput">Ask your personal assistant a question or describe work</label>
-      <textarea id="personalAssistantInput" class="personal-assistant-panel__input" rows="3"
-                maxlength="2000" autocomplete="off"
-                placeholder="Ask a question or describe what you want help with"></textarea>
-      <button type="submit" id="personalAssistantSend" class="personal-assistant-panel__send">Send</button>
-    </form>
-    <p id="personalAssistantPanelStatus" class="personal-assistant-panel__status" role="status" aria-live="polite"></p>
-    <div id="personalAssistantActivityMount" class="personal-assistant-panel__activity"></div>
+
+    {{if eq .CurrentPage "index"}}
+    <div id="personalAssistantTabs" class="personal-assistant-panel__tabs" role="tablist"
+         aria-label="Personal assistant views">
+      <button type="button" id="personalAssistantTodayTab" class="personal-assistant-panel__tab"
+              role="tab" aria-selected="true" aria-controls="personalAssistantTodayPanel">Today</button>
+      <button type="button" id="personalAssistantAskTab" class="personal-assistant-panel__tab"
+              role="tab" aria-selected="false" aria-controls="personalAssistantAskPanel" tabindex="-1">Ask</button>
+    </div>
+    <div id="personalAssistantTodayPanel" class="personal-assistant-panel__view personal-assistant-panel__view--today"
+         role="tabpanel" aria-labelledby="personalAssistantTodayTab">
+      {{template "personal-assistant-today.tmpl" .}}
+    </div>
+    {{end}}
+
+    <div id="personalAssistantAskPanel" class="personal-assistant-panel__view personal-assistant-panel__view--ask"
+         {{if eq .CurrentPage "index"}}role="tabpanel" aria-labelledby="personalAssistantAskTab" hidden{{end}}>
+      <form id="personalAssistantForm" class="personal-assistant-panel__form">
+        <label class="visually-hidden" for="personalAssistantInput">Ask your personal assistant a question or describe work</label>
+        <textarea id="personalAssistantInput" class="personal-assistant-panel__input" rows="3"
+                  maxlength="2000" autocomplete="off"
+                  placeholder="Ask a question or describe what you want help with"></textarea>
+        <button type="submit" id="personalAssistantSend" class="personal-assistant-panel__send">Send</button>
+      </form>
+      <p id="personalAssistantPanelStatus" class="personal-assistant-panel__status" role="status" aria-live="polite"></p>
+      <div id="personalAssistantActivityMount" class="personal-assistant-panel__activity"></div>
+    </div>
   </section>
 </div>
 {{end}}

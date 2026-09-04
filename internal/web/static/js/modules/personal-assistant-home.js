@@ -71,6 +71,21 @@ export function safeTodayRoute(value) {
   }
 }
 
+export function personalAssistantLauncherCue(personalAssistant, today) {
+  const relationshipState = String(personalAssistant?.state || 'unavailable');
+  const todayState = String(today?.state || 'loading');
+  if (relationshipState === 'paused' || todayState === 'paused') return 'Paused';
+  if (relationshipState === 'needs_hq' || relationshipState === 'provisioning_hq') {
+    return 'Build HQ';
+  }
+  if (relationshipState === 'repair_needed') return 'Repair needed';
+  if (todayState === 'partial' || todayState === 'unavailable') return 'Sources unavailable';
+  if (todayState === 'model_unavailable') return 'Model unavailable';
+  if (todayState === 'active' || todayState === 'healthy_empty') return 'Today ready';
+  if (relationshipState === 'active') return 'Loading Today';
+  return '';
+}
+
 // --- The post-hire domain offer ----------------------------------------
 //
 // Detection runs here, not in the hire wizard: hiring is one decision, and a
@@ -115,13 +130,21 @@ export function specialistOfferIsOpen(personalAssistant) {
   return settled && answered === '';
 }
 
-const state = { today: null, root: null, sequence: 0, offer: null, offerDecision: 'unanswered' };
+const state = {
+  today: null,
+  relationship: null,
+  root: null,
+  sequence: 0,
+  offer: null,
+  offerDecision: 'unanswered'
+};
 
 function elements() {
   const root = document.getElementById('personalAssistantToday');
   if (!root) return null;
   return {
     root,
+    launcherStatus: document.getElementById('personalAssistantLauncherStatus'),
     eyebrow: document.getElementById('personalAssistantTodayEyebrow'),
     title: document.getElementById('personalAssistantTodayTitle'),
     meta: document.getElementById('personalAssistantTodayMeta'),
@@ -144,7 +167,6 @@ function elements() {
     studioTitle: document.getElementById('personalAssistantTodayStudioTitle'),
     studio: document.getElementById('personalAssistantTodayStudio'),
     studioNote: document.getElementById('personalAssistantTodayStudioNote'),
-    briefMount: document.getElementById('personalAssistantTodayBriefMount'),
     links: {
       personal_hq: document.getElementById('personalAssistantTodayHQ'),
       working_agreement: document.getElementById('personalAssistantTodayAgreement'),
@@ -157,7 +179,10 @@ function elements() {
 function renderRows(list, section) {
   if (!list) return;
   list.replaceChildren();
-  todaySectionRows(section).forEach(row => {
+  const rows = todaySectionRows(section);
+  const sectionElement = list.closest?.('section');
+  if (sectionElement) sectionElement.dataset.empty = rows.every(row => row.kind === 'status');
+  rows.forEach(row => {
     const li = document.createElement('li');
     if (row.kind === 'status') li.className = 'personal-assistant-today__empty';
     if (row.route) {
@@ -358,10 +383,11 @@ function setLink(link, route) {
   if (safe) link.href = String(route);
 }
 
-function moveDailyBrief(els) {
-  const brief = document.getElementById('homeDailyBrief');
-  if (!brief || !els.briefMount || brief.parentElement === els.briefMount) return;
-  els.briefMount.appendChild(brief);
+function renderLauncherCue(els, today = state.today) {
+  if (!els?.launcherStatus) return;
+  const cue = personalAssistantLauncherCue(state.relationship, today);
+  els.launcherStatus.textContent = cue;
+  els.launcherStatus.hidden = !cue;
 }
 
 function renderToday(today) {
@@ -371,8 +397,8 @@ function renderToday(today) {
   const view = personalAssistantTodayView(today);
   els.root.hidden = false;
   els.root.dataset.state = view.state;
-  els.eyebrow.textContent = `Today from ${view.displayName}`;
-  els.title.textContent = 'Today';
+  els.eyebrow.textContent = 'Personal briefing';
+  els.title.textContent = `Today from ${view.displayName}`;
   els.meta.textContent = today?.next_check_in
     ? `Next scheduled check-in: ${new Date(today.next_check_in).toLocaleString()}`
     : view.paused
@@ -416,12 +442,15 @@ function renderToday(today) {
   renderRows(els.results, today?.results);
   renderStudio(els, today?.studio);
   Object.entries(els.links).forEach(([key, link]) => setLink(link, today?.links?.[key]));
-  if (view.active || view.paused || view.partial) moveDailyBrief(els);
+  renderLauncherCue(els, today);
 }
 
 function renderRelationship(personalAssistant, view) {
   const els = elements();
   if (!els) return;
+  state.relationship = personalAssistant || null;
+  state.today = null;
+  renderLauncherCue(els, null);
   if (!view?.known) {
     els.root.hidden = true;
     return;
@@ -434,13 +463,9 @@ function renderRelationship(personalAssistant, view) {
   // A hired assistant with no HQ yet already has a real, trustworthy name —
   // unlike needsHire, where nothing has been chosen yet.
   const named = view.available || view.needsHQ;
-  els.eyebrow.textContent = named ? `Today from ${view.name}` : 'Your personal assistant';
-  els.title.textContent = view.available
-    ? 'Loading Today…'
-    : view.needsHQ
-      ? `Build ${view.name}’s Personal HQ`
-      : 'Hire your personal assistant';
-  els.meta.textContent = '';
+  els.eyebrow.textContent = 'Personal briefing';
+  els.title.textContent = named ? `Today from ${view.name}` : 'Your personal assistant';
+  els.meta.textContent = view.available ? 'Loading the latest Today records…' : '';
   els.sections.hidden = !view.available;
   if (view.repair) {
     const repairStep = String(personalAssistant?.repair_step || '').trim();
@@ -507,10 +532,12 @@ async function loadToday() {
     if (!els) return;
     els.root.hidden = false;
     els.root.dataset.state = 'unavailable';
-    els.title.textContent = 'Today is temporarily unavailable';
+    els.eyebrow.textContent = 'Personal briefing';
+    els.title.textContent = `Today from ${state.relationship?.display_name || 'your assistant'}`;
     els.banner.textContent =
-      'The Workspace Map and the rest of Home are still available below. No all-clear is being shown.';
+      'Today is temporarily unavailable. The Workspace Map and the rest of Home remain available; no all-clear is being shown.';
     els.sections.hidden = true;
+    renderLauncherCue(els, { state: 'unavailable' });
   }
 }
 

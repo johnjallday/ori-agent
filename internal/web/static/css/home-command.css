@@ -65,9 +65,9 @@ body.home-command-page .home-command-bridge * {
 }
 
 /* One row: the cockpit, which absorbs the whole bridge height so Map/Tree and
-   the rail fill the screen. The optional Personal HQ mounts live INSIDE the
-   Today rail rather than as another row — below the cockpit they squeezed the
-   workspace area whenever an HQ card appeared.
+   the Updates flyout fill the screen. The optional Personal HQ utility mounts
+   live inside that flyout rather than as another row — below the cockpit they
+   squeezed the workspace area whenever an HQ card appeared.
 
    There used to be a leading `auto` row for the Ask Ori command strip. Issue
    #350 retired that strip (see dashboard.tmpl, which says its layout space is
@@ -91,28 +91,10 @@ body.home-command-page .home-command-bridge * {
   font-family: "Chakra Petch", system-ui, sans-serif;
 }
 
-.home-command-bridge:has(.personal-assistant-today:not([hidden])) {
-  grid-template-rows: auto minmax(0, 1fr);
-}
-
-.home-command-bridge:has(.pa-continuity:not([hidden])) {
-  grid-template-rows: auto minmax(0, 1fr);
-}
-
-.home-command-bridge:has(.personal-assistant-today:not([hidden])):has(
-    .pa-continuity:not([hidden])
-  ) {
-  grid-template-rows: auto auto minmax(0, 1fr);
-}
-
 .personal-assistant-today {
   min-width: 0;
-  overflow: hidden;
-  padding: clamp(14px, 2vw, 22px);
-  border: 1px solid var(--hc-line);
-  border-radius: 18px;
-  background: linear-gradient(145deg, var(--hc-panel-raised), var(--hc-panel));
-  box-shadow: var(--hc-shadow);
+  overflow: visible;
+  padding: 2px 4px 12px;
 }
 
 .personal-assistant-today[hidden] {
@@ -136,10 +118,12 @@ body.home-command-page .home-command-bridge * {
 }
 
 .personal-assistant-today__title {
-  margin: 2px 0;
+  margin: 3px 0;
   color: var(--hc-ink);
   font-family: "Fraunces", Georgia, serif;
-  font-size: clamp(25px, 3vw, 38px);
+  font-size: clamp(22px, 3vw, 28px);
+  line-height: 1.12;
+  overflow-wrap: anywhere;
 }
 
 .personal-assistant-today__meta {
@@ -182,18 +166,29 @@ body.home-command-page .home-command-bridge * {
   display: grid;
   min-width: 0;
   margin-top: 14px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .personal-assistant-today__sections > section {
   min-width: 0;
-  padding: 10px;
+  padding: 11px 12px;
   border: 1px solid var(--hc-line);
+  border-radius: 10px;
   background: color-mix(in srgb, var(--hc-panel-raised) 72%, transparent);
 }
 
-.personal-assistant-today__sections h2 {
+.personal-assistant-today__sections > section[data-empty="true"] {
+  padding-block: 8px;
+  background: transparent;
+}
+
+.personal-assistant-today__sections > section[data-empty="true"] h4 {
+  margin-bottom: 3px;
+  color: var(--hc-ink-dim);
+}
+
+.personal-assistant-today__sections h4 {
   margin: 0 0 8px;
   color: var(--hc-ink);
   font-size: 13px;
@@ -296,12 +291,8 @@ body.home-command-page .home-command-bridge * {
 
 .personal-assistant-today #homeDailyBrief {
   margin-top: 14px;
-}
-
-@media (max-width: 900px) {
-  .personal-assistant-today__sections {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+  border-radius: 12px;
+  box-shadow: none;
 }
 
 @media (max-width: 560px) {
@@ -1426,26 +1417,6 @@ a.quest-title:focus-visible {
     min-height: 0;
     flex: 1;
   }
-
-  /* Assistant-first Home adds a real Today section above the Map. The legacy
-     cockpit can lock itself to one viewport because it has only the Map row;
-     keeping that lock after Today mounts clips the Map below the fold while
-     the main element's overflow:hidden prevents the page from reaching it.
-     Let this cohort use normal document scrolling and give the cockpit a full
-     working viewport once the user reaches it. */
-  body.home-command-page:has(.personal-assistant-today:not([hidden])) .main-content-wrapper,
-  body.home-command-page:has(.personal-assistant-today:not([hidden])) .home-command-main {
-    height: auto;
-    min-height: calc(100dvh - var(--navbar-offset, 76px));
-  }
-
-  body.home-command-page:has(.personal-assistant-today:not([hidden])) .home-command-main {
-    overflow: visible;
-  }
-
-  .home-command-bridge:has(.personal-assistant-today:not([hidden])) .home-cockpit {
-    min-height: max(520px, calc(100dvh - var(--navbar-offset, 76px) - 24px));
-  }
 }
 
 @media (max-width: 1199px), (max-height: 679px) {
@@ -1863,12 +1834,20 @@ a.quest-title:focus-visible {
 }
 
 .pa-continuity {
-  margin: 0 0 1rem;
+  position: fixed;
+  z-index: 1045;
+  top: max(calc(var(--navbar-offset, 76px) + 12px), 88px);
+  right: 24px;
+  bottom: 24px;
+  width: min(760px, calc(100vw - 48px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: clamp(1rem, 2vw, 1.5rem);
   border: 1px solid color-mix(in srgb, var(--primary-color) 24%, var(--border-color));
   border-radius: var(--radius-lg);
   background: var(--surface-color);
-  box-shadow: var(--shadow-sm);
+  box-shadow: 0 20px 56px rgb(0 0 0 / 30%);
 }
 
 .pa-continuity[hidden] {
@@ -1892,10 +1871,26 @@ a.quest-title:focus-visible {
 }
 
 .pa-continuity__close {
-  border: 0;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--text-secondary);
   font-size: 1.5rem;
+  cursor: pointer;
+}
+
+.pa-continuity__close:focus-visible,
+.pa-continuity a:focus-visible,
+.pa-continuity button:focus-visible,
+.pa-continuity input:focus-visible,
+.pa-continuity select:focus-visible,
+.pa-continuity textarea:focus-visible {
+  outline: 3px solid var(--primary-color);
+  outline-offset: 2px;
 }
 
 .pa-continuity__status {
@@ -1984,6 +1979,14 @@ a.quest-title:focus-visible {
 @media (max-width: 720px) {
   .home-daily-brief-header {
     flex-direction: column;
+  }
+
+  .pa-continuity {
+    top: max(calc(var(--navbar-offset, 60px) + 8px), 68px);
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    width: auto;
   }
 
   .pa-continuity__rhythm,
