@@ -165,6 +165,25 @@ func TestPAFPanelRendersHomeTodayAndAskExactlyOnce(t *testing.T) {
 	}
 }
 
+func TestHomeCockpitHasNoTodayOrWorkingAgreementGridSibling(t *testing.T) {
+	body := readTemplate(t, "templates/components/dashboard.tmpl")
+	if strings.Contains(body, `id="personalAssistantToday"`) {
+		t.Fatal("Today must be owned by the shared Personal Assistant drawer, not the Home grid")
+	}
+	cockpit := strings.Index(body, `id="homeCockpit"`)
+	agreement := strings.Index(body, `id="personalAssistantContinuity"`)
+	if cockpit < 0 || agreement < 0 {
+		t.Fatalf("could not locate cockpit=%d agreement=%d", cockpit, agreement)
+	}
+	bridgeEndOffset := strings.Index(body[cockpit:], "\n</div>\n\n<!-- Working Agreement")
+	if bridgeEndOffset < 0 {
+		t.Fatal("could not locate the Home command bridge boundary")
+	}
+	if agreement < cockpit+bridgeEndOffset {
+		t.Fatal("Working Agreement still occupies the Home command grid ahead of the cockpit")
+	}
+}
+
 func TestPAFPanelKeepsNonHomePagesAskOnly(t *testing.T) {
 	r := NewTemplateRenderer()
 	if err := r.LoadTemplates(); err != nil {

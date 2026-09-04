@@ -519,9 +519,15 @@ test('a scan that never answers leaves Home fully usable', async ({ page }) => {
   });
 
   await page.goto('/');
+  // Detection is still outstanding, but the Map remains independently usable.
+  await expect(page.locator('#cockpitMap')).toBeVisible();
+  await page.locator('[data-cockpit-view="tree"]').click();
+  await expect(page.locator('#cockpitTree')).toBeVisible();
+  await page.locator('[data-cockpit-view="map"]').click();
+  await expect(page.locator('#cockpitMap')).toBeVisible();
+
   await openToday(page);
   await expect(offer(page)).toBeHidden();
-  // Home's own content is there and interactive.
   await expect(page.locator('#personalAssistantTodaySections')).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/10-slow-scan.png`, fullPage: true });
 });

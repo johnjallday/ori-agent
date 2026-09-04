@@ -927,7 +927,11 @@ test.describe('Personal Assistant Foundation first value', () => {
         viewportHeight: window.innerHeight,
         documentHeight: document.documentElement.scrollHeight,
         bodyHeight: document.body.scrollHeight,
-        mainOverflow: getComputedStyle(document.querySelector('.home-command-main')!).overflow
+        mainOverflow: getComputedStyle(document.querySelector('.home-command-main')!).overflow,
+        camera: window.OriWorkspaceMap?.getCamera?.() || null,
+        selectedWorkspace:
+          document.querySelector('.ws-map-tile.is-selected')?.getAttribute('data-workspace-id') ||
+          null
       };
     });
     expect(closedLayout.documentHeight).toBeLessThanOrEqual(closedLayout.viewportHeight + 2);
@@ -952,11 +956,19 @@ test.describe('Personal Assistant Foundation first value', () => {
       'href',
       '/workspaces/personal-hq'
     );
-    const openCockpit = await page.evaluate(() => {
+    const openState = await page.evaluate(() => {
       const cockpit = document.getElementById('homeCockpit')!.getBoundingClientRect();
-      return { x: cockpit.x, y: cockpit.y, width: cockpit.width, height: cockpit.height };
+      return {
+        cockpit: { x: cockpit.x, y: cockpit.y, width: cockpit.width, height: cockpit.height },
+        camera: window.OriWorkspaceMap?.getCamera?.() || null,
+        selectedWorkspace:
+          document.querySelector('.ws-map-tile.is-selected')?.getAttribute('data-workspace-id') ||
+          null
+      };
     });
-    expect(openCockpit).toEqual(closedLayout.cockpit);
+    expect(openState.cockpit).toEqual(closedLayout.cockpit);
+    expect(openState.camera).toEqual(closedLayout.camera);
+    expect(openState.selectedWorkspace).toBe(closedLayout.selectedWorkspace);
 
     // Bootstrap's nested settings modal is the topmost surface. Escape closes
     // only it, leaves the Today drawer coherent, and returns focus to its

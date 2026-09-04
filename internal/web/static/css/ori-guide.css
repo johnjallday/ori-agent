@@ -557,9 +557,9 @@
 .personal-assistant-panel {
   display: flex;
   width: min(640px, calc(100vw - 48px));
-  height: min(760px, calc(100dvh - 112px));
-  max-height: calc(100dvh - 112px);
-  min-height: 320px;
+  height: min(760px, calc(100dvh - var(--ori-navbar-bottom, 60px) - 32px));
+  max-height: calc(100dvh - var(--ori-navbar-bottom, 60px) - 32px);
+  min-height: min(320px, calc(100dvh - var(--ori-navbar-bottom, 60px) - 32px));
   overflow: hidden;
   flex-direction: column;
   padding: 18px;

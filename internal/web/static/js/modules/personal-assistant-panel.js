@@ -325,8 +325,8 @@ function init() {
   );
   state.els.close?.addEventListener('click', close);
   state.els.form?.addEventListener('submit', submit);
-  state.els.todayTab?.addEventListener('click', () => selectView('today'));
-  state.els.askTab?.addEventListener('click', () => selectView('ask'));
+  state.els.todayTab?.addEventListener('click', () => selectView('today', { focusTab: true }));
+  state.els.askTab?.addEventListener('click', () => selectView('ask', { focusComposer: true }));
   [state.els.todayTab, state.els.askTab].filter(Boolean).forEach(tab => {
     tab.addEventListener('keydown', event => {
       const next = assistantTabViewAfterKey(state.activeView, event.key);
