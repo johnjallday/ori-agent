@@ -27,7 +27,7 @@ func TestBuiltInRegistryMatchesSpecialistConstraintsAndStaysReleaseGated(t *test
 		entry.ExpectedProgramSchema != 2 || entry.ExpectedProtocol != plugin.SurfaceProtocolVersion {
 		t.Fatalf("reviewed candidate versions drifted: %#v", entry)
 	}
-	if entry.SourceCommit != "13d18c52a05025b8a54793a5b0844e72f1018fda" {
+	if entry.SourceCommit != "a5f4149f1aaf64611e90ff9484e37f7854c828b9" {
 		t.Fatalf("reviewed candidate commit drifted: %q", entry.SourceCommit)
 	}
 	if entry.ReleaseReady || entry.Source() != "" {

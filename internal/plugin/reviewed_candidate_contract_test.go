@@ -46,7 +46,7 @@ func TestReviewedCandidateHostContract(t *testing.T) {
 	if program == nil || program.SchemaVersion != workspace.AssistantProgramSchemaVersion ||
 		len(program.Roles) != 5 || program.Roles[0].Scope != workspace.AssistantRoleScopeHome ||
 		program.Roles[1].Scope != workspace.AssistantRoleScopeProject ||
-		program.Roles[4].CapabilityID != "sample_library" {
+		program.Roles[4].CapabilityID != "sample-library" {
 		t.Fatalf("candidate scoped assistant program = %#v", program)
 	}
 	report := BuildTrustReport(descriptor)

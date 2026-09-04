@@ -217,6 +217,23 @@ type InstallResult struct {
 // create another workspace; does not request or grant folder access; and does
 // not register a watcher or schedule. Everything that needs the user's approval
 // happens later, in setup.
+func assistantProgramHomeOffersCapability(ws *workspace.Workspace, capabilityID string) bool {
+	if ws == nil {
+		return false
+	}
+	state := ws.GetAssistantProgramState()
+	if state == nil || state.Declaration == nil {
+		return false
+	}
+	capabilityID = workspace.NormalizeCapabilityID(capabilityID)
+	for _, role := range state.Declaration.Roles {
+		if role.Scope == workspace.AssistantRoleScopeHome && !role.Required && workspace.NormalizeCapabilityID(role.CapabilityID) == capabilityID {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Service) Install(req InstallRequest) (InstallResult, error) {
 	def, err := s.resolveInstallable(req.CapabilityID)
 	if err != nil {
@@ -226,6 +243,12 @@ func (s *Service) Install(req InstallRequest) (InstallResult, error) {
 	ws, err := s.loadWorkspace(req.WorkspaceID)
 	if err != nil {
 		return InstallResult{}, err
+	}
+	if def.Requirements.AssistantProgramHomeOnly && !assistantProgramHomeOffersCapability(ws, def.ID) {
+		return InstallResult{}, &Error{
+			Code:    CodeCapabilityUnavailable,
+			Message: "This add-on is available only from an Assistant Program Home that explicitly offers it.",
+		}
 	}
 
 	// Idempotent fast path. Also checked inside the Update below, under the

@@ -6,7 +6,7 @@ var builtInEntries = mustRegistry([]Entry{
 	{
 		Key: "ori_reaper", PluginID: "reaper-plugin", ExpectedVersion: "0.5.0",
 		SourceRepository: "https://github.com/johnjallday/reaper-plugin",
-		SourceCommit:     "13d18c52a05025b8a54793a5b0844e72f1018fda", SourceFormat: reviewedClaudeFormat,
+		SourceCommit:     "a5f4149f1aaf64611e90ff9484e37f7854c828b9", SourceFormat: reviewedClaudeFormat,
 		PublisherLabel: "Ori", SourceLabel: "johnjallday/reaper-plugin",
 		ExpectedBlueprintID: "reaper-song", ExpectedBlueprintVersion: 4,
 		ExpectedProgramID: "music-producer-assistant", ExpectedProgramSchema: 2,
