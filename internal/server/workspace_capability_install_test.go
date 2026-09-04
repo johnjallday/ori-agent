@@ -64,8 +64,8 @@ func TestFileJanitorInstallVerticalSlice(t *testing.T) {
 	// 1. Catalog before install: File Janitor offered, not installed.
 	catalog := get(http.MethodGet, "/api/workspaces/"+workspaceID+"/capabilities")
 	items := catalog["capabilities"].([]any)
-	if len(items) != 1 {
-		t.Fatalf("expected one capability, got %d", len(items))
+	if len(items) != len(workspacecapability.BuiltinDefinitions()) {
+		t.Fatalf("expected every compiled capability, got %d", len(items))
 	}
 	item := items[0].(map[string]any)
 	if item["installed"] != false {
