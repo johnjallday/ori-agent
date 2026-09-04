@@ -567,6 +567,47 @@ test.describe('Personal Assistant Foundation first value', () => {
         })
       })
     );
+    await page.route('**/api/personal-hq/status', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          status: {
+            valid: true,
+            workspace_id: 'hq-1',
+            workspace: { folder_slug: 'personal-hq' }
+          }
+        })
+      })
+    );
+    await page.route('**/api/personal-hq/brief/config', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ config: briefConfig })
+      })
+    );
+    await page.route('**/api/personal-hq/brief/current', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          revision: {
+            local_date: new Date().toISOString().slice(0, 10),
+            status: 'succeeded',
+            generated_at: new Date().toISOString(),
+            content_json: JSON.stringify({ opening_summary: 'Your launch review is ready.' })
+          }
+        })
+      })
+    );
+    await page.route('**/api/personal-hq/brief/history', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ history: [{ local_date: '2026-09-01', status: 'succeeded' }] })
+      })
+    );
     await page.route('**/api/personal-assistant', route =>
       route.fulfill({
         status: 200,
@@ -916,6 +957,21 @@ test.describe('Personal Assistant Foundation first value', () => {
       return { x: cockpit.x, y: cockpit.y, width: cockpit.width, height: cockpit.height };
     });
     expect(openCockpit).toEqual(closedLayout.cockpit);
+
+    // Bootstrap's nested settings modal is the topmost surface. Escape closes
+    // only it, leaves the Today drawer coherent, and returns focus to its
+    // triggering action.
+    await expect(page.locator('#homeDailyBrief')).toBeVisible();
+    await page.locator('#homeDailyBriefMenu > summary').click();
+    const briefSettings = page.locator('#homeDailyBriefSettingsBtn');
+    await briefSettings.click();
+    const settingsModal = page.locator('#homeDailyBriefSettingsModal');
+    await expect(settingsModal).toBeVisible();
+    await expect(settingsModal).toBeFocused();
+    await settingsModal.press('Escape');
+    await expect(settingsModal).toBeHidden();
+    await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+    await expect(briefSettings).toBeFocused();
 
     await page.locator('#oriGuideMapTrigger').click();
     await expect(page.locator('#oriGuidePanel')).toBeVisible();

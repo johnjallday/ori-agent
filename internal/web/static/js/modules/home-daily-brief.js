@@ -400,6 +400,14 @@ export function renderContent(content) {
     if (!modalEl) return;
     loadSettingsAndHistory();
     if (window.bootstrap && window.bootstrap.Modal) {
+      modalEl.addEventListener(
+        'hidden.bs.modal',
+        () => {
+          const drawer = document.getElementById('personalAssistantPanel');
+          if (!drawer?.hidden && settingsBtn?.isConnected) settingsBtn.focus();
+        },
+        { once: true }
+      );
       window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
     }
   }

@@ -39,3 +39,25 @@ test('unavailable capability copy never claims a healthy connection', () => {
   assert.match(lines.join(' '), /Nothing until this source is configured/);
   assert.doesNotMatch(lines.join(' '), /connected|available/i);
 });
+
+test('working agreement remembers the visible assistant view without targeting a hidden link', () => {
+  const assistantTrigger = {
+    closest: selector => (selector === '#personalAssistantPanel' ? {} : null)
+  };
+  assert.deepEqual(
+    continuity.assistantReturnView(assistantTrigger, {
+      _state: { open: true, activeView: 'ask' }
+    }),
+    { fromAssistant: true, view: 'ask' }
+  );
+  assert.deepEqual(
+    continuity.assistantReturnView(assistantTrigger, {
+      _state: { open: false, activeView: 'ask' }
+    }),
+    { fromAssistant: false, view: 'today' }
+  );
+  assert.deepEqual(continuity.assistantReturnView(null, null), {
+    fromAssistant: false,
+    view: 'today'
+  });
+});

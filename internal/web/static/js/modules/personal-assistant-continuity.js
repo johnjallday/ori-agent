@@ -37,6 +37,16 @@
     ];
   }
 
+  function assistantReturnView(trigger, assistantPanel) {
+    const fromAssistant = Boolean(
+      trigger?.closest?.('#personalAssistantPanel') && assistantPanel?._state?.open
+    );
+    return {
+      fromAssistant,
+      view: fromAssistant ? assistantPanel?._state?.activeView || 'today' : 'today'
+    };
+  }
+
   async function responseJSON(response) {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -338,10 +348,9 @@
     function open(trigger) {
       lastTrigger = trigger || doc.activeElement;
       const assistantPanel = global.PersonalAssistantPanel;
-      returnToAssistant = Boolean(
-        trigger?.closest?.('#personalAssistantPanel') && assistantPanel?._state?.open
-      );
-      returnAssistantView = assistantPanel?._state?.activeView || 'today';
+      const returnView = assistantReturnView(trigger, assistantPanel);
+      returnToAssistant = returnView.fromAssistant;
+      returnAssistantView = returnView.view;
       if (returnToAssistant && typeof assistantPanel.close === 'function') {
         assistantPanel.close({ restoreFocus: false });
       }
@@ -395,14 +404,17 @@
     }
 
     doc.addEventListener('keydown', event => {
-      if (event.key !== 'Escape' || panel.hidden || doc.querySelector?.('.modal.show')) return;
+      const modalOpen = Boolean(
+        event.target?.closest?.('.modal') || doc.querySelector?.('.modal.show')
+      );
+      if (event.key !== 'Escape' || panel.hidden || modalOpen) return;
       close();
     });
 
     return { open, close, load, renderState, renderCapabilities };
   }
 
-  const api = { mount, splitList, conflictView, capabilityCopy };
+  const api = { mount, splitList, conflictView, capabilityCopy, assistantReturnView };
   global.PersonalAssistantContinuity = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (global.document) {

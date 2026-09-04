@@ -341,7 +341,11 @@ function init() {
     });
   });
   document.addEventListener('keydown', event => {
-    const modalOpen = Boolean(document.querySelector?.('.modal.show'));
+    // Bootstrap removes `.show` before this bubbling listener runs, so the
+    // event target is also part of the topmost-modal check.
+    const modalOpen = Boolean(
+      event.target?.closest?.('.modal') || document.querySelector?.('.modal.show')
+    );
     if (assistantPanelShouldCloseOnKey(event.key, state.open, modalOpen)) close();
   });
   window.addEventListener('personal-assistant:status', event => {

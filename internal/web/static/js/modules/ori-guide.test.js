@@ -1130,6 +1130,18 @@ test('the guide starts closed and opening it exposes expanded state', () => {
   assert.equal(els.oriGuideLauncher.getAttribute('aria-expanded'), 'true');
 });
 
+test('opening Ask Ori closes the Personal Assistant drawer first', () => {
+  const els = guideEls();
+  const { guide, sandbox } = load({ elements: els });
+  let closes = 0;
+  sandbox.window.PersonalAssistantPanel = { close: () => (closes += 1) };
+
+  guide.open(els.oriGuideLauncher);
+
+  assert.equal(closes, 1);
+  assert.equal(guide.isOpen(), true);
+});
+
 test('closing returns focus to whatever opened the guide', () => {
   const els = guideEls();
   const { guide } = load({ elements: els });
