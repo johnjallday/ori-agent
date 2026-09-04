@@ -1,6 +1,6 @@
-# Assistant Program Contract v1
+# Assistant Program Contract v1 and v2
 
-Status: accepted for implementation
+Status: v1 accepted and shipped; scoped v2/domain-Home amendment accepted for specialist-setup implementation
 
 ## Purpose and boundaries
 
@@ -176,7 +176,10 @@ Text limits match the declaration and memory limits. API collections are
 bounded by the persisted limits and stable-sorted. All timestamps are RFC3339
 UTC with nanoseconds omitted.
 
-## Lifecycle semantics
+## V1 lifecycle semantics
+
+These rules remain the compatibility contract for schema-v1 declarations and
+records. V2 does not reinterpret them in place.
 
 - **First compatible project:** create/reuse one station shell and link the
   project. Do not hire, schedule, grant capability access, or run anything.
@@ -200,6 +203,148 @@ UTC with nanoseconds omitted.
   station, project links, memory, tasks, tombstones, and suggestions readable.
 - **Reinstall/re-enable:** lookup by stable key reuses state and does not
   duplicate station, roster, schedules, learnings, or suggestions.
+
+## Scoped v2 and domain-Home amendment
+
+### Compatibility rule
+
+Assistant Program schema v2 adds scoped role ownership; it does not change the
+meaning of v1. V1 shared rosters and copied instances remain readable as
+`LegacyRoster` evidence. They cannot satisfy a v2 role by matching a role label,
+agent name, instance ID copied across workspaces, entry-agent name, or current
+membership. An explicit impact-reviewed migration creates fresh v2 bindings;
+without one, the old topology remains untouched and reports
+`legacy_review_required`.
+
+A v2 declaration keeps the v1 inert-data restrictions and limits, and adds to
+each role:
+
+```text
+scope     home | project
+required  explicit boolean
+primary   interpreted within scope
+```
+
+Role IDs remain unique across the declaration. V2 requires at least one
+required Home role and one required project role, exactly one required primary
+in each scope, and no optional primary. Clients may choose only bounded display
+names and allowed provider/model values; scope, requirement, primary status,
+prompt, skills, capabilities and owning workspace always come from the trusted
+normalized declaration.
+
+A concrete program's exact Home/project role IDs and labels belong only to its
+trusted plugin declaration and domain contract, never this generic host
+contract.
+
+### Domain Home identity and creation
+
+For v2, the station may be a top-level `Kind: group` domain Home, not a second
+wrapper around a station. Its authority remains the exact
+`(owner_user_id, plugin_id, program_id)` key and stable workspace ID; its name,
+slug, tags and parent/descendant display are mutable projections.
+
+Split station provisioning into `EnsureHome` and `LinkProject`. The trusted
+project-connect service may ensure one inert Home from the installed normalized
+declaration before the first child exists, then create the managed child with
+that Home as its initial physical parent, and finally write one reciprocal link.
+Home creation uses canonical group scaffolding but bypasses generic group-agent
+creation. It creates no Agent, AgentInstance, role, task, schedule, reflection,
+capability, folder grant, runtime state, plugin action or project. Database
+uniqueness, revisions and operation receipts make concurrent attempts converge;
+a process mutex is only an optimization.
+
+Every connected v2 project must have matching owner/provenance, one stable
+server-issued `AssistantProjectLink.ID`, reciprocal live membership, and the
+Home parent/physical projection. The link is authority; `ParentID` is required
+organization only. A physical mismatch is `needs_attention` and is never
+silently repaired by moving a tree. A domain Home's filesystem roots are only
+its own `files/` and `notes/`; its physical group root and
+`sub-workspaces/` are never recursive MCP/native roots. Parentage never grants
+Home, child or sibling data.
+
+### Scoped records and provisioning
+
+The Home-owned v2 state contains an independently revisioned `HomeRoster`,
+stable linked-project IDs, portfolio state, learning/reflection state and
+bounded operation receipts. Every live project link contains its own
+independently revisioned `ProjectRoster`. A binding records stable role/scope,
+AgentInstance ID, current profile name, explicit provider/model receipt fields,
+timestamps and declaration evidence only—never prompt, memory, task, grant,
+path or runtime state.
+
+A staffed role requires both the binding and a matching AgentInstance plus
+workspace-local Agent snapshot in its owning Home or child. Every
+`(workspace, scoped role ID)` gets a fresh instance ID and fresh profile/snapshot
+unless the exact interrupted provisioning receipt proves the found profile was
+created for that same role/configuration. A same-named unrelated global profile
+is a collision, not reusable evidence. Workspace-local prompt edits, memory,
+tasks, toolbox/MCP/skill grants and runtime state never copy to Home or another
+child.
+
+Home staffing and project staffing are separate reviewed operations. Home
+staffing creates exactly the required Home-role set after at least one live
+project link. Project staffing coordinates every required project role for one
+exact link. Optional Home-role staffing is a third operation and does not
+install or configure an associated capability.
+Each operation claims deterministic intended role IDs, names/configuration
+fingerprints and pre-issued instance IDs before side effects, checkpoints each
+created component, preserves truthful partial results, and retries only missing
+roles. Adding a role runs no task, reflection, file read, grant, runtime action
+or application change. Missing model execution is reported separately from a
+valid binding.
+
+Existing same-workspace delegation remains the only ordinary delegation path:
+a child primary can target only that child's project members, and a Home
+primary can target only Home members. Personal HQ and siblings receive no
+target or authority.
+
+### Portfolio, handoff, learning and optional Home role
+
+Home owns one revisioned portfolio record per exact live link. Deterministic
+status, priority, milestones, dates, blockers, deliverables and archive-review
+fields are bounded and mutate only through host preview/commit receipts. Reads
+join exact links with bounded canonical workspace/Ticket facts; they never
+search disk or materialize child roots, project entries, prompts, memories,
+grants or live state.
+
+A domain's **Send to project**-style action is a host-owned, reviewed handoff,
+not cross-workspace `delegate_task`. Commit revalidates one exact link and calls
+`TicketService.CreateIdempotent` with the child as owner, yielding a non-running
+child task and a bounded Home receipt. It grants the Home role no child tool.
+
+Managed learning stays Home-owned and review-gated. Reflection reads only
+bounded accepted-task summaries from reciprocal links, not transcripts,
+ordinary project memory, files or runtime state. Only current approved learning
+revisions may enter bounded context for a linked project. Creating a link or
+role does not schedule reflection by itself.
+
+An optional companion declared as a Home role is a normal optional binding with
+the same provisioning rules. Any associated deterministic capability, folder
+consent, indexing/analysis or file operation remains a separate host-owned
+boundary. The role receives only its compiled bounded read interface, never a
+raw Directory Reference or file-action authority.
+
+### Protected lifecycle
+
+A live-linked project cannot be generically reparented, trashed or deleted. An
+explicit disconnect review transitions its link to a bounded child-owned
+tombstone, removes live Home membership/handoffs, and preserves the child,
+project roster, AgentInstances, tasks, project/external files, runtime state and
+copied samples. A separately reviewed move/delete can follow.
+
+A Home cannot use generic group-only or recursive-content deletion/trash/restore.
+The specialized impact flow preserves managed children/teams/project and sample
+folders/copied assets by default, transitions links to deterministic recoverable
+state, un-nests managed children through the active-work/depth/cycle/slug and
+path-rebase guards, then removes only the empty Home-owned group/state selected
+in review. Restart checkpoints prevent repeated stages. Restoring a Home does
+not silently reconnect or move children; selected reconnect is separately
+reviewed. Plugin disable/removal is not topology removal and preserves all
+Home/link/role/learning/sample data in place while execution pauses.
+
+The complete project-entry, hierarchy, roster migration, sample-library and
+error/redaction contracts are in
+`docs/architecture/specialist-setup-journey-contract.md`.
 
 ## Sequence diagrams
 
@@ -280,18 +425,22 @@ sequenceDiagram
 
 ## Compatibility and rollout matrix
 
-| Host / plugin | Behavior |
-|---|---|
-| Old host / new plugin | Plugin must declare minimum host support. Installation/blueprint loading fails closed; no partial workspace is created. |
-| New host / old plugin | No assistant declaration, therefore unchanged one-project/one-agent behavior. |
-| New host / new plugin | v1 declaration loads, snapshots, and enables explicit shell/hire flow. |
-| Plugin disabled/removed | Persisted data remains readable; generation and plugin-derived execution are paused. |
-| Plugin re-enabled | Exact key reuses existing state; no duplicates. |
+| Host / plugin                                  | Behavior                                                                                                                |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Old host / new plugin                          | Plugin must declare minimum host support. Installation/blueprint loading fails closed; no partial workspace is created. |
+| New host / old plugin                          | No assistant declaration, therefore unchanged one-project/one-agent behavior.                                           |
+| New host / plugin with v1 declaration          | Existing shared station/roster behavior remains readable and unchanged.                                                 |
+| New host / reviewed plugin with v2 declaration | Scoped Home/project declarations load; new setup uses the group Home and independent bindings.                          |
+| V1 record offered v2 migration                 | Preserve `LegacyRoster`; require separate reviewed Home and selected-project staffing operations.                       |
+| Plugin disabled/removed                        | Persisted data remains readable; generation and plugin-derived execution are paused.                                    |
+| Plugin re-enabled                              | Exact key reuses existing state; no duplicates.                                                                         |
 
-Host support lands first. The coordinated plugin candidate bumps its blueprint
-version and minor plugin version, and declares the minimum compatible Ori host
-feature `assistant_program_v1`. Publishing/tagging the plugin remains a separate
-human-confirmed release action after the Ori change is available.
+Host support lands first. A coordinated plugin candidate that adopts scoped
+roles uses Assistant Program schema 2 and declares the exact minimum host
+feature needed for its setup flow. Concrete plugin/service/blueprint versions
+belong in that integration's contract. Publishing or tagging any external
+plugin remains a separate human-confirmed release action after the Ori change
+is available.
 
 ## Privacy, permissions, and telemetry
 
