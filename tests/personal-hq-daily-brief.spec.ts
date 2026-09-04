@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
 /**
  * Personal HQ / Daily Brief end-to-end coverage (PRD task 9.4/9.5).
@@ -40,29 +40,65 @@ import { test, expect } from '@playwright/test';
  */
 
 test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
-  // Home remains the first surface. Mission 01 is a pull invitation into the
-  // normal workspace Map, where the absent HQ appears as a selected blueprint
-  // landmark rather than a full-screen takeover.
-  test('Mission 01 focuses the unbuilt Personal HQ landmark on the Map', async ({
+  let assistantReady = false;
+
+  test.beforeEach(async ({ page }) => {
+    await page.route(/\/api\/personal-assistant$/, route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          personal_assistant: assistantReady
+            ? {
+                state: 'active',
+                state_version: 1,
+                assistant_id: 'daily-brief-browser-assistant',
+                display_name: 'Atlas',
+                hq_workspace_id: 'daily-brief-browser-hq',
+                availability: { model: { status: 'available', available: true } }
+              }
+            : { state: 'needs_hire', next_action: 'hire', availability: {} }
+        })
+      })
+    );
+    await page.route('**/api/personal-assistant/today', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          today: {
+            state: 'active',
+            relationship_state: 'active',
+            display_name: 'Atlas',
+            model: { status: 'available', available: true },
+            brief: { health: { status: 'available' }, items: [] },
+            decisions: { health: { status: 'healthy_empty' }, items: [] },
+            priorities: { health: { status: 'healthy_empty' }, items: [] },
+            follow_ups: { health: { status: 'healthy_empty' }, items: [] },
+            results: { health: { status: 'healthy_empty' }, items: [] },
+            links: { advanced: '/agents' }
+          }
+        })
+      })
+    );
+  });
+
+  async function openToday(page: Page) {
+    await page.locator('#personalAssistantLauncher').click();
+    await expect(page.locator('#personalAssistantTodayPanel')).toBeVisible();
+  }
+
+  // The direct focus intent remains the Map-level compatibility route for an
+  // unbuilt Personal HQ. The current Mission 01 uses the separate named-assistant
+  // quest, which is covered by the Personal Assistant foundation journey.
+  test('focus intent selects the unbuilt Personal HQ landmark on the Map', async ({
     page,
     request
   }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     const res = await request.post('/api/onboarding/skip');
     expect(res.ok()).toBeTruthy();
-    await page.goto('/');
-
-    // Issue #334: Mission 01 lives inside the Quests flyout now, closed by
-    // default — open it to reach the real content.
-    await page.locator('#cockpitQuestsToggle').click();
-    const mission = page.locator('[data-role="first-mission"]');
-    await expect(mission).toBeVisible();
-    await expect(mission).toContainText('Build My HQ');
-    await mission.locator('[data-role="first-mission-action"]').click();
-
-    // The quest link still points at the retired launcher; `/workspaces`
-    // redirects to Home carrying the focus intent (the redirect's own contract
-    // is covered by TestServeWorkspacesRedirect in internal/server).
+    await page.goto('/?focus=personal-hq');
     await expect(page).toHaveURL(/\/\?.*focus=personal-hq/);
     await expect(page.locator('#hqOnboardingGuided')).toHaveCount(0);
 
@@ -148,7 +184,7 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     await expect(page).toHaveURL(/\/$/);
     await expect(page.locator('#homeHQResume')).toHaveCount(0);
     await expect(page.locator('#homeDailyBrief')).toBeHidden();
-    await expect(page.locator('[data-role="first-mission-status"]')).toHaveText('Not set up');
+    await expect(page.locator('[data-role="first-mission-status"]')).toHaveText('Saved for later');
   });
 
   // The Map-native action hands off to the existing setup modal and then
@@ -172,8 +208,9 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     const rootResponse = await page.request.get('/api/settings/workspace-root');
     expect(rootResponse.ok()).toBeTruthy();
     expect((await rootResponse.json()).confirmed).toBe(true);
-    // Issue #334: Daily Brief lives inside the Updates flyout now.
-    await page.locator('#cockpitRailToggle').click();
+    assistantReady = true;
+    await page.reload();
+    await openToday(page);
     await expect(page.locator('#homeDailyBrief')).toBeVisible();
     await expect(page.locator('#homeHQResume')).toHaveCount(0);
 
@@ -201,8 +238,7 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     page
   }) => {
     await page.goto('/');
-    // Issue #334: Daily Brief lives inside the Updates flyout now.
-    await page.locator('#cockpitRailToggle').click();
+    await openToday(page);
     await expect(page.locator('#homeDailyBrief')).toBeVisible();
     const bodyBefore = await page.locator('#homeDailyBriefBody').innerText();
 
@@ -221,10 +257,9 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
 
   test('Brief settings modal opens scoped to the HQ and shows recent history', async ({ page }) => {
     await page.goto('/');
-    // Issue #334: Daily Brief lives inside the Updates flyout now.
-    await page.locator('#cockpitRailToggle').click();
+    await openToday(page);
     // Secondary brief actions live behind the header's overflow disclosure;
-    // only Refresh keeps permanent space in the flyout.
+    // only Refresh keeps permanent space in Today.
     await page.locator('#homeDailyBriefMenu > summary').click();
     await page.locator('#homeDailyBriefSettingsBtn').click();
     await expect(page.locator('#homeDailyBriefSettingsModal')).toBeVisible();

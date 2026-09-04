@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { Buffer } from 'node:buffer';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -8,6 +8,52 @@ async function captureImplementationScreenshot(page, name: string) {
   if (!directory) return;
   mkdirSync(directory, { recursive: true });
   await page.screenshot({ path: join(directory, name), fullPage: false });
+}
+
+async function installActivePersonalAssistant(page: Page) {
+  await page.route(/\/api\/personal-assistant$/, route =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        personal_assistant: {
+          state: 'active',
+          state_version: 7,
+          assistant_id: 'assistant-smoke',
+          display_name: 'Atlas',
+          hq_workspace_id: 'hq-smoke',
+          availability: { model: { status: 'available', available: true } }
+        }
+      })
+    })
+  );
+  await page.route('**/api/personal-assistant/today', route =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        today: {
+          state: 'active',
+          relationship_state: 'active',
+          display_name: 'Atlas',
+          model: { status: 'available', available: true },
+          brief: { health: { status: 'healthy_empty' }, items: [] },
+          decisions: { health: { status: 'healthy_empty' }, items: [] },
+          priorities: { health: { status: 'healthy_empty' }, items: [] },
+          follow_ups: { health: { status: 'healthy_empty' }, items: [] },
+          results: { health: { status: 'healthy_empty' }, items: [] },
+          links: { advanced: '/agents' }
+        }
+      })
+    })
+  );
+}
+
+async function openPersonalAssistantAsk(page: Page) {
+  await page.locator('#personalAssistantLauncher').click();
+  await page.locator('#personalAssistantAskTab').click();
+  await expect(page.locator('#personalAssistantAskPanel')).toBeVisible();
+  await expect(page.locator('#personalAssistantInput')).toBeFocused();
 }
 
 /**
@@ -217,10 +263,13 @@ test.describe('Onboarding', () => {
     await expect(page.getByRole('button', { name: 'Set Up Later' })).toBeVisible();
     await page.getByRole('button', { name: 'Continue without a model' }).click();
     await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 3 of 3');
-    await expect(page.locator('#doneSpeech')).toContainText('What would make Ori useful today?');
+    await expect(page.locator('#onboardingPersonalAssistantHire')).toBeVisible();
+    await expect(page.locator('#onboardingPersonalAssistantHire')).toContainText(
+      'Hire your personal assistant'
+    );
   });
 
-  test('recommends a ready blueprint from one bounded intent answer', async ({ page }) => {
+  test('moves from model setup to the domain-neutral personal assistant hire', async ({ page }) => {
     await installBaseOnboardingRoutes(page);
     await page.route('**/api/providers', async route => {
       await route.fulfill({
@@ -279,18 +328,10 @@ test.describe('Onboarding', () => {
     await page.locator('#modelNextBtn').click();
 
     await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 3 of 3');
-    await expect(page.locator('#doneSpeech')).toContainText('What would make Ori useful today?');
-    await page.getByRole('button', { name: 'Start something new' }).click();
-    await page.locator('#onboardingIntentDescription').fill('I am producing a song in REAPER');
-    await expect(page.locator('#onboardingRecommendationTitle')).toHaveText('REAPER Song');
-    await expect(page.locator('#startBtn')).toHaveText('Use REAPER Song');
-    await expect(page.locator('#startBtn')).toBeEnabled();
-
-    await page.getByRole('button', { name: 'Bring in existing work' }).click();
-    await expect(page.locator('#onboardingRecommendationTitle')).toHaveText(
-      'Bring in existing work'
-    );
-    await expect(page.locator('#startBtn')).toHaveText('Import a folder');
+    const hireModal = page.locator('#onboardingPersonalAssistantHire');
+    await expect(hireModal).toBeVisible();
+    await expect(hireModal).toContainText('Hire your personal assistant');
+    await expect(hireModal).not.toContainText(/REAPER|music|producer/i);
   });
 });
 
@@ -430,13 +471,15 @@ test.describe('Home First Run', () => {
     page,
     request
   }) => {
+    await installActivePersonalAssistant(page);
     const response = await request.get('/api/workspaces');
     const data = await response.json();
     test.skip((data.workspaces || []).length !== 0, 'requires an empty workspace store');
 
     await page.goto('/');
     await expect(page.locator('body.home-command-page')).toBeVisible();
-    await expect(page.locator('#homeAssistantCard')).toHaveAttribute('data-first-run', 'true');
+    await expect(page.locator('#personalAssistantLauncher')).toBeVisible();
+    await expect(page.locator('#personalAssistantPanel')).toBeHidden();
     await expect(page.locator('#homeCockpit')).toBeVisible();
     await expect(page.locator('#homeCockpit')).toHaveAttribute('data-state', 'empty-map');
     await expect(page.locator('#cockpitMap')).toBeVisible();
@@ -444,10 +487,6 @@ test.describe('Home First Run', () => {
     const emptyActions = page.locator('.cockpit-empty-map-actions');
     await expect(emptyActions.getByRole('button', { name: 'New Workspace' })).toBeVisible();
     await expect(emptyActions.getByRole('button', { name: 'Import Folder' })).toBeVisible();
-    await expect(page.locator('#homeAssistantInput')).toHaveAttribute(
-      'placeholder',
-      'Plan a product launch…'
-    );
     await expect(page.getByRole('button', { name: 'Create a workspace' })).toBeVisible();
     await expect(page.locator('#sidebar')).toHaveCount(1);
     await expect(page.locator('#sidebarToggle')).toBeVisible();
@@ -458,18 +497,19 @@ test.describe('Home First Run', () => {
     await expect(page.locator('.cockpit-empty-map-actions')).toBeVisible();
   });
 
-  test('keeps the command-strip interaction contract on home', async ({ page }) => {
+  test('keeps the Map-first launcher interaction contract on Home', async ({ page }) => {
+    await installActivePersonalAssistant(page);
     await page.goto('/');
 
-    await expect(page.locator('#homeAssistantCard')).toBeVisible();
-    await expect(page.locator('#homeAssistantCard h1')).toHaveCount(0);
-    await expect(page.locator('#homeAssistantInput')).toBeVisible();
-    await expect(page.locator('#homeAssistantSendBtn')).toBeVisible();
-    await expect(page.locator('.home-prompt-chip')).toHaveCount(3);
+    await expect(page.locator('#personalAssistantLauncher')).toBeVisible();
+    await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+    await expect(page.locator('#homeAssistantCard')).toBeHidden();
     await expect(page.locator('#homeCockpit')).toBeVisible();
+    await page.locator('#personalAssistantLauncher').click();
+    await expect(page.locator('#personalAssistantTodayPanel')).toBeVisible();
   });
 
-  test('preserves quick-order chips, the command shortcut, and submit flow', async ({ page }) => {
+  test('preserves an Ask draft across the on-demand drawer lifecycle', async ({ page }) => {
     await page.route('**/api/onboarding/status', async route => {
       await route.fulfill({
         status: 200,
@@ -477,29 +517,30 @@ test.describe('Home First Run', () => {
         body: JSON.stringify({ needs_onboarding: false, completed: true, skipped: true })
       });
     });
+    await installActivePersonalAssistant(page);
 
     await page.goto('/');
-    const input = page.locator('#homeAssistantInput');
-    const chip = page.locator('.home-prompt-chip').first();
-    const prompt = await chip.getAttribute('data-prompt');
-
-    await chip.focus();
-    await expect(chip).toBeFocused();
-    await page.keyboard.press('Enter');
-    await expect(input).toHaveValue(prompt || '');
-
-    await page.keyboard.press('Control+j');
-    await expect(input).toBeFocused();
-
+    await openPersonalAssistantAsk(page);
+    const input = page.locator('#personalAssistantInput');
     await input.fill('Summarize current operations');
-    await page.keyboard.press('Enter');
-    await expect(page.locator('#homeAssistantThinkingModal')).toHaveClass(/show/);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+    await expect(page.locator('#personalAssistantLauncher')).toBeFocused();
+
+    await page.locator('#personalAssistantLauncher').click();
+    await expect(page.locator('#personalAssistantTodayPanel')).toBeVisible();
+    await page.locator('#personalAssistantAskTab').click();
+    await expect(input).toHaveValue('Summarize current operations');
   });
 
   test('renders the bridge without browser console errors', async ({ page }) => {
     const errors: string[] = [];
+    const failedResources: string[] = [];
     page.on('console', message => {
       if (message.type() === 'error') errors.push(message.text());
+    });
+    page.on('response', response => {
+      if (response.status() === 404) failedResources.push(new URL(response.url()).pathname);
     });
     await page.route('**/api/onboarding/status', async route => {
       await route.fulfill({
@@ -524,7 +565,7 @@ test.describe('Home First Run', () => {
 
     await page.goto('/');
     await expect(page.locator('.home-command-bridge')).toBeVisible();
-    expect(errors).toEqual([]);
+    expect(errors, `404 responses: ${failedResources.join(', ')}`).toEqual([]);
   });
 
   test('surfaces Mission 01 in progression before the HQ tier unlocks', async ({ page }) => {
@@ -2665,7 +2706,7 @@ test.describe('Workspace File Folders', () => {
   });
 });
 
-test.describe('Floating Workspace Assistant', () => {
+test.describe('Personal Assistant surface ownership', () => {
   async function createTemporaryWorkspace(request, namePrefix: string) {
     const workspaceResp = await request.post('/api/orchestration/workspace', {
       data: {
@@ -2696,219 +2737,7 @@ test.describe('Floating Workspace Assistant', () => {
     });
   }
 
-  async function suppressEntryAgentPrompt(page, workspaceId: string) {
-    await page.addInitScript(id => {
-      window.sessionStorage.setItem(`workspace-detail-entry-agent-prompt-dismissed:${id}`, '1');
-    }, workspaceId);
-  }
-
-  async function gotoWorkspaceCommand(page, workspaceId: string) {
-    await suppressOnboarding(page);
-    await suppressEntryAgentPrompt(page, workspaceId);
-    const workspaceResp = await page.request.get(`/api/workspaces/${workspaceId}`);
-    const workspaceData = await workspaceResp.json();
-    const workspaceSlug =
-      workspaceData.folder_slug ||
-      workspaceData.folder?.folder_slug ||
-      workspaceData.workspace?.folder_slug;
-    expect(workspaceSlug).toBeTruthy();
-    await page.goto(`/workspaces/${workspaceSlug}`);
-    await expect(page.locator('#workspaceCommandView')).toBeVisible();
-  }
-
-  test('replaces the workspace-detail inline bar with a full floating assistant panel', async ({
-    page,
-    request
-  }) => {
-    let workspaceId = '';
-    workspaceId = await createTemporaryWorkspace(request, 'Playwright Floating Assistant');
-
-    try {
-      await gotoWorkspaceCommand(page, workspaceId);
-
-      await expect(page.locator('#homeAssistantCard.modern-card')).toHaveCount(0);
-      await expect(page.locator('#hubSupportChatLauncher')).toBeVisible();
-      await expect(page.locator('#hubSupportChatPanel')).toBeHidden();
-
-      await page.locator('#hubSupportChatLauncher').click();
-      const panel = page.locator('#hubSupportChatPanel');
-      await expect(panel).toBeVisible();
-      await expect(panel.getByRole('button', { name: 'Task', exact: true })).toBeVisible();
-      await expect(panel.getByRole('button', { name: 'Ask', exact: true })).toBeVisible();
-      await expect(panel.getByRole('button', { name: 'Note', exact: true })).toBeVisible();
-      await expect(panel.locator('#homeAssistantQuickPlan')).toBeVisible();
-      await expect(panel.locator('#homeAssistantQuickTasks')).toBeVisible();
-      await expect(panel.locator('#homeAssistantQuickNotes')).toBeVisible();
-      await expect(panel.locator('#homeAssistantQuickReview')).toBeVisible();
-    } finally {
-      if (workspaceId) {
-        await request.delete(`/api/orchestration/workspace?id=${workspaceId}`);
-      }
-    }
-  });
-
-  test('creates a workspace task from the floating assistant task mode', async ({
-    page,
-    request
-  }) => {
-    test.setTimeout(45000);
-
-    let workspaceId = '';
-    workspaceId = await createTemporaryWorkspace(request, 'Playwright Floating Task');
-    const taskTitle = `Write floating assistant smoke task ${Date.now()}`;
-
-    try {
-      await gotoWorkspaceCommand(page, workspaceId);
-      await page.waitForFunction(() => Boolean((window as any).workspaceDetail));
-
-      await page.locator('#hubSupportChatLauncher').click();
-      await page.locator('#homeAssistantInput').fill(taskTitle);
-      await page.locator('#homeAssistantSendBtn').click();
-
-      await expect(page.locator('#workspace-detail-task-confirm-modal')).toBeVisible();
-      await page.locator('#workspace-detail-task-confirm-confirm').click();
-      await expect(page.locator('#homeAssistantRoutingSummary')).toContainText('Task Created');
-      await expect(page.locator('#homeAssistantConversation')).toContainText('Created a task');
-    } finally {
-      if (workspaceId) {
-        await request.delete(`/api/orchestration/workspace?id=${workspaceId}`);
-      }
-    }
-  });
-
-  test('saves a workspace note from the floating assistant note mode', async ({
-    page,
-    request
-  }) => {
-    test.setTimeout(45000);
-
-    let workspaceId = '';
-    workspaceId = await createTemporaryWorkspace(request, 'Playwright Floating Note');
-    const noteText = `Floating assistant note smoke ${Date.now()}`;
-
-    try {
-      await gotoWorkspaceCommand(page, workspaceId);
-      await page.waitForFunction(() => Boolean((window as any).workspaceDetail));
-
-      await page.locator('#hubSupportChatLauncher').click();
-      await page.locator('#hubSupportChatPanel').getByRole('button', { name: 'Note' }).click();
-      await page.locator('#homeAssistantInput').fill(noteText);
-      await page.locator('#homeAssistantSendBtn').click();
-
-      await expect(page.locator('#homeAssistantRoutingSummary')).toContainText('Note Created');
-      await expect(page.locator('#homeAssistantConversation')).toContainText('Created a note');
-    } finally {
-      if (workspaceId) {
-        await request.delete(`/api/orchestration/workspace?id=${workspaceId}`);
-      }
-    }
-  });
-
-  test('runs preserved quick actions from the floating assistant', async ({ page, request }) => {
-    test.setTimeout(45000);
-
-    let workspaceId = '';
-    workspaceId = await createTemporaryWorkspace(request, 'Playwright Floating Quick Actions');
-
-    try {
-      await gotoWorkspaceCommand(page, workspaceId);
-
-      await page.locator('#hubSupportChatLauncher').click();
-      const panel = page.locator('#hubSupportChatPanel');
-      await expect(panel).toBeVisible();
-
-      await panel.locator('#homeAssistantQuickNotes').click();
-      await expect(page.locator('#noteEditorModal')).toBeVisible();
-      await expect(page.locator('#noteNameInput')).toHaveValue('Workspace Description');
-      await expect(page.locator('#noteContentInput')).toHaveValue(/## Description/);
-
-      await gotoWorkspaceCommand(page, workspaceId);
-      await page.locator('#hubSupportChatLauncher').click();
-      await page
-        .locator('#hubSupportChatPanel')
-        .getByRole('button', { name: 'Note', exact: true })
-        .click();
-
-      for (const selector of [
-        '#homeAssistantQuickPlan',
-        '#homeAssistantQuickTasks',
-        '#homeAssistantQuickReview'
-      ]) {
-        const button = page.locator('#hubSupportChatPanel').locator(selector);
-        const prompt = await button.getAttribute('data-home-prompt');
-        expect(prompt).toBeTruthy();
-        await button.click();
-        await expect(page.locator('#homeAssistantInput')).toHaveValue(prompt || '');
-        await expect(page.locator('#homeAssistantSendBtn')).toBeEnabled();
-      }
-    } finally {
-      if (workspaceId) {
-        await request.delete(`/api/orchestration/workspace?id=${workspaceId}`);
-      }
-    }
-  });
-
-  test('opens full chat for the active workspace assistant session', async ({ page, request }) => {
-    test.setTimeout(45000);
-
-    let workspaceId = '';
-    workspaceId = await createTemporaryWorkspace(request, 'Playwright Floating Open Chat');
-    let chatPayload: any = null;
-    let chatSessionId = '';
-
-    try {
-      await suppressOnboarding(page);
-      await page.route('**/api/chat', async route => {
-        chatPayload = route.request().postDataJSON();
-        chatSessionId = route.request().headers()['x-session-id'] || '';
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            response: 'Workspace manager inline response from smoke test.'
-          })
-        });
-      });
-
-      await gotoWorkspaceCommand(page, workspaceId);
-      await page.waitForFunction(() => Boolean((window as any).workspaceDetail));
-
-      await page.locator('#hubSupportChatLauncher').click();
-      const panel = page.locator('#hubSupportChatPanel');
-      await panel.getByRole('button', { name: 'Ask', exact: true }).click();
-      await page.locator('#homeAssistantInput').fill('What should happen next in this workspace?');
-      await page.locator('#homeAssistantSendBtn').click();
-
-      await expect(page.locator('#homeAssistantConversation')).toContainText(
-        'Workspace manager inline response'
-      );
-      expect(chatPayload?.route_context?.workspace_id).toBe(workspaceId);
-      expect(chatPayload?.route_context?.surface).toBe('workspace_detail');
-      expect(chatSessionId).toBeTruthy();
-
-      await page
-        .locator('#homeAssistantActions')
-        .getByRole('button', { name: 'Open Chat' })
-        .click();
-      await expect(page.locator('#chatPanel')).toHaveAttribute('aria-hidden', 'false');
-      const activeSessionId = await page.evaluate(() => {
-        const manager = (window as any).sessionManager;
-        return String(
-          manager?.getActiveSessionId?.() ||
-            manager?.activeSessionId ||
-            manager?.currentSessionId ||
-            ''
-        );
-      });
-      expect(activeSessionId).toBe(chatSessionId);
-    } finally {
-      if (workspaceId) {
-        await request.delete(`/api/orchestration/workspace?id=${workspaceId}`);
-      }
-    }
-  });
-
-  test('keeps home dashboard and workspace canvas inline assistant bars', async ({
+  test('keeps the Home drawer and workspace canvas assistant surfaces distinct', async ({
     page,
     request
   }) => {
@@ -2924,18 +2753,19 @@ test.describe('Floating Workspace Assistant', () => {
 
     try {
       await suppressOnboarding(page);
+      await installActivePersonalAssistant(page);
       await page.goto('/');
-      await expect(page.locator('#homeAssistantCard.modern-card')).toBeVisible();
-      await expect(page.locator('#homeAssistantInput')).toBeVisible();
+      await expect(page.locator('#personalAssistantLauncher')).toBeVisible();
+      await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+      await expect(page.locator('#homeAssistantCard.modern-card')).toHaveCount(0);
       await expect(page.locator('#hubSupportChat')).toHaveCount(0);
 
       await page.goto(`/workspaces/${workspaceSlug}/canvas`);
-      await expect(page.locator('#homeAssistantCard.modern-card')).toBeVisible();
-      await expect(page.locator('#homeAssistantInput')).toHaveAttribute(
-        'placeholder',
-        /from this canvas/
-      );
-      await expect(page.locator('#homeAssistantWorkspaceModeSwitch')).toBeVisible();
+      await expect(page.locator('#personalAssistantLauncher')).toBeVisible();
+      await page.locator('#personalAssistantLauncher').click();
+      await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+      await expect(page.locator('#personalAssistantTodayTab')).toHaveCount(0);
+      await expect(page.locator('#personalAssistantInput')).toBeVisible();
       await expect(page.locator('#hubSupportChat')).toHaveCount(0);
     } finally {
       if (workspaceId) {
@@ -2946,6 +2776,8 @@ test.describe('Floating Workspace Assistant', () => {
 });
 
 test.describe('Home Advisory Routing', () => {
+  test.beforeEach(async ({ page }) => installActivePersonalAssistant(page));
+
   async function installCompletedOnboarding(page) {
     await page.route('**/api/onboarding/status', async route => {
       await route.fulfill({
@@ -3022,8 +2854,9 @@ test.describe('Home Advisory Routing', () => {
 
     const prompt =
       'How should we improve visibility into ongoing implementations in the Ori DevOps workspace?';
-    await page.locator('#homeAssistantInput').fill(prompt);
-    await page.locator('#homeAssistantSendBtn').click();
+    await openPersonalAssistantAsk(page);
+    await page.locator('#personalAssistantInput').fill(prompt);
+    await page.locator('#personalAssistantSend').click();
 
     await expect.poll(() => chatCalls).toBe(1);
     expect(chatQuestion).toContain(prompt);
@@ -3058,10 +2891,11 @@ test.describe('Home Advisory Routing', () => {
     });
 
     await page.goto('/');
+    await openPersonalAssistantAsk(page);
     await page
-      .locator('#homeAssistantInput')
+      .locator('#personalAssistantInput')
       .fill('Implement support for deployment status in Ori');
-    await page.locator('#homeAssistantSendBtn').click();
+    await page.locator('#personalAssistantSend').click();
 
     await expect(page.locator('#homeAssistantRoutingSummary')).toContainText('Workspace Available');
     await expect(
@@ -3072,6 +2906,17 @@ test.describe('Home Advisory Routing', () => {
 });
 
 test.describe('Home Workspace Routing', () => {
+  test.beforeEach(async ({ page }) => {
+    await installActivePersonalAssistant(page);
+    await page.route('**/api/onboarding/status', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true, skipped: true })
+      })
+    );
+  });
+
   async function installWorkspaceAssistantMocks(
     page,
     options: {
@@ -3137,8 +2982,9 @@ test.describe('Home Workspace Routing', () => {
     });
 
     await page.goto('/');
-    await page.locator('#homeAssistantInput').fill('ship the launch plan');
-    await page.locator('#homeAssistantSendBtn').click();
+    await openPersonalAssistantAsk(page);
+    await page.locator('#personalAssistantInput').fill('ship the launch plan');
+    await page.locator('#personalAssistantSend').click();
 
     await expect(page.locator('#homeAssistantRoutingSummary')).toContainText('Choose Workspace');
     await expect(page.getByText('Launch Alpha', { exact: true })).toBeVisible();
@@ -3174,8 +3020,9 @@ test.describe('Home Workspace Routing', () => {
     });
 
     await page.goto('/');
-    await page.locator('#homeAssistantInput').fill('build a robotics dashboard from scratch');
-    await page.locator('#homeAssistantSendBtn').click();
+    await openPersonalAssistantAsk(page);
+    await page.locator('#personalAssistantInput').fill('build a robotics dashboard from scratch');
+    await page.locator('#personalAssistantSend').click();
 
     await expect(page.locator('#homeAssistantRoutingSummary')).toContainText('Workspace Needed');
     const actions = page.locator('#homeAssistantActions');
@@ -3233,8 +3080,9 @@ test.describe('Home Workspace Routing', () => {
         }
       };
     });
-    await page.locator('#homeAssistantInput').fill('build the cabinet roadmap');
-    await page.locator('#homeAssistantSendBtn').click();
+    await openPersonalAssistantAsk(page);
+    await page.locator('#personalAssistantInput').fill('build the cabinet roadmap');
+    await page.locator('#personalAssistantSend').click();
 
     await expect.poll(() => chatCalls).toBe(1);
     await expect(page.locator('#homeAssistantConversation')).toContainText(
@@ -3317,8 +3165,9 @@ test.describe('Home Workspace Routing', () => {
         }
       };
     });
-    await page.locator('#homeAssistantInput').fill('build the cabinet roadmap');
-    await page.locator('#homeAssistantSendBtn').click();
+    await openPersonalAssistantAsk(page);
+    await page.locator('#personalAssistantInput').fill('build the cabinet roadmap');
+    await page.locator('#personalAssistantSend').click();
 
     await expect
       .poll(() => page.evaluate(() => (window as any).__handoffWorkspaceIds))
@@ -3373,8 +3222,9 @@ test.describe('Home Workspace Routing', () => {
     });
 
     await page.goto('/');
-    await page.locator('#homeAssistantInput').fill('build the broken ops roadmap');
-    await page.locator('#homeAssistantSendBtn').click();
+    await openPersonalAssistantAsk(page);
+    await page.locator('#personalAssistantInput').fill('build the broken ops roadmap');
+    await page.locator('#personalAssistantSend').click();
 
     await expect(page.locator('#homeAssistantRoutingSummary')).toContainText('Commander Required');
     await expect(
@@ -3426,8 +3276,9 @@ test.describe('Home Workspace Routing', () => {
         }
       };
     });
-    await page.locator('#homeAssistantInput').fill('build a robotics dashboard from scratch');
-    await page.locator('#homeAssistantSendBtn').click();
+    await openPersonalAssistantAsk(page);
+    await page.locator('#personalAssistantInput').fill('build a robotics dashboard from scratch');
+    await page.locator('#personalAssistantSend').click();
     await page
       .locator('#homeAssistantActions')
       .getByText('Create Workspace', { exact: true })
