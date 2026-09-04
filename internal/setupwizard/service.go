@@ -604,7 +604,7 @@ func runtimeStepReadiness(step workspace.SetupWizardStep, status runtimecapabili
 	// A declared requirement absent from the selected mode is deliberately not
 	// applicable (for example live control in File-only mode), so this step is
 	// complete without probing or granting anything.
-	return StepReadiness{Ready: true, Summary: "Not required in the selected operating mode."}
+	return StepReadiness{Ready: true, Summary: "Not configured — optional in the selected operating mode."}
 }
 
 // applyChoices records an option the user picked on this call, so the adapters

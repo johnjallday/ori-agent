@@ -1320,3 +1320,46 @@
     </div>
   </div>
 </div>
+
+<!-- Generic specialist setup journey. Domain copy, order, status, and actions
+     come from the server; this shell owns only fixed review interactions. -->
+<div class="modal fade setup-journey" id="specialistSetupJourneyModal" tabindex="-1"
+     aria-labelledby="specialistSetupJourneyTitle" aria-describedby="specialistSetupJourneyDescription"
+     aria-hidden="true" data-bs-backdrop="static" role="dialog" aria-modal="true">
+  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content setup-journey__frame">
+      <header class="setup-journey__header">
+        <div>
+          <p class="setup-journey__eyebrow">Guided local setup</p>
+          <h2 class="setup-journey__title" id="specialistSetupJourneyTitle">Setup</h2>
+          <p class="setup-journey__description" id="specialistSetupJourneyDescription"></p>
+        </div>
+        <button type="button" class="setup-journey__close" id="specialistSetupJourneyClose" aria-label="Do this later">×</button>
+      </header>
+      <div class="setup-journey__body">
+        <nav class="setup-journey__rail" aria-label="Setup progress">
+          <ol id="specialistSetupJourneySteps" class="setup-journey__steps"></ol>
+        </nav>
+        <section class="setup-journey__stage" aria-labelledby="specialistSetupJourneyStepTitle">
+          <div id="specialistSetupJourneyBusy" class="setup-journey__busy" role="status" aria-live="polite" hidden>
+            <span class="setup-journey__spinner" aria-hidden="true"></span><span>Checking current setup…</span>
+          </div>
+          <div id="specialistSetupJourneyError" class="setup-journey__error" role="alert" aria-live="assertive" hidden></div>
+          <div id="specialistSetupJourneyContent">
+            <p id="specialistSetupJourneyStepState" class="setup-journey__state"></p>
+            <h3 id="specialistSetupJourneyStepTitle" class="setup-journey__step-title" tabindex="-1"></h3>
+            <p id="specialistSetupJourneyStepDescription" class="setup-journey__step-description"></p>
+            <div id="specialistSetupJourneyReceipt" class="setup-journey__receipt" aria-live="polite"></div>
+            <div id="specialistSetupJourneyDraft" class="setup-journey__draft"></div>
+            <div id="specialistSetupJourneyActions" class="setup-journey__actions"></div>
+          </div>
+          <div id="specialistSetupJourneyReview" class="setup-journey__review" aria-live="polite" hidden></div>
+        </section>
+      </div>
+      <footer class="setup-journey__footer">
+        <p id="specialistSetupJourneyLiveStatus" class="setup-journey__live" role="status" aria-live="polite"></p>
+        <button type="button" class="btn btn-outline-secondary" id="specialistSetupJourneyLater">Do this later</button>
+      </footer>
+    </div>
+  </div>
+</div>

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/runtimecapability"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacesurface"
 )
 
@@ -34,7 +35,7 @@ func (p *pluginRuntimeProvider) EvaluateDurable(ctx context.Context, request run
 	if !prerequisites.Ready {
 		return runtimecapability.DurableResult{
 			State: runtimecapability.DurableNeedsAttention, ReasonCode: "provider_prerequisites_missing",
-			Summary: prerequisites.Summary, Action: repairAction(),
+			Summary: prerequisites.Summary, Action: repairAction(prerequisites.RepairReview),
 		}, nil
 	}
 	readiness, err := p.readyResult(ctx, request.WorkspaceID, p.provider.Operations.Readiness)
@@ -44,7 +45,7 @@ func (p *pluginRuntimeProvider) EvaluateDurable(ctx context.Context, request run
 	if !readiness.Ready {
 		return runtimecapability.DurableResult{
 			State: runtimecapability.DurableInProgress, ReasonCode: "provider_setup_required",
-			Summary: readiness.Summary, Action: repairAction(), VerificationRequired: true,
+			Summary: readiness.Summary, Action: repairAction(readiness.RepairReview), VerificationRequired: true,
 		}, nil
 	}
 	return runtimecapability.DurableResult{
@@ -64,14 +65,15 @@ func (p *pluginRuntimeProvider) CheckLive(ctx context.Context, request runtimeca
 		return runtimecapability.LiveResult{State: runtimecapability.LiveAvailable, Summary: output.Summary}, nil
 	}
 	return runtimecapability.LiveResult{
-		State: runtimecapability.LiveOffline, ReasonCode: "provider_offline", Summary: output.Summary, Action: repairAction(),
+		State: runtimecapability.LiveOffline, ReasonCode: "provider_offline", Summary: output.Summary, Action: repairAction(nil),
 	}, nil
 }
 
 func (p *pluginRuntimeProvider) Verify(ctx context.Context, request runtimecapability.VerificationRequest) (runtimecapability.VerificationResult, error) {
 	var output struct {
-		Verified bool   `json:"verified"`
-		Summary  string `json:"summary"`
+		Verified   bool   `json:"verified"`
+		Summary    string `json:"summary"`
+		ReasonCode string `json:"reason_code,omitempty"`
 	}
 	if err := p.call(ctx, request.WorkspaceID, p.provider.Operations.Verify, &output); err != nil {
 		return runtimecapability.VerificationResult{}, err
@@ -79,6 +81,10 @@ func (p *pluginRuntimeProvider) Verify(ctx context.Context, request runtimecapab
 	state := runtimecapability.LiveOffline
 	if output.Verified {
 		state = runtimecapability.LiveAvailable
+	} else if output.ReasonCode == "wrong_project" {
+		state = runtimecapability.LiveWrongTarget
+	} else if output.ReasonCode != "offline" {
+		state = runtimecapability.LiveUnavailable
 	}
 	return runtimecapability.VerificationResult{
 		Succeeded: output.Verified, LiveState: state, Summary: output.Summary,
@@ -86,13 +92,16 @@ func (p *pluginRuntimeProvider) Verify(ctx context.Context, request runtimecapab
 			if output.Verified {
 				return ""
 			}
+			if normalized := workspace.NormalizeRuntimeIdentifier(output.ReasonCode); normalized != "" {
+				return normalized
+			}
 			return "provider_verification_failed"
 		}(),
 		Action: func() *runtimecapability.Action {
 			if output.Verified {
 				return nil
 			}
-			return repairAction()
+			return repairAction(nil)
 		}(),
 	}, nil
 }
@@ -142,9 +151,15 @@ func (p *pluginRuntimeProvider) ValidateGrant(ctx context.Context, request runti
 	return nil
 }
 
+type providerRepairReview struct {
+	Destination        string `json:"destination"`
+	ManualRegistration string `json:"manual_registration"`
+}
+
 type providerReadyResult struct {
-	Ready   bool   `json:"ready"`
-	Summary string `json:"summary"`
+	Ready        bool                  `json:"ready"`
+	Summary      string                `json:"summary"`
+	RepairReview *providerRepairReview `json:"repair_review,omitempty"`
 }
 
 func (p *pluginRuntimeProvider) readyResult(ctx context.Context, workspaceID, operationID string) (providerReadyResult, error) {
@@ -198,8 +213,17 @@ func providerTimeout(class workspacesurface.TimeoutClass) time.Duration {
 	}
 }
 
-func repairAction() *runtimecapability.Action {
-	return &runtimecapability.Action{Token: "repair", Code: "repair_provider", Label: "Repair"}
+func repairAction(review *providerRepairReview) *runtimecapability.Action {
+	if review == nil {
+		return nil
+	}
+	return &runtimecapability.Action{
+		Token: "repair", Code: "repair_provider", Label: "Stage trusted runner",
+		Disclosure: []runtimecapability.ActionDisclosure{
+			{Label: "Trusted destination", Value: review.Destination},
+			{Label: "Manual registration", Value: review.ManualRegistration},
+		},
+	}
 }
 
 func (l *SurfaceLifecycle) runtimeProviders(installed InstalledPlugin) ([]*pluginRuntimeProvider, error) {

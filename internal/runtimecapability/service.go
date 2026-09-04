@@ -1041,7 +1041,30 @@ func sanitizeAction(action *Action) *Action {
 			out.URL = rawURL
 		}
 	}
+	if len(action.Disclosure) <= 8 {
+		for _, item := range action.Disclosure {
+			item.Label = safeText(item.Label, maxActionLabelLength)
+			item.Value = safeActionDisclosureValue(item.Value)
+			if item.Label == "" || item.Value == "" {
+				return nil
+			}
+			out.Disclosure = append(out.Disclosure, item)
+		}
+	}
 	return out
+}
+
+func safeActionDisclosureValue(value string) string {
+	value = strings.TrimSpace(strings.ToValidUTF8(value, ""))
+	if value == "" || len(value) > maxActionURLLength {
+		return ""
+	}
+	for _, r := range value {
+		if r < 0x20 || r == 0x7f {
+			return ""
+		}
+	}
+	return value
 }
 
 func cloneTime(value *time.Time) *time.Time {

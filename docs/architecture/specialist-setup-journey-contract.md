@@ -244,6 +244,13 @@ is reachable and its exact `v0.5.0` artifact has been published, but local
 candidate validation and all fail-closed host behavior are required before the
 Ori PR gate.
 
+The reviewed local candidate is nested commit
+`0f938746231be27e85b8597784afeb1883ed8a50`, version `0.5.0`, Reaper Song
+blueprint `4`, with macOS arm64 artifact size `8,763,458` and SHA-256
+`ad4680d371024d43e2264c00b1a2e2a5a532343d31073e3754a94662bea2cb9d`.
+The commit is intentionally recorded with release readiness false: it has not
+been pushed, tagged, or published by this delivery.
+
 ## 3. `SetupJourney` v1 declaration and action adapters
 
 ### 3.1 Normalized declaration

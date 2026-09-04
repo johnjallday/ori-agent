@@ -12,7 +12,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 53
+const schemaVersion = 54
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -173,6 +173,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration052PersonalAssistantHQSetup(ctx)
 	case 53:
 		return db.migration053PersonalAssistantSpecialist(ctx)
+	case 54:
+		return db.migration054SetupJourneys(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -1935,6 +1937,157 @@ func (db *DB) migration053PersonalAssistantSpecialist(ctx context.Context) error
 	} {
 		if _, execErr := db.ExecContext(ctx, statement.sql); execErr != nil && !isDuplicateColumnError(execErr) {
 			return fmt.Errorf("failed to add personal_assistant_state.%s column: %w", statement.label, execErr)
+		}
+	}
+	return nil
+}
+
+// migration054SetupJourneys adds bounded structural setup progress and the
+// operation/review journals used to coordinate canonical owners. These tables
+// deliberately contain identifiers, digests, closed codes, and revisions only:
+// project paths, declarations/manifests, prompts, credentials, role bindings,
+// catalog entries, and arbitrary downstream errors remain with their owners.
+func (db *DB) migration054SetupJourneys(ctx context.Context) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS setup_journey_run (
+			id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 64),
+			run_kind TEXT NOT NULL CHECK (run_kind IN ('root', 'child')),
+			root_run_id TEXT,
+			owner_user_id TEXT NOT NULL DEFAULT '' CHECK (length(owner_user_id) <= 128),
+			relationship_id TEXT NOT NULL DEFAULT '' CHECK (length(relationship_id) <= 128),
+			specialist_slug TEXT NOT NULL DEFAULT '' CHECK (length(specialist_slug) <= 64),
+			journey_id TEXT NOT NULL CHECK (length(journey_id) BETWEEN 1 AND 64),
+			declaration_schema_version INTEGER NOT NULL CHECK (declaration_schema_version > 0),
+			declaration_version INTEGER NOT NULL CHECK (declaration_version > 0),
+			state_revision INTEGER NOT NULL DEFAULT 1 CHECK (state_revision > 0),
+			lifecycle_state TEXT NOT NULL DEFAULT 'not_started'
+				CHECK (lifecycle_state IN ('not_started', 'in_progress', 'ready', 'needs_attention')),
+			current_step_id TEXT NOT NULL DEFAULT '' CHECK (length(current_step_id) <= 64),
+			step_states_json TEXT NOT NULL DEFAULT '[]' CHECK (length(step_states_json) <= 8192),
+			dismissed INTEGER NOT NULL DEFAULT 0 CHECK (dismissed IN (0, 1)),
+			integration_plugin_id TEXT NOT NULL DEFAULT '' CHECK (length(integration_plugin_id) <= 128),
+			integration_version TEXT NOT NULL DEFAULT '' CHECK (length(integration_version) <= 128),
+			home_workspace_id TEXT NOT NULL DEFAULT '' CHECK (length(home_workspace_id) <= 128),
+			project_workspace_id TEXT NOT NULL DEFAULT '' CHECK (length(project_workspace_id) <= 128),
+			selected_mode_id TEXT NOT NULL DEFAULT '' CHECK (length(selected_mode_id) <= 64),
+			first_opened_at DATETIME,
+			last_dismissed_at DATETIME,
+			first_completed_at DATETIME,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			UNIQUE (id, run_kind),
+			FOREIGN KEY (root_run_id) REFERENCES setup_journey_run(id) ON DELETE RESTRICT,
+			CHECK (
+				(run_kind = 'root' AND root_run_id IS NULL AND owner_user_id != ''
+					AND relationship_id != '' AND specialist_slug != '')
+				OR
+				(run_kind = 'child' AND root_run_id IS NOT NULL AND owner_user_id = ''
+					AND relationship_id = '' AND specialist_slug = '')
+			),
+			CHECK (NOT (run_kind = 'child' AND project_workspace_id = '' AND lifecycle_state = 'ready')),
+			CHECK (run_kind = 'root' OR (
+				integration_plugin_id = '' AND integration_version = '' AND home_workspace_id = ''
+			))
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_setup_journey_run_root_identity
+			ON setup_journey_run(owner_user_id, relationship_id, specialist_slug, journey_id)
+			WHERE run_kind = 'root'`,
+		`CREATE INDEX IF NOT EXISTS idx_setup_journey_run_children
+			ON setup_journey_run(root_run_id, created_at)
+			WHERE run_kind = 'child'`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_setup_journey_run_unbound_child
+			ON setup_journey_run(root_run_id)
+			WHERE run_kind = 'child' AND project_workspace_id = '' AND lifecycle_state != 'ready'`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_setup_journey_run_child_project
+			ON setup_journey_run(root_run_id, project_workspace_id)
+			WHERE run_kind = 'child' AND project_workspace_id != ''`,
+		`CREATE TRIGGER IF NOT EXISTS setup_journey_child_root_insert
+			BEFORE INSERT ON setup_journey_run
+			WHEN NEW.run_kind = 'child' AND NOT EXISTS (
+				SELECT 1 FROM setup_journey_run parent
+				WHERE parent.id = NEW.root_run_id AND parent.run_kind = 'root'
+			)
+			BEGIN
+				SELECT RAISE(ABORT, 'setup journey child requires root run');
+			END`,
+		`CREATE TRIGGER IF NOT EXISTS setup_journey_child_root_update
+			BEFORE UPDATE OF run_kind, root_run_id ON setup_journey_run
+			WHEN NEW.run_kind = 'child' AND NOT EXISTS (
+				SELECT 1 FROM setup_journey_run parent
+				WHERE parent.id = NEW.root_run_id AND parent.run_kind = 'root'
+			)
+			BEGIN
+				SELECT RAISE(ABORT, 'setup journey child requires root run');
+			END`,
+		`CREATE TABLE IF NOT EXISTS setup_journey_operation_receipt (
+			run_kind TEXT NOT NULL CHECK (run_kind IN ('root', 'child')),
+			run_id TEXT NOT NULL,
+			idempotency_key TEXT NOT NULL CHECK (length(idempotency_key) BETWEEN 1 AND 128),
+			step_id TEXT NOT NULL CHECK (length(step_id) BETWEEN 1 AND 64),
+			action_id TEXT NOT NULL CHECK (length(action_id) BETWEEN 1 AND 64),
+			input_digest TEXT NOT NULL CHECK (length(input_digest) = 64),
+			review_digest TEXT NOT NULL DEFAULT '' CHECK (length(review_digest) IN (0, 64)),
+			status TEXT NOT NULL CHECK (status IN ('claimed', 'reconcile_required', 'succeeded', 'failed')),
+			result_code TEXT NOT NULL DEFAULT '' CHECK (length(result_code) <= 64),
+			reason_code TEXT NOT NULL DEFAULT '' CHECK (length(reason_code) <= 64),
+			result_json TEXT NOT NULL DEFAULT '{}' CHECK (length(result_json) <= 8192),
+			run_revision_before INTEGER NOT NULL CHECK (run_revision_before > 0),
+			run_revision_after INTEGER NOT NULL CHECK (run_revision_after > run_revision_before),
+			created_at DATETIME NOT NULL,
+			completed_at DATETIME,
+			PRIMARY KEY (run_kind, run_id, idempotency_key),
+			FOREIGN KEY (run_id, run_kind)
+				REFERENCES setup_journey_run(id, run_kind) ON DELETE RESTRICT
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_setup_journey_operation_busy
+			ON setup_journey_operation_receipt(run_kind, run_id)
+			WHERE status IN ('claimed', 'reconcile_required')`,
+		`CREATE INDEX IF NOT EXISTS idx_setup_journey_operation_created
+			ON setup_journey_operation_receipt(run_kind, run_id, created_at)`,
+		`CREATE TABLE IF NOT EXISTS setup_journey_declaration_migration_receipt (
+			run_kind TEXT NOT NULL CHECK (run_kind IN ('root', 'child')),
+			run_id TEXT NOT NULL,
+			from_schema_version INTEGER NOT NULL CHECK (from_schema_version > 0),
+			from_declaration_version INTEGER NOT NULL CHECK (from_declaration_version > 0),
+			to_schema_version INTEGER NOT NULL CHECK (to_schema_version > 0),
+			to_declaration_version INTEGER NOT NULL CHECK (to_declaration_version > 0),
+			step_mapping_digest TEXT NOT NULL CHECK (length(step_mapping_digest) = 64),
+			run_revision_before INTEGER NOT NULL CHECK (run_revision_before > 0),
+			run_revision_after INTEGER NOT NULL CHECK (run_revision_after > run_revision_before),
+			created_at DATETIME NOT NULL,
+			PRIMARY KEY (run_kind, run_id, from_schema_version, from_declaration_version,
+				to_schema_version, to_declaration_version),
+			FOREIGN KEY (run_id, run_kind)
+				REFERENCES setup_journey_run(id, run_kind) ON DELETE RESTRICT
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_setup_journey_declaration_migration_run
+			ON setup_journey_declaration_migration_receipt(run_kind, run_id, created_at)`,
+		`CREATE TABLE IF NOT EXISTS setup_journey_review_receipt (
+			token TEXT PRIMARY KEY CHECK (length(token) BETWEEN 1 AND 128),
+			run_kind TEXT NOT NULL CHECK (run_kind IN ('root', 'child')),
+			run_id TEXT NOT NULL,
+			idempotency_key TEXT NOT NULL CHECK (length(idempotency_key) BETWEEN 1 AND 128),
+			step_id TEXT NOT NULL CHECK (length(step_id) BETWEEN 1 AND 64),
+			action_id TEXT NOT NULL CHECK (length(action_id) BETWEEN 1 AND 64),
+			input_digest TEXT NOT NULL CHECK (length(input_digest) = 64),
+			run_revision INTEGER NOT NULL CHECK (run_revision > 0),
+			owner_revision_digest TEXT NOT NULL CHECK (length(owner_revision_digest) = 64),
+			disclosure_digest TEXT NOT NULL CHECK (length(disclosure_digest) = 64),
+			created_at DATETIME NOT NULL,
+			expires_at DATETIME NOT NULL,
+			consumed_at DATETIME,
+			consumed_by_idempotency_key TEXT NOT NULL DEFAULT ''
+				CHECK (length(consumed_by_idempotency_key) <= 128),
+			UNIQUE (run_kind, run_id, idempotency_key),
+			FOREIGN KEY (run_id, run_kind)
+				REFERENCES setup_journey_run(id, run_kind) ON DELETE RESTRICT
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_setup_journey_review_run
+			ON setup_journey_review_receipt(run_kind, run_id, created_at)`,
+	}
+	for _, statement := range statements {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("failed to create setup journey schema: %w", err)
 		}
 	}
 	return nil

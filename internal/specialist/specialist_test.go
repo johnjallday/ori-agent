@@ -1,6 +1,7 @@
 package specialist
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -89,6 +90,20 @@ func TestGetRejectsUnknownSlugs(t *testing.T) {
 	}
 	if entry.SuggestedTemplateID != "reaper-song" {
 		t.Fatalf("unexpected suggested template %q", entry.SuggestedTemplateID)
+	}
+}
+
+func TestAcceptedPreLinkSuggestionDoesNotClaimMonitoringOrStaffing(t *testing.T) {
+	entry, ok := Get("music_production")
+	if !ok {
+		t.Fatal("music specialist missing")
+	}
+	body := strings.ToLower(entry.Suggestion.Body)
+	if !strings.Contains(body, "no project monitoring") || strings.Contains(body, "reports on what it does") || strings.Contains(body, "brings in reaper producer") {
+		t.Fatalf("pre-link suggestion is not truthful: %q", entry.Suggestion.Body)
+	}
+	if entry.Suggestion.ActionRoute != "/personal-assistant?setup=specialist" {
+		t.Fatalf("suggestion route = %q", entry.Suggestion.ActionRoute)
 	}
 }
 

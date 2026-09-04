@@ -292,6 +292,16 @@
   color: var(--assistant-amber);
   font: 500 0.72rem var(--font-mono, monospace);
 }
+.assistant-program-role-readiness {
+  display: block;
+  margin-top: 0.45rem;
+  color: var(--assistant-muted);
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+.assistant-program-role[data-primary="true"] .assistant-program-role-readiness {
+  color: rgba(255, 248, 233, 0.68);
+}
 
 .assistant-program-stages {
   display: grid;
@@ -356,6 +366,76 @@
 }
 .assistant-program-project.is-current {
   border-color: var(--assistant-amber);
+}
+.assistant-program-project-card {
+  display: grid;
+  gap: 0.55rem;
+  min-width: min(100%, 18rem);
+  padding: 0.7rem;
+  border: 1px solid var(--assistant-line);
+  background: rgba(255, 255, 255, 0.38);
+}
+.assistant-program-project-meta {
+  margin: 0;
+  color: var(--assistant-muted);
+  font-size: 0.78rem;
+  text-transform: capitalize;
+}
+.assistant-program-project-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+.assistant-program-action-dialog {
+  width: min(42rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  padding: 1.25rem;
+  overflow: auto;
+  color: var(--assistant-ink);
+  border: 1px solid var(--assistant-line);
+  background: var(--assistant-paper);
+}
+.assistant-program-action-dialog::backdrop {
+  background: rgba(17, 24, 20, 0.58);
+}
+.assistant-program-action-form,
+.assistant-program-action-field {
+  display: grid;
+  gap: 0.45rem;
+}
+.assistant-program-action-form {
+  gap: 0.9rem;
+}
+.assistant-program-action-field span,
+.assistant-program-action-review dt {
+  font-weight: 700;
+}
+.assistant-program-action-field input,
+.assistant-program-action-field select,
+.assistant-program-action-field textarea {
+  width: 100%;
+  min-height: 2.6rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--assistant-line);
+  color: var(--assistant-ink);
+  background: #fffdf8;
+}
+.assistant-program-action-field textarea {
+  min-height: 5rem;
+  resize: vertical;
+}
+.assistant-program-action-review {
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.45fr) minmax(0, 1fr);
+  gap: 0.45rem 0.8rem;
+}
+.assistant-program-action-review dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.assistant-program-action-error {
+  min-height: 1.25rem;
+  color: var(--danger-color, #9f2f24);
 }
 .assistant-program-project-empty,
 .assistant-program-learning-copy,

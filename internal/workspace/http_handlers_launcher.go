@@ -27,10 +27,11 @@ type folderPickerSelectPathRequest struct {
 }
 
 type folderPickerSelectPathResponse struct {
-	Success  bool   `json:"success"`
-	Selected bool   `json:"selected,omitempty"`
-	Path     string `json:"path,omitempty"`
-	Error    string `json:"error,omitempty"`
+	Success        bool   `json:"success"`
+	Selected       bool   `json:"selected,omitempty"`
+	Path           string `json:"path,omitempty"`
+	SelectionToken string `json:"selection_token,omitempty"`
+	Error          string `json:"error,omitempty"`
 }
 
 // LaunchFolderPicker handles POST /api/launch-folder-picker
@@ -130,11 +131,20 @@ func (h *HTTPHandler) SelectFolderPath(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	selectionToken := ""
+	if selected && h.pathSelectionIssuer != nil {
+		selectionToken, err = h.pathSelectionIssuer.Issue(selectedPath)
+		if err != nil {
+			logger.Error("Failed to issue trusted folder selection", logger.Fields{"error": err})
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(folderPickerSelectPathResponse{Success: false, Error: "Trusted folder selection is unavailable"})
+			return
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(folderPickerSelectPathResponse{
-		Success:  true,
-		Selected: selected,
-		Path:     selectedPath,
+		Success: true, Selected: selected, Path: selectedPath, SelectionToken: selectionToken,
 	})
 }
 

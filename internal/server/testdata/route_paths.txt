@@ -94,6 +94,14 @@
 /api/orchestration/workspace/activate
 /api/orchestration/workspace/agents
 /api/orchestration/workspace/layout
+/api/personal-assistant/setup-journey
+/api/personal-assistant/setup-journey/children
+/api/personal-assistant/setup-journey/dismiss
+/api/personal-assistant/setup-journey/open
+/api/personal-assistant/setup-journey/runs/00000000-0000-0000-0000-000000000001
+/api/personal-assistant/setup-journey/runs/00000000-0000-0000-0000-000000000001/actions/review_install
+/api/personal-assistant/setup-journey/runs/00000000-0000-0000-0000-000000000001/dismiss
+/api/personal-assistant/setup-journey/runs/00000000-0000-0000-0000-000000000001/open
 /api/personal-hq/brief/config
 /api/personal-hq/brief/current
 /api/personal-hq/brief/history

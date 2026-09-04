@@ -676,6 +676,7 @@ func (h *Handler) AnswerSpecialistOffer(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
+	before, _ := h.service.Get(r.Context(), userID)
 	if _, err := h.specialistOffers.Answer(r.Context(), userID, personalassistant.SpecialistOfferRequest{
 		IfVersion: body.IfVersion, Decision: body.Decision, Slug: body.Slug,
 	}); err != nil {
@@ -698,7 +699,13 @@ func (h *Handler) AnswerSpecialistOffer(w http.ResponseWriter, r *http.Request) 
 		orihttp.ServiceUnavailable(w, "personal assistant state is temporarily unavailable")
 		return
 	}
-	orihttp.Success(w, map[string]any{"personal_assistant": projection})
+	newlyAccepted := strings.EqualFold(strings.TrimSpace(body.Decision), string(personalassistant.SpecialistOfferAccepted)) &&
+		before != nil && before.SpecialistOffer == personalassistant.SpecialistOfferUnanswered &&
+		(before.State == personalassistant.APIStateActive || before.State == personalassistant.APIStatePaused)
+	orihttp.Success(w, map[string]any{
+		"personal_assistant": projection,
+		"open_setup_journey": newlyAccepted,
+	})
 }
 
 func (h *Handler) UpdateWorkingAgreement(w http.ResponseWriter, r *http.Request) {

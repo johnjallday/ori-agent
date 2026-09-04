@@ -153,6 +153,7 @@ export default defineConfig([
       'internal/web/static/js/modules/renderer-primitives.js',
       'internal/web/static/js/modules/renderer-ui.js',
       'internal/web/static/js/modules/search-palette.js',
+      'internal/web/static/js/modules/setup-journey.js',
       'internal/web/static/js/modules/smartOnboarding.js',
       'internal/web/static/js/modules/studio-dashboard.js',
       'internal/web/static/js/modules/studio.js',

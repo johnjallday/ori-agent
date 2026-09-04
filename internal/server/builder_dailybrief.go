@@ -276,6 +276,7 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	b.personalAssistantHandler.SetTodayService(personalassistant.NewTodayService(
 		b.personalAssistantService, briefService, b.workspaceStore, b.followUpService,
 	))
+	b.initializeSetupJourney()
 	b.dailyBriefScheduler = dailybrief.NewScheduler(briefService, &personalHQWorkspaceLister{
 		service: b.personalHQService, relationship: b.personalAssistantStore,
 	}, dailyBriefSchedulerPollInterval)

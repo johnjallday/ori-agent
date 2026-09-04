@@ -27,27 +27,43 @@ type assistantProgramHireRequest struct {
 }
 
 type assistantProgramSummary struct {
-	Available        bool                                   `json:"available"`
-	ActivationNeeded bool                                   `json:"activation_needed,omitempty"`
-	StationID        string                                 `json:"station_id,omitempty"`
-	ProjectID        string                                 `json:"project_id,omitempty"`
-	IsStation        bool                                   `json:"is_station,omitempty"`
-	Hired            bool                                   `json:"hired,omitempty"`
-	PluginAvailable  bool                                   `json:"plugin_available"`
-	StateRevision    int64                                  `json:"state_revision,omitempty"`
-	PrimaryName      string                                 `json:"primary_name,omitempty"`
-	Provider         string                                 `json:"provider,omitempty"`
-	Model            string                                 `json:"model,omitempty"`
-	StageID          string                                 `json:"stage_id,omitempty"`
-	StageLabel       string                                 `json:"stage_label,omitempty"`
-	Level            int                                    `json:"level,omitempty"`
-	AcceptedTasks    int                                    `json:"accepted_tasks,omitempty"`
-	NextThreshold    int                                    `json:"next_threshold,omitempty"`
-	Remaining        int                                    `json:"remaining,omitempty"`
-	PromotionPending bool                                   `json:"promotion_pending,omitempty"`
-	Declaration      *workspace.AssistantProgramDeclaration `json:"declaration,omitempty"`
-	Roster           []workspace.AssistantRoleBinding       `json:"roster,omitempty"`
-	Projects         []assistantProgramProject              `json:"projects,omitempty"`
+	Available        bool                                            `json:"available"`
+	ActivationNeeded bool                                            `json:"activation_needed,omitempty"`
+	StationID        string                                          `json:"station_id,omitempty"`
+	ProjectID        string                                          `json:"project_id,omitempty"`
+	IsStation        bool                                            `json:"is_station,omitempty"`
+	Hired            bool                                            `json:"hired,omitempty"`
+	PluginAvailable  bool                                            `json:"plugin_available"`
+	StateRevision    int64                                           `json:"state_revision,omitempty"`
+	PrimaryName      string                                          `json:"primary_name,omitempty"`
+	Provider         string                                          `json:"provider,omitempty"`
+	Model            string                                          `json:"model,omitempty"`
+	StageID          string                                          `json:"stage_id,omitempty"`
+	StageLabel       string                                          `json:"stage_label,omitempty"`
+	Level            int                                             `json:"level,omitempty"`
+	AcceptedTasks    int                                             `json:"accepted_tasks,omitempty"`
+	NextThreshold    int                                             `json:"next_threshold,omitempty"`
+	Remaining        int                                             `json:"remaining,omitempty"`
+	PromotionPending bool                                            `json:"promotion_pending,omitempty"`
+	Declaration      *workspace.AssistantProgramDeclaration          `json:"declaration,omitempty"`
+	Roster           []workspace.AssistantRoleBinding                `json:"roster,omitempty"`
+	RosterScope      workspace.AssistantRoleScope                    `json:"roster_scope,omitempty"`
+	BindingRevision  int64                                           `json:"binding_revision,omitempty"`
+	LegacyRoster     []workspace.AssistantRoleBinding                `json:"legacy_roster,omitempty"`
+	Portfolio        []workspace.AssistantPortfolioProjectProjection `json:"portfolio,omitempty"`
+	RoleProfiles     []assistantProgramRoleProfile                   `json:"role_profiles,omitempty"`
+	Projects         []assistantProgramProject                       `json:"projects,omitempty"`
+}
+
+type assistantProgramRoleProfile struct {
+	RoleID        string                       `json:"role_id"`
+	Scope         workspace.AssistantRoleScope `json:"scope"`
+	ProfileName   string                       `json:"profile_name,omitempty"`
+	Provider      string                       `json:"provider,omitempty"`
+	Model         string                       `json:"model,omitempty"`
+	Configured    bool                         `json:"configured"`
+	ChatAvailable bool                         `json:"chat_available"`
+	Legacy        bool                         `json:"legacy,omitempty"`
 }
 
 type assistantProgramProject struct {
@@ -139,10 +155,62 @@ func (h *Handler) buildAssistantProgramSummary(station, project *workspace.Works
 		PrimaryName: state.PrimaryName, Provider: state.Provider, Model: state.Model,
 		StageID: state.StageID, Level: state.Level, AcceptedTasks: state.AcceptedCompletions,
 		Declaration: workspace.CloneAssistantProgramDeclaration(state.Declaration),
-		Roster:      append([]workspace.AssistantRoleBinding(nil), state.Roster...),
+	}
+	if state.SchemaVersion == workspace.AssistantProgramLegacyStateSchemaVersion {
+		summary.Roster = append([]workspace.AssistantRoleBinding(nil), state.Roster...)
+		summary.LegacyRoster = append([]workspace.AssistantRoleBinding(nil), state.Roster...)
+	} else if project == nil {
+		summary.RosterScope = workspace.AssistantRoleScopeHome
+		summary.BindingRevision = state.HomeBindings.StateRevision
+		summary.Roster = append([]workspace.AssistantRoleBinding(nil), state.HomeBindings.Bindings...)
+	} else if link := project.GetAssistantProjectLink(); link != nil {
+		summary.RosterScope = workspace.AssistantRoleScopeProject
+		summary.BindingRevision = link.ProjectBindings.StateRevision
+		summary.Roster = append([]workspace.AssistantRoleBinding(nil), link.ProjectBindings.Bindings...)
 	}
 	if project != nil {
 		summary.ProjectID = project.ID
+	}
+	if state.SchemaVersion >= workspace.AssistantProgramStateSchemaVersion {
+		target := station
+		scope := workspace.AssistantRoleScopeHome
+		bindings := state.HomeBindings.Bindings
+		if project != nil {
+			target = project
+			scope = workspace.AssistantRoleScopeProject
+			if link := project.GetAssistantProjectLink(); link != nil {
+				bindings = link.ProjectBindings.Bindings
+			}
+		}
+		profilesByRole := make(map[string]workspace.AssistantRoleBinding, len(bindings))
+		for _, binding := range bindings {
+			profilesByRole[binding.RoleID] = binding
+		}
+		for _, role := range state.Declaration.Roles {
+			if role.Scope != scope {
+				continue
+			}
+			profile := assistantProgramRoleProfile{RoleID: role.ID, Scope: scope}
+			if binding, ok := profilesByRole[role.ID]; ok {
+				if snapshot, found, readErr := h.workspaceTaskStore.GetWorkspaceAgent(target.ID, binding.AgentName); readErr == nil && found && snapshot != nil {
+					profile.Configured = true
+					profile.ProfileName = binding.AgentName
+					profile.Provider = snapshot.Settings.Provider
+					profile.Model = snapshot.Settings.Model
+					profile.ChatAvailable = profile.Provider != ""
+					if profile.ChatAvailable && h.assistantModelValidator != nil {
+						profile.ChatAvailable = h.assistantModelValidator(profile.Provider, profile.Model) == nil
+					}
+				}
+			}
+			summary.RoleProfiles = append(summary.RoleProfiles, profile)
+		}
+	} else {
+		for _, binding := range state.Roster {
+			summary.RoleProfiles = append(summary.RoleProfiles, assistantProgramRoleProfile{
+				RoleID: binding.RoleID, ProfileName: binding.AgentName, Configured: true, ChatAvailable: true, Legacy: true,
+			})
+		}
 	}
 	for index, stage := range state.Declaration.Stages {
 		if stage.ID == state.StageID || state.StageID == "" && index == 0 {
@@ -171,6 +239,12 @@ func (h *Handler) buildAssistantProgramSummary(station, project *workspace.Works
 		}
 		return summary.Projects[i].Name < summary.Projects[j].Name
 	})
+	if state.SchemaVersion >= workspace.AssistantProgramStateSchemaVersion {
+		summary.Portfolio, err = workspace.NewAssistantPortfolioService(h.workspaceTaskStore).List(station.ID)
+		if err != nil {
+			return assistantProgramSummary{}, err
+		}
+	}
 	return summary, nil
 }
 
@@ -376,6 +450,10 @@ func (h *Handler) HireAssistantProgram(w http.ResponseWriter, r *http.Request) {
 	state := station.GetAssistantProgramState()
 	if !state.PluginAvailable {
 		_ = orihttp.RespondConflict(w, "The assistant contribution is disabled; existing data remains available")
+		return
+	}
+	if state.SchemaVersion >= workspace.AssistantProgramStateSchemaVersion {
+		_ = orihttp.RespondConflict(w, "This Assistant Program uses separately reviewed Home and project staffing")
 		return
 	}
 	if state.Hired {

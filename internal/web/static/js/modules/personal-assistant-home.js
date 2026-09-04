@@ -320,12 +320,22 @@ async function answerSpecialistOffer(decision, entry = null) {
       })
     });
     if (!response.ok) throw new Error(`answer ${response.status}`);
+    const payload = await response.json();
     if (decision === 'accepted') state.offer = chosen;
     state.offerDecision = decision;
     renderSpecialistOffer();
     // Accepting changes the focus areas and the capability ordering, so the
     // page's own reads are refreshed rather than left showing stale values.
-    if (decision === 'accepted') await loadToday();
+    if (decision === 'accepted') {
+      await loadToday();
+      // This response-only flag is true only for the transition from an
+      // unanswered active/paused relationship. Ordinary read-back and replay
+      // never auto-open setup; a dismissed journey is resumed by an explicit
+      // launcher action instead.
+      if (payload?.open_setup_journey === true) {
+        window.dispatchEvent(new CustomEvent('ori:open-specialist-setup'));
+      }
+    }
   } catch (_) {
     showOfferError('That could not be saved. Try again.');
   } finally {

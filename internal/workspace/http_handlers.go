@@ -21,6 +21,10 @@ type folderWorkspaceResolver interface {
 	GetFolderWorkspace(workspaceID string) (*Workspace, error)
 }
 
+type trustedPathSelectionIssuer interface {
+	Issue(string) (string, error)
+}
+
 // HTTPHandler handles HTTP requests for Agent Workspaces
 type HTTPHandler struct {
 	store                   Store
@@ -32,6 +36,7 @@ type HTTPHandler struct {
 	openFolder              func(string) error
 	openFile                func(string) error
 	revealFile              func(string) error
+	pathSelectionIssuer     trustedPathSelectionIssuer
 	// scheduler is the TaskScheduler that owns the MissionTrigger reference.
 	// Mission-related HTTP endpoints route through it so they share the same
 	// trigger configuration as cadence-driven runs. Optional — handlers
@@ -68,6 +73,14 @@ func NewHTTPHandler(store Store, orchestrator *Orchestrator, eventBus *EventBus)
 // SetDesktopOpener replaces native desktop side effects for all workspace
 // handlers. Tests inject a no-op or recorder so routing checks never launch a
 // GUI application.
+// SetTrustedPathSelectionIssuer enables opaque native-picker receipts for
+// workflows that must not trust a browser-supplied path.
+func (h *HTTPHandler) SetTrustedPathSelectionIssuer(issuer trustedPathSelectionIssuer) {
+	if h != nil {
+		h.pathSelectionIssuer = issuer
+	}
+}
+
 func (h *HTTPHandler) SetDesktopOpener(opener platform.DesktopOpener) {
 	if h == nil || opener == nil {
 		return

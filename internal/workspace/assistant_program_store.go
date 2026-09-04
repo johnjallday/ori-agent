@@ -13,6 +13,7 @@ import (
 var (
 	ErrAssistantProgramUnavailable = errors.New("workspace has no assistant program declaration")
 	ErrAssistantStationNotFound    = errors.New("assistant station not found")
+	ErrAssistantProgramProtected   = errors.New("assistant program topology requires an explicit removal review")
 )
 
 var assistantProgramProvisionMu sync.Mutex
@@ -32,6 +33,18 @@ func assistantStationFolderSlug(key AssistantProgramKey) string {
 	normalized := key.Normalize()
 	digest := sha256.Sum256([]byte(normalized.OwnerUserID + "\x00" + normalized.PluginID + "\x00" + normalized.ProgramID))
 	return "assistant-" + hex.EncodeToString(digest[:8])
+}
+
+// AssistantProjectLinkID returns the stable host-owned identity for one exact
+// Home/child membership. It contains no path or mutable display material.
+func AssistantProjectLinkID(stationID, projectID string) string {
+	stationID = strings.TrimSpace(stationID)
+	projectID = strings.TrimSpace(projectID)
+	if stationID == "" || projectID == "" {
+		return ""
+	}
+	digest := sha256.Sum256([]byte(stationID + "\x00" + projectID))
+	return "assistant-link-" + hex.EncodeToString(digest[:12])
 }
 
 func (service *AssistantProgramStore) FindStation(key AssistantProgramKey) (*Workspace, error) {
@@ -64,6 +77,67 @@ func (service *AssistantProgramStore) FindStation(key AssistantProgramKey) (*Wor
 	return found, nil
 }
 
+// EnsureStation creates or reuses the one group Home for an accepted owner and
+// Assistant Program declaration. It performs no hire, schedule, capability
+// grant, project creation, or agent creation.
+func (service *AssistantProgramStore) EnsureStation(key AssistantProgramKey, declaration *AssistantProgramDeclaration) (*Workspace, bool, error) {
+	if service == nil || service.store == nil {
+		return nil, false, errors.New("assistant program storage is unavailable")
+	}
+	assistantProgramProvisionMu.Lock()
+	defer assistantProgramProvisionMu.Unlock()
+	return service.ensureStationLocked(key, declaration)
+}
+
+func (service *AssistantProgramStore) ensureStationLocked(key AssistantProgramKey, declaration *AssistantProgramDeclaration) (*Workspace, bool, error) {
+	key = key.Normalize()
+	if !key.Valid() || declaration == nil || strings.TrimSpace(declaration.ID) != key.ProgramID {
+		return nil, false, ErrAssistantProgramUnavailable
+	}
+	station, findErr := service.FindStation(key)
+	if findErr == nil {
+		state := station.GetAssistantProgramState()
+		if state == nil || state.Declaration == nil || state.Declaration.SchemaVersion != declaration.SchemaVersion {
+			return nil, false, ErrAssistantProgramVersionConflict
+		}
+		if station.Kind != "group" {
+			if err := service.store.Update(station.ID, func(current *Workspace) error {
+				current.Kind = "group"
+				return nil
+			}); err != nil {
+				return nil, false, err
+			}
+			station, _ = service.store.Get(station.ID)
+		}
+		return station, false, nil
+	}
+	if !errors.Is(findErr, ErrAssistantStationNotFound) {
+		return nil, false, findErr
+	}
+	station = NewWorkspace(CreateWorkspaceParams{
+		Name:        declaration.StationName,
+		Description: declaration.StationDescription,
+	})
+	station.Kind = "group"
+	station.FolderSlug = assistantStationFolderSlug(key)
+	station.OwnerUserID = key.OwnerUserID
+	stateSchemaVersion := AssistantProgramLegacyStateSchemaVersion
+	if declaration.SchemaVersion >= AssistantProgramSchemaVersion {
+		stateSchemaVersion = AssistantProgramStateSchemaVersion
+	}
+	station.SetAssistantProgramState(&AssistantProgramState{
+		SchemaVersion:   stateSchemaVersion,
+		StateRevision:   1,
+		Key:             key,
+		Declaration:     declaration,
+		PluginAvailable: true,
+	})
+	if err := service.store.Save(station); err != nil {
+		return nil, false, fmt.Errorf("create assistant station: %w", err)
+	}
+	return station, true, nil
+}
+
 // EnsureProjectStation creates or reuses one inert station shell and links a
 // compatible project. It performs no hire, schedule, grant, or agent creation.
 func (service *AssistantProgramStore) EnsureProjectStation(projectID string) (*Workspace, bool, error) {
@@ -80,7 +154,19 @@ func (service *AssistantProgramStore) EnsureProjectStation(projectID string) (*W
 	if existing := project.GetAssistantProjectLink(); existing != nil {
 		station, getErr := service.store.Get(existing.StationWorkspaceID)
 		if getErr == nil && station.GetAssistantProgramState() != nil {
-			return station, false, nil
+			if station.Kind != "group" {
+				if updateErr := service.store.Update(station.ID, func(current *Workspace) error {
+					current.Kind = "group"
+					return nil
+				}); updateErr != nil {
+					return nil, false, updateErr
+				}
+				station, getErr = service.store.Get(existing.StationWorkspaceID)
+			}
+			if getErr == nil {
+				getErr = service.ensureProjectNesting(project.ID, station.ID)
+			}
+			return station, false, getErr
 		}
 		return nil, false, ErrAssistantStationNotFound
 	}
@@ -111,28 +197,9 @@ func (service *AssistantProgramStore) EnsureProjectStation(projectID string) (*W
 		return nil, false, ErrAssistantProgramUnavailable
 	}
 
-	station, findErr := service.FindStation(key)
-	created := false
-	if errors.Is(findErr, ErrAssistantStationNotFound) {
-		station = NewWorkspace(CreateWorkspaceParams{
-			Name:        provenance.AssistantProgram.StationName,
-			Description: provenance.AssistantProgram.StationDescription,
-		})
-		station.FolderSlug = assistantStationFolderSlug(key)
-		station.OwnerUserID = key.OwnerUserID
-		station.SetAssistantProgramState(&AssistantProgramState{
-			SchemaVersion:   AssistantProgramSchemaVersion,
-			StateRevision:   1,
-			Key:             key,
-			Declaration:     provenance.AssistantProgram,
-			PluginAvailable: true,
-		})
-		if err := service.store.Save(station); err != nil {
-			return nil, false, fmt.Errorf("create assistant station: %w", err)
-		}
-		created = true
-	} else if findErr != nil {
-		return nil, false, findErr
+	station, created, err := service.ensureStationLocked(key, provenance.AssistantProgram)
+	if err != nil {
+		return nil, false, err
 	}
 
 	liveProjectIDs := make([]string, 0)
@@ -172,8 +239,13 @@ func (service *AssistantProgramStore) EnsureProjectStation(projectID string) (*W
 		return nil, false, err
 	}
 	stationState := station.GetAssistantProgramState()
+	linkSchemaVersion := AssistantProjectLinkLegacySchemaVersion
+	if stationState != nil && stationState.SchemaVersion >= AssistantProgramStateSchemaVersion {
+		linkSchemaVersion = AssistantProjectLinkSchemaVersion
+	}
 	link := &AssistantProjectLink{
-		SchemaVersion:      AssistantProgramSchemaVersion,
+		ID:                 AssistantProjectLinkID(station.ID, project.ID),
+		SchemaVersion:      linkSchemaVersion,
 		StationWorkspaceID: station.ID,
 		Key:                key,
 		DeclarationVersion: provenance.AssistantProgram.SchemaVersion,
@@ -187,7 +259,7 @@ func (service *AssistantProgramStore) EnsureProjectStation(projectID string) (*W
 			}
 			return ErrAssistantProgramVersionConflict
 		}
-		if stationState != nil && stationState.Hired {
+		if stationState != nil && stationState.SchemaVersion == AssistantProgramLegacyStateSchemaVersion && stationState.Hired {
 			merged, mergeErr := mergeAssistantStationRoster(current.GetAgentInstances(), station.GetAgentInstances())
 			if mergeErr != nil {
 				return mergeErr
@@ -230,7 +302,29 @@ func (service *AssistantProgramStore) EnsureProjectStation(projectID string) (*W
 		return nil, false, err
 	}
 	station, err = service.store.Get(station.ID)
+	if err == nil {
+		err = service.ensureProjectNesting(project.ID, station.ID)
+	}
 	return station, created, err
+}
+
+func (service *AssistantProgramStore) ensureProjectNesting(projectID, stationID string) error {
+	type workspaceMover interface {
+		MoveWorkspaceFolder(string, string) ([]MovedWorkspace, error)
+	}
+	mover, ok := service.store.(workspaceMover)
+	if !ok {
+		return nil
+	}
+	project, err := service.store.Get(projectID)
+	if err != nil {
+		return err
+	}
+	if project.ParentID == stationID {
+		return nil
+	}
+	_, err = mover.MoveWorkspaceFolder(projectID, stationID)
+	return err
 }
 
 func mergeAssistantStationRoster(existing, roster []AgentInstance) ([]AgentInstance, error) {

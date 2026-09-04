@@ -120,16 +120,24 @@ func TestSpecialistOffer_RefusedBeforeAHire(t *testing.T) {
 	}
 }
 
-// A hired assistant with no HQ yet can still be asked.
-func TestSpecialistOffer_AllowedBeforeHQExists(t *testing.T) {
+// Setup is offered only after the relationship has settled. Awaiting and
+// provisioning states remain side-effect free; a paused settled relationship
+// can still accept deliberately.
+func TestSpecialistOffer_RequiresSettledActiveOrPausedRelationship(t *testing.T) {
 	ctx := context.Background()
-	for _, status := range []RelationshipStatus{StatusAwaitingHQ, StatusProvisioningHQ, StatusPaused} {
+	for _, status := range []RelationshipStatus{StatusAwaitingHQ, StatusProvisioningHQ} {
 		service, _ := offerFixture(t, status)
 		if _, err := service.Answer(ctx, "local", SpecialistOfferRequest{
 			Decision: "accepted", Slug: "music_production",
-		}); err != nil {
-			t.Fatalf("status %q: %v", status, err)
+		}); !errors.Is(err, ErrConflict) {
+			t.Fatalf("unsettled status %q: error = %v", status, err)
 		}
+	}
+	service, _ := offerFixture(t, StatusPaused)
+	if _, err := service.Answer(ctx, "local", SpecialistOfferRequest{
+		Decision: "accepted", Slug: "music_production",
+	}); err != nil {
+		t.Fatalf("paused relationship: %v", err)
 	}
 }
 

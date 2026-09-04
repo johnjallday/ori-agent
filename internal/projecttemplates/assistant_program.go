@@ -41,9 +41,11 @@ func normalizeAndValidateAssistantProgram(declaration *workspace.AssistantProgra
 	if declaration == nil {
 		return fmt.Errorf("%w: declaration is required", ErrInvalidAssistantProgram)
 	}
-	if declaration.SchemaVersion != workspace.AssistantProgramSchemaVersion {
+	if declaration.SchemaVersion != workspace.AssistantProgramLegacySchemaVersion &&
+		declaration.SchemaVersion != workspace.AssistantProgramSchemaVersion {
 		return fmt.Errorf("%w: unsupported schema_version %d", ErrInvalidAssistantProgram, declaration.SchemaVersion)
 	}
+	legacy := declaration.SchemaVersion == workspace.AssistantProgramLegacySchemaVersion
 	declaration.ID = normalizeAssistantProgramID(declaration.ID)
 	if !assistantProgramIDPattern.MatchString(declaration.ID) {
 		return fmt.Errorf("%w: id must be a lowercase stable identifier", ErrInvalidAssistantProgram)
@@ -76,6 +78,9 @@ func normalizeAndValidateAssistantProgram(declaration *workspace.AssistantProgra
 	}
 	roleIDs := make(map[string]struct{}, len(declaration.Roles))
 	primaryCount := 0
+	primaryByScope := map[workspace.AssistantRoleScope]int{}
+	rolesByScope := map[workspace.AssistantRoleScope]int{}
+	requiredByScope := map[workspace.AssistantRoleScope]int{}
 	for index := range declaration.Roles {
 		role := &declaration.Roles[index]
 		role.ID = normalizeAssistantProgramID(role.ID)
@@ -86,8 +91,35 @@ func normalizeAndValidateAssistantProgram(declaration *workspace.AssistantProgra
 			return fmt.Errorf("%w: duplicate role id %q", ErrInvalidAssistantProgram, role.ID)
 		}
 		roleIDs[role.ID] = struct{}{}
-		if role.Primary {
-			primaryCount++
+		if legacy {
+			if role.Scope != "" || role.Required || strings.TrimSpace(role.CapabilityID) != "" {
+				return fmt.Errorf("%w: schema v1 roles cannot declare scoped-role fields", ErrInvalidAssistantProgram)
+			}
+			if role.Primary {
+				primaryCount++
+			}
+		} else {
+			role.Scope = workspace.AssistantRoleScope(strings.ToLower(strings.TrimSpace(string(role.Scope))))
+			if role.Scope != workspace.AssistantRoleScopeHome && role.Scope != workspace.AssistantRoleScopeProject {
+				return fmt.Errorf("%w: role %q has an invalid scope", ErrInvalidAssistantProgram, role.ID)
+			}
+			role.CapabilityID = normalizeAssistantProgramID(role.CapabilityID)
+			if role.Required && role.CapabilityID != "" {
+				return fmt.Errorf("%w: required role %q cannot be capability-optional", ErrInvalidAssistantProgram, role.ID)
+			}
+			if !role.Required && (role.Scope != workspace.AssistantRoleScopeHome || !assistantProgramIDPattern.MatchString(role.CapabilityID)) {
+				return fmt.Errorf("%w: optional role %q must be a Home capability role", ErrInvalidAssistantProgram, role.ID)
+			}
+			if role.Primary && !role.Required {
+				return fmt.Errorf("%w: primary role %q must be required", ErrInvalidAssistantProgram, role.ID)
+			}
+			rolesByScope[role.Scope]++
+			if role.Required {
+				requiredByScope[role.Scope]++
+			}
+			if role.Primary {
+				primaryByScope[role.Scope]++
+			}
 		}
 		if role.Label, err = boundedAssistantText("role label", role.Label, 100, true); err != nil {
 			return err
@@ -105,8 +137,16 @@ func normalizeAndValidateAssistantProgram(declaration *workspace.AssistantProgra
 			return fmt.Errorf("%w: role %q declares too many skills", ErrInvalidAssistantProgram, role.ID)
 		}
 	}
-	if primaryCount != 1 {
-		return fmt.Errorf("%w: exactly one role must be primary", ErrInvalidAssistantProgram)
+	if legacy {
+		if primaryCount != 1 {
+			return fmt.Errorf("%w: exactly one role must be primary", ErrInvalidAssistantProgram)
+		}
+	} else {
+		for _, scope := range []workspace.AssistantRoleScope{workspace.AssistantRoleScopeHome, workspace.AssistantRoleScopeProject} {
+			if rolesByScope[scope] == 0 || requiredByScope[scope] == 0 || primaryByScope[scope] != 1 {
+				return fmt.Errorf("%w: scope %q requires roles, one required role, and one primary", ErrInvalidAssistantProgram, scope)
+			}
+		}
 	}
 	if len(declaration.Stages) == 0 || len(declaration.Stages) > workspace.AssistantProgramMaxStages {
 		return fmt.Errorf("%w: stages must contain 1-%d entries", ErrInvalidAssistantProgram, workspace.AssistantProgramMaxStages)

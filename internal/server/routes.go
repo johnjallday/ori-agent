@@ -412,6 +412,7 @@ func registerOnboardingRoutes(mux *http.ServeMux, s *Server) {
 	}
 
 	registerPersonalAssistantRoutes(mux, s)
+	registerSetupJourneyRoutes(mux, s)
 	registerPersonalHQRoutes(mux, s)
 	registerDailyBriefRoutes(mux, s)
 
@@ -736,6 +737,11 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program", s.Handlers.Session.GetAssistantProgram)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/activate", s.Handlers.Session.ActivateAssistantProgram)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/hire", s.Handlers.Session.HireAssistantProgram)
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/portfolio", s.Handlers.Session.GetAssistantPortfolio)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/portfolio/review", s.Handlers.Session.ReviewAssistantPortfolio)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/portfolio/commit", s.Handlers.Session.CommitAssistantPortfolio)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/handoffs/review", s.Handlers.Session.ReviewAssistantHandoff)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/handoffs/commit", s.Handlers.Session.CommitAssistantHandoff)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/promotion/ack", s.Handlers.Session.AcknowledgeAssistantPromotion)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/learnings", s.Handlers.Session.GetAssistantLearnings)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/reflection", s.Handlers.Session.RunAssistantReflection)
@@ -993,6 +999,23 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/personal-assistant/first-assignment/preview", s.Handlers.PersonalAssistant.PreviewFirstAssignment)
 		mux.HandleFunc("POST /api/personal-assistant/first-assignment/apply", s.Handlers.PersonalAssistant.ApplyFirstAssignment)
 	}
+}
+
+// registerSetupJourneyRoutes registers the current accepted specialist's
+// generic root/child setup surface. No route accepts a user or owner ID.
+func registerSetupJourneyRoutes(mux *http.ServeMux, s *Server) {
+	if s == nil || s.Handlers == nil || s.Handlers.SetupJourney == nil {
+		return
+	}
+	handler := s.Handlers.SetupJourney
+	mux.HandleFunc("GET /api/personal-assistant/setup-journey", handler.GetRoot)
+	mux.HandleFunc("GET /api/personal-assistant/setup-journey/runs/{runID}", handler.GetRun)
+	mux.HandleFunc("POST /api/personal-assistant/setup-journey/open", handler.OpenRoot)
+	mux.HandleFunc("POST /api/personal-assistant/setup-journey/runs/{runID}/open", handler.OpenRun)
+	mux.HandleFunc("POST /api/personal-assistant/setup-journey/dismiss", handler.DismissRoot)
+	mux.HandleFunc("POST /api/personal-assistant/setup-journey/runs/{runID}/dismiss", handler.DismissRun)
+	mux.HandleFunc("POST /api/personal-assistant/setup-journey/children", handler.CreateChild)
+	mux.HandleFunc("POST /api/personal-assistant/setup-journey/runs/{runID}/actions/{actionID}", handler.Mutate)
 }
 
 // registerPersonalHQRoutes registers Personal HQ status/designation endpoints.

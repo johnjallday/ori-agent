@@ -100,7 +100,15 @@ func TestAssistantReflectionScheduleArmsOnlyAfterThreeHiredProjects(t *testing.T
 func TestAssistantReflectionSchedulePausesWhenLinkedProjectCountDrops(t *testing.T) {
 	store, station, learnings := reflectionFixture(t)
 	state := station.GetAssistantProgramState()
-	if err := store.Delete(state.LinkedProjectIDs[0]); err != nil {
+	removedProjectID := state.LinkedProjectIDs[0]
+	if err := store.Update(removedProjectID, func(current *Workspace) error {
+		current.SetAssistantProjectLink(nil)
+		current.ParentID = ""
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Delete(removedProjectID); err != nil {
 		t.Fatal(err)
 	}
 	model := reflectionModelFunc(func(context.Context, AssistantReflectionModelRequest) (string, error) {
