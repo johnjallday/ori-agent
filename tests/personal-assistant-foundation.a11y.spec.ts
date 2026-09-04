@@ -46,7 +46,7 @@ async function mockCompletedOnboarding(page: Page) {
 
 async function mockAssistantState(
   page: Page,
-  relationshipState: 'active' | 'paused' | 'repair_needed' = 'active',
+  relationshipState: 'active' | 'paused' | 'needs_hq' | 'repair_needed' = 'active',
   todayState = relationshipState,
   modelAvailable = true
 ) {
@@ -224,6 +224,23 @@ test.describe('Personal Assistant Foundation accessibility', () => {
       expect(overflow).toBe(false);
     });
   }
+
+  test('needs-HQ guidance opens from the named launcher without enabling Ask', async ({ page }) => {
+    await mockCompletedOnboarding(page);
+    await mockAssistantState(page, 'needs_hq');
+    await page.goto('/');
+
+    const launcher = page.locator('#personalAssistantLauncher');
+    await expect(launcher).toBeVisible();
+    await expect(page.locator('#personalAssistantLauncherStatus')).toHaveText('Build HQ');
+    await launcher.click();
+    await expect(page.locator('#personalAssistantToday')).toBeVisible();
+    await expect(page.locator('#personalAssistantTodayBanner')).toContainText('needs a home base');
+    await expect(page.getByRole('link', { name: 'Build Personal HQ' })).toHaveCount(1);
+    await page.locator('#personalAssistantAskTab').click();
+    await expect(page.locator('#personalAssistantInput')).toBeDisabled();
+    await expect(page.locator('#personalAssistantSend')).toBeDisabled();
+  });
 
   test('no-model onboarding exposes named, associated hire and preview controls', async ({
     page

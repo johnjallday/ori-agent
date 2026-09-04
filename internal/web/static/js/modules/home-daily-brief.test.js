@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -10,6 +11,20 @@ import {
   isQuietDay,
   renderContent
 } from './home-daily-brief.js';
+
+test('Daily Brief has one stable Today mount and no Updates copy', () => {
+  const todayTemplate = readFileSync(
+    new URL('../../../templates/components/personal-assistant-today.tmpl', import.meta.url),
+    'utf8'
+  );
+  const dashboardTemplate = readFileSync(
+    new URL('../../../templates/components/dashboard.tmpl', import.meta.url),
+    'utf8'
+  );
+  assert.equal((todayTemplate.match(/id="homeDailyBrief"/g) || []).length, 1);
+  assert.equal((dashboardTemplate.match(/id="homeDailyBrief"/g) || []).length, 0);
+  assert.doesNotMatch(todayTemplate, /personalAssistantTodayBriefMount|moveDailyBrief/);
+});
 
 test('parseContent decodes a revision content_json, degrading to {} on garbage', () => {
   assert.deepEqual(parseContent({ content_json: '{"opening_summary":"hi"}' }), {
