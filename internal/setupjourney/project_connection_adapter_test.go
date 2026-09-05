@@ -19,7 +19,7 @@ func (r staticProjectTemplateResolver) ResolveProjectTemplate(context.Context, R
 	return r.template, nil
 }
 
-func setupJourneyProjectAdapter(t *testing.T) (*ProjectConnectionAdapter, *pathselection.Store, *workspace.SyncStore) {
+func setupJourneyProjectAdapter(t *testing.T) (*ProjectConnectionAdapter, *pathselection.Store) {
 	t.Helper()
 	folders, err := workspace.NewFileStore(t.TempDir())
 	if err != nil {
@@ -51,11 +51,11 @@ func setupJourneyProjectAdapter(t *testing.T) (*ProjectConnectionAdapter, *paths
 			Reflection: workspace.AssistantReflectionConfig{MinimumProjects: 2, CadenceHours: 24, MaxProjects: 4, MaxEventsPerProject: 4, MaxCandidates: 2, MaxEvidence: 2, Rubric: "Review."},
 		},
 	}
-	return NewProjectConnectionAdapter(projectconnection.NewService(store, selections), staticProjectTemplateResolver{template}), selections, store
+	return NewProjectConnectionAdapter(projectconnection.NewService(store, selections), staticProjectTemplateResolver{template}), selections
 }
 
 func TestProjectConnectionAdapterReviewsCommitsAndReconcilesExactSelection(t *testing.T) {
-	adapter, selections, _ := setupJourneyProjectAdapter(t)
+	adapter, selections := setupJourneyProjectAdapter(t)
 	external := t.TempDir()
 	entry := filepath.Join(external, "Existing.project")
 	if err := os.WriteFile(entry, []byte("existing"), 0o600); err != nil {
@@ -94,7 +94,7 @@ func TestProjectConnectionAdapterReviewsCommitsAndReconcilesExactSelection(t *te
 }
 
 func TestProjectConnectionAdapterRejectsUnknownInputAndActionModeConfusion(t *testing.T) {
-	adapter, _, _ := setupJourneyProjectAdapter(t)
+	adapter, _ := setupJourneyProjectAdapter(t)
 	scope := ReadScope{OwnerUserID: "owner-1", RunKind: RunKindRoot, RunID: "run"}
 	unknown := json.RawMessage(`{"mode_id":"new_project","workspace_name":"New","project_name":"New","command":"run"}`)
 	if _, err := adapter.Review(context.Background(), scope, ActionReviewNewProject, unknown); err == nil {

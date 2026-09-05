@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/specialist"
+	"github.com/johnjallday/ori-agent/internal/specialistevents"
 )
 
 const actionReviewTTL = 15 * time.Minute
@@ -96,6 +97,7 @@ func (s *Service) Mutate(ctx context.Context, userID, runID string, actionID Act
 		if storeErr != nil {
 			return nil, safeActionStoreFailure(storeErr, projection.StateRevision)
 		}
+		emitReviewEvent(projection, stepID, actionID)
 		return &ActionResult{Journey: projection, Review: &ReviewProjection{
 			Token: receipt.Token, CommitAction: material.CommitAction,
 			ExpiresAt: receipt.ExpiresAt, Integration: cloneIntegrationProjection(material.Integration),
@@ -136,6 +138,7 @@ func (s *Service) Mutate(ctx context.Context, userID, runID string, actionID Act
 	result, commitErr := adapter.Commit(ctx, scope, actionID, request.Input, material)
 	if commitErr != nil {
 		_, _ = s.store.MarkOperationReconcileRequired(ctx, projection.RunKind, projection.RunID, request.IdempotencyKey)
+		emitActionOutcome(projection, stepID, actionID, specialistevents.OutcomeReconcileRequired, ReasonOperationFailed)
 		return nil, failure(ReasonOperationFailed, claimedRun.StateRevision)
 	}
 	if result.HomeWorkspaceID != "" {
@@ -150,11 +153,13 @@ func (s *Service) Mutate(ctx context.Context, userID, runID string, actionID Act
 	ownerRead := s.readers.read(ctx, kind, scope)
 	if !validCanonicalRead(kind, ownerRead) {
 		_, _ = s.store.MarkOperationReconcileRequired(ctx, projection.RunKind, projection.RunID, request.IdempotencyKey)
+		emitActionOutcome(projection, stepID, actionID, specialistevents.OutcomeReconcileRequired, ReasonOwnerUnavailable)
 		return nil, failure(ReasonOwnerUnavailable, claimedRun.StateRevision)
 	}
 	finalRun, finalRunErr := s.actionFinalRun(ctx, userID, projection.RunID)
 	if finalRunErr != nil {
 		_, _ = s.store.MarkOperationReconcileRequired(ctx, projection.RunKind, projection.RunID, request.IdempotencyKey)
+		emitActionOutcome(projection, stepID, actionID, specialistevents.OutcomeReconcileRequired, ReasonOwnerUnavailable)
 		return nil, failure(ReasonOwnerUnavailable, claimedRun.StateRevision)
 	}
 	if !adapter.ConsequenceObserved(actionID, ownerRead) {
@@ -162,8 +167,10 @@ func (s *Service) Mutate(ctx context.Context, userID, runID string, actionID Act
 			Status: OperationFailed, ResultCode: ResultNotApplied, ReasonCode: ReasonOperationFailed,
 		})
 		if finalizeErr != nil {
+			emitActionOutcome(projection, stepID, actionID, specialistevents.OutcomeReconcileRequired, ReasonOperationFailed)
 			return nil, safeActionStoreFailure(finalizeErr, claimedRun.StateRevision)
 		}
+		emitActionOutcome(projection, stepID, actionID, specialistevents.OutcomeFailed, ReasonOperationFailed)
 		return nil, failure(ReasonOperationFailed, claimedRun.StateRevision)
 	}
 	if normalized, _, normalizeErr := normalizeCanonicalResult(result); normalizeErr == nil {
@@ -175,12 +182,15 @@ func (s *Service) Mutate(ctx context.Context, userID, runID string, actionID Act
 		Status: OperationSucceeded, ResultCode: ResultApplied, Result: result,
 	})
 	if finalizeErr != nil {
+		emitActionOutcome(projection, stepID, actionID, specialistevents.OutcomeReconcileRequired, ReasonOperationFailed)
 		return nil, safeActionStoreFailure(finalizeErr, claimedRun.StateRevision)
 	}
 	fresh, readErr := s.Read(ctx, userID, projection.RunID)
 	if readErr != nil {
 		return nil, readErr
 	}
+	emitActionOutcome(fresh, stepID, actionID, specialistevents.OutcomeSucceeded, "")
+	emitProjectionLifecycleTransition(projection, fresh)
 	return &ActionResult{Journey: fresh}, nil
 }
 
@@ -195,33 +205,40 @@ func (s *Service) replayAction(ctx context.Context, userID string, projection *J
 	case OperationFailed:
 		return nil, failure(receipt.ReasonCode, projection.StateRevision)
 	case OperationClaimed, OperationReconcileRequired:
+		stepID := stepIDForKind(projection, kind)
 		ownerRead := s.readers.read(ctx, kind, scope)
 		if !validCanonicalRead(kind, ownerRead) {
 			if receipt.Status == OperationClaimed {
 				_, _ = s.store.MarkOperationReconcileRequired(ctx, receipt.RunKind, receipt.RunID, receipt.IdempotencyKey)
 			}
+			emitActionOutcome(projection, stepID, actionID, specialistevents.OutcomeReconcileRequired, ReasonOwnerUnavailable)
 			return nil, failure(ReasonOwnerUnavailable, projection.StateRevision)
 		}
 		if !adapter.ConsequenceObserved(actionID, ownerRead) {
 			if receipt.Status == OperationClaimed {
 				_, _ = s.store.MarkOperationReconcileRequired(ctx, receipt.RunKind, receipt.RunID, receipt.IdempotencyKey)
 			}
+			emitActionOutcome(projection, stepID, actionID, specialistevents.OutcomeReconcileRequired, ReasonOperationFailed)
 			return nil, failure(ReasonOperationFailed, projection.StateRevision)
 		}
 		finalRun, finalRunErr := s.actionFinalRun(ctx, userID, projection.RunID)
 		if finalRunErr != nil {
+			emitActionOutcome(projection, stepID, actionID, specialistevents.OutcomeReconcileRequired, ReasonOwnerUnavailable)
 			return nil, failure(ReasonOwnerUnavailable, projection.StateRevision)
 		}
 		_, _, _, finalizeErr := s.store.FinalizeOperation(ctx, finalRun, receipt.IdempotencyKey, OperationCompletion{
 			Status: OperationSucceeded, ResultCode: ResultAlreadyCurrent, Result: ownerRead.Result,
 		})
 		if finalizeErr != nil {
+			emitActionOutcome(projection, stepID, actionID, specialistevents.OutcomeReconcileRequired, ReasonOperationFailed)
 			return nil, safeActionStoreFailure(finalizeErr, projection.StateRevision)
 		}
 		fresh, readErr := s.Read(ctx, userID, projection.RunID)
 		if readErr != nil {
 			return nil, readErr
 		}
+		emitActionOutcome(fresh, stepID, actionID, specialistevents.OutcomeSucceeded, "")
+		emitProjectionLifecycleTransition(projection, fresh)
 		return &ActionResult{Journey: fresh}, nil
 	default:
 		return nil, failure(ReasonOperationFailed, projection.StateRevision)

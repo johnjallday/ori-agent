@@ -408,7 +408,12 @@ func (s *Service) SelectMode(ctx context.Context, workspaceID, modeID string) (S
 			return Status{}, err
 		}
 	}
-	return s.Status(ctx, workspaceID)
+	status, statusErr := s.Status(ctx, workspaceID)
+	if statusErr != nil {
+		return Status{}, statusErr
+	}
+	recordModeSelection(mode.ID)
+	return status, nil
 }
 
 // ConfirmAction executes only the exact token a fresh durable evaluation
@@ -461,33 +466,52 @@ func (s *Service) Verify(ctx context.Context, workspaceID, requirementKey string
 	}
 	adapter, found := s.registry.Lookup(requirement.Adapter)
 	if !found {
+		recordLiveVerification(requirement.Key, false, ReasonAdapterUnavailable)
 		return Status{}, ErrUnknownAdapter
 	}
 	verifier, ok := adapter.(Verifier)
 	if !ok {
+		recordLiveVerification(requirement.Key, false, ReasonCheckFailed)
 		return Status{}, ErrVerificationFailed
 	}
 	request := evaluationRequest(ws, mode, requirement)
 	result, verifyErr := verifier.Verify(ctx, VerificationRequest{EvaluationRequest: request})
 	if verifyErr != nil {
+		recordLiveVerification(requirement.Key, false, ReasonCheckFailed)
 		return Status{}, ErrVerificationFailed
 	}
 	if !result.Succeeded {
-		return s.verificationFailureStatus(ctx, workspaceID, requirement.Key, result)
+		status, statusErr := s.verificationFailureStatus(ctx, workspaceID, requirement.Key, result)
+		reasonCode := safeCode(result.ReasonCode)
+		if reasonCode == "" {
+			reasonCode = ReasonCheckFailed
+		}
+		recordLiveVerification(requirement.Key, false, reasonCode)
+		return status, statusErr
 	}
 
 	// Ignore the verifier's success assertion until durable state agrees.
 	durable, durableErr := adapter.EvaluateDurable(ctx, request)
 	if durableErr != nil {
+		recordLiveVerification(requirement.Key, false, ReasonCheckFailed)
 		return Status{}, ErrVerificationFailed
 	}
 	if normalizeDurableState(durable.State) != DurableConfigured {
-		return s.Status(ctx, workspaceID)
+		status, statusErr := s.Status(ctx, workspaceID)
+		recordLiveVerification(requirement.Key, false, ReasonVerificationRequired)
+		return status, statusErr
 	}
 	if err := s.recordVerification(workspaceID, requirement.Key); err != nil {
+		recordLiveVerification(requirement.Key, false, ReasonCheckFailed)
 		return Status{}, err
 	}
-	return s.Recheck(ctx, workspaceID)
+	status, recheckErr := s.Recheck(ctx, workspaceID)
+	if recheckErr != nil {
+		recordLiveVerification(requirement.Key, false, ReasonCheckFailed)
+		return Status{}, recheckErr
+	}
+	recordLiveVerification(requirement.Key, true, "")
+	return status, nil
 }
 
 // verificationFailureStatus projects the adapter's bounded, actionable failure

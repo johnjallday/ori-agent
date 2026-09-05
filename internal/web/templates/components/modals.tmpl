@@ -1325,7 +1325,7 @@
      come from the server; this shell owns only fixed review interactions. -->
 <div class="modal fade setup-journey" id="specialistSetupJourneyModal" tabindex="-1"
      aria-labelledby="specialistSetupJourneyTitle" aria-describedby="specialistSetupJourneyDescription"
-     aria-hidden="true" data-bs-backdrop="static" role="dialog" aria-modal="true">
+     aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false" role="dialog" aria-modal="true">
   <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content setup-journey__frame">
       <header class="setup-journey__header">
@@ -1340,11 +1340,11 @@
         <nav class="setup-journey__rail" aria-label="Setup progress">
           <ol id="specialistSetupJourneySteps" class="setup-journey__steps"></ol>
         </nav>
-        <section class="setup-journey__stage" aria-labelledby="specialistSetupJourneyStepTitle">
+        <section class="setup-journey__stage" aria-labelledby="specialistSetupJourneyStepTitle" aria-describedby="specialistSetupJourneyStepDescription specialistSetupJourneyError">
           <div id="specialistSetupJourneyBusy" class="setup-journey__busy" role="status" aria-live="polite" hidden>
             <span class="setup-journey__spinner" aria-hidden="true"></span><span>Checking current setup…</span>
           </div>
-          <div id="specialistSetupJourneyError" class="setup-journey__error" role="alert" aria-live="assertive" hidden></div>
+          <div id="specialistSetupJourneyError" class="setup-journey__error" role="alert" aria-live="assertive" tabindex="-1" hidden></div>
           <div id="specialistSetupJourneyContent">
             <p id="specialistSetupJourneyStepState" class="setup-journey__state"></p>
             <h3 id="specialistSetupJourneyStepTitle" class="setup-journey__step-title" tabindex="-1"></h3>

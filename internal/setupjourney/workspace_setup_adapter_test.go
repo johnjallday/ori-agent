@@ -30,12 +30,19 @@ type projectFilesConnected bool
 
 func (connected projectFilesConnected) FilesConnected(string) bool { return bool(connected) }
 
-type liveAdapterSpy struct{ evaluations int }
+type liveAdapterSpy struct {
+	evaluations int
+	durable     string
+}
 
 func (a *liveAdapterSpy) ID() string { return "live_adapter" }
 func (a *liveAdapterSpy) EvaluateDurable(context.Context, runtimecapability.EvaluationRequest) (runtimecapability.DurableResult, error) {
 	a.evaluations++
-	return runtimecapability.DurableResult{State: runtimecapability.DurableInProgress, Summary: "Live control is not configured."}, nil
+	state := a.durable
+	if state == "" {
+		state = runtimecapability.DurableInProgress
+	}
+	return runtimecapability.DurableResult{State: state, Summary: "Live control configuration status."}, nil
 }
 
 func workspaceSetupFixture(t *testing.T) (*WorkspaceSetupAdapter, *workspaceSetupStore, *liveAdapterSpy) {
@@ -101,6 +108,57 @@ func TestWorkspaceSetupAdapterSelectsOnlyFileModeWithoutLiveSideEffects(t *testi
 	after, err := adapter.Read(context.Background(), scope)
 	if err != nil || !after.Complete || after.WorkspaceSetup == nil || after.WorkspaceSetup.LiveControlConfigured || after.WorkspaceSetup.LiveControlTested {
 		t.Fatalf("after = %+v err=%v", after, err)
+	}
+}
+
+func TestWorkspaceSetupAdapterReadsCanonicallyReadyPermissionBearingMode(t *testing.T) {
+	adapter, store, live := workspaceSetupFixture(t)
+	live.durable = runtimecapability.DurableConfigured
+	ctx := context.Background()
+	completeAssistedWorkspaceSetup(t, adapter, store.workspace.ID)
+
+	read, err := adapter.Read(ctx, ReadScope{RunKind: RunKindRoot, RunID: "run", ProjectWorkspaceID: store.workspace.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !read.Complete || read.Result.SelectedModeID != "assisted" || read.WorkspaceSetup == nil {
+		t.Fatalf("assisted mode did not become canonically complete: %+v", read)
+	}
+	if !read.WorkspaceSetup.LiveControlConfigured || !read.WorkspaceSetup.LiveControlTested {
+		t.Fatalf("ready assisted mode lost canonical live readiness: %+v", read.WorkspaceSetup)
+	}
+	if live.evaluations == 0 {
+		t.Fatal("permission-bearing mode was accepted without a canonical runtime read")
+	}
+}
+
+func TestWorkspaceSetupAdapterReportsSelectedLiveRegressionAsNeedsAttention(t *testing.T) {
+	adapter, store, live := workspaceSetupFixture(t)
+	live.durable = runtimecapability.DurableConfigured
+	ctx := context.Background()
+	completeAssistedWorkspaceSetup(t, adapter, store.workspace.ID)
+	live.durable = runtimecapability.DurableNeedsAttention
+
+	read, err := adapter.Read(ctx, ReadScope{RunKind: RunKindRoot, RunID: "run", ProjectWorkspaceID: store.workspace.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.Complete || read.BlockedReason != ReasonRuntimeNeedsAttention || read.WorkspaceSetup == nil || read.WorkspaceSetup.ModeID != "assisted" {
+		t.Fatalf("live regression was not narrow and resumable: %+v", read)
+	}
+	if read.WorkspaceSetup.LiveControlConfigured || read.WorkspaceSetup.LiveControlTested {
+		t.Fatalf("historical mode selection was claimed as current live readiness: %+v", read.WorkspaceSetup)
+	}
+}
+
+func completeAssistedWorkspaceSetup(t *testing.T, adapter *WorkspaceSetupAdapter, workspaceID string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := adapter.wizard.Confirm(ctx, workspaceID, "mode", setupwizard.StepAction{Type: setupwizard.ActionConfirm, Option: "assisted"}); err != nil {
+		t.Fatalf("select assisted mode: %v", err)
+	}
+	if _, err := adapter.wizard.Confirm(ctx, workspaceID, "summary", setupwizard.StepAction{Type: setupwizard.ActionConfirm}); err != nil {
+		t.Fatalf("confirm setup summary: %v", err)
 	}
 }
 

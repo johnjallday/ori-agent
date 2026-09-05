@@ -9,6 +9,53 @@ const surfaceKey = 'plugin:reaper-plugin:reaper-live-control:live-control';
 const tidySurfaceKey = 'plugin:reaper-plugin:reaper-live-control:project-tidy';
 const evidenceDir = process.env.ORI_REAPER_EVIDENCE_DIR;
 
+async function cleanupAssistantTopology(
+  request: import('@playwright/test').APIRequestContext,
+  stationID: string,
+  projectIDs: string[]
+) {
+  for (const projectID of projectIDs) {
+    const current = await request
+      .get(`/api/workspaces/${projectID}/assistant-program`)
+      .then(response => response.json())
+      .catch(() => null);
+    if (current?.state_revision) {
+      const reviewed = await request
+        .post(`/api/workspaces/${stationID}/assistant-program/disconnect/review`, {
+          data: { project_workspace_id: projectID, state_revision: current.state_revision }
+        })
+        .then(response => response.json())
+        .catch(() => null);
+      if (reviewed?.token)
+        await request
+          .post(`/api/workspaces/${stationID}/assistant-program/disconnect/commit`, {
+            data: { token: reviewed.token, idempotency_key: `cleanup-${projectID}` }
+          })
+          .catch(() => {});
+    }
+    await request.delete(`/api/workspaces/${projectID}`).catch(() => {});
+  }
+  const home = await request
+    .get(`/api/workspaces/${stationID}/assistant-program`)
+    .then(response => response.json())
+    .catch(() => null);
+  if (home?.state_revision) {
+    const reviewed = await request
+      .post(`/api/workspaces/${stationID}/assistant-program/remove-home/review`, {
+        data: { state_revision: home.state_revision }
+      })
+      .then(response => response.json())
+      .catch(() => null);
+    if (reviewed?.token)
+      await request
+        .post(`/api/workspaces/${stationID}/assistant-program/remove-home/commit`, {
+          data: { token: reviewed.token }
+        })
+        .catch(() => {});
+  }
+  await request.delete(`/api/workspaces/${stationID}`).catch(() => {});
+}
+
 async function captureEvidence(page: import('@playwright/test').Page, name: string) {
   if (!evidenceDir) return;
   mkdirSync(evidenceDir, { recursive: true });
@@ -60,12 +107,14 @@ test('Create Workspace hires the shared assistant roster from the Team step', as
 
     await page.locator('#wizardNextBtn').click();
     await expect(page.locator('#wizardStep3')).toBeVisible();
-    await expect(page.locator('#wizardStep3Title')).toHaveText('Hire your music producer');
+    await expect(page.locator('#wizardStep3Title')).toHaveText(
+      'Staff your music production assistants'
+    );
     await expect(page.locator('#workspaceAssistantProgramCreate')).toBeVisible();
     await expect(page.locator('#existingAgentRosterPanel')).toBeHidden();
     await expect(page.locator('[data-team-agent-setup]')).toHaveCount(0);
     await expect(page.locator('[data-team-accept-all]')).toHaveCount(0);
-    await expect(page.locator('#workspaceTeamRoster .workspace-team-row')).toHaveCount(3);
+    await expect(page.locator('#workspaceTeamRoster .workspace-team-row')).toHaveCount(4);
     await expect(page.locator('#workspaceTeamRoster')).toContainText('Mix Engineer');
     await expect(page.locator('#workspaceTeamRoster')).toContainText('Songwriter');
     await page.locator('#assistantProgramCreateName').fill(producerName);
@@ -74,11 +123,9 @@ test('Create Workspace hires the shared assistant roster from the Team step', as
 
     await page.locator('#wizardNextBtn').click();
     await expect(page.locator('#wizardStep4')).toBeVisible();
+    await expect(page.locator('#workspaceReviewSummary')).toContainText(`Producer · Primary`);
     await expect(page.locator('#workspaceReviewSummary')).toContainText(
-      `${producerName} · Primary`
-    );
-    await expect(page.locator('#workspaceReviewSummary')).toContainText(
-      '3 shared assistant roles will be created and linked'
+      '4 shared assistant roles will be created and linked'
     );
 
     const createResponsePromise = page.waitForResponse(
@@ -90,7 +137,7 @@ test('Create Workspace hires the shared assistant roster from the Team step', as
     expect(createResponse.ok(), await createResponse.text()).toBeTruthy();
     const createPayload = createResponse.request().postDataJSON();
     expect(createPayload.template_agent_review).toBeUndefined();
-    expect(createPayload.assistant_hire?.name).toBe(producerName);
+    expect(createPayload.assistant_hire).toBeUndefined();
     const created = await createResponse.json();
     workspaceID = created.folder.id;
     await page.waitForURL(`**/workspaces/${encodeURIComponent(created.folder.folder_slug)}`, {
@@ -104,7 +151,10 @@ test('Create Workspace hires the shared assistant roster from the Team step', as
     expect(program.primary_name).toBe(producerName);
     expect(program.roster).toHaveLength(3);
     stationID = program.station_id;
-    agentNames.push(...program.roster.map((role: { agent_name: string }) => role.agent_name));
+    agentNames.push(
+      producerName,
+      ...program.roster.map((role: { agent_name: string }) => role.agent_name)
+    );
 
     // A later compatible project must preview the stable roster it will link,
     // not offer a rename that the already-hired station would ignore.
@@ -130,8 +180,8 @@ test('Create Workspace hires the shared assistant roster from the Team step', as
       'Existing shared assistant role · will be linked'
     );
   } finally {
-    if (workspaceID) await request.delete(`/api/workspaces/${workspaceID}`).catch(() => {});
-    if (stationID) await request.delete(`/api/workspaces/${stationID}`).catch(() => {});
+    if (stationID)
+      await cleanupAssistantTopology(request, stationID, workspaceID ? [workspaceID] : []);
     for (const name of agentNames) {
       await request.delete(`/api/agents/${encodeURIComponent(name)}`).catch(() => {});
     }
@@ -210,19 +260,18 @@ test('plugin-backed Reaper Song reaches generic setup, surface, action, script, 
     expect(assistantBefore.available).toBeTruthy();
     expect(assistantBefore.stage_label).toBe('Helper');
     await page.goto(`/workspaces/${encodeURIComponent(workspace.folder_slug)}`);
-    await expect(page.getByRole('link', { name: 'Open Producer Home' })).toBeVisible({
+    await expect(page.getByRole('link', { name: 'Open Music Production Home' })).toBeVisible({
       timeout: 15_000
     });
     await page.goto(`/workspaces/${encodeURIComponent(workspace.folder_slug)}/assistant`);
 
     let hired = assistantBefore;
     let producerName = String(assistantBefore.primary_name || '');
-    if (!assistantBefore.hired) {
-      // Direct/API-created legacy workspaces still retain the recovery hire page.
-      await expect(page.getByRole('heading', { name: 'Hire your music producer' })).toBeVisible({
-        timeout: 15_000
-      });
-      await capture('music-producer-01-pre-hire.png');
+    await expect(page.getByRole('heading', { name: 'Music Production Home' })).toBeVisible({
+      timeout: 15_000
+    });
+    await capture('music-producer-01-pre-hire.png');
+    if (!hired.hired || !(hired.roster || []).length) {
       producerName = `Producer ${Date.now().toString(36)}`;
       const hire = await request.post(`/api/workspaces/${workspace.id}/assistant-program/hire`, {
         data: { name: producerName, version: assistantBefore.state_revision }
@@ -234,6 +283,7 @@ test('plugin-backed Reaper Song reaches generic setup, surface, action, script, 
     expect(hired.roster).toHaveLength(3);
     assistantStationID = hired.station_id;
     assistantAgentNames.push(
+      producerName,
       ...hired.roster.map((item: { agent_name: string }) => item.agent_name)
     );
     expect(hired.stage_id).toBe('helper');
@@ -263,19 +313,18 @@ test('plugin-backed Reaper Song reaches generic setup, surface, action, script, 
     const secondSummary = await secondProgram.json();
     expect(secondSummary.station_id).toBe(hired.station_id);
     expect(secondSummary.primary_name).toBe(producerName);
-    expect(
-      secondSummary.roster.map((item: { agent_instance_id: string }) => item.agent_instance_id)
-    ).toEqual(hired.roster.map((item: { agent_instance_id: string }) => item.agent_instance_id));
+    expect(secondSummary.roster || []).toHaveLength(0);
+    expect(secondSummary.roster_scope || 'project').toBe('project');
 
     await page.reload();
-    await expect(page.getByRole('heading', { name: 'Producer Home' })).toBeVisible({
+    await expect(page.getByRole('heading', { name: 'Music Production Home' })).toBeVisible({
       timeout: 15_000
     });
     await expect(page.getByText('Stage 1 — Helper')).toBeVisible();
     await expect(page.getByText('0 accepted completions · 5 until Collaborator')).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Producer', exact: true })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Mix Engineer' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Songwriter' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /^Producer(?: |$)/ })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /^Mix Engineer(?: |$)/ })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /^Songwriter(?: |$)/ })).toBeVisible();
     await expect(page.getByRole('link', { name: secondAssistantWorkspace.name })).toBeVisible();
     await capture('music-producer-02-helper-home.png');
 
@@ -631,14 +680,13 @@ test('plugin-backed Reaper Song reaches generic setup, surface, action, script, 
     expect(restoredProgram.ok(), await restoredProgram.text()).toBeTruthy();
     expect((await restoredProgram.json()).station_id).toBe(hired.station_id);
   } finally {
+    if (assistantStationID)
+      await cleanupAssistantTopology(request, assistantStationID, [
+        workspace.id,
+        ...linkedAssistantWorkspaces.map(item => item.id)
+      ]);
+    else await request.delete(`/api/workspaces/${workspace.id}`).catch(() => {});
     await request.delete(`/api/plugins/${pluginName}`).catch(() => {});
-    for (const linkedWorkspace of linkedAssistantWorkspaces) {
-      await request.delete(`/api/workspaces/${linkedWorkspace.id}`).catch(() => {});
-    }
-    await request.delete(`/api/workspaces/${workspace.id}`).catch(() => {});
-    if (assistantStationID) {
-      await request.delete(`/api/workspaces/${assistantStationID}`).catch(() => {});
-    }
     for (const agentName of assistantAgentNames) {
       await request.delete(`/api/agents/${encodeURIComponent(agentName)}`).catch(() => {});
     }

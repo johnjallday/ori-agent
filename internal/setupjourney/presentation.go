@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/specialist"
+	"github.com/johnjallday/ori-agent/internal/specialistevents"
 )
 
 // PresentationMutation is the strict request shared by Open and Dismiss.
@@ -98,7 +99,19 @@ func (s *Service) mutatePresentation(
 	if finalizeReplayed {
 		return s.Read(ctx, userID, run.ID)
 	}
-	return projectionFromRun(declaration, finalized, reads, nil), nil
+	projection := projectionFromRun(declaration, finalized, reads, nil)
+	emitProjectionLifecycleTransition(current, projection)
+	if open {
+		switch {
+		case run.FirstOpenedAt == nil:
+			emitPresentationEvent(specialistevents.JourneyOpened, projection)
+		case run.Dismissed:
+			emitPresentationEvent(specialistevents.JourneyResumed, projection)
+		}
+	} else if !run.Dismissed {
+		emitPresentationEvent(specialistevents.JourneyDismissed, projection)
+	}
+	return projection, nil
 }
 
 // CreateOrResumeChild creates only setup persistence. It does not create a

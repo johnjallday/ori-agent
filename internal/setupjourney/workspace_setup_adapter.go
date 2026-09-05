@@ -125,15 +125,19 @@ func (a *WorkspaceSetupAdapter) Read(ctx context.Context, scope ReadScope) (Cano
 	if err != nil || !status.Applicable || status.Diagnostic != "" {
 		return CanonicalStepRead{BlockedReason: ReasonOwnerUnavailable}, nil
 	}
-	projection, _, ok := fileOnlyProjection(status)
+	projection, ok := currentWorkspaceSetupProjection(status)
 	if !ok {
 		return CanonicalStepRead{BlockedReason: ReasonOwnerUnavailable}, nil
 	}
 	actions := []ActionID{ActionReviewFileOnlyMode, ActionOpenWorkspaceSetup, ActionRefreshWorkspaceSetup, ActionOpenProject}
 	read := CanonicalStepRead{AvailableActions: actions, WorkspaceSetup: &projection}
-	if projection.ModeID == fileOnlyModeID {
+	// File-only is complete when its reviewed mode choice is committed. The
+	// optional setup summary is presentation, not a second authority gate.
+	if projection.ModeID == fileOnlyModeID || projection.ModeID != "" && status.Ready() {
 		read.Complete = true
-		read.Result = CanonicalResult{SelectedModeID: fileOnlyModeID}
+		read.Result = CanonicalResult{SelectedModeID: projection.ModeID}
+	} else if projection.ModeID != "" {
+		read.BlockedReason = ReasonRuntimeNeedsAttention
 	}
 	return read, nil
 }
@@ -165,6 +169,36 @@ func fileOnlyProjection(status setupwizard.Status) (WorkspaceSetupProjection, st
 		}
 	}
 	return WorkspaceSetupProjection{}, "", false
+}
+
+// currentWorkspaceSetupProjection reads whichever operating mode the canonical
+// Setup Wizard selected. File-only remains explicitly unconfigured and
+// untested. A permission-bearing mode is reported configured/tested only after
+// every required runtime step has passed and the wizard itself is ready; mode
+// selection alone never becomes live-readiness evidence.
+func currentWorkspaceSetupProjection(status setupwizard.Status) (WorkspaceSetupProjection, bool) {
+	for _, step := range status.Steps {
+		if step.Kind != workspace.SetupStepKindRuntimeMode {
+			continue
+		}
+		selectedID := strings.TrimSpace(step.SelectedOption)
+		if selectedID == "" {
+			projection, _, ok := fileOnlyProjection(status)
+			return projection, ok
+		}
+		for _, option := range step.Options {
+			if option.ID != selectedID {
+				continue
+			}
+			liveReady := selectedID != fileOnlyModeID && status.Ready()
+			return WorkspaceSetupProjection{
+				ModeID: selectedID, ModeLabel: option.Label, ModeDescription: option.Description,
+				FilesConnected: true, LiveControlConfigured: liveReady, LiveControlTested: liveReady,
+			}, true
+		}
+		return WorkspaceSetupProjection{}, false
+	}
+	return WorkspaceSetupProjection{}, false
 }
 
 func workspaceSetupDigests(action ActionID, status setupwizard.Status, projection WorkspaceSetupProjection) (string, string, error) {
@@ -210,10 +244,18 @@ func validWorkspaceSetupProjection(projection *WorkspaceSetupProjection) bool {
 	if projection == nil {
 		return true
 	}
-	return (projection.ModeID == "" || projection.ModeID == fileOnlyModeID) &&
-		len(strings.TrimSpace(projection.ModeLabel)) > 0 && len(projection.ModeLabel) <= 120 &&
-		len(projection.ModeDescription) <= 500 && projection.FilesConnected &&
-		!projection.LiveControlConfigured && !projection.LiveControlTested
+	modeID := strings.TrimSpace(projection.ModeID)
+	if modeID != "" && !validateCanonicalRef(modeID, false) {
+		return false
+	}
+	if projection.LiveControlTested && !projection.LiveControlConfigured {
+		return false
+	}
+	if modeID == fileOnlyModeID && (projection.LiveControlConfigured || projection.LiveControlTested) {
+		return false
+	}
+	return len(strings.TrimSpace(projection.ModeLabel)) > 0 && len(projection.ModeLabel) <= 120 &&
+		len(projection.ModeDescription) <= 500 && projection.FilesConnected
 }
 
 func cloneWorkspaceSetupProjection(source *WorkspaceSetupProjection) *WorkspaceSetupProjection {

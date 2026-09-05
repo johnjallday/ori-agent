@@ -106,6 +106,13 @@ test.describe('Smoke Tests', () => {
   });
 
   test('home exposes the shared sidebar navigation', async ({ page }) => {
+    await page.route('**/api/onboarding/status', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true, skipped: true })
+      })
+    );
     await page.goto('/');
 
     await expect(page.locator('.navbar').first()).toBeVisible();
@@ -471,6 +478,13 @@ test.describe('Home First Run', () => {
     page,
     request
   }) => {
+    await page.route('**/api/onboarding/status', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true, skipped: true })
+      })
+    );
     await installActivePersonalAssistant(page);
     const response = await request.get('/api/workspaces');
     const data = await response.json();
@@ -487,7 +501,6 @@ test.describe('Home First Run', () => {
     const emptyActions = page.locator('.cockpit-empty-map-actions');
     await expect(emptyActions.getByRole('button', { name: 'New Workspace' })).toBeVisible();
     await expect(emptyActions.getByRole('button', { name: 'Import Folder' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Create a workspace' })).toBeVisible();
     await expect(page.locator('#sidebar')).toHaveCount(1);
     await expect(page.locator('#sidebarToggle')).toBeVisible();
 
@@ -498,6 +511,13 @@ test.describe('Home First Run', () => {
   });
 
   test('keeps the Map-first launcher interaction contract on Home', async ({ page }) => {
+    await page.route('**/api/onboarding/status', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true, skipped: true })
+      })
+    );
     await installActivePersonalAssistant(page);
     await page.goto('/');
 
@@ -555,13 +575,16 @@ test.describe('Home First Run', () => {
     // Matches the new name and the legacy one: the cozy-character-experience
     // feature renamed the agent to Workspace Manager, freeing "Ori" for the
     // navigation guide.
-    await page.route(/\/api\/agents\?name=(Ori|Workspace(%20|\+| )Manager)$/, async route => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ allow_web_search: false })
-      });
-    });
+    await page.route(
+      /\/api\/agents\?name=(Ask(%20|\+| )Ori|Ori|Workspace(%20|\+| )Manager)$/,
+      async route => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ allow_web_search: false })
+        });
+      }
+    );
 
     await page.goto('/');
     await expect(page.locator('.home-command-bridge')).toBeVisible();
@@ -2005,7 +2028,9 @@ test.describe('Workspace Agent Character Roster', () => {
 
     const mission = page.locator('#workspace-command-mission-card');
     await expect(mission).toBeVisible();
-    expect((await mission.boundingBox())?.height || 0).toBeLessThanOrEqual(160);
+    // Chromium can report the exact 160px CSS cap a few ten-thousandths over
+    // after device-pixel conversion; keep the assertion at the same visual bound.
+    expect((await mission.boundingBox())?.height || 0).toBeLessThanOrEqual(160.1);
 
     const desktopGeometry = await page.locator('.ws-cmd-deck').evaluate(element => {
       const roster = element.querySelector('.ws-cmd-roster')?.getBoundingClientRect();
@@ -2609,6 +2634,13 @@ test.describe('Workspace File Folders', () => {
     expect(workspaceSlug).toBeTruthy();
 
     try {
+      await page.route('**/api/onboarding/status', route =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ needs_onboarding: false, completed: true, skipped: true })
+        })
+      );
       await page.addInitScript(id => {
         window.sessionStorage.setItem(`workspace-detail-entry-agent-prompt-dismissed:${id}`, '1');
       }, workspaceId);

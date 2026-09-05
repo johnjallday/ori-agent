@@ -8,6 +8,7 @@ const state = {
   reviewInput: null,
   returnFocus: null,
   busy: false,
+  commitLocked: false,
   modal: null
 };
 
@@ -78,15 +79,35 @@ export function newJourneyIdempotencyKey() {
   return `journey-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function setBusy(busy, message = '') {
+export function setupJourneyControlDisabled(busy, lockClose, isCloseControl) {
+  return Boolean(busy && (!isCloseControl || lockClose));
+}
+
+function setBusy(busy, message = '', { lockClose = false } = {}) {
   state.busy = busy;
+  state.commitLocked = busy && lockClose;
   const elements = ui();
   if (!elements) return;
   elements.busy.hidden = !busy;
   elements.live.textContent = message;
+  elements.root.setAttribute('aria-busy', busy ? 'true' : 'false');
   elements.root.querySelectorAll('button, input, select').forEach(control => {
-    if (!control.closest('#specialistSetupJourneyBusy')) control.disabled = busy;
+    const isCloseControl = control === elements.close || control === elements.later;
+    if (!control.closest('#specialistSetupJourneyBusy')) {
+      control.disabled = setupJourneyControlDisabled(busy, lockClose, isCloseControl);
+    }
   });
+}
+
+function hideJourneyPresentation() {
+  const elements = ui();
+  if (state.modal) state.modal.hide();
+  else if (elements) {
+    elements.root.classList.remove('show');
+    elements.root.style.display = 'none';
+    elements.root.setAttribute('aria-hidden', 'true');
+  }
+  state.returnFocus?.focus?.();
 }
 
 function showError(message = '') {
@@ -241,7 +262,11 @@ async function handleAction(action, trigger) {
   if (action.effect === 'review') {
     if (action.id === 'review_existing_project') return beginExistingProject();
     if (action.id === 'review_new_project') return beginNewProject();
-    if (action.id === 'review_home_staffing' || action.id === 'review_project_staffing')
+    if (
+      ['review_home_staffing', 'review_project_staffing', 'review_optional_home_staffing'].includes(
+        action.id
+      )
+    )
       return beginStaffing(action.id);
     return reviewAction(action.id, {});
   }
@@ -256,7 +281,10 @@ async function beginExistingProject() {
       method: 'POST',
       body: JSON.stringify({ title: 'Choose the project folder' })
     });
-    if (!picked?.selected) return;
+    if (!picked?.selected) {
+      state.returnFocus?.focus?.();
+      return;
+    }
     if (!picked.selection_token)
       throw new Error('The trusted folder selection expired. Choose the folder again.');
     const pieces = String(picked.path || '')
@@ -281,14 +309,15 @@ async function beginExistingProject() {
 }
 
 function beginNewProject() {
-  state.draft = { kind: 'new', workspaceName: '', projectName: '' };
+  state.draft = { kind: 'new', workspaceName: '', projectName: '', candidates: [] };
   state.review = null;
   render();
   ui()?.draft?.querySelector('input')?.focus();
 }
 
 function beginStaffing(actionID) {
-  const wantedScope = actionID === 'review_home_staffing' ? 'home' : 'project';
+  const optional = actionID === 'review_optional_home_staffing';
+  const wantedScope = actionID === 'review_project_staffing' ? 'project' : 'home';
   const staffing = setupJourneyCurrentStep(state.journey, state.selectedStepID)?.staffing;
   const target = (staffing?.scopes || []).find(item => item.scope === wantedScope);
   if (!target) {
@@ -301,7 +330,7 @@ function beginStaffing(actionID) {
     scope: wantedScope,
     workspaceLabel: target.workspace_label,
     roles: (target.roles || [])
-      .filter(role => role.required && !role.configured)
+      .filter(role => (optional ? !role.required : role.required) && !role.configured)
       .map(role => ({
         roleID: role.role_id,
         label: role.label,
@@ -668,7 +697,7 @@ function humanize(value) {
 async function commitReview() {
   if (!state.review || state.busy) return;
   const review = state.review;
-  setBusy(true, 'Applying the reviewed change…');
+  setBusy(true, 'Applying the reviewed change…', { lockClose: true });
   try {
     const payload = await request(runURL(`/actions/${encodeURIComponent(review.commit_action)}`), {
       method: 'POST',
@@ -691,6 +720,19 @@ async function commitReview() {
     render();
   } finally {
     setBusy(false);
+  }
+}
+
+async function workspaceRoute(workspaceID, suffix = '') {
+  if (!workspaceID) return '';
+  try {
+    const workspace = await request(`/api/workspaces/${encodeURIComponent(workspaceID)}`);
+    const slug = String(workspace?.folder_slug || '').trim();
+    if (!slug) throw new Error('That workspace route is unavailable.');
+    return `/workspaces/${encodeURIComponent(slug)}${suffix}`;
+  } catch (_) {
+    showError('That workspace route is unavailable. Refresh setup and try again.');
+    return '';
   }
 }
 
@@ -717,27 +759,34 @@ async function navigateAction(actionID) {
       }
       return;
     case 'open_workspace_setup':
-      if (receipts.project_workspace_id)
-        window.location.assign(
-          `/workspaces/${encodeURIComponent(receipts.project_workspace_id)}?panel=settings`
-        );
+    case 'open_live_setup': {
+      const route = await workspaceRoute(receipts.project_workspace_id, '?panel=settings');
+      if (route) window.location.assign(route);
       return;
-    case 'open_home':
-      if (receipts.home_workspace_id)
-        window.location.assign(`/workspaces/${encodeURIComponent(receipts.home_workspace_id)}`);
+    }
+    case 'open_home': {
+      const route = await workspaceRoute(receipts.home_workspace_id, '/assistant');
+      if (route) window.location.assign(route);
       return;
-    case 'open_home_staffing':
-      if (receipts.home_workspace_id)
-        window.location.assign(
-          `/workspaces/${encodeURIComponent(receipts.home_workspace_id)}?panel=agents`
-        );
+    }
+    case 'open_home_staffing': {
+      const route = await workspaceRoute(receipts.home_workspace_id, '/assistant');
+      if (route) window.location.assign(route);
       return;
-    case 'open_project_staffing':
-      if (receipts.project_workspace_id)
-        window.location.assign(
-          `/workspaces/${encodeURIComponent(receipts.project_workspace_id)}?panel=agents`
-        );
+    }
+    case 'open_project_staffing': {
+      const route = await workspaceRoute(receipts.project_workspace_id, '/assistant');
+      if (route) window.location.assign(route);
       return;
+    }
+    case 'open_sample_library_setup': {
+      const route = await workspaceRoute(
+        receipts.home_workspace_id,
+        '/assistant#sampleLibraryPanel'
+      );
+      if (route) window.location.assign(route);
+      return;
+    }
     case 'refresh_workspace_setup':
     case 'review_setup':
       return refreshJourney();
@@ -780,7 +829,11 @@ async function refreshJourney() {
 }
 
 async function dismissJourney() {
-  if (!state.journey || state.busy) return;
+  if (!state.journey || state.commitLocked) return;
+  if (state.busy) {
+    hideJourneyPresentation();
+    return;
+  }
   setBusy(true, 'Saving your place…');
   try {
     const payload = await request(runURL('/dismiss'), {
@@ -788,7 +841,7 @@ async function dismissJourney() {
       body: JSON.stringify(mutationBody())
     });
     state.journey = payload?.setup_journey || state.journey;
-    state.modal?.hide();
+    hideJourneyPresentation();
   } catch (error) {
     showError(error.message);
   } finally {
@@ -796,9 +849,11 @@ async function dismissJourney() {
   }
 }
 
-export async function openSpecialistSetupJourney() {
+export async function openSpecialistSetupJourney(requested = null) {
+  const intent = String(requested?.detail?.intent || requested?.intent || 'review');
   const elements = ui();
   if (!elements || state.busy) return false;
+  state.returnFocus = document.activeElement;
   setBusy(true, 'Loading current setup…');
   showError('');
   try {
@@ -810,6 +865,13 @@ export async function openSpecialistSetupJourney() {
       body: JSON.stringify(mutationBody())
     });
     state.journey = payload?.setup_journey || state.journey;
+    if (intent === 'connect_another' && state.journey?.lifecycle === 'ready') {
+      payload = await request(`${ROOT}/children`, {
+        method: 'POST',
+        body: JSON.stringify(mutationBody())
+      });
+      state.journey = payload?.setup_journey || state.journey;
+    }
     state.selectedStepID = state.journey.current_step_id || '';
     state.draft = null;
     state.review = null;
@@ -818,6 +880,9 @@ export async function openSpecialistSetupJourney() {
       state.modal ||= globalThis.bootstrap.Modal.getOrCreateInstance(elements.root);
       state.modal.show();
       elements.root.addEventListener('shown.bs.modal', () => elements.stepTitle?.focus(), {
+        once: true
+      });
+      elements.root.addEventListener('hidden.bs.modal', () => state.returnFocus?.focus?.(), {
         once: true
       });
     } else {
@@ -840,6 +905,20 @@ function initialize() {
   if (!elements) return;
   elements.close?.addEventListener('click', dismissJourney);
   elements.later?.addEventListener('click', dismissJourney);
+  window.addEventListener(
+    'keydown',
+    event => {
+      if (event.key !== 'Escape' || !elements.root.classList.contains('show')) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (state.commitLocked) {
+        elements.live.textContent = 'Finish the reviewed change before closing setup.';
+        return;
+      }
+      void dismissJourney();
+    },
+    true
+  );
   window.addEventListener('ori:open-specialist-setup', openSpecialistSetupJourney);
   const params = new URLSearchParams(window.location.search);
   if (params.get('setup') === 'specialist') openSpecialistSetupJourney();
