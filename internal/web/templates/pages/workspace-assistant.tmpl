@@ -107,10 +107,20 @@
               <div id="assistantProgramLearning" class="assistant-program-learning-empty">No approved learnings yet.</div>
             </section>
 
+            <section id="sampleLibraryPanel" class="assistant-program-panel sample-library-panel" aria-labelledby="sampleLibraryTitle" hidden>
+              <div class="assistant-program-panel-head"><div><span class="assistant-program-panel-index">05 / SAMPLE LIBRARY</span><h2 id="sampleLibraryTitle">Sample Library</h2></div><div class="assistant-program-project-actions"><button id="sampleLibraryRemove" class="modern-btn modern-btn-secondary" type="button">Review add-on removal</button><button id="sampleLibraryAddRoot" class="modern-btn modern-btn-primary" type="button">Connect folder</button></div></div>
+              <p id="sampleLibraryStatus" class="assistant-program-learning-copy" role="status" aria-live="polite" tabindex="-1">Loading catalog…</p>
+              <div id="sampleLibraryRoots" class="sample-library-roots" aria-label="Connected sample folders"></div>
+              <form id="sampleLibrarySearchForm" class="sample-library-search" role="search"><label for="sampleLibrarySearch">Search the active catalog</label><div><input id="sampleLibrarySearch" class="form-control" maxlength="200" autocomplete="off"><button class="modern-btn modern-btn-secondary" type="submit">Search</button></div></form>
+              <div class="sample-library-table-wrap" tabindex="0" aria-label="Sample catalog results" aria-describedby="sampleLibraryStatus"><table class="sample-library-table"><thead><tr><th scope="col"><span class="sr-only">Select</span></th><th scope="col">Sample</th><th scope="col">Type</th><th scope="col">Size</th></tr></thead><tbody id="sampleLibraryEntries"></tbody></table></div>
+              <div class="sample-library-copy"><label for="sampleLibraryProject">Copy selected samples to</label><select id="sampleLibraryProject" class="form-select"></select><button id="sampleLibraryCopy" class="modern-btn modern-btn-primary" type="button" disabled>Review copy</button></div>
+              <form id="sampleLibraryCollectionForm" class="sample-library-search"><label for="sampleLibraryCollectionName">New collection</label><div><input id="sampleLibraryCollectionName" class="form-control" maxlength="120"><button class="modern-btn modern-btn-secondary" type="submit">Create</button></div></form>
+            </section>
+
             <section id="assistantProgramSuggestionsPanel" class="assistant-program-panel assistant-program-suggestions-panel" aria-labelledby="assistantProgramSuggestionsTitle">
               <div class="assistant-program-panel-head">
                 <div>
-                  <span class="assistant-program-panel-index">05 / SUGGESTIONS</span>
+                  <span class="assistant-program-panel-index">06 / SUGGESTIONS</span>
                   <h2 id="assistantProgramSuggestionsTitle">For this project</h2>
                 </div>
                 <button id="assistantProgramSuggest" class="modern-btn modern-btn-secondary" type="button" disabled>Find suggestions</button>
@@ -161,12 +171,13 @@
 
   <script type="module">
     import { AssistantProgramPage } from '/js/modules/assistant-program.js';
+    import { SampleLibraryPanel } from '/js/modules/sample-library.js';
     const page = new AssistantProgramPage({
       workspaceId: {{.Extra.WorkspaceID}},
       workspaceSlug: {{.Extra.WorkspaceSlug}}
     });
     window.assistantProgramPage = page;
-    void page.init();
+    void page.init().then(() => new SampleLibraryPanel({workspaceId: page.workspaceId, program: page.program}).init());
   </script>
 </body>
 </html>

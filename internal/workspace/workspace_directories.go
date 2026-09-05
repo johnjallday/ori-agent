@@ -70,6 +70,9 @@ func (w *Workspace) UpdateDirectoryReference(dir DirectoryReference) error {
 
 	for i := range w.DirectoryReferences {
 		if w.DirectoryReferences[i].ID == dir.ID {
+			if w.DirectoryReferences[i].Purpose == "sample_library" {
+				return fmt.Errorf("sample library directory reference requires an explicit revocation review")
+			}
 			dir.UpdatedAt = time.Now()
 			dir.WorkspaceID = w.ID
 			// Preserve created timestamp
@@ -90,6 +93,9 @@ func (w *Workspace) DeleteDirectoryReference(id string) error {
 
 	for i := range w.DirectoryReferences {
 		if w.DirectoryReferences[i].ID == id {
+			if w.DirectoryReferences[i].Purpose == "sample_library" {
+				return fmt.Errorf("sample library directory reference requires an explicit revocation review")
+			}
 			w.DirectoryReferences = append(w.DirectoryReferences[:i], w.DirectoryReferences[i+1:]...)
 			w.UpdatedAt = time.Now()
 			return nil
@@ -119,6 +125,9 @@ func (w *Workspace) ListDirectoryFiles(dirID string) ([]FileInfo, error) {
 	dir, err := w.GetDirectoryReference(dirID)
 	if err != nil {
 		return nil, err
+	}
+	if dir.Purpose == "sample_library" {
+		return nil, fmt.Errorf("sample library roots are available only through bounded catalog actions")
 	}
 
 	var files []FileInfo
@@ -216,6 +225,9 @@ func (w *Workspace) ReadDirectoryFile(dirID string, relativePath string) ([]byte
 	dir, err := w.GetDirectoryReference(dirID)
 	if err != nil {
 		return nil, err
+	}
+	if dir.Purpose == "sample_library" {
+		return nil, fmt.Errorf("sample library roots are available only through bounded catalog actions")
 	}
 
 	// Validate the relative path to prevent directory traversal attacks

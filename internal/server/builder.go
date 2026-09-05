@@ -60,6 +60,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
 	"github.com/johnjallday/ori-agent/internal/runtimecapability"
 	"github.com/johnjallday/ori-agent/internal/runtimecapabilityhttp"
+	"github.com/johnjallday/ori-agent/internal/samplelibrary"
+	"github.com/johnjallday/ori-agent/internal/samplelibraryhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/sessionfiles"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
@@ -308,6 +310,8 @@ type ServerBuilder struct {
 	setupJourneyStore        *setupjourney.SQLiteStore
 	setupJourneyService      *setupjourney.Service
 	setupJourneyHandler      *setupjourneyhttp.Handler
+	sampleLibraryService     *samplelibrary.Service
+	sampleLibraryHandler     *samplelibraryhttp.Handler
 
 	// Personal HQ designation and onboarding state
 	personalHQService *personalhq.Service
@@ -583,6 +587,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		User:                  b.userHandler,
 		PersonalAssistant:     b.personalAssistantHandler,
 		SetupJourney:          b.setupJourneyHandler,
+		SampleLibrary:         b.sampleLibraryHandler,
 		PersonalHQ:            b.personalHQHandler,
 		DailyBrief:            b.dailyBriefHandler,
 		Characters:            b.characterHandler,

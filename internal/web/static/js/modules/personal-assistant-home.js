@@ -41,6 +41,75 @@ export function todaySectionRows(section) {
 // it says. It only ever describes watching and reporting: the assistant cannot
 // hand work to the specialist, and addressing that agent directly in its own
 // workspace is the first-class route, never a fallback.
+export function specialistSetupView(setup) {
+  if (!setup) return { visible: false, title: '', status: '', runs: [], actions: [] };
+  const health = String(setup?.health?.status || 'unavailable');
+  const lifecycle = String(setup?.lifecycle || 'not_started');
+  const connected = Math.max(0, Number(setup?.connected_project_count) || 0);
+  const childCount = Math.max(0, Number(setup?.child_run_count) || 0);
+  const unfinished = Math.max(0, Number(setup?.unfinished_child_count) || 0);
+  let status = `${connected} connected project${connected === 1 ? '' : 's'}.`;
+  if (health === 'unavailable') {
+    status = 'Setup status is temporarily unavailable. Existing work is unchanged.';
+  } else if (lifecycle === 'ready') {
+    status += unfinished
+      ? ` The first setup is ready; ${unfinished} later setup ${unfinished === 1 ? 'needs' : 'need'} attention.`
+      : ' Setup is ready.';
+  } else if (lifecycle === 'needs_attention') {
+    status += ' Setup needs attention.';
+  } else if (lifecycle === 'in_progress') {
+    status += ' Setup is in progress.';
+  } else {
+    status += ' Setup has not started.';
+  }
+  const runs = (Array.isArray(setup?.runs) ? setup.runs : []).slice(0, 64).map(run => {
+    const kind = String(run?.run_kind || '') === 'child' ? 'Later project' : 'First project';
+    const name = String(run?.project_name || '').trim();
+    const state = String(run?.lifecycle || 'not_started').replaceAll('_', ' ');
+    return `${name || kind} — ${state}`;
+  });
+  const allowed = new Set([
+    'continue_setup',
+    'review_setup',
+    'connect_another',
+    'open_home',
+    'open_project',
+    'manage_samples',
+    'live_setup'
+  ]);
+  const routeRequired = new Set(['open_home', 'open_project', 'manage_samples', 'live_setup']);
+  const actions = (Array.isArray(setup?.actions) ? setup.actions : [])
+    .slice(0, 8)
+    .map(action => ({
+      id: String(action?.id || ''),
+      label: String(action?.label || '').trim(),
+      route: safeTodayRoute(action?.route) ? String(action.route) : ''
+    }))
+    .filter(
+      action =>
+        allowed.has(action.id) &&
+        action.label &&
+        (!routeRequired.has(action.id) || Boolean(action.route))
+    );
+  const sample = setup?.sample_library;
+  let sampleStatus = '';
+  if (sample) {
+    const state = String(sample.state || 'unavailable').replaceAll('_', ' ');
+    const roots = Math.max(0, Number(sample.active_root_count) || 0);
+    const indexed = Math.max(0, Number(sample.indexed_root_count) || 0);
+    sampleStatus = `Sample library: ${state}; ${roots} approved folder${roots === 1 ? '' : 's'}, ${indexed} indexed.`;
+  }
+  return {
+    visible: true,
+    title: String(setup?.title || '').trim() || 'Specialist setup',
+    status,
+    runs,
+    actions,
+    sampleStatus,
+    childCount
+  };
+}
+
 export function studioSectionView(studio) {
   if (!studio) return { visible: false, heading: '', note: '', route: '' };
   const specialist = String(studio.specialist_name || '').trim();
@@ -163,6 +232,12 @@ function elements() {
     offerDecline: document.getElementById('personalAssistantSpecialistDeclineBtn'),
     offerError: document.getElementById('personalAssistantSpecialistOfferError'),
     offerManual: document.getElementById('personalAssistantSpecialistManual'),
+    setup: document.getElementById('personalAssistantSpecialistSetup'),
+    setupTitle: document.getElementById('personalAssistantSpecialistSetupTitle'),
+    setupStatus: document.getElementById('personalAssistantSpecialistSetupStatus'),
+    setupSamples: document.getElementById('personalAssistantSpecialistSetupSamples'),
+    setupRuns: document.getElementById('personalAssistantSpecialistSetupRuns'),
+    setupActions: document.getElementById('personalAssistantSpecialistSetupActions'),
     studioSection: document.getElementById('personalAssistantTodayStudioSection'),
     studioTitle: document.getElementById('personalAssistantTodayStudioTitle'),
     studio: document.getElementById('personalAssistantTodayStudio'),
@@ -364,6 +439,53 @@ function bindSpecialistOffer() {
   els?.offerDecline?.addEventListener('click', () => answerSpecialistOffer('declined'));
 }
 
+function renderSpecialistSetup(els, setup) {
+  if (!els.setup) return;
+  const view = specialistSetupView(setup);
+  els.setup.hidden = !view.visible;
+  if (!view.visible) return;
+  if (els.setupTitle) els.setupTitle.textContent = view.title;
+  if (els.setupStatus) els.setupStatus.textContent = view.status;
+  if (els.setupSamples) {
+    els.setupSamples.textContent = view.sampleStatus;
+    els.setupSamples.hidden = !view.sampleStatus;
+  }
+  if (els.setupRuns) {
+    els.setupRuns.replaceChildren();
+    view.runs.forEach(text => els.setupRuns.appendChild(makeTodayTextItem(text)));
+    els.setupRuns.hidden = !view.runs.length;
+  }
+  if (els.setupActions) {
+    els.setupActions.replaceChildren();
+    view.actions.forEach(action => {
+      if (action.route) {
+        const link = document.createElement('a');
+        link.href = action.route;
+        link.textContent = action.label;
+        els.setupActions.appendChild(link);
+        return;
+      }
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = action.label;
+      button.addEventListener('click', () => {
+        window.dispatchEvent(
+          new CustomEvent('ori:open-specialist-setup', {
+            detail: { intent: action.id === 'connect_another' ? 'connect_another' : 'review' }
+          })
+        );
+      });
+      els.setupActions.appendChild(button);
+    });
+  }
+}
+
+function makeTodayTextItem(text) {
+  const item = document.createElement('li');
+  item.textContent = text;
+  return item;
+}
+
 function renderStudio(els, studio) {
   if (!els.studioSection) return;
   const view = studioSectionView(studio);
@@ -450,6 +572,7 @@ function renderToday(today) {
   renderRows(els.priorities, today?.priorities);
   renderRows(els.followUps, today?.follow_ups);
   renderRows(els.results, today?.results);
+  renderSpecialistSetup(els, today?.specialist_setup);
   renderStudio(els, today?.studio);
   Object.entries(els.links).forEach(([key, link]) => setLink(link, today?.links?.[key]));
   renderLauncherCue(els, today);
@@ -460,6 +583,7 @@ function renderRelationship(personalAssistant, view) {
   if (!els) return;
   state.relationship = personalAssistant || null;
   state.today = null;
+  if (els.setup) els.setup.hidden = true;
   renderLauncherCue(els, null);
   if (!view?.known) {
     els.root.hidden = true;

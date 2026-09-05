@@ -12,7 +12,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 54
+const schemaVersion = 55
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -175,6 +175,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration053PersonalAssistantSpecialist(ctx)
 	case 54:
 		return db.migration054SetupJourneys(ctx)
+	case 55:
+		return db.migration055SampleLibrary(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -1942,11 +1944,154 @@ func (db *DB) migration053PersonalAssistantSpecialist(ctx context.Context) error
 	return nil
 }
 
+// migration055SampleLibrary stores capability-owned identifiers, catalog facts,
+// curation records, copy provenance, and bounded review/operation receipts.
+// Exact source paths remain in workspace Directory References.
+func (db *DB) migration055SampleLibrary(ctx context.Context) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS sample_library_state (
+			home_workspace_id TEXT PRIMARY KEY,
+			schema_version INTEGER NOT NULL CHECK (schema_version = 1),
+			lifecycle TEXT NOT NULL DEFAULT 'active' CHECK (lifecycle IN ('active','disabled','removing')),
+			catalog_revision INTEGER NOT NULL DEFAULT 0 CHECK (catalog_revision >= 0),
+			updated_at DATETIME NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS sample_library_root (
+			root_id TEXT PRIMARY KEY,
+			home_workspace_id TEXT NOT NULL,
+			directory_reference_id TEXT NOT NULL UNIQUE,
+			directory_fingerprint TEXT NOT NULL CHECK (length(directory_fingerprint) = 64),
+			state TEXT NOT NULL CHECK (state IN ('active', 'revoked', 'missing')),
+			root_revision INTEGER NOT NULL DEFAULT 1 CHECK (root_revision > 0),
+			generation INTEGER NOT NULL DEFAULT 0 CHECK (generation >= 0),
+			completeness TEXT NOT NULL DEFAULT 'not_indexed' CHECK (completeness IN ('not_indexed', 'complete', 'partial', 'failed')),
+			hash_enabled INTEGER NOT NULL DEFAULT 0 CHECK (hash_enabled IN (0,1)),
+			tags_enabled INTEGER NOT NULL DEFAULT 0 CHECK (tags_enabled IN (0,1)),
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			FOREIGN KEY (home_workspace_id) REFERENCES sample_library_state(home_workspace_id) ON DELETE RESTRICT
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_sample_library_root_home ON sample_library_root(home_workspace_id, state)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_sample_library_root_active_identity ON sample_library_root(directory_fingerprint) WHERE state='active'`,
+		`CREATE TRIGGER IF NOT EXISTS sample_library_root_limit BEFORE INSERT ON sample_library_root WHEN NEW.state='active' AND (SELECT count(*) FROM sample_library_root WHERE home_workspace_id=NEW.home_workspace_id AND state='active') >= 8 BEGIN SELECT RAISE(ABORT,'sample root limit'); END`,
+		`CREATE TABLE IF NOT EXISTS sample_library_entry (
+			entry_id TEXT PRIMARY KEY,
+			home_workspace_id TEXT NOT NULL,
+			root_id TEXT NOT NULL,
+			generation INTEGER NOT NULL CHECK (generation > 0),
+			relative_locator TEXT NOT NULL CHECK (length(relative_locator) BETWEEN 1 AND 2048),
+			filename TEXT NOT NULL CHECK (length(filename) BETWEEN 1 AND 255),
+			extension TEXT NOT NULL CHECK (length(extension) BETWEEN 2 AND 8),
+			size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
+			modified_at DATETIME NOT NULL,
+			created_at DATETIME,
+			UNIQUE(root_id, relative_locator),
+			FOREIGN KEY (root_id) REFERENCES sample_library_root(root_id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_sample_library_entry_home ON sample_library_entry(home_workspace_id, root_id, generation)`,
+		`CREATE TABLE IF NOT EXISTS sample_library_content_fact (
+			entry_id TEXT PRIMARY KEY,
+			sha256 TEXT NOT NULL DEFAULT '' CHECK (length(sha256) IN (0,64)),
+			title TEXT NOT NULL DEFAULT '' CHECK (length(title) <= 2000),
+			artist TEXT NOT NULL DEFAULT '' CHECK (length(artist) <= 2000),
+			album TEXT NOT NULL DEFAULT '' CHECK (length(album) <= 2000),
+			album_artist TEXT NOT NULL DEFAULT '' CHECK (length(album_artist) <= 2000),
+			genre TEXT NOT NULL DEFAULT '' CHECK (length(genre) <= 2000),
+			comment TEXT NOT NULL DEFAULT '' CHECK (length(comment) <= 2000),
+			year TEXT NOT NULL DEFAULT '' CHECK (length(year) <= 64),
+			track TEXT NOT NULL DEFAULT '' CHECK (length(track) <= 64),
+			disc TEXT NOT NULL DEFAULT '' CHECK (length(disc) <= 64),
+			FOREIGN KEY (entry_id) REFERENCES sample_library_entry(entry_id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS sample_library_annotation (
+			entry_id TEXT PRIMARY KEY,
+			revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+			user_tags_json TEXT NOT NULL DEFAULT '[]' CHECK (length(user_tags_json) <= 2200),
+			pack_note TEXT NOT NULL DEFAULT '' CHECK (length(pack_note) <= 2000),
+			source_note TEXT NOT NULL DEFAULT '' CHECK (length(source_note) <= 2000),
+			license_note TEXT NOT NULL DEFAULT '' CHECK (length(license_note) <= 2000),
+			updated_at DATETIME NOT NULL,
+			FOREIGN KEY (entry_id) REFERENCES sample_library_entry(entry_id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS sample_library_collection (
+			collection_id TEXT PRIMARY KEY,
+			home_workspace_id TEXT NOT NULL,
+			name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 255),
+			note TEXT NOT NULL DEFAULT '' CHECK (length(note) <= 2000),
+			revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_sample_library_collection_home ON sample_library_collection(home_workspace_id)`,
+		`CREATE TRIGGER IF NOT EXISTS sample_library_collection_limit BEFORE INSERT ON sample_library_collection WHEN (SELECT count(*) FROM sample_library_collection WHERE home_workspace_id=NEW.home_workspace_id) >= 128 BEGIN SELECT RAISE(ABORT,'sample collection limit'); END`,
+		`CREATE TABLE IF NOT EXISTS sample_library_collection_member (
+			collection_id TEXT NOT NULL,
+			entry_id TEXT NOT NULL,
+			added_at DATETIME NOT NULL,
+			PRIMARY KEY(collection_id,entry_id),
+			FOREIGN KEY (collection_id) REFERENCES sample_library_collection(collection_id) ON DELETE CASCADE,
+			FOREIGN KEY (entry_id) REFERENCES sample_library_entry(entry_id) ON DELETE RESTRICT
+		)`,
+		`CREATE TRIGGER IF NOT EXISTS sample_library_collection_member_limit BEFORE INSERT ON sample_library_collection_member WHEN (SELECT count(*) FROM sample_library_collection_member WHERE collection_id=NEW.collection_id) >= 1000 BEGIN SELECT RAISE(ABORT,'sample collection member limit'); END`,
+		`CREATE TABLE IF NOT EXISTS sample_library_child_copy (
+			copy_id TEXT PRIMARY KEY,
+			child_workspace_id TEXT NOT NULL,
+			assistant_project_link_id TEXT NOT NULL,
+			source_root_id TEXT NOT NULL,
+			source_entry_id TEXT NOT NULL,
+			destination_locator TEXT NOT NULL CHECK (length(destination_locator) BETWEEN 1 AND 2048),
+			size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
+			sha256 TEXT NOT NULL CHECK (length(sha256) = 64),
+			copied_at DATETIME NOT NULL,
+			UNIQUE(child_workspace_id,destination_locator)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_sample_library_child_copy_child ON sample_library_child_copy(child_workspace_id,copied_at)`,
+		`CREATE TABLE IF NOT EXISTS sample_library_review_receipt (
+			token TEXT PRIMARY KEY,
+			home_workspace_id TEXT NOT NULL,
+			action_kind TEXT NOT NULL CHECK (action_kind IN ('connect_root','analysis','revoke','copy','collection','annotation')),
+			selection_digest TEXT NOT NULL DEFAULT '' CHECK (length(selection_digest) IN (0,64)),
+			directory_fingerprint TEXT NOT NULL DEFAULT '' CHECK (length(directory_fingerprint) IN (0,64)),
+			input_digest TEXT NOT NULL CHECK (length(input_digest) = 64),
+			disclosure_digest TEXT NOT NULL CHECK (length(disclosure_digest) = 64),
+			catalog_revision INTEGER NOT NULL CHECK (catalog_revision >= 0),
+			root_revision INTEGER NOT NULL DEFAULT 0 CHECK (root_revision >= 0),
+			created_at DATETIME NOT NULL,
+			expires_at DATETIME NOT NULL,
+			consumed_at DATETIME,
+			consumed_by_idempotency_key TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE TABLE IF NOT EXISTS sample_library_operation_receipt (
+			operation_id TEXT PRIMARY KEY,
+			home_workspace_id TEXT NOT NULL,
+			root_id TEXT NOT NULL DEFAULT '',
+			operation_kind TEXT NOT NULL CHECK (operation_kind IN ('connect_root','index','analysis','revoke','copy','collection','annotation')),
+			idempotency_key TEXT NOT NULL,
+			input_digest TEXT NOT NULL CHECK (length(input_digest) = 64),
+			status TEXT NOT NULL CHECK (status IN ('reviewed','claimed','succeeded','partial','failed','reconcile_required')),
+			reason_code TEXT NOT NULL DEFAULT '' CHECK (length(reason_code) <= 64),
+			visited_count INTEGER NOT NULL DEFAULT 0,
+			indexed_count INTEGER NOT NULL DEFAULT 0,
+			skipped_count INTEGER NOT NULL DEFAULT 0,
+			error_count INTEGER NOT NULL DEFAULT 0,
+			created_at DATETIME NOT NULL,
+			expires_at DATETIME,
+			completed_at DATETIME,
+			UNIQUE(home_workspace_id, operation_kind, idempotency_key)
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_sample_library_scan_claim ON sample_library_operation_receipt(home_workspace_id,root_id) WHERE operation_kind='index' AND status='claimed'`,
+	}
+	for _, statement := range statements {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // migration054SetupJourneys adds bounded structural setup progress and the
 // operation/review journals used to coordinate canonical owners. These tables
-// deliberately contain identifiers, digests, closed codes, and revisions only:
-// project paths, declarations/manifests, prompts, credentials, role bindings,
-// catalog entries, and arbitrary downstream errors remain with their owners.
+// deliberately contain identifiers, digests, closed codes, and revisions only.
 func (db *DB) migration054SetupJourneys(ctx context.Context) error {
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS setup_journey_run (

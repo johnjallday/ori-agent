@@ -10,6 +10,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/samplelibrary"
+	"github.com/johnjallday/ori-agent/internal/samplelibraryhttp"
 	"github.com/johnjallday/ori-agent/internal/setupjourney"
 	"github.com/johnjallday/ori-agent/internal/setupjourneyhttp"
 	"github.com/johnjallday/ori-agent/internal/specialist"
@@ -105,6 +107,9 @@ func (b *ServerBuilder) initializeSetupJourney() {
 			},
 		)
 		readers[specialist.SetupStepAssistantProgramStaffing] = staffingAdapter
+		if b.sessionHandler != nil {
+			b.sessionHandler.SetAssistantReviewedStaffer(staffingAdapter.StaffFromReviewedWorkspaceSetup)
+		}
 	}
 	registry, err := setupjourney.NewReaderRegistry(readers)
 	if err != nil {
@@ -139,6 +144,22 @@ func (b *ServerBuilder) initializeSetupJourney() {
 		}
 	}
 	b.setupJourneyHandler = setupjourneyhttp.NewHandler(b.setupJourneyService, b.userProvider)
+	if b.workspaceStore != nil {
+		if b.pathSelectionStore == nil {
+			b.pathSelectionStore = pathselection.NewStore()
+		}
+		sampleStore := samplelibrary.NewStore(b.sessionStore.DB())
+		b.sampleLibraryService = samplelibrary.NewService(sampleStore, b.workspaceStore, b.pathSelectionStore)
+		b.sampleLibraryHandler = samplelibraryhttp.New(b.sampleLibraryService)
+		if b.sessionHandler != nil {
+			b.sessionHandler.SetAssistantHomeRemoved(b.sampleLibraryService.OnHomeRemoved)
+		}
+		if b.workspaceCapabilityRegistry != nil {
+			if err := b.workspaceCapabilityRegistry.BindRuntime(workspace.CapabilitySampleLibrary, samplelibrary.NewCapabilityRuntime(b.sampleLibraryService)); err != nil {
+				panic("invalid sample library runtime binding")
+			}
+		}
+	}
 }
 
 type serverStaffingToolGrants struct {

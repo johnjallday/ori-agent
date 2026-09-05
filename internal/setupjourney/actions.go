@@ -109,12 +109,14 @@ const (
 	ActionReviewFileOnlyMode    ActionID = "review_file_only_mode"
 	ActionSelectFileOnlyMode    ActionID = "select_file_only_mode"
 
-	ActionReviewHomeStaffing    ActionID = "review_home_staffing"
-	ActionAddHomeStaffing       ActionID = "add_home_staffing"
-	ActionReviewProjectStaffing ActionID = "review_project_staffing"
-	ActionAddProjectStaffing    ActionID = "add_project_staffing"
-	ActionOpenHomeStaffing      ActionID = "open_home_staffing"
-	ActionOpenProjectStaffing   ActionID = "open_project_staffing"
+	ActionReviewHomeStaffing         ActionID = "review_home_staffing"
+	ActionAddHomeStaffing            ActionID = "add_home_staffing"
+	ActionReviewProjectStaffing      ActionID = "review_project_staffing"
+	ActionAddProjectStaffing         ActionID = "add_project_staffing"
+	ActionReviewOptionalHomeStaffing ActionID = "review_optional_home_staffing"
+	ActionAddOptionalHomeStaffing    ActionID = "add_optional_home_staffing"
+	ActionOpenHomeStaffing           ActionID = "open_home_staffing"
+	ActionOpenProjectStaffing        ActionID = "open_project_staffing"
 
 	ActionOpenHome               ActionID = "open_home"
 	ActionConnectAnotherProject  ActionID = "connect_another_project"
@@ -152,6 +154,8 @@ var actionDefinitionsByKind = map[specialist.SetupStepKind][]ActionDefinition{
 		{ID: ActionAddHomeStaffing, Label: "Add Home staffing", Effect: ActionEffectCommit, RequiresReview: true},
 		{ID: ActionReviewProjectStaffing, Label: "Review project staffing", Effect: ActionEffectReview},
 		{ID: ActionAddProjectStaffing, Label: "Add project staffing", Effect: ActionEffectCommit, RequiresReview: true},
+		{ID: ActionReviewOptionalHomeStaffing, Label: "Review optional Home role", Effect: ActionEffectReview},
+		{ID: ActionAddOptionalHomeStaffing, Label: "Add optional Home role", Effect: ActionEffectCommit, RequiresReview: true},
 		{ID: ActionOpenHomeStaffing, Label: "Open Home staffing", Effect: ActionEffectNavigation},
 		{ID: ActionOpenProjectStaffing, Label: "Open project staffing", Effect: ActionEffectNavigation},
 	},

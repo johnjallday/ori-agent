@@ -144,12 +144,48 @@ func TestListCapabilities_ReturnsCatalogForOwnedWorkspace(t *testing.T) {
 
 	payload := decode(t, rec)
 	capabilities, ok := payload["capabilities"].([]any)
-	if !ok || len(capabilities) != 1 {
-		t.Fatalf("expected one capability, got %v", payload["capabilities"])
+	if !ok {
+		t.Fatalf("catalog response is missing capabilities: %v", payload)
 	}
-	item := capabilities[0].(map[string]any)
-	if item["installed"] != false {
-		t.Fatalf("expected not installed, got %v", item["installed"])
+	if len(capabilities) != len(workspacecapability.BuiltinDefinitions()) {
+		t.Fatalf("expected %d catalog entries, got %d", len(workspacecapability.BuiltinDefinitions()), len(capabilities))
+	}
+
+	seen := map[string]bool{}
+	for _, itemRaw := range capabilities {
+		item, ok := itemRaw.(map[string]any)
+		if !ok {
+			t.Fatalf("catalog item has unexpected type: %T", itemRaw)
+		}
+		if item["installed"] != false {
+			t.Fatalf("expected not installed, got %v", item["installed"])
+		}
+		definition, ok := item["definition"].(map[string]any)
+		if !ok {
+			t.Fatal("definition is missing or invalid")
+		}
+		id, _ := definition["id"].(string)
+		if id == "" {
+			t.Fatalf("catalog item has empty id: %v", definition)
+		}
+		if seen[id] {
+			t.Fatalf("catalog listed duplicate capability %q", id)
+		}
+		seen[id] = true
+	}
+
+	item := (func() map[string]any {
+		for _, itemRaw := range capabilities {
+			item := itemRaw.(map[string]any)
+			definition := item["definition"].(map[string]any)
+			if definition["id"] == workspace.CapabilityFileJanitor {
+				return item
+			}
+		}
+		return nil
+	})()
+	if item == nil {
+		t.Fatalf("file janitor missing from catalog; got %v", seen)
 	}
 	definition := item["definition"].(map[string]any)
 	if definition["id"] != workspace.CapabilityFileJanitor {

@@ -54,7 +54,7 @@ func ResolveProjectEntry(ws *Workspace, workspaceRoot string) (*ResolvedProjectE
 		}
 	case ProjectEntryDirectoryReference:
 		ref, referenceErr := ws.GetDirectoryReference(locator.DirectoryReferenceID)
-		if referenceErr != nil || ref == nil || ref.ID != locator.DirectoryReferenceID || ref.WorkspaceID != ws.ID {
+		if referenceErr != nil || ref == nil || ref.ID != locator.DirectoryReferenceID || ref.WorkspaceID != ws.ID || ref.Purpose == "sample_library" {
 			return nil, ErrProjectEntryUnavailable
 		}
 		target, err = verifiedDirectoryReferenceEntry(ref.Path, locator.RelativePath)

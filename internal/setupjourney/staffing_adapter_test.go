@@ -43,6 +43,7 @@ func staffingFixture(t *testing.T) (*AssistantStaffingAdapter, workspace.Store, 
 		ID:            "studio-guide", StationName: "Studio Home", DefaultPrimaryName: "Guide", HireTitle: "Staff assistants",
 		Roles: []workspace.AssistantProgramRoleSpec{
 			{ID: "home_guide", Label: "Home Guide", Scope: workspace.AssistantRoleScopeHome, Required: true, Primary: true, Role: "orchestrator", Type: "tool_calling", SystemPrompt: "home-only prompt"},
+			{ID: "catalog_guide", Label: "Catalog Guide", Scope: workspace.AssistantRoleScopeHome, CapabilityID: workspace.CapabilitySampleLibrary, Role: "specialist", Type: "tool_calling", SystemPrompt: "catalog-only prompt"},
 			{ID: "project_lead", Label: "Project Lead", Scope: workspace.AssistantRoleScopeProject, Required: true, Primary: true, Role: "orchestrator", Type: "tool_calling", SystemPrompt: "project-lead-only prompt", Skills: []string{"project-skill"}},
 			{ID: "project_reviewer", Label: "Project Reviewer", Scope: workspace.AssistantRoleScopeProject, Required: true, Role: "specialist", Type: "general", SystemPrompt: "project-review-only prompt"},
 		},
@@ -77,6 +78,29 @@ func staffingFixture(t *testing.T) (*AssistantStaffingAdapter, workspace.Store, 
 		HomeWorkspaceID: station.ID, ProjectWorkspaceID: project.ID, SelectedModeID: "file_only",
 	}
 	return adapter, workspaces, scope, grants
+}
+
+func TestAssistantStaffingAdapter_ReviewedWorkspaceSetupCreatesOnlyRequiredScopedRoles(t *testing.T) {
+	adapter, workspaces, scope, _ := staffingFixture(t)
+	if err := adapter.StaffFromReviewedWorkspaceSetup(context.Background(), scope.ProjectWorkspaceID, "June Home", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	station, _ := workspaces.Get(scope.HomeWorkspaceID)
+	project, _ := workspaces.Get(scope.ProjectWorkspaceID)
+	if got := len(station.GetAssistantProgramState().HomeBindings.Bindings); got != 1 {
+		t.Fatalf("Home bindings=%d", got)
+	}
+	if got := len(project.GetAssistantProjectLink().ProjectBindings.Bindings); got != 2 {
+		t.Fatalf("project bindings=%d", got)
+	}
+	for _, binding := range station.GetAssistantProgramState().HomeBindings.Bindings {
+		if binding.RoleID == "catalog_guide" {
+			t.Fatal("optional capability role was staffed implicitly")
+		}
+	}
+	if station.EntryAgentName() != "June Home" || project.EntryAgentName() != "Project Lead" {
+		t.Fatalf("entry identities Home=%q project=%q", station.EntryAgentName(), project.EntryAgentName())
+	}
 }
 
 func TestAssistantStaffingAdapter_SeparatelyReviewsAndCreatesScopedProfiles(t *testing.T) {
@@ -206,6 +230,38 @@ func TestAssistantStaffingAdapter_SeparatelyReviewsAndCreatesScopedProfiles(t *t
 		WorkspaceID: project.ID, From: "Alex Project Lead", To: "Sage Second Reviewer", Description: "Address a sibling",
 	}); err == nil {
 		t.Fatal("first project coordinator delegated to a sibling project role")
+	}
+}
+
+func TestAssistantStaffingAdapter_AddsOptionalHomeRoleWithoutModelOrCapabilitySideEffect(t *testing.T) {
+	adapter, workspaces, scope, _ := staffingFixture(t)
+	adapter.defaults = func() (string, string) { return "", "" }
+	input := []byte(`{"roles":[{"role_id":"catalog_guide","name":"Catalog Guide"}]}`)
+	review, err := adapter.Review(context.Background(), scope, ActionReviewOptionalHomeStaffing, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	role := review.Staffing.Scopes[0].Roles[0]
+	if role.Required || role.ChatAvailable || !role.UsesDefaults {
+		t.Fatalf("optional review=%+v", role)
+	}
+	if _, err = adapter.Commit(context.Background(), scope, ActionAddOptionalHomeStaffing, input, review); err != nil {
+		t.Fatal(err)
+	}
+	station, _ := workspaces.Get(scope.HomeWorkspaceID)
+	state := station.GetAssistantProgramState()
+	if len(state.HomeBindings.Bindings) != 1 || state.HomeBindings.Bindings[0].RoleID != "catalog_guide" {
+		t.Fatalf("bindings=%+v", state.HomeBindings)
+	}
+	if station.HasInstalledCapability(workspace.CapabilitySampleLibrary) {
+		t.Fatal("role staffing installed capability")
+	}
+	read, err := adapter.Read(context.Background(), scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.Complete {
+		t.Fatal("optional role completed required staffing")
 	}
 }
 

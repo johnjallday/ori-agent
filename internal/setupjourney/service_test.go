@@ -12,6 +12,23 @@ import (
 	"github.com/johnjallday/ori-agent/internal/specialist"
 )
 
+type syntheticJourneyAdapter struct{ reviews int }
+
+func (a *syntheticJourneyAdapter) InputDigest(_ ActionID, input json.RawMessage) (string, error) {
+	return Digest(input), nil
+}
+func (a *syntheticJourneyAdapter) Review(_ context.Context, _ ReadScope, _ ActionID, input json.RawMessage) (ActionReviewMaterial, error) {
+	a.reviews++
+	return ActionReviewMaterial{CommitAction: ActionInstall, InputDigest: Digest(input), OwnerRevisionDigest: Digest([]byte("synthetic-owner-v1")), DisclosureDigest: Digest([]byte("synthetic-disclosure-v1"))}, nil
+}
+func (a *syntheticJourneyAdapter) PrepareCommit(context.Context, ReadScope, ActionID, json.RawMessage) (ActionReviewMaterial, error) {
+	return ActionReviewMaterial{}, errors.New("not used")
+}
+func (a *syntheticJourneyAdapter) Commit(context.Context, ReadScope, ActionID, json.RawMessage, ActionReviewMaterial) (CanonicalResult, error) {
+	return CanonicalResult{}, errors.New("not used")
+}
+func (a *syntheticJourneyAdapter) ConsequenceObserved(ActionID, CanonicalStepRead) bool { return false }
+
 type relationshipStub struct {
 	state *personalassistant.State
 	err   error
@@ -99,6 +116,66 @@ func TestReaderRegistryRequiresExactlyTheClosedV1Kinds(t *testing.T) {
 	readers[specialist.SetupStepKind("custom")] = readers[specialist.SetupStepSummary]
 	if _, err := NewReaderRegistry(readers); err == nil {
 		t.Fatal("registry accepted an extra executable step kind")
+	}
+}
+
+func TestSyntheticNonDomainDeclarationUsesGenericSetupShell(t *testing.T) {
+	_, store := openTestStore(t)
+	journey, err := specialist.NormalizeSetupJourney(specialist.SetupJourney{SchemaVersion: 1, Version: 1, ID: "visual_archive_setup", Title: "Set up visual archives", Description: "Connect a reviewed archive workflow.", IntegrationKey: "archive_bridge", ExpectedBlueprintID: "visual_archive", ExpectedAssistantProgramID: "archive_assistant", Steps: []specialist.SetupJourneyStep{{ID: "integration", Kind: specialist.SetupStepIntegrationInstall, Title: "Integration", Description: "Review the archive bridge."}, {ID: "project", Kind: specialist.SetupStepProjectConnect, Title: "Archive", Description: "Connect an archive."}, {ID: "workspace", Kind: specialist.SetupStepWorkspaceSetup, Title: "Workspace", Description: "Choose workspace access."}, {ID: "staffing", Kind: specialist.SetupStepAssistantProgramStaffing, Title: "Team", Description: "Review scoped roles."}, {ID: "summary", Kind: specialist.SetupStepSummary, Title: "Summary", Description: "Review the setup."}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := specialist.Entry{Slug: "visual_archive", DisplayName: "visual archives", SetupJourney: journey}
+	relationship := acceptedRelationship()
+	relationship.SpecialistSlug = entry.Slug
+	service, err := newService(store, &relationshipStub{state: relationship}, readerRegistryStub(t, defaultCanonicalReads(), nil, nil, nil), func(slug string) (specialist.Entry, bool) { return entry, slug == entry.Slug }, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := &syntheticJourneyAdapter{}
+	if err = service.SetActionAdapter(specialist.SetupStepIntegrationInstall, adapter); err != nil {
+		t.Fatal(err)
+	}
+	projection, err := service.Read(context.Background(), "local", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projection.Journey.ID != journey.ID || len(projection.Steps) != specialist.SetupJourneyRequiredSteps || projection.CurrentStepID != "integration" || projection.Steps[4].Title != "Summary" {
+		t.Fatalf("generic projection=%#v", projection)
+	}
+	opened, err := service.Open(context.Background(), "local", projection.RunID, PresentationMutation{IfRevision: projection.StateRevision, IdempotencyKey: "synthetic-open"})
+	if err != nil || opened.FirstOpenedAt == nil {
+		t.Fatalf("open=%#v err=%v", opened, err)
+	}
+	dismissed, err := service.Dismiss(context.Background(), "local", projection.RunID, PresentationMutation{IfRevision: opened.StateRevision, IdempotencyKey: "synthetic-dismiss"})
+	if err != nil || !dismissed.Dismissed {
+		t.Fatalf("dismiss=%#v err=%v", dismissed, err)
+	}
+	resumedService, err := newService(store, &relationshipStub{state: relationship}, readerRegistryStub(t, defaultCanonicalReads(), nil, nil, nil), func(slug string) (specialist.Entry, bool) { return entry, slug == entry.Slug }, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumedAdapter := &syntheticJourneyAdapter{}
+	if err = resumedService.SetActionAdapter(specialist.SetupStepIntegrationInstall, resumedAdapter); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := resumedService.Read(context.Background(), "local", projection.RunID)
+	if err != nil || !resumed.Dismissed {
+		t.Fatalf("resume=%#v err=%v", resumed, err)
+	}
+	action, err := resumedService.Mutate(context.Background(), "local", projection.RunID, ActionReviewInstall, ActionMutation{IfRevision: resumed.StateRevision, IdempotencyKey: "synthetic-review", Input: json.RawMessage(`{}`)})
+	if err != nil || action.Review == nil || resumedAdapter.reviews != 1 {
+		t.Fatalf("generic action=%#v reviews=%d err=%v", action, resumedAdapter.reviews, err)
+	}
+	encoded, err := json.Marshal(action.Journey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lower := strings.ToLower(string(encoded))
+	for _, leak := range []string{"reaper", "mix engineer", "songwriter"} {
+		if strings.Contains(lower, leak) {
+			t.Fatalf("synthetic projection leaked domain literal %q: %s", leak, encoded)
+		}
 	}
 }
 
@@ -519,6 +596,31 @@ func TestServiceAppliesOnlyExactCompiledDeclarationMigration(t *testing.T) {
 	}
 	if receiptCount != 1 {
 		t.Fatalf("migration receipt count = %d; want 1", receiptCount)
+	}
+}
+
+func TestServiceOverviewReconcilesRootAndBoundedChildrenWithoutOpeningThem(t *testing.T) {
+	reads := defaultCanonicalReads()
+	service, store := serviceFixture(t, reads)
+	ctx := context.Background()
+	root, err := service.Read(ctx, "local", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, _, err := store.CreateOrGetChild(ctx, root.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	overview, err := service.Overview(ctx, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if overview.Root == nil || overview.Root.RunID != root.RunID || overview.ChildCount != 1 || overview.Truncated || len(overview.Children) != 1 || overview.Children[0].RunID != child.ID {
+		t.Fatalf("overview = %+v", overview)
+	}
+	if overview.Root.FirstOpenedAt != nil || overview.Children[0].FirstOpenedAt != nil || overview.Root.Dismissed || overview.Children[0].Dismissed {
+		t.Fatalf("reporting changed presentation state: root=%+v child=%+v", overview.Root, overview.Children[0])
 	}
 }
 

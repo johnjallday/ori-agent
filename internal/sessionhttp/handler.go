@@ -38,6 +38,8 @@ type Handler struct {
 	installedPluginLister     installedPluginLister
 	assistantReflectionModel  workspace.AssistantReflectionModel
 	assistantModelValidator   func(provider, model string) error
+	assistantHomeRemoved      func(workspaceID string) error
+	assistantReviewedStaffer  func(context.Context, string, string, string, string) error
 	agentStore                store.Store
 	systemModelReader         SystemModelReader
 	workspaceAllowlist        *workspace.Allowlist
@@ -188,6 +190,15 @@ func (h *Handler) SetAssistantReflectionModel(model workspace.AssistantReflectio
 
 func (h *Handler) SetAssistantModelValidator(validate func(provider, model string) error) {
 	h.assistantModelValidator = validate
+}
+
+// SetAssistantHomeRemoved coordinates capability-owned cleanup after the
+// reviewed Home topology removal succeeds.
+func (h *Handler) SetAssistantReviewedStaffer(staff func(context.Context, string, string, string, string) error) {
+	h.assistantReviewedStaffer = staff
+}
+func (h *Handler) SetAssistantHomeRemoved(finalize func(workspaceID string) error) {
+	h.assistantHomeRemoved = finalize
 }
 
 func (h *Handler) SetTemplateCapabilityService(service *workspacecapability.Service) {

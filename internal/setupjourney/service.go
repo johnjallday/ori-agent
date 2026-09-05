@@ -14,7 +14,10 @@ import (
 	"github.com/johnjallday/ori-agent/internal/specialist"
 )
 
-const maxReconcileCASAttempts = 4
+const (
+	maxReconcileCASAttempts     = 4
+	MaxOverviewChildProjections = 64
+)
 
 // RelationshipReader is the narrow current-user authority used by the journey.
 type RelationshipReader interface {
@@ -42,6 +45,17 @@ type JourneyProjection struct {
 	LastDismissedAt         *time.Time            `json:"last_dismissed_at,omitempty"`
 	FirstCompletedAt        *time.Time            `json:"first_completed_at,omitempty"`
 	UpdatedAt               time.Time             `json:"updated_at"`
+}
+
+// OverviewProjection is the bounded canonical root/child read used by Home
+// reporting. ChildCount remains exact even when the response list is capped.
+// Every included run is reconciled through the same owner reads as Read; this
+// is not a second setup-status implementation.
+type OverviewProjection struct {
+	Root       *JourneyProjection   `json:"root"`
+	Children   []*JourneyProjection `json:"children"`
+	ChildCount int                  `json:"child_count"`
+	Truncated  bool                 `json:"truncated,omitempty"`
 }
 
 // DeclarationProjection is inert normalized display data from the built-in
@@ -259,6 +273,37 @@ func (s *Service) Read(ctx context.Context, userID, runID string) (*JourneyProje
 	return s.reconcile(ctx, declaration, root, run)
 }
 
+// Overview reconciles the accepted relationship's root and a bounded list of
+// child runs for deterministic Home reporting. It may create only the same
+// inert root row as Read. It never opens a journey, creates a child run, or
+// invokes a consequence adapter.
+func (s *Service) Overview(ctx context.Context, userID string) (*OverviewProjection, error) {
+	root, err := s.Read(ctx, userID, "")
+	if err != nil {
+		return nil, err
+	}
+	children, err := s.store.ListChildRuns(ctx, root.RunID)
+	if err != nil {
+		return nil, safeStoreFailure(err, root.StateRevision)
+	}
+	result := &OverviewProjection{
+		Root: root, ChildCount: len(children),
+		Children:  make([]*JourneyProjection, 0, min(len(children), MaxOverviewChildProjections)),
+		Truncated: len(children) > MaxOverviewChildProjections,
+	}
+	for index, child := range children {
+		if index >= MaxOverviewChildProjections {
+			break
+		}
+		projection, readErr := s.Read(ctx, userID, child.ID)
+		if readErr != nil {
+			return nil, readErr
+		}
+		result.Children = append(result.Children, projection)
+	}
+	return result, nil
+}
+
 func (s *Service) currentDeclaration(ctx context.Context, userID string) (*personalassistant.State, *specialist.SetupJourney, error) {
 	state, err := s.relationships.GetState(ctx, userID)
 	if err != nil || state == nil || state.UserID != userID ||
@@ -330,6 +375,7 @@ func (s *Service) reconcile(ctx context.Context, declaration *specialist.SetupJo
 		}
 		updated, updateErr := s.store.CompareAndSwapRun(ctx, candidate, run.StateRevision)
 		if updateErr == nil {
+			emitLifecycleTransition(declaration, run, updated)
 			return projectionFromRun(declaration, updated, reads, nil), nil
 		}
 		if errors.Is(updateErr, ErrConflict) {

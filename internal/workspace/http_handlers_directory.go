@@ -104,10 +104,16 @@ func (h *HTTPHandler) ListDirectories(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	directories := make([]DirectoryReference, 0, len(workspace.DirectoryReferences))
+	for _, directory := range workspace.DirectoryReferences {
+		if directory.Purpose != "sample_library" {
+			directories = append(directories, directory)
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]any{
-		"directories": workspace.DirectoryReferences,
-		"count":       len(workspace.DirectoryReferences),
+		"directories": directories,
+		"count":       len(directories),
 		"workspace":   workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
@@ -126,8 +132,8 @@ func (h *HTTPHandler) GetDirectory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dir, err := workspace.GetDirectoryReference(dirID)
-	if err != nil {
-		orihttp.NotFound(w, err.Error())
+	if err != nil || dir.Purpose == "sample_library" {
+		orihttp.NotFound(w, "Directory reference not found")
 		return
 	}
 

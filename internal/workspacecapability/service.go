@@ -234,7 +234,15 @@ func assistantProgramHomeOffersCapability(ws *workspace.Workspace, capabilityID 
 	return false
 }
 
-func (s *Service) Install(req InstallRequest) (InstallResult, error) {
+func (s *Service) Install(req InstallRequest) (result InstallResult, resultErr error) {
+	defer func() {
+		count := 0
+		if resultErr == nil && !result.AlreadyInstalled {
+			count = 1
+		}
+		recordCapabilityOutcome(req.CapabilityID, eventActionInstallCapability, resultErr, count)
+	}()
+
 	def, err := s.resolveInstallable(req.CapabilityID)
 	if err != nil {
 		return InstallResult{}, err

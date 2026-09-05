@@ -154,6 +154,45 @@ test('assistant programs become a named shared roster in Team instead of an empt
   assert.deepEqual(view.payload.assistant_hire, { name: 'Producer', provider: '', model: '' });
 });
 
+test('scoped Home and project primaries keep separate names and select the project entry role', () => {
+  const program = assistantProgramPlan();
+  program.default_primary_name = 'Portfolio Lead';
+  program.roles = [
+    {
+      id: 'portfolio',
+      label: 'Portfolio Manager',
+      scope: 'home',
+      description: 'Coordinates portfolio.',
+      primary: true
+    },
+    {
+      id: 'producer',
+      label: 'Producer',
+      scope: 'project',
+      description: 'Coordinates project.',
+      primary: true
+    },
+    {
+      id: 'engineer',
+      label: 'Engineer',
+      scope: 'project',
+      description: 'Handles technical work.',
+      primary: false
+    }
+  ];
+  const draft = Draft.createDraft();
+  Draft.setPlanReady(draft, 'template:scoped', planResponse([], { assistant_program: program }));
+  Draft.setAssistantHire(draft, { name: 'June' });
+  const view = Draft.derive(draft);
+  assert.deepEqual(
+    view.roster.map(entry => entry.name),
+    ['Producer', 'June', 'Engineer']
+  );
+  assert.equal(view.primaryName, 'Producer');
+  assert.equal(view.canContinueFromTeam, true);
+  assert.ok(!view.issues.some(issue => issue.id === 'duplicate-names'));
+});
+
 test('an existing shared roster is linked without offering a second identity', () => {
   const draft = Draft.createDraft();
   const program = assistantProgramPlan();
@@ -170,11 +209,7 @@ test('an existing shared roster is linked without offering a second identity', (
   assert.equal(view.assistantProgram.existingHired, true);
   assert.equal(view.primaryName, 'June');
   assert.ok(view.roster.every(entry => entry.lifecycle === 'assistant-link'));
-  assert.deepEqual(view.payload.assistant_hire, {
-    name: 'June',
-    provider: 'ollama',
-    model: 'gemma4:e4b'
-  });
+  assert.equal(view.payload.assistant_hire, undefined);
   assert.equal(view.isModifiedFromBlueprint, false);
 });
 

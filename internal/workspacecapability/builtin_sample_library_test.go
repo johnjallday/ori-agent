@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/specialistevents"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -18,6 +19,17 @@ func TestSampleLibraryDefinitionIsInertAndHasNoGenericCompanion(t *testing.T) {
 }
 
 func TestSampleLibraryInstallIsLimitedToDeclaringAssistantProgramHome(t *testing.T) {
+	original := recordSpecialistEvent
+	t.Cleanup(func() { recordSpecialistEvent = original })
+	type recorded struct {
+		name   specialistevents.Name
+		fields specialistevents.Fields
+	}
+	var events []recorded
+	recordSpecialistEvent = func(name specialistevents.Name, fields specialistevents.Fields) {
+		events = append(events, recorded{name: name, fields: fields})
+	}
+
 	registry, err := NewBuiltinRegistry()
 	if err != nil {
 		t.Fatal(err)
@@ -56,5 +68,22 @@ func TestSampleLibraryInstallIsLimitedToDeclaringAssistantProgramHome(t *testing
 	}
 	if len(home.GetAgentInstances()) != 0 {
 		t.Fatal("capability install created a companion or role")
+	}
+	removed, err := service.Remove(home.ID, workspace.CapabilitySampleLibrary, RemoveOptions{})
+	if err != nil || !removed.Removed {
+		t.Fatalf("Home removal = %+v, %v", removed, err)
+	}
+
+	if len(events) != 3 {
+		t.Fatalf("sample capability events = %+v", events)
+	}
+	if events[0].name != specialistevents.SampleCapabilityOutcome || events[0].fields.Outcome != specialistevents.OutcomeFailed || events[0].fields.ReasonCode != "capability_operation_failed" {
+		t.Fatalf("refused install event = %+v", events[0])
+	}
+	if events[1].name != specialistevents.SampleCapabilityOutcome || events[1].fields.Outcome != specialistevents.OutcomeSucceeded || events[1].fields.Count != 1 {
+		t.Fatalf("install event = %+v", events[1])
+	}
+	if events[2].name != specialistevents.SampleCapabilityOutcome || events[2].fields.Outcome != specialistevents.OutcomeRevoked || events[2].fields.Count != 1 {
+		t.Fatalf("removal event = %+v", events[2])
 	}
 }

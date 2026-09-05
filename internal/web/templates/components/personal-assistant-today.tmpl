@@ -63,6 +63,20 @@
   </section>
   <p id="personalAssistantSpecialistManual" class="pa-specialist-manual" hidden></p>
 
+  <!-- Canonical setup/program/add-on reporting. Controls either navigate to a
+       server-derived workspace route or open the reviewed setup shell; none is
+       a Personal HQ cross-workspace action. -->
+  <section id="personalAssistantSpecialistSetup" class="pa-specialist-setup"
+           aria-labelledby="personalAssistantSpecialistSetupTitle" hidden>
+    <div>
+      <h4 id="personalAssistantSpecialistSetupTitle">Specialist setup</h4>
+      <p id="personalAssistantSpecialistSetupStatus" role="status"></p>
+      <p id="personalAssistantSpecialistSetupSamples" class="personal-assistant-today__meta" hidden></p>
+    </div>
+    <ul id="personalAssistantSpecialistSetupRuns" aria-label="Setup runs"></ul>
+    <div id="personalAssistantSpecialistSetupActions" class="pa-specialist-setup__actions"></div>
+  </section>
+
   <div id="personalAssistantTodaySections" class="personal-assistant-today__sections">
     <section aria-labelledby="personalAssistantTodayDecisionsTitle">
       <h4 id="personalAssistantTodayDecisionsTitle">Decisions</h4>

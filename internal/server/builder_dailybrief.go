@@ -273,10 +273,16 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	b.personalAssistantHandler.SetSpecialistOfferService(
 		personalassistant.NewSpecialistOfferService(b.personalAssistantStore),
 	)
-	b.personalAssistantHandler.SetTodayService(personalassistant.NewTodayService(
+	todayService := personalassistant.NewTodayService(
 		b.personalAssistantService, briefService, b.workspaceStore, b.followUpService,
-	))
+	)
 	b.initializeSetupJourney()
+	if b.setupJourneyService != nil {
+		todayService.SetSpecialistSetupReader(&personalAssistantSetupReportingAdapter{
+			journeys: b.setupJourneyService, workspaces: b.workspaceStore, samples: b.sampleLibraryService,
+		})
+	}
+	b.personalAssistantHandler.SetTodayService(todayService)
 	b.dailyBriefScheduler = dailybrief.NewScheduler(briefService, &personalHQWorkspaceLister{
 		service: b.personalHQService, relationship: b.personalAssistantStore,
 	}, dailyBriefSchedulerPollInterval)

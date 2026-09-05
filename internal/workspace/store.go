@@ -672,6 +672,24 @@ func preserveUnmirroredWorkspaceFields(target *Workspace, existing *Workspace) {
 	if capabilitiesMissing(target) && len(existing.InstalledCapabilities) > 0 {
 		target.InstalledCapabilities = CloneInstalledCapabilities(existing.InstalledCapabilities)
 	}
+	// Capability-owned sample roots may be changed only by the reviewed sample
+	// revocation boundary. A stale generic save cannot repoint or omit one.
+	for _, protected := range existing.DirectoryReferences {
+		if protected.Purpose != "sample_library" {
+			continue
+		}
+		found := false
+		for i := range target.DirectoryReferences {
+			if target.DirectoryReferences[i].ID == protected.ID {
+				target.DirectoryReferences[i] = protected
+				found = true
+				break
+			}
+		}
+		if !found {
+			target.DirectoryReferences = append(target.DirectoryReferences, protected)
+		}
+	}
 }
 
 // BasePath returns the default workspace root directory. Read under the lock so

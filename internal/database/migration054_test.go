@@ -162,6 +162,17 @@ func TestMigration054UpgradesV53WithoutChangingExistingRows(t *testing.T) {
 		t.Fatalf("seed existing row: %v", err)
 	}
 	for _, statement := range []string{
+		`DROP TABLE sample_library_operation_receipt`,
+		`DROP TABLE sample_library_review_receipt`,
+		`DROP TABLE sample_library_child_copy`,
+		`DROP TABLE sample_library_collection_member`,
+		`DROP TABLE sample_library_collection`,
+		`DROP TABLE sample_library_annotation`,
+		`DROP TABLE sample_library_content_fact`,
+		`DROP TABLE sample_library_entry`,
+		`DROP TABLE sample_library_root`,
+		`DROP TABLE sample_library_state`,
+		`DELETE FROM schema_migrations WHERE version = 55`,
 		`DROP TABLE setup_journey_review_receipt`,
 		`DROP TABLE setup_journey_declaration_migration_receipt`,
 		`DROP TABLE setup_journey_operation_receipt`,

@@ -74,6 +74,8 @@ type templateAssistantProgramRolePlan struct {
 	Label       string `json:"label"`
 	Description string `json:"description"`
 	Primary     bool   `json:"primary"`
+	Scope       string `json:"scope,omitempty"`
+	Required    bool   `json:"required"`
 	AgentName   string `json:"agent_name,omitempty"`
 }
 
@@ -503,7 +505,7 @@ func (h *Handler) buildTemplateAgentPlan(tpl projecttemplates.Template) template
 		}
 		for _, role := range declaration.Roles {
 			assistantPlan.Roles = append(assistantPlan.Roles, templateAssistantProgramRolePlan{
-				ID: role.ID, Label: role.Label, Description: role.Description, Primary: role.Primary,
+				ID: role.ID, Label: role.Label, Description: role.Description, Primary: role.Primary, Scope: string(role.Scope), Required: role.Required,
 			})
 		}
 		for _, stage := range declaration.Stages {
@@ -523,7 +525,10 @@ func (h *Handler) buildTemplateAgentPlan(tpl projecttemplates.Template) template
 					assistantPlan.ExistingHired = true
 					assistantPlan.ExistingProvider = state.Provider
 					assistantPlan.ExistingModel = state.Model
-					bindings := make(map[string]string, len(state.Roster))
+					bindings := make(map[string]string, len(state.HomeBindings.Bindings)+len(state.Roster))
+					for _, binding := range state.HomeBindings.Bindings {
+						bindings[binding.RoleID] = binding.AgentName
+					}
 					for _, binding := range state.Roster {
 						bindings[binding.RoleID] = binding.AgentName
 					}

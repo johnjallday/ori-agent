@@ -413,6 +413,7 @@ func registerOnboardingRoutes(mux *http.ServeMux, s *Server) {
 
 	registerPersonalAssistantRoutes(mux, s)
 	registerSetupJourneyRoutes(mux, s)
+	registerSampleLibraryRoutes(mux, s)
 	registerPersonalHQRoutes(mux, s)
 	registerDailyBriefRoutes(mux, s)
 
@@ -1022,6 +1023,34 @@ func registerSetupJourneyRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("POST /api/personal-assistant/setup-journey/runs/{runID}/dismiss", handler.DismissRun)
 	mux.HandleFunc("POST /api/personal-assistant/setup-journey/children", handler.CreateChild)
 	mux.HandleFunc("POST /api/personal-assistant/setup-journey/runs/{runID}/actions/{actionID}", handler.Mutate)
+}
+
+func registerSampleLibraryRoutes(mux *http.ServeMux, s *Server) {
+	if s == nil || s.Handlers == nil || s.Handlers.SampleLibrary == nil {
+		return
+	}
+	h := s.Handlers.SampleLibrary
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/sample-library", h.GetState)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/sample-library/search", h.Search)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/sample-library/find", h.FindForProject)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/questions", h.DelegateQuestion)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/sample-library/collections", h.Collections)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/collections", h.CreateCollection)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/collections/review", h.ReviewCollection)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/collections/{collectionID}/members/review", h.ReviewCollectionMember)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/collections/{collectionID}/members", h.AddCollectionMember)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/entries/{entryID}/annotation/review", h.ReviewAnnotation)
+	mux.HandleFunc("PUT /api/workspaces/{workspaceID}/sample-library/entries/{entryID}/annotation", h.SetAnnotation)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/copies/review", h.ReviewCopy)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/copies/commit", h.CommitCopy)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/roots/review", h.ReviewRoot)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/roots/commit", h.CommitRoot)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/roots/{rootID}/analysis/review", h.ReviewAnalysis)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/roots/{rootID}/analysis/commit", h.CommitAnalysis)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/roots/{rootID}/revoke/review", h.ReviewRevocation)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/roots/{rootID}/revoke/commit", h.CommitRevocation)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/roots/{rootID}/index", h.Index)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/sample-library/roots/{rootID}/entries", h.Entries)
 }
 
 // registerPersonalHQRoutes registers Personal HQ status/designation endpoints.

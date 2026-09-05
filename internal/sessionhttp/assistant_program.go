@@ -483,7 +483,18 @@ func (h *Handler) HireAssistantProgram(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if state.SchemaVersion >= workspace.AssistantProgramStateSchemaVersion {
-		_ = orihttp.RespondConflict(w, "This Assistant Program uses separately reviewed Home and project staffing")
+		if state.StateRevision != request.Version {
+			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"error": "Assistant program changed; reload and try again", "current_version": state.StateRevision})
+			return
+		}
+		if h.assistantReviewedStaffer == nil || h.assistantReviewedStaffer(r.Context(), project.ID, name, request.Provider, request.Model) != nil {
+			_ = orihttp.RespondConflict(w, "The reviewed scoped staffing could not be completed; reload and try again")
+			return
+		}
+		station, _ = h.workspaceTaskStore.Get(station.ID)
+		project, _ = h.workspaceTaskStore.Get(project.ID)
+		summary, _ := h.buildAssistantProgramSummary(station, project)
+		_ = orihttp.RespondSuccess(w, summary)
 		return
 	}
 	if state.Hired {
@@ -999,6 +1010,12 @@ func (h *Handler) CommitAssistantHomeRemoval(w http.ResponseWriter, r *http.Requ
 		if commitErr != nil {
 			respondAssistantTopologyError(w, commitErr)
 			return
+		}
+		if h.assistantHomeRemoved != nil {
+			if cleanupErr := h.assistantHomeRemoved(station.ID); cleanupErr != nil {
+				_ = orihttp.RespondInternalError(w, "Assistant Program Home was removed, but optional capability cleanup needs attention")
+				return
+			}
 		}
 		_ = orihttp.RespondSuccess(w, receipt)
 	}

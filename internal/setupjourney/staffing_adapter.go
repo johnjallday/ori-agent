@@ -117,6 +117,12 @@ func (a *AssistantStaffingAdapter) Read(_ context.Context, scope ReadScope) (Can
 		actions = append(actions, ActionReviewHomeStaffing)
 	} else {
 		actions = append(actions, ActionOpenHomeStaffing)
+		for _, role := range projection.Scopes[0].Roles {
+			if !role.Required && !role.Configured {
+				actions = append(actions, ActionReviewOptionalHomeStaffing)
+				break
+			}
+		}
 	}
 	if !projectComplete {
 		actions = append(actions, ActionReviewProjectStaffing)
@@ -167,7 +173,7 @@ func (a *AssistantStaffingAdapter) reviewMaterial(scope ReadScope, commit Action
 	if err != nil {
 		return ActionReviewMaterial{}, ErrConflict
 	}
-	projection, err := a.reviewProjection(scope, owner, targetScope, input)
+	projection, err := a.reviewProjection(scope, owner, targetScope, input, commit == ActionAddOptionalHomeStaffing)
 	if err != nil {
 		return ActionReviewMaterial{}, err
 	}
@@ -211,7 +217,7 @@ func (a *AssistantStaffingAdapter) Commit(_ context.Context, scope ReadScope, ac
 	if err != nil {
 		return CanonicalResult{}, ErrConflict
 	}
-	projection, err := a.reviewProjection(scope, owner, targetScope, input)
+	projection, err := a.reviewProjection(scope, owner, targetScope, input, action == ActionAddOptionalHomeStaffing)
 	if err != nil || !equalStaffingProjection(projection, reviewed.Staffing) {
 		return CanonicalResult{}, ErrConflict
 	}
@@ -330,6 +336,84 @@ func (a *AssistantStaffingAdapter) Commit(_ context.Context, scope ReadScope, ac
 	return CanonicalResult{}, nil
 }
 
+// StaffFromReviewedWorkspaceSetup commits the exact required scoped roles shown
+// on the Create Workspace review step. It is intentionally not an HTTP or
+// agent-facing shortcut: the session handler receives it only as a compiled
+// callback after that server-owned review is confirmed. Optional roles remain
+// separate setup actions.
+func (a *AssistantStaffingAdapter) StaffFromReviewedWorkspaceSetup(ctx context.Context, projectID, primaryName, provider, model string) error {
+	project, err := a.workspaces.Get(strings.TrimSpace(projectID))
+	if err != nil {
+		return ErrConflict
+	}
+	link := project.GetAssistantProjectLink()
+	if link == nil {
+		return ErrConflict
+	}
+	station, err := a.workspaces.Get(link.StationWorkspaceID)
+	if err != nil {
+		return ErrConflict
+	}
+	state := station.GetAssistantProgramState()
+	if state == nil || state.Declaration == nil {
+		return ErrConflict
+	}
+	scope := ReadScope{OwnerUserID: state.Key.OwnerUserID, ExpectedAssistantProgramID: state.Key.ProgramID, HomeWorkspaceID: station.ID, ProjectWorkspaceID: project.ID}
+	for _, target := range []workspace.AssistantRoleScope{workspace.AssistantRoleScopeHome, workspace.AssistantRoleScopeProject} {
+		owner, ownerErr := a.owner(scope)
+		if ownerErr != nil {
+			return ErrConflict
+		}
+		current, malformed := a.currentProjection(scope, owner)
+		if malformed {
+			return ErrConflict
+		}
+		complete := false
+		for _, item := range current.Scopes {
+			if item.Scope == target {
+				complete = item.RequiredComplete
+			}
+		}
+		if complete {
+			continue
+		}
+		input := staffingInput{}
+		for _, role := range state.Declaration.Roles {
+			if role.Scope != target || !role.Required {
+				continue
+			}
+			name := role.Label
+			if target == workspace.AssistantRoleScopeHome && role.Primary {
+				name = primaryName
+			}
+			if target == workspace.AssistantRoleScopeProject && (profileNameExists(a.profiles, name) || workspaceNameExists(station, name) || workspaceNameExists(project, name)) {
+				suffix := project.ID
+				if len(suffix) > 8 {
+					suffix = suffix[:8]
+				}
+				name = role.Label + " " + suffix
+			}
+			input.Roles = append(input.Roles, staffingRoleInput{RoleID: role.ID, Name: name, Provider: provider, Model: model})
+		}
+		raw, marshalErr := json.Marshal(input)
+		if marshalErr != nil {
+			return ErrInvalid
+		}
+		reviewAction, commitAction := ActionReviewHomeStaffing, ActionAddHomeStaffing
+		if target == workspace.AssistantRoleScopeProject {
+			reviewAction, commitAction = ActionReviewProjectStaffing, ActionAddProjectStaffing
+		}
+		review, reviewErr := a.Review(ctx, scope, reviewAction, raw)
+		if reviewErr != nil {
+			return reviewErr
+		}
+		if _, commitErr := a.Commit(ctx, scope, commitAction, raw, review); commitErr != nil {
+			return commitErr
+		}
+	}
+	return nil
+}
+
 func (a *AssistantStaffingAdapter) ConsequenceObserved(action ActionID, read CanonicalStepRead) bool {
 	if read.Staffing == nil {
 		return false
@@ -339,9 +423,18 @@ func (a *AssistantStaffingAdapter) ConsequenceObserved(action ActionID, read Can
 		return false
 	}
 	for _, current := range read.Staffing.Scopes {
-		if current.Scope == scope {
-			return current.RequiredComplete
+		if current.Scope != scope {
+			continue
 		}
+		if action == ActionAddOptionalHomeStaffing {
+			for _, role := range current.Roles {
+				if !role.Required && role.Configured {
+					return true
+				}
+			}
+			return false
+		}
+		return current.RequiredComplete
 	}
 	return false
 }
@@ -434,7 +527,7 @@ func (a *AssistantStaffingAdapter) scopeProjection(target *workspace.Workspace, 
 	return projection, malformed
 }
 
-func (a *AssistantStaffingAdapter) reviewProjection(scope ReadScope, owner *staffingOwner, targetScope workspace.AssistantRoleScope, input staffingInput) (*StaffingProjection, error) {
+func (a *AssistantStaffingAdapter) reviewProjection(scope ReadScope, owner *staffingOwner, targetScope workspace.AssistantRoleScope, input staffingInput, optional bool) (*StaffingProjection, error) {
 	current, malformed := a.currentProjection(scope, owner)
 	if malformed {
 		return nil, ErrConflict
@@ -450,7 +543,7 @@ func (a *AssistantStaffingAdapter) reviewProjection(scope ReadScope, owner *staf
 	target.ToolGrantsReady = true
 	missing := make(map[string]workspace.AssistantProgramRoleSpec)
 	for _, role := range owner.declaration.Roles {
-		if role.Scope != targetScope || !role.Required {
+		if role.Scope != targetScope || role.Required == optional {
 			continue
 		}
 		configured := false
@@ -492,7 +585,7 @@ func (a *AssistantStaffingAdapter) reviewProjection(scope ReadScope, owner *staf
 		if explicitModel && !chatAvailable {
 			return nil, ErrInvalid
 		}
-		if !chatAvailable {
+		if !chatAvailable && role.Required {
 			target.ModelsReady = false
 		}
 		for _, skill := range role.Skills {
@@ -501,7 +594,7 @@ func (a *AssistantStaffingAdapter) reviewProjection(scope ReadScope, owner *staf
 			}
 		}
 		planned = append(planned, StaffingRoleProjection{
-			RoleID: role.ID, Label: role.Label, Responsibility: role.Description, Required: true, Primary: role.Primary,
+			RoleID: role.ID, Label: role.Label, Responsibility: role.Description, Required: role.Required, Primary: role.Primary,
 			ProfileName: requested.Name, Provider: requested.Provider, Model: requested.Model,
 			UsesDefaults: requested.Provider == "" && requested.Model == "", ChatAvailable: chatAvailable,
 			ToolGrants: append([]string(nil), role.Skills...), Configured: false,
@@ -557,6 +650,8 @@ func staffingCommitForReview(action ActionID) (ActionID, workspace.AssistantRole
 		return ActionAddHomeStaffing, workspace.AssistantRoleScopeHome, true
 	case ActionReviewProjectStaffing:
 		return ActionAddProjectStaffing, workspace.AssistantRoleScopeProject, true
+	case ActionReviewOptionalHomeStaffing:
+		return ActionAddOptionalHomeStaffing, workspace.AssistantRoleScopeHome, true
 	default:
 		return "", "", false
 	}
@@ -564,7 +659,7 @@ func staffingCommitForReview(action ActionID) (ActionID, workspace.AssistantRole
 
 func staffingScopeForCommit(action ActionID) (workspace.AssistantRoleScope, bool) {
 	switch action {
-	case ActionAddHomeStaffing:
+	case ActionAddHomeStaffing, ActionAddOptionalHomeStaffing:
 		return workspace.AssistantRoleScopeHome, true
 	case ActionAddProjectStaffing:
 		return workspace.AssistantRoleScopeProject, true
