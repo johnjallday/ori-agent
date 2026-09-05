@@ -26,6 +26,24 @@ type assistantProgramHireRequest struct {
 	Version  int64  `json:"version"`
 }
 
+type assistantDisconnectReviewRequest struct {
+	ProjectWorkspaceID string `json:"project_workspace_id"`
+	StateRevision      int64  `json:"state_revision"`
+}
+
+type assistantDisconnectCommitRequest struct {
+	Token          string `json:"token"`
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+type assistantHomeRemovalReviewRequest struct {
+	StateRevision int64 `json:"state_revision"`
+}
+
+type assistantHomeRemovalCommitRequest struct {
+	Token string `json:"token"`
+}
+
 type assistantProgramSummary struct {
 	Available        bool                                            `json:"available"`
 	ActivationNeeded bool                                            `json:"activation_needed,omitempty"`
@@ -884,6 +902,107 @@ func (h *Handler) DeleteAssistantLearning(w http.ResponseWriter, r *http.Request
 		return
 	}
 	_ = orihttp.RespondSuccess(w, map[string]any{"deleted": true})
+}
+
+func (h *Handler) ReviewAssistantDisconnect(w http.ResponseWriter, r *http.Request) {
+	station, project, err := h.assistantProgramStation(strings.TrimSpace(r.PathValue("workspaceID")))
+	if err != nil || project != nil {
+		_ = orihttp.RespondNotFound(w, "Assistant Program Home not found")
+		return
+	}
+	if station, ok := h.requireAssistantWritable(w, station); !ok {
+		return
+	} else {
+		var request assistantDisconnectReviewRequest
+		if !h.decodeAssistantProgramJSON(w, r, &request) {
+			return
+		}
+		review, reviewErr := workspace.NewAssistantProgramStore(h.workspaceTaskStore).ReviewDisconnect(station.ID, request.ProjectWorkspaceID, request.StateRevision)
+		if reviewErr != nil {
+			respondAssistantTopologyError(w, reviewErr)
+			return
+		}
+		_ = orihttp.RespondSuccess(w, review)
+	}
+}
+
+func (h *Handler) CommitAssistantDisconnect(w http.ResponseWriter, r *http.Request) {
+	station, project, err := h.assistantProgramStation(strings.TrimSpace(r.PathValue("workspaceID")))
+	if err != nil || project != nil {
+		_ = orihttp.RespondNotFound(w, "Assistant Program Home not found")
+		return
+	}
+	if station, ok := h.requireAssistantWritable(w, station); !ok {
+		return
+	} else {
+		var request assistantDisconnectCommitRequest
+		if !h.decodeAssistantProgramJSON(w, r, &request) {
+			return
+		}
+		receipt, commitErr := workspace.NewAssistantProgramStore(h.workspaceTaskStore).CommitDisconnect(station.ID, request.Token, request.IdempotencyKey)
+		if commitErr != nil {
+			respondAssistantTopologyError(w, commitErr)
+			return
+		}
+		_ = orihttp.RespondSuccess(w, receipt)
+	}
+}
+
+func (h *Handler) ReviewAssistantHomeRemoval(w http.ResponseWriter, r *http.Request) {
+	station, project, err := h.assistantProgramStation(strings.TrimSpace(r.PathValue("workspaceID")))
+	if err != nil || project != nil {
+		_ = orihttp.RespondNotFound(w, "Assistant Program Home not found")
+		return
+	}
+	if station, ok := h.requireAssistantWritable(w, station); !ok {
+		return
+	} else {
+		var request assistantHomeRemovalReviewRequest
+		if !h.decodeAssistantProgramJSON(w, r, &request) {
+			return
+		}
+		review, reviewErr := workspace.NewAssistantProgramStore(h.workspaceTaskStore).ReviewHomeRemoval(station.ID, request.StateRevision)
+		if reviewErr != nil {
+			respondAssistantTopologyError(w, reviewErr)
+			return
+		}
+		_ = orihttp.RespondSuccess(w, review)
+	}
+}
+
+func (h *Handler) CommitAssistantHomeRemoval(w http.ResponseWriter, r *http.Request) {
+	station, project, err := h.assistantProgramStation(strings.TrimSpace(r.PathValue("workspaceID")))
+	if err != nil || project != nil {
+		_ = orihttp.RespondNotFound(w, "Assistant Program Home not found")
+		return
+	}
+	if station, ok := h.requireAssistantWritable(w, station); !ok {
+		return
+	} else {
+		var request assistantHomeRemovalCommitRequest
+		if !h.decodeAssistantProgramJSON(w, r, &request) {
+			return
+		}
+		receipt, commitErr := workspace.NewAssistantProgramStore(h.workspaceTaskStore).CommitHomeRemoval(station.ID, request.Token)
+		if commitErr != nil {
+			respondAssistantTopologyError(w, commitErr)
+			return
+		}
+		_ = orihttp.RespondSuccess(w, receipt)
+	}
+}
+
+func respondAssistantTopologyError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, workspace.ErrAssistantTopologyConflict), errors.Is(err, workspace.ErrAssistantTopologyIdempotency):
+		_ = orihttp.RespondConflict(w, "Assistant Program topology changed; review the impact again")
+	case errors.Is(err, workspace.ErrAssistantTopologyReviewExpired):
+		_ = orihttp.RespondConflict(w, "Assistant Program impact review expired")
+	case errors.Is(err, workspace.ErrAssistantStationNotFound):
+		_ = orihttp.RespondNotFound(w, "Assistant Program Home not found")
+	default:
+		_ = orihttp.RespondBadRequest(w, "Invalid Assistant Program topology request")
+	}
 }
 
 func (h *Handler) AcknowledgeAssistantPromotion(w http.ResponseWriter, r *http.Request) {

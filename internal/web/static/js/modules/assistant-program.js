@@ -74,6 +74,9 @@ export class AssistantProgramPage {
       .getElementById('assistantProgramPromotionAck')
       ?.addEventListener('click', () => void this.acknowledgePromotion());
     document
+      .getElementById('assistantProgramRemoveHome')
+      ?.addEventListener('click', event => void this.openHomeRemovalReview(event.currentTarget));
+    document
       .getElementById('assistantProgramReflect')
       ?.addEventListener('click', () => void this.reflect());
     document
@@ -271,6 +274,8 @@ export class AssistantProgramPage {
     if (hireOpen)
       hireOpen.hidden =
         scopedProgram || Boolean(program.hired) || program.plugin_available === false;
+    const removeHome = document.getElementById('assistantProgramRemoveHome');
+    if (removeHome) removeHome.hidden = !program.is_station || program.plugin_available === false;
     const promotionAck = document.getElementById('assistantProgramPromotionAck');
     if (promotionAck)
       promotionAck.hidden = !program.promotion_pending || program.plugin_available === false;
@@ -407,11 +412,146 @@ export class AssistantProgramPage {
           handoff.className = 'modern-btn modern-btn-secondary';
           handoff.textContent = 'Send to project';
           handoff.addEventListener('click', () => this.openHandoffEditor(record, handoff));
-          actions.append(edit, handoff);
+          const disconnect = document.createElement('button');
+          disconnect.type = 'button';
+          disconnect.className = 'modern-btn modern-btn-secondary';
+          disconnect.textContent = 'Review disconnect';
+          disconnect.addEventListener('click', () =>
+            this.openDisconnectReview(project, disconnect)
+          );
+          actions.append(edit, handoff, disconnect);
           card.append(actions);
         }
       }
       root.append(card);
+    }
+  }
+
+  async openHomeRemovalReview(trigger) {
+    const { dialog, close } = this.newActionDialog('Review Home removal', trigger);
+    const heading = document.createElement('h3');
+    heading.textContent = `Remove ${this.homeName()}?`;
+    const progress = document.createElement('p');
+    progress.setAttribute('role', 'status');
+    progress.setAttribute('aria-live', 'polite');
+    progress.textContent = 'Loading the current impact…';
+    const controls = document.createElement('div');
+    controls.className = 'assistant-program-action-buttons';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'modern-btn modern-btn-secondary';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', close);
+    controls.append(cancel);
+    dialog.append(heading, progress, controls);
+    try {
+      const review = await this.request('/remove-home/review', {
+        method: 'POST',
+        body: JSON.stringify({ state_revision: Number(this.program?.state_revision || 0) })
+      });
+      progress.textContent = `${Number(review.linked_project_count || 0)} linked projects will be retained.`;
+      const impact = document.createElement('ul');
+      impact.className = 'assistant-program-impact-list';
+      (review.impact || []).forEach(line => {
+        const item = document.createElement('li');
+        item.textContent = line;
+        impact.append(item);
+      });
+      const confirm = document.createElement('button');
+      confirm.type = 'button';
+      confirm.className = 'modern-btn modern-btn-danger';
+      confirm.textContent = 'Remove Home and retain projects';
+      confirm.addEventListener('click', async () => {
+        confirm.disabled = true;
+        cancel.disabled = true;
+        progress.textContent = 'Removing Home…';
+        try {
+          await this.request('/remove-home/commit', {
+            method: 'POST',
+            body: JSON.stringify({ token: review.token })
+          });
+          globalThis.location.assign(this.workspaceURL());
+        } catch (error) {
+          progress.textContent = error.message || 'The Home could not be removed.';
+          confirm.disabled = false;
+          cancel.disabled = false;
+        }
+      });
+      dialog.insertBefore(impact, controls);
+      controls.append(confirm);
+      confirm.focus();
+    } catch (error) {
+      progress.textContent = error.message || 'The removal impact could not be reviewed.';
+      cancel.focus();
+    }
+  }
+
+  async openDisconnectReview(project, trigger) {
+    const { dialog, close } = this.newActionDialog(
+      `Review disconnect for ${project.name || 'project'}`,
+      trigger
+    );
+    const heading = document.createElement('h3');
+    heading.textContent = `Disconnect ${project.name || 'project'}?`;
+    const progress = document.createElement('p');
+    progress.setAttribute('role', 'status');
+    progress.setAttribute('aria-live', 'polite');
+    progress.textContent = 'Loading the current impact…';
+    const controls = document.createElement('div');
+    controls.className = 'assistant-program-action-buttons';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'modern-btn modern-btn-secondary';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', close);
+    controls.append(cancel);
+    dialog.append(heading, progress, controls);
+    try {
+      const review = await this.request('/disconnect/review', {
+        method: 'POST',
+        body: JSON.stringify({
+          project_workspace_id: project.id,
+          state_revision: Number(this.program?.state_revision || 0)
+        })
+      });
+      progress.textContent = '';
+      const impact = document.createElement('ul');
+      impact.className = 'assistant-program-impact-list';
+      (review.impact || []).forEach(line => {
+        const item = document.createElement('li');
+        item.textContent = line;
+        impact.append(item);
+      });
+      const confirm = document.createElement('button');
+      confirm.type = 'button';
+      confirm.className = 'modern-btn modern-btn-danger';
+      confirm.textContent = 'Disconnect and preserve project';
+      confirm.addEventListener('click', async () => {
+        confirm.disabled = true;
+        cancel.disabled = true;
+        progress.textContent = 'Disconnecting…';
+        try {
+          await this.request('/disconnect/commit', {
+            method: 'POST',
+            body: JSON.stringify({
+              token: review.token,
+              idempotency_key: globalThis.crypto?.randomUUID?.() || `disconnect-${Date.now()}`
+            })
+          });
+          close();
+          await this.load();
+        } catch (error) {
+          progress.textContent = error.message || 'The project could not be disconnected.';
+          confirm.disabled = false;
+          cancel.disabled = false;
+        }
+      });
+      dialog.insertBefore(impact, controls);
+      controls.append(confirm);
+      confirm.focus();
+    } catch (error) {
+      progress.textContent = error.message || 'The disconnect impact could not be reviewed.';
+      cancel.focus();
     }
   }
 

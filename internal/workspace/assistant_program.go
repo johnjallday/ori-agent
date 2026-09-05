@@ -276,6 +276,7 @@ type AssistantProgramState struct {
 	LinkedProjectIDs []string                     `json:"linked_project_ids,omitempty"`
 	HomeBindings     AssistantRoleBindingSet      `json:"home_bindings,omitempty"`
 	Portfolio        AssistantPortfolioState      `json:"portfolio,omitempty"`
+	Topology         AssistantTopologyState       `json:"topology,omitempty"`
 	// Hired through Roster are schema-v1 shared-roster compatibility fields.
 	// Schema-v2 staffing writes scoped binding sets and never projects this
 	// legacy roster into newly linked children.
@@ -304,6 +305,7 @@ func CloneAssistantProgramState(source *AssistantProgramState) *AssistantProgram
 	clone.LinkedProjectIDs = append([]string(nil), source.LinkedProjectIDs...)
 	clone.HomeBindings = CloneAssistantRoleBindingSet(source.HomeBindings)
 	clone.Portfolio = CloneAssistantPortfolioState(source.Portfolio)
+	clone.Topology = CloneAssistantTopologyState(source.Topology)
 	clone.Roster = append([]AssistantRoleBinding(nil), source.Roster...)
 	clone.CompletionReceipts = append([]AssistantCompletionReceipt(nil), source.CompletionReceipts...)
 	if source.StageEnteredAt != nil {
@@ -329,6 +331,19 @@ func CloneAssistantProgramState(source *AssistantProgramState) *AssistantProgram
 		clone.Reflection.NextEligibleAt = &value
 	}
 	return &clone
+}
+
+func CloneAssistantTopologyState(source AssistantTopologyState) AssistantTopologyState {
+	clone := source
+	clone.ReviewReceipts = append([]AssistantTopologyReviewReceipt(nil), source.ReviewReceipts...)
+	for index := range clone.ReviewReceipts {
+		if source.ReviewReceipts[index].ConsumedAt != nil {
+			value := *source.ReviewReceipts[index].ConsumedAt
+			clone.ReviewReceipts[index].ConsumedAt = &value
+		}
+	}
+	clone.OperationReceipts = append([]AssistantTopologyOperationReceipt(nil), source.OperationReceipts...)
+	return clone
 }
 
 func CloneAssistantPortfolioState(source AssistantPortfolioState) AssistantPortfolioState {

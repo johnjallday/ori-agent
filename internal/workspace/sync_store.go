@@ -52,6 +52,16 @@ func (s *SyncStore) MoveWorkspaceFolder(workspaceID, parentID string) ([]MovedWo
 	if s == nil || s.fileSync == nil || s.primary == nil {
 		return nil, fmt.Errorf("workspace folder storage is unavailable")
 	}
+	current, currentErr := s.primary.Get(workspaceID)
+	if currentErr != nil {
+		return nil, currentErr
+	}
+	healingExactLink := current.AssistantProjectLink != nil && current.AssistantProjectLink.StationWorkspaceID == parentID
+	if protected, checkErr := storeContainsProtectedAssistantProgram(s.primary, workspaceID); checkErr != nil {
+		return nil, checkErr
+	} else if protected && !healingExactLink {
+		return nil, ErrAssistantProgramProtected
+	}
 	moved, err := s.fileSync.MoveWorkspaceFolder(workspaceID, parentID)
 	if err != nil {
 		return nil, err

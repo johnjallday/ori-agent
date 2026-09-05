@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -89,6 +90,54 @@ func TestAssistantPortfolioHTTPReviewCommitAndHandoff(t *testing.T) {
 	handler.GetAssistantPortfolio(listRecorder, assistantProgramRequest(http.MethodGet, "/portfolio", project.ID, ""))
 	if listRecorder.Code != http.StatusOK || !strings.Contains(listRecorder.Body.String(), `"project_workspace_id":"`+project.ID+`"`) || !strings.Contains(listRecorder.Body.String(), `"status":"active"`) {
 		t.Fatalf("portfolio list = %d: %s", listRecorder.Code, listRecorder.Body.String())
+	}
+}
+
+func TestAssistantProgramHTTPReviewedDisconnectPreservesProject(t *testing.T) {
+	handler, store, station, project := assistantPortfolioHTTPFixture(t)
+	state := station.GetAssistantProgramState()
+	reviewRecorder := httptest.NewRecorder()
+	handler.ReviewAssistantDisconnect(reviewRecorder, assistantProgramRequest(http.MethodPost, "/disconnect/review", station.ID, `{"project_workspace_id":"`+project.ID+`","state_revision":`+strconv.FormatInt(state.StateRevision, 10)+`}`))
+	if reviewRecorder.Code != http.StatusOK {
+		t.Fatalf("disconnect review = %d: %s", reviewRecorder.Code, reviewRecorder.Body.String())
+	}
+	var review workspace.AssistantDisconnectReview
+	if err := json.Unmarshal(reviewRecorder.Body.Bytes(), &review); err != nil || review.Token == "" || len(review.Impact) == 0 {
+		t.Fatalf("disconnect review body = %#v, %v", review, err)
+	}
+	commitRecorder := httptest.NewRecorder()
+	handler.CommitAssistantDisconnect(commitRecorder, assistantProgramRequest(http.MethodPost, "/disconnect/commit", station.ID, `{"token":"`+review.Token+`","idempotency_key":"disconnect-http-1"}`))
+	if commitRecorder.Code != http.StatusOK {
+		t.Fatalf("disconnect commit = %d: %s", commitRecorder.Code, commitRecorder.Body.String())
+	}
+	retained, err := store.Get(project.ID)
+	if err != nil || retained.GetAssistantProjectLink() != nil {
+		t.Fatalf("retained project = %#v, %v", retained, err)
+	}
+}
+
+func TestAssistantProgramHTTPReviewedHomeRemovalRetainsProject(t *testing.T) {
+	handler, store, station, project := assistantPortfolioHTTPFixture(t)
+	reviewRecorder := httptest.NewRecorder()
+	handler.ReviewAssistantHomeRemoval(reviewRecorder, assistantProgramRequest(http.MethodPost, "/remove-home/review", station.ID, `{"state_revision":`+strconv.FormatInt(station.GetAssistantProgramState().StateRevision, 10)+`}`))
+	if reviewRecorder.Code != http.StatusOK {
+		t.Fatalf("Home removal review = %d: %s", reviewRecorder.Code, reviewRecorder.Body.String())
+	}
+	var review workspace.AssistantHomeRemovalReview
+	if err := json.Unmarshal(reviewRecorder.Body.Bytes(), &review); err != nil || review.Token == "" || review.LinkedProjectCount != 1 {
+		t.Fatalf("Home removal body = %#v, %v", review, err)
+	}
+	commitRecorder := httptest.NewRecorder()
+	handler.CommitAssistantHomeRemoval(commitRecorder, assistantProgramRequest(http.MethodPost, "/remove-home/commit", station.ID, `{"token":"`+review.Token+`"}`))
+	if commitRecorder.Code != http.StatusOK {
+		t.Fatalf("Home removal commit = %d: %s", commitRecorder.Code, commitRecorder.Body.String())
+	}
+	if _, err := store.Get(station.ID); err == nil {
+		t.Fatal("removed Home remained")
+	}
+	retained, err := store.Get(project.ID)
+	if err != nil || retained.GetAssistantProjectLink() != nil {
+		t.Fatalf("retained child = %#v, %v", retained, err)
 	}
 }
 
