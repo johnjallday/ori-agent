@@ -439,6 +439,30 @@ func (a *fakeXPAwarder) callCount() int {
 	return len(a.awards)
 }
 
+// waitForAwards polls until at least want awards are recorded or the deadline
+// passes, then returns a copy of everything recorded so far.
+//
+// The wait is load-bearing, not defensive padding. executeTask awards XP as a
+// post-mutation side effect, *after* the store Update that flips the task to
+// completed has already committed. A test that waits on the task status and
+// then asserts immediately is racing that goroutine through the window between
+// the Update returning and the award landing, and reads zero awards whenever
+// the runner deschedules it there — rare locally, reproducible on loaded CI.
+func (a *fakeXPAwarder) waitForAwards(want int, deadline time.Time) []string {
+	for {
+		a.mu.Lock()
+		got := len(a.awards)
+		a.mu.Unlock()
+		if got >= want || !time.Now().Before(deadline) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.awards...)
+}
+
 // waitForTaskStatus polls the store until the task reaches one of the target
 // statuses or the deadline passes, returning the final status seen.
 func waitForTaskStatus(t *testing.T, store Store, wsID, taskID string, deadline time.Time) TaskStatus {
@@ -483,11 +507,12 @@ func TestExecuteTask_AwardsXPOnCompletion(t *testing.T) {
 		t.Fatalf("task status = %q, want completed", status)
 	}
 
-	if got := awarder.callCount(); got != 1 {
-		t.Fatalf("AwardTaskXP call count = %d, want 1", got)
+	awards := awarder.waitForAwards(1, time.Now().Add(2*time.Second))
+	if len(awards) != 1 {
+		t.Fatalf("AwardTaskXP call count = %d, want 1", len(awards))
 	}
-	if awarder.awards[0] != "agent-a" {
-		t.Errorf("AwardTaskXP called for agent %q, want agent-a", awarder.awards[0])
+	if awards[0] != "agent-a" {
+		t.Errorf("AwardTaskXP called for agent %q, want agent-a", awards[0])
 	}
 }
 
