@@ -746,6 +746,8 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/disconnect/commit", s.Handlers.Session.CommitAssistantDisconnect)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/remove-home/review", s.Handlers.Session.ReviewAssistantHomeRemoval)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/remove-home/commit", s.Handlers.Session.CommitAssistantHomeRemoval)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/migration/review", s.Handlers.Session.ReviewAssistantMigration)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/migration/commit", s.Handlers.Session.CommitAssistantMigration)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/promotion/ack", s.Handlers.Session.AcknowledgeAssistantPromotion)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/learnings", s.Handlers.Session.GetAssistantLearnings)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/reflection", s.Handlers.Session.RunAssistantReflection)

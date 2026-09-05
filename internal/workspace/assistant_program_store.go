@@ -100,7 +100,7 @@ func (service *AssistantProgramStore) ensureStationLocked(key AssistantProgramKe
 		if state == nil || state.Declaration == nil || state.Declaration.SchemaVersion != declaration.SchemaVersion {
 			return nil, false, ErrAssistantProgramVersionConflict
 		}
-		if station.Kind != "group" {
+		if station.Kind != "group" && state.SchemaVersion >= AssistantProgramStateSchemaVersion {
 			if err := service.store.Update(station.ID, func(current *Workspace) error {
 				current.Kind = "group"
 				return nil
@@ -154,6 +154,12 @@ func (service *AssistantProgramStore) EnsureProjectStation(projectID string) (*W
 	if existing := project.GetAssistantProjectLink(); existing != nil {
 		station, getErr := service.store.Get(existing.StationWorkspaceID)
 		if getErr == nil && station.GetAssistantProgramState() != nil {
+			stationState := station.GetAssistantProgramState()
+			if stationState.SchemaVersion == AssistantProgramLegacyStateSchemaVersion {
+				// Legacy topology remains readable exactly as it is until the user
+				// accepts the dedicated impact review. Do not silently group or nest it.
+				return station, false, nil
+			}
 			if station.Kind != "group" {
 				if updateErr := service.store.Update(station.ID, func(current *Workspace) error {
 					current.Kind = "group"

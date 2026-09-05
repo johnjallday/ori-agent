@@ -44,9 +44,18 @@ type assistantHomeRemovalCommitRequest struct {
 	Token string `json:"token"`
 }
 
+type assistantMigrationReviewRequest struct {
+	StateRevision int64 `json:"state_revision"`
+}
+
+type assistantMigrationCommitRequest struct {
+	Token string `json:"token"`
+}
+
 type assistantProgramSummary struct {
 	Available        bool                                            `json:"available"`
 	ActivationNeeded bool                                            `json:"activation_needed,omitempty"`
+	MigrationNeeded  bool                                            `json:"migration_needed,omitempty"`
 	StationID        string                                          `json:"station_id,omitempty"`
 	ProjectID        string                                          `json:"project_id,omitempty"`
 	IsStation        bool                                            `json:"is_station,omitempty"`
@@ -169,14 +178,17 @@ func (h *Handler) buildAssistantProgramSummary(station, project *workspace.Works
 	}
 	summary := assistantProgramSummary{
 		Available: true, StationID: station.ID, IsStation: project == nil,
-		Hired: state.Hired, PluginAvailable: state.PluginAvailable, StateRevision: state.StateRevision,
+		MigrationNeeded: state.SchemaVersion == workspace.AssistantProgramLegacyStateSchemaVersion,
+		Hired:           state.Hired, PluginAvailable: state.PluginAvailable, StateRevision: state.StateRevision,
 		PrimaryName: state.PrimaryName, Provider: state.Provider, Model: state.Model,
 		StageID: state.StageID, Level: state.Level, AcceptedTasks: state.AcceptedCompletions,
 		Declaration: workspace.CloneAssistantProgramDeclaration(state.Declaration),
 	}
+	if len(state.Roster) > 0 {
+		summary.LegacyRoster = append([]workspace.AssistantRoleBinding(nil), state.Roster...)
+	}
 	if state.SchemaVersion == workspace.AssistantProgramLegacyStateSchemaVersion {
 		summary.Roster = append([]workspace.AssistantRoleBinding(nil), state.Roster...)
-		summary.LegacyRoster = append([]workspace.AssistantRoleBinding(nil), state.Roster...)
 	} else if project == nil {
 		summary.RosterScope = workspace.AssistantRoleScopeHome
 		summary.BindingRevision = state.HomeBindings.StateRevision
@@ -989,6 +1001,63 @@ func (h *Handler) CommitAssistantHomeRemoval(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		_ = orihttp.RespondSuccess(w, receipt)
+	}
+}
+
+func (h *Handler) ReviewAssistantMigration(w http.ResponseWriter, r *http.Request) {
+	station, _, err := h.assistantProgramStation(strings.TrimSpace(r.PathValue("workspaceID")))
+	if err != nil {
+		_ = orihttp.RespondNotFound(w, "Assistant Program Home not found")
+		return
+	}
+	if station, ok := h.requireAssistantWritable(w, station); !ok {
+		return
+	} else {
+		var request assistantMigrationReviewRequest
+		if !h.decodeAssistantProgramJSON(w, r, &request) {
+			return
+		}
+		review, reviewErr := workspace.NewAssistantProgramStore(h.workspaceTaskStore).ReviewLegacyMigration(station.ID, request.StateRevision)
+		if reviewErr != nil {
+			respondAssistantMigrationError(w, reviewErr)
+			return
+		}
+		_ = orihttp.RespondSuccess(w, review)
+	}
+}
+
+func (h *Handler) CommitAssistantMigration(w http.ResponseWriter, r *http.Request) {
+	station, _, err := h.assistantProgramStation(strings.TrimSpace(r.PathValue("workspaceID")))
+	if err != nil {
+		_ = orihttp.RespondNotFound(w, "Assistant Program Home not found")
+		return
+	}
+	if station, ok := h.requireAssistantWritable(w, station); !ok {
+		return
+	} else {
+		var request assistantMigrationCommitRequest
+		if !h.decodeAssistantProgramJSON(w, r, &request) {
+			return
+		}
+		receipt, commitErr := workspace.NewAssistantProgramStore(h.workspaceTaskStore).CommitLegacyMigration(station.ID, request.Token)
+		if commitErr != nil {
+			respondAssistantMigrationError(w, commitErr)
+			return
+		}
+		_ = orihttp.RespondSuccess(w, receipt)
+	}
+}
+
+func respondAssistantMigrationError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, workspace.ErrAssistantMigrationConflict), errors.Is(err, workspace.ErrAssistantMigrationAmbiguous):
+		_ = orihttp.RespondConflict(w, "Assistant Program migration needs a fresh impact review")
+	case errors.Is(err, workspace.ErrAssistantMigrationExpired):
+		_ = orihttp.RespondConflict(w, "Assistant Program migration review expired")
+	case errors.Is(err, workspace.ErrAssistantMigrationNotRequired):
+		_ = orihttp.RespondConflict(w, "Assistant Program migration is not required")
+	default:
+		_ = orihttp.RespondNotFound(w, "Assistant Program Home not found")
 	}
 }
 

@@ -77,6 +77,9 @@ export class AssistantProgramPage {
       .getElementById('assistantProgramRemoveHome')
       ?.addEventListener('click', event => void this.openHomeRemovalReview(event.currentTarget));
     document
+      .getElementById('assistantProgramMigration')
+      ?.addEventListener('click', event => void this.openMigrationReview(event.currentTarget));
+    document
       .getElementById('assistantProgramReflect')
       ?.addEventListener('click', () => void this.reflect());
     document
@@ -274,6 +277,10 @@ export class AssistantProgramPage {
     if (hireOpen)
       hireOpen.hidden =
         scopedProgram || Boolean(program.hired) || program.plugin_available === false;
+    const migration = document.getElementById('assistantProgramMigration');
+    if (migration)
+      migration.hidden =
+        !program.is_station || !program.migration_needed || program.plugin_available === false;
     const removeHome = document.getElementById('assistantProgramRemoveHome');
     if (removeHome) removeHome.hidden = !program.is_station || program.plugin_available === false;
     const promotionAck = document.getElementById('assistantProgramPromotionAck');
@@ -424,6 +431,66 @@ export class AssistantProgramPage {
         }
       }
       root.append(card);
+    }
+  }
+
+  async openMigrationReview(trigger) {
+    const { dialog, close } = this.newActionDialog('Review roster migration', trigger);
+    const heading = document.createElement('h3');
+    heading.textContent = 'Separate the legacy shared roster?';
+    const progress = document.createElement('p');
+    progress.setAttribute('role', 'status');
+    progress.setAttribute('aria-live', 'polite');
+    progress.textContent = 'Loading the current impact…';
+    const controls = document.createElement('div');
+    controls.className = 'assistant-program-action-buttons';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'modern-btn modern-btn-secondary';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', close);
+    controls.append(cancel);
+    dialog.append(heading, progress, controls);
+    try {
+      const review = await this.request('/migration/review', {
+        method: 'POST',
+        body: JSON.stringify({ state_revision: Number(this.program?.state_revision || 0) })
+      });
+      progress.textContent = `${Number(review.legacy_roster_count || 0)} legacy bindings will remain readable.`;
+      const impact = document.createElement('ul');
+      impact.className = 'assistant-program-impact-list';
+      (review.impact || []).forEach(line => {
+        const item = document.createElement('li');
+        item.textContent = line;
+        impact.append(item);
+      });
+      const confirm = document.createElement('button');
+      confirm.type = 'button';
+      confirm.className = 'modern-btn modern-btn-primary';
+      confirm.textContent = 'Separate scopes and preserve legacy roster';
+      confirm.addEventListener('click', async () => {
+        confirm.disabled = true;
+        cancel.disabled = true;
+        progress.textContent = 'Migrating roster scopes…';
+        try {
+          await this.request('/migration/commit', {
+            method: 'POST',
+            body: JSON.stringify({ token: review.token })
+          });
+          close();
+          await this.load();
+        } catch (error) {
+          progress.textContent = error.message || 'The roster could not be migrated.';
+          confirm.disabled = false;
+          cancel.disabled = false;
+        }
+      });
+      dialog.insertBefore(impact, controls);
+      controls.append(confirm);
+      confirm.focus();
+    } catch (error) {
+      progress.textContent = error.message || 'The roster migration impact could not be reviewed.';
+      cancel.focus();
     }
   }
 
