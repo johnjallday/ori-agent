@@ -1,0 +1,1 @@
+Review Ready Issues, active worktrees and task progress, open PRs, and recent changes. Recommend three things the user could work on next, ranked by user value, effort, and readiness. Avoid duplicating in-flight work. Explain why the top choice matters now.

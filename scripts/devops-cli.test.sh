@@ -2901,4 +2901,8 @@ if [[ "$failures" -ne 0 ]]; then
   exit 1
 fi
 
+# Explore covers native argv without provider calls and drives the actual e
+# action through a pseudo-terminal, including empty and non-Ready views.
+PYTHONDONTWRITEBYTECODE=1 python3 "$repo_root/scripts/devops-explore.test.py"
+
 printf '%s\n' "devops.sh tests passed"

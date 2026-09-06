@@ -93,6 +93,7 @@ scripts and agents.
 | `./scripts/devops.sh status` | reads the shared feature overview for checked-out implementation worktrees: task progress, Git/PR, agent, and attention state |
 | `./scripts/devops.sh release` | reads the latest Release's tag/publish time and counts delivery PRs merged into `dev` strictly after it |
 | `./scripts/devops.sh agent-defaults` | reads or confirm-gates persistent primary and role-fallback kind/model pairs in `.herdr/devflow.toml` — local only |
+| `./scripts/devops.sh explore [preset] [options]` | global `e` prompt menu; display with `--print` or confirm a fresh read/search-only Claude/Pi advisory session |
 | `./scripts/devops.sh view <n>` | reads one Issue in full |
 | `./scripts/devops.sh new <title> [--body <text> \| --body-file <path\|->]` | **writes** a new unlabelled Issue with optional context, confirm-gated |
 | `./scripts/devops.sh plan-new <title...> (--body <text> \| --body-file <path\|->) --size <quick\|planned\|prd> [planner options]` | **writes** one Ready Issue and delegates to the existing planning flow, confirm-gated |
@@ -106,6 +107,18 @@ removes Issues with local branch/worktree evidence. The picker and `status`
 also consume the read-only Go feature overview used by `wt status`; the separate
 `agent-defaults` action needs no `gh`, calls only the local Go config command,
 and never contacts Herdr.
+
+Global `e` / `explore` works from every picker view, including empty lists, and
+from the line REPL. It offers eight Markdown-backed work-discovery prompts,
+optional context, preview, display or a fresh foreground Claude/Pi advisor.
+`--print` needs neither gh nor an agent and collects no live evidence. Launch
+requires Python 3 and native safety flags; it confirms provider usage and supplies
+a bounded read-only Git/GitHub/task snapshot. The advisor has read/search tools,
+not shell/edit/write/MCP tools. This is not an OS sandbox. Discovery creates no
+Issues, planning artifacts, worktrees or Herdr bindings; Capture/Plan remain
+separate human actions. Native session/runtime housekeeping is disclosed in the
+preview. Scripted launches require `--kind` and `--yes`; see
+`docs/devops-explore.md` for exact limits and native compatibility.
 
 `release` additionally delegates to `gh release view` and `gh pr list --base
 dev --state merged`. Feature delivery targets `dev`, while Releases snapshot
