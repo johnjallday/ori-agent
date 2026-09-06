@@ -41,7 +41,9 @@ async function ensureWorkspace(page: Page, name?: string): Promise<string> {
   return (await res.json())?.folder?.id;
 }
 
-async function listWorkspaces(page: Page): Promise<Array<{ id: string; name?: string }>> {
+async function listWorkspaces(
+  page: Page
+): Promise<Array<{ id: string; name?: string; parent_id?: string }>> {
   const body = await (await page.request.get('/api/workspaces')).json();
   return body.workspaces || body.folders || [];
 }
@@ -60,6 +62,20 @@ async function completeCreateWizard(page: Page, name: string) {
   await page.locator('#folderNameInput').fill(name);
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep3')).toBeVisible();
+  // Blank now includes a proposed assistant. Review its setup through the
+  // same controls used by the create-workspace suite, without running it.
+  const batch = page.locator('[data-team-accept-all]');
+  if (await batch.isVisible()) await batch.click();
+  const pending = page
+    .locator('#workspaceTeamRoster .workspace-team-row')
+    .filter({ hasText: 'New · Needs setup' });
+  while ((await pending.count()) > 0) {
+    await pending.first().locator('[data-team-agent-setup]').click();
+    await expect(page.locator('#addAgentModal')).toBeVisible();
+    await page.locator('#createAgentBtn').click();
+    await expect(page.locator('#addAgentModal')).toBeHidden();
+    await expect(page.locator('#addFolderModal')).toBeVisible();
+  }
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep4')).toBeVisible();
   await page.locator('#createFolderBtn').click();
@@ -1279,6 +1295,42 @@ test.describe('Coordinate Workspace Map', () => {
       }
       return (await cameraOf(page)).zoom;
     }
+
+    test('district Build creates at the chosen position in the group and survives reload (#451)', async ({
+      page
+    }, testInfo) => {
+      const { group } = await seedDistrict(page);
+      await openMap(page);
+      await centerOnWorkspace(page, group);
+      await zoomTo(page, 1);
+      const point = await districtSurfacePoint(page, group);
+      await page.mouse.click(point.x, point.y, { button: 'right' });
+      await expect(page.locator('[data-menu-action="build"]')).toBeEnabled();
+      await page.locator('[data-menu-action="build"]').click();
+      await expect(page.locator('#addFolderModal')).toBeVisible();
+      const name = `Grouped Build ${Date.now()}`;
+      await completeCreateWizard(page, name);
+      await expect(page.locator('#addFolderModal')).toBeHidden();
+      const built = (await listWorkspaces(page)).find(ws => ws.name === name)!;
+      expect(built.parent_id).toBe(group);
+      const saved = (await (await page.request.get('/api/workspace-map/layout')).json()).layout
+        .positions[built.id];
+      expect(saved).toEqual({ x: expect.any(Number), y: expect.any(Number) });
+      await page.reload();
+      await districtOf(page, group).waitFor();
+      expect((await listWorkspaces(page)).find(ws => ws.id === built.id)?.parent_id).toBe(group);
+      const tile = page.locator(`.ws-map-tile[data-ws-id="${built.id}"]`);
+      await expect(tile).toBeAttached();
+      expect(
+        await tile.evaluate(el => ({
+          x: parseFloat((el as HTMLElement).style.left),
+          y: parseFloat((el as HTMLElement).style.top)
+        }))
+      ).toEqual(saved);
+      await centerOnWorkspace(page, group);
+      await zoomTo(page, 1);
+      await page.screenshot({ path: testInfo.outputPath('grouped-build.png'), fullPage: true });
+    });
 
     test('a populated district is compact and never spans to a stale anchor (FR-16, FR-25)', async ({
       page
