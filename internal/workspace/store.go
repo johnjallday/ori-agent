@@ -672,6 +672,24 @@ func preserveUnmirroredWorkspaceFields(target *Workspace, existing *Workspace) {
 	if capabilitiesMissing(target) && len(existing.InstalledCapabilities) > 0 {
 		target.InstalledCapabilities = CloneInstalledCapabilities(existing.InstalledCapabilities)
 	}
+	// Capability-owned sample roots may be changed only by the reviewed sample
+	// revocation boundary. A stale generic save cannot repoint or omit one.
+	for _, protected := range existing.DirectoryReferences {
+		if protected.Purpose != "sample_library" {
+			continue
+		}
+		found := false
+		for i := range target.DirectoryReferences {
+			if target.DirectoryReferences[i].ID == protected.ID {
+				target.DirectoryReferences[i] = protected
+				found = true
+				break
+			}
+		}
+		if !found {
+			target.DirectoryReferences = append(target.DirectoryReferences, protected)
+		}
+	}
 }
 
 // BasePath returns the default workspace root directory. Read under the lock so
@@ -845,6 +863,9 @@ func (s *FileStore) Delete(id string) error {
 	if !ok {
 		return fmt.Errorf("workspace %s not found", id)
 	}
+	if protectedAssistantProgramSubtree(s.cache, id) {
+		return ErrAssistantProgramProtected
+	}
 
 	folderPath := s.resolveFolder(relPath)
 
@@ -879,6 +900,9 @@ func (s *FileStore) Trash(id string) (originalPath string, trashedPath string, e
 	relPath, ok := s.idToPath[id]
 	if !ok {
 		return "", "", fmt.Errorf("workspace %s not found", id)
+	}
+	if protectedAssistantProgramSubtree(s.cache, id) {
+		return "", "", ErrAssistantProgramProtected
 	}
 
 	folderPath := s.resolveFolder(relPath)
@@ -2334,6 +2358,9 @@ func (s *InMemoryStore) Delete(id string) error {
 	if _, ok := s.workspaces[id]; !ok {
 		return fmt.Errorf("workspace %s not found", id)
 	}
+	if protectedAssistantProgramSubtree(s.workspaces, id) {
+		return ErrAssistantProgramProtected
+	}
 
 	delete(s.workspaces, id)
 	for slug, workspaceID := range s.slugToID {
@@ -2342,6 +2369,26 @@ func (s *InMemoryStore) Delete(id string) error {
 		}
 	}
 	return nil
+}
+
+func protectedAssistantProgramSubtree(workspaces map[string]*Workspace, rootID string) bool {
+	pending := map[string]bool{rootID: true}
+	for changed := true; changed; {
+		changed = false
+		for id, candidate := range workspaces {
+			if candidate != nil && pending[candidate.ParentID] && !pending[id] {
+				pending[id] = true
+				changed = true
+			}
+		}
+	}
+	for id := range pending {
+		candidate := workspaces[id]
+		if candidate != nil && (candidate.AssistantProgramState != nil || candidate.AssistantProjectLink != nil) {
+			return true
+		}
+	}
+	return false
 }
 
 // ListActive returns all active workspaces

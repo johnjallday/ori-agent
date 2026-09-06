@@ -412,6 +412,8 @@ func registerOnboardingRoutes(mux *http.ServeMux, s *Server) {
 	}
 
 	registerPersonalAssistantRoutes(mux, s)
+	registerSetupJourneyRoutes(mux, s)
+	registerSampleLibraryRoutes(mux, s)
 	registerPersonalHQRoutes(mux, s)
 	registerDailyBriefRoutes(mux, s)
 
@@ -736,6 +738,17 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program", s.Handlers.Session.GetAssistantProgram)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/activate", s.Handlers.Session.ActivateAssistantProgram)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/hire", s.Handlers.Session.HireAssistantProgram)
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/portfolio", s.Handlers.Session.GetAssistantPortfolio)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/portfolio/review", s.Handlers.Session.ReviewAssistantPortfolio)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/portfolio/commit", s.Handlers.Session.CommitAssistantPortfolio)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/handoffs/review", s.Handlers.Session.ReviewAssistantHandoff)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/handoffs/commit", s.Handlers.Session.CommitAssistantHandoff)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/disconnect/review", s.Handlers.Session.ReviewAssistantDisconnect)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/disconnect/commit", s.Handlers.Session.CommitAssistantDisconnect)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/remove-home/review", s.Handlers.Session.ReviewAssistantHomeRemoval)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/remove-home/commit", s.Handlers.Session.CommitAssistantHomeRemoval)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/migration/review", s.Handlers.Session.ReviewAssistantMigration)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/migration/commit", s.Handlers.Session.CommitAssistantMigration)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/promotion/ack", s.Handlers.Session.AcknowledgeAssistantPromotion)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/learnings", s.Handlers.Session.GetAssistantLearnings)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/reflection", s.Handlers.Session.RunAssistantReflection)
@@ -993,6 +1006,52 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/personal-assistant/first-assignment/preview", s.Handlers.PersonalAssistant.PreviewFirstAssignment)
 		mux.HandleFunc("POST /api/personal-assistant/first-assignment/apply", s.Handlers.PersonalAssistant.ApplyFirstAssignment)
 	}
+}
+
+// registerSetupJourneyRoutes registers the current accepted specialist's
+// generic root/child setup surface. No route accepts a user or owner ID.
+func registerSetupJourneyRoutes(mux *http.ServeMux, s *Server) {
+	if s == nil || s.Handlers == nil || s.Handlers.SetupJourney == nil {
+		return
+	}
+	handler := s.Handlers.SetupJourney
+	mux.HandleFunc("GET /api/personal-assistant/setup-journey", handler.GetRoot)
+	mux.HandleFunc("GET /api/personal-assistant/setup-journey/runs/{runID}", handler.GetRun)
+	mux.HandleFunc("GET /api/personal-assistant/setup-journey/runs/{runID}/preparation", handler.CheckPreparation)
+	mux.HandleFunc("POST /api/personal-assistant/setup-journey/open", handler.OpenRoot)
+	mux.HandleFunc("POST /api/personal-assistant/setup-journey/runs/{runID}/open", handler.OpenRun)
+	mux.HandleFunc("POST /api/personal-assistant/setup-journey/dismiss", handler.DismissRoot)
+	mux.HandleFunc("POST /api/personal-assistant/setup-journey/runs/{runID}/dismiss", handler.DismissRun)
+	mux.HandleFunc("POST /api/personal-assistant/setup-journey/children", handler.CreateChild)
+	mux.HandleFunc("POST /api/personal-assistant/setup-journey/runs/{runID}/actions/{actionID}", handler.Mutate)
+}
+
+func registerSampleLibraryRoutes(mux *http.ServeMux, s *Server) {
+	if s == nil || s.Handlers == nil || s.Handlers.SampleLibrary == nil {
+		return
+	}
+	h := s.Handlers.SampleLibrary
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/sample-library", h.GetState)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/sample-library/search", h.Search)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/sample-library/find", h.FindForProject)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/questions", h.DelegateQuestion)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/sample-library/collections", h.Collections)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/collections", h.CreateCollection)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/collections/review", h.ReviewCollection)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/collections/{collectionID}/members/review", h.ReviewCollectionMember)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/collections/{collectionID}/members", h.AddCollectionMember)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/entries/{entryID}/annotation/review", h.ReviewAnnotation)
+	mux.HandleFunc("PUT /api/workspaces/{workspaceID}/sample-library/entries/{entryID}/annotation", h.SetAnnotation)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/copies/review", h.ReviewCopy)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/copies/commit", h.CommitCopy)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/roots/review", h.ReviewRoot)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/roots/commit", h.CommitRoot)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/roots/{rootID}/analysis/review", h.ReviewAnalysis)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/roots/{rootID}/analysis/commit", h.CommitAnalysis)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/roots/{rootID}/revoke/review", h.ReviewRevocation)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/roots/{rootID}/revoke/commit", h.CommitRevocation)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/sample-library/roots/{rootID}/index", h.Index)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/sample-library/roots/{rootID}/entries", h.Entries)
 }
 
 // registerPersonalHQRoutes registers Personal HQ status/designation endpoints.

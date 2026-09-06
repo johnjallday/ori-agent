@@ -14,7 +14,8 @@ import { join } from 'node:path';
 // in order and the ones that need a hire come after it.
 test.describe.configure({ mode: 'serial' });
 
-const SHOTS = 'test-results/domain-specialist';
+const SHOTS = process.env.ORI_REAPER_DEMO_EVIDENCE_DIR || 'test-results/domain-specialist';
+const EXPECT_DEVELOPMENT_COPY = process.env.ORI_REAPER_EXPECT_DEVELOPMENT_COPY === '1';
 
 const musicOffer = {
   slug: 'music_production',
@@ -25,8 +26,7 @@ const musicOffer = {
     question: 'Want me to help with your music projects?',
     accept_label: 'Yes, help with my music',
     decline_label: 'No thanks',
-    accepted_note:
-      'Your assistant will keep an eye on your music projects and tell you what Reaper Producer has done.',
+    accepted_note: "Let's connect a REAPER project so I can include real studio updates.",
     manual_label: 'I work on music'
   },
   focus_areas: [
@@ -78,10 +78,10 @@ const musicOffer = {
   ],
   suggested_template_id: 'reaper-song',
   suggestion: {
-    title: 'Set up your studio workspace',
-    body: 'The Reaper Song blueprint brings in Reaper Producer.',
-    action_label: 'Create the studio workspace',
-    action_route: '/?create=1&blueprint=reaper-song'
+    title: 'Set up your music projects',
+    body: "Review Ori's local integration, connect an existing project or create a new one, then choose File-only or optional live control. Until you finish those separate steps, no project monitoring, live control, or project team is active.",
+    action_label: 'Continue reviewed setup',
+    action_route: '/personal-assistant?setup=specialist'
   },
   capability_order: ['projects', 'folders', 'calendar', 'email']
 };
@@ -101,21 +101,6 @@ async function stubDetection(page: Page, specialist: unknown) {
       })
     })
   );
-}
-
-async function completeHire(page: Page, name: string) {
-  await page.goto('/');
-  await expect(page.locator('#onboardingModal')).toBeVisible();
-  await page.locator('#onboardingUserName').fill('Jordan');
-  await page.locator('#welcomeNextBtn').click();
-  await page.locator('#continueWithoutModelBtn').click();
-  await expect(page.locator('#onboardingPersonalAssistantHire')).toBeVisible();
-  await page.locator('#pafAssistantName').fill(name);
-  await page.locator('#pafHireNextBtn').click();
-  await page.locator('#pafHireNextBtn').click();
-  await page.locator('#pafHireConfirm').check();
-  await page.locator('#pafHireBtn').click();
-  await expect(page.locator('#onboardingModal')).toBeHidden();
 }
 
 const offer = (page: Page) => page.locator('#personalAssistantSpecialistOffer');
@@ -175,12 +160,18 @@ test('the hire wizard never mentions a domain', async ({ page }) => {
   ]);
   await expect(page.locator('#onboardingModal')).not.toContainText(/REAPER|music projects/i);
   await page.screenshot({ path: `${SHOTS}/01-hire-has-no-offer.png`, fullPage: true });
+
+  // Finish this one serial hire so the suite never leaves a partial durable
+  // identity for the next case to misread as a second assistant.
+  await page.locator('#pafHireNextBtn').click();
+  await page.locator('#pafHireConfirm').check();
+  await page.locator('#pafHireBtn').click();
+  await expect(page.locator('#onboardingModal')).toBeHidden();
 });
 
 test('Home offers help with the detected domain once setup is finished', async ({ page }) => {
-  await page.request.post('/api/onboarding/reset');
   await stubDetection(page, musicOffer);
-  await completeHire(page, 'Atlas');
+  await page.goto('/');
 
   // Straight after the hire, Home is running its guided HQ walkthrough. The
   // domain offer must not compete with the user's actual next step.
@@ -205,10 +196,33 @@ test('Home offers help with the detected domain once setup is finished', async (
   await page.screenshot({ path: `${SHOTS}/02-home-offer.png`, fullPage: true });
 
   await page.locator('#personalAssistantSpecialistAcceptBtn').click();
+  const setup = page.locator('#specialistSetupJourneyModal');
+  await expect(setup).toBeVisible();
+  await expect(page.locator('#specialistSetupJourneyTitle')).toHaveText('Set up REAPER');
+  if (EXPECT_DEVELOPMENT_COPY) {
+    await expect(page.locator('#specialistSetupJourneyStepTitle')).toHaveText(
+      'Build Your Music Production Group'
+    );
+    const integrationStep = page
+      .locator('.setup-journey__step-button')
+      .filter({ hasText: 'Install Ori REAPER Plugin' });
+    await expect(integrationStep).toHaveAttribute('data-status', 'complete');
+    await integrationStep.click();
+    await expect(page.locator('#specialistSetupJourneyReceipt')).toContainText(
+      'Local development copy — not release-verified'
+    );
+  } else {
+    await expect(page.locator('#specialistSetupJourneyStepTitle')).toHaveText(
+      'Install Ori REAPER Plugin'
+    );
+  }
+  await expect(page.locator('#specialistSetupJourneyLater')).toBeVisible();
   await expect(offer(page)).toHaveAttribute('data-decision', 'accepted');
   await expect(page.locator('#personalAssistantSpecialistOfferAccepted')).toBeVisible();
   await expect(page.locator('#personalAssistantSpecialistOfferActions')).toBeHidden();
   await page.screenshot({ path: `${SHOTS}/03-home-offer-accepted.png`, fullPage: true });
+  await page.locator('#specialistSetupJourneyLater').click();
+  await expect(setup).toBeHidden();
 
   // Accepting records the domain and reshapes the working agreement.
   const relationship = await page.request.get('/api/personal-assistant');
@@ -249,7 +263,7 @@ test('the post-hire surface leads with the domain and suggests its workspace', a
   await page.goto('/?personal-assistant=working-agreement');
   const suggestion = page.locator('[data-role="capability-suggestion"]');
   await expect(suggestion).toBeVisible();
-  await expect(suggestion.locator('h4')).toHaveText('Set up your studio workspace');
+  await expect(suggestion.locator('h4')).toHaveText('Set up your music projects');
   // Nothing here may imply the assistant can hand work to the specialist.
   await expect(suggestion).not.toContainText(/assign|delegate|tell it to|hand off/i);
   const cards = page.locator('#personalAssistantCapabilities .pa-capability');
@@ -380,6 +394,173 @@ test('Today names the specialist that did the studio work and links straight to 
   await expect(section).not.toContainText(/delegate|assign|on your behalf|instead|workaround/i);
   await page.screenshot({ path: `${SHOTS}/06-today-studio-attribution.png`, fullPage: true });
 });
+
+test('the local demo creates a real project from one name and observes it after reload', async ({
+  page
+}) => {
+  test.skip(
+    !EXPECT_DEVELOPMENT_COPY,
+    'Requires the explicitly enabled disposable local integration.'
+  );
+  const openRequests: string[] = [];
+  await page.route('**/api/workspaces/*/project/open', route => {
+    openRequests.push(route.request().url());
+    return route.fulfill({ json: { success: true } });
+  });
+  await page.goto('/?setup=specialist');
+  const dialog = page.locator('#specialistSetupJourneyModal');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('.setup-journey__step-button')).toHaveCount(4);
+  await dialog.getByRole('button', { name: 'Build Group', exact: true }).click();
+  const groupBuilder = page.locator('#buildGroupModal');
+  await expect(groupBuilder).toBeVisible();
+  await expect(dialog).toBeHidden();
+  await expect(groupBuilder.getByRole('textbox', { name: 'Group name' })).toHaveValue(
+    'Music Production'
+  );
+  await groupBuilder.getByRole('textbox', { name: 'Group name' }).fill('My Studio');
+  await groupBuilder.getByRole('button', { name: 'Review Group' }).click();
+  await expect(groupBuilder.getByRole('heading', { name: 'Build “My Studio”?' })).toBeVisible();
+  await captureProjectScreen(page, '23-shared-group-review');
+  const groupResponse = page.waitForResponse(response =>
+    response.url().endsWith('/actions/create_group')
+  );
+  await groupBuilder.getByRole('button', { name: 'Build Group', exact: true }).click();
+  const groupCommit = await groupResponse;
+  expect(groupCommit.ok(), await groupCommit.text()).toBeTruthy();
+  const grouped = (await groupCommit.json()).setup_journey;
+  await expect(dialog.locator('#specialistSetupJourneyStepTitle')).toHaveText('Set Up REAPER');
+  expect(grouped.receipts.home_workspace_id).toBeTruthy();
+  expect(grouped.receipts.project_workspace_id).toBeFalsy();
+  await captureProjectScreen(page, '19-group-before-project');
+  const prerequisiteResponse = page.waitForResponse(response =>
+    response.url().endsWith('/preparation')
+  );
+  await dialog.getByRole('button', { name: 'Check Setup' }).click();
+  const prerequisites = await prerequisiteResponse;
+  expect(prerequisites.ok(), await prerequisites.text()).toBeTruthy();
+  await expect(dialog).toContainText('More setup is needed');
+  await dialog.getByRole('button', { name: 'Set up later' }).click();
+  await dialog.getByRole('button', { name: 'Create New Workspace', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  const creator = page.locator('#addFolderModal');
+  await expect(creator).toBeVisible();
+  await expect(creator.locator('#wizardStep2')).toBeVisible();
+  await expect(creator.locator('#projectTemplateOpenAfterCreateToggle')).not.toBeChecked();
+  await expect(creator.locator('#folderParentSelect')).toHaveValue(
+    grouped.receipts.home_workspace_id
+  );
+  const name = 'First Idea';
+  await creator.getByRole('textbox', { name: 'Workspace name', exact: true }).fill(name);
+  await captureProjectScreen(page, '16-real-project-name');
+  await creator.locator('#wizardNextBtn').click();
+  await creator.locator('#wizardNextBtn').click();
+  await expect(creator.locator('#wizardStep4')).toBeVisible();
+  await expect(creator.locator('#workspaceJourneyReview')).toContainText('first-idea.rpp');
+  await expect(creator.locator('#workspaceJourneyReview')).toContainText('Group: My Studio');
+  await captureProjectScreen(page, '17-real-project-review');
+  const commitEnvelopes: unknown[] = [];
+  let releaseRetry!: () => void;
+  let retryArrived!: () => void;
+  const retryGate = new Promise<void>(resolve => {
+    releaseRetry = resolve;
+  });
+  const retryStarted = new Promise<void>(resolve => {
+    retryArrived = resolve;
+  });
+  await page.route(
+    '**/actions/create_new_project',
+    async route => {
+      commitEnvelopes.push(route.request().postDataJSON());
+      const result = await route.fetch();
+      if (commitEnvelopes.length === 1) {
+        await route.abort('failed');
+        return;
+      }
+      retryArrived();
+      await retryGate;
+      await route.fulfill({ response: result });
+    },
+    { times: 2 }
+  );
+  const committed = page.waitForResponse(response =>
+    response.url().endsWith('/actions/create_new_project')
+  );
+  await creator.locator('#createFolderBtn').click();
+  await expect(creator.locator('#createFolderBtn')).toHaveText('Retry Confirmed Change');
+  await expect(creator.getByRole('button', { name: 'Check Setup Status' })).toBeVisible();
+  await captureProjectScreen(page, '22-shared-create-retry');
+  await creator.locator('#createFolderBtn').click();
+  await retryStarted;
+  await page.keyboard.press('Escape');
+  await expect(creator).toBeVisible();
+  await expect(creator).toHaveAttribute('aria-busy', 'true');
+  releaseRetry();
+  const response = await committed;
+  expect(commitEnvelopes[1]).toEqual(commitEnvelopes[0]);
+  expect(response.ok(), await response.text()).toBeTruthy();
+  const connected = (await response.json()).setup_journey;
+  expect(connected.busy).toBeFalsy();
+  expect(connected.receipts.project_workspace_id).toBeTruthy();
+  expect(
+    connected.steps.find((step: { kind: string }) => step.kind === 'project_connect').status
+  ).toBe('complete');
+  await expect(creator).toBeHidden();
+  await page.goto('/?setup=specialist');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Create New Project' })).toHaveCount(0);
+  const reread = await page.request.get('/api/personal-assistant/setup-journey');
+  const current = (await reread.json()).setup_journey;
+  expect(current.receipts.project_workspace_id).toBe(connected.receipts.project_workspace_id);
+  expect(current.busy).toBeFalsy();
+  expect(current.receipts.selected_mode_id).toBe('file_only');
+  expect(openRequests).toEqual([]);
+  await expect(dialog.locator('#specialistSetupJourneyError')).toBeHidden();
+  await captureProjectScreen(page, '18-real-project-connected');
+
+  // Another project bypasses installation/group preparation, reuses the Home,
+  // and still confirms three new project roles instead of inheriting a roster.
+  await dialog.getByRole('button', { name: 'Manage Team and Extras' }).click();
+  await expect(dialog.getByRole('button', { name: 'Review optional Home role' })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Back to workspace' }).click();
+  await dialog.getByRole('button', { name: 'Create Another Workspace', exact: true }).click();
+  await expect(creator.locator('#folderParentSelect')).toHaveValue(
+    grouped.receipts.home_workspace_id
+  );
+  await creator.getByRole('textbox', { name: 'Workspace name', exact: true }).fill('Second Idea');
+  await creator.locator('#wizardNextBtn').click();
+  await expect(creator).toContainText('Reuse your group coordinator');
+  await expect(creator.locator('#assistantProgramCreateName')).toBeDisabled();
+  await creator.locator('#wizardNextBtn').click();
+  await expect(creator).toContainText('3 new project-only roles');
+  await captureProjectScreen(page, '21-second-workspace-review');
+  const secondCommit = page.waitForResponse(response =>
+    response.url().endsWith('/actions/create_new_project')
+  );
+  await creator.locator('#createFolderBtn').click();
+  const secondResponse = await secondCommit;
+  expect(secondResponse.ok(), await secondResponse.text()).toBeTruthy();
+  const second = (await secondResponse.json()).setup_journey;
+  expect(second.run_id).not.toBe(current.run_id);
+  expect(second.receipts.project_workspace_id).not.toBe(current.receipts.project_workspace_id);
+  await expect(creator).toBeHidden();
+  const secondStatus = (
+    await (
+      await page.request.get(`/api/personal-assistant/setup-journey/runs/${second.run_id}`)
+    ).json()
+  ).setup_journey;
+  expect(secondStatus.lifecycle_state).toBe('ready');
+  const root = (await (await page.request.get('/api/personal-assistant/setup-journey')).json())
+    .setup_journey;
+  expect(root.receipts.project_workspace_id).toBe(current.receipts.project_workspace_id);
+  expect(root.receipts.home_workspace_id).toBe(grouped.receipts.home_workspace_id);
+  expect(openRequests).toEqual([]);
+});
+
+async function captureProjectScreen(page: Page, name: string) {
+  mkdirSync(SHOTS, { recursive: true });
+  await page.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: false });
+}
 
 // --- Specialist presence ------------------------------------------------
 

@@ -6,15 +6,11 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
-
-var errProjectEntryTargetMissing = errors.New("project entry target is missing")
 
 // OpenWorkspaceProject handles POST /api/workspaces/:id/project/open.
 //
@@ -42,35 +38,17 @@ func (h *HTTPHandler) OpenWorkspaceProject(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	projectPath, err := validatePersistedProjectPath(ws.ProjectPath)
-	if err != nil {
-		if strings.TrimSpace(ws.ProjectPath) == "" {
-			orihttp.NotFound(w, "Workspace has no project to open")
-		} else {
-			orihttp.BadRequest(w, fmt.Sprintf("Workspace project metadata is invalid: %v", err))
-		}
-		return
-	}
-	entryPath, err := GetProjectEntryPath(ws.SharedData)
-	if err != nil {
-		orihttp.BadRequest(w, fmt.Sprintf("Workspace project entry metadata is invalid: %v", err))
-		return
-	}
-	if entryPath == "" {
-		orihttp.NotFound(w, "Workspace has no project entry to open")
-		return
-	}
 	workspaceRoot, err := h.folderResolver.GetFolderPath(workspaceID)
 	if err != nil {
 		orihttp.NotFound(w, fmt.Sprintf("Workspace folder is unavailable: %v", err))
 		return
 	}
-	target, err := verifiedProjectEntryTarget(workspaceRoot, projectPath, entryPath)
+	resolved, err := ResolveProjectEntry(ws, workspaceRoot)
 	if err != nil {
-		if errors.Is(err, errProjectEntryTargetMissing) {
-			orihttp.NotFound(w, "Project entry file was not found")
+		if errors.Is(err, ErrProjectEntryUnavailable) {
+			orihttp.NotFound(w, "Workspace has no available project entry to open")
 		} else {
-			orihttp.BadRequest(w, fmt.Sprintf("Project entry cannot be opened safely: %v", err))
+			orihttp.BadRequest(w, "Workspace project entry metadata is unsafe")
 		}
 		return
 	}
@@ -78,20 +56,20 @@ func (h *HTTPHandler) OpenWorkspaceProject(w http.ResponseWriter, r *http.Reques
 		orihttp.ServiceUnavailable(w, "Operating-system file opening is unavailable")
 		return
 	}
-	if err := h.openFile(target); err != nil {
+	if err := h.openFile(resolved.AbsolutePath); err != nil {
 		orihttp.InternalError(w, fmt.Sprintf("Failed to open project entry: %v", err))
 		return
 	}
 
 	logger.Info("Opened workspace project entry via OS", logger.Fields{
 		"workspace_id": workspaceID,
-		"project_path": projectPath,
-		"entry_path":   entryPath,
+		"entry_kind":   resolved.Locator.Kind,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{
-		"message":   "Project open request accepted",
-		"workspace": workspaceID,
-		"path":      entryPath,
+		"message":       "Project open request accepted",
+		"workspace":     workspaceID,
+		"path":          resolved.Locator.RelativePath,
+		"relative_path": resolved.Locator.RelativePath,
 	})
 }
 
@@ -150,74 +128,4 @@ func parseProjectOpenIP(value string) (net.IP, bool) {
 	value = strings.TrimPrefix(strings.TrimSuffix(value, "]"), "[")
 	ip := net.ParseIP(value)
 	return ip, ip != nil
-}
-
-func validatePersistedProjectPath(value string) (string, error) {
-	return validateResolvedProjectEntryPath(value)
-}
-
-func verifiedProjectEntryTarget(workspaceRoot, projectPath, entryPath string) (string, error) {
-	root, err := filepath.Abs(filepath.Clean(workspaceRoot))
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve workspace root: %w", err)
-	}
-	rootInfo, err := os.Stat(root)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", errProjectEntryTargetMissing
-		}
-		return "", fmt.Errorf("failed to inspect workspace root: %w", err)
-	}
-	if !rootInfo.IsDir() {
-		return "", fmt.Errorf("workspace root is not a directory")
-	}
-
-	projectRoot, err := inspectProjectRelativePath(root, projectPath, true)
-	if err != nil {
-		return "", err
-	}
-	target, err := inspectProjectRelativePath(projectRoot, entryPath, false)
-	if err != nil {
-		return "", err
-	}
-	if !pathWithinRootAfterSymlinks(projectRoot, root) ||
-		!pathWithinRootAfterSymlinks(target, projectRoot) {
-		return "", fmt.Errorf("resolved path escapes the workspace project")
-	}
-	return target, nil
-}
-
-func inspectProjectRelativePath(root, portablePath string, wantDirectory bool) (string, error) {
-	current := filepath.Clean(root)
-	segments := strings.Split(portablePath, "/")
-	for index, segment := range segments {
-		current = filepath.Join(current, filepath.FromSlash(segment))
-		if !isPathWithin(current, root) || current == root {
-			return "", fmt.Errorf("path escapes its allowed root")
-		}
-		// current is built segment-by-segment from root and re-checked with
-		// isPathWithin on every iteration, and symlinks are rejected below, so
-		// the path cannot escape the workspace root.
-		info, err := os.Lstat(current) // #nosec G304 G703
-		if err != nil {
-			if os.IsNotExist(err) {
-				return "", errProjectEntryTargetMissing
-			}
-			return "", fmt.Errorf("failed to inspect path: %w", err)
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return "", fmt.Errorf("path contains a symlink")
-		}
-		last := index == len(segments)-1
-		if !last && !info.IsDir() {
-			return "", fmt.Errorf("path has a non-directory parent")
-		}
-		if last && wantDirectory && !info.IsDir() {
-			return "", fmt.Errorf("project_path is not a directory")
-		}
-		if last && !wantDirectory && !info.Mode().IsRegular() {
-			return "", fmt.Errorf("project entry is not a regular file")
-		}
-	}
-	return current, nil
 }

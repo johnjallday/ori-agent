@@ -83,6 +83,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/components/task-modal.tmpl",
 		"templates/components/agent-create-form.tmpl",
 		"templates/components/modals.tmpl",
+		"templates/components/group-builder.tmpl",
 		"templates/components/personal-hq-modals.tmpl",
 		"templates/components/navbar.tmpl",
 		"templates/components/ori-guide.tmpl",

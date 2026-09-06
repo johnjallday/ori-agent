@@ -7,6 +7,10 @@ verified private service behind Ori's host broker. This is not a return of the
 old gRPC plugin system. Portable MCP/skill components use Ori's existing
 registries; Workspace Surfaces use the constrained v1 protocol documented below.
 
+For the user-facing distinction between Ori's REAPER integration, File-only and
+optional live control, authorized project folders, scoped Home/project roles,
+and the optional Sample Library, see [Ori's REAPER integration](reaper-integration.md).
+
 ## Installing a plugin
 
 **From the UI** — open **Plugins** in the sidebar:

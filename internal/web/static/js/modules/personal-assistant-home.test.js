@@ -6,6 +6,7 @@ import {
   personalAssistantTodayView,
   safeTodayRoute,
   specialistOfferIsOpen,
+  specialistSetupView,
   specialistOfferView,
   studioSectionView,
   todaySectionRows
@@ -153,6 +154,54 @@ test('the studio section degrades safely without a name, a workspace, or a usabl
   assert.equal(bare.heading, 'From your studio');
   assert.equal(bare.linkLabel, 'Open the workspace');
   assert.match(bare.note, /your specialist/i);
+});
+
+test('specialist setup reports exact project and child status with closed actions', () => {
+  const view = specialistSetupView({
+    health: { status: 'available' },
+    title: 'Set up a domain',
+    lifecycle: 'ready',
+    connected_project_count: 2,
+    child_run_count: 1,
+    unfinished_child_count: 1,
+    runs: [
+      { run_kind: 'root', lifecycle: 'ready', project_name: 'First project' },
+      { run_kind: 'child', lifecycle: 'needs_attention', project_name: 'Second project' }
+    ],
+    sample_library: {
+      state: 'active',
+      active_root_count: 2,
+      indexed_root_count: 1
+    },
+    actions: [
+      { id: 'review_setup', label: 'Review setup' },
+      { id: 'connect_another', label: 'Connect another project' },
+      { id: 'open_home', label: 'Open Home', route: '/workspaces/home/assistant' },
+      { id: 'open_project', label: 'Unsafe', route: 'https://evil.example' },
+      { id: 'made_up', label: 'Made up action', route: '/plugins' }
+    ]
+  });
+  assert.equal(view.visible, true);
+  assert.match(view.status, /2 connected projects/i);
+  assert.match(view.status, /1 later setup needs attention/i);
+  assert.deepEqual(view.runs, ['First project — ready', 'Second project — needs attention']);
+  assert.match(view.sampleStatus, /2 approved folders, 1 indexed/i);
+  assert.deepEqual(
+    view.actions.map(action => action.id),
+    ['review_setup', 'connect_another', 'open_home']
+  );
+});
+
+test('specialist setup keeps unavailable distinct from an empty setup', () => {
+  assert.equal(specialistSetupView(null).visible, false);
+  const unavailable = specialistSetupView({
+    health: { status: 'unavailable' },
+    lifecycle: 'not_started',
+    connected_project_count: 0,
+    actions: []
+  });
+  assert.match(unavailable.status, /temporarily unavailable/i);
+  assert.doesNotMatch(unavailable.status, /ready/i);
 });
 
 // --- The post-hire domain offer ----------------------------------------

@@ -42,7 +42,10 @@ const (
 	CodeHostFeatureUnsupported    ContributionErrorCode = "host_feature_unsupported"
 )
 
-const HostFeatureAssistantProgramV1 = "assistant_program_v1"
+const (
+	HostFeatureAssistantProgramV1       = "assistant_program_v1"
+	HostFeatureSpecialistSetupJourneyV1 = "specialist_setup_journey_v1"
+)
 
 // ContributionError is safe to project during local plugin validation. It
 // identifies the rejected component/field without including filesystem paths,
@@ -290,6 +293,16 @@ func ParseSurfaceContribution(data []byte) (*SurfaceContribution, error) {
 }
 
 func (c *SurfaceContribution) Validate() error {
+	return c.ValidateForHost(SurfaceProtocolVersion, []string{
+		HostFeatureAssistantProgramV1,
+		HostFeatureSpecialistSetupJourneyV1,
+	})
+}
+
+// ValidateForHost applies the same strict contribution validation against an
+// explicit host contract. Compatibility tests use it to prove that a plugin
+// requiring a newer feature fails before any registration on an older host.
+func (c *SurfaceContribution) ValidateForHost(protocolVersion int, hostFeatures []string) error {
 	if c == nil {
 		return contributionError(CodeContributionInvalid, "manifest", "", "manifest is required", nil)
 	}
@@ -307,16 +320,23 @@ func (c *SurfaceContribution) Validate() error {
 	if c.Protocol.Min < 1 || maximum < c.Protocol.Min {
 		return contributionError(CodeProtocolRangeInvalid, "manifest", "protocol", "protocol range is invalid", nil)
 	}
-	if c.Protocol.Min > SurfaceProtocolVersion || maximum < SurfaceProtocolVersion {
-		return contributionError(CodeProtocolIncompatible, "manifest", "protocol", "protocol range does not include host v1", nil)
+	if protocolVersion < 1 || c.Protocol.Min > protocolVersion || maximum < protocolVersion {
+		return contributionError(CodeProtocolIncompatible, "manifest", "protocol", "protocol range does not include the host version", nil)
 	}
 	if len(c.RequiresHostFeatures) > 8 {
 		return contributionError(CodeHostFeatureUnsupported, "manifest", "requires_host_features", "too many host features are required", nil)
 	}
+	availableHostFeatures := make(map[string]struct{}, len(hostFeatures))
+	for _, feature := range hostFeatures {
+		feature = strings.TrimSpace(feature)
+		if feature != "" {
+			availableHostFeatures[feature] = struct{}{}
+		}
+	}
 	seenHostFeatures := make(map[string]struct{}, len(c.RequiresHostFeatures))
 	for _, feature := range c.RequiresHostFeatures {
 		feature = strings.TrimSpace(feature)
-		if feature != HostFeatureAssistantProgramV1 {
+		if _, available := availableHostFeatures[feature]; !available {
 			return contributionError(CodeHostFeatureUnsupported, "manifest", "requires_host_features", "a required host feature is unavailable", nil)
 		}
 		if _, duplicate := seenHostFeatures[feature]; duplicate {

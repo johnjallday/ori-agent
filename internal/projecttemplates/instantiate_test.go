@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"testing"
 	"time"
@@ -84,6 +85,29 @@ func TestInstantiateSubstitutesNamesAndCopiesBytes(t *testing.T) {
 	// The manifest must not be copied.
 	if _, err := os.Stat(filepath.Join(wsDir, "song-x", ManifestFileName)); !os.IsNotExist(err) {
 		t.Errorf("template.json leaked into project (err=%v)", err)
+	}
+}
+
+func TestPreviewInstantiationUsesCreationNamesWithoutReadingOrWritingContent(t *testing.T) {
+	tplDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(tplDir, "Audio"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tplDir, "{{name}}.rpp"), []byte("private template content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tplDir, "Audio", "notes.txt"), []byte("notes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	files, err := PreviewInstantiation(Template{Path: tplDir, HasSkeleton: true}, "First Idea")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(files, []string{"Audio/notes.txt", "first-idea.rpp"}) {
+		t.Fatalf("preview files = %#v", files)
+	}
+	if _, err := os.Stat(filepath.Join(tplDir, "first-idea.rpp")); !os.IsNotExist(err) {
+		t.Fatal("preview wrote substituted output into the template")
 	}
 }
 

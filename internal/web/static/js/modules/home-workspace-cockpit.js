@@ -1,3 +1,5 @@
+import { openGroupBuilder } from './group-builder.js';
+
 // home-workspace-cockpit.js — the Map-first Home cockpit coordinator.
 //
 // PRD: tasks/prd-home-workspace-cockpit.md. This module owns the ONE cockpit
@@ -3021,6 +3023,10 @@ import {
   // Every create/import/delete/move/tag/undo path funnels through here, so one
   // authoritative reload updates Map, Tree, Summary, and the rail together
   // rather than each view refetching for itself (FR108, FR117).
+  document
+    .getElementById('cockpitBuildGroupBtn')
+    ?.addEventListener('click', () => openGroupBuilder());
+
   window.addEventListener('ori:workspaces-changed', () => {
     if (canHydrateWorkspaceData()) void refreshQuietly();
   });

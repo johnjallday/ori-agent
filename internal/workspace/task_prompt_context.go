@@ -354,7 +354,7 @@ func (h *LLMTaskHandler) buildTaskWorkspaceSnapshot(ctx context.Context, task Ta
 
 	directories := limitTaskPromptDirectories(ws.DirectoryReferences, taskPromptMaxDirectories)
 	if len(directories) > 0 {
-		lines = append(lines, "", fmt.Sprintf("### Workspace Directories (%d)", len(ws.DirectoryReferences)), "")
+		lines = append(lines, "", fmt.Sprintf("### Workspace Directories (%d)", len(directories)), "")
 		for _, dir := range directories {
 			lines = append(lines, fmt.Sprintf(
 				"- Directory: %q path=%q",
@@ -441,12 +441,12 @@ func (h *LLMTaskHandler) PrepareTaskContext(ctx context.Context, agentName strin
 				Detail: fmt.Sprintf("%d workspace file(s) are summarized in the snapshot; full content is not injected unless attached to this task.", fileCount),
 			})
 		}
-		if len(ws.DirectoryReferences) > 0 {
+		if directories := limitTaskPromptDirectories(ws.DirectoryReferences, taskPromptMaxDirectories); len(directories) > 0 {
 			prepared.Items = append(prepared.Items, TaskPreparedContextItem{
 				Kind:   "workspace_directories",
 				Name:   "Workspace directory references",
 				Access: "summarized",
-				Detail: fmt.Sprintf("%d directory reference(s) are summarized; contents are available only through tools.", len(ws.DirectoryReferences)),
+				Detail: fmt.Sprintf("%d directory reference(s) are summarized; contents are available only through tools.", len(directories)),
 			})
 		}
 	}
@@ -716,10 +716,17 @@ func limitTaskPromptDirectories(directories []DirectoryReference, limit int) []D
 	if limit <= 0 || len(directories) == 0 {
 		return nil
 	}
-	if len(directories) <= limit {
-		return directories
+	result := make([]DirectoryReference, 0, min(limit, len(directories)))
+	for _, directory := range directories {
+		if directory.Purpose == "sample_library" {
+			continue
+		}
+		result = append(result, directory)
+		if len(result) == limit {
+			break
+		}
 	}
-	return directories[:limit]
+	return result
 }
 
 func limitTaskPromptNotes(notes []TaskPromptNoteSummary, limit int) []TaskPromptNoteSummary {

@@ -74,6 +74,12 @@ export class AssistantProgramPage {
       .getElementById('assistantProgramPromotionAck')
       ?.addEventListener('click', () => void this.acknowledgePromotion());
     document
+      .getElementById('assistantProgramRemoveHome')
+      ?.addEventListener('click', event => void this.openHomeRemovalReview(event.currentTarget));
+    document
+      .getElementById('assistantProgramMigration')
+      ?.addEventListener('click', event => void this.openMigrationReview(event.currentTarget));
+    document
       .getElementById('assistantProgramReflect')
       ?.addEventListener('click', () => void this.reflect());
     document
@@ -158,7 +164,7 @@ export class AssistantProgramPage {
       }
       this.program = program;
       this.render();
-      if (!program.hired) this.openHire();
+      if (!program.hired && Number(program.declaration?.schema_version || 1) < 2) this.openHire();
     } catch (error) {
       this.showError(error.message || 'This assistant home is unavailable.');
     }
@@ -252,12 +258,31 @@ export class AssistantProgramPage {
         'The contribution is unavailable. Existing assistant data remains readable.'
     );
 
-    this.renderRoster(declaration.roles || [], program.roster || []);
+    const scopedProgram = Number(declaration.schema_version || 1) >= 2;
+    const rosterScope = program.roster_scope || (program.is_station ? 'home' : 'project');
+    const visibleRoles = scopedProgram
+      ? (declaration.roles || []).filter(role => role.scope === rosterScope)
+      : declaration.roles || [];
+    this.renderRoster(
+      visibleRoles,
+      program.roster || [],
+      rosterScope,
+      scopedProgram,
+      program.role_profiles || []
+    );
     this.renderStages(declaration.stages || []);
-    this.renderProjects(program.projects || []);
+    this.renderProjects(program.projects || [], program.portfolio || []);
 
     const hireOpen = document.getElementById('assistantProgramHireOpen');
-    if (hireOpen) hireOpen.hidden = Boolean(program.hired) || program.plugin_available === false;
+    if (hireOpen)
+      hireOpen.hidden =
+        scopedProgram || Boolean(program.hired) || program.plugin_available === false;
+    const migration = document.getElementById('assistantProgramMigration');
+    if (migration)
+      migration.hidden =
+        !program.is_station || !program.migration_needed || program.plugin_available === false;
+    const removeHome = document.getElementById('assistantProgramRemoveHome');
+    if (removeHome) removeHome.hidden = !program.is_station || program.plugin_available === false;
     const promotionAck = document.getElementById('assistantProgramPromotionAck');
     if (promotionAck)
       promotionAck.hidden = !program.promotion_pending || program.plugin_available === false;
@@ -273,29 +298,49 @@ export class AssistantProgramPage {
     if (program.hired) void this.loadLearnings();
   }
 
-  renderRoster(roles, roster) {
+  renderRoster(roles, roster, rosterScope = '', scopedProgram = false, profiles = []) {
     const root = document.getElementById('assistantProgramRoster');
     if (!root) return;
     root.replaceChildren();
     for (const role of roles) {
       const binding = roster.find(item => item.role_id === role.id);
+      const profile = profiles.find(item => item.role_id === role.id);
       const card = document.createElement('article');
       card.className = 'assistant-program-role';
       card.dataset.primary = role.primary ? 'true' : 'false';
       const roleID = document.createElement('span');
       roleID.className = 'assistant-program-role-id';
-      roleID.textContent = role.primary ? 'Primary / coordinator' : `Specialist / ${role.id}`;
+      const scopeLabel = scopedProgram
+        ? `${rosterScope === 'home' ? 'Home' : 'This project'} / `
+        : '';
+      roleID.textContent = role.primary
+        ? `${scopeLabel}Primary / coordinator`
+        : `${scopeLabel}Specialist / ${role.id}`;
       const title = document.createElement('h3');
       title.textContent = role.label || role.id;
       const description = document.createElement('p');
       description.textContent = role.description || '';
       card.append(roleID, title, description);
-      if (binding?.agent_name) {
+      const profileName = profile?.profile_name || binding?.agent_name;
+      if (profileName) {
         const agentName = document.createElement('a');
         agentName.className = 'assistant-program-role-agent';
-        agentName.href = `/agents/${encodeURIComponent(binding.agent_name)}`;
-        agentName.textContent = `Open ${binding.agent_name} →`;
+        agentName.href = `/agents/${encodeURIComponent(profileName)}`;
+        agentName.textContent = `Open ${profileName} →`;
         card.append(agentName);
+        if (scopedProgram) {
+          const readiness = document.createElement('span');
+          readiness.className = 'assistant-program-role-readiness';
+          readiness.textContent = profile?.chat_available
+            ? `${profile.provider || 'Default provider'} · ${profile.model || 'Provider default'}`
+            : 'Chat/execution unavailable — no compatible model is configured';
+          card.append(readiness);
+        }
+      } else if (scopedProgram) {
+        const unfinished = document.createElement('span');
+        unfinished.className = 'assistant-program-role-readiness';
+        unfinished.textContent = `Not staffed in ${rosterScope === 'home' ? 'Home' : 'this project'}`;
+        card.append(unfinished);
       }
       root.append(card);
     }
@@ -334,7 +379,7 @@ export class AssistantProgramPage {
     );
   }
 
-  renderProjects(projects) {
+  renderProjects(projects, portfolio = []) {
     const root = document.getElementById('assistantProgramProjects');
     if (!root) return;
     root.replaceChildren();
@@ -345,14 +390,544 @@ export class AssistantProgramPage {
       root.append(empty);
       return;
     }
+    const portfolioByProject = new Map(portfolio.map(item => [item.project_workspace_id, item]));
     for (const project of projects) {
+      const card = document.createElement('article');
+      card.className = 'assistant-program-project-card';
       const link = document.createElement('a');
       link.className = 'assistant-program-project';
       if (project.id === this.program.project_id) link.classList.add('is-current');
       link.href = project.folder_slug ? workspaceRootURL(project.folder_slug) : '#';
       link.textContent = project.name || project.id;
-      root.append(link);
+      card.append(link);
+      const record = portfolioByProject.get(project.id);
+      if (record) {
+        const details = document.createElement('p');
+        details.className = 'assistant-program-project-meta';
+        details.textContent = `${text(record.fields?.status || 'planning').replaceAll('_', ' ')} · Priority ${Number(record.fields?.priority || 0)} · ${Number(record.open_ticket_count || 0)} open Tickets`;
+        card.append(details);
+        if (this.program.is_station) {
+          const actions = document.createElement('div');
+          actions.className = 'assistant-program-project-actions';
+          const edit = document.createElement('button');
+          edit.type = 'button';
+          edit.className = 'modern-btn modern-btn-secondary';
+          edit.textContent = 'Edit portfolio details';
+          edit.addEventListener('click', () => this.openPortfolioEditor(record, edit));
+          const handoff = document.createElement('button');
+          handoff.type = 'button';
+          handoff.className = 'modern-btn modern-btn-secondary';
+          handoff.textContent = 'Send to project';
+          handoff.addEventListener('click', () => this.openHandoffEditor(record, handoff));
+          const disconnect = document.createElement('button');
+          disconnect.type = 'button';
+          disconnect.className = 'modern-btn modern-btn-secondary';
+          disconnect.textContent = 'Review disconnect';
+          disconnect.addEventListener('click', () =>
+            this.openDisconnectReview(project, disconnect)
+          );
+          actions.append(edit, handoff, disconnect);
+          card.append(actions);
+        }
+      }
+      root.append(card);
     }
+  }
+
+  async openMigrationReview(trigger) {
+    const { dialog, close } = this.newActionDialog('Review roster migration', trigger);
+    const heading = document.createElement('h3');
+    heading.textContent = 'Separate the legacy shared roster?';
+    const progress = document.createElement('p');
+    progress.setAttribute('role', 'status');
+    progress.setAttribute('aria-live', 'polite');
+    progress.textContent = 'Loading the current impact…';
+    const controls = document.createElement('div');
+    controls.className = 'assistant-program-action-buttons';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'modern-btn modern-btn-secondary';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', close);
+    controls.append(cancel);
+    dialog.append(heading, progress, controls);
+    try {
+      const review = await this.request('/migration/review', {
+        method: 'POST',
+        body: JSON.stringify({ state_revision: Number(this.program?.state_revision || 0) })
+      });
+      progress.textContent = `${Number(review.legacy_roster_count || 0)} legacy bindings will remain readable.`;
+      const impact = document.createElement('ul');
+      impact.className = 'assistant-program-impact-list';
+      (review.impact || []).forEach(line => {
+        const item = document.createElement('li');
+        item.textContent = line;
+        impact.append(item);
+      });
+      const confirm = document.createElement('button');
+      confirm.type = 'button';
+      confirm.className = 'modern-btn modern-btn-primary';
+      confirm.textContent = 'Separate scopes and preserve legacy roster';
+      confirm.addEventListener('click', async () => {
+        confirm.disabled = true;
+        cancel.disabled = true;
+        progress.textContent = 'Migrating roster scopes…';
+        try {
+          await this.request('/migration/commit', {
+            method: 'POST',
+            body: JSON.stringify({ token: review.token })
+          });
+          close();
+          await this.load();
+        } catch (error) {
+          progress.textContent = error.message || 'The roster could not be migrated.';
+          confirm.disabled = false;
+          cancel.disabled = false;
+        }
+      });
+      dialog.insertBefore(impact, controls);
+      controls.append(confirm);
+      confirm.focus();
+    } catch (error) {
+      progress.textContent = error.message || 'The roster migration impact could not be reviewed.';
+      cancel.focus();
+    }
+  }
+
+  async openHomeRemovalReview(trigger) {
+    const { dialog, close } = this.newActionDialog('Review Home removal', trigger);
+    const heading = document.createElement('h3');
+    heading.textContent = `Remove ${this.homeName()}?`;
+    const progress = document.createElement('p');
+    progress.setAttribute('role', 'status');
+    progress.setAttribute('aria-live', 'polite');
+    progress.textContent = 'Loading the current impact…';
+    const controls = document.createElement('div');
+    controls.className = 'assistant-program-action-buttons';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'modern-btn modern-btn-secondary';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', close);
+    controls.append(cancel);
+    dialog.append(heading, progress, controls);
+    try {
+      const review = await this.request('/remove-home/review', {
+        method: 'POST',
+        body: JSON.stringify({ state_revision: Number(this.program?.state_revision || 0) })
+      });
+      progress.textContent = `${Number(review.linked_project_count || 0)} linked projects will be retained.`;
+      const impact = document.createElement('ul');
+      impact.className = 'assistant-program-impact-list';
+      (review.impact || []).forEach(line => {
+        const item = document.createElement('li');
+        item.textContent = line;
+        impact.append(item);
+      });
+      const confirm = document.createElement('button');
+      confirm.type = 'button';
+      confirm.className = 'modern-btn modern-btn-danger';
+      confirm.textContent = 'Remove Home and retain projects';
+      confirm.addEventListener('click', async () => {
+        confirm.disabled = true;
+        cancel.disabled = true;
+        progress.textContent = 'Removing Home…';
+        try {
+          await this.request('/remove-home/commit', {
+            method: 'POST',
+            body: JSON.stringify({ token: review.token })
+          });
+          globalThis.location.assign(this.workspaceURL());
+        } catch (error) {
+          progress.textContent = error.message || 'The Home could not be removed.';
+          confirm.disabled = false;
+          cancel.disabled = false;
+        }
+      });
+      dialog.insertBefore(impact, controls);
+      controls.append(confirm);
+      confirm.focus();
+    } catch (error) {
+      progress.textContent = error.message || 'The removal impact could not be reviewed.';
+      cancel.focus();
+    }
+  }
+
+  async openDisconnectReview(project, trigger) {
+    const { dialog, close } = this.newActionDialog(
+      `Review disconnect for ${project.name || 'project'}`,
+      trigger
+    );
+    const heading = document.createElement('h3');
+    heading.textContent = `Disconnect ${project.name || 'project'}?`;
+    const progress = document.createElement('p');
+    progress.setAttribute('role', 'status');
+    progress.setAttribute('aria-live', 'polite');
+    progress.textContent = 'Loading the current impact…';
+    const controls = document.createElement('div');
+    controls.className = 'assistant-program-action-buttons';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'modern-btn modern-btn-secondary';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', close);
+    controls.append(cancel);
+    dialog.append(heading, progress, controls);
+    try {
+      const review = await this.request('/disconnect/review', {
+        method: 'POST',
+        body: JSON.stringify({
+          project_workspace_id: project.id,
+          state_revision: Number(this.program?.state_revision || 0)
+        })
+      });
+      progress.textContent = '';
+      const impact = document.createElement('ul');
+      impact.className = 'assistant-program-impact-list';
+      (review.impact || []).forEach(line => {
+        const item = document.createElement('li');
+        item.textContent = line;
+        impact.append(item);
+      });
+      const confirm = document.createElement('button');
+      confirm.type = 'button';
+      confirm.className = 'modern-btn modern-btn-danger';
+      confirm.textContent = 'Disconnect and preserve project';
+      confirm.addEventListener('click', async () => {
+        confirm.disabled = true;
+        cancel.disabled = true;
+        progress.textContent = 'Disconnecting…';
+        try {
+          await this.request('/disconnect/commit', {
+            method: 'POST',
+            body: JSON.stringify({
+              token: review.token,
+              idempotency_key: globalThis.crypto?.randomUUID?.() || `disconnect-${Date.now()}`
+            })
+          });
+          close();
+          await this.load();
+        } catch (error) {
+          progress.textContent = error.message || 'The project could not be disconnected.';
+          confirm.disabled = false;
+          cancel.disabled = false;
+        }
+      });
+      dialog.insertBefore(impact, controls);
+      controls.append(confirm);
+      confirm.focus();
+    } catch (error) {
+      progress.textContent = error.message || 'The disconnect impact could not be reviewed.';
+      cancel.focus();
+    }
+  }
+
+  newActionDialog(title, trigger) {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'assistant-program-action-dialog';
+    dialog.setAttribute('aria-label', title);
+    const close = () => {
+      if (dialog.open && typeof dialog.close === 'function') dialog.close();
+      dialog.remove();
+      trigger?.focus?.();
+    };
+    dialog.addEventListener('cancel', event => {
+      event.preventDefault();
+      close();
+    });
+    document.body.append(dialog);
+    if (typeof dialog.showModal === 'function') dialog.showModal();
+    else dialog.setAttribute('open', '');
+    return { dialog, close };
+  }
+
+  actionField(label, value = '', type = 'text') {
+    const wrapper = document.createElement('label');
+    wrapper.className = 'assistant-program-action-field';
+    const caption = document.createElement('span');
+    caption.textContent = label;
+    const input = document.createElement('input');
+    input.type = type;
+    input.value = text(value);
+    input.maxLength = type === 'number' || type === 'date' ? 32 : 240;
+    wrapper.append(caption, input);
+    return { wrapper, input };
+  }
+
+  renderActionReview(dialog, title, rows, onConfirm, close) {
+    dialog.replaceChildren();
+    const heading = document.createElement('h2');
+    heading.textContent = title;
+    const note = document.createElement('p');
+    note.textContent = 'Review these exact effects. Nothing else is authorized.';
+    const list = document.createElement('dl');
+    list.className = 'assistant-program-action-review';
+    for (const [label, value] of rows) {
+      const term = document.createElement('dt');
+      term.textContent = label;
+      const detail = document.createElement('dd');
+      detail.textContent = text(value);
+      list.append(term, detail);
+    }
+    const error = document.createElement('p');
+    error.className = 'assistant-program-action-error';
+    error.setAttribute('role', 'alert');
+    const controls = document.createElement('div');
+    controls.className = 'assistant-program-project-actions';
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'modern-btn modern-btn-secondary';
+    back.textContent = 'Cancel';
+    back.addEventListener('click', close);
+    const confirm = document.createElement('button');
+    confirm.type = 'button';
+    confirm.className = 'modern-btn modern-btn-primary';
+    confirm.textContent = 'Confirm reviewed change';
+    confirm.addEventListener('click', async () => {
+      confirm.disabled = true;
+      try {
+        await onConfirm();
+        close();
+      } catch (requestError) {
+        error.textContent = requestError.message || 'The reviewed change was not applied.';
+        confirm.disabled = false;
+      }
+    });
+    controls.append(back, confirm);
+    dialog.append(heading, note, list, error, controls);
+    confirm.focus();
+  }
+
+  announceAction(message) {
+    setText('assistantProgramActionLive', message);
+  }
+
+  openPortfolioEditor(record, trigger) {
+    const { dialog, close } = this.newActionDialog(
+      `Edit portfolio details for ${record.project_name}`,
+      trigger
+    );
+    const form = document.createElement('form');
+    form.className = 'assistant-program-action-form';
+    const heading = document.createElement('h2');
+    heading.textContent = `Portfolio details · ${record.project_name}`;
+    const statusLabel = document.createElement('label');
+    statusLabel.className = 'assistant-program-action-field';
+    const statusCaption = document.createElement('span');
+    statusCaption.textContent = 'Status';
+    const status = document.createElement('select');
+    for (const value of ['planning', 'active', 'on_hold', 'complete', 'archived'])
+      status.append(selectOption(value.replaceAll('_', ' '), value));
+    status.value = record.fields?.status || 'planning';
+    statusLabel.append(statusCaption, status);
+    const priority = this.actionField('Priority (0–5)', record.fields?.priority || 0, 'number');
+    priority.input.min = '0';
+    priority.input.max = '5';
+    const sessionDate = this.actionField('Session date', record.fields?.session_date || '', 'date');
+    const releaseDate = this.actionField('Release date', record.fields?.release_date || '', 'date');
+    const blockers = document.createElement('label');
+    blockers.className = 'assistant-program-action-field';
+    blockers.append(document.createElement('span'), document.createElement('textarea'));
+    blockers.firstChild.textContent = 'Blockers (one per line)';
+    blockers.lastChild.value = (record.fields?.blockers || []).join('\n');
+    blockers.lastChild.maxLength = 4096;
+    const deliverables = document.createElement('label');
+    deliverables.className = 'assistant-program-action-field';
+    deliverables.append(document.createElement('span'), document.createElement('textarea'));
+    deliverables.firstChild.textContent = 'Deliverables (one per line)';
+    deliverables.lastChild.value = (record.fields?.deliverables || []).join('\n');
+    deliverables.lastChild.maxLength = 4096;
+    const archiveLabel = document.createElement('label');
+    archiveLabel.className = 'assistant-program-action-field';
+    const archiveCaption = document.createElement('span');
+    archiveCaption.textContent = 'Archive review';
+    const archive = document.createElement('select');
+    for (const value of ['not_ready', 'ready', 'reviewed'])
+      archive.append(selectOption(value.replaceAll('_', ' '), value));
+    archive.value = record.fields?.archive_review_state || 'not_ready';
+    archiveLabel.append(archiveCaption, archive);
+    const error = document.createElement('p');
+    error.className = 'assistant-program-action-error';
+    error.setAttribute('role', 'alert');
+    const controls = document.createElement('div');
+    controls.className = 'assistant-program-project-actions';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'modern-btn modern-btn-secondary';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', close);
+    const reviewButton = document.createElement('button');
+    reviewButton.type = 'submit';
+    reviewButton.className = 'modern-btn modern-btn-primary';
+    reviewButton.textContent = 'Review portfolio change';
+    controls.append(cancel, reviewButton);
+    form.append(
+      heading,
+      statusLabel,
+      priority.wrapper,
+      sessionDate.wrapper,
+      releaseDate.wrapper,
+      blockers,
+      deliverables,
+      archiveLabel,
+      error,
+      controls
+    );
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      reviewButton.disabled = true;
+      const lines = element =>
+        element.value
+          .split(/\r?\n/)
+          .map(value => value.trim())
+          .filter(Boolean);
+      const fields = {
+        status: status.value,
+        priority: Number(priority.input.value || 0),
+        milestones: record.fields?.milestones || [],
+        session_date: sessionDate.input.value || undefined,
+        release_date: releaseDate.input.value || undefined,
+        blockers: lines(blockers.lastChild),
+        deliverables: lines(deliverables.lastChild),
+        archive_review_state: archive.value
+      };
+      try {
+        const review = await this.request('/portfolio/review', {
+          method: 'POST',
+          body: JSON.stringify({
+            link_id: record.link_id,
+            if_revision: Number(record.state_revision || 0),
+            fields
+          })
+        });
+        const reviewed = review.project;
+        this.renderActionReview(
+          dialog,
+          `Confirm portfolio change · ${reviewed.project_name}`,
+          [
+            ['Exact project link', reviewed.link_id],
+            ['Status', reviewed.fields.status],
+            ['Priority', reviewed.fields.priority],
+            ['Session date', reviewed.fields.session_date || 'Not set'],
+            ['Release date', reviewed.fields.release_date || 'Not set'],
+            ['Blockers', reviewed.fields.blockers?.join('; ') || 'None'],
+            ['Deliverables', reviewed.fields.deliverables?.join('; ') || 'None'],
+            ['Archive review', reviewed.fields.archive_review_state],
+            ['Archive guidance', reviewed.archive_guidance?.join(' ') || 'None']
+          ],
+          async () => {
+            const receipt = await this.request('/portfolio/commit', {
+              method: 'POST',
+              body: JSON.stringify({
+                review_token: review.token,
+                idempotency_key: globalThis.crypto?.randomUUID?.() || `portfolio-${Date.now()}`,
+                fields
+              })
+            });
+            this.announceAction(
+              `Portfolio details saved at revision ${receipt.state_revision}. No project files were changed.`
+            );
+            await this.load();
+          },
+          close
+        );
+      } catch (requestError) {
+        error.textContent = requestError.message || 'Portfolio review is unavailable.';
+        reviewButton.disabled = false;
+      }
+    });
+    dialog.append(form);
+    status.focus();
+  }
+
+  openHandoffEditor(record, trigger) {
+    const { dialog, close } = this.newActionDialog(`Send work to ${record.project_name}`, trigger);
+    const form = document.createElement('form');
+    form.className = 'assistant-program-action-form';
+    const heading = document.createElement('h2');
+    heading.textContent = `Send to project · ${record.project_name}`;
+    const title = this.actionField('Ticket title');
+    title.input.required = true;
+    const description = document.createElement('label');
+    description.className = 'assistant-program-action-field';
+    description.append(document.createElement('span'), document.createElement('textarea'));
+    description.firstChild.textContent = 'Description';
+    description.lastChild.maxLength = 8000;
+    const stateLabel = document.createElement('label');
+    stateLabel.className = 'assistant-program-action-field';
+    const stateCaption = document.createElement('span');
+    stateCaption.textContent = 'Child Ticket state';
+    const ticketState = document.createElement('select');
+    ticketState.append(selectOption('Backlog', 'backlog'), selectOption('Ready', 'ready'));
+    stateLabel.append(stateCaption, ticketState);
+    const error = document.createElement('p');
+    error.className = 'assistant-program-action-error';
+    error.setAttribute('role', 'alert');
+    const controls = document.createElement('div');
+    controls.className = 'assistant-program-project-actions';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'modern-btn modern-btn-secondary';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', close);
+    const reviewButton = document.createElement('button');
+    reviewButton.type = 'submit';
+    reviewButton.className = 'modern-btn modern-btn-primary';
+    reviewButton.textContent = 'Review child Ticket';
+    controls.append(cancel, reviewButton);
+    form.append(heading, title.wrapper, description, stateLabel, error, controls);
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      reviewButton.disabled = true;
+      const input = {
+        link_id: record.link_id,
+        title: title.input.value.trim(),
+        description: description.lastChild.value.trim() || undefined,
+        state: ticketState.value
+      };
+      try {
+        const review = await this.request('/handoffs/review', {
+          method: 'POST',
+          body: JSON.stringify(input)
+        });
+        const handoff = review.handoff;
+        this.renderActionReview(
+          dialog,
+          `Confirm child Ticket · ${handoff.project_name}`,
+          [
+            ['Exact project link', handoff.link_id],
+            ['Ticket title', handoff.title],
+            ['Description', handoff.description || 'None'],
+            ['State', handoff.state],
+            ['Assignment', handoff.assignment],
+            ['Suggested assignee', handoff.suggested_assignee || 'Not available'],
+            ['Authority boundary', handoff.authority_boundary]
+          ],
+          async () => {
+            const receipt = await this.request('/handoffs/commit', {
+              method: 'POST',
+              body: JSON.stringify({
+                review_token: review.token,
+                idempotency_key: globalThis.crypto?.randomUUID?.() || `handoff-${Date.now()}`,
+                title: input.title,
+                description: input.description,
+                state: input.state
+              })
+            });
+            this.announceAction(
+              `Created child-owned Ticket #${receipt.ticket_number || receipt.ticket_id}. No project tools were granted to Home.`
+            );
+            await this.load();
+          },
+          close
+        );
+      } catch (requestError) {
+        error.textContent = requestError.message || 'Handoff review is unavailable.';
+        reviewButton.disabled = false;
+      }
+    });
+    dialog.append(form);
+    title.input.focus();
   }
 
   openHire() {
@@ -421,7 +996,8 @@ export class AssistantProgramPage {
     try {
       this.program = await this.request('/activate', { method: 'POST' });
       this.render();
-      if (!this.program.hired) this.openHire();
+      if (!this.program.hired && Number(this.program.declaration?.schema_version || 1) < 2)
+        this.openHire();
     } catch (error) {
       setText('assistantProgramErrorText', error.message || 'Activation failed.');
     } finally {

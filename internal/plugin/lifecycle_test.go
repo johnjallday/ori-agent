@@ -472,6 +472,64 @@ func TestCheckUpdateReportsMalformedAndUnreachableSources(t *testing.T) {
 	})
 }
 
+func TestManagerUpdateFromReviewedSourceConfirmsAndKeepsEnablementSeparate(t *testing.T) {
+	oldRoot := makeClaudeBundle(t)
+	reg := &fakeRegistrar{}
+	sk := &fakeSkills{}
+	manager := NewManager(reg, sk, t.TempDir(), "")
+	installed, err := manager.Install(oldRoot, FormatClaude, func(TrustReport) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SetEnabled(installed.Name, true); err != nil {
+		t.Fatal(err)
+	}
+	candidate := makeClaudeBundle(t)
+	manifest := filepath.Join(candidate, ".claude-plugin", "plugin.json")
+	writeFile(t, manifest, `{"name":"reaper","version":"0.5.0"}`)
+	if _, err := manager.UpdateFromSource(installed.Name, candidate, FormatClaude, func(TrustReport) bool { return false }); !errors.Is(err, ErrInstallDeclined) {
+		t.Fatalf("declined reviewed replacement error = %v", err)
+	}
+	before, _, _ := manager.store.Get(installed.Name)
+	if before.Source != oldRoot || before.Version != "0.1.0" || !before.Enabled {
+		t.Fatalf("declined replacement changed existing generation: %#v", before)
+	}
+	updated, err := manager.UpdateFromSource(installed.Name, candidate, FormatClaude, func(report TrustReport) bool {
+		return report.Name == installed.Name
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Source != candidate || updated.Version != "0.5.0" || !updated.Enabled || updated.Generation <= installed.Generation {
+		t.Fatalf("unexpected reviewed replacement: %#v", updated)
+	}
+}
+
+func TestManagerUpdateFromReviewedSourceRestoresOldRegistrationOnFailure(t *testing.T) {
+	oldRoot := makeClaudeBundle(t)
+	reg := &fakeRegistrar{}
+	sk := &fakeSkills{}
+	manager := NewManager(reg, sk, t.TempDir(), "")
+	installed, err := manager.Install(oldRoot, FormatClaude, func(TrustReport) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := makeClaudeBundle(t)
+	writeFile(t, filepath.Join(candidate, ".claude-plugin", "plugin.json"), `{"name":"reaper","version":"0.5.0"}`)
+	writeFile(t, filepath.Join(candidate, "skills", "fails", "SKILL.md"), "---\nname: fails\n---\n")
+	sk.failOn = "fails"
+	if _, err := manager.UpdateFromSource(installed.Name, candidate, FormatClaude, func(TrustReport) bool { return true }); err == nil {
+		t.Fatal("replacement registration failure was accepted")
+	}
+	persisted, _, _ := manager.store.Get(installed.Name)
+	if persisted.Source != oldRoot || persisted.Version != installed.Version || persisted.Generation != installed.Generation {
+		t.Fatalf("failed replacement changed stored generation: %#v", persisted)
+	}
+	if _, ok := reg.added["reaper/ori-reaper"]; !ok {
+		t.Fatal("failed replacement did not restore existing MCP registration")
+	}
+}
+
 func TestManagerUpdate(t *testing.T) {
 	root := makeClaudeBundle(t)
 	reg := &fakeRegistrar{}

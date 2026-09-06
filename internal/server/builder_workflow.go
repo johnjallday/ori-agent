@@ -21,6 +21,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
+	"github.com/johnjallday/ori-agent/internal/pathselection"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/trigger"
@@ -696,6 +697,10 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() {
 
 	b.workspaceHandler = workspace.NewHTTPHandler(b.workspaceStore, b.workspaceOrchestrator, b.eventBus)
 	b.workspaceHandler.SetDesktopOpener(b.desktopOpener)
+	if b.pathSelectionStore == nil {
+		b.pathSelectionStore = pathselection.NewStore()
+	}
+	b.workspaceHandler.SetTrustedPathSelectionIssuer(b.pathSelectionStore)
 	if b.workspaceFileStore != nil {
 		b.workspaceHandler.SetFolderStore(b.workspaceFileStore)
 	}

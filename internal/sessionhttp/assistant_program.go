@@ -26,28 +26,71 @@ type assistantProgramHireRequest struct {
 	Version  int64  `json:"version"`
 }
 
+type assistantDisconnectReviewRequest struct {
+	ProjectWorkspaceID string `json:"project_workspace_id"`
+	StateRevision      int64  `json:"state_revision"`
+}
+
+type assistantDisconnectCommitRequest struct {
+	Token          string `json:"token"`
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+type assistantHomeRemovalReviewRequest struct {
+	StateRevision int64 `json:"state_revision"`
+}
+
+type assistantHomeRemovalCommitRequest struct {
+	Token string `json:"token"`
+}
+
+type assistantMigrationReviewRequest struct {
+	StateRevision int64 `json:"state_revision"`
+}
+
+type assistantMigrationCommitRequest struct {
+	Token string `json:"token"`
+}
+
 type assistantProgramSummary struct {
-	Available        bool                                   `json:"available"`
-	ActivationNeeded bool                                   `json:"activation_needed,omitempty"`
-	StationID        string                                 `json:"station_id,omitempty"`
-	ProjectID        string                                 `json:"project_id,omitempty"`
-	IsStation        bool                                   `json:"is_station,omitempty"`
-	Hired            bool                                   `json:"hired,omitempty"`
-	PluginAvailable  bool                                   `json:"plugin_available"`
-	StateRevision    int64                                  `json:"state_revision,omitempty"`
-	PrimaryName      string                                 `json:"primary_name,omitempty"`
-	Provider         string                                 `json:"provider,omitempty"`
-	Model            string                                 `json:"model,omitempty"`
-	StageID          string                                 `json:"stage_id,omitempty"`
-	StageLabel       string                                 `json:"stage_label,omitempty"`
-	Level            int                                    `json:"level,omitempty"`
-	AcceptedTasks    int                                    `json:"accepted_tasks,omitempty"`
-	NextThreshold    int                                    `json:"next_threshold,omitempty"`
-	Remaining        int                                    `json:"remaining,omitempty"`
-	PromotionPending bool                                   `json:"promotion_pending,omitempty"`
-	Declaration      *workspace.AssistantProgramDeclaration `json:"declaration,omitempty"`
-	Roster           []workspace.AssistantRoleBinding       `json:"roster,omitempty"`
-	Projects         []assistantProgramProject              `json:"projects,omitempty"`
+	Available        bool                                            `json:"available"`
+	ActivationNeeded bool                                            `json:"activation_needed,omitempty"`
+	MigrationNeeded  bool                                            `json:"migration_needed,omitempty"`
+	StationID        string                                          `json:"station_id,omitempty"`
+	ProjectID        string                                          `json:"project_id,omitempty"`
+	IsStation        bool                                            `json:"is_station,omitempty"`
+	Hired            bool                                            `json:"hired,omitempty"`
+	PluginAvailable  bool                                            `json:"plugin_available"`
+	StateRevision    int64                                           `json:"state_revision,omitempty"`
+	PrimaryName      string                                          `json:"primary_name,omitempty"`
+	Provider         string                                          `json:"provider,omitempty"`
+	Model            string                                          `json:"model,omitempty"`
+	StageID          string                                          `json:"stage_id,omitempty"`
+	StageLabel       string                                          `json:"stage_label,omitempty"`
+	Level            int                                             `json:"level,omitempty"`
+	AcceptedTasks    int                                             `json:"accepted_tasks,omitempty"`
+	NextThreshold    int                                             `json:"next_threshold,omitempty"`
+	Remaining        int                                             `json:"remaining,omitempty"`
+	PromotionPending bool                                            `json:"promotion_pending,omitempty"`
+	Declaration      *workspace.AssistantProgramDeclaration          `json:"declaration,omitempty"`
+	Roster           []workspace.AssistantRoleBinding                `json:"roster,omitempty"`
+	RosterScope      workspace.AssistantRoleScope                    `json:"roster_scope,omitempty"`
+	BindingRevision  int64                                           `json:"binding_revision,omitempty"`
+	LegacyRoster     []workspace.AssistantRoleBinding                `json:"legacy_roster,omitempty"`
+	Portfolio        []workspace.AssistantPortfolioProjectProjection `json:"portfolio,omitempty"`
+	RoleProfiles     []assistantProgramRoleProfile                   `json:"role_profiles,omitempty"`
+	Projects         []assistantProgramProject                       `json:"projects,omitempty"`
+}
+
+type assistantProgramRoleProfile struct {
+	RoleID        string                       `json:"role_id"`
+	Scope         workspace.AssistantRoleScope `json:"scope"`
+	ProfileName   string                       `json:"profile_name,omitempty"`
+	Provider      string                       `json:"provider,omitempty"`
+	Model         string                       `json:"model,omitempty"`
+	Configured    bool                         `json:"configured"`
+	ChatAvailable bool                         `json:"chat_available"`
+	Legacy        bool                         `json:"legacy,omitempty"`
 }
 
 type assistantProgramProject struct {
@@ -135,14 +178,69 @@ func (h *Handler) buildAssistantProgramSummary(station, project *workspace.Works
 	}
 	summary := assistantProgramSummary{
 		Available: true, StationID: station.ID, IsStation: project == nil,
-		Hired: state.Hired, PluginAvailable: state.PluginAvailable, StateRevision: state.StateRevision,
+		MigrationNeeded: state.SchemaVersion == workspace.AssistantProgramLegacyStateSchemaVersion,
+		Hired:           state.Hired, PluginAvailable: state.PluginAvailable, StateRevision: state.StateRevision,
 		PrimaryName: state.PrimaryName, Provider: state.Provider, Model: state.Model,
 		StageID: state.StageID, Level: state.Level, AcceptedTasks: state.AcceptedCompletions,
 		Declaration: workspace.CloneAssistantProgramDeclaration(state.Declaration),
-		Roster:      append([]workspace.AssistantRoleBinding(nil), state.Roster...),
+	}
+	if len(state.Roster) > 0 {
+		summary.LegacyRoster = append([]workspace.AssistantRoleBinding(nil), state.Roster...)
+	}
+	if state.SchemaVersion == workspace.AssistantProgramLegacyStateSchemaVersion {
+		summary.Roster = append([]workspace.AssistantRoleBinding(nil), state.Roster...)
+	} else if project == nil {
+		summary.RosterScope = workspace.AssistantRoleScopeHome
+		summary.BindingRevision = state.HomeBindings.StateRevision
+		summary.Roster = append([]workspace.AssistantRoleBinding(nil), state.HomeBindings.Bindings...)
+	} else if link := project.GetAssistantProjectLink(); link != nil {
+		summary.RosterScope = workspace.AssistantRoleScopeProject
+		summary.BindingRevision = link.ProjectBindings.StateRevision
+		summary.Roster = append([]workspace.AssistantRoleBinding(nil), link.ProjectBindings.Bindings...)
 	}
 	if project != nil {
 		summary.ProjectID = project.ID
+	}
+	if state.SchemaVersion >= workspace.AssistantProgramStateSchemaVersion {
+		target := station
+		scope := workspace.AssistantRoleScopeHome
+		bindings := state.HomeBindings.Bindings
+		if project != nil {
+			target = project
+			scope = workspace.AssistantRoleScopeProject
+			if link := project.GetAssistantProjectLink(); link != nil {
+				bindings = link.ProjectBindings.Bindings
+			}
+		}
+		profilesByRole := make(map[string]workspace.AssistantRoleBinding, len(bindings))
+		for _, binding := range bindings {
+			profilesByRole[binding.RoleID] = binding
+		}
+		for _, role := range state.Declaration.Roles {
+			if role.Scope != scope {
+				continue
+			}
+			profile := assistantProgramRoleProfile{RoleID: role.ID, Scope: scope}
+			if binding, ok := profilesByRole[role.ID]; ok {
+				if snapshot, found, readErr := h.workspaceTaskStore.GetWorkspaceAgent(target.ID, binding.AgentName); readErr == nil && found && snapshot != nil {
+					profile.Configured = true
+					profile.ProfileName = binding.AgentName
+					profile.Provider = snapshot.Settings.Provider
+					profile.Model = snapshot.Settings.Model
+					profile.ChatAvailable = profile.Provider != ""
+					if profile.ChatAvailable && h.assistantModelValidator != nil {
+						profile.ChatAvailable = h.assistantModelValidator(profile.Provider, profile.Model) == nil
+					}
+				}
+			}
+			summary.RoleProfiles = append(summary.RoleProfiles, profile)
+		}
+	} else {
+		for _, binding := range state.Roster {
+			summary.RoleProfiles = append(summary.RoleProfiles, assistantProgramRoleProfile{
+				RoleID: binding.RoleID, ProfileName: binding.AgentName, Configured: true, ChatAvailable: true, Legacy: true,
+			})
+		}
 	}
 	for index, stage := range state.Declaration.Stages {
 		if stage.ID == state.StageID || state.StageID == "" && index == 0 {
@@ -171,6 +269,12 @@ func (h *Handler) buildAssistantProgramSummary(station, project *workspace.Works
 		}
 		return summary.Projects[i].Name < summary.Projects[j].Name
 	})
+	if state.SchemaVersion >= workspace.AssistantProgramStateSchemaVersion {
+		summary.Portfolio, err = workspace.NewAssistantPortfolioService(h.workspaceTaskStore).List(station.ID)
+		if err != nil {
+			return assistantProgramSummary{}, err
+		}
+	}
 	return summary, nil
 }
 
@@ -376,6 +480,21 @@ func (h *Handler) HireAssistantProgram(w http.ResponseWriter, r *http.Request) {
 	state := station.GetAssistantProgramState()
 	if !state.PluginAvailable {
 		_ = orihttp.RespondConflict(w, "The assistant contribution is disabled; existing data remains available")
+		return
+	}
+	if state.SchemaVersion >= workspace.AssistantProgramStateSchemaVersion {
+		if state.StateRevision != request.Version {
+			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"error": "Assistant program changed; reload and try again", "current_version": state.StateRevision})
+			return
+		}
+		if h.assistantReviewedStaffer == nil || h.assistantReviewedStaffer(r.Context(), project.ID, name, request.Provider, request.Model) != nil {
+			_ = orihttp.RespondConflict(w, "The reviewed scoped staffing could not be completed; reload and try again")
+			return
+		}
+		station, _ = h.workspaceTaskStore.Get(station.ID)
+		project, _ = h.workspaceTaskStore.Get(project.ID)
+		summary, _ := h.buildAssistantProgramSummary(station, project)
+		_ = orihttp.RespondSuccess(w, summary)
 		return
 	}
 	if state.Hired {
@@ -806,6 +925,170 @@ func (h *Handler) DeleteAssistantLearning(w http.ResponseWriter, r *http.Request
 		return
 	}
 	_ = orihttp.RespondSuccess(w, map[string]any{"deleted": true})
+}
+
+func (h *Handler) ReviewAssistantDisconnect(w http.ResponseWriter, r *http.Request) {
+	station, project, err := h.assistantProgramStation(strings.TrimSpace(r.PathValue("workspaceID")))
+	if err != nil || project != nil {
+		_ = orihttp.RespondNotFound(w, "Assistant Program Home not found")
+		return
+	}
+	if station, ok := h.requireAssistantWritable(w, station); !ok {
+		return
+	} else {
+		var request assistantDisconnectReviewRequest
+		if !h.decodeAssistantProgramJSON(w, r, &request) {
+			return
+		}
+		review, reviewErr := workspace.NewAssistantProgramStore(h.workspaceTaskStore).ReviewDisconnect(station.ID, request.ProjectWorkspaceID, request.StateRevision)
+		if reviewErr != nil {
+			respondAssistantTopologyError(w, reviewErr)
+			return
+		}
+		_ = orihttp.RespondSuccess(w, review)
+	}
+}
+
+func (h *Handler) CommitAssistantDisconnect(w http.ResponseWriter, r *http.Request) {
+	station, project, err := h.assistantProgramStation(strings.TrimSpace(r.PathValue("workspaceID")))
+	if err != nil || project != nil {
+		_ = orihttp.RespondNotFound(w, "Assistant Program Home not found")
+		return
+	}
+	if station, ok := h.requireAssistantWritable(w, station); !ok {
+		return
+	} else {
+		var request assistantDisconnectCommitRequest
+		if !h.decodeAssistantProgramJSON(w, r, &request) {
+			return
+		}
+		receipt, commitErr := workspace.NewAssistantProgramStore(h.workspaceTaskStore).CommitDisconnect(station.ID, request.Token, request.IdempotencyKey)
+		if commitErr != nil {
+			respondAssistantTopologyError(w, commitErr)
+			return
+		}
+		_ = orihttp.RespondSuccess(w, receipt)
+	}
+}
+
+func (h *Handler) ReviewAssistantHomeRemoval(w http.ResponseWriter, r *http.Request) {
+	station, project, err := h.assistantProgramStation(strings.TrimSpace(r.PathValue("workspaceID")))
+	if err != nil || project != nil {
+		_ = orihttp.RespondNotFound(w, "Assistant Program Home not found")
+		return
+	}
+	if station, ok := h.requireAssistantWritable(w, station); !ok {
+		return
+	} else {
+		var request assistantHomeRemovalReviewRequest
+		if !h.decodeAssistantProgramJSON(w, r, &request) {
+			return
+		}
+		review, reviewErr := workspace.NewAssistantProgramStore(h.workspaceTaskStore).ReviewHomeRemoval(station.ID, request.StateRevision)
+		if reviewErr != nil {
+			respondAssistantTopologyError(w, reviewErr)
+			return
+		}
+		_ = orihttp.RespondSuccess(w, review)
+	}
+}
+
+func (h *Handler) CommitAssistantHomeRemoval(w http.ResponseWriter, r *http.Request) {
+	station, project, err := h.assistantProgramStation(strings.TrimSpace(r.PathValue("workspaceID")))
+	if err != nil || project != nil {
+		_ = orihttp.RespondNotFound(w, "Assistant Program Home not found")
+		return
+	}
+	if station, ok := h.requireAssistantWritable(w, station); !ok {
+		return
+	} else {
+		var request assistantHomeRemovalCommitRequest
+		if !h.decodeAssistantProgramJSON(w, r, &request) {
+			return
+		}
+		receipt, commitErr := workspace.NewAssistantProgramStore(h.workspaceTaskStore).CommitHomeRemoval(station.ID, request.Token)
+		if commitErr != nil {
+			respondAssistantTopologyError(w, commitErr)
+			return
+		}
+		if h.assistantHomeRemoved != nil {
+			if cleanupErr := h.assistantHomeRemoved(station.ID); cleanupErr != nil {
+				_ = orihttp.RespondInternalError(w, "Assistant Program Home was removed, but optional capability cleanup needs attention")
+				return
+			}
+		}
+		_ = orihttp.RespondSuccess(w, receipt)
+	}
+}
+
+func (h *Handler) ReviewAssistantMigration(w http.ResponseWriter, r *http.Request) {
+	station, _, err := h.assistantProgramStation(strings.TrimSpace(r.PathValue("workspaceID")))
+	if err != nil {
+		_ = orihttp.RespondNotFound(w, "Assistant Program Home not found")
+		return
+	}
+	if station, ok := h.requireAssistantWritable(w, station); !ok {
+		return
+	} else {
+		var request assistantMigrationReviewRequest
+		if !h.decodeAssistantProgramJSON(w, r, &request) {
+			return
+		}
+		review, reviewErr := workspace.NewAssistantProgramStore(h.workspaceTaskStore).ReviewLegacyMigration(station.ID, request.StateRevision)
+		if reviewErr != nil {
+			respondAssistantMigrationError(w, reviewErr)
+			return
+		}
+		_ = orihttp.RespondSuccess(w, review)
+	}
+}
+
+func (h *Handler) CommitAssistantMigration(w http.ResponseWriter, r *http.Request) {
+	station, _, err := h.assistantProgramStation(strings.TrimSpace(r.PathValue("workspaceID")))
+	if err != nil {
+		_ = orihttp.RespondNotFound(w, "Assistant Program Home not found")
+		return
+	}
+	if station, ok := h.requireAssistantWritable(w, station); !ok {
+		return
+	} else {
+		var request assistantMigrationCommitRequest
+		if !h.decodeAssistantProgramJSON(w, r, &request) {
+			return
+		}
+		receipt, commitErr := workspace.NewAssistantProgramStore(h.workspaceTaskStore).CommitLegacyMigration(station.ID, request.Token)
+		if commitErr != nil {
+			respondAssistantMigrationError(w, commitErr)
+			return
+		}
+		_ = orihttp.RespondSuccess(w, receipt)
+	}
+}
+
+func respondAssistantMigrationError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, workspace.ErrAssistantMigrationConflict), errors.Is(err, workspace.ErrAssistantMigrationAmbiguous):
+		_ = orihttp.RespondConflict(w, "Assistant Program migration needs a fresh impact review")
+	case errors.Is(err, workspace.ErrAssistantMigrationExpired):
+		_ = orihttp.RespondConflict(w, "Assistant Program migration review expired")
+	case errors.Is(err, workspace.ErrAssistantMigrationNotRequired):
+		_ = orihttp.RespondConflict(w, "Assistant Program migration is not required")
+	default:
+		_ = orihttp.RespondNotFound(w, "Assistant Program Home not found")
+	}
+}
+
+func respondAssistantTopologyError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, workspace.ErrAssistantTopologyConflict), errors.Is(err, workspace.ErrAssistantTopologyIdempotency):
+		_ = orihttp.RespondConflict(w, "Assistant Program topology changed; review the impact again")
+	case errors.Is(err, workspace.ErrAssistantTopologyReviewExpired):
+		_ = orihttp.RespondConflict(w, "Assistant Program impact review expired")
+	case errors.Is(err, workspace.ErrAssistantStationNotFound):
+		_ = orihttp.RespondNotFound(w, "Assistant Program Home not found")
+	default:
+		_ = orihttp.RespondBadRequest(w, "Invalid Assistant Program topology request")
+	}
 }
 
 func (h *Handler) AcknowledgeAssistantPromotion(w http.ResponseWriter, r *http.Request) {

@@ -68,6 +68,30 @@ func TestProjectFileFallbackPromotesOnlyAuthoritativeProject(t *testing.T) {
 	}
 }
 
+func TestProjectFileFallbackResolvesExactDirectoryReferenceEntry(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	externalRoot := t.TempDir()
+	entry := filepath.Join(externalRoot, "existing.rpp")
+	if err := os.WriteFile(entry, []byte("ORIGINAL"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ws := NewWorkspace(CreateWorkspaceParams{Name: "External"})
+	ws.SharedData = map[string]any{}
+	if err := ws.AddDirectoryReference(DirectoryReference{ID: "external", Name: "External", Path: externalRoot}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetProjectEntryLocator(ws.SharedData, ProjectEntryLocator{
+		SchemaVersion: ProjectEntryLocatorSchemaVersion, Kind: ProjectEntryDirectoryReference,
+		DirectoryReferenceID: "external", RelativePath: "existing.rpp",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := authoritativeProjectEntry(projectFallbackSource{workspace: ws, root: workspaceRoot}, ws.ID)
+	if err != nil || resolved != entry {
+		t.Fatalf("external fallback entry = %q err=%v", resolved, err)
+	}
+}
+
 func TestProjectFileFallbackRejectsUndeclaredCapabilityExtraFilesAndConflicts(t *testing.T) {
 	preparer, ws, entry := projectFallbackFixture(t)
 	if _, err := preparer.PrepareTaskFileFallback(context.Background(), ws.ID, genericFallbackTask(ws), "other_control"); err == nil {

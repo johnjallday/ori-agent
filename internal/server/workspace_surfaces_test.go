@@ -65,6 +65,30 @@ func TestTrustedWorkspaceProjectEntryRejectsTraversalAndSymlinks(t *testing.T) {
 	}
 }
 
+func TestTrustedWorkspaceProjectEntryResolvesDirectoryReferenceContext(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	externalRoot := t.TempDir()
+	entry := filepath.Join(externalRoot, "existing.rpp")
+	if err := os.WriteFile(entry, []byte("project"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "External"})
+	ws.SharedData = map[string]any{}
+	if err := ws.AddDirectoryReference(workspace.DirectoryReference{ID: "project-ref", Name: "Project", Path: externalRoot}); err != nil {
+		t.Fatal(err)
+	}
+	if err := workspace.SetProjectEntryLocator(ws.SharedData, workspace.ProjectEntryLocator{
+		SchemaVersion: workspace.ProjectEntryLocatorSchemaVersion,
+		Kind:          workspace.ProjectEntryDirectoryReference, DirectoryReferenceID: "project-ref",
+		RelativePath: "existing.rpp",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := trustedWorkspaceProjectEntry(workspaceRoot, ws); got != entry {
+		t.Fatalf("directory-reference host context entry = %q, want %q", got, entry)
+	}
+}
+
 func TestWireWorkspaceSurfacesRestoresInstalledPluginThroughOnlyGenericRoutes(t *testing.T) {
 	root := t.TempDir()
 	store, err := workspace.NewFileStore(root)

@@ -123,9 +123,11 @@
         label: text(role && role.label),
         description: text(role && role.description),
         primary: Boolean(role && role.primary),
+        scope: text(role && role.scope),
+        required: role?.required !== false,
         agentName: text(role && role.agent_name)
       }))
-      .filter(role => role.id && role.label);
+      .filter(role => role.id && role.label && role.required !== false);
     const stages = (Array.isArray(program.stages) ? program.stages : [])
       .map(stage => ({
         id: text(stage && stage.id),
@@ -135,6 +137,8 @@
       .filter(stage => stage.id && stage.label);
     const id = text(program.id);
     if (!id || !roles.length || !roles.some(role => role.primary) || !stages.length) return null;
+    const namedPrimary =
+      roles.find(role => role.primary && role.scope === 'home') || roles.find(role => role.primary);
     return {
       id,
       stationName: text(program.station_name),
@@ -146,6 +150,8 @@
       existingProvider: text(program.existing_provider),
       existingModel: text(program.existing_model),
       roles,
+      homeAlreadyStaffed: Boolean(namedPrimary?.scope === 'home' && namedPrimary.agentName),
+      namedPrimaryID: namedPrimary?.id || '',
       stages
     };
   }
@@ -262,14 +268,18 @@
     if (program) {
       const programKey = `${key}:${program.id}`;
       if (!draft.assistantHire || draft.assistantHire.programKey !== programKey) {
-        const existingPrimary = program.roles.find(role => role.primary)?.agentName;
+        const existingPrimary = program.roles.find(
+          role => role.id === program.namedPrimaryID
+        )?.agentName;
         draft.assistantHire = {
           programKey,
-          name: program.existingHired
-            ? existingPrimary || program.defaultPrimaryName
-            : program.defaultPrimaryName,
-          provider: program.existingHired ? program.existingProvider : '',
-          model: program.existingHired ? program.existingModel : ''
+          name:
+            program.existingHired || program.homeAlreadyStaffed
+              ? existingPrimary || program.defaultPrimaryName
+              : program.defaultPrimaryName,
+          provider:
+            program.existingHired || program.homeAlreadyStaffed ? program.existingProvider : '',
+          model: program.existingHired || program.homeAlreadyStaffed ? program.existingModel : ''
         };
       }
     } else {
@@ -283,6 +293,7 @@
     if (!draft || !program || program.existingHired || !fields) return draft;
     const next = { ...(draft.assistantHire || emptyAssistantHire()) };
     for (const field of ['name', 'provider', 'model']) {
+      if (field === 'name' && program.homeAlreadyStaffed) continue;
       if (has(fields, field)) next[field] = text(fields[field]);
     }
     draft.assistantHire = next;
@@ -782,20 +793,31 @@
 
   function resolveAssistantEntries(draft, program) {
     const hire = draft.assistantHire || emptyAssistantHire();
-    return program.roles.map(role => {
-      const name = program.existingHired
-        ? role.agentName || (role.primary ? text(hire.name) : role.label)
-        : role.primary
+    const roles = program.existingHired
+      ? program.roles.filter(role => role.agentName)
+      : program.roles;
+    return roles.map(role => {
+      const namedPrimary = role.id === program.namedPrimaryID;
+      const existing = program.existingHired || (role.scope === 'home' && Boolean(role.agentName));
+      const name = existing
+        ? role.agentName || (namedPrimary ? text(hire.name) : role.label)
+        : namedPrimary
           ? text(hire.name)
           : role.label;
-      const lifecycle = program.existingHired ? 'assistant-link' : 'assistant-create';
+      const lifecycle = existing ? 'assistant-link' : 'assistant-create';
       return {
         key: agentKey(name),
         name,
         source: 'assistant-program',
         identity: identityFrom(name, null),
         lifecycle,
-        lifecycleLabel: LIFECYCLE_LABELS[lifecycle],
+        lifecycleLabel:
+          role.scope === 'home'
+            ? `${existing ? 'Existing' : 'New'} group coordination role · group scope only`
+            : role.scope === 'project'
+              ? 'New project role · this workspace only'
+              : LIFECYCLE_LABELS[lifecycle],
+        assistantScope: role.scope,
         modelLabel: hire.model
           ? modelLabel(hire.model, hire.provider)
           : hire.provider
@@ -812,11 +834,11 @@
         type: '',
         templateAgentIndex: null,
         assistantRoleId: role.id,
-        declaredPrimary: role.primary,
+        declaredPrimary: role.primary && role.scope !== 'home',
         originalName: role.label,
         isCustomized:
           !program.existingHired &&
-          role.primary &&
+          namedPrimary &&
           agentKey(name) !== agentKey(program.defaultPrimaryName),
         customizable: false,
         removable: false,
@@ -1076,11 +1098,12 @@
 
     const payload = {};
     if (assistantProgram) {
-      payload.assistant_hire = {
-        name: text(source.assistantHire?.name),
-        provider: text(source.assistantHire?.provider),
-        model: text(source.assistantHire?.model)
-      };
+      if (!assistantProgram.existingHired)
+        payload.assistant_hire = {
+          name: text(source.assistantHire?.name),
+          provider: text(source.assistantHire?.provider),
+          model: text(source.assistantHire?.model)
+        };
     } else {
       if (allPlanAgents.length > 0) payload.create_template_agents = includeTeam;
       if (includeTeam) {

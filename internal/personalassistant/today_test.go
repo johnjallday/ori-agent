@@ -42,6 +42,15 @@ func (s stubTodayFollowUps) List(context.Context, followup.Filter) ([]*followup.
 	return s.items, s.err
 }
 
+type stubTodaySetup struct {
+	projection *TodaySpecialistSetupProjection
+	err        error
+}
+
+func (s stubTodaySetup) GetSpecialistSetup(context.Context, string) (*TodaySpecialistSetupProjection, error) {
+	return s.projection, s.err
+}
+
 func baseTodayProjection() *Projection {
 	return &Projection{
 		State: APIStateActive, StateVersion: 4, DisplayName: "Nova", Appearance: types.NewAgentAppearance(),
@@ -264,6 +273,61 @@ func TestTodayService_DistinguishesHealthyEmptyAndModelUnavailable(t *testing.T)
 	got, err = service.Get(context.Background(), "local")
 	if err != nil || got.State != "model_unavailable" {
 		t.Fatalf("model-unavailable state=%+v err=%v", got, err)
+	}
+}
+
+func TestTodayServiceIncludesCanonicalSpecialistSetupWithoutChangingHQAuthority(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	store, hq := newTodayWorkspace(t, now)
+	projection := baseTodayProjection()
+	projection.SpecialistSlug = "music_production"
+	service := NewTodayService(
+		stubTodayRelationship{projection: projection}, stubTodayBrief{err: dailybrief.ErrRevisionNotFound},
+		store, stubTodayFollowUps{},
+	)
+	service.SetSpecialistSetupReader(stubTodaySetup{projection: &TodaySpecialistSetupProjection{
+		Health: TodaySourceHealth{Status: TodaySectionAvailable}, JourneyID: "reaper_setup",
+		Title: "Set up REAPER", Lifecycle: "ready", ConnectedProjectCount: 2,
+		ChildRunCount: 1, UnfinishedChildCount: 1,
+		Runs:    []TodaySpecialistSetupRun{{RunID: "root-1", RunKind: "root", Lifecycle: "ready", ProjectWorkspaceID: "project-1"}, {RunID: "child-1", RunKind: "child", Lifecycle: "in_progress"}},
+		Actions: []TodaySpecialistSetupAction{{ID: "review_setup", Label: "Review setup"}},
+	}})
+	got, err := service.Get(context.Background(), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SpecialistSetup == nil || got.SpecialistSetup.ConnectedProjectCount != 2 || got.SpecialistSetup.UnfinishedChildCount != 1 || len(got.SpecialistSetup.Runs) != 2 {
+		t.Fatalf("specialist setup = %+v", got.SpecialistSetup)
+	}
+	persisted, err := store.Get(hq.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.GetAssistantProgramState() != nil || persisted.GetAssistantProjectLink() != nil || len(persisted.DirectoryReferences) != 0 || persisted.GetRuntimeState() != nil {
+		t.Fatalf("Today reporting broadened Personal HQ authority: %+v", persisted)
+	}
+}
+
+func TestTodayServiceSpecialistSetupFailureIsBoundedAndDoesNotHideOtherSources(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	store, _ := newTodayWorkspace(t, now)
+	projection := baseTodayProjection()
+	projection.SpecialistSlug = "music_production"
+	service := NewTodayService(
+		stubTodayRelationship{projection: projection}, stubTodayBrief{err: dailybrief.ErrRevisionNotFound},
+		store, stubTodayFollowUps{},
+	)
+	service.SetSpecialistSetupReader(stubTodaySetup{err: errors.New("/Users/private/song.rpp secret-token")})
+	got, err := service.Get(context.Background(), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != "partial" || got.SpecialistSetup == nil || got.SpecialistSetup.Health.Reason != "read_failed" || got.Priorities.Health.Status != TodaySectionAvailable {
+		t.Fatalf("setup source failure was not isolated: %+v", got)
+	}
+	encoded, _ := json.Marshal(got.SpecialistSetup)
+	if strings.Contains(string(encoded), "/Users/") || strings.Contains(string(encoded), "secret-token") {
+		t.Fatalf("setup error leaked through Today: %s", encoded)
 	}
 }
 

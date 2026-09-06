@@ -3,6 +3,7 @@ package workspace
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -14,8 +15,8 @@ func neutralAssistantDeclaration() *AssistantProgramDeclaration {
 		ID:            "project-guide", StationName: "Project Guide Home", StationDescription: "Shared project guidance.",
 		DefaultPrimaryName: "Guide", HireTitle: "Hire your guide",
 		Roles: []AssistantProgramRoleSpec{
-			{ID: "guide", Label: "Guide", Primary: true, Role: "orchestrator", SystemPrompt: "Coordinate confirmed work."},
-			{ID: "reviewer", Label: "Reviewer", Role: "specialist", SystemPrompt: "Review bounded questions."},
+			{ID: "guide", Label: "Guide", Scope: AssistantRoleScopeHome, Required: true, Primary: true, Role: "orchestrator", SystemPrompt: "Coordinate confirmed work."},
+			{ID: "reviewer", Label: "Reviewer", Scope: AssistantRoleScopeProject, Required: true, Primary: true, Role: "specialist", SystemPrompt: "Review bounded questions."},
 		},
 		Stages: []AssistantProgramStageSpec{
 			{ID: "helper", Label: "Helper", AcceptedCompletionThreshold: 0},
@@ -72,6 +73,54 @@ func TestAssistantProgramStore_ReadsCanonicalDeclarationWhenPrimaryOmitsProvenan
 	}
 }
 
+func TestAssistantProgramStore_EnsuresGroupHomeBeforeAnyProjectExists(t *testing.T) {
+	store := NewInMemoryStore()
+	service := NewAssistantProgramStore(store)
+	key := AssistantProgramKey{OwnerUserID: "owner-1", PluginID: "neutral", ProgramID: "project-guide"}
+	station, created, err := service.EnsureStation(key, neutralAssistantDeclaration())
+	if err != nil || !created {
+		t.Fatalf("ensure Home = (%+v, %v, %v)", station, created, err)
+	}
+	if station.Kind != "group" || station.OwnerUserID != "owner-1" {
+		t.Fatalf("Home identity = kind %q owner %q", station.Kind, station.OwnerUserID)
+	}
+	state := station.GetAssistantProgramState()
+	if state == nil || len(state.LinkedProjectIDs) != 0 || state.Hired || len(state.Roster) != 0 {
+		t.Fatalf("new Home acquired premature consequences: %+v", state)
+	}
+	again, created, err := service.EnsureStation(key, neutralAssistantDeclaration())
+	if err != nil || created || again.ID != station.ID {
+		t.Fatalf("repeat ensure Home = (%+v, %v, %v)", again, created, err)
+	}
+}
+
+func TestAssistantProgramStore_NestsLinkedProjectAsNonCanonicalProjection(t *testing.T) {
+	primary := NewInMemoryStore()
+	folders, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = folders.Close() })
+	store := NewSyncStore(primary, folders)
+	project := assistantProject(t, store, "Nested")
+	station, _, err := NewAssistantProgramStore(store).EnsureProjectStation(project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	linked, err := store.Get(project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if linked.ParentID != station.ID || linked.GetAssistantProjectLink() == nil {
+		t.Fatalf("linked project projection = parent %q link %#v", linked.ParentID, linked.GetAssistantProjectLink())
+	}
+	projectPath, _ := folders.GetFolderPath(project.ID)
+	stationPath, _ := folders.GetFolderPath(station.ID)
+	if !isPathWithin(projectPath, filepath.Join(stationPath, SubWorkspacesDir)) {
+		t.Fatalf("project folder %q is not nested under Home %q", projectPath, stationPath)
+	}
+}
+
 func TestAssistantProgramStore_CreatesOneStationAndStableLinks(t *testing.T) {
 	store := NewInMemoryStore()
 	service := NewAssistantProgramStore(store)
@@ -93,6 +142,9 @@ func TestAssistantProgramStore_CreatesOneStationAndStableLinks(t *testing.T) {
 	state := secondStation.GetAssistantProgramState()
 	if len(state.LinkedProjectIDs) != 2 || !containsString(state.LinkedProjectIDs, first.ID) || !containsString(state.LinkedProjectIDs, second.ID) {
 		t.Fatalf("linked projects = %#v", state.LinkedProjectIDs)
+	}
+	if station.Kind != "group" {
+		t.Fatalf("assistant Home kind = %q, want group", station.Kind)
 	}
 	if state.Hired || len(state.Roster) != 0 || state.Reflection.ScheduleTaskID != "" {
 		t.Fatalf("station shell created consequences before hire: %+v", state)
@@ -119,7 +171,7 @@ func TestAssistantProgramStore_StationIdentityDoesNotDependOnDisplaySlug(t *test
 	}
 }
 
-func TestAssistantProgramStore_ProjectLinkedAfterHireReceivesSharedRoster(t *testing.T) {
+func TestAssistantProgramStore_ScopedProgramDoesNotCopyHomeRosterIntoLaterProject(t *testing.T) {
 	store := NewInMemoryStore()
 	service := NewAssistantProgramStore(store)
 	first := assistantProject(t, store, "First Hired Project")
@@ -146,8 +198,91 @@ func TestAssistantProgramStore_ProjectLinkedAfterHireReceivesSharedRoster(t *tes
 	}
 	linked, _ := store.Get(second.ID)
 	instances := linked.GetAgentInstances()
-	if len(instances) != len(roster) || instances[0].ID != "producer-id" || linked.EntryAgentName() != "June" {
-		t.Fatalf("late-linked roster = %+v entry=%q", instances, linked.EntryAgentName())
+	if len(instances) != 0 || linked.EntryAgentName() != "" {
+		t.Fatalf("schema-v2 project inherited shared Home roster = %+v entry=%q", instances, linked.EntryAgentName())
+	}
+}
+
+func TestAssistantProgramStore_ScopedBindingsPersistAndReviseIndependently(t *testing.T) {
+	store := NewInMemoryStore()
+	service := NewAssistantProgramStore(store)
+	first := assistantProject(t, store, "First Scoped Project")
+	second := assistantProject(t, store, "Second Scoped Project")
+	station, _, err := service.EnsureProjectStation(first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.EnsureProjectStation(second.ID); err != nil {
+		t.Fatal(err)
+	}
+	homeAgent := AgentInstance{ID: "home-manager", Name: "Home Manager"}
+	firstAgent := AgentInstance{ID: "first-reviewer", Name: "First Reviewer"}
+	secondAgent := AgentInstance{ID: "second-reviewer", Name: "Second Reviewer"}
+	for id, instance := range map[string]AgentInstance{station.ID: homeAgent, first.ID: firstAgent, second.ID: secondAgent} {
+		if err := store.Update(id, func(current *Workspace) error {
+			current.AgentInstances = append(current.GetAgentInstances(), instance)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := service.SetHomeRoleBindings(station.ID, 0, []AssistantRoleBinding{{RoleID: "guide", AgentInstanceID: homeAgent.ID, AgentName: homeAgent.Name}}); err != nil {
+		t.Fatalf("set Home binding: %v", err)
+	}
+	if err := service.SetProjectRoleBindings(first.ID, 0, []AssistantRoleBinding{{RoleID: "reviewer", AgentInstanceID: firstAgent.ID, AgentName: firstAgent.Name}}); err != nil {
+		t.Fatalf("set first binding: %v", err)
+	}
+	if err := service.SetProjectRoleBindings(second.ID, 0, []AssistantRoleBinding{{RoleID: "reviewer", AgentInstanceID: secondAgent.ID, AgentName: secondAgent.Name}}); err != nil {
+		t.Fatalf("set second binding: %v", err)
+	}
+	if err := service.SetProjectRoleBindings(first.ID, 1, nil); err != nil {
+		t.Fatalf("revise first binding: %v", err)
+	}
+	storedHome, _ := store.Get(station.ID)
+	storedFirst, _ := store.Get(first.ID)
+	storedSecond, _ := store.Get(second.ID)
+	if storedHome.GetAssistantProgramState().HomeBindings.StateRevision != 1 || len(storedHome.GetAssistantProgramState().HomeBindings.Bindings) != 1 {
+		t.Fatalf("Home bindings = %#v", storedHome.GetAssistantProgramState().HomeBindings)
+	}
+	if storedFirst.GetAssistantProjectLink().ProjectBindings.StateRevision != 2 || len(storedFirst.GetAssistantProjectLink().ProjectBindings.Bindings) != 0 {
+		t.Fatalf("first bindings = %#v", storedFirst.GetAssistantProjectLink().ProjectBindings)
+	}
+	if storedSecond.GetAssistantProjectLink().ProjectBindings.StateRevision != 1 || storedSecond.GetAssistantProjectLink().ProjectBindings.Bindings[0].AgentInstanceID != secondAgent.ID {
+		t.Fatalf("second bindings changed with first = %#v", storedSecond.GetAssistantProjectLink().ProjectBindings)
+	}
+	if err := service.SetHomeRoleBindings(station.ID, 0, nil); !errors.Is(err, ErrAssistantBindingVersionConflict) {
+		t.Fatalf("stale Home binding error = %v", err)
+	}
+	if err := service.SetProjectRoleBindings(second.ID, 1, []AssistantRoleBinding{{RoleID: "guide", AgentInstanceID: secondAgent.ID, AgentName: secondAgent.Name}}); !errors.Is(err, ErrAssistantBindingInvalid) {
+		t.Fatalf("cross-scope binding error = %v", err)
+	}
+}
+
+func TestAssistantProgramStore_PreservesLegacySharedRosterWithoutInferringScopedBindings(t *testing.T) {
+	store := NewInMemoryStore()
+	station := NewWorkspace(CreateWorkspaceParams{Name: "Legacy Home"})
+	station.Kind = "group"
+	station.SetAssistantProgramState(&AssistantProgramState{
+		SchemaVersion: AssistantProgramLegacyStateSchemaVersion,
+		StateRevision: 4,
+		Key:           AssistantProgramKey{OwnerUserID: "owner-1", PluginID: "neutral", ProgramID: "project-guide"},
+		Declaration:   neutralAssistantDeclaration(),
+		Hired:         true,
+		Roster:        []AssistantRoleBinding{{RoleID: "guide", AgentInstanceID: "legacy-agent", AgentName: "Legacy Guide"}},
+	})
+	if err := store.Save(station); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.Get(station.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := stored.GetAssistantProgramState()
+	if len(state.Roster) != 1 || state.Roster[0].AgentInstanceID != "legacy-agent" {
+		t.Fatalf("legacy roster not readable: %#v", state.Roster)
+	}
+	if state.HomeBindings.StateRevision != 0 || len(state.HomeBindings.Bindings) != 0 {
+		t.Fatalf("legacy roster was inferred into Home scope: %#v", state.HomeBindings)
 	}
 }
 

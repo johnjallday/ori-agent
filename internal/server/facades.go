@@ -41,9 +41,11 @@ import (
 	"github.com/johnjallday/ori-agent/internal/progressionhttp"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
 	"github.com/johnjallday/ori-agent/internal/runtimecapabilityhttp"
+	"github.com/johnjallday/ori-agent/internal/samplelibraryhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
+	"github.com/johnjallday/ori-agent/internal/setupjourneyhttp"
 	"github.com/johnjallday/ori-agent/internal/setupwizardhttp"
 	"github.com/johnjallday/ori-agent/internal/skillshttp"
 	"github.com/johnjallday/ori-agent/internal/speechhttp"
@@ -189,6 +191,8 @@ type HandlerFacade struct {
 	RuntimeCapabilities *runtimecapabilityhttp.Handler
 	User                *userhttp.Handler
 	PersonalAssistant   *personalassistanthttp.Handler
+	SetupJourney        *setupjourneyhttp.Handler
+	SampleLibrary       *samplelibraryhttp.Handler
 	PersonalHQ          *personalhqhttp.Handler
 	DailyBrief          *dailybriefhttp.Handler
 	// OriGuide serves the setup-and-navigation guide. It is deliberately a

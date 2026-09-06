@@ -74,6 +74,37 @@ func TestOpenWorkspaceProjectUsesPersistedEntry(t *testing.T) {
 	}
 }
 
+func TestOpenWorkspaceProjectResolvesExactDirectoryReferenceWithoutExposingAbsolutePath(t *testing.T) {
+	store, ws, handler := newFolderHandlerTest(t, "ws-external-project-open", "External Project Open")
+	externalRoot := t.TempDir()
+	entryPath := filepath.Join(externalRoot, "Existing Song.RPP")
+	if err := os.WriteFile(entryPath, []byte("project"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(ws.ID, func(stored *Workspace) error {
+		if err := stored.AddDirectoryReference(DirectoryReference{ID: "external-project", Name: "Existing", Path: externalRoot}); err != nil {
+			return err
+		}
+		return SetProjectEntryLocator(stored.SharedData, ProjectEntryLocator{
+			SchemaVersion: ProjectEntryLocatorSchemaVersion,
+			Kind:          ProjectEntryDirectoryReference, DirectoryReferenceID: "external-project",
+			RelativePath: "Existing Song.RPP",
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var opened string
+	handler.openFile = func(path string) error { opened = path; return nil }
+	recorder := httptest.NewRecorder()
+	handler.OpenWorkspaceProject(recorder, localProjectOpenRequest(http.MethodPost, ws.ID, nil))
+	if recorder.Code != http.StatusOK || opened != entryPath {
+		t.Fatalf("external open = status %d path %q body %s", recorder.Code, opened, recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), externalRoot) || !strings.Contains(recorder.Body.String(), `"relative_path":"Existing Song.RPP"`) {
+		t.Fatalf("external open response leaked or omitted locator data: %s", recorder.Body.String())
+	}
+}
+
 func TestOpenWorkspaceProjectReadsCanonicalFolderMetadata(t *testing.T) {
 	primary := NewInMemoryStore()
 	fileStore, err := NewFileStore(t.TempDir())

@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -103,6 +104,46 @@ type InstantiationResult struct {
 	ProjectPath      string
 	ProjectEntryPath string
 	ProjectWarning   string
+}
+
+// PreviewInstantiation returns the bounded portable file list that the same
+// template/name substitution path will create. It reads names and file types
+// only; it never reads template file contents or creates a destination.
+func PreviewInstantiation(template Template, projectName string) ([]string, error) {
+	slug, err := SanitizeProjectName(projectName)
+	if err != nil || !template.HasSkeleton {
+		return nil, ErrNoSkeleton
+	}
+	values := newTemplateTokenValues(slug)
+	files := make([]string, 0)
+	err = fs.WalkDir(os.DirFS(template.Path), ".", func(relative string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if relative == "." || relative == ManifestFileName {
+			return nil
+		}
+		if relative == DashboardDirName && entry.IsDir() {
+			return fs.SkipDir
+		}
+		if entry.Type()&fs.ModeSymlink != 0 || entry.IsDir() {
+			return nil
+		}
+		if len(files) >= maxPluginBlueprintFiles {
+			return errors.New("template preview exceeds file limit")
+		}
+		resolved, resolveErr := substituteRelPathWithValues(relative, values)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		files = append(files, filepath.ToSlash(resolved))
+		return nil
+	})
+	if err != nil || len(files) == 0 {
+		return nil, ErrNoSkeleton
+	}
+	sort.Strings(files)
+	return files, nil
 }
 
 // Instantiate copies the template at templatePath into a new project folder

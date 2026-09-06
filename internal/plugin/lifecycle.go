@@ -149,14 +149,29 @@ func (m *Manager) Preview(source string, prefer SourceFormat) (TrustReport, erro
 }
 
 func (m *Manager) preview(source string, prefer SourceFormat) (TrustReport, error) {
+	_, report, err := m.inspect(source, prefer)
+	return report, err
+}
+
+// Inspect resolves the exact candidate descriptor and complete trust report
+// without installing or registering anything. It exists for trusted host
+// adapters that must validate version, contribution, blueprint, and program
+// identity in addition to rendering Preview's complete disclosure.
+func (m *Manager) Inspect(source string, prefer SourceFormat) (PluginDescriptor, TrustReport, error) {
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
+	return m.inspect(source, prefer)
+}
+
+func (m *Manager) inspect(source string, prefer SourceFormat) (PluginDescriptor, TrustReport, error) {
 	d, err := Load(source, m.cloneDir, prefer)
 	if err != nil {
-		return TrustReport{}, err
+		return PluginDescriptor{}, TrustReport{}, err
 	}
 	if err := prepareTrustedBlueprints(&d); err != nil {
-		return TrustReport{}, err
+		return PluginDescriptor{}, TrustReport{}, err
 	}
-	return BuildTrustReport(d), nil
+	return d, BuildTrustReport(d), nil
 }
 
 // SetEnabled invalidates/stops/replaces the trusted contribution before the
@@ -417,6 +432,135 @@ func (m *Manager) Update(name string, confirm ConfirmFunc) (InstalledPlugin, err
 		return InstalledPlugin{}, fmt.Errorf("plugin: record update: %w", err)
 	}
 	return updated, nil
+}
+
+// UpdateFromSource replaces an installed plugin from an explicit trusted
+// source rather than following the source recorded by an older install. It is
+// used by host-owned reviewed-integration adapters; generic clients still use
+// Update. The candidate is fully resolved, disclosed, confirmed, and artifact-
+// verified before the old generation is stopped.
+func (m *Manager) UpdateFromSource(name, source string, prefer SourceFormat, confirm ConfirmFunc) (InstalledPlugin, error) {
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
+	existing, ok, err := m.store.Get(name)
+	if err != nil {
+		return InstalledPlugin{}, err
+	}
+	if !ok {
+		return InstalledPlugin{}, fmt.Errorf("plugin: %q not installed", name)
+	}
+	candidate, err := Load(source, m.cloneDir, prefer)
+	if err != nil {
+		return InstalledPlugin{}, err
+	}
+	if err := prepareTrustedBlueprints(&candidate); err != nil {
+		return InstalledPlugin{}, err
+	}
+	if candidate.Name != existing.Name {
+		return InstalledPlugin{}, fmt.Errorf("plugin: reviewed replacement identity mismatch")
+	}
+	report := BuildTrustReport(candidate)
+	if confirm == nil || !confirm(report) {
+		return InstalledPlugin{}, ErrInstallDeclined
+	}
+	resolvedArtifacts, err := m.artifacts.Install(context.Background(), candidate)
+	if err != nil {
+		return InstalledPlugin{}, err
+	}
+	oldDescriptor, err := m.installedDescriptor(existing)
+	if err != nil {
+		return InstalledPlugin{}, fmt.Errorf("plugin: read existing generation before replacement: %w", err)
+	}
+
+	surfaceStopped := false
+	if m.surfaces != nil && existing.WorkspaceSurfaces != nil {
+		if err := m.surfaces.Unregister(existing.Name, existing.Generation); err != nil {
+			return InstalledPlugin{}, fmt.Errorf("plugin: stop workspace surfaces before replacement: %w", err)
+		}
+		surfaceStopped = true
+	}
+	restoreExisting := func() error {
+		if _, restoreErr := Register(oldDescriptor, m.reg, m.skills); restoreErr != nil {
+			return restoreErr
+		}
+		if surfaceStopped && m.surfaces != nil {
+			if restoreErr := m.surfaces.RegisterInstalled(existing); restoreErr != nil {
+				return restoreErr
+			}
+			surfaceStopped = false
+		}
+		return nil
+	}
+	for _, server := range existing.MCPServers {
+		if err := m.reg.RemoveServer(server); err != nil {
+			_ = restoreExisting()
+			return InstalledPlugin{}, fmt.Errorf("plugin: remove existing server for replacement: %w", err)
+		}
+	}
+	for _, skill := range existing.Skills {
+		if err := m.skills.RemoveSkill(existing.Name, skill); err != nil {
+			_ = restoreExisting()
+			return InstalledPlugin{}, fmt.Errorf("plugin: remove existing skill for replacement: %w", err)
+		}
+	}
+	registered, err := Register(candidate, m.reg, m.skills)
+	if err != nil {
+		if restoreErr := restoreExisting(); restoreErr != nil {
+			return InstalledPlugin{}, fmt.Errorf("plugin: replacement failed and existing generation could not be restored: %w", restoreErr)
+		}
+		return InstalledPlugin{}, err
+	}
+	updated := InstalledPlugin{
+		Name: candidate.Name, Version: candidate.Version, Description: candidate.Description,
+		Source: source, Format: candidate.SourceFormat, InstallDir: candidate.InstallDir,
+		MCPServers: registered.MCPServers, Skills: registered.Skills,
+		WorkspaceSurfaces: candidate.WorkspaceSurfaces, ResolvedArtifacts: resolvedArtifacts,
+		ResolvedBlueprints:   append([]ResolvedBlueprint(nil), candidate.ResolvedBlueprints...),
+		ComponentFingerprint: trustedComponentFingerprint(candidate),
+		Generation:           nextPluginGeneration(existing.Generation), Enabled: existing.Enabled,
+		InstalledAt: existing.InstalledAt,
+	}
+	if m.surfaces != nil {
+		if err := m.surfaces.RegisterInstalled(updated); err != nil {
+			rollback(m.reg, m.skills, candidate.Name, registered)
+			if restoreErr := restoreExisting(); restoreErr != nil {
+				return InstalledPlugin{}, fmt.Errorf("plugin: replacement surface failed and existing generation could not be restored: %w", restoreErr)
+			}
+			return InstalledPlugin{}, fmt.Errorf("plugin: register replacement workspace surfaces: %w", err)
+		}
+		surfaceStopped = false
+	}
+	if err := m.store.Put(updated); err != nil {
+		if m.surfaces != nil {
+			_ = m.surfaces.Unregister(updated.Name, updated.Generation)
+			surfaceStopped = existing.WorkspaceSurfaces != nil
+		}
+		rollback(m.reg, m.skills, candidate.Name, registered)
+		if restoreErr := restoreExisting(); restoreErr != nil {
+			return InstalledPlugin{}, fmt.Errorf("plugin: record replacement failed and existing generation could not be restored: %w", restoreErr)
+		}
+		return InstalledPlugin{}, fmt.Errorf("plugin: record replacement: %w", err)
+	}
+	return updated, nil
+}
+
+func (m *Manager) installedDescriptor(existing InstalledPlugin) (PluginDescriptor, error) {
+	root, err := canonicalInstallRoot(existing.InstallDir, existing.Source, m.cloneDir)
+	if err != nil {
+		return PluginDescriptor{}, err
+	}
+	manifest, err := DetectManifest(root, existing.Format)
+	if err != nil {
+		return PluginDescriptor{}, err
+	}
+	descriptor, err := Normalize(manifest, existing.Source)
+	if err != nil {
+		return PluginDescriptor{}, err
+	}
+	if err := prepareTrustedBlueprints(&descriptor); err != nil {
+		return PluginDescriptor{}, err
+	}
+	return descriptor, nil
 }
 
 // previewReload re-resolves a descriptor without changing the checkout used by
