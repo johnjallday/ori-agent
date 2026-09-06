@@ -49,7 +49,7 @@ var registryEntries = []Entry{
 		SuggestedTemplateID: "reaper-song",
 		Suggestion: Suggestion{
 			Title:       "Set up your music projects",
-			Body:        "Review Ori's local integration, connect an existing project or create a new one, then choose File-only or optional live control. Until you finish those separate steps, no project monitoring, live control, or project team is active.",
+			Body:        "Install the Ori REAPER plugin, create your music production group, prepare REAPER, then create a workspace for a new or existing project. There is no project monitoring or studio team until workspace setup is confirmed. Live access is approved and verified separately for each workspace.",
 			ActionLabel: "Continue reviewed setup",
 			ActionRoute: "/personal-assistant?setup=specialist",
 		},
@@ -63,11 +63,16 @@ var registryEntries = []Entry{
 			IntegrationKey:             "ori_reaper",
 			ExpectedBlueprintID:        "reaper-song",
 			ExpectedAssistantProgramID: "music-producer-assistant",
+			WorkspaceLaunch: &WorkspaceLaunchCopy{
+				GroupTitle: "Build Your Music Production Group", GroupName: "Music Production",
+				RuntimeTitle:        "Set Up REAPER",
+				RuntimeInstructions: "Open REAPER, then Preferences → Control/OSC/web. Add the Web browser interface and enable it. Check setup when you are ready. If the Ori runner is not registered yet, you can finish it from the workspace's live-control setup. No project access is granted here; the correct project must still be verified after creation.",
+			},
 			Steps: []SetupJourneyStep{
 				{
 					ID:          "integration",
 					Kind:        SetupStepIntegrationInstall,
-					Title:       "Review Ori's REAPER integration",
+					Title:       "Install Ori REAPER Plugin",
 					Description: "Ori's REAPER integration is a local integration for Ori, not an audio plug-in, VST, effect, or instrument. It will not appear in REAPER's FX browser.",
 				},
 				{

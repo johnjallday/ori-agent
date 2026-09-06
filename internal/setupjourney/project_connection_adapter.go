@@ -20,8 +20,9 @@ type ProjectTemplateResolver interface {
 }
 
 type ProjectConnectionAdapter struct {
-	owner     *projectconnection.Service
-	templates ProjectTemplateResolver
+	owner              *projectconnection.Service
+	templates          ProjectTemplateResolver
+	CheckPrerequisites func(context.Context, projecttemplates.Template) (bool, error)
 }
 
 func NewProjectConnectionAdapter(owner *projectconnection.Service, templates ProjectTemplateResolver) *ProjectConnectionAdapter {
@@ -29,6 +30,9 @@ func NewProjectConnectionAdapter(owner *projectconnection.Service, templates Pro
 }
 
 func (a *ProjectConnectionAdapter) InputDigest(action ActionID, raw json.RawMessage) (string, error) {
+	if isPreparationAction(action) {
+		return preparationInputDigest(action, raw)
+	}
 	request, err := decodeProjectConnectionRequest(action, raw)
 	if err != nil {
 		return "", err
@@ -37,6 +41,9 @@ func (a *ProjectConnectionAdapter) InputDigest(action ActionID, raw json.RawMess
 }
 
 func (a *ProjectConnectionAdapter) Review(ctx context.Context, scope ReadScope, action ActionID, raw json.RawMessage) (ActionReviewMaterial, error) {
+	if action == ActionReviewCreateGroup {
+		return a.prepareGroup(ctx, scope, ActionCreateGroup, raw)
+	}
 	commitAction, ok := projectCommitForReview(action)
 	if !ok {
 		return ActionReviewMaterial{}, errors.New("project connection action is unavailable")
@@ -45,6 +52,9 @@ func (a *ProjectConnectionAdapter) Review(ctx context.Context, scope ReadScope, 
 }
 
 func (a *ProjectConnectionAdapter) PrepareCommit(ctx context.Context, scope ReadScope, action ActionID, raw json.RawMessage) (ActionReviewMaterial, error) {
+	if isPreparationAction(action) {
+		return a.prepareGroup(ctx, scope, action, raw)
+	}
 	if action != ActionConnectExistingProject && action != ActionCreateNewProject {
 		return ActionReviewMaterial{}, errors.New("project connection action is unavailable")
 	}
@@ -63,9 +73,15 @@ func (a *ProjectConnectionAdapter) prepare(ctx context.Context, scope ReadScope,
 	if err != nil {
 		return ActionReviewMaterial{}, projectconnection.ErrUnavailable
 	}
+	if scope.WorkspaceLaunch {
+		preparation, prepErr := a.owner.HomePreparation(projectConnectionScope(scope, template))
+		if prepErr != nil || !preparation.Exists || !preparation.Acknowledged {
+			return ActionReviewMaterial{}, ErrConflict
+		}
+	}
 	preview, err := a.owner.Preview(ctx, projectConnectionScope(scope, template), request)
 	if err != nil {
-		return ActionReviewMaterial{}, err
+		return ActionReviewMaterial{}, projectConnectionFailure(err)
 	}
 	disclosureDigest, err := projectDisclosureDigest(commitAction, preview.Projection)
 	if err != nil {
@@ -82,6 +98,9 @@ func (a *ProjectConnectionAdapter) prepare(ctx context.Context, scope ReadScope,
 }
 
 func (a *ProjectConnectionAdapter) Commit(ctx context.Context, scope ReadScope, action ActionID, raw json.RawMessage, material ActionReviewMaterial) (CanonicalResult, error) {
+	if isPreparationAction(action) {
+		return a.commitGroup(ctx, scope, action, raw)
+	}
 	if a == nil || a.owner == nil || a.templates == nil {
 		return CanonicalResult{}, projectconnection.ErrUnavailable
 	}
@@ -95,7 +114,7 @@ func (a *ProjectConnectionAdapter) Commit(ctx context.Context, scope ReadScope, 
 	}
 	result, err := a.owner.Commit(ctx, projectConnectionScope(scope, template), request, material.InputDigest, material.OwnerRevisionDigest)
 	if err != nil {
-		return CanonicalResult{}, err
+		return CanonicalResult{}, projectConnectionFailure(err)
 	}
 	canonical := CanonicalResult{ProjectWorkspaceID: result.ProjectWorkspaceID}
 	if scope.RunKind == RunKindRoot {
@@ -112,8 +131,31 @@ func (a *ProjectConnectionAdapter) Read(ctx context.Context, scope ReadScope) (C
 	if err != nil {
 		return CanonicalStepRead{BlockedReason: ReasonOwnerUnavailable}, nil
 	}
+	var preparation *projectconnection.HomePreparation
+	if scope.WorkspaceLaunch {
+		value, prepErr := a.owner.HomePreparation(projectConnectionScope(scope, template))
+		if prepErr != nil {
+			return CanonicalStepRead{BlockedReason: ReasonOwnerUnavailable}, nil
+		}
+		// A historical project/link cannot prove its Home still exists. Do not
+		// advertise another group creation when canonical ownership was lost.
+		if !value.Exists && (scope.HomeWorkspaceID != "" || scope.ProjectWorkspaceID != "") {
+			return CanonicalStepRead{BlockedReason: ReasonOwnerUnavailable}, nil
+		}
+		preparation = &value
+	}
+	homeResult := CanonicalResult{}
+	if preparation != nil && scope.RunKind == RunKindRoot {
+		homeResult.HomeWorkspaceID = preparation.HomeID
+	}
 	observed, ok := a.owner.ObservedResult(projectConnectionScope(scope, template), scope.HomeWorkspaceID, scope.ProjectWorkspaceID)
 	if !ok {
+		if preparation != nil && !preparation.Exists {
+			return CanonicalStepRead{AvailableActions: []ActionID{ActionReviewCreateGroup}, Preparation: preparation}, nil
+		}
+		if preparation != nil && !preparation.Acknowledged {
+			return CanonicalStepRead{AvailableActions: []ActionID{ActionAcknowledgePreparation}, Preparation: preparation, Result: homeResult}, nil
+		}
 		actions := make([]ActionID, 0, 2)
 		if template.ProjectConnection != nil && template.ProjectConnection.Supports(projecttemplates.ProjectConnectionExistingProject) {
 			actions = append(actions, ActionReviewExistingProject)
@@ -124,18 +166,35 @@ func (a *ProjectConnectionAdapter) Read(ctx context.Context, scope ReadScope) (C
 		if len(actions) == 0 {
 			return CanonicalStepRead{BlockedReason: ReasonOwnerUnavailable}, nil
 		}
-		return CanonicalStepRead{AvailableActions: actions}, nil
+		return CanonicalStepRead{AvailableActions: actions, Preparation: preparation, Result: homeResult}, nil
 	}
 	result := CanonicalResult{ProjectWorkspaceID: observed.ProjectWorkspaceID}
 	if scope.RunKind == RunKindRoot {
 		result.HomeWorkspaceID = observed.HomeWorkspaceID
 	}
-	return CanonicalStepRead{Complete: true, AvailableActions: []ActionID{ActionOpenProject}, Result: result}, nil
+	return CanonicalStepRead{Complete: true, AvailableActions: []ActionID{ActionOpenProject}, Result: result, Preparation: preparation}, nil
 }
 
 func (a *ProjectConnectionAdapter) ConsequenceObserved(action ActionID, state CanonicalStepRead) bool {
+	if action == ActionCreateGroup {
+		return state.Preparation != nil && state.Preparation.Exists
+	}
+	if action == ActionAcknowledgePreparation {
+		return state.Preparation != nil && state.Preparation.Acknowledged
+	}
 	return (action == ActionConnectExistingProject || action == ActionCreateNewProject) && state.Complete &&
 		state.Result.ProjectWorkspaceID != ""
+}
+
+func projectConnectionFailure(err error) error {
+	switch {
+	case errors.Is(err, projectconnection.ErrInvalid):
+		return ErrInvalid
+	case errors.Is(err, projectconnection.ErrChanged):
+		return ErrConflict
+	default:
+		return projectconnection.ErrUnavailable
+	}
 }
 
 func projectConnectionScope(scope ReadScope, template projecttemplates.Template) projectconnection.Scope {

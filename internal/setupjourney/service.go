@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/projectconnection"
 	"github.com/johnjallday/ori-agent/internal/specialist"
+	"github.com/johnjallday/ori-agent/internal/specialistevents"
 )
 
 const (
@@ -62,11 +64,12 @@ type OverviewProjection struct {
 // specialist registry. Integration/blueprint/program constraints remain on the
 // server and are not client-selectable fields.
 type DeclarationProjection struct {
-	ID            string `json:"id"`
-	SchemaVersion int    `json:"schema_version"`
-	Version       int    `json:"version"`
-	Title         string `json:"title"`
-	Description   string `json:"description"`
+	ID              string                          `json:"id"`
+	SchemaVersion   int                             `json:"schema_version"`
+	Version         int                             `json:"version"`
+	Title           string                          `json:"title"`
+	Description     string                          `json:"description"`
+	WorkspaceLaunch *specialist.WorkspaceLaunchCopy `json:"workspace_launch,omitempty"`
 }
 
 // ResourceProjection contains bounded historical/resume receipt IDs only.
@@ -81,17 +84,18 @@ type ResourceProjection struct {
 // StepProjection combines inert declaration copy with the current canonical
 // read and only the closed host actions currently available.
 type StepProjection struct {
-	ID             string                    `json:"id"`
-	Kind           specialist.SetupStepKind  `json:"kind"`
-	Title          string                    `json:"title"`
-	Description    string                    `json:"description"`
-	Status         StepStatus                `json:"status"`
-	ReasonCode     ReasonCode                `json:"reason_code,omitempty"`
-	Guidance       string                    `json:"guidance,omitempty"`
-	Actions        []ActionDefinition        `json:"actions,omitempty"`
-	Integration    *IntegrationProjection    `json:"integration,omitempty"`
-	WorkspaceSetup *WorkspaceSetupProjection `json:"workspace_setup,omitempty"`
-	Staffing       *StaffingProjection       `json:"staffing,omitempty"`
+	ID             string                             `json:"id"`
+	Kind           specialist.SetupStepKind           `json:"kind"`
+	Title          string                             `json:"title"`
+	Description    string                             `json:"description"`
+	Status         StepStatus                         `json:"status"`
+	ReasonCode     ReasonCode                         `json:"reason_code,omitempty"`
+	Guidance       string                             `json:"guidance,omitempty"`
+	Actions        []ActionDefinition                 `json:"actions,omitempty"`
+	Integration    *IntegrationProjection             `json:"integration,omitempty"`
+	WorkspaceSetup *WorkspaceSetupProjection          `json:"workspace_setup,omitempty"`
+	Staffing       *StaffingProjection                `json:"staffing,omitempty"`
+	Preparation    *projectconnection.HomePreparation `json:"preparation,omitempty"`
 }
 
 // Failure is a safe public service error. Error returns only compiled guidance;
@@ -140,11 +144,12 @@ var safeGuidance = map[ReasonCode]string{
 	ReasonIntegrationNotInstalled:     "Review and install the required integration to continue.",
 	ReasonIntegrationDisabled:         "Review and enable the required integration to continue.",
 	ReasonIntegrationUpdateRequired:   "Review the current integration update before continuing.",
+	ReasonIntegrationLocalUnverified:  "Local development copy installed; not release-verified.",
 	ReasonIntegrationIdentityMismatch: "The installed integration does not match the reviewed integration.",
 	ReasonIntegrationUnsupported:      "The reviewed integration is not supported by this Ori installation.",
 	ReasonBlueprintUnavailable:        "The required project blueprint is not currently available.",
 	ReasonAssistantProgramMismatch:    "The available assistant program does not match this setup.",
-	ReasonProjectSelectionRequired:    "Choose an existing project or review a new project to continue.",
+	ReasonProjectSelectionRequired:    "Import an existing project or create a new project to continue.",
 	ReasonProjectScopeInvalid:         "The selected project scope could not be verified safely.",
 	ReasonProjectAlreadyConnected:     "That project is already connected to another setup.",
 	ReasonProjectUnavailable:          "Ori could not verify the connected project.",
@@ -368,6 +373,37 @@ func (s *Service) reconcile(ctx context.Context, declaration *specialist.SetupJo
 		}
 		candidate, reads := s.deriveCanonical(ctx, declaration, root, run, busy)
 		if busy != nil {
+			// An interrupted response must not strand an observed consequence.
+			// Only finish the durable receipt from the owner's observed result;
+			// never re-execute a mutation from a read or settle an active claim.
+			if busy.Status == OperationReconcileRequired {
+				kind, definition, known := actionKindAndDefinition(ActionID(busy.ActionID))
+				adapter := s.actionAdapters[kind]
+				// Group/project connection and File-only have unambiguous observed
+				// consequences. Do not generalize this to staffing or plugin actions.
+				recoverable := kind == specialist.SetupStepProjectConnect || ActionID(busy.ActionID) == ActionSelectFileOnlyMode
+				if recoverable && known && definition.Effect == ActionEffectCommit && adapter != nil {
+					settled, settledReads := s.deriveCanonical(ctx, declaration, root, run, nil)
+					for index, step := range declaration.Steps {
+						if step.ID != busy.StepID || step.Kind != kind || !validCanonicalRead(kind, settledReads[index]) ||
+							!adapter.ConsequenceObserved(ActionID(busy.ActionID), settledReads[index]) {
+							continue
+						}
+						_, updated, replayed, finalizeErr := s.store.FinalizeOperation(ctx, settled, busy.IdempotencyKey, OperationCompletion{
+							Status: OperationSucceeded, ResultCode: ResultAlreadyCurrent, Result: settledReads[index].Result,
+						})
+						if finalizeErr != nil {
+							return nil, safeStoreFailure(finalizeErr, run.StateRevision)
+						}
+						projection := projectionFromRun(declaration, updated, settledReads, nil)
+						if !replayed {
+							emitActionOutcome(projection, step.ID, ActionID(busy.ActionID), specialistevents.OutcomeSucceeded, "")
+							emitLifecycleTransition(declaration, run, updated)
+						}
+						return projection, nil
+					}
+				}
+			}
 			return projectionFromRun(declaration, candidate, reads, busy), nil
 		}
 		if !materialRunChange(run, candidate) {
@@ -496,7 +532,7 @@ func (s *Service) deriveCanonical(
 
 func scopeForRun(declaration *specialist.SetupJourney, root, run *Run) ReadScope {
 	scope := ReadScope{
-		OwnerUserID: root.OwnerUserID, RelationshipID: root.RelationshipID,
+		OwnerUserID: root.OwnerUserID, RelationshipID: root.RelationshipID, WorkspaceLaunch: declaration.WorkspaceLaunch != nil,
 		SpecialistSlug: root.SpecialistSlug, JourneyID: run.JourneyID,
 		IntegrationKey:             declaration.IntegrationKey,
 		ExpectedBlueprintID:        declaration.ExpectedBlueprintID,
@@ -659,6 +695,7 @@ func projectionFromRun(
 			Integration:    cloneIntegrationProjection(reads[index].Integration),
 			WorkspaceSetup: cloneWorkspaceSetupProjection(reads[index].WorkspaceSetup),
 			Staffing:       cloneStaffingProjection(reads[index].Staffing),
+			Preparation:    cloneHomePreparation(reads[index].Preparation),
 		}
 		if state.ReasonCode != "" {
 			stepProjection.Guidance = safeGuidance[state.ReasonCode]
@@ -683,6 +720,7 @@ func baseProjection(declaration *specialist.SetupJourney, run *Run) *JourneyProj
 		Journey: DeclarationProjection{
 			ID: declaration.ID, SchemaVersion: declaration.SchemaVersion,
 			Version: declaration.Version, Title: declaration.Title, Description: declaration.Description,
+			WorkspaceLaunch: cloneLaunchCopy(declaration.WorkspaceLaunch),
 		},
 		StateRevision: run.StateRevision, Lifecycle: run.Lifecycle,
 		CurrentStepID: run.CurrentStepID, Dismissed: run.Dismissed,

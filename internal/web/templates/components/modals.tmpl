@@ -1,5 +1,6 @@
 <!-- Modal placeholders - will be filled with actual modal content later -->
 
+{{template "group-builder.tmpl" .}}
 {{template "agent-create-form.tmpl" .}}
 <script defer src="/js/modules/agent-create-form.js"></script>
 
@@ -1332,7 +1333,7 @@
         <div>
           <p class="setup-journey__eyebrow">Guided local setup</p>
           <h2 class="setup-journey__title" id="specialistSetupJourneyTitle">Setup</h2>
-          <p class="setup-journey__description" id="specialistSetupJourneyDescription"></p>
+          <p class="setup-journey__description visually-hidden" id="specialistSetupJourneyDescription"></p>
         </div>
         <button type="button" class="setup-journey__close" id="specialistSetupJourneyClose" aria-label="Do this later">×</button>
       </header>

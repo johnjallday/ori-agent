@@ -187,15 +187,24 @@ The registry source is pinned to the final reviewed plugin candidate commit,
 not mutable `main` and not preview content. Until that commit and its artifact
 release exist remotely, install failure is an honest resumable blocked state;
 implementation must not publish them automatically. Local end-to-end delivery
-uses the canonical plugin checkout and `with-local-artifact.sh`, while the final
-registry pin is recorded only after the nested candidate commit is built and
-reviewed.
+uses the canonical plugin checkout and `with-local-artifact.sh`. The demo script
+configures that one absolute staged source as a process-local development
+exception: the adapter still validates version, format, component fingerprint,
+protocol, host features, blueprint, program, and platform, marks the completed
+receipt as a development copy, and never projects the path or calls it
+release-verified. An arbitrary local install remains blocked, and production
+launches without that explicit process setting retain the exact pinned-source
+rule. The final registry pin is recorded only after the nested candidate commit
+is built and reviewed.
 
 The journey integration adapter supports exactly these canonical states:
 
 - absent: `Preview` from the registry pin, then explicit confirmed `Install`;
 - matching but disabled: explicit `SetEnabled(true)`;
 - matching, enabled, and compatible: read-only completion with no reinstall;
+- the one process-configured local demo source, enabled and otherwise compatible:
+  read-only development completion with visibly unverified provenance and no
+  path in the journey projection;
 - older accepted identity/source: explicit preview and transactional
   replacement from the registry pin, preserving the previous generation on
   failure;
@@ -345,6 +354,68 @@ fail-closed contract, and registry startup/tests normalize every built-in entry
 before it can be returned by `specialist.Get`/`All`. Returned entries are deep
 copies so callers cannot mutate the registry's declaration or steps.
 
+### 3.1.1 Group-first workspace launch presentation
+
+The approved UX follow-up adds optional inert `workspace_launch` copy: group
+heading/default name and runtime heading/instructions. Each field uses the same
+plain-text validator (maximum 1,000 bytes). It supplies no executable source,
+route, action, renderer, runtime adapter, or permission policy.
+
+For this presentation, the first-run screens are **Install plugin → Create music
+group → Set up REAPER → Create New Workspace**. The five canonical v1 kinds,
+IDs, readiness tests, stored revisions, and operation receipts remain unchanged;
+this is not a migration that reinterprets stored stage indexes. Existing projects
+retain their canonical records. A historical project ID alone cannot make the
+workspace screen complete after a regression.
+
+- `projectconnection` can review/create only the canonical named Home, or reuse
+  it without renaming. No child, agent, schedule, or runtime grant is created by
+  group preparation. Legacy/unavailable ownership fails closed.
+  Step 2 opens the shared map **Build Group** dialog with a setup-bound name
+  and reviewed owner transport; it never falls back to generic group creation.
+  The ordinary map action explicitly sends `create_template_agents: false` to
+  build an empty group. Existing API callers that omit that flag retain their
+  historical manager behavior, and no selected workspaces are silently moved.
+  An existing project receipt cannot mark setup complete or offer replacement
+  group creation when its canonical Home is unverified.
+- A template-identity-bound preparation acknowledgement lives in canonical Home
+  shared data. It records a decision to proceed, not application or live readiness.
+  The bounded preparation projection contains only canonical group/template IDs,
+  display name, and existence/acknowledgement flags—no folder path or owner blob.
+- `GET .../runs/{runID}/preparation` checks the current caller/run, integration,
+  and Home, then invokes only the installed runtime provider's prerequisite
+  operation with a zero-valued context (required MCP keys, empty identities,
+  roots, and scopes). It returns only `ready`; it invents no
+  workspace, project, grant, exchange root, execution scope, or verification.
+  Failed rechecks clear any prior rendered prerequisite success; an unavailable
+  provider cannot leave a stale Continue action behind.
+- The shared creator skips already-selected Blueprint, then owns Details, Team,
+  and Review. Native selection tokens and exact project-entry choices still flow
+  through the existing reviewed project owner. The final confirmation covers
+  project files, File-only mode, and separately scoped team consequences.
+  A staffed Home is never presented as a staffed new project; only explicit Home
+  bindings are reused, and legacy roster entries are not promoted into access.
+  The shared post-create helper must not skip project staffing because the
+  canonical Home's legacy `hired` flag is true.
+- Creating requires an already-visible exact project review, never a replacement
+  review fetched under the same click. In-flight commits lock dismissal. An
+  uncertain retry retains the original envelope and is labelled **Retry Confirmed
+  Change**; **Check Setup Status** reads the exact root or child run instead.
+  Browser-only names/folder selections survive cancellation within one run;
+  cancellation discards review consent and does not write browser storage.
+- Interrupted group/project receipts and File-only selection may settle only from
+  their unambiguous canonical consequence. This recovery does not generalize to
+  staffing/plugin commits and never executes a mutation or settles an active claim.
+- The production summary reader offers only closed, existing-scope destinations;
+  the canonical reconciler still withholds them until readiness. Another-workspace
+  continuation is root-owned, so a child revision cannot be mistaken for its
+  root's. Child action authorization follows that exact root and checks its
+  current owner, relationship, specialist, and journey identity; those root-only
+  fields are not duplicated onto child rows. Project receipts and selected mode
+  remain child-owned. Team/optional-role and Sample Library management remain
+  reachable after the four-screen launch rather than being silently removed by
+  presentation.
+
 ### 3.2 Closed host adapter registry
 
 A declaration names only a `kind`. A compiled `setupjourney` registry maps that
@@ -407,8 +478,12 @@ Inputs are strict structs selected by `(kind, action)`, not arbitrary JSON.
 Examples are a server picker token plus candidate ID, a bounded new-project
 name, a review receipt, or editable role names/provider choices allowed by the
 staffing owner. Unknown fields are rejected. Route selection before project
-review is browser-only draft state and is discarded when changed. Review and
-commit never persist absolute project paths in journey state.
+review is browser-only draft state. Changing the route discards its uncommitted
+review; the guided project form may retain separate in-memory entries for Back
+and retry, but never in browser storage or across run identities. New projects
+use one project name by default; an optional Ori display-name override changes
+only the reviewed `workspace_name`. Choice, form, and confirmation are separate
+screens. Review and commit never persist absolute project paths in journey state.
 
 All mutations require the current run revision and a non-empty idempotency key.
 One request invokes at most one adapter and one canonical consequence boundary.
@@ -434,7 +509,7 @@ run_not_found, revision_conflict, idempotency_conflict, step_not_current,
 action_unavailable, input_invalid, review_required, review_stale,
 owner_unavailable, operation_failed,
 integration_not_installed, integration_disabled, integration_update_required,
-integration_identity_mismatch, integration_unsupported,
+integration_local_unverified, integration_identity_mismatch, integration_unsupported,
 blueprint_unavailable, assistant_program_mismatch,
 project_selection_required, project_scope_invalid, project_already_connected,
 project_unavailable, runtime_setup_required, runtime_needs_attention,
@@ -595,6 +670,15 @@ operation returns the original receipt. An uncertain timeout/crash is marked
 owner. If the intended result exists it finalizes success, otherwise it retries
 only through that owner's idempotent operation key/repair contract. It never
 blindly repeats a possibly completed side effect.
+
+For project connection, a normal authorized status read can settle a
+`reconcile_required` receipt only when the registered canonical owner observes
+that run's exact project consequence. It does not execute a commit, settle an
+active `claimed` operation, or infer success from a missing/unavailable record.
+Project observation combines primary identity/link state with folder-owned
+project path and template provenance; SQLite omits those portable fields.
+A browser retry after a lost response reuses the exact in-memory commit envelope
+and idempotency key, rather than requesting a second creation.
 
 Review receipts live in a sibling bounded table (or the same journal with a
 `review` record kind). They contain server token, run/step/action, input digest,
@@ -1434,7 +1518,7 @@ unowned requirement.
 | 13–24            | `specialist.SetupJourney` normalizer, built-in registry, `setupjourney` adapter registry, installed plugin blueprint | Strict inert v1 declaration, exact five-step order/IDs, equality constraints, host-only adapters/sources, synthetic-domain genericity, installed snapshots as authority.                                       | Table/fuzz tests in `internal/specialist` and `internal/setupjourney`; synthetic fixture template/JS tests.                       |
 | 25–38            | `setupjourney` SQLite store/service/HTTP                                                                             | Independent root/child runs, bounded state, canonical reconciliation, CAS/idempotency/review receipts, closed errors, current relationship authority, restart/concurrency and explicit declaration migrations. | Migration/store/reconcile/action/HTTP tests including malformed state, restart recovery, race tests and `409` replay.             |
 | 39–50            | reviewed-integration registry, `plugin.Manager`, nested REAPER source/release scripts                                | Exact not-a-VST copy; complete trust; separate install/update/enable; identity mismatch; resumable failures/preservation; source/version/checksum coherence; no publishing.                                    | Plugin adapter/manager tests, compatibility fixtures, nested unit/UI/artifact scripts, local coordinated demo.                    |
-| 51–52            | project-connect adapter and browser-only draft state                                                                 | Exactly existing/new routes; review before mutation; route switching discards drafts only.                                                                                                                     | Project adapter tests and generic-shell JS/e2e route-switch/cancel tests.                                                         |
+| 51–52            | project-connect adapter and browser-only draft state                                                                 | Exactly existing/new routes; review before mutation; route switching invalidates consent while retaining separate browser-only form entries.                                                                   | Project adapter tests and generic-shell JS/e2e route-switch/cancel tests.                                                         |
 | 53–65            | trusted picker/attach service, typed project-entry resolver, workspace/blueprint creator, Home/link service          | Bounded exact `.rpp` selection; contained Directory Reference locator; untouched external tree; managed Home child; normalized snapshots/mode-aware tasks; duplicate/rollback safety.                          | Attach/path fuzz and service/HTTP tests, before/after tree hashes, symlink/swap/multiple-entry/idempotency/restart cases.         |
 | 66–70            | canonical plugin-blueprint preview/create service, project-open action                                               | Reviewed scaffold directly under Home; one authoritative entry; no auto-open/agents/live/task execution.                                                                                                       | Blueprint/session creation and project-open tests plus e2e new-project path.                                                      |
 | 71–73            | `AssistantProjectLink`, Home portfolio projection, hierarchy and runtime-scope resolvers                             | Stable membership plus required parent projection; bounded deterministic rollup; no recursive Home/child/sibling authority or watcher.                                                                         | Assistant Program link tests, MCP/native scope tests, hierarchy mismatch tests, Home summary tests.                               |

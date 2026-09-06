@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"math"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -28,13 +29,24 @@ type IntegrationEntryResolver func(string) (reviewedintegration.Entry, bool)
 // ReviewedIntegrationAdapter is the only setup adapter for integration_install.
 // Its registry resolver is host-owned and declarations can select only a key.
 type ReviewedIntegrationAdapter struct {
-	manager  ReviewedIntegrationManager
-	resolve  IntegrationEntryResolver
-	platform string
+	manager           ReviewedIntegrationManager
+	resolve           IntegrationEntryResolver
+	platform          string
+	developmentSource string
 }
 
 func NewReviewedIntegrationAdapter(manager ReviewedIntegrationManager) *ReviewedIntegrationAdapter {
 	return newReviewedIntegrationAdapter(manager, reviewedintegration.Get, runtime.GOOS+"/"+runtime.GOARCH)
+}
+
+// NewReviewedIntegrationAdapterForDevelopment permits one process-configured
+// local source to satisfy the install prerequisite after the same identity and
+// contribution validation as a release. It never makes the copy release-ready
+// and never exposes or persists the configured path in journey state.
+func NewReviewedIntegrationAdapterForDevelopment(manager ReviewedIntegrationManager, source string) *ReviewedIntegrationAdapter {
+	adapter := NewReviewedIntegrationAdapter(manager)
+	adapter.developmentSource = normalizedLocalDevelopmentSource(source)
+	return adapter
 }
 
 func newReviewedIntegrationAdapter(manager ReviewedIntegrationManager, resolve IntegrationEntryResolver, platform string) *ReviewedIntegrationAdapter {
@@ -71,6 +83,34 @@ func (adapter *ReviewedIntegrationAdapter) Read(ctx context.Context, scope ReadS
 	if current != nil {
 		projection.InstalledVersion = current.Version
 		projection.Enabled = current.Enabled
+		if adapter.acceptsDevelopmentSource(current.Source) {
+			projection.DevelopmentCopy = true
+			projection.StateRevision = integrationStateDigest(entry, current, nil)
+			if reason := validateDevelopmentIntegration(entry, *current, adapter.platform); reason != "" {
+				return CanonicalStepRead{
+					BlockedReason: reason, AvailableActions: []ActionID{ActionManageIntegration},
+					Integration: projection, Result: integrationResult(current),
+				}, nil
+			}
+			if !current.Enabled {
+				return CanonicalStepRead{
+					BlockedReason: ReasonIntegrationDisabled, AvailableActions: []ActionID{ActionManageIntegration},
+					Integration: projection, Result: integrationResult(current),
+				}, nil
+			}
+			return CanonicalStepRead{
+				Complete: true, AvailableActions: []ActionID{ActionManageIntegration},
+				Integration: projection, Result: integrationResult(current),
+			}, nil
+		}
+		if localIntegrationSource(current.Source) {
+			projection.StateRevision = integrationStateDigest(entry, current, nil)
+			return CanonicalStepRead{
+				BlockedReason:    ReasonIntegrationLocalUnverified,
+				AvailableActions: []ActionID{ActionManageIntegration}, Integration: projection,
+				Result: integrationResult(current),
+			}, nil
+		}
 		if !acceptedPinnedSource(entry, current.Source) || current.Format != entry.SourceFormat {
 			projection.StateRevision = integrationStateDigest(entry, current, nil)
 			return CanonicalStepRead{
@@ -330,6 +370,32 @@ func entryMatchesScope(entry reviewedintegration.Entry, scope ReadScope) bool {
 		entry.ExpectedProgramID == scope.ExpectedAssistantProgramID
 }
 
+func localIntegrationSource(source string) bool {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return false
+	}
+	return !strings.HasPrefix(source, "https://") &&
+		!strings.HasPrefix(source, "http://") &&
+		!strings.HasPrefix(source, "git@") &&
+		!strings.HasSuffix(source, ".git")
+}
+
+func normalizedLocalDevelopmentSource(source string) string {
+	source = strings.TrimSpace(source)
+	if !localIntegrationSource(source) || !filepath.IsAbs(source) {
+		return ""
+	}
+	return filepath.Clean(source)
+}
+
+func (adapter *ReviewedIntegrationAdapter) acceptsDevelopmentSource(source string) bool {
+	if adapter == nil || adapter.developmentSource == "" {
+		return false
+	}
+	return normalizedLocalDevelopmentSource(source) == adapter.developmentSource
+}
+
 func acceptedPinnedSource(entry reviewedintegration.Entry, source string) bool {
 	source = strings.TrimSpace(source)
 	prefix := entry.SourceRepository + "#sha="
@@ -361,10 +427,16 @@ func validateReviewedDescriptor(entry reviewedintegration.Entry, descriptor plug
 }
 
 func validateInstalledIntegration(entry reviewedintegration.Entry, installed plugin.InstalledPlugin, platform string) ReasonCode {
+	if installed.Source != entry.Source() {
+		return ReasonIntegrationIdentityMismatch
+	}
+	return validateDevelopmentIntegration(entry, installed, platform)
+}
+
+func validateDevelopmentIntegration(entry reviewedintegration.Entry, installed plugin.InstalledPlugin, platform string) ReasonCode {
 	if installed.Name != entry.PluginID || installed.Version != entry.ExpectedVersion ||
-		installed.Source != entry.Source() || installed.Format != entry.SourceFormat ||
-		strings.TrimSpace(installed.ComponentFingerprint) == "" || installed.Generation == 0 ||
-		installed.Generation > math.MaxInt64 {
+		installed.Format != entry.SourceFormat || strings.TrimSpace(installed.ComponentFingerprint) == "" ||
+		installed.Generation == 0 || installed.Generation > math.MaxInt64 {
 		return ReasonIntegrationIdentityMismatch
 	}
 	return validateContribution(entry, installed.WorkspaceSurfaces, installed.ResolvedBlueprints, platform)

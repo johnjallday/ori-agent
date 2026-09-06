@@ -20,6 +20,7 @@ type IntegrationProjection struct {
 	InstalledVersion     string              `json:"installed_version,omitempty"`
 	Enabled              bool                `json:"enabled"`
 	ReleaseReady         bool                `json:"release_ready"`
+	DevelopmentCopy      bool                `json:"development_copy,omitempty"`
 	ExpectedBlueprintID  string              `json:"expected_blueprint_id"`
 	ExpectedProgramID    string              `json:"expected_program_id"`
 	RequiredHostFeatures []string            `json:"required_host_features"`

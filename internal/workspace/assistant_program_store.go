@@ -89,7 +89,26 @@ func (service *AssistantProgramStore) EnsureStation(key AssistantProgramKey, dec
 	return service.ensureStationLocked(key, declaration)
 }
 
+// EnsureNamedStation creates the same canonical Home with an explicitly chosen
+// display name. An existing Home is reused unchanged, never renamed on retry.
+func (service *AssistantProgramStore) EnsureNamedStation(key AssistantProgramKey, declaration *AssistantProgramDeclaration, name string) (*Workspace, bool, error) {
+	if service == nil || service.store == nil || strings.TrimSpace(name) == "" {
+		return nil, false, ErrAssistantProgramUnavailable
+	}
+	assistantProgramProvisionMu.Lock()
+	defer assistantProgramProvisionMu.Unlock()
+	return service.ensureStationNamedLocked(key, declaration, strings.TrimSpace(name))
+}
+
 func (service *AssistantProgramStore) ensureStationLocked(key AssistantProgramKey, declaration *AssistantProgramDeclaration) (*Workspace, bool, error) {
+	name := ""
+	if declaration != nil {
+		name = declaration.StationName
+	}
+	return service.ensureStationNamedLocked(key, declaration, name)
+}
+
+func (service *AssistantProgramStore) ensureStationNamedLocked(key AssistantProgramKey, declaration *AssistantProgramDeclaration, name string) (*Workspace, bool, error) {
 	key = key.Normalize()
 	if !key.Valid() || declaration == nil || strings.TrimSpace(declaration.ID) != key.ProgramID {
 		return nil, false, ErrAssistantProgramUnavailable
@@ -115,7 +134,7 @@ func (service *AssistantProgramStore) ensureStationLocked(key AssistantProgramKe
 		return nil, false, findErr
 	}
 	station = NewWorkspace(CreateWorkspaceParams{
-		Name:        declaration.StationName,
+		Name:        name,
 		Description: declaration.StationDescription,
 	})
 	station.Kind = "group"

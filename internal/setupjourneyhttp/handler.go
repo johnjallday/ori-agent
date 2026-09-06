@@ -97,6 +97,36 @@ func (h *Handler) read(w http.ResponseWriter, r *http.Request, runID string) {
 	orihttp.Success(w, journeyResponse{Journey: projection})
 }
 
+// CheckPreparation reads machine prerequisites without project grants or live
+// verification. Implementations that do not support it fail closed.
+func (h *Handler) CheckPreparation(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	runID := r.PathValue("runID")
+	if !noQuery(r) || !boundedRunID(runID) {
+		h.writeFailure(w, r, "", runID, setupjourney.FailureFor(setupjourney.ReasonInputInvalid, 0))
+		return
+	}
+	userID, ok := h.currentUser(w, r)
+	if !ok {
+		return
+	}
+	service, ok := h.service.(interface {
+		CheckPreparation(context.Context, string, string) (*setupjourney.PreparationCheck, error)
+	})
+	if !ok {
+		h.writeFailure(w, r, userID, runID, setupjourney.FailureFor(setupjourney.ReasonOwnerUnavailable, 0))
+		return
+	}
+	check, err := service.CheckPreparation(r.Context(), userID, runID)
+	if err != nil {
+		h.writeFailure(w, r, userID, runID, err)
+		return
+	}
+	orihttp.Success(w, check)
+}
+
 // OpenRoot and OpenRun record presentation history only.
 func (h *Handler) OpenRoot(w http.ResponseWriter, r *http.Request) {
 	h.presentation(w, r, "", true)

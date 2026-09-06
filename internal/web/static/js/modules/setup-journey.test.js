@@ -7,6 +7,10 @@ globalThis.document ||= { readyState: 'complete', getElementById: () => null };
 globalThis.window ||= { addEventListener() {}, location: { search: '' } };
 
 const {
+  workspaceLaunchStages,
+  projectDraftInput,
+  projectReviewPresentation,
+  projectFailureGuidance,
   newJourneyIdempotencyKey,
   setupJourneyControlDisabled,
   setupJourneyCurrentStep,
@@ -28,6 +32,27 @@ test('current step follows server identity and preserves an explicit rail select
     setupJourneyCurrentStep({ steps: [{ id: 'pending', status: 'pending' }] }).id,
     'pending'
   );
+});
+
+test('a permitted development integration stays visibly distinct from a reviewed release', () => {
+  const rows = setupJourneyReceiptRows(
+    {},
+    {
+      integration: {
+        plugin_id: 'local-plugin',
+        expected_version: '1.0.0',
+        installed_version: '1.0.0',
+        enabled: true,
+        development_copy: true
+      }
+    }
+  );
+  assert.deepEqual(rows, [
+    ['Integration', 'local-plugin'],
+    ['Version', '1.0.0'],
+    ['Enabled', 'Yes'],
+    ['Verification', 'Local development copy — not release-verified']
+  ]);
 });
 
 test('file-only receipt stays honest about unconfigured and untested live control', () => {
@@ -75,6 +100,82 @@ test('journey shell has labelled progress, associated errors, live status, focus
   assert.match(css, /:focus-visible/);
   assert.match(css, /@media \(max-width: 760px\)/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+});
+
+test('one project name defaults the Ori name without changing the exact review input', () => {
+  const draft = { kind: 'new', projectName: ' First Idea ', workspaceName: '' };
+  assert.deepEqual(projectDraftInput(draft), {
+    mode_id: 'new_project',
+    project_name: 'First Idea',
+    workspace_name: 'First Idea'
+  });
+  assert.equal(
+    projectDraftInput({ ...draft, workspaceName: ' Display Name ' }).workspace_name,
+    'Display Name'
+  );
+  assert.equal(draft.projectName, ' First Idea ');
+  assert.deepEqual(
+    projectDraftInput({
+      kind: 'existing',
+      workspaceName: ' Existing ',
+      selectionToken: 'opaque',
+      entryName: 'chosen.project'
+    }),
+    {
+      mode_id: 'existing_project',
+      workspace_name: 'Existing',
+      selection_token: 'opaque',
+      entry_name: 'chosen.project'
+    }
+  );
+});
+
+test('project reviews describe outcomes and commit errors never claim that nothing changed', () => {
+  assert.equal(
+    projectReviewPresentation({ mode_id: 'new_project', workspace_name: 'Idea' }).confirm,
+    'Create Project'
+  );
+  assert.equal(
+    projectReviewPresentation({ mode_id: 'existing_project', workspace_name: 'Idea' }).confirm,
+    'Import Project'
+  );
+  assert.match(projectFailureGuidance('review', 'input_invalid'), /without slashes/);
+  assert.match(
+    projectFailureGuidance('review', 'input_invalid', true),
+    /select the project folder again/
+  );
+  assert.match(projectFailureGuidance('commit'), /some files may already exist/);
+  assert.doesNotMatch(projectFailureGuidance('commit'), /nothing|did not create/i);
+});
+
+test('four launch screens separate group preparation from canonical project readiness', () => {
+  const journey = {
+    journey: { workspace_launch: { group_title: 'Create Group', runtime_title: 'Set Up App' } },
+    receipts: {},
+    steps: [
+      { kind: 'integration_install', title: 'Install Plugin', status: 'complete' },
+      {
+        kind: 'project_connect',
+        status: 'active',
+        preparation: { exists: false, acknowledged: false }
+      }
+    ]
+  };
+  assert.deepEqual(
+    workspaceLaunchStages(journey).map(step => step.title),
+    ['Install Plugin', 'Create Group', 'Set Up App', 'Create New Workspace']
+  );
+  assert.equal(workspaceLaunchStages(journey)[3].enabled, false);
+  journey.steps[1].preparation.exists = true;
+  assert.equal(workspaceLaunchStages(journey)[2].enabled, true);
+  assert.equal(workspaceLaunchStages(journey)[3].enabled, false);
+  journey.steps[1].preparation.acknowledged = true;
+  assert.equal(workspaceLaunchStages(journey)[3].enabled, true);
+  // Historical resource IDs do not establish readiness after a regression.
+  journey.receipts.project_workspace_id = 'previous';
+  assert.equal(workspaceLaunchStages(journey)[3].complete, false);
+  journey.steps[0].status = 'blocked';
+  assert.equal(workspaceLaunchStages(journey)[3].enabled, false);
 });
 
 test('idempotency keys are non-empty and distinct', () => {

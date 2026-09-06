@@ -9,8 +9,10 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/pathselection"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -217,6 +219,54 @@ func TestCreateNewProjectUsesSameHomeAndManagedLocator(t *testing.T) {
 	}
 	if got := taskDescriptions(child.Tasks); !reflect.DeepEqual(got, []string{"Shared task", "New task"}) {
 		t.Fatalf("new-mode starter tasks = %#v", got)
+	}
+}
+
+func TestManagedConnectionObservesCanonicalFilesWithSQLitePrimary(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, &database.Config{InMemory: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hybrid := session.NewHybridStoreWithDB(db, 10)
+	t.Cleanup(func() { _ = hybrid.Close() })
+	folders, err := workspace.NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = folders.Close() })
+	store := workspace.NewAgentSnapshotStore(workspace.NewSyncStore(session.NewWorkspaceStoreAdapter(hybrid), folders), nil)
+	service := NewService(store, pathselection.NewStore())
+	scope := Scope{OwnerUserID: "local", RunID: "run-real-store", Template: connectionTemplate(t)}
+	request := Request{ModeID: projecttemplates.ProjectConnectionNewProject, WorkspaceName: "New Song", ProjectName: "First Idea"}
+	preview, err := service.Preview(ctx, scope, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Commit(ctx, scope, request, preview.InputDigest, preview.OwnerDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed, ok := service.ObservedResult(scope, "", ""); !ok || observed != result {
+		t.Fatalf("created project was not observed through production store: %+v ok=%v", observed, ok)
+	}
+	// A retry must recognize the existing project, not try to scaffold it again.
+	again, err := service.Commit(ctx, scope, request, preview.InputDigest, preview.OwnerDigest)
+	if err != nil || again != result {
+		t.Fatalf("retry = %+v err=%v", again, err)
+	}
+	// The read is still fail-closed: an actual loss of canonical provenance
+	// must not be hidden by a cached/database version of the project.
+	canonical, err := folders.Get(result.ProjectWorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical.TemplateProvenance = nil
+	if err := folders.Save(canonical); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := service.ObservedResult(scope, "", ""); ok {
+		t.Fatal("missing canonical provenance reported connected")
 	}
 }
 

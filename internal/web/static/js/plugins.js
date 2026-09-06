@@ -178,6 +178,7 @@
     const formatBadge = '<span class="badge bg-secondary">' + esc(p.format) + '</span>';
     const rawName = String(p.name == null ? '' : p.name);
     const name = esc(rawName);
+    const installDirectory = String(p.install_dir == null ? '' : p.install_dir).trim();
     const update = updateIndex.get(rawName);
     const updateNotice = updateNotifications.pluginNotice(update);
     const updateBadge = updateNotice
@@ -202,6 +203,11 @@
       updateBadge +
       '</div>' +
       (p.description ? '<div class="small text-muted">' + esc(p.description) + '</div>' : '') +
+      (installDirectory
+        ? '<div class="small mt-1"><span class="fw-semibold">Installed files:</span> <code class="plugin-install-directory text-break">' +
+          esc(installDirectory) +
+          '</code></div>'
+        : '') +
       '<div class="small mt-1">MCP: ' +
       servers +
       ' &middot; Skills: ' +

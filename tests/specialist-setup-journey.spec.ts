@@ -39,8 +39,8 @@ function projectStep(status: string = 'current') {
     guidance: 'Nothing is created or connected until you confirm an exact review.',
     status,
     actions: [
-      action('review_existing_project', 'Use an existing project', 'review'),
-      action('review_new_project', 'Create a new project', 'review')
+      action('review_existing_project', 'Import Existing Project', 'review'),
+      action('review_new_project', 'Create New Project', 'review')
     ]
   };
 }
@@ -161,6 +161,215 @@ function journey(
 }
 
 test.describe('specialist setup journey browser evidence', () => {
+  test('keeps one project decision visible, preserves names, and safely retries a lost creation response', async ({
+    page
+  }) => {
+    await page.setViewportSize({ width: 390, height: 740 });
+    let current = journey('project', 7);
+    let reviews = 0;
+    const commits: unknown[] = [];
+    const inputs: Record<string, unknown>[] = [];
+    await page.route('**/api/onboarding/status', route =>
+      route.fulfill({ json: { completed: true, current_step: 'complete' } })
+    );
+    await page.route('**/api/personal-assistant/setup-journey**', async route => {
+      const path = new URL(route.request().url()).pathname;
+      if (path.endsWith('/actions/review_new_project')) {
+        const input = route.request().postDataJSON().input;
+        inputs.push(input);
+        reviews++;
+        if (reviews === 1) {
+          await route.fulfill({
+            status: 400,
+            json: { error: { reason_code: 'input_invalid' }, current }
+          });
+          return;
+        }
+        await route.fulfill({
+          json: {
+            review: {
+              token: `review-${reviews}`,
+              commit_action: 'create_new_project',
+              expires_at: '2035-01-01T00:00:00Z',
+              project_connection: {
+                mode_id: 'new_project',
+                workspace_name: input.workspace_name,
+                parent_workspace_name: 'Producer Home',
+                home_will_be_created: false,
+                project_name: input.project_name,
+                entry_name: 'First Idea.project',
+                created_files: ['First Idea.project', 'Notes.md'],
+                defaults_statement: 'The project app will not open automatically.'
+              }
+            }
+          }
+        });
+        return;
+      }
+      if (path.endsWith('/actions/create_new_project')) {
+        commits.push(route.request().postDataJSON());
+        if (commits.length === 1) {
+          await route.abort('failed');
+          return;
+        }
+        current = journey('workspace-setup', 8);
+      }
+      await route.fulfill({ json: { setup_journey: current } });
+    });
+    await page.goto('/?setup=specialist');
+    const dialog = page.locator('#specialistSetupJourneyModal');
+    await dialog.getByRole('button', { name: 'Create New Project' }).click();
+    const name = dialog.getByRole('textbox', { name: 'Project name' });
+    await expect(name).toBeFocused();
+    await name.fill('First Idea');
+    await expect(dialog.getByRole('textbox')).toHaveCount(1);
+    await dialog.getByRole('button', { name: 'Review Project' }).click();
+    await expect(dialog.getByRole('alert')).toContainText('Check the project name');
+    await expect(name).toHaveValue('First Idea');
+    expect(inputs[0]).toMatchObject({ workspace_name: 'First Idea', project_name: 'First Idea' });
+    expect(commits).toHaveLength(0);
+    await dialog.getByText('More options', { exact: true }).click();
+    await dialog
+      .getByRole('textbox', { name: 'Different display name in Ori' })
+      .fill('Writing Session');
+    await dialog.getByRole('button', { name: 'Back', exact: true }).click();
+    await expect(dialog.getByRole('button', { name: 'Create New Project' })).toBeFocused();
+    await dialog.getByRole('button', { name: 'Create New Project' }).click();
+    await expect(name).toHaveValue('First Idea');
+    await expect(
+      dialog.getByRole('textbox', { name: 'Different display name in Ori' })
+    ).toHaveValue('Writing Session');
+    await dialog.getByRole('button', { name: 'Review Project' }).click();
+    await expect(dialog.getByRole('heading', { name: 'Create “Writing Session”?' })).toBeFocused();
+    await expect(dialog.getByRole('button', { name: 'Review Project' })).toHaveCount(0);
+    await dialog.getByRole('button', { name: 'Back', exact: true }).click();
+    await expect(name).toBeFocused();
+    await expect(name).toHaveValue('First Idea');
+    await dialog.getByRole('button', { name: 'Review Project' }).click();
+    const create = dialog.getByRole('button', { name: 'Create Project', exact: true });
+    await create.scrollIntoViewIfNeeded();
+    const footer = await dialog.locator('.setup-journey__footer').boundingBox();
+    const button = await create.boundingBox();
+    expect(button!.y + button!.height).toBeLessThanOrEqual(footer!.y);
+    await capture(page, '16-guided-project-review-narrow');
+    await create.click();
+    await expect(dialog.getByRole('alert')).toContainText('some files may already exist');
+    await expect(dialog.getByRole('alert')).toContainText(
+      'Retrying uses your original confirmation'
+    );
+    await expect(dialog.getByRole('button', { name: 'Review Project' })).toHaveCount(0);
+    await dialog.getByRole('button', { name: 'Retry Project Change' }).click();
+    await expect(
+      dialog.getByRole('heading', { name: 'Choose how Ori works with the project' })
+    ).toBeVisible();
+    expect(commits).toHaveLength(2);
+    expect(commits[1]).toEqual(commits[0]);
+    expect(inputs.at(-1)).toMatchObject({
+      workspace_name: 'Writing Session',
+      project_name: 'First Idea'
+    });
+  });
+
+  test('opens and dismisses an uncertain project status without claiming another operation', async ({
+    page
+  }) => {
+    let current = { ...journey('project', 7), busy: true, reconciliation_required: true };
+    const writes: string[] = [];
+    await page.route('**/api/onboarding/status', route =>
+      route.fulfill({ json: { completed: true, current_step: 'complete' } })
+    );
+    await page.route('**/api/personal-assistant/setup-journey**', async route => {
+      if (route.request().method() !== 'GET') writes.push(route.request().url());
+      await route.fulfill({ json: { setup_journey: current } });
+    });
+    await page.goto('/?setup=specialist');
+    const dialog = page.locator('#specialistSetupJourneyModal');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Check Project Status' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('ori:open-specialist-setup')));
+    await expect(dialog).toBeVisible();
+    current = { ...journey('workspace-setup', 8), reconciliation_required: false };
+    await dialog.getByRole('button', { name: 'Check Project Status' }).click();
+    await expect(
+      dialog.getByRole('heading', { name: 'Choose how Ori works with the project' })
+    ).toBeFocused();
+    expect(writes).toEqual([]);
+  });
+
+  test('imports an explicitly selected project file without showing competing creation controls', async ({
+    page
+  }) => {
+    let current = journey('project', 7);
+    const commits: Record<string, unknown>[] = [];
+    await page.route('**/api/onboarding/status', route =>
+      route.fulfill({ json: { completed: true, current_step: 'complete' } })
+    );
+    await page.route('**/api/folder-picker/select-path', route =>
+      route.fulfill({
+        json: { selected: true, path: '/approved/Existing Song', selection_token: 'folder-consent' }
+      })
+    );
+    await page.route('**/api/personal-assistant/setup-journey**', async route => {
+      const path = new URL(route.request().url()).pathname;
+      if (path.endsWith('/actions/review_existing_project')) {
+        const input = route.request().postDataJSON().input;
+        await route.fulfill({
+          json: {
+            review: {
+              token: 'import-consent',
+              commit_action: 'connect_existing_project',
+              expires_at: '2035-01-01T00:00:00Z',
+              project_connection: {
+                mode_id: 'existing_project',
+                workspace_name: input.workspace_name,
+                selected_folder: '/approved/Existing Song',
+                parent_workspace_name: 'Producer Home',
+                home_will_be_created: false,
+                entry_name: input.entry_name || '',
+                entry_candidates: ['First.project', 'Second.project']
+              }
+            }
+          }
+        });
+        return;
+      }
+      if (path.endsWith('/actions/connect_existing_project')) {
+        commits.push(route.request().postDataJSON().input);
+        current = journey('workspace-setup', 8);
+      }
+      await route.fulfill({ json: { setup_journey: current } });
+    });
+    await page.goto('/?setup=specialist');
+    const dialog = page.locator('#specialistSetupJourneyModal');
+    await dialog.getByRole('button', { name: 'Import Existing Project' }).click();
+    await expect(dialog.getByRole('textbox', { name: 'Name in Ori', exact: true })).toHaveValue(
+      'Existing Song'
+    );
+    await expect(dialog.getByRole('button', { name: 'Create New Project' })).toHaveCount(0);
+    await dialog.getByRole('button', { name: 'Review Import' }).click();
+    const file = dialog.getByRole('combobox', { name: 'Project file to import' });
+    await expect(file).toBeFocused();
+    await file.selectOption('Second.project');
+    expect(commits).toHaveLength(0);
+    await dialog.getByRole('button', { name: 'Review Import' }).click();
+    await expect(dialog.getByRole('heading', { name: 'Import “Existing Song”?' })).toBeFocused();
+    await expect(dialog).toContainText('without moving or changing its existing files');
+    await dialog.getByRole('button', { name: 'Import Project', exact: true }).click();
+    await expect(
+      dialog.getByRole('heading', { name: 'Choose how Ori works with the project' })
+    ).toBeVisible();
+    expect(commits).toEqual([
+      {
+        mode_id: 'existing_project',
+        workspace_name: 'Existing Song',
+        entry_name: 'Second.project',
+        selection_token: 'folder-consent'
+      }
+    ]);
+  });
+
   test('keeps every lasting setup action behind review and preserves dismiss/resume', async ({
     page
   }) => {
@@ -264,21 +473,19 @@ test.describe('specialist setup journey browser evidence', () => {
     await expect(page.getByRole('navigation', { name: 'Setup progress' })).toBeVisible();
     await capture(page, '07-setup-project-choice');
 
-    await dialog.getByRole('button', { name: 'Create a new project' }).click();
+    await dialog.getByRole('button', { name: 'Create New Project' }).click();
     expect(pageErrors).toEqual([]);
-    const workspaceName = dialog.getByLabel('Workspace name');
-    await expect(workspaceName).toBeFocused();
-    await workspaceName.fill('Night Drive');
-    await dialog.getByLabel('Project name').fill('Night Drive');
-    await dialog.getByRole('button', { name: 'Continue to review' }).click();
+    const projectName = dialog.getByRole('textbox', { name: 'Project name' });
+    await expect(projectName).toBeFocused();
+    await projectName.fill('Night Drive');
+    await expect(dialog.getByRole('button', { name: 'Import Existing Project' })).toHaveCount(0);
+    await expect(dialog.getByRole('button', { name: 'Create New Project' })).toHaveCount(0);
+    await dialog.getByRole('button', { name: 'Review Project' }).click();
 
-    await expect(
-      dialog.getByRole('heading', { name: 'Review before making changes' })
-    ).toBeVisible();
-    await expect(dialog).toContainText('Home: Will be reused');
+    await expect(dialog.getByRole('heading', { name: 'Create “Night Drive”?' })).toBeFocused();
+    await expect(dialog).toContainText('Home setup: Use your existing Home');
     await expect(dialog).toContainText('A minimal reviewed project scaffold.');
-    const confirmProject = dialog.getByRole('button', { name: 'Confirm this change' });
-    await expect(dialog.getByRole('button', { name: 'Back' })).toBeFocused();
+    const confirmProject = dialog.getByRole('button', { name: 'Create Project', exact: true });
     await capture(page, '08-setup-project-review');
 
     await confirmProject.click();

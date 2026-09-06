@@ -76,6 +76,34 @@ func (stub *serviceStub) Mutate(_ context.Context, userID, runID string, actionI
 	return &setupjourney.ActionResult{Journey: stub.projection}, stub.actionErr
 }
 
+func (stub *serviceStub) CheckPreparation(_ context.Context, userID, runID string) (*setupjourney.PreparationCheck, error) {
+	stub.lastOperation, stub.lastUserID, stub.lastRunID = "prerequisites", userID, runID
+	return &setupjourney.PreparationCheck{Ready: false}, stub.readErr
+}
+
+func TestPreparationCheckIsAnAuthorizedReadWithOnlyBoundedOutput(t *testing.T) {
+	stub := &serviceStub{}
+	mux := testMux(NewHandler(stub, fixedUserProvider{id: "current-user"}))
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/personal-assistant/setup-journey/runs/current-run/preparation", nil))
+	if response.Code != http.StatusOK || stub.lastOperation != "prerequisites" || stub.lastUserID != "current-user" || stub.lastRunID != "current-run" {
+		t.Fatalf("check: %d %s %+v", response.Code, response.Body.String(), stub)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body) != 1 || body["ready"] != false {
+		t.Fatalf("unbounded output: %+v", body)
+	}
+	stub.lastOperation = ""
+	response = httptest.NewRecorder()
+	mux.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/personal-assistant/setup-journey/runs/current-run/preparation", nil))
+	if response.Code != http.StatusMethodNotAllowed || stub.lastOperation != "" {
+		t.Fatal("prerequisites admitted a write")
+	}
+}
+
 func testProjection() *setupjourney.JourneyProjection {
 	return &setupjourney.JourneyProjection{
 		RunID: "run-current", RunKind: setupjourney.RunKindRoot,
@@ -90,6 +118,7 @@ func testMux(handler *Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/personal-assistant/setup-journey", handler.GetRoot)
 	mux.HandleFunc("GET /api/personal-assistant/setup-journey/runs/{runID}", handler.GetRun)
+	mux.HandleFunc("GET /api/personal-assistant/setup-journey/runs/{runID}/preparation", handler.CheckPreparation)
 	mux.HandleFunc("POST /api/personal-assistant/setup-journey/open", handler.OpenRoot)
 	mux.HandleFunc("POST /api/personal-assistant/setup-journey/runs/{runID}/open", handler.OpenRun)
 	mux.HandleFunc("POST /api/personal-assistant/setup-journey/dismiss", handler.DismissRoot)

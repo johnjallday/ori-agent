@@ -191,6 +191,60 @@ test('scoped Home and project primaries keep separate names and select the proje
   assert.equal(view.primaryName, 'Producer');
   assert.equal(view.canContinueFromTeam, true);
   assert.ok(!view.issues.some(issue => issue.id === 'duplicate-names'));
+
+  // A subsequent workspace reuses only the group coordinator. It still asks
+  // to create/confirm project-scoped roles rather than claiming inheritance.
+  program.roles[0].agent_name = 'June';
+  const next = Draft.createDraft();
+  Draft.setPlanReady(next, 'template:scoped', planResponse([], { assistant_program: program }));
+  Draft.setAssistantHire(next, { name: 'Do not rename June' });
+  const nextView = Draft.derive(next);
+  assert.equal(nextView.assistantProgram.homeAlreadyStaffed, true);
+  assert.equal(nextView.assistantProgram.existingHired, false);
+  assert.equal(nextView.roster.find(entry => entry.assistantScope === 'home').name, 'June');
+  assert.equal(
+    nextView.roster.find(entry => entry.assistantScope === 'home').lifecycle,
+    'assistant-link'
+  );
+  assert.ok(
+    nextView.roster
+      .filter(entry => entry.assistantScope === 'project')
+      .every(entry => entry.lifecycle === 'assistant-create')
+  );
+  assert.equal(nextView.payload.assistant_hire.name, 'June');
+});
+
+test('post-create staffing does not treat a hired Home as a staffed new project', async () => {
+  const sessions = readFileSync(new URL('./sessions.js', import.meta.url), 'utf8');
+  const start = sessions.indexOf('  async hireAssistantProgramAfterCreate(');
+  const end = sessions.indexOf('  // Create folder', start);
+  assert.ok(start >= 0 && end > start);
+  for (const version of [1, 2]) {
+    const calls = [];
+    const hire = vm.runInNewContext(
+      `({${sessions.slice(start, end)}}).hireAssistantProgramAfterCreate`,
+      {
+        fetch: async (url, options = {}) => {
+          calls.push({ url, options });
+          return {
+            ok: true,
+            json: async () => ({
+              available: true,
+              hired: true,
+              state_revision: 3,
+              declaration: { schema_version: version }
+            })
+          };
+        }
+      }
+    );
+    await hire('new-project', { name: 'Existing Coordinator' });
+    assert.equal(calls.length, version === 2 ? 2 : 1);
+    if (version === 2) {
+      assert.equal(calls[1].url, '/api/workspaces/new-project/assistant-program/hire');
+      assert.equal(JSON.parse(calls[1].options.body).version, 3);
+    }
+  }
 });
 
 test('an existing shared roster is linked without offering a second identity', () => {

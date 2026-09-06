@@ -8,6 +8,23 @@ import (
 	"github.com/johnjallday/ori-agent/internal/specialist"
 )
 
+func TestProjectChoiceLabelsNameTheUserOutcomeWithoutChangingReviewSemantics(t *testing.T) {
+	definitions := actionDefinitionsByKind[specialist.SetupStepProjectConnect]
+	labels := make(map[ActionID]string, len(definitions))
+	for _, definition := range definitions {
+		if definition.ID == ActionReviewExistingProject || definition.ID == ActionReviewNewProject {
+			if definition.Effect != ActionEffectReview || definition.RequiresReview {
+				t.Fatalf("project choice changed review semantics: %#v", definition)
+			}
+			labels[definition.ID] = definition.Label
+		}
+	}
+	if labels[ActionReviewExistingProject] != "Import Existing Project" ||
+		labels[ActionReviewNewProject] != "Create New Project" {
+		t.Fatalf("project choice labels = %#v", labels)
+	}
+}
+
 func TestServiceOpenAndDismissAreRevisionedPresentationOnlyMutations(t *testing.T) {
 	service, _ := serviceFixture(t, defaultCanonicalReads())
 	ctx := context.Background()
@@ -116,6 +133,41 @@ func TestServiceCreateOrResumeChildIsIdempotentAndCreatesNoCanonicalResource(t *
 		t.Fatalf("child creation performed a canonical setup consequence: %#v", child)
 	}
 	firstChildID := child.RunID
+	storedChild, err := store.GetRun(ctx, firstChildID)
+	if err != nil || storedChild.OwnerUserID != "" || storedChild.RelationshipID != "" {
+		t.Fatalf("child copied root identity: %+v %v", storedChild, err)
+	}
+	scope, err := service.authorizedActionScope(ctx, "local", firstChildID)
+	if err != nil || scope.OwnerUserID != "local" || scope.RootRunID != root.RunID || scope.RunID != firstChildID || scope.ProjectWorkspaceID != "" || scope.SelectedModeID != "" {
+		t.Fatalf("child action authority/scope: %+v %v", scope, err)
+	}
+	for name, change := range map[string]func(*RootSpec){
+		"owner":        func(spec *RootSpec) { spec.OwnerUserID = "foreign" },
+		"relationship": func(spec *RootSpec) { spec.RelationshipID = "other" },
+		"specialist":   func(spec *RootSpec) { spec.SpecialistSlug = "other" },
+		"journey":      func(spec *RootSpec) { spec.JourneyID = "other" },
+	} {
+		t.Run("reject foreign "+name, func(t *testing.T) {
+			spec := RootSpec{
+				OwnerUserID: "local", RelationshipID: acceptedRelationship().AssistantID,
+				SpecialistSlug: "music_production", JourneyID: root.Journey.ID,
+				DeclarationSchemaVersion: 1, DeclarationVersion: 1,
+				StepIDs: []string{"integration", "project", "workspace", "staffing", "summary"},
+			}
+			change(&spec)
+			foreignRoot, _, err := store.CreateOrGetRoot(ctx, spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			foreignChild, _, err := store.CreateOrGetChild(ctx, foreignRoot.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := service.authorizedActionScope(ctx, "local", foreignChild.ID); err == nil {
+				t.Fatal("authorized a foreign root's child")
+			}
+		})
+	}
 
 	replayed, err := service.CreateOrResumeChild(ctx, "local", PresentationMutation{
 		IfRevision: root.StateRevision, IdempotencyKey: "child-request-1",

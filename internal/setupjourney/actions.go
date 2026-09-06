@@ -56,13 +56,14 @@ type ActionResult struct {
 // ReviewProjection is an expiring consent boundary. The commit action and
 // typed disclosure are server-selected; clients cannot supply owner identity.
 type ReviewProjection struct {
-	Token             string                        `json:"token"`
-	CommitAction      ActionID                      `json:"commit_action"`
-	ExpiresAt         time.Time                     `json:"expires_at"`
-	Integration       *IntegrationProjection        `json:"integration,omitempty"`
-	ProjectConnection *projectconnection.Projection `json:"project_connection,omitempty"`
-	WorkspaceSetup    *WorkspaceSetupProjection     `json:"workspace_setup,omitempty"`
-	Staffing          *StaffingProjection           `json:"staffing,omitempty"`
+	Token             string                             `json:"token"`
+	CommitAction      ActionID                           `json:"commit_action"`
+	ExpiresAt         time.Time                          `json:"expires_at"`
+	Integration       *IntegrationProjection             `json:"integration,omitempty"`
+	ProjectConnection *projectconnection.Projection      `json:"project_connection,omitempty"`
+	WorkspaceSetup    *WorkspaceSetupProjection          `json:"workspace_setup,omitempty"`
+	Staffing          *StaffingProjection                `json:"staffing,omitempty"`
+	Group             *projectconnection.HomePreparation `json:"group,omitempty"`
 }
 
 // ActionReviewMaterial is produced only by one compiled action adapter. Digests
@@ -76,6 +77,7 @@ type ActionReviewMaterial struct {
 	ProjectConnection   *projectconnection.Projection
 	WorkspaceSetup      *WorkspaceSetupProjection
 	Staffing            *StaffingProjection
+	Group               *projectconnection.HomePreparation
 }
 
 // JourneyActionAdapter is the closed review/commit contract for one setup step
@@ -98,6 +100,9 @@ const (
 	ActionUpdate            ActionID = "update"
 	ActionManageIntegration ActionID = "manage_integration"
 
+	ActionReviewCreateGroup      ActionID = "review_create_group"
+	ActionCreateGroup            ActionID = "create_group"
+	ActionAcknowledgePreparation ActionID = "acknowledge_preparation"
 	ActionReviewExistingProject  ActionID = "review_existing_project"
 	ActionConnectExistingProject ActionID = "connect_existing_project"
 	ActionReviewNewProject       ActionID = "review_new_project"
@@ -136,9 +141,12 @@ var actionDefinitionsByKind = map[specialist.SetupStepKind][]ActionDefinition{
 		{ID: ActionManageIntegration, Label: "Manage integration", Effect: ActionEffectNavigation},
 	},
 	specialist.SetupStepProjectConnect: {
-		{ID: ActionReviewExistingProject, Label: "Review existing project", Effect: ActionEffectReview},
+		{ID: ActionReviewCreateGroup, Label: "Review Group", Effect: ActionEffectReview},
+		{ID: ActionCreateGroup, Label: "Create Group", Effect: ActionEffectCommit, RequiresReview: true},
+		{ID: ActionAcknowledgePreparation, Label: "Continue to workspace creation", Effect: ActionEffectCommit},
+		{ID: ActionReviewExistingProject, Label: "Import Existing Project", Effect: ActionEffectReview},
 		{ID: ActionConnectExistingProject, Label: "Connect existing project", Effect: ActionEffectCommit, RequiresReview: true},
-		{ID: ActionReviewNewProject, Label: "Review new project", Effect: ActionEffectReview},
+		{ID: ActionReviewNewProject, Label: "Create New Project", Effect: ActionEffectReview},
 		{ID: ActionCreateNewProject, Label: "Create new project", Effect: ActionEffectCommit, RequiresReview: true},
 		{ID: ActionOpenProject, Label: "Open project", Effect: ActionEffectNavigation},
 	},
@@ -188,6 +196,7 @@ type ReadScope struct {
 	HomeWorkspaceID            string
 	ProjectWorkspaceID         string
 	SelectedModeID             string
+	WorkspaceLaunch            bool
 }
 
 // CanonicalStepRead is one read-only owner result. Complete is authoritative
@@ -200,6 +209,7 @@ type CanonicalStepRead struct {
 	Integration      *IntegrationProjection
 	WorkspaceSetup   *WorkspaceSetupProjection
 	Staffing         *StaffingProjection
+	Preparation      *projectconnection.HomePreparation
 }
 
 // CanonicalReader asks one canonical owner for current state. Implementations
@@ -251,10 +261,14 @@ func (r *ReaderRegistry) read(ctx context.Context, kind specialist.SetupStepKind
 	state.Integration = cloneIntegrationProjection(state.Integration)
 	state.WorkspaceSetup = cloneWorkspaceSetupProjection(state.WorkspaceSetup)
 	state.Staffing = cloneStaffingProjection(state.Staffing)
+	state.Preparation = cloneHomePreparation(state.Preparation)
 	return state
 }
 
 func validCanonicalRead(kind specialist.SetupStepKind, state CanonicalStepRead) bool {
+	if !validHomePreparation(state.Preparation) || (state.Preparation != nil && kind != specialist.SetupStepProjectConnect) {
+		return false
+	}
 	if state.Complete && state.BlockedReason != "" {
 		return false
 	}

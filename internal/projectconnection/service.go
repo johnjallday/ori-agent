@@ -124,7 +124,7 @@ func (s *Service) Preview(_ context.Context, scope Scope, request Request) (Prev
 		OwnerUserID: scope.OwnerUserID, PluginID: scope.Template.PluginOwner.PluginID,
 		ProgramID: scope.Template.AssistantProgram.ID,
 	}.Normalize()
-	_, stationErr := workspace.NewAssistantProgramStore(s.store).FindStation(key)
+	station, stationErr := workspace.NewAssistantProgramStore(s.store).FindStation(key)
 	if stationErr != nil && !errors.Is(stationErr, workspace.ErrAssistantStationNotFound) {
 		return Preview{}, ErrUnavailable
 	}
@@ -133,6 +133,9 @@ func (s *Service) Preview(_ context.Context, scope Scope, request Request) (Prev
 		ParentWorkspaceName: scope.Template.AssistantProgram.StationName,
 		HomeWillBeCreated:   errors.Is(stationErr, workspace.ErrAssistantStationNotFound),
 	}}
+	if stationErr == nil && station != nil {
+		preview.Projection.ParentWorkspaceName = station.Name
+	}
 	switch request.ModeID {
 	case projecttemplates.ProjectConnectionExistingProject:
 		if s.selections == nil || strings.TrimSpace(request.SelectionToken) == "" || request.ProjectName != "" {
@@ -235,7 +238,7 @@ func (s *Service) ObservedResult(scope Scope, homeID, projectID string) (CommitR
 	if projectID == "" {
 		projectID = connectionChildID(scope.RunID)
 	}
-	project, err := s.store.Get(projectID)
+	project, err := s.projectRecord(projectID)
 	if err != nil || project == nil {
 		return CommitResult{}, false
 	}
@@ -264,7 +267,7 @@ func (s *Service) Observe(scope Scope, homeID, projectID string, mode projecttem
 		projectID == "" || homeID == "" || projectID != connectionChildID(scope.RunID) {
 		return false
 	}
-	project, err := s.store.Get(projectID)
+	project, err := s.projectRecord(projectID)
 	if err != nil || project == nil || project.OwnerUserID != scope.OwnerUserID || project.SharedData[connectionRunKey] != scope.RunID {
 		return false
 	}
@@ -291,8 +294,33 @@ func (s *Service) Observe(scope Scope, homeID, projectID string, mode projecttem
 	return err == nil
 }
 
+// projectRecord overlays folder-owned facts on the primary identity. SQLite
+// does not store the project path or template provenance; its absence there is
+// not evidence that a successful project creation failed.
+func (s *Service) projectRecord(id string) (*workspace.Workspace, error) {
+	project, err := s.store.Get(id)
+	if err != nil || project == nil {
+		return project, err
+	}
+	if reader, ok := s.store.(interface {
+		GetFolderWorkspace(string) (*workspace.Workspace, error)
+	}); ok {
+		canonical, readErr := reader.GetFolderWorkspace(id)
+		if readErr != nil || canonical == nil || canonical.ID != project.ID {
+			return nil, ErrUnavailable
+		}
+		project.ProjectPath = canonical.ProjectPath
+		project.TemplateProvenance = canonical.TemplateProvenance
+	}
+	return project, nil
+}
+
 func (s *Service) ensureChild(scope Scope, request Request, preview Preview, home *workspace.Workspace, childID string) (*workspace.Workspace, error) {
 	if existing, err := s.store.Get(childID); err == nil && existing != nil {
+		existing, err = s.projectRecord(childID)
+		if err != nil {
+			return nil, ErrUnavailable
+		}
 		if existing.OwnerUserID != scope.OwnerUserID || existing.ParentID != home.ID || existing.SharedData[connectionRunKey] != scope.RunID {
 			return nil, ErrChanged
 		}

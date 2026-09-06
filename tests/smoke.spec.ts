@@ -1543,6 +1543,7 @@ test.describe('Plugin Update Notifications', () => {
               name: 'smoke-demo',
               version: '1.0.0',
               format: 'claude',
+              install_dir: '/tmp/Ori Demo/<escaped>',
               enabled: false
             }
           ]
@@ -1590,6 +1591,8 @@ test.describe('Plugin Update Notifications', () => {
       '1 plugin update is available'
     );
     await expect(page.locator('#pluginList')).toContainText('Update available · 2.0.0');
+    await expect(page.locator('.plugin-install-directory')).toHaveText('/tmp/Ori Demo/<escaped>');
+    await expect(page.locator('#pluginList img, #pluginList script')).toHaveCount(0);
     await expect(
       page.locator('[data-plugin-action="update"][data-plugin-name="smoke-demo"]')
     ).toBeVisible();
@@ -2682,8 +2685,10 @@ test.describe('Workspace File Folders', () => {
       );
 
       await page
-        .locator('#workspaceCommandView .ws-cmd-files-panel [data-cmd-open-section="files"]')
-        .first()
+        .locator(
+          '#workspaceCommandView .ws-cmd-files-panel [data-cmd-open-section="files"][data-cmd-item-id]'
+        )
+        .filter({ hasText: 'folder-smoke-report.txt' })
         .click();
       const explorer = page.locator('#workspace-directory-explorer-modal');
       await expect(explorer).toBeVisible();

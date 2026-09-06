@@ -817,6 +817,39 @@ func TestGroupNotesAndSettings(t *testing.T) {
 	}
 }
 
+func TestCreateGroupCanExplicitlyDeferStaffing(t *testing.T) {
+	for _, roster := range []string{"", `,"existing_agent_names":[]`} {
+		t.Run("roster="+roster, func(t *testing.T) {
+			handler, cleanup := createTestHandler(t)
+			defer cleanup()
+			newTestFileStore(t, handler)
+			body := `{"name":"Empty Group","kind":"group","create_template_agents":false` + roster + `}`
+			req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewBufferString(body))
+			req.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			handler.HandleWorkspaces(response, req)
+			if response.Code != http.StatusCreated {
+				t.Fatalf("create: %d %s", response.Code, response.Body.String())
+			}
+			var result struct {
+				Folder struct {
+					Kind   string            `json:"kind"`
+					Agents []json.RawMessage `json:"agent_instances"`
+				} `json:"folder"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if result.Folder.Kind != "group" || len(result.Folder.Agents) != 0 {
+				t.Fatalf("staffed empty group: %s", response.Body.String())
+			}
+			if _, exists := handler.agentStore.GetAgent("Empty Group Manager"); exists {
+				t.Fatal("created an unreviewed manager")
+			}
+		})
+	}
+}
+
 // TestCreateGroupWithEntryAgent verifies the New Group modal flow: a group
 // created with entry_agent_name resolves that agent as the default session
 // agent, and a group created without one gets a "<Name> Manager" entry agent

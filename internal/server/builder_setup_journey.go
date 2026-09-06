@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/pathselection"
@@ -18,6 +19,23 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
+// readSetupSummary supplies only closed navigation/continuation offers. The
+// journey reconciler, not this reader, decides when all owners are ready and
+// these actions may be exposed.
+func readSetupSummary(_ context.Context, scope setupjourney.ReadScope) (setupjourney.CanonicalStepRead, error) {
+	actions := []setupjourney.ActionID{setupjourney.ActionReviewSetup}
+	if scope.ProjectWorkspaceID != "" {
+		actions = append(actions, setupjourney.ActionOpenProject, setupjourney.ActionOpenLiveSetup)
+	}
+	if scope.HomeWorkspaceID != "" {
+		actions = append(actions, setupjourney.ActionOpenHome, setupjourney.ActionOpenSampleLibrarySetup)
+	}
+	if scope.RunKind == setupjourney.RunKindRoot && scope.HomeWorkspaceID != "" && scope.ProjectWorkspaceID != "" {
+		actions = append(actions, setupjourney.ActionConnectAnotherProject)
+	}
+	return setupjourney.CanonicalStepRead{AvailableActions: actions}, nil
+}
+
 // initializeSetupJourney wires the durable generic shell before individual
 // canonical adapters are added. Missing owners fail closed; later adapter tasks
 // replace these readers with plugin/workspace/runtime/Assistant Program reads.
@@ -28,12 +46,13 @@ func (b *ServerBuilder) initializeSetupJourney() {
 	readers := make(map[specialist.SetupStepKind]setupjourney.CanonicalReader, specialist.SetupJourneyRequiredSteps)
 	for _, kind := range []specialist.SetupStepKind{
 		specialist.SetupStepAssistantProgramStaffing,
-		specialist.SetupStepSummary,
 	} {
 		readers[kind] = setupjourney.CanonicalReaderFunc(func(context.Context, setupjourney.ReadScope) (setupjourney.CanonicalStepRead, error) {
 			return setupjourney.CanonicalStepRead{BlockedReason: setupjourney.ReasonOwnerUnavailable}, nil
 		})
 	}
+	readers[specialist.SetupStepSummary] = setupjourney.CanonicalReaderFunc(readSetupSummary)
+	var integrationAdapter *setupjourney.ReviewedIntegrationAdapter
 	var projectAdapter *setupjourney.ProjectConnectionAdapter
 	var workspaceSetupAdapter *setupjourney.WorkspaceSetupAdapter
 	var staffingAdapter *setupjourney.AssistantStaffingAdapter
@@ -52,7 +71,10 @@ func (b *ServerBuilder) initializeSetupJourney() {
 		})
 	}
 	if b.pluginHandler != nil {
-		readers[specialist.SetupStepIntegrationInstall] = setupjourney.NewReviewedIntegrationAdapter(b.pluginHandler.Manager())
+		integrationAdapter = setupjourney.NewReviewedIntegrationAdapterForDevelopment(
+			b.pluginHandler.Manager(), os.Getenv("ORI_REVIEWED_INTEGRATION_DEV_SOURCE"),
+		)
+		readers[specialist.SetupStepIntegrationInstall] = integrationAdapter
 		if connectionStore, ok := b.workspaceStore.(interface {
 			workspace.Store
 			GetFolderPath(string) (string, error)
@@ -64,6 +86,30 @@ func (b *ServerBuilder) initializeSetupJourney() {
 				projectconnection.NewService(connectionStore, b.pathSelectionStore),
 				installedProjectTemplateResolver{manager: b.pluginHandler.Manager()},
 			)
+			projectAdapter.CheckPrerequisites = func(ctx context.Context, template projecttemplates.Template) (bool, error) {
+				if template.RuntimeRequirements == nil || b.runtimeCapabilityRegistry == nil {
+					return false, errors.New("runtime prerequisites unavailable")
+				}
+				checked := false
+				for _, requirement := range template.RuntimeRequirements.Requirements {
+					adapter, ok := b.runtimeCapabilityRegistry.Lookup(requirement.Adapter)
+					if !ok {
+						return false, errors.New("runtime prerequisites unavailable")
+					}
+					checker, ok := adapter.(interface {
+						CheckPrerequisites(context.Context) (bool, error)
+					})
+					if !ok {
+						return false, errors.New("runtime prerequisites unavailable")
+					}
+					ready, err := checker.CheckPrerequisites(ctx)
+					if err != nil || !ready {
+						return false, err
+					}
+					checked = true
+				}
+				return checked, nil
+			}
 			readers[specialist.SetupStepProjectConnect] = projectAdapter
 		}
 	} else {
@@ -122,9 +168,8 @@ func (b *ServerBuilder) initializeSetupJourney() {
 	if err != nil {
 		panic("invalid built-in setup journey service")
 	}
-	if b.pluginHandler != nil {
-		adapter := setupjourney.NewReviewedIntegrationAdapter(b.pluginHandler.Manager())
-		if err := b.setupJourneyService.SetActionAdapter(specialist.SetupStepIntegrationInstall, adapter); err != nil {
+	if integrationAdapter != nil {
+		if err := b.setupJourneyService.SetActionAdapter(specialist.SetupStepIntegrationInstall, integrationAdapter); err != nil {
 			panic("invalid built-in setup journey integration action adapter")
 		}
 	}

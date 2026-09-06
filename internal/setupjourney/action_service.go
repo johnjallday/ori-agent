@@ -74,6 +74,7 @@ func (s *Service) Mutate(ctx context.Context, userID, runID string, actionID Act
 			!validateDigest(material.DisclosureDigest, false) ||
 			!validIntegrationProjection(material.Integration) ||
 			!validProjectConnectionProjection(material.ProjectConnection) ||
+			!validHomePreparation(material.Group) || (material.Group != nil && kind != specialist.SetupStepProjectConnect) ||
 			(material.Integration != nil && kind != specialist.SetupStepIntegrationInstall) ||
 			(material.ProjectConnection != nil && kind != specialist.SetupStepProjectConnect) ||
 			!validWorkspaceSetupProjection(material.WorkspaceSetup) ||
@@ -104,23 +105,32 @@ func (s *Service) Mutate(ctx context.Context, userID, runID string, actionID Act
 			ProjectConnection: cloneProjectConnectionProjection(material.ProjectConnection),
 			WorkspaceSetup:    cloneWorkspaceSetupProjection(material.WorkspaceSetup),
 			Staffing:          cloneStaffingProjection(material.Staffing),
+			Group:             cloneHomePreparation(material.Group),
 		}}, nil
 	}
 
-	if !definition.RequiresReview || request.ReviewToken == "" {
+	// The sole no-review adapter action records a decision to proceed, not a
+	// resource or permission change. All other consequences retain exact review.
+	acknowledgement := actionID == ActionAcknowledgePreparation && !definition.RequiresReview
+	if (!acknowledgement && (!definition.RequiresReview || request.ReviewToken == "")) ||
+		(acknowledgement && (request.ReviewToken != "" || !projectionHasAction(projection, actionID))) {
 		return nil, failure(ReasonReviewRequired, projection.StateRevision)
 	}
 	material, prepareErr := adapter.PrepareCommit(ctx, scope, actionID, request.Input)
 	if prepareErr != nil || material.CommitAction != actionID || material.InputDigest != inputDigest {
 		return nil, adapterFailure(prepareErr, projection.StateRevision)
 	}
-	review, reviewErr := s.store.GetReviewReceipt(ctx, request.ReviewToken)
-	if reviewErr != nil || review.RunKind != projection.RunKind || review.RunID != projection.RunID ||
-		review.StepID != stepID || review.ActionID != string(actionID) || review.InputDigest != inputDigest ||
-		review.RunRevision != projection.StateRevision || review.OwnerRevisionDigest != material.OwnerRevisionDigest ||
-		review.DisclosureDigest != material.DisclosureDigest || review.ConsumedAt != nil ||
-		!review.ExpiresAt.After(s.now().UTC()) {
-		return nil, failure(ReasonReviewStale, projection.StateRevision)
+	if !acknowledgement {
+		review, reviewErr := s.store.GetReviewReceipt(ctx, request.ReviewToken)
+		if reviewErr != nil || review.RunKind != projection.RunKind || review.RunID != projection.RunID ||
+			review.StepID != stepID || review.ActionID != string(actionID) || review.InputDigest != inputDigest ||
+			review.RunRevision != projection.StateRevision || review.OwnerRevisionDigest != material.OwnerRevisionDigest ||
+			review.DisclosureDigest != material.DisclosureDigest || review.ConsumedAt != nil ||
+			!review.ExpiresAt.After(s.now().UTC()) {
+			return nil, failure(ReasonReviewStale, projection.StateRevision)
+		}
+	} else {
+		material.DisclosureDigest = ""
 	}
 
 	claim, claimedRun, replayed, claimErr := s.store.ClaimOperation(ctx, OperationClaim{
@@ -272,17 +282,18 @@ func (s *Service) authorizedActionScope(ctx context.Context, userID, runID strin
 		return ReadScope{}, err
 	}
 	run, storeErr := s.store.GetRun(ctx, runID)
-	if storeErr != nil || run.OwnerUserID != userID || run.RelationshipID != relationship.AssistantID ||
-		run.SpecialistSlug != relationship.SpecialistSlug || run.JourneyID != declaration.ID {
+	if storeErr != nil || run == nil {
 		return ReadScope{}, failure(ReasonRunNotFound, 0)
 	}
 	root := run
 	if run.Kind == RunKindChild {
+		// Child rows deliberately contain no duplicated relationship identity.
+		// Authorize their exact immutable root, then keep project scope child-owned.
 		root, storeErr = s.store.GetRun(ctx, run.RootRunID)
-		if storeErr != nil || root.Kind != RunKindRoot || root.OwnerUserID != userID ||
-			root.RelationshipID != relationship.AssistantID || root.SpecialistSlug != relationship.SpecialistSlug {
-			return ReadScope{}, failure(ReasonRunNotFound, run.StateRevision)
-		}
+	}
+	if storeErr != nil || root == nil || root.Kind != RunKindRoot || root.OwnerUserID != userID ||
+		root.RelationshipID != relationship.AssistantID || root.SpecialistSlug != relationship.SpecialistSlug || root.JourneyID != declaration.ID {
+		return ReadScope{}, failure(ReasonRunNotFound, run.StateRevision)
 	}
 	return scopeForRun(declaration, root, run), nil
 }

@@ -208,6 +208,42 @@ func TestReviewedIntegrationUpdateReviewIsNonMutatingAndCommitUsesPinnedReplacem
 
 func TestReviewedIntegrationReadFailsClosedForIdentityAndContributionMismatch(t *testing.T) {
 	entry, descriptor, report, scope := readyIntegrationFixture(t)
+	t.Run("explicit development source can satisfy the prerequisite without claiming a release", func(t *testing.T) {
+		developmentEntry := entry
+		developmentEntry.ReleaseReady = false
+		source := t.TempDir()
+		manager := &fakeReviewedIntegrationManager{installed: []plugin.InstalledPlugin{
+			installedFromFixture(descriptor, source, entry.SourceFormat, true, 1),
+		}}
+		adapter := newReviewedIntegrationAdapter(manager, integrationResolver(developmentEntry), "darwin/arm64")
+		adapter.developmentSource = normalizedLocalDevelopmentSource(source)
+		read, err := adapter.Read(context.Background(), scope)
+		if err != nil || !read.Complete || read.BlockedReason != "" || manager.inspections != 0 {
+			t.Fatalf("explicit development copy was not accepted: %#v err=%v", read, err)
+		}
+		if read.Integration == nil || !read.Integration.DevelopmentCopy || read.Integration.ReleaseReady {
+			t.Fatalf("development provenance was not retained: %#v", read.Integration)
+		}
+		encoded, marshalErr := json.Marshal(read.Integration)
+		if marshalErr != nil || strings.Contains(string(encoded), source) {
+			t.Fatalf("development path leaked into projection: %s err=%v", encoded, marshalErr)
+		}
+	})
+	t.Run("a different local development copy has specific guidance", func(t *testing.T) {
+		manager := &fakeReviewedIntegrationManager{installed: []plugin.InstalledPlugin{{
+			Name: entry.PluginID, Version: entry.ExpectedVersion,
+			Source: t.TempDir(), Format: entry.SourceFormat, Generation: 1,
+		}}}
+		adapter := newReviewedIntegrationAdapter(manager, integrationResolver(entry), "darwin/arm64")
+		adapter.developmentSource = normalizedLocalDevelopmentSource(t.TempDir())
+		read, err := adapter.Read(context.Background(), scope)
+		if err != nil || read.BlockedReason != ReasonIntegrationLocalUnverified || manager.inspections != 0 {
+			t.Fatalf("local copy did not receive bounded guidance: %#v err=%v", read, err)
+		}
+		if guidance := safeGuidance[read.BlockedReason]; guidance != "Local development copy installed; not release-verified." {
+			t.Fatalf("local copy guidance = %q", guidance)
+		}
+	})
 	t.Run("same name wrong source", func(t *testing.T) {
 		manager := &fakeReviewedIntegrationManager{installed: []plugin.InstalledPlugin{{
 			Name: entry.PluginID, Version: entry.ExpectedVersion,

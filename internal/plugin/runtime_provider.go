@@ -177,15 +177,34 @@ func (p *pluginRuntimeProvider) call(ctx context.Context, workspaceID, operation
 	if err != nil || workspaceContext.WorkspaceID != workspaceID {
 		return workspacesurface.ErrServiceUnavailable
 	}
+	return p.callContext(ctx, operationID, operation, map[string]any{
+		"workspace_id": workspaceContext.WorkspaceID, "workspace_root": workspaceContext.WorkspaceRoot,
+		"project_entry": workspaceContext.ProjectEntry, "plugin_data_root": workspaceContext.PluginDataRoot,
+		"scopes": workspaceContext.Scopes,
+	}, target)
+}
+
+// CheckPrerequisites invokes only the installed provider's read-only machine
+// prerequisite operation. No workspace, project, grant or execution scope is
+// invented for pre-workspace onboarding.
+func (p *pluginRuntimeProvider) CheckPrerequisites(ctx context.Context) (bool, error) {
+	operation, ok := p.operations[p.provider.Operations.Prerequisites]
+	if !ok || p.manager == nil {
+		return false, workspacesurface.ErrServiceUnavailable
+	}
+	var output providerReadyResult
+	// MCP input schemas can require the context keys even for a machine-only
+	// operation. Empty values satisfy that envelope without inventing authority.
+	err := p.callContext(ctx, p.provider.Operations.Prerequisites, operation, map[string]any{
+		"workspace_id": "", "workspace_root": "", "project_entry": "", "plugin_data_root": "", "scopes": []string{},
+	}, &output)
+	return output.Ready, err
+}
+
+func (p *pluginRuntimeProvider) callContext(ctx context.Context, operationID string, operation workspacesurface.Operation, callContext map[string]any, target any) error {
 	arguments := map[string]any{
 		"protocol_version": workspacesurface.ProtocolVersion,
-		"operation_id":     operationID,
-		"context": map[string]any{
-			"workspace_id": workspaceContext.WorkspaceID, "workspace_root": workspaceContext.WorkspaceRoot,
-			"project_entry": workspaceContext.ProjectEntry, "plugin_data_root": workspaceContext.PluginDataRoot,
-			"scopes": workspaceContext.Scopes,
-		},
-		"input": map[string]any{},
+		"operation_id":     operationID, "context": callContext, "input": map[string]any{},
 	}
 	output, err := p.manager.Call(ctx, p.spec, workspacesurface.ServiceCall{
 		Operation: operationID, Arguments: arguments, Timeout: providerTimeout(operation.Timeout),

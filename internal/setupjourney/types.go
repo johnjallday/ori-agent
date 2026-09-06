@@ -100,6 +100,7 @@ const (
 	ReasonIntegrationNotInstalled     ReasonCode = "integration_not_installed"
 	ReasonIntegrationDisabled         ReasonCode = "integration_disabled"
 	ReasonIntegrationUpdateRequired   ReasonCode = "integration_update_required"
+	ReasonIntegrationLocalUnverified  ReasonCode = "integration_local_unverified"
 	ReasonIntegrationIdentityMismatch ReasonCode = "integration_identity_mismatch"
 	ReasonIntegrationUnsupported      ReasonCode = "integration_unsupported"
 	ReasonBlueprintUnavailable        ReasonCode = "blueprint_unavailable"
@@ -121,8 +122,9 @@ var validReasonCodes = map[ReasonCode]struct{}{
 	ReasonStepNotCurrent: {}, ReasonActionUnavailable: {}, ReasonInputInvalid: {},
 	ReasonReviewRequired: {}, ReasonReviewStale: {}, ReasonOwnerUnavailable: {},
 	ReasonOperationFailed: {}, ReasonIntegrationNotInstalled: {}, ReasonIntegrationDisabled: {},
-	ReasonIntegrationUpdateRequired: {}, ReasonIntegrationIdentityMismatch: {},
-	ReasonIntegrationUnsupported: {}, ReasonBlueprintUnavailable: {}, ReasonAssistantProgramMismatch: {},
+	ReasonIntegrationUpdateRequired: {}, ReasonIntegrationLocalUnverified: {},
+	ReasonIntegrationIdentityMismatch: {}, ReasonIntegrationUnsupported: {},
+	ReasonBlueprintUnavailable: {}, ReasonAssistantProgramMismatch: {},
 	ReasonProjectSelectionRequired: {}, ReasonProjectScopeInvalid: {}, ReasonProjectAlreadyConnected: {},
 	ReasonProjectUnavailable: {}, ReasonRuntimeSetupRequired: {}, ReasonRuntimeNeedsAttention: {},
 	ReasonHomeUnavailable: {}, ReasonStaffingRequired: {}, ReasonStaffingNeedsAttention: {},

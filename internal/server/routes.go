@@ -1017,6 +1017,7 @@ func registerSetupJourneyRoutes(mux *http.ServeMux, s *Server) {
 	handler := s.Handlers.SetupJourney
 	mux.HandleFunc("GET /api/personal-assistant/setup-journey", handler.GetRoot)
 	mux.HandleFunc("GET /api/personal-assistant/setup-journey/runs/{runID}", handler.GetRun)
+	mux.HandleFunc("GET /api/personal-assistant/setup-journey/runs/{runID}/preparation", handler.CheckPreparation)
 	mux.HandleFunc("POST /api/personal-assistant/setup-journey/open", handler.OpenRoot)
 	mux.HandleFunc("POST /api/personal-assistant/setup-journey/runs/{runID}/open", handler.OpenRun)
 	mux.HandleFunc("POST /api/personal-assistant/setup-journey/dismiss", handler.DismissRoot)

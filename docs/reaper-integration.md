@@ -6,7 +6,14 @@ Ori’s REAPER integration is an optional local contribution for organizing and 
 
 After a settled Personal Assistant recognizes music-production work, accepting its offer opens a guided setup journey. Acceptance records only that choice. It does not install software, connect a folder, create a workspace or agent, open REAPER, or enable live control.
 
-Each later change has its own review and confirmation. Choose **Do this later** at any point. Home’s Today view reports the server-derived setup state and provides **Review setup** or **Continue setup** without repeating completed consequences.
+Setup now follows four screens:
+
+1. **Install Ori REAPER Plugin** — or continue with the installed integration.
+2. **Build Your Music Production Group** — choose **Build Group** to open the same builder available beside **New Workspace** on the map, with **Music Production** prefilled. Review the name and build the canonical Music Production Home, or reuse the existing Home unchanged. This creates no agents, projects, schedules, or access grants. The map's ordinary Build Group action creates an empty organizational group; use Step 2 for the setup-specific Home.
+3. **Set Up REAPER** — manual Web Remote instructions and a read-only prerequisite check. **Set up later** keeps file-based work available. This check grants no access and does not verify a project; runner completion and exact-project verification remain in workspace Settings.
+4. **Create New Workspace** — the shared creator opens at **Details → Team → Review**, with the group and Reaper Song blueprint selected. Choose **Create New Project** or **Import Existing Project**. Its review covers the exact project files, File-only starting mode, and separately scoped group/project roles. Opening the project application is off by default in this flow.
+
+Group creation and workspace creation are separately confirmed. Choose **Do this later** at any point. Home’s Today view reports the server-derived setup state and provides **Review setup** or **Continue setup** without repeating completed consequences.
 
 The journey can either:
 
@@ -25,7 +32,7 @@ A blocked or later-regressed live check affects only live operation. Existing pr
 
 ## Home and project roles
 
-One **Music Production Home** groups exact linked projects without inheriting their folders or runtime grants.
+The music group is the canonical **Music Production Home**, not an extra wrapper. Its chosen display name does not change ownership. It groups exact linked projects without inheriting their folders or runtime grants.
 
 - The Home-scoped **Music Portfolio Manager** can report reviewed project status, maintain Home-owned portfolio fields, and prepare a confirmed handoff to one exact linked project.
 - Each project has its own Producer, Mix Engineer, and Songwriter bindings. Their prompts, model choices, memory, task history, grants, and live state are not shared with sibling projects.

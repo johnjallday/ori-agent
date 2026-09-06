@@ -48,15 +48,26 @@ var setupJourneyStepOrder = [...]SetupStepKind{
 // SetupJourney is bounded inert discovery data. Behavior for each step kind is
 // compiled into the host; no declaration field can select executable behavior.
 type SetupJourney struct {
-	SchemaVersion              int                `json:"schema_version"`
-	Version                    int                `json:"version"`
-	ID                         string             `json:"id"`
-	Title                      string             `json:"title"`
-	Description                string             `json:"description"`
-	IntegrationKey             string             `json:"integration_key"`
-	ExpectedBlueprintID        string             `json:"expected_blueprint_id"`
-	ExpectedAssistantProgramID string             `json:"expected_assistant_program_id"`
-	Steps                      []SetupJourneyStep `json:"steps"`
+	SchemaVersion              int                  `json:"schema_version"`
+	Version                    int                  `json:"version"`
+	ID                         string               `json:"id"`
+	Title                      string               `json:"title"`
+	Description                string               `json:"description"`
+	IntegrationKey             string               `json:"integration_key"`
+	ExpectedBlueprintID        string               `json:"expected_blueprint_id"`
+	ExpectedAssistantProgramID string               `json:"expected_assistant_program_id"`
+	Steps                      []SetupJourneyStep   `json:"steps"`
+	WorkspaceLaunch            *WorkspaceLaunchCopy `json:"workspace_launch,omitempty"`
+}
+
+// WorkspaceLaunchCopy describes the four first-run screens. Canonical project,
+// runtime and staffing readiness remain independently owned by the five steps.
+// These labels and instructions cannot select a command, route or adapter.
+type WorkspaceLaunchCopy struct {
+	GroupTitle          string `json:"group_title"`
+	GroupName           string `json:"group_name"`
+	RuntimeTitle        string `json:"runtime_title"`
+	RuntimeInstructions string `json:"runtime_instructions"`
 }
 
 // SetupJourneyStep is one display-only item in the fixed v1 order.
@@ -169,6 +180,16 @@ func NormalizeSetupJourney(declaration SetupJourney) (*SetupJourney, error) {
 		steps[index] = step
 	}
 	declaration.Steps = steps
+	if declaration.WorkspaceLaunch != nil {
+		copy := *declaration.WorkspaceLaunch
+		for field, value := range map[string]*string{"group_title": &copy.GroupTitle, "group_name": &copy.GroupName, "runtime_title": &copy.RuntimeTitle, "runtime_instructions": &copy.RuntimeInstructions} {
+			*value = strings.TrimSpace(*value)
+			if err := validateSetupJourneyText(field, *value, 1000); err != nil {
+				return nil, err
+			}
+		}
+		declaration.WorkspaceLaunch = &copy
+	}
 	return &declaration, nil
 }
 
@@ -230,5 +251,9 @@ func cloneSetupJourney(source *SetupJourney) *SetupJourney {
 	}
 	clone := *source
 	clone.Steps = append([]SetupJourneyStep(nil), source.Steps...)
+	if source.WorkspaceLaunch != nil {
+		copy := *source.WorkspaceLaunch
+		clone.WorkspaceLaunch = &copy
+	}
 	return &clone
 }
