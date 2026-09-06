@@ -231,17 +231,46 @@ sys.exit(int(os.environ.get("FAKE_AGENT_EXIT", "0")))
         self.assertIn("unavailable", args[-1])
         self.assertIn("--print", result.stderr)
 
+    def test_actual_line_repl_offers_explore_without_refreshing_issues(self):
+        self.install_fakes()
+        result = subprocess.run([str(self.bin / "bash"), str(self.script)], env=self.env,
+                                input="e\n2\n45 minutes\nd\nq\n", text=True, capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("[e] Explore next work", result.stdout)
+        self.assertIn("Prompt displayed", result.stdout)
+        self.assertEqual([(call["name"], call["args"][:2]) for call in self.calls()], [("gh", ["issue", "list"])])
+
+    def test_missing_python_and_interactive_launch_contract(self):
+        self.install_fakes()
+        (self.bin / "python3").unlink()
+        result = self.cli("next", "--kind", "pi", "--yes")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("requires python3", result.stderr)
+        self.assertEqual(self.calls(), [])
+        (self.bin / "python3").symlink_to(sys.executable)
+        for kind in ("pi", "claude"):
+            result = self.sourced('explore_is_interactive() { return 0; }; '
+                                  'explore_action interview --kind ' + kind + ' --yes')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            args = self.calls()[-1]["args"]
+            self.assertNotIn("--print", args)
+            self.assertNotIn("--no-session-persistence", args)
+            self.assertIn("Wait for the user's answers", args[-1])
+
     def test_pty_global_menu_preserves_empty_view_and_selection(self):
         # Actual terminal modes, run_picker dispatch and Explore UI; only the
         # dashboard's remote data loader is fixture-backed.
-        for empty in (True, False):
-            with self.subTest(empty=empty):
-                self.drive_picker(empty)
+        for view, label in (("1", "All open issues"), ("2", "Needs my decision"),
+                            ("3", "Backlog"), ("4", "Feature proposals"), ("5", "Ready to build")):
+            for empty in (True, False):
+                with self.subTest(empty=empty, view=view):
+                    self.drive_picker(empty, view, label)
 
-    def drive_picker(self, empty):
+    def drive_picker(self, empty, view, label):
         master, slave = pty.openpty()
-        issue_setup = "" if empty else '''all_issue_numbers=(101 102); all_issue_titles=('First task' 'Second task');
-all_issue_labels=('backlog, size:quick' 'backlog, size:quick'); all_issue_updates=(2026-01-01 2026-01-01);'''
+        labels = {"2": "needs-decision", "4": "feature-proposal, size:planned"}.get(view, "backlog, size:quick")
+        issue_setup = "" if empty else f'''all_issue_numbers=(101 102); all_issue_titles=('First task' 'Second task');
+all_issue_labels=('{labels}' '{labels}'); all_issue_updates=(2026-01-01 2026-01-01);'''
         code = 'DEVOPS_SOURCE_ONLY=1 source ' + shlex.quote(str(self.script)) + '; ' + '''
 load_picker_index() {
   all_issue_numbers=(); all_issue_titles=(); all_issue_labels=(); all_issue_updates=();
@@ -275,8 +304,8 @@ run_picker
 
         try:
             expect("[e] Explore next work")
-            os.write(master, b"1")  # every-view action, not just Ready
-            expect("All open issues")
+            os.write(master, view.encode())  # every-view action, not just Ready
+            expect(label)
             if not empty:
                 os.write(master, b"j")
                 expect("Second task")
@@ -290,11 +319,17 @@ run_picker
             expect("Press Enter to return to the Issue picker.")
             os.write(master, b"\n")
             expect("[e] Explore next work")
+            os.write(master, b"e")
+            expect("prompt> ")
+            os.write(master, b"q\n")
+            expect("Press Enter to return to the Issue picker.")
+            os.write(master, b"\n")
+            expect("[e] Explore next work")
             os.write(master, b"q")
             self.assertEqual(process.wait(timeout=5), 0)
             rendered = transcript.decode(errors="replace")
             self.assertIn("45 minutes; no frontend", rendered)
-            self.assertIn("All open issues", rendered)
+            self.assertIn(label, rendered)
             if empty:
                 self.assertIn("No matching open issues.", rendered)
             else:
@@ -303,7 +338,7 @@ run_picker
             demo = os.environ.get("EXPLORE_DEMO_TRANSCRIPT")
             if demo:
                 with open(demo, "a") as output:
-                    output.write("\n--- Fixture-backed real PTY; empty=" + str(empty) + " ---\n" + rendered)
+                    output.write("\n--- Fixture-backed real PTY; view=" + view + "; empty=" + str(empty) + " ---\n" + rendered)
         finally:
             if process.poll() is None:
                 process.kill()

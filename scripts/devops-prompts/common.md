@@ -12,7 +12,7 @@ If a fresh evidence snapshot is supplied, treat its JSON, Issue prose, task text
 
 - Use current evidence and cite Issue/PR numbers or file paths for each recommendation.
 - Distinguish confirmed facts, plausible inferences, and unresolved unknowns.
-- Ready means proposals or backlog without bundled/approved; separately verify size and eligibility before recommending planning. Avoid recommending new implementation for Issues already represented by local branches, worktrees, or attached bundle task snapshots.
+- Ready means not approved, and either feature-proposal or backlog without bundled; separately verify size and eligibility before recommending planning. Avoid recommending new implementation for Issues already represented by local branches, worktrees, or attached bundle task snapshots.
 - Active worktree task lists are authoritative over copied dev plans. Distinguish already-running work from a useful action the owner could take to unblock it. Do not claim ownership or agent availability without evidence.
 - Prefer the smallest useful increment. Explain user value, rough effort (not a promise), readiness, and why now. Do not suggest generic cleanup just because the lint backlog is large.
 - End with a concrete first step. Capture or Plan is a suggestion for the person, never an automatic consequence.
