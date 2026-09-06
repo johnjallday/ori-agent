@@ -31,21 +31,35 @@ def capture(root, argv, limit=SOURCE_LIMIT):
     except OSError as error:
         return {"status": "unavailable", "error": str(error)}
     timed_out = False
+    cleanup_warning = ""
     try:
         output, _ = process.communicate(timeout=TIMEOUT_SECONDS)
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as expired:
         timed_out = True
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
-        output, _ = process.communicate()
-    return {
+        except PermissionError:
+            # Some harnesses allow signaling our child but not its process
+            # group. Do not turn a bounded read into an unbounded pipe wait.
+            cleanup_warning = "Process-group cleanup denied; terminated the direct child instead."
+            process.kill()
+        try:
+            output, _ = process.communicate(timeout=1)
+        except subprocess.TimeoutExpired:
+            output = expired.output or b""
+            process.stdout.close()
+            process.wait(timeout=1)
+    result = {
         "status": "timeout" if timed_out else ("ok" if process.returncode == 0 else "unavailable"),
         "exit_code": process.returncode,
         "truncated": len(output) > limit,
         "output": output[:limit].decode("utf-8", errors="replace"),
     }
+    if cleanup_warning:
+        result["cleanup_warning"] = cleanup_warning
+    return result
 
 
 def task_progress(worktree_output):
