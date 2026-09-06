@@ -366,11 +366,59 @@ jobs:
       # time from every run. Real distributables come from GoReleaser in
       # release.yml on tags - grab those from the release page instead.
 
-  security:
-    name: Security Scan
+  # Older push uploads failed without security-events: write, leaving no
+  # base-branch analysis. Analyze the exact base with the same scanner so
+  # legacy findings are not reported as new. Never upload a fork's results
+  # under a base ref: upload-sarif ignores ref/sha overrides for forks.
+  security-baseline:
+    name: Security Baseline
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
 
     steps:
+      - name: Checkout PR base
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.12'
+
+      - name: Scan PR base
+        uses: securego/gosec@598d6146b91b2370c6f11f7d3cb256119d8cbfc4 # pinned action/image: gosec 2.29.0
+        with:
+          args: '-no-fail -fmt sarif -out results.sarif ./...'
+
+      - name: Upload PR base SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
+          ref: refs/heads/${{ github.event.pull_request.base.ref }}
+          sha: ${{ github.event.pull_request.base.sha }}
+          category: .github/workflows/ci.yml:security
+
+  security:
+    name: Security Scan
+    needs: security-baseline
+    # Pushes and forks skip the baseline job but must still scan the event.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Require baseline success
+        if: needs.security-baseline.result != 'success' && needs.security-baseline.result != 'skipped'
+        run: |
+          echo "::error::Security baseline analysis failed."
+          exit 1
+
       - name: Checkout code
         uses: actions/checkout@v5
 
@@ -379,17 +427,18 @@ jobs:
         with:
           go-version: '1.25.12'
 
+      # -no-fail leaves finding severity to code scanning's PR gate. Scanner
+      # execution and SARIF upload errors themselves must fail the job.
       - name: Run Gosec Security Scanner
-        uses: securego/gosec@master
+        uses: securego/gosec@598d6146b91b2370c6f11f7d3cb256119d8cbfc4 # pinned action/image: gosec 2.29.0
         with:
           args: '-no-fail -fmt sarif -out results.sarif ./...'
-        continue-on-error: true
 
       - name: Upload SARIF file
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: results.sarif
-        continue-on-error: true
+          category: .github/workflows/ci.yml:security
 
   dependency-review:
     name: Dependency Review

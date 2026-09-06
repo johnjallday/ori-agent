@@ -79,7 +79,10 @@ func verifiedProjectEntryTarget(workspaceRoot, projectPath, entryPath string) (s
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve workspace root: %w", err)
 	}
-	rootInfo, err := os.Stat(root)
+	// The root comes from the canonical folder store, never a request path.
+	// Inspect only that root's metadata; reject a symlinked/non-directory root before
+	// resolving the separately validated relative project and entry paths.
+	rootInfo, err := os.Lstat(root) // #nosec G304 G703 -- exact canonical store root, not a caller-selected file
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", errProjectEntryTargetMissing

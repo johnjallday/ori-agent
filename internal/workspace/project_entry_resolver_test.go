@@ -160,6 +160,63 @@ func TestResolveProjectEntryRejectsRevocationSymlinksAndChangedOwnership(t *test
 	}
 }
 
+func TestResolveProjectEntryManagedRootBoundaries(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	projectRoot := filepath.Join(workspaceRoot, "song")
+	if err := os.Mkdir(projectRoot, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	entry := filepath.Join(projectRoot, "main.rpp")
+	if err := os.WriteFile(entry, []byte("project"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ws := NewWorkspace(CreateWorkspaceParams{Name: "Managed"})
+	ws.ID = "managed-workspace"
+	ws.ProjectPath = "song"
+	ws.SharedData = map[string]any{}
+	if err := SetProjectEntryPath(ws.SharedData, "main.rpp"); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, root := range []string{workspaceRoot, projectRoot} {
+		t.Run("canonical "+filepath.Base(root), func(t *testing.T) {
+			resolved, err := ResolveProjectEntry(ws, root)
+			if err != nil || resolved == nil || resolved.AbsolutePath != entry {
+				t.Fatalf("canonical root resolve = %#v, %v", resolved, err)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name string
+		root string
+		want error
+	}{
+		{"relative root", "relative", ErrProjectEntryUnavailable},
+		{"missing root", filepath.Join(workspaceRoot, "missing"), ErrProjectEntryUnavailable},
+		{"file as root", entry, ErrProjectEntryUnsafe},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if resolved, err := ResolveProjectEntry(ws, tc.root); resolved != nil || !errors.Is(err, tc.want) {
+				t.Fatalf("resolve = %#v, %v; want %v", resolved, err, tc.want)
+			}
+		})
+	}
+	for _, tc := range []struct{ name, target, leaf string }{
+		{"symlinked workspace root", workspaceRoot, "workspace"},
+		{"symlinked project root cannot use parent retry", projectRoot, "song"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			link := filepath.Join(t.TempDir(), tc.leaf)
+			if err := os.Symlink(tc.target, link); err != nil {
+				t.Fatal(err)
+			}
+			if resolved, err := ResolveProjectEntry(ws, link); resolved != nil || !errors.Is(err, ErrProjectEntryUnsafe) {
+				t.Fatalf("symlink root resolve = %#v, %v; want unsafe", resolved, err)
+			}
+		})
+	}
+}
+
 func TestProjectEntryLocatorRejectsUnknownFieldsTraversalAndWrongTypes(t *testing.T) {
 	cases := []map[string]any{
 		{ProjectEntryLocatorKey: map[string]any{"schema_version": 1, "kind": "managed_workspace", "relative_path": "ok.rpp", "command": "run"}},
