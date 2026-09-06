@@ -11,12 +11,13 @@ import (
 )
 
 type workflowStep struct {
-	Name            string         `yaml:"name"`
-	Uses            string         `yaml:"uses"`
-	If              string         `yaml:"if"`
-	Run             string         `yaml:"run"`
-	With            map[string]any `yaml:"with"`
-	ContinueOnError any            `yaml:"continue-on-error"`
+	Name            string            `yaml:"name"`
+	Uses            string            `yaml:"uses"`
+	If              string            `yaml:"if"`
+	Run             string            `yaml:"run"`
+	With            map[string]any    `yaml:"with"`
+	Env             map[string]string `yaml:"env"`
+	ContinueOnError any               `yaml:"continue-on-error"`
 }
 
 type workflowJob struct {
@@ -76,6 +77,9 @@ func TestSecurityWorkflowKeepsComparableBaselineAndFailsOnUploadErrors(t *testin
 	}
 	baseUpload, headUpload := baseSteps["Upload PR base SARIF"], headSteps["Upload SARIF file"]
 	for _, upload := range []workflowStep{baseUpload, headUpload} {
+		if upload.Env["CODEQL_ACTION_ANALYSIS_KEY"] != ".github/workflows/ci.yml:security" {
+			t.Fatal("baseline and head need the same logical analysis key, not separate job-derived configurations")
+		}
 		if upload.Uses != "github/codeql-action/upload-sarif@v3" || upload.With["category"] != ".github/workflows/ci.yml:security" || upload.With["sarif_file"] != "results.sarif" {
 			t.Fatal("both uploads must retain the existing analysis category and complete scan results")
 		}

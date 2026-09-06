@@ -396,6 +396,10 @@ jobs:
 
       - name: Upload PR base SARIF
         uses: github/codeql-action/upload-sarif@v3
+        # The same logical scan runs in two jobs. Match its analysis key as
+        # well as category, while retaining the real base ref/SHA below.
+        env:
+          CODEQL_ACTION_ANALYSIS_KEY: .github/workflows/ci.yml:security
         with:
           sarif_file: results.sarif
           ref: refs/heads/${{ github.event.pull_request.base.ref }}
@@ -436,6 +440,8 @@ jobs:
 
       - name: Upload SARIF file
         uses: github/codeql-action/upload-sarif@v3
+        env:
+          CODEQL_ACTION_ANALYSIS_KEY: .github/workflows/ci.yml:security
         with:
           sarif_file: results.sarif
           category: .github/workflows/ci.yml:security
