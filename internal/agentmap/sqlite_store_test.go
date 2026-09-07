@@ -165,6 +165,40 @@ func TestLoadIgnoresPositionsForAgentsThatNoLongerExist(t *testing.T) {
 	}
 }
 
+// A write response is what the client adopts, so it must report exactly what
+// its next read would return. Reporting an orphan as stored made the client
+// echo a dead name back on its next patch, where it was refused as an unknown
+// agent — a save failure caused by the response before it.
+func TestApplyResponseHidesOrphansTheSameWayLoadDoes(t *testing.T) {
+	store, _ := newTestStore(t)
+	ctx := context.Background()
+
+	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+		SetPositions(map[string]Point{"Atlas": {X: 1, Y: 1}, "Ghost": {X: 2, Y: 2}}),
+	}}); err != nil {
+		t.Fatalf("seed Apply: %v", err)
+	}
+	store.SetAgentLister(stubLister{names: []string{"Atlas"}})
+
+	result, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+		SetPositions(map[string]Point{"Atlas": {X: 3, Y: 3}}),
+	}})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if _, ok := result.Layout.Positions["Ghost"]; ok {
+		t.Fatalf("write response = %v, want the orphan hidden as Load hides it", result.Layout.Positions)
+	}
+
+	loaded, err := store.Load(ctx, "local")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(result.Layout.Positions) != len(loaded.Positions) {
+		t.Fatalf("write response %v disagrees with the next read %v", result.Layout.Positions, loaded.Positions)
+	}
+}
+
 // The lister's names are compared case-insensitively, matching how the agent
 // API resolves a name elsewhere. Without this a stored "Atlas" would be dropped
 // by a lister reporting "atlas" — a live agent losing its saved tile.

@@ -841,10 +841,28 @@ func (b *ServerBuilder) wireAgentMap() {
 	}
 
 	agentStore := b.st
+	cliRegistry := b.cliAgentRegistry
 	// One read-only question, asked two ways: the store drops orphaned rows on
 	// read, and the service refuses to anchor an agent that does not exist.
-	// Neither can mutate an agent — ListAgents is the only method either holds.
-	lister := func() []string { return agentStore.ListAgents() }
+	// Neither can mutate an agent — listing names is all either can do.
+	//
+	// The list must cover exactly what the ROSTER draws, which is the stored
+	// agents PLUS the auto-detected CLI agents. Those live in the registry
+	// rather than in the agent store, so a lister built from the store alone
+	// refuses to anchor Claude Code — and because a move materializes every
+	// tile's anchor in one patch, one unknown name fails the whole drag.
+	lister := func() []string {
+		names := agentStore.ListAgents()
+		if cliRegistry != nil {
+			for _, info := range cliRegistry.List() {
+				if !info.Available {
+					continue
+				}
+				names = append(names, agenthttp.CLIAgentDisplayName(info.Backend))
+			}
+		}
+		return names
+	}
 
 	b.agentMapStore = agentmap.NewSQLiteStore(db)
 	b.agentMapStore.SetAgentLister(agentListerFunc(lister))

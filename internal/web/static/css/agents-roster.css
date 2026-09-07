@@ -673,6 +673,273 @@ body.agents-roster-page {
   min-width: 0;
 }
 
+/* ---- Map view ------------------------------------------------------------- */
+
+/* The Map has no district frames, so the canvas carries more empty space than
+   the Workspace Map's does. What keeps it from reading as sparse rather than
+   deliberate is the grid: the same 24px paper rhythm as the page behind it,
+   scaled with the camera so it reads as ground the tiles sit on rather than as
+   a backdrop they float over. */
+.roster-map {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.roster-map[hidden] {
+  display: none;
+}
+
+.agent-map {
+  position: relative;
+  height: clamp(420px, 62vh, 760px);
+  overflow: hidden;
+  border: 1px solid var(--card-line);
+  border-radius: var(--roster-radius);
+  background-color: var(--cozy-paper-deep, #e6dccb);
+  background-image:
+    linear-gradient(var(--roster-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--roster-grid) 1px, transparent 1px);
+  /* The grid scales with the camera, so zooming feels like moving over ground
+     rather than resizing a picture of it. --map-zoom is written by the
+     controller on every camera change. */
+  background-size: calc(24px * var(--map-zoom, 1)) calc(24px * var(--map-zoom, 1));
+  cursor: grab;
+  touch-action: none;
+}
+
+.agent-map:active {
+  cursor: grabbing;
+}
+
+.agent-map:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: -2px;
+}
+
+/* The world layer holds every tile in world coordinates and is transformed as
+   one. transform-origin is 0 0 because the controller writes the viewport
+   centring into the transform itself. */
+.agent-map__world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.agent-tile {
+  --tile-accent: var(--roster-accent, var(--primary-color, #4f46e5));
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 210px;
+  height: 132px;
+  padding: 6px;
+}
+
+.agent-tile__body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  padding: 12px 12px 10px;
+  border: 1px solid var(--card-line);
+  border-radius: var(--roster-radius);
+  background: var(--card-surface);
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: grab;
+  box-shadow: 0 8px 20px -18px rgb(15 23 42 / 55%);
+}
+
+/* Role reads as a top rule here too, so a tile and a card carry the same
+   colour signal. */
+.agent-tile__body::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  border-radius: var(--roster-radius) var(--roster-radius) 0 0;
+  background: linear-gradient(
+    90deg,
+    var(--tile-accent),
+    color-mix(in srgb, var(--tile-accent) 8%, transparent) 78%
+  );
+}
+
+.agent-tile__body:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 2px;
+}
+
+.agent-tile.is-selected .agent-tile__body {
+  border-color: var(--tile-accent);
+  box-shadow: inset 0 0 0 1px var(--tile-accent);
+}
+
+/* A blocked drop is stated by a dashed outline and a cursor, not by colour
+   alone — the same rule the rest of this page follows (FR-88). */
+.agent-tile.is-blocked .agent-tile__body {
+  border: 2px dashed #b91c1c;
+  cursor: not-allowed;
+}
+
+.agent-tile__flags {
+  position: absolute;
+  top: 9px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.agent-tile__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px 2px 6px;
+  border: 1px solid var(--card-line);
+  border-radius: 999px;
+  background: var(--card-soft);
+  color: var(--card-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.agent-tile__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #9ca3af;
+}
+
+.agent-tile__status.is-active .agent-tile__dot {
+  background: #15803d;
+}
+
+.agent-tile__status.is-error {
+  color: #b91c1c;
+  border-color: color-mix(in srgb, #b91c1c 40%, var(--card-line));
+}
+
+.agent-tile__status.is-error .agent-tile__dot {
+  background: #b91c1c;
+}
+
+.agent-tile__status.is-disabled .agent-tile__dot {
+  background: transparent;
+  border: 1px solid var(--card-muted);
+}
+
+.agent-tile__fav {
+  color: #b45309;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.agent-tile__ident {
+  min-width: 0;
+  margin-top: 14px;
+}
+
+.agent-tile__name {
+  display: block;
+  overflow: hidden;
+  padding-right: 84px;
+  color: var(--text-primary, #111827);
+  font-size: 15px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-tile__role {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--tile-accent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* Membership as text, because the Map has no frames to express it with
+   (FR-61/FR-63). */
+.agent-tile__where {
+  margin-top: auto;
+  overflow: hidden;
+  color: var(--card-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-map__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-map__btn {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--card-line);
+  border-radius: 8px;
+  background: var(--card-surface);
+  color: var(--text-primary, #111827);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.agent-map__btn:hover {
+  border-color: var(--primary-color, #4f46e5);
+}
+
+.agent-map__btn:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 1px;
+}
+
+.agent-map__zoom {
+  min-width: 46px;
+  color: var(--card-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.agent-map__note {
+  margin: 0;
+  color: var(--card-muted);
+  font-size: 12px;
+}
+
+.agent-map__note[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-map__world {
+    will-change: auto;
+  }
+}
+
 /* ---- Group-by sections ---------------------------------------------------- */
 
 /* Section headers read as district frames rather than table headers: a thin

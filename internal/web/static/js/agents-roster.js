@@ -180,6 +180,7 @@
       filtersBadge: document.getElementById('filtersBadge'),
       filtersClose: document.getElementById('filtersClose'),
       filtersDone: document.getElementById('filtersDone'),
+      map: document.getElementById('rosterMap'),
       menuHost: document.getElementById('rosterMenuHost'),
       emptyMsg: document.getElementById('rosterEmptyMsg'),
       emptyClearFilters: document.getElementById('rosterEmptyClearFilters'),
@@ -907,7 +908,7 @@
 
   /* ---- view mode ----------------------------------------------------------- */
 
-  var VIEWS = { gallery: 1, list: 1 };
+  var VIEWS = { gallery: 1, list: 1, map: 1 };
 
   function onViewToggleClick(e) {
     var btn = e.target.closest('[data-view]');
@@ -928,13 +929,73 @@
   }
 
   function reflectViewToggle() {
-    if (els.list) els.list.classList.toggle('is-list', state.view === 'list');
+    var isMap = state.view === 'map';
+    if (els.list) {
+      els.list.classList.toggle('is-list', state.view === 'list');
+      // The Map is a sibling host rather than a third presentation of the card
+      // grid: tiles are positioned in world space, which a grid cannot express.
+      els.list.hidden = isMap;
+    }
+    if (els.map) els.map.hidden = !isMap;
+    // Grouping is a Gallery/List concern. On the Map the user's own arrangement
+    // IS the grouping, and a control that rearranged tiles would fight the
+    // positions they saved (PRD 9.3).
+    var groupHost = els.group && els.group.closest('.view-group');
+    if (groupHost) groupHost.hidden = isMap;
+    // Bulk selection has no expression on the canvas — a tile is a place, not a
+    // row — so the count line's actions are hidden there too.
+    if (els.selectAll) els.selectAll.hidden = isMap;
+
     if (!els.viewToggle) return;
     els.viewToggle.querySelectorAll('[data-view]').forEach(function (btn) {
       var on = btn.dataset.view === state.view;
       btn.setAttribute('aria-pressed', on ? 'true' : 'false');
       btn.classList.toggle('is-active', on);
     });
+  }
+
+  /* ---- map view ------------------------------------------------------------ */
+
+  // The Map is mounted lazily and only once: it loads a layout of its own, and
+  // remounting on every render would refetch it and throw the camera away.
+  var mapMounted = false;
+
+  function renderMap() {
+    if (!els.map || !window.OriAgentMap) return;
+    var tiles = state.filtered.map(mapTileModel);
+    if (!mapMounted) {
+      mapMounted = true;
+      window.OriAgentMap.mount(els.map, tiles, {
+        selected: state.selected,
+        // One selection model, three views: a tile drives the same Inspector a
+        // card does (FR-73).
+        onSelect: function (name) {
+          selectAgent(name, { openInspector: true });
+        }
+      });
+      return;
+    }
+    window.OriAgentMap.update(tiles, state.selected);
+  }
+
+  // The Map draws from the same view model the cards do, so the two surfaces
+  // cannot disagree about what an agent is.
+  function mapTileModel(agent) {
+    var vm = viewFor(agent);
+    return {
+      name: vm.name,
+      roleLabel: vm.roleLabel,
+      level: vm.builtIn ? null : vm.level,
+      builtIn: vm.builtIn,
+      favorite: vm.favorite,
+      statusKind: vm.statusKind,
+      healthText: vm.healthText,
+      accent: roleAccent(vm),
+      workspaces: vm.workspaces.map(function (w) {
+        return { name: w.name, entry_point: w.entryPoint };
+      }),
+      spokenLabel: cardSpokenLabel(vm)
+    };
   }
 
   function onStatTileClick(e) {
@@ -1065,12 +1126,23 @@
       return;
     }
     els.empty.hidden = true;
-    els.list.hidden = false;
+    // Not an unconditional `false`: on the Map the card grid stays hidden, and
+    // reflectViewToggle above has already decided which host is showing.
+    els.list.hidden = state.view === 'map';
     setResultCount(
       shown === total
         ? total + ' agent' + (total === 1 ? '' : 's')
         : shown + ' of ' + total + ' agents'
     );
+
+    if (state.view === 'map') {
+      // The Map positions tiles in world space, so it renders itself rather
+      // than filling the card grid. `rendered` stays empty: there are no cards
+      // to arrow through or shift-select on the canvas.
+      renderMap();
+      updateBulkBar();
+      return;
+    }
 
     var frag = document.createDocumentFragment();
     if (state.group === 'none') {
@@ -1561,6 +1633,9 @@
       card.classList.toggle('is-focused', isSel);
       if (open) open.setAttribute('aria-current', isSel ? 'true' : 'false');
     });
+    // One selection model across three views: selecting from anywhere — a card,
+    // a tile, a URL, the context menu — marks the same agent on the Map too.
+    if (mapMounted && window.OriAgentMap) window.OriAgentMap.select(state.selected);
   }
 
   /* ---- selection ----------------------------------------------------------- */

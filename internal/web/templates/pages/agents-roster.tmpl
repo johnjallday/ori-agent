@@ -87,6 +87,11 @@
                     <i class="bi bi-list-ul" aria-hidden="true"></i>
                     <span class="visually-hidden">List view</span>
                   </button>
+                  <button type="button" class="view-button" id="viewMap" data-view="map"
+                    aria-pressed="false" title="Map view">
+                    <i class="bi bi-map" aria-hidden="true"></i>
+                    <span class="visually-hidden">Map view</span>
+                  </button>
                 </div>
                 <!-- A native select IS a menu: it opens one on click, is fully
                      keyboard operable, and needs no bespoke popup code. Keeping
@@ -192,6 +197,11 @@
               <div class="roster-collection" id="rosterList">
                 <!-- agent cards injected here -->
               </div>
+
+              <!-- Map view host. A third view over the SAME selection model,
+                   not a separate screen: selecting a tile populates the same
+                   Inspector the Gallery and List views use (FR-73). -->
+              <div class="roster-map" id="rosterMap" hidden></div>
 
               <!-- Real loading state, shown until the one dashboard request settles. -->
               <div class="collection-state" id="rosterLoading">
@@ -375,6 +385,9 @@
   <!-- Workspace colour key, shared with the Workspace Map so a workspace reads
        as the same place on both surfaces (FR-24). -->
   <script defer src="/js/modules/workspace-palette.js"></script>
+  <!-- The Map view's controller. Deferred like the rest, so it has installed
+       window.OriAgentMap before agents-roster.js runs. -->
+  <script defer src="/js/modules/agent-map.js"></script>
   <script defer src="/js/modules/stage-up-toast.js"></script>
   <!-- agent-avatar.js, character-catalog.js, agent-appearance.js, and
        character-picker.js all load from head.tmpl, which every page shares;

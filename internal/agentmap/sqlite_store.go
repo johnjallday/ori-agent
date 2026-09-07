@@ -371,6 +371,13 @@ func (s *SQLiteStore) writePositions(ctx context.Context, tx *sql.Tx, userID str
 
 // readPositionsTx reads the stored anchors inside the write transaction, so the
 // response reports the committed state rather than the requested one.
+//
+// It applies the SAME orphan and range filtering as Load. A write response the
+// client adopts has to match what its next read would return, or the client
+// ends up holding a name the server will not accept: an orphaned row was
+// reported here as stored, echoed back in the next patch, and refused as an
+// unknown agent — a save failure caused entirely by the response that preceded
+// it.
 func (s *SQLiteStore) readPositionsTx(ctx context.Context, tx *sql.Tx, userID string) (map[string]Point, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT agent_name, x, y FROM agent_map_positions WHERE user_id = ?
@@ -380,6 +387,7 @@ func (s *SQLiteStore) readPositionsTx(ctx context.Context, tx *sql.Tx, userID st
 	}
 	defer func() { _ = rows.Close() }()
 
+	live := s.liveAgents()
 	positions := map[string]Point{}
 	for rows.Next() {
 		var (
@@ -389,7 +397,18 @@ func (s *SQLiteStore) readPositionsTx(ctx context.Context, tx *sql.Tx, userID st
 		if err := rows.Scan(&name, &x, &y); err != nil {
 			continue
 		}
-		positions[name] = Point{X: x, Y: y}
+		agentName, nameErr := NormalizeAgentName(name)
+		if nameErr != nil {
+			continue
+		}
+		if live != nil && !live[strings.ToLower(agentName)] {
+			continue
+		}
+		point := Point{X: x, Y: y}
+		if !point.InSafeRange() {
+			continue
+		}
+		positions[agentName] = point
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("failed to read agent map positions: %w", err)

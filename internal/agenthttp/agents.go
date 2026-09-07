@@ -922,6 +922,15 @@ func cliAgentDisplayName(backend string) string {
 	}
 }
 
+// CLIAgentDisplayName is the exported form, for callers that must name a CLI
+// agent exactly as the roster does.
+//
+// The Agent Map's existence check is one: it has to recognise every agent the
+// roster draws, and the auto-detected CLI agents are not in the agent store.
+// Duplicating this switch there would let the two drift, and the failure would
+// be a refused drag rather than a visible mismatch.
+func CLIAgentDisplayName(backend string) string { return cliAgentDisplayName(backend) }
+
 // cliAgentBackendFromName resolves a display name or backend name to a backend key.
 func cliAgentBackendFromName(name string) string {
 	lower := strings.ToLower(strings.TrimSpace(name))
