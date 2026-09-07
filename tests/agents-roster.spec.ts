@@ -34,7 +34,7 @@ async function closeFilters(page) {
 }
 
 test.describe('Agents roster', () => {
-  test('browse, select, edit, assign workspace, and delete', async ({ page, request }) => {
+  test('browse, select, read, and delete', async ({ page, request }) => {
     const name = `PW Roster ${Date.now()}`;
 
     const create = await request.post(`${baseUrl}/api/agents`, {
@@ -61,27 +61,27 @@ test.describe('Agents roster', () => {
       await expect(page.locator('#rosterList')).toBeVisible();
       await expect(page.locator('#stageName')).toHaveText(name);
 
-      // Overview edit → save → persisted.
-      const desc = page.locator('#ov-description');
-      await expect(desc).toBeVisible();
-      await desc.fill('Edited by Playwright.');
-      const save = page.locator('#savebar-overview [data-role="save"]');
-      await expect(save).toBeEnabled();
-      await save.click();
-      await expect
-        .poll(async () => {
-          const r = await request.get(`${baseUrl}/api/agents/${encodeURIComponent(name)}/detail`);
-          return (await r.json()).metadata?.description;
-        })
-        .toBe('Edited by Playwright.');
+      // Overview reads the agent's facts; it does not offer to change any of
+      // them. The full page is the editor of record (FR-42/FR-44).
+      await expect(page.locator('#overviewFacts')).toContainText('Model');
+      await expect(page.locator('#overviewFacts')).toContainText('gpt-4o-mini');
+      await expect(page.locator('#panel-overview input, #panel-overview textarea')).toHaveCount(0);
 
-      // Prompt tab lazy-loads an editable textarea.
+      // Prompt tab lazy-loads the prompt as text, not a textarea.
       await page.locator('#tab-prompt').click();
-      await expect(page.locator('#pr-prompt')).toBeVisible();
+      await expect(page.locator('#panel-prompt')).toBeVisible();
+      await expect(page.locator('#panel-prompt textarea')).toHaveCount(0);
 
-      // Workspaces tab renders the editable assignment list.
+      // Workspaces tab reports membership and links out to change it.
       await page.locator('#tab-workspaces').click();
       await expect(page.locator('#panel-workspaces')).toBeVisible();
+      await expect(page.locator('#panel-workspaces input[type="checkbox"]')).toHaveCount(0);
+
+      // "Open full page" carries the tab the reader was on (FR-47).
+      await expect(page.locator('#stageFullPage')).toHaveAttribute(
+        'href',
+        `/agents/${encodeURIComponent(name)}?tab=workspaces`
+      );
 
       // Delete via the stage button (auto-accept the confirm dialog).
       page.once('dialog', dialog => dialog.accept());
@@ -328,7 +328,10 @@ test.describe('Agents roster', () => {
     }
   });
 
-  test('single-agent overview: edit tags and favorite persist', async ({ page, request }) => {
+  test('the Inspector offers exactly three actions, and Favorite is one of them', async ({
+    page,
+    request
+  }) => {
     const name = `PWOv ${Date.now()}`;
     const create = await request.post(`${baseUrl}/api/agents`, {
       data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
@@ -350,26 +353,120 @@ test.describe('Agents roster', () => {
       });
       await expect(page.locator('#stageName')).toHaveText(name);
 
-      // Favorite + add a tag via the Overview form.
-      await page.locator('#ov-favorite').check();
-      const tagField = page.locator('#ov-tags-host .tag-input-field');
-      await tagField.fill('research');
-      await tagField.press('Enter');
-      const save = page.locator('#savebar-overview [data-role="save"]');
-      await expect(save).toBeEnabled();
-      await save.click();
+      // Favorite/Unfavorite, Open full page, Delete — and nothing else (FR-43).
+      await expect(page.locator('.stage__actions > *')).toHaveCount(3);
+      const fav = page.locator('#stageFavoriteToggle');
+      await expect(fav).toHaveAttribute('aria-pressed', 'false');
+      await expect(page.locator('#stageFullPage')).toBeVisible();
+      await expect(page.locator('#stageDelete')).toBeVisible();
 
+      // Favorite is the one agent field the reader still writes: it is the same
+      // one-click roster action the card and the context menu offer, not a
+      // field editor.
+      await fav.click();
+      await expect(fav).toHaveAttribute('aria-pressed', 'true');
       await expect
         .poll(async () => {
           const r = await request.get(`${baseUrl}/api/agents/${encodeURIComponent(name)}/detail`);
-          const d = await r.json();
-          return `${d.metadata?.favorite}:${(d.metadata?.tags || []).join(',')}`;
+          return (await r.json()).metadata?.favorite;
         })
-        .toBe('true:research');
+        .toBe(true);
+
+      // The hero star follows, so the panel cannot disagree with itself.
+      await expect(page.locator('#stageFavorite')).toBeVisible();
     } finally {
       await request
         .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
         .catch(() => undefined);
+    }
+  });
+
+  test('the Inspector saves no agent field, on any tab', async ({ page, request }) => {
+    const name = `PWRead ${Date.now()}`;
+    await request.post(`${baseUrl}/api/agents`, {
+      data: {
+        name,
+        type: 'tool-calling',
+        model: 'gpt-4o-mini',
+        description: 'A readable purpose.',
+        tags: ['alpha']
+      }
+    });
+
+    try {
+      await openAgents(page, `?agent=${encodeURIComponent(name)}`);
+      await expect(page.locator('#stageName')).toHaveText(name);
+
+      // Not one editable control anywhere in the panel — no inputs, no
+      // textareas, no selects, no save bar, no stale-edit banner (FR-45).
+      for (const tab of ['overview', 'prompt', 'workspaces', 'toolbox']) {
+        await page.locator(`#tab-${tab}`).click();
+        await expect(page.locator(`#panel-${tab}`)).toBeVisible();
+        await expect(
+          page.locator(`#panel-${tab} input, #panel-${tab} textarea, #panel-${tab} select`)
+        ).toHaveCount(0);
+        await expect(page.locator(`#panel-${tab} .save-bar`)).toHaveCount(0);
+        await expect(page.locator(`#panel-${tab} .conflict-banner`)).toHaveCount(0);
+      }
+
+      // The facts Group 1 took off the card are readable here instead (FR-2).
+      await page.locator('#tab-overview').click();
+      await expect(page.locator('#overviewFacts')).toContainText('A readable purpose.');
+      await expect(page.locator('#overviewFacts')).toContainText('gpt-4o-mini');
+      await expect(page.locator('#overviewFacts')).toContainText('alpha');
+      await expect(page.locator('#overviewFacts')).toContainText('Last active');
+    } finally {
+      await request
+        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
+        .catch(() => undefined);
+    }
+  });
+
+  test('switching cards and tabs never raises an unsaved-changes prompt', async ({
+    page,
+    request
+  }) => {
+    const prefix = `PWNoGuard${Date.now()}`;
+    const names = [`${prefix} One`, `${prefix} Two`];
+    for (const n of names) {
+      await request.post(`${baseUrl}/api/agents`, {
+        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+      });
+    }
+
+    try {
+      // The guard used to be a window.confirm on card and tab switches. Any
+      // dialog at all now is a regression, so fail loudly rather than
+      // auto-accepting one (FR-45, and task 5.6 — the riskiest edit in the
+      // group, because the guard sat on both navigation paths).
+      const dialogs: string[] = [];
+      page.on('dialog', d => {
+        dialogs.push(d.message());
+        d.dismiss().catch(() => undefined);
+      });
+
+      await openAgents(page, `?agent=${encodeURIComponent(names[0])}`);
+      await expect(page.locator('#stageName')).toHaveText(names[0]);
+
+      for (let i = 0; i < 3; i++) {
+        for (const tab of ['prompt', 'workspaces', 'toolbox', 'overview']) {
+          await page.locator(`#tab-${tab}`).click();
+        }
+        await page.locator(`.roster-card[data-name="${names[1]}"] .roster-card__open`).click();
+        await expect(page.locator('#stageName')).toHaveText(names[1]);
+        await page.locator(`.roster-card[data-name="${names[0]}"] .roster-card__open`).click();
+        await expect(page.locator('#stageName')).toHaveText(names[0]);
+      }
+
+      // Closing the Inspector was the third guarded path.
+      await page.locator('#inspectorClose').click();
+      expect(dialogs).toEqual([]);
+    } finally {
+      for (const n of names) {
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
+      }
     }
   });
 
@@ -508,7 +605,9 @@ test.describe('Agents roster', () => {
 // response, and the avatar must follow Avatar Identity v1 (PRD FR2–FR24,
 // FR67–FR78, FR95–FR98, FR102).
 test.describe('Agents gallery', () => {
-  async function openAgents(page) {
+  // The optional query matches the helper of the same name in the other
+  // describes, so a test here can deep-link to one agent the same way.
+  async function openAgents(page, query = '') {
     await page.addInitScript(() => window.localStorage.setItem('ori-theme', 'dark'));
     await page.route('**/api/onboarding/status', route =>
       route.fulfill({
@@ -517,7 +616,7 @@ test.describe('Agents gallery', () => {
         body: JSON.stringify({ needs_onboarding: false, completed: true })
       })
     );
-    await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`${baseUrl}/agents${query}`, { waitUntil: 'domcontentloaded' });
     await expect(page.locator('#rosterList')).toBeVisible();
     await expect(page.locator('.roster-card').first()).toBeVisible();
   }
@@ -961,120 +1060,14 @@ test.describe('Agents single-agent editing', () => {
     await expect(page.locator('#stageName')).toHaveText(name);
   }
 
-  test('uploading an avatar from Overview updates the card and the hero together', async ({
-    page,
-    request
-  }) => {
-    const name = `PWAvUp${Date.now()}`;
-    await request.post(`${baseUrl}/api/agents`, {
-      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
-    });
-    const png = Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
-      'base64'
-    );
-
-    try {
-      await openAgent(page, name);
-      const card = page.locator(`.roster-card[data-name="${name}"]`);
-      await expect(card.locator('.agent-avatar')).toHaveClass(/agent-avatar--generated/);
-
-      await page.locator('#ov-appearance-file').setInputFiles({
-        name: 'a.png',
-        mimeType: 'image/png',
-        buffer: png
-      });
-      await expect(page.locator('#ov-appearance-status')).toHaveText('Image uploaded.');
-
-      // Both surfaces must move together; a stale projection would leave the
-      // hero on the old identity while the card updated.
-      await expect(card.locator('.agent-avatar')).toHaveClass(/agent-avatar--image/);
-      await expect(page.locator('#stageAvatar')).toHaveClass(/agent-avatar--image/);
-
-      await page.locator('#ov-appearance-upload-remove').click();
-      await expect(page.locator('#ov-appearance-status')).toHaveText('Image removed.');
-      await expect(card.locator('.agent-avatar')).toHaveClass(/agent-avatar--generated/);
-      await expect(page.locator('#stageAvatar')).toHaveClass(/agent-avatar--generated/);
-    } finally {
-      await request
-        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
-        .catch(() => undefined);
-    }
-  });
-
-  test('a stale save offers reload-latest recovery and keeps the roster usable', async ({
-    page,
-    request
-  }) => {
-    const name = `PWStale${Date.now()}`;
-    await request.post(`${baseUrl}/api/agents`, {
-      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
-    });
-
-    try {
-      await openAgent(page, name);
-      // Force the version-conflict response the server returns when the agent
-      // changed underneath the open form.
-      await page.route(`**/api/agents/${encodeURIComponent(name)}`, route => {
-        if (route.request().method() !== 'PATCH') return route.continue();
-        return route.fulfill({
-          status: 409,
-          contentType: 'application/json',
-          body: JSON.stringify({ error: 'stale_agent_edit', current_version: 'abc123' })
-        });
-      });
-
-      await page.locator('#ov-description').fill('Edited against a stale version.');
-      await page.locator('#savebar-overview [data-role="save"]').click();
-
-      const banner = page.locator('#panel-overview .conflict-banner');
-      await expect(banner).toBeVisible();
-      await expect(banner).toContainText('changed elsewhere');
-      await expect(banner.locator('.conflict-banner__action')).toHaveText('Reload latest');
-      // The collection stays usable while the conflict is unresolved (FR101).
-      await expect(page.locator('.roster-card').first()).toBeVisible();
-    } finally {
-      await request
-        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
-        .catch(() => undefined);
-    }
-  });
-
-  test('an unsaved edit guards a focus change and cancelling leaves it intact', async ({
-    page,
-    request
-  }) => {
-    const prefix = `PWGuard${Date.now()}`;
-    const a = `${prefix} Alpha`;
-    const b = `${prefix} Bravo`;
-    for (const n of [a, b]) {
-      await request.post(`${baseUrl}/api/agents`, {
-        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
-      });
-    }
-
-    try {
-      await openAgent(page, a);
-      await page.locator('#ov-description').fill('Half-written thought.');
-
-      // Decline the guard: focus must stay put and the edit must survive.
-      page.once('dialog', d => d.dismiss());
-      await page.locator(`.roster-card[data-name="${b}"] .roster-card__open`).click();
-      await expect(page.locator('#stageName')).toHaveText(a);
-      await expect(page.locator('#ov-description')).toHaveValue('Half-written thought.');
-
-      // Accept it: focus moves and the edit is abandoned.
-      page.once('dialog', d => d.accept());
-      await page.locator(`.roster-card[data-name="${b}"] .roster-card__open`).click();
-      await expect(page.locator('#stageName')).toHaveText(b);
-    } finally {
-      for (const n of [a, b]) {
-        await request
-          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
-          .catch(() => undefined);
-      }
-    }
-  });
+  // The avatar-upload, stale-save and unsaved-guard tests that stood here
+  // exercised the Inspector's Overview editor. That editor is gone: the
+  // standalone detail page is the editor of record, and it keeps its own
+  // appearance editor (#profileAppearanceHost) and its own version-checked
+  // save, so no capability went with them. What replaces them here is the
+  // read-only contract — see "the Inspector saves no agent field, on any tab"
+  // and "switching cards and tabs never raises an unsaved-changes prompt"
+  // above.
 
   test('the New Agent panel creates an agent and focuses the new definition', async ({
     page,
@@ -1156,57 +1149,46 @@ test.describe('Agents single-agent editing', () => {
     }
   });
 
-  test('a failed workspace save preserves the checkbox selection and reports the error', async ({
+  test('the Workspaces tab reads membership and links each workspace out', async ({
     page,
     request
   }) => {
-    const prefix = `PWWsFail${Date.now()}`;
+    const prefix = `PWWsRead${Date.now()}`;
     const name = `${prefix} Agent`;
-    const wsName = `${prefix} Target`;
     await request.post(`${baseUrl}/api/agents`, {
       data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
     });
     let wsId = '';
-    const ws = await request.post(`${baseUrl}/api/workspaces`, { data: { name: wsName } });
+    let slug = '';
+    const ws = await request.post(`${baseUrl}/api/workspaces`, {
+      data: { name: `${prefix} Target`, entry_agent_name: name }
+    });
     if (ws.ok()) {
       const j = await ws.json();
       wsId = j?.folder?.id || j?.id || '';
+      slug = j?.folder?.folder_slug || j?.folder_slug || '';
     }
     expect(wsId).toBeTruthy();
 
     try {
-      await page.addInitScript(() => window.localStorage.setItem('ori-theme', 'dark'));
-      await page.route('**/api/onboarding/status', route =>
-        route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({ needs_onboarding: false, completed: true })
-        })
-      );
-      await page.route(`**/api/agents/${encodeURIComponent(name)}/workspaces`, route =>
-        route.fulfill({
-          status: 500,
-          contentType: 'application/json',
-          body: JSON.stringify({ message: 'Simulated workspace save failure.' })
-        })
-      );
-
       await page.goto(`${baseUrl}/agents?agent=${encodeURIComponent(name)}&tab=workspaces`, {
         waitUntil: 'domcontentloaded'
       });
       await expect(page.locator('#stageName')).toHaveText(name);
-      await expect(page.locator('#panel-workspaces')).toBeVisible();
+      const panel = page.locator('#panel-workspaces');
+      await expect(panel).toBeVisible();
 
-      const box = page.locator(`input[data-ws-id="${wsId}"]`);
-      await box.check();
-      await page.locator('#savebar-workspaces [data-role="save"]').click();
+      // Membership is stated, and the workspace is a link to its own surface
+      // (FR-40) — not a checkbox that saves from here (FR-44).
+      await expect(panel.locator('.ws-row')).toHaveCount(1);
+      await expect(panel).toContainText(`${prefix} Target`);
+      await expect(panel.locator('input[type="checkbox"]')).toHaveCount(0);
+      if (slug) {
+        await expect(panel.locator(`a[href="/workspaces/${slug}"]`)).toBeVisible();
+      }
 
-      // The failure is reported, and the user's checked box is not reverted or
-      // silently discarded (PRD FR100/FR101).
-      await expect(page.locator('#panel-workspaces .save-status')).toContainText(
-        'Simulated workspace save failure.'
-      );
-      await expect(box).toBeChecked();
+      // Changing membership is offered, on the page that can actually do it.
+      await expect(panel.locator('a[href*="tab=workspaces"]')).toBeVisible();
     } finally {
       if (wsId)
         await request
@@ -1500,14 +1482,21 @@ test.describe('Agents inspector', () => {
     await open(page, '?agent=Claude%20Code');
     await expect(page.locator('#stageName')).toHaveText('Claude Code');
 
-    // No delete affordance and no editable Overview form for a built-in (FR18).
+    // No delete affordance for a built-in (FR18). The Inspector is read-only
+    // for every agent now, so the interesting part is what a built-in gets
+    // INSTEAD of the "edit on the full page" link every other agent gets.
     await expect(page.locator('#stageDelete')).toBeHidden();
-    await expect(page.locator('#ov-description')).toHaveCount(0);
-    await expect(page.locator('#savebar-overview')).toHaveCount(0);
+    await expect(page.locator('#overviewDesc')).toContainText('built-in agent');
+    await expect(page.locator('#overviewDesc a')).toHaveCount(0);
 
     // Prompt states its read-only reality instead of offering an editor.
     await page.locator('#tab-prompt').click();
-    await expect(page.locator('#pr-prompt')).toHaveCount(0);
+    await expect(page.locator('#panel-prompt textarea')).toHaveCount(0);
+
+    // Membership says why it cannot change rather than linking somewhere that
+    // would refuse the edit.
+    await page.locator('#tab-workspaces').click();
+    await expect(page.locator('#panel-workspaces')).toContainText('cannot be attached');
 
     // The other tabs still report their real data.
     await page.locator('#tab-toolbox').click();
@@ -1621,36 +1610,30 @@ test.describe('Agents collection controls', () => {
     }
   });
 
-  test('an unsaved Overview edit survives a Gallery/List view switch (FR64)', async ({
+  test('a view switch leaves the Inspector reading the same agent (FR64)', async ({
     page,
     request
   }) => {
     const name = `PWViewGuard${Date.now()}`;
     await request.post(`${baseUrl}/api/agents`, {
-      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+      data: { name, type: 'tool-calling', model: 'gpt-4o-mini', description: 'Kept across views.' }
     });
 
     try {
-      await openAgents(page, `?agent=${encodeURIComponent(name)}`);
+      await openAgents(page, `?agent=${encodeURIComponent(name)}&tab=prompt`);
       await expect(page.locator('#stageName')).toHaveText(name);
-      await page.locator('#ov-description').fill('Not yet saved.');
+      await expect(page.locator('#tab-prompt')).toHaveAttribute('aria-selected', 'true');
 
-      // The view switch renders only the collection grid; it must not touch
-      // the Inspector's form or silently discard the edit.
+      // The view switch renders only the collection grid; it must not disturb
+      // the Inspector's agent or its open tab. This used to be phrased as "an
+      // unsaved edit survives the switch"; with nothing editable, what has to
+      // survive is the reading position.
       await page.locator('#viewList').click();
-      await expect(page.locator('#ov-description')).toHaveValue('Not yet saved.');
+      await expect(page.locator('#stageName')).toHaveText(name);
+      await expect(page.locator('#tab-prompt')).toHaveAttribute('aria-selected', 'true');
       await page.locator('#viewGallery').click();
-      await expect(page.locator('#ov-description')).toHaveValue('Not yet saved.');
-
-      const save = page.locator('#savebar-overview [data-role="save"]');
-      await expect(save).toBeEnabled();
-      await save.click();
-      await expect
-        .poll(async () => {
-          const r = await request.get(`${baseUrl}/api/agents/${encodeURIComponent(name)}/detail`);
-          return (await r.json()).metadata?.description;
-        })
-        .toBe('Not yet saved.');
+      await expect(page.locator('#stageName')).toHaveText(name);
+      await expect(page.locator('#tab-prompt')).toHaveAttribute('aria-selected', 'true');
     } finally {
       await request
         .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)

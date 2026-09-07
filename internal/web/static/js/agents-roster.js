@@ -34,10 +34,6 @@
     'validator',
     'specialist'
   ];
-  var REASONING = ['', 'minimal', 'low', 'medium', 'high'];
-  // Agent capability types; these mirror the model catalog's category strings so
-  // the Model picker can be filtered to models that fit the selected type.
-  var TYPES = ['tool-calling', 'general', 'research', 'orchestration'];
 
   var state = {
     agents: [],
@@ -68,8 +64,6 @@
     // (PRD FR-30/FR-31).
     rendered: [],
     focusIndex: -1,
-    dirty: { overview: false, prompt: false, workspaces: false },
-    allWorkspaces: null,
     creating: false,
     providers: null,
     // Whether the Inspector is showing. Closing it is a presentation change:
@@ -102,10 +96,9 @@
 
   var els = {};
 
-  // Active OriTagInput instance for the focused agent's Overview tab (rebuilt on
-  // each render); read back in overviewEdits.
-  var overviewTagsInput = null;
-  // OriTagInput instance for the Create panel; read back in submitCreate.
+  // OriTagInput instance for the Create panel; read back in submitCreate. The
+  // Overview tab had one too until the Inspector stopped editing — creating an
+  // agent is a creation flow, not a field editor, so it keeps its inputs.
   var createTagsInput = null;
 
   document.addEventListener('DOMContentLoaded', init);
@@ -145,6 +138,7 @@
       workspacesBody: document.getElementById('workspacesBody'),
       stageDelete: document.getElementById('stageDelete'),
       stageFullPage: document.getElementById('stageFullPage'),
+      stageFavoriteToggle: document.getElementById('stageFavoriteToggle'),
       newAgentBtn: document.getElementById('newAgentBtn'),
       createPanel: document.getElementById('createPanel'),
       createBody: document.getElementById('createBody'),
@@ -251,6 +245,7 @@
     els.newAgentBtn.addEventListener('click', openCreate);
     els.createCancel.addEventListener('click', closeCreate);
     els.stageDelete.addEventListener('click', onDeleteClick);
+    els.stageFavoriteToggle.addEventListener('click', onStageFavoriteClick);
 
     els.selectAll.addEventListener('click', selectAllVisible);
     els.clearSelection.addEventListener('click', function () {
@@ -385,13 +380,6 @@
       restoreTabFromUrl();
     });
 
-    window.addEventListener('beforeunload', function (e) {
-      if (anyDirty()) {
-        e.preventDefault();
-        e.returnValue = '';
-      }
-    });
-
     // On a wide screen the Inspector starts open on its placeholder, so the
     // relationship between collection and detail is visible before anything is
     // focused. In sheet mode it stays closed until a card is opened, because a
@@ -422,11 +410,12 @@
       })
       .then(function (data) {
         state.providers = data && Array.isArray(data.providers) ? data.providers : [];
-        // If an agent was already selected and its stage rendered before the model
-        // catalog arrived, refresh the catalog-dependent surfaces: the overview
-        // (picker + notes) and the vitals (legacy badge). Guarded by !dirty so we
-        // never clobber unsaved edits.
-        if (state.selected && !state.dirty.overview && state.detailCache[state.selected]) {
+        // If an agent was already selected and its stage rendered before the
+        // model catalog arrived, refresh the catalog-dependent surface: the
+        // vitals' legacy-model badge. This used to be guarded against
+        // clobbering unsaved edits; with nothing editable here, a repaint is
+        // always safe.
+        if (state.selected && state.detailCache[state.selected]) {
           renderVitals(state.byName[state.selected], state.detailCache[state.selected]);
           renderOverview(state.selected, state.detailCache[state.selected]);
         }
@@ -1597,12 +1586,14 @@
   function selectAgent(name, opts) {
     opts = opts || {};
     if (!state.byName[name]) return;
-    if (name !== state.selected && !guardUnsaved()) return;
+    // Switching cards used to be gated by an unsaved-changes confirm. With the
+    // Inspector reading rather than editing there is nothing to lose, so the
+    // switch is unconditional — and the guard's early return goes with it, or
+    // this function would stop selecting anything.
     state.selected = name;
     state.focusIndex = state.filtered.findIndex(function (a) {
       return a.name === name;
     });
-    resetDirty();
     safeStorageSet(name);
     syncUrl(name, opts.push !== false);
     highlightSelected();
@@ -1636,7 +1627,6 @@
   // reopening restores the same context (PRD FR51).
   function closeInspector(opts) {
     opts = opts || {};
-    if (!guardUnsaved()) return false;
     state.inspectorOpen = false;
     reflectInspectorPresentation();
     if (opts.restoreFocus) {
@@ -1709,10 +1699,14 @@
     els.favorite.hidden = !heroVm.favorite;
     els.purpose.textContent = heroVm.hasDescription ? heroVm.description : 'No description yet.';
     els.purpose.classList.toggle('is-missing', !heroVm.hasDescription);
+    reflectFavoriteAction(heroVm);
     // Deep-link to the full agent detail page (/agents/{name}). The server routes
     // this to the rich editor for catalog agents and to the dedicated read-only
     // pages for the built-in Claude Code / Codex CLI agents.
-    els.stageFullPage.href = '/agents/' + encodeURIComponent(name);
+    //
+    // The open tab travels with it, so a reader who decides to edit lands where
+    // they were reading rather than at the top of the page (FR-47).
+    els.stageFullPage.href = detailHref(name, currentTab());
 
     renderProgression(name, listItem);
 
@@ -1867,165 +1861,124 @@
     return null;
   }
 
-  /* ---- overview (editable) ------------------------------------------------- */
+  /* ---- overview (read-only) ------------------------------------------------ */
+  //
+  // The Inspector reads; the standalone detail page at /agents/<name> writes.
+  // Before this epic both surfaces saved the same fields, each with its own
+  // dirty tracking, save bar, stale-write handling and tag editor — 935 lines of
+  // detail page duplicated inside a side panel, and no way for a user to know
+  // which one held the truth (FR-44).
+  //
+  // What the panel gained by giving up editing is room: the purpose, model,
+  // capabilities and last activity that Group 1 took off the card all land here,
+  // where there is space to state them plainly.
 
   function isEditable(detail) {
     // CLI / built-in agents come back without a version token and reject PATCH.
+    // Kept because it still decides what the DETAIL PAGE can offer and whether
+    // a delete action is shown, not what this panel renders.
     return !!(detail && detail.version);
   }
 
   function renderOverview(name, detail) {
     els.overviewDesc.textContent = '';
-    var editable = isEditable(detail);
 
-    if (!editable) {
-      els.overviewFacts.innerHTML = '<dl class="stage-facts">' + readonlyFacts(detail) + '</dl>';
-      els.overviewDesc.innerHTML =
-        '<p class="stage-hint">This is a built-in agent and cannot be edited here.</p>';
-      return;
-    }
-
-    // Offer a model picker when the provider/model catalog is loaded; otherwise
-    // fall back to free text so the field always works.
-    var hasCatalog = Array.isArray(state.providers) && state.providers.length > 0;
-    var agentType = detail.type || 'tool-calling';
-    var modelControl = hasCatalog
-      ? modelSelectInput('ov-model', detail.model || '', detail.provider || '', agentType)
-      : textInput('ov-model', detail.model || '');
-    // With the picker, provider is derived from the chosen model, so it is shown
-    // read-only. Without a catalog (text fallback) it stays editable.
-    var providerControl = hasCatalog
-      ? readonlyInput('ov-provider', detail.provider || '', 'Set by the selected model')
-      : textInput('ov-provider', detail.provider || '', 'openai / anthropic / ollama…');
-
-    var md = detail.metadata || {};
-    var overviewAppearance = normalizeAppearance(detail.appearance);
     els.overviewFacts.innerHTML =
-      '<form class="stage-form" id="overviewForm" novalidate>' +
-      field('Role', selectInput('ov-role', ROLES, detail.role, roleLabel), 'ov-role') +
-      field('Type', selectInput('ov-type', TYPES, agentType, typeLabel), 'ov-type') +
-      field(
-        'Model',
-        modelControl + '<p class="model-note" id="ov-model-note" aria-live="polite"></p>',
-        'ov-model'
-      ) +
-      field('Provider', providerControl, 'ov-provider') +
-      field(
-        'Temperature',
-        numInput('ov-temperature', detail.temperature, '0', '2', '0.1'),
-        'ov-temperature'
-      ) +
-      '<div class="field" id="ov-reasoning-field">' +
-      '<label class="field__label" for="ov-reasoning">Reasoning effort</label>' +
-      '<div class="field__control">' +
-      selectInput('ov-reasoning', REASONING, detail.reasoning_effort || '', function (v) {
-        return v ? titleCase(v) : 'Default';
-      }) +
-      '</div></div>' +
-      field(
-        'Max output tokens',
-        numInput('ov-maxtokens', detail.max_output_tokens || '', '0', '', '1'),
-        'ov-maxtokens'
-      ) +
-      field('Web search', checkInput('ov-websearch', detail.allow_web_search)) +
-      field(
-        'Description',
-        textareaInput('ov-description', md.description || '', 3),
-        'ov-description'
-      ) +
-      field(
-        'Favorite',
-        '<label class="check"><input id="ov-favorite" type="checkbox"' +
-          (md.favorite ? ' checked' : '') +
-          '> Favorited</label>'
-      ) +
-      field('Tags', '<div id="ov-tags-host"></div>', 'ov-tags-host') +
-      // One Appearance section replaces the three controls that used to sit
-      // here — a colour input, an upload widget, and a character button — each
-      // of which had its own idea of what "saved" meant (FR-26).
-      '<div class="field field--appearance"><div class="field__control" id="ov-appearance-host"></div></div>' +
-      '</form>' +
-      readonlyMetaHTML(detail) +
-      saveBar('overview');
+      purposeHTML(detail) +
+      '<dl class="stage-facts">' +
+      readonlyFacts(detail) +
+      '</dl>' +
+      capabilitiesHTML(detail) +
+      tagsHTML(detail) +
+      readonlyMetaHTML(detail);
 
-    els.overviewDesc.innerHTML = '';
-    wireOverviewTags(name, md.tags || []);
-    mountAppearanceEditor(name, detail, overviewAppearance);
-    wireDirty('overview', document.getElementById('overviewForm'));
-    wireSaveBar('overview', function () {
-      saveOverview(name);
-    });
-
-    var modelSel = document.getElementById('ov-model');
-    if (modelSel && modelSel.tagName === 'SELECT') {
-      // Reflect the picked model everywhere derived state depends on it: Provider
-      // (owning provider), the model note (pricing / good-for / legacy warning),
-      // and whether the Reasoning effort field is relevant.
-      var syncFromModel = function () {
-        var opt = modelSel.options[modelSel.selectedIndex];
-        var provEl = document.getElementById('ov-provider');
-        var prov = opt && opt.getAttribute('data-provider');
-        if (prov && provEl) provEl.value = prov;
-        updateModelNote(opt);
-        updateReasoningVisibility(modelSel.value, detail.reasoning_effort);
-      };
-      modelSel.addEventListener('change', syncFromModel);
-
-      // Changing Type re-scopes the catalog to models that fit that type, keeping
-      // the current selection when it still qualifies.
-      var typeSel = document.getElementById('ov-type');
-      if (typeSel) {
-        typeSel.addEventListener('change', function () {
-          var keep = modelSel.value;
-          modelSel.innerHTML = modelOptionsHTML(keep, val('ov-provider'), typeSel.value);
-          syncFromModel();
-        });
-      }
-
-      // Prime the derived state for the initially-loaded model.
-      updateModelNote(modelSel.options[modelSel.selectedIndex]);
-      updateReasoningVisibility(modelSel.value, detail.reasoning_effort);
-    }
+    els.overviewDesc.innerHTML = isEditable(detail)
+      ? '<p class="stage-hint">Editing happens on the full page. ' +
+        '<a class="stage-hint__link" href="' +
+        esc(detailHref(name, currentTab())) +
+        '">Open ' +
+        esc(name) +
+        ' ↗</a></p>'
+      : '<p class="stage-hint">This is a built-in agent and has no editable definition.</p>';
   }
 
-  // Populate #ov-model-note with the selected option's pricing / good-for hint and
-  // a legacy/deprecation warning when applicable.
-  function updateModelNote(opt) {
-    var note = document.getElementById('ov-model-note');
-    if (!note) return;
-    if (!opt) {
-      note.textContent = '';
-      note.className = 'model-note';
-      return;
-    }
-    var bits = [];
-    var goodFor = opt.getAttribute('data-goodfor');
-    if (goodFor) bits.push(goodFor);
-    var pricing = opt.getAttribute('data-pricing');
-    if (pricing) bits.push(pricing);
-    var legacy = opt.getAttribute('data-legacy') === '1';
-    var dep = opt.getAttribute('data-deprecation');
-    note.className = 'model-note' + (legacy ? ' is-legacy' : '');
-    var warn = legacy ? '⚠ Legacy model' + (dep ? ' — deprecated ' + dep : '') + '. ' : '';
-    note.textContent = warn + bits.join(' · ');
+  // The purpose the card stopped showing (FR-2). Stated in full here rather than
+  // clamped, because the panel has room the card did not — and omitted entirely
+  // when absent, so the Inspector never prints the italic placeholder this epic
+  // removed from the card.
+  function purposeHTML(detail) {
+    var md = (detail && detail.metadata) || {};
+    var description = String(md.description || '').trim();
+    if (!description) return '';
+    return '<p class="stage-readonly-purpose">' + esc(description) + '</p>';
   }
 
-  // Show Reasoning effort only for models that use it (OpenAI o-series / gpt-5 /
-  // Codex). Always show it when the agent already has an effort set, so existing
-  // configuration is never hidden from view.
-  function updateReasoningVisibility(model, existingEffort) {
-    var wrap = document.getElementById('ov-reasoning-field');
-    if (!wrap) return;
-    var relevant = supportsReasoning(model) || !!(existingEffort && String(existingEffort).trim());
-    wrap.hidden = !relevant;
+  // Capabilities in full. The card carried a two-item summary; the complete list
+  // has always belonged here, and now the summary does too (FR-42).
+  function capabilitiesHTML(detail) {
+    var caps = Array.isArray(detail && detail.capabilities) ? detail.capabilities : [];
+    if (caps.length === 0) return '';
+    return chipBlock(
+      'Capabilities',
+      caps.map(function (c) {
+        return titleCase(String(c));
+      })
+    );
   }
 
-  function supportsReasoning(model) {
-    var m = String(model || '')
-      .toLowerCase()
-      .trim();
-    if (!m) return false;
-    return /^o[1345](-|$)/.test(m) || m.indexOf('gpt-5') !== -1 || m.indexOf('codex') !== -1;
+  function tagsHTML(detail) {
+    var md = (detail && detail.metadata) || {};
+    var tags = Array.isArray(md.tags) ? md.tags.filter(Boolean) : [];
+    if (tags.length === 0) return '';
+    return chipBlock('Tags', tags.map(String));
+  }
+
+  function chipBlock(label, values) {
+    return (
+      '<div class="stage-readonly-block">' +
+      '<h3 class="stage-readonly-label">' +
+      esc(label) +
+      '</h3>' +
+      '<ul class="stage-chips">' +
+      values
+        .map(function (v) {
+          return '<li class="stage-chip">' + esc(v) + '</li>';
+        })
+        .join('') +
+      '</ul></div>'
+    );
+  }
+
+  // Favorite is the one agent field the Inspector still writes, and it is not a
+  // field editor: it is the same one-click roster action the card's star and the
+  // context menu offer, through the same endpoint (FR-43).
+  function reflectFavoriteAction(vm) {
+    var btn = els.stageFavoriteToggle;
+    if (!btn) return;
+    btn.textContent = vm.favorite ? '★ Unfavorite' : '☆ Favorite';
+    btn.setAttribute('aria-pressed', vm.favorite ? 'true' : 'false');
+    btn.title = vm.favorite ? 'Remove from favorites' : 'Add to favorites';
+  }
+
+  function onStageFavoriteClick() {
+    var name = state.selected;
+    if (!name || !state.byName[name]) return;
+    var vm = viewFor(state.byName[name]);
+    announce(vm.favorite ? 'Unfavoriting…' : 'Favoriting…');
+    submitBulkMetadata(
+      { operation: 'set_favorite', agent_names: [name], favorite: !vm.favorite },
+      null,
+      null
+    );
+  }
+
+  // The detail page is the editor of record, and the Inspector tab the reader
+  // was on travels with them so someone reading the prompt who decides to edit
+  // lands on the prompt rather than the top of the page (FR-47).
+  function detailHref(name, tab) {
+    var href = '/agents/' + encodeURIComponent(name);
+    if (tab && tab !== 'overview') href += '?tab=' + encodeURIComponent(tab);
+    return href;
   }
 
   function typeLabel(v) {
@@ -2043,100 +1996,36 @@
     }
   }
 
+  // Every configured fact, for every agent — the same list a built-in used to
+  // get, now that no agent gets a form here. Model in particular is a card fact
+  // that moved to this panel (FR-2/FR-42).
+  //
+  // A row whose value is absent is omitted rather than printed as an em dash:
+  // "Reasoning effort: —" states nothing that "no reasoning effort row" does not.
   function readonlyFacts(detail) {
+    var d = detail || {};
     var facts = [
-      ['Role', detail && detail.role ? roleLabel(detail.role) : '—'],
-      ['Model', (detail && detail.model) || '—'],
-      ['Provider', detail && detail.provider ? titleCase(detail.provider) : '—'],
-      ['Temperature', detail && detail.temperature != null ? String(detail.temperature) : '—']
+      ['Role', d.role ? roleLabel(d.role) : ''],
+      ['Type', d.type ? typeLabel(d.type) : ''],
+      ['Model', d.model || ''],
+      ['Provider', d.provider ? titleCase(d.provider) : ''],
+      ['Temperature', d.temperature != null ? String(d.temperature) : ''],
+      ['Reasoning effort', d.reasoning_effort ? titleCase(d.reasoning_effort) : ''],
+      ['Max output tokens', d.max_output_tokens ? String(d.max_output_tokens) : ''],
+      ['Web search', d.allow_web_search == null ? '' : d.allow_web_search ? 'Allowed' : 'Off']
     ];
     return facts
+      .filter(function (f) {
+        return f[1] !== '';
+      })
       .map(function (f) {
         return '<dt>' + esc(f[0]) + '</dt><dd>' + esc(f[1]) + '</dd>';
       })
       .join('');
   }
 
-  function overviewEdits(detail) {
-    // Diff current inputs against the loaded detail; return only changed fields
-    // keyed by the PATCH request's field names.
-    var out = {};
-    var role = val('ov-role');
-    if (role !== (detail.role || '')) out.role = role;
-    var type = val('ov-type');
-    if (type && type !== (detail.type || '')) out.type = type;
-    var model = val('ov-model').trim();
-    if (model !== (detail.model || '')) out.model = model;
-    var provider = val('ov-provider').trim();
-    if (provider !== (detail.provider || '')) out.llm_provider = provider;
-    var temp = parseFloat(val('ov-temperature'));
-    if (!isNaN(temp) && temp !== Number(detail.temperature)) out.temperature = temp;
-    var reasoning = val('ov-reasoning');
-    if (reasoning !== (detail.reasoning_effort || '')) out.reasoning_effort = reasoning;
-    var maxRaw = val('ov-maxtokens').trim();
-    var maxNum = maxRaw === '' ? 0 : parseInt(maxRaw, 10);
-    if (!isNaN(maxNum) && maxNum !== Number(detail.max_output_tokens || 0))
-      out.max_output_tokens = maxNum;
-    var web = checked('ov-websearch');
-    if (web !== !!detail.allow_web_search) out.allow_web_search = web;
-    var md = detail.metadata || {};
-    var desc = val('ov-description');
-    if (desc !== (md.description || '')) out.description = desc;
-    var fav = checked('ov-favorite');
-    if (fav !== !!md.favorite) out.favorite = fav;
-    // Appearance is deliberately absent from this diff. The shared editor saves
-    // each appearance change on its own, immediately, through its adapter — so
-    // folding it into the Overview Save would give one setting two write paths
-    // that could disagree about what is staged (FR-41).
-    // Tags: compare case-insensitively so re-saving unchanged tags is a no-op.
-    if (overviewTagsInput) {
-      var nextTags = overviewTagsInput.getTags();
-      if (tagsDiffer(nextTags, md.tags || [])) out.tags = nextTags;
-    }
-    return out;
-  }
-
-  function tagsDiffer(a, b) {
-    var na = (a || [])
-      .map(function (t) {
-        return String(t).toLowerCase().trim();
-      })
-      .filter(Boolean)
-      .sort();
-    var nb = (b || [])
-      .map(function (t) {
-        return String(t).toLowerCase().trim();
-      })
-      .filter(Boolean)
-      .sort();
-    if (na.length !== nb.length) return true;
-    for (var i = 0; i < na.length; i++) {
-      if (na[i] !== nb[i]) return true;
-    }
-    return false;
-  }
-
-  function wireOverviewTags(name, initial) {
-    overviewTagsInput = null;
-    var host = document.getElementById('ov-tags-host');
-    if (!host) return;
-    if (window.OriTagInput) {
-      overviewTagsInput = window.OriTagInput.createTagInput({
-        container: host,
-        initialTags: initial,
-        onChange: function () {
-          markDirty('overview', true);
-        }
-      });
-    } else {
-      host.innerHTML =
-        '<input id="ov-tags-text" type="text" value="' +
-        esc((initial || []).join(', ')) +
-        '" placeholder="tag1, tag2">';
-    }
-  }
-
-  // Read-only created / updated / last-active timestamps below the editable form.
+  // Created / updated / last-active timestamps. "Last active" is one of the two
+  // facts Group 1 took off the card, and this is where it lands (FR-2/FR-42).
   function readonlyMetaHTML(detail) {
     var s = detail.statistics || {};
     var rows = [
@@ -2169,19 +2058,11 @@
     return dateFmt ? dateFmt.format(new Date(t)) : new Date(t).toLocaleString();
   }
 
-  function saveOverview(name) {
-    var detail = state.detailCache[name];
-    if (!detail) return;
-    var edits = overviewEdits(detail);
-    if (Object.keys(edits).length === 0) {
-      showStatus('overview', 'No changes to save.', 'muted');
-      return;
-    }
-    submitPatch(name, 'overview', edits);
-  }
+  /* ---- prompt (lazy, read-only) -------------------------------------------- */
 
-  /* ---- prompt (lazy + editable) -------------------------------------------- */
-
+  // One rendering for every agent now: the prompt as text. The editable path
+  // that used to sit beside this — a textarea, its own dirty flag and its own
+  // save bar — was the second of the two editors this epic collapses (FR-44).
   function renderPrompt(name) {
     if (els.promptBody.dataset.loadedFor === name) return;
     els.promptBody.dataset.loadedFor = name;
@@ -2189,186 +2070,54 @@
     fetchDetail(name)
       .then(function (detail) {
         if (state.selected !== name) return;
-        if (!isEditable(detail)) {
-          var prompt = (detail && detail.system_prompt) || '';
-          els.promptBody.innerHTML = prompt.trim()
-            ? '<pre></pre>'
-            : '<p class="stage-hint">This agent has no custom system prompt.</p>';
-          if (prompt.trim()) els.promptBody.querySelector('pre').textContent = prompt;
+        var prompt = String((detail && detail.system_prompt) || '');
+        if (!prompt.trim()) {
+          els.promptBody.innerHTML =
+            '<p class="stage-hint">This agent has no custom system prompt.</p>';
           return;
         }
-        els.promptBody.innerHTML =
-          '<form class="stage-form" id="promptForm" novalidate>' +
-          '<textarea id="pr-prompt" class="stage-textarea" rows="16" spellcheck="false" ' +
-          'placeholder="No system prompt set. Add one to steer this agent."></textarea>' +
-          '</form>' +
-          saveBar('prompt');
-        document.getElementById('pr-prompt').value = detail.system_prompt || '';
-        wireDirty('prompt', document.getElementById('promptForm'));
-        wireSaveBar('prompt', function () {
-          savePrompt(name);
-        });
+        // textContent, not innerHTML: a system prompt is arbitrary user text and
+        // must never be parsed as markup on its way to the screen.
+        els.promptBody.innerHTML = '<pre class="stage-prompt__text"></pre>';
+        els.promptBody.querySelector('pre').textContent = prompt;
       })
       .catch(function () {
         els.promptBody.innerHTML = '<p class="stage-hint">Could not load the system prompt.</p>';
       });
   }
 
-  function savePrompt(name) {
-    var detail = state.detailCache[name];
-    if (!detail) return;
-    var next = val('pr-prompt');
-    if (next === (detail.system_prompt || '')) {
-      showStatus('prompt', 'No changes to save.', 'muted');
-      return;
-    }
-    submitPatch(name, 'prompt', { system_prompt: next });
-  }
+  /* ---- workspaces (read-only) ---------------------------------------------- */
 
-  /* ---- shared save path ---------------------------------------------------- */
-
-  function submitPatch(name, tab, fields, confirmShared) {
-    var detail = state.detailCache[name];
-    var body = Object.assign({ expected_version: detail.version }, fields);
-    if (confirmShared) body.confirm_shared_edit = true;
-    setSaving(tab, true);
-    clearBanner(tab);
-
-    fetch('/api/agents/' + encodeURIComponent(name), {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    })
-      .then(function (r) {
-        return r
-          .json()
-          .catch(function () {
-            return {};
-          })
-          .then(function (data) {
-            return { status: r.status, data: data };
-          });
-      })
-      .then(function (res) {
-        setSaving(tab, false);
-        if (res.status >= 200 && res.status < 300) return onSaved(name, tab);
-        if (res.status === 409 && res.data && res.data.error === 'stale_agent_edit')
-          return onStale(name, tab, res.data);
-        if (
-          res.status === 409 &&
-          res.data &&
-          res.data.error === 'shared_agent_edit_requires_confirmation'
-        )
-          return onSharedConfirm(name, tab, fields, res.data);
-        if (res.status === 409 && res.data && res.data.error === 'entry_agent_removal_blocked')
-          return showStatus(tab, res.data.message || 'Blocked.', 'error');
-        // Validation / other errors surface their message inline.
-        showStatus(
-          tab,
-          (res.data && res.data.message) || 'Save failed (' + res.status + ').',
-          'error'
-        );
-      })
-      .catch(function (err) {
-        setSaving(tab, false);
-        showStatus(tab, 'Network error — save not applied.', 'error');
-        console.error('[roster] save failed', err);
-      });
-  }
-
-  function onSaved(name, tab) {
-    // Refetch to reseed the version token and reflect any server normalization,
-    // then re-render the tab and the roster meta.
-    fetchDetail(name, true).then(function (detail) {
-      state.dirty[tab] = false;
-      if (state.selected !== name) return;
-      refreshRosterMeta(name, detail);
-      if (tab === 'overview') {
-        renderVitals(state.byName[name], detail);
-        renderOverview(name, detail);
-      } else if (tab === 'prompt') {
-        els.promptBody.dataset.loadedFor = '';
-        renderPrompt(name);
-      }
-      showStatus(tab, 'Saved.', 'ok');
-    });
-  }
-
-  function onStale(name, tab, data) {
-    showBanner(
-      tab,
-      'This agent was changed elsewhere since you loaded it. Reload the latest version to continue — your unsaved edits in this tab will be replaced.',
-      'Reload latest',
-      function () {
-        fetchDetail(name, true).then(function (detail) {
-          if (state.selected !== name) return;
-          state.dirty[tab] = false;
-          if (tab === 'overview') {
-            renderVitals(state.byName[name], detail);
-            renderOverview(name, detail);
-          } else if (tab === 'prompt') {
-            els.promptBody.dataset.loadedFor = '';
-            renderPrompt(name);
-          }
-        });
-      }
-    );
-    if (data && data.current_version && state.detailCache[name]) {
-      // Keep the cached version in sync so a subsequent explicit reload lines up.
-      state.detailCache[name]._staleVersion = data.current_version;
-    }
-  }
-
-  function onSharedConfirm(name, tab, fields, data) {
-    var n = (data && data.workspace_count) || 'multiple';
-    var ok = window.confirm(
-      '“' +
-        name +
-        '” is attached to ' +
-        n +
-        ' workspaces. This change affects all of them. Apply it?'
-    );
-    if (ok) submitPatch(name, tab, fields, true);
-    else showStatus(tab, 'Save cancelled.', 'muted');
-  }
-
-  /* ---- workspaces (read-only in G3) ---------------------------------------- */
-
+  // Membership, read-only, with each workspace linked to its own surface
+  // (FR-40). The assignment editor that used to load the full workspace list
+  // and reconcile it on save now lives only on the detail page.
   function renderWorkspaces(name, listItem, detail) {
     var members = Array.isArray(listItem.workspaces) ? listItem.workspaces : [];
+    var rows =
+      members.length === 0
+        ? '<p class="stage-hint">Not attached to any workspace.</p>'
+        : members
+            .map(function (ws) {
+              return readonlyWsRow(ws, listItem.role);
+            })
+            .join('');
 
-    // CLI / built-in agents cannot be attached — show the membership read-only.
-    if (!isEditable(detail)) {
-      els.workspacesBody.innerHTML =
-        members.length === 0
-          ? '<p class="stage-hint">Not attached to any workspace.</p>'
-          : members
-              .map(function (ws) {
-                return readonlyWsRow(ws, listItem.role);
-              })
-              .join('');
-      return;
-    }
+    var footer = isEditable(detail)
+      ? '<p class="stage-hint"><a class="stage-hint__link" href="' +
+        esc(detailHref(name, 'workspaces')) +
+        '">Change which workspaces ' +
+        esc(name) +
+        ' belongs to ↗</a></p>'
+      : '<p class="stage-hint">Built-in agents cannot be attached to a workspace.</p>';
 
-    els.workspacesBody.innerHTML = '<p class="stage-hint">Loading workspaces…</p>';
-    fetchWorkspaces()
-      .then(function (all) {
-        if (state.selected !== name) return;
-        renderWorkspacesEditor(name, members, all, listItem.role);
-      })
-      .catch(function () {
-        if (state.selected !== name) return;
-        // Fall back to a read-only view of current memberships.
-        els.workspacesBody.innerHTML =
-          (members.length === 0
-            ? '<p class="stage-hint">Not attached to any workspace.</p>'
-            : members.map(readonlyWsRow).join('')) +
-          '<p class="stage-hint">Could not load the full workspace list to edit assignments.</p>';
-      });
+    els.workspacesBody.innerHTML = rows + footer;
   }
 
   function readonlyWsRow(ws, role) {
     var nm = esc(ws.name || 'Workspace');
+    // folder_slug is what the workspace's own page is addressed by; without one
+    // there is nothing honest to link to, so the name stays plain text rather
+    // than becoming a link that 404s.
     var link = ws.folder_slug
       ? '<a href="/workspaces/' + encodeURIComponent(ws.folder_slug) + '">' + nm + '</a>'
       : nm;
@@ -2378,144 +2127,9 @@
     return '<div class="ws-row"><span>' + link + '</span>' + pill + '</div>';
   }
 
-  function renderWorkspacesEditor(name, members, all, role) {
-    var memberIds = {};
-    var entryIds = {};
-    members.forEach(function (m) {
-      memberIds[m.id] = true;
-      if (m.entry_point) entryIds[m.id] = true;
-    });
-    var commanderLbl = commanderSlotLabel(role);
-
-    var rows = all
-      .map(function (ws) {
-        var isMember = !!memberIds[ws.id];
-        var isEntry = !!entryIds[ws.id];
-        // The agent can't be unassigned from a workspace it's the Commander of;
-        // lock that checkbox and explain, matching the server guard.
-        var disabled = isEntry ? ' disabled' : '';
-        var pill = isEntry ? '<span class="ws-entry-pill">' + esc(commanderLbl) + '</span>' : '';
-        return (
-          '<label class="ws-check' +
-          (disabled ? ' is-locked' : '') +
-          '">' +
-          '<input type="checkbox" data-ws-id="' +
-          esc(ws.id) +
-          '"' +
-          (isMember ? ' checked' : '') +
-          disabled +
-          '>' +
-          '<span class="ws-check__name">' +
-          esc(ws.name || ws.id) +
-          '</span>' +
-          pill +
-          '</label>'
-        );
-      })
-      .join('');
-
-    els.workspacesBody.innerHTML =
-      (all.length === 0
-        ? '<p class="stage-hint">No workspaces exist yet. Create one from the Workspaces page.</p>'
-        : '') +
-      '<form class="ws-list" id="workspacesForm">' +
-      rows +
-      '</form>' +
-      saveBar('workspaces');
-
-    wireDirty('workspaces', document.getElementById('workspacesForm'));
-    wireSaveBar('workspaces', function () {
-      saveWorkspaces(name, members);
-    });
-  }
-
-  function saveWorkspaces(name, members) {
-    var checks = els.workspacesBody.querySelectorAll('input[data-ws-id]');
-    var desired = [];
-    checks.forEach(function (c) {
-      if (c.checked) desired.push(c.getAttribute('data-ws-id'));
-    });
-    // Entry-agent memberships have disabled (unchecked-proof) boxes but must stay
-    // in the desired set so the server doesn't try to remove them.
-    members.forEach(function (m) {
-      if (m.entry_point && desired.indexOf(m.id) === -1) desired.push(m.id);
-    });
-
-    setSaving('workspaces', true);
-    fetch('/api/agents/' + encodeURIComponent(name) + '/workspaces', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ workspace_ids: desired })
-    })
-      .then(function (r) {
-        return r
-          .json()
-          .catch(function () {
-            return {};
-          })
-          .then(function (data) {
-            return { status: r.status, data: data };
-          });
-      })
-      .then(function (res) {
-        setSaving('workspaces', false);
-        if (res.status >= 200 && res.status < 300) {
-          state.dirty.workspaces = false;
-          // Reflect the reconciled membership everywhere.
-          var item = state.byName[name];
-          if (item) {
-            item.workspaces = res.data.workspaces || [];
-            item.workspace_count = res.data.workspace_count || 0;
-          }
-          refreshRosterMeta(name, state.detailCache[name] || {});
-          renderWorkspaces(name, item, state.detailCache[name]);
-          showStatus('workspaces', 'Saved.', 'ok');
-        } else if (
-          res.status === 409 &&
-          res.data &&
-          res.data.error === 'entry_agent_removal_blocked'
-        ) {
-          showStatus('workspaces', res.data.message || 'Cannot remove the Commander.', 'error');
-        } else {
-          showStatus(
-            'workspaces',
-            (res.data && res.data.message) || 'Save failed (' + res.status + ').',
-            'error'
-          );
-        }
-      })
-      .catch(function () {
-        setSaving('workspaces', false);
-        showStatus('workspaces', 'Network error — not saved.', 'error');
-      });
-  }
-
-  function fetchWorkspaces() {
-    if (state.allWorkspaces) return Promise.resolve(state.allWorkspaces);
-    return fetch('/api/workspaces')
-      .then(function (r) {
-        if (!r.ok) throw new Error('workspaces ' + r.status);
-        return r.json();
-      })
-      .then(function (data) {
-        var list = (data && data.workspaces) || [];
-        // Only assignable (non-trashed / non-missing) workspaces.
-        list = list.filter(function (w) {
-          var s = String(w.status || '').toLowerCase();
-          return s !== 'trashed' && s !== 'missing';
-        });
-        list.sort(function (a, b) {
-          return String(a.name || '').localeCompare(String(b.name || ''));
-        });
-        state.allWorkspaces = list;
-        return list;
-      });
-  }
-
   /* ---- create agent -------------------------------------------------------- */
 
   function openCreate() {
-    if (!guardUnsaved()) return;
     state.creating = true;
     els.stage.hidden = true;
     els.placeholder.hidden = true;
@@ -2820,7 +2434,6 @@
       })
       .then(function (res) {
         if (res.status >= 200 && res.status < 300) {
-          resetDirty();
           safeStorageSet('');
           reloadThenSelect(null);
         } else {
@@ -2833,81 +2446,29 @@
       });
   }
 
-  // One place where a fresh detail response is folded back into the collection
-  // (PRD FR96/FR16). Every mutation path — metadata save, avatar change,
-  // favorite, workspace assignment — goes through here so the raw record, its
-  // projection, the card, and the Inspector hero can never disagree. Unrelated
-  // collection state (filters, sort, checked set, focus) is untouched.
-  function applyDetailToCollection(name, detail) {
-    var item = state.byName[name];
-    if (!item || !detail) return;
-    if (detail.model) item.model = detail.model;
-    // Replace wholesale, not merge: both callers pass a just-forced /detail
-    // fetch, which is the complete authoritative record, not a partial patch.
-    // A shallow merge can only add/overwrite keys, never clear one — after
-    // removing an upload the server's response simply omits `uploaded`, and
-    // merging into the old object would leave the stale filename in place, so
-    // the card kept showing the just-deleted image (FR-66).
-    if (detail.metadata) item.metadata = detail.metadata;
-    // Appearance is always present in a detail response, so it is assigned
-    // unconditionally — a guarded assignment would be the same stale-source bug
-    // in a new place.
-    item.appearance = detail.appearance;
-    if (detail.role) item.role = detail.role;
-
-    // Rebuild the projection FIRST: everything below reads through viewFor(),
-    // and a stale projection is how an updated card ends up beside an
-    // unchanged hero.
-    state.viewByName[name] = buildViewModel(item);
-
-    var card = els.list.querySelector('.roster-card[data-name="' + cssEscape(name) + '"]');
-    if (card) {
-      var idx = Number(card.dataset.index);
-      var rebuilt = buildCard(item, isNaN(idx) ? 0 : idx);
-      if (card.classList.contains('is-focused')) rebuilt.classList.add('is-focused');
-      card.replaceWith(rebuilt);
-      highlightSelected();
-    }
-
-    if (state.selected === name) {
-      if (els.avatar) {
-        els.avatar.outerHTML = avatarMarkup(item, 'stage__avatar', 'stageAvatar', AVATAR_SIZE.hero);
-        els.avatar = document.getElementById('stageAvatar');
-      }
-      // The hero's character line is derived state too: without this an
-      // identity save updated the portrait while the label beside it still
-      // described the previous identity.
-      renderCharacterLabel(item);
-      // Keep the hero's repeated purpose/favorite (FR54) in step with a save
-      // made on the Overview form, not just the card.
-      var heroVm = viewFor(item);
-      if (els.favorite) els.favorite.hidden = !heroVm.favorite;
-      if (els.purpose) {
-        els.purpose.textContent = heroVm.hasDescription
-          ? heroVm.description
-          : 'No description yet.';
-        els.purpose.classList.toggle('is-missing', !heroVm.hasDescription);
-      }
-    }
-  }
-
-  // Retained name for the metadata-save path; the behaviour now lives in one
-  // shared invalidation.
-  function refreshRosterMeta(name, detail) {
-    applyDetailToCollection(name, detail);
-  }
+  // NOTE: applyDetailToCollection lived here — the single place a fresh detail
+  // response was folded back into the collection after an in-panel save. Every
+  // caller it had was an Inspector editing path (metadata save, appearance
+  // change, workspace assignment), and all of them are gone. The mutations this
+  // page still performs — favorite, the bulk operations, delete, create — each
+  // end in reloadThenSelect(), which re-fetches the roster wholesale, so there
+  // is no longer a partial-update path for it to serve.
 
   /* ---- tabs ---------------------------------------------------------------- */
 
   function requestTab(tabName, focus) {
-    var current = currentTab();
-    if (tabName !== current && state.dirty[current] && !guardUnsaved()) {
-      return; // stay on the dirty tab
-    }
+    // A tab switch used to be able to bounce off a dirty tab. Nothing here can
+    // be dirty now, so the switch always happens — and the whole `current`
+    // lookup goes with the guard rather than being left computed and unused.
     setActiveTab(tabName);
     if (tabName === 'prompt' && state.selected) renderPrompt(state.selected);
     if (tabName === 'toolbox' && state.selected) renderToolbox(state.selected);
     if (focus) document.getElementById('tab-' + tabName).focus();
+    // "Open full page" carries whichever tab is now open, so the deep link
+    // follows the reader rather than freezing at the tab they arrived on.
+    if (state.selected && els.stageFullPage) {
+      els.stageFullPage.href = detailHref(state.selected, tabName);
+    }
     syncUrl(state.selected, false);
   }
 
@@ -3026,120 +2587,6 @@
       e.preventDefault();
       requestTab(TAB_ORDER[TAB_ORDER.length - 1], true);
     }
-  }
-
-  /* ---- dirty tracking + save bar ------------------------------------------- */
-
-  function wireDirty(tab, form) {
-    if (!form) return;
-    form.addEventListener('input', function () {
-      markDirty(tab, true);
-    });
-    form.addEventListener('change', function () {
-      markDirty(tab, true);
-    });
-  }
-
-  function markDirty(tab, on) {
-    state.dirty[tab] = on;
-    var bar = document.getElementById('savebar-' + tab);
-    if (!bar) return;
-    bar.classList.toggle('is-dirty', on);
-    var save = bar.querySelector('[data-role="save"]');
-    if (save) save.disabled = !on;
-    var dot = bar.querySelector('.dirty-note');
-    if (dot) dot.textContent = on ? 'Unsaved changes' : '';
-  }
-
-  function wireSaveBar(tab, onSave) {
-    var bar = document.getElementById('savebar-' + tab);
-    if (!bar) return;
-    bar.querySelector('[data-role="save"]').addEventListener('click', onSave);
-    var revert = bar.querySelector('[data-role="revert"]');
-    if (revert)
-      revert.addEventListener('click', function () {
-        state.dirty[tab] = false;
-        if (tab === 'overview') renderOverview(state.selected, state.detailCache[state.selected]);
-        else if (tab === 'prompt') {
-          els.promptBody.dataset.loadedFor = '';
-          renderPrompt(state.selected);
-        } else if (tab === 'workspaces')
-          renderWorkspaces(
-            state.selected,
-            state.byName[state.selected],
-            state.detailCache[state.selected]
-          );
-      });
-    markDirty(tab, false);
-  }
-
-  function setSaving(tab, on) {
-    var bar = document.getElementById('savebar-' + tab);
-    if (!bar) return;
-    var save = bar.querySelector('[data-role="save"]');
-    if (save) {
-      save.disabled = on || !state.dirty[tab];
-      save.textContent = on ? 'Saving…' : 'Save';
-    }
-  }
-
-  function showStatus(tab, msg, kind) {
-    var bar = document.getElementById('savebar-' + tab);
-    if (!bar) return;
-    var status = bar.querySelector('.save-status');
-    if (!status) return;
-    status.textContent = msg;
-    status.className = 'save-status is-' + (kind || 'muted');
-    if (kind === 'ok' || kind === 'muted') {
-      window.clearTimeout(status._t);
-      status._t = window.setTimeout(function () {
-        status.textContent = '';
-      }, 2600);
-    }
-  }
-
-  function showBanner(tab, msg, actionLabel, onAction) {
-    var panel = document.getElementById('panel-' + tab);
-    clearBanner(tab);
-    var banner = document.createElement('div');
-    banner.className = 'conflict-banner';
-    banner.id = 'banner-' + tab;
-    banner.setAttribute('role', 'alert');
-    banner.innerHTML = '<span>' + esc(msg) + '</span>';
-    var btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'conflict-banner__action';
-    btn.textContent = actionLabel;
-    btn.addEventListener('click', function () {
-      clearBanner(tab);
-      onAction();
-    });
-    banner.appendChild(btn);
-    panel.insertBefore(banner, panel.firstChild);
-  }
-
-  function clearBanner(tab) {
-    var existing = document.getElementById('banner-' + tab);
-    if (existing) existing.remove();
-  }
-
-  /* ---- unsaved guard ------------------------------------------------------- */
-
-  function anyDirty() {
-    return !!(state.dirty.overview || state.dirty.prompt || state.dirty.workspaces);
-  }
-
-  function guardUnsaved() {
-    if (!anyDirty()) return true;
-    var ok = window.confirm('You have unsaved changes that will be lost. Continue?');
-    if (ok) resetDirty();
-    return ok;
-  }
-
-  function resetDirty() {
-    state.dirty.overview = false;
-    state.dirty.prompt = false;
-    state.dirty.workspaces = false;
   }
 
   /* ---- roster interaction -------------------------------------------------- */
@@ -3875,9 +3322,6 @@
       return;
     }
 
-    // If the focused agent is among those being deleted, honor the unsaved guard.
-    if (state.selected && names.indexOf(state.selected) !== -1 && !guardUnsaved()) return;
-
     btn.dataset.busy = '1';
     btn.disabled = true;
     var restoreLabel = btn.textContent;
@@ -4011,7 +3455,6 @@
   // is a generic "bulk edit" shell keyed by dlg.dataset.mode.
   function openBulkTags(mode) {
     if (state.checked.size === 0) return;
-    if (state.selected && state.checked.has(state.selected) && !guardUnsaved()) return;
     var dlg = els.bulkTagsDialog;
     dlg.dataset.mode = mode;
     var titles = { add: 'Add tags', remove: 'Remove tags', role: 'Set role' };
@@ -4179,7 +3622,6 @@
 
   function runBulkFavorite(favorite) {
     if (state.checked.size === 0) return;
-    if (state.selected && state.checked.has(state.selected) && !guardUnsaved()) return;
     var btns = [els.bulkFavorite, els.bulkUnfavorite];
     btns.forEach(function (b) {
       b.disabled = true;
@@ -4334,39 +3776,6 @@
   }
   // A read-only text input for derived values (e.g. Provider, set by the model).
   // Kept as an <input> so the form still submits its value, but not user-editable.
-  function readonlyInput(id, value, title) {
-    return (
-      '<input id="' +
-      id +
-      '" class="field__readonly" type="text" readonly tabindex="-1" value="' +
-      esc(value) +
-      '"' +
-      (title ? ' title="' + esc(title) + '"' : '') +
-      '>'
-    );
-  }
-  function numInput(id, value, min, max, step) {
-    return (
-      '<input id="' +
-      id +
-      '" type="number" value="' +
-      esc(value === '' ? '' : value) +
-      '"' +
-      (min !== '' ? ' min="' + min + '"' : '') +
-      (max ? ' max="' + max + '"' : '') +
-      (step ? ' step="' + step + '"' : '') +
-      '>'
-    );
-  }
-  function checkInput(id, on) {
-    return (
-      '<label class="check"><input id="' +
-      id +
-      '" type="checkbox"' +
-      (on ? ' checked' : '') +
-      '> Allowed</label>'
-    );
-  }
   function selectInput(id, options, value, labeler) {
     var opts = options
       .map(function (o) {
@@ -4387,103 +3796,6 @@
   function textareaInput(id, value, rows) {
     return '<textarea id="' + id + '" rows="' + rows + '">' + esc(value) + '</textarea>';
   }
-  // Grouped <select> of available models (optgroup per provider). Each option
-  // carries data-provider so the Provider field can follow the chosen model. A
-  // model that isn't in the catalog (custom, or a provider without a key) is
-  // preserved under a "Current" group so switching to a picker never drops it.
-  function modelSelectInput(id, currentValue, currentProvider, typeFilter) {
-    return (
-      '<select id="' +
-      id +
-      '">' +
-      modelOptionsHTML(currentValue, currentProvider, typeFilter) +
-      '</select>'
-    );
-  }
-  // Build the grouped <option>/<optgroup> markup for the model picker. Each option
-  // carries the data the overview surfaces: provider (for provider sync), pricing
-  // and good-for (the model note), and legacy/deprecation flags (the warning). A
-  // typeFilter scopes options to models whose catalog category matches, and any
-  // off-catalog current model is preserved under a "Current" group.
-  function modelOptionsHTML(currentValue, currentProvider, typeFilter) {
-    var providers = state.providers || [];
-    var groups = '';
-    var matched = false;
-    providers.forEach(function (p) {
-      if (!p || !Array.isArray(p.models) || p.models.length === 0) return;
-      var seen = {};
-      var opts = '';
-      p.models.forEach(function (m) {
-        if (!m || !m.value || seen[m.value]) return;
-        // Filter by agent type when the model declares a category.
-        if (typeFilter && m.type && m.type !== typeFilter) return;
-        seen[m.value] = true;
-        var sel = m.value === currentValue;
-        if (sel) matched = true;
-        opts += modelOptionHTML(m.value, m.provider || p.name, m, sel);
-      });
-      if (opts)
-        groups += '<optgroup label="' + esc(p.display_name || p.name) + '">' + opts + '</optgroup>';
-    });
-    // Preserve the agent's current model when the type filter excluded it (its real
-    // category differs) or it isn't in the catalog at all. Enrich it from the full
-    // catalog so its note/warning still show even outside the filtered groups.
-    if (currentValue && !matched) {
-      var meta = modelMeta(currentValue);
-      groups =
-        '<optgroup label="Current">' +
-        modelOptionHTML(
-          currentValue,
-          (meta && meta.provider) || currentProvider || '',
-          meta,
-          true
-        ) +
-        '</optgroup>' +
-        groups;
-    }
-    return groups;
-  }
-  // Render one <option> for the model picker from a catalog entry (meta may be null
-  // for a truly unknown model). Encodes the data the overview reads back.
-  function modelOptionHTML(value, provider, meta, selected) {
-    var pricing = meta && meta.pricing ? meta.pricing : '';
-    var goodFor =
-      meta && Array.isArray(meta.good_for) && meta.good_for.length ? meta.good_for[0] : '';
-    var legacy = !!(meta && meta.is_legacy);
-    var dep = meta && meta.deprecation_date ? meta.deprecation_date : '';
-    var label = (meta && meta.label) || value;
-    return (
-      '<option value="' +
-      esc(value) +
-      '"' +
-      ' data-provider="' +
-      esc(provider) +
-      '"' +
-      (pricing ? ' data-pricing="' + esc(pricing) + '"' : '') +
-      (goodFor ? ' data-goodfor="' + esc(goodFor) + '"' : '') +
-      (legacy ? ' data-legacy="1"' : '') +
-      (dep ? ' data-deprecation="' + esc(dep) + '"' : '') +
-      (selected ? ' selected' : '') +
-      '>' +
-      esc(label) +
-      (legacy ? ' ⚠' : '') +
-      (pricing ? ' · ' + esc(pricing) : '') +
-      '</option>'
-    );
-  }
-  function saveBar(tab) {
-    return (
-      '<div class="save-bar" id="savebar-' +
-      tab +
-      '">' +
-      '<span class="dirty-note"></span>' +
-      '<span class="save-status is-muted"></span>' +
-      '<button type="button" class="btn-ghost" data-role="revert">Revert</button>' +
-      '<button type="button" class="btn-primary" data-role="save" disabled>Save</button>' +
-      '</div>'
-    );
-  }
-
   /* ---- misc helpers -------------------------------------------------------- */
 
   function val(id) {
@@ -4575,119 +3887,6 @@
     return out;
   }
 
-  // The Inspector's Appearance section is the shared editor, given a
-  // persistence adapter. The roster contributes only what it alone knows: which
-  // characters are already taken, and how to refresh its own caches after a
-  // confirmed mutation (FR-26/FR-66).
-  //
-  // Built-in agents mount the same editor read-only, so they render through the
-  // same resolver but are never offered a control the server would reject
-  // (FR-44).
-  var appearanceEditor = null;
-
-  function mountAppearanceEditor(name, detail, appearance) {
-    var host = document.getElementById('ov-appearance-host');
-    if (!host || !window.AgentAppearanceEditor) return;
-    if (appearanceEditor && appearanceEditor.destroy) appearanceEditor.destroy();
-
-    var listItem = state.byName[name];
-    var vm = listItem ? viewFor(listItem) : null;
-    var entry = vm ? vm.roleEntry : null;
-
-    appearanceEditor = window.AgentAppearanceEditor.create({
-      host: host,
-      idPrefix: 'ov-appearance',
-      mode: 'edit',
-      readOnly: !isEditable(detail),
-      appearance: appearance,
-      defaultColor: generatedAvatarColor(name),
-      agent: {
-        name: name,
-        source: vm ? vm.source : 'user',
-        role: (detail && detail.role) || (vm ? vm.role : ''),
-        roleAccent: entry ? entry.accent_color : '',
-        roleEmblem: entry ? entry.emblem : '',
-        builtIn: vm ? vm.builtIn : false
-      },
-      takenCharacterIds: takenCharacterIds,
-      adapter: appearanceAdapter(name),
-      onChange: function () {
-        // The editor owns its own saving/error copy; the roster only has to
-        // keep the card, the hero, and the projection in step.
-        refreshAppearanceSurfaces(name);
-      }
-    });
-  }
-
-  // The adapter is the only place the roster's save semantics meet the editor.
-  //
-  // Every mutation goes through the same detail refresh the upload path already
-  // used, so an appearance change inherits the cache refresh and the projection
-  // rebuild rather than working around them with a second write path (FR-66).
-  function appearanceAdapter(name) {
-    var uploadURL = '/api/agents/' + encodeURIComponent(name) + '/appearance/upload';
-    return {
-      saveAppearance: function (patch) {
-        return appearanceRequest(name, '/api/agents?name=' + encodeURIComponent(name), {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ appearance: patch })
-        });
-      },
-      uploadImage: function (file) {
-        var form = new FormData();
-        form.append('image', file);
-        return appearanceRequest(name, uploadURL, { method: 'POST', body: form });
-      },
-      removeImage: function () {
-        return appearanceRequest(name, uploadURL, { method: 'DELETE' });
-      }
-    };
-  }
-
-  // Resolves with the canonical appearance from the response, or rejects with
-  // the server's own message. The editor only marks a change saved on resolve,
-  // so a rejection here is what restores the last confirmed state (FR-41).
-  function appearanceRequest(name, url, init) {
-    return fetch(url, init)
-      .then(function (response) {
-        return response
-          .json()
-          .catch(function () {
-            return {};
-          })
-          .then(function (data) {
-            if (response.status >= 200 && response.status < 300) return data.appearance;
-            throw new Error(data.message || data.error || 'That change could not be saved.');
-          });
-      })
-      .then(function (appearance) {
-        // A forced detail fetch is what keeps the card, the projection, and the
-        // hero in step with the mutation — the same refresh the upload path
-        // already used (FR-66).
-        return fetchDetail(name, true)
-          .then(function (detail) {
-            applyDetailToCollection(name, detail);
-            return detail.appearance || appearance;
-          })
-          .catch(function () {
-            // The mutation landed; only the refresh failed. Returning the
-            // response's own appearance keeps the editor honest about what the
-            // server actually confirmed.
-            return appearance;
-          });
-      });
-  }
-
-  function refreshAppearanceSurfaces(name) {
-    if (state.selected !== name) return;
-    var listItem = state.byName[name];
-    if (!listItem || !els.avatar) return;
-    els.avatar.outerHTML = avatarMarkup(listItem, 'stage__avatar', 'stageAvatar', AVATAR_SIZE.hero);
-    els.avatar = document.getElementById('stageAvatar');
-    renderCharacterLabel(listItem);
-  }
-
   // The hero's character line. The agent's own name stays primary above it;
   // this is secondary descriptive copy, never the identity itself (FR-93).
   //
@@ -4714,17 +3913,6 @@
 
   // Seed the colour control with the colour the agent already shows, so opening
   // the field does not silently propose a different one (FR-31).
-  function generatedAvatarColor(name) {
-    var item = state.byName[name];
-    var vm = item ? viewFor(item) : null;
-    return window.AgentAvatar.signature({
-      name: name,
-      source: vm ? vm.source : 'user',
-      role: vm ? vm.role : '',
-      builtIn: vm ? vm.builtIn : false
-    }).base;
-  }
-
   // "Permanent residency" agents: the built-in CLI agents (Claude Code, Codex,
   // Gemini CLI) and the Workspace Manager system assistant. They're always
   // available and the server won't delete them.

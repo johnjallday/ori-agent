@@ -252,7 +252,14 @@
                   <!-- Repeats the card's purpose so it stays visible on every
                        Inspector tab, not only Overview (PRD FR54). -->
                   <p class="stage__purpose" id="stagePurpose"></p>
+                  <!-- Exactly three actions (FR-43). The Inspector reads; the
+                       full page is where agent fields are saved. -->
                   <div class="stage__actions">
+                    <!-- Not "stageFavorite": that id is already the hero's
+                         favorite STAR, a few lines up. Two elements sharing an
+                         id would have handed getElementById whichever came
+                         first and silently wired this button to the star. -->
+                    <button type="button" id="stageFavoriteToggle" class="stage__action">★ Favorite</button>
                     <a id="stageFullPage" class="stage__fullpage" href="#" title="Open the full agent detail page">Open full page ↗</a>
                     <button type="button" id="stageDelete" class="stage__delete" hidden title="Delete this agent">Delete</button>
                   </div>

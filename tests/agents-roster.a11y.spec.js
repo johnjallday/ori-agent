@@ -194,10 +194,15 @@ for (const theme of ['light', 'dark']) {
     }
   });
 
-  // The Appearance editor is the newest interactive surface in the Inspector,
-  // and the one most able to regress into something a keyboard cannot drive:
-  // three choices, a colour swatch, a file input, and a dialog-opening button
-  // (unified-agent-appearance FR-96 through FR-100).
+  // The Appearance editor is the interactive surface most able to regress into
+  // something a keyboard cannot drive: three choices, a colour swatch, a file
+  // input, and a dialog-opening button (unified-agent-appearance FR-96 through
+  // FR-100).
+  //
+  // It moved off the roster Inspector — which is now a reader — onto the agent
+  // detail page, the editor of record (agents-page-ux FR-44). Same shared
+  // editor, same assertions, different host: the ids carry that page's
+  // `profileAppearance` prefix and it opens inside the Edit Profile modal.
   test(`appearance editor accessibility (${theme})`, async ({ page, request }) => {
     const name = `PW A11y Appearance ${theme} ${Date.now()}`;
     const create = await request.post(`${baseUrl}/api/agents`, {
@@ -219,56 +224,60 @@ for (const theme of ['light', 'dark']) {
         })
       );
       await page.setViewportSize({ width: 1440, height: 950 });
-      await page.goto(`${baseUrl}/agents?agent=${encodeURIComponent(name)}`, {
+      await page.goto(`${baseUrl}/agents/${encodeURIComponent(name)}`, {
         waitUntil: 'domcontentloaded'
       });
-      await expect(page.locator('#ov-appearance-root')).toBeVisible();
+      await page.locator('#editProfileButton').click();
+      await expect(page.locator('#profileAppearance-root')).toBeVisible();
 
       // The three choices are one programmatically-labelled group, not three
       // loose radios (FR-96).
-      const group = page.locator('#ov-appearance-root [role="radiogroup"]');
+      const group = page.locator('#profileAppearance-root [role="radiogroup"]');
       await expect(group).toHaveAttribute('aria-label', 'Appearance source');
       await expect(group.locator('input[type="radio"]')).toHaveCount(3);
-      await expect(page.locator('#ov-appearance-root legend')).toHaveText('Appearance');
+      await expect(page.locator('#profileAppearance-root legend')).toHaveText('Appearance');
 
       // Unavailable sources say why in text, so the state does not depend on
       // the disabled attribute or a colour alone (FR-100).
-      await expect(page.locator('#ov-appearance-root')).toContainText(
+      await expect(page.locator('#profileAppearance-root')).toContainText(
         'Choose a character to use this source.'
       );
-      await expect(page.locator('#ov-appearance-root')).toContainText(
+      await expect(page.locator('#profileAppearance-root')).toContainText(
         'Upload an image to use this source.'
       );
 
       // Every control is reachable and operable from the keyboard (FR-97).
-      await page.locator('#ov-appearance-mode-generated').focus();
-      await expect(page.locator('#ov-appearance-mode-generated')).toBeFocused();
-      for (const id of ['ov-appearance-color', 'ov-appearance-character-choose']) {
+      await page.locator('#profileAppearance-mode-generated').focus();
+      await expect(page.locator('#profileAppearance-mode-generated')).toBeFocused();
+      for (const id of ['profileAppearance-color', 'profileAppearance-character-choose']) {
         await page.locator(`#${id}`).focus();
         await expect(page.locator(`#${id}`)).toBeFocused();
       }
 
       // The preview is a standalone image, so it names its source rather than
       // being decorative like an avatar sitting beside a name (FR-99).
-      const preview = page.locator('#ov-appearance-root [role="img"]');
+      const preview = page.locator('#profileAppearance-root [role="img"]');
       await expect(preview).toHaveAttribute('aria-label', /^Preview: /);
       // The portrait inside it stays decorative, so the source is announced
       // once rather than twice.
       await expect(preview.locator('.agent-avatar')).toHaveAttribute('aria-hidden', 'true');
 
       // Status is a live region, so a save or a failure is announced.
-      await expect(page.locator('#ov-appearance-status')).toHaveAttribute('role', 'status');
-      await expect(page.locator('#ov-appearance-status')).toHaveAttribute('aria-live', 'polite');
+      await expect(page.locator('#profileAppearance-status')).toHaveAttribute('role', 'status');
+      await expect(page.locator('#profileAppearance-status')).toHaveAttribute(
+        'aria-live',
+        'polite'
+      );
 
       // axe over the editor itself, which includes colour-contrast for the
       // cards, the selected state, and the unavailable copy (FR-101).
       await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
-      const results = await runAxe(page, '#ov-appearance-root');
+      const results = await runAxe(page, '#profileAppearance-root');
       expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
 
       // Opening the picker from the editor and cancelling returns focus to the
       // control that opened it (FR-98).
-      await page.locator('#ov-appearance-character-choose').click();
+      await page.locator('#profileAppearance-character-choose').click();
       await expect(page.locator('#charPicker')).toBeVisible();
       const pickerResults = await runAxe(page, '#charPicker');
       expect(pickerResults.violations, JSON.stringify(pickerResults.violations, null, 2)).toEqual(
@@ -276,7 +285,7 @@ for (const theme of ['light', 'dark']) {
       );
       await page.keyboard.press('Escape');
       await expect(page.locator('#charPicker')).toBeHidden();
-      await expect(page.locator('#ov-appearance-character-choose')).toBeFocused();
+      await expect(page.locator('#profileAppearance-character-choose')).toBeFocused();
     } finally {
       await request
         .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
