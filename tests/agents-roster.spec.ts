@@ -13,6 +13,26 @@ test.beforeEach(async ({ page }) => {
   await installLocalCdn(page);
 });
 
+// The role/workspace/source/assignment/tag selects live inside the Filters
+// panel, which is a closed <dialog> until asked for. Reading a value off one
+// works while it is closed; acting on one does not, so every test that SETS a
+// filter opens the panel first.
+async function openFilters(page) {
+  const panel = page.locator('#filtersPanel');
+  if (!(await panel.evaluate((d: HTMLDialogElement) => d.open))) {
+    await page.locator('#filtersButton').click();
+  }
+  await expect(panel).toBeVisible();
+}
+
+async function closeFilters(page) {
+  const panel = page.locator('#filtersPanel');
+  if (await panel.evaluate((d: HTMLDialogElement) => d.open)) {
+    await page.locator('#filtersDone').click();
+  }
+  await expect(panel).toBeHidden();
+}
+
 test.describe('Agents roster', () => {
   test('browse, select, edit, assign workspace, and delete', async ({ page, request }) => {
     const name = `PW Roster ${Date.now()}`;
@@ -384,7 +404,9 @@ test.describe('Agents roster', () => {
 
       // Check both, then apply a tag filter that hides one → 1 hidden checked.
       await page.locator('#rosterSelectAll').click();
+      await openFilters(page);
       await page.locator('#filterTag').selectOption(`${prefix}tag`);
+      await closeFilters(page);
       await expect(page.locator('.roster-card')).toHaveCount(1);
       await expect(page.locator(`.roster-card[data-name="${tagged}"]`)).toBeVisible();
       await expect(page.locator('#bulkCount')).toHaveText(/1 hidden by filters/);
@@ -400,7 +422,9 @@ test.describe('Agents roster', () => {
       await expect(page.locator('#bulkBar')).toBeHidden();
 
       // Clear filters restores both.
+      await openFilters(page);
       await page.locator('#clearFilters').click();
+      await closeFilters(page);
       await expect(page.locator('.roster-card')).toHaveCount(2);
     } finally {
       await request
@@ -1701,12 +1725,100 @@ test.describe('Agents collection controls', () => {
     // Setting the same thing through the select lights the chip (one model).
     await chip('all').click();
     await expect(page.locator('#filterSource')).toHaveValue('');
+    await openFilters(page);
     await page.locator('#filterSource').selectOption('cli');
+    await closeFilters(page);
     await expect(chip('builtin')).toHaveAttribute('aria-pressed', 'true');
 
     await chip('all').click();
     await expect(chip('all')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.locator('.roster-card').first()).toBeVisible();
+  });
+
+  test('the toolbar is four controls and the rest live behind Filters', async ({ page }) => {
+    await openAgents(page);
+
+    // Exactly four things on the always-visible row (FR-12).
+    const toolbar = page.locator('.collection-toolbar');
+    await expect(toolbar.locator('> *')).toHaveCount(4);
+    await expect(toolbar.locator('.collection-search')).toBeVisible();
+    await expect(toolbar.locator('.quick-filters')).toBeVisible();
+    await expect(toolbar.locator('.view-cluster')).toBeVisible();
+    await expect(toolbar.locator('#filtersButton')).toBeVisible();
+
+    // Needs attention is gone as a chip; it is the health tile (FR-19).
+    await expect(page.locator('[data-quick="attention"]')).toHaveCount(0);
+    await expect(page.locator('[data-quick="favorite"]')).toBeVisible();
+    await expect(page.locator('[data-quick="builtin"]')).toBeVisible();
+
+    // Sort is a view preference and rides with the view toggle (FR-17).
+    await expect(page.locator('.view-cluster #rosterSort')).toBeAttached();
+
+    // The header no longer explains itself in prose (FR-20).
+    await expect(page.locator('.collection-head__copy')).not.toContainText('Open a card');
+  });
+
+  test('the Filters badge counts active filters and is absent at zero', async ({ page }) => {
+    await openAgents(page);
+    const badge = page.locator('#filtersBadge');
+    const button = page.locator('#filtersButton');
+
+    // Absent, not a zero (FR-13).
+    await expect(badge).toBeHidden();
+
+    await openFilters(page);
+    await page.locator('#filterSource').selectOption('cli');
+    await expect(badge).toHaveText('1');
+    await page.locator('#filterAssignment').selectOption('library');
+    await expect(badge).toHaveText('2');
+    await expect(button).toHaveAttribute('aria-label', 'Filters, 2 active');
+
+    // Sort is not a filter and must not count (FR-17).
+    await closeFilters(page);
+    await page.locator('#rosterSort').selectOption('name-desc');
+    await expect(badge).toHaveText('2');
+
+    // Favorite is a quick chip with its own pressed state, so it is not
+    // double-reported as a hidden filter.
+    await page.locator('[data-quick="favorite"]').click();
+    await expect(badge).toHaveText('2');
+
+    await openFilters(page);
+    await page.locator('#clearFilters').click();
+    await expect(badge).toBeHidden();
+  });
+
+  test('the Filters panel traps focus, closes on Escape, and returns focus', async ({ page }) => {
+    await openAgents(page);
+    const button = page.locator('#filtersButton');
+    const panel = page.locator('#filtersPanel');
+
+    await expect(button).toHaveAttribute('aria-expanded', 'false');
+    await button.click();
+    await expect(panel).toBeVisible();
+    await expect(button).toHaveAttribute('aria-expanded', 'true');
+
+    // showModal() puts focus inside the panel rather than leaving it behind on
+    // the page, which is what makes the trap real (FR-15).
+    expect(await panel.evaluate(d => d.contains(document.activeElement))).toBe(true);
+
+    await page.keyboard.press('Escape');
+    await expect(panel).toBeHidden();
+    await expect(button).toHaveAttribute('aria-expanded', 'false');
+    await expect(button).toBeFocused();
+
+    // A click on the backdrop dismisses it the same way, and lands on the same
+    // teardown path rather than leaving aria-expanded stale.
+    await button.click();
+    await expect(panel).toBeVisible();
+    await panel.evaluate((d: HTMLDialogElement) => {
+      const r = d.getBoundingClientRect();
+      d.dispatchEvent(
+        new MouseEvent('click', { bubbles: true, clientX: r.left - 40, clientY: r.top - 40 })
+      );
+    });
+    await expect(panel).toBeHidden();
+    await expect(button).toHaveAttribute('aria-expanded', 'false');
   });
 
   test('the workspace picker filters by real membership and survives a reload', async ({
@@ -1737,7 +1849,9 @@ test.describe('Agents collection controls', () => {
       // The picker offers the real workspace by name.
       await expect(page.locator(`#filterWorkspace option[value="${wsId}"]`)).toHaveText(wsName);
 
+      await openFilters(page);
       await page.locator('#filterWorkspace').selectOption(wsId);
+      await closeFilters(page);
       const shown = await names(page);
       expect(shown).toContain(inside);
       expect(shown).not.toContain(outside);

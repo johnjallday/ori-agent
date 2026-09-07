@@ -29,9 +29,13 @@
           <div class="collection-head__intro">
             <p class="collection-head__eyebrow">Agent library</p>
             <h1 id="roster-title" class="collection-head__title">Your agent collection</h1>
+            <!-- The instructional sentence that used to close this paragraph
+                 ("Open a card to inspect it; check a card to manage several at
+                 once") is gone: a first-visit coachmark teaches selection the
+                 way the map does, instead of the page explaining itself in
+                 prose to every visitor forever (FR-20/FR-78). -->
             <p class="collection-head__copy">
               Reusable identities with their own roles, experience, and workspaces.
-              Open a card to inspect it; check a card to manage several at once.
             </p>
           </div>
           <div class="collection-head__actions">
@@ -47,8 +51,11 @@
         <div class="collection-shell" id="collectionShell">
           <section class="collection-pane" aria-label="Agent collection">
 
-            <!-- Collection controls: search, discovery filters, and sorting. The
-                 Gallery/List switch and quick-collection chips mount here too. -->
+            <!-- One quiet row of four things (FR-12): the search field, the
+                 quick-collection chips, the view cluster, and Filters. The five
+                 discovery selects moved into the Filters panel below; sort moved
+                 onto the view cluster, because sort is a view preference and not
+                 a filter (FR-17). -->
             <div class="collection-toolbar">
               <label class="collection-search" for="rosterSearch">
                 <span class="visually-hidden">Search agents</span>
@@ -57,58 +64,35 @@
               </label>
 
               <!-- Quick collections are shortcuts over the same canonical filter
-                   model as the selects below, so their pressed state stays
-                   truthful however the filters were set. -->
+                   model as the panel's selects, so their pressed state stays
+                   truthful however the filters were set. "Needs attention" is
+                   gone from here: it is the health tile above, and having it in
+                   both places was one of three ways to reach one filter
+                   (FR-19). -->
               <div class="quick-filters" role="group" aria-label="Quick collections">
                 <button type="button" class="collection-chip" data-quick="all" aria-pressed="true">All</button>
                 <button type="button" class="collection-chip" id="filterFavorite" data-quick="favorite" aria-pressed="false">★ Favorites</button>
-                <button type="button" class="collection-chip" data-quick="attention" aria-pressed="false">Needs attention</button>
                 <button type="button" class="collection-chip" data-quick="builtin" aria-pressed="false">Built-in</button>
               </div>
 
-              <div class="view-toggle" role="group" aria-label="Collection view">
-                <button type="button" class="view-button" id="viewGallery" data-view="gallery"
-                  aria-pressed="true" title="Gallery view">
-                  <i class="bi bi-grid-3x3-gap-fill" aria-hidden="true"></i>
-                  <span class="visually-hidden">Gallery view</span>
-                </button>
-                <button type="button" class="view-button" id="viewList" data-view="list"
-                  aria-pressed="false" title="List view">
-                  <i class="bi bi-list-ul" aria-hidden="true"></i>
-                  <span class="visually-hidden">List view</span>
-                </button>
-              </div>
-
-              <div class="collection-selects" role="group" aria-label="Filter and sort agents">
-                <label class="collection-select">
-                  <span class="visually-hidden">Filter by role</span>
-                  <select id="filterRole" aria-label="Filter by role"><option value="">All roles</option></select>
-                </label>
-                <label class="collection-select">
-                  <span class="visually-hidden">Filter by workspace</span>
-                  <select id="filterWorkspace" aria-label="Filter by workspace"><option value="">All workspaces</option></select>
-                </label>
-                <label class="collection-select">
-                  <span class="visually-hidden">Filter by source</span>
-                  <select id="filterSource" aria-label="Filter by source">
-                    <option value="">All sources</option>
-                    <option value="user">User</option>
-                    <option value="cli">Built-in</option>
-                  </select>
-                </label>
-                <label class="collection-select">
-                  <span class="visually-hidden">Filter by assignment</span>
-                  <select id="filterAssignment" aria-label="Filter by assignment">
-                    <option value="">Library &amp; assigned</option>
-                    <option value="library">Library only</option>
-                    <option value="assigned">Assigned only</option>
-                  </select>
-                </label>
-                <label class="collection-select">
-                  <span class="visually-hidden">Filter by tag</span>
-                  <select id="filterTag" aria-label="Filter by tag"><option value="">All tags</option></select>
-                </label>
-                <label class="collection-select">
+              <div class="view-cluster">
+                <div class="view-toggle" role="group" aria-label="Collection view">
+                  <button type="button" class="view-button" id="viewGallery" data-view="gallery"
+                    aria-pressed="true" title="Gallery view">
+                    <i class="bi bi-grid-3x3-gap-fill" aria-hidden="true"></i>
+                    <span class="visually-hidden">Gallery view</span>
+                  </button>
+                  <button type="button" class="view-button" id="viewList" data-view="list"
+                    aria-pressed="false" title="List view">
+                    <i class="bi bi-list-ul" aria-hidden="true"></i>
+                    <span class="visually-hidden">List view</span>
+                  </button>
+                </div>
+                <!-- A native select IS a menu: it opens one on click, is fully
+                     keyboard operable, and needs no bespoke popup code. Keeping
+                     the element (and its id) also means onSort, syncUrl, and
+                     applyUrlToState carry on unchanged. -->
+                <label class="view-sort">
                   <span class="visually-hidden">Sort agents</span>
                   <select id="rosterSort" aria-label="Sort agents">
                     <option value="name-asc">Name A–Z</option>
@@ -118,9 +102,66 @@
                     <option value="active-desc">Recently active</option>
                   </select>
                 </label>
-                <button type="button" id="clearFilters" class="roster-linkbtn" hidden>Clear filters</button>
               </div>
+
+              <button type="button" class="collection-filters-btn" id="filtersButton"
+                aria-haspopup="dialog" aria-expanded="false" aria-controls="filtersPanel">
+                <i class="bi bi-sliders" aria-hidden="true"></i>
+                <span>Filters</span>
+                <!-- Absent at zero, never a "0" (FR-13). -->
+                <span class="collection-filters-btn__badge" id="filtersBadge" hidden></span>
+              </button>
             </div>
+
+            <!-- Filters panel. A native <dialog> opened with showModal(), the
+                 same primitive the bulk dialogs on this page already use, so the
+                 focus trap and Escape-to-close are the platform's rather than a
+                 second hand-rolled implementation (FR-15). CSS presents it as a
+                 popover on desktop and tablet and as a bottom sheet on phone
+                 (FR-16). -->
+            <dialog class="filters-panel" id="filtersPanel" aria-labelledby="filtersPanelTitle">
+              <div class="filters-panel__head">
+                <h2 class="filters-panel__title" id="filtersPanelTitle">Filters</h2>
+                <button type="button" class="filters-panel__close" id="filtersClose"
+                  aria-label="Close filters">
+                  <span aria-hidden="true">×</span>
+                </button>
+              </div>
+              <div class="collection-selects" role="group" aria-label="Filter agents">
+                <label class="collection-select">
+                  <span class="collection-select__label">Role</span>
+                  <select id="filterRole" aria-label="Filter by role"><option value="">All roles</option></select>
+                </label>
+                <label class="collection-select">
+                  <span class="collection-select__label">Workspace</span>
+                  <select id="filterWorkspace" aria-label="Filter by workspace"><option value="">All workspaces</option></select>
+                </label>
+                <label class="collection-select">
+                  <span class="collection-select__label">Source</span>
+                  <select id="filterSource" aria-label="Filter by source">
+                    <option value="">All sources</option>
+                    <option value="user">User</option>
+                    <option value="cli">Built-in</option>
+                  </select>
+                </label>
+                <label class="collection-select">
+                  <span class="collection-select__label">Assignment</span>
+                  <select id="filterAssignment" aria-label="Filter by assignment">
+                    <option value="">Library &amp; assigned</option>
+                    <option value="library">Library only</option>
+                    <option value="assigned">Assigned only</option>
+                  </select>
+                </label>
+                <label class="collection-select">
+                  <span class="collection-select__label">Tag</span>
+                  <select id="filterTag" aria-label="Filter by tag"><option value="">All tags</option></select>
+                </label>
+              </div>
+              <div class="filters-panel__foot">
+                <button type="button" id="clearFilters" class="roster-linkbtn" hidden>Clear filters</button>
+                <button type="button" class="btn-primary filters-panel__done" id="filtersDone">Done</button>
+              </div>
+            </dialog>
 
             <div class="collection-scroll">
               <div class="collection-meta">

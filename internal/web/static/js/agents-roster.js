@@ -168,6 +168,11 @@
       quickFilters: document.querySelector('.quick-filters'),
       viewToggle: document.querySelector('.view-toggle'),
       clearFilters: document.getElementById('clearFilters'),
+      filtersButton: document.getElementById('filtersButton'),
+      filtersPanel: document.getElementById('filtersPanel'),
+      filtersBadge: document.getElementById('filtersBadge'),
+      filtersClose: document.getElementById('filtersClose'),
+      filtersDone: document.getElementById('filtersDone'),
       emptyMsg: document.getElementById('rosterEmptyMsg'),
       emptyClearFilters: document.getElementById('rosterEmptyClearFilters'),
       emptyCreate: document.getElementById('rosterEmptyCreate')
@@ -247,6 +252,23 @@
     els.quickFilters.addEventListener('click', onQuickFilterClick);
     els.viewToggle.addEventListener('click', onViewToggleClick);
 
+    els.filtersButton.addEventListener('click', openFilters);
+    els.filtersClose.addEventListener('click', closeFilters);
+    els.filtersDone.addEventListener('click', closeFilters);
+    // Native <dialog> fires 'cancel' on Escape. Preventing the default and
+    // routing through closeFilters() keeps the aria-expanded flag and the focus
+    // return on one path, whichever way the panel was dismissed (FR-15).
+    els.filtersPanel.addEventListener('cancel', function (e) {
+      e.preventDefault();
+      closeFilters();
+    });
+    // Clicking the backdrop of a modal dialog targets the dialog element itself,
+    // never its contents, which is what tells a backdrop click from a click on
+    // any control inside the panel.
+    els.filtersPanel.addEventListener('click', function (e) {
+      if (e.target === els.filtersPanel) closeFilters();
+    });
+
     els.inspectorClose.addEventListener('click', function () {
       closeInspector({ restoreFocus: true });
     });
@@ -267,6 +289,12 @@
     // Crossing the breakpoint changes which presentation is correct; the open
     // agent and every other piece of state stay exactly as they were.
     window.addEventListener('resize', reflectInspectorPresentation);
+    // The Filters panel is anchored to a button whose position moves with the
+    // toolbar, so an open panel has to be re-pinned on resize — including the
+    // crossing between popover and bottom sheet.
+    window.addEventListener('resize', function () {
+      if (els.filtersPanel && els.filtersPanel.open) positionFilters();
+    });
     els.clearFilters.addEventListener('click', clearFilters);
     els.emptyClearFilters.addEventListener('click', clearFilters);
     els.emptyCreate.addEventListener('click', openCreate);
@@ -706,13 +734,94 @@
     );
   }
 
+  // The Filters button's badge counts only the filters that live inside the
+  // panel. Health and Favorite are deliberately excluded: they show their own
+  // pressed state on the summary tiles and the quick chips, so counting them
+  // here would report a hidden filter that is in fact plainly visible. Sort is
+  // excluded because it is a view preference, not a filter (FR-13/FR-17).
+  function panelFilterCount() {
+    var f = state.filters;
+    return [f.role, f.source, f.assignment, f.tag, f.workspace].filter(function (v) {
+      return !!v;
+    }).length;
+  }
+
+  function reflectFilterBadge() {
+    if (!els.filtersBadge) return;
+    var n = panelFilterCount();
+    // Absent at zero, not a zero (FR-13).
+    els.filtersBadge.hidden = n === 0;
+    els.filtersBadge.textContent = n === 0 ? '' : String(n);
+    if (els.filtersButton) {
+      els.filtersButton.classList.toggle('is-active', n > 0);
+      els.filtersButton.setAttribute(
+        'aria-label',
+        n === 0 ? 'Filters' : 'Filters, ' + n + ' active'
+      );
+    }
+  }
+
   function onFilterChange() {
     els.clearFilters.hidden = !filtersActive();
     // Quick-chip pressed state is derived, so it has to be recomputed on every
     // filter change however it was made — including from the selects (FR26).
     reflectQuickFilters();
+    reflectFilterBadge();
     applyFilterSort();
     syncUrl(state.selected, false);
+  }
+
+  /* ---- filters panel ------------------------------------------------------- */
+
+  // showModal() gives the focus trap and Escape handling for free — the same
+  // primitive, and therefore the same behaviour, as this page's bulk dialogs
+  // (FR-15). Everything below is only the part the platform does not do:
+  // the truthful aria-expanded flag and returning focus to the invoking button.
+  // Below this width the panel is a bottom sheet and takes its geometry entirely
+  // from CSS. Kept in sync with the 640px breakpoint in agents-roster.css.
+  var FILTERS_SHEET_MAX_WIDTH = 640;
+
+  function openFilters() {
+    if (!els.filtersPanel || els.filtersPanel.open) return;
+    els.filtersPanel.showModal();
+    els.filtersButton.setAttribute('aria-expanded', 'true');
+    positionFilters();
+  }
+
+  // A modal <dialog> lives in the top layer, so it is positioned against the
+  // viewport and cannot be anchored to the button by CSS alone. Measure the
+  // button and pin the panel just under it, clamped so it can never hang off
+  // either edge. At phone width the inline values are removed so the CSS bottom
+  // sheet takes over untouched (FR-16).
+  function positionFilters() {
+    var panel = els.filtersPanel;
+    if (!panel) return;
+    if (window.innerWidth <= FILTERS_SHEET_MAX_WIDTH) {
+      panel.style.top = '';
+      panel.style.left = '';
+      panel.style.right = '';
+      return;
+    }
+    var anchor = els.filtersButton.getBoundingClientRect();
+    var margin = 12;
+    var width = panel.offsetWidth;
+    // Right-aligned to the button, then clamped to the viewport.
+    var left = Math.min(
+      Math.max(margin, anchor.right - width),
+      Math.max(margin, window.innerWidth - width - margin)
+    );
+    panel.style.left = Math.round(left) + 'px';
+    panel.style.right = 'auto';
+    panel.style.top = Math.round(anchor.bottom + 8) + 'px';
+  }
+
+  function closeFilters() {
+    if (!els.filtersPanel || !els.filtersPanel.open) return;
+    els.filtersPanel.close();
+    els.filtersButton.setAttribute('aria-expanded', 'false');
+    // Explicit rather than relying on the dialog's own focus restoration, which
+    // is not consistent across engines.
+    els.filtersButton.focus();
   }
 
   function clearFilters() {
@@ -743,10 +852,10 @@
       case 'favorite':
         f.favorite = !f.favorite;
         break;
-      case 'attention':
-        if (f.health.has('needs')) f.health.delete('needs');
-        else f.health.add('needs');
-        break;
+      // There is deliberately no 'attention' case: that chip was removed as a
+      // duplicate of the Needs attention health tile, which owns the same
+      // filter (FR-19). reflectQuickFilters still reads health, so setting it
+      // from the tile correctly un-presses "All".
       case 'builtin':
         f.source = f.source === 'cli' ? '' : 'cli';
         break;
@@ -4154,6 +4263,7 @@
     if (els.filterTag) els.filterTag.value = f.tag;
     if (els.filterWorkspace) els.filterWorkspace.value = f.workspace;
     reflectQuickFilters();
+    reflectFilterBadge();
     if (els.clearFilters) els.clearFilters.hidden = !filtersActive();
   }
 

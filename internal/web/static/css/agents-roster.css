@@ -276,22 +276,46 @@ body.agents-roster-page {
   outline-offset: 1px;
 }
 
+/* Inside the Filters panel the selects are a labelled stack, not a wrapping
+   row: the panel has vertical room the toolbar row never did, and a visible
+   label per control beats five unlabelled dropdowns. */
 .collection-selects {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 12px;
   min-width: 0;
 }
 
 .collection-select {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
   margin: 0;
   min-width: 0;
 }
 
+/* populateWorkspaceFilter() hides the Workspace select when no workspace
+   exists, with the hidden attribute. This rule used to have no display
+   property, so the attribute worked on its own; adding display:flex above
+   out-specifies the UA default and would have made it inert. Bootstrap's
+   reboot happens to carry [hidden]{display:none!important} and was covering
+   for it — state the dependency here rather than inherit it by luck. */
+.collection-select[hidden] {
+  display: none;
+}
+
+.collection-select__label {
+  color: var(--card-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .collection-select select {
+  width: 100%;
   height: 38px;
-  max-width: 170px;
+  min-width: 0;
   padding: 0 8px;
   border: 1px solid var(--card-line);
   border-radius: 10px;
@@ -340,6 +364,40 @@ body.agents-roster-page {
   min-width: 0;
 }
 
+/* Sort rides with the view toggle rather than in the filter row, because it is
+   a view preference and not a filter (FR-17). Together they are one control in
+   the toolbar's budget of four. */
+.view-cluster {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.view-sort {
+  margin: 0;
+  min-width: 0;
+}
+
+.view-sort select {
+  height: 38px;
+  max-width: 170px;
+  min-width: 0;
+  padding: 0 8px;
+  border: 1px solid var(--card-line);
+  border-radius: 10px;
+  background: var(--card-soft);
+  color: var(--text-primary, #111827);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.view-sort select:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 1px;
+}
+
 .view-toggle {
   display: flex;
   flex: 0 0 auto;
@@ -377,6 +435,135 @@ body.agents-roster-page {
 .view-button:focus-visible {
   outline: 2px solid var(--primary-color, #4f46e5);
   outline-offset: 1px;
+}
+
+/* ---- Filters button + panel ----------------------------------------------- */
+
+.collection-filters-btn {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 13px;
+  border: 1px solid var(--card-line);
+  border-radius: 10px;
+  background: var(--card-surface);
+  color: var(--text-primary, #111827);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.collection-filters-btn:hover {
+  border-color: var(--primary-color, #4f46e5);
+}
+
+.collection-filters-btn:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 1px;
+}
+
+/* Active filters are carried by the badge's presence and the button's weight,
+   not by colour alone (FR-88). */
+.collection-filters-btn.is-active {
+  border-color: var(--primary-color, #4f46e5);
+  box-shadow: inset 0 0 0 1px var(--primary-color, #4f46e5);
+  font-weight: 600;
+}
+
+.collection-filters-btn__badge {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--primary-color, #4f46e5);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* The panel is a modal <dialog>, so it lives in the top layer and is positioned
+   against the viewport rather than against the toolbar. On desktop and tablet
+   it reads as a popover card pinned under the Filters button — positionFilters()
+   measures the button and writes top/left, because a top-layer element cannot
+   be anchored by CSS alone. The values here are the pre-measurement fallback;
+   the phone presentation is the bottom sheet below (FR-16). */
+.filters-panel {
+  position: fixed;
+  inset: auto 20px auto auto;
+  top: 150px;
+  width: min(460px, calc(100vw - 40px));
+  max-height: min(70vh, 560px);
+  padding: 0;
+  overflow: auto;
+  border: 1px solid var(--card-line);
+  border-radius: var(--roster-radius);
+  background: var(--card-surface);
+  color: var(--text-primary, #111827);
+  box-shadow: 0 24px 60px -30px rgba(15, 23, 42, 0.6);
+}
+
+.filters-panel::backdrop {
+  background: rgb(15 23 42 / 26%);
+}
+
+.filters-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 0;
+}
+
+.filters-panel__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.filters-panel__close {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--card-muted);
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.filters-panel__close:hover {
+  border-color: var(--card-line);
+  color: var(--text-primary, #111827);
+}
+
+.filters-panel__close:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 1px;
+}
+
+.filters-panel .collection-selects {
+  padding: 14px 16px;
+}
+
+.filters-panel__foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px 16px;
+}
+
+/* Clear filters is hidden until something is set. margin-left:auto rather than
+   justify-content:space-between so Done stays pinned right in both states
+   instead of sliding left whenever Clear disappears. */
+.filters-panel__done {
+  margin-left: auto;
 }
 
 .collection-meta {
@@ -2217,9 +2404,6 @@ body.inspector-sheet-open {
   .collection-shell {
     grid-template-columns: minmax(0, 1fr);
   }
-  .collection-select select {
-    max-width: none;
-  }
 }
 
 @media (max-width: 860px) {
@@ -2299,13 +2483,34 @@ body.inspector-sheet-open {
     min-width: 0;
   }
   .collection-selects {
-    width: 100%;
+    grid-template-columns: minmax(0, 1fr);
   }
-  .collection-select {
-    flex: 1 1 140px;
-  }
-  .collection-select select {
+  /* The Filters panel becomes a bottom sheet, the same presentation switch the
+     Inspector already makes when narrow (FR-16). It is still the same modal
+     <dialog>, so the focus trap and Escape behaviour do not change with the
+     breakpoint — only where it sits. */
+  /* !important because positionFilters() writes inline top/left on the way up
+     from a wide viewport, and an inline style beats a stylesheet rule. The
+     function clears those values below this breakpoint, but the sheet must be
+     correct even in the frame before it runs. */
+  .filters-panel {
+    inset: auto 0 0 !important;
+    top: auto !important;
     width: 100%;
+    max-width: 100%;
+    max-height: 82vh;
+    border-width: 1px 0 0;
+    border-radius: var(--roster-radius) var(--roster-radius) 0 0;
+  }
+  .view-cluster {
+    flex: 1 1 auto;
+  }
+  .view-sort {
+    flex: 1 1 auto;
+  }
+  .view-sort select {
+    width: 100%;
+    max-width: none;
   }
 }
 

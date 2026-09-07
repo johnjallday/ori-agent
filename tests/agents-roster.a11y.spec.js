@@ -95,6 +95,19 @@ for (const theme of ['light', 'dark']) {
       );
       await page.locator('#bulkDeleteCancel').click();
       await expect(page.locator('#bulkDeleteDialog')).toBeHidden();
+
+      // The five discovery selects moved behind the Filters panel, so the
+      // resting-roster scan above no longer reaches them: scan the panel too,
+      // or the epic would have quietly shrunk this spec's coverage (FR-86).
+      await page.locator('#filtersButton').click();
+      await expect(page.locator('#filtersPanel')).toBeVisible();
+      const filterResults = await runAxe(page, '#filtersPanel');
+      expect(filterResults.violations, JSON.stringify(filterResults.violations, null, 2)).toEqual(
+        []
+      );
+      await page.keyboard.press('Escape');
+      await expect(page.locator('#filtersPanel')).toBeHidden();
+      await expect(page.locator('#filtersButton')).toBeFocused();
     } finally {
       await request
         .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
@@ -133,6 +146,29 @@ for (const theme of ['light', 'dark']) {
       await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
       const restResults = await runAxe(page, '.roster-layout');
       expect(restResults.violations, JSON.stringify(restResults.violations, null, 2)).toEqual([]);
+
+      // At phone width the Filters panel is a bottom sheet rather than a
+      // popover (FR-16). It is the same modal <dialog> either way, so this
+      // checks the narrow presentation is still reachable and still clean.
+      await page.locator('#filtersButton').click();
+      const sheet = page.locator('#filtersPanel');
+      await expect(sheet).toBeVisible();
+      const sheetBox = await sheet.boundingBox();
+      // documentElement.clientWidth, not viewportSize().width: the latter
+      // includes the scrollbar gutter, which the sheet correctly does not span.
+      const layout = await page.evaluate(() => ({
+        w: document.documentElement.clientWidth,
+        h: window.innerHeight
+      }));
+      expect(Math.round(sheetBox.width)).toBe(layout.w);
+      expect(Math.round(sheetBox.y + sheetBox.height)).toBe(layout.h);
+      const filterSheetResults = await runAxe(page, '#filtersPanel');
+      expect(
+        filterSheetResults.violations,
+        JSON.stringify(filterSheetResults.violations, null, 2)
+      ).toEqual([]);
+      await page.keyboard.press('Escape');
+      await expect(sheet).toBeHidden();
 
       await page.locator('#rosterSearch').fill(name);
       const opener = page.locator(`.roster-card[data-name="${name}"] .roster-card__open`);
