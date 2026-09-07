@@ -12,7 +12,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 55
+const schemaVersion = 56
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -177,6 +177,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration054SetupJourneys(ctx)
 	case 55:
 		return db.migration055SampleLibrary(ctx)
+	case 56:
+		return db.migration056AgentMapLayouts(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -2946,6 +2948,70 @@ func isDuplicateColumnError(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "duplicate column name")
+}
+
+// migration056AgentMapLayouts adds the current user's Agent Map layout: where
+// each agent tile sits in world space, where their camera is pointing, and
+// whether snapping is on (agents-page-ux FR-55).
+//
+// It mirrors migration 38's shape for the Workspace Map, minus the district
+// tables — the Agent Map draws no frames, because an agent belongs to many
+// workspaces and non-overlapping rectangles cannot express that (FR-61).
+//
+// Purely additive: two new tables, no alteration of anything existing. A
+// database that has never seen the Agent Map opens with no rows here, and every
+// agent falls back to automatic placement.
+//
+// Positions are keyed by agent NAME rather than by an id, because that is how
+// the rest of the agent API addresses an agent — there is no stable opaque
+// identifier to key on. That makes rename a data-carrying operation rather than
+// a no-op, which agentmap.SQLiteStore.RenamePosition handles explicitly
+// (FR-58), and it is why there is no foreign key to an agents table: agents are
+// not stored in SQLite at all, they live in agents.json and per-agent folders.
+// The read path therefore drops positions whose agent no longer exists, so an
+// orphan from any path is harmless (FR-57).
+//
+// The layout row is deliberately separate from the position rows so a reset can
+// clear every anchor while preserving the snap preference and camera, and so a
+// user who has only panned still has a record to write to.
+//
+// Viewport columns are nullable REALs, not a JSON object. "No camera saved yet"
+// is a real state that must open on fit-to-screen rather than on a fabricated
+// (0, 0, 1x) camera, and a single corrupt axis can then be dropped without
+// discarding the zoom beside it.
+func (db *DB) migration056AgentMapLayouts(ctx context.Context) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS agent_map_layouts (
+			user_id TEXT PRIMARY KEY,
+			schema_version INTEGER NOT NULL DEFAULT 1,
+			revision INTEGER NOT NULL DEFAULT 0,
+			viewport_center_x REAL,
+			viewport_center_y REAL,
+			viewport_zoom REAL,
+			snap_to_grid INTEGER NOT NULL DEFAULT 1,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS agent_map_positions (
+			user_id TEXT NOT NULL,
+			agent_name TEXT NOT NULL,
+			x REAL NOT NULL,
+			y REAL NOT NULL,
+			updated_at DATETIME NOT NULL,
+			PRIMARY KEY (user_id, agent_name),
+			FOREIGN KEY (user_id) REFERENCES agent_map_layouts(user_id) ON DELETE CASCADE
+		)`,
+		// Indexed by agent name for the delete and rename paths, which look a
+		// position up by agent rather than by user.
+		`CREATE INDEX IF NOT EXISTS idx_agent_map_positions_agent
+			ON agent_map_positions(agent_name)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("failed to create agent map layout schema: %w", err)
+		}
+	}
+	return nil
 }
 
 // GetSchemaVersion returns the current database schema version.

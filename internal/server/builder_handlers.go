@@ -13,6 +13,8 @@ import (
 	"time"
 
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
+	"github.com/johnjallday/ori-agent/internal/agentmap"
+	"github.com/johnjallday/ori-agent/internal/agentmaphttp"
 	"github.com/johnjallday/ori-agent/internal/calendarhttp"
 	"github.com/johnjallday/ori-agent/internal/characterhttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
@@ -805,6 +807,62 @@ func (b *ServerBuilder) wireWorkspaceMap() {
 	b.workspaceMapService = workspacemap.NewService(b.workspaceMapStore, b.workspaceStore)
 	b.workspaceMapHandler = workspacemaphttp.NewHandler(b.workspaceMapService, b.userProvider)
 }
+
+// wireAgentMap constructs the current user's agent-map layout storage, the
+// existence-checking service over it, and its HTTP handler.
+//
+// It needs only the database and the agent store, so unlike wireWorkspaceMap it
+// has no workspace-store dependency and no descendant resolver — the Agent Map
+// draws no districts (agents-page-ux FR-61).
+//
+// The handler resolves its service through a closure rather than capturing it,
+// because handlers are wired in an earlier phase than some of what they depend
+// on and a captured nil fails silently. Here the service is already built by
+// the time this runs, but the closure costs nothing and removes the ordering
+// question entirely.
+//
+// Failure is contained the same way: without a database there is nowhere to
+// hold a layout, so the handler stays unwired and answers 503, which the Map
+// reads as "render automatic placement, allow read-only pan and zoom, and say
+// plainly that positions cannot be saved".
+func (b *ServerBuilder) wireAgentMap() {
+	if b.sessionStore == nil {
+		logger.Warn("Agent map layout not wired: no database", logger.Fields{})
+		return
+	}
+	db := b.sessionStore.DB()
+	if db == nil {
+		logger.Warn("Agent map layout not wired: session store has no database", logger.Fields{})
+		return
+	}
+	if b.st == nil {
+		logger.Warn("Agent map layout not wired: no agent store", logger.Fields{})
+		return
+	}
+
+	agentStore := b.st
+	// One read-only question, asked two ways: the store drops orphaned rows on
+	// read, and the service refuses to anchor an agent that does not exist.
+	// Neither can mutate an agent — ListAgents is the only method either holds.
+	lister := func() []string { return agentStore.ListAgents() }
+
+	b.agentMapStore = agentmap.NewSQLiteStore(db)
+	b.agentMapStore.SetAgentLister(agentListerFunc(lister))
+	b.agentMapService = agentmap.NewService(b.agentMapStore, agentmap.AgentListerLookup{List: lister})
+	service := b.agentMapService
+	b.agentMapHandler = agentmaphttp.NewHandler(
+		func() agentmaphttp.LayoutService { return service },
+		b.userProvider,
+	)
+	// The store is published onto the Storage facade in createDomainFacades
+	// (phase 25), NOT here: that phase constructs a replacement facade object,
+	// so a field set on the current one at this point is discarded.
+}
+
+// agentListerFunc adapts a name-listing closure to agentmap.AgentLister.
+type agentListerFunc func() []string
+
+func (f agentListerFunc) ListAgents() []string { return f() }
 
 // backfillLegacyCapabilities records the file-janitor install for workspaces
 // that were already using Downloads Janitor before capabilities existed
