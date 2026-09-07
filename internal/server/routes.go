@@ -47,6 +47,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	registerWorkspaceCapabilityRoutes(mux, s)
 	registerWorkspaceSurfaceRoutes(mux, s)
 	registerWorkspaceMapRoutes(mux, s)
+	registerAgentMapRoutes(mux, s)
 	registerRuntimeCapabilityRoutes(mux, s)
 	registerSetupWizardRoutes(mux, s)
 	registerExternalAgentRoutes(mux, s)
@@ -153,6 +154,13 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	if s.Storage.SessionStore != nil {
 		agentHandler.SetSessionPurger(s.Storage.SessionStore)
 	}
+	// Deleting an agent drops its saved Agent Map tile; renaming one carries it
+	// across (agents-page-ux FR-57, FR-58). Nil-checked because the map may not
+	// have wired — the map's read path ignores orphans, so the worst case is a
+	// stale row rather than a broken delete.
+	if s.Storage.AgentMapPositions != nil {
+		agentHandler.SetMapPositionStore(s.Storage.AgentMapPositions)
+	}
 	if s.Handlers.ExternalAgents != nil {
 		agentHandler.SetClaudeSyncProvider(s.Handlers.ExternalAgents.ClaudeSyncData)
 		agentHandler.SetCodexSyncProvider(s.Handlers.ExternalAgents.CodexSyncData)
@@ -177,6 +185,11 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	dashboardHandler.SetCLIAgentRegistry(s.Handlers.CLIAgentRegistry)
 	dashboardHandler.SetWorkspaceStore(s.Storage.WorkspaceStore)
 	dashboardHandler.SetPersonalAssistantSupport(s.Storage.PersonalAssistant, s.Storage.UserProvider)
+	// The roster draws a progress ring per card, so the list carries the flat
+	// XP-per-level threshold once rather than making the client ask per agent.
+	if s.Handlers.Evolution != nil {
+		dashboardHandler.SetXPPerLevelReporter(s.Handlers.Evolution)
+	}
 	if s.Handlers.ExternalAgents != nil {
 		dashboardHandler.SetClaudeSyncProvider(s.Handlers.ExternalAgents.ClaudeSyncData)
 		dashboardHandler.SetCodexSyncProvider(s.Handlers.ExternalAgents.CodexSyncData)
@@ -1177,6 +1190,19 @@ func registerWorkspaceMapRoutes(mux *http.ServeMux, s *Server) {
 	// Workspace Map Layout Endpoints (current user)
 	// =============================================================================
 	s.Handlers.WorkspaceMap.Register(mux)
+}
+
+// registerAgentMapRoutes registers the current user's agent-map layout
+// endpoints at /api/agent-map/layout.
+//
+// Deliberately outside /api/agents/: that prefix is the agent record API, and
+// nothing under this one can change an agent — only where its tile sits
+// (agents-page-ux FR-56).
+//
+// A nil handler (the map failed to wire) registers nothing, so the Map falls
+// back to read-only automatic placement rather than taking the API down.
+func registerAgentMapRoutes(mux *http.ServeMux, s *Server) {
+	s.Handlers.AgentMap.Register(mux)
 }
 
 // registerRuntimeCapabilityRoutes registers the one generalized operating-mode,

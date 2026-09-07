@@ -31,14 +31,38 @@ async function makeAgent(page: Page, name: string) {
   expect(res.ok()).toBeTruthy();
 }
 
+// The appearance editor moved off the roster Inspector, which is now a reader,
+// onto the agent detail page — the editor of record (agents-page-ux FR-44). It
+// is the same shared editor with a different id prefix, so these helpers point
+// at its new home and the assertions below are unchanged in substance.
 async function openAgent(page: Page, name: string) {
+  await skipOnboarding(page);
+  await page.goto(`/agents/${encodeURIComponent(name)}`, { waitUntil: 'domcontentloaded' });
+  await expect(page.locator('#agentName')).toContainText(name);
+}
+
+// On the detail page the editor lives inside the Edit Profile modal.
+async function openAppearanceEditor(page: Page) {
+  const host = page.locator('#profileAppearanceHost');
+  if (!(await host.isVisible().catch(() => false))) {
+    await page.locator('#editProfileButton').click();
+  }
+  await expect(host).toBeVisible();
+}
+
+// The roster reads the same appearance the detail page writes. Several tests
+// below make a change on the editor and then check it landed on the roster's
+// card and hero — which is the cross-surface assertion worth having now that
+// the two are a writer and a reader rather than two writers.
+async function openRoster(page: Page, name: string) {
   await skipOnboarding(page);
   await page.goto(`/agents?agent=${encodeURIComponent(name)}`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('#stageName')).toHaveText(name);
 }
 
 async function openPickerFromInspector(page: Page) {
-  await page.locator('#ov-appearance-character-choose').click();
+  await openAppearanceEditor(page);
+  await page.locator('#profileAppearance-character-choose').click();
   await expect(page.locator('#charPicker')).toBeVisible();
 }
 
@@ -54,25 +78,28 @@ test.describe('choosing a character', () => {
     await page.locator('.char-card', { hasText: 'Research Archivist' }).click();
     await page.locator('#charPickerConfirm').click();
 
-    await expect(page.locator('#stageCharacter')).toContainText('Research Archivist');
-
     // The real assertion: it survives a round trip, not just a local re-render.
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await expect(page.locator('#stageCharacter')).toContainText('Research Archivist');
+    await openAppearanceEditor(page);
     // The editor lists all three sources, so "contains Generated" is trivially
     // true; the radio is what says which one is actually active.
-    await expect(page.locator('#ov-appearance-mode-character')).toBeChecked();
-    await expect(page.locator('#ov-appearance-root')).toContainText(
+    await expect(page.locator('#profileAppearance-mode-character')).toBeChecked();
+    await expect(page.locator('#profileAppearance-root')).toContainText(
       'Character art: Research Archivist'
     );
+
+    // And the roster, which only reads appearance, shows the same identity.
+    await openRoster(page, name);
+    await expect(page.locator('#stageCharacter')).toContainText('Research Archivist');
   });
 
   test('cancelling changes nothing', async ({ page }) => {
     const name = unique('PWCancel');
     await makeAgent(page, name);
     await openAgent(page, name);
+    await openAppearanceEditor(page);
 
-    await expect(page.locator('#ov-appearance-mode-generated')).toBeChecked();
+    await expect(page.locator('#profileAppearance-mode-generated')).toBeChecked();
 
     await openPickerFromInspector(page);
     await page.locator('.char-card', { hasText: 'Product Builder' }).click();
@@ -81,12 +108,13 @@ test.describe('choosing a character', () => {
 
     // Selecting a card inside the picker stages nothing: only Confirm assigns.
     // Character therefore stays unselectable, because none was ever saved.
-    await expect(page.locator('#ov-appearance-mode-generated')).toBeChecked();
-    await expect(page.locator('#ov-appearance-mode-character')).toBeDisabled();
+    await expect(page.locator('#profileAppearance-mode-generated')).toBeChecked();
+    await expect(page.locator('#profileAppearance-mode-character')).toBeDisabled();
 
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await expect(page.locator('#ov-appearance-mode-generated')).toBeChecked();
-    await expect(page.locator('#ov-appearance-mode-character')).toBeDisabled();
+    await openAppearanceEditor(page);
+    await expect(page.locator('#profileAppearance-mode-generated')).toBeChecked();
+    await expect(page.locator('#profileAppearance-mode-character')).toBeDisabled();
   });
 
   test('choosing a character is appearance only — no voice control anywhere', async ({
@@ -110,7 +138,7 @@ test.describe('choosing a character', () => {
 
     await page.locator('.char-card', { hasText: 'Team Caretaker' }).click();
     await page.locator('#charPickerConfirm').click();
-    await expect(page.locator('#stageCharacter')).toContainText('Team Caretaker');
+    await expect(page.locator('#profileAppearance-root')).toContainText('Team Caretaker');
 
     const after = await (
       await request.get(`/api/agents/${encodeURIComponent(name)}/detail`)
@@ -131,17 +159,22 @@ test.describe('choosing a character', () => {
     await openPickerFromInspector(page);
     await page.locator('.char-card', { hasText: 'Operations Keeper' }).click();
     await page.locator('#charPickerConfirm').click();
-    await expect(page.locator('#stageCharacter')).toContainText('Operations Keeper');
+    await expect(page.locator('#profileAppearance-root')).toContainText('Operations Keeper');
 
-    await page.locator('#ov-appearance-character-remove').click();
-    await expect(page.locator('#ov-appearance-mode-generated')).toBeChecked();
+    await page.locator('#profileAppearance-character-remove').click();
+    await expect(page.locator('#profileAppearance-mode-generated')).toBeChecked();
     // The selection is gone, so Character is no longer selectable — which is
     // what distinguishes "removed" from merely "switched away from" (FR-33).
-    await expect(page.locator('#ov-appearance-mode-character')).toBeDisabled();
+    await expect(page.locator('#profileAppearance-mode-character')).toBeDisabled();
 
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await expect(page.locator('#ov-appearance-mode-generated')).toBeChecked();
-    await expect(page.locator('#ov-appearance-mode-character')).toBeDisabled();
+    await openAppearanceEditor(page);
+    await expect(page.locator('#profileAppearance-mode-generated')).toBeChecked();
+    await expect(page.locator('#profileAppearance-mode-character')).toBeDisabled();
+
+    // The roster follows the removal too, rather than keeping a stale label.
+    await openRoster(page, name);
+    await expect(page.locator('#stageCharacter')).toBeHidden();
   });
 });
 
@@ -209,7 +242,7 @@ test.describe('the picker itself', () => {
 
     await page.keyboard.press('Escape');
     await expect(page.locator('#charPicker')).toBeHidden();
-    await expect(page.locator('#ov-appearance-character-choose')).toBeFocused();
+    await expect(page.locator('#profileAppearance-character-choose')).toBeFocused();
   });
 });
 
@@ -251,41 +284,30 @@ test.describe('creating an agent with a character', () => {
 
     await page.locator('#createSubmit').click();
     await expect(page.locator('#stageName')).toHaveText(name);
-    // No character means the generated portrait, not a broken one.
-    await expect(page.locator('#ov-appearance-mode-generated')).toBeChecked();
+    // No character means the generated portrait, not a broken one. Asserted on
+    // the roster's own surfaces: creation lands there, and the Inspector no
+    // longer carries an appearance editor to read a radio from.
     await expect(page.locator('#stageCharacter')).toBeHidden();
+    await expect(page.locator(`.roster-card[data-name="${name}"] .agent-avatar`)).toHaveClass(
+      /agent-avatar--generated/
+    );
   });
 });
 
 test.describe('identity does not disturb the rest of the page', () => {
-  test('choosing a character leaves checked agents alone', async ({ page }) => {
-    const a = unique('PWCheckA');
-    const b = unique('PWCheckB');
-    await makeAgent(page, a);
-    await makeAgent(page, b);
-    await openAgent(page, a);
-
-    await page.locator(`.roster-card[data-name="${b}"] .roster-card__check`).check();
-    await expect(page.locator('#bulkBar')).toBeVisible();
-
-    await openPickerFromInspector(page);
-    await page.locator('.char-card', { hasText: 'Project Coordinator' }).click();
-    await page.locator('#charPickerConfirm').click();
-    await expect(page.locator('#stageCharacter')).toContainText('Project Coordinator');
-
-    // Opening a picker is not a selection change (FR-95).
-    await expect(page.locator(`.roster-card[data-name="${b}"] .roster-card__check`)).toBeChecked();
-    await expect(page.locator('#bulkBar')).toBeVisible();
-    // ...and the focused agent is still the one we opened.
-    await expect(page.locator('#stageName')).toHaveText(a);
-  });
+  // The "choosing a character leaves checked agents alone" test lived here. It
+  // guarded against the picker — opened from the roster Inspector — disturbing
+  // the roster's checked set underneath it. The picker is not on the roster any
+  // more: appearance is edited on the detail page, a different page entirely,
+  // so there is no shared state left for it to disturb. The create panel's own
+  // picker is still exercised above.
 
   test('a built-in agent offers no character controls', async ({ page }) => {
     await openAgent(page, 'Claude Code');
 
     // The server would reject an edit, so the UI must not offer one (FR-70/FR-92).
-    await expect(page.locator('#ov-appearance-character-choose')).toHaveCount(0);
-    await expect(page.locator('#ov-appearance-character-remove')).toHaveCount(0);
+    await expect(page.locator('#profileAppearance-character-choose')).toHaveCount(0);
+    await expect(page.locator('#profileAppearance-character-remove')).toHaveCount(0);
   });
 
   test('the same identity renders in Gallery and List', async ({ page }) => {
@@ -297,6 +319,8 @@ test.describe('identity does not disturb the rest of the page', () => {
     await page.locator('.char-card', { hasText: 'Decision Strategist' }).click();
     await page.locator('#charPickerConfirm').click();
 
+    // The choice is made on the detail page; the roster reads it back.
+    await openRoster(page, name);
     const gallerySrc = await page
       .locator(`.roster-card[data-name="${name}"] .agent-avatar__portrait`)
       .getAttribute('src');

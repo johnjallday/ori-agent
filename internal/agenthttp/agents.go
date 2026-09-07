@@ -26,6 +26,17 @@ type SessionPurger interface {
 	DeleteSessionsByAgent(ctx context.Context, agentName string) (int, error)
 }
 
+// MapPositionStore keeps the Agent Map's saved coordinates in step with an
+// agent's lifecycle. Implemented by agentmap.SQLiteStore.
+//
+// It is deliberately the narrowest possible seam: two methods, both about where
+// a tile sits. The map cannot be read from here, and nothing about an agent can
+// be written through it (agents-page-ux FR-57, FR-58).
+type MapPositionStore interface {
+	DeletePositions(ctx context.Context, names ...string) error
+	RenamePosition(ctx context.Context, oldName, newName string) error
+}
+
 // validAgentNameRegex defines the allowed characters for agent names
 // Only alphanumeric, underscores, hyphens, and spaces are allowed
 var validAgentNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_\- ]+$`)
@@ -85,6 +96,7 @@ type Handler struct {
 	cliAgentRegistry *cliagent.CLIAgentRegistry
 	workspaceStore   workspace.Store
 	sessionPurger    SessionPurger
+	mapPositions     MapPositionStore
 	// claudeSync returns read-only synced ~/.claude data for the Claude Code
 	// agent (or nil when disabled). Injected so agenthttp stays decoupled from
 	// the externalagents package.
@@ -128,6 +140,17 @@ func (h *Handler) SetWorkspaceStore(s workspace.Store) {
 // keep referring to a deleted agent through restored session state.
 func (h *Handler) SetSessionPurger(p SessionPurger) {
 	h.sessionPurger = p
+}
+
+// SetMapPositionStore wires the Agent Map's coordinate store so an agent's
+// lifecycle keeps its saved tile position in step: a delete removes it, and a
+// rename carries it across.
+//
+// Optional by design. Unwired, deleting an agent leaves a row the map's read
+// path already ignores, and renaming one loses a position rather than moving a
+// tile somewhere wrong.
+func (h *Handler) SetMapPositionStore(s MapPositionStore) {
+	h.mapPositions = s
 }
 
 func (h *Handler) SetPersonalAssistantSupport(reader personalAssistantSupportReader, provider userprofile.UserProvider) {
@@ -680,6 +703,20 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update agent", err)
 			return
 		}
+		// Carry the saved Agent Map coordinate BEFORE the old record is deleted
+		// (agents-page-ux FR-58). Positions are keyed by agent name, so a rename
+		// would otherwise orphan the tile and drop the agent back to automatic
+		// placement — this save-new-then-delete-old shape is the one that has
+		// twice destroyed per-agent data in this repository.
+		//
+		// Only library-only agents reach here: the attachment guard above
+		// refuses a rename for any agent in a workspace.
+		if h.mapPositions != nil {
+			if err := h.mapPositions.RenamePosition(r.Context(), agentName, *req.Name); err != nil {
+				logger.Error("Failed to carry agent map position across rename",
+					logger.Fields{"from": agentName, "to": *req.Name, "err": err})
+			}
+		}
 		if err := h.State.DeleteAgent(agentName); err != nil {
 			logger.Error("Failed to delete old agent record after rename", logger.Fields{"name": agentName, "err": err})
 		}
@@ -824,6 +861,18 @@ func (h *Handler) performAgentDeletion(ctx context.Context, name string) error {
 		}
 	}
 
+	// Drop the agent's saved Agent Map coordinate alongside its sessions
+	// (agents-page-ux FR-57). A failure here is logged and not returned: the
+	// agent is already gone, and the map's read path ignores positions for
+	// agents that no longer exist, so the worst case is a harmless orphan row
+	// rather than a delete that reports failure after succeeding.
+	if h.mapPositions != nil {
+		if err := h.mapPositions.DeletePositions(ctx, name); err != nil {
+			logger.Error("Failed to remove agent map position for deleted agent",
+				logger.Fields{"agent": name, "err": err})
+		}
+	}
+
 	// Log activity
 	if h.ActivityLogger != nil {
 		details := map[string]any{}
@@ -872,6 +921,15 @@ func cliAgentDisplayName(backend string) string {
 		return backend
 	}
 }
+
+// CLIAgentDisplayName is the exported form, for callers that must name a CLI
+// agent exactly as the roster does.
+//
+// The Agent Map's existence check is one: it has to recognise every agent the
+// roster draws, and the auto-detected CLI agents are not in the agent store.
+// Duplicating this switch there would let the two drift, and the failure would
+// be a refused drag rather than a visible mismatch.
+func CLIAgentDisplayName(backend string) string { return cliAgentDisplayName(backend) }
 
 // cliAgentBackendFromName resolves a display name or backend name to a backend key.
 func cliAgentBackendFromName(name string) string {

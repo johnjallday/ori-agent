@@ -93,12 +93,28 @@
       });
   }
 
+  // A portrait becomes a link only when a caller asks for one. Most consumers
+  // draw a portrait beside a name that is already the thing you act on, and
+  // turning every one of them into a link app-wide would add a tab stop to
+  // several surfaces that did not ask for it (agents-page-ux FR-38/FR-39).
+  //
+  // Only same-origin absolute paths are accepted, so a caller cannot turn a
+  // portrait into a javascript: or off-site link by forwarding a value it did
+  // not construct.
+  function safeHref(value) {
+    var href = String(value == null ? '' : value).trim();
+    if (!/^\/[^/\\]/.test(href)) return '';
+    return href;
+  }
+
   function markup(name, options) {
     var settings = options && typeof options === 'object' ? options : {};
     var fullName = String(name == null ? '' : name);
     var safeName = escapeHtml(fullName);
+    var href = safeHref(settings.href);
     var classes = ['ws-map-av'];
     if (settings.isKeeper) classes.push('is-keeper');
+    if (href) classes.push('is-link');
     safeClasses(settings.className).forEach(function (className) {
       if (classes.indexOf(className) === -1) classes.push(className);
     });
@@ -111,10 +127,17 @@
       ? '<span class="ws-map-av-commander-mark" aria-hidden="true">★</span>'
       : '';
 
+    // The label inside already carries the name, so the link needs no aria-label
+    // of its own; the SVG stays aria-hidden and the text is the accessible name.
+    var tag = href ? 'a' : 'span';
     return (
-      '<span class="' +
+      '<' +
+      tag +
+      ' class="' +
       classes.join(' ') +
-      '" style="--av:' +
+      '"' +
+      (href ? ' href="' + escapeHtml(href) + '"' : '') +
+      ' style="--av:' +
       colorFor(fullName) +
       '" title="' +
       safeName +
@@ -142,7 +165,9 @@
       '">' +
       safeName +
       '</span>' +
-      '</span>'
+      '</' +
+      tag +
+      '>'
     );
   }
 

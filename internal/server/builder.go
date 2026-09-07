@@ -9,6 +9,8 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/actioncenterhttp"
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
+	"github.com/johnjallday/ori-agent/internal/agentmap"
+	"github.com/johnjallday/ori-agent/internal/agentmaphttp"
 	"github.com/johnjallday/ori-agent/internal/calendarhttp"
 	"github.com/johnjallday/ori-agent/internal/characterhttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
@@ -394,6 +396,13 @@ type ServerBuilder struct {
 	workspaceMapStore   *workspacemap.SQLiteStore
 	workspaceMapService *workspacemap.Service
 	workspaceMapHandler *workspacemaphttp.Handler
+
+	// Coordinate-based Agent Map: the same shape as the Workspace Map above, for
+	// the roster's spatial view. It draws no districts, so it needs no
+	// descendant resolver and no group tables (agents-page-ux FR-61).
+	agentMapStore   *agentmap.SQLiteStore
+	agentMapService *agentmap.Service
+	agentMapHandler *agentmaphttp.Handler
 }
 
 // NewServerBuilder creates a new ServerBuilder instance with an empty Server.
@@ -517,6 +526,12 @@ func (b *ServerBuilder) createDomainFacades() {
 		b.personalAssistantMemory,
 		b.personalHQService,
 	)
+	// Assigned after the constructor because this phase REPLACES the facade
+	// object, and the agent map is built two phases earlier. Setting the field
+	// on the old facade in wireAgentMap looked correct and was silently
+	// discarded here — the agent handler then read a nil store and a rename
+	// dropped the agent's saved tile.
+	b.server.Storage.AgentMapPositions = b.agentMapStore
 
 	// Workflow System Facade
 	b.server.Workflow = NewWorkflowSystemFacade(
@@ -596,6 +611,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		WorkspaceCapabilities: b.workspaceCapabilityHandler,
 		WorkspaceSurfaces:     b.workspaceSurfaceHandler,
 		WorkspaceMap:          b.workspaceMapHandler,
+		AgentMap:              b.agentMapHandler,
 		SetupWizard:           b.setupWizardHandler,
 		RuntimeCapabilities:   b.runtimeCapabilityHandler,
 		CLIAgents:             b.cliAgentHandler,

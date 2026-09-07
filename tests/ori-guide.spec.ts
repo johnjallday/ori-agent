@@ -170,24 +170,19 @@ test.describe('Ori Guide explanations and destinations', () => {
   // demonstration. This dirties a real form and proves the page's own
   // unsaved-changes guard actually fires when the guide navigates away
   // (FR-24/FR-36/FR-49).
-  test('a guide destination cannot skip an unsaved-changes guard', async ({ page, request }) => {
-    // A built-in agent has no editable form, so the fixture needs one of its
-    // own rather than whichever card happens to sort first.
-    const name = `PWGuard${Date.now()}`;
-    const made = await request.post('/api/agents', {
-      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
-    });
-    expect(made.ok()).toBeTruthy();
-
+  test('a guide destination cannot skip an unsaved-changes guard', async ({ page }) => {
+    // The fixture used to be the Agents roster Inspector's Overview form. That
+    // Inspector is a reader now — the agents-page-ux epic moved editing to the
+    // detail page and removed its unsaved-changes guard with it — so this uses
+    // the Behavior Studio, which is where the app's blocking beforeunload guard
+    // still lives. The subject under test is the GUIDE honouring such a guard,
+    // not which page raises it.
     await skipOnboarding(page);
-    await page.goto(`/agents?agent=${encodeURIComponent(name)}`, {
-      waitUntil: 'domcontentloaded'
-    });
+    await page.goto('/workflows', { waitUntil: 'domcontentloaded' });
     await expect(page.locator('#oriGuideLauncher')).toBeVisible();
-    await expect(page.locator('#ov-description')).toBeVisible();
 
-    await page.locator('#ov-description').fill('an edit nobody saved');
-    await page.locator('#ov-description').blur();
+    // Starting a new skill leaves an unsaved draft on the page.
+    await page.locator('#behaviorStudioNewBtn').click();
 
     let beforeUnloadFired = false;
     page.on('dialog', async d => {
@@ -204,9 +199,8 @@ test.describe('Ori Guide explanations and destinations', () => {
     expect(beforeUnloadFired, 'navigating from the guide bypassed the unsaved-changes guard').toBe(
       true
     );
-    // Dismissed, so the user is still on the page with their edit intact.
-    await expect(page).toHaveURL(/\/agents/);
-    await expect(page.locator('#ov-description')).toHaveValue('an edit nobody saved');
+    // Dismissed, so the user is still on the page with their draft intact.
+    await expect(page).toHaveURL(/\/workflows/);
   });
 
   // A question the navigation catalog cannot answer is no longer a dead end: it

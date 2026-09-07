@@ -405,6 +405,9 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	// The coordinate map resolves node ownership through the composed workspace
 	// store, so it wires here for the same reason (#292 FR-99).
 	b.wireWorkspaceMap()
+	// The Agent Map needs only the database and the agent store, but wires
+	// alongside its sibling so both coordinate maps are built in one place.
+	b.wireAgentMap()
 
 	// Same reason: the mailbox read/link/send runtime depends on the workspace
 	// store, so it is wired here rather than in initializeHandlers (Phase 17).

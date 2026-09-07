@@ -9,10 +9,16 @@
 # analyzer, so it prompts no matter how many rules exist. A script is one
 # stable token. Put the shell in here, not in the tool call.
 #
-# This worktree's feature: Workspace Planning Workflow
-# (tasks/prd-workspace-planning-policy.md).
+# This worktree's feature: Agents Page UX (tasks/prd-agents-page-ux.md).
+# Earlier features' checks are kept, because the point of one stable name is
+# that it accumulates: Workspace Planning Workflow
+# (tasks/prd-workspace-planning-policy.md) and the domain-specialist onboarding
+# checks both still live below.
 #
 # Usage:
+#   ./scripts/smoke.sh serve 8941 agentsux            # isolated server + sandbox
+#   ./scripts/smoke.sh agentseed http://localhost:8941 agentsux
+#   ./scripts/smoke.sh agentmap http://localhost:8941
 #   ./scripts/smoke.sh plans <base-url> <workspace-id>
 #
 # Start the server it talks to with `wt demo 8931`, or by hand with the
@@ -1397,8 +1403,297 @@ smoke_specialist() {
   echo "PASS specialist"
 }
 
+# smoke_agentseed fills an isolated sandbox with a roster that actually exercises
+# the /agents page.
+#
+# A fresh sandbox holds three built-in CLI agents in no workspace, and that hides
+# most of what this feature does: the two-pill + overflow rule, the Workspace
+# filter, per-workspace sections, multi-workspace membership, and the portrait
+# progress ring all need real data. Seeding it by hand is four screens of curl
+# that has to be retyped every time the sandbox is thrown away, which is exactly
+# the shell this script exists to hold.
+#
+# Usage: ./scripts/smoke.sh agentseed <base-url> [sandbox-name]
+smoke_agentseed() {
+  local sandbox_name="${1:-default}"
+  local sandbox="${TMPDIR:-/tmp}/ori-smoke-${sandbox_name}"
+  echo "--- seeding $BASE_URL (sandbox $sandbox) ---"
+
+  # A representative library: every catalog role represented, some favorites,
+  # some tags, and several agents with no description at all - the empty cases
+  # are the ones that used to print invented placeholder text.
+  echo "== agents =="
+  seed_agent "Atlas" orchestrator true '["ops","lead"]' "Runs the release train and dispatches work to the team."
+  seed_agent "Beacon" researcher false '["research"]' "Digs through docs and the web for sourced answers."
+  seed_agent "Cinder" analyzer false '["data"]' ""
+  seed_agent "Delta" synthesizer true '["writing","docs"]' "Turns raw findings into short readable briefs."
+  seed_agent "Echo" validator false '[]' ""
+  seed_agent "Foxglove" specialist false '["audio"]' "Domain specialist for the studio workflows."
+  seed_agent "Grove" researcher false '["research","web"]' ""
+  seed_agent "Harbor" orchestrator false '["ops"]' "Second commander, kept for the staging workspace."
+  seed_agent "Iris" analyzer true '["data","perf"]' ""
+  seed_agent "Juniper" synthesizer false '[]' ""
+  seed_agent "Kestrel" validator false '["qa"]' "Checks work before it ships."
+  seed_agent "Lantern" specialist false '[]' ""
+  seed_agent "Marlow" researcher false '["legal"]' ""
+  seed_agent "Nimbus" analyzer false '[]' ""
+  seed_agent "Onyx" specialist true '["audio","reaper"]' "Knows the REAPER session inside out."
+  seed_agent "Pike" validator false '[]' ""
+
+  # Three workspaces, with deliberate overlap: Delta belongs to all three, which
+  # is the only way to see the "+1" overflow pill and the Map's one-tile-per-agent
+  # rule diverging from the Gallery's one-card-per-membership rule.
+  echo "== workspaces =="
+  local studio field release
+  studio=$(seed_workspace "Studio" "Atlas")
+  field=$(seed_workspace "Field Notes" "Beacon")
+  release=$(seed_workspace "Release" "Harbor")
+  [[ -n "$studio" && -n "$field" && -n "$release" ]] ||
+    fail "workspace creation returned no id (studio='$studio' field='$field' release='$release')"
+  echo "ok   studio=$studio field=$field release=$release"
+
+  seed_assign "Delta" "$studio" "$field" "$release"
+  seed_assign "Iris" "$studio" "$field"
+  seed_assign "Cinder" "$studio"
+  seed_assign "Kestrel" "$release"
+  seed_assign "Grove" "$field"
+  seed_assign "Onyx" "$studio" "$release"
+
+  # Levels and stages. XP normally accrues from activity and there is no endpoint
+  # that awards it, so this writes the evolution record straight into the
+  # sandbox's own agent files. One agent per stage, plus a 0% and a 99% ring so
+  # both extremes are on screen.
+  echo "== progression =="
+  [[ -d "$sandbox/agents" ]] || fail "no agents directory in $sandbox - is this the sandbox the server is using?"
+  python3 -c 'import json, os, sys
+sandbox, per = sys.argv[1], 100
+plan = {
+    "Atlas": (3, 45, "learner"),
+    "Beacon": (1, 10, "infant"),
+    "Cinder": (0, 0, "spark"),
+    "Delta": (7, 80, "expert"),
+    "Echo": (2, 99, "infant"),
+    "Iris": (5, 60, "learner"),
+    "Onyx": (12, 25, "sentient"),
+    "Foxglove": (4, 50, "learner"),
+    "Harbor": (1, 75, "infant"),
+    "Kestrel": (9, 30, "expert"),
+}
+changed = 0
+for name, (level, into, stage) in plan.items():
+    path = os.path.join(sandbox, "agents", name, "agent_settings.json")
+    if not os.path.exists(path):
+        print("skip %s: no settings file" % name)
+        continue
+    with open(path) as handle:
+        data = json.load(handle)
+    evolution = data.get("evolution") or {}
+    evolution.update({"level": level, "experience": level * per + into, "stage": stage})
+    data["evolution"] = evolution
+    with open(path, "w") as handle:
+        json.dump(data, handle, indent=2)
+    changed += 1
+    print("ok   %-9s Lv %-2d %2d%% into the level, stage %s" % (name, level, into, stage))
+print("%d agents given progression" % changed)' "$sandbox"
+
+  echo
+  echo "Restart the server to load the progression records, then open:"
+  echo "  $BASE_URL/agents"
+  echo "PASS agentseed"
+}
+
+# seed_agent creates one agent and applies the metadata that is not part of
+# creation. Both requests report their status so a partial seed is visible.
+seed_agent() {
+  local name="$1" role="$2" favorite="$3" tags="$4" description="$5"
+  local body
+  body=$(python3 -c 'import json, sys
+print(json.dumps({"name": sys.argv[1], "catalog_role": sys.argv[2]}))' "$name" "$role")
+  curl -s -o /dev/null -w "%{http_code} create $name\n" \
+    -X POST "$BASE_URL/api/agents" -H 'Content-Type: application/json' -d "$body"
+  body=$(python3 -c 'import json, sys
+print(json.dumps({
+    "description": sys.argv[1],
+    "tags": json.loads(sys.argv[2]),
+    "favorite": sys.argv[3] == "true",
+}))' "$description" "$tags" "$favorite")
+  curl -s -o /dev/null -w "%{http_code} patch  $name\n" \
+    -X PATCH "$BASE_URL/api/agents/$(seed_urlencode "$name")" \
+    -H 'Content-Type: application/json' -d "$body"
+}
+
+seed_workspace() {
+  local name="$1" entry="$2" body
+  body=$(python3 -c 'import json, sys
+print(json.dumps({"name": sys.argv[1], "entry_agent_name": sys.argv[2]}))' "$name" "$entry")
+  curl -s -X POST "$BASE_URL/api/workspaces" \
+    -H 'Content-Type: application/json' -d "$body" | workspace_id
+}
+
+# seed_assign replaces an agent's workspace set. PUT, not POST: the
+# agent-centric route takes the whole set, which is also how the Inspector's
+# Workspaces tab reads it back.
+seed_assign() {
+  local agent="$1" body
+  shift
+  body=$(python3 -c 'import json, sys
+print(json.dumps({"workspace_ids": sys.argv[1:]}))' "$@")
+  curl -s -o /dev/null -w "%{http_code} assign $agent\n" \
+    -X PUT "$BASE_URL/api/agents/$(seed_urlencode "$agent")/workspaces" \
+    -H 'Content-Type: application/json' -d "$body"
+}
+
+# Agent names are display strings and reach the API as a path segment, so a name
+# with a space has to be percent-encoded before it becomes a URL.
+seed_urlencode() {
+  python3 -c 'import sys, urllib.parse
+print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"
+}
+
+# agentmap_patch builds a positions patch with JSON-escaped agent names, so a
+# roster whose first agent is called `O'Brien "Ori"` still produces a valid body.
+#
+#   agentmap_patch <op> <expected-revision|""> [<name> <x> <y>]...
+agentmap_patch() {
+  python3 -c 'import sys,json
+op, expected, args = sys.argv[1], sys.argv[2], sys.argv[3:]
+positions = {args[i]: {"x": float(args[i + 1]), "y": float(args[i + 2])} for i in range(0, len(args), 3)}
+patch = {"operations": [{"op": op, "positions": positions}]}
+if expected:
+    patch["expected_revision"] = int(expected)
+print(json.dumps(patch))' "$@"
+}
+
+# agentmap_position prints "<x>,<y>" for one agent, or "" when it has no anchor.
+# The name is looked up as an exact key rather than through json_field, whose
+# dotted path would split a name that contains a dot. Either envelope is
+# accepted, so a write response and a read response can be checked the same way.
+agentmap_position() {
+  python3 -c 'import sys,json
+d = json.load(sys.stdin)
+layout = d.get("layout") or (d.get("result") or {}).get("layout") or {}
+point = (layout.get("positions") or {}).get(sys.argv[1])
+print("" if point is None else "%g,%g" % (point["x"], point["y"]))' "$1"
+}
+
+# smoke_agentmap drives the three Agent Map layout endpoints end to end.
+#
+# The Map canvas is a browser surface, but its persistence contract is not: the
+# revision protocol, the world bounds, the agent-existence check, strict
+# decoding and the identity boundary are all only observable over HTTP. This is
+# where they are checked.
+#
+# It is rerunnable against a sandbox that already has a layout: nothing asserts
+# an absolute revision, only that reads never move it and writes always do.
+smoke_agentmap() {
+  local url="$BASE_URL/api/agent-map/layout"
+  echo "--- Agent Map layout API ---"
+
+  # Real agent names. A patch naming an agent the roster does not hold is a 404
+  # by design, so the checks use whatever this sandbox actually has.
+  local list first second
+  list=$(curl -s "$BASE_URL/api/agents/dashboard/list")
+  first=$(printf '%s' "$list" | json_field 'agents.0.name')
+  second=$(printf '%s' "$list" | json_field 'agents.1.name')
+  [[ -n "$first" && -n "$second" ]] ||
+    fail "need two agents in the roster (got '$first' '$second')"
+  echo "ok   using agents '$first' and '$second'"
+
+  # Reading never writes (FR-51). Two reads of the same layout must report the
+  # same revision; a GET that lazily created a record would bump it.
+  echo "== read is read-only =="
+  local schema rev_a rev_b
+  rev_a=$(curl -s "$url" | json_field 'layout.revision')
+  rev_b=$(curl -s "$url" | json_field 'layout.revision')
+  schema=$(curl -s "$url" | json_field 'layout.schema_version')
+  [[ "$rev_a" == "$rev_b" ]] || fail "GET moved the revision: $rev_a -> $rev_b"
+  [[ "$schema" == "1" ]] || fail "schema_version = '$schema', want 1"
+  echo "ok   two reads both at revision $rev_a, schema 1"
+
+  echo "== anchors, camera and preference round-trip =="
+  local anchored rev_anchored
+  anchored=$(curl -s -X PATCH "$url" -H 'Content-Type: application/json' \
+    -d "$(agentmap_patch set_positions '' "$first" 120 -40 "$second" 300 80)")
+  rev_anchored=$(printf '%s' "$anchored" | json_field 'result.layout.revision')
+  [[ -n "$rev_anchored" ]] || fail "set_positions returned no revision"
+  [[ "$rev_anchored" -gt "$rev_a" ]] || fail "revision did not advance ($rev_a -> $rev_anchored)"
+  [[ "$(printf '%s' "$anchored" | agentmap_position "$first")" == "120,-40" ]] ||
+    fail "the write response did not echo the committed anchor"
+  echo "ok   two anchors committed at revision $rev_anchored"
+
+  # Both operations in one patch, because a camera move and a preference change
+  # arrive together when the user zooms with snapping off.
+  expect_status 200 PATCH "$url" \
+    '{"operations":[{"op":"set_viewport","viewport":{"center_x":210,"center_y":20,"zoom":0.75}},{"op":"set_preferences","snap_to_grid":false}]}'
+
+  local layout zoom snap
+  layout=$(curl -s "$url")
+  zoom=$(printf '%s' "$layout" | json_field 'layout.viewport.zoom')
+  snap=$(printf '%s' "$layout" | json_field 'layout.snap_to_grid')
+  [[ "$zoom" == "0.75" ]] || fail "viewport zoom = '$zoom', want 0.75"
+  [[ "$snap" == "False" ]] || fail "snap_to_grid = '$snap', want false"
+  [[ "$(printf '%s' "$layout" | agentmap_position "$second")" == "300,80" ]] ||
+    fail "the second anchor did not survive the read"
+  echo "ok   camera 0.75x, snapping off, both anchors persisted"
+
+  # A stale revision is a 409, not a 400: the body was well formed and would
+  # have been accepted a moment ago. Nothing may change (FR-53).
+  echo "== stale writes are refused, current ones accepted =="
+  local rev_now
+  rev_now=$(printf '%s' "$layout" | json_field 'layout.revision')
+  expect_status 409 PATCH "$url" \
+    "$(agentmap_patch set_positions "$((rev_now - 1))" "$first" 999 999)"
+  [[ "$(curl -s "$url" | agentmap_position "$first")" == "120,-40" ]] ||
+    fail "the refused write changed the layout anyway"
+  echo "ok   the 409 left the anchor at 120,-40"
+
+  expect_status 200 PATCH "$url" \
+    "$(agentmap_patch set_positions "$rev_now" "$first" 121 -41)"
+
+  # Rejections. Each of these is a distinct guard, and each has a status the
+  # client acts on differently.
+  echo "== rejections =="
+  expect_status 400 PATCH "$url" "$(agentmap_patch set_positions '' "$first" 99999999 0)"
+  expect_status 404 PATCH "$url" "$(agentmap_patch set_positions '' 'No Such Agent' 1 1)"
+  expect_status 400 PATCH "$url" \
+    '{"operations":[{"op":"set_positions","positions":{},"colour":"red"}]}'
+  expect_status 400 PATCH "$url" \
+    '{"user_id":"someone-else","operations":[{"op":"reset"}]}'
+  expect_status 400 PATCH "$url" \
+    '{"operations":[{"op":"set_viewport","viewport":{"center_x":0,"center_y":0,"zoom":0}}]}'
+
+  # Reset clears the ARRANGEMENT only. Losing your view as well would make a
+  # reset something users learn to fear (FR-72).
+  echo "== reset clears anchors and keeps the view =="
+  expect_status 200 DELETE "$url"
+  layout=$(curl -s "$url")
+  [[ -z "$(printf '%s' "$layout" | agentmap_position "$first")" ]] ||
+    fail "reset left an anchor behind"
+  [[ "$(printf '%s' "$layout" | json_field 'layout.viewport.zoom')" == "0.75" ]] ||
+    fail "reset discarded the camera"
+  [[ "$(printf '%s' "$layout" | json_field 'layout.snap_to_grid')" == "False" ]] ||
+    fail "reset discarded the snap preference"
+  echo "ok   anchors gone, camera and snapping intact"
+
+  # Undo. restore_positions is what the reset's undo sends: the exact prior set,
+  # in one write, rather than one request per tile.
+  echo "== the reset is undoable =="
+  expect_status 200 PATCH "$url" \
+    "$(agentmap_patch restore_positions '' "$first" 121 -41 "$second" 300 80)"
+  layout=$(curl -s "$url")
+  [[ "$(printf '%s' "$layout" | agentmap_position "$first")" == "121,-41" ]] ||
+    fail "undo did not restore the first anchor"
+  [[ "$(printf '%s' "$layout" | agentmap_position "$second")" == "300,80" ]] ||
+    fail "undo did not restore the second anchor"
+  echo "ok   both anchors restored"
+
+  echo "PASS agentmap"
+}
+
 case "${1:-}" in
 serve) serve_isolated "${2:-8931}" "${3:-default}" ;;
+agentseed) smoke_agentseed "${3:-default}" ;;
+agentmap) smoke_agentmap ;;
 specialist) smoke_specialist ;;
 seed) seed_demo ;;
 rootswitch) smoke_rootswitch "${3:-}" ;;
@@ -1416,6 +1711,8 @@ execution) smoke_execution "${3:-}" ;;
 *)
   echo "usage:" >&2
   echo "  $0 serve [port] [sandbox-name]           # run an ISOLATED demo server (Ctrl-C to stop)" >&2
+  echo "  $0 agentseed <base-url> [sandbox-name]   # fill a sandbox with a demo agent roster" >&2
+  echo "  $0 agentmap <base-url>                   # Agent Map layout API checks" >&2
   echo "  $0 specialist <base-url>                 # domain-specialist onboarding API checks" >&2
   echo "  $0 seed <base-url>                       # seed plans and print URLs to review" >&2
   echo "  $0 {plans|drafting|review|materialize|execution|slot|reconcile|policy|boundary|hardening|packaged} <base-url> <workspace-id>" >&2

@@ -1454,6 +1454,19 @@
     // why this is separate from ask() and what it deliberately cannot express.
     presentQuestStep: presentQuestStep,
     clearQuestStep: clearQuestStep,
+    // Mark one registered control, for a page that wants to point at its own UI
+    // without opening the guide panel — a first-visit hint, for instance.
+    //
+    // Public rather than another test seam because the alternative is a second
+    // coachmark system: this one already re-anchors when the page re-renders
+    // beneath the mark, waits a bounded time for a control that is about to
+    // mount, clears itself when the route changes, and refuses any key that is
+    // not in the hand-written registry. None of that is worth duplicating.
+    //
+    // It marks and focuses. It never clicks, never submits, never changes a
+    // value (FR-42).
+    markControl: applyCoachmark,
+    clearControlMark: clearCoachmark,
     isOpen: function () {
       return state.open;
     },
