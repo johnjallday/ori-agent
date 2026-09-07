@@ -71,6 +71,9 @@ aged_output="$("$cleanup_script" --delete --quiet --older-than-hours 24 --temp-d
 [[ ! -e "$fixture_root/ori-test-old" ]]
 [[ -d "$fixture_root/ori-test-recent" ]]
 
+empty_output="$("$cleanup_script" --delete --quiet --temp-dir "$fixture_root")"
+[[ "$empty_output" == *"Removed 0 of 0 Ori test artifact(s)"* ]]
+
 if "$cleanup_script" --delete --temp-dir / >/dev/null 2>&1; then
 	printf 'Expected cleanup script to reject the filesystem root.\n' >&2
 	exit 1

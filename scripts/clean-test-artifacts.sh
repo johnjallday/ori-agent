@@ -119,7 +119,9 @@ removed=0
 skipped_recent=0
 minimum_age_minutes=$((older_than_hours * 60))
 
-for candidate in "${candidates[@]}"; do
+# Bash 3.2 treats an empty array expansion as unbound under `set -u`. The
+# default expansion keeps the no-candidate case a valid no-op on macOS.
+for candidate in "${candidates[@]-}"; do
 	[[ -e "$candidate" || -L "$candidate" ]] || continue
 
 	candidate_name="${candidate##*/}"

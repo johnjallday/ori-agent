@@ -36,7 +36,7 @@ else
     VERSION=""
 fi
 
-# Get installed Go version (e.g., 1.25.5)
+# Get installed Go version (e.g., 1.26.0)
 if command -v go &> /dev/null; then
     GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
     echo -e "${BLUE}[INFO]${NC} Found Go version: $GO_VERSION"
