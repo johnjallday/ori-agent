@@ -53,14 +53,19 @@ type Controller struct {
 	statusChan  chan ServerStatus
 	subscribers []func(ServerStatus)
 	subMu       sync.RWMutex
+
+	// Runtime construction is separated from host lifecycle so isolated tests
+	// can exercise real stop/start without native credentials or provider discovery.
+	runtimeFactory func(addr string) (*server.Server, *http.Server, error)
 }
 
 // NewController creates a new server controller
 func NewController(port int) *Controller {
 	return &Controller{
-		status:     StatusStopped,
-		port:       port,
-		statusChan: make(chan ServerStatus, 10),
+		status:         StatusStopped,
+		port:           port,
+		statusChan:     make(chan ServerStatus, 10),
+		runtimeFactory: newServerRuntime,
 	}
 }
 
@@ -218,12 +223,22 @@ func (c *Controller) isPortAvailable() bool {
 	return true
 }
 
+func newServerRuntime(addr string) (*server.Server, *http.Server, error) {
+	srv, err := server.New()
+	if err != nil {
+		return nil, nil, err
+	}
+	return srv, srv.HTTPServer(addr), nil
+}
+
 // runServer runs the HTTP server in a goroutine
 func (c *Controller) runServer() {
 	logger.Debug("Starting ori-agent server", logger.Fields{"port": c.port})
 
-	// Create server instance
-	srv, err := server.New()
+	// Create server instance and HTTP lifecycle together. The production
+	// factory retains the normal builder and BaseContext startup behavior.
+	addr := fmt.Sprintf(":%d", c.port)
+	srv, httpServer, err := c.runtimeFactory(addr)
 	if err != nil {
 		c.statusMu.Lock()
 		c.status = StatusError
@@ -234,13 +249,8 @@ func (c *Controller) runServer() {
 		return
 	}
 
-	c.server = srv
-
-	// Create HTTP server with wrapper for graceful shutdown
-	addr := fmt.Sprintf(":%d", c.port)
-	httpServer := srv.HTTPServer(addr)
-
 	c.statusMu.Lock()
+	c.server = srv
 	c.httpServer = &server.HTTPServerWrapper{Server: httpServer}
 	c.statusMu.Unlock()
 
