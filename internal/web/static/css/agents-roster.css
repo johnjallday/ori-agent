@@ -629,6 +629,20 @@ body.agents-roster-page {
 
 /* ---- Gallery grid --------------------------------------------------------- */
 
+/* The collection host. Ungrouped it holds one .agent-grid; grouped it holds a
+   stack of sections, each with its own grid. It carries the view mode (is-list)
+   and the sectioning flag (is-grouped) for everything inside it. */
+.roster-collection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.roster-collection.is-grouped {
+  gap: 22px;
+}
+
 /* Fluid: columns follow the collection's own width, so opening or closing the
    Inspector re-columns the Gallery instead of clipping it (FR79/FR80). */
 .agent-grid {
@@ -639,6 +653,85 @@ body.agents-roster-page {
   margin: 0;
   padding: 0;
   min-width: 0;
+}
+
+/* ---- Group-by sections ---------------------------------------------------- */
+
+/* Section headers read as district frames rather than table headers: a thin
+   rule in the group's accent, the name in the page's eyebrow style, the count
+   muted, and a chevron for collapse (FR-24). */
+.roster-section {
+  --section-accent: var(--roster-accent, var(--primary-color, #4f46e5));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.roster-section__heading {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.roster-section__head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 0 0 8px;
+  border: 0;
+  border-bottom: 2px solid var(--section-accent);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.roster-section__head:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 3px;
+}
+
+.roster-section__head:hover .roster-section__name {
+  color: var(--text-primary, #111827);
+}
+
+/* A CSS triangle rather than an icon font: the chevron has to rotate with the
+   collapsed state, and this page's icon set is not loaded for the roster. */
+.roster-section__chevron {
+  flex: 0 0 auto;
+  width: 0;
+  height: 0;
+  border-top: 5px solid var(--section-accent);
+  border-right: 4px solid transparent;
+  border-left: 4px solid transparent;
+  transition: transform 0.14s ease;
+}
+
+.roster-section.is-collapsed .roster-section__chevron {
+  transform: rotate(-90deg);
+}
+
+.roster-section__name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--section-accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.roster-section__count {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--card-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---- Agent card ----------------------------------------------------------- */
@@ -1015,7 +1108,7 @@ body.agents-roster-page {
 /* List is a presentation mode over the same card DOM, not a second renderer:
    one row states exactly what its Gallery card states, more densely
    (PRD FR14/FR17). */
-.agent-grid.is-list {
+.roster-collection.is-list .agent-grid {
   grid-template-columns: minmax(0, 1fr);
   gap: 6px;
 }
@@ -1024,7 +1117,7 @@ body.agents-roster-page {
    fourth, the status chip, riding in the flag cluster at the row's right end.
    There is deliberately no fifth column to add: List states exactly what the
    Gallery card states (FR-9). */
-.agent-grid.is-list .roster-card__open {
+.roster-collection.is-list .agent-grid .roster-card__open {
   grid-template-columns: minmax(190px, 1.5fr) minmax(0, 1.1fr) minmax(0, 1.4fr);
   grid-template-rows: auto;
   gap: 16px;
@@ -1034,47 +1127,47 @@ body.agents-roster-page {
 
 /* The name already identifies the row, so the portrait's column is better spent
    on membership at this density. It returns at phone width, below. */
-.agent-grid.is-list .agent-card__portrait {
+.roster-collection.is-list .agent-grid .agent-card__portrait {
   display: none;
 }
 
-.agent-grid.is-list .agent-card__ident {
+.roster-collection.is-list .agent-grid .agent-card__ident {
   grid-row: 1;
   grid-column: 1;
 }
 
-.agent-grid.is-list .agent-card__name {
+.roster-collection.is-list .agent-grid .agent-card__name {
   padding-right: 0;
   font-size: 14px;
 }
 
 /* Role moves from under the name into its own column. */
-.agent-grid.is-list .agent-card__ident .agent-card__class {
+.roster-collection.is-list .agent-grid .agent-card__ident .agent-card__class {
   display: none;
 }
 
-.agent-grid.is-list .agent-card__rolecell {
+.roster-collection.is-list .agent-grid .agent-card__rolecell {
   display: block;
   grid-row: 1;
   grid-column: 2;
 }
 
-.agent-grid.is-list .agent-card__rolecell .agent-card__class {
+.roster-collection.is-list .agent-grid .agent-card__rolecell .agent-card__class {
   margin-top: 0;
 }
 
-.agent-grid.is-list .agent-card__pills {
+.roster-collection.is-list .agent-grid .agent-card__pills {
   grid-row: 1;
   grid-column: 3;
 }
 
-.agent-grid.is-list .roster-card__checkwrap {
+.roster-collection.is-list .agent-grid .roster-card__checkwrap {
   top: 50%;
   left: 9px;
   transform: translateY(-50%);
 }
 
-.agent-grid.is-list .agent-card__flags {
+.roster-collection.is-list .agent-grid .agent-card__flags {
   top: 50%;
   transform: translateY(-50%);
 }
@@ -1082,13 +1175,13 @@ body.agents-roster-page {
 /* Below the Gallery's own column width the role column is the first to go: it
    is the one fact the row's accent rule already hints at. */
 @media (max-width: 1180px) {
-  .agent-grid.is-list .roster-card__open {
+  .roster-collection.is-list .agent-grid .roster-card__open {
     grid-template-columns: minmax(190px, 1.2fr) minmax(0, 1.4fr);
   }
-  .agent-grid.is-list .agent-card__rolecell {
+  .roster-collection.is-list .agent-grid .agent-card__rolecell {
     display: none;
   }
-  .agent-grid.is-list .agent-card__ident .agent-card__class {
+  .roster-collection.is-list .agent-grid .agent-card__ident .agent-card__class {
     display: block;
   }
 }
@@ -1096,34 +1189,34 @@ body.agents-roster-page {
 /* At phone width a "row" is the card again: three columns cannot fit in 400px
    without dropping one of the four facts (FR-9/FR-83). */
 @media (max-width: 640px) {
-  .agent-grid.is-list .roster-card__open {
+  .roster-collection.is-list .agent-grid .roster-card__open {
     grid-template-columns: 56px minmax(0, 1fr);
     grid-template-rows: auto auto;
     gap: 6px 11px;
     padding: 13px 13px 12px;
   }
-  .agent-grid.is-list .agent-card__portrait {
+  .roster-collection.is-list .agent-grid .agent-card__portrait {
     display: block;
   }
-  .agent-grid.is-list .agent-card__ident {
+  .roster-collection.is-list .agent-grid .agent-card__ident {
     grid-column: 2;
   }
-  .agent-grid.is-list .agent-card__name {
+  .roster-collection.is-list .agent-grid .agent-card__name {
     padding-right: 78px;
     font-size: 16px;
   }
-  .agent-grid.is-list .agent-card__rolecell {
+  .roster-collection.is-list .agent-grid .agent-card__rolecell {
     display: none;
   }
-  .agent-grid.is-list .agent-card__pills {
+  .roster-collection.is-list .agent-grid .agent-card__pills {
     grid-row: 2;
     grid-column: 1 / -1;
   }
-  .agent-grid.is-list .roster-card__checkwrap {
+  .roster-collection.is-list .agent-grid .roster-card__checkwrap {
     top: 7px;
     transform: none;
   }
-  .agent-grid.is-list .agent-card__flags {
+  .roster-collection.is-list .agent-grid .agent-card__flags {
     top: 9px;
     transform: none;
   }

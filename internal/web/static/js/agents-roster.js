@@ -55,6 +55,18 @@
     // Presentation mode for the one collection. Gallery is the default whenever
     // no valid preference is present (PRD FR11).
     view: 'gallery',
+    // Sectioning of the same filtered, sorted result. 'none' renders the flat
+    // grid the page has always rendered (PRD FR-22).
+    group: 'none',
+    // Section keys the viewer has collapsed, persisted per viewer.
+    collapsed: new Set(),
+    // The cards actually in the DOM, in DOM order. Distinct from `filtered`
+    // because grouping by workspace draws a multi-workspace agent once per
+    // section, so render order and render LENGTH both diverge from the filtered
+    // list. Every index-based interaction — arrow keys, shift-range, Select
+    // visible — walks this, not `filtered`, or it would address the wrong card
+    // (PRD FR-30/FR-31).
+    rendered: [],
     focusIndex: -1,
     dirty: { overview: false, prompt: false, workspaces: false },
     allWorkspaces: null,
@@ -105,6 +117,7 @@
       stats: document.getElementById('rosterStats'),
       search: document.getElementById('rosterSearch'),
       sort: document.getElementById('rosterSort'),
+      group: document.getElementById('rosterGroup'),
       empty: document.getElementById('rosterEmpty'),
       inspector: document.getElementById('inspector'),
       inspectorScroll: document.getElementById('inspectorScroll'),
@@ -206,8 +219,13 @@
       window.CharacterCatalog.load();
     }
 
+    // Read before the first render so a section the viewer collapsed last visit
+    // is already collapsed on the first paint rather than flashing open.
+    loadCollapsed();
+
     els.search.addEventListener('input', onSearch);
     els.sort.addEventListener('change', onSort);
+    els.group.addEventListener('change', onGroupChange);
     els.clearSearch.addEventListener('click', function () {
       els.search.value = '';
       onSearch();
@@ -1032,11 +1050,13 @@
 
   function renderRoster() {
     els.list.innerHTML = '';
+    state.rendered = [];
     var total = state.agents.length;
     var shown = state.filtered.length;
 
     renderStatusTiles();
     reflectViewToggle();
+    reflectGroupControl();
 
     if (shown === 0) {
       renderEmptyState(total);
@@ -1054,12 +1074,211 @@
     );
 
     var frag = document.createDocumentFragment();
-    state.filtered.forEach(function (agent, idx) {
-      frag.appendChild(buildCard(agent, idx));
-    });
+    if (state.group === 'none') {
+      frag.appendChild(buildGrid(state.filtered, 'Agents'));
+    } else {
+      groupSections().forEach(function (section) {
+        frag.appendChild(buildSection(section));
+      });
+    }
     els.list.appendChild(frag);
     highlightSelected();
     updateBulkBar();
+  }
+
+  /* ---- grouping ------------------------------------------------------------ */
+
+  var GROUPS = { none: 1, workspace: 1, role: 1, status: 1 };
+
+  // Partition the already-filtered, already-sorted list into sections. Grouping
+  // is presentation over the existing pipeline, never a second filter: every
+  // agent the filters kept appears in exactly one section, except under
+  // Workspace where it appears in one per membership (PRD FR-27/FR-29).
+  //
+  // Section order follows the group, not the agents: alphabetical by label, with
+  // the catch-all last so "Library" and "No role" read as the remainder rather
+  // than as just another group.
+  function groupSections() {
+    var byKey = Object.create(null);
+    var order = [];
+
+    function bucket(key, label, accent, trailing) {
+      if (!byKey[key]) {
+        byKey[key] = {
+          key: key,
+          label: label,
+          accent: accent || '',
+          trailing: !!trailing,
+          agents: []
+        };
+        order.push(byKey[key]);
+      }
+      return byKey[key];
+    }
+
+    state.filtered.forEach(function (agent) {
+      var vm = viewFor(agent);
+      if (state.group === 'workspace') {
+        if (vm.workspaces.length === 0) {
+          // An agent in no workspace is not missing data — it is in the
+          // library. It gets a real, trailing section rather than being
+          // dropped (PRD FR-28).
+          bucket('ws:', 'Library', '', true).agents.push(agent);
+          return;
+        }
+        // One entry per membership. This is the deliberate difference from the
+        // Map, which draws every agent exactly once: duplication is right for a
+        // list and wrong for a canvas.
+        vm.workspaces.forEach(function (w) {
+          bucket('ws:' + w.id, w.name, workspaceAccent(w.id)).agents.push(agent);
+        });
+        return;
+      }
+      if (state.group === 'role') {
+        var hasRole = !!vm.roleEntry;
+        bucket(
+          'role:' + (vm.role || ''),
+          vm.roleLabel,
+          hasRole ? roleAccent(vm) : '',
+          !hasRole
+        ).agents.push(agent);
+        return;
+      }
+      // status
+      bucket('health:' + vm.health, vm.healthText, healthAccent(vm.health)).agents.push(agent);
+    });
+
+    order.sort(function (a, b) {
+      if (a.trailing !== b.trailing) return a.trailing ? 1 : -1;
+      return a.label.localeCompare(b.label);
+    });
+    return order;
+  }
+
+  function workspaceAccent(id) {
+    return window.WorkspacePalette ? window.WorkspacePalette.keyFor(id) : '';
+  }
+
+  // The health colours the status chip and the summary tiles already use, so a
+  // Status section is the same colour as the chips inside it.
+  function healthAccent(health) {
+    if (health === 'needs') return '#b45309';
+    if (health === 'disabled') return '#6b7280';
+    return '#15803d';
+  }
+
+  function buildGrid(agents, label) {
+    var ul = document.createElement('ul');
+    ul.className = 'agent-grid';
+    ul.setAttribute('role', 'list');
+    ul.setAttribute('aria-label', label);
+    agents.forEach(function (agent) {
+      // The index is assigned here, in DOM order, so it addresses this card and
+      // no other even when the same agent is drawn in several sections.
+      var idx = state.rendered.length;
+      state.rendered.push(agent);
+      ul.appendChild(buildCard(agent, idx));
+    });
+    return ul;
+  }
+
+  function buildSection(section) {
+    var collapsed = state.collapsed.has(section.key);
+    var el = document.createElement('section');
+    el.className = 'roster-section' + (collapsed ? ' is-collapsed' : '');
+    el.dataset.section = section.key;
+    if (section.accent) el.style.setProperty('--section-accent', section.accent);
+
+    var bodyId = 'roster-section-' + sectionDomId(section.key);
+    var head = document.createElement('h3');
+    head.className = 'roster-section__heading';
+    head.innerHTML =
+      '<button type="button" class="roster-section__head" aria-expanded="' +
+      (collapsed ? 'false' : 'true') +
+      '" aria-controls="' +
+      bodyId +
+      '" data-section-toggle="' +
+      esc(section.key) +
+      '">' +
+      '<span class="roster-section__chevron" aria-hidden="true"></span>' +
+      '<span class="roster-section__name">' +
+      esc(section.label) +
+      '</span>' +
+      '<span class="roster-section__count">' +
+      section.agents.length +
+      '</span>' +
+      '</button>';
+    el.appendChild(head);
+
+    // A collapsed section renders its header and nothing else. Hiding the cards
+    // instead would leave them in `rendered`, and then Select visible and
+    // shift-range would silently reach agents nobody can see.
+    var body = collapsed ? document.createElement('ul') : buildGrid(section.agents, section.label);
+    body.id = bodyId;
+    if (collapsed) {
+      body.className = 'agent-grid';
+      body.hidden = true;
+      body.setAttribute('role', 'list');
+      body.setAttribute('aria-label', section.label);
+    }
+    el.appendChild(body);
+    return el;
+  }
+
+  // Section keys carry workspace ids and role slugs, so they are reduced to
+  // something safe for an id attribute rather than interpolated raw.
+  function sectionDomId(key) {
+    return String(key).replace(/[^a-zA-Z0-9_-]/g, '_');
+  }
+
+  function onGroupChange() {
+    var next = GROUPS[els.group.value] ? els.group.value : 'none';
+    if (next === state.group) return;
+    state.group = next;
+    renderRoster();
+    syncUrl(state.selected, false);
+  }
+
+  function reflectGroupControl() {
+    if (els.group && els.group.value !== state.group) els.group.value = state.group;
+    if (els.list) els.list.classList.toggle('is-grouped', state.group !== 'none');
+  }
+
+  function onSectionToggle(e) {
+    var btn = e.target.closest('[data-section-toggle]');
+    if (!btn) return;
+    var key = btn.dataset.sectionToggle;
+    if (state.collapsed.has(key)) state.collapsed.delete(key);
+    else state.collapsed.add(key);
+    saveCollapsed();
+    renderRoster();
+    // The section list is rebuilt, so focus has to be put back on the button
+    // that now stands where the pressed one was.
+    var again = els.list.querySelector('[data-section-toggle="' + cssEscape(key) + '"]');
+    if (again) again.focus();
+  }
+
+  var COLLAPSED_KEY = 'ori.roster.collapsedSections';
+
+  // Per viewer, and never load-bearing: a browser blocking site data renders
+  // every section expanded rather than failing to render (PRD FR-26).
+  function loadCollapsed() {
+    try {
+      var raw = window.localStorage.getItem(COLLAPSED_KEY);
+      if (!raw) return;
+      var parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) state.collapsed = new Set(parsed);
+    } catch (err) {
+      state.collapsed = new Set();
+    }
+  }
+
+  function saveCollapsed() {
+    try {
+      window.localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...state.collapsed]));
+    } catch (err) {
+      /* a viewer blocking site data simply does not get the memory */
+    }
   }
 
   // At-a-glance status summary over ALL agents (not the filtered view). Mirrors
@@ -2919,6 +3138,13 @@
   // touching its checkbox. The checkbox is handled by onListChange so a plain
   // click there only changes bulk-selection state (PRD FR3/FR4).
   function onListClick(e) {
+    // Section headers live inside the same delegation root as the cards, and
+    // are checked first because a header is never inside a card.
+    if (e.target.closest('[data-section-toggle]')) {
+      onSectionToggle(e);
+      return;
+    }
+
     var open = e.target.closest('.roster-card__open');
     if (open && open.dataset.open) {
       // Remember which control opened it so a mobile close can return focus
@@ -2958,7 +3184,10 @@
     // without moving focus (PRD FR83). Shift+Space extends a range from the
     // anchor — the documented keyboard equivalent of Shift-click (PRD FR10).
     var open = e.target.closest('.roster-card__open');
-    var n = state.filtered.length;
+    // Bounded by what is drawn, not by what survived the filters: grouping can
+    // draw more cards than there are filtered agents, and a collapsed section
+    // draws fewer.
+    var n = state.rendered.length;
     if (n === 0) return;
 
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Home' || e.key === 'End') {
@@ -2996,11 +3225,14 @@
     }
   }
 
-  // Move keyboard focus to the open button of the row at filtered index i.
+  // Move keyboard focus to the open button of the card at RENDER index i.
+  //
+  // Addressed by index rather than by name: under Workspace grouping the same
+  // agent can be on screen several times, and looking the card up by name would
+  // always return the first one, so arrow-key navigation would stick at the
+  // first section instead of walking through them.
   function focusRow(i) {
-    var agent = state.filtered[i];
-    if (!agent) return;
-    var card = els.list.querySelector('.roster-card[data-name="' + cssEscape(agent.name) + '"]');
+    var card = els.list.querySelector('.roster-card[data-index="' + i + '"]');
     if (!card) return;
     var open = card.querySelector('.roster-card__open');
     if (open) open.focus();
@@ -3015,10 +3247,15 @@
     else state.checked.delete(name);
   }
 
-  // Check every agent in the current filtered result set — and only those, never
-  // agents hidden by the active filters (PRD FR7).
+  // Check every agent actually on screen — and only those, never agents hidden
+  // by the active filters (PRD FR7) or sitting inside a collapsed section
+  // (PRD FR-30).
+  //
+  // `rendered` rather than `filtered` is what makes the collapsed case right:
+  // a collapsed section contributes no cards, so its agents are not selected by
+  // a control labelled "Select visible".
   function selectAllVisible() {
-    state.filtered.forEach(function (a) {
+    state.rendered.forEach(function (a) {
       state.checked.add(a.name);
     });
     reflectCheckedInDom();
@@ -3035,15 +3272,20 @@
     if (focusControl && els.selectAll) els.selectAll.focus();
   }
 
-  // Select the contiguous range between the anchor and index i in the current
-  // sorted+filtered order, adding every row in between to the checked set.
+  // Select the contiguous range between the anchor and index i in RENDER order,
+  // adding every card in between to the checked set.
+  //
+  // Render order, so a range drawn across a section boundary selects what the
+  // user actually dragged over rather than a different run of the flat filtered
+  // list (PRD FR-30). Selection is keyed by name, so a multi-workspace agent
+  // caught once is checked in every section it appears in (PRD FR-31).
   function rangeSelectTo(i) {
     var anchor = state.rangeAnchor;
-    if (anchor < 0 || anchor >= state.filtered.length) anchor = i;
+    if (anchor < 0 || anchor >= state.rendered.length) anchor = i;
     var lo = Math.min(anchor, i);
     var hi = Math.max(anchor, i);
     for (var k = lo; k <= hi; k++) {
-      var a = state.filtered[k];
+      var a = state.rendered[k];
       if (a) state.checked.add(a.name);
     }
     state.rangeAnchor = i;
@@ -4178,6 +4420,9 @@
     var f = state.filters;
     // Gallery is the default, so only List is worth carrying in the URL.
     if (state.view && state.view !== 'gallery') params.set('view', state.view);
+    // Likewise for grouping: 'none' is the default and stays out of the URL
+    // (PRD FR-32).
+    if (state.group && state.group !== 'none') params.set('group', state.group);
     if (f.role) params.set('role', f.role);
     if (f.source) params.set('source', f.source);
     if (f.assignment) params.set('assign', f.assignment);
@@ -4217,6 +4462,11 @@
     // (PRD FR11/FR33).
     state.view = VIEWS[p.get('view')] ? p.get('view') : 'gallery';
     reflectViewToggle();
+
+    // Same rule for grouping: an unknown value is discarded rather than
+    // rendering an empty roster.
+    state.group = GROUPS[p.get('group')] ? p.get('group') : 'none';
+    reflectGroupControl();
 
     var f = {
       health: new Set(),

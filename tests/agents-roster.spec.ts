@@ -1821,6 +1821,158 @@ test.describe('Agents collection controls', () => {
     await expect(button).toHaveAttribute('aria-expanded', 'false');
   });
 
+  test('grouping by workspace duplicates a multi-workspace agent and trails a Library section', async ({
+    page,
+    request
+  }) => {
+    const stamp = Date.now();
+    const shared = `PWGrp Shared ${stamp}`;
+    const loose = `PWGrp Loose ${stamp}`;
+    for (const n of [shared, loose]) {
+      await request.post(`${baseUrl}/api/agents`, {
+        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+      });
+    }
+    const wsIds: string[] = [];
+    for (const suffix of ['Alpha', 'Beta']) {
+      const r = await request.post(`${baseUrl}/api/workspaces`, {
+        data: { name: `PWGrp ${suffix} ${stamp}`, entry_agent_name: shared }
+      });
+      if (r.ok()) {
+        const j = await r.json();
+        wsIds.push(j?.folder?.id || j?.id || '');
+      }
+    }
+    expect(wsIds.filter(Boolean)).toHaveLength(2);
+
+    try {
+      await openAgents(page, '?group=workspace');
+      await expect(page.locator('.roster-section').first()).toBeVisible();
+
+      // One card per membership: a list may repeat an agent, and this is the
+      // deliberate difference from the Map, which draws it exactly once
+      // (FR-27).
+      const sharedCards = page.locator(`.roster-card[data-name="${shared}"]`);
+      await expect(sharedCards).toHaveCount(2);
+
+      // An agent in no workspace is in the library, not missing (FR-28), and
+      // that section sorts last however its name compares.
+      const sectionNames = await page
+        .locator('.roster-section__name')
+        .evaluateAll(els => els.map(e => e.textContent));
+      expect(sectionNames.at(-1)).toBe('Library');
+      const library = page.locator('.roster-section').last();
+      await expect(library.locator(`.roster-card[data-name="${loose}"]`)).toHaveCount(1);
+
+      // Checking one copy checks every copy, because selection is keyed by
+      // agent name (FR-31).
+      await sharedCards.first().locator('.roster-card__check').check();
+      await expect(page.locator(`.roster-card[data-name="${shared}"].is-checked`)).toHaveCount(2);
+      await expect(page.locator('#bulkCount')).toHaveText('1 selected');
+
+      // The grouping choice rides in the URL and comes back on reload (FR-32).
+      await expect.poll(() => new URL(page.url()).searchParams.get('group')).toBe('workspace');
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await expect(page.locator('#rosterGroup')).toHaveValue('workspace');
+      await expect(page.locator(`.roster-card[data-name="${shared}"]`)).toHaveCount(2);
+    } finally {
+      for (const id of wsIds.filter(Boolean)) {
+        await request
+          .delete(`${baseUrl}/api/workspaces/${encodeURIComponent(id)}`)
+          .catch(() => undefined);
+      }
+      for (const n of [shared, loose]) {
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
+      }
+    }
+  });
+
+  test('sections collapse, persist, and keep selection working across a boundary', async ({
+    page
+  }) => {
+    await openAgents(page, '?group=role');
+    const sections = page.locator('.roster-section');
+    await expect(sections.first()).toBeVisible();
+    const sectionCount = await sections.count();
+    expect(sectionCount).toBeGreaterThan(1);
+
+    // Shift-range across the first section's boundary into the second. Render
+    // order, not filtered order, is what the indices address (FR-30).
+    const cards = page.locator('.roster-card');
+    const firstSectionSize = await sections.first().locator('.roster-card').count();
+    const from = 0;
+    const to = firstSectionSize; // the first card of the second section
+    await cards.nth(from).locator('.roster-card__check').check();
+    await cards
+      .nth(to)
+      .locator('.roster-card__check')
+      .click({ modifiers: ['Shift'] });
+
+    const spanned = await cards
+      .evaluateAll((els, n) => els.slice(0, n + 1).map(e => (e as HTMLElement).dataset.name), to)
+      .then(names => new Set(names).size);
+    await expect(page.locator('#bulkCount')).toHaveText(`${spanned} selected`);
+    await page.locator('#rosterClearSelection').click();
+
+    // Collapsing renders the header and nothing else, so Select visible cannot
+    // reach agents nobody can see.
+    const head = sections.first().locator('.roster-section__head');
+    await expect(head).toHaveAttribute('aria-expanded', 'true');
+    await head.click();
+    await expect(sections.first().locator('.roster-section__head')).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    );
+    await expect(sections.first().locator('.roster-card')).toHaveCount(0);
+    // Focus lands on the header that replaced the one just pressed, rather than
+    // being dropped on the document by the re-render.
+    await expect(sections.first().locator('.roster-section__head')).toBeFocused();
+
+    const visibleAfter = await page
+      .locator('.roster-card')
+      .evaluateAll(els => new Set(els.map(e => (e as HTMLElement).dataset.name)).size);
+    await page.locator('#rosterSelectAll').click();
+    await expect(page.locator('#bulkCount')).toHaveText(`${visibleAfter} selected`);
+    await page.locator('#rosterClearSelection').click();
+
+    // Collapsed state is per viewer and survives a reload (FR-26).
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(
+      page.locator('.roster-section').first().locator('.roster-section__head')
+    ).toHaveAttribute('aria-expanded', 'false');
+
+    // Put it back so the persisted state does not leak into the next test.
+    await page.locator('.roster-section').first().locator('.roster-section__head').click();
+    await expect(
+      page.locator('.roster-section').first().locator('.roster-section__head')
+    ).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  test('grouping is presentation over the filtered result, not a second filter', async ({
+    page
+  }) => {
+    await openAgents(page, '?group=role&source=cli');
+
+    // Only the built-ins survive the filter, and grouping partitions exactly
+    // those — it never re-admits an agent the filters removed (FR-29).
+    const names = await page
+      .locator('.roster-card')
+      .evaluateAll(els => els.map(e => (e as HTMLElement).dataset.name));
+    for (const n of names) {
+      expect(['Claude Code', 'Codex', 'Gemini CLI']).toContain(n);
+    }
+    await expect(page.locator('.roster-section')).toHaveCount(1);
+
+    // Switching back to No grouping restores one flat grid and drops the
+    // parameter rather than carrying group=none around.
+    await page.locator('#rosterGroup').selectOption('none');
+    await expect(page.locator('.roster-section')).toHaveCount(0);
+    await expect(page.locator('#rosterList .agent-grid')).toHaveCount(1);
+    await expect.poll(() => new URL(page.url()).searchParams.get('group')).toBe(null);
+  });
+
   test('the workspace picker filters by real membership and survives a reload', async ({
     page,
     request

@@ -102,6 +102,18 @@
                     <option value="active-desc">Recently active</option>
                   </select>
                 </label>
+                <!-- Group by is a presentation over the same filtered, sorted
+                     result — not a second filter (FR-22/FR-29), so it belongs
+                     beside the view toggle rather than in the Filters panel. -->
+                <label class="view-sort view-group">
+                  <span class="visually-hidden">Group agents by</span>
+                  <select id="rosterGroup" aria-label="Group agents by">
+                    <option value="none">No grouping</option>
+                    <option value="workspace">By workspace</option>
+                    <option value="role">By role</option>
+                    <option value="status">By status</option>
+                  </select>
+                </label>
               </div>
 
               <button type="button" class="collection-filters-btn" id="filtersButton"
@@ -173,10 +185,13 @@
               </div>
 
               <!-- Gallery/List host. Both views render the same normalized model
-                   into this one element; List is a presentation mode on it. -->
-              <ul class="agent-grid" id="rosterList" role="list" aria-label="Agents">
+                   into this one element; List is a presentation mode on it.
+                   Ungrouped it holds a single .agent-grid list; grouped it holds
+                   one <section> per group, each with its own list, so a section
+                   header's aria-expanded has real content to point at. -->
+              <div class="roster-collection" id="rosterList">
                 <!-- agent cards injected here -->
-              </ul>
+              </div>
 
               <!-- Real loading state, shown until the one dashboard request settles. -->
               <div class="collection-state" id="rosterLoading">
@@ -345,6 +360,9 @@
   <script type="module" src="/js/modules/tag-input.js"></script>
   <script defer src="/js/modules/toast.js"></script>
   <script defer src="/js/modules/role-catalog.js"></script>
+  <!-- Workspace colour key, shared with the Workspace Map so a workspace reads
+       as the same place on both surfaces (FR-24). -->
+  <script defer src="/js/modules/workspace-palette.js"></script>
   <script defer src="/js/modules/stage-up-toast.js"></script>
   <!-- agent-avatar.js, character-catalog.js, agent-appearance.js, and
        character-picker.js all load from head.tmpl, which every page shares;
