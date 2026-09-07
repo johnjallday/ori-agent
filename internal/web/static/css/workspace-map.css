@@ -1875,6 +1875,23 @@
   box-shadow: inset 0 0 0 1px var(--ws-portrait-edge, rgba(255, 255, 255, 0.2));
   clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
 }
+/* A linked portrait (the Overview panel's roster and Commander) goes to that
+   agent's record. It keeps the portrait's exact geometry — only the affordances
+   are added — so linking changes nothing about how the panel reads at rest. */
+.ws-map-av.is-link {
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.ws-map-av.is-link:hover {
+  box-shadow: inset 0 0 0 1px var(--av, #46d39a);
+}
+
+.ws-map-av.is-link:focus-visible {
+  outline: 2px solid var(--av, #46d39a);
+  outline-offset: 2px;
+}
+
 .ws-map-av-figure {
   width: 45px;
   height: 52px;

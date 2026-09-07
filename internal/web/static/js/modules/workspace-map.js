@@ -2591,7 +2591,20 @@
     );
   }
 
-  function avatarHTML(name, extraClass) {
+  // Where an agent's own record lives. The Agents page reads ?agent= on load and
+  // opens that agent, so this is a URL a user could also have reached by hand
+  // (agents-page-ux FR-38/FR-41).
+  function agentRecordHref(name) {
+    var trimmed = String(name == null ? '' : name).trim();
+    if (!trimmed) return '';
+    return '/agents?agent=' + encodeURIComponent(trimmed);
+  }
+
+  // `href` is opt-in: only the Overview panel's roster and Commander link, so
+  // portraits drawn elsewhere on the map gain no tab stop. The shared-renderer
+  // path and the local fallback below must agree, or the link would appear on
+  // production pages and vanish on the ones still using the fallback.
+  function avatarHTML(name, extraClass, href) {
     // Production pages load the small shared renderer before this Map script so
     // Workspace Details can use the exact same portrait without loading the
     // whole map implementation. Keep the local fallback for isolated consumers
@@ -2600,16 +2613,24 @@
     if (shared && typeof shared.markup === 'function') {
       return shared.markup(name, {
         isKeeper: extraClass === 'is-keeper',
-        className: extraClass === 'is-keeper' ? '' : extraClass
+        className: extraClass === 'is-keeper' ? '' : extraClass,
+        href: href || ''
       });
     }
 
     var pal = paletteFor(name);
     var safeName = escapeHtml(name);
+    var linked = /^\/[^/\\]/.test(String(href || ''));
+    var tag = linked ? 'a' : 'span';
     return (
-      '<span class="ws-map-av' +
+      '<' +
+      tag +
+      ' class="ws-map-av' +
       (extraClass ? ' ' + extraClass : '') +
-      '" style="--av:' +
+      (linked ? ' is-link' : '') +
+      '"' +
+      (linked ? ' href="' + escapeHtml(href) + '"' : '') +
+      ' style="--av:' +
       pal.key +
       '" title="' +
       safeName +
@@ -2625,7 +2646,9 @@
       '">' +
       safeName +
       '</span>' +
-      '</span>'
+      '</' +
+      tag +
+      '>'
     );
   }
 
@@ -2801,9 +2824,12 @@
     var description = String(ws.description || '').trim();
     var delLabel = isGroup(ws) ? 'Delete group' : 'Delete workspace';
 
+    // The Overview panel's Commander and roster are the two places a portrait
+    // stands for an agent you might want to go and look at, so these — and only
+    // these — link to that agent's record (FR-38/FR-39).
     var keeper = entry
       ? '<div class="ws-map-ov-keeper">' +
-        avatarHTML(entry, 'is-keeper') +
+        avatarHTML(entry, 'is-keeper', agentRecordHref(entry)) +
         '<div class="ws-map-ov-keeper-meta">' +
         '<div class="ws-map-ov-keeper-badge">★ Locked · can&#39;t remove</div></div></div>'
       : '<span class="ws-map-ov-none">No Commander</span>';
@@ -2811,7 +2837,7 @@
     var roster = agents.length
       ? agents
           .map(function (a) {
-            return avatarHTML(a);
+            return avatarHTML(a, '', agentRecordHref(a));
           })
           .join('')
       : '<span class="ws-map-ov-none">No agents yet</span>';
@@ -7627,10 +7653,13 @@
     districtHTML: districtHTML,
     overviewBodyHTML: overviewBodyHTML,
     // Home's current Map context modal reuses this exact inline portrait rather
-    // than maintaining a second generated appearance for the same name.
+    // than maintaining a second generated appearance for the same name. It does
+    // not pass an href, so that portrait stays a span.
     agentPortraitHTML: function (name, isKeeper) {
       return avatarHTML(name, isKeeper ? 'is-keeper' : '');
     },
+    // Test-only seam for the portrait's link behaviour (agents-page-ux FR-38).
+    avatarHTML: avatarHTML,
     selBarHTML: selBarHTML,
     hqSiteView: hqSiteView,
     hqSiteHTML: hqSiteHTML,

@@ -1735,6 +1735,93 @@ test.describe('Agents collection controls', () => {
     await expect(page.locator('.roster-card').first()).toBeVisible();
   });
 
+  test('right-click opens a card menu that survives the opening gesture', async ({ page }) => {
+    await openAgents(page);
+    const card = page.locator('.roster-card').first();
+    await card.click({ button: 'right' });
+
+    const menu = page.locator('[data-roster-menu]');
+    // The known failure is that the opening right-click reaches the menu's own
+    // dismissal listeners while still propagating, closing it in the same
+    // gesture (FR-36). A menu that is visible a moment later is the proof.
+    await expect(menu).toBeVisible();
+    await page.waitForTimeout(150);
+    await expect(menu).toBeVisible();
+
+    await expect(menu.locator('[data-menu-action]')).toHaveCount(6);
+    await expect(menu.locator('[data-menu-action="open"]')).toBeFocused();
+  });
+
+  test('the card menu is fully operable by keyboard and skips disabled items', async ({ page }) => {
+    await openAgents(page);
+    // A built-in: Set role and Delete are present but disabled (FR-35).
+    const builtIn = page.locator('.roster-card[data-name="Claude Code"]');
+    await builtIn.click({ button: 'right' });
+    const menu = page.locator('[data-roster-menu]');
+    await expect(menu).toBeVisible();
+
+    await expect(menu.locator('[data-menu-action="delete"]')).toHaveAttribute(
+      'aria-disabled',
+      'true'
+    );
+    await expect(menu.locator('[data-menu-action="set-role"]')).toHaveAttribute(
+      'aria-disabled',
+      'true'
+    );
+
+    // Arrow navigation steps over the disabled items rather than landing on
+    // them, and wraps at both ends (FR-34).
+    await expect(menu.locator('[data-menu-action="open"]')).toBeFocused();
+    await page.keyboard.press('End');
+    await expect(menu.locator('[data-menu-action="assign"]')).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    await expect(menu.locator('[data-menu-action="favorite"]')).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(menu.locator('[data-menu-action="assign"]')).toBeFocused();
+
+    // Escape closes and hands focus back to the card it was opened from.
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await expect(builtIn.locator('.roster-card__open')).toBeFocused();
+  });
+
+  test('a built-in cannot be deleted from the card menu', async ({ page }) => {
+    await openAgents(page);
+    await page.locator('.roster-card[data-name="Codex"]').click({ button: 'right' });
+    const menu = page.locator('[data-roster-menu]');
+    await expect(menu).toBeVisible();
+
+    // Clicking a disabled item does nothing at all: no delete flow, and the
+    // menu is not dismissed as though something had been chosen.
+    await menu.locator('[data-menu-action="delete"]').click({ force: true });
+    await expect(page.locator('#bulkDeleteDialog')).toBeHidden();
+    await expect(menu).toBeVisible();
+  });
+
+  test('the card menu favorites one agent in two clicks', async ({ page, request }) => {
+    const name = `PWMenuFav${Date.now()}`;
+    await request.post(`${baseUrl}/api/agents`, {
+      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+    });
+    try {
+      await openAgents(page);
+      await page.locator('#rosterSearch').fill(name);
+      const card = page.locator(`.roster-card[data-name="${name}"]`);
+      await expect(card).toBeVisible();
+      await expect(card.locator('.agent-card__fav')).toHaveCount(0);
+
+      await card.click({ button: 'right' });
+      await page.locator('[data-menu-action="favorite"]').click();
+
+      // Right-click, Favorite. No checkbox, no walk to the bulk bar.
+      await expect(card.locator('.agent-card__fav')).toBeVisible();
+    } finally {
+      await request
+        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
+        .catch(() => undefined);
+    }
+  });
+
   test('the toolbar is four controls and the rest live behind Filters', async ({ page }) => {
     await openAgents(page);
 

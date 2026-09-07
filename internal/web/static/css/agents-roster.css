@@ -437,6 +437,24 @@ body.agents-roster-page {
   outline-offset: 1px;
 }
 
+/* ---- Card context menu ---------------------------------------------------- */
+
+/* The host is a zero-size anchor: the menu inside it is position:fixed, from
+   the shared .ori-context-menu component in context-menu.css, so the host only
+   needs to exist and take no space. */
+.roster-menu-host {
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+/* Above the Inspector, which is 10100 in sheet mode. A menu opened from a card
+   underneath a raised Inspector would otherwise be invisible — the same trap
+   that put dialogs behind full-screen surfaces on the map. */
+.roster-menu {
+  z-index: 10200;
+}
+
 /* ---- Filters button + panel ----------------------------------------------- */
 
 .collection-filters-btn {

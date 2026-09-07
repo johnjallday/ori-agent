@@ -300,6 +300,11 @@
           </aside>
         </div>
 
+        <!-- Card context-menu host. Inside .roster-layout so the accessibility
+             spec's axe run reaches an open menu, and outside the collection so
+             a roster re-render cannot tear a menu down mid-interaction. -->
+        <div class="roster-menu-host" id="rosterMenuHost" data-roster-menu-host></div>
+
         <!-- Bulk action bar: revealed when at least one agent is checked. -->
         <div class="bulk-bar" id="bulkBar" role="region" aria-label="Bulk actions" hidden>
           <div class="bulk-bar__count" id="bulkCount" aria-live="polite"></div>

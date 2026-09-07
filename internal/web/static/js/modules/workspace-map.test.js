@@ -1805,7 +1805,9 @@ test('overviewBodyHTML renders generated pocket residents for the Commander and 
     skill_count: 3
   });
 
-  const portraits = html.match(/<span class="ws-map-av(?: [^"]*)?"/g) || [];
+  // <a> rather than <span>: the Overview panel's portraits link to the agent's
+  // record (agents-page-ux FR-38/FR-39). Everything inside them is unchanged.
+  const portraits = html.match(/<a class="ws-map-av(?: [^"]*)?"/g) || [];
   assert.equal(portraits.length, 3, 'one Commander portrait plus one per supplied agent');
   assert.equal(
     (html.match(/<svg class="ws-map-av-figure"/g) || []).length,
@@ -1835,16 +1837,16 @@ test('overviewBodyHTML renders generated pocket residents for the Commander and 
   const rosterEnd = html.indexOf('<div class="ws-map-ov-row">', rosterStart);
   const roster = html.slice(rosterStart, rosterEnd);
   assert.equal(
-    (roster.match(/<span class="ws-map-av(?: [^"]*)?"/g) || []).length,
+    (roster.match(/<a class="ws-map-av(?: [^"]*)?"/g) || []).length,
     2,
     'the roster does not add or drop agent portraits'
   );
-  assert.equal((html.match(/ws-map-av is-keeper/g) || []).length, 1);
+  assert.equal((html.match(/ws-map-av is-keeper is-link/g) || []).length, 1);
   assert.match(html, /Locked · can&#39;t remove/);
   assert.match(html, /Agents · 2/);
 
   const leadPortraits =
-    html.match(/<span class="ws-map-av[^"]*" style="--av:[^"]+" title="Research Lead">/g) || [];
+    html.match(/<a class="ws-map-av[^"]*"[^>]*style="--av:[^"]+" title="Research Lead">/g) || [];
   assert.equal(leadPortraits.length, 2, 'the Commander also remains in the roster');
   assert.equal(
     leadPortraits[0].match(/style="([^"]+)"/)[1],
@@ -1929,7 +1931,44 @@ test('overviewBodyHTML keeps the full agent name available when portrait labels 
     html,
     new RegExp('class="ws-map-av-label" title="' + longName + '">' + longName + '<\\/span>')
   );
-  assert.match(html, new RegExp('class="ws-map-av"[^>]*title="' + longName + '"'));
+  // The Overview roster's portraits are links to the agent's own record
+  // (agents-page-ux FR-38), so the outer element carries is-link and the title
+  // rides on the anchor rather than on a span.
+  assert.match(html, new RegExp('class="ws-map-av is-link"[^>]*title="' + longName + '"'));
+});
+
+test('the Overview roster and Commander link to the agent record, and nothing else does', () => {
+  const { overviewBodyHTML, avatarHTML } = loadOriWorkspaceMap();
+  const html = overviewBodyHTML({
+    id: 'linked',
+    name: 'Studio',
+    entry_agent_name: 'Atlas',
+    agents: ['Beacon', 'Delta']
+  });
+
+  // Commander (FR-39) and every roster portrait (FR-38) reach /agents?agent=,
+  // which is a URL the Agents page already reads on load — arriving from here
+  // leaves the user somewhere they could have got to by hand (FR-41).
+  for (const name of ['Atlas', 'Beacon', 'Delta']) {
+    assert.match(html, new RegExp('href="/agents\\?agent=' + name + '"'));
+  }
+  assert.equal(html.match(/class="ws-map-av[^"]*is-link/g).length, 3);
+
+  // A portrait drawn without an href stays a span, so surfaces that did not ask
+  // for a link do not silently gain a tab stop.
+  const plain = avatarHTML('Solo', '');
+  assert.match(plain, /^<span class="ws-map-av"/);
+  assert.ok(!plain.includes('is-link'));
+  assert.ok(!plain.includes('href='));
+});
+
+test('a portrait href is refused unless it is a same-origin absolute path', () => {
+  const { avatarHTML } = loadOriWorkspaceMap();
+  for (const bad of ['javascript:alert(1)', 'https://evil.test/x', '//evil.test/x', 'agents']) {
+    const html = avatarHTML('Solo', '', bad);
+    assert.match(html, /^<span class="ws-map-av"/, bad + ' must not become a link');
+    assert.ok(!html.includes('href='), bad + ' must not reach an href attribute');
+  }
 });
 
 test('Workspace Map CSS keeps generated portraits compact, legible, and responsive', () => {

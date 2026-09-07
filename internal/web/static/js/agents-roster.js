@@ -186,6 +186,7 @@
       filtersBadge: document.getElementById('filtersBadge'),
       filtersClose: document.getElementById('filtersClose'),
       filtersDone: document.getElementById('filtersDone'),
+      menuHost: document.getElementById('rosterMenuHost'),
       emptyMsg: document.getElementById('rosterEmptyMsg'),
       emptyClearFilters: document.getElementById('rosterEmptyClearFilters'),
       emptyCreate: document.getElementById('rosterEmptyCreate')
@@ -238,6 +239,15 @@
     els.list.addEventListener('click', onListClick);
     els.list.addEventListener('keydown', onListKeydown);
     els.list.addEventListener('change', onListChange);
+    // One delegated listener per gesture, on the collection rather than per
+    // card: cards are rebuilt on every render, so per-card binding would be
+    // lost on the next group-by or collapse.
+    els.list.addEventListener('contextmenu', onCardContextMenu);
+    els.list.addEventListener('keydown', onCardMenuKey);
+    els.list.addEventListener('touchstart', onCardTouchStart, { passive: true });
+    els.list.addEventListener('touchmove', onCardTouchMove, { passive: true });
+    els.list.addEventListener('touchend', cancelLongPress);
+    els.list.addEventListener('touchcancel', cancelLongPress);
     els.newAgentBtn.addEventListener('click', openCreate);
     els.createCancel.addEventListener('click', closeCreate);
     els.stageDelete.addEventListener('click', onDeleteClick);
@@ -3223,6 +3233,406 @@
         updateBulkBar();
       }
     }
+  }
+
+  /* ---- card context menu --------------------------------------------------- */
+  //
+  // A port of the Workspace Map's menu contract (#317): the same item-builder
+  // shape, the same roving-tabindex arrow navigation that skips disabled items,
+  // the same viewport clamping, and the same rule that every dismissal route
+  // lands on one close function so focus returns exactly once.
+  //
+  // Three things carried over deliberately:
+  //
+  //   1. The menu mounts in a host OUTSIDE the collection, so a roster
+  //      re-render — which grouping and collapsing both trigger — cannot tear
+  //      the menu down while someone is arrowing through it.
+  //   2. One delegated `contextmenu` listener resolves its card with closest().
+  //      Cards are rebuilt on every render, so per-card binding would be lost
+  //      or doubled.
+  //   3. Every item routes to an action that already exists. The menu adds no
+  //      capability the page did not already have; it removes the walk to the
+  //      bulk bar for a single agent.
+
+  var MENU_EDGE_PAD = 8;
+  // Used only when the menu cannot be measured (before layout, or in a stub
+  // DOM). Flipping on an estimate beats not flipping at all.
+  var MENU_FALLBACK_SIZE = { width: 220, height: 250 };
+  // Press-and-hold that counts as a long press at touch widths (FR-37).
+  var LONG_PRESS_MS = 500;
+  // Movement above this cancels it, so a scroll is never read as a long press.
+  var LONG_PRESS_SLOP = 10;
+
+  var menuState = null;
+  var longPress = null;
+
+  function menuDivider() {
+    return { divider: true };
+  }
+
+  // The items for one agent. Delete is present but disabled for a built-in,
+  // rather than absent: the action's existence stays discoverable while the
+  // reason it cannot run is visible (FR-35).
+  function cardMenuItems(vm) {
+    return [
+      { label: 'Open', action: 'open' },
+      { label: 'Open full page', action: 'open-full' },
+      menuDivider(),
+      { label: vm.favorite ? 'Unfavorite' : 'Favorite', action: 'favorite' },
+      { label: 'Set role…', action: 'set-role', disabled: vm.builtIn },
+      { label: 'Assign to workspace…', action: 'assign' },
+      menuDivider(),
+      {
+        label: 'Delete',
+        action: 'delete',
+        variant: 'danger',
+        disabled: vm.builtIn
+      }
+    ];
+  }
+
+  function menuHTML(items, label) {
+    var body = items
+      .map(function (item) {
+        if (!item) return '';
+        if (item.divider) return '<div class="ori-context-divider" role="separator"></div>';
+        return (
+          '<button type="button" class="ori-context-item roster-menu-item' +
+          (item.variant === 'danger' ? ' ori-context-danger' : '') +
+          '" role="menuitem" tabindex="-1" data-menu-action="' +
+          esc(item.action) +
+          '"' +
+          (item.disabled ? ' aria-disabled="true"' : '') +
+          '>' +
+          esc(item.label) +
+          '</button>'
+        );
+      })
+      .join('');
+    return (
+      '<div class="ori-context-menu roster-menu" data-roster-menu role="menu" aria-label="' +
+      esc(label) +
+      '">' +
+      body +
+      '</div>'
+    );
+  }
+
+  function menuItemElements(menu) {
+    return Array.prototype.slice.call(menu.querySelectorAll('[data-menu-action]'));
+  }
+
+  function isMenuItemDisabled(el) {
+    return !!(el && el.getAttribute && el.getAttribute('aria-disabled') === 'true');
+  }
+
+  // Roving tabindex: exactly one item is tabbable, and it is the focused one.
+  function focusMenuItem(index) {
+    if (!menuState || !menuState.items.length) return;
+    var next = Math.max(0, Math.min(index, menuState.items.length - 1));
+    menuState.index = next;
+    menuState.items.forEach(function (el, i) {
+      el.setAttribute('tabindex', i === next ? '0' : '-1');
+    });
+    menuState.items[next].focus();
+  }
+
+  // Wraps at both ends and steps over disabled items, which stay visible and
+  // announced (FR-34).
+  function nextEnabledIndex(from, step) {
+    if (!menuState || !menuState.items.length) return -1;
+    var count = menuState.items.length;
+    for (var i = 1; i <= count; i++) {
+      var candidate = (((from + step * i) % count) + count) % count;
+      if (!isMenuItemDisabled(menuState.items[candidate])) return candidate;
+    }
+    return -1;
+  }
+
+  function firstEnabledIndex(step) {
+    return nextEnabledIndex(step > 0 ? -1 : 0, step);
+  }
+
+  function listenWhileMenuOpen(target, type, handler, capture) {
+    target.addEventListener(type, handler, capture);
+    if (menuState) {
+      menuState.teardown.push(function () {
+        target.removeEventListener(type, handler, capture);
+      });
+    }
+  }
+
+  function menuViewport() {
+    return {
+      width: window.innerWidth || 1024,
+      height: window.innerHeight || 768
+    };
+  }
+
+  function measureMenu(menu) {
+    var rect = menu.getBoundingClientRect();
+    var width = rect.width || menu.offsetWidth || 0;
+    var height = rect.height || menu.offsetHeight || 0;
+    return {
+      width: width > 0 ? width : MENU_FALLBACK_SIZE.width,
+      height: height > 0 ? height : MENU_FALLBACK_SIZE.height
+    };
+  }
+
+  // Flip past the anchor when the menu would overrun an edge, then clamp, so it
+  // can never be opened partly off screen.
+  function menuPosition(point, size, viewport) {
+    var left = point.x + size.width > viewport.width ? point.x - size.width : point.x;
+    var top = point.y + size.height > viewport.height ? point.y - size.height : point.y;
+    return {
+      left: clampToRange(left, MENU_EDGE_PAD, viewport.width - size.width - MENU_EDGE_PAD),
+      top: clampToRange(top, MENU_EDGE_PAD, viewport.height - size.height - MENU_EDGE_PAD)
+    };
+  }
+
+  function clampToRange(value, lo, hi) {
+    if (hi < lo) return lo;
+    return Math.max(lo, Math.min(hi, value));
+  }
+
+  function insideOpenMenu(node) {
+    return !!(node && node.closest && node.closest('[data-roster-menu]'));
+  }
+
+  // Every dismissal route lands here — Escape, a click or right-click outside,
+  // choosing an item, a resize — so focus returns to the card exactly once
+  // however the menu was closed.
+  function closeCardMenu(opts) {
+    var st = menuState;
+    if (!st) return;
+    menuState = null;
+    st.teardown.forEach(function (off) {
+      off();
+    });
+    st.host.innerHTML = '';
+    var restore = !(opts && opts.restoreFocus === false);
+    if (restore && st.origin && document.contains(st.origin)) st.origin.focus();
+  }
+
+  function activateMenuItem(el) {
+    if (!menuState || !el || isMenuItemDisabled(el)) return;
+    var action = el.getAttribute('data-menu-action');
+    var name = menuState.name;
+    // Close first, so focus is back on the card before a dialog or a navigation
+    // starts from it.
+    closeCardMenu();
+    runCardMenuAction(action, name);
+  }
+
+  function runCardMenuAction(action, name) {
+    var agent = state.byName[name];
+    if (!agent) return;
+    var vm = viewFor(agent);
+    switch (action) {
+      case 'open':
+        selectAgent(name, { openInspector: true });
+        return;
+      case 'open-full':
+        window.location.href = '/agents/' + encodeURIComponent(name);
+        return;
+      case 'favorite':
+        // One agent through the same endpoint the bulk bar uses, as a
+        // one-element batch. Two clicks to favorite from the roster instead of
+        // check-walk-confirm.
+        announce(vm.favorite ? 'Unfavoriting…' : 'Favoriting…');
+        submitBulkMetadata(
+          { operation: 'set_favorite', agent_names: [name], favorite: !vm.favorite },
+          null,
+          null
+        );
+        return;
+      case 'set-role':
+        // The bulk role dialog, scoped to this one agent. Reusing it keeps one
+        // role picker on the page rather than a second that can drift.
+        state.checked.clear();
+        state.checked.add(name);
+        reflectCheckedInDom();
+        updateBulkBar();
+        openBulkTags('role');
+        return;
+      case 'assign':
+        // Workspace membership is edited on the detail page, which is the
+        // editor of record. The tab travels in the URL so the user lands on
+        // the membership editor rather than the top of the page.
+        window.location.href = '/agents/' + encodeURIComponent(name) + '?tab=workspaces';
+        return;
+      case 'delete':
+        // The existing confirmation flow, scoped to this agent, so a
+        // context-menu delete is exactly as guarded as a bulk delete.
+        state.checked.clear();
+        state.checked.add(name);
+        reflectCheckedInDom();
+        updateBulkBar();
+        openBulkDelete();
+        return;
+      default:
+    }
+  }
+
+  function handleMenuKey(e) {
+    if (!menuState) return;
+    var handled = true;
+    switch (e.key) {
+      case 'ArrowDown':
+        focusMenuItem(nextEnabledIndex(menuState.index, 1));
+        break;
+      case 'ArrowUp':
+        focusMenuItem(nextEnabledIndex(menuState.index, -1));
+        break;
+      case 'Home':
+        focusMenuItem(firstEnabledIndex(1));
+        break;
+      case 'End':
+        focusMenuItem(firstEnabledIndex(-1));
+        break;
+      case 'Enter':
+      case ' ':
+      case 'Spacebar':
+        activateMenuItem(menuState.items[menuState.index]);
+        break;
+      case 'Escape':
+      case 'Tab':
+        closeCardMenu();
+        break;
+      default:
+        handled = false;
+    }
+    // Enter and Space are prevented too: a <button> would otherwise synthesize
+    // a click and run the action a second time.
+    if (handled) e.preventDefault();
+  }
+
+  function bindMenuInteractions() {
+    var st = menuState;
+    st.items.forEach(function (el) {
+      el.addEventListener('click', function (event) {
+        event.preventDefault();
+        activateMenuItem(el);
+      });
+    });
+    listenWhileMenuOpen(st.menu, 'keydown', handleMenuKey);
+
+    // The gesture that opened this menu is STILL PROPAGATING while these
+    // listeners are added. A listener attached to a node the event has not
+    // reached yet is called for that same event, so without the identity guard
+    // the menu would dismiss itself on the way up to the document — opening and
+    // closing in one gesture. This is the failure the map hit first; it is
+    // guarded the same way here rather than by a setTimeout, which would leave
+    // a window in which an outside click does nothing.
+    var openEvent = st.openEvent;
+    listenWhileMenuOpen(document, 'mousedown', function (event) {
+      if (event === openEvent) return;
+      if (insideOpenMenu(event.target)) return;
+      closeCardMenu();
+    });
+    listenWhileMenuOpen(document, 'contextmenu', function (event) {
+      if (event === openEvent) return;
+      if (insideOpenMenu(event.target)) return;
+      closeCardMenu();
+    });
+    listenWhileMenuOpen(document, 'keydown', function (event) {
+      if (event === openEvent) return;
+      if (event.key !== 'Escape') return;
+      closeCardMenu();
+    });
+    listenWhileMenuOpen(window, 'resize', function () {
+      closeCardMenu();
+    });
+    // Scrolling would strand the menu away from the card it belongs to.
+    listenWhileMenuOpen(window, 'scroll', function () {
+      closeCardMenu();
+    });
+  }
+
+  function openCardMenu(card, at, event) {
+    closeCardMenu({ restoreFocus: false });
+    if (!els.menuHost || !card) return false;
+    var name = card.dataset.name;
+    var agent = state.byName[name];
+    if (!agent) return false;
+    var vm = viewFor(agent);
+
+    els.menuHost.innerHTML = menuHTML(cardMenuItems(vm), 'Actions for ' + vm.name);
+    var menu = els.menuHost.querySelector('[data-roster-menu]');
+    if (!menu) {
+      els.menuHost.innerHTML = '';
+      return false;
+    }
+    menuState = {
+      host: els.menuHost,
+      menu: menu,
+      items: menuItemElements(menu),
+      index: 0,
+      name: name,
+      origin: card.querySelector('.roster-card__open'),
+      openEvent: event || null,
+      teardown: []
+    };
+    var placed = menuPosition(at, measureMenu(menu), menuViewport());
+    menu.style.left = placed.left + 'px';
+    menu.style.top = placed.top + 'px';
+    bindMenuInteractions();
+    focusMenuItem(firstEnabledIndex(1));
+    return true;
+  }
+
+  function onCardContextMenu(e) {
+    var card = e.target.closest('.roster-card');
+    if (!card) return;
+    e.preventDefault();
+    openCardMenu(card, { x: e.clientX, y: e.clientY }, e);
+  }
+
+  // Keyboard users get the same menu from the same place: the ContextMenu key,
+  // or Shift+F10, anchored to the card rather than to a cursor that does not
+  // exist (FR-34/FR-87).
+  function onCardMenuKey(e) {
+    if (e.key !== 'ContextMenu' && !(e.key === 'F10' && e.shiftKey)) return;
+    var card = e.target.closest('.roster-card');
+    if (!card) return;
+    e.preventDefault();
+    var rect = card.getBoundingClientRect();
+    openCardMenu(card, { x: rect.left + 12, y: rect.top + rect.height - 8 }, e);
+  }
+
+  // Long press opens the same menu where there is no right-click (FR-37).
+  // Cancelled by movement, so a scroll started on a card is still a scroll.
+  function onCardTouchStart(e) {
+    var card = e.target.closest('.roster-card');
+    if (!card || !e.touches || e.touches.length !== 1) return;
+    var touch = e.touches[0];
+    cancelLongPress();
+    longPress = {
+      card: card,
+      x: touch.clientX,
+      y: touch.clientY,
+      timer: window.setTimeout(function () {
+        longPress = null;
+        openCardMenu(card, { x: touch.clientX, y: touch.clientY }, null);
+      }, LONG_PRESS_MS)
+    };
+  }
+
+  function onCardTouchMove(e) {
+    if (!longPress || !e.touches || !e.touches.length) return;
+    var t = e.touches[0];
+    if (
+      Math.abs(t.clientX - longPress.x) > LONG_PRESS_SLOP ||
+      Math.abs(t.clientY - longPress.y) > LONG_PRESS_SLOP
+    ) {
+      cancelLongPress();
+    }
+  }
+
+  function cancelLongPress() {
+    if (!longPress) return;
+    window.clearTimeout(longPress.timer);
+    longPress = null;
   }
 
   // Move keyboard focus to the open button of the card at RENDER index i.
