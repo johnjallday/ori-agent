@@ -42,7 +42,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.12'
+          go-version-file: go.mod
           cache: true
 
       - name: Run go fmt
@@ -112,7 +112,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.12'
+          go-version-file: go.mod
           cache: true
 
       - name: Set up Node.js
@@ -200,6 +200,8 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
+        # Keep this value as a stable required-check label. setup-go reads the
+        # real toolchain from go.mod so dependency updates cannot desync CI.
         go-version: ['1.25.12']
 
     steps:
@@ -209,7 +211,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version-file: go.mod
           cache: true
 
       - name: Download dependencies
@@ -279,7 +281,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.12'
+          go-version-file: go.mod
           cache: true
 
       - name: Download dependencies
@@ -308,7 +310,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.12'
+          go-version-file: go.mod
           cache: true
 
       - name: Download dependencies
@@ -334,6 +336,8 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        # Keep this value as a stable required-check label. setup-go reads the
+        # real toolchain from go.mod so dependency updates cannot desync CI.
         go-version: ['1.25.12']
 
     steps:
@@ -343,7 +347,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version-file: go.mod
           cache: true
 
       - name: Download dependencies
@@ -387,7 +391,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.12'
+          go-version-file: go.mod
 
       - name: Scan PR base
         uses: securego/gosec@598d6146b91b2370c6f11f7d3cb256119d8cbfc4 # pinned action/image: gosec 2.29.0
@@ -429,7 +433,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.12'
+          go-version-file: go.mod
 
       # -no-fail leaves finding severity to code scanning's PR gate. Scanner
       # execution and SARIF upload errors themselves must fail the job.
