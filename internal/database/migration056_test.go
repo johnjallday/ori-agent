@@ -116,11 +116,14 @@ func TestMigration056UpgradesV55WithoutChangingExistingRows(t *testing.T) {
 	`); err != nil {
 		t.Fatalf("seed existing row: %v", err)
 	}
-	// Rewind to v55 by removing exactly what migration 56 adds.
+	// Rewind to v55 by removing exactly what migration 56 adds. The version
+	// delete is `> 55` rather than `= 56` so a future migration does not turn
+	// this into a test that silently re-applies nothing: the runner resolves the
+	// current version with MAX(version).
 	for _, statement := range []string{
 		`DROP TABLE agent_map_positions`,
 		`DROP TABLE agent_map_layouts`,
-		`DELETE FROM schema_migrations WHERE version = 56`,
+		`DELETE FROM schema_migrations WHERE version > 55`,
 	} {
 		if _, err := staging.ExecContext(ctx, statement); err != nil {
 			t.Fatalf("rewind to v55: %v", err)

@@ -162,6 +162,8 @@ func TestMigration054UpgradesV53WithoutChangingExistingRows(t *testing.T) {
 		t.Fatalf("seed existing row: %v", err)
 	}
 	for _, statement := range []string{
+		`DROP TABLE agent_map_positions`,
+		`DROP TABLE agent_map_layouts`,
 		`DROP TABLE sample_library_operation_receipt`,
 		`DROP TABLE sample_library_review_receipt`,
 		`DROP TABLE sample_library_child_copy`,
@@ -172,12 +174,15 @@ func TestMigration054UpgradesV53WithoutChangingExistingRows(t *testing.T) {
 		`DROP TABLE sample_library_entry`,
 		`DROP TABLE sample_library_root`,
 		`DROP TABLE sample_library_state`,
-		`DELETE FROM schema_migrations WHERE version = 55`,
 		`DROP TABLE setup_journey_review_receipt`,
 		`DROP TABLE setup_journey_declaration_migration_receipt`,
 		`DROP TABLE setup_journey_operation_receipt`,
 		`DROP TABLE setup_journey_run`,
-		`DELETE FROM schema_migrations WHERE version = 54`,
+		// Every version above 53, not an enumerated list. The runner resolves
+		// the current version with MAX(version), so leaving any higher row
+		// behind pins it there and it re-applies nothing — which is how adding
+		// migration 56 broke this test while changing nothing it tests.
+		`DELETE FROM schema_migrations WHERE version > 53`,
 	} {
 		if _, err := staging.ExecContext(ctx, statement); err != nil {
 			t.Fatalf("rewind to v53: %v", err)
