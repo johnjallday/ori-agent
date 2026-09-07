@@ -545,25 +545,42 @@ test.describe('Agents gallery', () => {
         String(agents.length - needs - disabled)
       );
 
-      // Card facts match this agent's own record, field for field.
-      const record = agents.find(a => a.name === rich);
+      // A card states exactly four facts: who, role, where, ready? (FR-1).
       const target = card(page, rich);
       await expect(target.locator('.agent-card__name')).toHaveText(rich);
-      await expect(target.locator('.agent-card__status')).toContainText('Active');
-      await expect(target.locator('.agent-card__class')).toContainText('Researcher');
-      await expect(target.locator('.agent-card__class')).toContainText('Lv 0');
-      await expect(target.locator('.agent-card__purpose')).toHaveText(record.metadata.description);
-      await expect(target.locator('.agent-card__model')).toHaveText(record.model);
-
-      // An agent with no description says so instead of borrowing the role's
-      // tagline, and an unattached agent reads as library-only (FR20/FR22).
-      const bareCard = card(page, bare);
-      await expect(bareCard.locator('.agent-card__purpose')).toHaveText('No description yet');
-      await expect(bareCard.locator('.agent-card__purpose')).toHaveClass(/is-missing/);
-      await expect(bareCard.locator('.agent-card__pill')).toHaveText('Library only');
-      await expect(bareCard.locator('.agent-card__toolbox-value')).toHaveText(
-        'No capabilities listed'
+      await expect(target.locator('.agent-card__status')).toContainText('Ready');
+      await expect(target.locator('.agent-card__ident .agent-card__class')).toContainText(
+        'Researcher'
       );
+      await expect(target.locator('.agent-card__ident .agent-card__class')).toContainText('Lv 0');
+
+      // Purpose, capability summary, model, and last activity moved to the
+      // Inspector, so the card must no longer render any of them (FR-2).
+      await expect(target.locator('.agent-card__purpose')).toHaveCount(0);
+      await expect(target.locator('.agent-card__toolbox')).toHaveCount(0);
+      await expect(target.locator('.agent-card__model')).toHaveCount(0);
+      await expect(target.locator('.agent-card__activity')).toHaveCount(0);
+
+      // The removed facts survive for a screen reader on the open control's
+      // accessible name, which is the whole reason they may leave the card
+      // (FR-10).
+      const record = agents.find(a => a.name === rich);
+      const spoken = await target.locator('.roster-card__open').getAttribute('aria-label');
+      expect(spoken).toContain(record.model);
+      expect(spoken).toContain('Ready');
+
+      // An absent fact is an absent slot: no italic "No description yet", no
+      // "No capabilities listed", and no section labels (FR-4/FR-6).
+      const bareCard = card(page, bare);
+      await expect(bareCard.locator('.agent-card__pill')).toHaveText('Library only');
+      await expect(bareCard.locator('.agent-card__section-label')).toHaveCount(0);
+      await expect(bareCard).not.toContainText('No description yet');
+      await expect(bareCard).not.toContainText('No capabilities listed');
+      await expect(bareCard).not.toContainText('Workspace orbit');
+
+      // The height budget is the point of the whole group (FR-8).
+      const height = await bareCard.evaluate(el => el.getBoundingClientRect().height);
+      expect(height).toBeLessThanOrEqual(160);
     } finally {
       for (const n of [rich, bare]) {
         await request
@@ -622,10 +639,16 @@ test.describe('Agents gallery', () => {
       const target = card(page, name);
       await expect(target).toHaveClass(/is-permanent/);
       await expect(target.locator('.agent-card__badge')).toHaveText('Built-in');
-      // Their real source data still shows: CLI role and the actual model.
-      await expect(target.locator('.agent-card__class')).toContainText('Cli Agent');
-      await expect(target.locator('.agent-card__model')).not.toBeEmpty();
-      await expect(target.locator('.agent-card__toolbox-value')).toContainText('File Operations');
+      // Their real source data still shows: the CLI role on the card, and the
+      // model and capabilities on the open control's accessible name, which is
+      // where the card's removed facts now live (FR-2/FR-10).
+      await expect(target.locator('.agent-card__ident .agent-card__class')).toContainText(
+        'Cli Agent'
+      );
+      // Built-ins have no progression record, so no level is invented for them.
+      await expect(target.locator('.agent-card__ident .agent-card__class')).not.toContainText('Lv');
+      const spoken = await target.locator('.roster-card__open').getAttribute('aria-label');
+      expect(spoken).toContain('built-in');
 
       const avatar = target.locator('.agent-avatar');
       await expect(avatar).toHaveAttribute('data-aa-system', '1');

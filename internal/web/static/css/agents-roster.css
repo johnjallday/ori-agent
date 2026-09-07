@@ -504,11 +504,13 @@ body.agents-roster-page {
   box-shadow: inset 0 0 0 1px var(--role-accent);
 }
 
+/* Bottom-right, not top-right: the top-right corner now carries the status chip
+   and the favorite star, and two markers in one 9px corner read as neither. */
 .roster-card.is-focused::after {
   content: "";
   position: absolute;
-  top: 9px;
   right: 9px;
+  bottom: 9px;
   width: 8px;
   height: 8px;
   border: 1px solid var(--role-accent);
@@ -575,14 +577,19 @@ body.agents-roster-page {
 }
 
 /* The open control is the card body: a full-size button reset so it reads as a
-   card, kept a sibling of the checkbox rather than its parent (FR40). */
+   card, kept a sibling of the checkbox rather than its parent (FR40).
+
+   Two rows, two columns: the portrait and the identity share the first row, the
+   workspace pills take the whole second one. That is the entire card — four
+   facts, no third row to grow into (FR-1/FR-8). */
 .roster-card__open {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  gap: 6px 11px;
   width: 100%;
   min-width: 0;
-  padding: 20px 15px 15px;
+  padding: 13px 13px 12px;
   border: 0;
   border-radius: inherit;
   background: transparent;
@@ -597,33 +604,78 @@ body.agents-roster-page {
   outline-offset: -3px;
 }
 
-.agent-card__visual {
-  display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
-  gap: 12px;
-  align-items: center;
+/* ---- Who: portrait + identity --------------------------------------------- */
+
+/* Geometry stays in CSS: the shared renderer emits a size CLASS, never an
+   inline --aa-size, exactly so a denser view can resize the portrait without
+   re-rendering it. The card asks for 56px rather than the renderer's 72px
+   default, which is most of the height this epic reclaims. */
+.roster-card .agent-card__portrait {
+  --aa-size: 56px;
+  grid-row: 1;
+  grid-column: 1;
+}
+
+.agent-card__ident {
+  grid-row: 1;
+  grid-column: 2;
+  align-self: center;
   min-width: 0;
 }
 
-.agent-card__heading {
-  min-width: 0;
+/* Only the NAME shares a horizontal band with the flag cluster, so only the
+   name reserves room for it. Reserving it on the whole identity block instead
+   truncated "Commander · Lv 3" at desktop width — clipping one of the four
+   facts to protect a chip it never overlapped. */
+.agent-card__name {
+  display: block;
+  overflow: hidden;
+  padding-right: 78px;
+  color: var(--text-primary, #111827);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Ready?: the flag cluster, top right ---------------------------------- */
+
+/* Status chip and favorite star share one corner, the way a map tile flies its
+   flags (FR-3/FR-7). Absolutely positioned so neither can add a row.
+   pointer-events:none lets a click land on the open button underneath, so the
+   corner is not a dead zone on an otherwise fully clickable card. */
+.agent-card__flags {
+  position: absolute;
+  top: 9px;
+  right: 10px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
 }
 
 .agent-card__status {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 5px;
+  gap: 5px;
+  padding: 2px 8px 2px 6px;
+  border: 1px solid var(--card-line);
+  border-radius: 999px;
+  background: var(--card-soft);
   color: var(--card-muted);
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 10px;
+  font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .agent-card__dot {
-  width: 7px;
-  height: 7px;
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: #9ca3af;
 }
@@ -634,6 +686,7 @@ body.agents-roster-page {
 
 .agent-card__status.is-error {
   color: #b91c1c;
+  border-color: color-mix(in srgb, #b91c1c 40%, var(--card-line));
 }
 
 .agent-card__status.is-error .agent-card__dot {
@@ -642,52 +695,40 @@ body.agents-roster-page {
   box-shadow: 0 0 0 2px color-mix(in srgb, #b91c1c 30%, transparent);
 }
 
+/* Disabled is a hollow dot: a shape difference, not a second hue. */
 .agent-card__status.is-disabled .agent-card__dot {
   background: transparent;
   border: 1px solid var(--card-muted);
 }
 
-.agent-card__name {
-  display: block;
-  overflow: hidden;
-  color: var(--text-primary, #111827);
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1.15;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* ---- Role: role label, then Lv N ------------------------------------------ */
 
+/* One line, clipped rather than wrapped: a wrapping role line is the other way
+   a card grows past its height budget. */
 .agent-card__class {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
+  display: block;
   min-width: 0;
-  margin-top: 5px;
+  margin-top: 3px;
+  overflow: hidden;
   color: var(--role-accent);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-/* Character identity sits below the role and reads quieter than it: the agent's
-   own name and role stay primary (PRD FR-55). Not uppercased, so it is visually
-   distinct from the operational role line above it. */
-.agent-card__character {
-  display: block;
-  min-width: 0;
-  margin-top: 4px;
-  overflow: hidden;
-  color: var(--card-muted);
-  font-size: 11px;
-  font-weight: 500;
   text-overflow: ellipsis;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
+/* The role has a second, hidden home so List view can lift it into its own
+   column without a second card renderer. Exactly one of the two is displayed;
+   see the List rules below. */
+.agent-card__rolecell {
+  display: none;
+  min-width: 0;
+}
+
 .agent-card__badge {
+  margin-left: 6px;
   padding: 1px 6px;
   border: 1px solid var(--card-line);
   border-radius: 999px;
@@ -698,51 +739,18 @@ body.agents-roster-page {
   text-transform: uppercase;
 }
 
-.agent-card__purpose {
-  display: -webkit-box;
-  min-height: 38px;
-  overflow: hidden;
-  color: var(--card-muted);
-  font-size: 12.5px;
-  line-height: 1.5;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-}
+/* ---- Where: bare workspace pills ------------------------------------------ */
 
-/* Missing values are stated, and stated as missing, rather than styled to look
-   like real content (FR20). */
-.agent-card__purpose.is-missing,
-.agent-card__model.is-missing,
-.agent-card__activity.is-missing {
-  /* The italics and the wording ("No description yet") already say this is
-     missing. The 0.85 opacity that used to sit here as well pushed the muted
-     ink to 4.42:1 on the warm card surface — a serious axe violation — for a
-     third cue nobody needed (FR-119). */
-  font-style: italic;
-}
-
-.agent-card__section,
-.agent-card__toolbox {
-  display: block;
-  min-width: 0;
-}
-
-.agent-card__section-label {
-  display: block;
-  margin-bottom: 5px;
-  color: var(--card-muted);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
+/* nowrap, not wrap: the two-plus-overflow rule already caps the content, and a
+   wrapping pill row could add a third line to a two-row card. */
 .agent-card__pills {
+  grid-row: 2;
+  grid-column: 1 / -1;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 5px;
   min-width: 0;
+  overflow: hidden;
 }
 
 .agent-card__pill {
@@ -784,62 +792,18 @@ body.agents-roster-page {
   display: none;
 }
 
+/* "Library only" is a real state, not a missing value, so it reads as a quiet
+   dashed pill rather than italic apology text (FR-6). */
 .agent-card__pill.is-empty {
-  font-style: italic;
-}
-
-.agent-card__toolbox {
-  padding: 8px 10px;
-  border: 1px solid color-mix(in srgb, var(--role-accent) 22%, var(--card-line));
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--role-accent) 5%, var(--card-soft));
-}
-
-.agent-card__toolbox.is-empty {
-  border-color: var(--card-line);
-  background: var(--card-soft);
-}
-
-.agent-card__toolbox-value {
-  display: block;
-  overflow: hidden;
-  color: var(--text-primary, #111827);
-  font-size: 11.5px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agent-card__toolbox.is-empty .agent-card__toolbox-value {
-  color: var(--card-muted);
-  font-style: italic;
-  font-weight: 500;
-}
-
-.agent-card__footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 0;
-  margin-top: auto;
-  padding-top: 4px;
-  color: var(--card-muted);
-  font-size: 11px;
-}
-
-.agent-card__model,
-.agent-card__activity {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  border-style: dashed;
+  color: var(--cozy-ink-faint, #7d8878);
 }
 
 .agent-card__fav {
   flex: 0 0 auto;
   color: #b45309;
   font-size: 13px;
+  line-height: 1;
 }
 
 [data-bs-theme="dark"] .agent-card__fav {
@@ -869,92 +833,111 @@ body.agents-roster-page {
   gap: 6px;
 }
 
+/* Three columns for three of the four facts — name, role, membership — with the
+   fourth, the status chip, riding in the flag cluster at the row's right end.
+   There is deliberately no fifth column to add: List states exactly what the
+   Gallery card states (FR-9). */
 .agent-grid.is-list .roster-card__open {
-  display: grid;
-  grid-template-columns: minmax(220px, 1.4fr) minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(190px, 1.5fr) minmax(0, 1.1fr) minmax(0, 1.4fr);
+  grid-template-rows: auto;
   gap: 16px;
   align-items: center;
-  padding: 12px 14px 12px 44px;
+  padding: 9px 150px 9px 40px;
 }
 
-.agent-grid.is-list .agent-card__visual {
-  grid-template-columns: 54px minmax(0, 1fr);
-  gap: 10px;
+/* The name already identifies the row, so the portrait's column is better spent
+   on membership at this density. It returns at phone width, below. */
+.agent-grid.is-list .agent-card__portrait {
+  display: none;
 }
 
-.agent-grid.is-list .agent-avatar--md {
-  --aa-size: 54px;
+.agent-grid.is-list .agent-card__ident {
+  grid-row: 1;
+  grid-column: 1;
 }
 
 .agent-grid.is-list .agent-card__name {
-  font-size: 15px;
+  padding-right: 0;
+  font-size: 14px;
 }
 
-.agent-grid.is-list .agent-card__purpose {
-  min-height: 0;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
+/* Role moves from under the name into its own column. */
+.agent-grid.is-list .agent-card__ident .agent-card__class {
+  display: none;
 }
 
-.agent-grid.is-list .agent-card__footer {
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-  padding-top: 0;
-  white-space: nowrap;
+.agent-grid.is-list .agent-card__rolecell {
+  display: block;
+  grid-row: 1;
+  grid-column: 2;
+}
+
+.agent-grid.is-list .agent-card__rolecell .agent-card__class {
+  margin-top: 0;
+}
+
+.agent-grid.is-list .agent-card__pills {
+  grid-row: 1;
+  grid-column: 3;
 }
 
 .agent-grid.is-list .roster-card__checkwrap {
   top: 50%;
-  left: 10px;
+  left: 9px;
   transform: translateY(-50%);
 }
 
-/* Below the Gallery's own column width there is no room for five columns;
-   drop the least load-bearing ones rather than letting the row overflow. */
+.agent-grid.is-list .agent-card__flags {
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* Below the Gallery's own column width the role column is the first to go: it
+   is the one fact the row's accent rule already hints at. */
 @media (max-width: 1180px) {
   .agent-grid.is-list .roster-card__open {
-    grid-template-columns: minmax(200px, 1.3fr) minmax(0, 1.6fr) minmax(0, 1fr) auto;
+    grid-template-columns: minmax(190px, 1.2fr) minmax(0, 1.4fr);
   }
-  .agent-grid.is-list .agent-card__toolbox {
+  .agent-grid.is-list .agent-card__rolecell {
     display: none;
   }
-}
-
-@media (max-width: 860px) {
-  .agent-grid.is-list .roster-card__open {
-    grid-template-columns: minmax(180px, 1fr) minmax(0, 1.4fr) auto;
-  }
-  .agent-grid.is-list .agent-card__section {
-    display: none;
-  }
-}
-
-/* At mobile widths a "row" is just the card again — five columns cannot fit in
-   320px without losing information (PRD FR81/FR93). */
-@media (max-width: 640px) {
-  .agent-grid.is-list .roster-card__open {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    padding: 58px 15px 15px;
-  }
-  .agent-grid.is-list .agent-card__visual {
-    grid-template-columns: 72px minmax(0, 1fr);
-  }
-  .agent-grid.is-list .agent-avatar--md {
-    --aa-size: 72px;
-  }
-  .agent-grid.is-list .agent-card__section,
-  .agent-grid.is-list .agent-card__toolbox {
+  .agent-grid.is-list .agent-card__ident .agent-card__class {
     display: block;
   }
-  .agent-grid.is-list .agent-card__footer {
-    flex-direction: row;
-    align-items: center;
+}
+
+/* At phone width a "row" is the card again: three columns cannot fit in 400px
+   without dropping one of the four facts (FR-9/FR-83). */
+@media (max-width: 640px) {
+  .agent-grid.is-list .roster-card__open {
+    grid-template-columns: 56px minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    gap: 6px 11px;
+    padding: 13px 13px 12px;
+  }
+  .agent-grid.is-list .agent-card__portrait {
+    display: block;
+  }
+  .agent-grid.is-list .agent-card__ident {
+    grid-column: 2;
+  }
+  .agent-grid.is-list .agent-card__name {
+    padding-right: 78px;
+    font-size: 16px;
+  }
+  .agent-grid.is-list .agent-card__rolecell {
+    display: none;
+  }
+  .agent-grid.is-list .agent-card__pills {
+    grid-row: 2;
+    grid-column: 1 / -1;
   }
   .agent-grid.is-list .roster-card__checkwrap {
-    top: 8px;
+    top: 7px;
+    transform: none;
+  }
+  .agent-grid.is-list .agent-card__flags {
+    top: 9px;
     transform: none;
   }
 }
@@ -2278,13 +2261,27 @@ body.inspector-sheet-open {
   }
 }
 
-/* common.css enforces a 44x44 minimum touch target for checkboxes at this
-   breakpoint, which makes the checkwrap 50px square. Give the card body enough
-   top clearance that the control sits in its own band instead of covering the
-   portrait's initials — the same arrangement as the approved mobile reference. */
+/* common.css inflates every checkbox to a 44x44 box at this breakpoint. On the
+   old tall card that was absorbed by pushing the body down 58px; on a ~115px
+   card that band is half the card, so the touch target is met without the
+   visual inflation: the control keeps its 15px box and the LABEL grows a
+   transparent ring out to 45px square.
+   Clicking a label toggles its input, and a pseudo-element is part of the
+   label's hit area, so the target is real rather than declared. */
 @media (max-width: 768px) {
-  .roster-card__open {
-    padding-top: 58px;
+  /* The attribute selector is load-bearing: common.css sets the min-height on
+     `input[type="checkbox"]`, which out-specifies a bare class and left the
+     control 50px square however small this rule asked for. */
+  .roster-card__check[type="checkbox"] {
+    width: 15px;
+    height: 15px;
+    min-width: 0;
+    min-height: 0;
+  }
+  .roster-card__checkwrap::after {
+    content: "";
+    position: absolute;
+    inset: -12px;
   }
 }
 

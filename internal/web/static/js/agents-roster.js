@@ -475,6 +475,11 @@
       // definition here; the server rejects mutation and deletion alike.
       editable: !builtIn,
       health: agentHealth(a),
+      // healthText is what the card's status chip prints, so the chip, the
+      // summary tiles, and the quick filters all state the same three buckets.
+      // statusKind/statusText stay the RAW status ('active'/'idle'/'error'),
+      // which the Inspector's vitals still report — the card no longer does.
+      healthText: healthText(agentHealth(a)),
       statusKind: healthKind(a),
       statusText: titleCase(String((a && a.status) || 'idle')),
       role: role,
@@ -482,6 +487,9 @@
       roleEntry: window.RoleCatalog ? window.RoleCatalog.entry(role) : null,
       level: level,
       stage: stage,
+      // The card shows the level alone; the stage word is carried by the
+      // portrait ring from Group 8, and by progressLabel everywhere else.
+      levelLabel: 'Lv ' + level,
       progressLabel: 'Lv ' + level + ' · ' + titleCase(stage),
       description: description,
       hasDescription: description !== '',
@@ -671,6 +679,14 @@
     if (status === 'disabled') return 'disabled';
     if (status === 'error' || !String((a && a.model) || '').trim()) return 'needs';
     return 'ready';
+  }
+
+  // The three words the card's status chip is allowed to say, keyed by the same
+  // health bucket the summary tiles count (PRD FR-1).
+  function healthText(health) {
+    if (health === 'needs') return 'Needs attention';
+    if (health === 'disabled') return 'Disabled';
+    return 'Ready';
   }
 
   function agentSourceKind(a) {
@@ -1029,6 +1045,10 @@
     // A labeled checkbox and a separate open/focus button are siblings — never
     // nested — so the checkbox is not a child of an interactive element and the
     // two actions stay independent (PRD FR38/FR39/FR40).
+    // Four slots, in reading order: who, role, where, ready?. The flag cluster
+    // is absolutely positioned inside the button so it overlays the top-right
+    // corner without adding a row to a ~120px card; the button's aria-label
+    // already states everything it shows, so it announces nothing twice.
     li.innerHTML =
       '<label class="roster-card__checkwrap">' +
       '<span class="visually-hidden">Select ' +
@@ -1045,53 +1065,67 @@
       '" aria-label="' +
       esc(cardSpokenLabel(vm)) +
       '">' +
+      cardFlagsHTML(vm) +
       cardVisualHTML(vm) +
-      cardPurposeHTML(vm) +
       cardWorkspacesHTML(vm) +
-      cardCapabilitiesHTML(vm) +
-      cardFooterHTML(vm) +
       '</button>';
 
     if (isChecked) li.classList.add('is-checked');
     return li;
   }
 
-  // The card's character line, rendered below the role so the agent's own name
-  // and role always read first — the character name is secondary descriptive
-  // copy, never the identity (FR-93). Omitted entirely when the agent has no
-  // curated character, so the generated case gains no clutter.
-  //
-  // This is appearance, not capability: it never states status, tools, or
-  // permissions, and it sits outside the portrait rather than on it (FR-94).
-  function cardCharacterHTML(vm) {
-    if (!vm.characterId || !window.CharacterCatalog) return '';
-    var entry = window.CharacterCatalog.get(vm.characterId);
-    if (!entry) return '';
-    // Only label the character when it is the source actually being shown; a
-    // retained-but-inactive choice would otherwise contradict the portrait
-    // (FR-12).
-    if (vm.appearance.mode !== window.AgentAvatar.MODES.CHARACTER) return '';
-    // The character name is already the descriptive role, so there is nothing
-    // to append after it.
-    return '<span class="agent-card__character">Character art: ' + esc(entry.name) + '</span>';
-  }
-
   // Concise spoken summary for the open control (PRD FR84). The card's own text
   // carries the same facts visually; this keeps them in one short sentence
   // instead of making a screen reader walk every decorative span.
+  // The card shows four facts; this sentence carries those four plus the ones
+  // the card stopped showing — purpose is the Inspector's, but model and last
+  // activity were card facts until this epic and must not silently vanish for a
+  // screen-reader user (PRD FR-10).
+  //
+  // The status word here is the health chip's word, not the raw status, so what
+  // is heard is what is displayed.
   function cardSpokenLabel(vm) {
     var parts = [vm.name];
     if (vm.builtIn) parts.push('built-in');
     if (vm.favorite) parts.push('favorite');
     parts.push(vm.roleLabel);
     if (!vm.builtIn) parts.push(vm.progressLabel);
-    parts.push(vm.statusText);
+    parts.push(vm.healthText);
     parts.push(vm.hasModel ? vm.model : 'model needed');
+    parts.push(vm.hasActivity ? vm.activityLabel : 'no recent activity');
     parts.push(vm.workspaceCount === 0 ? 'library only' : vm.workspaceLabel);
     return parts.join(', ');
   }
 
-  // Who is this? Portrait, text status, name, and role/progression line.
+  // Ready? — the status chip and the favorite star, as one corner cluster in the
+  // card's top right, where a map tile flies its status flag (PRD FR-3/FR-7).
+  //
+  // Absolutely positioned rather than laid out in the grid: on a ~120px card a
+  // fourth row for a chip is the difference between meeting the height target
+  // and missing it.
+  function cardFlagsHTML(vm) {
+    var star = vm.favorite
+      ? '<span class="agent-card__fav" title="Favorite" aria-hidden="true">★</span>'
+      : '';
+    return (
+      '<span class="agent-card__flags">' +
+      star +
+      '<span class="agent-card__status is-' +
+      vm.statusKind +
+      '">' +
+      '<span class="agent-card__dot" aria-hidden="true"></span>' +
+      esc(vm.healthText) +
+      '</span>' +
+      '</span>'
+    );
+  }
+
+  // Who + Role. The portrait and the name identify the agent; the line under it
+  // states the role and the level.
+  //
+  // The role also gets a second, hidden home (.agent-card__rolecell) so List
+  // view can lift it into a column of its own without a second renderer. Only
+  // one of the two is ever displayed — see the List rules in agents-roster.css.
   function cardVisualHTML(vm) {
     var badge = vm.builtIn
       ? '<span class="agent-card__badge" title="Built-in agent — always available and cannot be edited or deleted">Built-in</span>'
@@ -1099,27 +1133,21 @@
     // Progression is a user-agent concept; built-ins have no evolution record to
     // report, so the slot is omitted rather than filled with a zero (PRD FR20).
     var classBits = [esc(vm.roleLabel)];
-    if (!vm.builtIn) classBits.push(esc(vm.progressLabel));
+    if (!vm.builtIn) classBits.push(esc(vm.levelLabel));
+    var roleLine = '<span class="agent-card__class">' + classBits.join(' · ') + badge + '</span>';
 
     return (
-      '<span class="agent-card__visual">' +
       avatarMarkup(vm, 'agent-card__portrait', '', AVATAR_SIZE.card) +
-      '<span class="agent-card__heading">' +
-      '<span class="agent-card__status is-' +
-      vm.statusKind +
+      '<span class="agent-card__ident">' +
+      '<span class="agent-card__name" title="' +
+      esc(vm.name) +
       '">' +
-      '<span class="agent-card__dot" aria-hidden="true"></span>' +
-      esc(vm.statusText) +
-      '</span>' +
-      '<span class="agent-card__name">' +
       esc(vm.name) +
       '</span>' +
-      '<span class="agent-card__class">' +
-      classBits.join(' · ') +
-      badge +
+      roleLine +
       '</span>' +
-      cardCharacterHTML(vm) +
-      '</span>' +
+      '<span class="agent-card__rolecell">' +
+      roleLine +
       '</span>'
     );
   }
@@ -1133,26 +1161,27 @@
     return window.AgentAvatar.normalizeHex(entry.accent_color);
   }
 
-  // What are they for? Clamped in Gallery; the Inspector keeps the full text
-  // (PRD FR21). A missing description says so rather than borrowing the role's
-  // tagline, which describes the role and not this agent (PRD FR20).
-  function cardPurposeHTML(vm) {
-    if (!vm.hasDescription) {
-      return '<span class="agent-card__purpose is-missing">No description yet</span>';
-    }
-    return '<span class="agent-card__purpose">' + esc(vm.description) + '</span>';
-  }
-
   // Where are they used? At most two workspace labels plus a +N overflow; the
   // complete membership list belongs to the Workspaces tab (PRD FR22).
+  //
+  // The "Workspace orbit" section label is gone: bare pills already read as
+  // places, and a 9px all-caps label above two pills was a third of the slot's
+  // height spent saying what the pills say (PRD FR-4).
   function cardWorkspacesHTML(vm) {
     var pills;
     if (vm.workspaceCount === 0) {
-      pills = '<span class="agent-card__pill is-empty">Library only</span>';
+      // A muted, dashed pill — not a sentence, and never italic. "Library only"
+      // is a real state, not a missing value (PRD FR-6).
+      pills =
+        '<span class="agent-card__pill is-empty">' +
+        '<span class="agent-card__pill-label">Library only</span></span>';
     } else if (vm.workspaces.length === 0) {
       // The count is real but the reference list was not included; say the count
       // rather than implying we know which workspaces they are.
-      pills = '<span class="agent-card__pill is-empty">' + esc(vm.workspaceLabel) + '</span>';
+      pills =
+        '<span class="agent-card__pill is-empty"><span class="agent-card__pill-label">' +
+        esc(vm.workspaceLabel) +
+        '</span></span>';
     } else {
       pills = vm.workspaces
         .slice(0, 2)
@@ -1176,52 +1205,7 @@
           '<span class="agent-card__pill is-more">+' + (vm.workspaces.length - 2) + '</span>';
       }
     }
-    return (
-      '<span class="agent-card__section">' +
-      '<span class="agent-card__section-label">Workspace orbit</span>' +
-      '<span class="agent-card__pills">' +
-      pills +
-      '</span>' +
-      '</span>'
-    );
-  }
-
-  // A concise capability summary only; configuration and the complete list live
-  // in the Inspector's Toolbox tab (PRD FR23).
-  function cardCapabilitiesHTML(vm) {
-    var empty = vm.capabilities.length === 0 ? ' is-empty' : '';
-    return (
-      '<span class="agent-card__toolbox' +
-      empty +
-      '">' +
-      '<span class="agent-card__section-label">Capabilities</span>' +
-      '<span class="agent-card__toolbox-value">' +
-      esc(vm.capabilityLabel) +
-      '</span>' +
-      '</span>'
-    );
-  }
-
-  // Are they ready? Model availability, recent activity, favorite state.
-  function cardFooterHTML(vm) {
-    var star = vm.favorite
-      ? '<span class="agent-card__fav" title="Favorite" aria-hidden="true">★</span>'
-      : '';
-    return (
-      '<span class="agent-card__footer">' +
-      '<span class="agent-card__model' +
-      (vm.hasModel ? '' : ' is-missing') +
-      '">' +
-      esc(vm.modelLabel) +
-      '</span>' +
-      '<span class="agent-card__activity' +
-      (vm.hasActivity ? '' : ' is-missing') +
-      '">' +
-      esc(vm.activityLabel) +
-      '</span>' +
-      star +
-      '</span>'
-    );
+    return '<span class="agent-card__pills">' + pills + '</span>';
   }
 
   // Distinct empty states (PRD FR81): no agents at all vs. an active
