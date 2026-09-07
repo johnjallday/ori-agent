@@ -46,6 +46,22 @@ func NewHandler(agentStore AgentStore, assistantProgressStore AssistantProgressS
 	}
 }
 
+// XPPerLevel exposes the flat per-level threshold to other handlers.
+//
+// The agent roster draws a progress ring on every card, so it needs the
+// threshold once for the whole list rather than once per agent. This handler
+// already holds the service, and routing that one number through it is far
+// less plumbing than exposing the service itself on a server facade.
+//
+// Zero means "no threshold available", which callers read as "draw no ring" —
+// the same outcome as an agent with no progression record.
+func (h *Handler) XPPerLevel() int64 {
+	if h == nil || h.evolutionService == nil {
+		return 0
+	}
+	return h.evolutionService.XPPerLevel()
+}
+
 func (h *Handler) GetAssistantProgress(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)

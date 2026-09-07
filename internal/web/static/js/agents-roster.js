@@ -182,6 +182,10 @@
       filtersDone: document.getElementById('filtersDone'),
       map: document.getElementById('rosterMap'),
       menuHost: document.getElementById('rosterMenuHost'),
+      coachmark: document.getElementById('rosterCoachmark'),
+      coachmarkCopy: document.getElementById('rosterCoachmarkCopy'),
+      coachmarkNext: document.getElementById('rosterCoachmarkNext'),
+      coachmarkDismiss: document.getElementById('rosterCoachmarkDismiss'),
       emptyMsg: document.getElementById('rosterEmptyMsg'),
       emptyClearFilters: document.getElementById('rosterEmptyClearFilters'),
       emptyCreate: document.getElementById('rosterEmptyCreate')
@@ -275,6 +279,16 @@
     });
     els.quickFilters.addEventListener('click', onQuickFilterClick);
     els.viewToggle.addEventListener('click', onViewToggleClick);
+
+    els.coachmarkNext.addEventListener('click', function () {
+      showCoachmarkStep(coachmarkStep + 1);
+    });
+    els.coachmarkDismiss.addEventListener('click', dismissCoachmark);
+    // Opening a card is the lesson: once someone has done it, the hint has
+    // nothing left to teach and stays gone.
+    els.list.addEventListener('click', function (e) {
+      if (coachmarkStep >= 0 && e.target.closest('.roster-card__open')) dismissCoachmark();
+    });
 
     els.filtersButton.addEventListener('click', openFilters);
     els.filtersClose.addEventListener('click', closeFilters);
@@ -434,6 +448,10 @@
       })
       .then(function (data) {
         var agents = Array.isArray(data) ? data : (data && data.agents) || [];
+        // One global constant off the list response, so every card's progress
+        // ring is drawn without a request per agent (FR-75). Absent means no
+        // ring, which is the same outcome as an agent with no progression.
+        state.xpPerLevel = Number((data && data.xp_per_level) || 0);
         state.agents = agents;
         state.byName = {};
         agents.forEach(function (a) {
@@ -534,9 +552,16 @@
       level: level,
       stage: stage,
       // The card shows the level alone; the stage word is carried by the
-      // portrait ring from Group 8, and by progressLabel everywhere else.
+      // portrait ring's stage treatment, and by progressLabel everywhere else.
       levelLabel: 'Lv ' + level,
       progressLabel: 'Lv ' + level + ' · ' + titleCase(stage),
+      // Progress toward the NEXT level, as a percentage, for the portrait ring
+      // (FR-75). Built-ins have no evolution record, so they get no ring rather
+      // than an empty one — and neither does anyone if the threshold is
+      // unavailable, because a ring drawn against an unknown denominator would
+      // be a number the UI invented.
+      hasProgress: !builtIn && !!(a && a.evolution) && xpPerLevel() > 0,
+      progressPct: levelProgressPct(evo),
       description: description,
       hasDescription: description !== '',
       workspaces: workspaces,
@@ -725,6 +750,24 @@
     if (status === 'disabled') return 'disabled';
     if (status === 'error' || !String((a && a.model) || '').trim()) return 'needs';
     return 'ready';
+  }
+
+  // The flat XP-per-level threshold, as reported by the list response.
+  function xpPerLevel() {
+    return Number(state.xpPerLevel || 0);
+  }
+
+  // How far into the current level an agent is, 0–100.
+  //
+  // The same flat-threshold arithmetic the Inspector's XP bar uses, so the ring
+  // and the bar can never disagree about the same agent.
+  function levelProgressPct(evo) {
+    var per = xpPerLevel();
+    if (!per) return 0;
+    var xp = Number((evo && evo.experience) || 0);
+    if (!isFinite(xp) || xp < 0) return 0;
+    var intoLevel = xp % per;
+    return Math.max(0, Math.min(100, Math.round((intoLevel / per) * 100)));
   }
 
   // The three words the card's status chip is allowed to say, keyed by the same
@@ -1155,6 +1198,7 @@
     els.list.appendChild(frag);
     highlightSelected();
     updateBulkBar();
+    maybeShowCoachmark();
   }
 
   /* ---- grouping ------------------------------------------------------------ */
@@ -1327,6 +1371,80 @@
     // that now stands where the pressed one was.
     var again = els.list.querySelector('[data-section-toggle="' + cssEscape(key) + '"]');
     if (again) again.focus();
+  }
+
+  /* ---- first-visit coachmark ----------------------------------------------- */
+
+  var COACHMARK_KEY = 'ori.roster.selectionCoachmarkSeen';
+
+  // Two steps, each pointing at a real control through the shared registry.
+  // Together they say what the removed header sentence said — open a card to
+  // inspect it; check a card to manage several at once — except that the words
+  // arrive beside the thing they describe, once (FR-78).
+  var COACHMARK_STEPS = [
+    { key: 'select_agent', copy: 'Open a card to inspect the agent here.' },
+    { key: 'select_agent_check', copy: 'Check a card to manage several agents at once.' }
+  ];
+
+  var coachmarkStep = -1;
+
+  function coachmarkSeen() {
+    try {
+      return window.localStorage.getItem(COACHMARK_KEY) === '1';
+    } catch (err) {
+      // A browser blocking site data cannot remember the hint. Treating that as
+      // "already seen" is the kinder failure: a hint that returns on every load
+      // is worse than one that never appears.
+      return true;
+    }
+  }
+
+  function markCoachmarkSeen() {
+    try {
+      window.localStorage.setItem(COACHMARK_KEY, '1');
+    } catch (err) {
+      /* nothing to remember it with; the hint is dismissed for this visit */
+    }
+  }
+
+  // Shown only once the roster has actually rendered cards: there is nothing to
+  // point at on an empty collection, and a hint about selecting agents is noise
+  // for someone who has none.
+  function maybeShowCoachmark() {
+    if (!els.coachmark || coachmarkSeen()) return;
+    if (state.view === 'map') return;
+    if (!state.filtered.length) return;
+    if (coachmarkStep >= 0) return;
+    showCoachmarkStep(0);
+  }
+
+  function showCoachmarkStep(index) {
+    var step = COACHMARK_STEPS[index];
+    if (!step) {
+      dismissCoachmark();
+      return;
+    }
+    coachmarkStep = index;
+    els.coachmarkCopy.textContent = step.copy;
+    els.coachmark.hidden = false;
+    els.coachmarkNext.hidden = index >= COACHMARK_STEPS.length - 1;
+    // awaitTarget, because cards mount after the list request settles and this
+    // can run in the same tick as the render. The guide's own machinery handles
+    // the bounded wait and re-anchors the mark when the roster re-renders
+    // beneath it — which grouping, collapsing and a view switch all do
+    // (FR-79).
+    if (window.OriGuide && typeof window.OriGuide.markControl === 'function') {
+      window.OriGuide.markControl(step.key, { awaitTarget: true });
+    }
+  }
+
+  function dismissCoachmark() {
+    coachmarkStep = COACHMARK_STEPS.length;
+    if (els.coachmark) els.coachmark.hidden = true;
+    if (window.OriGuide && typeof window.OriGuide.clearControlMark === 'function') {
+      window.OriGuide.clearControlMark();
+    }
+    markCoachmarkSeen();
   }
 
   var COLLAPSED_KEY = 'ori.roster.collapsedSections';
@@ -1536,7 +1654,7 @@
     var roleLine = '<span class="agent-card__class">' + classBits.join(' · ') + badge + '</span>';
 
     return (
-      avatarMarkup(vm, 'agent-card__portrait', '', AVATAR_SIZE.card) +
+      portraitHTML(vm) +
       '<span class="agent-card__ident">' +
       '<span class="agent-card__name" title="' +
       esc(vm.name) +
@@ -1547,6 +1665,36 @@
       '</span>' +
       '<span class="agent-card__rolecell">' +
       roleLine +
+      '</span>'
+    );
+  }
+
+  // The portrait, with a progress ring around it when there is progress to
+  // show (FR-74/FR-75).
+  //
+  // The role EMBLEM is already drawn inside the portrait by the shared avatar
+  // renderer, from the catalog's reviewed emblem and accent — so this adds only
+  // the ring, and the two halves of FR-74 stay in one place each.
+  //
+  // Where there is no progression record — every built-in — the wrapper is
+  // omitted entirely rather than rendered at 0%: an empty ring looks like a
+  // real measurement of nothing, which is exactly the kind of invented fact
+  // Group 1 removed from this card.
+  function portraitHTML(vm) {
+    var avatar = avatarMarkup(vm, 'agent-card__portrait', '', AVATAR_SIZE.card);
+    if (!vm.hasProgress) return avatar;
+    // The stage rides on the wrapper so the five stages can be told apart by
+    // the ring's treatment, not by colour alone (FR-77/FR-88); the textual
+    // "Lv N" beside it stays the exact value (FR-76).
+    return (
+      '<span class="agent-card__ring" data-stage="' +
+      esc(vm.stage) +
+      '" style="--ring-pct:' +
+      vm.progressPct +
+      '" role="img" aria-label="' +
+      esc(vm.progressPct + '% toward the next level, stage ' + titleCase(vm.stage)) +
+      '">' +
+      avatar +
       '</span>'
     );
   }
@@ -2460,6 +2608,10 @@
       })
       .then(function (data) {
         var agents = Array.isArray(data) ? data : (data && data.agents) || [];
+        // One global constant off the list response, so every card's progress
+        // ring is drawn without a request per agent (FR-75). Absent means no
+        // ring, which is the same outcome as an agent with no progression.
+        state.xpPerLevel = Number((data && data.xp_per_level) || 0);
         state.agents = agents;
         state.byName = {};
         agents.forEach(function (a) {

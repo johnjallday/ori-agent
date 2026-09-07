@@ -45,9 +45,23 @@
   background: var(--bg-secondary);
 }
 
+/* The brand danger red (#ef4444) fails contrast on BOTH menu surfaces: 3.37:1
+   on the dark one (#303337) and 3.6:1 on the light one (#fdfaf2), against the
+   4.5:1 minimum — a serious axe violation on the one item whose meaning matters
+   most. Both directions are corrected rather than only the dark one, which is
+   the mistake this comment exists to record: "light is on white, so light is
+   fine" was wrong, because the menu sits on warm paper, not white.
+
+   Neither value is invented. #b91c1c and #fca5a5 are the reds the roster's own
+   error status text already uses in light and dark. */
 .ori-context-item.ori-context-danger,
 .session-context-item.session-context-danger {
-  color: var(--danger-color);
+  color: #b91c1c;
+}
+
+[data-bs-theme="dark"] .ori-context-item.ori-context-danger,
+[data-bs-theme="dark"] .session-context-item.session-context-danger {
+  color: #fca5a5;
 }
 
 .ori-context-item.ori-context-danger:hover,

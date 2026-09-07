@@ -108,6 +108,34 @@ for (const theme of ['light', 'dark']) {
       await page.keyboard.press('Escape');
       await expect(page.locator('#filtersPanel')).toBeHidden();
       await expect(page.locator('#filtersButton')).toBeFocused();
+
+      // Grouped section headers: collapse controls that carry their own
+      // aria-expanded and count (FR-86).
+      await page.locator('#rosterGroup').selectOption('role');
+      await expect(page.locator('.roster-section').first()).toBeVisible();
+      const sectionResults = await runAxe(page, '.roster-layout');
+      expect(sectionResults.violations, JSON.stringify(sectionResults.violations, null, 2)).toEqual(
+        []
+      );
+      await page.locator('#rosterGroup').selectOption('none');
+
+      // The card context menu, open. It is a menu with a roving tabindex and
+      // disabled items that stay announced, which is exactly the shape that
+      // regresses quietly.
+      await page.locator(`.roster-card[data-name="${name}"]`).click({ button: 'right' });
+      await expect(page.locator('[data-roster-menu]')).toBeVisible();
+      const menuResults = await runAxe(page, '[data-roster-menu]');
+      expect(menuResults.violations, JSON.stringify(menuResults.violations, null, 2)).toEqual([]);
+      await page.keyboard.press('Escape');
+      await expect(page.locator('[data-roster-menu]')).toHaveCount(0);
+
+      // The Map view: tiles, the control cluster, and the status line.
+      await page.locator('#viewMap').click();
+      await expect(page.locator('[data-map-canvas]')).toBeVisible();
+      await expect(page.locator('[data-agent-tile]').first()).toBeVisible();
+      const mapResults = await runAxe(page, '#rosterMap');
+      expect(mapResults.violations, JSON.stringify(mapResults.violations, null, 2)).toEqual([]);
+      await page.locator('#viewGallery').click();
     } finally {
       await request
         .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)

@@ -839,6 +839,10 @@ test('every registered coachmark key is a plain token, never a selector', () => 
 // Mirrors registeredCoachmarkKeys in internal/agenthttp/ori_guide_topics.go.
 // A key on one side and not the other means either a coachmark the browser
 // cannot resolve, or a selector no topic will ever ask for.
+//
+// Compared against serverKeys(), not keys(): a `local` entry is one a page
+// triggers to point at its own UI, and the server has no business knowing about
+// a control no topic can name.
 test('the registry matches the keys the server knows about', () => {
   const { coachmarks } = load();
   const expected = [
@@ -854,7 +858,21 @@ test('the registry matches the keys the server knows about', () => {
     'personal_hq_build'
   ].sort();
 
-  assert.deepEqual([...coachmarks.keys()].sort(), expected);
+  assert.deepEqual([...coachmarks.serverKeys()].sort(), expected);
+});
+
+// A local key must stay unreachable from the wire. The guide validates an
+// incoming action's coachmark against the registry, so a local key that the
+// server could name would let a topic point at a control the page owns.
+test('local coachmark keys are not server-addressable', () => {
+  const { coachmarks } = load();
+  const local = [...coachmarks.keys()].filter(key => !coachmarks.serverKeys().includes(key));
+  assert.deepEqual(local.sort(), ['select_agent', 'select_agent_check']);
+  for (const key of local) {
+    // Still resolvable by the page that owns them, on their own route only.
+    assert.ok(coachmarks.supports(key, '/agents'), `${key} should work on /agents`);
+    assert.ok(!coachmarks.supports(key, '/'), `${key} leaked onto Home`);
+  }
 });
 
 // The guided Personal HQ walkthrough resolves only hand-written Home selectors,

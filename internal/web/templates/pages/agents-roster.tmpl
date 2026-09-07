@@ -180,6 +180,20 @@
               </div>
             </dialog>
 
+            <!-- First-visit hint. This is what replaced the header's
+                 instructional sentence (FR-20/FR-78): the page teaches card
+                 selection once, to someone who has not seen it, instead of
+                 explaining itself in prose to everyone forever. It points at a
+                 real card through the shared guide-coachmark registry, and it
+                 is dismissible and remembered per viewer (FR-80). -->
+            <div class="roster-coachmark" id="rosterCoachmark" role="status" hidden>
+              <p class="roster-coachmark__copy" id="rosterCoachmarkCopy"></p>
+              <div class="roster-coachmark__actions">
+                <button type="button" class="roster-linkbtn" id="rosterCoachmarkNext">Show me selecting several</button>
+                <button type="button" class="roster-linkbtn" id="rosterCoachmarkDismiss">Got it</button>
+              </div>
+            </div>
+
             <div class="collection-scroll">
               <div class="collection-meta">
                 <p class="collection-meta__count" id="rosterCount" aria-live="polite">Loading agents…</p>

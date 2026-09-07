@@ -33,6 +33,29 @@ type DashboardHandler struct {
 	// externalagents package.
 	codexSync func() any
 	support   personalAssistantSupportClassifier
+	// xpPerLevel reports the flat XP-per-level threshold, so the roster can draw
+	// each card's progress ring without a request per agent. It is a global
+	// constant, not per-agent data, which is why it belongs on the list response
+	// rather than in each row (agents-page-ux FR-75).
+	xpPerLevel func() int64
+}
+
+// XPPerLevelReporter is the one thing the dashboard needs from the evolution
+// service: the flat per-level threshold. Narrow by design — the dashboard
+// cannot award XP, only divide by the threshold.
+type XPPerLevelReporter interface {
+	XPPerLevel() int64
+}
+
+// SetXPPerLevelReporter wires the threshold used to render progress rings.
+//
+// Optional: without it the list simply omits xp_per_level and the roster draws
+// no ring, which is the same outcome as an agent with no progression record.
+func (h *DashboardHandler) SetXPPerLevelReporter(r XPPerLevelReporter) {
+	if r == nil {
+		return
+	}
+	h.xpPerLevel = r.XPPerLevel
 }
 
 // NewDashboardHandler creates a new dashboard handler
@@ -248,10 +271,17 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 
 	// Return JSON response
 	w.Header().Set("Content-Type", "application/json")
-	orihttp.WriteJSON(w, map[string]any{
+	response := map[string]any{
 		"agents": agents,
 		"total":  len(agents),
-	})
+	}
+	// One global constant on the list, rather than one request per card: the
+	// roster draws a progress ring on every portrait, and fetching the
+	// threshold per agent would turn a single list request into N+1.
+	if h.xpPerLevel != nil {
+		response["xp_per_level"] = h.xpPerLevel()
+	}
+	orihttp.WriteJSON(w, response)
 }
 
 // GetAgentDetail handles GET /api/agents/:id/detail

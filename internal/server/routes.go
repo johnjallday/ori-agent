@@ -185,6 +185,11 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	dashboardHandler.SetCLIAgentRegistry(s.Handlers.CLIAgentRegistry)
 	dashboardHandler.SetWorkspaceStore(s.Storage.WorkspaceStore)
 	dashboardHandler.SetPersonalAssistantSupport(s.Storage.PersonalAssistant, s.Storage.UserProvider)
+	// The roster draws a progress ring per card, so the list carries the flat
+	// XP-per-level threshold once rather than making the client ask per agent.
+	if s.Handlers.Evolution != nil {
+		dashboardHandler.SetXPPerLevelReporter(s.Handlers.Evolution)
+	}
 	if s.Handlers.ExternalAgents != nil {
 		dashboardHandler.SetClaudeSyncProvider(s.Handlers.ExternalAgents.ClaudeSyncData)
 		dashboardHandler.SetCodexSyncProvider(s.Handlers.ExternalAgents.CodexSyncData)

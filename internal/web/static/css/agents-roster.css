@@ -455,6 +455,39 @@ body.agents-roster-page {
   z-index: 10200;
 }
 
+/* ---- First-visit coachmark ------------------------------------------------ */
+
+/* A quiet strip above the collection, not a modal: it teaches one thing beside
+   the thing it describes and can be ignored. The ring and pointer on the card
+   itself come from the shared guide coachmark. */
+.roster-coachmark {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--roster-accent) 40%, var(--card-line));
+  border-radius: var(--roster-radius);
+  background: color-mix(in srgb, var(--roster-accent) 8%, var(--card-surface));
+}
+
+.roster-coachmark[hidden] {
+  display: none;
+}
+
+.roster-coachmark__copy {
+  margin: 0;
+  color: var(--text-primary, #111827);
+  font-size: 13px;
+}
+
+.roster-coachmark__actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
 /* ---- Filters button + panel ----------------------------------------------- */
 
 .collection-filters-btn {
@@ -1181,6 +1214,84 @@ body.agents-roster-page {
   grid-column: 1;
 }
 
+/* ---- Portrait progress ring ---------------------------------------------- */
+
+/* Progress toward the next level, drawn around the portrait (FR-74/FR-75).
+   The role emblem inside the portrait comes from the shared avatar renderer,
+   so this element carries only the ring.
+
+   A conic-gradient masked to an annulus: one element, no SVG, and the fill is
+   a single custom property the controller writes. The portrait keeps its own
+   size, so the ring adds a 3px collar rather than shrinking the art. */
+.agent-card__ring {
+  --ring-track: color-mix(in srgb, var(--role-accent) 18%, transparent);
+  position: relative;
+  grid-row: 1;
+  grid-column: 1;
+  display: grid;
+  place-items: center;
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+}
+
+.agent-card__ring::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(var(--role-accent) calc(var(--ring-pct, 0) * 1%), var(--ring-track) 0);
+  /* The annulus. Both properties are needed: the unprefixed one for current
+     engines, the -webkit- one for Safari, which still requires it. */
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+}
+
+/* The ring shows proportion; it is never the only thing distinguishing a
+   stage. Each stage also changes the ring's WEIGHT and its track, so the five
+   are tellable apart in monochrome and by someone who cannot compare hues
+   (FR-77/FR-88). Names match the AgentStage constants exactly. */
+.agent-card__ring[data-stage="spark"]::before {
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+}
+
+.agent-card__ring[data-stage="infant"]::before {
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+}
+
+.agent-card__ring[data-stage="learner"]::before {
+  mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 4px));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 4px));
+}
+
+.agent-card__ring[data-stage="expert"]::before {
+  mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 5px));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 5px));
+}
+
+/* Sentient is the only stage that closes the track completely, so the last
+   stage reads as arrival rather than as "a slightly thicker expert". */
+.agent-card__ring[data-stage="sentient"] {
+  --ring-track: color-mix(in srgb, var(--role-accent) 42%, transparent);
+}
+
+.agent-card__ring[data-stage="sentient"]::before {
+  mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 5px));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 5px));
+}
+
+/* The ring never animates. The stage-up toast already owns the level-up
+   moment, and a second animation would compete with it for the same event
+   (PRD 9.4). This rule is moot while nothing transitions and exists so the
+   promise stays true if a later change adds motion. */
+@media (prefers-reduced-motion: reduce) {
+  .agent-card__ring::before {
+    transition: none;
+  }
+}
+
 .agent-card__ident {
   grid-row: 1;
   grid-column: 2;
@@ -1411,8 +1522,11 @@ body.agents-roster-page {
 }
 
 /* The name already identifies the row, so the portrait's column is better spent
-   on membership at this density. It returns at phone width, below. */
-.roster-collection.is-list .agent-grid .agent-card__portrait {
+   on membership at this density. It returns at phone width, below.
+   The ring is the portrait's wrapper, so hiding only the portrait would leave
+   a floating 62px circle where the art used to be. */
+.roster-collection.is-list .agent-grid .agent-card__portrait,
+.roster-collection.is-list .agent-grid .agent-card__ring {
   display: none;
 }
 
@@ -1482,6 +1596,10 @@ body.agents-roster-page {
   }
   .roster-collection.is-list .agent-grid .agent-card__portrait {
     display: block;
+  }
+  /* grid, not block: the ring centres the portrait with place-items. */
+  .roster-collection.is-list .agent-grid .agent-card__ring {
+    display: grid;
   }
   .roster-collection.is-list .agent-grid .agent-card__ident {
     grid-column: 2;
@@ -2285,7 +2403,27 @@ body.inspector-sheet-open {
   gap: 8px;
   font-weight: 600;
   font-size: 14px;
-  color: var(--role-accent, var(--text-primary, #111827));
+  /* The catalog's accents are picked to identify a role on a chip or an emblem,
+     not to be read as body text: the Writer green (#22c55e) gives 1.98:1 on the
+     light paper surface, which axe flags as a serious violation. Mixed toward
+     the page ink so the role stays recognisably its own colour while the text
+     is actually readable — the same trade the card's role line makes through
+     the --roster-accent indirection. The emblem beside it still carries the
+     accent at full strength, where contrast rules do not apply.
+     40%, not 55%: the lighter mix measured 4.21:1 — closer, still under the
+     4.5:1 minimum. Green is the worst case of the six catalog accents, so a
+     ratio that satisfies it satisfies all of them. */
+  color: color-mix(
+    in srgb,
+    var(--role-accent, var(--text-primary, #111827)) 40%,
+    var(--text-primary, #111827)
+  );
+}
+
+/* Dark surfaces need the opposite adjustment: there the accent is already
+   bright enough and mixing toward the (light) ink would wash it out. */
+[data-bs-theme="dark"] .stage__progression-role {
+  color: color-mix(in srgb, var(--role-accent, var(--text-primary, #e8eaec)) 82%, #ffffff);
 }
 
 .stage__progression-emblem {
