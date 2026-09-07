@@ -43,7 +43,7 @@ async function ensureWorkspace(page: Page, name?: string): Promise<string> {
 
 async function listWorkspaces(
   page: Page
-): Promise<Array<{ id: string; name?: string; parent_id?: string }>> {
+): Promise<Array<{ id: string; name?: string; parent_id?: string; kind?: string }>> {
   const body = await (await page.request.get('/api/workspaces')).json();
   return body.workspaces || body.folders || [];
 }
@@ -847,9 +847,11 @@ test.describe('Coordinate Workspace Map', () => {
 
     await expect(page.locator('.ws-map-canvas.is-readonly')).toBeVisible();
     await expect(page.locator('.ws-map-tile[data-ws-id]').first()).toBeVisible();
-    // Navigation still works; placement does not.
+    // Navigation still works; placement does not. Compare to the fitted zoom:
+    // the shared sandbox can contain enough fixtures to start below 50%.
+    const beforeZoom = (await cameraOf(page)).zoom;
     await page.click('[data-map-zoom-in]');
-    expect((await cameraOf(page)).zoom).toBeGreaterThan(0.5);
+    expect((await cameraOf(page)).zoom).toBeGreaterThan(beforeZoom);
     const site = await emptyPointOn(page);
     await page.mouse.click(site.x, site.y, { button: 'right' });
     await expect(page.locator('[data-menu-action="build"]')).toHaveAttribute(
@@ -1223,23 +1225,30 @@ test.describe('Coordinate Workspace Map', () => {
   // underneath it, and the zoom range those targets have to survive.
   // -------------------------------------------------------------------------
   test.describe('group districts (#346)', () => {
-    // Serial: every test seeds a fixture into the ONE shared demo server and
-    // picks its row from how many already exist. Run in parallel, two workers
-    // read the same count and stack their districts on each other.
+    // Serial: every test seeds a fixture below the same shared demo layout.
+    // Parallel workers could read the same bounds and stack their districts.
     test.describe.configure({ mode: 'serial' });
 
     /**
      * A group with two members, on a row of its own.
      *
-     * Each test in this block seeds its own fixture into the same sandbox, so a
-     * fixed coordinate would stack every district on the last one — producing
-     * genuine (and correctly reported) containment conflicts that have nothing
-     * to do with what is being tested.
+     * Place below existing workspace anchors and custom frames, not just this
+     * block's fixtures: earlier drag tests occupy the same sandbox too. Ignore
+     * group anchors, which may deliberately be stale in the compact-frame test.
      */
     async function seedDistrict(page: Page) {
       const tag = String(Date.now()).slice(-6);
       const existing = await listWorkspaces(page);
-      const row = existing.filter(ws => String(ws.name || '').startsWith('District A ')).length;
+      const layout = (await (await page.request.get('/api/workspace-map/layout')).json()).layout;
+      const bottoms = existing
+        .filter(ws => ws.kind !== 'group')
+        .map(ws => layout.positions?.[ws.id]?.y || 0);
+      for (const record of Object.values(layout.groups || {}) as Array<{
+        frame?: { y: number; height: number };
+      }>) {
+        if (record.frame) bottoms.push(record.frame.y + record.frame.height);
+      }
+      const y = Math.max(0, ...bottoms) + 570;
       const make = async (name: string, kind = 'workspace') => {
         const res = await page.request.post('/api/workspaces', { data: { name, kind } });
         return (await res.json()).folder.id;
@@ -1250,7 +1259,6 @@ test.describe('Coordinate Workspace Map', () => {
       for (const id of [a, b]) {
         await page.request.put(`/api/workspaces/${id}`, { data: { parent_id: group } });
       }
-      const y = 380 + row * 570;
       await page.request.patch('/api/workspace-map/layout', {
         data: {
           operations: [
@@ -1264,22 +1272,11 @@ test.describe('Coordinate Workspace Map', () => {
     const districtOf = (page: Page, group: string) =>
       page.locator(`.ws-map-district[data-group-id="${group}"]`);
 
-    /**
-     * Select the district, retrying across the cockpit's hydration remounts.
-     *
-     * Frames everything first: the sandbox is shared with every other spec in
-     * this file, and a camera one of them left behind can put the fixture
-     * outside the canvas entirely, where no click can reach it.
-     */
+    /** Select the fixture without force-clicking a subpixel label at Fit All's floor. */
     async function selectDistrict(page: Page, group: string) {
-      const district = districtOf(page, group);
-      await district.waitFor({ timeout: 15000 });
-      await frameFromMenu(page, 'fit');
-      await expect(async () => {
-        await frameFromMenu(page, 'fit');
-        await district.locator('.ws-map-district-tag').click({ force: true });
-        await expect(page.locator('[data-ws-map-resize]')).toBeVisible({ timeout: 1500 });
-      }).toPass({ timeout: 20000 });
+      await districtOf(page, group).waitFor({ timeout: 15000 });
+      await centerOnWorkspace(page, group);
+      await expect(page.locator('[data-ws-map-resize]')).toBeVisible();
     }
 
     async function zoomTo(page: Page, target: number) {
@@ -1304,6 +1301,17 @@ test.describe('Coordinate Workspace Map', () => {
       await centerOnWorkspace(page, group);
       await zoomTo(page, 1);
       const point = await districtSurfacePoint(page, group);
+      const candidate = await page.evaluate(at => {
+        const map = (window as unknown as { OriWorkspaceMap: any }).OriWorkspaceMap;
+        const canvas = document.querySelector('.ws-map-canvas')!;
+        const rect = canvas.getBoundingClientRect();
+        return map.snapPoint(
+          map.camera.screenToWorld({ x: at.x - rect.left, y: at.y - rect.top }, map.getCamera(), {
+            width: canvas.clientWidth,
+            height: canvas.clientHeight
+          })
+        );
+      }, point);
       await page.mouse.click(point.x, point.y, { button: 'right' });
       await expect(page.locator('[data-menu-action="build"]')).toBeEnabled();
       await page.locator('[data-menu-action="build"]').click();
@@ -1311,11 +1319,18 @@ test.describe('Coordinate Workspace Map', () => {
       const name = `Grouped Build ${Date.now()}`;
       await completeCreateWizard(page, name);
       await expect(page.locator('#addFolderModal')).toBeHidden();
+      await expect
+        .poll(async () => (await listWorkspaces(page)).find(ws => ws.name === name)?.parent_id)
+        .toBe(group);
       const built = (await listWorkspaces(page)).find(ws => ws.name === name)!;
       expect(built.parent_id).toBe(group);
       const saved = (await (await page.request.get('/api/workspace-map/layout')).json()).layout
         .positions[built.id];
       expect(saved).toEqual({ x: expect.any(Number), y: expect.any(Number) });
+      // The click uses the same bounded collision search as a drop (12 grid rings),
+      // not the new workspace's unrelated automatic fallback elsewhere on the map.
+      expect(Math.abs(saved.x - candidate.x)).toBeLessThanOrEqual(12 * 38);
+      expect(Math.abs(saved.y - candidate.y)).toBeLessThanOrEqual(12 * 38);
       await page.reload();
       await districtOf(page, group).waitFor();
       expect((await listWorkspaces(page)).find(ws => ws.id === built.id)?.parent_id).toBe(group);
@@ -1330,6 +1345,109 @@ test.describe('Coordinate Workspace Map', () => {
       await centerOnWorkspace(page, group);
       await zoomTo(page, 1);
       await page.screenshot({ path: testInfo.outputPath('grouped-build.png'), fullPage: true });
+      await page.locator('[data-cockpit-view="tree"]').click();
+      await expect(page.locator(`[data-tree-row="${built.id}"]`)).toHaveAttribute(
+        'data-parent-id',
+        group
+      );
+    });
+
+    test('cancelled label Build does not parent a later canvas Build (#451)', async ({ page }) => {
+      const { group, a } = await seedDistrict(page);
+      await openMap(page);
+      await centerOnWorkspace(page, group);
+      await zoomTo(page, 1);
+      const before = (await listWorkspaces(page)).length;
+      const membershipWrites: string[] = [];
+      page.on('request', req => {
+        if (req.method() === 'PATCH' && /\/api\/workspaces\/[^/]+$/.test(req.url()))
+          membershipWrites.push(req.url());
+      });
+      await districtOf(page, group).locator('.ws-map-district-tag').click({ button: 'right' });
+      await page.locator('[data-menu-action="build"]').click();
+      await expect(page.locator('#addFolderModal')).toBeVisible();
+      await page
+        .locator('#addFolderModal')
+        .getByRole('button', { name: 'Cancel', exact: true })
+        .click();
+      await expect(page.locator('#addFolderModal')).toBeHidden();
+      expect((await listWorkspaces(page)).length).toBe(before);
+      const point = await emptyPointOn(page);
+      await page.mouse.click(point.x, point.y, { button: 'right' });
+      await page.locator('[data-menu-action="build"]').click();
+      const name = `Ungrouped after cancel ${Date.now()}`;
+      await completeCreateWizard(page, name);
+      await expect(page.locator('#addFolderModal')).toBeHidden();
+      const built = (await listWorkspaces(page)).find(ws => ws.name === name)!;
+      expect(built.parent_id || '').toBe('');
+      expect(membershipWrites).toEqual([]);
+      expect(
+        (await (await page.request.get('/api/workspace-map/layout')).json()).layout.positions[
+          built.id
+        ]
+      ).toBeTruthy();
+      // A member remains a tile target, not a district Build trigger.
+      await centerOnWorkspace(page, a);
+      const member = await grabPointOn(page, a);
+      await page.mouse.click(member.x, member.y, { button: 'right' });
+      await expect(page.locator('[data-menu-action="open-backlog"]')).toBeVisible();
+      await expect(page.locator('[data-menu-action="build"]')).toHaveCount(0);
+    });
+
+    test('keyboard district Build preserves the real workspace and position on injected membership failure (#451)', async ({
+      page
+    }, testInfo) => {
+      const { group } = await seedDistrict(page);
+      await openMap(page);
+      await centerOnWorkspace(page, group);
+      await zoomTo(page, 1);
+      let attempted = 0;
+      await page.route('**/api/workspaces/*', async route => {
+        const req = route.request();
+        if (req.method() === 'PATCH' && req.postDataJSON()?.parent_id === group) {
+          attempted++;
+          await route.fulfill({
+            status: 404,
+            contentType: 'application/json',
+            body: JSON.stringify({ error: 'injected unavailable group' })
+          });
+        } else await route.continue();
+      });
+      await districtOf(page, group).locator('.ws-map-district-tag').focus();
+      await page.keyboard.press('Shift+F10');
+      await page.locator('[data-menu-action="build"]').click();
+      const name = `Membership failure ${Date.now()}`;
+      await completeCreateWizard(page, name);
+      await expect(page.locator('#addFolderModal')).toBeHidden();
+      await expect.poll(() => attempted).toBe(1);
+      const live = page.locator('[data-map-live]');
+      await expect(live).toContainText('could not be added to');
+      await expect(live).toContainText('Its position is saved');
+      const feedback = await live.textContent();
+      await testInfo.attach('membership-failure-announcement', {
+        body: feedback!,
+        contentType: 'text/plain'
+      });
+      const built = (await listWorkspaces(page)).find(ws => ws.name === name)!;
+      expect(built.parent_id || '').toBe('');
+      const saved = (await (await page.request.get('/api/workspace-map/layout')).json()).layout
+        .positions[built.id];
+      expect(saved).toEqual({ x: expect.any(Number), y: expect.any(Number) });
+      await page.reload();
+      await page.locator(`.ws-map-tile[data-ws-id="${built.id}"]`).waitFor();
+      expect((await listWorkspaces(page)).find(ws => ws.id === built.id)?.parent_id || '').toBe('');
+      expect(
+        (await (await page.request.get('/api/workspace-map/layout')).json()).layout.positions[
+          built.id
+        ]
+      ).toEqual(saved);
+      // After the real host reload, frame the retained building for evidence.
+      // Accessible-only feedback was attached above, not made into a fake toast.
+      await centerOnWorkspace(page, built.id);
+      await page.screenshot({
+        path: testInfo.outputPath('membership-failure.png'),
+        fullPage: true
+      });
     });
 
     test('a populated district is compact and never spans to a stale anchor (FR-16, FR-25)', async ({
