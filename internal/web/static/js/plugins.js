@@ -94,17 +94,19 @@
     return Promise.allSettled([window.loadPlugins(), window.loadPluginUpdateStatus()]);
   };
 
-  // ---- shared trust disclosure (used by source-install and marketplace-install) ----
+  // ---- trust disclosures ----
 
   let pendingConfirm = null;
+  let pendingUpdateConfirm = null;
+  let pendingUpdateName = '';
+  let updateReturnFocus = null;
 
   const DEFAULT_TRUST_TITLE = 'This plugin will register:';
   const DEFAULT_TRUST_CONFIRM = 'Confirm install';
 
-  // showTrust reveals the shared disclosure panel. opts lets callers retitle it
-  // for context (e.g. an update re-confirmation, which is triggered from the
-  // installed-plugins list far below) and scrolls it into view so the prompt
-  // isn't missed.
+  // Source and marketplace installs stay inline with the form that started
+  // them. Update disclosures use the dedicated modal below because their
+  // trigger lives in the installed-plugins list, far from the install card.
   function showTrust(report, onConfirm, opts) {
     opts = opts || {};
     const titleEl = byId('pluginTrustTitle');
@@ -153,6 +155,95 @@
 
   function renderTrustBody(t) {
     renderTrustInto(byId('pluginTrustBody'), t);
+  }
+
+  function updateModalInstance() {
+    const modalEl = byId('pluginUpdateModal');
+    if (!modalEl || !window.bootstrap || !window.bootstrap.Modal) {
+      throw new Error('The update confirmation dialog is unavailable.');
+    }
+    return window.bootstrap.Modal.getOrCreateInstance(modalEl);
+  }
+
+  function setUpdateApplying(applying) {
+    const modalEl = byId('pluginUpdateModal');
+    const confirmEl = byId('pluginUpdateConfirm');
+    if (!modalEl || !confirmEl) return;
+    modalEl.dataset.applying = applying ? 'true' : 'false';
+    confirmEl.disabled = applying;
+    confirmEl.textContent = applying ? 'Updating\u2026' : 'Confirm update';
+    modalEl.querySelectorAll('[data-bs-dismiss="modal"]').forEach(button => {
+      button.disabled = applying;
+    });
+  }
+
+  function resetUpdateTrustModal() {
+    const returnFocus = updateReturnFocus;
+    const updatedName = pendingUpdateName;
+    pendingUpdateConfirm = null;
+    pendingUpdateName = '';
+    updateReturnFocus = null;
+    const bodyEl = byId('pluginUpdateTrustBody');
+    if (bodyEl) bodyEl.innerHTML = '';
+    const titleEl = byId('pluginUpdateModalLabel');
+    if (titleEl) titleEl.textContent = 'Review plugin update';
+    setUpdateApplying(false);
+    document.body.classList.remove('plugin-update-modal-open');
+
+    if (returnFocus && returnFocus.isConnected && typeof returnFocus.focus === 'function') {
+      returnFocus.focus();
+      return;
+    }
+    const replacement = Array.from(document.querySelectorAll('[data-plugin-action="update"]')).find(
+      button => button.getAttribute('data-plugin-name') === updatedName
+    );
+    if (replacement) replacement.focus();
+  }
+
+  function showUpdateTrust(name, report, onConfirm) {
+    const titleEl = byId('pluginUpdateModalLabel');
+    const bodyEl = byId('pluginUpdateTrustBody');
+    if (!titleEl || !bodyEl) throw new Error('The update confirmation dialog is unavailable.');
+
+    titleEl.textContent = 'Update ' + name;
+    renderTrustInto(bodyEl, report || {});
+    pendingUpdateConfirm = onConfirm;
+    pendingUpdateName = name;
+    updateReturnFocus = document.activeElement;
+    setUpdateApplying(false);
+    updateModalInstance().show();
+  }
+
+  async function confirmPluginUpdate() {
+    if (!pendingUpdateConfirm) return;
+    const confirmAction = pendingUpdateConfirm;
+    let succeeded = false;
+    setUpdateApplying(true);
+    try {
+      await confirmAction();
+      pendingUpdateConfirm = null;
+      succeeded = true;
+    } catch (e) {
+      notify('Update failed: ' + e.message, 'error');
+    } finally {
+      setUpdateApplying(false);
+    }
+    if (succeeded) updateModalInstance().hide();
+  }
+
+  function wirePluginUpdateModal() {
+    const modalEl = byId('pluginUpdateModal');
+    const confirmEl = byId('pluginUpdateConfirm');
+    if (!modalEl || !confirmEl || modalEl.dataset.wired) return;
+    modalEl.dataset.wired = '1';
+    confirmEl.addEventListener('click', confirmPluginUpdate);
+    modalEl.addEventListener('show.bs.modal', () => {
+      document.body.classList.add('plugin-update-modal-open');
+    });
+    modalEl.addEventListener('hide.bs.modal', event => {
+      if (modalEl.dataset.applying === 'true') event.preventDefault();
+    });
+    modalEl.addEventListener('hidden.bs.modal', resetUpdateTrustModal);
   }
 
   // ---- installed plugins ----
@@ -340,7 +431,6 @@
       const data = await api('POST', url, { confirm: false });
       const doUpdate = async () => {
         const res = await api('POST', url, { confirm: true });
-        window.pluginCancelInstall();
         await window.refreshPluginsPage();
         const newVersion = (res && res.plugin && res.plugin.version) || '';
         if (newVersion && oldVersion && newVersion !== oldVersion) {
@@ -352,13 +442,9 @@
         }
       };
       if (data.changed) {
-        // The component set changed, so re-disclose and re-confirm. Title it for
-        // the update (the panel lives in the install card, far from the Update
-        // button) so the prompt is unmistakable.
-        showTrust(data.trust, doUpdate, {
-          title: 'Update ' + name + ' — this will now register:',
-          confirmLabel: 'Confirm update'
-        });
+        // The component set changed, so re-disclose and re-confirm in context
+        // without moving the user to the unrelated install form.
+        showUpdateTrust(name, data.trust, doUpdate);
       } else {
         await doUpdate();
       }
@@ -776,6 +862,7 @@
 
   document.addEventListener('DOMContentLoaded', function () {
     wireInstalledActions();
+    wirePluginUpdateModal();
     window.loadPlugins();
     updateController.start();
     window.loadMarketplaces();

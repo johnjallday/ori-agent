@@ -20,7 +20,7 @@ func TestRenderPluginsIncludesAccessibleUpdateNoticeAndHelperOrder(t *testing.T)
 	if err := r.LoadTemplates(); err != nil {
 		t.Fatalf("LoadTemplates failed: %v", err)
 	}
-	html, err := r.RenderTemplate("plugins", TemplateData{Title: "Plugins - Ori Agent"})
+	html, err := r.RenderTemplate("plugins", TemplateData{Title: "Plugins - Ori Agent", CurrentPage: "plugins"})
 	if err != nil {
 		t.Fatalf("RenderTemplate(plugins) failed: %v", err)
 	}
@@ -32,6 +32,12 @@ func TestRenderPluginsIncludesAccessibleUpdateNoticeAndHelperOrder(t *testing.T)
 		`id="pluginUpdateNoticeMarker"`,
 		`id="pluginUpdateNoticeTitle"`,
 		`id="pluginUpdateNoticeDetail"`,
+		`href="/css/plugins.css"`,
+		`id="pluginUpdateModal"`,
+		`aria-labelledby="pluginUpdateModalLabel"`,
+		`aria-describedby="pluginUpdateModalDescription"`,
+		`id="pluginUpdateTrustBody"`,
+		`id="pluginUpdateConfirm"`,
 		`onclick="refreshPluginsPage()"`,
 		`src="/js/modules/plugin-update-notifications.js"`,
 		`src="/js/plugins.js"`,

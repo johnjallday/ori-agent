@@ -1,0 +1,93 @@
+/* Plugins page confirmation surfaces. */
+
+/* The global navigation intentionally lives above ordinary Bootstrap layers.
+   Update confirmation is a full-screen decision, so its backdrop and dialog
+   must cover all application chrome. */
+body.plugin-update-modal-open .modal-backdrop {
+  z-index: var(--app-modal-backdrop-layer, 20190) !important;
+}
+
+#pluginUpdateModal {
+  z-index: var(--app-modal-layer, 20200) !important;
+}
+
+#pluginUpdateModal .modal-content {
+  overflow: hidden;
+  background: var(--bg-primary) !important;
+  border-color: var(--border-color) !important;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.58) !important;
+}
+
+#pluginUpdateModal .modal-header {
+  background: var(--bg-primary) !important;
+}
+
+.plugin-update-modal__header {
+  align-items: flex-start;
+  padding-block: 1.25rem;
+}
+
+.plugin-update-modal__heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.9rem;
+  min-width: 0;
+}
+
+.plugin-update-modal__icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 2.5rem;
+  height: 2.5rem;
+  place-items: center;
+  border: 1px solid rgba(31, 107, 78, 0.34);
+  border-radius: 0.8rem;
+  background: var(--primary-color-light);
+  color: var(--primary-light);
+  font-size: 1.15rem;
+}
+
+.plugin-update-modal__eyebrow {
+  margin-bottom: 0.15rem;
+  color: var(--primary-light);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.plugin-update-modal__description {
+  max-width: 38rem;
+  margin: 0.35rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.plugin-update-modal__trust {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+
+.plugin-update-modal__trust .plugin-trust-list li,
+.plugin-update-modal__trust .plugin-trust-value {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 576px) {
+  .plugin-update-modal__heading {
+    gap: 0.7rem;
+  }
+
+  .plugin-update-modal__icon {
+    width: 2.25rem;
+    height: 2.25rem;
+  }
+
+  .plugin-update-modal__trust {
+    padding: 0.85rem;
+  }
+}
