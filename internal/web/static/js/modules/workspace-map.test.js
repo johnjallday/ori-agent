@@ -3877,13 +3877,26 @@ test('focus intent still selects and announces the reserved site it frames (#322
 // site and the mode ends.
 // ---------------------------------------------------------------------------
 
-function buildHarness({ layout, patchResponse } = {}) {
+function buildHarness({ layout, patchResponse, membershipResponse, windowExtras = {} } = {}) {
   const modalCalls = [];
   const patches = [];
+  const requests = [];
+  const memberships = [];
   const fetchImpl = (url, init) => {
     if (init && init.method === 'PATCH') {
       const body = JSON.parse(init.body);
+      requests.push({ url, body });
+      if (url.startsWith('/api/workspaces/')) {
+        memberships.push({ url, body });
+        if (typeof membershipResponse === 'function') return membershipResponse(body);
+        if (membershipResponse === 'fail') return Promise.resolve({ ok: false, status: 404 });
+        if (membershipResponse === 'reject')
+          return Promise.reject(new Error('network unavailable'));
+        return Promise.resolve({ ok: true });
+      }
+      assert.equal(url, '/api/workspace-map/layout', 'no unexpected PATCH endpoint');
       patches.push(body);
+      if (typeof patchResponse === 'function') return patchResponse(body);
       if (patchResponse === 'fail') return Promise.resolve({ ok: false, status: 500 });
       // Echo what a real server would commit, including the preference the
       // request asked for — the client reconciles against the response, so a
@@ -3903,6 +3916,7 @@ function buildHarness({ layout, patchResponse } = {}) {
           })
       });
     }
+    assert.ok(!init || !init.method || init.method === 'GET', 'Build never deletes a workspace');
     return jsonResponse(
       layout || { schema_version: 1, revision: 1, positions: { 'ws-1': { x: 100, y: 100 } } }
     );
@@ -3910,10 +3924,11 @@ function buildHarness({ layout, patchResponse } = {}) {
   const map = loadMapWithFetch(fetchImpl, {
     sessionManager: {
       showAddWorkspaceModal: options => modalCalls.push(options)
-    }
+    },
+    ...windowExtras
   });
   const harness = createCameraHarness();
-  return { map, harness, modalCalls, patches };
+  return { map, harness, modalCalls, patches, memberships, requests };
 }
 
 const keyEvent = (key, extra = {}) => ({
@@ -3960,11 +3975,339 @@ test('Build takes the right-clicked point and hands off to the existing modal (F
   assert.equal(modalCalls.length, 1, 'exactly one create flow opened');
   assert.equal(modalCalls[0].mapOrigin, true);
   assert.equal(modalCalls[0].entryPoint, 'workspace_map_build');
-  // FR-62: a point inside a district is still just a point. Nothing about the
-  // handoff can carry a parent.
+  // Canvas Build has no group intent; the shared modal stays unchanged.
   assert.ok(!('parentId' in modalCalls[0]) && !('parent_id' in modalCalls[0]));
   assert.equal(patches.length, 0, 'nothing is saved for a workspace that does not exist yet');
   assert.equal(map.hasPendingBuild(), true);
+});
+
+function buildFromDistrict(harness, id = 'grp', at = { x: 600, y: 200 }) {
+  harness.fire('contextmenu', rightClick(districtTarget(id), at).event);
+  const item = harness.menu.item('build');
+  assert.ok(item, 'the district menu offers Build');
+  item.fire('click');
+}
+
+const buildGroups = [
+  { id: 'grp', name: 'Group A', kind: 'group' },
+  { id: 'ws-1', name: 'Alpha', parent_id: 'grp' },
+  { id: 'grp-b', name: 'Group B', kind: 'group' }
+];
+
+test('district Build saves a position then adds the new workspace to the chosen group (#451)', async () => {
+  const { map, harness, modalCalls, patches, memberships, requests } = buildHarness();
+  let refreshed = 0;
+  map.mount(harness.container, {
+    workspaces: buildGroups,
+    onHierarchyChanged: () => refreshed++
+  });
+  await flush();
+  buildFromDistrict(harness);
+  assert.deepEqual(
+    modalCalls.map(o => ({ ...o })),
+    [{ mapOrigin: true, entryPoint: 'workspace_map_build' }]
+  );
+  assert.equal(requests.length, 0, 'no writes before creation');
+
+  assert.equal(await map.completeBuild('ws-new'), true);
+  assert.deepEqual(
+    requests.map(r => r.url),
+    ['/api/workspace-map/layout', '/api/workspaces/ws-new']
+  );
+  assert.ok(patches[0].operations[0].positions['ws-new']);
+  assert.equal(JSON.stringify(patches).includes('parent'), false, 'hierarchy is not layout');
+  assert.deepEqual(memberships[0].body, { parent_id: 'grp' });
+  assert.equal(refreshed, 1, 'the host reloads membership/counts');
+  assert.equal(map.getSelectedId(), 'ws-new');
+  assert.equal(map.hasPendingBuild(), false);
+  assert.equal(await map.completeBuild('ws-new'), false);
+  assert.equal(requests.length, 2, 'completion is single-use');
+});
+
+test('district background and label use the camera and snap preference without restricting nested parents', async () => {
+  for (const snap of [true, false]) {
+    for (const label of [false, true]) {
+      const { map, harness, patches, memberships } = buildHarness({
+        layout: {
+          schema_version: 1,
+          positions: { 'ws-1': { x: 100, y: 100 } },
+          snap_to_grid: snap,
+          viewport: { center_x: 900, center_y: 900, zoom: 0.75 }
+        }
+      });
+      mountWithCamera(map, harness, [
+        ...buildGroups,
+        { id: 'nested', name: 'Nested', kind: 'group', parent_id: 'grp' }
+      ]);
+      await flush();
+      const at = { x: 737, y: 463 };
+      harness.canvas.getBoundingClientRect = () => ({
+        left: 50,
+        top: 20,
+        width: 1000,
+        height: 600
+      });
+      const expected = map.snapPoint(
+        map.camera.screenToWorld({ x: at.x - 50, y: at.y - 20 }, map.getCamera(), {
+          width: 1000,
+          height: 600
+        })
+      );
+      let restored = 0;
+      const tag = { focus: () => restored++ };
+      const district = { getAttribute: () => 'nested', querySelector: () => tag };
+      const target = label
+        ? { closest: sel => (sel === '.ws-map-district' ? district : null) }
+        : { ...district, closest: sel => (sel === '.ws-map-district' ? district : null) };
+      harness.fire('contextmenu', { target, clientX: at.x, clientY: at.y, preventDefault() {} });
+      harness.menu.item('build').fire('click');
+      assert.equal(restored, 1, 'focus returns to the district label');
+      assert.equal(await map.completeBuild('new'), true);
+      assert.deepEqual(patches[0].operations[0].positions.new, { ...expected });
+      assert.deepEqual(memberships[0].body, { parent_id: 'nested' });
+    }
+  }
+});
+
+test('keyboard district Build uses viewport center even outside the chosen district', async () => {
+  for (const key of [{ key: 'F10', shiftKey: true }, { key: 'ContextMenu' }]) {
+    const { map, harness, patches, memberships } = buildHarness({
+      layout: {
+        schema_version: 1,
+        positions: { 'ws-1': { x: 100, y: 100 } },
+        viewport: { center_x: 1200, center_y: 1300, zoom: 1.5 }
+      }
+    });
+    mountWithCamera(map, harness, buildGroups);
+    await flush();
+    harness.fire('keydown', {
+      ...key,
+      target: { closest: districtTarget('grp') },
+      preventDefault() {}
+    });
+    harness.menu.item('build').fire('click');
+    const expected = map.snapPoint({ x: map.getCamera().centerX, y: map.getCamera().centerY });
+    const district = districtsById(map.computeWorldLayout(buildGroups, map.getLayoutState())).grp;
+    assert.ok(
+      expected.x > district.x + district.width || expected.y > district.y + district.height
+    );
+    assert.equal(await map.completeBuild('new'), true);
+    assert.deepEqual(patches[0].operations[0].positions.new, { ...expected });
+    assert.equal(memberships[0].body.parent_id, 'grp');
+  }
+});
+
+test('collision resolution outside a collapsed district retains explicit Build membership', async () => {
+  const { map, harness, patches, memberships } = buildHarness({
+    layout: {
+      schema_version: 1,
+      positions: { 'ws-1': { x: 380, y: 380 } },
+      groups: { grp: { collapsed: true } }
+    }
+  });
+  mountWithCamera(map, harness, buildGroups);
+  await flush();
+  const district = districtsById(map.computeWorldLayout(buildGroups, map.getLayoutState())).grp;
+  assert.equal(district.collapsed, true);
+  const chosen = { x: Math.ceil(district.x / 38) * 38, y: Math.ceil(district.y / 38) * 38 };
+  const point = map.camera.worldToScreen(chosen, map.getCamera(), { width: 1000, height: 600 });
+  buildFromDistrict(harness, 'grp', point);
+  assert.equal(await map.completeBuild('new'), true);
+  const saved = patches[0].operations[0].positions.new;
+  assert.notDeepEqual(saved, chosen, 'collision moved the anchor');
+  assert.ok(
+    saved.x < district.x ||
+      saved.y < district.y ||
+      saved.x > district.x + district.width ||
+      saved.y > district.y + district.height,
+    JSON.stringify({ saved, district })
+  );
+  assert.equal(memberships[0].body.parent_id, 'grp');
+  assert.deepEqual(
+    patches[0].operations.map(op => op.op),
+    ['set_positions'],
+    'no implicit expansion'
+  );
+});
+
+test('read-only district Build is disabled, and member tiles and HQ keep their own menus', async () => {
+  const { map, harness, modalCalls, requests } = buildHarness();
+  mountWithCamera(map, harness, buildGroups);
+  await flush();
+  map._setLayoutForTest({ positions: {} }, 'unavailable');
+  harness.fire('contextmenu', rightClick(districtTarget('grp')).event);
+  assert.equal(harness.menu.item('build').getAttribute('aria-disabled'), 'true');
+  harness.menu.item('build').fire('click');
+  assert.equal(modalCalls.length, 0);
+  assert.equal(map.hasPendingBuild(), false);
+  assert.equal(requests.length, 0);
+  const memberTarget = sel => tileTarget('ws-1')(sel) || districtTarget('grp')(sel);
+  harness.fire('contextmenu', rightClick(memberTarget).event);
+  assert.equal(harness.menu.item('build'), null);
+  assert.ok(harness.menu.item('open-backlog'));
+  harness.fire('contextmenu', rightClick(sel => hqTarget()(sel) || memberTarget(sel)).event);
+  assert.ok(harness.menu.item('hq-build'));
+  assert.equal(harness.menu.item('build'), null);
+});
+
+test('cancelled or replaced district intent never leaks into a later Build', async () => {
+  for (const next of ['canvas', 'grp-b']) {
+    const { map, harness, memberships, requests } = buildHarness();
+    mountWithCamera(map, harness, buildGroups);
+    await flush();
+    buildFromDistrict(harness);
+    if (next === 'canvas') {
+      map.cancelBuild();
+      assert.equal(await map.completeBuild('cancelled'), false);
+      assert.equal(requests.length, 0);
+      buildFromMenu(harness);
+    } else {
+      buildFromDistrict(harness, next);
+    }
+    assert.equal(await map.completeBuild('new'), true);
+    assert.deepEqual(
+      memberships.map(m => m.body.parent_id),
+      next === 'canvas' ? [] : ['grp-b']
+    );
+  }
+});
+
+test('absent modal, missing ID, and missing coordinate consume all pending intent', async () => {
+  for (const cleanup of ['modal', 'id', 'coordinate']) {
+    const manager = {};
+    const { map, harness, memberships, requests } = buildHarness({
+      windowExtras: { sessionManager: manager }
+    });
+    manager.showAddWorkspaceModal = () => {};
+    mountWithCamera(map, harness, buildGroups);
+    await flush();
+    buildFromDistrict(harness);
+    if (cleanup === 'modal') {
+      delete manager.showAddWorkspaceModal;
+      buildFromDistrict(harness, 'grp-b');
+      manager.showAddWorkspaceModal = () => {};
+    } else if (cleanup === 'id') {
+      assert.equal(await map.completeBuild(''), false);
+    } else {
+      const query = harness.container.querySelector;
+      harness.container.querySelector = sel => (sel === '.ws-map-canvas' ? null : query(sel));
+      buildFromDistrict(harness, 'grp-b');
+      harness.container.querySelector = query;
+    }
+    assert.equal(map.hasPendingBuild(), false);
+    assert.equal(await map.completeBuild('stale'), false);
+    assert.equal(requests.length, 0);
+    buildFromMenu(harness);
+    assert.equal(await map.completeBuild('new'), true);
+    assert.equal(memberships.length, 0);
+  }
+});
+
+test('group intent is captured before awaiting placement and a later Build cannot replace it', async () => {
+  let resolvePosition;
+  const { map, harness, memberships, patches } = buildHarness({
+    patchResponse: () =>
+      new Promise(resolve => {
+        resolvePosition = resolve;
+      })
+  });
+  mountWithCamera(map, harness, buildGroups);
+  await flush();
+  buildFromDistrict(harness);
+  const completing = map.completeBuild('new-a');
+  await flushDeep();
+  assert.equal(map.hasPendingBuild(), false);
+  assert.equal(memberships.length, 0, 'membership waits for persistence');
+  assert.equal(await map.completeBuild('duplicate'), false);
+  buildFromDistrict(harness, 'grp-b');
+  resolvePosition({
+    ok: true,
+    json: async () => ({
+      result: {
+        schema_version: 1,
+        positions: patches[0].operations[0].positions
+      }
+    })
+  });
+  assert.equal(await completing, true);
+  assert.equal(memberships[0].body.parent_id, 'grp');
+  assert.equal(map.hasPendingBuild(), true, 'completion did not consume the next build');
+  const next = map.completeBuild('new-b');
+  await flushDeep();
+  resolvePosition({
+    ok: true,
+    json: async () => ({
+      result: {
+        schema_version: 1,
+        positions: patches[1].operations[0].positions
+      }
+    })
+  });
+  assert.equal(await next, true);
+  assert.deepEqual(
+    memberships.map(m => m.body.parent_id),
+    ['grp', 'grp-b']
+  );
+});
+
+test('failed grouped placement skips membership and its retry remains position-only', async () => {
+  let fail = true;
+  const { map, harness, patches, memberships } = buildHarness({
+    patchResponse: body =>
+      fail
+        ? Promise.resolve({ ok: false, status: 500 })
+        : Promise.resolve({
+            ok: true,
+            json: async () => ({
+              result: {
+                schema_version: 1,
+                positions: body.operations[0].positions
+              }
+            })
+          })
+  });
+  mountWithCamera(map, harness, buildGroups);
+  await flush();
+  buildFromDistrict(harness);
+  assert.equal(await map.completeBuild('new'), false);
+  assert.match(
+    harness.control('[data-map-live]').textContent,
+    /created, but its position could not be saved/
+  );
+  assert.equal(memberships.length, 0);
+  fail = false;
+  assert.equal(await map.retryPlacement('new'), true);
+  assert.deepEqual(patches[0].operations[0].positions.new, patches[1].operations[0].positions.new);
+  assert.equal(memberships.length, 0);
+});
+
+test('failed grouped membership preserves placement and prior parent without fabricating a retry', async () => {
+  for (const membershipResponse of ['fail', 'reject']) {
+    const { map, harness, patches, requests } = buildHarness({ membershipResponse });
+    const workspaces = [...buildGroups, { id: 'new', parent_id: 'grp-b' }];
+    let refreshed = 0;
+    map.mount(harness.container, { workspaces, onHierarchyChanged: () => refreshed++ });
+    await flush();
+    buildFromDistrict(harness);
+    assert.equal(await map.completeBuild('new'), false);
+    assert.equal(refreshed, 0);
+    assert.deepEqual(
+      { ...map.getLayoutState().positions.new },
+      patches[0].operations[0].positions.new
+    );
+    assert.equal(workspaces.at(-1).parent_id, 'grp-b');
+    assert.equal(await map.retryPlacement('new'), false);
+    assert.equal(requests.length, 2, 'no rollback, deletion, or position retry');
+    assert.equal(map.getSelectedId(), 'new');
+    assert.match(
+      harness.control('[data-map-live]').textContent,
+      /created at .*could not be added to Group A.*position is saved; group membership is unchanged/
+    );
+    assert.doesNotMatch(
+      harness.control('[data-map-live]').textContent,
+      /previous group|default spot|Retry position/
+    );
+  }
 });
 
 test('where you right-click is where it builds', async () => {
@@ -7738,7 +8081,7 @@ const hqTarget = () => sel => (sel.includes('data-hq-site') ? { focus() {} } : n
 
 const canvasTarget = () => sel => (sel.includes('ws-map-canvas') ? { focus() {} } : null);
 
-test('a group district offers Open, the layout actions, and a danger Delete group', () => {
+test('a group district offers Open, Build, the layout actions, and a danger Delete group', () => {
   const map = loadOriWorkspaceMap();
   map._setLayoutForTest({ positions: {} }, 'ready');
   const items = map.contextMenuItemsFor({
@@ -7747,7 +8090,15 @@ test('a group district offers Open, the layout actions, and a danger Delete grou
     ws: { id: 'grp-1', kind: 'group', name: 'Ops' }
   });
   const actions = Array.from(items.filter(item => !item.divider).map(item => item.action));
-  assert.deepEqual(actions, ['open', 'collapse-group', 'resize-group', 'fit-group', 'delete']);
+  assert.deepEqual(actions, [
+    'open',
+    'build',
+    'collapse-group',
+    'resize-group',
+    'fit-group',
+    'delete'
+  ]);
+  assert.equal(items[1].label, 'Build');
   assert.equal(items[0].label, 'Open group');
   assert.equal(items[items.length - 1].label, 'Delete group');
   assert.equal(items[items.length - 1].variant, 'danger');
