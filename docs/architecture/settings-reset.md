@@ -861,62 +861,64 @@ server tests use an instance-local first-phase constructor refusal, not a broad
 builder or production fault endpoint. Menubar menu and constructor guards are
 exercised headlessly; native UI/LaunchAgent/Keychain behavior is unverified.
 
-This closes host-lifetime sharing, **not** the production reset gate. Remaining
-writer/child coverage, joined draining, pre-start apply, relaunch recovery,
-verification and the unresolved shared-namespace migration policy still block
-CheckLifecycle/coordinator wiring.
-All receipt/policy/orphan evidence continues to block normal startup; there is
-still no applied-reset or browser completion claim.
+The production reset gate is now wired. A confirmed request fences the shared
+runtime gate, drains every registered lifecycle owner, persists the exact plan,
+and returns a restart-required operation. The server and menubar call
+`RecoverBeforeStores` before normal constructors. Only a verified completed
+operation authorizes those constructors; incomplete or ambiguous recovery stays
+on the read-only recovery host. Exact-key credential deletion uses the canonical
+installation namespace and retains `vault_dek`, unrelated slots, environment
+values, and external authentication.
 
-Validation: repeated focused race checks plus full `-race -short` resetstate,
-settingsreset, settingshttp, menubar and both launcher suites pass on
-macOS/arm64. Scoped server host/admission/preview/lifecycle/route-golden tests,
-both launcher builds and ratcheted lint pass (zero lint issues). Scoped host
-security scanning reports 14 existing findings, none overlapping added/changed
-Go lines; resetstate has zero findings. Linux/amd64 and Windows/amd64 resetstate
-cross-compilation passes, not native execution. The existing macOS menubar
-LC_DYSYMTAB linker warning remains; no native UI or credential validation was run.
+## Final validation findings
 
-## Validation limits / next implementation boundary (1.7)
+The implementation and its isolated tests cover selective reset, both safe
+guidance resets, and all nine Start Fresh categories. Test-owned same-sandbox
+production demos staged app-record and Start Fresh operations through HTTP,
+stopped the actual child process, relaunched through `BeforeStores`, and read
+verified durable results. The Start Fresh demo preserved workspace/vault
+SHA-256 checksums, left the retained vault detached, then attached and unlocked
+that package through the production API with its original synthetic password.
+Inherited provider keys were removed and the encrypted fallback secret store
+was forced; no Keychain, external provider, or real credential was used.
 
-The above lifecycle is chosen because tests falsified the simpler live-replace
-and same-process-restart assumptions. Preview and startup guards are implemented,
-and supported launchers now hold a process-lifetime lease. Admission/status and
-its journal are implemented. Exact-key credential inspection/deletion now exists
-for absolute, explicitly attached owners and preserves `vault_dek`, unrelated
-slots and external sources; fake-store tests cover locked and partial failure.
-Production selective lifecycle wiring, canonical namespace migration, scoped
-category application, unresolved-category retry, and same-operation verification
-are implemented. Test-owned same-sandbox demos staged both app-record reset and the full Start
-Fresh intent through the production HTTP lifecycle, fully stopped the owned
-server, relaunched through `BeforeStores`, and read completed durable results.
-The Start Fresh run exercised all nine categories, preserved workspace/vault
-checksums, kept the vault detached on relaunch, then attached and unlocked that
-same package through the production API. The demos explicitly removed inherited
-provider-key variables and forced the encrypted fallback secret store with a
-synthetic passphrase; they did not invoke Keychain or an external account.
-Headless Playwright screenshot capture was attempted again, but Chromium still
-failed its macOS Mach rendezvous, so screenshot evidence remains pending.
+After integrating the current local `origin/dev`, migrations 54–56 introduced
+16 setup-journey, Sample Library, and Agent Map tables. They are now explicitly
+classified in the app-record inventory, bringing the reviewed total to 60.
+Reset tests seed representative rows from each new domain and prove deletion,
+schema preservation, and retained backing-file preservation. Unknown future
+tables still block.
 
-Start Fresh's supplemental inventory/application and retained-vault attachment
-are implemented and covered by same-installation fixture tests, including
-byte-preserved vault decryption after explicit attachment. Still pending are the
-full production-builder demo/screenshots, native macOS menubar/Keychain journey,
-Windows/Linux native locking/backend execution, and complete browser/e2e/
-accessibility gates. Native and external authentication behavior is not
-represented as validated.
+Final local gates:
 
-Group 1 validation passed: full settingshttp/settingsreset/resetfixture/database/
-vault package tests; scoped server/menubar/database/vault lifecycle tests under
-`-race`; menubar same-process test under `-race -count=5`; ratcheted lint across
-all touched packages (0 issues); and gosec on resetfixture/settingsreset (0
-issues). Scoped menubar gosec reports four pre-existing findings in unchanged
-`launchagent.go` (G204 twice, G301, G306), none in the changed controller seam.
-No production fault hook, real credential value or machine-specific absolute
-path is checked in. Full repository and browser gates remain pending.
+- `make test`: full repository passed.
+- Focused `-race` reset/fresh/attachment tests passed for `settingsreset`,
+  `settingshttp`, `server`, `database`, `vault`, and `vaulthttp`.
+- `make test-js`: 2,557 tests passed; ESLint, Prettier, `go vet`, and
+  `git diff --check` passed.
+- Ratcheted lint reported zero new issues. The repository-pinned
+  golangci-lint v2.13.2 could not be downloaded because this host had no DNS;
+  the cached v2.8.0 source was rebuilt with Go 1.26 and used against the same
+  `--new-from-merge-base=origin/dev` boundary.
+- Gosec scanned all 44 changed Go package directories. It reported 199
+  pre-existing package findings and zero findings on added/changed lines after
+  the intentional read-only path annotations were reviewed.
+- Linux/amd64 and Windows/amd64 resetstate/settingsreset test binaries and the
+  server cross-compiled with `CGO_ENABLED=0`. This is compilation only:
+  destructive Windows reset remains explicitly unsupported until native lock,
+  ACL, and durable-replacement behavior is validated.
+- The dedicated Playwright suite formats and enumerates successfully, owns its
+  binary/process/port/data/HOME/fake secrets, and contains the full real-surface
+  journey. On this host Chromium aborts before test execution at macOS Mach
+  rendezvous registration (`bootstrap_check_in ... error 141`). System Chrome,
+  Firefox, and WebKit probes also abort. Therefore no browser screenshot,
+  narrow-screen/theme run, or end-to-end accessibility claim is made.
 
-Characterization tests intentionally pin current unsafe behavior and must be
-updated to the desired regression assertion when the corresponding fix lands;
-do not preserve a bug merely to keep its finding test green. Group 2 must wire
-host ownership/pre-start apply and persistent outcomes together before any new
-UI is considered delivered.
+Native subprocess tests exercise Darwin lease handoff and menubar-equivalent
+stop/start without native UI. Native Keychain, systray/LaunchAgent interaction,
+real provider-account behavior, Windows/Linux native execution, and user-visible
+screenshot evidence remain unvalidated and must stay labelled as limits. The
+permission sweep found no reusable shell operation that warranted a new checked-in
+entry point or allowlist request. No production fault endpoint, mock-backed
+production deletion path, real credential value, or machine-specific absolute
+path is checked in.
