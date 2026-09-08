@@ -1425,9 +1425,12 @@ export class OnboardingManager {
 
     const button = document.getElementById('pafHireBtn');
     const originalLabel = button?.textContent || 'Hire Assistant';
-    // A durable relationship already exists: close onboarding and hand over to
-    // Ori's HQ quest rather than posting a second hire.
-    if (personalAssistantNeedsHQ(this.personalAssistantState)) {
+    // A durable relationship already exists: replay may finish setup, but it
+    // must never post a second hire or reuse a stale browser hire request.
+    if (
+      this.personalAssistantState?.state === 'active' ||
+      personalAssistantNeedsHQ(this.personalAssistantState)
+    ) {
       try {
         await this.completePersonalAssistantOnboarding();
       } catch (error) {
@@ -1577,7 +1580,12 @@ export class OnboardingManager {
         'Your assistant is hired, but onboarding could not be closed. Continue to the HQ quest — this will not hire a second assistant.'
       );
     }
-    if (status) status.textContent = 'Assistant hired. Ori will help you build their home base.';
+    if (status) {
+      status.textContent =
+        this.personalAssistantState?.state === 'active'
+          ? 'Setup replay complete. Your existing assistant and Personal HQ were kept.'
+          : 'Assistant hired. Ori will help you build their home base.';
+    }
     this.modalInstance?.hide();
     window.location.href = personalAssistantNeedsHQ(this.personalAssistantState)
       ? HQ_QUEST_ROUTE
@@ -2129,11 +2137,11 @@ export class OnboardingManager {
       nameInput.value = this.userName;
     }
     const assistantInput = document.getElementById('onboardingAssistantName');
-    if (assistantInput && this.assistantName) {
-      assistantInput.value = this.assistantName;
+    if (assistantInput) {
+      // Replay Setup must not silently replace the retained assistant identity.
+      assistantInput.value = this.assistantName || 'Ori';
     }
     document.getElementById('welcomeAssistantReveal')?.classList.add('d-none');
-    if (assistantInput) assistantInput.value = 'Ori';
     const timezoneInput = document.getElementById('onboardingTimezone');
     if (timezoneInput) {
       this.populateTimezoneSelect();

@@ -366,6 +366,25 @@ func TestBackfill_RunsOnce(t *testing.T) {
 	}
 }
 
+func TestReset_PersistenceFailureKeepsAuthoritativeMemoryState(t *testing.T) {
+	store := &fakeStore{}
+	e := New(store)
+	if !e.Complete("t1-first-message") {
+		t.Fatal("failed to seed completed quest")
+	}
+	store.failNext = 1
+	if err := e.Reset(); err == nil {
+		t.Fatal("Reset succeeded despite persistence failure")
+	}
+	status := e.Status()
+	if status.CompletedCount != 1 || status.ResolvedCount != 1 {
+		t.Fatalf("failed reset changed in-memory status: %+v", status)
+	}
+	if len(store.state.CompletedQuests) != 1 {
+		t.Fatalf("failed reset changed durable state: %#v", store.state)
+	}
+}
+
 func TestReset_SurvivesBackfill(t *testing.T) {
 	store := &fakeStore{}
 	e := New(store)

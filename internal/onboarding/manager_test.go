@@ -13,6 +13,24 @@ import (
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
 
+func TestOpenForResetRefusesMalformedStateWithoutOverwriting(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "app_state.json")
+	before := []byte(`{"onboarding":{"completed":true},"user_name":"retained"`)
+	if err := os.WriteFile(path, before, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenForReset(path); err == nil {
+		t.Fatal("OpenForReset accepted malformed retained state")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatal("strict reset inspection changed malformed state")
+	}
+}
+
 func TestManager_AssistantProgress_Defaults(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "app_state.json")
 	mgr := NewManager(statePath)
@@ -212,6 +230,98 @@ func TestManager_SetNames_PersistenceRoundTrip(t *testing.T) {
 	}
 	if assistantName != "Ari" {
 		t.Fatalf("expected persisted assistant name Ari, got %q", assistantName)
+	}
+}
+
+func TestManager_ResetOnboardingReplaysOnlySetupSteps(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "app_state.json")
+	mgr := NewManager(statePath)
+	when := time.Now().UTC().Truncate(time.Second)
+
+	if err := mgr.SetNames("Jules", "Ari"); err != nil {
+		t.Fatalf("SetNames: %v", err)
+	}
+	if err := mgr.SetTimezone("America/New_York"); err != nil {
+		t.Fatalf("SetTimezone: %v", err)
+	}
+	if err := mgr.SetTheme("dark"); err != nil {
+		t.Fatalf("SetTheme: %v", err)
+	}
+	if err := mgr.SetNotesOpenBehavior("page"); err != nil {
+		t.Fatalf("SetNotesOpenBehavior: %v", err)
+	}
+	if err := mgr.SetUserProfile(&types.InferredProfile{
+		PrimaryCategory: "developer",
+		Specializations: []string{"Go"},
+	}); err != nil {
+		t.Fatalf("SetUserProfile: %v", err)
+	}
+	if err := mgr.SetProgression(types.ProgressionState{
+		CompletedQuests: map[string]time.Time{"t1-first-message": when},
+		SkippedQuests:   map[string]time.Time{"t2-build-hq": when},
+		Dismissed:       true,
+	}); err != nil {
+		t.Fatalf("SetProgression: %v", err)
+	}
+	if err := mgr.CompleteStep("profile"); err != nil {
+		t.Fatalf("CompleteStep: %v", err)
+	}
+	if err := mgr.SkipStep("connections"); err != nil {
+		t.Fatalf("SkipStep: %v", err)
+	}
+	if err := mgr.CompleteOnboarding(); err != nil {
+		t.Fatalf("CompleteOnboarding: %v", err)
+	}
+
+	if err := mgr.ResetOnboarding(); err != nil {
+		t.Fatalf("ResetOnboarding: %v", err)
+	}
+	reloaded := NewManager(statePath)
+	state := reloaded.GetState()
+	if state.Completed || !state.SkippedAt.IsZero() || state.CurrentStep != 0 || len(state.StepsCompleted) != 0 || len(state.StepsSkipped) != 0 {
+		t.Fatalf("setup state was not reset canonically: %#v", state)
+	}
+	userName, assistantName := reloaded.GetNames()
+	if userName != "Jules" || assistantName != "Ari" {
+		t.Fatalf("identity changed: user=%q assistant=%q", userName, assistantName)
+	}
+	if reloaded.GetTimezone() != "America/New_York" || reloaded.GetTheme() != "dark" || reloaded.GetNotesOpenBehavior() != "page" {
+		t.Fatalf("preferences changed during setup replay")
+	}
+	profile := reloaded.GetUserProfile()
+	if profile == nil || profile.PrimaryCategory != "developer" || len(profile.Specializations) != 1 {
+		t.Fatalf("profile changed: %#v", profile)
+	}
+	progression := reloaded.GetProgression()
+	if len(progression.CompletedQuests) != 1 || len(progression.SkippedQuests) != 1 || !progression.Dismissed {
+		t.Fatalf("Getting Started progress changed: %#v", progression)
+	}
+}
+
+func TestManager_ResetOnboardingPersistenceFailureKeepsAuthoritativeMemoryState(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "state")
+	if err := os.Mkdir(root, 0o750); err != nil {
+		t.Fatalf("mkdir state root: %v", err)
+	}
+	statePath := filepath.Join(root, "app_state.json")
+	mgr := NewManager(statePath)
+	if err := mgr.CompleteStep("profile"); err != nil {
+		t.Fatalf("CompleteStep: %v", err)
+	}
+	if err := mgr.CompleteOnboarding(); err != nil {
+		t.Fatalf("CompleteOnboarding: %v", err)
+	}
+	if err := os.Rename(root, filepath.Join(parent, "unavailable")); err != nil {
+		t.Fatalf("rename state root: %v", err)
+	}
+
+	if err := mgr.ResetOnboarding(); err == nil {
+		t.Fatal("ResetOnboarding succeeded with unavailable persistence path")
+	}
+	state := mgr.GetState()
+	if !state.Completed || state.CurrentStep != 1 || len(state.StepsCompleted) != 1 {
+		t.Fatalf("failed reset changed in-memory setup state: %#v", state)
 	}
 }
 

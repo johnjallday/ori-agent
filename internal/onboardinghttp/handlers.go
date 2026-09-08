@@ -232,8 +232,20 @@ func (h *Handler) Reset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	state := h.onboardingMgr.GetState()
+	userName, assistantName := h.onboardingMgr.GetNames()
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]bool{"success": true}); encErr != nil {
+	if encErr := json.NewEncoder(w).Encode(StatusResponse{
+		NeedsOnboarding: true,
+		CurrentStep:     state.CurrentStep,
+		Completed:       state.Completed,
+		Skipped:         !state.SkippedAt.IsZero(),
+		StepsCompleted:  state.StepsCompleted,
+		StepsSkipped:    state.StepsSkipped,
+		UserName:        userName,
+		AssistantName:   assistantName,
+		Timezone:        h.onboardingMgr.GetTimezone(),
+	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
