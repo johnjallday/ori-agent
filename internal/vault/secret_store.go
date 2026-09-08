@@ -16,10 +16,12 @@ import (
 type SecretKey string
 
 const (
-	SecretKeyOpenAIAPIKey    SecretKey = "openai_api_key"
-	SecretKeyAnthropicAPIKey SecretKey = "anthropic_api_key"
+	// These are secret store *key names* (identifiers for where a value is
+	// stored), not credential values themselves.
+	SecretKeyOpenAIAPIKey    SecretKey = "openai_api_key"    // #nosec G101 -- key name, not a credential
+	SecretKeyAnthropicAPIKey SecretKey = "anthropic_api_key" // #nosec G101 -- key name, not a credential
 	SecretKeyGeminiAPIKey    SecretKey = "gemini_api_key"
-	SecretKeyBraveAPIKey     SecretKey = "brave_api_key"
+	SecretKeyBraveAPIKey     SecretKey = "brave_api_key" // #nosec G101 -- key name, not a credential
 	SecretKeyVaultDEK        SecretKey = "vault_dek"
 )
 
@@ -63,7 +65,7 @@ type commandRunner interface {
 type execCommandRunner struct{}
 
 func (execCommandRunner) Run(stdin string, name string, args ...string) ([]byte, error) {
-	cmd := exec.Command(name, args...)
+	cmd := exec.Command(name, args...) // #nosec G204 -- name/args come from this package's own OS-keychain backend callers (fixed CLI tool names like "security"/"secret-tool"), never from request input
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
