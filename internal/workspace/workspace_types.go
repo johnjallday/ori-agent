@@ -78,10 +78,26 @@ type AgentInstance struct {
 	// CustomInstructions is the workspace owner's per-attachment refinement of a
 	// shared agent definition, layered onto the shared base prompt for this
 	// workspace only (never mutates the global definition). PRD FR16/FR17.
-	CustomInstructions string    `json:"custom_instructions,omitempty"`
-	EntryPoint         bool      `json:"entry_point,omitempty"` // Marks the default entry node for workspace-level requests
-	CreatedAt          time.Time `json:"created_at"`            // When this instance was added
+	CustomInstructions string `json:"custom_instructions,omitempty"`
+	// RoleID names the declared blueprint role this attachment fills, when it
+	// fills one. Empty means the agent is in the workspace without holding a
+	// role — the "Also in this workspace" case. A role is a slot: at most one
+	// attachment carries any given RoleID.
+	RoleID string `json:"role_id,omitempty"`
+	// RoleSource records how the role was filled: RoleSourceCreated when the
+	// fill minted a new agent definition, RoleSourceAssigned when it bound one
+	// the user already had. It is display provenance only — clearing a role
+	// never deletes a definition, whatever this says.
+	RoleSource string    `json:"role_source,omitempty"`
+	EntryPoint bool      `json:"entry_point,omitempty"` // Marks the default entry node for workspace-level requests
+	CreatedAt  time.Time `json:"created_at"`            // When this instance was added
 }
+
+// How an attachment came to fill its role. See AgentInstance.RoleSource.
+const (
+	RoleSourceCreated  = "created"
+	RoleSourceAssigned = "assigned"
+)
 
 // Folder represents a managed folder under the workspace files root.
 type Folder struct {

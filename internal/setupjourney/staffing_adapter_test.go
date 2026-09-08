@@ -16,10 +16,16 @@ import (
 type staffingGrantStub struct {
 	available map[string]bool
 	granted   map[string]map[string]bool
+	// grantErr fails Grant for the named agent, so a test can make a commit
+	// fail at its last step with everything before it already applied.
+	grantErr map[string]error
 }
 
 func (s *staffingGrantStub) Available(name string) bool { return s.available[name] }
 func (s *staffingGrantStub) Grant(agentName, skillName string) error {
+	if err := s.grantErr[agentName]; err != nil {
+		return err
+	}
 	if s.granted[agentName] == nil {
 		s.granted[agentName] = make(map[string]bool)
 	}

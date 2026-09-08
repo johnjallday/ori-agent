@@ -44,18 +44,22 @@ type StaffingScopeProjection struct {
 }
 
 type StaffingRoleProjection struct {
-	RoleID         string   `json:"role_id"`
-	Label          string   `json:"label"`
-	Responsibility string   `json:"responsibility,omitempty"`
-	Required       bool     `json:"required"`
-	Primary        bool     `json:"primary"`
-	Configured     bool     `json:"configured"`
-	ChatAvailable  bool     `json:"chat_available"`
-	ProfileName    string   `json:"profile_name,omitempty"`
-	Provider       string   `json:"provider,omitempty"`
-	Model          string   `json:"model,omitempty"`
-	UsesDefaults   bool     `json:"uses_defaults,omitempty"`
-	ToolGrants     []string `json:"tool_grants,omitempty"`
+	RoleID         string `json:"role_id"`
+	Label          string `json:"label"`
+	Responsibility string `json:"responsibility,omitempty"`
+	Required       bool   `json:"required"`
+	Primary        bool   `json:"primary"`
+	Configured     bool   `json:"configured"`
+	ChatAvailable  bool   `json:"chat_available"`
+	// Bound marks a planned role that attaches an agent the user already had
+	// instead of creating one. Review copy says "Your saved agent" for these,
+	// and nothing about them is created, mutated, or rolled back.
+	Bound        bool     `json:"bound,omitempty"`
+	ProfileName  string   `json:"profile_name,omitempty"`
+	Provider     string   `json:"provider,omitempty"`
+	Model        string   `json:"model,omitempty"`
+	UsesDefaults bool     `json:"uses_defaults,omitempty"`
+	ToolGrants   []string `json:"tool_grants,omitempty"`
 }
 
 type StaffingToolGrants interface {
@@ -80,12 +84,36 @@ func NewAssistantStaffingAdapter(workspaces workspace.Store, profiles store.Stor
 	return &AssistantStaffingAdapter{workspaces: workspaces, profiles: profiles, grants: grants, defaults: defaults, validate: validate}
 }
 
+// Staffing modes. A role is a slot; these are the two ways to fill one
+// (PRD FR3, FR49).
+const (
+	// StaffingModeCreate mints a new agent definition from the role's spec.
+	// This is the historical behavior and the decoded default, so every caller
+	// that predates modes keeps working byte-for-byte.
+	StaffingModeCreate = "create"
+	// StaffingModeBind attaches an agent definition the user already has. No
+	// definition is created, none is mutated, and rollback never deletes it.
+	StaffingModeBind = "bind"
+)
+
 type staffingRoleInput struct {
-	RoleID   string `json:"role_id"`
-	Name     string `json:"name"`
+	RoleID string `json:"role_id"`
+	Name   string `json:"name"`
+	// Mode is "create" or "bind". Absent means "create".
+	//
+	// decodeStaffingInput normalizes an explicit "create" back to the empty
+	// string so a request that names the default hashes identically to one that
+	// omits it — InputDigest marshals this struct, and a review receipt taken
+	// before this field existed must still match its commit. Read the mode
+	// through binds(), never by comparing this field to StaffingModeCreate.
+	Mode     string `json:"mode,omitempty"`
 	Provider string `json:"provider,omitempty"`
 	Model    string `json:"model,omitempty"`
 }
+
+// binds reports whether this role attaches an existing agent rather than
+// creating one. See staffingRoleInput.Mode for why "" means create.
+func (r staffingRoleInput) binds() bool { return r.Mode == StaffingModeBind }
 
 type staffingInput struct {
 	Roles []staffingRoleInput `json:"roles"`
@@ -218,6 +246,12 @@ func (a *AssistantStaffingAdapter) Commit(_ context.Context, scope ReadScope, ac
 		return CanonicalResult{}, ErrConflict
 	}
 	projection, err := a.reviewProjection(scope, owner, targetScope, input, action == ActionAddOptionalHomeStaffing)
+	// An agent assigned at review time and deleted before commit is a specific,
+	// explainable situation — say which one went away rather than "reload and
+	// try again" (FR52).
+	if errors.Is(err, ErrBoundAgentMissing) {
+		return CanonicalResult{}, err
+	}
 	if err != nil || !equalStaffingProjection(projection, reviewed.Staffing) {
 		return CanonicalResult{}, ErrConflict
 	}
@@ -229,6 +263,10 @@ func (a *AssistantStaffingAdapter) Commit(_ context.Context, scope ReadScope, ac
 	for _, role := range owner.declaration.Roles {
 		rolesByID[role.ID] = role
 	}
+	// createdNames records only definitions THIS commit brought into existence.
+	// A bound agent is the user's own and must never enter this list: rollback
+	// deletes exactly what is in it, and deleting an agent the user already had
+	// is the one unrecoverable failure this feature can cause (FR51).
 	createdNames := make([]string, 0, len(input.Roles))
 	granted := make(map[string][]string, len(input.Roles))
 	rollback := func() {
@@ -245,15 +283,28 @@ func (a *AssistantStaffingAdapter) Commit(_ context.Context, scope ReadScope, ac
 	bindings := make([]workspace.AssistantRoleBinding, 0, len(input.Roles))
 	for _, requested := range input.Roles {
 		role := rolesByID[requested.RoleID]
-		profileType := normalizeStaffingAgentType(role.Type)
-		if err := a.profiles.CreateAgent(requested.Name, &store.CreateAgentConfig{
-			Type: profileType, Role: types.AgentRole(role.Role), Model: requested.Model,
-			LLMProvider: requested.Provider, SystemPrompt: role.SystemPrompt,
-		}); err != nil {
-			rollback()
-			return CanonicalResult{}, ErrConflict
+		roleSource := workspace.RoleSourceCreated
+		if requested.binds() {
+			roleSource = workspace.RoleSourceAssigned
+			// Re-check existence here, not just at review: the agent can be
+			// deleted on /agents between the two, and binding a name with no
+			// definition behind it would leave the role permanently broken
+			// (FR52).
+			if _, found := a.profiles.GetAgent(requested.Name); !found {
+				rollback()
+				return CanonicalResult{}, ErrBoundAgentMissing
+			}
+		} else {
+			profileType := normalizeStaffingAgentType(role.Type)
+			if err := a.profiles.CreateAgent(requested.Name, &store.CreateAgentConfig{
+				Type: profileType, Role: types.AgentRole(role.Role), Model: requested.Model,
+				LLMProvider: requested.Provider, SystemPrompt: role.SystemPrompt,
+			}); err != nil {
+				rollback()
+				return CanonicalResult{}, ErrConflict
+			}
+			createdNames = append(createdNames, requested.Name)
 		}
-		createdNames = append(createdNames, requested.Name)
 		profile, found := a.profiles.GetAgent(requested.Name)
 		if !found || profile == nil {
 			rollback()
@@ -263,17 +314,24 @@ func (a *AssistantStaffingAdapter) Commit(_ context.Context, scope ReadScope, ac
 			rollback()
 			return CanonicalResult{}, ErrConflict
 		}
-		for _, skill := range role.Skills {
-			if a.grants == nil || a.grants.Grant(requested.Name, skill) != nil {
-				rollback()
-				return CanonicalResult{}, ErrConflict
+		// Skills are granted only to definitions this commit created. A bound
+		// agent keeps exactly the tools it had — the same contract the roster
+		// already applies to reuse-on-name-match, and the reason rollback can
+		// revoke without guessing what the user had granted themselves.
+		if !requested.binds() {
+			for _, skill := range role.Skills {
+				if a.grants == nil || a.grants.Grant(requested.Name, skill) != nil {
+					rollback()
+					return CanonicalResult{}, ErrConflict
+				}
+				granted[requested.Name] = append(granted[requested.Name], skill)
 			}
-			granted[requested.Name] = append(granted[requested.Name], skill)
 		}
 		instance := workspace.AgentInstance{
 			ID:   uuid.NewSHA1(uuid.NameSpaceOID, []byte(target.ID+"\x00"+role.ID)).String(),
 			Name: requested.Name, InstanceNumber: 1,
 			NodeID: "assistant-" + role.ID, Role: role.Label, Description: role.Description,
+			RoleID: role.ID, RoleSource: roleSource,
 			EntryPoint: role.Primary, CreatedAt: time.Now().UTC(),
 		}
 		instances = append(instances, instance)
@@ -508,6 +566,7 @@ func (a *AssistantStaffingAdapter) scopeProjection(target *workspace.Workspace, 
 				malformed = true
 			} else {
 				item.Configured = true
+				item.Bound = instance.RoleSource == workspace.RoleSourceAssigned
 				item.ProfileName = binding.AgentName
 				item.Provider = profile.Settings.Provider
 				item.Model = profile.Settings.Model
@@ -560,6 +619,10 @@ func (a *AssistantStaffingAdapter) reviewProjection(scope ReadScope, owner *staf
 	if len(missing) == 0 || len(input.Roles) != len(missing) {
 		return nil, ErrConflict
 	}
+	targetWorkspace := owner.station
+	if targetScope == workspace.AssistantRoleScopeProject {
+		targetWorkspace = owner.project
+	}
 	seenNames := make(map[string]struct{}, len(input.Roles))
 	planned := make([]StaffingRoleProjection, 0, len(input.Roles))
 	for index := range input.Roles {
@@ -570,10 +633,47 @@ func (a *AssistantStaffingAdapter) reviewProjection(scope ReadScope, owner *staf
 		}
 		delete(missing, requested.RoleID)
 		nameKey := strings.ToLower(requested.Name)
-		if _, duplicate := seenNames[nameKey]; duplicate || profileNameExists(a.profiles, requested.Name) || workspaceNameExists(owner.station, requested.Name) || workspaceNameExists(owner.project, requested.Name) {
+		if _, duplicate := seenNames[nameKey]; duplicate {
 			return nil, ErrConflict
 		}
 		seenNames[nameKey] = struct{}{}
+
+		if requested.binds() {
+			// The rule below — reject any name a profile already owns — is what
+			// makes "assign the agent I already have" impossible, so it belongs
+			// to create mode only (FR50). Bind inverts it: an existing profile
+			// is the required input, and a missing one is the error.
+			profile, found := a.profiles.GetAgent(requested.Name)
+			if !found || profile == nil {
+				return nil, ErrBoundAgentMissing
+			}
+			// One agent fills at most one role per workspace (FR25). An agent
+			// already attached here would also fail the Commit's instance-name
+			// guard, so refuse while the review can still explain itself.
+			if workspaceNameExists(targetWorkspace, requested.Name) {
+				return nil, ErrConflict
+			}
+			// A bound agent keeps its own provider, model, and tools; this
+			// request neither sets nor grants anything on it. Report what it
+			// actually has so the review is not a fiction.
+			boundProvider := strings.TrimSpace(profile.Settings.Provider)
+			boundModel := strings.TrimSpace(profile.Settings.Model)
+			chatAvailable := staffingModelAvailable(a.validate, boundProvider, boundModel)
+			if !chatAvailable && role.Required {
+				target.ModelsReady = false
+			}
+			planned = append(planned, StaffingRoleProjection{
+				RoleID: role.ID, Label: role.Label, Responsibility: role.Description, Required: role.Required, Primary: role.Primary,
+				ProfileName: requested.Name, Provider: boundProvider, Model: boundModel,
+				UsesDefaults: boundProvider == "" && boundModel == "", ChatAvailable: chatAvailable,
+				Configured: false, Bound: true,
+			})
+			continue
+		}
+
+		if profileNameExists(a.profiles, requested.Name) || workspaceNameExists(owner.station, requested.Name) || workspaceNameExists(owner.project, requested.Name) {
+			return nil, ErrConflict
+		}
 		explicitModel := requested.Provider != "" || requested.Model != ""
 		if requested.Provider == "" && requested.Model == "" && a.defaults != nil {
 			requested.Provider, requested.Model = a.defaults()
@@ -631,8 +731,21 @@ func decodeStaffingInput(raw json.RawMessage) (staffingInput, error) {
 		role := &input.Roles[index]
 		role.RoleID = strings.ToLower(strings.TrimSpace(role.RoleID))
 		role.Name = strings.TrimSpace(role.Name)
+		role.Mode = strings.ToLower(strings.TrimSpace(role.Mode))
 		role.Provider = strings.ToLower(strings.TrimSpace(role.Provider))
 		role.Model = strings.TrimSpace(role.Model)
+		if role.Mode == StaffingModeCreate {
+			role.Mode = ""
+		}
+		if role.Mode != "" && role.Mode != StaffingModeBind {
+			return staffingInput{}, ErrInvalid
+		}
+		// Binding attaches an existing definition as it stands. Its provider and
+		// model are the user's, set on /agents; accepting them here would look
+		// like this request could change them, and it cannot.
+		if role.binds() && (role.Provider != "" || role.Model != "") {
+			return staffingInput{}, ErrInvalid
+		}
 		if role.RoleID == "" || role.Name == "" || len(role.RoleID) > 80 || len(role.Name) > 80 || len(role.Provider) > 120 || len(role.Model) > 240 || strings.ContainsAny(role.Name, "\r\n\x00") {
 			return staffingInput{}, ErrInvalid
 		}

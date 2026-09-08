@@ -46,6 +46,11 @@ var (
 	// interpreted. Malformed structural progress is instead returned as a
 	// bounded needs-attention Run with NeedsNormalization set.
 	ErrMalformed = errors.New("setup journey persisted record is malformed")
+	// ErrBoundAgentMissing means a role was to be filled by assigning an agent
+	// the user already had, and that agent no longer exists — deleted between
+	// the review and the commit. It is separate from ErrConflict so the caller
+	// can say which agent went away instead of "try again".
+	ErrBoundAgentMissing = errors.New("the agent assigned to this role no longer exists")
 )
 
 // RunKind separates the accepted relationship's root setup from each later
