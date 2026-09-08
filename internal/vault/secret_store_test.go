@@ -174,6 +174,37 @@ func TestDarwinKeychainStoreUsesExpectedCommands(t *testing.T) {
 	}
 }
 
+func TestDarwinKeychainStoreDeleteTreatsMissingItemAsSuccess(t *testing.T) {
+	const command = "security delete-generic-password -s ori-agent -a default:openai_api_key"
+	for name, message := range map[string]string{
+		"current macOS wording": "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.",
+		"legacy wording":        "security: The item could not find a matching keychain entry.",
+	} {
+		t.Run(name, func(t *testing.T) {
+			runner := &fakeRunner{resp: map[string]fakeResponse{
+				command: {err: errors.New(message)},
+			}}
+			store := newDarwinKeychainStore(runner, "default")
+
+			if err := store.Delete(SecretKeyOpenAIAPIKey); err != nil {
+				t.Fatalf("Delete() missing item error = %v", err)
+			}
+		})
+	}
+}
+
+func TestDarwinKeychainStoreDeletePropagatesUnexpectedError(t *testing.T) {
+	unexpected := errors.New("synthetic keychain access refusal")
+	runner := &fakeRunner{resp: map[string]fakeResponse{
+		"security delete-generic-password -s ori-agent -a default:openai_api_key": {err: unexpected},
+	}}
+	store := newDarwinKeychainStore(runner, "default")
+
+	if err := store.Delete(SecretKeyOpenAIAPIKey); !errors.Is(err, unexpected) {
+		t.Fatalf("Delete() error = %v, want %v", err, unexpected)
+	}
+}
+
 func TestLinuxSecretServiceStoreUsesExpectedCommands(t *testing.T) {
 	runner := &fakeRunner{
 		resp: map[string]fakeResponse{
