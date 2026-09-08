@@ -111,7 +111,7 @@ func normalizeVaultStorageDirectory(directory string) (string, error) {
 	info, err := os.Stat(absolutePath)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
-		if err := os.MkdirAll(absolutePath, 0o755); err != nil {
+		if err := os.MkdirAll(absolutePath, 0o750); err != nil {
 			return "", fmt.Errorf("%w: %v", ErrVaultStoragePathInvalid, err)
 		}
 		return absolutePath, nil
@@ -157,7 +157,7 @@ func openVaultFileWithMode(ctx context.Context, path string, allowCreate bool) (
 		return nil, fmt.Errorf("vault file path is required")
 	}
 	if allowCreate {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			return nil, fmt.Errorf("create vault file directory: %w", err)
 		}
 	} else {

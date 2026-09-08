@@ -654,7 +654,7 @@ func (h *HTTPHandler) ExportResultCSV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	content, err := os.ReadFile(filePath)
+	content, err := os.ReadFile(filePath) // #nosec G304 G703 -- filePath is resolved by resolveTaskResultJSONLPath through the store/workspace-folder helpers, not taken directly from the request
 	if err != nil {
 		if os.IsNotExist(err) {
 			orihttp.NotFound(w, "No dataset has been written yet")
@@ -673,7 +673,7 @@ func (h *HTTPHandler) ExportResultCSV(w http.ResponseWriter, r *http.Request) {
 	downloadName := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath)) + ".csv"
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", downloadName))
-	_, _ = w.Write([]byte(csvData))
+	_, _ = w.Write([]byte(csvData)) // #nosec G203 G705 -- served as text/csv with Content-Disposition: attachment; the global SecurityHeaders middleware sets X-Content-Type-Options: nosniff, so browsers won't execute this as HTML/script
 }
 
 // resolveTaskResultJSONLPath resolves the local .jsonl file a task's append

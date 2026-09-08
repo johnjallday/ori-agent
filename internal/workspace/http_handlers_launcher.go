@@ -269,16 +269,26 @@ func launchFolderPickerApp(workspaceID string) error {
 	switch runtime.GOOS {
 	case "darwin":
 		if workspaceID != "" {
+			// #nosec G204 G702 -- appPath is resolved from a fixed set of known
+			// install locations by findFolderPickerApp, never from request
+			// input; workspaceID is passed as a discrete argv element (not
+			// through a shell), so it cannot inject additional commands.
 			cmd = exec.Command("open", appPath, "--args", "-workspace", workspaceID)
 		} else {
+			// #nosec G204 G702 -- appPath is resolved from a fixed set of known
+			// install locations, never from request input.
 			cmd = exec.Command("open", appPath)
 		}
 	case "windows":
+		// #nosec G204 G702 -- appPath is resolved from a fixed set of known
+		// install locations, never from request input.
 		cmd = exec.Command("cmd", "/c", "start", "", appPath)
 		if workspaceID != "" {
 			cmd.Args = append(cmd.Args, "-workspace", workspaceID)
 		}
 	default:
+		// #nosec G204 G702 -- appPath is resolved from a fixed set of known
+		// install locations, never from request input.
 		cmd = exec.Command(appPath, args...)
 	}
 
@@ -403,6 +413,9 @@ func findFolderPickerApp() (string, error) {
 	searchPaths = append(searchPaths, parentDirectorySearchCandidates(execDir, runtime.GOOS)...)
 
 	for _, path := range searchPaths {
+		// #nosec G304 G703 -- path is drawn from a fixed set of known install
+		// locations derived from the executable directory and cwd, never
+		// from request input; this only stats candidate paths.
 		if _, err := os.Stat(path); err == nil {
 			return path, nil
 		}

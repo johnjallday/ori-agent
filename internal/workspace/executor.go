@@ -1163,7 +1163,7 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 
 	// Create directories
 	dir := filepath.Dir(filePath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0750); err != nil {
 		logger.Error("Failed to create directories for task result", logger.Fields{
 			"task_id": task.ID,
 			"dir":     dir,
@@ -1193,7 +1193,7 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 	}
 
 	// Write file
-	if err := os.WriteFile(filePath, []byte(dataToStore), 0644); err != nil {
+	if err := os.WriteFile(filePath, []byte(dataToStore), 0600); err != nil {
 		logger.Error("Failed to auto-store task result to file", logger.Fields{
 			"task_id":   task.ID,
 			"file_path": filePath,

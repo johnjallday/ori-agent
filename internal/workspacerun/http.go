@@ -68,9 +68,12 @@ func (h *Handler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	handedOff = true
+	// Detach from the request context so the run keeps executing after the
+	// response returns, while still carrying any request-scoped values.
+	runCtx := context.WithoutCancel(r.Context())
 	go func() {
 		defer childRelease()
-		_ = h.service.ExecuteRun(context.Background(), workspaceID, run.ID)
+		_ = h.service.ExecuteRun(runCtx, workspaceID, run.ID)
 	}()
 	orihttp.Created(w, run)
 }
