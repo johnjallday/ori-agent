@@ -177,6 +177,13 @@ test('the header count reports the projection, pluralized', () => {
   assert.equal(Roster.headerCount({ roles: [] }), '0 of 0 roles filled');
 });
 
+// FR63: an agent in the workspace holding no declared role is listed, not
+// dropped. A workspace created before this feature has all of its agents here.
+test('the copy for unbound agents is shared, not invented per surface', () => {
+  assert.equal(Roster.COPY.alsoHere, 'Also in this workspace');
+  assert.equal(Roster.COPY.giveRole, 'Give a role…');
+});
+
 test('a missing or malformed projection renders no rows rather than throwing', () => {
   // Arrays built inside the vm sandbox belong to another realm, so length is
   // the assertion here rather than deep equality against a host [].

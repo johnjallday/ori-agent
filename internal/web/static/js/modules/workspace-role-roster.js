@@ -50,7 +50,9 @@
     defaultProvider: 'Use Ori default',
     defaultModel: 'Use provider default',
     openEditor: 'Open in Agents',
-    emptyRoster: 'This blueprint declares no roles.'
+    emptyRoster: 'This blueprint declares no roles.',
+    alsoHere: 'Also in this workspace',
+    giveRole: 'Give a role…'
   };
 
   // Display order (FR40). The primary slot leads whatever its state, because it
@@ -442,8 +444,53 @@
       onCreate: given.onCreate || noop,
       onAssign: given.onAssign || noop,
       onClear: given.onClear || noop,
+      // Optional: when absent, unbound agents are listed without an action,
+      // which is the right answer for the wizard where none exist yet.
+      onAssignExisting: given.onAssignExisting,
       showHeader: given.showHeader !== false
     };
+  }
+
+  // Agents attached to the workspace that hold no declared role. A workspace
+  // created before this feature has all of its agents here, and so does one
+  // where somebody was added outside the roster — listing them is what keeps
+  // the roster an honest picture of who is in the workspace (FR63, FR38).
+  //
+  // Each can be given a role in place, so the answer to "why is this agent
+  // here?" comes with the way to resolve it.
+  function renderUnassigned(container, roster, options) {
+    var agents = roster && Array.isArray(roster.unassigned) ? roster.unassigned : [];
+    if (!agents.length) return;
+
+    var section = element('section', 'ws-role-roster__also');
+    section.append(element('h4', 'ws-role-roster__also-title', COPY.alsoHere));
+
+    var list = element('ul', 'ws-role-roster__also-list');
+    list.setAttribute('aria-label', COPY.alsoHere);
+    agents.forEach(function (agent) {
+      var item = element('li', 'ws-role-roster__also-row');
+      var markup = avatarMarkup(agent);
+      if (markup) {
+        var avatar = element('span', 'ws-role-tag__avatar');
+        avatar.innerHTML = markup;
+        item.append(avatar);
+      }
+      item.append(element('span', 'ws-role-roster__also-name', agent.name));
+      if (typeof options.onAssignExisting === 'function') {
+        var assign = actionButton(
+          COPY.giveRole,
+          'Give ' + agent.name + ' a role',
+          'btn btn-sm btn-outline-secondary'
+        );
+        assign.addEventListener('click', function () {
+          options.onAssignExisting(agent);
+        });
+        item.append(assign);
+      }
+      list.append(item);
+    });
+    section.append(list);
+    container.append(section);
   }
 
   // render replaces the container's contents with the roster. It returns the
@@ -472,6 +519,7 @@
       list.append(renderRow(row, opts));
     });
     container.append(list);
+    renderUnassigned(container, roster, opts);
 
     if (opts.creatingRoleId) {
       var open = list.querySelector('[data-role-id="' + CSS.escape(opts.creatingRoleId) + '"]');

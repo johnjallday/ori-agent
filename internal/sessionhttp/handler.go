@@ -45,10 +45,13 @@ type Handler struct {
 	// which staffs every required role: under the vacancy model a role the user
 	// left empty must stay empty.
 	assistantRoleStaffer func(context.Context, string, []RoleStaffingFill) error
-	agentStore           store.Store
-	systemModelReader    SystemModelReader
-	workspaceAllowlist   *workspace.Allowlist
-	eventBus             *workspace.EventBus // optional, for project.created events
+	// assistantRoleUnstaffer clears one role. Clearing unbinds; it never
+	// deletes an agent definition.
+	assistantRoleUnstaffer assistantRoleUnstaffer
+	agentStore             store.Store
+	systemModelReader      SystemModelReader
+	workspaceAllowlist     *workspace.Allowlist
+	eventBus               *workspace.EventBus // optional, for project.created events
 	// applyTemplateTools binds a template's declared default tools onto a newly
 	// created workspace (apply-if-present), returning the applied and skipped
 	// names. Injected by the server, which holds the tool registries and binds

@@ -567,6 +567,123 @@ func (a *AssistantStaffingAdapter) StaffRolesFromReviewedWorkspaceSetup(ctx cont
 	return nil
 }
 
+// UnstaffRoleFromWorkspace clears one role: the binding, the agent instance,
+// and the workspace's snapshot of that agent are removed. The agent DEFINITION
+// is never touched, whether this request created it or the user assigned one
+// they already had (FR8, FR66) — clearing a role is not deleting an agent.
+//
+// Unlike staffing, this takes no review. Review exists so a user can see what
+// a request will bring into existence before it does; a removal that creates
+// nothing, deletes no definition, and is immediately reversible has nothing to
+// disclose. It still respects the same binding-revision discipline as Commit,
+// so a concurrent staffing cannot be silently overwritten.
+func (a *AssistantStaffingAdapter) UnstaffRoleFromWorkspace(_ context.Context, projectID, roleID string) error {
+	roleID = strings.ToLower(strings.TrimSpace(roleID))
+	if roleID == "" {
+		return ErrInvalid
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	project, err := a.workspaces.Get(strings.TrimSpace(projectID))
+	if err != nil {
+		return ErrConflict
+	}
+	link := project.GetAssistantProjectLink()
+	if link == nil {
+		return ErrConflict
+	}
+	station, err := a.workspaces.Get(link.StationWorkspaceID)
+	if err != nil {
+		return ErrConflict
+	}
+	state := station.GetAssistantProgramState()
+	if state == nil || state.Declaration == nil {
+		return ErrConflict
+	}
+	scope := workspace.AssistantRoleScopeProject
+	for _, role := range state.Declaration.Roles {
+		if role.ID == roleID {
+			if role.Scope == workspace.AssistantRoleScopeHome {
+				scope = workspace.AssistantRoleScopeHome
+			}
+			break
+		}
+	}
+	target := project
+	if scope == workspace.AssistantRoleScopeHome {
+		target = station
+	}
+
+	removedName := ""
+	err = a.workspaces.Update(target.ID, func(current *workspace.Workspace) error {
+		set := currentBindingSet(current, scope)
+		kept := make([]workspace.AssistantRoleBinding, 0, len(set.Bindings))
+		removedID := ""
+		for _, binding := range set.Bindings {
+			if binding.RoleID == roleID {
+				removedName, removedID = binding.AgentName, binding.AgentInstanceID
+				continue
+			}
+			kept = append(kept, binding)
+		}
+		if removedID == "" {
+			return workspace.ErrAssistantBindingInvalid
+		}
+		instances := make([]workspace.AgentInstance, 0, len(current.GetAgentInstances()))
+		for _, instance := range current.GetAgentInstances() {
+			if instance.ID == removedID {
+				continue
+			}
+			instances = append(instances, instance)
+		}
+		current.AgentInstances = instances
+		set.StateRevision++
+		set.Bindings = kept
+		if scope == workspace.AssistantRoleScopeHome {
+			programState := current.GetAssistantProgramState()
+			programState.HomeBindings = set
+			if strings.EqualFold(programState.PrimaryName, removedName) {
+				programState.PrimaryName = ""
+			}
+			current.SetAssistantProgramState(programState)
+		} else {
+			currentLink := current.GetAssistantProjectLink()
+			currentLink.ProjectBindings = set
+			current.SetAssistantProjectLink(currentLink)
+		}
+		// The entry agent moves to whoever is still filling a role, so a
+		// workspace with agents left in it is never dead (D3).
+		if strings.EqualFold(current.EntryAgentName(), removedName) {
+			next := ""
+			if len(instances) > 0 {
+				next = instances[0].Name
+			}
+			if err := current.SetEntryAgentName(next); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return ErrConflict
+	}
+	return nil
+}
+
+func currentBindingSet(current *workspace.Workspace, scope workspace.AssistantRoleScope) workspace.AssistantRoleBindingSet {
+	if scope == workspace.AssistantRoleScopeHome {
+		if state := current.GetAssistantProgramState(); state != nil {
+			return state.HomeBindings
+		}
+		return workspace.AssistantRoleBindingSet{}
+	}
+	if link := current.GetAssistantProjectLink(); link != nil {
+		return link.ProjectBindings
+	}
+	return workspace.AssistantRoleBindingSet{}
+}
+
 func (a *AssistantStaffingAdapter) ConsequenceObserved(action ActionID, read CanonicalStepRead) bool {
 	if read.Staffing == nil {
 		return false

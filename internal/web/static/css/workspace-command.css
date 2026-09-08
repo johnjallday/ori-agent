@@ -7396,3 +7396,28 @@ button.ws-cmd-rpg-class-card:focus-visible {
     scroll-behavior: auto;
   }
 }
+
+/* ============================================================
+   Role roster inside Command view
+   ------------------------------------------------------------
+   The roster is ONE component shared with the Create Workspace
+   Team step, and its own stylesheet (workspace-hub.css) is
+   written against the app-wide theme tokens. Command view has a
+   separate tactical palette, so rather than fork the component,
+   the tokens it reads are re-pointed at this view's own — same
+   markup, same states, host's colours.
+   ============================================================ */
+.ws-cmd-role-roster {
+  --text-primary: var(--ws-ink);
+  --text-secondary: var(--ws-ink-dim);
+  --text-muted: var(--ws-ink-faint);
+  --border-color: var(--ws-line);
+  --border-light: var(--ws-line-bright);
+  --bg-secondary: var(--ws-panel);
+  --bg-tertiary: var(--ws-panel-2);
+  margin: 0 0 14px;
+}
+
+.ws-cmd-role-roster:empty {
+  display: none;
+}

@@ -786,6 +786,8 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		// assistant-program routes above: the legacy /api/workspaces/ subtree
 		// router would otherwise swallow it.
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/roles", s.Handlers.Session.GetWorkspaceRoles)
+		mux.HandleFunc("PUT /api/workspaces/{workspaceID}/roles/{roleID}", s.Handlers.Session.PutWorkspaceRole)
+		mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/roles/{roleID}", s.Handlers.Session.DeleteWorkspaceRole)
 
 		// Workspace routes (unified workspace API)
 		mux.HandleFunc("/api/workspaces", s.handleWorkspaceCollectionAPI)

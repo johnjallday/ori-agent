@@ -6253,3 +6253,38 @@ body.chat-panel-open .chat-panel-backdrop {
 .ws-role-row__create-actions {
   grid-column: 1 / -1;
 }
+
+/* ---- Also in this workspace --------------------------------------------- */
+.ws-role-roster__also {
+  margin-top: 0.75rem;
+  padding-top: 0.625rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.ws-role-roster__also-title {
+  margin: 0 0 0.375rem;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.ws-role-roster__also-list {
+  display: grid;
+  gap: 0.375rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ws-role-roster__also-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+}
+
+.ws-role-roster__also-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}

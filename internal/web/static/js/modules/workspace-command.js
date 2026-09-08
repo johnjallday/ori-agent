@@ -351,7 +351,17 @@ export class WorkspaceCommandView {
     }
     this.ensureCapabilityStations();
     this.ensureSurfaceStations();
+    this.ensureRoleRoster();
     this.applyBootURLState();
+  }
+
+  // The roster is re-read on every activation rather than cached across them,
+  // so a role whose agent was deleted on /agents shows as empty again on the
+  // next load (FR42).
+  ensureRoleRoster() {
+    void this.loadRoleRoster(true).then(() => {
+      if (this.active) this.mountRoleRoster();
+    });
   }
 
   // Installed capabilities drive Map stations, so the catalog has to be loaded
@@ -1442,6 +1452,9 @@ export class WorkspaceCommandView {
       this.bindRail();
     }
     this.bindLoadoutAddModal();
+    // Filled after innerHTML, never serialized into it: the roster is real DOM
+    // with bound listeners and this container is rebuilt on every render.
+    this.mountRoleRoster();
     this.syncTicketsView();
     this.syncDashboardView();
     this.mountCommandTagInput();
@@ -3617,6 +3630,172 @@ export class WorkspaceCommandView {
     );
   }
 
+  // ---------- Role roster ----------
+  //
+  // The same component the Create Workspace Team step renders, driven by live
+  // state: each action persists immediately through the per-role endpoints and
+  // the server's answer — the roster as it now stands — replaces what is shown.
+  // Nothing is rendered from an optimistic local guess, which is why an agent
+  // deleted on /agents simply comes back as an empty role.
+
+  async loadRoleRoster(force = false) {
+    const workspaceId = this.workspaceId();
+    if (!workspaceId) return null;
+    if (!force && this.roleRosterFor === workspaceId && this.roleRoster) return this.roleRoster;
+    try {
+      const response = await fetch('/api/workspaces/' + encodeURIComponent(workspaceId) + '/roles');
+      if (!response.ok) return null;
+      const data = await response.json();
+      this.roleRoster = data?.roles || null;
+      this.roleRosterFor = workspaceId;
+    } catch (err) {
+      this.roleRoster = null;
+    }
+    return this.roleRoster;
+  }
+
+  mountRoleRoster() {
+    const host = this.container?.querySelector('[data-cmd-role-roster]');
+    const component = typeof window === 'undefined' ? null : window.WorkspaceRoleRoster;
+    if (!host || !component) return;
+    const roster = this.roleRoster;
+    if (!roster || !roster.total_count) {
+      host.hidden = true;
+      host.replaceChildren();
+      return;
+    }
+    host.hidden = false;
+    component.render(host, roster, {
+      title: 'Roles',
+      providers: this.roleRosterProviders,
+      creatingRoleId: this.roleRosterCreating || '',
+      groupWorkspaceHref: roster.group_workspace_id
+        ? '/workspaces/' + encodeURIComponent(roster.group_workspace_id)
+        : '',
+      agentHref: name => '/agents?agent=' + encodeURIComponent(name),
+      onRequestCreate: roleId => {
+        this.roleRosterCreating = roleId;
+        this.mountRoleRoster();
+      },
+      onCancelCreate: () => {
+        this.roleRosterCreating = '';
+        this.mountRoleRoster();
+      },
+      onCreate: (roleId, values) => this.fillRole(roleId, { mode: 'create', ...values }),
+      onAssign: (roleId, row) => this.openRoleAssignPicker(roleId, row),
+      onClear: (roleId, row) => this.clearRole(roleId, row)
+    });
+  }
+
+  async fillRole(roleId, body) {
+    const workspaceId = this.workspaceId();
+    if (!workspaceId) return;
+    try {
+      const response = await fetch(
+        '/api/workspaces/' +
+          encodeURIComponent(workspaceId) +
+          '/roles/' +
+          encodeURIComponent(roleId),
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        this.announceRole(data?.error || 'That role could not be filled.');
+        return;
+      }
+      this.roleRoster = data?.roles || this.roleRoster;
+      this.roleRosterCreating = '';
+      this.mountRoleRoster();
+      this.announceRoleChange(roleId, body.name + ' now fills');
+      // The workspace's own agent list changed, so re-read it rather than
+      // letting the deck describe a team the roster has already moved past.
+      await this.page?.loadAgents?.();
+      this.render();
+    } catch (err) {
+      this.announceRole('That role could not be filled.');
+    }
+  }
+
+  async clearRole(roleId, row) {
+    const workspaceId = this.workspaceId();
+    if (!workspaceId) return;
+    // Clearing the role that holds the entry agent leaves chat with nobody to
+    // talk to, so it is confirmed and the consequence is named (FR41).
+    const holdsEntry = row?.agent?.name && this.page?.isWorkspaceEntryAgent?.(row.agent.name);
+    if (holdsEntry) {
+      const proceed = window.confirm(
+        'Chat in this workspace will have no agent until you fill this role.\n\n' +
+          'Clear ' +
+          row.label +
+          '? ' +
+          row.agent.name +
+          ' stays in your agents and is not deleted.'
+      );
+      if (!proceed) return;
+    }
+    try {
+      const response = await fetch(
+        '/api/workspaces/' +
+          encodeURIComponent(workspaceId) +
+          '/roles/' +
+          encodeURIComponent(roleId),
+        { method: 'DELETE' }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        this.announceRole(data?.error || 'That role could not be cleared.');
+        return;
+      }
+      this.roleRoster = data?.roles || this.roleRoster;
+      this.mountRoleRoster();
+      this.announceRoleChange(roleId, 'Nobody fills');
+      await this.page?.loadAgents?.();
+      this.render();
+    } catch (err) {
+      this.announceRole('That role could not be cleared.');
+    }
+  }
+
+  // Assigning from the workspace reuses the page's existing add-agent picker;
+  // the chosen agent is bound to this role rather than attached loose.
+  openRoleAssignPicker(roleId, row) {
+    this.roleRosterAssigning = roleId;
+    const page = this.page || {};
+    if (typeof page.openAddAgentModal === 'function') {
+      page.openAddAgentModal({ roleId, roleLabel: row?.label || '' });
+      return;
+    }
+    this.announceRole('Assigning an agent needs the agent picker, which is unavailable here.');
+  }
+
+  announceRoleChange(roleId, phrase) {
+    const role = (this.roleRoster?.roles || []).find(item => item.role_id === roleId);
+    if (!role) return;
+    this.announceRole(phrase + ' ' + role.label + '.');
+  }
+
+  // One announcement per change, never a re-read of the whole roster (FR68).
+  announceRole(message) {
+    const host = this.container?.querySelector('[data-cmd-role-live]');
+    if (host) host.textContent = message;
+  }
+
+  // The blueprint's roles, mounted above the agent deck. This container is
+  // rebuilt with innerHTML on every render and the roster is real DOM with
+  // bound listeners, so only its EMPTY host is emitted here — mountRoleRoster()
+  // fills it afterwards, the same reason the Board and config panels are
+  // relocated rather than re-serialized.
+  roleRosterHostHTML() {
+    return (
+      '<div class="ws-cmd-role-roster" data-cmd-role-roster hidden></div>' +
+      '<div class="sr-only" data-cmd-role-live aria-live="polite" aria-atomic="true"></div>'
+    );
+  }
+
   renderGarrison() {
     if (!AGENT_TAB_KEYS.includes(this.activeAgentTab)) this.activeAgentTab = 'overview';
     const groups = this.agentGroups();
@@ -3624,6 +3803,7 @@ export class WorkspaceCommandView {
     if (!selectedGroup) {
       this.selectedAgentKey = '';
       return (
+        this.roleRosterHostHTML() +
         '<div class="ws-cmd-deck-empty"><div class="ws-cmd-deck-empty-glyph">◇</div>' +
         '<strong>No agents in this workspace</strong>' +
         '<span>Add an agent to begin assigning work.</span>' +
@@ -3637,6 +3817,7 @@ export class WorkspaceCommandView {
     const announce = statusAnnouncement === this.lastAnnouncedAgentStatus ? '' : statusAnnouncement;
     this.lastAnnouncedAgentStatus = statusAnnouncement;
     return (
+      this.roleRosterHostHTML() +
       '<div class="ws-cmd-deck">' +
       '<aside class="ws-cmd-roster" aria-label="Workspace agents">' +
       '<header class="ws-cmd-roster-head"><div><span>Agent roster</span><strong>' +

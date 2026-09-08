@@ -175,6 +175,7 @@ func (b *ServerBuilder) initializeSetupJourney() {
 					return staffingAdapter.StaffRolesFromReviewedWorkspaceSetup(ctx, projectID, roles)
 				},
 			)
+			b.sessionHandler.SetAssistantRoleUnstaffer(staffingAdapter.UnstaffRoleFromWorkspace)
 		}
 	}
 	registry, err := setupjourney.NewReaderRegistry(readers)
