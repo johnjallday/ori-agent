@@ -83,13 +83,13 @@ func TestResetLifecycleCatalogDetachPreservesReopenableVaultFile(t *testing.T) {
 	if err != nil || !bytes.Equal(before, after) {
 		t.Fatal("catalog detach changed retained vault bytes:", err)
 	}
-	// Characterize key independence, not a shipped attachment API: explicitly
-	// restore ONLY the captured catalog metadata into this fixture DB. A real
-	// file-attachment operation still needs an owner-validated API in group 4.
-	_, err = db.ExecContext(t.Context(), `INSERT INTO vaults (id, name, description, file_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		item.ID, item.Name, item.Description, item.FilePath, item.CreatedAt, item.UpdatedAt)
-	if err != nil {
-		t.Fatal(err)
+	attached, err := fresh.AttachVaultPackage(t.Context(), filepath.Dir(item.FilePath))
+	if err != nil || attached.ID != item.ID {
+		t.Fatalf("attach retained vault package: %+v, %v", attached, err)
+	}
+	status, err := fresh.Status(t.Context(), item.ID)
+	if err != nil || !status.Locked {
+		t.Fatalf("attached vault must require its original password: %+v, %v", status, err)
 	}
 	if err := fresh.Unlock(t.Context(), item.ID, password); err != nil {
 		t.Fatal("retained package lost required encryption material:", err)

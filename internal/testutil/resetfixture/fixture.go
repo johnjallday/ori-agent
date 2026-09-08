@@ -71,8 +71,9 @@ func New(t testing.TB) *Fixture {
 		}
 	}
 	for _, name := range []string{
-		"external/settings.json", "data-backup/settings.json",
-		"home/.config/other-app/auth.json", "projects/retained/source.txt", "vaults/retained.bin",
+		"external/settings.json", "data-backup/settings.json", "data/unknown-unclassified.txt",
+		"home/.config/other-app/auth.json", "home/.codex/auth.json", "home/.claude/settings.json",
+		"projects/retained/source.txt", "vaults/retained.bin",
 		"data/workspaces/retained-project/source.txt", "data/retained-vaults/retained.bin",
 	} {
 		content := []byte("reset fixture: preserve " + name + "\n")

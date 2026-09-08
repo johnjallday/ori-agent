@@ -98,5 +98,10 @@ func resetPreviewSelection(raw string) (settingsreset.Intent, []settingsreset.Ca
 		}
 	}
 	selected, err := settingsreset.Selection(intent, categories)
+	if err == nil && intent == settingsreset.IntentStartFresh {
+		// The planner expands this server-owned intent. Passing the canonical list
+		// back as if it came from the client would intentionally be rejected.
+		return intent, nil, nil
+	}
 	return intent, selected, err
 }

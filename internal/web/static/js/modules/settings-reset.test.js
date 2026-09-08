@@ -105,7 +105,9 @@ function harness({
     user_name: 'Retained User',
     assistant_name: 'Retained Assistant'
   },
-  progressionResult = { completed_count: 0, resolved_count: 0, dismissed: false }
+  progressionResult = { completed_count: 0, resolved_count: 0, dismissed: false },
+  localEntries = {},
+  sessionEntries = {}
 } = {}) {
   const elements = Object.fromEntries(
     [
@@ -114,6 +116,7 @@ function harness({
       'resetSessions',
       'resetOnboarding',
       'resetAppBtn',
+      'startFreshBtn',
       'selectAllResetBtn',
       'clearAllResetBtn',
       'resetConfirmInput',
@@ -121,9 +124,12 @@ function harness({
       'resetConfirmError',
       'resetItemsList',
       'resetConfirmModal',
+      'resetConfirmTitleText',
+      'resetConfirmWarning',
       'resetOperationStatus',
       'resetOperationResults',
       'resetOperationPanel',
+      'openStartFreshSetupBtn',
       'resetCancelBtn',
       'resetCloseBtn',
       'replaySetupBtn',
@@ -137,11 +143,22 @@ function harness({
   elements.confirmResetBtn.disabled = true;
   elements.openReplaySetupBtn.hidden = true;
   elements.openGettingStartedBtn.hidden = true;
+  elements.openStartFreshSetupBtn.hidden = true;
   const calls = [],
     timers = [],
     navigation = [];
-  const storage = new Map();
+  const storage = new Map(Object.entries(localEntries));
+  const sessionStorage = new Map(Object.entries(sessionEntries));
   if (storedOperation) storage.set('ori.reset.operation_id', storedOperation);
+  const storageAPI = values => ({
+    get length() {
+      return values.size;
+    },
+    key: index => [...values.keys()][index] ?? null,
+    getItem: key => values.get(key) || null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: key => values.delete(key)
+  });
   const modal = {
     show() {},
     hide() {
@@ -162,18 +179,23 @@ function harness({
       getElementById: id => elements[id] || null,
       createElement: () => element(),
       addEventListener() {},
-      querySelectorAll: () => []
+      querySelectorAll: selector =>
+        selector === '.reset-category-checkbox'
+          ? [
+              elements.resetSettings,
+              elements.resetAgents,
+              elements.resetSessions,
+              elements.resetOnboarding
+            ]
+          : []
     },
     window: {
       location: { href: '/settings', reload: () => navigation.push('reload') },
       addEventListener() {},
       confirm: () => true,
       crypto: { randomUUID: () => 'request-1' },
-      localStorage: {
-        getItem: key => storage.get(key) || null,
-        setItem: (key, value) => storage.set(key, value),
-        removeItem: key => storage.delete(key)
-      }
+      localStorage: storageAPI(storage),
+      sessionStorage: storageAPI(sessionStorage)
     },
     bootstrap: {
       Modal: class {
@@ -209,6 +231,7 @@ function harness({
     navigation,
     context,
     storage,
+    sessionStorage,
     async review(ids = ['resetSettings']) {
       for (const id of ids) elements[id].checked = true;
       await elements.resetSettings.emit('change');
@@ -396,6 +419,80 @@ test('canceling review does not submit and restores focus and selection controls
   assert.equal(h.elements.resetSettings.disabled, false);
   assert.equal(h.elements.resetAppBtn.focused, true);
   assert.equal(h.elements.confirmResetBtn.disabled, true);
+});
+
+test('Start Fresh is a distinct reviewed intent and clears only enumerated browser state after verified completion', async () => {
+  const freshPreview = {
+    ...preview,
+    id: 'fresh-preview',
+    operation_id: 'fresh-operation',
+    intent: 'start_fresh',
+    selected: ['settings', 'agents', 'app_records', 'identity_progress'],
+    categories: preview.categories
+  };
+  const completed = operation('completed');
+  completed.operation.id = 'fresh-operation';
+  completed.operation.intent = 'start_fresh';
+  const h = harness({
+    previewResult: freshPreview,
+    executeResult: completed,
+    localEntries: {
+      'ori-theme': 'dark',
+      ori_chat_session_old: 'old',
+      oriTabId: 'keep-tab',
+      'unrelated-app-key': 'keep'
+    },
+    sessionEntries: {
+      'oriSetupWizardResume:old': 'old',
+      oriTabId: 'keep-tab',
+      'unrelated-session-key': 'keep'
+    }
+  });
+
+  await h.elements.startFreshBtn.click();
+  assert.equal(h.calls[0].url, '/api/reset/preview?intent=start_fresh');
+  assert.match(h.elements.confirmResetBtn.textContent, /Start Fresh/i);
+  assert.match(h.elements.resetConfirmTitleText.textContent, /Start Fresh/i);
+  assert.match(h.elements.resetConfirmWarning.textContent, /detached/i);
+  assert.match(h.previewText(), /Start Fresh impact: 1 category/i);
+  h.elements.resetConfirmInput.value = 'RESET';
+  await h.elements.resetConfirmInput.emit('input');
+  await h.elements.confirmResetBtn.click();
+
+  assert.equal(h.storage.has('ori-theme'), false);
+  assert.equal(h.storage.has('ori_chat_session_old'), false);
+  assert.equal(h.sessionStorage.has('oriSetupWizardResume:old'), false);
+  assert.equal(h.storage.get('ori.reset.operation_id'), 'fresh-operation');
+  assert.equal(h.storage.get('ori.reset.generation'), 'fresh-operation');
+  assert.equal(h.elements.openStartFreshSetupBtn.hidden, false);
+  await h.elements.openStartFreshSetupBtn.click();
+  assert.equal(h.context.window.location.href, '/');
+  assert.equal(h.storage.get('oriTabId'), 'keep-tab');
+  assert.equal(h.sessionStorage.get('oriTabId'), 'keep-tab');
+  assert.equal(h.storage.get('unrelated-app-key'), 'keep');
+  assert.equal(h.sessionStorage.get('unrelated-session-key'), 'keep');
+});
+
+test('pending Start Fresh preserves browser data and its recovery receipt', async () => {
+  const freshPreview = { ...preview, intent: 'start_fresh' };
+  const pending = operation('awaiting_restart');
+  pending.operation.intent = 'start_fresh';
+  const h = harness({
+    previewResult: freshPreview,
+    executeResult: pending,
+    localEntries: { 'ori-theme': 'dark', ori_chat_session_old: 'old' },
+    sessionEntries: { 'oriSetupWizardResume:old': 'old' }
+  });
+  await h.elements.startFreshBtn.click();
+  h.elements.resetConfirmInput.value = 'RESET';
+  await h.elements.resetConfirmInput.emit('input');
+  await h.elements.confirmResetBtn.click();
+  assert.equal(h.storage.get('ori-theme'), 'dark');
+  assert.equal(h.storage.get('ori_chat_session_old'), 'old');
+  assert.equal(h.sessionStorage.get('oriSetupWizardResume:old'), 'old');
+  assert.equal(h.storage.get('ori.reset.operation_id'), 'operation-1');
+  assert.equal(h.storage.has('ori.reset.generation'), false);
+  assert.equal(h.elements.openStartFreshSetupBtn.hidden, true);
 });
 
 test('saved operation identity recovers durable status after a page load', async () => {

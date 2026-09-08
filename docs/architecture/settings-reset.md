@@ -5,9 +5,11 @@ Reset Getting Started, and Reset Selected Data now use distinct verified paths.
 Selective destructive reset is wired to the production process lease, shared
 admission gate, bounded drain, staged journal, full-process relaunch, pre-store
 application, startup suppression policy, durable status, and a minimal recovery
-host. The legacy live-deletion handler is removed. **Start Fresh remains disabled**
-until every additional owner in this matrix and retained-vault attachment are
-implemented; selecting every existing category never implies it.
+host. The legacy live-deletion handler is removed. **Start Fresh is now a
+separate server-owned intent** with an enumerated installation-local owner
+inventory, first-run verification, bounded browser cleanup, and an explicit
+attach-existing-vault-package path. Selecting every narrow category never
+implies Start Fresh.
 
 > The numbered “in progress” sections below are retained implementation notes.
 > Their milestone-specific delivery limits are superseded by the current status
@@ -146,7 +148,7 @@ boundary, never while a handle or writer is live.
 | Project templates T; legacy `workflow_templates/*.json`, `custom/*.json` | Project library operations/startup starter materialization; workflow manager caches | F removes enumerated Ori-owned library/templates and custom workflow configuration; built-in starters may return. External/custom root ownership or overlap not proven means **block**, not recursive erase or silent exclusion | Owned/custom template counts, configured/legacy roots, preserved project copies | Canonical library recreated without custom templates; instantiated projects unchanged |
 | Personal/repository/external skills — `~/.agents/skills`, repo `.agents/skills`, Claude/Codex directories | Skills manager/external cache, plugin skill registration | Preserve non-installation-owned skill contents; F clears Ori enablement/auto-discovery permissions, not files used by another harness | Sources and retained roots, own enablement registrations | External trees unchanged; prior implicit access not active |
 | Usage/activity — `~/.ori-agent/usage_data/usage_records.json`, `C/activity_logs/<agent>.jsonl` | CostTracker cache/background save; ActivityLogger | F removes owned usage/activity records; shared HOME usage location requires ownership check/blocker if another installation writes there | Counts, exact roots and shared-location warning | No old usage/activity after close/reopen or late flush |
-| CLI execution logs — EventLogger's configured root + `cli_agent_tasks/<task>/events.json`; ephemeral `ori-workspace-run-*` / schema/config temporary files | CLI task goroutines/event cache, run lifecycle; generated native-MCP config store | F clears known app-owned records/temp artifacts only after cancellation/join; preserve project edits and other apps' CLI config. Builder currently passes A (a file path) to EventLogger: do not invent a default directory | Active runs, retained project effects, actual log root/unavailable persistence | No remaining admitted jobs; exact owned temp paths cleaned, no glob deletion in system temp |
+| CLI execution logs — EventLogger's configured root + `cli_agent_tasks/<task>/events.json`; generated native-MCP configuration | CLI task goroutines/event cache, run lifecycle; generated native-MCP config store | F clears the exact installation-owned event/config directories only after cancellation/join; preserve project edits and external CLI authentication/configuration | Active runs, retained project effects, external `ori-ws-*.config.toml` profiles | No remaining admitted jobs; exact owned paths cleaned, no glob deletion in system temp |
 | Native-CLI MCP configurations — `D/cli-mcp/<workspace>.mcp.json`, `CODEX_HOME/ori-ws-<workspace>.config.toml` — `llm.CLIMCPConfigStore` | Regenerated on CLI invocation from workspace bindings | F/R detach removes exact owned generated configs where ownership is proven; preserve Codex `auth.json`, `config.toml`, models cache and other profiles. Shared-name/root ambiguity blocks cleanup, never erase CODEX_HOME | Generated workspace config names and effective roots, without embedded values | No stale generated profile invoked; all external auth/config sentinels survive |
 | Mac wake — config's last scheduled event and shared `<UserConfigDir>/ori/wake/wake-candidates.json`/lock (`ORI_WAKE_DIR` override supported) | macwake owner + other processes including Herdr | F clears this installation's settings/jobs; preserve other sources' candidates/system state. Outstanding shared/programmed wake with unproven safe scoped cleanup is a **blocker**; no privileged restart/wake automation added by reset | Owned task wake vs other-source candidates; manual recovery needed | Fake OS runner proves no unrelated cancellation; native behavior must be separately labelled |
 | Environment, `.env`, external CLI auth, third-party accounts, app binary/update metadata | Startup dotenv/PATH expansion; auth discovery can refresh external credentials | Preserve. Never revoke tokens or edit environment/config owned externally; suppress startup discovery/refresh during reset verification | Credential-source disclosure; operator-enforced roots can block F | Synthetic env/auth sentinels unchanged; no external network/auth calls |
@@ -437,10 +439,11 @@ facts only.
 - **Current vaults:** retain whole packages and encryption keys; detach only
   catalog/registration state. The characterization establishes that wrapped
   package keys suffice after explicit catalog reattachment, not that the
-  current UI can do it. Add a narrow, validated attach-existing-file operation
-  in group 4: inspect an explicitly chosen package without rewriting it, verify
-  metadata/password, then register it. Existing encrypted-bundle Import and
-  Relink of an existing row are not equivalent. Lock caches and remove app
+  attachment API now accepts only an explicitly selected `.orivault` package,
+  validates its existing SQLite schema and sole metadata identity, registers it
+  without moving/deleting the package, and leaves password proof to the existing
+  Unlock flow. Existing encrypted-bundle Import and Relink of an existing row
+  are not equivalent. Lock caches and remove app
   bindings without calling disconnect APIs that mutate retained vault records.
 - **Secret scope:** use only a positively owned attached backend namespace and
   exact provider/search keys. Preserve `vault_dek` even if it appears obsolete;
@@ -491,8 +494,10 @@ facts only.
 accepts repeated `category` parameters. Legacy boolean query options normalize
 only to their original families; mixed forms, duplicate/unknown keys, missing
 intent on the new form, empty selections, arbitrary paths and oversized queries
-are rejected before reading owners. Start Fresh is not enabled by this slice.
-Responses are `Cache-Control: no-store` and inspection has a five-second context.
+are rejected before reading owners. Start Fresh accepts only
+`intent=start_fresh` with no client category list; the server supplies its fixed
+category set and exact owner inventory. Responses are `Cache-Control: no-store`
+and inspection has a five-second context.
 
 - The builder supplies its real config, agent, setup, session DB/upload, folder,
   allowlist and vault owners after construction. Narrow read-only location
@@ -874,18 +879,24 @@ for absolute, explicitly attached owners and preserves `vault_dek`, unrelated
 slots and external sources; fake-store tests cover locked and partial failure.
 Production selective lifecycle wiring, canonical namespace migration, scoped
 category application, unresolved-category retry, and same-operation verification
-are implemented. A test-owned same-sandbox demo staged app-record reset through
-the production HTTP lifecycle, fully stopped the owned server, relaunched through
-`BeforeStores`, and read a completed durable result. The demo forced the encrypted
-fallback secret store; it did not invoke Keychain or an external account. Headless
-Playwright screenshot capture was attempted but the harness denied both Chromium's
-Mach rendezvous and WebKit launch, so screenshot evidence remains pending.
+are implemented. Test-owned same-sandbox demos staged both app-record reset and the full Start
+Fresh intent through the production HTTP lifecycle, fully stopped the owned
+server, relaunched through `BeforeStores`, and read completed durable results.
+The Start Fresh run exercised all nine categories, preserved workspace/vault
+checksums, kept the vault detached on relaunch, then attached and unlocked that
+same package through the production API. The demos explicitly removed inherited
+provider-key variables and forced the encrypted fallback secret store with a
+synthetic passphrase; they did not invoke Keychain or an external account.
+Headless Playwright screenshot capture was attempted again, but Chromium still
+failed its macOS Mach rendezvous, so screenshot evidence remains pending.
 
-Still pending are Start Fresh's supplemental owner inventory/application,
-retained-vault attachment, full production-builder and native macOS
-menubar/Keychain journeys, Windows/Linux native locking/backend execution, and
-complete browser/e2e/accessibility gates. Native and external authentication
-behavior is not represented as validated.
+Start Fresh's supplemental inventory/application and retained-vault attachment
+are implemented and covered by same-installation fixture tests, including
+byte-preserved vault decryption after explicit attachment. Still pending are the
+full production-builder demo/screenshots, native macOS menubar/Keychain journey,
+Windows/Linux native locking/backend execution, and complete browser/e2e/
+accessibility gates. Native and external authentication behavior is not
+represented as validated.
 
 Group 1 validation passed: full settingshttp/settingsreset/resetfixture/database/
 vault package tests; scoped server/menubar/database/vault lifecycle tests under

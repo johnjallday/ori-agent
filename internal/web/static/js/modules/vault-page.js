@@ -51,6 +51,7 @@
   const relinkVaultBtn = document.getElementById('vaultRelinkVaultBtn');
   const deleteVaultBtn = document.getElementById('vaultDeleteVaultBtn');
   const openCreateDialogBtn = document.getElementById('vaultOpenCreateDialogBtn');
+  const attachExistingBtn = document.getElementById('vaultAttachExistingBtn');
   const createOverlay = document.getElementById('vaultCreateOverlay');
   const createDialogDescription = document.getElementById('vaultCreateDialogDescription');
   const newVaultNameInput = document.getElementById('vaultNewVaultName');
@@ -1752,6 +1753,33 @@
       showInlineAlert(error.message || 'Failed to create vault.', 'error');
     } finally {
       setButtonLoading(createVaultSpaceBtn, false);
+    }
+  }
+
+  async function attachExistingVault() {
+    try {
+      const packageDirectory = await browseForFolderPath(
+        'Select Existing .orivault Package',
+        attachExistingBtn
+      );
+      if (!packageDirectory) return;
+      const response = await apiRequest('/api/vault/vaults/attach', {
+        method: 'POST',
+        body: { package_directory: packageDirectory }
+      });
+      if (response?.vault?.id) {
+        selectedVaultID = response.vault.id;
+        writeStoredVaultID(selectedVaultID);
+      }
+      notify('Existing vault attached. Unlock it with its original password.', 'success');
+      await refreshVault();
+    } catch (error) {
+      console.error('Failed to attach vault:', error);
+      showInlineAlert(
+        error.message ||
+          'Failed to attach the vault. Select its complete .orivault package folder.',
+        'error'
+      );
     }
   }
 
@@ -4465,6 +4493,10 @@
 
   relinkVaultBtn?.addEventListener('click', () => {
     relinkVaultSpace();
+  });
+
+  attachExistingBtn?.addEventListener('click', () => {
+    attachExistingVault();
   });
 
   createVaultSpaceBtn?.addEventListener('click', () => {

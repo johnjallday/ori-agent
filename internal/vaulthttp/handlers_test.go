@@ -1236,6 +1236,42 @@ func TestHandlerRenamesAndDeletesNamedVaults(t *testing.T) {
 	}
 }
 
+func TestHandlerAttachesAnExistingVaultPackageWithoutASecretOrFileDeletion(t *testing.T) {
+	handler, store, db, baseDir := newTestHandlerWithVaultFilesDir(t, vault.NewMemorySecretStore())
+	t.Cleanup(func() { _ = db.Close() })
+	created := createHandlerVault(t, store, "Retained Package")
+	vaultPath := absoluteVaultFilePath(baseDir, created)
+	before, err := os.ReadFile(vaultPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteVault(t.Context(), created.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/vaults/attach", map[string]any{
+		"package_directory": filepath.Dir(vaultPath),
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("attach status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Vault vault.Vault `json:"vault"`
+	}
+	decodeJSONBody(t, rec, &response)
+	if response.Vault.ID != created.ID {
+		t.Fatalf("attached vault = %+v", response.Vault)
+	}
+	status, err := store.Status(t.Context(), created.ID)
+	if err != nil || !status.Locked {
+		t.Fatalf("attached vault did not require its original password: %+v, %v", status, err)
+	}
+	after, err := os.ReadFile(vaultPath)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("attach changed or deleted the encrypted vault database:", err)
+	}
+}
+
 func TestHandlerRelinksMissingVault(t *testing.T) {
 	handler, _, db, vaultFilesBaseDir := newTestHandlerWithVaultFilesDir(t, vault.NewMemorySecretStore())
 	defer func() { _ = db.Close() }()

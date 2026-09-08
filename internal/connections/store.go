@@ -28,6 +28,9 @@ func NewStore(dataDir string) *Store {
 	return &Store{path: filepath.Join(dataDir, "connections", "google.json")}
 }
 
+// PersistencePath reports the concrete metadata file without reading it.
+func (s *Store) PersistencePath() string { return s.path }
+
 // Load returns the persisted connection, or (nil, nil) when none exists yet so
 // callers never have to special-case "not connected".
 func (s *Store) Load() (*Connection, error) {

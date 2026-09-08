@@ -24,6 +24,9 @@ func NewConfigManager(baseDir string) *ConfigManager {
 	}
 }
 
+// PersistencePath reports the concrete global registry document.
+func (cm *ConfigManager) PersistencePath() string { return cm.globalConfigPath }
+
 // GlobalConfig represents the global MCP server registry
 type GlobalConfig struct {
 	Servers []ServerConfig `json:"servers"`

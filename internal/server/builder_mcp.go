@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcp/mcpregistry"
@@ -16,9 +17,10 @@ const disableExternalMCPImportEnv = "ORI_DISABLE_EXTERNAL_MCP_IMPORT"
 
 // initializeMCPRegistry initializes the MCP server browser registry store.
 func (b *ServerBuilder) initializeMCPRegistry() {
-	store := mcpregistry.NewStore()
+	registryStore := mcpregistry.NewStoreAt(config.DefaultDataDir())
+	b.mcpCatalogStore = registryStore
 	if b.mcpHandler != nil {
-		b.mcpHandler.SetRegistryStore(store)
+		b.mcpHandler.SetRegistryStore(registryStore)
 	}
 }
 

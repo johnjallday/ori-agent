@@ -1,5 +1,7 @@
 package settingsreset
 
+import "slices"
+
 // CompletedCategories includes only named, verified postconditions, never a
 // selection, a pending restart, or a category with a contradictory check.
 func (op Operation) CompletedCategories() []CategoryID {
@@ -13,17 +15,22 @@ func (op Operation) CompletedCategories() []CategoryID {
 }
 
 func (op Operation) VerifiedComplete() bool {
-	if op.SchemaVersion != SchemaVersion || op.Intent != IntentSelectedData || op.State != StateCompleted || len(op.Blockers) != 0 || len(op.Results) == 0 {
+	if op.SchemaVersion != SchemaVersion || op.State != StateCompleted || len(op.Blockers) != 0 || len(op.Results) == 0 {
 		return false
 	}
-	ids := make(map[CategoryID]bool)
+	resultIDs := make([]CategoryID, 0, len(op.Results))
 	for _, result := range op.Results {
-		if ids[result.ID] || !verifiedCategory(result) {
+		if !verifiedCategory(result) {
 			return false
 		}
-		ids[result.ID] = true
+		resultIDs = append(resultIDs, result.ID)
 	}
-	return true
+	selectionInput := resultIDs
+	if op.Intent == IntentStartFresh {
+		selectionInput = nil
+	}
+	expected, err := Selection(op.Intent, selectionInput)
+	return err == nil && slices.Equal(expected, resultIDs)
 }
 
 func verifiedCategory(result CategoryResult) bool {

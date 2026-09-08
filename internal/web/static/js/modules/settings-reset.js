@@ -87,6 +87,7 @@
   byId('openReplaySetupBtn')?.addEventListener('click', () => window.location.reload());
 
   const reviewButton = byId('resetAppBtn');
+  const startFreshButton = byId('startFreshBtn');
   if (!reviewButton) return;
 
   const choices = {
@@ -99,7 +100,13 @@
     settings: 'Settings & API keys',
     agents: 'Agents',
     app_records: 'Conversation & app records',
-    setup_steps: 'Setup steps'
+    setup_steps: 'Setup steps',
+    identity_progress: 'Identity, setup & progress',
+    app_configuration: 'Supplemental app configuration',
+    integrations: 'Local integrations',
+    templates: 'Ori-owned templates',
+    activity: 'Usage & activity',
+    runtime_cache: 'Generated runtime state'
   };
   const operationStorageKey = 'ori.reset.operation_id';
   const selectAll = byId('selectAllResetBtn');
@@ -109,12 +116,16 @@
   const error = byId('resetConfirmError');
   const items = byId('resetItemsList');
   const modalElement = byId('resetConfirmModal');
+  const modalTitle = byId('resetConfirmTitleText');
+  const modalWarning = byId('resetConfirmWarning');
   const resultPanel = byId('resetOperationPanel');
   const status = byId('resetOperationStatus');
   const results = byId('resetOperationResults');
+  const openStartFreshSetup = byId('openStartFreshSetupBtn');
   const dismissButtons = [byId('resetCancelBtn'), byId('resetCloseBtn')];
   let phase = 'idle';
   let reviewed = null;
+  let reviewFocus = reviewButton;
 
   function selectedCategories() {
     return Object.values(choices)
@@ -135,6 +146,7 @@
     if (selectAll) selectAll.disabled = locked;
     if (clearSelection) clearSelection.disabled = locked;
     reviewButton.disabled = locked || selectedCategories().length === 0;
+    if (startFreshButton) startFreshButton.disabled = locked;
     if (input) input.disabled = phase !== 'review' || Boolean(reviewed?.blockers?.length);
     if (confirmButton) {
       confirmButton.disabled =
@@ -143,7 +155,11 @@
         !reviewed ||
         Boolean(reviewed.blockers?.length);
       confirmButton.textContent =
-        phase === 'submitting' ? 'Submitting reset…' : 'Reset reviewed data';
+        phase === 'submitting'
+          ? 'Submitting reset…'
+          : reviewed?.intent === 'start_fresh'
+            ? 'Start Fresh after full relaunch'
+            : 'Reset reviewed data';
       confirmButton.setAttribute('aria-busy', String(phase === 'submitting'));
     }
     dismissButtons.forEach(node => {
@@ -171,6 +187,20 @@
 
   function previewRows(preview) {
     const rows = [];
+    if (preview.intent === 'start_fresh') {
+      let knownItems = 0;
+      let unavailableCounts = 0;
+      for (const category of preview.categories || []) {
+        for (const fact of category.facts || []) {
+          if (typeof fact.count === 'number') knownItems += fact.count;
+          else unavailableCounts += 1;
+        }
+      }
+      const categoryCount = (preview.categories || []).length;
+      rows.push(
+        `Start Fresh impact: ${categoryCount} ${categoryCount === 1 ? 'category' : 'categories'}, ${knownItems} currently counted items${unavailableCounts ? `, ${unavailableCounts} unavailable counts` : ''}. Exact owner paths and preservation rules follow.`
+      );
+    }
     for (const category of preview.categories || []) {
       rows.push(
         `${category.label || labels[category.id] || category.id}: ${category.description || ''}`
@@ -203,6 +233,16 @@
       li.textContent = row;
       items?.appendChild(li);
     }
+    if (modalTitle) {
+      modalTitle.textContent =
+        preview.intent === 'start_fresh' ? 'Confirm Start Fresh' : 'Confirm reviewed data reset';
+    }
+    if (modalWarning) {
+      modalWarning.textContent =
+        preview.intent === 'start_fresh'
+          ? 'Warning: Start Fresh permanently removes every reviewed Ori-owned category below. Retained folders and vault packages stay detached.'
+          : 'Warning: You are about to permanently delete the reviewed data below.';
+    }
     if (preview.blockers?.length) {
       showError(
         'Reset is blocked. Resolve every blocker and review again; no data has been deleted.'
@@ -231,9 +271,91 @@
     return rows;
   }
 
+  function clearFreshBrowserState() {
+    const exactLocal = [
+      'ori-theme',
+      'ori-ui-density',
+      'voiceSettings',
+      'note.openBehavior',
+      'enterToSend',
+      'planBeforeAction',
+      'chatPanelWidth',
+      'sidebarWidth',
+      'sessionFolderCollapsed',
+      'sessionSidebarCollapsed',
+      'sessionSidebarWidth',
+      'oriWorkspaceHubLauncherView',
+      'oriWorkspaceCommandViewMode',
+      'oriWorkspaceDetailView',
+      'canvas-bg-color',
+      'note.leftRail.tab',
+      'note.toc.collapsed',
+      'note.aiAssist.collapsed',
+      'ori_chat_assistant',
+      'activeSessionId',
+      'ori.homeAssistant.recentSessions',
+      'oriWorkspaceSyncDismissed',
+      'note.tabs',
+      'note.search.recent',
+      'ori.roster.selectedAgent',
+      'ori-selected-vault-id',
+      'ori-vault-active-tab',
+      'ori.personalAssistantHireRequestId',
+      'ori.personalAssistantHQRequestId',
+      'ori.homeAssistant.automationMode'
+    ];
+    const exactSession = [
+      'activeSessionId',
+      'ori.homeAssistant.recentSessions',
+      'oriWorkspaceHubOverviewExpanded',
+      'oriWorkspaceHubLauncherTab',
+      'oriWorkspaceHubSelectedId',
+      'currentWorkspaceId',
+      'workspace-detail-task-assist-specialist',
+      'ori.homeAssistant.pendingWorkspacePrompt',
+      'ori-guide-handoff',
+      'ori.homeAssistant.automationMode',
+      'ori-keyboard-nav-persistent'
+    ];
+    const prefixes = [
+      'ori_chat_session_',
+      'ori_chat_assistant_',
+      'activeSessionId_',
+      'note.tabs.workspace.',
+      'ori.evolution.lastStage.',
+      'ori.personalAssistantApplyRequestId.',
+      'workspace-directory-explorer:',
+      'ori-workspace-command-agent:',
+      'oriSetupWizardResume:',
+      'oriProjectOpenNotice:',
+      'workspace-detail-entry-agent-prompt-dismissed:'
+    ];
+    const clear = (storage, exact) => {
+      if (!storage) return;
+      try {
+        exact.forEach(key => storage.removeItem?.(key));
+        if (typeof storage.length !== 'number' || typeof storage.key !== 'function') return;
+        const found = [];
+        for (let index = 0; index < storage.length; index += 1) {
+          const key = storage.key(index);
+          if (typeof key === 'string' && prefixes.some(prefix => key.startsWith(prefix)))
+            found.push(key);
+        }
+        found.forEach(key => storage.removeItem(key));
+      } catch {
+        // Browser storage is best effort and never changes the server's verified outcome.
+      }
+    };
+    clear(window.localStorage, exactLocal);
+    clear(window.sessionStorage, exactSession);
+  }
+
   function renderOperation(operation) {
     const state = operation?.state || 'interrupted';
-    phase = state === 'completed' ? 'complete' : state;
+    phase = state === 'completed' ? 'idle' : state;
+    if (openStartFreshSetup) {
+      openStartFreshSetup.hidden = !(state === 'completed' && operation?.intent === 'start_fresh');
+    }
     const messages = {
       preparing:
         'Reset admission is preparing. Ordinary work remains fenced while recovery is established.',
@@ -250,8 +372,21 @@
         'Reset outcome is interrupted or unknown. Preserve recovery metadata and do not submit another reset.'
     };
     showResult(messages[state] || messages.interrupted, operationRows(operation));
-    if (state === 'completed') window.localStorage?.removeItem(operationStorageKey);
-    else if (operation?.id) window.localStorage?.setItem(operationStorageKey, operation.id);
+    if (state === 'completed' && operation?.intent === 'start_fresh') {
+      clearFreshBrowserState();
+      try {
+        window.localStorage?.setItem('ori.reset.generation', operation.id);
+      } catch {
+        // Other tabs may need a manual reload when browser storage is unavailable.
+      }
+    }
+    if (operation?.id) {
+      try {
+        window.localStorage?.setItem(operationStorageKey, operation.id);
+      } catch {
+        // The durable server receipt remains authoritative.
+      }
+    }
   }
 
   function responseMessage(payload, fallback) {
@@ -260,6 +395,10 @@
       return payload.errors[0];
     return fallback;
   }
+
+  openStartFreshSetup?.addEventListener('click', () => {
+    window.location.href = '/';
+  });
 
   async function readJSON(response) {
     try {
@@ -271,7 +410,12 @@
   }
 
   async function recoverOperation() {
-    const operationID = window.localStorage?.getItem(operationStorageKey);
+    let operationID = '';
+    try {
+      operationID = window.localStorage?.getItem(operationStorageKey) || '';
+    } catch {
+      return;
+    }
     if (!operationID) return;
     try {
       const response = await fetch(`/api/reset/operations/${encodeURIComponent(operationID)}`, {
@@ -316,16 +460,16 @@
     });
   }
 
-  reviewButton.addEventListener('click', async () => {
-    if (phase !== 'idle') return;
-    const categories = selectedCategories();
-    if (!categories.length) return;
+  async function reviewReset(intent, categories) {
+    if (phase !== 'idle' || (intent === 'selected_data' && !categories.length)) return;
+    reviewFocus = intent === 'start_fresh' ? startFreshButton : reviewButton;
     phase = 'previewing';
     reviewed = null;
+    if (openStartFreshSetup) openStartFreshSetup.hidden = true;
     showResult('Loading the authoritative reset scope. No data is being changed.');
     updateControls();
     try {
-      const query = new URLSearchParams({ intent: 'selected_data' });
+      const query = new URLSearchParams({ intent });
       categories.forEach(category => query.append('category', category));
       const response = await fetch(`/api/reset/preview?${query.toString()}`, {
         headers: { 'X-Requested-With': 'XMLHttpRequest' }
@@ -353,7 +497,10 @@
       updateControls();
       status?.focus();
     }
-  });
+  }
+
+  reviewButton.addEventListener('click', () => reviewReset('selected_data', selectedCategories()));
+  startFreshButton?.addEventListener('click', () => reviewReset('start_fresh', []));
 
   input?.addEventListener('input', () => {
     if (phase !== 'review' || reviewed?.blockers?.length) return;
@@ -372,7 +519,11 @@
     const acceptedPreview = reviewed;
     const resetRequestID = requestID();
     phase = 'submitting';
-    window.localStorage?.setItem(operationStorageKey, acceptedPreview.operation_id);
+    try {
+      window.localStorage?.setItem(operationStorageKey, acceptedPreview.operation_id);
+    } catch {
+      // Submission still returns and renders the durable operation identity.
+    }
     updateControls();
     showResult(
       'Submitting the reviewed reset. Closing the dialog does not cancel an accepted request.'
@@ -424,7 +575,7 @@
     if (input) input.value = '';
     showError('');
     updateControls();
-    reviewButton.focus();
+    reviewFocus?.focus();
   });
 
   updateControls();

@@ -70,6 +70,9 @@ type fileModelCategoryStore struct {
 	config *types.ModelCategoryConfig
 }
 
+// PersistencePath reports the concrete owner's file without loading or saving it.
+func (s *fileModelCategoryStore) PersistencePath() string { return s.path }
+
 // NewFileModelCategoryStore creates a new file-based model category store
 func NewFileModelCategoryStore(path string) (ModelCategoryStore, error) {
 	s := &fileModelCategoryStore{

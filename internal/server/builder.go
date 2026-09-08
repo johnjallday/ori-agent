@@ -38,6 +38,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/macwake"
 	"github.com/johnjallday/ori-agent/internal/mcp"
+	"github.com/johnjallday/ori-agent/internal/mcp/mcpregistry"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
 	"github.com/johnjallday/ori-agent/internal/meetingprep"
 	"github.com/johnjallday/ori-agent/internal/memoryhttp"
@@ -79,6 +80,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/vault"
 	"github.com/johnjallday/ori-agent/internal/vaulthttp"
+	"github.com/johnjallday/ori-agent/internal/wakecoord"
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/internal/workflowhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -182,12 +184,14 @@ type ServerBuilder struct {
 	taskScheduler            *workspace.TaskScheduler
 	assistantReflectionModel workspace.AssistantReflectionModel
 	macWakeService           *macwake.Service
+	resetWakeStore           *wakecoord.Store
 	eventBus                 *workspace.EventBus
 	notificationService      *workspace.NotificationService
 	directorySyncManager     *workspace.DirectorySyncManager
 	workspaceOrchestrator    *workspace.Orchestrator
 	costTracker              *llm.CostTracker
 	mcpRegistry              *mcp.Registry
+	mcpCatalogStore          *mcpregistry.Store
 	mcpConfigManager         *mcp.ConfigManager
 	calendarOpsHandler       *calendarhttp.Handler
 	meetingPrepStore         *meetingprep.SQLiteStore
@@ -247,6 +251,7 @@ type ServerBuilder struct {
 	connectionsHandler *connectionshttp.Handler
 	githubHandler      *githubhttp.Handler
 	connStore          *connections.Store
+	consentLog         *connections.ConsentLog
 
 	// External agents (Claude Code, Codex)
 	externalAgentsCache   *externalagents.Cache

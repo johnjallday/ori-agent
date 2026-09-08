@@ -267,8 +267,24 @@ func independentlyResolvedTargets(root string) (map[string]string, error) {
 			break
 		}
 	}
+	settingsPath := filepath.Join(root, "settings.json")
+	plainSettings := config.NewManager(settingsPath)
+	if err := plainSettings.Load(); err != nil {
+		return nil, err
+	}
+	projectTemplates := config.ResolveTemplatesRoot(plainSettings.GetTemplatesRoot())
+	postResetProjectTemplates := config.ResolveTemplatesRoot("")
+	workflowTemplates := filepath.Join(root, "workflow_templates")
+	if configured := strings.TrimSpace(os.Getenv("WORKFLOW_TEMPLATES_DIR")); configured != "" {
+		if filepath.IsAbs(configured) {
+			workflowTemplates = configured
+		} else {
+			workflowTemplates = filepath.Join(root, configured)
+		}
+	}
+	pluginsRoot := filepath.Join(root, "plugins")
 	return map[string]string{
-		"settings_fields":               filepath.Join(root, "settings.json"),
+		"settings_fields":               settingsPath,
 		"agent_index":                   cleanIndex,
 		"agent_profiles":                agentProfiles,
 		"agent_projection":              filepath.Join(root, "agents.json"),
@@ -277,6 +293,27 @@ func independentlyResolvedTargets(root string) (map[string]string, error) {
 		"database_records":              filepath.Join(root, "sessions.db"),
 		"owned_uploads":                 filepath.Join(root, "session_files"),
 		"setup_fields":                  filepath.Join(root, "app_state.json"),
+		"first_run_state":               filepath.Join(root, "app_state.json"),
+		"model_categories":              filepath.Join(root, "model_categories.json"),
+		"location_zones":                filepath.Join(root, "locations.json"),
+		"connection_metadata":           filepath.Join(root, "connections", "google.json"),
+		"connection_consent":            filepath.Join(root, "connections", "consent.json"),
+		"mcp_registry":                  filepath.Join(root, "mcp_registry.json"),
+		"mcp_search_sources":            filepath.Join(root, "mcp_search_sources.json"),
+		"mcp_search_cache":              filepath.Join(root, "mcp_search_cache.json"),
+		"plugin_registry":               filepath.Join(pluginsRoot, "installed.json"),
+		"plugin_marketplaces":           filepath.Join(pluginsRoot, "marketplaces.json"),
+		"plugin_clones":                 filepath.Join(pluginsRoot, "src"),
+		"plugin_state":                  filepath.Join(pluginsRoot, "state"),
+		"plugin_artifacts":              filepath.Join(pluginsRoot, "artifacts"),
+		"plugin_preview":                filepath.Join(pluginsRoot, "preview"),
+		"project_templates":             projectTemplates,
+		"post_reset_project_templates":  postResetProjectTemplates,
+		"workflow_templates":            workflowTemplates,
+		"usage_records":                 filepath.Join(root, "usage_data"),
+		"activity_logs":                 filepath.Join(root, "activity_logs"),
+		"cli_event_logs":                filepath.Join(root, "cli_agent_tasks"),
+		"cli_mcp_configs":               filepath.Join(root, "cli-mcp"),
 	}, nil
 }
 
@@ -291,6 +328,7 @@ func expectedKinds(selected []CategoryID) map[string]bool {
 }
 
 func applyRecoveryCategory(ctx context.Context, result CategoryResult, selected []CategoryID, evidence resolvedEvidence, targets map[string]string, manager *config.Manager, lease *resetstate.Lease) CategoryResult {
+	installationRoot := filepath.Dir(targets["settings_fields"])
 	for i := range result.Checks {
 		result.Checks[i].Outcome = OutcomeFailed
 		result.Checks[i].Message = "Postcondition was not verified."
@@ -373,6 +411,45 @@ func applyRecoveryCategory(ctx context.Context, result CategoryResult, selected 
 			reflect.DeepEqual(beforeAssistantProgress, verified.GetAssistantProgress()) {
 			completeResultCheck(&result, "identity_and_progress_unchanged")
 		}
+	case CategoryIdentityProgress:
+		setup, err := onboarding.OpenForReset(targets["first_run_state"])
+		if err != nil || setup.ResetFirstRunVerified() != nil {
+			return result
+		}
+		completeResultCheck(&result, "first_run_state_default")
+	case CategoryAppConfiguration:
+		if removeFreshTargets(result.ID, targets, installationRoot) != nil {
+			return result
+		}
+		completeResultCheck(&result, "supplemental_configuration_default")
+	case CategoryIntegrations:
+		if removeFreshTargets(result.ID, targets, installationRoot) != nil {
+			return result
+		}
+		completeResultCheck(&result, "local_integrations_absent")
+		completeResultCheck(&result, "external_integrations_preserved")
+	case CategoryTemplates:
+		if removeFreshTargets(result.ID, targets, installationRoot) != nil {
+			return result
+		}
+		completeResultCheck(&result, "owned_templates_default")
+		if protectedDigestsUnchanged(ctx, evidence) {
+			completeResultCheck(&result, "project_files_preserved")
+		}
+	case CategoryActivity:
+		if removeFreshTargets(result.ID, targets, installationRoot) != nil {
+			return result
+		}
+		completeResultCheck(&result, "owned_activity_absent")
+	case CategoryRuntimeCache:
+		if removeFreshTargets(result.ID, targets, installationRoot) != nil {
+			return result
+		}
+		completeResultCheck(&result, "generated_runtime_absent")
+		policy, err := ReadStartupPolicy(lease)
+		if err == nil && policy.SuppressWorkspaceAdoption && policy.SuppressExternalMCPImport {
+			completeResultCheck(&result, "automatic_imports_disabled")
+		}
 	}
 	if !protectedDigestsUnchanged(ctx, evidence) {
 		result.Message = "Retained workspace or vault evidence changed while applying this category."
@@ -384,6 +461,45 @@ func applyRecoveryCategory(ctx context.Context, result CategoryResult, selected 
 		result.Retryable = false
 	}
 	return result
+}
+
+func removeFreshTargets(category CategoryID, targets map[string]string, installationRoot string) error {
+	ownedRoot, err := os.OpenRoot(installationRoot)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = ownedRoot.Close() }()
+	for _, kind := range targetKinds(category) {
+		path := strings.TrimSpace(targets[kind])
+		relative, err := filepath.Rel(installationRoot, path)
+		if err != nil || !filepath.IsLocal(relative) || relative == "." {
+			return ErrScopeChanged
+		}
+		if _, err := ownedRoot.Stat(relative); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		if err := ownedRoot.RemoveAll(relative); err != nil {
+			return err
+		}
+		parent, openErr := ownedRoot.Open(filepath.Dir(relative))
+		if openErr != nil {
+			return openErr
+		}
+		syncErr := parent.Sync()
+		closeErr := parent.Close()
+		if syncErr != nil {
+			return syncErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		if _, err := ownedRoot.Stat(relative); !errors.Is(err, os.ErrNotExist) {
+			return ErrScopeChanged
+		}
+	}
+	return nil
 }
 
 func protectedDigestsUnchanged(ctx context.Context, evidence resolvedEvidence) bool {

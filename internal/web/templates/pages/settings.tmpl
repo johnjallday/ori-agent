@@ -1800,7 +1800,24 @@
               <h3 id="resetOperationTitle" class="h6">Reset result</h3>
               <p id="resetOperationStatus" role="status" aria-live="polite" aria-atomic="true" tabindex="-1"></p>
               <ul id="resetOperationResults" class="mb-0"></ul>
+              <button id="openStartFreshSetupBtn" class="btn btn-primary mt-3" type="button" hidden>Open first-run setup</button>
             </section>
+
+            <div class="settings-field mt-4 pt-4" style="border-top: 1px solid var(--danger-color);">
+              <h3 class="h6 mb-2" style="color: var(--danger-color);">Start Fresh</h3>
+              <p class="settings-section-description">
+                Return this Ori installation to verified first-run state. This clears app identity, setup and
+                progress, settings and saved provider/search keys, agents, app records, local integrations,
+                Ori-owned templates, activity, and generated runtime state. Workspace/project folders and vault
+                packages stay byte-for-byte in place but remain detached until you explicitly attach them again.
+                External CLI authentication and third-party accounts are not revoked.
+              </p>
+              <div class="d-grid">
+                <button id="startFreshBtn" class="btn btn-outline-danger" type="button">
+                  Review everything Start Fresh removes
+                </button>
+              </div>
+            </div>
           </section>
 
         </div><!-- /.settings-content -->
@@ -1817,12 +1834,12 @@
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
               <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
             </svg>
-            Confirm reviewed data reset
+            <span id="resetConfirmTitleText">Confirm reviewed data reset</span>
           </h5>
           <button type="button" id="resetCloseBtn" class="btn-close" data-bs-dismiss="modal" aria-label="Close reset review"></button>
         </div>
         <div class="modal-body">
-          <div class="alert alert-danger mb-3">
+          <div id="resetConfirmWarning" class="alert alert-danger mb-3">
             <strong>Warning:</strong> You are about to permanently delete the following:
           </div>
           <ul id="resetItemsList" class="mb-3" style="color: var(--text-primary);"></ul>

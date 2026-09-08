@@ -122,6 +122,14 @@ type CostTracker struct {
 	saveDone chan struct{}
 }
 
+// PersistenceRoot reports the concrete owned usage directory.
+func (ct *CostTracker) PersistenceRoot() string {
+	if ct == nil {
+		return ""
+	}
+	return filepath.Dir(ct.dataFile)
+}
+
 // NewCostTracker creates a new cost tracker
 func NewCostTracker(dataDir string) *CostTracker {
 	ct := &CostTracker{

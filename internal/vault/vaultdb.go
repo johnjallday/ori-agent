@@ -300,6 +300,37 @@ func loadVaultFileMetadata(ctx context.Context, db *sql.DB, vaultID string) (vau
 	return metadata, nil
 }
 
+func loadOnlyVaultFileMetadata(ctx context.Context, db *sql.DB) (vaultFileMetadata, error) {
+	if db == nil {
+		return vaultFileMetadata{}, fmt.Errorf("vault file database is required")
+	}
+	rows, err := db.QueryContext(ctx, `
+		SELECT vault_id, name, description, key_salt, key_nonce, key_ciphertext, created_at, updated_at
+		FROM vault_metadata
+		ORDER BY vault_id
+		LIMIT 2
+	`)
+	if err != nil {
+		return vaultFileMetadata{}, fmt.Errorf("load vault file metadata: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var metadata vaultFileMetadata
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return vaultFileMetadata{}, fmt.Errorf("load vault file metadata: %w", err)
+		}
+		return vaultFileMetadata{}, ErrVaultFileCorrupt
+	}
+	if err := rows.Scan(&metadata.VaultID, &metadata.Name, &metadata.Description, &metadata.KeySalt, &metadata.KeyNonce, &metadata.KeyCiphertext, &metadata.CreatedAt, &metadata.UpdatedAt); err != nil {
+		return vaultFileMetadata{}, fmt.Errorf("load vault file metadata: %w", err)
+	}
+	if rows.Next() || normalizeVaultID(metadata.VaultID) == "" || strings.TrimSpace(metadata.Name) == "" ||
+		strings.TrimSpace(metadata.KeySalt) == "" || strings.TrimSpace(metadata.KeyNonce) == "" || strings.TrimSpace(metadata.KeyCiphertext) == "" {
+		return vaultFileMetadata{}, ErrVaultFileCorrupt
+	}
+	return metadata, rows.Err()
+}
+
 func validateVaultFileSchema(ctx context.Context, db *sql.DB) error {
 	if db == nil {
 		return fmt.Errorf("vault file database is required")

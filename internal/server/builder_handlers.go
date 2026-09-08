@@ -91,7 +91,8 @@ func (b *ServerBuilder) initializeHandlers() {
 	// including Herdr Overnight Runs and wake-enabled continuations — ask for
 	// one without ever calling pmset themselves.
 	if dir, err := wakecoord.DefaultDir(); err == nil {
-		b.macWakeService.UseCoordinator(wakecoord.New(dir))
+		b.resetWakeStore = wakecoord.New(dir)
+		b.macWakeService.UseCoordinator(b.resetWakeStore)
 	}
 	b.settingsHandler = settingshttp.NewHandler(b.st, b.configManager, b.clientFactory, b.llmFactory)
 	b.settingsHandler.SetMacWakeService(b.macWakeService)
@@ -348,6 +349,8 @@ func (b *ServerBuilder) initializeHandlers() {
 		// the native mailbox reuses it (FR 39); the same adapter also links the
 		// grant to workspaces without re-auth (FR 47, 54). Requires the vault
 		// store (Phase 17).
+		consentLog := connections.NewConsentLog(config.DefaultDataDir())
+		b.consentLog = consentLog
 		connDeps := connectionshttp.Deps{
 			Flow:           connFlow,
 			Store:          connStore,
@@ -356,7 +359,7 @@ func (b *ServerBuilder) initializeHandlers() {
 			Teardown:       connectionProductTeardown{b: b},
 			Health:         connectionGrantHealth{b: b},
 			HealthNotifier: connectionHealthNotifier{b: b},
-			Consent:        connections.NewConsentLog(config.DefaultDataDir()),
+			Consent:        consentLog,
 		}
 		if b.vaultStore != nil {
 			sink := newGmailCredentialSink(b.vaultStore)
@@ -433,7 +436,7 @@ func (b *ServerBuilder) initializeHandlers() {
 	// Initialize CLI agent adapter (delegatable CLI agents)
 	b.cliAgentRegistry = cliagent.NewRegistry()
 	b.cliAgentRegistry.AutoDetect()
-	b.cliAgentLogger = cliagent.NewEventLogger(b.agentStorePath)
+	b.cliAgentLogger = cliagent.NewEventLogger(filepath.Dir(b.agentStorePath))
 
 	// Create step planner using system model if available
 	var cliPlanner *cliagent.StepPlanner

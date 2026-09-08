@@ -87,7 +87,11 @@ func validateJournal(j *journal) error {
 	if op.Revision > 1024 || (op.State == StatePreparing && op.Revision != 1) || (op.State != StatePreparing && op.Revision < 2) {
 		return ErrJournalInvalid
 	}
-	selected, err := Selection(v.Intent, v.Selected)
+	selectionInput := v.Selected
+	if v.Intent == IntentStartFresh {
+		selectionInput = nil
+	}
+	selected, err := Selection(v.Intent, selectionInput)
 	if err != nil || !slices.Equal(selected, v.Selected) || len(v.Categories) != len(selected) || len(op.Results) != len(selected) {
 		return ErrJournalInvalid
 	}
@@ -232,6 +236,18 @@ func targetKinds(id CategoryID) []string {
 		return []string{"workspace_registration_fields", "workspace_permissions", "database_records", "owned_uploads"}
 	case CategorySetupSteps:
 		return []string{"setup_fields"}
+	case CategoryIdentityProgress:
+		return []string{"first_run_state"}
+	case CategoryAppConfiguration:
+		return []string{"model_categories", "location_zones"}
+	case CategoryIntegrations:
+		return []string{"connection_metadata", "connection_consent", "mcp_registry", "mcp_search_sources", "mcp_search_cache", "plugin_registry", "plugin_marketplaces", "plugin_clones", "plugin_state", "plugin_artifacts", "plugin_preview"}
+	case CategoryTemplates:
+		return []string{"project_templates", "post_reset_project_templates", "workflow_templates"}
+	case CategoryActivity:
+		return []string{"usage_records", "activity_logs", "cli_event_logs"}
+	case CategoryRuntimeCache:
+		return []string{"cli_mcp_configs"}
 	default:
 		return nil
 	}

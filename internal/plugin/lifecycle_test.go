@@ -35,6 +35,27 @@ func commitGitAll(t *testing.T, repo, message string) {
 	}
 }
 
+func TestFreshPersistencePathsContainOnlyManagedPluginState(t *testing.T) {
+	root := t.TempDir()
+	pluginsDir := filepath.Join(root, "plugins")
+	cloneDir := filepath.Join(pluginsDir, "src")
+	manager := NewManager(&fakeRegistrar{}, &fakeSkills{}, pluginsDir, cloneDir)
+	paths := manager.FreshPersistencePaths()
+	want := map[string]string{
+		"plugin_registry": filepath.Join(pluginsDir, "installed.json"), "plugin_marketplaces": filepath.Join(pluginsDir, "marketplaces.json"),
+		"plugin_clones": cloneDir, "plugin_state": filepath.Join(pluginsDir, "state"), "plugin_artifacts": filepath.Join(pluginsDir, "artifacts"),
+		"plugin_preview": filepath.Join(pluginsDir, "preview"),
+	}
+	for kind, path := range want {
+		if paths[kind] != path {
+			t.Fatalf("fresh plugin path %s = %q, want %q", kind, paths[kind], path)
+		}
+	}
+	if len(paths) != len(want) {
+		t.Fatalf("fresh plugin paths = %#v", paths)
+	}
+}
+
 func TestStoreRoundTrip(t *testing.T) {
 	s := NewStore(t.TempDir())
 	if list, _ := s.List(); len(list) != 0 {

@@ -298,14 +298,10 @@ func TestCreateWorkspaceStore(t *testing.T) {
 }
 
 func TestResolveCostTrackerDir(t *testing.T) {
-	dir := resolveCostTrackerDir()
-	if dir == "" {
-		t.Error("Expected non-empty directory")
-	}
-
-	// Should contain .ori-agent/usage_data
-	if !filepath.IsAbs(dir) {
-		t.Error("Expected absolute path for cost tracker directory")
+	dataDir := t.TempDir()
+	t.Setenv("ORI_DATA_DIR", dataDir)
+	if dir := resolveCostTrackerDir(); dir != filepath.Join(dataDir, "usage_data") {
+		t.Fatalf("cost tracker directory = %q", dir)
 	}
 }
 

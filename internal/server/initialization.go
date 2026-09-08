@@ -550,7 +550,7 @@ func createWorkspaceStore(workspaceDir string) (workspace.Store, error) {
 
 // resolveCostTrackerDir determines the cost tracker data directory.
 func resolveCostTrackerDir() string {
-	return filepath.Join(os.Getenv("HOME"), ".ori-agent", "usage_data")
+	return filepath.Join(config.DefaultDataDir(), "usage_data")
 }
 
 // resolveActivityLogDir determines the activity log directory.
@@ -579,11 +579,12 @@ func resolveLocationZonesPath() string {
 
 // resolveWorkflowTemplatesDir determines the workflow templates directory.
 func resolveWorkflowTemplatesDir() string {
-	templatesDir := "workflow_templates"
-	if p := os.Getenv("WORKFLOW_TEMPLATES_DIR"); p != "" {
-		templatesDir = p
-	} else if abs, err := filepath.Abs(templatesDir); err == nil {
-		templatesDir = abs
+	dataDir := config.DefaultDataDir()
+	if configured := strings.TrimSpace(os.Getenv("WORKFLOW_TEMPLATES_DIR")); configured != "" {
+		if filepath.IsAbs(configured) {
+			return filepath.Clean(configured)
+		}
+		return filepath.Join(dataDir, configured)
 	}
-	return templatesDir
+	return filepath.Join(dataDir, "workflow_templates")
 }

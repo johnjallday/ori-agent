@@ -47,6 +47,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleEmailOAuthCallback(w, r)
 	case path == "/vaults" || path == "/vaults/":
 		h.handleVaults(w, r)
+	case path == "/vaults/attach":
+		h.handleAttachVault(w, r)
 	case strings.HasPrefix(path, "/vaults/"):
 		h.handleVault(w, r, strings.TrimPrefix(path, "/vaults/"))
 	case path == "/email-accounts" || path == "/email-accounts/":
@@ -207,6 +209,24 @@ func (h *Handler) handleVaults(w http.ResponseWriter, r *http.Request) {
 	default:
 		_ = orihttp.RespondMethodNotAllowed(w)
 	}
+}
+
+func (h *Handler) handleAttachVault(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var req struct {
+		PackageDirectory string `json:"package_directory"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	item, err := h.store.AttachVaultPackage(r.Context(), req.PackageDirectory)
+	if err != nil {
+		respondVaultError(w, err)
+		return
+	}
+	orihttp.Created(w, map[string]any{"success": true, "vault": item})
 }
 
 func (h *Handler) handleVault(w http.ResponseWriter, r *http.Request, vaultID string) {

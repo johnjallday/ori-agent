@@ -1,7 +1,9 @@
 package settingsreset
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
 	"errors"
 	"os"
 	"path/filepath"
@@ -307,6 +309,134 @@ func (s *failDeleteOnceStore) Delete(key vault.SecretKey) error {
 		return errors.New("injected owned-slot delete failure")
 	}
 	return s.SecretStore.Delete(key)
+}
+
+func TestStartFreshRemovalTreatsAbsentNestedOwnersAsVerifiedEmpty(t *testing.T) {
+	root := t.TempDir()
+	targets := make(map[string]string)
+	for _, kind := range targetKinds(CategoryIntegrations) {
+		targets[kind] = filepath.Join(root, "missing", kind)
+	}
+	if err := removeFreshTargets(CategoryIntegrations, targets, root); err != nil {
+		t.Fatalf("remove already-empty integration owners: %v", err)
+	}
+}
+
+func TestStartFreshAppliesEveryEnumeratedOwnerAndPreservesProtectedBytes(t *testing.T) {
+	f, owners, coordinator, lifecycle := coordinatorFixture(t)
+	root := f.Paths().DataDir
+	mustPreview(t, owners.Config.SetTemplatesRoot(filepath.Join(root, "templates")))
+	mustPreview(t, owners.Config.Save())
+	t.Setenv("ORI_TEMPLATES_DIR", filepath.Join(root, "templates"))
+	t.Setenv("WORKFLOW_TEMPLATES_DIR", filepath.Join(root, "workflow_templates"))
+	owners.FreshTargets = fixtureFreshTargets(root)
+	for _, relative := range []string{
+		"data/model_categories.json", "data/locations.json", "data/connections/google.json", "data/connections/consent.json",
+		"data/mcp_registry.json", "data/mcp_search_sources.json", "data/mcp_search_cache.json", "data/plugins/installed.json",
+		"data/plugins/marketplaces.json", "data/plugins/src/plugin/file", "data/plugins/state/plugin/file", "data/plugins/artifacts/plugin/file",
+		"data/plugins/preview/plugin/file", "data/templates/custom/file", "data/workflow_templates/custom.json", "data/usage_data/usage_records.json",
+		"data/activity_logs/agent.jsonl", "data/cli_agent_tasks/task/events.json", "data/cli-mcp/workspace.mcp.json",
+	} {
+		mustPreview(t, f.WriteFile(relative, []byte("owned reset fixture\n")))
+	}
+	vaultDEK, err := f.Secrets().Get(vault.SecretKeyVaultDEK)
+	mustPreview(t, err)
+	otherKey, err := f.OtherSecrets().Get(vault.SecretKeyOpenAIAPIKey)
+	mustPreview(t, err)
+	vaultPassword := rand.Text()
+	retainedVault := vault.Vault{Name: "Retained Start Fresh Vault"}
+	mustPreview(t, owners.Vaults.CreateVault(t.Context(), &retainedVault, vaultPassword))
+	retainedRecord := vault.Record{VaultID: retainedVault.ID, Type: "personal_note", Label: "Retained", Payload: []byte(`{"owned":"vault"}`)}
+	mustPreview(t, owners.Vaults.CreateRecord(t.Context(), &retainedRecord, vault.AccessContext{}))
+	vaultBytes, err := os.ReadFile(retainedVault.FilePath)
+	mustPreview(t, err)
+
+	preview, err := coordinator.planner.Create(t.Context(), IntentStartFresh, nil)
+	mustPreview(t, err)
+	if len(preview.Blockers) != 0 {
+		t.Fatalf("Start Fresh blockers = %+v", preview.Blockers)
+	}
+	lifecycle.drain = func(context.Context) error {
+		return errors.Join(owners.Workspaces.Close(), owners.Database.Close())
+	}
+	operation, err := coordinator.Stage(t.Context(), ExecuteRequest{PreviewID: preview.ID, RequestID: "fresh-fixture", Confirmation: "RESET"})
+	mustPreview(t, err)
+	if operation.State != StateAwaitingRestart {
+		t.Fatalf("staged Start Fresh = %+v", operation)
+	}
+	receipt, err := coordinator.lease.Read(resetstate.OperationRecord)
+	mustPreview(t, err)
+	privateJournal, err := decodeJournal(receipt)
+	mustPreview(t, err)
+	if _, _, err := validateRecoveryScope(t.Context(), coordinator.lease, privateJournal, RecoveryOptions{DataDir: root, SecretStore: f.Secrets()}); err != nil {
+		expected, _ := independentlyResolvedTargets(root)
+		for _, target := range privateJournal.Plan.Targets {
+			if expected[target.Kind] != target.Path {
+				t.Logf("target mismatch %s: expected %q, got %q", target.Kind, expected[target.Kind], target.Path)
+			}
+		}
+		t.Fatalf("preflight fresh recovery scope: %v", err)
+	}
+	if err := RecoverBeforeStores(t.Context(), coordinator.lease, RecoveryOptions{DataDir: root, SecretStore: f.Secrets()}); err != nil {
+		failed, _ := coordinator.Status(t.Context(), operation.ID)
+		t.Fatalf("recover Start Fresh: %v: %+v", err, failed)
+	}
+	operation, err = coordinator.Status(t.Context(), operation.ID)
+	mustPreview(t, err)
+	if !operation.VerifiedComplete() || operation.Intent != IntentStartFresh || len(operation.CompletedCategories()) != 9 {
+		t.Fatalf("completed Start Fresh = %+v", operation)
+	}
+	completedRevision := operation.Revision
+	mustPreview(t, RecoverBeforeStores(t.Context(), coordinator.lease, RecoveryOptions{DataDir: root, SecretStore: f.Secrets()}))
+	operation, err = coordinator.Status(t.Context(), operation.ID)
+	mustPreview(t, err)
+	if operation.Revision != completedRevision || !operation.VerifiedComplete() {
+		t.Fatal("relaunch retried an already completed Start Fresh category")
+	}
+
+	state, err := onboarding.OpenForReset(filepath.Join(root, "app_state.json"))
+	mustPreview(t, err)
+	if !state.IsCanonicalFirstRun() {
+		t.Fatal("app state did not return to canonical first-run defaults")
+	}
+	for _, target := range owners.FreshTargets {
+		if target.Kind == "first_run_state" {
+			continue
+		}
+		if _, err := os.Lstat(target.Path); !os.IsNotExist(err) {
+			t.Fatalf("fresh target remains: %s: %v", target.Kind, err)
+		}
+	}
+	if value, err := f.Secrets().Get(vault.SecretKeyVaultDEK); err != nil || value != vaultDEK {
+		t.Fatal("Start Fresh changed retained vault encryption material")
+	}
+	if value, err := f.OtherSecrets().Get(vault.SecretKeyOpenAIAPIKey); err != nil || value != otherKey {
+		t.Fatal("Start Fresh changed an unrelated secret namespace")
+	}
+	afterVaultBytes, err := os.ReadFile(retainedVault.FilePath)
+	if err != nil || !bytes.Equal(vaultBytes, afterVaultBytes) {
+		t.Fatal("Start Fresh changed retained vault package bytes")
+	}
+	reopenedDB, err := database.Open(t.Context(), &database.Config{Path: filepath.Join(root, "sessions.db"), WALMode: true})
+	mustPreview(t, err)
+	t.Cleanup(func() { _ = reopenedDB.Close() })
+	reopenedVaults := vault.NewStore(reopenedDB, vault.StoreOptions{VaultFilesBaseDir: root, ManagedVaultRoot: f.Paths().Vaults})
+	registered, err := reopenedVaults.ListVaults(t.Context())
+	mustPreview(t, err)
+	if len(registered) != 0 {
+		t.Fatal("retained vault package reattached without user action")
+	}
+	attached, err := reopenedVaults.AttachVaultPackage(t.Context(), filepath.Dir(retainedVault.FilePath))
+	mustPreview(t, err)
+	if attached.ID != retainedVault.ID {
+		t.Fatal("attached retained vault identity changed")
+	}
+	mustPreview(t, reopenedVaults.Unlock(t.Context(), retainedVault.ID, vaultPassword))
+	decrypted, err := reopenedVaults.GetRecord(t.Context(), retainedRecord.ID, vault.AccessContext{})
+	if err != nil || !bytes.Equal(decrypted.Payload, retainedRecord.Payload) {
+		t.Fatal("explicitly attached vault did not decrypt retained record")
+	}
+	f.AssertPreserved(t)
 }
 
 func TestRecoverBeforeStoresRetainsPartialFailureAndRetriesOnlyUnresolvedCategory(t *testing.T) {

@@ -69,6 +69,13 @@ func (m *Manager) SetZonesFilePath(path string) {
 	m.zonesFilePath = path
 }
 
+// PersistencePath reports the authoritative zones document.
+func (m *Manager) PersistencePath() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.zonesFilePath
+}
+
 // Start begins the location detection loop
 func (m *Manager) Start(ctx context.Context, interval time.Duration) {
 	m.mu.Lock()

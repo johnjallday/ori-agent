@@ -49,6 +49,20 @@ func TestResetPreviewValidatesOptionsBeforeReadingRuntime(t *testing.T) {
 	}
 }
 
+func TestResetPreviewParsesStartFreshWithoutClientCategories(t *testing.T) {
+	intent, selected, err := resetPreviewSelection("intent=start_fresh")
+	if err != nil || intent != settingsreset.IntentStartFresh || len(selected) != 0 {
+		t.Fatalf("Start Fresh client selection = %q %v, %v", intent, selected, err)
+	}
+	h := NewResetHandler(nil, nil, "")
+	h.SetPreviewPlanner(settingsreset.NewPlanner(func() settingsreset.Owners { return settingsreset.Owners{} }))
+	w := httptest.NewRecorder()
+	h.GetResetPreview(w, httptest.NewRequest(http.MethodGet, "/api/reset/preview?intent=start_fresh", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("Start Fresh HTTP preview status = %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestResetPreviewRealHTTPReportsCountsAndBlockersWithoutMutation(t *testing.T) {
 	f := resetfixture.NewSeeded(t)
 	p := f.Paths()

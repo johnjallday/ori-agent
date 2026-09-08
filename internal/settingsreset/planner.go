@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,6 +40,14 @@ var (
 // Owners are supplied only by runtime construction, never decoded from HTTP.
 // Nil owners produce blockers/unknown facts instead of reconstructed defaults.
 // CheckLifecycle must inspect ownership/admission only, without stopping work.
+type FreshTarget struct {
+	Category CategoryID
+	Kind     string
+	Path     string
+	Reason   string
+	Count    *int64
+}
+
 type Owners struct {
 	DataDir        string
 	Config         *config.Manager
@@ -49,6 +58,9 @@ type Owners struct {
 	Workspaces     *workspace.FileStore
 	Allowlist      *workspace.Allowlist
 	Vaults         *vault.Store
+	FreshTargets   []FreshTarget
+	FreshBlockers  []Blocker
+	CheckFresh     func(context.Context) []Blocker
 	CheckLifecycle func(context.Context) []Blocker
 }
 
@@ -209,6 +221,16 @@ func (p *Planner) inspect(ctx context.Context, intent Intent, selected []Categor
 			block(item.Code, item.Category, item.Message, item.Recovery)
 		}
 	}
+	if intent == IntentStartFresh {
+		for _, item := range owners.FreshBlockers {
+			block(item.Code, item.Category, item.Message, item.Recovery)
+		}
+		if owners.CheckFresh != nil {
+			for _, item := range owners.CheckFresh(ctx) {
+				block(item.Code, item.Category, item.Message, item.Recovery)
+			}
+		}
+	}
 	root, err := resolvePath(owners.DataDir)
 	if err != nil || filepath.Dir(root) == root {
 		block("installation_unavailable", "", "The installation root is missing, unsafe or unreadable.", "Resolve the runtime data directory before reviewing reset.")
@@ -292,7 +314,7 @@ func (p *Planner) inspect(ctx context.Context, intent Intent, selected []Categor
 			if info, statErr := os.Stat(resolved); statErr != nil && !os.IsNotExist(statErr) {
 				block("target_unreadable", id, "A reset target cannot be inspected.", "Restore access before reviewing reset.")
 			} else if statErr == nil {
-				wantDirectory := kind == "agent_profiles" || kind == "owned_uploads"
+				wantDirectory := directoryTarget(kind)
 				if (wantDirectory && !info.IsDir()) || (!wantDirectory && !info.Mode().IsRegular()) {
 					block("target_type_mismatch", id, "An owner path has an unexpected filesystem type.", "Resolve the conflicting file/directory before reset; no recursive fallback is allowed.")
 				}
@@ -455,5 +477,74 @@ func inspectCategory(ctx context.Context, owners Owners, id CategoryID, category
 			count := int64(len(owners.Setup.GetState().StepsCompleted))
 			category.Facts = append(category.Facts, CountFact{Name: "completed setup steps", Count: &count})
 		}
+	case CategoryIdentityProgress, CategoryAppConfiguration, CategoryIntegrations, CategoryTemplates, CategoryActivity, CategoryRuntimeCache:
+		provided := make(map[string]FreshTarget)
+		for _, item := range owners.FreshTargets {
+			if item.Category == id {
+				provided[item.Kind] = item
+			}
+		}
+		for _, kind := range targetKinds(id) {
+			item, ok := provided[kind]
+			if !ok || strings.TrimSpace(item.Path) == "" {
+				block("fresh_owner_unavailable", id, "A required Start Fresh owner is unavailable.", "Restore the owner or resolve its configured path before reviewing Start Fresh; Ori will not guess a deletion target.")
+				unknown(kind)
+				continue
+			}
+			reason := item.Reason
+			if reason == "" {
+				reason = "Remove this enumerated Ori-owned state; preserve unknown and external files."
+			}
+			target(kind, item.Path, reason)
+			count := item.Count
+			if count == nil {
+				count = countFreshTarget(ctx, item.Path)
+			}
+			category.Facts = append(category.Facts, CountFact{Name: kind, Count: count})
+			if count == nil {
+				category.Facts[len(category.Facts)-1].UnavailableReason = "Count unavailable; the reviewed target remains explicit."
+			}
+		}
 	}
+}
+
+func countFreshTarget(ctx context.Context, path string) *int64 {
+	var count int64
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return &count
+	}
+	if err != nil {
+		return nil
+	}
+	if !info.IsDir() {
+		count = 1
+		return &count
+	}
+	err = filepath.WalkDir(path, func(current string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if current != path {
+			count++
+		}
+		if count > maxProtectedHashEntries {
+			return ErrPreviewLimit
+		}
+		return nil
+	})
+	if err != nil {
+		return nil
+	}
+	return &count
+}
+
+func directoryTarget(kind string) bool {
+	return slices.Contains([]string{
+		"agent_profiles", "owned_uploads", "plugin_clones", "plugin_state", "plugin_artifacts", "plugin_preview",
+		"project_templates", "post_reset_project_templates", "workflow_templates", "usage_records", "activity_logs", "cli_event_logs", "cli_mcp_configs",
+	}, kind)
 }

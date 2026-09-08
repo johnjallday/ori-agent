@@ -53,6 +53,33 @@ func previewFixture(t *testing.T) (*resetfixture.Fixture, *Owners, *Planner) {
 	return f, owners, NewPlanner(func() Owners { return *owners })
 }
 
+func fixtureFreshTargets(root string) []FreshTarget {
+	plugins := filepath.Join(root, "plugins")
+	return []FreshTarget{
+		{CategoryIdentityProgress, "first_run_state", filepath.Join(root, "app_state.json"), "", nil},
+		{CategoryAppConfiguration, "model_categories", filepath.Join(root, "model_categories.json"), "", nil},
+		{CategoryAppConfiguration, "location_zones", filepath.Join(root, "locations.json"), "", nil},
+		{CategoryIntegrations, "connection_metadata", filepath.Join(root, "connections", "google.json"), "", nil},
+		{CategoryIntegrations, "connection_consent", filepath.Join(root, "connections", "consent.json"), "", nil},
+		{CategoryIntegrations, "mcp_registry", filepath.Join(root, "mcp_registry.json"), "", nil},
+		{CategoryIntegrations, "mcp_search_sources", filepath.Join(root, "mcp_search_sources.json"), "", nil},
+		{CategoryIntegrations, "mcp_search_cache", filepath.Join(root, "mcp_search_cache.json"), "", nil},
+		{CategoryIntegrations, "plugin_registry", filepath.Join(plugins, "installed.json"), "", nil},
+		{CategoryIntegrations, "plugin_marketplaces", filepath.Join(plugins, "marketplaces.json"), "", nil},
+		{CategoryIntegrations, "plugin_clones", filepath.Join(plugins, "src"), "", nil},
+		{CategoryIntegrations, "plugin_state", filepath.Join(plugins, "state"), "", nil},
+		{CategoryIntegrations, "plugin_artifacts", filepath.Join(plugins, "artifacts"), "", nil},
+		{CategoryIntegrations, "plugin_preview", filepath.Join(plugins, "preview"), "", nil},
+		{CategoryTemplates, "project_templates", filepath.Join(root, "templates"), "", nil},
+		{CategoryTemplates, "post_reset_project_templates", filepath.Join(root, "templates"), "", nil},
+		{CategoryTemplates, "workflow_templates", filepath.Join(root, "workflow_templates"), "", nil},
+		{CategoryActivity, "usage_records", filepath.Join(root, "usage_data"), "", nil},
+		{CategoryActivity, "activity_logs", filepath.Join(root, "activity_logs"), "", nil},
+		{CategoryActivity, "cli_event_logs", filepath.Join(root, "cli_agent_tasks"), "", nil},
+		{CategoryRuntimeCache, "cli_mcp_configs", filepath.Join(root, "cli-mcp"), "", nil},
+	}
+}
+
 func mustPreview(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
@@ -84,6 +111,49 @@ func treeBytes(t *testing.T, root string) map[string][sha256.Size]byte {
 		return nil
 	}))
 	return files
+}
+
+func TestStartFreshIsOneServerRecognizedIntentNotASelectionShortcut(t *testing.T) {
+	f, owners, planner := previewFixture(t)
+	root := f.Paths().DataDir
+	mustPreview(t, owners.Config.SetTemplatesRoot(filepath.Join(root, "templates")))
+	mustPreview(t, owners.Config.Save())
+	t.Setenv("ORI_TEMPLATES_DIR", filepath.Join(root, "templates"))
+	t.Setenv("WORKFLOW_TEMPLATES_DIR", filepath.Join(root, "workflow_templates"))
+	owners.FreshTargets = fixtureFreshTargets(root)
+
+	preview, err := planner.Create(t.Context(), IntentStartFresh, nil)
+	mustPreview(t, err)
+	if len(preview.Blockers) != 0 {
+		t.Fatalf("Start Fresh blockers = %+v", preview.Blockers)
+	}
+	selected, err := Selection(IntentStartFresh, nil)
+	mustPreview(t, err)
+	if !reflect.DeepEqual(preview.Selected, selected) || len(preview.Categories) != len(selected) {
+		t.Fatalf("Start Fresh categories = %v", preview.Selected)
+	}
+	if _, err := planner.Create(t.Context(), IntentStartFresh, []CategoryID{CategorySettings, CategoryAgents, CategoryAppRecords, CategorySetupSteps}); !errors.Is(err, ErrInvalidSelection) {
+		t.Fatal("selecting every narrow category became Start Fresh")
+	}
+}
+
+func TestStartFreshBlocksExternalTemplateRootsInsteadOfBroadeningDeletion(t *testing.T) {
+	f, owners, planner := previewFixture(t)
+	owners.FreshTargets = fixtureFreshTargets(f.Paths().DataDir)
+	for i := range owners.FreshTargets {
+		if owners.FreshTargets[i].Kind == "project_templates" || owners.FreshTargets[i].Kind == "post_reset_project_templates" {
+			owners.FreshTargets[i].Path = f.Paths().Templates
+		}
+		if owners.FreshTargets[i].Kind == "workflow_templates" {
+			owners.FreshTargets[i].Path = filepath.Join(f.Paths().Root, "workflow-templates")
+		}
+	}
+	preview, err := planner.Create(t.Context(), IntentStartFresh, nil)
+	mustPreview(t, err)
+	if !hasBlocker(preview, "target_outside_installation") {
+		t.Fatalf("external template roots were not blocked: %+v", preview.Blockers)
+	}
+	f.AssertPreserved(t)
 }
 
 func TestPreviewRejectsInvalidSelectionBeforeReadingOwners(t *testing.T) {
