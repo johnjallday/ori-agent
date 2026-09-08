@@ -329,6 +329,11 @@ func (s *Service) DiscloseRevisionFor(ctx context.Context, workspaceID, planID s
 // user-authored content or break a dependency, it is refused until the caller
 // confirms (FR-56).
 func (s *Service) Revise(ctx context.Context, workspaceID, planID string, input ReviseInput) (*Plan, error) {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	plan, err := s.store.GetPlan(ctx, workspaceID, planID)
 	if err != nil {
 		return nil, err

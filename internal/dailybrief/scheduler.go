@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 )
 
 // ScheduledWorkspace is one HQ workspace/user pair the scheduler should
@@ -31,10 +32,11 @@ type WorkspaceLister interface {
 // workspace/local-date, including across app restarts and multiple ticks
 // landing on the same due occurrence (PRD 5.6-5.8).
 type Scheduler struct {
-	svc          *Service
-	workspaces   WorkspaceLister
-	pollInterval time.Duration
-	now          func() time.Time // overridable in tests; defaults to time.Now
+	admissionGate *resetstate.WorkGate
+	svc           *Service
+	workspaces    WorkspaceLister
+	pollInterval  time.Duration
+	now           func() time.Time // overridable in tests; defaults to time.Now
 
 	stopChan chan struct{}
 	wg       sync.WaitGroup
@@ -56,10 +58,21 @@ func NewScheduler(svc *Service, workspaces WorkspaceLister, pollInterval time.Du
 	}
 }
 
-// Start begins the poll loop in a background goroutine.
+// SetAdmissionGate is initialization-only, before Start or Tick.
+func (s *Scheduler) SetAdmissionGate(gate *resetstate.WorkGate) { s.admissionGate = gate }
+
+// Start registers the loop handoff before launch. The loop does not retain a
+// lifetime permit while idle; every Tick enters separately before owner reads.
 func (s *Scheduler) Start() {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return
+	}
 	s.wg.Add(1)
-	go s.pollLoop()
+	go func() {
+		release()
+		s.pollLoop()
+	}()
 }
 
 // Stop signals the poll loop to exit and waits for it to finish. Safe to
@@ -87,6 +100,11 @@ func (s *Scheduler) pollLoop() {
 // Tick runs one scheduling pass. Exported so tests (and a manual/debug
 // trigger) can drive it directly without waiting on the poll interval.
 func (s *Scheduler) Tick() {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return
+	}
+	defer release()
 	ctx := context.Background()
 	if s.workspaces == nil {
 		return

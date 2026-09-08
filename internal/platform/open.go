@@ -57,16 +57,12 @@ func OpenFolder(path string) error {
 		return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
 	}
 
-	// Run and don't wait for the process to complete
-	if err := cmd.Start(); err != nil {
+	// Join the launcher process. Native open helpers normally return as soon as
+	// the desktop application accepts the request; waiting here prevents an
+	// unowned helper child from outliving reset admission.
+	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to open folder: %w", err)
 	}
-
-	// Don't wait for the command to finish - file manager stays open
-	go func() {
-		_ = cmd.Wait()
-	}()
-
 	return nil
 }
 
@@ -96,14 +92,9 @@ func OpenFile(path string) error {
 		return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
 	}
 
-	if err := cmd.Start(); err != nil {
+	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to open file: %w", err)
 	}
-
-	go func() {
-		_ = cmd.Wait()
-	}()
-
 	return nil
 }
 
@@ -132,14 +123,9 @@ func OpenURL(url string) error {
 		return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
 	}
 
-	if err := cmd.Start(); err != nil {
+	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to open URL: %w", err)
 	}
-
-	go func() {
-		_ = cmd.Wait()
-	}()
-
 	return nil
 }
 
@@ -165,8 +151,7 @@ func OpenApplication(appName string) error {
 		cmd = exec.Command("cmd", "/c", "start", "", appName)
 	case "linux":
 		gtkCmd := exec.Command("gtk-launch", appName)
-		if err := gtkCmd.Start(); err == nil {
-			go func() { _ = gtkCmd.Wait() }()
+		if err := gtkCmd.Run(); err == nil {
 			return nil
 		}
 		cmd = exec.Command("xdg-open", appName)
@@ -174,11 +159,9 @@ func OpenApplication(appName string) error {
 		return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
 	}
 
-	if err := cmd.Start(); err != nil {
+	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to open application %q: %w", appName, err)
 	}
-
-	go func() { _ = cmd.Wait() }()
 	return nil
 }
 
@@ -210,14 +193,9 @@ func RevealInFileManager(path string) error {
 		return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
 	}
 
-	if err := cmd.Start(); err != nil {
+	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to reveal file: %w", err)
 	}
-
-	go func() {
-		_ = cmd.Wait()
-	}()
-
 	return nil
 }
 

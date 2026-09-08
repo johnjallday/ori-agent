@@ -24,6 +24,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -220,6 +221,11 @@ func (h *Handler) publishMessageSent(workspaceID, agentName string) {
 		Source:      "chat",
 		Data:        map[string]any{"agent": strings.TrimSpace(agentName)},
 	})
+}
+
+// SetAdmissionGate configures reset ownership for detached chat commands.
+func (h *Handler) SetAdmissionGate(gate *resetstate.WorkGate) {
+	h.commandHandler.SetAdmissionGate(gate)
 }
 
 // SetShutdownFunc sets the shutdown function for the /exit command

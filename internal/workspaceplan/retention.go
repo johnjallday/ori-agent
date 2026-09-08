@@ -58,6 +58,11 @@ func ShouldArchiveForInactivity(plan *Plan, now time.Time) bool {
 // that could not be archived must not fail the whole listing. The Plan simply
 // stays active and gets another chance on the next read.
 func (s *Service) ArchiveInactive(ctx context.Context, workspaceID string, plans []*Plan) int {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return 0
+	}
+	defer release()
 	now := s.now()
 	archived := 0
 	for _, plan := range plans {

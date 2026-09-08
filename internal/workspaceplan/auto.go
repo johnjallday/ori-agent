@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -24,6 +25,7 @@ import (
 
 // AutoRunner drives approved automatic Plans.
 type AutoRunner struct {
+	admissionGate *resetstate.WorkGate
 	// executor owns dispatch, the slot, and gate evaluation. The runner only
 	// decides when to ask it for the next step.
 	executor *Executor
@@ -68,6 +70,9 @@ func NewAutoRunner(executor *Executor, opts ...AutoRunnerOption) *AutoRunner {
 	return runner
 }
 
+// SetAdmissionGate is initialization-only, before Launch.
+func (r *AutoRunner) SetAdmissionGate(gate *resetstate.WorkGate) { r.admissionGate = gate }
+
 // Stop cancels every in-flight run and waits for the loops to return. In-flight
 // Tasks are not killed: cancelling stops the loop from dispatching the NEXT
 // one, which is the same safe stop a pause performs (FR-108).
@@ -102,7 +107,15 @@ type AutoStartResult struct {
 // A Plan is minutes or hours of work; holding an HTTP request open for it would
 // tie the run's survival to a browser tab.
 func (r *AutoRunner) Launch(ctx context.Context, workspaceID, planID, actor string) (*AutoStartResult, error) {
-	if r == nil || r.executor == nil {
+	if r == nil {
+		return nil, fmt.Errorf("%w: automatic execution is not configured", ErrValidation)
+	}
+	release, err := r.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	if r.executor == nil {
 		return nil, fmt.Errorf("%w: automatic execution is not configured", ErrValidation)
 	}
 
@@ -128,6 +141,17 @@ func (r *AutoRunner) Launch(ctx context.Context, workspaceID, planID, actor stri
 			Reason: "this plan was approved to step through, so it starts one task at a time"}, nil
 	}
 
+	childRelease, err := r.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			childRelease()
+		}
+	}()
+
 	key := workspaceID + "\x00" + planID
 	r.mu.Lock()
 	if _, active := r.running[key]; active {
@@ -137,7 +161,9 @@ func (r *AutoRunner) Launch(ctx context.Context, workspaceID, planID, actor stri
 	r.running[key] = struct{}{}
 	r.mu.Unlock()
 
+	handedOff = true
 	r.wg.Go(func() {
+		defer childRelease()
 		defer func() {
 			r.mu.Lock()
 			delete(r.running, key)

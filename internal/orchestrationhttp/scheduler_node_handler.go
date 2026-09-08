@@ -546,6 +546,11 @@ func (th *TaskHandler) handleDeleteSchedulerNode(w http.ResponseWriter, r *http.
 
 // SchedulerNodeTriggerHandler handles manual triggering of a scheduler node
 func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *http.Request) {
+	release, ok := th.enterTaskRequest(w)
+	if !ok {
+		return
+	}
+	defer release()
 	if r.Method != http.MethodPost {
 		orihttp.MethodNotAllowed(w)
 		return
@@ -671,7 +676,7 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 	}
 
 	// Execute task immediately in background with a timeout
-	go func() {
+	if err := th.startTaskWork(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 		logger.Info("Executing scheduler-triggered task", logger.Fields{"task_id": taskID, "agent": targetTask.To})
@@ -722,7 +727,10 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 				}
 			}
 		}
-	}()
+	}); err != nil {
+		respondTaskAdmissionError(w, err)
+		return
+	}
 
 	if th.eventBus != nil {
 		payload := map[string]any{

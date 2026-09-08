@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -35,8 +36,9 @@ const (
 // the trigger's history and surfaces failures as Action Center findings
 // (PRD #22–24).
 type Dispatcher struct {
-	mu          sync.RWMutex
-	domainScans map[string]DomainScanHandler
+	admissionGate *resetstate.WorkGate
+	mu            sync.RWMutex
+	domainScans   map[string]DomainScanHandler
 
 	store          *Store
 	workspaceStore workspace.Store
@@ -58,8 +60,16 @@ func NewDispatcher(store *Store, wsStore workspace.Store, mission MissionRunner,
 	}
 }
 
+// SetAdmissionGate configures reset admission before dispatch owner access.
+func (d *Dispatcher) SetAdmissionGate(gate *resetstate.WorkGate) { d.admissionGate = gate }
+
 // Dispatch executes one fire for a trigger. Implements DispatchFunc.
 func (d *Dispatcher) Dispatch(t Trigger, fire PendingFire) {
+	release, err := d.admissionGate.Enter()
+	if err != nil {
+		return
+	}
+	defer release()
 	firedAt := time.Now()
 	evCtx := buildEventContext(t, fire, firedAt)
 

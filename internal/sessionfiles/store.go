@@ -41,6 +41,10 @@ func NewStore(basePath string) (*Store, error) {
 	return store, nil
 }
 
+// BasePath reports the authoritative uploads root without reading manifests or
+// changing the filesystem. It is not permission to delete unknown files there.
+func (s *Store) BasePath() string { return s.basePath }
+
 // getSessionPath returns the path for a session's files directory
 func (s *Store) getSessionPath(sessionID string) string {
 	return filepath.Join(s.basePath, sessionID)

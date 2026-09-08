@@ -67,6 +67,7 @@ func (b *ServerBuilder) initializeLLMFactory() error {
 // initializeGateway creates the gateway service.
 func (b *ServerBuilder) initializeGateway() {
 	b.gateway = gateway.NewService(logger.New("gateway"))
+	b.gateway.SetAdmissionGate(b.resetWork)
 }
 
 // initializeStorage creates the agent store and sets the path.
@@ -76,7 +77,7 @@ func (b *ServerBuilder) initializeStorage() error {
 	agentStorePath := resolveAgentStorePath()
 	b.agentStorePath = agentStorePath
 
-	st, err := createFileStore(agentStorePath, defaultConf)
+	st, err := createFileStoreWithPolicy(agentStorePath, defaultConf, b.resetPolicy.SuppressAgentRehydration)
 	if err != nil {
 		return err
 	}
@@ -118,6 +119,7 @@ func (b *ServerBuilder) initializeLocationManager() {
 	zones := loadLocationZones(locationZonesPath)
 
 	mgr := createLocationManager(zones, locationZonesPath)
+	mgr.SetAdmissionGate(b.resetWork)
 
 	// Start location detection loop
 	ctx := context.Background()
@@ -147,6 +149,7 @@ func (b *ServerBuilder) initializeCostTracker() {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 	usageDataDir := resolveCostTrackerDir()
 	b.costTracker = llm.NewCostTracker(usageDataDir)
+	b.costTracker.SetAdmissionGate(b.resetWork)
 	if verbose {
 		logger.Debug("Cost tracker initialized", logger.Fields{"dir": usageDataDir})
 	}

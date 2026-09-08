@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 )
 
 // DefaultUpdateCheckInterval is the process-wide plugin source check cadence.
@@ -30,8 +31,9 @@ type UpdateSnapshot struct {
 // update availability. Source failures are isolated per plugin and retain the
 // last successful result until a later cycle succeeds.
 type UpdateChecker struct {
-	source updateCheckerSource
-	now    func() time.Time
+	admissionGate *resetstate.WorkGate
+	source        updateCheckerSource
+	now           func() time.Time
 
 	schedulerMu sync.Mutex
 	stop        chan struct{}
@@ -55,12 +57,20 @@ func NewUpdateChecker(source updateCheckerSource) *UpdateChecker {
 	}
 }
 
+// SetAdmissionGate configures reset admission before Start or Invalidate.
+func (c *UpdateChecker) SetAdmissionGate(gate *resetstate.WorkGate) { c.admissionGate = gate }
+
 // Start begins the checker once, running an immediate pass before waiting for
 // each interval. Non-positive intervals select the daily production default.
 func (c *UpdateChecker) Start(interval time.Duration) {
 	if c == nil || c.source == nil {
 		return
 	}
+	release, err := c.admissionGate.Enter()
+	if err != nil {
+		return
+	}
+	defer release()
 	if interval <= 0 {
 		interval = DefaultUpdateCheckInterval
 	}
@@ -148,6 +158,11 @@ func (c *UpdateChecker) Invalidate(name string) {
 	if c == nil || name == "" {
 		return
 	}
+	release, err := c.admissionGate.Enter()
+	if err != nil {
+		return
+	}
+	defer release()
 	c.snapshotMu.Lock()
 	delete(c.results, name)
 	c.epochs[name]++
@@ -160,6 +175,11 @@ type checkedUpdate struct {
 }
 
 func (c *UpdateChecker) checkCycle() {
+	release, err := c.admissionGate.Enter()
+	if err != nil {
+		return
+	}
+	defer release()
 	c.snapshotMu.Lock()
 	c.checking = true
 	c.snapshotMu.Unlock()

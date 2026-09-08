@@ -114,6 +114,7 @@ func (b *ServerBuilder) wireDownloadsJanitorAutomation() {
 		return
 	}
 	automation := downloadsjanitor.NewAutomation(b.downloadsJanitorService, janitorTriggerStore{service: b.triggerService})
+	automation.SetAdmissionGate(b.resetWork)
 	b.downloadsJanitorAutomation = automation
 	b.downloadsJanitorService.SetAutomationStatus(automation)
 	b.triggerService.RegisterDomainScanHandler(downloadsjanitor.DomainKey, automation)

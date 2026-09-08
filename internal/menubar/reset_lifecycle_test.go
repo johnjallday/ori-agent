@@ -2,6 +2,7 @@ package menubar
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/database"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/server"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/testutil/resetfixture"
@@ -21,6 +23,19 @@ import (
 // builder/native discovery and native menubar UI are deliberately not invoked.
 func TestResetLifecycleMenubarStopStartLeavesPreviousSQLiteOpen(t *testing.T) {
 	f := resetfixture.NewSeeded(t)
+	// Match the shell's outer lifetime, but release in fixture cleanup only
+	// AFTER explicitly closing all test stores. Production pins until exit.
+	if resetstate.Supported() {
+		lease, err := resetstate.Acquire(f.Paths().DataDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := lease.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+	}
 	path := filepath.Join(f.Paths().DataDir, "sessions.db")
 	controller := NewController(0)
 	type running struct {
@@ -99,6 +114,12 @@ func TestResetLifecycleMenubarStopStartLeavesPreviousSQLiteOpen(t *testing.T) {
 		}
 		if err := controller.StopServer(ctx); err != nil {
 			t.Fatal(err)
+		}
+		if resetstate.Supported() {
+			other, err := resetstate.Acquire(f.Paths().DataDir)
+			if other != nil || !errors.Is(err, resetstate.ErrInUse) {
+				t.Fatal("menubar stop released installation ownership:", err)
+			}
 		}
 		if controller.GetStatus() != StatusStopped || controller.server != nil || controller.httpServer != nil {
 			t.Fatal("StopServer did not clear host state")

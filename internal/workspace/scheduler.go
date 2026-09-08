@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/robfig/cron/v3"
 	"sync"
 	"time"
@@ -35,6 +36,7 @@ type TaskScheduler struct {
 	workspaceStore             Store
 	eventBus                   *EventBus
 	pollInterval               time.Duration
+	admissionGate              *resetstate.WorkGate
 	wakeScheduler              WakeScheduler
 	missionTrigger             MissionTrigger
 	assistantReflectionTrigger AssistantReflectionTrigger
@@ -72,7 +74,8 @@ type WakeScheduler interface {
 
 // SchedulerConfig contains configuration for the task scheduler
 type SchedulerConfig struct {
-	PollInterval  time.Duration // How often to check for scheduled tasks
+	AdmissionGate *resetstate.WorkGate // Shared runtime gate; nil means reset is unsupported
+	PollInterval  time.Duration        // How often to check for scheduled tasks
 	WakeScheduler WakeScheduler
 }
 
@@ -84,6 +87,7 @@ func NewTaskScheduler(store Store, config SchedulerConfig) *TaskScheduler {
 
 	return &TaskScheduler{
 		workspaceStore:     store,
+		admissionGate:      config.AdmissionGate,
 		pollInterval:       config.PollInterval,
 		wakeScheduler:      config.WakeScheduler,
 		stopChan:           make(chan struct{}),
@@ -110,6 +114,12 @@ func (ts *TaskScheduler) SetAssistantReflectionTrigger(trigger AssistantReflecti
 
 // Start begins the scheduler polling loop
 func (ts *TaskScheduler) Start() {
+	release, err := ts.admissionGate.Enter()
+	if err != nil {
+		return
+	}
+	defer release()
+
 	logger.Debug("Task scheduler started", logger.Fields{"poll_interval": ts.pollInterval})
 
 	ts.wg.Add(1)
@@ -158,6 +168,12 @@ func (ts *TaskScheduler) pollLoop() {
 //
 // Note: Uses pointer iteration (&ws.Tasks[i]) to allow in-place modifications
 func (ts *TaskScheduler) checkScheduledTasks() {
+	release, err := ts.admissionGate.Enter()
+	if err != nil {
+		return
+	}
+	defer release()
+
 	workspaces, err := ts.listActiveWorkspacesForScheduling()
 	if err != nil {
 		logger.Error("Failed to list workspaces", logger.Fields{"error": err})
@@ -237,15 +253,27 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 		// checks for the duration. The in-flight claim prevents the next tick
 		// from launching a second run before this one advances NextMissionRunAt.
 		if ts.missionDue(ws, now) && ts.claimMission(ws.ID) {
+			finishMission, err := ts.admissionGate.Enter()
+			if err != nil {
+				ts.releaseMission(ws.ID)
+				return
+			}
 			missionWS, missionNow := ws, now
 			ts.wg.Go(func() {
+				defer finishMission()
 				defer ts.releaseMission(missionWS.ID)
 				ts.checkMissionCadence(missionWS, missionNow)
 			})
 		}
 		if ts.assistantReflectionDue(ws, now) && ts.claimAssistantReflection(ws.ID) {
+			finishReflection, err := ts.admissionGate.Enter()
+			if err != nil {
+				ts.releaseAssistantReflection(ws.ID)
+				return
+			}
 			stationID := ws.ID
 			ts.wg.Go(func() {
+				defer finishReflection()
 				defer ts.releaseAssistantReflection(stationID)
 				if err := ts.assistantReflectionTrigger.TriggerAssistantReflection(context.Background(), stationID); err != nil {
 					logger.Warn("Assistant reflection schedule failed", logger.Fields{"station_id": stationID, "error": err})

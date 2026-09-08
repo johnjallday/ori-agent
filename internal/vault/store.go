@@ -268,6 +268,20 @@ func (s *Store) resolveVaultFileAbsolutePath(filePath string) string {
 	return filepath.Join(baseDir, filePath)
 }
 
+// RetainedPath resolves a raw catalog path using this owner's actual base. It
+// never opens, migrates or decrypts a vault. Preserve the entire package when
+// the catalog names its inner database; an empty legacy path stays empty.
+func (s *Store) RetainedPath(catalogPath string) string {
+	path := s.resolveVaultFileAbsolutePath(catalogPath)
+	if packageDir := vaultPackageDirectoryForFilePath(path); packageDir != "" {
+		return packageDir
+	}
+	return path
+}
+
+// ManagedRoot reports the configured creation root without creating a package.
+func (s *Store) ManagedRoot() string { return s.managedVaultRootDir() }
+
 func (s *Store) decorateVault(item *Vault) {
 	if item == nil {
 		return

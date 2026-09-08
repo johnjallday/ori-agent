@@ -54,6 +54,12 @@ func NewFileStore(path string, defaultSettings types.Settings) (Store, error) {
 	return fs, nil
 }
 
+// PersistencePaths reports the same paths used by this owner's writers. The
+// plugin projection intentionally retains its current-CWD semantics.
+func (s *fileStore) PersistencePaths() (index, profiles, projection string) {
+	return s.path, s.agentsDir(), "agents.json"
+}
+
 func (s *fileStore) ListAgents() (names []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

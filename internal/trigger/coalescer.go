@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 )
 
 // maxAccumulatedEvents caps how many raw events a single fire carries.
@@ -28,8 +29,9 @@ type DispatchFunc func(t Trigger, fire PendingFire)
 //   - When the in-flight fire completes, the pending fire (if any) executes
 //     with its accumulated context.
 type Coalescer struct {
-	store    *Store
-	dispatch DispatchFunc
+	admissionGate *resetstate.WorkGate
+	store         *Store
+	dispatch      DispatchFunc
 	// debounceFor resolves a trigger's window length; defaults to
 	// Trigger.Debounce. Overridable so tests run on millisecond windows.
 	debounceFor func(Trigger) time.Duration
@@ -44,9 +46,10 @@ type Coalescer struct {
 }
 
 type coalesceState struct {
-	window   *PendingFire // open debounce window accumulating events
-	timer    *time.Timer
-	inFlight bool
+	window           *PendingFire // open debounce window accumulating events
+	timer            *time.Timer
+	inFlight         bool
+	ownershipRelease func() // spans window, durable pending fire and final dispatch writes
 }
 
 // NewCoalescer creates a coalescer that persists pending fires through store
@@ -60,6 +63,9 @@ func NewCoalescer(store *Store, dispatch DispatchFunc) *Coalescer {
 	}
 }
 
+// SetAdmissionGate configures reset admission before observing or restoring.
+func (c *Coalescer) SetAdmissionGate(gate *resetstate.WorkGate) { c.admissionGate = gate }
+
 // Observe records a raw event for a trigger and returns the fire ID the
 // event was folded into (a new window, the open window, or the queued
 // pending fire). The fire ID is what webhook callers receive in the 202
@@ -69,6 +75,15 @@ func NewCoalescer(store *Store, dispatch DispatchFunc) *Coalescer {
 // a continuous event stream still produces a fire every window instead of
 // starving forever.
 func (c *Coalescer) Observe(t Trigger, ev Event) string {
+	release, err := c.admissionGate.Enter()
+	if err != nil {
+		return ""
+	}
+	defer func() {
+		if release != nil {
+			release()
+		}
+	}()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
@@ -79,6 +94,10 @@ func (c *Coalescer) Observe(t Trigger, ev Event) string {
 	if st == nil {
 		st = &coalesceState{}
 		c.states[t.ID] = st
+	}
+	if st.ownershipRelease == nil {
+		st.ownershipRelease = release
+		release = nil
 	}
 
 	if st.window != nil {
@@ -117,14 +136,15 @@ func (c *Coalescer) closeWindow(wsID, triggerID string) {
 	st.timer = nil
 
 	if st.inFlight {
-		// Merge into the single pending slot and persist it (PRD #20–21).
-		// The merged fire keeps the earlier fire ID so callers holding it
-		// still correlate.
-		c.mu.Unlock()
+		// Serialize pending persistence with the run's claim under c.mu. If the
+		// current run wins first it marks itself idle but retains ownership for
+		// this window; if this timer wins first the run observes the persisted
+		// pending fire. Neither ordering can strand an unowned durable fire.
 		_, err := c.store.Update(wsID, triggerID, func(t *Trigger) error {
 			t.PendingFire = mergeFires(t.PendingFire, fire)
 			return nil
 		})
+		c.mu.Unlock()
 		if err != nil {
 			logger.Warn("trigger coalescer: persist pending fire", logger.Fields{
 				"trigger_id": triggerID, "workspace_id": wsID, "error": err,
@@ -160,17 +180,30 @@ func (c *Coalescer) run(wsID, triggerID string, fire PendingFire) {
 			})
 		}
 
-		next := c.takePending(wsID, triggerID)
-		if next == nil {
-			c.clearInFlight(triggerID)
+		c.mu.Lock()
+		next, err := c.takePending(wsID, triggerID)
+		if err != nil && err != ErrNotFound {
+			// The durable pending state is uncertain. Keep this trigger's
+			// ownership permit and in-flight marker latched rather than allowing
+			// reset admission to race evidence that could not be claimed safely.
+			c.mu.Unlock()
 			return
 		}
+		if next == nil {
+			release := c.clearInFlightLocked(triggerID)
+			c.mu.Unlock()
+			if release != nil {
+				release()
+			}
+			return
+		}
+		c.mu.Unlock()
 		fire = *next
 	}
 }
 
 // takePending atomically claims and clears the persisted pending fire.
-func (c *Coalescer) takePending(wsID, triggerID string) *PendingFire {
+func (c *Coalescer) takePending(wsID, triggerID string) (*PendingFire, error) {
 	var pf *PendingFire
 	_, err := c.store.Update(wsID, triggerID, func(t *Trigger) error {
 		pf = t.PendingFire
@@ -183,19 +216,34 @@ func (c *Coalescer) takePending(wsID, triggerID string) *PendingFire {
 				"trigger_id": triggerID, "workspace_id": wsID, "error": err,
 			})
 		}
-		return nil
+		return nil, err
 	}
-	return pf
+	return pf, nil
 }
 
 // clearInFlight releases the in-flight marker so a future event can start a
 // new run for this trigger.
 func (c *Coalescer) clearInFlight(triggerID string) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if st := c.states[triggerID]; st != nil {
-		st.inFlight = false
+	release := c.clearInFlightLocked(triggerID)
+	c.mu.Unlock()
+	if release != nil {
+		release()
 	}
+}
+
+func (c *Coalescer) clearInFlightLocked(triggerID string) func() {
+	st := c.states[triggerID]
+	if st == nil {
+		return nil
+	}
+	st.inFlight = false
+	if st.window != nil {
+		return nil
+	}
+	release := st.ownershipRelease
+	st.ownershipRelease = nil
+	return release
 }
 
 // RestorePending dispatches fires that were persisted before a restart
@@ -206,28 +254,46 @@ func (c *Coalescer) RestorePending() {
 		if t.PendingFire == nil {
 			continue
 		}
+		release, err := c.admissionGate.Enter()
+		if err != nil {
+			continue
+		}
 		c.mu.Lock()
+		if c.closed {
+			c.mu.Unlock()
+			release()
+			return
+		}
 		st := c.states[t.ID]
 		if st == nil {
 			st = &coalesceState{}
 			c.states[t.ID] = st
 		}
-		if st.inFlight {
+		if st.inFlight || st.ownershipRelease != nil {
 			c.mu.Unlock()
+			release()
 			continue
 		}
 		st.inFlight = true
-		c.mu.Unlock()
-
-		fire := c.takePending(t.WorkspaceID, t.ID)
+		st.ownershipRelease = release
+		fire, err := c.takePending(t.WorkspaceID, t.ID)
+		if err != nil && err != ErrNotFound {
+			c.mu.Unlock()
+			continue // retain ownership: durable pending state is uncertain
+		}
 		if fire == nil {
-			c.clearInFlight(t.ID)
+			release = c.clearInFlightLocked(t.ID)
+			c.mu.Unlock()
+			if release != nil {
+				release()
+			}
 			continue
 		}
+		c.runs.Add(1)
+		c.mu.Unlock()
 		logger.Info("trigger coalescer: restoring pending fire from before restart", logger.Fields{
 			"trigger_id": t.ID, "workspace_id": t.WorkspaceID, "fire_id": fire.FireID,
 		})
-		c.runs.Add(1)
 		go c.run(t.WorkspaceID, t.ID, *fire)
 	}
 }
@@ -237,9 +303,9 @@ func (c *Coalescer) RestorePending() {
 // is the caller's responsibility (deletion removes it with the trigger).
 func (c *Coalescer) Drop(triggerID string) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	st := c.states[triggerID]
 	if st == nil {
+		c.mu.Unlock()
 		return
 	}
 	if st.timer != nil {
@@ -247,6 +313,15 @@ func (c *Coalescer) Drop(triggerID string) {
 		st.timer = nil
 	}
 	st.window = nil
+	var release func()
+	if !st.inFlight {
+		release = st.ownershipRelease
+		st.ownershipRelease = nil
+	}
+	c.mu.Unlock()
+	if release != nil {
+		release()
+	}
 }
 
 // WaitIdle blocks until every run goroutine has finished. Useful in tests to
@@ -258,14 +333,22 @@ func (c *Coalescer) WaitIdle() { c.runs.Wait() }
 // persisted for the next startup.
 func (c *Coalescer) Close() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.closed = true
+	var releases []func()
 	for _, st := range c.states {
 		if st.timer != nil {
 			st.timer.Stop()
 			st.timer = nil
 		}
 		st.window = nil
+		if !st.inFlight && st.ownershipRelease != nil {
+			releases = append(releases, st.ownershipRelease)
+			st.ownershipRelease = nil
+		}
+	}
+	c.mu.Unlock()
+	for _, release := range releases {
+		release()
 	}
 }
 

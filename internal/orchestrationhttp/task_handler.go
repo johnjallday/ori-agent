@@ -19,6 +19,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -53,6 +54,7 @@ type FrontendScheduleConfigRaw struct {
 
 // TaskHandler manages task and scheduled task operations
 type TaskHandler struct {
+	admissionGate  *resetstate.WorkGate
 	workspaceStore workspace.Store
 	communicator   *agentcomm.Communicator
 	taskHandler    workspace.TaskHandler

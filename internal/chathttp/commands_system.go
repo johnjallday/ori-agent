@@ -16,6 +16,15 @@ var openApplicationFn = platform.OpenApplication
 // HandleExit handles the /exit command to shut down the server
 func (ch *CommandHandler) HandleExit(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	// Shutdown is detached from the request. Own it before acknowledging so a
+	// reset cannot fence in the gap between the response and delayed shutdown.
+	finishShutdown, err := ch.admissionGate.Enter()
+	if err != nil {
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "reset_pending"})
+		return
+	}
 
 	// Send acknowledgment response first
 	response := map[string]any{
@@ -32,6 +41,7 @@ func (ch *CommandHandler) HandleExit(w http.ResponseWriter, r *http.Request) {
 
 	// Trigger shutdown in a goroutine to allow response to be sent
 	go func() {
+		defer finishShutdown()
 		// Small delay to ensure response is sent
 		time.Sleep(100 * time.Millisecond)
 

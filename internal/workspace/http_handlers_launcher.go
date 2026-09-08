@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,14 +13,21 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 )
 
 const folderPickerControlPort = "21547"
 
 var errFolderPickerAppNotFound = errors.New("folder picker app not found")
+
+var folderPickerProcess struct {
+	sync.Mutex
+	release func()
+}
 
 type folderPickerSelectPathRequest struct {
 	WorkspaceID string `json:"workspace_id,omitempty"`
@@ -49,8 +57,18 @@ func (h *HTTPHandler) LaunchFolderPicker(w http.ResponseWriter, r *http.Request)
 		_ = json.NewDecoder(r.Body).Decode(&reqBody)
 	}
 
-	// First, try to show existing window via local control server
+	// Claim persistent-child ownership before launch or acknowledgement. The
+	// claim survives the request until verified shutdown; a reset fence can
+	// therefore never race a detached picker that may still call back.
+	folderPickerProcess.Lock()
+	if err := claimFolderPickerLocked(h.admissionGate); err != nil {
+		folderPickerProcess.Unlock()
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	// First, try to show existing window via local control server.
 	if showExistingFolderPicker(reqBody.WorkspaceID) {
+		folderPickerProcess.Unlock()
 		logger.Info("Showed existing folder picker window", logger.Fields{"workspace_id": reqBody.WorkspaceID})
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -60,8 +78,10 @@ func (h *HTTPHandler) LaunchFolderPicker(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// App not running, need to launch it
+	// App not running, need to launch it.
 	if err := launchFolderPickerApp(reqBody.WorkspaceID); err != nil {
+		releaseFolderPickerLocked()
+		folderPickerProcess.Unlock()
 		logger.Error("Failed to launch folder picker", logger.Fields{"error": err})
 		w.Header().Set("Content-Type", "application/json")
 		status, errMsg := folderPickerLaunchErrorResponse(err)
@@ -72,6 +92,7 @@ func (h *HTTPHandler) LaunchFolderPicker(w http.ResponseWriter, r *http.Request)
 		})
 		return
 	}
+	folderPickerProcess.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -93,8 +114,16 @@ func (h *HTTPHandler) SelectFolderPath(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
 
+	folderPickerProcess.Lock()
+	if err := claimFolderPickerLocked(h.admissionGate); err != nil {
+		folderPickerProcess.Unlock()
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
 	if !showExistingFolderPicker(req.WorkspaceID) {
 		if err := launchFolderPickerApp(req.WorkspaceID); err != nil {
+			releaseFolderPickerLocked()
+			folderPickerProcess.Unlock()
 			logger.Error("Failed to launch folder picker for path selection", logger.Fields{"error": err})
 			w.Header().Set("Content-Type", "application/json")
 			status, errMsg := folderPickerLaunchErrorResponse(err)
@@ -107,6 +136,8 @@ func (h *HTTPHandler) SelectFolderPath(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := waitForFolderPickerReady(4 * time.Second); err != nil {
+			// Launch succeeded but child state is ambiguous: retain ownership.
+			folderPickerProcess.Unlock()
 			logger.Error("Folder picker did not become ready for path selection", logger.Fields{"error": err})
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusGatewayTimeout)
@@ -117,6 +148,7 @@ func (h *HTTPHandler) SelectFolderPath(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	folderPickerProcess.Unlock()
 
 	selectedPath, selected, err := requestFolderSelection(req.Title)
 	if err != nil {
@@ -156,20 +188,57 @@ func showExistingFolderPicker(workspaceID string) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// ShutdownFolderPicker sends a quit signal to the folder picker app if it's running
-func ShutdownFolderPicker() {
-	client := &http.Client{Timeout: 500 * time.Millisecond}
-
-	resp, err := client.Post("http://127.0.0.1:"+folderPickerControlPort+"/quit", "application/json", nil)
-	if err != nil {
-		// App not running, nothing to do
-		return
+func claimFolderPickerLocked(gate *resetstate.WorkGate) error {
+	if folderPickerProcess.release != nil {
+		return nil
 	}
-	defer func() { _ = resp.Body.Close() }()
+	release, err := gate.EnterLifetime()
+	if err != nil {
+		return err
+	}
+	folderPickerProcess.release = release
+	return nil
+}
 
-	if resp.StatusCode == http.StatusOK {
+func releaseFolderPickerLocked() {
+	if folderPickerProcess.release != nil {
+		folderPickerProcess.release()
+		folderPickerProcess.release = nil
+	}
+}
+
+// ShutdownFolderPicker stops only a child previously claimed by this runtime
+// and releases lifetime ownership only after the private listener is gone.
+func ShutdownFolderPicker(ctx context.Context) error {
+	folderPickerProcess.Lock()
+	defer folderPickerProcess.Unlock()
+	if folderPickerProcess.release == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	deadlineCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	resp, err := client.Post("http://127.0.0.1:"+folderPickerControlPort+"/quit", "application/json", nil)
+	if err == nil {
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("folder picker refused shutdown: %s", resp.Status)
+		}
 		logger.Info("Folder picker app shutdown signal sent", nil)
 	}
+	for isFolderPickerReady() {
+		select {
+		case <-deadlineCtx.Done():
+			return fmt.Errorf("folder picker shutdown remains ambiguous: %w", deadlineCtx.Err())
+		case <-time.After(25 * time.Millisecond):
+		}
+	}
+	releaseFolderPickerLocked()
+	return nil
 }
 
 func launchFolderPickerApp(workspaceID string) error {

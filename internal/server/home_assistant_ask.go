@@ -10,6 +10,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -111,10 +112,15 @@ func (a homeAgentsAdapter) AgentRoster() ([]agenthttp.HomeAgentSummary, bool) {
 // CreateTask, and StartTask are wired; StartTask runs the task through the same
 // orchestrator path the workspace UI uses, so coordinator-driven assignment and
 // the delegation loop apply identically.
+type homeTaskOrchestrator interface {
+	ExecuteTask(context.Context, string, workspace.Task) error
+}
+
 type homeActionMutator struct {
+	admissionGate  *resetstate.WorkGate
 	workspaces     workspace.Store
 	agents         store.Store
-	orchestrator   *workspace.Orchestrator
+	orchestrator   homeTaskOrchestrator
 	backlogService *workspace.BacklogService
 }
 
@@ -215,6 +221,11 @@ func (m homeActionMutator) CreateBacklogItem(ctx context.Context, workspaceID, d
 }
 
 func (m homeActionMutator) StartTask(ctx context.Context, workspaceID, taskID string) (string, error) {
+	release, err := m.admissionGate.Enter()
+	if err != nil {
+		return "", err
+	}
+	defer release()
 	href := m.workspaceHref(workspaceID)
 	if m.workspaces == nil {
 		return href, fmt.Errorf("workspace store unavailable")
@@ -255,7 +266,12 @@ func (m homeActionMutator) StartTask(ctx context.Context, workspaceID, taskID st
 	}
 	task := *target
 	orchestrator := m.orchestrator
+	finishTask, err := m.admissionGate.Enter()
+	if err != nil {
+		return href, err
+	}
 	go func() {
+		defer finishTask()
 		if execErr := orchestrator.ExecuteTask(execCtx, workspaceID, task); execErr != nil {
 			logger.Error("home assistant: failed to start task", logger.Fields{"workspace_id": workspaceID, "task_id": taskID, "err": execErr})
 		}
@@ -383,8 +399,9 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 	}
 	if s.Storage != nil {
 		mutator := homeActionMutator{
-			workspaces: s.Storage.WorkspaceStore,
-			agents:     s.Storage.AgentStore,
+			admissionGate: s.resetWork,
+			workspaces:    s.Storage.WorkspaceStore,
+			agents:        s.Storage.AgentStore,
 		}
 		if s.Storage.WorkspaceStore != nil {
 			// A dedicated instance over the same store/event bus/file

@@ -109,6 +109,12 @@ func WithGates(
 // approved version has no gates to read, and no Task either — nothing was
 // materialized — so the empty result is the correct one rather than a hole.
 func (e *Executor) Gates(ctx context.Context, plan *Plan, task workspace.Task) ([]Gate, error) {
+	release, err := e.service.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
 	if plan.ApprovedVersion <= 0 {
 		return nil, nil
 	}
@@ -161,6 +167,12 @@ type StartResult struct {
 // In step_through this is how work moves at all: approval created the Tasks and
 // started nothing, so every step is a deliberate user action.
 func (e *Executor) Start(ctx context.Context, workspaceID, planID string, input StartInput) (*StartResult, error) {
+	release, err := e.service.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
 	plan, err := e.service.Get(ctx, workspaceID, planID)
 	if err != nil {
 		return nil, err
@@ -381,6 +393,12 @@ type TaskRef struct {
 // The distinction matters: a user pausing a plan wants it to stop taking new
 // steps, not to have an agent killed halfway through writing a file.
 func (e *Executor) Pause(ctx context.Context, workspaceID, planID string, input PauseInput) (*PauseResult, error) {
+	release, err := e.service.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
 	plan, err := e.service.Get(ctx, workspaceID, planID)
 	if err != nil {
 		return nil, err
@@ -453,6 +471,12 @@ func (e *Executor) releaseSlot(ctx context.Context, workspaceID, planID string) 
 // group 6's execution slot decides when it actually does, and a resumed Plan
 // rejoins the queue rather than displacing whoever holds the slot.
 func (e *Executor) Resume(ctx context.Context, workspaceID, planID, actor string) (*Plan, error) {
+	release, err := e.service.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
 	plan, err := e.service.Get(ctx, workspaceID, planID)
 	if err != nil {
 		return nil, err
@@ -506,6 +530,12 @@ type CancelPreview struct {
 
 // PreviewCancel reports what cancelling this Plan would affect.
 func (e *Executor) PreviewCancel(ctx context.Context, workspaceID, planID string) (*CancelPreview, error) {
+	release, err := e.service.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
 	plan, err := e.service.Get(ctx, workspaceID, planID)
 	if err != nil {
 		return nil, err
@@ -548,6 +578,12 @@ func (e *Executor) PreviewCancel(ctx context.Context, workspaceID, planID string
 // Completed history is never deleted, and running work is stopped through the
 // workspace's own cancellation path rather than by writing a status directly.
 func (e *Executor) Cancel(ctx context.Context, workspaceID, planID, reason, actor string) (*Plan, error) {
+	release, err := e.service.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
 	plan, err := e.service.Get(ctx, workspaceID, planID)
 	if err != nil {
 		return nil, err
@@ -642,6 +678,12 @@ func isTerminalTaskStatus(status workspace.TaskStatus) bool {
 // The earlier Run keeps its trace, result, and artifacts. A retry is another
 // attempt at the same work, not a rewrite of what already happened.
 func (e *Executor) Retry(ctx context.Context, workspaceID, planID, taskID, actor string) (*StartResult, error) {
+	release, err := e.service.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
 	plan, err := e.service.Get(ctx, workspaceID, planID)
 	if err != nil {
 		return nil, err
@@ -702,6 +744,12 @@ type SkipInput struct {
 // the difference between "everything approved was done" and "we decided to
 // leave something out" must survive into the report.
 func (e *Executor) Skip(ctx context.Context, workspaceID, planID, taskID string, input SkipInput) (*Plan, error) {
+	release, err := e.service.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
 	if strings.TrimSpace(input.Reason) == "" {
 		return nil, fmt.Errorf("%w: skipping approved work requires a reason", ErrValidation)
 	}
@@ -798,6 +846,12 @@ type CompletionException struct {
 // It refuses while anything is still outstanding. A plan that reports itself
 // complete with work left is worse than one that reports itself unfinished.
 func (e *Executor) Complete(ctx context.Context, workspaceID, planID, actor string) (*CompletionReport, error) {
+	release, err := e.service.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
 	plan, err := e.service.Get(ctx, workspaceID, planID)
 	if err != nil {
 		return nil, err
@@ -892,6 +946,12 @@ func (e *Executor) buildReport(plan *Plan, tasks []workspace.Task, progress Prog
 // reaches failed only when it cannot continue without revision or user
 // intervention, so "failed" keeps meaning something.
 func (e *Executor) Fail(ctx context.Context, workspaceID, planID, reason, actor string) (*Plan, error) {
+	release, err := e.service.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
 	if strings.TrimSpace(reason) == "" {
 		return nil, fmt.Errorf("%w: failing a plan requires a reason", ErrValidation)
 	}

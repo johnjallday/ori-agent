@@ -115,6 +115,11 @@ type Manager struct {
 	secretStore vault.SecretStore
 }
 
+// PersistencePath reports this owner's configured path without loading settings
+// or consulting credential storage. A relative path has the same CWD semantics
+// as Load/Save; reset callers must resolve it and enforce installation ownership.
+func (m *Manager) PersistencePath() string { return m.filePath }
+
 // NewManager creates a new configuration manager
 func NewManager(filePath string) *Manager {
 	if filePath == "" {

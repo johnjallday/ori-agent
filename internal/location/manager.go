@@ -2,14 +2,16 @@ package location
 
 import (
 	"context"
-
-	"github.com/johnjallday/ori-agent/internal/logger"
 	"sync"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 )
 
 // Manager manages location detection and zone matching
 type Manager struct {
+	admissionGate     *resetstate.WorkGate
 	mu                sync.RWMutex
 	detectors         []Detector
 	zones             map[string]Zone // zone ID -> Zone
@@ -20,6 +22,9 @@ type Manager struct {
 	ctx               context.Context
 	cancel            context.CancelFunc
 	zonesFilePath     string // Path to zones file for persistence
+	stopping          bool
+	detectionWorkers  sync.WaitGroup
+	callbackWorkers   sync.WaitGroup
 }
 
 // NewManager creates a new location manager
@@ -54,6 +59,9 @@ func NewManager(detectors []Detector, zones []Zone) *Manager {
 	}
 }
 
+// SetAdmissionGate configures reset admission before Start or other callers.
+func (m *Manager) SetAdmissionGate(gate *resetstate.WorkGate) { m.admissionGate = gate }
+
 // SetZonesFilePath sets the file path for zone persistence
 func (m *Manager) SetZonesFilePath(path string) {
 	m.mu.Lock()
@@ -68,22 +76,30 @@ func (m *Manager) Start(ctx context.Context, interval time.Duration) {
 		m.detectionInterval = interval
 	}
 	m.ctx, m.cancel = context.WithCancel(ctx)
+	m.stopping = false
+	m.detectionWorkers.Add(1)
 	m.mu.Unlock()
 
 	// Initial detection
-	m.detectAndUpdate()
+	_ = m.detectAndUpdate()
 
 	// Start periodic detection
-	go m.detectionLoop()
+	go func() {
+		defer m.detectionWorkers.Done()
+		m.detectionLoop()
+	}()
 }
 
 // Stop stops the location detection loop
 func (m *Manager) Stop() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.stopping = true
 	if m.cancel != nil {
 		m.cancel()
 	}
+	m.mu.Unlock()
+	m.detectionWorkers.Wait()
+	m.callbackWorkers.Wait()
 }
 
 // detectionLoop runs periodic location detection
@@ -96,16 +112,27 @@ func (m *Manager) detectionLoop() {
 		case <-m.ctx.Done():
 			return
 		case <-ticker.C:
-			m.detectAndUpdate()
+			_ = m.detectAndUpdate()
 		}
 	}
 }
 
-// detectAndUpdate detects location and updates if changed
-func (m *Manager) detectAndUpdate() {
+// detectAndUpdate detects location and updates if changed.
+func (m *Manager) detectAndUpdate() error {
+	release, err := m.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
+	m.mu.RLock()
+	stopping := m.stopping
+	m.mu.RUnlock()
+	if stopping {
+		return context.Canceled
+	}
 	detectedValue, method := m.detectLocation()
 	if detectedValue == "" {
-		return
+		return nil
 	}
 
 	var zoneName string
@@ -132,6 +159,7 @@ func (m *Manager) detectAndUpdate() {
 		m.emitLocationChange(event)
 		logger.Debug("Location changed", logger.Fields{"previous_location": previousLocation, "zone_name": zoneName, "method": method})
 	}
+	return nil
 }
 
 // detectLocation tries detectors in priority order with fallback
@@ -183,18 +211,26 @@ func (m *Manager) GetCurrentLocation() string {
 	return m.currentLocation
 }
 
-// SetManualLocation sets a manual location override
-func (m *Manager) SetManualLocation(location string) {
+// SetManualLocation sets a manual location override.
+func (m *Manager) SetManualLocation(location string) error {
+	release, err := m.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	m.manualDetector.SetLocation(location)
-	// Trigger immediate detection
-	m.detectAndUpdate()
+	return m.detectAndUpdate()
 }
 
-// ClearManualLocation clears the manual location override
-func (m *Manager) ClearManualLocation() {
+// ClearManualLocation clears the manual location override.
+func (m *Manager) ClearManualLocation() error {
+	release, err := m.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	m.manualDetector.ClearLocation()
-	// Trigger immediate detection
-	m.detectAndUpdate()
+	return m.detectAndUpdate()
 }
 
 // OnLocationChange registers a callback for location change events
@@ -206,12 +242,30 @@ func (m *Manager) OnLocationChange(callback func(LocationChangeEvent)) {
 
 // emitLocationChange emits a location change event to all registered callbacks
 func (m *Manager) emitLocationChange(event LocationChangeEvent) {
-	m.mu.RLock()
-	callbacks := make([]func(LocationChangeEvent), len(m.eventCallbacks))
-	copy(callbacks, m.eventCallbacks)
-	m.mu.RUnlock()
-
-	for _, callback := range callbacks {
-		go callback(event)
+	type admittedCallback struct {
+		callback func(LocationChangeEvent)
+		release  func()
+	}
+	m.mu.Lock()
+	if m.stopping {
+		m.mu.Unlock()
+		return
+	}
+	admitted := make([]admittedCallback, 0, len(m.eventCallbacks))
+	for _, callback := range m.eventCallbacks {
+		release, err := m.admissionGate.Enter()
+		if err != nil {
+			continue
+		}
+		m.callbackWorkers.Add(1)
+		admitted = append(admitted, admittedCallback{callback: callback, release: release})
+	}
+	m.mu.Unlock()
+	for _, item := range admitted {
+		go func(item admittedCallback) {
+			defer m.callbackWorkers.Done()
+			defer item.release()
+			item.callback(event)
+		}(item)
 	}
 }

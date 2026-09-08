@@ -231,6 +231,12 @@ type MaterializeResult struct {
 
 // Materialize spends an approval and creates the work it authorized.
 func (m *Materializer) Materialize(ctx context.Context, workspaceID, planID string, input MaterializeInput) (*MaterializeResult, error) {
+	release, err := m.service.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
 	store := m.service.Store()
 
 	plan, err := store.GetPlan(ctx, workspaceID, planID)

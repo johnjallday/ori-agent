@@ -30,6 +30,10 @@ type allowlistFile struct {
 	WorkspaceIDs []string `json:"workspace_ids"`
 }
 
+// PersistencePath reports this owner's import-permission file without loading
+// or saving it. An empty/missing owner is not permission to guess another path.
+func (a *Allowlist) PersistencePath() string { return a.path }
+
 // NewAllowlist returns an empty Allowlist backed by the given file path.
 // The file is not read; call Load to populate from disk.
 func NewAllowlist(path string) *Allowlist {

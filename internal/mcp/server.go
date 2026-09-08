@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -148,18 +150,24 @@ func NormalizedAuthRef(cfg ServerConfig) string {
 
 // Server manages an MCP server process and client
 type Server struct {
-	config       ServerConfig
-	client       *sdkmcp.Client
-	cmd          *exec.Cmd
-	conn         *sdkmcp.ClientSession
-	tools        []Tool
-	instructions string                 // server-provided usage hint from the initialize handshake
-	serverInfo   *sdkmcp.Implementation // server name/version reported during initialization
-	ctx          context.Context
-	cancel       context.CancelFunc
-	mu           sync.RWMutex
-	status       ServerStatus
-	authorizeURL string // set while status == StatusAuthRequired; browser URL to open
+	admissionGate  *resetstate.WorkGate
+	lifecycleMu    sync.Mutex
+	runtimeRelease func()
+	healthWorkers  sync.WaitGroup
+	startRuntime   func() error // deterministic lifecycle seams for package tests
+	stopRuntime    func() error
+	config         ServerConfig
+	client         *sdkmcp.Client
+	cmd            *exec.Cmd
+	conn           *sdkmcp.ClientSession
+	tools          []Tool
+	instructions   string                 // server-provided usage hint from the initialize handshake
+	serverInfo     *sdkmcp.Implementation // server name/version reported during initialization
+	ctx            context.Context
+	cancel         context.CancelFunc
+	mu             sync.RWMutex
+	status         ServerStatus
+	authorizeURL   string // set while status == StatusAuthRequired; browser URL to open
 }
 
 // ServerStatus represents the current status of a server
@@ -194,15 +202,30 @@ func NewServer(config ServerConfig) *Server {
 	}
 }
 
+// SetAdmissionGate configures reset admission before Start or tool calls.
+func (s *Server) SetAdmissionGate(gate *resetstate.WorkGate) { s.admissionGate = gate }
+
 // Start starts the MCP server process/connection and initializes the client.
 // It dispatches to the stdio subprocess path or the remote Streamable HTTP
 // path based on the configured transport; both converge on finishConnect for
 // tool discovery, status, and the health-check loop.
 func (s *Server) Start() error {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	release, err := s.admissionGate.EnterLifetime()
+	if err != nil {
+		return err
+	}
+	transferred := false
+	defer func() {
+		if !transferred {
+			release()
+		}
+	}()
 	s.mu.Lock()
-	if s.status == StatusRunning || s.status == StatusStarting {
+	if s.status == StatusRunning || s.status == StatusStarting || s.runtimeRelease != nil {
 		s.mu.Unlock()
-		return fmt.Errorf("server already running")
+		return fmt.Errorf("server already running or requires a successful stop")
 	}
 	s.status = StatusStarting
 	s.authorizeURL = ""
@@ -213,12 +236,24 @@ func (s *Server) Start() error {
 	}
 	s.mu.Unlock()
 
-	switch NormalizedTransport(s.config) {
-	case TransportStreamableHTTP:
-		return s.startRemote()
-	default:
-		return s.startStdio()
+	if s.startRuntime != nil {
+		err = s.startRuntime()
+	} else {
+		switch NormalizedTransport(s.config) {
+		case TransportStreamableHTTP:
+			err = s.startRemote()
+		default:
+			err = s.startStdio()
+		}
 	}
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.runtimeRelease = release
+	s.mu.Unlock()
+	transferred = true
+	return nil
 }
 
 // startStdio launches the configured command and connects over stdio. This
@@ -384,10 +419,14 @@ func (s *Server) finishConnect(client *sdkmcp.Client, session *sdkmcp.ClientSess
 	// Bind this loop to the exact connection generation. Start may replace
 	// s.ctx after a stopped/crashed process; a loop that re-reads s.ctx can then
 	// accidentally follow the new generation and race its context swap.
-	s.mu.RLock()
+	s.mu.Lock()
 	healthCtx := s.ctx
-	s.mu.RUnlock()
-	go s.healthCheckLoop(healthCtx)
+	s.healthWorkers.Add(1)
+	s.mu.Unlock()
+	go func() {
+		defer s.healthWorkers.Done()
+		s.healthCheckLoop(healthCtx)
+	}()
 
 	return nil
 }
@@ -408,37 +447,49 @@ func (s *Server) setAuthorizeURL(url string) {
 
 // Stop stops the MCP server process
 func (s *Server) Stop() error {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
 	s.mu.Lock()
-	if s.status == StatusStopped || s.status == StatusError {
-		conn := s.conn
-		s.conn = nil
-		s.client = nil
-		s.cmd = nil
-		cancel := s.cancel
+	if s.status == StatusStopped && s.conn == nil && s.runtimeRelease == nil {
 		s.mu.Unlock()
-		if conn != nil {
-			_ = conn.Close()
-		}
-		cancel()
 		return nil
 	}
-
 	s.status = StatusStopped
 	conn := s.conn
-	s.conn = nil
-	s.client = nil
-	s.cmd = nil
 	cancel := s.cancel
 	s.mu.Unlock()
 
-	if conn != nil {
-		if err := conn.Close(); err != nil {
-			cancel()
-			return fmt.Errorf("failed to close client session: %w", err)
-		}
+	var closeErr error
+	if s.stopRuntime != nil {
+		closeErr = s.stopRuntime()
+	} else if conn != nil {
+		closeErr = conn.Close()
 	}
 	cancel()
+	s.healthWorkers.Wait()
+	var exited *exec.ExitError
+	terminated := closeErr != nil && errors.As(closeErr, &exited)
+	if closeErr != nil && !terminated {
+		s.setStatus(StatusError)
+		// An ambiguous close does not prove the local child or remote session
+		// stopped. Retain pointers and the lifetime permit for a retry. A concrete
+		// ExitError is different: it is positive process-termination evidence.
+		return fmt.Errorf("failed to close client session: %w", closeErr)
+	}
 
+	s.mu.Lock()
+	s.conn = nil
+	s.client = nil
+	s.cmd = nil
+	release := s.runtimeRelease
+	s.runtimeRelease = nil
+	s.mu.Unlock()
+	if release != nil {
+		release()
+	}
+	if closeErr != nil {
+		return fmt.Errorf("failed to close client session: %w", closeErr)
+	}
 	return nil
 }
 
@@ -489,6 +540,11 @@ func (s *Server) GetServerInfo() *sdkmcp.Implementation {
 
 // CallTool calls a tool on the MCP server
 func (s *Server) CallTool(ctx context.Context, name string, arguments map[string]any) (*ToolCallResult, error) {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	// Fail-closed exposure policy (e.g. Google Drive read-only): a denied tool is
 	// rejected here even if a caller names it directly, not merely hidden from the
 	// listing (FR 66, 67). This is the single execution chokepoint both

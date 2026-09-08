@@ -11,6 +11,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/progression"
+	"github.com/johnjallday/ori-agent/internal/settingsreset"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/testutil/resetfixture"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -40,6 +41,23 @@ func TestResetLifecycleEmptyGlobalStoreReadoptsLegacyCWDAgents(t *testing.T) {
 		// Only an owned fixture profile tree is removed; no workspace/vault
 		// files or live database handles are involved.
 		requireResetNoError(t, os.RemoveAll(filepath.Join(p.DataDir, "agents")))
+	}
+}
+
+func TestResetLifecycleAgentPolicyPreventsLegacyProfileReadoption(t *testing.T) {
+	f := resetfixture.New(t)
+	p := f.Paths()
+	legacy, err := store.NewFileStore(filepath.Join(p.WorkDir, "agents.json"), types.Settings{})
+	requireResetNoError(t, err)
+	requireResetNoError(t, legacy.CreateAgent("Legacy Fixture", nil))
+
+	reopened, err := createFileStoreWithPolicy(filepath.Join(p.DataDir, "agents.json"), types.Settings{}, true)
+	requireResetNoError(t, err)
+	if _, found := reopened.GetAgent("Legacy Fixture"); found {
+		t.Fatal("reset policy allowed legacy profile adoption")
+	}
+	if _, found := legacy.GetAgent("Legacy Fixture"); !found {
+		t.Fatal("suppression changed retained legacy source")
 	}
 }
 
@@ -84,6 +102,20 @@ func TestResetLifecycleOperatorRootOverridesFreshInstallConsent(t *testing.T) {
 	t.Setenv("WORKSPACE_DIR", f.Paths().Workspaces)
 	if !shouldRunWorkspaceStartupMaintenance(cfg) || resolveWorkspaceRoot(cfg) != f.Paths().Workspaces {
 		t.Fatal("expected operator root to authorize startup adoption even without saved consent")
+	}
+}
+
+func TestResetLifecycleWorkspacePolicyOverridesOperatorAdoption(t *testing.T) {
+	f := resetfixture.New(t)
+	cfg := config.NewManagerWithSecretStore(filepath.Join(f.Paths().DataDir, "settings.json"), f.Secrets())
+	requireResetNoError(t, cfg.Load())
+	t.Setenv("WORKSPACE_DIR", f.Paths().Workspaces)
+	builder := &ServerBuilder{
+		configManager: cfg,
+		resetPolicy:   settingsreset.StartupPolicy{SuppressWorkspaceAdoption: true},
+	}
+	if builder.workspaceStartupMaintenanceApproved() {
+		t.Fatal("reset policy allowed operator environment to re-adopt retained workspaces")
 	}
 }
 
@@ -133,14 +165,39 @@ func TestResetLifecycleStartupProfileSeedRestoresRetainedAppIdentity(t *testing.
 	}
 }
 
+func TestResetLifecycleProfilePolicyPreventsRetainedIdentityBackfill(t *testing.T) {
+	f := resetfixture.NewSeeded(t)
+	db, err := database.Open(t.Context(), &database.Config{Path: filepath.Join(f.Paths().DataDir, "sessions.db"), WALMode: true})
+	requireResetNoError(t, err)
+	t.Cleanup(func() { requireResetNoError(t, db.Close()) })
+	if _, err := db.Exec(`DELETE FROM users WHERE id = ?`, userprofile.LocalUserID); err != nil {
+		t.Fatal(err)
+	}
+	profiles := userprofile.NewSQLiteStore(db)
+	mgr := onboarding.NewManager(filepath.Join(f.Paths().DataDir, "app_state.json"))
+	mgr.SetUserStore(profiles)
+	builder := &ServerBuilder{
+		onboardingMgr: mgr,
+		resetPolicy:   settingsreset.StartupPolicy{SuppressProfileSeed: true},
+	}
+	builder.seedLocalUserProfile(t.Context())
+	if _, err := profiles.Get(t.Context(), userprofile.LocalUserID); err == nil {
+		t.Fatal("reset policy restored retained app identity into cleared records")
+	}
+}
+
 func TestResetLifecycleRegistryDeletionReadoptsExternalMCPUnlessDisabled(t *testing.T) {
 	f := resetfixture.New(t)
 	const external = "[mcp_servers.fixture_external]\ncommand = \"fixture-only-command\"\n"
 	requireResetNoError(t, f.WriteFile("home/.codex/config.toml", []byte(external)))
-	for _, disabled := range []string{"false", "false", "true"} {
-		t.Setenv(disableExternalMCPImportEnv, disabled)
+	for _, testCase := range []struct {
+		disabled    string
+		resetPolicy bool
+		wantImport  bool
+	}{{"false", false, true}, {"false", true, false}, {"true", false, false}} {
+		t.Setenv(disableExternalMCPImportEnv, testCase.disabled)
 		requireResetNoError(t, f.WriteFile("cwd/mcp_registry.json", []byte(`{"servers":[]}`)))
-		builder := &ServerBuilder{}
+		builder := &ServerBuilder{resetPolicy: settingsreset.StartupPolicy{SuppressExternalMCPImport: testCase.resetPolicy}}
 		builder.initializeMCP()
 		cfg, err := builder.mcpConfigManager.LoadGlobalConfig()
 		requireResetNoError(t, err)
@@ -156,7 +213,7 @@ func TestResetLifecycleRegistryDeletionReadoptsExternalMCPUnlessDisabled(t *test
 				t.Fatal("external fixture command was started")
 			}
 		}
-		if found != (disabled == "false") {
+		if found != testCase.wantImport {
 			t.Fatal("external import did not follow the startup import policy")
 		}
 		requireResetNoError(t, os.Remove(filepath.Join(f.Paths().WorkDir, "mcp_registry.json")))

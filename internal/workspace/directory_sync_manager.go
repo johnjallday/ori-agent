@@ -9,6 +9,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/filewatcher"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 )
 
 // DirectorySyncConfig controls how frequently workspace directories are re-synced.
@@ -45,10 +46,11 @@ type directoryWatchTarget struct {
 
 // DirectorySyncManager keeps directory references in sync by watching filesystem changes.
 type DirectorySyncManager struct {
-	store    Store
-	eventBus *EventBus
-	watcher  *filewatcher.Watcher
-	config   DirectorySyncConfig
+	admissionGate *resetstate.WorkGate
+	store         Store
+	eventBus      *EventBus
+	watcher       *filewatcher.Watcher
+	config        DirectorySyncConfig
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -100,8 +102,16 @@ func NewDirectorySyncManager(store Store, eventBus *EventBus, config DirectorySy
 	}, nil
 }
 
+// SetAdmissionGate configures reset admission before Start or other callers.
+func (m *DirectorySyncManager) SetAdmissionGate(gate *resetstate.WorkGate) { m.admissionGate = gate }
+
 // Start starts filesystem watching and periodic sync.
 func (m *DirectorySyncManager) Start() {
+	release, err := m.admissionGate.Enter()
+	if err != nil {
+		return
+	}
+	defer release()
 	m.startMu.Lock()
 	if m.started {
 		m.startMu.Unlock()
@@ -169,6 +179,11 @@ func (m *DirectorySyncManager) runEventLoop() {
 }
 
 func (m *DirectorySyncManager) handleWatchEvent(evt filewatcher.WatchEvent) {
+	release, err := m.admissionGate.Enter()
+	if err != nil {
+		return
+	}
+	defer release()
 	if m.eventBus == nil {
 		return
 	}
@@ -233,6 +248,11 @@ func (m *DirectorySyncManager) WatchWorkspace(workspaceID string) (DirectorySync
 }
 
 func (m *DirectorySyncManager) watchWorkspace(workspaceID string, touchAccess bool) (DirectorySyncWatchResult, error) {
+	release, err := m.admissionGate.Enter()
+	if err != nil {
+		return DirectorySyncWatchResult{WorkspaceID: workspaceID}, err
+	}
+	defer release()
 	result := DirectorySyncWatchResult{WorkspaceID: workspaceID}
 	if strings.TrimSpace(workspaceID) == "" {
 		return result, nil

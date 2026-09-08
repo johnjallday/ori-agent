@@ -1,9 +1,17 @@
 # Settings reset: scope and lifecycle findings
 
-Status: findings-first baseline and chosen contract for `settings-reset-ux`.
-**This document specifies the implementation; it does not claim the reset
-behavior is shipped.** Shared payload types live in
-`internal/settingsreset/types.go`; product wiring follows in checklist group 2.
+Status: active implementation branch for `settings-reset-ux`. Replay Setup,
+Reset Getting Started, and Reset Selected Data now use distinct verified paths.
+Selective destructive reset is wired to the production process lease, shared
+admission gate, bounded drain, staged journal, full-process relaunch, pre-store
+application, startup suppression policy, durable status, and a minimal recovery
+host. The legacy live-deletion handler is removed. **Start Fresh remains disabled**
+until every additional owner in this matrix and retained-vault attachment are
+implemented; selecting every existing category never implies it.
+
+> The numbered “in progress” sections below are retained implementation notes.
+> Their milestone-specific delivery limits are superseded by the current status
+> above and the final validation boundary at the end of this document.
 
 ## Evidence and isolation
 
@@ -24,8 +32,10 @@ Characterized so far:
 - Real config/onboarding/agent/workspace/SQLite seeds reopen at the same paths.
 - A paused real `config.Manager.Save` recreates deleted `settings.json` when
   released. Deleting the file does not invalidate the manager.
-- Real settings-only reset rejects missing confirmation, deletes the confirmed
-  fixture file, and preserves unselected files plus every retained sentinel.
+- Historical settings-only reset rejected missing confirmation but deleted a
+  live fixture file. The real HTTP fixture now asserts `409 preview_required`
+  and preservation. Original confinement cases now exercise the real planner;
+  there is no test-only copy of the old deletion implementation.
 - Fixture writes reject traversal, absolute paths and escaping symlinks; HTTP
   cannot attach to an inherited browser URL, proxy, redirect destination, or
   reuse its listener after close.
@@ -36,7 +46,7 @@ Characterized so far:
   the same process and directory with real SQLite/cache and owned loopback HTTP.
   Both old DB handles remain open after stop until explicit test cleanup.
   Only runtime construction is injected through a package-private factory;
-  production still uses `server.New` + `srv.HTTPServer`. Native credential
+  production now uses `server.NewWithResetLease` + `srv.HTTPServer`. Native credential
   discovery, the broad builder and native menubar UI are not exercised.
 - EventBus shutdown returns while an already-dispatched callback is paused;
   releasing it afterward still writes. Server shutdown leaves the actual usage
@@ -50,8 +60,9 @@ Characterized so far:
 - Clearing the MCP registry re-imports synthetic Codex config on every enabled
   startup; the existing explicit import-disable switch prevents it. Imported
   commands stay stopped, and the external config stays byte-identical.
-- Running real migrations from a seeded v11 schema drops DB-only vault content
-  and its empty-path catalog row before Open returns. Conversely, detaching a
+- Initial characterization showed that normal Open migrated a seeded v11 schema
+  and dropped DB-only vault content before returning. The 2.4 startup guard now
+  refuses that Open without changing database/WAL bytes (see below). Detaching a
   current vault catalog row preserves its package byte-for-byte; a fresh store
   does not auto-attach it. Explicit test-only catalog reinsertion permits
   decryption with the generated password. This is not a shipped attachment API.
@@ -143,7 +154,9 @@ boundary, never while a handle or writer is live.
 
 ### Shared database domains
 
-`database.Open` always migrates. The migration inventory includes:
+`database.Open` migrates after its retained-vault safety guard allows startup;
+preview must still use the read-only inspector, not that constructor. The
+migration inventory includes:
 
 - `users` (canonical local profile, preferences and HQ designation), `workspaces`
   (rich workspace JSON including tasks, schedules and setup/integration state).
@@ -180,9 +193,10 @@ columns and remove empty-path catalog rows. They do not first export DB-only
 content. The normal vault list filters missing/legacy rows. Therefore reset
 preflight must inspect before `database.Open`/migration can destroy that evidence;
 a legacy content-bearing database must block with a preserve/export/recovery
-instruction. `internal/database/reset_legacy_test.go` characterizes the actual
-v11 → current migration on an explicit temporary SQLite path (without config,
-provider or credential initialization).
+instruction. `internal/database/reset_legacy_test.go` originally reproduced this
+loss and now asserts the fixed pre-migration refusal using the same real v11
+schema, including encryption material present only in a live WAL. Empty legacy
+layouts still upgrade. No config/provider/credential initialization is involved.
 
 ### Secret ownership hazard
 
@@ -192,10 +206,13 @@ not its canonical absolute path. Two roots using this call can share native
 accounts. Fallback storage, by contrast, resolves through `ORI_DATA_DIR`.
 Do not claim absolute-root isolation merely because filesystem paths differ.
 A reset must use the attached namespace and establish ownership of legacy
-accounts; shared/ambiguous legacy native credentials are a preflight blocker
-until a safe migration/ownership policy is settled. Never enumerate/delete all
-`ori-agent` accounts. Backend `Status()` currently advertises availability based
-on discovery, not a verified unlocked read; failures cannot mean “absent.”
+accounts. Credential preflight now rejects a relative config/namespace before
+calling the backend, so today's production `settings.json` namespace remains an
+explicit `credential_namespace_ambiguous` blocker until a safe migration policy
+is implemented. Never enumerate/delete all `ori-agent` accounts. For an
+absolute, explicitly attached owner, preflight checks only the four exact
+provider/search slots and maps locked, unavailable, read-only and failed reads
+to blockers; failures never mean “absent.”
 
 ## Browser inventory (explicit allowlist, never origin-wide clear)
 
@@ -240,8 +257,9 @@ localStorage cleanup alone cannot stop them writing old state back.
   after destructive removal is too late; joining periodic writers is separate
   from closing a stop channel. Tests must pin the actual interleavings.
 - Standalone shutdown calls background shutdown *before* HTTP shutdown. Menubar
-  calls HTTP shutdown *before* background shutdown, ignores the HTTP error,
-  clears pointers, and stays in the same process. Process exit cannot justify
+  calls HTTP shutdown *before* background shutdown and stays in the same process.
+  It previously ignored HTTP shutdown errors and discarded the runtime; the
+  host-admission slice now retains it on failure and requires Stop retry/Quit. Process exit cannot justify
   the menubar sequence's persistence safety. `internal/menubar/reset_lifecycle_test.go`
   exercises real start/stop over two instances with injected safe construction.
   The native menubar UI and full production builder remain unverified.
@@ -256,6 +274,10 @@ localStorage cleanup alone cannot stop them writing old state back.
 - Progression engine backfill is one-time, but builder separately completes the
   first-day quest whenever an old first assignment is complete. The bypass of
   intentional Getting Started reset is pinned in `reset_startup_test.go`.
+- The menubar C/D split above is now corrected: its shell honors ORI_DATA_DIR,
+  canonicalizes the physical root and publishes it before constructing settings.
+  Both supported launchers now acquire process ownership before constructors (see
+  the 2.4 ownership slice below); this alone does not enable destructive reset.
 - `cmd/server` loads dotenv before directory activation and expands PATH. A
   sanitized parent environment is not proof an arbitrary production executable
   will remain isolated. Dedicated full-server tests must control those seams.
@@ -266,13 +288,14 @@ localStorage cleanup alone cannot stop them writing old state back.
 | --- | --- | --- |
 | Task/step executors | Stop closes channel, cancels tracked jobs and waits; cancellation still writes final task status/results. Start also reconciles old assigned/in-progress tasks | Block confirmation while active work exists; stop new dispatch before staging. Finalization must finish before the apply boundary, never wipe underneath it |
 | Task scheduler | Immediate initial poll; Stop closes channel and waits | Disable new dispatch while pending; restart must not load retained schedules |
-| Daily Brief scheduler | Immediate Tick; Stop joins its loop, but Tick uses a background context | No bounded live replacement claim; process relaunch is mandatory |
+| Daily Brief scheduler | Immediate Tick; Stop joins its loop, but Tick uses a background context. Service, HTTP handoff, scheduler ticks and revision-ready callback now share host admission | Admission covers generation/final persistence without cancelling it; process relaunch remains mandatory because this is not complete host draining |
+| Workspace Runs / automatic Plans | HTTP and Plan launchers detach work; final-approval Runs retain an environment after ExecuteRun returns | Child handoff is now registered before response/return, with permits through final status/Plan writes and approval-environment teardown. Persisted in-progress/awaiting state must still be inspected after relaunch |
 | Directory sync / session watcher | Directory sync joins its loops, then closes watcher; watcher owns additional event/debounce goroutines | Explicit teardown required; no filesystem removal while watched |
 | Trigger service | Start restores pending fires from sidecars; Close explicitly lets in-flight dispatches finish independently | Retained sidecars stay inert; process boundary, not Close alone, prevents late writes |
 | EventBus / location | Subscribers run in separate goroutines; shutdown/cancel does not join every callback/detection | Receipt acceptance is not proof of quiescence; no live destructive apply |
 | Chat / CLI | Chat derives timeout from request context; CLI tracks per-job cancellation but has no global join in Server.Shutdown | Gate new work and refuse active/unowned child processes; never equate browser disconnect with completion |
 | MCP registry | StopAll exists but Server.Shutdown does not call it | Running external services must be stopped and ownership verified, or block staging; do not assume parent exit kills arbitrary child processes |
-| Menubar shell settings | `cmd/menubar` reads a separate onboarding manager before Controller construction; chooses C from HOME, independently of ORI_DATA_DIR | Apply must precede shell manager construction too. Same-process server restart cannot qualify; inconsistent C/D must converge explicitly or block |
+| Menubar shell settings | A separate onboarding manager precedes Controller construction. C/D now converge through ORI_DATA_DIR and shell mutations share the host admission gate | Apply must still precede shell manager construction. Same-process restart cannot qualify; changed C/D or recovery evidence blocks construction |
 
 ## Chosen lifecycle (1.4)
 
@@ -384,7 +407,8 @@ facts only.
   confirmation. A retry updates that operation/revision and cannot repeat
   completed/preserved categories. Unknown/interrupted categories must first
   reconcile postconditions; never blindly infer whether their deletion ran.
-- States remain distinct: `awaiting_restart`, `applying`, `verifying`,
+- States remain distinct: `preparing` (durable admission/draining),
+  `awaiting_restart`, `applying`, `verifying`,
   `completed`, `partial_failure`, `blocked`, `interrupted`. Each category has
   `pending`, `completed`, `failed`, `skipped`, `preserved` or `unknown` outcome,
   named verification checks, safe errors and an explicit retryability flag.
@@ -461,14 +485,407 @@ facts only.
   explicit preflight blocker with manual recovery. A default path is not proof
   of exclusive ownership of shared HOME usage or legacy stores.
 
+## Read-only preview implementation (2.3)
+
+`GET /api/reset/preview?intent=selected_data&category=agents&category=app_records`
+accepts repeated `category` parameters. Legacy boolean query options normalize
+only to their original families; mixed forms, duplicate/unknown keys, missing
+intent on the new form, empty selections, arbitrary paths and oversized queries
+are rejected before reading owners. Start Fresh is not enabled by this slice.
+Responses are `Cache-Control: no-store` and inspection has a five-second context.
+
+- The builder supplies its real config, agent, setup, session DB/upload, folder,
+  allowlist and vault owners after construction. Narrow read-only location
+  methods expose the same paths those owners use. Split CWD/data roots produce
+  actual locations and confinement blockers, not substituted default paths.
+- Database inspection uses a read transaction on the existing connection: no
+  normal constructor, migration, checkpoint, key read, vault-file open, provider
+  request or external auth discovery. All 44 classified record tables are
+  counted; known FTS infrastructure is explicit. Unknown domains, unsupported
+  schemas, legacy vault evidence and uninspectable catalog rows block. The
+  v11 regression proves inspection and the new startup guard both preserve
+  legacy content instead of letting normal Open erase the evidence.
+- Raw catalog paths are resolved by the vault owner, including whole packages
+  outside the current creation root. Protected overlaps, hard links, symlink
+  escapes/dangling links and invalid path encodings block. App-record preview
+  also lists collateral root-consent/import-permission changes and their actual
+  files. Upload-root counts explicitly include preserved files and are bounded;
+  linked/uninspectable contents are unknown, never reported as zero.
+- Confirmation references are server-held, defensively copied, bounded to 32
+  previews/10 minutes and 64 KiB per plan. The scope digest binds resolved
+  targets, protected roots, database location/schema and readiness. Ordinary
+  record-count changes do not freeze the dataset, but changed owners, schema,
+  consent, overlaps or blockers require a new review. This validation is **not
+  operation admission** and does not yet consume a token or persist a receipt.
+- Saved provider/search key preflight is scoped to `openai_api_key`,
+  `anthropic_api_key`, `gemini_api_key` and `brave_api_key` through the attached
+  config owner. It reports only a distinct-slot count, never values, and treats
+  locked/unavailable/read-only/failed inspection as unknown plus a blocker.
+  Relative shared namespaces block before backend access. `vault_dek`, unrelated
+  keys/namespaces and environment/CLI credentials are explicitly retained;
+  external provider environment presence is disclosed only as booleans/counts.
+- Production readiness remains `lifecycle_unavailable` until the real process
+  lease/coordinator is attached. Unit fixtures may supply a read-only readiness
+  callback; there is no test fault endpoint or mock-backed production apply.
+
+Preview planner/API/builder/legacy-inspection checks pass normally and under
+`-race`. Tests compare application file contents before/after preview (excluding
+SQLite SHM read-lock coordination only), verify real mixed known/unknown counts,
+legacy query normalization, cache bounds/expiry and scope changes. Ratcheted
+lint is clean; gosec reports zero findings in settingsreset and the new database
+inspection file (the database package's old G301 in `db.go` is unchanged).
+The old live-deletion POST path has now been removed. Preview/admission safety
+still cannot be used as evidence that destructive application or post-relaunch
+verification works.
+
+## Startup/legacy error safeguards (2.4, in progress)
+
+`database.Open` now probes existing files using SQLite **mode=ro before opening
+a writable connection**, then rechecks before storage pragmas or migrations.
+This covers callers outside the server builder too. Fixed metadata and EXISTS
+queries detect legacy content, non-empty key columns and unclassified vault
+columns without loading secret values. Refusal returns
+`ErrRetainedVaultMigration` with preserve/export guidance. The read-only probe
+matters: closing a refused *writable* connection could otherwise implicitly
+checkpoint a crash-left WAL. Tests prove repeated refusal preserves database
+bytes, live-WAL keys and an offline DB+WAL copy (including URI-reserved filename
+characters), while empty v11 layouts still upgrade. Future-schema errors no
+longer suggest blindly resetting the database. This is not an atomic ownership
+lease against other writers; process-lifetime ownership remains required for
+staged reset.
+
+The product no longer contains the live file-deletion/cache-clear helpers.
+Legacy requests now assert review refusal and unchanged selected/cached data,
+not success from a copied historical algorithm. Original root, sibling, traversal
+and symlink cases now exercise the real planner. Actual mixed category/owner
+failure assertions remain required on pre-start application before delivery;
+request-refusal and result-projection tests do not prove staged application.
+
+### Process ownership and metadata boundary (2.4, in progress)
+
+`internal/resetstate` is a small pre-store package with no config, credential,
+SQLite, provider, or service constructors. Both `cmd/server` and `cmd/menubar`
+call `BeforeStores` before persistence initialization; standalone does so before
+port inspection/takeover too. Menubar respects explicit ORI_DATA_DIR and gives
+its shell settings manager and server the same canonical physical root.
+
+- Darwin/Linux use nonblocking exclusive `flock` on the stable
+  `D/.ori-reset/process.lock` inode. Alias paths contend for the same owner;
+  another installation remains independent. The lock file is never unlinked.
+  Exclusive file creation avoids a reproduced concurrent O_CREAT/APFS race.
+- The lease is pinned in process-owned storage, including through garbage
+  collection. `Close` refuses a pinned lease. Neither a shutdown return nor
+  menubar Stop/Start releases it: only process exit does. This is necessary
+  while known shutdown paths still leave cached writers and SQLite handles alive.
+- Root-relative `os.Root` operations, physical-identity rechecks, effective-owner
+  checks, private modes (0700 directory/0600 files), regular-file/single-link
+  checks and symlink refusal protect metadata. Replaced ownership directories or
+  lock inodes fail closed. This is a cooperating-process boundary, not an OS
+  sandbox or proof that legacy instances/untracked children stopped.
+- Only `operation.json` and independent `policy.json` can be read/replaced, with
+  a 64 KiB bound per record. Missing and empty files differ. Writes use exclusive
+  temporary files, file sync, rename, then directory sync. Parent-directory sync
+  also covers a creator losing the acquisition race. Failure after rename is
+  explicitly uncertain, not rollback; orphan temp files remain recovery evidence.
+  Payload schema validation and operation admission still belong to the pending
+  coordinator, not this filesystem layer.
+- Until that coordinator can interpret/apply/verify a journal, **any** private
+  state besides the lock prevents normal constructors. Corrupt, empty, future,
+  policy-only and orphan records are never silently ignored or deleted. Current
+  recovery is a startup refusal with preserve/compatible-version guidance, not
+  a shipped operation-status UI or a claimed successful reset.
+- Other platforms, including Windows, currently leave destructive reset
+  unsupported. Ordinary startup is allowed only without prior reset metadata;
+  they refuse an existing reset directory rather than ignoring pending work or
+  import policy. Native Windows locking/ACLs/durable replacement remain work.
+
+Owned subprocess tests run the real standalone/menubar `main` refusal paths.
+Private construction seams fail safely if ordering regresses, before any port
+inspection, shell manager, broad builder, systray, browser or native credential
+command. A separate pure-package child holds ownership through GC and an early
+Close attempt, exits without deferred unlock, and allows reacquisition only
+then. The real controller's two-stop/start SQLite fixture also proves its outer
+lease remains held while those old handles remain writable.
+
+These checks pass under `-race` on macOS/arm64, including repeated concurrent
+acquisition and process-exit tests. Darwin/Linux code and unsupported Windows
+code compile; Linux/Windows native execution has not been performed. Ratcheted
+lint reports zero issues; gosec reports zero in resetstate and seven pre-existing
+browser/AppleScript subprocess findings in unchanged launcher functions. The
+menubar race-test linker emits an LC_DYSYMTAB warning but the tests pass. No real
+credential backend, external authentication or native menubar UI was exercised.
+
+The planner now uses the metadata package's reserved directory constant, but
+production still reports `lifecycle_unavailable`: a lease alone is not safe
+admission, writer draining, pre-start application or restart verification. The
+old POST is now refused; the replay regression uses the admission coordinator
+and owned HTTP rather than the historical deletion helpers.
+
+### Durable admission and recovery API (2.4 / 2.6, in progress)
+
+`settingsreset.Coordinator.Stage` serializes on the installation lease, including
+across separately constructed coordinators. It validates the held preview and
+its installation, budgets the complete journal envelope before fencing, calls
+an atomic `Lifecycle.TryFence`, and revalidates scope before draining. Successful
+fencing is irreversible within the running process. It records `preparing`
+before `Drain`, then durably records `awaiting_restart` or a safe `blocked` result.
+No category is applied in this process and every category/check remains pending.
+
+- A preview allocates **separate** `id` and `operation_id` values before POST, so
+  a lost POST response can be recovered with a read-only operation lookup.
+- A repeated request/preview pair returns the same durable operation/revision
+  without preview expiry checks, writer draining or record rewriting. Reusing
+  either for another pair conflicts and returns the active operation. Only one
+  operation is currently supported: result retirement and explicit unresolved-
+  category retry remain unimplemented, never an implicit second wipe.
+- The private journal checks schema/version, canonical encoding, selection,
+  target kinds/confinement, installation identity and coherent admission states.
+  Duplicate/unknown/case-variant fields, unsupported states, arbitrary target
+  kinds, truncation and even manual reformatting fail closed. Recovered targets
+  are evidence only: pre-start apply must independently resolve owners before
+  treating any path as executable.
+- Panics after fencing and persistence uncertainty latch admission closed across
+  coordinator reconstruction. A known receipt disappearing cannot become a fresh
+  operation in the same process. A prior process's `preparing` state is projected
+  as `interrupted` without rewriting/retrying it. Raw drain/provider errors are
+  never persisted. A bounded failure message explains recovery instead.
+- `POST /api/reset` requires JSON, XMLHttpRequest, exact RESET and only the three
+  execute fields. Duplicate/unknown/case-variant/mixed fields, null booleans,
+  trailing data and bodies exceeding 1 KiB are rejected. Legacy booleans receive
+  `409 preview_required`; missing runtime lifecycle receives 503. The handler
+  uses a bounded independent admission context after valid confirmation, so
+  closing the browser is not cancellation or permission to unfreeze work.
+- `GET /api/reset/operations/{id}` is registered and read-only. Both APIs use
+  no-store responses. 202 means staged acceptance, **not** success. Compatibility
+  fields report only named verified category checks; a restart, partial result,
+  unverified check or contradictory completion state cannot imply success.
+
+Owned HTTP tests now send a real preview, two accepted POSTs and a status GET,
+assert one drain/revision and unchanged selected/retained bytes. Other tests
+cover concurrent coordinators, busy work arriving after preview, material scope
+changes during fencing, status while drain is paused, drain failure, panic,
+failed persistence, missing/corrupt/future receipts and journal-envelope overflow.
+The original replay regression is green on this real admitted path, not made
+vacuous by only rejecting legacy requests. Old live-deletion expectations are
+replaced with actual compatibility-preservation behavior; original confinement
+cases are ported to the real planner, with no copied historical deletion helper.
+
+Full settingsreset/settingshttp/resetstate tests pass under `-race`; scoped
+server route/preview/lifecycle tests, nine transitional JS tests and ratcheted
+lint pass. Gosec reports no findings in new reset code; two existing G301 findings
+remain in unchanged `settingshttp/handlers.go`. Route golden coverage now includes
+preview and operation recovery.
+
+**Delivery limit:** no production `Lifecycle` is attached yet. The real builder
+still reports lifecycle_unavailable; startup still refuses all receipt/policy/
+orphan evidence before constructors. There is no pre-start category applier,
+relaunch recovery HTTP host, import-suppression policy consumer or retry engine.
+The current browser's legacy request therefore receives preview_required, not a
+working reset. No full-server/native/browser reset completion is claimed.
+
+### Cooperating runtime admission (2.4, in progress)
+
+`resetstate.WorkGate` now arbitrates instrumented work against an irreversible
+in-process fence under one mutex. Admission refuses active work **without
+cancelling it or partially fencing the runtime**. Permits are idempotently
+released after final owner writes, not merely after a provider returns. There
+is no Unfence method. An unwired gate is explicitly unknown, not evidence of an
+idle runtime; existing non-reset callers retain ordinary behavior.
+
+The production builder shares one gate across this initial set of entry points:
+
+| Covered entry | Permit boundary |
+| --- | --- |
+| Build / Server.Start | Synchronous construction and startup, including task boot reconciliation; this does not account for every service started there |
+| Ordinary HTTP | Through handler return, including GET handlers, which are not assumed read-only; detached work needs its own permit before the response |
+| Task polling/execution | Before owner discovery and claims; child registration before dispatch; through final status, result storage and event publication |
+| Step polling/workflows | Before dependency/status changes and claims; through task results and workflow completion rollup |
+| Workspace orchestrator | Mission planning, synchronous task execution, sequential execution and its own mission-to-goroutine handoff |
+| Task scheduler | Before workspace/schedule/wake inspection and changes; mission/reflection child permits registered before the poll returns |
+| CLI executor and CLI HTTP create | Before adapter/provider discovery; through usage/event persistence; HTTP registers detached work before acknowledging 202 |
+| EventBus publication/subscribers | Before history/filter processing; each callback registers before Publish returns and retains admission through its save/panic recovery |
+
+The reset APIs use a separate, explicitly registered control mux inside the
+existing security/recovery/CORS chain. They do not count themselves as ordinary
+work, and read-only operation recovery/replay stays reachable after fencing.
+This is not a broad `/api/reset*` path exemption into the main router. Fenced
+ordinary requests return no-store 503 reset_pending, including page requests.
+A dedicated recovery page must exist before enabling this in the product.
+
+Tests exercise real owned HTTP preview → concurrent paused config save → busy
+refusal → normal save completion → accepted admission → fenced ordinary methods
+→ GET recovery and replay. They assert one drain, unchanged selected setup bytes
+and retained sentinels. Real temporary file-store tests pause task, step and
+orchestrator final writes, prove admission stays busy without cancelling their
+contexts, and reopen the same files to verify normal completion. Manual task
+HTTP, first-open, assist/review reruns, parent sequences and legacy scheduler-node
+triggers register children before acknowledgment and retain them through final
+workspace saves, including failed saves. CLI HTTP similarly uses a fake
+provider/adapter and an empty executable PATH. Event tests prove that an
+already-dispatched save remains tracked even after the existing non-joining
+EventBus.Shutdown returns. Failed task claims release context, running slot and
+permit. Gate entry/fence races, duplicate release, cancellation and panic cleanup
+are covered.
+
+Daily Brief generation now enters before claims and holds through revision,
+current-pointer, notification callback and final claim status; HTTP registers its
+detached child before 202, and each scheduler tick enters before owner reads.
+Workspace Run HTTP similarly transfers before Created, and run execution owns
+environment preparation, runner, artifacts, validation and final status. A
+final-approval run retains its permit after ExecuteRun returns; approve, reject
+or stop releases it only after environment teardown. Automatic Plan launch does
+the same for its loop, synchronous Task/Run dispatches and final Plan status.
+CostTracker now transfers each TrackUsage permit to the exact asynchronous
+snapshot that includes it; coalesced signals retain every permit, Close joins the
+writer, and closed/fenced trackers reject before changing memory. Session cache
+flush and retention-cleanup ticks also enter the host gate; HybridStore Close
+joins both loops before its final flush and database close. Location detection,
+manual/zone mutation and emitted callbacks are admitted before OS detection or
+state changes, callbacks receive child permits before launch, and Stop joins the
+detection and callback workers. Directory-sync polling and fsnotify events enter
+before workspace reads, OS watch changes or EventBus publication. Plugin update
+checks enter before registry/source/Git access, Stop joins active checks without
+cancelling them, and fenced invalidation cannot change its cache. Trigger
+ownership now spans webhook acknowledgement, an open fixed debounce window,
+durable pending-fire merge/claim, synchronous mission/task/domain dispatch and
+final fire-history persistence. Claim uncertainty retains its permit instead of
+stranding unowned durable work. Trigger file-watch events and validation enter
+before store/stat/watch changes. File Janitor domain handoff acquires its scan
+child before trigger dispatch returns; coalesced follow-ups retain that ownership,
+scheduler callbacks enter first, and Stop joins scans. Home Assistant task
+confirmation transfers a child permit before acknowledgement. Gateway channels
+are registered with a lifetime permit before launch; inbound/outbound dispatch
+enters the same gate, and the console channel no longer hides its input loop in
+an unowned second goroutine. Global MCP servers and workspace-surface service
+processes acquire lifetime permits before construction; calls and asynchronous
+connect starts are admitted before launch, health/status work remains covered,
+and only a verified successful stop (or concrete local ExitError) releases
+ownership. Ambiguous stops retain retryable process evidence and the permit.
+Lifetime owners are now counted separately from finite operations: an idle
+service does not masquerade as active user work, so an atomic fence can reject
+new calls before a future `Lifecycle.Drain` stops it. A finite admitted call
+still refuses fencing without cancellation, and a failed/ambiguous stop leaves
+an owner count that must fail drain. This primitive is not itself that lifecycle.
+The Plan lifecycle service now gates creation, generation, retention, editing,
+review decisions, approvals and revisions before model/store access; hosted
+materialization/execution remains covered by ordinary HTTP admission or the
+Automatic Plan parent permit. The legacy workspace manual-task route, Calendar
+Meeting Prep and review jobs transfer permits before acknowledgement/run-ID
+return and retain them through final task/note/review persistence; request
+cancellation no longer erases accepted work. Delayed chat shutdown and menubar
+status callbacks are registered before launch. Failed final writes are not
+projected as persisted success. These in-memory
+permits do not recover ownership after process death: durable in-progress and
+awaiting-approval rows remain mandatory pre-start recovery evidence.
+
+**This is still partial instrumentation, not a production Lifecycle.** Supported
+hosts share the lease's gate across runtimes and shell writers (see below).
+Direct Plan execution helper use outside hosted HTTP/Automatic Plan wiring,
+remaining external children and any newly discovered callback writers still
+need their own admission
+and drain/ownership coverage. A callback
+that spawns detached work must transfer a permit again; tracking its parent is
+not enough. Existing shutdown/SQLite/child-ownership findings are not overturned
+by an idle gate. The builder still supplies no CheckLifecycle/coordinator, and
+BeforeStores still refuses all recovery evidence before constructors. Pre-start
+apply, recovery serving after relaunch, import policy and verification remain
+unimplemented. No production, native-child or browser reset completion is claimed.
+
+Validation on macOS/arm64: repeated focused race tests pass; complete
+`-race -short` workspace, CLI, CLI HTTP, settingsreset, settingshttp, resetstate,
+orchestration HTTP, Daily Brief/HTTP, Workspace Run and Workspace Plan,
+LLM/CostTracker, session, location, directory-sync, trigger, File Janitor,
+gateway, Home action, MCP/workspace-surface and plugin-update suites pass.
+Scoped server
+admission/host/preview/lifecycle/route-golden checks and both launcher builds
+pass. Ratcheted lint reports zero issues. The latest scoped
+LLM/session/location/plugin/workspace/trigger/File Janitor/Plan/Run/orchestration/
+Daily Brief/server gosec reports 113 existing
+findings and zero overlap with branch-added/changed Go lines. Full delivery gates
+remain pending.
+
+### Host-lifetime gate and constructor boundary (2.4, in progress)
+
+The process `Lease` now owns the `WorkGate`; neither a new server builder nor a
+new menubar Controller can replace that gate when using the same lease. Both
+launchers forward the lease explicitly. Alternate callers retain their existing
+constructors, but receive no destructive reset capability.
+
+- `Lease.EnterRuntime` acquires construction admission before touching owners,
+  checks clean recovery metadata, physical CWD/data-root identity and in-memory
+  uncertainty/expected-receipt latches, and pins ownership before returning.
+  Root mismatch has explicit relaunch/configuration guidance, not an instruction
+  to delete state. Releasing a construction permit never releases the lease.
+- Builder and background startup use that boundary. A failed/panicking hosted
+  build latches uncertainty because earlier phases may already have writers or
+  children. Newly discovered root/recovery errors at background startup block
+  ordinary HTTP too. An already-fenced late Start does **not** incorrectly turn
+  a valid pending receipt into uncertain admission.
+- Lease uncertainty now rejects new instrumented work even if fencing itself
+  panicked. Existing permits remain counted and contexts are not cancelled;
+  neither this emergency closure nor an idle gate proves complete draining.
+- Menubar transfers its construction permit to the constructor goroutine,
+  rather than releasing it when the Start caller times out. A timeout cannot
+  admit another build or pretend Stop joined the constructor. Start/Stop
+  generations prevent old waiters/serve errors overwriting a newer lifecycle.
+- A failed HTTP shutdown retains the runtime, reports the failure, and leaves
+  Stop retry available. It does not cancel background work or advertise Stopped
+  while requests remain active. Ports/runtime pointers are read under the
+  controller lock. Existing final SQLite/background close gaps remain separate.
+- The separate shell settings manager shares the lease gate. Menu start holds
+  root/host admission **before** port preflight/takeover, and autostart/port
+  changes hold a permit across their native action/dialog and final save.
+  Setter guards prevent a retained shell cache writing after the fence. Quit
+  and Stop remain available; neither clears reset admission.
+
+Owned subprocess tests cover actual standalone lease handoff, repeated runtime
+construction, pinned GC/Close/exit ownership, real menubar Stop/Start with old
+SQLite writes still counted, initialization timeout, HTTP shutdown timeout and
+retry, second-controller fence refusal and shell persistence preservation.
+Constructor/preflight/dialog seams make regressions fail safely before native
+credentials, provider discovery, port takeover, AppleScript or systray. The
+server tests use an instance-local first-phase constructor refusal, not a broad
+builder or production fault endpoint. Menubar menu and constructor guards are
+exercised headlessly; native UI/LaunchAgent/Keychain behavior is unverified.
+
+This closes host-lifetime sharing, **not** the production reset gate. Remaining
+writer/child coverage, joined draining, pre-start apply, relaunch recovery,
+verification and the unresolved shared-namespace migration policy still block
+CheckLifecycle/coordinator wiring.
+All receipt/policy/orphan evidence continues to block normal startup; there is
+still no applied-reset or browser completion claim.
+
+Validation: repeated focused race checks plus full `-race -short` resetstate,
+settingsreset, settingshttp, menubar and both launcher suites pass on
+macOS/arm64. Scoped server host/admission/preview/lifecycle/route-golden tests,
+both launcher builds and ratcheted lint pass (zero lint issues). Scoped host
+security scanning reports 14 existing findings, none overlapping added/changed
+Go lines; resetstate has zero findings. Linux/amd64 and Windows/amd64 resetstate
+cross-compilation passes, not native execution. The existing macOS menubar
+LC_DYSYMTAB linker warning remains; no native UI or credential validation was run.
+
 ## Validation limits / next implementation boundary (1.7)
 
 The above lifecycle is chosen because tests falsified the simpler live-replace
-and same-process-restart assumptions. The new types have serialization tests,
-not a working coordinator yet. No reset API has been rewired and no native
-restart or credential cleanup has run. Full production-builder shutdown and
-native macOS menubar/Keychain journeys, Windows/Linux locking/backends, browser
-accessibility/recovery, and applied-reset postconditions remain group 2–5 gates.
+and same-process-restart assumptions. Preview and startup guards are implemented,
+and supported launchers now hold a process-lifetime lease. Admission/status and
+its journal are implemented. Exact-key credential inspection/deletion now exists
+for absolute, explicitly attached owners and preserves `vault_dek`, unrelated
+slots and external sources; fake-store tests cover locked and partial failure.
+Production selective lifecycle wiring, canonical namespace migration, scoped
+category application, unresolved-category retry, and same-operation verification
+are implemented. A test-owned same-sandbox demo staged app-record reset through
+the production HTTP lifecycle, fully stopped the owned server, relaunched through
+`BeforeStores`, and read a completed durable result. The demo forced the encrypted
+fallback secret store; it did not invoke Keychain or an external account. Headless
+Playwright screenshot capture was attempted but the harness denied both Chromium's
+Mach rendezvous and WebKit launch, so screenshot evidence remains pending.
+
+Still pending are Start Fresh's supplemental owner inventory/application,
+retained-vault attachment, full production-builder and native macOS
+menubar/Keychain journeys, Windows/Linux native locking/backend execution, and
+complete browser/e2e/accessibility gates. Native and external authentication
+behavior is not represented as validated.
 
 Group 1 validation passed: full settingshttp/settingsreset/resetfixture/database/
 vault package tests; scoped server/menubar/database/vault lifecycle tests under

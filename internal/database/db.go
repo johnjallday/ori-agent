@@ -85,6 +85,14 @@ func Open(ctx context.Context, cfg *Config) (*DB, error) {
 		dsn = path
 	}
 
+	// Probe existing files read-only first: even closing a refused writable
+	// connection could implicitly checkpoint a WAL left by an exited process.
+	if !cfg.InMemory {
+		if err := guardRetainedVaultFile(ctx, path); err != nil {
+			return nil, err
+		}
+	}
+
 	// Open the database
 	sqlDB, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -99,6 +107,14 @@ func Open(ctx context.Context, cfg *Config) (*DB, error) {
 	// Configure connection pool
 	sqlDB.SetMaxOpenConns(1) // SQLite works best with a single writer
 	sqlDB.SetMaxIdleConns(1)
+
+	// Inspect raw legacy vault evidence before any migration (or WAL-mode
+	// change) can erase it. Reset preview runs too late if startup drops the
+	// only copy first. On refusal, close without a checkpoint or migration.
+	if err := guardRetainedVaultMigration(ctx, sqlDB); err != nil {
+		_ = sqlDB.Close()
+		return nil, err
+	}
 
 	// Apply pragmas for performance
 	if err := db.applyPragmas(ctx, cfg); err != nil {

@@ -56,6 +56,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/privateservices"
 	"github.com/johnjallday/ori-agent/internal/progression"
 	"github.com/johnjallday/ori-agent/internal/progressionhttp"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
 	"github.com/johnjallday/ori-agent/internal/runtimecapability"
 	"github.com/johnjallday/ori-agent/internal/runtimecapabilityhttp"
@@ -63,6 +64,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/sessionfiles"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
+	"github.com/johnjallday/ori-agent/internal/settingsreset"
 	"github.com/johnjallday/ori-agent/internal/setupwizard"
 	"github.com/johnjallday/ori-agent/internal/setupwizardhttp"
 	"github.com/johnjallday/ori-agent/internal/skills"
@@ -136,7 +138,14 @@ import (
 //
 //	builder.WithStore(mockStore).WithLLMFactory(mockFactory)
 type ServerBuilder struct {
-	server *Server
+	server      *Server
+	resetWork   *resetstate.WorkGate
+	resetLease  *resetstate.Lease
+	resetPolicy settingsreset.StartupPolicy
+
+	// Instance-local constructor seam: boundary regressions can fail before
+	// credentials/providers without ever running the broad production builder.
+	configurationPhase func() error
 
 	desktopOpener platform.DesktopOpener
 
@@ -208,6 +217,7 @@ type ServerBuilder struct {
 	modelCategoryHandler   *modelcategoryhttp.Handler
 	autoCategorizeHandler  *modelcategoryhttp.AutoCategorizeHandler
 	resetHandler           *settingshttp.ResetHandler
+	resetPlanner           *settingsreset.Planner
 	autoConfigHandler      *agenthttp.AutoConfigHandler
 	smartOnboardingHandler *onboardinghttp.SmartOnboardingHandler
 	speechHandler          *speechhttp.Handler
@@ -387,9 +397,27 @@ type ServerBuilder struct {
 
 // NewServerBuilder creates a new ServerBuilder instance with an empty Server.
 func NewServerBuilder() (*ServerBuilder, error) {
+	return NewServerBuilderWithResetLease(nil)
+}
+
+// NewServerBuilderWithResetLease retains the host's gate across runtime rebuilds.
+// Build validates the lease and activated roots before constructors. A nil lease
+// preserves alternate-host behavior, with destructive reset still unavailable.
+func NewServerBuilderWithResetLease(lease *resetstate.Lease) (*ServerBuilder, error) {
 	desktopOpener := platform.NativeDesktopOpener{}
+	resetWork := lease.WorkGate()
+	if resetWork == nil {
+		resetWork = &resetstate.WorkGate{}
+	}
+	resetPolicy, err := settingsreset.ReadStartupPolicy(lease)
+	if err != nil {
+		return nil, err
+	}
 	return &ServerBuilder{
 		desktopOpener: desktopOpener,
+		resetWork:     resetWork,
+		resetLease:    lease,
+		resetPolicy:   resetPolicy,
 		server: &Server{
 			Core:          &CoreSystemFacade{},
 			Storage:       &StorageSystemFacade{},
@@ -398,6 +426,8 @@ func NewServerBuilder() (*ServerBuilder, error) {
 			UI:            &UISystemFacade{},
 			Handlers:      &HandlerFacade{},
 			desktopOpener: desktopOpener,
+			resetWork:     resetWork,
+			resetLease:    lease,
 		},
 	}, nil
 }
@@ -405,13 +435,31 @@ func NewServerBuilder() (*ServerBuilder, error) {
 // Build executes all initialization phases in order and returns the fully constructed Server.
 // Returns an error if any phase fails. See ServerBuilder documentation for phase groups.
 func (b *ServerBuilder) Build() (*Server, error) {
+	release, err := enterResetRuntime(b.resetLease, b.resetWork)
+	if err != nil {
+		return nil, err
+	}
+	constructed := false
+	defer func() {
+		if !constructed && b.resetLease != nil {
+			// Earlier phases may already own writers/children. A failed build
+			// cannot be treated as a clean, freely retryable runtime boundary.
+			b.resetLease.MarkUncertain()
+		}
+		release()
+	}()
+
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 
 	// ═══════════════════════════════════════════════════════════════════════════
 	// GROUP 1: CORE - Foundational components with no dependencies
 	// ═══════════════════════════════════════════════════════════════════════════
 
-	if err := b.initializeConfiguration(); err != nil { // Phase 1
+	configure := b.initializeConfiguration
+	if b.configurationPhase != nil {
+		configure = b.configurationPhase
+	}
+	if err := configure(); err != nil { // Phase 1
 		return nil, fmt.Errorf("configuration phase failed: %w", err)
 	}
 	b.initializeClientFactory()                      // Phase 3 (deprecated)
@@ -472,12 +520,14 @@ func (b *ServerBuilder) Build() (*Server, error) {
 	// ═══════════════════════════════════════════════════════════════════════════
 
 	b.createDomainFacades() // Phase 25
+	b.initializeResetCoordinator()
 
 	// Log success
 	if !verbose {
 		logger.Info("Server initialized successfully", logger.Fields{})
 	}
 
+	constructed = true
 	return b.server, nil
 }
 
@@ -521,6 +571,7 @@ func (b *ServerBuilder) createDomainFacades() {
 	// mission-bridge init; stopped on Shutdown).
 	b.server.Workflow.TriggerService = b.triggerService
 	b.server.Workflow.DailyBriefScheduler = b.dailyBriefScheduler
+	b.server.downloadsJanitorAutomation = b.downloadsJanitorAutomation
 
 	// Integration System Facade
 	b.server.Integration = NewIntegrationSystemFacade(
@@ -600,6 +651,7 @@ func (b *ServerBuilder) createDomainFacades() {
 	}
 	b.server.Handlers = handlers
 	b.server.workspaceSurfaceServices = b.workspaceSurfaceServices
+	b.server.workspaceFileStore = b.workspaceFileStore
 	b.server.projectTemplateCatalog = templateRuntimeCatalog{
 		capabilities: b.workspaceCapabilityRegistry,
 		runtimes:     b.runtimeCapabilityRegistry,

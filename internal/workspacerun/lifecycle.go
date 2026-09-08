@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -14,6 +15,7 @@ type WorkspaceRootResolver func(workspaceID string) []string
 type TaskReferenceURLResolver func(ctx context.Context, workspaceID, taskID string) (string, error)
 
 type Service struct {
+	admissionGate           *resetstate.WorkGate
 	store                   Store
 	profiles                *ProfileRegistry
 	executors               *ExecutorRegistry
@@ -23,6 +25,7 @@ type Service struct {
 	resolveTaskReferenceURL TaskReferenceURLResolver
 	mu                      sync.Mutex
 	runningCancels          map[string]context.CancelFunc
+	approvalPermits         map[string]func()
 }
 
 type CreateRunRequest struct {
@@ -58,15 +61,21 @@ func NewService(store Store, profiles *ProfileRegistry, executors *ExecutorRegis
 		validator = NewValidator()
 	}
 	return &Service{
-		store:          store,
-		profiles:       profiles,
-		executors:      executors,
-		environments:   environments,
-		validator:      validator,
-		resolveRoots:   resolveRoots,
-		runningCancels: make(map[string]context.CancelFunc),
+		store:           store,
+		profiles:        profiles,
+		executors:       executors,
+		environments:    environments,
+		validator:       validator,
+		resolveRoots:    resolveRoots,
+		runningCancels:  make(map[string]context.CancelFunc),
+		approvalPermits: make(map[string]func()),
 	}
 }
+
+// SetAdmissionGate is initialization-only, before run operations.
+func (s *Service) SetAdmissionGate(gate *resetstate.WorkGate) { s.admissionGate = gate }
+
+func (s *Service) enterMutation() (func(), error) { return s.admissionGate.Enter() }
 
 func (s *Service) SetTaskReferenceURLResolver(fn TaskReferenceURLResolver) {
 	if s == nil {
@@ -76,6 +85,11 @@ func (s *Service) SetTaskReferenceURLResolver(fn TaskReferenceURLResolver) {
 }
 
 func (s *Service) CreateRun(ctx context.Context, workspaceID string, req CreateRunRequest) (*Run, error) {
+	release, err := s.enterMutation()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if s.store == nil {
 		return nil, fmt.Errorf("workspace run store is nil")
 	}
@@ -171,6 +185,16 @@ func appendUniqueString(values []string, value string) []string {
 }
 
 func (s *Service) ExecuteRun(ctx context.Context, workspaceID, runID string) error {
+	release, err := s.enterMutation()
+	if err != nil {
+		return err
+	}
+	retainForApproval := false
+	defer func() {
+		if !retainForApproval {
+			release()
+		}
+	}()
 	run, err := s.store.GetRun(ctx, workspaceID, runID)
 	if err != nil {
 		return err
@@ -290,12 +314,25 @@ func (s *Service) ExecuteRun(ctx context.Context, workspaceID, runID string) err
 	}
 	if run.Policy.Approval == PolicyApprovalFinalOnly || run.Policy.Approval == PolicyApprovalPerTool {
 		teardown = false
-		return s.transition(ctx, run, RunStatusAwaitingApproval, "Awaiting final approval")
+		if err := s.transition(ctx, run, RunStatusAwaitingApproval, "Awaiting final approval"); err != nil {
+			return err
+		}
+		if !s.holdApprovalPermit(workspaceID, runID, release) {
+			teardown = true
+			return fmt.Errorf("run %s already awaits approval", runID)
+		}
+		retainForApproval = true
+		return nil
 	}
 	return s.transition(ctx, run, RunStatusSucceeded, "Run succeeded")
 }
 
 func (s *Service) StopRun(ctx context.Context, workspaceID, runID string) error {
+	release, err := s.enterMutation()
+	if err != nil {
+		return err
+	}
+	defer release()
 	key := runKey(workspaceID, runID)
 	s.mu.Lock()
 	if cancel, ok := s.runningCancels[key]; ok {
@@ -309,10 +346,19 @@ func (s *Service) StopRun(ctx context.Context, workspaceID, runID string) error 
 	if runner, err := s.executors.Get(run.Executor.Kind); err == nil {
 		_ = runner.Cancel(ctx, run)
 	}
+	if approvalRelease := s.takeApprovalPermit(workspaceID, runID); approvalRelease != nil {
+		defer approvalRelease()
+		defer func() { _ = s.environments.TearDown(context.Background(), run, &run.Environment) }()
+	}
 	return s.transition(ctx, run, RunStatusCancelled, "Run cancelled")
 }
 
 func (s *Service) ApproveRun(ctx context.Context, workspaceID, runID string) error {
+	release, err := s.enterMutation()
+	if err != nil {
+		return err
+	}
+	defer release()
 	run, err := s.store.GetRun(ctx, workspaceID, runID)
 	if err != nil {
 		return err
@@ -320,11 +366,19 @@ func (s *Service) ApproveRun(ctx context.Context, workspaceID, runID string) err
 	if run.Status != RunStatusAwaitingApproval {
 		return fmt.Errorf("run %s is not awaiting approval", runID)
 	}
+	if approvalRelease := s.takeApprovalPermit(workspaceID, runID); approvalRelease != nil {
+		defer approvalRelease()
+	}
 	defer func() { _ = s.environments.TearDown(context.Background(), run, &run.Environment) }()
 	return s.transition(ctx, run, RunStatusSucceeded, "Run approved")
 }
 
 func (s *Service) RejectRun(ctx context.Context, workspaceID, runID, reason string) error {
+	release, err := s.enterMutation()
+	if err != nil {
+		return err
+	}
+	defer release()
 	run, err := s.store.GetRun(ctx, workspaceID, runID)
 	if err != nil {
 		return err
@@ -333,8 +387,31 @@ func (s *Service) RejectRun(ctx context.Context, workspaceID, runID, reason stri
 		_ = runner.Cancel(ctx, run)
 	}
 	_ = s.store.SetError(ctx, workspaceID, runID, reason)
+	if approvalRelease := s.takeApprovalPermit(workspaceID, runID); approvalRelease != nil {
+		defer approvalRelease()
+	}
 	defer func() { _ = s.environments.TearDown(context.Background(), run, &run.Environment) }()
 	return s.transition(ctx, run, RunStatusRejected, "Run rejected")
+}
+
+func (s *Service) holdApprovalPermit(workspaceID, runID string, release func()) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := runKey(workspaceID, runID)
+	if _, exists := s.approvalPermits[key]; exists {
+		return false
+	}
+	s.approvalPermits[key] = release
+	return true
+}
+
+func (s *Service) takeApprovalPermit(workspaceID, runID string) func() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := runKey(workspaceID, runID)
+	release := s.approvalPermits[key]
+	delete(s.approvalPermits, key)
+	return release
 }
 
 func (s *Service) transition(ctx context.Context, run *Run, status RunStatus, message string) error {

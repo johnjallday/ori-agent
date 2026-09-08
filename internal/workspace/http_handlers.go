@@ -12,6 +12,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/platform"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 )
 
 // folderWorkspaceResolver loads the canonical workspace.json record for a
@@ -23,6 +24,7 @@ type folderWorkspaceResolver interface {
 
 // HTTPHandler handles HTTP requests for Agent Workspaces
 type HTTPHandler struct {
+	admissionGate           *resetstate.WorkGate
 	store                   Store
 	orchestrator            *Orchestrator
 	eventBus                *EventBus
@@ -64,6 +66,9 @@ func NewHTTPHandler(store Store, orchestrator *Orchestrator, eventBus *EventBus)
 	}
 	return handler
 }
+
+// SetAdmissionGate configures reset admission before detached handler work.
+func (h *HTTPHandler) SetAdmissionGate(gate *resetstate.WorkGate) { h.admissionGate = gate }
 
 // SetDesktopOpener replaces native desktop side effects for all workspace
 // handlers. Tests inject a no-op or recorder so routing checks never launch a

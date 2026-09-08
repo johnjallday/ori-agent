@@ -10,6 +10,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcp/mcpregistry"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/vault"
 
 	"github.com/google/uuid"
@@ -17,6 +18,8 @@ import (
 
 // Handler handles MCP-related HTTP requests
 type Handler struct {
+	admissionGate *resetstate.WorkGate
+	startServer   func(string) error
 	registry      *mcp.Registry
 	configManager *mcp.ConfigManager
 	regStore      *mcpregistry.Store
@@ -29,8 +32,12 @@ func NewHandler(registry *mcp.Registry, configManager *mcp.ConfigManager) *Handl
 	return &Handler{
 		registry:      registry,
 		configManager: configManager,
+		startServer:   registry.StartServer,
 	}
 }
+
+// SetAdmissionGate configures reset admission before detached connection work.
+func (h *Handler) SetAdmissionGate(gate *resetstate.WorkGate) { h.admissionGate = gate }
 
 // SetRegistryStore wires the MCP registry browser store into the handler.
 func (h *Handler) SetRegistryStore(s *mcpregistry.Store) {

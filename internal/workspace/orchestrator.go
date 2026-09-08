@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/openai/openai-go/v3"
 )
@@ -17,6 +18,7 @@ import (
 // Orchestrator manages autonomous task delegation and agent coordination
 type Orchestrator struct {
 	workspaceStore Store
+	admissionGate  *resetstate.WorkGate
 	agentStore     store.Store  // For loading agents and their tools
 	llmProvider    LLMProvider  // For intelligent task breakdown
 	eventBus       *EventBus    // For real-time updates
@@ -54,6 +56,11 @@ func NewOrchestrator(workspaceStore Store, agentStore store.Store, llmProvider L
 	}
 }
 
+// SetAdmissionGate wires the shared runtime gate before dispatch begins.
+func (o *Orchestrator) SetAdmissionGate(gate *resetstate.WorkGate) {
+	o.admissionGate = gate
+}
+
 // SetTaskHandler wires the task executor used for single-task LLM execution.
 // Must be called before ExecuteTask, otherwise ExecuteTask returns an error.
 func (o *Orchestrator) SetTaskHandler(h taskExecutor) {
@@ -68,6 +75,12 @@ func (o *Orchestrator) SetDelegationLoop(loop *DelegationLoop) {
 
 // ExecuteMission starts autonomous execution of a mission
 func (o *Orchestrator) ExecuteMission(ctx context.Context, workspaceID string, mission string) error {
+	release, err := o.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	workspace, err := o.workspaceStore.Get(workspaceID)
 	if err != nil {
 		return fmt.Errorf("failed to get workspace: %w", err)
@@ -124,8 +137,15 @@ func (o *Orchestrator) ExecuteMission(ctx context.Context, workspaceID string, m
 		logger.Error("[Orchestrator] Warning: failed to save workspace", logger.Fields{"error": err})
 	}
 
-	// Step 3: Start task execution in background
-	go o.ExecuteTasksSequentially(ctx, workspaceID, tasks)
+	// Step 3: Transfer admission to the detached work before this call returns.
+	finishMission, err := o.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	go func() {
+		defer finishMission()
+		o.executeTasksSequentially(ctx, workspaceID, tasks)
+	}()
 
 	return nil
 }
@@ -287,8 +307,18 @@ func parseDependencyIndex(raw json.RawMessage, taskCount int) (int, bool) {
 	return 0, false
 }
 
-// executeTasksSequentially executes tasks in priority order
+// ExecuteTasksSequentially executes tasks while holding admission through the
+// final mission event. A fenced refusal never changes task state.
 func (o *Orchestrator) ExecuteTasksSequentially(ctx context.Context, workspaceID string, tasks []Task) {
+	release, err := o.admissionGate.Enter()
+	if err != nil {
+		return
+	}
+	defer release()
+	o.executeTasksSequentially(ctx, workspaceID, tasks)
+}
+
+func (o *Orchestrator) executeTasksSequentially(ctx context.Context, workspaceID string, tasks []Task) {
 	logger.Debug("[Orchestrator] Starting sequential task execution for workspace", logger.Fields{"workspace_id": workspaceID})
 
 	for _, task := range tasks {
@@ -319,6 +349,12 @@ func (o *Orchestrator) ExecuteTasksSequentially(ctx context.Context, workspaceID
 // delegated to the LLMTaskHandler wired via SetTaskHandler; the orchestrator
 // owns workspace state, message events, and task lifecycle bookkeeping.
 func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task Task) error {
+	release, err := o.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	logger.Debug("[Orchestrator] Executing task", logger.Fields{"task_id": task.ID, "description": task.Description, "assigned_to": task.To})
 
 	workspace, err := o.workspaceStore.Get(workspaceID)

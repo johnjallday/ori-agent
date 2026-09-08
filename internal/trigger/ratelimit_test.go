@@ -53,6 +53,7 @@ func TestStatusForIngest(t *testing.T) {
 		IngestUnauthorized: 401,
 		IngestRateLimited:  429,
 		IngestWrongType:    415,
+		IngestUnavailable:  503,
 	}
 	for res, want := range cases {
 		if got := StatusForIngest(res); got != want {

@@ -22,9 +22,17 @@ import (
 	"github.com/johnjallday/ori-agent/internal/gateway/channels/console"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	portutil "github.com/johnjallday/ori-agent/internal/port"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/server"
+	"github.com/johnjallday/ori-agent/internal/settingsreset"
 	"github.com/johnjallday/ori-agent/internal/version"
 )
+
+// Private construction seams let owned-process startup tests fail safely before
+// any port inspection or native/provider initialization if ordering regresses.
+var startupPortCheck = ensurePortAvailable
+var startupBeforeStores = settingsreset.BeforeStores
+var startupServer = server.NewWithResetLease
 
 func main() {
 	// Load .env from the working directory (if present) before anything reads
@@ -76,13 +84,27 @@ func main() {
 		log.Fatalf("Failed to setup data directory: %v", err)
 	}
 
+	// This process owns the installation before any persistence constructor or
+	// port takeover. The lease is pinned until process exit; Shutdown does not
+	// join every writer, so do NOT defer an early unlock here.
+	lease, err := startupBeforeStores(context.Background(), os.Getenv("ORI_DATA_DIR"))
+	if err != nil {
+		if lease != nil && errors.Is(err, settingsreset.ErrRecoveryIncomplete) {
+			if recoveryErr := runResetRecoveryServer(lease, *port, *noBrowser); recoveryErr != nil {
+				log.Fatalf("Reset recovery host failed: %v", recoveryErr)
+			}
+			return
+		}
+		log.Fatalf("Cannot open installation: %v", err)
+	}
+
 	// Ensure port is safe to take before starting
-	if err := ensurePortAvailable(*port); err != nil {
+	if err := startupPortCheck(*port); err != nil {
 		log.Fatalf("Port %d is unavailable: %v", *port, err)
 	}
 
 	// Create server with all dependencies
-	srv, err := server.New()
+	srv, err := startupServer(lease)
 	if err != nil {
 		log.Fatalf("Failed to initialize server: %v", err)
 	}
@@ -165,6 +187,42 @@ func main() {
 	}
 
 	logger.Info("Server stopped", nil)
+}
+
+func runResetRecoveryServer(lease *resetstate.Lease, port int, noBrowser bool) error {
+	if err := startupPortCheck(port); err != nil {
+		return err
+	}
+	address := fmt.Sprintf("127.0.0.1:%d", port)
+	url := fmt.Sprintf("http://localhost:%d/", port)
+	httpServer := settingsreset.RecoveryHTTPServer(lease, address)
+	serveErr := make(chan error, 1)
+	go func() {
+		err := httpServer.ListenAndServe()
+		if errors.Is(err, http.ErrServerClosed) {
+			err = nil
+		}
+		serveErr <- err
+	}()
+	logger.Warn("Ori started in reset recovery mode; application stores remain closed", logger.Fields{"url": url})
+	if !noBrowser && os.Getenv("NO_BROWSER") == "" {
+		go func() {
+			if err := openBrowser(url); err != nil {
+				logger.Debug("Could not open reset recovery page", logger.Fields{"error": err})
+			}
+		}()
+	}
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(quit)
+	select {
+	case err := <-serveErr:
+		return err
+	case <-quit:
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return httpServer.Shutdown(ctx)
 }
 
 // dataDirectoryInputs contains the process facts used to choose the one runtime

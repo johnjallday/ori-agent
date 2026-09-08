@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 )
 
 // ErrGenerationInProgress is returned by RequestGeneration when another
@@ -44,8 +45,9 @@ type Generator interface {
 // lifecycle: claiming, invoking the Generator, persisting the revision, and
 // atomically flipping the current pointer.
 type Service struct {
-	store     Store
-	generator Generator
+	admissionGate *resetstate.WorkGate
+	store         Store
+	generator     Generator
 
 	// mu/inFlight serializes ANY concurrent generation for the same
 	// workspace regardless of trigger — stronger than the store's DB-level
@@ -70,6 +72,11 @@ func NewService(store Store, generator Generator) *Service {
 	return &Service{store: store, generator: generator, inFlight: map[string]bool{}}
 }
 
+// SetAdmissionGate is initialization-only, before requests or scheduler ticks.
+func (s *Service) SetAdmissionGate(gate *resetstate.WorkGate) { s.admissionGate = gate }
+
+func (s *Service) enterMutation() (func(), error) { return s.admissionGate.Enter() }
+
 // SetOnRevisionReady registers a callback fired whenever a generation
 // succeeds or partially succeeds and becomes the current revision,
 // regardless of trigger. The callback decides whether/how to notify (e.g.
@@ -88,6 +95,11 @@ func (s *Service) GetConfig(ctx context.Context, workspaceID string) (*Config, e
 // ConfigRevision. Source/schedule changes affect only future generations —
 // this never rewrites prior revisions.
 func (s *Service) UpdateConfig(ctx context.Context, cfg Config) (*Config, error) {
+	release, err := s.enterMutation()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	normalized, err := NormalizeConfig(cfg)
 	if err != nil {
 		return nil, err
@@ -110,6 +122,11 @@ func TodayLocalDate(cfg Config) (string, error) {
 // RequestGenerationNow resolves "today" from cfg's timezone and requests a
 // generation for it. Used by first-open and manual refresh.
 func (s *Service) RequestGenerationNow(ctx context.Context, workspaceID, userID string, trigger Trigger) (*Revision, error) {
+	release, err := s.enterMutation()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	cfg, err := s.store.GetConfig(ctx, workspaceID)
 	if err != nil {
 		return nil, err
@@ -118,7 +135,7 @@ func (s *Service) RequestGenerationNow(ctx context.Context, workspaceID, userID 
 	if err != nil {
 		return nil, err
 	}
-	return s.RequestGeneration(ctx, *cfg, userID, trigger, localDate)
+	return s.requestGeneration(ctx, *cfg, userID, trigger, localDate, "")
 }
 
 // RequestGeneration claims and (if newly claimed) runs a generation for
@@ -131,6 +148,11 @@ func (s *Service) RequestGenerationNow(ctx context.Context, workspaceID, userID 
 //
 // Manual refresh (Trigger=TriggerManual) always creates a new revision.
 func (s *Service) RequestGeneration(ctx context.Context, cfg Config, userID string, trigger Trigger, localDate string) (*Revision, error) {
+	release, err := s.enterMutation()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	return s.requestGeneration(ctx, cfg, userID, trigger, localDate, "")
 }
 
@@ -160,6 +182,11 @@ func (s *Service) PlanFirstAssignmentBrief(ctx context.Context, workspaceID stri
 // GenerateFirstAssignmentBrief executes one preplanned trigger using a stable
 // claim ID, making even a manual refresh restart-safe.
 func (s *Service) GenerateFirstAssignmentBrief(ctx context.Context, cfg Config, userID string, trigger Trigger, requestID string) (*GenerationRequest, *Revision, error) {
+	release, err := s.enterMutation()
+	if err != nil {
+		return nil, nil, err
+	}
+	defer release()
 	localDate, err := TodayLocalDate(cfg)
 	if err != nil {
 		return nil, nil, err
@@ -303,6 +330,11 @@ func (s *Service) GetHistory(ctx context.Context, workspaceID string, limit int)
 // PruneHistory prunes workspaceID's history down to MinRetentionDays,
 // never touching another workspace or the current revision.
 func (s *Service) PruneHistory(ctx context.Context, workspaceID string) error {
+	release, err := s.enterMutation()
+	if err != nil {
+		return err
+	}
+	defer release()
 	return s.store.PruneHistory(ctx, workspaceID, MinRetentionDays)
 }
 
@@ -330,6 +362,11 @@ func (s *Service) GetActiveGeneration(ctx context.Context, workspaceID string) (
 // notification should be surfaced to the user (the Action Center item
 // itself is created by the caller — task 7's integration layer).
 func (s *Service) RecordNotificationIfEnabled(ctx context.Context, cfg Config, rev *Revision) (bool, error) {
+	release, err := s.enterMutation()
+	if err != nil {
+		return false, err
+	}
+	defer release()
 	if !cfg.NotifyOnReady || rev == nil || rev.Trigger != TriggerScheduled {
 		return false, nil
 	}

@@ -77,8 +77,10 @@ type RestartInfo struct {
 }
 
 type Preview struct {
-	SchemaVersion    int               `json:"schema_version"`
-	ID               string            `json:"id"`
+	SchemaVersion int    `json:"schema_version"`
+	ID            string `json:"id"`
+	// Allocated before submission so response loss can be recovered with GET.
+	OperationID      string            `json:"operation_id"`
 	Intent           Intent            `json:"intent"`
 	Selected         []CategoryID      `json:"selected"`
 	Dependencies     []CategoryID      `json:"dependencies"`
@@ -102,6 +104,7 @@ type ExecuteRequest struct {
 type OperationState string
 
 const (
+	StatePreparing       OperationState = "preparing"
 	StateAwaitingRestart OperationState = "awaiting_restart"
 	StateApplying        OperationState = "applying"
 	StateVerifying       OperationState = "verifying"

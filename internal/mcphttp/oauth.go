@@ -98,8 +98,14 @@ func (h *Handler) ConnectServerHandler(w http.ResponseWriter, r *http.Request) {
 	case mcp.StatusRunning, mcp.StatusStarting:
 		// already connected/connecting; fall through to report current state
 	default:
+		finishStart, err := h.admissionGate.Enter()
+		if err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusServiceUnavailable, "MCP connection unavailable", err)
+			return
+		}
 		go func() {
-			if startErr := h.registry.StartServer(serverName); startErr != nil {
+			defer finishStart()
+			if startErr := h.startServer(serverName); startErr != nil {
 				logger.Warn("mcp connect: start failed", logger.Fields{"server": serverName, "error": startErr})
 			}
 		}()

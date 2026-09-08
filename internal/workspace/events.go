@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 )
 
 // EventType represents the type of workspace event
@@ -146,6 +147,7 @@ type subscription struct {
 
 // EventBus manages event publishing and subscription
 type EventBus struct {
+	admissionGate *resetstate.WorkGate
 	mu            sync.RWMutex
 	subscriptions map[string]*subscription // ID -> subscription
 	bufferSize    int
@@ -171,6 +173,12 @@ func NewEventBus(bufferSize, historySize int) *EventBus {
 	}
 }
 
+// SetAdmissionGate wires runtime admission before publishing or subscribing.
+// Subscriber-owned detached work must acquire its own permit before returning.
+func (eb *EventBus) SetAdmissionGate(gate *resetstate.WorkGate) {
+	eb.admissionGate = gate
+}
+
 // DefaultEventBus creates an event bus with default settings
 func DefaultEventBus() *EventBus {
 	return NewEventBus(100, 1000) // Buffer 100, keep last 1000 events
@@ -178,6 +186,12 @@ func DefaultEventBus() *EventBus {
 
 // Publish publishes an event to all matching subscribers
 func (eb *EventBus) Publish(event Event) {
+	release, err := eb.admissionGate.Enter()
+	if err != nil {
+		return
+	}
+	defer release()
+
 	// Set timestamp if not already set
 	if event.Timestamp.IsZero() {
 		event.Timestamp = time.Now()
@@ -203,7 +217,14 @@ func (eb *EventBus) Publish(event Event) {
 
 	// Deliver to subscribers (non-blocking)
 	for _, sub := range subs {
+		// Register before Publish returns; otherwise a callback that has not
+		// been scheduled yet could disappear from the reset admission boundary.
+		finishCallback, err := eb.admissionGate.Enter()
+		if err != nil {
+			return
+		}
 		go func(s *subscription) {
+			defer finishCallback()
 			defer func() {
 				if r := recover(); r != nil {
 					logger.Error("Event subscriber panic", logger.Fields{"r": r})

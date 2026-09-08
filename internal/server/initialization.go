@@ -33,7 +33,18 @@ func loadDefaultSettings() types.Settings {
 
 // createConfigManager initializes and loads the configuration manager.
 func createConfigManager(configPath string) (*config.Manager, error) {
-	mgr := config.NewManagerWithSecretStore(configPath, vault.NewDefaultSecretStoreForNamespace(configPath))
+	absolutePath, err := filepath.Abs(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve configuration path: %w", err)
+	}
+	canonicalSecrets := vault.NewDefaultSecretStoreForNamespace(absolutePath)
+	if configPath != absolutePath {
+		legacySecrets := vault.NewDefaultSecretStoreForNamespace(configPath)
+		if err := config.MigrateInstallationSecretNamespace(legacySecrets, canonicalSecrets); err != nil {
+			logger.Warn("Failed to migrate installation credential namespace", logger.Fields{"error": err})
+		}
+	}
+	mgr := config.NewManagerWithSecretStore(absolutePath, canonicalSecrets)
 	if err := mgr.Load(); err != nil {
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
@@ -263,8 +274,14 @@ func resolveAllowlistPath() string {
 
 // createFileStore creates a new file-based storage system for agents.
 func createFileStore(agentStorePath string, defaultConf types.Settings) (store.Store, error) {
-	if err := migrateLegacyAgentStore(agentStorePath); err != nil {
-		logger.Verbosef("Warning: legacy agent store migration failed: %v", err)
+	return createFileStoreWithPolicy(agentStorePath, defaultConf, false)
+}
+
+func createFileStoreWithPolicy(agentStorePath string, defaultConf types.Settings, suppressLegacyAdoption bool) (store.Store, error) {
+	if !suppressLegacyAdoption {
+		if err := migrateLegacyAgentStore(agentStorePath); err != nil {
+			logger.Verbosef("Warning: legacy agent store migration failed: %v", err)
+		}
 	}
 
 	st, err := store.NewFileStore(agentStorePath, defaultConf)

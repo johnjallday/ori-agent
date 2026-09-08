@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -413,10 +414,17 @@ func (h *HTTPHandler) ExecuteTaskManually(w http.ResponseWriter, r *http.Request
 
 	logger.Debug("Manually executing task in workspace", logger.Fields{"workspace_id": workspaceID, "task_id": taskID})
 
-	// Execute task asynchronously
+	// Register and detach before acknowledging so request cancellation cannot
+	// erase accepted work and reset cannot fence between response and launch.
+	finishTask, err := h.admissionGate.Enter()
+	if err != nil {
+		orihttp.ServiceUnavailable(w, err.Error())
+		return
+	}
+	execCtx := context.WithoutCancel(r.Context())
 	go func() {
-		ctx := r.Context()
-		if err := h.orchestrator.ExecuteTask(ctx, workspaceID, *targetTask); err != nil {
+		defer finishTask()
+		if err := h.orchestrator.ExecuteTask(execCtx, workspaceID, *targetTask); err != nil {
 			logger.Error("Failed to execute task", logger.Fields{"task_id": taskID, "err": err})
 		}
 	}()

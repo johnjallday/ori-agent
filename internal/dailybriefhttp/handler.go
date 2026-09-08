@@ -16,6 +16,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
 
@@ -30,9 +31,10 @@ var ErrNoValidHQ = errors.New("dailybriefhttp: no valid personal hq designated")
 
 // Handler serves the Daily Brief API.
 type Handler struct {
-	service    *dailybrief.Service
-	personalHQ *personalhq.Service
-	provider   userprofile.UserProvider
+	admissionGate *resetstate.WorkGate
+	service       *dailybrief.Service
+	personalHQ    *personalhq.Service
+	provider      userprofile.UserProvider
 }
 
 // NewHandler constructs a Daily Brief HTTP handler. provider may be nil, in
@@ -42,6 +44,19 @@ func NewHandler(service *dailybrief.Service, personalHQ *personalhq.Service, pro
 		provider = userprofile.LocalUserProvider{}
 	}
 	return &Handler{service: service, personalHQ: personalHQ, provider: provider}
+}
+
+// SetAdmissionGate is initialization-only, before serving requests.
+func (h *Handler) SetAdmissionGate(gate *resetstate.WorkGate) { h.admissionGate = gate }
+
+func (h *Handler) enterMutation(w http.ResponseWriter) (func(), bool) {
+	release, err := h.admissionGate.Enter()
+	if err != nil {
+		w.Header().Set("Cache-Control", "no-store")
+		_ = orihttp.RespondError(w, http.StatusServiceUnavailable, err.Error())
+		return nil, false
+	}
+	return release, true
 }
 
 func (h *Handler) userID(ctx context.Context) (string, error) {
@@ -140,6 +155,11 @@ func (h *Handler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 	if !orihttp.RequireMethod(w, r, http.MethodPut) {
 		return
 	}
+	release, ok := h.enterMutation(w)
+	if !ok {
+		return
+	}
+	defer release()
 	if h.unavailable() {
 		orihttp.ServiceUnavailable(w, "daily brief is unavailable")
 		return
@@ -265,6 +285,11 @@ func (h *Handler) requestGeneration(w http.ResponseWriter, r *http.Request, trig
 	if !orihttp.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
+	release, ok := h.enterMutation(w)
+	if !ok {
+		return
+	}
+	defer release()
 	if h.unavailable() {
 		orihttp.ServiceUnavailable(w, "daily brief is unavailable")
 		return
@@ -285,10 +310,16 @@ func (h *Handler) requestGeneration(w http.ResponseWriter, r *http.Request, trig
 		}
 	}
 
-	// Detached from the request's context (which ends when this handler
-	// returns) with its own bound, so generation keeps running in the
-	// background rather than blocking this response.
+	// Register the detached child before returning 202. Acquiring inside the
+	// goroutine creates an unowned launch gap after the request permit ends.
+	childRelease, err := h.admissionGate.Enter()
+	if err != nil {
+		w.Header().Set("Cache-Control", "no-store")
+		_ = orihttp.RespondError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
 	go func() {
+		defer childRelease()
 		ctx, cancel := context.WithTimeout(context.Background(), generationTimeout)
 		defer cancel()
 		if _, err := h.service.RequestGenerationNow(ctx, workspaceID, userID, trigger); err != nil &&

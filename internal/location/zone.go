@@ -10,6 +10,11 @@ import (
 
 // AddZone adds a new zone to the manager
 func (m *Manager) AddZone(zone Zone) error {
+	release, err := m.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -42,6 +47,11 @@ func (m *Manager) AddZone(zone Zone) error {
 
 // RemoveZone removes a zone by ID
 func (m *Manager) RemoveZone(zoneID string) error {
+	release, err := m.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -63,6 +73,11 @@ func (m *Manager) RemoveZone(zoneID string) error {
 
 // UpdateZone updates an existing zone
 func (m *Manager) UpdateZone(zone Zone) error {
+	release, err := m.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -116,6 +131,11 @@ func (m *Manager) GetZoneByID(id string) (Zone, error) {
 
 // SaveZones writes zones to a JSON file
 func (m *Manager) SaveZones(filepath string) error {
+	release, err := m.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	m.mu.RLock()
 	zones := make([]Zone, 0, len(m.zones))
 	for _, zone := range m.zones {

@@ -57,6 +57,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/sessionfiles"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
+	"github.com/johnjallday/ori-agent/internal/settingsreset"
 	"github.com/johnjallday/ori-agent/internal/setupwizard"
 	"github.com/johnjallday/ori-agent/internal/setupwizardhttp"
 	"github.com/johnjallday/ori-agent/internal/skills"
@@ -83,6 +84,7 @@ func (b *ServerBuilder) initializeHandlers() {
 	b.locationHandler = locationhttp.NewHandler(b.locationManager)
 	b.usageHandler = usagehttp.NewHandler(b.costTracker)
 	b.mcpHandler = mcphttp.NewHandler(b.mcpRegistry, b.mcpConfigManager)
+	b.mcpHandler.SetAdmissionGate(b.resetWork)
 	b.macWakeService = macwake.NewService(b.configManager)
 	// Ori owns one system wake event and this service is the only thing that
 	// programs it. The shared coordinator is how other Ori processes —
@@ -96,6 +98,7 @@ func (b *ServerBuilder) initializeHandlers() {
 	b.speechHandler = speechhttp.NewHandler(b.configManager)
 
 	b.chatHandler = chathttp.NewHandler(b.st, b.clientFactory)
+	b.chatHandler.SetAdmissionGate(b.resetWork)
 	b.chatHandler.SetLLMFactory(b.llmFactory)
 	b.chatHandler.SetCostTracker(b.costTracker)
 	b.chatHandler.SetMCPRegistry(b.mcpRegistry)
@@ -144,6 +147,8 @@ func (b *ServerBuilder) initializeHandlers() {
 	b.onboardingHandler = onboardinghttp.NewHandler(b.onboardingMgr)
 	b.deviceHandler = devicehttp.NewHandler(b.onboardingMgr)
 	b.resetHandler = settingshttp.NewResetHandler(b.onboardingMgr, b.st, config.DefaultDataDir())
+	b.resetPlanner = settingsreset.NewPlanner(b.resetPreviewOwners)
+	b.resetHandler.SetPreviewPlanner(b.resetPlanner)
 
 	// Initialize auto-config handler for agent creation
 	b.autoConfigHandler = agenthttp.NewAutoConfigHandler(b.llmFactory, b.configManager)
@@ -170,14 +175,13 @@ func (b *ServerBuilder) initializeHandlers() {
 		logger.Error("Failed to create session store", logger.Fields{"error": err})
 		// Non-fatal: continue without session management
 	} else {
+		session.SetAdmissionGate(sessionStore, b.resetWork)
 		b.sessionStore = sessionStore
 		b.userProvider = userprofile.LocalUserProvider{}
 		userProfileStore := userprofile.NewSQLiteStore(sessionStore.DB())
 		b.userStore = userProfileStore
 		b.onboardingMgr.SetUserStore(b.userStore)
-		if err := b.onboardingMgr.SeedLocalUserProfile(ctx); err != nil {
-			logger.Warn("Failed to seed local user profile", logger.Fields{"error": err})
-		}
+		b.seedLocalUserProfile(ctx)
 		b.userHandler = userhttp.NewHandler(b.userStore, b.userProvider)
 		b.chatHandler.SetUserProfileDeps(b.userStore, b.userProvider)
 		b.sessionHandler = sessionhttp.New(sessionStore)
@@ -280,6 +284,7 @@ func (b *ServerBuilder) initializeHandlers() {
 			b.sessionStore.ToolCallStore(),
 			review.DefaultDetectionConfig(),
 		)
+		reviewRunner.SetAdmissionGate(b.resetWork)
 		// Wire up agent store for per-agent review settings
 		if b.st != nil {
 			reviewRunner.SetAgentStore(b.st)
@@ -462,7 +467,9 @@ func (b *ServerBuilder) initializeHandlers() {
 		cliagent.NewDiffDetector(),
 		b.costTracker,
 	)
+	b.cliAgentExecutor.SetAdmissionGate(b.resetWork)
 	b.cliAgentHandler = cliagenthttp.NewHandler(b.cliAgentExecutor, b.cliAgentRegistry, b.cliAgentLogger)
+	b.cliAgentHandler.SetAdmissionGate(b.resetWork)
 	logger.Info("CLI agent adapter initialized", logger.Fields{
 		"backends": len(b.cliAgentRegistry.List()),
 	})
@@ -492,6 +499,7 @@ func (b *ServerBuilder) initializeHandlers() {
 		return []string{root}
 	}
 	b.workspaceRunService = workspacerun.NewService(b.workspaceRunStore, runProfiles, b.workspaceRunExecutors, runEnv, runValidator, resolveRunRoots)
+	b.workspaceRunService.SetAdmissionGate(b.resetWork)
 	if b.workspaceStore != nil {
 		b.workspaceRunService.SetTaskReferenceURLResolver(func(_ context.Context, workspaceID, taskID string) (string, error) {
 			ws, err := b.workspaceStore.Get(workspaceID)
@@ -507,6 +515,7 @@ func (b *ServerBuilder) initializeHandlers() {
 		})
 	}
 	b.workspaceRunHandler = workspacerun.NewHandler(b.workspaceRunStore, b.workspaceRunService)
+	b.workspaceRunHandler.SetAdmissionGate(b.resetWork)
 	b.registerWorkspaceRunTaskValidationMirror()
 	logger.Info("Workspace Runs initialized", logger.Fields{
 		"durable": b.sessionStore != nil,
@@ -521,6 +530,7 @@ func (b *ServerBuilder) initializeHandlers() {
 		b.workspacePlanStore = workspaceplan.NewMemoryStore()
 	}
 	b.workspacePlanService = workspaceplan.NewService(b.workspacePlanStore)
+	b.workspacePlanService.SetAdmissionGate(b.resetWork)
 	// The planner resolves its provider per call, so changing the configured
 	// model takes effect without a restart. A resolver that cannot produce a
 	// structured-output provider disables generation only: editing, review,
@@ -606,6 +616,7 @@ func (b *ServerBuilder) initializeHandlers() {
 	if b.mcpConfigManager != nil && b.mcpRegistry != nil {
 		pluginsDir := filepath.Join(config.DefaultDataDir(), "plugins")
 		b.pluginHandler = pluginhttp.NewHandler(b.mcpConfigManager, b.mcpRegistry, personalSkillsDir, pluginsDir)
+		b.pluginHandler.UpdateChecker().SetAdmissionGate(b.resetWork)
 	}
 
 	// Let workspaces created from a template bind its declared default tools
@@ -624,6 +635,15 @@ func (b *ServerBuilder) initializeHandlers() {
 // after startup and after a live workspace-root change. The profile record is
 // authoritative, while an unambiguous personal_hq marker in workspace.json is
 // portable recovery evidence for a fresh data directory.
+func (b *ServerBuilder) seedLocalUserProfile(ctx context.Context) {
+	if b.onboardingMgr == nil || b.resetPolicy.SuppressProfileSeed {
+		return
+	}
+	if err := b.onboardingMgr.SeedLocalUserProfile(ctx); err != nil {
+		logger.Warn("Failed to seed local user profile", logger.Fields{"error": err})
+	}
+}
+
 func (b *ServerBuilder) reconcileWorkspaceDesignations(ctx context.Context) error {
 	if b == nil || b.personalHQService == nil || b.sessionHandler == nil {
 		return nil
@@ -691,6 +711,7 @@ func (b *ServerBuilder) wireCalendarOpsSetup() {
 		return
 	}
 	b.calendarOpsHandler = calendarhttp.NewHandler(folders, b.sessionStore, b.mcpRegistry, b.mcpConfigManager, b.userProvider)
+	b.calendarOpsHandler.SetAdmissionGate(b.resetWork)
 	b.calendarOpsHandler.SetNotes(b.sessionStore)
 	if b.meetingPrepStore != nil {
 		b.calendarOpsHandler.SetMeetingPreps(b.meetingPrepStore)

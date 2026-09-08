@@ -5,25 +5,37 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
-
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/getlantern/systray"
+	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/environ"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/menubar"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 	portutil "github.com/johnjallday/ori-agent/internal/port"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
+	"github.com/johnjallday/ori-agent/internal/settingsreset"
 	"github.com/johnjallday/ori-agent/internal/version"
 )
+
+// Guard tests replace only construction, never native credentials or systray.
+var newShellOnboarding = onboarding.NewManager
+var menuBeforeStores = settingsreset.BeforeStores
+var menuPortCheck = ensurePortAvailableForStart
+var menuInputDialog = showInputDialog
 
 func main() {
 	// Expand PATH to include common development tool locations
@@ -33,13 +45,22 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Println("Starting Ori Agent Menu Bar App (systray)...")
 
-	// Change to proper user data directory for macOS
-	dataDir := os.Getenv("HOME") + "/Library/Application Support/OriAgent"
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
-		log.Fatalf("Failed to create data directory: %v", err)
+	dataDir, err := activateMenubarDataDirectory()
+	if err != nil {
+		log.Fatalf("Failed to activate data directory: %v", err)
 	}
-	if err := os.Chdir(dataDir); err != nil {
-		log.Fatalf("Failed to change to data directory: %v", err)
+	// The shell has its own settings writer. Acquire BEFORE constructing it,
+	// not in Controller.StartServer. Stop/Start Server cannot release this lease;
+	// even Shutdown leaves writers alive, so only full process exit may do so.
+	lease, err := menuBeforeStores(context.Background(), dataDir)
+	if err != nil {
+		if lease != nil && errors.Is(err, settingsreset.ErrRecoveryIncomplete) {
+			if recoveryErr := runMenubarResetRecovery(lease); recoveryErr != nil {
+				log.Fatalf("Reset recovery host failed: %v", recoveryErr)
+			}
+			return
+		}
+		log.Fatalf("Cannot open installation: %v", err)
 	}
 	logger.Debug("Working directory", logger.Fields{"dataDir": dataDir})
 
@@ -48,14 +69,16 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	// Initialize settings managers first
-	onboardingMgr := onboarding.NewManager("app_state.json")
-	settingsMgr := menubar.NewSettingsManager(onboardingMgr)
+	settingsMgr, err := initializeMenubarSettings(lease)
+	if err != nil {
+		log.Fatalf("Cannot initialize shell settings: %v", err)
+	}
 
 	// Get port from settings (defaults to 8765)
 	port := settingsMgr.GetPort()
 	logger.Debug("Using port", logger.Fields{"port": port})
 
-	controller := menubar.NewController(port)
+	controller := menubar.NewControllerWithResetLease(port, lease)
 
 	// Initialize LaunchAgent manager
 	launchAgentMgr, err := menubar.NewLaunchAgentManager()
@@ -100,6 +123,85 @@ func main() {
 
 	systray.Run(onReady, onExit)
 	log.Println("Systray app exited")
+}
+
+func runMenubarResetRecovery(lease *resetstate.Lease) error {
+	port := 8765
+	if configured, err := strconv.Atoi(strings.TrimSpace(os.Getenv("PORT"))); err == nil && configured > 0 && configured <= 65535 {
+		port = configured
+	}
+	address := fmt.Sprintf("127.0.0.1:%d", port)
+	url := fmt.Sprintf("http://localhost:%d/", port)
+	httpServer := settingsreset.RecoveryHTTPServer(lease, address)
+	serveErr := make(chan error, 1)
+	go func() {
+		err := httpServer.ListenAndServe()
+		if errors.Is(err, http.ErrServerClosed) {
+			err = nil
+		}
+		serveErr <- err
+	}()
+	logger.Warn("Ori started in reset recovery mode; shell and application stores remain closed", logger.Fields{"url": url})
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(quit)
+	select {
+	case err := <-serveErr:
+		return err
+	case <-quit:
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return httpServer.Shutdown(ctx)
+}
+
+// Converge shell CWD and server ORI_DATA_DIR, including explicit overrides.
+// No settings manager, credential backend or native UI is initialized here.
+func activateMenubarDataDirectory() (string, error) {
+	dataDir, err := filepath.Abs(config.DefaultDataDir())
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dataDir, 0o750); err != nil {
+		return "", err
+	}
+	dataDir, err = filepath.EvalSymlinks(dataDir)
+	if err != nil {
+		return "", err
+	}
+	if err := os.Chdir(dataDir); err != nil {
+		return "", err
+	}
+	if err := os.Setenv("ORI_DATA_DIR", dataDir); err != nil {
+		return "", err
+	}
+	return dataDir, nil
+}
+
+// Recheck the shared admission/root boundary immediately before shell owners.
+func initializeMenubarSettings(lease *resetstate.Lease) (*menubar.SettingsManager, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	release, err := lease.EnterRuntime(cwd, os.Getenv("ORI_DATA_DIR"))
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	manager := newShellOnboarding("app_state.json")
+	return menubar.NewSettingsManagerWithAdmission(manager, lease.WorkGate()), nil
+}
+
+func startMenuServer(controller *menubar.Controller, settingsMgr *menubar.SettingsManager) error {
+	return settingsMgr.WithMutation(func() error {
+		return controller.StartServerWithPreflight(context.Background(), func(port int) error {
+			if !menuPortCheck(port) {
+				return fmt.Errorf("server start cancelled during port preflight")
+			}
+			return nil
+		})
+	})
 }
 
 func setupMenuSystray(controller *menubar.Controller, settingsMgr *menubar.SettingsManager, launchAgentMgr *menubar.LaunchAgentManager) {
@@ -158,16 +260,7 @@ func setupMenuSystray(controller *menubar.Controller, settingsMgr *menubar.Setti
 			select {
 			case <-startItem.ClickedCh:
 				log.Println("Start Server clicked")
-				if controller.GetStatus() != menubar.StatusStopped {
-					logger.Info("Server already running", nil)
-					continue
-				}
-				port := controller.GetPort()
-				if !ensurePortAvailableForStart(port) {
-					continue
-				}
-				ctx := context.Background()
-				if err := controller.StartServer(ctx); err != nil {
+				if err := startMenuServer(controller, settingsMgr); err != nil {
 					logger.Error("Failed to start server", logger.Fields{"error": err})
 				}
 
@@ -189,31 +282,36 @@ func setupMenuSystray(controller *menubar.Controller, settingsMgr *menubar.Setti
 					continue
 				}
 
-				// Toggle auto-start
-				if autoStartItem.Checked() {
-					// Currently checked, so uncheck (disable auto-start)
-					log.Println("Disabling auto-start...")
-					if err := launchAgentMgr.Uninstall(); err != nil {
-						logger.Error("Failed to uninstall LaunchAgent", logger.Fields{"error": err})
-					} else {
-						if err := settingsMgr.SetAutoStartEnabled(false); err != nil {
-							logger.Error("Failed to save auto-start setting", logger.Fields{"err": err})
+				if err := settingsMgr.WithMutation(func() error {
+					// Keep OS registration and the shell save under one permit.
+					if autoStartItem.Checked() {
+						// Currently checked, so uncheck (disable auto-start)
+						log.Println("Disabling auto-start...")
+						if err := launchAgentMgr.Uninstall(); err != nil {
+							logger.Error("Failed to uninstall LaunchAgent", logger.Fields{"error": err})
+						} else {
+							if err := settingsMgr.SetAutoStartEnabled(false); err != nil {
+								logger.Error("Failed to save auto-start setting", logger.Fields{"err": err})
+							}
+							autoStartItem.Uncheck()
+							log.Println("Auto-start disabled")
 						}
-						autoStartItem.Uncheck()
-						log.Println("Auto-start disabled")
-					}
-				} else {
-					// Currently unchecked, so check (enable auto-start)
-					log.Println("Enabling auto-start...")
-					if err := launchAgentMgr.Install(); err != nil {
-						logger.Error("Failed to install LaunchAgent", logger.Fields{"error": err})
 					} else {
-						if err := settingsMgr.SetAutoStartEnabled(true); err != nil {
-							logger.Error("Failed to save auto-start setting", logger.Fields{"err": err})
+						// Currently unchecked, so check (enable auto-start)
+						log.Println("Enabling auto-start...")
+						if err := launchAgentMgr.Install(); err != nil {
+							logger.Error("Failed to install LaunchAgent", logger.Fields{"error": err})
+						} else {
+							if err := settingsMgr.SetAutoStartEnabled(true); err != nil {
+								logger.Error("Failed to save auto-start setting", logger.Fields{"err": err})
+							}
+							autoStartItem.Check()
+							log.Println("Auto-start enabled")
 						}
-						autoStartItem.Check()
-						log.Println("Auto-start enabled")
 					}
+					return nil
+				}); err != nil {
+					logger.Error("Auto-start change blocked", logger.Fields{"error": err})
 				}
 
 			case <-portItem.ClickedCh:
@@ -249,7 +347,11 @@ func updateMenuForStatusSystray(status menubar.ServerStatus, controller *menubar
 		systray.SetIcon(menubar.GetStoppedIcon())
 		systray.SetTooltip("Ori Agent - Server Stopped")
 		statusItem.SetTitle("Status: Stopped")
-		startItem.Enable()
+		if controller.CanStart() {
+			startItem.Enable()
+		} else {
+			startItem.Disable()
+		}
 		stopItem.Disable()
 		openBrowserItem.Disable()
 
@@ -282,8 +384,16 @@ func updateMenuForStatusSystray(status menubar.ServerStatus, controller *menubar
 		errMsg := controller.GetErrorMessage()
 		systray.SetTooltip("Ori Agent - Error: " + errMsg)
 		statusItem.SetTitle("Status: Error - " + errMsg)
-		startItem.Enable()
-		stopItem.Disable()
+		if controller.CanStart() {
+			startItem.Enable()
+		} else {
+			startItem.Disable()
+		}
+		if controller.CanStop() {
+			stopItem.Enable()
+		} else {
+			stopItem.Disable()
+		}
 		openBrowserItem.Disable()
 	}
 }
@@ -318,6 +428,15 @@ func openBrowser(port int) {
 }
 
 func handlePortConfigurationSystray(controller *menubar.Controller, settingsMgr *menubar.SettingsManager, portItem *systray.MenuItem) {
+	if err := settingsMgr.WithMutation(func() error {
+		handleAdmittedPortConfiguration(controller, settingsMgr, portItem)
+		return nil
+	}); err != nil {
+		logger.Error("Port change blocked", logger.Fields{"error": err})
+	}
+}
+
+func handleAdmittedPortConfiguration(controller *menubar.Controller, settingsMgr *menubar.SettingsManager, portItem *systray.MenuItem) {
 	// Check if server is running
 	if controller.GetStatus() != menubar.StatusStopped {
 		log.Println("Cannot change port while server is running")
@@ -330,7 +449,7 @@ func handlePortConfigurationSystray(controller *menubar.Controller, settingsMgr 
 
 	// Show input dialog (macOS only for now)
 	if runtime.GOOS == "darwin" {
-		newPortStr, err := showInputDialog("Server Port Configuration", fmt.Sprintf("Enter new port number (current: %d):", currentPort), fmt.Sprintf("%d", currentPort))
+		newPortStr, err := menuInputDialog("Server Port Configuration", fmt.Sprintf("Enter new port number (current: %d):", currentPort), fmt.Sprintf("%d", currentPort))
 		if err != nil {
 			logger.Error("Failed to show port dialog", logger.Fields{"err": err})
 			return

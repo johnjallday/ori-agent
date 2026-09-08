@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -19,6 +20,7 @@ const (
 	IngestUnauthorized                     // missing/wrong secret; 401
 	IngestRateLimited                      // over the per-trigger cap; 429
 	IngestWrongType                        // unsupported content type; 415 (decided by caller)
+	IngestUnavailable                      // reset fence/service shutdown; 503
 )
 
 // ErrServiceNotReady is returned by operations attempted before Start.
@@ -30,11 +32,12 @@ var ErrServiceNotReady = errors.New("trigger service not started")
 // registers its watch; deleting one tears it down and forgets its rate
 // bucket).
 type Service struct {
-	store       *Store
-	coalescer   *Coalescer
-	dispatcher  *Dispatcher
-	watch       *WatchManager
-	rateLimiter *rateLimiter
+	admissionGate *resetstate.WorkGate
+	store         *Store
+	coalescer     *Coalescer
+	dispatcher    *Dispatcher
+	watch         *WatchManager
+	rateLimiter   *rateLimiter
 }
 
 // ServiceConfig groups Service dependencies.
@@ -65,10 +68,25 @@ func NewService(cfg ServiceConfig) (*Service, error) {
 	}, nil
 }
 
+// SetAdmissionGate configures one host gate across debounce, persistence,
+// watcher callbacks and dispatch. Call it before Start.
+func (s *Service) SetAdmissionGate(gate *resetstate.WorkGate) {
+	s.admissionGate = gate
+	s.store.SetAdmissionGate(gate)
+	s.coalescer.SetAdmissionGate(gate)
+	s.dispatcher.SetAdmissionGate(gate)
+	s.watch.SetAdmissionGate(gate)
+}
+
 // Start loads triggers from disk, begins file watching, and re-dispatches any
 // fires that were persisted before a restart. Order matters: load → watch →
 // restore, so restored fires see a fully-wired dispatcher (PRD #18, #21).
 func (s *Service) Start() error {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	if err := s.store.LoadAll(); err != nil {
 		return err
 	}
@@ -105,6 +123,11 @@ func (s *Service) Get(workspaceID, triggerID string) (Trigger, error) {
 // Create persists a new trigger and, for enabled file-watch triggers, starts
 // its watch.
 func (s *Service) Create(t Trigger) (Trigger, error) {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return Trigger{}, err
+	}
+	defer release()
 	created, err := s.store.Create(t)
 	if err != nil {
 		return Trigger{}, err
@@ -122,6 +145,11 @@ func (s *Service) Create(t Trigger) (Trigger, error) {
 
 // Update applies fn and reconciles the file watch to match the new state.
 func (s *Service) Update(workspaceID, triggerID string, fn func(*Trigger) error) (Trigger, error) {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return Trigger{}, err
+	}
+	defer release()
 	updated, err := s.store.Update(workspaceID, triggerID, fn)
 	if err != nil {
 		return Trigger{}, err
@@ -172,6 +200,11 @@ func (s *Service) RegenerateToken(workspaceID, triggerID string) (Trigger, error
 // Delete removes a trigger, tears down its watch, and forgets its rate
 // bucket.
 func (s *Service) Delete(workspaceID, triggerID string) error {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	s.watch.Remove(triggerID)
 	s.rateLimiter.forget(triggerID)
 	return s.store.Delete(workspaceID, triggerID)
@@ -182,6 +215,11 @@ func (s *Service) Delete(workspaceID, triggerID string) error {
 // code. Content-type validation is left to the HTTP layer, which knows the
 // raw header; here we only require the resolved trigger to be a webhook.
 func (s *Service) IngestWebhook(token, secret string, ev Event) (string, IngestResult) {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return "", IngestUnavailable
+	}
+	defer release()
 	t, ok := s.store.GetByToken(token)
 	// Unknown and disabled both look identical to the caller (PRD #9).
 	if !ok || !t.Enabled || t.Type != TypeWebhook {
@@ -196,6 +234,9 @@ func (s *Service) IngestWebhook(token, secret string, ev Event) (string, IngestR
 		return "", IngestRateLimited
 	}
 	fireID := s.coalescer.Observe(t, ev)
+	if fireID == "" {
+		return "", IngestUnavailable
+	}
 	return fireID, IngestAccepted
 }
 
@@ -203,6 +244,11 @@ func (s *Service) IngestWebhook(token, secret string, ev Event) (string, IngestR
 // user can verify wiring without waiting for a real event (PRD #28). It
 // dispatches synchronously and returns the resulting fire record.
 func (s *Service) TestFire(workspaceID, triggerID string) (FireRecord, error) {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return FireRecord{}, err
+	}
+	defer release()
 	t, err := s.store.Get(workspaceID, triggerID)
 	if err != nil {
 		return FireRecord{}, err
@@ -278,6 +324,8 @@ func StatusForIngest(r IngestResult) int {
 		return http.StatusTooManyRequests
 	case IngestWrongType:
 		return http.StatusUnsupportedMediaType
+	case IngestUnavailable:
+		return http.StatusServiceUnavailable
 	default:
 		return http.StatusNotFound
 	}

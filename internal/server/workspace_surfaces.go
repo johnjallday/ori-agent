@@ -70,6 +70,7 @@ func (b *ServerBuilder) wireWorkspaceSurfaces() {
 	}
 	registry := workspacesurface.NewRegistry()
 	services := workspacesurface.NewServiceManager(nil)
+	services.SetAdmissionGate(b.resetWork)
 
 	attachments := workspacesurfacehttp.AttachmentCheckerFunc(func(_ context.Context, workspaceID string, surface workspacesurface.RegisteredSurface) bool {
 		if b.pluginHandler == nil || surface.Owner.Kind != workspacesurface.OwnerPlugin {

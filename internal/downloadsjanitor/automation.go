@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	workspace "github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 )
@@ -73,9 +74,10 @@ type TriggerRecord struct {
 
 // Automation installs, removes, and services the Janitor's unattended runs.
 type Automation struct {
-	service  *Service
-	triggers TriggerStore
-	now      func() time.Time
+	admissionGate *resetstate.WorkGate
+	service       *Service
+	triggers      TriggerStore
+	now           func() time.Time
 	// scan is the function one automatic run performs. It defaults to the
 	// service's own ScanNow so automatic and manual runs share one path;
 	// coalescing tests substitute a blocking implementation to hold a scan open
@@ -93,8 +95,10 @@ type Automation struct {
 	// catch-up, so a restart or a re-tick cannot run it twice in one day.
 	lastCatchUp map[string]string
 
-	stop chan struct{}
-	done chan struct{}
+	stop     chan struct{}
+	done     chan struct{}
+	stopping bool
+	scanWG   sync.WaitGroup
 }
 
 // NewAutomation builds the automation service.
@@ -110,6 +114,9 @@ func NewAutomation(service *Service, triggers TriggerStore) *Automation {
 	automation.scan = service.ScanNow
 	return automation
 }
+
+// SetAdmissionGate configures reset admission before automation starts.
+func (a *Automation) SetAdmissionGate(gate *resetstate.WorkGate) { a.admissionGate = gate }
 
 func (a *Automation) clock() time.Time {
 	if a == nil || a.now == nil {
@@ -130,6 +137,11 @@ func (a *Automation) EnsureWatcher(workspaceID string) error {
 	if a == nil || a.triggers == nil {
 		return nil
 	}
+	release, err := a.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	settings, err := a.service.store.LoadSettings(workspaceID)
 	if err != nil {
 		return err
@@ -220,6 +232,11 @@ func (a *Automation) PauseWatcher(workspaceID string) error {
 	if a == nil || a.triggers == nil {
 		return nil
 	}
+	release, err := a.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	existing, err := a.findWatcher(workspaceID)
 	if err != nil || existing == nil {
 		return err
@@ -236,6 +253,11 @@ func (a *Automation) RemoveWatcher(workspaceID string) error {
 	if a == nil || a.triggers == nil {
 		return nil
 	}
+	release, err := a.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	existing, err := a.findWatcher(workspaceID)
 	if err != nil || existing == nil {
 		return err
@@ -265,16 +287,34 @@ func (a *Automation) HandleDomainScan(workspaceID, fireID string, eventCount int
 // during a scan collapse into exactly one more scan afterwards. That is what
 // turns a burst of a hundred events into one active scan and one follow-up.
 func (a *Automation) RunCoalescedScan(workspaceID string, source ScanSource) {
+	if a == nil {
+		return
+	}
+	release, err := a.admissionGate.Enter()
+	if err != nil {
+		return
+	}
 	a.mu.Lock()
+	if a.stopping {
+		a.mu.Unlock()
+		release()
+		return
+	}
 	if a.running[workspaceID] {
 		a.followUp[workspaceID] = true
 		a.mu.Unlock()
+		release()
 		return
 	}
 	a.running[workspaceID] = true
+	a.scanWG.Add(1)
 	a.mu.Unlock()
 
-	go a.drainScans(workspaceID, source)
+	go func() {
+		defer a.scanWG.Done()
+		defer release()
+		a.drainScans(workspaceID, source)
+	}()
 }
 
 // drainScans runs the scan, then any single follow-up that accumulated while it
@@ -283,6 +323,7 @@ func (a *Automation) drainScans(workspaceID string, source ScanSource) {
 	defer func() {
 		a.mu.Lock()
 		delete(a.running, workspaceID)
+		delete(a.followUp, workspaceID)
 		a.mu.Unlock()
 	}()
 
@@ -293,6 +334,10 @@ func (a *Automation) drainScans(workspaceID string, source ScanSource) {
 		wanted := a.followUp[workspaceID]
 		delete(a.followUp, workspaceID)
 		if !wanted {
+			// Clear running under the same lock used by RunCoalescedScan. An
+			// arrival can now either become this run's follow-up or start a new
+			// admitted child; it cannot be stranded between check and teardown.
+			delete(a.running, workspaceID)
 			a.mu.Unlock()
 			return
 		}
@@ -342,6 +387,11 @@ func (a *Automation) Start(workspaces func() []string, interval time.Duration) {
 	if a == nil {
 		return
 	}
+	release, err := a.admissionGate.Enter()
+	if err != nil {
+		return
+	}
+	defer release()
 	if interval <= 0 {
 		interval = time.Minute
 	}
@@ -353,6 +403,7 @@ func (a *Automation) Start(workspaces func() []string, interval time.Duration) {
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	a.stop, a.done = stop, done
+	a.stopping = false
 	a.mu.Unlock()
 
 	go func() {
@@ -377,14 +428,15 @@ func (a *Automation) Stop() {
 		return
 	}
 	a.mu.Lock()
+	a.stopping = true
 	stop, done := a.stop, a.done
 	a.stop, a.done = nil, nil
 	a.mu.Unlock()
-	if stop == nil {
-		return
+	if stop != nil {
+		close(stop)
+		<-done
 	}
-	close(stop)
-	<-done
+	a.scanWG.Wait()
 }
 
 // tick checks every configured workspace and runs the ones whose local catch-up
@@ -393,6 +445,11 @@ func (a *Automation) tick(workspaces func() []string) {
 	if workspaces == nil {
 		return
 	}
+	release, err := a.admissionGate.Enter()
+	if err != nil {
+		return
+	}
+	defer release()
 	now := a.clock()
 	for _, workspaceID := range workspaces() {
 		if a.dueForCatchUp(workspaceID, now) {
@@ -466,6 +523,11 @@ func (a *Automation) SchedulerRegistered(string) bool {
 // MarkCaughtUp records that a workspace already ran today, used when restoring
 // scheduler state after a restart.
 func (a *Automation) MarkCaughtUp(workspaceID, localDate string) {
+	release, err := a.admissionGate.Enter()
+	if err != nil {
+		return
+	}
+	defer release()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.lastCatchUp[workspaceID] = localDate

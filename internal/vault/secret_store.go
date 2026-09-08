@@ -90,16 +90,28 @@ type AutoSecretStoreOptions struct {
 }
 
 func NewDefaultSecretStore() SecretStore {
-	return NewAutoSecretStore(AutoSecretStoreOptions{
-		FallbackPassphrase: strings.TrimSpace(os.Getenv("ORI_VAULT_PASSPHRASE")),
-	})
+	return newEnvironmentSecretStore("")
 }
 
 func NewDefaultSecretStoreForNamespace(namespace string) SecretStore {
-	return NewAutoSecretStore(AutoSecretStoreOptions{
+	return newEnvironmentSecretStore(namespace)
+}
+
+func newEnvironmentSecretStore(namespace string) SecretStore {
+	options := AutoSecretStoreOptions{
 		Namespace:          namespace,
 		FallbackPassphrase: strings.TrimSpace(os.Getenv("ORI_VAULT_PASSPHRASE")),
-	})
+	}
+	// Explicitly disabling native discovery gives isolated demos and test-owned
+	// processes a fallback namespace without touching a user's Keychain or
+	// Secret Service. It never weakens native storage implicitly.
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("ORI_DISABLE_NATIVE_SECRET_STORE")), "true") || strings.TrimSpace(os.Getenv("ORI_DISABLE_NATIVE_SECRET_STORE")) == "1" {
+		unavailable := false
+		options.DarwinAvailable = &unavailable
+		options.LinuxAvailable = &unavailable
+		options.WindowsAvailable = &unavailable
+	}
+	return NewAutoSecretStore(options)
 }
 
 func NewAutoSecretStore(opts AutoSecretStoreOptions) SecretStore {

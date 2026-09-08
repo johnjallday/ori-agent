@@ -10,13 +10,15 @@ import (
 	"sync"
 
 	"github.com/johnjallday/ori-agent/internal/cliagent"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 )
 
 // Handler provides HTTP endpoints for CLI agent task management.
 type Handler struct {
-	executor    *cliagent.MicroStepExecutor
-	registry    *cliagent.CLIAgentRegistry
-	eventLogger *cliagent.EventLogger
+	executor      *cliagent.MicroStepExecutor
+	registry      *cliagent.CLIAgentRegistry
+	eventLogger   *cliagent.EventLogger
+	admissionGate *resetstate.WorkGate
 
 	mu      sync.RWMutex
 	results map[string]*cliagent.TaskResult // taskID -> result (for completed tasks)
@@ -32,6 +34,11 @@ func NewHandler(executor *cliagent.MicroStepExecutor, registry *cliagent.CLIAgen
 		results:     make(map[string]*cliagent.TaskResult),
 		pending:     make(map[string]*cliagent.TaskConfig),
 	}
+}
+
+// SetAdmissionGate must be called before serving, with the executor's gate.
+func (h *Handler) SetAdmissionGate(gate *resetstate.WorkGate) {
+	h.admissionGate = gate
 }
 
 // createTaskRequest is the request body for POST /api/cli-agents/tasks.
@@ -79,11 +86,20 @@ func (h *Handler) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Register the detached work before the HTTP request can finish. Acquiring
+	// only inside Execute would leave an idle gap after returning 202.
+	release, err := h.admissionGate.Enter()
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "reset_pending"})
+		return
+	}
+
 	// Launch task in background. The request context is canceled as soon as
 	// this handler returns, so the background task must not inherit its
 	// cancellation or it dies almost immediately.
 	taskCtx := context.WithoutCancel(r.Context())
 	go func() {
+		defer release()
 		result, err := h.executor.Execute(taskCtx, config)
 		if err != nil {
 			result = &cliagent.TaskResult{

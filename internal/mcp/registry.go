@@ -6,13 +6,15 @@ import (
 	"reflect"
 	"sync"
 
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
 )
 
 // Registry manages multiple MCP servers and their tools
 type Registry struct {
-	servers map[string]*Server // server name -> server instance
-	mu      sync.RWMutex
+	admissionGate *resetstate.WorkGate
+	servers       map[string]*Server // server name -> server instance
+	mu            sync.RWMutex
 }
 
 // NewRegistry creates a new MCP server registry
@@ -22,8 +24,23 @@ func NewRegistry() *Registry {
 	}
 }
 
+// SetAdmissionGate configures one host gate for existing and future servers.
+func (r *Registry) SetAdmissionGate(gate *resetstate.WorkGate) {
+	r.mu.Lock()
+	r.admissionGate = gate
+	for _, server := range r.servers {
+		server.SetAdmissionGate(gate)
+	}
+	r.mu.Unlock()
+}
+
 // AddServer adds a new MCP server to the registry
 func (r *Registry) AddServer(config ServerConfig) error {
+	release, err := r.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	if err := ValidateServerConfig(config); err != nil {
 		return err
 	}
@@ -36,6 +53,7 @@ func (r *Registry) AddServer(config ServerConfig) error {
 	}
 
 	server := NewServer(config)
+	server.SetAdmissionGate(r.admissionGate)
 	r.servers[config.Name] = server
 
 	return nil
@@ -60,6 +78,11 @@ func (r *Registry) UpsertServer(config ServerConfig) error {
 
 // RemoveServer removes an MCP server from the registry
 func (r *Registry) RemoveServer(name string) error {
+	release, err := r.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -105,6 +128,11 @@ func (r *Registry) ListServers() []ServerConfig {
 
 // StartServer starts an MCP server by name
 func (r *Registry) StartServer(name string) error {
+	release, err := r.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	server, err := r.GetServer(name)
 	if err != nil {
 		return err
@@ -195,6 +223,11 @@ func (r *Registry) GetToolsForServer(serverName string) ([]toolapi.Tool, error) 
 
 // CallTool calls a tool on a specific server
 func (r *Registry) CallTool(ctx context.Context, serverName, toolName string, arguments map[string]any) (*ToolCallResult, error) {
+	release, err := r.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	server, err := r.GetServer(serverName)
 	if err != nil {
 		return nil, err
@@ -209,6 +242,11 @@ func (r *Registry) CallTool(ctx context.Context, serverName, toolName string, ar
 
 // StartAll starts all enabled servers
 func (r *Registry) StartAll() error {
+	release, err := r.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 

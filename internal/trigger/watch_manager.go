@@ -8,6 +8,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/filewatcher"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -22,6 +23,7 @@ const watchValidateInterval = time.Minute
 // separate from the session watcher used by DirectorySyncManager), filters
 // raw events per trigger, and feeds matches into the coalescer.
 type WatchManager struct {
+	admissionGate *resetstate.WorkGate
 	store         *Store
 	coalescer     *Coalescer
 	watcher       *filewatcher.Watcher
@@ -47,9 +49,17 @@ func NewWatchManager(store *Store, coalescer *Coalescer, opps workspace.Opportun
 	}, nil
 }
 
+// SetAdmissionGate configures reset admission before Start or owner access.
+func (m *WatchManager) SetAdmissionGate(gate *resetstate.WorkGate) { m.admissionGate = gate }
+
 // Start registers all enabled file-watch triggers and begins processing
 // events. Call after Store.LoadAll and after the dispatcher is wired.
 func (m *WatchManager) Start() {
+	release, err := m.admissionGate.Enter()
+	if err != nil {
+		return
+	}
+	defer release()
 	m.watcher.Start()
 
 	for _, t := range m.store.ListAll() {
@@ -71,6 +81,11 @@ func (m *WatchManager) Start() {
 // Add starts watching for one trigger. The path is live-validated first; on
 // failure the trigger's tracking fields are updated and the error returned.
 func (m *WatchManager) Add(t Trigger) error {
+	release, err := m.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	if t.Type != TypeFileWatch || t.FileWatch == nil {
 		return nil
 	}
@@ -88,6 +103,11 @@ func (m *WatchManager) Add(t Trigger) error {
 // Remove stops watching for one trigger (disable or delete) and drops any
 // open coalescing window.
 func (m *WatchManager) Remove(triggerID string) {
+	release, err := m.admissionGate.Enter()
+	if err != nil {
+		return
+	}
+	defer release()
 	if err := m.watcher.Unwatch(triggerID); err != nil {
 		logger.Debug("trigger watch manager: unwatch", logger.Fields{
 			"trigger_id": triggerID, "error": err,
@@ -124,6 +144,11 @@ func (m *WatchManager) eventLoop() {
 // returns one arbitrary key per path, which would starve a second trigger
 // watching the same directory).
 func (m *WatchManager) handleEvent(ev filewatcher.WatchEvent) {
+	release, err := m.admissionGate.Enter()
+	if err != nil {
+		return
+	}
+	defer release()
 	dir := filepath.Dir(ev.FilePath)
 	for _, t := range m.store.ListAll() {
 		if t.Type != TypeFileWatch || !t.Enabled || t.FileWatch == nil {
@@ -165,6 +190,11 @@ func (m *WatchManager) validateLoop() {
 
 // validateWatches stats every enabled watch path once.
 func (m *WatchManager) validateWatches() {
+	release, err := m.admissionGate.Enter()
+	if err != nil {
+		return
+	}
+	defer release()
 	for _, t := range m.store.ListAll() {
 		if t.Type != TypeFileWatch || !t.Enabled {
 			continue

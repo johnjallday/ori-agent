@@ -2,7 +2,6 @@ package settingshttp
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,10 +14,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
-// Exercise the reusable fixture against the real reset handler, not a mock
-// success endpoint. Sessions reset remains deliberately excluded here: the
-// current handler recursively deletes data/workspaces, where this fixture has
-// a retained-project sentinel. Later preservation regressions must address it.
+// Exercise the real handler's compatibility refusal, not a mock success.
+// The unsafe legacy live-deletion implementation is no longer in the product.
 func TestResetFixtureSettingsRequestUsesOnlyOwnedInstallation(t *testing.T) {
 	f := resetfixture.NewSeeded(t)
 	p := f.Paths()
@@ -58,11 +55,11 @@ func TestResetFixtureSettingsRequestUsesOnlyOwnedInstallation(t *testing.T) {
 	if err := json.NewDecoder(accepted.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	if accepted.StatusCode != http.StatusOK || !result.Success || len(result.ResetItems) != 1 || result.ResetItems[0] != "settings" {
+	if accepted.StatusCode != http.StatusConflict || result.Success || len(result.ResetItems) != 0 || result.Code != "preview_required" {
 		t.Fatalf("unexpected reset outcome: status=%d result=%+v", accepted.StatusCode, result)
 	}
-	if _, err := os.Stat(settingsPath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("confirmed reset did not remove fixture settings")
+	if _, err := os.Stat(settingsPath); err != nil {
+		t.Fatal("legacy confirmation deleted live settings without preview:", err)
 	}
 	for _, name := range []string{"agents.json", "app_state.json", "sessions.db", "session_files/fixture-upload.txt"} {
 		if _, err := os.Stat(filepath.Join(p.DataDir, name)); err != nil {
