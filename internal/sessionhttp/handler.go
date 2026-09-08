@@ -40,10 +40,15 @@ type Handler struct {
 	assistantModelValidator   func(provider, model string) error
 	assistantHomeRemoved      func(workspaceID string) error
 	assistantReviewedStaffer  func(context.Context, string, string, string, string) error
-	agentStore                store.Store
-	systemModelReader         SystemModelReader
-	workspaceAllowlist        *workspace.Allowlist
-	eventBus                  *workspace.EventBus // optional, for project.created events
+	// assistantRoleStaffer commits exactly the roles the user filled on an
+	// assistant-program blueprint. Separate from assistantReviewedStaffer,
+	// which staffs every required role: under the vacancy model a role the user
+	// left empty must stay empty.
+	assistantRoleStaffer func(context.Context, string, []RoleStaffingFill) error
+	agentStore           store.Store
+	systemModelReader    SystemModelReader
+	workspaceAllowlist   *workspace.Allowlist
+	eventBus             *workspace.EventBus // optional, for project.created events
 	// applyTemplateTools binds a template's declared default tools onto a newly
 	// created workspace (apply-if-present), returning the applied and skipped
 	// names. Injected by the server, which holds the tool registries and binds
@@ -196,6 +201,22 @@ func (h *Handler) SetAssistantModelValidator(validate func(provider, model strin
 // reviewed Home topology removal succeeds.
 func (h *Handler) SetAssistantReviewedStaffer(staff func(context.Context, string, string, string, string) error) {
 	h.assistantReviewedStaffer = staff
+}
+
+// RoleStaffingFill is one role the user chose to fill, as handed to the
+// assistant role staffer. Mode is "create" or "assign".
+type RoleStaffingFill struct {
+	RoleID   string
+	Mode     string
+	Name     string
+	Provider string
+	Model    string
+}
+
+// SetAssistantRoleStaffer supplies the per-role staffing callback used when a
+// create request carries role_staffing for an assistant-program blueprint.
+func (h *Handler) SetAssistantRoleStaffer(staff func(context.Context, string, []RoleStaffingFill) error) {
+	h.assistantRoleStaffer = staff
 }
 func (h *Handler) SetAssistantHomeRemoved(finalize func(workspaceID string) error) {
 	h.assistantHomeRemoved = finalize

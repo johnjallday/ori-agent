@@ -508,10 +508,17 @@ test('new blueprint agents require explicit setup acknowledgement before Team ca
   assert.equal(proposed.statusLabel, 'New · Needs setup');
   assert.equal(proposed.actionLabel, 'Set up agent');
   assert.equal(reused.setupState, 'ready', 'exact-name reuse needs no acknowledgement');
-  assert.equal(view.canContinueFromTeam, false);
-  assert.equal(view.blockingIssues.length, 1, 'pending rows are aggregated into one blocker');
-  assert.equal(view.blockingIssues[0].id, 'template-agent-setup-required');
-  assert.equal(view.blockingIssues[0].templateAgentIndex, 0);
+
+  // Setup state is still tracked per proposed agent, but it no longer BLOCKS.
+  // A blueprint that declares roles creates nothing unless the user fills one,
+  // so demanding setup for agents the request will not make would block Review
+  // on work that is not going to happen — and leaving a role empty must never
+  // block (FR19).
+  assert.equal(view.canContinueFromTeam, true);
+  assert.equal(
+    view.blockingIssues.find(issue => issue.id === 'template-agent-setup-required'),
+    undefined
+  );
 
   Draft.acceptRecommended(draft, 0);
   view = Draft.derive(draft);
@@ -654,7 +661,9 @@ test('recommended batch setup is idempotent and never overwrites individual work
 
   assert.equal(Draft.undoBatchRecommended(draft), 2);
   view = Draft.derive(draft);
-  assert.equal(view.canContinueFromTeam, false);
+  // Undoing the batch returns both rows to "needs setup" without blocking:
+  // an unreviewed proposal is only a proposal until its role is filled.
+  assert.equal(view.canContinueFromTeam, true);
   assert.equal(view.batchSetup.pendingCount, 2);
   assert.equal(view.roster.find(row => row.originalName === 'Two').name, 'Two Custom');
   assert.equal(view.roster.find(row => row.originalName === 'Two').setupAcknowledged, true);

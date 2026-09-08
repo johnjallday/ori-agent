@@ -322,6 +322,14 @@
                   <div id="workspaceTeamIssues" class="workspace-team-issues"></div>
                   <div id="workspaceTeamBatchActions" class="workspace-team-batch-actions" aria-live="polite"></div>
 
+                  <!-- The blueprint's declared roles, as slots. Rendered by the
+                       SAME component the workspace's own roster uses, so the
+                       wizard and the workspace can never describe different
+                       teams. Not a live region: it re-renders wholesale, and
+                       each fill or clear is announced once in words through
+                       #workspaceTeamLiveRegion. -->
+                  <div id="workspaceRoleRoster" class="workspace-role-roster" hidden></div>
+
                   <!-- ONE roster: blueprint agents and manually added saved
                        agents together, primary first. There is no separate
                        nested "Blueprint agents" card. -->

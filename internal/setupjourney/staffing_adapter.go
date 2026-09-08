@@ -472,6 +472,101 @@ func (a *AssistantStaffingAdapter) StaffFromReviewedWorkspaceSetup(ctx context.C
 	return nil
 }
 
+// RoleFill is one role the user chose to fill on the Create Workspace step.
+// Mode is StaffingModeCreate or StaffingModeBind.
+type RoleFill struct {
+	RoleID   string
+	Mode     string
+	Name     string
+	Provider string
+	Model    string
+}
+
+// StaffRolesFromReviewedWorkspaceSetup commits EXACTLY the roles the user
+// filled, and never a role they left empty. It is the vacancy-model counterpart
+// of StaffFromReviewedWorkspaceSetup, which staffs every required role.
+//
+// Like that one it is deliberately not an agent- or HTTP-facing shortcut: the
+// session handler receives it as a compiled callback after its own review. It
+// goes through the adapter's ordinary Review/Commit pair rather than around it,
+// so there is exactly one code path that binds a role (FR54).
+func (a *AssistantStaffingAdapter) StaffRolesFromReviewedWorkspaceSetup(ctx context.Context, projectID string, fills []RoleFill) error {
+	if len(fills) == 0 {
+		return nil
+	}
+	project, err := a.workspaces.Get(strings.TrimSpace(projectID))
+	if err != nil {
+		return ErrConflict
+	}
+	link := project.GetAssistantProjectLink()
+	if link == nil {
+		return ErrConflict
+	}
+	station, err := a.workspaces.Get(link.StationWorkspaceID)
+	if err != nil {
+		return ErrConflict
+	}
+	state := station.GetAssistantProgramState()
+	if state == nil || state.Declaration == nil {
+		return ErrConflict
+	}
+	scopeByRole := make(map[string]workspace.AssistantRoleScope, len(state.Declaration.Roles))
+	optionalByRole := make(map[string]bool, len(state.Declaration.Roles))
+	for _, role := range state.Declaration.Roles {
+		scope := role.Scope
+		if scope == "" {
+			scope = workspace.AssistantRoleScopeProject
+		}
+		scopeByRole[role.ID] = scope
+		optionalByRole[role.ID] = !role.Required
+	}
+
+	scope := ReadScope{
+		OwnerUserID: state.Key.OwnerUserID, ExpectedAssistantProgramID: state.Key.ProgramID,
+		HomeWorkspaceID: station.ID, ProjectWorkspaceID: project.ID,
+	}
+	// Home and project roles are separately revisioned, and the review action
+	// differs for an optional Home role, so each group commits on its own.
+	for _, target := range []workspace.AssistantRoleScope{workspace.AssistantRoleScopeHome, workspace.AssistantRoleScopeProject} {
+		for _, optional := range []bool{false, true} {
+			input := staffingInput{}
+			for _, fill := range fills {
+				if scopeByRole[fill.RoleID] != target || optionalByRole[fill.RoleID] != optional {
+					continue
+				}
+				role := staffingRoleInput{RoleID: fill.RoleID, Name: fill.Name, Provider: fill.Provider, Model: fill.Model}
+				if fill.Mode == StaffingModeBind {
+					role.Mode = StaffingModeBind
+					role.Provider, role.Model = "", ""
+				}
+				input.Roles = append(input.Roles, role)
+			}
+			if len(input.Roles) == 0 {
+				continue
+			}
+			raw, marshalErr := json.Marshal(input)
+			if marshalErr != nil {
+				return ErrInvalid
+			}
+			reviewAction, commitAction := ActionReviewHomeStaffing, ActionAddHomeStaffing
+			switch {
+			case target == workspace.AssistantRoleScopeProject:
+				reviewAction, commitAction = ActionReviewProjectStaffing, ActionAddProjectStaffing
+			case optional:
+				reviewAction, commitAction = ActionReviewOptionalHomeStaffing, ActionAddOptionalHomeStaffing
+			}
+			review, reviewErr := a.Review(ctx, scope, reviewAction, raw)
+			if reviewErr != nil {
+				return reviewErr
+			}
+			if _, commitErr := a.Commit(ctx, scope, commitAction, raw, review); commitErr != nil {
+				return commitErr
+			}
+		}
+	}
+	return nil
+}
+
 func (a *AssistantStaffingAdapter) ConsequenceObserved(action ActionID, read CanonicalStepRead) bool {
 	if read.Staffing == nil {
 		return false
@@ -616,7 +711,16 @@ func (a *AssistantStaffingAdapter) reviewProjection(scope ReadScope, owner *staf
 			missing[role.ID] = role
 		}
 	}
-	if len(missing) == 0 || len(input.Roles) != len(missing) {
+	// A request may staff a SUBSET of the unfilled roles. It used to have to
+	// staff every one of them, which is precisely what made "fill the Producer
+	// today and the Mix Engineer next week" impossible: a role is a slot, and
+	// leaving one empty is a supported outcome (FR7).
+	//
+	// Callers that do staff the complete set — StaffFromReviewedWorkspaceSetup
+	// and the setup journey's own steps — are unaffected: they send exactly the
+	// missing roles, which is still accepted. What stays rejected is a role
+	// that is not missing at all, caught per entry below.
+	if len(missing) == 0 || len(input.Roles) > len(missing) {
 		return nil, ErrConflict
 	}
 	targetWorkspace := owner.station

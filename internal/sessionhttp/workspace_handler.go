@@ -232,7 +232,76 @@ type createWorkspaceRequest struct {
 	CreateTemplateAgents   *bool                      `json:"create_template_agents,omitempty"`
 	TemplateAgentOverrides []templateAgentOverride    `json:"template_agent_overrides,omitempty"`
 	TemplateAgentReview    *templateAgentReview       `json:"template_agent_review,omitempty"`
-	Blank                  bool                       `json:"blank,omitempty"` // The Blank blueprint: seed the synthetic single-agent roster (no template, no project)
+	// RoleStaffing carries the user's per-role choices: which of the
+	// blueprint's declared roles to fill, and how. A role the user left empty
+	// is simply absent, so an empty (but present) slice means "create this
+	// workspace with nobody in it" — a supported outcome.
+	//
+	// Its ABSENCE is what preserves every pre-vacancy caller: nil means the
+	// endpoint behaves exactly as it always has, auto-staffing required roles
+	// and seeding template agents (FR57). The vacancy default is a property of
+	// the wizard, not of this API, which is why CreateFromTemplate and the
+	// Personal HQ setup coordinator are unaffected.
+	RoleStaffing []roleStaffingInput `json:"role_staffing,omitempty"`
+	Blank        bool                `json:"blank,omitempty"` // The Blank blueprint: seed the synthetic single-agent roster (no template, no project)
+}
+
+// roleStaffingInput is one filled role in a create request.
+type roleStaffingInput struct {
+	RoleID string `json:"role_id"`
+	// Mode is "create" (mint a new agent from the role's spec) or "assign"
+	// (attach one the user already has). It mirrors the staffing adapter's
+	// modes so there is one vocabulary end to end.
+	Mode     string `json:"mode"`
+	Name     string `json:"name"`
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
+}
+
+const (
+	roleStaffingModeCreate = "create"
+	roleStaffingModeAssign = "assign"
+)
+
+// normalizeRoleStaffing validates the per-role choices and returns them keyed
+// by role id. A malformed entry is rejected rather than skipped: silently
+// dropping one would create a workspace missing a role the user asked for and
+// report success.
+func normalizeRoleStaffing(items []roleStaffingInput) (map[string]roleStaffingInput, error) {
+	out := make(map[string]roleStaffingInput, len(items))
+	seenNames := make(map[string]string, len(items))
+	for _, item := range items {
+		item.RoleID = strings.ToLower(strings.TrimSpace(item.RoleID))
+		item.Mode = strings.ToLower(strings.TrimSpace(item.Mode))
+		item.Name = strings.TrimSpace(item.Name)
+		item.Provider = strings.ToLower(strings.TrimSpace(item.Provider))
+		item.Model = strings.TrimSpace(item.Model)
+		if item.Mode == "" {
+			item.Mode = roleStaffingModeCreate
+		}
+		if item.RoleID == "" || item.Name == "" {
+			return nil, fmt.Errorf("each role_staffing entry needs a role_id and a name")
+		}
+		if item.Mode != roleStaffingModeCreate && item.Mode != roleStaffingModeAssign {
+			return nil, fmt.Errorf("role_staffing mode for %q must be create or assign", item.RoleID)
+		}
+		if item.Mode == roleStaffingModeAssign && (item.Provider != "" || item.Model != "") {
+			return nil, fmt.Errorf("assigning %q cannot change its provider or model", item.Name)
+		}
+		if _, duplicate := out[item.RoleID]; duplicate {
+			return nil, fmt.Errorf("role %q is staffed twice", item.RoleID)
+		}
+		// One agent fills at most one role per workspace: two roles naming the
+		// same agent would resolve to a single attachment and silently drop a
+		// role the user believes they filled.
+		nameKey := strings.ToLower(item.Name)
+		if other, clash := seenNames[nameKey]; clash {
+			return nil, fmt.Errorf("agent %q cannot fill both %q and %q", item.Name, other, item.RoleID)
+		}
+		seenNames[nameKey] = item.RoleID
+		out[item.RoleID] = item
+	}
+	return out, nil
 }
 
 // CreateFromTemplate creates a normal (non-group) workspace from a built-in
@@ -507,6 +576,19 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		} else {
 			assistantStationID = station.ID
 		}
+		// An assistant-program blueprint can only be staffed once its station
+		// link exists, which is why this runs here rather than in the
+		// entry-agent stage. Exactly the roles the user filled are committed;
+		// the roles they left empty stay empty.
+		if assistantStationID != "" && len(req.RoleStaffing) > 0 {
+			if warning := h.staffAssistantRoles(r.Context(), ws.ID, req.RoleStaffing); warning != "" {
+				if prov.projectWarning == "" {
+					prov.projectWarning = warning
+				} else {
+					prov.projectWarning += "; " + warning
+				}
+			}
+		}
 	}
 
 	// Completeness/ordering backstop: when the workspace was created with an
@@ -607,6 +689,45 @@ func buildCreateWorkspace(req createWorkspaceRequest, kind session.WorkspaceKind
 func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *session.Workspace, req createWorkspaceRequest, kind session.WorkspaceKind, tmpl projecttemplates.Template, templateResolved bool, strictTemplate *projecttemplates.Template) (seedAgentsResult, bool) {
 	var seed seedAgentsResult
 	usesExistingAgentRoster := req.ExistingAgentNames != nil
+
+	// The vacancy model replaces automatic staffing entirely: exactly the roles
+	// the user filled are staffed, and NOTHING else runs — no whole-roster
+	// seeding, and no fallback "<Name> Manager" when every role was left empty
+	// (FR59). A workspace with no agent is a supported outcome, and inventing
+	// one to avoid it is the behavior this feature exists to remove.
+	//
+	// An assistant-program blueprint staffs after creation instead: its station
+	// link does not exist until the workspace is persisted.
+	if req.RoleStaffing != nil {
+		if templateResolved && !tmpl.HasAssistantProgram() && tmpl.HasAgents() {
+			staffing, err := normalizeRoleStaffing(req.RoleStaffing)
+			if err != nil {
+				_ = orihttp.RespondBadRequest(w, err.Error())
+				return seed, false
+			}
+			seed, err = h.seedRoleStaffedAgents(ws, tmpl, staffing)
+			if err != nil {
+				cleanupErrors := h.respondRoleStaffingError(seed, err)
+				response := map[string]any{
+					"error":    err.Error(),
+					"conflict": map[string]any{"type": "role_staffing"},
+				}
+				if len(cleanupErrors) > 0 {
+					response["cleanup_errors"] = cleanupErrors
+				}
+				_ = orihttp.RespondJSON(w, http.StatusConflict, response)
+				return seedAgentsResult{}, false
+			}
+		}
+		for _, name := range req.ExistingAgentNames {
+			attachWorkspaceSpecialist(ws, name)
+		}
+		if !seed.EntrySet && len(req.ExistingAgentNames) > 0 {
+			setWorkspaceEntryAgent(ws, req.ExistingAgentNames[0])
+			seed.EntrySet = true
+		}
+		return seed, true
+	}
 
 	if strictTemplate != nil && req.TemplateAgentReview != nil {
 		var err error

@@ -1284,7 +1284,13 @@
         templateAgentIndex: failedEntry.templateAgentIndex
       });
     }
-    if (pendingSetups.length > 0) {
+    // "Set up these proposed agents first" belongs to the flow that created the
+    // whole roster on submit. Under the vacancy model nothing is created unless
+    // the user fills a role, and filling one configures it on its own row — so
+    // demanding setup for agents that may never exist would block Review on
+    // work the request will not do, and leaving roles empty must never block
+    // (FR19).
+    if (pendingSetups.length > 0 && roleRoster.total_count === 0) {
       issues.push({
         id: 'template-agent-setup-required',
         severity: 'blocking',

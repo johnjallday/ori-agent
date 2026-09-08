@@ -418,7 +418,16 @@ const sessionManager = {
     });
     document.getElementById('existingAgentRosterList')?.addEventListener('click', event => {
       const button = event.target.closest('[data-existing-agent-add]');
-      if (button) this.addExistingAgent(button.dataset.existingAgentAdd || '');
+      if (!button) return;
+      const name = button.dataset.existingAgentAdd || '';
+      // While the picker is scoped to a role, choosing an agent FILLS that role
+      // rather than attaching it as an extra team member — the user opened it
+      // from that row and expects to land back there.
+      if (this.workspaceRoleAssigning) {
+        this.assignWorkspaceRole(this.workspaceRoleAssigning, name);
+        return;
+      }
+      this.addExistingAgent(name);
     });
     // Roster actions are delegated: the list re-renders on every draft change,
     // so per-row listeners would have to be rebound each time.
@@ -4089,6 +4098,18 @@ const sessionManager = {
       return;
     }
 
+    // When the blueprint declares roles, the role roster IS the team list —
+    // it shows the same members with their slots and their fill actions. Two
+    // lists of the same people is how the two come to disagree.
+    if (view.roleRoster && view.roleRoster.total_count > 0) {
+      list.innerHTML = '';
+      list.hidden = true;
+      if (note) note.hidden = true;
+      if (advanced) advanced.hidden = true;
+      return;
+    }
+    list.hidden = false;
+
     list.innerHTML = view.roster
       .map((entry, index) => this.renderWorkspaceTeamRow(entry, index))
       .join('');
@@ -4106,8 +4127,16 @@ const sessionManager = {
 
   renderWorkspaceTeamBatchActions() {
     const host = document.getElementById('workspaceTeamBatchActions');
-    const batch = this.teamView()?.batchSetup;
+    const view = this.teamView();
+    const batch = view?.batchSetup;
     if (!host || !batch) return;
+    // Batch setup accepts a recommendation for every proposed agent at once.
+    // With roles as slots there is nothing to accept in bulk — an agent exists
+    // only once its role is filled, and filling one configures it there.
+    if (view.roleRoster && view.roleRoster.total_count > 0) {
+      host.innerHTML = '';
+      return;
+    }
     const controls = [];
     if (batch.canAcceptAll) {
       controls.push(
@@ -4735,13 +4764,73 @@ const sessionManager = {
         `${agent?.name || ''} ${agent?.role || ''} ${agent?.model || ''}`.toLowerCase();
       return !query || haystack.includes(query);
     });
+    // Scoped to a role, the picker still lists EVERY saved agent — matching only
+    // reorders, it never hides (FR22, FR23). The empty state names the way out
+    // rather than leaving a blank panel (FR27).
+    const role = this.workspaceRoleAssigning ? this.workspaceRoleForAssign() : null;
+    if (!this.existingAgentRoster.length) {
+      status.textContent = role
+        ? 'You have no saved agents yet. Create one for this role instead.'
+        : 'No matching saved agents.';
+      list.innerHTML = '';
+      return;
+    }
     status.textContent = matches.length
       ? `${matches.length} saved agent${matches.length === 1 ? '' : 's'}`
       : 'No matching saved agents.';
+
     // No drag affordance: with the drop zone gone there is nothing to drop onto,
     // and a draggable card would advertise an interaction that does nothing. Add
     // is a button, so mouse and keyboard take the identical path.
-    list.innerHTML = matches.map(agent => this.renderExistingAgentRosterCard(agent)).join('');
+    if (!role) {
+      list.innerHTML = matches.map(agent => this.renderExistingAgentRosterCard(agent)).join('');
+      return;
+    }
+    const suggested = [];
+    const others = [];
+    for (const agent of matches) {
+      (this.savedAgentSuitsRole(agent, role) ? suggested : others).push(agent);
+    }
+    const section = (heading, agents) =>
+      agents.length
+        ? `<p class="workspace-existing-agent-roster-group">${this.escapeHtml(heading)}</p>` +
+          agents.map(agent => this.renderExistingAgentRosterCard(agent, role)).join('')
+        : '';
+    list.innerHTML = section('Suggested for this role', suggested) + section('All agents', others);
+  },
+
+  // The LABEL of the role this agent already fills, or null. Named rather than
+  // boolean because the picker has to say which role it is (FR25).
+  roleAlreadyFilledBy(name, exceptRoleId) {
+    const api = window.CreateWorkspaceTeamDraft;
+    const draft = this.teamDraft;
+    if (!api || !draft) return null;
+    const heldRoleId = api.roleFilledBy(draft, name);
+    if (!heldRoleId || heldRoleId === exceptRoleId) return null;
+    const view = this.teamView();
+    const role = (view?.roleRoster?.roles || []).find(item => item.role_id === heldRoleId);
+    return role ? role.label : null;
+  },
+
+  workspaceRoleForAssign() {
+    const view = this.teamView();
+    return (
+      (view?.roleRoster?.roles || []).find(item => item.role_id === this.workspaceRoleAssigning) ||
+      null
+    );
+  },
+
+  // Deterministic role/type matching only — no ranking model, and a
+  // non-matching agent is still listed under "All agents".
+  savedAgentSuitsRole(agent, role) {
+    const label = String(role?.label || '').toLowerCase();
+    const agentRole = String(agent?.role || '').toLowerCase();
+    const agentName = String(agent?.name || '').toLowerCase();
+    if (!label) return false;
+    return Boolean(
+      (agentRole && (label.includes(agentRole) || agentRole.includes(label))) ||
+      (agentName && (label.includes(agentName) || agentName.includes(label)))
+    );
   },
 
   // The picker cards and the Team roster must show one agent one way, so both
@@ -4760,7 +4849,7 @@ const sessionManager = {
     return api && typeof api.identityFrom === 'function' ? api.identityFrom(name, agent) : { name };
   },
 
-  renderExistingAgentRosterCard(agent) {
+  renderExistingAgentRosterCard(agent, role = null) {
     const name = String(agent?.name || '').trim();
     const key = this.existingAgentKey(name);
     const selected = this.existingAgentSelections.some(
@@ -4768,27 +4857,44 @@ const sessionManager = {
     );
     const alreadyIncluded = this.templateAgentIsAlreadyIncluded(name);
     const attachable = this.isExistingAgentAttachable(agent);
-    const disabled = selected || alreadyIncluded || !attachable;
-    const reason = selected
-      ? 'Added to this workspace'
-      : alreadyIncluded
-        ? 'Already included by this blueprint'
-        : !attachable
-          ? 'Built-in CLI agents cannot be attached'
-          : '';
+    // One agent fills at most one role (FR25). An agent already holding a slot
+    // is shown disabled WITH the reason, rather than quietly missing — and that
+    // holds whether or not the picker is scoped to a role, because adding it as
+    // a plain team member would attach the same definition twice.
+    const heldRole = this.roleAlreadyFilledBy(name, role ? role.role_id : '');
+    const disabled = Boolean(!attachable || heldRole || (!role && (selected || alreadyIncluded)));
+    const reason = heldRole
+      ? `Already filling ${heldRole}`
+      : !attachable
+        ? 'Built-in CLI agents cannot be attached'
+        : role
+          ? ''
+          : selected
+            ? 'Added to this workspace'
+            : alreadyIncluded
+              ? 'Already included by this blueprint'
+              : '';
     const workspaceCount = Number(agent?.workspace_count) || 0;
-    const label = selected
-      ? 'Added'
-      : alreadyIncluded
-        ? 'Included'
+    const label = role
+      ? heldRole
+        ? 'In use'
         : attachable
-          ? 'Add'
-          : 'Unavailable';
+          ? 'Assign'
+          : 'Unavailable'
+      : selected
+        ? 'Added'
+        : alreadyIncluded
+          ? 'Included'
+          : attachable
+            ? 'Add'
+            : 'Unavailable';
     // A disabled control's own label cannot explain itself, so the reason goes
     // into the accessible name too — not only into the visible small print.
     const accessibleName = reason
       ? `${label} — ${name}: ${reason}`
-      : `Add ${name} to this workspace`;
+      : role
+        ? `Assign ${name} to ${role.label}`
+        : `Add ${name} to this workspace`;
     return `
       <article class="workspace-existing-agent-card" role="listitem" data-existing-agent-name="${this.escapeHtml(name)}">
         ${this.renderAgentAvatar(this.existingAgentIdentity(name, agent), 'workspace-agent-avatar')}
@@ -4845,6 +4951,138 @@ const sessionManager = {
     );
   },
 
+  // ---- Role vacancies -------------------------------------------------------
+  //
+  // The Team step draws the blueprint's declared roles through the SAME
+  // component the workspace's own roster uses. Everything it renders comes from
+  // the derived view, and every action writes back into the draft — this
+  // controller keeps no second opinion about which roles are filled.
+
+  // Which role's inline Create form is open, and which role the Assign picker
+  // is currently scoped to. Both are ephemeral view state, not team state.
+  workspaceRoleCreating: '',
+  workspaceRoleAssigning: '',
+
+  renderWorkspaceRoleRoster(view) {
+    const container = document.getElementById('workspaceRoleRoster');
+    const component = window.WorkspaceRoleRoster;
+    if (!container || !component) return;
+    const roster = view && view.roleRoster;
+    const active = Boolean(roster && roster.total_count > 0);
+    container.hidden = !active;
+    if (!active) {
+      container.replaceChildren();
+      return;
+    }
+    component.render(container, roster, {
+      title: 'Roles this blueprint declares',
+      providers: this.editAgentProvidersData,
+      creatingRoleId: this.workspaceRoleCreating,
+      // Nothing exists yet, so there is no agent page to link to. The roster
+      // component omits the link when no href builder is supplied.
+      agentHref: null,
+      onRequestCreate: roleId => {
+        this.workspaceRoleCreating = roleId;
+        this.workspaceRoleAssigning = '';
+        this.refreshWorkspaceReview();
+      },
+      onCancelCreate: () => {
+        this.workspaceRoleCreating = '';
+        this.refreshWorkspaceReview();
+        this.focusWorkspaceRoleRow(this.workspaceRoleCreating);
+      },
+      onCreate: (roleId, values, row) => this.fillWorkspaceRole(roleId, values, row),
+      onAssign: (roleId, row) => this.openWorkspaceRoleAssignPicker(roleId, row),
+      onClear: (roleId, row) => this.clearWorkspaceRole(roleId, row)
+    });
+  },
+
+  // A Create fill is refused before it is staged when its name would collide
+  // with a saved agent, and the refusal offers both recoveries: rename, or
+  // assign that agent instead (FR26). Surfacing it here rather than after
+  // submit is the point — the server would otherwise reject the whole create
+  // once the user had already left the wizard.
+  fillWorkspaceRole(roleId, values) {
+    const api = window.CreateWorkspaceTeamDraft;
+    const draft = this.ensureWorkspaceTeamDraft();
+    if (!draft || !api) return;
+    const name = String(values?.name || '').trim();
+    const existing = api.findSavedAgent(draft, name);
+    if (existing) {
+      const form = document
+        .getElementById('workspaceRoleRoster')
+        ?.querySelector(`[data-role-id="${CSS.escape(roleId)}"]`)?.rosterCreateForm;
+      form?.showBlocker(
+        `You already have a saved agent named “${existing.name}”. Rename this one, or assign the agent you have.`,
+        {
+          label: `Assign ${existing.name}`,
+          onSelect: () => {
+            this.workspaceRoleCreating = '';
+            this.assignWorkspaceRole(roleId, existing.name);
+          }
+        }
+      );
+      return;
+    }
+    if (!api.setRoleFill(draft, roleId, { mode: api.FILL_CREATE, ...values, name })) return;
+    this.workspaceRoleCreating = '';
+    this.refreshWorkspaceReview();
+    this.announceWorkspaceRoleChange(roleId, `${name} will be created for`);
+    this.focusWorkspaceRoleRow(roleId);
+  },
+
+  assignWorkspaceRole(roleId, name) {
+    const api = window.CreateWorkspaceTeamDraft;
+    const draft = this.ensureWorkspaceTeamDraft();
+    if (!draft || !api) return;
+    const canonical = String(api.findSavedAgent(draft, name)?.name || name).trim();
+    if (!api.setRoleFill(draft, roleId, { mode: api.FILL_ASSIGN, name: canonical })) return;
+    this.workspaceRoleAssigning = '';
+    this.refreshWorkspaceReview();
+    this.renderExistingAgentRoster();
+    this.announceWorkspaceRoleChange(roleId, `${canonical} will be attached to`);
+    this.focusWorkspaceRoleRow(roleId);
+  },
+
+  clearWorkspaceRole(roleId) {
+    const api = window.CreateWorkspaceTeamDraft;
+    const draft = this.ensureWorkspaceTeamDraft();
+    if (!draft || !api || !api.clearRoleFill(draft, roleId)) return;
+    this.refreshWorkspaceReview();
+    this.renderExistingAgentRoster();
+    this.announceWorkspaceRoleChange(roleId, 'Nobody will fill');
+    this.focusWorkspaceRoleRow(roleId);
+  },
+
+  // Scopes the existing picker to one role. It is the same inline panel, never
+  // a nested modal: this wizard is full-screen, and a dialog raised from it
+  // opens underneath it.
+  openWorkspaceRoleAssignPicker(roleId, row) {
+    this.workspaceRoleAssigning = roleId;
+    this.workspaceRoleCreating = '';
+    this.refreshWorkspaceReview();
+    this.renderExistingAgentRoster();
+    const panel = document.getElementById('existingAgentRosterPanel');
+    const title = document.getElementById('existingAgentRosterTitle');
+    if (title) title.textContent = `Assign an agent to ${row?.label || 'this role'}`;
+    panel?.scrollIntoView({ block: 'nearest' });
+    document.getElementById('existingAgentRosterSearch')?.focus();
+  },
+
+  // One announcement per change, in words, naming the role it acted on —
+  // never a re-read of the whole roster (FR68).
+  announceWorkspaceRoleChange(roleId, phrase) {
+    const view = this.teamView();
+    const role = (view?.roleRoster?.roles || []).find(item => item.role_id === roleId);
+    if (!role) return;
+    this.announceWorkspaceTeamChange(`${phrase} ${role.label}. ${view.roleSummary || ''}`.trim());
+  },
+
+  focusWorkspaceRoleRow(roleId) {
+    if (!roleId || !window.WorkspaceRoleRoster) return;
+    window.WorkspaceRoleRoster.focusRole(document.getElementById('workspaceRoleRoster'), roleId);
+  },
+
   // Returns the derived team view, or null when the draft helper is unavailable.
   teamView() {
     const api = window.CreateWorkspaceTeamDraft;
@@ -4871,10 +5109,23 @@ const sessionManager = {
     const hire = view?.assistantHire;
     const active = Boolean(view?.isAssistantProgram && program && hire);
 
+    // The assistant-program path used to hide the saved-agent picker outright,
+    // which is what made "assign an agent I already have" impossible in that
+    // path at any point in the product. Both blueprint kinds now render the
+    // same roster and reach the same picker (FR20).
+    // The assistant-program path used to hide the saved-agent picker outright,
+    // which is what made "assign an agent I already have" impossible in that
+    // path at any point in the product. Both blueprint kinds now render the
+    // same roster and reach the same picker (FR20).
     if (panel) panel.hidden = !active;
-    if (picker) picker.hidden = active;
+    if (picker) picker.hidden = false;
     layout?.classList.toggle('is-assistant-program', active);
     if (advanced && active) advanced.hidden = true;
+    // The primary's name/provider/model are set on the role's own row now. Left
+    // visible, these fields would be a second place to name the primary, and
+    // the two could disagree about who fills the slot.
+    const legacyFields = panel?.querySelector('.workspace-assistant-program-fields');
+    if (legacyFields) legacyFields.hidden = true;
     if (!active) {
       if (title) title.textContent = 'Build your workspace team';
       if (description) {
@@ -5158,6 +5409,7 @@ const sessionManager = {
     this.renderWorkspaceTeamIssues();
     this.renderWorkspaceTeamIssues('workspaceReviewIssues');
     this.renderWorkspaceTeamBatchActions();
+    this.renderWorkspaceRoleRoster(view);
     this.renderWorkspaceTeamRoster();
     this.renderBlueprintAgentSummary();
     window.SetupWorkspaceCreator?.refreshReview();
@@ -5257,6 +5509,15 @@ const sessionManager = {
     const specialists = roster.filter(entry => entry.designation === 'specialist');
     const primary = roster.find(entry => entry.designation === 'primary');
 
+    // When the blueprint declares roles, the receipt lists EVERY role and its
+    // resolved state, using the same tags the Team step used. Review must never
+    // look calmer than the step it summarizes (FR28, FR29) — and the old
+    // per-agent lines below would describe creating the whole roster, which is
+    // no longer what the request does.
+    if (view?.roleRoster?.total_count > 0) {
+      return this.renderWorkspaceReceiptRoles(view);
+    }
+
     const lines = [];
     if (primary) {
       lines.push(`${primary.name} · Primary`);
@@ -5307,6 +5568,38 @@ const sessionManager = {
       </div>`;
   },
 
+  // The receipt's role list: one line per declared role, in the same display
+  // order and with the same state words the Team step used, plus an Edit link
+  // back to that role's row (FR28, FR31).
+  renderWorkspaceReceiptRoles(view) {
+    const component = window.WorkspaceRoleRoster;
+    const rows = component ? component.rowsFrom(view.roleRoster) : [];
+    const lines = rows.map(row => {
+      const state =
+        row.state === 'filled'
+          ? `${row.tag.label} · ${row.sourceLabel}`
+          : row.readOnly
+            ? `${row.tag.label} · in the group workspace`
+            : row.tag.label;
+      return [row.label, row.designation === 'PRIMARY' ? 'Primary' : 'Specialist', state].join(
+        ' · '
+      );
+    });
+    lines.push(this.workspaceTeamSummaryText(view));
+
+    return `
+      <div class="workspace-review-card">
+        <div class="workspace-review-card-main">
+          <span class="workspace-review-card-label">Team</span>
+          <span class="workspace-review-card-meta">${this.escapeHtml(component ? component.headerCount(view.roleRoster) : '')}</span>
+          ${lines.map(line => `<span class="workspace-review-card-meta">${this.escapeHtml(line)}</span>`).join('')}
+        </div>
+        <div class="workspace-review-card-actions">
+          <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="3">Edit team</button>
+        </div>
+      </div>`;
+  },
+
   // Only choices that materially change what gets created, and only when they
   // differ from the default. A receipt listing every default would bury the few
   // things the user actually decided.
@@ -5344,6 +5637,10 @@ const sessionManager = {
   // attached" is the distinction that matters before the workspace exists.
   workspaceTeamSummaryText(view) {
     const roster = view ? view.roster : [];
+    // When the blueprint declares roles, the summary IS the roster's own count
+    // of what this request will do. Team and Review read the same sentence
+    // from the same projection, so they cannot disagree (FR17, FR30).
+    if (view?.roleSummary) return view.roleSummary;
     // The consequence is spelled out by the advisory issue below the summary;
     // repeating it here would say the same thing twice in two shapes.
     if (roster.length === 0) return 'No agent will be attached to this workspace.';
@@ -6339,6 +6636,12 @@ const sessionManager = {
               ...expectation
             }))
           };
+        }
+        // Sent even when empty — an empty array is how "create this workspace
+        // with every role unfilled" is stated, and its ABSENCE is what tells
+        // the server to keep its pre-vacancy behavior (FR56, FR57).
+        if (Array.isArray(teamPayload.role_staffing)) {
+          payload.role_staffing = teamPayload.role_staffing.map(entry => ({ ...entry }));
         }
         if (Array.isArray(teamPayload.existing_agent_names)) {
           payload.existing_agent_names = [...teamPayload.existing_agent_names];
