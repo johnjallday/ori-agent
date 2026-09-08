@@ -171,9 +171,13 @@ test.describe.serial('Settings reset on an owned installation', () => {
     expect(legacyExecute.status()).toBe(409);
 
     await page.locator('#replaySetupBtn').click();
-    await expect(page.locator('#replaySetupStatus')).toContainText('identity and existing work were kept');
+    await expect(page.locator('#replaySetupStatus')).toContainText(
+      'identity and existing work were kept'
+    );
     await page.locator('#resetGettingStartedBtn').click();
-    await expect(page.locator('#resetGettingStartedStatus')).toContainText('Setup and user data were kept');
+    await expect(page.locator('#resetGettingStartedStatus')).toContainText(
+      'Setup and user data were kept'
+    );
 
     await page.locator('#selectAllResetBtn').click();
     await expect(page.locator('.reset-category-checkbox:checked')).toHaveCount(4);

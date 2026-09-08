@@ -638,6 +638,9 @@ lists every open Issue before prompting for another view.
 ./scripts/devops.sh status             # checked-out feature implementation overview
 ./scripts/devops.sh release            # what has merged to dev since the latest release
 ./scripts/devops.sh agent-defaults     # local persistent kind/model fallback pairs
+./scripts/devops.sh explore            # global e: choose a work-discovery prompt
+./scripts/devops.sh explore quick-win --print # prompt only, no gh or native agent
+./scripts/devops.sh explore next --kind pi --yes # confirmed native advisor, not Herdr
 ./scripts/devops.sh view <number>      # one Issue in full
 ./scripts/devops.sh new <title>                    # quick title-only capture
 ./scripts/devops.sh new <title> --body <text>      # optional inline context
@@ -673,6 +676,19 @@ list-level `r` refreshes, `?` shows help, and `q` quits.
 `c <number> <answers>`, `ok <number>`, and `g` for the interactive local
 defaults action. Lists include every author and only open Issues. Filters are literal labels; no Project board or rank
 participates.
+
+**Not sure what to work on?** Global `e` / `explore` opens eight investigation
+prompts in every picker view, even with no Issues; the line REPL also accepts it.
+Add optional context, preview, and display/copy the prompt or choose Claude/Pi
+plus model/thinking and confirm a fresh foreground advisor. It has read/search
+tools and a bounded Git/GitHub/task snapshot, not shell/edit/write tools. Quit the
+native conversation to return to the same picker selection. This path needs no
+Herdr state and never calls `wt plan`, creates an Issue/plan/worktree, or starts
+implementation. `--print` collects no evidence and needs neither gh nor an agent.
+Launch requires Python 3 and compatible native safety flags; model calls may
+incur usage, and native runtime/history behavior is disclosed before launch.
+Tool restrictions are not an OS sandbox. See [Explore](devops-explore.md) for the
+preset catalog, CLI, privacy limits, and failure recovery.
 
 The `s` key is the direct link from this REPL to the planning flow above. In
 the Ready view, or on the opened Issue's own action bar when its live labels

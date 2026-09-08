@@ -49,6 +49,8 @@ func (s *Store) PersistencePaths() (string, string) {
 
 func (s *Store) load() {
 	sourcesPath, cachePath := s.PersistencePaths()
+	// #nosec G304 -- the constructor binds the owner root and both leaf names
+	// are compiled constants; callers cannot supply a file name.
 	data, err := os.ReadFile(sourcesPath)
 	if err == nil {
 		var fd sourcesFileData
@@ -58,6 +60,7 @@ func (s *Store) load() {
 	}
 	s.ensureBuiltins()
 
+	// #nosec G304 -- cachePath uses the same bound root and compiled leaf name.
 	cacheData, err := os.ReadFile(cachePath)
 	if err == nil {
 		var cd cacheFileData

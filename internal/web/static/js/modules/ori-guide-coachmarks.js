@@ -17,11 +17,19 @@
 (function () {
   'use strict';
 
-  // key -> { route, selector, label }
+  // key -> { routes, selector, label, local }
   //
-  // `route` records which page owns the control. A key is only honoured on its
+  // `routes` records which pages own the control. A key is only honoured on its
   // own route, so a stale key from a previous page cannot mark a same-named
   // element somewhere else.
+  //
+  // `local: true` marks a key no server topic can ask for — one a page uses to
+  // point at its own UI. Every other key mirrors registeredCoachmarkKeys in
+  // internal/agenthttp/ori_guide_topics.go and is checked against it from both
+  // sides, so a server-addressable key added to one side and not the other
+  // fails a test rather than silently producing a coachmark that never
+  // appears. A local key is deliberately absent from that list: adding it
+  // would tell the server about a control no topic will ever name.
   var REGISTRY = {
     workspace_manager: {
       routes: ['/'],
@@ -47,6 +55,27 @@
       routes: ['/agents'],
       selector: '#newAgentBtn',
       label: 'New Agent'
+    },
+    // The roster's first card. Used by the first-visit hint that replaced the
+    // header's instructional sentence: the page no longer explains card
+    // selection in prose to every visitor forever, it points at a card once
+    // (agents-page-ux FR-20/FR-78).
+    //
+    // Cards mount after the roster's list request settles, so the caller asks
+    // for the bounded wait rather than resolving into an empty grid.
+    select_agent: {
+      routes: ['/agents'],
+      selector: '.roster-card__open',
+      label: 'an agent card',
+      local: true
+    },
+    // The checkbox that starts a multi-agent selection — the second half of
+    // what the removed sentence taught.
+    select_agent_check: {
+      routes: ['/agents'],
+      selector: '.roster-card__check',
+      label: "an agent card's checkbox",
+      local: true
     },
     agent_toolbox: {
       routes: ['/agents'],
@@ -147,11 +176,20 @@
     return Object.keys(REGISTRY);
   }
 
+  // The keys a server topic may name. Excludes local ones, which only a page
+  // can trigger, so the browser/server key check compares like with like.
+  function serverKeys() {
+    return Object.keys(REGISTRY).filter(function (key) {
+      return !REGISTRY[key].local;
+    });
+  }
+
   var api = {
     supports: supports,
     resolve: resolve,
     labelFor: labelFor,
     keys: keys,
+    serverKeys: serverKeys,
     normalizeRoute: normalizeRoute,
     // Exposed so tests assert against the real table rather than a copy that
     // could drift from it.

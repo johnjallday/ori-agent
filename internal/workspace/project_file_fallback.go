@@ -131,19 +131,14 @@ func authoritativeProjectEntry(source ProjectFileFallbackSource, workspaceID str
 	if err != nil || !filepath.IsAbs(root) {
 		return "", ErrProjectFileFallbackUnavailable
 	}
-	entry, err := GetProjectEntryPath(ws.SharedData)
-	if err != nil || entry == "" {
-		return "", ErrProjectFileFallbackUnavailable
-	}
-	projectRoot, err := inspectFallbackRelativePath(root, ws.ProjectPath, true)
+	resolved, err := ResolveProjectEntry(ws, root)
 	if err != nil {
-		return "", err
-	}
-	target, err := inspectFallbackRelativePath(projectRoot, entry, false)
-	if err != nil || !fallbackPathInside(target, projectRoot) || !fallbackPathInside(projectRoot, root) {
+		if errors.Is(err, ErrProjectEntryUnavailable) {
+			return "", ErrProjectFileFallbackUnavailable
+		}
 		return "", ErrProjectFileFallbackScope
 	}
-	return filepath.Clean(target), nil
+	return filepath.Clean(resolved.AbsolutePath), nil
 }
 
 func inspectFallbackRelativePath(root, portable string, wantDirectory bool) (string, error) {

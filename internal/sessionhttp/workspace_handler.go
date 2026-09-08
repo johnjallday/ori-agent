@@ -644,7 +644,7 @@ func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *ses
 				return seed, false
 			}
 			seed = h.seedTemplateAgents(ws, blankTpl)
-		case kind == session.WorkspaceKindGroup:
+		case kind == session.WorkspaceKindGroup && createTemplateAgentsEnabled(req):
 			if agentName := h.autoCreateManagerEntryAgent(ws); agentName != "" {
 				setWorkspaceEntryAgent(ws, agentName)
 				seed.EntrySet = true
@@ -707,7 +707,9 @@ func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *ses
 			return seed, false
 		}
 		seed = h.seedTemplateAgents(ws, blankTpl)
-	case kind == session.WorkspaceKindGroup:
+	case kind == session.WorkspaceKindGroup && createTemplateAgentsEnabled(req):
+		// Empty-group creation explicitly defers staffing. Legacy callers that
+		// omit the flag retain their automatic manager.
 		if agentName := h.autoCreateManagerEntryAgent(ws); agentName != "" {
 			setWorkspaceEntryAgent(ws, agentName)
 			seed.EntrySet = true

@@ -13,7 +13,7 @@ package specialist
 // DAW is.
 //
 // Adding a domain is a new entry here plus its copy. Nothing else changes.
-var registry = []Entry{
+var registryEntries = []Entry{
 	{
 		Slug:           "music_production",
 		AppPatterns:    [][]string{{"reaper"}},
@@ -24,7 +24,7 @@ var registry = []Entry{
 			Question:     "Want me to help with your music projects?",
 			AcceptLabel:  "Yes, help with my music",
 			DeclineLabel: "No thanks",
-			AcceptedNote: "Your assistant will keep an eye on your music projects and tell you what Reaper Producer has done.",
+			AcceptedNote: "Let's connect a REAPER project so I can include real studio updates.",
 			ManualLabel:  "I work on music",
 		},
 		FocusAreas: []FocusOption{
@@ -48,11 +48,58 @@ var registry = []Entry{
 		},
 		SuggestedTemplateID: "reaper-song",
 		Suggestion: Suggestion{
-			Title:       "Set up your studio workspace",
-			Body:        "The Reaper Song blueprint brings in Reaper Producer, the named expert who handles studio work. Your assistant reports on what it does.",
-			ActionLabel: "Create the studio workspace",
-			ActionRoute: "/?create=1&blueprint=reaper-song",
+			Title:       "Set up your music projects",
+			Body:        "Install the Ori REAPER plugin, create your music production group, prepare REAPER, then create a workspace for a new or existing project. There is no project monitoring or studio team until workspace setup is confirmed. Live access is approved and verified separately for each workspace.",
+			ActionLabel: "Continue reviewed setup",
+			ActionRoute: "/personal-assistant?setup=specialist",
 		},
 		CapabilityOrder: []string{"projects", "folders", "calendar", "email"},
+		SetupJourney: &SetupJourney{
+			SchemaVersion:              1,
+			Version:                    1,
+			ID:                         "reaper_setup",
+			Title:                      "Set up REAPER",
+			Description:                "Connect a REAPER project and choose how Ori can help.",
+			IntegrationKey:             "ori_reaper",
+			ExpectedBlueprintID:        "reaper-song",
+			ExpectedAssistantProgramID: "music-producer-assistant",
+			WorkspaceLaunch: &WorkspaceLaunchCopy{
+				GroupTitle: "Build Your Music Production Group", GroupName: "Music Production",
+				RuntimeTitle:        "Set Up REAPER",
+				RuntimeInstructions: "Open REAPER, then Preferences → Control/OSC/web. Add the Web browser interface and enable it. Check setup when you are ready. If the Ori runner is not registered yet, you can finish it from the workspace's live-control setup. No project access is granted here; the correct project must still be verified after creation.",
+			},
+			Steps: []SetupJourneyStep{
+				{
+					ID:          "integration",
+					Kind:        SetupStepIntegrationInstall,
+					Title:       "Install Ori REAPER Plugin",
+					Description: "Ori's REAPER integration is a local integration for Ori, not an audio plug-in, VST, effect, or instrument. It will not appear in REAPER's FX browser.",
+				},
+				{
+					ID:          "project",
+					Kind:        SetupStepProjectConnect,
+					Title:       "Connect a project",
+					Description: "Connect one existing REAPER project or create a new one after review.",
+				},
+				{
+					ID:          "workspace",
+					Kind:        SetupStepWorkspaceSetup,
+					Title:       "Choose how Ori works",
+					Description: "Choose File-only or Ori-assisted REAPER through the project setup flow.",
+				},
+				{
+					ID:          "staffing",
+					Kind:        SetupStepAssistantProgramStaffing,
+					Title:       "Add your studio team",
+					Description: "Add one Home portfolio role and an independent team for this project.",
+				},
+				{
+					ID:          "summary",
+					Kind:        SetupStepSummary,
+					Title:       "Review setup",
+					Description: "Review what is installed, connected, staffed, selected, and still optional.",
+				},
+			},
+		},
 	},
 }

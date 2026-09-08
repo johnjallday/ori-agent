@@ -21,6 +21,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
+	"github.com/johnjallday/ori-agent/internal/pathselection"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/trigger"
@@ -411,6 +412,9 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	// The coordinate map resolves node ownership through the composed workspace
 	// store, so it wires here for the same reason (#292 FR-99).
 	b.wireWorkspaceMap()
+	// The Agent Map needs only the database and the agent store, but wires
+	// alongside its sibling so both coordinate maps are built in one place.
+	b.wireAgentMap()
 
 	// Same reason: the mailbox read/link/send runtime depends on the workspace
 	// store, so it is wired here rather than in initializeHandlers (Phase 17).
@@ -711,6 +715,10 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() {
 	b.workspaceHandler = workspace.NewHTTPHandler(b.workspaceStore, b.workspaceOrchestrator, b.eventBus)
 	b.workspaceHandler.SetAdmissionGate(b.resetWork)
 	b.workspaceHandler.SetDesktopOpener(b.desktopOpener)
+	if b.pathSelectionStore == nil {
+		b.pathSelectionStore = pathselection.NewStore()
+	}
+	b.workspaceHandler.SetTrustedPathSelectionIssuer(b.pathSelectionStore)
 	if b.workspaceFileStore != nil {
 		b.workspaceHandler.SetFolderStore(b.workspaceFileStore)
 	}

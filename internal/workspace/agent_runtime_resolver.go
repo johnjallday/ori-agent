@@ -344,6 +344,9 @@ func collectWorkspaceDirectoryRoots(ws *Workspace) []string {
 	roots := make([]string, 0, len(ws.DirectoryReferences))
 	seen := make(map[string]struct{}, len(ws.DirectoryReferences))
 	for _, dir := range ws.DirectoryReferences {
+		if dir.Purpose == "sample_library" {
+			continue
+		}
 		path := strings.TrimSpace(dir.Path)
 		if path == "" {
 			continue

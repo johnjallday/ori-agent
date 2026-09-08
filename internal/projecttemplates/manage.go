@@ -39,6 +39,9 @@ func ImportFolder(libDir, srcPath, displayName string) (Template, error) {
 	if src.HasInvalidRuntimeRequirements() {
 		return Template{}, fmt.Errorf("%w: imported blueprint runtime_requirements is unusable: %s", ErrInvalidRuntimeRequirements, src.RuntimeRequirementsError)
 	}
+	if src.HasInvalidProjectConnection() {
+		return Template{}, fmt.Errorf("%w: imported blueprint project_connection is unusable: %s", ErrInvalidProjectConnection, src.ProjectConnectionError)
+	}
 
 	absLib, err := filepath.Abs(libDir)
 	if err != nil {
@@ -140,6 +143,9 @@ func Duplicate(libDir, id, newName string) (Template, error) {
 	}
 	if src.HasInvalidRuntimeRequirements() {
 		return Template{}, fmt.Errorf("%w: source blueprint runtime_requirements is unusable: %s", ErrInvalidRuntimeRequirements, src.RuntimeRequirementsError)
+	}
+	if src.HasInvalidProjectConnection() {
+		return Template{}, fmt.Errorf("%w: source blueprint project_connection is unusable: %s", ErrInvalidProjectConnection, src.ProjectConnectionError)
 	}
 
 	absLib, err := filepath.Abs(strings.TrimSpace(libDir))

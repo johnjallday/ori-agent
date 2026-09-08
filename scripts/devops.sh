@@ -34,6 +34,8 @@ fi
 # Filesystem/Git-only plan identity and progress helpers are shared with the
 # away dispatcher. The library is intentionally macOS bash 3.2 compatible.
 source "$script_dir/lib/devflow-common.sh"
+source "$script_dir/lib/devops-explore.sh"
+source "$script_dir/lib/devops-explore-launch.sh"
 
 require_gh() {
   if command -v gh >/dev/null 2>&1; then
@@ -56,6 +58,9 @@ Usage:
   ./scripts/devops.sh status
   ./scripts/devops.sh release
   ./scripts/devops.sh agent-defaults [options] [--yes]
+  ./scripts/devops.sh explore
+  ./scripts/devops.sh explore <preset> [--context <text>] --print
+  ./scripts/devops.sh explore <preset> [--context <text>] [--kind <claude|pi>] [--model <model>] [--thinking <level>] [--yes]
   ./scripts/devops.sh view <issue-number>
   ./scripts/devops.sh new <title...> [--body <text> | --body-file <path|->] [--yes]
   ./scripts/devops.sh plan-new <title...> (--body <text> | --body-file <path|->) --size <quick|planned|prd> [--kind <claude|pi>] [--model <model>] [--thinking <level>] [--yes]
@@ -115,6 +120,16 @@ one-shot options are --primary-kind, --primary-model/--clear-primary-model,
 --role-kind, and --role-model/--clear-role-model. It is local: no GitHub or
 Herdr call is made. Empty models mean the external integration chooses.
 
+`explore` (global picker/REPL key `e`) helps choose useful work: eight prompts,
+optional context, preview, display only or a fresh foreground Claude/Pi advisor.
+Presets: next, quick-win, finish, ux, reliability, workflow, missing, interview.
+It works from every view, even an empty list. --print needs neither gh nor an
+agent and collects no evidence. Launch uses read/search tools and a bounded
+Git/GitHub/task snapshot, not wt plan or a Herdr feature binding. Quit the native
+agent to return here. Scripted launch requires --kind and --yes; interview needs
+a terminal. The preview explains provider usage and native history; tool limits
+are not an OS sandbox. See docs/devops-explore.md for dependencies and limits.
+
 new/plan-new/decide/approve/unapprove write to GitHub. They prompt for
 confirmation on a terminal, and require --yes when stdin is not a terminal.
 `answer` remains a backwards-compatible alias for `decide`. A new Issue is
@@ -130,7 +145,8 @@ EOF
 print_menu() {
   printf '\n%s\n' \
     "[1/a] All  [2/d] Needs my decision  [3/b] Backlog  [4/f] Proposals  [5/y] Ready" \
-    "[v #] View  [n title] Capture  [c # choices] Decide  [ok #] Approve  [g] Agent defaults  [q] Quit"
+    "[v #] View  [n title] Capture  [c # choices] Decide  [ok #] Approve  [g] Agent defaults  [q] Quit" \
+    "[e] Explore next work"
 }
 
 # Labels arrive from `gh` as a ", "-joined string. Split on commas and trim so a
@@ -1289,6 +1305,9 @@ run_one_shot() {
     agent-defaults)
       agent_defaults_action "$@"
       ;;
+    explore)
+      explore_action "$@"
+      ;;
     decisions|decision)
       [[ $# -eq 0 ]] || return 2
       list_issues decisions
@@ -1750,7 +1769,7 @@ render_picker() {
   printf '\n'
   style '2' 'Enter open  •  c decide  •  n capture  •  p new & plan  •  o approve  •  s plan selected  •  i start implementation'
   printf '\n'
-  style '2' 'w implementation details  •  g agent defaults  •  r refresh  •  ? help  •  q quit'
+  style '2' '[e] Explore next work  •  w implementation details  •  g agent defaults  •  r refresh  •  ? help  •  q quit'
   printf '\n'
 }
 
@@ -1826,6 +1845,8 @@ Picker keys
   s             Plan the selected existing Ready Issue with Claude/Pi options
   i             Start implementation from a completed local plan; choose Claude,
                 Codex, Pi, worktree-only, or cancel
+  e             Explore next work: eight prompts, context, preview, display or
+                fresh read/search-only Claude/Pi advisor (all views, even empty)
   w             Show the full checked-out feature implementation overview
   g             Read or change persistent primary and role agent defaults
                 (local config only; no GitHub or Herdr call)
@@ -2027,7 +2048,7 @@ prompt_custom_planner_model() {
 prompt_planner_agent() {
   local choice
   planner_kind_choice=""
-  printf '\nChoose the planning agent.\n'
+  printf '\nChoose the %s agent.\n' "${agent_session_purpose:-planning}"
   printf '  [1/c] Claude\n'
   printf '  [2/p] Pi\n'
   printf '  [q/Enter] Cancel\n'
@@ -2052,8 +2073,8 @@ prompt_claude_planner_model() {
   local choice
   planner_model_choice=""
   while true; do
-    printf '\nChoose the Claude model for this planning session.\n'
-    printf '  [Enter] Integration default (or recorded model on retry)\n'
+    printf '\nChoose the Claude model for this %s session.\n' "${agent_session_purpose:-planning}"
+    printf '  [Enter] Integration default%s\n' "${agent_model_retry_hint- (or recorded model on retry)}"
     printf '  [1/s] Sonnet (sonnet)\n'
     printf '  [2/o] Opus (opus)\n'
     printf '  [3/f] Fable (fable)\n'
@@ -2082,8 +2103,8 @@ prompt_claude_planner_thinking() {
   local choice
   planner_thinking_choice=""
   while true; do
-    printf '\nChoose the Claude thinking level for this planning session.\n'
-    printf '  [Enter] Integration default (or recorded level on retry)\n'
+    printf '\nChoose the Claude thinking level for this %s session.\n' "${agent_session_purpose:-planning}"
+    printf '  [Enter] Integration default%s\n' "${agent_thinking_retry_hint- (or recorded level on retry)}"
     printf '  [1/l] Low\n'
     printf '  [2/m] Medium\n'
     printf '  [3/h] High\n'
@@ -2112,9 +2133,9 @@ prompt_pi_planner_thinking() {
   local choice
   planner_thinking_choice=""
   while true; do
-    printf '\nChoose the Pi thinking level for this planning session.\n'
+    printf '\nChoose the Pi thinking level for this %s session.\n' "${agent_session_purpose:-planning}"
     printf 'Pi may clamp a level that the selected model does not support.\n'
-    printf '  [Enter] Integration default (or recorded level on retry)\n'
+    printf '  [Enter] Integration default%s\n' "${agent_thinking_retry_hint- (or recorded level on retry)}"
     printf '  [1/o] Off\n'
     printf '  [2/n] Minimal\n'
     printf '  [3/l] Low\n'
@@ -2150,8 +2171,8 @@ prompt_planner_model() {
   load_pi_model_catalog >/dev/null 2>&1 || true
 
   while true; do
-    printf '\nChoose the Pi model for this planning session.\n'
-    printf '  [Enter] Integration default (or recorded model on retry)\n'
+    printf '\nChoose the Pi model for this %s session.\n' "${agent_session_purpose:-planning}"
+    printf '  [Enter] Integration default%s\n' "${agent_model_retry_hint- (or recorded model on retry)}"
     if [[ "${#planner_model_catalog_providers[@]}" -gt 0 ]]; then
       index=1
       for provider in "${planner_model_catalog_providers[@]}"; do
@@ -2758,6 +2779,11 @@ run_picker() {
           fi
         fi
         ;;
+      e)
+        # Global and read-only with respect to delivery. Do not refresh GitHub,
+        # reset selection, or prune bundle marks after preview/cancel/return.
+        with_normal_terminal explore_menu
+        ;;
       g)
         # Persistent defaults are repository-local. Do not refresh or otherwise
         # contact GitHub after this action.
@@ -2822,11 +2848,13 @@ if [[ -n "${DEVOPS_SOURCE_ONLY:-}" ]]; then
   return 0 2>/dev/null || exit 0
 fi
 
-# agent-defaults is intentionally usable without gh. Every existing Issue,
-# release, picker, and REPL path retains the same GitHub CLI prerequisite.
-if [[ $# -eq 0 || "$1" != "agent-defaults" ]]; then
-  require_gh || exit $?
-fi
+# Local defaults and Explore display work without gh. Explore launch reports
+# unavailable GitHub evidence rather than preventing local-code investigation.
+# Existing Issue, release, picker, and REPL paths retain their prerequisite.
+case "${1:-}" in
+  agent-defaults|explore|help|-h|--help) ;;
+  *) require_gh || exit $? ;;
+esac
 
 if [[ $# -gt 0 ]]; then
   run_one_shot "$@"
@@ -2951,6 +2979,13 @@ while true; do
         continue
       fi
       agent_defaults_action
+      ;;
+    e|explore)
+      if [[ -n "$argument" || -n "$extra" ]]; then
+        printf '%s\n' "explore takes no REPL arguments; follow its prompts or use the one-shot CLI" >&2
+        continue
+      fi
+      explore_menu
       ;;
     h|help|'?')
       print_usage

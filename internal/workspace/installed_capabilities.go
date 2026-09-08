@@ -11,7 +11,10 @@ import (
 // capability registry so workspace-level code (persistence, migration, station
 // derivation) can reference the ID without importing the registry — and so the
 // registry may import this package instead of the other way around.
-const CapabilityFileJanitor = "file-janitor"
+const (
+	CapabilityFileJanitor   = "file-janitor"
+	CapabilitySampleLibrary = "sample-library"
+)
 
 // Well-known install sources (FR-5). The set is not closed: any normalized
 // non-empty string is accepted so a future blueprint or preset can name itself

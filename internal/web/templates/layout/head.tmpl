@@ -75,6 +75,7 @@
   <!-- Feature-specific styles -->
   <link href="/styles.css" rel="stylesheet">
   <link href="/css/common.css" rel="stylesheet">
+  <link href="/css/setup-journey.css" rel="stylesheet">
   <link href="/css/sessions.css" rel="stylesheet">
   <!-- Shared context-menu surface (sessions, folders, notes, and the Workspace
        Map). Loaded right after sessions.css, where it used to live. -->
@@ -82,6 +83,7 @@
   <link href="/css/file-manager.css" rel="stylesheet">
   <link href="/css/workspace-hub.css" rel="stylesheet">
   <link href="/css/workspace-map.css" rel="stylesheet">
+  <link href="/css/group-builder.css" rel="stylesheet">
   <link href="/css/workspace-command.css" rel="stylesheet">
   <link href="/css/workspace-construct.css" rel="stylesheet">
   <!-- Agent identity is rendered on pages across the app (the Agents roster, a
@@ -124,6 +126,7 @@
   <script type="module" src="/js/modules/personal-assistant-panel.js"></script>
   {{if eq .CurrentPage "templates"}}<link href="/css/templates.css" rel="stylesheet">{{end}}
   {{if eq .CurrentPage "vault"}}<link href="/css/vault-page.css" rel="stylesheet">{{end}}
+  {{if eq .CurrentPage "plugins"}}<link href="/css/plugins.css" rel="stylesheet">{{end}}
   <!-- Shared tag input widget (deferred ES module; exposes window.OriTagInput) -->
   <script type="module" src="/js/modules/tag-input.js"></script>
   <!-- Shared tag filter bar (deferred ES module; exposes window.OriTagFilterBar) -->

@@ -123,6 +123,8 @@ func (b *ServerBuilder) resetFreshOwners() ([]settingsreset.FreshTarget, func(co
 		}
 		legacyUsage := filepath.Join(os.Getenv("HOME"), ".ori-agent", "usage_data", "usage_records.json")
 		if active := filepath.Join(config.DefaultDataDir(), "usage_data", "usage_records.json"); legacyUsage != active {
+			// #nosec G703 -- this is a read-only metadata check of the one explicit
+			// legacy HOME location; reset never opens its contents or removes it.
 			if _, err := os.Lstat(legacyUsage); err == nil {
 				blockers = append(blockers, settingsreset.Blocker{Code: "legacy_usage_ownership_ambiguous", Category: settingsreset.CategoryActivity, Message: "A legacy shared-HOME usage file cannot be attributed exclusively to this installation.", Recovery: "Archive or remove that legacy file manually after confirming no other Ori installation uses it, then review Start Fresh again."})
 			} else if !os.IsNotExist(err) {

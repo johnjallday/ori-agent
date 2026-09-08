@@ -31,6 +31,23 @@ func validAssistantProgramJSON(t *testing.T) json.RawMessage {
 	}`)
 }
 
+func validScopedAssistantProgramJSON() json.RawMessage {
+	return json.RawMessage(`{
+		"schema_version":2,
+		"id":"project-guide",
+		"station_name":"Project Guide Home",
+		"default_primary_name":"Coordinator",
+		"hire_title":"Staff project guidance",
+		"roles":[
+			{"id":"coordinator","label":"Coordinator","scope":"home","required":true,"primary":true,"system_prompt":"Coordinate bounded portfolio records."},
+			{"id":"lead","label":"Project Lead","scope":"project","required":true,"primary":true,"system_prompt":"Coordinate one exact linked project."},
+			{"id":"librarian","label":"Library Manager","scope":"home","capability_id":"library_catalog","system_prompt":"Manage reviewed catalog projections only."}
+		],
+		"stages":[{"id":"helper","label":"Helper","accepted_completion_threshold":0}],
+		"reflection":{"minimum_projects":3,"cadence_hours":24,"max_projects":12,"max_events_per_project":32,"max_candidates":6,"max_evidence":8,"rubric":"Find repeated preferences from reviewed evidence."}
+	}`)
+}
+
 func TestAssistantProgram_AbsentIsNoOp(t *testing.T) {
 	declaration, err := normalizeAssistantProgram(nil)
 	if err != nil || declaration != nil {
@@ -59,6 +76,32 @@ func TestAssistantProgram_ValidRoundTripsAndClones(t *testing.T) {
 	decoded, err := normalizeAssistantProgram(encoded)
 	if err != nil || decoded.ID != declaration.ID {
 		t.Fatalf("round trip = (%+v, %v)", decoded, err)
+	}
+}
+
+func TestAssistantProgram_ScopedV2RequiresIndependentHomeAndProjectPrimaries(t *testing.T) {
+	declaration, err := normalizeAssistantProgram(validScopedAssistantProgramJSON())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if declaration.SchemaVersion != 2 || len(declaration.Roles) != 3 ||
+		declaration.Roles[0].Scope != workspace.AssistantRoleScopeHome ||
+		declaration.Roles[1].Scope != workspace.AssistantRoleScopeProject ||
+		declaration.Roles[2].Required || declaration.Roles[2].CapabilityID != "library_catalog" {
+		t.Fatalf("scoped declaration = %#v", declaration)
+	}
+	invalid := map[string]string{
+		"missing project scope":    strings.Replace(string(validScopedAssistantProgramJSON()), `"scope":"project"`, `"scope":"home"`, 1),
+		"optional project role":    strings.Replace(string(validScopedAssistantProgramJSON()), `"scope":"project","required":true`, `"scope":"project","capability_id":"optional"`, 1),
+		"required capability role": strings.Replace(string(validScopedAssistantProgramJSON()), `"scope":"home","capability_id"`, `"scope":"home","required":true,"capability_id"`, 1),
+		"optional primary":         strings.Replace(string(validScopedAssistantProgramJSON()), `"scope":"home","capability_id":"library_catalog"`, `"scope":"home","primary":true,"capability_id":"library_catalog"`, 1),
+	}
+	for name, raw := range invalid {
+		t.Run(name, func(t *testing.T) {
+			if value, normalizeErr := normalizeAssistantProgram(json.RawMessage(raw)); normalizeErr == nil || value != nil {
+				t.Fatalf("invalid scoped roles accepted: %#v err=%v", value, normalizeErr)
+			}
+		})
 	}
 }
 

@@ -90,7 +90,7 @@ make lint          # Requires golangci-lint
 
 ### Core Technology Stack
 
-- **Language**: Go 1.25+
+- **Language**: Go 1.26+
 - **Tool System**: MCP (Model Context Protocol) servers + Skills
 - **LLM Providers**: OpenAI, Anthropic Claude, Ollama (via provider abstraction)
 - **Tool Interface**: `internal/toolapi/` defines the internal tool interface

@@ -276,22 +276,46 @@ body.agents-roster-page {
   outline-offset: 1px;
 }
 
+/* Inside the Filters panel the selects are a labelled stack, not a wrapping
+   row: the panel has vertical room the toolbar row never did, and a visible
+   label per control beats five unlabelled dropdowns. */
 .collection-selects {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 12px;
   min-width: 0;
 }
 
 .collection-select {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
   margin: 0;
   min-width: 0;
 }
 
+/* populateWorkspaceFilter() hides the Workspace select when no workspace
+   exists, with the hidden attribute. This rule used to have no display
+   property, so the attribute worked on its own; adding display:flex above
+   out-specifies the UA default and would have made it inert. Bootstrap's
+   reboot happens to carry [hidden]{display:none!important} and was covering
+   for it — state the dependency here rather than inherit it by luck. */
+.collection-select[hidden] {
+  display: none;
+}
+
+.collection-select__label {
+  color: var(--card-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .collection-select select {
+  width: 100%;
   height: 38px;
-  max-width: 170px;
+  min-width: 0;
   padding: 0 8px;
   border: 1px solid var(--card-line);
   border-radius: 10px;
@@ -340,6 +364,40 @@ body.agents-roster-page {
   min-width: 0;
 }
 
+/* Sort rides with the view toggle rather than in the filter row, because it is
+   a view preference and not a filter (FR-17). Together they are one control in
+   the toolbar's budget of four. */
+.view-cluster {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.view-sort {
+  margin: 0;
+  min-width: 0;
+}
+
+.view-sort select {
+  height: 38px;
+  max-width: 170px;
+  min-width: 0;
+  padding: 0 8px;
+  border: 1px solid var(--card-line);
+  border-radius: 10px;
+  background: var(--card-soft);
+  color: var(--text-primary, #111827);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.view-sort select:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 1px;
+}
+
 .view-toggle {
   display: flex;
   flex: 0 0 auto;
@@ -377,6 +435,186 @@ body.agents-roster-page {
 .view-button:focus-visible {
   outline: 2px solid var(--primary-color, #4f46e5);
   outline-offset: 1px;
+}
+
+/* ---- Card context menu ---------------------------------------------------- */
+
+/* The host is a zero-size anchor: the menu inside it is position:fixed, from
+   the shared .ori-context-menu component in context-menu.css, so the host only
+   needs to exist and take no space. */
+.roster-menu-host {
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+/* Above the Inspector, which is 10100 in sheet mode. A menu opened from a card
+   underneath a raised Inspector would otherwise be invisible — the same trap
+   that put dialogs behind full-screen surfaces on the map. */
+.roster-menu {
+  z-index: 10200;
+}
+
+/* ---- First-visit coachmark ------------------------------------------------ */
+
+/* A quiet strip above the collection, not a modal: it teaches one thing beside
+   the thing it describes and can be ignored. The ring and pointer on the card
+   itself come from the shared guide coachmark. */
+.roster-coachmark {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--roster-accent) 40%, var(--card-line));
+  border-radius: var(--roster-radius);
+  background: color-mix(in srgb, var(--roster-accent) 8%, var(--card-surface));
+}
+
+.roster-coachmark[hidden] {
+  display: none;
+}
+
+.roster-coachmark__copy {
+  margin: 0;
+  color: var(--text-primary, #111827);
+  font-size: 13px;
+}
+
+.roster-coachmark__actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* ---- Filters button + panel ----------------------------------------------- */
+
+.collection-filters-btn {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 13px;
+  border: 1px solid var(--card-line);
+  border-radius: 10px;
+  background: var(--card-surface);
+  color: var(--text-primary, #111827);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.collection-filters-btn:hover {
+  border-color: var(--primary-color, #4f46e5);
+}
+
+.collection-filters-btn:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 1px;
+}
+
+/* Active filters are carried by the badge's presence and the button's weight,
+   not by colour alone (FR-88). */
+.collection-filters-btn.is-active {
+  border-color: var(--primary-color, #4f46e5);
+  box-shadow: inset 0 0 0 1px var(--primary-color, #4f46e5);
+  font-weight: 600;
+}
+
+.collection-filters-btn__badge {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--primary-color, #4f46e5);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* The panel is a modal <dialog>, so it lives in the top layer and is positioned
+   against the viewport rather than against the toolbar. On desktop and tablet
+   it reads as a popover card pinned under the Filters button — positionFilters()
+   measures the button and writes top/left, because a top-layer element cannot
+   be anchored by CSS alone. The values here are the pre-measurement fallback;
+   the phone presentation is the bottom sheet below (FR-16). */
+.filters-panel {
+  position: fixed;
+  inset: auto 20px auto auto;
+  top: 150px;
+  width: min(460px, calc(100vw - 40px));
+  max-height: min(70vh, 560px);
+  padding: 0;
+  overflow: auto;
+  border: 1px solid var(--card-line);
+  border-radius: var(--roster-radius);
+  background: var(--card-surface);
+  color: var(--text-primary, #111827);
+  box-shadow: 0 24px 60px -30px rgba(15, 23, 42, 0.6);
+}
+
+.filters-panel::backdrop {
+  background: rgb(15 23 42 / 26%);
+}
+
+.filters-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 0;
+}
+
+.filters-panel__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.filters-panel__close {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--card-muted);
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.filters-panel__close:hover {
+  border-color: var(--card-line);
+  color: var(--text-primary, #111827);
+}
+
+.filters-panel__close:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 1px;
+}
+
+.filters-panel .collection-selects {
+  padding: 14px 16px;
+}
+
+.filters-panel__foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px 16px;
+}
+
+/* Clear filters is hidden until something is set. margin-left:auto rather than
+   justify-content:space-between so Done stays pinned right in both states
+   instead of sliding left whenever Clear disappears. */
+.filters-panel__done {
+  margin-left: auto;
 }
 
 .collection-meta {
@@ -442,6 +680,20 @@ body.agents-roster-page {
 
 /* ---- Gallery grid --------------------------------------------------------- */
 
+/* The collection host. Ungrouped it holds one .agent-grid; grouped it holds a
+   stack of sections, each with its own grid. It carries the view mode (is-list)
+   and the sectioning flag (is-grouped) for everything inside it. */
+.roster-collection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.roster-collection.is-grouped {
+  gap: 22px;
+}
+
 /* Fluid: columns follow the collection's own width, so opening or closing the
    Inspector re-columns the Gallery instead of clipping it (FR79/FR80). */
 .agent-grid {
@@ -452,6 +704,352 @@ body.agents-roster-page {
   margin: 0;
   padding: 0;
   min-width: 0;
+}
+
+/* ---- Map view ------------------------------------------------------------- */
+
+/* The Map has no district frames, so the canvas carries more empty space than
+   the Workspace Map's does. What keeps it from reading as sparse rather than
+   deliberate is the grid: the same 24px paper rhythm as the page behind it,
+   scaled with the camera so it reads as ground the tiles sit on rather than as
+   a backdrop they float over. */
+.roster-map {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.roster-map[hidden] {
+  display: none;
+}
+
+.agent-map {
+  position: relative;
+  height: clamp(420px, 62vh, 760px);
+  overflow: hidden;
+  border: 1px solid var(--card-line);
+  border-radius: var(--roster-radius);
+  background-color: var(--cozy-paper-deep, #e6dccb);
+  background-image:
+    linear-gradient(var(--roster-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--roster-grid) 1px, transparent 1px);
+  /* The grid scales with the camera, so zooming feels like moving over ground
+     rather than resizing a picture of it. --map-zoom is written by the
+     controller on every camera change. */
+  background-size: calc(24px * var(--map-zoom, 1)) calc(24px * var(--map-zoom, 1));
+  cursor: grab;
+  touch-action: none;
+}
+
+.agent-map:active {
+  cursor: grabbing;
+}
+
+.agent-map:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: -2px;
+}
+
+/* The world layer holds every tile in world coordinates and is transformed as
+   one. transform-origin is 0 0 because the controller writes the viewport
+   centring into the transform itself. */
+.agent-map__world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.agent-tile {
+  --tile-accent: var(--roster-accent, var(--primary-color, #4f46e5));
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 210px;
+  height: 132px;
+  padding: 6px;
+}
+
+.agent-tile__body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  padding: 12px 12px 10px;
+  border: 1px solid var(--card-line);
+  border-radius: var(--roster-radius);
+  background: var(--card-surface);
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: grab;
+  box-shadow: 0 8px 20px -18px rgb(15 23 42 / 55%);
+}
+
+/* Role reads as a top rule here too, so a tile and a card carry the same
+   colour signal. */
+.agent-tile__body::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  border-radius: var(--roster-radius) var(--roster-radius) 0 0;
+  background: linear-gradient(
+    90deg,
+    var(--tile-accent),
+    color-mix(in srgb, var(--tile-accent) 8%, transparent) 78%
+  );
+}
+
+.agent-tile__body:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 2px;
+}
+
+.agent-tile.is-selected .agent-tile__body {
+  border-color: var(--tile-accent);
+  box-shadow: inset 0 0 0 1px var(--tile-accent);
+}
+
+/* A blocked drop is stated by a dashed outline and a cursor, not by colour
+   alone — the same rule the rest of this page follows (FR-88). */
+.agent-tile.is-blocked .agent-tile__body {
+  border: 2px dashed #b91c1c;
+  cursor: not-allowed;
+}
+
+.agent-tile__flags {
+  position: absolute;
+  top: 9px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.agent-tile__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px 2px 6px;
+  border: 1px solid var(--card-line);
+  border-radius: 999px;
+  background: var(--card-soft);
+  color: var(--card-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.agent-tile__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #9ca3af;
+}
+
+.agent-tile__status.is-active .agent-tile__dot {
+  background: #15803d;
+}
+
+.agent-tile__status.is-error {
+  color: #b91c1c;
+  border-color: color-mix(in srgb, #b91c1c 40%, var(--card-line));
+}
+
+.agent-tile__status.is-error .agent-tile__dot {
+  background: #b91c1c;
+}
+
+.agent-tile__status.is-disabled .agent-tile__dot {
+  background: transparent;
+  border: 1px solid var(--card-muted);
+}
+
+.agent-tile__fav {
+  color: #b45309;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.agent-tile__ident {
+  min-width: 0;
+  margin-top: 14px;
+}
+
+.agent-tile__name {
+  display: block;
+  overflow: hidden;
+  padding-right: 84px;
+  color: var(--text-primary, #111827);
+  font-size: 15px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-tile__role {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--tile-accent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* Membership as text, because the Map has no frames to express it with
+   (FR-61/FR-63). */
+.agent-tile__where {
+  margin-top: auto;
+  overflow: hidden;
+  color: var(--card-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-map__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-map__btn {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--card-line);
+  border-radius: 8px;
+  background: var(--card-surface);
+  color: var(--text-primary, #111827);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.agent-map__btn:hover {
+  border-color: var(--primary-color, #4f46e5);
+}
+
+.agent-map__btn:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 1px;
+}
+
+.agent-map__zoom {
+  min-width: 46px;
+  color: var(--card-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.agent-map__note {
+  margin: 0;
+  color: var(--card-muted);
+  font-size: 12px;
+}
+
+.agent-map__note[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-map__world {
+    will-change: auto;
+  }
+}
+
+/* ---- Group-by sections ---------------------------------------------------- */
+
+/* Section headers read as district frames rather than table headers: a thin
+   rule in the group's accent, the name in the page's eyebrow style, the count
+   muted, and a chevron for collapse (FR-24). */
+.roster-section {
+  --section-accent: var(--roster-accent, var(--primary-color, #4f46e5));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.roster-section__heading {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.roster-section__head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 0 0 8px;
+  border: 0;
+  border-bottom: 2px solid var(--section-accent);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.roster-section__head:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 3px;
+}
+
+.roster-section__head:hover .roster-section__name {
+  color: var(--text-primary, #111827);
+}
+
+/* A CSS triangle rather than an icon font: the chevron has to rotate with the
+   collapsed state, and this page's icon set is not loaded for the roster. */
+.roster-section__chevron {
+  flex: 0 0 auto;
+  width: 0;
+  height: 0;
+  border-top: 5px solid var(--section-accent);
+  border-right: 4px solid transparent;
+  border-left: 4px solid transparent;
+  transition: transform 0.14s ease;
+}
+
+.roster-section.is-collapsed .roster-section__chevron {
+  transform: rotate(-90deg);
+}
+
+.roster-section__name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--section-accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.roster-section__count {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--card-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---- Agent card ----------------------------------------------------------- */
@@ -504,11 +1102,13 @@ body.agents-roster-page {
   box-shadow: inset 0 0 0 1px var(--role-accent);
 }
 
+/* Bottom-right, not top-right: the top-right corner now carries the status chip
+   and the favorite star, and two markers in one 9px corner read as neither. */
 .roster-card.is-focused::after {
   content: "";
   position: absolute;
-  top: 9px;
   right: 9px;
+  bottom: 9px;
   width: 8px;
   height: 8px;
   border: 1px solid var(--role-accent);
@@ -575,14 +1175,19 @@ body.agents-roster-page {
 }
 
 /* The open control is the card body: a full-size button reset so it reads as a
-   card, kept a sibling of the checkbox rather than its parent (FR40). */
+   card, kept a sibling of the checkbox rather than its parent (FR40).
+
+   Two rows, two columns: the portrait and the identity share the first row, the
+   workspace pills take the whole second one. That is the entire card — four
+   facts, no third row to grow into (FR-1/FR-8). */
 .roster-card__open {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  gap: 6px 11px;
   width: 100%;
   min-width: 0;
-  padding: 20px 15px 15px;
+  padding: 13px 13px 12px;
   border: 0;
   border-radius: inherit;
   background: transparent;
@@ -597,33 +1202,156 @@ body.agents-roster-page {
   outline-offset: -3px;
 }
 
-.agent-card__visual {
+/* ---- Who: portrait + identity --------------------------------------------- */
+
+/* Geometry stays in CSS: the shared renderer emits a size CLASS, never an
+   inline --aa-size, exactly so a denser view can resize the portrait without
+   re-rendering it. The card asks for 56px rather than the renderer's 72px
+   default, which is most of the height this epic reclaims. */
+.roster-card .agent-card__portrait {
+  --aa-size: 56px;
+  grid-row: 1;
+  grid-column: 1;
+}
+
+/* ---- Portrait progress ring ---------------------------------------------- */
+
+/* Progress toward the next level, drawn around the portrait (FR-74/FR-75).
+   The role emblem inside the portrait comes from the shared avatar renderer,
+   so this element carries only the ring.
+
+   A conic-gradient masked to an annulus: one element, no SVG, and the fill is
+   a single custom property the controller writes. The portrait keeps its own
+   size, so the ring adds a 3px collar rather than shrinking the art. */
+.agent-card__ring {
+  --ring-track: color-mix(in srgb, var(--role-accent) 18%, transparent);
+  position: relative;
+  grid-row: 1;
+  grid-column: 1;
   display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
-  gap: 12px;
-  align-items: center;
+  place-items: center;
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+}
+
+.agent-card__ring::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(var(--role-accent) calc(var(--ring-pct, 0) * 1%), var(--ring-track) 0);
+  /* The annulus. Both properties are needed: the unprefixed one for current
+     engines, the -webkit- one for Safari, which still requires it. */
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+}
+
+/* The ring shows proportion; it is never the only thing distinguishing a
+   stage. Each stage also changes the ring's WEIGHT and its track, so the five
+   are tellable apart in monochrome and by someone who cannot compare hues
+   (FR-77/FR-88). Names match the AgentStage constants exactly. */
+.agent-card__ring[data-stage="spark"]::before {
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+}
+
+.agent-card__ring[data-stage="infant"]::before {
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+}
+
+.agent-card__ring[data-stage="learner"]::before {
+  mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 4px));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 4px));
+}
+
+.agent-card__ring[data-stage="expert"]::before {
+  mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 5px));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 5px));
+}
+
+/* Sentient is the only stage that closes the track completely, so the last
+   stage reads as arrival rather than as "a slightly thicker expert". */
+.agent-card__ring[data-stage="sentient"] {
+  --ring-track: color-mix(in srgb, var(--role-accent) 42%, transparent);
+}
+
+.agent-card__ring[data-stage="sentient"]::before {
+  mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 5px));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 5px));
+}
+
+/* The ring never animates. The stage-up toast already owns the level-up
+   moment, and a second animation would compete with it for the same event
+   (PRD 9.4). This rule is moot while nothing transitions and exists so the
+   promise stays true if a later change adds motion. */
+@media (prefers-reduced-motion: reduce) {
+  .agent-card__ring::before {
+    transition: none;
+  }
+}
+
+.agent-card__ident {
+  grid-row: 1;
+  grid-column: 2;
+  align-self: center;
   min-width: 0;
 }
 
-.agent-card__heading {
-  min-width: 0;
+/* Only the NAME shares a horizontal band with the flag cluster, so only the
+   name reserves room for it. Reserving it on the whole identity block instead
+   truncated "Commander · Lv 3" at desktop width — clipping one of the four
+   facts to protect a chip it never overlapped. */
+.agent-card__name {
+  display: block;
+  overflow: hidden;
+  padding-right: 78px;
+  color: var(--text-primary, #111827);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Ready?: the flag cluster, top right ---------------------------------- */
+
+/* Status chip and favorite star share one corner, the way a map tile flies its
+   flags (FR-3/FR-7). Absolutely positioned so neither can add a row.
+   pointer-events:none lets a click land on the open button underneath, so the
+   corner is not a dead zone on an otherwise fully clickable card. */
+.agent-card__flags {
+  position: absolute;
+  top: 9px;
+  right: 10px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
 }
 
 .agent-card__status {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 5px;
+  gap: 5px;
+  padding: 2px 8px 2px 6px;
+  border: 1px solid var(--card-line);
+  border-radius: 999px;
+  background: var(--card-soft);
   color: var(--card-muted);
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 10px;
+  font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .agent-card__dot {
-  width: 7px;
-  height: 7px;
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: #9ca3af;
 }
@@ -634,6 +1362,7 @@ body.agents-roster-page {
 
 .agent-card__status.is-error {
   color: #b91c1c;
+  border-color: color-mix(in srgb, #b91c1c 40%, var(--card-line));
 }
 
 .agent-card__status.is-error .agent-card__dot {
@@ -642,52 +1371,40 @@ body.agents-roster-page {
   box-shadow: 0 0 0 2px color-mix(in srgb, #b91c1c 30%, transparent);
 }
 
+/* Disabled is a hollow dot: a shape difference, not a second hue. */
 .agent-card__status.is-disabled .agent-card__dot {
   background: transparent;
   border: 1px solid var(--card-muted);
 }
 
-.agent-card__name {
-  display: block;
-  overflow: hidden;
-  color: var(--text-primary, #111827);
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1.15;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* ---- Role: role label, then Lv N ------------------------------------------ */
 
+/* One line, clipped rather than wrapped: a wrapping role line is the other way
+   a card grows past its height budget. */
 .agent-card__class {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
+  display: block;
   min-width: 0;
-  margin-top: 5px;
+  margin-top: 3px;
+  overflow: hidden;
   color: var(--role-accent);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-/* Character identity sits below the role and reads quieter than it: the agent's
-   own name and role stay primary (PRD FR-55). Not uppercased, so it is visually
-   distinct from the operational role line above it. */
-.agent-card__character {
-  display: block;
-  min-width: 0;
-  margin-top: 4px;
-  overflow: hidden;
-  color: var(--card-muted);
-  font-size: 11px;
-  font-weight: 500;
   text-overflow: ellipsis;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
+/* The role has a second, hidden home so List view can lift it into its own
+   column without a second card renderer. Exactly one of the two is displayed;
+   see the List rules below. */
+.agent-card__rolecell {
+  display: none;
+  min-width: 0;
+}
+
 .agent-card__badge {
+  margin-left: 6px;
   padding: 1px 6px;
   border: 1px solid var(--card-line);
   border-radius: 999px;
@@ -698,51 +1415,18 @@ body.agents-roster-page {
   text-transform: uppercase;
 }
 
-.agent-card__purpose {
-  display: -webkit-box;
-  min-height: 38px;
-  overflow: hidden;
-  color: var(--card-muted);
-  font-size: 12.5px;
-  line-height: 1.5;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-}
+/* ---- Where: bare workspace pills ------------------------------------------ */
 
-/* Missing values are stated, and stated as missing, rather than styled to look
-   like real content (FR20). */
-.agent-card__purpose.is-missing,
-.agent-card__model.is-missing,
-.agent-card__activity.is-missing {
-  /* The italics and the wording ("No description yet") already say this is
-     missing. The 0.85 opacity that used to sit here as well pushed the muted
-     ink to 4.42:1 on the warm card surface — a serious axe violation — for a
-     third cue nobody needed (FR-119). */
-  font-style: italic;
-}
-
-.agent-card__section,
-.agent-card__toolbox {
-  display: block;
-  min-width: 0;
-}
-
-.agent-card__section-label {
-  display: block;
-  margin-bottom: 5px;
-  color: var(--card-muted);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
+/* nowrap, not wrap: the two-plus-overflow rule already caps the content, and a
+   wrapping pill row could add a third line to a two-row card. */
 .agent-card__pills {
+  grid-row: 2;
+  grid-column: 1 / -1;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 5px;
   min-width: 0;
+  overflow: hidden;
 }
 
 .agent-card__pill {
@@ -784,62 +1468,18 @@ body.agents-roster-page {
   display: none;
 }
 
+/* "Library only" is a real state, not a missing value, so it reads as a quiet
+   dashed pill rather than italic apology text (FR-6). */
 .agent-card__pill.is-empty {
-  font-style: italic;
-}
-
-.agent-card__toolbox {
-  padding: 8px 10px;
-  border: 1px solid color-mix(in srgb, var(--role-accent) 22%, var(--card-line));
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--role-accent) 5%, var(--card-soft));
-}
-
-.agent-card__toolbox.is-empty {
-  border-color: var(--card-line);
-  background: var(--card-soft);
-}
-
-.agent-card__toolbox-value {
-  display: block;
-  overflow: hidden;
-  color: var(--text-primary, #111827);
-  font-size: 11.5px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agent-card__toolbox.is-empty .agent-card__toolbox-value {
-  color: var(--card-muted);
-  font-style: italic;
-  font-weight: 500;
-}
-
-.agent-card__footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 0;
-  margin-top: auto;
-  padding-top: 4px;
-  color: var(--card-muted);
-  font-size: 11px;
-}
-
-.agent-card__model,
-.agent-card__activity {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  border-style: dashed;
+  color: var(--cozy-ink-faint, #7d8878);
 }
 
 .agent-card__fav {
   flex: 0 0 auto;
   color: #b45309;
   font-size: 13px;
+  line-height: 1;
 }
 
 [data-bs-theme="dark"] .agent-card__fav {
@@ -864,97 +1504,123 @@ body.agents-roster-page {
 /* List is a presentation mode over the same card DOM, not a second renderer:
    one row states exactly what its Gallery card states, more densely
    (PRD FR14/FR17). */
-.agent-grid.is-list {
+.roster-collection.is-list .agent-grid {
   grid-template-columns: minmax(0, 1fr);
   gap: 6px;
 }
 
-.agent-grid.is-list .roster-card__open {
-  display: grid;
-  grid-template-columns: minmax(220px, 1.4fr) minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+/* Three columns for three of the four facts — name, role, membership — with the
+   fourth, the status chip, riding in the flag cluster at the row's right end.
+   There is deliberately no fifth column to add: List states exactly what the
+   Gallery card states (FR-9). */
+.roster-collection.is-list .agent-grid .roster-card__open {
+  grid-template-columns: minmax(190px, 1.5fr) minmax(0, 1.1fr) minmax(0, 1.4fr);
+  grid-template-rows: auto;
   gap: 16px;
   align-items: center;
-  padding: 12px 14px 12px 44px;
+  padding: 9px 150px 9px 40px;
 }
 
-.agent-grid.is-list .agent-card__visual {
-  grid-template-columns: 54px minmax(0, 1fr);
-  gap: 10px;
+/* The name already identifies the row, so the portrait's column is better spent
+   on membership at this density. It returns at phone width, below.
+   The ring is the portrait's wrapper, so hiding only the portrait would leave
+   a floating 62px circle where the art used to be. */
+.roster-collection.is-list .agent-grid .agent-card__portrait,
+.roster-collection.is-list .agent-grid .agent-card__ring {
+  display: none;
 }
 
-.agent-grid.is-list .agent-avatar--md {
-  --aa-size: 54px;
+.roster-collection.is-list .agent-grid .agent-card__ident {
+  grid-row: 1;
+  grid-column: 1;
 }
 
-.agent-grid.is-list .agent-card__name {
-  font-size: 15px;
+.roster-collection.is-list .agent-grid .agent-card__name {
+  padding-right: 0;
+  font-size: 14px;
 }
 
-.agent-grid.is-list .agent-card__purpose {
-  min-height: 0;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
+/* Role moves from under the name into its own column. */
+.roster-collection.is-list .agent-grid .agent-card__ident .agent-card__class {
+  display: none;
 }
 
-.agent-grid.is-list .agent-card__footer {
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-  padding-top: 0;
-  white-space: nowrap;
+.roster-collection.is-list .agent-grid .agent-card__rolecell {
+  display: block;
+  grid-row: 1;
+  grid-column: 2;
 }
 
-.agent-grid.is-list .roster-card__checkwrap {
+.roster-collection.is-list .agent-grid .agent-card__rolecell .agent-card__class {
+  margin-top: 0;
+}
+
+.roster-collection.is-list .agent-grid .agent-card__pills {
+  grid-row: 1;
+  grid-column: 3;
+}
+
+.roster-collection.is-list .agent-grid .roster-card__checkwrap {
   top: 50%;
-  left: 10px;
+  left: 9px;
   transform: translateY(-50%);
 }
 
-/* Below the Gallery's own column width there is no room for five columns;
-   drop the least load-bearing ones rather than letting the row overflow. */
+.roster-collection.is-list .agent-grid .agent-card__flags {
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* Below the Gallery's own column width the role column is the first to go: it
+   is the one fact the row's accent rule already hints at. */
 @media (max-width: 1180px) {
-  .agent-grid.is-list .roster-card__open {
-    grid-template-columns: minmax(200px, 1.3fr) minmax(0, 1.6fr) minmax(0, 1fr) auto;
+  .roster-collection.is-list .agent-grid .roster-card__open {
+    grid-template-columns: minmax(190px, 1.2fr) minmax(0, 1.4fr);
   }
-  .agent-grid.is-list .agent-card__toolbox {
+  .roster-collection.is-list .agent-grid .agent-card__rolecell {
     display: none;
   }
-}
-
-@media (max-width: 860px) {
-  .agent-grid.is-list .roster-card__open {
-    grid-template-columns: minmax(180px, 1fr) minmax(0, 1.4fr) auto;
-  }
-  .agent-grid.is-list .agent-card__section {
-    display: none;
-  }
-}
-
-/* At mobile widths a "row" is just the card again — five columns cannot fit in
-   320px without losing information (PRD FR81/FR93). */
-@media (max-width: 640px) {
-  .agent-grid.is-list .roster-card__open {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    padding: 58px 15px 15px;
-  }
-  .agent-grid.is-list .agent-card__visual {
-    grid-template-columns: 72px minmax(0, 1fr);
-  }
-  .agent-grid.is-list .agent-avatar--md {
-    --aa-size: 72px;
-  }
-  .agent-grid.is-list .agent-card__section,
-  .agent-grid.is-list .agent-card__toolbox {
+  .roster-collection.is-list .agent-grid .agent-card__ident .agent-card__class {
     display: block;
   }
-  .agent-grid.is-list .agent-card__footer {
-    flex-direction: row;
-    align-items: center;
+}
+
+/* At phone width a "row" is the card again: three columns cannot fit in 400px
+   without dropping one of the four facts (FR-9/FR-83). */
+@media (max-width: 640px) {
+  .roster-collection.is-list .agent-grid .roster-card__open {
+    grid-template-columns: 56px minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    gap: 6px 11px;
+    padding: 13px 13px 12px;
   }
-  .agent-grid.is-list .roster-card__checkwrap {
-    top: 8px;
+  .roster-collection.is-list .agent-grid .agent-card__portrait {
+    display: block;
+  }
+  /* grid, not block: the ring centres the portrait with place-items. */
+  .roster-collection.is-list .agent-grid .agent-card__ring {
+    display: grid;
+  }
+  .roster-collection.is-list .agent-grid .agent-card__ident {
+    grid-column: 2;
+  }
+  .roster-collection.is-list .agent-grid .agent-card__name {
+    padding-right: 78px;
+    font-size: 16px;
+  }
+  .roster-collection.is-list .agent-grid .agent-card__rolecell {
+    display: none;
+  }
+  .roster-collection.is-list .agent-grid .agent-card__pills {
+    grid-row: 2;
+    grid-column: 1 / -1;
+  }
+  .roster-collection.is-list .agent-grid .roster-card__checkwrap {
+    top: 7px;
+    transform: none;
+  }
+  .roster-collection.is-list .agent-grid .agent-card__flags {
+    top: 9px;
     transform: none;
   }
 }
@@ -1569,6 +2235,36 @@ body.inspector-sheet-open {
   gap: 8px;
 }
 
+/* Favorite/Unfavorite — the first of the Inspector's three actions (FR-43).
+   Quieter than "Open full page", which is the primary way out of a reader. */
+.stage__action {
+  font-size: 12px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  color: var(--text-primary, #111827);
+  background: transparent;
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.stage__action:hover {
+  border-color: var(--roster-accent, #4f46e5);
+}
+.stage__action:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 2px;
+}
+/* Favorited reads as a filled state, not only as a different star glyph. */
+.stage__action[aria-pressed="true"] {
+  border-color: #b45309;
+  background: color-mix(in srgb, #b45309 12%, transparent);
+  color: #b45309;
+}
+[data-bs-theme="dark"] .stage__action[aria-pressed="true"] {
+  border-color: #fbbf24;
+  color: #fbbf24;
+}
+
 .stage__fullpage {
   font-size: 12px;
   border: 1px solid
@@ -1707,7 +2403,27 @@ body.inspector-sheet-open {
   gap: 8px;
   font-weight: 600;
   font-size: 14px;
-  color: var(--role-accent, var(--text-primary, #111827));
+  /* The catalog's accents are picked to identify a role on a chip or an emblem,
+     not to be read as body text: the Writer green (#22c55e) gives 1.98:1 on the
+     light paper surface, which axe flags as a serious violation. Mixed toward
+     the page ink so the role stays recognisably its own colour while the text
+     is actually readable — the same trade the card's role line makes through
+     the --roster-accent indirection. The emblem beside it still carries the
+     accent at full strength, where contrast rules do not apply.
+     40%, not 55%: the lighter mix measured 4.21:1 — closer, still under the
+     4.5:1 minimum. Green is the worst case of the six catalog accents, so a
+     ratio that satisfies it satisfies all of them. */
+  color: color-mix(
+    in srgb,
+    var(--role-accent, var(--text-primary, #111827)) 40%,
+    var(--text-primary, #111827)
+  );
+}
+
+/* Dark surfaces need the opposite adjustment: there the accent is already
+   bright enough and mixing toward the (light) ink would wash it out. */
+[data-bs-theme="dark"] .stage__progression-role {
+  color: color-mix(in srgb, var(--role-accent, var(--text-primary, #e8eaec)) 82%, #ffffff);
 }
 
 .stage__progression-emblem {
@@ -1798,20 +2514,6 @@ body.inspector-sheet-open {
   color: #b45309;
 }
 
-/* Note under the Model picker: pricing / good-for hint, legacy warning. */
-.model-note {
-  margin: 6px 2px 0;
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--card-muted);
-}
-.model-note:empty {
-  display: none;
-}
-.model-note.is-legacy {
-  color: #b45309;
-}
-
 /* Tabs */
 .stage__tabs {
   display: flex;
@@ -1881,6 +2583,55 @@ body.inspector-sheet-open {
   border-top: 1px solid var(--border-color, #eee);
 }
 
+/* ---- Read-only Inspector blocks ------------------------------------------- */
+
+/* The purpose the card no longer shows. Stated in full — this panel has the
+   room the card did not — and absent entirely when the agent has none, so no
+   placeholder reappears here after Group 1 removed it from the card. */
+.stage-readonly-purpose {
+  margin: 0 0 16px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-primary, #111827);
+}
+
+.stage-readonly-block {
+  margin-top: 16px;
+}
+
+.stage-readonly-label {
+  margin: 0 0 7px;
+  color: var(--card-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.stage-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stage-chip {
+  padding: 3px 10px;
+  border: 1px solid var(--card-line);
+  border-radius: 999px;
+  background: var(--card-soft);
+  color: var(--text-primary, #111827);
+  font-size: 12px;
+}
+
+/* The link out to the editor of record. */
+.stage-hint__link {
+  color: var(--roster-accent, #4f46e5);
+  font-weight: 600;
+}
+
 .stage-prompt pre {
   white-space: pre-wrap;
   word-break: break-word;
@@ -1937,6 +2688,13 @@ body.inspector-sheet-open {
 
 /* ---- Editable forms ------------------------------------------------------- */
 
+/* These belong to the create-agent panel, which is the one form left in the
+   Inspector. It is a creation flow, not a field editor, so it survived the
+   move of agent editing to the detail page (FR-48). The rules the Overview and
+   Prompt editors owned alone — the readonly derived field, the prompt
+   textarea, the dirty note, the stale-edit banner, the workspace checkbox
+   list, and the model note — went with them. */
+
 .stage-form {
   display: flex;
   flex-direction: column;
@@ -1958,8 +2716,7 @@ body.inspector-sheet-open {
 .field__control input[type="text"],
 .field__control input[type="number"],
 .field__control select,
-.field__control textarea,
-.stage-textarea {
+.field__control textarea {
   width: 100%;
   border: 1px solid var(--border-color, #d1d5db);
   border-radius: 8px;
@@ -1975,29 +2732,9 @@ body.inspector-sheet-open {
   line-height: 1.5;
 }
 
-/* Read-only derived field (e.g. Provider, set by the selected model). */
-.field__control input.field__readonly {
-  background: var(--bg-secondary, #f3f4f6);
-  color: var(--card-muted);
-  cursor: default;
-}
-.field__control input.field__readonly:focus-visible {
-  outline: none;
-  border-color: var(--border-color, #d1d5db);
-}
-
-.stage-textarea {
-  width: 100%;
-  resize: vertical;
-  line-height: 1.55;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 13px;
-}
-
 .field__control input:focus-visible,
 .field__control select:focus-visible,
-.field__control textarea:focus-visible,
-.stage-textarea:focus-visible {
+.field__control textarea:focus-visible {
   outline: 2px solid var(--primary-color, #4f46e5);
   outline-offset: 1px;
   border-color: var(--primary-color, #4f46e5);
@@ -2014,7 +2751,7 @@ body.inspector-sheet-open {
   width: auto;
 }
 
-/* Save bar */
+/* The create panel's action row. */
 .save-bar {
   display: flex;
   align-items: center;
@@ -2022,15 +2759,6 @@ body.inspector-sheet-open {
   margin-top: 16px;
   padding-top: 14px;
   border-top: 1px solid var(--border-color, #eee);
-}
-
-.save-bar .dirty-note {
-  font-size: 12px;
-  color: var(--card-muted);
-  margin-right: auto;
-}
-.save-bar.is-dirty .dirty-note {
-  color: var(--roster-accent, #4f46e5);
 }
 
 .save-status {
@@ -2084,47 +2812,10 @@ body.inspector-sheet-open {
   outline-offset: 2px;
 }
 
-/* Stale-edit / shared-edit banner */
-.conflict-banner {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
-  margin-bottom: 16px;
-  border-radius: 10px;
-  font-size: 13px;
-  line-height: 1.45;
-  background: color-mix(in srgb, #f59e0b 16%, var(--bg-primary, #fff));
-  border: 1px solid color-mix(in srgb, #f59e0b 45%, var(--border-color, #e5e7eb));
-  color: var(--text-primary, #111827);
-}
-.conflict-banner span {
-  flex: 1;
-}
-.conflict-banner__action {
-  flex: none;
-  border: 1px solid #f59e0b;
-  background: transparent;
-  color: var(--text-primary, #111827);
-  border-radius: 8px;
-  padding: 6px 12px;
-  font-size: 13px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.conflict-banner__action:hover {
-  background: color-mix(in srgb, #f59e0b 20%, transparent);
-}
-
 [data-bs-theme="dark"] .field__control input,
 [data-bs-theme="dark"] .field__control select,
-[data-bs-theme="dark"] .field__control textarea,
-[data-bs-theme="dark"] .stage-textarea {
+[data-bs-theme="dark"] .field__control textarea {
   background: rgba(255, 255, 255, 0.04);
-}
-[data-bs-theme="dark"] .field__control input.field__readonly {
-  background: rgba(255, 255, 255, 0.015);
-  color: var(--card-muted);
 }
 
 @media (max-width: 560px) {
@@ -2134,40 +2825,7 @@ body.inspector-sheet-open {
   }
 }
 
-/* ---- Workspaces assignment + create panel --------------------------------- */
-
-.ws-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.ws-check {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 12px;
-  border: 1px solid var(--border-color, #e5e7eb);
-  border-radius: 10px;
-  font-size: 14px;
-  cursor: pointer;
-}
-.ws-check:hover {
-  border-color: color-mix(in srgb, var(--primary-color, #4f46e5) 40%, var(--border-color, #e5e7eb));
-}
-.ws-check input {
-  width: auto;
-}
-.ws-check__name {
-  flex: 1;
-}
-.ws-check.is-locked {
-  cursor: default;
-  opacity: 0.85;
-}
-.ws-check.is-locked:hover {
-  border-color: var(--border-color, #e5e7eb);
-}
+/* ---- Create panel --------------------------------------------------------- */
 
 .create-panel {
   border: 1px solid var(--border-color, #e5e7eb);
@@ -2234,9 +2892,6 @@ body.inspector-sheet-open {
   .collection-shell {
     grid-template-columns: minmax(0, 1fr);
   }
-  .collection-select select {
-    max-width: none;
-  }
 }
 
 @media (max-width: 860px) {
@@ -2278,13 +2933,27 @@ body.inspector-sheet-open {
   }
 }
 
-/* common.css enforces a 44x44 minimum touch target for checkboxes at this
-   breakpoint, which makes the checkwrap 50px square. Give the card body enough
-   top clearance that the control sits in its own band instead of covering the
-   portrait's initials — the same arrangement as the approved mobile reference. */
+/* common.css inflates every checkbox to a 44x44 box at this breakpoint. On the
+   old tall card that was absorbed by pushing the body down 58px; on a ~115px
+   card that band is half the card, so the touch target is met without the
+   visual inflation: the control keeps its 15px box and the LABEL grows a
+   transparent ring out to 45px square.
+   Clicking a label toggles its input, and a pseudo-element is part of the
+   label's hit area, so the target is real rather than declared. */
 @media (max-width: 768px) {
-  .roster-card__open {
-    padding-top: 58px;
+  /* The attribute selector is load-bearing: common.css sets the min-height on
+     `input[type="checkbox"]`, which out-specifies a bare class and left the
+     control 50px square however small this rule asked for. */
+  .roster-card__check[type="checkbox"] {
+    width: 15px;
+    height: 15px;
+    min-width: 0;
+    min-height: 0;
+  }
+  .roster-card__checkwrap::after {
+    content: "";
+    position: absolute;
+    inset: -12px;
   }
 }
 
@@ -2302,13 +2971,34 @@ body.inspector-sheet-open {
     min-width: 0;
   }
   .collection-selects {
-    width: 100%;
+    grid-template-columns: minmax(0, 1fr);
   }
-  .collection-select {
-    flex: 1 1 140px;
-  }
-  .collection-select select {
+  /* The Filters panel becomes a bottom sheet, the same presentation switch the
+     Inspector already makes when narrow (FR-16). It is still the same modal
+     <dialog>, so the focus trap and Escape behaviour do not change with the
+     breakpoint — only where it sits. */
+  /* !important because positionFilters() writes inline top/left on the way up
+     from a wide viewport, and an inline style beats a stylesheet rule. The
+     function clears those values below this breakpoint, but the sheet must be
+     correct even in the frame before it runs. */
+  .filters-panel {
+    inset: auto 0 0 !important;
+    top: auto !important;
     width: 100%;
+    max-width: 100%;
+    max-height: 82vh;
+    border-width: 1px 0 0;
+    border-radius: var(--roster-radius) var(--roster-radius) 0 0;
+  }
+  .view-cluster {
+    flex: 1 1 auto;
+  }
+  .view-sort {
+    flex: 1 1 auto;
+  }
+  .view-sort select {
+    width: 100%;
+    max-width: none;
   }
 }
 

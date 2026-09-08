@@ -1,0 +1,1 @@
+Find five useful improvements that look feasible in roughly an hour, or the time budget in the user's context. Look for user friction, confusing errors, missing tests, or small workflow annoyances. Cite concrete evidence for each, explain scope uncertainty, and recommend the best value-for-effort option. Do not pad the list if evidence supports fewer candidates.

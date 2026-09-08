@@ -49,8 +49,43 @@ func CanonicalUpdate(s Store, wsID string, fn func(*Workspace) error) error {
 	if err != nil {
 		return err
 	}
+	beforeHome := ws.AssistantProgramState != nil
+	beforeLink := ws.AssistantProjectLink != nil
+	beforeStation := ""
+	if ws.AssistantProjectLink != nil {
+		beforeStation = ws.AssistantProjectLink.StationWorkspaceID
+	}
+	beforeParent := ws.ParentID
 	if err := fn(ws); err != nil {
 		return err
 	}
+	if assistantProgramTopologyWasGenericallyRemoved(beforeHome, beforeLink, beforeStation, beforeParent, ws) {
+		return ErrAssistantProgramProtected
+	}
 	return s.Save(ws)
+}
+
+func assistantProgramTopologyWasGenericallyRemoved(beforeHome, beforeLink bool, beforeStation, beforeParent string, after *Workspace) bool {
+	if after == nil {
+		return false
+	}
+	if beforeHome {
+		return after.AssistantProgramState == nil || after.ParentID != beforeParent || after.Status == StatusTrashed
+	}
+	if beforeLink {
+		// Clearing the typed link and its physical parent together is the trusted
+		// explicit unlink shape. Generic move/trash paths retain the link and are
+		// refused here.
+		if after.AssistantProjectLink == nil && after.ParentID == "" {
+			return false
+		}
+		// Link creation may persist before the managed-folder projection. Moving
+		// that exact child to its already-recorded Home heals, rather than changes,
+		// authoritative topology.
+		if after.ParentID == beforeStation && after.Status != StatusTrashed {
+			return false
+		}
+		return after.ParentID != beforeParent || after.Status == StatusTrashed
+	}
+	return false
 }

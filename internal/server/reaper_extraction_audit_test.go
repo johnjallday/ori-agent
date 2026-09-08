@@ -49,7 +49,8 @@ func TestCompiledDomainExtractionLeavesOnlyGenericHostProductionCode(t *testing.
 		// generic and lives elsewhere. The guard below keeps it that way by
 		// asserting the file stays data only.
 		if clean == "internal/server/marketplace_cache_official.json" ||
-			clean == "internal/specialist/domains.go" {
+			clean == "internal/specialist/domains.go" ||
+			clean == "internal/reviewedintegration/entries.go" {
 			return nil
 		}
 		if strings.HasSuffix(clean, "_test.go") || strings.HasSuffix(clean, ".test.js") {

@@ -1,0 +1,32 @@
+<div class="modal fade group-builder" id="buildGroupModal" tabindex="-1" aria-labelledby="buildGroupTitle" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div><p class="group-builder__eyebrow">Workspace map</p><h2 class="modal-title" id="buildGroupTitle">Build Group</h2></div>
+        <button type="button" class="modern-btn modern-btn-secondary" id="buildGroupClose" aria-label="Close group builder"><span aria-hidden="true">&times;</span></button>
+      </div>
+      <div class="modal-body">
+        <p id="buildGroupContext">An empty group for related workspaces.</p>
+        <p class="group-builder__boundary">Build the place first. Add workspaces and their teams separately. No agents, projects, schedules, or access permissions are added here.</p>
+        <div id="buildGroupError" class="group-builder__error" role="alert" hidden></div>
+        <form id="buildGroupForm">
+          <label for="buildGroupName">Group name</label>
+          <input id="buildGroupName" class="form-control" type="text" required maxlength="128" autocomplete="off" aria-describedby="buildGroupNameHelp">
+          <p id="buildGroupNameHelp" class="group-builder__hint">Choose a name that makes this group easy to find on the map.</p>
+          <button type="submit" id="buildGroupReview" class="modern-btn modern-btn-secondary">Review Group</button>
+        </form>
+        <section id="buildGroupReviewPanel" aria-labelledby="buildGroupReviewTitle" hidden>
+          <h3 id="buildGroupReviewTitle" tabindex="-1"></h3>
+          <p id="buildGroupReviewDescription"></p>
+        </section>
+        <p id="buildGroupStatus" class="group-builder__hint" role="status" aria-live="polite"></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="buildGroupBack" class="modern-btn modern-btn-secondary" hidden>Back</button>
+        <button type="button" id="buildGroupCancel" class="modern-btn modern-btn-secondary">Cancel</button>
+        <button type="button" id="buildGroupCheck" class="modern-btn modern-btn-secondary" hidden>Check Setup Status</button>
+        <button type="button" id="buildGroupCommit" class="modern-btn modern-btn-primary" hidden>Build Group</button>
+      </div>
+    </div>
+  </div>
+</div>

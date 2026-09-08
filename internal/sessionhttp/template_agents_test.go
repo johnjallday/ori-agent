@@ -203,6 +203,25 @@ func TestBuildTemplateAgentPlan_ExposesExistingSharedRosterWithoutOfferingRename
 	if program.Roles[0].AgentName != "June" || program.Roles[1].AgentName != "Reviewer" {
 		t.Fatalf("existing role bindings = %+v", program.Roles)
 	}
+
+	// Scoped programs reuse only an explicit Home binding. Legacy roster
+	// evidence must not become access for a new project.
+	declaration.SchemaVersion = 2
+	declaration.Roles[0].Scope = agentworkspace.AssistantRoleScopeHome
+	declaration.Roles[1].Scope = agentworkspace.AssistantRoleScopeProject
+	state := station.GetAssistantProgramState()
+	state.SchemaVersion = agentworkspace.AssistantProgramStateSchemaVersion
+	state.Declaration = declaration
+	state.HomeBindings = agentworkspace.AssistantRoleBindingSet{StateRevision: 1, Bindings: []agentworkspace.AssistantRoleBinding{{RoleID: "guide", AgentInstanceID: "guide-1", AgentName: "June"}}}
+	station.SetAssistantProgramState(state)
+	station.Name = "My Studio"
+	if err := handler.workspaceTaskStore.Save(station); err != nil {
+		t.Fatal(err)
+	}
+	scoped := handler.buildTemplateAgentPlan(projecttemplates.Template{ID: "plugin:neutral:project", PluginOwner: &agentworkspace.PluginTemplateOwner{PluginID: "neutral"}, AssistantProgram: declaration}).AssistantProgram
+	if scoped == nil || scoped.ExistingHired || scoped.StationName != "My Studio" || scoped.Roles[0].AgentName != "June" || scoped.Roles[1].AgentName != "" {
+		t.Fatalf("Home implied a staffed project: %+v", scoped)
+	}
 }
 
 func TestBuildTemplateAgentPlan_CreateReuseAndSystemModel(t *testing.T) {

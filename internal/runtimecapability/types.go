@@ -67,11 +67,20 @@ const (
 // Action is one exact user-facing repair projected by an adapter. Token is a
 // short opaque value the browser may echo only to the confirmed-action
 // endpoint. It is not an adapter name, path, URL target, or request payload.
+type ActionDisclosure struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
+}
+
 type Action struct {
 	Token string `json:"token"`
 	Code  string `json:"code"`
 	Label string `json:"label"`
 	URL   string `json:"url,omitempty"`
+	// Disclosure is response-only exact review data for the action currently
+	// offered (for example a trusted staging destination). It is never copied
+	// into WorkspaceRuntimeState or a grant.
+	Disclosure []ActionDisclosure `json:"disclosure,omitempty"`
 }
 
 // EvaluationRequest is everything compiled adapter code receives for a

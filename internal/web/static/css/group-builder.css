@@ -1,0 +1,66 @@
+/* Override the global glass modal surface: map labels must not show through
+   this consequence review, particularly in dark mode. */
+#buildGroupModal .modal-content {
+  background: var(--bg-primary) !important;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+}
+.group-builder .modal-header,
+.group-builder .modal-footer {
+  border-color: var(--border-color);
+  gap: 12px;
+  padding: 20px 24px;
+}
+.group-builder .modal-body {
+  padding: 24px;
+  overflow-wrap: anywhere;
+}
+.group-builder__eyebrow {
+  color: var(--accent-color, var(--text-secondary));
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  margin-bottom: 6px;
+}
+.group-builder__boundary {
+  border-left: 3px solid var(--border-color);
+  padding-left: 16px;
+  margin: 20px 0;
+  line-height: 1.6;
+}
+.group-builder label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.group-builder .form-control {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-color: var(--border-color);
+}
+.group-builder__hint {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  margin-top: 10px;
+}
+.group-builder__error {
+  border-left: 3px solid var(--error-color, #b24b38);
+  padding: 12px;
+  margin-bottom: 16px;
+}
+.group-builder :focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 3px;
+}
+.group-builder [hidden] {
+  display: none !important;
+}
+@media (max-width: 480px) {
+  .group-builder .modal-footer .modern-btn {
+    white-space: normal;
+  }
+  .group-builder #buildGroupCommit {
+    width: 100%;
+  }
+}

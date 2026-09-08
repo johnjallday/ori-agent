@@ -34,10 +34,6 @@
     'validator',
     'specialist'
   ];
-  var REASONING = ['', 'minimal', 'low', 'medium', 'high'];
-  // Agent capability types; these mirror the model catalog's category strings so
-  // the Model picker can be filtered to models that fit the selected type.
-  var TYPES = ['tool-calling', 'general', 'research', 'orchestration'];
 
   var state = {
     agents: [],
@@ -55,9 +51,19 @@
     // Presentation mode for the one collection. Gallery is the default whenever
     // no valid preference is present (PRD FR11).
     view: 'gallery',
+    // Sectioning of the same filtered, sorted result. 'none' renders the flat
+    // grid the page has always rendered (PRD FR-22).
+    group: 'none',
+    // Section keys the viewer has collapsed, persisted per viewer.
+    collapsed: new Set(),
+    // The cards actually in the DOM, in DOM order. Distinct from `filtered`
+    // because grouping by workspace draws a multi-workspace agent once per
+    // section, so render order and render LENGTH both diverge from the filtered
+    // list. Every index-based interaction — arrow keys, shift-range, Select
+    // visible — walks this, not `filtered`, or it would address the wrong card
+    // (PRD FR-30/FR-31).
+    rendered: [],
     focusIndex: -1,
-    dirty: { overview: false, prompt: false, workspaces: false },
-    allWorkspaces: null,
     creating: false,
     providers: null,
     // Whether the Inspector is showing. Closing it is a presentation change:
@@ -90,10 +96,9 @@
 
   var els = {};
 
-  // Active OriTagInput instance for the focused agent's Overview tab (rebuilt on
-  // each render); read back in overviewEdits.
-  var overviewTagsInput = null;
-  // OriTagInput instance for the Create panel; read back in submitCreate.
+  // OriTagInput instance for the Create panel; read back in submitCreate. The
+  // Overview tab had one too until the Inspector stopped editing — creating an
+  // agent is a creation flow, not a field editor, so it keeps its inputs.
   var createTagsInput = null;
 
   document.addEventListener('DOMContentLoaded', init);
@@ -105,6 +110,7 @@
       stats: document.getElementById('rosterStats'),
       search: document.getElementById('rosterSearch'),
       sort: document.getElementById('rosterSort'),
+      group: document.getElementById('rosterGroup'),
       empty: document.getElementById('rosterEmpty'),
       inspector: document.getElementById('inspector'),
       inspectorScroll: document.getElementById('inspectorScroll'),
@@ -132,6 +138,7 @@
       workspacesBody: document.getElementById('workspacesBody'),
       stageDelete: document.getElementById('stageDelete'),
       stageFullPage: document.getElementById('stageFullPage'),
+      stageFavoriteToggle: document.getElementById('stageFavoriteToggle'),
       newAgentBtn: document.getElementById('newAgentBtn'),
       createPanel: document.getElementById('createPanel'),
       createBody: document.getElementById('createBody'),
@@ -168,6 +175,17 @@
       quickFilters: document.querySelector('.quick-filters'),
       viewToggle: document.querySelector('.view-toggle'),
       clearFilters: document.getElementById('clearFilters'),
+      filtersButton: document.getElementById('filtersButton'),
+      filtersPanel: document.getElementById('filtersPanel'),
+      filtersBadge: document.getElementById('filtersBadge'),
+      filtersClose: document.getElementById('filtersClose'),
+      filtersDone: document.getElementById('filtersDone'),
+      map: document.getElementById('rosterMap'),
+      menuHost: document.getElementById('rosterMenuHost'),
+      coachmark: document.getElementById('rosterCoachmark'),
+      coachmarkCopy: document.getElementById('rosterCoachmarkCopy'),
+      coachmarkNext: document.getElementById('rosterCoachmarkNext'),
+      coachmarkDismiss: document.getElementById('rosterCoachmarkDismiss'),
       emptyMsg: document.getElementById('rosterEmptyMsg'),
       emptyClearFilters: document.getElementById('rosterEmptyClearFilters'),
       emptyCreate: document.getElementById('rosterEmptyCreate')
@@ -201,8 +219,13 @@
       window.CharacterCatalog.load();
     }
 
+    // Read before the first render so a section the viewer collapsed last visit
+    // is already collapsed on the first paint rather than flashing open.
+    loadCollapsed();
+
     els.search.addEventListener('input', onSearch);
     els.sort.addEventListener('change', onSort);
+    els.group.addEventListener('change', onGroupChange);
     els.clearSearch.addEventListener('click', function () {
       els.search.value = '';
       onSearch();
@@ -215,9 +238,19 @@
     els.list.addEventListener('click', onListClick);
     els.list.addEventListener('keydown', onListKeydown);
     els.list.addEventListener('change', onListChange);
+    // One delegated listener per gesture, on the collection rather than per
+    // card: cards are rebuilt on every render, so per-card binding would be
+    // lost on the next group-by or collapse.
+    els.list.addEventListener('contextmenu', onCardContextMenu);
+    els.list.addEventListener('keydown', onCardMenuKey);
+    els.list.addEventListener('touchstart', onCardTouchStart, { passive: true });
+    els.list.addEventListener('touchmove', onCardTouchMove, { passive: true });
+    els.list.addEventListener('touchend', cancelLongPress);
+    els.list.addEventListener('touchcancel', cancelLongPress);
     els.newAgentBtn.addEventListener('click', openCreate);
     els.createCancel.addEventListener('click', closeCreate);
     els.stageDelete.addEventListener('click', onDeleteClick);
+    els.stageFavoriteToggle.addEventListener('click', onStageFavoriteClick);
 
     els.selectAll.addEventListener('click', selectAllVisible);
     els.clearSelection.addEventListener('click', function () {
@@ -247,6 +280,33 @@
     els.quickFilters.addEventListener('click', onQuickFilterClick);
     els.viewToggle.addEventListener('click', onViewToggleClick);
 
+    els.coachmarkNext.addEventListener('click', function () {
+      showCoachmarkStep(coachmarkStep + 1);
+    });
+    els.coachmarkDismiss.addEventListener('click', dismissCoachmark);
+    // Opening a card is the lesson: once someone has done it, the hint has
+    // nothing left to teach and stays gone.
+    els.list.addEventListener('click', function (e) {
+      if (coachmarkStep >= 0 && e.target.closest('.roster-card__open')) dismissCoachmark();
+    });
+
+    els.filtersButton.addEventListener('click', openFilters);
+    els.filtersClose.addEventListener('click', closeFilters);
+    els.filtersDone.addEventListener('click', closeFilters);
+    // Native <dialog> fires 'cancel' on Escape. Preventing the default and
+    // routing through closeFilters() keeps the aria-expanded flag and the focus
+    // return on one path, whichever way the panel was dismissed (FR-15).
+    els.filtersPanel.addEventListener('cancel', function (e) {
+      e.preventDefault();
+      closeFilters();
+    });
+    // Clicking the backdrop of a modal dialog targets the dialog element itself,
+    // never its contents, which is what tells a backdrop click from a click on
+    // any control inside the panel.
+    els.filtersPanel.addEventListener('click', function (e) {
+      if (e.target === els.filtersPanel) closeFilters();
+    });
+
     els.inspectorClose.addEventListener('click', function () {
       closeInspector({ restoreFocus: true });
     });
@@ -267,6 +327,12 @@
     // Crossing the breakpoint changes which presentation is correct; the open
     // agent and every other piece of state stay exactly as they were.
     window.addEventListener('resize', reflectInspectorPresentation);
+    // The Filters panel is anchored to a button whose position moves with the
+    // toolbar, so an open panel has to be re-pinned on resize — including the
+    // crossing between popover and bottom sheet.
+    window.addEventListener('resize', function () {
+      if (els.filtersPanel && els.filtersPanel.open) positionFilters();
+    });
     els.clearFilters.addEventListener('click', clearFilters);
     els.emptyClearFilters.addEventListener('click', clearFilters);
     els.emptyCreate.addEventListener('click', openCreate);
@@ -329,13 +395,6 @@
       restoreTabFromUrl();
     });
 
-    window.addEventListener('beforeunload', function (e) {
-      if (anyDirty()) {
-        e.preventDefault();
-        e.returnValue = '';
-      }
-    });
-
     // On a wide screen the Inspector starts open on its placeholder, so the
     // relationship between collection and detail is visible before anything is
     // focused. In sheet mode it stays closed until a card is opened, because a
@@ -366,11 +425,12 @@
       })
       .then(function (data) {
         state.providers = data && Array.isArray(data.providers) ? data.providers : [];
-        // If an agent was already selected and its stage rendered before the model
-        // catalog arrived, refresh the catalog-dependent surfaces: the overview
-        // (picker + notes) and the vitals (legacy badge). Guarded by !dirty so we
-        // never clobber unsaved edits.
-        if (state.selected && !state.dirty.overview && state.detailCache[state.selected]) {
+        // If an agent was already selected and its stage rendered before the
+        // model catalog arrived, refresh the catalog-dependent surface: the
+        // vitals' legacy-model badge. This used to be guarded against
+        // clobbering unsaved edits; with nothing editable here, a repaint is
+        // always safe.
+        if (state.selected && state.detailCache[state.selected]) {
           renderVitals(state.byName[state.selected], state.detailCache[state.selected]);
           renderOverview(state.selected, state.detailCache[state.selected]);
         }
@@ -388,6 +448,10 @@
       })
       .then(function (data) {
         var agents = Array.isArray(data) ? data : (data && data.agents) || [];
+        // One global constant off the list response, so every card's progress
+        // ring is drawn without a request per agent (FR-75). Absent means no
+        // ring, which is the same outcome as an agent with no progression.
+        state.xpPerLevel = Number((data && data.xp_per_level) || 0);
         state.agents = agents;
         state.byName = {};
         agents.forEach(function (a) {
@@ -475,6 +539,11 @@
       // definition here; the server rejects mutation and deletion alike.
       editable: !builtIn,
       health: agentHealth(a),
+      // healthText is what the card's status chip prints, so the chip, the
+      // summary tiles, and the quick filters all state the same three buckets.
+      // statusKind/statusText stay the RAW status ('active'/'idle'/'error'),
+      // which the Inspector's vitals still report — the card no longer does.
+      healthText: healthText(agentHealth(a)),
       statusKind: healthKind(a),
       statusText: titleCase(String((a && a.status) || 'idle')),
       role: role,
@@ -482,7 +551,17 @@
       roleEntry: window.RoleCatalog ? window.RoleCatalog.entry(role) : null,
       level: level,
       stage: stage,
+      // The card shows the level alone; the stage word is carried by the
+      // portrait ring's stage treatment, and by progressLabel everywhere else.
+      levelLabel: 'Lv ' + level,
       progressLabel: 'Lv ' + level + ' · ' + titleCase(stage),
+      // Progress toward the NEXT level, as a percentage, for the portrait ring
+      // (FR-75). Built-ins have no evolution record, so they get no ring rather
+      // than an empty one — and neither does anyone if the threshold is
+      // unavailable, because a ring drawn against an unknown denominator would
+      // be a number the UI invented.
+      hasProgress: !builtIn && !!(a && a.evolution) && xpPerLevel() > 0,
+      progressPct: levelProgressPct(evo),
       description: description,
       hasDescription: description !== '',
       workspaces: workspaces,
@@ -673,6 +752,32 @@
     return 'ready';
   }
 
+  // The flat XP-per-level threshold, as reported by the list response.
+  function xpPerLevel() {
+    return Number(state.xpPerLevel || 0);
+  }
+
+  // How far into the current level an agent is, 0–100.
+  //
+  // The same flat-threshold arithmetic the Inspector's XP bar uses, so the ring
+  // and the bar can never disagree about the same agent.
+  function levelProgressPct(evo) {
+    var per = xpPerLevel();
+    if (!per) return 0;
+    var xp = Number((evo && evo.experience) || 0);
+    if (!isFinite(xp) || xp < 0) return 0;
+    var intoLevel = xp % per;
+    return Math.max(0, Math.min(100, Math.round((intoLevel / per) * 100)));
+  }
+
+  // The three words the card's status chip is allowed to say, keyed by the same
+  // health bucket the summary tiles count (PRD FR-1).
+  function healthText(health) {
+    if (health === 'needs') return 'Needs attention';
+    if (health === 'disabled') return 'Disabled';
+    return 'Ready';
+  }
+
   function agentSourceKind(a) {
     return String((a && a.source) || 'user').toLowerCase() === 'cli' ? 'cli' : 'user';
   }
@@ -690,13 +795,94 @@
     );
   }
 
+  // The Filters button's badge counts only the filters that live inside the
+  // panel. Health and Favorite are deliberately excluded: they show their own
+  // pressed state on the summary tiles and the quick chips, so counting them
+  // here would report a hidden filter that is in fact plainly visible. Sort is
+  // excluded because it is a view preference, not a filter (FR-13/FR-17).
+  function panelFilterCount() {
+    var f = state.filters;
+    return [f.role, f.source, f.assignment, f.tag, f.workspace].filter(function (v) {
+      return !!v;
+    }).length;
+  }
+
+  function reflectFilterBadge() {
+    if (!els.filtersBadge) return;
+    var n = panelFilterCount();
+    // Absent at zero, not a zero (FR-13).
+    els.filtersBadge.hidden = n === 0;
+    els.filtersBadge.textContent = n === 0 ? '' : String(n);
+    if (els.filtersButton) {
+      els.filtersButton.classList.toggle('is-active', n > 0);
+      els.filtersButton.setAttribute(
+        'aria-label',
+        n === 0 ? 'Filters' : 'Filters, ' + n + ' active'
+      );
+    }
+  }
+
   function onFilterChange() {
     els.clearFilters.hidden = !filtersActive();
     // Quick-chip pressed state is derived, so it has to be recomputed on every
     // filter change however it was made — including from the selects (FR26).
     reflectQuickFilters();
+    reflectFilterBadge();
     applyFilterSort();
     syncUrl(state.selected, false);
+  }
+
+  /* ---- filters panel ------------------------------------------------------- */
+
+  // showModal() gives the focus trap and Escape handling for free — the same
+  // primitive, and therefore the same behaviour, as this page's bulk dialogs
+  // (FR-15). Everything below is only the part the platform does not do:
+  // the truthful aria-expanded flag and returning focus to the invoking button.
+  // Below this width the panel is a bottom sheet and takes its geometry entirely
+  // from CSS. Kept in sync with the 640px breakpoint in agents-roster.css.
+  var FILTERS_SHEET_MAX_WIDTH = 640;
+
+  function openFilters() {
+    if (!els.filtersPanel || els.filtersPanel.open) return;
+    els.filtersPanel.showModal();
+    els.filtersButton.setAttribute('aria-expanded', 'true');
+    positionFilters();
+  }
+
+  // A modal <dialog> lives in the top layer, so it is positioned against the
+  // viewport and cannot be anchored to the button by CSS alone. Measure the
+  // button and pin the panel just under it, clamped so it can never hang off
+  // either edge. At phone width the inline values are removed so the CSS bottom
+  // sheet takes over untouched (FR-16).
+  function positionFilters() {
+    var panel = els.filtersPanel;
+    if (!panel) return;
+    if (window.innerWidth <= FILTERS_SHEET_MAX_WIDTH) {
+      panel.style.top = '';
+      panel.style.left = '';
+      panel.style.right = '';
+      return;
+    }
+    var anchor = els.filtersButton.getBoundingClientRect();
+    var margin = 12;
+    var width = panel.offsetWidth;
+    // Right-aligned to the button, then clamped to the viewport.
+    var left = Math.min(
+      Math.max(margin, anchor.right - width),
+      Math.max(margin, window.innerWidth - width - margin)
+    );
+    panel.style.left = Math.round(left) + 'px';
+    panel.style.right = 'auto';
+    panel.style.top = Math.round(anchor.bottom + 8) + 'px';
+  }
+
+  function closeFilters() {
+    if (!els.filtersPanel || !els.filtersPanel.open) return;
+    els.filtersPanel.close();
+    els.filtersButton.setAttribute('aria-expanded', 'false');
+    // Explicit rather than relying on the dialog's own focus restoration, which
+    // is not consistent across engines.
+    els.filtersButton.focus();
   }
 
   function clearFilters() {
@@ -727,10 +913,10 @@
       case 'favorite':
         f.favorite = !f.favorite;
         break;
-      case 'attention':
-        if (f.health.has('needs')) f.health.delete('needs');
-        else f.health.add('needs');
-        break;
+      // There is deliberately no 'attention' case: that chip was removed as a
+      // duplicate of the Needs attention health tile, which owns the same
+      // filter (FR-19). reflectQuickFilters still reads health, so setting it
+      // from the tile correctly un-presses "All".
       case 'builtin':
         f.source = f.source === 'cli' ? '' : 'cli';
         break;
@@ -765,7 +951,7 @@
 
   /* ---- view mode ----------------------------------------------------------- */
 
-  var VIEWS = { gallery: 1, list: 1 };
+  var VIEWS = { gallery: 1, list: 1, map: 1 };
 
   function onViewToggleClick(e) {
     var btn = e.target.closest('[data-view]');
@@ -786,13 +972,73 @@
   }
 
   function reflectViewToggle() {
-    if (els.list) els.list.classList.toggle('is-list', state.view === 'list');
+    var isMap = state.view === 'map';
+    if (els.list) {
+      els.list.classList.toggle('is-list', state.view === 'list');
+      // The Map is a sibling host rather than a third presentation of the card
+      // grid: tiles are positioned in world space, which a grid cannot express.
+      els.list.hidden = isMap;
+    }
+    if (els.map) els.map.hidden = !isMap;
+    // Grouping is a Gallery/List concern. On the Map the user's own arrangement
+    // IS the grouping, and a control that rearranged tiles would fight the
+    // positions they saved (PRD 9.3).
+    var groupHost = els.group && els.group.closest('.view-group');
+    if (groupHost) groupHost.hidden = isMap;
+    // Bulk selection has no expression on the canvas — a tile is a place, not a
+    // row — so the count line's actions are hidden there too.
+    if (els.selectAll) els.selectAll.hidden = isMap;
+
     if (!els.viewToggle) return;
     els.viewToggle.querySelectorAll('[data-view]').forEach(function (btn) {
       var on = btn.dataset.view === state.view;
       btn.setAttribute('aria-pressed', on ? 'true' : 'false');
       btn.classList.toggle('is-active', on);
     });
+  }
+
+  /* ---- map view ------------------------------------------------------------ */
+
+  // The Map is mounted lazily and only once: it loads a layout of its own, and
+  // remounting on every render would refetch it and throw the camera away.
+  var mapMounted = false;
+
+  function renderMap() {
+    if (!els.map || !window.OriAgentMap) return;
+    var tiles = state.filtered.map(mapTileModel);
+    if (!mapMounted) {
+      mapMounted = true;
+      window.OriAgentMap.mount(els.map, tiles, {
+        selected: state.selected,
+        // One selection model, three views: a tile drives the same Inspector a
+        // card does (FR-73).
+        onSelect: function (name) {
+          selectAgent(name, { openInspector: true });
+        }
+      });
+      return;
+    }
+    window.OriAgentMap.update(tiles, state.selected);
+  }
+
+  // The Map draws from the same view model the cards do, so the two surfaces
+  // cannot disagree about what an agent is.
+  function mapTileModel(agent) {
+    var vm = viewFor(agent);
+    return {
+      name: vm.name,
+      roleLabel: vm.roleLabel,
+      level: vm.builtIn ? null : vm.level,
+      builtIn: vm.builtIn,
+      favorite: vm.favorite,
+      statusKind: vm.statusKind,
+      healthText: vm.healthText,
+      accent: roleAccent(vm),
+      workspaces: vm.workspaces.map(function (w) {
+        return { name: w.name, entry_point: w.entryPoint };
+      }),
+      spokenLabel: cardSpokenLabel(vm)
+    };
   }
 
   function onStatTileClick(e) {
@@ -907,11 +1153,13 @@
 
   function renderRoster() {
     els.list.innerHTML = '';
+    state.rendered = [];
     var total = state.agents.length;
     var shown = state.filtered.length;
 
     renderStatusTiles();
     reflectViewToggle();
+    reflectGroupControl();
 
     if (shown === 0) {
       renderEmptyState(total);
@@ -921,20 +1169,305 @@
       return;
     }
     els.empty.hidden = true;
-    els.list.hidden = false;
+    // Not an unconditional `false`: on the Map the card grid stays hidden, and
+    // reflectViewToggle above has already decided which host is showing.
+    els.list.hidden = state.view === 'map';
     setResultCount(
       shown === total
         ? total + ' agent' + (total === 1 ? '' : 's')
         : shown + ' of ' + total + ' agents'
     );
 
+    if (state.view === 'map') {
+      // The Map positions tiles in world space, so it renders itself rather
+      // than filling the card grid. `rendered` stays empty: there are no cards
+      // to arrow through or shift-select on the canvas.
+      renderMap();
+      updateBulkBar();
+      return;
+    }
+
     var frag = document.createDocumentFragment();
-    state.filtered.forEach(function (agent, idx) {
-      frag.appendChild(buildCard(agent, idx));
-    });
+    if (state.group === 'none') {
+      frag.appendChild(buildGrid(state.filtered, 'Agents'));
+    } else {
+      groupSections().forEach(function (section) {
+        frag.appendChild(buildSection(section));
+      });
+    }
     els.list.appendChild(frag);
     highlightSelected();
     updateBulkBar();
+    maybeShowCoachmark();
+  }
+
+  /* ---- grouping ------------------------------------------------------------ */
+
+  var GROUPS = { none: 1, workspace: 1, role: 1, status: 1 };
+
+  // Partition the already-filtered, already-sorted list into sections. Grouping
+  // is presentation over the existing pipeline, never a second filter: every
+  // agent the filters kept appears in exactly one section, except under
+  // Workspace where it appears in one per membership (PRD FR-27/FR-29).
+  //
+  // Section order follows the group, not the agents: alphabetical by label, with
+  // the catch-all last so "Library" and "No role" read as the remainder rather
+  // than as just another group.
+  function groupSections() {
+    var byKey = Object.create(null);
+    var order = [];
+
+    function bucket(key, label, accent, trailing) {
+      if (!byKey[key]) {
+        byKey[key] = {
+          key: key,
+          label: label,
+          accent: accent || '',
+          trailing: !!trailing,
+          agents: []
+        };
+        order.push(byKey[key]);
+      }
+      return byKey[key];
+    }
+
+    state.filtered.forEach(function (agent) {
+      var vm = viewFor(agent);
+      if (state.group === 'workspace') {
+        if (vm.workspaces.length === 0) {
+          // An agent in no workspace is not missing data — it is in the
+          // library. It gets a real, trailing section rather than being
+          // dropped (PRD FR-28).
+          bucket('ws:', 'Library', '', true).agents.push(agent);
+          return;
+        }
+        // One entry per membership. This is the deliberate difference from the
+        // Map, which draws every agent exactly once: duplication is right for a
+        // list and wrong for a canvas.
+        vm.workspaces.forEach(function (w) {
+          bucket('ws:' + w.id, w.name, workspaceAccent(w.id)).agents.push(agent);
+        });
+        return;
+      }
+      if (state.group === 'role') {
+        var hasRole = !!vm.roleEntry;
+        bucket(
+          'role:' + (vm.role || ''),
+          vm.roleLabel,
+          hasRole ? roleAccent(vm) : '',
+          !hasRole
+        ).agents.push(agent);
+        return;
+      }
+      // status
+      bucket('health:' + vm.health, vm.healthText, healthAccent(vm.health)).agents.push(agent);
+    });
+
+    order.sort(function (a, b) {
+      if (a.trailing !== b.trailing) return a.trailing ? 1 : -1;
+      return a.label.localeCompare(b.label);
+    });
+    return order;
+  }
+
+  function workspaceAccent(id) {
+    return window.WorkspacePalette ? window.WorkspacePalette.keyFor(id) : '';
+  }
+
+  // The health colours the status chip and the summary tiles already use, so a
+  // Status section is the same colour as the chips inside it.
+  function healthAccent(health) {
+    if (health === 'needs') return '#b45309';
+    if (health === 'disabled') return '#6b7280';
+    return '#15803d';
+  }
+
+  function buildGrid(agents, label) {
+    var ul = document.createElement('ul');
+    ul.className = 'agent-grid';
+    ul.setAttribute('role', 'list');
+    ul.setAttribute('aria-label', label);
+    agents.forEach(function (agent) {
+      // The index is assigned here, in DOM order, so it addresses this card and
+      // no other even when the same agent is drawn in several sections.
+      var idx = state.rendered.length;
+      state.rendered.push(agent);
+      ul.appendChild(buildCard(agent, idx));
+    });
+    return ul;
+  }
+
+  function buildSection(section) {
+    var collapsed = state.collapsed.has(section.key);
+    var el = document.createElement('section');
+    el.className = 'roster-section' + (collapsed ? ' is-collapsed' : '');
+    el.dataset.section = section.key;
+    if (section.accent) el.style.setProperty('--section-accent', section.accent);
+
+    var bodyId = 'roster-section-' + sectionDomId(section.key);
+    var head = document.createElement('h3');
+    head.className = 'roster-section__heading';
+    head.innerHTML =
+      '<button type="button" class="roster-section__head" aria-expanded="' +
+      (collapsed ? 'false' : 'true') +
+      '" aria-controls="' +
+      bodyId +
+      '" data-section-toggle="' +
+      esc(section.key) +
+      '">' +
+      '<span class="roster-section__chevron" aria-hidden="true"></span>' +
+      '<span class="roster-section__name">' +
+      esc(section.label) +
+      '</span>' +
+      '<span class="roster-section__count">' +
+      section.agents.length +
+      '</span>' +
+      '</button>';
+    el.appendChild(head);
+
+    // A collapsed section renders its header and nothing else. Hiding the cards
+    // instead would leave them in `rendered`, and then Select visible and
+    // shift-range would silently reach agents nobody can see.
+    var body = collapsed ? document.createElement('ul') : buildGrid(section.agents, section.label);
+    body.id = bodyId;
+    if (collapsed) {
+      body.className = 'agent-grid';
+      body.hidden = true;
+      body.setAttribute('role', 'list');
+      body.setAttribute('aria-label', section.label);
+    }
+    el.appendChild(body);
+    return el;
+  }
+
+  // Section keys carry workspace ids and role slugs, so they are reduced to
+  // something safe for an id attribute rather than interpolated raw.
+  function sectionDomId(key) {
+    return String(key).replace(/[^a-zA-Z0-9_-]/g, '_');
+  }
+
+  function onGroupChange() {
+    var next = GROUPS[els.group.value] ? els.group.value : 'none';
+    if (next === state.group) return;
+    state.group = next;
+    renderRoster();
+    syncUrl(state.selected, false);
+  }
+
+  function reflectGroupControl() {
+    if (els.group && els.group.value !== state.group) els.group.value = state.group;
+    if (els.list) els.list.classList.toggle('is-grouped', state.group !== 'none');
+  }
+
+  function onSectionToggle(e) {
+    var btn = e.target.closest('[data-section-toggle]');
+    if (!btn) return;
+    var key = btn.dataset.sectionToggle;
+    if (state.collapsed.has(key)) state.collapsed.delete(key);
+    else state.collapsed.add(key);
+    saveCollapsed();
+    renderRoster();
+    // The section list is rebuilt, so focus has to be put back on the button
+    // that now stands where the pressed one was.
+    var again = els.list.querySelector('[data-section-toggle="' + cssEscape(key) + '"]');
+    if (again) again.focus();
+  }
+
+  /* ---- first-visit coachmark ----------------------------------------------- */
+
+  var COACHMARK_KEY = 'ori.roster.selectionCoachmarkSeen';
+
+  // Two steps, each pointing at a real control through the shared registry.
+  // Together they say what the removed header sentence said — open a card to
+  // inspect it; check a card to manage several at once — except that the words
+  // arrive beside the thing they describe, once (FR-78).
+  var COACHMARK_STEPS = [
+    { key: 'select_agent', copy: 'Open a card to inspect the agent here.' },
+    { key: 'select_agent_check', copy: 'Check a card to manage several agents at once.' }
+  ];
+
+  var coachmarkStep = -1;
+
+  function coachmarkSeen() {
+    try {
+      return window.localStorage.getItem(COACHMARK_KEY) === '1';
+    } catch (err) {
+      // A browser blocking site data cannot remember the hint. Treating that as
+      // "already seen" is the kinder failure: a hint that returns on every load
+      // is worse than one that never appears.
+      return true;
+    }
+  }
+
+  function markCoachmarkSeen() {
+    try {
+      window.localStorage.setItem(COACHMARK_KEY, '1');
+    } catch (err) {
+      /* nothing to remember it with; the hint is dismissed for this visit */
+    }
+  }
+
+  // Shown only once the roster has actually rendered cards: there is nothing to
+  // point at on an empty collection, and a hint about selecting agents is noise
+  // for someone who has none.
+  function maybeShowCoachmark() {
+    if (!els.coachmark || coachmarkSeen()) return;
+    if (state.view === 'map') return;
+    if (!state.filtered.length) return;
+    if (coachmarkStep >= 0) return;
+    showCoachmarkStep(0);
+  }
+
+  function showCoachmarkStep(index) {
+    var step = COACHMARK_STEPS[index];
+    if (!step) {
+      dismissCoachmark();
+      return;
+    }
+    coachmarkStep = index;
+    els.coachmarkCopy.textContent = step.copy;
+    els.coachmark.hidden = false;
+    els.coachmarkNext.hidden = index >= COACHMARK_STEPS.length - 1;
+    // awaitTarget, because cards mount after the list request settles and this
+    // can run in the same tick as the render. The guide's own machinery handles
+    // the bounded wait and re-anchors the mark when the roster re-renders
+    // beneath it — which grouping, collapsing and a view switch all do
+    // (FR-79).
+    if (window.OriGuide && typeof window.OriGuide.markControl === 'function') {
+      window.OriGuide.markControl(step.key, { awaitTarget: true });
+    }
+  }
+
+  function dismissCoachmark() {
+    coachmarkStep = COACHMARK_STEPS.length;
+    if (els.coachmark) els.coachmark.hidden = true;
+    if (window.OriGuide && typeof window.OriGuide.clearControlMark === 'function') {
+      window.OriGuide.clearControlMark();
+    }
+    markCoachmarkSeen();
+  }
+
+  var COLLAPSED_KEY = 'ori.roster.collapsedSections';
+
+  // Per viewer, and never load-bearing: a browser blocking site data renders
+  // every section expanded rather than failing to render (PRD FR-26).
+  function loadCollapsed() {
+    try {
+      var raw = window.localStorage.getItem(COLLAPSED_KEY);
+      if (!raw) return;
+      var parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) state.collapsed = new Set(parsed);
+    } catch (err) {
+      state.collapsed = new Set();
+    }
+  }
+
+  function saveCollapsed() {
+    try {
+      window.localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...state.collapsed]));
+    } catch (err) {
+      /* a viewer blocking site data simply does not get the memory */
+    }
   }
 
   // At-a-glance status summary over ALL agents (not the filtered view). Mirrors
@@ -1029,6 +1562,10 @@
     // A labeled checkbox and a separate open/focus button are siblings — never
     // nested — so the checkbox is not a child of an interactive element and the
     // two actions stay independent (PRD FR38/FR39/FR40).
+    // Four slots, in reading order: who, role, where, ready?. The flag cluster
+    // is absolutely positioned inside the button so it overlays the top-right
+    // corner without adding a row to a ~120px card; the button's aria-label
+    // already states everything it shows, so it announces nothing twice.
     li.innerHTML =
       '<label class="roster-card__checkwrap">' +
       '<span class="visually-hidden">Select ' +
@@ -1045,53 +1582,67 @@
       '" aria-label="' +
       esc(cardSpokenLabel(vm)) +
       '">' +
+      cardFlagsHTML(vm) +
       cardVisualHTML(vm) +
-      cardPurposeHTML(vm) +
       cardWorkspacesHTML(vm) +
-      cardCapabilitiesHTML(vm) +
-      cardFooterHTML(vm) +
       '</button>';
 
     if (isChecked) li.classList.add('is-checked');
     return li;
   }
 
-  // The card's character line, rendered below the role so the agent's own name
-  // and role always read first — the character name is secondary descriptive
-  // copy, never the identity (FR-93). Omitted entirely when the agent has no
-  // curated character, so the generated case gains no clutter.
-  //
-  // This is appearance, not capability: it never states status, tools, or
-  // permissions, and it sits outside the portrait rather than on it (FR-94).
-  function cardCharacterHTML(vm) {
-    if (!vm.characterId || !window.CharacterCatalog) return '';
-    var entry = window.CharacterCatalog.get(vm.characterId);
-    if (!entry) return '';
-    // Only label the character when it is the source actually being shown; a
-    // retained-but-inactive choice would otherwise contradict the portrait
-    // (FR-12).
-    if (vm.appearance.mode !== window.AgentAvatar.MODES.CHARACTER) return '';
-    // The character name is already the descriptive role, so there is nothing
-    // to append after it.
-    return '<span class="agent-card__character">Character art: ' + esc(entry.name) + '</span>';
-  }
-
   // Concise spoken summary for the open control (PRD FR84). The card's own text
   // carries the same facts visually; this keeps them in one short sentence
   // instead of making a screen reader walk every decorative span.
+  // The card shows four facts; this sentence carries those four plus the ones
+  // the card stopped showing — purpose is the Inspector's, but model and last
+  // activity were card facts until this epic and must not silently vanish for a
+  // screen-reader user (PRD FR-10).
+  //
+  // The status word here is the health chip's word, not the raw status, so what
+  // is heard is what is displayed.
   function cardSpokenLabel(vm) {
     var parts = [vm.name];
     if (vm.builtIn) parts.push('built-in');
     if (vm.favorite) parts.push('favorite');
     parts.push(vm.roleLabel);
     if (!vm.builtIn) parts.push(vm.progressLabel);
-    parts.push(vm.statusText);
+    parts.push(vm.healthText);
     parts.push(vm.hasModel ? vm.model : 'model needed');
+    parts.push(vm.hasActivity ? vm.activityLabel : 'no recent activity');
     parts.push(vm.workspaceCount === 0 ? 'library only' : vm.workspaceLabel);
     return parts.join(', ');
   }
 
-  // Who is this? Portrait, text status, name, and role/progression line.
+  // Ready? — the status chip and the favorite star, as one corner cluster in the
+  // card's top right, where a map tile flies its status flag (PRD FR-3/FR-7).
+  //
+  // Absolutely positioned rather than laid out in the grid: on a ~120px card a
+  // fourth row for a chip is the difference between meeting the height target
+  // and missing it.
+  function cardFlagsHTML(vm) {
+    var star = vm.favorite
+      ? '<span class="agent-card__fav" title="Favorite" aria-hidden="true">★</span>'
+      : '';
+    return (
+      '<span class="agent-card__flags">' +
+      star +
+      '<span class="agent-card__status is-' +
+      vm.statusKind +
+      '">' +
+      '<span class="agent-card__dot" aria-hidden="true"></span>' +
+      esc(vm.healthText) +
+      '</span>' +
+      '</span>'
+    );
+  }
+
+  // Who + Role. The portrait and the name identify the agent; the line under it
+  // states the role and the level.
+  //
+  // The role also gets a second, hidden home (.agent-card__rolecell) so List
+  // view can lift it into a column of its own without a second renderer. Only
+  // one of the two is ever displayed — see the List rules in agents-roster.css.
   function cardVisualHTML(vm) {
     var badge = vm.builtIn
       ? '<span class="agent-card__badge" title="Built-in agent — always available and cannot be edited or deleted">Built-in</span>'
@@ -1099,27 +1650,51 @@
     // Progression is a user-agent concept; built-ins have no evolution record to
     // report, so the slot is omitted rather than filled with a zero (PRD FR20).
     var classBits = [esc(vm.roleLabel)];
-    if (!vm.builtIn) classBits.push(esc(vm.progressLabel));
+    if (!vm.builtIn) classBits.push(esc(vm.levelLabel));
+    var roleLine = '<span class="agent-card__class">' + classBits.join(' · ') + badge + '</span>';
 
     return (
-      '<span class="agent-card__visual">' +
-      avatarMarkup(vm, 'agent-card__portrait', '', AVATAR_SIZE.card) +
-      '<span class="agent-card__heading">' +
-      '<span class="agent-card__status is-' +
-      vm.statusKind +
+      portraitHTML(vm) +
+      '<span class="agent-card__ident">' +
+      '<span class="agent-card__name" title="' +
+      esc(vm.name) +
       '">' +
-      '<span class="agent-card__dot" aria-hidden="true"></span>' +
-      esc(vm.statusText) +
-      '</span>' +
-      '<span class="agent-card__name">' +
       esc(vm.name) +
       '</span>' +
-      '<span class="agent-card__class">' +
-      classBits.join(' · ') +
-      badge +
+      roleLine +
       '</span>' +
-      cardCharacterHTML(vm) +
-      '</span>' +
+      '<span class="agent-card__rolecell">' +
+      roleLine +
+      '</span>'
+    );
+  }
+
+  // The portrait, with a progress ring around it when there is progress to
+  // show (FR-74/FR-75).
+  //
+  // The role EMBLEM is already drawn inside the portrait by the shared avatar
+  // renderer, from the catalog's reviewed emblem and accent — so this adds only
+  // the ring, and the two halves of FR-74 stay in one place each.
+  //
+  // Where there is no progression record — every built-in — the wrapper is
+  // omitted entirely rather than rendered at 0%: an empty ring looks like a
+  // real measurement of nothing, which is exactly the kind of invented fact
+  // Group 1 removed from this card.
+  function portraitHTML(vm) {
+    var avatar = avatarMarkup(vm, 'agent-card__portrait', '', AVATAR_SIZE.card);
+    if (!vm.hasProgress) return avatar;
+    // The stage rides on the wrapper so the five stages can be told apart by
+    // the ring's treatment, not by colour alone (FR-77/FR-88); the textual
+    // "Lv N" beside it stays the exact value (FR-76).
+    return (
+      '<span class="agent-card__ring" data-stage="' +
+      esc(vm.stage) +
+      '" style="--ring-pct:' +
+      vm.progressPct +
+      '" role="img" aria-label="' +
+      esc(vm.progressPct + '% toward the next level, stage ' + titleCase(vm.stage)) +
+      '">' +
+      avatar +
       '</span>'
     );
   }
@@ -1133,26 +1708,27 @@
     return window.AgentAvatar.normalizeHex(entry.accent_color);
   }
 
-  // What are they for? Clamped in Gallery; the Inspector keeps the full text
-  // (PRD FR21). A missing description says so rather than borrowing the role's
-  // tagline, which describes the role and not this agent (PRD FR20).
-  function cardPurposeHTML(vm) {
-    if (!vm.hasDescription) {
-      return '<span class="agent-card__purpose is-missing">No description yet</span>';
-    }
-    return '<span class="agent-card__purpose">' + esc(vm.description) + '</span>';
-  }
-
   // Where are they used? At most two workspace labels plus a +N overflow; the
   // complete membership list belongs to the Workspaces tab (PRD FR22).
+  //
+  // The "Workspace orbit" section label is gone: bare pills already read as
+  // places, and a 9px all-caps label above two pills was a third of the slot's
+  // height spent saying what the pills say (PRD FR-4).
   function cardWorkspacesHTML(vm) {
     var pills;
     if (vm.workspaceCount === 0) {
-      pills = '<span class="agent-card__pill is-empty">Library only</span>';
+      // A muted, dashed pill — not a sentence, and never italic. "Library only"
+      // is a real state, not a missing value (PRD FR-6).
+      pills =
+        '<span class="agent-card__pill is-empty">' +
+        '<span class="agent-card__pill-label">Library only</span></span>';
     } else if (vm.workspaces.length === 0) {
       // The count is real but the reference list was not included; say the count
       // rather than implying we know which workspaces they are.
-      pills = '<span class="agent-card__pill is-empty">' + esc(vm.workspaceLabel) + '</span>';
+      pills =
+        '<span class="agent-card__pill is-empty"><span class="agent-card__pill-label">' +
+        esc(vm.workspaceLabel) +
+        '</span></span>';
     } else {
       pills = vm.workspaces
         .slice(0, 2)
@@ -1176,52 +1752,7 @@
           '<span class="agent-card__pill is-more">+' + (vm.workspaces.length - 2) + '</span>';
       }
     }
-    return (
-      '<span class="agent-card__section">' +
-      '<span class="agent-card__section-label">Workspace orbit</span>' +
-      '<span class="agent-card__pills">' +
-      pills +
-      '</span>' +
-      '</span>'
-    );
-  }
-
-  // A concise capability summary only; configuration and the complete list live
-  // in the Inspector's Toolbox tab (PRD FR23).
-  function cardCapabilitiesHTML(vm) {
-    var empty = vm.capabilities.length === 0 ? ' is-empty' : '';
-    return (
-      '<span class="agent-card__toolbox' +
-      empty +
-      '">' +
-      '<span class="agent-card__section-label">Capabilities</span>' +
-      '<span class="agent-card__toolbox-value">' +
-      esc(vm.capabilityLabel) +
-      '</span>' +
-      '</span>'
-    );
-  }
-
-  // Are they ready? Model availability, recent activity, favorite state.
-  function cardFooterHTML(vm) {
-    var star = vm.favorite
-      ? '<span class="agent-card__fav" title="Favorite" aria-hidden="true">★</span>'
-      : '';
-    return (
-      '<span class="agent-card__footer">' +
-      '<span class="agent-card__model' +
-      (vm.hasModel ? '' : ' is-missing') +
-      '">' +
-      esc(vm.modelLabel) +
-      '</span>' +
-      '<span class="agent-card__activity' +
-      (vm.hasActivity ? '' : ' is-missing') +
-      '">' +
-      esc(vm.activityLabel) +
-      '</span>' +
-      star +
-      '</span>'
-    );
+    return '<span class="agent-card__pills">' + pills + '</span>';
   }
 
   // Distinct empty states (PRD FR81): no agents at all vs. an active
@@ -1250,6 +1781,9 @@
       card.classList.toggle('is-focused', isSel);
       if (open) open.setAttribute('aria-current', isSel ? 'true' : 'false');
     });
+    // One selection model across three views: selecting from anywhere — a card,
+    // a tile, a URL, the context menu — marks the same agent on the Map too.
+    if (mapMounted && window.OriAgentMap) window.OriAgentMap.select(state.selected);
   }
 
   /* ---- selection ----------------------------------------------------------- */
@@ -1275,12 +1809,14 @@
   function selectAgent(name, opts) {
     opts = opts || {};
     if (!state.byName[name]) return;
-    if (name !== state.selected && !guardUnsaved()) return;
+    // Switching cards used to be gated by an unsaved-changes confirm. With the
+    // Inspector reading rather than editing there is nothing to lose, so the
+    // switch is unconditional — and the guard's early return goes with it, or
+    // this function would stop selecting anything.
     state.selected = name;
     state.focusIndex = state.filtered.findIndex(function (a) {
       return a.name === name;
     });
-    resetDirty();
     safeStorageSet(name);
     syncUrl(name, opts.push !== false);
     highlightSelected();
@@ -1314,7 +1850,6 @@
   // reopening restores the same context (PRD FR51).
   function closeInspector(opts) {
     opts = opts || {};
-    if (!guardUnsaved()) return false;
     state.inspectorOpen = false;
     reflectInspectorPresentation();
     if (opts.restoreFocus) {
@@ -1387,10 +1922,14 @@
     els.favorite.hidden = !heroVm.favorite;
     els.purpose.textContent = heroVm.hasDescription ? heroVm.description : 'No description yet.';
     els.purpose.classList.toggle('is-missing', !heroVm.hasDescription);
+    reflectFavoriteAction(heroVm);
     // Deep-link to the full agent detail page (/agents/{name}). The server routes
     // this to the rich editor for catalog agents and to the dedicated read-only
     // pages for the built-in Claude Code / Codex CLI agents.
-    els.stageFullPage.href = '/agents/' + encodeURIComponent(name);
+    //
+    // The open tab travels with it, so a reader who decides to edit lands where
+    // they were reading rather than at the top of the page (FR-47).
+    els.stageFullPage.href = detailHref(name, currentTab());
 
     renderProgression(name, listItem);
 
@@ -1545,165 +2084,124 @@
     return null;
   }
 
-  /* ---- overview (editable) ------------------------------------------------- */
+  /* ---- overview (read-only) ------------------------------------------------ */
+  //
+  // The Inspector reads; the standalone detail page at /agents/<name> writes.
+  // Before this epic both surfaces saved the same fields, each with its own
+  // dirty tracking, save bar, stale-write handling and tag editor — 935 lines of
+  // detail page duplicated inside a side panel, and no way for a user to know
+  // which one held the truth (FR-44).
+  //
+  // What the panel gained by giving up editing is room: the purpose, model,
+  // capabilities and last activity that Group 1 took off the card all land here,
+  // where there is space to state them plainly.
 
   function isEditable(detail) {
     // CLI / built-in agents come back without a version token and reject PATCH.
+    // Kept because it still decides what the DETAIL PAGE can offer and whether
+    // a delete action is shown, not what this panel renders.
     return !!(detail && detail.version);
   }
 
   function renderOverview(name, detail) {
     els.overviewDesc.textContent = '';
-    var editable = isEditable(detail);
 
-    if (!editable) {
-      els.overviewFacts.innerHTML = '<dl class="stage-facts">' + readonlyFacts(detail) + '</dl>';
-      els.overviewDesc.innerHTML =
-        '<p class="stage-hint">This is a built-in agent and cannot be edited here.</p>';
-      return;
-    }
-
-    // Offer a model picker when the provider/model catalog is loaded; otherwise
-    // fall back to free text so the field always works.
-    var hasCatalog = Array.isArray(state.providers) && state.providers.length > 0;
-    var agentType = detail.type || 'tool-calling';
-    var modelControl = hasCatalog
-      ? modelSelectInput('ov-model', detail.model || '', detail.provider || '', agentType)
-      : textInput('ov-model', detail.model || '');
-    // With the picker, provider is derived from the chosen model, so it is shown
-    // read-only. Without a catalog (text fallback) it stays editable.
-    var providerControl = hasCatalog
-      ? readonlyInput('ov-provider', detail.provider || '', 'Set by the selected model')
-      : textInput('ov-provider', detail.provider || '', 'openai / anthropic / ollama…');
-
-    var md = detail.metadata || {};
-    var overviewAppearance = normalizeAppearance(detail.appearance);
     els.overviewFacts.innerHTML =
-      '<form class="stage-form" id="overviewForm" novalidate>' +
-      field('Role', selectInput('ov-role', ROLES, detail.role, roleLabel), 'ov-role') +
-      field('Type', selectInput('ov-type', TYPES, agentType, typeLabel), 'ov-type') +
-      field(
-        'Model',
-        modelControl + '<p class="model-note" id="ov-model-note" aria-live="polite"></p>',
-        'ov-model'
-      ) +
-      field('Provider', providerControl, 'ov-provider') +
-      field(
-        'Temperature',
-        numInput('ov-temperature', detail.temperature, '0', '2', '0.1'),
-        'ov-temperature'
-      ) +
-      '<div class="field" id="ov-reasoning-field">' +
-      '<label class="field__label" for="ov-reasoning">Reasoning effort</label>' +
-      '<div class="field__control">' +
-      selectInput('ov-reasoning', REASONING, detail.reasoning_effort || '', function (v) {
-        return v ? titleCase(v) : 'Default';
-      }) +
-      '</div></div>' +
-      field(
-        'Max output tokens',
-        numInput('ov-maxtokens', detail.max_output_tokens || '', '0', '', '1'),
-        'ov-maxtokens'
-      ) +
-      field('Web search', checkInput('ov-websearch', detail.allow_web_search)) +
-      field(
-        'Description',
-        textareaInput('ov-description', md.description || '', 3),
-        'ov-description'
-      ) +
-      field(
-        'Favorite',
-        '<label class="check"><input id="ov-favorite" type="checkbox"' +
-          (md.favorite ? ' checked' : '') +
-          '> Favorited</label>'
-      ) +
-      field('Tags', '<div id="ov-tags-host"></div>', 'ov-tags-host') +
-      // One Appearance section replaces the three controls that used to sit
-      // here — a colour input, an upload widget, and a character button — each
-      // of which had its own idea of what "saved" meant (FR-26).
-      '<div class="field field--appearance"><div class="field__control" id="ov-appearance-host"></div></div>' +
-      '</form>' +
-      readonlyMetaHTML(detail) +
-      saveBar('overview');
+      purposeHTML(detail) +
+      '<dl class="stage-facts">' +
+      readonlyFacts(detail) +
+      '</dl>' +
+      capabilitiesHTML(detail) +
+      tagsHTML(detail) +
+      readonlyMetaHTML(detail);
 
-    els.overviewDesc.innerHTML = '';
-    wireOverviewTags(name, md.tags || []);
-    mountAppearanceEditor(name, detail, overviewAppearance);
-    wireDirty('overview', document.getElementById('overviewForm'));
-    wireSaveBar('overview', function () {
-      saveOverview(name);
-    });
-
-    var modelSel = document.getElementById('ov-model');
-    if (modelSel && modelSel.tagName === 'SELECT') {
-      // Reflect the picked model everywhere derived state depends on it: Provider
-      // (owning provider), the model note (pricing / good-for / legacy warning),
-      // and whether the Reasoning effort field is relevant.
-      var syncFromModel = function () {
-        var opt = modelSel.options[modelSel.selectedIndex];
-        var provEl = document.getElementById('ov-provider');
-        var prov = opt && opt.getAttribute('data-provider');
-        if (prov && provEl) provEl.value = prov;
-        updateModelNote(opt);
-        updateReasoningVisibility(modelSel.value, detail.reasoning_effort);
-      };
-      modelSel.addEventListener('change', syncFromModel);
-
-      // Changing Type re-scopes the catalog to models that fit that type, keeping
-      // the current selection when it still qualifies.
-      var typeSel = document.getElementById('ov-type');
-      if (typeSel) {
-        typeSel.addEventListener('change', function () {
-          var keep = modelSel.value;
-          modelSel.innerHTML = modelOptionsHTML(keep, val('ov-provider'), typeSel.value);
-          syncFromModel();
-        });
-      }
-
-      // Prime the derived state for the initially-loaded model.
-      updateModelNote(modelSel.options[modelSel.selectedIndex]);
-      updateReasoningVisibility(modelSel.value, detail.reasoning_effort);
-    }
+    els.overviewDesc.innerHTML = isEditable(detail)
+      ? '<p class="stage-hint">Editing happens on the full page. ' +
+        '<a class="stage-hint__link" href="' +
+        esc(detailHref(name, currentTab())) +
+        '">Open ' +
+        esc(name) +
+        ' ↗</a></p>'
+      : '<p class="stage-hint">This is a built-in agent and has no editable definition.</p>';
   }
 
-  // Populate #ov-model-note with the selected option's pricing / good-for hint and
-  // a legacy/deprecation warning when applicable.
-  function updateModelNote(opt) {
-    var note = document.getElementById('ov-model-note');
-    if (!note) return;
-    if (!opt) {
-      note.textContent = '';
-      note.className = 'model-note';
-      return;
-    }
-    var bits = [];
-    var goodFor = opt.getAttribute('data-goodfor');
-    if (goodFor) bits.push(goodFor);
-    var pricing = opt.getAttribute('data-pricing');
-    if (pricing) bits.push(pricing);
-    var legacy = opt.getAttribute('data-legacy') === '1';
-    var dep = opt.getAttribute('data-deprecation');
-    note.className = 'model-note' + (legacy ? ' is-legacy' : '');
-    var warn = legacy ? '⚠ Legacy model' + (dep ? ' — deprecated ' + dep : '') + '. ' : '';
-    note.textContent = warn + bits.join(' · ');
+  // The purpose the card stopped showing (FR-2). Stated in full here rather than
+  // clamped, because the panel has room the card did not — and omitted entirely
+  // when absent, so the Inspector never prints the italic placeholder this epic
+  // removed from the card.
+  function purposeHTML(detail) {
+    var md = (detail && detail.metadata) || {};
+    var description = String(md.description || '').trim();
+    if (!description) return '';
+    return '<p class="stage-readonly-purpose">' + esc(description) + '</p>';
   }
 
-  // Show Reasoning effort only for models that use it (OpenAI o-series / gpt-5 /
-  // Codex). Always show it when the agent already has an effort set, so existing
-  // configuration is never hidden from view.
-  function updateReasoningVisibility(model, existingEffort) {
-    var wrap = document.getElementById('ov-reasoning-field');
-    if (!wrap) return;
-    var relevant = supportsReasoning(model) || !!(existingEffort && String(existingEffort).trim());
-    wrap.hidden = !relevant;
+  // Capabilities in full. The card carried a two-item summary; the complete list
+  // has always belonged here, and now the summary does too (FR-42).
+  function capabilitiesHTML(detail) {
+    var caps = Array.isArray(detail && detail.capabilities) ? detail.capabilities : [];
+    if (caps.length === 0) return '';
+    return chipBlock(
+      'Capabilities',
+      caps.map(function (c) {
+        return titleCase(String(c));
+      })
+    );
   }
 
-  function supportsReasoning(model) {
-    var m = String(model || '')
-      .toLowerCase()
-      .trim();
-    if (!m) return false;
-    return /^o[1345](-|$)/.test(m) || m.indexOf('gpt-5') !== -1 || m.indexOf('codex') !== -1;
+  function tagsHTML(detail) {
+    var md = (detail && detail.metadata) || {};
+    var tags = Array.isArray(md.tags) ? md.tags.filter(Boolean) : [];
+    if (tags.length === 0) return '';
+    return chipBlock('Tags', tags.map(String));
+  }
+
+  function chipBlock(label, values) {
+    return (
+      '<div class="stage-readonly-block">' +
+      '<h3 class="stage-readonly-label">' +
+      esc(label) +
+      '</h3>' +
+      '<ul class="stage-chips">' +
+      values
+        .map(function (v) {
+          return '<li class="stage-chip">' + esc(v) + '</li>';
+        })
+        .join('') +
+      '</ul></div>'
+    );
+  }
+
+  // Favorite is the one agent field the Inspector still writes, and it is not a
+  // field editor: it is the same one-click roster action the card's star and the
+  // context menu offer, through the same endpoint (FR-43).
+  function reflectFavoriteAction(vm) {
+    var btn = els.stageFavoriteToggle;
+    if (!btn) return;
+    btn.textContent = vm.favorite ? '★ Unfavorite' : '☆ Favorite';
+    btn.setAttribute('aria-pressed', vm.favorite ? 'true' : 'false');
+    btn.title = vm.favorite ? 'Remove from favorites' : 'Add to favorites';
+  }
+
+  function onStageFavoriteClick() {
+    var name = state.selected;
+    if (!name || !state.byName[name]) return;
+    var vm = viewFor(state.byName[name]);
+    announce(vm.favorite ? 'Unfavoriting…' : 'Favoriting…');
+    submitBulkMetadata(
+      { operation: 'set_favorite', agent_names: [name], favorite: !vm.favorite },
+      null,
+      null
+    );
+  }
+
+  // The detail page is the editor of record, and the Inspector tab the reader
+  // was on travels with them so someone reading the prompt who decides to edit
+  // lands on the prompt rather than the top of the page (FR-47).
+  function detailHref(name, tab) {
+    var href = '/agents/' + encodeURIComponent(name);
+    if (tab && tab !== 'overview') href += '?tab=' + encodeURIComponent(tab);
+    return href;
   }
 
   function typeLabel(v) {
@@ -1721,100 +2219,36 @@
     }
   }
 
+  // Every configured fact, for every agent — the same list a built-in used to
+  // get, now that no agent gets a form here. Model in particular is a card fact
+  // that moved to this panel (FR-2/FR-42).
+  //
+  // A row whose value is absent is omitted rather than printed as an em dash:
+  // "Reasoning effort: —" states nothing that "no reasoning effort row" does not.
   function readonlyFacts(detail) {
+    var d = detail || {};
     var facts = [
-      ['Role', detail && detail.role ? roleLabel(detail.role) : '—'],
-      ['Model', (detail && detail.model) || '—'],
-      ['Provider', detail && detail.provider ? titleCase(detail.provider) : '—'],
-      ['Temperature', detail && detail.temperature != null ? String(detail.temperature) : '—']
+      ['Role', d.role ? roleLabel(d.role) : ''],
+      ['Type', d.type ? typeLabel(d.type) : ''],
+      ['Model', d.model || ''],
+      ['Provider', d.provider ? titleCase(d.provider) : ''],
+      ['Temperature', d.temperature != null ? String(d.temperature) : ''],
+      ['Reasoning effort', d.reasoning_effort ? titleCase(d.reasoning_effort) : ''],
+      ['Max output tokens', d.max_output_tokens ? String(d.max_output_tokens) : ''],
+      ['Web search', d.allow_web_search == null ? '' : d.allow_web_search ? 'Allowed' : 'Off']
     ];
     return facts
+      .filter(function (f) {
+        return f[1] !== '';
+      })
       .map(function (f) {
         return '<dt>' + esc(f[0]) + '</dt><dd>' + esc(f[1]) + '</dd>';
       })
       .join('');
   }
 
-  function overviewEdits(detail) {
-    // Diff current inputs against the loaded detail; return only changed fields
-    // keyed by the PATCH request's field names.
-    var out = {};
-    var role = val('ov-role');
-    if (role !== (detail.role || '')) out.role = role;
-    var type = val('ov-type');
-    if (type && type !== (detail.type || '')) out.type = type;
-    var model = val('ov-model').trim();
-    if (model !== (detail.model || '')) out.model = model;
-    var provider = val('ov-provider').trim();
-    if (provider !== (detail.provider || '')) out.llm_provider = provider;
-    var temp = parseFloat(val('ov-temperature'));
-    if (!isNaN(temp) && temp !== Number(detail.temperature)) out.temperature = temp;
-    var reasoning = val('ov-reasoning');
-    if (reasoning !== (detail.reasoning_effort || '')) out.reasoning_effort = reasoning;
-    var maxRaw = val('ov-maxtokens').trim();
-    var maxNum = maxRaw === '' ? 0 : parseInt(maxRaw, 10);
-    if (!isNaN(maxNum) && maxNum !== Number(detail.max_output_tokens || 0))
-      out.max_output_tokens = maxNum;
-    var web = checked('ov-websearch');
-    if (web !== !!detail.allow_web_search) out.allow_web_search = web;
-    var md = detail.metadata || {};
-    var desc = val('ov-description');
-    if (desc !== (md.description || '')) out.description = desc;
-    var fav = checked('ov-favorite');
-    if (fav !== !!md.favorite) out.favorite = fav;
-    // Appearance is deliberately absent from this diff. The shared editor saves
-    // each appearance change on its own, immediately, through its adapter — so
-    // folding it into the Overview Save would give one setting two write paths
-    // that could disagree about what is staged (FR-41).
-    // Tags: compare case-insensitively so re-saving unchanged tags is a no-op.
-    if (overviewTagsInput) {
-      var nextTags = overviewTagsInput.getTags();
-      if (tagsDiffer(nextTags, md.tags || [])) out.tags = nextTags;
-    }
-    return out;
-  }
-
-  function tagsDiffer(a, b) {
-    var na = (a || [])
-      .map(function (t) {
-        return String(t).toLowerCase().trim();
-      })
-      .filter(Boolean)
-      .sort();
-    var nb = (b || [])
-      .map(function (t) {
-        return String(t).toLowerCase().trim();
-      })
-      .filter(Boolean)
-      .sort();
-    if (na.length !== nb.length) return true;
-    for (var i = 0; i < na.length; i++) {
-      if (na[i] !== nb[i]) return true;
-    }
-    return false;
-  }
-
-  function wireOverviewTags(name, initial) {
-    overviewTagsInput = null;
-    var host = document.getElementById('ov-tags-host');
-    if (!host) return;
-    if (window.OriTagInput) {
-      overviewTagsInput = window.OriTagInput.createTagInput({
-        container: host,
-        initialTags: initial,
-        onChange: function () {
-          markDirty('overview', true);
-        }
-      });
-    } else {
-      host.innerHTML =
-        '<input id="ov-tags-text" type="text" value="' +
-        esc((initial || []).join(', ')) +
-        '" placeholder="tag1, tag2">';
-    }
-  }
-
-  // Read-only created / updated / last-active timestamps below the editable form.
+  // Created / updated / last-active timestamps. "Last active" is one of the two
+  // facts Group 1 took off the card, and this is where it lands (FR-2/FR-42).
   function readonlyMetaHTML(detail) {
     var s = detail.statistics || {};
     var rows = [
@@ -1847,19 +2281,11 @@
     return dateFmt ? dateFmt.format(new Date(t)) : new Date(t).toLocaleString();
   }
 
-  function saveOverview(name) {
-    var detail = state.detailCache[name];
-    if (!detail) return;
-    var edits = overviewEdits(detail);
-    if (Object.keys(edits).length === 0) {
-      showStatus('overview', 'No changes to save.', 'muted');
-      return;
-    }
-    submitPatch(name, 'overview', edits);
-  }
+  /* ---- prompt (lazy, read-only) -------------------------------------------- */
 
-  /* ---- prompt (lazy + editable) -------------------------------------------- */
-
+  // One rendering for every agent now: the prompt as text. The editable path
+  // that used to sit beside this — a textarea, its own dirty flag and its own
+  // save bar — was the second of the two editors this epic collapses (FR-44).
   function renderPrompt(name) {
     if (els.promptBody.dataset.loadedFor === name) return;
     els.promptBody.dataset.loadedFor = name;
@@ -1867,186 +2293,54 @@
     fetchDetail(name)
       .then(function (detail) {
         if (state.selected !== name) return;
-        if (!isEditable(detail)) {
-          var prompt = (detail && detail.system_prompt) || '';
-          els.promptBody.innerHTML = prompt.trim()
-            ? '<pre></pre>'
-            : '<p class="stage-hint">This agent has no custom system prompt.</p>';
-          if (prompt.trim()) els.promptBody.querySelector('pre').textContent = prompt;
+        var prompt = String((detail && detail.system_prompt) || '');
+        if (!prompt.trim()) {
+          els.promptBody.innerHTML =
+            '<p class="stage-hint">This agent has no custom system prompt.</p>';
           return;
         }
-        els.promptBody.innerHTML =
-          '<form class="stage-form" id="promptForm" novalidate>' +
-          '<textarea id="pr-prompt" class="stage-textarea" rows="16" spellcheck="false" ' +
-          'placeholder="No system prompt set. Add one to steer this agent."></textarea>' +
-          '</form>' +
-          saveBar('prompt');
-        document.getElementById('pr-prompt').value = detail.system_prompt || '';
-        wireDirty('prompt', document.getElementById('promptForm'));
-        wireSaveBar('prompt', function () {
-          savePrompt(name);
-        });
+        // textContent, not innerHTML: a system prompt is arbitrary user text and
+        // must never be parsed as markup on its way to the screen.
+        els.promptBody.innerHTML = '<pre class="stage-prompt__text"></pre>';
+        els.promptBody.querySelector('pre').textContent = prompt;
       })
       .catch(function () {
         els.promptBody.innerHTML = '<p class="stage-hint">Could not load the system prompt.</p>';
       });
   }
 
-  function savePrompt(name) {
-    var detail = state.detailCache[name];
-    if (!detail) return;
-    var next = val('pr-prompt');
-    if (next === (detail.system_prompt || '')) {
-      showStatus('prompt', 'No changes to save.', 'muted');
-      return;
-    }
-    submitPatch(name, 'prompt', { system_prompt: next });
-  }
+  /* ---- workspaces (read-only) ---------------------------------------------- */
 
-  /* ---- shared save path ---------------------------------------------------- */
-
-  function submitPatch(name, tab, fields, confirmShared) {
-    var detail = state.detailCache[name];
-    var body = Object.assign({ expected_version: detail.version }, fields);
-    if (confirmShared) body.confirm_shared_edit = true;
-    setSaving(tab, true);
-    clearBanner(tab);
-
-    fetch('/api/agents/' + encodeURIComponent(name), {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    })
-      .then(function (r) {
-        return r
-          .json()
-          .catch(function () {
-            return {};
-          })
-          .then(function (data) {
-            return { status: r.status, data: data };
-          });
-      })
-      .then(function (res) {
-        setSaving(tab, false);
-        if (res.status >= 200 && res.status < 300) return onSaved(name, tab);
-        if (res.status === 409 && res.data && res.data.error === 'stale_agent_edit')
-          return onStale(name, tab, res.data);
-        if (
-          res.status === 409 &&
-          res.data &&
-          res.data.error === 'shared_agent_edit_requires_confirmation'
-        )
-          return onSharedConfirm(name, tab, fields, res.data);
-        if (res.status === 409 && res.data && res.data.error === 'entry_agent_removal_blocked')
-          return showStatus(tab, res.data.message || 'Blocked.', 'error');
-        // Validation / other errors surface their message inline.
-        showStatus(
-          tab,
-          (res.data && res.data.message) || 'Save failed (' + res.status + ').',
-          'error'
-        );
-      })
-      .catch(function (err) {
-        setSaving(tab, false);
-        showStatus(tab, 'Network error — save not applied.', 'error');
-        console.error('[roster] save failed', err);
-      });
-  }
-
-  function onSaved(name, tab) {
-    // Refetch to reseed the version token and reflect any server normalization,
-    // then re-render the tab and the roster meta.
-    fetchDetail(name, true).then(function (detail) {
-      state.dirty[tab] = false;
-      if (state.selected !== name) return;
-      refreshRosterMeta(name, detail);
-      if (tab === 'overview') {
-        renderVitals(state.byName[name], detail);
-        renderOverview(name, detail);
-      } else if (tab === 'prompt') {
-        els.promptBody.dataset.loadedFor = '';
-        renderPrompt(name);
-      }
-      showStatus(tab, 'Saved.', 'ok');
-    });
-  }
-
-  function onStale(name, tab, data) {
-    showBanner(
-      tab,
-      'This agent was changed elsewhere since you loaded it. Reload the latest version to continue — your unsaved edits in this tab will be replaced.',
-      'Reload latest',
-      function () {
-        fetchDetail(name, true).then(function (detail) {
-          if (state.selected !== name) return;
-          state.dirty[tab] = false;
-          if (tab === 'overview') {
-            renderVitals(state.byName[name], detail);
-            renderOverview(name, detail);
-          } else if (tab === 'prompt') {
-            els.promptBody.dataset.loadedFor = '';
-            renderPrompt(name);
-          }
-        });
-      }
-    );
-    if (data && data.current_version && state.detailCache[name]) {
-      // Keep the cached version in sync so a subsequent explicit reload lines up.
-      state.detailCache[name]._staleVersion = data.current_version;
-    }
-  }
-
-  function onSharedConfirm(name, tab, fields, data) {
-    var n = (data && data.workspace_count) || 'multiple';
-    var ok = window.confirm(
-      '“' +
-        name +
-        '” is attached to ' +
-        n +
-        ' workspaces. This change affects all of them. Apply it?'
-    );
-    if (ok) submitPatch(name, tab, fields, true);
-    else showStatus(tab, 'Save cancelled.', 'muted');
-  }
-
-  /* ---- workspaces (read-only in G3) ---------------------------------------- */
-
+  // Membership, read-only, with each workspace linked to its own surface
+  // (FR-40). The assignment editor that used to load the full workspace list
+  // and reconcile it on save now lives only on the detail page.
   function renderWorkspaces(name, listItem, detail) {
     var members = Array.isArray(listItem.workspaces) ? listItem.workspaces : [];
+    var rows =
+      members.length === 0
+        ? '<p class="stage-hint">Not attached to any workspace.</p>'
+        : members
+            .map(function (ws) {
+              return readonlyWsRow(ws, listItem.role);
+            })
+            .join('');
 
-    // CLI / built-in agents cannot be attached — show the membership read-only.
-    if (!isEditable(detail)) {
-      els.workspacesBody.innerHTML =
-        members.length === 0
-          ? '<p class="stage-hint">Not attached to any workspace.</p>'
-          : members
-              .map(function (ws) {
-                return readonlyWsRow(ws, listItem.role);
-              })
-              .join('');
-      return;
-    }
+    var footer = isEditable(detail)
+      ? '<p class="stage-hint"><a class="stage-hint__link" href="' +
+        esc(detailHref(name, 'workspaces')) +
+        '">Change which workspaces ' +
+        esc(name) +
+        ' belongs to ↗</a></p>'
+      : '<p class="stage-hint">Built-in agents cannot be attached to a workspace.</p>';
 
-    els.workspacesBody.innerHTML = '<p class="stage-hint">Loading workspaces…</p>';
-    fetchWorkspaces()
-      .then(function (all) {
-        if (state.selected !== name) return;
-        renderWorkspacesEditor(name, members, all, listItem.role);
-      })
-      .catch(function () {
-        if (state.selected !== name) return;
-        // Fall back to a read-only view of current memberships.
-        els.workspacesBody.innerHTML =
-          (members.length === 0
-            ? '<p class="stage-hint">Not attached to any workspace.</p>'
-            : members.map(readonlyWsRow).join('')) +
-          '<p class="stage-hint">Could not load the full workspace list to edit assignments.</p>';
-      });
+    els.workspacesBody.innerHTML = rows + footer;
   }
 
   function readonlyWsRow(ws, role) {
     var nm = esc(ws.name || 'Workspace');
+    // folder_slug is what the workspace's own page is addressed by; without one
+    // there is nothing honest to link to, so the name stays plain text rather
+    // than becoming a link that 404s.
     var link = ws.folder_slug
       ? '<a href="/workspaces/' + encodeURIComponent(ws.folder_slug) + '">' + nm + '</a>'
       : nm;
@@ -2056,144 +2350,9 @@
     return '<div class="ws-row"><span>' + link + '</span>' + pill + '</div>';
   }
 
-  function renderWorkspacesEditor(name, members, all, role) {
-    var memberIds = {};
-    var entryIds = {};
-    members.forEach(function (m) {
-      memberIds[m.id] = true;
-      if (m.entry_point) entryIds[m.id] = true;
-    });
-    var commanderLbl = commanderSlotLabel(role);
-
-    var rows = all
-      .map(function (ws) {
-        var isMember = !!memberIds[ws.id];
-        var isEntry = !!entryIds[ws.id];
-        // The agent can't be unassigned from a workspace it's the Commander of;
-        // lock that checkbox and explain, matching the server guard.
-        var disabled = isEntry ? ' disabled' : '';
-        var pill = isEntry ? '<span class="ws-entry-pill">' + esc(commanderLbl) + '</span>' : '';
-        return (
-          '<label class="ws-check' +
-          (disabled ? ' is-locked' : '') +
-          '">' +
-          '<input type="checkbox" data-ws-id="' +
-          esc(ws.id) +
-          '"' +
-          (isMember ? ' checked' : '') +
-          disabled +
-          '>' +
-          '<span class="ws-check__name">' +
-          esc(ws.name || ws.id) +
-          '</span>' +
-          pill +
-          '</label>'
-        );
-      })
-      .join('');
-
-    els.workspacesBody.innerHTML =
-      (all.length === 0
-        ? '<p class="stage-hint">No workspaces exist yet. Create one from the Workspaces page.</p>'
-        : '') +
-      '<form class="ws-list" id="workspacesForm">' +
-      rows +
-      '</form>' +
-      saveBar('workspaces');
-
-    wireDirty('workspaces', document.getElementById('workspacesForm'));
-    wireSaveBar('workspaces', function () {
-      saveWorkspaces(name, members);
-    });
-  }
-
-  function saveWorkspaces(name, members) {
-    var checks = els.workspacesBody.querySelectorAll('input[data-ws-id]');
-    var desired = [];
-    checks.forEach(function (c) {
-      if (c.checked) desired.push(c.getAttribute('data-ws-id'));
-    });
-    // Entry-agent memberships have disabled (unchecked-proof) boxes but must stay
-    // in the desired set so the server doesn't try to remove them.
-    members.forEach(function (m) {
-      if (m.entry_point && desired.indexOf(m.id) === -1) desired.push(m.id);
-    });
-
-    setSaving('workspaces', true);
-    fetch('/api/agents/' + encodeURIComponent(name) + '/workspaces', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ workspace_ids: desired })
-    })
-      .then(function (r) {
-        return r
-          .json()
-          .catch(function () {
-            return {};
-          })
-          .then(function (data) {
-            return { status: r.status, data: data };
-          });
-      })
-      .then(function (res) {
-        setSaving('workspaces', false);
-        if (res.status >= 200 && res.status < 300) {
-          state.dirty.workspaces = false;
-          // Reflect the reconciled membership everywhere.
-          var item = state.byName[name];
-          if (item) {
-            item.workspaces = res.data.workspaces || [];
-            item.workspace_count = res.data.workspace_count || 0;
-          }
-          refreshRosterMeta(name, state.detailCache[name] || {});
-          renderWorkspaces(name, item, state.detailCache[name]);
-          showStatus('workspaces', 'Saved.', 'ok');
-        } else if (
-          res.status === 409 &&
-          res.data &&
-          res.data.error === 'entry_agent_removal_blocked'
-        ) {
-          showStatus('workspaces', res.data.message || 'Cannot remove the Commander.', 'error');
-        } else {
-          showStatus(
-            'workspaces',
-            (res.data && res.data.message) || 'Save failed (' + res.status + ').',
-            'error'
-          );
-        }
-      })
-      .catch(function () {
-        setSaving('workspaces', false);
-        showStatus('workspaces', 'Network error — not saved.', 'error');
-      });
-  }
-
-  function fetchWorkspaces() {
-    if (state.allWorkspaces) return Promise.resolve(state.allWorkspaces);
-    return fetch('/api/workspaces')
-      .then(function (r) {
-        if (!r.ok) throw new Error('workspaces ' + r.status);
-        return r.json();
-      })
-      .then(function (data) {
-        var list = (data && data.workspaces) || [];
-        // Only assignable (non-trashed / non-missing) workspaces.
-        list = list.filter(function (w) {
-          var s = String(w.status || '').toLowerCase();
-          return s !== 'trashed' && s !== 'missing';
-        });
-        list.sort(function (a, b) {
-          return String(a.name || '').localeCompare(String(b.name || ''));
-        });
-        state.allWorkspaces = list;
-        return list;
-      });
-  }
-
   /* ---- create agent -------------------------------------------------------- */
 
   function openCreate() {
-    if (!guardUnsaved()) return;
     state.creating = true;
     els.stage.hidden = true;
     els.placeholder.hidden = true;
@@ -2449,6 +2608,10 @@
       })
       .then(function (data) {
         var agents = Array.isArray(data) ? data : (data && data.agents) || [];
+        // One global constant off the list response, so every card's progress
+        // ring is drawn without a request per agent (FR-75). Absent means no
+        // ring, which is the same outcome as an agent with no progression.
+        state.xpPerLevel = Number((data && data.xp_per_level) || 0);
         state.agents = agents;
         state.byName = {};
         agents.forEach(function (a) {
@@ -2498,7 +2661,6 @@
       })
       .then(function (res) {
         if (res.status >= 200 && res.status < 300) {
-          resetDirty();
           safeStorageSet('');
           reloadThenSelect(null);
         } else {
@@ -2511,81 +2673,29 @@
       });
   }
 
-  // One place where a fresh detail response is folded back into the collection
-  // (PRD FR96/FR16). Every mutation path — metadata save, avatar change,
-  // favorite, workspace assignment — goes through here so the raw record, its
-  // projection, the card, and the Inspector hero can never disagree. Unrelated
-  // collection state (filters, sort, checked set, focus) is untouched.
-  function applyDetailToCollection(name, detail) {
-    var item = state.byName[name];
-    if (!item || !detail) return;
-    if (detail.model) item.model = detail.model;
-    // Replace wholesale, not merge: both callers pass a just-forced /detail
-    // fetch, which is the complete authoritative record, not a partial patch.
-    // A shallow merge can only add/overwrite keys, never clear one — after
-    // removing an upload the server's response simply omits `uploaded`, and
-    // merging into the old object would leave the stale filename in place, so
-    // the card kept showing the just-deleted image (FR-66).
-    if (detail.metadata) item.metadata = detail.metadata;
-    // Appearance is always present in a detail response, so it is assigned
-    // unconditionally — a guarded assignment would be the same stale-source bug
-    // in a new place.
-    item.appearance = detail.appearance;
-    if (detail.role) item.role = detail.role;
-
-    // Rebuild the projection FIRST: everything below reads through viewFor(),
-    // and a stale projection is how an updated card ends up beside an
-    // unchanged hero.
-    state.viewByName[name] = buildViewModel(item);
-
-    var card = els.list.querySelector('.roster-card[data-name="' + cssEscape(name) + '"]');
-    if (card) {
-      var idx = Number(card.dataset.index);
-      var rebuilt = buildCard(item, isNaN(idx) ? 0 : idx);
-      if (card.classList.contains('is-focused')) rebuilt.classList.add('is-focused');
-      card.replaceWith(rebuilt);
-      highlightSelected();
-    }
-
-    if (state.selected === name) {
-      if (els.avatar) {
-        els.avatar.outerHTML = avatarMarkup(item, 'stage__avatar', 'stageAvatar', AVATAR_SIZE.hero);
-        els.avatar = document.getElementById('stageAvatar');
-      }
-      // The hero's character line is derived state too: without this an
-      // identity save updated the portrait while the label beside it still
-      // described the previous identity.
-      renderCharacterLabel(item);
-      // Keep the hero's repeated purpose/favorite (FR54) in step with a save
-      // made on the Overview form, not just the card.
-      var heroVm = viewFor(item);
-      if (els.favorite) els.favorite.hidden = !heroVm.favorite;
-      if (els.purpose) {
-        els.purpose.textContent = heroVm.hasDescription
-          ? heroVm.description
-          : 'No description yet.';
-        els.purpose.classList.toggle('is-missing', !heroVm.hasDescription);
-      }
-    }
-  }
-
-  // Retained name for the metadata-save path; the behaviour now lives in one
-  // shared invalidation.
-  function refreshRosterMeta(name, detail) {
-    applyDetailToCollection(name, detail);
-  }
+  // NOTE: applyDetailToCollection lived here — the single place a fresh detail
+  // response was folded back into the collection after an in-panel save. Every
+  // caller it had was an Inspector editing path (metadata save, appearance
+  // change, workspace assignment), and all of them are gone. The mutations this
+  // page still performs — favorite, the bulk operations, delete, create — each
+  // end in reloadThenSelect(), which re-fetches the roster wholesale, so there
+  // is no longer a partial-update path for it to serve.
 
   /* ---- tabs ---------------------------------------------------------------- */
 
   function requestTab(tabName, focus) {
-    var current = currentTab();
-    if (tabName !== current && state.dirty[current] && !guardUnsaved()) {
-      return; // stay on the dirty tab
-    }
+    // A tab switch used to be able to bounce off a dirty tab. Nothing here can
+    // be dirty now, so the switch always happens — and the whole `current`
+    // lookup goes with the guard rather than being left computed and unused.
     setActiveTab(tabName);
     if (tabName === 'prompt' && state.selected) renderPrompt(state.selected);
     if (tabName === 'toolbox' && state.selected) renderToolbox(state.selected);
     if (focus) document.getElementById('tab-' + tabName).focus();
+    // "Open full page" carries whichever tab is now open, so the deep link
+    // follows the reader rather than freezing at the tab they arrived on.
+    if (state.selected && els.stageFullPage) {
+      els.stageFullPage.href = detailHref(state.selected, tabName);
+    }
     syncUrl(state.selected, false);
   }
 
@@ -2706,126 +2816,19 @@
     }
   }
 
-  /* ---- dirty tracking + save bar ------------------------------------------- */
-
-  function wireDirty(tab, form) {
-    if (!form) return;
-    form.addEventListener('input', function () {
-      markDirty(tab, true);
-    });
-    form.addEventListener('change', function () {
-      markDirty(tab, true);
-    });
-  }
-
-  function markDirty(tab, on) {
-    state.dirty[tab] = on;
-    var bar = document.getElementById('savebar-' + tab);
-    if (!bar) return;
-    bar.classList.toggle('is-dirty', on);
-    var save = bar.querySelector('[data-role="save"]');
-    if (save) save.disabled = !on;
-    var dot = bar.querySelector('.dirty-note');
-    if (dot) dot.textContent = on ? 'Unsaved changes' : '';
-  }
-
-  function wireSaveBar(tab, onSave) {
-    var bar = document.getElementById('savebar-' + tab);
-    if (!bar) return;
-    bar.querySelector('[data-role="save"]').addEventListener('click', onSave);
-    var revert = bar.querySelector('[data-role="revert"]');
-    if (revert)
-      revert.addEventListener('click', function () {
-        state.dirty[tab] = false;
-        if (tab === 'overview') renderOverview(state.selected, state.detailCache[state.selected]);
-        else if (tab === 'prompt') {
-          els.promptBody.dataset.loadedFor = '';
-          renderPrompt(state.selected);
-        } else if (tab === 'workspaces')
-          renderWorkspaces(
-            state.selected,
-            state.byName[state.selected],
-            state.detailCache[state.selected]
-          );
-      });
-    markDirty(tab, false);
-  }
-
-  function setSaving(tab, on) {
-    var bar = document.getElementById('savebar-' + tab);
-    if (!bar) return;
-    var save = bar.querySelector('[data-role="save"]');
-    if (save) {
-      save.disabled = on || !state.dirty[tab];
-      save.textContent = on ? 'Saving…' : 'Save';
-    }
-  }
-
-  function showStatus(tab, msg, kind) {
-    var bar = document.getElementById('savebar-' + tab);
-    if (!bar) return;
-    var status = bar.querySelector('.save-status');
-    if (!status) return;
-    status.textContent = msg;
-    status.className = 'save-status is-' + (kind || 'muted');
-    if (kind === 'ok' || kind === 'muted') {
-      window.clearTimeout(status._t);
-      status._t = window.setTimeout(function () {
-        status.textContent = '';
-      }, 2600);
-    }
-  }
-
-  function showBanner(tab, msg, actionLabel, onAction) {
-    var panel = document.getElementById('panel-' + tab);
-    clearBanner(tab);
-    var banner = document.createElement('div');
-    banner.className = 'conflict-banner';
-    banner.id = 'banner-' + tab;
-    banner.setAttribute('role', 'alert');
-    banner.innerHTML = '<span>' + esc(msg) + '</span>';
-    var btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'conflict-banner__action';
-    btn.textContent = actionLabel;
-    btn.addEventListener('click', function () {
-      clearBanner(tab);
-      onAction();
-    });
-    banner.appendChild(btn);
-    panel.insertBefore(banner, panel.firstChild);
-  }
-
-  function clearBanner(tab) {
-    var existing = document.getElementById('banner-' + tab);
-    if (existing) existing.remove();
-  }
-
-  /* ---- unsaved guard ------------------------------------------------------- */
-
-  function anyDirty() {
-    return !!(state.dirty.overview || state.dirty.prompt || state.dirty.workspaces);
-  }
-
-  function guardUnsaved() {
-    if (!anyDirty()) return true;
-    var ok = window.confirm('You have unsaved changes that will be lost. Continue?');
-    if (ok) resetDirty();
-    return ok;
-  }
-
-  function resetDirty() {
-    state.dirty.overview = false;
-    state.dirty.prompt = false;
-    state.dirty.workspaces = false;
-  }
-
   /* ---- roster interaction -------------------------------------------------- */
 
   // Clicking a card's open button focuses that agent (drives the stage) without
   // touching its checkbox. The checkbox is handled by onListChange so a plain
   // click there only changes bulk-selection state (PRD FR3/FR4).
   function onListClick(e) {
+    // Section headers live inside the same delegation root as the cards, and
+    // are checked first because a header is never inside a card.
+    if (e.target.closest('[data-section-toggle]')) {
+      onSectionToggle(e);
+      return;
+    }
+
     var open = e.target.closest('.roster-card__open');
     if (open && open.dataset.open) {
       // Remember which control opened it so a mobile close can return focus
@@ -2865,7 +2868,10 @@
     // without moving focus (PRD FR83). Shift+Space extends a range from the
     // anchor — the documented keyboard equivalent of Shift-click (PRD FR10).
     var open = e.target.closest('.roster-card__open');
-    var n = state.filtered.length;
+    // Bounded by what is drawn, not by what survived the filters: grouping can
+    // draw more cards than there are filtered agents, and a collapsed section
+    // draws fewer.
+    var n = state.rendered.length;
     if (n === 0) return;
 
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Home' || e.key === 'End') {
@@ -2903,11 +2909,414 @@
     }
   }
 
-  // Move keyboard focus to the open button of the row at filtered index i.
-  function focusRow(i) {
-    var agent = state.filtered[i];
+  /* ---- card context menu --------------------------------------------------- */
+  //
+  // A port of the Workspace Map's menu contract (#317): the same item-builder
+  // shape, the same roving-tabindex arrow navigation that skips disabled items,
+  // the same viewport clamping, and the same rule that every dismissal route
+  // lands on one close function so focus returns exactly once.
+  //
+  // Three things carried over deliberately:
+  //
+  //   1. The menu mounts in a host OUTSIDE the collection, so a roster
+  //      re-render — which grouping and collapsing both trigger — cannot tear
+  //      the menu down while someone is arrowing through it.
+  //   2. One delegated `contextmenu` listener resolves its card with closest().
+  //      Cards are rebuilt on every render, so per-card binding would be lost
+  //      or doubled.
+  //   3. Every item routes to an action that already exists. The menu adds no
+  //      capability the page did not already have; it removes the walk to the
+  //      bulk bar for a single agent.
+
+  var MENU_EDGE_PAD = 8;
+  // Used only when the menu cannot be measured (before layout, or in a stub
+  // DOM). Flipping on an estimate beats not flipping at all.
+  var MENU_FALLBACK_SIZE = { width: 220, height: 250 };
+  // Press-and-hold that counts as a long press at touch widths (FR-37).
+  var LONG_PRESS_MS = 500;
+  // Movement above this cancels it, so a scroll is never read as a long press.
+  var LONG_PRESS_SLOP = 10;
+
+  var menuState = null;
+  var longPress = null;
+
+  function menuDivider() {
+    return { divider: true };
+  }
+
+  // The items for one agent. Delete is present but disabled for a built-in,
+  // rather than absent: the action's existence stays discoverable while the
+  // reason it cannot run is visible (FR-35).
+  function cardMenuItems(vm) {
+    return [
+      { label: 'Open', action: 'open' },
+      { label: 'Open full page', action: 'open-full' },
+      menuDivider(),
+      { label: vm.favorite ? 'Unfavorite' : 'Favorite', action: 'favorite' },
+      { label: 'Set role…', action: 'set-role', disabled: vm.builtIn },
+      { label: 'Assign to workspace…', action: 'assign' },
+      menuDivider(),
+      {
+        label: 'Delete',
+        action: 'delete',
+        variant: 'danger',
+        disabled: vm.builtIn
+      }
+    ];
+  }
+
+  function menuHTML(items, label) {
+    var body = items
+      .map(function (item) {
+        if (!item) return '';
+        if (item.divider) return '<div class="ori-context-divider" role="separator"></div>';
+        return (
+          '<button type="button" class="ori-context-item roster-menu-item' +
+          (item.variant === 'danger' ? ' ori-context-danger' : '') +
+          '" role="menuitem" tabindex="-1" data-menu-action="' +
+          esc(item.action) +
+          '"' +
+          (item.disabled ? ' aria-disabled="true"' : '') +
+          '>' +
+          esc(item.label) +
+          '</button>'
+        );
+      })
+      .join('');
+    return (
+      '<div class="ori-context-menu roster-menu" data-roster-menu role="menu" aria-label="' +
+      esc(label) +
+      '">' +
+      body +
+      '</div>'
+    );
+  }
+
+  function menuItemElements(menu) {
+    return Array.prototype.slice.call(menu.querySelectorAll('[data-menu-action]'));
+  }
+
+  function isMenuItemDisabled(el) {
+    return !!(el && el.getAttribute && el.getAttribute('aria-disabled') === 'true');
+  }
+
+  // Roving tabindex: exactly one item is tabbable, and it is the focused one.
+  function focusMenuItem(index) {
+    if (!menuState || !menuState.items.length) return;
+    var next = Math.max(0, Math.min(index, menuState.items.length - 1));
+    menuState.index = next;
+    menuState.items.forEach(function (el, i) {
+      el.setAttribute('tabindex', i === next ? '0' : '-1');
+    });
+    menuState.items[next].focus();
+  }
+
+  // Wraps at both ends and steps over disabled items, which stay visible and
+  // announced (FR-34).
+  function nextEnabledIndex(from, step) {
+    if (!menuState || !menuState.items.length) return -1;
+    var count = menuState.items.length;
+    for (var i = 1; i <= count; i++) {
+      var candidate = (((from + step * i) % count) + count) % count;
+      if (!isMenuItemDisabled(menuState.items[candidate])) return candidate;
+    }
+    return -1;
+  }
+
+  function firstEnabledIndex(step) {
+    return nextEnabledIndex(step > 0 ? -1 : 0, step);
+  }
+
+  function listenWhileMenuOpen(target, type, handler, capture) {
+    target.addEventListener(type, handler, capture);
+    if (menuState) {
+      menuState.teardown.push(function () {
+        target.removeEventListener(type, handler, capture);
+      });
+    }
+  }
+
+  function menuViewport() {
+    return {
+      width: window.innerWidth || 1024,
+      height: window.innerHeight || 768
+    };
+  }
+
+  function measureMenu(menu) {
+    var rect = menu.getBoundingClientRect();
+    var width = rect.width || menu.offsetWidth || 0;
+    var height = rect.height || menu.offsetHeight || 0;
+    return {
+      width: width > 0 ? width : MENU_FALLBACK_SIZE.width,
+      height: height > 0 ? height : MENU_FALLBACK_SIZE.height
+    };
+  }
+
+  // Flip past the anchor when the menu would overrun an edge, then clamp, so it
+  // can never be opened partly off screen.
+  function menuPosition(point, size, viewport) {
+    var left = point.x + size.width > viewport.width ? point.x - size.width : point.x;
+    var top = point.y + size.height > viewport.height ? point.y - size.height : point.y;
+    return {
+      left: clampToRange(left, MENU_EDGE_PAD, viewport.width - size.width - MENU_EDGE_PAD),
+      top: clampToRange(top, MENU_EDGE_PAD, viewport.height - size.height - MENU_EDGE_PAD)
+    };
+  }
+
+  function clampToRange(value, lo, hi) {
+    if (hi < lo) return lo;
+    return Math.max(lo, Math.min(hi, value));
+  }
+
+  function insideOpenMenu(node) {
+    return !!(node && node.closest && node.closest('[data-roster-menu]'));
+  }
+
+  // Every dismissal route lands here — Escape, a click or right-click outside,
+  // choosing an item, a resize — so focus returns to the card exactly once
+  // however the menu was closed.
+  function closeCardMenu(opts) {
+    var st = menuState;
+    if (!st) return;
+    menuState = null;
+    st.teardown.forEach(function (off) {
+      off();
+    });
+    st.host.innerHTML = '';
+    var restore = !(opts && opts.restoreFocus === false);
+    if (restore && st.origin && document.contains(st.origin)) st.origin.focus();
+  }
+
+  function activateMenuItem(el) {
+    if (!menuState || !el || isMenuItemDisabled(el)) return;
+    var action = el.getAttribute('data-menu-action');
+    var name = menuState.name;
+    // Close first, so focus is back on the card before a dialog or a navigation
+    // starts from it.
+    closeCardMenu();
+    runCardMenuAction(action, name);
+  }
+
+  function runCardMenuAction(action, name) {
+    var agent = state.byName[name];
     if (!agent) return;
-    var card = els.list.querySelector('.roster-card[data-name="' + cssEscape(agent.name) + '"]');
+    var vm = viewFor(agent);
+    switch (action) {
+      case 'open':
+        selectAgent(name, { openInspector: true });
+        return;
+      case 'open-full':
+        window.location.href = '/agents/' + encodeURIComponent(name);
+        return;
+      case 'favorite':
+        // One agent through the same endpoint the bulk bar uses, as a
+        // one-element batch. Two clicks to favorite from the roster instead of
+        // check-walk-confirm.
+        announce(vm.favorite ? 'Unfavoriting…' : 'Favoriting…');
+        submitBulkMetadata(
+          { operation: 'set_favorite', agent_names: [name], favorite: !vm.favorite },
+          null,
+          null
+        );
+        return;
+      case 'set-role':
+        // The bulk role dialog, scoped to this one agent. Reusing it keeps one
+        // role picker on the page rather than a second that can drift.
+        state.checked.clear();
+        state.checked.add(name);
+        reflectCheckedInDom();
+        updateBulkBar();
+        openBulkTags('role');
+        return;
+      case 'assign':
+        // Workspace membership is edited on the detail page, which is the
+        // editor of record. The tab travels in the URL so the user lands on
+        // the membership editor rather than the top of the page.
+        window.location.href = '/agents/' + encodeURIComponent(name) + '?tab=workspaces';
+        return;
+      case 'delete':
+        // The existing confirmation flow, scoped to this agent, so a
+        // context-menu delete is exactly as guarded as a bulk delete.
+        state.checked.clear();
+        state.checked.add(name);
+        reflectCheckedInDom();
+        updateBulkBar();
+        openBulkDelete();
+        return;
+      default:
+    }
+  }
+
+  function handleMenuKey(e) {
+    if (!menuState) return;
+    var handled = true;
+    switch (e.key) {
+      case 'ArrowDown':
+        focusMenuItem(nextEnabledIndex(menuState.index, 1));
+        break;
+      case 'ArrowUp':
+        focusMenuItem(nextEnabledIndex(menuState.index, -1));
+        break;
+      case 'Home':
+        focusMenuItem(firstEnabledIndex(1));
+        break;
+      case 'End':
+        focusMenuItem(firstEnabledIndex(-1));
+        break;
+      case 'Enter':
+      case ' ':
+      case 'Spacebar':
+        activateMenuItem(menuState.items[menuState.index]);
+        break;
+      case 'Escape':
+      case 'Tab':
+        closeCardMenu();
+        break;
+      default:
+        handled = false;
+    }
+    // Enter and Space are prevented too: a <button> would otherwise synthesize
+    // a click and run the action a second time.
+    if (handled) e.preventDefault();
+  }
+
+  function bindMenuInteractions() {
+    var st = menuState;
+    st.items.forEach(function (el) {
+      el.addEventListener('click', function (event) {
+        event.preventDefault();
+        activateMenuItem(el);
+      });
+    });
+    listenWhileMenuOpen(st.menu, 'keydown', handleMenuKey);
+
+    // The gesture that opened this menu is STILL PROPAGATING while these
+    // listeners are added. A listener attached to a node the event has not
+    // reached yet is called for that same event, so without the identity guard
+    // the menu would dismiss itself on the way up to the document — opening and
+    // closing in one gesture. This is the failure the map hit first; it is
+    // guarded the same way here rather than by a setTimeout, which would leave
+    // a window in which an outside click does nothing.
+    var openEvent = st.openEvent;
+    listenWhileMenuOpen(document, 'mousedown', function (event) {
+      if (event === openEvent) return;
+      if (insideOpenMenu(event.target)) return;
+      closeCardMenu();
+    });
+    listenWhileMenuOpen(document, 'contextmenu', function (event) {
+      if (event === openEvent) return;
+      if (insideOpenMenu(event.target)) return;
+      closeCardMenu();
+    });
+    listenWhileMenuOpen(document, 'keydown', function (event) {
+      if (event === openEvent) return;
+      if (event.key !== 'Escape') return;
+      closeCardMenu();
+    });
+    listenWhileMenuOpen(window, 'resize', function () {
+      closeCardMenu();
+    });
+    // Scrolling would strand the menu away from the card it belongs to.
+    listenWhileMenuOpen(window, 'scroll', function () {
+      closeCardMenu();
+    });
+  }
+
+  function openCardMenu(card, at, event) {
+    closeCardMenu({ restoreFocus: false });
+    if (!els.menuHost || !card) return false;
+    var name = card.dataset.name;
+    var agent = state.byName[name];
+    if (!agent) return false;
+    var vm = viewFor(agent);
+
+    els.menuHost.innerHTML = menuHTML(cardMenuItems(vm), 'Actions for ' + vm.name);
+    var menu = els.menuHost.querySelector('[data-roster-menu]');
+    if (!menu) {
+      els.menuHost.innerHTML = '';
+      return false;
+    }
+    menuState = {
+      host: els.menuHost,
+      menu: menu,
+      items: menuItemElements(menu),
+      index: 0,
+      name: name,
+      origin: card.querySelector('.roster-card__open'),
+      openEvent: event || null,
+      teardown: []
+    };
+    var placed = menuPosition(at, measureMenu(menu), menuViewport());
+    menu.style.left = placed.left + 'px';
+    menu.style.top = placed.top + 'px';
+    bindMenuInteractions();
+    focusMenuItem(firstEnabledIndex(1));
+    return true;
+  }
+
+  function onCardContextMenu(e) {
+    var card = e.target.closest('.roster-card');
+    if (!card) return;
+    e.preventDefault();
+    openCardMenu(card, { x: e.clientX, y: e.clientY }, e);
+  }
+
+  // Keyboard users get the same menu from the same place: the ContextMenu key,
+  // or Shift+F10, anchored to the card rather than to a cursor that does not
+  // exist (FR-34/FR-87).
+  function onCardMenuKey(e) {
+    if (e.key !== 'ContextMenu' && !(e.key === 'F10' && e.shiftKey)) return;
+    var card = e.target.closest('.roster-card');
+    if (!card) return;
+    e.preventDefault();
+    var rect = card.getBoundingClientRect();
+    openCardMenu(card, { x: rect.left + 12, y: rect.top + rect.height - 8 }, e);
+  }
+
+  // Long press opens the same menu where there is no right-click (FR-37).
+  // Cancelled by movement, so a scroll started on a card is still a scroll.
+  function onCardTouchStart(e) {
+    var card = e.target.closest('.roster-card');
+    if (!card || !e.touches || e.touches.length !== 1) return;
+    var touch = e.touches[0];
+    cancelLongPress();
+    longPress = {
+      card: card,
+      x: touch.clientX,
+      y: touch.clientY,
+      timer: window.setTimeout(function () {
+        longPress = null;
+        openCardMenu(card, { x: touch.clientX, y: touch.clientY }, null);
+      }, LONG_PRESS_MS)
+    };
+  }
+
+  function onCardTouchMove(e) {
+    if (!longPress || !e.touches || !e.touches.length) return;
+    var t = e.touches[0];
+    if (
+      Math.abs(t.clientX - longPress.x) > LONG_PRESS_SLOP ||
+      Math.abs(t.clientY - longPress.y) > LONG_PRESS_SLOP
+    ) {
+      cancelLongPress();
+    }
+  }
+
+  function cancelLongPress() {
+    if (!longPress) return;
+    window.clearTimeout(longPress.timer);
+    longPress = null;
+  }
+
+  // Move keyboard focus to the open button of the card at RENDER index i.
+  //
+  // Addressed by index rather than by name: under Workspace grouping the same
+  // agent can be on screen several times, and looking the card up by name would
+  // always return the first one, so arrow-key navigation would stick at the
+  // first section instead of walking through them.
+  function focusRow(i) {
+    var card = els.list.querySelector('.roster-card[data-index="' + i + '"]');
     if (!card) return;
     var open = card.querySelector('.roster-card__open');
     if (open) open.focus();
@@ -2922,10 +3331,15 @@
     else state.checked.delete(name);
   }
 
-  // Check every agent in the current filtered result set — and only those, never
-  // agents hidden by the active filters (PRD FR7).
+  // Check every agent actually on screen — and only those, never agents hidden
+  // by the active filters (PRD FR7) or sitting inside a collapsed section
+  // (PRD FR-30).
+  //
+  // `rendered` rather than `filtered` is what makes the collapsed case right:
+  // a collapsed section contributes no cards, so its agents are not selected by
+  // a control labelled "Select visible".
   function selectAllVisible() {
-    state.filtered.forEach(function (a) {
+    state.rendered.forEach(function (a) {
       state.checked.add(a.name);
     });
     reflectCheckedInDom();
@@ -2942,15 +3356,20 @@
     if (focusControl && els.selectAll) els.selectAll.focus();
   }
 
-  // Select the contiguous range between the anchor and index i in the current
-  // sorted+filtered order, adding every row in between to the checked set.
+  // Select the contiguous range between the anchor and index i in RENDER order,
+  // adding every card in between to the checked set.
+  //
+  // Render order, so a range drawn across a section boundary selects what the
+  // user actually dragged over rather than a different run of the flat filtered
+  // list (PRD FR-30). Selection is keyed by name, so a multi-workspace agent
+  // caught once is checked in every section it appears in (PRD FR-31).
   function rangeSelectTo(i) {
     var anchor = state.rangeAnchor;
-    if (anchor < 0 || anchor >= state.filtered.length) anchor = i;
+    if (anchor < 0 || anchor >= state.rendered.length) anchor = i;
     var lo = Math.min(anchor, i);
     var hi = Math.max(anchor, i);
     for (var k = lo; k <= hi; k++) {
-      var a = state.filtered[k];
+      var a = state.rendered[k];
       if (a) state.checked.add(a.name);
     }
     state.rangeAnchor = i;
@@ -3130,9 +3549,6 @@
       return;
     }
 
-    // If the focused agent is among those being deleted, honor the unsaved guard.
-    if (state.selected && names.indexOf(state.selected) !== -1 && !guardUnsaved()) return;
-
     btn.dataset.busy = '1';
     btn.disabled = true;
     var restoreLabel = btn.textContent;
@@ -3266,7 +3682,6 @@
   // is a generic "bulk edit" shell keyed by dlg.dataset.mode.
   function openBulkTags(mode) {
     if (state.checked.size === 0) return;
-    if (state.selected && state.checked.has(state.selected) && !guardUnsaved()) return;
     var dlg = els.bulkTagsDialog;
     dlg.dataset.mode = mode;
     var titles = { add: 'Add tags', remove: 'Remove tags', role: 'Set role' };
@@ -3434,7 +3849,6 @@
 
   function runBulkFavorite(favorite) {
     if (state.checked.size === 0) return;
-    if (state.selected && state.checked.has(state.selected) && !guardUnsaved()) return;
     var btns = [els.bulkFavorite, els.bulkUnfavorite];
     btns.forEach(function (b) {
       b.disabled = true;
@@ -3589,39 +4003,6 @@
   }
   // A read-only text input for derived values (e.g. Provider, set by the model).
   // Kept as an <input> so the form still submits its value, but not user-editable.
-  function readonlyInput(id, value, title) {
-    return (
-      '<input id="' +
-      id +
-      '" class="field__readonly" type="text" readonly tabindex="-1" value="' +
-      esc(value) +
-      '"' +
-      (title ? ' title="' + esc(title) + '"' : '') +
-      '>'
-    );
-  }
-  function numInput(id, value, min, max, step) {
-    return (
-      '<input id="' +
-      id +
-      '" type="number" value="' +
-      esc(value === '' ? '' : value) +
-      '"' +
-      (min !== '' ? ' min="' + min + '"' : '') +
-      (max ? ' max="' + max + '"' : '') +
-      (step ? ' step="' + step + '"' : '') +
-      '>'
-    );
-  }
-  function checkInput(id, on) {
-    return (
-      '<label class="check"><input id="' +
-      id +
-      '" type="checkbox"' +
-      (on ? ' checked' : '') +
-      '> Allowed</label>'
-    );
-  }
   function selectInput(id, options, value, labeler) {
     var opts = options
       .map(function (o) {
@@ -3642,103 +4023,6 @@
   function textareaInput(id, value, rows) {
     return '<textarea id="' + id + '" rows="' + rows + '">' + esc(value) + '</textarea>';
   }
-  // Grouped <select> of available models (optgroup per provider). Each option
-  // carries data-provider so the Provider field can follow the chosen model. A
-  // model that isn't in the catalog (custom, or a provider without a key) is
-  // preserved under a "Current" group so switching to a picker never drops it.
-  function modelSelectInput(id, currentValue, currentProvider, typeFilter) {
-    return (
-      '<select id="' +
-      id +
-      '">' +
-      modelOptionsHTML(currentValue, currentProvider, typeFilter) +
-      '</select>'
-    );
-  }
-  // Build the grouped <option>/<optgroup> markup for the model picker. Each option
-  // carries the data the overview surfaces: provider (for provider sync), pricing
-  // and good-for (the model note), and legacy/deprecation flags (the warning). A
-  // typeFilter scopes options to models whose catalog category matches, and any
-  // off-catalog current model is preserved under a "Current" group.
-  function modelOptionsHTML(currentValue, currentProvider, typeFilter) {
-    var providers = state.providers || [];
-    var groups = '';
-    var matched = false;
-    providers.forEach(function (p) {
-      if (!p || !Array.isArray(p.models) || p.models.length === 0) return;
-      var seen = {};
-      var opts = '';
-      p.models.forEach(function (m) {
-        if (!m || !m.value || seen[m.value]) return;
-        // Filter by agent type when the model declares a category.
-        if (typeFilter && m.type && m.type !== typeFilter) return;
-        seen[m.value] = true;
-        var sel = m.value === currentValue;
-        if (sel) matched = true;
-        opts += modelOptionHTML(m.value, m.provider || p.name, m, sel);
-      });
-      if (opts)
-        groups += '<optgroup label="' + esc(p.display_name || p.name) + '">' + opts + '</optgroup>';
-    });
-    // Preserve the agent's current model when the type filter excluded it (its real
-    // category differs) or it isn't in the catalog at all. Enrich it from the full
-    // catalog so its note/warning still show even outside the filtered groups.
-    if (currentValue && !matched) {
-      var meta = modelMeta(currentValue);
-      groups =
-        '<optgroup label="Current">' +
-        modelOptionHTML(
-          currentValue,
-          (meta && meta.provider) || currentProvider || '',
-          meta,
-          true
-        ) +
-        '</optgroup>' +
-        groups;
-    }
-    return groups;
-  }
-  // Render one <option> for the model picker from a catalog entry (meta may be null
-  // for a truly unknown model). Encodes the data the overview reads back.
-  function modelOptionHTML(value, provider, meta, selected) {
-    var pricing = meta && meta.pricing ? meta.pricing : '';
-    var goodFor =
-      meta && Array.isArray(meta.good_for) && meta.good_for.length ? meta.good_for[0] : '';
-    var legacy = !!(meta && meta.is_legacy);
-    var dep = meta && meta.deprecation_date ? meta.deprecation_date : '';
-    var label = (meta && meta.label) || value;
-    return (
-      '<option value="' +
-      esc(value) +
-      '"' +
-      ' data-provider="' +
-      esc(provider) +
-      '"' +
-      (pricing ? ' data-pricing="' + esc(pricing) + '"' : '') +
-      (goodFor ? ' data-goodfor="' + esc(goodFor) + '"' : '') +
-      (legacy ? ' data-legacy="1"' : '') +
-      (dep ? ' data-deprecation="' + esc(dep) + '"' : '') +
-      (selected ? ' selected' : '') +
-      '>' +
-      esc(label) +
-      (legacy ? ' ⚠' : '') +
-      (pricing ? ' · ' + esc(pricing) : '') +
-      '</option>'
-    );
-  }
-  function saveBar(tab) {
-    return (
-      '<div class="save-bar" id="savebar-' +
-      tab +
-      '">' +
-      '<span class="dirty-note"></span>' +
-      '<span class="save-status is-muted"></span>' +
-      '<button type="button" class="btn-ghost" data-role="revert">Revert</button>' +
-      '<button type="button" class="btn-primary" data-role="save" disabled>Save</button>' +
-      '</div>'
-    );
-  }
-
   /* ---- misc helpers -------------------------------------------------------- */
 
   function val(id) {
@@ -3830,119 +4114,6 @@
     return out;
   }
 
-  // The Inspector's Appearance section is the shared editor, given a
-  // persistence adapter. The roster contributes only what it alone knows: which
-  // characters are already taken, and how to refresh its own caches after a
-  // confirmed mutation (FR-26/FR-66).
-  //
-  // Built-in agents mount the same editor read-only, so they render through the
-  // same resolver but are never offered a control the server would reject
-  // (FR-44).
-  var appearanceEditor = null;
-
-  function mountAppearanceEditor(name, detail, appearance) {
-    var host = document.getElementById('ov-appearance-host');
-    if (!host || !window.AgentAppearanceEditor) return;
-    if (appearanceEditor && appearanceEditor.destroy) appearanceEditor.destroy();
-
-    var listItem = state.byName[name];
-    var vm = listItem ? viewFor(listItem) : null;
-    var entry = vm ? vm.roleEntry : null;
-
-    appearanceEditor = window.AgentAppearanceEditor.create({
-      host: host,
-      idPrefix: 'ov-appearance',
-      mode: 'edit',
-      readOnly: !isEditable(detail),
-      appearance: appearance,
-      defaultColor: generatedAvatarColor(name),
-      agent: {
-        name: name,
-        source: vm ? vm.source : 'user',
-        role: (detail && detail.role) || (vm ? vm.role : ''),
-        roleAccent: entry ? entry.accent_color : '',
-        roleEmblem: entry ? entry.emblem : '',
-        builtIn: vm ? vm.builtIn : false
-      },
-      takenCharacterIds: takenCharacterIds,
-      adapter: appearanceAdapter(name),
-      onChange: function () {
-        // The editor owns its own saving/error copy; the roster only has to
-        // keep the card, the hero, and the projection in step.
-        refreshAppearanceSurfaces(name);
-      }
-    });
-  }
-
-  // The adapter is the only place the roster's save semantics meet the editor.
-  //
-  // Every mutation goes through the same detail refresh the upload path already
-  // used, so an appearance change inherits the cache refresh and the projection
-  // rebuild rather than working around them with a second write path (FR-66).
-  function appearanceAdapter(name) {
-    var uploadURL = '/api/agents/' + encodeURIComponent(name) + '/appearance/upload';
-    return {
-      saveAppearance: function (patch) {
-        return appearanceRequest(name, '/api/agents?name=' + encodeURIComponent(name), {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ appearance: patch })
-        });
-      },
-      uploadImage: function (file) {
-        var form = new FormData();
-        form.append('image', file);
-        return appearanceRequest(name, uploadURL, { method: 'POST', body: form });
-      },
-      removeImage: function () {
-        return appearanceRequest(name, uploadURL, { method: 'DELETE' });
-      }
-    };
-  }
-
-  // Resolves with the canonical appearance from the response, or rejects with
-  // the server's own message. The editor only marks a change saved on resolve,
-  // so a rejection here is what restores the last confirmed state (FR-41).
-  function appearanceRequest(name, url, init) {
-    return fetch(url, init)
-      .then(function (response) {
-        return response
-          .json()
-          .catch(function () {
-            return {};
-          })
-          .then(function (data) {
-            if (response.status >= 200 && response.status < 300) return data.appearance;
-            throw new Error(data.message || data.error || 'That change could not be saved.');
-          });
-      })
-      .then(function (appearance) {
-        // A forced detail fetch is what keeps the card, the projection, and the
-        // hero in step with the mutation — the same refresh the upload path
-        // already used (FR-66).
-        return fetchDetail(name, true)
-          .then(function (detail) {
-            applyDetailToCollection(name, detail);
-            return detail.appearance || appearance;
-          })
-          .catch(function () {
-            // The mutation landed; only the refresh failed. Returning the
-            // response's own appearance keeps the editor honest about what the
-            // server actually confirmed.
-            return appearance;
-          });
-      });
-  }
-
-  function refreshAppearanceSurfaces(name) {
-    if (state.selected !== name) return;
-    var listItem = state.byName[name];
-    if (!listItem || !els.avatar) return;
-    els.avatar.outerHTML = avatarMarkup(listItem, 'stage__avatar', 'stageAvatar', AVATAR_SIZE.hero);
-    els.avatar = document.getElementById('stageAvatar');
-    renderCharacterLabel(listItem);
-  }
-
   // The hero's character line. The agent's own name stays primary above it;
   // this is secondary descriptive copy, never the identity itself (FR-93).
   //
@@ -3969,17 +4140,6 @@
 
   // Seed the colour control with the colour the agent already shows, so opening
   // the field does not silently propose a different one (FR-31).
-  function generatedAvatarColor(name) {
-    var item = state.byName[name];
-    var vm = item ? viewFor(item) : null;
-    return window.AgentAvatar.signature({
-      name: name,
-      source: vm ? vm.source : 'user',
-      role: vm ? vm.role : '',
-      builtIn: vm ? vm.builtIn : false
-    }).base;
-  }
-
   // "Permanent residency" agents: the built-in CLI agents (Claude Code, Codex,
   // Gemini CLI) and the Workspace Manager system assistant. They're always
   // available and the server won't delete them.
@@ -4085,6 +4245,9 @@
     var f = state.filters;
     // Gallery is the default, so only List is worth carrying in the URL.
     if (state.view && state.view !== 'gallery') params.set('view', state.view);
+    // Likewise for grouping: 'none' is the default and stays out of the URL
+    // (PRD FR-32).
+    if (state.group && state.group !== 'none') params.set('group', state.group);
     if (f.role) params.set('role', f.role);
     if (f.source) params.set('source', f.source);
     if (f.assignment) params.set('assign', f.assignment);
@@ -4124,6 +4287,11 @@
     // (PRD FR11/FR33).
     state.view = VIEWS[p.get('view')] ? p.get('view') : 'gallery';
     reflectViewToggle();
+
+    // Same rule for grouping: an unknown value is discarded rather than
+    // rendering an empty roster.
+    state.group = GROUPS[p.get('group')] ? p.get('group') : 'none';
+    reflectGroupControl();
 
     var f = {
       health: new Set(),
@@ -4170,6 +4338,7 @@
     if (els.filterTag) els.filterTag.value = f.tag;
     if (els.filterWorkspace) els.filterWorkspace.value = f.workspace;
     reflectQuickFilters();
+    reflectFilterBadge();
     if (els.clearFilters) els.clearFilters.hidden = !filtersActive();
   }
 

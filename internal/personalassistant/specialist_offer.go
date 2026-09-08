@@ -41,8 +41,9 @@ func NewSpecialistOfferService(store Store) *SpecialistOfferService {
 // stated focus becomes the user's actual work. Declining records only that the
 // question was asked and answered, so it is never asked again.
 //
-// It creates no workspace and runs no setup wizard. The domain's workspace
-// stays a suggestion the user acts on deliberately.
+// It creates no workspace and performs no setup consequence. A newly accepted
+// active/paused relationship may ask its HTTP caller to open the generic setup
+// shell; all durable setup remains separately reviewed there.
 func (s *SpecialistOfferService) Answer(ctx context.Context, userID string, request SpecialistOfferRequest) (*State, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("personal assistant: specialist offer service is not configured")
@@ -80,7 +81,7 @@ func (s *SpecialistOfferService) Answer(ctx context.Context, userID string, requ
 	// Only a real relationship can answer. Before a hire there is no working
 	// agreement to shape and nobody to shape it for.
 	switch state.Status {
-	case StatusAwaitingHQ, StatusProvisioningHQ, StatusActive, StatusPaused:
+	case StatusActive, StatusPaused:
 	default:
 		return nil, fmt.Errorf("%w: no assistant has been hired yet", ErrConflict)
 	}

@@ -226,7 +226,9 @@ test.describe('Agents collection performance (100 agents)', () => {
       await time('open Inspector (Overview)', async () => {
         await page.locator('.roster-card').first().locator('.roster-card__open').click();
         await expect(page.locator('#inspector')).toBeVisible();
-        await expect(page.locator('#overviewFacts .stage-form')).toBeVisible();
+        // .stage-facts, not .stage-form: the Overview tab reads rather than
+        // edits, so it renders a definition list instead of a form.
+        await expect(page.locator('#overviewFacts .stage-facts')).toBeVisible();
       });
 
       await time('open Toolbox tab', async () => {

@@ -98,6 +98,18 @@ func TestPluginRuntimeProviderRoutesDeclaredOperationsThroughTrustedService(t *t
 	if contextValue["workspace_root"] != workspaceRoot || contextValue["plugin_data_root"] != pluginDataRoot {
 		t.Fatalf("service context = %+v", contextValue)
 	}
+	ready, err := adapter.(*pluginRuntimeProvider).CheckPrerequisites(context.Background())
+	if err != nil || !ready {
+		t.Fatalf("prerequisites: %v %v", ready, err)
+	}
+	process.mu.Lock()
+	defer process.mu.Unlock()
+	contextValue, _ = process.lastArgs["context"].(map[string]any)
+	scopes, ok := contextValue["scopes"].([]string)
+	if process.operation != "runtime.prerequisites" || !ok || len(scopes) != 0 ||
+		contextValue["workspace_id"] != "" || contextValue["workspace_root"] != "" || contextValue["project_entry"] != "" || contextValue["plugin_data_root"] != "" {
+		t.Fatalf("pre-workspace check selected project, scope or mutation: %s %+v", process.operation, contextValue)
+	}
 }
 
 func TestPluginRuntimeProviderRejectsUnknownRepairTokenWithoutServiceCall(t *testing.T) {

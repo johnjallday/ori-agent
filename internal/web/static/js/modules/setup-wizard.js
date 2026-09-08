@@ -429,6 +429,24 @@
       summary.textContent = step.summary;
       container.appendChild(summary);
     }
+    renderRuntimeActionDisclosure(container, step);
+  }
+
+  function renderRuntimeActionDisclosure(container, step) {
+    const disclosure = runtimeRequirement(step)?.action?.disclosure;
+    if (!Array.isArray(disclosure) || !disclosure.length) return;
+    const title = document.createElement('h4');
+    title.textContent = 'Exact action review';
+    const list = document.createElement('dl');
+    list.className = 'setup-wizard-runtime-action-review';
+    disclosure.forEach(item => {
+      const term = document.createElement('dt');
+      term.textContent = item.label || 'Detail';
+      const value = document.createElement('dd');
+      value.textContent = item.value || '';
+      list.append(term, value);
+    });
+    container.append(title, list);
   }
 
   // renderStepOptions draws an adapter-declared choice. Choosing is the action:

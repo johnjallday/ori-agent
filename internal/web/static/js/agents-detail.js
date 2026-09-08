@@ -596,7 +596,50 @@ document.addEventListener('DOMContentLoaded', async () => {
       'agents-detail'
     );
   }
+
+  focusRequestedSection();
 });
+
+// The roster Inspector is a reader; this page is the editor of record. When
+// someone reading a tab there chooses to edit, "Open full page" carries that
+// tab as ?tab= and this brings them to the matching section rather than the top
+// of a long page (agents-page-ux FR-47).
+//
+// This page is one scrolling document, not a tabbed one, so a "tab" resolves to
+// a section to scroll to. A value with no section here — overview, and
+// workspaces, which this page does not present — correctly lands at the top.
+const TAB_SECTIONS = {
+  prompt: 'promptSection',
+  toolbox: 'capabilitiesSection'
+};
+
+function focusRequestedSection() {
+  const tab = new URLSearchParams(window.location.search).get('tab');
+  const id = TAB_SECTIONS[tab];
+  if (!id) return;
+
+  // Sections finish rendering after this runs, and one of them (capabilities)
+  // stays display:none until the agent declares any, so the target may not be
+  // scrollable-to yet. Retry briefly rather than scrolling to a zero-height
+  // box or giving up on the first miss; if it never appears — which is the
+  // correct outcome for an agent with no capabilities — the deep link simply
+  // leaves the reader at the top.
+  let attempts = 0;
+  const tryScroll = () => {
+    const section = document.getElementById(id);
+    if (section && section.offsetParent !== null && section.getBoundingClientRect().height > 0) {
+      // behavior:'instant', not 'smooth'. This page sets scroll-behavior:smooth
+      // globally, and a smooth scroll started during load is cancelled by the
+      // rendering still going on behind it — the scroll silently never happens.
+      // Arriving from a deep link should also just BE at the destination rather
+      // than animating there.
+      section.scrollIntoView({ block: 'start', behavior: 'instant' });
+      return;
+    }
+    if (++attempts < 20) window.setTimeout(tryScroll, 100);
+  };
+  tryScroll();
+}
 
 async function fetchAgentDetail() {
   const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}/detail`);

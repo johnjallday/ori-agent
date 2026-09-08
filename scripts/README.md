@@ -213,6 +213,27 @@ In a pipe or redirected shell, the line REPL remains available: use `1/a`,
 approve. The default and `all` view include every author; closed Issues stay out
 of lists.
 
+**Explore next work.** Press global `e` from any picker view, including an empty
+list, or enter `e` / `explore` in the line REPL. Choose one of eight prompts, add
+optional context, and preview before displaying/copying it or launching a fresh
+foreground Claude/Pi advisor with model/thinking options. Quitting the advisor
+returns to the same picker selection. Discovery does not create Issues, plans,
+worktrees, or Herdr bindings; Capture and Plan stay separate actions.
+
+```bash
+./scripts/devops.sh explore
+./scripts/devops.sh explore quick-win --context '45 minutes; no frontend' --print
+./scripts/devops.sh explore next --kind pi --yes
+```
+
+`--print` prints the prompt without gh, Python, a native agent, or evidence
+collection. Launch requires Python 3 and a compatible authenticated Claude/Pi
+CLI; it gives the model read/search tools plus bounded read-only Git/GitHub/task
+evidence, not shell/edit/write tools. Provider usage and native history are
+previewed; these controls are not an OS sandbox. See
+[the Explore guide](../docs/devops-explore.md) for presets, dependencies,
+noninteractive behavior, privacy limits, and tests.
+
 Every row shows the Issue's `size:*` label in its own column, so a long label
 list can never truncate away the signal that says whether to open a PRD first.
 
@@ -286,7 +307,7 @@ line, and either read failing
 (no release exists, the PR query errors) exits non-zero with `gh`'s own
 message on stderr rather than reporting a misleading zero.
 
-**Writes.** `new`, `plan-new`, `decide`, `approve` and `unapprove` are the only mutating
+**GitHub writes.** `new`, `plan-new`, `decide`, `approve` and `unapprove` are the only GitHub-mutating
 commands; `answer` is a backwards-compatible alias for `decide`. Each prints
 what it will do and asks for confirmation; without a terminal they refuse unless
 given `--yes`, so a pipe can never write by accident.

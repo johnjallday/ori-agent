@@ -5,7 +5,7 @@
 
 set -e
 
-REQUIRED_GO_VERSION="1.25.5"
+REQUIRED_GO_VERSION="1.26.0"
 CURRENT_GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
 
 echo "Current Go version: $CURRENT_GO_VERSION"

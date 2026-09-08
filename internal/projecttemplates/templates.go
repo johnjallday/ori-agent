@@ -72,6 +72,9 @@ type StarterTask struct {
 	// satisfied by an explicitly confirmed project-file change. Declaration is
 	// not authorization; task execution still stops for a user choice first.
 	FileFallbackFor []string `json:"file_fallback_for,omitempty"`
+	// ConnectionModes limits this inert task to supported project connection
+	// modes. Empty means the task applies to every declared mode.
+	ConnectionModes []ProjectConnectionMode `json:"connection_modes,omitempty"`
 }
 
 // ErrInvalidStarterTasks reports a starter-task edit that violates the setup
@@ -249,6 +252,20 @@ func mergeUniqueStrings(a, b []string) []string {
 func validateStarterTasks(tasks []StarterTask) error {
 	var setupTasks []string
 	for _, task := range tasks {
+		seenModes := make(map[ProjectConnectionMode]struct{}, len(task.ConnectionModes))
+		if len(task.ConnectionModes) > 2 {
+			return fmt.Errorf("%w: starter task has too many connection modes", ErrInvalidStarterTasks)
+		}
+		for _, rawMode := range task.ConnectionModes {
+			mode := ProjectConnectionMode(strings.ToLower(strings.TrimSpace(string(rawMode))))
+			if mode != ProjectConnectionNewProject && mode != ProjectConnectionExistingProject {
+				return fmt.Errorf("%w: starter task has an unsupported connection mode", ErrInvalidStarterTasks)
+			}
+			if _, duplicate := seenModes[mode]; duplicate {
+				return fmt.Errorf("%w: starter task repeats a connection mode", ErrInvalidStarterTasks)
+			}
+			seenModes[mode] = struct{}{}
+		}
 		if !task.Setup {
 			continue
 		}
@@ -289,6 +306,10 @@ type Template struct {
 	// ProjectEntry is the optional scaffolded file Ori can offer to open after
 	// an explicit Create Workspace action. It is validated data only.
 	ProjectEntry *ProjectEntry `json:"project_entry,omitempty"`
+	// ProjectConnection is the optional normalized create/attach contract.
+	// Invalid declarations remain nil and block trusted plugin creation.
+	ProjectConnection      *ProjectConnectionDeclaration `json:"project_connection,omitempty"`
+	ProjectConnectionError string                        `json:"project_connection_error,omitempty"`
 	// Builtin marks a template shipped with the app: read-only in the authoring
 	// UI and grouped as a built-in in the create-modal picker.
 	Builtin bool `json:"builtin"`
@@ -408,6 +429,14 @@ func (t Template) HasInvalidRuntimeRequirements() bool {
 	return strings.TrimSpace(t.RuntimeRequirementsError) != ""
 }
 
+func (t Template) HasProjectConnection() bool {
+	return t.ProjectConnection != nil
+}
+
+func (t Template) HasInvalidProjectConnection() bool {
+	return strings.TrimSpace(t.ProjectConnectionError) != ""
+}
+
 // HasSetupWizard reports whether the template declares a usable setup wizard.
 func (t Template) HasSetupWizard() bool {
 	return !t.SetupWizard.IsEmpty()
@@ -458,6 +487,7 @@ type manifest struct {
 	BehaviorProfile        string                  `json:"behavior_profile,omitempty"`
 	StarterTasks           []StarterTask           `json:"starter_tasks,omitempty"`
 	ProjectEntry           json.RawMessage         `json:"project_entry,omitempty"`
+	ProjectConnection      json.RawMessage         `json:"project_connection,omitempty"`
 	Builtin                bool                    `json:"builtin,omitempty"`
 	BuiltinVersion         int                     `json:"builtin_version,omitempty"`
 	Onboarding             json.RawMessage         `json:"onboarding,omitempty"`
@@ -527,6 +557,15 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 	t.Onboarding = m.Onboarding
 	projectEntry, projectEntryErr := normalizeManifestProjectEntry(t.Path, m.ProjectEntry)
 	t.ProjectEntry = projectEntry
+	projectConnection, projectConnectionErr := normalizeProjectConnection(m.ProjectConnection)
+	if projectConnectionErr == nil {
+		projectConnectionErr = normalizeStarterTaskConnectionModes(t.StarterTasks, projectConnection)
+	}
+	t.ProjectConnection = projectConnection
+	if projectConnectionErr != nil {
+		t.ProjectConnection = nil
+		t.ProjectConnectionError = projectConnectionErr.Error()
+	}
 	if m.Tools != nil {
 		t.Tools = normalizeToolDefaults(*m.Tools)
 	}
@@ -559,6 +598,9 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 	t.Warnings = append(manifestWarnings(m, t.Agents, t.AssistantProgram != nil), capabilityWarnings...)
 	if projectEntryErr != nil {
 		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json project_entry is ignored: %v", projectEntryErr))
+	}
+	if projectConnectionErr != nil {
+		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json project_connection is unusable and blocks workspace creation: %v", projectConnectionErr))
 	}
 	if runtimeRequirementsErr != nil {
 		t.RuntimeRequirementsError = runtimeRequirementsErr.Error()
@@ -614,6 +656,7 @@ func normalizeStarterTasks(tasks []StarterTask) []StarterTask {
 			Setup:           setup,
 			Requires:        normalizeOperationNames(task.Requires),
 			FileFallbackFor: normalizeOperationNames(task.FileFallbackFor),
+			ConnectionModes: append([]ProjectConnectionMode(nil), task.ConnectionModes...),
 		})
 	}
 	if len(out) == 0 {

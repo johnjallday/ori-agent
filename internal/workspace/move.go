@@ -52,6 +52,11 @@ func (s *FileStore) MoveWorkspaceFolder(id, newParentID string) ([]MovedWorkspac
 	if !ok {
 		return nil, fmt.Errorf("workspace %s not found", id)
 	}
+	current := s.cache[id]
+	healingExactLink := current != nil && current.AssistantProjectLink != nil && current.AssistantProjectLink.StationWorkspaceID == newParentID
+	if !healingExactLink && protectedAssistantProgramSubtree(s.cache, id) {
+		return nil, ErrAssistantProgramProtected
+	}
 
 	// Validate the destination parent.
 	if newParentID != "" {

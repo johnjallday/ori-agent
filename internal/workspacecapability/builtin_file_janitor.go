@@ -100,5 +100,6 @@ func FileJanitorDefinition() Definition {
 func BuiltinDefinitions() []Definition {
 	return []Definition{
 		FileJanitorDefinition(),
+		SampleLibraryDefinition(),
 	}
 }

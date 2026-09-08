@@ -1,0 +1,1 @@
+Trace Ori's core experience through available code and documentation: setup, creating an agent, starting a workspace, and completing a useful task. Identify the three most consequential friction points. Distinguish behavior verified by existing evidence from assumptions based on code; do not claim a browser walkthrough. Propose the smallest useful fix for each.

@@ -34,7 +34,18 @@ var ErrInvalidProjectEntry = errors.New("invalid project entry")
 
 // ProjectEntryPathKey aliases the canonical workspace shared_data key so older
 // callers importing projecttemplates keep one stable metadata contract.
-const ProjectEntryPathKey = workspace.ProjectEntryPathKey
+const (
+	ProjectEntryPathKey              = workspace.ProjectEntryPathKey
+	ProjectEntryLocatorKey           = workspace.ProjectEntryLocatorKey
+	ProjectEntryLocatorSchemaVersion = workspace.ProjectEntryLocatorSchemaVersion
+)
+
+type ProjectEntryLocator = workspace.ProjectEntryLocator
+
+const (
+	ProjectEntryManagedWorkspace   = workspace.ProjectEntryManagedWorkspace
+	ProjectEntryDirectoryReference = workspace.ProjectEntryDirectoryReference
+)
 
 var projectEntryTokenPattern = regexp.MustCompile(`\{\{[^{}]*\}\}`)
 
@@ -147,6 +158,33 @@ func verifyTemplateEntrySource(templateDir, portablePath string) error {
 	return nil
 }
 
+// ResolveProjectEntryForName computes the portable entry expected from one
+// normalized template and project name without creating files. Commit paths
+// must still verify the materialized regular file.
+func ResolveProjectEntryForName(template Template, projectName string) (string, error) {
+	if template.ProjectEntry == nil {
+		return "", ErrInvalidProjectEntry
+	}
+	slug, err := SanitizeProjectName(projectName)
+	if err != nil {
+		return "", ErrInvalidProjectEntry
+	}
+	values := newTemplateTokenValues(slug)
+	clean, err := ValidateProjectEntryPath(template.ProjectEntry.RelativePath)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := substituteRelPathWithValues(clean, values)
+	if err != nil {
+		return "", fmt.Errorf("%w: failed to resolve project entry", ErrInvalidProjectEntry)
+	}
+	portable := filepath.ToSlash(resolved)
+	if strings.Contains(portable, "{{") || strings.Contains(portable, "}}") {
+		return "", fmt.Errorf("%w: project entry contains an unresolved token", ErrInvalidProjectEntry)
+	}
+	return ValidateProjectEntryPath(portable)
+}
+
 func resolveInstantiatedProjectEntry(projectRoot string, entry *ProjectEntry, values templateTokenValues) (string, error) {
 	if entry == nil {
 		return "", nil
@@ -183,6 +221,14 @@ func SetProjectEntryPath(sharedData map[string]any, relativePath string) error {
 		return fmt.Errorf("%w: %v", ErrInvalidProjectEntry, err)
 	}
 	return nil
+}
+
+func SetProjectEntryLocator(sharedData map[string]any, locator ProjectEntryLocator) error {
+	return workspace.SetProjectEntryLocator(sharedData, locator)
+}
+
+func GetProjectEntryLocator(sharedData map[string]any) (*ProjectEntryLocator, error) {
+	return workspace.GetProjectEntryLocator(sharedData)
 }
 
 // GetProjectEntryPath returns a validated resolved path from shared_data. A

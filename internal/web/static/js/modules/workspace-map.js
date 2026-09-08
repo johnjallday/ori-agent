@@ -2591,7 +2591,20 @@
     );
   }
 
-  function avatarHTML(name, extraClass) {
+  // Where an agent's own record lives. The Agents page reads ?agent= on load and
+  // opens that agent, so this is a URL a user could also have reached by hand
+  // (agents-page-ux FR-38/FR-41).
+  function agentRecordHref(name) {
+    var trimmed = String(name == null ? '' : name).trim();
+    if (!trimmed) return '';
+    return '/agents?agent=' + encodeURIComponent(trimmed);
+  }
+
+  // `href` is opt-in: only the Overview panel's roster and Commander link, so
+  // portraits drawn elsewhere on the map gain no tab stop. The shared-renderer
+  // path and the local fallback below must agree, or the link would appear on
+  // production pages and vanish on the ones still using the fallback.
+  function avatarHTML(name, extraClass, href) {
     // Production pages load the small shared renderer before this Map script so
     // Workspace Details can use the exact same portrait without loading the
     // whole map implementation. Keep the local fallback for isolated consumers
@@ -2600,16 +2613,24 @@
     if (shared && typeof shared.markup === 'function') {
       return shared.markup(name, {
         isKeeper: extraClass === 'is-keeper',
-        className: extraClass === 'is-keeper' ? '' : extraClass
+        className: extraClass === 'is-keeper' ? '' : extraClass,
+        href: href || ''
       });
     }
 
     var pal = paletteFor(name);
     var safeName = escapeHtml(name);
+    var linked = /^\/[^/\\]/.test(String(href || ''));
+    var tag = linked ? 'a' : 'span';
     return (
-      '<span class="ws-map-av' +
+      '<' +
+      tag +
+      ' class="ws-map-av' +
       (extraClass ? ' ' + extraClass : '') +
-      '" style="--av:' +
+      (linked ? ' is-link' : '') +
+      '"' +
+      (linked ? ' href="' + escapeHtml(href) + '"' : '') +
+      ' style="--av:' +
       pal.key +
       '" title="' +
       safeName +
@@ -2625,7 +2646,9 @@
       '">' +
       safeName +
       '</span>' +
-      '</span>'
+      '</' +
+      tag +
+      '>'
     );
   }
 
@@ -2801,9 +2824,12 @@
     var description = String(ws.description || '').trim();
     var delLabel = isGroup(ws) ? 'Delete group' : 'Delete workspace';
 
+    // The Overview panel's Commander and roster are the two places a portrait
+    // stands for an agent you might want to go and look at, so these — and only
+    // these — link to that agent's record (FR-38/FR-39).
     var keeper = entry
       ? '<div class="ws-map-ov-keeper">' +
-        avatarHTML(entry, 'is-keeper') +
+        avatarHTML(entry, 'is-keeper', agentRecordHref(entry)) +
         '<div class="ws-map-ov-keeper-meta">' +
         '<div class="ws-map-ov-keeper-badge">★ Locked · can&#39;t remove</div></div></div>'
       : '<span class="ws-map-ov-none">No Commander</span>';
@@ -2811,7 +2837,7 @@
     var roster = agents.length
       ? agents
           .map(function (a) {
-            return avatarHTML(a);
+            return avatarHTML(a, '', agentRecordHref(a));
           })
           .join('')
       : '<span class="ws-map-ov-none">No agents yet</span>';
@@ -3568,7 +3594,11 @@
     var district = renderedDistrict(groupId);
     var readOnly = isMapReadOnly();
     var collapsed = !!(district && district.collapsed);
-    var items = [{ label: 'Open group', action: 'open' }, menuDivider()];
+    var items = [
+      { label: 'Open group', action: 'open' },
+      { label: 'Build', action: 'build', disabled: readOnly },
+      menuDivider()
+    ];
     items.push({
       label: collapsed ? 'Expand group' : 'Collapse group',
       action: collapsed ? 'expand-group' : 'collapse-group',
@@ -4045,11 +4075,16 @@
       // there, exactly as the retired build mode did.
       case 'build':
         if (context.world) {
-          chooseBuildSite(container, context.world);
+          chooseBuildSite(
+            container,
+            context.world,
+            context.type === 'district' ? { id: context.id, name: context.name } : null
+          );
           break;
         }
         // No usable coordinate (a map with no canvas to measure): fall back to
         // the plain create flow rather than silently doing nothing.
+        cancelBuild();
         announce(container, 'Opening the new workspace flow');
         triggerCreateWorkspace();
         break;
@@ -4172,8 +4207,11 @@
         id: target.id || '',
         type: target.type,
         name: (target.ws && target.ws.name) || (target.type === 'hq' ? 'Personal HQ' : 'workspace'),
-        // Only the canvas menu builds, and only it needs a coordinate.
-        world: target.type === 'canvas' ? menuWorldPoint(container, at, viaKeyboard) : null
+        // Canvas and district Build share the same camera/snap placement rule.
+        world:
+          target.type === 'canvas' || target.type === 'district'
+            ? menuWorldPoint(container, at, viaKeyboard)
+            : null
       },
       options: options,
       event: event
@@ -6009,10 +6047,9 @@
   /**
    * Apply the one confirmed hierarchy change produced by a Map drop.
    *
-   * This is the ONE place the Map writes hierarchy, and it does not do so
-   * through the layout API — that API has no vocabulary for a parent and keeps
-   * none. It calls the same workspace endpoint Tree uses, with a target id for
-   * join or the same empty parent Tree sends for moving to top level.
+   * Like district Build, this uses the workspace endpoint, never the layout
+   * API — that API has no vocabulary for a parent and keeps none. A join sends
+   * a target id; moving to top level sends the same empty parent Tree uses.
    *
    * The coordinate is already saved, so failure here is partial rather than
    * total: the workspace stays where it was dropped and retains its old group.
@@ -6020,13 +6057,8 @@
   function changeMembershipOnDrop(container, id, intent, committed) {
     if (typeof fetch !== 'function') return Promise.resolve(false);
     var leaving = intent.kind === 'leave';
-    return fetch('/api/workspaces/' + encodeURIComponent(id), {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ parent_id: leaving ? '' : intent.groupId })
-    })
-      .then(function (response) {
-        if (!response || !response.ok) throw new Error('reparent failed');
+    return patchWorkspaceMembership(id, leaving ? '' : intent.groupId)
+      .then(function () {
         announce(
           container,
           'Moved to ' +
@@ -6084,6 +6116,19 @@
         'is-leave-source',
         !!groupId && el.getAttribute('data-group-id') === groupId
       );
+    });
+  }
+
+  // Hierarchy belongs to workspaces, not layout. Drop and grouped Build share
+  // only the request contract; each owns its own partial-success feedback.
+  function patchWorkspaceMembership(id, parentId) {
+    if (typeof fetch !== 'function') return Promise.reject(new Error('membership unavailable'));
+    return fetch('/api/workspaces/' + encodeURIComponent(id), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parent_id: parentId })
+    }).then(function (response) {
+      if (!response || !response.ok) throw new Error('reparent failed');
     });
   }
 
@@ -7077,7 +7122,7 @@
   // workspace that does not exist yet (FR-54). sessions.js consumes it through
   // completeBuild/cancelBuild when its modal closes.
 
-  var buildState = { pending: null, container: null };
+  var buildState = { pending: null, container: null, group: null };
 
   function snapValue(value) {
     return Math.round(value / SNAP_STEP) * SNAP_STEP;
@@ -7104,6 +7149,8 @@
   // when the create modal closes without creating anything.
   function cancelBuild() {
     buildState.pending = null;
+    buildState.container = null;
+    buildState.group = null;
   }
 
   /**
@@ -7114,10 +7161,12 @@
    * stray position behind (FR-54). The modal itself is Ori's existing one —
    * there is deliberately no second creation form (FR-51).
    */
-  function chooseBuildSite(container, point) {
+  function chooseBuildSite(container, point, group) {
+    cancelBuild();
     if (!point) return;
     buildState.pending = { x: point.x, y: point.y };
     buildState.container = container;
+    buildState.group = group && group.id ? { id: group.id, name: group.name } : null;
     announce(
       container,
       'Building at ' + formatCoordinate(point) + '. Complete the workspace details.'
@@ -7129,7 +7178,7 @@
     }
     // No modal available (an older page): keep the map usable rather than
     // stranding the user in a mode with nowhere to go.
-    buildState.pending = null;
+    cancelBuild();
   }
 
   /**
@@ -7139,12 +7188,17 @@
    * the time this runs the workspace exists; if its coordinate cannot be saved,
    * the workspace stays, appears at its deterministic fallback, and the user is
    * told plainly and offered a retry — the client never deletes a real
-   * workspace to tidy up a layout failure.
+   * workspace to tidy up a layout failure. District Build adds membership only
+   * after placement succeeds. A failed join preserves both the workspace and
+   * its saved position; Retry position remains position-only.
    */
   function completeBuild(workspaceId) {
     var point = buildState.pending;
     var container = buildState.container;
-    buildState.pending = null;
+    var group = buildState.group;
+    // Consume all intent before the first async write. A later Build cannot
+    // change this completion's target, nor can duplicate completion reuse it.
+    cancelBuild();
     if (!workspaceId) return Promise.resolve(false);
     if (!point) return Promise.resolve(false);
     // Two buildings may not be committed to the same anchor, and a snapped
@@ -7155,22 +7209,46 @@
     var built = {};
     built[workspaceId] = point;
     var positions = withAutomaticLayoutPins(built);
-    return patchLayout([{ op: 'set_positions', positions: positions }])
-      .then(function () {
-        selectedId = workspaceId;
-        announce(container, 'Workspace built at ' + formatCoordinate(point));
+    return patchLayout([{ op: 'set_positions', positions: positions }]).then(
+      function () {
         settleLayout();
-        return true;
-      })
-      .catch(function () {
+        selectedId = workspaceId;
+        if (!group) {
+          announce(container, 'Workspace built at ' + formatCoordinate(point));
+          return true;
+        }
+        return patchWorkspaceMembership(workspaceId, group.id).then(
+          function () {
+            announce(
+              container,
+              'Workspace built at ' + formatCoordinate(point) + ' and added to ' + group.name + '.'
+            );
+            notifyHierarchyChanged();
+            return true;
+          },
+          function () {
+            announce(
+              container,
+              'The workspace was created at ' +
+                formatCoordinate(point) +
+                ', but it could not be added to ' +
+                group.name +
+                '. Its position is saved; group membership is unchanged.'
+            );
+            return false;
+          }
+        );
+      },
+      function () {
         rememberFailedPlacement(workspaceId, point);
+        settleLayout();
         announce(
           container,
           'The workspace was created, but its position could not be saved. It is shown at a default spot; use Retry position to try again.'
         );
-        settleLayout();
         return false;
-      });
+      }
+    );
   }
 
   // Failed initial placements are remembered so the honest retry offered to the
@@ -7575,10 +7653,13 @@
     districtHTML: districtHTML,
     overviewBodyHTML: overviewBodyHTML,
     // Home's current Map context modal reuses this exact inline portrait rather
-    // than maintaining a second generated appearance for the same name.
+    // than maintaining a second generated appearance for the same name. It does
+    // not pass an href, so that portrait stays a span.
     agentPortraitHTML: function (name, isKeeper) {
       return avatarHTML(name, isKeeper ? 'is-keeper' : '');
     },
+    // Test-only seam for the portrait's link behaviour (agents-page-ux FR-38).
+    avatarHTML: avatarHTML,
     selBarHTML: selBarHTML,
     hqSiteView: hqSiteView,
     hqSiteHTML: hqSiteHTML,

@@ -33,6 +33,8 @@ type RemovalFacts struct {
 	Automation []string `json:"automation,omitempty"`
 	// RetainedAudit describes what survives removal for the record.
 	RetainedAudit []string `json:"retained_audit,omitempty"`
+	// Impacts lists bounded capability-owned state affected by teardown.
+	Impacts []string `json:"impacts,omitempty"`
 }
 
 // RemovalSummary is the dry run. It is computed without mutating anything, so
@@ -46,6 +48,7 @@ type RemovalSummary struct {
 	ManagedFolder   string   `json:"managed_folder,omitempty"`
 	StopsAutomation []string `json:"stops_automation,omitempty"`
 	RetainedAudit   []string `json:"retained_audit,omitempty"`
+	Impacts         []string `json:"impacts,omitempty"`
 
 	// Releases are resources this capability owns exclusively and will give up.
 	Releases []workspace.CapabilityResource `json:"releases,omitempty"`
@@ -146,6 +149,7 @@ func (s *Service) RemovalPlan(workspaceID, capabilityID string) (RemovalSummary,
 				summary.ManagedFolder = facts.ManagedFolder
 				summary.StopsAutomation = facts.Automation
 				summary.RetainedAudit = facts.RetainedAudit
+				summary.Impacts = facts.Impacts
 			}
 		}
 	}
@@ -168,7 +172,15 @@ func (s *Service) RemovalPlan(workspaceID, capabilityID string) (RemovalSummary,
 // record is still there the capability reports itself installed and unhealthy,
 // which is visible and repairable. Dropping the record first would leave live
 // watchers behind with nothing recording that they exist (FR-15, FR-145).
-func (s *Service) Remove(workspaceID, capabilityID string, opts RemoveOptions) (RemovalResult, error) {
+func (s *Service) Remove(workspaceID, capabilityID string, opts RemoveOptions) (result RemovalResult, resultErr error) {
+	defer func() {
+		count := 0
+		if resultErr == nil && result.Removed {
+			count = 1
+		}
+		recordCapabilityOutcome(capabilityID, eventActionRemoveCapability, resultErr, count)
+	}()
+
 	if s == nil || s.registry == nil {
 		return RemovalResult{}, &Error{Code: CodeCapabilityUnavailable, Message: "Workspace capabilities are not available."}
 	}
@@ -227,7 +239,7 @@ func (s *Service) Remove(workspaceID, capabilityID string, opts RemoveOptions) (
 		}
 	}
 
-	result := RemovalResult{}
+	result = RemovalResult{}
 
 	// 3. Companion, only when the user made that separate choice AND the
 	// capability actually created the agent.

@@ -135,8 +135,8 @@ func TestService_CatalogListsFileJanitorAsAvailableAndNotInstalled(t *testing.T)
 	if err != nil {
 		t.Fatalf("Catalog: %v", err)
 	}
-	if len(items) != 1 {
-		t.Fatalf("expected one catalog item, got %d", len(items))
+	if len(items) != len(BuiltinDefinitions()) {
+		t.Fatalf("expected every compiled catalog item, got %d", len(items))
 	}
 	item := items[0]
 	if item.Definition.ID != workspace.CapabilityFileJanitor {
@@ -201,11 +201,11 @@ func TestService_CatalogKeepsUnknownInstalledRecordVisible(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Catalog must not fail on an unknown install: %v", err)
 	}
-	if len(items) != 2 {
-		t.Fatalf("expected the compiled definition plus the unknown record, got %d", len(items))
+	if len(items) != len(BuiltinDefinitions())+1 {
+		t.Fatalf("expected compiled definitions plus the unknown record, got %d", len(items))
 	}
 
-	unknown := items[1]
+	unknown := items[len(items)-1]
 	if unknown.Available {
 		t.Fatal("an unknown capability must not be reported available")
 	}

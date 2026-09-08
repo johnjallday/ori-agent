@@ -45,6 +45,36 @@ func (s *SyncStore) GetFolderWorkspace(workspaceID string) (*Workspace, error) {
 	return s.fileSync.Get(workspaceID)
 }
 
+// MoveWorkspaceFolder delegates to the canonical folder move and then aligns
+// the primary parent projection. Typed domain links, not physical nesting,
+// remain authoritative for membership.
+func (s *SyncStore) MoveWorkspaceFolder(workspaceID, parentID string) ([]MovedWorkspace, error) {
+	if s == nil || s.fileSync == nil || s.primary == nil {
+		return nil, fmt.Errorf("workspace folder storage is unavailable")
+	}
+	current, currentErr := s.primary.Get(workspaceID)
+	if currentErr != nil {
+		return nil, currentErr
+	}
+	healingExactLink := current.AssistantProjectLink != nil && current.AssistantProjectLink.StationWorkspaceID == parentID
+	if protected, checkErr := storeContainsProtectedAssistantProgram(s.primary, workspaceID); checkErr != nil {
+		return nil, checkErr
+	} else if protected && !healingExactLink {
+		return nil, ErrAssistantProgramProtected
+	}
+	moved, err := s.fileSync.MoveWorkspaceFolder(workspaceID, parentID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.primary.Update(workspaceID, func(current *Workspace) error {
+		current.ParentID = parentID
+		return nil
+	}); err != nil {
+		return moved, err
+	}
+	return moved, nil
+}
+
 // Save persists the workspace. FileStore still runs first so its monotonic
 // Version bump reaches the primary record, but disk failures are no longer
 // best-effort: slug conflicts and other folder errors abort the operation. A
@@ -270,6 +300,11 @@ func (s *SyncStore) List() ([]string, error) {
 
 // Delete removes a workspace from the primary store and the disk folder.
 func (s *SyncStore) Delete(id string) error {
+	if protected, checkErr := storeContainsProtectedAssistantProgram(s.primary, id); checkErr != nil {
+		return checkErr
+	} else if protected {
+		return ErrAssistantProgramProtected
+	}
 	err := s.primary.Delete(id)
 	if s.fileSync != nil {
 		if delErr := s.fileSync.Delete(id); delErr != nil {
@@ -280,6 +315,22 @@ func (s *SyncStore) Delete(id string) error {
 		}
 	}
 	return err
+}
+
+func storeContainsProtectedAssistantProgram(store Store, rootID string) (bool, error) {
+	ids, err := store.List()
+	if err != nil {
+		return false, err
+	}
+	all := make(map[string]*Workspace, len(ids))
+	for _, id := range ids {
+		candidate, getErr := store.Get(id)
+		if getErr != nil {
+			return false, getErr
+		}
+		all[id] = candidate
+	}
+	return protectedAssistantProgramSubtree(all, rootID), nil
 }
 
 // ListActive returns all active workspaces from the primary store.

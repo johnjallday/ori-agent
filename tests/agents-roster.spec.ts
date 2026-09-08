@@ -13,8 +13,28 @@ test.beforeEach(async ({ page }) => {
   await installLocalCdn(page);
 });
 
+// The role/workspace/source/assignment/tag selects live inside the Filters
+// panel, which is a closed <dialog> until asked for. Reading a value off one
+// works while it is closed; acting on one does not, so every test that SETS a
+// filter opens the panel first.
+async function openFilters(page) {
+  const panel = page.locator('#filtersPanel');
+  if (!(await panel.evaluate((d: HTMLDialogElement) => d.open))) {
+    await page.locator('#filtersButton').click();
+  }
+  await expect(panel).toBeVisible();
+}
+
+async function closeFilters(page) {
+  const panel = page.locator('#filtersPanel');
+  if (await panel.evaluate((d: HTMLDialogElement) => d.open)) {
+    await page.locator('#filtersDone').click();
+  }
+  await expect(panel).toBeHidden();
+}
+
 test.describe('Agents roster', () => {
-  test('browse, select, edit, assign workspace, and delete', async ({ page, request }) => {
+  test('browse, select, read, and delete', async ({ page, request }) => {
     const name = `PW Roster ${Date.now()}`;
 
     const create = await request.post(`${baseUrl}/api/agents`, {
@@ -41,27 +61,27 @@ test.describe('Agents roster', () => {
       await expect(page.locator('#rosterList')).toBeVisible();
       await expect(page.locator('#stageName')).toHaveText(name);
 
-      // Overview edit → save → persisted.
-      const desc = page.locator('#ov-description');
-      await expect(desc).toBeVisible();
-      await desc.fill('Edited by Playwright.');
-      const save = page.locator('#savebar-overview [data-role="save"]');
-      await expect(save).toBeEnabled();
-      await save.click();
-      await expect
-        .poll(async () => {
-          const r = await request.get(`${baseUrl}/api/agents/${encodeURIComponent(name)}/detail`);
-          return (await r.json()).metadata?.description;
-        })
-        .toBe('Edited by Playwright.');
+      // Overview reads the agent's facts; it does not offer to change any of
+      // them. The full page is the editor of record (FR-42/FR-44).
+      await expect(page.locator('#overviewFacts')).toContainText('Model');
+      await expect(page.locator('#overviewFacts')).toContainText('gpt-4o-mini');
+      await expect(page.locator('#panel-overview input, #panel-overview textarea')).toHaveCount(0);
 
-      // Prompt tab lazy-loads an editable textarea.
+      // Prompt tab lazy-loads the prompt as text, not a textarea.
       await page.locator('#tab-prompt').click();
-      await expect(page.locator('#pr-prompt')).toBeVisible();
+      await expect(page.locator('#panel-prompt')).toBeVisible();
+      await expect(page.locator('#panel-prompt textarea')).toHaveCount(0);
 
-      // Workspaces tab renders the editable assignment list.
+      // Workspaces tab reports membership and links out to change it.
       await page.locator('#tab-workspaces').click();
       await expect(page.locator('#panel-workspaces')).toBeVisible();
+      await expect(page.locator('#panel-workspaces input[type="checkbox"]')).toHaveCount(0);
+
+      // "Open full page" carries the tab the reader was on (FR-47).
+      await expect(page.locator('#stageFullPage')).toHaveAttribute(
+        'href',
+        `/agents/${encodeURIComponent(name)}?tab=workspaces`
+      );
 
       // Delete via the stage button (auto-accept the confirm dialog).
       page.once('dialog', dialog => dialog.accept());
@@ -308,7 +328,10 @@ test.describe('Agents roster', () => {
     }
   });
 
-  test('single-agent overview: edit tags and favorite persist', async ({ page, request }) => {
+  test('the Inspector offers exactly three actions, and Favorite is one of them', async ({
+    page,
+    request
+  }) => {
     const name = `PWOv ${Date.now()}`;
     const create = await request.post(`${baseUrl}/api/agents`, {
       data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
@@ -330,26 +353,120 @@ test.describe('Agents roster', () => {
       });
       await expect(page.locator('#stageName')).toHaveText(name);
 
-      // Favorite + add a tag via the Overview form.
-      await page.locator('#ov-favorite').check();
-      const tagField = page.locator('#ov-tags-host .tag-input-field');
-      await tagField.fill('research');
-      await tagField.press('Enter');
-      const save = page.locator('#savebar-overview [data-role="save"]');
-      await expect(save).toBeEnabled();
-      await save.click();
+      // Favorite/Unfavorite, Open full page, Delete — and nothing else (FR-43).
+      await expect(page.locator('.stage__actions > *')).toHaveCount(3);
+      const fav = page.locator('#stageFavoriteToggle');
+      await expect(fav).toHaveAttribute('aria-pressed', 'false');
+      await expect(page.locator('#stageFullPage')).toBeVisible();
+      await expect(page.locator('#stageDelete')).toBeVisible();
 
+      // Favorite is the one agent field the reader still writes: it is the same
+      // one-click roster action the card and the context menu offer, not a
+      // field editor.
+      await fav.click();
+      await expect(fav).toHaveAttribute('aria-pressed', 'true');
       await expect
         .poll(async () => {
           const r = await request.get(`${baseUrl}/api/agents/${encodeURIComponent(name)}/detail`);
-          const d = await r.json();
-          return `${d.metadata?.favorite}:${(d.metadata?.tags || []).join(',')}`;
+          return (await r.json()).metadata?.favorite;
         })
-        .toBe('true:research');
+        .toBe(true);
+
+      // The hero star follows, so the panel cannot disagree with itself.
+      await expect(page.locator('#stageFavorite')).toBeVisible();
     } finally {
       await request
         .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
         .catch(() => undefined);
+    }
+  });
+
+  test('the Inspector saves no agent field, on any tab', async ({ page, request }) => {
+    const name = `PWRead ${Date.now()}`;
+    await request.post(`${baseUrl}/api/agents`, {
+      data: {
+        name,
+        type: 'tool-calling',
+        model: 'gpt-4o-mini',
+        description: 'A readable purpose.',
+        tags: ['alpha']
+      }
+    });
+
+    try {
+      await openAgents(page, `?agent=${encodeURIComponent(name)}`);
+      await expect(page.locator('#stageName')).toHaveText(name);
+
+      // Not one editable control anywhere in the panel — no inputs, no
+      // textareas, no selects, no save bar, no stale-edit banner (FR-45).
+      for (const tab of ['overview', 'prompt', 'workspaces', 'toolbox']) {
+        await page.locator(`#tab-${tab}`).click();
+        await expect(page.locator(`#panel-${tab}`)).toBeVisible();
+        await expect(
+          page.locator(`#panel-${tab} input, #panel-${tab} textarea, #panel-${tab} select`)
+        ).toHaveCount(0);
+        await expect(page.locator(`#panel-${tab} .save-bar`)).toHaveCount(0);
+        await expect(page.locator(`#panel-${tab} .conflict-banner`)).toHaveCount(0);
+      }
+
+      // The facts Group 1 took off the card are readable here instead (FR-2).
+      await page.locator('#tab-overview').click();
+      await expect(page.locator('#overviewFacts')).toContainText('A readable purpose.');
+      await expect(page.locator('#overviewFacts')).toContainText('gpt-4o-mini');
+      await expect(page.locator('#overviewFacts')).toContainText('alpha');
+      await expect(page.locator('#overviewFacts')).toContainText('Last active');
+    } finally {
+      await request
+        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
+        .catch(() => undefined);
+    }
+  });
+
+  test('switching cards and tabs never raises an unsaved-changes prompt', async ({
+    page,
+    request
+  }) => {
+    const prefix = `PWNoGuard${Date.now()}`;
+    const names = [`${prefix} One`, `${prefix} Two`];
+    for (const n of names) {
+      await request.post(`${baseUrl}/api/agents`, {
+        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+      });
+    }
+
+    try {
+      // The guard used to be a window.confirm on card and tab switches. Any
+      // dialog at all now is a regression, so fail loudly rather than
+      // auto-accepting one (FR-45, and task 5.6 — the riskiest edit in the
+      // group, because the guard sat on both navigation paths).
+      const dialogs: string[] = [];
+      page.on('dialog', d => {
+        dialogs.push(d.message());
+        d.dismiss().catch(() => undefined);
+      });
+
+      await openAgents(page, `?agent=${encodeURIComponent(names[0])}`);
+      await expect(page.locator('#stageName')).toHaveText(names[0]);
+
+      for (let i = 0; i < 3; i++) {
+        for (const tab of ['prompt', 'workspaces', 'toolbox', 'overview']) {
+          await page.locator(`#tab-${tab}`).click();
+        }
+        await page.locator(`.roster-card[data-name="${names[1]}"] .roster-card__open`).click();
+        await expect(page.locator('#stageName')).toHaveText(names[1]);
+        await page.locator(`.roster-card[data-name="${names[0]}"] .roster-card__open`).click();
+        await expect(page.locator('#stageName')).toHaveText(names[0]);
+      }
+
+      // Closing the Inspector was the third guarded path.
+      await page.locator('#inspectorClose').click();
+      expect(dialogs).toEqual([]);
+    } finally {
+      for (const n of names) {
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
+      }
     }
   });
 
@@ -384,7 +501,9 @@ test.describe('Agents roster', () => {
 
       // Check both, then apply a tag filter that hides one → 1 hidden checked.
       await page.locator('#rosterSelectAll').click();
+      await openFilters(page);
       await page.locator('#filterTag').selectOption(`${prefix}tag`);
+      await closeFilters(page);
       await expect(page.locator('.roster-card')).toHaveCount(1);
       await expect(page.locator(`.roster-card[data-name="${tagged}"]`)).toBeVisible();
       await expect(page.locator('#bulkCount')).toHaveText(/1 hidden by filters/);
@@ -400,7 +519,9 @@ test.describe('Agents roster', () => {
       await expect(page.locator('#bulkBar')).toBeHidden();
 
       // Clear filters restores both.
+      await openFilters(page);
       await page.locator('#clearFilters').click();
+      await closeFilters(page);
       await expect(page.locator('.roster-card')).toHaveCount(2);
     } finally {
       await request
@@ -484,7 +605,9 @@ test.describe('Agents roster', () => {
 // response, and the avatar must follow Avatar Identity v1 (PRD FR2–FR24,
 // FR67–FR78, FR95–FR98, FR102).
 test.describe('Agents gallery', () => {
-  async function openAgents(page) {
+  // The optional query matches the helper of the same name in the other
+  // describes, so a test here can deep-link to one agent the same way.
+  async function openAgents(page, query = '') {
     await page.addInitScript(() => window.localStorage.setItem('ori-theme', 'dark'));
     await page.route('**/api/onboarding/status', route =>
       route.fulfill({
@@ -493,7 +616,7 @@ test.describe('Agents gallery', () => {
         body: JSON.stringify({ needs_onboarding: false, completed: true })
       })
     );
-    await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`${baseUrl}/agents${query}`, { waitUntil: 'domcontentloaded' });
     await expect(page.locator('#rosterList')).toBeVisible();
     await expect(page.locator('.roster-card').first()).toBeVisible();
   }
@@ -545,25 +668,42 @@ test.describe('Agents gallery', () => {
         String(agents.length - needs - disabled)
       );
 
-      // Card facts match this agent's own record, field for field.
-      const record = agents.find(a => a.name === rich);
+      // A card states exactly four facts: who, role, where, ready? (FR-1).
       const target = card(page, rich);
       await expect(target.locator('.agent-card__name')).toHaveText(rich);
-      await expect(target.locator('.agent-card__status')).toContainText('Active');
-      await expect(target.locator('.agent-card__class')).toContainText('Researcher');
-      await expect(target.locator('.agent-card__class')).toContainText('Lv 0');
-      await expect(target.locator('.agent-card__purpose')).toHaveText(record.metadata.description);
-      await expect(target.locator('.agent-card__model')).toHaveText(record.model);
-
-      // An agent with no description says so instead of borrowing the role's
-      // tagline, and an unattached agent reads as library-only (FR20/FR22).
-      const bareCard = card(page, bare);
-      await expect(bareCard.locator('.agent-card__purpose')).toHaveText('No description yet');
-      await expect(bareCard.locator('.agent-card__purpose')).toHaveClass(/is-missing/);
-      await expect(bareCard.locator('.agent-card__pill')).toHaveText('Library only');
-      await expect(bareCard.locator('.agent-card__toolbox-value')).toHaveText(
-        'No capabilities listed'
+      await expect(target.locator('.agent-card__status')).toContainText('Ready');
+      await expect(target.locator('.agent-card__ident .agent-card__class')).toContainText(
+        'Researcher'
       );
+      await expect(target.locator('.agent-card__ident .agent-card__class')).toContainText('Lv 0');
+
+      // Purpose, capability summary, model, and last activity moved to the
+      // Inspector, so the card must no longer render any of them (FR-2).
+      await expect(target.locator('.agent-card__purpose')).toHaveCount(0);
+      await expect(target.locator('.agent-card__toolbox')).toHaveCount(0);
+      await expect(target.locator('.agent-card__model')).toHaveCount(0);
+      await expect(target.locator('.agent-card__activity')).toHaveCount(0);
+
+      // The removed facts survive for a screen reader on the open control's
+      // accessible name, which is the whole reason they may leave the card
+      // (FR-10).
+      const record = agents.find(a => a.name === rich);
+      const spoken = await target.locator('.roster-card__open').getAttribute('aria-label');
+      expect(spoken).toContain(record.model);
+      expect(spoken).toContain('Ready');
+
+      // An absent fact is an absent slot: no italic "No description yet", no
+      // "No capabilities listed", and no section labels (FR-4/FR-6).
+      const bareCard = card(page, bare);
+      await expect(bareCard.locator('.agent-card__pill')).toHaveText('Library only');
+      await expect(bareCard.locator('.agent-card__section-label')).toHaveCount(0);
+      await expect(bareCard).not.toContainText('No description yet');
+      await expect(bareCard).not.toContainText('No capabilities listed');
+      await expect(bareCard).not.toContainText('Workspace orbit');
+
+      // The height budget is the point of the whole group (FR-8).
+      const height = await bareCard.evaluate(el => el.getBoundingClientRect().height);
+      expect(height).toBeLessThanOrEqual(160);
     } finally {
       for (const n of [rich, bare]) {
         await request
@@ -622,10 +762,16 @@ test.describe('Agents gallery', () => {
       const target = card(page, name);
       await expect(target).toHaveClass(/is-permanent/);
       await expect(target.locator('.agent-card__badge')).toHaveText('Built-in');
-      // Their real source data still shows: CLI role and the actual model.
-      await expect(target.locator('.agent-card__class')).toContainText('Cli Agent');
-      await expect(target.locator('.agent-card__model')).not.toBeEmpty();
-      await expect(target.locator('.agent-card__toolbox-value')).toContainText('File Operations');
+      // Their real source data still shows: the CLI role on the card, and the
+      // model and capabilities on the open control's accessible name, which is
+      // where the card's removed facts now live (FR-2/FR-10).
+      await expect(target.locator('.agent-card__ident .agent-card__class')).toContainText(
+        'Cli Agent'
+      );
+      // Built-ins have no progression record, so no level is invented for them.
+      await expect(target.locator('.agent-card__ident .agent-card__class')).not.toContainText('Lv');
+      const spoken = await target.locator('.roster-card__open').getAttribute('aria-label');
+      expect(spoken).toContain('built-in');
 
       const avatar = target.locator('.agent-avatar');
       await expect(avatar).toHaveAttribute('data-aa-system', '1');
@@ -914,120 +1060,14 @@ test.describe('Agents single-agent editing', () => {
     await expect(page.locator('#stageName')).toHaveText(name);
   }
 
-  test('uploading an avatar from Overview updates the card and the hero together', async ({
-    page,
-    request
-  }) => {
-    const name = `PWAvUp${Date.now()}`;
-    await request.post(`${baseUrl}/api/agents`, {
-      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
-    });
-    const png = Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
-      'base64'
-    );
-
-    try {
-      await openAgent(page, name);
-      const card = page.locator(`.roster-card[data-name="${name}"]`);
-      await expect(card.locator('.agent-avatar')).toHaveClass(/agent-avatar--generated/);
-
-      await page.locator('#ov-appearance-file').setInputFiles({
-        name: 'a.png',
-        mimeType: 'image/png',
-        buffer: png
-      });
-      await expect(page.locator('#ov-appearance-status')).toHaveText('Image uploaded.');
-
-      // Both surfaces must move together; a stale projection would leave the
-      // hero on the old identity while the card updated.
-      await expect(card.locator('.agent-avatar')).toHaveClass(/agent-avatar--image/);
-      await expect(page.locator('#stageAvatar')).toHaveClass(/agent-avatar--image/);
-
-      await page.locator('#ov-appearance-upload-remove').click();
-      await expect(page.locator('#ov-appearance-status')).toHaveText('Image removed.');
-      await expect(card.locator('.agent-avatar')).toHaveClass(/agent-avatar--generated/);
-      await expect(page.locator('#stageAvatar')).toHaveClass(/agent-avatar--generated/);
-    } finally {
-      await request
-        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
-        .catch(() => undefined);
-    }
-  });
-
-  test('a stale save offers reload-latest recovery and keeps the roster usable', async ({
-    page,
-    request
-  }) => {
-    const name = `PWStale${Date.now()}`;
-    await request.post(`${baseUrl}/api/agents`, {
-      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
-    });
-
-    try {
-      await openAgent(page, name);
-      // Force the version-conflict response the server returns when the agent
-      // changed underneath the open form.
-      await page.route(`**/api/agents/${encodeURIComponent(name)}`, route => {
-        if (route.request().method() !== 'PATCH') return route.continue();
-        return route.fulfill({
-          status: 409,
-          contentType: 'application/json',
-          body: JSON.stringify({ error: 'stale_agent_edit', current_version: 'abc123' })
-        });
-      });
-
-      await page.locator('#ov-description').fill('Edited against a stale version.');
-      await page.locator('#savebar-overview [data-role="save"]').click();
-
-      const banner = page.locator('#panel-overview .conflict-banner');
-      await expect(banner).toBeVisible();
-      await expect(banner).toContainText('changed elsewhere');
-      await expect(banner.locator('.conflict-banner__action')).toHaveText('Reload latest');
-      // The collection stays usable while the conflict is unresolved (FR101).
-      await expect(page.locator('.roster-card').first()).toBeVisible();
-    } finally {
-      await request
-        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
-        .catch(() => undefined);
-    }
-  });
-
-  test('an unsaved edit guards a focus change and cancelling leaves it intact', async ({
-    page,
-    request
-  }) => {
-    const prefix = `PWGuard${Date.now()}`;
-    const a = `${prefix} Alpha`;
-    const b = `${prefix} Bravo`;
-    for (const n of [a, b]) {
-      await request.post(`${baseUrl}/api/agents`, {
-        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
-      });
-    }
-
-    try {
-      await openAgent(page, a);
-      await page.locator('#ov-description').fill('Half-written thought.');
-
-      // Decline the guard: focus must stay put and the edit must survive.
-      page.once('dialog', d => d.dismiss());
-      await page.locator(`.roster-card[data-name="${b}"] .roster-card__open`).click();
-      await expect(page.locator('#stageName')).toHaveText(a);
-      await expect(page.locator('#ov-description')).toHaveValue('Half-written thought.');
-
-      // Accept it: focus moves and the edit is abandoned.
-      page.once('dialog', d => d.accept());
-      await page.locator(`.roster-card[data-name="${b}"] .roster-card__open`).click();
-      await expect(page.locator('#stageName')).toHaveText(b);
-    } finally {
-      for (const n of [a, b]) {
-        await request
-          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
-          .catch(() => undefined);
-      }
-    }
-  });
+  // The avatar-upload, stale-save and unsaved-guard tests that stood here
+  // exercised the Inspector's Overview editor. That editor is gone: the
+  // standalone detail page is the editor of record, and it keeps its own
+  // appearance editor (#profileAppearanceHost) and its own version-checked
+  // save, so no capability went with them. What replaces them here is the
+  // read-only contract — see "the Inspector saves no agent field, on any tab"
+  // and "switching cards and tabs never raises an unsaved-changes prompt"
+  // above.
 
   test('the New Agent panel creates an agent and focuses the new definition', async ({
     page,
@@ -1109,57 +1149,46 @@ test.describe('Agents single-agent editing', () => {
     }
   });
 
-  test('a failed workspace save preserves the checkbox selection and reports the error', async ({
+  test('the Workspaces tab reads membership and links each workspace out', async ({
     page,
     request
   }) => {
-    const prefix = `PWWsFail${Date.now()}`;
+    const prefix = `PWWsRead${Date.now()}`;
     const name = `${prefix} Agent`;
-    const wsName = `${prefix} Target`;
     await request.post(`${baseUrl}/api/agents`, {
       data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
     });
     let wsId = '';
-    const ws = await request.post(`${baseUrl}/api/workspaces`, { data: { name: wsName } });
+    let slug = '';
+    const ws = await request.post(`${baseUrl}/api/workspaces`, {
+      data: { name: `${prefix} Target`, entry_agent_name: name }
+    });
     if (ws.ok()) {
       const j = await ws.json();
       wsId = j?.folder?.id || j?.id || '';
+      slug = j?.folder?.folder_slug || j?.folder_slug || '';
     }
     expect(wsId).toBeTruthy();
 
     try {
-      await page.addInitScript(() => window.localStorage.setItem('ori-theme', 'dark'));
-      await page.route('**/api/onboarding/status', route =>
-        route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({ needs_onboarding: false, completed: true })
-        })
-      );
-      await page.route(`**/api/agents/${encodeURIComponent(name)}/workspaces`, route =>
-        route.fulfill({
-          status: 500,
-          contentType: 'application/json',
-          body: JSON.stringify({ message: 'Simulated workspace save failure.' })
-        })
-      );
-
       await page.goto(`${baseUrl}/agents?agent=${encodeURIComponent(name)}&tab=workspaces`, {
         waitUntil: 'domcontentloaded'
       });
       await expect(page.locator('#stageName')).toHaveText(name);
-      await expect(page.locator('#panel-workspaces')).toBeVisible();
+      const panel = page.locator('#panel-workspaces');
+      await expect(panel).toBeVisible();
 
-      const box = page.locator(`input[data-ws-id="${wsId}"]`);
-      await box.check();
-      await page.locator('#savebar-workspaces [data-role="save"]').click();
+      // Membership is stated, and the workspace is a link to its own surface
+      // (FR-40) — not a checkbox that saves from here (FR-44).
+      await expect(panel.locator('.ws-row')).toHaveCount(1);
+      await expect(panel).toContainText(`${prefix} Target`);
+      await expect(panel.locator('input[type="checkbox"]')).toHaveCount(0);
+      if (slug) {
+        await expect(panel.locator(`a[href="/workspaces/${slug}"]`)).toBeVisible();
+      }
 
-      // The failure is reported, and the user's checked box is not reverted or
-      // silently discarded (PRD FR100/FR101).
-      await expect(page.locator('#panel-workspaces .save-status')).toContainText(
-        'Simulated workspace save failure.'
-      );
-      await expect(box).toBeChecked();
+      // Changing membership is offered, on the page that can actually do it.
+      await expect(panel.locator('a[href*="tab=workspaces"]')).toBeVisible();
     } finally {
       if (wsId)
         await request
@@ -1453,14 +1482,21 @@ test.describe('Agents inspector', () => {
     await open(page, '?agent=Claude%20Code');
     await expect(page.locator('#stageName')).toHaveText('Claude Code');
 
-    // No delete affordance and no editable Overview form for a built-in (FR18).
+    // No delete affordance for a built-in (FR18). The Inspector is read-only
+    // for every agent now, so the interesting part is what a built-in gets
+    // INSTEAD of the "edit on the full page" link every other agent gets.
     await expect(page.locator('#stageDelete')).toBeHidden();
-    await expect(page.locator('#ov-description')).toHaveCount(0);
-    await expect(page.locator('#savebar-overview')).toHaveCount(0);
+    await expect(page.locator('#overviewDesc')).toContainText('built-in agent');
+    await expect(page.locator('#overviewDesc a')).toHaveCount(0);
 
     // Prompt states its read-only reality instead of offering an editor.
     await page.locator('#tab-prompt').click();
-    await expect(page.locator('#pr-prompt')).toHaveCount(0);
+    await expect(page.locator('#panel-prompt textarea')).toHaveCount(0);
+
+    // Membership says why it cannot change rather than linking somewhere that
+    // would refuse the edit.
+    await page.locator('#tab-workspaces').click();
+    await expect(page.locator('#panel-workspaces')).toContainText('cannot be attached');
 
     // The other tabs still report their real data.
     await page.locator('#tab-toolbox').click();
@@ -1574,36 +1610,30 @@ test.describe('Agents collection controls', () => {
     }
   });
 
-  test('an unsaved Overview edit survives a Gallery/List view switch (FR64)', async ({
+  test('a view switch leaves the Inspector reading the same agent (FR64)', async ({
     page,
     request
   }) => {
     const name = `PWViewGuard${Date.now()}`;
     await request.post(`${baseUrl}/api/agents`, {
-      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+      data: { name, type: 'tool-calling', model: 'gpt-4o-mini', description: 'Kept across views.' }
     });
 
     try {
-      await openAgents(page, `?agent=${encodeURIComponent(name)}`);
+      await openAgents(page, `?agent=${encodeURIComponent(name)}&tab=prompt`);
       await expect(page.locator('#stageName')).toHaveText(name);
-      await page.locator('#ov-description').fill('Not yet saved.');
+      await expect(page.locator('#tab-prompt')).toHaveAttribute('aria-selected', 'true');
 
-      // The view switch renders only the collection grid; it must not touch
-      // the Inspector's form or silently discard the edit.
+      // The view switch renders only the collection grid; it must not disturb
+      // the Inspector's agent or its open tab. This used to be phrased as "an
+      // unsaved edit survives the switch"; with nothing editable, what has to
+      // survive is the reading position.
       await page.locator('#viewList').click();
-      await expect(page.locator('#ov-description')).toHaveValue('Not yet saved.');
+      await expect(page.locator('#stageName')).toHaveText(name);
+      await expect(page.locator('#tab-prompt')).toHaveAttribute('aria-selected', 'true');
       await page.locator('#viewGallery').click();
-      await expect(page.locator('#ov-description')).toHaveValue('Not yet saved.');
-
-      const save = page.locator('#savebar-overview [data-role="save"]');
-      await expect(save).toBeEnabled();
-      await save.click();
-      await expect
-        .poll(async () => {
-          const r = await request.get(`${baseUrl}/api/agents/${encodeURIComponent(name)}/detail`);
-          return (await r.json()).metadata?.description;
-        })
-        .toBe('Not yet saved.');
+      await expect(page.locator('#stageName')).toHaveText(name);
+      await expect(page.locator('#tab-prompt')).toHaveAttribute('aria-selected', 'true');
     } finally {
       await request
         .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
@@ -1678,12 +1708,339 @@ test.describe('Agents collection controls', () => {
     // Setting the same thing through the select lights the chip (one model).
     await chip('all').click();
     await expect(page.locator('#filterSource')).toHaveValue('');
+    await openFilters(page);
     await page.locator('#filterSource').selectOption('cli');
+    await closeFilters(page);
     await expect(chip('builtin')).toHaveAttribute('aria-pressed', 'true');
 
     await chip('all').click();
     await expect(chip('all')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.locator('.roster-card').first()).toBeVisible();
+  });
+
+  test('right-click opens a card menu that survives the opening gesture', async ({ page }) => {
+    await openAgents(page);
+    const card = page.locator('.roster-card').first();
+    await card.click({ button: 'right' });
+
+    const menu = page.locator('[data-roster-menu]');
+    // The known failure is that the opening right-click reaches the menu's own
+    // dismissal listeners while still propagating, closing it in the same
+    // gesture (FR-36). A menu that is visible a moment later is the proof.
+    await expect(menu).toBeVisible();
+    await page.waitForTimeout(150);
+    await expect(menu).toBeVisible();
+
+    await expect(menu.locator('[data-menu-action]')).toHaveCount(6);
+    await expect(menu.locator('[data-menu-action="open"]')).toBeFocused();
+  });
+
+  test('the card menu is fully operable by keyboard and skips disabled items', async ({ page }) => {
+    await openAgents(page);
+    // A built-in: Set role and Delete are present but disabled (FR-35).
+    const builtIn = page.locator('.roster-card[data-name="Claude Code"]');
+    await builtIn.click({ button: 'right' });
+    const menu = page.locator('[data-roster-menu]');
+    await expect(menu).toBeVisible();
+
+    await expect(menu.locator('[data-menu-action="delete"]')).toHaveAttribute(
+      'aria-disabled',
+      'true'
+    );
+    await expect(menu.locator('[data-menu-action="set-role"]')).toHaveAttribute(
+      'aria-disabled',
+      'true'
+    );
+
+    // Arrow navigation steps over the disabled items rather than landing on
+    // them, and wraps at both ends (FR-34).
+    await expect(menu.locator('[data-menu-action="open"]')).toBeFocused();
+    await page.keyboard.press('End');
+    await expect(menu.locator('[data-menu-action="assign"]')).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    await expect(menu.locator('[data-menu-action="favorite"]')).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(menu.locator('[data-menu-action="assign"]')).toBeFocused();
+
+    // Escape closes and hands focus back to the card it was opened from.
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await expect(builtIn.locator('.roster-card__open')).toBeFocused();
+  });
+
+  test('a built-in cannot be deleted from the card menu', async ({ page }) => {
+    await openAgents(page);
+    await page.locator('.roster-card[data-name="Codex"]').click({ button: 'right' });
+    const menu = page.locator('[data-roster-menu]');
+    await expect(menu).toBeVisible();
+
+    // Clicking a disabled item does nothing at all: no delete flow, and the
+    // menu is not dismissed as though something had been chosen.
+    await menu.locator('[data-menu-action="delete"]').click({ force: true });
+    await expect(page.locator('#bulkDeleteDialog')).toBeHidden();
+    await expect(menu).toBeVisible();
+  });
+
+  test('the card menu favorites one agent in two clicks', async ({ page, request }) => {
+    const name = `PWMenuFav${Date.now()}`;
+    await request.post(`${baseUrl}/api/agents`, {
+      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+    });
+    try {
+      await openAgents(page);
+      await page.locator('#rosterSearch').fill(name);
+      const card = page.locator(`.roster-card[data-name="${name}"]`);
+      await expect(card).toBeVisible();
+      await expect(card.locator('.agent-card__fav')).toHaveCount(0);
+
+      await card.click({ button: 'right' });
+      await page.locator('[data-menu-action="favorite"]').click();
+
+      // Right-click, Favorite. No checkbox, no walk to the bulk bar.
+      await expect(card.locator('.agent-card__fav')).toBeVisible();
+    } finally {
+      await request
+        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
+        .catch(() => undefined);
+    }
+  });
+
+  test('the toolbar is four controls and the rest live behind Filters', async ({ page }) => {
+    await openAgents(page);
+
+    // Exactly four things on the always-visible row (FR-12).
+    const toolbar = page.locator('.collection-toolbar');
+    await expect(toolbar.locator('> *')).toHaveCount(4);
+    await expect(toolbar.locator('.collection-search')).toBeVisible();
+    await expect(toolbar.locator('.quick-filters')).toBeVisible();
+    await expect(toolbar.locator('.view-cluster')).toBeVisible();
+    await expect(toolbar.locator('#filtersButton')).toBeVisible();
+
+    // Needs attention is gone as a chip; it is the health tile (FR-19).
+    await expect(page.locator('[data-quick="attention"]')).toHaveCount(0);
+    await expect(page.locator('[data-quick="favorite"]')).toBeVisible();
+    await expect(page.locator('[data-quick="builtin"]')).toBeVisible();
+
+    // Sort is a view preference and rides with the view toggle (FR-17).
+    await expect(page.locator('.view-cluster #rosterSort')).toBeAttached();
+
+    // The header no longer explains itself in prose (FR-20).
+    await expect(page.locator('.collection-head__copy')).not.toContainText('Open a card');
+  });
+
+  test('the Filters badge counts active filters and is absent at zero', async ({ page }) => {
+    await openAgents(page);
+    const badge = page.locator('#filtersBadge');
+    const button = page.locator('#filtersButton');
+
+    // Absent, not a zero (FR-13).
+    await expect(badge).toBeHidden();
+
+    await openFilters(page);
+    await page.locator('#filterSource').selectOption('cli');
+    await expect(badge).toHaveText('1');
+    await page.locator('#filterAssignment').selectOption('library');
+    await expect(badge).toHaveText('2');
+    await expect(button).toHaveAttribute('aria-label', 'Filters, 2 active');
+
+    // Sort is not a filter and must not count (FR-17).
+    await closeFilters(page);
+    await page.locator('#rosterSort').selectOption('name-desc');
+    await expect(badge).toHaveText('2');
+
+    // Favorite is a quick chip with its own pressed state, so it is not
+    // double-reported as a hidden filter.
+    await page.locator('[data-quick="favorite"]').click();
+    await expect(badge).toHaveText('2');
+
+    await openFilters(page);
+    await page.locator('#clearFilters').click();
+    await expect(badge).toBeHidden();
+  });
+
+  test('the Filters panel traps focus, closes on Escape, and returns focus', async ({ page }) => {
+    await openAgents(page);
+    const button = page.locator('#filtersButton');
+    const panel = page.locator('#filtersPanel');
+
+    await expect(button).toHaveAttribute('aria-expanded', 'false');
+    await button.click();
+    await expect(panel).toBeVisible();
+    await expect(button).toHaveAttribute('aria-expanded', 'true');
+
+    // showModal() puts focus inside the panel rather than leaving it behind on
+    // the page, which is what makes the trap real (FR-15).
+    expect(await panel.evaluate(d => d.contains(document.activeElement))).toBe(true);
+
+    await page.keyboard.press('Escape');
+    await expect(panel).toBeHidden();
+    await expect(button).toHaveAttribute('aria-expanded', 'false');
+    await expect(button).toBeFocused();
+
+    // A click on the backdrop dismisses it the same way, and lands on the same
+    // teardown path rather than leaving aria-expanded stale.
+    await button.click();
+    await expect(panel).toBeVisible();
+    await panel.evaluate((d: HTMLDialogElement) => {
+      const r = d.getBoundingClientRect();
+      d.dispatchEvent(
+        new MouseEvent('click', { bubbles: true, clientX: r.left - 40, clientY: r.top - 40 })
+      );
+    });
+    await expect(panel).toBeHidden();
+    await expect(button).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  test('grouping by workspace duplicates a multi-workspace agent and trails a Library section', async ({
+    page,
+    request
+  }) => {
+    const stamp = Date.now();
+    const shared = `PWGrp Shared ${stamp}`;
+    const loose = `PWGrp Loose ${stamp}`;
+    for (const n of [shared, loose]) {
+      await request.post(`${baseUrl}/api/agents`, {
+        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+      });
+    }
+    const wsIds: string[] = [];
+    for (const suffix of ['Alpha', 'Beta']) {
+      const r = await request.post(`${baseUrl}/api/workspaces`, {
+        data: { name: `PWGrp ${suffix} ${stamp}`, entry_agent_name: shared }
+      });
+      if (r.ok()) {
+        const j = await r.json();
+        wsIds.push(j?.folder?.id || j?.id || '');
+      }
+    }
+    expect(wsIds.filter(Boolean)).toHaveLength(2);
+
+    try {
+      await openAgents(page, '?group=workspace');
+      await expect(page.locator('.roster-section').first()).toBeVisible();
+
+      // One card per membership: a list may repeat an agent, and this is the
+      // deliberate difference from the Map, which draws it exactly once
+      // (FR-27).
+      const sharedCards = page.locator(`.roster-card[data-name="${shared}"]`);
+      await expect(sharedCards).toHaveCount(2);
+
+      // An agent in no workspace is in the library, not missing (FR-28), and
+      // that section sorts last however its name compares.
+      const sectionNames = await page
+        .locator('.roster-section__name')
+        .evaluateAll(els => els.map(e => e.textContent));
+      expect(sectionNames.at(-1)).toBe('Library');
+      const library = page.locator('.roster-section').last();
+      await expect(library.locator(`.roster-card[data-name="${loose}"]`)).toHaveCount(1);
+
+      // Checking one copy checks every copy, because selection is keyed by
+      // agent name (FR-31).
+      await sharedCards.first().locator('.roster-card__check').check();
+      await expect(page.locator(`.roster-card[data-name="${shared}"].is-checked`)).toHaveCount(2);
+      await expect(page.locator('#bulkCount')).toHaveText('1 selected');
+
+      // The grouping choice rides in the URL and comes back on reload (FR-32).
+      await expect.poll(() => new URL(page.url()).searchParams.get('group')).toBe('workspace');
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await expect(page.locator('#rosterGroup')).toHaveValue('workspace');
+      await expect(page.locator(`.roster-card[data-name="${shared}"]`)).toHaveCount(2);
+    } finally {
+      for (const id of wsIds.filter(Boolean)) {
+        await request
+          .delete(`${baseUrl}/api/workspaces/${encodeURIComponent(id)}`)
+          .catch(() => undefined);
+      }
+      for (const n of [shared, loose]) {
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
+      }
+    }
+  });
+
+  test('sections collapse, persist, and keep selection working across a boundary', async ({
+    page
+  }) => {
+    await openAgents(page, '?group=role');
+    const sections = page.locator('.roster-section');
+    await expect(sections.first()).toBeVisible();
+    const sectionCount = await sections.count();
+    expect(sectionCount).toBeGreaterThan(1);
+
+    // Shift-range across the first section's boundary into the second. Render
+    // order, not filtered order, is what the indices address (FR-30).
+    const cards = page.locator('.roster-card');
+    const firstSectionSize = await sections.first().locator('.roster-card').count();
+    const from = 0;
+    const to = firstSectionSize; // the first card of the second section
+    await cards.nth(from).locator('.roster-card__check').check();
+    await cards
+      .nth(to)
+      .locator('.roster-card__check')
+      .click({ modifiers: ['Shift'] });
+
+    const spanned = await cards
+      .evaluateAll((els, n) => els.slice(0, n + 1).map(e => (e as HTMLElement).dataset.name), to)
+      .then(names => new Set(names).size);
+    await expect(page.locator('#bulkCount')).toHaveText(`${spanned} selected`);
+    await page.locator('#rosterClearSelection').click();
+
+    // Collapsing renders the header and nothing else, so Select visible cannot
+    // reach agents nobody can see.
+    const head = sections.first().locator('.roster-section__head');
+    await expect(head).toHaveAttribute('aria-expanded', 'true');
+    await head.click();
+    await expect(sections.first().locator('.roster-section__head')).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    );
+    await expect(sections.first().locator('.roster-card')).toHaveCount(0);
+    // Focus lands on the header that replaced the one just pressed, rather than
+    // being dropped on the document by the re-render.
+    await expect(sections.first().locator('.roster-section__head')).toBeFocused();
+
+    const visibleAfter = await page
+      .locator('.roster-card')
+      .evaluateAll(els => new Set(els.map(e => (e as HTMLElement).dataset.name)).size);
+    await page.locator('#rosterSelectAll').click();
+    await expect(page.locator('#bulkCount')).toHaveText(`${visibleAfter} selected`);
+    await page.locator('#rosterClearSelection').click();
+
+    // Collapsed state is per viewer and survives a reload (FR-26).
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(
+      page.locator('.roster-section').first().locator('.roster-section__head')
+    ).toHaveAttribute('aria-expanded', 'false');
+
+    // Put it back so the persisted state does not leak into the next test.
+    await page.locator('.roster-section').first().locator('.roster-section__head').click();
+    await expect(
+      page.locator('.roster-section').first().locator('.roster-section__head')
+    ).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  test('grouping is presentation over the filtered result, not a second filter', async ({
+    page
+  }) => {
+    await openAgents(page, '?group=role&source=cli');
+
+    // Only the built-ins survive the filter, and grouping partitions exactly
+    // those — it never re-admits an agent the filters removed (FR-29).
+    const names = await page
+      .locator('.roster-card')
+      .evaluateAll(els => els.map(e => (e as HTMLElement).dataset.name));
+    for (const n of names) {
+      expect(['Claude Code', 'Codex', 'Gemini CLI']).toContain(n);
+    }
+    await expect(page.locator('.roster-section')).toHaveCount(1);
+
+    // Switching back to No grouping restores one flat grid and drops the
+    // parameter rather than carrying group=none around.
+    await page.locator('#rosterGroup').selectOption('none');
+    await expect(page.locator('.roster-section')).toHaveCount(0);
+    await expect(page.locator('#rosterList .agent-grid')).toHaveCount(1);
+    await expect.poll(() => new URL(page.url()).searchParams.get('group')).toBe(null);
   });
 
   test('the workspace picker filters by real membership and survives a reload', async ({
@@ -1714,7 +2071,9 @@ test.describe('Agents collection controls', () => {
       // The picker offers the real workspace by name.
       await expect(page.locator(`#filterWorkspace option[value="${wsId}"]`)).toHaveText(wsName);
 
+      await openFilters(page);
       await page.locator('#filterWorkspace').selectOption(wsId);
+      await closeFilters(page);
       const shown = await names(page);
       expect(shown).toContain(inside);
       expect(shown).not.toContain(outside);

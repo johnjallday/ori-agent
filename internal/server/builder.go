@@ -9,6 +9,8 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/actioncenterhttp"
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
+	"github.com/johnjallday/ori-agent/internal/agentmap"
+	"github.com/johnjallday/ori-agent/internal/agentmaphttp"
 	"github.com/johnjallday/ori-agent/internal/calendarhttp"
 	"github.com/johnjallday/ori-agent/internal/characterhttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
@@ -48,6 +50,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
+	"github.com/johnjallday/ori-agent/internal/pathselection"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/personalassistanthttp"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
@@ -61,11 +64,15 @@ import (
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
 	"github.com/johnjallday/ori-agent/internal/runtimecapability"
 	"github.com/johnjallday/ori-agent/internal/runtimecapabilityhttp"
+	"github.com/johnjallday/ori-agent/internal/samplelibrary"
+	"github.com/johnjallday/ori-agent/internal/samplelibraryhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/sessionfiles"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
 	"github.com/johnjallday/ori-agent/internal/settingsreset"
+	"github.com/johnjallday/ori-agent/internal/setupjourney"
+	"github.com/johnjallday/ori-agent/internal/setupjourneyhttp"
 	"github.com/johnjallday/ori-agent/internal/setupwizard"
 	"github.com/johnjallday/ori-agent/internal/setupwizardhttp"
 	"github.com/johnjallday/ori-agent/internal/skills"
@@ -163,6 +170,7 @@ type ServerBuilder struct {
 	workspaceStore        workspace.Store
 	workspaceFileStore    *workspace.FileStore
 	workspaceAllowlist    *workspace.Allowlist
+	pathSelectionStore    *pathselection.Store
 	runtimeResolver       *workspace.AgentRuntimeResolver
 	taskHandler           *workspace.LLMTaskHandler
 	// emailReadiness evaluates the deterministic mailbox-connection state. It is
@@ -316,6 +324,11 @@ type ServerBuilder struct {
 	personalAssistantMemory  *personalassistant.MemoryService
 	personalAssignment       *personalassistant.AssignmentService
 	personalAssistantHandler *personalassistanthttp.Handler
+	setupJourneyStore        *setupjourney.SQLiteStore
+	setupJourneyService      *setupjourney.Service
+	setupJourneyHandler      *setupjourneyhttp.Handler
+	sampleLibraryService     *samplelibrary.Service
+	sampleLibraryHandler     *samplelibraryhttp.Handler
 
 	// Personal HQ designation and onboarding state
 	personalHQService *personalhq.Service
@@ -398,6 +411,13 @@ type ServerBuilder struct {
 	workspaceMapStore   *workspacemap.SQLiteStore
 	workspaceMapService *workspacemap.Service
 	workspaceMapHandler *workspacemaphttp.Handler
+
+	// Coordinate-based Agent Map: the same shape as the Workspace Map above, for
+	// the roster's spatial view. It draws no districts, so it needs no
+	// descendant resolver and no group tables (agents-page-ux FR-61).
+	agentMapStore   *agentmap.SQLiteStore
+	agentMapService *agentmap.Service
+	agentMapHandler *agentmaphttp.Handler
 }
 
 // NewServerBuilder creates a new ServerBuilder instance with an empty Server.
@@ -561,6 +581,12 @@ func (b *ServerBuilder) createDomainFacades() {
 		b.personalAssistantMemory,
 		b.personalHQService,
 	)
+	// Assigned after the constructor because this phase REPLACES the facade
+	// object, and the agent map is built two phases earlier. Setting the field
+	// on the old facade in wireAgentMap looked correct and was silently
+	// discarded here — the agent handler then read a nil store and a rename
+	// dropped the agent's saved tile.
+	b.server.Storage.AgentMapPositions = b.agentMapStore
 
 	// Workflow System Facade
 	b.server.Workflow = NewWorkflowSystemFacade(
@@ -631,6 +657,8 @@ func (b *ServerBuilder) createDomainFacades() {
 		Skills:                b.skillsHandler,
 		User:                  b.userHandler,
 		PersonalAssistant:     b.personalAssistantHandler,
+		SetupJourney:          b.setupJourneyHandler,
+		SampleLibrary:         b.sampleLibraryHandler,
 		PersonalHQ:            b.personalHQHandler,
 		DailyBrief:            b.dailyBriefHandler,
 		Characters:            b.characterHandler,
@@ -639,6 +667,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		WorkspaceCapabilities: b.workspaceCapabilityHandler,
 		WorkspaceSurfaces:     b.workspaceSurfaceHandler,
 		WorkspaceMap:          b.workspaceMapHandler,
+		AgentMap:              b.agentMapHandler,
 		SetupWizard:           b.setupWizardHandler,
 		RuntimeCapabilities:   b.runtimeCapabilityHandler,
 		CLIAgents:             b.cliAgentHandler,

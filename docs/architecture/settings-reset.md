@@ -179,6 +179,14 @@ migration inventory includes:
 - `workspace_plans`, versions, clarifications, approvals, task/run links,
   activity, draft snapshots, execution slots/queue/generations, reconciliations
   (all `workspace_plan_*` tables).
+- Specialist setup journey runs and bounded operation, declaration-migration,
+  and review receipts (all `setup_journey_*` tables).
+- Sample Library state, source registrations, catalog facts, curation and copy
+  provenance, plus bounded review/operation receipts (all `sample_library_*`
+  tables). The source and copied files remain workspace-owned backing bytes and
+  are not database reset targets.
+- Agent Map layout and position records (`agent_map_layouts`,
+  `agent_map_positions`).
 - `vaults` catalog. Older schemas additionally contain `vault_records`,
   `vault_record_attachments`, `vault_folders`, `vault_grants`,
   `vault_audit_events`, and crypto material in the old vault row.
@@ -505,7 +513,7 @@ and inspection has a five-second context.
   actual locations and confinement blockers, not substituted default paths.
 - Database inspection uses a read transaction on the existing connection: no
   normal constructor, migration, checkpoint, key read, vault-file open, provider
-  request or external auth discovery. All 44 classified record tables are
+  request or external auth discovery. All 60 classified record tables are
   counted; known FTS infrastructure is explicit. Unknown domains, unsupported
   schemas, legacy vault evidence and uninspectable catalog rows block. The
   v11 regression proves inspection and the new startup guard both preserve

@@ -1,6 +1,9 @@
 package runtimecapability
 
-import "github.com/johnjallday/ori-agent/internal/logger"
+import (
+	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/specialistevents"
+)
 
 const (
 	EventDurableCheckFailed = "runtime_capability.durable_check_failed"
@@ -15,6 +18,8 @@ const (
 	eventFieldAgent         = "agent_instance_id"
 	eventFieldCapability    = "capability"
 	eventFieldOutcome       = "outcome"
+	eventActionSelectMode   = "select_mode"
+	eventActionLiveVerify   = "live_verify"
 )
 
 // emitRuntimeEvent is the single structured-log exit point and is indirected
@@ -24,6 +29,8 @@ const (
 var emitRuntimeEvent = func(_ string, fields logger.Fields) {
 	logger.Info("Runtime capability event", fields)
 }
+
+var recordSpecialistEvent = specialistevents.Record
 
 func runtimeAuditEvent(name, workspaceID, agentInstanceID, capability, outcome string) {
 	fields := logger.Fields{eventFieldName: name}
@@ -49,4 +56,26 @@ func runtimeFailureEvent(name, adapter, category string) {
 		fields[eventFieldAdapter] = id
 	}
 	emitRuntimeEvent(name, fields)
+}
+
+func recordModeSelection(modeID string) {
+	recordSpecialistEvent(specialistevents.ModeSelected, specialistevents.Fields{
+		ActionID:  eventActionSelectMode,
+		ModeToken: modeID,
+		Outcome:   specialistevents.OutcomeSelected,
+	})
+}
+
+func recordLiveVerification(requirementKey string, succeeded bool, reasonCode string) {
+	outcome := specialistevents.OutcomeFailed
+	if succeeded {
+		outcome = specialistevents.OutcomeSucceeded
+		reasonCode = ""
+	}
+	recordSpecialistEvent(specialistevents.LiveVerifyOutcome, specialistevents.Fields{
+		ActionID:   eventActionLiveVerify,
+		ResourceID: requirementKey,
+		Outcome:    outcome,
+		ReasonCode: reasonCode,
+	})
 }

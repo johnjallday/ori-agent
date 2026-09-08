@@ -26,7 +26,14 @@ func ResetRecordTables() []string {
 		"workspace_plan_clarifications", "workspace_plan_approvals", "workspace_plan_task_links",
 		"workspace_plan_run_links", "workspace_plan_activity", "workspace_plan_draft_snapshots",
 		"workspace_plan_execution_slots", "workspace_plan_execution_queue",
-		"workspace_plan_execution_generations", "workspace_plan_reconciliations", "vaults",
+		"workspace_plan_execution_generations", "workspace_plan_reconciliations",
+		"setup_journey_run", "setup_journey_operation_receipt",
+		"setup_journey_declaration_migration_receipt", "setup_journey_review_receipt",
+		"sample_library_state", "sample_library_root", "sample_library_entry",
+		"sample_library_content_fact", "sample_library_annotation", "sample_library_collection",
+		"sample_library_collection_member", "sample_library_child_copy",
+		"sample_library_review_receipt", "sample_library_operation_receipt",
+		"agent_map_layouts", "agent_map_positions", "vaults",
 	}
 }
 

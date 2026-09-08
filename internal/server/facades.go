@@ -4,6 +4,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/actioncenterhttp"
 	"github.com/johnjallday/ori-agent/internal/agent"
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
+	"github.com/johnjallday/ori-agent/internal/agentmap"
+	"github.com/johnjallday/ori-agent/internal/agentmaphttp"
 	"github.com/johnjallday/ori-agent/internal/calendarhttp"
 	"github.com/johnjallday/ori-agent/internal/characterhttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
@@ -41,9 +43,11 @@ import (
 	"github.com/johnjallday/ori-agent/internal/progressionhttp"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
 	"github.com/johnjallday/ori-agent/internal/runtimecapabilityhttp"
+	"github.com/johnjallday/ori-agent/internal/samplelibraryhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
+	"github.com/johnjallday/ori-agent/internal/setupjourneyhttp"
 	"github.com/johnjallday/ori-agent/internal/setupwizardhttp"
 	"github.com/johnjallday/ori-agent/internal/skillshttp"
 	"github.com/johnjallday/ori-agent/internal/speechhttp"
@@ -91,6 +95,11 @@ type StorageSystemFacade struct {
 	// non-HTTP callers like serveIndex's first-run classification can read
 	// onboarding status directly.
 	PersonalHQ *personalhq.Service
+	// AgentMapPositions is the Agent Map's coordinate store, exposed here so
+	// the agent CRUD handler can keep a tile's position in step with a delete
+	// or a rename. It is the store rather than the service: the agent handler
+	// has no business reading a layout, only maintaining one (FR-57, FR-58).
+	AgentMapPositions *agentmap.SQLiteStore
 }
 
 // WorkflowSystemFacade manages workspace orchestration dependencies
@@ -181,6 +190,11 @@ type HandlerFacade struct {
 	// layout belongs to a user, not to a workspace, and must never be confused
 	// with a single workspace's internal Canvas (#292 FR-4, FR-104).
 	WorkspaceMap *workspacemaphttp.Handler
+	// AgentMap serves the current user's coordinate-based Agent Map layout —
+	// the roster's spatial view. Like WorkspaceMap it belongs to a user rather
+	// than to the records it arranges, and it can change none of them
+	// (agents-page-ux FR-50).
+	AgentMap *agentmaphttp.Handler
 	// SetupWizard serves the shared blueprint Setup Wizard for every
 	// wizard-enabled workspace, whichever blueprint it came from.
 	SetupWizard *setupwizardhttp.Handler
@@ -189,6 +203,8 @@ type HandlerFacade struct {
 	RuntimeCapabilities *runtimecapabilityhttp.Handler
 	User                *userhttp.Handler
 	PersonalAssistant   *personalassistanthttp.Handler
+	SetupJourney        *setupjourneyhttp.Handler
+	SampleLibrary       *samplelibraryhttp.Handler
 	PersonalHQ          *personalhqhttp.Handler
 	DailyBrief          *dailybriefhttp.Handler
 	// OriGuide serves the setup-and-navigation guide. It is deliberately a

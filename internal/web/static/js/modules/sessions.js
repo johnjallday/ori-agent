@@ -4892,13 +4892,17 @@ const sessionManager = {
     if (description) {
       description.textContent = program.existingHired
         ? `This workspace will link to the existing ${program.stationName || 'assistant'} roster.`
-        : program.hireDescription || 'Name the primary assistant and review the shared roster.';
+        : program.homeAlreadyStaffed
+          ? 'Reuse your group coordinator and review new roles for this workspace. Their access stays separate.'
+          : program.roles.some(role => role.scope)
+            ? 'Review group coordination and project roles separately. Group coordination does not grant project access.'
+            : program.hireDescription || 'Name the primary assistant and review the shared roster.';
     }
 
     const nameInput = document.getElementById('assistantProgramCreateName');
     if (nameInput) {
       if (document.activeElement !== nameInput) nameInput.value = hire.name || '';
-      nameInput.disabled = program.existingHired;
+      nameInput.disabled = program.existingHired || program.homeAlreadyStaffed;
     }
 
     const providerSelect = document.getElementById('assistantProgramCreateProvider');
@@ -5156,6 +5160,7 @@ const sessionManager = {
     this.renderWorkspaceTeamBatchActions();
     this.renderWorkspaceTeamRoster();
     this.renderBlueprintAgentSummary();
+    window.SetupWorkspaceCreator?.refreshReview();
   },
 
   // Review's receipt: what will exist, stated once, with a route back to the step
@@ -5343,6 +5348,11 @@ const sessionManager = {
     // repeating it here would say the same thing twice in two shapes.
     if (roster.length === 0) return 'No agent will be attached to this workspace.';
     if (view?.isAssistantProgram) {
+      if (view.assistantProgram.roles.some(role => role.scope)) {
+        const groupRoles = roster.filter(entry => entry.assistantScope === 'home');
+        const projectRoles = roster.filter(entry => entry.assistantScope === 'project');
+        return `${groupRoles.length} group role${groupRoles.length === 1 ? '' : 's'} and ${projectRoles.length} new project-only role${projectRoles.length === 1 ? '' : 's'}. Existing group roles stay in the group; access stays separate.`;
+      }
       const action = view.assistantProgram.existingHired
         ? 'linked to this workspace'
         : 'created and linked';
@@ -5811,7 +5821,10 @@ const sessionManager = {
         // blueprint dependency counts: the server would refuse the request, and
         // offering Create anyway turns a knowable state into a failed attempt.
         createBtn.disabled =
-          !importMode && (this.hasBlockingTeamIssue() || this.blueprintSelectionBlocked());
+          !importMode &&
+          (this.hasBlockingTeamIssue() ||
+            this.blueprintSelectionBlocked() ||
+            window.SetupWorkspaceCreator?.canSubmit() === false);
       }
     }
     if (onFinalStep) this.renderReviewReadiness();
@@ -5853,6 +5866,7 @@ const sessionManager = {
   // the button says what will exist afterwards. Falls back to a generic label
   // until the name is set.
   workspaceCreateCtaLabel() {
+    if (window.SetupWorkspaceCreator?.hasPending()) return 'Retry Confirmed Change';
     const name = String(document.getElementById('folderNameInput')?.value || '').trim();
     return name ? `Create “${name}”` : 'Create Workspace';
   },
@@ -5939,7 +5953,10 @@ const sessionManager = {
   // the top and moves focus to the new step heading — or, when a step's own
   // validation refuses the move, to the control that has to be fixed first.
   goToWizardStep(step) {
-    const targetStep = Math.max(1, Math.min(this.wizardStepCount, Number(step) || 1));
+    const targetStep = Math.max(
+      window.SetupWorkspaceCreator?.isActive() ? 2 : 1,
+      Math.min(this.wizardStepCount, Number(step) || 1)
+    );
     // Leaving Blueprint requires a blueprint that can actually produce a
     // workspace. A blueprint whose plugin is missing, disabled, or unusable
     // here would otherwise be carried silently through Details and Team, and
@@ -6133,7 +6150,9 @@ const sessionManager = {
     if (!state.available) {
       throw new Error('The shared assistant station could not be prepared.');
     }
-    if (state.hired) return state;
+    // For scoped programs this flag describes the Home, not the new project's
+    // independently reviewed roles. The owner idempotently reuses complete scopes.
+    if (state.hired && Number(state.declaration?.schema_version || 1) < 2) return state;
 
     const hireResponse = await fetch(`${base}/hire`, {
       method: 'POST',
@@ -6224,6 +6243,7 @@ const sessionManager = {
     // A fresh attempt starts without the previous attempt's failure on screen.
     this.clearWorkspaceCreateError();
     this.isCreatingFolder = true;
+    window.SetupWorkspaceCreator?.setSubmitting(true);
     if (createBtn) {
       createBtn.disabled = true;
       createBtn.textContent = importEnabled ? 'Importing...' : 'Creating...';
@@ -6336,11 +6356,13 @@ const sessionManager = {
       let result = {};
 
       while (true) {
-        response = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestPayload)
-        });
+        response = window.SetupWorkspaceCreator?.isActive()
+          ? await window.SetupWorkspaceCreator.submit(requestPayload)
+          : await fetch(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(requestPayload)
+            });
 
         try {
           result = await response.json();
@@ -6709,7 +6731,8 @@ const sessionManager = {
         }
       }
 
-      // Close modal
+      // Close only after all of the confirmed workspace/team changes finish.
+      window.SetupWorkspaceCreator?.setSubmitting(false);
       const modal = bootstrap.Modal.getInstance(modalElement);
       modal?.hide();
       this.resetAddWorkspaceModalForm();
@@ -6773,9 +6796,12 @@ const sessionManager = {
       if (!importEnabled) this.showWorkspaceCreateError(message);
     } finally {
       this.isCreatingFolder = false;
+      window.SetupWorkspaceCreator?.setSubmitting(false);
       if (createBtn) {
-        createBtn.disabled = false;
-        createBtn.textContent = originalCreateLabel || 'Create';
+        createBtn.disabled = window.SetupWorkspaceCreator?.canSubmit() === false;
+        createBtn.textContent = window.SetupWorkspaceCreator?.hasPending()
+          ? 'Retry Confirmed Change'
+          : originalCreateLabel || 'Create';
       }
     }
   },

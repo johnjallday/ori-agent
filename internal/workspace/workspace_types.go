@@ -1051,6 +1051,9 @@ type DirectoryReference struct {
 	Y           float64   `json:"y"`    // Canvas position Y
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+	// Purpose is empty for user-visible references. sample_library references are
+	// owned by the compiled capability and are never exposed as generic file roots.
+	Purpose string `json:"purpose,omitempty"`
 }
 
 // FileInfo represents information about a file in a directory

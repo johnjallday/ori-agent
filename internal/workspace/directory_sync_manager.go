@@ -264,7 +264,11 @@ func (m *DirectorySyncManager) watchWorkspace(workspaceID string, touchAccess bo
 		return result, err
 	}
 
-	result.TotalDirectories = len(ws.DirectoryReferences)
+	for _, dir := range ws.DirectoryReferences {
+		if dir.Purpose != "sample_library" {
+			result.TotalDirectories++
+		}
+	}
 	if ws.Status != "" && ws.Status != StatusActive {
 		m.unwatchWorkspace(workspaceID)
 		return result, nil
@@ -272,6 +276,9 @@ func (m *DirectorySyncManager) watchWorkspace(workspaceID string, touchAccess bo
 
 	desired := make(map[string]directoryWatchTarget)
 	for _, dir := range ws.DirectoryReferences {
+		if dir.Purpose == "sample_library" {
+			continue
+		}
 		path := strings.TrimSpace(dir.Path)
 		if path == "" {
 			result.SkippedInvalid++

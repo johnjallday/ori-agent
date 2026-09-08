@@ -35,7 +35,9 @@ Environment:
   ORI_KEEP_REAPER_SANDBOX=1      Preserve generated state after exit.
 
 The refreshed binary is written to ./reaper-plugin-darwin-arm64. The canonical
-plugin checkout and artifact remain under plugins/src/reaper-plugin.
+plugin checkout and artifact remain under plugins/src/reaper-plugin. Serve/test
+allow only their staged local copy to satisfy setup, labelled as a development
+copy rather than a release-verified integration.
 EOF
 }
 
@@ -176,7 +178,10 @@ go build -o bin/ori-agent ./cmd/server
 
 (
 	cd "$sandbox"
+	# This process-local path authorizes only the exact staged demo copy to
+	# satisfy the journey prerequisite. It does not publish or release-verify it.
 	exec env HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" \
+		ORI_REVIEWED_INTEGRATION_DEV_SOURCE="$bundled_plugin" \
 		"$repo_root/bin/ori-agent"
 ) >"$server_log" 2>&1 &
 server_pid=$!
@@ -210,6 +215,7 @@ if [[ "$mode" == "test" ]]; then
 	env PLAYWRIGHT_BASE_URL="$base_url" \
 		ORI_REAPER_PLUGIN_PATH="$bundled_plugin" \
 		ORI_REAPER_EVIDENCE_DIR="$sandbox/evidence" \
+		ORI_REAPER_EXPECT_DEVELOPMENT_COPY=1 \
 		npx playwright test \
 		tests/reaper-plugin-surface.spec.ts \
 		tests/reaper-project-tidy.spec.ts \

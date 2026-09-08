@@ -107,15 +107,23 @@ type Entry struct {
 	// domain wants them. Keys the projection does not know are ignored; keys it
 	// knows but this list omits keep their default relative order at the end.
 	CapabilityOrder []string `json:"capability_order"`
+
+	// SetupJourney is an optional inert, versioned setup declaration. Its step
+	// kinds select only host-owned adapters; entries without one retain their
+	// existing suggestion behavior.
+	SetupJourney *SetupJourney `json:"setup_journey,omitempty"`
 }
 
 // The mapping's entries live in domains.go, which is data only. Nothing in
 // this file names an application.
+var registry = mustNormalizeRegistry(registryEntries)
 
-// All returns a copy of the built-in mapping.
+// All returns a deep copy of the built-in mapping.
 func All() []Entry {
 	out := make([]Entry, len(registry))
-	copy(out, registry)
+	for index := range registry {
+		out[index] = cloneEntry(registry[index])
+	}
 	return out
 }
 
@@ -128,7 +136,7 @@ func Get(slug string) (Entry, bool) {
 	}
 	for _, entry := range registry {
 		if entry.Slug == slug {
-			return entry, true
+			return cloneEntry(entry), true
 		}
 	}
 	return Entry{}, false
@@ -179,7 +187,7 @@ func Match(apps []App) (Entry, bool) {
 		}
 		return left.app.Name < right.app.Name
 	})
-	return matches[0].entry, true
+	return cloneEntry(matches[0].entry), true
 }
 
 func entryMatches(entry Entry, tokens []string) bool {
@@ -254,4 +262,18 @@ func (e Entry) MatchesTemplate(templateID string) bool {
 		return true
 	}
 	return strings.HasSuffix(templateID, ":"+suggested)
+}
+
+func cloneEntry(source Entry) Entry {
+	clone := source
+	clone.AppPatterns = make([][]string, len(source.AppPatterns))
+	for index := range source.AppPatterns {
+		clone.AppPatterns[index] = append([]string(nil), source.AppPatterns[index]...)
+	}
+	clone.FocusAreas = append([]FocusOption(nil), source.FocusAreas...)
+	clone.AssignmentLabels = append([]AssignmentLabel(nil), source.AssignmentLabels...)
+	clone.AssignmentSteps = append([]AssignmentStep(nil), source.AssignmentSteps...)
+	clone.CapabilityOrder = append([]string(nil), source.CapabilityOrder...)
+	clone.SetupJourney = cloneSetupJourney(source.SetupJourney)
+	return clone
 }

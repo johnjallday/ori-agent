@@ -2,6 +2,7 @@ package personalassistant
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,19 +12,53 @@ import (
 
 func newStudioWorkspace(t *testing.T, store *workspace.InMemoryStore, templateID string, now time.Time) *workspace.Workspace {
 	t.Helper()
+	blueprintID := templateID
+	if strings.HasSuffix(templateID, ":reaper-song") {
+		blueprintID = "reaper-song"
+	}
+	declaration := &workspace.AssistantProgramDeclaration{
+		SchemaVersion: workspace.AssistantProgramSchemaVersion, ID: "music-producer-assistant",
+		Roles: []workspace.AssistantProgramRoleSpec{{
+			ID: "producer", Label: "Producer", Scope: workspace.AssistantRoleScopeProject, Primary: true,
+		}},
+	}
+	key := workspace.AssistantProgramKey{OwnerUserID: "local", PluginID: "reaper-plugin", ProgramID: declaration.ID}.Normalize()
+	home := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Music Home"})
+	home.ID, home.FolderSlug, home.OwnerUserID, home.Kind = "music-home", "music-home", "local", "group"
+	home.SetAssistantProgramState(&workspace.AssistantProgramState{
+		SchemaVersion: workspace.AssistantProgramStateSchemaVersion, Key: key,
+		Declaration: declaration, LinkedProjectIDs: []string{"studio-1"},
+	})
+	if err := store.Save(home); err != nil {
+		t.Fatal(err)
+	}
+
 	studio := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Ivory"})
 	studio.ID, studio.FolderSlug, studio.OwnerUserID = "studio-1", "ivory", "local"
-	studio.SetTemplateProvenance(&workspace.TemplateProvenance{TemplateID: templateID})
+	studio.SetTemplateProvenance(&workspace.TemplateProvenance{
+		TemplateID: templateID,
+		PluginOwner: &workspace.PluginTemplateOwner{
+			PluginID: "reaper-plugin", PluginVersion: "0.5.0", BlueprintID: blueprintID, BlueprintVersion: 1,
+		},
+		AssistantProgram: declaration,
+	})
+	studio.SetAssistantProjectLink(&workspace.AssistantProjectLink{
+		ID: workspace.AssistantProjectLinkID(home.ID, studio.ID), SchemaVersion: workspace.AssistantProjectLinkSchemaVersion,
+		StationWorkspaceID: home.ID, Key: key, DeclarationVersion: 1, LinkedAt: now, StateRevision: 1,
+		ProjectBindings: workspace.AssistantRoleBindingSet{StateRevision: 1, Bindings: []workspace.AssistantRoleBinding{{
+			RoleID: "producer", AgentInstanceID: "producer-1", AgentName: "Ivory Producer",
+		}}},
+	})
 	completed := now.Add(-2 * time.Hour)
 	older := now.Add(-6 * time.Hour)
 	studio.Tasks = []workspace.Task{
 		{
-			ID: "studio-result-1", WorkspaceID: studio.ID, To: "Reaper Producer",
+			ID: "studio-result-1", WorkspaceID: studio.ID, To: "Ivory Producer",
 			Description: "Bounce a rough mix of Ivory", TicketState: workspace.TicketStateReview,
 			Result: "rough mix rendered", CompletedAt: &completed, CreatedAt: older,
 		},
 		{
-			ID: "studio-result-2", WorkspaceID: studio.ID, To: "Reaper Producer",
+			ID: "studio-result-2", WorkspaceID: studio.ID, To: "Ivory Producer",
 			Description: "Tag the session takes", TicketState: workspace.TicketStateReview,
 			Result: "takes tagged", CompletedAt: &older, CreatedAt: older,
 		},
@@ -36,7 +71,7 @@ func newStudioWorkspace(t *testing.T, store *workspace.InMemoryStore, templateID
 		},
 		{
 			// Not finished, so not a result.
-			ID: "studio-open", WorkspaceID: studio.ID, To: "Reaper Producer",
+			ID: "studio-open", WorkspaceID: studio.ID, To: "Ivory Producer",
 			Description: "Master the single", TicketState: workspace.TicketStateReady, CreatedAt: older,
 		},
 	}
@@ -73,13 +108,13 @@ func TestToday_StudioWorkIsAttributedToTheSpecialistByName(t *testing.T) {
 	if out.Studio == nil {
 		t.Fatal("expected a studio section")
 	}
-	if out.Studio.SpecialistName != "Reaper Producer" {
+	if out.Studio.SpecialistName != "Ivory Producer" {
 		t.Fatalf("specialist name = %q", out.Studio.SpecialistName)
 	}
-	if out.Studio.Domain != "music projects" || out.Studio.WorkspaceName != "Ivory" {
+	if out.Studio.Domain != "music projects" || out.Studio.WorkspaceName != "Ivory" || out.Studio.ConnectedProjectCount != 1 {
 		t.Fatalf("studio = %+v", out.Studio)
 	}
-	if out.Studio.Route != "/workspaces/ivory" {
+	if out.Studio.Route != "/workspaces/ivory" || out.Studio.HomeRoute != "/workspaces/music-home/assistant" {
 		t.Fatalf("studio route = %q", out.Studio.Route)
 	}
 	if out.Studio.Health.Status != TodaySectionAvailable {
@@ -95,7 +130,7 @@ func TestToday_StudioWorkIsAttributedToTheSpecialistByName(t *testing.T) {
 			t.Fatalf("item %q kind = %q", item.ID, item.Kind)
 		}
 	}
-	if byID["studio-result-1"].Attribution != "Reaper Producer" {
+	if byID["studio-result-1"].Attribution != "Ivory Producer" {
 		t.Fatalf("attribution = %q", byID["studio-result-1"].Attribution)
 	}
 	if byID["studio-result-3"].Attribution != "" {
@@ -110,16 +145,14 @@ func TestToday_StudioWorkIsAttributedToTheSpecialistByName(t *testing.T) {
 	}
 }
 
-// No specialist, an unknown slug, and a specialist with no workspace yet are
-// all "nothing to report" — which is not a degraded source and must not turn
-// Today "partial".
-func TestToday_StudioIsAbsentRatherThanEmpty(t *testing.T) {
+// No specialist, an unknown slug, and a specialist with no exact Home/link
+// topology are all "nothing to report" — which is not a degraded source and
+// must not turn Today "partial".
+func TestToday_StudioIsAbsentWithoutExactProgramTopology(t *testing.T) {
 	cases := map[string]struct{ slug, templateID string }{
-		"no specialist":         {"", ""},
-		"unknown slug":          {"retired_domain", "plugin:reaper-plugin:reaper-song"},
-		"no domain workspace":   {"music_production", ""},
-		"unrelated workspace":   {"music_production", "calendar-ops"},
-		"bare blueprint typo'd": {"music_production", "reaper-songs"},
+		"no specialist":       {"", ""},
+		"unknown slug":        {"retired_domain", "plugin:reaper-plugin:reaper-song"},
+		"no domain workspace": {"music_production", ""},
 	}
 	for name, testCase := range cases {
 		out := studioTodayService(t, testCase.slug, testCase.templateID)
@@ -128,6 +161,18 @@ func TestToday_StudioIsAbsentRatherThanEmpty(t *testing.T) {
 		}
 		if out.State == "partial" {
 			t.Fatalf("%s: an absent studio must not degrade Today", name)
+		}
+	}
+}
+
+func TestToday_StudioFailsClosedForMismatchedLinkedProvenance(t *testing.T) {
+	for _, templateID := range []string{"calendar-ops", "reaper-songs"} {
+		out := studioTodayService(t, "music_production", templateID)
+		if out.Studio == nil || out.Studio.Health.Status != TodaySectionUnavailable || out.Studio.Health.Reason != "stale_references" {
+			t.Fatalf("%s: mismatched exact link did not fail closed: %+v", templateID, out.Studio)
+		}
+		if out.Studio.ConnectedProjectCount != 0 || len(out.Studio.Items) != 0 || out.State != "partial" {
+			t.Fatalf("%s: mismatched project was reported: %+v", templateID, out)
 		}
 	}
 }
@@ -158,7 +203,7 @@ func TestToday_StudioIgnoresAnotherUsersWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if out.Studio != nil {
-		t.Fatalf("another user's studio must not be reported: %+v", out.Studio)
+	if out.Studio == nil || out.Studio.Health.Status != TodaySectionUnavailable || out.Studio.ConnectedProjectCount != 0 || len(out.Studio.Items) != 0 {
+		t.Fatalf("another user's linked studio must fail closed without being reported: %+v", out.Studio)
 	}
 }

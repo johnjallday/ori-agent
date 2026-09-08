@@ -76,10 +76,18 @@ func TestTestsCannotReachARealDownloadsFolder(t *testing.T) {
 
 // TestNoTestWritesOutsideATempDir pins the other half: the package's own
 // helpers build fixtures under t.TempDir(), never under a path derived from the
-// real environment.
+// real environment. Go 1.26 creates t.TempDir fixtures under GOTMPDIR; when the
+// repository test wrapper is active, both GOTMPDIR and TMPDIR belong to the
+// same ORI_TEST_RUN_DIR sandbox.
 func TestNoTestWritesOutsideATempDir(t *testing.T) {
 	root := inboxFixture(t)
-	temp := os.TempDir()
+	temp := os.Getenv("ORI_TEST_RUN_DIR")
+	if temp == "" {
+		temp = os.Getenv("GOTMPDIR")
+	}
+	if temp == "" {
+		temp = os.TempDir()
+	}
 	resolvedRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		t.Fatalf("resolve fixture: %v", err)
@@ -88,8 +96,8 @@ func TestNoTestWritesOutsideATempDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve temp: %v", err)
 	}
-	if !strings.HasPrefix(resolvedRoot, resolvedTemp) {
-		t.Fatalf("fixture %q is not under the temp dir %q", resolvedRoot, resolvedTemp)
+	if !isAncestor(resolvedTemp, resolvedRoot) {
+		t.Fatalf("fixture %q is not under the test sandbox %q", resolvedRoot, resolvedTemp)
 	}
 	if home, err := os.UserHomeDir(); err == nil && home != "" && strings.HasPrefix(resolvedRoot, filepath.Join(home, "Downloads")) {
 		t.Fatalf("fixture %q is inside a real Downloads folder", resolvedRoot)

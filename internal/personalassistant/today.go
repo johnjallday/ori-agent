@@ -84,10 +84,67 @@ type TodayStudioProjection struct {
 	// Domain is the user's own words for this work, e.g. "music projects".
 	Domain string `json:"domain,omitempty"`
 	// SpecialistName is the named expert the domain's workspace template seeds.
-	SpecialistName string      `json:"specialist_name,omitempty"`
-	WorkspaceName  string      `json:"workspace_name,omitempty"`
-	Route          string      `json:"route,omitempty"`
-	Items          []TodayItem `json:"items"`
+	SpecialistName        string               `json:"specialist_name,omitempty"`
+	WorkspaceName         string               `json:"workspace_name,omitempty"`
+	Route                 string               `json:"route,omitempty"`
+	HomeWorkspaceName     string               `json:"home_workspace_name,omitempty"`
+	HomeRoute             string               `json:"home_route,omitempty"`
+	ConnectedProjectCount int                  `json:"connected_project_count"`
+	Projects              []TodayStudioProject `json:"projects"`
+	Items                 []TodayItem          `json:"items"`
+}
+
+// TodayStudioProject is one exact Assistant Project Link resolved to its
+// current canonical workspace. Names and routes are display only; membership
+// comes from the stable link, never from either value.
+type TodayStudioProject struct {
+	WorkspaceID string `json:"workspace_id"`
+	Name        string `json:"name"`
+	Route       string `json:"route,omitempty"`
+	State       string `json:"state"`
+}
+
+// TodaySpecialistSetupProjection consumes the setup journey's canonical root
+// and child reconciliation. It carries navigation/presentation affordances
+// only and grants the Personal Assistant no project, file, catalog, or runtime
+// mutation authority.
+type TodaySpecialistSetupProjection struct {
+	Health                TodaySourceHealth             `json:"health"`
+	JourneyID             string                        `json:"journey_id"`
+	Title                 string                        `json:"title"`
+	Lifecycle             string                        `json:"lifecycle"`
+	CurrentStepID         string                        `json:"current_step_id,omitempty"`
+	ConnectedProjectCount int                           `json:"connected_project_count"`
+	ChildRunCount         int                           `json:"child_run_count"`
+	UnfinishedChildCount  int                           `json:"unfinished_child_count"`
+	Runs                  []TodaySpecialistSetupRun     `json:"runs"`
+	SampleLibrary         *TodaySampleLibraryProjection `json:"sample_library,omitempty"`
+	Actions               []TodaySpecialistSetupAction  `json:"actions"`
+}
+
+type TodaySpecialistSetupRun struct {
+	RunID              string `json:"run_id"`
+	RunKind            string `json:"run_kind"`
+	Lifecycle          string `json:"lifecycle"`
+	CurrentStepID      string `json:"current_step_id,omitempty"`
+	ProjectWorkspaceID string `json:"project_workspace_id,omitempty"`
+	ProjectName        string `json:"project_name,omitempty"`
+	ProjectRoute       string `json:"project_route,omitempty"`
+	SelectedModeID     string `json:"selected_mode_id,omitempty"`
+}
+
+type TodaySampleLibraryProjection struct {
+	State               string `json:"state"`
+	CapabilityInstalled bool   `json:"capability_installed"`
+	ActiveRootCount     int    `json:"active_root_count"`
+	IndexedRootCount    int    `json:"indexed_root_count"`
+	AnalysisRootCount   int    `json:"analysis_root_count"`
+}
+
+type TodaySpecialistSetupAction struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Route string `json:"route,omitempty"`
 }
 
 type TodayLinks struct {
@@ -116,10 +173,11 @@ type TodayProjection struct {
 	// Studio is present only when the user accepted a domain specialist and a
 	// workspace built from its blueprint exists. Otherwise there is nothing
 	// honest to report and the section is absent rather than empty.
-	Studio      *TodayStudioProjection `json:"studio,omitempty"`
-	NextCheckIn *time.Time             `json:"next_check_in,omitempty"`
-	Links       TodayLinks             `json:"links"`
-	GeneratedAt time.Time              `json:"generated_at"`
+	Studio          *TodayStudioProjection          `json:"studio,omitempty"`
+	SpecialistSetup *TodaySpecialistSetupProjection `json:"specialist_setup,omitempty"`
+	NextCheckIn     *time.Time                      `json:"next_check_in,omitempty"`
+	Links           TodayLinks                      `json:"links"`
+	GeneratedAt     time.Time                       `json:"generated_at"`
 }
 
 type todayRelationshipReader interface {
@@ -134,6 +192,10 @@ type todayFollowUpReader interface {
 	List(ctx context.Context, filter followup.Filter) ([]*followup.FollowUp, error)
 }
 
+type todaySpecialistSetupReader interface {
+	GetSpecialistSetup(ctx context.Context, userID string) (*TodaySpecialistSetupProjection, error)
+}
+
 // TodayService reads canonical stores independently; it never generates a
 // brief, mutates a Ticket, or changes a follow-up.
 type TodayService struct {
@@ -141,11 +203,21 @@ type TodayService struct {
 	briefs       todayBriefReader
 	workspaces   workspace.Store
 	followUps    todayFollowUpReader
+	setup        todaySpecialistSetupReader
 	now          func() time.Time
 }
 
 func NewTodayService(relationship todayRelationshipReader, briefs todayBriefReader, workspaces workspace.Store, followUps todayFollowUpReader) *TodayService {
 	return &TodayService{relationship: relationship, briefs: briefs, workspaces: workspaces, followUps: followUps, now: time.Now}
+}
+
+// SetSpecialistSetupReader adds the optional canonical root/child/add-on
+// overview after setup services are wired. The reader is read-only from the
+// Personal Assistant's perspective.
+func (s *TodayService) SetSpecialistSetupReader(reader todaySpecialistSetupReader) {
+	if s != nil {
+		s.setup = reader
+	}
 }
 
 func (s *TodayService) Get(ctx context.Context, userID string) (*TodayProjection, error) {
@@ -227,86 +299,206 @@ func (s *TodayService) Get(ctx context.Context, userID string) (*TodayProjection
 		out.Decisions = decisionsFromFollowUps(followUpsByID, route, now)
 	}
 	out.Studio = s.loadStudio(userID, relationship.SpecialistSlug, relationship.HQWorkspaceID)
+	out.SpecialistSetup = s.loadSpecialistSetup(ctx, userID, relationship.SpecialistSlug)
 	out.NextCheckIn = nextTodayCheckIn(relationship, now)
 	out.State = todayOverallState(relationship, out)
 	return out, nil
 }
 
-// loadStudio reports the domain specialist's finished work, attributed by name.
-// It returns nil when the user has no specialist, when the mapping no longer
-// knows the persisted slug, or when no workspace from the domain's blueprint
-// exists yet — in all three cases there is nothing to report, which is not the
-// same as a source being unavailable.
+// loadStudio reports finished work from exact Assistant Project Links. A
+// matching blueprint name or physical parent is never enough: those are
+// presentation and organization, not program-membership authority.
 func (s *TodayService) loadStudio(userID, slug, hqID string) *TodayStudioProjection {
 	entry, ok := specialist.Get(slug)
-	if !ok {
-		return nil
-	}
-	if s.workspaces == nil {
+	if !ok || entry.SetupJourney == nil || s.workspaces == nil {
 		return nil
 	}
 	workspaces, err := s.workspaces.ListActive()
 	if err != nil {
 		return &TodayStudioProjection{
 			Health: todayUnavailable("read_failed"), Domain: entry.DisplayName,
-			SpecialistName: entry.SpecialistName, Items: []TodayItem{},
+			Projects: []TodayStudioProject{}, Items: []TodayItem{},
 		}
 	}
-	var studio *workspace.Workspace
-	for _, ws := range workspaces {
-		if ws == nil || strings.TrimSpace(ws.ID) == strings.TrimSpace(hqID) {
+	userID = strings.TrimSpace(userID)
+	expectedProgramID := strings.TrimSpace(entry.SetupJourney.ExpectedAssistantProgramID)
+	var stations []*workspace.Workspace
+	for _, candidate := range workspaces {
+		if candidate == nil || strings.TrimSpace(candidate.ID) == strings.TrimSpace(hqID) {
 			continue
 		}
-		if owner := strings.TrimSpace(ws.OwnerUserID); owner != "" && owner != strings.TrimSpace(userID) {
+		state := candidate.GetAssistantProgramState()
+		if state == nil || state.Declaration == nil {
 			continue
 		}
-		if ws.TemplateProvenance == nil || !entry.MatchesTemplate(ws.TemplateProvenance.TemplateID) {
+		key := state.Key.Normalize()
+		if key.OwnerUserID != userID || key.ProgramID != expectedProgramID || state.Declaration.ID != expectedProgramID {
 			continue
 		}
-		studio = ws
-		break
+		stations = append(stations, candidate)
 	}
-	if studio == nil {
+	if len(stations) == 0 {
 		return nil
 	}
 	out := &TodayStudioProjection{
-		Domain: entry.DisplayName, SpecialistName: entry.SpecialistName,
-		WorkspaceName: truncateRunes(studio.Name, 100), Items: []TodayItem{},
+		Domain: entry.DisplayName, Projects: []TodayStudioProject{}, Items: []TodayItem{},
 	}
-	slugPath := strings.TrimSpace(studio.FolderSlug)
-	if !todaySafeSlug.MatchString(slugPath) {
+	if len(stations) != 1 {
+		out.Health = todayUnavailable("ambiguous_home")
+		return out
+	}
+	station := stations[0]
+	out.HomeWorkspaceName = truncateRunes(station.Name, 100)
+	if route, ok := todayWorkspaceRoute(station, true); ok {
+		out.HomeRoute = route
+	} else {
 		out.Health = todayUnavailable("workspace_slug_invalid")
 		return out
 	}
-	route := "/workspaces/" + url.PathEscape(slugPath)
-	out.Route = route
 
-	results := make([]workspace.Task, 0)
-	for _, task := range studio.Tasks {
-		if task.CanonicalState() != workspace.TicketStateReview || strings.TrimSpace(task.Result) == "" {
+	linked, err := workspace.NewAssistantProgramStore(s.workspaces).LinkedProjects(station.ID)
+	if err != nil {
+		out.Health = todayUnavailable("read_failed")
+		return out
+	}
+	sort.SliceStable(linked, func(i, j int) bool {
+		left, right := strings.ToLower(linked[i].Name), strings.ToLower(linked[j].Name)
+		if left != right {
+			return left < right
+		}
+		return linked[i].ID < linked[j].ID
+	})
+	type studioResult struct {
+		task  workspace.Task
+		route string
+	}
+	results := make([]studioResult, 0)
+	state := station.GetAssistantProgramState()
+	var firstValidProject *workspace.Workspace
+	invalidProject := false
+	for _, project := range linked {
+		if owner := strings.TrimSpace(project.OwnerUserID); owner != "" && owner != userID {
+			invalidProject = true
 			continue
 		}
-		results = append(results, task)
+		provenance := project.GetTemplateProvenance()
+		link := project.GetAssistantProjectLink()
+		if provenance == nil || provenance.PluginOwner == nil || provenance.AssistantProgram == nil || link == nil ||
+			provenance.PluginOwner.BlueprintID != entry.SetupJourney.ExpectedBlueprintID ||
+			!strings.EqualFold(provenance.PluginOwner.PluginID, state.Key.PluginID) ||
+			provenance.AssistantProgram.ID != expectedProgramID {
+			invalidProject = true
+			continue
+		}
+		route, safe := todayWorkspaceRoute(project, false)
+		if !safe {
+			invalidProject = true
+			continue
+		}
+		out.Projects = append(out.Projects, TodayStudioProject{
+			WorkspaceID: project.ID, Name: truncateRunes(project.Name, 100),
+			Route: route, State: string(project.Status),
+		})
+		if firstValidProject == nil {
+			firstValidProject = project
+		}
+		for _, task := range project.Tasks {
+			if task.CanonicalState() != workspace.TicketStateReview || strings.TrimSpace(task.Result) == "" {
+				continue
+			}
+			results = append(results, studioResult{task: task, route: route})
+		}
+	}
+	out.ConnectedProjectCount = len(out.Projects)
+	if len(out.Projects) == 1 {
+		out.WorkspaceName = out.Projects[0].Name
+		out.Route = out.Projects[0].Route
+		out.SpecialistName = primaryProjectAgentName(state, firstValidProject)
 	}
 	sort.SliceStable(results, func(i, j int) bool {
-		left, right := taskSourceTime(results[i]), taskSourceTime(results[j])
+		left, right := taskSourceTime(results[i].task), taskSourceTime(results[j].task)
 		if !left.Equal(right) {
 			return left.After(right)
 		}
-		return results[i].ID < results[j].ID
+		if results[i].task.ID != results[j].task.ID {
+			return results[i].task.ID < results[j].task.ID
+		}
+		return results[i].task.WorkspaceID < results[j].task.WorkspaceID
 	})
-	section := taskTodaySection(results, route, "studio_result", todayResultCap)
-	for i, task := range results {
-		if i >= len(section.Items) {
+	var updated time.Time
+	for _, result := range results {
+		if len(out.Items) >= todayResultCap {
 			break
 		}
-		// Who did it comes from the record, never from the mapping: an
-		// unassigned task is reported without a name rather than credited to
-		// the specialist by assumption.
-		section.Items[i].Attribution = truncateRunes(strings.TrimSpace(task.To), 100)
+		task := result.task
+		sourceAt := taskSourceTime(task)
+		if sourceAt.After(updated) {
+			updated = sourceAt
+		}
+		out.Items = append(out.Items, TodayItem{
+			ID: task.ID, Kind: "studio_result", Title: truncateRunes(task.Description, 200),
+			State: string(task.CanonicalState()), Attribution: truncateRunes(strings.TrimSpace(task.To), 100),
+			Route:    recordTodayRoute(result.route, "ticket", task.ID),
+			Ref:      dailybrief.SourceRef{WorkspaceID: task.WorkspaceID, EntityType: "task", EntityID: task.ID, Timestamp: sourceAt},
+			SourceAt: sourceAt,
+		})
 	}
-	out.Health, out.Items = section.Health, section.Items
+	out.Health = todayHealthForItems(out.Items, updated)
+	if invalidProject {
+		out.Health = todayUnavailable("stale_references")
+	}
 	return out
+}
+
+func todayWorkspaceRoute(ws *workspace.Workspace, assistant bool) (string, bool) {
+	if ws == nil {
+		return "", false
+	}
+	slug := strings.TrimSpace(ws.FolderSlug)
+	if !todaySafeSlug.MatchString(slug) {
+		return "", false
+	}
+	route := "/workspaces/" + url.PathEscape(slug)
+	if assistant {
+		route += "/assistant"
+	}
+	return route, true
+}
+
+func primaryProjectAgentName(state *workspace.AssistantProgramState, project *workspace.Workspace) string {
+	if state == nil || state.Declaration == nil || project == nil {
+		return ""
+	}
+	link := project.GetAssistantProjectLink()
+	if link == nil {
+		return ""
+	}
+	bindings := make(map[string]string, len(link.ProjectBindings.Bindings))
+	for _, binding := range link.ProjectBindings.Bindings {
+		bindings[binding.RoleID] = binding.AgentName
+	}
+	for _, role := range state.Declaration.Roles {
+		if role.Scope == workspace.AssistantRoleScopeProject && role.Primary {
+			return truncateRunes(strings.TrimSpace(bindings[role.ID]), 100)
+		}
+	}
+	return ""
+}
+
+func (s *TodayService) loadSpecialistSetup(ctx context.Context, userID, slug string) *TodaySpecialistSetupProjection {
+	entry, ok := specialist.Get(slug)
+	if !ok || entry.SetupJourney == nil || s.setup == nil {
+		return nil
+	}
+	projection, err := s.setup.GetSpecialistSetup(ctx, strings.TrimSpace(userID))
+	if err != nil || projection == nil {
+		return &TodaySpecialistSetupProjection{
+			Health: todayUnavailable("read_failed"), JourneyID: entry.SetupJourney.ID,
+			Title: entry.SetupJourney.Title, Runs: []TodaySpecialistSetupRun{},
+			Actions: []TodaySpecialistSetupAction{},
+		}
+	}
+	return projection
 }
 
 func (s *TodayService) loadHQ(workspaceID string) (*workspace.Workspace, string, error) {
@@ -617,6 +809,9 @@ func todayOverallState(relationship *Projection, out *TodayProjection) string {
 	if out.Studio != nil {
 		health = append(health, out.Studio.Health)
 		itemCount += len(out.Studio.Items)
+	}
+	if out.SpecialistSetup != nil {
+		health = append(health, out.SpecialistSetup.Health)
 	}
 	for _, source := range health {
 		if source.Status == TodaySectionUnavailable {

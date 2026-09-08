@@ -113,6 +113,10 @@ type Requirements struct {
 	// MaxInstallsPerWorkspace caps concurrent active installs. V1 File Janitor
 	// is 1 (FR-8).
 	MaxInstallsPerWorkspace int `json:"max_installs_per_workspace,omitempty"`
+	// AssistantProgramHomeOnly restricts installation to a dedicated Assistant
+	// Program Home whose declaration explicitly offers a Home-scoped optional
+	// role for this capability. It grants that role no authority by itself.
+	AssistantProgramHomeOnly bool `json:"assistant_program_home_only,omitempty"`
 }
 
 // SetupDescriptor names the capability's setup adapter and the directory
