@@ -18,7 +18,7 @@ func newDarwinKeychainStore(runner commandRunner, namespace string) SecretStore 
 func (s *darwinKeychainStore) Get(key SecretKey) (string, error) {
 	output, err := s.runner.Run("", "security", "find-generic-password", "-s", darwinKeychainService, "-a", s.account(key), "-w")
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "could not be found") || strings.Contains(strings.ToLower(err.Error()), "could not find") {
+		if isDarwinSecretNotFoundError(err) {
 			return "", ErrSecretNotFound
 		}
 		return "", err
@@ -37,10 +37,18 @@ func (s *darwinKeychainStore) Set(key SecretKey, value string) error {
 
 func (s *darwinKeychainStore) Delete(key SecretKey) error {
 	_, err := s.runner.Run("", "security", "delete-generic-password", "-s", darwinKeychainService, "-a", s.account(key))
-	if err != nil && strings.Contains(strings.ToLower(err.Error()), "could not find") {
+	if isDarwinSecretNotFoundError(err) {
 		return nil
 	}
 	return err
+}
+
+func isDarwinSecretNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "could not be found") || strings.Contains(message, "could not find")
 }
 
 func (s *darwinKeychainStore) Status() StoreStatus {
