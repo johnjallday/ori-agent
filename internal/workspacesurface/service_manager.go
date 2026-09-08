@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/mcp"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 )
 
 var (
@@ -76,25 +77,27 @@ type ServiceProcess interface {
 type ServiceProcessFactory func(ServiceSpec) ServiceProcess
 
 type ServiceManager struct {
-	mu        sync.Mutex
-	instances map[string]*serviceInstance
-	factory   ServiceProcessFactory
+	admissionGate *resetstate.WorkGate
+	mu            sync.Mutex
+	instances     map[string]*serviceInstance
+	factory       ServiceProcessFactory
 }
 
 type serviceInstance struct {
 	spec ServiceSpec
 
-	mu          sync.Mutex
-	process     ServiceProcess
-	started     bool
-	starting    bool
-	startDone   chan struct{}
-	stopping    bool
-	restartUsed bool
-	rootCtx     context.Context
-	cancel      context.CancelFunc
-	semaphore   chan struct{}
-	calls       sync.WaitGroup
+	mu             sync.Mutex
+	process        ServiceProcess
+	started        bool
+	starting       bool
+	startDone      chan struct{}
+	stopping       bool
+	restartUsed    bool
+	rootCtx        context.Context
+	cancel         context.CancelFunc
+	semaphore      chan struct{}
+	calls          sync.WaitGroup
+	runtimeRelease func()
 }
 
 func NewServiceManager(factory ServiceProcessFactory) *ServiceManager {
@@ -104,6 +107,9 @@ func NewServiceManager(factory ServiceProcessFactory) *ServiceManager {
 	return &ServiceManager{instances: make(map[string]*serviceInstance), factory: factory}
 }
 
+// SetAdmissionGate configures reset admission before process construction.
+func (m *ServiceManager) SetAdmissionGate(gate *resetstate.WorkGate) { m.admissionGate = gate }
+
 // Call lazily starts the service, bounds concurrency and call duration, and
 // performs at most one reconstruction/retry after an unhealthy transport
 // failure. Domain/tool errors from a healthy process are not retried.
@@ -111,6 +117,11 @@ func (m *ServiceManager) Call(ctx context.Context, spec ServiceSpec, call Servic
 	if m == nil || m.factory == nil || spec.validate() != nil || !idPattern.MatchString(call.Operation) {
 		return nil, ErrServiceUnavailable
 	}
+	release, err := m.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	instance, err := m.instance(spec.normalized())
 	if err != nil {
 		return nil, err
@@ -134,6 +145,11 @@ func (m *ServiceManager) Probe(ctx context.Context, spec ServiceSpec) error {
 	if m == nil || spec.validate() != nil {
 		return ErrServiceUnavailable
 	}
+	release, err := m.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	instance, err := m.instance(spec.normalized())
 	if err != nil {
 		return err
@@ -182,13 +198,26 @@ func (m *ServiceManager) callInstance(ctx context.Context, instance *serviceInst
 	}
 	instance.restartUsed = true
 	old := instance.process
-	instance.process = nil
 	instance.started = false
 	instance.mu.Unlock()
 	if old != nil {
 		stopCtx, cancel := context.WithTimeout(context.Background(), instance.spec.ShutdownTimeout)
-		_ = old.Stop(stopCtx)
+		stopErr := old.Stop(stopCtx)
 		cancel()
+		if stopErr != nil {
+			instance.mu.Lock()
+			instance.stopping = true
+			instance.mu.Unlock()
+			return nil, ErrServiceUnavailable
+		}
+	}
+	instance.mu.Lock()
+	instance.process = nil
+	oldRelease := instance.runtimeRelease
+	instance.runtimeRelease = nil
+	instance.mu.Unlock()
+	if oldRelease != nil {
+		oldRelease()
 	}
 	if err := m.ensureStarted(ctx, instance); err != nil {
 		return nil, err
@@ -225,6 +254,11 @@ func (m *ServiceManager) ensureStarted(ctx context.Context, instance *serviceIns
 			return ErrServiceStopping
 		}
 	}
+	runtimeRelease, err := m.admissionGate.EnterLifetime()
+	if err != nil {
+		instance.mu.Unlock()
+		return err
+	}
 	process := m.factory(instance.spec)
 	instance.process = process
 	instance.starting = true
@@ -235,7 +269,7 @@ func (m *ServiceManager) ensureStarted(ctx context.Context, instance *serviceIns
 
 	startCtx, cancel := context.WithTimeout(ctx, startupTimeout)
 	stopCancel := context.AfterFunc(instance.rootCtx, cancel)
-	err := process.Start(startCtx)
+	err = process.Start(startCtx)
 	stopCancel()
 	cancel()
 
@@ -243,19 +277,31 @@ func (m *ServiceManager) ensureStarted(ctx context.Context, instance *serviceIns
 	instance.starting = false
 	close(done)
 	failed := err != nil || !process.Healthy() || instance.stopping
-	if failed {
-		instance.process = nil
-		instance.started = false
-	} else {
+	if !failed {
 		instance.started = true
+		instance.runtimeRelease = runtimeRelease
 	}
 	instance.mu.Unlock()
 	if !failed {
 		return nil
 	}
 	stopCtx, stop := context.WithTimeout(context.Background(), instance.spec.ShutdownTimeout)
-	_ = process.Stop(stopCtx)
+	stopErr := process.Stop(stopCtx)
 	stop()
+	instance.mu.Lock()
+	if stopErr == nil {
+		instance.process = nil
+		instance.started = false
+	} else {
+		// A failed stop leaves child ownership ambiguous. Retain both the
+		// process and permit and prevent reconstruction over it.
+		instance.runtimeRelease = runtimeRelease
+		instance.stopping = true
+	}
+	instance.mu.Unlock()
+	if stopErr == nil {
+		runtimeRelease()
+	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(startCtx.Err(), context.DeadlineExceeded) {
 		return ErrServiceTimeout
 	}
@@ -321,6 +367,9 @@ func (m *ServiceManager) StopPlugin(pluginID string, generation uint64) error {
 	for _, instance := range targets {
 		if err := stopInstance(instance); err != nil {
 			joined = errors.Join(joined, err)
+			m.mu.Lock()
+			m.instances[instance.spec.key()] = instance
+			m.mu.Unlock()
 		}
 	}
 	return joined
@@ -341,6 +390,9 @@ func (m *ServiceManager) Shutdown() error {
 	for _, instance := range instances {
 		if err := stopInstance(instance); err != nil {
 			joined = errors.Join(joined, err)
+			m.mu.Lock()
+			m.instances[instance.spec.key()] = instance
+			m.mu.Unlock()
 		}
 	}
 	return joined
@@ -365,13 +417,22 @@ func stopInstance(instance *serviceInstance) error {
 	case <-wait:
 	case <-timer.C:
 	}
-	if process == nil {
-		return nil
+	if process != nil {
+		stopCtx, cancel := context.WithTimeout(context.Background(), timeout)
+		err := process.Stop(stopCtx)
+		cancel()
+		if err != nil {
+			return ErrServiceUnavailable // retain process evidence and lifetime permit
+		}
 	}
-	stopCtx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	if err := process.Stop(stopCtx); err != nil && !errors.Is(err, context.Canceled) {
-		return ErrServiceUnavailable
+	instance.mu.Lock()
+	instance.process = nil
+	instance.started = false
+	release := instance.runtimeRelease
+	instance.runtimeRelease = nil
+	instance.mu.Unlock()
+	if release != nil {
+		release()
 	}
 	return nil
 }

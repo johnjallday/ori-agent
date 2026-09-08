@@ -15,6 +15,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/platform"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 )
 
 // TaskExecutor handles automatic execution of workspace tasks
@@ -25,6 +26,7 @@ type TaskExecutor struct {
 	maxConcurrent          int
 	localTimeoutMultiplier int
 	eventBus               *EventBus // Optional event bus for publishing events
+	admissionGate          *resetstate.WorkGate
 
 	providerResolver TaskProviderResolver // optional; overrides taskHandler assertion
 	evolutionAwarder TaskXPAwarder        // optional; awards XP for completed tasks
@@ -146,9 +148,10 @@ func effectiveTaskTimeout(taskTimeout time.Duration, isLocal bool, multiplier in
 
 // ExecutorConfig contains configuration for the task executor
 type ExecutorConfig struct {
-	PollInterval           time.Duration // How often to check for new tasks
-	MaxConcurrent          int           // Max number of concurrent task executions
-	LocalTimeoutMultiplier int           // Multiplies the default timeout for local providers (0 = default)
+	AdmissionGate          *resetstate.WorkGate // Shared runtime gate; nil means reset is unsupported
+	PollInterval           time.Duration        // How often to check for new tasks
+	MaxConcurrent          int                  // Max number of concurrent task executions
+	LocalTimeoutMultiplier int                  // Multiplies the default timeout for local providers (0 = default)
 }
 
 // envBool reads a boolean environment variable, returning def when unset or
@@ -179,6 +182,7 @@ func NewTaskExecutor(store Store, handler TaskHandler, config ExecutorConfig) *T
 
 	return &TaskExecutor{
 		workspaceStore:         store,
+		admissionGate:          config.AdmissionGate,
 		taskHandler:            handler,
 		pollInterval:           config.PollInterval,
 		maxConcurrent:          config.MaxConcurrent,
@@ -205,6 +209,12 @@ func (te *TaskExecutor) SetEventBus(eventBus *EventBus) {
 
 // Start begins the task executor polling loop
 func (te *TaskExecutor) Start() {
+	release, err := te.admissionGate.Enter()
+	if err != nil {
+		return
+	}
+	defer release()
+
 	// Reconcile persisted task state against the fact that a new process just
 	// booted, before anything can claim work.
 	te.reconcileTasksAtBoot()
@@ -409,6 +419,12 @@ func (te *TaskExecutor) admissionLimitForCycle() int {
 // checkAndExecuteTasks checks for assigned tasks and executes those that fit the
 // global and per-provider concurrency limits.
 func (te *TaskExecutor) checkAndExecuteTasks() {
+	release, err := te.admissionGate.Enter()
+	if err != nil {
+		return
+	}
+	defer release()
+
 	workspaceIDs, err := te.workspaceStore.List()
 	if err != nil {
 		logger.Error("Failed to list workspaces", logger.Fields{"error": err})
@@ -488,13 +504,31 @@ func (te *TaskExecutor) checkAndExecuteTasks() {
 
 // executeTask executes a single task asynchronously
 func (te *TaskExecutor) executeTask(ws *Workspace, task Task, profile TaskProviderProfile) {
+	// Acquire synchronously while the poll still holds its permit. The worker
+	// owns this second permit through final saves, not just provider execution.
+	release, err := te.admissionGate.Enter()
+	if err != nil {
+		return
+	}
+
 	// Create context with timeout. Local providers get a scaled default to absorb
 	// cold model loads when the task set no explicit timeout (WS6.25).
 	timeout := effectiveTaskTimeout(task.Timeout, profile.IsLocal, te.localTimeoutMultiplier)
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	// NOTE: Don't defer cancel() here because we launch a goroutine below
-	// The goroutine will defer cancel() when it completes (see line ~290)
+	cleanup := func() {
+		te.mu.Lock()
+		if exec, ok := te.runningTasks[task.ID]; ok && exec.ConcurrencyKey != "" {
+			te.runningByKey[exec.ConcurrencyKey]--
+			if te.runningByKey[exec.ConcurrencyKey] <= 0 {
+				delete(te.runningByKey, exec.ConcurrencyKey)
+			}
+		}
+		delete(te.runningTasks, task.ID)
+		te.mu.Unlock()
+		cancel()
+		release()
+	}
 
 	// Track running task
 	te.mu.Lock()
@@ -539,6 +573,7 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task, profile TaskProvid
 	now := time.Now()
 	if err := task.SetStatus(TaskStatusInProgress); err != nil {
 		logger.Error("Failed to mark local task in_progress", logger.Fields{"task_id": task.ID, "error": err})
+		cleanup()
 		return
 	}
 	task.StartedAt = &now
@@ -564,18 +599,7 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task, profile TaskProvid
 
 	// Execute asynchronously
 	te.wg.Go(func() {
-		defer cancel()
-		defer func() {
-			te.mu.Lock()
-			if exec, ok := te.runningTasks[task.ID]; ok && exec.ConcurrencyKey != "" {
-				te.runningByKey[exec.ConcurrencyKey]--
-				if te.runningByKey[exec.ConcurrencyKey] <= 0 {
-					delete(te.runningByKey, exec.ConcurrencyKey)
-				}
-			}
-			delete(te.runningTasks, task.ID)
-			te.mu.Unlock()
-		}()
+		defer cleanup()
 
 		// Execute the task with a run-start output spec snapshot so later
 		// approvals do not change prompt/validation semantics in-flight.
@@ -1139,7 +1163,7 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 
 	// Create directories
 	dir := filepath.Dir(filePath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0750); err != nil {
 		logger.Error("Failed to create directories for task result", logger.Fields{
 			"task_id": task.ID,
 			"dir":     dir,
@@ -1169,7 +1193,7 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 	}
 
 	// Write file
-	if err := os.WriteFile(filePath, []byte(dataToStore), 0644); err != nil {
+	if err := os.WriteFile(filePath, []byte(dataToStore), 0600); err != nil {
 		logger.Error("Failed to auto-store task result to file", logger.Fields{
 			"task_id":   task.ID,
 			"file_path": filePath,

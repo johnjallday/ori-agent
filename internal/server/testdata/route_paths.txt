@@ -148,6 +148,8 @@
 /api/prompt-variables/preview
 /api/providers
 /api/reset
+/api/reset/operations/fixture-operation
+/api/reset/preview
 /api/sessions
 /api/sessions/auto-classify
 /api/sessions/bulk

@@ -434,6 +434,7 @@ func (b *ServerBuilder) attachWorkspacePlanExecutor() {
 	// Automatic execution runs in the background, so it outlives the request
 	// that started it and must be stopped explicitly at shutdown.
 	b.workspacePlanAuto = workspaceplan.NewAutoRunner(b.workspacePlanExecutor)
+	b.workspacePlanAuto.SetAdmissionGate(b.resetWork)
 	b.workspacePlanHandler.SetAutoRunner(b.workspacePlanAuto)
 	b.server.workspacePlanAuto = b.workspacePlanAuto
 }

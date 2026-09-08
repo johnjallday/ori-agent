@@ -33,7 +33,18 @@ func loadDefaultSettings() types.Settings {
 
 // createConfigManager initializes and loads the configuration manager.
 func createConfigManager(configPath string) (*config.Manager, error) {
-	mgr := config.NewManagerWithSecretStore(configPath, vault.NewDefaultSecretStoreForNamespace(configPath))
+	absolutePath, err := filepath.Abs(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve configuration path: %w", err)
+	}
+	canonicalSecrets := vault.NewDefaultSecretStoreForNamespace(absolutePath)
+	if configPath != absolutePath {
+		legacySecrets := vault.NewDefaultSecretStoreForNamespace(configPath)
+		if err := config.MigrateInstallationSecretNamespace(legacySecrets, canonicalSecrets); err != nil {
+			logger.Warn("Failed to migrate installation credential namespace", logger.Fields{"error": err})
+		}
+	}
+	mgr := config.NewManagerWithSecretStore(absolutePath, canonicalSecrets)
 	if err := mgr.Load(); err != nil {
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
@@ -263,8 +274,14 @@ func resolveAllowlistPath() string {
 
 // createFileStore creates a new file-based storage system for agents.
 func createFileStore(agentStorePath string, defaultConf types.Settings) (store.Store, error) {
-	if err := migrateLegacyAgentStore(agentStorePath); err != nil {
-		logger.Verbosef("Warning: legacy agent store migration failed: %v", err)
+	return createFileStoreWithPolicy(agentStorePath, defaultConf, false)
+}
+
+func createFileStoreWithPolicy(agentStorePath string, defaultConf types.Settings, suppressLegacyAdoption bool) (store.Store, error) {
+	if !suppressLegacyAdoption {
+		if err := migrateLegacyAgentStore(agentStorePath); err != nil {
+			logger.Verbosef("Warning: legacy agent store migration failed: %v", err)
+		}
 	}
 
 	st, err := store.NewFileStore(agentStorePath, defaultConf)
@@ -533,7 +550,7 @@ func createWorkspaceStore(workspaceDir string) (workspace.Store, error) {
 
 // resolveCostTrackerDir determines the cost tracker data directory.
 func resolveCostTrackerDir() string {
-	return filepath.Join(os.Getenv("HOME"), ".ori-agent", "usage_data")
+	return filepath.Join(config.DefaultDataDir(), "usage_data")
 }
 
 // resolveActivityLogDir determines the activity log directory.
@@ -562,11 +579,12 @@ func resolveLocationZonesPath() string {
 
 // resolveWorkflowTemplatesDir determines the workflow templates directory.
 func resolveWorkflowTemplatesDir() string {
-	templatesDir := "workflow_templates"
-	if p := os.Getenv("WORKFLOW_TEMPLATES_DIR"); p != "" {
-		templatesDir = p
-	} else if abs, err := filepath.Abs(templatesDir); err == nil {
-		templatesDir = abs
+	dataDir := config.DefaultDataDir()
+	if configured := strings.TrimSpace(os.Getenv("WORKFLOW_TEMPLATES_DIR")); configured != "" {
+		if filepath.IsAbs(configured) {
+			return filepath.Clean(configured)
+		}
+		return filepath.Join(dataDir, configured)
 	}
-	return templatesDir
+	return filepath.Join(dataDir, "workflow_templates")
 }

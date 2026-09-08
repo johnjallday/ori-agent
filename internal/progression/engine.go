@@ -237,12 +237,17 @@ func (e *Engine) SetDismissed(dismissed bool) error {
 func (e *Engine) Reset() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	previous := e.state
 	e.state = types.ProgressionState{
 		CompletedQuests: map[string]time.Time{},
 		SkippedQuests:   map[string]time.Time{},
 		BackfilledAt:    e.now(),
 	}
-	return e.persistLocked()
+	if err := e.persistLocked(); err != nil {
+		e.state = previous
+		return err
+	}
+	return nil
 }
 
 // Status returns the full quest graph with derived per-quest status and the

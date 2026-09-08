@@ -170,7 +170,10 @@ func (h *Handler) SetManualLocation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.manager.SetManualLocation(request.Location)
+	if err := h.manager.SetManualLocation(request.Location); err != nil {
+		orihttp.RespondErrorWithErr(w, http.StatusServiceUnavailable, "location update unavailable", err)
+		return
+	}
 
 	response := struct {
 		Location string `json:"location"`

@@ -49,6 +49,11 @@ type ReviewInput struct {
 // incomplete. A version is what a user will be asked to approve, so it cannot
 // contain an empty group or a dangling dependency.
 func (s *Service) RequestReview(ctx context.Context, workspaceID, planID string, input ReviewInput) (*Version, error) {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	plan, err := s.store.GetPlan(ctx, workspaceID, planID)
 	if err != nil {
 		return nil, err
@@ -143,6 +148,11 @@ func (s *Service) Reject(ctx context.Context, workspaceID, planID string, input 
 
 func (s *Service) decide(ctx context.Context, workspaceID, planID string, input DecisionInput,
 	outcome VersionStatus, kind ActivityKind) (*Plan, error) {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	plan, err := s.store.GetPlan(ctx, workspaceID, planID)
 	if err != nil {
 		return nil, err
@@ -204,6 +214,11 @@ type ApprovalRequest struct {
 // materialization consumes it separately, which is what lets a retry replay the
 // original result instead of doing the work twice (FR-72, FR-73).
 func (s *Service) Approve(ctx context.Context, workspaceID, planID string, req ApprovalRequest) (*Approval, error) {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	plan, err := s.store.GetPlan(ctx, workspaceID, planID)
 	if err != nil {
 		return nil, err
@@ -296,6 +311,11 @@ func EffectFor(mode ExecutionMode) ApprovalEffect {
 // tell a user their pending approval died, instead of only discovering it when
 // they click.
 func (s *Service) InvalidateOutstandingApprovals(ctx context.Context, workspaceID, planID, reason string) error {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	plan, err := s.store.GetPlan(ctx, workspaceID, planID)
 	if err != nil {
 		return err
@@ -557,6 +577,11 @@ func (s *Service) Approvals(ctx context.Context, workspaceID, planID string) ([]
 // is additive, corrective, or superseding, because that decides what
 // reconciliation may do to work the earlier approval already created (FR-39).
 func (s *Service) EditApproved(ctx context.Context, workspaceID, planID string, intent RevisionIntent, actor string) (*Plan, error) {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	plan, err := s.store.GetPlan(ctx, workspaceID, planID)
 	if err != nil {
 		return nil, err

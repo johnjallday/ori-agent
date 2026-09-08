@@ -352,9 +352,16 @@ func registerSettingsRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/web3-chains", s.Handlers.Settings.Web3ChainsHandler)
 	}
 
-	// Reset endpoints
+	registerResetRoutes(mux, s)
+}
+
+// registerResetRoutes is the narrow control surface allowed through a pending
+// reset fence. Do not add ordinary application handlers or method-based GET
+// exemptions here: several existing GET handlers can write or start work.
+func registerResetRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/reset", s.Handlers.Reset.HandleReset)
 	mux.HandleFunc("/api/reset/preview", s.Handlers.Reset.GetResetPreview)
+	mux.HandleFunc("/api/reset/operations/", s.Handlers.Reset.GetOperation)
 }
 
 // registerChatRoutes registers the chat endpoint.

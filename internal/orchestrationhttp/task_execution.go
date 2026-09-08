@@ -137,6 +137,11 @@ func (th *TaskHandler) StartTaskAsync(workspaceID, taskID string) error {
 	if th == nil || th.taskHandler == nil {
 		return fmt.Errorf("task execution not available")
 	}
+	release, err := th.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	ws, err := th.workspaceStore.Get(workspaceID)
 	if err != nil {
 		return fmt.Errorf("workspace %s not found: %w", workspaceID, err)
@@ -161,7 +166,7 @@ func (th *TaskHandler) StartTaskAsync(workspaceID, taskID string) error {
 		}
 	}
 
-	go func() {
+	return th.startTaskWork(func() {
 		ws, err := th.workspaceStore.Get(workspaceID)
 		if err != nil {
 			logger.Error("Failed to reload workspace for async task start", logger.Fields{"workspace_id": workspaceID, "error": err})
@@ -179,12 +184,16 @@ func (th *TaskHandler) StartTaskAsync(workspaceID, taskID string) error {
 			}
 			logger.Error("Async task execution failed", logger.Fields{"task_id": taskID, "error": err})
 		}
-	}()
-	return nil
+	})
 }
 
 // ExecuteTaskHandler handles manual task execution
 func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request) {
+	release, ok := th.enterTaskRequest(w)
+	if !ok {
+		return
+	}
+	defer release()
 	if r.Method != http.MethodPost {
 		orihttp.MethodNotAllowed(w)
 		return
@@ -266,7 +275,10 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		go th.executeParentTaskSequence(foundWorkspace.ID, foundTask.ID)
+		if err := th.startTaskWork(func() { th.executeParentTaskSequence(foundWorkspace.ID, foundTask.ID) }); err != nil {
+			respondTaskAdmissionError(w, err)
+			return
+		}
 
 		logger.Info("Started manual execution of task sequence", logger.Fields{"task_id": req.TaskID})
 
@@ -335,7 +347,8 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 
 	// Execute the task immediately in a goroutine with a timeout
 	// Default timeout is 30 minutes to prevent runaway tasks
-	go func(workspaceID, taskID string) {
+	workspaceID, taskID := foundWorkspace.ID, foundTask.ID
+	if err := th.startTaskWork(func() {
 		ws, err := th.workspaceStore.Get(workspaceID)
 		if err != nil {
 			logger.Error("Failed to reload workspace for manual task execution", logger.Fields{"workspace_id": workspaceID, "error": err})
@@ -355,7 +368,10 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 			}
 			logger.Error("Manual task execution failed", logger.Fields{"task_id": taskID, "error": err})
 		}
-	}(foundWorkspace.ID, foundTask.ID)
+	}); err != nil {
+		respondTaskAdmissionError(w, err)
+		return
+	}
 
 	logger.Info("Started manual execution of task", logger.Fields{"task_id": req.TaskID})
 
@@ -370,6 +386,11 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 }
 
 func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) {
+	release, ok := th.enterTaskRequest(w)
+	if !ok {
+		return
+	}
+	defer release()
 	if r.Method != http.MethodPost {
 		orihttp.MethodNotAllowed(w)
 		return
@@ -568,7 +589,10 @@ func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if action != "mark_failed" {
-		th.resumeTaskExecutionAsync(ws.ID, task.ID)
+		if err := th.resumeTaskExecutionAsync(ws.ID, task.ID); err != nil {
+			respondTaskAdmissionError(w, err)
+			return
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -593,8 +617,8 @@ func resolveAssignedNodeID(ws *workspace.Workspace, agentName string) string {
 	return ""
 }
 
-func (th *TaskHandler) resumeTaskExecutionAsync(workspaceID, taskID string) {
-	go func() {
+func (th *TaskHandler) resumeTaskExecutionAsync(workspaceID, taskID string) error {
+	return th.startTaskWork(func() {
 		ws, err := th.workspaceStore.Get(workspaceID)
 		if err != nil {
 			logger.Error("Failed to load workspace for task resume", logger.Fields{"workspace_id": workspaceID, "error": err})
@@ -620,7 +644,7 @@ func (th *TaskHandler) resumeTaskExecutionAsync(workspaceID, taskID string) {
 			}
 			logger.Error("Task resume failed", logger.Fields{"task_id": taskID, "error": err})
 		}
-	}()
+	})
 }
 
 func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID string) {

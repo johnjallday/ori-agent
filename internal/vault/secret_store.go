@@ -16,10 +16,12 @@ import (
 type SecretKey string
 
 const (
-	SecretKeyOpenAIAPIKey    SecretKey = "openai_api_key"
-	SecretKeyAnthropicAPIKey SecretKey = "anthropic_api_key"
+	// These are secret store *key names* (identifiers for where a value is
+	// stored), not credential values themselves.
+	SecretKeyOpenAIAPIKey    SecretKey = "openai_api_key"    // #nosec G101 -- key name, not a credential
+	SecretKeyAnthropicAPIKey SecretKey = "anthropic_api_key" // #nosec G101 -- key name, not a credential
 	SecretKeyGeminiAPIKey    SecretKey = "gemini_api_key"
-	SecretKeyBraveAPIKey     SecretKey = "brave_api_key"
+	SecretKeyBraveAPIKey     SecretKey = "brave_api_key" // #nosec G101 -- key name, not a credential
 	SecretKeyVaultDEK        SecretKey = "vault_dek"
 )
 
@@ -63,7 +65,7 @@ type commandRunner interface {
 type execCommandRunner struct{}
 
 func (execCommandRunner) Run(stdin string, name string, args ...string) ([]byte, error) {
-	cmd := exec.Command(name, args...)
+	cmd := exec.Command(name, args...) // #nosec G204 -- name/args come from this package's own OS-keychain backend callers (fixed CLI tool names like "security"/"secret-tool"), never from request input
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
@@ -90,16 +92,28 @@ type AutoSecretStoreOptions struct {
 }
 
 func NewDefaultSecretStore() SecretStore {
-	return NewAutoSecretStore(AutoSecretStoreOptions{
-		FallbackPassphrase: strings.TrimSpace(os.Getenv("ORI_VAULT_PASSPHRASE")),
-	})
+	return newEnvironmentSecretStore("")
 }
 
 func NewDefaultSecretStoreForNamespace(namespace string) SecretStore {
-	return NewAutoSecretStore(AutoSecretStoreOptions{
+	return newEnvironmentSecretStore(namespace)
+}
+
+func newEnvironmentSecretStore(namespace string) SecretStore {
+	options := AutoSecretStoreOptions{
 		Namespace:          namespace,
 		FallbackPassphrase: strings.TrimSpace(os.Getenv("ORI_VAULT_PASSPHRASE")),
-	})
+	}
+	// Explicitly disabling native discovery gives isolated demos and test-owned
+	// processes a fallback namespace without touching a user's Keychain or
+	// Secret Service. It never weakens native storage implicitly.
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("ORI_DISABLE_NATIVE_SECRET_STORE")), "true") || strings.TrimSpace(os.Getenv("ORI_DISABLE_NATIVE_SECRET_STORE")) == "1" {
+		unavailable := false
+		options.DarwinAvailable = &unavailable
+		options.LinuxAvailable = &unavailable
+		options.WindowsAvailable = &unavailable
+	}
+	return NewAutoSecretStore(options)
 }
 
 func NewAutoSecretStore(opts AutoSecretStoreOptions) SecretStore {

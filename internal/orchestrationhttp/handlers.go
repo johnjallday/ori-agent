@@ -11,6 +11,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -45,7 +46,8 @@ type HandlerConfig struct {
 	// FolderStore is the canonical folder-based workspace.json store, used to
 	// hydrate fields with no SQLite column (currently: Designation) that a
 	// plain WorkspaceStore.Get (SQLite-primary) never carries.
-	FolderStore *workspace.FileStore
+	FolderStore   *workspace.FileStore
+	AdmissionGate *resetstate.WorkGate
 }
 
 // SessionStore interface for fetching session data
@@ -89,6 +91,7 @@ func (c *HandlerConfig) Validate() error {
 
 // Handler manages orchestration-related HTTP endpoints
 type Handler struct {
+	admissionGate *resetstate.WorkGate
 	// taskCapabilityGate is remembered here so it survives being set before the
 	// task sub-handler is constructed (the server wires it across build phases).
 	taskCapabilityGate      workspace.TaskCapabilityGate
@@ -150,6 +153,7 @@ func NewHandler(cfg HandlerConfig) (*Handler, error) {
 		fileWatcher:         cfg.FileWatcher,
 		directorySync:       cfg.DirectorySync,
 		folderStore:         cfg.FolderStore,
+		admissionGate:       cfg.AdmissionGate,
 	}
 
 	// Initialize all sub-handlers
@@ -200,6 +204,7 @@ func (h *Handler) initializeSubHandlers() {
 		h.taskHandlerSub.SetCapabilityGate(h.taskCapabilityGate)
 		h.taskHandlerSub.SetCapabilityValidator(h.taskCapabilityValidator)
 		h.taskHandlerSub.SetFileFallbackPreparer(h.taskFileFallback)
+		h.taskHandlerSub.SetAdmissionGate(h.admissionGate)
 	}
 }
 
@@ -335,6 +340,7 @@ func (h *Handler) initializeTaskHandlerLegacy() {
 		h.taskHandlerSub.SetCapabilityGate(h.taskCapabilityGate)
 		h.taskHandlerSub.SetCapabilityValidator(h.taskCapabilityValidator)
 		h.taskHandlerSub.SetFileFallbackPreparer(h.taskFileFallback)
+		h.taskHandlerSub.SetAdmissionGate(h.admissionGate)
 	}
 }
 

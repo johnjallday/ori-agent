@@ -2,6 +2,7 @@ package llm
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/modelinfo"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 )
 
 // isLocalProvider reports whether the provider runs locally and should not
@@ -91,13 +93,26 @@ type TimeRange struct {
 	End   time.Time `json:"end"`
 }
 
+var ErrCostTrackerClosed = errors.New("cost tracker is closed")
+
+type costSavePermit struct {
+	sequence uint64
+	release  func()
+}
+
 // CostTracker tracks usage and calculates costs
 type CostTracker struct {
+	admissionGate *resetstate.WorkGate
 	pricingModels map[string]PricingModel // key: "provider:model"
 	records       []UsageRecord
 	mu            sync.RWMutex
 	dataFile      string
 	maxRecords    int // Maximum records to keep in memory
+	sequence      uint64
+	pending       []costSavePermit
+	closed        bool
+	closeOnce     sync.Once
+	beforePersist func() // deterministic writer seam for package tests
 
 	// saveCh signals the writer goroutine that records have changed.
 	// Buffered (size 1) so concurrent TrackUsage calls coalesce into a
@@ -105,6 +120,14 @@ type CostTracker struct {
 	saveCh   chan struct{}
 	stopCh   chan struct{}
 	saveDone chan struct{}
+}
+
+// PersistenceRoot reports the concrete owned usage directory.
+func (ct *CostTracker) PersistenceRoot() string {
+	if ct == nil {
+		return ""
+	}
+	return filepath.Dir(ct.dataFile)
 }
 
 // NewCostTracker creates a new cost tracker
@@ -130,14 +153,17 @@ func NewCostTracker(dataDir string) *CostTracker {
 	return ct
 }
 
+// SetAdmissionGate is initialization-only, before TrackUsage callers exist.
+func (ct *CostTracker) SetAdmissionGate(gate *resetstate.WorkGate) { ct.admissionGate = gate }
+
 // Close stops the background writer goroutine after flushing any pending save.
 func (ct *CostTracker) Close() {
-	select {
-	case <-ct.stopCh:
-		return
-	default:
-	}
-	close(ct.stopCh)
+	ct.closeOnce.Do(func() {
+		ct.mu.Lock()
+		ct.closed = true
+		ct.mu.Unlock()
+		close(ct.stopCh)
+	})
 	<-ct.saveDone
 }
 
@@ -167,10 +193,34 @@ func (ct *CostTracker) persistSnapshot() {
 	ct.mu.RLock()
 	snapshot := make([]UsageRecord, len(ct.records))
 	copy(snapshot, ct.records)
+	sequence := ct.sequence
+	beforePersist := ct.beforePersist
 	ct.mu.RUnlock()
 
+	if beforePersist != nil {
+		beforePersist()
+	}
 	if err := ct.saveRecordsCopy(snapshot); err != nil {
 		logger.Warn("Failed to save cost tracking records", logger.Fields{"error": err})
+	}
+
+	ct.mu.Lock()
+	var releases []func()
+	kept := ct.pending[:0]
+	for _, permit := range ct.pending {
+		if permit.sequence <= sequence {
+			releases = append(releases, permit.release)
+		} else {
+			kept = append(kept, permit)
+		}
+	}
+	for i := len(kept); i < len(ct.pending); i++ {
+		ct.pending[i] = costSavePermit{}
+	}
+	ct.pending = kept
+	ct.mu.Unlock()
+	for _, release := range releases {
+		release()
 	}
 }
 
@@ -268,8 +318,22 @@ func (ct *CostTracker) addPricingModel(pm PricingModel) {
 
 // TrackUsage records usage from a chat response
 func (ct *CostTracker) TrackUsage(provider, model, agentName string, usage Usage, requestID string) error {
+	release, err := ct.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			release()
+		}
+	}()
+
 	ct.mu.Lock()
 	defer ct.mu.Unlock()
+	if ct.closed {
+		return ErrCostTrackerClosed
+	}
 
 	// Calculate cost
 	cost, currency := ct.calculateCost(provider, model, usage)
@@ -296,8 +360,11 @@ func (ct *CostTracker) TrackUsage(provider, model, agentName string, usage Usage
 		ct.records = ct.records[len(ct.records)-ct.maxRecords:]
 	}
 
-	// Signal the writer goroutine. Non-blocking: if a save is already
-	// queued, this call coalesces into it.
+	// The asynchronous writer owns this permit through the snapshot containing
+	// this record. Coalesced signals still keep every caller's permit.
+	ct.sequence++
+	ct.pending = append(ct.pending, costSavePermit{sequence: ct.sequence, release: release})
+	handedOff = true
 	select {
 	case ct.saveCh <- struct{}{}:
 	default:

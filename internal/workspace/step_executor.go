@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 )
 
 // StepExecutor manages the execution of workflow steps
@@ -16,6 +17,7 @@ type StepExecutor struct {
 	workspaceStore Store
 	taskHandler    TaskHandler
 	pollInterval   time.Duration
+	admissionGate  *resetstate.WorkGate
 
 	mu           sync.RWMutex
 	runningSteps map[string]*stepExecution
@@ -34,7 +36,8 @@ type stepExecution struct {
 
 // StepExecutorConfig contains configuration for the step executor
 type StepExecutorConfig struct {
-	PollInterval time.Duration // How often to check for ready steps
+	AdmissionGate *resetstate.WorkGate // Shared runtime gate; nil means reset is unsupported
+	PollInterval  time.Duration        // How often to check for ready steps
 }
 
 // NewStepExecutor creates a new step executor
@@ -45,6 +48,7 @@ func NewStepExecutor(store Store, handler TaskHandler, config StepExecutorConfig
 
 	return &StepExecutor{
 		workspaceStore: store,
+		admissionGate:  config.AdmissionGate,
 		taskHandler:    handler,
 		pollInterval:   config.PollInterval,
 		runningSteps:   make(map[string]*stepExecution),
@@ -54,6 +58,12 @@ func NewStepExecutor(store Store, handler TaskHandler, config StepExecutorConfig
 
 // Start begins the step executor polling loop
 func (se *StepExecutor) Start() {
+	release, err := se.admissionGate.Enter()
+	if err != nil {
+		return
+	}
+	defer release()
+
 	logger.Debug("Step executor started", logger.Fields{"poll_interval": se.pollInterval})
 
 	se.wg.Add(1)
@@ -98,6 +108,12 @@ func (se *StepExecutor) pollLoop() {
 
 // checkAndExecuteSteps checks for ready steps and executes them
 func (se *StepExecutor) checkAndExecuteSteps() {
+	release, err := se.admissionGate.Enter()
+	if err != nil {
+		return
+	}
+	defer release()
+
 	// Get all workspaces
 	workspaceIDs, err := se.workspaceStore.List()
 	if err != nil {
@@ -131,6 +147,12 @@ func (se *StepExecutor) checkAndExecuteSteps() {
 // whether work is needed at all and to dispatch executeStep — actual mutations
 // go through the canonical Get → mutate → Save serialized by the store lock.
 func (se *StepExecutor) processWorkflow(ws *Workspace, workflowID string) {
+	release, err := se.admissionGate.Enter()
+	if err != nil {
+		return
+	}
+	defer release()
+
 	workflow, err := ws.GetWorkflow(workflowID)
 	if err != nil {
 		return
@@ -388,6 +410,13 @@ func (se *StepExecutor) findStep(workflow *Workflow, stepID string) *WorkflowSte
 // goroutine. The terminal flip (Completed/Failed) is likewise atomic and is
 // followed by a workflow-completion check on the same fresh snapshot.
 func (se *StepExecutor) executeStep(ws *Workspace, workflow *Workflow, step *WorkflowStep) {
+	// Register before the claim and hand the permit to the worker without an
+	// idle gap. It covers the final workflow rollup as well as the task itself.
+	release, err := se.admissionGate.Enter()
+	if err != nil {
+		return
+	}
+
 	timeout := step.Timeout
 	if timeout == 0 {
 		timeout = 10 * time.Minute
@@ -422,6 +451,7 @@ func (se *StepExecutor) executeStep(ws *Workspace, workflow *Workflow, step *Wor
 			logger.Warn("Failed to claim step", logger.Fields{"id": stepID, "err": claimErr})
 		}
 		cancel()
+		release()
 		return
 	}
 
@@ -440,6 +470,7 @@ func (se *StepExecutor) executeStep(ws *Workspace, workflow *Workflow, step *Wor
 	se.wg.Add(1)
 	go func() {
 		defer se.wg.Done()
+		defer release()
 		defer cancel()
 		defer func() {
 			se.mu.Lock()

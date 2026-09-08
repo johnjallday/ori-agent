@@ -175,6 +175,7 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		Resolver: resolver,
 	}
 	briefService := dailybrief.NewService(store, synthesizer)
+	briefService.SetAdmissionGate(b.resetWork)
 
 	// Action Center notification: fires only for a successful/partial
 	// scheduled revision when the user opted in (PRD FR63/FR65). The
@@ -209,6 +210,7 @@ func (b *ServerBuilder) initializeDailyBrief() {
 
 	b.dailyBriefService = briefService
 	b.dailyBriefHandler = dailybriefhttp.NewHandler(briefService, b.personalHQService, b.userProvider)
+	b.dailyBriefHandler.SetAdmissionGate(b.resetWork)
 
 	// PAF reads aggregate the relationship, HQ, Daily Brief configuration, and
 	// model capability through narrow interfaces. Construction happens here so
@@ -286,4 +288,5 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	b.dailyBriefScheduler = dailybrief.NewScheduler(briefService, &personalHQWorkspaceLister{
 		service: b.personalHQService, relationship: b.personalAssistantStore,
 	}, dailyBriefSchedulerPollInterval)
+	b.dailyBriefScheduler.SetAdmissionGate(b.resetWork)
 }

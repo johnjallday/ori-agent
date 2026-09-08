@@ -1709,25 +1709,44 @@
                   <path d="M12,4C14.1,4 16.1,4.8 17.6,6.3C20.7,9.4 20.7,14.5 17.6,17.6C15.8,19.5 13.3,20.2 10.9,19.9L11.4,17.9C13.1,18.1 14.9,17.5 16.2,16.2C18.5,13.9 18.5,10.1 16.2,7.7C15.1,6.6 13.5,6 12,6V10.6L7,5.6L12,0.6V4M6.3,17.6C3.7,15 3.3,11 5.1,7.9L6.6,9.4C5.5,11.6 5.9,14.4 7.8,16.2C8.3,16.7 8.9,17.1 9.6,17.4L9,19.4C8,19 7.1,18.4 6.3,17.6Z"/>
                 </svg>
               </span>
-              <h2 class="settings-section-title" style="color: var(--danger-color);">Reset Application</h2>
+              <h2 class="settings-section-title" style="color: var(--danger-color);">Reset &amp; Recovery</h2>
             </div>
 
             <p class="settings-section-description">
-              Reset parts of the application to start fresh. Select what you want to reset below.
-              <strong style="color: var(--danger-color);">This action cannot be undone.</strong>
+              Replay guidance without deleting your work, or review the exact impact of a destructive data reset.
+              Selecting every data category is still not the separate Start Fresh journey.
             </p>
 
-            <!-- Getting Started (non-destructive; separate from the danger checkboxes) -->
             <div class="settings-field mb-4 pb-4" style="border-bottom: 1px solid var(--border-color);">
-              <label class="form-check-label mb-1" style="color: var(--text-primary);"><strong>Getting Started</strong></label>
-              <p class="settings-section-description mb-2">
-                Clear your quest-log progress and show the Getting Started quests from the beginning.
-                This only affects the quest log — nothing is deleted.
-              </p>
-              <div class="d-flex align-items-center gap-2">
-                <button id="resetGettingStartedBtn" class="btn btn-sm btn-outline-secondary">Reset Getting Started</button>
-                <span id="resetGettingStartedStatus" style="color: var(--text-secondary); font-size: 0.85rem;"></span>
+              <h3 class="h6 mb-3" style="color: var(--text-primary);">Replay guidance</h3>
+              <div class="mb-3">
+                <strong style="color: var(--text-primary);">Replay Setup</strong>
+                <p class="settings-section-description mb-2">
+                  Show setup steps again. Keep your names and profile, agents, workspaces, conversations,
+                  credentials, and Getting Started progress. This does not create a new identity.
+                </p>
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                  <button id="replaySetupBtn" class="btn btn-sm btn-outline-secondary">Replay Setup</button>
+                  <span id="replaySetupStatus" role="status" aria-live="polite" tabindex="-1" style="color: var(--text-secondary); font-size: 0.85rem;"></span>
+                  <button id="openReplaySetupBtn" class="btn btn-sm btn-secondary" type="button" hidden>Open Setup</button>
+                </div>
               </div>
+              <div>
+                <strong style="color: var(--text-primary);">Reset Getting Started</strong>
+                <p class="settings-section-description mb-2">
+                  Clear quest completions, skips, and dismissal so the quest log begins again. Keep setup
+                  completion and all user data; retained artifacts will not be backfilled as completed quests.
+                </p>
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                  <button id="resetGettingStartedBtn" class="btn btn-sm btn-outline-secondary">Reset Getting Started</button>
+                  <span id="resetGettingStartedStatus" role="status" aria-live="polite" tabindex="-1" style="color: var(--text-secondary); font-size: 0.85rem;"></span>
+                  <a id="openGettingStartedBtn" class="btn btn-sm btn-secondary" href="/" hidden>Open Getting Started</a>
+                </div>
+              </div>
+            </div>
+
+            <div class="alert alert-danger" role="note">
+              <strong>Reset selected data is destructive.</strong> Review its owner-resolved scope and preserved items before typing a confirmation. A browser reload is not an application restart.
             </div>
 
             <!-- Reset Options -->
@@ -1749,23 +1768,23 @@
               <div class="form-check mb-2">
                 <input class="form-check-input" type="checkbox" id="resetSessions">
                 <label class="form-check-label" for="resetSessions" style="color: var(--text-primary);">
-                  <strong>Database</strong>
-                  <small class="d-block" style="color: var(--text-secondary);">Delete all chat sessions, workspaces, and uploaded files</small>
+                  <strong>Conversation &amp; app records</strong>
+                  <small class="d-block" style="color: var(--text-secondary);">Shared app records and owned uploads; preserve and detach workspace/project folders and vault packages</small>
                 </label>
               </div>
               <div class="form-check mb-2">
                 <input class="form-check-input" type="checkbox" id="resetOnboarding">
                 <label class="form-check-label" for="resetOnboarding" style="color: var(--text-primary);">
-                  <strong>Onboarding State</strong>
-                  <small class="d-block" style="color: var(--text-secondary);">Reset app preferences and show onboarding again</small>
+                  <strong>Setup steps</strong>
+                  <small class="d-block" style="color: var(--text-secondary);">Replay setup completion only; keep identity, data, credentials, and quest progress</small>
                 </label>
               </div>
             </div>
 
             <!-- Quick Select -->
             <div class="mb-4 d-flex gap-2">
-              <button id="selectAllResetBtn" class="btn btn-sm btn-outline-secondary">Select All</button>
-              <button id="clearAllResetBtn" class="btn btn-sm btn-outline-secondary">Clear All</button>
+              <button id="selectAllResetBtn" class="btn btn-sm btn-outline-secondary">Select every category</button>
+              <button id="clearAllResetBtn" class="btn btn-sm btn-outline-secondary">Clear selection</button>
             </div>
 
             <!-- Reset Button -->
@@ -1774,8 +1793,30 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
                   <path d="M12,4C14.1,4 16.1,4.8 17.6,6.3C20.7,9.4 20.7,14.5 17.6,17.6C15.8,19.5 13.3,20.2 10.9,19.9L11.4,17.9C13.1,18.1 14.9,17.5 16.2,16.2C18.5,13.9 18.5,10.1 16.2,7.7C15.1,6.6 13.5,6 12,6V10.6L7,5.6L12,0.6V4M6.3,17.6C3.7,15 3.3,11 5.1,7.9L6.6,9.4C5.5,11.6 5.9,14.4 7.8,16.2C8.3,16.7 8.9,17.1 9.6,17.4L9,19.4C8,19 7.1,18.4 6.3,17.6Z"/>
                 </svg>
-                Reset Selected Items
+                Review selected data
               </button>
+            </div>
+            <section id="resetOperationPanel" class="mt-4 p-3 modern-card" aria-labelledby="resetOperationTitle" hidden>
+              <h3 id="resetOperationTitle" class="h6">Reset result</h3>
+              <p id="resetOperationStatus" role="status" aria-live="polite" aria-atomic="true" tabindex="-1"></p>
+              <ul id="resetOperationResults" class="mb-0"></ul>
+              <button id="openStartFreshSetupBtn" class="btn btn-primary mt-3" type="button" hidden>Open first-run setup</button>
+            </section>
+
+            <div class="settings-field mt-4 pt-4" style="border-top: 1px solid var(--danger-color);">
+              <h3 class="h6 mb-2" style="color: var(--danger-color);">Start Fresh</h3>
+              <p class="settings-section-description">
+                Return this Ori installation to verified first-run state. This clears app identity, setup and
+                progress, settings and saved provider/search keys, agents, app records, local integrations,
+                Ori-owned templates, activity, and generated runtime state. Workspace/project folders and vault
+                packages stay byte-for-byte in place but remain detached until you explicitly attach them again.
+                External CLI authentication and third-party accounts are not revoked.
+              </p>
+              <div class="d-grid">
+                <button id="startFreshBtn" class="btn btn-outline-danger" type="button">
+                  Review everything Start Fresh removes
+                </button>
+              </div>
             </div>
           </section>
 
@@ -1793,30 +1834,30 @@
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
               <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
             </svg>
-            Confirm Reset
+            <span id="resetConfirmTitleText">Confirm reviewed data reset</span>
           </h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          <button type="button" id="resetCloseBtn" class="btn-close" data-bs-dismiss="modal" aria-label="Close reset review"></button>
         </div>
         <div class="modal-body">
-          <div class="alert alert-danger mb-3">
+          <div id="resetConfirmWarning" class="alert alert-danger mb-3">
             <strong>Warning:</strong> You are about to permanently delete the following:
           </div>
           <ul id="resetItemsList" class="mb-3" style="color: var(--text-primary);"></ul>
-          <p style="color: var(--text-secondary);">
+          <label for="resetConfirmInput" id="resetConfirmInstructions" class="mb-2" style="color: var(--text-secondary);">
             To confirm, type <strong>RESET</strong> in the box below:
-          </p>
+          </label>
           <input type="text"
                  id="resetConfirmInput"
                  class="form-control settings-input"
                  placeholder="Type RESET to confirm"
                  autocomplete="off"
-                 aria-describedby="resetConfirmError">
+                 aria-describedby="resetConfirmInstructions resetConfirmError">
           <div id="resetConfirmError" class="text-danger mt-2" style="display: none;">
             Please type RESET exactly to confirm
           </div>
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" id="resetCancelBtn" class="btn btn-secondary" data-bs-dismiss="modal">Cancel reset</button>
           <button type="button" id="confirmResetBtn" class="btn btn-danger" disabled>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
               <path d="M12,4C14.1,4 16.1,4.8 17.6,6.3C20.7,9.4 20.7,14.5 17.6,17.6C15.8,19.5 13.3,20.2 10.9,19.9L11.4,17.9C13.1,18.1 14.9,17.5 16.2,16.2C18.5,13.9 18.5,10.1 16.2,7.7C15.1,6.6 13.5,6 12,6V10.6L7,5.6L12,0.6V4M6.3,17.6C3.7,15 3.3,11 5.1,7.9L6.6,9.4C5.5,11.6 5.9,14.4 7.8,16.2C8.3,16.7 8.9,17.1 9.6,17.4L9,19.4C8,19 7.1,18.4 6.3,17.6Z"/>
@@ -2026,6 +2067,7 @@
   <script defer src="/js/modules/settings-controller.js"></script>
   <script defer src="/js/modules/settings-navigation.js"></script>
   <script defer src="/js/modules/settings-page.js"></script>
+  <script defer src="/js/modules/settings-reset.js"></script>
   <script defer src="/js/modules/plugin-lifecycle.js"></script>
   <script defer src="/js/modules/blueprint-readiness.js"></script>
   <script defer src="/js/modules/workspace-building-art.js"></script>

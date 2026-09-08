@@ -8,21 +8,52 @@ import (
 	"strings"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 )
 
 type Handler struct {
-	store   Store
-	service *Service
+	admissionGate *resetstate.WorkGate
+	store         Store
+	service       *Service
 }
 
 func NewHandler(store Store, service *Service) *Handler {
 	return &Handler{store: store, service: service}
 }
 
+// SetAdmissionGate is initialization-only, before serving requests.
+func (h *Handler) SetAdmissionGate(gate *resetstate.WorkGate) { h.admissionGate = gate }
+
+func (h *Handler) enterMutation(w http.ResponseWriter) (func(), bool) {
+	release, err := h.admissionGate.Enter()
+	if err != nil {
+		w.Header().Set("Cache-Control", "no-store")
+		_ = orihttp.RespondError(w, http.StatusServiceUnavailable, err.Error())
+		return nil, false
+	}
+	return release, true
+}
+
 func (h *Handler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	if !orihttp.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
+	release, ok := h.enterMutation(w)
+	if !ok {
+		return
+	}
+	defer release()
+	childRelease, err := h.admissionGate.Enter()
+	if err != nil {
+		writeRunError(w, err)
+		return
+	}
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			childRelease()
+		}
+	}()
 	workspaceID := requireWorkspaceID(w, r)
 	if workspaceID == "" {
 		return
@@ -36,8 +67,13 @@ func (h *Handler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		writeRunError(w, err)
 		return
 	}
+	handedOff = true
+	// Detach from the request context so the run keeps executing after the
+	// response returns, while still carrying any request-scoped values.
+	runCtx := context.WithoutCancel(r.Context())
 	go func() {
-		_ = h.service.ExecuteRun(context.Background(), workspaceID, run.ID)
+		defer childRelease()
+		_ = h.service.ExecuteRun(runCtx, workspaceID, run.ID)
 	}()
 	orihttp.Created(w, run)
 }
@@ -96,6 +132,11 @@ func (h *Handler) StopRun(w http.ResponseWriter, r *http.Request) {
 	if !orihttp.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
+	release, ok := h.enterMutation(w)
+	if !ok {
+		return
+	}
+	defer release()
 	workspaceID, runID := requireWorkspaceAndRunID(w, r)
 	if workspaceID == "" || runID == "" {
 		return
@@ -111,6 +152,11 @@ func (h *Handler) ApproveRun(w http.ResponseWriter, r *http.Request) {
 	if !orihttp.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
+	release, ok := h.enterMutation(w)
+	if !ok {
+		return
+	}
+	defer release()
 	workspaceID, runID := requireWorkspaceAndRunID(w, r)
 	if workspaceID == "" || runID == "" {
 		return
@@ -134,6 +180,11 @@ func (h *Handler) RejectRun(w http.ResponseWriter, r *http.Request) {
 	if !orihttp.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
+	release, ok := h.enterMutation(w)
+	if !ok {
+		return
+	}
+	defer release()
 	workspaceID, runID := requireWorkspaceAndRunID(w, r)
 	if workspaceID == "" || runID == "" {
 		return
@@ -226,6 +277,9 @@ func writeRunError(w http.ResponseWriter, err error) {
 		orihttp.NotFound(w, "Workspace run not found")
 	case errors.Is(err, ErrRunExists):
 		orihttp.Conflict(w, "Workspace run already exists")
+	case errors.Is(err, resetstate.ErrWorkFenced), errors.Is(err, resetstate.ErrWorkUntracked):
+		w.Header().Set("Cache-Control", "no-store")
+		_ = orihttp.RespondError(w, http.StatusServiceUnavailable, err.Error())
 	case errors.Is(err, ErrProfileNotFound), errors.Is(err, ErrExecutorNotRegistered):
 		orihttp.BadRequest(w, err.Error())
 	case strings.Contains(err.Error(), "reference_url"):

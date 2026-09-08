@@ -8,6 +8,22 @@ import (
 	"testing"
 )
 
+func TestDefaultSecretStoreCanExplicitlyAvoidNativeCredentialCommands(t *testing.T) {
+	t.Setenv("ORI_DATA_DIR", t.TempDir())
+	t.Setenv("ORI_VAULT_PASSPHRASE", "fixture-only-passphrase")
+	t.Setenv("ORI_DISABLE_NATIVE_SECRET_STORE", "1")
+	secrets := NewDefaultSecretStoreForNamespace("owned-fixture")
+	if status := secrets.Status(); status.Backend != BackendPassphraseFallback || !status.Available || !status.Writable {
+		t.Fatalf("isolated secret backend = %+v", status)
+	}
+	if err := secrets.Set(SecretKeyOpenAIAPIKey, "fixture-value"); err != nil {
+		t.Fatal(err)
+	}
+	if value, err := secrets.Get(SecretKeyOpenAIAPIKey); err != nil || value != "fixture-value" {
+		t.Fatalf("isolated secret round trip = %q, %v", value, err)
+	}
+}
+
 type fakeRunner struct {
 	calls []fakeCall
 	resp  map[string]fakeResponse

@@ -149,6 +149,16 @@ func defaultCLIMCPDir() string {
 	return filepath.Join(".", "cli-mcp")
 }
 
+// PersistenceRoots reports the installation-owned Claude config directory and
+// the external Codex home. Start Fresh may clear the former; the latter is
+// inspection-only because auth.json and user config must survive.
+func (s *CLIMCPConfigStore) PersistenceRoots() (string, string) {
+	if s == nil {
+		return "", ""
+	}
+	return s.claudeDir, s.codexHome
+}
+
 // ClaudeConfigPath returns the per-workspace Claude `--mcp-config` file path.
 func (s *CLIMCPConfigStore) ClaudeConfigPath(workspaceID string) string {
 	return filepath.Join(s.claudeDir, cliSafeName(workspaceID)+".mcp.json")

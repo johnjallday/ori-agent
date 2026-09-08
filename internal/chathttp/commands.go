@@ -1,6 +1,7 @@
 package chathttp
 
 import (
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -8,6 +9,7 @@ import (
 
 // CommandHandler handles special chat commands
 type CommandHandler struct {
+	admissionGate  *resetstate.WorkGate
 	store          store.Store
 	workspaceStore workspace.Store
 	shutdownFunc   func()
@@ -27,6 +29,11 @@ func NewCommandHandler(store store.Store) *CommandHandler {
 // SetWorkspaceStore sets the workspace store for workspace commands
 func (ch *CommandHandler) SetWorkspaceStore(ws workspace.Store) {
 	ch.workspaceStore = ws
+}
+
+// SetAdmissionGate configures reset ownership for detached commands.
+func (ch *CommandHandler) SetAdmissionGate(gate *resetstate.WorkGate) {
+	ch.admissionGate = gate
 }
 
 // SetShutdownFunc sets the shutdown function to be called on exit

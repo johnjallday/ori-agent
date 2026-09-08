@@ -20,6 +20,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/calendar"
 	"github.com/johnjallday/ori-agent/internal/mcp"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
@@ -73,11 +74,12 @@ type connectorStatus struct {
 
 // Handler serves the Calendar Ops setup API.
 type Handler struct {
-	folders  FolderStore
-	lister   WorkspaceLister
-	registry *mcp.Registry
-	config   *mcp.ConfigManager
-	provider userprofile.UserProvider
+	admissionGate *resetstate.WorkGate
+	folders       FolderStore
+	lister        WorkspaceLister
+	registry      *mcp.Registry
+	config        *mcp.ConfigManager
+	provider      userprofile.UserProvider
 
 	// connectorStatusFn resolves a bound server's runtime status. Injectable so
 	// setup-state tests can drive every transition without a live registry.
@@ -122,6 +124,10 @@ func NewHandler(folders FolderStore, lister WorkspaceLister, registry *mcp.Regis
 	h.confirmations = newConfirmationStore(confirmationTTL)
 	return h
 }
+
+// SetAdmissionGate configures reset admission before Calendar Ops owner access
+// and detached Meeting Prep dispatch.
+func (h *Handler) SetAdmissionGate(gate *resetstate.WorkGate) { h.admissionGate = gate }
 
 // WithConnectorStatusFn overrides connector-status resolution (tests).
 func (h *Handler) WithConnectorStatusFn(fn func(serverName string) connectorStatus) *Handler {

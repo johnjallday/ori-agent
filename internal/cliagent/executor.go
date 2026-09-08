@@ -8,15 +8,17 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 )
 
 // MicroStepExecutor coordinates the micro-step execution loop for CLI agent tasks.
 type MicroStepExecutor struct {
-	registry    *CLIAgentRegistry
-	planner     *StepPlanner
-	eventLogger *EventLogger
-	diff        *DiffDetector
-	costTracker *llm.CostTracker
+	registry      *CLIAgentRegistry
+	planner       *StepPlanner
+	eventLogger   *EventLogger
+	diff          *DiffDetector
+	costTracker   *llm.CostTracker
+	admissionGate *resetstate.WorkGate
 
 	mu            sync.Mutex
 	running       map[string]context.CancelFunc // taskID -> cancel
@@ -42,6 +44,13 @@ func NewMicroStepExecutor(
 	}
 }
 
+// SetAdmissionGate wires the shared runtime gate before the executor is used.
+// It cannot establish ownership of processes spawned by an adapter; the reset
+// host must still block unverified external-child ownership separately.
+func (e *MicroStepExecutor) SetAdmissionGate(gate *resetstate.WorkGate) {
+	e.admissionGate = gate
+}
+
 // SetMaxConcurrent sets the maximum number of concurrent tasks.
 func (e *MicroStepExecutor) SetMaxConcurrent(n int) {
 	e.mu.Lock()
@@ -62,6 +71,12 @@ func (e *MicroStepExecutor) Execute(ctx context.Context, config TaskConfig) (*Ta
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
+
+	release, err := e.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release() // Includes final event persistence and usage reporting.
 
 	// Check concurrency limit
 	e.mu.Lock()

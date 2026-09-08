@@ -34,7 +34,7 @@ func (db *DB) migrate(ctx context.Context) error {
 	}
 
 	if currentVersion > schemaVersion {
-		return fmt.Errorf("database schema version %d is newer than supported %d; reset the database or migrate manually", currentVersion, schemaVersion)
+		return fmt.Errorf("database schema version %d is newer than supported %d; preserve the database and use a compatible Ori version", currentVersion, schemaVersion)
 	}
 
 	if currentVersion >= schemaVersion {

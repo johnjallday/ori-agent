@@ -35,7 +35,33 @@ type Manager struct {
 // Personal-assistant onboarding is the only supported first-run path; older
 // state files are upgraded in memory and persisted by the next write.
 func NewManager(statePath string) *Manager {
-	m := &Manager{
+	m, err := OpenForReset(statePath)
+	if err == nil {
+		return m
+	}
+	// Ordinary startup historically recovers an unreadable file with canonical
+	// defaults. Destructive pre-start reset uses OpenForReset directly and must
+	// not overwrite unreadable retained fields with those defaults.
+	logger.Verbosef("Warning: failed to load onboarding state from %s: %v", statePath, err)
+	return newManagerDefaults(statePath)
+}
+
+// OpenForReset loads the app-state owner strictly. Missing state is canonical
+// first-run state; unreadable or malformed state is an error so a scoped reset
+// cannot silently erase identity/progression fields it promised to retain.
+func OpenForReset(statePath string) (*Manager, error) {
+	m := newManagerDefaults(statePath)
+	if err := m.load(); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	m.mu.Lock()
+	m.ensureStateDefaultsUnlocked()
+	m.mu.Unlock()
+	return m, nil
+}
+
+func newManagerDefaults(statePath string) *Manager {
+	return &Manager{
 		statePath: statePath,
 		state: &types.AppState{
 			Version: version.Version,
@@ -48,19 +74,11 @@ func NewManager(statePath string) *Manager {
 			AssistantName:     DefaultAssistantName,
 		},
 	}
-
-	// A missing or unreadable file falls back to canonical defaults so
-	// onboarding remains recoverable.
-	if err := m.load(); err != nil {
-		logger.Verbosef("Warning: failed to load onboarding state from %s: %v", statePath, err)
-	}
-
-	m.mu.Lock()
-	m.ensureStateDefaultsUnlocked()
-	m.mu.Unlock()
-
-	return m
 }
+
+// PersistencePath reports the authoritative app-state location without loading
+// or saving state. Resetting setup steps must not delete this whole file.
+func (m *Manager) PersistencePath() string { return m.statePath }
 
 // IsOnboardingComplete returns true if onboarding has been completed or skipped
 func (m *Manager) IsOnboardingComplete() bool {
@@ -139,13 +157,18 @@ func (m *Manager) ResetOnboarding() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	previous := m.state.Onboarding
 	m.state.Onboarding = types.OnboardingState{
 		Completed:      false,
 		CurrentStep:    0,
 		StepsCompleted: []string{},
 		StepsSkipped:   []string{},
 	}
-	return m.saveUnlocked()
+	if err := m.saveUnlocked(); err != nil {
+		m.state.Onboarding = previous
+		return err
+	}
+	return nil
 }
 
 // SkipStep marks a step as skipped and advances to the next step
@@ -288,9 +311,14 @@ func (m *Manager) SetProgression(p types.ProgressionState) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	previous := m.state.Progression
 	cp := cloneProgression(p)
 	m.state.Progression = &cp
-	return m.saveUnlocked()
+	if err := m.saveUnlocked(); err != nil {
+		m.state.Progression = previous
+		return err
+	}
+	return nil
 }
 
 // cloneProgression deep-copies the completion and skip maps so callers can't

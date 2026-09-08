@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/url"
@@ -13,12 +14,14 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/cliagent"
+	"github.com/johnjallday/ori-agent/internal/downloadsjanitor"
 	"github.com/johnjallday/ori-agent/internal/featureflags"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/privateservices"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspaceplan"
@@ -38,12 +41,24 @@ type Server struct {
 
 	desktopOpener platform.DesktopOpener
 
+	// Hosted instances share the lease's process-lifetime gate. Remaining
+	// writers, child ownership and pre-start apply still block a Lifecycle.
+	resetWork  *resetstate.WorkGate
+	resetLease *resetstate.Lease
+
 	// workspacePlanAuto drives approved automatic Plans. Its loops are not
 	// owned by any request, so shutdown has to stop them explicitly or a
 	// closing process keeps dispatching work.
-	workspacePlanAuto        *workspaceplan.AutoRunner
-	workspaceSurfaceServices *workspacesurface.ServiceManager
-	projectTemplateCatalog   projecttemplates.RuntimeCatalog
+	workspacePlanAuto          *workspaceplan.AutoRunner
+	downloadsJanitorAutomation *downloadsjanitor.Automation
+	workspaceSurfaceServices   *workspacesurface.ServiceManager
+	workspaceFileStore         *workspace.FileStore
+	projectTemplateCatalog     projecttemplates.RuntimeCatalog
+
+	shutdownOnce   sync.Once
+	shutdownErr    error
+	resetCloseOnce sync.Once
+	resetCloseErr  error
 }
 
 func (s *Server) resolvedDesktopOpener() platform.DesktopOpener {
@@ -55,7 +70,13 @@ func (s *Server) resolvedDesktopOpener() platform.DesktopOpener {
 
 // New creates and initializes a new Server with all dependencies using the ServerBuilder.
 func New() (*Server, error) {
-	builder, err := NewServerBuilder()
+	return NewWithResetLease(nil)
+}
+
+// NewWithResetLease is used by process hosts after BeforeStores. It does not
+// enable destructive reset: writer coverage and pre-start apply are incomplete.
+func NewWithResetLease(lease *resetstate.Lease) (*Server, error) {
+	builder, err := NewServerBuilderWithResetLease(lease)
 	if err != nil {
 		return nil, err
 	}
@@ -67,17 +88,28 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	registerRoutes(mux, s)
 
-	// Apply middleware chain: SecurityHeaders -> ErrorRecovery -> CORS -> routes
+	// Apply middleware chain: SecurityHeaders -> ErrorRecovery -> CORS -> admission -> routes
 	handler := orihttp.Chain(
 		orihttp.SecurityHeaders(),
 		orihttp.ErrorRecovery(),
-	)(s.CORSMiddleware(mux))
+	)(s.CORSMiddleware(s.resetAdmissionMiddleware(mux)))
 
 	return handler
 }
 
 // Start starts background services (task executor, etc.)
 func (s *Server) Start() {
+	release, err := enterResetRuntime(s.resetLease, s.resetWork)
+	if err != nil {
+		if s.resetLease != nil && !errors.Is(err, resetstate.ErrWorkFenced) {
+			// Constructors already ran. A newly changed root or recovery record
+			// cannot leave HTTP writers open while background startup is refused.
+			s.resetLease.MarkUncertain()
+		}
+		return
+	}
+	defer release()
+
 	s.cleanupStaleWorkspaceManagerAgents()
 
 	if s.Handlers != nil && s.Handlers.Plugin != nil {
@@ -135,40 +167,53 @@ func isStaleWorkspaceManagerAgent(ag *agent.Agent) bool {
 	return false
 }
 
-// Shutdown gracefully shuts down background services
+// Shutdown gracefully shuts down background services. It deliberately leaves
+// the shared stores open for the menubar's same-process Stop/Start behavior.
 func (s *Server) Shutdown() {
-	// Stop plugin source checks before workspace plugin services. A check may be
-	// waiting on the manager operation gate while a service mutation completes.
-	if s.Handlers != nil && s.Handlers.Plugin != nil {
-		s.Handlers.Plugin.UpdateChecker().Stop()
+	if err := s.shutdownBackground(context.Background()); err != nil {
+		logger.Warn("Background service shutdown was incomplete", logger.Fields{"error": err})
 	}
+}
 
-	// Stop background services. Automatic plan execution goes first: it
-	// dispatches THROUGH the task machinery, so stopping it before that
-	// machinery means nothing is queuing new work into a service that is
-	// already closing.
-	if s.workspacePlanAuto != nil {
-		s.workspacePlanAuto.Stop()
-	}
-	if s.Workflow != nil {
-		s.Workflow.Shutdown()
-	}
-	if s.workspaceSurfaceServices != nil {
-		_ = s.workspaceSurfaceServices.Shutdown()
-	}
-	if s.Handlers != nil && s.Handlers.SessionFiles != nil {
-		if watcher := s.Handlers.SessionFiles.Watcher(); watcher != nil {
-			_ = watcher.Close()
+func (s *Server) shutdownBackground(ctx context.Context) error {
+	s.shutdownOnce.Do(func() {
+		// Stop plugin source checks before workspace plugin services. A check may
+		// be waiting on the manager operation gate while a service mutation completes.
+		if s.Handlers != nil && s.Handlers.Plugin != nil {
+			s.Handlers.Plugin.UpdateChecker().Stop()
 		}
-	}
 
-	// Shutdown folder picker if running
-	workspace.ShutdownFolderPicker()
+		// Automatic plans dispatch through the task machinery, so stop them first.
+		if s.workspacePlanAuto != nil {
+			s.workspacePlanAuto.Stop()
+		}
+		if s.downloadsJanitorAutomation != nil {
+			s.downloadsJanitorAutomation.Stop()
+		}
+		if s.Workflow != nil {
+			s.Workflow.Shutdown()
+		}
+		if s.workspaceSurfaceServices != nil {
+			s.shutdownErr = errors.Join(s.shutdownErr, s.workspaceSurfaceServices.Shutdown())
+		}
+		if s.Handlers != nil && s.Handlers.SessionFiles != nil {
+			if watcher := s.Handlers.SessionFiles.Watcher(); watcher != nil {
+				s.shutdownErr = errors.Join(s.shutdownErr, watcher.Close())
+			}
+		}
+		if s.Storage != nil && s.Storage.LocationManager != nil {
+			s.Storage.LocationManager.Stop()
+		}
 
-	// Shutdown gateway
-	if s.Core != nil && s.Core.Gateway != nil {
-		_ = s.Core.Gateway.Shutdown(context.Background())
-	}
+		// The helper can only call back through fenced ordinary HTTP, but ask it
+		// to exit before destructive application anyway.
+		s.shutdownErr = errors.Join(s.shutdownErr, workspace.ShutdownFolderPicker(ctx))
+
+		if s.Core != nil && s.Core.Gateway != nil {
+			s.shutdownErr = errors.Join(s.shutdownErr, s.Core.Gateway.Shutdown(ctx))
+		}
+	})
+	return s.shutdownErr
 }
 
 // HTTPServer returns a fully configured http.Server.

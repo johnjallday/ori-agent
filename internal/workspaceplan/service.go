@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 )
 
 // Service is the app-owned lifecycle authority for Plans.
@@ -16,8 +18,9 @@ import (
 // explicit user action, and nothing that materialized work can be deleted
 // (FR-14, FR-15, FR-17, FR-59).
 type Service struct {
-	store Store
-	now   func() time.Time
+	admissionGate *resetstate.WorkGate
+	store         Store
+	now           func() time.Time
 	// progress derives the Plan read model from live Task and Run state. It is
 	// optional: with no source, a Plan reads without progress rather than with
 	// a persisted copy of execution state (FR-12).
@@ -73,6 +76,9 @@ func NewService(store Store, opts ...ServiceOption) *Service {
 	return service
 }
 
+// SetAdmissionGate configures reset admission before lifecycle operations.
+func (s *Service) SetAdmissionGate(gate *resetstate.WorkGate) { s.admissionGate = gate }
+
 // CreateInput is the request to start a new Plan.
 type CreateInput struct {
 	// Request is the initiating text. It is stored verbatim and separately
@@ -94,6 +100,11 @@ type CreateInput struct {
 // Create starts a new Plan in draft. It creates no Tasks, writes no artifacts,
 // and starts nothing: a Plan existing is not a Plan being approved (FR-20).
 func (s *Service) Create(ctx context.Context, workspaceID string, input CreateInput) (*Plan, error) {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	workspaceID = strings.TrimSpace(workspaceID)
 	if workspaceID == "" {
 		return nil, fmt.Errorf("%w: a plan requires an owning workspace", ErrValidation)
@@ -182,6 +193,11 @@ func (s *Service) Get(ctx context.Context, workspaceID, planID string) (*Plan, e
 
 // List returns the workspace's Plans for the Active or History section.
 func (s *Service) List(ctx context.Context, workspaceID string, filter ListFilter) ([]*Plan, error) {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	plans, err := s.store.ListPlans(ctx, workspaceID, filter)
 	if err != nil {
 		return nil, err
@@ -238,6 +254,11 @@ type TransitionInput struct {
 // Transition validates and applies one status change, recording it in the
 // Plan's append-only history (FR-14, FR-15).
 func (s *Service) Transition(ctx context.Context, workspaceID, planID string, input TransitionInput) (*Plan, error) {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	plan, err := s.store.GetPlan(ctx, workspaceID, planID)
 	if err != nil {
 		return nil, err
@@ -266,6 +287,11 @@ func (s *Service) Transition(ctx context.Context, workspaceID, planID string, in
 // versions, approvals, Task links, Run links, artifacts, and activity all stay
 // exactly as they were (FR-16).
 func (s *Service) Archive(ctx context.Context, workspaceID, planID, reason, actor string) (*Plan, error) {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	plan, err := s.store.GetPlan(ctx, workspaceID, planID)
 	if err != nil {
 		return nil, err
@@ -293,6 +319,11 @@ func (s *Service) Archive(ctx context.Context, workspaceID, planID, reason, acto
 // one back would imply its old approval still authorizes work, and it does not
 // (FR-38, FR-74).
 func (s *Service) Reopen(ctx context.Context, workspaceID, planID, actor string) (*Plan, error) {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	plan, err := s.store.GetPlan(ctx, workspaceID, planID)
 	if err != nil {
 		return nil, err
@@ -325,6 +356,11 @@ func (s *Service) Reopen(ctx context.Context, workspaceID, planID, actor string)
 // inside the same transaction that does the delete, closing the window where a
 // Task could be linked between the check and the removal.
 func (s *Service) Delete(ctx context.Context, workspaceID, planID string) error {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	return s.store.DeletePlan(ctx, workspaceID, planID)
 }
 

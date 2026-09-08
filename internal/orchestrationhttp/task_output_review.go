@@ -13,6 +13,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/platform"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -169,6 +170,11 @@ func (th *TaskHandler) handleSaveTaskResult(w http.ResponseWriter, r *http.Reque
 }
 
 func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Request) {
+	release, ok := th.enterTaskRequest(w)
+	if !ok {
+		return
+	}
+	defer release()
 	w.Header().Set("Content-Type", "application/json")
 
 	if r.Method != http.MethodPost {
@@ -267,6 +273,10 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 		reviewValidation = validation
 	case "rerun":
 		if err := th.startTaskOutputReviewRerun(ws.ID, task.ID); err != nil {
+			if errors.Is(err, resetstate.ErrWorkFenced) {
+				respondTaskAdmissionError(w, err)
+				return
+			}
 			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Failed to re-run task", err)
 			return
 		}
@@ -575,6 +585,11 @@ func resolveTaskReviewHistoryIndex(task *workspace.Task, requested *int) int {
 }
 
 func (th *TaskHandler) startTaskOutputReviewRerun(workspaceID, taskID string) error {
+	release, err := th.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	if th.taskHandler == nil {
 		return fmt.Errorf("task execution not available")
 	}
@@ -601,8 +616,7 @@ func (th *TaskHandler) startTaskOutputReviewRerun(workspaceID, taskID string) er
 				return fmt.Errorf("all subtasks must be assigned to an agent before execution")
 			}
 		}
-		go th.executeParentTaskSequence(ws.ID, task.ID)
-		return nil
+		return th.startTaskWork(func() { th.executeParentTaskSequence(ws.ID, task.ID) })
 	}
 
 	if err := task.SetStatus(workspace.TaskStatusPending); err != nil {
@@ -616,7 +630,7 @@ func (th *TaskHandler) startTaskOutputReviewRerun(workspaceID, taskID string) er
 		return err
 	}
 
-	go func() {
+	return th.startTaskWork(func() {
 		fresh, err := th.workspaceStore.Get(workspaceID)
 		if err != nil {
 			logger.Error("Failed to reload workspace for review re-run", logger.Fields{"workspace_id": workspaceID, "error": err})
@@ -634,8 +648,7 @@ func (th *TaskHandler) startTaskOutputReviewRerun(workspaceID, taskID string) er
 			}
 			logger.Error("Review task re-run failed", logger.Fields{"task_id": taskID, "error": err})
 		}
-	}()
-	return nil
+	})
 }
 
 func appendApprovedTaskCSV(store workspace.Store, ws *workspace.Workspace, task *workspace.Task, csvData string) error {

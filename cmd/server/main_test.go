@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,8 +11,33 @@ import (
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
 )
+
+func TestActivatedInstallationRefusesPendingResetBeforeStores(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	t.Setenv("ORI_DATA_DIR", filepath.Join(root, "owned-installation"))
+	if err := ensureDataDirectory(); err != nil {
+		t.Fatal(err)
+	}
+	dataDir := os.Getenv("ORI_DATA_DIR")
+	if err := os.Mkdir(filepath.Join(dataDir, resetstate.Directory), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, resetstate.Directory, "operation.json"), []byte(`{"future":99}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if lease, err := resetstate.BeforeStores(dataDir); lease != nil || !errors.Is(err, resetstate.ErrRecoveryRequired) {
+		t.Fatal("startup ignored reset evidence:", err)
+	}
+	for _, name := range []string{"settings.json", "app_state.json", "agents.json", "sessions.db"} {
+		if _, err := os.Stat(filepath.Join(dataDir, name)); !os.IsNotExist(err) {
+			t.Fatal("store constructed before recovery:", name, err)
+		}
+	}
+}
 
 func TestResolveDataDirectory(t *testing.T) {
 	launchDir := filepath.Join(string(filepath.Separator), "tmp", "ori-launch")

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,9 +15,11 @@ import (
 
 // Channel implements gateway.Channel for terminal interaction
 type Channel struct {
-	id     string
-	logger *logger.Logger
-	cancel context.CancelFunc
+	id            string
+	logger        *logger.Logger
+	mu            sync.Mutex
+	cancel        context.CancelFunc
+	stopRequested bool
 }
 
 // NewConsoleChannel creates a new console channel
@@ -36,58 +39,73 @@ func (c *Channel) Type() string { return "console" }
 // Start begins listening for input from os.Stdin
 func (c *Channel) Start(ctx context.Context, handler gateway.Handler) error {
 	ctx, cancel := context.WithCancel(ctx)
+	c.mu.Lock()
+	if c.stopRequested {
+		c.mu.Unlock()
+		cancel()
+		return nil
+	}
 	c.cancel = cancel
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		c.cancel = nil
+		c.mu.Unlock()
+		cancel()
+	}()
 
 	scanner := bufio.NewScanner(os.Stdin)
 
-	// We use a goroutine to not block the main server startup
-	go func() {
-		// Small delay to allow other startup logs to finish
-		time.Sleep(1 * time.Second)
-		fmt.Println("\n>>> Console Channel Active. Type your message and press Enter.")
-		fmt.Print("> ")
+	// RegisterChannel already runs Start on its owned goroutine. Stay in this
+	// method for the channel lifetime so reset admission is retained until all
+	// input handling has ended instead of releasing while an inner goroutine
+	// can still dispatch messages.
+	time.Sleep(1 * time.Second)
+	fmt.Println("\n>>> Console Channel Active. Type your message and press Enter.")
+	fmt.Print("> ")
 
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				if !scanner.Scan() {
-					return
-				}
-				text := scanner.Text()
-				if text == "" {
-					fmt.Print("> ")
-					continue
-				}
-
-				msg := gateway.Message{
-					ID:      uuid.New(),
-					Content: text,
-					Sender: gateway.Sender{
-						ID:       "local-user",
-						Name:     "Console User",
-						Platform: "console",
-						IsBot:    false,
-					},
-					Timestamp: time.Now(),
-				}
-
-				if err := handler(ctx, msg); err != nil {
-					c.logger.Error("failed to handle console message", logger.Fields{"error": err})
-				}
-				fmt.Print("> ")
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+			if !scanner.Scan() {
+				return scanner.Err()
 			}
-		}
-	}()
+			text := scanner.Text()
+			if text == "" {
+				fmt.Print("> ")
+				continue
+			}
 
-	return nil
+			msg := gateway.Message{
+				ID:      uuid.New(),
+				Content: text,
+				Sender: gateway.Sender{
+					ID:       "local-user",
+					Name:     "Console User",
+					Platform: "console",
+					IsBot:    false,
+				},
+				Timestamp: time.Now(),
+			}
+
+			if err := handler(ctx, msg); err != nil {
+				c.logger.Error("failed to handle console message", logger.Fields{"error": err})
+			}
+			fmt.Print("> ")
+		}
+	}
 }
 
 // Stop stops the console channel
 func (c *Channel) Stop(ctx context.Context) error {
-	if c.cancel != nil {
-		c.cancel()
+	c.mu.Lock()
+	c.stopRequested = true
+	cancel := c.cancel
+	c.mu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 	return nil
 }

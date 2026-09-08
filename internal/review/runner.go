@@ -5,18 +5,20 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
 )
 
 // Runner orchestrates the review process.
 type Runner struct {
-	store        Store
-	sessionStore session.SessionStore
-	toolStore    session.ToolCallStore
-	agentStore   store.Store
-	config       DetectionConfig
-	detector     *Detector
+	admissionGate *resetstate.WorkGate
+	store         Store
+	sessionStore  session.SessionStore
+	toolStore     session.ToolCallStore
+	agentStore    store.Store
+	config        DetectionConfig
+	detector      *Detector
 
 	mu      sync.RWMutex
 	running map[string]*Run // Active runs by ID
@@ -34,6 +36,10 @@ func NewRunner(reviewStore Store, sessionStore session.SessionStore, toolStore s
 	}
 }
 
+// SetAdmissionGate configures reset ownership before review records or detached
+// review work touch their owners.
+func (r *Runner) SetAdmissionGate(gate *resetstate.WorkGate) { r.admissionGate = gate }
+
 // SetAgentStore sets the agent store for checking per-agent review settings.
 func (r *Runner) SetAgentStore(agentStore store.Store) {
 	r.agentStore = agentStore
@@ -41,6 +47,18 @@ func (r *Runner) SetAgentStore(agentStore store.Store) {
 
 // StartReview begins a new review job asynchronously and returns the job ID.
 func (r *Runner) StartReview(ctx context.Context, opts Options) (string, error) {
+	// Transfer this permit to the detached review before returning its ID. It
+	// covers initial persistence, every read/write and final status update.
+	finishReview, err := r.admissionGate.Enter()
+	if err != nil {
+		return "", err
+	}
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			finishReview()
+		}
+	}()
 	// Create the review run record
 	run, err := r.store.CreateReviewRun(ctx)
 	if err != nil {
@@ -52,8 +70,13 @@ func (r *Runner) StartReview(ctx context.Context, opts Options) (string, error) 
 	r.running[run.ID] = run
 	r.mu.Unlock()
 
-	// Start the review in a goroutine
-	go r.executeReview(run.ID, opts)
+	// Start the review in a goroutine only after ownership and the durable
+	// running record both exist.
+	handedOff = true
+	go func() {
+		defer finishReview()
+		r.executeReview(run.ID, opts)
+	}()
 
 	return run.ID, nil
 }

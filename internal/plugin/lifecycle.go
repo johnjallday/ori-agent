@@ -31,6 +31,7 @@ type Manager struct {
 	marketplaces *MarketplaceStore
 	artifacts    *ArtifactInstaller
 	surfaces     contributionLifecycle
+	pluginsDir   string
 	cloneDir     string
 	previewDir   string
 }
@@ -45,8 +46,25 @@ func NewManager(reg MCPRegistrar, skills SkillInstaller, pluginsDir, cloneDir st
 		store:        NewStore(pluginsDir),
 		marketplaces: NewMarketplaceStore(pluginsDir),
 		artifacts:    NewArtifactInstaller(pluginsDir),
+		pluginsDir:   pluginsDir,
 		cloneDir:     cloneDir,
 		previewDir:   filepath.Join(pluginsDir, "preview"),
+	}
+}
+
+// FreshPersistencePaths reports only managed plugin state. Linked source paths
+// are deliberately absent and therefore survive Start Fresh.
+func (m *Manager) FreshPersistencePaths() map[string]string {
+	if m == nil {
+		return nil
+	}
+	return map[string]string{
+		"plugin_registry":     filepath.Join(m.pluginsDir, "installed.json"),
+		"plugin_marketplaces": filepath.Join(m.pluginsDir, "marketplaces.json"),
+		"plugin_clones":       m.cloneDir,
+		"plugin_state":        filepath.Join(m.pluginsDir, "state"),
+		"plugin_artifacts":    filepath.Join(m.pluginsDir, "artifacts"),
+		"plugin_preview":      m.previewDir,
 	}
 }
 

@@ -108,6 +108,13 @@ func (h *Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 	if !orihttp.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
+	finishRequest, err := h.admissionGate.Enter()
+	if err != nil {
+		w.Header().Set("Cache-Control", "no-store")
+		_ = orihttp.RespondError(w, http.StatusServiceUnavailable, "reset_pending")
+		return
+	}
+	defer finishRequest()
 	var req prepareEventRequest
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -195,11 +202,20 @@ func (h *Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Deliberately context.Background(), not r.Context(): the whole point of
-	// "asynchronous" (task 6.2) is that this run must survive the HTTP
-	// response, which cancels the request context the instant this handler
-	// returns.
-	go h.runPrepTask(context.Background(), gw.Workspace.ID, dispatchedTask, link.ID, evt) // #nosec G118 -- request-scoped context would cancel the prep run the instant this handler returns; see comment above
+	// Register the detached child before acknowledging. Keep request values but
+	// not response cancellation, and retain ownership through note/link finalization.
+	finishPrep, err := h.admissionGate.Enter()
+	if err != nil {
+		_ = h.meetingPreps.MarkFailed(r.Context(), link.ID, "reset admission unavailable")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = orihttp.RespondError(w, http.StatusServiceUnavailable, "reset_pending")
+		return
+	}
+	prepCtx := context.WithoutCancel(r.Context())
+	go func() {
+		defer finishPrep()
+		h.runPrepTask(prepCtx, gw.Workspace.ID, dispatchedTask, link.ID, evt)
+	}()
 
 	_ = orihttp.RespondSuccess(w, prepareEventResponse{Status: meetingprep.StatusPending, AlreadyRunning: false})
 }

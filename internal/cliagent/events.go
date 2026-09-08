@@ -23,6 +23,14 @@ func NewEventLogger(dataDir string) *EventLogger {
 	}
 }
 
+// PersistenceRoot reports the concrete owned CLI event directory.
+func (l *EventLogger) PersistenceRoot() string {
+	if l == nil {
+		return ""
+	}
+	return filepath.Join(l.dataDir, "cli_agent_tasks")
+}
+
 // LogEvent appends an event to the given task's log.
 func (l *EventLogger) LogEvent(taskID string, event CLIEvent) {
 	l.mu.Lock()
@@ -54,7 +62,7 @@ func (l *EventLogger) GetEvents(taskID string) []CLIEvent {
 
 // taskDir returns the directory for a task's persisted data.
 func (l *EventLogger) taskDir(taskID string) string {
-	return filepath.Join(l.dataDir, "cli_agent_tasks", taskID)
+	return filepath.Join(l.PersistenceRoot(), taskID)
 }
 
 // Persist writes the event log to disk as JSON.

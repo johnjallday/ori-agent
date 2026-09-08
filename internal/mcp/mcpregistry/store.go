@@ -3,6 +3,7 @@ package mcpregistry
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -25,20 +26,32 @@ type cacheFileData struct {
 // Store manages persistence of registry sources and fetched entry cache.
 type Store struct {
 	mu      sync.RWMutex
+	baseDir string
 	sources []RegistrySource
 	cache   []RegistryEntry
 	cacheAt time.Time
 }
 
 // NewStore creates a Store and loads persisted data from disk.
-func NewStore() *Store {
-	s := &Store{}
+func NewStore() *Store { return NewStoreAt(".") }
+
+// NewStoreAt binds registry persistence to one explicit installation root.
+func NewStoreAt(baseDir string) *Store {
+	s := &Store{baseDir: baseDir}
 	s.load()
 	return s
 }
 
+// PersistencePaths reports custom-source and fetched-cache documents.
+func (s *Store) PersistencePaths() (string, string) {
+	return filepath.Join(s.baseDir, sourcesFile), filepath.Join(s.baseDir, cacheFile)
+}
+
 func (s *Store) load() {
-	data, err := os.ReadFile(sourcesFile)
+	sourcesPath, cachePath := s.PersistencePaths()
+	// #nosec G304 -- the constructor binds the owner root and both leaf names
+	// are compiled constants; callers cannot supply a file name.
+	data, err := os.ReadFile(sourcesPath)
 	if err == nil {
 		var fd sourcesFileData
 		if json.Unmarshal(data, &fd) == nil {
@@ -47,7 +60,8 @@ func (s *Store) load() {
 	}
 	s.ensureBuiltins()
 
-	cacheData, err := os.ReadFile(cacheFile)
+	// #nosec G304 -- cachePath uses the same bound root and compiled leaf name.
+	cacheData, err := os.ReadFile(cachePath)
 	if err == nil {
 		var cd cacheFileData
 		if json.Unmarshal(cacheData, &cd) == nil {
@@ -80,7 +94,8 @@ func (s *Store) saveSources() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(sourcesFile, data, 0644)
+	sourcesPath, _ := s.PersistencePaths()
+	return os.WriteFile(sourcesPath, data, 0o600)
 }
 
 // GetSources returns a copy of all configured registry sources.
@@ -142,7 +157,8 @@ func (s *Store) SetCache(entries []RegistryEntry) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(cacheFile, data, 0644)
+	_, cachePath := s.PersistencePaths()
+	return os.WriteFile(cachePath, data, 0o600)
 }
 
 // InvalidateCache clears the in-memory cache timestamp, forcing a re-fetch on next access.

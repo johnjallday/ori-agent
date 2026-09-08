@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -10,18 +11,25 @@ import (
 	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 )
 
 // hybridStore implements HybridStore using an LRU memory cache backed by SQLite.
 type hybridStore struct {
+	admissionGate *resetstate.WorkGate
 	cache         *MemoryCache
 	sqlite        *SQLiteStore
 	toolCallStore *SQLiteToolCallStore
 	db            *database.DB
 
-	mu     sync.RWMutex
-	stopCh chan struct{}
-	config *HybridStoreConfig
+	mu          sync.RWMutex
+	stopCh      chan struct{}
+	config      *HybridStoreConfig
+	background  sync.WaitGroup
+	closeOnce   sync.Once
+	closeDone   chan struct{}
+	closeErr    error
+	beforeFlush func() // deterministic periodic-writer seam for package tests
 }
 
 // NewHybridStore creates a new hybrid store with the given configuration.
@@ -95,6 +103,14 @@ func NewHybridStoreWithDB(db *database.DB, cacheSize int) HybridStore {
 		db:            db,
 		stopCh:        make(chan struct{}),
 		config:        &HybridStoreConfig{CacheSize: cacheSize},
+	}
+}
+
+// SetAdmissionGate is initialization-only, before background ticks or callers.
+// The concrete setter avoids widening HybridStore for alternate implementations.
+func SetAdmissionGate(store HybridStore, gate *resetstate.WorkGate) {
+	if hybrid, ok := store.(*hybridStore); ok {
+		hybrid.admissionGate = gate
 	}
 }
 
@@ -437,21 +453,38 @@ func (h *hybridStore) GetCacheStats() CacheStats {
 
 // FlushToStorage forces all cached sessions to be written to SQLite.
 func (h *hybridStore) FlushToStorage(ctx context.Context) error {
+	release, err := h.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
+	return h.flushToStorage(ctx)
+}
+
+// flushToStorage is the close-only path after the shared gate is fenced. The
+// lifecycle has already proved finite work idle; requiring a new permit here
+// would reject the final cache flush and resurrect old state on relaunch.
+func (h *hybridStore) flushToStorage(ctx context.Context) error {
+	if h.beforeFlush != nil {
+		h.beforeFlush()
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	sessions := h.cache.GetAll()
+	var flushErr error
 	for _, session := range sessions {
 		if err := h.sqlite.UpdateSession(ctx, session); err != nil {
 			logger.Warn("Failed to flush session to storage", logger.Fields{
 				"id":    session.ID,
 				"error": err,
 			})
+			flushErr = errors.Join(flushErr, err)
 		}
 	}
 
 	logger.Debug("Flushed sessions to storage", logger.Fields{"count": len(sessions)})
-	return nil
+	return flushErr
 }
 
 func (h *hybridStore) clearCachedWorkspaceReference(workspaceID string) {
@@ -502,24 +535,33 @@ func (h *hybridStore) evictCachedSessionsByAgent(agentName string) {
 	}
 }
 
-// Close releases resources.
+// Close joins periodic workers, flushes once, then closes the database.
 func (h *hybridStore) Close() error {
-	// Stop periodic flush
-	if h.stopCh != nil {
-		close(h.stopCh)
-	}
-
-	// Final flush
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_ = h.FlushToStorage(ctx)
-
-	// Close database
-	return h.db.Close()
+	h.closeOnce.Do(func() {
+		if h.closeDone == nil {
+			h.closeDone = make(chan struct{})
+		}
+		if h.stopCh != nil {
+			close(h.stopCh)
+		}
+		h.background.Wait()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		flushErr := h.flushToStorage(ctx)
+		cancel()
+		h.closeErr = errors.Join(flushErr, h.db.Close())
+		close(h.closeDone)
+	})
+	<-h.closeDone
+	return h.closeErr
 }
 
 // Cleanup removes sessions inactive for the specified number of days.
 func (h *hybridStore) Cleanup(ctx context.Context, inactiveDays int) (int, error) {
+	release, err := h.admissionGate.Enter()
+	if err != nil {
+		return 0, err
+	}
+	defer release()
 	cutoff := time.Now().AddDate(0, 0, -inactiveDays)
 
 	// First, get IDs of sessions to be deleted so we can remove from cache
@@ -649,7 +691,9 @@ func (h *hybridStore) getDatabaseSize() int64 {
 
 // startPeriodicFlush starts a background goroutine to flush cached data.
 func (h *hybridStore) startPeriodicFlush(interval time.Duration) {
+	h.background.Add(1)
 	go func() {
+		defer h.background.Done()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
@@ -668,7 +712,9 @@ func (h *hybridStore) startPeriodicFlush(interval time.Duration) {
 
 // startPeriodicCleanup starts a background goroutine to clean up inactive sessions.
 func (h *hybridStore) startPeriodicCleanup(interval time.Duration) {
+	h.background.Add(1)
 	go func() {
+		defer h.background.Done()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
@@ -690,6 +736,11 @@ func (h *hybridStore) startPeriodicCleanup(interval time.Duration) {
 // enforceStorageLimits ensures storage limits are respected.
 // It cleans up inactive sessions and enforces max session count.
 func (h *hybridStore) enforceStorageLimits(ctx context.Context) error {
+	release, err := h.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	if h.config == nil {
 		return nil
 	}

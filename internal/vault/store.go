@@ -268,6 +268,20 @@ func (s *Store) resolveVaultFileAbsolutePath(filePath string) string {
 	return filepath.Join(baseDir, filePath)
 }
 
+// RetainedPath resolves a raw catalog path using this owner's actual base. It
+// never opens, migrates or decrypts a vault. Preserve the entire package when
+// the catalog names its inner database; an empty legacy path stays empty.
+func (s *Store) RetainedPath(catalogPath string) string {
+	path := s.resolveVaultFileAbsolutePath(catalogPath)
+	if packageDir := vaultPackageDirectoryForFilePath(path); packageDir != "" {
+		return packageDir
+	}
+	return path
+}
+
+// ManagedRoot reports the configured creation root without creating a package.
+func (s *Store) ManagedRoot() string { return s.managedVaultRootDir() }
+
 func (s *Store) decorateVault(item *Vault) {
 	if item == nil {
 		return
@@ -613,6 +627,73 @@ func (s *Store) UpdateVault(ctx context.Context, vaultID string, name string, de
 	})
 
 	return current, nil
+}
+
+// AttachVaultPackage registers one existing .orivault package without moving,
+// recreating, decrypting, or deleting its backing file. The package metadata is
+// authoritative; a password is required only by the existing Unlock flow.
+func (s *Store) AttachVaultPackage(ctx context.Context, packageDirectory string) (Vault, error) {
+	if s.db == nil {
+		return Vault{}, ErrSecretStoreUnavailable
+	}
+	packageDirectory = filepath.Clean(strings.TrimSpace(packageDirectory))
+	if !filepath.IsAbs(packageDirectory) || !strings.HasSuffix(strings.ToLower(filepath.Base(packageDirectory)), vaultPackageExtension) {
+		return Vault{}, ErrVaultStoragePathInvalid
+	}
+	packageInfo, err := os.Lstat(packageDirectory)
+	if err != nil || !packageInfo.IsDir() || packageInfo.Mode()&os.ModeSymlink != 0 {
+		return Vault{}, ErrVaultStoragePathInvalid
+	}
+	physicalPackage, err := filepath.EvalSymlinks(packageDirectory)
+	if err != nil || !strings.HasSuffix(strings.ToLower(filepath.Base(physicalPackage)), vaultPackageExtension) {
+		return Vault{}, ErrVaultStoragePathInvalid
+	}
+	vaultPath := filepath.Join(physicalPackage, vaultPackageDatabaseFileName)
+	before, err := os.Lstat(vaultPath)
+	if err != nil || !before.Mode().IsRegular() {
+		return Vault{}, ErrVaultStoragePathInvalid
+	}
+
+	vaultFileDB, err := openExistingVaultFile(ctx, vaultPath)
+	if err != nil {
+		return Vault{}, err
+	}
+	defer func() { _ = vaultFileDB.Close() }()
+	metadata, err := loadOnlyVaultFileMetadata(ctx, vaultFileDB)
+	if err != nil {
+		return Vault{}, err
+	}
+	metadata.VaultID = normalizeVaultID(metadata.VaultID)
+	metadata.Name = strings.TrimSpace(metadata.Name)
+	catalogPath := s.catalogFilePathForAbsolutePath(metadata.VaultID, vaultPath)
+
+	var conflict string
+	err = s.db.QueryRowContext(ctx, `
+		SELECT id FROM vaults
+		WHERE id = ? OR LOWER(name) = LOWER(?) OR file_path = ?
+		LIMIT 1
+	`, metadata.VaultID, metadata.Name, catalogPath).Scan(&conflict)
+	switch {
+	case err == nil:
+		return Vault{}, ErrVaultAlreadyExists
+	case !errors.Is(err, sql.ErrNoRows):
+		return Vault{}, fmt.Errorf("query attached vault conflict: %w", err)
+	}
+	if after, err := os.Lstat(vaultPath); err != nil || !os.SameFile(before, after) {
+		return Vault{}, ErrVaultStoragePathInvalid
+	}
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO vaults (id, name, description, file_path, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, metadata.VaultID, metadata.Name, metadata.Description, catalogPath, metadata.CreatedAt, metadata.UpdatedAt); err != nil {
+		return Vault{}, fmt.Errorf("attach vault package: %w", err)
+	}
+	attached, err := s.getVault(ctx, metadata.VaultID)
+	if err != nil {
+		_, _ = s.db.ExecContext(context.WithoutCancel(ctx), `DELETE FROM vaults WHERE id = ?`, metadata.VaultID)
+		return Vault{}, err
+	}
+	return attached, nil
 }
 
 func (s *Store) RelinkVault(ctx context.Context, vaultID string, storage VaultStorage) (Vault, error) {

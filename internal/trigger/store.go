@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 )
 
 // TriggersFileName is the per-workspace triggers file, a sibling of
@@ -36,7 +37,8 @@ type triggersFile struct {
 // Store persists triggers in each workspace's folder and maintains an
 // in-memory cache plus a token → trigger index for webhook lookup.
 type Store struct {
-	source WorkspaceSource
+	admissionGate *resetstate.WorkGate
+	source        WorkspaceSource
 
 	mu          sync.RWMutex
 	byWorkspace map[string][]*Trigger // workspaceID → triggers (cache of disk state)
@@ -53,11 +55,19 @@ func NewStore(source WorkspaceSource) *Store {
 	}
 }
 
+// SetAdmissionGate configures reset admission before loading or mutation.
+func (s *Store) SetAdmissionGate(gate *resetstate.WorkGate) { s.admissionGate = gate }
+
 // LoadAll reads triggers.json from every known workspace folder, replacing
 // the cache and token index. Workspaces without a triggers file are skipped
 // silently; unreadable files are logged and skipped so one corrupt file
 // doesn't take down every trigger.
 func (s *Store) LoadAll() error {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	ids, err := s.source.List()
 	if err != nil {
 		return fmt.Errorf("list workspaces: %w", err)
@@ -210,6 +220,11 @@ func (s *Store) GetByToken(token string) (Trigger, bool) {
 // Create validates, fills server-side fields (ID, token for webhooks,
 // timestamps), persists, and returns the stored trigger.
 func (s *Store) Create(t Trigger) (Trigger, error) {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return Trigger{}, err
+	}
+	defer release()
 	if t.ID == "" {
 		t.ID = "trg-" + uuid.NewString()
 	}
@@ -252,6 +267,11 @@ func (s *Store) Create(t Trigger) (Trigger, error) {
 // result. fn sees the live record; mutations are visible to subsequent reads
 // only when persist succeeds (on failure the previous state is restored).
 func (s *Store) Update(wsID, triggerID string, fn func(*Trigger) error) (Trigger, error) {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return Trigger{}, err
+	}
+	defer release()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t := s.findLocked(wsID, triggerID)
@@ -294,6 +314,11 @@ func (s *Store) Update(wsID, triggerID string, fn func(*Trigger) error) (Trigger
 
 // Delete removes a trigger and persists the workspace file.
 func (s *Store) Delete(wsID, triggerID string) error {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ts := s.byWorkspace[wsID]

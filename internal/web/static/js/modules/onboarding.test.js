@@ -358,6 +358,37 @@ test('a durable needs_hq relationship closes onboarding instead of hiring again'
   }
 });
 
+test('Replay Setup closes an active relationship without hiring or routing to a new HQ', async () => {
+  const dom = stubHireDom();
+  let hirePosts = 0;
+  let completePosts = 0;
+  const priorFetch = globalThis.fetch;
+  globalThis.fetch = async url => {
+    if (String(url).includes('/api/personal-assistant/hire')) hirePosts += 1;
+    if (String(url).includes('/api/onboarding/complete')) completePosts += 1;
+    return { ok: true, json: async () => ({}) };
+  };
+  try {
+    const manager = new OnboardingManager();
+    manager.personalAssistantState = {
+      state: 'active',
+      display_name: 'Atlas',
+      assistant_id: 'assistant-1',
+      hq_workspace_id: 'hq-1'
+    };
+    manager.completeStep = async () => {};
+    await manager.hireAssistant();
+
+    assert.equal(hirePosts, 0, 'setup replay posted a duplicate hire');
+    assert.equal(completePosts, 1);
+    assert.equal(dom.navigations.at(-1), '/');
+    assert.match(dom.elements.get('pafHireStatus').textContent, /existing assistant.*kept/i);
+  } finally {
+    globalThis.fetch = priorFetch;
+    dom.restore();
+  }
+});
+
 test('relationship recovery posts no client-selected identity and never starts a hire', async () => {
   const dom = stubHireDom();
   let repairBody = null;

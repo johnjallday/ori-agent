@@ -47,6 +47,9 @@ func NewConsentLog(dataDir string) *ConsentLog {
 	return &ConsentLog{path: filepath.Join(dataDir, "connections", "consent.json")}
 }
 
+// PersistencePath reports the concrete consent document without reading it.
+func (l *ConsentLog) PersistencePath() string { return l.path }
+
 // List returns the audit records oldest-first (empty if none yet).
 func (l *ConsentLog) List() ([]ConsentRecord, error) {
 	l.mu.Lock()

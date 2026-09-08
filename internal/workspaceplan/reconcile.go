@@ -145,6 +145,12 @@ func NewReconciler(service *Service, tasks TaskReader, mutate TaskMutator) *Reco
 // Preview computes what reconciling the Plan's version under review against its
 // approved work would do. It changes nothing.
 func (r *Reconciler) Preview(ctx context.Context, workspaceID, planID string) (*ReconcilePreview, error) {
+	release, err := r.service.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
 	plan, err := r.service.Get(ctx, workspaceID, planID)
 	if err != nil {
 		return nil, err
@@ -192,6 +198,12 @@ type ConfirmInput struct {
 // revised version is what spends it. Keeping them apart is what lets a
 // materialization retry replay rather than reconcile twice.
 func (r *Reconciler) Confirm(ctx context.Context, workspaceID, planID string, input ConfirmInput) (*Reconciliation, error) {
+	release, err := r.service.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
 	preview, err := r.Preview(ctx, workspaceID, planID)
 	if err != nil {
 		return nil, err
@@ -234,6 +246,12 @@ func (r *Reconciler) Confirm(ctx context.Context, workspaceID, planID string, in
 // request earlier and then acted on later would be exactly the stale
 // authorization the token exists to prevent.
 func (r *Reconciler) Authorize(ctx context.Context, workspaceID, planID string) (*ReconcilePreview, *Reconciliation, error) {
+	release, err := r.service.admissionGate.Enter()
+	if err != nil {
+		return nil, nil, err
+	}
+	defer release()
+
 	preview, err := r.Preview(ctx, workspaceID, planID)
 	if err != nil {
 		return nil, nil, err
@@ -266,6 +284,12 @@ func (r *Reconciler) Authorize(ctx context.Context, workspaceID, planID string) 
 // change through the workspace's own transition rules (FR-77, FR-78, FR-111,
 // FR-112).
 func (r *Reconciler) Apply(ctx context.Context, workspaceID, planID string, preview *ReconcilePreview, confirmation *Reconciliation) error {
+	release, err := r.service.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	if confirmation == nil {
 		// Nothing to spend and nothing to cancel: an additive revision reaches
 		// here with only created work ahead of it.

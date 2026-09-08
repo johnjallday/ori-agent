@@ -111,7 +111,7 @@ func normalizeVaultStorageDirectory(directory string) (string, error) {
 	info, err := os.Stat(absolutePath)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
-		if err := os.MkdirAll(absolutePath, 0o755); err != nil {
+		if err := os.MkdirAll(absolutePath, 0o750); err != nil {
 			return "", fmt.Errorf("%w: %v", ErrVaultStoragePathInvalid, err)
 		}
 		return absolutePath, nil
@@ -157,7 +157,7 @@ func openVaultFileWithMode(ctx context.Context, path string, allowCreate bool) (
 		return nil, fmt.Errorf("vault file path is required")
 	}
 	if allowCreate {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			return nil, fmt.Errorf("create vault file directory: %w", err)
 		}
 	} else {
@@ -298,6 +298,37 @@ func loadVaultFileMetadata(ctx context.Context, db *sql.DB, vaultID string) (vau
 		return vaultFileMetadata{}, fmt.Errorf("load vault file metadata: %w", err)
 	}
 	return metadata, nil
+}
+
+func loadOnlyVaultFileMetadata(ctx context.Context, db *sql.DB) (vaultFileMetadata, error) {
+	if db == nil {
+		return vaultFileMetadata{}, fmt.Errorf("vault file database is required")
+	}
+	rows, err := db.QueryContext(ctx, `
+		SELECT vault_id, name, description, key_salt, key_nonce, key_ciphertext, created_at, updated_at
+		FROM vault_metadata
+		ORDER BY vault_id
+		LIMIT 2
+	`)
+	if err != nil {
+		return vaultFileMetadata{}, fmt.Errorf("load vault file metadata: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var metadata vaultFileMetadata
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return vaultFileMetadata{}, fmt.Errorf("load vault file metadata: %w", err)
+		}
+		return vaultFileMetadata{}, ErrVaultFileCorrupt
+	}
+	if err := rows.Scan(&metadata.VaultID, &metadata.Name, &metadata.Description, &metadata.KeySalt, &metadata.KeyNonce, &metadata.KeyCiphertext, &metadata.CreatedAt, &metadata.UpdatedAt); err != nil {
+		return vaultFileMetadata{}, fmt.Errorf("load vault file metadata: %w", err)
+	}
+	if rows.Next() || normalizeVaultID(metadata.VaultID) == "" || strings.TrimSpace(metadata.Name) == "" ||
+		strings.TrimSpace(metadata.KeySalt) == "" || strings.TrimSpace(metadata.KeyNonce) == "" || strings.TrimSpace(metadata.KeyCiphertext) == "" {
+		return vaultFileMetadata{}, ErrVaultFileCorrupt
+	}
+	return metadata, rows.Err()
 }
 
 func validateVaultFileSchema(ctx context.Context, db *sql.DB) error {

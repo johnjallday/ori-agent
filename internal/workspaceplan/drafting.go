@@ -59,6 +59,11 @@ func (s *Service) GeneratorAvailable() bool { return s.generator.Available() }
 // (FR-23). Either way nothing is approved, no Task is created, and nothing
 // starts (FR-20).
 func (s *Service) Draft(ctx context.Context, workspaceID, planID string, opts DraftingOptions) (*Plan, error) {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	plan, err := s.store.GetPlan(ctx, workspaceID, planID)
 	if err != nil {
 		return nil, err
@@ -223,6 +228,11 @@ type AnswerInput struct {
 // resulting assumption in the draft, so the user can see what was assumed on
 // their behalf (FR-28).
 func (s *Service) Answer(ctx context.Context, workspaceID, planID, clarificationID string, input AnswerInput) (*Plan, error) {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	plan, err := s.store.GetPlan(ctx, workspaceID, planID)
 	if err != nil {
 		return nil, err
@@ -342,6 +352,11 @@ type EditInput struct {
 // User-authored content is marked as such so version provenance can show which
 // parts a person wrote and which a model produced (FR-57).
 func (s *Service) Edit(ctx context.Context, workspaceID, planID string, input EditInput) (*Plan, error) {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	plan, err := s.store.GetPlan(ctx, workspaceID, planID)
 	if err != nil {
 		return nil, err
@@ -500,6 +515,11 @@ func (s *Service) Snapshots(ctx context.Context, workspaceID, planID string) ([]
 // recovering does not silently beat a concurrent edit, and the recovered
 // content can itself be recovered from later (FR-30).
 func (s *Service) RecoverSnapshot(ctx context.Context, workspaceID, planID, snapshotID, actor string) (*Plan, error) {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	plan, err := s.store.GetPlan(ctx, workspaceID, planID)
 	if err != nil {
 		return nil, err

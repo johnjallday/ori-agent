@@ -165,6 +165,10 @@ func delegationCapsFromEnv() workspace.DelegationCaps {
 // Uses the session HybridStore as the underlying storage via an adapter,
 // which unifies workspace data between the Sessions sidebar and Workspaces page.
 // A SyncStore wrapper ensures every Save also writes workspace.json to disk.
+func (b *ServerBuilder) workspaceStartupMaintenanceApproved() bool {
+	return !b.resetPolicy.SuppressWorkspaceAdoption && shouldRunWorkspaceStartupMaintenance(b.configManager)
+}
+
 func (b *ServerBuilder) initializeWorkspaceStore() error {
 	var ws workspace.Store
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
@@ -197,7 +201,8 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	// 2. WORKSPACE_DIR env var
 	// 3. Default: ~/Ori Workspaces
 	workspaceDir := resolveWorkspaceRoot(b.configManager)
-	startupMaintenanceApproved := shouldRunWorkspaceStartupMaintenance(b.configManager)
+	startupMaintenanceApproved := b.workspaceStartupMaintenanceApproved()
+	agentRehydrationApproved := !b.resetPolicy.SuppressAgentRehydration
 	fileStore, err := workspace.NewFileStore(workspaceDir)
 	if err != nil {
 		if errors.Is(err, workspace.ErrWorkspaceSlugMigration) {
@@ -330,28 +335,30 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 		// not wiped) on startup. Foreign workspaces that are not in the local
 		// folder tree stay gated, preserving cross-worktree isolation. Runs before
 		// the wipe/restore below.
-		if fileStore != nil && startupMaintenanceApproved {
-			workspace.BackfillLocalWorkspacesIntoAllowlist(fileStore, allowlist)
-		}
+		if agentRehydrationApproved {
+			if fileStore != nil && startupMaintenanceApproved {
+				workspace.BackfillLocalWorkspacesIntoAllowlist(fileStore, allowlist)
+			}
 
-		// First wipe agents whose only source is a non-allowlisted workspace
-		// snapshot — keeps cross-worktree contamination from lingering after
-		// the user revokes (or never granted) an import.
-		if fileStore != nil && startupMaintenanceApproved {
-			workspace.WipeNonAllowlistedAgentSnapshots(fileStore, b.st, allowlist)
-		}
-		workspace.WipeNonAllowlistedAgentSnapshots(ws, b.st, allowlist)
+			// First wipe agents whose only source is a non-allowlisted workspace
+			// snapshot — keeps cross-worktree contamination from lingering after
+			// the user revokes (or never granted) an import.
+			if fileStore != nil && startupMaintenanceApproved {
+				workspace.WipeNonAllowlistedAgentSnapshots(fileStore, b.st, allowlist)
+			}
+			workspace.WipeNonAllowlistedAgentSnapshots(ws, b.st, allowlist)
 
-		// Restore only allowlisted workspaces' agent snapshots.
-		if fileStore != nil && startupMaintenanceApproved {
-			workspace.RestoreAllowlistedWorkspaceAgents(fileStore, b.st, allowlist)
+			// Restore only allowlisted workspaces' agent snapshots.
+			if fileStore != nil && startupMaintenanceApproved {
+				workspace.RestoreAllowlistedWorkspaceAgents(fileStore, b.st, allowlist)
+			}
+			workspace.RestoreAllowlistedWorkspaceAgents(ws, b.st, allowlist)
+			workspace.SnapshotAllWorkspaces(ws, b.st)
+			if fileStore != nil && startupMaintenanceApproved {
+				workspace.SnapshotAllWorkspaces(fileStore, b.st)
+			}
 		}
 		ws = workspace.NewAgentSnapshotStore(ws, b.st)
-		workspace.RestoreAllowlistedWorkspaceAgents(ws, b.st, allowlist)
-		workspace.SnapshotAllWorkspaces(ws, b.st)
-		if fileStore != nil && startupMaintenanceApproved {
-			workspace.SnapshotAllWorkspaces(fileStore, b.st)
-		}
 	}
 
 	b.workspaceStore = ws
@@ -421,6 +428,7 @@ func (b *ServerBuilder) initializeEventSystem() {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 
 	b.eventBus = workspace.DefaultEventBus()
+	b.eventBus.SetAdmissionGate(b.resetWork)
 	if b.workspaceStore != nil {
 		workspace.SubscribeAssistantProgression(b.eventBus, b.workspaceStore)
 	}
@@ -452,6 +460,7 @@ func (b *ServerBuilder) initializeEventSystem() {
 		if err != nil {
 			logger.Warn("Failed to initialize directory sync manager", logger.Fields{"error": err})
 		} else {
+			syncMgr.SetAdmissionGate(b.resetWork)
 			b.directorySyncManager = syncMgr
 			if verbose {
 				logger.Info("Directory sync manager initialized", logger.Fields{})
@@ -531,6 +540,7 @@ func (b *ServerBuilder) initializeTaskExecution() {
 	b.attachWorkspacePlanExecutor()
 
 	b.taskExecutor = workspace.NewTaskExecutor(b.workspaceStore, taskExecutionHandler, workspace.ExecutorConfig{
+		AdmissionGate: b.resetWork,
 		PollInterval:  10 * time.Second,
 		MaxConcurrent: 5,
 	})
@@ -547,10 +557,12 @@ func (b *ServerBuilder) initializeTaskExecution() {
 	}
 
 	b.stepExecutor = workspace.NewStepExecutor(b.workspaceStore, taskExecutionHandler, workspace.StepExecutorConfig{
-		PollInterval: 5 * time.Second,
+		AdmissionGate: b.resetWork,
+		PollInterval:  5 * time.Second,
 	})
 
 	b.taskScheduler = workspace.NewTaskScheduler(b.workspaceStore, workspace.SchedulerConfig{
+		AdmissionGate: b.resetWork,
 		PollInterval:  1 * time.Minute,
 		WakeScheduler: b.macWakeService,
 	})
@@ -618,6 +630,7 @@ func (b *ServerBuilder) initializeOrchestration() error {
 		FileWatcher:         b.sessionFilesWatcher,
 		DirectorySync:       b.directorySyncManager,
 		FolderStore:         b.workspaceFileStore,
+		AdmissionGate:       b.resetWork,
 		// TemplateManager: nil - loaded later in initializeTemplateManager
 	})
 	if err != nil {
@@ -672,6 +685,7 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() {
 
 	llmAdapter := workspace.NewLLMFactoryAdapter(b.llmFactory, "openai")
 	b.workspaceOrchestrator = workspace.NewOrchestrator(b.workspaceStore, b.st, llmAdapter, b.eventBus)
+	b.workspaceOrchestrator.SetAdmissionGate(b.resetWork)
 	var loopExecutor workspace.TaskHandler
 	if b.runBackedTaskHandler != nil {
 		loopExecutor = b.runBackedTaskHandler
@@ -699,6 +713,7 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() {
 	}
 
 	b.workspaceHandler = workspace.NewHTTPHandler(b.workspaceStore, b.workspaceOrchestrator, b.eventBus)
+	b.workspaceHandler.SetAdmissionGate(b.resetWork)
 	b.workspaceHandler.SetDesktopOpener(b.desktopOpener)
 	if b.pathSelectionStore == nil {
 		b.pathSelectionStore = pathselection.NewStore()
@@ -830,8 +845,10 @@ func (b *ServerBuilder) initializeTriggerService(opportunityStore workspace.Oppo
 		logger.Warn("Trigger service construction failed; event triggers disabled", logger.Fields{"error": err})
 		return
 	}
+	svc.SetAdmissionGate(b.resetWork)
 	if err := svc.Start(); err != nil {
 		logger.Warn("Trigger service start failed; event triggers disabled", logger.Fields{"error": err})
+		svc.Close()
 		return
 	}
 	b.triggerService = svc

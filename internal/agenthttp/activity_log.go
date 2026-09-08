@@ -33,6 +33,9 @@ func NewActivityLogger(logDir string) (*ActivityLogger, error) {
 	}, nil
 }
 
+// PersistencePath reports the concrete owned activity directory.
+func (al *ActivityLogger) PersistencePath() string { return al.logDir }
+
 // LogActivity logs an activity event for an agent
 func (al *ActivityLogger) LogActivity(agentName string, eventType types.ActivityEventType, details map[string]any, user string) error {
 	al.mu.Lock()
