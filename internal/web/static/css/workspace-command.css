@@ -7421,3 +7421,45 @@ button.ws-cmd-rpg-class-card:focus-visible {
 .ws-cmd-role-roster:empty {
   display: none;
 }
+
+/* Unstaffed guidance. Informational, not an alarm: an empty primary role is a
+   workspace waiting for a decision, not a broken one — so it takes the same
+   neutral treatment as the Missing tag and never the danger palette. */
+.ws-cmd-unstaffed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--ws-line);
+  background: var(--ws-panel);
+  color: var(--ws-ink);
+}
+
+.ws-cmd-unstaffed-copy {
+  margin: 0;
+  font-size: 13px;
+}
+
+.ws-cmd-unstaffed-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Chat with nobody to talk to. The composer is REPLACED rather than disabled:
+   an input that accepts text and then does nothing is worse than no input. */
+.ws-cmd-chat-unstaffed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border: 1px dashed var(--ws-line);
+  background: var(--ws-panel);
+  color: var(--ws-ink-dim);
+  font-size: 13px;
+}

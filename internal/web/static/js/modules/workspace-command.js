@@ -1246,6 +1246,92 @@ export class WorkspaceCommandView {
     if (tile) tile.textContent = this.ticketCountLabel();
   }
 
+  // ---------- Unstaffed guidance ----------
+  //
+  // A workspace whose primary role is empty explains itself in one sentence
+  // and one click, instead of being a page whose controls quietly do nothing.
+
+  // The banner is informational: it never traps focus and never blocks
+  // navigation (FR48). Dismissal is remembered per workspace (FR44), and it
+  // returns if the workspace goes back to having nobody in it at all (FR45).
+  unstaffedBannerState() {
+    const roster = this.roleRoster;
+    if (!roster || !roster.total_count) return null;
+    const primary = (roster.roles || []).find(role => role.primary && !role.read_only);
+    if (!primary || primary.state === 'filled') return null;
+    return {
+      roleId: primary.role_id,
+      // Zero filled roles is a stronger state than "the primary is empty":
+      // nothing in this workspace can act at all.
+      emptyEntirely: roster.filled_count === 0
+    };
+  }
+
+  unstaffedDismissKey() {
+    return 'ori:unstaffed-dismissed:' + this.workspaceId();
+  }
+
+  unstaffedBannerDismissed(state) {
+    // A dismissal only silences the workspace it was made in, and only while
+    // it still has someone in it. Returning to zero filled roles is a new
+    // situation, so the banner speaks again.
+    if (state.emptyEntirely && this.unstaffedWasStaffed) return false;
+    try {
+      return window.localStorage.getItem(this.unstaffedDismissKey()) === '1';
+    } catch (err) {
+      return false;
+    }
+  }
+
+  dismissUnstaffedBanner() {
+    try {
+      window.localStorage.setItem(this.unstaffedDismissKey(), '1');
+    } catch (err) {
+      /* a browser that refuses storage simply shows the banner again */
+    }
+    this.render();
+  }
+
+  bindUnstaffedBanner() {
+    const host = this.container;
+    if (!host) return;
+    host.querySelector('[data-cmd-dismiss-unstaffed]')?.addEventListener('click', () => {
+      this.dismissUnstaffedBanner();
+    });
+    host.querySelector('[data-cmd-fill-primary]')?.addEventListener('click', () => {
+      const state = this.unstaffedBannerState();
+      if (!state) return;
+      // The banner's job is to get the user to the roster, not to be a second
+      // place to staff from.
+      this.roleRosterCreating = state.roleId;
+      this.mountRoleRoster();
+      const row = host.querySelector('[data-cmd-role-roster] [data-role-id]');
+      row?.scrollIntoView({ block: 'nearest' });
+      window.WorkspaceRoleRoster?.focusRole(
+        host.querySelector('[data-cmd-role-roster]'),
+        state.roleId
+      );
+    });
+  }
+
+  renderUnstaffedBanner() {
+    const state = this.unstaffedBannerState();
+    if (!state || this.unstaffedBannerDismissed(state)) return '';
+    return (
+      '<section class="ws-cmd-unstaffed" aria-label="Workspace staffing">' +
+      '<p class="ws-cmd-unstaffed-copy">' +
+      'This workspace has no agent yet — fill the primary role to start working.' +
+      '</p>' +
+      '<div class="ws-cmd-unstaffed-actions">' +
+      '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-fill-primary>' +
+      'Fill the primary role</button>' +
+      '<button type="button" class="ws-cmd-icon-btn" data-cmd-dismiss-unstaffed' +
+      ' aria-label="Dismiss this message">×</button>' +
+      '</div>' +
+      '</section>'
+    );
+  }
+
   renderMissionPanel() {
     const summary = this.missionSummary();
     const missionText = String(summary.mission || '').trim();
@@ -1427,6 +1513,7 @@ export class WorkspaceCommandView {
           ? this.renderOperationsMap()
           : '<div class="ws-cmd-layout">' +
             '<main class="ws-cmd-main">' +
+            this.renderUnstaffedBanner() +
             this.renderMissionPanel() +
             '<section class="ws-cmd-garrison">' +
             this.renderGarrison() +
@@ -1452,6 +1539,7 @@ export class WorkspaceCommandView {
       this.bindRail();
     }
     this.bindLoadoutAddModal();
+    this.bindUnstaffedBanner();
     // Filled after innerHTML, never serialized into it: the roster is real DOM
     // with bound listeners and this container is rebuilt on every render.
     this.mountRoleRoster();
@@ -3648,6 +3736,9 @@ export class WorkspaceCommandView {
       const data = await response.json();
       this.roleRoster = data?.roles || null;
       this.roleRosterFor = workspaceId;
+      // Remembered so a workspace that HAD someone and now has nobody gets the
+      // banner back even after it was dismissed (FR45).
+      if (this.roleRoster?.filled_count > 0) this.unstaffedWasStaffed = true;
     } catch (err) {
       this.roleRoster = null;
     }
@@ -8820,16 +8911,25 @@ export class WorkspaceCommandView {
       '" data-cmd-map-quest-intent="backlog" aria-pressed="' +
       (intent === 'backlog' ? 'true' : 'false') +
       '">Add to Backlog</button></div>';
+    // With no role filled there is no Commander to name, and saying otherwise
+    // would promise an assignment that cannot happen. The quest is still
+    // created and still stays visible — it simply says it is waiting for
+    // someone, and points at the roster (FR46, FR47).
+    const unstaffed = Boolean(this.roleRoster && this.roleRoster.filled_count === 0);
     const consequence =
       '<p class="ws-cmd-map-quest-consequence">' +
       (intent === 'backlog'
         ? 'Saves the idea without committing it — nothing is assigned, scheduled, or run until you promote it to Ready.'
-        : 'Commits now — creates an unassigned Ready quest that waits for an explicit assign, run, or schedule.') +
+        : unstaffed
+          ? 'No agent is filling this workspace’s primary role yet, so this quest is created unassigned and waits until you fill a role.'
+          : 'Commits now — creates an unassigned Ready quest that waits for an explicit assign, run, or schedule.') +
       '</p>';
     const placeholder =
       intent === 'backlog'
         ? 'Describe the idea…'
-        : 'Describe the quest… (assigned to the Commander)';
+        : unstaffed
+          ? 'Describe the quest… (nobody is assigned yet)'
+          : 'Describe the quest… (assigned to the Commander)';
     const primaryLabel = submitting
       ? intent === 'backlog'
         ? 'Adding…'
