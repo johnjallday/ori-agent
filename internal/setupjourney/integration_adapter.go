@@ -111,7 +111,7 @@ func (adapter *ReviewedIntegrationAdapter) Read(ctx context.Context, scope ReadS
 				Result: integrationResult(current),
 			}, nil
 		}
-		if !acceptedPinnedSource(entry, current.Source) || current.Format != entry.SourceFormat {
+		if !reviewableIntegrationSource(entry, current.Source) || current.Format != entry.SourceFormat {
 			projection.StateRevision = integrationStateDigest(entry, current, nil)
 			return CanonicalStepRead{
 				BlockedReason:    ReasonIntegrationIdentityMismatch,
@@ -122,7 +122,10 @@ func (adapter *ReviewedIntegrationAdapter) Read(ctx context.Context, scope ReadS
 	}
 	if !entry.ReleaseReady || entry.Source() == "" {
 		projection.StateRevision = integrationStateDigest(entry, current, nil)
-		return CanonicalStepRead{BlockedReason: ReasonOwnerUnavailable, Integration: projection}, nil
+		return CanonicalStepRead{
+			BlockedReason: ReasonIntegrationReleaseNotReady, Integration: projection,
+			AvailableActions: []ActionID{ActionManageIntegration}, Result: integrationResult(current),
+		}, nil
 	}
 	if current == nil {
 		descriptor, report, inspectErr := adapter.manager.Inspect(entry.Source(), entry.SourceFormat)
@@ -141,7 +144,10 @@ func (adapter *ReviewedIntegrationAdapter) Read(ctx context.Context, scope ReadS
 	}
 
 	if current.Version != entry.ExpectedVersion || current.Source != entry.Source() {
-		if compareVersions(current.Version, entry.ExpectedVersion) >= 0 {
+		// An official mutable source (or an older pin at the same version) is
+		// eligible for replacement, never acceptance. Do not downgrade a newer
+		// or unrecognized version under an update confirmation.
+		if current.Version != entry.ExpectedVersion && compareVersions(current.Version, entry.ExpectedVersion) >= 0 {
 			projection.StateRevision = integrationStateDigest(entry, current, nil)
 			return CanonicalStepRead{
 				BlockedReason:    ReasonIntegrationIdentityMismatch,
@@ -160,6 +166,7 @@ func (adapter *ReviewedIntegrationAdapter) Read(ctx context.Context, scope ReadS
 			return CanonicalStepRead{BlockedReason: reason, Integration: projection, Result: integrationResult(current)}, nil
 		}
 		projection.Trust = cloneTrustReport(&report)
+		projection.ReplacementRequired = true
 		projection.StateRevision = integrationStateDigest(entry, current, &report)
 		return CanonicalStepRead{
 			AvailableActions: []ActionID{ActionReviewUpdate, ActionManageIntegration},
@@ -174,6 +181,7 @@ func (adapter *ReviewedIntegrationAdapter) Read(ctx context.Context, scope ReadS
 		}, nil
 	}
 	projection.StateRevision = integrationStateDigest(entry, current, nil)
+	projection.Verified = true
 	if !current.Enabled {
 		return CanonicalStepRead{
 			AvailableActions: []ActionID{ActionReviewEnable, ActionManageIntegration},
@@ -303,17 +311,17 @@ func (adapter *ReviewedIntegrationAdapter) ConsequenceObserved(actionID ActionID
 			read.Result.IntegrationVersion == read.Integration.ExpectedVersion &&
 			read.BlockedReason == "" && acceptedPinnedSourceForProjection(read.Integration)
 	case ActionEnable:
-		return read.Complete && read.Integration != nil && read.Integration.Enabled
+		return read.Complete && read.Integration != nil && read.Integration.Enabled && read.Integration.Verified
 	default:
 		return false
 	}
 }
 
 func acceptedPinnedSourceForProjection(projection *IntegrationProjection) bool {
-	// Read validates the private exact source before producing an unblocked
-	// installed projection; this helper deliberately cannot reconstruct it from
-	// browser-visible fields.
-	return projection != nil && projection.ReleaseReady
+	// A reviewable same-version replacement is unblocked but not verified.
+	// Only the installed exact-source match can settle a successful receipt;
+	// release availability alone is not proof that replacement happened.
+	return projection != nil && projection.ReleaseReady && projection.Verified
 }
 
 func emptyIntegrationInputDigest(input json.RawMessage) (string, error) {
@@ -394,6 +402,14 @@ func (adapter *ReviewedIntegrationAdapter) acceptsDevelopmentSource(source strin
 		return false
 	}
 	return normalizedLocalDevelopmentSource(source) == adapter.developmentSource
+}
+
+// reviewableIntegrationSource permits only the exact official repository's
+// legacy unpinned URLs in addition to its pins. This permits a review of the
+// host-selected replacement; it never proves the installed bytes are trusted.
+func reviewableIntegrationSource(entry reviewedintegration.Entry, source string) bool {
+	return source == entry.SourceRepository || source == entry.SourceRepository+".git" ||
+		acceptedPinnedSource(entry, source)
 }
 
 func acceptedPinnedSource(entry reviewedintegration.Entry, source string) bool {

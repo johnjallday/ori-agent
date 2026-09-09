@@ -8,7 +8,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/specialist"
 )
 
-func TestBuiltInRegistryMatchesSpecialistConstraintsAndStaysReleaseGated(t *testing.T) {
+func TestBuiltInRegistryMatchesSpecialistConstraintsAndPublishedRelease(t *testing.T) {
 	entry, ok := Get(" ORI_REAPER ")
 	if !ok {
 		t.Fatal("reviewed REAPER integration is missing")
@@ -27,11 +27,11 @@ func TestBuiltInRegistryMatchesSpecialistConstraintsAndStaysReleaseGated(t *test
 		entry.ExpectedProgramSchema != 2 || entry.ExpectedProtocol != plugin.SurfaceProtocolVersion {
 		t.Fatalf("reviewed candidate versions drifted: %#v", entry)
 	}
-	if entry.SourceCommit != "a5f4149f1aaf64611e90ff9484e37f7854c828b9" {
+	if entry.SourceCommit != "1f494db5a39d8c13f6149943b28e6a506d19631a" {
 		t.Fatalf("reviewed candidate commit drifted: %q", entry.SourceCommit)
 	}
-	if entry.ReleaseReady || entry.Source() != "" {
-		t.Fatalf("unpublished candidate exposed install source: ready=%v source=%q", entry.ReleaseReady, entry.Source())
+	if !entry.ReleaseReady || entry.Source() != entry.SourceRepository+"#sha="+entry.SourceCommit {
+		t.Fatalf("published release missing immutable install source: ready=%v source=%q", entry.ReleaseReady, entry.Source())
 	}
 	features := strings.Join(entry.RequiredHostFeatures, ",")
 	for _, required := range []string{plugin.HostFeatureAssistantProgramV1, plugin.HostFeatureSpecialistSetupJourneyV1} {

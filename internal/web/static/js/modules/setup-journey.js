@@ -62,10 +62,19 @@ export function setupJourneyReceiptRows(journey, step) {
   const rows = [];
   if (step?.integration) {
     rows.push(['Integration', step.integration.plugin_id]);
+    rows.push(['Installed', step.integration.installed_version ? 'Yes' : 'No']);
     rows.push(['Version', step.integration.installed_version || step.integration.expected_version]);
     rows.push(['Enabled', step.integration.enabled ? 'Yes' : 'Not yet']);
-    if (step.integration.development_copy) {
-      rows.push(['Verification', 'Local development copy — not release-verified']);
+    rows.push([
+      'Verification',
+      step.integration.development_copy
+        ? 'Local development copy — not release-verified'
+        : step.integration.verified
+          ? 'Verified release'
+          : 'Not verified for guided setup'
+    ]);
+    if (step.integration.replacement_required) {
+      rows.push(['Next step', 'Review the verified replacement before continuing']);
     }
   }
   if (step?.workspace_setup) {
@@ -441,6 +450,7 @@ function renderWorkspaceLaunch(journey) {
     appendRows(elements.receipt, setupJourneyReceiptRows(journey, integration));
     if (integration.guidance) elements.receipt.appendChild(makeText('p', '', integration.guidance));
     renderActions(integration);
+    button('Check Again', refreshJourney);
     if (stage.complete)
       button(
         'Continue',
@@ -1070,6 +1080,7 @@ function renderReview() {
   if (!state.review) return;
   const project = state.review.project_connection;
   const group = state.review.group;
+  const replacement = state.review.integration?.replacement_required === true;
   const presentation = project
     ? projectReviewPresentation(project)
     : group
@@ -1080,7 +1091,12 @@ function renderReview() {
             'Create your group. No project, agent, schedule, or access permission will be added.'
         }
       : null;
-  const heading = makeText('h4', '', presentation?.title || 'Review before making changes');
+  const heading = makeText(
+    'h4',
+    '',
+    presentation?.title ||
+      (replacement ? 'Replace installed integration?' : 'Review before making changes')
+  );
   heading.tabIndex = -1;
   container.appendChild(heading);
   if (group) {
@@ -1120,6 +1136,15 @@ function renderReview() {
     if (project.defaults_statement)
       container.appendChild(makeText('p', 'setup-journey__scope-note', project.defaults_statement));
   } else {
+    if (replacement) {
+      container.appendChild(
+        makeText(
+          'p',
+          '',
+          'Replace the current installation with Ori’s reviewed version, even if the version number is unchanged. Its enabled state is preserved. Existing workspaces and project files are not deleted; runtime access may need review again.'
+        )
+      );
+    }
     appendRows(container, reviewRows(state.review), 'setup-journey__review-list');
   }
   const controls = document.createElement('div');
@@ -1131,12 +1156,14 @@ function renderReview() {
     state.reviewInput = null;
     render();
     showError('');
-    ui()?.draft?.querySelector('input, select')?.focus();
+    const target =
+      ui()?.draft?.querySelector('input, select') || ui()?.actions?.querySelector('button');
+    target?.focus();
   });
   const confirm = makeText(
     'button',
     'setup-journey__action setup-journey__review-confirm',
-    presentation?.confirm || 'Confirm this change'
+    presentation?.confirm || (replacement ? 'Replace with reviewed version' : 'Confirm this change')
   );
   confirm.type = 'button';
   confirm.addEventListener('click', commitReview);
@@ -1152,7 +1179,10 @@ function reviewRows(review) {
       ['Integration', integration.plugin_id],
       ['Publisher', integration.publisher],
       ['Source', integration.source_label],
-      ['Version', integration.expected_version],
+      ...(integration.installed_version
+        ? [['Installed version', integration.installed_version]]
+        : []),
+      ['Reviewed version', integration.expected_version],
       ['Platform', (integration.supported_platforms || []).join(', ')],
       ['Required host features', (integration.required_host_features || []).join(', ')],
       ['Enabled after this action', integration.enabled ? 'Already enabled' : 'No']

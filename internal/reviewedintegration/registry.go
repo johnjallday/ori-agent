@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	RegistryRevision     = 1
+	RegistryRevision     = 2
 	MaxRegistryItems     = 16
 	reviewedClaudeFormat = plugin.FormatClaude
 )

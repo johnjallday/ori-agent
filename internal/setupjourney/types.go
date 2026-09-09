@@ -103,6 +103,7 @@ const (
 	ReasonIntegrationLocalUnverified  ReasonCode = "integration_local_unverified"
 	ReasonIntegrationIdentityMismatch ReasonCode = "integration_identity_mismatch"
 	ReasonIntegrationUnsupported      ReasonCode = "integration_unsupported"
+	ReasonIntegrationReleaseNotReady  ReasonCode = "integration_release_unavailable"
 	ReasonBlueprintUnavailable        ReasonCode = "blueprint_unavailable"
 	ReasonAssistantProgramMismatch    ReasonCode = "assistant_program_mismatch"
 	ReasonProjectSelectionRequired    ReasonCode = "project_selection_required"
@@ -123,7 +124,7 @@ var validReasonCodes = map[ReasonCode]struct{}{
 	ReasonReviewRequired: {}, ReasonReviewStale: {}, ReasonOwnerUnavailable: {},
 	ReasonOperationFailed: {}, ReasonIntegrationNotInstalled: {}, ReasonIntegrationDisabled: {},
 	ReasonIntegrationUpdateRequired: {}, ReasonIntegrationLocalUnverified: {},
-	ReasonIntegrationIdentityMismatch: {}, ReasonIntegrationUnsupported: {},
+	ReasonIntegrationIdentityMismatch: {}, ReasonIntegrationUnsupported: {}, ReasonIntegrationReleaseNotReady: {},
 	ReasonBlueprintUnavailable: {}, ReasonAssistantProgramMismatch: {},
 	ReasonProjectSelectionRequired: {}, ReasonProjectScopeInvalid: {}, ReasonProjectAlreadyConnected: {},
 	ReasonProjectUnavailable: {}, ReasonRuntimeSetupRequired: {}, ReasonRuntimeNeedsAttention: {},

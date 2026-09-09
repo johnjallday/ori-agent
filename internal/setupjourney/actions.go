@@ -136,7 +136,7 @@ var actionDefinitionsByKind = map[specialist.SetupStepKind][]ActionDefinition{
 		{ID: ActionInstall, Label: "Install integration", Effect: ActionEffectCommit, RequiresReview: true},
 		{ID: ActionReviewEnable, Label: "Review enabling", Effect: ActionEffectReview},
 		{ID: ActionEnable, Label: "Enable integration", Effect: ActionEffectCommit, RequiresReview: true},
-		{ID: ActionReviewUpdate, Label: "Review update", Effect: ActionEffectReview},
+		{ID: ActionReviewUpdate, Label: "Review verified replacement", Effect: ActionEffectReview},
 		{ID: ActionUpdate, Label: "Update integration", Effect: ActionEffectCommit, RequiresReview: true},
 		{ID: ActionManageIntegration, Label: "Manage integration", Effect: ActionEffectNavigation},
 	},
