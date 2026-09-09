@@ -913,6 +913,14 @@ async function captureScene(
     for (const pattern of privatePatterns) expect(visibleText).not.toMatch(pattern);
     expect(fixture.unexpectedRequests, `Unexpected fixture requests for ${id}`).toEqual([]);
     expect(fixture.consoleErrors, `Console errors for ${id}`).toEqual([]);
+    // Production avatars deliberately decode asynchronously. Await every page
+    // image here so screenshotting cannot race their final pixels; a broken
+    // image can still use the application's delegated error fallback.
+    await page.evaluate(async () => {
+      await Promise.all(
+        Array.from(document.images, image => image.decode().catch(() => undefined))
+      );
+    });
     // ResizeObserver callbacks run before paint. Two frames ensure a modal's
     // restored body width has reached the Map camera before bytes are captured.
     await page.evaluate(
