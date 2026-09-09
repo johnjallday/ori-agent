@@ -143,6 +143,13 @@ operating system, and architecture. The accepted manifest records the rendered
 product-source commit plus README/image checksums; it does not attempt the
 impossible self-reference of storing the later documentation commit hash.
 
+The capture-only Chromium configuration also pins font positioning with
+`--disable-font-subpixel-positioning`. This avoids Linux glyph-rasterization
+variation in unchanged wrapped text across fresh contexts; it does not change
+product DOM/CSS, mask pixels, or relax the exact same-environment comparison.
+The flag lives in `playwright.readme.config.ts`, not the application's browser
+configuration. Keep it consistent for both capture passes.
+
 The repository pins `sharp` for WebP encoding. Its capture encoder uses fixed
 options: quality `82`, effort `6`, `smartSubsample: false`, alpha quality `100`,
 and the `text` preset. The run report records the exact `sharp` and Chromium
