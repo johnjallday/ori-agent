@@ -107,6 +107,10 @@
           source: text(role && role.source),
           readOnly: Boolean(role && role.read_only),
           readOnlyReason: text(role && role.read_only_reason),
+          // What the blueprint proposes for this role, so the Create form can
+          // show the instructions the agent would actually get rather than an
+          // empty box that hides them.
+          proposed: (role && role.proposed) || null,
           declarationIndex: index
         };
         // A role can only be filled by an agent; a projection claiming otherwise

@@ -267,6 +267,81 @@ test('role ids are derived from names the way the server derives them', () => {
   assert.equal(Draft.roleIdFromName('!!!'), 'role');
 });
 
+// The Create form shows the blueprint's proposed setup, and an edit to it has
+// to reach the created agent. Both used to be silently dropped: the form
+// collected a system prompt and an agent type and sent neither, so the
+// blueprint's prompt won whatever the user typed.
+test('a role carries the blueprint’s proposed setup so the Create form can show it', () => {
+  const draft = readyDraft([
+    planAgent('Content Lead', {
+      entry_point: true,
+      type: 'general',
+      model: 'gpt-5',
+      provider: 'openai',
+      system_prompt: 'You are the content lead. Hold the brand voice.'
+    })
+  ]);
+  const role = Draft.derive(draft).roleRoster.roles[0];
+
+  assert.deepEqual(role.proposed, {
+    type: 'general',
+    model: 'gpt-5',
+    provider: 'openai',
+    system_prompt: 'You are the content lead. Hold the brand voice.'
+  });
+});
+
+test('an edited prompt and type travel all the way into the request', () => {
+  const draft = readyDraft([planAgent('Content Lead', { entry_point: true })]);
+  Draft.setRoleFill(draft, 'content-lead', {
+    mode: 'create',
+    name: 'Desk Chief',
+    type: 'research',
+    systemPrompt: 'Only write headlines.'
+  });
+
+  assert.deepEqual(Draft.derive(draft).payload.role_staffing, [
+    {
+      role_id: 'content-lead',
+      mode: 'create',
+      name: 'Desk Chief',
+      type: 'research',
+      system_prompt: 'Only write headlines.'
+    }
+  ]);
+});
+
+test('an unedited fill sends no prompt, leaving the blueprint’s in force', () => {
+  const draft = readyDraft([planAgent('Content Lead', { entry_point: true })]);
+  Draft.setRoleFill(draft, 'content-lead', { mode: 'create', name: 'Desk Chief' });
+
+  assert.deepEqual(Draft.derive(draft).payload.role_staffing, [
+    { role_id: 'content-lead', mode: 'create', name: 'Desk Chief' }
+  ]);
+});
+
+// An assigned agent keeps its own definition; a fill that binds one must not
+// carry setup that would imply this request could rewrite it.
+test('assigning an agent carries nothing but its name', () => {
+  const draft = readyDraft([planAgent('Content Lead', { entry_point: true })]);
+  Draft.setRoleFill(draft, 'content-lead', {
+    mode: 'assign',
+    name: 'My Mixer',
+    systemPrompt: 'ignored',
+    type: 'general'
+  });
+
+  assert.deepEqual(Draft.derive(draft).payload.role_staffing, [
+    { role_id: 'content-lead', mode: 'assign', name: 'My Mixer' }
+  ]);
+});
+
+test('a filled role stops proposing a setup', () => {
+  const draft = readyDraft([planAgent('Content Lead', { entry_point: true })]);
+  Draft.setRoleFill(draft, 'content-lead', { mode: 'create', name: 'Desk Chief' });
+  assert.equal(Draft.derive(draft).roleRoster.roles[0].proposed, undefined);
+});
+
 test('an ordinary blueprint declares roles from its roster, entry agent first', () => {
   const draft = readyDraft([
     planAgent('Content Lead', {

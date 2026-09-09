@@ -64,6 +64,15 @@ func FromTemplateAgents(specs []projecttemplates.AgentSpec) []Role {
 			Scope:       ScopeProject,
 			Required:    index == 0,
 			Primary:     index == 0,
+			// The blueprint's own proposal for this role, so the Create form
+			// shows the instructions the agent would actually get rather than
+			// an empty box that hides a 250-character prompt.
+			Proposed: &ProposedSetup{
+				Type:         strings.TrimSpace(spec.Type),
+				Model:        strings.TrimSpace(spec.Model),
+				Provider:     strings.TrimSpace(spec.Provider),
+				SystemPrompt: strings.TrimSpace(spec.SystemPrompt),
+			},
 		})
 	}
 	return roles

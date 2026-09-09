@@ -35,19 +35,15 @@ func (h *Handler) PutWorkspaceRole(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var request struct {
-		Mode     string `json:"mode"`
-		Name     string `json:"name"`
-		Provider string `json:"provider,omitempty"`
-		Model    string `json:"model,omitempty"`
-	}
+	// Decoded straight into the shared input so a field added to the wire
+	// format reaches this endpoint too. Re-listing them here is what dropped
+	// the Create form's system prompt and agent type on the way through.
+	var request roleStaffingInput
 	if !orihttp.ParseJSONBody(w, r, &request) {
 		return
 	}
-	staffing, err := normalizeRoleStaffing([]roleStaffingInput{{
-		RoleID: roleID, Mode: request.Mode, Name: request.Name,
-		Provider: request.Provider, Model: request.Model,
-	}})
+	request.RoleID = roleID
+	staffing, err := normalizeRoleStaffing([]roleStaffingInput{request})
 	if err != nil {
 		_ = orihttp.RespondBadRequest(w, err.Error())
 		return

@@ -254,6 +254,10 @@
         if (count === 0) break;
         roleId = base + '-' + (count + 1);
       }
+      // The blueprint's own proposal for this role. It mirrors the server's
+      // ProposedSetup so the Team step and the workspace roster seed the
+      // Create form from the same shape.
+      const recommended = agent.recommended || agent;
       return {
         roleId,
         label: agent.name,
@@ -262,7 +266,13 @@
         required: index === 0,
         primary: index === 0,
         heldElsewhere: '',
-        templateAgentIndex: index
+        templateAgentIndex: index,
+        proposed: {
+          type: text(recommended.type),
+          model: text(recommended.model),
+          provider: text(recommended.provider),
+          system_prompt: text(recommended.systemPrompt)
+        }
       };
     });
   }
@@ -279,8 +289,19 @@
     const mode = text(fill.mode) === FILL_ASSIGN ? FILL_ASSIGN : FILL_CREATE;
     const name = text(fill.name);
     if (!name) return null;
+    // An assigned agent keeps its own definition entirely, so a fill that binds
+    // one carries nothing but its name.
     if (mode === FILL_ASSIGN) return { mode, name };
-    return { mode, name, provider: text(fill.provider), model: text(fill.model) };
+    return {
+      mode,
+      name,
+      provider: text(fill.provider),
+      model: text(fill.model),
+      // Carried so an edit made in the Create form reaches the created agent.
+      // Empty means "use what the blueprint proposes".
+      type: text(fill.type),
+      systemPrompt: text(fill.systemPrompt)
+    };
   }
 
   // setRoleFill records that a role will be filled — by creating an agent for
@@ -1059,6 +1080,9 @@
         primary: role.primary,
         state: 'empty'
       };
+      // Only an empty role has anything left to propose. Assistant-program
+      // roles carry none: that declaration's prompts stay server-side.
+      if (role.proposed) item.proposed = role.proposed;
       // A group-scoped role an existing station already holds is reported, not
       // offered: it belongs to the group workspace (D2).
       if (role.heldElsewhere) {
@@ -1080,6 +1104,8 @@
           type: saved ? text(saved.type) : '',
           appearance: (saved && saved.appearance) || null
         };
+        // A filled role has nothing left to propose.
+        delete item.proposed;
       }
       return item;
     });
@@ -1396,6 +1422,10 @@
           if (fill.mode === FILL_CREATE) {
             if (fill.provider) item.provider = fill.provider;
             if (fill.model) item.model = fill.model;
+            // Sent only when the user actually edited them; absent means the
+            // server applies what the blueprint declared.
+            if (fill.type) item.type = fill.type;
+            if (fill.systemPrompt) item.system_prompt = fill.systemPrompt;
           }
           return item;
         });

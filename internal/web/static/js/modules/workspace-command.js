@@ -3822,11 +3822,21 @@ export class WorkspaceCommandView {
       error.textContent = '';
     }
 
+    // Seeded with what the blueprint proposes, so the form shows the
+    // instructions this agent would actually get. An empty prompt box hid a
+    // 250-character prompt the server was about to apply anyway.
+    const proposed = row.proposed || {};
     this.roleCreateForm = formApi.mount(host, {
       idPrefix: 'agent',
       profile: formApi.PROFILE_TEMPLATE,
       providers: Array.isArray(this.roleRosterProviders) ? this.roleRosterProviders : [],
-      values: { name: row.label }
+      values: {
+        name: row.label,
+        type: proposed.type || '',
+        model: proposed.model || '',
+        provider: proposed.provider || '',
+        systemPrompt: proposed.system_prompt || ''
+      }
     });
 
     const createButton = document.getElementById('createAgentBtn');
@@ -3879,7 +3889,11 @@ export class WorkspaceCommandView {
       mode: 'create',
       name: String(values.name || '').trim(),
       provider: values.provider || '',
-      model: values.model || ''
+      model: values.model || '',
+      // Sent so an edit to either actually reaches the created agent. They
+      // used to be collected by the form and dropped on the way out.
+      type: values.type || '',
+      system_prompt: values.systemPrompt || ''
     });
     if (outcome && outcome.error) {
       // The server owns name collisions; surface its message on the form

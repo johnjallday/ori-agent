@@ -5044,19 +5044,20 @@ const sessionManager = {
       error.textContent = '';
     }
 
-    // The blueprint's own spec for this role seeds the form; the name is
-    // prefilled with the role label (FR14).
-    const spec = this.workspaceRoleSpec(roleId);
+    // Seeded with what the blueprint proposes — the same `proposed` block the
+    // workspace roster reads, so both surfaces show the same starting point.
+    // The name is prefilled with the role label (FR14).
+    const proposed = row.proposed || {};
     this.workspaceRoleSetupForm = formApi.mount(host, {
       idPrefix: 'agent',
       profile: formApi.PROFILE_TEMPLATE,
       providers: Array.isArray(this.editAgentProvidersData) ? this.editAgentProvidersData : [],
       values: {
         name: row.label,
-        type: spec?.type || '',
-        model: spec?.model || '',
-        provider: spec?.provider || '',
-        systemPrompt: spec?.systemPrompt || ''
+        type: proposed.type || '',
+        model: proposed.model || '',
+        provider: proposed.provider || '',
+        systemPrompt: proposed.system_prompt || ''
       }
     });
 
@@ -5084,26 +5085,6 @@ const sessionManager = {
     } else {
       showAgentModal();
     }
-  },
-
-  // The blueprint's proposed setup for a role, when it has one. Ordinary
-  // blueprints carry a template agent per role; assistant-program roles carry
-  // their prompt server-side and seed only the name.
-  workspaceRoleSpec(roleId) {
-    const api = window.CreateWorkspaceTeamDraft;
-    const draft = this.teamDraft;
-    if (!api || !draft || typeof api.declaredRoles !== 'function') return null;
-    const role = api.declaredRoles(draft).find(item => item.roleId === roleId);
-    if (!role || !Number.isInteger(role.templateAgentIndex)) return null;
-    const plan = this.planAgentAt(role.templateAgentIndex);
-    if (!plan) return null;
-    const recommended = plan.recommended || plan;
-    return {
-      type: recommended.type,
-      model: recommended.model,
-      provider: recommended.provider,
-      systemPrompt: recommended.systemPrompt
-    };
   },
 
   // A Create fill is refused before it is staged when its name would collide
@@ -5155,7 +5136,9 @@ const sessionManager = {
         mode: api.FILL_CREATE,
         name,
         provider: values.provider,
-        model: values.model
+        model: values.model,
+        type: values.type,
+        systemPrompt: values.systemPrompt
       })
     ) {
       return;

@@ -50,6 +50,27 @@ type Role struct {
 	Scope       Scope
 	Required    bool
 	Primary     bool
+	// Proposed is the setup the blueprint suggests for whoever fills this role.
+	// Present only where the blueprint's spec is already disclosed to the
+	// client — see ProposedSetup.
+	Proposed *ProposedSetup
+}
+
+// ProposedSetup is what a blueprint proposes for a role's agent, so the Create
+// form can show the instructions the agent would actually get instead of an
+// empty box that hides them.
+//
+// It is deliberately absent for assistant-program roles: that declaration's
+// prompts are never disclosed in a staffing projection (the staffing adapter
+// has a test asserting they do not leak), and the server applies them itself at
+// commit time. An ordinary blueprint's prompt is already public — the
+// template-agent-plan endpoint returns it in full — so carrying it here
+// discloses nothing new.
+type ProposedSetup struct {
+	Type         string `json:"type,omitempty"`
+	Model        string `json:"model,omitempty"`
+	Provider     string `json:"provider,omitempty"`
+	SystemPrompt string `json:"system_prompt,omitempty"`
 }
 
 // Attachment is one agent currently in the workspace. RoleID is empty for an
@@ -88,6 +109,9 @@ type RoleProjection struct {
 	// group-scoped role seen from a project (D2).
 	ReadOnly       bool   `json:"read_only,omitempty"`
 	ReadOnlyReason string `json:"read_only_reason,omitempty"`
+	// Proposed seeds the Create form for an empty role. Omitted once the role
+	// is filled — there is nothing left to propose.
+	Proposed *ProposedSetup `json:"proposed,omitempty"`
 }
 
 // Roster is the whole projection for one workspace.
@@ -176,12 +200,20 @@ func Build(in Input) Roster {
 			item.ReadOnlyReason = readOnlyGroupRoleReason
 		}
 
+		if role.Proposed != nil {
+			proposed := *role.Proposed
+			item.Proposed = &proposed
+		}
+
 		holder, source := holderFor(roleID, byRole, in.Bindings)
 		if holder != "" {
 			if identity, exists := lookup(in.Lookup, holder); exists {
 				item.State = StateFilled
 				item.Source = source
 				item.Agent = &identity
+				// A filled role has nothing left to propose, and the holder's
+				// real setup lives on its own definition.
+				item.Proposed = nil
 				claimed[strings.ToLower(holder)] = struct{}{}
 				roster.FilledCount++
 			}
