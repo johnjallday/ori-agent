@@ -15,6 +15,10 @@ export default defineConfig({
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:8765',
     browserName: 'chromium',
+    // Linux's fractional glyph positioning can rasterize the same wrapped text
+    // differently across fresh browser contexts (PR #466's Today metadata).
+    // Pin the browser's font positioning, not the UI or comparison tolerance.
+    launchOptions: { args: ['--disable-font-subpixel-positioning'] },
     viewport: { width: 1440, height: 900 },
     deviceScaleFactor: 2,
     colorScheme: 'dark',

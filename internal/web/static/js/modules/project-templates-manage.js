@@ -364,6 +364,8 @@ function ptcIsBlocked(template) {
 }
 
 let ptcSelected = PTC_BLANK;
+let ptcQuests = [];
+let ptcQuestForTemplate = () => null;
 
 function ptcElements() {
   return {
@@ -380,6 +382,7 @@ function ptcElements() {
     openAfterCreate: document.getElementById('projectTemplateOpenAfterCreate'),
     openAfterCreateToggle: document.getElementById('projectTemplateOpenAfterCreateToggle'),
     readinessPanel: document.getElementById('templateBriefingReadiness'),
+    questPanel: document.getElementById('templateBriefingQuest'),
     readinessLive: document.getElementById('blueprintReadinessLive'),
     // Briefing panel: the selected template's description + a "deploys" readout.
     blueprintHeader: document.getElementById('workspaceCreateBlueprintHeader'),
@@ -751,6 +754,45 @@ function ptcRenderBriefing(els, importMode, templatePath) {
   }
 
   ptcRenderReadiness(els, showBriefing ? template : null);
+  ptcRenderQuest(els.questPanel, showBriefing ? template : null);
+}
+
+// Selecting a template never starts setup. This explicit action opens the same
+// saved quest as Plugins and the assistant, outside the workspace-owned wizard.
+function ptcRenderQuest(host, template) {
+  if (!host) return;
+  host.textContent = '';
+  const quest = ptcQuestForTemplate(template, ptcQuests);
+  host.hidden = !quest;
+  if (!quest) return;
+  const link = document.createElement('a');
+  link.className = 'modern-btn modern-btn-secondary';
+  link.href = quest.launch_url;
+  link.textContent = 'Open Guided Setup';
+  link.addEventListener('click', event => {
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    const open = () =>
+      window.dispatchEvent(
+        new CustomEvent('ori:open-specialist-setup', {
+          detail: { plugin_id: quest.plugin_id, quest_id: quest.id }
+        })
+      );
+    const modal = document.getElementById('addFolderModal');
+    const instance = window.bootstrap?.Modal.getInstance(modal);
+    if (instance && modal.classList.contains('show')) {
+      modal.addEventListener('hidden.bs.modal', open, { once: true });
+      instance.hide();
+    } else open();
+  });
+  const help = document.createElement('p');
+  help.className = 'small text-muted mt-2 mb-0';
+  help.textContent =
+    'Build or reuse your group, optionally prepare the app, then create or import a workspace. Saved setup progress is shared across entry points.' +
+    (quest.ownership === 'host_compatibility'
+      ? ' Ori provides compatibility setup for this plugin version.'
+      : '');
+  host.append(link, help);
 }
 
 // ptcRenderReadiness paints the selected blueprint's state into the briefing.
@@ -1271,8 +1313,18 @@ async function ptcPopulate(options) {
 
   let data = null;
   let loadFailed = false;
+  let quests = [];
+  let questResolver = () => null;
   try {
     data = await ptmFetchJSON('/api/project-templates');
+    try {
+      const { loadSetupQuests, setupQuestForTemplate } =
+        await import('/js/modules/setup-quest-links.js');
+      quests = await loadSetupQuests();
+      questResolver = setupQuestForTemplate;
+    } catch {
+      // Keep the ordinary template picker usable when quest discovery fails.
+    }
   } catch (error) {
     console.error('Failed to load project templates:', error);
     loadFailed = true;
@@ -1280,6 +1332,8 @@ async function ptcPopulate(options) {
   // A response from a superseded request must not repaint the picker: the
   // newer load is the one that reflects what the user just did.
   if (generation !== ptcCatalogGeneration) return;
+  ptcQuests = quests;
+  ptcQuestForTemplate = questResolver;
 
   els.grid.innerHTML = '';
   if (els.userList) els.userList.innerHTML = '';

@@ -18,6 +18,19 @@
     "name": { "$ref": "#/$defs/id" },
     "version": { "type": "string", "minLength": 1, "maxLength": 120 },
     "protocol": { "$ref": "#/$defs/protocol" },
+    "requires_host_features": {
+      "type": "array",
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["assistant_program_v1", "specialist_setup_journey_v1", "setup_quests_v1"]
+      }
+    },
+    "setup_quests": {
+      "type": "array",
+      "maxItems": 8,
+      "items": { "$ref": "setup-quest-v1.schema.json" }
+    },
     "capabilities": {
       "type": "array",
       "maxItems": 16,

@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "version": 1,
+  "id": "reaper_setup",
+  "title": "Set up REAPER",
+  "description": "Connect a REAPER project and choose how Ori can help.",
+  "integration_key": "ori_reaper",
+  "expected_blueprint_id": "reaper-song",
+  "expected_assistant_program_id": "music-producer-assistant",
+  "workspace_launch": {
+    "group_title": "Build Your Music Production Group",
+    "group_name": "Music Production",
+    "runtime_title": "Set Up REAPER",
+    "runtime_instructions": "Open REAPER, then Preferences → Control/OSC/web. Add the Web browser interface and enable it. Check setup when you are ready. If the Ori runner is not registered yet, you can finish it from the workspace's live-control setup. No project access is granted here; the correct project must still be verified after creation."
+  },
+  "steps": [
+    {
+      "id": "integration",
+      "kind": "integration_install",
+      "title": "Install Ori REAPER Plugin",
+      "description": "Ori's REAPER integration is a local integration for Ori, not an audio plug-in, VST, effect, or instrument. It will not appear in REAPER's FX browser."
+    },
+    {
+      "id": "project",
+      "kind": "project_connect",
+      "title": "Connect a project",
+      "description": "Connect one existing REAPER project or create a new one after review."
+    },
+    {
+      "id": "workspace",
+      "kind": "workspace_setup",
+      "title": "Choose how Ori works",
+      "description": "Choose File-only or Ori-assisted REAPER through the project setup flow."
+    },
+    {
+      "id": "staffing",
+      "kind": "assistant_program_staffing",
+      "title": "Add your studio team",
+      "description": "Add one Home portfolio role and an independent team for this project."
+    },
+    {
+      "id": "summary",
+      "kind": "summary",
+      "title": "Review setup",
+      "description": "Review what is installed, connected, staffed, selected, and still optional."
+    }
+  ]
+}

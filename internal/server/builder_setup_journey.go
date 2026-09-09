@@ -209,6 +209,9 @@ func (b *ServerBuilder) initializeSetupJourney() {
 			panic("invalid built-in setup journey staffing adapter")
 		}
 	}
+	if b.pluginHandler != nil {
+		b.setupJourneyService.SetQuestCatalog(setupjourney.NewInstalledQuestCatalog(b.pluginHandler.Manager()))
+	}
 	b.setupJourneyHandler = setupjourneyhttp.NewHandler(b.setupJourneyService, b.userProvider)
 	if b.workspaceStore != nil {
 		if b.pathSelectionStore == nil {

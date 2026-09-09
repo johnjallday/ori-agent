@@ -1,6 +1,6 @@
 // One map/group surface. A setup context uses only its canonical reviewed owner;
 // it must never fall back to the generic group POST. Drafts/consent stay in memory.
-const ROOT = '/api/personal-assistant/setup-journey';
+import { setupJourneyAPIRoot } from './setup-quest-links.js';
 let active = null;
 let initialized = false;
 let retained = null;
@@ -44,7 +44,8 @@ async function request(url, options = {}) {
   }
   return body;
 }
-const runURL = state => `${ROOT}/runs/${encodeURIComponent(state.journey.run_id)}`;
+const runURL = state =>
+  `${setupJourneyAPIRoot(state.journey)}/runs/${encodeURIComponent(state.journey.run_id)}`;
 function message(value = '') {
   el('buildGroupError').textContent = value;
   el('buildGroupError').hidden = !value;

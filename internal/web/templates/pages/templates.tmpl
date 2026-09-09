@@ -88,9 +88,10 @@
               <div id="tplDetail" hidden>
                 <div class="d-flex justify-content-between align-items-start gap-3 mb-3 flex-wrap">
                   <div style="min-width: 0;">
-                    <h4 id="tplDetailName" class="mb-1" style="color: var(--text-primary); word-break: break-word;">Template
-                      <span id="tplDetailBuiltinBadge" hidden style="display: inline-block; margin-left: 6px; padding: 2px 8px; font-size: 11px; font-weight: 600; vertical-align: middle; border-radius: 999px; background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-secondary);">Built-in · read-only</span>
-                    </h4>
+                    <div class="d-flex align-items-center flex-wrap gap-2 mb-1">
+                      <h4 id="tplDetailName" class="mb-0" style="color: var(--text-primary); word-break: break-word;">Template</h4>
+                      <span id="tplDetailBuiltinBadge" hidden class="badge" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-secondary);">Built-in · read-only</span>
+                    </div>
                     <code id="tplDetailId" style="font-size: 12px; color: var(--text-secondary);"></code>
                   </div>
                   <div class="d-flex gap-2 flex-wrap">
@@ -99,6 +100,20 @@
                     <button id="tplDeleteBtn" class="modern-btn modern-btn-secondary btn-sm" style="color: #ef4444;">Delete</button>
                   </div>
                 </div>
+
+                <section id="tplSetupQuest" class="mb-3 p-3 rounded-3 text-break" hidden aria-labelledby="tplQuestHeading" style="border: 1px solid var(--border-color); background: var(--bg-tertiary);">
+                  <div class="d-flex align-items-start justify-content-between flex-wrap gap-3">
+                    <div style="min-width: 0;">
+                      <div class="tpl-section-kicker">Guided setup</div>
+                      <h5 id="tplQuestHeading" class="tpl-section-title">Setup quest</h5>
+                    </div>
+                    <a id="tplQuestOpen" class="modern-btn modern-btn-primary btn-sm" hidden>Open Guided Setup</a>
+                  </div>
+                  <p id="tplQuestDescription" class="tpl-section-copy mt-2 mb-2"></p>
+                  <p id="tplQuestOwnership" class="small text-muted mb-2" hidden></p>
+                  <p id="tplQuestStatus" class="small mb-0" role="status" aria-live="polite"></p>
+                  <button id="tplQuestRetry" type="button" class="modern-btn modern-btn-secondary btn-sm mt-2" hidden>Check again</button>
+                </section>
 
                 <ul class="nav nav-tabs mb-3" role="tablist">
                   <li class="nav-item" role="presentation">
@@ -119,7 +134,7 @@
                   <!-- Overview / metadata -->
                   <div class="tab-pane fade show active" id="tplOverviewPane" role="tabpanel" aria-labelledby="tplTabOverview">
                     <div id="tplReadOnlyNotice" hidden class="mb-3" style="padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-tertiary); font-size: 12px; color: var(--text-secondary);">
-                      This is a built-in template and is read-only.
+                      <span id="tplReadOnlyText">This is a built-in template and is read-only.</span>
                       <button id="tplDuplicateToCustomizeBtn" class="modern-btn modern-btn-primary btn-sm ms-2">Duplicate to customize</button>
                     </div>
                     <div class="mb-3">
@@ -235,7 +250,7 @@
                   <!-- Agents: roster seeded when a workspace is created from this template -->
                   <div class="tab-pane fade" id="tplAgentsPane" role="tabpanel" aria-labelledby="tplTabAgents">
                     <div id="tplAgentsReadOnlyNotice" hidden class="tpl-agents-readonly mb-3">
-                      <span>This is a built-in template and is read-only.</span>
+                      <span id="tplAgentsReadOnlyText">This is a built-in template and is read-only.</span>
                       <button id="tplAgentsDuplicateBtn" class="modern-btn modern-btn-primary btn-sm">Duplicate to customize</button>
                     </div>
                     <div class="tpl-agents-head">

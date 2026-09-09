@@ -39,6 +39,8 @@
   // the version before an update) without an extra round-trip.
   let installedCache = [];
   let installedLoaded = false;
+  let questCache = [];
+  let pluginLoadGeneration = 0;
   let updateIndex = new Map();
   let lastNoticeSignature = '';
 
@@ -249,12 +251,25 @@
   // ---- installed plugins ----
 
   window.loadPlugins = async function () {
+    const generation = ++pluginLoadGeneration;
     const list = byId('pluginList');
     try {
       const data = await api('GET', '/api/plugins');
+      if (generation !== pluginLoadGeneration) return;
       installedCache = (data && data.plugins) || [];
       installedLoaded = true;
+      questCache = [];
       renderInstalledPlugins();
+      try {
+        const { loadSetupQuests } = await import('/js/modules/setup-quest-links.js');
+        const quests = await loadSetupQuests();
+        if (generation !== pluginLoadGeneration) return;
+        questCache = quests;
+        renderInstalledPlugins();
+      } catch {
+        // Catalog discovery must not hide installed plugins or prevent their
+        // normal lifecycle controls from working. Never invent a quest URL.
+      }
     } catch (e) {
       if (list) {
         list.innerHTML =
@@ -270,6 +285,17 @@
     const rawName = String(p.name == null ? '' : p.name);
     const name = esc(rawName);
     const installDirectory = String(p.install_dir == null ? '' : p.install_dir).trim();
+    const questLinks = questCache
+      .filter(quest => quest.plugin_id === rawName)
+      .map(
+        quest =>
+          '<a class="modern-btn modern-btn-secondary" href="' +
+          esc(quest.launch_url) +
+          '" title="' +
+          esc(quest.title) +
+          '">Guided Setup</a>'
+      )
+      .join('');
     const update = updateIndex.get(rawName);
     const updateNotice = updateNotifications.pluginNotice(update);
     const updateBadge = updateNotice
@@ -318,8 +344,14 @@
         )
       ) +
       '</div>' +
+      (questCache.some(
+        quest => quest.plugin_id === rawName && quest.ownership === 'host_compatibility'
+      )
+        ? '<div class="small text-muted mt-1">Ori compatibility setup for this plugin version.</div>'
+        : '') +
       '</div>' +
       '<div class="d-flex flex-wrap gap-2">' +
+      questLinks +
       // Enable is the call to action while a plugin is disabled: it is the one
       // thing standing between an installed plugin and a usable one.
       '<button class="modern-btn ' +

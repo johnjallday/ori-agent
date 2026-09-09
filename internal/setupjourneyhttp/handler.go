@@ -353,6 +353,7 @@ var forbiddenControlFields = map[string]struct{}{
 	"station_id": {}, "home_workspace_id": {}, "workspace_id": {},
 	"parent_id": {}, "plugin_source": {}, "source_url": {}, "source": {},
 	"adapter": {}, "scope": {}, "declaration": {}, "journey_id": {},
+	"plugin_id": {}, "quest_id": {},
 }
 
 func validActionInput(raw json.RawMessage) bool {

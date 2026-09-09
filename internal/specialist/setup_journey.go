@@ -48,6 +48,9 @@ var setupJourneyStepOrder = [...]SetupStepKind{
 // SetupJourney is bounded inert discovery data. Behavior for each step kind is
 // compiled into the host; no declaration field can select executable behavior.
 type SetupJourney struct {
+	// OwnerPluginID is runtime-only binding metadata. It cannot be authored in
+	// JSON and never authorizes an action by itself.
+	OwnerPluginID              string               `json:"-"`
 	SchemaVersion              int                  `json:"schema_version"`
 	Version                    int                  `json:"version"`
 	ID                         string               `json:"id"`

@@ -375,6 +375,9 @@ type Template struct {
 	// — a declaration that could not be understood yields nil plus
 	// SetupWizardError rather than a partially interpreted wizard.
 	SetupWizard *SetupWizard `json:"setup_wizard,omitempty"`
+	// SetupQuestID references a pre-workspace quest in this template's owning
+	// plugin. It grants no authority and is resolved only from installed data.
+	SetupQuestID string `json:"setup_quest,omitempty"`
 	// SetupWizardError is the actionable diagnostic for an invalid
 	// `setup_wizard` declaration. Unlike Warnings, it is not cosmetic: a
 	// template carrying one offers no setup wizard and cannot create a
@@ -504,7 +507,8 @@ type manifest struct {
 	// SetupWizard is held raw so a malformed wizard fails only the wizard: were
 	// it typed here, one bad step would fail the whole manifest decode and the
 	// template would silently lose its name, tasks, and agents too.
-	SetupWizard json.RawMessage `json:"setup_wizard,omitempty"`
+	SetupWizard  json.RawMessage `json:"setup_wizard,omitempty"`
+	SetupQuestID string          `json:"setup_quest,omitempty"`
 	// AssistantProgram uses the same isolated, fail-closed decode. Unknown fields
 	// inside the versioned block are rejected even though ordinary top-level
 	// template metadata remains forward-compatible.
@@ -590,6 +594,7 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 	// normalized first.
 	setupWizard, setupWizardErr := normalizeSetupWizard(m.SetupWizard, templateSetupWizardScope(t.DirectoryRequirements, t.AutomationRecipes, t.CapabilityRequirements, t.Tools.Plugins, t.RuntimeRequirements))
 	t.SetupWizard = setupWizard
+	t.SetupQuestID = strings.TrimSpace(m.SetupQuestID)
 	assistantProgram, assistantProgramErr := normalizeAssistantProgram(m.AssistantProgram)
 	t.AssistantProgram = assistantProgram
 	if assistantProgramErr != nil {

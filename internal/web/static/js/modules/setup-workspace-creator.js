@@ -1,7 +1,7 @@
 // The shared Create Workspace UI owns details/team/confirmation. This bridge
 // changes only its project-creation transport to the exact journey owner. It
 // never stores selection paths, consent, or drafts in browser storage.
-const ROOT = '/api/personal-assistant/setup-journey';
+import { setupJourneyAPIRoot } from './setup-quest-links.js';
 let active = null;
 let savedDraft = null; // One run, browser memory only; never review consent.
 const el = id => document.getElementById(id);
@@ -32,7 +32,7 @@ async function jsonRequest(url, options = {}) {
   return body;
 }
 function runURL(state, suffix = '') {
-  return `${ROOT}/runs/${encodeURIComponent(state.journey.run_id)}${suffix}`;
+  return `${setupJourneyAPIRoot(state.journey)}/runs/${encodeURIComponent(state.journey.run_id)}${suffix}`;
 }
 function inputFor(state) {
   const name = el('folderNameInput').value.trim();
@@ -210,7 +210,15 @@ async function submit(payload) {
         () =>
           window.dispatchEvent(
             new CustomEvent('ori:open-specialist-setup', {
-              detail: { run_id: state.journey.run_id }
+              detail: {
+                run_id: state.journey.run_id,
+                ...(state.journey.journey?.plugin_id
+                  ? {
+                      plugin_id: state.journey.journey.plugin_id,
+                      quest_id: state.journey.journey.id
+                    }
+                  : {})
+              }
             })
           ),
         { once: true }

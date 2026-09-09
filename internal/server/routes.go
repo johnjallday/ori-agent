@@ -12,6 +12,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/setupjourneyhttp"
 	"github.com/johnjallday/ori-agent/internal/updatehttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -1035,13 +1036,25 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 	}
 }
 
-// registerSetupJourneyRoutes registers the current accepted specialist's
-// generic root/child setup surface. No route accepts a user or owner ID.
+// registerSetupJourneyRoutes exposes the assistant alias and owner-scoped
+// quest entry points. A plugin/quest ID selects inert installed metadata, never
+// the current user, a download source, or a permission scope.
 func registerSetupJourneyRoutes(mux *http.ServeMux, s *Server) {
 	if s == nil || s.Handlers == nil || s.Handlers.SetupJourney == nil {
 		return
 	}
 	handler := s.Handlers.SetupJourney
+	mux.HandleFunc("GET /api/setup-quests", handler.ListQuests)
+	const questRoot = "/api/setup-quests/{pluginID}/{questID}"
+	mux.HandleFunc("GET "+questRoot, handler.ScopeQuest((*setupjourneyhttp.Handler).GetRoot))
+	mux.HandleFunc("GET "+questRoot+"/runs/{runID}", handler.ScopeQuest((*setupjourneyhttp.Handler).GetRun))
+	mux.HandleFunc("GET "+questRoot+"/runs/{runID}/preparation", handler.ScopeQuest((*setupjourneyhttp.Handler).CheckPreparation))
+	mux.HandleFunc("POST "+questRoot+"/open", handler.ScopeQuest((*setupjourneyhttp.Handler).OpenRoot))
+	mux.HandleFunc("POST "+questRoot+"/runs/{runID}/open", handler.ScopeQuest((*setupjourneyhttp.Handler).OpenRun))
+	mux.HandleFunc("POST "+questRoot+"/dismiss", handler.ScopeQuest((*setupjourneyhttp.Handler).DismissRoot))
+	mux.HandleFunc("POST "+questRoot+"/runs/{runID}/dismiss", handler.ScopeQuest((*setupjourneyhttp.Handler).DismissRun))
+	mux.HandleFunc("POST "+questRoot+"/children", handler.ScopeQuest((*setupjourneyhttp.Handler).CreateChild))
+	mux.HandleFunc("POST "+questRoot+"/runs/{runID}/actions/{actionID}", handler.ScopeQuest((*setupjourneyhttp.Handler).Mutate))
 	mux.HandleFunc("GET /api/personal-assistant/setup-journey", handler.GetRoot)
 	mux.HandleFunc("GET /api/personal-assistant/setup-journey/runs/{runID}", handler.GetRun)
 	mux.HandleFunc("GET /api/personal-assistant/setup-journey/runs/{runID}/preparation", handler.CheckPreparation)

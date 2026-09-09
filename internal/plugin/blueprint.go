@@ -74,6 +74,9 @@ func ResolvePluginBlueprints(descriptor PluginDescriptor) ([]ResolvedBlueprint, 
 			Template: template, SkeletonRoot: skeletonRoot, SkeletonDigest: digest,
 		})
 	}
+	if err := validateQuestBlueprints(contribution, resolved); err != nil {
+		return nil, err
+	}
 	return resolved, nil
 }
 

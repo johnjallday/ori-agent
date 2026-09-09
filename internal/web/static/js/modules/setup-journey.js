@@ -1,7 +1,11 @@
 import { openSetupWorkspaceCreator } from './setup-workspace-creator.js';
 import { groupBuildState, isGroupBuilderOpen, openGroupBuilder } from './group-builder.js';
 
-const ROOT = '/api/personal-assistant/setup-journey';
+import {
+  ASSISTANT_SETUP_ROOT,
+  setupJourneyAPIRoot,
+  setupQuestAPIRoot
+} from './setup-quest-links.js';
 
 const state = {
   journey: null,
@@ -188,7 +192,7 @@ function mutationBody(input = {}) {
 
 function runURL(suffix = '') {
   const id = encodeURIComponent(String(state.journey?.run_id || ''));
-  return `${ROOT}/runs/${id}${suffix}`;
+  return `${setupJourneyAPIRoot(state.journey)}/runs/${id}${suffix}`;
 }
 
 function makeText(tag, className, text) {
@@ -1390,7 +1394,7 @@ async function navigateAction(actionID) {
 async function createChildRun() {
   setBusy(true, 'Preparing another independent project setup…');
   try {
-    const payload = await request(`${ROOT}/children`, {
+    const payload = await request(`${setupJourneyAPIRoot(state.journey)}/children`, {
       method: 'POST',
       body: JSON.stringify(mutationBody())
     });
@@ -1460,7 +1464,7 @@ async function dismissJourney() {
 export async function openSpecialistSetupJourney(requested = null) {
   const intent = String(requested?.detail?.intent || requested?.intent || 'review');
   const requestedRunID = String(requested?.detail?.run_id || requested?.run_id || '');
-  const endpoint = requestedRunID ? `${ROOT}/runs/${encodeURIComponent(requestedRunID)}` : ROOT;
+  const selection = requested?.detail || requested || {};
   const elements = ui();
   if (!elements || state.busy || state.launchingGroup || isGroupBuilderOpen()) return false;
   state.returnFocus = document.activeElement;
@@ -1468,6 +1472,11 @@ export async function openSpecialistSetupJourney(requested = null) {
   showError('');
   try {
     const previousRunID = state.journey?.run_id;
+    const root =
+      selection.plugin_id != null || selection.quest_id != null
+        ? setupQuestAPIRoot(selection.plugin_id, selection.quest_id)
+        : ASSISTANT_SETUP_ROOT;
+    const endpoint = requestedRunID ? `${root}/runs/${encodeURIComponent(requestedRunID)}` : root;
     let payload = await request(endpoint);
     state.journey = payload?.setup_journey;
     if (!state.journey) return false;
@@ -1487,7 +1496,7 @@ export async function openSpecialistSetupJourney(requested = null) {
       intent === 'connect_another' &&
       (state.journey?.lifecycle_state || state.journey?.lifecycle) === 'ready'
     ) {
-      payload = await request(`${ROOT}/children`, {
+      payload = await request(`${setupJourneyAPIRoot(state.journey)}/children`, {
         method: 'POST',
         body: JSON.stringify(mutationBody())
       });
@@ -1526,6 +1535,11 @@ export async function openSpecialistSetupJourney(requested = null) {
     return true;
   } catch (error) {
     showError(error.message);
+    // A rejected deep link has no open modal to display its alert in.
+    if (!elements.root.classList.contains('show')) {
+      if (globalThis.Toast?.error) globalThis.Toast.error(error.message);
+      else window.alert(error.message);
+    }
     return false;
   } finally {
     setBusy(false);
@@ -1554,6 +1568,12 @@ function initialize() {
   window.addEventListener('ori:open-specialist-setup', openSpecialistSetupJourney);
   const params = new URLSearchParams(window.location.search);
   if (params.get('setup') === 'specialist') openSpecialistSetupJourney();
+  if (params.get('setup') === 'quest') {
+    openSpecialistSetupJourney({
+      plugin_id: params.get('plugin') || '',
+      quest_id: params.get('quest') || ''
+    });
+  }
 }
 
 if (document.readyState === 'loading')

@@ -54,52 +54,6 @@ var registryEntries = []Entry{
 			ActionRoute: "/personal-assistant?setup=specialist",
 		},
 		CapabilityOrder: []string{"projects", "folders", "calendar", "email"},
-		SetupJourney: &SetupJourney{
-			SchemaVersion:              1,
-			Version:                    1,
-			ID:                         "reaper_setup",
-			Title:                      "Set up REAPER",
-			Description:                "Connect a REAPER project and choose how Ori can help.",
-			IntegrationKey:             "ori_reaper",
-			ExpectedBlueprintID:        "reaper-song",
-			ExpectedAssistantProgramID: "music-producer-assistant",
-			WorkspaceLaunch: &WorkspaceLaunchCopy{
-				GroupTitle: "Build Your Music Production Group", GroupName: "Music Production",
-				RuntimeTitle:        "Set Up REAPER",
-				RuntimeInstructions: "Open REAPER, then Preferences → Control/OSC/web. Add the Web browser interface and enable it. Check setup when you are ready. If the Ori runner is not registered yet, you can finish it from the workspace's live-control setup. No project access is granted here; the correct project must still be verified after creation.",
-			},
-			Steps: []SetupJourneyStep{
-				{
-					ID:          "integration",
-					Kind:        SetupStepIntegrationInstall,
-					Title:       "Install Ori REAPER Plugin",
-					Description: "Ori's REAPER integration is a local integration for Ori, not an audio plug-in, VST, effect, or instrument. It will not appear in REAPER's FX browser.",
-				},
-				{
-					ID:          "project",
-					Kind:        SetupStepProjectConnect,
-					Title:       "Connect a project",
-					Description: "Connect one existing REAPER project or create a new one after review.",
-				},
-				{
-					ID:          "workspace",
-					Kind:        SetupStepWorkspaceSetup,
-					Title:       "Choose how Ori works",
-					Description: "Choose File-only or Ori-assisted REAPER through the project setup flow.",
-				},
-				{
-					ID:          "staffing",
-					Kind:        SetupStepAssistantProgramStaffing,
-					Title:       "Add your studio team",
-					Description: "Add one Home portfolio role and an independent team for this project.",
-				},
-				{
-					ID:          "summary",
-					Kind:        SetupStepSummary,
-					Title:       "Review setup",
-					Description: "Review what is installed, connected, staffed, selected, and still optional.",
-				},
-			},
-		},
+		SetupJourney:    legacySetup("reaper-setup.json"),
 	},
 }
