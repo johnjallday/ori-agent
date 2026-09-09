@@ -127,6 +127,26 @@ func integrationResolver(entry reviewedintegration.Entry) IntegrationEntryResolv
 	}
 }
 
+// TestReviewedIntegrationReadCurrentlyCouplesReviewedAndTargetReferences pins
+// the pre-user-quest seam. The reviewed plugin contribution is valid, but a
+// local template/program target cannot enter the adapter until reviewed
+// installation expectations and user target references are carried separately.
+func TestReviewedIntegrationReadCurrentlyCouplesReviewedAndTargetReferences(t *testing.T) {
+	entry, descriptor, report, scope := readyIntegrationFixture(t)
+	manager := &fakeReviewedIntegrationManager{descriptor: descriptor, report: report}
+	adapter := newReviewedIntegrationAdapter(manager, integrationResolver(entry), "darwin/arm64")
+	scope.ExpectedBlueprintID = "user-setup-quest-eligible"
+	scope.ExpectedAssistantProgramID = "user-music-team"
+
+	read, err := adapter.Read(context.Background(), scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.BlockedReason != ReasonIntegrationIdentityMismatch || manager.inspections != 0 {
+		t.Fatalf("reviewed/target reference coupling changed: read=%+v inspections=%d", read, manager.inspections)
+	}
+}
+
 func TestReviewedIntegrationReadAbsentSurfacesExactReview(t *testing.T) {
 	entry, descriptor, report, scope := readyIntegrationFixture(t)
 	manager := &fakeReviewedIntegrationManager{descriptor: descriptor, report: report}
