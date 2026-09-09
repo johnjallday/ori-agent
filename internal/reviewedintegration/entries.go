@@ -1,12 +1,13 @@
 package reviewedintegration
 
-// This file is inert host-owned allowlist data. The candidate commit is pinned
-// while release readiness stays false until a human publishes the exact asset.
+// This file is inert host-owned allowlist data. Release sources are pinned only
+// after verifying the published asset against that commit's manifest.
+// See docs/reaper-integration.md for the v0.5.0 verification evidence.
 var builtInEntries = mustRegistry([]Entry{
 	{
 		Key: "ori_reaper", PluginID: "reaper-plugin", ExpectedVersion: "0.5.0",
 		SourceRepository: "https://github.com/johnjallday/reaper-plugin",
-		SourceCommit:     "a5f4149f1aaf64611e90ff9484e37f7854c828b9", SourceFormat: reviewedClaudeFormat,
+		SourceCommit:     "1f494db5a39d8c13f6149943b28e6a506d19631a", SourceFormat: reviewedClaudeFormat,
 		PublisherLabel: "Ori", SourceLabel: "johnjallday/reaper-plugin",
 		ExpectedBlueprintID: "reaper-song", ExpectedBlueprintVersion: 4,
 		ExpectedProgramID: "music-producer-assistant", ExpectedProgramSchema: 2,
@@ -15,6 +16,6 @@ var builtInEntries = mustRegistry([]Entry{
 			"specialist_setup_journey_v1",
 		},
 		ExpectedProtocol: 1, SupportedPlatforms: []string{"darwin/arm64"},
-		ReleaseReady: false,
+		ReleaseReady: true,
 	},
 })

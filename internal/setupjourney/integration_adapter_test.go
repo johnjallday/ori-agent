@@ -22,6 +22,9 @@ type fakeReviewedIntegrationManager struct {
 	listErr         error
 	inspectErr      error
 	inspections     int
+	inspectSources  []string
+	updateCalls     int
+	updateErr       error
 	installCalls    int
 	confirmAccepted bool
 }
@@ -29,8 +32,9 @@ type fakeReviewedIntegrationManager struct {
 func (manager *fakeReviewedIntegrationManager) List() ([]plugin.InstalledPlugin, error) {
 	return append([]plugin.InstalledPlugin(nil), manager.installed...), manager.listErr
 }
-func (manager *fakeReviewedIntegrationManager) Inspect(string, plugin.SourceFormat) (plugin.PluginDescriptor, plugin.TrustReport, error) {
+func (manager *fakeReviewedIntegrationManager) Inspect(source string, _ plugin.SourceFormat) (plugin.PluginDescriptor, plugin.TrustReport, error) {
 	manager.inspections++
+	manager.inspectSources = append(manager.inspectSources, source)
 	return manager.descriptor, manager.report, manager.inspectErr
 }
 func (manager *fakeReviewedIntegrationManager) Install(source string, format plugin.SourceFormat, confirm plugin.ConfirmFunc) (plugin.InstalledPlugin, error) {
@@ -53,6 +57,10 @@ func (manager *fakeReviewedIntegrationManager) SetEnabled(name string, enabled b
 	return errors.New("not installed")
 }
 func (manager *fakeReviewedIntegrationManager) UpdateFromSource(_ string, source string, format plugin.SourceFormat, confirm plugin.ConfirmFunc) (plugin.InstalledPlugin, error) {
+	manager.updateCalls++
+	if manager.updateErr != nil {
+		return plugin.InstalledPlugin{}, manager.updateErr
+	}
 	if confirm == nil || !confirm(manager.report) {
 		return plugin.InstalledPlugin{}, plugin.ErrInstallDeclined
 	}
@@ -151,7 +159,7 @@ func TestReviewedIntegrationReadInstalledSeparatesEnablement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if read.Complete || read.BlockedReason != "" || !containsAction(read.AvailableActions, ActionReviewEnable) {
+	if read.Complete || !read.Integration.Verified || read.BlockedReason != "" || !containsAction(read.AvailableActions, ActionReviewEnable) {
 		t.Fatalf("disabled installation was not independently actionable: %#v", read)
 	}
 	manager.installed[0].Enabled = true
@@ -221,7 +229,7 @@ func TestReviewedIntegrationReadFailsClosedForIdentityAndContributionMismatch(t 
 		if err != nil || !read.Complete || read.BlockedReason != "" || manager.inspections != 0 {
 			t.Fatalf("explicit development copy was not accepted: %#v err=%v", read, err)
 		}
-		if read.Integration == nil || !read.Integration.DevelopmentCopy || read.Integration.ReleaseReady {
+		if read.Integration == nil || !read.Integration.DevelopmentCopy || read.Integration.ReleaseReady || read.Integration.Verified {
 			t.Fatalf("development provenance was not retained: %#v", read.Integration)
 		}
 		encoded, marshalErr := json.Marshal(read.Integration)
@@ -293,7 +301,7 @@ func TestReviewedIntegrationPendingReleaseNeverResolvesMutableSource(t *testing.
 	entry.SourceCommit = ""
 	manager := &fakeReviewedIntegrationManager{descriptor: descriptor, report: report}
 	read, err := newReviewedIntegrationAdapter(manager, integrationResolver(entry), "darwin/arm64").Read(context.Background(), scope)
-	if err != nil || read.BlockedReason != ReasonOwnerUnavailable || manager.inspections != 0 ||
+	if err != nil || read.BlockedReason != ReasonIntegrationReleaseNotReady || manager.inspections != 0 ||
 		read.Integration == nil || read.Integration.ReleaseReady {
 		t.Fatalf("pending release was not inert: %#v err=%v inspections=%d", read, err, manager.inspections)
 	}

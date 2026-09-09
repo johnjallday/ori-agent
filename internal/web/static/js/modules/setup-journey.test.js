@@ -49,10 +49,42 @@ test('a permitted development integration stays visibly distinct from a reviewed
   );
   assert.deepEqual(rows, [
     ['Integration', 'local-plugin'],
+    ['Installed', 'Yes'],
     ['Version', '1.0.0'],
     ['Enabled', 'Yes'],
     ['Verification', 'Local development copy — not release-verified']
   ]);
+});
+
+test('installation and enablement never imply verified release provenance', () => {
+  const integration = {
+    plugin_id: 'installed-plugin',
+    installed_version: '0.5.0',
+    expected_version: '0.5.0',
+    enabled: true,
+    release_ready: true,
+    replacement_required: true
+  };
+  let rows = setupJourneyReceiptRows({}, { integration });
+  assert.ok(rows.some(([label, value]) => label === 'Installed' && value === 'Yes'));
+  assert.ok(
+    rows.some(
+      ([label, value]) => label === 'Verification' && value === 'Not verified for guided setup'
+    )
+  );
+  assert.ok(rows.some(([label, value]) => label === 'Next step' && /replacement/.test(value)));
+  rows = setupJourneyReceiptRows(
+    {},
+    { integration: { ...integration, verified: true, replacement_required: false, enabled: false } }
+  );
+  assert.ok(
+    rows.some(([label, value]) => label === 'Verification' && value === 'Verified release')
+  );
+  assert.ok(rows.some(([label, value]) => label === 'Enabled' && value === 'Not yet'));
+  assert.equal(
+    rows.some(([label]) => label === 'Next step'),
+    false
+  );
 });
 
 test('file-only receipt stays honest about unconfigured and untested live control', () => {
