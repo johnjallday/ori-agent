@@ -6032,3 +6032,212 @@ body.chat-panel-open .chat-panel-backdrop {
     outline: 2px solid var(--accent-primary, #8ab4f8);
   }
 }
+
+/* ============================================================
+   Workspace role roster (workspace-role-roster.js)
+   ------------------------------------------------------------
+   One stylesheet for both surfaces: the Create Workspace Team step
+   and the workspace's own Roles roster. It is written against the
+   app-wide theme tokens rather than either surface's local palette,
+   so the same row looks the same in the modal and on the workspace
+   and needs no per-theme block of its own — variables.css already
+   swaps these under [data-bs-theme="dark"].
+
+   The state tags are deliberately NEUTRAL. "Missing" means a slot is
+   ready for someone, not that anything is broken, so it must never
+   reach for the danger palette (FR6). Missing is the more present of
+   the two — a solid border and full-strength ink — while Optional
+   recedes; the difference is emphasis, never alarm.
+   ============================================================ */
+.ws-role-roster__count {
+  margin: 0 0 0.5rem;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+}
+
+.ws-role-roster__empty {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+}
+
+.ws-role-roster__list {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ws-role-row {
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+
+/* An empty optional role is quieter than a Missing one and sorts below it, so
+   the roster reads as "these still need a decision, these are extras". */
+.ws-role-row.is-quiet {
+  background: transparent;
+  border-style: dashed;
+}
+
+.ws-role-row.is-quiet .ws-role-row__description,
+.ws-role-row.is-quiet .ws-role-row__meta {
+  color: var(--text-muted);
+}
+
+/* Focus returns to a row after a fill or clear. It is not a tab stop, so the
+   ring is the only thing that says where you landed — it has to be visible. */
+.ws-role-row:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.ws-role-row__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.ws-role-row__identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.ws-role-row__label {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.ws-role-row__designation {
+  color: var(--text-muted);
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+}
+
+.ws-role-row__meta {
+  margin: 0.125rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+.ws-role-row__description {
+  margin: 0.25rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.ws-role-row__read-only {
+  margin: 0.375rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+/* ---- State tags ---------------------------------------------------------- */
+.ws-role-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.125rem 0.5rem;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  white-space: nowrap;
+}
+
+/* Missing gets its presence from a solid border, full-strength ink, and weight
+   — never from colour. Do NOT reach for --border-light here: that token means
+   "a lighter border", which is a STRONGER edge in the dark palette (#5c5c5e)
+   and an almost invisible one in the light palette (#e8eaed), so the tag that
+   reads clearly in dark disappears in light. */
+.ws-role-tag--missing {
+  border-color: var(--border-color);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.ws-role-tag--optional {
+  border-style: dashed;
+  border-color: var(--border-color);
+  color: var(--text-muted);
+}
+
+.ws-role-tag--filled {
+  padding-left: 0.25rem;
+  border-color: var(--border-color);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.ws-role-tag__avatar {
+  display: inline-flex;
+}
+
+.ws-role-tag__source {
+  color: var(--text-muted);
+}
+
+.ws-role-tag__source::before {
+  content: "·";
+  margin-right: 0.375rem;
+}
+
+/* ---- Actions ------------------------------------------------------------- */
+.ws-role-row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: 0.5rem;
+}
+
+.ws-role-row__link {
+  font-size: 0.75rem;
+}
+
+/* Create has no styles of its own: the row hands the role to its host, which
+   opens the app's canonical Create Agent modal prefilled for it. The roster
+   deliberately owns no form — see workspace-role-roster.js. */
+
+/* ---- Also in this workspace --------------------------------------------- */
+.ws-role-roster__also {
+  margin-top: 0.75rem;
+  padding-top: 0.625rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.ws-role-roster__also-title {
+  margin: 0 0 0.375rem;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.ws-role-roster__also-list {
+  display: grid;
+  gap: 0.375rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ws-role-roster__also-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+}
+
+.ws-role-roster__also-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}

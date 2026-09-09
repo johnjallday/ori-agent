@@ -91,7 +91,6 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/components/vault-settings-section.tmpl",
 		"templates/components/user-profile-form.tmpl",
 		"templates/components/file_dialog.tmpl",
-		"templates/components/workspaces/manage-agents-modal.tmpl",
 		"templates/components/workspaces/create-workspace-modal.tmpl",
 		"templates/components/workspaces/setup-wizard-modal.tmpl",
 		"templates/components/project-templates-manage.tmpl",

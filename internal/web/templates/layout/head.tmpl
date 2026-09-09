@@ -28,6 +28,13 @@
        creates its own mount point, so no page needs to provide one. -->
   <script defer src="/js/modules/agent-appearance.js"></script>
   <script defer src="/js/modules/character-picker.js"></script>
+  <!-- The role roster is drawn by two surfaces — the Create Workspace Team step
+       and the workspace's own roster — so it is registered here for the same
+       reason as the renderer above: a per-page registration is how one of them
+       silently ends up without it, and the two surfaces disagreeing about a
+       team is the exact failure this component exists to prevent. It reads
+       AgentAvatar for a filled role's identity, so it must load after it. -->
+  <script defer src="/js/modules/workspace-role-roster.js"></script>
   <script defer src="/js/modules/update-checker.js"></script>
   <script defer src="/js/modules/vault-modal.js"></script>
   <script defer src="/js/modules/keyboard-navigation.js"></script>

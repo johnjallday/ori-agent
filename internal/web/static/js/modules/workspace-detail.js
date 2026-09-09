@@ -5559,10 +5559,41 @@ export class WorkspaceDetailPage {
       return false;
     }
 
+    // A workspace whose blueprint declares ROLES is not broken for having none
+    // of them filled — that is a supported end state, and its roster is the
+    // place to fix it. This mandatory prompt says the workspace "cannot
+    // function" and offers to mint a Commander on the spot, which is exactly
+    // the automatic staffing the vacancy model replaces: it would undo the
+    // user's choice to create the workspace empty, moments after they made it.
+    if (this.declaresBlueprintRoles()) {
+      return false;
+    }
+
     try {
       return window.sessionStorage?.getItem(this.getEntryAgentPromptDismissalStorageKey()) !== '1';
     } catch (_error) {
       return true;
+    }
+  }
+
+  // Whether this workspace's blueprint declares roles, read from the roster the
+  // Command view already loaded. Absent (a workspace from no blueprint, or a
+  // roster that has not answered yet) the legacy prompt keeps its behavior —
+  // those workspaces genuinely have no other way to get an entry agent.
+  declaresBlueprintRoles() {
+    const roster = window.workspaceCommand?.roleRoster;
+    return Boolean(roster && roster.total_count > 0);
+  }
+
+  // Resolves once the roster is known, or gives up so a slow or failed roster
+  // fetch never leaves the page waiting on it.
+  async awaitBlueprintRoles() {
+    const view = window.workspaceCommand;
+    if (!view || typeof view.loadRoleRoster !== 'function') return;
+    try {
+      await view.loadRoleRoster();
+    } catch (_error) {
+      /* an unreadable roster falls through to the legacy prompt */
     }
   }
 
@@ -5629,6 +5660,12 @@ export class WorkspaceDetailPage {
   }
 
   async maybePromptForMissingEntryAgent() {
+    // The roster load is what tells us whether this workspace has roles at all,
+    // and it is in flight while the page boots. Waiting for it here is the
+    // difference between "no roles declared" and "not answered yet" — without
+    // it, an empty-by-design workspace gets the mandatory Commander prompt on
+    // every load purely because the fetch had not landed.
+    await this.awaitBlueprintRoles();
     if (!this.shouldPromptForMissingEntryAgent()) return;
 
     const workspaceName = String(this.workspace?.name || '').trim() || 'this workspace';

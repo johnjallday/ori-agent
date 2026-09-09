@@ -117,6 +117,10 @@
 
   function normalizeAssistantProgram(program) {
     if (!program || typeof program !== 'object') return null;
+    // EVERY declared role reaches the Team step, optional ones included (FR9,
+    // FR10). Filtering out `required !== false` here is what made optional roles
+    // invisible in the wizard — the user could neither see them nor fill them,
+    // and the only way to get one was a separate setup action afterwards.
     const roles = (Array.isArray(program.roles) ? program.roles : [])
       .map(role => ({
         id: text(role && role.id),
@@ -124,10 +128,10 @@
         description: text(role && role.description),
         primary: Boolean(role && role.primary),
         scope: text(role && role.scope),
-        required: role?.required !== false,
+        required: role?.required === true,
         agentName: text(role && role.agent_name)
       }))
-      .filter(role => role.id && role.label && role.required !== false);
+      .filter(role => role.id && role.label);
     const stages = (Array.isArray(program.stages) ? program.stages : [])
       .map(stage => ({
         id: text(stage && stage.id),
@@ -183,6 +187,170 @@
     return { programKey: '', name: '', provider: '', model: '' };
   }
 
+  // ---- Role vacancies -------------------------------------------------------
+  //
+  // A blueprint declares roles; a role is a slot. Which slots the user has
+  // filled lives HERE, in the draft, and reaches every surface through
+  // derive(). There is deliberately no second copy: the Team roster, the Review
+  // receipt, and the create request all read the same projection, which is the
+  // whole reason this module exists.
+
+  const FILL_CREATE = 'create';
+  const FILL_ASSIGN = 'assign';
+
+  // roleIdFromName mirrors projecttemplates.AgentRoleID exactly. An ordinary
+  // blueprint's roster is a list of agents, not slots, so its role identity is
+  // derived from the name on both sides — the wizard sends a role_id the server
+  // must re-derive to the same string, or the fill binds nothing.
+  function roleIdFromName(name) {
+    let slug = '';
+    let lastHyphen = true;
+    for (const char of text(name).toLocaleLowerCase()) {
+      if ((char >= 'a' && char <= 'z') || (char >= '0' && char <= '9')) {
+        slug += char;
+        lastHyphen = false;
+      } else if (!lastHyphen) {
+        slug += '-';
+        lastHyphen = true;
+      }
+    }
+    slug = slug.replace(/^-+|-+$/g, '');
+    if (slug.length > 80) slug = slug.slice(0, 80).replace(/-+$/, '');
+    return slug || 'role';
+  }
+
+  // declaredRoles is the one place either blueprint kind becomes a list of
+  // slots, so the Team step renders one roster whichever kind the user picked
+  // (FR20).
+  //
+  // An ordinary blueprint declares no requiredness, so it follows the roster
+  // contract templates already have: the first entry is the workspace's entry
+  // agent and the rest are specialists. First role primary and required, the
+  // rest optional — calling four specialists "Missing" would read as four
+  // failures for a team the user never asked for.
+  function declaredRoles(source) {
+    const plan = source.plan || {};
+    const program = plan.data?.assistantProgram || null;
+    if (program) {
+      return program.roles.map(role => ({
+        roleId: role.id,
+        label: role.label,
+        description: role.description,
+        scope: role.scope === 'home' ? 'home' : 'project',
+        required: role.required,
+        primary: Boolean(role.primary),
+        // A home role an existing station already staffs is shown with its
+        // holder and cannot be changed from here (D2).
+        heldElsewhere: role.scope === 'home' ? role.agentName : ''
+      }));
+    }
+    const seen = new Map();
+    return planAgents(source).map((agent, index) => {
+      const base = roleIdFromName(agent.name);
+      let roleId = base;
+      for (;;) {
+        const count = seen.get(roleId) || 0;
+        seen.set(roleId, count + 1);
+        if (count === 0) break;
+        roleId = base + '-' + (count + 1);
+      }
+      // The blueprint's own proposal for this role. It mirrors the server's
+      // ProposedSetup so the Team step and the workspace roster seed the
+      // Create form from the same shape.
+      const recommended = agent.recommended || agent;
+      return {
+        roleId,
+        label: agent.name,
+        description: agent.systemPrompt ? firstSentence(agent.systemPrompt) : '',
+        scope: 'project',
+        required: index === 0,
+        primary: index === 0,
+        heldElsewhere: '',
+        templateAgentIndex: index,
+        proposed: {
+          type: text(recommended.type),
+          model: text(recommended.model),
+          provider: text(recommended.provider),
+          system_prompt: text(recommended.systemPrompt)
+        }
+      };
+    });
+  }
+
+  function firstSentence(value) {
+    const flat = text(value).replace(/\s+/g, ' ');
+    const end = flat.search(/[.!?]/);
+    if (end > 0 && end + 1 <= 160) return flat.slice(0, end + 1);
+    return flat.length <= 160 ? flat : flat.slice(0, 160).replace(/\s\S*$/, '') + '…';
+  }
+
+  function normalizeFill(fill) {
+    if (!fill || typeof fill !== 'object') return null;
+    const mode = text(fill.mode) === FILL_ASSIGN ? FILL_ASSIGN : FILL_CREATE;
+    const name = text(fill.name);
+    if (!name) return null;
+    // An assigned agent keeps its own definition entirely, so a fill that binds
+    // one carries nothing but its name.
+    if (mode === FILL_ASSIGN) return { mode, name };
+    return {
+      mode,
+      name,
+      provider: text(fill.provider),
+      model: text(fill.model),
+      // Carried so an edit made in the Create form reaches the created agent.
+      // Empty means "use what the blueprint proposes".
+      type: text(fill.type),
+      systemPrompt: text(fill.systemPrompt)
+    };
+  }
+
+  // setRoleFill records that a role will be filled — by creating an agent for
+  // it, or by assigning one the user already has. It never performs I/O; the
+  // fill becomes a request only at submit.
+  function setRoleFill(draft, roleId, fill) {
+    const id = text(roleId);
+    const normalized = normalizeFill(fill);
+    if (!draft || !id || !normalized) return false;
+    if (!draft.roleFills) draft.roleFills = new Map();
+    // One agent fills at most one role (FR25). Assigning someone already in
+    // another slot moves them rather than cloning them into two.
+    if (normalized.mode === FILL_ASSIGN) {
+      for (const [otherRole, other] of draft.roleFills) {
+        if (
+          otherRole !== id &&
+          other.mode === FILL_ASSIGN &&
+          agentKey(other.name) === agentKey(normalized.name)
+        ) {
+          draft.roleFills.delete(otherRole);
+        }
+      }
+    }
+    draft.roleFills.set(id, normalized);
+    return true;
+  }
+
+  function clearRoleFill(draft, roleId) {
+    const id = text(roleId);
+    if (!draft || !id || !draft.roleFills) return false;
+    return draft.roleFills.delete(id);
+  }
+
+  function getRoleFill(draft, roleId) {
+    const fill = draft && draft.roleFills && draft.roleFills.get(text(roleId));
+    return fill ? { ...fill } : null;
+  }
+
+  // roleFilledBy reports which role an agent name currently fills, so the
+  // picker can disable someone already holding another slot and say why (FR25).
+  function roleFilledBy(source, name) {
+    const key = agentKey(name);
+    if (!key || !source.roleFills) return '';
+    for (const [roleId, fill] of source.roleFills) {
+      if (agentKey(fill.name) === key) return roleId;
+    }
+    return '';
+  }
+
   function createDraft() {
     return {
       plan: { status: PLAN_IDLE, blueprintKey: '', data: null, error: '' },
@@ -194,6 +362,9 @@
       staleConflict: null,
       creationFailures: new Map(),
       assistantHire: emptyAssistantHire(),
+      // Which declared roles the user has chosen to fill. Empty is the correct
+      // starting state and a valid end state (FR7, FR11).
+      roleFills: new Map(),
       savedSelections: [],
       savedRoster: { status: PLAN_IDLE, agents: [], error: '' },
       explicitPrimary: ''
@@ -223,6 +394,9 @@
     draft.staleConflict = null;
     draft.creationFailures = new Map();
     draft.assistantHire = emptyAssistantHire();
+    // Role ids belong to the blueprint that declared them, so a different
+    // blueprint's fills would bind to slots that no longer exist.
+    draft.roleFills = new Map();
     draft.includeBlueprintTeam = true;
     if (draft.explicitPrimary && !isSelected(draft, draft.explicitPrimary)) {
       draft.explicitPrimary = '';
@@ -271,15 +445,19 @@
         const existingPrimary = program.roles.find(
           role => role.id === program.namedPrimaryID
         )?.agentName;
+        // The primary role starts EMPTY like every other one (FR11). The name
+        // is prefilled only when a station already holds this role — there the
+        // agent exists and the wizard is reporting it, not proposing it.
+        //
+        // Prefilling defaultPrimaryName for a fresh station is what made "pick
+        // a blueprint" mean "and here are four agents you did not ask for":
+        // the wizard filled the slot before the user could look at it.
+        const alreadyStaffed = program.existingHired || program.homeAlreadyStaffed;
         draft.assistantHire = {
           programKey,
-          name:
-            program.existingHired || program.homeAlreadyStaffed
-              ? existingPrimary || program.defaultPrimaryName
-              : program.defaultPrimaryName,
-          provider:
-            program.existingHired || program.homeAlreadyStaffed ? program.existingProvider : '',
-          model: program.existingHired || program.homeAlreadyStaffed ? program.existingModel : ''
+          name: alreadyStaffed ? existingPrimary || program.defaultPrimaryName : '',
+          provider: alreadyStaffed ? program.existingProvider : '',
+          model: alreadyStaffed ? program.existingModel : ''
         };
       }
     } else {
@@ -791,19 +969,22 @@
     };
   }
 
-  function resolveAssistantEntries(draft, program) {
-    const hire = draft.assistantHire || emptyAssistantHire();
+  function resolveAssistantEntries(source, program) {
+    const hire = source.assistantHire || emptyAssistantHire();
     const roles = program.existingHired
       ? program.roles.filter(role => role.agentName)
       : program.roles;
     return roles.map(role => {
       const namedPrimary = role.id === program.namedPrimaryID;
       const existing = program.existingHired || (role.scope === 'home' && Boolean(role.agentName));
+      // An unfilled role is described by its LABEL, primary included. The
+      // primary used to be described by the hire name, which is now empty until
+      // the user fills the slot (FR11) — without the fallback the roster would
+      // show a blank row where a role should be.
+      const fill = source.roleFills && source.roleFills.get(role.id);
       const name = existing
-        ? role.agentName || (namedPrimary ? text(hire.name) : role.label)
-        : namedPrimary
-          ? text(hire.name)
-          : role.label;
+        ? role.agentName || text(hire.name) || role.label
+        : text(fill && fill.name) || (namedPrimary ? text(hire.name) : '') || role.label;
       const lifecycle = existing ? 'assistant-link' : 'assistant-create';
       return {
         key: agentKey(name),
@@ -847,9 +1028,12 @@
     });
   }
 
+  // An EMPTY name is not a problem: leaving the primary role unfilled is a
+  // supported outcome, so it must never block creation (FR7, FR19). Only a name
+  // the user actually typed can be malformed.
   function assistantNameProblem(name) {
     const normalized = text(name);
-    if (!normalized) return 'Choose a name for the primary assistant.';
+    if (!normalized) return '';
     if (normalized.length > 100) return 'Assistant name must be 100 characters or fewer.';
     if (!/^[A-Za-z0-9 _-]+$/.test(normalized)) {
       return 'Assistant name may use letters, numbers, spaces, underscores, and hyphens.';
@@ -880,6 +1064,99 @@
       .filter(override => Object.keys(override).length > 1);
   }
 
+  // buildRoleRoster projects declared roles plus the user's fills into the same
+  // wire shape the workspace's own roster endpoint returns, so the shared
+  // component renders the wizard and the workspace from one contract (FR33).
+  //
+  // Nothing is persisted yet here — a "filled" row means "will be filled".
+  function buildRoleRoster(source, savedAgentsByKey) {
+    const roles = declaredRoles(source).map(role => {
+      const item = {
+        role_id: role.roleId,
+        label: role.label,
+        description: role.description,
+        scope: role.scope,
+        required: role.required,
+        primary: role.primary,
+        state: 'empty'
+      };
+      // Only an empty role has anything left to propose. Assistant-program
+      // roles carry none: that declaration's prompts stay server-side.
+      if (role.proposed) item.proposed = role.proposed;
+      // A group-scoped role an existing station already holds is reported, not
+      // offered: it belongs to the group workspace (D2).
+      if (role.heldElsewhere) {
+        item.state = 'filled';
+        item.source = SOURCE_ASSIGNED_WIRE;
+        item.agent = { name: role.heldElsewhere };
+        item.read_only = true;
+        item.read_only_reason = GROUP_ROLE_READ_ONLY;
+        return item;
+      }
+      const fill = source.roleFills && source.roleFills.get(role.roleId);
+      if (fill) {
+        const saved = savedAgentsByKey.get(agentKey(fill.name));
+        item.state = 'filled';
+        item.source = fill.mode === FILL_ASSIGN ? SOURCE_ASSIGNED_WIRE : SOURCE_CREATED_WIRE;
+        item.agent = {
+          name: fill.name,
+          role: saved ? text(saved.role) : '',
+          type: saved ? text(saved.type) : '',
+          appearance: (saved && saved.appearance) || null
+        };
+        // A filled role has nothing left to propose.
+        delete item.proposed;
+      }
+      return item;
+    });
+    const filled = roles.filter(role => role.state === 'filled');
+    return {
+      roles,
+      filled_count: filled.length,
+      total_count: roles.length,
+      // Counted separately because only these two produce a request: a role
+      // held by the group station is neither created nor attached here.
+      created_count: roles.filter(
+        role => role.state === 'filled' && !role.read_only && role.source === SOURCE_CREATED_WIRE
+      ).length,
+      assigned_count: roles.filter(
+        role => role.state === 'filled' && !role.read_only && role.source === SOURCE_ASSIGNED_WIRE
+      ).length,
+      empty_count: roles.length - filled.length
+    };
+  }
+
+  const SOURCE_CREATED_WIRE = 'created';
+  const SOURCE_ASSIGNED_WIRE = 'assigned';
+  const GROUP_ROLE_READ_ONLY = 'This role belongs to the group workspace. Fill or clear it there.';
+
+  // roleStaffingSummary states the request in FUTURE tense and counts every
+  // outcome, so the Team summary and the Review receipt can be the same
+  // sentence and cannot drift apart (FR17, FR18, FR30).
+  function roleStaffingSummary(roster) {
+    if (!roster || roster.total_count === 0) return '';
+    if (roster.created_count === 0 && roster.assigned_count === 0) {
+      return 'No agent will be attached to this workspace. You can fill these roles any time from the workspace.';
+    }
+    const parts = [];
+    if (roster.created_count > 0) {
+      parts.push(
+        `${roster.created_count} new agent${roster.created_count === 1 ? '' : 's'} will be created`
+      );
+    }
+    if (roster.assigned_count > 0) {
+      parts.push(
+        `${roster.assigned_count} saved agent${roster.assigned_count === 1 ? '' : 's'} will be attached`
+      );
+    }
+    if (roster.empty_count > 0) {
+      parts.push(
+        `${roster.empty_count} role${roster.empty_count === 1 ? '' : 's'} will stay empty`
+      );
+    }
+    return parts.join(' · ') + '.';
+  }
+
   // Pure projection of the draft. Everything the wizard renders — Blueprint
   // chips, the Team roster, the Review receipt, and the create request — comes
   // from here, so no two surfaces can describe different teams.
@@ -894,6 +1171,24 @@
     const blueprintEntries = assistantProgram
       ? resolveAssistantEntries(source, assistantProgram)
       : activePlanAgents.map((agent, index) => resolveBlueprintEntry(source, agent, index));
+
+    const savedAgentsByKey = new Map(
+      ((source.savedRoster && source.savedRoster.agents) || []).map(agent => [
+        agentKey(agent && agent.name),
+        agent
+      ])
+    );
+    const roleRoster = includeTeam
+      ? buildRoleRoster(source, savedAgentsByKey)
+      : {
+          roles: [],
+          filled_count: 0,
+          total_count: 0,
+          created_count: 0,
+          assigned_count: 0,
+          empty_count: 0
+        };
+    const roleSummary = roleStaffingSummary(roleRoster);
 
     // A retained saved selection that the (possibly changed) blueprint already
     // contributes stays selected but yields its roster slot to the blueprint
@@ -1015,7 +1310,13 @@
         templateAgentIndex: failedEntry.templateAgentIndex
       });
     }
-    if (pendingSetups.length > 0) {
+    // "Set up these proposed agents first" belongs to the flow that created the
+    // whole roster on submit. Under the vacancy model nothing is created unless
+    // the user fills a role, and filling one configures it on its own row — so
+    // demanding setup for agents that may never exist would block Review on
+    // work the request will not do, and leaving roles empty must never block
+    // (FR19).
+    if (pendingSetups.length > 0 && roleRoster.total_count === 0) {
       issues.push({
         id: 'template-agent-setup-required',
         severity: 'blocking',
@@ -1075,13 +1376,22 @@
         anchor: 'saved-agent-picker'
       });
     }
-    if (!assistantProgram && plan.status !== PLAN_LOADING && roster.length === 0) {
-      // Intentionally allowed (FR55) — prominent, but never blocking.
+    // Leaving roles empty is a supported outcome, so it is advisory AT MOST and
+    // never blocking (FR19). It is worth saying once, because starter tasks
+    // will sit unassigned until a role is filled.
+    if (
+      plan.status !== PLAN_LOADING &&
+      roleRoster.created_count === 0 &&
+      roleRoster.assigned_count === 0 &&
+      savedEntries.length === 0
+    ) {
       issues.push({
         id: 'empty-team',
         severity: 'advisory',
         message:
-          'No agent will be attached to this workspace. Starter and setup tasks may remain unassigned until you add one.',
+          roleRoster.total_count > 0
+            ? 'No agent will be attached to this workspace. Starter and setup tasks stay unassigned until you fill a role.'
+            : 'No agent will be attached to this workspace. Starter and setup tasks may remain unassigned until you add one.',
         recovery: ['add-saved-agent', 'include-blueprint-team'],
         anchor: 'team-roster'
       });
@@ -1097,8 +1407,35 @@
     });
 
     const payload = {};
+    // role_staffing carries the user's per-role choices and is sent whenever
+    // this blueprint declares roles — INCLUDING when it is empty, which is how
+    // "create this workspace with nobody in it" is expressed. Its absence means
+    // "no vacancy model here", and the server then behaves exactly as it always
+    // did (FR57), which is what keeps CreateFromTemplate and other non-wizard
+    // callers working.
+    if (includeTeam && plan.status === PLAN_READY && roleRoster.total_count > 0) {
+      payload.role_staffing = roleRoster.roles
+        .filter(role => role.state === 'filled' && !role.read_only)
+        .map(role => {
+          const fill = source.roleFills.get(role.role_id);
+          const item = { role_id: role.role_id, mode: fill.mode, name: fill.name };
+          if (fill.mode === FILL_CREATE) {
+            if (fill.provider) item.provider = fill.provider;
+            if (fill.model) item.model = fill.model;
+            // Sent only when the user actually edited them; absent means the
+            // server applies what the blueprint declared.
+            if (fill.type) item.type = fill.type;
+            if (fill.systemPrompt) item.system_prompt = fill.systemPrompt;
+          }
+          return item;
+        });
+    }
     if (assistantProgram) {
-      if (!assistantProgram.existingHired)
+      // assistant_hire drives the post-create hire, which staffs every required
+      // role at once. It is sent ONLY when the vacancy model is not in play, so
+      // a wizard submission can never silently staff a role the user left
+      // empty.
+      if (!assistantProgram.existingHired && !payload.role_staffing)
         payload.assistant_hire = {
           name: text(source.assistantHire?.name),
           provider: text(source.assistantHire?.provider),
@@ -1109,7 +1446,11 @@
       if (includeTeam) {
         const overrides = serializeOverrides(source);
         if (overrides.length > 0) payload.template_agent_overrides = overrides;
+        // The reviewed-roster contract describes creating the WHOLE blueprint
+        // team. Under the vacancy model the request creates only the roles the
+        // user filled, so the two cannot both describe the same submission.
         if (
+          !payload.role_staffing &&
           allPlanAgents.length > 0 &&
           text(plan.data?.revision) &&
           pendingSetups.length === 0 &&
@@ -1165,6 +1506,10 @@
         ? { ...(source.assistantHire || emptyAssistantHire()) }
         : null,
       isAssistantProgram: Boolean(assistantProgram),
+      // The vacancy projection both the Team step and the Review receipt
+      // render, and the one the create request is built from.
+      roleRoster,
+      roleSummary,
       roster,
       primaryName: primary ? primary.name : '',
       primaryIsAutomatic: Boolean(primary) && !text(source.explicitPrimary),
@@ -1234,6 +1579,14 @@
     normalizePlan,
     setIncludeBlueprintTeam,
     setAssistantHire,
+    setRoleFill,
+    clearRoleFill,
+    getRoleFill,
+    roleFilledBy,
+    declaredRoles,
+    roleIdFromName,
+    FILL_CREATE,
+    FILL_ASSIGN,
     stageOverride,
     clearOverride,
     getOverride,

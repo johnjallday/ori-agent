@@ -498,6 +498,22 @@ async function installFixtureRoutes(page: Page) {
       await json(route, { available: false });
       return;
     }
+    // The workspace's role roster. This scene's workspace comes from no
+    // blueprint, so it declares no roles — an empty roster is its real state,
+    // it renders nothing, and the captured screenshot is unchanged. Its agents
+    // are attached without a role id, which is what `unassigned` reports.
+    if (/^\/api\/workspaces\/[^/]+\/roles$/.test(url.pathname)) {
+      await json(route, {
+        roles: {
+          workspace_id: README_SCENES.workspace_command.workspace_id,
+          roles: [],
+          unassigned: [],
+          filled_count: 0,
+          total_count: 0
+        }
+      });
+      return;
+    }
     if (
       url.pathname === `/api/workspaces/${README_SCENES.workspace_command.workspace_id}/files/tree`
     ) {

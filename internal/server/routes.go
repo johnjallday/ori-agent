@@ -782,6 +782,13 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/assistant-program/learnings/{learningID}", s.Handlers.Session.EditAssistantLearning)
 		mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/assistant-program/learnings/{learningID}", s.Handlers.Session.DeleteAssistantLearning)
 
+		// Workspace role roster. Explicit for the same reason as the
+		// assistant-program routes above: the legacy /api/workspaces/ subtree
+		// router would otherwise swallow it.
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/roles", s.Handlers.Session.GetWorkspaceRoles)
+		mux.HandleFunc("PUT /api/workspaces/{workspaceID}/roles/{roleID}", s.Handlers.Session.PutWorkspaceRole)
+		mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/roles/{roleID}", s.Handlers.Session.DeleteWorkspaceRole)
+
 		// Workspace routes (unified workspace API)
 		mux.HandleFunc("/api/workspaces", s.handleWorkspaceCollectionAPI)
 		mux.HandleFunc("/api/workspaces/", s.handleWorkspaceAPI)

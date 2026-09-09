@@ -38,6 +38,12 @@ type seedAgentsResult struct {
 	// must delete exactly what the request made and nothing else. An agent that
 	// already existed is reused, not owned, and deleting it would destroy the
 	// user's own definition.
+	//
+	// An agent ASSIGNED to a role is likewise never owned. Every append to this
+	// slice must sit behind a check that the definition did not already exist:
+	// a role filled by assignment is the user's own agent, and rolling back a
+	// failed create by deleting it is the one unrecoverable failure this
+	// staffing path can cause (PRD FR51).
 	OwnedNames []string
 }
 

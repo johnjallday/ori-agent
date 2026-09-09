@@ -273,6 +273,8 @@ func toWorkspaceAgentInstances(items []session.AgentInstance) []agentworkspace.A
 			Role:               item.Role,
 			Description:        item.Description,
 			CustomInstructions: item.CustomInstructions,
+			RoleID:             item.RoleID,
+			RoleSource:         item.RoleSource,
 			EntryPoint:         item.EntryPoint,
 			CreatedAt:          item.CreatedAt,
 		}

@@ -46,24 +46,31 @@ function assistantProgramPlan() {
     default_primary_name: 'Producer',
     hire_title: 'Hire your producer',
     hire_description: 'Name the producer and review the bounded room.',
+    // `required` is stated explicitly because the server always sends it
+    // (templateAssistantProgramRolePlan.Required has no omitempty). Songwriter
+    // is optional on purpose: optional roles used to be filtered out of the
+    // wizard entirely, and these tests now assert that they reach it (FR9/FR10).
     roles: [
       {
         id: 'producer',
         label: 'Producer',
         description: 'Coordinates the room.',
-        primary: true
+        primary: true,
+        required: true
       },
       {
         id: 'engineer',
         label: 'Mix Engineer',
         description: 'Handles technical session concerns.',
-        primary: false
+        primary: false,
+        required: true
       },
       {
         id: 'writer',
         label: 'Songwriter',
         description: 'Handles composition and arrangement.',
-        primary: false
+        primary: false,
+        required: false
       }
     ],
     stages: [
@@ -137,7 +144,10 @@ test('assistant programs become a named shared roster in Team instead of an empt
   const view = Draft.derive(draft);
 
   assert.equal(view.isAssistantProgram, true);
-  assert.equal(view.assistantHire.name, 'Producer');
+  // The primary is NOT pre-filled. Naming it before the user looked at it is
+  // what made picking a blueprint mean "and here are agents you did not ask
+  // for" (FR11).
+  assert.equal(view.assistantHire.name, '');
   assert.equal(view.blueprintSummary.count, 3);
   assert.equal(view.blueprintSummary.isEmpty, false);
   assert.deepEqual(
@@ -148,10 +158,209 @@ test('assistant programs become a named shared roster in Team instead of an empt
       ['Songwriter', 'specialist', 'assistant-create']
     ]
   );
-  assert.ok(!view.issues.some(issue => issue.id === 'empty-team'));
   assert.equal(view.batchSetup.canAcceptAll, false);
   assert.equal(view.payload.template_agent_review, undefined);
-  assert.deepEqual(view.payload.assistant_hire, { name: 'Producer', provider: '', model: '' });
+
+  // Every declared role — the optional Songwriter included — reaches the Team
+  // step as an empty slot, and nothing is staffed (FR9, FR10, FR11).
+  assert.deepEqual(
+    view.roleRoster.roles.map(role => [role.role_id, role.required, role.state]),
+    [
+      ['producer', true, 'empty'],
+      ['engineer', true, 'empty'],
+      ['writer', false, 'empty']
+    ]
+  );
+  assert.equal(view.roleRoster.filled_count, 0);
+  assert.equal(view.roleRoster.total_count, 3);
+  assert.deepEqual(view.payload.role_staffing, [], 'an untouched roster staffs nothing');
+  assert.equal(
+    view.payload.assistant_hire,
+    undefined,
+    'assistant_hire would staff every required role, so it is never sent alongside vacancies'
+  );
+  assert.equal(
+    view.roleSummary,
+    'No agent will be attached to this workspace. You can fill these roles any time from the workspace.'
+  );
+  // Leaving roles empty is advisory at most, never a blocker (FR19).
+  const emptyIssue = view.issues.find(issue => issue.id === 'empty-team');
+  assert.equal(emptyIssue.severity, 'advisory');
+  assert.equal(view.canContinueFromTeam, true);
+});
+
+test('filling a role by Create and another by Assign counts both and staffs exactly those', () => {
+  const draft = Draft.createDraft();
+  Draft.setPlanReady(
+    draft,
+    'template:studio',
+    planResponse([], { assistant_program: assistantProgramPlan() })
+  );
+  Draft.setSavedRosterReady(draft, [
+    { name: 'My Mixer', role: 'specialist', type: 'tool-calling' }
+  ]);
+  Draft.setRoleFill(draft, 'producer', { mode: 'create', name: 'June', provider: 'openai' });
+  Draft.setRoleFill(draft, 'engineer', { mode: 'assign', name: 'My Mixer' });
+  const view = Draft.derive(draft);
+
+  assert.equal(view.roleRoster.created_count, 1);
+  assert.equal(view.roleRoster.assigned_count, 1);
+  assert.equal(view.roleRoster.empty_count, 1);
+  assert.equal(
+    view.roleSummary,
+    '1 new agent will be created · 1 saved agent will be attached · 1 role will stay empty.'
+  );
+  assert.deepEqual(view.payload.role_staffing, [
+    { role_id: 'producer', mode: 'create', name: 'June', provider: 'openai' },
+    { role_id: 'engineer', mode: 'assign', name: 'My Mixer' }
+  ]);
+  // The assigned agent's identity comes from the saved roster, so the row can
+  // render its real avatar rather than a name-only placeholder.
+  const engineer = view.roleRoster.roles.find(role => role.role_id === 'engineer');
+  assert.equal(engineer.agent.role, 'specialist');
+  assert.equal(engineer.source, 'assigned');
+});
+
+test('clearing a role returns it to empty and drops it from the request', () => {
+  const draft = Draft.createDraft();
+  Draft.setPlanReady(
+    draft,
+    'template:studio',
+    planResponse([], { assistant_program: assistantProgramPlan() })
+  );
+  Draft.setRoleFill(draft, 'producer', { mode: 'create', name: 'June' });
+  assert.equal(Draft.derive(draft).payload.role_staffing.length, 1);
+
+  Draft.clearRoleFill(draft, 'producer');
+  const view = Draft.derive(draft);
+  assert.deepEqual(view.payload.role_staffing, []);
+  assert.equal(view.roleRoster.roles[0].state, 'empty');
+});
+
+// FR25: one agent fills at most one role. Assigning someone already holding a
+// slot moves them rather than attaching two copies of one definition.
+test('assigning an agent that already fills another role moves it', () => {
+  const draft = Draft.createDraft();
+  Draft.setPlanReady(
+    draft,
+    'template:studio',
+    planResponse([], { assistant_program: assistantProgramPlan() })
+  );
+  Draft.setRoleFill(draft, 'producer', { mode: 'assign', name: 'My Mixer' });
+  Draft.setRoleFill(draft, 'engineer', { mode: 'assign', name: 'my mixer' });
+  const view = Draft.derive(draft);
+
+  assert.equal(Draft.roleFilledBy(draft, 'My Mixer'), 'engineer');
+  assert.deepEqual(view.payload.role_staffing, [
+    { role_id: 'engineer', mode: 'assign', name: 'my mixer' }
+  ]);
+});
+
+// The wizard and the server must derive the SAME role id from a name, or a
+// fill binds nothing. These cases mirror projecttemplates.AgentRoleID's tests.
+test('role ids are derived from names the way the server derives them', () => {
+  assert.equal(Draft.roleIdFromName('Mix Engineer'), 'mix-engineer');
+  assert.equal(Draft.roleIdFromName('  Producer  '), 'producer');
+  assert.equal(Draft.roleIdFromName('A&R / Scout'), 'a-r-scout');
+  assert.equal(Draft.roleIdFromName('agent_2'), 'agent-2');
+  assert.equal(Draft.roleIdFromName(''), 'role');
+  assert.equal(Draft.roleIdFromName('!!!'), 'role');
+});
+
+// The Create form shows the blueprint's proposed setup, and an edit to it has
+// to reach the created agent. Both used to be silently dropped: the form
+// collected a system prompt and an agent type and sent neither, so the
+// blueprint's prompt won whatever the user typed.
+test('a role carries the blueprint’s proposed setup so the Create form can show it', () => {
+  const draft = readyDraft([
+    planAgent('Content Lead', {
+      entry_point: true,
+      type: 'general',
+      model: 'gpt-5',
+      provider: 'openai',
+      system_prompt: 'You are the content lead. Hold the brand voice.'
+    })
+  ]);
+  const role = Draft.derive(draft).roleRoster.roles[0];
+
+  assert.deepEqual(role.proposed, {
+    type: 'general',
+    model: 'gpt-5',
+    provider: 'openai',
+    system_prompt: 'You are the content lead. Hold the brand voice.'
+  });
+});
+
+test('an edited prompt and type travel all the way into the request', () => {
+  const draft = readyDraft([planAgent('Content Lead', { entry_point: true })]);
+  Draft.setRoleFill(draft, 'content-lead', {
+    mode: 'create',
+    name: 'Desk Chief',
+    type: 'research',
+    systemPrompt: 'Only write headlines.'
+  });
+
+  assert.deepEqual(Draft.derive(draft).payload.role_staffing, [
+    {
+      role_id: 'content-lead',
+      mode: 'create',
+      name: 'Desk Chief',
+      type: 'research',
+      system_prompt: 'Only write headlines.'
+    }
+  ]);
+});
+
+test('an unedited fill sends no prompt, leaving the blueprint’s in force', () => {
+  const draft = readyDraft([planAgent('Content Lead', { entry_point: true })]);
+  Draft.setRoleFill(draft, 'content-lead', { mode: 'create', name: 'Desk Chief' });
+
+  assert.deepEqual(Draft.derive(draft).payload.role_staffing, [
+    { role_id: 'content-lead', mode: 'create', name: 'Desk Chief' }
+  ]);
+});
+
+// An assigned agent keeps its own definition; a fill that binds one must not
+// carry setup that would imply this request could rewrite it.
+test('assigning an agent carries nothing but its name', () => {
+  const draft = readyDraft([planAgent('Content Lead', { entry_point: true })]);
+  Draft.setRoleFill(draft, 'content-lead', {
+    mode: 'assign',
+    name: 'My Mixer',
+    systemPrompt: 'ignored',
+    type: 'general'
+  });
+
+  assert.deepEqual(Draft.derive(draft).payload.role_staffing, [
+    { role_id: 'content-lead', mode: 'assign', name: 'My Mixer' }
+  ]);
+});
+
+test('a filled role stops proposing a setup', () => {
+  const draft = readyDraft([planAgent('Content Lead', { entry_point: true })]);
+  Draft.setRoleFill(draft, 'content-lead', { mode: 'create', name: 'Desk Chief' });
+  assert.equal(Draft.derive(draft).roleRoster.roles[0].proposed, undefined);
+});
+
+test('an ordinary blueprint declares roles from its roster, entry agent first', () => {
+  const draft = readyDraft([
+    planAgent('Content Lead', {
+      entry_point: true,
+      system_prompt: 'You run the desk. Keep moving.'
+    }),
+    planAgent('Brand Copywriter')
+  ]);
+  const view = Draft.derive(draft);
+
+  assert.deepEqual(
+    view.roleRoster.roles.map(role => [role.role_id, role.primary, role.required, role.state]),
+    [
+      ['content-lead', true, true, 'empty'],
+      ['brand-copywriter', false, false, 'empty']
+    ]
+  );
+  assert.equal(view.roleRoster.roles[0].description, 'You run the desk.');
+  assert.deepEqual(view.payload.role_staffing, []);
 });
 
 test('scoped Home and project primaries keep separate names and select the project entry role', () => {
@@ -183,6 +392,7 @@ test('scoped Home and project primaries keep separate names and select the proje
   const draft = Draft.createDraft();
   Draft.setPlanReady(draft, 'template:scoped', planResponse([], { assistant_program: program }));
   Draft.setAssistantHire(draft, { name: 'June' });
+  Draft.setRoleFill(draft, 'portfolio', { mode: 'create', name: 'June' });
   const view = Draft.derive(draft);
   assert.deepEqual(
     view.roster.map(entry => entry.name),
@@ -211,7 +421,20 @@ test('scoped Home and project primaries keep separate names and select the proje
       .filter(entry => entry.assistantScope === 'project')
       .every(entry => entry.lifecycle === 'assistant-create')
   );
-  assert.equal(nextView.payload.assistant_hire.name, 'June');
+  // The group coordinator is reported as already filled and read-only — it
+  // belongs to the group workspace (D2) — while the project roles stay empty
+  // slots this workspace can fill.
+  const homeRole = nextView.roleRoster.roles.find(role => role.role_id === 'portfolio');
+  assert.equal(homeRole.state, 'filled');
+  assert.equal(homeRole.read_only, true);
+  assert.equal(homeRole.agent.name, 'June');
+  assert.deepEqual(
+    nextView.roleRoster.roles.filter(role => role.scope === 'project').map(role => role.state),
+    ['empty', 'empty']
+  );
+  // A role the group already holds is neither created nor attached from here.
+  assert.deepEqual(nextView.payload.role_staffing, []);
+  assert.equal(nextView.payload.assistant_hire, undefined);
 });
 
 test('post-create staffing does not treat a hired Home as a staffed new project', async () => {
@@ -282,12 +505,11 @@ test('assistant hire choices are staged, validated, and reset with the blueprint
   let view = Draft.derive(draft);
   assert.equal(view.primaryName, 'June');
   assert.equal(view.roster[0].name, 'June');
-  assert.deepEqual(view.payload.assistant_hire, {
-    name: 'June',
-    provider: 'ollama',
-    model: 'gemma4:e4b'
-  });
   assert.equal(view.isModifiedFromBlueprint, true);
+  // The hire fields still stage the primary's identity, but the request that
+  // staffs a role is now role_staffing — assistant_hire staffed every required
+  // role at once, which is exactly what a vacancy must not do.
+  assert.equal(view.payload.assistant_hire, undefined);
 
   Draft.setAssistantHire(draft, { name: 'Songwriter' });
   view = Draft.derive(draft);
@@ -297,9 +519,15 @@ test('assistant hire choices are staged, validated, and reset with the blueprint
     'assistantProgramCreateName'
   );
 
+  // An EMPTY primary name is not an error — it is an unfilled slot, and a
+  // workspace may be created with every role empty (FR7, FR19).
   Draft.setAssistantHire(draft, { name: '' });
   view = Draft.derive(draft);
-  assert.equal(view.issues.find(issue => issue.id === 'assistant-name').severity, 'blocking');
+  assert.equal(
+    view.issues.find(issue => issue.id === 'assistant-name'),
+    undefined
+  );
+  assert.equal(view.canContinueFromTeam, true);
 
   Draft.setPlanReady(draft, 'template:other', planResponse([]));
   assert.equal(Draft.derive(draft).isAssistantProgram, false);
@@ -355,10 +583,17 @@ test('new blueprint agents require explicit setup acknowledgement before Team ca
   assert.equal(proposed.statusLabel, 'New · Needs setup');
   assert.equal(proposed.actionLabel, 'Set up agent');
   assert.equal(reused.setupState, 'ready', 'exact-name reuse needs no acknowledgement');
-  assert.equal(view.canContinueFromTeam, false);
-  assert.equal(view.blockingIssues.length, 1, 'pending rows are aggregated into one blocker');
-  assert.equal(view.blockingIssues[0].id, 'template-agent-setup-required');
-  assert.equal(view.blockingIssues[0].templateAgentIndex, 0);
+
+  // Setup state is still tracked per proposed agent, but it no longer BLOCKS.
+  // A blueprint that declares roles creates nothing unless the user fills one,
+  // so demanding setup for agents the request will not make would block Review
+  // on work that is not going to happen — and leaving a role empty must never
+  // block (FR19).
+  assert.equal(view.canContinueFromTeam, true);
+  assert.equal(
+    view.blockingIssues.find(issue => issue.id === 'template-agent-setup-required'),
+    undefined
+  );
 
   Draft.acceptRecommended(draft, 0);
   view = Draft.derive(draft);
@@ -399,7 +634,13 @@ test('saving customized setup acknowledges the proposed agent and stages only ch
   ]);
 });
 
-test('an acknowledged ordinary blueprint serializes one strict expectation per roster index', () => {
+// The strict whole-roster review and the vacancy model describe two different
+// submissions: a review asserts "create every agent in this plan", while
+// role_staffing creates only the roles the user filled. The server would honor
+// the review and staff the whole team, so the wizard sends one or the other —
+// never both. template_agent_review remains the contract for callers that do
+// staff a whole roster; it is simply not what the wizard asks for any more.
+test('an acknowledged ordinary blueprint staffs the roles the user filled, not the whole plan', () => {
   const draft = Draft.createDraft();
   Draft.setPlanReady(
     draft,
@@ -414,21 +655,23 @@ test('an acknowledged ordinary blueprint serializes one strict expectation per r
   );
   Draft.acceptRecommended(draft, 0);
 
-  assert.deepEqual(Draft.toCreatePayload(draft).template_agent_review, {
-    version: 1,
-    plan_revision: 'revision-123',
-    expectations: [
-      { index: 0, name: 'New Lead', action: 'create' },
-      { index: 1, name: 'Saved Scout', action: 'reuse' }
-    ]
-  });
+  const untouched = Draft.toCreatePayload(draft);
+  assert.deepEqual(untouched.role_staffing, [], 'reviewing a plan staffs nothing on its own');
+  assert.equal(untouched.template_agent_review, undefined);
 
+  Draft.setRoleFill(draft, 'new-lead', { mode: 'create', name: 'New Lead' });
+  Draft.setRoleFill(draft, 'saved-scout', { mode: 'assign', name: 'Saved Scout' });
+  assert.deepEqual(Draft.toCreatePayload(draft).role_staffing, [
+    { role_id: 'new-lead', mode: 'create', name: 'New Lead' },
+    { role_id: 'saved-scout', mode: 'assign', name: 'Saved Scout' }
+  ]);
+
+  // Staged customizations still ride the override field — they describe the
+  // blueprint entry, independent of whether its role is filled.
   Draft.stageOverride(draft, 1, { name: 'Saved Scout copy' });
-  assert.deepEqual(Draft.toCreatePayload(draft).template_agent_review.expectations[1], {
-    index: 1,
-    name: 'Saved Scout copy',
-    action: 'create'
-  });
+  assert.deepEqual(Draft.toCreatePayload(draft).template_agent_overrides, [
+    { index: 1, name: 'Saved Scout copy' }
+  ]);
 });
 
 test('strict review is omitted for pending, excluded, empty, and assistant-program teams', () => {
@@ -493,7 +736,9 @@ test('recommended batch setup is idempotent and never overwrites individual work
 
   assert.equal(Draft.undoBatchRecommended(draft), 2);
   view = Draft.derive(draft);
-  assert.equal(view.canContinueFromTeam, false);
+  // Undoing the batch returns both rows to "needs setup" without blocking:
+  // an unreviewed proposal is only a proposal until its role is filled.
+  assert.equal(view.canContinueFromTeam, true);
   assert.equal(view.batchSetup.pendingCount, 2);
   assert.equal(view.roster.find(row => row.originalName === 'Two').name, 'Two Custom');
   assert.equal(view.roster.find(row => row.originalName === 'Two').setupAcknowledged, true);
@@ -504,7 +749,9 @@ test('setup scales from one agent to a long multi-agent recommendation batch', (
   const one = readyDraft([planAgent('A'.repeat(100), { entry_point: true })]);
   assert.equal(Draft.derive(one).batchSetup.canAcceptAll, false);
   assert.equal(Draft.acceptAllRecommended(one), 1);
-  assert.equal(Draft.toCreatePayload(one).template_agent_review.expectations.length, 1);
+  // The wizard now states its request as role_staffing; the whole-roster
+  // review is not what it asks for (see the acknowledged-blueprint test).
+  assert.deepEqual(Draft.toCreatePayload(one).role_staffing, []);
 
   const manyAgents = Array.from({ length: 10 }, (_, index) =>
     planAgent(`Specialist ${String(index + 1).padStart(2, '0')}`, {
@@ -517,11 +764,10 @@ test('setup scales from one agent to a long multi-agent recommendation batch', (
   const many = readyDraft(manyAgents);
   assert.equal(Draft.acceptAllRecommended(many), 10);
   const payload = Draft.toCreatePayload(many);
-  assert.equal(payload.template_agent_review.expectations.length, 10);
-  assert.deepEqual(
-    payload.template_agent_review.expectations.map(expectation => expectation.index),
-    Array.from({ length: 10 }, (_, index) => index)
-  );
+  // Ten declared roles, ten empty slots, and nothing staffed until the user
+  // fills one — accepting a recommendation reviews a role, it does not take it.
+  assert.equal(Draft.derive(many).roleRoster.total_count, 10);
+  assert.deepEqual(payload.role_staffing, []);
 });
 
 test('same-blueprint refresh preserves only byte-equivalent setup state', () => {
@@ -580,7 +826,7 @@ test('stale-plan recovery blocks payloads until changed entries are reviewed and
   assert.equal(Draft.confirmFreshPlan(draft), true);
   view = Draft.derive(draft);
   assert.equal(view.canContinueFromTeam, true);
-  assert.equal(view.payload.template_agent_review.plan_revision, 'revision-after');
+  assert.deepEqual(view.payload.role_staffing, []);
 });
 
 test('a byte-equivalent stale plan keeps setup acknowledgement but still requires confirmation', () => {
@@ -600,7 +846,7 @@ test('a byte-equivalent stale plan keeps setup acknowledgement but still require
 
   assert.equal(Draft.derive(draft).roster[0].setupAcknowledged, true);
   assert.equal(Draft.confirmFreshPlan(draft), true);
-  assert.equal(Draft.toCreatePayload(draft).template_agent_review.plan_revision, 'revision-after');
+  assert.deepEqual(Draft.toCreatePayload(draft).role_staffing, []);
 });
 
 test('fatal strict creation failure belongs to one row and is retryable without losing setup', () => {
@@ -620,7 +866,8 @@ test('fatal strict creation failure belongs to one row and is retryable without 
   view = Draft.derive(draft);
   assert.equal(view.canContinueFromTeam, true);
   assert.equal(view.roster[0].statusLabel, 'Customized · Will be created with workspace');
-  assert.equal(view.payload.template_agent_review.expectations[0].name, 'Reviewed Lead');
+  // The reviewed name survives the failure and is what a fill would use.
+  assert.equal(view.roster[0].name, 'Reviewed Lead');
 });
 
 test('lifecycle copy describes future behavior, never past attachment (FR37-FR39)', () => {

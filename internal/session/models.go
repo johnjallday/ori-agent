@@ -237,6 +237,15 @@ type AgentInstance struct {
 	// workspace only (never mutates the global definition). PRD FR16/FR17.
 	CustomInstructions string `json:"custom_instructions,omitempty"`
 
+	// RoleID names the declared blueprint role this attachment fills, when it
+	// fills one. Empty means the agent is in the workspace without holding a
+	// role. Mirrors workspace.AgentInstance.RoleID.
+	RoleID string `json:"role_id,omitempty"`
+
+	// RoleSource records how the role was filled ("created" or "assigned").
+	// Mirrors workspace.AgentInstance.RoleSource.
+	RoleSource string `json:"role_source,omitempty"`
+
 	// EntryPoint marks the instance as the default workspace entry node.
 	EntryPoint bool `json:"entry_point,omitempty"`
 

@@ -224,6 +224,8 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Wor
 				Role:               ai.Role,
 				Description:        ai.Description,
 				CustomInstructions: ai.CustomInstructions,
+				RoleID:             ai.RoleID,
+				RoleSource:         ai.RoleSource,
 				EntryPoint:         ai.EntryPoint,
 				CreatedAt:          ai.CreatedAt,
 			}
@@ -465,6 +467,8 @@ func (a *WorkspaceStoreAdapter) toAgentWorkspace(ws *Workspace) *workspace.Works
 				Role:               ai.Role,
 				Description:        ai.Description,
 				CustomInstructions: ai.CustomInstructions,
+				RoleID:             ai.RoleID,
+				RoleSource:         ai.RoleSource,
 				EntryPoint:         ai.EntryPoint,
 				CreatedAt:          ai.CreatedAt,
 			}

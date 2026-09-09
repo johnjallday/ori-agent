@@ -13,6 +13,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/samplelibrary"
 	"github.com/johnjallday/ori-agent/internal/samplelibraryhttp"
+	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/setupjourney"
 	"github.com/johnjallday/ori-agent/internal/setupjourneyhttp"
 	"github.com/johnjallday/ori-agent/internal/specialist"
@@ -155,6 +156,26 @@ func (b *ServerBuilder) initializeSetupJourney() {
 		readers[specialist.SetupStepAssistantProgramStaffing] = staffingAdapter
 		if b.sessionHandler != nil {
 			b.sessionHandler.SetAssistantReviewedStaffer(staffingAdapter.StaffFromReviewedWorkspaceSetup)
+			// The vacancy path staffs only the roles the user filled. It is
+			// adapted here rather than sharing a signature so the session
+			// package keeps no dependency on setupjourney's types.
+			b.sessionHandler.SetAssistantRoleStaffer(
+				func(ctx context.Context, projectID string, fills []sessionhttp.RoleStaffingFill) error {
+					roles := make([]setupjourney.RoleFill, 0, len(fills))
+					for _, fill := range fills {
+						mode := setupjourney.StaffingModeCreate
+						if fill.Mode == "assign" {
+							mode = setupjourney.StaffingModeBind
+						}
+						roles = append(roles, setupjourney.RoleFill{
+							RoleID: fill.RoleID, Mode: mode, Name: fill.Name,
+							Provider: fill.Provider, Model: fill.Model,
+						})
+					}
+					return staffingAdapter.StaffRolesFromReviewedWorkspaceSetup(ctx, projectID, roles)
+				},
+			)
+			b.sessionHandler.SetAssistantRoleUnstaffer(staffingAdapter.UnstaffRoleFromWorkspace)
 		}
 	}
 	registry, err := setupjourney.NewReaderRegistry(readers)
