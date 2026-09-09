@@ -362,6 +362,18 @@ export class WorkspaceCommandView {
     void this.loadRoleRoster(true).then(() => {
       if (this.active) this.mountRoleRoster();
     });
+    // Providers seed the Create modal's model choices. Loaded once, and a
+    // failure just leaves the picker on "Use Ori default" rather than blocking.
+    if (!this.roleRosterProvidersRequested) {
+      this.roleRosterProvidersRequested = true;
+      void fetch('/api/providers')
+        .then(response => (response.ok ? response.json() : null))
+        .then(data => {
+          const providers = Array.isArray(data) ? data : data?.providers;
+          if (Array.isArray(providers)) this.roleRosterProviders = providers;
+        })
+        .catch(() => {});
+    }
   }
 
   // Installed capabilities drive Map stations, so the catalog has to be loaded
@@ -1301,16 +1313,15 @@ export class WorkspaceCommandView {
     host.querySelector('[data-cmd-fill-primary]')?.addEventListener('click', () => {
       const state = this.unstaffedBannerState();
       if (!state) return;
-      // The banner's job is to get the user to the roster, not to be a second
-      // place to staff from.
-      this.roleRosterCreating = state.roleId;
-      this.mountRoleRoster();
-      const row = host.querySelector('[data-cmd-role-roster] [data-role-id]');
-      row?.scrollIntoView({ block: 'nearest' });
-      window.WorkspaceRoleRoster?.focusRole(
-        host.querySelector('[data-cmd-role-roster]'),
-        state.roleId
+      // The banner's job is to get the user to the primary role. It opens the
+      // same Create modal that role's own button does, rather than becoming a
+      // second place to staff from.
+      const row = (window.WorkspaceRoleRoster?.rowsFrom(this.roleRoster) || []).find(
+        item => item.roleId === state.roleId
       );
+      const roster = host.querySelector('[data-cmd-role-roster]');
+      roster?.scrollIntoView({ block: 'nearest' });
+      if (row) this.openRoleCreateModal(state.roleId, row);
     });
   }
 
@@ -3758,24 +3769,154 @@ export class WorkspaceCommandView {
     host.hidden = false;
     component.render(host, roster, {
       title: 'Roles',
-      providers: this.roleRosterProviders,
-      creatingRoleId: this.roleRosterCreating || '',
       groupWorkspaceHref: roster.group_workspace_id
         ? '/workspaces/' + encodeURIComponent(roster.group_workspace_id)
         : '',
       agentHref: name => '/agents?agent=' + encodeURIComponent(name),
-      onRequestCreate: roleId => {
-        this.roleRosterCreating = roleId;
-        this.mountRoleRoster();
-      },
-      onCancelCreate: () => {
-        this.roleRosterCreating = '';
-        this.mountRoleRoster();
-      },
-      onCreate: (roleId, values) => this.fillRole(roleId, { mode: 'create', ...values }),
+      onRequestCreate: (roleId, row) => this.openRoleCreateModal(roleId, row),
       onAssign: (roleId, row) => this.openRoleAssignPicker(roleId, row),
       onClear: (roleId, row) => this.clearRole(roleId, row)
     });
+  }
+
+  // Create opens the app's canonical Create Agent modal, prefilled for the
+  // role. Nothing is nested here — the workspace page is not itself a modal —
+  // so it simply shows, and the role is filled when it is submitted.
+  openRoleCreateModal(roleId, row) {
+    const formApi = typeof window === 'undefined' ? null : window.AgentCreateForm;
+    const modalElement = document.getElementById('addAgentModal');
+    const host = document.getElementById('agentCreateFormHost');
+    if (!formApi || !modalElement || !host || typeof bootstrap === 'undefined') return;
+
+    this.roleCreateRoleId = roleId;
+    this.roleCreateOpener = document.activeElement;
+    modalElement.dataset.agentCreateMode = 'workspace-role-live';
+    modalElement.classList.add('is-workspace-agent-draft');
+
+    const title = document.getElementById('addAgentModalTitleText');
+    if (title) title.textContent = 'Create an agent for ' + row.label;
+    const context = document.getElementById('agentCreateDraftContext');
+    const contextTitle = document.getElementById('agentCreateDraftContextTitle');
+    const contextText = document.getElementById('agentCreateDraftContextText');
+    if (context) context.hidden = false;
+    if (contextTitle) contextTitle.textContent = row.label + ' · ' + row.designation;
+    if (contextText) {
+      contextText.textContent = row.description
+        ? row.description + ' It is created and attached to this workspace immediately.'
+        : 'This agent is created and attached to this workspace immediately.';
+    }
+    const portrait = document.getElementById('agentCreateDraftPortrait');
+    if (portrait) portrait.innerHTML = '';
+    const summary = document.getElementById('agentCreateDraftSummary');
+    if (summary) {
+      summary.innerHTML =
+        '<div><dt>Role</dt><dd>' +
+        escapeHtml(row.label) +
+        '</dd></div><div><dt>Scope</dt><dd>' +
+        escapeHtml(row.scopeLine) +
+        '</dd></div>';
+    }
+    const error = document.getElementById('agentCreateDraftError');
+    if (error) {
+      error.hidden = true;
+      error.textContent = '';
+    }
+
+    this.roleCreateForm = formApi.mount(host, {
+      idPrefix: 'agent',
+      profile: formApi.PROFILE_TEMPLATE,
+      providers: Array.isArray(this.roleRosterProviders) ? this.roleRosterProviders : [],
+      values: { name: row.label }
+    });
+
+    const createButton = document.getElementById('createAgentBtn');
+    if (createButton) {
+      if (!createButton.dataset.workspaceDraftOriginalHtml) {
+        createButton.dataset.workspaceDraftOriginalHtml = createButton.innerHTML;
+      }
+      createButton.textContent = 'Create and fill role';
+      createButton.disabled = false;
+    }
+    this.bindRoleCreateModal(modalElement);
+    modalElement.addEventListener('shown.bs.modal', () => this.roleCreateForm?.focus('name'), {
+      once: true
+    });
+    bootstrap.Modal.getOrCreateInstance(modalElement).show();
+  }
+
+  // Bound once per view. The capture phase matters: it has to run before the
+  // standalone agents.js handlers, or submitting would POST /api/agents and
+  // create an agent bound to no role at all.
+  bindRoleCreateModal(modalElement) {
+    if (this.roleCreateModalBound) return;
+    this.roleCreateModalBound = true;
+    const submit = event => {
+      if (modalElement.dataset.agentCreateMode !== 'workspace-role-live') return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      void this.submitRoleCreateModal();
+    };
+    document.getElementById('createAgentBtn')?.addEventListener('click', submit, true);
+    document.getElementById('addAgentForm')?.addEventListener('submit', submit, true);
+    modalElement.addEventListener('hidden.bs.modal', () => {
+      if (modalElement.dataset.agentCreateMode !== 'workspace-role-live') return;
+      this.finishRoleCreateModal();
+    });
+  }
+
+  async submitRoleCreateModal() {
+    const form = this.roleCreateForm;
+    const roleId = this.roleCreateRoleId;
+    if (!form || !roleId) return;
+    const result = form.extract();
+    if (!result.valid) {
+      form.focus(Object.keys(result.errors)[0] || 'name');
+      return;
+    }
+    const values = result.values;
+    const error = document.getElementById('agentCreateDraftError');
+    const outcome = await this.fillRole(roleId, {
+      mode: 'create',
+      name: String(values.name || '').trim(),
+      provider: values.provider || '',
+      model: values.model || ''
+    });
+    if (outcome && outcome.error) {
+      // The server owns name collisions; surface its message on the form
+      // rather than closing on a failure.
+      if (error) {
+        error.textContent = outcome.error;
+        error.hidden = false;
+      }
+      form.focus('name');
+      return;
+    }
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('addAgentModal')).hide();
+  }
+
+  finishRoleCreateModal() {
+    const modalElement = document.getElementById('addAgentModal');
+    if (!modalElement) return;
+    modalElement.classList.remove('is-workspace-agent-draft');
+    delete modalElement.dataset.agentCreateMode;
+    const title = document.getElementById('addAgentModalTitleText');
+    if (title) title.textContent = 'Create New Agent';
+    const context = document.getElementById('agentCreateDraftContext');
+    if (context) context.hidden = true;
+    const createButton = document.getElementById('createAgentBtn');
+    if (createButton?.dataset.workspaceDraftOriginalHtml) {
+      createButton.innerHTML = createButton.dataset.workspaceDraftOriginalHtml;
+      delete createButton.dataset.workspaceDraftOriginalHtml;
+      createButton.disabled = false;
+    }
+    window.resetStandaloneAgentCreateForm?.();
+    const roleId = this.roleCreateRoleId;
+    this.roleCreateRoleId = '';
+    this.roleCreateForm = null;
+    window.WorkspaceRoleRoster?.focusRole(
+      this.container?.querySelector('[data-cmd-role-roster]'),
+      roleId
+    ) || this.roleCreateOpener?.focus?.();
   }
 
   async fillRole(roleId, body) {
@@ -3795,19 +3936,27 @@ export class WorkspaceCommandView {
       );
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        this.announceRole(data?.error || 'That role could not be filled.');
-        return;
+        // Returned rather than only announced: the Create modal has to keep
+        // the form open and show the reason on the field that caused it.
+        // The API's error envelope is {code, message}; `error` is only used by
+        // a few older handlers, so read both rather than falling back to a
+        // generic line that throws away "you already have an agent named X".
+        const message = data?.message || data?.error || 'That role could not be filled.';
+        this.announceRole(message);
+        return { error: message };
       }
       this.roleRoster = data?.roles || this.roleRoster;
-      this.roleRosterCreating = '';
       this.mountRoleRoster();
       this.announceRoleChange(roleId, body.name + ' now fills');
       // The workspace's own agent list changed, so re-read it rather than
       // letting the deck describe a team the roster has already moved past.
       await this.page?.loadAgents?.();
       this.render();
+      return { ok: true };
     } catch (err) {
-      this.announceRole('That role could not be filled.');
+      const message = 'That role could not be filled.';
+      this.announceRole(message);
+      return { error: message };
     }
   }
 
@@ -3838,7 +3987,7 @@ export class WorkspaceCommandView {
       );
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        this.announceRole(data?.error || 'That role could not be cleared.');
+        this.announceRole(data?.message || data?.error || 'That role could not be cleared.');
         return;
       }
       this.roleRoster = data?.roles || this.roleRoster;

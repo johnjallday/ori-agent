@@ -461,9 +461,14 @@ const sessionManager = {
     });
     const addAgentDraftModal = document.getElementById('addAgentModal');
     const submitWorkspaceAgentDraft = event => {
-      if (addAgentDraftModal?.dataset.agentCreateMode !== 'workspace-draft') return;
+      const mode = addAgentDraftModal?.dataset.agentCreateMode;
+      if (mode !== 'workspace-draft' && mode !== 'workspace-role-draft') return;
       event.preventDefault();
       event.stopImmediatePropagation();
+      if (mode === 'workspace-role-draft') {
+        this.saveWorkspaceRoleSetup();
+        return;
+      }
       this.saveWorkspaceAgentSetup();
     };
     // Capture before agents.js's standalone handlers so draft mode can never
@@ -491,6 +496,8 @@ const sessionManager = {
     addAgentDraftModal?.addEventListener('hidden.bs.modal', () => {
       if (addAgentDraftModal.dataset.agentCreateMode === 'workspace-draft') {
         this.finishWorkspaceAgentSetupModal();
+      } else if (addAgentDraftModal.dataset.agentCreateMode === 'workspace-role-draft') {
+        this.finishWorkspaceRoleSetupModal();
       }
     });
     document.getElementById('workspaceReviewSummary')?.addEventListener('click', event => {
@@ -4958,10 +4965,11 @@ const sessionManager = {
   // the derived view, and every action writes back into the draft — this
   // controller keeps no second opinion about which roles are filled.
 
-  // Which role's inline Create form is open, and which role the Assign picker
-  // is currently scoped to. Both are ephemeral view state, not team state.
-  workspaceRoleCreating: '',
+  // Which role the Assign picker is currently scoped to, and which role the
+  // Create Agent modal is open for. Both are ephemeral view state, not team
+  // state.
   workspaceRoleAssigning: '',
+  workspaceRoleSetupId: '',
 
   renderWorkspaceRoleRoster(view) {
     const container = document.getElementById('workspaceRoleRoster');
@@ -4976,25 +4984,126 @@ const sessionManager = {
     }
     component.render(container, roster, {
       title: 'Roles this blueprint declares',
-      providers: this.editAgentProvidersData,
-      creatingRoleId: this.workspaceRoleCreating,
       // Nothing exists yet, so there is no agent page to link to. The roster
       // component omits the link when no href builder is supplied.
       agentHref: null,
-      onRequestCreate: roleId => {
-        this.workspaceRoleCreating = roleId;
-        this.workspaceRoleAssigning = '';
-        this.refreshWorkspaceReview();
-      },
-      onCancelCreate: () => {
-        this.workspaceRoleCreating = '';
-        this.refreshWorkspaceReview();
-        this.focusWorkspaceRoleRow(this.workspaceRoleCreating);
-      },
-      onCreate: (roleId, values, row) => this.fillWorkspaceRole(roleId, values, row),
+      onRequestCreate: (roleId, row) => this.openWorkspaceRoleSetup(roleId, row),
       onAssign: (roleId, row) => this.openWorkspaceRoleAssignPicker(roleId, row),
       onClear: (roleId, row) => this.clearWorkspaceRole(roleId, row)
     });
+  },
+
+  // Create opens the app's canonical Create Agent form, prefilled for the role,
+  // rather than a smaller form of this roster's own. The wizard reaches it the
+  // way the blueprint-agent setup already does — it SUSPENDS itself, shows the
+  // agent modal, and restores on close — so nothing is ever stacked on the
+  // full-screen surface.
+  openWorkspaceRoleSetup(roleId, row, opener) {
+    const formApi = window.AgentCreateForm;
+    const draft = this.ensureWorkspaceTeamDraft();
+    const workspaceModalElement = document.getElementById('addFolderModal');
+    const agentModalElement = document.getElementById('addAgentModal');
+    const host = document.getElementById('agentCreateFormHost');
+    if (!formApi || !draft || !row || !workspaceModalElement || !agentModalElement || !host) return;
+
+    this.workspaceRoleSetupId = roleId;
+    this.workspaceRoleSetupOpener = opener || document.activeElement;
+
+    agentModalElement.dataset.agentCreateMode = 'workspace-role-draft';
+    agentModalElement.classList.add('is-workspace-agent-draft');
+    const title = document.getElementById('addAgentModalTitleText');
+    if (title) title.textContent = `Create an agent for ${row.label}`;
+
+    const context = document.getElementById('agentCreateDraftContext');
+    const contextTitle = document.getElementById('agentCreateDraftContextTitle');
+    const contextText = document.getElementById('agentCreateDraftContextText');
+    if (context) context.hidden = false;
+    if (contextTitle) contextTitle.textContent = `${row.label} · ${row.designation}`;
+    const portrait = document.getElementById('agentCreateDraftPortrait');
+    if (portrait) portrait.innerHTML = '';
+    if (contextText) {
+      contextText.textContent = row.description
+        ? `${row.description} Nothing is created until the workspace itself is.`
+        : 'This role is declared by the blueprint. Nothing is created until the workspace itself is.';
+    }
+    const summary = document.getElementById('agentCreateDraftSummary');
+    if (summary) {
+      summary.innerHTML = [
+        ['Role', row.label],
+        ['Scope', row.scopeLine]
+      ]
+        .map(
+          ([label, value]) =>
+            `<div><dt>${this.escapeHtml(label)}</dt><dd>${this.escapeHtml(value)}</dd></div>`
+        )
+        .join('');
+    }
+    const error = document.getElementById('agentCreateDraftError');
+    if (error) {
+      error.hidden = true;
+      error.textContent = '';
+    }
+
+    // The blueprint's own spec for this role seeds the form; the name is
+    // prefilled with the role label (FR14).
+    const spec = this.workspaceRoleSpec(roleId);
+    this.workspaceRoleSetupForm = formApi.mount(host, {
+      idPrefix: 'agent',
+      profile: formApi.PROFILE_TEMPLATE,
+      providers: Array.isArray(this.editAgentProvidersData) ? this.editAgentProvidersData : [],
+      values: {
+        name: row.label,
+        type: spec?.type || '',
+        model: spec?.model || '',
+        provider: spec?.provider || '',
+        systemPrompt: spec?.systemPrompt || ''
+      }
+    });
+
+    const createButton = document.getElementById('createAgentBtn');
+    if (createButton) {
+      if (!createButton.dataset.workspaceDraftOriginalHtml) {
+        createButton.dataset.workspaceDraftOriginalHtml = createButton.innerHTML;
+      }
+      createButton.textContent = 'Add to team';
+      createButton.disabled = false;
+    }
+
+    const showAgentModal = () => {
+      agentModalElement.addEventListener(
+        'shown.bs.modal',
+        () => this.workspaceRoleSetupForm?.focus('name'),
+        { once: true }
+      );
+      bootstrap.Modal.getOrCreateInstance(agentModalElement).show();
+    };
+    workspaceModalElement.dataset.suspendedForAgentSetup = 'true';
+    if (workspaceModalElement.classList.contains('show')) {
+      workspaceModalElement.addEventListener('hidden.bs.modal', showAgentModal, { once: true });
+      bootstrap.Modal.getOrCreateInstance(workspaceModalElement).hide();
+    } else {
+      showAgentModal();
+    }
+  },
+
+  // The blueprint's proposed setup for a role, when it has one. Ordinary
+  // blueprints carry a template agent per role; assistant-program roles carry
+  // their prompt server-side and seed only the name.
+  workspaceRoleSpec(roleId) {
+    const api = window.CreateWorkspaceTeamDraft;
+    const draft = this.teamDraft;
+    if (!api || !draft || typeof api.declaredRoles !== 'function') return null;
+    const role = api.declaredRoles(draft).find(item => item.roleId === roleId);
+    if (!role || !Number.isInteger(role.templateAgentIndex)) return null;
+    const plan = this.planAgentAt(role.templateAgentIndex);
+    if (!plan) return null;
+    const recommended = plan.recommended || plan;
+    return {
+      type: recommended.type,
+      model: recommended.model,
+      provider: recommended.provider,
+      systemPrompt: recommended.systemPrompt
+    };
   },
 
   // A Create fill is refused before it is staged when its name would collide
@@ -5002,33 +5111,118 @@ const sessionManager = {
   // assign that agent instead (FR26). Surfacing it here rather than after
   // submit is the point — the server would otherwise reject the whole create
   // once the user had already left the wizard.
-  fillWorkspaceRole(roleId, values) {
+  saveWorkspaceRoleSetup() {
+    const roleId = this.workspaceRoleSetupId;
+    const form = this.workspaceRoleSetupForm;
     const api = window.CreateWorkspaceTeamDraft;
     const draft = this.ensureWorkspaceTeamDraft();
-    if (!draft || !api) return;
-    const name = String(values?.name || '').trim();
-    const existing = api.findSavedAgent(draft, name);
-    if (existing) {
-      const form = document
-        .getElementById('workspaceRoleRoster')
-        ?.querySelector(`[data-role-id="${CSS.escape(roleId)}"]`)?.rosterCreateForm;
-      form?.showBlocker(
-        `You already have a saved agent named “${existing.name}”. Rename this one, or assign the agent you have.`,
-        {
-          label: `Assign ${existing.name}`,
-          onSelect: () => {
-            this.workspaceRoleCreating = '';
-            this.assignWorkspaceRole(roleId, existing.name);
-          }
-        }
-      );
+    if (!roleId || !form || !api || !draft) return;
+
+    const result = form.extract();
+    if (!result.valid) {
+      form.focus(Object.keys(result.errors)[0] || 'name');
       return;
     }
-    if (!api.setRoleFill(draft, roleId, { mode: api.FILL_CREATE, ...values, name })) return;
-    this.workspaceRoleCreating = '';
+    const values = result.values;
+    const name = String(values.name || '').trim();
+    const error = document.getElementById('agentCreateDraftError');
+    const existing = api.findSavedAgent(draft, name);
+    if (existing) {
+      if (error) {
+        error.textContent = `You already have a saved agent named “${existing.name}”. Rename this one, or cancel and use Assign… to attach the agent you have.`;
+        error.hidden = false;
+      }
+      form.focus('name');
+      return;
+    }
+    const taken = (this.teamView()?.roleRoster?.roles || []).some(
+      role =>
+        role.role_id !== roleId &&
+        role.agent &&
+        api.agentKey(role.agent.name) === api.agentKey(name)
+    );
+    if (taken) {
+      if (error) {
+        error.textContent = `Another role in this workspace is already filled by “${name}”. Choose another name.`;
+        error.hidden = false;
+      }
+      form.focus('name');
+      return;
+    }
+
+    if (
+      !api.setRoleFill(draft, roleId, {
+        mode: api.FILL_CREATE,
+        name,
+        provider: values.provider,
+        model: values.model
+      })
+    ) {
+      return;
+    }
+    this.workspaceRoleSetupCompleted = name;
+    this.closeWorkspaceRoleSetup();
+  },
+
+  closeWorkspaceRoleSetup() {
+    const modalElement = document.getElementById('addAgentModal');
+    if (modalElement?.classList.contains('show')) {
+      bootstrap.Modal.getOrCreateInstance(modalElement).hide();
+      return;
+    }
+    this.finishWorkspaceRoleSetupModal();
+  },
+
+  finishWorkspaceRoleSetupModal() {
+    const agentModalElement = document.getElementById('addAgentModal');
+    if (agentModalElement?.dataset.agentCreateMode !== 'workspace-role-draft') return;
+
+    const roleId = this.workspaceRoleSetupId;
+    const opener = this.workspaceRoleSetupOpener;
+    const created = this.workspaceRoleSetupCompleted;
+
+    agentModalElement.classList.remove('is-workspace-agent-draft');
+    delete agentModalElement.dataset.agentCreateMode;
+    const title = document.getElementById('addAgentModalTitleText');
+    if (title) title.textContent = 'Create New Agent';
+    const context = document.getElementById('agentCreateDraftContext');
+    if (context) context.hidden = true;
+    const error = document.getElementById('agentCreateDraftError');
+    if (error) {
+      error.hidden = true;
+      error.textContent = '';
+    }
+    const createButton = document.getElementById('createAgentBtn');
+    if (createButton?.dataset.workspaceDraftOriginalHtml) {
+      createButton.innerHTML = createButton.dataset.workspaceDraftOriginalHtml;
+      delete createButton.dataset.workspaceDraftOriginalHtml;
+      createButton.disabled = false;
+    }
+    window.resetStandaloneAgentCreateForm?.();
+
+    this.workspaceRoleSetupId = '';
+    this.workspaceRoleSetupForm = null;
+    this.workspaceRoleSetupOpener = null;
+    this.workspaceRoleSetupCompleted = '';
+
+    const workspaceModalElement = document.getElementById('addFolderModal');
+    if (workspaceModalElement) delete workspaceModalElement.dataset.suspendedForAgentSetup;
     this.refreshWorkspaceReview();
-    this.announceWorkspaceRoleChange(roleId, `${name} will be created for`);
-    this.focusWorkspaceRoleRow(roleId);
+
+    const afterResume = () => {
+      if (created) {
+        this.announceWorkspaceRoleChange(roleId, `${created} will be created for`);
+        this.showToast(`${created} added to the workspace draft.`, 'success');
+      }
+      this.focusWorkspaceRoleRow(roleId) || opener?.focus?.();
+    };
+    if (workspaceModalElement) {
+      workspaceModalElement.dataset.resumingFromAgentSetup = 'true';
+      workspaceModalElement.addEventListener('shown.bs.modal', afterResume, { once: true });
+      bootstrap.Modal.getOrCreateInstance(workspaceModalElement).show();
+    } else {
+      afterResume();
+    }
   },
 
   assignWorkspaceRole(roleId, name) {

@@ -6203,56 +6203,9 @@ body.chat-panel-open .chat-panel-backdrop {
   font-size: 0.75rem;
 }
 
-/* Create expands in place. The Create Workspace modal is full-screen and a
-   dialog raised from it opens underneath it, so this must never be one.
-   The columns wrap on the ROW's own width, not the viewport's: this roster
-   renders inside the wizard's narrow Team column and inside a full-width
-   workspace panel, and a viewport media query would give the narrow one three
-   columns and truncate every select in it. */
-.ws-role-row__create {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
-  gap: 0.5rem;
-  align-items: end;
-  margin-top: 0.5rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid var(--border-color);
-}
-
-.ws-role-row__field {
-  display: grid;
-  gap: 0.1875rem;
-  min-width: 0;
-}
-
-/* The name is the field people actually edit, so it takes the room when the
-   row is wide enough to have any to spare. */
-.ws-role-row__field:first-child {
-  grid-column: span 2;
-}
-
-.ws-role-row__field-label {
-  color: var(--text-secondary);
-  font-size: 0.6875rem;
-}
-
-.ws-role-row__create-actions {
-  display: flex;
-  gap: 0.375rem;
-}
-
-/* The one place the roster does use an alarm colour: a name collision is a
-   real blocker the user must resolve before the fill can happen. */
-.ws-role-row__error {
-  margin: 0;
-  color: var(--danger-color);
-  font-size: 0.75rem;
-}
-
-.ws-role-row__error,
-.ws-role-row__create-actions {
-  grid-column: 1 / -1;
-}
+/* Create has no styles of its own: the row hands the role to its host, which
+   opens the app's canonical Create Agent modal prefilled for it. The roster
+   deliberately owns no form — see workspace-role-roster.js. */
 
 /* ---- Also in this workspace --------------------------------------------- */
 .ws-role-roster__also {

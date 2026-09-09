@@ -42,13 +42,10 @@
     create: 'Create',
     assign: 'Assign…',
     clear: 'Clear',
-    cancel: 'Cancel',
     scopeProject: 'this workspace only',
     scopeHome: 'group scope only',
     sourceCreated: 'New agent',
     sourceAssigned: 'Your saved agent',
-    defaultProvider: 'Use Ori default',
-    defaultModel: 'Use provider default',
     openEditor: 'Open in Agents',
     emptyRoster: 'This blueprint declares no roles.',
     alsoHere: 'Also in this workspace',
@@ -176,157 +173,18 @@
     return button;
   }
 
-  function optionsInto(select, entries, placeholder) {
-    select.replaceChildren();
-    var first = document.createElement('option');
-    first.value = '';
-    first.textContent = placeholder;
-    select.append(first);
-    entries.forEach(function (entry) {
-      var option = document.createElement('option');
-      option.value = entry.value;
-      option.textContent = entry.label;
-      select.append(option);
-    });
-  }
-
-  function providerEntries(providers) {
-    return (Array.isArray(providers) ? providers : [])
-      .map(function (provider) {
-        return {
-          value: text(provider && provider.name),
-          label: text(provider && provider.display_name)
-        };
-      })
-      .filter(function (entry) {
-        return entry.value && entry.value !== 'default';
-      })
-      .map(function (entry) {
-        return { value: entry.value, label: entry.label || entry.value };
-      });
-  }
-
-  function modelEntries(providers, providerName) {
-    var provider = (Array.isArray(providers) ? providers : []).find(function (candidate) {
-      return text(candidate && candidate.name) === providerName;
-    });
-    return (provider && Array.isArray(provider.models) ? provider.models : [])
-      .map(function (model) {
-        var value = text(model && (model.value || model.id));
-        return { value: value, label: text(model && model.label) || value };
-      })
-      .filter(function (entry) {
-        return entry.value;
-      });
-  }
-
-  // The Create form expands IN PLACE. It must never open a dialog: the Create
-  // Workspace modal is full-screen, and a dialog raised from it opens
-  // underneath it.
-  function createForm(row, options) {
-    var form = element('form', 'ws-role-row__create');
-    form.noValidate = true;
-
-    var nameField = element('label', 'ws-role-row__field');
-    nameField.append(element('span', 'ws-role-row__field-label', 'Name'));
-    var name = document.createElement('input');
-    name.type = 'text';
-    name.className = 'form-control form-control-sm';
-    // Prefilled from the role label, which is what the user just read (FR14).
-    name.value = row.label;
-    name.setAttribute('aria-label', 'Name the agent for ' + row.label);
-    nameField.append(name);
-
-    var providerField = element('label', 'ws-role-row__field');
-    providerField.append(element('span', 'ws-role-row__field-label', 'Provider'));
-    var provider = document.createElement('select');
-    provider.className = 'form-select form-select-sm';
-    provider.setAttribute('aria-label', 'Provider for ' + row.label);
-    optionsInto(provider, providerEntries(options.providers), COPY.defaultProvider);
-    providerField.append(provider);
-
-    var modelField = element('label', 'ws-role-row__field');
-    modelField.append(element('span', 'ws-role-row__field-label', 'Model'));
-    var model = document.createElement('select');
-    model.className = 'form-select form-select-sm';
-    model.setAttribute('aria-label', 'Model for ' + row.label);
-    optionsInto(model, [], COPY.defaultProvider);
-    model.disabled = true;
-    modelField.append(model);
-
-    provider.addEventListener('change', function () {
-      var selected = provider.value;
-      optionsInto(
-        model,
-        modelEntries(options.providers, selected),
-        selected ? COPY.defaultModel : COPY.defaultProvider
-      );
-      model.disabled = !selected;
-    });
-
-    var error = element('p', 'ws-role-row__error');
-    error.hidden = true;
-
-    var actions = element('div', 'ws-role-row__create-actions');
-    var confirm = actionButton(
-      COPY.create,
-      'Create an agent for ' + row.label,
-      'btn btn-sm btn-primary'
-    );
-    confirm.type = 'submit';
-    var cancel = actionButton(
-      COPY.cancel,
-      'Cancel creating an agent for ' + row.label,
-      'btn btn-sm btn-link'
-    );
-    actions.append(confirm, cancel);
-
-    form.append(nameField, providerField, modelField, error, actions);
-
-    form.addEventListener('submit', function (event) {
-      event.preventDefault();
-      var value = text(name.value);
-      if (!value) {
-        error.textContent = 'Give this agent a name.';
-        error.hidden = false;
-        name.focus();
-        return;
-      }
-      error.hidden = true;
-      options.onCreate(
-        row.roleId,
-        { name: value, provider: provider.value, model: model.value },
-        row
-      );
-    });
-    cancel.addEventListener('click', function () {
-      options.onCancelCreate(row.roleId, row);
-    });
-
-    // The blocker a name collision raises belongs on the row that caused it,
-    // with the recovery beside it (FR26). The host supplies the message.
-    form.showBlocker = function (message, recovery) {
-      error.replaceChildren(document.createTextNode(message));
-      if (recovery && recovery.label && typeof recovery.onSelect === 'function') {
-        var action = actionButton(
-          recovery.label,
-          recovery.label + ' for ' + row.label,
-          'btn btn-sm btn-link'
-        );
-        action.addEventListener('click', recovery.onSelect);
-        error.append(document.createTextNode(' '), action);
-      }
-      error.hidden = false;
-      name.focus();
-      name.select();
-    };
-    form.focusFirstField = function () {
-      name.focus();
-      name.select();
-    };
-    return form;
-  }
-
+  // NOTE: this component deliberately owns no form. Create hands the role back
+  // to its host, which opens the app's canonical Create Agent modal prefilled
+  // for that role. Two reasons: the app already has ONE agent-creation form
+  // (agent-create-form.js, mounted into #addAgentModal), and a second, poorer
+  // one here would be exactly the "never add a second creation form" problem —
+  // this roster's three fields could not offer type, system prompt,
+  // temperature, or web tools.
+  //
+  // The Create Workspace wizard reaches that modal without nesting: it
+  // SUSPENDS itself, shows the agent modal, and restores on close. That swap is
+  // the established pattern in this step, which is why "never open a dialog"
+  // does not apply — nothing is ever stacked on the full-screen surface.
   function renderRow(row, options) {
     var item = element('li', 'ws-role-row');
     item.dataset.roleId = row.roleId;
@@ -373,17 +231,6 @@
         readOnly.append(document.createTextNode(' '), link);
       }
       item.append(readOnly);
-      return item;
-    }
-
-    // While this row's Create form is open it IS the row's action set. Leaving
-    // the buttons above it would put two controls called "Create an agent for
-    // Mix Engineer" on the page, which is ambiguous to anyone navigating by
-    // accessible name.
-    var creatingHere = row.state === STATE_EMPTY && options.creatingRoleId === row.roleId;
-    if (creatingHere) {
-      item.append(createForm(row, options));
-      item.rosterCreateForm = item.lastChild;
       return item;
     }
 
@@ -435,13 +282,11 @@
     var given = options || {};
     return {
       title: text(given.title) || 'Roles',
-      providers: given.providers,
-      creatingRoleId: text(given.creatingRoleId),
       groupWorkspaceHref: given.groupWorkspaceHref,
       agentHref: typeof given.agentHref === 'function' ? given.agentHref : null,
+      // Create hands the role back; the host opens the canonical Create Agent
+      // modal for it. This component never collects the values itself.
       onRequestCreate: given.onRequestCreate || noop,
-      onCancelCreate: given.onCancelCreate || noop,
-      onCreate: given.onCreate || noop,
       onAssign: given.onAssign || noop,
       onClear: given.onClear || noop,
       // Optional: when absent, unbound agents are listed without an action,
@@ -520,13 +365,6 @@
     });
     container.append(list);
     renderUnassigned(container, roster, opts);
-
-    if (opts.creatingRoleId) {
-      var open = list.querySelector('[data-role-id="' + CSS.escape(opts.creatingRoleId) + '"]');
-      if (open && open.rosterCreateForm && open.rosterCreateForm.focusFirstField) {
-        open.rosterCreateForm.focusFirstField();
-      }
-    }
     return rows;
   }
 
