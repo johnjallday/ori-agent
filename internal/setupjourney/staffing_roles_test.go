@@ -70,7 +70,7 @@ func TestStaffRolesFromReviewedWorkspaceSetup_StaffsOnlyTheFilledRoles(t *testin
 // fill modes travel together through one commit.
 func TestStaffRolesFromReviewedWorkspaceSetup_MixesCreateAndAssign(t *testing.T) {
 	adapter, workspaces, scope, _ := staffingFixture(t)
-	saveExistingAgent(t, adapter, "My Reviewer")
+	saveExistingAgent(t, adapter)
 	before := len(adapter.profiles.ListAgents())
 
 	err := adapter.StaffRolesFromReviewedWorkspaceSetup(context.Background(), scope.ProjectWorkspaceID, []RoleFill{

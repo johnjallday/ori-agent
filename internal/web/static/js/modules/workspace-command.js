@@ -3741,19 +3741,30 @@ export class WorkspaceCommandView {
     const workspaceId = this.workspaceId();
     if (!workspaceId) return null;
     if (!force && this.roleRosterFor === workspaceId && this.roleRoster) return this.roleRoster;
-    try {
-      const response = await fetch('/api/workspaces/' + encodeURIComponent(workspaceId) + '/roles');
-      if (!response.ok) return null;
-      const data = await response.json();
-      this.roleRoster = data?.roles || null;
-      this.roleRosterFor = workspaceId;
-      // Remembered so a workspace that HAD someone and now has nobody gets the
-      // banner back even after it was dismissed (FR45).
-      if (this.roleRoster?.filled_count > 0) this.unstaffedWasStaffed = true;
-    } catch (err) {
-      this.roleRoster = null;
-    }
-    return this.roleRoster;
+    // Concurrent callers share one request. The page's own load and the
+    // entry-agent prompt's check both want the roster during boot, and without
+    // this they raced into two identical fetches.
+    if (this.roleRosterInFlight) return this.roleRosterInFlight;
+    this.roleRosterInFlight = (async () => {
+      try {
+        const response = await fetch(
+          '/api/workspaces/' + encodeURIComponent(workspaceId) + '/roles'
+        );
+        if (!response.ok) return null;
+        const data = await response.json();
+        this.roleRoster = data?.roles || null;
+        this.roleRosterFor = workspaceId;
+        // Remembered so a workspace that HAD someone and now has nobody gets
+        // the banner back even after it was dismissed (FR45).
+        if (this.roleRoster?.filled_count > 0) this.unstaffedWasStaffed = true;
+      } catch (err) {
+        this.roleRoster = null;
+      } finally {
+        this.roleRosterInFlight = null;
+      }
+      return this.roleRoster;
+    })();
+    return this.roleRosterInFlight;
   }
 
   mountRoleRoster() {

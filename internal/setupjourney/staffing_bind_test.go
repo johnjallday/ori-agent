@@ -9,11 +9,16 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
+// existingAgentName is the saved agent these tests bind to. It is a constant
+// rather than a parameter because every test wants the same one — the point is
+// always "an agent the user already had", never which one.
+const existingAgentName = "My Reviewer"
+
 // saveExistingAgent creates a saved agent definition the way the user's own
 // /agents page would, so bind mode has something real to attach.
-func saveExistingAgent(t *testing.T, adapter *AssistantStaffingAdapter, name string) {
+func saveExistingAgent(t *testing.T, adapter *AssistantStaffingAdapter) {
 	t.Helper()
-	if err := adapter.profiles.CreateAgent(name, &agentstore.CreateAgentConfig{
+	if err := adapter.profiles.CreateAgent(existingAgentName, &agentstore.CreateAgentConfig{
 		Type: "tool-calling", Role: "specialist", LLMProvider: "openai", Model: "gpt-4o-mini",
 		SystemPrompt: "the user's own prompt",
 	}); err != nil {
@@ -27,7 +32,7 @@ func saveExistingAgent(t *testing.T, adapter *AssistantStaffingAdapter, name str
 // have" could not be expressed at the domain level at all.
 func TestAssistantStaffingAdapter_BindAttachesExistingAgentWithoutCreating(t *testing.T) {
 	adapter, workspaces, scope, grants := staffingFixture(t)
-	saveExistingAgent(t, adapter, "My Reviewer")
+	saveExistingAgent(t, adapter)
 	before := len(adapter.profiles.ListAgents())
 
 	input := []byte(`{"roles":[{"role_id":"project_lead","name":"Alex Lead"},{"role_id":"project_reviewer","name":"My Reviewer","mode":"bind"}]}`)
@@ -81,7 +86,7 @@ func TestAssistantStaffingAdapter_BindAttachesExistingAgentWithoutCreating(t *te
 // would silently adopt the user's existing agent instead of making a new one.
 func TestAssistantStaffingAdapter_CreateStillRejectsAnExistingProfileName(t *testing.T) {
 	adapter, _, scope, _ := staffingFixture(t)
-	saveExistingAgent(t, adapter, "My Reviewer")
+	saveExistingAgent(t, adapter)
 
 	input := []byte(`{"roles":[{"role_id":"project_lead","name":"Alex Lead"},{"role_id":"project_reviewer","name":"My Reviewer"}]}`)
 	if _, err := adapter.Review(context.Background(), scope, ActionReviewProjectStaffing, input); err == nil {
@@ -103,7 +108,7 @@ func TestAssistantStaffingAdapter_BindRejectsAnAgentThatDoesNotExist(t *testing.
 // behind it.
 func TestAssistantStaffingAdapter_BindFailsClearlyWhenTheAgentIsDeletedMidFlight(t *testing.T) {
 	adapter, workspaces, scope, _ := staffingFixture(t)
-	saveExistingAgent(t, adapter, "My Reviewer")
+	saveExistingAgent(t, adapter)
 
 	input := []byte(`{"roles":[{"role_id":"project_lead","name":"Alex Lead"},{"role_id":"project_reviewer","name":"My Reviewer","mode":"bind"}]}`)
 	review, err := adapter.Review(context.Background(), scope, ActionReviewProjectStaffing, input)
@@ -134,7 +139,7 @@ func TestAssistantStaffingAdapter_BindFailsClearlyWhenTheAgentIsDeletedMidFlight
 // deleting it is unrecoverable (FR51).
 func TestAssistantStaffingAdapter_FailedCreateLeavesABoundAgentAlive(t *testing.T) {
 	adapter, workspaces, scope, grants := staffingFixture(t)
-	saveExistingAgent(t, adapter, "My Reviewer")
+	saveExistingAgent(t, adapter)
 
 	input := []byte(`{"roles":[{"role_id":"project_lead","name":"Alex Lead"},{"role_id":"project_reviewer","name":"My Reviewer","mode":"bind"}]}`)
 	review, err := adapter.Review(context.Background(), scope, ActionReviewProjectStaffing, input)
