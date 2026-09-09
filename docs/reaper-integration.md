@@ -4,7 +4,9 @@ Ori’s REAPER integration is an optional local contribution for organizing and 
 
 ## Start and resume setup
 
-After a settled Personal Assistant recognizes music-production work, accepting its offer opens a guided setup journey. Acceptance records only that choice. It does not install software, connect a folder, create a workspace or agent, open REAPER, or enable live control.
+Open **Plugins → Guided Setup**, or select Reaper Song in the workspace template picker and choose **Open Guided Setup**. The standalone **Templates** page also shows the selected template's quest and **Open Guided Setup** action, with plugin-owned declarations kept read-only. All three resume the same saved quest without requiring an accepted Personal Assistant offer. If the assistant offers music-production setup, its accepted setup action is another entry to that quest.
+
+Opening setup does not install software, connect a folder, create a workspace or agent, open REAPER, or enable live control. Published plugin v0.5.0 uses labeled **Ori compatibility setup** until a reviewed plugin release supplies its own declaration. See [Plugin-owned setup quests](plugin-setup-quests.md) for the declaration and rollout contract.
 
 Setup now follows four screens:
 

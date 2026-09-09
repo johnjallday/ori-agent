@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ori.local/schemas/setup-quest-v1.schema.json",
+  "title": "Ori plugin setup quest v1 (inert declaration)",
+  "description": "The host normalizer additionally enforces plain text, UTF-8 byte limits, a 16 KiB total limit, and exact plugin/blueprint/program ownership.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "version",
+    "id",
+    "title",
+    "description",
+    "integration_key",
+    "expected_blueprint_id",
+    "expected_assistant_program_id",
+    "steps",
+    "workspace_launch"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "version": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+    "id": { "$ref": "#/$defs/id" },
+    "title": { "$ref": "#/$defs/title" },
+    "description": { "$ref": "#/$defs/text" },
+    "integration_key": { "$ref": "#/$defs/id" },
+    "expected_blueprint_id": { "$ref": "#/$defs/id" },
+    "expected_assistant_program_id": { "$ref": "#/$defs/id" },
+    "workspace_launch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["group_title", "group_name", "runtime_title", "runtime_instructions"],
+      "properties": {
+        "group_title": { "$ref": "#/$defs/launchText" },
+        "group_name": { "$ref": "#/$defs/launchText" },
+        "runtime_title": { "$ref": "#/$defs/launchText" },
+        "runtime_instructions": { "$ref": "#/$defs/launchText" }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "prefixItems": [
+        { "$ref": "#/$defs/step", "properties": { "kind": { "const": "integration_install" } } },
+        { "$ref": "#/$defs/step", "properties": { "kind": { "const": "project_connect" } } },
+        { "$ref": "#/$defs/step", "properties": { "kind": { "const": "workspace_setup" } } },
+        {
+          "$ref": "#/$defs/step",
+          "properties": { "kind": { "const": "assistant_program_staffing" } }
+        },
+        { "$ref": "#/$defs/step", "properties": { "kind": { "const": "summary" } } }
+      ],
+      "items": false
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9][a-z0-9_-]*$" },
+    "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "text": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "launchText": { "type": "string", "minLength": 1, "maxLength": 1000 },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "title", "description"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "kind": { "type": "string" },
+        "title": { "$ref": "#/$defs/title" },
+        "description": { "$ref": "#/$defs/text" }
+      }
+    }
+  }
+}

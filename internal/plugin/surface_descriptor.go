@@ -45,6 +45,7 @@ const (
 const (
 	HostFeatureAssistantProgramV1       = "assistant_program_v1"
 	HostFeatureSpecialistSetupJourneyV1 = "specialist_setup_journey_v1"
+	HostFeatureSetupQuestsV1            = "setup_quests_v1"
 )
 
 // ContributionError is safe to project during local plugin validation. It
@@ -109,6 +110,7 @@ type SurfaceContribution struct {
 	Capabilities         []ContributedCapability `json:"capabilities,omitempty"`
 	Services             []ContributedService    `json:"services,omitempty"`
 	Blueprints           []ContributedBlueprint  `json:"blueprints,omitempty"`
+	SetupQuests          []SetupQuest            `json:"setup_quests,omitempty"`
 }
 
 type ContributedCapability struct {
@@ -296,6 +298,7 @@ func (c *SurfaceContribution) Validate() error {
 	return c.ValidateForHost(SurfaceProtocolVersion, []string{
 		HostFeatureAssistantProgramV1,
 		HostFeatureSpecialistSetupJourneyV1,
+		HostFeatureSetupQuestsV1,
 	})
 }
 
@@ -349,6 +352,9 @@ func (c *SurfaceContribution) ValidateForHost(protocolVersion int, hostFeatures 
 	}
 	if len(c.Capabilities) > 16 || len(c.Services) > 8 || len(c.Blueprints) > 16 {
 		return contributionError(CodeContributionInvalid, "manifest", "components", "component count exceeds v1 limits", nil)
+	}
+	if err := validateSetupQuests(c); err != nil {
+		return contributionError(CodeContributionInvalid, "manifest", "setup_quests", "setup quest declarations are invalid", err)
 	}
 	return validateContributionComponents(c)
 }

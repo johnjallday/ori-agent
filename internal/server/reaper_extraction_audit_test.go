@@ -50,6 +50,7 @@ func TestCompiledDomainExtractionLeavesOnlyGenericHostProductionCode(t *testing.
 		// asserting the file stays data only.
 		if clean == "internal/server/marketplace_cache_official.json" ||
 			clean == "internal/specialist/domains.go" ||
+			clean == "internal/specialist/compatibility/reaper-setup.json" ||
 			clean == "internal/reviewedintegration/entries.go" {
 			return nil
 		}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
+	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/specialist"
 	"github.com/johnjallday/ori-agent/internal/specialistevents"
 )
@@ -61,9 +62,10 @@ type OverviewProjection struct {
 }
 
 // DeclarationProjection is inert normalized display data from the built-in
-// specialist registry. Integration/blueprint/program constraints remain on the
+// selected declaration. Integration/blueprint/program constraints remain on the
 // server and are not client-selectable fields.
 type DeclarationProjection struct {
+	PluginID        string                          `json:"plugin_id,omitempty"`
 	ID              string                          `json:"id"`
 	SchemaVersion   int                             `json:"schema_version"`
 	Version         int                             `json:"version"`
@@ -190,6 +192,8 @@ type Service struct {
 	readers        *ReaderRegistry
 	actionAdapters map[specialist.SetupStepKind]JourneyActionAdapter
 	resolveEntry   entryResolver
+	quests         QuestCatalog
+	quest          *QuestKey
 	migrations     map[declarationMigrationKey]DeclarationMigration
 	now            func() time.Time
 }
@@ -239,7 +243,7 @@ func (s *Service) SetActionAdapter(kind specialist.SetupStepKind, adapter Journe
 	return nil
 }
 
-// Read derives the current accepted built-in declaration, creates the inert
+// Read resolves the selected plugin quest or accepted assistant alias, creates the inert
 // root row when first needed, authorizes an optional child ID through that
 // exact root, and reconciles every declared step.
 func (s *Service) Read(ctx context.Context, userID, runID string) (*JourneyProjection, error) {
@@ -310,7 +314,10 @@ func (s *Service) Overview(ctx context.Context, userID string) (*OverviewProject
 	return result, nil
 }
 
-func (s *Service) currentDeclaration(ctx context.Context, userID string) (*personalassistant.State, *specialist.SetupJourney, error) {
+func (s *Service) currentDeclaration(ctx context.Context, userID string) (*declarationIdentity, *specialist.SetupJourney, error) {
+	if s.quest != nil {
+		return s.questDeclaration(ctx, userID, *s.quest)
+	}
 	state, err := s.relationships.GetState(ctx, userID)
 	if err != nil || state == nil || state.UserID != userID ||
 		state.SpecialistOfferState != personalassistant.SpecialistOfferAccepted ||
@@ -328,7 +335,12 @@ func (s *Service) currentDeclaration(ctx context.Context, userID string) (*perso
 	if err != nil {
 		return nil, nil, failure(ReasonDeclarationInvalid, 0)
 	}
-	return state.Clone(), declaration, nil
+	if s.quests != nil {
+		if integration, ok := reviewedintegration.Get(declaration.IntegrationKey); ok {
+			return s.questDeclaration(ctx, userID, QuestKey{PluginID: integration.PluginID, ID: declaration.ID})
+		}
+	}
+	return &declarationIdentity{UserID: state.UserID, AssistantID: state.AssistantID, SpecialistSlug: state.SpecialistSlug}, declaration, nil
 }
 
 func (s *Service) reconcile(ctx context.Context, declaration *specialist.SetupJourney, root, initial *Run) (*JourneyProjection, error) {
@@ -719,7 +731,8 @@ func baseProjection(declaration *specialist.SetupJourney, run *Run) *JourneyProj
 	return &JourneyProjection{
 		RunID: run.ID, RunKind: run.Kind, RootRunID: run.RootRunID,
 		Journey: DeclarationProjection{
-			ID: declaration.ID, SchemaVersion: declaration.SchemaVersion,
+			PluginID: declaration.OwnerPluginID,
+			ID:       declaration.ID, SchemaVersion: declaration.SchemaVersion,
 			Version: declaration.Version, Title: declaration.Title, Description: declaration.Description,
 			WorkspaceLaunch: cloneLaunchCopy(declaration.WorkspaceLaunch),
 		},
