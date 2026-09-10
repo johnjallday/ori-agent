@@ -100,7 +100,7 @@ func emailOpsStatusHTTP(t *testing.T, handler *Handler) EmailOpsStatus {
 	return payload.Status
 }
 
-func runFollowUpActionHTTP(t *testing.T, handler *Handler, path, id string, action func(http.ResponseWriter, *http.Request)) *followup.FollowUp {
+func runFollowUpActionHTTP(t *testing.T, path, id string, action func(http.ResponseWriter, *http.Request)) *followup.FollowUp {
 	t.Helper()
 	body := fmt.Sprintf(`{"id":%q}`, id)
 	if path == "/api/personal-hq/followups/snooze" {
@@ -141,9 +141,9 @@ func TestFollowUpHTTP_EmailOpsOwnershipPanelCountAndLifecycleRemainAligned(t *te
 		t.Fatalf("owner-local panel/count mismatch: listed=%+v status=%+v", listed, status)
 	}
 
-	completed := runFollowUpActionHTTP(t, handler, "/api/personal-hq/followups/complete", completeTarget.ID, handler.CompleteFollowUp)
-	snoozed := runFollowUpActionHTTP(t, handler, "/api/personal-hq/followups/snooze", snoozeTarget.ID, handler.SnoozeFollowUp)
-	dismissed := runFollowUpActionHTTP(t, handler, "/api/personal-hq/followups/dismiss", dismissTarget.ID, handler.DismissFollowUp)
+	completed := runFollowUpActionHTTP(t, "/api/personal-hq/followups/complete", completeTarget.ID, handler.CompleteFollowUp)
+	snoozed := runFollowUpActionHTTP(t, "/api/personal-hq/followups/snooze", snoozeTarget.ID, handler.SnoozeFollowUp)
+	dismissed := runFollowUpActionHTTP(t, "/api/personal-hq/followups/dismiss", dismissTarget.ID, handler.DismissFollowUp)
 	if completed.WorkspaceID != emailOps.ID || completed.Status != followup.StatusCompleted ||
 		snoozed.WorkspaceID != emailOps.ID || snoozed.Status != followup.StatusSnoozed ||
 		dismissed.WorkspaceID != emailOps.ID || dismissed.Status != followup.StatusDismissed {

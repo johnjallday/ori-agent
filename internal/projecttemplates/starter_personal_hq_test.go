@@ -30,9 +30,10 @@ func TestPersonalOpsStarterEvolvedToPersonalHQ(t *testing.T) {
 	if !tpl.Builtin {
 		t.Fatal("personal-ops must remain a built-in template")
 	}
-	// The Email Ops spin-off (v5) dropped the in-HQ Inbox specialist.
-	if tpl.BuiltinVersion < 5 {
-		t.Fatalf("personal-ops builtin_version = %d, want at least 5", tpl.BuiltinVersion)
+	// The Email Ops spin-off (v5) dropped the in-HQ Inbox specialist; v6
+	// clarifies that HQ projects authorized Email Ops follow-ups without owning them.
+	if tpl.BuiltinVersion < 6 {
+		t.Fatalf("personal-ops builtin_version = %d, want at least 6", tpl.BuiltinVersion)
 	}
 
 	// Display metadata now presents this as Personal HQ.
@@ -73,6 +74,11 @@ func TestPersonalOpsStarterEvolvedToPersonalHQ(t *testing.T) {
 	// The Chief must route email work to the Email Ops workspace, not do it in HQ.
 	if !strings.Contains(strings.ToLower(prompt), "email ops") {
 		t.Errorf("Chief prompt must route email to the Email Ops workspace: %s", prompt)
+	}
+	for _, want := range []string{"email ops owns", "first-assignment follow-ups remain owned by personal hq", "without taking ownership"} {
+		if !strings.Contains(strings.ToLower(prompt), want) {
+			t.Errorf("Chief prompt must preserve follow-up ownership phrase %q: %s", want, prompt)
+		}
 	}
 	if !strings.Contains(strings.ToLower(prompt), "not the specialist work itself") &&
 		!strings.Contains(strings.ToLower(prompt), "not take it on yourself") &&

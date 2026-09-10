@@ -1,6 +1,8 @@
-// Package followup implements the Personal HQ structured follow-up domain
-// (contract §2): personal commitments and dependencies with their own lifecycle
-// and source-based deduplication. It is deliberately NOT built on Action Center
+// Package followup implements structured personal commitments and dependencies
+// with their own lifecycle, canonical workspace owner, and source provenance.
+// Personal HQ and authorized specialist workspaces can project the same row, but
+// FollowUp.WorkspaceID remains its operational owner. It is deliberately NOT
+// built on Action Center
 // opportunities — those are title-deduped mission findings with different
 // semantics.
 package followup
@@ -61,7 +63,8 @@ const (
 	StatusReopened  Status = "reopened"
 )
 
-// SourceRef points at what a follow-up came from.
+// SourceRef records what a follow-up came from. It is provenance and dedup
+// input, never the operational owner or lifecycle authority.
 type SourceRef struct {
 	Type      string `json:"type"` // email_thread | manual | journal
 	ID        string `json:"id,omitempty"`
@@ -74,7 +77,9 @@ type TaskRef struct {
 	TaskID      string `json:"task_id"`
 }
 
-// FollowUp is one tracked personal commitment/dependency.
+// FollowUp is one tracked personal commitment/dependency. UserID scopes access;
+// WorkspaceID names the canonical owning workspace. Read-only projections into
+// Today or Daily Brief do not change either field.
 type FollowUp struct {
 	ID           string     `json:"id"`
 	UserID       string     `json:"user_id"`

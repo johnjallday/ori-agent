@@ -63,7 +63,7 @@ func TestCreatePersonalAssistantProfileUsesTheCanonicalEntrySpecOnly(t *testing.
 	if record.Role != types.RoleOrchestrator {
 		t.Fatalf("role = %q", record.Role)
 	}
-	if !strings.Contains(record.Settings.SystemPrompt, "own prioritization, briefs, follow-ups, and routing") ||
+	if !strings.Contains(record.Settings.SystemPrompt, "own prioritization, briefs, and routing") ||
 		!strings.Contains(record.Settings.SystemPrompt, testPAFPromptFragment) {
 		t.Fatalf("prompt did not layer the PAF fragment onto the canonical entry prompt")
 	}

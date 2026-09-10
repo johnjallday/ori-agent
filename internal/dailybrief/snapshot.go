@@ -208,7 +208,8 @@ type MailboxSource interface {
 	BriefEmailThreads(ctx context.Context, userID string) ([]EmailThreadSnapshot, error)
 }
 
-// FollowUpSource is the narrow canonical follow-up read used by snapshots.
+// FollowUpSource is the narrow owner-scoped canonical follow-up read used by
+// snapshots. It exposes no mutation or ownership-transfer capability.
 type FollowUpSource interface {
 	List(ctx context.Context, filter followup.Filter) ([]*followup.FollowUp, error)
 }
@@ -229,7 +230,8 @@ type SnapshotSources struct {
 	// (no email section, no gap).
 	Mailbox MailboxSource
 	// FollowUps is optional. Nil or an empty Config.WorkspaceID means not
-	// configured and is distinct from a configured source read failure.
+	// configured and is distinct from a configured owner read failure. Every
+	// authorized owner is filtered and validated independently.
 	FollowUps FollowUpSource
 }
 

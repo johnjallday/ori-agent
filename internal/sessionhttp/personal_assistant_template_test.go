@@ -46,7 +46,7 @@ func TestPersonalAssistantTemplatePlanSubstitutesIdentityWithoutMutatingBase(t *
 	if customized.Agents[0].Appearance == appearance || !reflect.DeepEqual(customized.Agents[0].Appearance, appearance) {
 		t.Fatal("appearance was not defensively reused through the shared appearance type")
 	}
-	if !strings.Contains(customized.Agents[0].SystemPrompt, "own prioritization, briefs, follow-ups, and routing") ||
+	if !strings.Contains(customized.Agents[0].SystemPrompt, "own prioritization, briefs, and routing") ||
 		!strings.Contains(customized.Agents[0].SystemPrompt, testPAFPromptFragment) {
 		t.Fatal("custom prompt did not preserve the bounded Chief of Staff scope plus PAF fragment")
 	}

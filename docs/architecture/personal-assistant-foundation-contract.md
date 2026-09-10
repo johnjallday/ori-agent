@@ -10,6 +10,14 @@ PAF contract is unchanged. The superseded decision is recorded, not erased: an
 installation hired before this amendment keeps its existing active relationship
 and never replays the quest.
 
+Amendment 2 — Follow-up ownership and HQ projection: a Follow-Up's
+`workspace_id` is its canonical operational owner, while its source fields
+record provenance rather than ownership. Personal HQ continues to own direct
+first-assignment follow-ups. The built-in Email Ops workspace owns follow-ups
+created or captured for Email Ops. Today and Daily Brief may show both as
+read-only projections under the saved workspace scope; this never moves,
+clones, re-keys, or expands the lifecycle authority over either record.
+
 ## Purpose
 
 Ori exposes one user-chosen, durable personal-assistant relationship. The
@@ -37,7 +45,7 @@ Brief generation, workspace memory, and user-profile services remain canonical.
 | Personal HQ identity | session/workspace agent-instance model | `Workspace.EntryAgent` selects the entry profile by name today; `AgentInstance.ID` is the stable workspace attachment that PAF binds. |
 | Daily Brief | `dailybrief.Service`, HTTP handler, scheduler, and Home renderer | Durable user/HQ-scoped config and revisions. First-open/scheduled claims enforce existing deduplication. |
 | Tickets | `workspace.TicketService` | Target-workspace-owned canonical project work; confirmation remains in the caller before creation/execution. |
-| Follow-ups | `followup.Service` | User/HQ-owned commitments with source-key deduplication and optional project-task links. |
+| Follow-ups | `followup.Service` | User-scoped commitments canonically owned by `FollowUp.WorkspaceID`, with source-key provenance/deduplication and optional project-task links. Direct first-assignment rows remain HQ-owned; authorized Email Ops rows remain Email-Ops-owned when projected in HQ. |
 | Profile and memory | `userprofile` and workspace `MemoryStore` | Global preferences are field-allowlisted; workspace facts remain in `MEMORY.md`; both reject secret-like text. |
 
 ## State and action matrix
@@ -123,7 +131,7 @@ stable. A mismatch never falls back to a name search.
 | User-wide identity and preferences | `userprofile` |
 | HQ working agreement and operational facts | designated HQ `MEMORY.md` |
 | Project work | target workspace Tickets |
-| Commitments/dependencies | Follow-Ups owned by the user/HQ, optionally linked to a Ticket |
+| Commitments/dependencies | Follow-Ups user-scoped and operationally owned by `FollowUp.WorkspaceID`; direct first-assignment rows use Personal HQ, while Email Ops capture uses the resolved built-in Email Ops workspace. Ticket links and source provenance do not change that owner. |
 | Agent runtime/profile configuration | existing global agent store plus stable HQ agent instance |
 
 ## Mutation and idempotency contract
@@ -140,7 +148,7 @@ stable. A mismatch never falls back to a name search.
 | First-assignment apply | Requires preview ID, assignment version, and matching payload hash. One terminal application stores canonical refs; replay returns those refs without recreating records. |
 | Daily Brief manual generation | Uses existing Daily Brief claim/revision idempotency; PAF stores no brief body or schedule duplicate. |
 | Ticket creation | Uses source `assistant` and assignment-derived source ID; replay resolves the existing target-workspace record. |
-| Follow-up capture | Uses existing source-dedup key derived from user and assignment source ID. |
+| Follow-up capture | Uses the existing source-dedup key derived from user and source ID. First-assignment apply writes to the designated HQ; manual Email Ops capture writes to the resolved Email Ops workspace. Today and Daily Brief perform no capture or lifecycle mutation. |
 | Rename | Requires current state version and updates global profile plus bound instance name without changing stable IDs. |
 
 Request IDs, preview IDs, hashes, and canonical refs are bounded opaque values.
@@ -385,16 +393,26 @@ group. It is never silently removed from an existing HQ.
 Canonical stores remain authoritative:
 
 - project work uses workspace Tickets and keeps ticket source provenance;
-- commitments use Follow-Ups and remain user/HQ-owned even when linked to a
-  project task;
+- commitments use Follow-Ups: `user_id` scopes access, `workspace_id` is the
+  canonical operational owner, and source fields preserve creation provenance;
+- direct first-assignment Follow-Ups remain Personal-HQ-owned, while follow-ups
+  captured for the built-in Email Ops path remain Email-Ops-owned;
+- Today and Daily Brief may project authorized active/reopened HQ and Email Ops
+  rows under the saved selected/all/future-workspace scope, but cannot mutate
+  them; lifecycle actions remain on the owning workspace's management surface;
 - preferences and identity facts use User Profile fields;
 - workspace-specific operational facts use that workspace's `MEMORY.md`;
 - Daily Brief uses its existing durable configuration/revision stores; and
 - source integrations continue to enforce their existing consent gates.
 
 Project work must not be duplicated into Personal HQ. Follow-ups may link to a
-project Ticket but are not moved into it. Assistant profile edits must preserve
-stable IDs and pass existing free-text/secret validation. Memory writes use
+project Ticket but are not moved into it. An HQ projection is likewise not a
+second commitment: the original Follow-Up ID, owning workspace, source
+provenance, and lifecycle remain canonical. Authorization is deliberately
+bounded to the designated HQ plus active, current-user workspaces with built-in
+`email-ops` template provenance; this is not a generic specialist framework.
+Assistant profile edits must preserve stable IDs and pass existing
+free-text/secret validation. Memory writes use
 `ValidateMemoryText`, fixed workspace roots, and atomic `0600` persistence.
 
 ## Privacy, permissions, and telemetry
@@ -530,7 +548,12 @@ deletes external-provider data.
 ## Compatibility
 
 No legacy onboarding cohort is maintained. Existing Personal HQ, Daily Brief,
-Follow-Up, workspace, and protected system-assistant records remain valid. A
+Follow-Up, workspace, and protected system-assistant records remain valid. The
+follow-up ownership amendment is read-only compatibility work: it adds no data
+migration, re-key, clone, backfill, orphan adoption, mailbox-permission
+expansion, proactive capture, task classification, or generic specialist
+integration. Recovery of blank/orphaned legacy ownership, if needed, is separate
+reviewed work. A
 complete development profile reset returns to a fresh hire only when no PAF
 provenance survives; otherwise bounded recovery or blocked review takes
 precedence.

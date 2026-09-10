@@ -218,7 +218,7 @@ func TestEmailOpsFollowUpFlowsThroughProductionWriterTodayAndDailyBriefWithoutMo
 		t.Fatalf("portal=%+v err=%v body=%s", portalPayload, err, portalRec.Body.String())
 	}
 
-	assertToday := func(wantCreated bool) personalassistant.TodayProjection {
+	assertToday := func(wantCreated bool) {
 		t.Helper()
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/personal-assistant/today", nil))
@@ -252,7 +252,6 @@ func TestEmailOpsFollowUpFlowsThroughProductionWriterTodayAndDailyBriefWithoutMo
 		if wantCreated && (createdRef.WorkspaceID != emailOps.ID || createdRef.WorkspaceSlug != emailOps.FolderSlug) {
 			t.Fatalf("Today ref not grounded to Email Ops: %+v", createdRef)
 		}
-		return payload.Today
 	}
 	assertToday(true)
 

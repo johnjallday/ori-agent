@@ -1,9 +1,10 @@
 // Package dailybrief implements Daily Brief configuration, durable
 // revisions/history, and timezone-aware scheduling for the designated
-// Personal HQ workspace. Content synthesis (grounded snapshots, the actual
-// brief prose) is a separate concern layered on top in a later package —
-// this package owns storage, config, generation lifecycle/concurrency, and
-// the recurrence calculation.
+// Personal HQ workspace. Its bounded snapshots may project authorized records
+// from other owning workspaces without transferring ownership. Content
+// synthesis (grounded snapshots and brief prose) is separate — this package
+// owns storage, config, generation lifecycle/concurrency, and recurrence, not
+// the lifecycle of projected source records.
 package dailybrief
 
 import "time"
