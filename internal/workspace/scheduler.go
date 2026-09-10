@@ -1011,6 +1011,30 @@ func CalculateNextRun(config ScheduleConfig, lastRun time.Time) *time.Time {
 	}
 }
 
+// IsRecurringSchedule reports whether a schedule repeats on its own.
+//
+// This is the one definition of "recurring" in the codebase (city-economy FR14).
+// It lives here rather than in internal/economy because the task executor has to
+// classify a finished run — a repeating schedule produces Harvest, everything
+// else produces Craft — and importing the economy package from workspace would
+// invert the dependency. economy.IsRecurring is the economy-facing name for it.
+//
+// "once" never recurs, and "relative_delay" recurs only while TriggerOnce is
+// false: with it set, the delay fires a single follow-up run and stops.
+func IsRecurringSchedule(config *ScheduleConfig) bool {
+	if config == nil {
+		return false
+	}
+	switch config.Type {
+	case ScheduleInterval, ScheduleDaily, ScheduleWeekly, ScheduleMonthly, ScheduleCron:
+		return true
+	case ScheduleRelativeDelay:
+		return !config.TriggerOnce
+	default:
+		return false
+	}
+}
+
 // ValidateCronExpression validates a cron expression
 func ValidateCronExpression(expr string) error {
 	if expr == "" {

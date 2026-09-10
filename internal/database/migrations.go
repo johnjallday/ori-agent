@@ -12,7 +12,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 56
+const schemaVersion = 57
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -179,6 +179,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration055SampleLibrary(ctx)
 	case 56:
 		return db.migration056AgentMapLayouts(ctx)
+	case 57:
+		return db.migration057Economy(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -3009,6 +3011,69 @@ func (db *DB) migration056AgentMapLayouts(ctx context.Context) error {
 	for _, stmt := range statements {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("failed to create agent map layout schema: %w", err)
+		}
+	}
+	return nil
+}
+
+// migration057Economy adds the City Economy ledger: the append-only record every
+// Craft and Harvest balance is summed from, plus the pending-Harvest rows a Farm
+// run creates and opening its result banks (city-economy FR2, FR10).
+//
+// Purely additive. An install that has never seen the economy opens with no rows
+// here, and both balances read as zero until the first-run backfill grants a
+// starting stock of Craft (FR32).
+//
+// Balances are a SUM over economy_ledger rather than a stored counter, so no
+// crash or partial write can leave a balance disagreeing with its history. The
+// UNIQUE(resource, ref_kind, ref_id) constraint is what makes that safe to
+// replay: every writer states what it is paying for, and re-processing the same
+// event or the same save is a no-op instead of a double count (FR3).
+//
+// economy_harvest_pending is keyed by (task_id, run_key) because one finished run
+// is one pending Harvest, and the run key is the run's own id — so a duplicate
+// task.completed delivery for one run cannot pile up twice (FR10). harvested_at
+// is nullable on purpose: NULL is the whole "waiting to be collected" state that
+// the tile's harvest pile counts, and a banked row is kept rather than deleted so
+// the pile's history survives.
+func (db *DB) migration057Economy(ctx context.Context) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS economy_ledger (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			resource TEXT NOT NULL,
+			delta INTEGER NOT NULL,
+			reason TEXT NOT NULL,
+			ref_kind TEXT NOT NULL,
+			ref_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			UNIQUE(resource, ref_kind, ref_id)
+		)`,
+		// Balances are read on every Home load and before every priced save, so
+		// the sum-by-resource path gets its own index.
+		`CREATE INDEX IF NOT EXISTS idx_economy_ledger_resource
+			ON economy_ledger(resource)`,
+		// The build-charged-once check (FR17) and the grandfathering pass look an
+		// entry up by reason.
+		`CREATE INDEX IF NOT EXISTS idx_economy_ledger_reason
+			ON economy_ledger(reason)`,
+		`CREATE TABLE IF NOT EXISTS economy_harvest_pending (
+			task_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			run_key TEXT NOT NULL,
+			produced_at TEXT NOT NULL,
+			harvested_at TEXT,
+			PRIMARY KEY (task_id, run_key)
+		)`,
+		// Home asks one question of this table: how many unharvested runs does
+		// each workspace have. Indexing (workspace_id, harvested_at) answers it
+		// without a scan.
+		`CREATE INDEX IF NOT EXISTS idx_economy_pending_ws
+			ON economy_harvest_pending(workspace_id, harvested_at)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("failed to create economy ledger schema: %w", err)
 		}
 	}
 	return nil

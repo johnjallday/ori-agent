@@ -33,7 +33,14 @@ func ResetRecordTables() []string {
 		"sample_library_content_fact", "sample_library_annotation", "sample_library_collection",
 		"sample_library_collection_member", "sample_library_child_copy",
 		"sample_library_review_receipt", "sample_library_operation_receipt",
-		"agent_map_layouts", "agent_map_positions", "vaults",
+		"agent_map_layouts", "agent_map_positions",
+		// The City Economy ledger is an app record: resetting app records
+		// clears the city (both balances and every pending Harvest) and the
+		// first-run backfill grants a fresh starting stock of Craft on the
+		// next start. Omitting either table would append
+		// unclassified_database_domain to every reset inspection.
+		"economy_ledger", "economy_harvest_pending",
+		"vaults",
 	}
 }
 
