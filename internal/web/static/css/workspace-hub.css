@@ -5001,6 +5001,16 @@ body.chat-panel-open .chat-panel-backdrop {
   background: var(--bg-secondary);
 }
 
+.hq-followup-card.is-deep-linked {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+.hq-followup-card.is-deep-linked:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
 .hq-followup-category {
   display: inline-block;
   margin-bottom: 0.2rem;

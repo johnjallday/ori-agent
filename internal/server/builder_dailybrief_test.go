@@ -109,6 +109,211 @@ func TestDailyBrief_FollowUpSourceIsWiredAndGroundedWithoutModel(t *testing.T) {
 	}
 }
 
+func TestEmailOpsFollowUpFlowsThroughProductionWriterTodayAndDailyBriefWithoutMovingOwnership(t *testing.T) {
+	builder, handler := newDailyBriefTestServer(t)
+	ctx := context.Background()
+
+	hireReq := httptest.NewRequest(http.MethodPost, "/api/personal-assistant/hire", bytes.NewBufferString(`{"request_id":"followup-hire","if_version":0,"display_name":"Atlas","mandate":"Keep commitments visible.","focus_areas":["plan_my_day"]}`))
+	hireReq.Header.Set("Content-Type", "application/json")
+	hireRec := httptest.NewRecorder()
+	handler.ServeHTTP(hireRec, hireReq)
+	if hireRec.Code != http.StatusCreated {
+		t.Fatalf("hire status=%d body=%s", hireRec.Code, hireRec.Body.String())
+	}
+	state := activateTestRelationshipWithHQ(t, builder, handler, "local")
+
+	emailOps := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Email Ops"})
+	emailOps.ID = "email-ops-integration"
+	emailOps.FolderSlug = "email-ops"
+	emailOps.OwnerUserID = "local"
+	emailOps.SetTemplateProvenance(&workspace.TemplateProvenance{TemplateID: workspace.EmailOpsTemplateID, Builtin: true})
+	if err := builder.workspaceStore.Save(emailOps); err != nil {
+		t.Fatalf("save Email Ops: %v", err)
+	}
+	if _, err := builder.dailyBriefService.UpdateConfig(ctx, dailybrief.Config{
+		WorkspaceID: state.HQWorkspaceID, UserID: "local", Timezone: "UTC",
+		Scope: dailybrief.ScopeSelected, SelectedWorkspaceIDs: []string{emailOps.ID},
+	}); err != nil {
+		t.Fatalf("configure Email Ops scope: %v", err)
+	}
+
+	dueToday := time.Now().UTC().Truncate(time.Second)
+	preexisting, err := builder.followUpService.Capture(ctx, followup.CaptureInput{
+		UserID: "local", WorkspaceID: emailOps.ID, Category: followup.CategoryWaitingOn,
+		Direction: followup.DirectionInbound, Title: "Pre-existing Email Ops row", DueAt: &dueToday,
+		Source:     followup.SourceRef{Type: "email_thread", ID: "thread-existing", AccountID: "account-1"},
+		Provenance: followup.ProvenanceExplicit,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := builder.personalAssignment.Preview(ctx, "local", state.StateVersion, personalassistant.AssignmentInput{
+		Rows: []personalassistant.AssignmentInputRow{{
+			Type: personalassistant.AssignmentRowFixedCommitment, Title: "HQ first-assignment follow-up",
+			Due: time.Now().UTC().Format("2006-01-02"),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("preview first assignment: %v", err)
+	}
+	applied, err := builder.personalAssignment.Apply(ctx, "local", personalassistant.AssignmentApplyRequest{
+		PreviewID: preview.Preview.PreviewID, PreviewVersion: preview.Preview.AssignmentVersion,
+		PayloadHash: preview.Preview.PayloadHash, IfVersion: preview.StateVersion, ApplyRequestID: "integration-apply-442",
+	})
+	if err != nil {
+		t.Fatalf("apply first assignment: %v", err)
+	}
+	if len(applied.CreatedCanonicalRefs) != 1 || applied.CreatedCanonicalRefs[0].Kind != "follow_up" {
+		t.Fatalf("first assignment refs = %+v", applied.CreatedCanonicalRefs)
+	}
+	hqFollowUp, err := builder.followUpService.Get(ctx, "local", applied.CreatedCanonicalRefs[0].ID)
+	if err != nil {
+		t.Fatalf("read first-assignment follow-up: %v", err)
+	}
+	if hqFollowUp.WorkspaceID != state.HQWorkspaceID {
+		t.Fatalf("first-assignment owner = %q, want HQ %q", hqFollowUp.WorkspaceID, state.HQWorkspaceID)
+	}
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/personal-hq/followups", bytes.NewBufferString(`{"category":"needs_decision","direction":"inbound","title":"Waiting for Alex's signed agreement","counterparty":"Alex"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create follow-up status=%d body=%s", createRec.Code, createRec.Body.String())
+	}
+	var createdPayload struct {
+		FollowUp *followup.FollowUp `json:"followup"`
+	}
+	if err := json.Unmarshal(createRec.Body.Bytes(), &createdPayload); err != nil || createdPayload.FollowUp == nil {
+		t.Fatalf("decode created follow-up: followup=%+v err=%v", createdPayload.FollowUp, err)
+	}
+	created := createdPayload.FollowUp
+	if created.WorkspaceID != emailOps.ID || created.Source.Type != "manual" || created.Provenance != followup.ProvenanceManual {
+		t.Fatalf("real writer moved ownership/provenance: %+v", created)
+	}
+
+	panelReq := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+emailOps.ID+"/followups", nil)
+	panelRec := httptest.NewRecorder()
+	handler.ServeHTTP(panelRec, panelReq)
+	var panelPayload struct {
+		FollowUps []*followup.FollowUp `json:"followups"`
+	}
+	if panelRec.Code != http.StatusOK {
+		t.Fatalf("panel status=%d body=%s", panelRec.Code, panelRec.Body.String())
+	}
+	if err := json.Unmarshal(panelRec.Body.Bytes(), &panelPayload); err != nil || len(panelPayload.FollowUps) != 2 {
+		t.Fatalf("panel follow-ups=%+v err=%v body=%s", panelPayload.FollowUps, err, panelRec.Body.String())
+	}
+	portalReq := httptest.NewRequest(http.MethodGet, "/api/personal-hq/email-ops", nil)
+	portalRec := httptest.NewRecorder()
+	handler.ServeHTTP(portalRec, portalReq)
+	var portalPayload struct {
+		Status struct {
+			WorkspaceID       string `json:"workspace_id"`
+			OpenFollowupCount int    `json:"open_followup_count"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(portalRec.Body.Bytes(), &portalPayload); err != nil ||
+		portalPayload.Status.WorkspaceID != emailOps.ID || portalPayload.Status.OpenFollowupCount != 2 {
+		t.Fatalf("portal=%+v err=%v body=%s", portalPayload, err, portalRec.Body.String())
+	}
+
+	assertToday := func(wantCreated bool) personalassistant.TodayProjection {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/personal-assistant/today", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("today status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		var payload struct {
+			Today personalassistant.TodayProjection `json:"today"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("decode Today: %v", err)
+		}
+		seen, decisions := map[string]dailybrief.SourceRef{}, map[string]dailybrief.SourceRef{}
+		for _, item := range payload.Today.FollowUps.Items {
+			seen[item.ID] = item.Ref
+		}
+		for _, item := range payload.Today.Decisions.Items {
+			decisions[item.ID] = item.Ref
+		}
+		if _, ok := seen[preexisting.ID]; !ok {
+			t.Fatalf("pre-existing Email Ops row missing from Today: %+v", payload.Today.FollowUps)
+		}
+		if _, ok := seen[hqFollowUp.ID]; !ok {
+			t.Fatalf("HQ follow-up missing from Today: %+v", payload.Today.FollowUps)
+		}
+		createdRef, createdSeen := seen[created.ID]
+		_, decisionSeen := decisions[created.ID]
+		if createdSeen != wantCreated || decisionSeen != wantCreated {
+			t.Fatalf("created visibility=%v decision=%v want=%v today=%+v", createdSeen, decisionSeen, wantCreated, payload.Today)
+		}
+		if wantCreated && (createdRef.WorkspaceID != emailOps.ID || createdRef.WorkspaceSlug != emailOps.FolderSlug) {
+			t.Fatalf("Today ref not grounded to Email Ops: %+v", createdRef)
+		}
+		return payload.Today
+	}
+	assertToday(true)
+
+	generate := func() dailybrief.BriefContent {
+		t.Helper()
+		revision, err := builder.dailyBriefService.RequestGenerationNow(ctx, state.HQWorkspaceID, "local", dailybrief.TriggerManual)
+		if err != nil {
+			t.Fatalf("generate brief: %v", err)
+		}
+		var content dailybrief.BriefContent
+		if err := json.Unmarshal([]byte(revision.ContentJSON), &content); err != nil {
+			t.Fatalf("decode brief: %v", err)
+		}
+		return content
+	}
+	brief := generate()
+	briefRefs := func(content dailybrief.BriefContent) map[string]dailybrief.SourceRef {
+		refs := map[string]dailybrief.SourceRef{}
+		for _, item := range content.NeedsAttention {
+			refs[item.Ref.EntityID] = item.Ref
+		}
+		for _, item := range content.SinceLastBrief {
+			refs[item.Ref.EntityID] = item.Ref
+		}
+		for _, item := range content.TodaysPlan {
+			refs[item.Ref.EntityID] = item.Ref
+		}
+		return refs
+	}
+	refs := briefRefs(brief)
+	if refs[created.ID].WorkspaceID != emailOps.ID || refs[created.ID].WorkspaceSlug != emailOps.FolderSlug ||
+		refs[preexisting.ID].WorkspaceID != emailOps.ID || refs[hqFollowUp.ID].WorkspaceID != state.HQWorkspaceID {
+		t.Fatalf("brief refs lost real owners: %+v", refs)
+	}
+
+	all, err := builder.followUpService.List(ctx, followup.Filter{UserID: "local"})
+	if err != nil || len(all) != 3 {
+		t.Fatalf("aggregation cloned or lost canonical rows: count=%d err=%v rows=%+v", len(all), err, all)
+	}
+	persistedExisting, err := builder.followUpService.Get(ctx, "local", preexisting.ID)
+	if err != nil || persistedExisting.WorkspaceID != emailOps.ID || persistedExisting.Source != preexisting.Source {
+		t.Fatalf("pre-existing row was rewritten: before=%+v after=%+v err=%v", preexisting, persistedExisting, err)
+	}
+
+	completeReq := httptest.NewRequest(http.MethodPost, "/api/personal-hq/followups/complete", bytes.NewBufferString(`{"id":"`+created.ID+`"}`))
+	completeReq.Header.Set("Content-Type", "application/json")
+	completeRec := httptest.NewRecorder()
+	handler.ServeHTTP(completeRec, completeReq)
+	if completeRec.Code != http.StatusOK {
+		t.Fatalf("complete status=%d body=%s", completeRec.Code, completeRec.Body.String())
+	}
+	assertToday(false)
+	if ref, exists := briefRefs(generate())[created.ID]; exists {
+		t.Fatalf("completed owner-local row remained in regenerated brief: %+v", ref)
+	}
+	persistedCreated, err := builder.followUpService.Get(ctx, "local", created.ID)
+	if err != nil || persistedCreated.WorkspaceID != emailOps.ID || persistedCreated.Status != followup.StatusCompleted {
+		t.Fatalf("completion moved original row: %+v err=%v", persistedCreated, err)
+	}
+}
+
 // TestDailyBrief_ScheduledSuccessCreatesExactlyOneActionCenterNotification
 // covers task 7.11 end-to-end: initializeDailyBrief's onRevisionReady hook
 // (builder_dailybrief.go) must actually create a visible Action Center

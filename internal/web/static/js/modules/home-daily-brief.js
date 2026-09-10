@@ -38,6 +38,19 @@ export function hrefForRef(ref) {
   if (ref.entity_type === 'email_thread' && ref.entity_id) {
     return `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(ref.entity_id)}`;
   }
+  if (ref.entity_type === 'follow_up') {
+    const workspaceId = String(ref.workspace_id || '');
+    const workspaceSlug = String(ref.workspace_slug || '');
+    const recordId = String(ref.entity_id || '');
+    if (
+      !workspaceId ||
+      !/^[a-z0-9][a-z0-9-]{0,79}$/.test(workspaceSlug) ||
+      !/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(recordId)
+    ) {
+      return '#';
+    }
+    return `/workspaces/${encodeURIComponent(workspaceSlug)}?follow_up=${encodeURIComponent(recordId)}`;
+  }
   if (!ref.workspace_slug) return '#';
   const workspaceSlug = encodeURIComponent(ref.workspace_slug);
   if (ref.entity_type === 'task' && ref.entity_id) {
