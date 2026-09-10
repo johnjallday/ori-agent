@@ -282,6 +282,27 @@ func TestValidateAgainstAllowlist_RejectsFabricatedFollowUpRef(t *testing.T) {
 	}
 }
 
+func TestValidateAgainstAllowlist_CanonicalizesFollowUpToAuthorizedOwningWorkspace(t *testing.T) {
+	canonical := SourceRef{
+		WorkspaceID: "email", WorkspaceSlug: "email-ops", EntityType: "follow_up",
+		EntityID: "agreement", Timestamp: time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC),
+	}
+	content := BriefContent{NeedsAttention: []BriefAttentionItem{
+		{Ref: SourceRef{WorkspaceID: "email", EntityType: "follow_up", EntityID: "agreement"}, Title: "Authorized model item"},
+		{Ref: SourceRef{WorkspaceID: "hq", EntityType: "follow_up", EntityID: "agreement"}, Title: "Wrong owner"},
+		{Ref: SourceRef{WorkspaceID: "excluded", EntityType: "follow_up", EntityID: "agreement"}, Title: "Excluded owner"},
+		{Ref: SourceRef{WorkspaceID: "email", EntityType: "follow_up", EntityID: "inactive"}, Title: "Inactive or fabricated row"},
+		{Ref: SourceRef{WorkspaceID: "", EntityType: "follow_up", EntityID: "agreement"}, Title: "Malformed owner"},
+	}}
+	got, dropped := ValidateAgainstAllowlist(content, map[string]SourceRef{canonical.Key(): canonical})
+	if dropped != 4 || len(got.NeedsAttention) != 1 {
+		t.Fatalf("validated=%+v dropped=%d", got.NeedsAttention, dropped)
+	}
+	if got.NeedsAttention[0].Ref != canonical {
+		t.Fatalf("model ref was not canonicalized to owning workspace: %+v", got.NeedsAttention[0].Ref)
+	}
+}
+
 func TestValidateAgainstAllowlist_DropsOnlyInvalidRefs(t *testing.T) {
 	allowed := map[string]SourceRef{
 		"task:ws-1:t1": {WorkspaceID: "ws-1", WorkspaceSlug: "marketing-site", EntityType: "task", EntityID: "t1"},

@@ -151,10 +151,17 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	opportunityStore := workspace.NewOpportunityStore(b.workspaceStore)
 	sessionSource := &sessionSourceAdapter{store: b.sessionStore}
 	workspaceStore := b.workspaceStore
+	workspaceSource := dailybrief.WorkspaceSource(workspaceStore)
+	if b.workspaceFileStore != nil {
+		// Template provenance and canonical navigation slugs live in the folder
+		// record. Follow-up owner authorization must read that hydrated source,
+		// not the lean SQLite projection used for other workspace services.
+		workspaceSource = b.workspaceFileStore
+	}
 
 	resolver := func(ctx context.Context, req dailybrief.GenerationRequest, cfg dailybrief.Config) (dailybrief.Snapshot, *dailybrief.Revision, error) {
 		sources := dailybrief.SnapshotSources{
-			Workspaces:    workspaceStore,
+			Workspaces:    workspaceSource,
 			Opportunities: opportunityStore,
 			Sessions:      sessionSource,
 			// Read lazily off the builder: the mailbox source is wired during
