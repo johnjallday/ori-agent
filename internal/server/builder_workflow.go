@@ -455,6 +455,10 @@ func (b *ServerBuilder) initializeEventSystem() {
 	// Onboarding progression: engine, event subscription, backfill.
 	b.initializeProgression()
 
+	// City Economy: ledger, service, event subscription, backfill. Same shape,
+	// same phase, and for the same reason — it needs the bus that was just built.
+	b.initializeEconomy()
+
 	if b.workspaceStore != nil {
 		syncMgr, err := workspace.NewDirectorySyncManager(b.workspaceStore, b.eventBus, workspace.DefaultDirectorySyncConfig())
 		if err != nil {

@@ -18,6 +18,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/dailybriefhttp"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
 	"github.com/johnjallday/ori-agent/internal/downloadsjanitorhttp"
+	"github.com/johnjallday/ori-agent/internal/economyhttp"
 	"github.com/johnjallday/ori-agent/internal/evolutionhttp"
 	"github.com/johnjallday/ori-agent/internal/externalagentshttp"
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
@@ -215,6 +216,10 @@ type HandlerFacade struct {
 	// store and exposes no mutation route; identity assignment is validated by
 	// the agent endpoints against the same catalog.
 	Characters *characterhttp.Handler
+	// Economy serves the City Economy: balances, Farms, harvest piles, and the
+	// price of a cadence change. Like WorkspaceMap it belongs to the user rather
+	// than to any one workspace, and it can change no task — it only prices one.
+	Economy *economyhttp.Handler
 }
 
 // NewCoreSystemFacade creates a new core system facade

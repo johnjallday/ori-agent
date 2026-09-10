@@ -25,6 +25,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
 	"github.com/johnjallday/ori-agent/internal/downloadsjanitor"
 	"github.com/johnjallday/ori-agent/internal/downloadsjanitorhttp"
+	"github.com/johnjallday/ori-agent/internal/economy"
+	"github.com/johnjallday/ori-agent/internal/economyhttp"
 	"github.com/johnjallday/ori-agent/internal/evolution"
 	"github.com/johnjallday/ori-agent/internal/evolutionhttp"
 	"github.com/johnjallday/ori-agent/internal/externalagents"
@@ -418,6 +420,14 @@ type ServerBuilder struct {
 	agentMapStore   *agentmap.SQLiteStore
 	agentMapService *agentmap.Service
 	agentMapHandler *agentmaphttp.Handler
+
+	// City Economy: the ledger both balances are summed from, the service that
+	// owns the earning and pricing rules, and its HTTP handler. All three stay
+	// nil when the feature flag is off, which is exactly the state every caller
+	// already treats as "the economy does nothing".
+	economyStore   *economy.SQLiteStore
+	economyService *economy.Service
+	economyHandler *economyhttp.Handler
 }
 
 // NewServerBuilder creates a new ServerBuilder instance with an empty Server.
@@ -662,6 +672,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		PersonalHQ:            b.personalHQHandler,
 		DailyBrief:            b.dailyBriefHandler,
 		Characters:            b.characterHandler,
+		Economy:               b.economyHandler,
 		OriGuide:              b.oriGuideHandler,
 		DownloadsJanitor:      b.downloadsJanitorHandler,
 		WorkspaceCapabilities: b.workspaceCapabilityHandler,
