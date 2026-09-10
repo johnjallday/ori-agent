@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/database"
+	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	"github.com/johnjallday/ori-agent/internal/pathselection"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
@@ -219,6 +221,59 @@ func TestCreateNewProjectUsesSameHomeAndManagedLocator(t *testing.T) {
 	}
 	if got := taskDescriptions(child.Tasks); !reflect.DeepEqual(got, []string{"Shared task", "New task"}) {
 		t.Fatalf("new-mode starter tasks = %#v", got)
+	}
+}
+
+func TestRecommendedStandaloneConnectionCreatesNoHomeOrMembership(t *testing.T) {
+	service, store, _ := connectionService(t)
+	service.SetGroupRequirementService(grouprequirements.NewService(store, grouprequirements.NewMemoryStore()))
+	template := connectionTemplate(t)
+	template.Revision = strings.Repeat("a", 64)
+	template.GroupRequirement = &projecttemplates.GroupRequirement{
+		SchemaVersion: projecttemplates.GroupRequirementSchemaVersion, Policy: projecttemplates.GroupPolicyRecommended,
+		AssistantProgramID: template.AssistantProgram.ID, MissingHome: projecttemplates.MissingHomeOfferCreate,
+		DefaultHomeName: template.AssistantProgram.StationName,
+	}
+	template.StandaloneComposition = &projecttemplates.StandaloneComposition{
+		SchemaVersion: projecttemplates.StandaloneCompositionSchemaVersion,
+		ProjectRoles:  []projecttemplates.StandaloneRole{{RoleID: "reviewer", SystemPrompt: "Review only this project."}},
+	}
+	scope := Scope{OwnerUserID: "owner-1", RunID: "run-standalone", Template: template}
+	request := Request{
+		ModeID: projecttemplates.ProjectConnectionNewProject, WorkspaceName: "Standalone Song", ProjectName: "Standalone Song",
+		GroupComposition: grouprequirements.CompositionStandalone,
+	}
+	preview, err := service.Preview(context.Background(), scope, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Projection.GroupRequirementState != string(grouprequirements.StateReadyStandalone) ||
+		preview.Projection.GroupComposition != grouprequirements.CompositionStandalone || preview.Projection.HomeWillBeCreated || preview.Projection.ParentWorkspaceName != "" {
+		t.Fatalf("standalone projection = %#v", preview.Projection)
+	}
+	result, err := service.Commit(context.Background(), scope, request, preview.InputDigest, preview.OwnerDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.HomeWorkspaceID != "" {
+		t.Fatalf("standalone result created a Home: %#v", result)
+	}
+	ids, _ := store.List()
+	if len(ids) != 1 || ids[0] != result.ProjectWorkspaceID {
+		t.Fatalf("standalone workspace state = %v", ids)
+	}
+	project, err := store.Get(result.ProjectWorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provenance := project.GetTemplateProvenance()
+	if project.GetAssistantProjectLink() != nil || project.GetAssistantProgramState() != nil ||
+		provenance == nil || provenance.GroupRequirement == nil || !provenance.GroupRequirement.StructurallyValid() ||
+		provenance.GroupRequirement.SelectedComposition != workspace.GroupRequirementCompositionStandalone {
+		t.Fatalf("standalone project = %#v provenance=%#v", project, provenance)
+	}
+	if observed, ok := service.ObservedResult(scope, "", ""); !ok || observed != result {
+		t.Fatalf("standalone observation = %#v ok=%v", observed, ok)
 	}
 }
 

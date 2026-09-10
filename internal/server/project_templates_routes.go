@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/blueprintreadiness"
+	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/plugin"
@@ -25,7 +26,7 @@ func (b *ServerBuilder) wireProjectTemplateResolver() {
 	if b == nil || b.sessionHandler == nil {
 		return
 	}
-	b.sessionHandler.SetProjectTemplateResolver(func(templateID, templatePath string) (projecttemplates.Template, error) {
+	resolveTemplate := func(templateID, templatePath string) (projecttemplates.Template, error) {
 		catalog := templateRuntimeCatalog{
 			capabilities: b.workspaceCapabilityRegistry,
 			runtimes:     b.runtimeCapabilityRegistry,
@@ -81,7 +82,52 @@ func (b *ServerBuilder) wireProjectTemplateResolver() {
 			return template, nil
 		}
 		return projecttemplates.Template{}, errors.New("no template specified")
-	})
+	}
+	b.sessionHandler.SetProjectTemplateResolver(resolveTemplate)
+	if b.chatHandler != nil {
+		b.chatHandler.SetProjectTemplateCatalog(
+			func(id string) (projecttemplates.Template, error) { return resolveTemplate(id, "") },
+			func() ([]projecttemplates.Template, error) {
+				var installed []plugin.InstalledPlugin
+				if b.pluginHandler != nil {
+					var err error
+					installed, err = b.pluginHandler.Manager().List()
+					if err != nil {
+						return nil, err
+					}
+				}
+				result := activePluginBlueprintTemplates(installed)
+				library, err := projecttemplates.ListLibraryWithCatalog(resolveTemplatesRoot(b.configManager), templateRuntimeCatalog{
+					capabilities: b.workspaceCapabilityRegistry, runtimes: b.runtimeCapabilityRegistry,
+				})
+				if err != nil {
+					return nil, err
+				}
+				for _, template := range library {
+					if template.TemplateVariant == nil {
+						result = append(result, template)
+						continue
+					}
+					resolved, resolveErr := resolveTemplate(template.ID, "")
+					if resolveErr == nil {
+						result = append(result, resolved)
+					}
+				}
+				return result, nil
+			},
+		)
+	}
+
+	if b.workspaceStore == nil || b.sessionStore == nil || b.userProvider == nil {
+		return
+	}
+	receipts, err := grouprequirements.NewSQLiteStore(b.sessionStore.DB())
+	if err != nil {
+		logger.Warn("Template group requirement receipts are unavailable", logger.Fields{"error": err.Error()})
+		return
+	}
+	b.groupRequirements = grouprequirements.NewService(b.workspaceStore, receipts)
+	b.sessionHandler.SetGroupRequirementService(b.groupRequirements, b.userProvider.CurrentUserID)
 }
 
 type templateRuntimeCatalog struct {

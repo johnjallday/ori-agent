@@ -26,6 +26,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/skills"
@@ -77,8 +78,10 @@ type Handler struct {
 	planOpener PlanOpener
 
 	// Project-template tool dependencies (optional; see SetProjectTemplateDeps)
-	templatesRootResolver func() string
-	workspaceEventBus     *workspace.EventBus
+	templatesRootResolver   func() string
+	projectTemplateResolver func(string) (projecttemplates.Template, error)
+	projectTemplateCatalog  func() ([]projecttemplates.Template, error)
+	workspaceEventBus       *workspace.EventBus
 
 	// mailboxAccess, when set, enables the read-only Personal HQ mail tools for
 	// authorized agents in chat (see SetMailboxAccess).
@@ -201,6 +204,14 @@ func (h *Handler) SetUserProfileDeps(store userprofile.UserStore, provider userp
 func (h *Handler) SetProjectTemplateDeps(templatesRootResolver func() string, eventBus *workspace.EventBus) {
 	h.templatesRootResolver = templatesRootResolver
 	h.workspaceEventBus = eventBus
+}
+
+// SetProjectTemplateCatalog supplies the same effective built-in/user/plugin/
+// variant resolver used by browser creation. Agent tools never fall back to a
+// similarly named library folder when this owner-aware resolver refuses.
+func (h *Handler) SetProjectTemplateCatalog(resolve func(string) (projecttemplates.Template, error), list func() ([]projecttemplates.Template, error)) {
+	h.projectTemplateResolver = resolve
+	h.projectTemplateCatalog = list
 }
 
 // SetPlanOpener enables chat to start a durable Plan for requests that need

@@ -851,6 +851,56 @@ func (s *FileStore) List() ([]string, error) {
 	return ids, nil
 }
 
+// DeleteReviewedGroupRequirementOperation removes only an incomplete child
+// whose canonical snapshot is bound to the exact reviewed operation and which
+// has no live Assistant Program state. It is for host rollback, not a user
+// lifecycle shortcut.
+func reviewedRollbackHasReciprocalMembership(workspaces map[string]*Workspace, candidate *Workspace) bool {
+	if candidate == nil {
+		return false
+	}
+	provenance := candidate.GetTemplateProvenance()
+	if provenance == nil || provenance.GroupRequirement == nil {
+		return false
+	}
+	home := workspaces[provenance.GroupRequirement.HomeWorkspaceID]
+	if home == nil {
+		return false
+	}
+	state := home.GetAssistantProgramState()
+	return state != nil && containsAssistantProjectID(state.LinkedProjectIDs, candidate.ID)
+}
+
+func (s *FileStore) DeleteReviewedGroupRequirementOperation(id, operationDigest, operationStatus string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	relPath, ok := s.idToPath[id]
+	if !ok {
+		return fmt.Errorf("workspace %s not found", id)
+	}
+	if !reviewedGroupRequirementOperationOwned(s.cache[id], operationDigest, operationStatus) ||
+		protectedAssistantProgramSubtree(s.cache, id) || reviewedRollbackHasReciprocalMembership(s.cache, s.cache[id]) {
+		return ErrGroupRequirementProtected
+	}
+	folderPath := s.resolveFolder(relPath)
+	if s.isInsideRoot(folderPath) {
+		relativeFolder, err := filepath.Rel(s.basePath, folderPath)
+		if err != nil {
+			return fmt.Errorf("resolve reviewed operation workspace folder: %w", err)
+		}
+		root, err := os.OpenRoot(s.basePath)
+		if err != nil {
+			return fmt.Errorf("open workspace root for reviewed rollback: %w", err)
+		}
+		defer func() { _ = root.Close() }()
+		if err := root.RemoveAll(relativeFolder); err != nil {
+			return fmt.Errorf("failed to delete reviewed operation workspace folder: %w", err)
+		}
+	}
+	s.removeFromCacheRecursive(id)
+	return nil
+}
+
 // Delete removes a workspace from storage by deleting the entire folder.
 // This also removes all sub-workspaces (cascading delete).
 // Safety: only deletes folders that are inside the workspace root.
@@ -865,6 +915,9 @@ func (s *FileStore) Delete(id string) error {
 	}
 	if protectedAssistantProgramSubtree(s.cache, id) {
 		return ErrAssistantProgramProtected
+	}
+	if requiredGroupRequirementSubtree(s.cache, id) {
+		return ErrGroupRequirementProtected
 	}
 
 	folderPath := s.resolveFolder(relPath)
@@ -903,6 +956,9 @@ func (s *FileStore) Trash(id string) (originalPath string, trashedPath string, e
 	}
 	if protectedAssistantProgramSubtree(s.cache, id) {
 		return "", "", ErrAssistantProgramProtected
+	}
+	if requiredGroupRequirementSubtree(s.cache, id) {
+		return "", "", ErrGroupRequirementProtected
 	}
 
 	folderPath := s.resolveFolder(relPath)
@@ -2361,6 +2417,9 @@ func (s *InMemoryStore) Delete(id string) error {
 	if protectedAssistantProgramSubtree(s.workspaces, id) {
 		return ErrAssistantProgramProtected
 	}
+	if requiredGroupRequirementSubtree(s.workspaces, id) {
+		return ErrGroupRequirementProtected
+	}
 
 	delete(s.workspaces, id)
 	for slug, workspaceID := range s.slugToID {
@@ -2389,6 +2448,28 @@ func protectedAssistantProgramSubtree(workspaces map[string]*Workspace, rootID s
 		}
 	}
 	return false
+}
+
+// DeleteReviewedGroupRequirementOperation removes an exact operation-owned
+// incomplete child while retaining ordinary Required lifecycle protection.
+func (s *InMemoryStore) DeleteReviewedGroupRequirementOperation(id, operationDigest, operationStatus string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	candidate, ok := s.workspaces[id]
+	if !ok {
+		return fmt.Errorf("workspace %s not found", id)
+	}
+	if !reviewedGroupRequirementOperationOwned(candidate, operationDigest, operationStatus) ||
+		protectedAssistantProgramSubtree(s.workspaces, id) || reviewedRollbackHasReciprocalMembership(s.workspaces, candidate) {
+		return ErrGroupRequirementProtected
+	}
+	delete(s.workspaces, id)
+	for slug, workspaceID := range s.slugToID {
+		if workspaceID == id {
+			delete(s.slugToID, slug)
+		}
+	}
+	return nil
 }
 
 // ListActive returns all active workspaces

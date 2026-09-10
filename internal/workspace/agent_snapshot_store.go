@@ -46,8 +46,31 @@ func (s *AgentSnapshotStore) GetFolderWorkspace(id string) (*Workspace, error) {
 	return nil, fmt.Errorf("wrapped store does not support GetFolderWorkspace")
 }
 
+// MoveWorkspaceFolder preserves the topology owner's physical move through the
+// decorator. Falling back to an ordinary Save after ParentID changes can create
+// a second folder instead of relocating the canonical workspace.
+func (s *AgentSnapshotStore) MoveWorkspaceFolder(id, newParentID string) ([]MovedWorkspace, error) {
+	mover, ok := s.Store.(interface {
+		MoveWorkspaceFolder(string, string) ([]MovedWorkspace, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("wrapped store does not support MoveWorkspaceFolder")
+	}
+	return mover.MoveWorkspaceFolder(id, newParentID)
+}
+
 // ResolveSlug preserves the optional canonical-slug resolver through this
 // decorator. No ID fallback is permitted when the wrapped store lacks it.
+func (s *AgentSnapshotStore) DeleteReviewedGroupRequirementOperation(id, operationDigest, operationStatus string) error {
+	deleter, ok := s.Store.(interface {
+		DeleteReviewedGroupRequirementOperation(string, string, string) error
+	})
+	if !ok {
+		return ErrGroupRequirementProtected
+	}
+	return deleter.DeleteReviewedGroupRequirementOperation(id, operationDigest, operationStatus)
+}
+
 func (s *AgentSnapshotStore) ResolveSlug(slug string) (*Workspace, error) {
 	resolver, ok := s.Store.(SlugResolver)
 	if !ok {

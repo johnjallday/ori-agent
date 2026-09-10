@@ -42,6 +42,7 @@ const sessionManager = {
   // Create-workspace "Starting point" template currently picked in the modal.
   // Populated when the modal opens (defaults to the first/Blank template).
   workspaceTemplate: null,
+  groupRequirementDraft: null,
   templateAgentPlan: null,
   templateAgentPlanError: '',
   templateAgentPlanRequestId: 0,
@@ -341,6 +342,7 @@ const sessionManager = {
     // Enter to advance, or to create once the wizard is on Review.
     const workspaceNameInput = document.getElementById('folderNameInput');
     workspaceNameInput?.addEventListener('input', () => {
+      this.invalidateGroupRequirementReview();
       this.clearWorkspaceNameError();
       this.updateWorkspaceNameHint();
       // The final CTA names the workspace, so it tracks the name as it is typed.
@@ -372,6 +374,7 @@ const sessionManager = {
         const template = event?.detail?.template || null;
         this.closeWorkspaceAgentSetup({ restoreFocus: false, silent: true });
         this.workspaceTemplate = template;
+        this.resetGroupRequirementDraft(template);
         this.prefillTemplateValue(
           document.getElementById('folderNameInput'),
           template?.name || '',
@@ -504,6 +507,10 @@ const sessionManager = {
       const edit = event.target.closest('[data-wizard-edit-step]');
       if (edit) this.goToWizardStep(Number(edit.dataset.wizardEditStep));
     });
+    document.getElementById('workspaceReviewSummary')?.addEventListener('change', event => {
+      const choice = event.target.closest('[name="workspace-group-composition"]');
+      if (choice) this.setGroupRequirementComposition(choice.value);
+    });
 
     document.getElementById('projectTemplatePathInput')?.addEventListener('input', () => {
       this.scheduleTemplateAgentPlanRefresh();
@@ -577,6 +584,7 @@ const sessionManager = {
     // Group/Color/Tags live inside the Advanced disclosure now; refresh the
     // collapsed summary hint when they change or when Advanced is toggled shut.
     document.getElementById('folderParentSelect')?.addEventListener('change', () => {
+      this.invalidateGroupRequirementReview();
       this.updateBehaviorHint();
     });
     document.getElementById('folderAdvancedDisclosure')?.addEventListener('toggle', () => {
@@ -3840,6 +3848,7 @@ const sessionManager = {
     // any auto-filled name/description. A safety hint update covers the case
     // where the picker module has not loaded yet.
     this.workspaceTemplate = null;
+    this.groupRequirementDraft = null;
     window.ProjectTemplateCard?.reset?.();
     this.resetTemplateAgentReview();
     this.resetExistingAgentTeam();
@@ -3916,6 +3925,64 @@ const sessionManager = {
     }, 180);
   },
 
+  resetGroupRequirementDraft(template) {
+    const requirement = template?.group_requirement || null;
+    if (!requirement) {
+      this.groupRequirementDraft = null;
+      this.syncGroupRequirementParentControl();
+      return;
+    }
+    const policy = String(requirement.policy || '');
+    this.groupRequirementDraft = {
+      policy,
+      composition: policy === 'none' ? 'standalone' : policy === 'required' ? 'grouped' : '',
+      review: null,
+      createHome: false
+    };
+    this.syncGroupRequirementParentControl();
+  },
+
+  invalidateGroupRequirementReview() {
+    if (!this.groupRequirementDraft?.review) return;
+    this.groupRequirementDraft.review = null;
+    this.refreshWorkspaceCreateCta();
+  },
+
+  setGroupRequirementComposition(composition) {
+    if (!this.groupRequirementDraft) return;
+    const normalized = composition === 'grouped' || composition === 'standalone' ? composition : '';
+    if (this.groupRequirementDraft.policy === 'required' && normalized !== 'grouped') return;
+    if (this.groupRequirementDraft.policy === 'none' && normalized !== 'standalone') return;
+    if (this.groupRequirementDraft.composition === normalized) return;
+    this.groupRequirementDraft.composition = normalized;
+    this.groupRequirementDraft.review = null;
+    this.groupRequirementDraft.createHome = false;
+    this.syncGroupRequirementParentControl();
+    // Team and placement are one reviewed composition. A standalone choice
+    // replaces scoped program roles with project-local agents, so no stale team
+    // draft or agent receipt may survive this change.
+    this.discardWorkspaceTeamDraft();
+    void this.refreshTemplateAgentPlan();
+    this.refreshWorkspaceReview();
+    this.refreshWizardChrome();
+  },
+
+  syncGroupRequirementParentControl() {
+    if (window.SetupWorkspaceCreator?.isActive()) return;
+    const parent = document.getElementById('folderParentSelect');
+    if (!parent) return;
+    const grouped = this.groupRequirementDraft?.composition === 'grouped';
+    if (grouped) parent.value = '';
+    parent.disabled = grouped || parent.options.length <= 1;
+  },
+
+  groupRequirementBlocked() {
+    return Boolean(
+      this.groupRequirementDraft?.policy === 'recommended' &&
+      !this.groupRequirementDraft.composition
+    );
+  },
+
   // Stable identity for the currently selected blueprint. The draft compares it
   // to decide whether staged overrides belong to the blueprint still on screen:
   // a change discards them (FR21), while a retry of the same blueprint keeps them.
@@ -3958,7 +4025,8 @@ const sessionManager = {
         body: JSON.stringify({
           template_id: templateId || undefined,
           template_path: templatePath || undefined,
-          blank: isBlank || undefined
+          blank: isBlank || undefined,
+          group_composition: this.groupRequirementDraft?.composition || undefined
         })
       });
       const data = await response.json().catch(() => ({}));
@@ -5562,6 +5630,7 @@ const sessionManager = {
   },
 
   refreshWorkspaceReview() {
+    this.syncGroupRequirementParentControl();
     const summary = document.getElementById('workspaceReviewSummary');
     const heading = document.getElementById('workspaceTeamHeading');
     const teamSummary = document.getElementById('workspaceTeamSummary');
@@ -5641,7 +5710,53 @@ const sessionManager = {
       </div>`
       : '';
 
-    return identity + details + this.renderWorkspaceReceiptTeam(view);
+    return (
+      identity +
+      details +
+      this.renderWorkspaceGroupRequirementReceipt(selectedTemplate) +
+      this.renderWorkspaceReceiptTeam(view)
+    );
+  },
+
+  renderWorkspaceGroupRequirementReceipt(template) {
+    const requirement = template?.group_requirement;
+    const draft = this.groupRequirementDraft;
+    if (!requirement || !draft) return '';
+    const homeName = String(
+      draft.review?.home_name || requirement.default_home_name || 'the canonical Home'
+    );
+    const reviewedStatus = draft.review?.review_token
+      ? draft.review.home_will_be_created
+        ? 'Reviewed: this Home will be created first.'
+        : draft.review.selected_composition === 'grouped'
+          ? 'Reviewed: this exact existing Home will be reused.'
+          : 'Reviewed: no Home will be created or linked.'
+      : 'Destination review is prepared when you continue with Create.';
+    if (draft.policy === 'recommended') {
+      return `
+        <fieldset class="workspace-review-card workspace-group-placement-review">
+          <legend class="workspace-review-card-label">Project placement</legend>
+          <label>
+            <input type="radio" name="workspace-group-composition" value="grouped" ${draft.composition === 'grouped' ? 'checked' : ''}>
+            Grouped in ${this.escapeHtml(homeName)}
+          </label>
+          <span class="workspace-review-card-note">Uses the exact owner-resolved Home. If it is missing, creation is reviewed separately. ${this.escapeHtml(draft.composition === 'grouped' ? reviewedStatus : '')}</span>
+          <label>
+            <input type="radio" name="workspace-group-composition" value="standalone" ${draft.composition === 'standalone' ? 'checked' : ''}>
+            Standalone project
+          </label>
+          <span class="workspace-review-card-note">Creates no Home membership and keeps only the declared project-local composition. ${this.escapeHtml(draft.composition === 'standalone' ? reviewedStatus : '')}</span>
+        </fieldset>`;
+    }
+    const grouped = draft.composition === 'grouped';
+    return `
+      <div class="workspace-review-card workspace-group-placement-review">
+        <div class="workspace-review-card-main">
+          <span class="workspace-review-card-label">Project placement</span>
+          <strong>${grouped ? `Required group: ${this.escapeHtml(homeName)}` : 'Standalone — no Home membership'}</strong>
+          <span class="workspace-review-card-note">${grouped ? 'Ori resolves the exact canonical Home and establishes reciprocal membership before project work can start.' : 'Ordinary parent selection remains organizational and grants no Assistant Program membership.'} ${this.escapeHtml(reviewedStatus)}</span>
+        </div>
+      </div>`;
   },
 
   // Names who owns the selected blueprint and, where one is tracked, its
@@ -6298,6 +6413,7 @@ const sessionManager = {
           !importMode &&
           (this.hasBlockingTeamIssue() ||
             this.blueprintSelectionBlocked() ||
+            this.groupRequirementBlocked() ||
             window.SetupWorkspaceCreator?.canSubmit() === false);
       }
     }
@@ -6342,7 +6458,71 @@ const sessionManager = {
   workspaceCreateCtaLabel() {
     if (window.SetupWorkspaceCreator?.hasPending()) return 'Retry Confirmed Change';
     const name = String(document.getElementById('folderNameInput')?.value || '').trim();
+    if (this.groupRequirementDraft?.review?.review_token) {
+      return name ? `Confirm create “${name}”` : 'Confirm reviewed creation';
+    }
     return name ? `Create “${name}”` : 'Create Workspace';
+  },
+
+  async prepareGroupRequirementCommit(endpoint, payload) {
+    const draft = this.groupRequirementDraft;
+    if (!draft || window.SetupWorkspaceCreator?.isActive()) return true;
+    payload.group_composition = draft.composition;
+    if (draft.createHome) payload.create_required_home = true;
+    const payloadKey = JSON.stringify(payload);
+    if (draft.review?.payloadKey === payloadKey && draft.review.review_token) {
+      payload.group_review_token = draft.review.review_token;
+      payload.idempotency_key = draft.review.idempotencyKey;
+      return true;
+    }
+
+    const requestReview = async () => {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, group_requirement_review: true })
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || body.error) throw new Error(body.error || 'Placement review failed.');
+      return body.group_requirement_review || {};
+    };
+
+    let review = await requestReview();
+    if (review.state === 'home_creation_review_required') {
+      const confirmed = window.confirm(
+        `Create the canonical group “${String(review.home_name || 'Assistant Program Home')}” before this workspace?\n\nThe review creates nothing. Confirming here prepares the final placement receipt; the workspace is created only after you review and click Create again.`
+      );
+      if (!confirmed) return false;
+      draft.createHome = true;
+      payload.create_required_home = true;
+      review = await requestReview();
+    }
+    if (review.state !== 'ready_grouped' && review.state !== 'ready_standalone') {
+      const actions = Array.isArray(review.actions) ? review.actions.join(', ') : '';
+      this.showWorkspaceCreateError(
+        `${String(review.summary || 'This placement is not ready.')}${actions ? ` Available actions: ${actions}.` : ''}`
+      );
+      return false;
+    }
+    if (!review.review_token) throw new Error('The placement receipt is unavailable.');
+    draft.review = {
+      ...review,
+      payloadKey: JSON.stringify(payload),
+      idempotencyKey: crypto.randomUUID()
+    };
+    this.refreshWorkspaceReview();
+    this.refreshWizardChrome();
+    const readiness = document.getElementById('workspaceReviewReadiness');
+    if (readiness) {
+      readiness.hidden = false;
+      readiness.textContent = review.home_will_be_created
+        ? `Reviewed: create “${review.home_name}”, then create the workspace inside it. Click Confirm create to apply.`
+        : review.selected_composition === 'grouped'
+          ? `Reviewed destination: ${review.home_name}. Click Confirm create to apply.`
+          : 'Reviewed destination: standalone, with no Home membership. Click Confirm create to apply.';
+      readiness.focus?.();
+    }
+    return false;
   },
 
   // Keeps the create button's label in step with the workspace name without
@@ -6831,6 +7011,15 @@ const sessionManager = {
         }
       }
 
+      if (!importEnabled && this.groupRequirementDraft) {
+        if (this.groupRequirementBlocked()) {
+          this.showWorkspaceCreateError('Choose grouped or standalone placement before creating.');
+          return;
+        }
+        const readyToCommit = await this.prepareGroupRequirementCommit(endpoint, payload);
+        if (!readyToCommit) return;
+      }
+
       const requestPayload = { ...payload };
       let response;
       let result = {};
@@ -6964,6 +7153,17 @@ const sessionManager = {
             `${failureName || 'Agent'} creation failed. Nothing was created; setup was preserved for retry.`
           );
           document.getElementById(`team-agent-retry-${failureIndex}`)?.focus();
+          return;
+        }
+
+        if (response.status === 409 && !importEnabled && result.group_requirement) {
+          if (this.groupRequirementDraft) this.groupRequirementDraft.review = null;
+          this.refreshWorkspaceReview();
+          this.showWorkspaceCreateError(
+            result.group_requirement.summary ||
+              result.error ||
+              'Review the workspace placement again.'
+          );
           return;
         }
 

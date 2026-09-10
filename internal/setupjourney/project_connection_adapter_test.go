@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	"github.com/johnjallday/ori-agent/internal/pathselection"
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
@@ -51,7 +53,9 @@ func setupJourneyProjectAdapter(t *testing.T) (*ProjectConnectionAdapter, *paths
 			Reflection: workspace.AssistantReflectionConfig{MinimumProjects: 2, CadenceHours: 24, MaxProjects: 4, MaxEventsPerProject: 4, MaxCandidates: 2, MaxEvidence: 2, Rubric: "Review."},
 		},
 	}
-	return NewProjectConnectionAdapter(projectconnection.NewService(store, selections), staticProjectTemplateResolver{template}), selections
+	owner := projectconnection.NewService(store, selections)
+	owner.SetGroupRequirementService(grouprequirements.NewService(store, grouprequirements.NewMemoryStore()))
+	return NewProjectConnectionAdapter(owner, staticProjectTemplateResolver{template}), selections
 }
 
 func TestProjectConnectionAdapterReviewsCommitsAndReconcilesExactSelection(t *testing.T) {
@@ -90,6 +94,45 @@ func TestProjectConnectionAdapterReviewsCommitsAndReconcilesExactSelection(t *te
 	observed, err := adapter.Read(context.Background(), scope)
 	if err != nil || !observed.Complete || !adapter.ConsequenceObserved(ActionConnectExistingProject, observed) {
 		t.Fatalf("observed = %+v err=%v", observed, err)
+	}
+}
+
+func TestProjectConnectionAdapterReviewsAndCommitsRecommendedStandalone(t *testing.T) {
+	adapter, _ := setupJourneyProjectAdapter(t)
+	resolver := adapter.templates.(staticProjectTemplateResolver)
+	resolver.template.Revision = strings.Repeat("a", 64)
+	resolver.template.GroupRequirement = &projecttemplates.GroupRequirement{
+		SchemaVersion: projecttemplates.GroupRequirementSchemaVersion, Policy: projecttemplates.GroupPolicyRecommended,
+		AssistantProgramID: resolver.template.AssistantProgram.ID, MissingHome: projecttemplates.MissingHomeOfferCreate,
+		DefaultHomeName: resolver.template.AssistantProgram.StationName,
+	}
+	resolver.template.StandaloneComposition = &projecttemplates.StandaloneComposition{
+		SchemaVersion: projecttemplates.StandaloneCompositionSchemaVersion,
+		ProjectRoles:  []projecttemplates.StandaloneRole{{RoleID: "project", SystemPrompt: "Work only in this project."}},
+	}
+	adapter.templates = resolver
+	scope := ReadScope{OwnerUserID: "owner-1", RunKind: RunKindRoot, RunID: "standalone-journey", WorkspaceLaunch: true}
+	raw := json.RawMessage(`{"mode_id":"new_project","workspace_name":"Standalone","project_name":"Standalone","group_composition":"standalone"}`)
+	material, err := adapter.Review(context.Background(), scope, ActionReviewNewProject, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection := material.ProjectConnection
+	if projection == nil || projection.GroupRequirementState != string(grouprequirements.StateReadyStandalone) ||
+		projection.GroupComposition != grouprequirements.CompositionStandalone || projection.HomeWillBeCreated || projection.ParentWorkspaceName != "" {
+		t.Fatalf("standalone review = %#v", material)
+	}
+	result, err := adapter.Commit(context.Background(), scope, ActionCreateNewProject, raw, material)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.HomeWorkspaceID != "" || result.ProjectWorkspaceID == "" {
+		t.Fatalf("standalone result = %#v", result)
+	}
+	scope.ProjectWorkspaceID = result.ProjectWorkspaceID
+	observed, err := adapter.Read(context.Background(), scope)
+	if err != nil || !observed.Complete || observed.Result.HomeWorkspaceID != "" || !adapter.ConsequenceObserved(ActionCreateNewProject, observed) {
+		t.Fatalf("standalone observation = %#v err=%v", observed, err)
 	}
 }
 

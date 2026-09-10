@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
@@ -34,6 +35,8 @@ type Handler struct {
 	workspaceRootResolver     func() string
 	templatesRootResolver     func() string // resolves the project templates library directory
 	projectTemplateResolver   func(templateID, templatePath string) (projecttemplates.Template, error)
+	groupRequirements         *grouprequirements.Service
+	currentUserID             func(context.Context) (string, error)
 	templateCapabilityService *workspacecapability.Service
 	installedPluginLister     installedPluginLister
 	assistantReflectionModel  workspace.AssistantReflectionModel
@@ -188,6 +191,14 @@ func (h *Handler) SetTemplatesRootResolver(fn func() string) {
 // blueprint catalog. Minimal/test handlers retain the legacy library resolver.
 func (h *Handler) SetProjectTemplateResolver(fn func(templateID, templatePath string) (projecttemplates.Template, error)) {
 	h.projectTemplateResolver = fn
+}
+
+// SetGroupRequirementService wires the host-owned placement evaluator and the
+// current-user resolver. Both are required for a policy-bearing template;
+// missing ownership fails closed instead of falling back to "local".
+func (h *Handler) SetGroupRequirementService(service *grouprequirements.Service, currentUserID func(context.Context) (string, error)) {
+	h.groupRequirements = service
+	h.currentUserID = currentUserID
 }
 
 // SetAssistantReflectionModel injects the structured, read-only model path used

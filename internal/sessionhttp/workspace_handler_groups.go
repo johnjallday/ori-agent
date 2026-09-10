@@ -53,6 +53,15 @@ func handleWorkspaceMoveError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.As(err, &slugConflict):
 		_ = orihttp.RespondConflict(w, "A workspace with the same folder name already exists in the destination group. Rename one of them and try again.")
+	case errors.Is(err, agentworkspace.ErrGroupRequirementProtected):
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"error": "This Required template contract needs an explicit reconnect or standalone transition review before regrouping.",
+			"group_requirement": map[string]any{
+				"state": "group_requirement_unfulfilled", "actions": []string{"open_guided_setup", "reconnect_project", "recreate_workspace"},
+			},
+		})
+	case errors.Is(err, agentworkspace.ErrAssistantProgramProtected):
+		_ = orihttp.RespondConflict(w, "Assistant Program membership must be reviewed before regrouping this workspace.")
 	case errors.Is(err, agentworkspace.ErrMaxNestingDepthExceeded),
 		errors.Is(err, agentworkspace.ErrMoveCreatesCycle),
 		errors.Is(err, agentworkspace.ErrSelfParent):

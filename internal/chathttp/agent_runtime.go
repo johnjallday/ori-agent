@@ -154,6 +154,7 @@ func (h *Handler) attachWorkspaceTools(ag *resolvedChatAgent, agentName string, 
 	if h.templatesRootResolver != nil {
 		wtp.SetProjectTemplateDeps(h.templatesRootResolver, h.workspaceEventBus)
 	}
+	wtp.SetProjectTemplateCatalog(h.projectTemplateResolver, h.projectTemplateCatalog)
 	if taskID := strings.TrimSpace(routeCtx.TaskID); taskID != "" {
 		wtp.SetTaskID(taskID)
 	}

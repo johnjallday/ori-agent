@@ -22,6 +22,11 @@ func (p *WorkspaceToolProvider) SetProjectTemplateDeps(templatesRootResolver fun
 	p.projectEventBus = eventBus
 }
 
+func (p *WorkspaceToolProvider) SetProjectTemplateCatalog(resolve func(string) (projecttemplates.Template, error), list func() ([]projecttemplates.Template, error)) {
+	p.projectTemplateResolver = resolve
+	p.projectTemplateCatalog = list
+}
+
 // --- workspace_project_templates (read) ---
 
 func (p *WorkspaceToolProvider) projectTemplatesTool() toolapi.Tool {
@@ -35,18 +40,26 @@ func (p *WorkspaceToolProvider) projectTemplatesTool() toolapi.Tool {
 			},
 		},
 		call: func(ctx context.Context, args string) (string, error) {
-			templates, err := projecttemplates.ListLibrary(p.templatesRootResolver())
+			var templates []projecttemplates.Template
+			var err error
+			if p.projectTemplateCatalog != nil {
+				templates, err = p.projectTemplateCatalog()
+			} else {
+				templates, err = projecttemplates.ListLibrary(p.templatesRootResolver())
+			}
 			if err != nil {
 				return "", fmt.Errorf("failed to read templates library: %w", err)
 			}
 			items := make([]map[string]any, 0, len(templates))
 			for _, tpl := range templates {
-				items = append(items, map[string]any{
-					"id":          tpl.ID,
-					"name":        tpl.Name,
-					"description": tpl.Description,
-					"tags":        tpl.Tags,
-				})
+				item := map[string]any{
+					"id": tpl.ID, "name": tpl.Name, "description": tpl.Description, "tags": tpl.Tags,
+				}
+				if tpl.GroupRequirement != nil {
+					item["group_policy"] = tpl.GroupRequirement.Policy
+					item["create_route"] = "guided_create"
+				}
+				items = append(items, item)
 			}
 			message := fmt.Sprintf("%d project template(s) available.", len(items))
 			if len(items) == 0 {
@@ -116,9 +129,20 @@ func (p *WorkspaceToolProvider) createProjectTool() toolapi.Tool {
 				return "", fmt.Errorf("workspace folder is unavailable: %w", err)
 			}
 
-			tpl, err := projecttemplates.FindLibraryTemplate(p.templatesRootResolver(), req.TemplateID)
+			var tpl projecttemplates.Template
+			if p.projectTemplateResolver != nil {
+				tpl, err = p.projectTemplateResolver(req.TemplateID)
+			} else {
+				tpl, err = projecttemplates.FindLibraryTemplate(p.templatesRootResolver(), req.TemplateID)
+			}
 			if err != nil {
-				available, listErr := projecttemplates.ListLibrary(p.templatesRootResolver())
+				var available []projecttemplates.Template
+				var listErr error
+				if p.projectTemplateCatalog != nil {
+					available, listErr = p.projectTemplateCatalog()
+				} else {
+					available, listErr = projecttemplates.ListLibrary(p.templatesRootResolver())
+				}
 				if listErr == nil && len(available) > 0 {
 					ids := make([]string, 0, len(available))
 					for _, t := range available {
@@ -127,6 +151,14 @@ func (p *WorkspaceToolProvider) createProjectTool() toolapi.Tool {
 					return "", fmt.Errorf("unknown template %q; available templates: %s", req.TemplateID, strings.Join(ids, ", "))
 				}
 				return "", err
+			}
+
+			if tpl.GroupRequirement != nil {
+				return marshalToolResponse(map[string]any{
+					"status": "guided_create_required", "reason": "review_stale",
+					"actions": []string{"open_guided_setup"},
+					"message": "This template requires a reviewed placement choice. Open the supported Create or Connect flow; no project or group was changed.",
+				})
 			}
 
 			projectName := strings.TrimSpace(req.Name)

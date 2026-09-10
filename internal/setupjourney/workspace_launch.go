@@ -25,10 +25,32 @@ func cloneHomePreparation(source *projectconnection.HomePreparation) *projectcon
 		return nil
 	}
 	copy := *source
+	copy.AvailableCompositions = append([]string(nil), source.AvailableCompositions...)
 	return &copy
 }
 func validHomePreparation(value *projectconnection.HomePreparation) bool {
-	return value == nil || (len(value.Name) > 0 && len(value.Name) <= 128 && len(value.TemplateID) > 0 && len(value.TemplateID) <= 256 && validateCanonicalRef(value.HomeID, true))
+	if value == nil {
+		return true
+	}
+	if len(value.Name) == 0 || len(value.Name) > 128 || len(value.TemplateID) == 0 || len(value.TemplateID) > 256 || !validateCanonicalRef(value.HomeID, true) {
+		return false
+	}
+	if value.GroupPolicy == "" {
+		return len(value.AvailableCompositions) == 0
+	}
+	expected := map[string][]string{
+		"none": {"standalone"}, "recommended": {"grouped", "standalone"}, "required": {"grouped"},
+	}
+	want, ok := expected[value.GroupPolicy]
+	if !ok || len(want) != len(value.AvailableCompositions) {
+		return false
+	}
+	for index := range want {
+		if value.AvailableCompositions[index] != want[index] {
+			return false
+		}
+	}
+	return true
 }
 func isPreparationAction(action ActionID) bool {
 	return action == ActionReviewCreateGroup || action == ActionCreateGroup || action == ActionAcknowledgePreparation

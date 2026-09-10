@@ -19,6 +19,7 @@ import (
 	"unicode"
 
 	"github.com/google/uuid"
+	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -47,11 +48,16 @@ type folderStore interface {
 type Service struct {
 	store      folderStore
 	selections SelectionResolver
+	grouping   *grouprequirements.Service
 	now        func() time.Time
 }
 
 func NewService(store folderStore, selections SelectionResolver) *Service {
 	return &Service{store: store, selections: selections, now: func() time.Time { return time.Now().UTC() }}
+}
+
+func (s *Service) SetGroupRequirementService(service *grouprequirements.Service) {
+	s.grouping = service
 }
 
 type Scope struct {
@@ -61,24 +67,27 @@ type Scope struct {
 }
 
 type Request struct {
-	ModeID         projecttemplates.ProjectConnectionMode `json:"mode_id"`
-	SelectionToken string                                 `json:"selection_token,omitempty"`
-	EntryName      string                                 `json:"entry_name,omitempty"`
-	WorkspaceName  string                                 `json:"workspace_name"`
-	ProjectName    string                                 `json:"project_name,omitempty"`
+	ModeID           projecttemplates.ProjectConnectionMode `json:"mode_id"`
+	SelectionToken   string                                 `json:"selection_token,omitempty"`
+	EntryName        string                                 `json:"entry_name,omitempty"`
+	WorkspaceName    string                                 `json:"workspace_name"`
+	ProjectName      string                                 `json:"project_name,omitempty"`
+	GroupComposition string                                 `json:"group_composition,omitempty"`
 }
 
 type Projection struct {
-	ModeID              projecttemplates.ProjectConnectionMode `json:"mode_id"`
-	WorkspaceName       string                                 `json:"workspace_name"`
-	ProjectName         string                                 `json:"project_name,omitempty"`
-	ParentWorkspaceName string                                 `json:"parent_workspace_name"`
-	HomeWillBeCreated   bool                                   `json:"home_will_be_created"`
-	SelectedFolder      string                                 `json:"selected_folder,omitempty"`
-	EntryName           string                                 `json:"entry_name"`
-	EntryCandidates     []string                               `json:"entry_candidates,omitempty"`
-	CreatedFiles        []string                               `json:"created_files,omitempty"`
-	DefaultsStatement   string                                 `json:"defaults_statement,omitempty"`
+	ModeID                projecttemplates.ProjectConnectionMode `json:"mode_id"`
+	WorkspaceName         string                                 `json:"workspace_name"`
+	ProjectName           string                                 `json:"project_name,omitempty"`
+	ParentWorkspaceName   string                                 `json:"parent_workspace_name"`
+	HomeWillBeCreated     bool                                   `json:"home_will_be_created"`
+	SelectedFolder        string                                 `json:"selected_folder,omitempty"`
+	EntryName             string                                 `json:"entry_name"`
+	EntryCandidates       []string                               `json:"entry_candidates,omitempty"`
+	CreatedFiles          []string                               `json:"created_files,omitempty"`
+	DefaultsStatement     string                                 `json:"defaults_statement,omitempty"`
+	GroupRequirementState string                                 `json:"group_requirement_state,omitempty"`
+	GroupComposition      string                                 `json:"group_composition,omitempty"`
 }
 
 type Preview struct {
@@ -100,6 +109,7 @@ func NormalizeRequest(request Request) Request {
 	request.WorkspaceName = strings.TrimSpace(request.WorkspaceName)
 	request.ProjectName = strings.TrimSpace(request.ProjectName)
 	request.EntryName = strings.TrimSpace(request.EntryName)
+	request.GroupComposition = strings.ToLower(strings.TrimSpace(request.GroupComposition))
 	return request
 }
 
@@ -109,7 +119,7 @@ func InputDigest(request Request) (string, error) {
 
 func (s *Service) Preview(_ context.Context, scope Scope, request Request) (Preview, error) {
 	if s == nil || s.store == nil || scope.Template.ProjectConnection == nil ||
-		scope.Template.AssistantProgram == nil || strings.TrimSpace(scope.OwnerUserID) == "" || strings.TrimSpace(scope.RunID) == "" {
+		strings.TrimSpace(scope.OwnerUserID) == "" || strings.TrimSpace(scope.RunID) == "" {
 		return Preview{}, ErrUnavailable
 	}
 	request = NormalizeRequest(request)
@@ -120,21 +130,54 @@ func (s *Service) Preview(_ context.Context, scope Scope, request Request) (Prev
 	if err != nil {
 		return Preview{}, ErrInvalid
 	}
-	key, keyErr := homeKey(scope)
-	if keyErr != nil {
-		return Preview{}, ErrUnavailable
-	}
-	station, stationErr := workspace.NewAssistantProgramStore(s.store).FindStation(key)
-	if stationErr != nil && !errors.Is(stationErr, workspace.ErrAssistantStationNotFound) {
-		return Preview{}, ErrUnavailable
-	}
 	preview := Preview{InputDigest: inputDigest, Projection: Projection{
 		ModeID: request.ModeID, WorkspaceName: request.WorkspaceName, ProjectName: request.ProjectName,
-		ParentWorkspaceName: scope.Template.AssistantProgram.StationName,
-		HomeWillBeCreated:   errors.Is(stationErr, workspace.ErrAssistantStationNotFound),
 	}}
-	if stationErr == nil && station != nil {
-		preview.Projection.ParentWorkspaceName = station.Name
+	groupOwnerDigest := ""
+	if scope.Template.GroupRequirement != nil {
+		if s.grouping == nil {
+			return Preview{}, ErrUnavailable
+		}
+		operationKind := grouprequirements.OperationConnectProject
+		if request.ModeID == projecttemplates.ProjectConnectionNewProject {
+			operationKind = grouprequirements.OperationCreateProject
+		}
+		evaluation := s.grouping.Evaluate(grouprequirements.Input{
+			OwnerUserID: scope.OwnerUserID, OperationKind: operationKind, Template: scope.Template,
+			Composition: request.GroupComposition, InputDigest: inputDigest,
+		})
+		preview.Projection.GroupRequirementState = string(evaluation.State)
+		preview.Projection.GroupComposition = evaluation.SelectedComposition
+		switch evaluation.State {
+		case grouprequirements.StateReadyStandalone:
+			scope.Template = evaluation.EffectiveTemplate
+		case grouprequirements.StateReadyGrouped:
+			preview.Projection.ParentWorkspaceName = evaluation.HomeName
+			preview.Projection.HomeWillBeCreated = evaluation.HomeWillBeCreated
+		default:
+			if evaluation.State == grouprequirements.StateSourceUnavailable || evaluation.State == grouprequirements.StateTargetAmbiguous {
+				return Preview{}, ErrUnavailable
+			}
+			return Preview{}, ErrChanged
+		}
+		groupOwnerDigest = digestStrings(evaluation.DefinitionDigest, string(evaluation.State), evaluation.SelectedComposition, evaluation.HomeWorkspaceID)
+	} else {
+		if scope.Template.AssistantProgram == nil {
+			return Preview{}, ErrUnavailable
+		}
+		key, keyErr := homeKey(scope)
+		if keyErr != nil {
+			return Preview{}, ErrUnavailable
+		}
+		station, stationErr := workspace.NewAssistantProgramStore(s.store).FindStation(key)
+		if stationErr != nil && !errors.Is(stationErr, workspace.ErrAssistantStationNotFound) {
+			return Preview{}, ErrUnavailable
+		}
+		preview.Projection.ParentWorkspaceName = scope.Template.AssistantProgram.StationName
+		preview.Projection.HomeWillBeCreated = errors.Is(stationErr, workspace.ErrAssistantStationNotFound)
+		if stationErr == nil && station != nil {
+			preview.Projection.ParentWorkspaceName = station.Name
+		}
 	}
 	switch request.ModeID {
 	case projecttemplates.ProjectConnectionExistingProject:
@@ -161,7 +204,7 @@ func (s *Service) Preview(_ context.Context, scope Scope, request Request) (Prev
 		preview.Projection.SelectedFolder = root
 		preview.Projection.EntryName = entry
 		preview.Projection.EntryCandidates = append([]string(nil), candidates...)
-		preview.OwnerDigest = digestStrings(templateIdentity(scope.Template), scanDigest, entry)
+		preview.OwnerDigest = digestStrings(templateIdentity(scope.Template), groupOwnerDigest, scanDigest, entry)
 	case projecttemplates.ProjectConnectionNewProject:
 		if strings.TrimSpace(request.SelectionToken) != "" || request.EntryName != "" || !validDisplayName(request.ProjectName) || !scope.Template.HasSkeleton {
 			return Preview{}, ErrInvalid
@@ -178,7 +221,7 @@ func (s *Service) Preview(_ context.Context, scope Scope, request Request) (Prev
 		preview.Projection.EntryName = entry
 		preview.Projection.CreatedFiles = append([]string(nil), files...)
 		preview.Projection.DefaultsStatement = "The starter project file begins with the blueprint's documented defaults. The project application is not opened by creation."
-		preview.OwnerDigest = digestStrings(templateIdentity(scope.Template), request.ProjectName, entry, strings.Join(files, "\x00"))
+		preview.OwnerDigest = digestStrings(templateIdentity(scope.Template), groupOwnerDigest, request.ProjectName, entry, strings.Join(files, "\x00"))
 	default:
 		return Preview{}, ErrInvalid
 	}
@@ -188,6 +231,7 @@ func (s *Service) Preview(_ context.Context, scope Scope, request Request) (Prev
 func (s *Service) Commit(ctx context.Context, scope Scope, request Request, reviewedInputDigest, reviewedOwnerDigest string) (CommitResult, error) {
 	connectionCommitMu.Lock()
 	defer connectionCommitMu.Unlock()
+	request = NormalizeRequest(request)
 	current, err := s.Preview(ctx, scope, request)
 	if err != nil {
 		return CommitResult{}, err
@@ -198,33 +242,73 @@ func (s *Service) Commit(ctx context.Context, scope Scope, request Request, revi
 	if current.selectedEntry == "" {
 		return CommitResult{}, ErrInvalid
 	}
-	key, keyErr := homeKey(scope)
-	if keyErr != nil {
-		return CommitResult{}, ErrUnavailable
-	}
+
 	programs := workspace.NewAssistantProgramStore(s.store)
-	home, homeCreated, err := programs.EnsureStation(key, scope.Template.AssistantProgram)
-	if err != nil {
-		return CommitResult{}, ErrUnavailable
+	var home *workspace.Workspace
+	homeCreated := false
+	var groupSnapshot *workspace.GroupRequirementSnapshot
+	if scope.Template.GroupRequirement != nil {
+		if s.grouping == nil {
+			return CommitResult{}, ErrUnavailable
+		}
+		operationKind := grouprequirements.OperationConnectProject
+		if request.ModeID == projecttemplates.ProjectConnectionNewProject {
+			operationKind = grouprequirements.OperationCreateProject
+		}
+		operationDigest := digestStrings(scope.RunID, string(request.ModeID), reviewedInputDigest, reviewedOwnerDigest)
+		reviewDigest := digestStrings(reviewedInputDigest, reviewedOwnerDigest)
+		effective, homeID, snapshot, groupErr := s.grouping.CommitReviewed(grouprequirements.Input{
+			OwnerUserID: scope.OwnerUserID, OperationKind: operationKind, Template: scope.Template,
+			Composition: request.GroupComposition, InputDigest: current.InputDigest,
+		}, connectionChildID(scope.RunID), reviewDigest, operationDigest)
+		if groupErr != nil {
+			return CommitResult{}, ErrChanged
+		}
+		scope.Template = effective
+		groupSnapshot = snapshot
+		if homeID != "" {
+			home, err = s.store.Get(homeID)
+			if err != nil || home == nil {
+				return CommitResult{}, ErrUnavailable
+			}
+		}
+	} else {
+		key, keyErr := homeKey(scope)
+		if keyErr != nil {
+			return CommitResult{}, ErrUnavailable
+		}
+		home, homeCreated, err = programs.EnsureStation(key, scope.Template.AssistantProgram)
+		if err != nil {
+			return CommitResult{}, ErrUnavailable
+		}
 	}
+
 	childID := connectionChildID(scope.RunID)
 	_, childLookupErr := s.store.Get(childID)
 	childCreated := childLookupErr != nil
-	child, err := s.ensureChild(scope, request, current, home, childID)
+	child, err := s.ensureChild(scope, request, current, home, childID, groupSnapshot)
 	if err != nil {
 		s.rollbackNewState(scope.RunID, home, homeCreated, childID, childCreated)
 		return CommitResult{}, err
 	}
+	if home != nil {
+		linkedHome, _, linkErr := programs.EnsureProjectStation(child.ID)
+		if linkErr != nil || linkedHome == nil || linkedHome.ID != home.ID {
+			s.rollbackNewState(scope.RunID, home, homeCreated, childID, childCreated)
+			return CommitResult{}, ErrUnavailable
+		}
+	}
+	// Starter tasks can execute later, so they are persisted only after the
+	// required topology (or explicit standalone snapshot) is canonical.
 	if err := s.ensureStarterTasks(scope, request.ModeID, child.ID); err != nil {
 		s.rollbackNewState(scope.RunID, home, homeCreated, childID, childCreated)
 		return CommitResult{}, ErrUnavailable
 	}
-	linkedHome, _, err := programs.EnsureProjectStation(child.ID)
-	if err != nil || linkedHome.ID != home.ID {
-		s.rollbackNewState(scope.RunID, home, homeCreated, childID, childCreated)
-		return CommitResult{}, ErrUnavailable
+	result := CommitResult{ProjectWorkspaceID: child.ID, ModeID: request.ModeID}
+	if home != nil {
+		result.HomeWorkspaceID = home.ID
 	}
-	return CommitResult{HomeWorkspaceID: home.ID, ProjectWorkspaceID: child.ID, ModeID: request.ModeID}, nil
+	return result, nil
 }
 
 // ObservedResult discovers and verifies the deterministic child consequence,
@@ -243,11 +327,20 @@ func (s *Service) ObservedResult(scope Scope, homeID, projectID string) (CommitR
 	}
 	link := project.GetAssistantProjectLink()
 	locator, locatorErr := workspace.GetProjectEntryLocator(project.SharedData)
-	if link == nil || locatorErr != nil || locator == nil {
+	if locatorErr != nil || locator == nil {
 		return CommitResult{}, false
 	}
-	if homeID == "" {
-		homeID = link.StationWorkspaceID
+	provenance := project.GetTemplateProvenance()
+	standalone := provenance != nil && provenance.GroupRequirement != nil &&
+		provenance.GroupRequirement.StructurallyValid() &&
+		provenance.GroupRequirement.SelectedComposition == workspace.GroupRequirementCompositionStandalone
+	if !standalone {
+		if link == nil {
+			return CommitResult{}, false
+		}
+		if homeID == "" {
+			homeID = link.StationWorkspaceID
+		}
 	}
 	mode := projecttemplates.ProjectConnectionNewProject
 	if locator.Kind == workspace.ProjectEntryDirectoryReference {
@@ -262,8 +355,7 @@ func (s *Service) ObservedResult(scope Scope, homeID, projectID string) (CommitR
 // Observe verifies the durable canonical consequences for reconciliation. It
 // never trusts display names, physical nesting, or a journey receipt alone.
 func (s *Service) Observe(scope Scope, homeID, projectID string, mode projecttemplates.ProjectConnectionMode) bool {
-	if s == nil || s.store == nil || scope.Template.AssistantProgram == nil ||
-		projectID == "" || homeID == "" || projectID != connectionChildID(scope.RunID) {
+	if s == nil || s.store == nil || projectID == "" || projectID != connectionChildID(scope.RunID) {
 		return false
 	}
 	project, err := s.projectRecord(projectID)
@@ -272,11 +364,42 @@ func (s *Service) Observe(scope Scope, homeID, projectID string, mode projecttem
 	}
 	provenance := project.GetTemplateProvenance()
 	link := project.GetAssistantProjectLink()
-	expectedKey, keyErr := homeKey(scope)
-	if provenance == nil || link == nil || keyErr != nil || link.StationWorkspaceID != homeID ||
-		provenance.TemplateID != scope.Template.ID || !templateProvenanceMatches(scope.Template, provenance) ||
-		link.Key.Normalize() != expectedKey || link.Key.ProgramID != scope.Template.AssistantProgram.ID {
+	if provenance == nil || provenance.TemplateID != scope.Template.ID {
 		return false
+	}
+	if snapshot := provenance.GroupRequirement; snapshot != nil {
+		if scope.Template.GroupRequirement == nil || !snapshot.StructurallyValid() || snapshot.Policy != string(scope.Template.GroupRequirement.Policy) {
+			return false
+		}
+		if snapshot.SelectedComposition == workspace.GroupRequirementCompositionStandalone {
+			if homeID != "" || link != nil {
+				return false
+			}
+		} else {
+			if homeID == "" || link == nil || snapshot.ProgramKey == nil || project.ParentID != homeID ||
+				link.StationWorkspaceID != homeID || link.ID != snapshot.ProjectLinkID ||
+				link.Key.Normalize() != snapshot.ProgramKey.Normalize() {
+				return false
+			}
+			station, stationErr := s.store.Get(homeID)
+			if stationErr != nil || station == nil {
+				return false
+			}
+			state := station.GetAssistantProgramState()
+			if state == nil || !containsProjectID(state.LinkedProjectIDs, project.ID) {
+				return false
+			}
+		}
+	} else {
+		if scope.Template.AssistantProgram == nil || homeID == "" {
+			return false
+		}
+		expectedKey, keyErr := homeKey(scope)
+		if link == nil || keyErr != nil || link.StationWorkspaceID != homeID ||
+			!templateProvenanceMatches(scope.Template, provenance) ||
+			link.Key.Normalize() != expectedKey || link.Key.ProgramID != scope.Template.AssistantProgram.ID {
+			return false
+		}
 	}
 	locator, err := workspace.GetProjectEntryLocator(project.SharedData)
 	if err != nil || locator == nil ||
@@ -313,14 +436,25 @@ func (s *Service) projectRecord(id string) (*workspace.Workspace, error) {
 	return project, nil
 }
 
-func (s *Service) ensureChild(scope Scope, request Request, preview Preview, home *workspace.Workspace, childID string) (*workspace.Workspace, error) {
+func (s *Service) ensureChild(scope Scope, request Request, preview Preview, home *workspace.Workspace, childID string, groupSnapshot *workspace.GroupRequirementSnapshot) (*workspace.Workspace, error) {
+	expectedParentID := ""
+	if home != nil {
+		expectedParentID = home.ID
+	}
 	if existing, err := s.store.Get(childID); err == nil && existing != nil {
 		existing, err = s.projectRecord(childID)
 		if err != nil {
 			return nil, ErrUnavailable
 		}
-		if existing.OwnerUserID != scope.OwnerUserID || existing.ParentID != home.ID || existing.SharedData[connectionRunKey] != scope.RunID {
+		if existing.OwnerUserID != scope.OwnerUserID || existing.ParentID != expectedParentID || existing.SharedData[connectionRunKey] != scope.RunID {
 			return nil, ErrChanged
+		}
+		if groupSnapshot != nil {
+			provenance := existing.GetTemplateProvenance()
+			if provenance == nil || provenance.GroupRequirement == nil ||
+				provenance.GroupRequirement.OperationDigest != groupSnapshot.OperationDigest {
+				return nil, ErrChanged
+			}
 		}
 		if _, resolveErr := workspace.ResolveProjectEntry(existing, mustFolderPath(s.store, existing.ID)); resolveErr == nil {
 			return existing, nil
@@ -334,9 +468,9 @@ func (s *Service) ensureChild(scope Scope, request Request, preview Preview, hom
 	child := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: request.WorkspaceName})
 	child.ID = childID
 	child.OwnerUserID = scope.OwnerUserID
-	child.ParentID = home.ID
+	child.ParentID = expectedParentID
 	child.SharedData = map[string]any{connectionRunKey: scope.RunID}
-	child.SetTemplateProvenance(templateProvenance(scope.Template, s.now()))
+	child.SetTemplateProvenance(templateProvenance(scope.Template, s.now(), groupSnapshot))
 	if request.ModeID == projecttemplates.ProjectConnectionExistingProject {
 		referenceID := connectionReferenceID(scope.RunID)
 		if err := child.AddDirectoryReference(workspace.DirectoryReference{ID: referenceID, Name: request.WorkspaceName, Path: preview.selectedRoot}); err != nil {
@@ -563,6 +697,15 @@ func validDisplayName(value string) bool {
 	return true
 }
 
+func containsProjectID(ids []string, wanted string) bool {
+	for _, id := range ids {
+		if id == wanted {
+			return true
+		}
+	}
+	return false
+}
+
 func templateIdentity(template projecttemplates.Template) string {
 	if template.AssistantProgram == nil {
 		return ""
@@ -597,7 +740,7 @@ func templateProvenanceMatches(template projecttemplates.Template, provenance *w
 		owner.ExecutionDigest == projecttemplates.UserSetupQuestExecutionDigest(template)
 }
 
-func templateProvenance(template projecttemplates.Template, now time.Time) *workspace.TemplateProvenance {
+func templateProvenance(template projecttemplates.Template, now time.Time, snapshots ...*workspace.GroupRequirementSnapshot) *workspace.TemplateProvenance {
 	version := template.BuiltinVersion
 	if template.PluginOwner != nil {
 		version = template.PluginOwner.BlueprintVersion
@@ -611,13 +754,17 @@ func templateProvenance(template projecttemplates.Template, now time.Time) *work
 			ExecutionDigest:  projecttemplates.UserSetupQuestExecutionDigest(template),
 		}
 	}
+	var snapshot *workspace.GroupRequirementSnapshot
+	if len(snapshots) > 0 {
+		snapshot = snapshots[0]
+	}
 	return &workspace.TemplateProvenance{
 		TemplateID: template.ID, TemplateName: template.Name, Builtin: template.Builtin, Version: version, AppliedAt: now,
 		PluginOwner: template.PluginOwner, UserTemplateOwner: userOwner, DirectoryRequirements: template.DirectoryRequirements,
 		AutomationRecipes: template.AutomationRecipes, CapabilityRequirements: template.CapabilityRequirements,
 		Plugins: template.Tools.Plugins, PluginSources: template.Tools.PluginSources,
 		RuntimeRequirements: template.RuntimeRequirements, SetupWizard: template.SetupWizard,
-		AssistantProgram: template.AssistantProgram,
+		AssistantProgram: template.AssistantProgram, GroupRequirement: snapshot,
 	}
 }
 

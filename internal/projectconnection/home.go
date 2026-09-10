@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -11,11 +12,13 @@ const preparationAcknowledgementKey = "setup_preparation_acknowledgement"
 
 // HomePreparation is owner-read state, not a runtime grant or live verification.
 type HomePreparation struct {
-	HomeID       string `json:"group_id,omitempty"`
-	Name         string `json:"name"`
-	Exists       bool   `json:"exists"`
-	Acknowledged bool   `json:"acknowledged"`
-	TemplateID   string `json:"template_id"`
+	HomeID                string   `json:"group_id,omitempty"`
+	Name                  string   `json:"name"`
+	Exists                bool     `json:"exists"`
+	Acknowledged          bool     `json:"acknowledged"`
+	TemplateID            string   `json:"template_id"`
+	GroupPolicy           string   `json:"group_policy,omitempty"`
+	AvailableCompositions []string `json:"available_compositions,omitempty"`
 }
 
 func homeKey(scope Scope) (workspace.AssistantProgramKey, error) {
@@ -40,11 +43,26 @@ func homeKey(scope Scope) (workspace.AssistantProgramKey, error) {
 }
 
 func (s *Service) HomePreparation(scope Scope) (HomePreparation, error) {
-	key, err := homeKey(scope)
-	if err != nil || s == nil || s.store == nil {
+	if s == nil || s.store == nil || scope.Template.AssistantProgram == nil {
 		return HomePreparation{}, ErrUnavailable
 	}
 	result := HomePreparation{Name: scope.Template.AssistantProgram.StationName, TemplateID: scope.Template.ID}
+	if requirement := scope.Template.GroupRequirement; requirement != nil {
+		result.GroupPolicy = string(requirement.Policy)
+		switch requirement.Policy {
+		case projecttemplates.GroupPolicyNone:
+			result.AvailableCompositions = []string{"standalone"}
+			return result, nil
+		case projecttemplates.GroupPolicyRecommended:
+			result.AvailableCompositions = []string{"grouped", "standalone"}
+		case projecttemplates.GroupPolicyRequired:
+			result.AvailableCompositions = []string{"grouped"}
+		}
+	}
+	key, err := homeKey(scope)
+	if err != nil {
+		return HomePreparation{}, ErrUnavailable
+	}
 	home, err := workspace.NewAssistantProgramStore(s.store).FindStation(key)
 	if errors.Is(err, workspace.ErrAssistantStationNotFound) {
 		return result, nil
