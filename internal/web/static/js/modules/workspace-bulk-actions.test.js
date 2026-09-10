@@ -40,6 +40,7 @@ function ctxFor({ answers = [], promptWith = 'New group', responses, rows = ROWS
   const announced = [];
   const toasted = [];
   const trashed = [];
+  const navigated = [];
   let changed = 0;
   const { calls, fetchImpl } = recorder(responses);
   const queue = [...answers];
@@ -49,9 +50,11 @@ function ctxFor({ answers = [], promptWith = 'New group', responses, rows = ROWS
     announced,
     toasted,
     trashed,
+    navigated,
     changedCount: () => changed,
     ctx: {
       rows,
+      navigate: url => navigated.push(url),
       fetch: fetchImpl,
       confirm: message => {
         asked.push(message);
@@ -380,6 +383,76 @@ test('a failure with only a message field still reads correctly', async () => {
 
   await deleteWorkspace('w3', h.ctx);
   assert.equal(h.toasted[0].message, 'Disk is full');
+});
+
+function reviewRequired(slug = 'music-home') {
+  return {
+    ok: false,
+    status: 409,
+    text: async () =>
+      JSON.stringify({
+        code: 'assistant_program_review_required',
+        message: slug
+          ? 'Use Review disconnect in Music Home before deleting.'
+          : 'Restore Music Home from Trash first.',
+        details: slug ? { review_home_slug: slug } : {}
+      })
+  };
+}
+
+test('protected deletion offers the Home review without deleting or retrying', async () => {
+  const h = ctxFor({ answers: [true, true], responses: { default: reviewRequired() } });
+  assert.equal(await deleteWorkspace('w3', h.ctx), false);
+  assert.deepEqual(h.navigated, ['/workspaces/music-home/assistant']);
+  assert.match(h.toasted[0].message, /Review disconnect/);
+  assert.equal(h.calls.length, 1, 'no automatic disconnect or delete retry');
+  assert.equal(h.changedCount(), 0);
+  assert.deepEqual(h.trashed, []);
+});
+
+test('declining the review navigation leaves the protected workspace alone', async () => {
+  const h = ctxFor({ answers: [true, false], responses: { default: reviewRequired() } });
+  await deleteWorkspace('w3', h.ctx);
+  assert.deepEqual(h.navigated, []);
+  assert.equal(h.calls.length, 1);
+});
+
+test('a trashed Home gives recovery instructions rather than a broken review link', async () => {
+  const h = ctxFor({ answers: [true, true], responses: { default: reviewRequired('') } });
+  await deleteWorkspace('w3', h.ctx);
+  assert.match(h.toasted[0].message, /Restore Music Home/);
+  assert.equal(h.asked.length, 1);
+  assert.deepEqual(h.navigated, []);
+});
+
+test('bulk deletion keeps the review reason and offers a shared Home only once', async () => {
+  const h = ctxFor({
+    answers: [true, true],
+    responses: {
+      'DELETE /api/workspaces/w1': reviewRequired(),
+      'DELETE /api/workspaces/w2': reviewRequired(),
+      default: { ok: true, status: 204 }
+    }
+  });
+  assert.equal(await deleteWorkspaces(['w1', 'w2', 'w3'], h.ctx), 1);
+  assert.match(h.announced[0], /Deleted 1 of 3/);
+  assert.match(h.announced[0], /Review disconnect/);
+  assert.deepEqual(h.navigated, ['/workspaces/music-home/assistant']);
+  assert.equal(h.asked.length, 2);
+  assert.equal(h.calls.length, 3);
+});
+
+test('bulk deletion does not choose arbitrarily between multiple Assistant Homes', async () => {
+  const h = ctxFor({
+    answers: [true, true],
+    responses: {
+      'DELETE /api/workspaces/w1': reviewRequired('music-home'),
+      'DELETE /api/workspaces/w2': reviewRequired('another-home')
+    }
+  });
+  assert.equal(await deleteWorkspaces(['w1', 'w2'], h.ctx), 0);
+  assert.equal(h.asked.length, 1);
+  assert.deepEqual(h.navigated, []);
 });
 
 test('a non-JSON failure body is passed through verbatim', async () => {

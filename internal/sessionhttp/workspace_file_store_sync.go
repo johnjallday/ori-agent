@@ -1,6 +1,9 @@
 package sessionhttp
 
 import (
+	"encoding/json"
+	"fmt"
+
 	"github.com/johnjallday/ori-agent/internal/session"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -28,7 +31,30 @@ func (h *Handler) syncWorkspacePortableStateToFileStore(workspace *session.Works
 	}
 
 	mergePortableWorkspaceState(existing, portablySynced)
+	// An absent field is a partial/legacy row; an explicit empty envelope is
+	// authoritative (including a reviewed disconnect). Never resurrect a link.
+	if len(hydrated.AssistantProgramJSON) > 0 {
+		existing.AssistantProgramState = agentworkspace.CloneAssistantProgramState(portablySynced.AssistantProgramState)
+		existing.AssistantProjectLink = agentworkspace.CloneAssistantProjectLink(portablySynced.AssistantProjectLink)
+	}
 	return h.workspaceStore.Save(existing)
+}
+
+// The session row wraps the two portable fields in one JSON column. Keep this
+// decode strict: treating malformed topology as empty would permit deletion.
+type workspaceAssistantState struct {
+	State *agentworkspace.AssistantProgramState `json:"state,omitempty"`
+	Link  *agentworkspace.AssistantProjectLink  `json:"link,omitempty"`
+}
+
+func decodeWorkspaceAssistantState(raw json.RawMessage) (workspaceAssistantState, error) {
+	var state workspaceAssistantState
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &state); err != nil {
+			return state, fmt.Errorf("failed to decode workspace assistant state: %w", err)
+		}
+	}
+	return state, nil
 }
 
 func (h *Handler) syncWorkspaceTagsToFileStore(workspace *session.Workspace) error {

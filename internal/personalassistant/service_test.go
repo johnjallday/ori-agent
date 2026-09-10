@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,14 +45,45 @@ func (s *readTrackingStore) UpdateAssignment(context.Context, *Assignment, int64
 }
 
 type fakeHQReader struct {
+	mu     sync.Mutex
 	status *personalhq.Status
 	err    error
 	reads  int
 }
 
 func (f *fakeHQReader) Status(context.Context, string) (*personalhq.Status, error) {
+	// Concurrent service calls share this fake; its read instrumentation must
+	// not race. Fixtures configure status/err before starting those calls.
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.reads++
 	return f.status, f.err
+}
+
+func TestFakeHQReaderConcurrentStatusReads(t *testing.T) {
+	status := &personalhq.Status{UserID: "local", WorkspaceID: "hq-local", Valid: true}
+	reader := &fakeHQReader{status: status}
+	const workers, readsPerWorker = 16, 128
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for range readsPerWorker {
+				got, err := reader.Status(context.Background(), "local")
+				if err != nil || got != status {
+					t.Errorf("Status = %v, %v; want the configured status", got, err)
+				}
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if reader.reads != workers*readsPerWorker {
+		t.Fatalf("recorded %d reads; want %d", reader.reads, workers*readsPerWorker)
+	}
 }
 
 type fakeBriefReader struct {
