@@ -25,6 +25,7 @@ func TestSpecialistEventMappingsAreClosedAndBounded(t *testing.T) {
 		Lifecycle: LifecycleInProgress,
 		Journey: DeclarationProjection{
 			ID: "fixture-setup", SchemaVersion: 1, Version: 2,
+			Source: QuestSourceUserTemplate, TemplateID: "local-template", AttachmentID: "attachment-1",
 		},
 	}
 	emitPresentationEvent(specialistevents.JourneyOpened, projection)
@@ -62,7 +63,8 @@ func TestSpecialistEventMappingsAreClosedAndBounded(t *testing.T) {
 	gotNames := make([]specialistevents.Name, len(events))
 	for index, event := range events {
 		gotNames[index] = event.name
-		if event.fields.JourneyID != "fixture-setup" || event.fields.SchemaVersion != 1 || event.fields.DeclarationVersion != 2 {
+		if event.fields.JourneyID != "fixture-setup" || event.fields.SchemaVersion != 1 || event.fields.DeclarationVersion != 2 ||
+			event.fields.Source != string(QuestSourceUserTemplate) || event.fields.TemplateID != "local-template" || event.fields.AttachmentID != "attachment-1" {
 			t.Fatalf("event %q lost declaration identity: %+v", event.name, event.fields)
 		}
 	}

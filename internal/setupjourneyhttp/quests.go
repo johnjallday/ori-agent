@@ -19,6 +19,7 @@ func (user questRequestUser) CurrentUserID(context.Context) (string, error) {
 type questService interface {
 	ListQuests(context.Context) ([]setupjourney.QuestSummary, error)
 	ForQuest(context.Context, string, string, string) (*setupjourney.Service, error)
+	ForUserTemplateQuest(context.Context, string, string, string) (*setupjourney.Service, error)
 }
 
 // ListQuests exposes inert catalog metadata, never progress creation or plugin
@@ -64,6 +65,28 @@ func (h *Handler) ScopeQuest(next func(*Handler, http.ResponseWriter, *http.Requ
 			return
 		}
 		scoped, err := service.ForQuest(r.Context(), userID, r.PathValue("pluginID"), r.PathValue("questID"))
+		if err != nil {
+			h.writeFailure(w, r, "", "", err)
+			return
+		}
+		next(NewHandler(scoped, questRequestUser(userID)), w, r)
+	}
+}
+
+// ScopeUserTemplateQuest binds the current user plus an exact local template
+// and host-generated attachment identity. The URL has no plugin owner segment.
+func (h *Handler) ScopeUserTemplateQuest(next func(*Handler, http.ResponseWriter, *http.Request)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, ok := h.currentUser(w, r)
+		if !ok {
+			return
+		}
+		service, ok := h.service.(questService)
+		if !ok {
+			h.writeFailure(w, r, "", "", setupjourney.FailureFor(setupjourney.ReasonJourneyUnavailable, 0))
+			return
+		}
+		scoped, err := service.ForUserTemplateQuest(r.Context(), userID, r.PathValue("templateID"), r.PathValue("attachmentID"))
 		if err != nil {
 			h.writeFailure(w, r, "", "", err)
 			return

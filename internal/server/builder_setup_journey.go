@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/pathselection"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
@@ -83,9 +84,13 @@ func (b *ServerBuilder) initializeSetupJourney() {
 			if b.pathSelectionStore == nil {
 				b.pathSelectionStore = pathselection.NewStore()
 			}
+			userTemplates := configuredUserTemplateQuestLibrary{
+				config:  b.configManager,
+				catalog: templateRuntimeCatalog{capabilities: b.workspaceCapabilityRegistry, runtimes: b.runtimeCapabilityRegistry},
+			}
 			projectAdapter = setupjourney.NewProjectConnectionAdapter(
 				projectconnection.NewService(connectionStore, b.pathSelectionStore),
-				installedProjectTemplateResolver{manager: b.pluginHandler.Manager()},
+				installedProjectTemplateResolver{manager: b.pluginHandler.Manager(), userTemplates: userTemplates},
 			)
 			projectAdapter.CheckPrerequisites = func(ctx context.Context, template projecttemplates.Template) (bool, error) {
 				if template.RuntimeRequirements == nil || b.runtimeCapabilityRegistry == nil {
@@ -209,8 +214,18 @@ func (b *ServerBuilder) initializeSetupJourney() {
 			panic("invalid built-in setup journey staffing adapter")
 		}
 	}
+	var questCatalogs []setupjourney.QuestCatalog
 	if b.pluginHandler != nil {
-		b.setupJourneyService.SetQuestCatalog(setupjourney.NewInstalledQuestCatalog(b.pluginHandler.Manager()))
+		questCatalogs = append(questCatalogs, setupjourney.NewInstalledQuestCatalog(b.pluginHandler.Manager()))
+	}
+	if b.configManager != nil {
+		questCatalogs = append(questCatalogs, setupjourney.NewUserTemplateQuestCatalog(configuredUserTemplateQuestLibrary{
+			config:  b.configManager,
+			catalog: templateRuntimeCatalog{capabilities: b.workspaceCapabilityRegistry, runtimes: b.runtimeCapabilityRegistry},
+		}))
+	}
+	if len(questCatalogs) > 0 {
+		b.setupJourneyService.SetQuestCatalog(setupjourney.CombineQuestCatalogs(questCatalogs...))
 	}
 	b.setupJourneyHandler = setupjourneyhttp.NewHandler(b.setupJourneyService, b.userProvider)
 	if b.workspaceStore != nil {
@@ -284,11 +299,49 @@ func (r workspaceProjectFileReadiness) FilesConnected(projectID string) bool {
 	return err == nil
 }
 
-type installedProjectTemplateResolver struct {
-	manager *plugin.Manager
+type configuredUserTemplateQuestLibrary struct {
+	config  *config.Manager
+	catalog projecttemplates.RuntimeCatalog
 }
 
-func (r installedProjectTemplateResolver) ResolveProjectTemplate(_ context.Context, scope setupjourney.ReadScope) (projecttemplates.Template, error) {
+func (l configuredUserTemplateQuestLibrary) ListUserSetupQuestTemplates(_ context.Context) ([]projecttemplates.Template, error) {
+	if l.config == nil {
+		return nil, errors.New("user template library is unavailable")
+	}
+	return projecttemplates.ListLibraryWithCatalog(resolveTemplatesRoot(l.config), l.catalog)
+}
+
+func (l configuredUserTemplateQuestLibrary) FindUserSetupQuestTemplate(_ context.Context, templateID string) (projecttemplates.Template, error) {
+	if l.config == nil {
+		return projecttemplates.Template{}, errors.New("user template library is unavailable")
+	}
+	return projecttemplates.FindLibraryTemplateWithCatalog(resolveTemplatesRoot(l.config), templateID, l.catalog)
+}
+
+func (l configuredUserTemplateQuestLibrary) WithUserSetupQuestMutationLock(_ context.Context, operation func() error) error {
+	if l.config == nil {
+		return errors.New("user template library is unavailable")
+	}
+	return projecttemplates.WithLibraryMutationLock(resolveTemplatesRoot(l.config), operation)
+}
+
+type installedProjectTemplateResolver struct {
+	manager       *plugin.Manager
+	userTemplates setupjourney.UserTemplateQuestLibrary
+}
+
+func (r installedProjectTemplateResolver) ResolveProjectTemplate(ctx context.Context, scope setupjourney.ReadScope) (projecttemplates.Template, error) {
+	if scope.QuestSource == setupjourney.QuestSourceUserTemplate {
+		if r.userTemplates == nil || scope.UserTemplateID == "" {
+			return projecttemplates.Template{}, errors.New("project template owner is unavailable")
+		}
+		template, err := r.userTemplates.FindUserSetupQuestTemplate(ctx, scope.UserTemplateID)
+		if err != nil || template.UserSetupQuest == nil || template.AssistantProgram == nil ||
+			template.ID != scope.ExpectedBlueprintID || template.AssistantProgram.ID != scope.ExpectedAssistantProgramID {
+			return projecttemplates.Template{}, errors.New("project template owner is unavailable")
+		}
+		return template, nil
+	}
 	if r.manager == nil || scope.IntegrationPluginID == "" || scope.IntegrationVersion == "" ||
 		scope.ExpectedBlueprintID == "" || scope.ExpectedAssistantProgramID == "" {
 		return projecttemplates.Template{}, errors.New("project template owner is unavailable")

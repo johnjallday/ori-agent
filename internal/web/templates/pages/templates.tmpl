@@ -119,6 +119,9 @@
                   <li class="nav-item" role="presentation">
                     <button class="nav-link active" id="tplTabOverview" data-bs-toggle="tab" data-bs-target="#tplOverviewPane" type="button" role="tab" aria-controls="tplOverviewPane" aria-selected="true">Overview</button>
                   </li>
+                  <li id="tplSetupQuestTabItem" class="nav-item" role="presentation" hidden>
+                    <button class="nav-link" id="tplTabSetupQuest" data-bs-toggle="tab" data-bs-target="#tplSetupQuestPane" type="button" role="tab" aria-controls="tplSetupQuestPane" aria-selected="false">Setup quest</button>
+                  </li>
                   <li class="nav-item" role="presentation">
                     <button class="nav-link" id="tplTabFiles" data-bs-toggle="tab" data-bs-target="#tplFilesPane" type="button" role="tab" aria-controls="tplFilesPane" aria-selected="false">Files</button>
                   </li>
@@ -189,6 +192,72 @@
                     <div class="d-flex gap-2">
                       <button id="tplSaveBtn" class="modern-btn modern-btn-primary btn-sm">Save changes</button>
                       <button id="tplResetBtn" class="modern-btn modern-btn-secondary btn-sm">Reset</button>
+                    </div>
+                  </div>
+
+                  <!-- User-owned setup quest authoring -->
+                  <div class="tab-pane fade" id="tplSetupQuestPane" role="tabpanel" aria-labelledby="tplTabSetupQuest">
+                    <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap mb-3">
+                      <div>
+                        <div class="tpl-section-kicker">User template</div>
+                        <h5 class="tpl-section-title mb-1">Setup quest</h5>
+                        <p class="tpl-section-copy mb-0">Guide a person through connecting a project, creating its workspace, choosing File-only or optional live setup, and reviewing Home and project staffing.</p>
+                      </div>
+                      <span class="badge" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-secondary);">Source · User template</span>
+                    </div>
+                    <div id="tplUserQuestStatus" class="alert alert-secondary py-2" role="status" aria-live="polite">Loading authoring details…</div>
+                    <div id="tplUserQuestEligibility" class="mb-3" hidden></div>
+                    <button id="tplUserQuestCreate" type="button" class="modern-btn modern-btn-primary btn-sm mb-3" hidden>Create setup quest</button>
+
+                    <div id="tplUserQuestForm" hidden>
+                      <div class="alert alert-light py-2" style="font-size: 12px; border: 1px solid var(--border-color);">
+                        Preview and save edit inert guidance only. They do not install software, create a workspace, launch an app, staff agents, or start setup progress.
+                      </div>
+                      <div class="row g-3 mb-3">
+                        <div class="col-12 col-md-7">
+                          <label for="tplUserQuestTitle" class="form-label tpl-section-kicker">Quest title</label>
+                          <input id="tplUserQuestTitle" class="modern-input w-100" maxlength="120" autocomplete="off">
+                        </div>
+                        <div class="col-12 col-md-5">
+                          <label for="tplUserQuestIntegration" class="form-label tpl-section-kicker">Reviewed integration</label>
+                          <select id="tplUserQuestIntegration" class="modern-input w-100"></select>
+                        </div>
+                        <div class="col-12">
+                          <label for="tplUserQuestDescription" class="form-label tpl-section-kicker">Description</label>
+                          <textarea id="tplUserQuestDescription" class="form-control" rows="2" maxlength="500" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);"></textarea>
+                        </div>
+                      </div>
+
+                      <div class="mb-3">
+                        <div class="tpl-section-kicker">Fixed journey</div>
+                        <p class="small text-muted mb-2">All setup quests use these five stages once and in this order. You can edit their titles and descriptions, not their behavior.</p>
+                        <div id="tplUserQuestSteps" class="d-flex flex-column gap-2"></div>
+                      </div>
+
+                      <details class="mb-3">
+                        <summary style="cursor: pointer; color: var(--text-primary); font-weight: 600;">Workspace copy</summary>
+                        <div class="row g-2 mt-1">
+                          <div class="col-12 col-md-6"><label for="tplUserQuestGroupTitle" class="form-label small text-muted">Home step title</label><input id="tplUserQuestGroupTitle" class="modern-input w-100" maxlength="120"></div>
+                          <div class="col-12 col-md-6"><label for="tplUserQuestGroupName" class="form-label small text-muted">Default Home name</label><input id="tplUserQuestGroupName" class="modern-input w-100" maxlength="120"></div>
+                          <div class="col-12"><label for="tplUserQuestRuntimeTitle" class="form-label small text-muted">Runtime step title</label><input id="tplUserQuestRuntimeTitle" class="modern-input w-100" maxlength="120"></div>
+                          <div class="col-12"><label for="tplUserQuestRuntimeInstructions" class="form-label small text-muted">Runtime instructions</label><textarea id="tplUserQuestRuntimeInstructions" class="form-control" rows="3" maxlength="1000" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);"></textarea></div>
+                        </div>
+                      </details>
+
+                      <div class="d-flex gap-2 align-items-center flex-wrap">
+                        <button id="tplUserQuestPreviewBtn" type="button" class="modern-btn modern-btn-secondary btn-sm">Preview</button>
+                        <button id="tplUserQuestSaveBtn" type="button" class="modern-btn modern-btn-primary btn-sm">Save setup quest</button>
+                        <button id="tplUserQuestCancelBtn" type="button" class="modern-btn modern-btn-secondary btn-sm">Cancel edits</button>
+                        <button id="tplUserQuestRemoveBtn" type="button" class="modern-btn modern-btn-secondary btn-sm" style="color: #ef4444;" hidden>Remove…</button>
+                        <span id="tplUserQuestDirty" class="small" style="color: #f59e0b;" hidden>● Unsaved changes</span>
+                      </div>
+                    </div>
+
+                    <div id="tplUserQuestPreview" class="mt-3 p-3 rounded-3" style="border: 1px solid var(--border-color); background: var(--bg-tertiary);" hidden>
+                      <div class="tpl-section-kicker">Preview — no setup started</div>
+                      <h6 id="tplUserQuestPreviewTitle" class="mt-1 mb-1"></h6>
+                      <p id="tplUserQuestPreviewDescription" class="small text-muted"></p>
+                      <ol id="tplUserQuestPreviewSteps" class="mb-0 ps-3"></ol>
                     </div>
                   </div>
 

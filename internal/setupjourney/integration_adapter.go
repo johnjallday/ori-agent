@@ -374,8 +374,15 @@ func integrationProjection(entry reviewedintegration.Entry) *IntegrationProjecti
 }
 
 func entryMatchesScope(entry reviewedintegration.Entry, scope ReadScope) bool {
-	return entry.Key == scope.IntegrationKey && entry.ExpectedBlueprintID == scope.ExpectedBlueprintID &&
-		entry.ExpectedProgramID == scope.ExpectedAssistantProgramID
+	if entry.Key != scope.IntegrationKey {
+		return false
+	}
+	if scope.QuestSource == QuestSourceUserTemplate {
+		// The reviewed key owns software identity only. A user quest's bound local
+		// template owns its blueprint/program target identity independently.
+		return scope.UserTemplateID == scope.ExpectedBlueprintID
+	}
+	return entry.ExpectedBlueprintID == scope.ExpectedBlueprintID && entry.ExpectedProgramID == scope.ExpectedAssistantProgramID
 }
 
 func localIntegrationSource(source string) bool {

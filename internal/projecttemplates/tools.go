@@ -100,7 +100,16 @@ func normalizeNameList(names []string) []string {
 // preserving every other key. An all-empty ToolDefaults clears the key. Like the
 // onboarding writer, this stores names only and never interprets them.
 func SetTools(libDir, id string, tools ToolDefaults) (Template, error) {
-	tpl, err := FindLibraryTemplate(libDir, id)
+	return SetToolsWithGuard(libDir, id, tools, nil, defaultRuntimeCatalog())
+}
+
+func SetToolsWithGuard(libDir, id string, tools ToolDefaults, guard UserSetupQuestMutationGuard, catalog RuntimeCatalog) (Template, error) {
+	release, err := acquireManifestMutationLock(libDir)
+	if err != nil {
+		return Template{}, err
+	}
+	defer release()
+	tpl, err := FindLibraryTemplateWithCatalog(libDir, id, catalog)
 	if err != nil {
 		return Template{}, err
 	}
@@ -130,8 +139,18 @@ func SetTools(libDir, id string, tools ToolDefaults) (Template, error) {
 	if err != nil {
 		return Template{}, fmt.Errorf("failed to encode manifest: %w", err)
 	}
-	if err := os.WriteFile(manifestPath, append(data, '\n'), 0o640); err != nil { // #nosec G304 G306 -- manifestPath is libDir/<validated id>/template.json; 0o640 matches the package's manifest-write convention
-		return Template{}, fmt.Errorf("failed to write manifest: %w", err)
+	var candidateManifest manifest
+	if err := json.Unmarshal(data, &candidateManifest); err != nil {
+		return Template{}, fmt.Errorf("failed to validate effective manifest: %w", err)
 	}
-	return newTemplate(tpl.Path), nil
+	candidate := newTemplateWithManifest(tpl.Path, candidateManifest, catalog)
+	if guard != nil {
+		if err := guard(tpl, candidate); err != nil {
+			return Template{}, err
+		}
+	}
+	if err := writeManifestAtomic(manifestPath, append(data, '\n')); err != nil {
+		return Template{}, err
+	}
+	return candidate, nil
 }

@@ -96,7 +96,7 @@ func TestFieldsCannotGrowFreeTextPayloadsUnnoticed(t *testing.T) {
 	t.Parallel()
 	typeOfFields := reflect.TypeOf(Fields{})
 	want := []string{
-		"JourneyID", "StepID", "ActionID", "ResourceID", "RoleID", "RouteToken", "ModeToken",
+		"Source", "TemplateID", "AttachmentID", "JourneyID", "StepID", "ActionID", "ResourceID", "RoleID", "RouteToken", "ModeToken",
 		"RunKind", "Lifecycle", "Outcome", "ReasonCode", "SchemaVersion", "DeclarationVersion",
 		"DurationSeconds", "Count",
 	}

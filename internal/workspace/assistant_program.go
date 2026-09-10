@@ -104,9 +104,11 @@ func CloneAssistantProgramDeclaration(source *AssistantProgramDeclaration) *Assi
 // "local" at the workspace-store boundary; callers still normalize it here so
 // lookup behavior is deterministic for legacy records.
 type AssistantProgramKey struct {
-	OwnerUserID string `json:"owner_user_id"`
-	PluginID    string `json:"plugin_id"`
-	ProgramID   string `json:"program_id"`
+	OwnerUserID  string `json:"owner_user_id"`
+	PluginID     string `json:"plugin_id,omitempty"`
+	TemplateID   string `json:"template_id,omitempty"`
+	AttachmentID string `json:"attachment_id,omitempty"`
+	ProgramID    string `json:"program_id"`
 }
 
 func (key AssistantProgramKey) Normalize() AssistantProgramKey {
@@ -115,13 +117,17 @@ func (key AssistantProgramKey) Normalize() AssistantProgramKey {
 		key.OwnerUserID = "local"
 	}
 	key.PluginID = strings.ToLower(strings.TrimSpace(key.PluginID))
+	key.TemplateID = strings.ToLower(strings.TrimSpace(key.TemplateID))
+	key.AttachmentID = strings.ToLower(strings.TrimSpace(key.AttachmentID))
 	key.ProgramID = strings.ToLower(strings.TrimSpace(key.ProgramID))
 	return key
 }
 
 func (key AssistantProgramKey) Valid() bool {
 	key = key.Normalize()
-	return key.OwnerUserID != "" && key.PluginID != "" && key.ProgramID != ""
+	pluginOwner := key.PluginID != "" && key.TemplateID == "" && key.AttachmentID == ""
+	userTemplateOwner := key.PluginID == "" && key.TemplateID != "" && key.AttachmentID != ""
+	return key.OwnerUserID != "" && key.ProgramID != "" && (pluginOwner || userTemplateOwner)
 }
 
 // AssistantProjectLink is stored on a compatible project. Membership is never

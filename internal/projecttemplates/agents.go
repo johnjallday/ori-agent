@@ -119,7 +119,16 @@ func ValidateAgentPrompts(specs []AgentSpec) error {
 // one agent (the first is the entry agent). Like the tools writer, this stores
 // agent specs as data and never creates agents.
 func SetAgents(libDir, id string, agents []AgentSpec) (Template, error) {
-	tpl, err := FindLibraryTemplate(libDir, id)
+	return SetAgentsWithGuard(libDir, id, agents, nil, defaultRuntimeCatalog())
+}
+
+func SetAgentsWithGuard(libDir, id string, agents []AgentSpec, guard UserSetupQuestMutationGuard, catalog RuntimeCatalog) (Template, error) {
+	release, err := acquireManifestMutationLock(libDir)
+	if err != nil {
+		return Template{}, err
+	}
+	defer release()
+	tpl, err := FindLibraryTemplateWithCatalog(libDir, id, catalog)
 	if err != nil {
 		return Template{}, err
 	}
@@ -152,8 +161,18 @@ func SetAgents(libDir, id string, agents []AgentSpec) (Template, error) {
 	if err != nil {
 		return Template{}, fmt.Errorf("failed to encode manifest: %w", err)
 	}
-	if err := os.WriteFile(manifestPath, append(data, '\n'), 0o640); err != nil { // #nosec G304 G306 -- manifestPath is libDir/<validated id>/template.json; 0o640 matches the package's manifest-write convention
-		return Template{}, fmt.Errorf("failed to write manifest: %w", err)
+	var candidateManifest manifest
+	if err := json.Unmarshal(data, &candidateManifest); err != nil {
+		return Template{}, fmt.Errorf("failed to validate effective manifest: %w", err)
 	}
-	return newTemplate(tpl.Path), nil
+	candidate := newTemplateWithManifest(tpl.Path, candidateManifest, catalog)
+	if guard != nil {
+		if err := guard(tpl, candidate); err != nil {
+			return Template{}, err
+		}
+	}
+	if err := writeManifestAtomic(manifestPath, append(data, '\n')); err != nil {
+		return Template{}, err
+	}
+	return candidate, nil
 }

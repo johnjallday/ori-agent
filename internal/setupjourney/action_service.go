@@ -151,6 +151,11 @@ func (s *Service) Mutate(ctx context.Context, userID, runID string, actionID Act
 		emitActionOutcome(projection, stepID, actionID, specialistevents.OutcomeReconcileRequired, ReasonOperationFailed)
 		return nil, failure(ReasonOperationFailed, claimedRun.StateRevision)
 	}
+	if err := s.claimUserTemplateResultRoots(ctx, userID, result); err != nil {
+		_, _ = s.store.MarkOperationReconcileRequired(ctx, projection.RunKind, projection.RunID, request.IdempotencyKey)
+		emitActionOutcome(projection, stepID, actionID, specialistevents.OutcomeReconcileRequired, ReasonProjectAlreadyConnected)
+		return nil, failure(ReasonProjectAlreadyConnected, claimedRun.StateRevision)
+	}
 	if result.HomeWorkspaceID != "" {
 		scope.HomeWorkspaceID = result.HomeWorkspaceID
 	}
@@ -204,6 +209,27 @@ func (s *Service) Mutate(ctx context.Context, userID, runID string, actionID Act
 	return &ActionResult{Journey: fresh}, nil
 }
 
+func (s *Service) claimUserTemplateResultRoots(ctx context.Context, userID string, result CanonicalResult) error {
+	identity, _, err := s.currentDeclaration(ctx, strings.TrimSpace(userID))
+	if err != nil || identity.Binding == nil {
+		return err
+	}
+	values := []struct{ kind, id string }{
+		{"home", result.HomeWorkspaceID},
+		{"project", result.ProjectWorkspaceID},
+		{"workspace", result.ProjectWorkspaceID},
+	}
+	claims := make([]UserTemplateRootClaim, 0, len(values))
+	for _, item := range values {
+		if item.id != "" {
+			claims = append(claims, UserTemplateRootClaim{
+				RootKind: item.kind, RootID: item.id, UserTemplateBinding: *identity.Binding,
+			})
+		}
+	}
+	return s.store.ClaimUserTemplateRoots(ctx, claims)
+}
+
 func (s *Service) replayAction(ctx context.Context, userID string, projection *JourneyProjection, scope ReadScope, kind specialist.SetupStepKind, actionID ActionID, adapter JourneyActionAdapter, receipt *OperationReceipt) (*ActionResult, error) {
 	switch receipt.Status {
 	case OperationSucceeded:
@@ -230,6 +256,10 @@ func (s *Service) replayAction(ctx context.Context, userID string, projection *J
 			}
 			emitActionOutcome(projection, stepID, actionID, specialistevents.OutcomeReconcileRequired, ReasonOperationFailed)
 			return nil, failure(ReasonOperationFailed, projection.StateRevision)
+		}
+		if err := s.claimUserTemplateResultRoots(ctx, userID, ownerRead.Result); err != nil {
+			emitActionOutcome(projection, stepID, actionID, specialistevents.OutcomeReconcileRequired, ReasonProjectAlreadyConnected)
+			return nil, failure(ReasonProjectAlreadyConnected, projection.StateRevision)
 		}
 		finalRun, finalRunErr := s.actionFinalRun(ctx, userID, projection.RunID)
 		if finalRunErr != nil {
