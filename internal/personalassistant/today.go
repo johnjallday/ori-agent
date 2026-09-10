@@ -47,9 +47,9 @@ type TodayItem struct {
 	Title  string `json:"title"`
 	Detail string `json:"detail,omitempty"`
 	State  string `json:"state,omitempty"`
-	// Attribution names the agent whose work this is, so the user can see who
-	// did it. It is the assignee recorded on the canonical record and is empty
-	// when no agent is recorded — never inferred.
+	// Attribution names the canonical agent or owning workspace responsible for
+	// the record, so the user can see where the work lives. It comes from the
+	// validated source record/scope and is never inferred from generated prose.
 	Attribution string               `json:"attribution,omitempty"`
 	Route       string               `json:"route"`
 	Ref         dailybrief.SourceRef `json:"ref"`
@@ -194,9 +194,10 @@ type todayFollowUpReader interface {
 }
 
 type groundedFollowUp struct {
-	item  *followup.FollowUp
-	ref   dailybrief.SourceRef
-	route string
+	item      *followup.FollowUp
+	ref       dailybrief.SourceRef
+	route     string
+	ownerName string
 }
 
 type todaySpecialistSetupReader interface {
@@ -650,6 +651,7 @@ func (s *TodayService) loadFollowUps(ctx context.Context, userID string, relatio
 			}
 			grounded := groundedFollowUp{
 				item: &copyItem, ref: ref, route: recordTodayRoute(baseRoute, "follow_up", copyItem.ID),
+				ownerName: truncateRunes(owner.Name, 100),
 			}
 			byRef[ref.Key()] = grounded
 			accepted = append(accepted, grounded)
@@ -763,7 +765,7 @@ func followUpTodayItem(grounded groundedFollowUp) TodayItem {
 	item := grounded.item
 	return TodayItem{
 		ID: item.ID, Kind: "follow_up", Title: truncateRunes(item.Title, 200), Detail: truncateRunes(item.Counterparty, 100),
-		State: string(item.Status), Route: grounded.route, Ref: grounded.ref,
+		State: string(item.Status), Attribution: grounded.ownerName, Route: grounded.route, Ref: grounded.ref,
 		DueAt: item.DueAt, SourceAt: item.UpdatedAt,
 	}
 }
@@ -849,7 +851,7 @@ func groundedTodayItem(title, detail string, ref dailybrief.SourceRef, route str
 		}
 		return TodayItem{
 			ID: grounded.item.ID, Kind: "brief", Title: truncateRunes(title, 200), Detail: truncateRunes(detail, 300),
-			Route: grounded.route, Ref: grounded.ref, SourceAt: grounded.ref.Timestamp,
+			Attribution: grounded.ownerName, Route: grounded.route, Ref: grounded.ref, SourceAt: grounded.ref.Timestamp,
 		}, true
 	default:
 		return TodayItem{}, false

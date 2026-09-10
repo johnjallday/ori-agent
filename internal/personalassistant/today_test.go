@@ -257,12 +257,12 @@ func TestTodayService_AggregatesEmailOpsDecisionsAndGroundsBriefToOwningRoute(t 
 		t.Fatalf("Email Ops decision missing or duplicated: %+v", got.Decisions)
 	}
 	decision := got.Decisions.Items[0]
-	if decision.ID != emailDecision.ID || decision.Ref.WorkspaceID != emailOps.ID ||
+	if decision.ID != emailDecision.ID || decision.Ref.WorkspaceID != emailOps.ID || decision.Attribution != "Email Ops" ||
 		decision.Ref.WorkspaceSlug != "email-ops" || decision.Route != "/workspaces/email-ops?follow_up=same-id" {
 		t.Fatalf("decision not grounded to Email Ops owner: %+v", decision)
 	}
 	if len(got.Brief.Items) != 1 || got.Brief.Items[0].Route != decision.Route ||
-		got.Brief.Items[0].Ref.WorkspaceSlug != "email-ops" {
+		got.Brief.Items[0].Ref.WorkspaceSlug != "email-ops" || got.Brief.Items[0].Attribution != "Email Ops" {
 		t.Fatalf("brief follow-up did not use canonical live owner: %+v", got.Brief)
 	}
 	for _, item := range append(append([]TodayItem{}, got.FollowUps.Items...), got.Decisions.Items...) {
