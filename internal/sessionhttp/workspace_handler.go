@@ -1484,6 +1484,12 @@ func (h *Handler) deleteWorkspace(w http.ResponseWriter, r *http.Request, id str
 		return
 	}
 
+	// Review assistant topology before confirmations or any session, folder, or
+	// group mutation. Folder-only guards cannot see DB-only or divergent Homes.
+	if !h.allowWorkspaceRemoval(w, r, ws) {
+		return
+	}
+
 	// If confirm is not set, return session count for UI confirmation prompt
 	if r.URL.Query().Get("confirm") != "true" {
 		sessionCount := ws.SessionCount
@@ -2094,6 +2100,13 @@ func buildFileStoreWorkspace(workspace *session.Workspace) (*agentworkspace.Work
 	if err := decodeSessionWorkspaceJSONField(workspace.InstalledCapabilitiesJSON, &folderWS.InstalledCapabilities); err != nil {
 		return nil, fmt.Errorf("failed to decode workspace installed capabilities: %w", err)
 	}
+
+	assistantState, err := decodeWorkspaceAssistantState(workspace.AssistantProgramJSON)
+	if err != nil {
+		return nil, err
+	}
+	folderWS.AssistantProgramState = assistantState.State
+	folderWS.AssistantProjectLink = assistantState.Link
 
 	return folderWS, nil
 }

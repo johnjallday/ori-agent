@@ -48,7 +48,17 @@ func (h *Handler) BackfillGroupScaffolding(ctx context.Context) error {
 	checked, backfilled := 0, 0
 	for i := range groups {
 		checked++
-		changed, err := h.backfillGroupScaffolding(ctx, &groups[i])
+		// ListWorkspaces is a summary projection: notably it omits assistant
+		// state. Never rebuild a portable Home from that lossy snapshot.
+		full, err := h.store.GetWorkspace(ctx, groups[i].ID)
+		if err != nil {
+			logger.Warn("Failed to read group for scaffolding backfill", logger.Fields{"id": groups[i].ID, "error": err})
+			continue
+		}
+		if !full.IsGroup() || full.Status == session.WorkspaceStatusTrashed || full.Status == session.WorkspaceStatusMissing {
+			continue
+		}
+		changed, err := h.backfillGroupScaffolding(ctx, full)
 		if err != nil {
 			logger.Warn("Group scaffolding backfill failed", logger.Fields{"id": groups[i].ID, "error": err})
 			continue
@@ -100,6 +110,20 @@ func (h *Handler) backfillGroupScaffolding(ctx context.Context, ws *session.Work
 	hydrated := h.hydrateWorkspaceMetadataFromFileStore(ws)
 	now := time.Now()
 	changed := false
+
+	// Repair Homes whose scaffolding was previously written without their
+	// assistant declaration. Do not touch trashed/missing Homes or infer links.
+	assistantState, err := decodeWorkspaceAssistantState(ws.AssistantProgramJSON)
+	if err != nil {
+		return false, err
+	}
+	disk, err := h.workspaceStore.Get(ws.ID)
+	if err != nil {
+		return false, err
+	}
+	if assistantState.State != nil && disk.GetAssistantProgramState() == nil {
+		changed = true
+	}
 
 	refs, err := decodeDirectoryReferences(hydrated.DirectoryReferencesJSON)
 	if err != nil {

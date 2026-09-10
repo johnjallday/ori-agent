@@ -14,6 +14,8 @@
 // host's announce/toast/refresh callbacks — arrives through `ctx`, so these run
 // under plain Node in tests with no DOM and no network.
 
+import { workspacePageURL } from './workspace-routes.js';
+
 /** A row is a group when its kind says so (matches home-workspace-cockpit). */
 export function isGroupRow(row) {
   return (
@@ -117,21 +119,54 @@ function trashed(ctx, id, name) {
  * older copy of this helper did) meant a slug conflict — the most common real
  * failure here — reached the user as a wall of raw JSON in a toast.
  */
-async function errorText(response, fallback) {
+async function requestError(response, fallback) {
+  let message = fallback;
+  let payload;
   try {
     const text = await response.text();
-    if (!text) return fallback;
-    try {
-      const parsed = JSON.parse(text);
-      if (parsed && typeof parsed.error === 'string' && parsed.error) return parsed.error;
-      if (parsed && typeof parsed.message === 'string' && parsed.message) return parsed.message;
-      return text;
-    } catch (_) {
-      return text;
+    if (text) {
+      message = text;
+      try {
+        payload = JSON.parse(text);
+        if (typeof payload?.error === 'string' && payload.error) message = payload.error;
+        else if (typeof payload?.message === 'string' && payload.message) message = payload.message;
+      } catch (_) {
+        // Non-JSON errors still carry a useful explanation.
+      }
     }
   } catch (_) {
-    return fallback;
+    // Preserve the fallback when the body cannot be read.
   }
+  const error = new Error(message);
+  if (
+    response.status === 409 &&
+    payload?.code === 'assistant_program_review_required' &&
+    typeof payload.details?.review_home_slug === 'string' &&
+    payload.details.review_home_slug.trim()
+  ) {
+    error.reviewHomeSlug = payload.details.review_home_slug;
+  }
+  return error;
+}
+
+async function errorText(response, fallback) {
+  return (await requestError(response, fallback)).message;
+}
+
+// Navigating to a review is not permission to disconnect or remove anything.
+// Ask once after the batch, and never redirect to a missing/trashed Home.
+function offerRemovalReview(ctx, errors) {
+  const homes = [...new Set(errors.map(error => error?.reviewHomeSlug).filter(Boolean))];
+  if (homes.length !== 1) return;
+  if (
+    !ctxConfirm(ctx)(
+      'This removal needs an assistant review. Open the Assistant Home now? Nothing will be deleted by opening it.'
+    )
+  )
+    return;
+  const url = workspacePageURL(homes[0], ['assistant']);
+  if (typeof ctx?.navigate === 'function') ctx.navigate(url);
+  else if (typeof window !== 'undefined') window.location.assign(url);
 }
 
 /** Report a failure the same way on every path: SR announcement + toast. */
@@ -193,7 +228,7 @@ export async function deleteWorkspace(id, ctx) {
       `/api/workspaces/${encodeURIComponent(id)}?confirm=true${query}`,
       { method: 'DELETE' }
     );
-    if (!res.ok) throw new Error(await errorText(res, 'Failed to delete'));
+    if (!res.ok) throw await requestError(res, 'Failed to delete');
     if (res.status !== 204) {
       const data = await res.json().catch(() => ({}));
       if (data && data.trashed) trashed(ctx, id, row.name);
@@ -203,6 +238,7 @@ export async function deleteWorkspace(id, ctx) {
     return true;
   } catch (err) {
     fail(ctx, err, 'Failed to delete.');
+    offerRemovalReview(ctx, [err]);
     return false;
   }
 }
@@ -221,6 +257,7 @@ export async function deleteWorkspaces(ids, ctx) {
 
   let deleted = 0;
   const failures = [];
+  const errors = [];
   for (const id of selected) {
     const row = findRow(ctx, id);
     if (!row) continue;
@@ -231,7 +268,9 @@ export async function deleteWorkspaces(ids, ctx) {
         method: 'DELETE'
       });
       if (!res.ok) {
-        failures.push(row.name);
+        const error = await requestError(res, 'Failed to delete');
+        failures.push(`${row.name}: ${error.message}`);
+        errors.push(error);
         continue;
       }
       if (res.status !== 204) {
@@ -255,6 +294,7 @@ export async function deleteWorkspaces(ids, ctx) {
     toast(ctx, message, 'error');
   }
   await changed(ctx);
+  offerRemovalReview(ctx, errors);
   return deleted;
 }
 
