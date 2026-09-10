@@ -28,9 +28,17 @@ create.
 - The accepted assistant's setup action is an alias of that quest. None of
   the other entry points requires an accepted assistant offer or creates one.
 
-A visual editor for user-owned quests is separate future work, captured in
-[Issue #464](https://github.com/johnjallday/ori-agent/issues/464). This change does
-not add quest-authoring controls or silently duplicate plugin declarations.
+User-owned templates have a separate blank authoring flow under **Templates →
+select a user template → Setup quest**. It edits only bounded display copy for
+the same five fixed ordered stages and selects one host-reviewed integration.
+The template must already have a usable project connection, constructible
+project entry/skeleton, current Assistant Program, File-only runtime mode, and
+required runtime-mode wizard step. Preview and save are inert. Deliberately
+opening the saved quest creates its durable binding and permanently locks its
+protected definition; display metadata and the ordinary Agents roster remain
+editable. Duplicates and quest-bearing folder imports are rehosted with fresh
+local IDs. There is no plugin-quest copy or standalone quest sharing/export
+flow. See [User-owned setup quests](user-setup-quests.md).
 
 Catalog discovery performs reads only. Opening a quest may create an inert
 progress row; it does not install/enable anything, build a group, create a
@@ -43,6 +51,7 @@ Routes are compiled by Ori:
 GET /api/setup-quests
 GET /api/setup-quests/{pluginID}/{questID}
 GET /api/setup-quests/{pluginID}/{questID}/runs/{runID}
+GET /api/user-template-setup-quests/{templateID}/{attachmentID}
 ```
 
 The scoped root also exposes the existing `open`, `dismiss`, `children`,

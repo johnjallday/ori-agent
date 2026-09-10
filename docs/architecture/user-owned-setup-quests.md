@@ -72,12 +72,11 @@ The feature spike traced the #466 checkout at `41d0a747`.
     user, and expected Assistant Program. It creates reviewed scoped roles only;
     it does not inherit a parent's project, mode, tools, or permissions.
 
-Characterization coverage pins the two key rejection seams:
+The characterization coverage now exercises the completed additive seams:
 `internal/projecttemplates/user_setup_quest_characterization_test.go` proves a
-constructible user template is rejected by plugin-only Home/project identity,
-and `TestReviewedIntegrationReadCurrentlyCouplesReviewedAndTargetReferences`
-proves reviewed installation expectations are currently coupled to target
-references.
+constructible user template previews and commits through canonical Home/project
+creation with typed user provenance, and the reviewed-integration adapter tests
+prove installation identity remains separate from local target references.
 
 ## Eligible user template
 
@@ -113,13 +112,14 @@ The on-disk manifest field is distinct from the plugin-only string:
 ```json
 {
   "user_setup_quest": {
+    "source": "user_template",
     "attachment_id": "uqatt_<host-generated-id>",
     "schema_version": 1,
     "version": 1,
     "id": "quest_<host-generated-id>",
     "title": "Set up my project",
     "description": "Connect a project and choose how Ori can help.",
-    "integration_key": "ori_reaper",
+    "integration_key": "<reviewed-integration-key>",
     "expected_blueprint_id": "canonical-local-template-id",
     "expected_assistant_program_id": "user-music-team",
     "workspace_launch": {
@@ -259,7 +259,7 @@ user; they are detected before runtime owners are read or invoked.
 | Tools setter | allowed when effective declaration remains valid | rejected if plugin references/sources change; true no-op allowed |
 | Agents setter | allowed; not the Assistant Program editor | allowed; staffing still uses the locked Assistant Program |
 | Generic file write/create/rename/delete involving `template.json` | rejected; manifest uses structured writers | rejected |
-| Ordinary skeleton file operation | unchanged existing behavior | unchanged; it cannot alter the pinned declaration/reference contract |
+| Ordinary skeleton file operation | unchanged existing behavior | rejected because scaffold content is pinned by the execution digest |
 | Duplicate | ordinary template behavior; a user quest gets fresh attachment, quest, and step IDs | same fresh inert copy; no root/receipt/grant is copied |
 | Import | validates an inert embedded declaration and assigns fresh local identity | source lock metadata is never portable or imported |
 | Plugin `setup_quest` string/import | no plugin quest copy or editable declaration is synthesized | unchanged/read-only plugin semantics |
