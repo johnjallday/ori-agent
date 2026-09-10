@@ -267,6 +267,12 @@ func TestProjectTemplateVariantCatalogStatesAndOwnerIsolation(t *testing.T) {
 	if len(disabled) != 1 || disabled[0].VariantSourceState != projecttemplates.VariantSourceDisabled {
 		t.Fatalf("disabled source catalog = %#v", disabled)
 	}
+	reenabled := resolveCatalogVariants(overlays, []plugin.InstalledPlugin{installed}, "local")
+	if len(reenabled) != 1 || reenabled[0].VariantSourceState != projecttemplates.VariantSourceReady ||
+		reenabled[0].ID != local.ID || reenabled[0].VariantRevision != local.VariantRevision ||
+		reenabled[0].TemplateVariant.Source.DefinitionDigest != local.TemplateVariant.Source.DefinitionDigest {
+		t.Fatalf("re-enabled source changed variant identity or provenance = %#v", reenabled)
+	}
 	changedPlugin := installed
 	changedPlugin.Version = "2.0.0"
 	changed := resolveCatalogVariants(overlays, []plugin.InstalledPlugin{changedPlugin}, "local")

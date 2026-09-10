@@ -164,6 +164,14 @@ func TestHandleGetWorkspaceHydratesDesignationFromFolderStore(t *testing.T) {
 	folderWS := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "HQ Workspace"})
 	folderWS.ID = "hq-workspace"
 	folderWS.Designation = "personal_hq"
+	folderWS.SetTemplateProvenance(&workspace.TemplateProvenance{
+		TemplateID: "standalone-template",
+		GroupRequirement: &workspace.GroupRequirementSnapshot{
+			SchemaVersion: 1, Policy: "none", SelectedComposition: workspace.GroupRequirementCompositionStandalone,
+			TemplateID: "standalone-template", DefinitionDigest: strings.Repeat("a", 64),
+			ReviewDigest: strings.Repeat("b", 64), OperationDigest: strings.Repeat("c", 64), AppliedAt: now,
+		},
+	})
 	if err := folderStore.Save(folderWS); err != nil {
 		t.Fatalf("Save folder workspace: %v", err)
 	}
@@ -184,6 +192,10 @@ func TestHandleGetWorkspaceHydratesDesignationFromFolderStore(t *testing.T) {
 	}
 	if got := response["designation"]; got != "personal_hq" {
 		t.Fatalf(`expected designation hydrated from folder store to "personal_hq", got %#v`, got)
+	}
+	status, ok := response["group_requirement_status"].(map[string]any)
+	if !ok || status["state"] != string(workspace.GroupRequirementStatusReadyStandalone) {
+		t.Fatalf("expected canonical standalone group status, got %#v", response["group_requirement_status"])
 	}
 }
 
