@@ -365,6 +365,68 @@ entry, scaffold, and topology failures belong to the reviewed operation and
 remain resumable—not warnings. Agent/capability/runtime grants stay with their
 existing explicit owners after successful topology.
 
+## Implemented host behavior and local evidence
+
+The host implementation is split into independently reviewable commits:
+
+- `690ac620` defines this contract and its rollout boundary.
+- `175bfa59` adds strict authoring, preview, and source-linked variants.
+- `856bf2f6` adds the canonical evaluator, durable review/operation receipts,
+  creation-path enforcement, clean-start snapshots, and grouped/standalone
+  composition.
+- `d5e6413e` adds snapshot-driven lifecycle projection, move/delete protection,
+  reviewed disconnect/reconnect and Home removal, and workspace recovery UI.
+- `335035c8` makes the disposable REAPER demo accept an explicit candidate
+  source without changing reviewed or user-installed plugin state.
+
+Production receipts use SQLite tables `group_requirement_reviews` and
+`group_requirement_operations`. Clean-start placement provenance remains in the
+canonical folder `workspace.json`. Required success observes exact parent,
+typed child link, reciprocal Home membership, stable owner/program identity,
+and matching operation digest. Browser review data never supplies owner,
+source, Home, or permission authority.
+
+The canonical workspace, existing-workspace project, setup journey, Map/shared
+creator, and applicable chat-tool paths use the same evaluator or return a
+bounded guided-create refusal. The legacy Assistant Program Activate route
+cannot repair an unfulfilled Required snapshot; only reviewed reconnect may do
+so. Ordinary parent moves remain organizational and cannot mint program
+membership or authority.
+
+The separately owned REAPER implementation is commit `c3487d7` in
+`/Users/jjdev/Projects/ori/worktrees/reaper-plugin-template-groups`. Two clean
+local builds produced identical candidate bytes:
+
+```text
+plugin version: 0.6.0
+Reaper Song blueprint: 6
+artifact size: 8780098 bytes
+sha256: 4def4fec14ecf083b0358c686c608514d4b9afff99dd810f1184213312770119
+```
+
+A disposable host run demonstrated one renamed Home with two exact Required
+children, one standalone variant project, idempotent create/reconnect replay,
+stale-review and arbitrary-move refusal, Required activation-bypass refusal,
+Home removal preserving project paths/tasks/snapshots, and one canonical
+`workspace.json` per workspace ID. Editing the variant from None to Recommended
+after creation left the existing project's recorded None/standalone snapshot
+unchanged. Screenshots and endpoint evidence are under the gitignored
+`tasks/screenshots/` and `tasks/*evidence.json`; they are local development
+evidence only.
+
+Validation completed with the main Go suite, 2,660 JS module tests, affected Go
+package and race suites, ESLint, Prettier, vet, ratcheted golangci-lint, the
+Playwright group-requirement acceptance spec, and `git diff --check`. Scoped
+`gosec` produced 99 findings both at the branch merge base and current tree,
+with zero normalized new findings; the package-wide legacy baseline was not
+misreported as a feature regression. The final smoke run passed 49 tests and
+skipped one; its one failure was the unrelated CSV-storage task setup receiving
+`409 insufficient_resources` for `craft`. The same focused failure reproduced
+on a clean server built from `origin/dev` commit `ce18a03c`, so it is recorded as
+target-branch baseline rather than hidden or attributed to this feature. The
+plugin separately passed all Go tests, vet, 16 UI tests, deterministic artifact
+verification, and release packaging.
+
 ## Host/plugin compatibility and delivery
 
 The exact required host feature is `template_group_requirements_v1`. A trusted
