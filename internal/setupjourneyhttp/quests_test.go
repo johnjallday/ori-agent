@@ -12,6 +12,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/plugin"
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/setupjourney"
 	"github.com/johnjallday/ori-agent/internal/specialist"
 )
@@ -25,6 +26,18 @@ func (absentQuestRelationship) GetState(context.Context, string) (*personalassis
 type emptyQuestPlugins struct{}
 
 func (emptyQuestPlugins) List() ([]plugin.InstalledPlugin, error) { return nil, nil }
+
+type httpUserQuestLibrary struct{ template projecttemplates.Template }
+
+func (l httpUserQuestLibrary) ListUserSetupQuestTemplates(context.Context) ([]projecttemplates.Template, error) {
+	return []projecttemplates.Template{l.template}, nil
+}
+func (l httpUserQuestLibrary) FindUserSetupQuestTemplate(context.Context, string) (projecttemplates.Template, error) {
+	return l.template, nil
+}
+func (httpUserQuestLibrary) WithUserSetupQuestMutationLock(_ context.Context, operation func() error) error {
+	return operation()
+}
 
 func questHTTPFixture(t *testing.T) (*setupjourney.Service, *database.DB) {
 	t.Helper()
@@ -60,6 +73,9 @@ func questHTTPMux(service *setupjourney.Service, user string) *http.ServeMux {
 	mux.HandleFunc("GET "+root+"/runs/{runID}", h.ScopeQuest((*Handler).GetRun))
 	mux.HandleFunc("POST "+root+"/open", h.ScopeQuest((*Handler).OpenRoot))
 	mux.HandleFunc("POST "+root+"/runs/{runID}/actions/{actionID}", h.ScopeQuest((*Handler).Mutate))
+	const userRoot = "/api/user-template-setup-quests/{templateID}/{attachmentID}"
+	mux.HandleFunc("GET "+userRoot, h.ScopeUserTemplateQuest((*Handler).GetRoot))
+	mux.HandleFunc("POST "+userRoot+"/runs/{runID}/actions/{actionID}", h.ScopeUserTemplateQuest((*Handler).Mutate))
 	return mux
 }
 
@@ -105,5 +121,65 @@ func TestQuestHTTPDiscoveryIsReadOnlyAndScopeComesOnlyFromTrustedPathAndUser(t *
 	questHTTPMux(service, "other-user").ServeHTTP(foreign, httptest.NewRequest(http.MethodGet, root+"/runs/"+savedID, nil))
 	if foreign.Code != http.StatusNotFound || strings.Contains(foreign.Body.String(), savedID) {
 		t.Fatalf("cross-user read: %d %s", foreign.Code, foreign.Body.String())
+	}
+}
+
+func TestUserTemplateQuestHTTPRouteUsesAttachmentIdentityWithoutPluginOwnership(t *testing.T) {
+	service, db := questHTTPFixture(t)
+	template, err := projecttemplates.LoadFolder("../projecttemplates/testdata/user-setup-quest-eligible")
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft := projecttemplates.DefaultUserSetupQuestDraft()
+	draft.IntegrationKey = "ori_reaper"
+	quest, err := projecttemplates.NewUserSetupQuest(template, nil, draft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template.UserSetupQuest = quest
+	template.UserSetupQuestRevision = projecttemplates.UserSetupQuestRevision(quest)
+	service.SetQuestCatalog(setupjourney.CombineQuestCatalogs(
+		setupjourney.NewInstalledQuestCatalog(emptyQuestPlugins{}),
+		setupjourney.NewUserTemplateQuestCatalog(httpUserQuestLibrary{template: template}),
+	))
+	mux := questHTTPMux(service, "local")
+	root := "/api/user-template-setup-quests/" + template.ID + "/" + quest.AttachmentID
+
+	list := httptest.NewRecorder()
+	mux.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/setup-quests", nil))
+	var catalogBody struct {
+		Quests []setupjourney.QuestSummary `json:"quests"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &catalogBody); err != nil {
+		t.Fatal(err)
+	}
+	foundUser := false
+	for _, item := range catalogBody.Quests {
+		if item.Source == setupjourney.QuestSourceUserTemplate {
+			foundUser = item.PluginID == "" && item.TemplateID == template.ID && item.AttachmentID == quest.AttachmentID
+		}
+	}
+	if list.Code != http.StatusOK || !foundUser {
+		t.Fatalf("list=%d %s", list.Code, list.Body.String())
+	}
+	var before int
+	_ = db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM setup_journey_run").Scan(&before)
+	if before != 0 {
+		t.Fatalf("catalog read created %d progress rows", before)
+	}
+
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, root, nil))
+	var body journeyResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusOK || body.Journey == nil || body.Journey.Journey.Source != setupjourney.QuestSourceUserTemplate ||
+		body.Journey.Journey.PluginID != "" || body.Journey.Journey.AttachmentID != quest.AttachmentID {
+		t.Fatalf("user route=%d %s", response.Code, response.Body.String())
+	}
+	var bindings int
+	if err := db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM setup_user_template_binding").Scan(&bindings); err != nil || bindings != 1 {
+		t.Fatalf("bindings=%d err=%v", bindings, err)
 	}
 }

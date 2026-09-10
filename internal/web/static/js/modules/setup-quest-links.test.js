@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   ASSISTANT_SETUP_ROOT,
   setupQuestAPIRoot,
+  userTemplateSetupQuestAPIRoot,
   setupJourneyAPIRoot,
   setupQuestURL,
   setupQuestForTemplate,
@@ -13,6 +14,12 @@ const quest = {
   plugin_id: 'demo-plugin',
   id: 'demo_setup',
   template_id: 'plugin:demo-plugin:project'
+};
+const userQuest = {
+  source: 'user_template',
+  template_id: 'local-project',
+  attachment_id: 'uqatt_0123456789abcdef01234567',
+  id: 'quest_0123456789abcdef01234567'
 };
 
 test('quest routes are compiled from exact IDs, not plugin URLs or arbitrary paths', () => {
@@ -45,6 +52,36 @@ test('quest routes are compiled from exact IDs, not plugin URLs or arbitrary pat
     assert.throws(() => setupQuestAPIRoot(quest.plugin_id, bad));
   }
   assert.throws(() => setupJourneyAPIRoot({ journey: { plugin_id: '../other', id: quest.id } }));
+});
+
+test('user template routes use source-aware attachment identity without a plugin owner', () => {
+  assert.equal(
+    userTemplateSetupQuestAPIRoot(userQuest.template_id, userQuest.attachment_id),
+    '/api/user-template-setup-quests/local-project/uqatt_0123456789abcdef01234567'
+  );
+  assert.equal(
+    setupJourneyAPIRoot({ journey: userQuest }),
+    '/api/user-template-setup-quests/local-project/uqatt_0123456789abcdef01234567'
+  );
+  assert.equal(
+    setupQuestURL(userQuest),
+    '/?setup=quest&source=user_template&template=local-project&attachment=uqatt_0123456789abcdef01234567'
+  );
+  const template = {
+    id: userQuest.template_id,
+    user_setup_quest: { attachment_id: userQuest.attachment_id }
+  };
+  assert.equal(setupQuestForTemplate(template, [userQuest]), userQuest);
+  assert.equal(
+    setupQuestForTemplate(template, [
+      { ...userQuest, attachment_id: 'uqatt_aaaaaaaaaaaaaaaaaaaaaaaa' }
+    ]),
+    null
+  );
+  assert.throws(() => userTemplateSetupQuestAPIRoot('../local', userQuest.attachment_id));
+  assert.throws(() =>
+    userTemplateSetupQuestAPIRoot(userQuest.template_id, 'quest_0123456789abcdef01234567')
+  );
 });
 
 test('template lookup matches exact ownership, optional legacy reference, and refuses ambiguity', () => {

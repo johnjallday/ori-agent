@@ -18,6 +18,9 @@ import (
 type Store interface {
 	FindQuestRoot(ctx context.Context, userID string, key QuestKey, legacySlug string) (*Run, error)
 	CreateOrGetRoot(ctx context.Context, spec RootSpec) (*Run, bool, error)
+	CreateOrGetUserTemplateRoot(ctx context.Context, spec RootSpec, binding UserTemplateBinding) (*Run, bool, error)
+	ClaimUserTemplateRoot(ctx context.Context, claim UserTemplateRootClaim) (*UserTemplateRootClaim, bool, error)
+	ClaimUserTemplateRoots(ctx context.Context, claims []UserTemplateRootClaim) error
 	GetRoot(ctx context.Context, ownerUserID, relationshipID, specialistSlug, journeyID string) (*Run, error)
 	CreateOrGetChild(ctx context.Context, rootRunID string) (*Run, bool, error)
 	GetRun(ctx context.Context, runID string) (*Run, error)
@@ -103,31 +106,36 @@ func (s *SQLiteStore) CreateOrGetRoot(ctx context.Context, spec RootSpec) (*Run,
 	var result *Run
 	created := false
 	err = s.db.InTransaction(ctx, func(tx *sql.Tx) error {
-		execResult, execErr := tx.ExecContext(ctx, `
-			INSERT OR IGNORE INTO setup_journey_run (
-				id, run_kind, root_run_id, owner_user_id, relationship_id,
-				specialist_slug, journey_id, declaration_schema_version, declaration_version,
-				state_revision, lifecycle_state, current_step_id, step_states_json, dismissed,
-				created_at, updated_at
-			) VALUES (?, 'root', NULL, ?, ?, ?, ?, ?, ?, 1, 'not_started', ?, ?, 0, ?, ?)
-		`, run.ID, run.OwnerUserID, run.RelationshipID, run.SpecialistSlug, run.JourneyID,
-			run.DeclarationSchemaVersion, run.DeclarationVersion, run.CurrentStepID,
-			stepJSON, run.CreatedAt, run.UpdatedAt)
-		if execErr != nil {
-			return execErr
-		}
-		rows, rowsErr := execResult.RowsAffected()
-		if rowsErr != nil {
-			return rowsErr
-		}
-		created = rows == 1
-		result, execErr = getRootWith(ctx, tx, run.OwnerUserID, run.RelationshipID, run.SpecialistSlug, run.JourneyID)
-		return execErr
+		var createErr error
+		result, created, createErr = createOrGetRootWith(ctx, tx, run, stepJSON)
+		return createErr
 	})
 	if err != nil {
 		return nil, false, fmt.Errorf("setup journey: create root: %w", err)
 	}
 	return result.Clone(), created, nil
+}
+
+func createOrGetRootWith(ctx context.Context, tx *sql.Tx, run *Run, stepJSON string) (*Run, bool, error) {
+	execResult, err := tx.ExecContext(ctx, `
+		INSERT OR IGNORE INTO setup_journey_run (
+			id, run_kind, root_run_id, owner_user_id, relationship_id,
+			specialist_slug, journey_id, declaration_schema_version, declaration_version,
+			state_revision, lifecycle_state, current_step_id, step_states_json, dismissed,
+			created_at, updated_at
+		) VALUES (?, 'root', NULL, ?, ?, ?, ?, ?, ?, 1, 'not_started', ?, ?, 0, ?, ?)
+	`, run.ID, run.OwnerUserID, run.RelationshipID, run.SpecialistSlug, run.JourneyID,
+		run.DeclarationSchemaVersion, run.DeclarationVersion, run.CurrentStepID,
+		stepJSON, run.CreatedAt, run.UpdatedAt)
+	if err != nil {
+		return nil, false, err
+	}
+	rows, err := execResult.RowsAffected()
+	if err != nil {
+		return nil, false, err
+	}
+	result, err := getRootWith(ctx, tx, run.OwnerUserID, run.RelationshipID, run.SpecialistSlug, run.JourneyID)
+	return result, rows == 1, err
 }
 
 func (s *SQLiteStore) GetRoot(ctx context.Context, ownerUserID, relationshipID, specialistSlug, journeyID string) (*Run, error) {

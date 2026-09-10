@@ -18,6 +18,26 @@ var (
 
 var assistantProgramProvisionMu sync.Mutex
 
+func validAssistantProgramUserOwner(provenance *TemplateProvenance) bool {
+	if provenance == nil || provenance.UserTemplateOwner == nil {
+		return true
+	}
+	owner := provenance.UserTemplateOwner
+	if strings.TrimSpace(owner.TemplateID) == "" || owner.TemplateID != provenance.TemplateID ||
+		strings.TrimSpace(owner.AttachmentID) == "" || strings.TrimSpace(owner.QuestID) == "" {
+		return false
+	}
+	for _, digest := range []string{owner.DefinitionDigest, owner.ExecutionDigest} {
+		if len(digest) != sha256.Size*2 {
+			return false
+		}
+		if _, err := hex.DecodeString(digest); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
 // AssistantProgramStore owns generic station lookup/link mutations. It relies
 // only on stable persisted IDs and Store.Update; names and tags are display-only.
 type AssistantProgramStore struct {
@@ -31,7 +51,11 @@ func NewAssistantProgramStore(store Store) *AssistantProgramStore {
 
 func assistantStationFolderSlug(key AssistantProgramKey) string {
 	normalized := key.Normalize()
-	digest := sha256.Sum256([]byte(normalized.OwnerUserID + "\x00" + normalized.PluginID + "\x00" + normalized.ProgramID))
+	identity := normalized.PluginID
+	if identity == "" {
+		identity = "user_template\x00" + normalized.TemplateID + "\x00" + normalized.AttachmentID
+	}
+	digest := sha256.Sum256([]byte(normalized.OwnerUserID + "\x00" + identity + "\x00" + normalized.ProgramID))
 	return "assistant-" + hex.EncodeToString(digest[:8])
 }
 
@@ -200,7 +224,7 @@ func (service *AssistantProgramStore) EnsureProjectStation(projectID string) (*W
 	// canonical workspace.json field. Resolve that portable declaration before
 	// failing closed so first-run station provisioning works in production, not
 	// only with stores that keep every field in one record.
-	if provenance == nil || provenance.PluginOwner == nil || provenance.AssistantProgram == nil {
+	if provenance == nil || (provenance.PluginOwner == nil && provenance.UserTemplateOwner == nil) || provenance.AssistantProgram == nil {
 		type canonicalWorkspaceReader interface {
 			GetFolderWorkspace(string) (*Workspace, error)
 		}
@@ -210,14 +234,18 @@ func (service *AssistantProgramStore) EnsureProjectStation(projectID string) (*W
 			}
 		}
 	}
-	if provenance == nil || provenance.PluginOwner == nil || provenance.AssistantProgram == nil {
+	if provenance == nil || (provenance.PluginOwner == nil && provenance.UserTemplateOwner == nil) || provenance.AssistantProgram == nil ||
+		(provenance.PluginOwner != nil && provenance.UserTemplateOwner != nil) || !validAssistantProgramUserOwner(provenance) {
 		return nil, false, ErrAssistantProgramUnavailable
 	}
-	key := AssistantProgramKey{
-		OwnerUserID: project.OwnerUserID,
-		PluginID:    provenance.PluginOwner.PluginID,
-		ProgramID:   provenance.AssistantProgram.ID,
-	}.Normalize()
+	key := AssistantProgramKey{OwnerUserID: project.OwnerUserID, ProgramID: provenance.AssistantProgram.ID}
+	if provenance.PluginOwner != nil {
+		key.PluginID = provenance.PluginOwner.PluginID
+	} else {
+		key.TemplateID = provenance.UserTemplateOwner.TemplateID
+		key.AttachmentID = provenance.UserTemplateOwner.AttachmentID
+	}
+	key = key.Normalize()
 	if !key.Valid() {
 		return nil, false, ErrAssistantProgramUnavailable
 	}

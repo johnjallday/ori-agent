@@ -65,7 +65,10 @@ type OverviewProjection struct {
 // selected declaration. Integration/blueprint/program constraints remain on the
 // server and are not client-selectable fields.
 type DeclarationProjection struct {
+	Source          QuestSource                     `json:"source,omitempty"`
 	PluginID        string                          `json:"plugin_id,omitempty"`
+	TemplateID      string                          `json:"template_id,omitempty"`
+	AttachmentID    string                          `json:"attachment_id,omitempty"`
 	ID              string                          `json:"id"`
 	SchemaVersion   int                             `json:"schema_version"`
 	Version         int                             `json:"version"`
@@ -187,15 +190,16 @@ type entryResolver func(slug string) (specialist.Entry, bool)
 // Service reconciles bounded journey rows against current relationship and
 // canonical owner reads.
 type Service struct {
-	store          Store
-	relationships  RelationshipReader
-	readers        *ReaderRegistry
-	actionAdapters map[specialist.SetupStepKind]JourneyActionAdapter
-	resolveEntry   entryResolver
-	quests         QuestCatalog
-	quest          *QuestKey
-	migrations     map[declarationMigrationKey]DeclarationMigration
-	now            func() time.Time
+	store              Store
+	relationships      RelationshipReader
+	readers            *ReaderRegistry
+	actionAdapters     map[specialist.SetupStepKind]JourneyActionAdapter
+	resolveEntry       entryResolver
+	quests             QuestCatalog
+	quest              *QuestKey
+	userTemplateLocker userTemplateQuestMutationLocker
+	migrations         map[declarationMigrationKey]DeclarationMigration
+	now                func() time.Time
 }
 
 func NewService(store Store, relationships RelationshipReader, readers *ReaderRegistry) (*Service, error) {
@@ -247,6 +251,27 @@ func (s *Service) SetActionAdapter(kind specialist.SetupStepKind, adapter Journe
 // root row when first needed, authorizes an optional child ID through that
 // exact root, and reconciles every declared step.
 func (s *Service) Read(ctx context.Context, userID, runID string) (*JourneyProjection, error) {
+	if s != nil && s.quest != nil && s.quest.Source == QuestSourceUserTemplate {
+		if s.userTemplateLocker == nil {
+			return nil, failure(ReasonJourneyUnavailable, 0)
+		}
+		var projection *JourneyProjection
+		var readErr error
+		if err := s.userTemplateLocker.WithUserSetupQuestMutationLock(ctx, func() error {
+			projection, readErr = s.read(ctx, userID, runID)
+			return readErr
+		}); err != nil {
+			if readErr != nil {
+				return nil, readErr
+			}
+			return nil, failure(ReasonJourneyUnavailable, 0)
+		}
+		return projection, nil
+	}
+	return s.read(ctx, userID, runID)
+}
+
+func (s *Service) read(ctx context.Context, userID, runID string) (*JourneyProjection, error) {
 	if s == nil || s.store == nil || s.relationships == nil || s.readers == nil || s.resolveEntry == nil || s.now == nil {
 		return nil, failure(ReasonJourneyUnavailable, 0)
 	}
@@ -262,13 +287,23 @@ func (s *Service) Read(ctx context.Context, userID, runID string) (*JourneyProje
 	for index, step := range declaration.Steps {
 		stepIDs[index] = step.ID
 	}
-	root, _, storeErr := s.store.CreateOrGetRoot(ctx, RootSpec{
+	rootSpec := RootSpec{
 		OwnerUserID: userID, RelationshipID: relationship.AssistantID,
 		SpecialistSlug: relationship.SpecialistSlug, JourneyID: declaration.ID,
 		DeclarationSchemaVersion: declaration.SchemaVersion,
 		DeclarationVersion:       declaration.Version, StepIDs: stepIDs,
-	})
+	}
+	var root *Run
+	var storeErr error
+	if relationship.Binding != nil {
+		root, _, storeErr = s.store.CreateOrGetUserTemplateRoot(ctx, rootSpec, *relationship.Binding)
+	} else {
+		root, _, storeErr = s.store.CreateOrGetRoot(ctx, rootSpec)
+	}
 	if storeErr != nil {
+		if errors.Is(storeErr, ErrUserTemplateBindingMismatch) {
+			return nil, failure(ReasonDeclarationInvalid, 0)
+		}
 		return nil, safeStoreFailure(storeErr, 0)
 	}
 
@@ -280,7 +315,13 @@ func (s *Service) Read(ctx context.Context, userID, runID string) (*JourneyProje
 			return nil, failure(ReasonRunNotFound, root.StateRevision)
 		}
 	}
-	return s.reconcile(ctx, declaration, root, run)
+	projection, err := s.reconcile(ctx, declaration, root, run)
+	if err == nil && projection != nil && relationship.QuestKey.Source == QuestSourceUserTemplate {
+		projection.Journey.Source = QuestSourceUserTemplate
+		projection.Journey.TemplateID = relationship.QuestKey.TemplateID
+		projection.Journey.AttachmentID = relationship.QuestKey.AttachmentID
+	}
+	return projection, err
 }
 
 // Overview reconciles the accepted relationship's root and a bounded list of
@@ -401,6 +442,9 @@ func (s *Service) reconcile(ctx context.Context, declaration *specialist.SetupJo
 						if step.ID != busy.StepID || step.Kind != kind || !validCanonicalRead(kind, settledReads[index]) ||
 							!adapter.ConsequenceObserved(ActionID(busy.ActionID), settledReads[index]) {
 							continue
+						}
+						if claimErr := s.claimUserTemplateResultRoots(ctx, root.OwnerUserID, settledReads[index].Result); claimErr != nil {
+							return nil, failure(ReasonProjectAlreadyConnected, run.StateRevision)
 						}
 						_, updated, replayed, finalizeErr := s.store.FinalizeOperation(ctx, settled, busy.IdempotencyKey, OperationCompletion{
 							Status: OperationSucceeded, ResultCode: ResultAlreadyCurrent, Result: settledReads[index].Result,
@@ -554,6 +598,10 @@ func scopeForRun(declaration *specialist.SetupJourney, root, run *Run) ReadScope
 		IntegrationPluginID: root.IntegrationPluginID, IntegrationVersion: root.IntegrationVersion,
 		HomeWorkspaceID: root.HomeWorkspaceID, ProjectWorkspaceID: run.ProjectWorkspaceID,
 		SelectedModeID: run.SelectedModeID,
+	}
+	if root.SpecialistSlug == "user_template_quest" {
+		scope.QuestSource = QuestSourceUserTemplate
+		scope.UserTemplateID = declaration.ExpectedBlueprintID
 	}
 	if run.Kind == RunKindRoot {
 		scope.ProjectWorkspaceID = root.ProjectWorkspaceID
@@ -728,7 +776,7 @@ func projectionFromRun(
 }
 
 func baseProjection(declaration *specialist.SetupJourney, run *Run) *JourneyProjection {
-	return &JourneyProjection{
+	projection := &JourneyProjection{
 		RunID: run.ID, RunKind: run.Kind, RootRunID: run.RootRunID,
 		Journey: DeclarationProjection{
 			PluginID: declaration.OwnerPluginID,
@@ -746,6 +794,11 @@ func baseProjection(declaration *specialist.SetupJourney, run *Run) *JourneyProj
 		FirstOpenedAt: cloneTime(run.FirstOpenedAt), LastDismissedAt: cloneTime(run.LastDismissedAt),
 		FirstCompletedAt: cloneTime(run.FirstCompletedAt), UpdatedAt: run.UpdatedAt.UTC(),
 	}
+	if run.SpecialistSlug == "user_template_quest" {
+		projection.Journey.Source = QuestSourceUserTemplate
+		projection.Journey.TemplateID = declaration.ExpectedBlueprintID
+	}
+	return projection
 }
 
 func materialRunChange(before, after *Run) bool {

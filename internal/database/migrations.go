@@ -12,7 +12,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 56
+const schemaVersion = 57
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -179,6 +179,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration055SampleLibrary(ctx)
 	case 56:
 		return db.migration056AgentMapLayouts(ctx)
+	case 57:
+		return db.migration057UserSetupQuestBindings(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -3009,6 +3011,49 @@ func (db *DB) migration056AgentMapLayouts(ctx context.Context) error {
 	for _, stmt := range statements {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("failed to create agent map layout schema: %w", err)
+		}
+	}
+	return nil
+}
+
+// migration057UserSetupQuestBindings records the immutable execution identity
+// for a user-owned template quest before any canonical setup consequence. Root
+// claims prevent another quest/user from adopting a Home, project or workspace
+// identity. Both tables are additive; plugin journey rows remain untouched.
+func (db *DB) migration057UserSetupQuestBindings(ctx context.Context) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS setup_user_template_binding (
+			user_id TEXT NOT NULL,
+			template_id TEXT NOT NULL,
+			attachment_id TEXT NOT NULL,
+			quest_id TEXT NOT NULL,
+			definition_digest TEXT NOT NULL,
+			execution_digest TEXT NOT NULL,
+			created_at DATETIME NOT NULL,
+			PRIMARY KEY (user_id, template_id, attachment_id),
+			UNIQUE (user_id, quest_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_setup_user_template_binding_template
+			ON setup_user_template_binding(user_id, template_id)`,
+		`CREATE TABLE IF NOT EXISTS setup_user_template_root_claim (
+			root_kind TEXT NOT NULL,
+			root_id TEXT NOT NULL,
+			user_id TEXT NOT NULL,
+			template_id TEXT NOT NULL,
+			attachment_id TEXT NOT NULL,
+			quest_id TEXT NOT NULL,
+			created_at DATETIME NOT NULL,
+			PRIMARY KEY (root_kind, root_id),
+			FOREIGN KEY (user_id, template_id, attachment_id)
+				REFERENCES setup_user_template_binding(user_id, template_id, attachment_id)
+				ON DELETE RESTRICT
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_setup_user_template_root_claim_binding
+			ON setup_user_template_root_claim(user_id, template_id, attachment_id)`,
+	}
+	for _, statement := range statements {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("failed to create user setup quest binding schema: %w", err)
 		}
 	}
 	return nil

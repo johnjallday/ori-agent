@@ -4,7 +4,8 @@ import { groupBuildState, isGroupBuilderOpen, openGroupBuilder } from './group-b
 import {
   ASSISTANT_SETUP_ROOT,
   setupJourneyAPIRoot,
-  setupQuestAPIRoot
+  setupQuestAPIRoot,
+  userTemplateSetupQuestAPIRoot
 } from './setup-quest-links.js';
 
 const state = {
@@ -1473,9 +1474,13 @@ export async function openSpecialistSetupJourney(requested = null) {
   try {
     const previousRunID = state.journey?.run_id;
     const root =
-      selection.plugin_id != null || selection.quest_id != null
-        ? setupQuestAPIRoot(selection.plugin_id, selection.quest_id)
-        : ASSISTANT_SETUP_ROOT;
+      selection.source === 'user_template' ||
+      selection.template_id != null ||
+      selection.attachment_id != null
+        ? userTemplateSetupQuestAPIRoot(selection.template_id, selection.attachment_id)
+        : selection.plugin_id != null || selection.quest_id != null
+          ? setupQuestAPIRoot(selection.plugin_id, selection.quest_id)
+          : ASSISTANT_SETUP_ROOT;
     const endpoint = requestedRunID ? `${root}/runs/${encodeURIComponent(requestedRunID)}` : root;
     let payload = await request(endpoint);
     state.journey = payload?.setup_journey;
@@ -1569,10 +1574,18 @@ function initialize() {
   const params = new URLSearchParams(window.location.search);
   if (params.get('setup') === 'specialist') openSpecialistSetupJourney();
   if (params.get('setup') === 'quest') {
-    openSpecialistSetupJourney({
-      plugin_id: params.get('plugin') || '',
-      quest_id: params.get('quest') || ''
-    });
+    openSpecialistSetupJourney(
+      params.get('source') === 'user_template'
+        ? {
+            source: 'user_template',
+            template_id: params.get('template') || '',
+            attachment_id: params.get('attachment') || ''
+          }
+        : {
+            plugin_id: params.get('plugin') || '',
+            quest_id: params.get('quest') || ''
+          }
+    );
   }
 }
 

@@ -127,14 +127,15 @@ func integrationResolver(entry reviewedintegration.Entry) IntegrationEntryResolv
 	}
 }
 
-// TestReviewedIntegrationReadCurrentlyCouplesReviewedAndTargetReferences pins
-// the pre-user-quest seam. The reviewed plugin contribution is valid, but a
-// local template/program target cannot enter the adapter until reviewed
-// installation expectations and user target references are carried separately.
-func TestReviewedIntegrationReadCurrentlyCouplesReviewedAndTargetReferences(t *testing.T) {
+// TestReviewedIntegrationReadSeparatesReviewedSoftwareFromUserTemplateTarget
+// proves a host-reviewed key still owns software identity while the bound local
+// template independently owns blueprint/program target identity.
+func TestReviewedIntegrationReadSeparatesReviewedSoftwareFromUserTemplateTarget(t *testing.T) {
 	entry, descriptor, report, scope := readyIntegrationFixture(t)
 	manager := &fakeReviewedIntegrationManager{descriptor: descriptor, report: report}
 	adapter := newReviewedIntegrationAdapter(manager, integrationResolver(entry), "darwin/arm64")
+	scope.QuestSource = QuestSourceUserTemplate
+	scope.UserTemplateID = "user-setup-quest-eligible"
 	scope.ExpectedBlueprintID = "user-setup-quest-eligible"
 	scope.ExpectedAssistantProgramID = "user-music-team"
 
@@ -142,8 +143,8 @@ func TestReviewedIntegrationReadCurrentlyCouplesReviewedAndTargetReferences(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if read.BlockedReason != ReasonIntegrationIdentityMismatch || manager.inspections != 0 {
-		t.Fatalf("reviewed/target reference coupling changed: read=%+v inspections=%d", read, manager.inspections)
+	if read.BlockedReason != "" || len(read.AvailableActions) != 1 || read.AvailableActions[0] != ActionReviewInstall || manager.inspections != 1 {
+		t.Fatalf("reviewed software was not kept independent: read=%+v inspections=%d", read, manager.inspections)
 	}
 }
 
