@@ -23,6 +23,7 @@ const (
 const (
 	ReasonChat          = "chat"          // a chat message the user sent
 	ReasonManualTask    = "manual_task"   // a task the user ran by hand
+	ReasonQuest         = "quest"         // an onboarding quest the user finished
 	ReasonHarvest       = "harvest"       // Farm runs the user opened and banked
 	ReasonBuild         = "build"         // turning a task into a Farm
 	ReasonUpgrade       = "upgrade"       // speeding a Farm's cadence up
@@ -39,6 +40,7 @@ const (
 	RefKindBuild    = "build"
 	RefKindUpgrade  = "upgrade"
 	RefKindBackfill = "backfill"
+	RefKindQuest    = "quest"
 )
 
 // ErrStoreUnavailable means no ledger storage is wired. Callers treat it the way

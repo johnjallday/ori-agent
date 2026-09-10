@@ -2,6 +2,7 @@ package economy
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -539,6 +540,96 @@ func TestEnergyFallsBackToTheTunedDefault(t *testing.T) {
 	if overview.Energy.DailyFigure != DefaultDailyEnergyTokens {
 		t.Fatalf("daily figure = %d, want the tuned default %d",
 			overview.Energy.DailyFigure, DefaultDailyEnergyTokens)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Starter quests (Group 7)
+// ---------------------------------------------------------------------------
+
+func TestFinishingAStarterQuestEarnsCraft(t *testing.T) {
+	ctx := context.Background()
+	service, _, _ := newService(t)
+
+	awarded, ok := service.AwardQuestCraft(ctx, "t1-first-message")
+	if !ok || awarded != CraftPerStarterQuest {
+		t.Fatalf("awarded %d ok=%v, want %d and true", awarded, ok, CraftPerStarterQuest)
+	}
+	if got := balancesOf(t, service).Craft; got != CraftPerStarterQuest {
+		t.Fatalf("craft = %d, want %d", got, CraftPerStarterQuest)
+	}
+}
+
+// A quest can only be finished once, so the second call pays nothing and
+// reports that it paid nothing — a caller must not be able to toast a phantom
+// reward.
+func TestAStarterQuestPaysOnlyOnce(t *testing.T) {
+	ctx := context.Background()
+	service, _, _ := newService(t)
+
+	if _, ok := service.AwardQuestCraft(ctx, "t2-run-task"); !ok {
+		t.Fatal("first award did not pay")
+	}
+	awarded, ok := service.AwardQuestCraft(ctx, "t2-run-task")
+	if ok || awarded != 0 {
+		t.Fatalf("second award = %d ok=%v, want 0 and false", awarded, ok)
+	}
+	if got := balancesOf(t, service).Craft; got != CraftPerStarterQuest {
+		t.Fatalf("craft = %d after paying twice, want %d", got, CraftPerStarterQuest)
+	}
+}
+
+// Only the early quests pay. Later tiers are past the cold-start wall and the
+// user is earning normally by then.
+func TestOnlyEarlyQuestsPay(t *testing.T) {
+	ctx := context.Background()
+	service, _, _ := newService(t)
+
+	for _, questID := range []string{"t3-second-agent", "t5-create-trigger", "t6-memory", "", "made-up"} {
+		awarded, ok := service.AwardQuestCraft(ctx, questID)
+		if ok || awarded != 0 {
+			t.Fatalf("quest %q awarded %d, want nothing", questID, awarded)
+		}
+	}
+	if got := balancesOf(t, service).Craft; got != 0 {
+		t.Fatalf("craft = %d, want 0", got)
+	}
+}
+
+// The whole reason this exists: a new install must be able to reach its first
+// Farm inside one sitting. Onboarding alone has to cover the build price, or
+// the wall the rewards were added to remove is still there.
+func TestStarterQuestsCoverAFirstFarm(t *testing.T) {
+	if StarterQuestTotal() < FarmBuildCost {
+		t.Fatalf("starter quests pay %d in total but a Farm costs %d — a new user "+
+			"still cannot reach the loop from onboarding alone",
+			StarterQuestTotal(), FarmBuildCost)
+	}
+}
+
+// Every id in the reward table must be a quest that actually exists, or the
+// reward is dead weight nobody can earn. The ids are checked against
+// internal/progression in that package's own test, which can import both.
+func TestStarterQuestIdsAreTierOneAndTwo(t *testing.T) {
+	for questID := range starterQuests {
+		if !strings.HasPrefix(questID, "t1-") && !strings.HasPrefix(questID, "t2-") {
+			t.Fatalf("quest %q pays Craft but is not a Tier 1 or 2 quest; later tiers "+
+				"are past the cold start and should not pay", questID)
+		}
+	}
+}
+
+func TestQuestRewardLookupIsTheOneSourceOfTheAmount(t *testing.T) {
+	amount, ok := StarterQuestCraft("t1-personalize")
+	if !ok || amount != CraftPerStarterQuest {
+		t.Fatalf("StarterQuestCraft = %d, %v; want %d, true", amount, ok, CraftPerStarterQuest)
+	}
+	if _, ok := StarterQuestCraft("t4-enable-skill"); ok {
+		t.Fatal("a Tier 4 quest reported a reward")
+	}
+	// Whitespace is tolerated: ids arrive from a JSON payload.
+	if _, ok := StarterQuestCraft("  t1-personalize  "); !ok {
+		t.Fatal("a padded quest id was not recognized")
 	}
 }
 

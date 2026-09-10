@@ -2131,6 +2131,26 @@ h3,
   color: var(--text-secondary);
 }
 
+/* What an open quest pays (city-economy Group 7).
+   Pushed to the right of the row, ahead of Resume/Skip, and quiet: it is a
+   reason to do the quest, not a second action competing with them. */
+.quest-reward {
+  margin-left: auto;
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.25rem;
+  background: color-mix(in srgb, var(--primary-color) 14%, transparent);
+  color: var(--primary-color);
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* The reward already claims the auto margin, so a row carrying both keeps its
+   status label snug against the buttons instead of fighting for the gap. */
+.quest-reward ~ .quest-status {
+  margin-left: 0;
+}
+
 .quest-resume,
 .quest-skip {
   font-size: 0.78rem;

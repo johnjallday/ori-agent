@@ -86,6 +86,12 @@ type QuestView struct {
 	// Optional mirrors Quest.Optional so the UI can offer Skip only where
 	// valid.
 	Optional bool `json:"optional,omitempty"`
+	// RewardCraft is the Craft this quest pays on completion, or 0 when it pays
+	// nothing. Filled from a resolver the server injects (see WithRewards), so
+	// this package stays a generic quest engine and the economy keeps its prices
+	// in one file. Shown by the quest log: a reward the user cannot see teaches
+	// them nothing about where resources come from.
+	RewardCraft int64 `json:"reward_craft,omitempty"`
 }
 
 // TierView groups a tier's quests for the API.

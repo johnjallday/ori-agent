@@ -28,6 +28,9 @@ type Engine struct {
 	quests []Quest
 	state  types.ProgressionState
 
+	// rewards reports what a quest pays, for display only. Nil means no quest
+	// advertises a reward. See WithRewards.
+	rewards func(questID string) (int64, bool)
 	// onComplete is called (outside the lock) when a quest completes live
 	// (not during backfill). Optional — used for logging/notifications.
 	onComplete func(Quest)
@@ -63,6 +66,17 @@ type Option func(*Engine)
 // WithOnComplete registers a callback fired when a quest completes live.
 func WithOnComplete(fn func(Quest)) Option {
 	return func(e *Engine) { e.onComplete = fn }
+}
+
+// WithRewards registers what each quest pays, so the quest log can show it.
+//
+// Injected rather than declared on Quest because the amounts belong to whoever
+// pays them — the City Economy keeps every price in internal/economy/tuning.go
+// — and this package should not gain a dependency on a currency to render a
+// checklist. Unset means no quest advertises a reward, which is exactly how
+// this behaved before rewards existed.
+func WithRewards(fn func(questID string) (int64, bool)) Option {
+	return func(e *Engine) { e.rewards = fn }
 }
 
 // WithQuests replaces the default graph with a freshly copied cohort-specific
@@ -344,6 +358,11 @@ func (e *Engine) statusLocked() Status {
 		qv := QuestView{
 			ID: q.ID, Tier: q.Tier, Title: q.Title, Why: q.Why, Status: status,
 			ActionURL: q.ActionURL, ActionLabel: q.ActionLabel, Optional: q.Optional,
+		}
+		if e.rewards != nil {
+			if amount, ok := e.rewards(q.ID); ok {
+				qv.RewardCraft = amount
+			}
 		}
 		if done {
 			at := completedAt

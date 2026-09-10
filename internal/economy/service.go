@@ -327,6 +327,52 @@ func (s *Service) dropPendingForDeletedTask(ctx context.Context, ev workspace.Ev
 	}
 }
 
+// AwardQuestCraft pays for an onboarding quest the user just finished.
+//
+// This is the cold start. A brand-new install earns nothing from the first-run
+// backfill, so without it the first Farm is 25 chat messages away — two clock
+// hours, once the hourly cap is applied — and the loop the whole feature is
+// about cannot be reached in one sitting.
+//
+// It is NOT a starter grant. Every quest that pays is real hand-work (send a
+// request, create a workspace, run a task), which is exactly what Craft is for.
+// A quest outside the paying set returns false and writes nothing.
+//
+// Call this only for a LIVE completion. The progression engine's backfill marks
+// an established install's quests complete silently, without firing its
+// onComplete callback, which is what stops this from re-paying for history the
+// economy's own backfill already accounted for. The ledger reference is the
+// quest id, so even a double-delivered completion pays once.
+func (s *Service) AwardQuestCraft(ctx context.Context, questID string) (int64, bool) {
+	if !s.Available() {
+		return 0, false
+	}
+	questID = strings.TrimSpace(questID)
+	amount, rewarded := StarterQuestCraft(questID)
+	if !rewarded {
+		return 0, false
+	}
+
+	inserted, err := s.store.Credit(ctx, Entry{
+		Resource: ResourceCraft,
+		Amount:   amount,
+		Reason:   ReasonQuest,
+		RefKind:  RefKindQuest,
+		RefID:    questID,
+	}, s.clock())
+	if err != nil {
+		logger.Warn("Failed to credit quest Craft", logger.Fields{"quest": questID, "error": err})
+		return 0, false
+	}
+	if !inserted {
+		// Already paid for. Not an error — a quest can only be finished once,
+		// and reporting a second award would let a caller toast a phantom one.
+		return 0, false
+	}
+	logger.Info("Quest Craft awarded", logger.Fields{"quest": questID, "craft": amount})
+	return amount, true
+}
+
 // BankResult is what a harvest returns: how many runs were collected, and the
 // balances afterwards, so the HUD can update from one response.
 type BankResult struct {
