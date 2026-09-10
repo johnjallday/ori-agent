@@ -133,9 +133,10 @@
 /* City Economy HUD (city-economy FR34): what the city has, beside the view
    toggle it shares a shape with.
 
-   These are readouts, not controls: no border, no hover state, and nothing here
-   is focusable. They sit in the same monospace vocabulary as their neighbours so
-   the header reads as one row rather than as a widget bolted onto it.
+   Each element is a button that opens its own explanation. They are styled as
+   readouts rather than as buttons — the number is the point, and three loud
+   controls would compete with the actual actions further along the row — but
+   they carry a hover and a focus ring so the affordance is discoverable.
 
    Every color is an --hc-* token, so both themes come for free — none of these
    values may be hardcoded, and --border-light in particular inverts between
@@ -158,6 +159,24 @@
   font-weight: 600;
   letter-spacing: 0.2px;
   white-space: nowrap;
+  cursor: help;
+}
+
+.cockpit-economy__chip:hover,
+.cockpit-economy__energy:hover {
+  border-color: var(--hc-line-bright);
+}
+
+.cockpit-economy__chip:focus-visible,
+.cockpit-economy__energy:focus-visible {
+  outline: 2px solid var(--hc-signal);
+  outline-offset: 2px;
+}
+
+/* The open element keeps its state visible while its panel is up. */
+.cockpit-economy__chip[aria-expanded="true"],
+.cockpit-economy__energy[aria-expanded="true"] {
+  border-color: var(--hc-signal);
 }
 
 .cockpit-economy__chip-label {
@@ -203,11 +222,17 @@
   }
 }
 
-/* Energy bar (FR31): 120px of track, filled against the user's daily figure. */
+/* Energy bar (FR31): 120px of track, filled against the user's daily figure.
+   A button like its neighbours, but with no plate of its own — the bar is the
+   affordance. */
 .cockpit-economy__energy {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: help;
 }
 
 .cockpit-economy__energy-track {
@@ -268,6 +293,108 @@
   .cockpit-economy__chip.is-earned {
     animation: none;
   }
+}
+
+/* The resource help panel.
+   Anchored under the HUD in the header zone, which is already
+   position: relative for the Updates/Quests flyouts — so this uses the same
+   containing block and the same non-modal, dismiss-on-outside-click behavior. */
+.cockpit-economy-help {
+  position: absolute;
+  top: calc(100% - 4px);
+  left: 12px;
+  z-index: 40;
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  padding: 12px 14px;
+  border: 1px solid var(--hc-line-bright);
+  background: var(--hc-panel-raised);
+  box-shadow: var(--hc-shadow);
+}
+
+.cockpit-economy-help[hidden] {
+  display: none;
+}
+
+.cockpit-economy-help:focus-visible {
+  outline: 2px solid var(--hc-signal);
+  outline-offset: -2px;
+}
+
+.cockpit-economy-help__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cockpit-economy-help__title {
+  margin: 0;
+  color: var(--hc-ink);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.cockpit-economy-help__close {
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--hc-ink-dim);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.cockpit-economy-help__close:hover {
+  color: var(--hc-ink);
+}
+
+.cockpit-economy-help__what {
+  margin: 6px 0 0;
+  color: var(--hc-ink-dim);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* The status line is the useful half: it reads the CURRENT balance and says
+   what to do next, so it gets the ink and an accent edge. */
+.cockpit-economy-help__status {
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  border-left: 2px solid var(--hc-signal);
+  background: color-mix(in srgb, var(--hc-signal) 10%, transparent);
+  color: var(--hc-ink);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.cockpit-economy-help__heading {
+  margin: 10px 0 4px;
+  color: var(--hc-ink-faint);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.cockpit-economy-help__list {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--hc-ink-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.cockpit-economy-help__spend {
+  margin: 10px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--hc-line);
+  color: var(--hc-ink-dim);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 /* Updates/Quests: shaped like the view toggle they sit beside, but each is

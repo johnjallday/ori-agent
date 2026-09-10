@@ -31,6 +31,7 @@ import {
   economyMapSnapshot,
   energyBarView,
   formatTokens,
+  resourceHelpView,
   isGroupWorkspace,
   flattenWorkspaceTree,
   findWorkspace,
@@ -1765,6 +1766,108 @@ test('energy handles a missing payload without dividing by nothing', () => {
     assert.equal(view.percent, 0);
     assert.equal(view.over, false);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Resource help — "what is this and where do I get it"
+// ---------------------------------------------------------------------------
+
+const helpEconomy = {
+  craft: 12,
+  harvest: 4,
+  creativeMode: false,
+  energy: { usedToday: 340000, dailyFigure: 1000000 },
+  farms: [{ workspace_id: 'ws1', task_id: 't1', name: 'Inbox triage' }],
+  pendingByWorkspace: { ws1: 3 }
+};
+
+test('Craft help says how to earn it and what it buys', () => {
+  const view = resourceHelpView('craft', helpEconomy);
+  assert.equal(view.title, 'Craft');
+  assert.match(view.what, /by hand/);
+  assert.equal(view.earn.length, 2);
+  assert.match(view.earn[0], /chat message/);
+  assert.match(view.earn[1], /ran yourself/);
+  assert.match(view.spend, /25 Craft/);
+});
+
+// The status line is the whole reason this is a panel and not a tooltip: it
+// reads the CURRENT balance and says what to do next.
+test('Craft help says exactly how far off the next Farm is', () => {
+  assert.match(resourceHelpView('craft', helpEconomy).status, /you are 13 short/);
+  assert.match(
+    resourceHelpView('craft', { ...helpEconomy, craft: 60 }).status,
+    /enough for 2 more Farms/
+  );
+  assert.match(
+    resourceHelpView('craft', { ...helpEconomy, craft: 25 }).status,
+    /enough for 1 more Farm\b/
+  );
+});
+
+test('Harvest help points at the pile when runs are waiting', () => {
+  const view = resourceHelpView('harvest', helpEconomy);
+  assert.equal(view.title, 'Harvest');
+  assert.match(view.status, /3 runs waiting to collect/);
+  assert.match(view.status, /amber pile/);
+  assert.match(view.earn[1], /Open result/);
+});
+
+// The three states a new user actually passes through, in order.
+test('Harvest help changes as the city grows', () => {
+  const noFarms = resourceHelpView('harvest', {
+    ...helpEconomy,
+    farms: [],
+    pendingByWorkspace: {}
+  });
+  assert.match(noFarms.status, /no Farms yet/);
+
+  const idleFarm = resourceHelpView('harvest', { ...helpEconomy, pendingByWorkspace: {} });
+  assert.match(idleFarm.status, /Nothing is waiting/);
+  assert.match(idleFarm.status, /Farm produces/);
+
+  const producing = resourceHelpView('harvest', helpEconomy);
+  assert.match(producing.status, /waiting to collect/);
+});
+
+test('a single waiting run is described in the singular', () => {
+  const view = resourceHelpView('harvest', { ...helpEconomy, pendingByWorkspace: { ws1: 1 } });
+  assert.match(view.status, /1 run waiting/);
+});
+
+test('Energy help says plainly that nothing pauses', () => {
+  const view = resourceHelpView('energy', helpEconomy);
+  assert.equal(view.title, 'Energy');
+  assert.match(view.earn[0], /Nothing pauses, blocks, or warns/);
+  assert.match(view.earn[1], /Settings → Economy/);
+  assert.match(view.status, /340k of 1M/);
+  assert.match(view.spend, /buys nothing/);
+});
+
+// Creative mode changes what the panel promises, or it would tell the user to
+// go earn Craft they do not need.
+test('creative mode is reflected in both the status and the spend line', () => {
+  const craft = resourceHelpView('craft', { ...helpEconomy, creativeMode: true });
+  assert.match(craft.status, /Creative mode is on/);
+  assert.match(craft.spend, /free right now/);
+
+  const harvest = resourceHelpView('harvest', { ...helpEconomy, creativeMode: true });
+  assert.match(harvest.spend, /free right now/);
+});
+
+test('help renders on an empty or missing economy without inventing numbers', () => {
+  for (const economy of [null, undefined, {}]) {
+    const craft = resourceHelpView('craft', economy);
+    assert.match(craft.status, /You have 0/);
+    assert.match(craft.status, /25 short/);
+    const harvest = resourceHelpView('harvest', economy);
+    assert.match(harvest.status, /no Farms yet/);
+  }
+});
+
+// An unknown resource falls back to Craft rather than rendering a blank panel.
+test('an unrecognized resource still explains something', () => {
+  assert.equal(resourceHelpView('insight', helpEconomy).title, 'Craft');
 });
 
 test('token counts are formatted the way a person reads them', () => {
