@@ -19,8 +19,8 @@ const (
 	maxTasksPerWorkspace         = 20
 	maxOpportunitiesPerWorkspace = 10
 	maxSessionsPerWorkspace      = 5
-	// maxFollowUpsPerBrief bounds Personal HQ commitments globally rather
-	// than once per workspace; follow-ups belong only to the designated HQ.
+	// maxFollowUpsPerBrief bounds projected commitments globally across the
+	// designated HQ and eligible Email Ops owners, never once per workspace.
 	maxFollowUpsPerBrief = 10
 )
 
@@ -102,10 +102,13 @@ type WorkspaceSnapshot struct {
 // upstream by the mailbox runtime; the brief treats them as untrusted display
 // text (task 4.6). Email is HQ-scoped, so these live at the Snapshot top level
 // rather than per-workspace.
-// FollowUpSnapshot is the bounded Personal HQ commitment projection. Detail
-// and source content are intentionally excluded.
+// FollowUpSnapshot is a bounded read-only projection of a commitment owned by
+// its referenced workspace. Detail and source content are intentionally
+// excluded; OwnerName is hydrated from the authorized workspace, never from
+// the follow-up row.
 type FollowUpSnapshot struct {
 	Ref       SourceRef
+	OwnerName string
 	Category  string
 	Direction string
 	Title     string
@@ -132,7 +135,8 @@ type Snapshot struct {
 	// inbox — distinct from an unreadable source, which appends a Gap).
 	EmailThreads []EmailThreadSnapshot
 	// FollowUps contains only active/reopened records owned by the current
-	// user and designated HQ. Nil/empty is healthy when not configured.
+	// user in the designated HQ or a scope-authorized Email Ops workspace.
+	// Nil/empty is healthy when no follow-up source is configured.
 	FollowUps []FollowUpSnapshot
 	// Gaps names data sources that could not be read (an inaccessible
 	// workspace, a failed opportunity/session query, a failed email read, ...)
@@ -260,61 +264,76 @@ func isOpenTaskStatus(status workspace.TaskStatus) bool {
 //     user opts back in — proving inclusion is never silent (PRD FR110).
 func BuildSnapshot(ctx context.Context, sources SnapshotSources, cfg Config, userID string, now time.Time) Snapshot {
 	snap := Snapshot{GeneratedAt: now}
-	if sources.Workspaces == nil {
-		snap.Gaps = append(snap.Gaps, "workspace data is unavailable")
-		return snap
-	}
-
-	var candidates []*workspace.Workspace
-	if cfg.Scope == ScopeSelected {
-		for _, id := range cfg.SelectedWorkspaceIDs {
-			ws, err := sources.Workspaces.Get(id)
-			if err != nil || ws == nil {
-				snap.Gaps = append(snap.Gaps, fmt.Sprintf("workspace %s is unavailable", id))
-				continue
-			}
-			candidates = append(candidates, ws)
-		}
-	} else {
-		all, err := sources.Workspaces.ListActive()
-		if err != nil {
-			snap.Gaps = append(snap.Gaps, "workspace list is unavailable")
-			return snap
-		}
-		candidates = all
-	}
-
-	for _, candidate := range candidates {
-		ws := candidate
-		// SQLite's ListActive path deliberately returns a lean workspace record
-		// without orchestration payloads such as tasks and schedules. Hydrate
-		// all-scope candidates before building the projection so callers such as
-		// Watchtower cannot mistake an omitted payload for a quiet workspace.
-		// Selected scope already loaded each full record above.
-		if cfg.Scope == ScopeAll {
-			fullWorkspace, err := sources.Workspaces.Get(candidate.ID)
-			if err != nil || fullWorkspace == nil {
-				name := strings.TrimSpace(candidate.Name)
-				if name == "" {
-					name = candidate.ID
-				}
-				snap.Gaps = append(snap.Gaps, fmt.Sprintf("workspace %s is unavailable", name))
-				continue
-			}
-			ws = fullWorkspace
-		}
-		if ws == nil || isGroupWorkspace(ws) || ws.Status != workspace.StatusActive {
-			continue
-		}
-		if ws.OwnerUserID != "" && ws.OwnerUserID != userID {
-			continue
-		}
-		if cfg.Scope == ScopeAll && !cfg.IncludeFutureWorkspaces && !cfg.UpdatedAt.IsZero() && ws.CreatedAt.After(cfg.UpdatedAt) {
-			continue
-		}
-		wsSnap, gaps := buildWorkspaceSnapshot(ctx, sources, ws)
+	scope := ResolveWorkspaceScope(sources.Workspaces, cfg, userID)
+	followUpOwners := ResolveFollowUpOwnerScope(sources.Workspaces, scope, cfg.WorkspaceID, userID)
+	snap.Gaps = append(snap.Gaps, followUpOwners.Gaps...)
+	for _, scoped := range scope.Workspaces {
+		wsSnap, gaps := buildWorkspaceSnapshot(ctx, sources, scoped.Workspace)
 		snap.Workspaces = append(snap.Workspaces, wsSnap)
 		snap.Gaps = append(snap.Gaps, gaps...)
+	}
+
+	if sources.FollowUps != nil && strings.TrimSpace(cfg.WorkspaceID) != "" {
+		failedOwners := newWorkspaceScopeGaps()
+		seenRefs := make(map[string]struct{})
+		for _, owner := range followUpOwners.Owners {
+			items, err := sources.FollowUps.List(ctx, followup.Filter{
+				UserID: strings.TrimSpace(userID), WorkspaceID: owner.WorkspaceID,
+				Statuses: []followup.Status{followup.StatusActive, followup.StatusReopened},
+			})
+			if err != nil {
+				if owner.WorkspaceID == strings.TrimSpace(cfg.WorkspaceID) {
+					failedOwners.add("Personal HQ follow-ups could not be read")
+				} else {
+					failedOwners.add(fmt.Sprintf("follow-ups for %s could not be read", boundedWorkspaceLabel(owner.Name)))
+				}
+				continue
+			}
+			for _, item := range items {
+				if item == nil || item.UserID != strings.TrimSpace(userID) || item.WorkspaceID != owner.WorkspaceID ||
+					strings.TrimSpace(item.ID) == "" || item.ID != strings.TrimSpace(item.ID) ||
+					(item.Status != followup.StatusActive && item.Status != followup.StatusReopened) {
+					continue
+				}
+				ref := SourceRef{
+					WorkspaceID: owner.WorkspaceID, WorkspaceSlug: owner.WorkspaceSlug,
+					EntityType: "follow_up", EntityID: item.ID, Timestamp: item.UpdatedAt,
+				}
+				if _, duplicate := seenRefs[ref.Key()]; duplicate {
+					continue
+				}
+				seenRefs[ref.Key()] = struct{}{}
+				dueAt := item.DueAt
+				snap.FollowUps = append(snap.FollowUps, FollowUpSnapshot{
+					Ref: ref, OwnerName: owner.Name,
+					Category: string(item.Category), Direction: string(item.Direction), Title: followup.Truncate(item.Title, followup.MaxTitleLen),
+					Status: string(item.Status), DueAt: dueAt, Stale: item.IsStale(now),
+				})
+			}
+		}
+		snap.Gaps = append(snap.Gaps, failedOwners.values()...)
+		sort.SliceStable(snap.FollowUps, func(i, j int) bool {
+			left, right := snap.FollowUps[i], snap.FollowUps[j]
+			if left.Stale != right.Stale {
+				return left.Stale
+			}
+			if left.DueAt != nil && right.DueAt != nil && !left.DueAt.Equal(*right.DueAt) {
+				return left.DueAt.Before(*right.DueAt)
+			}
+			if (left.DueAt != nil) != (right.DueAt != nil) {
+				return left.DueAt != nil
+			}
+			if !left.Ref.Timestamp.Equal(right.Ref.Timestamp) {
+				return left.Ref.Timestamp.Before(right.Ref.Timestamp)
+			}
+			if left.Ref.WorkspaceID != right.Ref.WorkspaceID {
+				return left.Ref.WorkspaceID < right.Ref.WorkspaceID
+			}
+			return left.Ref.EntityID < right.Ref.EntityID
+		})
+		if len(snap.FollowUps) > maxFollowUpsPerBrief {
+			snap.FollowUps = snap.FollowUps[:maxFollowUpsPerBrief]
+		}
 	}
 
 	// Email is HQ-scoped and read through its own most-restrictive access
@@ -322,45 +341,6 @@ func BuildSnapshot(ctx context.Context, sources SnapshotSources, cfg Config, use
 	// mailbox is NOT a gap; only a selected source that fails to read is
 	// (task 4.3). Email failure degrades only this source — it never blocks the
 	// rest of the brief.
-	if sources.FollowUps != nil && strings.TrimSpace(cfg.WorkspaceID) != "" {
-		items, err := sources.FollowUps.List(ctx, followup.Filter{
-			UserID: userID, WorkspaceID: cfg.WorkspaceID,
-			Statuses: []followup.Status{followup.StatusActive, followup.StatusReopened},
-		})
-		if err != nil {
-			snap.Gaps = append(snap.Gaps, "Personal HQ follow-ups could not be read")
-		} else {
-			for _, item := range items {
-				if item == nil || item.UserID != userID || item.WorkspaceID != cfg.WorkspaceID ||
-					(item.Status != followup.StatusActive && item.Status != followup.StatusReopened) {
-					continue
-				}
-				dueAt := item.DueAt
-				snap.FollowUps = append(snap.FollowUps, FollowUpSnapshot{
-					Ref:      SourceRef{WorkspaceID: cfg.WorkspaceID, EntityType: "follow_up", EntityID: item.ID, Timestamp: item.UpdatedAt},
-					Category: string(item.Category), Direction: string(item.Direction), Title: followup.Truncate(item.Title, followup.MaxTitleLen),
-					Status: string(item.Status), DueAt: dueAt, Stale: item.IsStale(now),
-				})
-			}
-			sort.SliceStable(snap.FollowUps, func(i, j int) bool {
-				left, right := snap.FollowUps[i], snap.FollowUps[j]
-				if left.Stale != right.Stale {
-					return left.Stale
-				}
-				if left.DueAt != nil && right.DueAt != nil && !left.DueAt.Equal(*right.DueAt) {
-					return left.DueAt.Before(*right.DueAt)
-				}
-				if (left.DueAt != nil) != (right.DueAt != nil) {
-					return left.DueAt != nil
-				}
-				return left.Ref.Timestamp.Before(right.Ref.Timestamp)
-			})
-			if len(snap.FollowUps) > maxFollowUpsPerBrief {
-				snap.FollowUps = snap.FollowUps[:maxFollowUpsPerBrief]
-			}
-		}
-	}
-
 	if sources.Mailbox != nil {
 		threads, err := sources.Mailbox.BriefEmailThreads(ctx, userID)
 		switch {
