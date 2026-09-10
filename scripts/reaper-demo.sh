@@ -33,11 +33,12 @@ Options:
 Environment:
   ORI_REAPER_DEMO_PORT=PORT       Change the default port.
   ORI_KEEP_REAPER_SANDBOX=1      Preserve generated state after exit.
+  ORI_REAPER_PLUGIN_SOURCE=DIR   Use an explicit clean plugin candidate worktree.
 
-The refreshed binary is written to ./reaper-plugin-darwin-arm64. The canonical
-plugin checkout and artifact remain under plugins/src/reaper-plugin. Serve/test
-allow only their staged local copy to satisfy setup, labelled as a development
-copy rather than a release-verified integration.
+The refreshed binary is written to ./reaper-plugin-darwin-arm64. The plugin
+source/artifact stays in the explicit candidate worktree (or the legacy nested
+default when present). Serve/test allow only a staged local copy to satisfy
+setup, labelled as a development copy rather than a release-verified integration.
 EOF
 }
 
@@ -110,7 +111,9 @@ fi
 script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null || true)"
 [[ -n "$repo_root" ]] || fail "must run from an Ori Git worktree"
-plugin_root="$repo_root/plugins/src/reaper-plugin"
+plugin_root="${ORI_REAPER_PLUGIN_SOURCE:-$repo_root/plugins/src/reaper-plugin}"
+plugin_root="$(CDPATH= cd -- "$plugin_root" 2>/dev/null && pwd)" || \
+	fail "plugin source does not exist; set ORI_REAPER_PLUGIN_SOURCE to the clean candidate worktree"
 wrapper="$plugin_root/scripts/with-local-artifact.sh"
 verify="$plugin_root/scripts/verify-artifact.sh"
 plugin_artifact="$plugin_root/artifacts/reaper-plugin-darwin-arm64"
@@ -164,9 +167,9 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
 
-# Keep the canonical plugin checkout clean: the helper briefly prepares its
-# bundled manifest, copies that exact state into the disposable sandbox, and
-# restores the source manifest before the long-running server starts.
+# Keep the isolated plugin candidate clean: the helper prepares its local
+# artifact, copies the exact candidate into the disposable sandbox, and restores
+# any temporary packaging changes before the long-running server starts.
 bundled_plugin="$sandbox/plugin-source/reaper-plugin"
 rm -rf -- "$bundled_plugin"
 "$wrapper" cp -R "$plugin_root" "$bundled_plugin"
@@ -239,7 +242,7 @@ curl -fsS -X POST "$base_url/api/plugins/reaper-plugin/enable" \
 
 printf '\nREAPER local demo is ready.\n'
 printf 'Open: %s\n' "$base_url"
-printf 'Create a Reaper Song workspace and review its Team; Producer Home is optional.\n'
+printf 'Create a Reaper Song workspace and review its Required Music Production Home and project team.\n'
 printf 'Press Ctrl-C to stop the server.\n\n'
 
 if ((open_browser == 1)); then
