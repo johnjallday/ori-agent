@@ -82,7 +82,11 @@ const (
 	ReasonRuntimeProviderUnavailable Reason = "runtime_provider_unavailable"
 	// ReasonDependencyStateUnknown: dependency state could not be read this
 	// time (a transient store or listing failure). Retry is meaningful.
-	ReasonDependencyStateUnknown Reason = "dependency_state_unknown"
+	ReasonDependencyStateUnknown    Reason = "dependency_state_unknown"
+	ReasonVariantSourceMissing      Reason = "source_missing"
+	ReasonVariantSourceDisabled     Reason = "source_disabled"
+	ReasonVariantSourceChanged      Reason = "source_changed"
+	ReasonVariantSourceIncompatible Reason = "source_incompatible"
 )
 
 // Action is the allowlist of recovery actions a readiness descriptor may
@@ -108,6 +112,9 @@ const (
 	// ActionEditTemplateManifest points a template author at their own
 	// template.json. Only ever offered for OwnershipUser.
 	ActionEditTemplateManifest Action = "edit_template_manifest"
+	// ActionCustomizeTemplate creates a fresh user-owned overlay from the
+	// current trusted source; it never rewrites or silently rebases a variant.
+	ActionCustomizeTemplate Action = "customize_template"
 )
 
 // Copy length limits. Long enough to explain a state in a sentence or two,
@@ -187,13 +194,14 @@ var validReasons = map[Reason]struct{}{
 	ReasonNone: {}, ReasonPluginInstallRequired: {}, ReasonPluginEnableRequired: {},
 	ReasonPluginUpdateRequired: {}, ReasonPlatformUnsupported: {}, ReasonProtocolIncompatible: {},
 	ReasonBlueprintRetired: {}, ReasonManifestInvalid: {}, ReasonRuntimeProviderUnavailable: {},
-	ReasonDependencyStateUnknown: {},
+	ReasonDependencyStateUnknown: {}, ReasonVariantSourceMissing: {}, ReasonVariantSourceDisabled: {},
+	ReasonVariantSourceChanged: {}, ReasonVariantSourceIncompatible: {},
 }
 
 var validActions = map[Action]struct{}{
 	ActionInstallPlugin: {}, ActionEnablePlugin: {}, ActionReviewPluginUpdate: {},
 	ActionRetry: {}, ActionManagePlugins: {}, ActionChangeBlueprint: {},
-	ActionEditTemplateManifest: {},
+	ActionEditTemplateManifest: {}, ActionCustomizeTemplate: {},
 }
 
 // ParseAction resolves a client-supplied action name against the allowlist.

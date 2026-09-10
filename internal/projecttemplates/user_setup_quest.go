@@ -388,6 +388,10 @@ func UserSetupQuestExecutionDigest(template Template) string {
 		CapabilityRequirements []CapabilityRequirement                `json:"capability_requirements,omitempty"`
 		Tools                  ToolDefaults                           `json:"tools"`
 		Capabilities           []CapabilityInstall                    `json:"capabilities,omitempty"`
+		GroupRequirement       *GroupRequirement                      `json:"group_requirement,omitempty"`
+		StandaloneComposition  *StandaloneComposition                 `json:"standalone_composition,omitempty"`
+		TemplateVariant        *TemplateVariant                       `json:"template_variant,omitempty"`
+		VariantRevision        string                                 `json:"variant_revision,omitempty"`
 	}
 	attachmentID := ""
 	if template.UserSetupQuest != nil {
@@ -400,6 +404,8 @@ func UserSetupQuestExecutionDigest(template Template) string {
 		StarterTasks: template.StarterTasks, DirectoryRequirements: template.DirectoryRequirements,
 		AutomationRecipes: template.AutomationRecipes, CapabilityRequirements: template.CapabilityRequirements,
 		Tools: template.Tools, Capabilities: template.Capabilities,
+		GroupRequirement: template.GroupRequirement, StandaloneComposition: template.StandaloneComposition,
+		TemplateVariant: template.TemplateVariant, VariantRevision: template.VariantRevision,
 	})
 	if err != nil {
 		return ""

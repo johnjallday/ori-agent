@@ -821,6 +821,8 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/project-templates/import", s.handleProjectTemplateImport)
 		mux.HandleFunc("POST /api/project-templates/reveal", s.handleProjectTemplateReveal)
 		mux.HandleFunc("POST /api/project-templates/{templateID}/duplicate", s.handleProjectTemplateDuplicate)
+		mux.HandleFunc("POST /api/project-templates/{templateID}/variants", s.handleProjectTemplateVariantCreate)
+		mux.HandleFunc("POST /api/project-templates/{templateID}/group-requirement/preview", s.handleProjectTemplateGroupRequirementPreview)
 		mux.HandleFunc("POST /api/project-templates/{templateID}/plugin-recovery", s.handleBlueprintPluginRecovery)
 		mux.HandleFunc("GET /api/project-templates/{templateID}/setup-quest", s.handleUserSetupQuestGet)
 		mux.HandleFunc("PUT /api/project-templates/{templateID}/setup-quest", s.handleUserSetupQuestPut)

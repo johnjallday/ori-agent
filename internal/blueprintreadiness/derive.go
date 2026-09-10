@@ -85,6 +85,9 @@ func Derive(template projecttemplates.Template, sources Sources) Readiness {
 	if diagnostic := manifestDiagnostic(template); diagnostic != "" {
 		return manifestInvalidReadiness(ownership, diagnostic).Normalize()
 	}
+	if template.TemplateVariant != nil && template.VariantSourceState != projecttemplates.VariantSourceReady {
+		return variantSourceReadiness(template).Normalize()
+	}
 
 	if reference, ok := unsatisfiedHostReference(template, sources.Catalog); ok {
 		return Readiness{
@@ -313,6 +316,15 @@ func manifestInvalidReadiness(ownership Ownership, diagnostic string) Readiness 
 // manifestDiagnostic returns the author-facing detail for a manifest that
 // could not be fully understood, or "" when it was.
 func manifestDiagnostic(template projecttemplates.Template) string {
+	if template.HasInvalidVariant() {
+		return template.TemplateVariantError
+	}
+	if template.HasInvalidGroupRequirement() {
+		return template.GroupRequirementError
+	}
+	if template.HasInvalidStandaloneComposition() {
+		return template.StandaloneCompositionError
+	}
 	if template.HasInvalidRuntimeRequirements() {
 		return template.RuntimeRequirementsError
 	}
@@ -334,6 +346,43 @@ func manifestDiagnostic(template projecttemplates.Template) string {
 // host can be given different registry views, and a blueprint whose runtime
 // adapter disappeared must not be offered as ready on the strength of a
 // decision made somewhere else.
+func variantSourceReadiness(template projecttemplates.Template) Readiness {
+	dependency := &Dependency{}
+	if template.TemplateVariant != nil {
+		dependency.PluginName = template.TemplateVariant.Source.PluginID
+		dependency.PluginVersion = template.TemplateVariant.Source.PluginVersion
+	}
+	readiness := Readiness{State: StateUnavailable, Ownership: OwnershipUser, Dependency: dependency}
+	switch template.VariantSourceState {
+	case projecttemplates.VariantSourceMissing:
+		readiness.Reason = ReasonVariantSourceMissing
+		readiness.Summary = "This variant's exact source plugin is not available."
+		readiness.Detail = "Install the reviewed source or customize its current blueprint; Ori will not substitute another template."
+		readiness.Actions = []Action{ActionManagePlugins, ActionChangeBlueprint}
+	case projecttemplates.VariantSourceDisabled:
+		readiness.Dependency.Installed = true
+		readiness.State = StateActionRequired
+		readiness.Reason = ReasonVariantSourceDisabled
+		readiness.Summary = "This variant's source plugin is disabled."
+		readiness.Detail = "Enable the exact source plugin, then retry. The variant remains unchanged."
+		readiness.Actions = []Action{ActionManagePlugins, ActionRetry, ActionChangeBlueprint}
+	case projecttemplates.VariantSourceChanged:
+		readiness.Dependency.Installed = true
+		readiness.Reason = ReasonVariantSourceChanged
+		readiness.Summary = "This variant is pinned to an older source definition."
+		readiness.Detail = "Create a new customization from the current source. Ori will not silently rebase this variant."
+		readiness.Actions = []Action{ActionCustomizeTemplate, ActionChangeBlueprint}
+	default:
+		readiness.Dependency.Installed = true
+		readiness.Dependency.Enabled = true
+		readiness.Reason = ReasonVariantSourceIncompatible
+		readiness.Summary = "This variant's source is incompatible with this version of Ori."
+		readiness.Detail = "Manage the source plugin or choose another template."
+		readiness.Actions = []Action{ActionManagePlugins, ActionChangeBlueprint}
+	}
+	return readiness
+}
+
 func unsatisfiedHostReference(template projecttemplates.Template, catalog projecttemplates.RuntimeCatalog) (string, bool) {
 	if catalog == nil {
 		return "", false

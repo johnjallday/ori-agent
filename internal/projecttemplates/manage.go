@@ -22,6 +22,10 @@ var ErrTemplateExists = errors.New("template already exists in the library")
 // or slugifies to nothing usable.
 var ErrInvalidTemplateName = errors.New("template name is invalid")
 
+// ErrTemplateRevisionStale prevents an optimistic policy save from replacing
+// unrelated manifest changes made after preview.
+var ErrTemplateRevisionStale = errors.New("template revision is stale")
+
 // ImportFolder copies an arbitrary folder into the library as a new template.
 // The copy is verbatim — no token substitution, since template files may
 // legitimately carry {{name}}/{{date}} in their names — with symlinks skipped.
@@ -49,6 +53,12 @@ func ImportFolder(libDir, srcPath, displayName string) (Template, error) {
 	}
 	if src.UserSetupQuestError != "" {
 		return Template{}, fmt.Errorf("%w: imported user_setup_quest is unusable", ErrInvalidUserSetupQuest)
+	}
+	if src.TemplateVariant != nil || src.TemplateVariantError != "" {
+		return Template{}, fmt.Errorf("%w: source-linked variants must be explicitly rehosted", ErrInvalidTemplateVariant)
+	}
+	if src.HasInvalidGroupRequirement() || src.HasInvalidStandaloneComposition() {
+		return Template{}, fmt.Errorf("%w: imported group/composition declaration is unusable", ErrInvalidGroupRequirement)
 	}
 
 	absLib, err := filepath.Abs(libDir)
@@ -168,6 +178,12 @@ func Duplicate(libDir, id, newName string) (Template, error) {
 	}
 	if src.HasInvalidProjectConnection() {
 		return Template{}, fmt.Errorf("%w: source blueprint project_connection is unusable: %s", ErrInvalidProjectConnection, src.ProjectConnectionError)
+	}
+	if src.TemplateVariant != nil || src.TemplateVariantError != "" {
+		return Template{}, ErrTemplateVariantRestricted
+	}
+	if src.HasInvalidGroupRequirement() || src.HasInvalidStandaloneComposition() {
+		return Template{}, fmt.Errorf("%w: source group/composition declaration is unusable", ErrInvalidGroupRequirement)
 	}
 
 	absLib, err := filepath.Abs(strings.TrimSpace(libDir))
@@ -327,6 +343,9 @@ func EnsureMutable(libDir, id string) error {
 	if tpl.Builtin {
 		return fmt.Errorf("%w: %q", ErrTemplateReadOnly, id)
 	}
+	if tpl.TemplateVariant != nil || tpl.TemplateVariantError != "" {
+		return fmt.Errorf("%w: %q", ErrTemplateVariantRestricted, id)
+	}
 	return nil
 }
 
@@ -347,6 +366,11 @@ type ManifestEdit struct {
 	// strict all-or-nothing validation. Keeping it raw lets the validator reject
 	// unknown/behavior-bearing fields instead of json.Unmarshal dropping them.
 	RuntimeRequirements json.RawMessage
+	// GroupRequirement is tri-state raw JSON: nil preserves, null removes the
+	// declaration (legacy absence), and an object strictly replaces it.
+	GroupRequirement json.RawMessage
+	// ExpectedRevision is required whenever GroupRequirement is edited.
+	ExpectedRevision string
 }
 
 // UpdateManifest writes display metadata into a library template's
@@ -381,6 +405,12 @@ func updateManifestUnlocked(libDir, id, name, description string, tags *[]string
 	tpl, err := FindLibraryTemplateWithCatalog(libDir, id, catalog)
 	if err != nil {
 		return Template{}, err
+	}
+	if tpl.TemplateVariant != nil || tpl.TemplateVariantError != "" {
+		return Template{}, ErrTemplateVariantRestricted
+	}
+	if edit != nil && edit.GroupRequirement != nil && (len(edit.ExpectedRevision) != 64 || edit.ExpectedRevision != tpl.Revision) {
+		return Template{}, ErrTemplateRevisionStale
 	}
 
 	// manifestPath is the resolved library template's folder (from
@@ -505,6 +535,18 @@ func updateManifestUnlocked(libDir, id, name, description string, tags *[]string
 				raw["runtime_requirements"] = value
 			}
 		}
+		if edit.GroupRequirement != nil {
+			trimmed := bytes.TrimSpace(edit.GroupRequirement)
+			if bytes.Equal(trimmed, []byte("null")) {
+				delete(raw, "group_requirement")
+			} else {
+				requirement, err := normalizeGroupRequirement(trimmed)
+				if err != nil {
+					return Template{}, err
+				}
+				raw["group_requirement"] = requirement
+			}
+		}
 	}
 
 	// Validate the effective block even for an unrelated metadata edit. A
@@ -552,6 +594,12 @@ func updateManifestUnlocked(libDir, id, name, description string, tags *[]string
 		return Template{}, fmt.Errorf("failed to validate effective manifest: %w", err)
 	}
 	candidate := newTemplateWithManifest(tpl.Path, candidateManifest, catalog)
+	if candidate.HasInvalidGroupRequirement() {
+		return Template{}, fmt.Errorf("%w: %s", ErrInvalidGroupRequirement, candidate.GroupRequirementError)
+	}
+	if candidate.HasInvalidStandaloneComposition() {
+		return Template{}, fmt.Errorf("%w: %s", ErrInvalidStandaloneComposition, candidate.StandaloneCompositionError)
+	}
 	if guard != nil {
 		if err := guard(tpl, candidate); err != nil {
 			return Template{}, err
@@ -560,7 +608,7 @@ func updateManifestUnlocked(libDir, id, name, description string, tags *[]string
 	if err := writeManifestAtomic(manifestPath, append(data, '\n')); err != nil {
 		return Template{}, err
 	}
-	return candidate, nil
+	return newTemplateWithManifest(tpl.Path, readManifest(tpl.Path), catalog), nil
 }
 
 // Delete removes a library template, preferring the system trash so the

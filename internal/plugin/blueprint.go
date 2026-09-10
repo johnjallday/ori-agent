@@ -46,6 +46,13 @@ func ResolvePluginBlueprints(descriptor PluginDescriptor) ([]ResolvedBlueprint, 
 		}
 	}
 
+	declaresGroupRequirements := false
+	for _, feature := range contribution.RequiresHostFeatures {
+		if feature == HostFeatureTemplateGroupRequirementsV1 {
+			declaresGroupRequirements = true
+			break
+		}
+	}
 	resolved := make([]ResolvedBlueprint, 0, len(contribution.Blueprints))
 	for _, blueprint := range contribution.Blueprints {
 		manifestPath, err := containedPluginComponent(descriptor.InstallDir, blueprint.Manifest, false)
@@ -62,6 +69,9 @@ func ResolvePluginBlueprints(descriptor PluginDescriptor) ([]ResolvedBlueprint, 
 		}
 		if !sameCapabilityIDs(template.Capabilities, blueprint.Capabilities) {
 			return nil, fmt.Errorf("plugin blueprint %q capability projection does not match its contribution descriptor", blueprint.ID)
+		}
+		if (template.GroupRequirement != nil || template.StandaloneComposition != nil) && !declaresGroupRequirements {
+			return nil, fmt.Errorf("plugin blueprint %q group declarations require %s", blueprint.ID, HostFeatureTemplateGroupRequirementsV1)
 		}
 		owner := &workspace.PluginTemplateOwner{
 			PluginID: descriptor.Name, PluginVersion: descriptor.Version,

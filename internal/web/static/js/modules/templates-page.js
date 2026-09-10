@@ -27,6 +27,10 @@ const tplState = {
 // catalog read must never leave a launch link for the previous selection.
 const tplQuests = { status: 'loading', items: [], generation: 0, resolve: () => null };
 
+// Placement authoring is inert. Dirty state exists independently from file and
+// setup-quest editors so navigation never discards a reviewed policy change.
+const tplGroup = { dirty: false, preview: null, loading: false };
+
 // User-owned setup-quest authoring is deliberately separate from plugin quest
 // discovery. The editor deals only in inert copy and host-reviewed keys.
 const tplUserQuest = {
@@ -102,8 +106,16 @@ function tplPluginOwned(template = tplSelected()) {
   );
 }
 
+function tplTemplateVariant(template = tplSelected()) {
+  return Boolean(template && template.template_variant);
+}
+
 function tplTemplateReadOnly(template = tplSelected()) {
   return Boolean(template && (template.builtin || tplPluginOwned(template)));
+}
+
+function tplSourceSectionsReadOnly(template = tplSelected()) {
+  return Boolean(tplTemplateReadOnly(template) || tplTemplateVariant(template));
 }
 
 // --- Loading & list rendering ---
@@ -214,6 +226,14 @@ function tplBuildRow(template) {
     badge.textContent = tplPluginOwned(template) ? 'PLUGIN · READ-ONLY' : 'BUILT-IN';
     title.appendChild(badge);
   }
+  if (tplTemplateVariant(template)) {
+    const badge = document.createElement('span');
+    badge.className = 'badge ms-1';
+    badge.style.cssText =
+      'background: rgba(14, 116, 144, 0.12); color: #0e7490; font-weight: 700; font-size: 9px; vertical-align: middle;';
+    badge.textContent = 'CUSTOM VARIANT';
+    title.appendChild(badge);
+  }
   row.appendChild(title);
 
   const id = document.createElement('div');
@@ -304,13 +324,20 @@ function tplRenderDetail() {
   if (idLabel) idLabel.textContent = template.id;
 
   tplResetOverviewFields();
-  // Reset the agents editor so it reloads for the newly-selected template.
+  tplGroupRender();
+  // Reset the agents editor so it reloads inherited declarations read-only for
+  // source-linked variants.
   tplAgents.templateId = '';
   tplAgentsLoad();
   tplApplyReadOnly();
   const questTabItem = tplEl('tplSetupQuestTabItem');
-  if (questTabItem) questTabItem.hidden = tplTemplateReadOnly(template);
-  if (!tplTemplateReadOnly(template) && tplUserQuest.templateId !== template.id) {
+  if (questTabItem) questTabItem.hidden = tplSourceSectionsReadOnly(template);
+  const filesTabItem = tplEl('tplFilesTabItem');
+  if (filesTabItem) filesTabItem.hidden = tplTemplateVariant(template);
+  if (tplTemplateVariant(template) && tplEl('tplTabFiles')?.classList.contains('active')) {
+    bootstrap.Tab.getOrCreateInstance(tplEl('tplTabOverview')).show();
+  }
+  if (!tplSourceSectionsReadOnly(template) && tplUserQuest.templateId !== template.id) {
     void tplUserQuestLoad();
   }
 }
@@ -483,6 +510,9 @@ function tplStarterTasksCollect() {
 function tplResetOverviewFields() {
   const template = tplSelected();
   if (!template) return;
+  tplGroup.dirty = false;
+  const groupDirty = tplEl('tplGroupDirty');
+  if (groupDirty) groupDirty.hidden = true;
   const nameInput = tplEl('tplEditName');
   const descInput = tplEl('tplEditDescription');
   // A name equal to the id is a folder-name fallback, not an explicit name.
@@ -506,6 +536,236 @@ function tplResetOverviewFields() {
   if (tplState.tagsWidget) tplState.tagsWidget.setTags(template.tags || []);
 }
 
+function tplGroupRequirementFromControls() {
+  const template = tplSelected();
+  const policy = tplEl('tplGroupPolicy')?.value || 'none';
+  const requirement = { schema_version: 1, policy };
+  if (policy !== 'none') {
+    requirement.assistant_program_id = template?.assistant_program?.id || '';
+    requirement.missing_home = tplEl('tplGroupMissing')?.value || 'offer_create';
+    if (requirement.missing_home === 'offer_create') {
+      requirement.default_home_name = (tplEl('tplGroupHomeName')?.value || '').trim();
+    }
+  }
+  return requirement;
+}
+
+function tplGroupUpdateVisibility() {
+  const grouped = (tplEl('tplGroupPolicy')?.value || 'none') !== 'none';
+  const offer = (tplEl('tplGroupMissing')?.value || '') === 'offer_create';
+  const missingWrap = tplEl('tplGroupMissingWrap');
+  const nameWrap = tplEl('tplGroupNameWrap');
+  if (missingWrap) missingWrap.hidden = !grouped;
+  if (nameWrap) nameWrap.hidden = !grouped || !offer;
+}
+
+function tplGroupRender() {
+  const template = tplSelected();
+  const host = tplEl('tplGroupRequirements');
+  if (!host || !template) return;
+  const requirement = template.group_requirement || null;
+  const policy = requirement?.policy || 'none';
+  const policySelect = tplEl('tplGroupPolicy');
+  const missingSelect = tplEl('tplGroupMissing');
+  const homeName = tplEl('tplGroupHomeName');
+  const hasProgram = Boolean(template.assistant_program?.id);
+  const hasStandalone = !hasProgram || Boolean(template.standalone_composition);
+  if (policySelect) {
+    policySelect.value = policy;
+    for (const option of policySelect.options) {
+      if (option.value === 'none') option.disabled = !hasStandalone;
+      if (option.value === 'recommended') option.disabled = !hasProgram || !hasStandalone;
+      if (option.value === 'required') option.disabled = !hasProgram;
+    }
+  }
+  if (missingSelect) missingSelect.value = requirement?.missing_home || 'offer_create';
+  if (homeName)
+    homeName.value =
+      requirement?.default_home_name || template.assistant_program?.station_name || '';
+
+  const badge = tplEl('tplGroupSourceBadge');
+  if (badge) {
+    badge.textContent = tplPluginOwned(template)
+      ? 'Plugin source · read-only'
+      : tplTemplateVariant(template)
+        ? 'User-owned source variant'
+        : 'User template';
+  }
+  const source = tplEl('tplGroupSource');
+  if (source) {
+    const pin = template.template_variant?.source;
+    const sourceReadiness = template.readiness?.state || 'ready';
+    const state = template.variant_source_state || 'ready';
+    source.hidden = !pin && sourceReadiness === 'ready';
+    source.textContent = pin
+      ? `Pinned source: ${pin.plugin_id} ${pin.plugin_version} / ${pin.blueprint_id} v${pin.blueprint_version}. Source state: ${state}. ${
+          state === 'ready'
+            ? 'Updates require a new customization.'
+            : 'Creation and editing are blocked; select the current plugin template to create a fresh customization.'
+        }`
+      : sourceReadiness !== 'ready'
+        ? `Source unavailable: ${template.readiness?.summary || 'This plugin template is not ready.'}`
+        : '';
+  }
+  const summary = tplEl('tplGroupComposition');
+  if (summary) {
+    const destination = hasProgram
+      ? ` Destination: ${template.assistant_program.station_name || 'Assistant Program Home'} (${template.assistant_program.id}), resolved from trusted source identity—not by name.`
+      : '';
+    if (!requirement) {
+      summary.textContent =
+        'No v1 placement contract is declared. This legacy absence is not explicit None; unrelated saves preserve it.';
+    } else if (policy === 'none') {
+      summary.textContent =
+        'Standalone: no Assistant Program Home, Home roster, project link, or pre-workspace plugin quest will be created.';
+    } else if (policy === 'recommended') {
+      summary.textContent =
+        'Creation must explicitly choose grouped or standalone. Ori never chooses a composition automatically.' +
+        destination;
+    } else {
+      summary.textContent =
+        'Required: creation must use the exact source-owned Assistant Program Home. Customize this template to change the policy.' +
+        destination;
+    }
+  }
+
+  const immutable = tplTemplateReadOnly(template);
+  [policySelect, missingSelect, homeName].forEach(control => {
+    if (control) control.disabled = immutable;
+  });
+  const previewButton = tplEl('tplGroupPreviewBtn');
+  const sourceUnavailable =
+    (tplTemplateVariant(template) && template.variant_source_state !== 'ready') ||
+    (tplPluginOwned(template) && template.readiness?.state && template.readiness.state !== 'ready');
+  if (previewButton) previewButton.disabled = Boolean(sourceUnavailable);
+  const customize = tplEl('tplGroupCustomizeBtn');
+  if (customize) {
+    customize.hidden = !tplPluginOwned(template) || !requirement;
+    customize.disabled = Boolean(sourceUnavailable);
+    customize.title = sourceUnavailable
+      ? 'Resolve the source status before creating a customization.'
+      : '';
+  }
+  const dirty = tplEl('tplGroupDirty');
+  if (dirty) dirty.hidden = !tplGroup.dirty;
+  const preview = tplEl('tplGroupPreview');
+  if (preview) preview.hidden = true;
+  tplGroup.preview = null;
+  tplGroupUpdateVisibility();
+}
+
+function tplGroupMarkDirty() {
+  if (tplTemplateReadOnly()) return;
+  tplGroup.dirty = true;
+  tplGroup.preview = null;
+  const dirty = tplEl('tplGroupDirty');
+  if (dirty) dirty.hidden = false;
+  const preview = tplEl('tplGroupPreview');
+  if (preview) preview.hidden = true;
+  tplGroupUpdateVisibility();
+}
+
+function tplGroupRenderPreview(preview) {
+  const host = tplEl('tplGroupPreview');
+  if (!host) return;
+  host.innerHTML = '';
+  const intro = document.createElement('strong');
+  intro.textContent = preview.label || 'Preview — no workspace or Home created';
+  host.appendChild(intro);
+  for (const key of ['grouped', 'standalone']) {
+    const projection = preview[key];
+    if (!projection) continue;
+    const heading = document.createElement('h6');
+    heading.textContent = key === 'grouped' ? 'Grouped consequence' : 'Standalone consequence';
+    host.appendChild(heading);
+    const list = document.createElement('ul');
+    const lines = [];
+    lines.push(
+      projection.assistant_program
+        ? 'Uses the exact Assistant Program Home and reciprocal project link.'
+        : 'Creates no Assistant Program Home or link.'
+    );
+    if (projection.project_roles?.length)
+      lines.push(`Project roles: ${projection.project_roles.join(', ')}.`);
+    if (projection.unavailable_home_roles?.length)
+      lines.push(`Unavailable Home roles: ${projection.unavailable_home_roles.join(', ')}.`);
+    if (projection.capabilities?.length)
+      lines.push(`Project capabilities retained: ${projection.capabilities.join(', ')}.`);
+    if (projection.runtime_modes?.length)
+      lines.push(`Runtime modes retained: ${projection.runtime_modes.join(', ')}.`);
+    lines.push(
+      projection.pre_workspace_setup
+        ? 'Pre-workspace guided setup remains available.'
+        : 'No Home-dependent pre-workspace quest is retained.'
+    );
+    for (const line of lines) {
+      const item = document.createElement('li');
+      item.textContent = line;
+      list.appendChild(item);
+    }
+    host.appendChild(list);
+  }
+  host.hidden = false;
+}
+
+async function tplGroupPreview() {
+  const template = tplSelected();
+  if (!template || tplGroup.loading) return;
+  tplGroup.loading = true;
+  const button = tplEl('tplGroupPreviewBtn');
+  if (button) button.disabled = true;
+  try {
+    const body = { group_requirement: tplGroupRequirementFromControls() };
+    if (tplTemplateVariant(template)) body.if_revision = template.variant_revision;
+    else if (!tplPluginOwned(template)) body.if_revision = template.revision;
+    const preview = await tplFetchJSON(
+      `/api/project-templates/${encodeURIComponent(template.id)}/group-requirement/preview`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      }
+    );
+    tplGroup.preview = preview;
+    tplGroupRenderPreview(preview);
+  } catch (error) {
+    tplToast(error.message || 'Could not preview placement consequences.', 'error');
+  } finally {
+    tplGroup.loading = false;
+    if (button) button.disabled = false;
+  }
+}
+
+function tplCustomizePluginTemplate() {
+  const template = tplSelected();
+  if (!template || !tplPluginOwned(template) || !template.group_requirement) return;
+  tplOpenNameModal({
+    title: 'Customize Template',
+    label: 'Variant name',
+    confirm: 'Create variant',
+    initial: `${template.name || template.id} custom`,
+    run: async name => {
+      if (!name) throw new Error('Please enter a name.');
+      const result = await tplFetchJSON(
+        `/api/project-templates/${encodeURIComponent(template.id)}/variants`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            description: template.description || '',
+            icon: template.icon || '',
+            group_requirement: template.group_requirement
+          })
+        }
+      );
+      const created = result.template || {};
+      tplToast(`Created user-owned variant "${created.name || created.id}".`, 'success');
+      await tplRefresh(created.id);
+    }
+  });
+}
+
 async function tplSaveOverview() {
   const template = tplSelected();
   if (!template || tplTemplateReadOnly(template)) return;
@@ -517,26 +777,44 @@ async function tplSaveOverview() {
   const projectEntryDefault = tplEl('tplEditProjectEntryDefault');
   const entryPath = projectEntryPath ? projectEntryPath.value.trim() : '';
   const tags = tplState.tagsWidget ? tplState.tagsWidget.getTags() : template.tags || [];
+  const body = {
+    name: nameInput ? nameInput.value.trim() : '',
+    description: descInput ? descInput.value.trim() : '',
+    icon: iconInput ? iconInput.value.trim() : ''
+  };
+  const variant = tplTemplateVariant(template);
+  if (variant && !body.name) {
+    tplToast('A variant display name is required.', 'error');
+    return;
+  }
+  if (variant) {
+    body.if_revision = template.variant_revision;
+    body.group_requirement = tplGroupRequirementFromControls();
+  } else {
+    Object.assign(body, {
+      tags,
+      behavior_profile: behaviorSelect ? behaviorSelect.value : 'general',
+      starter_tasks: tplStarterTasksCollect(),
+      project_entry: entryPath
+        ? {
+            relative_path: entryPath,
+            open_after_create_default: Boolean(projectEntryDefault?.checked)
+          }
+        : null,
+      if_revision: template.revision
+    });
+    // Preserve the meaningful difference between a legacy missing declaration
+    // and explicit None when only unrelated metadata was changed.
+    if (tplGroup.dirty) body.group_requirement = tplGroupRequirementFromControls();
+  }
   try {
     await tplFetchJSON(`/api/project-templates/${encodeURIComponent(template.id)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: nameInput ? nameInput.value.trim() : '',
-        description: descInput ? descInput.value.trim() : '',
-        tags,
-        icon: iconInput ? iconInput.value.trim() : '',
-        behavior_profile: behaviorSelect ? behaviorSelect.value : 'general',
-        starter_tasks: tplStarterTasksCollect(),
-        project_entry: entryPath
-          ? {
-              relative_path: entryPath,
-              open_after_create_default: Boolean(projectEntryDefault?.checked)
-            }
-          : null
-      })
+      body: JSON.stringify(body)
     });
-    tplToast('Template saved.', 'success');
+    tplGroup.dirty = false;
+    tplToast(variant ? 'Template variant saved.' : 'Template saved.', 'success');
     tplUserQuestReset();
     await tplRefresh(template.id);
   } catch (error) {
@@ -549,30 +827,55 @@ async function tplSaveOverview() {
 function tplApplyReadOnly() {
   const template = tplSelected();
   const readOnly = tplTemplateReadOnly(template);
+  const sourceSectionsReadOnly = tplSourceSectionsReadOnly(template);
   const pluginOwned = tplPluginOwned(template);
+  const variant = tplTemplateVariant(template);
   const badge = tplEl('tplDetailBuiltinBadge');
   if (badge) {
-    badge.hidden = !readOnly;
-    badge.textContent = pluginOwned ? 'Plugin-owned · read-only' : 'Built-in · read-only';
+    badge.hidden = !readOnly && !variant;
+    badge.textContent = pluginOwned
+      ? 'Plugin-owned · read-only'
+      : variant
+        ? 'User-owned source variant'
+        : 'Built-in · read-only';
   }
   const notice = tplEl('tplReadOnlyNotice');
-  if (notice) notice.hidden = !readOnly;
+  if (notice) notice.hidden = !readOnly && !variant;
   const agentsNotice = tplEl('tplAgentsReadOnlyNotice');
-  if (agentsNotice) agentsNotice.hidden = !readOnly;
+  if (agentsNotice) agentsNotice.hidden = !sourceSectionsReadOnly;
   ['tplReadOnlyText', 'tplAgentsReadOnlyText'].forEach(id => {
     const text = tplEl(id);
     if (text)
       text.textContent = pluginOwned
         ? 'This template and its declarations are managed by the installed plugin and are read-only here.'
-        : 'This is a built-in template and is read-only.';
+        : variant
+          ? 'Name, description, icon, and placement policy are user-owned. Behavior, files, tools, agents, and setup stay pinned to the trusted source.'
+          : 'This is a built-in template and is read-only.';
   });
-  ['tplDuplicateBtn', 'tplDuplicateToCustomizeBtn', 'tplAgentsDuplicateBtn'].forEach(id => {
-    const button = tplEl(id);
-    if (button) {
-      button.disabled = pluginOwned;
-      if (id !== 'tplDuplicateBtn') button.hidden = pluginOwned;
-    }
-  });
+  const duplicate = tplEl('tplDuplicateBtn');
+  const pluginSourceUnavailable = Boolean(
+    pluginOwned && template?.readiness?.state && template.readiness.state !== 'ready'
+  );
+  if (duplicate) {
+    duplicate.disabled = Boolean(
+      template?.builtin || (pluginOwned && !template?.group_requirement) || pluginSourceUnavailable
+    );
+    duplicate.textContent = pluginOwned ? 'Customize' : 'Duplicate';
+    duplicate.title = pluginOwned
+      ? pluginSourceUnavailable
+        ? 'Resolve the plugin source status before creating a customization.'
+        : 'Create a user-owned policy variant pinned to this plugin blueprint.'
+      : variant
+        ? 'Create a second user-owned overlay with a new identity and the same source pin.'
+        : 'Duplicate template';
+  }
+  const customize = tplEl('tplDuplicateToCustomizeBtn');
+  if (customize) {
+    customize.hidden = !pluginOwned || !template?.group_requirement;
+    customize.disabled = pluginSourceUnavailable;
+  }
+  const agentsDuplicate = tplEl('tplAgentsDuplicateBtn');
+  if (agentsDuplicate) agentsDuplicate.hidden = sourceSectionsReadOnly;
   ['tplAgentsAddBtn', 'tplAgentsSaveBtn'].forEach(id => {
     const el = tplEl(id);
     if (el) el.hidden = readOnly;
@@ -598,28 +901,38 @@ function tplApplyReadOnly() {
     'tplAgentsSaveBtn'
   ].forEach(id => {
     const el = tplEl(id);
-    if (el) el.disabled = readOnly;
+    if (el) {
+      const variantEditableControl = [
+        'tplEditName',
+        'tplEditDescription',
+        'tplEditIcon',
+        'tplSaveBtn',
+        'tplResetBtn',
+        'tplDeleteBtn'
+      ].includes(id);
+      el.disabled = variantEditableControl ? readOnly : sourceSectionsReadOnly;
+    }
   });
-  // Dynamic controls must also be read-only, including keyboard interaction.
+  // Dynamic source-owned controls must also be read-only, including keyboard interaction.
   document
     .querySelectorAll(
       '#tplStarterTasksList input, #tplStarterTasksList textarea, #tplStarterTasksList button, #tplEditTags input, #tplEditTags button'
     )
     .forEach(el => {
-      el.disabled = readOnly;
+      el.disabled = sourceSectionsReadOnly;
     });
   const tagsWrap = tplEl('tplEditTags');
   if (tagsWrap) {
-    tagsWrap.style.pointerEvents = readOnly ? 'none' : '';
-    tagsWrap.style.opacity = readOnly ? '0.6' : '';
+    tagsWrap.style.pointerEvents = sourceSectionsReadOnly ? 'none' : '';
+    tagsWrap.style.opacity = sourceSectionsReadOnly ? '0.6' : '';
   }
   const agentsList = tplEl('tplAgentsList');
   if (agentsList) {
     agentsList.querySelectorAll('input, select, textarea, button').forEach(el => {
-      el.disabled = readOnly;
+      el.disabled = sourceSectionsReadOnly;
     });
     agentsList.querySelectorAll('.tpl-agent-card').forEach(card => {
-      card.draggable = !readOnly;
+      card.draggable = !sourceSectionsReadOnly;
     });
   }
 }
@@ -779,7 +1092,7 @@ function tplUserQuestReset() {
 
 async function tplUserQuestLoad() {
   const template = tplSelected();
-  if (!template || tplTemplateReadOnly(template)) return;
+  if (!template || tplSourceSectionsReadOnly(template)) return;
   const generation = ++tplUserQuest.generation;
   tplUserQuest.templateId = template.id;
   tplUserQuest.status = 'loading';
@@ -1215,15 +1528,15 @@ async function tplOpenFile(path) {
     let notice = '';
     if (data.binary) {
       notice = 'Binary file — read-only. Use Reveal to open it on disk.';
-    } else if (tplTemplateReadOnly()) {
-      notice = 'This template is read-only; its installed declarations cannot be edited here.';
+    } else if (tplSourceSectionsReadOnly()) {
+      notice = 'This declaration is inherited from a trusted source and cannot be edited here.';
     } else if (data.read_only) {
       notice = 'template.json is managed by the Overview, Tools, and Agents tabs — read-only here.';
     }
     tplEditorShow(
       data.path || path,
       data.content || '',
-      Boolean(data.read_only) || tplTemplateReadOnly(),
+      Boolean(data.read_only) || tplSourceSectionsReadOnly(),
       notice
     );
   } catch (error) {
@@ -1262,7 +1575,7 @@ function tplEditorShow(path, content, readOnly, notice) {
 async function tplEditorSave() {
   const path = tplFiles.selectedPath;
   const textarea = tplEl('tplEditorTextarea');
-  if (!path || tplFiles.readOnly || tplTemplateReadOnly() || !textarea) return false;
+  if (!path || tplFiles.readOnly || tplSourceSectionsReadOnly() || !textarea) return false;
   try {
     await tplFetchJSON(`${tplApiBase()}/files/content`, {
       method: 'PUT',
@@ -1294,6 +1607,10 @@ function tplClearDirty() {
 // tplGuardDirty runs `proceed` immediately unless the editor has unsaved
 // changes, in which case it opens the save / discard / keep-editing prompt.
 function tplGuardDirty(proceed) {
+  if (tplGroup.dirty) {
+    if (!window.confirm('Discard unsaved placement policy changes?')) return;
+    tplGroup.dirty = false;
+  }
   if (tplUserQuest.dirty) {
     if (!window.confirm('Discard unsaved setup quest changes?')) return;
     tplUserQuest.dirty = false;
@@ -1328,7 +1645,7 @@ async function tplDirtyResolve(action) {
 }
 
 function tplFileCreate(type) {
-  if (!tplState.selectedId || tplTemplateReadOnly()) return;
+  if (!tplState.selectedId || tplSourceSectionsReadOnly()) return;
   tplOpenNameModal({
     title: type === 'dir' ? 'New Folder' : 'New File',
     label: 'Path (relative to the template)',
@@ -1350,7 +1667,7 @@ function tplFileCreate(type) {
 
 function tplFileRename() {
   const path = tplFiles.selectedPath;
-  if (!path || tplTemplateReadOnly()) return;
+  if (!path || tplSourceSectionsReadOnly()) return;
   tplGuardDirty(() => {
     tplOpenNameModal({
       title: 'Rename / Move',
@@ -1374,7 +1691,7 @@ function tplFileRename() {
 
 async function tplFileDelete() {
   const path = tplFiles.selectedPath;
-  if (!path || tplTemplateReadOnly()) return;
+  if (!path || tplSourceSectionsReadOnly()) return;
   if (!window.confirm(`Delete "${path}" from the template? This cannot be undone from the app.`)) {
     return;
   }
@@ -1484,7 +1801,7 @@ function tplToolsRow(row) {
   cb.type = 'checkbox';
   cb.className = 'form-check-input';
   cb.checked = row.checked;
-  cb.disabled = tplTemplateReadOnly();
+  cb.disabled = tplSourceSectionsReadOnly();
   cb.dataset.name = row.name;
   label.appendChild(cb);
   const span = document.createElement('span');
@@ -1525,7 +1842,7 @@ function tplToolsCollect(containerId) {
 
 async function tplToolsSave() {
   const template = tplSelected();
-  if (!template || tplTemplateReadOnly(template)) return;
+  if (!template || tplSourceSectionsReadOnly(template)) return;
   const body = {
     skills: tplToolsCollect('tplToolsSkills'),
     mcp_servers: tplToolsCollect('tplToolsMcp'),
@@ -1847,7 +2164,7 @@ function tplAgentsPromptTools(textarea) {
 }
 
 function tplAgentsCard(agent, index) {
-  const readOnly = tplTemplateReadOnly();
+  const readOnly = tplSourceSectionsReadOnly();
   const card = document.createElement('div');
   card.className = `tpl-agent-card${index === 0 ? ' is-entry' : ''}${readOnly ? ' is-readonly' : ''}`;
   card.dataset.index = String(index);
@@ -2086,7 +2403,7 @@ function tplAgentsReorder(from, to) {
 
 async function tplAgentsSave() {
   const template = tplSelected();
-  if (!template || tplTemplateReadOnly(template)) return;
+  if (!template || tplSourceSectionsReadOnly(template)) return;
   const agents = tplAgentsCollect().filter(a => a.name);
   if (agents.length === 0) {
     tplToast(
@@ -2134,7 +2451,10 @@ function tplInit() {
     if (href) tplGuardDirty(() => window.location.assign(href));
   });
 
-  tplEl('tplDuplicateBtn')?.addEventListener('click', tplDuplicate);
+  tplEl('tplDuplicateBtn')?.addEventListener('click', () => {
+    if (tplPluginOwned()) tplCustomizePluginTemplate();
+    else tplDuplicate();
+  });
   tplEl('tplRevealBtn')?.addEventListener('click', () => {
     const t = tplSelected();
     if (t) void tplReveal(t.id);
@@ -2145,8 +2465,17 @@ function tplInit() {
   tplEl('tplStarterTaskAddBtn')?.addEventListener('click', () => {
     tplEl('tplStarterTasksList')?.appendChild(tplStarterTaskRow(null));
   });
-  tplEl('tplResetBtn')?.addEventListener('click', tplResetOverviewFields);
-  tplEl('tplDuplicateToCustomizeBtn')?.addEventListener('click', tplDuplicate);
+  tplEl('tplResetBtn')?.addEventListener('click', () => {
+    tplResetOverviewFields();
+    tplGroupRender();
+  });
+  tplEl('tplDuplicateToCustomizeBtn')?.addEventListener('click', tplCustomizePluginTemplate);
+  tplEl('tplGroupCustomizeBtn')?.addEventListener('click', tplCustomizePluginTemplate);
+  tplEl('tplGroupPreviewBtn')?.addEventListener('click', () => void tplGroupPreview());
+  ['tplGroupPolicy', 'tplGroupMissing', 'tplGroupHomeName'].forEach(id => {
+    tplEl(id)?.addEventListener('input', tplGroupMarkDirty);
+    tplEl(id)?.addEventListener('change', tplGroupMarkDirty);
+  });
 
   const search = tplEl('tplSearch');
   if (search) {
@@ -2188,7 +2517,7 @@ function tplInit() {
   tplEl('tplUserQuestCancelBtn')?.addEventListener('click', tplUserQuestCancel);
   tplEl('tplUserQuestRemoveBtn')?.addEventListener('click', () => void tplUserQuestRemove());
   window.addEventListener('beforeunload', event => {
-    if (!tplUserQuest.dirty && !tplFiles.dirty) return;
+    if (!tplGroup.dirty && !tplUserQuest.dirty && !tplFiles.dirty) return;
     event.preventDefault();
     event.returnValue = '';
   });

@@ -313,6 +313,24 @@ func TestUserSetupQuestBindingLocksProtectedTemplateMutations(t *testing.T) {
 		t.Fatalf("quest edit=%d: %s", changedRecorder.Code, changedRecorder.Body.String())
 	}
 
+	// Placement policy is creation-bearing content and cannot rewrite an
+	// already-reviewed setup run.
+	groupBody, _ := json.Marshal(map[string]any{
+		"name": "User-owned music project", "description": template.Description,
+		"if_revision": template.Revision,
+		"group_requirement": map[string]any{
+			"schema_version": 1, "policy": "required", "assistant_program_id": "user-music-team",
+			"missing_home": "existing_only",
+		},
+	})
+	group := httptest.NewRequest(http.MethodPut, "/template", bytes.NewReader(groupBody))
+	group.SetPathValue("templateID", template.ID)
+	groupRecorder := httptest.NewRecorder()
+	s.handleProjectTemplateUpdate(groupRecorder, group)
+	if groupRecorder.Code != http.StatusConflict {
+		t.Fatalf("group policy edit=%d: %s", groupRecorder.Code, groupRecorder.Body.String())
+	}
+
 	// Display-only metadata remains mutable because it is outside the execution digest.
 	display := httptest.NewRequest(http.MethodPut, "/template", bytes.NewBufferString(`{"name":"Renamed after start","description":"Display copy"}`))
 	display.SetPathValue("templateID", template.ID)

@@ -66,8 +66,10 @@ func LoadPluginBlueprint(manifestPath, skeletonRoot string, catalog RuntimeCatal
 	template.BuiltinVersion = 0
 	template.HasSkeleton = files > 0
 	if template.RuntimeRequirementsError != "" || template.SetupWizardError != "" ||
-		template.AssistantProgramError != "" || template.ProjectConnectionError != "" {
-		return Template{}, "", errors.New("plugin blueprint setup/runtime/program/project-connection references are unavailable")
+		template.AssistantProgramError != "" || template.ProjectConnectionError != "" ||
+		template.GroupRequirementError != "" || template.StandaloneCompositionError != "" ||
+		template.TemplateVariant != nil || template.TemplateVariantError != "" {
+		return Template{}, "", errors.New("plugin blueprint setup/runtime/program/project-connection/group references are unavailable")
 	}
 	for _, warning := range template.Warnings {
 		if strings.Contains(warning, "declares capability") || strings.Contains(warning, "project_entry is ignored") {
