@@ -2,7 +2,9 @@ package chathttp
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -210,8 +212,15 @@ func (h *Handler) SetPlanOpener(opener PlanOpener) {
 
 // publishMessageSent emits a message.sent event when the user sends a chat
 // message. It is used by the onboarding progression detector to complete the
-// Tier 1 "first contact" quest. No-op when the event bus is not configured.
-func (h *Handler) publishMessageSent(workspaceID, agentName string) {
+// Tier 1 "first contact" quest, and by the City Economy to credit Craft (FR5).
+// No-op when the event bus is not configured.
+//
+// The message itself is never put on the bus — events land in a shared
+// thousand-entry history ring that anything can read. What travels instead is a
+// fingerprint: enough for the economy to notice the same message sent twice in a
+// row and decline to pay for it (FR6), and useless for reconstructing what was
+// said.
+func (h *Handler) publishMessageSent(workspaceID, agentName, message string) {
 	if h == nil || h.workspaceEventBus == nil {
 		return
 	}
@@ -219,8 +228,23 @@ func (h *Handler) publishMessageSent(workspaceID, agentName string) {
 		Type:        workspace.EventMessageSent,
 		WorkspaceID: strings.TrimSpace(workspaceID),
 		Source:      "chat",
-		Data:        map[string]any{"agent": strings.TrimSpace(agentName)},
+		Data: map[string]any{
+			"agent":               strings.TrimSpace(agentName),
+			"message_fingerprint": messageFingerprint(message),
+		},
 	})
+}
+
+// messageFingerprint reduces a message to a one-way digest of its normalized
+// text. Normalizing first (lowercase, collapsed whitespace) means a message
+// retyped with different spacing still reads as the same message.
+func messageFingerprint(message string) string {
+	normalized := strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(message))), " ")
+	if normalized == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(normalized))
+	return hex.EncodeToString(sum[:])
 }
 
 // SetAdmissionGate configures reset ownership for detached chat commands.
@@ -925,7 +949,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	// progression detector (Tier 1 "first contact"). Fire-and-forget: Publish
 	// delivers to subscribers on their own goroutines, so this never blocks the
 	// chat path, and the bus may be absent in stripped-down configurations.
-	h.publishMessageSent(normalizedRouteContext.WorkspaceID, req.AgentName)
+	h.publishMessageSent(normalizedRouteContext.WorkspaceID, req.AgentName, q)
 
 	// Get session ID from header for multi-tab support
 	sessionID := h.getSessionID(r)

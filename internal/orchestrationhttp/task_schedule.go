@@ -34,6 +34,20 @@ func parseFlexibleTime(s string) (*time.Time, error) {
 	return nil, fmt.Errorf("unable to parse time: %s", s)
 }
 
+// ParseFrontendSchedule converts the editor's schedule payload into a backend
+// schedule, exactly as the save paths in this package do.
+//
+// It is exported so the economy's quote endpoint prices the very same bytes the
+// editor is about to save. Reimplementing the conversion there would make it
+// possible to quote one cadence and charge for another — and the two would drift
+// apart the first time this shape gained a field.
+func ParseFrontendSchedule(raw json.RawMessage) *workspace.ScheduleConfig {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	return convertScheduleConfig(raw)
+}
+
 // convertScheduleConfig converts frontend schedule format to backend format
 func convertScheduleConfig(raw json.RawMessage) *workspace.ScheduleConfig {
 	if raw == nil {
@@ -133,6 +147,47 @@ func normalizeWakeLeadMinutes(minutes int) int {
 		return 120
 	}
 	return minutes
+}
+
+// resolvedSchedule and resolvedScheduleEnabled answer "what would this task's
+// cadence be if this request were applied", without applying it.
+//
+// They mirror the first two branches of applyScheduleUpdates exactly, and exist
+// because the economy has to price a change before the task is touched
+// (city-economy FR22). Any future change to how a schedule lands on a task has
+// to be made in both places, which is why they sit directly above it.
+func resolvedSchedule(
+	task *workspace.Task,
+	schedule *workspace.ScheduleConfig,
+	clearSchedule bool,
+) *workspace.ScheduleConfig {
+	switch {
+	case clearSchedule:
+		return nil
+	case schedule != nil:
+		return schedule
+	case task != nil:
+		return task.Schedule
+	default:
+		return nil
+	}
+}
+
+func resolvedScheduleEnabled(
+	task *workspace.Task,
+	req *taskUpdateRequest,
+	clearSchedule bool,
+) bool {
+	switch {
+	case clearSchedule:
+		return false
+	case req != nil && req.ScheduleEnabled != nil:
+		return *req.ScheduleEnabled
+	case task != nil:
+		return task.ScheduleEnabled
+	default:
+		return false
+	}
 }
 
 // applyScheduleUpdates applies schedule configuration changes to a task

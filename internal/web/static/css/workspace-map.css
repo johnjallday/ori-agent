@@ -62,6 +62,13 @@
   --ws-idle: #4ec5e6;
   --ws-working: #46d39a;
   --ws-alert: #e2654d;
+  /* City Economy: one accent per thing, chosen so a Farm badge and a harvest
+     pile are never confused with the working/idle LEDs beside them. Both have a
+     light-theme value below — nothing in the economy's rules may hardcode a
+     color, and --border-light in particular inverts between themes. */
+  --ws-farm: #6f9f5f;
+  --ws-harvest: #d8a13a;
+  --ws-harvest-ink: #0c0d10;
 
   /* generated Pocket Resident portraits */
   --ws-resident-cream: #f7efdc;
@@ -1232,6 +1239,185 @@
   background: rgba(255, 255, 255, 0.85);
 }
 
+/* City Economy badges (city-economy FR36, FR38).
+   They share the HQ badge's slot and its plate treatment, so a tile with a Farm
+   reads like a tile with an HQ rather than like a different kind of object. The
+   Farm badge stacks BELOW HQ so the two never collide on the user's own HQ
+   workspace, which is also the workspace most likely to run routines. */
+.ws-map-tile-farm-badge {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 5;
+  padding: 1px 5px;
+  border: 1px solid var(--ws-farm);
+  border-radius: 3px;
+  background: rgba(12, 13, 16, 0.85);
+  color: var(--ws-farm);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+
+[data-bs-theme="light"] .ws-map-tile-farm-badge {
+  background: rgba(255, 255, 255, 0.85);
+}
+
+/* The harvest pile is the one badge that is also a control, so unlike its
+   neighbours it keeps pointer events and shows a pointer cursor. */
+.ws-map-tile-harvest {
+  position: absolute;
+  top: 20px;
+  left: 4px;
+  z-index: 6;
+  padding: 1px 6px;
+  border: 1px solid var(--ws-harvest);
+  border-radius: 999px;
+  background: var(--ws-harvest);
+  color: var(--ws-harvest-ink);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.ws-map-tile-harvest:hover,
+.ws-map-tile-harvest:focus-visible {
+  filter: brightness(1.12);
+  outline: 2px solid var(--ws-harvest);
+  outline-offset: 2px;
+}
+
+/* The pulse exists to pull the eye to a pile that is WAITING, so it runs only
+   while something is pending — the badge is simply not rendered at zero. */
+@media (prefers-reduced-motion: no-preference) {
+  .ws-map-tile-harvest {
+    animation: ws-map-harvest-pulse 2s ease-in-out infinite;
+  }
+}
+
+@keyframes ws-map-harvest-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.1);
+  }
+}
+
+/* The harvest popover. Same plate, border, and shadow language as the tile
+   context menu it is a sibling of, positioned in viewport coordinates by
+   placeMenu — which is why its host sits outside the theatre's clip-path. */
+.ws-map-harvest {
+  position: fixed;
+  z-index: 10200;
+  width: 280px;
+  max-width: calc(100vw - 32px);
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 10px;
+}
+
+.ws-map-harvest__title {
+  margin: 0 0 8px;
+  color: var(--ws-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ws-map-harvest__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ws-map-harvest__row + .ws-map-harvest__row {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--ws-line);
+}
+
+.ws-map-harvest__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ws-map-harvest__name {
+  font-size: 12px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ws-map-harvest__count {
+  flex: 0 0 auto;
+  color: var(--ws-harvest);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ws-map-harvest__tier {
+  margin: 2px 0 0;
+  color: var(--ws-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+
+/* The last run's summary is what makes a pile triageable, but it is a summary,
+   not the result: two lines, then it is the Open result button's job. */
+.ws-map-harvest__summary {
+  display: -webkit-box;
+  margin: 4px 0 0;
+  overflow: hidden;
+  color: var(--ws-ink-dim);
+  font-size: 11px;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.ws-map-harvest__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.ws-map-harvest__btn {
+  padding: 3px 9px;
+  border: 1px solid var(--ws-line-bright);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ws-map-harvest__btn:hover {
+  border-color: var(--ws-harvest);
+  color: var(--ws-harvest);
+}
+
+.ws-map-harvest__hint {
+  margin: 8px 0 0;
+  color: var(--ws-ink-dim);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
 /* The HQ citadel is taller than a standard tile block, so its beacon rises
    above neighbouring buildings. A warm gold glow (vs. the neutral drop-shadow
    on ordinary structs) marks it as the map's capital. */
@@ -2295,6 +2481,11 @@
   --ws-idle: #167c99;
   --ws-working: #1f6b4e;
   --ws-alert: #b94b3f;
+  /* Darkened for contrast against the light plate; the pile's own ink flips to
+     white because the badge is a filled chip, not an outlined one. */
+  --ws-farm: #4a6f3c;
+  --ws-harvest: #8a5f11;
+  --ws-harvest-ink: #ffffff;
 
   --ws-portrait-field: #eef1f1;
   --ws-portrait-field-deep: #cfd8da;

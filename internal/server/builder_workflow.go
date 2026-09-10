@@ -455,6 +455,10 @@ func (b *ServerBuilder) initializeEventSystem() {
 	// Onboarding progression: engine, event subscription, backfill.
 	b.initializeProgression()
 
+	// City Economy: ledger, service, event subscription, backfill. Same shape,
+	// same phase, and for the same reason — it needs the bus that was just built.
+	b.initializeEconomy()
+
 	if b.workspaceStore != nil {
 		syncMgr, err := workspace.NewDirectorySyncManager(b.workspaceStore, b.eventBus, workspace.DefaultDirectorySyncConfig())
 		if err != nil {
@@ -475,6 +479,14 @@ func (b *ServerBuilder) initializeTaskExecution() {
 	b.taskHandler.SetEventBus(b.eventBus)
 	b.taskHandler.SetMCPRegistry(b.mcpRegistry)
 	b.taskHandler.SetUtilityToolProvider(b.utilityToolRegistry)
+	// Task runs record their tokens like every other LLM call (city-economy
+	// FR29). Before this, a scheduled run was invisible to the Usage page: only
+	// chat and CLI agents ever reached the cost tracker. Guarded rather than
+	// passed blindly, because a nil concrete pointer inside a non-nil interface
+	// would defeat the recorder's own nil check.
+	if b.costTracker != nil {
+		b.taskHandler.SetUsageRecorder(b.costTracker)
+	}
 	if b.configManager != nil {
 		if secs := b.configManager.GetNativeMCPExecTimeoutSeconds(); secs > 0 {
 			b.taskHandler.SetNativeMCPExecTimeout(time.Duration(secs) * time.Second)
@@ -637,6 +649,11 @@ func (b *ServerBuilder) initializeOrchestration() error {
 		return err
 	}
 	b.orchestrationHandler = handler
+
+	// The City Economy prices a cadence change on this handler's two save
+	// paths. It is wired here rather than in initializeEconomy (phase 19)
+	// because this handler does not exist until now (city-economy FR21).
+	b.wireEconomyPricing()
 
 	// Wire Note validation into the canonical Ticket service so a Ticket can
 	// only link Notes that exist in its own workspace

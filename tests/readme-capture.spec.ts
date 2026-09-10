@@ -452,6 +452,12 @@ async function installFixtureRoutes(page: Page) {
       await json(route, {});
       return;
     }
+    // City Economy: the Home HUD's chips and Energy bar, and the map's Farm
+    // badge and harvest pile, all read from this one route.
+    if (url.pathname === '/api/economy') {
+      await json(route, README_SCENES.economy);
+      return;
+    }
     if (url.pathname === '/api/orchestration/workspace') {
       await json(
         route,

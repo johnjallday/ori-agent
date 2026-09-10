@@ -17,6 +17,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
+	"github.com/johnjallday/ori-agent/internal/economy"
+	"github.com/johnjallday/ori-agent/internal/featureflags"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/resetstate"
@@ -66,8 +68,84 @@ type TaskHandler struct {
 	// new task record is written while leaving ordinary planning keys alone.
 	capabilityValidator workspace.TaskCapabilityValidator
 	fileFallback        workspace.TaskFileFallbackPreparer
-	runningMu           sync.Mutex
-	runningCancels      map[string]context.CancelFunc
+	// economy prices a schedule change before it is saved and charges it after
+	// (city-economy FR21). A nil service means the economy is off or unwired,
+	// and every save is free — the same behavior as before the feature.
+	economy        *economy.Service
+	runningMu      sync.Mutex
+	runningCancels map[string]context.CancelFunc
+}
+
+// SetEconomy wires the City Economy's pricing. Called from the server builder
+// after both sides exist; leaving it unset is a supported state, not a bug.
+func (th *TaskHandler) SetEconomy(service *economy.Service) {
+	if th != nil {
+		th.economy = service
+	}
+}
+
+// priceScheduleChange runs the economy's price check for a save (FR21, FR22).
+//
+// It returns whether the caller may proceed. On a refusal it has already written
+// the 409, and — crucially — it runs before the task is touched, so a refused
+// save leaves the task exactly as it was.
+//
+// A nil economy, a disabled feature flag, or a ledger read failure all wave the
+// save through. A game mechanic must never be the reason a user cannot edit
+// their own schedule.
+func (th *TaskHandler) priceScheduleChange(
+	w http.ResponseWriter,
+	r *http.Request,
+	change economy.ScheduleChange,
+) (economy.Quote, bool) {
+	if th == nil || !th.economy.Available() || !featureflags.EconomyEnabled() {
+		return economy.Quote{Action: economy.ActionNone}, true
+	}
+	quote, err := th.economy.PriceScheduleChange(r.Context(), change)
+	if err == nil {
+		return quote, true
+	}
+
+	var insufficient *economy.InsufficientResourcesError
+	if errors.As(err, &insufficient) {
+		// Exactly the FR22 body: the client renders its own copy from these
+		// fields, so the wording lives in one place on the frontend rather than
+		// being duplicated in a server string.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		if encodeErr := json.NewEncoder(w).Encode(map[string]any{
+			"error":    "insufficient_resources",
+			"resource": insufficient.Resource,
+			"required": insufficient.Required,
+			"balance":  insufficient.Balance,
+			"action":   insufficient.Action,
+		}); encodeErr != nil {
+			logger.Warn("Failed to write the insufficient-resources response",
+				logger.Fields{"error": encodeErr})
+		}
+		return quote, false
+	}
+
+	logger.Warn("Economy price check failed; allowing the save",
+		logger.Fields{"task_id": change.TaskID, "error": err})
+	return economy.Quote{Action: economy.ActionNone}, true
+}
+
+// chargeScheduleChange writes the debit for a save that has already persisted
+// (FR23). A failure here is logged and swallowed: the save happened, and
+// refusing to acknowledge it would be worse than an uncharged Farm.
+func (th *TaskHandler) chargeScheduleChange(
+	ctx context.Context,
+	change economy.ScheduleChange,
+	quote economy.Quote,
+) {
+	if th == nil || !th.economy.Available() || quote.Action == economy.ActionNone {
+		return
+	}
+	if err := th.economy.Charge(ctx, change, quote); err != nil {
+		logger.Warn("Failed to charge for a schedule change",
+			logger.Fields{"task_id": change.TaskID, "action": quote.Action, "error": err})
+	}
 }
 
 // SetCapabilityGate wires the connection-precondition check used before task
@@ -448,6 +526,20 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		task.ID = uuid.New().String()
 	}
 
+	// A task that is born a Farm costs the flat build price at any tier
+	// (city-economy FR17, FR18). Priced here, immediately before the task is
+	// added to the workspace, so a refusal creates nothing at all.
+	economyChange := economy.ScheduleChange{
+		WorkspaceID:     req.WorkspaceID,
+		TaskID:          task.ID,
+		Schedule:        task.Schedule,
+		ScheduleEnabled: task.ScheduleEnabled,
+	}
+	economyQuote, mayProceed := th.priceScheduleChange(w, r, economyChange)
+	if !mayProceed {
+		return
+	}
+
 	// Add task to workspace
 	if err := ws.AddTask(task); err != nil {
 		if respondTaskGraphError(w, err, "Failed to add task") {
@@ -464,6 +556,10 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save workspace", err)
 		return
 	}
+
+	// The debit goes after the save, never before: a user is never charged for
+	// a Farm that failed to persist (FR23).
+	th.chargeScheduleChange(r.Context(), economyChange, economyQuote)
 
 	// Get the task we just added by its pre-assigned ID.
 	createdTask, err := ws.GetTask(task.ID)
@@ -815,6 +911,24 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
+		// Price the cadence change BEFORE anything is written (FR21, FR22).
+		//
+		// The loop below mutates ws.Tasks[i] in place and only saves afterwards,
+		// so a check placed inside it would leave a rejected task modified in
+		// memory even though nothing was persisted. Quoting here — from the
+		// task as it stands and the schedule the request would apply — is what
+		// makes "the task must not be modified in any way" literally true.
+		economyChange := economy.ScheduleChange{
+			WorkspaceID:     task.WorkspaceID,
+			TaskID:          req.TaskID,
+			Schedule:        resolvedSchedule(task, schedule, clearSchedule),
+			ScheduleEnabled: resolvedScheduleEnabled(task, &req, clearSchedule),
+		}
+		economyQuote, mayProceed := th.priceScheduleChange(w, r, economyChange)
+		if !mayProceed {
+			return
+		}
+
 		// Find and update task
 		taskIndex := -1
 		for i := range ws.Tasks {
@@ -875,6 +989,9 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 		}
 
 		logger.Info("Updated task", logger.Fields{"task_id": req.TaskID})
+
+		// The debit goes after the save, never before (FR23).
+		th.chargeScheduleChange(r.Context(), economyChange, economyQuote)
 
 		// Publish event
 		if th.eventBus != nil {

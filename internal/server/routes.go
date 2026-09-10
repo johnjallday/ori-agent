@@ -321,6 +321,7 @@ func registerSettingsRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	mux.HandleFunc("/api/settings", s.Handlers.Settings.SettingsHandler)
 	mux.HandleFunc("/api/settings/session", s.Handlers.Settings.SessionSettingsHandler)
+	mux.HandleFunc("/api/settings/economy", s.Handlers.Settings.EconomySettingsHandler)
 	mux.HandleFunc("/api/settings/workspace-root", s.Handlers.Settings.WorkspaceRootSettingsHandler)
 	mux.HandleFunc("/api/settings/vault-root", s.Handlers.Settings.VaultRootSettingsHandler)
 	mux.HandleFunc("/api/settings/templates-root", s.Handlers.Settings.TemplatesRootSettingsHandler)
@@ -415,6 +416,15 @@ func registerOnboardingRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/progression/dismiss", s.Handlers.Progression.Dismiss)
 		mux.HandleFunc("/api/progression/skip", s.Handlers.Progression.Skip)
 		mux.HandleFunc("/api/progression/reset", s.Handlers.Progression.Reset)
+	}
+
+	// City Economy (Craft, Harvest, Farms, Energy). Registered unconditionally:
+	// the handler itself answers 404 on every route when the feature flag is off,
+	// so the flag can be read per request rather than baked in at boot.
+	if s.Handlers.Economy != nil {
+		mux.HandleFunc("/api/economy", s.Handlers.Economy.GetOverview)
+		mux.HandleFunc("/api/economy/harvest", s.Handlers.Economy.Harvest)
+		mux.HandleFunc("/api/economy/quote", s.Handlers.Economy.Quote)
 	}
 
 	// Smart onboarding endpoints (AI-powered profile inference)

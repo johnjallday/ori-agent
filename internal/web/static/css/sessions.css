@@ -4506,9 +4506,18 @@ body.task-modal-open {
   gap: 8px;
 }
 
-.task-modal-btn-save:hover {
+.task-modal-btn-save:hover:not(:disabled) {
   background: var(--primary-hover, #155039);
   border-color: var(--primary-hover, #155039);
+}
+
+/* A Save that cannot be pressed has to look like one.
+   The City Economy disables this button when a cadence change is unaffordable
+   (city-economy FR40), and an unstyled disabled button reads as a working
+   button that silently does nothing. The tooltip carries the reason. */
+.task-modal-btn-save:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .task-modal-btn-save .task-modal-btn-spinner {
@@ -4884,6 +4893,68 @@ body.task-modal-open {
 }
 
 .task-modal-schedule-preview[hidden] {
+  display: none;
+}
+
+/* City Economy price line (city-economy FR39).
+   Sits under the schedule preview it prices and borrows its shape, so the
+   cadence and its cost read as one block. Every color is a theme token: the
+   tone attribute selects which, and none of them is hardcoded. */
+.task-modal-economy-price {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--border-color);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--primary-color) 8%, transparent);
+  font-size: 0.8rem;
+}
+
+.task-modal-economy-price[hidden] {
+  display: none;
+}
+
+/* Neutral when affordable; the theme's warning family when not. Never
+   red-on-red — the ground stays the panel's, only the edge and the text move. */
+.task-modal-economy-price[data-tone="warning"] {
+  border-left-color: var(--warning-color, #b45309);
+  background: color-mix(in srgb, var(--warning-color, #b45309) 12%, transparent);
+}
+
+.task-modal-economy-price[data-tone="muted"] {
+  border-left-color: var(--border-color);
+  background: transparent;
+}
+
+.task-modal-economy-price__cost {
+  margin: 0;
+  color: var(--text-color);
+  font-weight: 600;
+}
+
+.task-modal-economy-price[data-tone="warning"] .task-modal-economy-price__cost {
+  color: var(--warning-color, #b45309);
+}
+
+/* Creative mode: the price is shown struck through and labelled, so the user
+   sees both what it would have cost and that they are not paying it (FR39). */
+.task-modal-economy-price__cost.is-creative {
+  color: var(--text-muted, #6b7280);
+  font-weight: 500;
+  text-decoration: line-through;
+}
+
+.task-modal-economy-price__cost.is-creative::after {
+  content: " Creative mode";
+  text-decoration: none;
+}
+
+.task-modal-economy-price__runs {
+  margin: 4px 0 0;
+  color: var(--text-muted, #6b7280);
+  font-size: 0.75rem;
+}
+
+.task-modal-economy-price__runs[hidden] {
   display: none;
 }
 

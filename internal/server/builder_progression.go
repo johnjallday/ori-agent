@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 
+	"github.com/johnjallday/ori-agent/internal/economy"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/progression"
@@ -23,8 +24,26 @@ func (b *ServerBuilder) initializeProgression() {
 	engine := progression.New(
 		b.onboardingMgr,
 		progression.WithQuests(progression.PersonalAssistantQuests()),
+		// What each quest pays, for the quest log to display. The amounts live
+		// in the economy's own tuning file; progression only renders them.
+		progression.WithRewards(economy.StarterQuestCraft),
 		progression.WithOnComplete(func(q progression.Quest) {
 			logger.Info("Onboarding quest completed", logger.Fields{"quest": q.ID, "tier": q.Tier})
+			// The early quests pay Craft, which is what makes the City Economy
+			// reachable on a fresh install (city-economy Group 7).
+			//
+			// b.economyService is read HERE rather than captured, because the
+			// economy is initialized after this function runs — capturing it now
+			// would bind a nil forever. A quest completes long after the build,
+			// so by then it is set, and a nil is a safe no-op besides.
+			//
+			// This fires only for a LIVE completion: the engine's Backfill marks
+			// existing state complete without calling back, so an established
+			// install is never paid twice for history the economy's own backfill
+			// already counted.
+			if awarded, ok := b.economyService.AwardQuestCraft(context.Background(), q.ID); ok {
+				logger.Info("Quest reward paid", logger.Fields{"quest": q.ID, "craft": awarded})
+			}
 		}),
 	)
 	b.progressionEngine = engine

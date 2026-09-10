@@ -725,9 +725,19 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task, profile TaskProvid
 			}
 
 			if te.eventBus != nil {
+				// scheduled and run_id let a subscriber classify this run without
+				// re-loading the task (city-economy FR8, FR10). A run produced by
+				// an enabled recurring schedule is Farm output and becomes a
+				// pending Harvest; everything else is work the user did by hand
+				// and earns Craft. run_id is the run's own identity, so a
+				// duplicate delivery of one run cannot be counted twice; when the
+				// handler produced no run record, subscribers fall back to the
+				// completion time.
 				te.eventBus.Publish(NewTaskEvent(EventTaskCompleted, workspaceID, task.ID, task.To, map[string]any{
 					"description": task.Description,
 					"result":      result,
+					"scheduled":   task.ScheduleEnabled && IsRecurringSchedule(task.Schedule),
+					"run_id":      strings.TrimSpace(taskRun.RunID),
 				}))
 			}
 		}

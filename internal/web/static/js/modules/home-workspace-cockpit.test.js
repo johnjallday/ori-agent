@@ -27,6 +27,11 @@ import {
   searchForView,
   readCount,
   formatCount,
+  readEconomy,
+  economyMapSnapshot,
+  energyBarView,
+  formatTokens,
+  resourceHelpView,
   isGroupWorkspace,
   flattenWorkspaceTree,
   findWorkspace,
@@ -1649,4 +1654,230 @@ test('context modal visibility requires an explicit request, regardless of heade
       `panel=${panel}`
     );
   }
+});
+
+// ---------------------------------------------------------------------------
+// City Economy (city-economy FR34, FR35)
+// ---------------------------------------------------------------------------
+
+test('readEconomy normalizes a full payload', () => {
+  const economy = readEconomy({
+    craft: 120,
+    harvest: 45,
+    creative_mode: true,
+    energy: { used_today: 142000, daily_figure: 1000000 },
+    farms: [{ workspace_id: 'ws1', task_id: 't1', name: 'Inbox triage', tier: 2 }],
+    pending_by_workspace: { ws1: 3, ws2: 0 }
+  });
+
+  assert.equal(economy.craft, 120);
+  assert.equal(economy.harvest, 45);
+  assert.equal(economy.creativeMode, true);
+  assert.equal(economy.energy.usedToday, 142000);
+  assert.equal(economy.energy.dailyFigure, 1000000);
+  assert.equal(economy.farms.length, 1);
+  // A zero pile is dropped rather than carried: the Map draws a pile only when
+  // something is waiting, so a zero in the map would be dead weight.
+  assert.deepEqual(economy.pendingByWorkspace, { ws1: 3 });
+});
+
+// null is the "there is no economy here" state — the feature flag is off, or
+// the request failed. It must stay distinguishable from an economy at zero,
+// because one hides the HUD and the other shows two zeros (FR34, FR47).
+test('readEconomy returns null for an unusable payload', () => {
+  for (const payload of [null, undefined, {}, 'nope', { craft: 1 }, { craft: 'x', harvest: 2 }]) {
+    assert.equal(readEconomy(payload), null, JSON.stringify(payload) ?? 'undefined');
+  }
+});
+
+test('readEconomy reads a real but empty economy as zeros, not as absent', () => {
+  const economy = readEconomy({
+    craft: 0,
+    harvest: 0,
+    creative_mode: false,
+    energy: { used_today: 0, daily_figure: 1000000 },
+    farms: [],
+    pending_by_workspace: {}
+  });
+  assert.notEqual(economy, null);
+  assert.equal(economy.craft, 0);
+  assert.deepEqual(economy.farms, []);
+});
+
+test('the map snapshot carries only what the map draws', () => {
+  const economy = readEconomy({
+    craft: 120,
+    harvest: 45,
+    creative_mode: true,
+    energy: { used_today: 1, daily_figure: 2 },
+    farms: [{ workspace_id: 'ws1', task_id: 't1', name: 'Inbox triage' }],
+    pending_by_workspace: { ws1: 3 }
+  });
+  const snapshot = economyMapSnapshot(economy);
+
+  assert.deepEqual(Object.keys(snapshot).sort(), ['farms', 'pendingByWorkspace']);
+  assert.equal(snapshot.farms.length, 1);
+  assert.deepEqual(snapshot.pendingByWorkspace, { ws1: 3 });
+});
+
+test('a missing economy projects to an empty map snapshot', () => {
+  assert.deepEqual(economyMapSnapshot(null), { farms: [], pendingByWorkspace: {} });
+});
+
+// ---------------------------------------------------------------------------
+// Energy (city-economy FR31)
+// ---------------------------------------------------------------------------
+
+test('the energy bar fills against the daily figure', () => {
+  const view = energyBarView({ usedToday: 340000, dailyFigure: 1000000 });
+  assert.equal(view.percent, 34);
+  assert.equal(view.over, false);
+  assert.equal(view.text, '34%');
+  assert.equal(view.label, 'Energy: 340k of 1M tokens used today');
+});
+
+// Exceeding the figure is a state, not a failure: the bar fills and the overage
+// is stated. Nothing pauses (FR31).
+test('going over the figure fills the bar and states the overage', () => {
+  const view = energyBarView({ usedToday: 1250000, dailyFigure: 1000000 });
+  assert.equal(view.percent, 100);
+  assert.equal(view.over, true);
+  assert.equal(view.text, '1.3M · +250k over');
+  assert.match(view.label, /over the 1M figure/);
+});
+
+test('an unset figure reports the raw count rather than an infinite bar', () => {
+  const view = energyBarView({ usedToday: 5000, dailyFigure: 0 });
+  assert.equal(view.percent, 0);
+  assert.equal(view.over, false);
+  assert.equal(view.text, '5k');
+  assert.equal(view.label, 'Energy: 5k tokens used today');
+});
+
+test('a day with no tokens reads as empty, not as missing', () => {
+  const view = energyBarView({ usedToday: 0, dailyFigure: 1000000 });
+  assert.equal(view.percent, 0);
+  assert.equal(view.text, '0%');
+});
+
+test('energy handles a missing payload without dividing by nothing', () => {
+  for (const energy of [null, undefined, {}]) {
+    const view = energyBarView(energy);
+    assert.equal(view.percent, 0);
+    assert.equal(view.over, false);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Resource help — "what is this and where do I get it"
+// ---------------------------------------------------------------------------
+
+const helpEconomy = {
+  craft: 12,
+  harvest: 4,
+  creativeMode: false,
+  energy: { usedToday: 340000, dailyFigure: 1000000 },
+  farms: [{ workspace_id: 'ws1', task_id: 't1', name: 'Inbox triage' }],
+  pendingByWorkspace: { ws1: 3 }
+};
+
+test('Craft help says how to earn it and what it buys', () => {
+  const view = resourceHelpView('craft', helpEconomy);
+  assert.equal(view.title, 'Craft');
+  assert.match(view.what, /by hand/);
+  assert.equal(view.earn.length, 2);
+  assert.match(view.earn[0], /chat message/);
+  assert.match(view.earn[1], /ran yourself/);
+  assert.match(view.spend, /25 Craft/);
+});
+
+// The status line is the whole reason this is a panel and not a tooltip: it
+// reads the CURRENT balance and says what to do next.
+test('Craft help says exactly how far off the next Farm is', () => {
+  assert.match(resourceHelpView('craft', helpEconomy).status, /you are 13 short/);
+  assert.match(
+    resourceHelpView('craft', { ...helpEconomy, craft: 60 }).status,
+    /enough for 2 more Farms/
+  );
+  assert.match(
+    resourceHelpView('craft', { ...helpEconomy, craft: 25 }).status,
+    /enough for 1 more Farm\b/
+  );
+});
+
+test('Harvest help points at the pile when runs are waiting', () => {
+  const view = resourceHelpView('harvest', helpEconomy);
+  assert.equal(view.title, 'Harvest');
+  assert.match(view.status, /3 runs waiting to collect/);
+  assert.match(view.status, /amber pile/);
+  assert.match(view.earn[1], /Open result/);
+});
+
+// The three states a new user actually passes through, in order.
+test('Harvest help changes as the city grows', () => {
+  const noFarms = resourceHelpView('harvest', {
+    ...helpEconomy,
+    farms: [],
+    pendingByWorkspace: {}
+  });
+  assert.match(noFarms.status, /no Farms yet/);
+
+  const idleFarm = resourceHelpView('harvest', { ...helpEconomy, pendingByWorkspace: {} });
+  assert.match(idleFarm.status, /Nothing is waiting/);
+  assert.match(idleFarm.status, /Farm produces/);
+
+  const producing = resourceHelpView('harvest', helpEconomy);
+  assert.match(producing.status, /waiting to collect/);
+});
+
+test('a single waiting run is described in the singular', () => {
+  const view = resourceHelpView('harvest', { ...helpEconomy, pendingByWorkspace: { ws1: 1 } });
+  assert.match(view.status, /1 run waiting/);
+});
+
+test('Energy help says plainly that nothing pauses', () => {
+  const view = resourceHelpView('energy', helpEconomy);
+  assert.equal(view.title, 'Energy');
+  assert.match(view.earn[0], /Nothing pauses, blocks, or warns/);
+  assert.match(view.earn[1], /Settings → Economy/);
+  assert.match(view.status, /340k of 1M/);
+  assert.match(view.spend, /buys nothing/);
+});
+
+// Creative mode changes what the panel promises, or it would tell the user to
+// go earn Craft they do not need.
+test('creative mode is reflected in both the status and the spend line', () => {
+  const craft = resourceHelpView('craft', { ...helpEconomy, creativeMode: true });
+  assert.match(craft.status, /Creative mode is on/);
+  assert.match(craft.spend, /free right now/);
+
+  const harvest = resourceHelpView('harvest', { ...helpEconomy, creativeMode: true });
+  assert.match(harvest.spend, /free right now/);
+});
+
+test('help renders on an empty or missing economy without inventing numbers', () => {
+  for (const economy of [null, undefined, {}]) {
+    const craft = resourceHelpView('craft', economy);
+    assert.match(craft.status, /You have 0/);
+    assert.match(craft.status, /25 short/);
+    const harvest = resourceHelpView('harvest', economy);
+    assert.match(harvest.status, /no Farms yet/);
+  }
+});
+
+// An unknown resource falls back to Craft rather than rendering a blank panel.
+test('an unrecognized resource still explains something', () => {
+  assert.equal(resourceHelpView('insight', helpEconomy).title, 'Craft');
+});
+
+test('token counts are formatted the way a person reads them', () => {
+  assert.equal(formatTokens(0), '0');
+  assert.equal(formatTokens(999), '999');
+  assert.equal(formatTokens(1000), '1k');
+  assert.equal(formatTokens(340000), '340k');
+  assert.equal(formatTokens(1000000), '1M');
+  assert.equal(formatTokens(1250000), '1.3M');
+  assert.equal(formatTokens(12500000), '13M');
+  // A negative reading is nonsense, not a negative bar.
+  assert.equal(formatTokens(-5), '0');
 });

@@ -355,6 +355,19 @@
           <input type="text" id="taskModalScheduleCron" class="task-modal-input" placeholder="0 9 * * *" autocomplete="off">
         </div>
         <div id="taskModalSchedulePreview" class="task-modal-schedule-preview" aria-live="polite"></div>
+        <!--
+          City Economy price line (city-economy FR39). Sits directly under the
+          cadence fields it prices, so the cost is read in the same glance as
+          the schedule that causes it.
+
+          Hidden until a quote says there is something to charge: an unpriced
+          save — a slower cadence, a non-cadence edit, or an install with the
+          feature off — must show nothing at all rather than "0 Craft".
+        -->
+        <div id="taskModalEconomyPrice" class="task-modal-economy-price" aria-live="polite" hidden>
+          <p class="task-modal-economy-price__cost" data-economy-price-cost></p>
+          <p class="task-modal-economy-price__runs" data-economy-price-runs hidden></p>
+        </div>
       </div>
       <!-- Auto-save Results Section -->
       <div class="task-modal-field" style="margin-top: 16px;">

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
+	"github.com/johnjallday/ori-agent/internal/economy"
 	"github.com/johnjallday/ori-agent/internal/filewatcher"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
@@ -97,18 +98,21 @@ type Handler struct {
 	taskCapabilityGate      workspace.TaskCapabilityGate
 	taskCapabilityValidator workspace.TaskCapabilityValidator
 	taskFileFallback        workspace.TaskFileFallbackPreparer
-	agentStore              store.Store
-	workspaceStore          workspace.Store
-	sessionStore            SessionStore
-	communicator            *agentcomm.Communicator
-	orchestrator            *orchestration.Orchestrator
-	templateManager         *templates.TemplateManager
-	eventBus                *workspace.EventBus
-	notificationService     *workspace.NotificationService
-	taskHandler             workspace.TaskHandler
-	fileWatcher             *filewatcher.Watcher
-	directorySync           *workspace.DirectorySyncManager
-	folderStore             *workspace.FileStore
+	// economy is remembered for the same reason: it is wired in a later build
+	// phase than the sub-handler that uses it, and may also arrive before one.
+	economy             *economy.Service
+	agentStore          store.Store
+	workspaceStore      workspace.Store
+	sessionStore        SessionStore
+	communicator        *agentcomm.Communicator
+	orchestrator        *orchestration.Orchestrator
+	templateManager     *templates.TemplateManager
+	eventBus            *workspace.EventBus
+	notificationService *workspace.NotificationService
+	taskHandler         workspace.TaskHandler
+	fileWatcher         *filewatcher.Watcher
+	directorySync       *workspace.DirectorySyncManager
+	folderStore         *workspace.FileStore
 
 	// Sub-handlers for modular organization
 	workspaceHandler    *WorkspaceHandler
@@ -205,6 +209,7 @@ func (h *Handler) initializeSubHandlers() {
 		h.taskHandlerSub.SetCapabilityValidator(h.taskCapabilityValidator)
 		h.taskHandlerSub.SetFileFallbackPreparer(h.taskFileFallback)
 		h.taskHandlerSub.SetAdmissionGate(h.admissionGate)
+		h.taskHandlerSub.SetEconomy(h.economy)
 	}
 }
 
@@ -333,6 +338,26 @@ func (h *Handler) SetTaskFileFallbackPreparer(preparer workspace.TaskFileFallbac
 	}
 }
 
+// SetEconomy wires the City Economy so the two task save paths price a cadence
+// change before writing it (city-economy FR21). Leaving it unset makes every
+// save free, which is both the pre-feature behavior and the feature-flag-off
+// behavior.
+//
+// The service is remembered on the Handler as well as pushed down, because the
+// task sub-handler is built lazily — SetTaskHandler can construct it long after
+// this runs, and a service handed only to the sub-handler that existed at this
+// moment would be silently dropped by the one that replaces it. That is the
+// same reason the capability gate and validator are stored here.
+func (h *Handler) SetEconomy(service *economy.Service) {
+	if h == nil {
+		return
+	}
+	h.economy = service
+	if h.taskHandlerSub != nil {
+		h.taskHandlerSub.SetEconomy(service)
+	}
+}
+
 // initializeTaskHandlerLegacy initializes the task handler if all dependencies are available (legacy)
 func (h *Handler) initializeTaskHandlerLegacy() {
 	if h.eventBus != nil && h.taskHandler != nil && h.taskHandlerSub == nil {
@@ -341,6 +366,7 @@ func (h *Handler) initializeTaskHandlerLegacy() {
 		h.taskHandlerSub.SetCapabilityValidator(h.taskCapabilityValidator)
 		h.taskHandlerSub.SetFileFallbackPreparer(h.taskFileFallback)
 		h.taskHandlerSub.SetAdmissionGate(h.admissionGate)
+		h.taskHandlerSub.SetEconomy(h.economy)
 	}
 }
 

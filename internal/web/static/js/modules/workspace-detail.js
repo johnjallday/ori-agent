@@ -21,6 +21,7 @@ import { WorkspaceMemoryManager } from './workspace-detail-memory.js';
 import { WorkspaceFileModalManager } from './workspace-detail-file-modal.js';
 import { WorkspaceMembersPanel } from './workspace-detail-members.js';
 import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
+import { bankHarvest, taskResultDeepLink, taskScheduleDeepLink } from './economy-harvest.js';
 
 /**
  * Format a date for display
@@ -345,6 +346,12 @@ export class WorkspaceDetailPage {
       this.loadDirectories(),
       this.loadSchedules()
     ]);
+    // The harvest popover's two links (FR37, FR42). Both run right after tasks
+    // load, because each resolves its task out of the list that was just
+    // filled, and before the setup prompts below so a deliberate deep link is
+    // never buried under a first-open dialog.
+    this.checkTaskResultDeepLink();
+    void this.checkTaskScheduleDeepLink();
     const restoredBlockedTask = this.restoreTaskAssistPageFromRoute();
     if (!restoredBlockedTask) {
       this.maybeResumePendingAssistSpecialistHandoff();
@@ -5519,6 +5526,67 @@ export class WorkspaceDetailPage {
   }
 
   /**
+   * Check for `?task=<id>&result=1` and open that task's result.
+   *
+   * This is where the Home map's harvest popover sends a user, and opening the
+   * result is what banks that Farm's pending Harvest (city-economy FR11, FR37).
+   *
+   * The parameters are stripped from the URL first, so a refresh does not
+   * re-open the modal — and so the link is a one-shot instruction rather than a
+   * state the page keeps re-applying.
+   */
+  checkTaskResultDeepLink() {
+    const taskId = taskResultDeepLink(window.location.search);
+    if (!taskId) return false;
+
+    const url = new URL(window.location.href);
+    url.searchParams.delete('task');
+    url.searchParams.delete('result');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+
+    // A task id that is not in this workspace is a stale link, not an error:
+    // showTaskResult already returns quietly when it cannot find the task.
+    this.showTaskResult(taskId);
+    return true;
+  }
+
+  /**
+   * Check for `?task=<id>&schedule=1` and open that task's editor on its
+   * schedule section (city-economy FR42).
+   *
+   * This is the upgrade entry point the harvest popover offers. It deliberately
+   * opens the ordinary task editor rather than a second cadence dialog, so a
+   * cadence is priced, validated, and saved in exactly one place.
+   */
+  async checkTaskScheduleDeepLink() {
+    const taskId = taskScheduleDeepLink(window.location.search);
+    if (!taskId) return false;
+
+    const url = new URL(window.location.href);
+    url.searchParams.delete('task');
+    url.searchParams.delete('schedule');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+
+    const task = this.tasks.find(item => item.id === taskId);
+    if (!task) return false;
+    if (
+      !window.taskModalController ||
+      typeof window.taskModalController.openForEdit !== 'function'
+    ) {
+      return false;
+    }
+    await window.taskModalController.openForEdit(task, () => this.loadTasks());
+    // Scroll the schedule into view once the editor has painted, so the user
+    // lands on the thing they came to change rather than at the top of a form.
+    window.setTimeout(() => {
+      document
+        .getElementById('taskModalScheduleFields')
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }, 120);
+    return true;
+  }
+
+  /**
    * Check for ?addAgent=1 query param and open the Create Agent modal
    * pre-filled with workspace manager defaults so the user picks model/provider.
    */
@@ -7346,6 +7414,11 @@ export class WorkspaceDetailPage {
     this.currentTaskResultPromotionDraft = null;
     this.currentTaskResultPromotionContext = null;
     this.renderTaskResultNextSteps(task, resultData);
+
+    // Reading a Farm's result is what collects its Harvest (city-economy FR11).
+    // Fire-and-forget: the user opened this to read it, and a ledger problem is
+    // never a reason to interrupt that. A task that is not a Farm banks nothing.
+    void bankHarvest({ workspaceId: this.workspaceId, taskId: task.id });
 
     const openResultModal = () => {
       if (!this.elements.taskResultModal || !window.bootstrap) return;

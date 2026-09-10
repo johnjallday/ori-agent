@@ -1141,10 +1141,16 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 			})
 			th.eventBus.Publish(event)
 		} else {
+			// A Run started from the UI still produces real Farm output when the
+			// task has an enabled recurring schedule, so it is classified the
+			// same way a scheduled run is (city-economy FR8, FR10). manual says
+			// who pressed the button; scheduled says what kind of task ran.
 			event := workspace.NewTaskEvent(workspace.EventTaskCompleted, ws.ID, task.ID, task.To, map[string]any{
 				"description": task.Description,
 				"result":      result,
 				"manual":      manual,
+				"scheduled":   task.ScheduleEnabled && workspace.IsRecurringSchedule(task.Schedule),
+				"run_id":      strings.TrimSpace(task.CurrentRunID),
 			})
 			th.eventBus.Publish(event)
 		}

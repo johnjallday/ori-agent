@@ -1,6 +1,44 @@
 package featureflags
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
+
+func TestEconomyEnabledDefaultsOnAndRespectsTheEnvironment(t *testing.T) {
+	tests := []struct {
+		name  string
+		unset bool
+		raw   string
+		want  bool
+	}{
+		{name: "unset defaults enabled", unset: true, want: true},
+		{name: "empty defaults enabled", raw: "", want: true},
+		{name: "false disables", raw: "false", want: false},
+		{name: "off disables", raw: "off", want: false},
+		{name: "zero disables", raw: "0", want: false},
+		{name: "true enables", raw: "true", want: true},
+		{name: "unknown defaults enabled", raw: "maybe", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setenv first even when testing the unset case: it is what
+			// registers the cleanup that restores whatever the developer's own
+			// shell had exported.
+			t.Setenv(envEconomyEnabled, tt.raw)
+			if tt.unset {
+				if err := os.Unsetenv(envEconomyEnabled); err != nil {
+					t.Fatalf("unset %s: %v", envEconomyEnabled, err)
+				}
+			}
+			if got := EconomyEnabled(); got != tt.want {
+				t.Fatalf("EconomyEnabled() with %s=%q (unset=%v) = %v, want %v",
+					envEconomyEnabled, tt.raw, tt.unset, got, tt.want)
+			}
+		})
+	}
+}
 
 func TestParseBoolDefaultTrue(t *testing.T) {
 	tests := []struct {

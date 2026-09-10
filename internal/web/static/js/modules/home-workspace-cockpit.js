@@ -1,4 +1,7 @@
 import { openGroupBuilder } from './group-builder.js';
+// Importing this also registers window.OriEconomy, which is how dashboard.js —
+// a plain script, not a module — reaches the same harvest client.
+import { ECONOMY_CHANGED_EVENT } from './economy-harvest.js';
 
 // home-workspace-cockpit.js — the Map-first Home cockpit coordinator.
 //
@@ -54,6 +57,201 @@ export function readCount(value) {
 /** Format a possibly-unavailable count for display (FR44, FR121). */
 export function formatCount(value) {
   return value === null || value === undefined ? '—' : String(value);
+}
+
+// ---------------------------------------------------------------------------
+// City Economy (city-economy FR34, FR35)
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize a GET /api/economy payload into what the HUD and the Map need.
+ *
+ * Returns null for anything unusable — a 404 from the feature flag being off, a
+ * failed request, a malformed body. Null is a real state and means "there is no
+ * economy here": the HUD stays hidden and the Map draws no badges, rather than
+ * showing a pair of chips permanently reading zero.
+ */
+export function readEconomy(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  const craft = readCount(payload.craft);
+  const harvest = readCount(payload.harvest);
+  if (craft === null || harvest === null) return null;
+  const pending = {};
+  const source = payload.pending_by_workspace;
+  if (source && typeof source === 'object') {
+    Object.keys(source).forEach(id => {
+      const count = readCount(source[id]);
+      if (count) pending[id] = count;
+    });
+  }
+  return {
+    craft,
+    harvest,
+    creativeMode: !!payload.creative_mode,
+    energy: {
+      usedToday: readCount(payload.energy && payload.energy.used_today) || 0,
+      dailyFigure: readCount(payload.energy && payload.energy.daily_figure) || 0
+    },
+    farms: Array.isArray(payload.farms) ? payload.farms : [],
+    pendingByWorkspace: pending
+  };
+}
+
+/**
+ * What a resource is, where it comes from, and what it buys.
+ *
+ * This is the answer to "how do I get Harvest?", which is the first question
+ * the HUD provokes and one a `title` tooltip cannot answer. Returned as data so
+ * every line can be asserted, and so the copy lives in one place rather than
+ * being spread through DOM-building code.
+ *
+ * `status` is the part that makes it useful rather than encyclopaedic: it reads
+ * the CURRENT economy and says what to do next — how much short of a Farm you
+ * are, or which workspace has runs waiting.
+ */
+export function resourceHelpView(resource, economy) {
+  const craft = Number((economy && economy.craft) || 0);
+  const harvest = Number((economy && economy.harvest) || 0);
+  const creative = !!(economy && economy.creativeMode);
+
+  if (resource === 'harvest') {
+    return {
+      title: 'Harvest',
+      what: 'Harvest comes from Farm output you actually read. A Farm is any task on a repeating schedule.',
+      status: harvestStatus(economy, harvest),
+      earnHeading: 'To earn it',
+      earn: [
+        'Let a Farm run. Each finished run waits on its workspace tile as a +1 pile.',
+        'Click the pile, then Open result. Reading the result is what collects it.'
+      ],
+      spend: creative
+        ? 'Spends on making a Farm run more often — free right now, because Creative mode is on.'
+        : 'Spends on making a Farm run more often: 10 Harvest per step up, rising with the cadence.'
+    };
+  }
+
+  if (resource === 'energy') {
+    const bar = energyBarView(economy && economy.energy);
+    return {
+      title: 'Energy',
+      what: 'Energy is the tokens your machine pushed today, across every provider.',
+      status: bar.label,
+      earnHeading: 'What it does',
+      earn: [
+        'Nothing pauses, blocks, or warns when you go over the figure.',
+        'It is a gauge you set for yourself, in Settings → Economy.'
+      ],
+      spend: 'Costs nothing and buys nothing. It is here so a busy day is visible.'
+    };
+  }
+
+  return {
+    title: 'Craft',
+    what: 'Craft comes from work you do by hand — the opposite of work you automate.',
+    status: craftStatus(craft, creative),
+    earnHeading: 'To earn it',
+    earn: ['Send a chat message: +1, up to 20 an hour.', 'Finish a task you ran yourself: +5.'],
+    spend: creative
+      ? 'Spends on building a Farm — free right now, because Creative mode is on.'
+      : 'Spends on building a Farm: 25 Craft, once per task, at any cadence.'
+  };
+}
+
+function craftStatus(craft, creative) {
+  if (creative) return `You have ${craft}. Creative mode is on, so Farms cost nothing.`;
+  if (craft >= 25) {
+    const farms = Math.floor(craft / 25);
+    return `You have ${craft} — enough for ${farms} more ${farms === 1 ? 'Farm' : 'Farms'}.`;
+  }
+  return `You have ${craft}. A Farm costs 25, so you are ${25 - craft} short.`;
+}
+
+function harvestStatus(economy, harvest) {
+  const pending = Object.values((economy && economy.pendingByWorkspace) || {}).reduce(
+    (total, count) => total + Number(count || 0),
+    0
+  );
+  if (pending > 0) {
+    return `You have ${harvest}, with ${pending} ${pending === 1 ? 'run' : 'runs'} waiting to collect — look for the amber pile on the map.`;
+  }
+  const farms = ((economy && economy.farms) || []).length;
+  if (farms > 0) {
+    return `You have ${harvest}. Nothing is waiting; your ${farms === 1 ? 'Farm produces' : 'Farms produce'} more on their next run.`;
+  }
+  return `You have ${harvest}. You have no Farms yet — build one with Craft to start producing.`;
+}
+
+/**
+ * How the Energy bar should read (city-economy FR31).
+ *
+ * Returns `{ percent, over, text, label }`. It is a gauge and never a limit:
+ * nothing here can block, and going over produces a full bar plus an explicit
+ * overage rather than a warning.
+ *
+ * A figure of zero means the user has not set one, which would make every
+ * reading infinite — so the bar reports empty and says only the raw count.
+ */
+export function energyBarView(energy) {
+  const used = Math.max(0, Number((energy && energy.usedToday) || 0));
+  const figure = Math.max(0, Number((energy && energy.dailyFigure) || 0));
+
+  if (!figure) {
+    return {
+      percent: 0,
+      over: false,
+      text: formatTokens(used),
+      label: `Energy: ${formatTokens(used)} tokens used today`
+    };
+  }
+
+  const ratio = used / figure;
+  const percent = Math.min(100, Math.round(ratio * 100));
+  if (used > figure) {
+    const over = used - figure;
+    return {
+      percent: 100,
+      over: true,
+      text: `${formatTokens(used)} · +${formatTokens(over)} over`,
+      label:
+        `Energy: ${formatTokens(used)} tokens used today, ` +
+        `${formatTokens(over)} over the ${formatTokens(figure)} figure`
+    };
+  }
+  return {
+    percent,
+    over: false,
+    text: `${percent}%`,
+    label: `Energy: ${formatTokens(used)} of ${formatTokens(figure)} tokens used today`
+  };
+}
+
+/**
+ * Token counts as a person reads them: 340k, not 340,000, and 1.2M above a
+ * million. The Energy bar is glanced at, not audited.
+ */
+export function formatTokens(value) {
+  const tokens = Math.max(0, Math.round(Number(value) || 0));
+  if (tokens >= 1_000_000) {
+    const millions = tokens / 1_000_000;
+    return `${millions >= 10 ? Math.round(millions) : Math.round(millions * 10) / 10}M`;
+  }
+  if (tokens >= 1000) return `${Math.round(tokens / 1000)}k`;
+  return String(tokens);
+}
+
+/**
+ * The snapshot handed to OriWorkspaceMap.mount (FR35).
+ *
+ * Deliberately a projection rather than the whole economy: the Map draws badges
+ * and piles and has no business knowing about balances, creative mode, or
+ * energy. A null economy projects to empty, which draws nothing.
+ */
+export function economyMapSnapshot(economy) {
+  if (!economy) return { farms: [], pendingByWorkspace: {} };
+  return {
+    farms: economy.farms || [],
+    pendingByWorkspace: economy.pendingByWorkspace || {}
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1481,7 +1679,25 @@ import {
     captureCancel: document.getElementById('cockpitCaptureCancel'),
     captureStatus: document.getElementById('cockpitCaptureStatus'),
     askPanel: document.getElementById('homeAssistantThinkingModal'),
-    askTarget: document.getElementById('cockpitAskTarget')
+    askTarget: document.getElementById('cockpitAskTarget'),
+    // City Economy HUD. Hidden until GET /api/economy answers, so an install
+    // with the feature switched off never shows it (FR34, FR47).
+    economy: document.getElementById('cockpitEconomy'),
+    economyCraft: document.querySelector('[data-economy-craft]'),
+    economyHarvest: document.querySelector('[data-economy-harvest]'),
+    economyEnergy: document.querySelector('[data-economy-energy]'),
+    economyEnergyFill: document.querySelector('[data-economy-energy-fill]'),
+    economyEnergyText: document.querySelector('[data-economy-energy-text]'),
+    // The help panel each HUD element opens.
+    economyHelp: document.getElementById('cockpitEconomyHelp'),
+    economyHelpTitle: document.getElementById('cockpitEconomyHelpTitle'),
+    economyHelpWhat: document.querySelector('[data-economy-help-what]'),
+    economyHelpStatus: document.querySelector('[data-economy-help-status]'),
+    economyHelpEarnHeading: document.querySelector('[data-economy-help-earn-heading]'),
+    economyHelpEarn: document.querySelector('[data-economy-help-earn]'),
+    economyHelpSpend: document.querySelector('[data-economy-help-spend]'),
+    economyHelpClose: document.querySelector('[data-economy-help-close]'),
+    economyHelpTriggers: Array.from(document.querySelectorAll('[data-economy-help]'))
   };
 
   // Dashboard components render inside #main-content, whose z-index creates a
@@ -1533,6 +1749,11 @@ import {
     // Personal HQ status, read once and refreshed on HQ actions. Quick Capture
     // needs it to know where a capture goes (FR102/FR104).
     hqStatus: null,
+    // City Economy. null until GET /api/economy answers successfully, so "the
+    // economy is switched off" and "the user has nothing yet" stay
+    // distinguishable — the first hides the HUD, the second shows two zeros
+    // (city-economy FR34).
+    economy: null,
     onboardingGate: {
       state: ONBOARDING_GATE_LOADING,
       allowWorkspaceHydration: false,
@@ -1638,6 +1859,9 @@ import {
       tree: state.tree,
       selectedId: state.selectedId,
       metadata: state.metadata,
+      // Farm badges and harvest piles (city-economy FR35). A projection, not
+      // the whole economy: the Map draws buildings, it does not hold balances.
+      economy: economyMapSnapshot(state.economy),
       // Cockpit contract (see workspace-map.js): select-only pointer semantics,
       // no internal topbar/overview chrome, and no invented default selection.
       selectOnly: true,
@@ -2728,6 +2952,191 @@ import {
     }
   }
 
+  /**
+   * Load the City Economy (city-economy FR35).
+   *
+   * Independently degradable in exactly the way the schedule is: a failure or a
+   * 404 leaves state.economy null, which hides the HUD and draws no badges, and
+   * never blocks or delays the workspace list. Nothing here is added to the
+   * workspace payload — the economy is its own read.
+   */
+  async function refreshEconomy() {
+    try {
+      const res = await fetch('/api/economy');
+      // 404 is the feature flag being off (FR47), not a failure to report.
+      if (res.status === 404) {
+        state.economy = null;
+        return;
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      state.economy = readEconomy(await res.json());
+    } catch (err) {
+      console.warn('home-workspace-cockpit: economy unavailable', err);
+      state.economy = null;
+    }
+  }
+
+  /**
+   * Paint the HUD chips, and bump the one that grew.
+   *
+   * The bump is the whole feedback for earned Craft — there is deliberately no
+   * toast for it (FR44) — so it fires only on an increase, and never on the
+   * first paint, where every value has "grown" from nothing.
+   */
+  let lastEconomyChips = null;
+  function renderEconomyHUD() {
+    if (!els.economy) return;
+    if (!state.economy) {
+      els.economy.hidden = true;
+      lastEconomyChips = null;
+      // The HUD going away takes its help panel with it, or the panel outlives
+      // the chips it explains.
+      hideEconomyHelp({ restoreFocus: false });
+      return;
+    }
+    const next = { craft: state.economy.craft, harvest: state.economy.harvest };
+    const first = lastEconomyChips === null;
+    if (els.economyCraft) els.economyCraft.textContent = formatCount(next.craft);
+    if (els.economyHarvest) els.economyHarvest.textContent = formatCount(next.harvest);
+    renderEnergyBar(energyBarView(state.economy.energy));
+    els.economy.hidden = false;
+    if (!first) {
+      if (next.craft > lastEconomyChips.craft) bumpEconomyChip('craft');
+      if (next.harvest > lastEconomyChips.harvest) bumpEconomyChip('harvest');
+    }
+    lastEconomyChips = next;
+    // A panel left open while a message earns Craft has to keep telling the
+    // truth about how far off the next Farm is.
+    if (openEconomyHelp) renderEconomyHelp(openEconomyHelp);
+  }
+
+  /** Paint the Energy gauge. Never blocks or warns — it only reports (FR31). */
+  function renderEnergyBar(view) {
+    if (els.economyEnergyFill) els.economyEnergyFill.style.width = `${view.percent}%`;
+    if (els.economyEnergyText) els.economyEnergyText.textContent = view.text;
+    if (els.economyEnergy) {
+      els.economyEnergy.dataset.over = view.over ? 'true' : 'false';
+      // The spoken label carries the whole reading, because the visual is a bar
+      // and a percentage that mean nothing read aloud on their own.
+      els.economyEnergy.setAttribute('aria-label', view.label);
+    }
+  }
+
+  // ---- resource help (what a resource is, and where to get it) ----
+  //
+  // One panel, reused by all three HUD elements, because only one can be open
+  // at a time and three panels would be three places for the copy to drift.
+
+  let openEconomyHelp = '';
+  let economyHelpTrigger = null;
+
+  function showEconomyHelp(resource, trigger) {
+    if (!els.economyHelp) return;
+    // Clicking the open chip closes it, the way a disclosure should.
+    if (openEconomyHelp === resource) {
+      hideEconomyHelp();
+      return;
+    }
+    renderEconomyHelp(resource);
+    // Focus the panel itself rather than the close button: the first thing a
+    // screen reader should hear is the resource and its explanation, not "close".
+    els.economyHelp.setAttribute('tabindex', '-1');
+    els.economyHelp.focus();
+    economyHelpTrigger = trigger || economyHelpTrigger;
+  }
+
+  /**
+   * Paint the panel for one resource.
+   *
+   * Separate from showEconomyHelp so a balance that moves while the panel is
+   * open updates it in place — the status line is the useful part, and a stale
+   * "you are 13 short" right after earning is worse than no line at all.
+   */
+  function renderEconomyHelp(resource) {
+    if (!els.economyHelp) return;
+    const view = resourceHelpView(resource, state.economy);
+    if (els.economyHelpTitle) els.economyHelpTitle.textContent = view.title;
+    if (els.economyHelpWhat) els.economyHelpWhat.textContent = view.what;
+    if (els.economyHelpStatus) els.economyHelpStatus.textContent = view.status;
+    if (els.economyHelpEarnHeading) els.economyHelpEarnHeading.textContent = view.earnHeading;
+    if (els.economyHelpEarn) {
+      els.economyHelpEarn.innerHTML = '';
+      view.earn.forEach(line => {
+        const item = document.createElement('li');
+        item.textContent = line;
+        els.economyHelpEarn.append(item);
+      });
+    }
+    if (els.economyHelpSpend) els.economyHelpSpend.textContent = view.spend;
+
+    els.economyHelp.hidden = false;
+    els.economyHelp.dataset.resource = resource;
+    openEconomyHelp = resource;
+    els.economyHelpTriggers.forEach(btn => {
+      btn.setAttribute(
+        'aria-expanded',
+        btn.getAttribute('data-economy-help') === resource ? 'true' : 'false'
+      );
+    });
+  }
+
+  function hideEconomyHelp({ restoreFocus = true } = {}) {
+    if (!els.economyHelp || els.economyHelp.hidden) return;
+    els.economyHelp.hidden = true;
+    openEconomyHelp = '';
+    els.economyHelpTriggers.forEach(btn => btn.setAttribute('aria-expanded', 'false'));
+    if (restoreFocus && economyHelpTrigger && typeof economyHelpTrigger.focus === 'function') {
+      economyHelpTrigger.focus();
+    }
+    economyHelpTrigger = null;
+  }
+
+  els.economyHelpTriggers.forEach(trigger => {
+    trigger.addEventListener('click', () => {
+      showEconomyHelp(trigger.getAttribute('data-economy-help') || 'craft', trigger);
+    });
+  });
+  els.economyHelpClose?.addEventListener('click', () => hideEconomyHelp());
+  // Escape and an outside click both close it, like every other transient panel
+  // on this page.
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || !openEconomyHelp) return;
+    hideEconomyHelp();
+  });
+  document.addEventListener('mousedown', event => {
+    if (!openEconomyHelp) return;
+    const target = event.target;
+    if (!target || typeof target.closest !== 'function') return;
+    if (target.closest('#cockpitEconomyHelp') || target.closest('[data-economy-help]')) return;
+    hideEconomyHelp({ restoreFocus: false });
+  });
+
+  function bumpEconomyChip(resource) {
+    if (!els.economy) return;
+    const chip = els.economy.querySelector(`[data-economy-chip="${resource}"]`);
+    if (!chip || !chip.classList) return;
+    // Restart rather than stack: a burst of earnings should read as one lively
+    // chip, not as a queue of animations finishing long after the fact.
+    chip.classList.remove('is-earned');
+    void chip.offsetWidth;
+    chip.classList.add('is-earned');
+    chip.addEventListener('animationend', () => chip.classList.remove('is-earned'), { once: true });
+  }
+
+  /**
+   * Reload the economy and repaint everything that reads it.
+   *
+   * Called after a harvest and after any schedule save that spent a resource.
+   * The Map is re-mounted rather than patched because the badge and the pile are
+   * part of tileHTML, and a half-updated tile is worse than a re-mount that
+   * preserves camera and selection anyway.
+   */
+  async function refreshEconomyAndRender() {
+    await refreshEconomy();
+    renderEconomyHUD();
+    mountMap();
+  }
+
   async function refresh() {
     if (!canHydrateWorkspaceData()) return null;
     if (state.inFlight) return state.inFlight;
@@ -2767,6 +3176,13 @@ import {
       applyFilterToMap();
       renderToday();
       if (state.railState === RAIL_SUMMARY) renderRail({ announceChange: false });
+    });
+    // The economy rides alongside for the same reason (city-economy FR35). The
+    // Map is re-mounted when it lands so the badges appear; a Map that mounted
+    // first without them is correct, just briefly plainer.
+    void refreshEconomy().then(() => {
+      renderEconomyHUD();
+      mountMap();
     });
     return state.inFlight;
   }
@@ -2870,6 +3286,15 @@ import {
   }
 
   // ---- wiring ----
+
+  // Any surface that changes a balance says so through this one event rather
+  // than reaching into the cockpit: harvesting from a result modal on another
+  // page, and (Group 4) paying for a Farm build or a cadence upgrade. The HUD
+  // and the Map's badges both re-read from the server, so a change made
+  // anywhere lands here without either side guessing at the new numbers.
+  window.addEventListener(ECONOMY_CHANGED_EVENT, () => {
+    void refreshEconomyAndRender();
+  });
 
   // District tags may be reconciled after the Map's initial shell binding when
   // persisted layout arrives. Keep one Home-owned delegated seam on the stable

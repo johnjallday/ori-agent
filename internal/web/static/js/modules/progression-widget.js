@@ -329,6 +329,18 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
 
     li.append(mark, title);
 
+    // What this quest pays (city-economy Group 7). Shown on quests that are
+    // still open — once one is done the reward is already in the balance, and
+    // a lingering "+5 Craft" would read as something still owed.
+    const reward = Number(q.reward_craft || 0);
+    if (reward > 0 && !state.done && !state.skipped) {
+      const badge = document.createElement('span');
+      badge.className = 'quest-reward';
+      badge.textContent = `+${reward} Craft`;
+      badge.title = 'Finishing this earns Craft, which builds Farms';
+      li.append(badge);
+    }
+
     if (state.skipped) {
       const label = document.createElement('span');
       label.className = 'quest-status quest-status-skipped';

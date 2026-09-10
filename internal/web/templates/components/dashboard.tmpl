@@ -92,6 +92,87 @@
             <span class="cockpit-flyout-toggle__label">Quests</span>
             <span class="cockpit-flyout-toggle__summary" data-role="quests-summary"></span>
           </button>
+          <!--
+            City Economy HUD (city-economy FR34): what the city has right now.
+            Craft is earned by hand, Harvest by opening a Farm's results, and
+            the Energy bar (Group 5) gauges today's tokens against a figure the
+            user sets.
+
+            It starts hidden and home-workspace-cockpit.js reveals it only after
+            a successful GET /api/economy, so an install with the feature flag
+            off — where that route answers 404 — shows nothing rather than a
+            pair of chips permanently reading zero.
+
+            aria-live="polite" because these values change as a side effect of
+            other actions (a message sent, a result opened, a schedule saved)
+            rather than in response to pressing anything here.
+          -->
+          <!--
+            Each element here is a BUTTON that explains itself. A resource whose
+            only documentation is a `title` tooltip is undiscoverable with a
+            keyboard and invisible on touch, and "how do I get Harvest?" is the
+            first question this HUD provokes — so asking it is a click.
+
+            The values still live in an aria-live region; the popover does NOT
+            (see below), or opening it would read the whole panel out as a
+            balance change.
+          -->
+          <div class="cockpit-economy" id="cockpitEconomy" role="group"
+               aria-label="City resources" aria-live="polite" hidden>
+            <button type="button" class="cockpit-economy__chip" data-economy-chip="craft"
+                    data-economy-help="craft" aria-expanded="false"
+                    aria-controls="cockpitEconomyHelp"
+                    aria-label="Craft — what it is and how to earn it">
+              <span class="cockpit-economy__chip-label">Craft</span>
+              <span class="cockpit-economy__chip-value" data-economy-craft>0</span>
+            </button>
+            <button type="button" class="cockpit-economy__chip" data-economy-chip="harvest"
+                    data-economy-help="harvest" aria-expanded="false"
+                    aria-controls="cockpitEconomyHelp"
+                    aria-label="Harvest — what it is and how to earn it">
+              <span class="cockpit-economy__chip-label">Harvest</span>
+              <span class="cockpit-economy__chip-value" data-economy-harvest>0</span>
+            </button>
+            <!--
+              Energy (FR31): tokens this machine pushed today, against a figure
+              the user sets in Settings. A gauge, never a limit — nothing in the
+              app pauses, blocks, or warns when it is exceeded; the bar simply
+              fills and the overage is stated as text.
+
+              It explains itself like its neighbours, because "is this going to
+              stop my work?" is exactly the question a filling bar raises and
+              the answer is no.
+            -->
+            <button type="button" class="cockpit-economy__energy" data-economy-energy
+                    data-economy-help="energy" aria-expanded="false"
+                    aria-controls="cockpitEconomyHelp"
+                    aria-label="Energy used today">
+              <span class="cockpit-economy__energy-track">
+                <span class="cockpit-economy__energy-fill" data-economy-energy-fill></span>
+              </span>
+              <span class="cockpit-economy__energy-text" data-economy-energy-text></span>
+            </button>
+          </div>
+          <!--
+            The help panel, deliberately OUTSIDE the aria-live region above: its
+            content is requested, not announced, and a live region would read
+            the whole thing out again on every balance change.
+          -->
+          <div class="cockpit-economy-help" id="cockpitEconomyHelp" role="dialog"
+               aria-labelledby="cockpitEconomyHelpTitle" hidden>
+            <div class="cockpit-economy-help__head">
+              <h3 class="cockpit-economy-help__title" id="cockpitEconomyHelpTitle"></h3>
+              <button type="button" class="cockpit-economy-help__close"
+                      data-economy-help-close aria-label="Close">
+                <span aria-hidden="true">&times;</span>
+              </button>
+            </div>
+            <p class="cockpit-economy-help__what" data-economy-help-what></p>
+            <p class="cockpit-economy-help__status" data-economy-help-status></p>
+            <p class="cockpit-economy-help__heading" data-economy-help-earn-heading></p>
+            <ul class="cockpit-economy-help__list" data-economy-help-earn></ul>
+            <p class="cockpit-economy-help__spend" data-economy-help-spend></p>
+          </div>
           <!-- Mutually exclusive Map/Tree toggle. aria-pressed carries the
                active view; the visible labels carry it without color (FR24). -->
           <div class="cockpit-view-toggle" role="group" aria-label="Workspace view">

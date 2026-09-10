@@ -65,6 +65,51 @@ type LLMTaskHandler struct {
 	workspaceToolsFn       WorkspaceToolFactory
 	runtimeToolsFn         RuntimeTaskToolFactory
 	utilityTools           UtilityToolProvider
+	// usageRecorder records token usage for a task's LLM calls. Nil means
+	// nothing is recorded, which is exactly what happened before this existed.
+	usageRecorder UsageRecorder
+}
+
+// UsageRecorder records token usage from a completed provider call.
+//
+// Narrow on purpose, and modelled on TaskXPAwarder: it is satisfied by
+// *llm.CostTracker without this package depending on the cost tracker's
+// lifecycle, and a nil recorder is a supported state rather than a bug.
+type UsageRecorder interface {
+	TrackUsage(provider, model, agentName string, usage llm.Usage, requestID string) error
+}
+
+// SetUsageRecorder wires token accounting for task runs (city-economy FR29).
+//
+// Never call this with a possibly-nil concrete pointer wrapped in the interface
+// — leave it unset instead, so the nil check in recordTaskUsage is reliable.
+// This is the same warning SetEvolutionAwarder carries, for the same reason.
+func (h *LLMTaskHandler) SetUsageRecorder(recorder UsageRecorder) {
+	if h == nil {
+		return
+	}
+	h.usageRecorder = recorder
+}
+
+// recordTaskUsage books one successful provider call.
+//
+// Best-effort in every direction: no recorder, an empty response, or a failed
+// write all leave the task run untouched. Usage accounting must never be the
+// reason a task fails.
+func (h *LLMTaskHandler) recordTaskUsage(providerName, modelName, agentName string, usage llm.Usage) {
+	if h == nil || h.usageRecorder == nil {
+		return
+	}
+	// A provider that reports nothing has nothing to record. Writing a zero row
+	// would inflate the request count on the Usage page without adding a token.
+	if usage.TotalTokens <= 0 && usage.PromptTokens <= 0 && usage.CompletionTokens <= 0 {
+		return
+	}
+	if err := h.usageRecorder.TrackUsage(providerName, modelName, agentName, usage, ""); err != nil {
+		logger.Warn("Failed to record task token usage", logger.Fields{
+			"provider": providerName, "model": modelName, "agent": agentName, "error": err,
+		})
+	}
 }
 
 // TaskExecutionScopeResolver supplies a server-authorized, one-invocation CLI
@@ -637,6 +682,15 @@ func (h *LLMTaskHandler) executeTaskConversation(
 			}
 			return "", fmt.Errorf("LLM call failed: %w", err)
 		}
+
+		// Record what this round cost (city-economy FR29). Every retry path
+		// above — the tools-rejected retry, the cold-load retry — converges
+		// here with a successful response, so recording once at this point
+		// covers all three provider.Chat calls without triple-counting a round
+		// that was retried. Until this existed, a scheduled task run was
+		// invisible to the Usage page and to the Energy bar; only chat and CLI
+		// agents recorded anything.
+		h.recordTaskUsage(providerName, modelName, agentName, resp.Usage)
 
 		if h.eventBus != nil {
 			h.eventBus.Publish(NewTaskEvent(EventTaskThinking, task.WorkspaceID, task.ID, agentName, map[string]any{

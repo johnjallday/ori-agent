@@ -123,6 +123,7 @@ export default defineConfig([
       'internal/web/static/js/modules/dashboard-state.js',
       'internal/web/static/js/modules/dashboard-tasks.js',
       'internal/web/static/js/modules/dashboard-ui.js',
+      'internal/web/static/js/modules/economy-harvest.js',
       'internal/web/static/js/modules/note-ai-assist.js',
       'internal/web/static/js/modules/note-backlinks.js',
       'internal/web/static/js/modules/note-editor.js',
