@@ -21,7 +21,7 @@ import { WorkspaceMemoryManager } from './workspace-detail-memory.js';
 import { WorkspaceFileModalManager } from './workspace-detail-file-modal.js';
 import { WorkspaceMembersPanel } from './workspace-detail-members.js';
 import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
-import { bankHarvest, taskResultDeepLink } from './economy-harvest.js';
+import { bankHarvest, taskResultDeepLink, taskScheduleDeepLink } from './economy-harvest.js';
 
 /**
  * Format a date for display
@@ -346,11 +346,12 @@ export class WorkspaceDetailPage {
       this.loadDirectories(),
       this.loadSchedules()
     ]);
-    // ?task=<id>&result=1 — the harvest popover's Open result link (FR37).
-    // Runs right after tasks load, because showTaskResult resolves the task out
-    // of the list it just filled, and before the setup prompts below so a
-    // deliberate deep link is never buried under a first-open dialog.
+    // The harvest popover's two links (FR37, FR42). Both run right after tasks
+    // load, because each resolves its task out of the list that was just
+    // filled, and before the setup prompts below so a deliberate deep link is
+    // never buried under a first-open dialog.
     this.checkTaskResultDeepLink();
+    void this.checkTaskScheduleDeepLink();
     const restoredBlockedTask = this.restoreTaskAssistPageFromRoute();
     if (!restoredBlockedTask) {
       this.maybeResumePendingAssistSpecialistHandoff();
@@ -5546,6 +5547,42 @@ export class WorkspaceDetailPage {
     // A task id that is not in this workspace is a stale link, not an error:
     // showTaskResult already returns quietly when it cannot find the task.
     this.showTaskResult(taskId);
+    return true;
+  }
+
+  /**
+   * Check for `?task=<id>&schedule=1` and open that task's editor on its
+   * schedule section (city-economy FR42).
+   *
+   * This is the upgrade entry point the harvest popover offers. It deliberately
+   * opens the ordinary task editor rather than a second cadence dialog, so a
+   * cadence is priced, validated, and saved in exactly one place.
+   */
+  async checkTaskScheduleDeepLink() {
+    const taskId = taskScheduleDeepLink(window.location.search);
+    if (!taskId) return false;
+
+    const url = new URL(window.location.href);
+    url.searchParams.delete('task');
+    url.searchParams.delete('schedule');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+
+    const task = this.tasks.find(item => item.id === taskId);
+    if (!task) return false;
+    if (
+      !window.taskModalController ||
+      typeof window.taskModalController.openForEdit !== 'function'
+    ) {
+      return false;
+    }
+    await window.taskModalController.openForEdit(task, () => this.loadTasks());
+    // Scroll the schedule into view once the editor has painted, so the user
+    // lands on the thing they came to change rather than at the top of a form.
+    window.setTimeout(() => {
+      document
+        .getElementById('taskModalScheduleFields')
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }, 120);
     return true;
   }
 

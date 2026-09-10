@@ -95,6 +95,25 @@ export function taskResultDeepLink(search) {
   return String(params.get('task') || '').trim();
 }
 
+/**
+ * Read `?task=<id>&schedule=1` out of a query string (FR42).
+ *
+ * The harvest popover's Upgrade button sends a user here, and the receiving page
+ * opens that task's editor on its schedule section. Like the result link it is
+ * one-shot: the parameters are stripped on arrival.
+ */
+export function taskScheduleDeepLink(search) {
+  let params;
+  try {
+    params = new URLSearchParams(String(search || ''));
+  } catch {
+    return '';
+  }
+  const schedule = String(params.get('schedule') || '').trim();
+  if (schedule !== '1' && schedule !== 'true') return '';
+  return String(params.get('task') || '').trim();
+}
+
 // dashboard.js is a plain script, not an ES module, so it cannot import any of
 // this. Registering the same functions on window gives it a call site without
 // making everything else reach through a global.
@@ -103,6 +122,7 @@ if (typeof window !== 'undefined') {
     bankHarvest,
     notifyEconomyChanged,
     taskResultDeepLink,
+    taskScheduleDeepLink,
     CHANGED_EVENT: ECONOMY_CHANGED_EVENT
   });
 }

@@ -43,6 +43,14 @@ class TaskModalController {
     this.outputContractSuggestionRequestKey = '';
     this.outputContractEdited = false;
     this.outputContractSource = 'manual';
+    // City Economy price line (city-economy FR39-FR41). economyQuote is the
+    // last quote the server gave for the cadence currently in the form; null
+    // means nothing is priced — either the change is free, or there is no
+    // economy on this install.
+    this.economyQuote = null;
+    this.economyQuoteTimer = null;
+    this.economyQuoteRequest = 0;
+    this.economySaveBlocked = false;
     this.outputContractEditTelemetrySent = false;
     this.outputSpecDraft = null;
     this.autoParseConfirmResolve = null;
@@ -2421,6 +2429,8 @@ class TaskModalController {
           body: JSON.stringify(payload)
         });
 
+        const refused = await this._economyRefusal(response);
+        if (refused) throw refused;
         if (!response.ok) {
           throw await this._parseTaskApiError(response, 'Failed to create task');
         }
@@ -2457,6 +2467,8 @@ class TaskModalController {
           })
         });
 
+        const refused = await this._economyRefusal(response);
+        if (refused) throw refused;
         if (!response.ok) {
           const errText = await response.text();
           throw new Error(errText || 'Failed to update task');
@@ -2688,6 +2700,11 @@ class TaskModalController {
         this.showToast('Task created', 'success');
       }
 
+      // What the save cost, said plainly (city-economy FR46). Announced from the
+      // quote the user was shown rather than from a second server read, so the
+      // toast can never claim a different number than the price line did.
+      this.announceEconomyCharge();
+
       // Surface partial-success warning before closing the modal — the
       // task itself was saved, but one or more attachment uploads failed.
       // Without this users would only see the success toast and not
@@ -2700,6 +2717,12 @@ class TaskModalController {
       this._clearSubtaskGraphErrors();
       await this.finalizeSuccessfulSave(eventName, eventPayload);
     } catch (error) {
+      // An economy refusal has already explained itself in the price line and
+      // in a toast (FR41); reporting it again here would say it twice.
+      if (error?.economyHandled) {
+        console.warn('Save refused: not enough resources for this cadence change');
+        return;
+      }
       console.error('Failed to save task:', error);
       const issues = Array.isArray(error?.issues) ? error.issues : [];
       if (issues.length > 0) {
@@ -2712,7 +2735,11 @@ class TaskModalController {
     } finally {
       this.isSaving = false;
       if (saveButton) {
-        saveButton.disabled = false;
+        // An economy block outlives the save attempt: releasing it here would
+        // re-enable a button whose next click is guaranteed to be refused
+        // again. The re-quote started by handleEconomyRefusal is what clears it,
+        // once the change actually becomes affordable (FR40, FR41).
+        saveButton.disabled = this.economySaveBlocked;
         saveButton.classList.remove('is-saving');
       }
       if (saveText) saveText.textContent = originalText || 'Save Task';
@@ -3610,6 +3637,194 @@ class TaskModalController {
     }
     previewEl.hidden = false;
     previewEl.textContent = summary;
+    // Every cadence and enabled-state change funnels through this method, so
+    // this is the one place the price line has to be refreshed from (FR39).
+    this.scheduleEconomyQuote();
+  }
+
+  // ---- City Economy price line (city-economy FR39, FR40, FR41) ----
+
+  economyPriceLine() {
+    return typeof window !== 'undefined' ? window.OriEconomyPriceLine : null;
+  }
+
+  /**
+   * Re-quote after the user stops changing the cadence.
+   *
+   * Debounced because every keystroke in the interval field is a cadence
+   * change, and quoting each one would be a request per character for an answer
+   * only the last one needs.
+   */
+  scheduleEconomyQuote() {
+    const priceLine = this.economyPriceLine();
+    if (!priceLine) return;
+    if (this.economyQuoteTimer) clearTimeout(this.economyQuoteTimer);
+    this.economyQuoteTimer = setTimeout(() => {
+      this.economyQuoteTimer = null;
+      void this.refreshEconomyQuote();
+    }, priceLine.QUOTE_DEBOUNCE_MS);
+  }
+
+  /**
+   * Ask what the current form would cost, and render the answer.
+   *
+   * Responses are sequence-guarded: a slow quote for a cadence the user has
+   * already moved past must not overwrite the answer for the one on screen.
+   */
+  async refreshEconomyQuote() {
+    const priceLine = this.economyPriceLine();
+    if (!priceLine) return;
+
+    const scheduleData = this.getScheduleData();
+    const request = ++this.economyQuoteRequest;
+    const quote = await priceLine.fetchQuote({
+      workspaceId: this.workspaceId,
+      taskId: this.editingTaskId || '',
+      schedule: scheduleData.schedule || null,
+      scheduleEnabled: !!scheduleData.schedule_enabled
+    });
+    if (request !== this.economyQuoteRequest) return;
+
+    this.economyQuote = quote;
+    this.renderEconomyPriceLine(priceLine.priceLineView(quote));
+  }
+
+  /** Paint the price line and gate Save (FR39, FR40). */
+  renderEconomyPriceLine(view) {
+    const host = document.getElementById('taskModalEconomyPrice');
+    if (!host) return;
+    const costEl = host.querySelector('[data-economy-price-cost]');
+    const runsEl = host.querySelector('[data-economy-price-runs]');
+
+    if (!view || !view.visible) {
+      host.hidden = true;
+      if (costEl) costEl.textContent = '';
+      if (runsEl) {
+        runsEl.textContent = '';
+        runsEl.hidden = true;
+      }
+      this.setEconomySaveBlocked(false, '');
+      return;
+    }
+
+    host.hidden = false;
+    host.dataset.tone = view.tone;
+    if (costEl) {
+      costEl.textContent = view.text;
+      // Creative mode strikes the price through and says why, so the user can
+      // see both what it would have cost and that they are not paying it.
+      costEl.classList.toggle('is-creative', !!view.creativeMode);
+      costEl.title = view.creativeMode ? 'Creative mode — costs are off' : '';
+    }
+    if (runsEl) {
+      runsEl.textContent = view.runsPerDay || '';
+      runsEl.hidden = !view.runsPerDay;
+    }
+    this.setEconomySaveBlocked(view.blockSave, view.text);
+  }
+
+  /**
+   * Disable Save when the change is unaffordable (FR40).
+   *
+   * The tooltip repeats the price line, because a disabled button with no
+   * explanation is the worst version of this. The server enforces the same rule
+   * regardless (FR22) — this only saves the user a round trip.
+   */
+  setEconomySaveBlocked(blocked, reason) {
+    this.economySaveBlocked = !!blocked;
+    const saveBtn = document.getElementById('taskModalSave');
+    if (!saveBtn) return;
+    if (blocked) {
+      saveBtn.disabled = true;
+      saveBtn.title = reason || 'Not enough resources for this change';
+      return;
+    }
+    // Only release a block this code applied: the save path disables the button
+    // while it is saving, and clearing that here would let a second click land
+    // mid-save.
+    if (!this.isSaving) {
+      saveBtn.disabled = false;
+      saveBtn.title = '';
+    }
+  }
+
+  /**
+   * Say what a successful save cost, and tell Home its balances moved (FR46).
+   *
+   * Silent for a free change and in creative mode: a toast reading "0 Craft
+   * spent" is noise, and creative mode's whole point is not being billed.
+   */
+  announceEconomyCharge() {
+    const quote = this.economyQuote;
+    this.economyQuote = null;
+    if (!quote || quote.action === 'none' || quote.creative_mode) return;
+    const cost = Number(quote.cost || 0);
+    if (cost <= 0) return;
+
+    if (quote.action === 'build') {
+      this.showToast(`Farm built · ${cost} Craft spent`, 'success');
+    } else {
+      const tier = String(quote.to_tier_name || 'a faster cadence');
+      this.showToast(`Upgraded to ${tier} · ${cost} Harvest spent`, 'success');
+    }
+    // The Home HUD listens for this and re-reads the ledger, so its chips move
+    // even though the spend happened on another page.
+    if (window.OriEconomy && typeof window.OriEconomy.notifyEconomyChanged === 'function') {
+      window.OriEconomy.notifyEconomyChanged({ action: quote.action, cost });
+    }
+  }
+
+  /**
+   * Turn a 409 from a save into a handled economy refusal, or null.
+   *
+   * Returns an Error to throw when the save was refused for price: the price
+   * line has already been put into its error state and the toast shown, and the
+   * error is marked so the outer catch does not report it a second time.
+   *
+   * The response is cloned before reading, because the ordinary error paths
+   * below read the body too and a body can only be consumed once.
+   */
+  async _economyRefusal(response) {
+    if (!response || response.status !== 409) return null;
+    let body = null;
+    try {
+      body = await response.clone().json();
+    } catch (_error) {
+      return null; // A 409 that is not JSON belongs to somebody else.
+    }
+    if (!this.handleEconomyRefusal(body)) return null;
+    const error = new Error('insufficient_resources');
+    error.economyHandled = true;
+    return error;
+  }
+
+  /**
+   * Recover from a 409 the editor did not predict (FR41).
+   *
+   * That happens when the quote went stale — another client spent the same
+   * resource in between. The refusal is shown in the price line's error state,
+   * then a fresh quote re-enables Save if the change became affordable again.
+   */
+  handleEconomyRefusal(body) {
+    const priceLine = this.economyPriceLine();
+    if (!priceLine) return false;
+    const refusal = priceLine.readInsufficientBody(body);
+    if (!refusal) return false;
+
+    const message = priceLine.insufficientMessage(refusal);
+    this.renderEconomyPriceLine({
+      visible: true,
+      text: message,
+      runsPerDay: '',
+      tone: 'warning',
+      blockSave: true,
+      creativeMode: false
+    });
+    this.showToast(message, 'error');
+    // Re-quote so a balance that has since recovered unblocks Save without the
+    // user having to touch the cadence fields again.
+    void this.refreshEconomyQuote();
+    return true;
   }
 
   /**

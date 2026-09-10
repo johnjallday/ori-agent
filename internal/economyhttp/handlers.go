@@ -7,12 +7,14 @@
 package economyhttp
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/johnjallday/ori-agent/internal/economy"
 	"github.com/johnjallday/ori-agent/internal/featureflags"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
 )
 
 // Handler serves the economy API.
@@ -90,4 +92,43 @@ func (h *Handler) Harvest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = orihttp.RespondSuccess(w, result)
+}
+
+// QuoteRequest is the schedule change being priced. `schedule` is the same shape
+// the task editor already sends to the task API, so the editor quotes with
+// exactly the payload it is about to save rather than a translation of it.
+type QuoteRequest struct {
+	WorkspaceID     string          `json:"workspace_id"`
+	TaskID          string          `json:"task_id"`
+	Schedule        json.RawMessage `json:"schedule"`
+	ScheduleEnabled bool            `json:"schedule_enabled"`
+}
+
+// Quote returns what a schedule save would charge, without charging it.
+// POST /api/economy/quote
+func (h *Handler) Quote(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if !h.available(w) {
+		return
+	}
+	var req QuoteRequest
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	quote, err := h.service.Quote(r.Context(), economy.ScheduleChange{
+		WorkspaceID:     req.WorkspaceID,
+		TaskID:          req.TaskID,
+		Schedule:        orchestrationhttp.ParseFrontendSchedule(req.Schedule),
+		ScheduleEnabled: req.ScheduleEnabled,
+	})
+	if err != nil {
+		logger.Error("Failed to quote a schedule change",
+			logger.Fields{"task_id": req.TaskID, "error": err})
+		_ = orihttp.RespondInternalError(w, "failed to price this change")
+		return
+	}
+	_ = orihttp.RespondSuccess(w, quote)
 }

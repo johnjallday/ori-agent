@@ -207,6 +207,10 @@
   <script defer src="/js/modules/sidebar.js"></script>
   <script defer src="/js/modules/file-upload.js"></script>
   <script defer src="/js/modules/location.js"></script>
+  <!-- The economy's price line loads BEFORE the task modal that renders it:
+       both are deferred classic scripts, so this ordering is the guarantee that
+       window.OriEconomyPriceLine exists when the controller binds (FR39). -->
+  <script defer src="/js/modules/economy-price-line.js"></script>
   <script defer src="/js/modules/task-modal-controller.js"></script>
   <script defer src="/js/modules/workspace-bootstrap-review.js"></script>
   <script type="module" src="/js/modules/note-editor.js"></script>

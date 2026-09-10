@@ -52,6 +52,21 @@ func (b *ServerBuilder) initializeEconomy() {
 		logger.Warn("City Economy has no workspace store: Farms will not be listed", logger.Fields{})
 	}
 
+	// Settings are read through closures rather than captured once, because the
+	// user can flip creative mode while Home is open and the next quote has to
+	// reflect it.
+	if b.configManager != nil {
+		manager := b.configManager
+		b.economyService.SetSettingsSource(economy.SettingsFunc{
+			CreativeMode: func() bool {
+				return manager.Get().EconomyCreativeMode
+			},
+			DailyEnergyTokens: func() int64 {
+				return manager.Get().EconomyDailyEnergyTokens
+			},
+		})
+	}
+
 	b.economyHandler = economyhttp.NewHandler(b.economyService)
 
 	// Live earning. Publish already delivers on its own goroutine, so a slow
@@ -77,4 +92,28 @@ func (b *ServerBuilder) initializeEconomy() {
 	if err := b.economyService.Backfill(context.Background()); err != nil {
 		logger.Warn("City Economy backfill failed", logger.Fields{"error": err})
 	}
+}
+
+// wireEconomyPricing puts the price check on the two task save paths (FR21).
+//
+// It is a separate step from initializeEconomy because the orchestration handler
+// is built in phase 21 and the economy in phase 19: called from the earlier
+// phase, this found a nil handler and silently made every Farm free. That bug
+// reached a demo build, which is why the nil case now says so out loud.
+//
+// The handler stores the service and re-applies it to its task sub-handler
+// however that sub-handler comes to exist — it is built lazily and can be
+// replaced later, so handing it only to the instance that exists right now is
+// not enough either.
+func (b *ServerBuilder) wireEconomyPricing() {
+	if b.economyService == nil {
+		return
+	}
+	if b.orchestrationHandler == nil {
+		logger.Warn("City Economy has no orchestration handler: saves will not be priced",
+			logger.Fields{})
+		return
+	}
+	b.orchestrationHandler.SetEconomy(b.economyService)
+	logger.Info("City Economy pricing wired to the task save paths", logger.Fields{})
 }

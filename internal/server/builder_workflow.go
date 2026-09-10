@@ -642,6 +642,11 @@ func (b *ServerBuilder) initializeOrchestration() error {
 	}
 	b.orchestrationHandler = handler
 
+	// The City Economy prices a cadence change on this handler's two save
+	// paths. It is wired here rather than in initializeEconomy (phase 19)
+	// because this handler does not exist until now (city-economy FR21).
+	b.wireEconomyPricing()
+
 	// Wire Note validation into the canonical Ticket service so a Ticket can
 	// only link Notes that exist in its own workspace
 	// (tasks/prd-workspace-ticket-management.md FR-17, FR-71). Without this,

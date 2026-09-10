@@ -3344,6 +3344,12 @@
     if (opts && opts.taskResultId) {
       query = '?task=' + encodeURIComponent(opts.taskResultId) + '&result=1';
     }
+    // ?task=<id>&schedule=1 opens that task's editor scrolled to its schedule
+    // section — the upgrade entry point for this slice (FR42). There is no
+    // second editor: a cadence is priced and changed in exactly one place.
+    if (opts && opts.taskScheduleId) {
+      query = '?task=' + encodeURIComponent(opts.taskScheduleId) + '&schedule=1';
+    }
     window.location.href = '/workspaces/' + encodeURIComponent(slug) + query;
   }
 
@@ -3676,6 +3682,12 @@
       '<button type="button" class="ws-map-harvest__btn" data-harvest-open data-task-id="' +
       escapeHtml(taskID) +
       '">Open result</button>' +
+      // The upgrade entry point for this slice (FR42). There is no second
+      // editor: this opens the task's own schedule section, which is where a
+      // cadence is priced and changed everywhere else too.
+      '<button type="button" class="ws-map-harvest__btn" data-harvest-upgrade data-task-id="' +
+      escapeHtml(taskID) +
+      '">Upgrade</button>' +
       '</div>' +
       '</li>'
     );
@@ -3776,6 +3788,19 @@
           if (!taskID) return;
           announce(container, 'Opening the result so it can be harvested');
           openWorkspace(workspaceId, { taskResultId: taskID });
+        });
+      });
+
+    Array.prototype.slice
+      .call(popover.querySelectorAll('[data-harvest-upgrade]'))
+      .forEach(function (btn) {
+        btn.addEventListener('click', function (event) {
+          if (event && event.preventDefault) event.preventDefault();
+          var taskID = btn.getAttribute('data-task-id') || '';
+          closeHarvestPopover({ restoreFocus: false });
+          if (!taskID) return;
+          announce(container, 'Opening the schedule so its cadence can be changed');
+          openWorkspace(workspaceId, { taskScheduleId: taskID });
         });
       });
 

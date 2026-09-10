@@ -100,6 +100,15 @@ type Settings struct {
 	VaultRoot              string `json:"vault_root,omitempty"`     // Default directory for new managed vault files
 	TemplatesRoot          string `json:"templates_root,omitempty"` // Directory holding project template folders (defaults to <app data>/templates)
 
+	// City Economy settings (tasks/prd-city-economy.md).
+	//
+	// Creative mode waives every cost while leaving earning intact, for a user
+	// who wants the city without the pricing. The daily energy figure is what
+	// the Home Energy bar fills against; it is a gauge the user sets, and
+	// nothing in the app pauses or blocks when it is exceeded.
+	EconomyCreativeMode      bool  `json:"economy_creative_mode,omitempty"`
+	EconomyDailyEnergyTokens int64 `json:"economy_daily_energy_tokens,omitempty"`
+
 	// Native utility settings
 	Utility UtilitySettings `json:"utility,omitempty"`
 
