@@ -130,6 +130,93 @@
   outline-offset: -2px;
 }
 
+/* City Economy HUD (city-economy FR34): what the city has, beside the view
+   toggle it shares a shape with.
+
+   These are readouts, not controls: no border, no hover state, and nothing here
+   is focusable. They sit in the same monospace vocabulary as their neighbours so
+   the header reads as one row rather than as a widget bolted onto it.
+
+   Every color is an --hc-* token, so both themes come for free — none of these
+   values may be hardcoded, and --border-light in particular inverts between
+   themes and is not used anywhere in this block. */
+.cockpit-economy {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cockpit-economy__chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid var(--hc-line);
+  background: var(--hc-panel-deep);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+
+.cockpit-economy__chip-label {
+  color: var(--hc-ink-dim);
+}
+
+.cockpit-economy__chip-value {
+  color: var(--hc-ink);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* One accent per resource, matching what earns it: Craft is made by hand
+   (amber), Harvest is grown and collected (moss). The accent is a left edge
+   rather than the text color, so the number keeps full ink contrast. */
+.cockpit-economy__chip[data-economy-chip="craft"] {
+  box-shadow: inset 2px 0 0 var(--hc-amber);
+}
+
+.cockpit-economy__chip[data-economy-chip="harvest"] {
+  box-shadow: inset 2px 0 0 var(--hc-signal);
+}
+
+/* A resource arriving is worth a glance, not an interruption: no toast for
+   earned Craft, just this (FR44). The class is added by the cockpit for one
+   animation and removed on animationend, so a rapid sequence of earnings
+   re-triggers rather than stacking. */
+.cockpit-economy__chip.is-earned {
+  animation: cockpit-economy-bump 420ms ease-out;
+}
+
+@keyframes cockpit-economy-bump {
+  0% {
+    transform: none;
+  }
+
+  35% {
+    transform: translateY(-2px) scale(1.06);
+  }
+
+  100% {
+    transform: none;
+  }
+}
+
+/* On a narrow header the labels are the first thing to go: the accent edge and
+   the title attribute still say which number is which. */
+@media (max-width: 900px) {
+  .cockpit-economy__chip-label {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cockpit-economy__chip.is-earned {
+    animation: none;
+  }
+}
+
 /* Updates/Quests: shaped like the view toggle they sit beside, but each is
    its own button rather than a pair — a flyout is open or it is not
    (Issue #334). `.cockpit-rail-toggle*` class names are retired; the id

@@ -27,6 +27,8 @@ import {
   searchForView,
   readCount,
   formatCount,
+  readEconomy,
+  economyMapSnapshot,
   isGroupWorkspace,
   flattenWorkspaceTree,
   findWorkspace,
@@ -1649,4 +1651,72 @@ test('context modal visibility requires an explicit request, regardless of heade
       `panel=${panel}`
     );
   }
+});
+
+// ---------------------------------------------------------------------------
+// City Economy (city-economy FR34, FR35)
+// ---------------------------------------------------------------------------
+
+test('readEconomy normalizes a full payload', () => {
+  const economy = readEconomy({
+    craft: 120,
+    harvest: 45,
+    creative_mode: true,
+    energy: { used_today: 142000, daily_figure: 1000000 },
+    farms: [{ workspace_id: 'ws1', task_id: 't1', name: 'Inbox triage', tier: 2 }],
+    pending_by_workspace: { ws1: 3, ws2: 0 }
+  });
+
+  assert.equal(economy.craft, 120);
+  assert.equal(economy.harvest, 45);
+  assert.equal(economy.creativeMode, true);
+  assert.equal(economy.energy.usedToday, 142000);
+  assert.equal(economy.energy.dailyFigure, 1000000);
+  assert.equal(economy.farms.length, 1);
+  // A zero pile is dropped rather than carried: the Map draws a pile only when
+  // something is waiting, so a zero in the map would be dead weight.
+  assert.deepEqual(economy.pendingByWorkspace, { ws1: 3 });
+});
+
+// null is the "there is no economy here" state — the feature flag is off, or
+// the request failed. It must stay distinguishable from an economy at zero,
+// because one hides the HUD and the other shows two zeros (FR34, FR47).
+test('readEconomy returns null for an unusable payload', () => {
+  for (const payload of [null, undefined, {}, 'nope', { craft: 1 }, { craft: 'x', harvest: 2 }]) {
+    assert.equal(readEconomy(payload), null, JSON.stringify(payload) ?? 'undefined');
+  }
+});
+
+test('readEconomy reads a real but empty economy as zeros, not as absent', () => {
+  const economy = readEconomy({
+    craft: 0,
+    harvest: 0,
+    creative_mode: false,
+    energy: { used_today: 0, daily_figure: 1000000 },
+    farms: [],
+    pending_by_workspace: {}
+  });
+  assert.notEqual(economy, null);
+  assert.equal(economy.craft, 0);
+  assert.deepEqual(economy.farms, []);
+});
+
+test('the map snapshot carries only what the map draws', () => {
+  const economy = readEconomy({
+    craft: 120,
+    harvest: 45,
+    creative_mode: true,
+    energy: { used_today: 1, daily_figure: 2 },
+    farms: [{ workspace_id: 'ws1', task_id: 't1', name: 'Inbox triage' }],
+    pending_by_workspace: { ws1: 3 }
+  });
+  const snapshot = economyMapSnapshot(economy);
+
+  assert.deepEqual(Object.keys(snapshot).sort(), ['farms', 'pendingByWorkspace']);
+  assert.equal(snapshot.farms.length, 1);
+  assert.deepEqual(snapshot.pendingByWorkspace, { ws1: 3 });
+});
+
+test('a missing economy projects to an empty map snapshot', () => {
+  assert.deepEqual(economyMapSnapshot(null), { farms: [], pendingByWorkspace: {} });
 });

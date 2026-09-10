@@ -449,6 +449,86 @@
   var hqWorkspaceId = null;
   var hqFocusConsumed = false;
 
+  // City Economy snapshot, handed in by the host on every mount (city-economy
+  // FR35). The Map owns none of this: it neither fetches it nor writes it, it
+  // only draws the Farm badge and the harvest pile from it.
+  //
+  // An empty snapshot is the normal state whenever the economy is switched off
+  // or has not loaded yet, and it draws nothing at all — never a "0 Farms"
+  // badge, which would be noise on every tile in the city.
+  var economyFarms = [];
+  var economyPendingByWorkspace = Object.create(null);
+
+  function setEconomySnapshot(snapshot) {
+    var farms = snapshot && snapshot.farms;
+    economyFarms = Array.isArray(farms) ? farms : [];
+    var pending = snapshot && snapshot.pendingByWorkspace;
+    economyPendingByWorkspace =
+      pending && typeof pending === 'object' ? pending : Object.create(null);
+  }
+
+  /**
+   * What the economy says about one workspace's tile.
+   *
+   * Pure, and exported for tests: the Farms belonging to this workspace (each
+   * with its cadence tier name), and how many finished runs are waiting to be
+   * collected there.
+   */
+  function economyTileView(workspaceId) {
+    var id = String(workspaceId || '');
+    var farms = [];
+    if (id) {
+      for (var i = 0; i < economyFarms.length; i++) {
+        var farm = economyFarms[i];
+        if (farm && String(farm.workspace_id || '') === id) farms.push(farm);
+      }
+    }
+    var pending = Number(id ? economyPendingByWorkspace[id] : 0);
+    if (!isFinite(pending) || pending < 0) pending = 0;
+    return { farms: farms, pending: Math.floor(pending) };
+  }
+
+  /**
+   * The Farm badge and the harvest pile, for the tile's badge slot (FR36, FR38).
+   *
+   * The badge reads "Farm" for one and "Farm xN" for more, and its title lists
+   * each Farm's name and cadence — so a user can see how often a workspace's
+   * routines run without opening a single task (FR38). The pile reads "+N" and
+   * carries a spoken label, because "+3" alone tells a screen reader nothing.
+   */
+  function economyBadgesHTML(workspaceId) {
+    var view = economyTileView(workspaceId);
+    var html = '';
+    if (view.farms.length) {
+      var titleLines = view.farms.map(function (farm) {
+        var name = String((farm && farm.name) || 'Farm');
+        var tier = String((farm && farm.tier_name) || '').trim();
+        return tier ? name + ' — ' + tier : name;
+      });
+      html +=
+        '<span class="ws-map-tile-farm-badge" title="' +
+        escapeHtml(titleLines.join('\n')) +
+        '">' +
+        (view.farms.length === 1 ? 'Farm' : 'Farm ×' + view.farms.length) +
+        '</span>';
+    }
+    if (view.pending > 0) {
+      // role="button" with tabindex="-1" rather than a real <button>: this lives
+      // inside the tile's own <button>, and a focusable control nested in a
+      // control is invalid. The tile's H key is the keyboard route (see
+      // bindTiles), the same shape the bulk-select corner box already uses.
+      html +=
+        '<span class="ws-map-tile-harvest" data-harvest-pile role="button" tabindex="-1" ' +
+        'aria-label="' +
+        view.pending +
+        (view.pending === 1 ? ' run to harvest' : ' runs to harvest') +
+        '" title="Ready to harvest — click to see which Farms">+' +
+        view.pending +
+        '</span>';
+    }
+    return html;
+  }
+
   function hqSiteView(status) {
     if (!status || status.valid) return { show: false };
     var repair = !!status.workspace_id;
@@ -2048,6 +2128,17 @@
       : isSel
         ? '. Selected — activate to open'
         : '. Activate to select, double-click to open';
+    // The economy's two badges, and the spoken version of the pile. The pile is
+    // not focusable on its own (see economyBadgesHTML), so the tile's label is
+    // the only place a keyboard user learns it is there and how to open it.
+    var economyView = economyTileView(ws.id);
+    var economyLabel =
+      economyView.pending > 0
+        ? ', ' +
+          economyView.pending +
+          (economyView.pending === 1 ? ' run to harvest' : ' runs to harvest') +
+          ', press H to see them'
+        : '';
 
     return (
       '<button type="button" class="ws-map-tile' +
@@ -2076,6 +2167,7 @@
       statusText +
       (hasKeeper ? ', entry agent ' + escapeHtml(ws.entry_agent_name) : '') +
       (isHQ ? ', Personal HQ' : '') +
+      economyLabel +
       actionHint +
       '">' +
       '<span class="ws-map-tile-check" data-ws-check role="checkbox" tabindex="-1" ' +
@@ -2091,6 +2183,9 @@
       '</span>' +
       (hasKeeper ? '<span class="ws-map-tile-crest" title="Commander (locked)">★</span>' : '') +
       (isHQ ? '<span class="ws-map-tile-hq-badge" title="Personal HQ">HQ</span>' : '') +
+      // Same badge slot as HQ, so the economy's badges inherit the tile's own
+      // custom properties and render correctly in both themes (FR36).
+      economyBadgesHTML(ws.id) +
       structure +
       '<span class="ws-map-tile-name">' +
       escapeHtml(ws.name || 'Workspace') +
@@ -2989,7 +3084,8 @@
         '</div>' +
         selBarHTML() +
         menuHostHTML() +
-        confirmHostHTML()
+        confirmHostHTML() +
+        harvestHostHTML()
       );
     }
     return (
@@ -3036,7 +3132,8 @@
       // viewport coordinates, so it must sit outside both the theatre's
       // clip-path and the world layer's pan/zoom transform.
       menuHostHTML() +
-      confirmHostHTML()
+      confirmHostHTML() +
+      harvestHostHTML()
     );
   }
 
@@ -3240,6 +3337,13 @@
     // ?setup=1 opens the workspace's own Setup Wizard on arrival — the same
     // persisted state its banner and dialog show, never a second copy.
     if (opts && opts.setup) query = '?setup=1';
+    // ?task=<id>&result=1 opens that task's result modal on arrival, which is
+    // what banks its pending Harvest (city-economy FR11, FR37). The Map never
+    // banks anything itself — collecting is a consequence of reading the result,
+    // so the Map only ever navigates to where the result is read.
+    if (opts && opts.taskResultId) {
+      query = '?task=' + encodeURIComponent(opts.taskResultId) + '&result=1';
+    }
     window.location.href = '/workspaces/' + encodeURIComponent(slug) + query;
   }
 
@@ -3529,6 +3633,185 @@
   // not take a pending confirmation with it.
   function confirmHostHTML() {
     return '<div class="ws-map-menu-host" data-ws-map-confirm-host></div>';
+  }
+
+  // The harvest popover's host. Its own, for the same reason the confirmation
+  // has one: it is anchored to a different thing and closes on its own schedule.
+  function harvestHostHTML() {
+    return '<div class="ws-map-menu-host" data-ws-map-harvest-host></div>';
+  }
+
+  /**
+   * One Farm's row in the harvest popover (city-economy FR37).
+   *
+   * The last run's summary is what makes the pile triageable: it is the
+   * difference between "three things ran" and "three things ran and here is what
+   * they found". A Farm that has never produced a summary says so plainly rather
+   * than rendering an empty line.
+   */
+  function harvestRowHTML(farm) {
+    var taskID = String((farm && farm.task_id) || '');
+    var name = String((farm && farm.name) || 'Farm');
+    var pending = Number((farm && farm.pending_harvest) || 0);
+    var summary = String((farm && farm.last_summary) || '').trim();
+    var tier = String((farm && farm.tier_name) || '').trim();
+    return (
+      '<li class="ws-map-harvest__row">' +
+      '<div class="ws-map-harvest__head">' +
+      '<span class="ws-map-harvest__name">' +
+      escapeHtml(name) +
+      '</span>' +
+      '<span class="ws-map-harvest__count" aria-label="' +
+      pending +
+      (pending === 1 ? ' run waiting' : ' runs waiting') +
+      '">+' +
+      pending +
+      '</span>' +
+      '</div>' +
+      (tier ? '<p class="ws-map-harvest__tier">' + escapeHtml(tier) + '</p>' : '') +
+      '<p class="ws-map-harvest__summary">' +
+      escapeHtml(summary || 'No summary from the last run.') +
+      '</p>' +
+      '<div class="ws-map-harvest__actions">' +
+      '<button type="button" class="ws-map-harvest__btn" data-harvest-open data-task-id="' +
+      escapeHtml(taskID) +
+      '">Open result</button>' +
+      '</div>' +
+      '</li>'
+    );
+  }
+
+  function harvestPopoverHTML(workspaceName, farms) {
+    return (
+      '<div class="ori-context-menu ws-map-harvest" data-ws-map-harvest role="dialog" ' +
+      'aria-label="Ready to harvest in ' +
+      escapeHtml(workspaceName || 'this workspace') +
+      '">' +
+      '<p class="ws-map-harvest__title">Ready to harvest</p>' +
+      '<ul class="ws-map-harvest__list">' +
+      farms.map(harvestRowHTML).join('') +
+      '</ul>' +
+      '<p class="ws-map-harvest__hint">Opening a result banks that Farm’s runs.</p>' +
+      '</div>'
+    );
+  }
+
+  // The open popover, or null. Mirrors menuState deliberately: one open at a
+  // time, one teardown list, and one place every dismissal route lands.
+  var harvestState = null;
+
+  function closeHarvestPopover(options) {
+    var state = harvestState;
+    if (!state) return;
+    harvestState = null;
+    state.teardown.forEach(function (off) {
+      off();
+    });
+    if (state.host) state.host.innerHTML = '';
+    var restore = !(options && options.restoreFocus === false);
+    if (restore && state.origin && typeof state.origin.focus === 'function') state.origin.focus();
+  }
+
+  function listenWhileHarvestOpen(target, type, handler, capture) {
+    if (!target || typeof target.addEventListener !== 'function') return;
+    target.addEventListener(type, handler, capture);
+    if (harvestState) {
+      harvestState.teardown.push(function () {
+        if (typeof target.removeEventListener === 'function') {
+          target.removeEventListener(type, handler, capture);
+        }
+      });
+    }
+  }
+
+  /**
+   * Open the harvest popover for one workspace (FR37).
+   *
+   * Returns false when there is nothing to show, so the caller can leave the
+   * gesture alone rather than flashing an empty panel.
+   */
+  function openHarvestPopover(container, workspaceId, spec) {
+    closeHarvestPopover({ restoreFocus: false });
+    if (!container || typeof container.querySelector !== 'function') return false;
+    var host = container.querySelector('[data-ws-map-harvest-host]');
+    if (!host) return false;
+    var view = economyTileView(workspaceId);
+    var farms = view.farms.filter(function (farm) {
+      return Number((farm && farm.pending_harvest) || 0) > 0;
+    });
+    if (!farms.length) return false;
+
+    var workspaces = (lastMount && lastMount.state && lastMount.state.workspaces) || [];
+    var ws = findWs(workspaces, workspaceId);
+    host.innerHTML = harvestPopoverHTML((ws && ws.name) || '', farms);
+    var popover = host.querySelector('[data-ws-map-harvest]');
+    if (!popover) {
+      host.innerHTML = '';
+      return false;
+    }
+
+    harvestState = {
+      container: container,
+      host: host,
+      popover: popover,
+      workspaceId: workspaceId,
+      origin: (spec && spec.origin) || null,
+      // The gesture that opened this is still propagating while the dismissal
+      // listeners below are attached, and a listener added to a node the event
+      // has not reached yet still fires for it. Without this the popover would
+      // open and dismiss itself in one click — the same trap the context menu
+      // documents.
+      openEvent: (spec && spec.event) || null,
+      teardown: []
+    };
+    placeMenu(popover, (spec && spec.at) || { x: 0, y: 0 });
+
+    Array.prototype.slice
+      .call(popover.querySelectorAll('[data-harvest-open]'))
+      .forEach(function (btn) {
+        btn.addEventListener('click', function (event) {
+          if (event && event.preventDefault) event.preventDefault();
+          var taskID = btn.getAttribute('data-task-id') || '';
+          closeHarvestPopover({ restoreFocus: false });
+          if (!taskID) return;
+          announce(container, 'Opening the result so it can be harvested');
+          openWorkspace(workspaceId, { taskResultId: taskID });
+        });
+      });
+
+    listenWhileHarvestOpen(popover, 'keydown', function (event) {
+      if (!event || event.key !== 'Escape') return;
+      if (event.preventDefault) event.preventDefault();
+      closeHarvestPopover();
+    });
+    if (typeof document !== 'undefined') {
+      listenWhileHarvestOpen(document, 'mousedown', function (event) {
+        if (event === harvestState.openEvent) return;
+        if (
+          event &&
+          event.target &&
+          event.target.closest &&
+          event.target.closest('[data-ws-map-harvest]')
+        ) {
+          return;
+        }
+        closeHarvestPopover();
+      });
+      listenWhileHarvestOpen(document, 'keydown', function (event) {
+        if (event === harvestState.openEvent) return;
+        if (!event || event.key !== 'Escape') return;
+        closeHarvestPopover();
+      });
+    }
+    if (typeof window !== 'undefined') {
+      listenWhileHarvestOpen(window, 'resize', function () {
+        closeHarvestPopover();
+      });
+    }
+
+    var first = popover.querySelector('[data-harvest-open]');
+    if (first && typeof first.focus === 'function') first.focus();
+    return true;
   }
 
   // Single workspace tile. Every entry mirrors a control the Overview rail
@@ -4337,6 +4620,16 @@
       el.addEventListener('click', function (e) {
         var id = el.getAttribute('data-ws-id');
         var onCheck = e.target && e.target.closest && e.target.closest('[data-ws-check]');
+        // The harvest pile is a control inside the tile, so it claims the click
+        // outright: clicking it must open the pile, never select the workspace
+        // underneath it (city-economy FR37).
+        var onPile = e.target && e.target.closest && e.target.closest('[data-harvest-pile]');
+        if (isTile && onPile) {
+          e.preventDefault();
+          e.stopPropagation();
+          openHarvestPopover(container, id, { origin: el, event: e, at: anchorForElement(onPile) });
+          return;
+        }
         if (isTile && (onCheck || e.metaKey || e.ctrlKey || e.shiftKey)) {
           e.preventDefault();
           toggleMulti(container, id);
@@ -4359,6 +4652,21 @@
           // Suppress the synthesized click so the tile does not also select.
           e.preventDefault();
           toggleMulti(container, el.getAttribute('data-ws-id'));
+        });
+        // Keyboard route to the harvest pile. The pile itself cannot be
+        // focusable — it lives inside this <button> — so without a key of its
+        // own the popover would be reachable by mouse only. H is announced in
+        // the tile's own label whenever there is anything to harvest.
+        el.addEventListener('keydown', function (e) {
+          if (!e || (e.key !== 'h' && e.key !== 'H')) return;
+          if (e.metaKey || e.ctrlKey || e.altKey) return;
+          var id = el.getAttribute('data-ws-id');
+          if (
+            !openHarvestPopover(container, id, { origin: el, event: e, at: anchorForElement(el) })
+          ) {
+            return;
+          }
+          e.preventDefault();
         });
       }
       if (selectOnly) {
@@ -4521,7 +4829,7 @@
   function isInteractiveTarget(target) {
     if (!target || typeof target.closest !== 'function') return false;
     return !!target.closest(
-      '.ws-map-tile, .ws-map-district-tag, .ws-map-district-handle, .ws-map-pad, .ws-map-controls, .ws-map-actions, .ws-map-build, button, a, input, select, textarea, [data-ws-check], [role="checkbox"]'
+      '.ws-map-tile, .ws-map-district-tag, .ws-map-district-handle, .ws-map-pad, .ws-map-controls, .ws-map-actions, .ws-map-build, button, a, input, select, textarea, [data-ws-check], [role="checkbox"], [data-harvest-pile]'
     );
   }
 
@@ -6158,6 +6466,12 @@
         // never start a spatial move (FR-76).
         if (event.metaKey || event.ctrlKey || event.shiftKey) return;
         if (event.target && event.target.closest && event.target.closest('[data-ws-check]')) return;
+        // Same for the harvest pile: pressing it opens the popover, and a press
+        // that also began dragging the building would make the popover appear
+        // somewhere the tile no longer is (city-economy FR37).
+        if (event.target && event.target.closest && event.target.closest('[data-harvest-pile]')) {
+          return;
+        }
         var id = el.getAttribute('data-ws-id');
         var origin = committedAnchor(id);
         if (!id || !origin) return;
@@ -7333,6 +7647,11 @@
     // builders below consult them.
     selectOnlyMode = !!(state && state.selectOnly);
     hideChromeMode = !!(state && state.hideChrome);
+    // The economy snapshot is read before any HTML is built, because tileHTML
+    // draws the Farm badge and the harvest pile straight out of it. A host that
+    // passes none — every surface other than Home — leaves it empty, and the
+    // tiles render exactly as they did before the feature (city-economy FR35).
+    setEconomySnapshot(state && state.economy);
     var workspaces = (state && state.workspaces) || [];
     var incoming = (state && state.selectedId) || '';
     var site = hqSiteView(hqStatus);
@@ -7392,6 +7711,7 @@
     // or cancel them first so listeners, capture, and previews cannot outlive
     // the DOM they referred to.
     closeContextMenu({ restoreFocus: false });
+    closeHarvestPopover({ restoreFocus: false });
     settleDropConfirm('decline', { restoreFocus: false, skipRedraw: true });
     cancelPointerTranslations(container);
     lastMount = { container: container, state: state };
@@ -7562,6 +7882,15 @@
         return;
       }
       applySelection(container, workspaces || [], id || '', options);
+    },
+    // The City Economy's read-only view of a tile. The Map never fetches or
+    // writes any of this: the host hands it a snapshot on mount and these draw
+    // from it (city-economy FR35, FR36). Exported so the badge and pile can be
+    // asserted without a browser.
+    economy: {
+      setSnapshot: setEconomySnapshot,
+      tileView: economyTileView,
+      badgesHTML: economyBadgesHTML
     },
     computeLayout: computeMapLayout,
     // The coordinate engine: saved anchors, deterministic fallback placement,

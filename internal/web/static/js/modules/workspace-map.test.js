@@ -8706,3 +8706,148 @@ test('focus intent on a BUILT HQ selects its workspace and announces that instea
   assert.deepEqual(selected, [['hq-1', 'My HQ']]);
   assert.equal(map.getSelectedId(), 'hq-1');
 });
+
+// ---------------------------------------------------------------------------
+// City Economy: Farm badges and harvest piles (city-economy FR36, FR38)
+// ---------------------------------------------------------------------------
+
+const FARM = {
+  workspace_id: 'ws-1',
+  task_id: 't1',
+  name: 'Inbox triage',
+  tier: 2,
+  tier_name: 'Daily',
+  pending_harvest: 3,
+  last_summary: '12 threads triaged'
+};
+
+test('a workspace with a Farm and a pile renders both badges', () => {
+  const map = loadOriWorkspaceMap();
+  map.economy.setSnapshot({ farms: [FARM], pendingByWorkspace: { 'ws-1': 3 } });
+
+  const html = map.economy.badgesHTML('ws-1');
+  assert.match(html, /ws-map-tile-farm-badge/);
+  assert.match(html, />Farm</);
+  assert.match(html, /ws-map-tile-harvest/);
+  assert.match(html, />\+3</);
+  // "+3" alone tells a screen reader nothing, so the pile carries words.
+  assert.match(html, /aria-label="3 runs to harvest"/);
+});
+
+test('the Farm badge title names each Farm and its cadence (FR38)', () => {
+  const map = loadOriWorkspaceMap();
+  map.economy.setSnapshot({
+    farms: [
+      FARM,
+      { workspace_id: 'ws-1', task_id: 't2', name: 'Weekly report', tier_name: 'Weekly' }
+    ],
+    pendingByWorkspace: {}
+  });
+
+  const html = map.economy.badgesHTML('ws-1');
+  // Two Farms read as a count, not as two badges.
+  assert.match(html, /Farm ×2/);
+  assert.match(html, /Inbox triage — Daily/);
+  assert.match(html, /Weekly report — Weekly/);
+});
+
+test('a single pending run is described in the singular', () => {
+  const map = loadOriWorkspaceMap();
+  map.economy.setSnapshot({ farms: [], pendingByWorkspace: { 'ws-1': 1 } });
+  assert.match(map.economy.badgesHTML('ws-1'), /aria-label="1 run to harvest"/);
+});
+
+test('a workspace with no Farms and nothing pending renders no economy badges', () => {
+  const map = loadOriWorkspaceMap();
+  map.economy.setSnapshot({ farms: [FARM], pendingByWorkspace: { 'ws-1': 3 } });
+
+  // A different workspace on the same map: the badges belong to ws-1 only.
+  assert.equal(map.economy.badgesHTML('ws-2'), '');
+});
+
+// Every surface other than Home mounts the Map with no economy at all. Those
+// tiles must render exactly as they did before the feature — never a "0 Farms"
+// badge, which would be noise on every building in the city (FR35).
+test('an absent economy snapshot renders nothing', () => {
+  const map = loadOriWorkspaceMap();
+  map.economy.setSnapshot(undefined);
+  assert.equal(map.economy.badgesHTML('ws-1'), '');
+
+  map.economy.setSnapshot({ farms: [], pendingByWorkspace: {} });
+  assert.equal(map.economy.badgesHTML('ws-1'), '');
+});
+
+test('a zero or negative pending count draws no pile', () => {
+  const map = loadOriWorkspaceMap();
+  map.economy.setSnapshot({ farms: [], pendingByWorkspace: { 'ws-1': 0, 'ws-2': -4 } });
+  assert.equal(map.economy.badgesHTML('ws-1'), '');
+  assert.equal(map.economy.badgesHTML('ws-2'), '');
+});
+
+test('the tile view groups Farms by their own workspace', () => {
+  const map = loadOriWorkspaceMap();
+  map.economy.setSnapshot({
+    farms: [FARM, { workspace_id: 'ws-2', task_id: 't9', name: 'Elsewhere' }],
+    pendingByWorkspace: { 'ws-1': 3, 'ws-2': 1 }
+  });
+
+  const first = map.economy.tileView('ws-1');
+  assert.equal(first.farms.length, 1);
+  assert.equal(first.farms[0].task_id, 't1');
+  assert.equal(first.pending, 3);
+
+  const second = map.economy.tileView('ws-2');
+  assert.equal(second.farms.length, 1);
+  assert.equal(second.pending, 1);
+
+  // An empty id belongs to no workspace. Compared field by field rather than
+  // with deepEqual: these objects are built inside the vm sandbox, so their
+  // prototypes are the sandbox's, and a structural comparison fails on that
+  // alone.
+  const none = map.economy.tileView('');
+  assert.equal(none.farms.length, 0);
+  assert.equal(none.pending, 0);
+});
+
+test('mounting with an economy draws the badges into the tile itself', () => {
+  const map = loadMapAt('');
+  const { container } = createMapHarness({ tiles: ['ws-1'] });
+  map.mount(
+    container,
+    cockpitState({
+      economy: { farms: [FARM], pendingByWorkspace: { 'ws-1': 3 } }
+    })
+  );
+
+  assert.match(container.innerHTML, /ws-map-tile-farm-badge/);
+  assert.match(container.innerHTML, /data-harvest-pile/);
+  // The pile is not focusable on its own, so the tile's own label is where a
+  // keyboard user learns it is there and how to open it.
+  assert.match(container.innerHTML, /3 runs to harvest, press H to see them/);
+});
+
+test('mounting without an economy leaves the tile exactly as it was', () => {
+  const map = loadMapAt('');
+  const { container } = createMapHarness({ tiles: ['ws-1'] });
+  map.mount(container, cockpitState({}));
+
+  assert.doesNotMatch(container.innerHTML, /ws-map-tile-farm-badge/);
+  assert.doesNotMatch(container.innerHTML, /data-harvest-pile/);
+  assert.doesNotMatch(container.innerHTML, /to harvest/);
+});
+
+// A remount must not carry a previous host's economy: mounting the Map on a
+// surface that has none has to clear it, or a stale badge survives.
+test('mounting without an economy clears a previous snapshot', () => {
+  const map = loadMapAt('');
+  const { container } = createMapHarness({ tiles: ['ws-1'] });
+  map.mount(
+    container,
+    cockpitState({ economy: { farms: [FARM], pendingByWorkspace: { 'ws-1': 3 } } })
+  );
+  assert.match(container.innerHTML, /data-harvest-pile/);
+
+  map.mount(container, cockpitState({}));
+  assert.doesNotMatch(container.innerHTML, /data-harvest-pile/);
+  assert.equal(map.economy.badgesHTML('ws-1'), '');
+});

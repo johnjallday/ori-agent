@@ -1,4 +1,7 @@
 import { openGroupBuilder } from './group-builder.js';
+// Importing this also registers window.OriEconomy, which is how dashboard.js —
+// a plain script, not a module — reaches the same harvest client.
+import { ECONOMY_CHANGED_EVENT } from './economy-harvest.js';
 
 // home-workspace-cockpit.js — the Map-first Home cockpit coordinator.
 //
@@ -54,6 +57,59 @@ export function readCount(value) {
 /** Format a possibly-unavailable count for display (FR44, FR121). */
 export function formatCount(value) {
   return value === null || value === undefined ? '—' : String(value);
+}
+
+// ---------------------------------------------------------------------------
+// City Economy (city-economy FR34, FR35)
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize a GET /api/economy payload into what the HUD and the Map need.
+ *
+ * Returns null for anything unusable — a 404 from the feature flag being off, a
+ * failed request, a malformed body. Null is a real state and means "there is no
+ * economy here": the HUD stays hidden and the Map draws no badges, rather than
+ * showing a pair of chips permanently reading zero.
+ */
+export function readEconomy(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  const craft = readCount(payload.craft);
+  const harvest = readCount(payload.harvest);
+  if (craft === null || harvest === null) return null;
+  const pending = {};
+  const source = payload.pending_by_workspace;
+  if (source && typeof source === 'object') {
+    Object.keys(source).forEach(id => {
+      const count = readCount(source[id]);
+      if (count) pending[id] = count;
+    });
+  }
+  return {
+    craft,
+    harvest,
+    creativeMode: !!payload.creative_mode,
+    energy: {
+      usedToday: readCount(payload.energy && payload.energy.used_today) || 0,
+      dailyFigure: readCount(payload.energy && payload.energy.daily_figure) || 0
+    },
+    farms: Array.isArray(payload.farms) ? payload.farms : [],
+    pendingByWorkspace: pending
+  };
+}
+
+/**
+ * The snapshot handed to OriWorkspaceMap.mount (FR35).
+ *
+ * Deliberately a projection rather than the whole economy: the Map draws badges
+ * and piles and has no business knowing about balances, creative mode, or
+ * energy. A null economy projects to empty, which draws nothing.
+ */
+export function economyMapSnapshot(economy) {
+  if (!economy) return { farms: [], pendingByWorkspace: {} };
+  return {
+    farms: economy.farms || [],
+    pendingByWorkspace: economy.pendingByWorkspace || {}
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1481,7 +1537,12 @@ import {
     captureCancel: document.getElementById('cockpitCaptureCancel'),
     captureStatus: document.getElementById('cockpitCaptureStatus'),
     askPanel: document.getElementById('homeAssistantThinkingModal'),
-    askTarget: document.getElementById('cockpitAskTarget')
+    askTarget: document.getElementById('cockpitAskTarget'),
+    // City Economy HUD. Hidden until GET /api/economy answers, so an install
+    // with the feature switched off never shows it (FR34, FR47).
+    economy: document.getElementById('cockpitEconomy'),
+    economyCraft: document.querySelector('[data-economy-craft]'),
+    economyHarvest: document.querySelector('[data-economy-harvest]')
   };
 
   // Dashboard components render inside #main-content, whose z-index creates a
@@ -1533,6 +1594,11 @@ import {
     // Personal HQ status, read once and refreshed on HQ actions. Quick Capture
     // needs it to know where a capture goes (FR102/FR104).
     hqStatus: null,
+    // City Economy. null until GET /api/economy answers successfully, so "the
+    // economy is switched off" and "the user has nothing yet" stay
+    // distinguishable — the first hides the HUD, the second shows two zeros
+    // (city-economy FR34).
+    economy: null,
     onboardingGate: {
       state: ONBOARDING_GATE_LOADING,
       allowWorkspaceHydration: false,
@@ -1638,6 +1704,9 @@ import {
       tree: state.tree,
       selectedId: state.selectedId,
       metadata: state.metadata,
+      // Farm badges and harvest piles (city-economy FR35). A projection, not
+      // the whole economy: the Map draws buildings, it does not hold balances.
+      economy: economyMapSnapshot(state.economy),
       // Cockpit contract (see workspace-map.js): select-only pointer semantics,
       // no internal topbar/overview chrome, and no invented default selection.
       selectOnly: true,
@@ -2728,6 +2797,83 @@ import {
     }
   }
 
+  /**
+   * Load the City Economy (city-economy FR35).
+   *
+   * Independently degradable in exactly the way the schedule is: a failure or a
+   * 404 leaves state.economy null, which hides the HUD and draws no badges, and
+   * never blocks or delays the workspace list. Nothing here is added to the
+   * workspace payload — the economy is its own read.
+   */
+  async function refreshEconomy() {
+    try {
+      const res = await fetch('/api/economy');
+      // 404 is the feature flag being off (FR47), not a failure to report.
+      if (res.status === 404) {
+        state.economy = null;
+        return;
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      state.economy = readEconomy(await res.json());
+    } catch (err) {
+      console.warn('home-workspace-cockpit: economy unavailable', err);
+      state.economy = null;
+    }
+  }
+
+  /**
+   * Paint the HUD chips, and bump the one that grew.
+   *
+   * The bump is the whole feedback for earned Craft — there is deliberately no
+   * toast for it (FR44) — so it fires only on an increase, and never on the
+   * first paint, where every value has "grown" from nothing.
+   */
+  let lastEconomyChips = null;
+  function renderEconomyHUD() {
+    if (!els.economy) return;
+    if (!state.economy) {
+      els.economy.hidden = true;
+      lastEconomyChips = null;
+      return;
+    }
+    const next = { craft: state.economy.craft, harvest: state.economy.harvest };
+    const first = lastEconomyChips === null;
+    if (els.economyCraft) els.economyCraft.textContent = formatCount(next.craft);
+    if (els.economyHarvest) els.economyHarvest.textContent = formatCount(next.harvest);
+    els.economy.hidden = false;
+    if (!first) {
+      if (next.craft > lastEconomyChips.craft) bumpEconomyChip('craft');
+      if (next.harvest > lastEconomyChips.harvest) bumpEconomyChip('harvest');
+    }
+    lastEconomyChips = next;
+  }
+
+  function bumpEconomyChip(resource) {
+    if (!els.economy) return;
+    const chip = els.economy.querySelector(`[data-economy-chip="${resource}"]`);
+    if (!chip || !chip.classList) return;
+    // Restart rather than stack: a burst of earnings should read as one lively
+    // chip, not as a queue of animations finishing long after the fact.
+    chip.classList.remove('is-earned');
+    void chip.offsetWidth;
+    chip.classList.add('is-earned');
+    chip.addEventListener('animationend', () => chip.classList.remove('is-earned'), { once: true });
+  }
+
+  /**
+   * Reload the economy and repaint everything that reads it.
+   *
+   * Called after a harvest and after any schedule save that spent a resource.
+   * The Map is re-mounted rather than patched because the badge and the pile are
+   * part of tileHTML, and a half-updated tile is worse than a re-mount that
+   * preserves camera and selection anyway.
+   */
+  async function refreshEconomyAndRender() {
+    await refreshEconomy();
+    renderEconomyHUD();
+    mountMap();
+  }
+
   async function refresh() {
     if (!canHydrateWorkspaceData()) return null;
     if (state.inFlight) return state.inFlight;
@@ -2767,6 +2913,13 @@ import {
       applyFilterToMap();
       renderToday();
       if (state.railState === RAIL_SUMMARY) renderRail({ announceChange: false });
+    });
+    // The economy rides alongside for the same reason (city-economy FR35). The
+    // Map is re-mounted when it lands so the badges appear; a Map that mounted
+    // first without them is correct, just briefly plainer.
+    void refreshEconomy().then(() => {
+      renderEconomyHUD();
+      mountMap();
     });
     return state.inFlight;
   }
@@ -2870,6 +3023,15 @@ import {
   }
 
   // ---- wiring ----
+
+  // Any surface that changes a balance says so through this one event rather
+  // than reaching into the cockpit: harvesting from a result modal on another
+  // page, and (Group 4) paying for a Farm build or a cadence upgrade. The HUD
+  // and the Map's badges both re-read from the server, so a change made
+  // anywhere lands here without either side guessing at the new numbers.
+  window.addEventListener(ECONOMY_CHANGED_EVENT, () => {
+    void refreshEconomyAndRender();
+  });
 
   // District tags may be reconciled after the Map's initial shell binding when
   // persisted layout arrives. Keep one Home-owned delegated seam on the stable

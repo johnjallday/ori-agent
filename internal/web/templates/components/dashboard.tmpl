@@ -92,6 +92,34 @@
             <span class="cockpit-flyout-toggle__label">Quests</span>
             <span class="cockpit-flyout-toggle__summary" data-role="quests-summary"></span>
           </button>
+          <!--
+            City Economy HUD (city-economy FR34): what the city has right now.
+            Craft is earned by hand, Harvest by opening a Farm's results, and
+            the Energy bar (Group 5) gauges today's tokens against a figure the
+            user sets.
+
+            It starts hidden and home-workspace-cockpit.js reveals it only after
+            a successful GET /api/economy, so an install with the feature flag
+            off — where that route answers 404 — shows nothing rather than a
+            pair of chips permanently reading zero.
+
+            aria-live="polite" because these values change as a side effect of
+            other actions (a message sent, a result opened, a schedule saved)
+            rather than in response to pressing anything here.
+          -->
+          <div class="cockpit-economy" id="cockpitEconomy" role="group"
+               aria-label="City resources" aria-live="polite" hidden>
+            <span class="cockpit-economy__chip" data-economy-chip="craft"
+                  title="Craft — earned by sending messages and finishing tasks by hand">
+              <span class="cockpit-economy__chip-label">Craft</span>
+              <span class="cockpit-economy__chip-value" data-economy-craft>0</span>
+            </span>
+            <span class="cockpit-economy__chip" data-economy-chip="harvest"
+                  title="Harvest — earned by opening a Farm's results">
+              <span class="cockpit-economy__chip-label">Harvest</span>
+              <span class="cockpit-economy__chip-value" data-economy-harvest>0</span>
+            </span>
+          </div>
           <!-- Mutually exclusive Map/Tree toggle. aria-pressed carries the
                active view; the visible labels carry it without color (FR24). -->
           <div class="cockpit-view-toggle" role="group" aria-label="Workspace view">
