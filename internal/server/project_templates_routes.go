@@ -2,9 +2,11 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/runtimecapability"
 	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 )
@@ -284,6 +287,9 @@ func pluginArtifactsAvailable(artifacts []plugin.ResolvedArtifact) bool {
 // handleProjectTemplateImport serves POST /api/project-templates/import:
 // copy an arbitrary folder into the library as a new template.
 func (s *Server) handleProjectTemplateImport(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.currentTemplateAuthor(w, r); !ok {
+		return
+	}
 	var req struct {
 		Path string `json:"path"`
 		Name string `json:"name,omitempty"`
@@ -309,6 +315,10 @@ func (s *Server) handleProjectTemplateImport(w http.ResponseWriter, r *http.Requ
 // fields are tri-state so older clients preserve values they do not send;
 // project_entry null explicitly clears that object.
 func (s *Server) handleProjectTemplateUpdate(w http.ResponseWriter, r *http.Request) {
+	userID, ok := s.currentTemplateAuthor(w, r)
+	if !ok {
+		return
+	}
 	var req struct {
 		Name                   string                                    `json:"name"`
 		Description            string                                    `json:"description"`
@@ -352,12 +362,286 @@ func (s *Server) handleProjectTemplateUpdate(w http.ResponseWriter, r *http.Requ
 		AutomationRecipes:      req.AutomationRecipes,
 		RuntimeRequirements:    req.RuntimeRequirements,
 	}
-	tpl, err := projecttemplates.UpdateManifest(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.Name, req.Description, req.Tags, edit)
+	tpl, err := projecttemplates.UpdateManifestWithGuard(
+		resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.Name, req.Description,
+		req.Tags, edit, s.userSetupQuestMutationGuard(r.Context(), userID), s.projectTemplateCatalog,
+	)
 	if err != nil {
 		s.respondProjectTemplateError(w, err)
 		return
 	}
 	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "template": tpl})
+}
+
+type userSetupQuestIntegrationOption struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+}
+
+type userSetupQuestAuthoringResponse struct {
+	Source       string                                     `json:"source"`
+	TemplateID   string                                     `json:"template_id"`
+	Editable     bool                                       `json:"editable"`
+	Locked       bool                                       `json:"locked"`
+	LockMessage  string                                     `json:"lock_message,omitempty"`
+	RecoveryCode string                                     `json:"recovery_code,omitempty"`
+	Eligibility  projecttemplates.UserSetupQuestEligibility `json:"eligibility"`
+	Revision     string                                     `json:"revision"`
+	Error        string                                     `json:"error,omitempty"`
+	Quest        *projecttemplates.UserSetupQuest           `json:"user_setup_quest,omitempty"`
+	Draft        projecttemplates.UserSetupQuestDraft       `json:"draft"`
+	Integrations []userSetupQuestIntegrationOption          `json:"integrations"`
+}
+
+func (s *Server) userSetupQuestAuthoring(ctx context.Context, template projecttemplates.Template) userSetupQuestAuthoringResponse {
+	draft := projecttemplates.DefaultUserSetupQuestDraft()
+	if template.UserSetupQuest != nil {
+		draft = projecttemplates.UserSetupQuestDraftFor(template.UserSetupQuest)
+	}
+	integrations := make([]userSetupQuestIntegrationOption, 0, len(reviewedintegration.All()))
+	for _, entry := range reviewedintegration.All() {
+		integrations = append(integrations, userSetupQuestIntegrationOption{Key: entry.Key, Label: entry.SourceLabel})
+	}
+	if _, ok := reviewedintegration.Get(draft.IntegrationKey); !ok && len(integrations) > 0 {
+		draft.IntegrationKey = integrations[0].Key
+	}
+	response := userSetupQuestAuthoringResponse{
+		Source: "user_template", TemplateID: template.ID,
+		Editable:    !template.Builtin && template.PluginOwner == nil,
+		Eligibility: template.UserSetupQuestEligibility,
+		Revision:    template.UserSetupQuestRevision, Error: template.UserSetupQuestError,
+		Quest: template.UserSetupQuest.Clone(), Draft: draft, Integrations: integrations,
+	}
+	if s != nil && s.setupJourneyStore != nil {
+		bindings, err := s.setupJourneyStore.ListUserTemplateBindings(ctx, template.ID)
+		if err != nil {
+			response.Locked = true
+			response.RecoveryCode = "binding_state_unavailable"
+			response.LockMessage = "Ori could not verify durable setup bindings, so protected editing is unavailable. Retry after storage recovers."
+		} else if len(bindings) > 0 {
+			response.Locked = true
+			response.LockMessage = "This setup definition is locked because setup has started. Duplicate the template to create a new editable version."
+			for _, binding := range bindings {
+				if binding.DefinitionDigest != projecttemplates.UserSetupQuestDefinitionDigest(template.UserSetupQuest) ||
+					binding.ExecutionDigest != projecttemplates.UserSetupQuestExecutionDigest(template) {
+					response.RecoveryCode = "protected_content_changed"
+					response.LockMessage = "Protected setup content changed outside Ori after this journey started. Ori will not rebind it. Restore the original template or duplicate and create a new setup quest."
+					break
+				}
+			}
+		}
+	}
+	return response
+}
+
+func (s *Server) currentTemplateAuthor(w http.ResponseWriter, r *http.Request) (string, bool) {
+	if s == nil || s.Storage == nil || s.Storage.UserProvider == nil {
+		_ = orihttp.RespondError(w, http.StatusServiceUnavailable, "Template authoring ownership is unavailable")
+		return "", false
+	}
+	userID, err := s.Storage.UserProvider.CurrentUserID(r.Context())
+	if err != nil || strings.TrimSpace(userID) == "" {
+		_ = orihttp.RespondError(w, http.StatusServiceUnavailable, "Template authoring ownership is unavailable")
+		return "", false
+	}
+	return strings.TrimSpace(userID), true
+}
+
+func (s *Server) userSetupQuestMutationGuard(ctx context.Context, userID string) projecttemplates.UserSetupQuestMutationGuard {
+	return func(before, after projecttemplates.Template) error {
+		_ = userID // Ownership is resolved at the boundary; the shared template locks after any user's first run.
+		if s == nil || s.setupJourneyStore == nil {
+			return nil
+		}
+		bindings, err := s.setupJourneyStore.ListUserTemplateBindings(ctx, before.ID)
+		if err != nil {
+			return err
+		}
+		if len(bindings) == 0 {
+			return nil
+		}
+		definitionChanged := before.UserSetupQuestRevision != after.UserSetupQuestRevision
+		executionChanged := projecttemplates.UserSetupQuestExecutionDigest(before) != projecttemplates.UserSetupQuestExecutionDigest(after)
+		for _, binding := range bindings {
+			if binding.DefinitionDigest != projecttemplates.UserSetupQuestDefinitionDigest(before.UserSetupQuest) ||
+				binding.ExecutionDigest != projecttemplates.UserSetupQuestExecutionDigest(before) {
+				if !definitionChanged && !executionChanged {
+					continue
+				}
+				if binding.DefinitionDigest == projecttemplates.UserSetupQuestDefinitionDigest(after.UserSetupQuest) &&
+					binding.ExecutionDigest == projecttemplates.UserSetupQuestExecutionDigest(after) {
+					continue
+				}
+				return projecttemplates.ErrUserSetupQuestLocked
+			}
+			if definitionChanged || executionChanged {
+				return projecttemplates.ErrUserSetupQuestLocked
+			}
+		}
+		return nil
+	}
+}
+
+func (s *Server) userSetupQuestContentGuard(ctx context.Context, userID string) projecttemplates.UserSetupQuestContentGuard {
+	return func(template projecttemplates.Template) error {
+		_ = userID
+		if s == nil || s.setupJourneyStore == nil {
+			return nil
+		}
+		bindings, err := s.setupJourneyStore.ListUserTemplateBindings(ctx, template.ID)
+		if err != nil {
+			return err
+		}
+		if len(bindings) == 0 {
+			return nil
+		}
+		return projecttemplates.ErrUserSetupQuestLocked
+	}
+}
+
+func (s *Server) loadUserSetupQuestTemplate(id string) (projecttemplates.Template, error) {
+	return projecttemplates.FindLibraryTemplateWithCatalog(resolveTemplatesRoot(s.Core.ConfigManager), id, s.projectTemplateCatalog)
+}
+
+// handleUserSetupQuestGet returns authoring metadata only. It never calls the
+// journey service or a canonical integration/workspace owner.
+func (s *Server) handleUserSetupQuestGet(w http.ResponseWriter, r *http.Request) {
+	if r.URL.RawQuery != "" {
+		_ = orihttp.RespondBadRequest(w, "query parameters are not supported")
+		return
+	}
+	if _, ok := s.currentTemplateAuthor(w, r); !ok {
+		return
+	}
+	template, err := s.loadUserSetupQuestTemplate(r.PathValue("templateID"))
+	if err != nil {
+		s.respondProjectTemplateError(w, err)
+		return
+	}
+	_ = orihttp.RespondSuccess(w, s.userSetupQuestAuthoring(r.Context(), template))
+}
+
+func (s *Server) handleUserSetupQuestPreview(w http.ResponseWriter, r *http.Request) {
+	if r.URL.RawQuery != "" {
+		_ = orihttp.RespondBadRequest(w, "query parameters are not supported")
+		return
+	}
+	if _, ok := s.currentTemplateAuthor(w, r); !ok {
+		return
+	}
+	var request struct {
+		Quest json.RawMessage `json:"user_setup_quest"`
+	}
+	if err := decodeStrictTemplateRequest(w, r, &request); err != nil || len(bytes.TrimSpace(request.Quest)) == 0 || bytes.Equal(bytes.TrimSpace(request.Quest), []byte("null")) {
+		_ = orihttp.RespondBadRequest(w, "user_setup_quest must be an object")
+		return
+	}
+	var draft projecttemplates.UserSetupQuestDraft
+	if err := decodeStrictJSON(request.Quest, &draft); err != nil {
+		_ = orihttp.RespondBadRequest(w, "user_setup_quest contains unsupported or malformed fields")
+		return
+	}
+	if _, ok := reviewedintegration.Get(draft.IntegrationKey); !ok {
+		_ = orihttp.RespondBadRequest(w, "user_setup_quest must select a host-reviewed integration")
+		return
+	}
+	template, err := s.loadUserSetupQuestTemplate(r.PathValue("templateID"))
+	if err != nil {
+		s.respondProjectTemplateError(w, err)
+		return
+	}
+	preview, err := projecttemplates.PreviewUserSetupQuest(template, draft)
+	if err != nil {
+		s.respondProjectTemplateError(w, err)
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{
+		"label": "Preview — no setup started", "source": "user_template", "template_id": template.ID,
+		"user_setup_quest": preview,
+	})
+}
+
+func (s *Server) handleUserSetupQuestPut(w http.ResponseWriter, r *http.Request) {
+	if r.URL.RawQuery != "" {
+		_ = orihttp.RespondBadRequest(w, "query parameters are not supported")
+		return
+	}
+	userID, ok := s.currentTemplateAuthor(w, r)
+	if !ok {
+		return
+	}
+	var request struct {
+		IfRevision string          `json:"if_revision"`
+		Quest      json.RawMessage `json:"user_setup_quest"`
+	}
+	if err := decodeStrictTemplateRequest(w, r, &request); err != nil {
+		_ = orihttp.RespondBadRequest(w, "setup quest save request is invalid")
+		return
+	}
+	if len(request.IfRevision) != 64 {
+		_ = orihttp.RespondBadRequest(w, "if_revision is required")
+		return
+	}
+	if request.Quest == nil {
+		template, err := s.loadUserSetupQuestTemplate(r.PathValue("templateID"))
+		if err != nil {
+			s.respondProjectTemplateError(w, err)
+			return
+		}
+		_ = orihttp.RespondSuccess(w, s.userSetupQuestAuthoring(r.Context(), template))
+		return
+	}
+	edit := projecttemplates.UserSetupQuestEdit{ExpectedRevision: request.IfRevision}
+	if bytes.Equal(bytes.TrimSpace(request.Quest), []byte("null")) {
+		edit.Remove = true
+	} else {
+		var draft projecttemplates.UserSetupQuestDraft
+		if err := decodeStrictJSON(request.Quest, &draft); err != nil {
+			_ = orihttp.RespondBadRequest(w, "user_setup_quest contains unsupported or malformed fields")
+			return
+		}
+		if _, ok := reviewedintegration.Get(draft.IntegrationKey); !ok {
+			_ = orihttp.RespondBadRequest(w, "user_setup_quest must select a host-reviewed integration")
+			return
+		}
+		edit.Draft = &draft
+	}
+	updated, err := projecttemplates.UpdateUserSetupQuestWithCatalog(
+		resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), edit,
+		s.userSetupQuestMutationGuard(r.Context(), userID), s.projectTemplateCatalog,
+	)
+	if err != nil {
+		s.respondProjectTemplateError(w, err)
+		return
+	}
+	_ = orihttp.RespondSuccess(w, s.userSetupQuestAuthoring(r.Context(), updated))
+}
+
+func decodeStrictTemplateRequest(w http.ResponseWriter, r *http.Request, target any) error {
+	if r.Body == nil {
+		return errors.New("request body is required")
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 40<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("request must contain exactly one object")
+	}
+	return nil
+}
+
+func decodeStrictJSON(raw []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("value must contain exactly one object")
+	}
+	return nil
 }
 
 // guardTemplateMutable rejects mutating operations on built-in templates,
@@ -374,6 +658,9 @@ func (s *Server) guardTemplateMutable(w http.ResponseWriter, templateID string) 
 // handleProjectTemplateCreate serves POST /api/project-templates: create a new,
 // empty template in the library from a display name.
 func (s *Server) handleProjectTemplateCreate(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.currentTemplateAuthor(w, r); !ok {
+		return
+	}
 	var req struct {
 		Name string `json:"name"`
 	}
@@ -394,6 +681,9 @@ func (s *Server) handleProjectTemplateCreate(w http.ResponseWriter, r *http.Requ
 // new one. The (optional) `name` seeds the copy's display name and id; send `{}`
 // for a default "<source> copy".
 func (s *Server) handleProjectTemplateDuplicate(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.currentTemplateAuthor(w, r); !ok {
+		return
+	}
 	var req struct {
 		Name string `json:"name,omitempty"`
 	}
@@ -414,10 +704,14 @@ func (s *Server) handleProjectTemplateDuplicate(w http.ResponseWriter, r *http.R
 // response reports which path was taken. Deleted starter templates reappear
 // on the next server start (materialize-if-absent).
 func (s *Server) handleProjectTemplateDelete(w http.ResponseWriter, r *http.Request) {
-	if !s.guardTemplateMutable(w, r.PathValue("templateID")) {
+	userID, ok := s.currentTemplateAuthor(w, r)
+	if !ok || !s.guardTemplateMutable(w, r.PathValue("templateID")) {
 		return
 	}
-	trashed, err := projecttemplates.Delete(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"))
+	trashed, err := projecttemplates.DeleteWithGuard(
+		resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"),
+		s.userSetupQuestContentGuard(r.Context(), userID), s.projectTemplateCatalog,
+	)
 	if err != nil {
 		s.respondProjectTemplateError(w, err)
 		return
@@ -457,6 +751,10 @@ func (s *Server) handleProjectTemplateFileRead(w http.ResponseWriter, r *http.Re
 // file's bytes verbatim. The file must already exist (use the create endpoint
 // for new files).
 func (s *Server) handleProjectTemplateFileWrite(w http.ResponseWriter, r *http.Request) {
+	userID, ok := s.currentTemplateAuthor(w, r)
+	if !ok {
+		return
+	}
 	var req struct {
 		Path    string `json:"path"`
 		Content string `json:"content"`
@@ -467,7 +765,10 @@ func (s *Server) handleProjectTemplateFileWrite(w http.ResponseWriter, r *http.R
 	if !s.guardTemplateMutable(w, r.PathValue("templateID")) {
 		return
 	}
-	if err := projecttemplates.WriteFileContent(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.Path, req.Content); err != nil {
+	if err := projecttemplates.WriteFileContentWithGuard(
+		resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.Path, req.Content,
+		s.userSetupQuestContentGuard(r.Context(), userID), s.projectTemplateCatalog,
+	); err != nil {
 		s.respondProjectTemplateError(w, err)
 		return
 	}
@@ -478,6 +779,10 @@ func (s *Server) handleProjectTemplateFileWrite(w http.ResponseWriter, r *http.R
 // /api/project-templates/{templateID}/files: create a new file or folder
 // ({"path": ..., "type": "file"|"dir"}).
 func (s *Server) handleProjectTemplateFileCreate(w http.ResponseWriter, r *http.Request) {
+	userID, ok := s.currentTemplateAuthor(w, r)
+	if !ok {
+		return
+	}
 	var req struct {
 		Path string `json:"path"`
 		Type string `json:"type"`
@@ -488,7 +793,10 @@ func (s *Server) handleProjectTemplateFileCreate(w http.ResponseWriter, r *http.
 	if !s.guardTemplateMutable(w, r.PathValue("templateID")) {
 		return
 	}
-	node, err := projecttemplates.CreateEntry(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.Path, req.Type)
+	node, err := projecttemplates.CreateEntryWithGuard(
+		resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.Path, req.Type,
+		s.userSetupQuestContentGuard(r.Context(), userID), s.projectTemplateCatalog,
+	)
 	if err != nil {
 		s.respondProjectTemplateError(w, err)
 		return
@@ -500,6 +808,10 @@ func (s *Server) handleProjectTemplateFileCreate(w http.ResponseWriter, r *http.
 // /api/project-templates/{templateID}/files/rename: move a file or folder
 // ({"from": ..., "to": ...}); the destination must not already exist.
 func (s *Server) handleProjectTemplateFileRename(w http.ResponseWriter, r *http.Request) {
+	userID, ok := s.currentTemplateAuthor(w, r)
+	if !ok {
+		return
+	}
 	var req struct {
 		From string `json:"from"`
 		To   string `json:"to"`
@@ -510,7 +822,10 @@ func (s *Server) handleProjectTemplateFileRename(w http.ResponseWriter, r *http.
 	if !s.guardTemplateMutable(w, r.PathValue("templateID")) {
 		return
 	}
-	node, err := projecttemplates.RenameEntry(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.From, req.To)
+	node, err := projecttemplates.RenameEntryWithGuard(
+		resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.From, req.To,
+		s.userSetupQuestContentGuard(r.Context(), userID), s.projectTemplateCatalog,
+	)
 	if err != nil {
 		s.respondProjectTemplateError(w, err)
 		return
@@ -522,11 +837,15 @@ func (s *Server) handleProjectTemplateFileRename(w http.ResponseWriter, r *http.
 // /api/project-templates/{templateID}/files?path=<rel>: remove a file or folder
 // (recursive for folders).
 func (s *Server) handleProjectTemplateFileDelete(w http.ResponseWriter, r *http.Request) {
-	if !s.guardTemplateMutable(w, r.PathValue("templateID")) {
+	userID, ok := s.currentTemplateAuthor(w, r)
+	if !ok || !s.guardTemplateMutable(w, r.PathValue("templateID")) {
 		return
 	}
 	path := r.URL.Query().Get("path")
-	if err := projecttemplates.DeleteEntry(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), path); err != nil {
+	if err := projecttemplates.DeleteEntryWithGuard(
+		resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), path,
+		s.userSetupQuestContentGuard(r.Context(), userID), s.projectTemplateCatalog,
+	); err != nil {
 		s.respondProjectTemplateError(w, err)
 		return
 	}
@@ -539,6 +858,10 @@ func (s *Server) handleProjectTemplateFileDelete(w http.ResponseWriter, r *http.
 // applied (if present on the machine) when a workspace is created from the
 // template; reading them is covered by the list endpoint's Template.Tools.
 func (s *Server) handleProjectTemplateToolsSet(w http.ResponseWriter, r *http.Request) {
+	userID, ok := s.currentTemplateAuthor(w, r)
+	if !ok {
+		return
+	}
 	var req projecttemplates.ToolDefaults
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -546,7 +869,10 @@ func (s *Server) handleProjectTemplateToolsSet(w http.ResponseWriter, r *http.Re
 	if !s.guardTemplateMutable(w, r.PathValue("templateID")) {
 		return
 	}
-	tpl, err := projecttemplates.SetTools(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req)
+	tpl, err := projecttemplates.SetToolsWithGuard(
+		resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req,
+		s.userSetupQuestMutationGuard(r.Context(), userID), s.projectTemplateCatalog,
+	)
 	if err != nil {
 		s.respondProjectTemplateError(w, err)
 		return
@@ -560,6 +886,10 @@ func (s *Server) handleProjectTemplateToolsSet(w http.ResponseWriter, r *http.Re
 // created from the template; reading is covered by the list endpoint's
 // Template.Agents.
 func (s *Server) handleProjectTemplateAgentsSet(w http.ResponseWriter, r *http.Request) {
+	userID, ok := s.currentTemplateAuthor(w, r)
+	if !ok {
+		return
+	}
 	var req struct {
 		Agents []projecttemplates.AgentSpec `json:"agents"`
 	}
@@ -569,7 +899,10 @@ func (s *Server) handleProjectTemplateAgentsSet(w http.ResponseWriter, r *http.R
 	if !s.guardTemplateMutable(w, r.PathValue("templateID")) {
 		return
 	}
-	tpl, err := projecttemplates.SetAgents(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.Agents)
+	tpl, err := projecttemplates.SetAgentsWithGuard(
+		resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.Agents,
+		s.userSetupQuestMutationGuard(r.Context(), userID), s.projectTemplateCatalog,
+	)
 	if err != nil {
 		s.respondProjectTemplateError(w, err)
 		return
@@ -627,9 +960,10 @@ func (s *Server) respondProjectTemplateError(w http.ResponseWriter, err error) {
 	case errors.Is(err, projecttemplates.ErrInvalidTemplateName), errors.Is(err, projecttemplates.ErrInvalidPath), errors.Is(err, projecttemplates.ErrInvalidPromptVariable),
 		errors.Is(err, projecttemplates.ErrInvalidStarterTasks), errors.Is(err, projecttemplates.ErrInvalidProjectEntry), errors.Is(err, projecttemplates.ErrRosterRequired),
 		errors.Is(err, projecttemplates.ErrInvalidCapabilityRequirements), errors.Is(err, projecttemplates.ErrInvalidDirectoryRequirements), errors.Is(err, projecttemplates.ErrInvalidAutomationRecipes),
-		errors.Is(err, projecttemplates.ErrInvalidRuntimeRequirements):
+		errors.Is(err, projecttemplates.ErrInvalidRuntimeRequirements), errors.Is(err, projecttemplates.ErrInvalidUserSetupQuest):
 		_ = orihttp.RespondBadRequest(w, err.Error())
-	case errors.Is(err, projecttemplates.ErrTemplateExists), errors.Is(err, projecttemplates.ErrFileExists):
+	case errors.Is(err, projecttemplates.ErrTemplateExists), errors.Is(err, projecttemplates.ErrFileExists),
+		errors.Is(err, projecttemplates.ErrUserSetupQuestStale), errors.Is(err, projecttemplates.ErrUserSetupQuestLocked):
 		_ = orihttp.RespondConflict(w, err.Error())
 	case errors.Is(err, projecttemplates.ErrTemplateReadOnly):
 		_ = orihttp.RespondForbidden(w, err.Error())

@@ -101,6 +101,31 @@ test('Templates shows an inert plugin-owned quest and its canonical launch link'
   assert.equal(node('tplQuestHeading').innerHTML, '');
 });
 
+test('user-owned templates show their source-aware attachment quest without plugin ownership', () => {
+  const { subject, node } = harness();
+  const userTemplate = {
+    id: 'local-project',
+    name: 'Local project',
+    user_setup_quest: { attachment_id: 'uqatt_0123456789abcdef01234567' }
+  };
+  const userQuest = {
+    source: 'user_template',
+    template_id: userTemplate.id,
+    attachment_id: userTemplate.user_setup_quest.attachment_id,
+    id: 'quest_0123456789abcdef01234567',
+    title: 'Set up local project',
+    description: 'Use local setup copy.'
+  };
+  userQuest.launch_url = setupQuestURL(userQuest);
+  subject.tplState.templates = [userTemplate];
+  subject.tplState.selectedId = userTemplate.id;
+  subject.tplQuests.items = [userQuest];
+  subject.tplRenderQuest();
+  assert.equal(node('tplQuestOpen').href, userQuest.launch_url);
+  assert.equal(node('tplQuestOwnership').textContent, 'User-owned · Source: user template');
+  assert.equal(node('tplQuestHeading').textContent, userQuest.title);
+});
+
 test('selection changes, missing references, and failed reads clear stale quest links', () => {
   const { subject, node } = harness();
   for (const status of ['loading', 'error']) {

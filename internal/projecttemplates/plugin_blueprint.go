@@ -50,6 +50,9 @@ func LoadPluginBlueprint(manifestPath, skeletonRoot string, catalog RuntimeCatal
 	if declaration.Builtin || declaration.BuiltinVersion != 0 {
 		return Template{}, "", errors.New("plugin blueprint cannot claim built-in ownership")
 	}
+	if raw := bytes.TrimSpace(declaration.UserSetupQuest); len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
+		return Template{}, "", errors.New("plugin blueprint cannot declare a user-owned setup quest")
+	}
 	if len(bytes.TrimSpace(declaration.Onboarding)) > 0 && !bytes.Equal(bytes.TrimSpace(declaration.Onboarding), []byte("null")) {
 		return Template{}, "", errors.New("plugin blueprint cannot declare legacy onboarding behavior")
 	}

@@ -686,6 +686,7 @@ func (b *ServerBuilder) createDomainFacades() {
 	b.server.Handlers = handlers
 	b.server.workspaceSurfaceServices = b.workspaceSurfaceServices
 	b.server.workspaceFileStore = b.workspaceFileStore
+	b.server.setupJourneyStore = b.setupJourneyStore
 	b.server.projectTemplateCatalog = templateRuntimeCatalog{
 		capabilities: b.workspaceCapabilityRegistry,
 		runtimes:     b.runtimeCapabilityRegistry,

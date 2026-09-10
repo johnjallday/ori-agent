@@ -378,6 +378,13 @@ type Template struct {
 	// SetupQuestID references a pre-workspace quest in this template's owning
 	// plugin. It grants no authority and is resolved only from installed data.
 	SetupQuestID string `json:"setup_quest,omitempty"`
+	// UserSetupQuest is one strict inert declaration attached to a user-owned
+	// template. Its identity is host-generated and it never fabricates plugin
+	// provenance. Invalid declarations remain isolated behind the diagnostic.
+	UserSetupQuest            *UserSetupQuest           `json:"user_setup_quest,omitempty"`
+	UserSetupQuestError       string                    `json:"user_setup_quest_error,omitempty"`
+	UserSetupQuestEligibility UserSetupQuestEligibility `json:"user_setup_quest_eligibility"`
+	UserSetupQuestRevision    string                    `json:"user_setup_quest_revision"`
 	// SetupWizardError is the actionable diagnostic for an invalid
 	// `setup_wizard` declaration. Unlike Warnings, it is not cosmetic: a
 	// template carrying one offers no setup wizard and cannot create a
@@ -507,8 +514,9 @@ type manifest struct {
 	// SetupWizard is held raw so a malformed wizard fails only the wizard: were
 	// it typed here, one bad step would fail the whole manifest decode and the
 	// template would silently lose its name, tasks, and agents too.
-	SetupWizard  json.RawMessage `json:"setup_wizard,omitempty"`
-	SetupQuestID string          `json:"setup_quest,omitempty"`
+	SetupWizard    json.RawMessage `json:"setup_wizard,omitempty"`
+	SetupQuestID   string          `json:"setup_quest,omitempty"`
+	UserSetupQuest json.RawMessage `json:"user_setup_quest,omitempty"`
 	// AssistantProgram uses the same isolated, fail-closed decode. Unknown fields
 	// inside the versioned block are rejected even though ordinary top-level
 	// template metadata remains forward-compatible.
@@ -600,6 +608,15 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 	if assistantProgramErr != nil {
 		t.AssistantProgramError = assistantProgramErr.Error()
 	}
+	t.UserSetupQuestEligibility = EvaluateUserSetupQuestEligibility(t)
+	userSetupQuest, userSetupQuestErr := normalizeUserSetupQuest(m.UserSetupQuest, t)
+	if userSetupQuestErr == nil {
+		t.UserSetupQuest = userSetupQuest
+		t.UserSetupQuestRevision = UserSetupQuestRevision(userSetupQuest)
+	} else {
+		t.UserSetupQuestError = userSetupQuestErr.Error()
+		t.UserSetupQuestRevision = digestUserQuestBytes(append([]byte("user_setup_quest:invalid:v1:"), bytes.TrimSpace(m.UserSetupQuest)...))
+	}
 	t.Warnings = append(manifestWarnings(m, t.Agents, t.AssistantProgram != nil), capabilityWarnings...)
 	if projectEntryErr != nil {
 		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json project_entry is ignored: %v", projectEntryErr))
@@ -617,6 +634,9 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 	}
 	if assistantProgramErr != nil {
 		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json assistant_program is unusable and blocks workspace creation: %v", assistantProgramErr))
+	}
+	if userSetupQuestErr != nil {
+		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json user_setup_quest is unusable and cannot be launched: %v", userSetupQuestErr))
 	}
 	return t
 }
