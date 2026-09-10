@@ -79,9 +79,12 @@ type BriefConfigProjection struct {
 	Scope                   dailybrief.Scope `json:"scope"`
 	SelectedWorkspaceIDs    []string         `json:"selected_workspace_ids"`
 	IncludeFutureWorkspaces bool             `json:"include_future_workspaces"`
-	NotifyOnReady           bool             `json:"notify_on_ready"`
-	ConfigRevision          int              `json:"config_revision"`
-	NextGenerationAt        *time.Time       `json:"next_generation_at,omitempty"`
+	// UpdatedAt is the persisted scope cutoff used when all-scope future
+	// inclusion is disabled. Today consumes the same timestamp as generation.
+	UpdatedAt        time.Time  `json:"updated_at"`
+	NotifyOnReady    bool       `json:"notify_on_ready"`
+	ConfigRevision   int        `json:"config_revision"`
+	NextGenerationAt *time.Time `json:"next_generation_at,omitempty"`
 }
 
 // RenameProjection reports a durable in-progress rename without implying that
@@ -444,8 +447,8 @@ func (s *Service) loadBrief(ctx context.Context, userID, workspaceID string, pro
 		Timezone: cfg.Timezone, ScheduleDays: append([]string(nil), cfg.ScheduleDays...),
 		ScheduleTime: cfg.ScheduleTime, ScheduleEnabled: cfg.ScheduleEnabled,
 		Scope: cfg.Scope, SelectedWorkspaceIDs: append([]string(nil), cfg.SelectedWorkspaceIDs...),
-		IncludeFutureWorkspaces: cfg.IncludeFutureWorkspaces,
-		NotifyOnReady:           cfg.NotifyOnReady, ConfigRevision: cfg.ConfigRevision,
+		IncludeFutureWorkspaces: cfg.IncludeFutureWorkspaces, UpdatedAt: cfg.UpdatedAt,
+		NotifyOnReady: cfg.NotifyOnReady, ConfigRevision: cfg.ConfigRevision,
 	}
 	if next, ok, nextErr := dailybrief.NextOccurrence(*cfg, time.Now()); nextErr == nil && ok {
 		brief.NextGenerationAt = &next

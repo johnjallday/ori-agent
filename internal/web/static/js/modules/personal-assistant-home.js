@@ -27,14 +27,21 @@ export function todaySectionRows(section) {
       { kind: 'status', title: 'Source unavailable — other Today sections are still current.' }
     ];
   }
-  if (!rows.length) return [{ kind: 'status', title: 'Nothing here right now.' }];
-  return rows.map(item => ({
+  const projected = rows.map(item => ({
     kind: String(item?.kind || 'item'),
     title: String(item?.title || '').trim(),
     detail: String(item?.detail || '').trim(),
     attribution: String(item?.attribution || '').trim(),
     route: safeTodayRoute(item?.route) ? String(item.route) : ''
   }));
+  if (health === 'partial') {
+    return [
+      { kind: 'status', title: 'Some sources are unavailable — showing verified items.' },
+      ...projected
+    ];
+  }
+  if (!projected.length) return [{ kind: 'status', title: 'Nothing here right now.' }];
+  return projected;
 }
 
 // studioSectionView decides whether the studio region appears at all and what

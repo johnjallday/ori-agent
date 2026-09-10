@@ -285,6 +285,7 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	todayService := personalassistant.NewTodayService(
 		b.personalAssistantService, briefService, b.workspaceStore, b.followUpService,
 	)
+	todayService.SetFollowUpWorkspaceSource(workspaceSource)
 	b.initializeSetupJourney()
 	if b.setupJourneyService != nil {
 		todayService.SetSpecialistSetupReader(&personalAssistantSetupReportingAdapter{

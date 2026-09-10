@@ -21,6 +21,7 @@ import (
 const (
 	TodaySectionAvailable    = "available"
 	TodaySectionHealthyEmpty = "healthy_empty"
+	TodaySectionPartial      = "partial"
 	TodaySectionUnavailable  = "unavailable"
 
 	todayBriefCap    = 5
@@ -192,6 +193,12 @@ type todayFollowUpReader interface {
 	List(ctx context.Context, filter followup.Filter) ([]*followup.FollowUp, error)
 }
 
+type groundedFollowUp struct {
+	item  *followup.FollowUp
+	ref   dailybrief.SourceRef
+	route string
+}
+
 type todaySpecialistSetupReader interface {
 	GetSpecialistSetup(ctx context.Context, userID string) (*TodaySpecialistSetupProjection, error)
 }
@@ -199,16 +206,30 @@ type todaySpecialistSetupReader interface {
 // TodayService reads canonical stores independently; it never generates a
 // brief, mutates a Ticket, or changes a follow-up.
 type TodayService struct {
-	relationship todayRelationshipReader
-	briefs       todayBriefReader
-	workspaces   workspace.Store
-	followUps    todayFollowUpReader
-	setup        todaySpecialistSetupReader
-	now          func() time.Time
+	relationship       todayRelationshipReader
+	briefs             todayBriefReader
+	workspaces         workspace.Store
+	followUpWorkspaces dailybrief.WorkspaceSource
+	followUps          todayFollowUpReader
+	setup              todaySpecialistSetupReader
+	now                func() time.Time
 }
 
 func NewTodayService(relationship todayRelationshipReader, briefs todayBriefReader, workspaces workspace.Store, followUps todayFollowUpReader) *TodayService {
-	return &TodayService{relationship: relationship, briefs: briefs, workspaces: workspaces, followUps: followUps, now: time.Now}
+	return &TodayService{
+		relationship: relationship, briefs: briefs, workspaces: workspaces,
+		followUpWorkspaces: workspaces, followUps: followUps, now: time.Now,
+	}
+}
+
+// SetFollowUpWorkspaceSource selects the provenance-hydrating read source used
+// only for follow-up-owner scope. Production points this at the canonical
+// folder store while ordinary Today task reads retain the composed workspace
+// store. It grants no write capability.
+func (s *TodayService) SetFollowUpWorkspaceSource(source dailybrief.WorkspaceSource) {
+	if s != nil {
+		s.followUpWorkspaces = source
+	}
 }
 
 // SetSpecialistSetupReader adds the optional canonical root/child/add-on
@@ -291,13 +312,9 @@ func (s *TodayService) Get(ctx context.Context, userID string) (*TodayProjection
 		tasksByID[task.ID] = task
 	}
 	s.loadTicketsAndResults(ws, route, now, out)
-	followUpsByID := s.loadFollowUps(ctx, userID, ws.ID, route, now, out)
-	s.loadBrief(ctx, userID, ws.ID, route, tasksByID, followUpsByID, out)
-	if out.FollowUps.Health.Status == TodaySectionUnavailable {
-		out.Decisions = TodaySection{Health: out.FollowUps.Health, Items: []TodayItem{}}
-	} else {
-		out.Decisions = decisionsFromFollowUps(followUpsByID, route, now)
-	}
+	followUpsByRef := s.loadFollowUps(ctx, userID, relationship, now, out)
+	s.loadBrief(ctx, userID, ws.ID, route, tasksByID, followUpsByRef, out)
+	out.Decisions = decisionsFromFollowUps(followUpsByRef, out.FollowUps.Health, now)
 	out.Studio = s.loadStudio(userID, relationship.SpecialistSlug, relationship.HQWorkspaceID)
 	out.SpecialistSetup = s.loadSpecialistSetup(ctx, userID, relationship.SpecialistSlug)
 	out.NextCheckIn = nextTodayCheckIn(relationship, now)
@@ -593,74 +610,136 @@ func taskSourceTime(task workspace.Task) time.Time {
 	return task.CreatedAt.UTC()
 }
 
-func (s *TodayService) loadFollowUps(ctx context.Context, userID, workspaceID, route string, now time.Time, out *TodayProjection) map[string]*followup.FollowUp {
-	byID := map[string]*followup.FollowUp{}
+func (s *TodayService) loadFollowUps(ctx context.Context, userID string, relationship *Projection, now time.Time, out *TodayProjection) map[string]groundedFollowUp {
+	byRef := map[string]groundedFollowUp{}
 	if s.followUps == nil {
 		out.FollowUps = TodaySection{Health: todayUnavailable("service_unavailable"), Items: []TodayItem{}}
-		return byID
+		return byRef
 	}
-	all, err := s.followUps.List(ctx, followup.Filter{UserID: strings.TrimSpace(userID), WorkspaceID: workspaceID})
-	if err != nil {
-		out.FollowUps = TodaySection{Health: todayUnavailable("read_failed"), Items: []TodayItem{}}
-		return byID
-	}
-	open := make([]*followup.FollowUp, 0, len(all))
-	for _, item := range all {
-		if item == nil || item.UserID != strings.TrimSpace(userID) || item.WorkspaceID != workspaceID || !item.IsOpen() {
+	cfg := todayFollowUpConfig(relationship)
+	scope := dailybrief.ResolveWorkspaceScope(s.followUpWorkspaces, cfg, userID)
+	ownerScope := dailybrief.ResolveFollowUpOwnerScope(s.followUpWorkspaces, scope, cfg.WorkspaceID, userID)
+	partial := len(ownerScope.Gaps) > 0
+	successfulReads, failedReads := 0, 0
+	accepted := make([]groundedFollowUp, 0)
+	for _, owner := range ownerScope.Owners {
+		rows, err := s.followUps.List(ctx, followup.Filter{
+			UserID: strings.TrimSpace(userID), WorkspaceID: owner.WorkspaceID,
+			Statuses: []followup.Status{followup.StatusActive, followup.StatusReopened},
+		})
+		if err != nil {
+			partial = true
+			failedReads++
 			continue
 		}
-		copyItem := *item
-		byID[item.ID] = &copyItem
-		if item.Status == followup.StatusActive || item.Status == followup.StatusReopened {
-			open = append(open, &copyItem)
+		successfulReads++
+		baseRoute := "/workspaces/" + url.PathEscape(owner.WorkspaceSlug)
+		for _, item := range rows {
+			if item == nil || item.UserID != strings.TrimSpace(userID) || item.WorkspaceID != owner.WorkspaceID ||
+				strings.TrimSpace(item.ID) == "" || item.ID != strings.TrimSpace(item.ID) ||
+				(item.Status != followup.StatusActive && item.Status != followup.StatusReopened) {
+				continue
+			}
+			copyItem := *item
+			ref := dailybrief.SourceRef{
+				WorkspaceID: owner.WorkspaceID, WorkspaceSlug: owner.WorkspaceSlug,
+				EntityType: "follow_up", EntityID: copyItem.ID, Timestamp: copyItem.UpdatedAt,
+			}
+			if _, duplicate := byRef[ref.Key()]; duplicate {
+				continue
+			}
+			grounded := groundedFollowUp{
+				item: &copyItem, ref: ref, route: recordTodayRoute(baseRoute, "follow_up", copyItem.ID),
+			}
+			byRef[ref.Key()] = grounded
+			accepted = append(accepted, grounded)
 		}
 	}
-	sort.SliceStable(open, func(i, j int) bool {
-		leftStale, rightStale := open[i].IsStale(now), open[j].IsStale(now)
+
+	sort.SliceStable(accepted, func(i, j int) bool {
+		left, right := accepted[i], accepted[j]
+		leftStale, rightStale := left.item.IsStale(now), right.item.IsStale(now)
 		if leftStale != rightStale {
 			return leftStale
 		}
-		if (open[i].DueAt == nil) != (open[j].DueAt == nil) {
-			return open[i].DueAt != nil
+		if (left.item.DueAt == nil) != (right.item.DueAt == nil) {
+			return left.item.DueAt != nil
 		}
-		if open[i].DueAt != nil && open[j].DueAt != nil && !open[i].DueAt.Equal(*open[j].DueAt) {
-			return open[i].DueAt.Before(*open[j].DueAt)
+		if left.item.DueAt != nil && right.item.DueAt != nil && !left.item.DueAt.Equal(*right.item.DueAt) {
+			return left.item.DueAt.Before(*right.item.DueAt)
 		}
-		if !open[i].UpdatedAt.Equal(open[j].UpdatedAt) {
-			return open[i].UpdatedAt.Before(open[j].UpdatedAt)
+		if !left.item.UpdatedAt.Equal(right.item.UpdatedAt) {
+			return left.item.UpdatedAt.Before(right.item.UpdatedAt)
 		}
-		return open[i].ID < open[j].ID
+		if left.ref.WorkspaceID != right.ref.WorkspaceID {
+			return left.ref.WorkspaceID < right.ref.WorkspaceID
+		}
+		return left.item.ID < right.item.ID
 	})
-	items := make([]TodayItem, 0, min(len(open), todayFollowUpCap))
+	items := make([]TodayItem, 0, min(len(accepted), todayFollowUpCap))
 	var updated time.Time
-	for _, item := range open {
+	for _, grounded := range accepted {
 		if len(items) >= todayFollowUpCap {
 			break
 		}
-		if item.UpdatedAt.After(updated) {
-			updated = item.UpdatedAt
+		if grounded.item.UpdatedAt.After(updated) {
+			updated = grounded.item.UpdatedAt
 		}
-		items = append(items, followUpTodayItem(item, route))
+		items = append(items, followUpTodayItem(grounded))
 	}
-	out.FollowUps = TodaySection{Health: todayHealthForItems(items, updated), Items: items}
-	return byID
+	health := todayHealthForItems(items, updated)
+	switch {
+	case successfulReads == 0 && (failedReads > 0 || len(ownerScope.Owners) == 0):
+		health = todayUnavailable("read_failed")
+	case partial:
+		health = TodaySourceHealth{Status: TodaySectionPartial, Reason: "some_sources_unavailable", UpdatedAt: updated}
+	}
+	out.FollowUps = TodaySection{Health: health, Items: items}
+	return byRef
 }
 
-func decisionsFromFollowUps(byID map[string]*followup.FollowUp, route string, now time.Time) TodaySection {
-	decisions := make([]*followup.FollowUp, 0)
-	for _, item := range byID {
-		if item.Category == followup.CategoryNeedsDecision && (item.Status == followup.StatusActive || item.Status == followup.StatusReopened) {
-			decisions = append(decisions, item)
+func todayFollowUpConfig(relationship *Projection) dailybrief.Config {
+	cfg := dailybrief.Config{Scope: dailybrief.ScopeSelected}
+	if relationship == nil {
+		return cfg
+	}
+	cfg.WorkspaceID = strings.TrimSpace(relationship.HQWorkspaceID)
+	if relationship.DailyBrief == nil {
+		return cfg
+	}
+	brief := relationship.DailyBrief
+	if brief.Scope == dailybrief.ScopeAll || brief.Scope == dailybrief.ScopeSelected {
+		cfg.Scope = brief.Scope
+	}
+	cfg.SelectedWorkspaceIDs = append([]string(nil), brief.SelectedWorkspaceIDs...)
+	cfg.IncludeFutureWorkspaces = brief.IncludeFutureWorkspaces
+	cfg.UpdatedAt = brief.UpdatedAt
+	return cfg
+}
+
+func decisionsFromFollowUps(byRef map[string]groundedFollowUp, sourceHealth TodaySourceHealth, now time.Time) TodaySection {
+	if sourceHealth.Status == TodaySectionUnavailable {
+		return TodaySection{Health: sourceHealth, Items: []TodayItem{}}
+	}
+	decisions := make([]groundedFollowUp, 0)
+	for _, grounded := range byRef {
+		if grounded.item.Category == followup.CategoryNeedsDecision &&
+			(grounded.item.Status == followup.StatusActive || grounded.item.Status == followup.StatusReopened) {
+			decisions = append(decisions, grounded)
 		}
 	}
 	sort.SliceStable(decisions, func(i, j int) bool {
-		if decisions[i].IsStale(now) != decisions[j].IsStale(now) {
-			return decisions[i].IsStale(now)
+		left, right := decisions[i], decisions[j]
+		if left.item.IsStale(now) != right.item.IsStale(now) {
+			return left.item.IsStale(now)
 		}
-		if !decisions[i].UpdatedAt.Equal(decisions[j].UpdatedAt) {
-			return decisions[i].UpdatedAt.Before(decisions[j].UpdatedAt)
+		if !left.item.UpdatedAt.Equal(right.item.UpdatedAt) {
+			return left.item.UpdatedAt.Before(right.item.UpdatedAt)
 		}
-		return decisions[i].ID < decisions[j].ID
+		if left.ref.WorkspaceID != right.ref.WorkspaceID {
+			return left.ref.WorkspaceID < right.ref.WorkspaceID
+		}
+		return left.item.ID < right.item.ID
 	})
 	items := make([]TodayItem, 0, min(len(decisions), todayDecisionCap))
 	var updated time.Time
@@ -668,24 +747,28 @@ func decisionsFromFollowUps(byID map[string]*followup.FollowUp, route string, no
 		if len(items) >= todayDecisionCap {
 			break
 		}
-		items = append(items, followUpTodayItem(item, route))
-		if item.UpdatedAt.After(updated) {
-			updated = item.UpdatedAt
+		items = append(items, followUpTodayItem(item))
+		if item.item.UpdatedAt.After(updated) {
+			updated = item.item.UpdatedAt
 		}
 	}
-	return TodaySection{Health: todayHealthForItems(items, updated), Items: items}
+	health := todayHealthForItems(items, updated)
+	if sourceHealth.Status == TodaySectionPartial {
+		health = TodaySourceHealth{Status: TodaySectionPartial, Reason: sourceHealth.Reason, UpdatedAt: updated}
+	}
+	return TodaySection{Health: health, Items: items}
 }
 
-func followUpTodayItem(item *followup.FollowUp, route string) TodayItem {
+func followUpTodayItem(grounded groundedFollowUp) TodayItem {
+	item := grounded.item
 	return TodayItem{
 		ID: item.ID, Kind: "follow_up", Title: truncateRunes(item.Title, 200), Detail: truncateRunes(item.Counterparty, 100),
-		State: string(item.Status), Route: recordTodayRoute(route, "follow_up", item.ID),
-		Ref:   dailybrief.SourceRef{WorkspaceID: item.WorkspaceID, EntityType: "follow_up", EntityID: item.ID, Timestamp: item.UpdatedAt},
+		State: string(item.Status), Route: grounded.route, Ref: grounded.ref,
 		DueAt: item.DueAt, SourceAt: item.UpdatedAt,
 	}
 }
 
-func (s *TodayService) loadBrief(ctx context.Context, userID, workspaceID, route string, tasks map[string]workspace.Task, followUps map[string]*followup.FollowUp, out *TodayProjection) {
+func (s *TodayService) loadBrief(ctx context.Context, userID, workspaceID, route string, tasks map[string]workspace.Task, followUps map[string]groundedFollowUp, out *TodayProjection) {
 	out.Brief = TodayBriefProjection{Health: todayUnavailable("service_unavailable"), Items: []TodayItem{}}
 	if s.briefs == nil {
 		return
@@ -751,7 +834,7 @@ func (s *TodayService) loadBrief(ctx context.Context, userID, workspaceID, route
 	}
 }
 
-func groundedTodayItem(title, detail string, ref dailybrief.SourceRef, route string, tasks map[string]workspace.Task, followUps map[string]*followup.FollowUp) (TodayItem, bool) {
+func groundedTodayItem(title, detail string, ref dailybrief.SourceRef, route string, tasks map[string]workspace.Task, followUps map[string]groundedFollowUp) (TodayItem, bool) {
 	switch ref.EntityType {
 	case "task":
 		task, ok := tasks[ref.EntityID]
@@ -760,11 +843,14 @@ func groundedTodayItem(title, detail string, ref dailybrief.SourceRef, route str
 		}
 		return TodayItem{ID: task.ID, Kind: "brief", Title: truncateRunes(title, 200), Detail: truncateRunes(detail, 300), Route: recordTodayRoute(route, "ticket", task.ID), Ref: ref, SourceAt: ref.Timestamp}, true
 	case "follow_up":
-		item, ok := followUps[ref.EntityID]
-		if !ok || ref.WorkspaceID != item.WorkspaceID {
+		grounded, ok := followUps[ref.Key()]
+		if !ok || grounded.item == nil || ref.WorkspaceID != grounded.item.WorkspaceID || ref.EntityID != grounded.item.ID {
 			return TodayItem{}, false
 		}
-		return TodayItem{ID: item.ID, Kind: "brief", Title: truncateRunes(title, 200), Detail: truncateRunes(detail, 300), Route: recordTodayRoute(route, "follow_up", item.ID), Ref: ref, SourceAt: ref.Timestamp}, true
+		return TodayItem{
+			ID: grounded.item.ID, Kind: "brief", Title: truncateRunes(title, 200), Detail: truncateRunes(detail, 300),
+			Route: grounded.route, Ref: grounded.ref, SourceAt: grounded.ref.Timestamp,
+		}, true
 	default:
 		return TodayItem{}, false
 	}
@@ -814,7 +900,7 @@ func todayOverallState(relationship *Projection, out *TodayProjection) string {
 		health = append(health, out.SpecialistSetup.Health)
 	}
 	for _, source := range health {
-		if source.Status == TodaySectionUnavailable {
+		if source.Status == TodaySectionUnavailable || source.Status == TodaySectionPartial {
 			unavailable = true
 		}
 	}
