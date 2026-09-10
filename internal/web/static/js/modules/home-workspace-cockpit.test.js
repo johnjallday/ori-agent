@@ -29,6 +29,8 @@ import {
   formatCount,
   readEconomy,
   economyMapSnapshot,
+  energyBarView,
+  formatTokens,
   isGroupWorkspace,
   flattenWorkspaceTree,
   findWorkspace,
@@ -1719,4 +1721,60 @@ test('the map snapshot carries only what the map draws', () => {
 
 test('a missing economy projects to an empty map snapshot', () => {
   assert.deepEqual(economyMapSnapshot(null), { farms: [], pendingByWorkspace: {} });
+});
+
+// ---------------------------------------------------------------------------
+// Energy (city-economy FR31)
+// ---------------------------------------------------------------------------
+
+test('the energy bar fills against the daily figure', () => {
+  const view = energyBarView({ usedToday: 340000, dailyFigure: 1000000 });
+  assert.equal(view.percent, 34);
+  assert.equal(view.over, false);
+  assert.equal(view.text, '34%');
+  assert.equal(view.label, 'Energy: 340k of 1M tokens used today');
+});
+
+// Exceeding the figure is a state, not a failure: the bar fills and the overage
+// is stated. Nothing pauses (FR31).
+test('going over the figure fills the bar and states the overage', () => {
+  const view = energyBarView({ usedToday: 1250000, dailyFigure: 1000000 });
+  assert.equal(view.percent, 100);
+  assert.equal(view.over, true);
+  assert.equal(view.text, '1.3M · +250k over');
+  assert.match(view.label, /over the 1M figure/);
+});
+
+test('an unset figure reports the raw count rather than an infinite bar', () => {
+  const view = energyBarView({ usedToday: 5000, dailyFigure: 0 });
+  assert.equal(view.percent, 0);
+  assert.equal(view.over, false);
+  assert.equal(view.text, '5k');
+  assert.equal(view.label, 'Energy: 5k tokens used today');
+});
+
+test('a day with no tokens reads as empty, not as missing', () => {
+  const view = energyBarView({ usedToday: 0, dailyFigure: 1000000 });
+  assert.equal(view.percent, 0);
+  assert.equal(view.text, '0%');
+});
+
+test('energy handles a missing payload without dividing by nothing', () => {
+  for (const energy of [null, undefined, {}]) {
+    const view = energyBarView(energy);
+    assert.equal(view.percent, 0);
+    assert.equal(view.over, false);
+  }
+});
+
+test('token counts are formatted the way a person reads them', () => {
+  assert.equal(formatTokens(0), '0');
+  assert.equal(formatTokens(999), '999');
+  assert.equal(formatTokens(1000), '1k');
+  assert.equal(formatTokens(340000), '340k');
+  assert.equal(formatTokens(1000000), '1M');
+  assert.equal(formatTokens(1250000), '1.3M');
+  assert.equal(formatTokens(12500000), '13M');
+  // A negative reading is nonsense, not a negative bar.
+  assert.equal(formatTokens(-5), '0');
 });

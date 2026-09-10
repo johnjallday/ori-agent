@@ -67,6 +67,16 @@ func (b *ServerBuilder) initializeEconomy() {
 		})
 	}
 
+	// The Energy gauge reads the same cost tracker the Usage page does, so the
+	// two can never disagree about today's tokens (FR25). Read through a closure
+	// rather than captured, because the tracker's totals move continuously.
+	if b.costTracker != nil {
+		tracker := b.costTracker
+		b.economyService.SetEnergySource(economy.EnergyFunc(func() int64 {
+			return int64(tracker.GetTodayStats().TotalTokens)
+		}))
+	}
+
 	b.economyHandler = economyhttp.NewHandler(b.economyService)
 
 	// Live earning. Publish already delivers on its own goroutine, so a slow

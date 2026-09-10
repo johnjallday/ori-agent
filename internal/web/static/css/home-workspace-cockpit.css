@@ -203,10 +203,63 @@
   }
 }
 
+/* Energy bar (FR31): 120px of track, filled against the user's daily figure. */
+.cockpit-economy__energy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cockpit-economy__energy-track {
+  display: block;
+  width: 120px;
+  height: 6px;
+  overflow: hidden;
+  border: 1px solid var(--hc-line);
+  background: var(--hc-panel-deep);
+}
+
+.cockpit-economy__energy-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--hc-idle);
+  transition: width 240ms ease-out;
+}
+
+/* Over the figure the bar is full and changes color — a state, not a warning.
+   Nothing pauses; the overage is spelled out in the text beside it. */
+.cockpit-economy__energy[data-over="true"] .cockpit-economy__energy-fill {
+  background: var(--hc-amber);
+}
+
+.cockpit-economy__energy-text {
+  color: var(--hc-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cockpit-economy__energy-fill {
+    transition: none;
+  }
+}
+
 /* On a narrow header the labels are the first thing to go: the accent edge and
    the title attribute still say which number is which. */
 @media (max-width: 900px) {
   .cockpit-economy__chip-label {
+    display: none;
+  }
+}
+
+/* Narrower still: the bar collapses to its percentage label (PRD §6). The
+   number is the part that carries meaning; 120px of track is the part that does
+   not fit. */
+@media (max-width: 1200px) {
+  .cockpit-economy__energy-track {
     display: none;
   }
 }

@@ -468,6 +468,80 @@ func TestOverviewSurvivesAFailedFarmListing(t *testing.T) {
 	}
 }
 
+// Energy reports today's tokens across every provider, exactly as the cost
+// tracker has them — the Usage page and this gauge read the same source, so the
+// two can never disagree (FR25).
+func TestEnergyReportsTodaysTokensFromTheTracker(t *testing.T) {
+	service, _, _ := newService(t)
+	tracker := &fakeEnergy{}
+	service.SetEnergySource(tracker)
+	service.SetSettingsSource(&fakeSettings{dailyEnergy: 500_000})
+
+	tracker.tokens = 0
+	overview, err := service.Overview(context.Background())
+	if err != nil {
+		t.Fatalf("overview: %v", err)
+	}
+	if overview.Energy.UsedToday != 0 {
+		t.Fatalf("used today = %d before any run, want 0", overview.Energy.UsedToday)
+	}
+
+	// A task run lands in the tracker; the next read reflects it.
+	tracker.tokens = 1020
+	overview, err = service.Overview(context.Background())
+	if err != nil {
+		t.Fatalf("overview: %v", err)
+	}
+	if overview.Energy.UsedToday != 1020 {
+		t.Fatalf("used today = %d after a run, want 1020", overview.Energy.UsedToday)
+	}
+	if overview.Energy.DailyFigure != 500_000 {
+		t.Fatalf("daily figure = %d, want the configured 500000", overview.Energy.DailyFigure)
+	}
+}
+
+// Exceeding the figure changes nothing about what the economy will do: it is a
+// gauge, and no earning, pricing, or charging consults it (FR31).
+func TestEnergyOverTheFigureStillEarnsAndPrices(t *testing.T) {
+	ctx := context.Background()
+	service, _, _ := newService(t)
+	service.SetEnergySource(&fakeEnergy{tokens: 9_000_000})
+	service.SetSettingsSource(&fakeSettings{dailyEnergy: 1_000_000})
+
+	service.HandleEvent(messageSent("event-1", "still working"))
+	if got := balancesOf(t, service).Craft; got != CraftPerChatMessage {
+		t.Fatalf("craft = %d over the energy figure, want %d — earning is unaffected",
+			got, CraftPerChatMessage)
+	}
+
+	quote, err := service.Quote(ctx, ScheduleChange{
+		WorkspaceID: "ws1", Schedule: daily(), ScheduleEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("quote: %v", err)
+	}
+	if quote.Action != ActionBuild {
+		t.Fatalf("action = %q over the energy figure, want build — pricing is unaffected",
+			quote.Action)
+	}
+}
+
+// The default figure comes from tuning.go, not from a second copy in config.
+func TestEnergyFallsBackToTheTunedDefault(t *testing.T) {
+	service, _, _ := newService(t)
+	// A settings source that reports zero, the way config does for "never set".
+	service.SetSettingsSource(SettingsFunc{DailyEnergyTokens: func() int64 { return 0 }})
+
+	overview, err := service.Overview(context.Background())
+	if err != nil {
+		t.Fatalf("overview: %v", err)
+	}
+	if overview.Energy.DailyFigure != DefaultDailyEnergyTokens {
+		t.Fatalf("daily figure = %d, want the tuned default %d",
+			overview.Energy.DailyFigure, DefaultDailyEnergyTokens)
+	}
+}
+
 // A nil service is the "economy switched off" state at every call site.
 func TestNilServiceDoesNothing(t *testing.T) {
 	var service *Service

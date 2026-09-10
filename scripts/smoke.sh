@@ -9,11 +9,11 @@
 # analyzer, so it prompts no matter how many rules exist. A script is one
 # stable token. Put the shell in here, not in the tool call.
 #
-# This worktree's feature: Agents Page UX (tasks/prd-agents-page-ux.md).
+# This worktree's feature: City Economy (tasks/prd-city-economy.md).
 # Earlier features' checks are kept, because the point of one stable name is
-# that it accumulates: Workspace Planning Workflow
-# (tasks/prd-workspace-planning-policy.md) and the domain-specialist onboarding
-# checks both still live below.
+# that it accumulates: Agents Page UX (tasks/prd-agents-page-ux.md), Workspace
+# Planning Workflow (tasks/prd-workspace-planning-policy.md) and the
+# domain-specialist onboarding checks all still live below.
 #
 # Usage:
 #   ./scripts/smoke.sh serve 8941 agentsux            # isolated server + sandbox
@@ -1690,8 +1690,145 @@ smoke_agentmap() {
   echo "PASS agentmap"
 }
 
+# --------------------------------------------------------------------------
+# City Economy (tasks/prd-city-economy.md)
+# --------------------------------------------------------------------------
+
+# economy_state prints the whole economy in one line, which is what every check
+# below wants to see between steps.
+economy_state() {
+  printf '  economy: '
+  curl -s "$BASE_URL/api/economy"
+  printf '\n'
+}
+
+# economy_field reads one nested field from a JSON blob on stdin without needing
+# jq, which is not guaranteed on a fresh machine.
+economy_field() {
+  python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["'"$1"'"]["'"$2"'"])'
+}
+
+# smoke_economy_seed walks the earning half of the loop against a running
+# server: a chat message earns Craft, the same message again earns nothing, a
+# hand-completed task earns more, and a recurring task appears as a Farm.
+smoke_economy_seed() {
+  echo "--- City Economy: earning ---"
+  economy_state
+
+  echo "chat message (earns Craft)"
+  curl -s -o /dev/null -X POST "$BASE_URL/api/chat" \
+    -H 'Content-Type: application/json' \
+    -d '{"question":"seed the economy demo","agent_name":""}'
+  economy_state
+
+  echo "the same message again (duplicate window: earns nothing)"
+  curl -s -o /dev/null -X POST "$BASE_URL/api/chat" \
+    -H 'Content-Type: application/json' \
+    -d '{"question":"seed the economy demo","agent_name":""}'
+  economy_state
+
+  local workspace_id task_id farm_id
+  workspace_id="$(curl -s -X POST "$BASE_URL/api/workspaces" \
+    -H 'Content-Type: application/json' \
+    -d '{"name":"Economy Demo","description":"city-economy checkpoint"}' \
+    | economy_field folder id)"
+  echo "workspace_id: $workspace_id"
+
+  echo "hand-run task, completed (earns Craft)"
+  task_id="$(curl -s -X POST "$BASE_URL/api/orchestration/tasks" \
+    -H 'Content-Type: application/json' \
+    -d "{\"workspace_id\":\"$workspace_id\",\"description\":\"A hand-run task\",\"priority\":2}" \
+    | economy_field task id)"
+  curl -s -o /dev/null -X POST "$BASE_URL/api/orchestration/tasks/$task_id/complete" \
+    -H 'Content-Type: application/json' -d '{"result":"done by hand"}'
+  economy_state
+
+  echo "recurring task (a Farm; costs Craft, so this 409s on an empty city)"
+  farm_id="$(curl -s -X POST "$BASE_URL/api/orchestration/tasks" \
+    -H 'Content-Type: application/json' \
+    -d "{\"workspace_id\":\"$workspace_id\",\"description\":\"Daily inbox triage\",\"to\":\"Claude Code\",\"schedule\":{\"type\":\"daily\",\"time\":\"09:00\"},\"schedule_enabled\":true,\"schedule_name\":\"Inbox triage\"}" \
+    | python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d.get("task",{}).get("id","(refused: "+str(d.get("error"))+")"))')"
+  echo "farm: $farm_id"
+  economy_state
+
+  echo "workspace_id=$workspace_id"
+  echo "task_id=$task_id"
+  echo "PASS economy seed"
+}
+
+# smoke_economy_earn earns Craft the honest way, by sending distinct chat
+# messages. The hourly cap still applies, so this cannot mint more than the cap
+# allows — which is the point.
+smoke_economy_earn() {
+  local count="${3:-20}" i
+  echo "--- City Economy: earning $count Craft by chatting ---"
+  for i in $(seq 1 "$count"); do
+    curl -s -o /dev/null -X POST "$BASE_URL/api/chat" \
+      -H 'Content-Type: application/json' \
+      -d "{\"question\":\"economy demo message number $i\",\"agent_name\":\"\"}"
+  done
+  economy_state
+  echo "PASS economy earn"
+}
+
+# smoke_economy_quote prices a cadence change without charging it, which is the
+# same call the task editor's price line makes.
+smoke_economy_quote() {
+  local workspace_id="${3:-}" task_id="${4:-}"
+  echo "--- City Economy: quote ---"
+  echo "build (a new task becoming a Farm):"
+  curl -s -X POST "$BASE_URL/api/economy/quote" \
+    -H 'Content-Type: application/json' \
+    -d '{"workspace_id":"","task_id":"","schedule":{"type":"daily","time":"09:00"},"schedule_enabled":true}'
+  printf '\n'
+  if [ -n "$task_id" ]; then
+    echo "upgrade (this Farm to hourly):"
+    curl -s -X POST "$BASE_URL/api/economy/quote" \
+      -H 'Content-Type: application/json' \
+      -d "{\"workspace_id\":\"$workspace_id\",\"task_id\":\"$task_id\",\"schedule\":{\"type\":\"interval\",\"interval_minutes\":60},\"schedule_enabled\":true}"
+    printf '\n'
+  fi
+  echo "PASS economy quote"
+}
+
+# smoke_economy_pending seeds pending-harvest rows straight into a DEMO sandbox
+# database.
+#
+# A genuine pending Harvest needs a Farm run to finish, which needs a working
+# LLM provider. When the demo machine has none (no key, or an exhausted quota)
+# the Home surface still has to be driven in a real browser, so this writes the
+# rows a finished run would have written. Everything downstream — the pile, the
+# popover, banking — is then the real path.
+#
+# It refuses anything that is not a throwaway sandbox database.
+smoke_economy_pending() {
+  local db="${3:-}" workspace_id="${4:-}" task_id="${5:-}" count="${6:-3}" batch i
+  [ -n "$db" ] && [ -n "$workspace_id" ] && [ -n "$task_id" ] ||
+    fail "usage: $0 economypending <base-url> <sandbox-db> <workspace-id> <task-id> [count]"
+  case "$db" in
+  *ori-demo.* | *smoke* | *economy-smoke*) ;;
+  *) fail "refusing: $db is not a demo sandbox database" ;;
+  esac
+
+  # Run keys carry the seeding time so a second seeding adds NEW rows rather
+  # than silently colliding with rows the previous one already banked.
+  batch="$(date -u +%s)"
+  for i in $(seq 1 "$count"); do
+    sqlite3 "$db" "INSERT OR IGNORE INTO economy_harvest_pending
+      (task_id, workspace_id, run_key, produced_at, harvested_at)
+      VALUES ('$task_id', '$workspace_id', 'seeded-$batch-$i', '$(date -u +%Y-%m-%dT%H:%M:%SZ)', NULL);"
+  done
+  echo "seeded $count pending runs for task $task_id"
+  economy_state
+  echo "PASS economy pending"
+}
+
 case "${1:-}" in
 serve) serve_isolated "${2:-8931}" "${3:-default}" ;;
+economyseed) smoke_economy_seed ;;
+economyearn) smoke_economy_earn "$@" ;;
+economyquote) smoke_economy_quote "$@" ;;
+economypending) smoke_economy_pending "$@" ;;
 agentseed) smoke_agentseed "${3:-default}" ;;
 agentmap) smoke_agentmap ;;
 specialist) smoke_specialist ;;
@@ -1714,6 +1851,10 @@ execution) smoke_execution "${3:-}" ;;
   echo "  $0 agentseed <base-url> [sandbox-name]   # fill a sandbox with a demo agent roster" >&2
   echo "  $0 agentmap <base-url>                   # Agent Map layout API checks" >&2
   echo "  $0 specialist <base-url>                 # domain-specialist onboarding API checks" >&2
+  echo "  $0 economyseed <base-url>                # City Economy: walk the earning half of the loop" >&2
+  echo "  $0 economyearn <base-url> [count]        # City Economy: earn Craft by chatting" >&2
+  echo "  $0 economyquote <base-url> [ws] [task]   # City Economy: price a cadence change" >&2
+  echo "  $0 economypending <base-url> <db> <ws> <task> [n]  # City Economy: seed pending Harvest (demo sandboxes only)" >&2
   echo "  $0 seed <base-url>                       # seed plans and print URLs to review" >&2
   echo "  $0 {plans|drafting|review|materialize|execution|slot|reconcile|policy|boundary|hardening|packaged} <base-url> <workspace-id>" >&2
   exit 2

@@ -218,6 +218,58 @@ func (h *Handler) SessionSettingsHandler(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+// EconomySettingsHandler reads and writes the City Economy's two settings
+// (city-economy FR43): whether every cost is waived, and the daily token figure
+// the Home Energy bar fills against.
+//
+// The figure is reported raw — zero means "never set" — because the default
+// belongs to internal/economy/tuning.go, which is the one file the feature's
+// numbers live in. The client renders the default when it sees zero.
+func (h *Handler) EconomySettingsHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		creativeMode, dailyEnergyTokens := h.configManager.GetEconomySettings()
+		orihttp.WriteJSON(w, map[string]any{
+			"economy_creative_mode":       creativeMode,
+			"economy_daily_energy_tokens": dailyEnergyTokens,
+		})
+
+	case http.MethodPost:
+		var req struct {
+			EconomyCreativeMode      *bool  `json:"economy_creative_mode"`
+			EconomyDailyEnergyTokens *int64 `json:"economy_daily_energy_tokens"`
+		}
+		if !orihttp.ParseJSONBody(w, r, &req) {
+			return
+		}
+
+		// Partial updates: a request that names one setting must not reset the
+		// other, which is how every sibling settings endpoint here behaves.
+		creativeMode, dailyEnergyTokens := h.configManager.GetEconomySettings()
+		if req.EconomyCreativeMode != nil {
+			creativeMode = *req.EconomyCreativeMode
+		}
+		if req.EconomyDailyEnergyTokens != nil {
+			dailyEnergyTokens = *req.EconomyDailyEnergyTokens
+		}
+
+		h.configManager.SetEconomySettings(creativeMode, dailyEnergyTokens)
+		if err := h.configManager.Save(); err != nil {
+			orihttp.InternalError(w, err.Error())
+			return
+		}
+
+		orihttp.WriteJSON(w, map[string]any{
+			"success":                     true,
+			"economy_creative_mode":       creativeMode,
+			"economy_daily_energy_tokens": dailyEnergyTokens,
+		})
+
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
 // WorkspaceRootResponse describes the configured and effective workspace directory.
 type WorkspaceRootResponse struct {
 	WorkspaceRoot          string `json:"workspace_root,omitempty"`

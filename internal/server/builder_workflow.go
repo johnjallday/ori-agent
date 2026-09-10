@@ -479,6 +479,14 @@ func (b *ServerBuilder) initializeTaskExecution() {
 	b.taskHandler.SetEventBus(b.eventBus)
 	b.taskHandler.SetMCPRegistry(b.mcpRegistry)
 	b.taskHandler.SetUtilityToolProvider(b.utilityToolRegistry)
+	// Task runs record their tokens like every other LLM call (city-economy
+	// FR29). Before this, a scheduled run was invisible to the Usage page: only
+	// chat and CLI agents ever reached the cost tracker. Guarded rather than
+	// passed blindly, because a nil concrete pointer inside a non-nil interface
+	// would defeat the recorder's own nil check.
+	if b.costTracker != nil {
+		b.taskHandler.SetUsageRecorder(b.costTracker)
+	}
 	if b.configManager != nil {
 		if secs := b.configManager.GetNativeMCPExecTimeoutSeconds(); secs > 0 {
 			b.taskHandler.SetNativeMCPExecTimeout(time.Duration(secs) * time.Second)

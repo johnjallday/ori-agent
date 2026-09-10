@@ -119,6 +119,22 @@
               <span class="cockpit-economy__chip-label">Harvest</span>
               <span class="cockpit-economy__chip-value" data-economy-harvest>0</span>
             </span>
+            <!--
+              Energy (FR31): tokens this machine pushed today, against a figure
+              the user sets in Settings. A gauge, never a limit — nothing in the
+              app pauses, blocks, or warns when it is exceeded; the bar simply
+              fills and the overage is stated as text.
+
+              role="img" with a spoken label rather than a progressbar role: it
+              reports a fact, and nothing here can be operated.
+            -->
+            <span class="cockpit-economy__energy" data-economy-energy role="img"
+                  aria-label="Energy used today" title="Tokens used today">
+              <span class="cockpit-economy__energy-track">
+                <span class="cockpit-economy__energy-fill" data-economy-energy-fill></span>
+              </span>
+              <span class="cockpit-economy__energy-text" data-economy-energy-text></span>
+            </span>
           </div>
           <!-- Mutually exclusive Map/Tree toggle. aria-pressed carries the
                active view; the visible labels carry it without color (FR24). -->

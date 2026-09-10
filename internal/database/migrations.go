@@ -3049,14 +3049,16 @@ func (db *DB) migration057Economy(ctx context.Context) error {
 			created_at TEXT NOT NULL,
 			UNIQUE(resource, ref_kind, ref_id)
 		)`,
-		// Balances are read on every Home load and before every priced save, so
-		// the sum-by-resource path gets its own index.
-		`CREATE INDEX IF NOT EXISTS idx_economy_ledger_resource
-			ON economy_ledger(resource)`,
-		// The build-charged-once check (FR17) and the grandfathering pass look an
-		// entry up by reason.
-		`CREATE INDEX IF NOT EXISTS idx_economy_ledger_reason
-			ON economy_ledger(reason)`,
+		// economy_ledger deliberately carries NO extra indexes.
+		//
+		// The UNIQUE(resource, ref_kind, ref_id) constraint above already creates
+		// an index that serves the build-charged-once lookup, and summing a few
+		// thousand rows by resource does not need one. Two speculative indexes
+		// were tried here and removed: reset inspection refuses to read a schema
+		// with more than 256 objects (internal/database/reset_inspection.go), the
+		// live schema now sits at 254 of those, and spending headroom on indexes
+		// nothing measured is how the next migration ends up breaking settings
+		// reset instead of merely being slower.
 		`CREATE TABLE IF NOT EXISTS economy_harvest_pending (
 			task_id TEXT NOT NULL,
 			workspace_id TEXT NOT NULL,

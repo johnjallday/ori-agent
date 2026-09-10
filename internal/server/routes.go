@@ -321,6 +321,7 @@ func registerSettingsRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	mux.HandleFunc("/api/settings", s.Handlers.Settings.SettingsHandler)
 	mux.HandleFunc("/api/settings/session", s.Handlers.Settings.SessionSettingsHandler)
+	mux.HandleFunc("/api/settings/economy", s.Handlers.Settings.EconomySettingsHandler)
 	mux.HandleFunc("/api/settings/workspace-root", s.Handlers.Settings.WorkspaceRootSettingsHandler)
 	mux.HandleFunc("/api/settings/vault-root", s.Handlers.Settings.VaultRootSettingsHandler)
 	mux.HandleFunc("/api/settings/templates-root", s.Handlers.Settings.TemplatesRootSettingsHandler)

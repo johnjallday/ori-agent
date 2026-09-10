@@ -44,6 +44,28 @@ export const README_SCENES = {
       entry_agent_name: 'Theo',
     },
   ],
+  // City Economy, as Home's HUD and map badges show it. Fictional like every
+  // other scene here: a city partway through its first week, with one Farm
+  // producing and a pile waiting to be collected, so the README's Home shot
+  // shows the loop rather than a row of zeros.
+  economy: {
+    craft: 42,
+    harvest: 18,
+    creative_mode: false,
+    energy: { used_today: 340000, daily_figure: 1000000 },
+    farms: [
+      {
+        workspace_id: 'ws-product-launch',
+        task_id: 'task-launch-digest',
+        name: 'Launch readiness digest',
+        tier: 2,
+        tier_name: 'Daily',
+        pending_harvest: 3,
+        last_summary: 'Two launch tasks still need a named owner.',
+      },
+    ],
+    pending_by_workspace: { 'ws-product-launch': 3 },
+  },
   action_center: {
     items: [
       {
@@ -172,5 +194,19 @@ export function assertReadmeSceneContract() {
   }
   if (!README_SCENES.workspace_command.agents.length || !README_SCENES.workspace_command.tasks.length) {
     throw new Error('Workspace Command fixture requires agents and tasks.');
+  }
+  // The economy scene has to tell the loop's story, not just render: a Farm on
+  // a workspace that exists, and a pile that matches that Farm's pending count.
+  // A mismatch here would put a badge on one tile and a pile on another.
+  for (const farm of README_SCENES.economy.farms) {
+    if (!requiredWorkspaceIDs.has(farm.workspace_id)) {
+      throw new Error(`Economy fixture references an unknown workspace: ${farm.workspace_id}.`);
+    }
+    const pending = README_SCENES.economy.pending_by_workspace[farm.workspace_id];
+    if (pending !== farm.pending_harvest) {
+      throw new Error(
+        `Economy fixture pile (${pending}) disagrees with the Farm's pending count (${farm.pending_harvest}).`
+      );
+    }
   }
 }

@@ -1117,6 +1117,77 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   }
 })();
 
+// City Economy Settings (city-economy FR43)
+//
+// Both settings save on change rather than behind a Save button: each is a
+// single value with an immediate, visible effect — creative mode changes the
+// next price line, the figure changes the Energy bar — and a Save button for
+// one checkbox is a step the user has to remember for no benefit.
+(function () {
+  const creativeModeToggle = document.getElementById('economyCreativeModeToggle');
+  const dailyEnergyInput = document.getElementById('economyDailyEnergyInput');
+  if (!creativeModeToggle && !dailyEnergyInput) return;
+
+  // Mirrors economy.DefaultDailyEnergyTokens. The server reports zero for
+  // "never set" so the default lives in one place on the Go side; this is only
+  // what the empty field shows as a placeholder value.
+  const DEFAULT_DAILY_ENERGY_TOKENS = 1000000;
+
+  function notifyEconomy(message, type) {
+    if (typeof notify === 'function') notify(message, type);
+  }
+
+  async function loadEconomySettings() {
+    try {
+      const response = await fetch('/api/settings/economy');
+      if (!response.ok) return;
+      const settings = await response.json();
+      if (creativeModeToggle) {
+        creativeModeToggle.checked = settings.economy_creative_mode === true;
+      }
+      if (dailyEnergyInput) {
+        const figure = Number(settings.economy_daily_energy_tokens || 0);
+        dailyEnergyInput.value = figure > 0 ? figure : DEFAULT_DAILY_ENERGY_TOKENS;
+      }
+    } catch (error) {
+      console.error('Error loading economy settings:', error);
+    }
+  }
+
+  async function saveEconomySettings(patch, successMessage) {
+    try {
+      const response = await fetch('/api/settings/economy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch)
+      });
+      if (!response.ok) {
+        notifyEconomy('Failed to save economy settings: ' + (await response.text()), 'error');
+        return;
+      }
+      notifyEconomy(successMessage, 'success');
+    } catch (error) {
+      console.error('Error saving economy settings:', error);
+      notifyEconomy('Error saving economy settings: ' + error.message, 'error');
+    }
+  }
+
+  creativeModeToggle?.addEventListener('change', () => {
+    void saveEconomySettings(
+      { economy_creative_mode: creativeModeToggle.checked },
+      creativeModeToggle.checked ? 'Creative mode on — costs are off' : 'Creative mode off'
+    );
+  });
+
+  dailyEnergyInput?.addEventListener('change', () => {
+    const figure = Math.max(0, Math.floor(Number(dailyEnergyInput.value) || 0));
+    dailyEnergyInput.value = figure || DEFAULT_DAILY_ENERGY_TOKENS;
+    void saveEconomySettings({ economy_daily_energy_tokens: figure }, 'Daily energy figure saved');
+  });
+
+  loadEconomySettings();
+})();
+
 // System Model Settings
 (function () {
   const providerSelect = document.getElementById('systemModelProvider');

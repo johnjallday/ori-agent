@@ -98,6 +98,64 @@ export function readEconomy(payload) {
 }
 
 /**
+ * How the Energy bar should read (city-economy FR31).
+ *
+ * Returns `{ percent, over, text, label }`. It is a gauge and never a limit:
+ * nothing here can block, and going over produces a full bar plus an explicit
+ * overage rather than a warning.
+ *
+ * A figure of zero means the user has not set one, which would make every
+ * reading infinite — so the bar reports empty and says only the raw count.
+ */
+export function energyBarView(energy) {
+  const used = Math.max(0, Number((energy && energy.usedToday) || 0));
+  const figure = Math.max(0, Number((energy && energy.dailyFigure) || 0));
+
+  if (!figure) {
+    return {
+      percent: 0,
+      over: false,
+      text: formatTokens(used),
+      label: `Energy: ${formatTokens(used)} tokens used today`
+    };
+  }
+
+  const ratio = used / figure;
+  const percent = Math.min(100, Math.round(ratio * 100));
+  if (used > figure) {
+    const over = used - figure;
+    return {
+      percent: 100,
+      over: true,
+      text: `${formatTokens(used)} · +${formatTokens(over)} over`,
+      label:
+        `Energy: ${formatTokens(used)} tokens used today, ` +
+        `${formatTokens(over)} over the ${formatTokens(figure)} figure`
+    };
+  }
+  return {
+    percent,
+    over: false,
+    text: `${percent}%`,
+    label: `Energy: ${formatTokens(used)} of ${formatTokens(figure)} tokens used today`
+  };
+}
+
+/**
+ * Token counts as a person reads them: 340k, not 340,000, and 1.2M above a
+ * million. The Energy bar is glanced at, not audited.
+ */
+export function formatTokens(value) {
+  const tokens = Math.max(0, Math.round(Number(value) || 0));
+  if (tokens >= 1_000_000) {
+    const millions = tokens / 1_000_000;
+    return `${millions >= 10 ? Math.round(millions) : Math.round(millions * 10) / 10}M`;
+  }
+  if (tokens >= 1000) return `${Math.round(tokens / 1000)}k`;
+  return String(tokens);
+}
+
+/**
  * The snapshot handed to OriWorkspaceMap.mount (FR35).
  *
  * Deliberately a projection rather than the whole economy: the Map draws badges
@@ -1542,7 +1600,10 @@ import {
     // with the feature switched off never shows it (FR34, FR47).
     economy: document.getElementById('cockpitEconomy'),
     economyCraft: document.querySelector('[data-economy-craft]'),
-    economyHarvest: document.querySelector('[data-economy-harvest]')
+    economyHarvest: document.querySelector('[data-economy-harvest]'),
+    economyEnergy: document.querySelector('[data-economy-energy]'),
+    economyEnergyFill: document.querySelector('[data-economy-energy-fill]'),
+    economyEnergyText: document.querySelector('[data-economy-energy-text]')
   };
 
   // Dashboard components render inside #main-content, whose z-index creates a
@@ -2840,12 +2901,25 @@ import {
     const first = lastEconomyChips === null;
     if (els.economyCraft) els.economyCraft.textContent = formatCount(next.craft);
     if (els.economyHarvest) els.economyHarvest.textContent = formatCount(next.harvest);
+    renderEnergyBar(energyBarView(state.economy.energy));
     els.economy.hidden = false;
     if (!first) {
       if (next.craft > lastEconomyChips.craft) bumpEconomyChip('craft');
       if (next.harvest > lastEconomyChips.harvest) bumpEconomyChip('harvest');
     }
     lastEconomyChips = next;
+  }
+
+  /** Paint the Energy gauge. Never blocks or warns — it only reports (FR31). */
+  function renderEnergyBar(view) {
+    if (els.economyEnergyFill) els.economyEnergyFill.style.width = `${view.percent}%`;
+    if (els.economyEnergyText) els.economyEnergyText.textContent = view.text;
+    if (els.economyEnergy) {
+      els.economyEnergy.dataset.over = view.over ? 'true' : 'false';
+      // The spoken label carries the whole reading, because the visual is a bar
+      // and a percentage that mean nothing read aloud on their own.
+      els.economyEnergy.setAttribute('aria-label', view.label);
+    }
   }
 
   function bumpEconomyChip(resource) {

@@ -1319,6 +1319,31 @@ func (m *Manager) SetSessionCleanupSettings(enabled bool, days int, maxCount int
 	m.settings.SessionMaxCount = maxCount
 }
 
+// GetEconomySettings returns the City Economy's two settings: whether every
+// cost is waived, and the daily token figure the Energy bar fills against.
+//
+// A figure of zero means "never set". The default is deliberately NOT applied
+// here: every tunable number in the feature lives in internal/economy/tuning.go
+// (city-economy FR4), and a second copy in this package would be the one that
+// silently went stale.
+func (m *Manager) GetEconomySettings() (creativeMode bool, dailyEnergyTokens int64) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.settings.EconomyCreativeMode, m.settings.EconomyDailyEnergyTokens
+}
+
+// SetEconomySettings stores both economy settings. A non-positive figure is
+// stored as zero, which reads back as the default.
+func (m *Manager) SetEconomySettings(creativeMode bool, dailyEnergyTokens int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.settings.EconomyCreativeMode = creativeMode
+	if dailyEnergyTokens < 0 {
+		dailyEnergyTokens = 0
+	}
+	m.settings.EconomyDailyEnergyTokens = dailyEnergyTokens
+}
+
 // GetSystemModel returns the configured system model provider and model
 func (m *Manager) GetSystemModel() (provider, model string) {
 	m.mu.RLock()
