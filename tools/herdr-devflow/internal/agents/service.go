@@ -893,6 +893,22 @@ func planningReferenceLines(feature model.Feature) []string {
 	return lines
 }
 
+// implementationReferenceLines points both entry and continuation at the same
+// canonical dependency preflight. Companion readiness is assessed by the agent
+// from the full plan and current evidence, never inferred from checklist prose
+// or promoted into cross-repository write authority by the prompt renderer.
+func implementationReferenceLines(feature model.Feature) []string {
+	skillPath := filepath.Join(feature.Path, ".agents", "skills", "task-planning", "SKILL.md")
+	workflow := "Execution workflow: " + skillPath + " (implementation dependency preflight)"
+	if info, err := os.Stat(skillPath); err != nil || !info.Mode().IsRegular() {
+		workflow = "Execution workflow unavailable: " + skillPath + "; resolve repository guidance before editing."
+	}
+	return []string{
+		workflow,
+		"Before editing, read the full planning artifacts, including Execution Topology and Companion Dependencies when present; the next-item preview may be truncated.",
+	}
+}
+
 func BootstrapPrompt(feature model.Feature, role string) string {
 	lines := []string{
 		"You are the primary " + role + " for Ori feature " + feature.Name + ".",
@@ -900,8 +916,9 @@ func BootstrapPrompt(feature model.Feature, role string) string {
 		agentsInstructionFor(feature),
 	}
 	lines = append(lines, planningReferenceLines(feature)...)
+	lines = append(lines, implementationReferenceLines(feature)...)
 	lines = append(lines,
-		"Begin working on that task. As each sub-task is completed, update the checklist from [ ] to [x].",
+		"After the dependency preflight, begin the next safe in-scope task. As each sub-task is completed, update the checklist from [ ] to [x].",
 		"Do not create or remove Git worktrees. When the feature is ready, use the existing wt pr workflow; after merge, use wt done "+feature.Name+".",
 	)
 	return strings.Join(lines, "\n")
@@ -915,11 +932,11 @@ func ContinuationPrompt(feature model.Feature, role string) string {
 		"This is a scheduled continuation for the managed " + role + " role on Ori feature " + feature.Name + ".",
 		"Work only in this Git worktree: " + feature.Path,
 		agentsInstructionFor(feature),
-		"Re-read the planning artifacts before making changes.",
 	}
 	lines = append(lines, planningReferenceLines(feature)...)
+	lines = append(lines, implementationReferenceLines(feature)...)
 	lines = append(lines,
-		"Continue safely from that task. Update the checklist from [ ] to [x] only after completing each sub-task.",
+		"After the dependency preflight, continue with the next safe in-scope task. Update the checklist from [ ] to [x] only after completing each sub-task.",
 		"Do not create or remove Git worktrees. Use the existing wt pr and wt done "+feature.Name+" lifecycle when the feature is ready.",
 	)
 	return strings.Join(lines, "\n")
