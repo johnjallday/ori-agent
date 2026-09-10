@@ -116,7 +116,11 @@ test('Today section caps records and only preserves server-owned internal routes
     'https://evil.example',
     '//evil.example',
     'javascript:alert(1)',
-    'workspaces/x'
+    'workspaces/x',
+    '/workspaces/../settings',
+    '/workspaces/%2e%2e/settings',
+    '/workspaces/email-ops\\settings',
+    '/workspaces/%zz'
   ]) {
     assert.equal(safeTodayRoute(route), false, route);
   }
