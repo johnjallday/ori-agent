@@ -2572,7 +2572,9 @@ func (db *DB) migration041WorkspacePlanReconciliations(ctx context.Context) erro
 // migration032FollowUps creates the dedicated structured follow-up domain
 // (contract §2): personal commitments/dependencies with their own lifecycle and
 // source-based deduplication — deliberately NOT reusing Action Center
-// opportunities (which are title-deduped mission findings).
+// opportunities (which are title-deduped mission findings). Despite the
+// historical table name, workspace_id is the row's canonical operational owner;
+// Personal HQ and authorized specialist surfaces may only project that row.
 func (db *DB) migration032FollowUps(ctx context.Context) error {
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS personal_hq_followup (

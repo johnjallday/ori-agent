@@ -99,7 +99,7 @@ func ComputeNeedsAttention(snap Snapshot) []AttentionItem {
 		if followUp.Stale {
 			items = append(items, AttentionItem{
 				Ref: followUp.Ref, Title: followUp.Title,
-				WorkspaceName: "Personal HQ", Reason: "follow_up_stale",
+				WorkspaceName: followUpWorkspaceName(followUp), Reason: "follow_up_stale",
 			})
 		}
 	}
@@ -174,7 +174,7 @@ func ComputeTodaysPlan(snap Snapshot, now time.Time) []PlanItem {
 		if followUp.DueAt != nil && !followUp.DueAt.After(now.Add(24*time.Hour)) {
 			dueSoon = append(dueSoon, PlanItem{
 				Ref: followUp.Ref, Title: followUp.Title,
-				WorkspaceName: "Personal HQ", Reason: "follow_up_due",
+				WorkspaceName: followUpWorkspaceName(followUp), Reason: "follow_up_due",
 			})
 		}
 	}
@@ -222,7 +222,7 @@ func ComputeSinceLastBrief(snap Snapshot, since time.Time) []ChangeItem {
 	for _, followUp := range snap.FollowUps {
 		if followUp.Ref.Timestamp.After(since) {
 			items = append(items, ChangeItem{
-				Ref: followUp.Ref, Title: followUp.Title, WorkspaceName: "Personal HQ",
+				Ref: followUp.Ref, Title: followUp.Title, WorkspaceName: followUpWorkspaceName(followUp),
 			})
 		}
 	}
@@ -244,6 +244,14 @@ type ResumeItem struct {
 // ComputeResumeCandidates returns up to limit recent sessions across all
 // snapshot workspaces, most recently updated first. limit<=0 defaults to
 // defaultResumeLimit.
+func followUpWorkspaceName(item FollowUpSnapshot) string {
+	if name := strings.TrimSpace(item.OwnerName); name != "" {
+		return name
+	}
+	// Compatibility for snapshots produced before owner labels were carried.
+	return "Personal HQ"
+}
+
 func ComputeResumeCandidates(snap Snapshot, limit int) []ResumeItem {
 	if limit <= 0 {
 		limit = defaultResumeLimit

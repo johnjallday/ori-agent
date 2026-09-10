@@ -75,6 +75,43 @@ test('hrefForRef routes tasks to their deep-link page and everything else to the
   );
 });
 
+test('hrefForRef routes follow-ups to the exact record in their owning workspace', () => {
+  assert.equal(
+    hrefForRef({
+      workspace_id: 'email-workspace-id',
+      workspace_slug: 'email-ops',
+      entity_type: 'follow_up',
+      entity_id: 'follow-up_1'
+    }),
+    '/workspaces/email-ops?follow_up=follow-up_1'
+  );
+  for (const ref of [
+    { workspace_slug: 'email-ops', entity_type: 'follow_up', entity_id: 'follow-1' },
+    { workspace_id: 'email', entity_type: 'follow_up', entity_id: 'follow-1' },
+    {
+      workspace_id: 'email',
+      workspace_slug: '../email',
+      entity_type: 'follow_up',
+      entity_id: 'follow-1'
+    },
+    {
+      workspace_id: 'email',
+      workspace_slug: 'email ops',
+      entity_type: 'follow_up',
+      entity_id: 'follow-1'
+    },
+    { workspace_id: 'email', workspace_slug: 'email-ops', entity_type: 'follow_up' },
+    {
+      workspace_id: 'email',
+      workspace_slug: 'email-ops',
+      entity_type: 'follow_up',
+      entity_id: '../follow'
+    }
+  ]) {
+    assert.equal(hrefForRef(ref), '#', JSON.stringify(ref));
+  }
+});
+
 test('hrefForRef falls back to # for a ref with no workspace', () => {
   assert.equal(hrefForRef(null), '#');
   assert.equal(hrefForRef({}), '#');

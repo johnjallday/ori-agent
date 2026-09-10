@@ -17,6 +17,18 @@ export function managementView(items) {
   return { show: views.length > 0, count: views.length, items: views };
 }
 
+// followUpIDFromSearch accepts one exact, bounded record identity. Duplicate,
+// empty, traversal-shaped, or otherwise malformed query values are inert.
+export function followUpIDFromSearch(search) {
+  try {
+    const values = new URLSearchParams(String(search || '')).getAll('follow_up');
+    if (values.length !== 1 || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(values[0])) return '';
+    return values[0];
+  } catch (_) {
+    return '';
+  }
+}
+
 // followUpActionFor returns the {url, label} for a follow-up card button.
 export function followUpActionFor(kind) {
   switch (kind) {
@@ -81,8 +93,22 @@ export function renderManagementCard(doc, view, act) {
   return card;
 }
 
+// focusManagementCard marks and focuses one exact, already-rendered owner-local
+// card. It never chooses a fallback card and performs no follow-up mutation.
+export function focusManagementCard(card, title = '') {
+  if (!card) return false;
+  card.className = `${card.className} is-deep-linked`.trim();
+  card.tabIndex = -1;
+  if (typeof card.setAttribute === 'function') {
+    card.setAttribute('aria-label', `Selected follow-up: ${String(title || '').trim()}`);
+  }
+  if (typeof card.scrollIntoView === 'function') card.scrollIntoView({ block: 'center' });
+  if (typeof card.focus === 'function') card.focus({ preventScroll: true });
+  return true;
+}
+
 // renderManagementPanel populates the mount with a header + cards, or hides it.
-export function renderManagementPanel(doc, mount, view, act) {
+export function renderManagementPanel(doc, mount, view, act, focusID = '') {
   if (!mount) return;
   if (!view.show) {
     mount.hidden = true;
@@ -103,9 +129,19 @@ export function renderManagementPanel(doc, mount, view, act) {
 
   const list = doc.createElement('div');
   list.className = 'workspace-followup-list';
-  view.items.forEach(v => list.appendChild(renderManagementCard(doc, v, act)));
+  let focusedCard = null;
+  let focusedTitle = '';
+  view.items.forEach(v => {
+    const card = renderManagementCard(doc, v, act);
+    list.appendChild(card);
+    if (focusID && v.id === focusID) {
+      focusedCard = card;
+      focusedTitle = v.title;
+    }
+  });
   mount.appendChild(list);
   mount.hidden = false;
+  focusManagementCard(focusedCard, focusedTitle);
 }
 
 // wireWorkspaceFollowUps fetches the workspace's follow-ups and renders the
@@ -117,7 +153,8 @@ export async function wireWorkspaceFollowUps({
   mount,
   fetchImpl,
   postImpl,
-  toast
+  toast,
+  locationSearch = ''
 }) {
   if (!mount || !workspaceId) return;
   const load = async () => {
@@ -126,10 +163,9 @@ export async function wireWorkspaceFollowUps({
       const res = await fetchImpl(`/api/workspaces/${encodeURIComponent(workspaceId)}/followups`, {
         headers: { Accept: 'application/json' }
       });
-      if (res && res.ok) {
-        const data = await res.json();
-        items = Array.isArray(data.followups) ? data.followups : [];
-      }
+      if (!res || !res.ok) return;
+      const data = await res.json();
+      items = Array.isArray(data.followups) ? data.followups : [];
     } catch (_) {
       return; // leave the panel as-is on a transient failure
     }
@@ -147,7 +183,13 @@ export async function wireWorkspaceFollowUps({
         if (toast) toast(`Could not ${action.label} the follow-up.`, 'Error', 'danger');
       }
     };
-    renderManagementPanel(doc, mount, managementView(items), act);
+    renderManagementPanel(
+      doc,
+      mount,
+      managementView(items),
+      act,
+      followUpIDFromSearch(locationSearch)
+    );
   };
   await load();
 }
@@ -184,6 +226,7 @@ export async function wireWorkspaceFollowUps({
     mount,
     fetchImpl: (u, o) => fetch(u, o),
     postImpl: postJSON,
-    toast
+    toast,
+    locationSearch: typeof window !== 'undefined' ? window.location.search : ''
   });
 })();

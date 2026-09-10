@@ -34,11 +34,23 @@ func (s stubTodayBrief) GetCurrent(context.Context, string) (*dailybrief.Revisio
 }
 
 type stubTodayFollowUps struct {
-	items []*followup.FollowUp
-	err   error
+	items             []*followup.FollowUp
+	err               error
+	itemsByWorkspace  map[string][]*followup.FollowUp
+	errorsByWorkspace map[string]error
+	filters           *[]followup.Filter
 }
 
-func (s stubTodayFollowUps) List(context.Context, followup.Filter) ([]*followup.FollowUp, error) {
+func (s stubTodayFollowUps) List(_ context.Context, filter followup.Filter) ([]*followup.FollowUp, error) {
+	if s.filters != nil {
+		*s.filters = append(*s.filters, filter)
+	}
+	if err := s.errorsByWorkspace[filter.WorkspaceID]; err != nil {
+		return nil, err
+	}
+	if s.itemsByWorkspace != nil {
+		return s.itemsByWorkspace[filter.WorkspaceID], nil
+	}
 	return s.items, s.err
 }
 
@@ -90,6 +102,20 @@ func newTodayWorkspace(t *testing.T, now time.Time) (*workspace.InMemoryStore, *
 		t.Fatal(err)
 	}
 	return store, ws
+}
+
+func addTodayEmailOpsWorkspace(t *testing.T, store *workspace.InMemoryStore, createdAt time.Time) *workspace.Workspace {
+	t.Helper()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Email Ops"})
+	ws.ID = "email-ops-1"
+	ws.FolderSlug = "email-ops"
+	ws.OwnerUserID = "local"
+	ws.CreatedAt = createdAt
+	ws.SetTemplateProvenance(&workspace.TemplateProvenance{TemplateID: workspace.EmailOpsTemplateID, Builtin: true})
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+	return ws
 }
 
 func newTodayFollowUps(now time.Time) []*followup.FollowUp {
@@ -162,6 +188,196 @@ func TestTodayService_AggregatesBoundedOwnedCanonicalRecordsAndDropsDeletedRefs(
 	}
 	if got.NextCheckIn == nil || !got.NextCheckIn.After(now) {
 		t.Fatalf("next check-in missing: %+v", got.NextCheckIn)
+	}
+}
+
+func TestTodayService_AggregatesEmailOpsDecisionsAndGroundsBriefToOwningRoute(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	store, _ := newTodayWorkspace(t, now)
+	emailOps := addTodayEmailOpsWorkspace(t, store, now.Add(-24*time.Hour))
+	projection := baseTodayProjection()
+	projection.DailyBrief.Scope = dailybrief.ScopeSelected
+	projection.DailyBrief.SelectedWorkspaceIDs = []string{emailOps.ID}
+	projection.DailyBrief.UpdatedAt = now
+
+	hqItem := &followup.FollowUp{
+		ID: "same-id", UserID: "local", WorkspaceID: "hq-1", Category: followup.CategoryWaitingOn,
+		Title: "HQ follow-up", Status: followup.StatusActive, UpdatedAt: now.Add(-2 * time.Hour),
+	}
+	emailDecision := &followup.FollowUp{
+		ID: "same-id", UserID: "local", WorkspaceID: emailOps.ID, Category: followup.CategoryNeedsDecision,
+		Title: "Approve the signed agreement", Counterparty: "Alex", Status: followup.StatusActive,
+		UpdatedAt: now.Add(-time.Hour),
+	}
+	wrongOwner := &followup.FollowUp{
+		ID: "wrong-owner", UserID: "local", WorkspaceID: "unrelated", Category: followup.CategoryNeedsDecision,
+		Title: "Must not leak", Status: followup.StatusActive, UpdatedAt: now,
+	}
+	closed := &followup.FollowUp{
+		ID: "closed", UserID: "local", WorkspaceID: emailOps.ID, Category: followup.CategoryNeedsDecision,
+		Title: "Already completed", Status: followup.StatusCompleted, UpdatedAt: now,
+	}
+	content := dailybrief.BriefContent{NeedsAttention: []dailybrief.BriefAttentionItem{
+		{Title: "Grounded Email Ops decision", Ref: dailybrief.SourceRef{WorkspaceID: emailOps.ID, EntityType: "follow_up", EntityID: emailDecision.ID}},
+		{Title: "Wrong-owner collision", Ref: dailybrief.SourceRef{WorkspaceID: "hq-1", EntityType: "follow_up", EntityID: "missing"}},
+	}}
+	encoded, _ := json.Marshal(content)
+	var filters []followup.Filter
+	service := NewTodayService(
+		stubTodayRelationship{projection: projection},
+		stubTodayBrief{revision: &dailybrief.Revision{
+			ID: "brief-1", WorkspaceID: "hq-1", UserID: "local", ContentJSON: string(encoded), GeneratedAt: now,
+		}},
+		store,
+		stubTodayFollowUps{
+			itemsByWorkspace: map[string][]*followup.FollowUp{
+				"hq-1":      {hqItem},
+				emailOps.ID: {emailDecision, emailDecision, wrongOwner, closed},
+			},
+			filters: &filters,
+		},
+	)
+	service.now = func() time.Time { return now }
+	got, err := service.Get(context.Background(), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filters) != 2 {
+		t.Fatalf("filters = %+v, want one read per owner", filters)
+	}
+	for _, filter := range filters {
+		if filter.UserID != "local" || filter.WorkspaceID == "" || len(filter.Statuses) != 2 {
+			t.Fatalf("unbounded follow-up filter: %+v", filter)
+		}
+	}
+	if len(got.FollowUps.Items) != 2 {
+		t.Fatalf("mixed-owner follow-ups = %+v", got.FollowUps)
+	}
+	if len(got.Decisions.Items) != 1 {
+		t.Fatalf("Email Ops decision missing or duplicated: %+v", got.Decisions)
+	}
+	decision := got.Decisions.Items[0]
+	if decision.ID != emailDecision.ID || decision.Ref.WorkspaceID != emailOps.ID || decision.Attribution != "Email Ops" ||
+		decision.Ref.WorkspaceSlug != "email-ops" || decision.Route != "/workspaces/email-ops?follow_up=same-id" {
+		t.Fatalf("decision not grounded to Email Ops owner: %+v", decision)
+	}
+	if len(got.Brief.Items) != 1 || got.Brief.Items[0].Route != decision.Route ||
+		got.Brief.Items[0].Ref.WorkspaceSlug != "email-ops" || got.Brief.Items[0].Attribution != "Email Ops" {
+		t.Fatalf("brief follow-up did not use canonical live owner: %+v", got.Brief)
+	}
+	for _, item := range append(append([]TodayItem{}, got.FollowUps.Items...), got.Decisions.Items...) {
+		if item.ID == wrongOwner.ID || item.ID == closed.ID {
+			t.Fatalf("wrong-owner or completed item leaked: %+v", item)
+		}
+	}
+}
+
+func TestTodayService_EmailOpsFailureIsPartialAndRetainsHealthyHQItems(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	store, _ := newTodayWorkspace(t, now)
+	emailOps := addTodayEmailOpsWorkspace(t, store, now.Add(-24*time.Hour))
+	projection := baseTodayProjection()
+	projection.DailyBrief.Scope = dailybrief.ScopeSelected
+	projection.DailyBrief.SelectedWorkspaceIDs = []string{emailOps.ID}
+	hqDecision := &followup.FollowUp{
+		ID: "hq-decision", UserID: "local", WorkspaceID: "hq-1", Category: followup.CategoryNeedsDecision,
+		Title: "Healthy HQ decision", Status: followup.StatusActive, UpdatedAt: now,
+	}
+	service := NewTodayService(
+		stubTodayRelationship{projection: projection}, stubTodayBrief{err: dailybrief.ErrRevisionNotFound}, store,
+		stubTodayFollowUps{
+			itemsByWorkspace:  map[string][]*followup.FollowUp{"hq-1": {hqDecision}},
+			errorsByWorkspace: map[string]error{emailOps.ID: errors.New("private details")},
+		},
+	)
+	service.now = func() time.Time { return now }
+	got, err := service.Get(context.Background(), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != "partial" || got.FollowUps.Health.Status != TodaySectionPartial ||
+		got.Decisions.Health.Status != TodaySectionPartial {
+		t.Fatalf("partial source health = %+v", got)
+	}
+	if len(got.FollowUps.Items) != 1 || got.FollowUps.Items[0].ID != hqDecision.ID ||
+		len(got.Decisions.Items) != 1 || got.Decisions.Items[0].ID != hqDecision.ID {
+		t.Fatalf("healthy HQ items erased by Email Ops failure: followups=%+v decisions=%+v", got.FollowUps, got.Decisions)
+	}
+}
+
+func TestTodayService_UsesPersistedCutoffForFutureEmailOpsScope(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	cutoff := now.Add(-24 * time.Hour)
+	store, _ := newTodayWorkspace(t, now)
+	emailOps := addTodayEmailOpsWorkspace(t, store, now.Add(-time.Hour))
+	projection := baseTodayProjection()
+	projection.DailyBrief.Scope = dailybrief.ScopeAll
+	projection.DailyBrief.IncludeFutureWorkspaces = false
+	projection.DailyBrief.UpdatedAt = cutoff
+	var filters []followup.Filter
+	reader := stubTodayFollowUps{itemsByWorkspace: map[string][]*followup.FollowUp{
+		emailOps.ID: {{
+			ID: "future", UserID: "local", WorkspaceID: emailOps.ID, Title: "Future source",
+			Status: followup.StatusActive, UpdatedAt: now,
+		}},
+	}, filters: &filters}
+	service := NewTodayService(
+		stubTodayRelationship{projection: projection}, stubTodayBrief{err: dailybrief.ErrRevisionNotFound}, store, reader,
+	)
+	service.now = func() time.Time { return now }
+	got, err := service.Get(context.Background(), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.FollowUps.Items) != 0 {
+		t.Fatalf("post-cutoff Email Ops leaked with future inclusion disabled: %+v", got.FollowUps)
+	}
+	for _, filter := range filters {
+		if filter.WorkspaceID == emailOps.ID {
+			t.Fatalf("post-cutoff Email Ops was queried: %+v", filters)
+		}
+	}
+
+	projection.DailyBrief.IncludeFutureWorkspaces = true
+	filters = nil
+	got, err = service.Get(context.Background(), "local")
+	if err != nil || len(got.FollowUps.Items) != 1 || got.FollowUps.Items[0].Ref.WorkspaceID != emailOps.ID {
+		t.Fatalf("future-enabled Email Ops missing: followups=%+v filters=%+v err=%v", got.FollowUps, filters, err)
+	}
+}
+
+func TestTodayService_MixedOwnersShareOneDeterministicFollowUpCap(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	store, _ := newTodayWorkspace(t, now)
+	emailOps := addTodayEmailOpsWorkspace(t, store, now.Add(-24*time.Hour))
+	projection := baseTodayProjection()
+	projection.DailyBrief.Scope = dailybrief.ScopeSelected
+	projection.DailyBrief.SelectedWorkspaceIDs = []string{emailOps.ID}
+	byWorkspace := map[string][]*followup.FollowUp{}
+	for _, ownerID := range []string{"hq-1", emailOps.ID} {
+		for i := 5; i >= 0; i-- {
+			byWorkspace[ownerID] = append(byWorkspace[ownerID], &followup.FollowUp{
+				ID: fmt.Sprintf("item-%02d", i), UserID: "local", WorkspaceID: ownerID,
+				Title: "Follow-up", Status: followup.StatusActive, UpdatedAt: now,
+			})
+		}
+	}
+	service := NewTodayService(
+		stubTodayRelationship{projection: projection}, stubTodayBrief{err: dailybrief.ErrRevisionNotFound}, store,
+		stubTodayFollowUps{itemsByWorkspace: byWorkspace},
+	)
+	service.now = func() time.Time { return now }
+	got, err := service.Get(context.Background(), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.FollowUps.Items) != todayFollowUpCap {
+		t.Fatalf("cap=%d want=%d", len(got.FollowUps.Items), todayFollowUpCap)
+	}
+	for i := 0; i < 6; i++ {
+		if got.FollowUps.Items[i].Ref.WorkspaceID != emailOps.ID || got.FollowUps.Items[i].ID != fmt.Sprintf("item-%02d", i) {
+			t.Fatalf("deterministic mixed-owner order at %d: %+v", i, got.FollowUps.Items)
+		}
 	}
 }
 

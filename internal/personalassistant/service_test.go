@@ -94,7 +94,8 @@ func serviceMatrixFixture(status RelationshipStatus) (*Service, *readTrackingSto
 	briefs := &fakeBriefReader{config: &dailybrief.Config{
 		WorkspaceID: workspace.ID, UserID: "local", Timezone: "America/New_York",
 		ScheduleDays: []string{"mon", "tue"}, ScheduleTime: "08:00",
-		ScheduleEnabled: true, ConfigRevision: 3,
+		ScheduleEnabled: true, Scope: dailybrief.ScopeAll, IncludeFutureWorkspaces: false,
+		ConfigRevision: 3, UpdatedAt: time.Date(2026, 8, 30, 15, 0, 0, 0, time.UTC),
 	}}
 	service := NewService(
 		store, hq, briefs,
@@ -131,7 +132,7 @@ func TestServiceGet_StateMatrix(t *testing.T) {
 		{StatusPaused, APIStatePaused, "resume"},
 	} {
 		t.Run(string(test.status), func(t *testing.T) {
-			service, store, _, _, workspace := serviceMatrixFixture(test.status)
+			service, store, _, briefs, workspace := serviceMatrixFixture(test.status)
 			before := *workspace
 			before.AgentInstances = append([]session.AgentInstance(nil), workspace.AgentInstances...)
 			projection, err := service.Get(context.Background(), "local")
@@ -144,8 +145,9 @@ func TestServiceGet_StateMatrix(t *testing.T) {
 			if projection.AssistantID != "assistant-a" || projection.HQAgentInstanceID != "instance-local" || projection.Mandate == "" {
 				t.Fatalf("canonical identity/working agreement missing: %#v", projection)
 			}
-			if projection.DailyBrief == nil || projection.DailyBrief.ConfigRevision != 3 {
-				t.Fatalf("daily brief = %#v", projection.DailyBrief)
+			if projection.DailyBrief == nil || projection.DailyBrief.ConfigRevision != 3 ||
+				!projection.DailyBrief.UpdatedAt.Equal(briefs.config.UpdatedAt) {
+				t.Fatalf("daily brief did not preserve saved scope cutoff = %#v", projection.DailyBrief)
 			}
 			if store.mutationHit || !reflect.DeepEqual(before, *workspace) {
 				t.Fatal("GET mutated relationship, tools, permissions, or workspace membership")

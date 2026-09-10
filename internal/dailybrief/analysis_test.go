@@ -141,6 +141,30 @@ func TestComputeSinceLastBrief_OnlyIncludesChangesAfterCheckpoint(t *testing.T) 
 	}
 }
 
+func TestFollowUpAnalysisAttributesEverySectionToCanonicalOwner(t *testing.T) {
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	due := now.Add(time.Hour)
+	snap := Snapshot{GeneratedAt: now, FollowUps: []FollowUpSnapshot{{
+		Ref: SourceRef{
+			WorkspaceID: "email", WorkspaceSlug: "email-ops", EntityType: "follow_up",
+			EntityID: "agreement", Timestamp: now.Add(-time.Hour),
+		},
+		OwnerName: "Email Ops", Title: "Waiting for agreement", Status: "active", DueAt: &due, Stale: true,
+	}}}
+	attention := ComputeNeedsAttention(snap)
+	plan := ComputeTodaysPlan(snap, now)
+	changes := ComputeSinceLastBrief(snap, now.Add(-2*time.Hour))
+	if len(attention) != 1 || attention[0].WorkspaceName != "Email Ops" {
+		t.Fatalf("needs attention attribution = %+v", attention)
+	}
+	if len(plan) != 1 || plan[0].WorkspaceName != "Email Ops" {
+		t.Fatalf("today's plan attribution = %+v", plan)
+	}
+	if len(changes) != 1 || changes[0].WorkspaceName != "Email Ops" {
+		t.Fatalf("since last brief attribution = %+v", changes)
+	}
+}
+
 func TestComputeResumeCandidates_OrdersByRecencyAndCaps(t *testing.T) {
 	now := time.Now()
 	snap := Snapshot{Workspaces: []WorkspaceSnapshot{{

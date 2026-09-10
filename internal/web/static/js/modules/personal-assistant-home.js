@@ -27,14 +27,21 @@ export function todaySectionRows(section) {
       { kind: 'status', title: 'Source unavailable — other Today sections are still current.' }
     ];
   }
-  if (!rows.length) return [{ kind: 'status', title: 'Nothing here right now.' }];
-  return rows.map(item => ({
+  const projected = rows.map(item => ({
     kind: String(item?.kind || 'item'),
     title: String(item?.title || '').trim(),
     detail: String(item?.detail || '').trim(),
     attribution: String(item?.attribution || '').trim(),
     route: safeTodayRoute(item?.route) ? String(item.route) : ''
   }));
+  if (health === 'partial') {
+    return [
+      { kind: 'status', title: 'Some sources are unavailable — showing verified items.' },
+      ...projected
+    ];
+  }
+  if (!projected.length) return [{ kind: 'status', title: 'Nothing here right now.' }];
+  return projected;
 }
 
 // studioSectionView decides whether the studio region appears at all and what
@@ -133,8 +140,20 @@ export function safeTodayRoute(value) {
   const route = String(value || '');
   if (!route.startsWith('/') || route.startsWith('//') || route.includes('://')) return false;
   try {
+    const rawPath = route.split(/[?#]/, 1)[0];
+    const decodedPath = decodeURIComponent(rawPath);
+    if (
+      decodedPath.includes('\\') ||
+      [...decodedPath].some(character => {
+        const code = character.charCodeAt(0);
+        return code < 32 || code === 127;
+      }) ||
+      decodedPath.split('/').some(segment => segment === '.' || segment === '..')
+    ) {
+      return false;
+    }
     const parsed = new URL(route, 'http://ori.local');
-    return parsed.origin === 'http://ori.local' && !parsed.pathname.includes('..');
+    return parsed.origin === 'http://ori.local';
   } catch (_) {
     return false;
   }

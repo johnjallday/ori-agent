@@ -534,13 +534,14 @@ test.describe('Personal Assistant Foundation first value', () => {
 
   test('Map-first Home keeps Today on demand, Ori Help isolated, and handoff confirmable', async ({
     page
-  }) => {
+  }, testInfo) => {
     let assistantName = 'Atlas';
     let relationshipState = 'active';
     let stateVersion = 7;
     let rememberWrites = 0;
     let routeCalls = 0;
     let askCalls = 0;
+    let emailOpsReadPartial = false;
     const briefConfig = {
       timezone: 'UTC',
       schedule_days: ['mon', 'tue', 'wed', 'thu', 'fri'],
@@ -596,7 +597,22 @@ test.describe('Personal Assistant Foundation first value', () => {
             local_date: new Date().toISOString().slice(0, 10),
             status: 'succeeded',
             generated_at: new Date().toISOString(),
-            content_json: JSON.stringify({ opening_summary: 'Your launch review is ready.' })
+            content_json: JSON.stringify({
+              opening_summary: 'Your launch review is ready.',
+              needs_attention: [
+                {
+                  title: "Waiting for Alex's signed agreement",
+                  workspace_name: 'Email Ops',
+                  reason: 'follow_up_stale',
+                  ref: {
+                    workspace_id: 'email-ops-1',
+                    workspace_slug: 'email-ops',
+                    entity_type: 'follow_up',
+                    entity_id: 'follow-email-1'
+                  }
+                }
+              ]
+            })
           }
         })
       })
@@ -754,7 +770,18 @@ test.describe('Personal Assistant Foundation first value', () => {
               opening_summary: 'Two confirmed items need attention.',
               items: []
             },
-            decisions: { health: { status: 'healthy_empty' }, items: [] },
+            decisions: {
+              health: { status: emailOpsReadPartial ? 'partial' : 'available' },
+              items: [
+                {
+                  id: 'follow-email-1',
+                  kind: 'follow_up',
+                  title: "Waiting for Alex's signed agreement",
+                  attribution: 'Email Ops',
+                  route: '/workspaces/email-ops?follow_up=follow-email-1'
+                }
+              ]
+            },
             priorities: {
               health: { status: 'available' },
               items: [
@@ -767,13 +794,21 @@ test.describe('Personal Assistant Foundation first value', () => {
               ]
             },
             follow_ups: {
-              health: { status: 'available' },
+              health: { status: emailOpsReadPartial ? 'partial' : 'available' },
               items: [
                 {
-                  id: 'follow-1',
+                  id: 'follow-email-1',
                   kind: 'follow_up',
-                  title: 'Hear back from Maya',
-                  route: '/workspaces/personal-hq?follow_up=follow-1'
+                  title: "Waiting for Alex's signed agreement",
+                  attribution: 'Email Ops',
+                  route: '/workspaces/email-ops?follow_up=follow-email-1'
+                },
+                {
+                  id: 'follow-hq-1',
+                  kind: 'follow_up',
+                  title: 'Confirm the launch room',
+                  attribution: 'Personal HQ',
+                  route: '/workspaces/personal-hq?follow_up=follow-hq-1'
                 }
               ]
             },
@@ -952,6 +987,19 @@ test.describe('Personal Assistant Foundation first value', () => {
     await expect(page.locator('#personalAssistantTodayPriorities')).toContainText(
       'Review launch plan'
     );
+    await expect(page.locator('#personalAssistantTodayFollowUps a').first()).toHaveAttribute(
+      'href',
+      '/workspaces/email-ops?follow_up=follow-email-1'
+    );
+    await expect(page.locator('#personalAssistantTodayDecisions a')).toHaveAttribute(
+      'href',
+      '/workspaces/email-ops?follow_up=follow-email-1'
+    );
+    await expect(page.locator('#homeDailyBriefBody a').first()).toHaveAttribute(
+      'href',
+      '/workspaces/email-ops?follow_up=follow-email-1'
+    );
+    await page.screenshot({ path: testInfo.outputPath('today-email-ops-owner-links.png') });
     await expect(page.locator('#personalAssistantTodayHQ')).toHaveAttribute(
       'href',
       '/workspaces/personal-hq'
@@ -1099,5 +1147,96 @@ test.describe('Personal Assistant Foundation first value', () => {
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)
     ).toBe(true);
+
+    // One owner read can fail without suppressing the verified cross-workspace
+    // card or silently presenting the section as fully healthy.
+    emailOpsReadPartial = true;
+    await page.reload();
+    await page.locator('#personalAssistantLauncher').click();
+    await expect(page.locator('#personalAssistantTodayFollowUps')).toContainText(
+      'Some sources are unavailable — showing verified items.'
+    );
+    await expect(page.locator('#personalAssistantTodayFollowUps')).toContainText(
+      "Waiting for Alex's signed agreement"
+    );
+    await expect(page.locator('#personalAssistantTodayFollowUps')).toContainText(
+      'Confirm the launch room'
+    );
+    await page.locator('#personalAssistantTodayFollowUps').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath('today-email-ops-partial.png') });
+  });
+
+  test('Email Ops owner route focuses and completes the exact canonical follow-up', async ({
+    page
+  }, testInfo) => {
+    let rows = [
+      {
+        id: 'follow-email-1',
+        workspace_id: 'email-ops-1',
+        user_id: 'local',
+        source: 'manual',
+        status: 'active',
+        title: "Waiting for Alex's signed agreement",
+        detail: 'Expected by Friday',
+        counterparty: 'Alex',
+        category: 'waiting_on'
+      },
+      {
+        id: 'follow-email-2',
+        workspace_id: 'email-ops-1',
+        user_id: 'local',
+        source: 'manual',
+        status: 'active',
+        title: 'Send the revised timeline',
+        category: 'you_owe'
+      }
+    ];
+    let completedID = '';
+
+    await page.route(/\/workspaces\/email-ops\?follow_up=follow-email-1$/, route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'text/html',
+        body: `<!doctype html>
+          <html><head><link rel="stylesheet" href="/css/workspace-hub.css"></head>
+          <body data-workspace-id="email-ops-1" style="--primary-color:#176b4d;--primary-light:rgba(23,107,77,.2);--border-color:#c7bda8;--radius-md:10px;--bg-secondary:#fffaf0;--text-primary:#26372d;--text-secondary:#68756d;background:#f4efe4;padding:2rem">
+            <main style="max-width:760px;margin:auto"><section id="workspaceFollowupMount" class="workspace-followup-mount" style="background:#fffdf8;border:1px solid #c7bda8;border-radius:12px;padding:1.25rem" hidden></section></main>
+            <script>window.currentWorkspaceId = 'email-ops-1';</script>
+            <script type="module" src="/js/modules/workspace-followups.js"></script>
+          </body></html>`
+      })
+    );
+    await page.route('**/api/workspaces/email-ops-1/followups', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ followups: rows })
+      })
+    );
+    await page.route('**/api/personal-hq/followups/complete', async route => {
+      completedID = String(route.request().postDataJSON()?.id || '');
+      rows = rows.filter(row => row.id !== completedID);
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ followup: { id: completedID, status: 'completed' } })
+      });
+    });
+
+    await page.goto('/workspaces/email-ops?follow_up=follow-email-1');
+    const selected = page.locator('[data-followup-id="follow-email-1"]');
+    await expect(selected).toBeFocused();
+    await expect(selected).toHaveClass(/is-deep-linked/);
+    await expect(selected).toHaveAttribute(
+      'aria-label',
+      "Selected follow-up: Waiting for Alex's signed agreement"
+    );
+    await page.screenshot({ path: testInfo.outputPath('email-ops-exact-follow-up.png') });
+
+    await selected.getByRole('button', { name: 'Done' }).click();
+    await expect.poll(() => completedID).toBe('follow-email-1');
+    await expect(page.locator('[data-followup-id="follow-email-1"]')).toHaveCount(0);
+    await expect(page.locator('[data-followup-id="follow-email-2"]')).toHaveCount(1);
+    await page.screenshot({ path: testInfo.outputPath('email-ops-after-completion.png') });
   });
 });

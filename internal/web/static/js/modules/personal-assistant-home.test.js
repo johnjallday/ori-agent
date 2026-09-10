@@ -79,6 +79,29 @@ test('Today section never turns unavailable into a healthy empty all-clear', () 
   );
 });
 
+test('partial follow-up sections retain healthy Email Ops rows with a source warning', () => {
+  const rows = todaySectionRows({
+    health: { status: 'partial', reason: 'some_sources_unavailable' },
+    items: [
+      {
+        kind: 'follow_up',
+        title: 'Waiting for Alex’s signed agreement',
+        route: '/workspaces/email-ops?follow_up=follow-1'
+      },
+      {
+        kind: 'follow_up',
+        title: 'Unsafe owner route',
+        route: '//evil.example/workspaces/email-ops?follow_up=follow-2'
+      }
+    ]
+  });
+  assert.equal(rows.length, 3);
+  assert.equal(rows[0].kind, 'status');
+  assert.match(rows[0].title, /Some sources are unavailable/i);
+  assert.equal(rows[1].route, '/workspaces/email-ops?follow_up=follow-1');
+  assert.equal(rows[2].route, '');
+});
+
 test('Today section caps records and only preserves server-owned internal routes', () => {
   const items = Array.from({ length: 15 }, (_, index) => ({
     kind: 'ticket',
@@ -93,7 +116,11 @@ test('Today section caps records and only preserves server-owned internal routes
     'https://evil.example',
     '//evil.example',
     'javascript:alert(1)',
-    'workspaces/x'
+    'workspaces/x',
+    '/workspaces/../settings',
+    '/workspaces/%2e%2e/settings',
+    '/workspaces/email-ops\\settings',
+    '/workspaces/%zz'
   ]) {
     assert.equal(safeTodayRoute(route), false, route);
   }
