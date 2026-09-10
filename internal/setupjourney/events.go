@@ -12,7 +12,9 @@ func journeyEventFields(projection *JourneyProjection) specialistevents.Fields {
 		return specialistevents.Fields{}
 	}
 	return specialistevents.Fields{
-		JourneyID: projection.Journey.ID, RunKind: string(projection.RunKind),
+		Source: string(projection.Journey.Source), TemplateID: projection.Journey.TemplateID,
+		AttachmentID: projection.Journey.AttachmentID,
+		JourneyID:    projection.Journey.ID, RunKind: string(projection.RunKind),
 		Lifecycle: string(projection.Lifecycle), SchemaVersion: projection.Journey.SchemaVersion,
 		DeclarationVersion: projection.Journey.Version,
 	}
@@ -22,10 +24,15 @@ func runEventFields(run *Run, declaration *specialist.SetupJourney) specialistev
 	if run == nil || declaration == nil {
 		return specialistevents.Fields{}
 	}
-	return specialistevents.Fields{
+	fields := specialistevents.Fields{
 		JourneyID: declaration.ID, RunKind: string(run.Kind), Lifecycle: string(run.Lifecycle),
 		SchemaVersion: declaration.SchemaVersion, DeclarationVersion: declaration.Version,
 	}
+	if run.SpecialistSlug == "user_template_quest" {
+		fields.Source = string(QuestSourceUserTemplate)
+		fields.TemplateID = declaration.ExpectedBlueprintID
+	}
+	return fields
 }
 
 func emitPresentationEvent(name specialistevents.Name, projection *JourneyProjection) {

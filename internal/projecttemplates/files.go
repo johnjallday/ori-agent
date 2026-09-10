@@ -213,6 +213,22 @@ func ReadFileContent(libDir, id, rel string) (FileContent, error) {
 // CreateEntry); a missing path returns ErrFileNotFound. Bytes are written as-is
 // — {{name}}/{{date}} tokens are never substituted.
 func WriteFileContent(libDir, id, rel, content string) error {
+	return WriteFileContentWithGuard(libDir, id, rel, content, nil, defaultRuntimeCatalog())
+}
+
+func WriteFileContentWithGuard(libDir, id, rel, content string, guard UserSetupQuestContentGuard, catalog RuntimeCatalog) error {
+	release, err := acquireManifestMutationLock(libDir)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if err := guardUserSetupQuestContent(libDir, id, guard, catalog); err != nil {
+		return err
+	}
+	return writeFileContentUnlocked(libDir, id, rel, content)
+}
+
+func writeFileContentUnlocked(libDir, id, rel, content string) error {
 	abs, err := resolveTemplatePath(libDir, id, rel)
 	if err != nil {
 		return err
@@ -237,6 +253,22 @@ func WriteFileContent(libDir, id, rel, content string) error {
 // Missing parent folders are created. A path that already exists returns
 // ErrFileExists.
 func CreateEntry(libDir, id, rel, entryType string) (Node, error) {
+	return CreateEntryWithGuard(libDir, id, rel, entryType, nil, defaultRuntimeCatalog())
+}
+
+func CreateEntryWithGuard(libDir, id, rel, entryType string, guard UserSetupQuestContentGuard, catalog RuntimeCatalog) (Node, error) {
+	release, err := acquireManifestMutationLock(libDir)
+	if err != nil {
+		return Node{}, err
+	}
+	defer release()
+	if err := guardUserSetupQuestContent(libDir, id, guard, catalog); err != nil {
+		return Node{}, err
+	}
+	return createEntryUnlocked(libDir, id, rel, entryType)
+}
+
+func createEntryUnlocked(libDir, id, rel, entryType string) (Node, error) {
 	abs, err := resolveTemplatePath(libDir, id, rel)
 	if err != nil {
 		return Node{}, err
@@ -270,6 +302,22 @@ func CreateEntry(libDir, id, rel, entryType string) (Node, error) {
 // RenameEntry moves a file or folder within a template. The source must exist
 // and the destination must not (ErrFileExists otherwise).
 func RenameEntry(libDir, id, from, to string) (Node, error) {
+	return RenameEntryWithGuard(libDir, id, from, to, nil, defaultRuntimeCatalog())
+}
+
+func RenameEntryWithGuard(libDir, id, from, to string, guard UserSetupQuestContentGuard, catalog RuntimeCatalog) (Node, error) {
+	release, err := acquireManifestMutationLock(libDir)
+	if err != nil {
+		return Node{}, err
+	}
+	defer release()
+	if err := guardUserSetupQuestContent(libDir, id, guard, catalog); err != nil {
+		return Node{}, err
+	}
+	return renameEntryUnlocked(libDir, id, from, to)
+}
+
+func renameEntryUnlocked(libDir, id, from, to string) (Node, error) {
 	fromAbs, err := resolveTemplatePath(libDir, id, from)
 	if err != nil {
 		return Node{}, err
@@ -301,6 +349,22 @@ func RenameEntry(libDir, id, from, to string) (Node, error) {
 // DeleteEntry removes a file or folder (recursively) from a template. A missing
 // path returns ErrFileNotFound.
 func DeleteEntry(libDir, id, rel string) error {
+	return DeleteEntryWithGuard(libDir, id, rel, nil, defaultRuntimeCatalog())
+}
+
+func DeleteEntryWithGuard(libDir, id, rel string, guard UserSetupQuestContentGuard, catalog RuntimeCatalog) error {
+	release, err := acquireManifestMutationLock(libDir)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if err := guardUserSetupQuestContent(libDir, id, guard, catalog); err != nil {
+		return err
+	}
+	return deleteEntryUnlocked(libDir, id, rel)
+}
+
+func deleteEntryUnlocked(libDir, id, rel string) error {
 	abs, err := resolveTemplatePath(libDir, id, rel)
 	if err != nil {
 		return err
@@ -315,6 +379,17 @@ func DeleteEntry(libDir, id, rel string) error {
 		return fmt.Errorf("failed to delete %q: %w", rel, err)
 	}
 	return nil
+}
+
+func guardUserSetupQuestContent(libDir, id string, guard UserSetupQuestContentGuard, catalog RuntimeCatalog) error {
+	if guard == nil {
+		return nil
+	}
+	template, err := FindLibraryTemplateWithCatalog(libDir, id, catalog)
+	if err != nil {
+		return err
+	}
+	return guard(template)
 }
 
 func statNode(abs, rel string) (Node, error) {

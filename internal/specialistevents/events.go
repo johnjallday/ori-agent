@@ -51,6 +51,9 @@ const (
 // user/relationship identity, path, project/folder/agent/sample name, prompt,
 // credential, file/audio value, runtime-state body, or plugin manifest body.
 type Fields struct {
+	Source             string
+	TemplateID         string
+	AttachmentID       string
 	JourneyID          string
 	StepID             string
 	ActionID           string
@@ -100,6 +103,9 @@ func Record(name Name, fields Fields) {
 		return
 	}
 	values := logger.Fields{"event": string(name)}
+	addToken(values, "source", fields.Source)
+	addToken(values, "template_id", fields.TemplateID)
+	addToken(values, "attachment_id", fields.AttachmentID)
 	addToken(values, "journey_id", fields.JourneyID)
 	addToken(values, "step_id", fields.StepID)
 	addToken(values, "action_id", fields.ActionID)

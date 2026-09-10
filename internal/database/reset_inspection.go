@@ -29,6 +29,7 @@ func ResetRecordTables() []string {
 		"workspace_plan_execution_generations", "workspace_plan_reconciliations",
 		"setup_journey_run", "setup_journey_operation_receipt",
 		"setup_journey_declaration_migration_receipt", "setup_journey_review_receipt",
+		"setup_user_template_binding", "setup_user_template_root_claim",
 		"sample_library_state", "sample_library_root", "sample_library_entry",
 		"sample_library_content_fact", "sample_library_annotation", "sample_library_collection",
 		"sample_library_collection_member", "sample_library_child_copy",
@@ -124,7 +125,7 @@ func InspectReset(ctx context.Context, db *sql.DB) (ResetInspection, error) {
 }
 
 func resetSchema(ctx context.Context, tx *sql.Tx) (map[string]bool, string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT type, substr(name, 1, 257), substr(COALESCE(sql, ''), 1, 65537) FROM sqlite_master ORDER BY type, name LIMIT 257`)
+	rows, err := tx.QueryContext(ctx, `SELECT type, substr(name, 1, 257), substr(COALESCE(sql, ''), 1, 65537) FROM sqlite_master ORDER BY type, name LIMIT 513`)
 	if err != nil {
 		return nil, "", errors.New("database schema unavailable")
 	}
@@ -139,7 +140,7 @@ func resetSchema(ctx context.Context, tx *sql.Tx) (map[string]bool, string, erro
 		}
 		count++
 		size += len(statement) + len(name)
-		if count > 256 || len(name) > 256 || size > 256*1024 || len(statement) > 65536 {
+		if count > 512 || len(name) > 256 || size > 512*1024 || len(statement) > 65536 {
 			return nil, "", errors.New("database schema exceeds inspection limits")
 		}
 		if kind == "table" {

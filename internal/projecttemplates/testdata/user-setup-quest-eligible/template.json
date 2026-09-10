@@ -1,0 +1,99 @@
+{
+  "name": "User-owned music project",
+  "description": "A hand-authored local template that satisfies the setup-quest target contract without plugin provenance.",
+  "project_entry": {
+    "relative_path": "{{name}}.rpp"
+  },
+  "project_connection": {
+    "schema_version": 1,
+    "supported_modes": [
+      "new_project",
+      "existing_project"
+    ],
+    "attach_existing": {
+      "entry_extensions": [
+        ".rpp"
+      ]
+    }
+  },
+  "runtime_requirements": {
+    "schema_version": 1,
+    "operating_modes": [
+      {
+        "id": "file_only",
+        "label": "File-only",
+        "description": "Work through the connected project files without live application control."
+      }
+    ],
+    "requirements": []
+  },
+  "setup_wizard": {
+    "version": 1,
+    "title": "Choose how Ori works with this project",
+    "steps": [
+      {
+        "id": "mode",
+        "kind": "runtime_mode",
+        "required": true,
+        "title": "Choose an operating mode",
+        "description": "File-only keeps live application control unconfigured."
+      },
+      {
+        "id": "summary",
+        "kind": "summary",
+        "required": true,
+        "title": "Review workspace setup",
+        "description": "Review the selected mode before continuing."
+      }
+    ]
+  },
+  "assistant_program": {
+    "schema_version": 2,
+    "id": "user-music-team",
+    "station_name": "Music Projects",
+    "station_description": "A Home for the user's related music projects.",
+    "default_primary_name": "Music Coordinator",
+    "hire_title": "Staff the music project",
+    "hire_description": "Review separate Home and project roles before creating agents.",
+    "disabled_message": "The local template is unavailable; existing project data remains readable.",
+    "roles": [
+      {
+        "id": "portfolio_coordinator",
+        "label": "Portfolio Coordinator",
+        "scope": "home",
+        "required": true,
+        "primary": true,
+        "role": "orchestrator",
+        "type": "tool_calling",
+        "system_prompt": "Coordinate bounded portfolio records without inheriting project access."
+      },
+      {
+        "id": "project_lead",
+        "label": "Project Lead",
+        "scope": "project",
+        "required": true,
+        "primary": true,
+        "role": "orchestrator",
+        "type": "tool_calling",
+        "system_prompt": "Coordinate only the exact linked project."
+      }
+    ],
+    "stages": [
+      {
+        "id": "helper",
+        "label": "Helper",
+        "description": "The initial collaboration stage.",
+        "accepted_completion_threshold": 0
+      }
+    ],
+    "reflection": {
+      "minimum_projects": 3,
+      "cadence_hours": 24,
+      "max_projects": 8,
+      "max_events_per_project": 8,
+      "max_candidates": 4,
+      "max_evidence": 4,
+      "rubric": "Find stable preferences only in reviewed evidence from linked projects."
+    }
+  }
+}

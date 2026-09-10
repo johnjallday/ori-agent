@@ -22,6 +22,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/privateservices"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/resetstate"
+	"github.com/johnjallday/ori-agent/internal/setupjourney"
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspaceplan"
@@ -54,6 +55,7 @@ type Server struct {
 	workspaceSurfaceServices   *workspacesurface.ServiceManager
 	workspaceFileStore         *workspace.FileStore
 	projectTemplateCatalog     projecttemplates.RuntimeCatalog
+	setupJourneyStore          *setupjourney.SQLiteStore
 
 	shutdownOnce   sync.Once
 	shutdownErr    error

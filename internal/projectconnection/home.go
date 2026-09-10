@@ -19,10 +19,20 @@ type HomePreparation struct {
 }
 
 func homeKey(scope Scope) (workspace.AssistantProgramKey, error) {
-	if scope.Template.PluginOwner == nil || scope.Template.AssistantProgram == nil {
+	if scope.Template.AssistantProgram == nil {
 		return workspace.AssistantProgramKey{}, ErrUnavailable
 	}
-	key := workspace.AssistantProgramKey{OwnerUserID: scope.OwnerUserID, PluginID: scope.Template.PluginOwner.PluginID, ProgramID: scope.Template.AssistantProgram.ID}.Normalize()
+	key := workspace.AssistantProgramKey{OwnerUserID: scope.OwnerUserID, ProgramID: scope.Template.AssistantProgram.ID}
+	switch {
+	case scope.Template.PluginOwner != nil:
+		key.PluginID = scope.Template.PluginOwner.PluginID
+	case scope.Template.UserSetupQuest != nil && scope.Template.UserSetupQuest.Declaration != nil:
+		key.TemplateID = scope.Template.ID
+		key.AttachmentID = scope.Template.UserSetupQuest.AttachmentID
+	default:
+		return workspace.AssistantProgramKey{}, ErrUnavailable
+	}
+	key = key.Normalize()
 	if !key.Valid() {
 		return key, ErrUnavailable
 	}

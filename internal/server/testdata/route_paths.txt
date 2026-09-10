@@ -144,6 +144,8 @@
 /api/project-templates
 /api/project-templates/import
 /api/project-templates/reveal
+/api/project-templates/x/setup-quest
+/api/project-templates/x/setup-quest/preview
 /api/prompt-variables
 /api/prompt-variables/preview
 /api/providers
@@ -172,6 +174,13 @@
 /api/settings/utility
 /api/settings/vault-root
 /api/settings/workspace-root
+/api/setup-quests/x/x
+/api/setup-quests/x/x/dismiss
+/api/setup-quests/x/x/open
+/api/setup-quests/x/x/runs/x
+/api/setup-quests/x/x/runs/x/preparation
+/api/setup-quests/x/x/runs/x/steps/x/actions/x
+/api/setup-quests/x/x/runs/x/steps/x/review
 /api/skills
 /api/skills/generate-prompt
 /api/skills/marketplace/check
@@ -189,6 +198,13 @@
 /api/transcribe
 /api/updates/check
 /api/updates/version
+/api/user-template-setup-quests/x/x
+/api/user-template-setup-quests/x/x/dismiss
+/api/user-template-setup-quests/x/x/open
+/api/user-template-setup-quests/x/x/runs/x
+/api/user-template-setup-quests/x/x/runs/x/preparation
+/api/user-template-setup-quests/x/x/runs/x/steps/x/actions/x
+/api/user-template-setup-quests/x/x/runs/x/steps/x/review
 /api/user/profile
 /api/vault/email-accounts
 /api/vault/email-oauth/providers

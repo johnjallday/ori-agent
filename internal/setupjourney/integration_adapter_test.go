@@ -127,6 +127,27 @@ func integrationResolver(entry reviewedintegration.Entry) IntegrationEntryResolv
 	}
 }
 
+// TestReviewedIntegrationReadSeparatesReviewedSoftwareFromUserTemplateTarget
+// proves a host-reviewed key still owns software identity while the bound local
+// template independently owns blueprint/program target identity.
+func TestReviewedIntegrationReadSeparatesReviewedSoftwareFromUserTemplateTarget(t *testing.T) {
+	entry, descriptor, report, scope := readyIntegrationFixture(t)
+	manager := &fakeReviewedIntegrationManager{descriptor: descriptor, report: report}
+	adapter := newReviewedIntegrationAdapter(manager, integrationResolver(entry), "darwin/arm64")
+	scope.QuestSource = QuestSourceUserTemplate
+	scope.UserTemplateID = "user-setup-quest-eligible"
+	scope.ExpectedBlueprintID = "user-setup-quest-eligible"
+	scope.ExpectedAssistantProgramID = "user-music-team"
+
+	read, err := adapter.Read(context.Background(), scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.BlockedReason != "" || len(read.AvailableActions) != 1 || read.AvailableActions[0] != ActionReviewInstall || manager.inspections != 1 {
+		t.Fatalf("reviewed software was not kept independent: read=%+v inspections=%d", read, manager.inspections)
+	}
+}
+
 func TestReviewedIntegrationReadAbsentSurfacesExactReview(t *testing.T) {
 	entry, descriptor, report, scope := readyIntegrationFixture(t)
 	manager := &fakeReviewedIntegrationManager{descriptor: descriptor, report: report}

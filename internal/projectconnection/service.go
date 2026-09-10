@@ -108,7 +108,7 @@ func InputDigest(request Request) (string, error) {
 }
 
 func (s *Service) Preview(_ context.Context, scope Scope, request Request) (Preview, error) {
-	if s == nil || s.store == nil || scope.Template.ProjectConnection == nil || scope.Template.PluginOwner == nil ||
+	if s == nil || s.store == nil || scope.Template.ProjectConnection == nil ||
 		scope.Template.AssistantProgram == nil || strings.TrimSpace(scope.OwnerUserID) == "" || strings.TrimSpace(scope.RunID) == "" {
 		return Preview{}, ErrUnavailable
 	}
@@ -120,10 +120,10 @@ func (s *Service) Preview(_ context.Context, scope Scope, request Request) (Prev
 	if err != nil {
 		return Preview{}, ErrInvalid
 	}
-	key := workspace.AssistantProgramKey{
-		OwnerUserID: scope.OwnerUserID, PluginID: scope.Template.PluginOwner.PluginID,
-		ProgramID: scope.Template.AssistantProgram.ID,
-	}.Normalize()
+	key, keyErr := homeKey(scope)
+	if keyErr != nil {
+		return Preview{}, ErrUnavailable
+	}
 	station, stationErr := workspace.NewAssistantProgramStore(s.store).FindStation(key)
 	if stationErr != nil && !errors.Is(stationErr, workspace.ErrAssistantStationNotFound) {
 		return Preview{}, ErrUnavailable
@@ -198,11 +198,10 @@ func (s *Service) Commit(ctx context.Context, scope Scope, request Request, revi
 	if current.selectedEntry == "" {
 		return CommitResult{}, ErrInvalid
 	}
-	key := workspace.AssistantProgramKey{
-		OwnerUserID: scope.OwnerUserID,
-		PluginID:    scope.Template.PluginOwner.PluginID,
-		ProgramID:   scope.Template.AssistantProgram.ID,
-	}.Normalize()
+	key, keyErr := homeKey(scope)
+	if keyErr != nil {
+		return CommitResult{}, ErrUnavailable
+	}
 	programs := workspace.NewAssistantProgramStore(s.store)
 	home, homeCreated, err := programs.EnsureStation(key, scope.Template.AssistantProgram)
 	if err != nil {
@@ -263,7 +262,7 @@ func (s *Service) ObservedResult(scope Scope, homeID, projectID string) (CommitR
 // Observe verifies the durable canonical consequences for reconciliation. It
 // never trusts display names, physical nesting, or a journey receipt alone.
 func (s *Service) Observe(scope Scope, homeID, projectID string, mode projecttemplates.ProjectConnectionMode) bool {
-	if s == nil || s.store == nil || scope.Template.PluginOwner == nil || scope.Template.AssistantProgram == nil ||
+	if s == nil || s.store == nil || scope.Template.AssistantProgram == nil ||
 		projectID == "" || homeID == "" || projectID != connectionChildID(scope.RunID) {
 		return false
 	}
@@ -273,11 +272,10 @@ func (s *Service) Observe(scope Scope, homeID, projectID string, mode projecttem
 	}
 	provenance := project.GetTemplateProvenance()
 	link := project.GetAssistantProjectLink()
-	if provenance == nil || provenance.PluginOwner == nil || link == nil || link.StationWorkspaceID != homeID ||
-		provenance.TemplateID != scope.Template.ID || provenance.PluginOwner.PluginID != scope.Template.PluginOwner.PluginID ||
-		provenance.PluginOwner.PluginVersion != scope.Template.PluginOwner.PluginVersion ||
-		link.Key.OwnerUserID != scope.OwnerUserID || link.Key.PluginID != scope.Template.PluginOwner.PluginID ||
-		link.Key.ProgramID != scope.Template.AssistantProgram.ID {
+	expectedKey, keyErr := homeKey(scope)
+	if provenance == nil || link == nil || keyErr != nil || link.StationWorkspaceID != homeID ||
+		provenance.TemplateID != scope.Template.ID || !templateProvenanceMatches(scope.Template, provenance) ||
+		link.Key.Normalize() != expectedKey || link.Key.ProgramID != scope.Template.AssistantProgram.ID {
 		return false
 	}
 	locator, err := workspace.GetProjectEntryLocator(project.SharedData)
@@ -566,11 +564,37 @@ func validDisplayName(value string) bool {
 }
 
 func templateIdentity(template projecttemplates.Template) string {
-	owner := template.PluginOwner
-	if owner == nil {
+	if template.AssistantProgram == nil {
 		return ""
 	}
-	return digestStrings(template.ID, owner.PluginID, owner.PluginVersion, owner.BlueprintID, strconv.Itoa(owner.BlueprintVersion), template.AssistantProgram.ID, strconv.Itoa(template.AssistantProgram.SchemaVersion))
+	if owner := template.PluginOwner; owner != nil {
+		return digestStrings(template.ID, owner.PluginID, owner.PluginVersion, owner.BlueprintID, strconv.Itoa(owner.BlueprintVersion), template.AssistantProgram.ID, strconv.Itoa(template.AssistantProgram.SchemaVersion))
+	}
+	if template.UserSetupQuest != nil && template.UserSetupQuest.Declaration != nil {
+		return digestStrings("user_template", template.ID, template.UserSetupQuest.AttachmentID,
+			projecttemplates.UserSetupQuestDefinitionDigest(template.UserSetupQuest), projecttemplates.UserSetupQuestExecutionDigest(template),
+			template.AssistantProgram.ID, strconv.Itoa(template.AssistantProgram.SchemaVersion))
+	}
+	return ""
+}
+
+func templateProvenanceMatches(template projecttemplates.Template, provenance *workspace.TemplateProvenance) bool {
+	if provenance == nil || template.AssistantProgram == nil || provenance.AssistantProgram == nil {
+		return false
+	}
+	if template.PluginOwner != nil {
+		return provenance.UserTemplateOwner == nil && provenance.PluginOwner != nil &&
+			provenance.PluginOwner.PluginID == template.PluginOwner.PluginID &&
+			provenance.PluginOwner.PluginVersion == template.PluginOwner.PluginVersion
+	}
+	if template.UserSetupQuest == nil || template.UserSetupQuest.Declaration == nil || provenance.PluginOwner != nil || provenance.UserTemplateOwner == nil {
+		return false
+	}
+	owner := provenance.UserTemplateOwner
+	return owner.TemplateID == template.ID && owner.AttachmentID == template.UserSetupQuest.AttachmentID &&
+		owner.QuestID == template.UserSetupQuest.Declaration.ID &&
+		owner.DefinitionDigest == projecttemplates.UserSetupQuestDefinitionDigest(template.UserSetupQuest) &&
+		owner.ExecutionDigest == projecttemplates.UserSetupQuestExecutionDigest(template)
 }
 
 func templateProvenance(template projecttemplates.Template, now time.Time) *workspace.TemplateProvenance {
@@ -578,9 +602,18 @@ func templateProvenance(template projecttemplates.Template, now time.Time) *work
 	if template.PluginOwner != nil {
 		version = template.PluginOwner.BlueprintVersion
 	}
+	var userOwner *workspace.UserTemplateOwner
+	if template.PluginOwner == nil && template.UserSetupQuest != nil && template.UserSetupQuest.Declaration != nil {
+		userOwner = &workspace.UserTemplateOwner{
+			TemplateID: template.ID, AttachmentID: template.UserSetupQuest.AttachmentID,
+			QuestID:          template.UserSetupQuest.Declaration.ID,
+			DefinitionDigest: projecttemplates.UserSetupQuestDefinitionDigest(template.UserSetupQuest),
+			ExecutionDigest:  projecttemplates.UserSetupQuestExecutionDigest(template),
+		}
+	}
 	return &workspace.TemplateProvenance{
 		TemplateID: template.ID, TemplateName: template.Name, Builtin: template.Builtin, Version: version, AppliedAt: now,
-		PluginOwner: template.PluginOwner, DirectoryRequirements: template.DirectoryRequirements,
+		PluginOwner: template.PluginOwner, UserTemplateOwner: userOwner, DirectoryRequirements: template.DirectoryRequirements,
 		AutomationRecipes: template.AutomationRecipes, CapabilityRequirements: template.CapabilityRequirements,
 		Plugins: template.Tools.Plugins, PluginSources: template.Tools.PluginSources,
 		RuntimeRequirements: template.RuntimeRequirements, SetupWizard: template.SetupWizard,

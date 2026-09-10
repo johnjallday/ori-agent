@@ -36,11 +36,19 @@ func ImportFolder(libDir, srcPath, displayName string) (Template, error) {
 	if err != nil {
 		return Template{}, err
 	}
+	release, err := acquireManifestMutationLock(libDir)
+	if err != nil {
+		return Template{}, err
+	}
+	defer release()
 	if src.HasInvalidRuntimeRequirements() {
 		return Template{}, fmt.Errorf("%w: imported blueprint runtime_requirements is unusable: %s", ErrInvalidRuntimeRequirements, src.RuntimeRequirementsError)
 	}
 	if src.HasInvalidProjectConnection() {
 		return Template{}, fmt.Errorf("%w: imported blueprint project_connection is unusable: %s", ErrInvalidProjectConnection, src.ProjectConnectionError)
+	}
+	if src.UserSetupQuestError != "" {
+		return Template{}, fmt.Errorf("%w: imported user_setup_quest is unusable", ErrInvalidUserSetupQuest)
 	}
 
 	absLib, err := filepath.Abs(libDir)
@@ -78,8 +86,12 @@ func ImportFolder(libDir, srcPath, displayName string) (Template, error) {
 		return Template{}, err
 	}
 
+	if err := remapCopiedUserSetupQuest(dest, src.UserSetupQuest); err != nil {
+		_ = os.RemoveAll(dest)
+		return Template{}, err
+	}
 	if strings.TrimSpace(displayName) != "" {
-		if _, err := UpdateManifest(absLib, id, displayName, src.Description, nil, nil); err != nil {
+		if _, err := updateManifestUnlocked(absLib, id, displayName, src.Description, nil, nil, nil, defaultRuntimeCatalog()); err != nil {
 			_ = os.RemoveAll(dest)
 			return Template{}, err
 		}
@@ -103,6 +115,11 @@ func CreateBlank(libDir, name string) (Template, error) {
 	// Slugify never returns empty (it falls back to "untitled"), so any non-empty
 	// name yields a usable id.
 	id := workspace.Slugify(name)
+	release, err := acquireManifestMutationLock(libDir)
+	if err != nil {
+		return Template{}, err
+	}
+	defer release()
 
 	absLib, err := filepath.Abs(libDir)
 	if err != nil {
@@ -124,7 +141,7 @@ func CreateBlank(libDir, name string) (Template, error) {
 	}
 
 	// Seed a minimal manifest so the display name is explicit from the start.
-	if _, err := UpdateManifest(absLib, id, name, "", nil, nil); err != nil {
+	if _, err := updateManifestUnlocked(absLib, id, name, "", nil, nil, nil, defaultRuntimeCatalog()); err != nil {
 		_ = os.RemoveAll(dest)
 		return Template{}, err
 	}
@@ -137,6 +154,11 @@ func CreateBlank(libDir, name string) (Template, error) {
 // duplicate's manifest display name is always set to the resolved name so the
 // two templates stay distinguishable.
 func Duplicate(libDir, id, newName string) (Template, error) {
+	release, err := acquireManifestMutationLock(libDir)
+	if err != nil {
+		return Template{}, err
+	}
+	defer release()
 	src, err := FindLibraryTemplate(libDir, id)
 	if err != nil {
 		return Template{}, err
@@ -177,9 +199,13 @@ func Duplicate(libDir, id, newName string) (Template, error) {
 		_ = os.RemoveAll(dest)
 		return Template{}, err
 	}
+	if err := remapCopiedUserSetupQuest(dest, src.UserSetupQuest); err != nil {
+		_ = os.RemoveAll(dest)
+		return Template{}, err
+	}
 	// Set the duplicate's display name (tags/unknown keys preserved; a legacy
 	// onboarding block is stripped by the save, matching the authoring path).
-	if _, err := UpdateManifest(absLib, newID, basis, src.Description, nil, nil); err != nil {
+	if _, err := updateManifestUnlocked(absLib, newID, basis, src.Description, nil, nil, nil, defaultRuntimeCatalog()); err != nil {
 		_ = os.RemoveAll(dest)
 		return Template{}, err
 	}
@@ -207,10 +233,51 @@ func deleteManifestKeys(dir string, keys ...string) error {
 	if err != nil {
 		return fmt.Errorf("failed to encode manifest: %w", err)
 	}
-	if err := os.WriteFile(manifestPath, append(out, '\n'), 0o640); err != nil { // #nosec G304 -- manifestPath is a resolved library template folder + the fixed ManifestFileName constant
-		return fmt.Errorf("failed to write manifest: %w", err)
+	if err := writeManifestAtomic(manifestPath, append(out, '\n')); err != nil {
+		return err
 	}
 	return nil
+}
+
+func remapCopiedUserSetupQuest(destination string, source *UserSetupQuest) error {
+	if err := deleteManifestKeys(destination, "user_setup_quest"); err != nil {
+		return err
+	}
+	if source == nil || source.Declaration == nil {
+		return nil
+	}
+	template := newTemplate(destination)
+	quest, err := NewUserSetupQuest(template, nil, UserSetupQuestDraftFor(source))
+	if err != nil {
+		return err
+	}
+	template.UserSetupQuest = quest
+	if err := ensureUserSetupQuestLibraryIdentity(filepath.Dir(destination), template, defaultRuntimeCatalog()); err != nil {
+		return err
+	}
+	manifestPath := filepath.Join(destination, ManifestFileName)
+	data, err := os.ReadFile(manifestPath) // #nosec G304 -- destination is a newly copied library template
+	if err != nil {
+		return err
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("%w: copied template manifest is invalid", ErrInvalidUserSetupQuest)
+	}
+	encoded, err := json.Marshal(quest)
+	if err != nil {
+		return err
+	}
+	var value any
+	if err := json.Unmarshal(encoded, &value); err != nil {
+		return err
+	}
+	raw["user_setup_quest"] = value
+	out, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeManifestAtomic(manifestPath, append(out, '\n'))
 }
 
 // copyFolderVerbatim copies a directory tree without name substitution,
@@ -292,7 +359,26 @@ type ManifestEdit struct {
 // tags with the normalized set, and an explicit empty slice clears the key.
 // edit is nil for callers that only touch name/description/tags.
 func UpdateManifest(libDir, id, name, description string, tags *[]string, edit *ManifestEdit) (Template, error) {
-	tpl, err := FindLibraryTemplate(libDir, id)
+	return UpdateManifestWithGuard(libDir, id, name, description, tags, edit, nil, defaultRuntimeCatalog())
+}
+
+// UpdateManifestWithGuard serializes the complete read/validate/lock/write
+// sequence across processes. The guard decides whether a normalized protected
+// change is legal for the current user.
+func UpdateManifestWithGuard(libDir, id, name, description string, tags *[]string, edit *ManifestEdit, guard UserSetupQuestMutationGuard, catalog RuntimeCatalog) (Template, error) {
+	if catalog == nil {
+		catalog = defaultRuntimeCatalog()
+	}
+	release, err := acquireManifestMutationLock(libDir)
+	if err != nil {
+		return Template{}, err
+	}
+	defer release()
+	return updateManifestUnlocked(libDir, id, name, description, tags, edit, guard, catalog)
+}
+
+func updateManifestUnlocked(libDir, id, name, description string, tags *[]string, edit *ManifestEdit, guard UserSetupQuestMutationGuard, catalog RuntimeCatalog) (Template, error) {
+	tpl, err := FindLibraryTemplateWithCatalog(libDir, id, catalog)
 	if err != nil {
 		return Template{}, err
 	}
@@ -461,10 +547,20 @@ func UpdateManifest(libDir, id, name, description string, tags *[]string, edit *
 	if err != nil {
 		return Template{}, fmt.Errorf("failed to encode manifest: %w", err)
 	}
-	if err := os.WriteFile(manifestPath, append(data, '\n'), 0o640); err != nil { // #nosec G304 -- manifestPath is libDir/<validated id>/template.json, not user-controlled
-		return Template{}, fmt.Errorf("failed to write manifest: %w", err)
+	var candidateManifest manifest
+	if err := json.Unmarshal(data, &candidateManifest); err != nil {
+		return Template{}, fmt.Errorf("failed to validate effective manifest: %w", err)
 	}
-	return newTemplate(tpl.Path), nil
+	candidate := newTemplateWithManifest(tpl.Path, candidateManifest, catalog)
+	if guard != nil {
+		if err := guard(tpl, candidate); err != nil {
+			return Template{}, err
+		}
+	}
+	if err := writeManifestAtomic(manifestPath, append(data, '\n')); err != nil {
+		return Template{}, err
+	}
+	return candidate, nil
 }
 
 // Delete removes a library template, preferring the system trash so the
@@ -473,9 +569,23 @@ func UpdateManifest(libDir, id, name, description string, tags *[]string, edit *
 // support). Note: deleting a starter template only lasts until the next
 // server start, which re-materializes absent starters.
 func Delete(libDir, id string) (bool, error) {
-	tpl, err := FindLibraryTemplate(libDir, id)
+	return DeleteWithGuard(libDir, id, nil, defaultRuntimeCatalog())
+}
+
+func DeleteWithGuard(libDir, id string, guard UserSetupQuestContentGuard, catalog RuntimeCatalog) (bool, error) {
+	release, err := acquireManifestMutationLock(libDir)
 	if err != nil {
 		return false, err
+	}
+	defer release()
+	tpl, err := FindLibraryTemplateWithCatalog(libDir, id, catalog)
+	if err != nil {
+		return false, err
+	}
+	if guard != nil {
+		if err := guard(tpl); err != nil {
+			return false, err
+		}
 	}
 
 	if platform.TrashSupported() {

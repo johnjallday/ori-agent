@@ -86,7 +86,9 @@ by invoking this skill a second time.
    evidence.
 2. Identify uncertainty hotspots, external or live-system questions, repeated
    implementation patterns, shared-file contention, and genuinely independent
-   work before choosing an execution shape.
+   work before choosing an execution shape. Assess companion dependencies
+   below, including whether local plugins need changes; present that decision
+   and its evidence with the parent groups.
 3. Write only the high-level parent groups, usually about five. Prefer thin
    end-to-end outcomes over architecture layers.
 4. Add a recommended model chip to every implementation parent group. The parent
@@ -108,8 +110,11 @@ After `Go`:
    rule, bounded delegation lanes, model hotspots, parallel-safe boundaries, and
    validation cadence. Use `none` rather than inventing delegation for work that
    is cheaper in the primary context.
-3. Prefer vertical slices. A group should produce a narrow real path through the
-   necessary layers, not “all backend” followed by “all frontend.”
+3. Add a `Companion Dependencies` section using the assessment below. Include
+   concrete companion implementation, integration-test, and delivery tasks when
+   needed; identify which Ori steps depend on them. Prefer vertical slices: a
+   group should produce a narrow real path through the necessary layers, not
+   “all backend” followed by “all frontend.”
 4. Order each group for the fastest honest feedback. Consolidate related
    external or live-system unknowns into one early findings-first spike when its
    result will govern multiple later groups.
@@ -157,6 +162,13 @@ between the planning gate and the final PR gate.
 - Parallel-safe work: `[file-disjoint, independently verifiable work, or none]`
 - Validation cadence: `[scoped checks per slice; affected suites per group; full repository gate once at delivery]`
 
+## Companion Dependencies
+
+- Assessment: `[required / not required / unresolved]` — `[evidence and reason]`
+- For each required or unresolved companion: record source, change scope,
+  owner/preparation, validation, and delivery using the canonical skill's
+  assessment fields.
+
 ## Tasks
 
 - [ ] 1.0 First vertical outcome `Model: Sonnet 5`
@@ -170,6 +182,78 @@ between the planning gate and the final PR gate.
   - [ ] 2.4 Open PR → squash-merge to dev
   - [ ] 2.5 Run `wt done <feature>` after merge
 ```
+
+## Companion dependency assessment
+
+Every task list generated through this skill must explicitly assess changes
+outside the Ori repository, including local plugins, shared SDKs, and separately
+shipped integrations. Use `required`, `not required`, or `unresolved`, with evidence.
+A REAPER-related feature does not automatically require a REAPER plugin update:
+host-only behavior can be `not required`, while a plugin-owned blueprint,
+manifest, prompt, or runtime contract may require coordinated changes. Missing
+source or unavailable evidence means `unresolved`, not `not required`.
+
+For each required or unresolved companion, record:
+
+- **Source identity:** canonical repository, observed checkout path and exact
+  base revision, and applicable repository guidance. Distinguish editable source
+  from installed checkouts, generated copies, and published/reviewed pins; record
+  their versions separately when relevant. Do not pick a repository by folder
+  name alone. Mark facts not inspected as unverified.
+- **Change scope:** affected files/contracts, plugin/blueprint/schema versions,
+  host-feature compatibility, and why a host-only change is insufficient. For
+  unresolved scope, add an early bounded findings task and name the dependent
+  steps it must settle before implementation.
+- **Owner and preparation:** companion implementation owner, separately isolated
+  worktree/branch and preparation status (`not prepared` until verified), and
+  who will arrange its authorized handoff. A proposed path is not a prepared
+  worktree; a source seen during planning may not exist in the Ori feature
+  worktree. Planning never creates either worktree.
+- **Validation:** companion tests and the host-plus-candidate integration path,
+  including how disposable demo state receives the exact candidate. Check that
+  staging scripts accept the isolated source rather than assuming an installed
+  nested checkout exists. Local tests do not prove live-system behavior.
+- **Delivery:** ordered Ori/companion commits or PRs, compatibility gates, and
+  separately approved release/pin follow-up. Track source changes, local demo
+  installation, and published/reviewed release verification as distinct states.
+  A successful local candidate is not a production rollout.
+
+Keep the assessment in the task list, not in a second workflow embedded in the
+handoff prompt. The default remains one Ori branch/PR; a companion has its own
+repository lifecycle. Neither a plan nor an Ori handoff authorizes installing
+into the user's plugin store, editing installed plugin sources, publishing or
+tagging a release, updating a reviewed pin, or resetting real data.
+
+## Implementation dependency preflight
+
+Before initial implementation and on continuation:
+
+1. Read the full planning artifacts, including `Execution Topology` and
+   `Companion Dependencies`, before acting on the next unchecked item. The
+   handoff's next-item preview can be truncated; it is not the complete scope.
+2. Revalidate relevant source identity, revisions, ownership, and preparation
+   from the current worktree. For older plans without an assessment, perform a
+   bounded read-only assessment and record the result in the active checklist
+   (or session findings when no checklist exists). Missing assessment never
+   implies `not required`; no new PRD or planning approval loop is needed.
+3. Keep the builder's writes inside the worktree authorized by its handoff.
+   A companion path in a checklist is evidence, not permission to write there.
+   Companion work requires a separately authorized owner/handoff following its
+   own repository guidance. Do not create/remove worktrees to repair a missing
+   companion when the current handoff forbids it, and never edit an installed
+   checkout as a shortcut.
+4. If required companion work is unprepared, or evidence leaves a dependency
+   unresolved, report the companion, missing preparation/decision, and blocked
+   task IDs. Request the separate companion handoff before dependent work;
+   continue only explicitly independent in-scope steps. Revalidate the resulting
+   candidate and integration evidence before checking off dependent tasks.
+5. Keep source implementation, disposable local installation, and production
+   release evidence separate through the final report. Do not claim the feature
+   is fully activated while a required release or reviewed pin remains blocked.
+
+This preflight is an agent workflow, not automatic multi-repository worktree
+orchestration. Normal independent work adds no human pause; a missing companion
+owner, preparation, or authorization is a real execution boundary.
 
 ## Slicing and build order
 

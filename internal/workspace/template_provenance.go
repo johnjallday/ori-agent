@@ -17,6 +17,20 @@ type PluginTemplateOwner struct {
 
 func (o PluginTemplateOwner) Clone() PluginTemplateOwner { return o }
 
+// UserTemplateOwner is inert source-aware provenance for one host-generated
+// setup attachment. It is deliberately separate from PluginTemplateOwner: a
+// local template can require reviewed software without claiming that software
+// owns the template or Assistant Program.
+type UserTemplateOwner struct {
+	TemplateID       string `json:"template_id"`
+	AttachmentID     string `json:"attachment_id"`
+	QuestID          string `json:"quest_id"`
+	DefinitionDigest string `json:"definition_digest"`
+	ExecutionDigest  string `json:"execution_digest"`
+}
+
+func (o UserTemplateOwner) Clone() UserTemplateOwner { return o }
+
 // TemplateProvenance records the template a workspace was created from in
 // portable workspace metadata. Runtime providers identify origin from this
 // rather than scanning user-editable names, tasks, or project filenames. It
@@ -35,6 +49,9 @@ type TemplateProvenance struct {
 	// PluginOwner is present only for a plugin-contributed blueprint. Existing
 	// workspaces retain this inert snapshot when the plugin is disabled/removed.
 	PluginOwner *PluginTemplateOwner `json:"plugin_owner,omitempty"`
+	// UserTemplateOwner is present only for a user-owned setup attachment and is
+	// mutually exclusive with PluginOwner.
+	UserTemplateOwner *UserTemplateOwner `json:"user_template_owner,omitempty"`
 	// DirectoryRequirements are the local folders the template asked the user to
 	// choose. They are carried unresolved: creation records what the template
 	// requested, and guided setup — not this record — resolves, validates, and
@@ -104,6 +121,10 @@ func cloneTemplateProvenanceInto(dst *TemplateProvenance, src *TemplateProvenanc
 	if src.PluginOwner != nil {
 		owner := src.PluginOwner.Clone()
 		dst.PluginOwner = &owner
+	}
+	if src.UserTemplateOwner != nil {
+		owner := src.UserTemplateOwner.Clone()
+		dst.UserTemplateOwner = &owner
 	}
 	dst.DirectoryRequirements = cloneDirectoryRequirements(src.DirectoryRequirements)
 	dst.AutomationRecipes = cloneAutomationRecipes(src.AutomationRecipes)

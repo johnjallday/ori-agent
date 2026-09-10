@@ -142,6 +142,11 @@ The bootstrap prompt and size-routed starter carry only Issue-specific paths and
 state. Planning workflow lives once in
 `.agents/skills/task-planning/SKILL.md`, which the selected planner reads
 directly; it runs planning-only mode and stops after replacing the starter.
+The skill's [companion dependency assessment](../.agents/skills/task-planning/SKILL.md#companion-dependency-assessment)
+records whether local plugins or other repositories need coordinated changes.
+The decision and evidence live in the detailed checklist's `Companion
+Dependencies` section, not in a REAPER-specific bootstrap or an automatic plugin
+update rule.
 
 **Planner sessions are not feature handoffs.** They are stored separately from
 `BridgeState.Features`, keyed by repository plus Issue *number* — the one part
@@ -211,6 +216,30 @@ AGENTS.md and whichever planning artifacts actually exist in the worktree.
 A feature needs a PRD **or** a task list, not both: work planned from a
 `size:quick`/`size:planned` Issue has no PRD, and the bootstrap prompt says so
 honestly rather than naming a `prd-<feature>.md` that was never written.
+
+Initial and default continuation prompts also reference the canonical skill's
+[implementation dependency preflight](../.agents/skills/task-planning/SKILL.md#implementation-dependency-preflight)
+and require reading the full planning artifacts, including `Execution Topology`
+and `Companion Dependencies`, before acting on the potentially truncated next-item
+preview. An unavailable skill is reported rather than silently skipping the
+preflight. Older plans without the dependency section are assessed by the agent;
+the prompt renderer does not parse checklist prose into a readiness claim.
+
+The handoff remains scoped to one Ori worktree. `wt start` does not provision a
+companion repository or copy ignored installed plugin checkouts into the feature.
+The preflight directs the builder to report missing companion preparation and
+blocked task IDs, request a separately authorized companion owner/handoff, and
+continue only explicitly independent Ori work. A companion path in the plan does
+not authorize writing there; installed sources are not an implementation shortcut.
+Local candidate integration and published/reviewed release verification remain
+separate evidence states. No multi-repository orchestration or automatic plugin
+installation, publication, or reviewed-pin update is added by this workflow.
+
+These are generated-prompt changes, not a resend to existing sessions. Already
+delivered handoffs and explicitly supplied continuation prompts are not rewritten.
+As with other helper changes, a stable installed helper must be explicitly
+refreshed through `wt herd setup` to use the new generator; this does not update
+a feature worktree's copy of the planning skill.
 
 The handoff resolves the **currently focused** Herdr workspace and creates the
 feature's tab inside it, labelled with the feature slug. It never opens a

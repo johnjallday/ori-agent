@@ -2,6 +2,7 @@
 // supply a URL, action handler, user ID, or permission scope.
 export const ASSISTANT_SETUP_ROOT = '/api/personal-assistant/setup-journey';
 const idPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const attachmentPattern = /^uqatt_[a-f0-9]{24}$/;
 
 export function setupQuestAPIRoot(pluginID, questID) {
   if (
@@ -17,14 +18,41 @@ export function setupQuestAPIRoot(pluginID, questID) {
   return `/api/setup-quests/${encodeURIComponent(pluginID)}/${encodeURIComponent(questID)}`;
 }
 
+export function userTemplateSetupQuestAPIRoot(templateID, attachmentID) {
+  if (
+    typeof templateID !== 'string' ||
+    typeof attachmentID !== 'string' ||
+    templateID.trim() !== templateID ||
+    attachmentID.trim() !== attachmentID ||
+    !idPattern.test(templateID) ||
+    !attachmentPattern.test(attachmentID)
+  ) {
+    throw new Error('This setup quest is unavailable. Refresh its template.');
+  }
+  return `/api/user-template-setup-quests/${encodeURIComponent(templateID)}/${encodeURIComponent(attachmentID)}`;
+}
+
 export function setupJourneyAPIRoot(projection) {
   const declaration = projection?.journey;
+  if (declaration?.source === 'user_template') {
+    return userTemplateSetupQuestAPIRoot(declaration.template_id, declaration.attachment_id);
+  }
   return declaration?.plugin_id
     ? setupQuestAPIRoot(declaration.plugin_id, declaration.id)
     : ASSISTANT_SETUP_ROOT;
 }
 
 export function setupQuestURL(quest) {
+  if (quest?.source === 'user_template') {
+    userTemplateSetupQuestAPIRoot(quest.template_id, quest.attachment_id);
+    const query = new URLSearchParams({
+      setup: 'quest',
+      source: 'user_template',
+      template: quest.template_id,
+      attachment: quest.attachment_id
+    });
+    return `/?${query}`;
+  }
   setupQuestAPIRoot(quest?.plugin_id, quest?.id);
   const query = new URLSearchParams({ setup: 'quest', plugin: quest.plugin_id, quest: quest.id });
   return `/?${query}`;
@@ -34,6 +62,15 @@ export function setupQuestURL(quest) {
 // Local copies cannot select another plugin's quest by naming its ID alone.
 export function setupQuestForTemplate(template, quests) {
   if (!template) return null;
+  if (template.user_setup_quest?.attachment_id) {
+    const matches = (Array.isArray(quests) ? quests : []).filter(
+      quest =>
+        quest?.source === 'user_template' &&
+        quest.template_id === template.id &&
+        quest.attachment_id === template.user_setup_quest.attachment_id
+    );
+    return matches.length === 1 ? matches[0] : null;
+  }
   const owner = template.plugin_owner;
   const templateID =
     owner?.plugin_id && owner?.blueprint_id

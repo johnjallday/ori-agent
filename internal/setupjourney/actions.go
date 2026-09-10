@@ -182,6 +182,8 @@ var actionDefinitionsByKind = map[specialist.SetupStepKind][]ActionDefinition{
 // declaration-selected adapter can enter this value.
 type ReadScope struct {
 	OwnerUserID                string
+	QuestSource                QuestSource
+	UserTemplateID             string
 	RelationshipID             string
 	SpecialistSlug             string
 	JourneyID                  string

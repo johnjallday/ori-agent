@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +12,10 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/config"
+	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/setupjourney"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
 
 func TestHandleProjectTemplates(t *testing.T) {
@@ -82,6 +86,7 @@ func newTemplateRoutesServer(t *testing.T, libDir string) *Server {
 	}
 	s := &Server{}
 	s.Core = NewCoreSystemFacade(nil, nil, configMgr, nil, nil)
+	s.Storage = &StorageSystemFacade{UserProvider: userprofile.LocalUserProvider{}}
 	return s
 }
 
@@ -152,6 +157,233 @@ func TestProjectTemplateManagementRoutes(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(libDir, "imported-pack")); !os.IsNotExist(err) {
 		t.Fatalf("template still present after delete (err=%v)", err)
+	}
+}
+
+func TestUserSetupQuestAuthoringRoutesUsePreviewAndOptimisticSave(t *testing.T) {
+	libDir := t.TempDir()
+	fixture := filepath.Join("..", "projecttemplates", "testdata", "user-setup-quest-eligible")
+	template, err := projecttemplates.ImportFolder(libDir, fixture, "Eligible project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newTemplateRoutesServer(t, libDir)
+	s.Storage = &StorageSystemFacade{UserProvider: userprofile.LocalUserProvider{}}
+
+	getRequest := httptest.NewRequest(http.MethodGet, "/api/project-templates/"+template.ID+"/setup-quest", nil)
+	getRequest.SetPathValue("templateID", template.ID)
+	getRecorder := httptest.NewRecorder()
+	s.handleUserSetupQuestGet(getRecorder, getRequest)
+	if getRecorder.Code != http.StatusOK {
+		t.Fatalf("get = %d: %s", getRecorder.Code, getRecorder.Body.String())
+	}
+	var metadata userSetupQuestAuthoringResponse
+	if err := json.Unmarshal(getRecorder.Body.Bytes(), &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if metadata.Source != "user_template" || !metadata.Editable || !metadata.Eligibility.Eligible || len(metadata.Integrations) == 0 {
+		t.Fatalf("metadata = %+v", metadata)
+	}
+
+	manifestPath := filepath.Join(template.Path, projecttemplates.ManifestFileName)
+	beforePreview, _ := os.ReadFile(manifestPath)
+	previewBody, _ := json.Marshal(map[string]any{"user_setup_quest": metadata.Draft})
+	previewRequest := httptest.NewRequest(http.MethodPost, "/preview", bytes.NewReader(previewBody))
+	previewRequest.SetPathValue("templateID", template.ID)
+	previewRecorder := httptest.NewRecorder()
+	s.handleUserSetupQuestPreview(previewRecorder, previewRequest)
+	if previewRecorder.Code != http.StatusOK || !strings.Contains(previewRecorder.Body.String(), "Preview — no setup started") {
+		t.Fatalf("preview = %d: %s", previewRecorder.Code, previewRecorder.Body.String())
+	}
+	afterPreview, _ := os.ReadFile(manifestPath)
+	if string(afterPreview) != string(beforePreview) {
+		t.Fatal("preview changed template.json")
+	}
+
+	// Omission preserves the current absent attachment.
+	omitted := httptest.NewRequest(http.MethodPut, "/setup-quest", bytes.NewBufferString(`{"if_revision":"`+metadata.Revision+`"}`))
+	omitted.SetPathValue("templateID", template.ID)
+	omittedRecorder := httptest.NewRecorder()
+	s.handleUserSetupQuestPut(omittedRecorder, omitted)
+	if omittedRecorder.Code != http.StatusOK {
+		t.Fatalf("omitted = %d: %s", omittedRecorder.Code, omittedRecorder.Body.String())
+	}
+
+	saveBody, _ := json.Marshal(map[string]any{"if_revision": metadata.Revision, "user_setup_quest": metadata.Draft})
+	saveRequest := httptest.NewRequest(http.MethodPut, "/setup-quest", bytes.NewReader(saveBody))
+	saveRequest.SetPathValue("templateID", template.ID)
+	saveRecorder := httptest.NewRecorder()
+	s.handleUserSetupQuestPut(saveRecorder, saveRequest)
+	if saveRecorder.Code != http.StatusOK {
+		t.Fatalf("save = %d: %s", saveRecorder.Code, saveRecorder.Body.String())
+	}
+	var saved userSetupQuestAuthoringResponse
+	if err := json.Unmarshal(saveRecorder.Body.Bytes(), &saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved.Quest == nil || saved.Revision == metadata.Revision {
+		t.Fatalf("saved metadata = %+v", saved)
+	}
+
+	staleRequest := httptest.NewRequest(http.MethodPut, "/setup-quest", bytes.NewReader(saveBody))
+	staleRequest.SetPathValue("templateID", template.ID)
+	staleRecorder := httptest.NewRecorder()
+	s.handleUserSetupQuestPut(staleRecorder, staleRequest)
+	if staleRecorder.Code != http.StatusConflict {
+		t.Fatalf("stale = %d: %s", staleRecorder.Code, staleRecorder.Body.String())
+	}
+
+	malicious := map[string]any{}
+	encodedDraft, _ := json.Marshal(metadata.Draft)
+	if err := json.Unmarshal(encodedDraft, &malicious); err != nil {
+		t.Fatal(err)
+	}
+	malicious["route"] = "/api/run"
+	maliciousBody, _ := json.Marshal(map[string]any{"if_revision": saved.Revision, "user_setup_quest": malicious})
+	maliciousRequest := httptest.NewRequest(http.MethodPut, "/setup-quest", bytes.NewReader(maliciousBody))
+	maliciousRequest.SetPathValue("templateID", template.ID)
+	maliciousRecorder := httptest.NewRecorder()
+	s.handleUserSetupQuestPut(maliciousRecorder, maliciousRequest)
+	if maliciousRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("malicious = %d: %s", maliciousRecorder.Code, maliciousRecorder.Body.String())
+	}
+
+	removeRequest := httptest.NewRequest(http.MethodPut, "/setup-quest", bytes.NewBufferString(`{"if_revision":"`+saved.Revision+`","user_setup_quest":null}`))
+	removeRequest.SetPathValue("templateID", template.ID)
+	removeRecorder := httptest.NewRecorder()
+	s.handleUserSetupQuestPut(removeRecorder, removeRequest)
+	if removeRecorder.Code != http.StatusOK {
+		t.Fatalf("remove = %d: %s", removeRecorder.Code, removeRecorder.Body.String())
+	}
+}
+
+func TestUserSetupQuestBindingLocksProtectedTemplateMutations(t *testing.T) {
+	libDir := t.TempDir()
+	fixture := filepath.Join("..", "projecttemplates", "testdata", "user-setup-quest-eligible")
+	template, err := projecttemplates.ImportFolder(libDir, fixture, "Locked project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft := projecttemplates.DefaultUserSetupQuestDraft()
+	draft.IntegrationKey = "ori_reaper"
+	template, err = projecttemplates.UpdateUserSetupQuest(libDir, template.ID, projecttemplates.UserSetupQuestEdit{
+		ExpectedRevision: template.UserSetupQuestRevision, Draft: &draft,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := database.Open(context.Background(), &database.Config{InMemory: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	store := setupjourney.NewSQLiteStore(db)
+	if _, _, err := store.ClaimUserTemplateBinding(context.Background(), setupjourney.UserTemplateBinding{
+		UserID: "other-user", TemplateID: template.ID,
+		AttachmentID: template.UserSetupQuest.AttachmentID, QuestID: template.UserSetupQuest.Declaration.ID,
+		DefinitionDigest: projecttemplates.UserSetupQuestDefinitionDigest(template.UserSetupQuest),
+		ExecutionDigest:  projecttemplates.UserSetupQuestExecutionDigest(template),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s := newTemplateRoutesServer(t, libDir)
+	s.setupJourneyStore = store
+
+	get := httptest.NewRequest(http.MethodGet, "/setup-quest", nil)
+	get.SetPathValue("templateID", template.ID)
+	getRecorder := httptest.NewRecorder()
+	s.handleUserSetupQuestGet(getRecorder, get)
+	var metadata userSetupQuestAuthoringResponse
+	if err := json.Unmarshal(getRecorder.Body.Bytes(), &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if !metadata.Locked || metadata.RecoveryCode != "" {
+		t.Fatalf("locked metadata=%+v", metadata)
+	}
+
+	changedDraft := projecttemplates.UserSetupQuestDraftFor(template.UserSetupQuest)
+	changedDraft.Title = "Changed after start"
+	changedBody, _ := json.Marshal(map[string]any{"if_revision": template.UserSetupQuestRevision, "user_setup_quest": changedDraft})
+	changed := httptest.NewRequest(http.MethodPut, "/setup-quest", bytes.NewReader(changedBody))
+	changed.SetPathValue("templateID", template.ID)
+	changedRecorder := httptest.NewRecorder()
+	s.handleUserSetupQuestPut(changedRecorder, changed)
+	if changedRecorder.Code != http.StatusConflict {
+		t.Fatalf("quest edit=%d: %s", changedRecorder.Code, changedRecorder.Body.String())
+	}
+
+	// Display-only metadata remains mutable because it is outside the execution digest.
+	display := httptest.NewRequest(http.MethodPut, "/template", bytes.NewBufferString(`{"name":"Renamed after start","description":"Display copy"}`))
+	display.SetPathValue("templateID", template.ID)
+	displayRecorder := httptest.NewRecorder()
+	s.handleProjectTemplateUpdate(displayRecorder, display)
+	if displayRecorder.Code != http.StatusOK {
+		t.Fatalf("display edit=%d: %s", displayRecorder.Code, displayRecorder.Body.String())
+	}
+
+	// A project-entry change and any scaffold write are protected.
+	entryBody := `{"name":"Renamed after start","description":"Display copy","project_entry":{"relative_path":"{{name}}.rpp","open_after_create_default":true}}`
+	entry := httptest.NewRequest(http.MethodPut, "/template", bytes.NewBufferString(entryBody))
+	entry.SetPathValue("templateID", template.ID)
+	entryRecorder := httptest.NewRecorder()
+	s.handleProjectTemplateUpdate(entryRecorder, entry)
+	if entryRecorder.Code != http.StatusConflict {
+		t.Fatalf("project entry edit=%d: %s", entryRecorder.Code, entryRecorder.Body.String())
+	}
+	file := httptest.NewRequest(http.MethodPut, "/files/content", bytes.NewBufferString(`{"path":"{{name}}.rpp","content":"changed"}`))
+	file.SetPathValue("templateID", template.ID)
+	fileRecorder := httptest.NewRecorder()
+	s.handleProjectTemplateFileWrite(fileRecorder, file)
+	if fileRecorder.Code != http.StatusConflict {
+		t.Fatalf("scaffold edit=%d: %s", fileRecorder.Code, fileRecorder.Body.String())
+	}
+
+	// The ordinary Agents roster is not the Assistant Program and stays editable.
+	agents := httptest.NewRequest(http.MethodPut, "/agents", bytes.NewBufferString(`{"agents":[{"name":"Producer"}]}`))
+	agents.SetPathValue("templateID", template.ID)
+	agentsRecorder := httptest.NewRecorder()
+	s.handleProjectTemplateAgentsSet(agentsRecorder, agents)
+	if agentsRecorder.Code != http.StatusOK {
+		t.Fatalf("agents edit=%d: %s", agentsRecorder.Code, agentsRecorder.Body.String())
+	}
+
+	remove := httptest.NewRequest(http.MethodDelete, "/template", nil)
+	remove.SetPathValue("templateID", template.ID)
+	removeRecorder := httptest.NewRecorder()
+	s.handleProjectTemplateDelete(removeRecorder, remove)
+	if removeRecorder.Code != http.StatusConflict {
+		t.Fatalf("template delete=%d: %s", removeRecorder.Code, removeRecorder.Body.String())
+	}
+
+	// Out-of-band protected drift is reported as recovery, never silently rebound.
+	manifestPath := filepath.Join(template.Path, projecttemplates.ManifestFileName)
+	var raw map[string]any
+	manifestBytes, _ := os.ReadFile(manifestPath)
+	if err := json.Unmarshal(manifestBytes, &raw); err != nil {
+		t.Fatal(err)
+	}
+	raw["project_entry"].(map[string]any)["open_after_create_default"] = true
+	drifted, _ := json.MarshalIndent(raw, "", "  ")
+	if err := os.WriteFile(manifestPath, drifted, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	driftGet := httptest.NewRequest(http.MethodGet, "/setup-quest", nil)
+	driftGet.SetPathValue("templateID", template.ID)
+	driftRecorder := httptest.NewRecorder()
+	s.handleUserSetupQuestGet(driftRecorder, driftGet)
+	if err := json.Unmarshal(driftRecorder.Body.Bytes(), &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if metadata.RecoveryCode != "protected_content_changed" || !strings.Contains(metadata.LockMessage, "will not rebind") {
+		t.Fatalf("drift metadata=%+v", metadata)
+	}
+	driftDisplay := httptest.NewRequest(http.MethodPut, "/template", bytes.NewBufferString(`{"name":"Metadata during recovery","description":"Still editable"}`))
+	driftDisplay.SetPathValue("templateID", template.ID)
+	driftDisplayRecorder := httptest.NewRecorder()
+	s.handleProjectTemplateUpdate(driftDisplayRecorder, driftDisplay)
+	if driftDisplayRecorder.Code != http.StatusOK {
+		t.Fatalf("display edit during recovery=%d: %s", driftDisplayRecorder.Code, driftDisplayRecorder.Body.String())
 	}
 }
 
