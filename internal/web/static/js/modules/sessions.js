@@ -3969,6 +3969,7 @@ const sessionManager = {
   returnFromWorkspaceMapPlacement(token, reason = 'back') {
     const state = this.workspaceMapPlacement;
     if (!state || state.token !== token || state.phase !== 'placing') return false;
+    const mapUnavailable = reason === 'map-unavailable';
     state.phase = 'resuming';
     window.OriWorkspaceMap?.endPlacement?.(token, { reason });
 
@@ -3976,6 +3977,11 @@ const sessionManager = {
     const modalAPI = typeof bootstrap !== 'undefined' ? bootstrap.Modal : window.bootstrap?.Modal;
     if (!modalElement || !modalAPI) {
       state.phase = 'review';
+      if (mapUnavailable) {
+        this.showWorkspaceCreateError(
+          'Map placement is unavailable. Retry after the map finishes loading, or cancel this workspace.'
+        );
+      }
       return true;
     }
 
@@ -3993,6 +3999,11 @@ const sessionManager = {
           state.phase = 'review';
           this.wizardStep = this.wizardStepCount;
           this.refreshWizardChrome();
+          if (mapUnavailable) {
+            this.showWorkspaceCreateError(
+              'Map placement is unavailable. Retry after the map finishes loading, or cancel this workspace.'
+            );
+          }
           document.getElementById('wizardStep4Title')?.focus();
         },
         { once: true }

@@ -522,6 +522,9 @@
 .ws-map-canvas.is-placement-active {
   cursor: crosshair;
 }
+.ws-map-canvas.is-placement-active.is-panning {
+  cursor: grabbing;
+}
 .ws-map-canvas.is-placement-active .ws-map-world > :not(.ws-map-placement-preview) {
   pointer-events: none;
 }

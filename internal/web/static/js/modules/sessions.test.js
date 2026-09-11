@@ -395,6 +395,32 @@ test('Map placement holds the reviewed draft without creating before a final map
   assert.equal(fetches.length, 0, 'Escape remains non-mutating');
 });
 
+test('unavailable Map placement returns to Review with an actionable non-create error', () => {
+  let endCalls = 0;
+  const manager = loadSessionManager(undefined, {
+    OriWorkspaceMap: {
+      beginPlacement: () => false,
+      endPlacement: () => endCalls++
+    }
+  });
+  let error = '';
+  manager.showWorkspaceCreateError = message => {
+    error = message;
+  };
+
+  const placement = manager.beginWorkspaceMapPlacement({
+    origin: { entryPoint: 'workspace_map_build', kind: 'canvas' },
+    candidate: { x: 456, y: 228 },
+    payload: { name: 'Wait for Map' },
+    review: { signature: 'map-loading' }
+  });
+
+  assert.equal(placement.phase, 'review');
+  assert.equal(endCalls, 1, 'the failed start clears the page-local session only');
+  assert.match(error, /Map placement is unavailable/);
+  assert.equal(manager.workspaceMapPlacement, placement);
+});
+
 test('Map placement keeps an agent-less vacancy snapshot and true cancellation discards it', () => {
   const placementCalls = [];
   const manager = loadSessionManager(undefined, {

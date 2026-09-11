@@ -4983,7 +4983,6 @@
     canvas.addEventListener(
       'wheel',
       function (event) {
-        if (placementSession && placementSession.container === container) return;
         if (isInteractiveTarget(event.target)) return;
         if (event.preventDefault) event.preventDefault();
         var viewport = viewportSize(canvas);
@@ -5941,6 +5940,12 @@
     });
     if (lastWorldLayout) {
       lastWorldLayout.nodes.forEach(function (node) {
+        claim(node.id, node);
+      });
+      // Collapsing a district hides its member tiles, not their real map
+      // footprints. A reviewed candidate must not be allowed to occupy a
+      // building merely because its group is currently compact.
+      (lastWorldLayout.hiddenNodes || []).forEach(function (node) {
         claim(node.id, node);
       });
     }
@@ -7698,6 +7703,10 @@
             state.payload && state.payload.blueprint_builtin === true
           )
         : '';
+    // A draft has no designation. Personal Ops may use the curated catalog
+    // art, but only a persisted personal_hq workspace may render the reserved
+    // HQ landmark treatment (tileHTML enforces the same provenance rule).
+    if (variant === 'hq') variant = '';
     var structure =
       variant && art && typeof art.svgForVariant === 'function'
         ? art.svgForVariant(variant, { context: 'map' })
@@ -7722,14 +7731,15 @@
     var state = placementSession;
     if (!state || !state.candidate) return '';
     var problem = placementProblem(state.candidate);
-    var detail = problem || 'Click or drag on open ground. Arrow keys nudge the exact position.';
+    var detail =
+      problem || 'Move to preview, click open ground to create. Drag navigates; Arrow keys nudge.';
     return (
       '<div class="ws-map-placement-controls" data-ws-map-placement-controls role="group" aria-label="Place new workspace">' +
       '<div class="ws-map-placement-copy"><strong>Place ' +
       escapeHtml(String((state.payload && state.payload.name) || 'new workspace')) +
       '</strong><span data-ws-map-placement-coordinate>' +
       escapeHtml(candidateLabel(state.candidate)) +
-      '</span><small data-ws-map-placement-instruction>' +
+      '</span><small data-ws-map-placement-instruction role="status" aria-live="polite">' +
       escapeHtml(detail) +
       '</small></div>' +
       '<div class="ws-map-placement-buttons">' +
@@ -7827,7 +7837,8 @@
     if (coordinate) coordinate.textContent = candidateLabel(state.candidate);
     if (instruction) {
       instruction.textContent =
-        problem || 'Click or drag on open ground. Arrow keys nudge the exact position.';
+        problem ||
+        'Move to preview, click open ground to create. Drag navigates; Arrow keys nudge.';
     }
     if (confirm) {
       confirm.disabled = !!problem || !!state.submitting;
@@ -7839,17 +7850,41 @@
     }
   }
 
-  function setPlacementCandidate(container, point, bypassSnap) {
+  function setPlacementCandidate(container, point, bypassSnap, announceCandidate) {
     var state = placementSession;
     if (!state || state.container !== container || state.submitting) return;
     var candidate = safePoint(point);
     if (!candidate) return;
     state.candidate = snapPoint(candidate, bypassSnap);
+    var problem = placementProblem(state.candidate);
+    var status = problem ? 'blocked' : 'available';
     updatePlacementPresentation(container);
-    announce(
-      container,
-      placementProblem(state.candidate) || 'Placement candidate ' + candidateLabel(state.candidate)
-    );
+    // Pointer hover can emit dozens of events per second. Announce only a
+    // validity transition there; Arrow keys are intentional discrete moves and
+    // receive the exact coordinate so keyboard placement remains observable.
+    if (announceCandidate || state.announcedStatus !== status) {
+      announce(
+        container,
+        problem ||
+          (announceCandidate
+            ? 'Placement candidate ' + candidateLabel(state.candidate)
+            : 'Placement position is available.')
+      );
+      state.announcedStatus = status;
+    }
+  }
+
+  function restorePlacementMoveMode(state) {
+    if (
+      !state ||
+      !state.previousMoveMode ||
+      !lastMount ||
+      lastMount.container !== state.container ||
+      layoutState.status !== 'ready'
+    ) {
+      return;
+    }
+    setMoveMode(state.container, true);
   }
 
   function finishPlacement(container, notifyCancel) {
@@ -7857,6 +7892,7 @@
     if (!state || state.container !== container) return;
     placementSession = null;
     settleLayout();
+    restorePlacementMoveMode(state);
     if (notifyCancel) {
       var back = typeof state.onBack === 'function' ? state.onBack : state.onCancel;
       if (typeof back === 'function') back(state.token, 'back');
@@ -7902,6 +7938,16 @@
   function handlePlacementKey(container, event) {
     var state = placementSession;
     if (!state || state.container !== container) return false;
+    if (
+      event.key === 'Enter' &&
+      event.target &&
+      event.target.closest &&
+      event.target.closest('button, a, input, select, textarea, [contenteditable="true"]')
+    ) {
+      // Let the focused control own Enter. In particular, a focused Back button
+      // must not also submit placement through the canvas key handler.
+      return false;
+    }
     if (event.key === 'Escape') {
       finishPlacement(container, true);
       return true;
@@ -7910,7 +7956,11 @@
       confirmPlacement(container);
       return true;
     }
-    var step = layoutState.snapToGrid ? SNAP_STEP : event.shiftKey ? 10 : 1;
+    var step = layoutState.snapToGrid
+      ? SNAP_STEP * (event.shiftKey ? 5 : 1)
+      : event.shiftKey
+        ? 10
+        : 1;
     var point = state.candidate;
     var next = null;
     switch (event.key) {
@@ -7929,7 +7979,7 @@
       default:
         return false;
     }
-    setPlacementCandidate(container, next, !layoutState.snapToGrid);
+    setPlacementCandidate(container, next, !layoutState.snapToGrid, true);
     return true;
   }
 
@@ -7950,46 +8000,93 @@
       });
     }
     if (!canvas || !canvas.addEventListener) return;
-    var pointerId = null;
-    function updateFromPointer(event) {
+    var press = null;
+
+    function releasePress() {
+      if (!press) return;
+      if (
+        canvas.releasePointerCapture &&
+        canvas.hasPointerCapture &&
+        canvas.hasPointerCapture(press.pointerId)
+      ) {
+        canvas.releasePointerCapture(press.pointerId);
+      }
+      if (canvas.classList) canvas.classList.remove('is-panning');
+      press = null;
+    }
+
+    function updateFromPointer(event, announceCandidate) {
       var viewport = viewportSize(canvas);
       setPlacementCandidate(
         container,
         screenToWorld(pointerPosition(canvas, event), camera, viewport),
-        !!event.altKey
+        !!event.altKey,
+        announceCandidate
       );
     }
+
     canvas.addEventListener('pointerdown', function (event) {
       if (placementSession !== state || state.submitting) return;
+      // Secondary and middle buttons retain their ordinary Map behavior and
+      // cannot accidentally create a workspace.
       if (event.button != null && event.button !== 0) return;
-      if (
-        event.target &&
-        event.target.closest &&
-        event.target.closest('[data-ws-map-placement-controls]')
-      ) {
+      if (isInteractiveTarget(event.target)) return;
+      var start = pointerPosition(canvas, event);
+      press = {
+        pointerId: event.pointerId,
+        startX: start.x,
+        startY: start.y,
+        centerX: camera.centerX,
+        centerY: camera.centerY,
+        moved: false
+      };
+      if (canvas.setPointerCapture) canvas.setPointerCapture(event.pointerId);
+    });
+
+    canvas.addEventListener('pointermove', function (event) {
+      if (placementSession !== state || state.submitting) return;
+      // Hover previews the candidate without treating it as a drag or flooding
+      // the live region with every pixel crossed.
+      if (!press || event.pointerId !== press.pointerId) {
+        updateFromPointer(event, false);
         return;
       }
-      pointerId = event.pointerId;
-      if (canvas.setPointerCapture) canvas.setPointerCapture(pointerId);
-      updateFromPointer(event);
+      var point = pointerPosition(canvas, event);
+      var dx = point.x - press.startX;
+      var dy = point.y - press.startY;
+      if (!press.moved) {
+        if (Math.abs(dx) < PAN_THRESHOLD && Math.abs(dy) < PAN_THRESHOLD) return;
+        press.moved = true;
+        if (canvas.classList) canvas.classList.add('is-panning');
+      }
       if (event.preventDefault) event.preventDefault();
+      // A drag is navigation, never confirmation. Keep the candidate in world
+      // coordinates while the camera moves beneath it.
+      setCamera(
+        {
+          centerX: press.centerX - dx / camera.zoom,
+          centerY: press.centerY - dy / camera.zoom,
+          zoom: camera.zoom
+        },
+        container
+      );
     });
-    canvas.addEventListener('pointermove', function (event) {
-      if (placementSession !== state || event.pointerId !== pointerId) return;
-      updateFromPointer(event);
-      if (event.preventDefault) event.preventDefault();
+
+    canvas.addEventListener('pointerup', function (event) {
+      if (!press || event.pointerId !== press.pointerId) return;
+      var wasPan = press.moved;
+      releasePress();
+      if (wasPan || placementSession !== state || state.submitting) return;
+      updateFromPointer(event, true);
+      // A primary background click is the one-step pointer confirmation. An
+      // invalid point stays visibly blocked for a corrected click or keyboard
+      // nudge; it never submits a draft.
+      if (!placementProblem(state.candidate)) confirmPlacement(container);
     });
-    ['pointerup', 'pointercancel'].forEach(function (type) {
+
+    ['pointercancel', 'pointerleave'].forEach(function (type) {
       canvas.addEventListener(type, function (event) {
-        if (event.pointerId !== pointerId) return;
-        if (
-          canvas.releasePointerCapture &&
-          canvas.hasPointerCapture &&
-          canvas.hasPointerCapture(pointerId)
-        ) {
-          canvas.releasePointerCapture(pointerId);
-        }
-        pointerId = null;
+        if (press && event.pointerId === press.pointerId) releasePress();
       });
     });
     // The wizard just yielded focus while its modal closed. Put it on the
@@ -8003,6 +8100,7 @@
     var token = String(options.token || '').trim();
     if (!container || !token || layoutState.status !== 'ready') return false;
     if (placementSession && !placementMatches(placementSession, options)) return false;
+    var previousMoveMode = moveModeEnabled;
     closeContextMenu({ restoreFocus: false });
     closeHarvestPopover({ restoreFocus: false });
     settleDropConfirm('decline', { restoreFocus: false, skipRedraw: true });
@@ -8022,20 +8120,23 @@
       onBack: options.onBack,
       onCancel: options.onCancel,
       container: container,
+      previousMoveMode: previousMoveMode,
       submitting: false
     };
     settleLayout();
     announce(
       container,
-      'Choose an exact position for the new workspace. Click or drag, then create workspace here.'
+      'Choose an exact position for the new workspace. Move to preview, click open ground to create; drag navigates.'
     );
     return true;
   }
 
   function endPlacement(options, secondary) {
     if (!placementMatches(placementSession, options, secondary)) return false;
+    var state = placementSession;
     placementSession = null;
     settleLayout();
+    restorePlacementMoveMode(state);
     return true;
   }
 
@@ -8066,6 +8167,7 @@
         'Workspace was created, but its reviewed position is no longer available. Choose a new position for this workspace.'
       );
       settleLayout();
+      restorePlacementMoveMode(state);
       return Promise.resolve({ saved: false, reason: 'blocked', point: point || null });
     }
 
@@ -8081,6 +8183,7 @@
         placementSession = null;
         announce(state.container, 'Workspace placed at ' + formatCoordinate(point));
         settleLayout();
+        restorePlacementMoveMode(state);
         return { saved: true, point: point };
       },
       function () {
@@ -8091,6 +8194,7 @@
           'Workspace was created, but its position could not be saved. It remains available at a default spot; retry position to try again.'
         );
         settleLayout();
+        restorePlacementMoveMode(state);
         return { saved: false, reason: 'layout_save_failed', point: point };
       }
     );

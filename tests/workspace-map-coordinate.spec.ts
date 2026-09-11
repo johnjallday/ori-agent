@@ -430,25 +430,94 @@ test.describe('Coordinate Workspace Map', () => {
       'preview creates no position record'
     ).toEqual(positionsBefore);
 
-    await page.locator('[data-ws-map-placement-confirm]').click();
+    // Keyboard confirmation shares the displayed candidate state with pointer
+    // placement. Move once so this asserts the value after, not before, input.
+    await page.locator('[data-ws-map-viewport]').focus();
+    await page.screenshot({
+      path: testInfo.outputPath('keyboard-placement-focus.png'),
+      fullPage: true
+    });
+    await page.keyboard.press('ArrowRight');
+    const confirmedPoint = await preview.evaluate(el => ({
+      x: Math.round(parseFloat((el as HTMLElement).style.left)),
+      y: Math.round(parseFloat((el as HTMLElement).style.top))
+    }));
+    expect(confirmedPoint.x).toBeGreaterThan(previewPoint.x);
+    await page.keyboard.press('Enter');
     await expect(preview).toBeHidden();
     expect(new URL(page.url()).pathname).toBe('/');
     const rows = await listWorkspaces(page);
     const built = rows.find((ws: { name?: string }) => ws?.name === name);
     expect(built, 'the workspace was created after exact confirmation').toBeTruthy();
     const layout = await (await page.request.get('/api/workspace-map/layout')).json();
-    expect(layout.layout.positions[built!.id]).toEqual(previewPoint);
+    expect(layout.layout.positions[built!.id]).toEqual(confirmedPoint);
     await page.reload();
     const tile = page.locator(`.ws-map-tile[data-ws-id="${built!.id}"]`);
     await expect(tile).toBeAttached();
     await expect(tile).toHaveAttribute(
       'style',
-      new RegExp(`left:${previewPoint.x}px;top:${previewPoint.y}px`)
+      new RegExp(`left:${confirmedPoint.x}px;top:${confirmedPoint.y}px`)
     );
     await page.screenshot({
       path: testInfo.outputPath('workspace-placed-after-reload.png'),
       fullPage: true
     });
+  });
+
+  test('blocked placement and panning never create a workspace (FR-47 – FR-54)', async ({
+    page
+  }, testInfo) => {
+    await ensureWorkspace(page);
+    await openMap(page);
+    const before = new Set((await listWorkspaces(page)).map(ws => ws.id));
+    const site = await emptyPointOn(page);
+    await page.mouse.click(site.x, site.y, { button: 'right' });
+    await page.click('[data-menu-action="build"]');
+    await reviewCreateWizard(page, `Blocked ${Date.now()}`);
+    await page.locator('#createFolderBtn').click();
+    const preview = page.locator('[data-ws-map-placement-preview]');
+    await expect(preview).toBeVisible();
+
+    const existing = page.locator('.ws-map-tile[data-ws-id]').first();
+    const existingBox = (await existing.boundingBox())!;
+    await page.mouse.click(
+      existingBox.x + existingBox.width / 2,
+      existingBox.y + existingBox.height / 2
+    );
+    await expect(preview).toHaveClass(/is-invalid/);
+    await page.screenshot({ path: testInfo.outputPath('blocked-placement.png'), fullPage: true });
+    expect(new Set((await listWorkspaces(page)).map(ws => ws.id))).toEqual(before);
+
+    const cameraBefore = await cameraOf(page);
+    const pan = await emptyPointOn(page);
+    await page.mouse.move(pan.x, pan.y);
+    await page.mouse.down();
+    await page.mouse.move(pan.x - 140, pan.y, { steps: 4 });
+    await page.mouse.up();
+    await expect(preview).toBeVisible();
+    expect((await cameraOf(page)).centerX).not.toBe(cameraBefore.centerX);
+    expect(new Set((await listWorkspaces(page)).map(ws => ws.id))).toEqual(before);
+
+    await page.locator('[data-ws-map-viewport]').press('Escape');
+    await expect(page.locator('#addFolderModal')).toBeVisible();
+    await page.getByRole('button', { name: 'Close create workspace' }).click();
+  });
+
+  test('placement renders a reviewed markup-like name as literal text', async ({ page }) => {
+    await ensureWorkspace(page);
+    await openMap(page);
+    const site = await emptyPointOn(page);
+    await page.mouse.click(site.x, site.y, { button: 'right' });
+    await page.click('[data-menu-action="build"]');
+    const name = '<img data-hostile-preview src=x>';
+    await reviewCreateWizard(page, name);
+    await page.locator('#createFolderBtn').click();
+    const preview = page.locator('[data-ws-map-placement-preview]');
+    await expect(preview).toContainText(name);
+    await expect(preview.locator('[data-hostile-preview]')).toHaveCount(0);
+    await page.locator('[data-ws-map-viewport]').press('Escape');
+    await expect(page.locator('#addFolderModal')).toBeVisible();
+    await page.getByRole('button', { name: 'Close create workspace' }).click();
   });
 
   test('cancelling a build creates nothing (FR-54)', async ({ page }) => {
