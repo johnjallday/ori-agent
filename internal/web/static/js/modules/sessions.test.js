@@ -207,6 +207,27 @@ test('a Map-origin create flags the existing modal rather than opening a second 
   );
 });
 
+test('an unchanged readiness recheck preserves group receipts while a template revision clears them', () => {
+  const manager = loadSessionManager();
+  manager.syncGroupRequirementParentControl = () => {};
+  const template = {
+    id: 'plugin:reaper-plugin:reaper-song',
+    revision: 'a'.repeat(64),
+    group_requirement: { policy: 'required' }
+  };
+  manager.resetGroupRequirementDraft(template);
+  manager.groupRequirementDraft.review = { review_token: 'workspace-receipt' };
+  manager.groupRequirementDraft.preparedHome = { home_workspace_id: 'home-1' };
+
+  manager.resetGroupRequirementDraft({ ...template });
+  assert.equal(manager.groupRequirementDraft.review.review_token, 'workspace-receipt');
+  assert.equal(manager.groupRequirementDraft.preparedHome.home_workspace_id, 'home-1');
+
+  manager.resetGroupRequirementDraft({ ...template, revision: 'b'.repeat(64) });
+  assert.equal(manager.groupRequirementDraft.review, null);
+  assert.equal(manager.groupRequirementDraft.preparedHome, null);
+});
+
 test('group requirement creation reviews before committing and reuses only the exact receipt', async () => {
   const calls = [];
   const manager = loadSessionManager(async (url, options) => {
@@ -226,7 +247,7 @@ test('group requirement creation reviews before committing and reuses only the e
     policy: 'recommended',
     composition: 'standalone',
     review: null,
-    createHome: false
+    preparedHome: null
   };
   manager.refreshWorkspaceReview = () => {};
   manager.refreshWizardChrome = () => {};
@@ -248,25 +269,58 @@ test('group requirement creation reviews before committing and reuses only the e
   assert.equal(calls.length, 2, 'changed request gets a fresh inert review');
 });
 
-test('missing required Home needs explicit review before a creation receipt is prepared', async () => {
+test('missing required Home is created alone before a fresh workspace receipt is prepared', async () => {
   const calls = [];
-  const replies = [
-    {
-      state: 'home_creation_review_required',
-      home_name: 'Music Production Home'
-    },
-    {
-      state: 'ready_grouped',
-      selected_composition: 'grouped',
-      home_name: 'Music Production Home',
-      home_will_be_created: true,
-      review_token: 'grouped-receipt'
-    }
-  ];
+  let workspaceReviews = 0;
   const manager = loadSessionManager(
-    async (_url, options) => {
-      calls.push(JSON.parse(options.body));
-      return { ok: true, json: async () => ({ group_requirement_review: replies.shift() }) };
+    async (url, options) => {
+      const body = JSON.parse(options.body);
+      calls.push({ url, body });
+      if (url === '/api/workspaces/group-requirement/home/review') {
+        return {
+          ok: true,
+          json: async () => ({
+            group_requirement_review: {
+              state: 'ready_grouped',
+              home_name: 'Music Production Home',
+              home_will_be_created: true,
+              review_token: 'home-receipt'
+            }
+          })
+        };
+      }
+      if (url === '/api/workspaces/group-requirement/home/commit') {
+        return {
+          ok: true,
+          json: async () => ({
+            group_requirement: {
+              state: 'home_ready',
+              home_name: 'Music Production Home',
+              home_workspace_id: 'home-1',
+              home_created: true
+            }
+          })
+        };
+      }
+      workspaceReviews += 1;
+      return {
+        ok: true,
+        json: async () => ({
+          group_requirement_review:
+            workspaceReviews === 1
+              ? {
+                  state: 'home_creation_review_required',
+                  home_name: 'Music Production Home'
+                }
+              : {
+                  state: 'ready_grouped',
+                  selected_composition: 'grouped',
+                  home_name: 'Music Production Home',
+                  home_workspace_id: 'home-1',
+                  review_token: 'workspace-receipt'
+                }
+        })
+      };
     },
     { confirm: () => true }
   );
@@ -274,18 +328,66 @@ test('missing required Home needs explicit review before a creation receipt is p
     policy: 'required',
     composition: 'grouped',
     review: null,
-    createHome: false
+    preparedHome: null
   };
   manager.refreshWorkspaceReview = () => {};
   manager.refreshWizardChrome = () => {};
   const payload = { name: 'Song', template_id: 'reaper' };
 
   assert.equal(await manager.prepareGroupRequirementCommit('/api/workspaces', payload), false);
-  assert.equal(calls.length, 2);
-  assert.equal(calls[0].create_required_home, undefined);
-  assert.equal(calls[1].create_required_home, true);
-  assert.equal(manager.groupRequirementDraft.createHome, true);
-  assert.equal(manager.groupRequirementDraft.review.review_token, 'grouped-receipt');
+  assert.equal(calls.length, 4);
+  assert.deepEqual(
+    calls.map(call => call.url),
+    [
+      '/api/workspaces',
+      '/api/workspaces/group-requirement/home/review',
+      '/api/workspaces/group-requirement/home/commit',
+      '/api/workspaces'
+    ]
+  );
+  assert.equal(calls[0].body.create_required_home, undefined);
+  assert.deepEqual(calls[1].body, { template_id: 'reaper' });
+  assert.equal(calls[2].body.group_review_token, 'home-receipt');
+  assert.equal(calls[3].body.create_required_home, undefined);
+  assert.equal(manager.groupRequirementDraft.preparedHome.home_workspace_id, 'home-1');
+  assert.equal(manager.groupRequirementDraft.review.review_token, 'workspace-receipt');
+});
+
+test('declining required Home creation leaves the workspace and Home untouched', async () => {
+  const calls = [];
+  const manager = loadSessionManager(
+    async (url, options) => {
+      calls.push({ url, body: JSON.parse(options.body) });
+      return {
+        ok: true,
+        json: async () => ({
+          group_requirement_review: {
+            state: 'home_creation_review_required',
+            home_name: 'Music Production Home'
+          }
+        })
+      };
+    },
+    { confirm: () => false }
+  );
+  manager.groupRequirementDraft = {
+    policy: 'required',
+    composition: 'grouped',
+    review: null,
+    preparedHome: null
+  };
+  manager.refreshWorkspaceReview = () => {};
+  manager.refreshWizardChrome = () => {};
+
+  assert.equal(
+    await manager.prepareGroupRequirementCommit('/api/workspaces', {
+      name: 'Song',
+      template_id: 'reaper'
+    }),
+    false
+  );
+  assert.equal(calls.length, 1, 'decline must not call either Home mutation endpoint');
+  assert.equal(manager.groupRequirementDraft.preparedHome, null);
 });
 
 test('workspace post-create action keeps the standard workspace destination by default', async () => {

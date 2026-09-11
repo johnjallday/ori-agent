@@ -223,7 +223,7 @@ compositions, stable Assistant Program key, and zero or one exact Home. A client
 | `ready_grouped` | Exact compatible Home exists. |
 | `ready_standalone` | Effective standalone composition is valid. |
 | `choice_required` | Recommended needs an explicit grouped/standalone choice. |
-| `home_creation_review_required` | Grouped + `offer_create` needs explicit inert Home review. |
+| `home_creation_review_required` | Grouped + `offer_create` has no exact Home. Project creation stays blocked while a separate inert Home-only review is offered. |
 | `home_required` | Grouped + `existing_only` has no exact Home. |
 | `source_unavailable` | Exact source/owner state cannot be proven. |
 | `target_ambiguous` | Multiple Homes carry one stable key or canonical state conflicts. |
@@ -235,22 +235,33 @@ composition, program declaration/key, existing Home or reviewed create intent,
 and connection/folder/entry fingerprints. It stores no credential, prompt,
 absolute path, command, route, or plugin action.
 
-Commit consumes the receipt with a caller idempotency key, revalidates every
-bound fact, and journals `claimed`, `home_ready`, `child_ready`, `link_ready`,
-`succeeded`, or `reconcile_required`. It creates/resumes a deterministic child
-at its final parent, persists files/tasks/effective provenance, and for grouped
-creation establishes and observes the reciprocal link before reporting success
-or starting Home-dependent work.
+Missing `offer_create` placement uses two independent consequence boundaries.
+`prepare_home` review/commit can create or reuse only the canonical empty Home;
+it has no child workspace ID, project-link ID, project files, roster, tasks, or
+grants. The response explicitly reports that no project workspace was created.
+The client then obtains a fresh project receipt bound to that exact existing
+Home, and only a later explicit action may create/connect the project.
+`create_required_home` on a workspace/project request cannot collapse these
+steps and never receives a commit receipt.
 
-Concurrent reviewed first-Home creates converge on the same stable key. A
+A project commit consumes its own receipt with a caller idempotency key,
+revalidates every bound fact, and journals `claimed`, `home_ready`,
+`child_ready`, `link_ready`, `succeeded`, or `reconcile_required`. It
+creates/resumes a deterministic child at its final parent, persists
+files/tasks/effective provenance, and for grouped creation establishes and
+observes the reciprocal link before reporting success or starting
+Home-dependent work.
+
+Concurrent reviewed first-Home preparations converge on the same stable key. A
 matching concurrently created Home may satisfy create intent; a replaced Home
-cannot satisfy a receipt that bound an existing ID. Rename is harmless.
+cannot satisfy a receipt that bound an existing ID. Rename is harmless. If the
+user stops after Home preparation, the empty canonical Home remains visible and
+reusable; cancellation never implies permission to delete it.
 
-Rollback may remove only a provably operation-owned incomplete child and a
-newly created, unhired, unlinked Home. It never deletes a reused Home, external
-project/folder, user file, agent, or grant. Uncertain cleanup records
-`reconcile_required`; retry observes and resumes the same IDs rather than
-creating duplicates.
+Rollback may remove only a provably operation-owned incomplete project child.
+It never deletes a separately prepared or reused Home, external project/folder,
+user file, agent, or grant. Uncertain cleanup records `reconcile_required`;
+retry observes and resumes the same IDs rather than creating duplicates.
 
 ## Durable workspace snapshot
 
@@ -351,8 +362,9 @@ observed.
 | Template create/update/import/duplicate/delete/files | Existing library lock plus variant owner; variant surface is manifest-only and revision checked. |
 | Plugin blueprint resolver | Strict declaration and required-host-feature validation; no fallback to same-named library data. |
 | Templates editor | Preview/save/cancel against owner endpoints; installed source is read-only and offers Customize. |
-| `POST /api/workspaces` and legacy `/api/folders` | Shared evaluator/review-commit owner for policy-bearing templates. |
-| `/api/workspaces/{id}/project`, map/group creator | Same effective resolver and evaluator; no arbitrary-parent bypass. |
+| `POST /api/workspaces/group-requirement/home/{review,commit}` | Inert review plus idempotent Home-only preparation; no project identity or project consequence. |
+| `POST /api/workspaces` and legacy `/api/folders` | Shared evaluator/review-commit owner for policy-bearing templates; missing grouped Home blocks rather than being created in the project commit. |
+| `/api/workspaces/{id}/project`, map/group creator | Same effective resolver and evaluator; no arbitrary-parent or combined Home/project bypass. |
 | Setup quest/journey new/existing project | Existing project-connection owner plus the same group review; exact external file remains unchanged. |
 | Chat list/create project tools | Unified catalog/resolver; use supported owner or return bounded guided-create action. |
 | Capability/runtime/surface/plugin routes | Unrelated unless the concrete feature genuinely depends on live reciprocal membership; grouping grants nothing. |
@@ -404,28 +416,31 @@ artifact size: 8780098 bytes
 sha256: 4def4fec14ecf083b0358c686c608514d4b9afff99dd810f1184213312770119
 ```
 
-A disposable host run demonstrated one renamed Home with two exact Required
-children, one standalone variant project, idempotent create/reconnect replay,
-stale-review and arbitrary-move refusal, Required activation-bypass refusal,
-Home removal preserving project paths/tasks/snapshots, and one canonical
-`workspace.json` per workspace ID. Editing the variant from None to Recommended
-after creation left the existing project's recorded None/standalone snapshot
-unchanged. Screenshots and endpoint evidence are under the gitignored
-`tasks/screenshots/` and `tasks/*evidence.json`; they are local development
-evidence only.
+A disposable host run demonstrated a separate Home-only consequence before any
+project existed, cancellation leaving only that inert empty Home, then one
+renamed Home with two exact Required children, one standalone variant project,
+idempotent Home/create/reconnect replay, stale-review and arbitrary-move refusal,
+Required activation-bypass refusal, Home removal preserving project
+paths/tasks/snapshots, and one canonical `workspace.json` per workspace ID.
+Editing the variant from None to Recommended after creation left the existing
+project's recorded None/standalone snapshot unchanged. Screenshots and endpoint
+evidence are under the gitignored `tasks/screenshots/` and
+`tasks/*evidence.json`; they are local development evidence only.
 
-Validation completed with the main Go suite, 2,660 JS module tests, affected Go
-package and race suites, ESLint, Prettier, vet, ratcheted golangci-lint, the
-Playwright group-requirement acceptance spec, and `git diff --check`. Scoped
-`gosec` produced 99 findings both at the branch merge base and current tree,
-with zero normalized new findings; the package-wide legacy baseline was not
-misreported as a feature regression. The final smoke run passed 49 tests and
-skipped one; its one failure was the unrelated CSV-storage task setup receiving
-`409 insufficient_resources` for `craft`. The same focused failure reproduced
-on a clean server built from `origin/dev` commit `ce18a03c`, so it is recorded as
-target-branch baseline rather than hidden or attributed to this feature. The
-plugin separately passed all Go tests, vet, 16 UI tests, deterministic artifact
-verification, and release packaging.
+Validation completed with the main Go suite, 2,662 JS module tests, affected Go
+package and race suites, ESLint, Prettier, vet, ratcheted golangci-lint, two
+Playwright group-requirement acceptance cases, four coordinated REAPER browser
+cases, and `git diff --check`. The original scoped `gosec` comparison produced
+99 findings both at the branch merge base and current tree, with zero normalized
+new findings; a final scan of the three correction packages reported seven
+legacy package findings and none in the corrected Go files. The package-wide
+baseline was not misreported as a feature regression. The final smoke run passed
+50 of 51 tests; its one failure was the unrelated CSV-storage task setup
+receiving `409 insufficient_resources` for `craft`. The same focused failure
+previously reproduced on a clean server built from `origin/dev` commit
+`ce18a03c`, so it is recorded as target-branch baseline rather than hidden or
+attributed to this feature. The plugin separately passed all Go tests, vet, 16
+UI tests, deterministic artifact verification, and release packaging.
 
 ## Host/plugin compatibility and delivery
 

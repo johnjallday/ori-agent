@@ -56,6 +56,10 @@ const (
 type OperationKind string
 
 const (
+	// OperationPrepareHome is the separately confirmed prerequisite for grouped
+	// project creation. It may create or reuse only the canonical Home; it never
+	// reserves, creates, moves, or links a project workspace.
+	OperationPrepareHome     OperationKind = "prepare_home"
 	OperationCreateWorkspace OperationKind = "create_workspace"
 	OperationCreateProject   OperationKind = "create_project"
 	OperationConnectProject  OperationKind = "connect_project"
@@ -274,16 +278,19 @@ func (s *Service) Evaluate(input Input) Evaluation {
 	if requirement.MissingHome != projecttemplates.MissingHomeOfferCreate {
 		return unavailable(StateContractInvalid, "This template's missing-group behavior is unsupported.", ActionCustomize, ActionChangeTemplate)
 	}
-	if !input.CreateHome {
+	// A project operation may never create its own prerequisite Home. Keeping
+	// this refusal in the owner—not only in the browser—ensures direct HTTP,
+	// chat, and orchestration callers cannot collapse the two confirmations.
+	if input.OperationKind != OperationPrepareHome || !input.CreateHome {
 		return Evaluation{State: StateHomeCreationReviewRequired, Policy: requirement.Policy, SelectedComposition: CompositionGrouped,
 			HomeName: requirement.DefaultHomeName, HomeWillBeCreated: true,
-			Summary: "Review creation of the canonical group before continuing.", Actions: []Action{ActionReviewCreateHome},
+			Summary: "Create the canonical group before creating the project workspace.", Actions: []Action{ActionReviewCreateHome, ActionOpenGuidedSetup},
 			EffectiveTemplate: template, ProgramKey: &key, DefinitionDigest: evaluation.DefinitionDigest}
 	}
 	evaluation.State = StateReadyGrouped
 	evaluation.HomeName = requirement.DefaultHomeName
 	evaluation.HomeWillBeCreated = true
-	evaluation.Summary = "The canonical group will be created before the project."
+	evaluation.Summary = "Only the canonical group will be created by this action."
 	return evaluation
 }
 
@@ -326,6 +333,8 @@ type Claim struct {
 	Operation         Operation
 	EffectiveTemplate projecttemplates.Template
 	Snapshot          *workspace.GroupRequirementSnapshot
+	HomeCreated       bool
+	Replayed          bool
 }
 
 func (s *Service) Claim(ctx context.Context, input Input, token, idempotencyKey string) (Claim, error) {
@@ -358,7 +367,11 @@ func (s *Service) Claim(ctx context.Context, input Input, token, idempotencyKey 
 		if err := receiptMatches(receipt, input.Template, current); err != nil {
 			return Claim{}, err
 		}
-		return Claim{Operation: existing, EffectiveTemplate: current.EffectiveTemplate, Snapshot: snapshotFor(receipt, existing, input.Template)}, nil
+		var snapshot *workspace.GroupRequirementSnapshot
+		if receipt.OperationKind != OperationPrepareHome {
+			snapshot = snapshotFor(receipt, existing, input.Template)
+		}
+		return Claim{Operation: existing, EffectiveTemplate: current.EffectiveTemplate, Snapshot: snapshot, Replayed: true}, nil
 	} else if !errors.Is(getErr, ErrNotFound) {
 		return Claim{}, ErrUnavailable
 	}
@@ -376,14 +389,17 @@ func (s *Service) Claim(ctx context.Context, input Input, token, idempotencyKey 
 		ChildWorkspaceID: receipt.TargetWorkspaceID,
 		AppliedAt:        s.now(), UpdatedAt: s.now(),
 	}
-	if operation.ChildWorkspaceID == "" {
+	if operation.ChildWorkspaceID == "" && receipt.OperationKind != OperationPrepareHome {
 		operation.ChildWorkspaceID = deterministicChildID(receipt.OwnerUserID, receipt.OperationKind, idempotencyKey)
 	}
+	homeCreated := false
 	if receipt.Composition == CompositionGrouped {
 		key := receipt.ProgramKey.Normalize()
 		homeID := receipt.HomeWorkspaceID
 		if receipt.CreateHome {
-			home, _, ensureErr := workspace.NewAssistantProgramStore(s.workspaces).EnsureNamedStation(key, input.Template.AssistantProgram, receipt.DefaultHomeName)
+			var home *workspace.Workspace
+			var ensureErr error
+			home, homeCreated, ensureErr = workspace.NewAssistantProgramStore(s.workspaces).EnsureNamedStation(key, input.Template.AssistantProgram, receipt.DefaultHomeName)
 			if ensureErr != nil || home == nil {
 				return Claim{}, ErrUnavailable
 			}
@@ -393,7 +409,9 @@ func (s *Service) Claim(ctx context.Context, input Input, token, idempotencyKey 
 			return Claim{}, ErrReviewStale
 		}
 		operation.HomeWorkspaceID = homeID
-		operation.ProjectLinkID = workspace.AssistantProjectLinkID(homeID, operation.ChildWorkspaceID)
+		if receipt.OperationKind != OperationPrepareHome {
+			operation.ProjectLinkID = workspace.AssistantProjectLinkID(homeID, operation.ChildWorkspaceID)
+		}
 		operation.Status = OperationHomeReady
 	}
 	operation.OperationDigest = operationDigest(operation)
@@ -404,7 +422,11 @@ func (s *Service) Claim(ctx context.Context, input Input, token, idempotencyKey 
 	if err := s.receipts.ConsumeReceipt(ctx, receipt.Token, consumedAt); err != nil {
 		return Claim{}, ErrUnavailable
 	}
-	return Claim{Operation: operation, EffectiveTemplate: current.EffectiveTemplate, Snapshot: snapshotFor(receipt, operation, input.Template)}, nil
+	var snapshot *workspace.GroupRequirementSnapshot
+	if receipt.OperationKind != OperationPrepareHome {
+		snapshot = snapshotFor(receipt, operation, input.Template)
+	}
+	return Claim{Operation: operation, EffectiveTemplate: current.EffectiveTemplate, Snapshot: snapshot, HomeCreated: homeCreated}, nil
 }
 
 // CommitReviewed applies a review boundary owned by another durable host
@@ -423,15 +445,13 @@ func (s *Service) CommitReviewed(input Input, childWorkspaceID, reviewDigest, op
 	if evaluation.State != StateReadyGrouped && evaluation.State != StateReadyStandalone {
 		return projecttemplates.Template{}, "", nil, ErrReviewStale
 	}
-	homeID := evaluation.HomeWorkspaceID
+	// Setup journeys prepare and acknowledge their Home in a distinct action.
+	// CommitReviewed must therefore observe an existing destination and may not
+	// silently restore the old create-Home-and-project behavior.
 	if evaluation.SelectedComposition == CompositionGrouped && evaluation.HomeWillBeCreated {
-		key := evaluation.ProgramKey.Normalize()
-		home, _, err := workspace.NewAssistantProgramStore(s.workspaces).EnsureNamedStation(key, input.Template.AssistantProgram, evaluation.HomeName)
-		if err != nil || home == nil {
-			return projecttemplates.Template{}, "", nil, ErrUnavailable
-		}
-		homeID = home.ID
+		return projecttemplates.Template{}, "", nil, ErrReviewStale
 	}
+	homeID := evaluation.HomeWorkspaceID
 	receipt := Receipt{
 		OwnerUserID: strings.TrimSpace(input.OwnerUserID), OperationKind: input.OperationKind,
 		InputDigest: input.InputDigest, TemplateID: input.Template.ID, TemplateRevision: input.Template.Revision,
@@ -633,7 +653,7 @@ func deterministicChildID(owner string, kind OperationKind, key string) string {
 }
 
 func validOperationKind(kind OperationKind) bool {
-	return kind == OperationCreateWorkspace || kind == OperationCreateProject || kind == OperationConnectProject
+	return kind == OperationPrepareHome || kind == OperationCreateWorkspace || kind == OperationCreateProject || kind == OperationConnectProject
 }
 
 func validDigest(value string) bool {

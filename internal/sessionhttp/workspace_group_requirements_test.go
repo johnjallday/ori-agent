@@ -121,6 +121,59 @@ func postPolicyProject(t *testing.T, handler *Handler, workspaceID string, paylo
 	return response.Code, body
 }
 
+func postPolicyHome(t *testing.T, handler *Handler, commit bool, payload map[string]any) (int, map[string]any) {
+	t.Helper()
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/workspaces/group-requirement/home/review"
+	handle := handler.ReviewGroupRequirementHome
+	if commit {
+		path = "/api/workspaces/group-requirement/home/commit"
+		handle = handler.CommitGroupRequirementHome
+	}
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(encoded))
+	req.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handle(response, req)
+	var body map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode Home response %d: %v: %s", response.Code, err, response.Body.String())
+	}
+	return response.Code, body
+}
+
+func preparePolicyHome(t *testing.T, handler *Handler) string {
+	t.Helper()
+	selection := map[string]any{"template_id": "plugin:neutral:project"}
+	code, body := postPolicyHome(t, handler, false, selection)
+	if code != http.StatusOK {
+		t.Fatalf("Home review status=%d body=%v", code, body)
+	}
+	review := body["group_requirement_review"].(map[string]any)
+	if review["state"] != "ready_grouped" || review["home_will_be_created"] != true {
+		t.Fatalf("Home review=%#v", review)
+	}
+	commit := map[string]any{
+		"template_id": "plugin:neutral:project", "group_review_token": review["review_token"],
+		"idempotency_key": "prepare-neutral-home",
+	}
+	code, body = postPolicyHome(t, handler, true, commit)
+	if code != http.StatusOK {
+		t.Fatalf("Home commit status=%d body=%v", code, body)
+	}
+	result := body["group_requirement"].(map[string]any)
+	if result["state"] != "home_ready" || result["home_created"] != true {
+		t.Fatalf("Home result=%#v", result)
+	}
+	homeID, _ := result["home_workspace_id"].(string)
+	if homeID == "" {
+		t.Fatalf("Home result has no ID: %#v", result)
+	}
+	return homeID
+}
+
 func postAssistantTopology(t *testing.T, handler func(http.ResponseWriter, *http.Request), workspaceID string, payload map[string]any) (int, map[string]any) {
 	t.Helper()
 	encoded, err := json.Marshal(payload)
@@ -164,19 +217,44 @@ func TestCreateWorkspaceRequiredReviewCommitAndReuse(t *testing.T) {
 		t.Fatalf("review created state: %v", ids)
 	}
 
-	confirmedPayload := reviewPayload("First Project", true)
-	code, body = postPolicyWorkspace(t, handler, confirmedPayload)
+	// The former combined-create flag cannot bypass the separate Home action.
+	bypassPayload := reviewPayload("First Project", true)
+	code, body = postPolicyWorkspace(t, handler, bypassPayload)
 	if code != http.StatusOK {
-		t.Fatalf("confirmed review status = %d, body=%v", code, body)
+		t.Fatalf("combined review status = %d, body=%v", code, body)
 	}
-	confirmed := body["group_requirement_review"].(map[string]any)
-	token, _ := confirmed["review_token"].(string)
-	if confirmed["state"] != "ready_grouped" || token == "" {
-		t.Fatalf("confirmed review = %#v", confirmed)
+	blocked := body["group_requirement_review"].(map[string]any)
+	if blocked["state"] != "home_creation_review_required" || blocked["review_token"] != nil {
+		t.Fatalf("combined review bypassed Home preparation: %#v", blocked)
 	}
 	ids, _ = store.List()
 	if len(ids) != 0 {
-		t.Fatalf("confirmed review created state: %v", ids)
+		t.Fatalf("combined review created state: %v", ids)
+	}
+
+	homeID := preparePolicyHome(t, handler)
+	ids, _ = store.List()
+	if len(ids) != 1 || ids[0] != homeID {
+		t.Fatalf("Home-only action created project state: %v", ids)
+	}
+	preparedHome, err := store.Get(homeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preparedState := preparedHome.GetAssistantProgramState()
+	if preparedState == nil || len(preparedState.LinkedProjectIDs) != 0 || len(preparedHome.AgentInstances) != 0 {
+		t.Fatalf("prepared Home is not inert: %#v", preparedHome)
+	}
+
+	confirmedPayload := reviewPayload("First Project", false)
+	code, body = postPolicyWorkspace(t, handler, confirmedPayload)
+	if code != http.StatusOK {
+		t.Fatalf("project review status = %d, body=%v", code, body)
+	}
+	confirmed := body["group_requirement_review"].(map[string]any)
+	token, _ := confirmed["review_token"].(string)
+	if confirmed["state"] != "ready_grouped" || token == "" || confirmed["home_workspace_id"] != homeID {
+		t.Fatalf("project review = %#v", confirmed)
 	}
 
 	delete(confirmedPayload, "group_requirement_review")
@@ -188,7 +266,6 @@ func TestCreateWorkspaceRequiredReviewCommitAndReuse(t *testing.T) {
 	}
 	folder := body["folder"].(map[string]any)
 	projectID := folder["id"].(string)
-	homeID := body["assistant_station_id"].(string)
 	project, err := store.Get(projectID)
 	if err != nil {
 		t.Fatal(err)
@@ -302,6 +379,51 @@ func TestCreateWorkspaceRequiredReviewCommitAndReuse(t *testing.T) {
 	}
 }
 
+func TestPrepareHomeCommitReplayNeverCreatesProjectConsequences(t *testing.T) {
+	template := policyTemplate(projecttemplates.GroupPolicyRequired)
+	handler, store, cleanup := newPolicyHandler(t, &template)
+	defer cleanup()
+
+	selection := map[string]any{"template_id": template.ID}
+	code, body := postPolicyHome(t, handler, false, selection)
+	if code != http.StatusOK {
+		t.Fatalf("Home review status=%d body=%v", code, body)
+	}
+	review := body["group_requirement_review"].(map[string]any)
+	commit := map[string]any{
+		"template_id": template.ID, "group_review_token": review["review_token"],
+		"idempotency_key": "home-only-replay",
+	}
+	code, body = postPolicyHome(t, handler, true, commit)
+	if code != http.StatusOK {
+		t.Fatalf("Home commit status=%d body=%v", code, body)
+	}
+	first := body["group_requirement"].(map[string]any)
+	if first["home_created"] != true || first["idempotent_replay"] != false {
+		t.Fatalf("first Home result=%#v", first)
+	}
+	code, body = postPolicyHome(t, handler, true, commit)
+	if code != http.StatusOK {
+		t.Fatalf("Home replay status=%d body=%v", code, body)
+	}
+	replayed := body["group_requirement"].(map[string]any)
+	if replayed["home_workspace_id"] != first["home_workspace_id"] || replayed["idempotent_replay"] != true {
+		t.Fatalf("Home replay=%#v first=%#v", replayed, first)
+	}
+	ids, _ := store.List()
+	if len(ids) != 1 {
+		t.Fatalf("Home-only replay created project state: %v", ids)
+	}
+	home, err := store.Get(ids[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := home.GetAssistantProgramState()
+	if state == nil || len(state.LinkedProjectIDs) != 0 || len(home.AgentInstances) != 0 || home.ParentID != "" {
+		t.Fatalf("Home-only replay added project, roster, or parent consequences: %#v", home)
+	}
+}
+
 func TestCreateWorkspaceNonePersistsStandaloneWithoutHome(t *testing.T) {
 	template := policyTemplate(projecttemplates.GroupPolicyNone)
 	handler, store, cleanup := newPolicyHandler(t, &template)
@@ -344,18 +466,36 @@ func TestCreateProjectForExistingWorkspaceUsesReviewedGroupPlacement(t *testing.
 		t.Fatalf("workspace create status=%d body=%v", code, body)
 	}
 	workspaceID := body["folder"].(map[string]any)["id"].(string)
-	payload := map[string]any{
+	blockedPayload := map[string]any{
 		"template_id": template.ID, "project_name": "Existing Project", "group_composition": "grouped",
 		"create_required_home": true, "group_requirement_review": true,
+	}
+	code, body = postPolicyProject(t, handler, workspaceID, blockedPayload)
+	if code != http.StatusOK {
+		t.Fatalf("combined project review status=%d body=%v", code, body)
+	}
+	blocked := body["group_requirement_review"].(map[string]any)
+	if blocked["state"] != "home_creation_review_required" || blocked["review_token"] != nil {
+		t.Fatalf("combined project review bypassed Home preparation: %#v", blocked)
+	}
+	ids, _ := store.List()
+	if len(ids) != 1 || ids[0] != workspaceID {
+		t.Fatalf("blocked project review changed state: %v", ids)
+	}
+
+	homeID := preparePolicyHome(t, handler)
+	payload := map[string]any{
+		"template_id": template.ID, "project_name": "Existing Project", "group_composition": "grouped",
+		"group_requirement_review": true,
 	}
 	code, body = postPolicyProject(t, handler, workspaceID, payload)
 	if code != http.StatusOK {
 		t.Fatalf("project review status=%d body=%v", code, body)
 	}
 	review := body["group_requirement_review"].(map[string]any)
-	ids, _ := store.List()
-	if len(ids) != 1 {
-		t.Fatalf("project review created Home state: %v", ids)
+	ids, _ = store.List()
+	if len(ids) != 2 {
+		t.Fatalf("project review changed workspace state: %v", ids)
 	}
 	delete(payload, "group_requirement_review")
 	payload["group_review_token"] = review["review_token"]
@@ -370,8 +510,8 @@ func TestCreateProjectForExistingWorkspaceUsesReviewedGroupPlacement(t *testing.
 		t.Fatal(err)
 	}
 	link := project.GetAssistantProjectLink()
-	if project.ParentID == "" || link == nil || link.StationWorkspaceID != project.ParentID {
-		t.Fatalf("existing project placement = parent %q link %#v", project.ParentID, link)
+	if project.ParentID != homeID || link == nil || link.StationWorkspaceID != homeID {
+		t.Fatalf("existing project placement = parent %q link %#v home=%q", project.ParentID, link, homeID)
 	}
 	canonical, err := store.(interface {
 		GetFolderWorkspace(string) (*agentworkspace.Workspace, error)
@@ -393,7 +533,8 @@ func TestCreateWorkspaceRejectsStaleGroupReviewBeforeMutation(t *testing.T) {
 	template := policyTemplate(projecttemplates.GroupPolicyRequired)
 	handler, store, cleanup := newPolicyHandler(t, &template)
 	defer cleanup()
-	payload := reviewPayload("Stale Project", true)
+	homeID := preparePolicyHome(t, handler)
+	payload := reviewPayload("Stale Project", false)
 	code, body := postPolicyWorkspace(t, handler, payload)
 	if code != http.StatusOK {
 		t.Fatalf("review status=%d body=%v", code, body)
@@ -408,7 +549,7 @@ func TestCreateWorkspaceRejectsStaleGroupReviewBeforeMutation(t *testing.T) {
 		t.Fatalf("stale commit status=%d body=%v", code, body)
 	}
 	ids, _ := store.List()
-	if len(ids) != 0 {
-		t.Fatalf("stale commit created state: %v", ids)
+	if len(ids) != 1 || ids[0] != homeID {
+		t.Fatalf("stale project commit changed Home-only state: %v", ids)
 	}
 }

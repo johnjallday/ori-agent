@@ -359,6 +359,129 @@ func (h *Handler) prepareWorkspaceProjectGroupRequirement(
 	return claim.EffectiveTemplate, &createWorkspaceGroupPlan{claim: claim, sourceTemplate: template}, false
 }
 
+type groupRequirementHomeRequest struct {
+	TemplateID       string `json:"template_id,omitempty"`
+	TemplatePath     string `json:"template_path,omitempty"`
+	GroupReviewToken string `json:"group_review_token,omitempty"`
+	IdempotencyKey   string `json:"idempotency_key,omitempty"`
+}
+
+func groupRequirementHomeDigest(request groupRequirementHomeRequest) (string, error) {
+	return grouprequirements.DigestInput(struct {
+		TemplateID   string `json:"template_id,omitempty"`
+		TemplatePath string `json:"template_path,omitempty"`
+	}{TemplateID: strings.TrimSpace(request.TemplateID), TemplatePath: strings.TrimSpace(request.TemplatePath)})
+}
+
+func (h *Handler) prepareGroupRequirementHomeAction(
+	ctx context.Context,
+	w http.ResponseWriter,
+	request groupRequirementHomeRequest,
+) (grouprequirements.Input, bool) {
+	if (strings.TrimSpace(request.TemplateID) == "") == (strings.TrimSpace(request.TemplatePath) == "") {
+		_ = orihttp.RespondBadRequest(w, "specify exactly one template_id or template_path")
+		return grouprequirements.Input{}, false
+	}
+	if h == nil || h.groupRequirements == nil || h.currentUserID == nil {
+		respondGroupRequirementUnavailable(w)
+		return grouprequirements.Input{}, false
+	}
+	template, err := h.resolveProjectTemplate(request.TemplateID, request.TemplatePath)
+	if err != nil {
+		h.respondWorkspaceProjectError(w, err)
+		return grouprequirements.Input{}, false
+	}
+	readiness := h.revalidateBlueprintReadiness(template)
+	if blueprintCreationBlocked(template, readiness) {
+		respondBlueprintReadinessConflict(w, template, readiness)
+		return grouprequirements.Input{}, false
+	}
+	if template.GroupRequirement == nil || template.GroupRequirement.Policy == projecttemplates.GroupPolicyNone {
+		_ = orihttp.RespondBadRequest(w, "this template does not declare a grouped Home")
+		return grouprequirements.Input{}, false
+	}
+	ownerUserID, err := h.currentUserID(ctx)
+	if err != nil || strings.TrimSpace(ownerUserID) == "" {
+		respondGroupRequirementUnavailable(w)
+		return grouprequirements.Input{}, false
+	}
+	digest, err := groupRequirementHomeDigest(request)
+	if err != nil {
+		_ = orihttp.RespondBadRequest(w, "group review input is invalid")
+		return grouprequirements.Input{}, false
+	}
+	return grouprequirements.Input{
+		OwnerUserID: strings.TrimSpace(ownerUserID), OperationKind: grouprequirements.OperationPrepareHome,
+		Template: template, Composition: grouprequirements.CompositionGrouped, CreateHome: true, InputDigest: digest,
+	}, true
+}
+
+// ReviewGroupRequirementHome returns an inert receipt for creating or reusing
+// only the canonical Home. Project/workspace creation is deliberately a later
+// request with its own review and confirmation.
+func (h *Handler) ReviewGroupRequirementHome(w http.ResponseWriter, r *http.Request) {
+	var request groupRequirementHomeRequest
+	if !orihttp.ParseJSONBody(w, r, &request) {
+		return
+	}
+	if strings.TrimSpace(request.GroupReviewToken) != "" || strings.TrimSpace(request.IdempotencyKey) != "" {
+		_ = orihttp.RespondBadRequest(w, "Home review does not accept commit fields")
+		return
+	}
+	input, ok := h.prepareGroupRequirementHomeAction(r.Context(), w, request)
+	if !ok {
+		return
+	}
+	review, err := h.groupRequirements.Review(r.Context(), input)
+	if err != nil {
+		respondGroupRequirementError(w, err)
+		return
+	}
+	if review.State != grouprequirements.StateReadyGrouped || strings.TrimSpace(review.Token) == "" {
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"error": review.Summary, "group_requirement": review.Evaluation,
+		})
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"group_requirement_review": review})
+}
+
+// CommitGroupRequirementHome applies one reviewed Home-only consequence. It
+// never creates, reserves, moves, or links a project workspace.
+func (h *Handler) CommitGroupRequirementHome(w http.ResponseWriter, r *http.Request) {
+	var request groupRequirementHomeRequest
+	if !orihttp.ParseJSONBody(w, r, &request) {
+		return
+	}
+	input, ok := h.prepareGroupRequirementHomeAction(r.Context(), w, request)
+	if !ok {
+		return
+	}
+	claim, err := h.groupRequirements.Claim(r.Context(), input, request.GroupReviewToken, request.IdempotencyKey)
+	if err != nil {
+		respondGroupRequirementError(w, err)
+		return
+	}
+	homeID := strings.TrimSpace(claim.Operation.HomeWorkspaceID)
+	current := h.groupRequirements.Evaluate(input)
+	if homeID == "" || current.State != grouprequirements.StateReadyGrouped || current.HomeWorkspaceID != homeID {
+		respondGroupRequirementError(w, grouprequirements.ErrReviewStale)
+		return
+	}
+	if err := h.groupRequirements.Mark(r.Context(), claim.Operation, grouprequirements.OperationSucceeded); err != nil {
+		respondGroupRequirementUnavailable(w)
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{
+		"success": true,
+		"group_requirement": map[string]any{
+			"state": "home_ready", "summary": "The canonical group is ready. No project workspace was created.",
+			"home_workspace_id": homeID, "home_name": current.HomeName,
+			"home_created": claim.HomeCreated, "idempotent_replay": claim.Replayed,
+		},
+	})
+}
+
 func respondGroupRequirementUnavailable(w http.ResponseWriter) {
 	_ = orihttp.RespondJSON(w, http.StatusServiceUnavailable, map[string]any{
 		"error": "Template group placement is unavailable.",

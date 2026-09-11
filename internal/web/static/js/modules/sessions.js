@@ -3925,6 +3925,23 @@ const sessionManager = {
     }, 180);
   },
 
+  groupRequirementTemplateKey(template) {
+    if (!template?.group_requirement) return '';
+    const source = template.template_variant?.source || {};
+    const owner = template.plugin_owner || {};
+    return JSON.stringify({
+      id: String(template.id || ''),
+      revision: String(template.revision || ''),
+      variant_revision: String(template.variant_revision || ''),
+      source_digest: String(source.definition_digest || ''),
+      plugin_id: String(owner.plugin_id || ''),
+      plugin_version: String(owner.plugin_version || ''),
+      blueprint_id: String(owner.blueprint_id || ''),
+      blueprint_version: Number(owner.blueprint_version || 0),
+      policy: String(template.group_requirement.policy || '')
+    });
+  },
+
   resetGroupRequirementDraft(template) {
     const requirement = template?.group_requirement || null;
     if (!requirement) {
@@ -3933,11 +3950,20 @@ const sessionManager = {
       return;
     }
     const policy = String(requirement.policy || '');
+    const templateKey = this.groupRequirementTemplateKey(template);
+    // Readiness rechecks emit the selected template again. Preserve a receipt
+    // only when every behavior-bearing identity is unchanged; a real template,
+    // variant, source, or policy revision still clears it immediately.
+    if (this.groupRequirementDraft?.templateKey === templateKey) {
+      this.syncGroupRequirementParentControl();
+      return;
+    }
     this.groupRequirementDraft = {
       policy,
+      templateKey,
       composition: policy === 'none' ? 'standalone' : policy === 'required' ? 'grouped' : '',
       review: null,
-      createHome: false
+      preparedHome: null
     };
     this.syncGroupRequirementParentControl();
   },
@@ -3956,7 +3982,7 @@ const sessionManager = {
     if (this.groupRequirementDraft.composition === normalized) return;
     this.groupRequirementDraft.composition = normalized;
     this.groupRequirementDraft.review = null;
-    this.groupRequirementDraft.createHome = false;
+    this.groupRequirementDraft.preparedHome = null;
     this.syncGroupRequirementParentControl();
     // Team and placement are one reviewed composition. A standalone choice
     // replaces scoped program roles with project-local agents, so no stale team
@@ -5726,11 +5752,11 @@ const sessionManager = {
       draft.review?.home_name || requirement.default_home_name || 'the canonical Home'
     );
     const reviewedStatus = draft.review?.review_token
-      ? draft.review.home_will_be_created
-        ? 'Reviewed: this Home will be created first.'
-        : draft.review.selected_composition === 'grouped'
-          ? 'Reviewed: this exact existing Home will be reused.'
-          : 'Reviewed: no Home will be created or linked.'
+      ? draft.review.selected_composition === 'grouped'
+        ? draft.preparedHome
+          ? 'Home prepared separately; no workspace has been created yet. Reviewed: this exact existing Home will be reused.'
+          : 'Reviewed: this exact existing Home will be reused.'
+        : 'Reviewed: no Home will be created or linked.'
       : 'Destination review is prepared when you continue with Create.';
     if (draft.policy === 'recommended') {
       return `
@@ -6464,11 +6490,48 @@ const sessionManager = {
     return name ? `Create “${name}”` : 'Create Workspace';
   },
 
+  async prepareCanonicalGroupHome(payload) {
+    const selection = {
+      ...(payload.template_id ? { template_id: payload.template_id } : {}),
+      ...(payload.template_path ? { template_path: payload.template_path } : {})
+    };
+    const request = async (url, body) => {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.error) {
+        throw new Error(
+          result.group_requirement?.summary ||
+            result.error ||
+            'The required group could not be prepared.'
+        );
+      }
+      return result;
+    };
+    const reviewed = await request('/api/workspaces/group-requirement/home/review', selection);
+    const review = reviewed.group_requirement_review || {};
+    if (review.state !== 'ready_grouped' || !review.review_token) {
+      throw new Error(review.summary || 'The required group is not ready to create.');
+    }
+    const committed = await request('/api/workspaces/group-requirement/home/commit', {
+      ...selection,
+      group_review_token: review.review_token,
+      idempotency_key: crypto.randomUUID()
+    });
+    const prepared = committed.group_requirement || {};
+    if (prepared.state !== 'home_ready' || !prepared.home_workspace_id) {
+      throw new Error(prepared.summary || 'The required group could not be verified.');
+    }
+    return prepared;
+  },
+
   async prepareGroupRequirementCommit(endpoint, payload) {
     const draft = this.groupRequirementDraft;
     if (!draft || window.SetupWorkspaceCreator?.isActive()) return true;
     payload.group_composition = draft.composition;
-    if (draft.createHome) payload.create_required_home = true;
     const payloadKey = JSON.stringify(payload);
     if (draft.review?.payloadKey === payloadKey && draft.review.review_token) {
       payload.group_review_token = draft.review.review_token;
@@ -6489,12 +6552,15 @@ const sessionManager = {
 
     let review = await requestReview();
     if (review.state === 'home_creation_review_required') {
+      const homeName = String(review.home_name || 'Assistant Program Home');
       const confirmed = window.confirm(
-        `Create the canonical group “${String(review.home_name || 'Assistant Program Home')}” before this workspace?\n\nThe review creates nothing. Confirming here prepares the final placement receipt; the workspace is created only after you review and click Create again.`
+        `“${homeName}” must exist before this workspace can be created.\n\nCreate the group now? This action creates only the empty group. It does not create, move, or link the workspace. You will review the exact destination and create the workspace in a separate action.`
       );
       if (!confirmed) return false;
-      draft.createHome = true;
-      payload.create_required_home = true;
+      draft.preparedHome = await this.prepareCanonicalGroupHome(payload);
+      // The Home-only commit is complete. Obtain a fresh inert project receipt
+      // against that exact existing destination; never reuse the create-Home
+      // receipt as authorization to create a workspace.
       review = await requestReview();
     }
     if (review.state !== 'ready_grouped' && review.state !== 'ready_standalone') {
@@ -6515,8 +6581,8 @@ const sessionManager = {
     const readiness = document.getElementById('workspaceReviewReadiness');
     if (readiness) {
       readiness.hidden = false;
-      readiness.textContent = review.home_will_be_created
-        ? `Reviewed: create “${review.home_name}”, then create the workspace inside it. Click Confirm create to apply.`
+      readiness.textContent = draft.preparedHome
+        ? `${draft.preparedHome.home_created ? 'Created' : 'Reused'} “${draft.preparedHome.home_name || review.home_name}” as the required group. No workspace was created. Reviewed destination: ${review.home_name}. Click Confirm create to create the workspace separately.`
         : review.selected_composition === 'grouped'
           ? `Reviewed destination: ${review.home_name}. Click Confirm create to apply.`
           : 'Reviewed destination: standalone, with no Home membership. Click Confirm create to apply.';
@@ -7481,7 +7547,7 @@ const sessionManager = {
         createBtn.disabled = window.SetupWorkspaceCreator?.canSubmit() === false;
         createBtn.textContent = window.SetupWorkspaceCreator?.hasPending()
           ? 'Retry Confirmed Change'
-          : originalCreateLabel || 'Create';
+          : this.workspaceCreateCtaLabel() || originalCreateLabel || 'Create';
       }
     }
   },

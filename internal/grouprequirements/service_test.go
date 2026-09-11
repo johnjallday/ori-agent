@@ -58,7 +58,17 @@ func testInput(t *testing.T, template projecttemplates.Template, composition str
 		Composition: composition, CreateHome: createHome, InputDigest: digest}
 }
 
-func TestRequiredReviewIsInertAndConfirmedClaimCreatesExactHome(t *testing.T) {
+func testHomeInput(t *testing.T, template projecttemplates.Template) Input {
+	t.Helper()
+	digest, err := DigestInput(map[string]any{"template_id": template.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Input{OwnerUserID: "owner-1", OperationKind: OperationPrepareHome, Template: template,
+		Composition: CompositionGrouped, CreateHome: true, InputDigest: digest}
+}
+
+func TestRequiredProjectStaysBlockedUntilSeparateHomeClaim(t *testing.T) {
 	store, err := workspace.NewFileStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -78,20 +88,32 @@ func TestRequiredReviewIsInertAndConfirmedClaimCreatesExactHome(t *testing.T) {
 		t.Fatalf("inert review created workspaces: %v", ids)
 	}
 
-	input := testInput(t, template, CompositionGrouped, true)
-	review, err := service.Review(context.Background(), input)
+	// Even the old create_required_home intent cannot authorize a project
+	// operation to create its own prerequisite.
+	projectInput := testInput(t, template, CompositionGrouped, true)
+	blocked, err := service.Review(context.Background(), projectInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blocked.State != StateHomeCreationReviewRequired || blocked.Token != "" {
+		t.Fatalf("project create-home review = %#v", blocked)
+	}
+
+	homeInput := testHomeInput(t, template)
+	review, err := service.Review(context.Background(), homeInput)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if review.State != StateReadyGrouped || review.Token == "" || !review.HomeWillBeCreated {
-		t.Fatalf("confirmed review = %#v", review)
+		t.Fatalf("Home-only review = %#v", review)
 	}
-	claim, err := service.Claim(context.Background(), input, review.Token, "create-one")
+	claim, err := service.Claim(context.Background(), homeInput, review.Token, "create-home-one")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if claim.Operation.HomeWorkspaceID == "" || claim.Operation.ProjectLinkID == "" || !claim.Snapshot.StructurallyValid() {
-		t.Fatalf("claim = %#v, snapshot = %#v", claim.Operation, claim.Snapshot)
+	if claim.Operation.HomeWorkspaceID == "" || claim.Operation.ChildWorkspaceID != "" ||
+		claim.Operation.ProjectLinkID != "" || claim.Snapshot != nil || !claim.HomeCreated {
+		t.Fatalf("Home-only claim = %#v, snapshot = %#v", claim, claim.Snapshot)
 	}
 	home, err := store.Get(claim.Operation.HomeWorkspaceID)
 	if err != nil {
@@ -99,6 +121,27 @@ func TestRequiredReviewIsInertAndConfirmedClaimCreatesExactHome(t *testing.T) {
 	}
 	if home.Name != "Neutral Program Home" || home.Kind != "group" {
 		t.Fatalf("home = %#v", home)
+	}
+
+	projectInput.CreateHome = false
+	projectInput.InputDigest, err = DigestInput(map[string]any{"name": "Project One", "composition": CompositionGrouped})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectReview, err := service.Review(context.Background(), projectInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projectReview.State != StateReadyGrouped || projectReview.Token == "" || projectReview.HomeWillBeCreated {
+		t.Fatalf("project review after Home = %#v", projectReview)
+	}
+	projectClaim, err := service.Claim(context.Background(), projectInput, projectReview.Token, "create-project-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projectClaim.Operation.HomeWorkspaceID != home.ID || projectClaim.Operation.ChildWorkspaceID == "" ||
+		projectClaim.Operation.ProjectLinkID == "" || projectClaim.Snapshot == nil || !projectClaim.Snapshot.StructurallyValid() {
+		t.Fatalf("project claim after Home = %#v", projectClaim)
 	}
 }
 
@@ -182,7 +225,7 @@ func TestClaimRejectsTemplateChangeAfterReview(t *testing.T) {
 	}
 	service := NewService(store, NewMemoryStore())
 	template := testProgramTemplate(projecttemplates.GroupPolicyRequired, projecttemplates.MissingHomeOfferCreate)
-	input := testInput(t, template, CompositionGrouped, true)
+	input := testHomeInput(t, template)
 	review, err := service.Review(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
@@ -197,21 +240,14 @@ func TestClaimRejectsTemplateChangeAfterReview(t *testing.T) {
 	}
 }
 
-func TestConcurrentFirstProjectClaimsConvergeOnOneHome(t *testing.T) {
+func TestConcurrentHomePreparationClaimsConvergeWithoutProjectConsequences(t *testing.T) {
 	store, err := workspace.NewFileStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	service := NewService(store, NewMemoryStore())
 	template := testProgramTemplate(projecttemplates.GroupPolicyRequired, projecttemplates.MissingHomeOfferCreate)
-	inputs := []Input{
-		testInput(t, template, CompositionGrouped, true),
-		testInput(t, template, CompositionGrouped, true),
-	}
-	inputs[1].InputDigest, err = DigestInput(map[string]any{"name": "Project Two", "composition": CompositionGrouped, "create_home": true})
-	if err != nil {
-		t.Fatal(err)
-	}
+	inputs := []Input{testHomeInput(t, template), testHomeInput(t, template)}
 	reviews := make([]Review, len(inputs))
 	for index := range inputs {
 		reviews[index], err = service.Review(context.Background(), inputs[index])
@@ -240,6 +276,13 @@ func TestConcurrentFirstProjectClaimsConvergeOnOneHome(t *testing.T) {
 	if claims[0].Operation.HomeWorkspaceID == "" || claims[0].Operation.HomeWorkspaceID != claims[1].Operation.HomeWorkspaceID {
 		t.Fatalf("claims selected different Homes: %#v / %#v", claims[0].Operation, claims[1].Operation)
 	}
+	if claims[0].Operation.ChildWorkspaceID != "" || claims[1].Operation.ChildWorkspaceID != "" ||
+		claims[0].Operation.ProjectLinkID != "" || claims[1].Operation.ProjectLinkID != "" {
+		t.Fatalf("Home preparation created project identity: %#v / %#v", claims[0].Operation, claims[1].Operation)
+	}
+	if claims[0].HomeCreated == claims[1].HomeCreated {
+		t.Fatalf("exactly one concurrent claim must create the Home: %#v / %#v", claims[0], claims[1])
+	}
 	ids, _ := store.List()
 	if len(ids) != 1 || ids[0] != claims[0].Operation.HomeWorkspaceID {
 		t.Fatalf("concurrent claims created duplicate Homes: %v", ids)
@@ -266,7 +309,7 @@ func TestSQLiteReceiptReplaySurvivesServiceRestartAndConverges(t *testing.T) {
 		t.Fatal(err)
 	}
 	template := testProgramTemplate(projecttemplates.GroupPolicyRequired, projecttemplates.MissingHomeOfferCreate)
-	input := testInput(t, template, CompositionGrouped, true)
+	input := testHomeInput(t, template)
 	firstService := NewService(workspaces, receipts)
 	review, err := firstService.Review(ctx, input)
 	if err != nil {
@@ -282,8 +325,11 @@ func TestSQLiteReceiptReplaySurvivesServiceRestartAndConverges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.Operation.ChildWorkspaceID != first.Operation.ChildWorkspaceID || second.Operation.HomeWorkspaceID != first.Operation.HomeWorkspaceID || second.Operation.OperationDigest != first.Operation.OperationDigest {
-		t.Fatalf("replay diverged: first=%#v second=%#v", first.Operation, second.Operation)
+	if second.Operation.ChildWorkspaceID != "" || first.Operation.ChildWorkspaceID != "" ||
+		second.Operation.ProjectLinkID != "" || first.Operation.ProjectLinkID != "" ||
+		second.Operation.HomeWorkspaceID != first.Operation.HomeWorkspaceID ||
+		second.Operation.OperationDigest != first.Operation.OperationDigest || !second.Replayed {
+		t.Fatalf("Home-only replay diverged or gained project identity: first=%#v second=%#v", first, second)
 	}
 	ids, _ := workspaces.List()
 	if len(ids) != 1 || ids[0] != first.Operation.HomeWorkspaceID {

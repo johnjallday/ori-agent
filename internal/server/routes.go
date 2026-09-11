@@ -764,6 +764,12 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		})
 		mux.HandleFunc("/api/folders", s.Handlers.Session.HandleWorkspaces)
 
+		// Group preparation is a separate consequence from project creation.
+		// These static routes must be registered explicitly so the workspace
+		// subtree does not interpret "group-requirement" as a workspace ID.
+		mux.HandleFunc("POST /api/workspaces/group-requirement/home/review", s.Handlers.Session.ReviewGroupRequirementHome)
+		mux.HandleFunc("POST /api/workspaces/group-requirement/home/commit", s.Handlers.Session.CommitGroupRequirementHome)
+
 		// Generic assistant-program routes are explicit so they cannot be
 		// swallowed by the legacy workspace subtree router.
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program", s.Handlers.Session.GetAssistantProgram)
