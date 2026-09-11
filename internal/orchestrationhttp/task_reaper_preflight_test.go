@@ -150,14 +150,22 @@ func TestExplicitReaperFileFallbackRunsOnceAndReportsFileChange(t *testing.T) {
 			fallback.mu.Lock()
 			commits, aborts, prepares := fallback.commits, fallback.aborts, fallback.prepare
 			fallback.mu.Unlock()
-			if commits != 1 || aborts != 1 || prepares != 1 {
+			// The completed result is persisted just before executeTaskWithDependencies
+			// returns and runs the deferred staging cleanup. Wait for both observable
+			// effects instead of racing that defer on faster Linux runners.
+			if commits == 1 && aborts == 1 && prepares == 1 {
+				return
+			}
+			if commits > 1 || aborts > 1 || prepares > 1 {
 				t.Fatalf("fallback lifecycle prepare=%d commit=%d abort=%d", prepares, commits, aborts)
 			}
-			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("fallback did not complete; provider calls=%d", provider.calls)
+	fallback.mu.Lock()
+	commits, aborts, prepares := fallback.commits, fallback.aborts, fallback.prepare
+	fallback.mu.Unlock()
+	t.Fatalf("fallback did not complete; provider calls=%d lifecycle prepare=%d commit=%d abort=%d", provider.calls, prepares, commits, aborts)
 }
 
 func TestFileFallbackChoiceCannotBeForgedOnUnrelatedBlock(t *testing.T) {
