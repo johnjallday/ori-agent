@@ -83,9 +83,14 @@ class FakeElement {
     (this._listeners[event] || []).forEach(fn => fn());
   }
   focus() {
-    // A disabled control cannot take focus in a real browser, and the panel
-    // relies on that being true.
+    // A disabled control or one inside a hidden view cannot take focus in a
+    // real browser, and the panel relies on both being true.
     if (this.disabled) return;
+    let node = this;
+    while (node) {
+      if (node.hidden) return;
+      node = node.parent;
+    }
     globalThis.document.activeElement = this;
   }
   removeAttribute(k) {
@@ -2381,6 +2386,28 @@ test('closing returns focus to the control that opened it', () => {
   assert.equal(doc.activeElement, station, 'focus must go back where the user left it');
 });
 
+test('closing after a view switch never restores focus to the now-hidden Details card', () => {
+  const doc = setup();
+  doc.body.dataset = { workspaceViewMode: 'details' };
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(statusFixture());
+  const cardTrigger = doc.getElementById('fileJanitorCardOpen');
+
+  const station = new FakeElement('button');
+  station.setAttribute('data-cmd-hq-station', 'file-janitor');
+  doc.body.appendChild(station);
+  doc.querySelector = selector =>
+    selector === '[data-cmd-hq-station="file-janitor"]' ? station : null;
+
+  panel.open({ source: 'workspace-details', trigger: cardTrigger });
+  doc.body.dataset.workspaceViewMode = 'map';
+  panel._syncSummaryVisibility();
+  assert.equal(doc.getElementById('downloadsJanitorMount').hidden, true);
+
+  panel.close();
+  assert.equal(doc.activeElement, station, 'the visible station is the live equivalent entry');
+});
+
 test('opening puts focus inside the console', () => {
   const doc = setup();
   renderReview(doc);
@@ -2515,7 +2542,22 @@ test('station state follows the required priority order', () => {
   });
   assert.equal(panel.stationState().value, 'Setup needed');
 
-  // Files waiting outrank both Paused and Watching.
+  // Consent is an explicit prerequisite and leads to the Settings control,
+  // before ordinary pending work.
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.render(
+    statusFixture({
+      privacy: {
+        mode: 'cloud_model',
+        provider: 'Example Cloud',
+        consent_required: true
+      }
+    })
+  );
+  assert.equal(panel.stationState().value, 'Consent required');
+  assert.equal(panel.stationState().actionTab, 'settings');
+
+  // Files waiting outrank both Paused and Watching once prerequisites are met.
   panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
   panel.render(statusFixture({ settings: { ...statusFixture().settings, paused: true } }));
   assert.equal(panel.stationState().value, '2 files ready for review');
@@ -2530,8 +2572,40 @@ test('station state follows the required priority order', () => {
   assert.equal(panel.stationState().value, 'Watching');
 });
 
+test('the station sends consent-required workspaces to the existing consent control', () => {
+  const doc = setup();
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(
+    statusFixture({
+      privacy: {
+        mode: 'cloud_model',
+        headline: 'Ori may inspect a short text extract.',
+        detail: 'Nothing has been sent yet.',
+        provider: 'Example Cloud',
+        leaves_device: true,
+        consent_required: true
+      }
+    })
+  );
+  globalThis.window.WorkspaceCapabilities = {
+    find: () => ({ installed: true, available: true, status: {} })
+  };
+  const adapter = globalThis.window.WorkspaceBuiltinStationAdapters.find(
+    entry => entry.key === 'file-janitor'
+  );
+  const station = adapter.station();
+  const trigger = new FakeElement('button');
+  doc.body.appendChild(trigger);
+
+  station.action(trigger);
+
+  assert.equal(panel.activeTab(), 'settings');
+  assert.match(surface(doc).textContent, /Confirm Example Cloud/);
+});
+
 test('Workspace Details carries no review table and no settings form', () => {
   const doc = setup();
+  doc.body.dataset = { workspaceViewMode: 'details' };
   renderReview(doc);
   const card = doc.getElementById('downloadsJanitorMount');
 
@@ -2548,6 +2622,45 @@ test('Workspace Details carries no review table and no settings form', () => {
   assert.equal(card.all(n => n.id === 'downloadsJanitorSettingsHost').length, 0);
   assert.equal(card.all(n => n.id === 'downloadsJanitorBatch').length, 0);
   assert.equal(card.all(n => n.id === 'downloadsJanitorHistoryHost').length, 0);
+});
+
+test('the configured summary is visible only in Details across status refreshes', () => {
+  const doc = setup();
+  const status = statusFixture();
+  const card = doc.getElementById('downloadsJanitorMount');
+
+  doc.body.dataset = { workspaceViewMode: 'details' };
+  panel.render(status);
+  assert.equal(card.hidden, false, 'Details owns the compact fallback summary');
+
+  for (const mode of ['map', 'tickets', 'dashboard']) {
+    doc.body.dataset.workspaceViewMode = mode;
+    // A status refresh is the path that used to set hidden=false regardless of
+    // the active view, resurrecting the full-width banner over Map.
+    panel.render(status);
+    assert.equal(card.hidden, true, `${mode} must not inherit the Details summary`);
+  }
+});
+
+test('slow capability status cannot reveal the summary in a direct Map entry', () => {
+  const doc = setup();
+  doc.body.dataset = { workspaceViewMode: 'map' };
+  const card = doc.getElementById('downloadsJanitorMount');
+
+  panel.render({ applies: false });
+  assert.equal(card.hidden, true);
+  // This render represents the delayed status response arriving after Command
+  // has already resolved ?mode=map.
+  panel.render(statusFixture());
+  assert.equal(card.hidden, true, 'late installed state is not presentation permission');
+  assert.ok(card.children.length > 0, 'the Details fallback remains ready for a later view switch');
+});
+
+test('the summary falls back to Details when Workspace Command is unavailable', () => {
+  const doc = setup();
+  delete doc.body.dataset;
+  panel.render(statusFixture());
+  assert.equal(doc.getElementById('downloadsJanitorMount').hidden, false);
 });
 
 test('the console header carries the real scan and pause controls', () => {

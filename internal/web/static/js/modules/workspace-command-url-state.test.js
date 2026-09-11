@@ -240,6 +240,27 @@ test('Back/Forward (popstate) restores mode, panel, task, and agent (FR88)', () 
   });
 });
 
+test('Back from an explicit Map entry restores the clean Details entry', () => {
+  withHarness('', ({ harness }) => {
+    const view = new WorkspaceCommandView(makePage());
+    assert.equal(view.viewMode, 'details');
+
+    view.setCommandViewMode('map', { focus: false });
+    assert.equal(view.viewMode, 'map');
+    assert.match(harness.win.location.search, /mode=map/);
+
+    // A clean workspace URL is the canonical Details entry. The Map preference
+    // was just persisted, so resolving this popstate through local preference
+    // incorrectly leaves the rendered map active even though Back removed mode.
+    harness.fireExternalNavigation('?agent=writer', {
+      drawerScroll: 0,
+      focusSelector: null,
+      trayCollapsed: false
+    });
+    assert.equal(view.viewMode, 'details');
+  });
+});
+
 test('popstate restores the captured trayCollapsed presentation flag from history.state (FR88-FR89)', () => {
   withHarness('', ({ harness }) => {
     const view = new WorkspaceCommandView(makePage());

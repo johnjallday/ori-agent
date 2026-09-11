@@ -43,6 +43,12 @@ import { join } from 'node:path';
 
 const RUN = Date.now().toString(36);
 const OLD = new Date(Date.now() - 6 * 60 * 60 * 1000);
+const workspaceSlugs = new Map<string, string>();
+
+function workspacePath(workspaceId: string, query = ''): string {
+  const slug = workspaceSlugs.get(workspaceId) || workspaceId;
+  return `/workspaces/${encodeURIComponent(slug)}${query}`;
+}
 
 function fixtureFolder(label: string, files: Record<string, string>): string {
   const root = mkdtempSync(join(tmpdir(), `fj-${label}-`));
@@ -85,6 +91,8 @@ async function createPlainWorkspace(request: APIRequestContext, name: string): P
   expect(res.ok(), await res.text()).toBeTruthy();
   const body = await res.json();
   const workspaceId = (body.folder?.id || body.workspace?.id) as string;
+  const workspaceSlug = (body.folder?.folder_slug || body.workspace?.folder_slug) as string;
+  workspaceSlugs.set(workspaceId, workspaceSlug || workspaceId);
 
   const agentName = `${name} Manager`;
   const created = await request.post('/api/agents', {
@@ -182,8 +190,8 @@ async function clearCommanderNudge(page: Page, url: string) {
   await clearBlockingModals(page);
 }
 
-async function openWorkspace(page: Page, workspaceId: string) {
-  await clearCommanderNudge(page, `/workspaces/${workspaceId}`);
+async function openWorkspace(page: Page, workspaceId: string, query = '') {
+  await clearCommanderNudge(page, workspacePath(workspaceId, query));
 }
 
 async function openConsoleFromCard(page: Page) {
@@ -217,6 +225,75 @@ test.describe('File Janitor capability', () => {
     await expect(page.locator('#fileJanitorCardOpen')).toHaveText('Set up File Janitor');
     await openConsoleFromCard(page);
     await expect(consoleBody(page).locator('#downloadsJanitorPath')).toBeVisible();
+  });
+
+  test('keeps the summary in Details while Map remains station-first across slow status and refresh', async ({
+    page,
+    request
+  }) => {
+    const workspaceId = await createPlainWorkspace(request, `FJ Views ${RUN}`);
+    const root = fixtureFolder('views', { 'map-entry.pdf': 'fixture' });
+    await installCapability(request, workspaceId);
+    await grantFolder(request, workspaceId, root);
+    const scanned = await request.post(`/api/workspaces/${workspaceId}/file-janitor/scan`);
+    expect(scanned.ok(), await scanned.text()).toBeTruthy();
+
+    await skipOnboarding(page);
+    let releaseStatus!: () => void;
+    const statusGate = new Promise<void>(resolve => {
+      releaseStatus = resolve;
+    });
+    let heldStatus = false;
+    await page.route(`**/api/workspaces/${workspaceId}/file-janitor`, async route => {
+      if (!heldStatus) {
+        heldStatus = true;
+        await statusGate;
+      }
+      await route.continue();
+    });
+
+    await page.goto(workspacePath(workspaceId, '?mode=map'), {
+      waitUntil: 'domcontentloaded'
+    });
+    await expect(page.locator('#downloadsJanitorMount')).toBeHidden();
+    releaseStatus();
+    await clearBlockingModals(page);
+
+    const station = page.locator('[data-cmd-hq-station="file-janitor"]');
+    await expect(station).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('#downloadsJanitorMount')).toBeHidden();
+
+    // A later capability status refresh may update station text, but it cannot
+    // grant presentation permission to the Details-only summary.
+    await page.evaluate(async () => {
+      await (window as any).FileJanitorConsole.refresh();
+    });
+    await expect(page.locator('#downloadsJanitorMount')).toBeHidden();
+
+    // The station is the real Map entry point, not decoration.
+    await station.click();
+    await expect(console_(page)).toBeVisible({ timeout: 15000 });
+    await page.locator('[data-fj-console-close]').click();
+    await expect(station).toBeFocused();
+
+    await page.getByRole('button', { name: 'Tickets', exact: true }).click();
+    await expect(page.locator('#downloadsJanitorMount')).toBeHidden();
+
+    await page.getByRole('button', { name: 'Details', exact: true }).click();
+    await expect(page.locator('#downloadsJanitorMount')).toBeVisible();
+    await expect(page.locator('#downloadsJanitorMount')).toContainText('1 file waiting for review');
+
+    await page.getByRole('button', { name: 'Map', exact: true }).click();
+    await expect(page.locator('#downloadsJanitorMount')).toBeHidden();
+    await page.goBack();
+    await expect(page.getByRole('button', { name: 'Details', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+    await expect(page.locator('#downloadsJanitorMount')).toBeVisible();
+    await page.goForward();
+    await expect(station).toBeVisible();
+    await expect(page.locator('#downloadsJanitorMount')).toBeHidden();
   });
 
   // A generic in-place install must NOT propose a folder. Pre-filling a real
@@ -378,7 +455,7 @@ test.describe('File Janitor capability', () => {
     // The next Back leaves the console entirely, without leaving the workspace.
     await page.goBack();
     await expect(console_(page)).toBeHidden({ timeout: 15000 });
-    expect(page.url()).toContain(`/workspaces/${workspaceId}`);
+    expect(page.url()).toContain(workspacePath(workspaceId));
     await expect(page).not.toHaveURL(/panel=file-janitor/);
   });
 
@@ -389,7 +466,10 @@ test.describe('File Janitor capability', () => {
     await installCapability(request, workspaceId);
     await grantFolder(request, workspaceId, root);
 
-    await clearCommanderNudge(page, `/workspaces/${workspaceId}?panel=file-janitor&tab=not-a-tab`);
+    await clearCommanderNudge(
+      page,
+      workspacePath(workspaceId, '?panel=file-janitor&tab=not-a-tab')
+    );
     await expect(console_(page)).toBeVisible({ timeout: 15000 });
     await expect(console_(page).locator('[data-fj-tab="review"]')).toHaveAttribute(
       'aria-selected',
@@ -471,9 +551,11 @@ test.describe('File Janitor capability', () => {
     expect(created.ok(), await created.text()).toBeTruthy();
     const body = await created.json();
     const workspaceId = (body.folder?.id || body.workspace?.id) as string;
+    const workspaceSlug = (body.folder?.folder_slug || body.workspace?.folder_slug) as string;
+    workspaceSlugs.set(workspaceId, workspaceSlug || workspaceId);
 
     await skipOnboarding(page);
-    await page.goto(`/workspaces/${workspaceId}`);
+    await page.goto(workspacePath(workspaceId));
 
     const dialog = page.locator('#setupWizardDialog');
     if (!(await dialog.isVisible().catch(() => false))) {

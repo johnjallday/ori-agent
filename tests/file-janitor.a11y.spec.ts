@@ -37,6 +37,7 @@ import { join } from 'node:path';
 
 const RUN = Date.now().toString(36);
 const OLD = new Date(Date.now() - 6 * 60 * 60 * 1000);
+const workspaceSlugs = new Map<string, string>();
 
 function inbox(label: string, names: string[]): string {
   const root = mkdtempSync(join(tmpdir(), `fj-a11y-${label}-`));
@@ -60,6 +61,8 @@ async function workspaceWithFolder(
   expect(created.ok(), await created.text()).toBeTruthy();
   const body = await created.json();
   const workspaceId = (body.folder?.id || body.workspace?.id) as string;
+  const workspaceSlug = (body.folder?.folder_slug || body.workspace?.folder_slug) as string;
+  workspaceSlugs.set(workspaceId, workspaceSlug || workspaceId);
 
   // An agent keeps the unrelated Commander prompt off the screen; see
   // tests/file-janitor.spec.ts for why that matters.
@@ -94,7 +97,8 @@ async function openConsole(page: Page, workspaceId: string) {
       body: JSON.stringify({ needs_onboarding: false, completed: true })
     })
   );
-  await page.goto(`/workspaces/${workspaceId}`);
+  const workspaceSlug = workspaceSlugs.get(workspaceId) || workspaceId;
+  await page.goto(`/workspaces/${encodeURIComponent(workspaceSlug)}`);
   await page.locator('#fileJanitorCardOpen').click();
   await expect(page.locator('#fileJanitorConsole')).toBeVisible({ timeout: 15000 });
 }

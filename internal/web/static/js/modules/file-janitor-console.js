@@ -22,6 +22,8 @@
   'use strict';
 
   const MOUNT_ID = 'downloadsJanitorMount';
+  const WORKSPACE_VIEW_MODE_EVENT = 'ori:workspace-view-mode-changed';
+  const WORKSPACE_VIEW_MODES = new Set(['details', 'map', 'tickets', 'dashboard']);
 
   // Set by renderSetupCard so the folder picker can re-enable the confirm
   // button after writing a path straight into the input.
@@ -96,6 +98,27 @@
 
   function mount() {
     return document.getElementById(MOUNT_ID);
+  }
+
+  // Workspace Command owns which top-level workspace view is active and
+  // publishes it outside the subtree it repeatedly rebuilds. Missing state is
+  // intentionally Details: if Command fails to initialize, the compact summary
+  // remains a useful setup/repair fallback rather than disappearing entirely.
+  function workspaceViewMode() {
+    if (typeof document === 'undefined') return 'details';
+    const mode = String(document.body?.dataset?.workspaceViewMode || '').toLowerCase();
+    return WORKSPACE_VIEW_MODES.has(mode) ? mode : 'details';
+  }
+
+  // This controller is the sole writer of the summary mount's hidden state.
+  // Installed/applicable decides whether the summary exists; Command view mode
+  // decides whether that existing summary is presented. Keeping those facts
+  // separate prevents a late capability refresh from resurrecting the card in
+  // Map, Tickets, or Dashboard.
+  function syncSummaryVisibility(status = lastStatus) {
+    const host = mount();
+    if (!host) return;
+    host.hidden = !status?.applies || workspaceViewMode() !== 'details';
   }
 
   function el(tag, className, text) {
@@ -2052,13 +2075,12 @@
     const host = mount();
     if (host) {
       if (!status || !status.applies) {
-        host.hidden = true;
         clear(host);
       } else {
-        host.hidden = false;
         clear(host);
         renderCompactCard(host, status);
       }
+      syncSummaryVisibility(status);
     }
 
     if (consoleOpen) renderConsole();
@@ -2357,13 +2379,13 @@
     const trigger = consoleTrigger;
     consoleTrigger = null;
 
-    if (trigger && typeof trigger.focus === 'function' && isInDocument(trigger)) {
+    if (isVisibleFocusTarget(trigger)) {
       trigger.focus();
       return;
     }
 
     const replacement = liveTrigger(trigger);
-    if (replacement && typeof replacement.focus === 'function') replacement.focus();
+    if (isVisibleFocusTarget(replacement)) replacement.focus();
   }
 
   function isInDocument(node) {
@@ -2372,21 +2394,56 @@
     return Boolean(node.isConnected);
   }
 
-  // liveTrigger finds the current instance of whatever opened the console.
-  // Preference order matches how the user got here: the same id if it had one,
-  // then the Map station, then the card.
+  // A connected node can still be unfocusable because its Details or Map
+  // ancestor is hidden after a view switch. Treat visibility as part of
+  // liveness so closing a console never tries to return the keyboard to a
+  // now-hidden summary.
+  function isVisibleFocusTarget(node) {
+    if (!node || typeof node.focus !== 'function' || !isInDocument(node) || node.disabled) {
+      return false;
+    }
+    let current = node;
+    while (current) {
+      if (current.hidden) return false;
+      current = current.parentElement || current.parent || null;
+    }
+    if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
+      const style = window.getComputedStyle(node);
+      if (style.display === 'none' || style.visibility === 'hidden') return false;
+    }
+    return true;
+  }
+
+  function firstVisible(selector) {
+    if (typeof document === 'undefined') return null;
+    if (typeof document.querySelectorAll === 'function') {
+      const matches = Array.from(document.querySelectorAll(selector));
+      const visible = matches.find(isVisibleFocusTarget);
+      if (visible) return visible;
+    }
+    if (typeof document.querySelector === 'function') {
+      const match = document.querySelector(selector);
+      if (isVisibleFocusTarget(match)) return match;
+    }
+    return null;
+  }
+
+  // liveTrigger finds the current visible instance of whatever opened the
+  // console. Preference order matches how the user got here: the same id,
+  // then a station, then the Details card. Tickets/Dashboard have neither, so
+  // their active view control is the safe final landing point.
   function liveTrigger(trigger) {
     if (typeof document === 'undefined') return null;
     const id = trigger && trigger.id;
     if (id) {
       const byID = document.getElementById(id);
-      if (byID) return byID;
+      if (isVisibleFocusTarget(byID)) return byID;
     }
-    if (typeof document.querySelector === 'function') {
-      const station = document.querySelector('[data-cmd-hq-station="file-janitor"]');
-      if (station) return station;
-    }
-    return document.getElementById('fileJanitorCardOpen');
+    const station = firstVisible('[data-cmd-hq-station="file-janitor"]');
+    if (station) return station;
+    const card = document.getElementById('fileJanitorCardOpen');
+    if (isVisibleFocusTarget(card)) return card;
+    return firstVisible('[data-cmd-view-mode="' + workspaceViewMode() + '"]');
   }
 
   function renderConsole() {
@@ -3032,6 +3089,7 @@
   }
 
   if (typeof document !== 'undefined') {
+    document.addEventListener(WORKSPACE_VIEW_MODE_EVENT, () => syncSummaryVisibility());
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', () => init(), { once: true });
     } else {
@@ -3064,7 +3122,7 @@
   //
   // The order is fixed and is the order of urgency (FR-95):
   //
-  //   Needs attention → Setup needed → <N> ready for review → Paused → Watching
+  //   Needs attention → Setup needed → Consent required → <N> ready for review → Paused → Watching
   //
   // It is a priority rather than a lookup because these overlap constantly: a
   // paused janitor can still have twelve files waiting, and a broken one can be
@@ -3074,6 +3132,7 @@
     if (!lastStatus || !lastStatus.applies) return { applies: false };
     const readiness = lastStatus.readiness || {};
     const settings = lastStatus.settings || {};
+    const privacy = lastStatus.privacy || {};
 
     if (readiness.state === 'needs_attention') {
       return {
@@ -3089,6 +3148,16 @@
         value: 'Setup needed',
         description: 'waiting for you to choose a folder to tidy',
         tone: 'attention'
+      };
+    }
+    if (privacy.consent_required) {
+      const provider = safeName(privacy.provider, 'the configured provider');
+      return {
+        applies: true,
+        value: 'Consent required',
+        description: 'confirm before document extracts may be sent to ' + provider,
+        tone: 'attention',
+        actionTab: 'settings'
       };
     }
     const pending = pendingCount();
@@ -3345,6 +3414,7 @@
     _setStatus: status => {
       lastStatus = status;
     },
+    _syncSummaryVisibility: syncSummaryVisibility,
     _openSettings: () => {
       settingsOpen = true;
       renderSettings();
@@ -3431,7 +3501,12 @@
           },
           action: trigger => {
             if (typeof controller.open === 'function') {
-              controller.open({ source: 'map-station', trigger });
+              const state = controller.stationState();
+              controller.open({
+                source: 'map-station',
+                tab: state?.actionTab || undefined,
+                trigger
+              });
               return;
             }
             catalog.onOpen?.('file-janitor', trigger);
