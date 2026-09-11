@@ -59,6 +59,10 @@
   // Files the user has explicitly marked for Trash. Kept apart from `selected`
   // so a move selection and a removal can never be confused for one another.
   let trashMarked = new Set();
+  // Expanded metadata belongs to a candidate within one batch. It survives
+  // filters, paging, and benign same-batch repaints, but not a new folder or
+  // scan batch.
+  let expandedCandidates = new Set();
   let historyActions = [];
   let historyLoaded = false;
   let historyFilter = '';
@@ -407,6 +411,7 @@
   function categoryPicker(candidate) {
     const select = document.createElement('select');
     select.className = 'dj-category';
+    select.id = 'fileJanitorCategory-' + candidateDOMToken(candidate.id);
     select.setAttribute('aria-label', 'Category for ' + displayName(candidate));
     const chosen = candidate.decision_category || candidate.category || '';
     const options = categories.length
@@ -429,8 +434,71 @@
     return select;
   }
 
+  function candidateDOMToken(value) {
+    return Array.from(String(value || 'unknown'))
+      .map(character => character.codePointAt(0).toString(16))
+      .join('-');
+  }
+
+  function fileDetails(candidate) {
+    const token = candidateDOMToken(candidate.id);
+    const controlID = 'fileJanitorFileDetailsToggle-' + token;
+    const panelID = 'fileJanitorFileDetails-' + token;
+    const expanded = expandedCandidates.has(candidate.id);
+    const wrap = el('div', 'dj-file-disclosure');
+    const control = button(
+      expanded ? 'Hide details' : 'File details',
+      'dj-file-details-toggle',
+      () => {
+        const next = !expandedCandidates.has(candidate.id);
+        if (next) expandedCandidates.add(candidate.id);
+        else expandedCandidates.delete(candidate.id);
+        control.textContent = next ? 'Hide details' : 'File details';
+        control.setAttribute('aria-expanded', next ? 'true' : 'false');
+        control.setAttribute(
+          'aria-label',
+          (next ? 'Hide' : 'Show') + ' file details for ' + displayName(candidate)
+        );
+        details.hidden = !next;
+        if (next) details.scrollIntoView?.({ block: 'nearest' });
+      }
+    );
+    control.id = controlID;
+    control.setAttribute('data-fj-file-details', candidate.id);
+    control.setAttribute('aria-controls', panelID);
+    control.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    control.setAttribute(
+      'aria-label',
+      (expanded ? 'Hide' : 'Show') + ' file details for ' + displayName(candidate)
+    );
+    wrap.appendChild(control);
+
+    const details = el('dl', 'dj-file-details');
+    details.id = panelID;
+    details.hidden = !expanded;
+    [
+      ['Type', candidate.extension || candidate.mime_type || 'Unknown'],
+      ['Size', formatSize(candidate.size)],
+      ['Modified', formatWhen(candidate.modified_at) || 'Unknown']
+    ].forEach(([label, value]) => {
+      const item = el('div', 'dj-file-detail');
+      item.appendChild(el('dt', 'dj-file-detail-label', label));
+      item.appendChild(el('dd', 'dj-file-detail-value', value));
+      details.appendChild(item);
+    });
+    wrap.appendChild(details);
+    return wrap;
+  }
+
   function candidateRow(candidate) {
-    const row = el('tr', 'dj-row-item dj-row-state-' + (candidate.state || 'pending'));
+    const token = candidateDOMToken(candidate.id);
+    const row = el(
+      'tr',
+      'dj-row-item dj-row-state-' +
+        (candidate.state || 'pending') +
+        (candidate.needs_review ? ' is-needs-review' : '')
+    );
+    row.setAttribute('role', 'row');
     row.setAttribute('data-candidate-id', candidate.id);
     // A deep link naming this candidate marks it, so the row a notification
     // was about is findable in a batch of hundreds. The id is registered so
@@ -442,9 +510,11 @@
     }
 
     const selectCell = el('td', 'dj-cell dj-cell-select');
+    selectCell.setAttribute('role', 'cell');
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.className = 'dj-select';
+    checkbox.id = 'fileJanitorSelect-' + token;
     checkbox.checked = selected.has(candidate.id);
     checkbox.setAttribute('aria-label', 'Select ' + displayName(candidate));
     checkbox.disabled = candidate.state !== 'pending' && candidate.state !== 'approved';
@@ -469,21 +539,19 @@
     row.appendChild(selectCell);
 
     const nameCell = el('td', 'dj-cell dj-cell-name');
+    nameCell.setAttribute('role', 'cell');
     nameCell.appendChild(el('span', 'dj-name', displayName(candidate)));
     if (candidate.needs_review) {
       const flag = el('span', 'dj-flag', 'Needs review');
       flag.setAttribute('title', 'Ori could not place this confidently');
       nameCell.appendChild(flag);
     }
+    nameCell.appendChild(fileDetails(candidate));
     row.appendChild(nameCell);
 
-    row.appendChild(
-      el('td', 'dj-cell dj-cell-type', candidate.extension || candidate.mime_type || '—')
-    );
-    row.appendChild(el('td', 'dj-cell dj-cell-size', formatSize(candidate.size)));
-    row.appendChild(el('td', 'dj-cell dj-cell-modified', formatWhen(candidate.modified_at) || '—'));
-
-    const categoryCell = el('td', 'dj-cell dj-cell-category');
+    const categoryCell = el('td', 'dj-cell dj-cell-category dj-cell-destination');
+    categoryCell.setAttribute('role', 'cell');
+    categoryCell.appendChild(el('span', 'dj-cell-mobile-label', 'Destination'));
     if (candidate.state === 'pending' || candidate.state === 'approved') {
       categoryCell.appendChild(categoryPicker(candidate));
     } else {
@@ -494,8 +562,10 @@
     categoryCell.appendChild(el('span', 'dj-destination', candidate.destination || ''));
     row.appendChild(categoryCell);
 
-    const reasonCell = el('td', 'dj-cell dj-cell-reason');
-    reasonCell.appendChild(el('span', 'dj-reason', candidate.reason || ''));
+    const reasonCell = el('td', 'dj-cell dj-cell-reason dj-cell-why-status');
+    reasonCell.setAttribute('role', 'cell');
+    reasonCell.appendChild(el('span', 'dj-cell-mobile-label', 'Why / Status'));
+    reasonCell.appendChild(el('span', 'dj-reason', candidate.reason || 'No rationale available.'));
     if (candidate.confidence) {
       const confidence = el(
         'span',
@@ -504,17 +574,17 @@
       );
       reasonCell.appendChild(confidence);
     }
+    reasonCell.appendChild(
+      el('span', 'dj-state', STATE_ROW_LABELS[candidate.state] || candidate.state || 'Unknown')
+    );
+    if (candidate.state_reason) {
+      reasonCell.appendChild(el('span', 'dj-state-reason', candidate.state_reason));
+    }
     row.appendChild(reasonCell);
 
-    const stateCell = el('td', 'dj-cell dj-cell-state');
-    stateCell.appendChild(
-      el('span', 'dj-state', STATE_ROW_LABELS[candidate.state] || candidate.state)
-    );
-    if (candidate.state_reason)
-      stateCell.appendChild(el('span', 'dj-state-reason', candidate.state_reason));
-    row.appendChild(stateCell);
-
     const actionCell = el('td', 'dj-cell dj-cell-actions');
+    actionCell.setAttribute('role', 'cell');
+    actionCell.appendChild(el('span', 'dj-cell-mobile-label', 'Actions'));
     if (candidate.state === 'pending' || candidate.state === 'approved') {
       // Trash is a per-file choice with its own toggle. It is never part of the
       // move selection, so a bulk selection cannot become a removal (FR-66).
@@ -533,17 +603,18 @@
           renderBatch();
         }
       );
+      trashToggle.id = 'fileJanitorTrash-' + token;
       trashToggle.setAttribute('aria-pressed', marked ? 'true' : 'false');
       trashToggle.setAttribute(
         'aria-label',
         (marked ? 'Unmark' : 'Mark') + ' ' + displayName(candidate) + ' for Trash'
       );
       actionCell.appendChild(trashToggle);
-      actionCell.appendChild(
-        button('Skip', 'dj-btn dj-btn-quiet', () => {
-          void submitDecisions([{ candidate_id: candidate.id, decision: 'skip' }]);
-        })
-      );
+      const skip = button('Skip', 'dj-btn dj-btn-quiet', () => {
+        void submitDecisions([{ candidate_id: candidate.id, decision: 'skip' }]);
+      });
+      skip.id = 'fileJanitorSkip-' + token;
+      actionCell.appendChild(skip);
     } else if (candidate.state === 'skipped') {
       actionCell.appendChild(el('span', 'dj-muted', 'Dismissed'));
     }
@@ -673,26 +744,26 @@
 
   function reviewTable() {
     const table = el('table', 'dj-table');
+    table.setAttribute('role', 'table');
     table.setAttribute('aria-label', 'Files proposed for filing');
 
     const head = document.createElement('thead');
+    head.setAttribute('role', 'rowgroup');
     const headRow = document.createElement('tr');
+    headRow.setAttribute('role', 'row');
     // The select column's header is a screen-reader label, not a select-all:
     // a select-all control on a list that can include Trash decisions is how
     // bulk mistakes happen.
     [
       { label: 'Select', className: 'dj-th-select' },
       { label: 'File' },
-      { label: 'Type' },
-      { label: 'Size' },
-      { label: 'Modified' },
-      { label: 'Category and destination' },
-      { label: 'Why' },
-      { label: 'State' },
+      { label: 'Destination' },
+      { label: 'Why / Status' },
       { label: 'Actions' }
     ].forEach(column => {
       const cell = el('th', 'dj-th ' + (column.className || ''), column.label);
       cell.setAttribute('scope', 'col');
+      cell.setAttribute('role', 'columnheader');
       headRow.appendChild(cell);
     });
     head.appendChild(headRow);
@@ -700,6 +771,7 @@
 
     const body = document.createElement('tbody');
     body.className = 'dj-tbody';
+    body.setAttribute('role', 'rowgroup');
     visibleCandidates().forEach(candidate => body.appendChild(candidateRow(candidate)));
     table.appendChild(body);
     return table;
@@ -729,7 +801,7 @@
       if (moves) parts.push(moves + (moves === 1 ? ' move' : ' moves'));
       if (trashes) parts.push(trashes + ' to Trash');
       approve.textContent =
-        parts.length === 0 ? 'Approve selected' : 'Approve ' + parts.join(' and ');
+        parts.length === 0 ? 'Review selected changes' : 'Review ' + parts.join(' and ');
       approve.disabled = moves + trashes === 0;
       approve.setAttribute('aria-disabled', approve.disabled ? 'true' : 'false');
       // Point the disabled control at the line that says why ("No files
@@ -744,6 +816,7 @@
   function renderBatch() {
     const container = document.getElementById('downloadsJanitorBatch');
     if (!container) return;
+    const focusedReviewControlID = String(document.activeElement?.id || '');
     clear(container);
 
     if (!lastBatch) {
@@ -785,7 +858,7 @@
     footer.appendChild(selection);
 
     const approve = button(
-      'Approve selected moves',
+      'Review selected changes',
       'dj-btn dj-btn-primary',
       () => void startApproval()
     );
@@ -794,6 +867,11 @@
     container.appendChild(footer);
 
     updateSelectionSummary();
+    if (
+      /^fileJanitor(?:Select|Category|FileDetailsToggle|Trash|Skip)-/.test(focusedReviewControlID)
+    ) {
+      document.getElementById(focusedReviewControlID)?.focus?.();
+    }
   }
 
   // ------------------------------------------------------- confirm and apply
@@ -2169,6 +2247,7 @@
     if (managedFolderChanged(lastStatus, status)) {
       trashMarked = new Set();
       selected = new Set();
+      expandedCandidates = new Set();
       pendingPreview = null;
     }
     lastStatus = status;
@@ -2230,6 +2309,9 @@
       }
       return;
     }
+    host.setAttribute('role', 'tabpanel');
+    host.setAttribute('aria-labelledby', 'fileJanitorTab-' + consoleTab);
+
     if (consoleTab === 'history') {
       const historyHost = el('div', 'dj-history-host');
       historyHost.id = 'downloadsJanitorHistoryHost';
@@ -2667,7 +2749,7 @@
 
     const actions = el('div', 'fj-console-actions');
     if (configured) {
-      const scan = button('Scan now', 'dj-btn dj-btn-primary', () => void scanNow());
+      const scan = button('Scan now', 'dj-btn dj-btn-secondary', () => void scanNow());
       scan.id = 'downloadsJanitorScan';
       scan.disabled = scanning;
       actions.appendChild(scan);
@@ -2694,15 +2776,20 @@
   function renderConsoleTabs() {
     const list = el('div', 'fj-console-tabs');
     list.setAttribute('role', 'tablist');
+    list.setAttribute('aria-label', 'File Janitor sections');
     const labels = { review: 'Review', history: 'History', settings: 'Settings' };
     CONSOLE_TABS.forEach(tab => {
       const active = tab === consoleTab;
       const control = button(labels[tab], 'fj-console-tab' + (active ? ' is-active' : ''), () =>
         selectTab(tab)
       );
+      control.id = 'fileJanitorTab-' + tab;
       control.setAttribute('role', 'tab');
+      control.setAttribute('aria-controls', 'fileJanitorConsoleBody');
       control.setAttribute('aria-selected', active ? 'true' : 'false');
+      control.setAttribute('tabindex', active ? '0' : '-1');
       control.setAttribute('data-fj-tab', tab);
+      control.addEventListener('keydown', event => handleConsoleTabKey(event, tab));
       if (tab === 'review') {
         const pending = pendingCount();
         if (pending > 0) control.appendChild(el('span', 'fj-console-tab-count', String(pending)));
@@ -2710,6 +2797,21 @@
       list.appendChild(control);
     });
     return list;
+  }
+
+  function handleConsoleTabKey(event, tab) {
+    const index = CONSOLE_TABS.indexOf(tab);
+    if (index < 0) return;
+    let next = '';
+    if (event.key === 'ArrowRight') next = CONSOLE_TABS[(index + 1) % CONSOLE_TABS.length];
+    if (event.key === 'ArrowLeft') {
+      next = CONSOLE_TABS[(index - 1 + CONSOLE_TABS.length) % CONSOLE_TABS.length];
+    }
+    if (event.key === 'Home') next = CONSOLE_TABS[0];
+    if (event.key === 'End') next = CONSOLE_TABS[CONSOLE_TABS.length - 1];
+    if (!next) return;
+    event.preventDefault();
+    selectTab(next);
   }
 
   function selectTab(tab) {
@@ -2722,6 +2824,7 @@
     pendingPreview = null;
     consoleItem = '';
     renderConsole();
+    document.getElementById('fileJanitorTab-' + next)?.focus?.();
     syncUrl();
   }
 
@@ -3101,9 +3204,9 @@
     }
   }
 
-  // loadBatch fetches the newest batch still awaiting the user. Selection is
-  // cleared on every load: a stored decision may have changed which rows are
-  // actionable, and a stale selection is how the wrong file gets acted on.
+  // loadBatch fetches the newest batch still awaiting the user. Selection and
+  // disclosure state survive a same-batch reload; a new batch clears both, and
+  // candidates that became ineligible are dropped individually below.
   async function loadBatch() {
     const id = wsId();
     if (!id) return;
@@ -3147,6 +3250,7 @@
     if ((lastBatch && lastBatch.id) !== previousBatchID) {
       selected = new Set();
       trashMarked = new Set();
+      expandedCandidates = new Set();
     }
     dropIneligibleSelections();
     // A confirmation already on screen must survive a batch reload that did not
@@ -3525,11 +3629,13 @@
     _selectTab: selectTab,
     _confirmSetup: confirmSetup,
     _setBatch: (batch, candidates, cats) => {
+      const changed = (lastBatch && lastBatch.id) !== (batch && batch.id);
       lastBatch = batch;
       lastCandidates = candidates || [];
       if (cats) categories = cats;
       selected = new Set();
       trashMarked = new Set();
+      if (changed) expandedCandidates = new Set();
       pendingPreview = null;
       filter = '';
     },
@@ -3584,6 +3690,7 @@
       lastStatus = null;
       lastBatch = null;
       lastCandidates = [];
+      expandedCandidates = new Set();
     },
     _select: id => {
       selected.add(id);

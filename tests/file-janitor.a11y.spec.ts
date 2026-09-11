@@ -310,11 +310,25 @@ test.describe('File Janitor console accessibility', () => {
     await expect(tabs).toHaveCount(3);
     await expect(page.locator('[data-fj-tab="review"]')).toHaveAttribute('aria-selected', 'true');
 
+    const reviewTab = page.locator('[data-fj-tab="review"]');
+    await expect(reviewTab).toHaveAttribute('aria-controls', 'fileJanitorConsoleBody');
+    await expect(page.locator('#fileJanitorConsoleBody')).toHaveAttribute('role', 'tabpanel');
+    await expect(page.locator('#fileJanitorConsoleBody')).toHaveAttribute(
+      'aria-labelledby',
+      'fileJanitorTab-review'
+    );
+
     await page.locator('[data-fj-tab="history"]').click();
     await expect(page.locator('[data-fj-tab="history"]')).toHaveAttribute('aria-selected', 'true');
-    await expect(page.locator('[data-fj-tab="review"]')).toHaveAttribute('aria-selected', 'false');
+    await expect(page.locator('[data-fj-tab="history"]')).toBeFocused();
+    await expect(reviewTab).toHaveAttribute('aria-selected', 'false');
 
-    await page.locator('[data-fj-tab="review"]').click();
+    await page.keyboard.press('End');
+    await expect(page.locator('[data-fj-tab="settings"]')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('[data-fj-tab="settings"]')).toBeFocused();
+    await page.keyboard.press('Home');
+    await expect(reviewTab).toHaveAttribute('aria-selected', 'true');
+    await expect(reviewTab).toBeFocused();
     await page.locator('#downloadsJanitorScan').click();
     await expect(page.locator('.dj-row-item').first()).toBeVisible({ timeout: 15000 });
 
@@ -363,8 +377,8 @@ test.describe('File Janitor console accessibility', () => {
     // the document before/after is worse still: the page is still laying out,
     // so the "growth" is the page finishing, not the table.
     //
-    // What File Janitor is answerable for is that a review table wider than the
-    // screen scrolls inside its own box instead of stretching anything.
+    // What File Janitor is answerable for is that the review rows reflow inside
+    // the console instead of creating a second sideways scrolling surface.
     const widths = await page.evaluate(() => {
       const box = (sel: string) => {
         const el = document.querySelector(sel);
@@ -377,6 +391,7 @@ test.describe('File Janitor console accessibility', () => {
         body: box('#fileJanitorConsoleBody'),
         scroller: box('.dj-table-scroll'),
         table: box('.dj-table'),
+        row: box('.dj-row-item'),
         scrollerScrolls: scroller ? scroller.scrollWidth > scroller.clientWidth : false
       };
     });
@@ -390,12 +405,25 @@ test.describe('File Janitor console accessibility', () => {
     expect(widths.scroller, 'the table container is wider than the screen').toBeLessThanOrEqual(
       widths.viewport
     );
-    // The table really is wider than its container, and really does scroll
-    // there — otherwise this test would pass on a table that simply fit.
-    expect(widths.table, 'this fixture produced no overflowing table').toBeGreaterThan(
+    expect(widths.table, 'the table did not reflow inside its container').toBeLessThanOrEqual(
       widths.scroller
     );
-    expect(widths.scrollerScrolls, 'the table does not scroll in its own box').toBe(true);
+    expect(widths.row, 'a review row did not reflow inside its container').toBeLessThanOrEqual(
+      widths.scroller
+    );
+    expect(widths.scrollerScrolls, 'the table still creates sideways scrolling').toBe(false);
+    await expect(page.locator('.dj-row-item').first().locator('.dj-cell-mobile-label')).toHaveText([
+      'Destination',
+      'Why / Status',
+      'Actions'
+    ]);
+
+    const details = page.locator('.dj-file-details-toggle').first();
+    await expect(details).toHaveAttribute('aria-expanded', 'false');
+    await details.focus();
+    await page.keyboard.press('Enter');
+    await expect(details).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('.dj-file-details').first()).toBeVisible();
 
     // The header — and its Close — stay reachable however far the body scrolls.
     await page.locator('#fileJanitorConsoleBody').evaluate(el => el.scrollTo(0, el.scrollHeight));

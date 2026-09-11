@@ -79,8 +79,8 @@ class FakeElement {
   set selected(v) {
     this._selected = v;
   }
-  dispatch(event) {
-    (this._listeners[event] || []).forEach(fn => fn());
+  dispatch(event, payload = {}) {
+    (this._listeners[event] || []).forEach(fn => fn(payload));
   }
   focus() {
     // A disabled control or one inside a hidden view cannot take focus in a
@@ -562,6 +562,53 @@ test('review table renders a row per candidate with the facts needed to judge it
   assert.match(body, /200 KB/); // human-readable size
 });
 
+test('review rows present five decisions-first columns with expandable file details', () => {
+  const doc = setup();
+  const host = renderReview(doc);
+  const headers = host.all(node => node.tagName === 'TH').map(node => node.textContent);
+  assert.deepEqual(headers, ['Select', 'File', 'Destination', 'Why / Status', 'Actions']);
+
+  const row = rowsIn(host).find(node => node.getAttribute('data-candidate-id') === 'c1');
+  const disclosure = row.all(
+    node => node.tagName === 'BUTTON' && node.getAttribute('data-fj-file-details') === 'c1'
+  )[0];
+  assert.ok(disclosure, 'the file cell has one details control');
+  assert.equal(disclosure.getAttribute('aria-expanded'), 'false');
+  assert.match(disclosure.getAttribute('aria-label'), /Show file details for invoice-2026-07.pdf/);
+
+  disclosure.click();
+  assert.equal(disclosure.getAttribute('aria-expanded'), 'true');
+  const details = row.all(node => node.className === 'dj-file-details')[0];
+  assert.equal(details.hidden, false);
+  assert.match(details.textContent, /Type \.pdf/);
+  assert.match(details.textContent, /Size 200 KB/);
+  assert.match(details.textContent, /Modified/);
+
+  panel.renderBatch();
+  const refreshed = rowsIn(doc.getElementById('downloadsJanitorBatch')).find(
+    node => node.getAttribute('data-candidate-id') === 'c1'
+  );
+  const refreshedDisclosure = refreshed.all(
+    node => node.tagName === 'BUTTON' && node.getAttribute('data-fj-file-details') === 'c1'
+  )[0];
+  assert.equal(refreshedDisclosure.getAttribute('aria-expanded'), 'true');
+  assert.equal(refreshed.all(node => node.className === 'dj-file-details')[0].hidden, false);
+
+  panel._setBatch({ ...batchFixture(), id: 'batch-2' }, candidatesFixture(), CATEGORIES);
+  panel.renderBatch();
+  const replacement = rowsIn(doc.getElementById('downloadsJanitorBatch')).find(
+    node => node.getAttribute('data-candidate-id') === 'c1'
+  );
+  assert.equal(
+    replacement
+      .all(
+        node => node.tagName === 'BUTTON' && node.getAttribute('data-fj-file-details') === 'c1'
+      )[0]
+      .getAttribute('aria-expanded'),
+    'false'
+  );
+});
+
 test('the batch summary states counts, scan source, and when it ran', () => {
   const doc = setup();
   renderReview(doc);
@@ -725,7 +772,7 @@ test('the table and its controls carry screen-reader labels', () => {
   assert.ok(table.getAttribute('aria-label'), 'the table needs a label');
 
   const headers = host.all(n => n.tagName === 'TH');
-  assert.equal(headers.length, 9);
+  assert.equal(headers.length, 5);
   headers.forEach(header => assert.equal(header.getAttribute('scope'), 'col'));
 
   const box = host.all(n => n.className === 'dj-select')[0];
@@ -831,14 +878,14 @@ test('the approve control states the count and is disabled until something is se
   renderReview(doc);
   const approve = doc.getElementById('downloadsJanitorApprove');
   assert.equal(approve.disabled, true);
-  assert.match(approve.textContent, /Approve selected/);
+  assert.match(approve.textContent, /Review selected changes/);
 
   panel._select('c1');
   assert.equal(approve.disabled, false);
-  assert.match(approve.textContent, /Approve 1 move$/);
+  assert.match(approve.textContent, /Review 1 move$/);
 
   panel._select('c2');
-  assert.match(approve.textContent, /Approve 2 moves$/);
+  assert.match(approve.textContent, /Review 2 moves$/);
 });
 
 test('approving previews the plan without moving anything', async () => {
@@ -1117,9 +1164,10 @@ test('results survive the batch they emptied', async () => {
 
 function trashToggleFor(doc, name) {
   const host = surface(doc);
-  return host.all(
-    n => n.tagName === 'BUTTON' && String(n.getAttribute('aria-label') || '').includes(name)
-  )[0];
+  return host.all(n => {
+    const label = String(n.getAttribute('aria-label') || '');
+    return n.tagName === 'BUTTON' && label.includes(name) && label.includes('for Trash');
+  })[0];
 }
 
 test('Trash is a per-file choice, never part of the move selection', () => {
@@ -1785,6 +1833,38 @@ test('stopping use of a folder confirms first and explains what is kept', async 
   stop.click();
   await new Promise(r => setTimeout(r, 0));
   assert.equal(called, true, 'the second press confirms');
+});
+
+test('console tabs expose their panel and support arrow, Home, and End navigation', () => {
+  const doc = setup();
+  renderReview(doc);
+  const event = key => ({ key, preventDefault() {} });
+
+  let review = doc.getElementById('fileJanitorTab-review');
+  assert.equal(review.getAttribute('aria-selected'), 'true');
+  assert.equal(review.getAttribute('tabindex'), '0');
+  assert.equal(review.getAttribute('aria-controls'), 'fileJanitorConsoleBody');
+  assert.equal(doc.getElementById('fileJanitorConsoleBody').getAttribute('role'), 'tabpanel');
+  assert.equal(
+    doc.getElementById('fileJanitorConsoleBody').getAttribute('aria-labelledby'),
+    'fileJanitorTab-review'
+  );
+
+  review.dispatch('keydown', event('ArrowRight'));
+  let history = doc.getElementById('fileJanitorTab-history');
+  assert.equal(panel.activeTab(), 'history');
+  assert.equal(history.getAttribute('aria-selected'), 'true');
+  assert.equal(doc.activeElement, history);
+
+  history.dispatch('keydown', event('End'));
+  const settings = doc.getElementById('fileJanitorTab-settings');
+  assert.equal(panel.activeTab(), 'settings');
+  assert.equal(doc.activeElement, settings);
+
+  settings.dispatch('keydown', event('Home'));
+  review = doc.getElementById('fileJanitorTab-review');
+  assert.equal(panel.activeTab(), 'review');
+  assert.equal(doc.activeElement, review);
 });
 
 test('the Settings tab reports whether it is the selected tab', () => {
@@ -3026,8 +3106,14 @@ test('selections survive a page change', async () => {
     ['c0', 'c1'],
     'turning a page must not discard decisions already made'
   );
-  // And the approve control still reflects them, from the new page.
-  assert.equal(doc.getElementById('downloadsJanitorApprove').disabled, false);
+  panel._select('c50');
+  assert.deepEqual(
+    panel._selected().sort(),
+    ['c0', 'c1', 'c50'],
+    'the selection may intentionally span server pages'
+  );
+  // And the review control reflects both off-page and current-page choices.
+  assert.equal(doc.getElementById('downloadsJanitorApprove').textContent, 'Review 3 moves');
 });
 
 // The other half of the rule: a file that has since been filed, skipped, or
@@ -3137,22 +3223,49 @@ test('a flagged row cannot be selected until the user chooses a category', () =>
   assert.equal(confidentRow.all(n => n.className === 'dj-select')[0].disabled, false);
 });
 
-test('choosing a category makes a flagged row selectable', async () => {
+test('choosing a category makes a flagged row selectable and keeps focus', async () => {
   const doc = setup();
   renderReview(doc);
   await settle();
-
-  const resolved = candidatesFixture().map(c =>
-    c.id === 'c2' ? { ...c, decision_category: 'documents' } : c
-  );
-  panel._setBatch(batchFixture(), resolved, CATEGORIES);
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.render(statusFixture());
   panel.renderBatch();
 
-  const flaggedRow = rowsIn(surface(doc)).find(r => r.textContent.includes('payload.bin'));
+  const resolved = candidatesFixture().map(candidate =>
+    candidate.id === 'c2' ? { ...candidate, decision_category: 'documents' } : candidate
+  );
+  globalThis.fetch = async (_url, options) =>
+    options?.method === 'POST'
+      ? { ok: true, json: async () => ({}) }
+      : {
+          ok: true,
+          json: async () => ({
+            batch: batchFixture(),
+            candidates: resolved,
+            total: resolved.length,
+            filtered_total: resolved.length,
+            counts: { all: resolved.length, needs_review: 1, pending: 2, skipped: 1 }
+          })
+        };
+
+  const before = rowsIn(surface(doc)).find(row => row.textContent.includes('payload.bin'));
+  const category = before.all(node => node.className === 'dj-category')[0];
+  category.focus();
+  category.value = 'documents';
+  category.dispatch('change');
+  await settle();
+  await settle();
+
+  const flaggedRow = rowsIn(surface(doc)).find(row => row.textContent.includes('payload.bin'));
   assert.equal(
-    flaggedRow.all(n => n.className === 'dj-select')[0].disabled,
+    flaggedRow.all(node => node.className === 'dj-select')[0].disabled,
     false,
     'the user has now said where it goes'
+  );
+  assert.equal(
+    doc.activeElement,
+    flaggedRow.all(node => node.className === 'dj-category')[0],
+    'the server repaint must not drop focus from the decision control'
   );
 });
 

@@ -252,18 +252,20 @@
   outline-offset: 2px;
 }
 
-/* A hundred-file batch has to stay usable: the table scrolls inside its own
-   container rather than pushing the page sideways. */
+/* Review scrolling belongs to the console body. Keeping the table wrapper out
+   of the scroll chain prevents a focused row from disappearing underneath a
+   second nested viewport. */
 .dj-table-scroll {
-  overflow-x: auto;
-  max-height: 28rem;
-  overflow-y: auto;
+  min-width: 0;
+  margin-bottom: 4.5rem;
+  overflow: visible;
   border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
   border-radius: 8px;
 }
 
 .dj-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 0.8rem;
 }
@@ -277,8 +279,29 @@
   background: var(--bg-secondary, #1c1c1e);
   color: var(--text-secondary, #9aa0a6);
   font-weight: 600;
-  white-space: nowrap;
+  white-space: normal;
   border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.dj-th:nth-child(1),
+.dj-cell-select {
+  width: 3.25rem;
+}
+
+.dj-th:nth-child(2) {
+  width: 24%;
+}
+
+.dj-th:nth-child(3) {
+  width: 24%;
+}
+
+.dj-th:nth-child(4) {
+  width: 30%;
+}
+
+.dj-th:nth-child(5) {
+  width: 10.5rem;
 }
 
 .dj-cell {
@@ -290,12 +313,61 @@
 
 .dj-cell-name {
   color: var(--text-primary, #e8e8e8);
-  max-width: 22rem;
   overflow-wrap: anywhere;
 }
 
 .dj-name {
   font-weight: 500;
+}
+
+.dj-file-disclosure {
+  margin-top: 0.28rem;
+}
+
+.dj-file-details-toggle {
+  min-height: 28px;
+  padding: 0.1rem 0;
+  color: var(--accent-color, #3b7dd8);
+  font: inherit;
+  font-size: 0.72rem;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.dj-file-details-toggle:hover {
+  color: var(--accent-hover, #2f6ec3);
+}
+
+.dj-file-details {
+  display: grid;
+  gap: 0.18rem;
+  margin: 0.2rem 0 0;
+  scroll-margin-bottom: 5.5rem;
+  font-size: 0.72rem;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-file-details[hidden] {
+  display: none;
+}
+
+.dj-file-detail {
+  display: grid;
+  grid-template-columns: 4.2rem minmax(0, 1fr);
+  gap: 0.35rem;
+}
+
+.dj-file-detail-label,
+.dj-file-detail-value {
+  margin: 0;
+}
+
+.dj-file-detail-label {
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
 }
 
 .dj-flag {
@@ -309,13 +381,9 @@
   color: var(--warning-color, #b26a00);
 }
 
-.dj-cell-size,
-.dj-cell-modified {
-  white-space: nowrap;
-}
-
 .dj-category {
-  max-width: 11rem;
+  width: 100%;
+  max-width: 13rem;
   padding: 0.2rem 0.35rem;
   border-radius: 6px;
   border: 1px solid var(--border-color, rgba(255, 255, 255, 0.14));
@@ -334,7 +402,6 @@
 }
 
 .dj-cell-reason {
-  max-width: 18rem;
   overflow-wrap: anywhere;
 }
 
@@ -350,13 +417,25 @@
 }
 
 .dj-state {
-  white-space: nowrap;
+  display: block;
+  width: fit-content;
+  margin-top: 0.3rem;
+  padding: 0.08rem 0.34rem;
+  color: var(--text-primary, #e8e8e8);
+  white-space: normal;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.14));
+  border-radius: 999px;
+}
+
+.dj-cell-mobile-label {
+  display: none;
 }
 
 /* Low-confidence and changed rows are marked by text as well as tint, so the
    distinction survives without colour. */
 .dj-row-state-stale,
-.dj-row-state-failed {
+.dj-row-state-failed,
+.dj-row-item.is-needs-review {
   background: color-mix(in srgb, var(--warning-color, #b26a00) 8%, transparent);
 }
 
@@ -402,6 +481,80 @@
   color: var(--text-secondary, #9aa0a6);
 }
 
+@media (max-width: 680px) {
+  .dj-table-scroll {
+    border: 0;
+  }
+
+  .dj-table,
+  .dj-tbody {
+    display: block;
+  }
+
+  .dj-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .dj-row-item {
+    display: grid;
+    grid-template-columns: 2.25rem minmax(0, 1fr);
+    gap: 0.25rem 0.5rem;
+    margin-bottom: 0.65rem;
+    padding: 0.65rem;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+    border-radius: 8px;
+  }
+
+  .dj-cell {
+    display: block;
+    min-width: 0;
+    padding: 0.18rem 0;
+    border: 0;
+  }
+
+  .dj-cell-select {
+    grid-row: 1;
+    grid-column: 1;
+    width: auto;
+  }
+
+  .dj-cell-name {
+    grid-row: 1;
+    grid-column: 2;
+  }
+
+  .dj-cell-destination,
+  .dj-cell-why-status,
+  .dj-cell-actions {
+    grid-column: 1 / -1;
+  }
+
+  .dj-cell-mobile-label {
+    display: block;
+    margin-bottom: 0.2rem;
+    color: var(--text-secondary, #9aa0a6);
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .dj-category {
+    max-width: none;
+  }
+
+  .dj-cell-actions .dj-btn {
+    min-height: 44px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .dj-btn,
   .dj-filter {
@@ -412,16 +565,29 @@
 /* --------------------------------------------------- confirmation & results */
 
 .dj-footer {
+  position: sticky;
+  bottom: -1.25rem;
+  z-index: 2;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
   margin-top: 0.6rem;
+  padding: 0.65rem 0 0.7rem;
+  background: var(--bg-secondary, #1a1a1a);
+  border-top: 1px solid var(--border-color, #2f2f2f);
+  box-shadow: 0 -10px 20px color-mix(in srgb, var(--bg-secondary, #1a1a1a) 88%, transparent);
 }
 
 .dj-footer .dj-selection {
   margin: 0;
+}
+
+.dj-footer .dj-btn-primary:disabled {
+  color: var(--text-secondary, #9aa0a6);
+  background: var(--bg-tertiary, #2a2a2a);
+  border-color: var(--border-color, #2f2f2f);
 }
 
 .dj-confirm {
@@ -894,8 +1060,9 @@
   min-width: 0;
   min-height: 0;
   padding: 1rem 1.25rem 1.25rem;
-  overflow-x: auto;
+  overflow-x: hidden;
   overflow-y: auto;
+  scroll-padding-block: 0.75rem 5.5rem;
   overscroll-behavior: contain;
 }
 
@@ -1332,34 +1499,12 @@
   border-top: 1px solid var(--border-color, #2f2f2f);
 }
 
-/* The table scrolls inside its own box at any width, so a wide batch never
-   makes the page itself scroll sideways. */
-.dj-table-scroll {
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-}
-
 /* ----------------------------------------------------------- narrow screens
 
-   The table drops its secondary columns — type, size, and modified date — and
-   keeps what a decision actually rests on: the file's name, where it would go,
-   and the controls that act on it.
-
-   Those columns are hidden rather than reflowed because the approval
-   consequence ("Filed/Documents") must stay visible at every width. A user who
-   cannot see the destination is being asked to approve a move they cannot
-   evaluate (FR-118). */
+   Decision rows reflow above at phone width; no columns are hidden. These
+   remaining rules keep page controls and the selected-action footer compact. */
 
 @media (max-width: 720px) {
-  .dj-cell-type,
-  .dj-cell-size,
-  .dj-cell-modified,
-  .dj-table thead th:nth-child(3),
-  .dj-table thead th:nth-child(4),
-  .dj-table thead th:nth-child(5) {
-    display: none;
-  }
-
   .dj-pager {
     justify-content: center;
   }

@@ -394,12 +394,37 @@ test.describe('File Janitor capability', () => {
     await page.locator('#downloadsJanitorScan').click();
     await expect(consoleBody(page).locator('.dj-row-item').first()).toBeVisible({ timeout: 15000 });
 
+    await expect(consoleBody(page).locator('.dj-table th')).toHaveText([
+      'Select',
+      'File',
+      'Destination',
+      'Why / Status',
+      'Actions'
+    ]);
     const row = consoleBody(page).locator('.dj-row-item').filter({ hasText: 'invoice.pdf' });
     await expect(row).toBeVisible();
     // The row shows what the decision rests on: where it would go.
     await expect(row).toContainText('Filed/Documents');
+    const details = row.locator('.dj-file-details-toggle');
+    await expect(details).toHaveAccessibleName('Show file details for invoice.pdf');
+    await details.click();
+    await expect(details).toHaveAttribute('aria-expanded', 'true');
+    await expect(details).toHaveAccessibleName('Hide file details for invoice.pdf');
+    const fileDetails = row.locator('.dj-file-details');
+    await expect(fileDetails.locator('dt')).toHaveText(['Type', 'Size', 'Modified']);
+    await expect(fileDetails.locator('dd').nth(0)).toHaveText('.pdf');
+    await expect(fileDetails.locator('dd').nth(1)).toHaveText('7 B');
+    const [detailsBox, footerBox] = await Promise.all([
+      fileDetails.boundingBox(),
+      page.locator('.dj-footer').boundingBox()
+    ]);
+    expect(detailsBox).toBeTruthy();
+    expect(footerBox).toBeTruthy();
+    expect(detailsBox!.y + detailsBox!.height).toBeLessThanOrEqual(footerBox!.y);
 
     await row.locator('.dj-select').check();
+    await expect(page.locator('.dj-footer')).toBeInViewport();
+    await expect(page.locator('#downloadsJanitorApprove')).toHaveText('Review 1 move');
     await page.locator('#downloadsJanitorApprove').click();
 
     // Nothing has moved yet: this is the confirmation, in the console.
