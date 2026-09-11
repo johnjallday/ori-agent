@@ -24,6 +24,21 @@ function cardByLabel(page: Page, label: string) {
 }
 
 async function openCreateModal(page: Page) {
+  // Readiness scenarios own the catalog state, not staffing. Keep the chosen
+  // ready blueprint's staffing plan explicitly empty so reaching Review tests
+  // only readiness and does not bypass the separate required-role contract.
+  await page.route('**/api/workspaces/template-agent-plan**', route =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        revision: 'readiness-demo-empty-plan',
+        has_agents: false,
+        agents: [],
+        warnings: []
+      })
+    })
+  );
   // The demo sandbox is a fresh profile, so the onboarding modal would sit on
   // top of everything. Keep it out of the way and pin the theme for
   // deterministic screenshots.

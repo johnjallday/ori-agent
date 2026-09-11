@@ -80,6 +80,11 @@ func (h *Handler) declaredWorkspaceRoles(current *workspace.Workspace) ([]worksp
 	if provenance == nil || strings.TrimSpace(provenance.TemplateID) == "" {
 		return nil, nil, ""
 	}
+	// Strict Blank workspaces retain their host-owned synthetic declaration so
+	// an intentionally empty Ask Ori role remains visible and fillable later.
+	if strings.TrimSpace(provenance.TemplateID) == blankWorkspaceTemplateID {
+		return workspaceroles.FromTemplateAgents(blankWorkspaceTemplate().Agents), nil, ""
+	}
 	// The ordinary roster is not snapshotted on the workspace, so it is read
 	// back from the library. A blueprint that has since been removed or edited
 	// simply yields fewer roles; the workspace's agents remain listed.

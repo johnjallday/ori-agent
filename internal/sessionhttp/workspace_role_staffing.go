@@ -162,6 +162,77 @@ func roleStaffedEntryAgent(
 // now, and tearing it down because one role could not be staffed would be worse
 // than handing the user a workspace whose roster still shows that role empty —
 // which is exactly the state the roster is built to explain and to fix.
+type workspaceTeamCompletionRole struct {
+	RoleID string `json:"role_id"`
+	Label  string `json:"label"`
+}
+
+type workspaceTeamCompletionAction struct {
+	Label string `json:"label"`
+	Href  string `json:"href"`
+}
+
+type workspaceTeamCompletion struct {
+	State                     string                        `json:"state"`
+	WorkspaceID               string                        `json:"workspace_id"`
+	TeamStaffed               bool                          `json:"team_staffed"`
+	AppliedRoleIDs            []string                      `json:"applied_role_ids"`
+	MissingRequiredRoles      []workspaceTeamCompletionRole `json:"missing_required_roles"`
+	RequestedUnappliedRoleIDs []string                      `json:"requested_unapplied_role_ids"`
+	Action                    workspaceTeamCompletionAction `json:"action"`
+}
+
+func (h *Handler) observeAssistantTeamCompletion(workspaceID, workspaceSlug string, requested []roleStaffingInput) *workspaceTeamCompletion {
+	result := &workspaceTeamCompletion{
+		State: "unknown", WorkspaceID: workspaceID,
+		AppliedRoleIDs: []string{}, MissingRequiredRoles: []workspaceTeamCompletionRole{},
+		RequestedUnappliedRoleIDs: []string{},
+		Action: workspaceTeamCompletionAction{
+			Label: "Complete team setup",
+			Href:  "/workspaces/" + workspaceSlug,
+		},
+	}
+	if h == nil || h.workspaceTaskStore == nil {
+		return result
+	}
+	current, err := h.workspaceTaskStore.Get(workspaceID)
+	if err != nil || current == nil {
+		return result
+	}
+	roster := h.buildWorkspaceRoster(current)
+	requestedIDs := make(map[string]struct{}, len(requested))
+	for _, item := range requested {
+		requestedIDs[strings.ToLower(strings.TrimSpace(item.RoleID))] = struct{}{}
+	}
+	observedRequested := make(map[string]struct{}, len(requestedIDs))
+	for _, role := range roster.Roles {
+		if role.Required && role.State != "filled" {
+			result.MissingRequiredRoles = append(result.MissingRequiredRoles, workspaceTeamCompletionRole{
+				RoleID: role.RoleID, Label: role.Label,
+			})
+		}
+		if _, wanted := requestedIDs[role.RoleID]; wanted && role.State == "filled" && role.Agent != nil {
+			observedRequested[role.RoleID] = struct{}{}
+			result.AppliedRoleIDs = append(result.AppliedRoleIDs, role.RoleID)
+		}
+	}
+	for roleID := range requestedIDs {
+		if _, applied := observedRequested[roleID]; !applied {
+			result.RequestedUnappliedRoleIDs = append(result.RequestedUnappliedRoleIDs, roleID)
+		}
+	}
+	sort.Strings(result.AppliedRoleIDs)
+	sort.Strings(result.RequestedUnappliedRoleIDs)
+	result.TeamStaffed = len(result.MissingRequiredRoles) == 0
+	if result.TeamStaffed && len(result.RequestedUnappliedRoleIDs) == 0 {
+		result.State = "complete"
+		result.Action = workspaceTeamCompletionAction{}
+	} else {
+		result.State = "incomplete"
+	}
+	return result
+}
+
 func (h *Handler) staffAssistantRoles(ctx context.Context, workspaceID string, items []roleStaffingInput) string {
 	if h == nil || h.assistantRoleStaffer == nil || len(items) == 0 {
 		return ""

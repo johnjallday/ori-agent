@@ -60,6 +60,34 @@ async function advanceToReviewFromTeam(page: Page) {
     await expect(page.locator('#addAgentModal')).toBeHidden();
     await expect(page.locator('#addFolderModal')).toBeVisible();
   }
+  // Strict role staffing never treats a blueprint proposal as membership. Tests
+  // whose concern is after Team still cross the real UI boundary by explicitly
+  // accepting each required Create action before advancing.
+  const missingRequired = page.locator(
+    '#workspaceRoleRoster .ws-role-row:has(.ws-role-tag--missing)'
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as unknown as {
+              sessionManager: { teamView: () => { planStatus?: string } | null };
+            }
+          ).sessionManager.teamView()?.planStatus
+      )
+    )
+    .not.toBe('loading');
+  while ((await missingRequired.count()) > 0) {
+    await missingRequired
+      .first()
+      .getByRole('button', { name: /^Create an agent for / })
+      .click();
+    await expect(page.locator('#addAgentModal')).toBeVisible();
+    await page.locator('#createAgentBtn').click();
+    await expect(page.locator('#addAgentModal')).toBeHidden();
+    await expect(page.locator('#addFolderModal')).toBeVisible();
+  }
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep4')).toBeVisible();
 }
@@ -125,7 +153,12 @@ async function routeProjectEntryTemplates(page: Page) {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ has_agents: false, agents: [], warnings: [] })
+      body: JSON.stringify({
+        revision: 'empty-plan',
+        has_agents: false,
+        agents: [],
+        warnings: []
+      })
     });
   });
 }
@@ -584,7 +617,12 @@ test('createFolder submits workspace_preset for create and import', async ({ pag
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ has_agents: false, agents: [], warnings: [] })
+      body: JSON.stringify({
+        revision: 'preset-empty-plan',
+        has_agents: false,
+        agents: [],
+        warnings: []
+      })
     });
   });
   await openCreateModal(page);
@@ -657,7 +695,12 @@ test('Team attaches a saved agent and submits the complete team atomically', asy
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ has_agents: false, agents: [], warnings: [] })
+      body: JSON.stringify({
+        revision: 'blank-team-plan',
+        has_agents: false,
+        agents: [],
+        warnings: []
+      })
     });
   });
   await page.route('**/api/agents/dashboard/list**', async route => {
@@ -766,35 +809,27 @@ test('Team visualizes every included template agent and its lifecycle', async ({
   // The blueprint roster is edited on Team, not Review (FR32, FR83).
   await advanceToTeam(page);
 
-  // ONE roster, primary first, everything else a Specialist (FR32-FR35).
-  const rows = page.locator('#workspaceTeamRoster .workspace-team-row');
+  // The server plan declares slots, not members. Primary and specialist roles
+  // appear in declaration order with explicit Create/Assign actions.
+  const rows = page.locator('#workspaceRoleRoster .ws-role-row');
   await expect(rows).toHaveCount(3);
   await expect(page.locator('#templateAgentReview')).toHaveCount(0);
   await expect(rows.nth(0)).toContainText('Research Lead');
-  await expect(rows.nth(0).locator('.workspace-team-badge')).toHaveText('Primary');
-  await expect(rows.nth(1).locator('.workspace-team-badge')).toHaveText('Specialist');
-  await expect(rows.nth(2).locator('.workspace-team-badge')).toHaveText('Specialist');
-
-  // Source, readiness, and future action are all explicit in text.
-  await expect(rows.nth(0)).toContainText('Saved · Ready to attach');
-  await expect(rows.nth(0)).toContainText('Your Agents · Ready · Will attach saved definition');
-  await expect(rows.nth(2)).toContainText('New · Needs setup');
-  await expect(rows.nth(2)).toContainText('Blueprint · Needs setup · Will create with workspace');
-  await expect(rows.nth(2).locator('.workspace-team-readiness-badge')).toHaveText('Missing');
-  await expect(rows.nth(0).locator('.workspace-team-readiness-badge')).toHaveCount(0);
-  await expect(page.locator('#workspaceTeamRoster')).not.toContainText(
-    'already saved and attached'
+  await expect(rows.nth(0).locator('.ws-role-row__designation')).toHaveText('PRIMARY');
+  await expect(rows.nth(0).locator('.ws-role-tag')).toHaveText('Missing');
+  await expect(rows.nth(1).locator('.ws-role-row__designation')).toHaveText('SPECIALIST');
+  await expect(rows.nth(1).locator('.ws-role-tag')).toHaveText('Optional');
+  await expect(rows.nth(2).locator('.ws-role-row__designation')).toHaveText('SPECIALIST');
+  await expect(rows.nth(2).locator('.ws-role-tag')).toHaveText('Optional');
+  await expect(
+    rows.nth(0).getByRole('button', { name: 'Create an agent for Research Lead' })
+  ).toBeVisible();
+  await expect(
+    rows.nth(0).getByRole('button', { name: 'Assign an agent to Research Lead' })
+  ).toBeVisible();
+  await expect(page.locator('#workspaceTeamIssues')).toContainText(
+    'Fill the required Research Lead role'
   );
-  await expect(page.locator('#workspaceTeamRoster')).not.toContainText(
-    'Added to Your Agents and attached'
-  );
-
-  // Resolved model information is shown per row (FR36).
-  await expect(rows.nth(0)).toContainText('codex / gpt-5.3-codex');
-
-  // The action is named for what it does, not for copying (FR42).
-  await expect(rows.nth(0).locator('[data-team-agent-setup]')).toHaveText('Customize as new agent');
-  await expect(page.locator('#workspaceTeamRoster')).not.toContainText('Make a workspace copy');
 });
 
 test('proposed setup reuses Create New Agent in draft mode and submits one strict atomic request', async ({
@@ -847,24 +882,21 @@ test('proposed setup reuses Create New Agent in draft mode and submits one stric
   await page.locator('#folderNameInput').fill('Reviewed Session');
   await advanceToTeam(page);
 
-  const row = page.locator('#workspaceTeamRoster .workspace-team-row');
-  await expect(row).toContainText('New · Needs setup');
-  await expect(row.locator('[data-team-agent-setup]')).toHaveText('Set up agent');
-  await page.locator('#wizardNextBtn').click();
-  await expect(page.locator('#wizardStep3')).toBeVisible();
-  const requiredSetupAction = row.locator('[data-team-agent-setup]');
-  await expect(requiredSetupAction).toBeFocused();
-  await expect(requiredSetupAction).toHaveClass(/is-blocking-attention/);
-  await expect(row).toHaveClass(/is-blocking-attention/);
-  await expect(page.locator('#workspaceTeamLiveRegion')).toContainText(
-    'Focus moved to the required control.'
-  );
+  const row = page.locator('#workspaceRoleRoster .ws-role-row');
+  await expect(row).toContainText('Missing');
+  const requiredSetupAction = row.getByRole('button', {
+    name: 'Create an agent for Reaper Producer'
+  });
+  await expect(requiredSetupAction).toHaveText('Create');
+  await expect(page.locator('#wizardNextBtn')).toBeDisabled();
 
   await requiredSetupAction.click();
   await expect(page.locator('#addFolderModal')).toBeHidden();
   await expect(page.locator('#addAgentModal')).toBeVisible();
   await expect(page.locator('.modal.show')).toHaveCount(1);
-  await expect(page.locator('#addAgentModalTitleText')).toHaveText('Set up agent');
+  await expect(page.locator('#addAgentModalTitleText')).toHaveText(
+    'Create an agent for Reaper Producer'
+  );
   await expect(page.locator('#agentName')).toHaveValue('Reaper Producer');
   await expect(page.locator('#agentReasoning')).toBeDisabled();
   await expect(page.locator('#agentCreateDraftSummary')).toContainText('reaper-session');
@@ -878,13 +910,10 @@ test('proposed setup reuses Create New Agent in draft mode and submits one stric
   await expect(page.locator('#addAgentModal')).toBeHidden();
   await expect(page.locator('#addFolderModal')).toBeVisible();
   await expect(row).toContainText('Reaper Producer');
-  await expect(row).toContainText('New · Needs setup');
-  await expect(requiredSetupAction).toBeFocused();
+  await expect(row).toContainText('Missing');
+  await expect(row).toBeFocused();
   await expect(page.locator('#addAgentModalTitleText')).toHaveText('Create New Agent');
-  await expect(page.locator('#addAgentModal')).not.toHaveAttribute(
-    'data-agent-create-mode',
-    /.+/
-  );
+  await expect(page.locator('#addAgentModal')).not.toHaveAttribute('data-agent-create-mode', /.+/);
 
   await requiredSetupAction.click();
   await expect(page.locator('#addAgentModal')).toBeVisible();
@@ -893,14 +922,14 @@ test('proposed setup reuses Create New Agent in draft mode and submits one stric
   await page.locator('#createAgentBtn').click();
   await expect(
     page.locator('#toastContainer .toast').filter({
-      hasText: 'Session Producer added to the team draft. It will be created with the workspace.'
+      hasText: 'Session Producer added to the workspace draft.'
     })
   ).toBeVisible();
   await expect(page.locator('#addAgentModal')).toBeHidden();
   await expect(page.locator('#addFolderModal')).toBeVisible();
   await expect(row).toContainText('Session Producer');
-  await expect(row).toContainText('Customized · Will be created with workspace');
-  await expect(row.locator('.workspace-team-readiness-badge')).toHaveCount(0);
+  await expect(row).toContainText('New agent');
+  await expect(row.locator('.ws-role-tag--filled')).toHaveCount(1);
 
   let payload: Record<string, any> | undefined;
   await page.route('**/api/workspaces', async route => {
@@ -936,18 +965,21 @@ test('proposed setup reuses Create New Agent in draft mode and submits one stric
       type: 'success'
     });
 
-  expect(payload?.template_agent_overrides).toEqual([
+  expect(payload?.team_intent).toEqual({
+    version: 1,
+    mode: 'staffed',
+    plan_revision: 'reviewed-plan-1'
+  });
+  expect(payload?.role_staffing).toEqual([
     expect.objectContaining({
-      index: 0,
+      role_id: 'reaper-producer',
+      mode: 'create',
       name: 'Session Producer',
       system_prompt: 'Produce this session carefully.'
     })
   ]);
-  expect(payload?.template_agent_review).toEqual({
-    version: 1,
-    plan_revision: 'reviewed-plan-1',
-    expectations: [{ index: 0, name: 'Session Producer', action: 'create' }]
-  });
+  expect(payload?.template_agent_overrides).toBeUndefined();
+  expect(payload?.template_agent_review).toBeUndefined();
   expect(unexpectedPosts).toEqual([]);
 });
 
@@ -984,7 +1016,8 @@ test('agent setup remains keyboard-safe and readable at narrow widths in both th
   await advanceToWorkspaceDetails(page);
   await page.locator('#folderNameInput').fill('Narrow Team');
   await advanceToTeam(page);
-  const opener = page.locator('[data-team-agent-setup="0"]');
+  const roleRow = page.locator('#workspaceRoleRoster .ws-role-row').first();
+  const opener = roleRow.getByRole('button', { name: 'Create an agent for Narrow Lead' });
   await opener.focus();
   await page.keyboard.press('Enter');
 
@@ -1005,13 +1038,13 @@ test('agent setup remains keyboard-safe and readable at narrow widths in both th
   await page.keyboard.press('Escape');
   await expect(page.locator('#addAgentModal')).toBeHidden();
   await expect(page.locator('#addFolderModal')).toBeVisible();
-  await expect(opener).toBeFocused();
+  await expect(roleRow).toBeFocused();
 
   await opener.click();
   await page.locator('#createAgentBtn').click();
   const toastBox = await page
     .locator('#toastContainer .toast')
-    .filter({ hasText: 'Narrow Lead added to the team draft' })
+    .filter({ hasText: 'Narrow Lead added to the workspace draft' })
     .boundingBox();
   expect(toastBox).not.toBeNull();
   expect(toastBox?.x || 0).toBeGreaterThanOrEqual(0);
@@ -1020,15 +1053,13 @@ test('agent setup remains keyboard-safe and readable at narrow widths in both th
   await expect(page.locator('#wizardStep4')).toBeVisible();
 });
 
-test('batch recommendation acceptance can be undone without losing individual setup', async ({
-  page
-}) => {
+test('required roles are explicit while optional roles may remain empty', async ({ page }) => {
   await page.route('**/api/workspaces/template-agent-plan**', async route => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        revision: 'batch-plan-1',
+        revision: 'role-plan-1',
         has_agents: true,
         entry_agent_name: 'Lead',
         agents: [
@@ -1044,40 +1075,24 @@ test('batch recommendation acceptance can be undone without losing individual se
   await openCreateModal(page);
   await cardByLabel(page, 'Research Project').click();
   await advanceToWorkspaceDetails(page);
-  await page.locator('#folderNameInput').fill('Batch Team');
+  await page.locator('#folderNameInput').fill('Role Team');
   await advanceToTeam(page);
-  const rows = page.locator('#workspaceTeamRoster .workspace-team-row');
-  await expect(page.locator('[data-team-accept-all]')).toHaveText(
-    'Use recommended setup for all 3'
-  );
-
-  await rows.nth(0).locator('[data-team-agent-setup]').click();
+  const rows = page.locator('#workspaceRoleRoster .ws-role-row');
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(0).locator('.ws-role-tag')).toHaveText('Missing');
+  await expect(rows.nth(1).locator('.ws-role-tag')).toHaveText('Optional');
+  await expect(rows.nth(2).locator('.ws-role-tag')).toHaveText('Optional');
+  await rows.nth(0).getByRole('button', { name: 'Create an agent for Lead' }).click();
   await page.locator('#agentSystemPrompt').fill('Individually reviewed.');
   await page.locator('#createAgentBtn').click();
   await expect(page.locator('#addFolderModal')).toBeVisible();
-  await expect(page.locator('[data-team-accept-all]')).toHaveText(
-    'Use recommended setup for all 2'
-  );
-  await page.locator('[data-team-accept-all]').click();
-  await expect(
-    page.locator('#toastContainer .toast').filter({
-      hasText: '2 agents added to the team draft. They will be created with the workspace.'
-    })
-  ).toBeVisible();
-  await expect(rows).toContainText([
-    /Customized · Will be created with workspace/,
-    /Ready · Will be created with workspace/,
-    /Ready · Will be created with workspace/
-  ]);
-  await expect(page.locator('[data-team-undo-batch]')).toBeFocused();
-
-  await page.locator('[data-team-undo-batch]').click();
-  await expect(rows.nth(0)).toContainText('Customized · Will be created with workspace');
-  await expect(rows.nth(1)).toContainText('New · Needs setup');
-  await expect(rows.nth(2)).toContainText('New · Needs setup');
+  await expect(rows.nth(0)).toContainText('Lead');
+  await expect(rows.nth(0)).toContainText('New agent');
+  await expect(page.locator('#wizardNextBtn')).toBeEnabled();
   await page.locator('#wizardNextBtn').click();
-  await expect(page.locator('#wizardStep3')).toBeVisible();
-  await expect(rows.nth(1).locator('[data-team-agent-setup]')).toBeFocused();
+  await expect(page.locator('#wizardStep4')).toBeVisible();
+  await expect(page.locator('#workspaceReviewSummary')).toContainText('1 of 3 roles filled');
+  await expect(page.locator('#workspaceReviewSummary')).toContainText('2 roles will stay empty');
 });
 
 test('a stale reviewed plan returns to Team with fresh setup and preserves the draft', async ({
@@ -1109,28 +1124,31 @@ test('a stale reviewed plan returns to Team with fresh setup and preserves the d
   await page.route('**/api/workspaces', async route => {
     createAttempts += 1;
     const payload = route.request().postDataJSON();
-    submittedRevisions.push(payload.template_agent_review?.plan_revision);
+    submittedRevisions.push(payload.team_intent?.plan_revision);
     if (createAttempts === 1) {
       await route.fulfill({
         status: 409,
         contentType: 'application/json',
         body: JSON.stringify({
-          error: 'The blueprint agent plan changed.',
-          conflict: { type: 'template_agent_plan', index: 0, name: 'Lead' },
-          template_agent_plan: {
-            revision: 'stale-after',
-            has_agents: true,
-            agents: [
-              {
-                name: 'Lead',
-                action: 'create',
-                entry_point: true,
-                model: 'after-model',
-                system_prompt: 'After prompt',
-                model_source: 'template'
-              }
-            ],
-            warnings: []
+          error: 'The blueprint team changed; review the current roles again.',
+          conflict: {
+            type: 'team_readiness',
+            roles: [{ role_id: 'lead', label: 'Lead', required: true, state: 'empty' }],
+            fresh_plan: {
+              revision: 'stale-after',
+              has_agents: true,
+              agents: [
+                {
+                  name: 'Lead',
+                  action: 'create',
+                  entry_point: true,
+                  model: 'after-model',
+                  system_prompt: 'After prompt',
+                  model_source: 'template'
+                }
+              ],
+              warnings: []
+            }
           }
         })
       });
@@ -1151,7 +1169,10 @@ test('a stale reviewed plan returns to Team with fresh setup and preserves the d
   await advanceToWorkspaceDetails(page);
   await page.locator('#folderNameInput').fill('Stale Draft');
   await advanceToTeam(page);
-  await page.locator('[data-team-agent-setup="0"]').click();
+  await page
+    .locator('#workspaceRoleRoster [data-role-id="lead"]')
+    .getByRole('button', { name: 'Create an agent for Lead' })
+    .click();
   await page.locator('#createAgentBtn').click();
   await expect(page.locator('#addFolderModal')).toBeVisible();
   await advanceToReviewFromTeam(page);
@@ -1160,24 +1181,24 @@ test('a stale reviewed plan returns to Team with fresh setup and preserves the d
   await expect(page.locator('#wizardStep3')).toBeVisible();
   await expect(
     page.locator('#wizardStep3 [data-issue-id="template-agent-plan-changed"]')
-  ).toContainText('Blueprint changed');
+  ).toContainText(/blueprint team changed/i);
   await expect(page.locator('#folderNameInput')).toHaveValue('Stale Draft');
-  await expect(page.locator('[data-team-agent-setup="0"]')).toHaveText('Review setup');
-  await page.locator('[data-team-agent-setup="0"]').click();
+  const refreshedRole = page.locator('#workspaceRoleRoster [data-role-id="lead"]');
+  await expect(refreshedRole).toContainText('Lead');
+  await refreshedRole.getByRole('button', { name: 'Clear Lead' }).click();
+  await expect(refreshedRole).toContainText('Missing');
+  await refreshedRole.getByRole('button', { name: 'Create an agent for Lead' }).click();
   await expect(page.locator('#agentModel')).toHaveValue('after-model');
   await expect(page.locator('#agentSystemPrompt')).toHaveValue('After prompt');
   await page.locator('#createAgentBtn').click();
   await expect(page.locator('#addFolderModal')).toBeVisible();
-  await page.locator('#wizardStep3 [data-team-recovery="confirm-fresh-plan"]').click();
   await advanceToReviewFromTeam(page);
   await page.locator('#createFolderBtn').click();
   await expect.poll(() => submittedRevisions).toHaveLength(2);
   expect(submittedRevisions).toEqual(['stale-before', 'stale-after']);
 });
 
-test('fatal strict agent creation returns to the owning row and retries the preserved setup', async ({
-  page
-}) => {
+test('a failed strict create retries the preserved role staffing request', async ({ page }) => {
   await page.route('**/api/workspaces/template-agent-plan**', async route => {
     await route.fulfill({
       status: 200,
@@ -1198,8 +1219,7 @@ test('fatal strict agent creation returns to the owning row and retries the pres
         status: 500,
         contentType: 'application/json',
         body: JSON.stringify({
-          error: 'Agent “Reviewed Lead” could not be created. Nothing was created.',
-          conflict: { type: 'template_agent_create', index: 0, name: 'Reviewed Lead' }
+          error: 'Agent “Reviewed Lead” could not be created. Nothing was created.'
         })
       });
       return;
@@ -1219,7 +1239,10 @@ test('fatal strict agent creation returns to the owning row and retries the pres
   await advanceToWorkspaceDetails(page);
   await page.locator('#folderNameInput').fill('Retry Workspace');
   await advanceToTeam(page);
-  await page.locator('[data-team-agent-setup="0"]').click();
+  await page
+    .locator('#workspaceRoleRoster [data-role-id="lead"]')
+    .getByRole('button', { name: 'Create an agent for Lead' })
+    .click();
   await page.locator('#agentName').fill('Reviewed Lead');
   await page.locator('#agentSystemPrompt').fill('Preserve this setup.');
   await page.locator('#createAgentBtn').click();
@@ -1227,17 +1250,17 @@ test('fatal strict agent creation returns to the owning row and retries the pres
   await advanceToReviewFromTeam(page);
   await page.locator('#createFolderBtn').click();
 
-  const row = page.locator('#workspaceTeamRoster .workspace-team-row');
-  await expect(page.locator('#wizardStep3')).toBeVisible();
-  await expect(row).toContainText('Missing · Creation failed');
-  await expect(row.locator('[data-team-agent-retry]')).toBeFocused();
-  await row.locator('[data-team-agent-retry]').click();
+  await expect(page.locator('#wizardStep4')).toBeVisible();
+  await expect(page.locator('#workspaceReviewError')).toContainText(
+    'Reviewed Lead” could not be created'
+  );
+  await page.locator('#createFolderBtn').click();
   await expect.poll(() => payloads).toHaveLength(2);
-  expect(payloads[1].template_agent_overrides).toEqual(payloads[0].template_agent_overrides);
-  expect(payloads[1].template_agent_review).toEqual(payloads[0].template_agent_review);
+  expect(payloads[1].team_intent).toEqual(payloads[0].team_intent);
+  expect(payloads[1].role_staffing).toEqual(payloads[0].role_staffing);
 });
 
-test('server prompt validation returns to the owning setup field before any create', async ({
+test('server prompt validation keeps the reviewed role draft before any create', async ({
   page
 }) => {
   await page.route('**/api/workspaces/template-agent-plan**', async route => {
@@ -1267,9 +1290,9 @@ test('server prompt validation returns to the owning setup field before any crea
       status: 400,
       contentType: 'application/json',
       body: JSON.stringify({
+        code: 'team_intent_invalid',
         error:
-          'invalid prompt variable: agent "Prompt Lead" uses unknown prompt variable {{unknown}}',
-        conflict: { type: 'template_agent_override', index: 0, field: 'system_prompt' }
+          'invalid prompt variable: agent "Prompt Lead" uses unknown prompt variable {{unknown}}'
       })
     });
   });
@@ -1279,7 +1302,10 @@ test('server prompt validation returns to the owning setup field before any crea
   await advanceToWorkspaceDetails(page);
   await page.locator('#folderNameInput').fill('Prompt Validation Workspace');
   await advanceToTeam(page);
-  await page.locator('[data-team-agent-setup="0"]').click();
+  await page
+    .locator('#workspaceRoleRoster [data-role-id="prompt-lead"]')
+    .getByRole('button', { name: 'Create an agent for Prompt Lead' })
+    .click();
   await page.locator('#agentSystemPrompt').fill('Use {{unknown}}.');
   await page.locator('#createAgentBtn').click();
   await expect(page.locator('#addFolderModal')).toBeVisible();
@@ -1287,49 +1313,37 @@ test('server prompt validation returns to the owning setup field before any crea
   await page.locator('#createFolderBtn').click();
 
   await expect.poll(() => payloads).toHaveLength(1);
-  await expect(page.locator('#addFolderModal')).toBeHidden();
-  await expect(page.locator('#addAgentModal')).toBeVisible();
-  await expect(page.locator('#agentSystemPrompt')).toBeFocused();
-  await expect(page.locator('#agentSystemPrompt')).toHaveAttribute('aria-invalid', 'true');
-  await expect(page.locator('#agentSystemPromptError')).toContainText('unknown prompt variable');
+  await expect(page.locator('#addFolderModal')).toBeVisible();
+  await expect(page.locator('#wizardStep4')).toBeVisible();
+  await expect(page.locator('#workspaceReviewError')).toContainText('unknown prompt variable');
+  expect(payloads[0].role_staffing).toEqual([
+    expect.objectContaining({
+      role_id: 'prompt-lead',
+      mode: 'create',
+      system_prompt: 'Use {{unknown}}.'
+    })
+  ]);
 });
 
-test('Team stages a customized copy without touching the reused agent (FR40-FR47)', async ({
-  page
-}) => {
+test('assigning a saved definition fills one role without mutating it', async ({ page }) => {
+  await page.route('**/api/agents/dashboard/list**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ agents: [{ name: 'Shared Lead', model: 'saved-model' }] })
+    });
+  });
   await page.route('**/api/workspaces/template-agent-plan**', async route => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        revision: 'copy-plan-1',
+        revision: 'assign-plan-1',
         has_agents: true,
         entry_agent_name: 'Shared Lead',
         agents: [
-          {
-            name: 'Shared Lead',
-            action: 'reuse',
-            entry_point: true,
-            role: 'saved-role',
-            model: 'saved-model',
-            provider: 'saved-provider',
-            system_prompt: 'Saved prompt',
-            model_source: 'existing',
-            recommended_setup: {
-              role: 'orchestrator',
-              type: 'general',
-              model: 'blueprint-model',
-              provider: 'blueprint-provider',
-              system_prompt: 'Blueprint prompt',
-              tools: { skills: ['blueprint-skill'] }
-            }
-          },
-          {
-            name: 'Brand New',
-            action: 'create',
-            entry_point: false,
-            model_source: 'agent_default'
-          }
+          { name: 'Shared Lead', action: 'reuse', entry_point: true, model_source: 'existing' },
+          { name: 'Brand New', action: 'create', entry_point: false, model_source: 'agent_default' }
         ],
         warnings: []
       })
@@ -1339,82 +1353,46 @@ test('Team stages a customized copy without touching the reused agent (FR40-FR47
   await openCreateModal(page);
   await cardByLabel(page, 'Research Project').click();
   await advanceToWorkspaceDetails(page);
-  await page.locator('#folderNameInput').fill('Copy WS');
+  await page.locator('#folderNameInput').fill('Assigned WS');
   await advanceToTeam(page);
+  const role = page.locator('#workspaceRoleRoster [data-role-id="shared-lead"]');
+  await expect(role).toContainText('Missing');
+  await page
+    .locator('[data-suggested-agent-use="Shared Lead"][data-suggested-role-id="shared-lead"]')
+    .click();
+  await expect(role).toContainText('Shared Lead');
+  await expect(role).toContainText('Your saved agent');
 
-  const rows = page.locator('#workspaceTeamRoster .workspace-team-row');
-  await expect(rows.nth(0)).toContainText('Saved · Ready to attach');
-  await expect(rows.nth(0)).toContainText('saved-provider / saved-model');
-  await rows.nth(0).locator('[data-team-agent-setup]').click();
-  await expect(page.locator('#agentName')).toHaveValue('Shared Lead copy');
-  await expect(page.locator('#agentModel')).toHaveValue('blueprint-model');
-  await expect(page.locator('#agentCreateDraftSummary')).toContainText('blueprint-skill');
-
-  // The saved definition can only be reused unchanged. Behavioral edits need a
-  // real copy name, and roster collisions are rejected in the shared modal.
-  await page.locator('#agentName').fill('Shared Lead');
-  await page.locator('#agentSystemPrompt').fill('Behave differently.');
-  await page.locator('#createAgentBtn').click();
-  await expect(page.locator('#agentCreateDraftError')).toContainText(
-    'Give this copy a different name'
-  );
-  await page.locator('#agentName').fill('brand new');
-  await page.locator('#createAgentBtn').click();
-  await expect(page.locator('#agentCreateDraftError')).toContainText('already called');
-
-  await page.locator('#agentName').fill('Shared Lead Studio');
-  await page.locator('#createAgentBtn').click();
-  await expect(page.locator('#addFolderModal')).toBeVisible();
-  await expect(rows).toHaveCount(2);
-  await expect(rows.nth(0)).toContainText('Shared Lead Studio');
-  await expect(rows.nth(0)).toContainText('Customized copy · Will be created with workspace');
-
-  // Review the other absent definition so the strict two-member roster can be submitted.
-  await rows.nth(1).locator('[data-team-agent-setup]').click();
-  await page.locator('#createAgentBtn').click();
-  await expect(page.locator('#addFolderModal')).toBeVisible();
-
-  let payload: Record<string, any> | undefined;
+  let payload: Record<string, unknown> | undefined;
   await page.route('**/api/workspaces', async route => {
     payload = route.request().postDataJSON();
     await route.fulfill({
       status: 201,
       contentType: 'application/json',
       body: JSON.stringify({
-        folder: { id: 'copy-ws', folder_slug: 'copy-ws' },
+        folder: { id: 'assigned-ws', folder_slug: 'assigned-ws' },
         seeded_starter_tasks: 0
       })
     });
   });
   await advanceToReviewFromTeam(page);
-  await expect(page.locator('#workspaceReviewSummary')).toContainText(
-    '1 new · 0 saved · 1 customized copy'
-  );
   await page.locator('#createFolderBtn').click();
   await expect.poll(() => payload).toBeTruthy();
 
-  expect(payload?.create_template_agents).toBe(true);
-  expect(payload?.template_agent_overrides).toEqual([
-    expect.objectContaining({
-      index: 0,
-      name: 'Shared Lead Studio',
-      model: 'blueprint-model',
-      provider: 'blueprint-provider',
-      system_prompt: 'Behave differently.'
-    })
+  expect(payload?.role_staffing).toEqual([
+    { role_id: 'shared-lead', mode: 'assign', name: 'Shared Lead' }
   ]);
-  expect(payload?.template_agent_review.expectations).toEqual([
-    { index: 0, name: 'Shared Lead Studio', action: 'create' },
-    { index: 1, name: 'Brand New', action: 'create' }
-  ]);
+  expect(payload?.template_agent_overrides).toBeUndefined();
 });
 
-test('Advanced team options can exclude the blueprint team (FR48-FR50)', async ({ page }) => {
+test('a required blueprint role cannot be excluded through the retired opt-out', async ({
+  page
+}) => {
   await page.route('**/api/agents/dashboard/list**', async route => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ agents: [{ name: 'Research Scout', model: 'gpt-5.5' }] })
+      body: JSON.stringify({ agents: [{ name: 'Blueprint Lead', model: 'gpt-5.5' }] })
     });
   });
   await page.route('**/api/workspaces/template-agent-plan**', async route => {
@@ -1436,23 +1414,26 @@ test('Advanced team options can exclude the blueprint team (FR48-FR50)', async (
   await openCreateModal(page);
   await cardByLabel(page, 'Research Project').click();
   await advanceToWorkspaceDetails(page);
-  await page.locator('#folderNameInput').fill('Excluded WS');
+  await page.locator('#folderNameInput').fill('Staffed WS');
   await advanceToTeam(page);
 
-  const rows = page.locator('#workspaceTeamRoster .workspace-team-row');
-  await page.locator('[data-existing-agent-add="Research Scout"]').click();
-  await expect(rows.nth(0)).toContainText('Blueprint Lead');
-
-  await page.locator('#workspaceTeamAdvanced summary').click();
-  await page.locator('#templateAgentReviewToggle').uncheck();
-
-  // Blueprint entries leave the roster and the primary is recomputed.
-  await expect(rows).toHaveCount(1);
-  await expect(rows.nth(0)).toContainText('Research Scout');
-  await expect(rows.nth(0).locator('.workspace-team-badge')).toHaveText('Primary');
-  await expect(page.locator('#workspaceTeamLiveRegion')).toContainText(
-    "Research Scout is now this workspace's primary agent"
+  await expect(page.locator('#workspaceTeamAdvanced')).toHaveCount(0);
+  await expect(page.locator('#templateAgentReviewToggle')).toHaveCount(0);
+  await expect(page.locator('#workspaceRoleRoster [data-role-id="blueprint-lead"]')).toContainText(
+    'Missing'
   );
+  await expect(page.locator('#workspaceTeamIssues')).toContainText(
+    'Fill the required Blueprint Lead role before reviewing this workspace.'
+  );
+  await expect(page.locator('#wizardNextBtn')).toBeDisabled();
+
+  await page
+    .locator('[data-suggested-agent-use="Blueprint Lead"][data-suggested-role-id="blueprint-lead"]')
+    .click();
+  await expect(page.locator('#workspaceRoleRoster [data-role-id="blueprint-lead"]')).toContainText(
+    'Blueprint Lead'
+  );
+  await expect(page.locator('#wizardNextBtn')).toBeEnabled();
 
   let payload: Record<string, unknown> | undefined;
   await page.route('**/api/workspaces', async route => {
@@ -1461,21 +1442,27 @@ test('Advanced team options can exclude the blueprint team (FR48-FR50)', async (
       status: 201,
       contentType: 'application/json',
       body: JSON.stringify({
-        folder: { id: 'excluded-ws', folder_slug: 'excluded-ws' },
+        folder: { id: 'staffed-ws', folder_slug: 'staffed-ws' },
         seeded_starter_tasks: 0
       })
     });
   });
   await advanceToReviewFromTeam(page);
   await page.locator('#createFolderBtn').click({ force: true });
-  await page.waitForURL('**/workspaces/excluded-ws');
+  await page.waitForURL('**/workspaces/staffed-ws');
 
-  expect(payload?.create_template_agents).toBe(false);
-  expect(payload?.existing_agent_names).toEqual(['Research Scout']);
-  expect(payload?.entry_agent_name).toBe('Research Scout');
+  expect(payload?.team_intent).toEqual({
+    version: 1,
+    mode: 'staffed',
+    plan_revision: 'browser-reuse-plan'
+  });
+  expect(payload?.role_staffing).toEqual([
+    { role_id: 'blueprint-lead', mode: 'assign', name: 'Blueprint Lead' }
+  ]);
+  expect(payload?.create_template_agents).toBeUndefined();
 });
 
-test('Your Agents searches, states why entries are unavailable, and needs no drag', async ({
+test('Your Agents suggests a same-name saved agent without auto-filling its role', async ({
   page
 }) => {
   await page.route('**/api/agents/dashboard/list**', async route => {
@@ -1522,18 +1509,34 @@ test('Your Agents searches, states why entries are unavailable, and needs no dra
   await expect(scout).toContainText('gpt-5.5');
   await expect(scout).toContainText('2 workspaces');
 
-  // Every non-addable entry says why, in text (FR62).
-  const included = cards.filter({ hasText: 'Blueprint Lead' });
-  await expect(included).toContainText('Already included by this blueprint');
-  await expect(included.locator('button')).toBeDisabled();
+  // A same-name blueprint declaration is a suggestion, not membership. The
+  // required role remains visibly vacant and the general list still says Add.
+  const blueprintMatch = cards.filter({ hasText: 'Blueprint Lead' });
+  await expect(blueprintMatch.locator('button')).toHaveText('Add');
+  await expect(blueprintMatch.locator('button')).toBeEnabled();
+  const role = page.locator('#workspaceRoleRoster [data-role-id="blueprint-lead"]');
+  await expect(role).toContainText('Missing');
+  const suggestions = page.locator('#workspaceSavedAgentSuggestions');
+  await expect(suggestions).toContainText('Suggested for this workspace');
+  await expect(suggestions).toContainText("Matches this role's name");
+  const useSuggested = suggestions.locator(
+    '[data-suggested-agent-use="Blueprint Lead"][data-suggested-role-id="blueprint-lead"]'
+  );
+  await expect(useSuggested).toHaveText('Use this agent');
+
+  // The suggestion carries its role explicitly; no role-scoped Assign picker
+  // needs to be opened first. Only this action fills the slot.
+  await useSuggested.click();
+  await expect(role).toContainText('Blueprint Lead');
+  await expect(role).toContainText('Your saved agent');
+  await expect(blueprintMatch).toContainText('Already filling Blueprint Lead');
+  await expect(blueprintMatch.locator('button')).toHaveText('Assigned');
+  await expect(blueprintMatch.locator('button')).toBeDisabled();
+
+  // Every other non-addable entry says why in text.
   const cli = cards.filter({ hasText: 'Claude Code' });
   await expect(cli).toContainText('Built-in CLI agents cannot be attached');
   await expect(cli.locator('button')).toBeDisabled();
-  // The reason is in the accessible name too, since a disabled button's own
-  // label ("Included") cannot explain itself.
-  await expect(included.locator('button')).toHaveAccessibleName(
-    /Blueprint Lead: Already included by this blueprint/
-  );
 
   // Adding flips the entry to a stated reason rather than silently doing nothing.
   await page.locator('[data-existing-agent-add="Research Scout"]').click();
@@ -1555,12 +1558,12 @@ test('Your Agents searches, states why entries are unavailable, and needs no dra
   await expect(page.locator('#existingAgentRosterList [draggable="true"]')).toHaveCount(0);
 });
 
-test('Your Agents can be added and promoted by keyboard alone (FR61, FR101)', async ({ page }) => {
+test('a suggested saved agent can fill and clear a role by keyboard alone', async ({ page }) => {
   await page.route('**/api/agents/dashboard/list**', async route => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ agents: [{ name: 'Research Scout', model: 'gpt-5.5' }] })
+      body: JSON.stringify({ agents: [{ name: 'Blueprint Lead', model: 'gpt-5.5' }] })
     });
   });
   await page.route('**/api/workspaces/template-agent-plan**', async route => {
@@ -1585,29 +1588,23 @@ test('Your Agents can be added and promoted by keyboard alone (FR61, FR101)', as
   await page.locator('#folderNameInput').fill('Keyboard WS');
   await advanceToTeam(page);
 
-  await page.locator('[data-existing-agent-add="Research Scout"]').focus();
-  await page.keyboard.press('Enter');
-  await expect(page.locator('#workspaceTeamRoster .workspace-team-row')).toHaveCount(2);
-
-  await page.locator('[data-existing-agent-primary="Research Scout"]').focus();
-  await page.keyboard.press('Enter');
-
-  const rows = page.locator('#workspaceTeamRoster .workspace-team-row');
-  await expect(rows.nth(0)).toContainText('Research Scout');
-  await expect(rows.nth(0).locator('.workspace-team-badge')).toHaveText('Primary');
-  // The previous primary stays attached, demoted (FR52).
-  await expect(rows.nth(1)).toContainText('Blueprint Lead');
-  await expect(rows.nth(1).locator('.workspace-team-badge')).toHaveText('Specialist');
-  await expect(page.locator('#workspaceTeamLiveRegion')).toContainText(
-    'stays attached as a specialist'
+  // Keyboard actions use the same explicit role assignment as pointer input.
+  const assign = page.locator(
+    '[data-suggested-agent-use="Blueprint Lead"][data-suggested-role-id="blueprint-lead"]'
   );
-
-  // Removing by keyboard hands the primary slot back.
-  await page.locator('[data-existing-agent-remove="Research Scout"]').focus();
+  await assign.focus();
   await page.keyboard.press('Enter');
-  await expect(page.locator('#workspaceTeamRoster .workspace-team-row')).toHaveCount(1);
-  await expect(rows.nth(0)).toContainText('Blueprint Lead');
-  await expect(rows.nth(0).locator('.workspace-team-badge')).toHaveText('Primary');
+  const role = page.locator('#workspaceRoleRoster [data-role-id="blueprint-lead"]');
+  await expect(role).toContainText('Blueprint Lead');
+  await expect(role).toContainText('Your saved agent');
+  await expect(page.locator('#wizardNextBtn')).toBeEnabled();
+
+  // Clearing by keyboard returns the same slot to Missing without removing the
+  // saved definition.
+  await role.getByRole('button', { name: 'Clear Blueprint Lead' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(role).toContainText('Missing');
+  await expect(page.locator('[data-existing-agent-add="Blueprint Lead"]')).toBeEnabled();
 });
 
 test('a Your Agents failure stays advisory and offers Retry (FR65, FR66)', async ({ page }) => {
@@ -1650,9 +1647,14 @@ test('a Your Agents failure stays advisory and offers Retry (FR65, FR66)', async
   await page.locator('#folderNameInput').fill('Advisory WS');
   await advanceToTeam(page);
 
-  // The preconfigured blueprint team is unaffected and still reviewable.
-  await expect(page.locator('#workspaceTeamRoster .workspace-team-row')).toHaveCount(1);
-  const issue = page.locator('#workspaceTeamIssues .workspace-team-issue');
+  // The declared blueprint role can still be filled even though saved-agent
+  // suggestions are unavailable.
+  const role = page.locator('#workspaceRoleRoster .ws-role-row');
+  await expect(role).toHaveCount(1);
+  await role.getByRole('button', { name: 'Create an agent for Blueprint Lead' }).click();
+  await page.locator('#createAgentBtn').click();
+  await expect(page.locator('#addFolderModal')).toBeVisible();
+  const issue = page.locator('#workspaceTeamIssues [data-issue-id="saved-roster-error"]');
   await expect(issue).toHaveClass(/is-advisory/);
   await expect(issue).toContainText('saved agents could not be loaded');
   await expect(page.locator('#workspaceTeamIssues .workspace-team-issue.is-blocking')).toHaveCount(
@@ -1677,7 +1679,12 @@ test('an agent-less team warns without blocking creation (FR55)', async ({ page 
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ has_agents: false, agents: [], warnings: [] })
+      body: JSON.stringify({
+        revision: 'travels-empty-plan',
+        has_agents: false,
+        agents: [],
+        warnings: []
+      })
     });
   });
 
@@ -1688,7 +1695,9 @@ test('an agent-less team warns without blocking creation (FR55)', async ({ page 
   await advanceToTeam(page);
 
   const issue = page.locator('#workspaceTeamIssues .workspace-team-issue');
-  await expect(issue).toContainText('Starter and setup tasks may remain unassigned');
+  await expect(issue).toContainText(
+    'This blueprint declares no agent roles. You can still add a saved teammate.'
+  );
   await expect(issue).toHaveClass(/is-advisory/);
   await expect(issue.locator('.workspace-team-issue-label')).toHaveText('Note');
 
@@ -1697,9 +1706,7 @@ test('an agent-less team warns without blocking creation (FR55)', async ({ page 
   await expect(page.locator('#createFolderBtn')).toBeEnabled();
 });
 
-test('an unavailable blueprint plan blocks Team and offers recovery (FR94, FR95)', async ({
-  page
-}) => {
+test('an unavailable blueprint plan fails closed without the retired opt-out', async ({ page }) => {
   await page.route('**/api/workspaces/template-agent-plan**', async route => {
     await route.fulfill({
       status: 500,
@@ -1717,16 +1724,10 @@ test('an unavailable blueprint plan blocks Team and offers recovery (FR94, FR95)
   const blocker = page.locator('#workspaceTeamIssues .workspace-team-issue.is-blocking');
   await expect(blocker).toContainText('plan backend down');
   await expect(blocker.locator('.workspace-team-issue-label')).toHaveText('Needs attention');
-  // All three documented recovery paths are offered (FR95).
   await expect(blocker.locator('[data-team-recovery="retry-plan"]')).toBeVisible();
   await expect(blocker.locator('[data-team-recovery="edit-blueprint"]')).toBeVisible();
-  await expect(blocker.locator('[data-team-recovery="exclude-blueprint-team"]')).toBeVisible();
-
-  // Taking the exclude path clears the blocker.
-  await blocker.locator('[data-team-recovery="exclude-blueprint-team"]').click();
-  await expect(page.locator('#workspaceTeamIssues .workspace-team-issue.is-blocking')).toHaveCount(
-    0
-  );
+  await expect(blocker.locator('[data-team-recovery="exclude-blueprint-team"]')).toHaveCount(0);
+  await expect(page.locator('#wizardNextBtn')).toBeDisabled();
 });
 
 test('Blueprint summarizes included agents read-only, with no agent controls', async ({ page }) => {
@@ -1784,7 +1785,12 @@ test('Blueprint tells checking, empty, and unavailable apart (FR18, FR19)', asyn
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ has_agents: false, agents: [], warnings: [] })
+      body: JSON.stringify({
+        revision: 'blueprint-empty-plan',
+        has_agents: false,
+        agents: [],
+        warnings: []
+      })
     });
   });
   await openCreateModal(page);
@@ -1809,7 +1815,7 @@ test('Blueprint tells checking, empty, and unavailable apart (FR18, FR19)', asyn
   await expect(page.locator('#blueprintAgentSummaryText')).not.toContainText('includes no agents');
 });
 
-test('changing blueprint keeps saved agents and attaches a duplicate only once', async ({
+test('changing blueprint keeps saved agents without treating a proposal as membership', async ({
   page
 }) => {
   // Blueprint A declares no agents; blueprint B declares the very agent the user
@@ -1852,7 +1858,12 @@ test('changing blueprint keeps saved agents and attaches a duplicate only once',
               ],
               warnings: []
             }
-          : { has_agents: false, agents: [], warnings: [] }
+          : {
+              revision: 'dedup-empty-plan',
+              has_agents: false,
+              agents: [],
+              warnings: []
+            }
       )
     });
   });
@@ -1879,15 +1890,21 @@ test('changing blueprint keeps saved agents and attaches a duplicate only once',
   await expect(page.locator('#wizardStep2')).toBeVisible();
   await advanceToTeam(page);
 
-  // One roster entry for Research Lead, owned by the blueprint — not two.
-  await expect(rows).toHaveCount(2);
-  await expect(rows.nth(0)).toContainText('Research Lead');
-  await expect(rows.nth(0).locator('[data-team-agent-setup]')).toBeVisible();
-  await expect(rows.nth(1)).toContainText('Data Miner');
-  // ...and the wizard explains which source owns it (FR23).
-  await expect(page.locator('#workspaceTeamIssues')).toContainText(
-    'Research Lead is already included by this blueprint'
-  );
+  // The declaration is still a vacant slot. Saved selections remain truthful
+  // unassigned members; the same-name proposal does not absorb either one.
+  const role = page.locator('#workspaceRoleRoster [data-role-id="research-lead"]');
+  await expect(role).toContainText('Missing');
+  const unassigned = page.locator('#workspaceRoleRoster .ws-role-roster__also-row');
+  await expect(unassigned).toHaveCount(2);
+  await expect(unassigned.nth(0)).toContainText('Research Lead');
+  await expect(unassigned.nth(1)).toContainText('Data Miner');
+
+  // Filling the declared role is a separate explicit action. Rename the new
+  // holder so it cannot collide with the existing saved definition.
+  await role.getByRole('button', { name: 'Create an agent for Research Lead' }).click();
+  await page.locator('#agentName').fill('Project Research Lead');
+  await page.locator('#createAgentBtn').click();
+  await expect(page.locator('#addFolderModal')).toBeVisible();
 
   let payload: Record<string, unknown> | undefined;
   await page.route('**/api/workspaces', async route => {
@@ -1906,9 +1923,14 @@ test('changing blueprint keeps saved agents and attaches a duplicate only once',
   await page.locator('#createFolderBtn').click();
   await page.waitForURL('**/workspaces/dedup-ws');
 
-  // The duplicate is not sent, and the blueprint keeps the primary slot.
-  expect(payload?.existing_agent_names).toEqual(['Data Miner']);
-  expect(payload?.entry_agent_name).toBeUndefined();
+  expect(payload?.existing_agent_names).toEqual(['Research Lead', 'Data Miner']);
+  expect(payload?.role_staffing).toEqual([
+    expect.objectContaining({
+      role_id: 'research-lead',
+      mode: 'create',
+      name: 'Project Research Lead'
+    })
+  ]);
 });
 
 test('Review reads as a receipt: name once, blueprint as provenance, team summarized', async ({
@@ -1960,10 +1982,13 @@ test('Review reads as a receipt: name once, blueprint as provenance, team summar
   await expect(receipt).toContainText('Folder: midnight-sessions');
   await expect(receipt.locator('.workspace-review-identity-name')).toHaveCount(1);
 
-  // A compact team summary: who is primary, how many specialists, what happens.
-  await expect(receipt).toContainText('Reaper Producer · Primary');
-  await expect(receipt).toContainText('2 specialists: Session Scout, Research Scout');
-  await expect(receipt).toContainText('will be created and attached');
+  // The receipt distinguishes filled roles, optional vacancies, and saved
+  // teammates that were explicitly added outside a role.
+  await expect(receipt).toContainText('Reaper Producer · Primary · Reaper Producer · New agent');
+  await expect(receipt).toContainText('Session Scout · Specialist · Optional');
+  await expect(receipt).toContainText('Research Scout · Also in this workspace · Saved agent');
+  await expect(receipt).toContainText('1 new agent will be created');
+  await expect(receipt).toContainText('1 saved agent will be attached');
 
   // Review is a receipt, not a second configuration surface (FR83).
   await expect(page.locator('#wizardStep4 #workspaceTeamRoster')).toHaveCount(0);
@@ -1980,7 +2005,8 @@ test('Review reads as a receipt: name once, blueprint as provenance, team summar
   // Edit round trips return to the owning step and preserve everything else.
   await receipt.locator('[data-wizard-edit-step="3"]').click();
   await expect(page.locator('#wizardStep3')).toBeVisible();
-  await expect(page.locator('#workspaceTeamRoster .workspace-team-row')).toHaveCount(3);
+  await expect(page.locator('#workspaceRoleRoster .ws-role-row')).toHaveCount(2);
+  await expect(page.locator('#workspaceRoleRoster .ws-role-roster__also-row')).toHaveCount(1);
   await advanceToReviewFromTeam(page);
   await expect(receipt).toContainText('Midnight Sessions');
 
@@ -1992,7 +2018,7 @@ test('Review reads as a receipt: name once, blueprint as provenance, team summar
   await expect(page.locator('#wizardStep2')).toBeVisible();
   await expect(page.locator('#folderNameInput')).toHaveValue('Midnight Sessions');
   await advanceToReview(page);
-  await expect(receipt).toContainText('2 specialists: Session Scout, Research Scout');
+  await expect(receipt).toContainText('Research Scout · Also in this workspace · Saved agent');
 });
 
 test('Review summarizes only the details that were actually chosen (FR81)', async ({ page }) => {
@@ -2088,8 +2114,10 @@ test('a failed create keeps the draft, shows the real error, and routes back (FR
   // Editing from the failure returns to Team with the draft intact.
   await failure.getByRole('button', { name: 'Edit team' }).click({ force: true });
   await expect(page.locator('#wizardStep3')).toBeVisible();
-  await expect(page.locator('#workspaceTeamRoster .workspace-team-row')).toHaveCount(2);
-  await expect(page.locator('#workspaceTeamRoster')).toContainText('Research Scout');
+  await expect(page.locator('#workspaceRoleRoster .ws-role-row')).toHaveCount(1);
+  await expect(page.locator('#workspaceRoleRoster .ws-role-roster__also-row')).toContainText(
+    'Research Scout'
+  );
 
   // Resubmitting succeeds and the failure notice is gone.
   await advanceToReviewFromTeam(page);
@@ -2098,9 +2126,7 @@ test('a failed create keeps the draft, shows the real error, and routes back (FR
   await page.waitForURL('**/workspaces/recovered-ws');
 });
 
-test('Team refuses to reach Review while a blocker is unresolved (FR89, FR94)', async ({
-  page
-}) => {
+test('Team refuses to reach Review while a plan blocker is unresolved', async ({ page }) => {
   await page.route('**/api/workspaces/template-agent-plan**', async route => {
     await route.fulfill({
       status: 500,
@@ -2115,18 +2141,19 @@ test('Team refuses to reach Review while a blocker is unresolved (FR89, FR94)', 
   await page.locator('#folderNameInput').fill('Blocked WS');
   await advanceToTeam(page);
 
-  // Continuing is refused and focus lands on the reason.
-  await page.locator('#wizardNextBtn').click();
+  // Continuing is unavailable while the reason remains visible.
+  await expect(page.locator('#wizardNextBtn')).toBeDisabled();
   await expect(page.locator('#wizardStep3')).toBeVisible();
   await expect(page.locator('#wizardStep4')).toBeHidden();
   await expect(
     page.locator('#workspaceTeamIssues .workspace-team-issue.is-blocking')
-  ).toBeFocused();
+  ).toBeVisible();
 
-  // Clearing the blocker lets the flow continue, and Create is enabled.
-  await page.locator('#workspaceTeamIssues [data-team-recovery="exclude-blueprint-team"]').click();
-  await advanceToReviewFromTeam(page);
-  await expect(page.locator('#createFolderBtn')).toBeEnabled();
+  // A normal blueprint cannot bypass unknown staffing by excluding its team.
+  await expect(
+    page.locator('#workspaceTeamIssues [data-team-recovery="exclude-blueprint-team"]')
+  ).toHaveCount(0);
+  await expect(page.locator('#wizardNextBtn')).toBeDisabled();
 });
 
 test('Team carries text semantics, list roles, and quiet live-region updates', async ({ page }) => {
@@ -2159,20 +2186,19 @@ test('Team carries text semantics, list roles, and quiet live-region updates', a
   await page.locator('#folderNameInput').fill('Semantics WS');
   await advanceToTeam(page);
 
-  // Both collections are lists with accessible names (FR105).
-  await expect(page.locator('#workspaceTeamRoster')).toHaveRole('list');
+  // Both collections are lists with accessible names.
+  await expect(page.locator('#workspaceRoleRoster .ws-role-roster__list')).toHaveRole('list');
   await expect(page.locator('#existingAgentRosterList')).toHaveRole('list');
-  await expect(page.locator('#workspaceTeamRoster .workspace-team-row').first()).toHaveRole(
-    'listitem'
-  );
+  await expect(page.locator('#workspaceRoleRoster .ws-role-row').first()).toHaveRole('listitem');
   await expect(
     page.locator('#existingAgentRosterList .workspace-existing-agent-card').first()
   ).toHaveRole('listitem');
 
-  // Designation and lifecycle are words, not colour (FR102).
-  await expect(page.locator('#workspaceTeamRoster .workspace-team-badge').first()).toHaveText(
-    'Primary'
+  // Designation and vacancy are words, not colour.
+  await expect(page.locator('#workspaceRoleRoster .ws-role-row__designation').first()).toHaveText(
+    'PRIMARY'
   );
+  await expect(page.locator('#workspaceRoleRoster .ws-role-tag').first()).toHaveText('Missing');
 
   // Neither the roster nor the receipt is itself a live region — they re-render
   // wholesale, and announcing them would repeat the whole team on each edit.
@@ -2244,7 +2270,11 @@ test('the modal never scrolls horizontally at a narrow viewport (FR108)', async 
     .click();
   expect(await noHorizontalOverflow()).toBe(true);
 
-  await page.locator('#workspaceTeamRoster [data-team-agent-setup]').first().click();
+  await page
+    .locator('#workspaceRoleRoster .ws-role-row')
+    .first()
+    .getByRole('button', { name: /^Create an agent for / })
+    .click();
   await expect(page.locator('#addAgentModal')).toHaveCSS('opacity', '1');
   expect(await noHorizontalOverflow()).toBe(true);
   await page.keyboard.press('Escape');
@@ -2334,13 +2364,19 @@ test('the wizard never persists an agent before the workspace is created (FR68)'
   await page.locator('#folderNameInput').fill('No Orphans WS');
   await advanceToTeam(page);
 
-  // Edit and review staged blueprint agents on Team: still no persistence request.
-  const row = page.locator('#workspaceTeamRoster .workspace-team-row').first();
-  await row.locator('[data-team-agent-setup]').click();
+  // Fill and review declared roles on Team: still no persistence request.
+  const rows = page.locator('#workspaceRoleRoster .ws-role-row');
+  await rows
+    .filter({ hasText: 'Reaper Producer' })
+    .getByRole('button', { name: 'Create an agent for Reaper Producer' })
+    .click();
   await page.locator('#agentName').fill('Renamed Producer');
   await page.locator('#createAgentBtn').click();
   await expect(page.locator('#addFolderModal')).toBeVisible();
-  await page.locator('[data-team-agent-setup="1"]').click();
+  await rows
+    .filter({ hasText: 'Session Scout' })
+    .getByRole('button', { name: 'Create an agent for Session Scout' })
+    .click();
   await page.locator('#createAgentBtn').click();
   await expect(page.locator('#addFolderModal')).toBeVisible();
   await advanceToReviewFromTeam(page);

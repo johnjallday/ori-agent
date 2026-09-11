@@ -146,6 +146,7 @@
     return {
       id,
       stationName: text(program.station_name),
+      stationWorkspaceSlug: text(program.station_workspace_slug),
       stationDescription: text(program.station_description),
       defaultPrimaryName: text(program.default_primary_name),
       hireTitle: text(program.hire_title),
@@ -271,7 +272,8 @@
           type: text(recommended.type),
           model: text(recommended.model),
           provider: text(recommended.provider),
-          system_prompt: text(recommended.systemPrompt)
+          system_prompt: text(recommended.systemPrompt),
+          ...(recommended.tools ? { tools: recommended.tools } : {})
         }
       };
     });
@@ -306,27 +308,68 @@
 
   // setRoleFill records that a role will be filled — by creating an agent for
   // it, or by assigning one the user already has. It never performs I/O; the
-  // fill becomes a request only at submit.
+  // fill becomes a request only at submit. Every precondition is rechecked at
+  // action time so a stale suggestion cannot move an agent, replace a role, or
+  // bind a declaration that changed after it was rendered.
   function setRoleFill(draft, roleId, fill) {
     const id = text(roleId);
     const normalized = normalizeFill(fill);
     if (!draft || !id || !normalized) return false;
+    const role = declaredRoles(draft).find(item => item.roleId === id);
+    if (!role || role.scope === 'home' || role.heldElsewhere || draft.roleFills?.has(id))
+      return false;
     if (!draft.roleFills) draft.roleFills = new Map();
-    // One agent fills at most one role (FR25). Assigning someone already in
-    // another slot moves them rather than cloning them into two.
+
+    const wanted = agentKey(normalized.name);
+    for (const other of draft.roleFills.values()) {
+      if (agentKey(other.name) === wanted) return false;
+    }
+    if (
+      declaredRoles(draft).some(
+        item => item.heldElsewhere && agentKey(item.heldElsewhere) === wanted
+      )
+    ) {
+      return false;
+    }
+    if (normalized.mode === FILL_CREATE && findSavedAgent(draft, normalized.name)) return false;
     if (normalized.mode === FILL_ASSIGN) {
-      for (const [otherRole, other] of draft.roleFills) {
-        if (
-          otherRole !== id &&
-          other.mode === FILL_ASSIGN &&
-          agentKey(other.name) === agentKey(normalized.name)
-        ) {
-          draft.roleFills.delete(otherRole);
-        }
-      }
+      const saved = findSavedAgent(draft, normalized.name);
+      if (!saved || !isAttachableSavedAgent(saved)) return false;
+      normalized.name = text(saved.name);
+      // A role-specific action deliberately converts an extra teammate into a
+      // role holder. Keeping both would attach the same definition twice.
+      draft.savedSelections = (draft.savedSelections || []).filter(
+        name => agentKey(name) !== wanted
+      );
     }
     draft.roleFills.set(id, normalized);
+    draft.agentless = false;
+    clearResolvedReadinessConflict(draft);
     return true;
+  }
+
+  function setAgentless(draft, enabled) {
+    if (!draft) return false;
+    const blank = draft.plan?.status === PLAN_READY && draft.plan.data?.templateId === 'blank';
+    if (enabled && !blank) return false;
+    draft.agentless = Boolean(enabled);
+    if (draft.agentless) {
+      draft.roleFills.clear();
+      draft.savedSelections = [];
+      draft.explicitPrimary = '';
+      draft.overrides.clear();
+      draft.acknowledgements.clear();
+    }
+    clearResolvedReadinessConflict(draft);
+    return true;
+  }
+
+  function clearResolvedReadinessConflict(draft) {
+    if (draft?.staleConflict?.kind !== 'team-readiness') return;
+    const ready = declaredRoles(draft)
+      .filter(role => role.required)
+      .every(role => role.heldElsewhere || draft.roleFills?.has(role.roleId));
+    if (ready || draft.agentless) draft.staleConflict = null;
   }
 
   function clearRoleFill(draft, roleId) {
@@ -340,15 +383,19 @@
     return fill ? { ...fill } : null;
   }
 
-  // roleFilledBy reports which role an agent name currently fills, so the
-  // picker can disable someone already holding another slot and say why (FR25).
+  // roleFilledBy reports which role an agent name currently fills, so every
+  // picker appearance shares one eligibility decision. Inherited group holders
+  // count too: they cannot also be attached as a project extra.
   function roleFilledBy(source, name) {
     const key = agentKey(name);
-    if (!key || !source.roleFills) return '';
-    for (const [roleId, fill] of source.roleFills) {
+    if (!key) return '';
+    for (const [roleId, fill] of source.roleFills || []) {
       if (agentKey(fill.name) === key) return roleId;
     }
-    return '';
+    const inherited = declaredRoles(source).find(
+      role => role.heldElsewhere && agentKey(role.heldElsewhere) === key
+    );
+    return inherited ? inherited.roleId : '';
   }
 
   function createDraft() {
@@ -367,7 +414,8 @@
       roleFills: new Map(),
       savedSelections: [],
       savedRoster: { status: PLAN_IDLE, agents: [], error: '' },
-      explicitPrimary: ''
+      explicitPrimary: '',
+      agentless: false
     };
   }
 
@@ -398,6 +446,7 @@
     // blueprint's fills would bind to slots that no longer exist.
     draft.roleFills = new Map();
     draft.includeBlueprintTeam = true;
+    draft.agentless = false;
     if (draft.explicitPrimary && !isSelected(draft, draft.explicitPrimary)) {
       draft.explicitPrimary = '';
     }
@@ -438,6 +487,11 @@
     }
     draft.reconciledPlanChanges = changedIndexes;
     draft.plan = { status: PLAN_READY, blueprintKey: key, data: normalized, error: '' };
+    const currentRoles = new Map(declaredRoles(draft).map(role => [role.roleId, role]));
+    for (const roleID of draft.roleFills.keys()) {
+      const role = currentRoles.get(roleID);
+      if (!role || role.heldElsewhere) draft.roleFills.delete(roleID);
+    }
     const program = normalized.assistantProgram;
     if (program) {
       const programKey = `${key}:${program.id}`;
@@ -493,6 +547,7 @@
     }
     draft.staleConflict = {
       message: text(message) || 'Blueprint changed—review again before creating the workspace.',
+      kind: details.kind === 'team-readiness' ? 'team-readiness' : 'plan',
       changedIndexes,
       occupiedNames
     };
@@ -501,6 +556,14 @@
 
   function confirmFreshPlan(draft) {
     if (!draft || !draft.staleConflict) return false;
+    if (draft.staleConflict.kind === 'team-readiness') {
+      const ready = declaredRoles(draft)
+        .filter(role => role.required)
+        .every(role => role.heldElsewhere || draft.roleFills?.has(role.roleId));
+      if (!ready && !draft.agentless) return false;
+      draft.staleConflict = null;
+      return true;
+    }
     const pending = planAgents(draft).some(
       (agent, index) => agent.action === 'create' && !isSetupAcknowledged(draft, index, agent)
     );
@@ -552,10 +615,9 @@
   }
 
   function setIncludeBlueprintTeam(draft, included) {
-    draft.includeBlueprintTeam = Boolean(included);
-    // The blueprint's entry agent can no longer own the primary slot once its
-    // team is excluded; derive() recomputes the fallback (FR49, FR50).
-    return draft;
+    if (!draft || !included) return false;
+    draft.includeBlueprintTeam = true;
+    return true;
   }
 
   function planAgents(draft) {
@@ -748,13 +810,88 @@
     };
   }
 
-  // True when the blueprint already contributes this name under its ORIGINAL
-  // identity. Used to disable the picker's Add action (FR62) and, in derive(),
-  // to explain which source owns a retained selection after a blueprint change
-  // (FR23).
+  // True when the blueprint proposes this name under its ORIGINAL identity.
+  // This is declaration metadata, not membership: a proposed Downloads Curator
+  // does not fill its role merely because a saved agent has the same name.
+  // Retained only for the legacy whole-roster reconciliation path.
   function isBlueprintOwned(draft, name) {
     const key = agentKey(name);
     return planAgents(draft).some(agent => agentKey(agent.name) === key);
+  }
+
+  function isActuallyIncluded(draft, name) {
+    return Boolean(isSelected(draft, name) || roleFilledBy(draft, name));
+  }
+
+  function matchText(value) {
+    return text(value)
+      .toLocaleLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim()
+      .replace(/\s+/g, ' ');
+  }
+
+  function recommendationMatch(agent, role) {
+    const label = matchText(role && role.label);
+    const name = matchText(agent && agent.name);
+    const savedRole = matchText(agent && agent.role);
+    if (!label || !name) return null;
+    if (name === label) return { rank: 0, kind: 'exact-name', reason: "Matches this role's name" };
+    if (savedRole && savedRole === label) {
+      return { rank: 1, kind: 'exact-role', reason: "Matches this saved agent's role label" };
+    }
+    if (name.includes(label) || label.includes(name)) {
+      return { rank: 2, kind: 'name-text', reason: "Matches text in this role's name" };
+    }
+    if (savedRole && (savedRole.includes(label) || label.includes(savedRole))) {
+      return {
+        rank: 3,
+        kind: 'role-text',
+        reason: "Matches text in this saved agent's role label"
+      };
+    }
+    return null;
+  }
+
+  // Pure recommendation projection. It owns no mutable roster and makes no
+  // request: suggestions are a role/name view over the current declarations,
+  // fills, explicit extras, and attachable saved definitions.
+  function recommendSavedAgents(source, roster) {
+    const roles = (roster?.roles || [])
+      .map((role, index) => ({ ...role, declarationIndex: index }))
+      .filter(role => role.state !== 'filled' && !role.read_only)
+      .sort((left, right) => {
+        const bucket = role => (role.primary ? 0 : role.required ? 1 : 2);
+        return bucket(left) - bucket(right) || left.declarationIndex - right.declarationIndex;
+      });
+    const agents = ((source.savedRoster && source.savedRoster.agents) || []).filter(
+      agent => isAttachableSavedAgent(agent) && !isActuallyIncluded(source, agent.name)
+    );
+    const out = [];
+    for (const role of roles) {
+      const matches = agents
+        .map(agent => ({ agent, match: recommendationMatch(agent, role) }))
+        .filter(item => item.match)
+        .sort(
+          (left, right) =>
+            left.match.rank - right.match.rank ||
+            text(left.agent.name).localeCompare(text(right.agent.name), undefined, {
+              sensitivity: 'base'
+            })
+        );
+      for (const item of matches) {
+        out.push({
+          roleId: role.role_id,
+          roleLabel: role.label,
+          roleRequired: Boolean(role.required),
+          rolePrimary: Boolean(role.primary),
+          agent: item.agent,
+          matchKind: item.match.kind,
+          reason: item.match.reason
+        });
+      }
+    }
+    return out;
   }
 
   function setSavedRosterLoading(draft) {
@@ -765,6 +902,11 @@
   function setSavedRosterReady(draft, agents) {
     const list = (Array.isArray(agents) ? agents : []).filter(agent => text(agent && agent.name));
     draft.savedRoster = { status: PLAN_READY, agents: list, error: '' };
+    for (const [roleID, fill] of draft.roleFills || []) {
+      if (fill.mode !== FILL_ASSIGN) continue;
+      const saved = findSavedAgent(draft, fill.name);
+      if (!saved || !isAttachableSavedAgent(saved)) draft.roleFills.delete(roleID);
+    }
     return draft;
   }
 
@@ -783,8 +925,11 @@
     const agent = findSavedAgent(draft, name);
     if (!agent || !isAttachableSavedAgent(agent)) return false;
     const canonical = text(agent.name);
-    if (isSelected(draft, canonical) || isBlueprintOwned(draft, canonical)) return false;
+    // A blueprint name is only a proposal. Actual role fills and explicit extras
+    // are the membership states that make Add unavailable.
+    if (isSelected(draft, canonical) || roleFilledBy(draft, canonical)) return false;
     draft.savedSelections = [...draft.savedSelections, canonical];
+    draft.agentless = false;
     return true;
   }
 
@@ -804,6 +949,7 @@
   // blueprint primary is instead derived from roster order.
   function setExplicitPrimary(draft, name) {
     const canonical = text(name);
+    if (declaredRoles(draft).length > 0) return false;
     if (canonical && !isSelected(draft, canonical)) return false;
     if (agentKey(draft.explicitPrimary) === agentKey(canonical)) return false;
     draft.explicitPrimary = canonical;
@@ -1083,14 +1229,17 @@
       // Only an empty role has anything left to propose. Assistant-program
       // roles carry none: that declaration's prompts stay server-side.
       if (role.proposed) item.proposed = role.proposed;
-      // A group-scoped role an existing station already holds is reported, not
-      // offered: it belongs to the group workspace (D2).
-      if (role.heldElsewhere) {
-        item.state = 'filled';
-        item.source = SOURCE_ASSIGNED_WIRE;
-        item.agent = { name: role.heldElsewhere };
+      // Every group-scoped role is read-only here: an existing holder is
+      // reported, while a vacancy remains an actionable blocker owned by the
+      // group workspace rather than an impossible project-side field (D2).
+      if (role.scope === 'home') {
         item.read_only = true;
         item.read_only_reason = GROUP_ROLE_READ_ONLY;
+        if (role.heldElsewhere) {
+          item.state = 'filled';
+          item.source = SOURCE_ASSIGNED_WIRE;
+          item.agent = { name: role.heldElsewhere };
+        }
         return item;
       }
       const fill = source.roleFills && source.roleFills.get(role.roleId);
@@ -1135,19 +1284,19 @@
   // sentence and cannot drift apart (FR17, FR18, FR30).
   function roleStaffingSummary(roster) {
     if (!roster || roster.total_count === 0) return '';
-    if (roster.created_count === 0 && roster.assigned_count === 0) {
-      return 'No agent will be attached to this workspace. You can fill these roles any time from the workspace.';
-    }
-    const parts = [];
+    const required = roster.roles.filter(role => role.required);
+    const requiredFilled = required.filter(role => role.state === 'filled').length;
+    const parts = [
+      `${requiredFilled} of ${required.length} required role${required.length === 1 ? '' : 's'} filled`
+    ];
     if (roster.created_count > 0) {
       parts.push(
         `${roster.created_count} new agent${roster.created_count === 1 ? '' : 's'} will be created`
       );
     }
-    if (roster.assigned_count > 0) {
-      parts.push(
-        `${roster.assigned_count} saved agent${roster.assigned_count === 1 ? '' : 's'} will be attached`
-      );
+    const savedCount = roster.assigned_count + (roster.unassigned?.length || 0);
+    if (savedCount > 0) {
+      parts.push(`${savedCount} saved agent${savedCount === 1 ? '' : 's'} will be attached`);
     }
     if (roster.empty_count > 0) {
       parts.push(
@@ -1188,12 +1337,17 @@
           assigned_count: 0,
           empty_count: 0
         };
-    const roleSummary = roleStaffingSummary(roleRoster);
+    const isBlank = plan.data?.templateId === 'blank';
+    const agentless = Boolean(source.agentless && isBlank);
 
     // A retained saved selection that the (possibly changed) blueprint already
     // contributes stays selected but yields its roster slot to the blueprint
     // entry, and we report which source won so the UI can say so (FR23).
-    const originalKeys = new Set(activePlanAgents.map(agent => agentKey(agent.name)));
+    const originalKeys = new Set(
+      roleRoster.roles
+        .filter(role => role.state === 'filled' && !role.read_only && role.agent)
+        .map(role => agentKey(role.agent.name))
+    );
     const shadowedSelections = [];
     const savedEntries = [];
     if (!assistantProgram) {
@@ -1207,9 +1361,38 @@
         savedEntries.push(resolveSavedEntry(source, name));
       });
     }
+    // Saved teammates that do not fill a declared role are still real members
+    // of the resulting workspace. Put them in the shared roster projection so
+    // Team and Review never make an explicit Add action disappear merely
+    // because this blueprint also declares role slots.
+    roleRoster.unassigned = savedEntries.map(entry => ({
+      name: entry.name,
+      role: entry.role || '',
+      type: entry.type || '',
+      appearance: entry.identity?.appearance || null
+    }));
+    const roleSummary = agentless
+      ? 'No agents will be created or attached.'
+      : roleStaffingSummary(roleRoster);
+    const recommendations = agentless ? [] : recommendSavedAgents(source, roleRoster);
 
-    const primaryName = resolvePrimaryName(source, blueprintEntries, savedEntries);
-    const primaryKey = agentKey(primaryName);
+    const rosterPrimaryName = resolvePrimaryName(source, blueprintEntries, savedEntries);
+    const primaryKey = agentKey(rosterPrimaryName);
+    // Once a plan declares roles, only an actual local holder or explicitly
+    // added teammate can be the workspace entry agent. A blueprint proposal is
+    // a slot description, not membership, so it must never drive primary copy.
+    const filledLocalPrimary = roleRoster.roles.find(
+      role => role.state === 'filled' && !role.read_only && role.primary && role.agent
+    );
+    const firstFilledLocalRole = roleRoster.roles.find(
+      role => role.state === 'filled' && !role.read_only && role.agent
+    );
+    const actualPrimaryName = agentless
+      ? ''
+      : filledLocalPrimary?.agent?.name ||
+        firstFilledLocalRole?.agent?.name ||
+        savedEntries[0]?.name ||
+        '';
     const members = [...blueprintEntries, ...savedEntries];
     // Promote by POSITION, not by key. A staged rename can make two members share
     // one key, and excluding "everything matching the primary key" would silently
@@ -1230,13 +1413,28 @@
     // Resulting-name collisions are a blocker, distinct from the shadowing case
     // above: here a staged rename would produce two definitions with one name
     // (FR45), which the server would reject after the user left the wizard.
+    const collisionCandidates =
+      roleRoster.total_count > 0
+        ? [
+            ...roleRoster.roles
+              .filter(role => role.state === 'filled' && role.agent)
+              .map(role => ({
+                name: role.agent.name,
+                key: agentKey(role.agent.name),
+                source: 'role',
+                templateAgentIndex: null,
+                isCustomized: role.source === SOURCE_CREATED_WIRE
+              })),
+            ...savedEntries
+          ]
+        : roster;
     const nameCounts = new Map();
-    roster.forEach(entry => {
+    collisionCandidates.forEach(entry => {
       nameCounts.set(entry.key, (nameCounts.get(entry.key) || 0) + 1);
     });
     // Report the customized member first: it owns the name the user just typed,
     // so that is the field focus should land on (FR104).
-    const collisions = roster
+    const collisions = collisionCandidates
       .filter(entry => nameCounts.get(entry.key) > 1)
       .sort((left, right) => Number(right.isCustomized) - Number(left.isCustomized));
 
@@ -1251,13 +1449,7 @@
         anchor: 'team-roster'
       });
     }
-    if (
-      includeTeam &&
-      plan.status === PLAN_READY &&
-      !assistantProgram &&
-      allPlanAgents.length > 0 &&
-      !text(plan.data?.revision)
-    ) {
+    if (includeTeam && plan.status === PLAN_READY && !text(plan.data?.revision)) {
       issues.push({
         id: 'plan-revision-missing',
         severity: 'blocking',
@@ -1273,9 +1465,7 @@
         id: 'plan-error',
         severity: 'blocking',
         message: plan.error || 'Could not load blueprint agents.',
-        recovery: assistantProgram
-          ? ['retry-plan', 'edit-blueprint']
-          : ['retry-plan', 'edit-blueprint', 'exclude-blueprint-team'],
+        recovery: ['retry-plan', 'edit-blueprint'],
         anchor: 'team-roster'
       });
     }
@@ -1376,24 +1566,42 @@
         anchor: 'saved-agent-picker'
       });
     }
-    // Leaving roles empty is a supported outcome, so it is advisory AT MOST and
-    // never blocking (FR19). It is worth saying once, because starter tasks
-    // will sit unassigned until a role is filled.
-    if (
+    const missingRequired = roleRoster.roles.filter(
+      role => role.required && role.state !== 'filled'
+    );
+    if (!agentless && missingRequired.length > 0) {
+      issues.push({
+        id: 'required-roles-missing',
+        severity: 'blocking',
+        message:
+          missingRequired.length === 1
+            ? `Fill the required ${missingRequired[0].label} role before reviewing this workspace.`
+            : `Fill all ${missingRequired.length} required roles before reviewing this workspace.`,
+        recovery: ['fill-required-role'],
+        anchor: `workspace-role-${missingRequired[0].role_id}`,
+        roleId: missingRequired[0].role_id
+      });
+    }
+    if (agentless) {
+      issues.push({
+        id: 'agentless-workspace',
+        severity: 'advisory',
+        message:
+          'This Blank workspace will be created without agents. Chat and agent work require adding one later.',
+        recovery: [],
+        anchor: 'workspaceBlankAgentlessToggle'
+      });
+    } else if (
       plan.status !== PLAN_LOADING &&
-      roleRoster.created_count === 0 &&
-      roleRoster.assigned_count === 0 &&
+      roleRoster.total_count === 0 &&
       savedEntries.length === 0
     ) {
       issues.push({
         id: 'empty-team',
         severity: 'advisory',
-        message:
-          roleRoster.total_count > 0
-            ? 'No agent will be attached to this workspace. Starter and setup tasks stay unassigned until you fill a role.'
-            : 'No agent will be attached to this workspace. Starter and setup tasks may remain unassigned until you add one.',
-        recovery: ['add-saved-agent', 'include-blueprint-team'],
-        anchor: 'team-roster'
+        message: 'This blueprint declares no agent roles. You can still add a saved teammate.',
+        recovery: ['add-saved-agent'],
+        anchor: 'saved-agent-picker'
       });
     }
     shadowedSelections.forEach(shadowed => {
@@ -1407,14 +1615,16 @@
     });
 
     const payload = {};
-    // role_staffing carries the user's per-role choices and is sent whenever
-    // this blueprint declares roles — INCLUDING when it is empty, which is how
-    // "create this workspace with nobody in it" is expressed. Its absence means
-    // "no vacancy model here", and the server then behaves exactly as it always
-    // did (FR57), which is what keeps CreateFromTemplate and other non-wizard
-    // callers working.
-    if (includeTeam && plan.status === PLAN_READY && roleRoster.total_count > 0) {
-      payload.role_staffing = roleRoster.roles
+    // Every non-import wizard create carries an explicit versioned intent and
+    // an explicit staffing array. API callers that omit team_intent still use
+    // the legacy behavior; the wizard never relies on omission as permission.
+    if (includeTeam && plan.status === PLAN_READY && text(plan.data?.revision)) {
+      payload.team_intent = {
+        version: 1,
+        mode: agentless ? 'agentless' : 'staffed',
+        plan_revision: plan.data.revision
+      };
+      payload.role_staffing = (agentless ? [] : roleRoster.roles)
         .filter(role => role.state === 'filled' && !role.read_only)
         .map(role => {
           const fill = source.roleFills.get(role.role_id);
@@ -1442,8 +1652,10 @@
           model: text(source.assistantHire?.model)
         };
     } else {
-      if (allPlanAgents.length > 0) payload.create_template_agents = includeTeam;
-      if (includeTeam) {
+      if (agentless) payload.create_template_agents = false;
+      else if (!payload.team_intent && allPlanAgents.length > 0)
+        payload.create_template_agents = includeTeam;
+      if (includeTeam && !payload.team_intent) {
         const overrides = serializeOverrides(source);
         if (overrides.length > 0) payload.template_agent_overrides = overrides;
         // The reviewed-roster contract describes creating the WHOLE blueprint
@@ -1472,10 +1684,14 @@
       }
       // Sent only when non-empty: the server treats a nil existing_agent_names as
       // a legacy request and keeps its original entry-agent behavior.
-      if (savedEntries.length > 0) {
+      if (!agentless && savedEntries.length > 0) {
         payload.existing_agent_names = savedEntries.map(entry => entry.name);
         const savedPrimary = savedEntries.find(entry => entry.key === primaryKey);
-        if (savedPrimary) payload.entry_agent_name = savedPrimary.name;
+        // A declared primary role owns entry-agent selection. Explicit saved
+        // primaries remain meaningful only for a blueprint with no role slots.
+        if (savedPrimary && roleRoster.total_count === 0) {
+          payload.entry_agent_name = savedPrimary.name;
+        }
       }
     }
 
@@ -1502,6 +1718,8 @@
         warnings: (planForSummary && planForSummary.warnings) || []
       },
       assistantProgram,
+      isBlank,
+      agentless,
       assistantHire: assistantProgram
         ? { ...(source.assistantHire || emptyAssistantHire()) }
         : null,
@@ -1510,9 +1728,13 @@
       // render, and the one the create request is built from.
       roleRoster,
       roleSummary,
+      recommendations,
       roster,
-      primaryName: primary ? primary.name : '',
-      primaryIsAutomatic: Boolean(primary) && !text(source.explicitPrimary),
+      primaryName: roleRoster.total_count > 0 ? actualPrimaryName : primary ? primary.name : '',
+      primaryIsAutomatic:
+        roleRoster.total_count > 0
+          ? Boolean(actualPrimaryName) && !text(source.explicitPrimary)
+          : Boolean(primary) && !text(source.explicitPrimary),
       specialists,
       shadowedSelections,
       batchSetup: {
@@ -1581,6 +1803,7 @@
     setAssistantHire,
     setRoleFill,
     clearRoleFill,
+    setAgentless,
     getRoleFill,
     roleFilledBy,
     declaredRoles,
@@ -1604,6 +1827,9 @@
     setExplicitPrimary,
     isSelected,
     isBlueprintOwned,
+    isActuallyIncluded,
+    recommendSavedAgents,
+    recommendationMatch,
     isAttachableSavedAgent,
     findSavedAgent,
     identityFrom,

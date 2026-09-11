@@ -77,6 +77,7 @@ const sessionManager = {
   },
   existingAgentRosterLoaded: false,
   existingAgentRosterLoading: false,
+  existingAgentRosterRequestId: 0,
   // True once the user manually changes "Agent behavior", so selecting a
   // Starting point no longer overwrites their choice. Reset on modal open.
   behaviorOverridden: false,
@@ -398,12 +399,17 @@ const sessionManager = {
         this.refreshWorkspaceReview();
       });
 
-    document.getElementById('templateAgentReviewToggle')?.addEventListener('change', event => {
-      this.syncIncludeBlueprintTeam(Boolean(event?.currentTarget?.checked));
-      this.updateTemplateAgentReviewDisabledState();
+    document.getElementById('workspaceBlankAgentlessToggle')?.addEventListener('change', event => {
+      const api = window.CreateWorkspaceTeamDraft;
+      const draft = this.ensureWorkspaceTeamDraft();
+      if (!draft || !api?.setAgentless?.(draft, Boolean(event.currentTarget?.checked))) return;
       this.refreshWorkspaceReview();
-      // Excluding the blueprint team can hand the primary slot to a saved agent.
-      this.announceResolvedPrimary();
+      this.renderExistingAgentRoster();
+      this.announceWorkspaceTeamChange(
+        event.currentTarget.checked
+          ? 'Blank workspace will be created without agents.'
+          : 'Ask Ori is required again; create or assign an agent for the role.'
+      );
     });
 
     document.getElementById('assistantProgramCreateName')?.addEventListener('input', event => {
@@ -425,6 +431,16 @@ const sessionManager = {
     document.getElementById('existingAgentRosterSearch')?.addEventListener('input', () => {
       this.renderExistingAgentRoster();
     });
+    document
+      .getElementById('workspaceSavedAgentSuggestionsList')
+      ?.addEventListener('click', event => {
+        const button = event.target.closest('[data-suggested-agent-use]');
+        if (!button) return;
+        this.assignWorkspaceRole(
+          button.dataset.suggestedRoleId || '',
+          button.dataset.suggestedAgentUse || ''
+        );
+      });
     document.getElementById('existingAgentRosterList')?.addEventListener('click', event => {
       const button = event.target.closest('[data-existing-agent-add]');
       if (!button) return;
@@ -4096,6 +4112,9 @@ const sessionManager = {
     // Forget what was last announced so a reopened wizard announces its primary
     // afresh rather than staying silent because the name happens to repeat.
     this.announcedPrimaryName = '';
+    this.existingAgentRosterRequestId += 1;
+    this.existingAgentRosterLoading = false;
+    this.existingAgentRosterLoaded = false;
     this.templateAgentPlanRequestId += 1;
     if (this.templateAgentPlanTimer) {
       clearTimeout(this.templateAgentPlanTimer);
@@ -5026,6 +5045,7 @@ const sessionManager = {
   async loadExistingAgentRoster() {
     const api = window.CreateWorkspaceTeamDraft;
     const draft = this.ensureWorkspaceTeamDraft();
+    const requestId = ++this.existingAgentRosterRequestId;
     this.watchCharacterCatalog();
     this.existingAgentRosterLoading = true;
     if (draft && api) api.setSavedRosterLoading(draft);
@@ -5034,6 +5054,7 @@ const sessionManager = {
       const response = await fetch('/api/agents/dashboard/list?sort_by=name&order=asc');
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data?.error || `Request failed (${response.status})`);
+      if (requestId !== this.existingAgentRosterRequestId || draft !== this.teamDraft) return;
       const items = Array.isArray(data) ? data : Array.isArray(data?.agents) ? data.agents : [];
       if (draft && api) {
         api.setSavedRosterReady(
@@ -5043,17 +5064,20 @@ const sessionManager = {
       }
       this.existingAgentRosterLoaded = true;
     } catch (error) {
+      if (requestId !== this.existingAgentRosterRequestId || draft !== this.teamDraft) return;
       console.warn('Failed to load existing agent roster:', error);
       if (draft && api) {
         api.setSavedRosterError(
           draft,
-          'Your saved agents could not be loaded. You can still create the included workspace setup.'
+          'Your saved agents could not be loaded. You can still create agents for roles in this workspace.'
         );
       }
     } finally {
-      this.existingAgentRosterLoading = false;
-      this.renderExistingAgentRoster();
-      this.refreshWorkspaceReview();
+      if (requestId === this.existingAgentRosterRequestId && draft === this.teamDraft) {
+        this.existingAgentRosterLoading = false;
+        this.renderExistingAgentRoster();
+        this.refreshWorkspaceReview();
+      }
     }
   },
 
@@ -5061,6 +5085,7 @@ const sessionManager = {
     const list = document.getElementById('existingAgentRosterList');
     const status = document.getElementById('existingAgentRosterStatus');
     if (!list || !status) return;
+    this.renderSavedAgentSuggestions();
     if (this.existingAgentRosterLoading) {
       status.textContent = 'Loading your saved agents…';
       list.innerHTML = '';
@@ -5116,6 +5141,69 @@ const sessionManager = {
           agents.map(agent => this.renderExistingAgentRosterCard(agent, role)).join('')
         : '';
     list.innerHTML = section('Suggested for this role', suggested) + section('All agents', others);
+  },
+
+  renderSavedAgentSuggestions() {
+    const section = document.getElementById('workspaceSavedAgentSuggestions');
+    const list = document.getElementById('workspaceSavedAgentSuggestionsList');
+    if (!section || !list) return;
+    const view = this.teamView();
+    const query = String(document.getElementById('existingAgentRosterSearch')?.value || '')
+      .trim()
+      .toLowerCase();
+    const recommendations = (view?.recommendations || []).filter(item => {
+      const agent = item.agent || {};
+      const haystack =
+        `${agent.name || ''} ${agent.role || ''} ${item.roleLabel || ''} ${item.reason || ''}`.toLowerCase();
+      return !query || haystack.includes(query);
+    });
+    if (!recommendations.length || this.existingAgentRosterLoading) {
+      section.hidden = true;
+      list.innerHTML = '';
+      return;
+    }
+
+    const groups = [];
+    for (const recommendation of recommendations) {
+      let group = groups.find(item => item.roleId === recommendation.roleId);
+      if (!group) {
+        group = {
+          roleId: recommendation.roleId,
+          roleLabel: recommendation.roleLabel,
+          roleRequired: recommendation.roleRequired,
+          recommendations: []
+        };
+        groups.push(group);
+      }
+      group.recommendations.push(recommendation);
+    }
+    list.innerHTML = groups
+      .map(
+        group => `
+          <section class="workspace-saved-agent-suggestion-group" aria-label="Suggestions for ${this.escapeHtml(group.roleLabel)}">
+            <h5>${this.escapeHtml(group.roleLabel)}${group.roleRequired ? ' · Required' : ' · Optional'}</h5>
+            <div role="list">
+              ${group.recommendations.map(item => this.renderSavedAgentSuggestion(item)).join('')}
+            </div>
+          </section>`
+      )
+      .join('');
+    section.hidden = false;
+  },
+
+  renderSavedAgentSuggestion(recommendation) {
+    const agent = recommendation?.agent || {};
+    const name = String(agent.name || '').trim();
+    const roleLabel = String(recommendation?.roleLabel || '').trim();
+    return `
+      <article class="workspace-existing-agent-card workspace-saved-agent-suggestion" role="listitem">
+        ${this.renderAgentAvatar(this.existingAgentIdentity(name, agent), 'workspace-agent-avatar')}
+        <div class="workspace-existing-agent-card-copy">
+          <strong>${this.escapeHtml(name)}</strong>
+          <span>${this.escapeHtml(recommendation.reason || '')}</span>
+        </div>
+        <button type="button" class="modern-btn modern-btn-primary" data-suggested-agent-use="${this.escapeHtml(name)}" data-suggested-role-id="${this.escapeHtml(recommendation.roleId || '')}" aria-label="${this.escapeHtml(`Use ${name} for ${roleLabel}`)}">Use this agent</button>
+      </article>`;
   },
 
   // The LABEL of the role this agent already fills, or null. Named rather than
@@ -5174,36 +5262,37 @@ const sessionManager = {
     const selected = this.existingAgentSelections.some(
       selectedName => this.existingAgentKey(selectedName) === key
     );
-    const alreadyIncluded = this.templateAgentIsAlreadyIncluded(name);
     const attachable = this.isExistingAgentAttachable(agent);
-    // One agent fills at most one role (FR25). An agent already holding a slot
-    // is shown disabled WITH the reason, rather than quietly missing — and that
-    // holds whether or not the picker is scoped to a role, because adding it as
-    // a plain team member would attach the same definition twice.
-    const heldRole = this.roleAlreadyFilledBy(name, role ? role.role_id : '');
-    const disabled = Boolean(!attachable || heldRole || (!role && (selected || alreadyIncluded)));
-    const reason = heldRole
-      ? `Already filling ${heldRole}`
+    const api = window.CreateWorkspaceTeamDraft;
+    const draft = this.ensureWorkspaceTeamDraft();
+    const heldRoleId = api?.roleFilledBy?.(draft, name) || '';
+    const heldRole = (this.teamView()?.roleRoster?.roles || []).find(
+      item => item.role_id === heldRoleId
+    );
+    const fillsTarget = Boolean(role && heldRoleId === role.role_id);
+    const disabled = Boolean(!attachable || heldRoleId || (!role && selected));
+    const reason = heldRoleId
+      ? `${fillsTarget ? 'Assigned to' : 'Already filling'} ${heldRole?.label || 'another role'}`
       : !attachable
         ? 'Built-in CLI agents cannot be attached'
         : role
           ? ''
           : selected
             ? 'Added to this workspace'
-            : alreadyIncluded
-              ? 'Already included by this blueprint'
-              : '';
+            : '';
     const workspaceCount = Number(agent?.workspace_count) || 0;
     const label = role
-      ? heldRole
-        ? 'In use'
-        : attachable
-          ? 'Assign'
-          : 'Unavailable'
-      : selected
-        ? 'Added'
-        : alreadyIncluded
-          ? 'Included'
+      ? fillsTarget
+        ? 'Assigned'
+        : heldRoleId
+          ? 'In use'
+          : attachable
+            ? 'Assign'
+            : 'Unavailable'
+      : heldRoleId
+        ? 'Assigned'
+        : selected
+          ? 'Added'
           : attachable
             ? 'Add'
             : 'Unavailable';
@@ -5288,7 +5377,7 @@ const sessionManager = {
     const component = window.WorkspaceRoleRoster;
     if (!container || !component) return;
     const roster = view && view.roleRoster;
-    const active = Boolean(roster && roster.total_count > 0);
+    const active = Boolean(roster && roster.total_count > 0 && !view.agentless);
     container.hidden = !active;
     if (!active) {
       container.replaceChildren();
@@ -5296,9 +5385,13 @@ const sessionManager = {
     }
     component.render(container, roster, {
       title: 'Roles this blueprint declares',
-      // Nothing exists yet, so there is no agent page to link to. The roster
-      // component omits the link when no href builder is supplied.
+      // Nothing exists yet, so there is no agent page to link to. Home-owned
+      // vacancies instead route to the canonical group workspace when its
+      // reviewed station already exists.
       agentHref: null,
+      groupWorkspaceHref: view?.assistantProgram?.stationWorkspaceSlug
+        ? `/workspaces/${encodeURIComponent(view.assistantProgram.stationWorkspaceSlug)}`
+        : '',
       onRequestCreate: (roleId, row) => this.openWorkspaceRoleSetup(roleId, row),
       onAssign: (roleId, row) => this.openWorkspaceRoleAssignPicker(roleId, row),
       onClear: (roleId, row) => this.clearWorkspaceRole(roleId, row)
@@ -5338,12 +5431,13 @@ const sessionManager = {
         ? `${row.description} Nothing is created until the workspace itself is.`
         : 'This role is declared by the blueprint. Nothing is created until the workspace itself is.';
     }
+    const proposed = row.proposed || {};
     const summary = document.getElementById('agentCreateDraftSummary');
     if (summary) {
-      summary.innerHTML = [
-        ['Role', row.label],
-        ['Scope', row.scopeLine]
-      ]
+      const capabilityRows = this.workspaceAgentSetupSummaryRows(proposed).filter(([label]) =>
+        ['Skills', 'MCP servers', 'Plugins'].includes(label)
+      );
+      summary.innerHTML = [['Role', row.label], ['Scope', row.scopeLine], ...capabilityRows]
         .map(
           ([label, value]) =>
             `<div><dt>${this.escapeHtml(label)}</dt><dd>${this.escapeHtml(value)}</dd></div>`
@@ -5359,7 +5453,6 @@ const sessionManager = {
     // Seeded with what the blueprint proposes — the same `proposed` block the
     // workspace roster reads, so both surfaces show the same starting point.
     // The name is prefilled with the role label (FR14).
-    const proposed = row.proposed || {};
     this.workspaceRoleSetupForm = formApi.mount(host, {
       idPrefix: 'agent',
       profile: formApi.PROFILE_TEMPLATE,
@@ -5385,7 +5478,16 @@ const sessionManager = {
     const showAgentModal = () => {
       agentModalElement.addEventListener(
         'shown.bs.modal',
-        () => this.workspaceRoleSetupForm?.focus('name'),
+        () => {
+          // Bootstrap ignores hide() while its opening transition is still in
+          // progress. A fast keyboard submit can legitimately arrive in that
+          // window, so finish the pending close as soon as shown settles.
+          if (this.workspaceRoleSetupCompleted) {
+            this.closeWorkspaceRoleSetup();
+            return;
+          }
+          this.workspaceRoleSetupForm?.focus('name');
+        },
         { once: true }
       );
       bootstrap.Modal.getOrCreateInstance(agentModalElement).show();
@@ -5525,7 +5627,16 @@ const sessionManager = {
     const draft = this.ensureWorkspaceTeamDraft();
     if (!draft || !api) return;
     const canonical = String(api.findSavedAgent(draft, name)?.name || name).trim();
-    if (!api.setRoleFill(draft, roleId, { mode: api.FILL_ASSIGN, name: canonical })) return;
+    if (!api.setRoleFill(draft, roleId, { mode: api.FILL_ASSIGN, name: canonical })) {
+      this.refreshWorkspaceReview();
+      this.renderExistingAgentRoster();
+      this.announceWorkspaceTeamChange(
+        `${canonical || 'That agent'} was not assigned because the team changed. Review the current role and try again.`
+      );
+      this.showToast('The team changed. Review the role and try again.', 'warning');
+      this.focusWorkspaceRoleRow(roleId);
+      return;
+    }
     this.workspaceRoleAssigning = '';
     this.refreshWorkspaceReview();
     this.renderExistingAgentRoster();
@@ -5568,8 +5679,11 @@ const sessionManager = {
   },
 
   focusWorkspaceRoleRow(roleId) {
-    if (!roleId || !window.WorkspaceRoleRoster) return;
-    window.WorkspaceRoleRoster.focusRole(document.getElementById('workspaceRoleRoster'), roleId);
+    if (!roleId || !window.WorkspaceRoleRoster) return false;
+    return window.WorkspaceRoleRoster.focusRole(
+      document.getElementById('workspaceRoleRoster'),
+      roleId
+    );
   },
 
   // Returns the derived team view, or null when the draft helper is unavailable.
@@ -5882,8 +5996,13 @@ const sessionManager = {
     const name = String(document.getElementById('folderNameInput')?.value || '').trim();
     const view = this.teamView();
     const roster = view ? view.roster : [];
+    const nextButton = document.getElementById('wizardNextBtn');
+    if (nextButton && this.wizardStep === 3) {
+      nextButton.disabled = Boolean(view?.blockingIssues?.length);
+    }
 
     this.renderAssistantProgramCreate(view);
+    this.renderBlankAgentlessChoice(view);
     if (heading) {
       // "Workspace Assistant" is a retired product label (Issue #350); this
       // heading describes the roster, so it says what the roster is.
@@ -5903,6 +6022,14 @@ const sessionManager = {
     this.renderWorkspaceTeamRoster();
     this.renderBlueprintAgentSummary();
     window.SetupWorkspaceCreator?.refreshReview();
+  },
+
+  renderBlankAgentlessChoice(view) {
+    const choice = document.getElementById('workspaceBlankAgentlessChoice');
+    const toggle = document.getElementById('workspaceBlankAgentlessToggle');
+    if (!choice || !toggle) return;
+    choice.hidden = !view?.isBlank;
+    toggle.checked = Boolean(view?.agentless);
   },
 
   // Review's receipt: what will exist, stated once, with a route back to the step
@@ -6045,6 +6172,20 @@ const sessionManager = {
     const specialists = roster.filter(entry => entry.designation === 'specialist');
     const primary = roster.find(entry => entry.designation === 'primary');
 
+    if (view?.agentless) {
+      return `
+        <div class="workspace-review-card">
+          <div class="workspace-review-card-main">
+            <span class="workspace-review-card-label">Team</span>
+            <strong>Create without agents</strong>
+            <span class="workspace-review-card-note">No agents will be created or attached. Chat and agent work require adding one later.</span>
+          </div>
+          <div class="workspace-review-card-actions">
+            <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="3">Edit team</button>
+          </div>
+        </div>`;
+    }
+
     // When the blueprint declares roles, the receipt lists EVERY role and its
     // resolved state, using the same tags the Team step used. Review must never
     // look calmer than the step it summarizes (FR28, FR29) — and the old
@@ -6121,6 +6262,9 @@ const sessionManager = {
         ' · '
       );
     });
+    for (const agent of view?.roleRoster?.unassigned || []) {
+      lines.push(`${agent.name} · Also in this workspace · Saved agent`);
+    }
     lines.push(this.workspaceTeamSummaryText(view));
 
     return `
@@ -6234,6 +6378,10 @@ const sessionManager = {
       } else if (expectation?.action === 'reuse') {
         addName(attached, seenAttached, expectation.name);
       }
+    }
+    for (const fill of teamPayload?.role_staffing || []) {
+      if (fill?.mode === 'create') addName(created, seenCreated, fill.name);
+      else if (fill?.mode === 'assign') addName(attached, seenAttached, fill.name);
     }
     for (const name of teamPayload?.existing_agent_names || []) {
       addName(attached, seenAttached, name);
@@ -6485,7 +6633,7 @@ const sessionManager = {
     if (!target) return;
     this.clearWorkspaceTeamBlockAttention();
 
-    const owner = target.closest?.('.workspace-team-row, .workspace-team-issue');
+    const owner = target.closest?.('.ws-role-row, .workspace-team-row, .workspace-team-issue');
     const attentionTargets = Array.from(new Set([target, owner].filter(Boolean)));
     // Force style recalculation so clicking Review repeatedly restarts the cue.
     void target.offsetWidth;
@@ -6638,6 +6786,7 @@ const sessionManager = {
       // Continue through Blueprint and Details; the last hop names its target so
       // the user knows the next screen confirms rather than configures.
       nextBtn.textContent = step === 3 ? 'Review →' : 'Continue →';
+      nextBtn.disabled = step === 3 && this.hasBlockingTeamIssue();
     }
     if (backBtn) backBtn.hidden = importMode || onStep1;
     if (createBtn) {
@@ -6987,11 +7136,21 @@ const sessionManager = {
         const setupIssue = blockers.find(issue => issue.id === 'template-agent-setup-required');
         const changedIssue = blockers.find(issue => issue.id === 'template-agent-plan-changed');
         const creationIssue = blockers.find(issue => issue.id === 'template-agent-creation-failed');
+        const requiredRoleIssue = blockers.find(issue => issue.id === 'required-roles-missing');
         const activeIssue =
-          assistantNameIssue || changedIssue || creationIssue || setupIssue || blockers[0];
+          assistantNameIssue ||
+          requiredRoleIssue ||
+          changedIssue ||
+          creationIssue ||
+          setupIssue ||
+          blockers[0];
         let target = null;
         if (assistantNameIssue) target = document.getElementById('assistantProgramCreateName');
-        else if (changedIssue && Number.isInteger(changedIssue.templateAgentIndex)) {
+        else if (requiredRoleIssue?.roleId) {
+          target = document.querySelector(
+            `#workspaceRoleRoster [data-role-id="${CSS.escape(requiredRoleIssue.roleId)}"] button`
+          );
+        } else if (changedIssue && Number.isInteger(changedIssue.templateAgentIndex)) {
           target = document.getElementById(`team-agent-setup-${changedIssue.templateAgentIndex}`);
         } else if (creationIssue) {
           target = document.getElementById(`team-agent-retry-${creationIssue.templateAgentIndex}`);
@@ -7329,9 +7488,12 @@ const sessionManager = {
             }))
           };
         }
-        // Sent even when empty — an empty array is how "create this workspace
-        // with every role unfilled" is stated, and its ABSENCE is what tells
-        // the server to keep its pre-vacancy behavior (FR56, FR57).
+        if (teamPayload.team_intent) {
+          payload.team_intent = { ...teamPayload.team_intent };
+        }
+        // Strict intent always carries the explicit array, including when it is
+        // empty. Legacy API clients preserve their historical behavior by
+        // omitting team_intent entirely.
         if (Array.isArray(teamPayload.role_staffing)) {
           payload.role_staffing = teamPayload.role_staffing.map(entry => ({ ...entry }));
         }
@@ -7437,6 +7599,38 @@ const sessionManager = {
 
           requestPayload.folder_slug = suggestedSlug;
           continue;
+        }
+
+        if (
+          response.status === 409 &&
+          !importEnabled &&
+          result.conflict?.type === 'team_readiness'
+        ) {
+          const api = window.CreateWorkspaceTeamDraft;
+          const draft = this.ensureWorkspaceTeamDraft();
+          const freshPlan = result.conflict?.fresh_plan;
+          if (freshPlan) {
+            const blueprintKey = draft?.plan?.blueprintKey || '';
+            this.templateAgentPlan = freshPlan;
+            api?.setPlanReady?.(draft, blueprintKey, freshPlan);
+          }
+          api?.markPlanConflict?.(
+            draft,
+            String(result.error || 'Review the current required roles before creating.'),
+            { kind: 'team-readiness' }
+          );
+          this.goToWizardStep(3);
+          this.refreshWorkspaceReview();
+          void this.openExistingAgentRoster();
+          this.announceWorkspaceTeamChange(
+            'Team staffing changed. Review the current required roles before creating this workspace.'
+          );
+          const affected = (result.conflict?.roles || []).find(role => role.state !== 'filled');
+          const roleID = String(affected?.role_id || '').trim();
+          if (!this.focusWorkspaceRoleRow(roleID)) {
+            document.querySelector('[data-issue-id="template-agent-plan-changed"]')?.focus();
+          }
+          return;
         }
 
         if (
@@ -7724,8 +7918,24 @@ const sessionManager = {
         // only when the create-time hire did not finish and recovery is needed.
         postCreateResult.destination = `/workspaces/${encodeURIComponent(createdWorkspaceSlug)}/assistant`;
       }
+      const teamCompletion = result?.team_completion;
+      const teamNeedsRecovery = Boolean(teamCompletion && teamCompletion.state !== 'complete');
+      if (teamNeedsRecovery && createdWorkspaceId) {
+        const recoveryHref = String(teamCompletion?.action?.href || '');
+        postCreateResult.destination = recoveryHref.startsWith('/workspaces/')
+          ? recoveryHref
+          : `/workspaces/${encodeURIComponent(createdWorkspaceSlug || createdWorkspaceId)}`;
+      }
 
-      if (postCreateResult.applied) {
+      if (teamNeedsRecovery) {
+        const missing = Array.isArray(teamCompletion.missing_required_roles)
+          ? teamCompletion.missing_required_roles.length
+          : 0;
+        this.showToast(
+          `Workspace created, but its team setup is ${teamCompletion.state === 'unknown' ? 'not yet verified' : 'incomplete'}${missing ? ` (${missing} required role${missing === 1 ? '' : 's'} missing)` : ''}. Complete the existing workspace team; Ori will not create another workspace.`,
+          'warning'
+        );
+      } else if (postCreateResult.applied) {
         this.showToast('Personal HQ imported successfully', 'success');
       } else if (
         bootstrapApplyResult.invitedAgents > 0 ||

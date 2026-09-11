@@ -67,13 +67,14 @@ func templateAgentPlanRevision(plan templateAgentPlan) string {
 		agents[index].Warning = ""
 	}
 	canonical := struct {
-		TemplateID            string                  `json:"template_id"`
-		TemplateName          string                  `json:"template_name"`
-		EntryAgentName        string                  `json:"entry_agent_name"`
-		SystemProvider        string                  `json:"system_provider"`
-		SystemModel           string                  `json:"system_model"`
-		SystemModelConfigured bool                    `json:"system_model_configured"`
-		Agents                []templateAgentPlanItem `json:"agents"`
+		TemplateID            string                        `json:"template_id"`
+		TemplateName          string                        `json:"template_name"`
+		EntryAgentName        string                        `json:"entry_agent_name"`
+		SystemProvider        string                        `json:"system_provider"`
+		SystemModel           string                        `json:"system_model"`
+		SystemModelConfigured bool                          `json:"system_model_configured"`
+		AssistantProgram      *templateAssistantProgramPlan `json:"assistant_program"`
+		Agents                []templateAgentPlanItem       `json:"agents"`
 	}{
 		TemplateID:            strings.TrimSpace(plan.TemplateID),
 		TemplateName:          strings.TrimSpace(plan.TemplateName),
@@ -81,6 +82,7 @@ func templateAgentPlanRevision(plan templateAgentPlan) string {
 		SystemProvider:        strings.TrimSpace(plan.SystemProvider),
 		SystemModel:           strings.TrimSpace(plan.SystemModel),
 		SystemModelConfigured: plan.SystemModelConfigured,
+		AssistantProgram:      plan.AssistantProgram,
 		Agents:                agents,
 	}
 	encoded, err := json.Marshal(canonical)

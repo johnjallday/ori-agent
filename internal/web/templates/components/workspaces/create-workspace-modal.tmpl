@@ -320,6 +320,14 @@
                     </div>
                   </div>
 
+                  <label id="workspaceBlankAgentlessChoice" class="workspace-blank-agentless-choice" for="workspaceBlankAgentlessToggle" hidden>
+                    <input type="checkbox" id="workspaceBlankAgentlessToggle">
+                    <span>
+                      <strong>Create without agents</strong>
+                      <small>Chat and agent work require adding an agent later.</small>
+                    </span>
+                  </label>
+
                   <div id="workspaceTeamIssues" class="workspace-team-issues"></div>
                   <div id="workspaceTeamBatchActions" class="workspace-team-batch-actions" aria-live="polite"></div>
 
@@ -338,14 +346,6 @@
 
                   <p id="workspaceTeamModelNote" class="workspace-team-model-note"></p>
 
-                  <details id="workspaceTeamAdvanced" class="workspace-template-agent-advanced">
-                    <summary>Advanced team options</summary>
-                    <label class="workspace-template-agent-toggle" title="Clear this to create the workspace without the assistant included by this blueprint.">
-                      <input type="checkbox" id="templateAgentReviewToggle" checked>
-                      <span>Include blueprint assistant/team</span>
-                    </label>
-                    <span class="workspace-template-agent-advanced-help">Clear this to create without the included assistant/team. Starter tasks will remain unassigned unless you add an existing agent.</span>
-                  </details>
                 </section>
 
                 <!-- Inline picker: the same step, never a nested modal. On wide
@@ -359,6 +359,11 @@
                     </div>
                     <button type="button" id="addExistingAgentBtn" class="modern-btn modern-btn-secondary">Refresh</button>
                   </div>
+                  <section id="workspaceSavedAgentSuggestions" class="workspace-saved-agent-suggestions" aria-labelledby="workspaceSavedAgentSuggestionsTitle" hidden>
+                    <h4 id="workspaceSavedAgentSuggestionsTitle">Suggested for this workspace</h4>
+                    <p>Matches use saved names and role labels only. Check each agent's setup before relying on it.</p>
+                    <div id="workspaceSavedAgentSuggestionsList" class="workspace-saved-agent-suggestions-list"></div>
+                  </section>
                   <label class="visually-hidden" for="existingAgentRosterSearch">Search your agents</label>
                   <input type="search" id="existingAgentRosterSearch" class="modern-input w-100" placeholder="Search saved agents">
                   <div id="existingAgentRosterStatus" class="workspace-existing-agent-roster-status" aria-live="polite"></div>
