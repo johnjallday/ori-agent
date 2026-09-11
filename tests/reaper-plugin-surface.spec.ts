@@ -194,6 +194,7 @@ test('Create Workspace prepares the required Home before creating and staffing t
     const homeOnly = await request.get('/api/workspaces').then(response => response.json());
     const homeOnlyRecords = Array.isArray(homeOnly.folders) ? homeOnly.folders : [];
     expect(homeOnlyRecords.some((item: { id?: string }) => item.id === stationID)).toBeTruthy();
+    await expect(page.locator(`.ws-map-district[data-group-id="${stationID}"]`)).toBeAttached();
     expect(
       homeOnlyRecords.some((item: { name?: string }) => item.name === workspaceName)
     ).toBeFalsy();
@@ -236,6 +237,14 @@ test('Create Workspace prepares the required Home before creating and staffing t
         response.request().method() === 'POST' &&
         Boolean(response.request().postDataJSON()?.group_review_token)
     );
+    const groupPlacementPromise = page.waitForRequest(request => {
+      if (!request.url().endsWith('/api/workspace-map/layout') || request.method() !== 'PATCH') {
+        return false;
+      }
+      return request
+        .postDataJSON()
+        ?.operations?.some((operation: { op?: string }) => operation.op === 'set_positions');
+    });
     await page.locator('#createFolderBtn').click();
     const createResponse = await createResponsePromise;
     expect(createResponse.ok(), await createResponse.text()).toBeTruthy();
@@ -245,6 +254,16 @@ test('Create Workspace prepares the required Home before creating and staffing t
     expect(createPayload.assistant_hire).toBeUndefined();
     const created = await createResponse.json();
     workspaceID = created.folder.id;
+    const placementRequest = await groupPlacementPromise;
+    const positions = placementRequest
+      .postDataJSON()
+      .operations.find((operation: { op?: string }) => operation.op === 'set_positions')?.positions;
+    expect(positions?.[stationID]).toBeTruthy();
+    expect(positions?.[workspaceID]).toBeTruthy();
+    expect(positions[workspaceID].x).toBeGreaterThanOrEqual(positions[stationID].x);
+    expect(positions[workspaceID].x).toBeLessThan(positions[stationID].x + 176);
+    expect(positions[workspaceID].y).toBeGreaterThanOrEqual(positions[stationID].y);
+    expect(positions[workspaceID].y).toBeLessThan(positions[stationID].y + 170);
     await page.waitForURL(`**/workspaces/${encodeURIComponent(created.folder.folder_slug)}`, {
       timeout: 20_000
     });
@@ -258,6 +277,37 @@ test('Create Workspace prepares the required Home before creating and staffing t
       .then(response => response.json());
     expect(createdWorkspace.parent_id).toBe(stationID);
     expect(createdWorkspace.group_requirement_status?.state).toBe('ready_grouped');
+
+    await page.goto('/workspaces');
+    const district = page.locator(`.ws-map-district[data-group-id="${stationID}"]`);
+    const tile = page.locator(`.ws-map-tile[data-ws-id="${workspaceID}"]`);
+    await expect(district).toBeVisible();
+    await expect(tile).toBeVisible();
+    const geometry = await page.evaluate(
+      ({ homeID, childID }) => {
+        const group = document.querySelector(`.ws-map-district[data-group-id="${homeID}"]`);
+        const child = document.querySelector(`.ws-map-tile[data-ws-id="${childID}"]`);
+        const value = (element: Element | null, property: string) =>
+          Number.parseFloat((element as HTMLElement | null)?.style[property] || 'NaN');
+        return {
+          group: {
+            x: value(group, 'left'),
+            y: value(group, 'top'),
+            width: value(group, 'width'),
+            height: value(group, 'height')
+          },
+          child: { x: value(child, 'left'), y: value(child, 'top') }
+        };
+      },
+      { homeID: stationID, childID: workspaceID }
+    );
+    expect(geometry.child.x).toBeGreaterThanOrEqual(geometry.group.x);
+    expect(geometry.child.y).toBeGreaterThanOrEqual(geometry.group.y);
+    expect(geometry.child.x).toBeLessThan(geometry.group.x + geometry.group.width);
+    expect(geometry.child.y).toBeLessThan(geometry.group.y + geometry.group.height);
+    await page.locator('[data-map-zoom-out]').click();
+    await page.waitForTimeout(650); // let the Map's deliberate rise animation finish
+    await captureEvidence(page, 'music-producer-02-group-aware-map.png');
   } finally {
     if (stationID)
       await cleanupAssistantTopology(request, stationID, workspaceID ? [workspaceID] : []);

@@ -332,6 +332,8 @@ test('missing required Home is created alone before a fresh workspace receipt is
   };
   manager.refreshWorkspaceReview = () => {};
   manager.refreshWizardChrome = () => {};
+  const surfaceRefreshes = [];
+  manager.refreshWorkspaceSurfacesAfterGroupPreparation = async () => surfaceRefreshes.push('home');
   const payload = { name: 'Song', template_id: 'reaper' };
 
   assert.equal(await manager.prepareGroupRequirementCommit('/api/workspaces', payload), false);
@@ -351,6 +353,58 @@ test('missing required Home is created alone before a fresh workspace receipt is
   assert.equal(calls[3].body.create_required_home, undefined);
   assert.equal(manager.groupRequirementDraft.preparedHome.home_workspace_id, 'home-1');
   assert.equal(manager.groupRequirementDraft.review.review_token, 'workspace-receipt');
+  assert.deepEqual(surfaceRefreshes, ['home'], 'the empty Home becomes visible behind the creator');
+});
+
+test('normal grouped creation requests a Map site while explicit Build keeps its coordinate', async () => {
+  const placements = [];
+  const manager = loadSessionManager(undefined, {
+    OriWorkspaceMap: {
+      placeCreatedGroupMember: async (workspaceID, groupID) => {
+        placements.push({ workspaceID, groupID });
+        return { placed: true };
+      }
+    }
+  });
+  const result = {
+    folder: { id: 'song-1', kind: 'workspace', parent_id: 'music-home' }
+  };
+
+  const automatic = await manager.placeCreatedWorkspaceInGroup(result);
+  assert.equal(automatic.placed, true);
+  assert.deepEqual(placements, [{ workspaceID: 'song-1', groupID: 'music-home' }]);
+
+  const explicit = await manager.placeCreatedWorkspaceInGroup(result, { mapOrigin: true });
+  assert.equal(explicit.placed, false);
+  assert.equal(explicit.reason, 'not_applicable');
+  assert.equal(placements.length, 1, 'an explicit Map Build position is never replaced');
+
+  await manager.placeCreatedWorkspaceInGroup({
+    folder: { id: 'loose', kind: 'workspace', parent_id: '' }
+  });
+  assert.equal(placements.length, 1, 'standalone creation has no group placement effect');
+});
+
+test('a failed group-aware Map save never turns workspace creation into a failure', async () => {
+  const manager = loadSessionManager(undefined, {
+    OriWorkspaceMap: {
+      placeCreatedGroupMember: async () => {
+        throw new Error('layout unavailable');
+      }
+    }
+  });
+
+  const previousWarn = console.warn;
+  console.warn = () => {};
+  try {
+    const outcome = await manager.placeCreatedWorkspaceInGroup({
+      folder: { id: 'song-1', kind: 'workspace', parent_id: 'music-home' }
+    });
+    assert.equal(outcome.placed, false);
+    assert.equal(outcome.reason, 'layout_save_failed');
+  } finally {
+    console.warn = previousWarn;
+  }
 });
 
 test('declining required Home creation leaves the workspace and Home untouched', async () => {

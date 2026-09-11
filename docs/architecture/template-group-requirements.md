@@ -258,6 +258,30 @@ cannot satisfy a receipt that bound an existing ID. Rename is harmless. If the
 user stops after Home preparation, the empty canonical Home remains visible and
 reusable; cancellation never implies permission to delete it.
 
+### Map placement after grouped creation
+
+The Home-only commit refreshes mounted workspace projections while the creator
+stays open, so the empty canonical group is visible before the project action.
+That refresh is best effort: a display failure cannot roll back the durable Home
+or authorize a project.
+
+After a normal grouped create with no user-selected Map coordinate, the Map
+persists one presentation-only anchor for the new child. The first child inherits
+the empty group's interior cell. Later children use an unoccupied cell inside a
+custom/reserved frame when possible, then a safe adjacent cell. A candidate is
+refused if the resulting frame would claim an unrelated workspace or district.
+No existing building moves to make room. After persistence, the exact group
+boundary receives a brief reduced-motion-aware emphasis and the Map announces
+the placement through its live status region.
+
+The effective group boundary remains the visual invariant: automatic districts
+are the padded bounds of their members, while custom districts are the union of
+the saved minimum and required member bounds. An explicit Map Build coordinate
+always wins and may expand that boundary; it is never replaced by the automatic
+suggestion. Layout persistence is non-authoritative and non-fatal—`ParentID`,
+typed project link, reciprocal membership, and the workspace remain committed
+if the Map write is unavailable.
+
 Rollback may remove only a provably operation-owned incomplete project child.
 It never deletes a separately prepared or reused Home, external project/folder,
 user file, agent, or grant. Uncertain cleanup records `reconcile_required`;
@@ -425,9 +449,11 @@ paths/tasks/snapshots, and one canonical `workspace.json` per workspace ID.
 Editing the variant from None to Recommended after creation left the existing
 project's recorded None/standalone snapshot unchanged. Screenshots and endpoint
 evidence are under the gitignored `tasks/screenshots/` and
-`tasks/*evidence.json`; they are local development evidence only.
+`tasks/*evidence.json`; the group-aware Map capture shows the first project
+inside the Home's circumscribing boundary. These are local development evidence
+only.
 
-Validation completed with the main Go suite, 2,662 JS module tests, affected Go
+Validation completed with the main Go suite, 2,668 JS module tests, affected Go
 package and race suites, ESLint, Prettier, vet, ratcheted golangci-lint, two
 Playwright group-requirement acceptance cases, four coordinated REAPER browser
 cases, and `git diff --check`. The original scoped `gosec` comparison produced

@@ -6490,6 +6490,48 @@ const sessionManager = {
     return name ? `Create “${name}”` : 'Create Workspace';
   },
 
+  async refreshWorkspaceSurfacesAfterGroupPreparation() {
+    // Home preparation is already durable. Refresh every mounted workspace
+    // projection independently so a display failure cannot turn that completed
+    // consequence into a misleading create failure or trigger another Home.
+    const refreshes = [
+      () => this.loadFolders(),
+      () => window.WorkspaceHub?.loadWorkspaces?.(),
+      () => window.OriHomeCockpit?.refreshQuietly?.()
+    ];
+    for (const refresh of refreshes) {
+      try {
+        await refresh();
+      } catch (error) {
+        console.warn(
+          'Canonical group was prepared but a workspace surface did not refresh:',
+          error
+        );
+      }
+    }
+  },
+
+  async placeCreatedWorkspaceInGroup(result, options = {}) {
+    const workspace = result?.folder || null;
+    const workspaceID = String(workspace?.id || '').trim();
+    const groupID = String(workspace?.parent_id || '').trim();
+    // A Map Build already owns one explicit coordinate chosen by the user.
+    // Never replace that intent with an automatic group suggestion.
+    if (options.mapOrigin || !workspaceID || !groupID || workspace?.kind === 'group') {
+      return { placed: false, reason: 'not_applicable' };
+    }
+    const place = window.OriWorkspaceMap?.placeCreatedGroupMember;
+    if (typeof place !== 'function') return { placed: false, reason: 'map_unavailable' };
+    try {
+      return await place(workspaceID, groupID);
+    } catch (error) {
+      // Layout is a non-fatal presentation consequence. Membership and the
+      // workspace stay committed; automatic layout will still circumscribe it.
+      console.warn('Workspace created, but its group-aware Map position did not save:', error);
+      return { placed: false, reason: 'layout_save_failed' };
+    }
+  },
+
   async prepareCanonicalGroupHome(payload) {
     const selection = {
       ...(payload.template_id ? { template_id: payload.template_id } : {}),
@@ -6558,6 +6600,7 @@ const sessionManager = {
       );
       if (!confirmed) return false;
       draft.preparedHome = await this.prepareCanonicalGroupHome(payload);
+      await this.refreshWorkspaceSurfacesAfterGroupPreparation();
       // The Home-only commit is complete. Obtain a fresh inert project receipt
       // against that exact existing destination; never reuse the create-Home
       // receipt as authorization to create a workspace.
@@ -7293,6 +7336,9 @@ const sessionManager = {
         result && result.folder && result.folder.folder_slug
           ? String(result.folder.folder_slug)
           : '';
+      await this.placeCreatedWorkspaceInGroup(result, {
+        mapOrigin: Boolean(this.workspaceMapOrigin)
+      });
       const askOriSeedNoteRaw = modalElement
         ? String(modalElement.dataset.askOriSeedNote || '')
         : '';
