@@ -4079,12 +4079,78 @@ test('focus intent still selects and announces the reserved site it frames (#322
 });
 
 // ---------------------------------------------------------------------------
-// Build mode (#292 FR-47 – FR-62)
-//
-// An explicit, single-use placement state. Outside it, an empty-space click
-// means what it always meant; inside it, exactly one selection chooses a build
-// site and the mode ends.
+// Reviewed placement and legacy Build compatibility
 // ---------------------------------------------------------------------------
+
+// The Map's reviewed placement is intentionally not the legacy pre-wizard
+// Build coordinate: it has one page-local preview, never writes a fake record,
+// and hands its exact candidate back to the wizard owner only on confirmation.
+test('reviewed placement previews the reviewed name/art and confirms one exact candidate', async () => {
+  const { map, harness, patches } = buildHarness({
+    windowExtras: {
+      OriWorkspaceBuildingArt: {
+        variantForBlueprint: (id, builtin) => (builtin && id === 'email-ops' ? 'mail' : ''),
+        svgForVariant: variant => `<svg data-building-variant="${variant}"></svg>`
+      }
+    }
+  });
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+
+  const confirmations = [];
+  assert.equal(
+    map.beginPlacement({
+      token: 'reviewed-placement',
+      initialCandidate: { x: 456, y: 228 },
+      preview: { name: 'Inbox command', blueprintID: 'email-ops', blueprintBuiltin: true },
+      onConfirm: (token, candidate) => confirmations.push({ token, candidate })
+    }),
+    true
+  );
+  assert.match(harness.container.innerHTML, /ws-map-placement-preview/);
+  assert.match(harness.container.innerHTML, /Inbox command/);
+  assert.match(harness.container.innerHTML, /data-building-variant="mail"/);
+  assert.match(harness.container.innerHTML, /Back to review/);
+  assert.match(harness.container.innerHTML, /Create workspace here/);
+  assert.equal(patches.length, 0, 'a preview is never a layout write');
+
+  harness.fire('keydown', keyEvent('Enter'));
+  await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(confirmations)), [
+    { token: 'reviewed-placement', candidate: { x: 456, y: 228 } }
+  ]);
+  assert.equal(patches.length, 0, 'Map confirmation still leaves creation to the wizard owner');
+
+  const saved = await map.commitPlacement('ws-new', {
+    token: 'reviewed-placement',
+    candidate: { x: 456, y: 228 }
+  });
+  assert.equal(saved.saved, true);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(patches[0].operations[0].positions['ws-new'])),
+    { x: 456, y: 228 },
+    'the exact reviewed coordinate is saved without nearest-free resolution'
+  );
+  assert.doesNotMatch(harness.container.innerHTML, /ws-map-placement-preview/);
+
+  map.mount(harness.container, {
+    workspaces: [
+      { id: 'ws-1', name: 'Alpha' },
+      { id: 'ws-new', name: 'Inbox command' }
+    ],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true
+  });
+  assert.equal(
+    map.getSelectedId(),
+    'ws-new',
+    'the returned id becomes selected once its tile arrives'
+  );
+});
+
+// Legacy Build coverage remains while old callers migrate to the reviewed
+// handoff above. Its pre-wizard coordinate is isolated from the new API.
 
 function buildHarness({ layout, patchResponse, membershipResponse, windowExtras = {} } = {}) {
   const modalCalls = [];

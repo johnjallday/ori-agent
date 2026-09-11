@@ -426,6 +426,10 @@
 
   // Currently-selected workspace id, remembered across re-mounts (data refreshes).
   var selectedId = '';
+  // The layout save finishes before the workspace collection refresh that can
+  // render its new tile. Keep this real id until that refresh arrives, rather
+  // than selecting a fake preview or losing selection on the interim redraw.
+  var pendingPlacementSelectionId = '';
 
   // Cockpit mode flags, set from the mount options on every mount() so the
   // exported HTML builders (which keep their existing signatures for tests)
@@ -1824,6 +1828,10 @@
   var placementHighlightGroupId = '';
   var placementHighlightTimer = null;
   var cameraSaveTimer = null;
+  // Reviewed placement exists only while this Map page is open. It is not a
+  // layout record and has no fake workspace id; persistence starts only after
+  // sessions.js creates the real workspace.
+  var placementSession = null;
 
   // measured:false marks the DEFAULT_VIEWPORT fallback. Panning and drawing are
   // happy with a placeholder size, but framing is not: a fit computed against
@@ -2473,12 +2481,15 @@
         '<div class="ws-map-canvas' +
         settling +
         readOnly +
+        (placementSession ? ' is-placement-active' : '') +
         '" role="group" aria-label="Workspaces map" tabindex="0"' +
         (settling ? ' aria-busy="true"' : '') +
         ' data-ws-map-viewport>' +
         '<div class="ws-map-world">' +
         parts.join('') +
+        placementPreviewHTML() +
         '</div>' +
+        placementControlsHTML() +
         // The resize overlay lives OUTSIDE the world layer on purpose. Inside
         // it, the camera transform would scale the handles with the map, so at
         // 10% zoom a 44px target would be 4px of screen (#346 FR-55, FR-56).
@@ -4539,6 +4550,10 @@
     if (!canvas || typeof canvas.addEventListener !== 'function') return;
     // One delegated listener, because tiles are replaced on every refresh.
     canvas.addEventListener('contextmenu', function (event) {
+      if (placementSession && placementSession.container === container) {
+        if (event.preventDefault) event.preventDefault();
+        return;
+      }
       // A menu opened mid-gesture would act on a target that is still moving.
       if (dragState || clusterDrag) return;
       var target = resolveMenuTarget(event && event.target, workspaces);
@@ -4565,6 +4580,7 @@
     // menu is the only way to reach Center Selected without a mouse.
     canvas.addEventListener('keydown', function (event) {
       if (!event) return;
+      if (placementSession && placementSession.container === container) return;
       var wanted = event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey);
       if (!wanted) return;
       if (dragState || clusterDrag) return;
@@ -4901,6 +4917,7 @@
     }
 
     canvas.addEventListener('pointerdown', function (event) {
+      if (placementSession && placementSession.container === container) return;
       if (event.button != null && event.button !== 0) return;
       if (isInteractiveTarget(event.target)) return;
       var start = pointerPosition(canvas, event);
@@ -4966,6 +4983,7 @@
     canvas.addEventListener(
       'wheel',
       function (event) {
+        if (placementSession && placementSession.container === container) return;
         if (isInteractiveTarget(event.target)) return;
         if (event.preventDefault) event.preventDefault();
         var viewport = viewportSize(canvas);
@@ -5059,6 +5077,12 @@
     // Keyboard equivalents for every camera gesture, so navigating the map
     // never requires a pointer (FR-115).
     canvas.addEventListener('keydown', function (event) {
+      // Reviewed placement owns all Map keyboard input until it is confirmed or
+      // returned to the wizard; camera and move shortcuts must not leak through.
+      if (placementSession && placementSession.container === container) {
+        if (handlePlacementKey(container, event) && event.preventDefault) event.preventDefault();
+        return;
+      }
       // An active resize owns Escape before anything else does (#346 FR-165).
       // Bound here as well as on the handle because a POINTER resize does not
       // require the handle to still hold focus, and "Escape cancels what I am
@@ -7656,6 +7680,422 @@
     return formatCoordinate(point) + (layoutState.snapToGrid ? ' · snapped' : ' · free');
   }
 
+  // ---------- reviewed workspace placement ----------
+  //
+  // The wizard owns the draft and the real workspace mutation. The Map owns
+  // only this short-lived, exact coordinate selection. Keeping that boundary
+  // explicit prevents a preview from being mistaken for a persisted building.
+
+  function placementPreviewHTML() {
+    var state = placementSession;
+    if (!state || !state.candidate) return '';
+    var name = String((state.payload && state.payload.name) || 'New workspace').trim();
+    var art = window.OriWorkspaceBuildingArt;
+    var variant =
+      art && typeof art.variantForBlueprint === 'function'
+        ? art.variantForBlueprint(
+            state.payload && state.payload.blueprint_id,
+            state.payload && state.payload.blueprint_builtin === true
+          )
+        : '';
+    var structure =
+      variant && art && typeof art.svgForVariant === 'function'
+        ? art.svgForVariant(variant, { context: 'map' })
+        : structSVG(paletteFor(name));
+    var problem = placementProblem(state.candidate);
+    return (
+      '<div class="ws-map-placement-preview' +
+      (problem ? ' is-invalid' : '') +
+      '" data-ws-map-placement-preview aria-hidden="true" style="left:' +
+      state.candidate.x +
+      'px;top:' +
+      state.candidate.y +
+      'px">' +
+      structure +
+      '<span class="ws-map-placement-preview-name">' +
+      escapeHtml(name) +
+      '</span></div>'
+    );
+  }
+
+  function placementControlsHTML() {
+    var state = placementSession;
+    if (!state || !state.candidate) return '';
+    var problem = placementProblem(state.candidate);
+    var detail = problem || 'Click or drag on open ground. Arrow keys nudge the exact position.';
+    return (
+      '<div class="ws-map-placement-controls" data-ws-map-placement-controls role="group" aria-label="Place new workspace">' +
+      '<div class="ws-map-placement-copy"><strong>Place ' +
+      escapeHtml(String((state.payload && state.payload.name) || 'new workspace')) +
+      '</strong><span data-ws-map-placement-coordinate>' +
+      escapeHtml(candidateLabel(state.candidate)) +
+      '</span><small data-ws-map-placement-instruction>' +
+      escapeHtml(detail) +
+      '</small></div>' +
+      '<div class="ws-map-placement-buttons">' +
+      '<button type="button" class="ws-map-placement-back" data-ws-map-placement-back>Back to review</button>' +
+      '<button type="button" class="ws-map-placement-confirm" data-ws-map-placement-confirm' +
+      (problem || state.submitting ? ' disabled' : '') +
+      '>' +
+      (state.saving
+        ? 'Saving position…'
+        : state.submitting
+          ? 'Creating workspace…'
+          : 'Create workspace here') +
+      '</button></div></div>'
+    );
+  }
+
+  function placementProblem(point, excludeId) {
+    if (
+      !point ||
+      !isSafeCoordinate(point.x) ||
+      !isSafeCoordinate(point.y) ||
+      !isSafeCoordinate(point.x + CELL_W) ||
+      !isSafeCoordinate(point.y + CELL_H)
+    ) {
+      return 'Choose a position inside the map.';
+    }
+    return wouldOverlapOccupied(point, excludeId || '')
+      ? 'That position overlaps an existing workspace. Choose open ground.'
+      : '';
+  }
+
+  function placementOptions(options, secondary) {
+    if (typeof options === 'string') {
+      var legacy = secondary && typeof secondary === 'object' ? secondary : {};
+      return Object.assign({}, legacy, { token: options });
+    }
+    return options || {};
+  }
+
+  function placementMatches(state, options, secondary) {
+    var opts = placementOptions(options, secondary);
+    return (
+      !!state &&
+      String(opts.token || '') === String(state.token || '') &&
+      // Sessions owns revisions, while Map-only callers may omit one.
+      (opts.revision == null || Number(opts.revision) === Number(state.revision))
+    );
+  }
+
+  function placementPayload(spec) {
+    var options = spec || {};
+    if (options.payload && typeof options.payload === 'object') return options.payload;
+    var preview = options.preview && typeof options.preview === 'object' ? options.preview : {};
+    return {
+      name: preview.name,
+      blueprint_id: preview.blueprintID,
+      blueprint_builtin: preview.blueprintBuiltin === true
+    };
+  }
+
+  function suggestedPlacementPoint(spec) {
+    var point = safePoint(spec && (spec.candidate || spec.initialCandidate));
+    if (!point) {
+      point = {
+        x: camera.centerX - CELL_W / 2,
+        y: camera.centerY - CELL_H / 2
+      };
+    }
+    point = snapPoint(point);
+    // A suggestion may move to the nearest open anchor. Once the user chooses
+    // a point, confirmation validates that exact geometry and never resolves it
+    // behind their back.
+    if (placementProblem(point)) {
+      var safe = resolveDropAnchor('', point);
+      point = { x: safe.x, y: safe.y };
+    }
+    return point;
+  }
+
+  function updatePlacementPresentation(container) {
+    var state = placementSession;
+    if (!container || !state || state.container !== container) return;
+    var preview = container.querySelector('[data-ws-map-placement-preview]');
+    var controls = container.querySelector('[data-ws-map-placement-controls]');
+    var problem = placementProblem(state.candidate);
+    if (preview && preview.style) {
+      preview.style.left = state.candidate.x + 'px';
+      preview.style.top = state.candidate.y + 'px';
+      if (preview.classList) preview.classList.toggle('is-invalid', !!problem);
+    }
+    if (!controls) return;
+    var coordinate = controls.querySelector('[data-ws-map-placement-coordinate]');
+    var instruction = controls.querySelector('[data-ws-map-placement-instruction]');
+    var confirm = controls.querySelector('[data-ws-map-placement-confirm]');
+    if (coordinate) coordinate.textContent = candidateLabel(state.candidate);
+    if (instruction) {
+      instruction.textContent =
+        problem || 'Click or drag on open ground. Arrow keys nudge the exact position.';
+    }
+    if (confirm) {
+      confirm.disabled = !!problem || !!state.submitting;
+      confirm.textContent = state.saving
+        ? 'Saving position…'
+        : state.submitting
+          ? 'Creating workspace…'
+          : 'Create workspace here';
+    }
+  }
+
+  function setPlacementCandidate(container, point, bypassSnap) {
+    var state = placementSession;
+    if (!state || state.container !== container || state.submitting) return;
+    var candidate = safePoint(point);
+    if (!candidate) return;
+    state.candidate = snapPoint(candidate, bypassSnap);
+    updatePlacementPresentation(container);
+    announce(
+      container,
+      placementProblem(state.candidate) || 'Placement candidate ' + candidateLabel(state.candidate)
+    );
+  }
+
+  function finishPlacement(container, notifyCancel) {
+    var state = placementSession;
+    if (!state || state.container !== container) return;
+    placementSession = null;
+    settleLayout();
+    if (notifyCancel) {
+      var back = typeof state.onBack === 'function' ? state.onBack : state.onCancel;
+      if (typeof back === 'function') back(state.token, 'back');
+    }
+  }
+
+  function confirmPlacement(container) {
+    var state = placementSession;
+    if (!state || state.container !== container || state.submitting) return;
+    var problem = placementProblem(state.candidate);
+    if (problem) {
+      announce(container, problem);
+      updatePlacementPresentation(container);
+      return;
+    }
+    if (typeof state.onConfirm !== 'function') return;
+    state.submitting = true;
+    updatePlacementPresentation(container);
+    Promise.resolve(
+      state.onConfirm(state.token, { x: state.candidate.x, y: state.candidate.y })
+    ).then(
+      function (accepted) {
+        // A stale draft can refuse the confirmation. Put the Map back into a
+        // truthful selectable state rather than leaving a disabled primary CTA.
+        if (accepted === false && placementSession === state) {
+          state.submitting = false;
+          updatePlacementPresentation(container);
+        }
+      },
+      function () {
+        if (placementSession === state) {
+          state.submitting = false;
+          updatePlacementPresentation(container);
+          announce(
+            container,
+            'Workspace creation did not start. Review the details and try again.'
+          );
+        }
+      }
+    );
+  }
+
+  function handlePlacementKey(container, event) {
+    var state = placementSession;
+    if (!state || state.container !== container) return false;
+    if (event.key === 'Escape') {
+      finishPlacement(container, true);
+      return true;
+    }
+    if (event.key === 'Enter') {
+      confirmPlacement(container);
+      return true;
+    }
+    var step = layoutState.snapToGrid ? SNAP_STEP : event.shiftKey ? 10 : 1;
+    var point = state.candidate;
+    var next = null;
+    switch (event.key) {
+      case 'ArrowLeft':
+        next = { x: point.x - step, y: point.y };
+        break;
+      case 'ArrowRight':
+        next = { x: point.x + step, y: point.y };
+        break;
+      case 'ArrowUp':
+        next = { x: point.x, y: point.y - step };
+        break;
+      case 'ArrowDown':
+        next = { x: point.x, y: point.y + step };
+        break;
+      default:
+        return false;
+    }
+    setPlacementCandidate(container, next, !layoutState.snapToGrid);
+    return true;
+  }
+
+  function bindPlacementControls(container) {
+    var state = placementSession;
+    if (!state || state.container !== container) return;
+    var canvas = container.querySelector('[data-ws-map-viewport]');
+    var back = container.querySelector('[data-ws-map-placement-back]');
+    var confirm = container.querySelector('[data-ws-map-placement-confirm]');
+    if (back && back.addEventListener) {
+      back.addEventListener('click', function () {
+        finishPlacement(container, true);
+      });
+    }
+    if (confirm && confirm.addEventListener) {
+      confirm.addEventListener('click', function () {
+        confirmPlacement(container);
+      });
+    }
+    if (!canvas || !canvas.addEventListener) return;
+    var pointerId = null;
+    function updateFromPointer(event) {
+      var viewport = viewportSize(canvas);
+      setPlacementCandidate(
+        container,
+        screenToWorld(pointerPosition(canvas, event), camera, viewport),
+        !!event.altKey
+      );
+    }
+    canvas.addEventListener('pointerdown', function (event) {
+      if (placementSession !== state || state.submitting) return;
+      if (event.button != null && event.button !== 0) return;
+      if (
+        event.target &&
+        event.target.closest &&
+        event.target.closest('[data-ws-map-placement-controls]')
+      ) {
+        return;
+      }
+      pointerId = event.pointerId;
+      if (canvas.setPointerCapture) canvas.setPointerCapture(pointerId);
+      updateFromPointer(event);
+      if (event.preventDefault) event.preventDefault();
+    });
+    canvas.addEventListener('pointermove', function (event) {
+      if (placementSession !== state || event.pointerId !== pointerId) return;
+      updateFromPointer(event);
+      if (event.preventDefault) event.preventDefault();
+    });
+    ['pointerup', 'pointercancel'].forEach(function (type) {
+      canvas.addEventListener(type, function (event) {
+        if (event.pointerId !== pointerId) return;
+        if (
+          canvas.releasePointerCapture &&
+          canvas.hasPointerCapture &&
+          canvas.hasPointerCapture(pointerId)
+        ) {
+          canvas.releasePointerCapture(pointerId);
+        }
+        pointerId = null;
+      });
+    });
+    // The wizard just yielded focus while its modal closed. Put it on the
+    // canvas so Arrow/Enter/Escape are immediately reachable without a mouse.
+    if (canvas.focus) canvas.focus();
+  }
+
+  function beginPlacement(spec) {
+    var options = spec || {};
+    var container = lastMount && lastMount.container;
+    var token = String(options.token || '').trim();
+    if (!container || !token || layoutState.status !== 'ready') return false;
+    if (placementSession && !placementMatches(placementSession, options)) return false;
+    closeContextMenu({ restoreFocus: false });
+    closeHarvestPopover({ restoreFocus: false });
+    settleDropConfirm('decline', { restoreFocus: false, skipRedraw: true });
+    cancelPointerTranslations(container);
+    endKeyboardMove(container, false);
+    if (resizeState) cancelResize('Placement started. Group resize cancelled.');
+    if (moveModeEnabled) setMoveMode(container, false);
+    // A pre-review legacy Build coordinate must not leak into this reviewed
+    // submission. The reviewed candidate below is the only site that can save.
+    cancelBuild();
+    placementSession = {
+      token: token,
+      revision: Number(options.revision) || 1,
+      payload: placementPayload(options),
+      candidate: suggestedPlacementPoint(options),
+      onConfirm: options.onConfirm,
+      onBack: options.onBack,
+      onCancel: options.onCancel,
+      container: container,
+      submitting: false
+    };
+    settleLayout();
+    announce(
+      container,
+      'Choose an exact position for the new workspace. Click or drag, then create workspace here.'
+    );
+    return true;
+  }
+
+  function endPlacement(options, secondary) {
+    if (!placementMatches(placementSession, options, secondary)) return false;
+    placementSession = null;
+    settleLayout();
+    return true;
+  }
+
+  function cancelPlacement(options, secondary) {
+    return endPlacement(options, secondary);
+  }
+
+  /**
+   * Persist the reviewed candidate for the real workspace id returned by the
+   * wizard. This path deliberately does not call resolveDropAnchor(): a point
+   * that became occupied after confirmation is an honest partial success, not
+   * permission to silently move the newly created workspace elsewhere.
+   */
+  function commitPlacement(workspaceId, options) {
+    var id = String(workspaceId || '').trim();
+    var state = placementSession;
+    var opts = placementOptions(options);
+    if (!id || !placementMatches(state, opts)) {
+      return Promise.resolve({ saved: false, reason: 'stale_placement' });
+    }
+    var point = safePoint(opts.candidate || state.candidate);
+    var problem = placementProblem(point, id);
+    if (problem) {
+      rememberFailedPlacement(id, point || state.candidate);
+      placementSession = null;
+      announce(
+        state.container,
+        'Workspace was created, but its reviewed position is no longer available. Choose a new position for this workspace.'
+      );
+      settleLayout();
+      return Promise.resolve({ saved: false, reason: 'blocked', point: point || null });
+    }
+
+    state.saving = true;
+    state.submitting = true;
+    updatePlacementPresentation(state.container);
+    var positions = withAutomaticLayoutPins({});
+    positions[id] = { x: point.x, y: point.y };
+    return patchLayout([{ op: 'set_positions', positions: positions }]).then(
+      function () {
+        selectedId = id;
+        pendingPlacementSelectionId = id;
+        placementSession = null;
+        announce(state.container, 'Workspace placed at ' + formatCoordinate(point));
+        settleLayout();
+        return { saved: true, point: point };
+      },
+      function () {
+        rememberFailedPlacement(id, point);
+        placementSession = null;
+        announce(
+          state.container,
+          'Workspace was created, but its position could not be saved. It remains available at a default spot; retry position to try again.'
+        );
+        settleLayout();
+        return { saved: false, reason: 'layout_save_failed', point: point };
+      }
+    );
+  }
+
   // cancelBuild is the abandonment path: forget the site, so nothing is left
   // pointing at a workspace that will never exist (FR-54). sessions.js calls it
   // when the create modal closes without creating anything.
@@ -7862,7 +8302,10 @@
     // the cockpit rail still sits on Today with no Build affordance anywhere on
     // screen (#322). Recorded here, dispatched once the DOM below exists.
     var focusNotify = '';
-    if (focusHQ && site.show) {
+    if (findWs(workspaces, pendingPlacementSelectionId)) {
+      selectedId = pendingPlacementSelectionId;
+      pendingPlacementSelectionId = '';
+    } else if (focusHQ && site.show) {
       selectedId = HQ_SITE_ID;
       hqFocusConsumed = true;
       focusNotify = 'hq-site';
@@ -7941,6 +8384,7 @@
     bindDistrictDrag(container);
     bindResizeHandles(container);
     bindResetLayout(container);
+    bindPlacementControls(container);
     if (preservedAnnouncement) {
       var liveAfterRemount = container.querySelector('[data-map-live]');
       if (liveAfterRemount) liveAfterRemount.textContent = preservedAnnouncement;
@@ -7979,6 +8423,11 @@
   /** Tear down the map view (called when switching away). */
   function unmount(container) {
     if (!container) return;
+    // Leaving the Map cannot strand the wizard in a page-local placement
+    // state. Clear it before DOM teardown, then let the draft resume review.
+    var abandonedPlacement =
+      placementSession && placementSession.container === container ? placementSession : null;
+    if (abandonedPlacement) placementSession = null;
     stopResizeWatch();
     closeContextMenu({ restoreFocus: false });
     settleDropConfirm('decline', { restoreFocus: false, skipRedraw: true });
@@ -7989,6 +8438,13 @@
     // no-op when it lands: settleLayout has nothing to repaint.
     lastMount = null;
     multiSelected = Object.create(null);
+    if (abandonedPlacement) {
+      var back =
+        typeof abandonedPlacement.onBack === 'function'
+          ? abandonedPlacement.onBack
+          : abandonedPlacement.onCancel;
+      if (typeof back === 'function') back(abandonedPlacement.token, 'map-unmount');
+    }
   }
 
   window.OriWorkspaceMap = {
@@ -8150,10 +8606,15 @@
     getCamera: function () {
       return { centerX: camera.centerX, centerY: camera.centerY, zoom: camera.zoom };
     },
-    // Build mode's seam with the existing Create Workspace flow. sessions.js
-    // calls completeBuild after a successful create and cancelBuild when the
-    // modal closes without one, so the pending coordinate is consumed exactly
-    // once and never for a workspace that does not exist (FR-53, FR-54).
+    // Reviewed placement API. sessions.js owns the draft token/revision and the
+    // real workspace POST; the Map only returns an exact candidate or a Back
+    // request and never writes a placeholder layout record.
+    beginPlacement: beginPlacement,
+    endPlacement: endPlacement,
+    cancelPlacement: cancelPlacement,
+    commitPlacement: commitPlacement,
+    // Legacy Build seam retained for older callers while the shared wizard now
+    // uses the reviewed placement API above.
     completeBuild: completeBuild,
     // A normal create has no chosen Map point. Give a newly grouped workspace a
     // safe interior/adjacent site while leaving explicit Build coordinates and
@@ -8165,6 +8626,16 @@
     },
     hasPendingBuild: function () {
       return !!buildState.pending;
+    },
+    // Compatibility bridge while old context-menu Build callers enter the
+    // reviewed wizard. It exposes only a suggested coordinate/group label;
+    // beginPlacement consumes it and clears the legacy state before any create.
+    getPendingBuild: function () {
+      if (!buildState.pending) return null;
+      return {
+        point: { x: buildState.pending.x, y: buildState.pending.y },
+        group: buildState.group ? { id: buildState.group.id, name: buildState.group.name } : null
+      };
     },
     retryPlacement: retryFailedPlacement,
     snapPoint: snapPoint,

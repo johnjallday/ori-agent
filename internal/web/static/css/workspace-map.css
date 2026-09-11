@@ -516,9 +516,142 @@
   border-style: double;
   border-width: 3px;
 }
-/* The build-mode cursor and candidate-site marker are gone with the mode
-   itself (#317): there is no in-between state to preview when the right-click
-   is the coordinate. */
+/* Reviewed workspace placement is different from the retired Build mode: the
+   wizard is already complete, and this translucent, unpersisted preview lets a
+   person inspect and adjust the exact site before the real workspace exists. */
+.ws-map-canvas.is-placement-active {
+  cursor: crosshair;
+}
+.ws-map-canvas.is-placement-active .ws-map-world > :not(.ws-map-placement-preview) {
+  pointer-events: none;
+}
+.ws-map-placement-preview {
+  position: absolute;
+  z-index: 12;
+  width: 150px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  opacity: 0.58;
+  pointer-events: none;
+  filter: saturate(0.85);
+}
+.ws-map-placement-preview::before {
+  content: "";
+  position: absolute;
+  top: 40px;
+  left: 50%;
+  width: 116px;
+  height: 58px;
+  transform: translate(-50%, -50%);
+  border: 2px dashed var(--ws-faction);
+  border-radius: 50% / 40%;
+  box-shadow: 0 0 24px rgba(70, 211, 154, 0.38);
+}
+.ws-map-placement-preview.is-invalid {
+  opacity: 0.38;
+}
+.ws-map-placement-preview.is-invalid::before {
+  border-style: solid;
+  border-color: var(--ws-danger, #d9534f);
+  box-shadow: 0 0 24px rgba(217, 83, 79, 0.36);
+}
+.ws-map-placement-preview-name {
+  max-width: 142px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ws-ink);
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+.ws-map-placement-controls {
+  position: absolute;
+  z-index: 16;
+  top: 14px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: min(620px, calc(100% - 32px));
+  transform: translateX(-50%);
+  padding: 10px 12px;
+  border: 1px solid var(--ws-faction);
+  background: var(--ws-bg-2);
+  box-shadow: var(--ws-glow);
+}
+.ws-map-placement-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  color: var(--ws-ink);
+  font-size: 12px;
+}
+.ws-map-placement-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-map-placement-copy span,
+.ws-map-placement-copy small {
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+}
+.ws-map-placement-copy span {
+  color: var(--ws-faction);
+}
+.ws-map-placement-copy small {
+  color: var(--ws-ink-dim);
+}
+.ws-map-placement-buttons {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.ws-map-placement-buttons button {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--ws-line-bright);
+  background: transparent;
+  color: var(--ws-ink);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+}
+.ws-map-placement-buttons .ws-map-placement-confirm {
+  border-color: var(--ws-faction-deep);
+  background: rgba(70, 211, 154, 0.12);
+  color: var(--ws-faction);
+}
+.ws-map-placement-buttons button:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-map-placement-buttons button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+@media (max-width: 620px) {
+  .ws-map-placement-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .ws-map-placement-buttons {
+    justify-content: stretch;
+  }
+  .ws-map-placement-buttons button {
+    flex: 1 1 auto;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ws-map-placement-preview {
+    transition: none;
+  }
+}
 
 /* The honest read-only notice: the map is navigable, but nothing can be saved
    (#292 FR-105). Stated in words, not implied by a greyed-out button. */

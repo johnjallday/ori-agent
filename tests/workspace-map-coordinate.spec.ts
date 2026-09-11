@@ -55,7 +55,7 @@ async function listWorkspaces(
  * drives the real four steps — Blueprint → Details → Team → Review — exactly as
  * tests/create-workspace-behavior.spec.ts does.
  */
-async function completeCreateWizard(page: Page, name: string) {
+async function reviewCreateWizard(page: Page, name: string) {
   await page.locator('.workspace-template-card', { hasText: 'Blank' }).first().click();
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep2')).toBeVisible();
@@ -78,7 +78,14 @@ async function completeCreateWizard(page: Page, name: string) {
   }
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep4')).toBeVisible();
+}
+
+async function completeCreateWizard(page: Page, name: string) {
+  await reviewCreateWizard(page, name);
   await page.locator('#createFolderBtn').click();
+  await expect(page.locator('[data-ws-map-placement-preview]')).toBeVisible();
+  await page.locator('[data-ws-map-placement-confirm]').click();
+  await expect(page.locator('[data-ws-map-placement-preview]')).toBeHidden();
 }
 
 async function savePosition(page: Page, id: string, x: number, y: number) {
@@ -371,38 +378,77 @@ test.describe('Coordinate Workspace Map', () => {
     expect(Math.round(restored.zoom * 100)).toBe(Math.round(saved.zoom * 100));
   });
 
-  test('Build places a workspace at the right-clicked point (FR-47 – FR-53, metric 3)', async ({
+  test('Build previews before create, then saves the displayed exact position (FR-47 – FR-53, metric 3)', async ({
     page
-  }) => {
+  }, testInfo) => {
     await ensureWorkspace(page);
     await openMap(page);
+    const before = new Set((await listWorkspaces(page)).map(ws => ws.id));
+    const positionsBefore = new Set(
+      Object.keys(
+        (await (await page.request.get('/api/workspace-map/layout')).json()).layout.positions
+      )
+    );
 
-    // Build is a context-menu item now (#317): right-click the spot you want,
-    // and that point is the coordinate. There is no mode and no second click.
     const site = await emptyPointOn(page);
     await page.mouse.click(site.x, site.y, { button: 'right' });
     await expect(page.locator('[data-menu-action="build"]')).toBeVisible();
     await page.click('[data-menu-action="build"]');
-
-    // The existing Create Workspace modal opens — the same four-step wizard,
-    // not a second form (FR-51).
     await expect(page.locator('#addFolderModal')).toBeVisible();
     await expect(page.locator('[data-ws-map-menu]')).toHaveCount(0);
 
     const name = `Built ${Date.now()}`;
-    await completeCreateWizard(page, name);
+    await reviewCreateWizard(page, name);
+    await expect(page.locator('#createFolderBtn')).toContainText('Place');
+    await page.screenshot({
+      path: testInfo.outputPath('review-before-placement.png'),
+      fullPage: true
+    });
+    await page.locator('#createFolderBtn').click();
 
-    // FR-53: the flow returns to the map rather than navigating into the new
-    // workspace, and the coordinate the user chose is what was saved.
-    await page.waitForTimeout(2000);
+    const preview = page.locator('[data-ws-map-placement-preview]');
+    await expect(preview).toBeVisible();
+    await expect(page.locator('#addFolderModal')).toBeHidden();
+    const previewPoint = await preview.evaluate(el => ({
+      x: Math.round(parseFloat((el as HTMLElement).style.left)),
+      y: Math.round(parseFloat((el as HTMLElement).style.top))
+    }));
+    await page.screenshot({
+      path: testInfo.outputPath('workspace-placement-preview.png'),
+      fullPage: true
+    });
+    expect(
+      new Set((await listWorkspaces(page)).map(ws => ws.id)),
+      'preview creates no workspace'
+    ).toEqual(before);
+    expect(
+      new Set(
+        Object.keys(
+          (await (await page.request.get('/api/workspace-map/layout')).json()).layout.positions
+        )
+      ),
+      'preview creates no position record'
+    ).toEqual(positionsBefore);
+
+    await page.locator('[data-ws-map-placement-confirm]').click();
+    await expect(preview).toBeHidden();
     expect(new URL(page.url()).pathname).toBe('/');
-
     const rows = await listWorkspaces(page);
     const built = rows.find((ws: { name?: string }) => ws?.name === name);
-    expect(built, 'the workspace was created').toBeTruthy();
-
+    expect(built, 'the workspace was created after exact confirmation').toBeTruthy();
     const layout = await (await page.request.get('/api/workspace-map/layout')).json();
-    expect(layout.layout.positions[built!.id], 'its chosen coordinate was saved').toBeTruthy();
+    expect(layout.layout.positions[built!.id]).toEqual(previewPoint);
+    await page.reload();
+    const tile = page.locator(`.ws-map-tile[data-ws-id="${built!.id}"]`);
+    await expect(tile).toBeAttached();
+    await expect(tile).toHaveAttribute(
+      'style',
+      new RegExp(`left:${previewPoint.x}px;top:${previewPoint.y}px`)
+    );
+    await page.screenshot({
+      path: testInfo.outputPath('workspace-placed-after-reload.png'),
+      fullPage: true
+    });
   });
 
   test('cancelling a build creates nothing (FR-54)', async ({ page }) => {
@@ -422,24 +468,25 @@ test.describe('Coordinate Workspace Map', () => {
     await expect(page.locator('[data-ws-map-menu]')).toHaveCount(0);
     await expect(page.locator('#addFolderModal')).toBeHidden();
 
-    // And cancelling from inside the modal leaves nothing behind either.
+    // Escape from placement is navigation inside the reviewed draft, not a
+    // cancellation. The resumed Review keeps the exact name before a genuine
+    // modal cancel discards it.
     const site = await emptyPointOn(page);
     await page.mouse.click(site.x, site.y, { button: 'right' });
     await page.click('[data-menu-action="build"]');
+    const name = `Cancelled preview ${Date.now()}`;
+    await reviewCreateWizard(page, name);
+    await page.locator('#createFolderBtn').click();
+    await expect(page.locator('[data-ws-map-placement-preview]')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('[data-ws-map-placement-preview]')).toBeHidden();
     await expect(page.locator('#addFolderModal')).toBeVisible();
-    // Let the show transition finish: hiding a Bootstrap modal mid-fade is a
-    // no-op, which looks exactly like "cancel is broken".
-    await page.waitForTimeout(500);
-    // Dismiss the same way the rest of the create-flow suite does — the modal's
-    // own Bootstrap instance — so this tests the cancel contract rather than
-    // Bootstrap's click handling.
-    await page.evaluate(() => {
-      const el = document.getElementById('addFolderModal');
-      // @ts-expect-error bootstrap is a page global
-      window.bootstrap.Modal.getInstance(el)?.hide();
-    });
+    await expect(page.locator('#wizardStep4')).toBeVisible();
+    await expect(page.locator('#folderNameInput')).toHaveValue(name);
+    // The modal's own close control is a true cancellation, distinct from the
+    // placement Back/Escape route above.
+    await page.getByRole('button', { name: 'Close create workspace' }).click();
     await expect(page.locator('#addFolderModal')).toBeHidden();
-    await page.waitForTimeout(600);
 
     const after = new Set((await listWorkspaces(page)).map(ws => ws.id));
     expect([...after].filter(id => !before.has(id))).toEqual([]);
