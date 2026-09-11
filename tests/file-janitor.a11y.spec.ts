@@ -356,6 +356,45 @@ test.describe('File Janitor console accessibility', () => {
     await expect(page.locator('#downloadsJanitorSelection')).toHaveAttribute('aria-live', 'polite');
   });
 
+  test('stays operable at a short 200%-zoom-equivalent viewport', async ({ page, request }) => {
+    const root = inbox(
+      'zoom',
+      Array.from({ length: 60 }, (_, i) => `zoom-file-${i}.pdf`)
+    );
+    const workspaceId = await workspaceWithFolder(request, `FJ A11y Zoom ${RUN}`, root);
+    // At 200% browser zoom a 1440×900 display exposes roughly a 720×450 CSS
+    // viewport. Driving that viewport directly is deterministic in headless
+    // Chromium while exercising the same responsive layout boundary.
+    await page.setViewportSize({ width: 720, height: 450 });
+
+    await openConsole(page, workspaceId);
+    await page.locator('#downloadsJanitorScan').click();
+    const firstRow = page.locator('.dj-row-item').first();
+    await expect(firstRow).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('.dj-batch-progress')).toContainText('60 remaining of 60 candidates');
+
+    const containment = await page.evaluate(() => {
+      const dialog = document.querySelector('#fileJanitorConsoleDialog');
+      const body = document.querySelector('#fileJanitorConsoleBody');
+      const progress = document.querySelector('.dj-batch-progress');
+      return {
+        viewport: innerWidth,
+        dialog: dialog?.getBoundingClientRect().width || 0,
+        body: body?.getBoundingClientRect().width || 0,
+        progress: progress?.getBoundingClientRect().width || 0,
+        bodyScrollsSideways: body ? body.scrollWidth > body.clientWidth : false
+      };
+    });
+    expect(containment.dialog).toBeLessThanOrEqual(containment.viewport);
+    expect(containment.progress).toBeLessThanOrEqual(containment.body);
+    expect(containment.bodyScrollsSideways).toBe(false);
+
+    await firstRow.locator('.dj-select').check();
+    await expect(page.locator('#downloadsJanitorApprove')).toHaveText('Review 1 move');
+    await expect(page.locator('.dj-footer')).toBeInViewport();
+    await expect(page.locator('[data-fj-console-close]')).toBeInViewport();
+  });
+
   test('scrolls inside itself and never sideways at phone width', async ({ page, request }) => {
     const root = inbox(
       'narrow',
