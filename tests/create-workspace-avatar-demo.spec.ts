@@ -16,6 +16,7 @@ import { test, expect, Page, APIRequestContext } from '@playwright/test';
 const RUN = `PWAvatar${Date.now()}`;
 const WITH_CHARACTER = `${RUN} Scout`;
 const WITHOUT_CHARACTER = `${RUN} Plain`;
+let createdWorkspaceId = '';
 
 async function seedAgent(request: APIRequestContext, name: string, catalogId?: string) {
   const data: Record<string, unknown> = { name, model: 'gpt-5.5', role: 'specialist' };
@@ -34,6 +35,9 @@ test.beforeAll(async ({ request }) => {
 });
 
 test.afterAll(async ({ request }) => {
+  if (createdWorkspaceId) {
+    await request.delete(`/api/workspaces/${createdWorkspaceId}?confirm=true`).catch(() => {});
+  }
   for (const name of [WITH_CHARACTER, WITHOUT_CHARACTER]) {
     await request.delete(`/api/agents/${encodeURIComponent(name)}`).catch(() => {});
   }
@@ -68,7 +72,7 @@ test('Team step renders agent identities through the shared renderer', async ({ 
   // Blueprint → Details
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep2')).toBeVisible();
-  await page.locator('#folderNameInput').fill('Avatar Demo');
+  await page.locator('#folderNameInput').fill(`Avatar Demo ${RUN}`);
 
   // Details → Team
   await page.locator('#wizardNextBtn').click();
@@ -100,15 +104,18 @@ test('Team step renders agent identities through the shared renderer', async ({ 
   );
   await expect(plain.locator('.agent-avatar--generated')).toBeVisible();
 
-  // Add one so the left-hand Resulting Workspace Team roster shows it too.
+  // Fill Blank's required role explicitly, then add the character-backed agent
+  // as an extra teammate. A saved-agent proposal is not role membership.
+  await page.getByRole('button', { name: 'Assign an agent to Ask Ori', exact: true }).click();
+  await page.locator(`[data-existing-agent-add="${WITHOUT_CHARACTER}"]`).click();
   await page.locator(`[data-existing-agent-add="${WITH_CHARACTER}"]`).click();
-  // The added agent keeps its portrait on the Team roster, and the blueprint's
-  // own not-yet-created agent sits beside it on deterministic art.
-  const teamRow = page.locator(
-    `#workspaceTeamRoster [data-agent-key="${WITH_CHARACTER.toLowerCase()}"]`
-  );
+  // Both resulting identities keep their selected render mode in the shared
+  // role roster: one role holder and one unassigned teammate.
+  const teamRow = page
+    .locator('#workspaceRoleRoster .ws-role-roster__also-row')
+    .filter({ hasText: WITH_CHARACTER });
   await expect(teamRow.locator('.agent-avatar--character .agent-avatar__portrait')).toBeVisible();
-  await expect(page.locator('#workspaceTeamRoster .agent-avatar--generated').first()).toBeVisible();
+  await expect(page.locator('#workspaceRoleRoster .agent-avatar--generated').first()).toBeVisible();
 
   // Both rosters scroll independently; capture them from the top so the
   // Resulting Workspace Team roster is in frame, not scrolled past.
@@ -122,4 +129,36 @@ test('Team step renders agent identities through the shared renderer', async ({ 
   await page.locator('#addFolderModal .modal-dialog').screenshot({
     path: 'test-results/create-workspace-team-avatars.png'
   });
+
+  // Submit to the real API as well as checking the draft. This proves Assign
+  // reuses the saved definition, the extra remains unassigned, and the role
+  // holder becomes the durable entry agent.
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#wizardStep4')).toBeVisible();
+  await expect(page.locator('#workspaceReviewSummary')).toContainText(WITHOUT_CHARACTER);
+  await expect(page.locator('#workspaceReviewSummary')).toContainText(WITH_CHARACTER);
+  const createResponse = page.waitForResponse(
+    response => response.url().endsWith('/api/workspaces') && response.request().method() === 'POST'
+  );
+  await page.locator('#createFolderBtn').click();
+  const response = await createResponse;
+  expect(response.ok(), await response.text()).toBe(true);
+  const body = await response.json();
+  createdWorkspaceId = body.folder.id;
+  const roleHolder = body.folder.agent_instances.find(
+    (instance: { name?: string }) => instance.name === WITHOUT_CHARACTER
+  );
+  const extra = body.folder.agent_instances.find(
+    (instance: { name?: string }) => instance.name === WITH_CHARACTER
+  );
+  expect(roleHolder).toEqual(
+    expect.objectContaining({
+      role_id: 'ask-ori',
+      role_source: 'assigned',
+      entry_point: true
+    })
+  );
+  expect(extra).toBeTruthy();
+  expect(extra.role_id || '').toBe('');
+  await expect(page).toHaveURL(new RegExp(`/workspaces/${body.folder.folder_slug}$`));
 });

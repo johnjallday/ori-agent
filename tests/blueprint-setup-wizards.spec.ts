@@ -128,13 +128,17 @@ async function installBlueprint(request: APIRequestContext) {
   writeFileSync(join(templateDir, 'template.json'), JSON.stringify(MANIFEST, null, 2));
 }
 
-async function createWorkspace(request: APIRequestContext, name: string): Promise<string> {
+async function createWorkspace(
+  request: APIRequestContext,
+  name: string
+): Promise<{ id: string; slug: string }> {
   const res = await request.post('/api/workspaces', {
     data: { name, description: '', template_id: TEMPLATE_ID, create_template_agents: true }
   });
   expect(res.ok(), await res.text()).toBeTruthy();
   const body = await res.json();
-  return (body.folder?.id || body.workspace?.id) as string;
+  const workspace = body.folder || body.workspace;
+  return { id: workspace.id as string, slug: workspace.folder_slug as string };
 }
 
 function dialog(page: Page) {
@@ -187,6 +191,13 @@ test.describe('Blueprint Setup Wizard', () => {
     await page.locator('#folderNameInput').fill(`Preview Only ${Date.now().toString(36)}`);
     await page.locator('#wizardNextBtn').click();
     await expect(page.locator('#wizardStep3')).toBeVisible();
+    const managerRole = page.locator('#workspaceRoleRoster [data-role-id="wizard-shell-manager"]');
+    await managerRole
+      .getByRole('button', { name: 'Create an agent for Wizard Shell Manager' })
+      .click();
+    await page.locator('#createAgentBtn').click();
+    await expect(page.locator('#addFolderModal')).toBeVisible();
+    await expect(managerRole).toContainText('Wizard Shell Manager');
     await page.locator('#wizardNextBtn').click();
     await expect(page.locator('#wizardStep4')).toBeVisible();
 
@@ -207,13 +218,13 @@ test.describe('Blueprint Setup Wizard', () => {
   });
 
   test('auto-opens once, resumes after dismissal, and completes', async ({ page, request }) => {
-    const workspaceId = await createWorkspace(request, `Wizard Journey ${Date.now().toString(36)}`);
+    const workspace = await createWorkspace(request, `Wizard Journey ${Date.now().toString(36)}`);
 
     // A created workspace is visibly unfinished before anything is opened.
-    expect((await setupState(request, workspaceId)).state).toBe('not_started');
+    expect((await setupState(request, workspace.id)).state).toBe('not_started');
 
     // ---- first open: the dialog opens itself, at the first required step ----
-    await page.goto(`/workspaces/${workspaceId}`);
+    await page.goto(`/workspaces/${workspace.slug}`);
     await expect(dialog(page)).toBeVisible({ timeout: 15000 });
     await expect(page.locator('#setupWizardTitle')).toHaveText('Set up Wizard Shell Demo');
     await expect(page.locator('#setupWizardStepTitle')).toHaveText('Choose the folder to tidy');
@@ -224,12 +235,12 @@ test.describe('Blueprint Setup Wizard', () => {
     // ---- dismissal: recorded, and it does not make the workspace ready ----
     await page.locator('#setupWizardClose').click();
     await expect(dialog(page)).toBeHidden();
-    const dismissed = await setupState(request, workspaceId);
+    const dismissed = await setupState(request, workspace.id);
     expect(dismissed.dismissed).toBe(true);
     expect(dismissed.state).not.toBe('ready');
 
     // ---- reload: a dismissed wizard does not ambush the user again ----
-    await page.goto(`/workspaces/${workspaceId}`);
+    await page.goto(`/workspaces/${workspace.slug}`);
     await expect(page.locator('#setupWizardBanner')).toBeVisible({ timeout: 15000 });
     await expect(page.locator('#setupWizardBannerState')).toHaveText('Setup required');
     await expect(dialog(page)).toBeHidden();
@@ -267,17 +278,17 @@ test.describe('Blueprint Setup Wizard', () => {
     await expect(dialog(page)).toBeHidden({ timeout: 15000 });
     await expect(page.locator('#setupWizardBannerState')).toHaveText('Ready');
 
-    const ready = await setupState(request, workspaceId);
+    const ready = await setupState(request, workspace.id);
     expect(ready.state).toBe('ready');
     expect(ready.completed_at).toBeTruthy();
 
     // ---- a completed wizard does not reopen on the next visit ----
-    await page.goto(`/workspaces/${workspaceId}`);
+    await page.goto(`/workspaces/${workspace.slug}`);
     await expect(page.locator('#setupWizardBannerState')).toHaveText('Ready', { timeout: 15000 });
     await expect(dialog(page)).toBeHidden();
 
     // ---- the blueprint's setup help task was completed without an agent run ----
-    const tasksRes = await request.get(`/api/workspaces/${workspaceId}`);
+    const tasksRes = await request.get(`/api/workspaces/${workspace.id}`);
     const tasksBody = await tasksRes.json();
     const tasks = (tasksBody.folder || tasksBody.workspace || tasksBody).tasks || [];
     const setupTask = tasks.find((task: { description?: string }) =>
@@ -300,9 +311,9 @@ test.describe('Blueprint Setup Wizard', () => {
     });
     expect(res.ok(), await res.text()).toBeTruthy();
     const body = await res.json();
-    const workspaceId = (body.folder?.id || body.workspace?.id) as string;
+    const workspace = body.folder || body.workspace;
 
-    await page.goto(`/workspaces/${workspaceId}`);
+    await page.goto(`/workspaces/${workspace.folder_slug}`);
     // The dialog and banner are in the page either way; a workspace with no
     // wizard must leave both dormant rather than showing an empty setup surface.
     await expect(dialog(page)).toBeAttached({ timeout: 15000 });
@@ -318,11 +329,8 @@ test.describe('Blueprint Setup Wizard', () => {
   // screen reader would.
 
   test('the whole wizard is completable with the keyboard alone', async ({ page, request }) => {
-    const workspaceId = await createWorkspace(
-      request,
-      `Wizard Keyboard ${Date.now().toString(36)}`
-    );
-    await page.goto(`/workspaces/${workspaceId}`);
+    const workspace = await createWorkspace(request, `Wizard Keyboard ${Date.now().toString(36)}`);
+    await page.goto(`/workspaces/${workspace.slug}`);
     await expect(dialog(page)).toBeVisible({ timeout: 15000 });
 
     // Focus lands inside the dialog, not behind it.
@@ -358,22 +366,22 @@ test.describe('Blueprint Setup Wizard', () => {
       await page.waitForTimeout(700);
     }
     await expect(dialog(page)).toBeHidden({ timeout: 15000 });
-    expect((await setupState(request, workspaceId)).state).toBe('ready');
+    expect((await setupState(request, workspace.id)).state).toBe('ready');
   });
 
   test('Escape dismisses, and focus returns to what opened the dialog', async ({
     page,
     request
   }) => {
-    const workspaceId = await createWorkspace(request, `Wizard Escape ${Date.now().toString(36)}`);
-    await page.goto(`/workspaces/${workspaceId}`);
+    const workspace = await createWorkspace(request, `Wizard Escape ${Date.now().toString(36)}`);
+    await page.goto(`/workspaces/${workspace.slug}`);
     await expect(dialog(page)).toBeVisible({ timeout: 15000 });
 
     await page.keyboard.press('Escape');
     await expect(dialog(page)).toBeHidden();
     // Dismissal is recorded server-side, and it does not make the workspace
     // ready — closing a dialog is not finishing setup.
-    const dismissed = await setupState(request, workspaceId);
+    const dismissed = await setupState(request, workspace.id);
     expect(dismissed.dismissed).toBe(true);
     expect(dismissed.state).not.toBe('ready');
 
@@ -388,8 +396,8 @@ test.describe('Blueprint Setup Wizard', () => {
   });
 
   test('state is announced and never carried by color alone', async ({ page, request }) => {
-    const workspaceId = await createWorkspace(request, `Wizard A11y ${Date.now().toString(36)}`);
-    await page.goto(`/workspaces/${workspaceId}`);
+    const workspace = await createWorkspace(request, `Wizard A11y ${Date.now().toString(36)}`);
+    await page.goto(`/workspaces/${workspace.slug}`);
     await expect(dialog(page)).toBeVisible({ timeout: 15000 });
 
     // The step list carries a word per step, not a colored dot.
@@ -427,9 +435,9 @@ test.describe('Blueprint Setup Wizard', () => {
     page,
     request
   }) => {
-    const workspaceId = await createWorkspace(request, `Wizard Narrow ${Date.now().toString(36)}`);
+    const workspace = await createWorkspace(request, `Wizard Narrow ${Date.now().toString(36)}`);
     await page.setViewportSize({ width: 390, height: 620 });
-    await page.goto(`/workspaces/${workspaceId}`);
+    await page.goto(`/workspaces/${workspace.slug}`);
     await expect(dialog(page)).toBeVisible({ timeout: 15000 });
 
     // The primary action is reachable without leaving the viewport — the failure
