@@ -122,7 +122,7 @@
                   <li id="tplSetupQuestTabItem" class="nav-item" role="presentation" hidden>
                     <button class="nav-link" id="tplTabSetupQuest" data-bs-toggle="tab" data-bs-target="#tplSetupQuestPane" type="button" role="tab" aria-controls="tplSetupQuestPane" aria-selected="false">Setup quest</button>
                   </li>
-                  <li class="nav-item" role="presentation">
+                  <li id="tplFilesTabItem" class="nav-item" role="presentation">
                     <button class="nav-link" id="tplTabFiles" data-bs-toggle="tab" data-bs-target="#tplFilesPane" type="button" role="tab" aria-controls="tplFilesPane" aria-selected="false">Files</button>
                   </li>
                   <li class="nav-item" role="presentation">
@@ -138,7 +138,7 @@
                   <div class="tab-pane fade show active" id="tplOverviewPane" role="tabpanel" aria-labelledby="tplTabOverview">
                     <div id="tplReadOnlyNotice" hidden class="mb-3" style="padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-tertiary); font-size: 12px; color: var(--text-secondary);">
                       <span id="tplReadOnlyText">This is a built-in template and is read-only.</span>
-                      <button id="tplDuplicateToCustomizeBtn" class="modern-btn modern-btn-primary btn-sm ms-2">Duplicate to customize</button>
+                      <button id="tplDuplicateToCustomizeBtn" class="modern-btn modern-btn-primary btn-sm ms-2">Customize as a variant</button>
                     </div>
                     <div class="mb-3">
                       <label for="tplEditName" class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Display name</label>
@@ -178,6 +178,48 @@
                       <label class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Tags</label>
                       <div id="tplEditTags"></div>
                     </div>
+                    <section id="tplGroupRequirements" class="tpl-group-requirements mb-3" aria-labelledby="tplGroupHeading">
+                      <div class="d-flex align-items-start justify-content-between gap-2 flex-wrap">
+                        <div>
+                          <div class="tpl-section-kicker">Placement contract</div>
+                          <h5 id="tplGroupHeading" class="tpl-section-title">Group requirements</h5>
+                        </div>
+                        <span id="tplGroupSourceBadge" class="tpl-group-source-badge">User template</span>
+                      </div>
+                      <p class="tpl-section-copy mt-1 mb-3">
+                        Choose whether projects stay standalone or join the exact Assistant Program Home from this template's trusted source. Ordinary grouping never grants program membership or permissions.
+                      </p>
+                      <div id="tplGroupSource" class="tpl-group-source" hidden></div>
+                      <div class="row g-3">
+                        <div class="col-12 col-md-6">
+                          <label for="tplGroupPolicy" class="form-label tpl-section-kicker">Policy</label>
+                          <select id="tplGroupPolicy" class="modern-input w-100">
+                            <option value="none">None · standalone</option>
+                            <option value="recommended">Recommended · choose during creation</option>
+                            <option value="required">Required · always use the Home</option>
+                          </select>
+                        </div>
+                        <div id="tplGroupMissingWrap" class="col-12 col-md-6">
+                          <label for="tplGroupMissing" class="form-label tpl-section-kicker">When the Home is missing</label>
+                          <select id="tplGroupMissing" class="modern-input w-100">
+                            <option value="offer_create">Offer a reviewed Home creation</option>
+                            <option value="existing_only">Require an existing Home</option>
+                          </select>
+                        </div>
+                        <div id="tplGroupNameWrap" class="col-12">
+                          <label for="tplGroupHomeName" class="form-label tpl-section-kicker">Default Home display name</label>
+                          <input id="tplGroupHomeName" class="modern-input w-100" maxlength="120" autocomplete="off" aria-describedby="tplGroupHomeHelp">
+                          <div id="tplGroupHomeHelp" class="tpl-group-help">Used only after an explicit create review. Home identity does not depend on this name.</div>
+                        </div>
+                      </div>
+                      <div id="tplGroupComposition" class="tpl-group-composition mt-3" role="status" aria-live="polite"></div>
+                      <div id="tplGroupPreview" class="tpl-group-preview mt-3" hidden></div>
+                      <div class="d-flex gap-2 align-items-center flex-wrap mt-3">
+                        <button id="tplGroupPreviewBtn" type="button" class="modern-btn modern-btn-secondary btn-sm">Preview consequences</button>
+                        <button id="tplGroupCustomizeBtn" type="button" class="modern-btn modern-btn-primary btn-sm" hidden>Customize as a variant</button>
+                        <span id="tplGroupDirty" class="small" style="color: #f59e0b;" hidden>● Unsaved placement changes</span>
+                      </div>
+                    </section>
                     <div class="mb-3">
                       <label class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Starter tasks</label>
                       <div id="tplStarterTasksList" class="d-flex flex-column gap-2 mb-2"></div>

@@ -81,13 +81,15 @@ func TestSurfaceContributionNewHostRequirementFailsClosedOnOlderHost(t *testing.
 	contribution.RequiresHostFeatures = []string{
 		HostFeatureAssistantProgramV1,
 		HostFeatureSpecialistSetupJourneyV1,
+		HostFeatureTemplateGroupRequirementsV1,
 	}
-	if err := contribution.ValidateForHost(1, []string{HostFeatureAssistantProgramV1}); !ContributionErrorIs(err, CodeHostFeatureUnsupported) {
+	if err := contribution.ValidateForHost(1, []string{HostFeatureAssistantProgramV1, HostFeatureSpecialistSetupJourneyV1}); !ContributionErrorIs(err, CodeHostFeatureUnsupported) {
 		t.Fatalf("new plugin was accepted by old host feature set: %v", err)
 	}
 	if err := contribution.ValidateForHost(1, []string{
 		HostFeatureAssistantProgramV1,
 		HostFeatureSpecialistSetupJourneyV1,
+		HostFeatureTemplateGroupRequirementsV1,
 	}); err != nil {
 		t.Fatalf("current host rejected current feature set: %v", err)
 	}

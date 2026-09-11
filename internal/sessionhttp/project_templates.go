@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
@@ -57,9 +58,10 @@ func (h *Handler) handleTemplateAgentPlan(w http.ResponseWriter, r *http.Request
 	}
 
 	var req struct {
-		TemplateID   string `json:"template_id,omitempty"`
-		TemplatePath string `json:"template_path,omitempty"`
-		Blank        bool   `json:"blank,omitempty"`
+		TemplateID       string `json:"template_id,omitempty"`
+		TemplatePath     string `json:"template_path,omitempty"`
+		Blank            bool   `json:"blank,omitempty"`
+		GroupComposition string `json:"group_composition,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -84,6 +86,17 @@ func (h *Handler) handleTemplateAgentPlan(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		h.respondWorkspaceProjectError(w, err)
 		return
+	}
+	if strings.TrimSpace(req.GroupComposition) == "standalone" {
+		if tpl.GroupRequirement == nil || tpl.GroupRequirement.Policy == projecttemplates.GroupPolicyRequired {
+			_ = orihttp.RespondBadRequest(w, "this blueprint does not support standalone composition")
+			return
+		}
+		tpl, err = projecttemplates.StandaloneTemplate(tpl)
+		if err != nil {
+			_ = orihttp.RespondBadRequest(w, "this blueprint's standalone composition is unavailable")
+			return
+		}
 	}
 
 	_ = orihttp.RespondSuccess(w, h.buildTemplateAgentPlan(tpl))
@@ -190,7 +203,7 @@ func (h *Handler) handleTemplateAgentCreate(w http.ResponseWriter, r *http.Reque
 // copy it removes the project folder again so the workspace never ends up
 // with an orphaned project or a dangling ProjectPath. Entry-file verification
 // is deliberately non-fatal and is returned in InstantiationResult.
-func (h *Handler) instantiateWorkspaceProject(ctx context.Context, ws *session.Workspace, folderWS *agentworkspace.Workspace, templateID, templatePath, projectName string) (projecttemplates.InstantiationResult, error) {
+func (h *Handler) instantiateWorkspaceProject(ctx context.Context, ws *session.Workspace, folderWS *agentworkspace.Workspace, templateID, templatePath, projectName string, resolved ...projecttemplates.Template) (projecttemplates.InstantiationResult, error) {
 	if err := projecttemplates.ValidateTarget(ws.IsGroup(), ws.ProjectPath); err != nil {
 		return projecttemplates.InstantiationResult{}, err
 	}
@@ -203,9 +216,14 @@ func (h *Handler) instantiateWorkspaceProject(ctx context.Context, ws *session.W
 		return projecttemplates.InstantiationResult{}, fmt.Errorf("workspace folder is unavailable: %w", err)
 	}
 
-	tpl, err := h.resolveProjectTemplate(templateID, templatePath)
-	if err != nil {
-		return projecttemplates.InstantiationResult{}, err
+	var tpl projecttemplates.Template
+	if len(resolved) > 0 {
+		tpl = resolved[0]
+	} else {
+		tpl, err = h.resolveProjectTemplate(templateID, templatePath)
+		if err != nil {
+			return projecttemplates.InstantiationResult{}, err
+		}
 	}
 
 	if strings.TrimSpace(projectName) == "" {
@@ -317,17 +335,24 @@ func setFileStoreWorkspacePrimaryDirectoryID(ws *agentworkspace.Workspace, direc
 	projecttemplates.SetPrimaryDirectoryID(ws.SharedData, directoryID)
 }
 
+type createWorkspaceProjectRequest struct {
+	TemplateID             string `json:"template_id,omitempty"`
+	TemplatePath           string `json:"template_path,omitempty"`
+	ProjectName            string `json:"project_name,omitempty"`
+	GroupRequirementReview bool   `json:"group_requirement_review,omitempty"`
+	GroupComposition       string `json:"group_composition,omitempty"`
+	CreateRequiredHome     bool   `json:"create_required_home,omitempty"`
+	GroupReviewToken       string `json:"group_review_token,omitempty"`
+	IdempotencyKey         string `json:"idempotency_key,omitempty"`
+}
+
 func (h *Handler) handleWorkspaceProject(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodPost {
 		_ = orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
-	var req struct {
-		TemplateID   string `json:"template_id,omitempty"`
-		TemplatePath string `json:"template_path,omitempty"`
-		ProjectName  string `json:"project_name,omitempty"`
-	}
+	var req createWorkspaceProjectRequest
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
@@ -364,9 +389,67 @@ func (h *Handler) handleWorkspaceProject(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	result, err := h.instantiateWorkspaceProject(r.Context(), workspace, folderWS, req.TemplateID, req.TemplatePath, req.ProjectName)
+	template, err := h.resolveProjectTemplate(req.TemplateID, req.TemplatePath)
 	if err != nil {
 		h.respondWorkspaceProjectError(w, err)
+		return
+	}
+	readiness := h.revalidateBlueprintReadiness(template)
+	if blueprintCreationBlocked(template, readiness) {
+		respondBlueprintReadinessConflict(w, template, readiness)
+		return
+	}
+	template, groupPlan, handled := h.prepareWorkspaceProjectGroupRequirement(r.Context(), w, id, req, template)
+	if handled {
+		return
+	}
+	if h.respondWorkspaceProjectGroupReplay(r.Context(), w, groupPlan) {
+		return
+	}
+	if err := h.finalizeCreateWorkspaceGroupRequirement(r.Context(), id, groupPlan, template); err != nil {
+		_ = orihttp.RespondJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"error": "Project placement is incomplete; retry the same reviewed operation.",
+			"group_requirement": map[string]any{
+				"state": "operation_incomplete", "reason": "operation_incomplete",
+				"summary": "No project files were created because the required placement was not observed.",
+				"actions": []grouprequirements.Action{grouprequirements.ActionRetry},
+			},
+		})
+		return
+	}
+	if groupPlan != nil {
+		// Placement moved and linked the existing workspace. Reload both mirrors
+		// before project instantiation so stale pre-review records cannot erase
+		// its parent, reciprocal link, or creation-time policy snapshot.
+		workspace, err = h.store.GetWorkspace(r.Context(), id)
+		if err == nil {
+			h.hydrateWorkspaceMetadataInto(workspace)
+			folderWS, err = h.workspaceStore.Get(id)
+		}
+		if err != nil || workspace == nil || folderWS == nil {
+			_ = h.groupRequirements.Mark(r.Context(), groupPlan.claim.Operation, grouprequirements.OperationReconcileRequired)
+			respondGroupOperationIncomplete(w, "The reviewed placement was committed but could not be reloaded before project creation.")
+			return
+		}
+	}
+
+	result, err := h.instantiateWorkspaceProject(r.Context(), workspace, folderWS, req.TemplateID, req.TemplatePath, req.ProjectName, template)
+	if err != nil {
+		if groupPlan != nil {
+			_ = h.groupRequirements.Mark(r.Context(), groupPlan.claim.Operation, grouprequirements.OperationReconcileRequired)
+		}
+		h.respondWorkspaceProjectError(w, err)
+		return
+	}
+	if err := h.completeCreateWorkspaceGroupRequirement(r.Context(), groupPlan); err != nil {
+		_ = orihttp.RespondJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"error": "Project was created but its placement receipt needs reconciliation.",
+			"group_requirement": map[string]any{
+				"state": "operation_incomplete", "reason": "operation_incomplete",
+				"summary": "Retry the same reviewed operation; Ori will not create duplicate project files.",
+				"actions": []grouprequirements.Action{grouprequirements.ActionRetry},
+			},
+		})
 		return
 	}
 
@@ -375,6 +458,9 @@ func (h *Handler) handleWorkspaceProject(w http.ResponseWriter, r *http.Request,
 		"success":      true,
 		"project_path": hydrated.ProjectPath,
 		"workspace":    h.buildWorkspaceDetailResponse(hydrated),
+	}
+	if groupPlan != nil {
+		response["group_requirement"] = groupPlan.claim.Snapshot
 	}
 	if result.ProjectWarning != "" {
 		response["project_warning"] = result.ProjectWarning

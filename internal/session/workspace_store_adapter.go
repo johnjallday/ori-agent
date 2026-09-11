@@ -62,6 +62,19 @@ func (a *WorkspaceStoreAdapter) Save(ws *workspace.Workspace) error {
 	return a.store.UpdateWorkspace(ctx, sessionWS)
 }
 
+// SetWorkspaceParent updates the explicit hierarchy column without routing
+// through Save's protection for partial workspace projections. SyncStore uses
+// this after the canonical folder move succeeds.
+func (a *WorkspaceStoreAdapter) SetWorkspaceParent(workspaceID, parentID string) error {
+	ctx := context.Background()
+	current, err := a.store.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	current.ParentID = strings.TrimSpace(parentID)
+	return a.store.UpdateWorkspace(ctx, current)
+}
+
 // Get retrieves a workspace by ID and converts to workspace.Workspace.
 func (a *WorkspaceStoreAdapter) Get(id string) (*workspace.Workspace, error) {
 	ctx := context.Background()

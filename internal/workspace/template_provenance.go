@@ -85,6 +85,10 @@ type TemplateProvenance struct {
 	// AssistantProgram snapshots the normalized inert declaration. Existing
 	// workspaces keep this copy when a plugin changes or is removed.
 	AssistantProgram *AssistantProgramDeclaration `json:"assistant_program,omitempty"`
+	// GroupRequirement is the reviewed creation-time placement contract. Its
+	// presence as a structurally valid schema-v1 snapshot is the clean-start
+	// boundary; legacy records are never inferred or backfilled into one.
+	GroupRequirement *GroupRequirementSnapshot `json:"group_requirement,omitempty"`
 }
 
 // cloneCapabilityRequirements returns a defensive copy, including each
@@ -134,6 +138,7 @@ func cloneTemplateProvenanceInto(dst *TemplateProvenance, src *TemplateProvenanc
 	dst.RuntimeRequirements = CloneRuntimeRequirementsContract(src.RuntimeRequirements)
 	dst.SetupWizard = CloneSetupWizard(src.SetupWizard)
 	dst.AssistantProgram = CloneAssistantProgramDeclaration(src.AssistantProgram)
+	dst.GroupRequirement = CloneGroupRequirementSnapshot(src.GroupRequirement)
 }
 
 // RuntimeRequirementsSnapshot returns a defensive copy of the runtime contract

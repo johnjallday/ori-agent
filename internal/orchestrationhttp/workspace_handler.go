@@ -176,6 +176,15 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 				settings.TaskMarkdown,
 			),
 		}
+		groupContractWorkspace := ws
+		if wh.folderStore != nil {
+			if canonical, canonicalErr := wh.folderStore.Get(ws.ID); canonicalErr == nil && canonical != nil {
+				groupContractWorkspace = canonical
+			}
+		}
+		if status := workspace.EvaluateGroupRequirementLifecycle(groupContractWorkspace, wh.workspaceStore.Get); status != nil {
+			response["group_requirement_status"] = status
+		}
 
 		// Add sessions if session store is available
 		if wh.sessionStore != nil {

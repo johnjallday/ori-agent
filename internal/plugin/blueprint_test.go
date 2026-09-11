@@ -55,6 +55,28 @@ func TestResolvePluginBlueprintsValidatesAndNamespacesTrustedTemplate(t *testing
 	}
 }
 
+func TestResolvePluginBlueprintsRequiresGroupRequirementHostFeature(t *testing.T) {
+	descriptor := blueprintDescriptorFixture(t)
+	manifestPath := filepath.Join(descriptor.InstallDir, "blueprints", "demo", "template.json")
+	writeFile(t, manifestPath, `{
+		"name":"Demo Workspace",
+		"agents":[{"name":"Demo Lead"}],
+		"capabilities":[{"id":"demo-tools","source":"plugin-blueprint"}],
+		"group_requirement":{"schema_version":1,"policy":"none"}
+	}`)
+	if _, err := ResolvePluginBlueprints(descriptor); err == nil {
+		t.Fatal("plugin group declaration loaded without its host feature")
+	}
+	descriptor.WorkspaceSurfaces.RequiresHostFeatures = []string{HostFeatureTemplateGroupRequirementsV1}
+	resolved, err := ResolvePluginBlueprints(descriptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resolved) != 1 || resolved[0].Template.GroupRequirement == nil {
+		t.Fatalf("group declaration was not resolved: %#v", resolved)
+	}
+}
+
 func TestResolvePluginBlueprintsRejectsUnknownFieldsCapabilityDriftAndSymlinks(t *testing.T) {
 	t.Run("unknown manifest field", func(t *testing.T) {
 		descriptor := blueprintDescriptorFixture(t)

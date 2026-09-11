@@ -217,18 +217,21 @@ function appendRows(container, rows, className = 'setup-journey__receipt-list') 
 }
 
 export function projectDraftInput(draft) {
+  const placement = draft.groupComposition ? { group_composition: draft.groupComposition } : {};
   if (draft.kind === 'existing') {
     return {
       mode_id: 'existing_project',
       selection_token: draft.selectionToken,
       entry_name: draft.entryName || undefined,
-      workspace_name: draft.workspaceName.trim()
+      workspace_name: draft.workspaceName.trim(),
+      ...placement
     };
   }
   return {
     mode_id: 'new_project',
     workspace_name: draft.workspaceName.trim() || draft.projectName.trim(),
-    project_name: draft.projectName.trim()
+    project_name: draft.projectName.trim(),
+    ...placement
   };
 }
 
@@ -359,12 +362,15 @@ export function workspaceLaunchStages(journey) {
   const project = journey.steps.find(step => step.kind === 'project_connect');
   const preparation = project?.preparation;
   const connected =
-    Boolean(preparation?.exists) &&
-    project?.status === 'complete' &&
-    Boolean(journey.receipts?.project_workspace_id);
+    project?.status === 'complete' && Boolean(journey.receipts?.project_workspace_id);
   const installed = integration?.status === 'complete';
   const grouped = Boolean(preparation?.exists);
+  const policy = preparation?.group_policy || 'required';
+  const groupOptional = policy === 'recommended' || policy === 'none';
+  const groupComplete = grouped || policy === 'none';
   const acknowledged = Boolean(preparation?.acknowledged || connected);
+  const preparationComplete = acknowledged || (groupOptional && !grouped);
+  const workspaceEnabled = installed && (groupOptional || (grouped && acknowledged));
   return [
     {
       id: 'integration',
@@ -372,18 +378,18 @@ export function workspaceLaunchStages(journey) {
       complete: installed,
       enabled: true
     },
-    { id: 'group', title: copy.group_title, complete: grouped, enabled: installed },
+    { id: 'group', title: copy.group_title, complete: groupComplete, enabled: installed },
     {
       id: 'preparation',
       title: copy.runtime_title,
-      complete: acknowledged,
+      complete: preparationComplete,
       enabled: installed && grouped
     },
     {
       id: 'workspace',
       title: 'Create New Workspace',
       complete: connected,
-      enabled: installed && grouped && acknowledged
+      enabled: workspaceEnabled
     }
   ];
 }
@@ -487,6 +493,26 @@ function renderWorkspaceLaunch(journey) {
           const route = await workspaceRoute(journey.receipts.project_workspace_id);
           if (route) window.location.assign(route);
         });
+    } else if (preparation?.group_policy === 'recommended') {
+      elements.stepDescription.textContent = `This template recommends ${copy.group_name}, but you can continue without creating a Home. The workspace creator will require an explicit grouped or standalone choice.`;
+      button('Build Recommended Group', launchGroupBuilder, true);
+      button('Choose Placement in Workspace Creator', () => {
+        state.launchStage = 'workspace';
+        render();
+        elements.stepTitle.focus();
+      });
+    } else if (preparation?.group_policy === 'none') {
+      elements.stepDescription.textContent =
+        'This template is explicitly standalone. No Assistant Program Home will be created.';
+      button(
+        'Continue',
+        () => {
+          state.launchStage = 'workspace';
+          render();
+          elements.stepTitle.focus();
+        },
+        true
+      );
     } else {
       elements.stepDescription.textContent = `Use Build Group on the workspace map to create one place for your projects. The shared builder opens with “${copy.group_name}” prefilled; workspaces and teams come later.`;
       button('Build Group', launchGroupBuilder, true);
@@ -507,7 +533,15 @@ function renderWorkspaceLaunch(journey) {
     button('Check Setup', checkPreparation);
     button(state.preparationCheck ? 'Continue' : 'Set up later', acknowledgePreparation, true);
   } else {
-    elements.stepDescription.textContent = `Your workspace will belong to ${preparation?.name || 'your group'}. Choose a new or existing project and confirm its team in the workspace creator.`;
+    if (preparation?.group_policy === 'none') {
+      elements.stepDescription.textContent =
+        'Create a standalone workspace. No Assistant Program Home or membership will be added.';
+    } else if (preparation?.group_policy === 'recommended' && !preparation?.exists) {
+      elements.stepDescription.textContent =
+        'Choose grouped or standalone placement, then review the exact project changes in the workspace creator.';
+    } else {
+      elements.stepDescription.textContent = `Your workspace will belong to ${preparation?.name || 'your group'}. Choose a new or existing project and confirm its team in the workspace creator.`;
+    }
     elements.receipt.appendChild(
       makeText(
         'p',
@@ -549,12 +583,14 @@ function renderWorkspaceLaunch(journey) {
             await launchWorkspaceCreator();
         });
       }
-      button('Open Group', async () => {
-        const route = await workspaceRoute(
-          preparation?.group_id || journey.receipts.home_workspace_id
-        );
-        if (route) window.location.assign(route);
-      });
+      if (preparation?.group_id || journey.receipts.home_workspace_id) {
+        button('Open Group', async () => {
+          const route = await workspaceRoute(
+            preparation?.group_id || journey.receipts.home_workspace_id
+          );
+          if (route) window.location.assign(route);
+        });
+      }
     } else button('Create New Workspace', launchWorkspaceCreator, true);
   }
   renderReview();
@@ -735,6 +771,20 @@ async function handleAction(action, trigger) {
   if (action.id === 'connect_another_project') return createChildRun();
 }
 
+function currentProjectPlacement() {
+  const preparation = setupJourneyCurrentStep(state.journey, state.selectedStepID)?.preparation;
+  const available = Array.isArray(preparation?.available_compositions)
+    ? preparation.available_compositions.filter(
+        value => value === 'grouped' || value === 'standalone'
+      )
+    : [];
+  return {
+    policy: String(preparation?.group_policy || ''),
+    available,
+    initial: available.length === 1 ? available[0] : ''
+  };
+}
+
 async function beginExistingProject(pickAgain = false) {
   if (!pickAgain && state.projectDrafts.existing) {
     state.draft = state.projectDrafts.existing;
@@ -757,13 +807,17 @@ async function beginExistingProject(pickAgain = false) {
     const pieces = String(picked.path || '')
       .split(/[\\/]/)
       .filter(Boolean);
+    const placement = currentProjectPlacement();
     state.draft = {
       kind: 'existing',
       selectionToken: picked.selection_token,
       selectedFolder: picked.path || '',
       workspaceName: state.projectDrafts.existing?.workspaceName || pieces.at(-1) || 'Project',
       entryName: '',
-      candidates: []
+      candidates: [],
+      groupPolicy: placement.policy,
+      groupCompositions: placement.available,
+      groupComposition: state.projectDrafts.existing?.groupComposition || placement.initial
     };
     state.projectDrafts.existing = state.draft;
     state.review = null;
@@ -777,12 +831,16 @@ async function beginExistingProject(pickAgain = false) {
 }
 
 function beginNewProject() {
+  const placement = currentProjectPlacement();
   state.draft = state.projectDrafts.new || {
     kind: 'new',
     workspaceName: '',
     projectName: '',
     candidates: [],
-    optionsOpen: false
+    optionsOpen: false,
+    groupPolicy: placement.policy,
+    groupCompositions: placement.available,
+    groupComposition: placement.initial
   };
   state.projectDrafts.new = state.draft;
   state.review = null;
@@ -900,6 +958,51 @@ function renderDraft(step) {
       if (state.draft?.kind === 'new') state.draft.optionsOpen = options.open;
     });
     form.appendChild(options);
+  }
+  const compositions = Array.isArray(state.draft.groupCompositions)
+    ? state.draft.groupCompositions
+    : [];
+  if (compositions.length > 1) {
+    const label = document.createElement('label');
+    label.className = 'setup-journey__field';
+    label.appendChild(makeText('span', '', 'Project placement'));
+    const select = document.createElement('select');
+    select.name = 'project-placement';
+    select.required = true;
+    select.appendChild(new Option('Choose grouped or standalone', ''));
+    select.appendChild(new Option('Use the Assistant Program Home', 'grouped'));
+    select.appendChild(new Option('Create a standalone project', 'standalone'));
+    select.value = state.draft.groupComposition || '';
+    select.addEventListener('change', () => {
+      state.draft.groupComposition = select.value;
+      state.review = null;
+      state.reviewInput = null;
+    });
+    label.appendChild(select);
+    label.appendChild(
+      makeText(
+        'small',
+        '',
+        'Grouped placement uses the exact canonical Home. Standalone keeps project roles local and creates no Home membership.'
+      )
+    );
+    form.appendChild(label);
+  } else if (compositions[0] === 'grouped') {
+    form.appendChild(
+      makeText(
+        'p',
+        'setup-journey__scope-note',
+        'This template requires its canonical group destination.'
+      )
+    );
+  } else if (compositions[0] === 'standalone') {
+    form.appendChild(
+      makeText(
+        'p',
+        'setup-journey__scope-note',
+        'This template creates a standalone project with no Home membership.'
+      )
+    );
   }
   form.appendChild(
     makeText(
@@ -1119,11 +1222,23 @@ function renderReview() {
       container,
       [
         ['Project in Ori', project.workspace_name],
-        ['Home', project.parent_workspace_name],
         [
-          'Home setup',
-          project.home_will_be_created ? 'Create this Home' : 'Use your existing Home'
+          'Placement',
+          project.group_composition === 'standalone'
+            ? 'Standalone — no Home membership'
+            : project.group_composition === 'grouped'
+              ? `Grouped in ${project.parent_workspace_name}`
+              : project.parent_workspace_name
         ],
+        ...(project.group_composition === 'standalone'
+          ? []
+          : [
+              ['Home', project.parent_workspace_name],
+              [
+                'Home setup',
+                project.home_will_be_created ? 'Create this Home' : 'Use your existing Home'
+              ]
+            ]),
         ['Project file', project.entry_name],
         ...(project.selected_folder ? [['Existing folder', project.selected_folder]] : []),
         ['Team', 'Add your team in a later step'],
@@ -1205,15 +1320,19 @@ function reviewRows(review) {
   }
   const project = review.project_connection;
   if (project) {
-    rows.push(
-      ['Workspace', project.workspace_name],
-      ['Parent', project.parent_workspace_name],
-      [
-        'Home',
-        project.home_will_be_created ? 'Will be created if still missing' : 'Will be reused'
-      ],
-      ['Project file', project.entry_name]
-    );
+    rows.push(['Workspace', project.workspace_name]);
+    if (project.group_composition === 'standalone') {
+      rows.push(['Placement', 'Standalone — no Home membership']);
+    } else {
+      rows.push(
+        ['Parent', project.parent_workspace_name],
+        [
+          'Home',
+          project.home_will_be_created ? 'Will be created if still missing' : 'Will be reused'
+        ]
+      );
+    }
+    rows.push(['Project file', project.entry_name]);
     if (project.selected_folder) rows.push(['Authorized folder', project.selected_folder]);
     if (project.project_name) rows.push(['Project name', project.project_name]);
     if (project.created_files?.length)

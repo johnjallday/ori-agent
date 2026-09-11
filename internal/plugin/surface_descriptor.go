@@ -43,9 +43,10 @@ const (
 )
 
 const (
-	HostFeatureAssistantProgramV1       = "assistant_program_v1"
-	HostFeatureSpecialistSetupJourneyV1 = "specialist_setup_journey_v1"
-	HostFeatureSetupQuestsV1            = "setup_quests_v1"
+	HostFeatureAssistantProgramV1          = "assistant_program_v1"
+	HostFeatureSpecialistSetupJourneyV1    = "specialist_setup_journey_v1"
+	HostFeatureSetupQuestsV1               = "setup_quests_v1"
+	HostFeatureTemplateGroupRequirementsV1 = "template_group_requirements_v1"
 )
 
 // ContributionError is safe to project during local plugin validation. It
@@ -299,6 +300,7 @@ func (c *SurfaceContribution) Validate() error {
 		HostFeatureAssistantProgramV1,
 		HostFeatureSpecialistSetupJourneyV1,
 		HostFeatureSetupQuestsV1,
+		HostFeatureTemplateGroupRequirementsV1,
 	})
 }
 

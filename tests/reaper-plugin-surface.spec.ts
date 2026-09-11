@@ -62,12 +62,59 @@ async function captureEvidence(page: import('@playwright/test').Page, name: stri
   await page.screenshot({ path: path.join(evidenceDir, name), fullPage: true });
 }
 
+async function createReviewedGroupedWorkspace(
+  request: import('@playwright/test').APIRequestContext,
+  data: Record<string, unknown>,
+  idempotencyKey: string
+) {
+  let review = await request.post('/api/workspaces', {
+    data: { ...data, group_composition: 'grouped', group_requirement_review: true }
+  });
+  expect(review.ok(), await review.text()).toBeTruthy();
+  let reviewed = (await review.json()).group_requirement_review;
+  if (reviewed?.state === 'home_creation_review_required') {
+    const homeReview = await request.post('/api/workspaces/group-requirement/home/review', {
+      data: { template_id: data.template_id }
+    });
+    const homeReviewText = await homeReview.text();
+    expect(homeReview.ok(), homeReviewText).toBeTruthy();
+    const homeReviewed = JSON.parse(homeReviewText).group_requirement_review;
+    expect(homeReviewed?.state, homeReviewText).toBe('ready_grouped');
+    expect(homeReviewed?.home_will_be_created, homeReviewText).toBeTruthy();
+    const homeCommit = await request.post('/api/workspaces/group-requirement/home/commit', {
+      data: {
+        group_review_token: homeReviewed.review_token,
+        idempotency_key: `${idempotencyKey}-home`,
+        template_id: data.template_id
+      }
+    });
+    const homeCommitText = await homeCommit.text();
+    expect(homeCommit.ok(), homeCommitText).toBeTruthy();
+    expect(JSON.parse(homeCommitText).group_requirement?.state, homeCommitText).toBe('home_ready');
+    review = await request.post('/api/workspaces', {
+      data: { ...data, group_composition: 'grouped', group_requirement_review: true }
+    });
+    expect(review.ok(), await review.text()).toBeTruthy();
+    reviewed = (await review.json()).group_requirement_review;
+  }
+  expect(reviewed?.state).toBe('ready_grouped');
+  expect(reviewed?.review_token).toBeTruthy();
+  return request.post('/api/workspaces', {
+    data: {
+      ...data,
+      group_composition: 'grouped',
+      group_review_token: reviewed.review_token,
+      idempotency_key: idempotencyKey
+    }
+  });
+}
+
 test.skip(
   !pluginPath,
   'set ORI_REAPER_PLUGIN_PATH to the locally built coordinated plugin checkout'
 );
 
-test('Create Workspace hires the shared assistant roster from the Team step', async ({
+test('Create Workspace prepares the required Home before creating and staffing the project', async ({
   page,
   request
 }) => {
@@ -82,7 +129,6 @@ test('Create Workspace hires the shared assistant roster from the Team step', as
 
   let workspaceID = '';
   let stationID = '';
-  const agentNames: string[] = [];
   try {
     await page.goto('/workspaces');
     await page.evaluate(() => {
@@ -100,7 +146,6 @@ test('Create Workspace hires the shared assistant roster from the Team step', as
     await page.locator('#wizardNextBtn').click();
     await expect(page.locator('#wizardStep2')).toBeVisible();
     const workspaceName = `Wizard REAPER ${Date.now().toString(36)}`;
-    const producerName = `June ${Date.now().toString(36)}`;
     await page.locator('#folderNameInput').fill(workspaceName);
     const openProject = page.locator('#projectTemplateOpenAfterCreateToggle');
     if (await openProject.isChecked()) await openProject.uncheck();
@@ -111,35 +156,114 @@ test('Create Workspace hires the shared assistant roster from the Team step', as
       'Staff your music production assistants'
     );
     await expect(page.locator('#workspaceAssistantProgramCreate')).toBeVisible();
-    await expect(page.locator('#existingAgentRosterPanel')).toBeHidden();
-    await expect(page.locator('[data-team-agent-setup]')).toHaveCount(0);
-    await expect(page.locator('[data-team-accept-all]')).toHaveCount(0);
-    await expect(page.locator('#workspaceTeamRoster .workspace-team-row')).toHaveCount(4);
-    await expect(page.locator('#workspaceTeamRoster')).toContainText('Mix Engineer');
-    await expect(page.locator('#workspaceTeamRoster')).toContainText('Songwriter');
-    await page.locator('#assistantProgramCreateName').fill(producerName);
-    await expect(page.locator('#workspaceTeamRoster')).toContainText(producerName);
-    await captureEvidence(page, 'music-producer-00-create-hire.png');
+    await expect(page.locator('#wizardStep3')).toContainText('Mix Engineer');
+    await expect(page.locator('#wizardStep3')).toContainText('Songwriter');
+    await expect(page.locator('#wizardStep3')).toContainText('Missing');
 
     await page.locator('#wizardNextBtn').click();
     await expect(page.locator('#wizardStep4')).toBeVisible();
-    await expect(page.locator('#workspaceReviewSummary')).toContainText(`Producer · Primary`);
     await expect(page.locator('#workspaceReviewSummary')).toContainText(
-      '4 shared assistant roles will be created and linked'
+      'Required group: Music Production Home'
     );
+
+    const homeResponsePromise = page.waitForResponse(
+      response =>
+        response.url().endsWith('/api/workspaces/group-requirement/home/commit') &&
+        response.request().method() === 'POST'
+    );
+    page.once('dialog', async dialog => {
+      expect(dialog.message()).toContain('must exist before this workspace can be created');
+      expect(dialog.message()).toContain('creates only the empty group');
+      await dialog.accept();
+    });
+    await page.locator('#createFolderBtn').click();
+    const homeResponse = await homeResponsePromise;
+    expect(homeResponse.ok(), await homeResponse.text()).toBeTruthy();
+    const prepared = (await homeResponse.json()).group_requirement;
+    expect(prepared.state).toBe('home_ready');
+    expect(prepared.home_created).toBeTruthy();
+    stationID = prepared.home_workspace_id;
+    await expect(page.locator('#addFolderModal')).toBeVisible();
+    await expect(page.locator('#workspaceReviewReadiness')).toContainText(
+      'No workspace was created'
+    );
+    await expect(page.locator('#workspaceReviewReadiness')).toContainText(
+      'Click Confirm create to create the workspace separately'
+    );
+    await expect(page.locator('#createFolderBtn')).toHaveText(`Confirm create “${workspaceName}”`);
+    const homeOnly = await request.get('/api/workspaces').then(response => response.json());
+    const homeOnlyRecords = Array.isArray(homeOnly.folders) ? homeOnly.folders : [];
+    expect(homeOnlyRecords.some((item: { id?: string }) => item.id === stationID)).toBeTruthy();
+    await expect(page.locator(`.ws-map-district[data-group-id="${stationID}"]`)).toBeAttached();
+    expect(
+      homeOnlyRecords.some((item: { name?: string }) => item.name === workspaceName)
+    ).toBeFalsy();
+    await captureEvidence(page, 'music-producer-01-home-before-project.png');
+
+    // Cancelling after Home preparation closes the wizard but leaves only the
+    // reviewed empty Home. Reopening must obtain another fresh project receipt.
+    await page.locator('#addFolderModal .modal-footer [data-bs-dismiss="modal"]').click();
+    await expect(page.locator('#addFolderModal')).toBeHidden();
+    const afterCancel = await request.get('/api/workspaces').then(response => response.json());
+    expect((afterCancel.folders || []).map((item: { id: string }) => item.id)).toEqual([stationID]);
+
+    await page.evaluate(() => {
+      const modal = document.getElementById('addFolderModal');
+      // @ts-expect-error bootstrap is a page global
+      window.bootstrap.Modal.getOrCreateInstance(modal).show();
+    });
+    await expect(page.locator('#addFolderModal')).toBeVisible();
+    await page.locator('#templatePicker').getByRole('radio', { name: 'Reaper Song' }).click();
+    await page.locator('#wizardNextBtn').click();
+    await page.locator('#folderNameInput').fill(workspaceName);
+    if (await openProject.isChecked()) await openProject.uncheck();
+    await page.locator('#wizardNextBtn').click();
+    await page.locator('#wizardNextBtn').click();
+    await expect(page.locator('#wizardStep4')).toBeVisible();
+    const freshReviewPromise = page.waitForResponse(
+      response =>
+        response.url().endsWith('/api/workspaces') &&
+        response.request().method() === 'POST' &&
+        response.request().postDataJSON()?.group_requirement_review === true
+    );
+    await page.locator('#createFolderBtn').click();
+    const freshReview = await freshReviewPromise;
+    expect(freshReview.ok(), await freshReview.text()).toBeTruthy();
+    await expect(page.locator('#createFolderBtn')).toHaveText(`Confirm create “${workspaceName}”`);
 
     const createResponsePromise = page.waitForResponse(
       response =>
-        response.url().endsWith('/api/workspaces') && response.request().method() === 'POST'
+        response.url().endsWith('/api/workspaces') &&
+        response.request().method() === 'POST' &&
+        Boolean(response.request().postDataJSON()?.group_review_token)
     );
+    const groupPlacementPromise = page.waitForRequest(request => {
+      if (!request.url().endsWith('/api/workspace-map/layout') || request.method() !== 'PATCH') {
+        return false;
+      }
+      return request
+        .postDataJSON()
+        ?.operations?.some((operation: { op?: string }) => operation.op === 'set_positions');
+    });
     await page.locator('#createFolderBtn').click();
     const createResponse = await createResponsePromise;
     expect(createResponse.ok(), await createResponse.text()).toBeTruthy();
     const createPayload = createResponse.request().postDataJSON();
+    expect(createPayload.create_required_home).toBeUndefined();
     expect(createPayload.template_agent_review).toBeUndefined();
     expect(createPayload.assistant_hire).toBeUndefined();
     const created = await createResponse.json();
     workspaceID = created.folder.id;
+    const placementRequest = await groupPlacementPromise;
+    const positions = placementRequest
+      .postDataJSON()
+      .operations.find((operation: { op?: string }) => operation.op === 'set_positions')?.positions;
+    expect(positions?.[stationID]).toBeTruthy();
+    expect(positions?.[workspaceID]).toBeTruthy();
+    expect(positions[workspaceID].x).toBeGreaterThanOrEqual(positions[stationID].x);
+    expect(positions[workspaceID].x).toBeLessThan(positions[stationID].x + 176);
+    expect(positions[workspaceID].y).toBeGreaterThanOrEqual(positions[stationID].y);
+    expect(positions[workspaceID].y).toBeLessThan(positions[stationID].y + 170);
     await page.waitForURL(`**/workspaces/${encodeURIComponent(created.folder.folder_slug)}`, {
       timeout: 20_000
     });
@@ -147,44 +271,46 @@ test('Create Workspace hires the shared assistant roster from the Team step', as
     const programResponse = await request.get(`/api/workspaces/${workspaceID}/assistant-program`);
     expect(programResponse.ok(), await programResponse.text()).toBeTruthy();
     const program = await programResponse.json();
-    expect(program.hired).toBeTruthy();
-    expect(program.primary_name).toBe(producerName);
-    expect(program.roster).toHaveLength(3);
-    stationID = program.station_id;
-    agentNames.push(
-      producerName,
-      ...program.roster.map((role: { agent_name: string }) => role.agent_name)
-    );
+    expect(program.station_id).toBe(stationID);
+    const createdWorkspace = await request
+      .get(`/api/workspaces/${workspaceID}`)
+      .then(response => response.json());
+    expect(createdWorkspace.parent_id).toBe(stationID);
+    expect(createdWorkspace.group_requirement_status?.state).toBe('ready_grouped');
 
-    // A later compatible project must preview the stable roster it will link,
-    // not offer a rename that the already-hired station would ignore.
     await page.goto('/workspaces');
-    await page.evaluate(() => {
-      const modal = document.getElementById('addFolderModal');
-      // @ts-expect-error bootstrap is a page global
-      window.bootstrap.Modal.getOrCreateInstance(modal).show();
-    });
-    await page
-      .locator('#templatePicker')
-      .getByRole('radio', { name: 'Reaper Song', exact: true })
-      .click();
-    await page.locator('#wizardNextBtn').click();
-    await page.locator('#folderNameInput').fill(`Second Wizard REAPER ${Date.now().toString(36)}`);
-    await page.locator('#wizardNextBtn').click();
-    await expect(page.locator('#wizardStep3Title')).toHaveText(
-      'Connect your shared assistant team'
+    const district = page.locator(`.ws-map-district[data-group-id="${stationID}"]`);
+    const tile = page.locator(`.ws-map-tile[data-ws-id="${workspaceID}"]`);
+    await expect(district).toBeVisible();
+    await expect(tile).toBeVisible();
+    const geometry = await page.evaluate(
+      ({ homeID, childID }) => {
+        const group = document.querySelector(`.ws-map-district[data-group-id="${homeID}"]`);
+        const child = document.querySelector(`.ws-map-tile[data-ws-id="${childID}"]`);
+        const value = (element: Element | null, property: string) =>
+          Number.parseFloat((element as HTMLElement | null)?.style[property] || 'NaN');
+        return {
+          group: {
+            x: value(group, 'left'),
+            y: value(group, 'top'),
+            width: value(group, 'width'),
+            height: value(group, 'height')
+          },
+          child: { x: value(child, 'left'), y: value(child, 'top') }
+        };
+      },
+      { homeID: stationID, childID: workspaceID }
     );
-    await expect(page.locator('#assistantProgramCreateName')).toHaveValue(producerName);
-    await expect(page.locator('#assistantProgramCreateName')).toBeDisabled();
-    await expect(page.locator('#workspaceTeamRoster')).toContainText(
-      'Existing shared assistant role · will be linked'
-    );
+    expect(geometry.child.x).toBeGreaterThanOrEqual(geometry.group.x);
+    expect(geometry.child.y).toBeGreaterThanOrEqual(geometry.group.y);
+    expect(geometry.child.x).toBeLessThan(geometry.group.x + geometry.group.width);
+    expect(geometry.child.y).toBeLessThan(geometry.group.y + geometry.group.height);
+    await page.locator('[data-map-zoom-out]').click();
+    await page.waitForTimeout(650); // let the Map's deliberate rise animation finish
+    await captureEvidence(page, 'music-producer-02-group-aware-map.png');
   } finally {
     if (stationID)
       await cleanupAssistantTopology(request, stationID, workspaceID ? [workspaceID] : []);
-    for (const name of agentNames) {
-      await request.delete(`/api/agents/${encodeURIComponent(name)}`).catch(() => {});
-    }
     await request.delete(`/api/plugins/${pluginName}`).catch(() => {});
   }
 });
@@ -232,14 +358,16 @@ test('plugin-backed Reaper Song reaches generic setup, surface, action, script, 
     (await templates.json()).templates.some((item: { id: string }) => item.id === templateID)
   ).toBeTruthy();
 
-  const create = await request.post('/api/workspaces', {
-    data: {
+  const create = await createReviewedGroupedWorkspace(
+    request,
+    {
       name: `Plugin REAPER ${Date.now().toString(36)}`,
       description: 'Disposable plugin-backed REAPER fixture',
       template_id: templateID,
       create_template_agents: true
-    }
-  });
+    },
+    `plugin-reaper-${Date.now().toString(36)}`
+  );
   expect(create.ok(), await create.text()).toBeTruthy();
   const created = await create.json();
   const workspace = created.folder;
@@ -289,14 +417,16 @@ test('plugin-backed Reaper Song reaches generic setup, surface, action, script, 
     expect(hired.stage_id).toBe('helper');
     expect(hired.level).toBe(1);
 
-    const secondCreate = await request.post('/api/workspaces', {
-      data: {
+    const secondCreate = await createReviewedGroupedWorkspace(
+      request,
+      {
         name: `Second Plugin REAPER ${Date.now().toString(36)}`,
         description: 'Second disposable linked assistant fixture',
         template_id: templateID,
         create_template_agents: true
-      }
-    });
+      },
+      `second-plugin-reaper-${Date.now().toString(36)}`
+    );
     expect(secondCreate.ok(), await secondCreate.text()).toBeTruthy();
     const secondCreated = await secondCreate.json();
     const secondAssistantWorkspace = secondCreated.folder as {
@@ -328,14 +458,16 @@ test('plugin-backed Reaper Song reaches generic setup, surface, action, script, 
     await expect(page.getByRole('link', { name: secondAssistantWorkspace.name })).toBeVisible();
     await capture('music-producer-02-helper-home.png');
 
-    const thirdCreate = await request.post('/api/workspaces', {
-      data: {
+    const thirdCreate = await createReviewedGroupedWorkspace(
+      request,
+      {
         name: `Third Plugin REAPER ${Date.now().toString(36)}`,
         description: 'Third disposable linked assistant fixture',
         template_id: templateID,
         create_template_agents: true
-      }
-    });
+      },
+      `third-plugin-reaper-${Date.now().toString(36)}`
+    );
     expect(thirdCreate.ok(), await thirdCreate.text()).toBeTruthy();
     const thirdCreated = await thirdCreate.json();
     linkedAssistantWorkspaces.push(thirdCreated.folder);

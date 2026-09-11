@@ -73,7 +73,7 @@ func (a *ProjectConnectionAdapter) prepare(ctx context.Context, scope ReadScope,
 	if err != nil {
 		return ActionReviewMaterial{}, projectconnection.ErrUnavailable
 	}
-	if scope.WorkspaceLaunch {
+	if scope.WorkspaceLaunch && projectRequestNeedsPreparedGroup(template, request) {
 		preparation, prepErr := a.owner.HomePreparation(projectConnectionScope(scope, template))
 		if prepErr != nil || !preparation.Exists || !preparation.Acknowledged {
 			return ActionReviewMaterial{}, ErrConflict
@@ -132,6 +132,8 @@ func (a *ProjectConnectionAdapter) Read(ctx context.Context, scope ReadScope) (C
 		return CanonicalStepRead{BlockedReason: ReasonOwnerUnavailable}, nil
 	}
 	var preparation *projectconnection.HomePreparation
+	requiresPreparedGroup := template.GroupRequirement == nil ||
+		(template.GroupRequirement != nil && template.GroupRequirement.Policy == projecttemplates.GroupPolicyRequired)
 	if scope.WorkspaceLaunch {
 		value, prepErr := a.owner.HomePreparation(projectConnectionScope(scope, template))
 		if prepErr != nil {
@@ -139,24 +141,27 @@ func (a *ProjectConnectionAdapter) Read(ctx context.Context, scope ReadScope) (C
 		}
 		// A historical project/link cannot prove its Home still exists. Do not
 		// advertise another group creation when canonical ownership was lost.
-		if !value.Exists && (scope.HomeWorkspaceID != "" || scope.ProjectWorkspaceID != "") {
+		if requiresPreparedGroup && !value.Exists && (scope.HomeWorkspaceID != "" || scope.ProjectWorkspaceID != "") {
 			return CanonicalStepRead{BlockedReason: ReasonOwnerUnavailable}, nil
 		}
 		preparation = &value
 	}
 	homeResult := CanonicalResult{}
-	if preparation != nil && scope.RunKind == RunKindRoot {
+	if requiresPreparedGroup && preparation != nil && scope.RunKind == RunKindRoot {
 		homeResult.HomeWorkspaceID = preparation.HomeID
 	}
 	observed, ok := a.owner.ObservedResult(projectConnectionScope(scope, template), scope.HomeWorkspaceID, scope.ProjectWorkspaceID)
 	if !ok {
-		if preparation != nil && !preparation.Exists {
+		if requiresPreparedGroup && preparation != nil && !preparation.Exists {
 			return CanonicalStepRead{AvailableActions: []ActionID{ActionReviewCreateGroup}, Preparation: preparation}, nil
 		}
-		if preparation != nil && !preparation.Acknowledged {
+		if requiresPreparedGroup && preparation != nil && !preparation.Acknowledged {
 			return CanonicalStepRead{AvailableActions: []ActionID{ActionAcknowledgePreparation}, Preparation: preparation, Result: homeResult}, nil
 		}
-		actions := make([]ActionID, 0, 2)
+		actions := make([]ActionID, 0, 3)
+		if preparation != nil && !preparation.Exists && template.GroupRequirement != nil && template.GroupRequirement.Policy == projecttemplates.GroupPolicyRecommended {
+			actions = append(actions, ActionReviewCreateGroup)
+		}
 		if template.ProjectConnection != nil && template.ProjectConnection.Supports(projecttemplates.ProjectConnectionExistingProject) {
 			actions = append(actions, ActionReviewExistingProject)
 		}
@@ -184,6 +189,14 @@ func (a *ProjectConnectionAdapter) ConsequenceObserved(action ActionID, state Ca
 	}
 	return (action == ActionConnectExistingProject || action == ActionCreateNewProject) && state.Complete &&
 		state.Result.ProjectWorkspaceID != ""
+}
+
+func projectRequestNeedsPreparedGroup(template projecttemplates.Template, request projectconnection.Request) bool {
+	if template.GroupRequirement == nil {
+		return true
+	}
+	return template.GroupRequirement.Policy == projecttemplates.GroupPolicyRequired &&
+		request.GroupComposition != "standalone"
 }
 
 func projectConnectionFailure(err error) error {
@@ -258,7 +271,7 @@ func validProjectConnectionProjection(projection *projectconnection.Projection) 
 		return true
 	}
 	if len(projection.WorkspaceName) == 0 || len(projection.WorkspaceName) > 128 ||
-		len(projection.ProjectName) > 128 || len(projection.ParentWorkspaceName) == 0 || len(projection.ParentWorkspaceName) > 128 ||
+		len(projection.ProjectName) > 128 || len(projection.ParentWorkspaceName) > 128 ||
 		len(projection.EntryName) > 255 ||
 		len(projection.EntryCandidates) > maxEntryCandidatesProjection || len(projection.CreatedFiles) > maxCreatedFilesProjection ||
 		len(projection.DefaultsStatement) > 512 {
@@ -278,6 +291,24 @@ func validProjectConnectionProjection(projection *projectconnection.Projection) 
 		}
 	default:
 		return false
+	}
+	if projection.GroupRequirementState == "" {
+		if projection.ParentWorkspaceName == "" {
+			return false
+		}
+	} else {
+		switch projection.GroupComposition {
+		case "grouped":
+			if projection.GroupRequirementState != "ready_grouped" || projection.ParentWorkspaceName == "" {
+				return false
+			}
+		case "standalone":
+			if projection.GroupRequirementState != "ready_standalone" || projection.ParentWorkspaceName != "" || projection.HomeWillBeCreated {
+				return false
+			}
+		default:
+			return false
+		}
 	}
 	for _, candidate := range projection.EntryCandidates {
 		if candidate == "" || len(candidate) > 255 || filepath.Base(candidate) != candidate || strings.ContainsAny(candidate, `/\\`) {

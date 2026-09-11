@@ -57,6 +57,10 @@ func (s *FileStore) MoveWorkspaceFolder(id, newParentID string) ([]MovedWorkspac
 	if !healingExactLink && protectedAssistantProgramSubtree(s.cache, id) {
 		return nil, ErrAssistantProgramProtected
 	}
+	if current != nil && current.AssistantProjectLink == nil && HasRequiredGroupRequirement(current) &&
+		newParentID != "" && newParentID != current.ParentID {
+		return nil, ErrGroupRequirementProtected
+	}
 
 	// Validate the destination parent.
 	if newParentID != "" {
@@ -85,6 +89,17 @@ func (s *FileStore) MoveWorkspaceFolder(id, newParentID string) ([]MovedWorkspac
 	}
 
 	oldFolderPath := s.resolveFolder(oldRelPath)
+	// The cache intentionally omits tasks and messages. Load the canonical
+	// record before moving so rewriting ParentID cannot erase those fields.
+	configPath := filepath.Join(oldFolderPath, WorkspaceConfigFile)
+	data, err := os.ReadFile(configPath) // #nosec G304 -- path comes from the store-owned workspace index.
+	if err != nil {
+		return nil, fmt.Errorf("failed to read workspace before move: %w", err)
+	}
+	fullWorkspace, err := FromJSON(data)
+	if err != nil || fullWorkspace == nil || fullWorkspace.ID != id {
+		return nil, fmt.Errorf("failed to load workspace before move")
+	}
 	slug := filepath.Base(oldFolderPath)
 
 	// Resolve the destination parent directory.
@@ -139,15 +154,13 @@ func (s *FileStore) MoveWorkspaceFolder(id, newParentID string) ([]MovedWorkspac
 	// Update the moved node: path mapping, ParentID, persisted workspace.json,
 	// and index entry.
 	s.idToPath[id] = newRelPath
-	ws, ok := s.cache[id]
-	if ok {
-		ws.ParentID = newParentID
-		ws.UpdatedAt = time.Now()
-		if err := s.persistWorkspaceLocked(ws); err != nil {
-			return nil, fmt.Errorf("failed to persist moved workspace: %w", err)
-		}
-		s.registerIndexLocked(ws, newRelPath)
+	fullWorkspace.ParentID = newParentID
+	fullWorkspace.UpdatedAt = time.Now()
+	if err := s.persistWorkspaceLocked(fullWorkspace); err != nil {
+		return nil, fmt.Errorf("failed to persist moved workspace: %w", err)
 	}
+	s.cacheMeta(fullWorkspace)
+	s.registerIndexLocked(fullWorkspace, newRelPath)
 	moved = append(moved, MovedWorkspace{ID: id, OldPath: oldFolderPath, NewPath: s.resolveFolder(newRelPath)})
 
 	// Update every descendant: their position within the subtree is unchanged,

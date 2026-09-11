@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +16,7 @@ const (
 	assistantTopologyReviewTTL  = 10 * time.Minute
 	assistantTopologyReceiptMax = 32
 	AssistantTopologyDisconnect = "disconnect_project"
+	AssistantTopologyReconnect  = "reconnect_project"
 	AssistantTopologyRemoveHome = "remove_home"
 )
 
@@ -64,6 +66,24 @@ type AssistantDisconnectReview struct {
 }
 
 type AssistantDisconnectReceipt struct {
+	StationWorkspaceID string    `json:"station_workspace_id"`
+	ProjectWorkspaceID string    `json:"project_workspace_id"`
+	LinkID             string    `json:"link_id"`
+	RecordedAt         time.Time `json:"recorded_at"`
+	Replayed           bool      `json:"replayed,omitempty"`
+}
+
+type AssistantReconnectReview struct {
+	Token              string    `json:"token"`
+	ExpiresAt          time.Time `json:"expires_at"`
+	StationWorkspaceID string    `json:"station_workspace_id"`
+	ProjectWorkspaceID string    `json:"project_workspace_id"`
+	LinkID             string    `json:"link_id"`
+	StateRevision      int64     `json:"state_revision"`
+	Impact             []string  `json:"impact"`
+}
+
+type AssistantReconnectReceipt struct {
 	StationWorkspaceID string    `json:"station_workspace_id"`
 	ProjectWorkspaceID string    `json:"project_workspace_id"`
 	LinkID             string    `json:"link_id"`
@@ -122,15 +142,18 @@ func (service *AssistantProgramStore) ReviewDisconnect(stationID, projectID stri
 	}); err != nil {
 		return nil, ErrAssistantTopologyConflict
 	}
+	impact := []string{
+		"The project will stop appearing in this Home's portfolio.",
+		"Home handoffs to this project will stop.",
+		"The project workspace, project team, tasks, files, and copied assets will be preserved.",
+	}
+	if service.hasRequiredGroupRequirement(project) {
+		impact = append(impact, "Its Required template group contract will remain recorded and unfulfilled until reviewed reconnect or transition.")
+	}
 	return &AssistantDisconnectReview{
 		Token: receipt.Token, ExpiresAt: receipt.ExpiresAt, StationWorkspaceID: station.ID,
 		ProjectWorkspaceID: project.ID, LinkID: link.ID, StateRevision: state.StateRevision,
-		LinkRevision: link.StateRevision,
-		Impact: []string{
-			"The project will stop appearing in this Home's portfolio.",
-			"Home handoffs to this project will stop.",
-			"The project workspace, project team, tasks, files, and copied assets will be preserved.",
-		},
+		LinkRevision: link.StateRevision, Impact: impact,
 	}, nil
 }
 
@@ -185,7 +208,8 @@ func (service *AssistantProgramStore) CommitDisconnect(stationID, token, idempot
 			return ErrAssistantTopologyConflict
 		}
 		current.SetAssistantProjectLink(nil)
-		current.ParentID = ""
+		// Preserve ParentID until the folder owner performs the physical move;
+		// changing it through an ordinary Save can create a second root folder.
 		return nil
 	}); err != nil {
 		return nil, err
@@ -239,6 +263,185 @@ func (service *AssistantProgramStore) CommitDisconnect(stationID, token, idempot
 	return &AssistantDisconnectReceipt{StationWorkspaceID: station.ID, ProjectWorkspaceID: project.ID, LinkID: link.ID, RecordedAt: now}, nil
 }
 
+func (service *AssistantProgramStore) ReviewReconnect(projectID string) (*AssistantReconnectReview, error) {
+	assistantTopologyMu.Lock()
+	defer assistantTopologyMu.Unlock()
+	project, snapshot, station, state, err := service.reconnectResources(projectID, false)
+	if err != nil {
+		return nil, err
+	}
+	now := service.now().UTC()
+	digest := assistantReconnectDigest(station.ID, project.ID, snapshot.ProjectLinkID, state.StateRevision, snapshot.OperationDigest)
+	receipt := AssistantTopologyReviewReceipt{
+		Token: uuid.NewString(), Action: AssistantTopologyReconnect, ProjectWorkspaceID: project.ID,
+		LinkID: snapshot.ProjectLinkID, StateRevision: state.StateRevision, InputDigest: digest,
+		ExpiresAt: now.Add(assistantTopologyReviewTTL),
+	}
+	if err := service.store.Update(station.ID, func(current *Workspace) error {
+		currentState := current.GetAssistantProgramState()
+		if currentState == nil || currentState.StateRevision != state.StateRevision || currentState.Key.Normalize() != snapshot.ProgramKey.Normalize() {
+			return ErrAssistantTopologyConflict
+		}
+		currentState.Topology.ReviewReceipts = appendBoundedTopologyReviews(currentState.Topology.ReviewReceipts, receipt, now)
+		current.SetAssistantProgramState(currentState)
+		return nil
+	}); err != nil {
+		return nil, ErrAssistantTopologyConflict
+	}
+	return &AssistantReconnectReview{
+		Token: receipt.Token, ExpiresAt: receipt.ExpiresAt, StationWorkspaceID: station.ID,
+		ProjectWorkspaceID: project.ID, LinkID: snapshot.ProjectLinkID, StateRevision: state.StateRevision,
+		Impact: []string{
+			"The project will return to its exact recorded Assistant Program Home.",
+			"Reciprocal portfolio and handoff membership will be restored.",
+			"No project files, tasks, team definitions, or grants will be replaced.",
+		},
+	}, nil
+}
+
+func (service *AssistantProgramStore) CommitReconnect(projectID, token, idempotencyKey string) (*AssistantReconnectReceipt, error) {
+	assistantTopologyMu.Lock()
+	defer assistantTopologyMu.Unlock()
+	token, idempotencyKey = strings.TrimSpace(token), strings.TrimSpace(idempotencyKey)
+	if token == "" || idempotencyKey == "" || len(token) > 160 || len(idempotencyKey) > 160 {
+		return nil, ErrAssistantTopologyInvalid
+	}
+	project, snapshot, station, state, err := service.reconnectResources(projectID, true)
+	if err != nil {
+		return nil, err
+	}
+	for _, operation := range state.Topology.OperationReceipts {
+		if operation.IdempotencyKey != idempotencyKey {
+			continue
+		}
+		if operation.Action != AssistantTopologyReconnect || operation.ProjectWorkspaceID != project.ID || operation.LinkID != snapshot.ProjectLinkID {
+			return nil, ErrAssistantTopologyIdempotency
+		}
+		return &AssistantReconnectReceipt{
+			StationWorkspaceID: station.ID, ProjectWorkspaceID: project.ID, LinkID: snapshot.ProjectLinkID,
+			RecordedAt: operation.RecordedAt, Replayed: true,
+		}, nil
+	}
+	if project.GetAssistantProjectLink() != nil {
+		return nil, ErrAssistantTopologyIdempotency
+	}
+	var review *AssistantTopologyReviewReceipt
+	for index := range state.Topology.ReviewReceipts {
+		if state.Topology.ReviewReceipts[index].Token == token {
+			copy := state.Topology.ReviewReceipts[index]
+			review = &copy
+			break
+		}
+	}
+	now := service.now().UTC()
+	if review == nil || review.Action != AssistantTopologyReconnect || review.ConsumedAt != nil || !now.Before(review.ExpiresAt) ||
+		review.ProjectWorkspaceID != project.ID || review.LinkID != snapshot.ProjectLinkID || review.StateRevision != state.StateRevision {
+		return nil, ErrAssistantTopologyReviewExpired
+	}
+	digest := assistantReconnectDigest(station.ID, project.ID, snapshot.ProjectLinkID, state.StateRevision, snapshot.OperationDigest)
+	if digest != review.InputDigest {
+		return nil, ErrAssistantTopologyConflict
+	}
+	linkedHome, _, err := service.EnsureProjectStation(project.ID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: reconnect link: %v", ErrAssistantTopologyConflict, err)
+	}
+	if linkedHome == nil || linkedHome.ID != station.ID {
+		return nil, ErrAssistantTopologyConflict
+	}
+	operation := AssistantTopologyOperationReceipt{
+		IdempotencyKey: idempotencyKey, Action: AssistantTopologyReconnect,
+		ProjectWorkspaceID: project.ID, LinkID: snapshot.ProjectLinkID, InputDigest: digest, RecordedAt: now,
+	}
+	if err := service.store.Update(station.ID, func(current *Workspace) error {
+		currentState := current.GetAssistantProgramState()
+		if currentState == nil || currentState.Key.Normalize() != snapshot.ProgramKey.Normalize() || !containsAssistantProjectID(currentState.LinkedProjectIDs, project.ID) {
+			return ErrAssistantTopologyConflict
+		}
+		for index := range currentState.Topology.ReviewReceipts {
+			if currentState.Topology.ReviewReceipts[index].Token == token {
+				consumed := now
+				currentState.Topology.ReviewReceipts[index].ConsumedAt = &consumed
+			}
+		}
+		currentState.Topology.OperationReceipts = appendBoundedTopologyOperations(currentState.Topology.OperationReceipts, operation)
+		currentState.StateRevision++
+		current.SetAssistantProgramState(currentState)
+		return nil
+	}); err != nil {
+		return nil, ErrAssistantTopologyConflict
+	}
+	return &AssistantReconnectReceipt{
+		StationWorkspaceID: station.ID, ProjectWorkspaceID: project.ID, LinkID: snapshot.ProjectLinkID, RecordedAt: now,
+	}, nil
+}
+
+func (service *AssistantProgramStore) hasRequiredGroupRequirement(project *Workspace) bool {
+	if HasRequiredGroupRequirement(project) {
+		return true
+	}
+	if project == nil {
+		return false
+	}
+	if reader, ok := service.store.(interface {
+		GetFolderWorkspace(string) (*Workspace, error)
+	}); ok {
+		canonical, err := reader.GetFolderWorkspace(project.ID)
+		return err == nil && HasRequiredGroupRequirement(canonical)
+	}
+	return false
+}
+
+func (service *AssistantProgramStore) reconnectResources(projectID string, allowCompleted bool) (*Workspace, *GroupRequirementSnapshot, *Workspace, *AssistantProgramState, error) {
+	if service == nil || service.store == nil {
+		return nil, nil, nil, nil, ErrAssistantTopologyInvalid
+	}
+	project, err := service.store.Get(strings.TrimSpace(projectID))
+	if err != nil || project == nil {
+		return nil, nil, nil, nil, ErrAssistantTopologyConflict
+	}
+	provenance := project.GetTemplateProvenance()
+	if provenance == nil {
+		if reader, ok := service.store.(interface {
+			GetFolderWorkspace(string) (*Workspace, error)
+		}); ok {
+			if canonical, canonicalErr := reader.GetFolderWorkspace(project.ID); canonicalErr == nil && canonical != nil {
+				provenance = canonical.GetTemplateProvenance()
+			}
+		}
+	}
+	if provenance == nil || provenance.GroupRequirement == nil || !provenance.GroupRequirement.StructurallyValid() ||
+		provenance.GroupRequirement.SelectedComposition != GroupRequirementCompositionGrouped || provenance.GroupRequirement.ProgramKey == nil {
+		return nil, nil, nil, nil, ErrAssistantTopologyConflict
+	}
+	snapshot := CloneGroupRequirementSnapshot(provenance.GroupRequirement)
+	station, err := service.store.Get(snapshot.HomeWorkspaceID)
+	if err != nil || station == nil || station.Kind != "group" || station.Status == StatusTrashed || station.Status == StatusMissing {
+		return nil, nil, nil, nil, ErrAssistantStationNotFound
+	}
+	state := station.GetAssistantProgramState()
+	if state == nil || state.Key.Normalize() != snapshot.ProgramKey.Normalize() {
+		return nil, nil, nil, nil, ErrAssistantTopologyConflict
+	}
+	link := project.GetAssistantProjectLink()
+	member := containsAssistantProjectID(state.LinkedProjectIDs, project.ID)
+	if link != nil {
+		if !allowCompleted || !member || project.ParentID != station.ID || link.ID != snapshot.ProjectLinkID ||
+			link.StationWorkspaceID != station.ID || link.Key.Normalize() != snapshot.ProgramKey.Normalize() {
+			return nil, nil, nil, nil, ErrAssistantTopologyConflict
+		}
+	} else if member {
+		return nil, nil, nil, nil, ErrAssistantTopologyConflict
+	}
+	return project, snapshot, station, state, nil
+}
+
+func assistantReconnectDigest(stationID, projectID, linkID string, stateRevision int64, operationDigest string) string {
+	raw := strings.Join([]string{AssistantTopologyReconnect, stationID, projectID, linkID, operationDigest, time.Unix(stateRevision, 0).UTC().Format(time.RFC3339Nano)}, "\x00")
+	digest := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(digest[:])
+}
+
 func (service *AssistantProgramStore) ReviewHomeRemoval(stationID string, expectedStateRevision int64) (*AssistantHomeRemovalReview, error) {
 	assistantTopologyMu.Lock()
 	defer assistantTopologyMu.Unlock()
@@ -267,15 +470,22 @@ func (service *AssistantProgramStore) ReviewHomeRemoval(stationID string, expect
 	}); err != nil {
 		return nil, ErrAssistantTopologyConflict
 	}
+	impact := []string{
+		"The Home, its Home-scoped roles, portfolio rollup, and optional add-on state will be removed.",
+		"Every linked project, project-scoped team, task, file, and confirmed copied asset will be preserved as a standalone workspace.",
+		"External project and sample folders will not be moved, changed, or deleted.",
+	}
+	for _, projectID := range state.LinkedProjectIDs {
+		if project, projectErr := service.store.Get(projectID); projectErr == nil && service.hasRequiredGroupRequirement(project) {
+			impact = append(impact, "Required template group contracts remain recorded and become unfulfilled until reviewed reconnect or transition.")
+			break
+		}
+	}
 	return &AssistantHomeRemovalReview{
 		Token: receipt.Token, ExpiresAt: receipt.ExpiresAt, StationWorkspaceID: station.ID,
 		StateRevision: state.StateRevision, LinkedProjectCount: len(state.LinkedProjectIDs),
 		HomeRoleCount: len(state.HomeBindings.Bindings), HasSampleLibrary: station.HasInstalledCapability(CapabilitySampleLibrary),
-		Impact: []string{
-			"The Home, its Home-scoped roles, portfolio rollup, and optional add-on state will be removed.",
-			"Every linked project, project-scoped team, task, file, and confirmed copied asset will be preserved as a standalone workspace.",
-			"External project and sample folders will not be moved, changed, or deleted.",
-		},
+		Impact: impact,
 	}, nil
 }
 
@@ -324,7 +534,6 @@ func (service *AssistantProgramStore) CommitHomeRemoval(stationID, token string)
 	for index, item := range retained {
 		if updateErr := service.store.Update(item.projectID, func(current *Workspace) error {
 			current.SetAssistantProjectLink(nil)
-			current.ParentID = ""
 			return nil
 		}); updateErr != nil {
 			service.restoreRemovedHomeProjects(station.ID, retained[:index])
@@ -349,20 +558,22 @@ func (service *AssistantProgramStore) CommitHomeRemoval(stationID, token string)
 	return &AssistantHomeRemovalReceipt{StationWorkspaceID: station.ID, RetainedProjects: len(retained), RecordedAt: now}, nil
 }
 
-func (service *AssistantProgramStore) restoreRemovedHomeProjects(stationID string, retained []assistantRetainedLink) {
+func (service *AssistantProgramStore) restoreRemovedHomeProjects(_ string, retained []assistantRetainedLink) {
 	for _, item := range retained {
 		_ = service.store.Update(item.projectID, func(current *Workspace) error {
 			current.SetAssistantProjectLink(item.link)
-			current.ParentID = item.parentID
 			return nil
 		})
-		if item.parentID == stationID {
-			type workspaceMover interface {
-				MoveWorkspaceFolder(string, string) ([]MovedWorkspace, error)
-			}
-			if mover, ok := service.store.(workspaceMover); ok {
-				_, _ = mover.MoveWorkspaceFolder(item.projectID, stationID)
-			}
+		type workspaceMover interface {
+			MoveWorkspaceFolder(string, string) ([]MovedWorkspace, error)
+		}
+		if mover, ok := service.store.(workspaceMover); ok {
+			_, _ = mover.MoveWorkspaceFolder(item.projectID, item.parentID)
+		} else {
+			_ = service.store.Update(item.projectID, func(current *Workspace) error {
+				current.ParentID = item.parentID
+				return nil
+			})
 		}
 	}
 }
@@ -411,7 +622,10 @@ func (service *AssistantProgramStore) moveDisconnectedProject(projectID string) 
 		_, err := mover.MoveWorkspaceFolder(projectID, "")
 		return err
 	}
-	return nil
+	return service.store.Update(projectID, func(current *Workspace) error {
+		current.ParentID = ""
+		return nil
+	})
 }
 
 func assistantDisconnectDigest(stationID, projectID, linkID string, stateRevision, linkRevision int64) string {

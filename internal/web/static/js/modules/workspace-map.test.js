@@ -404,6 +404,176 @@ test('an empty district uses its saved anchor at the documented minimum size (#3
   assert.equal(district.sizingMode, 'auto');
 });
 
+test('the first unsited member inherits its empty group Map location', () => {
+  const map = loadOriWorkspaceMap();
+  const geo = map.districtGeometry;
+  const empty = map.computeWorldLayout([{ id: 'g', kind: 'group', name: 'Music Home' }], {
+    positions: { g: { x: 800, y: 900 } }
+  });
+
+  const point = map.groupMemberPlacement('g', 'song-1', empty);
+  assert.deepEqual(
+    { ...point },
+    { x: 800 + geo.padX, y: 900 + geo.padY },
+    'the workspace occupies the empty boundary rather than moving the group'
+  );
+
+  const populated = map.computeWorldLayout(
+    [
+      { id: 'g', kind: 'group', name: 'Music Home' },
+      { id: 'song-1', parent_id: 'g' }
+    ],
+    { positions: { g: { x: 800, y: 900 }, 'song-1': point } }
+  );
+  const district = districtsById(populated).g;
+  assert.equal(district.x, 800);
+  assert.equal(district.y, 900);
+  assert.ok(point.x >= district.x && point.x < district.x + district.width);
+  assert.ok(point.y >= district.y && point.y < district.y + district.height);
+});
+
+test('a new member fills reserved custom-group room before expanding the boundary', () => {
+  const map = loadOriWorkspaceMap();
+  const frame = { x: 300, y: 300, width: 600, height: 400 };
+  const layout = map.computeWorldLayout(
+    [
+      { id: 'g', kind: 'group', name: 'Roomy' },
+      { id: 'song-1', parent_id: 'g' }
+    ],
+    {
+      positions: { 'song-1': { x: 304, y: 305 } },
+      groupPresentations: { g: { sizing_mode: 'custom', frame } }
+    }
+  );
+
+  const point = map.groupMemberPlacement('g', 'song-2', layout);
+  assert.ok(point, 'a safe site exists inside the reserved frame');
+  assert.ok(
+    point.x >= frame.x && point.x + map.districtGeometry.memberWidth <= frame.x + frame.width
+  );
+  assert.ok(
+    point.y >= frame.y && point.y + map.districtGeometry.memberHeight <= frame.y + frame.height
+  );
+  assert.notDeepEqual({ ...point }, { x: 304, y: 305 });
+
+  const populated = map.computeWorldLayout(
+    [
+      { id: 'g', kind: 'group', name: 'Roomy' },
+      { id: 'song-1', parent_id: 'g' },
+      { id: 'song-2', parent_id: 'g' }
+    ],
+    {
+      positions: { 'song-1': { x: 304, y: 305 }, 'song-2': point },
+      groupPresentations: { g: { sizing_mode: 'custom', frame } }
+    }
+  );
+  const district = districtsById(populated).g;
+  assert.deepEqual(
+    { x: district.x, y: district.y, width: district.width, height: district.height },
+    frame,
+    'using reserved room does not grow the custom boundary'
+  );
+});
+
+test('group-aware placement rejects expansion across an unrelated workspace', () => {
+  const map = loadOriWorkspaceMap();
+  const layout = map.computeWorldLayout(
+    [
+      { id: 'g', kind: 'group', name: 'Music Home' },
+      { id: 'song-1', parent_id: 'g' },
+      { id: 'outside', name: 'Outside' }
+    ],
+    { positions: { 'song-1': { x: 400, y: 400 }, outside: { x: 400, y: 570 } } }
+  );
+
+  const point = map.groupMemberPlacement('g', 'song-2', layout);
+  assert.deepEqual(
+    { ...point },
+    { x: 576, y: 400 },
+    'the next row is blocked, so the workspace joins beside its sibling instead'
+  );
+  assert.deepEqual(
+    {
+      x: layout.nodes.find(node => node.id === 'song-1').x,
+      y: layout.nodes.find(node => node.id === 'song-1').y
+    },
+    { x: 400, y: 400 },
+    'the existing member never moves to make room'
+  );
+
+  const expanded = map.computeWorldLayout(
+    [
+      { id: 'g', kind: 'group', name: 'Music Home' },
+      { id: 'song-1', parent_id: 'g' },
+      { id: 'song-2', parent_id: 'g' },
+      { id: 'outside', name: 'Outside' }
+    ],
+    {
+      positions: {
+        'song-1': { x: 400, y: 400 },
+        'song-2': point,
+        outside: { x: 400, y: 570 }
+      }
+    }
+  );
+  const district = districtsById(expanded).g;
+  assert.ok(district.width > districtsById(layout).g.width, 'the boundary grows around the child');
+  assert.ok(
+    point.x >= district.x &&
+      point.x + map.districtGeometry.memberWidth <= district.x + district.width
+  );
+  assert.ok(
+    point.y >= district.y &&
+      point.y + map.districtGeometry.memberHeight <= district.y + district.height
+  );
+  assert.ok(
+    expanded.nodes.find(node => node.id === 'outside').y >= district.y + district.height,
+    'the expanded boundary still does not claim the unrelated workspace'
+  );
+});
+
+test('persisted group-aware placement highlights the exact boundary and never replaces its saved site', async () => {
+  const patches = [];
+  const map = loadMapWithFetch((url, init) => {
+    if (init?.method === 'PATCH') {
+      const body = JSON.parse(init.body);
+      patches.push(body);
+      const positions = body.operations.find(
+        operation => operation.op === 'set_positions'
+      )?.positions;
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ result: { revision: 2, positions } })
+      });
+    }
+    return jsonResponse({
+      schema_version: 1,
+      revision: 1,
+      positions: { g: { x: 800, y: 900 } }
+    });
+  });
+  const harness = createCameraHarness({ districts: ['g'] });
+  map.mount(harness.container, {
+    workspaces: [{ id: 'g', kind: 'group', name: 'Music Home' }],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true
+  });
+  await flush();
+
+  const outcome = await map.placeCreatedGroupMember('song-1', 'g');
+  assert.equal(outcome.placed, true);
+  assert.equal(patches.length, 1);
+  assert.match(harness.container.innerHTML, /is-placement-highlighted/);
+  assert.match(mapCSS, /@keyframes ws-map-district-arrival/);
+  assert.match(mapCSS, /prefers-reduced-motion: no-preference/);
+
+  const replay = await map.placeCreatedGroupMember('song-1', 'g');
+  assert.equal(replay.placed, false);
+  assert.equal(replay.reason, 'not_applicable');
+  assert.equal(patches.length, 1, 'a persisted/manual coordinate is never overwritten');
+});
+
 test('a custom minimum frame survives members moving inward and never auto-shrinks (#346 FR-34, FR-37)', () => {
   const computeWorldLayout = loadWorldLayout();
   const wss = [

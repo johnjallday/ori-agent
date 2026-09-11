@@ -7,6 +7,8 @@ package projecttemplates
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -289,6 +291,10 @@ type Template struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
+	// Revision is the SHA-256 of the exact manifest bytes read under the
+	// template-library lock. Policy/variant saves bind to it so an unrelated
+	// concurrent edit cannot be overwritten.
+	Revision string `json:"revision,omitempty"`
 	// Icon is an optional emoji glyph shown on the create-modal picker card.
 	Icon string `json:"icon,omitempty"`
 	// Tagline is a one-line summary shown on the compact create-modal picker
@@ -396,6 +402,19 @@ type Template struct {
 	// so trusted plugin blueprint creation fails closed.
 	AssistantProgram      *workspace.AssistantProgramDeclaration `json:"assistant_program,omitempty"`
 	AssistantProgramError string                                 `json:"assistant_program_error,omitempty"`
+	// GroupRequirement controls standalone versus exact Assistant Program Home
+	// placement. StandaloneComposition is the trusted fixed transformation a
+	// program-bearing source provides for a Home-free variant.
+	GroupRequirement           *GroupRequirement      `json:"group_requirement,omitempty"`
+	GroupRequirementError      string                 `json:"group_requirement_error,omitempty"`
+	StandaloneComposition      *StandaloneComposition `json:"standalone_composition,omitempty"`
+	StandaloneCompositionError string                 `json:"standalone_composition_error,omitempty"`
+	// TemplateVariant identifies a user-owned manifest-only overlay over an
+	// exact trusted plugin blueprint. It never confers PluginOwner authority.
+	TemplateVariant      *TemplateVariant   `json:"template_variant,omitempty"`
+	TemplateVariantError string             `json:"template_variant_error,omitempty"`
+	VariantRevision      string             `json:"variant_revision,omitempty"`
+	VariantSourceState   VariantSourceState `json:"variant_source_state,omitempty"`
 	// Capabilities are the built-in Workspace Capabilities a workspace created
 	// from this template has installed (FR-31, FR-32).
 	//
@@ -469,6 +488,22 @@ func (t Template) HasInvalidAssistantProgram() bool {
 	return strings.TrimSpace(t.AssistantProgramError) != ""
 }
 
+func (t Template) HasGroupRequirement() bool { return t.GroupRequirement != nil }
+
+func (t Template) HasInvalidGroupRequirement() bool {
+	return strings.TrimSpace(t.GroupRequirementError) != ""
+}
+
+func (t Template) HasInvalidStandaloneComposition() bool {
+	return strings.TrimSpace(t.StandaloneCompositionError) != ""
+}
+
+func (t Template) IsVariant() bool { return t.TemplateVariant != nil }
+
+func (t Template) HasInvalidVariant() bool {
+	return strings.TrimSpace(t.TemplateVariantError) != ""
+}
+
 // HasOnboarding reports whether the template still carries a legacy intake-era
 // onboarding block (detection only — the block is ignored at runtime and
 // stripped on the next authoring save).
@@ -488,6 +523,7 @@ func (t Template) HasAgents() bool {
 // warning detection and strip-on-save — never interpreted, so the file-copy
 // engine stays domain-blind.
 type manifest struct {
+	revision               string
 	Name                   string                  `json:"name"`
 	Description            string                  `json:"description"`
 	Tags                   []string                `json:"tags,omitempty"`
@@ -520,7 +556,10 @@ type manifest struct {
 	// AssistantProgram uses the same isolated, fail-closed decode. Unknown fields
 	// inside the versioned block are rejected even though ordinary top-level
 	// template metadata remains forward-compatible.
-	AssistantProgram json.RawMessage `json:"assistant_program,omitempty"`
+	AssistantProgram      json.RawMessage `json:"assistant_program,omitempty"`
+	GroupRequirement      json.RawMessage `json:"group_requirement,omitempty"`
+	StandaloneComposition json.RawMessage `json:"standalone_composition,omitempty"`
+	TemplateVariant       json.RawMessage `json:"template_variant,omitempty"`
 }
 
 // readManifest loads template.json from dir. A missing or malformed manifest
@@ -537,6 +576,8 @@ func readManifest(dir string) manifest {
 	if err := json.Unmarshal(data, &m); err != nil {
 		return manifest{}
 	}
+	digest := sha256.Sum256(data)
+	m.revision = hex.EncodeToString(digest[:])
 	return m
 }
 
@@ -548,8 +589,9 @@ func newTemplate(path string) Template {
 
 func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Template {
 	t := Template{
-		ID:   filepath.Base(filepath.Clean(path)),
-		Path: filepath.Clean(path),
+		ID:       filepath.Base(filepath.Clean(path)),
+		Path:     filepath.Clean(path),
+		Revision: m.revision,
 	}
 	t.Name = strings.TrimSpace(m.Name)
 	if t.Name == "" {
@@ -608,6 +650,41 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 	if assistantProgramErr != nil {
 		t.AssistantProgramError = assistantProgramErr.Error()
 	}
+	standaloneComposition, standaloneCompositionErr := normalizeStandaloneComposition(
+		m.StandaloneComposition, assistantProgram, projectConnection, t.Agents, runtimeRequirements,
+	)
+	t.StandaloneComposition = standaloneComposition
+	if standaloneCompositionErr != nil {
+		t.StandaloneCompositionError = standaloneCompositionErr.Error()
+	}
+	groupRequirement, groupRequirementErr := normalizeGroupRequirement(m.GroupRequirement)
+	if groupRequirementErr == nil {
+		groupRequirementErr = validateGroupComposition(groupRequirement, standaloneComposition, assistantProgram)
+	}
+	t.GroupRequirement = groupRequirement
+	if groupRequirementErr != nil {
+		t.GroupRequirement = nil
+		t.GroupRequirementError = groupRequirementErr.Error()
+	}
+	templateVariant, templateVariantErr := normalizeTemplateVariant(m.TemplateVariant)
+	if templateVariantErr == nil && templateVariant != nil {
+		templateVariantErr = validateTemplateVariantEnvelope(t.Path)
+	}
+	if templateVariantErr == nil && templateVariant != nil {
+		t.TemplateVariant = templateVariant
+		t.VariantRevision = TemplateVariantRevision(templateVariant)
+		t.Name = templateVariant.Overrides.Name
+		t.Description = templateVariant.Overrides.Description
+		t.Icon = templateVariant.Overrides.Icon
+		t.GroupRequirement = CloneGroupRequirement(templateVariant.Overrides.GroupRequirement)
+		t.GroupRequirementError = ""
+		t.Builtin = false
+		t.SetupQuestID = ""
+		t.UserSetupQuest = nil
+		t.PluginOwner = nil
+	} else if templateVariantErr != nil {
+		t.TemplateVariantError = templateVariantErr.Error()
+	}
 	t.UserSetupQuestEligibility = EvaluateUserSetupQuestEligibility(t)
 	userSetupQuest, userSetupQuestErr := normalizeUserSetupQuest(m.UserSetupQuest, t)
 	if userSetupQuestErr == nil {
@@ -617,7 +694,11 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 		t.UserSetupQuestError = userSetupQuestErr.Error()
 		t.UserSetupQuestRevision = digestUserQuestBytes(append([]byte("user_setup_quest:invalid:v1:"), bytes.TrimSpace(m.UserSetupQuest)...))
 	}
-	t.Warnings = append(manifestWarnings(m, t.Agents, t.AssistantProgram != nil), capabilityWarnings...)
+	if t.TemplateVariant == nil && t.TemplateVariantError == "" {
+		t.Warnings = append(manifestWarnings(m, t.Agents, t.AssistantProgram != nil), capabilityWarnings...)
+	} else {
+		t.Warnings = append(t.Warnings, capabilityWarnings...)
+	}
 	if projectEntryErr != nil {
 		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json project_entry is ignored: %v", projectEntryErr))
 	}
@@ -634,6 +715,15 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 	}
 	if assistantProgramErr != nil {
 		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json assistant_program is unusable and blocks workspace creation: %v", assistantProgramErr))
+	}
+	if standaloneCompositionErr != nil {
+		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json standalone_composition is unusable and blocks standalone creation: %v", standaloneCompositionErr))
+	}
+	if groupRequirementErr != nil {
+		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json group_requirement is unusable and blocks workspace creation: %v", groupRequirementErr))
+	}
+	if templateVariantErr != nil {
+		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json template_variant is unusable and blocks workspace creation: %v", templateVariantErr))
 	}
 	if userSetupQuestErr != nil {
 		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json user_setup_quest is unusable and cannot be launched: %v", userSetupQuestErr))

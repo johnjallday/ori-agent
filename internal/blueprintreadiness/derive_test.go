@@ -130,6 +130,48 @@ func TestDeriveInvalidManifestGuidanceFollowsOwnership(t *testing.T) {
 	}
 }
 
+func TestDeriveGroupAndVariantStatesFailClosed(t *testing.T) {
+	invalid := Derive(projecttemplates.Template{
+		ID: "invalid-group", Name: "Invalid group",
+		GroupRequirementError: "invalid group requirement: unsupported field",
+	}, Sources{})
+	assertReadiness(t, invalid, StateUnavailable, OwnershipUser, ReasonManifestInvalid)
+	if !strings.Contains(invalid.Diagnostic, "group requirement") || !hasAction(invalid, ActionEditTemplateManifest) {
+		t.Fatalf("invalid group guidance = %+v", invalid)
+	}
+
+	for _, test := range []struct {
+		name    string
+		state   projecttemplates.VariantSourceState
+		want    State
+		reason  Reason
+		action  Action
+		enabled bool
+	}{
+		{name: "missing", state: projecttemplates.VariantSourceMissing, want: StateUnavailable, reason: ReasonVariantSourceMissing, action: ActionManagePlugins},
+		{name: "disabled", state: projecttemplates.VariantSourceDisabled, want: StateActionRequired, reason: ReasonVariantSourceDisabled, action: ActionRetry},
+		{name: "changed", state: projecttemplates.VariantSourceChanged, want: StateUnavailable, reason: ReasonVariantSourceChanged, action: ActionCustomizeTemplate},
+		{name: "incompatible", state: projecttemplates.VariantSourceIncompatible, want: StateUnavailable, reason: ReasonVariantSourceIncompatible, action: ActionChangeBlueprint, enabled: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := Derive(projecttemplates.Template{
+				ID: "variant", Name: "Variant", VariantSourceState: test.state,
+				TemplateVariant: &projecttemplates.TemplateVariant{Source: projecttemplates.TemplateVariantSource{PluginID: "neutral-plugin", PluginVersion: "1.0.0"}},
+			}, Sources{})
+			assertReadiness(t, got, test.want, OwnershipUser, test.reason)
+			if !hasAction(got, test.action) || got.Dependency == nil || got.Dependency.PluginName != "neutral-plugin" {
+				t.Fatalf("variant source guidance = %+v", got)
+			}
+			if test.state != projecttemplates.VariantSourceMissing && !got.Dependency.Installed {
+				t.Fatalf("present source reported missing: %+v", got.Dependency)
+			}
+			if got.Dependency.Enabled != test.enabled {
+				t.Fatalf("enabled = %v, want %v", got.Dependency.Enabled, test.enabled)
+			}
+		})
+	}
+}
+
 func TestDeriveRuntimeErrorIsReportedAsAManifestProblem(t *testing.T) {
 	got := Derive(projecttemplates.Template{
 		ID: "runtime", Name: "Runtime",

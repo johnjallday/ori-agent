@@ -269,6 +269,13 @@ func (h *Handler) buildWorkspaceDetailResponse(workspace *session.Workspace) map
 	payload["workspace_progress"] = analyticsWorkspace.GetWorkspaceProgress()
 	payload["workspace_settings"] = settings
 	payload["workspace_settings_effective_behavior"] = workspacesettings.BuildEffectiveBehavior(settings)
+	if h.workspaceStore != nil {
+		if canonical, err := h.workspaceStore.Get(workspace.ID); err == nil && canonical != nil {
+			if status := agentworkspace.EvaluateGroupRequirementLifecycle(canonical, h.workspaceStore.Get); status != nil {
+				payload["group_requirement_status"] = status
+			}
+		}
+	}
 
 	return payload
 }

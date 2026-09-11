@@ -20,6 +20,11 @@
 
     <div class="main-content">
       <div class="container-fluid py-4">
+        <section id="workspaceGroupRequirementStatus" class="workspace-group-requirement-status" aria-live="polite" hidden>
+          <strong id="workspaceGroupRequirementStatusTitle"></strong>
+          <span id="workspaceGroupRequirementStatusSummary"></span>
+          <span id="workspaceGroupRequirementStatusActions" class="workspace-group-requirement-status__actions"></span>
+        </section>
         <!-- Email Ops connect CTA: populated by personal-hq-email-setup.js on the
              Email Ops workspace when no account is linked yet — one-click setup on
              the workspace surface. Additive; hidden when connected or elsewhere. -->
@@ -31,6 +36,9 @@
              body scroll for map panning). -->
         <div id="workspaceFollowupMount" class="workspace-followup-mount" hidden></div>
         <style>
+          .workspace-group-requirement-status { display: grid; gap: 0.2rem; margin: 0 0 1rem; padding: 0.85rem 1rem; border: 1px solid rgba(37, 99, 235, 0.28); border-radius: 12px; background: rgba(37, 99, 235, 0.08); color: var(--text-primary); }
+          .workspace-group-requirement-status[data-state="group_requirement_unfulfilled"], .workspace-group-requirement-status[data-state="contract_invalid"] { border-color: rgba(217, 119, 6, 0.38); background: rgba(217, 119, 6, 0.1); }
+          .workspace-group-requirement-status__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.65rem; color: var(--text-secondary); font-size: 0.8rem; }
           .workspace-followup-mount { margin-bottom: 1rem; padding: 1rem 1.25rem; border-radius: 12px;
             background: var(--surface-1, rgba(255,255,255,0.03)); border: 1px solid var(--border-subtle, rgba(255,255,255,0.08)); }
           .workspace-followup-title { font-size: 1rem; font-weight: 600; margin: 0; color: var(--text-primary, #e8e8e8); }

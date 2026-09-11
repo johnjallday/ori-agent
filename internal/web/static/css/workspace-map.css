@@ -640,6 +640,35 @@
   border-radius: 16px;
 }
 
+/* A grouped create briefly points back to the destination district. The live
+   announcement carries the same information without relying on motion/color. */
+.ws-map-district.is-placement-highlighted {
+  border-color: rgba(var(--ws-district-accent), 0.92);
+  box-shadow:
+    0 0 0 3px rgba(var(--ws-district-accent), 0.22),
+    0 0 28px rgba(var(--ws-district-accent), 0.28);
+}
+
+@keyframes ws-map-district-arrival {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 3px rgba(var(--ws-district-accent), 0.18),
+      0 0 20px rgba(var(--ws-district-accent), 0.2);
+  }
+  45% {
+    box-shadow:
+      0 0 0 7px rgba(var(--ws-district-accent), 0.3),
+      0 0 38px rgba(var(--ws-district-accent), 0.42);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ws-map-district.is-placement-highlighted {
+    animation: ws-map-district-arrival 1.5s ease-out both;
+  }
+}
+
 /* Themes differ in SHAPE as well as colour, so two districts remain
    distinguishable to someone who cannot see the difference between their
    accents (FR-130, FR-163). */

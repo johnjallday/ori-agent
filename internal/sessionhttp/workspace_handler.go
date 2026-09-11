@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
@@ -244,6 +245,14 @@ type createWorkspaceRequest struct {
 	// Personal HQ setup coordinator are unaffected.
 	RoleStaffing []roleStaffingInput `json:"role_staffing,omitempty"`
 	Blank        bool                `json:"blank,omitempty"` // The Blank blueprint: seed the synthetic single-agent roster (no template, no project)
+	// GroupRequirementReview makes this request an inert review. A policy-aware
+	// commit must replay the same request with the returned token and one caller
+	// idempotency key; neither field is accepted as a trusted destination.
+	GroupRequirementReview bool   `json:"group_requirement_review,omitempty"`
+	GroupComposition       string `json:"group_composition,omitempty"`
+	CreateRequiredHome     bool   `json:"create_required_home,omitempty"`
+	GroupReviewToken       string `json:"group_review_token,omitempty"`
+	IdempotencyKey         string `json:"idempotency_key,omitempty"`
 }
 
 // roleStaffingInput is one filled role in a create request.
@@ -404,6 +413,21 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		resolvedTemplate, templateResolveErr = h.resolveProjectTemplate(req.TemplateID, req.TemplatePath)
 		templateResolved = templateResolveErr == nil
 	}
+	if req.GroupRequirementReview && !templateResolved {
+		if templateResolveErr != nil {
+			h.respondWorkspaceProjectError(w, templateResolveErr)
+		} else {
+			_ = orihttp.RespondBadRequest(w, "a template is required for placement review")
+		}
+		return
+	}
+	if wantsProject && !templateResolved && (strings.HasPrefix(strings.TrimSpace(req.TemplateID), "plugin:") ||
+		errors.Is(templateResolveErr, projecttemplates.ErrTemplateVariantSource) ||
+		errors.Is(templateResolveErr, projecttemplates.ErrTemplateVariantSourceChanged) ||
+		errors.Is(templateResolveErr, projecttemplates.ErrTemplateVariantOwner)) {
+		h.respondWorkspaceProjectError(w, templateResolveErr)
+		return
+	}
 	if templateResolved {
 		if options, ok := personalAssistantCreationOptions(r.Context()); ok {
 			if strings.TrimSpace(req.TemplateID) != personalhq.PersonalHQTemplateID || strings.TrimSpace(req.TemplatePath) != "" {
@@ -415,6 +439,26 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 				_ = orihttp.RespondBadRequest(w, err.Error())
 				return
 			}
+		}
+
+		// Re-derive blueprint readiness before issuing a placement receipt. The
+		// receipt must never make an unavailable source appear safe to create.
+		readiness := h.revalidateBlueprintReadiness(resolvedTemplate)
+		if blueprintCreationBlocked(resolvedTemplate, readiness) {
+			respondBlueprintReadinessConflict(w, resolvedTemplate, readiness)
+			return
+		}
+	}
+
+	var groupPlan *createWorkspaceGroupPlan
+	if templateResolved {
+		var handled bool
+		resolvedTemplate, groupPlan, handled = h.prepareCreateWorkspaceGroupRequirement(r.Context(), w, req, resolvedTemplate)
+		if handled {
+			return
+		}
+		if h.respondCreateWorkspaceGroupReplay(r.Context(), w, groupPlan) {
+			return
 		}
 	}
 	rawResolvedTemplate := resolvedTemplate
@@ -461,26 +505,6 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		strictTemplate = &effectiveReviewTemplate
 	}
 
-	// Blueprint readiness gate. The catalog the user chose from was drawn at
-	// some earlier moment; this re-derives the same contract from current state
-	// before any workspace file, agent, task, capability, plugin binding, or
-	// permission is touched.
-	//
-	// It covers every way a blueprint can be unusable in one place: a manifest
-	// whose runtime contract or setup wizard could not be understood (creating
-	// the workspace anyway would silently skip setup the author declared), a
-	// blueprint this build no longer ships, a required plugin that is missing,
-	// disabled, incompatible, or unrunnable here, and dependency state that
-	// could not be read at all. The refusal carries the current reason and the
-	// allowlisted recovery actions, so the wizard can offer the fix in place.
-	if templateResolved {
-		readiness := h.revalidateBlueprintReadiness(resolvedTemplate)
-		if blueprintCreationBlocked(resolvedTemplate, readiness) {
-			respondBlueprintReadinessConflict(w, resolvedTemplate, readiness)
-			return
-		}
-	}
-
 	composition, err := h.validateCreateWorkspaceAgentComposition(req)
 	if err != nil {
 		_ = orihttp.RespondBadRequest(w, err.Error())
@@ -503,6 +527,15 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ws := buildCreateWorkspace(req, kind, requestedTags, resolvedTemplate, templateResolved)
+	if groupPlan != nil {
+		ws.ID = groupPlan.claim.Operation.ChildWorkspaceID
+		ws.OwnerUserID = groupPlan.claim.Operation.OwnerUserID
+		if groupPlan.claim.Snapshot.SelectedComposition == grouprequirements.CompositionGrouped {
+			// Create directly at the reviewed canonical destination. The client
+			// parent is never used as a temporary placement or membership claim.
+			ws.ParentID = groupPlan.claim.Operation.HomeWorkspaceID
+		}
+	}
 
 	seed, ok := h.selectCreateWorkspaceEntryAgent(w, ws, req, kind, resolvedTemplate, templateResolved, strictTemplate)
 	if !ok {
@@ -540,6 +573,26 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A new group-policy contract becomes canonical before any template task,
+	// capability, plugin/tool binding, or Home-dependent staffing can run. A
+	// grouped commit must also observe its exact parent and reciprocal link.
+	if err := h.finalizeCreateWorkspaceGroupRequirement(r.Context(), ws.ID, groupPlan, resolvedTemplate); err != nil {
+		_ = h.rollbackIncompleteGroupWorkspace(r.Context(), ws.ID, groupPlan.claim.Operation.OperationDigest, string(groupPlan.claim.Operation.Status), seed)
+		_ = orihttp.RespondJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"error": "Workspace placement is incomplete; retry the same reviewed operation.",
+			"group_requirement": map[string]any{
+				"state": "operation_incomplete", "reason": "operation_incomplete",
+				"summary": "Ori could not observe every required placement consequence.",
+				"actions": []grouprequirements.Action{grouprequirements.ActionRetry},
+			},
+		})
+		return
+	}
+
+	// Bind per-agent tools only after the policy snapshot and, where required,
+	// reciprocal group membership are durable. Declarations alone grant nothing.
+	prov.agentToolWarnings = h.bindSeededAgentTools(ws.ID, seed.Created)
+
 	// Local creation implies this data directory owns the workspace: allowlist it
 	// so its agent snapshots are restored (and not wiped) on subsequent startups,
 	// mirroring the import flow. Best-effort; a failure only affects later agent
@@ -568,7 +621,11 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Must run after starter-task seeding above — see
 	// persistCreateWorkspaceTemplateProvenance's doc comment for why.
 	assistantStationID := ""
-	if capabilityWarning := h.persistCreateWorkspaceTemplateProvenance(ws.ID, resolvedTemplate, templateResolved); capabilityWarning != "" {
+	var groupSnapshot *agentworkspace.GroupRequirementSnapshot
+	if groupPlan != nil {
+		groupSnapshot = groupPlan.claim.Snapshot
+	}
+	if capabilityWarning := h.persistCreateWorkspaceTemplateProvenance(ws.ID, resolvedTemplate, templateResolved, groupSnapshot); capabilityWarning != "" {
 		if prov.projectWarning == "" {
 			prov.projectWarning = capabilityWarning
 		} else {
@@ -576,17 +633,24 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if templateResolved && resolvedTemplate.HasAssistantProgram() && h.workspaceTaskStore != nil {
-		station, _, err := agentworkspace.NewAssistantProgramStore(h.workspaceTaskStore).EnsureProjectStation(ws.ID)
-		if err != nil {
-			warning := "assistant home could not be linked; use Activate from the workspace after resolving storage"
-			if prov.projectWarning == "" {
-				prov.projectWarning = warning
-			} else {
-				prov.projectWarning += "; " + warning
-			}
-			logger.Warn("Failed to link assistant station", logger.Fields{"workspace_id": ws.ID, "error": err})
+		if groupPlan != nil && groupPlan.claim.Snapshot.SelectedComposition == grouprequirements.CompositionGrouped {
+			// The mandatory path already established and observed this exact link
+			// before tasks/tools/capabilities. It is never downgraded to a warning.
+			assistantStationID = groupPlan.claim.Operation.HomeWorkspaceID
 		} else {
-			assistantStationID = station.ID
+			// Legacy absence preserves the historical best-effort activation path.
+			station, _, err := agentworkspace.NewAssistantProgramStore(h.workspaceTaskStore).EnsureProjectStation(ws.ID)
+			if err != nil {
+				warning := "assistant home could not be linked; use Activate from the workspace after resolving storage"
+				if prov.projectWarning == "" {
+					prov.projectWarning = warning
+				} else {
+					prov.projectWarning += "; " + warning
+				}
+				logger.Warn("Failed to link assistant station", logger.Fields{"workspace_id": ws.ID, "error": err})
+			} else {
+				assistantStationID = station.ID
+			}
 		}
 		// An assistant-program blueprint can only be staffed once its station
 		// link exists, which is why this runs here rather than in the
@@ -611,6 +675,18 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		h.claimUnassignedTasksForEntryAgentLogged(ws.ID)
 	}
 
+	if err := h.completeCreateWorkspaceGroupRequirement(r.Context(), groupPlan); err != nil {
+		_ = orihttp.RespondJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"error": "Workspace placement completed but its operation receipt needs reconciliation.",
+			"group_requirement": map[string]any{
+				"state": "operation_incomplete", "reason": "operation_incomplete",
+				"summary": "Retry the same reviewed operation; Ori will not create a duplicate workspace.",
+				"actions": []grouprequirements.Action{grouprequirements.ActionRetry},
+			},
+		})
+		return
+	}
+
 	logger.Info("Workspace created", logger.Fields{"id": ws.ID, "name": req.Name, "folder_slug": ws.FolderSlug, "kind": ws.Kind})
 
 	response := map[string]any{
@@ -619,6 +695,9 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	if assistantStationID != "" {
 		response["assistant_station_id"] = assistantStationID
+	}
+	if groupSnapshot != nil {
+		response["group_requirement"] = groupSnapshot
 	}
 	if prov.projectWarning != "" {
 		response["project_warning"] = prov.projectWarning
@@ -928,7 +1007,6 @@ type createProvisionOutcome struct {
 // the workspace back and writes the conflict response itself — signalled by
 // responded=true, in which case the caller must return immediately.
 func (h *Handler) provisionCreateWorkspaceFolder(ctx context.Context, w http.ResponseWriter, req createWorkspaceRequest, ws *session.Workspace, tc createTemplateContext, seed seedAgentsResult) (out createProvisionOutcome, responded bool) {
-	seededAgents := seed.Created
 	if tc.wantsProject {
 		// Default for every path below that does not reach (or does not
 		// succeed in) template application: missing store, folder-creation
@@ -947,6 +1025,7 @@ func (h *Handler) provisionCreateWorkspaceFolder(ctx context.Context, w http.Res
 		Kind:           string(ws.Kind),
 		Description:    ws.Description,
 		FolderSlug:     ws.FolderSlug,
+		OwnerUserID:    ws.OwnerUserID,
 		ProjectPath:    ws.ProjectPath,
 		Tags:           append([]string(nil), ws.Tags...),
 		ParentID:       ws.ParentID,
@@ -996,11 +1075,6 @@ func (h *Handler) provisionCreateWorkspaceFolder(ctx context.Context, w http.Res
 	if err != nil {
 		return out, false
 	}
-
-	// Bind per-agent tools for any seeded template agents now that the
-	// workspace is persisted (skills enable on the agent; MCP binds on
-	// the workspace). Apply-if-present and non-fatal.
-	out.agentToolWarnings = h.bindSeededAgentTools(ws.ID, seededAgents)
 
 	// Install the template's dashboard, if it ships one. Deliberately before
 	// the group branch and outside the project-scaffold path: a dashboard is
@@ -1121,46 +1195,21 @@ func (h *Handler) applyCreateWorkspaceTemplate(ctx context.Context, req createWo
 // later Update on the same workspace id — starter-task seeding runs right
 // after template application — would clobber a provenance write made here
 // earlier. Doing it last avoids that.
-func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl projecttemplates.Template, resolved bool) string {
+func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl projecttemplates.Template, resolved bool, snapshots ...*agentworkspace.GroupRequirementSnapshot) string {
 	if !resolved || strings.TrimSpace(tmpl.ID) == "" || h.workspaceTaskStore == nil {
 		return ""
 	}
+	var snapshot *agentworkspace.GroupRequirementSnapshot
+	if len(snapshots) > 0 {
+		snapshot = snapshots[0]
+	}
 	// Built-ins always record provenance. A user template records it too when it
-	// declares a setup wizard or runtime contract: those snapshots *are* the
-	// workspace's setup contract, so without provenance the blueprint's declared
-	// requirements would silently disappear after creation.
-	if !tmpl.Builtin && tmpl.PluginOwner == nil && !tmpl.HasSetupWizard() && !tmpl.HasRuntimeRequirements() && !tmpl.HasAssistantProgram() {
+	// declares a setup/runtime/program/group contract: without provenance those
+	// reviewed requirements would silently disappear after creation.
+	if !tmpl.Builtin && tmpl.PluginOwner == nil && !tmpl.HasSetupWizard() && !tmpl.HasRuntimeRequirements() && !tmpl.HasAssistantProgram() && snapshot == nil {
 		return ""
 	}
-	version := tmpl.BuiltinVersion
-	if tmpl.PluginOwner != nil {
-		version = tmpl.PluginOwner.BlueprintVersion
-	}
-	prov := &agentworkspace.TemplateProvenance{
-		TemplateID:   tmpl.ID,
-		TemplateName: tmpl.Name,
-		Builtin:      tmpl.Builtin,
-		Version:      version,
-		AppliedAt:    time.Now(),
-		PluginOwner:  tmpl.PluginOwner,
-		// Setup requirements are recorded unresolved on purpose: creation states
-		// which folder the template will ask for and what automation it wants
-		// afterwards, but selects no path, expands no "~", registers no watcher,
-		// and enables no schedule. Guided setup does all of that, only after the
-		// user confirms a folder.
-		DirectoryRequirements: tmpl.DirectoryRequirements,
-		AutomationRecipes:     tmpl.AutomationRecipes,
-		// The capability and plugin declarations travel with the wizard because
-		// its steps reference them by key. Snapshotting them keeps setup and
-		// repair readable from the workspace alone, instead of re-reading a
-		// template the user may have since edited, replaced, or deleted.
-		CapabilityRequirements: tmpl.CapabilityRequirements,
-		Plugins:                tmpl.Tools.Plugins,
-		PluginSources:          tmpl.Tools.PluginSources,
-		RuntimeRequirements:    tmpl.RuntimeRequirements,
-		SetupWizard:            tmpl.SetupWizard,
-		AssistantProgram:       tmpl.AssistantProgram,
-	}
+	prov := newTemplateProvenance(tmpl, snapshot)
 	// Provenance and the blueprint's declared capability installs are written in
 	// ONE update, so a workspace can never end up recorded as coming from the
 	// File Janitor blueprint while lacking the capability that blueprint exists
@@ -1220,6 +1269,36 @@ func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl pro
 		}
 	}
 	return ""
+}
+
+func newTemplateProvenance(tmpl projecttemplates.Template, snapshot *agentworkspace.GroupRequirementSnapshot) *agentworkspace.TemplateProvenance {
+	version := tmpl.BuiltinVersion
+	if tmpl.PluginOwner != nil {
+		version = tmpl.PluginOwner.BlueprintVersion
+	} else if snapshot != nil && snapshot.SourcePlugin != nil {
+		version = snapshot.SourcePlugin.BlueprintVersion
+	}
+	provenance := &agentworkspace.TemplateProvenance{
+		TemplateID: tmpl.ID, TemplateName: tmpl.Name, Builtin: tmpl.Builtin, Version: version,
+		AppliedAt: time.Now(), PluginOwner: tmpl.PluginOwner,
+		// Setup requirements stay unresolved: this snapshot chooses no path,
+		// registers no watcher, enables no schedule, and grants no capability.
+		DirectoryRequirements:  tmpl.DirectoryRequirements,
+		AutomationRecipes:      tmpl.AutomationRecipes,
+		CapabilityRequirements: tmpl.CapabilityRequirements,
+		Plugins:                tmpl.Tools.Plugins, PluginSources: tmpl.Tools.PluginSources,
+		RuntimeRequirements: tmpl.RuntimeRequirements, SetupWizard: tmpl.SetupWizard,
+		AssistantProgram: tmpl.AssistantProgram, GroupRequirement: snapshot,
+	}
+	if tmpl.UserSetupQuest != nil && tmpl.UserSetupQuest.Declaration != nil {
+		provenance.UserTemplateOwner = &agentworkspace.UserTemplateOwner{
+			TemplateID: tmpl.ID, AttachmentID: tmpl.UserSetupQuest.AttachmentID,
+			QuestID:          tmpl.UserSetupQuest.Declaration.ID,
+			DefinitionDigest: projecttemplates.UserSetupQuestDefinitionDigest(tmpl.UserSetupQuest),
+			ExecutionDigest:  projecttemplates.UserSetupQuestExecutionDigest(tmpl),
+		}
+	}
+	return provenance
 }
 
 func workspacePathsEqual(a, b string) bool {
@@ -1504,6 +1583,27 @@ func (h *Handler) deleteWorkspace(w http.ResponseWriter, r *http.Request, id str
 	}
 
 	deleteSessions := r.URL.Query().Get("delete_sessions") == "true"
+	if h.workspaceStore != nil {
+		if canonical, canonicalErr := h.workspaceStore.Get(id); canonicalErr == nil && canonical != nil {
+			if canonical.GetAssistantProgramState() != nil || canonical.GetAssistantProjectLink() != nil {
+				_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+					"error": "Assistant Program membership must be reviewed before deleting this workspace.",
+					"group_requirement": map[string]any{
+						"state": "group_requirement_unfulfilled", "actions": []string{"open_guided_setup"},
+					},
+				})
+				return
+			}
+			if agentworkspace.HasRequiredGroupRequirement(canonical) {
+				status := agentworkspace.EvaluateGroupRequirementLifecycle(canonical, h.workspaceStore.Get)
+				_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+					"error":             "This Required template contract needs an explicit lifecycle review before deletion.",
+					"group_requirement": status,
+				})
+				return
+			}
+		}
+	}
 
 	// Groups physically contain their members, so deletion has its own two-mode
 	// flow (delete contents vs un-nest members to the root, then remove the

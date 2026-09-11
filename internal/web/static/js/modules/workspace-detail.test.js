@@ -645,6 +645,61 @@ test('workspace detail disables create-project action for groups and existing pr
   assert.match(button.title, /Groups cannot hold projects/);
 });
 
+test('workspace detail renders reviewed reconnect for the lifecycle action name', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  const appended = [];
+  page.elements = {
+    groupRequirementStatus: { hidden: true, dataset: {} },
+    groupRequirementStatusTitle: { textContent: '' },
+    groupRequirementStatusSummary: { textContent: '' },
+    groupRequirementStatusActions: {
+      replaceChildren() {
+        appended.length = 0;
+      },
+      append(...nodes) {
+        appended.push(...nodes);
+      },
+      appendChild(node) {
+        appended.push(node);
+      }
+    }
+  };
+  page.workspace = {
+    group_requirement_status: {
+      state: 'group_requirement_unfulfilled',
+      summary: 'Reconnect through review.',
+      actions: ['open_guided_setup', 'reconnect_project']
+    }
+  };
+  const previousDocument = global.document;
+  global.document = {
+    ...previousDocument,
+    createTextNode(text) {
+      return { textContent: text };
+    },
+    createElement(tag) {
+      return {
+        tag,
+        className: '',
+        textContent: '',
+        addEventListener(name, listener) {
+          this.listener = { name, listener };
+        }
+      };
+    }
+  };
+  try {
+    page.renderGroupRequirementStatus();
+  } finally {
+    global.document = previousDocument;
+  }
+
+  assert.equal(page.elements.groupRequirementStatus.hidden, false);
+  const reconnect = appended.find(node => node.textContent === 'Review reconnect');
+  assert.ok(reconnect);
+  assert.equal(reconnect.listener.name, 'click');
+});
+
 test('workspace detail normalizes workspace tag drafts', () => {
   const page = new WorkspaceDetailPage('workspace-1');
 

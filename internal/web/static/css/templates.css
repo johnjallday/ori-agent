@@ -23,6 +23,66 @@
   max-width: 66ch;
 }
 
+#templatesPage .tpl-group-requirements {
+  background: linear-gradient(145deg, rgba(14, 116, 144, 0.07), rgba(99, 102, 241, 0.04));
+  border: 1px solid rgba(14, 116, 144, 0.24);
+  border-radius: 10px;
+  padding: 16px;
+}
+
+#templatesPage .tpl-group-source-badge {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 5px 8px;
+  text-transform: uppercase;
+}
+
+#templatesPage .tpl-group-source,
+#templatesPage .tpl-group-composition,
+#templatesPage .tpl-group-preview {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 10px 12px;
+}
+
+#templatesPage .tpl-group-source {
+  font-family: var(--font-mono, monospace);
+  margin-bottom: 12px;
+  overflow-wrap: anywhere;
+}
+
+#templatesPage .tpl-group-help {
+  color: var(--text-secondary);
+  font-size: 11px;
+  margin-top: 6px;
+}
+
+#templatesPage .tpl-group-preview h6 {
+  color: var(--text-primary);
+  font-size: 12px;
+  margin: 8px 0 4px;
+}
+
+#templatesPage .tpl-group-preview ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+@media (max-width: 720px) {
+  #templatesPage .tpl-group-requirements {
+    padding: 13px;
+  }
+}
+
 #templatesPage .tpl-agents-readonly {
   align-items: center;
   background: var(--bg-tertiary);

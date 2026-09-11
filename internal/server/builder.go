@@ -36,6 +36,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/followup"
 	"github.com/johnjallday/ori-agent/internal/gateway"
 	"github.com/johnjallday/ori-agent/internal/githubhttp"
+	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/location"
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
@@ -172,6 +173,7 @@ type ServerBuilder struct {
 	workspaceStore        workspace.Store
 	workspaceFileStore    *workspace.FileStore
 	workspaceAllowlist    *workspace.Allowlist
+	groupRequirements     *grouprequirements.Service
 	pathSelectionStore    *pathselection.Store
 	runtimeResolver       *workspace.AgentRuntimeResolver
 	taskHandler           *workspace.LLMTaskHandler

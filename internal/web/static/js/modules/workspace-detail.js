@@ -1073,6 +1073,14 @@ export class WorkspaceDetailPage {
       // Header elements
       workspaceName: document.getElementById('workspace-name'),
       workspaceDescription: document.getElementById('workspace-description'),
+      groupRequirementStatus: document.getElementById('workspaceGroupRequirementStatus'),
+      groupRequirementStatusTitle: document.getElementById('workspaceGroupRequirementStatusTitle'),
+      groupRequirementStatusSummary: document.getElementById(
+        'workspaceGroupRequirementStatusSummary'
+      ),
+      groupRequirementStatusActions: document.getElementById(
+        'workspaceGroupRequirementStatusActions'
+      ),
       workspaceTagsContainer: document.getElementById('workspace-tags-container'),
       workspaceTagsList: document.getElementById('workspace-tags-list'),
       workspaceTagsEditBtn: document.getElementById('workspace-tags-edit-btn'),
@@ -2320,6 +2328,7 @@ export class WorkspaceDetailPage {
         });
       }
       await this.renderWorkspaceInfo();
+      this.renderGroupRequirementStatus();
       this.syncProjectActionState();
       this.renderWorkspaceMCPBindings();
       this.renderWorkspaceSettings();
@@ -2335,6 +2344,84 @@ export class WorkspaceDetailPage {
       console.error('Failed to load workspace:', error);
       if (window.Toast) window.Toast.error('Failed to load workspace');
       this.renderWorkspaceHealth();
+    }
+  }
+
+  async reviewRequiredGroupReconnect(action) {
+    const summary = this.elements.groupRequirementStatusSummary;
+    action.disabled = true;
+    summary.textContent = 'Reviewing the exact Home and membership…';
+    try {
+      const reviewResponse = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/assistant-program/reconnect/review`,
+        {
+          method: 'POST',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: '{}'
+        }
+      );
+      const review = await reviewResponse.json().catch(() => ({}));
+      if (!reviewResponse.ok)
+        throw new Error(review.message || review.error || 'Reconnect review failed.');
+      const impact = Array.isArray(review.impact) ? review.impact.join('\n\n') : '';
+      if (!window.confirm(`${impact}\n\nReconnect this workspace now?`)) {
+        summary.textContent = 'Reconnect review cancelled. Nothing changed.';
+        return;
+      }
+      const commitResponse = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/assistant-program/reconnect/commit`,
+        {
+          method: 'POST',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: review.token, idempotency_key: crypto.randomUUID() })
+        }
+      );
+      const result = await commitResponse.json().catch(() => ({}));
+      if (!commitResponse.ok)
+        throw new Error(result.message || result.error || 'Reconnect commit failed.');
+      summary.textContent = 'Reconnect confirmed. Refreshing canonical status…';
+      await this.loadWorkspace();
+    } catch (error) {
+      summary.textContent = error.message;
+    } finally {
+      action.disabled = false;
+    }
+  }
+
+  renderGroupRequirementStatus() {
+    const panel = this.elements.groupRequirementStatus;
+    if (!panel) return;
+    const status = this.workspace?.group_requirement_status;
+    if (!status?.state) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+    panel.dataset.state = status.state;
+    const standalone = status.selected_composition === 'standalone';
+    const healthy = status.state === 'ready_grouped' || status.state === 'ready_standalone';
+    this.elements.groupRequirementStatusTitle.textContent = healthy
+      ? standalone
+        ? 'Standalone template placement'
+        : 'Template group connected'
+      : 'Template group needs attention';
+    this.elements.groupRequirementStatusSummary.textContent = status.summary || '';
+    const actions = Array.isArray(status.actions) ? status.actions : [];
+    this.elements.groupRequirementStatusActions.replaceChildren();
+    if (actions.length) {
+      this.elements.groupRequirementStatusActions.append(
+        document.createTextNode(
+          `Next: ${actions.map(action => String(action).replaceAll('_', ' ')).join(' · ')}`
+        )
+      );
+    }
+    if (actions.includes('reconnect_project')) {
+      const reconnect = document.createElement('button');
+      reconnect.type = 'button';
+      reconnect.className = 'modern-btn modern-btn-primary';
+      reconnect.textContent = 'Review reconnect';
+      reconnect.addEventListener('click', () => this.reviewRequiredGroupReconnect(reconnect));
+      this.elements.groupRequirementStatusActions.appendChild(reconnect);
     }
   }
 

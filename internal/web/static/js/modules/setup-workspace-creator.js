@@ -34,16 +34,40 @@ async function jsonRequest(url, options = {}) {
 function runURL(state, suffix = '') {
   return `${setupJourneyAPIRoot(state.journey)}/runs/${encodeURIComponent(state.journey.run_id)}${suffix}`;
 }
+export function setupWorkspacePlacement(preparation, draftComposition = '') {
+  const groupPolicy = preparation?.group_policy || 'required';
+  const availableCompositions = preparation?.available_compositions || ['grouped'];
+  const allowed = availableCompositions.filter(value => ['grouped', 'standalone'].includes(value));
+  const groupComposition =
+    allowed.length === 1 ? allowed[0] : allowed.includes(draftComposition) ? draftComposition : '';
+  return {
+    groupPolicy,
+    availableCompositions: allowed,
+    groupComposition,
+    canOpen: Boolean(
+      preparation &&
+      (groupPolicy !== 'required' || (preparation.exists && preparation.acknowledged))
+    )
+  };
+}
+
 function inputFor(state) {
   const name = el('folderNameInput').value.trim();
+  const placement = state.groupComposition ? { group_composition: state.groupComposition } : {};
   return state.mode === 'existing_project'
     ? {
         mode_id: state.mode,
         workspace_name: name,
         selection_token: state.selectionToken,
-        entry_name: state.entryName || undefined
+        entry_name: state.entryName || undefined,
+        ...placement
       }
-    : { mode_id: 'new_project', workspace_name: name, project_name: name };
+    : {
+        mode_id: 'new_project',
+        workspace_name: name,
+        project_name: name,
+        ...placement
+      };
 }
 function reviewError(message) {
   const box = el('workspaceJourneyReview');
@@ -67,6 +91,16 @@ function refreshReview() {
   const generation = ++state.generation;
   if (!input.workspace_name) {
     reviewError('Name the workspace to review its project files.');
+    return;
+  }
+  if (!state.groupComposition) {
+    reviewError('Choose grouped or standalone placement before reviewing project files.');
+    return;
+  }
+  if (state.groupComposition === 'grouped' && !state.homeID) {
+    reviewError(
+      'Grouped placement needs its exact Assistant Program Home. Return to setup to review and create the Home, then launch the workspace again.'
+    );
     return;
   }
   if (state.mode === 'existing_project' && !state.selectionToken) {
@@ -118,10 +152,14 @@ function refreshReview() {
         box.appendChild(label);
         return;
       }
-      box.append(
-        text('p', `Group: ${project.parent_workspace_name}`),
-        text('p', `Project file: ${project.entry_name}`)
-      );
+      if (project.group_composition === 'grouped') {
+        box.appendChild(text('p', `Group: ${project.parent_workspace_name}`));
+      } else {
+        box.appendChild(
+          text('p', 'Placement: Standalone — no Assistant Program Home or membership is created.')
+        );
+      }
+      box.appendChild(text('p', `Project file: ${project.entry_name}`));
       if (project.created_files?.length) {
         const list = document.createElement('ul');
         project.created_files.forEach(name => list.appendChild(text('li', name)));
@@ -154,10 +192,11 @@ function refreshReview() {
 async function submit(payload) {
   const state = active;
   if (!state) throw new Error('Workspace setup is no longer open.');
+  const expectedParent = state.groupComposition === 'grouped' ? state.homeID : '';
   if (
     payload.template_id !== state.templateID ||
     payload.template_path ||
-    payload.parent_id !== state.homeID ||
+    payload.parent_id !== expectedParent ||
     payload.location ||
     payload.project_path ||
     payload.blank ||
@@ -277,7 +316,29 @@ function mountProjectChoice(state) {
   const box = document.createElement('div');
   box.id = 'workspaceJourneyProjectChoice';
   box.className = 'workspace-setup-card mb-2';
-  box.appendChild(text('p', `Group: ${state.groupName}`));
+  if (state.availableCompositions.length > 1) {
+    const placementLabel = text('label', 'Placement');
+    const placement = document.createElement('select');
+    placement.className = 'modern-input w-100';
+    placement.append(
+      new Option('Choose placement…', ''),
+      new Option(`Grouped — ${state.groupName}`, 'grouped'),
+      new Option('Standalone — no Assistant Program Home', 'standalone')
+    );
+    placement.value = state.groupComposition;
+    placement.addEventListener('change', () => {
+      state.groupComposition = placement.value;
+      const parent = el('folderParentSelect');
+      parent.value = state.groupComposition === 'grouped' ? state.homeID : '';
+      refreshReview();
+    });
+    placementLabel.appendChild(placement);
+    box.appendChild(placementLabel);
+  } else if (state.groupComposition === 'grouped') {
+    box.appendChild(text('p', `Required placement: ${state.groupName}`));
+  } else {
+    box.appendChild(text('p', 'Placement: Standalone — no Assistant Program Home'));
+  }
   const label = text('label', 'Project');
   const select = document.createElement('select');
   select.className = 'modern-input w-100';
@@ -330,8 +391,10 @@ function mountProjectChoice(state) {
 export async function openSetupWorkspaceCreator(journey, onCreated) {
   const manager = window.sessionManager;
   const preparation = journey.steps.find(step => step.kind === 'project_connect')?.preparation;
-  if (!manager || !preparation?.exists || !preparation.acknowledged)
-    throw new Error('Finish the group and preparation steps first.');
+  const placement = setupWorkspacePlacement(preparation);
+  const { groupPolicy, availableCompositions } = placement;
+  if (!manager || !placement.canOpen)
+    throw new Error('Finish the required group and preparation steps first.');
   await manager.loadFolders();
   const state = {
     journey,
@@ -339,6 +402,9 @@ export async function openSetupWorkspaceCreator(journey, onCreated) {
     homeID: preparation.group_id || journey.receipts.home_workspace_id,
     groupName: preparation.name,
     templateID: preparation.template_id,
+    groupPolicy,
+    availableCompositions,
+    groupComposition: placement.groupComposition,
     mode: 'new_project',
     selectionToken: '',
     entryName: '',
@@ -353,6 +419,8 @@ export async function openSetupWorkspaceCreator(journey, onCreated) {
     state.selectionToken = draft.selectionToken;
     state.entryName = draft.entryName;
     state.folderDisplay = draft.folderDisplay;
+    if (availableCompositions.includes(draft.groupComposition))
+      state.groupComposition = draft.groupComposition;
   }
   savedDraft = null;
   active = state;
@@ -392,7 +460,8 @@ export async function openSetupWorkspaceCreator(journey, onCreated) {
           mode: state.mode,
           selectionToken: state.selectionToken,
           entryName: state.entryName,
-          folderDisplay: state.folderDisplay
+          folderDisplay: state.folderDisplay,
+          groupComposition: state.groupComposition
         };
       active = null;
     }
@@ -424,9 +493,9 @@ export async function openSetupWorkspaceCreator(journey, onCreated) {
   hide(el('folderDescriptionInput')?.closest('.workspace-setup-card'));
   hide(el('wizardEditBlueprintBtn'));
   const parent = el('folderParentSelect');
-  if (![...parent.options].some(option => option.value === state.homeID))
+  if (state.homeID && ![...parent.options].some(option => option.value === state.homeID))
     parent.add(new Option(state.groupName, state.homeID));
-  parent.value = state.homeID;
+  parent.value = state.groupComposition === 'grouped' ? state.homeID : '';
   for (let i = 0; i < 60 && active === state; i++) {
     const template = window.ProjectTemplateCard?.getSelectedTemplate?.();
     if (template?.id === state.templateID && !manager.blueprintSelectionBlocked()) {

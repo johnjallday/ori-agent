@@ -9,6 +9,53 @@ const tidySurfaceKey = 'plugin:reaper-plugin:reaper-live-control:project-tidy';
 
 test.skip(!pluginPath, 'set ORI_REAPER_PLUGIN_PATH to the coordinated plugin worktree');
 
+async function createReviewedReaperWorkspace(
+  request: import('@playwright/test').APIRequestContext,
+  name: string
+) {
+  const key = `reaper-tidy-${Date.now().toString(36)}`;
+  const homeReview = await request.post('/api/workspaces/group-requirement/home/review', {
+    data: { template_id: templateID }
+  });
+  const homeReviewText = await homeReview.text();
+  expect(homeReview.ok(), homeReviewText).toBeTruthy();
+  const homeReviewed = JSON.parse(homeReviewText).group_requirement_review;
+  expect(homeReviewed?.state, homeReviewText).toBe('ready_grouped');
+  const homeCommit = await request.post('/api/workspaces/group-requirement/home/commit', {
+    data: {
+      template_id: templateID,
+      group_review_token: homeReviewed.review_token,
+      idempotency_key: `${key}-home`
+    }
+  });
+  const homeCommitText = await homeCommit.text();
+  expect(homeCommit.ok(), homeCommitText).toBeTruthy();
+  expect(JSON.parse(homeCommitText).group_requirement?.state, homeCommitText).toBe('home_ready');
+
+  const data = {
+    name,
+    description: 'Disposable Project Tidy browser fixture',
+    template_id: templateID,
+    create_template_agents: true,
+    group_composition: 'grouped'
+  };
+  const review = await request.post('/api/workspaces', {
+    data: { ...data, group_requirement_review: true }
+  });
+  expect(review.ok(), await review.text()).toBeTruthy();
+  const reviewed = (await review.json()).group_requirement_review;
+  expect(reviewed.state).toBe('ready_grouped');
+  const create = await request.post('/api/workspaces', {
+    data: {
+      ...data,
+      group_review_token: reviewed.review_token,
+      idempotency_key: key
+    }
+  });
+  expect(create.ok(), await create.text()).toBeTruthy();
+  return (await create.json()).folder;
+}
+
 function writeReport(projectRoot: string, proposalID: string, itemID: string) {
   const tidyRoot = path.join(projectRoot, 'tidy');
   const proposalStatePath = path.join(tidyRoot, `proposal-${proposalID}.state.json`);
@@ -117,16 +164,10 @@ test('project-entry tidy panel reviews, filters, dismisses, and supersedes fixtu
   expect(install.ok(), await install.text()).toBeTruthy();
   expect((await request.post(`/api/plugins/${pluginName}/enable`)).ok()).toBeTruthy();
 
-  const create = await request.post('/api/workspaces', {
-    data: {
-      name: `Tidy Surface ${Date.now().toString(36)}`,
-      description: 'Disposable Project Tidy browser fixture',
-      template_id: templateID,
-      create_template_agents: true
-    }
-  });
-  expect(create.ok(), await create.text()).toBeTruthy();
-  const workspace = (await create.json()).folder;
+  const workspace = await createReviewedReaperWorkspace(
+    request,
+    `Tidy Surface ${Date.now().toString(36)}`
+  );
   const primary = workspace.directory_references.find(
     (item: { id: string }) => item.id === workspace.shared_data.primary_directory_id
   );

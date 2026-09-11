@@ -1818,6 +1818,11 @@
   // The most recent computed world, held so the camera controls can fit, clamp,
   // and centre without recomputing placement.
   var lastWorldLayout = null;
+  // A grouped create briefly emphasizes the exact destination boundary. This
+  // is deliberately transient presentation state: it carries no membership or
+  // authorization meaning and is never persisted with the layout.
+  var placementHighlightGroupId = '';
+  var placementHighlightTimer = null;
   var cameraSaveTimer = null;
 
   // measured:false marks the DEFAULT_VIEWPORT fallback. Panning and drawing are
@@ -2299,6 +2304,7 @@
       theme +
       (collapsed ? ' is-collapsed' : '') +
       (conflict ? ' is-conflicted' : '') +
+      (ws.id === placementHighlightGroupId ? ' is-placement-highlighted' : '') +
       '" role="group" aria-label="' +
       escapeHtml(conflict ? label + ', needs layout attention' : label) +
       '" ' +
@@ -5929,6 +5935,173 @@
   }
 
   /**
+   * Choose a safe Map anchor for a newly created, unsited group member.
+   *
+   * An empty group already occupies a meaningful place on the Map. Its first
+   * workspace inherits that interior cell instead of making the district jump
+   * somewhere else. A populated/custom district is scanned for an unused
+   * interior cell first; only then do we try adjacent cells that let the
+   * effective boundary expand truthfully. Existing buildings never move, and a
+   * candidate is refused when the resulting frame would claim an unrelated
+   * workspace or district.
+   *
+   * This is presentation-only and generic to every group. Membership has
+   * already been committed by the workspace owner through parent_id; the Map
+   * merely gives a new record with no user-selected site a legible location.
+   */
+  function groupMemberPlacement(groupId, workspaceId, world) {
+    var layout = world || lastWorldLayout;
+    if (!groupId || !workspaceId || !layout) return null;
+    var district = null;
+    (layout.districts || []).forEach(function (candidate) {
+      if (candidate.id === groupId) district = candidate;
+    });
+    if (!district) return null;
+
+    var members = [];
+    (layout.nodes || []).concat(layout.hiddenNodes || []).forEach(function (node) {
+      if (node.groupId === groupId) members.push(node);
+    });
+    var occupied = (layout.nodes || []).concat(layout.hiddenNodes || []).filter(function (node) {
+      return node.id !== workspaceId;
+    });
+    if (layout.hqSite) occupied.push(layout.hqSite);
+
+    var frame = district.expandedFrame || district;
+    var presentation =
+      district.sizingMode === 'custom' && district.customFrame
+        ? { sizingMode: 'custom', frame: district.customFrame }
+        : { sizingMode: 'auto', frame: null };
+    var seen = Object.create(null);
+
+    function available(point) {
+      var key = anchorKey(point);
+      if (seen[key]) return false;
+      seen[key] = true;
+      if (
+        !isSafeCoordinate(point.x) ||
+        !isSafeCoordinate(point.y) ||
+        !isSafeCoordinate(point.x + MEMBER_W) ||
+        !isSafeCoordinate(point.y + MEMBER_H)
+      ) {
+        return false;
+      }
+      if (
+        occupied.some(function (node) {
+          return footprintsOverlap(point, node);
+        })
+      ) {
+        return false;
+      }
+      var projectedMembers = members.map(function (node) {
+        return { x: node.x, y: node.y };
+      });
+      projectedMembers.push(point);
+      var projectedFrame = effectiveDistrictFrame({
+        anchor: { x: frame.x, y: frame.y },
+        members: projectedMembers,
+        presentation: presentation
+      });
+      return !frameConflict(projectedFrame, groupId, layout).blocked;
+    }
+
+    function scanInterior(origin) {
+      var maxX = frame.x + frame.width - DISTRICT_PAD_X - MEMBER_W;
+      var maxY = frame.y + frame.height - DISTRICT_PAD_Y - MEMBER_H;
+      for (var y = origin.y; y <= maxY + 0.001; y += CELL_H) {
+        for (var x = origin.x; x <= maxX + 0.001; x += CELL_W) {
+          var point = { x: x, y: y };
+          if (available(point)) return point;
+        }
+      }
+      return null;
+    }
+
+    var interiorOrigin = {
+      x: frame.x + DISTRICT_PAD_X,
+      y: frame.y + DISTRICT_PAD_Y
+    };
+    var memberOrigin = null;
+    if (members.length) {
+      memberOrigin = members.reduce(
+        function (origin, node) {
+          return { x: Math.min(origin.x, node.x), y: Math.min(origin.y, node.y) };
+        },
+        { x: Infinity, y: Infinity }
+      );
+    }
+    // A custom frame may contain intentionally reserved empty room, so scan it
+    // from its own corner. Automatic groups stay aligned to their member grid.
+    var first =
+      presentation.sizingMode === 'custom' ? interiorOrigin : memberOrigin || interiorOrigin;
+    var candidate = scanInterior(first);
+    if (!candidate && memberOrigin && first !== memberOrigin)
+      candidate = scanInterior(memberOrigin);
+    if (candidate) return candidate;
+
+    // No room remains inside the current frame. Grow from its lower or right
+    // edge in deterministic cell steps, preferring the familiar next row.
+    var base = memberOrigin || interiorOrigin;
+    var cols = Math.max(1, Math.ceil(frame.width / CELL_W));
+    var rows = Math.max(1, Math.ceil(frame.height / CELL_H));
+    for (var ring = 1; ring <= 12; ring++) {
+      var bottomY = base.y + (rows + ring - 1) * CELL_H;
+      for (var col = 0; col < cols + ring; col++) {
+        candidate = { x: base.x + col * CELL_W, y: bottomY };
+        if (available(candidate)) return candidate;
+      }
+      var rightX = base.x + (cols + ring - 1) * CELL_W;
+      for (var row = 0; row < rows + ring - 1; row++) {
+        candidate = { x: rightX, y: base.y + row * CELL_H };
+        if (available(candidate)) return candidate;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Persist the group-aware default above after a workspace is created without
+   * an explicit Map Build site. A failed layout write never rolls back the real
+   * workspace or its membership; automatic layout still draws a truthful frame.
+   */
+  function highlightGroupBoundary(groupId) {
+    placementHighlightGroupId = groupId;
+    if (placementHighlightTimer && typeof window.clearTimeout === 'function') {
+      window.clearTimeout(placementHighlightTimer);
+    }
+    settleLayout();
+    if (typeof window.setTimeout !== 'function') return;
+    placementHighlightTimer = window.setTimeout(function () {
+      placementHighlightTimer = null;
+      placementHighlightGroupId = '';
+      var container = lastMount && lastMount.container;
+      if (!container || typeof container.querySelectorAll !== 'function') return;
+      var districts = container.querySelectorAll('.ws-map-district[data-group-id]');
+      Array.prototype.forEach.call(districts, function (district) {
+        district.classList.remove('is-placement-highlighted');
+      });
+    }, 1600);
+  }
+
+  function placeCreatedGroupMember(workspaceId, groupId) {
+    if (!workspaceId || !groupId || layoutState.positions[workspaceId]) {
+      return Promise.resolve({ placed: false, reason: 'not_applicable' });
+    }
+    var point = groupMemberPlacement(groupId, workspaceId, lastWorldLayout);
+    if (!point) return Promise.resolve({ placed: false, reason: 'no_safe_site' });
+    var placed = {};
+    placed[workspaceId] = point;
+    return patchLayout([{ op: 'set_positions', positions: withAutomaticLayoutPins(placed) }]).then(
+      function () {
+        highlightGroupBoundary(groupId);
+        var container = lastMount && lastMount.container;
+        if (container) announce(container, 'New workspace placed inside its group on the Map.');
+        return { placed: true, point: point, groupId: groupId };
+      }
+    );
+  }
+
+  /**
    * Resolve where a drop may actually land.
    *
    * A building's on-screen box is CELL_W x CELL_H, so "occupied" means "any
@@ -7982,6 +8155,11 @@
     // modal closes without one, so the pending coordinate is consumed exactly
     // once and never for a workspace that does not exist (FR-53, FR-54).
     completeBuild: completeBuild,
+    // A normal create has no chosen Map point. Give a newly grouped workspace a
+    // safe interior/adjacent site while leaving explicit Build coordinates and
+    // every existing building untouched.
+    placeCreatedGroupMember: placeCreatedGroupMember,
+    groupMemberPlacement: groupMemberPlacement,
     cancelBuild: function () {
       cancelBuild();
     },

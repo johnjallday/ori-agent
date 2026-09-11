@@ -36,6 +36,13 @@ type assistantDisconnectCommitRequest struct {
 	IdempotencyKey string `json:"idempotency_key"`
 }
 
+type assistantReconnectReviewRequest struct{}
+
+type assistantReconnectCommitRequest struct {
+	Token          string `json:"token"`
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
 type assistantHomeRemovalReviewRequest struct {
 	StateRevision int64 `json:"state_revision"`
 }
@@ -130,7 +137,33 @@ func (h *Handler) assistantProgramStation(workspaceID string) (*workspace.Worksp
 	if err != nil || station.GetAssistantProgramState() == nil {
 		return nil, current, workspace.ErrAssistantStationNotFound
 	}
+	state := station.GetAssistantProgramState()
+	if link.Key.Normalize() != state.Key.Normalize() || !containsWorkspaceID(state.LinkedProjectIDs, current.ID) {
+		return nil, current, workspace.ErrAssistantProgramVersionConflict
+	}
+	if required, ok := h.requiredGroupRequirementWorkspace(current.ID); ok && required.ParentID != station.ID {
+		return nil, current, workspace.ErrAssistantProgramVersionConflict
+	}
 	return station, current, nil
+}
+
+func (h *Handler) requiredGroupRequirementWorkspace(workspaceID string) (*workspace.Workspace, bool) {
+	if h == nil || h.workspaceTaskStore == nil {
+		return nil, false
+	}
+	candidate, err := h.workspaceTaskStore.Get(workspaceID)
+	if err == nil && workspace.HasRequiredGroupRequirement(candidate) {
+		return candidate, true
+	}
+	if reader, ok := h.workspaceTaskStore.(interface {
+		GetFolderWorkspace(string) (*workspace.Workspace, error)
+	}); ok {
+		candidate, err = reader.GetFolderWorkspace(workspaceID)
+		if err == nil && workspace.HasRequiredGroupRequirement(candidate) {
+			return candidate, true
+		}
+	}
+	return nil, false
 }
 
 func (h *Handler) syncAssistantPluginAvailability(station *workspace.Workspace) *workspace.Workspace {
@@ -309,6 +342,13 @@ func (h *Handler) ActivateAssistantProgram(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		_ = orihttp.RespondNotFound(w, "Workspace not found")
 		return
+	}
+	if required, ok := h.requiredGroupRequirementWorkspace(project.ID); ok {
+		status := workspace.EvaluateGroupRequirementLifecycle(required, h.workspaceTaskStore.Get)
+		if status == nil || status.State != workspace.GroupRequirementStatusReadyGrouped {
+			_ = orihttp.RespondConflict(w, "This Required template placement needs reviewed reconnect")
+			return
+		}
 	}
 	if project.GetAssistantProjectLink() == nil {
 		provenance := project.GetTemplateProvenance()
@@ -969,6 +1009,74 @@ func (h *Handler) CommitAssistantDisconnect(w http.ResponseWriter, r *http.Reque
 		}
 		_ = orihttp.RespondSuccess(w, receipt)
 	}
+}
+
+func (h *Handler) ReviewAssistantReconnect(w http.ResponseWriter, r *http.Request) {
+	projectID := strings.TrimSpace(r.PathValue("workspaceID"))
+	if !h.requireAssistantReconnectWritable(w, projectID) {
+		return
+	}
+	var request assistantReconnectReviewRequest
+	if !h.decodeAssistantProgramJSON(w, r, &request) {
+		return
+	}
+	review, err := workspace.NewAssistantProgramStore(h.workspaceTaskStore).ReviewReconnect(projectID)
+	if err != nil {
+		respondAssistantTopologyError(w, err)
+		return
+	}
+	_ = orihttp.RespondSuccess(w, review)
+}
+
+func (h *Handler) CommitAssistantReconnect(w http.ResponseWriter, r *http.Request) {
+	projectID := strings.TrimSpace(r.PathValue("workspaceID"))
+	if !h.requireAssistantReconnectWritable(w, projectID) {
+		return
+	}
+	var request assistantReconnectCommitRequest
+	if !h.decodeAssistantProgramJSON(w, r, &request) {
+		return
+	}
+	receipt, err := workspace.NewAssistantProgramStore(h.workspaceTaskStore).CommitReconnect(projectID, request.Token, request.IdempotencyKey)
+	if err != nil {
+		respondAssistantTopologyError(w, err)
+		return
+	}
+	_ = orihttp.RespondSuccess(w, receipt)
+}
+
+func (h *Handler) requireAssistantReconnectWritable(w http.ResponseWriter, projectID string) bool {
+	if h == nil || h.workspaceTaskStore == nil {
+		_ = orihttp.RespondServiceUnavailable(w, "Assistant program storage is unavailable")
+		return false
+	}
+	project, err := h.workspaceTaskStore.Get(projectID)
+	if err != nil || project == nil {
+		_ = orihttp.RespondNotFound(w, "Workspace not found")
+		return false
+	}
+	provenance := project.GetTemplateProvenance()
+	if provenance == nil {
+		if reader, ok := h.workspaceTaskStore.(interface {
+			GetFolderWorkspace(string) (*workspace.Workspace, error)
+		}); ok {
+			if canonical, canonicalErr := reader.GetFolderWorkspace(projectID); canonicalErr == nil && canonical != nil {
+				provenance = canonical.GetTemplateProvenance()
+			}
+		}
+	}
+	if provenance == nil || provenance.GroupRequirement == nil || !provenance.GroupRequirement.StructurallyValid() ||
+		provenance.GroupRequirement.SelectedComposition != workspace.GroupRequirementCompositionGrouped {
+		_ = orihttp.RespondConflict(w, "This workspace has no reconnectable template group contract")
+		return false
+	}
+	station, err := h.workspaceTaskStore.Get(provenance.GroupRequirement.HomeWorkspaceID)
+	if err != nil || station == nil {
+		_ = orihttp.RespondConflict(w, "The recorded Assistant Program Home is unavailable; recreate or reconnect through guided setup")
+		return false
+	}
+	_, ok := h.requireAssistantWritable(w, station)
+	return ok
 }
 
 func (h *Handler) ReviewAssistantHomeRemoval(w http.ResponseWriter, r *http.Request) {

@@ -11,12 +11,14 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/blueprintreadiness"
+	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/runtimecapability"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 )
 
@@ -24,14 +26,16 @@ func (b *ServerBuilder) wireProjectTemplateResolver() {
 	if b == nil || b.sessionHandler == nil {
 		return
 	}
-	b.sessionHandler.SetProjectTemplateResolver(func(templateID, templatePath string) (projecttemplates.Template, error) {
+	resolveTemplate := func(templateID, templatePath string) (projecttemplates.Template, error) {
 		catalog := templateRuntimeCatalog{
 			capabilities: b.workspaceCapabilityRegistry,
 			runtimes:     b.runtimeCapabilityRegistry,
 		}
 		if id := strings.TrimSpace(templateID); id != "" {
+			var installed []plugin.InstalledPlugin
 			if b.pluginHandler != nil {
-				installed, err := b.pluginHandler.Manager().List()
+				var err error
+				installed, err = b.pluginHandler.Manager().List()
 				if err != nil {
 					return projecttemplates.Template{}, err
 				}
@@ -44,13 +48,86 @@ func (b *ServerBuilder) wireProjectTemplateResolver() {
 			if strings.HasPrefix(id, "plugin:") {
 				return projecttemplates.Template{}, fmt.Errorf("%w: %q", projecttemplates.ErrTemplateNotFound, id)
 			}
-			return projecttemplates.FindLibraryTemplateWithCatalog(resolveTemplatesRoot(b.configManager), id, catalog)
+			template, err := projecttemplates.FindLibraryTemplateWithCatalog(resolveTemplatesRoot(b.configManager), id, catalog)
+			if err != nil {
+				return projecttemplates.Template{}, err
+			}
+			if template.HasInvalidVariant() {
+				return projecttemplates.Template{}, projecttemplates.ErrInvalidTemplateVariant
+			}
+			if template.TemplateVariant == nil {
+				return template, nil
+			}
+			source, state := findVariantSource(template.TemplateVariant.Source, installed)
+			if state != projecttemplates.VariantSourceReady {
+				return projecttemplates.Template{}, projecttemplates.ErrTemplateVariantSource
+			}
+			if b.userProvider == nil {
+				return projecttemplates.Template{}, projecttemplates.ErrTemplateVariantOwner
+			}
+			ownerUserID, ownerErr := b.userProvider.CurrentUserID(context.Background())
+			if ownerErr != nil || strings.TrimSpace(ownerUserID) == "" {
+				return projecttemplates.Template{}, projecttemplates.ErrTemplateVariantOwner
+			}
+			return projecttemplates.ResolveTemplateVariant(template, source, ownerUserID)
 		}
 		if path := strings.TrimSpace(templatePath); path != "" {
-			return projecttemplates.LoadFolderWithCatalog(path, catalog)
+			template, err := projecttemplates.LoadFolderWithCatalog(path, catalog)
+			if err != nil {
+				return projecttemplates.Template{}, err
+			}
+			if template.TemplateVariant != nil || template.HasInvalidVariant() {
+				return projecttemplates.Template{}, projecttemplates.ErrTemplateVariantRestricted
+			}
+			return template, nil
 		}
 		return projecttemplates.Template{}, errors.New("no template specified")
-	})
+	}
+	b.sessionHandler.SetProjectTemplateResolver(resolveTemplate)
+	if b.chatHandler != nil {
+		b.chatHandler.SetProjectTemplateCatalog(
+			func(id string) (projecttemplates.Template, error) { return resolveTemplate(id, "") },
+			func() ([]projecttemplates.Template, error) {
+				var installed []plugin.InstalledPlugin
+				if b.pluginHandler != nil {
+					var err error
+					installed, err = b.pluginHandler.Manager().List()
+					if err != nil {
+						return nil, err
+					}
+				}
+				result := activePluginBlueprintTemplates(installed)
+				library, err := projecttemplates.ListLibraryWithCatalog(resolveTemplatesRoot(b.configManager), templateRuntimeCatalog{
+					capabilities: b.workspaceCapabilityRegistry, runtimes: b.runtimeCapabilityRegistry,
+				})
+				if err != nil {
+					return nil, err
+				}
+				for _, template := range library {
+					if template.TemplateVariant == nil {
+						result = append(result, template)
+						continue
+					}
+					resolved, resolveErr := resolveTemplate(template.ID, "")
+					if resolveErr == nil {
+						result = append(result, resolved)
+					}
+				}
+				return result, nil
+			},
+		)
+	}
+
+	if b.workspaceStore == nil || b.sessionStore == nil || b.userProvider == nil {
+		return
+	}
+	receipts, err := grouprequirements.NewSQLiteStore(b.sessionStore.DB())
+	if err != nil {
+		logger.Warn("Template group requirement receipts are unavailable", logger.Fields{"error": err.Error()})
+		return
+	}
+	b.groupRequirements = grouprequirements.NewService(b.workspaceStore, receipts)
+	b.sessionHandler.SetGroupRequirementService(b.groupRequirements, b.userProvider.CurrentUserID)
 }
 
 type templateRuntimeCatalog struct {
@@ -90,7 +167,7 @@ func (s *Server) handleProjectTemplates(w http.ResponseWriter, r *http.Request) 
 	}
 
 	root := resolveTemplatesRoot(s.Core.ConfigManager)
-	entries, err := s.buildBlueprintCatalog(root)
+	entries, err := s.buildBlueprintCatalogForOwner(root, s.currentTemplateCatalogOwner(r.Context()))
 	if err != nil {
 		_ = orihttp.RespondInternalError(w, "Failed to read templates library")
 		return
@@ -106,6 +183,10 @@ func (s *Server) handleProjectTemplates(w http.ResponseWriter, r *http.Request) 
 // blueprints installed plugins contribute, and one readiness projection per
 // entry derived from the same authoritative state the create gate uses.
 func (s *Server) buildBlueprintCatalog(root string) ([]blueprintCatalogEntry, error) {
+	return s.buildBlueprintCatalogForOwner(root, "local")
+}
+
+func (s *Server) buildBlueprintCatalogForOwner(root, ownerUserID string) ([]blueprintCatalogEntry, error) {
 	catalog := s.projectTemplateCatalog
 	var templates []projecttemplates.Template
 	var err error
@@ -134,6 +215,7 @@ func (s *Server) buildBlueprintCatalog(root string) ([]blueprintCatalogEntry, er
 		}
 	}
 
+	templates = resolveCatalogVariants(templates, sources.Installed, ownerUserID)
 	merged := mergePluginBlueprintCandidates(templates, candidates)
 	entries := make([]blueprintCatalogEntry, 0, len(merged))
 	for _, template := range merged {
@@ -239,6 +321,84 @@ func candidatePluginBlueprintTemplates(installed []plugin.InstalledPlugin) []plu
 	return candidates
 }
 
+func resolveCatalogVariants(templates []projecttemplates.Template, installed []plugin.InstalledPlugin, ownerUserID string) []projecttemplates.Template {
+	resolved := make([]projecttemplates.Template, 0, len(templates))
+	for _, template := range templates {
+		if template.TemplateVariant == nil {
+			resolved = append(resolved, template)
+			continue
+		}
+		if template.TemplateVariant.OwnerUserID != strings.TrimSpace(ownerUserID) {
+			// Owner-scoped variants are hidden exactly like unrelated workspaces;
+			// even their display metadata is not disclosed.
+			continue
+		}
+		source, state := findVariantSource(template.TemplateVariant.Source, installed)
+		if state != projecttemplates.VariantSourceReady {
+			template.VariantSourceState = state
+			template.Path = ""
+			template.HasSkeleton = false
+			resolved = append(resolved, template)
+			continue
+		}
+		effective, err := projecttemplates.ResolveTemplateVariant(template, source, ownerUserID)
+		if err != nil {
+			if errors.Is(err, projecttemplates.ErrTemplateVariantSourceChanged) {
+				template.VariantSourceState = projecttemplates.VariantSourceChanged
+			} else {
+				template.VariantSourceState = projecttemplates.VariantSourceIncompatible
+			}
+			template.Path = ""
+			template.HasSkeleton = false
+			resolved = append(resolved, template)
+			continue
+		}
+		resolved = append(resolved, effective)
+	}
+	return resolved
+}
+
+func findVariantSource(pin projecttemplates.TemplateVariantSource, installed []plugin.InstalledPlugin) (projecttemplates.VariantSource, projecttemplates.VariantSourceState) {
+	var currentPlugin *plugin.InstalledPlugin
+	for index := range installed {
+		if workspace.NormalizeCapabilityID(installed[index].Name) == pin.PluginID {
+			currentPlugin = &installed[index]
+			break
+		}
+	}
+	if currentPlugin == nil {
+		return projecttemplates.VariantSource{}, projecttemplates.VariantSourceMissing
+	}
+	if currentPlugin.Version != pin.PluginVersion {
+		return projecttemplates.VariantSource{}, projecttemplates.VariantSourceChanged
+	}
+	var source *plugin.ResolvedBlueprint
+	for index := range currentPlugin.ResolvedBlueprints {
+		blueprint := &currentPlugin.ResolvedBlueprints[index]
+		if blueprint.ID == pin.BlueprintID {
+			source = blueprint
+			break
+		}
+	}
+	if source == nil || source.Version != pin.BlueprintVersion {
+		return projecttemplates.VariantSource{}, projecttemplates.VariantSourceChanged
+	}
+	if !currentPlugin.Enabled {
+		return projecttemplates.VariantSource{}, projecttemplates.VariantSourceDisabled
+	}
+	if !pluginBlueprintsActive(*currentPlugin) {
+		return projecttemplates.VariantSource{}, projecttemplates.VariantSourceIncompatible
+	}
+	template := source.Template
+	template.Path = source.SkeletonRoot
+	template.HasSkeleton = true
+	variantSource := projecttemplates.VariantSource{Template: template, SkeletonDigest: source.SkeletonDigest}
+	if projecttemplates.TemplateDefinitionDigest(template, source.SkeletonDigest) != pin.DefinitionDigest {
+		return projecttemplates.VariantSource{}, projecttemplates.VariantSourceChanged
+	}
+	return variantSource, projecttemplates.VariantSourceReady
+}
+
 func activePluginBlueprintTemplates(installed []plugin.InstalledPlugin) []projecttemplates.Template {
 	var templates []projecttemplates.Template
 	for _, candidate := range installed {
@@ -267,12 +427,36 @@ func pluginBlueprintsActive(candidate plugin.InstalledPlugin) bool {
 	if !candidate.Enabled || candidate.WorkspaceSurfaces == nil {
 		return false
 	}
+	if !pluginHostFeaturesAvailable(candidate.WorkspaceSurfaces.RequiresHostFeatures) {
+		return false
+	}
 	if !pluginArtifactsAvailable(candidate.ResolvedArtifacts) {
 		return false
 	}
 	protocol := candidate.WorkspaceSurfaces.Protocol
 	maximum := max(protocol.Max, protocol.Min)
 	return protocol.Min <= plugin.SurfaceProtocolVersion && maximum >= plugin.SurfaceProtocolVersion
+}
+
+func pluginHostFeaturesAvailable(required []string) bool {
+	available := map[string]struct{}{
+		plugin.HostFeatureAssistantProgramV1:          {},
+		plugin.HostFeatureSpecialistSetupJourneyV1:    {},
+		plugin.HostFeatureSetupQuestsV1:               {},
+		plugin.HostFeatureTemplateGroupRequirementsV1: {},
+	}
+	seen := make(map[string]struct{}, len(required))
+	for _, feature := range required {
+		feature = strings.TrimSpace(feature)
+		if _, ok := available[feature]; !ok {
+			return false
+		}
+		if _, duplicate := seen[feature]; duplicate {
+			return false
+		}
+		seen[feature] = struct{}{}
+	}
+	return true
 }
 
 func pluginArtifactsAvailable(artifacts []plugin.ResolvedArtifact) bool {
@@ -287,12 +471,14 @@ func pluginArtifactsAvailable(artifacts []plugin.ResolvedArtifact) bool {
 // handleProjectTemplateImport serves POST /api/project-templates/import:
 // copy an arbitrary folder into the library as a new template.
 func (s *Server) handleProjectTemplateImport(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.currentTemplateAuthor(w, r); !ok {
+	userID, ok := s.currentTemplateAuthor(w, r)
+	if !ok {
 		return
 	}
 	var req struct {
-		Path string `json:"path"`
-		Name string `json:"name,omitempty"`
+		Path          string `json:"path"`
+		Name          string `json:"name,omitempty"`
+		ConfirmRehost bool   `json:"confirm_rehost,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -302,7 +488,20 @@ func (s *Server) handleProjectTemplateImport(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	tpl, err := projecttemplates.ImportFolder(resolveTemplatesRoot(s.Core.ConfigManager), req.Path, req.Name)
+	root := resolveTemplatesRoot(s.Core.ConfigManager)
+	sourceTemplate, loadErr := projecttemplates.LoadFolderWithCatalog(req.Path, s.projectTemplateCatalog)
+	var tpl projecttemplates.Template
+	var err error
+	if loadErr == nil && sourceTemplate.TemplateVariant != nil {
+		source, sourceErr := s.activeVariantSource(sourceTemplate.TemplateVariant.Source)
+		if sourceErr != nil {
+			s.respondProjectTemplateError(w, sourceErr)
+			return
+		}
+		tpl, err = projecttemplates.RehostTemplateVariant(root, req.Path, req.Name, userID, req.ConfirmRehost, source)
+	} else {
+		tpl, err = projecttemplates.ImportFolder(root, req.Path, req.Name)
+	}
 	if err != nil {
 		s.respondProjectTemplateError(w, err)
 		return
@@ -319,6 +518,58 @@ func (s *Server) handleProjectTemplateUpdate(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
+	root := resolveTemplatesRoot(s.Core.ConfigManager)
+	id := r.PathValue("templateID")
+	if strings.HasPrefix(id, "plugin:") {
+		s.respondProjectTemplateError(w, projecttemplates.ErrTemplateReadOnly)
+		return
+	}
+	current, err := projecttemplates.FindLibraryTemplateWithCatalog(root, id, s.projectTemplateCatalog)
+	if err != nil {
+		s.respondProjectTemplateError(w, err)
+		return
+	}
+	if current.TemplateVariant != nil {
+		if current.TemplateVariant.OwnerUserID != userID {
+			s.respondProjectTemplateError(w, projecttemplates.ErrTemplateVariantOwner)
+			return
+		}
+		var request struct {
+			Name             string          `json:"name"`
+			Description      string          `json:"description"`
+			Icon             string          `json:"icon"`
+			GroupRequirement json.RawMessage `json:"group_requirement"`
+			IfRevision       string          `json:"if_revision"`
+		}
+		if err := decodeStrictTemplateRequest(w, r, &request); err != nil {
+			_ = orihttp.RespondBadRequest(w, "variant edit contains unsupported or malformed fields")
+			return
+		}
+		requirement, parseErr := projecttemplates.ParseGroupRequirement(request.GroupRequirement)
+		if parseErr != nil {
+			s.respondProjectTemplateError(w, parseErr)
+			return
+		}
+		if requirement == nil {
+			_ = orihttp.RespondBadRequest(w, "group_requirement must be an explicit object")
+			return
+		}
+		source, sourceErr := s.activeVariantSource(current.TemplateVariant.Source)
+		if sourceErr != nil {
+			s.respondProjectTemplateError(w, sourceErr)
+			return
+		}
+		updated, updateErr := projecttemplates.UpdateTemplateVariant(root, current.ID, userID, request.IfRevision, projecttemplates.VariantEdit{
+			Name: request.Name, Description: request.Description, Icon: request.Icon, GroupRequirement: requirement,
+		}, source)
+		if updateErr != nil {
+			s.respondProjectTemplateError(w, updateErr)
+			return
+		}
+		_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "template": updated})
+		return
+	}
+
 	var req struct {
 		Name                   string                                    `json:"name"`
 		Description            string                                    `json:"description"`
@@ -331,11 +582,13 @@ func (s *Server) handleProjectTemplateUpdate(w http.ResponseWriter, r *http.Requ
 		DirectoryRequirements  *[]projecttemplates.DirectoryRequirement  `json:"directory_requirements"`
 		AutomationRecipes      *[]projecttemplates.AutomationRecipe      `json:"automation_recipes"`
 		RuntimeRequirements    json.RawMessage                           `json:"runtime_requirements"`
+		GroupRequirement       json.RawMessage                           `json:"group_requirement"`
+		IfRevision             string                                    `json:"if_revision"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
-	if !s.guardTemplateMutable(w, r.PathValue("templateID")) {
+	if !s.guardTemplateMutable(w, id) {
 		return
 	}
 
@@ -361,9 +614,11 @@ func (s *Server) handleProjectTemplateUpdate(w http.ResponseWriter, r *http.Requ
 		DirectoryRequirements:  req.DirectoryRequirements,
 		AutomationRecipes:      req.AutomationRecipes,
 		RuntimeRequirements:    req.RuntimeRequirements,
+		GroupRequirement:       req.GroupRequirement,
+		ExpectedRevision:       req.IfRevision,
 	}
 	tpl, err := projecttemplates.UpdateManifestWithGuard(
-		resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.Name, req.Description,
+		root, id, req.Name, req.Description,
 		req.Tags, edit, s.userSetupQuestMutationGuard(r.Context(), userID), s.projectTemplateCatalog,
 	)
 	if err != nil {
@@ -434,6 +689,17 @@ func (s *Server) userSetupQuestAuthoring(ctx context.Context, template projectte
 	return response
 }
 
+func (s *Server) currentTemplateCatalogOwner(ctx context.Context) string {
+	if s != nil && s.Storage != nil && s.Storage.UserProvider != nil {
+		if userID, err := s.Storage.UserProvider.CurrentUserID(ctx); err == nil && strings.TrimSpace(userID) != "" {
+			return strings.TrimSpace(userID)
+		}
+	}
+	// Ordinary templates remain listable when identity storage is unavailable,
+	// but owner-scoped variant metadata must not fall back to another identity.
+	return ""
+}
+
 func (s *Server) currentTemplateAuthor(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if s == nil || s.Storage == nil || s.Storage.UserProvider == nil {
 		_ = orihttp.RespondError(w, http.StatusServiceUnavailable, "Template authoring ownership is unavailable")
@@ -499,8 +765,21 @@ func (s *Server) userSetupQuestContentGuard(ctx context.Context, userID string) 
 	}
 }
 
-func (s *Server) loadUserSetupQuestTemplate(id string) (projecttemplates.Template, error) {
-	return projecttemplates.FindLibraryTemplateWithCatalog(resolveTemplatesRoot(s.Core.ConfigManager), id, s.projectTemplateCatalog)
+func (s *Server) loadUserSetupQuestTemplate(id, ownerUserID string) (projecttemplates.Template, error) {
+	template, err := projecttemplates.FindLibraryTemplateWithCatalog(resolveTemplatesRoot(s.Core.ConfigManager), id, s.projectTemplateCatalog)
+	if err != nil {
+		return projecttemplates.Template{}, err
+	}
+	if template.TemplateVariant != nil {
+		if template.TemplateVariant.OwnerUserID != strings.TrimSpace(ownerUserID) {
+			return projecttemplates.Template{}, projecttemplates.ErrTemplateVariantOwner
+		}
+		return projecttemplates.Template{}, projecttemplates.ErrTemplateVariantRestricted
+	}
+	if template.HasInvalidVariant() {
+		return projecttemplates.Template{}, projecttemplates.ErrTemplateVariantRestricted
+	}
+	return template, nil
 }
 
 // handleUserSetupQuestGet returns authoring metadata only. It never calls the
@@ -510,10 +789,11 @@ func (s *Server) handleUserSetupQuestGet(w http.ResponseWriter, r *http.Request)
 		_ = orihttp.RespondBadRequest(w, "query parameters are not supported")
 		return
 	}
-	if _, ok := s.currentTemplateAuthor(w, r); !ok {
+	userID, ok := s.currentTemplateAuthor(w, r)
+	if !ok {
 		return
 	}
-	template, err := s.loadUserSetupQuestTemplate(r.PathValue("templateID"))
+	template, err := s.loadUserSetupQuestTemplate(r.PathValue("templateID"), userID)
 	if err != nil {
 		s.respondProjectTemplateError(w, err)
 		return
@@ -526,7 +806,8 @@ func (s *Server) handleUserSetupQuestPreview(w http.ResponseWriter, r *http.Requ
 		_ = orihttp.RespondBadRequest(w, "query parameters are not supported")
 		return
 	}
-	if _, ok := s.currentTemplateAuthor(w, r); !ok {
+	userID, ok := s.currentTemplateAuthor(w, r)
+	if !ok {
 		return
 	}
 	var request struct {
@@ -545,7 +826,7 @@ func (s *Server) handleUserSetupQuestPreview(w http.ResponseWriter, r *http.Requ
 		_ = orihttp.RespondBadRequest(w, "user_setup_quest must select a host-reviewed integration")
 		return
 	}
-	template, err := s.loadUserSetupQuestTemplate(r.PathValue("templateID"))
+	template, err := s.loadUserSetupQuestTemplate(r.PathValue("templateID"), userID)
 	if err != nil {
 		s.respondProjectTemplateError(w, err)
 		return
@@ -583,7 +864,7 @@ func (s *Server) handleUserSetupQuestPut(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if request.Quest == nil {
-		template, err := s.loadUserSetupQuestTemplate(r.PathValue("templateID"))
+		template, err := s.loadUserSetupQuestTemplate(r.PathValue("templateID"), userID)
 		if err != nil {
 			s.respondProjectTemplateError(w, err)
 			return
@@ -676,12 +957,160 @@ func (s *Server) handleProjectTemplateCreate(w http.ResponseWriter, r *http.Requ
 	_ = orihttp.RespondCreated(w, map[string]any{"success": true, "template": tpl})
 }
 
+func (s *Server) activeVariantSource(pin projecttemplates.TemplateVariantSource) (projecttemplates.VariantSource, error) {
+	if s == nil || s.Handlers == nil || s.Handlers.Plugin == nil {
+		return projecttemplates.VariantSource{}, projecttemplates.ErrTemplateVariantSource
+	}
+	installed, err := s.Handlers.Plugin.Manager().List()
+	if err != nil {
+		return projecttemplates.VariantSource{}, err
+	}
+	source, state := findVariantSource(pin, installed)
+	if state != projecttemplates.VariantSourceReady {
+		if state == projecttemplates.VariantSourceChanged {
+			return projecttemplates.VariantSource{}, projecttemplates.ErrTemplateVariantSourceChanged
+		}
+		return projecttemplates.VariantSource{}, projecttemplates.ErrTemplateVariantSource
+	}
+	return source, nil
+}
+
+func (s *Server) activePluginVariantSource(templateID string) (projecttemplates.VariantSource, error) {
+	if s == nil || s.Handlers == nil || s.Handlers.Plugin == nil {
+		return projecttemplates.VariantSource{}, projecttemplates.ErrTemplateVariantSource
+	}
+	installed, err := s.Handlers.Plugin.Manager().List()
+	if err != nil {
+		return projecttemplates.VariantSource{}, err
+	}
+	for _, candidate := range installed {
+		if !pluginBlueprintsActive(candidate) {
+			continue
+		}
+		for _, blueprint := range candidate.ResolvedBlueprints {
+			if blueprint.QualifiedID != templateID {
+				continue
+			}
+			template := blueprint.Template
+			template.Path = blueprint.SkeletonRoot
+			template.HasSkeleton = true
+			return projecttemplates.VariantSource{Template: template, SkeletonDigest: blueprint.SkeletonDigest}, nil
+		}
+	}
+	return projecttemplates.VariantSource{}, projecttemplates.ErrTemplateVariantSource
+}
+
+func (s *Server) handleProjectTemplateVariantCreate(w http.ResponseWriter, r *http.Request) {
+	userID, ok := s.currentTemplateAuthor(w, r)
+	if !ok {
+		return
+	}
+	var request struct {
+		Name             string          `json:"name"`
+		Description      string          `json:"description,omitempty"`
+		Icon             string          `json:"icon,omitempty"`
+		GroupRequirement json.RawMessage `json:"group_requirement"`
+	}
+	if err := decodeStrictTemplateRequest(w, r, &request); err != nil {
+		_ = orihttp.RespondBadRequest(w, "variant request contains unsupported or malformed fields")
+		return
+	}
+	requirement, err := projecttemplates.ParseGroupRequirement(request.GroupRequirement)
+	if err != nil {
+		s.respondProjectTemplateError(w, err)
+		return
+	}
+	if requirement == nil {
+		_ = orihttp.RespondBadRequest(w, "group_requirement must be an explicit object")
+		return
+	}
+	source, err := s.activePluginVariantSource(r.PathValue("templateID"))
+	if err != nil {
+		s.respondProjectTemplateError(w, err)
+		return
+	}
+	if _, err := projecttemplates.PreviewGroupRequirement(source.Template, request.GroupRequirement); err != nil {
+		s.respondProjectTemplateError(w, err)
+		return
+	}
+	created, err := projecttemplates.CreateTemplateVariant(resolveTemplatesRoot(s.Core.ConfigManager), source, userID, projecttemplates.VariantEdit{
+		Name: request.Name, Description: request.Description, Icon: request.Icon, GroupRequirement: requirement,
+	})
+	if err != nil {
+		s.respondProjectTemplateError(w, err)
+		return
+	}
+	_ = orihttp.RespondCreated(w, map[string]any{"success": true, "template": created})
+}
+
+func (s *Server) handleProjectTemplateGroupRequirementPreview(w http.ResponseWriter, r *http.Request) {
+	userID, ok := s.currentTemplateAuthor(w, r)
+	if !ok {
+		return
+	}
+	var request struct {
+		IfRevision       string          `json:"if_revision,omitempty"`
+		GroupRequirement json.RawMessage `json:"group_requirement"`
+	}
+	if err := decodeStrictTemplateRequest(w, r, &request); err != nil {
+		_ = orihttp.RespondBadRequest(w, "group requirement preview contains unsupported or malformed fields")
+		return
+	}
+	id := r.PathValue("templateID")
+	var template projecttemplates.Template
+	var err error
+	if strings.HasPrefix(id, "plugin:") {
+		source, sourceErr := s.activePluginVariantSource(id)
+		if sourceErr != nil {
+			s.respondProjectTemplateError(w, sourceErr)
+			return
+		}
+		template = source.Template
+	} else {
+		template, err = projecttemplates.FindLibraryTemplateWithCatalog(resolveTemplatesRoot(s.Core.ConfigManager), id, s.projectTemplateCatalog)
+		if err != nil {
+			s.respondProjectTemplateError(w, err)
+			return
+		}
+		if template.TemplateVariant != nil {
+			if template.TemplateVariant.OwnerUserID != userID {
+				s.respondProjectTemplateError(w, projecttemplates.ErrTemplateVariantOwner)
+				return
+			}
+			if request.IfRevision != template.VariantRevision {
+				s.respondProjectTemplateError(w, projecttemplates.ErrTemplateVariantStale)
+				return
+			}
+			source, sourceErr := s.activeVariantSource(template.TemplateVariant.Source)
+			if sourceErr != nil {
+				s.respondProjectTemplateError(w, sourceErr)
+				return
+			}
+			template, err = projecttemplates.ResolveTemplateVariant(template, source, userID)
+			if err != nil {
+				s.respondProjectTemplateError(w, err)
+				return
+			}
+		} else if request.IfRevision != template.Revision {
+			s.respondProjectTemplateError(w, projecttemplates.ErrTemplateRevisionStale)
+			return
+		}
+	}
+	preview, err := projecttemplates.PreviewGroupRequirement(template, request.GroupRequirement)
+	if err != nil {
+		s.respondProjectTemplateError(w, err)
+		return
+	}
+	_ = orihttp.RespondSuccess(w, preview)
+}
+
 // handleProjectTemplateDuplicate serves POST
 // /api/project-templates/{templateID}/duplicate: copy an existing template into a
 // new one. The (optional) `name` seeds the copy's display name and id; send `{}`
 // for a default "<source> copy".
 func (s *Server) handleProjectTemplateDuplicate(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.currentTemplateAuthor(w, r); !ok {
+	userID, ok := s.currentTemplateAuthor(w, r)
+	if !ok {
 		return
 	}
 	var req struct {
@@ -691,7 +1120,35 @@ func (s *Server) handleProjectTemplateDuplicate(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	tpl, err := projecttemplates.Duplicate(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.Name)
+	root := resolveTemplatesRoot(s.Core.ConfigManager)
+	original, loadErr := projecttemplates.FindLibraryTemplateWithCatalog(root, r.PathValue("templateID"), s.projectTemplateCatalog)
+	if loadErr == nil && original.TemplateVariant != nil {
+		if original.TemplateVariant.OwnerUserID != userID {
+			s.respondProjectTemplateError(w, projecttemplates.ErrTemplateVariantOwner)
+			return
+		}
+		source, sourceErr := s.activeVariantSource(original.TemplateVariant.Source)
+		if sourceErr != nil {
+			s.respondProjectTemplateError(w, sourceErr)
+			return
+		}
+		name := strings.TrimSpace(req.Name)
+		if name == "" {
+			name = original.Name + " copy"
+		}
+		tpl, createErr := projecttemplates.CreateTemplateVariant(root, source, userID, projecttemplates.VariantEdit{
+			Name: name, Description: original.Description, Icon: original.Icon,
+			GroupRequirement: original.TemplateVariant.Overrides.GroupRequirement,
+		})
+		if createErr != nil {
+			s.respondProjectTemplateError(w, createErr)
+			return
+		}
+		_ = orihttp.RespondCreated(w, map[string]any{"success": true, "template": tpl})
+		return
+	}
+
+	tpl, err := projecttemplates.Duplicate(root, r.PathValue("templateID"), req.Name)
 	if err != nil {
 		s.respondProjectTemplateError(w, err)
 		return
@@ -705,7 +1162,20 @@ func (s *Server) handleProjectTemplateDuplicate(w http.ResponseWriter, r *http.R
 // on the next server start (materialize-if-absent).
 func (s *Server) handleProjectTemplateDelete(w http.ResponseWriter, r *http.Request) {
 	userID, ok := s.currentTemplateAuthor(w, r)
-	if !ok || !s.guardTemplateMutable(w, r.PathValue("templateID")) {
+	if !ok {
+		return
+	}
+	current, err := projecttemplates.FindLibraryTemplateWithCatalog(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), s.projectTemplateCatalog)
+	if err != nil {
+		s.respondProjectTemplateError(w, err)
+		return
+	}
+	if current.TemplateVariant != nil {
+		if current.TemplateVariant.OwnerUserID != userID {
+			s.respondProjectTemplateError(w, projecttemplates.ErrTemplateVariantOwner)
+			return
+		}
+	} else if !s.guardTemplateMutable(w, r.PathValue("templateID")) {
 		return
 	}
 	trashed, err := projecttemplates.DeleteWithGuard(
@@ -721,7 +1191,27 @@ func (s *Server) handleProjectTemplateDelete(w http.ResponseWriter, r *http.Requ
 
 // handleProjectTemplateFilesList serves GET
 // /api/project-templates/{templateID}/files: the template's file/folder tree.
+func (s *Server) rejectVariantFileSurface(w http.ResponseWriter, r *http.Request) bool {
+	template, err := projecttemplates.FindLibraryTemplateWithCatalog(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), s.projectTemplateCatalog)
+	if err != nil || template.TemplateVariant == nil {
+		return false
+	}
+	userID, ok := s.currentTemplateAuthor(w, r)
+	if !ok {
+		return true
+	}
+	if template.TemplateVariant.OwnerUserID != userID {
+		s.respondProjectTemplateError(w, projecttemplates.ErrTemplateVariantOwner)
+		return true
+	}
+	s.respondProjectTemplateError(w, projecttemplates.ErrTemplateVariantRestricted)
+	return true
+}
+
 func (s *Server) handleProjectTemplateFilesList(w http.ResponseWriter, r *http.Request) {
+	if s.rejectVariantFileSurface(w, r) {
+		return
+	}
 	nodes, err := projecttemplates.ListTree(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"))
 	if err != nil {
 		s.respondProjectTemplateError(w, err)
@@ -734,6 +1224,9 @@ func (s *Server) handleProjectTemplateFilesList(w http.ResponseWriter, r *http.R
 // /api/project-templates/{templateID}/files/content?path=<rel>: one file's
 // contents for the editor (read-only for binary/manifest, 413 if oversized).
 func (s *Server) handleProjectTemplateFileRead(w http.ResponseWriter, r *http.Request) {
+	if s.rejectVariantFileSurface(w, r) {
+		return
+	}
 	content, err := projecttemplates.ReadFileContent(
 		resolveTemplatesRoot(s.Core.ConfigManager),
 		r.PathValue("templateID"),
@@ -946,6 +1439,16 @@ func (s *Server) handleProjectTemplateReveal(w http.ResponseWriter, r *http.Requ
 		s.respondProjectTemplateError(w, err)
 		return
 	}
+	if tpl.TemplateVariant != nil {
+		userID, ok := s.currentTemplateAuthor(w, r)
+		if !ok {
+			return
+		}
+		if tpl.TemplateVariant.OwnerUserID != userID {
+			s.respondProjectTemplateError(w, projecttemplates.ErrTemplateVariantOwner)
+			return
+		}
+	}
 	if err := opener.RevealInFileManager(tpl.Path); err != nil {
 		_ = orihttp.RespondInternalError(w, "Failed to reveal template")
 		return
@@ -960,13 +1463,18 @@ func (s *Server) respondProjectTemplateError(w http.ResponseWriter, err error) {
 	case errors.Is(err, projecttemplates.ErrInvalidTemplateName), errors.Is(err, projecttemplates.ErrInvalidPath), errors.Is(err, projecttemplates.ErrInvalidPromptVariable),
 		errors.Is(err, projecttemplates.ErrInvalidStarterTasks), errors.Is(err, projecttemplates.ErrInvalidProjectEntry), errors.Is(err, projecttemplates.ErrRosterRequired),
 		errors.Is(err, projecttemplates.ErrInvalidCapabilityRequirements), errors.Is(err, projecttemplates.ErrInvalidDirectoryRequirements), errors.Is(err, projecttemplates.ErrInvalidAutomationRecipes),
-		errors.Is(err, projecttemplates.ErrInvalidRuntimeRequirements), errors.Is(err, projecttemplates.ErrInvalidUserSetupQuest):
+		errors.Is(err, projecttemplates.ErrInvalidRuntimeRequirements), errors.Is(err, projecttemplates.ErrInvalidUserSetupQuest),
+		errors.Is(err, projecttemplates.ErrInvalidGroupRequirement), errors.Is(err, projecttemplates.ErrInvalidStandaloneComposition), errors.Is(err, projecttemplates.ErrInvalidTemplateVariant):
 		_ = orihttp.RespondBadRequest(w, err.Error())
 	case errors.Is(err, projecttemplates.ErrTemplateExists), errors.Is(err, projecttemplates.ErrFileExists),
-		errors.Is(err, projecttemplates.ErrUserSetupQuestStale), errors.Is(err, projecttemplates.ErrUserSetupQuestLocked):
+		errors.Is(err, projecttemplates.ErrUserSetupQuestStale), errors.Is(err, projecttemplates.ErrUserSetupQuestLocked),
+		errors.Is(err, projecttemplates.ErrTemplateRevisionStale), errors.Is(err, projecttemplates.ErrTemplateVariantStale),
+		errors.Is(err, projecttemplates.ErrTemplateVariantSource), errors.Is(err, projecttemplates.ErrTemplateVariantSourceChanged), errors.Is(err, projecttemplates.ErrTemplateVariantRehost):
 		_ = orihttp.RespondConflict(w, err.Error())
-	case errors.Is(err, projecttemplates.ErrTemplateReadOnly):
+	case errors.Is(err, projecttemplates.ErrTemplateReadOnly), errors.Is(err, projecttemplates.ErrTemplateVariantRestricted):
 		_ = orihttp.RespondForbidden(w, err.Error())
+	case errors.Is(err, projecttemplates.ErrTemplateVariantOwner):
+		_ = orihttp.RespondNotFound(w, "template not found")
 	case errors.Is(err, projecttemplates.ErrFileTooLarge):
 		_ = orihttp.RespondError(w, http.StatusRequestEntityTooLarge, err.Error())
 	default:

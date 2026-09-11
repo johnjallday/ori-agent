@@ -11,6 +11,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -45,8 +46,10 @@ type WorkspaceToolProvider struct {
 	skillsManager skillLister
 
 	// Optional dependencies for project-template tools
-	templatesRootResolver func() string
-	projectEventBus       *workspace.EventBus
+	templatesRootResolver   func() string
+	projectTemplateResolver func(string) (projecttemplates.Template, error)
+	projectTemplateCatalog  func() ([]projecttemplates.Template, error)
+	projectEventBus         *workspace.EventBus
 
 	// mailboxAccess, when set, enables the read-only Personal HQ mail tools for
 	// authorized agents (internal/chathttp/workspace_mail_tools.go).

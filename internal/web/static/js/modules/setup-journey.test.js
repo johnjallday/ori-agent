@@ -146,6 +146,10 @@ test('one project name defaults the Ori name without changing the exact review i
     'Display Name'
   );
   assert.equal(draft.projectName, ' First Idea ');
+  assert.equal(
+    projectDraftInput({ ...draft, groupComposition: 'standalone' }).group_composition,
+    'standalone'
+  );
   assert.deepEqual(
     projectDraftInput({
       kind: 'existing',
@@ -208,6 +212,33 @@ test('four launch screens separate group preparation from canonical project read
   assert.equal(workspaceLaunchStages(journey)[3].complete, false);
   journey.steps[0].status = 'blocked';
   assert.equal(workspaceLaunchStages(journey)[3].enabled, false);
+});
+
+test('Recommended and None launch paths can reach an explicit standalone review without a Home', () => {
+  const base = policy => ({
+    journey: { workspace_launch: { group_title: 'Create Group', runtime_title: 'Set Up App' } },
+    receipts: {},
+    steps: [
+      { kind: 'integration_install', title: 'Install Plugin', status: 'complete' },
+      {
+        kind: 'project_connect',
+        status: 'active',
+        preparation: {
+          exists: false,
+          acknowledged: false,
+          group_policy: policy,
+          available_compositions: policy === 'none' ? ['standalone'] : ['grouped', 'standalone']
+        }
+      }
+    ]
+  });
+  const recommended = workspaceLaunchStages(base('recommended'));
+  assert.equal(recommended.find(stage => stage.id === 'group').complete, false);
+  assert.equal(recommended.find(stage => stage.id === 'workspace').enabled, true);
+  const none = workspaceLaunchStages(base('none'));
+  assert.equal(none.find(stage => stage.id === 'group').complete, true);
+  assert.equal(none.find(stage => stage.id === 'preparation').complete, true);
+  assert.equal(none.find(stage => stage.id === 'workspace').enabled, true);
 });
 
 test('idempotency keys are non-empty and distinct', () => {

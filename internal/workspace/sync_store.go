@@ -66,7 +66,14 @@ func (s *SyncStore) MoveWorkspaceFolder(workspaceID, parentID string) ([]MovedWo
 	if err != nil {
 		return nil, err
 	}
-	if err := s.primary.Update(workspaceID, func(current *Workspace) error {
+	type explicitParentSetter interface {
+		SetWorkspaceParent(workspaceID, parentID string) error
+	}
+	if setter, ok := s.primary.(explicitParentSetter); ok {
+		if err := setter.SetWorkspaceParent(workspaceID, parentID); err != nil {
+			return moved, err
+		}
+	} else if err := s.primary.Update(workspaceID, func(current *Workspace) error {
 		current.ParentID = parentID
 		return nil
 	}); err != nil {
@@ -298,12 +305,63 @@ func (s *SyncStore) List() ([]string, error) {
 	return s.primary.List()
 }
 
+// DeleteReviewedGroupRequirementOperation delegates the exact-digest rollback
+// through both mirrors without exposing an unrestricted Required delete.
+func (s *SyncStore) DeleteReviewedGroupRequirementOperation(id, operationDigest, operationStatus string) error {
+	if s == nil || s.primary == nil {
+		return ErrGroupRequirementProtected
+	}
+	canonical, err := s.GetFolderWorkspace(id)
+	if err != nil || !reviewedGroupRequirementOperationOwned(canonical, operationDigest, operationStatus) {
+		return ErrGroupRequirementProtected
+	}
+	live, liveErr := s.primary.Get(id)
+	if liveErr != nil || live == nil || live.GetAssistantProjectLink() != nil {
+		return ErrGroupRequirementProtected
+	}
+	provenance := canonical.GetTemplateProvenance()
+	if provenance != nil && provenance.GroupRequirement != nil && provenance.GroupRequirement.HomeWorkspaceID != "" {
+		if home, homeErr := s.primary.Get(provenance.GroupRequirement.HomeWorkspaceID); homeErr == nil && home != nil {
+			if state := home.GetAssistantProgramState(); state != nil && containsAssistantProjectID(state.LinkedProjectIDs, id) {
+				return ErrGroupRequirementProtected
+			}
+		}
+	}
+	type reviewedOperationDeleter interface {
+		DeleteReviewedGroupRequirementOperation(id, operationDigest, operationStatus string) error
+	}
+	if deleter, ok := s.primary.(reviewedOperationDeleter); ok {
+		if err := deleter.DeleteReviewedGroupRequirementOperation(id, operationDigest, operationStatus); err != nil {
+			return err
+		}
+	} else if err := s.primary.Delete(id); err != nil {
+		return err
+	}
+	if s.fileSync != nil {
+		if err := s.fileSync.DeleteReviewedGroupRequirementOperation(id, operationDigest, operationStatus); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Delete removes a workspace from the primary store and the disk folder.
 func (s *SyncStore) Delete(id string) error {
 	if protected, checkErr := storeContainsProtectedAssistantProgram(s.primary, id); checkErr != nil {
 		return checkErr
 	} else if protected {
 		return ErrAssistantProgramProtected
+	}
+	if s.fileSync != nil {
+		if protected, checkErr := storeContainsRequiredGroupRequirement(s.fileSync, id); checkErr != nil {
+			return checkErr
+		} else if protected {
+			return ErrGroupRequirementProtected
+		}
+	} else if protected, checkErr := storeContainsRequiredGroupRequirement(s.primary, id); checkErr != nil {
+		return checkErr
+	} else if protected {
+		return ErrGroupRequirementProtected
 	}
 	err := s.primary.Delete(id)
 	if s.fileSync != nil {
@@ -315,6 +373,22 @@ func (s *SyncStore) Delete(id string) error {
 		}
 	}
 	return err
+}
+
+func storeContainsRequiredGroupRequirement(store Store, rootID string) (bool, error) {
+	ids, err := store.List()
+	if err != nil {
+		return false, err
+	}
+	all := make(map[string]*Workspace, len(ids))
+	for _, id := range ids {
+		candidate, getErr := store.Get(id)
+		if getErr != nil {
+			return false, getErr
+		}
+		all[id] = candidate
+	}
+	return requiredGroupRequirementSubtree(all, rootID), nil
 }
 
 func storeContainsProtectedAssistantProgram(store Store, rootID string) (bool, error) {

@@ -764,6 +764,12 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		})
 		mux.HandleFunc("/api/folders", s.Handlers.Session.HandleWorkspaces)
 
+		// Group preparation is a separate consequence from project creation.
+		// These static routes must be registered explicitly so the workspace
+		// subtree does not interpret "group-requirement" as a workspace ID.
+		mux.HandleFunc("POST /api/workspaces/group-requirement/home/review", s.Handlers.Session.ReviewGroupRequirementHome)
+		mux.HandleFunc("POST /api/workspaces/group-requirement/home/commit", s.Handlers.Session.CommitGroupRequirementHome)
+
 		// Generic assistant-program routes are explicit so they cannot be
 		// swallowed by the legacy workspace subtree router.
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program", s.Handlers.Session.GetAssistantProgram)
@@ -776,6 +782,8 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/handoffs/commit", s.Handlers.Session.CommitAssistantHandoff)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/disconnect/review", s.Handlers.Session.ReviewAssistantDisconnect)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/disconnect/commit", s.Handlers.Session.CommitAssistantDisconnect)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/reconnect/review", s.Handlers.Session.ReviewAssistantReconnect)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/reconnect/commit", s.Handlers.Session.CommitAssistantReconnect)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/remove-home/review", s.Handlers.Session.ReviewAssistantHomeRemoval)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/remove-home/commit", s.Handlers.Session.CommitAssistantHomeRemoval)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/migration/review", s.Handlers.Session.ReviewAssistantMigration)
@@ -821,6 +829,8 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/project-templates/import", s.handleProjectTemplateImport)
 		mux.HandleFunc("POST /api/project-templates/reveal", s.handleProjectTemplateReveal)
 		mux.HandleFunc("POST /api/project-templates/{templateID}/duplicate", s.handleProjectTemplateDuplicate)
+		mux.HandleFunc("POST /api/project-templates/{templateID}/variants", s.handleProjectTemplateVariantCreate)
+		mux.HandleFunc("POST /api/project-templates/{templateID}/group-requirement/preview", s.handleProjectTemplateGroupRequirementPreview)
 		mux.HandleFunc("POST /api/project-templates/{templateID}/plugin-recovery", s.handleBlueprintPluginRecovery)
 		mux.HandleFunc("GET /api/project-templates/{templateID}/setup-quest", s.handleUserSetupQuestGet)
 		mux.HandleFunc("PUT /api/project-templates/{templateID}/setup-quest", s.handleUserSetupQuestPut)

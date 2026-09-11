@@ -189,6 +189,45 @@ func TestWorkspaceCreateProjectTool(t *testing.T) {
 	}
 }
 
+func TestWorkspaceCreateProjectToolCannotBypassReviewedPlacement(t *testing.T) {
+	ctx := context.Background()
+	provider, folderPath, _, cleanup := setupProjectToolProvider(t, &session.Workspace{ID: "ws-policy", Name: "Policy"})
+	defer cleanup()
+	library := provider.templatesRootResolver()
+	policyDir := filepath.Join(library, "policy")
+	if err := os.MkdirAll(policyDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(policyDir, "template.json"), []byte(`{"name":"Policy","group_requirement":{"schema_version":1,"policy":"none"},"project_entry":{"relative_path":"{{name}}.rpp"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(policyDir, "{{name}}.rpp"), []byte("policy project"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := provider.createProjectTool().Call(ctx, `{"template_id":"policy"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response map[string]any
+	if err := json.Unmarshal([]byte(result), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response["status"] != "guided_create_required" {
+		t.Fatalf("policy create response = %v", response)
+	}
+	if _, err := os.Stat(filepath.Join(folderPath, "policy")); !os.IsNotExist(err) {
+		t.Fatalf("agent tool created project files: %v", err)
+	}
+	workspaceState, err := provider.fileStore.Get("ws-policy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workspaceState.ProjectPath != "" || workspaceState.ParentID != "" || workspaceState.GetAssistantProjectLink() != nil {
+		t.Fatalf("agent tool changed policy state: %#v", workspaceState)
+	}
+}
+
 func TestWorkspaceCreateProjectToolRefusals(t *testing.T) {
 	ctx := context.Background()
 

@@ -88,8 +88,10 @@ func (b *ServerBuilder) initializeSetupJourney() {
 				config:  b.configManager,
 				catalog: templateRuntimeCatalog{capabilities: b.workspaceCapabilityRegistry, runtimes: b.runtimeCapabilityRegistry},
 			}
+			connectionService := projectconnection.NewService(connectionStore, b.pathSelectionStore)
+			connectionService.SetGroupRequirementService(b.groupRequirements)
 			projectAdapter = setupjourney.NewProjectConnectionAdapter(
-				projectconnection.NewService(connectionStore, b.pathSelectionStore),
+				connectionService,
 				installedProjectTemplateResolver{manager: b.pluginHandler.Manager(), userTemplates: userTemplates},
 			)
 			projectAdapter.CheckPrerequisites = func(ctx context.Context, template projecttemplates.Template) (bool, error) {

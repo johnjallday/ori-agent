@@ -11,12 +11,15 @@ import {
 
 const source = readFileSync(new URL('./sessions.js', import.meta.url), 'utf8');
 
-function loadSessionManager(fetchImpl = async () => ({ ok: true, json: async () => ({}) })) {
-  const window = {};
-  const document = { addEventListener() {} };
+function loadSessionManager(
+  fetchImpl = async () => ({ ok: true, json: async () => ({}) }),
+  windowOverrides = {}
+) {
+  const window = { ...windowOverrides };
+  const document = { addEventListener() {}, getElementById() {} };
   vm.runInNewContext(
     source,
-    { window, document, fetch: fetchImpl, console },
+    { window, document, fetch: fetchImpl, console, crypto: { randomUUID: () => 'review-key' } },
     { filename: 'sessions.js' }
   );
   return window.sessionManager;
@@ -202,6 +205,243 @@ test('a Map-origin create flags the existing modal rather than opening a second 
     false,
     'a normal create is not a map build'
   );
+});
+
+test('an unchanged readiness recheck preserves group receipts while a template revision clears them', () => {
+  const manager = loadSessionManager();
+  manager.syncGroupRequirementParentControl = () => {};
+  const template = {
+    id: 'plugin:reaper-plugin:reaper-song',
+    revision: 'a'.repeat(64),
+    group_requirement: { policy: 'required' }
+  };
+  manager.resetGroupRequirementDraft(template);
+  manager.groupRequirementDraft.review = { review_token: 'workspace-receipt' };
+  manager.groupRequirementDraft.preparedHome = { home_workspace_id: 'home-1' };
+
+  manager.resetGroupRequirementDraft({ ...template });
+  assert.equal(manager.groupRequirementDraft.review.review_token, 'workspace-receipt');
+  assert.equal(manager.groupRequirementDraft.preparedHome.home_workspace_id, 'home-1');
+
+  manager.resetGroupRequirementDraft({ ...template, revision: 'b'.repeat(64) });
+  assert.equal(manager.groupRequirementDraft.review, null);
+  assert.equal(manager.groupRequirementDraft.preparedHome, null);
+});
+
+test('group requirement creation reviews before committing and reuses only the exact receipt', async () => {
+  const calls = [];
+  const manager = loadSessionManager(async (url, options) => {
+    calls.push({ url, body: JSON.parse(options.body) });
+    return {
+      ok: true,
+      json: async () => ({
+        group_requirement_review: {
+          state: 'ready_standalone',
+          selected_composition: 'standalone',
+          review_token: 'receipt-1'
+        }
+      })
+    };
+  });
+  manager.groupRequirementDraft = {
+    policy: 'recommended',
+    composition: 'standalone',
+    review: null,
+    preparedHome: null
+  };
+  manager.refreshWorkspaceReview = () => {};
+  manager.refreshWizardChrome = () => {};
+  const payload = { name: 'Standalone', template_id: 'variant' };
+
+  assert.equal(await manager.prepareGroupRequirementCommit('/api/workspaces', payload), false);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].body.group_requirement_review, true);
+  assert.equal(calls[0].body.group_composition, 'standalone');
+  assert.equal(payload.group_review_token, undefined, 'review request must not become a commit');
+
+  assert.equal(await manager.prepareGroupRequirementCommit('/api/workspaces', payload), true);
+  assert.equal(calls.length, 1, 'unchanged payload reuses the visible receipt');
+  assert.equal(payload.group_review_token, 'receipt-1');
+  assert.equal(payload.idempotency_key, 'review-key');
+
+  const changed = { name: 'Changed', template_id: 'variant' };
+  assert.equal(await manager.prepareGroupRequirementCommit('/api/workspaces', changed), false);
+  assert.equal(calls.length, 2, 'changed request gets a fresh inert review');
+});
+
+test('missing required Home is created alone before a fresh workspace receipt is prepared', async () => {
+  const calls = [];
+  let workspaceReviews = 0;
+  const manager = loadSessionManager(
+    async (url, options) => {
+      const body = JSON.parse(options.body);
+      calls.push({ url, body });
+      if (url === '/api/workspaces/group-requirement/home/review') {
+        return {
+          ok: true,
+          json: async () => ({
+            group_requirement_review: {
+              state: 'ready_grouped',
+              home_name: 'Music Production Home',
+              home_will_be_created: true,
+              review_token: 'home-receipt'
+            }
+          })
+        };
+      }
+      if (url === '/api/workspaces/group-requirement/home/commit') {
+        return {
+          ok: true,
+          json: async () => ({
+            group_requirement: {
+              state: 'home_ready',
+              home_name: 'Music Production Home',
+              home_workspace_id: 'home-1',
+              home_created: true
+            }
+          })
+        };
+      }
+      workspaceReviews += 1;
+      return {
+        ok: true,
+        json: async () => ({
+          group_requirement_review:
+            workspaceReviews === 1
+              ? {
+                  state: 'home_creation_review_required',
+                  home_name: 'Music Production Home'
+                }
+              : {
+                  state: 'ready_grouped',
+                  selected_composition: 'grouped',
+                  home_name: 'Music Production Home',
+                  home_workspace_id: 'home-1',
+                  review_token: 'workspace-receipt'
+                }
+        })
+      };
+    },
+    { confirm: () => true }
+  );
+  manager.groupRequirementDraft = {
+    policy: 'required',
+    composition: 'grouped',
+    review: null,
+    preparedHome: null
+  };
+  manager.refreshWorkspaceReview = () => {};
+  manager.refreshWizardChrome = () => {};
+  const surfaceRefreshes = [];
+  manager.refreshWorkspaceSurfacesAfterGroupPreparation = async () => surfaceRefreshes.push('home');
+  const payload = { name: 'Song', template_id: 'reaper' };
+
+  assert.equal(await manager.prepareGroupRequirementCommit('/api/workspaces', payload), false);
+  assert.equal(calls.length, 4);
+  assert.deepEqual(
+    calls.map(call => call.url),
+    [
+      '/api/workspaces',
+      '/api/workspaces/group-requirement/home/review',
+      '/api/workspaces/group-requirement/home/commit',
+      '/api/workspaces'
+    ]
+  );
+  assert.equal(calls[0].body.create_required_home, undefined);
+  assert.deepEqual(calls[1].body, { template_id: 'reaper' });
+  assert.equal(calls[2].body.group_review_token, 'home-receipt');
+  assert.equal(calls[3].body.create_required_home, undefined);
+  assert.equal(manager.groupRequirementDraft.preparedHome.home_workspace_id, 'home-1');
+  assert.equal(manager.groupRequirementDraft.review.review_token, 'workspace-receipt');
+  assert.deepEqual(surfaceRefreshes, ['home'], 'the empty Home becomes visible behind the creator');
+});
+
+test('normal grouped creation requests a Map site while explicit Build keeps its coordinate', async () => {
+  const placements = [];
+  const manager = loadSessionManager(undefined, {
+    OriWorkspaceMap: {
+      placeCreatedGroupMember: async (workspaceID, groupID) => {
+        placements.push({ workspaceID, groupID });
+        return { placed: true };
+      }
+    }
+  });
+  const result = {
+    folder: { id: 'song-1', kind: 'workspace', parent_id: 'music-home' }
+  };
+
+  const automatic = await manager.placeCreatedWorkspaceInGroup(result);
+  assert.equal(automatic.placed, true);
+  assert.deepEqual(placements, [{ workspaceID: 'song-1', groupID: 'music-home' }]);
+
+  const explicit = await manager.placeCreatedWorkspaceInGroup(result, { mapOrigin: true });
+  assert.equal(explicit.placed, false);
+  assert.equal(explicit.reason, 'not_applicable');
+  assert.equal(placements.length, 1, 'an explicit Map Build position is never replaced');
+
+  await manager.placeCreatedWorkspaceInGroup({
+    folder: { id: 'loose', kind: 'workspace', parent_id: '' }
+  });
+  assert.equal(placements.length, 1, 'standalone creation has no group placement effect');
+});
+
+test('a failed group-aware Map save never turns workspace creation into a failure', async () => {
+  const manager = loadSessionManager(undefined, {
+    OriWorkspaceMap: {
+      placeCreatedGroupMember: async () => {
+        throw new Error('layout unavailable');
+      }
+    }
+  });
+
+  const previousWarn = console.warn;
+  console.warn = () => {};
+  try {
+    const outcome = await manager.placeCreatedWorkspaceInGroup({
+      folder: { id: 'song-1', kind: 'workspace', parent_id: 'music-home' }
+    });
+    assert.equal(outcome.placed, false);
+    assert.equal(outcome.reason, 'layout_save_failed');
+  } finally {
+    console.warn = previousWarn;
+  }
+});
+
+test('declining required Home creation leaves the workspace and Home untouched', async () => {
+  const calls = [];
+  const manager = loadSessionManager(
+    async (url, options) => {
+      calls.push({ url, body: JSON.parse(options.body) });
+      return {
+        ok: true,
+        json: async () => ({
+          group_requirement_review: {
+            state: 'home_creation_review_required',
+            home_name: 'Music Production Home'
+          }
+        })
+      };
+    },
+    { confirm: () => false }
+  );
+  manager.groupRequirementDraft = {
+    policy: 'required',
+    composition: 'grouped',
+    review: null,
+    preparedHome: null
+  };
+  manager.refreshWorkspaceReview = () => {};
+  manager.refreshWizardChrome = () => {};
+
+  assert.equal(
+    await manager.prepareGroupRequirementCommit('/api/workspaces', {
+      name: 'Song',
+      template_id: 'reaper'
+    }),
+    false
+  );
+  assert.equal(calls.length, 1, 'decline must not call either Home mutation endpoint');
+  assert.equal(manager.groupRequirementDraft.preparedHome, null);
 });
 
 test('workspace post-create action keeps the standard workspace destination by default', async () => {

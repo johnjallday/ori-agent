@@ -38,6 +38,19 @@ func validAssistantProgramUserOwner(provenance *TemplateProvenance) bool {
 	return true
 }
 
+func assistantProgramProvenanceUsable(provenance *TemplateProvenance) bool {
+	if provenance == nil || provenance.AssistantProgram == nil ||
+		(provenance.PluginOwner != nil && provenance.UserTemplateOwner != nil) || !validAssistantProgramUserOwner(provenance) {
+		return false
+	}
+	if provenance.PluginOwner != nil || provenance.UserTemplateOwner != nil {
+		return true
+	}
+	snapshot := provenance.GroupRequirement
+	return snapshot != nil && snapshot.StructurallyValid() &&
+		snapshot.SelectedComposition == GroupRequirementCompositionGrouped && snapshot.ProgramKey != nil
+}
+
 // AssistantProgramStore owns generic station lookup/link mutations. It relies
 // only on stable persisted IDs and Store.Update; names and tags are display-only.
 type AssistantProgramStore struct {
@@ -224,7 +237,7 @@ func (service *AssistantProgramStore) EnsureProjectStation(projectID string) (*W
 	// canonical workspace.json field. Resolve that portable declaration before
 	// failing closed so first-run station provisioning works in production, not
 	// only with stores that keep every field in one record.
-	if provenance == nil || (provenance.PluginOwner == nil && provenance.UserTemplateOwner == nil) || provenance.AssistantProgram == nil {
+	if !assistantProgramProvenanceUsable(provenance) {
 		type canonicalWorkspaceReader interface {
 			GetFolderWorkspace(string) (*Workspace, error)
 		}
@@ -234,12 +247,18 @@ func (service *AssistantProgramStore) EnsureProjectStation(projectID string) (*W
 			}
 		}
 	}
-	if provenance == nil || (provenance.PluginOwner == nil && provenance.UserTemplateOwner == nil) || provenance.AssistantProgram == nil ||
-		(provenance.PluginOwner != nil && provenance.UserTemplateOwner != nil) || !validAssistantProgramUserOwner(provenance) {
+	if !assistantProgramProvenanceUsable(provenance) {
 		return nil, false, ErrAssistantProgramUnavailable
 	}
 	key := AssistantProgramKey{OwnerUserID: project.OwnerUserID, ProgramID: provenance.AssistantProgram.ID}
-	if provenance.PluginOwner != nil {
+	if snapshot := provenance.GroupRequirement; snapshot != nil && snapshot.StructurallyValid() &&
+		snapshot.SelectedComposition == GroupRequirementCompositionGrouped && snapshot.ProgramKey != nil {
+		key = snapshot.ProgramKey.Normalize()
+		if key.OwnerUserID != (AssistantProgramKey{OwnerUserID: project.OwnerUserID}).Normalize().OwnerUserID ||
+			key.ProgramID != strings.ToLower(strings.TrimSpace(provenance.AssistantProgram.ID)) {
+			return nil, false, ErrAssistantProgramUnavailable
+		}
+	} else if provenance.PluginOwner != nil {
 		key.PluginID = provenance.PluginOwner.PluginID
 	} else {
 		key.TemplateID = provenance.UserTemplateOwner.TemplateID
@@ -422,6 +441,14 @@ func (service *AssistantProgramStore) RecordAcceptedCompletion(projectID, finger
 	if link == nil || fingerprint == "" {
 		return nil, false, ErrAssistantProgramUnavailable
 	}
+	linkedStation, stationErr := service.store.Get(link.StationWorkspaceID)
+	if stationErr != nil || linkedStation == nil || (service.hasRequiredGroupRequirement(project) && project.ParentID != link.StationWorkspaceID) {
+		return nil, false, ErrAssistantProgramUnavailable
+	}
+	linkedState := linkedStation.GetAssistantProgramState()
+	if linkedState == nil || linkedState.Key.Normalize() != link.Key.Normalize() || !containsAssistantProjectID(linkedState.LinkedProjectIDs, project.ID) {
+		return nil, false, ErrAssistantProgramUnavailable
+	}
 	taskID := ""
 	if strings.HasPrefix(fingerprint, "task:") {
 		taskID = strings.TrimSpace(strings.TrimPrefix(fingerprint, "task:"))
@@ -571,7 +598,7 @@ func (service *AssistantProgramStore) LinkedProjects(stationID string) ([]*Works
 			continue
 		}
 		link := project.GetAssistantProjectLink()
-		if link == nil || link.StationWorkspaceID != stationID || link.Key.Normalize() != state.Key.Normalize() {
+		if link == nil || (service.hasRequiredGroupRequirement(project) && project.ParentID != stationID) || link.StationWorkspaceID != stationID || link.Key.Normalize() != state.Key.Normalize() {
 			continue
 		}
 		projects = append(projects, project)
