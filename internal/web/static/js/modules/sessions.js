@@ -95,6 +95,11 @@ const sessionManager = {
   workspaceAgentSetupCloseOptions: null,
   workspaceAgentSetupCompletion: null,
   workspaceAgentSetupFocusField: '',
+  // One live Home-role subflow may temporarily suspend this modal. It points
+  // only at the exact canonical Home and never writes into the project draft.
+  workspaceGroupRoleSetup: null,
+  workspaceGroupRoleSetupForm: null,
+  workspaceGroupRoleSetupRequestId: 0,
 
   // Auto mode state
   chatAutoMode: false,
@@ -352,9 +357,15 @@ const sessionManager = {
       this.invalidateGroupRequirementReview();
       this.clearWorkspaceNameError();
       this.updateWorkspaceNameHint();
-      // The final CTA names the workspace, so it tracks the name as it is typed.
+      // The final CTA and destination route name the workspace, so both track it as it is typed.
       this.refreshWorkspaceCreateCta();
+      this.renderWorkspaceGroupDestinationCard();
     });
+    for (const fieldID of ['folderDescriptionInput', 'folderSystemsInput', 'folderContextInput']) {
+      document.getElementById(fieldID)?.addEventListener('input', () => {
+        this.invalidateGroupRequirementReview();
+      });
+    }
     workspaceNameInput?.addEventListener('keydown', event => {
       if (event.key !== 'Enter') return;
       event.preventDefault();
@@ -369,6 +380,7 @@ const sessionManager = {
     // value as overridden so picking a Template won't clobber it.
     document.getElementById('folderPresetSelect')?.addEventListener('change', () => {
       this.behaviorOverridden = true;
+      this.invalidateGroupRequirementReview();
       this.updateBehaviorHint();
     });
 
@@ -403,6 +415,7 @@ const sessionManager = {
       const api = window.CreateWorkspaceTeamDraft;
       const draft = this.ensureWorkspaceTeamDraft();
       if (!draft || !api?.setAgentless?.(draft, Boolean(event.currentTarget?.checked))) return;
+      this.invalidateGroupRequirementReview();
       this.refreshWorkspaceReview();
       this.renderExistingAgentRoster();
       this.announceWorkspaceTeamChange(
@@ -487,11 +500,20 @@ const sessionManager = {
     const addAgentDraftModal = document.getElementById('addAgentModal');
     const submitWorkspaceAgentDraft = event => {
       const mode = addAgentDraftModal?.dataset.agentCreateMode;
-      if (mode !== 'workspace-draft' && mode !== 'workspace-role-draft') return;
+      if (
+        mode !== 'workspace-draft' &&
+        mode !== 'workspace-role-draft' &&
+        mode !== 'workspace-group-role-live'
+      )
+        return;
       event.preventDefault();
       event.stopImmediatePropagation();
       if (mode === 'workspace-role-draft') {
         this.saveWorkspaceRoleSetup();
+        return;
+      }
+      if (mode === 'workspace-group-role-live') {
+        void this.saveWorkspaceGroupRoleSetup();
         return;
       }
       this.saveWorkspaceAgentSetup();
@@ -518,11 +540,26 @@ const sessionManager = {
       },
       true
     );
+    addAgentDraftModal?.addEventListener('hide.bs.modal', event => {
+      if (
+        addAgentDraftModal.dataset.agentCreateMode === 'workspace-group-role-live' &&
+        this.workspaceGroupRoleSetup?.phase === 'committing'
+      ) {
+        event.preventDefault();
+      }
+    });
     addAgentDraftModal?.addEventListener('hidden.bs.modal', () => {
       if (addAgentDraftModal.dataset.agentCreateMode === 'workspace-draft') {
         this.finishWorkspaceAgentSetupModal();
       } else if (addAgentDraftModal.dataset.agentCreateMode === 'workspace-role-draft') {
         this.finishWorkspaceRoleSetupModal();
+      } else if (addAgentDraftModal.dataset.agentCreateMode === 'workspace-group-role-live') {
+        this.finishWorkspaceGroupRoleSetupModal();
+      }
+    });
+    document.getElementById('workspaceGroupRoleMode')?.addEventListener('change', event => {
+      if (event.target.matches('[name="workspace-group-role-fill-mode"]')) {
+        this.setWorkspaceGroupRoleFillMode(event.target.value);
       }
     });
     document.getElementById('workspaceReviewSummary')?.addEventListener('click', event => {
@@ -533,6 +570,21 @@ const sessionManager = {
       const choice = event.target.closest('[name="workspace-group-composition"]');
       if (choice) this.setGroupRequirementComposition(choice.value);
     });
+    document.getElementById('workspaceGroupDestinationCard')?.addEventListener('change', event => {
+      const choice = event.target.closest('[name="workspace-group-composition-details"]');
+      if (choice) this.setGroupRequirementComposition(choice.value);
+    });
+    document.getElementById('workspaceGroupDestinationCard')?.addEventListener('click', event => {
+      const action = event.target.closest('[data-group-destination-action]');
+      if (action)
+        void this.runWorkspaceGroupDestinationAction(action.dataset.groupDestinationAction, action);
+    });
+    document
+      .getElementById('workspaceGroupHomeConfirm')
+      ?.addEventListener('click', event => void this.commitRequiredGroupHome(event.currentTarget));
+    document
+      .getElementById('workspaceGroupHomeCancel')
+      ?.addEventListener('click', () => this.cancelRequiredGroupHomeReview());
 
     document.getElementById('projectTemplatePathInput')?.addEventListener('input', () => {
       this.scheduleTemplateAgentPlanRefresh();
@@ -599,6 +651,7 @@ const sessionManager = {
       btn.addEventListener('click', e => {
         document.querySelectorAll('.folder-color-btn').forEach(b => b.classList.remove('active'));
         e.target.classList.add('active');
+        this.invalidateGroupRequirementReview();
         this.updateBehaviorHint();
       });
     });
@@ -612,6 +665,9 @@ const sessionManager = {
     document.getElementById('folderAdvancedDisclosure')?.addEventListener('toggle', () => {
       this.updateBehaviorHint();
     });
+    document
+      .getElementById('addFolderModal')
+      ?.addEventListener('workspace-tags-changed', () => this.invalidateGroupRequirementReview());
 
     const addFolderModal = document.getElementById('addFolderModal');
     // Resuming after the sibling Agent modal is not a fresh Create Workspace
@@ -684,7 +740,7 @@ const sessionManager = {
     addFolderModal?.addEventListener('hidden.bs.modal', () => {
       // Agent setup reuses the sibling Create New Agent modal. Map placement
       // is another, distinct in-draft navigation. Neither is cancellation.
-      if (addFolderModal.dataset.suspendedForAgentSetup === 'true') return;
+      if (addFolderModal.dataset.suspendedForAgentSetup) return;
       if (addFolderModal.dataset.suspendedForMapPlacement) return;
       this.abandonWorkspaceMapPlacement();
       this.discardWorkspaceTeamDraft();
@@ -4195,31 +4251,43 @@ const sessionManager = {
       this.syncGroupRequirementParentControl();
       return;
     }
-    this.groupRequirementDraft = {
-      policy,
-      templateKey,
-      composition: policy === 'none' ? 'standalone' : policy === 'required' ? 'grouped' : '',
-      review: null,
-      preparedHome: null
-    };
+    const composition = policy === 'none' ? 'standalone' : policy === 'required' ? 'grouped' : '';
+    this.groupRequirementDraft = window.CreateWorkspacePlacementDraft?.createDraft
+      ? window.CreateWorkspacePlacementDraft.createDraft({ templateKey, policy, composition })
+      : {
+          policy,
+          templateKey,
+          composition,
+          review: null,
+          preparedHome: null
+        };
     this.syncGroupRequirementParentControl();
   },
 
   invalidateGroupRequirementReview() {
     if (!this.groupRequirementDraft?.review) return;
-    this.groupRequirementDraft.review = null;
+    if (window.CreateWorkspacePlacementDraft?.invalidateReview) {
+      window.CreateWorkspacePlacementDraft.invalidateReview(this.groupRequirementDraft);
+    } else {
+      this.groupRequirementDraft.review = null;
+    }
     this.refreshWorkspaceCreateCta();
   },
 
   setGroupRequirementComposition(composition) {
     if (!this.groupRequirementDraft) return;
     const normalized = composition === 'grouped' || composition === 'standalone' ? composition : '';
-    if (this.groupRequirementDraft.policy === 'required' && normalized !== 'grouped') return;
-    if (this.groupRequirementDraft.policy === 'none' && normalized !== 'standalone') return;
-    if (this.groupRequirementDraft.composition === normalized) return;
-    this.groupRequirementDraft.composition = normalized;
-    this.groupRequirementDraft.review = null;
-    this.groupRequirementDraft.preparedHome = null;
+    const placementDraft = window.CreateWorkspacePlacementDraft;
+    if (placementDraft?.setComposition) {
+      if (!placementDraft.setComposition(this.groupRequirementDraft, normalized)) return;
+    } else {
+      if (this.groupRequirementDraft.policy === 'required' && normalized !== 'grouped') return;
+      if (this.groupRequirementDraft.policy === 'none' && normalized !== 'standalone') return;
+      if (this.groupRequirementDraft.composition === normalized) return;
+      this.groupRequirementDraft.composition = normalized;
+      this.groupRequirementDraft.review = null;
+      this.groupRequirementDraft.preparedHome = null;
+    }
     this.syncGroupRequirementParentControl();
     // Team and placement are one reviewed composition. A standalone choice
     // replaces scoped program roles with project-local agents, so no stale team
@@ -4231,12 +4299,17 @@ const sessionManager = {
   },
 
   syncGroupRequirementParentControl() {
-    if (window.SetupWorkspaceCreator?.isActive()) return;
     const parent = document.getElementById('folderParentSelect');
+    const field = document.getElementById('workspaceOptionalParentField');
     if (!parent) return;
-    const grouped = this.groupRequirementDraft?.composition === 'grouped';
-    if (grouped) parent.value = '';
-    parent.disabled = grouped || parent.options.length <= 1;
+    const draft = this.groupRequirementDraft;
+    const grouped = draft?.composition === 'grouped';
+    const awaitingRequiredChoice = draft?.policy === 'recommended' && !draft.composition;
+    const fixedPlacement = grouped || awaitingRequiredChoice;
+    if (field) field.hidden = fixedPlacement;
+    if (fixedPlacement) parent.value = '';
+    if (window.SetupWorkspaceCreator?.isActive()) return;
+    parent.disabled = fixedPlacement || parent.options.length <= 1;
   },
 
   groupRequirementBlocked() {
@@ -4279,6 +4352,10 @@ const sessionManager = {
       return;
     }
 
+    const placementDraft = this.groupRequirementDraft;
+    const placementAPI = window.CreateWorkspacePlacementDraft;
+    const placementTicket =
+      placementDraft && placementAPI?.begin ? placementAPI.begin(placementDraft) : null;
     if (draft && api) api.setPlanLoading(draft, blueprintKey);
     this.setTemplateAgentReviewLoading();
     try {
@@ -4295,7 +4372,23 @@ const sessionManager = {
       const data = await response.json().catch(() => ({}));
       if (requestId !== this.templateAgentPlanRequestId) return;
       if (!response.ok || data.error) {
+        placementAPI?.reject?.(
+          placementDraft,
+          placementTicket,
+          data.error || 'Could not check the required destination.'
+        );
         this.renderTemplateAgentPlanError(data.error || 'Could not load blueprint agents.');
+        return;
+      }
+      if (
+        placementTicket &&
+        (!placementAPI?.resolve?.(
+          placementDraft,
+          placementTicket,
+          data.group_requirement || null
+        ) ||
+          this.groupRequirementDraft !== placementDraft)
+      ) {
         return;
       }
       this.templateAgentPlan = data;
@@ -4305,6 +4398,11 @@ const sessionManager = {
       this.renderTemplateAgentPlan(data);
     } catch (error) {
       if (requestId !== this.templateAgentPlanRequestId) return;
+      placementAPI?.reject?.(
+        placementDraft,
+        placementTicket,
+        'Could not check the required destination.'
+      );
       console.error('Failed to load template agent plan:', error);
       this.renderTemplateAgentPlanError('Could not load blueprint agents.');
     }
@@ -4496,6 +4594,7 @@ const sessionManager = {
     const draft = this.ensureWorkspaceTeamDraft();
     const accepted = api?.acceptAllRecommended?.(draft) || 0;
     if (accepted === 0) return;
+    this.invalidateGroupRequirementReview();
     this.refreshWorkspaceReview();
     this.announceWorkspaceTeamChange(
       `${accepted} recommended agent setup${accepted === 1 ? '' : 's'} accepted.`
@@ -4512,6 +4611,7 @@ const sessionManager = {
     const draft = this.ensureWorkspaceTeamDraft();
     const undone = api?.undoBatchRecommended?.(draft) || 0;
     if (undone === 0) return;
+    this.invalidateGroupRequirementReview();
     this.refreshWorkspaceReview();
     this.announceWorkspaceTeamChange(
       `${undone} batch acceptance${undone === 1 ? '' : 's'} undone. Individual setup changes were kept.`
@@ -4612,6 +4712,7 @@ const sessionManager = {
         const toggle = document.getElementById('templateAgentReviewToggle');
         if (toggle) toggle.checked = false;
         this.syncIncludeBlueprintTeam(false);
+        this.invalidateGroupRequirementReview();
         this.refreshWorkspaceReview();
         this.announceResolvedPrimary();
         break;
@@ -4638,6 +4739,7 @@ const sessionManager = {
         const api = window.CreateWorkspaceTeamDraft;
         const draft = this.ensureWorkspaceTeamDraft();
         if (api?.confirmFreshPlan?.(draft)) {
+          this.invalidateGroupRequirementReview();
           this.refreshWorkspaceReview();
           this.announceWorkspaceTeamChange('Updated blueprint agent plan confirmed.');
           document.getElementById('wizardNextBtn')?.focus();
@@ -4924,6 +5026,7 @@ const sessionManager = {
     if (saveButton?.disabled) return;
     if (saveButton) saveButton.disabled = true;
     api.saveSetup(draft, index, values);
+    this.invalidateGroupRequirementReview();
     const name = values.name;
     this.workspaceAgentSetupCompletion = {
       announcement:
@@ -4952,6 +5055,7 @@ const sessionManager = {
     const draft = this.ensureWorkspaceTeamDraft();
     const entry = this.teamView()?.roster.find(item => item.templateAgentIndex === index);
     if (!api || !draft || !entry || !api.resetToRecommended(draft, index)) return;
+    this.invalidateGroupRequirementReview();
     this.refreshWorkspaceReview();
     this.announceWorkspaceTeamChange(`${entry.originalName} reset to the recommended setup.`);
     document.getElementById(`team-agent-setup-${index}`)?.focus();
@@ -5385,6 +5489,8 @@ const sessionManager = {
     }
     component.render(container, roster, {
       title: 'Roles this blueprint declares',
+      groupTitle: `Group coordination — ${view?.assistantProgram?.stationName || 'required group'}`,
+      projectTitle: `Team for ${String(document.getElementById('folderNameInput')?.value || '').trim() || 'this workspace'}`,
       // Nothing exists yet, so there is no agent page to link to. Home-owned
       // vacancies instead route to the canonical group workspace when its
       // reviewed station already exists.
@@ -5396,6 +5502,464 @@ const sessionManager = {
       onAssign: (roleId, row) => this.openWorkspaceRoleAssignPicker(roleId, row),
       onClear: (roleId, row) => this.clearWorkspaceRole(roleId, row)
     });
+  },
+
+  async openWorkspaceGroupRoleSetup(opener) {
+    const draft = this.groupRequirementDraft;
+    const projection = draft?.projection || this.templateAgentPlan?.group_requirement || null;
+    const missingRole = projection?.required_home_roles?.roles?.find?.(
+      role => role.state !== 'filled'
+    );
+    const workspaceID = String(projection?.home?.workspace_id || '').trim();
+    const roleID = String(missingRole?.role_id || '').trim();
+    const formApi = window.AgentCreateForm;
+    const workspaceModalElement = document.getElementById('addFolderModal');
+    const agentModalElement = document.getElementById('addAgentModal');
+    const host = document.getElementById('agentCreateFormHost');
+    if (
+      !draft ||
+      projection?.state !== 'ready_grouped' ||
+      !projection?.actions?.includes?.('open_group_roles') ||
+      projection?.home?.exists !== true ||
+      !workspaceID ||
+      !roleID ||
+      !formApi ||
+      !workspaceModalElement ||
+      !agentModalElement ||
+      !host
+    ) {
+      this.setWorkspaceGroupDestinationMessage(
+        'The exact group role is no longer available. Recheck the destination.'
+      );
+      return false;
+    }
+
+    let canonicalRole;
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceID)}/roles`);
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || 'The group roster could not be read.');
+      if (this.groupRequirementDraft !== draft) return false;
+      const currentProjection = draft.projection || this.templateAgentPlan?.group_requirement || {};
+      if (
+        String(currentProjection.source_revision || '') !==
+          String(projection.source_revision || '') ||
+        String(currentProjection.home?.workspace_id || '') !== workspaceID
+      ) {
+        return false;
+      }
+      const roster = body.roles || {};
+      canonicalRole = Array.isArray(roster.roles)
+        ? roster.roles.find(role => String(role?.role_id || '') === roleID)
+        : null;
+      if (!canonicalRole || canonicalRole.scope !== 'home' || canonicalRole.read_only) {
+        throw new Error('The exact Home role is not editable on this group.');
+      }
+      if (canonicalRole.state === 'filled') {
+        await this.refreshTemplateAgentPlan();
+        this.setWorkspaceGroupDestinationMessage(
+          `${canonicalRole.label || missingRole.label || 'The group role'} was already filled. Canonical state has been refreshed.`
+        );
+        return true;
+      }
+    } catch (error) {
+      this.setWorkspaceGroupDestinationMessage(
+        error?.message || 'The exact group roster could not be read.'
+      );
+      return false;
+    }
+
+    const operation = {
+      workspaceID,
+      roleID,
+      roleLabel: String(canonicalRole.label || missingRole.label || 'Group coordinator'),
+      templateKey: draft.templateKey,
+      sourceRevision: String(projection.source_revision || ''),
+      projectDraft: this.teamDraft,
+      phase: 'editing',
+      mode: canonicalRole.needs_clear ? 'clear' : 'create',
+      completed: ''
+    };
+    this.workspaceGroupRoleSetup = operation;
+    agentModalElement.dataset.agentCreateMode = 'workspace-group-role-live';
+    agentModalElement.classList.add('is-workspace-agent-draft');
+    agentModalElement.classList.remove('is-workspace-group-role-assign');
+
+    const title = document.getElementById('addAgentModalTitleText');
+    if (title) title.textContent = `Set up ${operation.roleLabel}`;
+    const context = document.getElementById('agentCreateDraftContext');
+    const contextTitle = document.getElementById('agentCreateDraftContextTitle');
+    const contextText = document.getElementById('agentCreateDraftContextText');
+    if (context) context.hidden = false;
+    if (contextTitle) contextTitle.textContent = `${operation.roleLabel} · Program Home only`;
+    if (contextText) {
+      contextText.textContent = canonicalRole.needs_clear
+        ? 'This role still has an invalid prior assignment. Clear only that stale group binding before choosing another holder. No saved definition or project draft is deleted.'
+        : 'This separate confirmation fills one role on the existing canonical group immediately. It does not create or change the project draft, project team, child link, tools, or runtime setup.';
+    }
+    const summary = document.getElementById('agentCreateDraftSummary');
+    if (summary) {
+      summary.innerHTML = [
+        ['Role', operation.roleLabel],
+        ['Target', projection.home.name || 'Canonical group'],
+        ['Scope', 'Home only'],
+        ['Project draft', 'Preserved, not submitted']
+      ]
+        .map(
+          ([label, value]) =>
+            `<div><dt>${this.escapeHtml(label)}</dt><dd>${this.escapeHtml(value)}</dd></div>`
+        )
+        .join('');
+    }
+    const rosterPreview = document.getElementById('workspaceGroupRoleRosterPreview');
+    if (rosterPreview && window.WorkspaceRoleRoster) {
+      rosterPreview.hidden = false;
+      window.WorkspaceRoleRoster.render(
+        rosterPreview,
+        {
+          roles: [
+            {
+              ...canonicalRole,
+              read_only: true,
+              read_only_reason: 'This confirmed action changes this Home role only.'
+            }
+          ],
+          filled_count: 0,
+          total_count: 1,
+          empty_count: 1
+        },
+        { title: operation.roleLabel, showHeader: false }
+      );
+    }
+    const error = document.getElementById('agentCreateDraftError');
+    if (error) {
+      error.hidden = true;
+      error.textContent = '';
+    }
+    const mode = document.getElementById('workspaceGroupRoleMode');
+    if (mode) {
+      mode.hidden = canonicalRole.needs_clear;
+      mode.querySelectorAll('[name="workspace-group-role-fill-mode"]').forEach(input => {
+        input.checked = input.value === 'create';
+      });
+    }
+    this.workspaceGroupRoleSetupForm = formApi.mount(host, {
+      idPrefix: 'agent',
+      profile: formApi.PROFILE_TEMPLATE,
+      providers: Array.isArray(this.editAgentProvidersData) ? this.editAgentProvidersData : [],
+      values: { name: operation.roleLabel, type: 'tool_calling' }
+    });
+    if (canonicalRole.needs_clear) {
+      agentModalElement.classList.add('is-workspace-group-role-assign');
+      const createButton = document.getElementById('createAgentBtn');
+      if (createButton) {
+        if (!createButton.dataset.workspaceDraftOriginalHtml) {
+          createButton.dataset.workspaceDraftOriginalHtml = createButton.innerHTML;
+        }
+        createButton.textContent = 'Clear stale group assignment';
+        createButton.disabled = false;
+      }
+    } else {
+      this.setWorkspaceGroupRoleFillMode('create');
+      void this.loadWorkspaceGroupRoleSavedAgents(operation);
+    }
+
+    const showAgentModal = () => {
+      agentModalElement.addEventListener(
+        'shown.bs.modal',
+        () => this.workspaceGroupRoleSetupForm?.focus('name'),
+        { once: true }
+      );
+      bootstrap.Modal.getOrCreateInstance(agentModalElement).show();
+    };
+    workspaceModalElement.dataset.suspendedForAgentSetup = 'workspace-group-role-live';
+    if (workspaceModalElement.classList.contains('show')) {
+      workspaceModalElement.addEventListener('hidden.bs.modal', showAgentModal, { once: true });
+      bootstrap.Modal.getOrCreateInstance(workspaceModalElement).hide();
+    } else {
+      showAgentModal();
+    }
+    operation.opener = opener || document.activeElement;
+    return true;
+  },
+
+  setWorkspaceGroupRoleFillMode(mode) {
+    const operation = this.workspaceGroupRoleSetup;
+    if (!operation || operation.phase === 'committing') return false;
+    operation.mode = mode === 'assign' ? 'assign' : 'create';
+    const modal = document.getElementById('addAgentModal');
+    modal?.classList.toggle('is-workspace-group-role-assign', operation.mode === 'assign');
+    const panel = document.getElementById('workspaceGroupRoleAssignPanel');
+    if (panel) panel.hidden = operation.mode !== 'assign';
+    const button = document.getElementById('createAgentBtn');
+    if (button) {
+      if (!button.dataset.workspaceDraftOriginalHtml) {
+        button.dataset.workspaceDraftOriginalHtml = button.innerHTML;
+      }
+      button.textContent =
+        operation.mode === 'assign' ? 'Assign to group role' : 'Create and fill group role';
+      button.disabled = false;
+    }
+    if (operation.mode === 'assign') {
+      document.getElementById('workspaceGroupRoleAgentSelect')?.focus();
+    }
+    return true;
+  },
+
+  async loadWorkspaceGroupRoleSavedAgents(operation) {
+    const requestID = ++this.workspaceGroupRoleSetupRequestId;
+    const select = document.getElementById('workspaceGroupRoleAgentSelect');
+    const status = document.getElementById('workspaceGroupRoleAgentStatus');
+    if (select) {
+      select.innerHTML = '<option value="">Loading saved agents…</option>';
+      select.disabled = true;
+    }
+    if (status) status.textContent = 'Loading saved agents…';
+    try {
+      const response = await fetch('/api/agents/dashboard/list?sort_by=name&order=asc');
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || 'Saved agents could not be loaded.');
+      if (
+        requestID !== this.workspaceGroupRoleSetupRequestId ||
+        this.workspaceGroupRoleSetup !== operation
+      )
+        return;
+      const agents = (Array.isArray(body) ? body : Array.isArray(body.agents) ? body.agents : [])
+        .map(agent => String(agent?.name || '').trim())
+        .filter(Boolean);
+      if (select) {
+        select.innerHTML = agents.length
+          ? '<option value="">Choose a saved agent…</option>' +
+            agents
+              .map(
+                name => `<option value="${this.escapeHtml(name)}">${this.escapeHtml(name)}</option>`
+              )
+              .join('')
+          : '<option value="">No saved agents available</option>';
+        select.disabled = !agents.length;
+      }
+      if (status) {
+        status.textContent = agents.length
+          ? `${agents.length} saved agent${agents.length === 1 ? '' : 's'} available. The selected definition is not changed.`
+          : 'No saved agents are available. Create a new one instead.';
+      }
+    } catch (error) {
+      if (
+        requestID !== this.workspaceGroupRoleSetupRequestId ||
+        this.workspaceGroupRoleSetup !== operation
+      )
+        return;
+      if (select) {
+        select.innerHTML = '<option value="">Saved agents unavailable</option>';
+        select.disabled = true;
+      }
+      if (status) status.textContent = error?.message || 'Saved agents could not be loaded.';
+    }
+  },
+
+  async saveWorkspaceGroupRoleSetup() {
+    const operation = this.workspaceGroupRoleSetup;
+    const draft = this.groupRequirementDraft;
+    if (!operation || operation.phase === 'committing' || !draft) return false;
+    const projection = draft.projection || this.templateAgentPlan?.group_requirement || {};
+    if (
+      operation.templateKey !== draft.templateKey ||
+      operation.sourceRevision !== String(projection.source_revision || '') ||
+      operation.workspaceID !== String(projection.home?.workspace_id || '')
+    ) {
+      this.showWorkspaceGroupRoleSetupError(
+        'The exact group destination changed. Close this form and review the current destination.'
+      );
+      return false;
+    }
+
+    let body;
+    if (operation.mode === 'clear') {
+      body = null;
+    } else if (operation.mode === 'assign') {
+      const name = String(
+        document.getElementById('workspaceGroupRoleAgentSelect')?.value || ''
+      ).trim();
+      if (!name) {
+        this.showWorkspaceGroupRoleSetupError('Choose one saved agent to assign.');
+        document.getElementById('workspaceGroupRoleAgentSelect')?.focus();
+        return false;
+      }
+      body = { mode: 'assign', name };
+    } else {
+      const result = this.workspaceGroupRoleSetupForm?.extract?.();
+      if (!result?.valid) {
+        this.workspaceGroupRoleSetupForm?.focus(Object.keys(result?.errors || {})[0] || 'name');
+        return false;
+      }
+      body = {
+        mode: 'create',
+        name: String(result.values.name || '').trim(),
+        provider: result.values.provider || '',
+        model: result.values.model || '',
+        type: result.values.type || '',
+        system_prompt: result.values.systemPrompt || ''
+      };
+    }
+
+    operation.phase = 'committing';
+    const button = document.getElementById('createAgentBtn');
+    if (button) {
+      button.disabled = true;
+      button.textContent =
+        operation.mode === 'clear' ? 'Clearing stale assignment…' : 'Filling group role…';
+    }
+    this.showWorkspaceGroupRoleSetupError('');
+    let response;
+    let responseBody = {};
+    try {
+      const request = { method: operation.mode === 'clear' ? 'DELETE' : 'PUT' };
+      if (body) {
+        request.headers = { 'Content-Type': 'application/json' };
+        request.body = JSON.stringify(body);
+      }
+      response = await fetch(
+        `/api/workspaces/${encodeURIComponent(operation.workspaceID)}/roles/${encodeURIComponent(operation.roleID)}`,
+        request
+      );
+      responseBody = await response.json().catch(() => ({}));
+    } catch (error) {
+      response = null;
+      responseBody = { error: error?.message || 'The role response was lost.' };
+    }
+    if (this.workspaceGroupRoleSetup !== operation) return false;
+
+    const rosterRole = payload => {
+      const roster = Array.isArray(payload?.roles?.roles) ? payload.roles : payload;
+      return roster?.roles?.find?.(role => role.role_id === operation.roleID);
+    };
+    let canonicalRosterRole = rosterRole(responseBody);
+    try {
+      const rosterResponse = await fetch(
+        `/api/workspaces/${encodeURIComponent(operation.workspaceID)}/roles`
+      );
+      if (rosterResponse.ok) {
+        const roster = await rosterResponse.json();
+        canonicalRosterRole = rosterRole(roster);
+      }
+    } catch (_error) {
+      // The template plan below is still authoritative for a successful fill.
+      // A stale-binding clear remains unconfirmed until this exact roster reads.
+    }
+    await this.refreshTemplateAgentPlan();
+    if (this.workspaceGroupRoleSetup !== operation) return false;
+    const currentProjection = draft.projection || this.templateAgentPlan?.group_requirement || {};
+    const canonicalRole = currentProjection.required_home_roles?.roles?.find?.(
+      role => role.role_id === operation.roleID
+    );
+    const staleBindingCleared =
+      operation.mode === 'clear' &&
+      canonicalRosterRole?.state === 'empty' &&
+      canonicalRosterRole?.needs_clear !== true;
+    if (canonicalRole?.state === 'filled' || staleBindingCleared) {
+      if (staleBindingCleared) {
+        operation.completed = `${operation.roleLabel} stale assignment was cleared on ${currentProjection.home?.name || 'the group'}. Choose Set Up again to fill it.`;
+      } else {
+        operation.completed =
+          response?.ok === true
+            ? `${operation.roleLabel} is filled on ${currentProjection.home?.name || 'the group'}.`
+            : `${operation.roleLabel} was filled and recovered from canonical group state.`;
+      }
+      operation.phase = 'complete';
+      this.invalidateGroupRequirementReview();
+      this.closeWorkspaceGroupRoleSetup();
+      return true;
+    }
+
+    operation.phase = 'editing';
+    if (button) {
+      button.disabled = false;
+      button.textContent =
+        operation.mode === 'clear'
+          ? 'Clear stale group assignment'
+          : operation.mode === 'assign'
+            ? 'Assign to group role'
+            : 'Create and fill group role';
+    }
+    this.showWorkspaceGroupRoleSetupError(
+      responseBody.error ||
+        (response
+          ? `The group role could not be ${operation.mode === 'clear' ? 'cleared' : 'filled'} (${response.status}).`
+          : 'The role response was lost. Recheck and try again.')
+    );
+    return false;
+  },
+
+  showWorkspaceGroupRoleSetupError(message) {
+    const error = document.getElementById('agentCreateDraftError');
+    if (!error) return;
+    error.textContent = String(message || '');
+    error.hidden = !message;
+    if (message) error.focus();
+  },
+
+  closeWorkspaceGroupRoleSetup() {
+    const modal = document.getElementById('addAgentModal');
+    if (modal?.classList.contains('show')) {
+      bootstrap.Modal.getOrCreateInstance(modal).hide();
+      return;
+    }
+    this.finishWorkspaceGroupRoleSetupModal();
+  },
+
+  finishWorkspaceGroupRoleSetupModal() {
+    const modal = document.getElementById('addAgentModal');
+    if (modal?.dataset.agentCreateMode !== 'workspace-group-role-live') return;
+    const operation = this.workspaceGroupRoleSetup;
+    if (operation?.phase === 'committing') return;
+    const completed = operation?.completed || '';
+    const opener = operation?.opener;
+
+    this.workspaceGroupRoleSetupRequestId += 1;
+    this.workspaceGroupRoleSetup = null;
+    this.workspaceGroupRoleSetupForm = null;
+    modal.classList.remove('is-workspace-agent-draft', 'is-workspace-group-role-assign');
+    delete modal.dataset.agentCreateMode;
+    const title = document.getElementById('addAgentModalTitleText');
+    if (title) title.textContent = 'Create New Agent';
+    const context = document.getElementById('agentCreateDraftContext');
+    if (context) context.hidden = true;
+    const mode = document.getElementById('workspaceGroupRoleMode');
+    if (mode) mode.hidden = true;
+    const rosterPreview = document.getElementById('workspaceGroupRoleRosterPreview');
+    if (rosterPreview) {
+      rosterPreview.hidden = true;
+      rosterPreview.replaceChildren();
+    }
+    const panel = document.getElementById('workspaceGroupRoleAssignPanel');
+    if (panel) panel.hidden = true;
+    const button = document.getElementById('createAgentBtn');
+    if (button?.dataset.workspaceDraftOriginalHtml) {
+      button.innerHTML = button.dataset.workspaceDraftOriginalHtml;
+      delete button.dataset.workspaceDraftOriginalHtml;
+      button.disabled = false;
+    }
+    window.resetStandaloneAgentCreateForm?.();
+
+    const workspaceModal = document.getElementById('addFolderModal');
+    if (workspaceModal) delete workspaceModal.dataset.suspendedForAgentSetup;
+    this.refreshWorkspaceReview();
+    const afterResume = () => {
+      if (completed) {
+        this.setWorkspaceGroupDestinationMessage(completed);
+        this.showToast(completed, 'success');
+      }
+      const destinationTitle = document.getElementById('workspaceGroupDestinationTitle');
+      if (destinationTitle) destinationTitle.focus();
+      else opener?.focus?.();
+    };
+    if (workspaceModal) {
+      workspaceModal.dataset.resumingFromAgentSetup = 'true';
+      workspaceModal.addEventListener('shown.bs.modal', afterResume, { once: true });
+      bootstrap.Modal.getOrCreateInstance(workspaceModal).show();
+    } else {
+      afterResume();
+    }
   },
 
   // Create opens the app's canonical Create Agent form, prefilled for the role,
@@ -5558,6 +6122,7 @@ const sessionManager = {
       return;
     }
     this.workspaceRoleSetupCompleted = name;
+    this.invalidateGroupRequirementReview();
     this.closeWorkspaceRoleSetup();
   },
 
@@ -5638,6 +6203,7 @@ const sessionManager = {
       return;
     }
     this.workspaceRoleAssigning = '';
+    this.invalidateGroupRequirementReview();
     this.refreshWorkspaceReview();
     this.renderExistingAgentRoster();
     this.announceWorkspaceRoleChange(roleId, `${canonical} will be attached to`);
@@ -5648,6 +6214,7 @@ const sessionManager = {
     const api = window.CreateWorkspaceTeamDraft;
     const draft = this.ensureWorkspaceTeamDraft();
     if (!draft || !api || !api.clearRoleFill(draft, roleId)) return;
+    this.invalidateGroupRequirementReview();
     this.refreshWorkspaceReview();
     this.renderExistingAgentRoster();
     this.announceWorkspaceRoleChange(roleId, 'Nobody will fill');
@@ -5853,6 +6420,7 @@ const sessionManager = {
     // The draft owns the rules: unknown, non-attachable, already-selected, and
     // blueprint-included names are all refused here rather than at each caller.
     if (!api.addSavedAgent(draft, name)) return;
+    this.invalidateGroupRequirementReview();
     const canonicalName = String(api.findSavedAgent(draft, name)?.name || name).trim();
     this.renderExistingAgentRoster();
     this.refreshWorkspaceReview();
@@ -5872,6 +6440,7 @@ const sessionManager = {
     const draft = this.ensureWorkspaceTeamDraft();
     if (!draft || !api) return;
     if (!api.removeSavedAgent(draft, name)) return;
+    this.invalidateGroupRequirementReview();
     this.renderExistingAgentRoster();
     this.refreshWorkspaceReview();
     this.announceWorkspaceTeamChange(
@@ -5886,6 +6455,7 @@ const sessionManager = {
     const draft = this.ensureWorkspaceTeamDraft();
     if (!draft || !api) return;
     if (!api.setExplicitPrimary(draft, name)) return;
+    this.invalidateGroupRequirementReview();
     this.refreshWorkspaceReview();
     const canonicalName = String(api.findSavedAgent(draft, name)?.name || name).trim();
     this.announceWorkspaceTeamChange(
@@ -5987,6 +6557,230 @@ const sessionManager = {
     text.textContent = `Includes ${summary.count} agent${summary.count === 1 ? '' : 's'}: ${names.join(', ')}.`;
   },
 
+  renderWorkspaceGroupDestinationCard() {
+    const card = document.getElementById('workspaceGroupDestinationCard');
+    if (!card) return;
+    const draft = this.groupRequirementDraft;
+    if (!draft || this.importModeEnabled) {
+      card.hidden = true;
+      return;
+    }
+    card.hidden = false;
+
+    const projection = draft.projection || this.templateAgentPlan?.group_requirement || null;
+    const status =
+      draft.status || (projection ? 'ready' : this.templateAgentPlanError ? 'error' : 'loading');
+    const state = String(projection?.state || '');
+    const home = projection?.home || null;
+    const progress = projection?.required_home_roles || null;
+    const projectName = String(document.getElementById('folderNameInput')?.value || '').trim();
+    const title = document.getElementById('workspaceGroupDestinationTitle');
+    const badge = document.getElementById('workspaceGroupDestinationBadge');
+    const route = document.getElementById('workspaceGroupDestinationRoute');
+    const summary = document.getElementById('workspaceGroupDestinationSummary');
+    const progressHost = document.getElementById('workspaceGroupDestinationProgress');
+    const choices = document.getElementById('workspaceGroupCompositionChoice');
+    const homeReview = document.getElementById('workspaceGroupHomeReview');
+    const homeReviewTitle = document.getElementById('workspaceGroupHomeReviewTitle');
+    const homeReviewCopy = document.getElementById('workspaceGroupHomeReviewCopy');
+    const homeConfirm = document.getElementById('workspaceGroupHomeConfirm');
+    const homeCancel = document.getElementById('workspaceGroupHomeCancel');
+    const actionsHost = document.getElementById('workspaceGroupDestinationActions');
+
+    const missingRequiredHomeRoles = Number(progress?.missing);
+    const groupRolesReady =
+      progress?.verification === 'verified' &&
+      Number.isInteger(missingRequiredHomeRoles) &&
+      missingRequiredHomeRoles === 0;
+    if (title) title.textContent = 'Project destination';
+    if (badge) {
+      badge.className = 'workspace-group-destination-badge';
+      if (status === 'loading') {
+        badge.textContent = 'Checking';
+      } else if (state === 'ready_standalone' || (state === 'ready_grouped' && groupRolesReady)) {
+        badge.textContent = 'Ready';
+        badge.classList.add('is-ready');
+      } else if (state === 'choice_required') {
+        badge.textContent = 'Choose';
+      } else {
+        badge.textContent = 'Needs setup';
+        badge.classList.add('is-blocked');
+      }
+    }
+
+    const standalone = state === 'ready_standalone' || draft.composition === 'standalone';
+    let destinationName = '';
+    let destinationMeta = '';
+    let destinationClass = '';
+    if (standalone) {
+      destinationName = 'Standalone workspace';
+      destinationMeta = 'No program Home or membership';
+    } else if (home?.exists === true) {
+      destinationName = String(home.name || 'Canonical group');
+      destinationMeta = 'Existing verified group';
+    } else if (home && home.exists === false && home.proposed_name) {
+      destinationName = String(home.proposed_name);
+      destinationMeta = 'Proposed group · not created';
+      destinationClass = ' is-proposed';
+    } else {
+      destinationName = status === 'loading' ? 'Checking exact group…' : 'Exact group unavailable';
+      destinationMeta =
+        status === 'loading' ? 'No destination assumed yet' : 'No group identity was guessed';
+    }
+    if (route) {
+      route.innerHTML = `
+        <div class="workspace-group-destination-node${destinationClass}">
+          <span>${standalone ? 'Structure' : 'Program Home'}</span>
+          <strong>${this.escapeHtml(destinationName)}</strong>
+          <small>${this.escapeHtml(destinationMeta)}</small>
+        </div>
+        <div class="workspace-group-destination-arrow" aria-hidden="true"></div>
+        <div class="workspace-group-destination-node">
+          <span>New project workspace</span>
+          <strong>${this.escapeHtml(projectName || 'Name this workspace')}</strong>
+          <small>${standalone ? 'Created independently' : 'Created here after a separate final review'}</small>
+        </div>`;
+    }
+
+    if (summary) {
+      summary.textContent =
+        status === 'loading'
+          ? 'Checking the blueprint’s trusted source and exact destination. No group or workspace is being created.'
+          : status === 'error'
+            ? draft.projectionError || 'The required destination could not be checked.'
+            : projection?.summary || 'The blueprint’s destination is unavailable.';
+    }
+    if (progressHost) {
+      progressHost.className = 'workspace-group-destination-progress';
+      const required = Number(progress?.required);
+      const filled = Number(progress?.filled);
+      const missingRoles = Array.isArray(progress?.roles)
+        ? progress.roles.filter(role => role.state !== 'filled').map(role => role.label)
+        : [];
+      if (progress?.verification === 'not_applicable') {
+        progressHost.textContent = 'Group coordinator · Not applicable for standalone placement';
+        progressHost.classList.add('is-ready');
+      } else if (Number.isInteger(required) && Number.isInteger(filled)) {
+        const noun = required === 1 ? 'required group role' : 'required group roles';
+        const missingCopy = missingRoles.length ? ` · Needs ${missingRoles.join(', ')}` : '';
+        progressHost.textContent = `${filled} of ${required} ${noun} filled${missingCopy}`;
+        if (required === filled) progressHost.classList.add('is-ready');
+      } else {
+        progressHost.textContent = 'Required group role status is unavailable';
+      }
+    }
+
+    if (choices) {
+      choices.hidden = draft.policy !== 'recommended';
+      choices.querySelectorAll('input').forEach(input => {
+        input.checked = input.value === draft.composition;
+      });
+    }
+
+    const homeOperation = draft.homeOperation || null;
+    const showHomeReview = ['awaiting_confirmation', 'committing', 'unknown'].includes(
+      homeOperation?.phase
+    );
+    if (homeReview) homeReview.hidden = !showHomeReview;
+    if (showHomeReview) {
+      const reviewedName = String(homeOperation.review?.home_name || destinationName);
+      if (homeReviewTitle) homeReviewTitle.textContent = `Prepare ${reviewedName}`;
+      if (homeReviewCopy) {
+        homeReviewCopy.textContent =
+          'This confirmation creates or reuses only the empty canonical group. It does not create this project, staff either team, link a child, grant tools, or run setup.';
+      }
+      if (homeConfirm) {
+        homeConfirm.disabled = homeOperation.phase === 'committing';
+        homeConfirm.textContent =
+          homeOperation.phase === 'unknown'
+            ? 'Retry confirmed group setup'
+            : homeOperation.phase === 'committing'
+              ? 'Creating group…'
+              : 'Create group only';
+      }
+      if (homeCancel) homeCancel.hidden = homeOperation.phase !== 'awaiting_confirmation';
+    }
+
+    if (actionsHost) {
+      actionsHost.innerHTML = '';
+      if (showHomeReview) return;
+      const actions = Array.isArray(projection?.actions) ? projection.actions : [];
+      let action = '';
+      if (actions.includes('review_create_home')) action = 'review_create_home';
+      else if (actions.includes('open_group_roles')) action = 'open_group_roles';
+      else if (actions.includes('retry')) action = 'retry';
+      else if (actions.includes('open_guided_setup')) action = 'open_guided_setup';
+      else if (actions.includes('manage_plugins')) action = 'manage_plugins';
+      else if (actions.includes('change_template')) action = 'change_template';
+      const missingLabel = progress?.roles?.find?.(role => role.state !== 'filled')?.label;
+      const labels = {
+        review_create_home: `Review ${destinationName} setup`,
+        open_group_roles: `Set up ${missingLabel || 'group coordinator'}`,
+        retry: 'Recheck destination',
+        open_guided_setup: 'Open guided setup',
+        manage_plugins: 'Manage plugin',
+        change_template: 'Change blueprint'
+      };
+      if (action && labels[action]) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className =
+          action === 'review_create_home' || action === 'open_group_roles'
+            ? 'modern-btn modern-btn-primary'
+            : 'modern-btn modern-btn-secondary';
+        button.dataset.groupDestinationAction = action;
+        button.textContent = labels[action];
+        actionsHost.appendChild(button);
+      }
+    }
+  },
+
+  setWorkspaceGroupDestinationMessage(message) {
+    const host = document.getElementById('workspaceGroupDestinationMessage');
+    if (host) host.textContent = String(message || '');
+  },
+
+  async runWorkspaceGroupDestinationAction(action, button) {
+    const allowlisted = new Set([
+      'review_create_home',
+      'open_group_roles',
+      'retry',
+      'open_guided_setup',
+      'manage_plugins',
+      'change_template'
+    ]);
+    if (!allowlisted.has(action)) return false;
+    this.setWorkspaceGroupDestinationMessage('');
+    if (action === 'change_template' || action === 'manage_plugins') {
+      this.goToWizardStep(1);
+      if (action === 'manage_plugins') window.ProjectTemplateCard?.focusReadiness?.();
+      return true;
+    }
+    if (action === 'open_guided_setup') {
+      if (window.ProjectTemplateCard?.openSelectedGuidedSetup?.()) return true;
+      this.setWorkspaceGroupDestinationMessage(
+        'Guided setup is unavailable for this blueprint. Change blueprint or recheck its source.'
+      );
+      return false;
+    }
+    if (button) button.disabled = true;
+    try {
+      if (action === 'retry') {
+        await this.refreshTemplateAgentPlan();
+        return true;
+      }
+      if (action === 'review_create_home') {
+        return await this.prepareRequiredGroupHomeFromCard(button);
+      }
+      if (action === 'open_group_roles') {
+        return await this.openWorkspaceGroupRoleSetup(button);
+      }
+      return false;
+    } finally {
+      if (button?.isConnected) button.disabled = false;
+    }
+  },
+
   refreshWorkspaceReview() {
     this.syncGroupRequirementParentControl();
     const summary = document.getElementById('workspaceReviewSummary');
@@ -5996,6 +6790,7 @@ const sessionManager = {
     const name = String(document.getElementById('folderNameInput')?.value || '').trim();
     const view = this.teamView();
     const roster = view ? view.roster : [];
+    this.renderWorkspaceGroupDestinationCard();
     const nextButton = document.getElementById('wizardNextBtn');
     if (nextButton && this.wizardStep === 3) {
       nextButton.disabled = Boolean(view?.blockingIssues?.length);
@@ -6093,39 +6888,67 @@ const sessionManager = {
     const requirement = template?.group_requirement;
     const draft = this.groupRequirementDraft;
     if (!requirement || !draft) return '';
-    const homeName = String(
-      draft.review?.home_name || requirement.default_home_name || 'the canonical Home'
-    );
-    const reviewedStatus = draft.review?.review_token
-      ? draft.review.selected_composition === 'grouped'
-        ? draft.preparedHome
-          ? 'Home prepared separately; no workspace has been created yet. Reviewed: this exact existing Home will be reused.'
-          : 'Reviewed: this exact existing Home will be reused.'
-        : 'Reviewed: no Home will be created or linked.'
-      : 'Destination review is prepared when you continue with Create.';
-    if (draft.policy === 'recommended') {
-      return `
-        <fieldset class="workspace-review-card workspace-group-placement-review">
-          <legend class="workspace-review-card-label">Project placement</legend>
-          <label>
-            <input type="radio" name="workspace-group-composition" value="grouped" ${draft.composition === 'grouped' ? 'checked' : ''}>
-            Grouped in ${this.escapeHtml(homeName)}
-          </label>
-          <span class="workspace-review-card-note">Uses the exact owner-resolved Home. If it is missing, creation is reviewed separately. ${this.escapeHtml(draft.composition === 'grouped' ? reviewedStatus : '')}</span>
-          <label>
-            <input type="radio" name="workspace-group-composition" value="standalone" ${draft.composition === 'standalone' ? 'checked' : ''}>
-            Standalone project
-          </label>
-          <span class="workspace-review-card-note">Creates no Home membership and keeps only the declared project-local composition. ${this.escapeHtml(draft.composition === 'standalone' ? reviewedStatus : '')}</span>
-        </fieldset>`;
-    }
+    const projection = draft.projection || this.templateAgentPlan?.group_requirement || {};
     const grouped = draft.composition === 'grouped';
+    const homeName = String(
+      projection.home?.name ||
+        projection.home?.proposed_name ||
+        requirement.default_home_name ||
+        'the canonical Home'
+    );
+    let reviewedStatus = 'A fresh destination review is required before creation.';
+    if (draft.review?.review_token) {
+      reviewedStatus = grouped
+        ? 'Final placement reviewed for this exact existing Home.'
+        : 'Final standalone placement reviewed with no Home membership.';
+    } else if (grouped && projection.home?.exists === true) {
+      reviewedStatus = draft.preparedHome
+        ? 'The Home already persisted during setup; no project workspace has been created yet.'
+        : 'The existing Home is verified; no new group will be created.';
+    } else if (grouped && projection.home?.exists === false) {
+      reviewedStatus = 'This proposed group has not been created.';
+    }
+    const projectName = String(document.getElementById('folderNameInput')?.value || '').trim();
+    const requiredHomeRoles = Array.isArray(projection.required_home_roles?.roles)
+      ? projection.required_home_roles.roles
+      : [];
+    const coordinatorLines = requiredHomeRoles.map(role => {
+      const holder = String(role.agent?.name || '').trim();
+      const state = holder ? `${holder} · already staffed on the group` : 'Missing on the group';
+      return `<span class="workspace-review-hierarchy-role"><b>${this.escapeHtml(role.label)}</b><small>${this.escapeHtml(state)}</small></span>`;
+    });
+    const hierarchy = !draft.composition
+      ? '<strong>Choose grouped or standalone placement in Details</strong>'
+      : grouped
+        ? `<div class="workspace-review-hierarchy">
+            <div class="workspace-review-hierarchy-node is-group">
+              <span>${draft.preparedHome ? 'Prepared group · already persisted' : 'Existing verified group · reused'}</span>
+              <strong>${this.escapeHtml(homeName)}</strong>
+              ${coordinatorLines.join('')}
+            </div>
+            <div class="workspace-review-hierarchy-branch" aria-hidden="true">↳</div>
+            <div class="workspace-review-hierarchy-node is-project">
+              <span>New project workspace · not created yet</span>
+              <strong>${this.escapeHtml(projectName || 'Untitled workspace')}</strong>
+              <small>Will be linked only after final confirmation</small>
+            </div>
+          </div>`
+        : `<div class="workspace-review-hierarchy">
+            <div class="workspace-review-hierarchy-node is-project">
+              <span>Standalone project · not created yet</span>
+              <strong>${this.escapeHtml(projectName || 'Untitled workspace')}</strong>
+              <small>No Home or Assistant Program membership</small>
+            </div>
+          </div>`;
     return `
       <div class="workspace-review-card workspace-group-placement-review">
         <div class="workspace-review-card-main">
-          <span class="workspace-review-card-label">Project placement</span>
-          <strong>${grouped ? `Required group: ${this.escapeHtml(homeName)}` : 'Standalone — no Home membership'}</strong>
-          <span class="workspace-review-card-note">${grouped ? 'Ori resolves the exact canonical Home and establishes reciprocal membership before project work can start.' : 'Ordinary parent selection remains organizational and grants no Assistant Program membership.'} ${this.escapeHtml(reviewedStatus)}</span>
+          <span class="workspace-review-card-label">Resulting hierarchy</span>
+          ${hierarchy}
+          <span class="workspace-review-card-note">${this.escapeHtml(reviewedStatus)}</span>
+        </div>
+        <div class="workspace-review-card-actions">
+          <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="2">Edit destination</button>
         </div>
       </div>`;
   },
@@ -6250,28 +7073,38 @@ const sessionManager = {
   // back to that role's row (FR28, FR31).
   renderWorkspaceReceiptRoles(view) {
     const component = window.WorkspaceRoleRoster;
-    const rows = component ? component.rowsFrom(view.roleRoster) : [];
+    const allRows = component ? component.rowsFrom(view.roleRoster) : [];
+    // A group holder is an already-persisted prerequisite, not part of the
+    // child's create payload. The hierarchy receipt above names it once; this
+    // card lists only what final project confirmation will attach.
+    const rows = view?.isAssistantProgram
+      ? allRows.filter(row => row.scope === 'project')
+      : allRows;
     const lines = rows.map(row => {
       const state =
         row.state === 'filled'
-          ? `${row.tag.label} · ${row.sourceLabel}`
-          : row.readOnly
-            ? `${row.tag.label} · in the group workspace`
-            : row.tag.label;
-      return [row.label, row.designation === 'PRIMARY' ? 'Primary' : 'Specialist', state].join(
-        ' · '
-      );
+          ? row.source === 'assigned'
+            ? `${row.tag.label} · saved agent will be attached`
+            : `${row.tag.label} · new agent will be created`
+          : row.tag.label;
+      return [row.label, row.designation, state].join(' · ');
     });
     for (const agent of view?.roleRoster?.unassigned || []) {
       lines.push(`${agent.name} · Also in this workspace · Saved agent`);
     }
     lines.push(this.workspaceTeamSummaryText(view));
+    const heading = view?.isAssistantProgram ? 'Project team' : 'Team';
+    const progress = component
+      ? view?.isAssistantProgram
+        ? component.requiredProgress(rows)
+        : component.headerCount(view.roleRoster)
+      : '';
 
     return `
       <div class="workspace-review-card">
         <div class="workspace-review-card-main">
-          <span class="workspace-review-card-label">Team</span>
-          <span class="workspace-review-card-meta">${this.escapeHtml(component ? component.headerCount(view.roleRoster) : '')}</span>
+          <span class="workspace-review-card-label">${heading}</span>
+          <span class="workspace-review-card-meta">${this.escapeHtml(progress)}</span>
           ${lines.map(line => `<span class="workspace-review-card-meta">${this.escapeHtml(line)}</span>`).join('')}
         </div>
         <div class="workspace-review-card-actions">
@@ -6317,9 +7150,42 @@ const sessionManager = {
   // attached" is the distinction that matters before the workspace exists.
   workspaceTeamSummaryText(view) {
     const roster = view ? view.roster : [];
-    // When the blueprint declares roles, the summary IS the roster's own count
-    // of what this request will do. Team and Review read the same sentence
-    // from the same projection, so they cannot disagree (FR17, FR30).
+    if (view?.isAssistantProgram && view?.roleRoster?.total_count > 0) {
+      const roles = view.roleRoster.roles || [];
+      const progress = scope => {
+        const required = roles.filter(role => role.scope === scope && role.required);
+        const filled = required.filter(role => role.state === 'filled').length;
+        return `${filled} of ${required.length} required role${required.length === 1 ? '' : 's'} filled`;
+      };
+      const projectCreated = roles.filter(
+        role => role.scope === 'project' && role.state === 'filled' && role.source === 'created'
+      ).length;
+      const projectAssigned = roles.filter(
+        role => role.scope === 'project' && role.state === 'filled' && role.source === 'assigned'
+      ).length;
+      const optionalHomeOpen = roles.filter(
+        role => role.scope === 'home' && !role.required && role.state !== 'filled'
+      ).length;
+      const consequences = [];
+      if (projectCreated) {
+        consequences.push(
+          `${projectCreated} new project agent${projectCreated === 1 ? '' : 's'} will be created`
+        );
+      }
+      if (projectAssigned) {
+        consequences.push(
+          `${projectAssigned} saved project agent${projectAssigned === 1 ? '' : 's'} will be attached`
+        );
+      }
+      if (optionalHomeOpen) {
+        consequences.push(
+          `${optionalHomeOpen} optional group add-on${optionalHomeOpen === 1 ? '' : 's'} stays empty`
+        );
+      }
+      return `Group coordination: ${progress('home')}. Project team: ${progress('project')}.${consequences.length ? ` ${consequences.join(' · ')}.` : ''}`;
+    }
+    // When an ordinary blueprint declares roles, the summary IS the roster's
+    // own count of what this request will do.
     if (view?.roleSummary) return view.roleSummary;
     // The consequence is spelled out by the advisory issue below the summary;
     // repeating it here would say the same thing twice in two shapes.
@@ -6906,42 +7772,204 @@ const sessionManager = {
     }
   },
 
-  async prepareCanonicalGroupHome(payload) {
-    const selection = {
-      ...(payload.template_id ? { template_id: payload.template_id } : {}),
-      ...(payload.template_path ? { template_path: payload.template_path } : {})
+  groupRequirementSelection() {
+    const fields = window.ProjectTemplateCard?.getPayloadFields?.() || {};
+    const templateID = String(fields.template_id || '').trim();
+    const templatePath = String(fields.template_path || '').trim();
+    if ((templateID ? 1 : 0) + (templatePath ? 1 : 0) !== 1) return null;
+    return templateID ? { template_id: templateID } : { template_path: templatePath };
+  },
+
+  async prepareRequiredGroupHomeFromCard() {
+    const draft = this.groupRequirementDraft;
+    const projection = draft?.projection || this.templateAgentPlan?.group_requirement || null;
+    if (
+      !draft ||
+      !projection ||
+      !Array.isArray(projection.actions) ||
+      !projection.actions.includes('review_create_home')
+    ) {
+      this.setWorkspaceGroupDestinationMessage(
+        'The selected blueprint no longer offers group preparation. Recheck its destination.'
+      );
+      return false;
+    }
+    if (draft.homeOperation) return true;
+    const selection = this.groupRequirementSelection();
+    if (!selection) {
+      this.setWorkspaceGroupDestinationMessage(
+        'Choose one trusted blueprint source before preparing its group.'
+      );
+      return false;
+    }
+    const operation = {
+      phase: 'reviewing',
+      templateKey: draft.templateKey,
+      sourceRevision: String(projection.source_revision || ''),
+      selection,
+      idempotencyKey: crypto.randomUUID(),
+      review: null
     };
-    const request = async (url, body) => {
-      const response = await fetch(url, {
+    draft.homeOperation = operation;
+    this.setWorkspaceGroupDestinationMessage('Reviewing the group-only consequence…');
+    try {
+      const response = await fetch('/api/workspaces/group-requirement/home/review', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
+        body: JSON.stringify(selection)
       });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok || result.error) {
+      const body = await response.json().catch(() => ({}));
+      if (this.groupRequirementDraft !== draft || draft.homeOperation !== operation) return false;
+      if (!response.ok || body.error) {
         throw new Error(
-          result.group_requirement?.summary ||
-            result.error ||
-            'The required group could not be prepared.'
+          body.group_requirement?.summary || body.error || 'The group setup review failed.'
         );
       }
-      return result;
-    };
-    const reviewed = await request('/api/workspaces/group-requirement/home/review', selection);
-    const review = reviewed.group_requirement_review || {};
-    if (review.state !== 'ready_grouped' || !review.review_token) {
-      throw new Error(review.summary || 'The required group is not ready to create.');
+      const review = body.group_requirement_review || {};
+      if (review.state !== 'ready_grouped' || !review.review_token) {
+        throw new Error(review.summary || 'The canonical group is not ready to prepare.');
+      }
+      const currentProjection = draft.projection || this.templateAgentPlan?.group_requirement || {};
+      if (
+        operation.templateKey !== draft.templateKey ||
+        operation.sourceRevision !== String(currentProjection.source_revision || '')
+      ) {
+        throw new Error(
+          'The blueprint destination changed. Recheck it before preparing the group.'
+        );
+      }
+      operation.review = review;
+      operation.phase = 'awaiting_confirmation';
+      this.setWorkspaceGroupDestinationMessage('');
+      this.renderWorkspaceGroupDestinationCard();
+      document.getElementById('workspaceGroupHomeReviewTitle')?.focus();
+      return true;
+    } catch (error) {
+      if (this.groupRequirementDraft === draft && draft.homeOperation === operation) {
+        draft.homeOperation = null;
+        this.setWorkspaceGroupDestinationMessage(
+          error?.message || 'The group setup review failed. Nothing was changed.'
+        );
+        this.renderWorkspaceGroupDestinationCard();
+      }
+      return false;
     }
-    const committed = await request('/api/workspaces/group-requirement/home/commit', {
-      ...selection,
-      group_review_token: review.review_token,
-      idempotency_key: crypto.randomUUID()
-    });
-    const prepared = committed.group_requirement || {};
-    if (prepared.state !== 'home_ready' || !prepared.home_workspace_id) {
-      throw new Error(prepared.summary || 'The required group could not be verified.');
+  },
+
+  cancelRequiredGroupHomeReview() {
+    const draft = this.groupRequirementDraft;
+    if (!draft?.homeOperation || draft.homeOperation.phase !== 'awaiting_confirmation') {
+      return false;
     }
-    return prepared;
+    draft.homeOperation = null;
+    this.setWorkspaceGroupDestinationMessage('Group setup cancelled. Nothing was created.');
+    this.renderWorkspaceGroupDestinationCard();
+    document.querySelector('[data-group-destination-action="review_create_home"]')?.focus();
+    return true;
+  },
+
+  async commitRequiredGroupHome(button) {
+    const draft = this.groupRequirementDraft;
+    const operation = draft?.homeOperation;
+    if (!draft || !operation || !['awaiting_confirmation', 'unknown'].includes(operation.phase)) {
+      return false;
+    }
+    const currentProjection = draft.projection || this.templateAgentPlan?.group_requirement || {};
+    if (
+      operation.templateKey !== draft.templateKey ||
+      operation.sourceRevision !== String(currentProjection.source_revision || '')
+    ) {
+      draft.homeOperation = null;
+      this.setWorkspaceGroupDestinationMessage(
+        'The blueprint destination changed. Review the current group setup again.'
+      );
+      this.renderWorkspaceGroupDestinationCard();
+      return false;
+    }
+
+    operation.phase = 'committing';
+    if (button) button.disabled = true;
+    this.setWorkspaceGroupDestinationMessage('Creating only the canonical group…');
+    this.renderWorkspaceGroupDestinationCard();
+    try {
+      const response = await fetch('/api/workspaces/group-requirement/home/commit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...operation.selection,
+          group_review_token: operation.review.review_token,
+          idempotency_key: operation.idempotencyKey
+        })
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || body.error) {
+        if (response.status === 400 || response.status === 409) {
+          draft.homeOperation = null;
+          await this.refreshTemplateAgentPlan();
+          this.setWorkspaceGroupDestinationMessage(
+            body.group_requirement?.summary ||
+              body.error ||
+              'The group setup review changed. Review it again.'
+          );
+          this.renderWorkspaceGroupDestinationCard();
+          return false;
+        }
+        throw new Error(
+          body.group_requirement?.summary || body.error || 'The confirmed group setup is uncertain.'
+        );
+      }
+      const prepared = body.group_requirement || {};
+      if (prepared.state !== 'home_ready' || !prepared.home_workspace_id) {
+        throw new Error(prepared.summary || 'The confirmed group could not be verified.');
+      }
+      draft.preparedHome = prepared;
+      draft.homeOperation = null;
+      this.invalidateGroupRequirementReview();
+      await this.refreshWorkspaceSurfacesAfterGroupPreparation();
+      await this.refreshTemplateAgentPlan();
+      const verified = draft.projection || this.templateAgentPlan?.group_requirement || {};
+      if (
+        verified.state === 'ready_grouped' &&
+        verified.home?.exists === true &&
+        String(verified.home.workspace_id || '') === String(prepared.home_workspace_id)
+      ) {
+        this.setWorkspaceGroupDestinationMessage(
+          `${verified.home.name || 'The group'} is prepared. No project workspace or team was created.`
+        );
+      } else {
+        this.setWorkspaceGroupDestinationMessage(
+          'The group was prepared, but its latest status could not be read. Recheck before continuing.'
+        );
+      }
+      this.renderWorkspaceGroupDestinationCard();
+      document.getElementById('workspaceGroupDestinationTitle')?.focus();
+      return true;
+    } catch (error) {
+      if (this.groupRequirementDraft === draft && draft.homeOperation === operation) {
+        await this.refreshTemplateAgentPlan();
+        const verified = draft.projection || this.templateAgentPlan?.group_requirement || {};
+        if (verified.state === 'ready_grouped' && verified.home?.exists === true) {
+          draft.preparedHome = {
+            state: 'home_ready',
+            home_workspace_id: verified.home.workspace_id,
+            home_name: verified.home.name,
+            reconciled_after_unknown_response: true
+          };
+          draft.homeOperation = null;
+          this.setWorkspaceGroupDestinationMessage(
+            `${verified.home.name || 'The group'} is prepared. The response was recovered from canonical state.`
+          );
+          this.renderWorkspaceGroupDestinationCard();
+          return true;
+        }
+        operation.phase = 'unknown';
+        this.setWorkspaceGroupDestinationMessage(
+          `${error?.message || 'The response was lost.'} Recheck or retry the same confirmed operation; Ori will not create a second group.`
+        );
+        this.renderWorkspaceGroupDestinationCard();
+      }
+      return false;
+    }
   },
 
   async prepareGroupRequirementCommit(endpoint, payload) {
@@ -6966,19 +7994,14 @@ const sessionManager = {
       return body.group_requirement_review || {};
     };
 
-    let review = await requestReview();
+    const review = await requestReview();
     if (review.state === 'home_creation_review_required') {
-      const homeName = String(review.home_name || 'Assistant Program Home');
-      const confirmed = window.confirm(
-        `“${homeName}” must exist before this workspace can be created.\n\nCreate the group now? This action creates only the empty group. It does not create, move, or link the workspace. You will review the exact destination and create the workspace in a separate action.`
+      this.showWorkspaceCreateError(
+        'Prepare the required group from Details before reviewing project creation.'
       );
-      if (!confirmed) return false;
-      draft.preparedHome = await this.prepareCanonicalGroupHome(payload);
-      await this.refreshWorkspaceSurfacesAfterGroupPreparation();
-      // The Home-only commit is complete. Obtain a fresh inert project receipt
-      // against that exact existing destination; never reuse the create-Home
-      // receipt as authorization to create a workspace.
-      review = await requestReview();
+      this.goToWizardStep(2);
+      document.getElementById('workspaceGroupDestinationTitle')?.focus();
+      return false;
     }
     if (review.state !== 'ready_grouped' && review.state !== 'ready_standalone') {
       const actions = Array.isArray(review.actions) ? review.actions.join(', ') : '';

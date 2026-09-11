@@ -354,6 +354,233 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
   color: #f3f5f8;
 }
 
+/* ---------- exact group destination ---------- */
+.workspace-create-modal .workspace-group-destination {
+  position: relative;
+  overflow: hidden;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--wc-faction) 34%, var(--wc-line));
+  border-left: 3px solid var(--wc-faction);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--wc-faction) 8%, transparent), transparent 48%),
+    var(--wc-panel-2);
+  clip-path: polygon(0 0, calc(100% - 11px) 0, 100% 11px, 100% 100%, 0 100%);
+}
+.workspace-create-modal .workspace-group-destination::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto auto;
+  width: 74px;
+  height: 1px;
+  background: color-mix(in srgb, var(--wc-faction) 55%, transparent);
+}
+.workspace-create-modal .workspace-group-destination-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.workspace-create-modal .workspace-group-destination-head h3 {
+  margin: 2px 0 0;
+  color: var(--wc-ink);
+  font-family: var(--wc-font-display);
+  font-size: 17px;
+  letter-spacing: 0.4px;
+}
+.workspace-create-modal .workspace-group-destination-badge {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 1px solid var(--wc-line-bright);
+  color: var(--wc-ink-dim);
+  font-family: var(--wc-font-mono);
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.workspace-create-modal .workspace-group-destination-badge.is-ready {
+  border-color: color-mix(in srgb, var(--wc-faction) 58%, var(--wc-line));
+  color: var(--wc-faction);
+}
+.workspace-create-modal .workspace-group-destination-badge.is-blocked {
+  border-color: color-mix(in srgb, #f59e0b 60%, var(--wc-line));
+  color: #f4bd5f;
+}
+.workspace-create-modal .workspace-group-destination-route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr);
+  align-items: stretch;
+  margin-top: 12px;
+}
+.workspace-create-modal .workspace-group-destination-node {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--wc-line);
+  background: color-mix(in srgb, var(--wc-panel) 82%, transparent);
+}
+.workspace-create-modal .workspace-group-destination-node.is-proposed {
+  border-style: dashed;
+}
+.workspace-create-modal .workspace-group-destination-node span,
+.workspace-create-modal .workspace-group-destination-node small {
+  display: block;
+}
+.workspace-create-modal .workspace-group-destination-node span {
+  color: var(--wc-ink-faint);
+  font-family: var(--wc-font-mono);
+  font-size: 8px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+}
+.workspace-create-modal .workspace-group-destination-node strong {
+  display: block;
+  overflow-wrap: anywhere;
+  margin-top: 3px;
+  color: var(--wc-ink);
+  font-size: 12px;
+}
+.workspace-create-modal .workspace-group-destination-node small {
+  margin-top: 2px;
+  color: var(--wc-ink-faint);
+  font-size: 10px;
+}
+.workspace-create-modal .workspace-group-destination-arrow {
+  position: relative;
+}
+.workspace-create-modal .workspace-group-destination-arrow::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  left: 6px;
+  height: 1px;
+  background: var(--wc-line-bright);
+}
+.workspace-create-modal .workspace-group-destination-arrow::after {
+  content: "";
+  position: absolute;
+  top: calc(50% - 3px);
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-top: 1px solid var(--wc-line-bright);
+  border-right: 1px solid var(--wc-line-bright);
+  transform: rotate(45deg);
+}
+.workspace-create-modal .workspace-group-destination-summary,
+.workspace-create-modal .workspace-group-destination-message {
+  margin: 9px 0 0;
+  color: var(--wc-ink-dim);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.workspace-create-modal .workspace-group-destination-progress {
+  margin-top: 9px;
+  padding: 7px 9px;
+  border-left: 2px solid var(--wc-line-bright);
+  background: color-mix(in srgb, var(--wc-panel) 64%, transparent);
+  color: var(--wc-ink-dim);
+  font-family: var(--wc-font-mono);
+  font-size: 10px;
+}
+.workspace-create-modal .workspace-group-destination-progress.is-ready {
+  border-left-color: var(--wc-faction);
+  color: var(--wc-faction);
+}
+.workspace-create-modal .workspace-group-composition-choice {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 11px 0 0;
+  padding: 0;
+  border: 0;
+}
+.workspace-create-modal .workspace-group-composition-choice legend {
+  grid-column: 1 / -1;
+  margin-bottom: 1px;
+  color: var(--wc-ink-faint);
+  font-family: var(--wc-font-mono);
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+.workspace-create-modal .workspace-group-composition-choice label {
+  display: flex;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid var(--wc-line);
+  cursor: pointer;
+}
+.workspace-create-modal .workspace-group-composition-choice label:has(input:checked) {
+  border-color: var(--wc-faction);
+  background: color-mix(in srgb, var(--wc-faction) 8%, transparent);
+}
+.workspace-create-modal .workspace-group-composition-choice strong,
+.workspace-create-modal .workspace-group-composition-choice small {
+  display: block;
+}
+.workspace-create-modal .workspace-group-composition-choice strong {
+  color: var(--wc-ink);
+  font-size: 11px;
+}
+.workspace-create-modal .workspace-group-composition-choice small {
+  margin-top: 2px;
+  color: var(--wc-ink-faint);
+  font-size: 10px;
+  line-height: 1.35;
+}
+.workspace-create-modal .workspace-group-home-review {
+  margin-top: 11px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, #f59e0b 52%, var(--wc-line));
+  background: color-mix(in srgb, #f59e0b 7%, transparent);
+}
+.workspace-create-modal .workspace-group-home-review > strong {
+  color: var(--wc-ink);
+  font-size: 12px;
+}
+.workspace-create-modal .workspace-group-home-review > p {
+  margin: 4px 0 0;
+  color: var(--wc-ink-dim);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.workspace-create-modal .workspace-group-destination-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
+}
+.workspace-create-modal .workspace-group-destination-actions:empty,
+.workspace-create-modal .workspace-group-destination-message:empty,
+.workspace-create-modal .workspace-group-destination-progress:empty {
+  display: none;
+}
+@media (max-width: 575px) {
+  .workspace-create-modal .workspace-group-destination-route {
+    grid-template-columns: 1fr;
+  }
+  .workspace-create-modal .workspace-group-destination-arrow {
+    height: 24px;
+  }
+  .workspace-create-modal .workspace-group-destination-arrow::before {
+    top: 5px;
+    bottom: 5px;
+    left: 15px;
+    width: 1px;
+    height: auto;
+  }
+  .workspace-create-modal .workspace-group-destination-arrow::after {
+    top: auto;
+    right: auto;
+    bottom: 5px;
+    left: 12px;
+    transform: rotate(135deg);
+  }
+  .workspace-create-modal .workspace-group-composition-choice {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ---------- briefing panel ---------- */
 .workspace-create-modal .workspace-template-briefing {
   border: 1px solid var(--wc-line);
@@ -642,6 +869,58 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
   float: none;
   width: auto;
   margin: 0 0 2px;
+}
+.workspace-create-modal .workspace-review-hierarchy {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 5px;
+  margin: 5px 0;
+}
+.workspace-create-modal .workspace-review-hierarchy-node {
+  display: grid;
+  gap: 2px;
+  padding: 8px 9px;
+  border: 1px solid var(--wc-line);
+  background: color-mix(in srgb, var(--wc-panel) 90%, transparent);
+}
+.workspace-create-modal .workspace-review-hierarchy-node > span {
+  color: var(--wc-ink-dim);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.workspace-create-modal .workspace-review-hierarchy-node > strong {
+  color: var(--wc-ink);
+  font-size: 13px;
+}
+.workspace-create-modal .workspace-review-hierarchy-node > small {
+  color: var(--wc-ink-dim);
+  font-size: 10px;
+}
+.workspace-create-modal .workspace-review-hierarchy-node.is-group {
+  border-left: 3px solid #f59e0b;
+}
+.workspace-create-modal .workspace-review-hierarchy-node.is-project {
+  border-left: 3px solid var(--wc-accent);
+}
+.workspace-create-modal .workspace-review-hierarchy-branch {
+  padding-left: 12px;
+  color: var(--wc-accent);
+  font-weight: 800;
+}
+.workspace-create-modal .workspace-review-hierarchy-role {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 5px 12px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--wc-line);
+  color: var(--wc-ink);
+  font-size: 10px;
+}
+.workspace-create-modal .workspace-review-hierarchy-role small {
+  color: var(--wc-ink-dim);
 }
 .workspace-create-modal .workspace-group-placement-review label {
   display: flex;
@@ -1004,6 +1283,43 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
 }
 #addAgentModal .agent-create-draft-context dd {
   color: var(--text-primary);
+}
+#addAgentModal .workspace-group-role-roster-preview {
+  margin-top: 10px;
+}
+#addAgentModal .workspace-group-role-roster-preview .ws-role-row {
+  background: color-mix(in srgb, var(--bg-tertiary) 72%, transparent);
+}
+#addAgentModal .workspace-group-role-mode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin: 11px 0 0;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+}
+#addAgentModal .workspace-group-role-mode legend {
+  float: none;
+  width: auto;
+  margin: 0 0 2px;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 700;
+}
+#addAgentModal .workspace-group-role-mode label {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+#addAgentModal .workspace-group-role-assign-panel {
+  flex-basis: 100%;
+}
+#addAgentModal .workspace-group-role-assign-panel > label,
+#addAgentModal .workspace-group-role-assign-panel > small {
+  display: block;
+  margin: 5px 0 3px;
+}
+#addAgentModal.is-workspace-group-role-assign #agentCreateFormHost {
+  display: none;
 }
 #addAgentModal .agent-create-draft-error {
   margin-top: 10px;

@@ -13,16 +13,61 @@ const source = readFileSync(new URL('./sessions.js', import.meta.url), 'utf8');
 
 function loadSessionManager(
   fetchImpl = async () => ({ ok: true, json: async () => ({}) }),
-  windowOverrides = {}
+  windowOverrides = {},
+  documentOverrides = {}
 ) {
   const window = { ...windowOverrides };
-  const document = { addEventListener() {}, getElementById() {} };
+  const document = {
+    addEventListener() {},
+    getElementById() {},
+    querySelector() {},
+    ...documentOverrides
+  };
   vm.runInNewContext(
     source,
     { window, document, fetch: fetchImpl, console, crypto: { randomUUID: () => 'review-key' } },
     { filename: 'sessions.js' }
   );
   return window.sessionManager;
+}
+
+class CardElement {
+  constructor() {
+    this.hidden = false;
+    this.className = '';
+    this.children = [];
+    this.dataset = {};
+    this.inputs = [];
+    this._innerHTML = '';
+    this._text = '';
+    this.classList = {
+      add: (...names) => {
+        this.className = [...new Set(`${this.className} ${names.join(' ')}`.trim().split(/\s+/))]
+          .filter(Boolean)
+          .join(' ');
+      }
+    };
+  }
+  set textContent(value) {
+    this._text = String(value ?? '');
+  }
+  get textContent() {
+    return this._text;
+  }
+  set innerHTML(value) {
+    this._innerHTML = String(value ?? '');
+    if (!value) this.children = [];
+  }
+  get innerHTML() {
+    return this._innerHTML;
+  }
+  appendChild(child) {
+    this.children.push(child);
+    return child;
+  }
+  querySelectorAll(selector) {
+    return selector === 'input' ? this.inputs : [];
+  }
 }
 
 class PreviewElement {
@@ -858,6 +903,137 @@ test('an unchanged readiness recheck preserves group receipts while a template r
   assert.equal(manager.groupRequirementDraft.preparedHome, null);
 });
 
+test('Details destination card distinguishes loading, proposed, existing, standalone, and unavailable state', () => {
+  const ids = [
+    'workspaceGroupDestinationCard',
+    'workspaceGroupDestinationTitle',
+    'workspaceGroupDestinationBadge',
+    'workspaceGroupDestinationRoute',
+    'workspaceGroupDestinationSummary',
+    'workspaceGroupDestinationProgress',
+    'workspaceGroupCompositionChoice',
+    'workspaceGroupHomeReview',
+    'workspaceGroupHomeReviewTitle',
+    'workspaceGroupHomeReviewCopy',
+    'workspaceGroupHomeConfirm',
+    'workspaceGroupHomeCancel',
+    'workspaceGroupDestinationActions',
+    'folderNameInput'
+  ];
+  const elements = new Map(ids.map(id => [id, new CardElement()]));
+  elements.get('folderNameInput').value = 'Field Notes';
+  elements.get('workspaceGroupCompositionChoice').inputs = [
+    { value: 'grouped', checked: false },
+    { value: 'standalone', checked: false }
+  ];
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    {
+      getElementById: id => elements.get(id) || null,
+      createElement: () => new CardElement()
+    }
+  );
+  manager.groupRequirementDraft = {
+    policy: 'required',
+    composition: 'grouped',
+    status: 'loading',
+    projection: null
+  };
+  manager.renderWorkspaceGroupDestinationCard();
+  assert.equal(elements.get('workspaceGroupDestinationBadge').textContent, 'Checking');
+  assert.match(elements.get('workspaceGroupDestinationRoute').innerHTML, /Checking exact group/);
+
+  manager.groupRequirementDraft.status = 'ready';
+  manager.groupRequirementDraft.projection = {
+    state: 'home_creation_review_required',
+    summary: 'Create the canonical group first.',
+    home: { exists: false, proposed_name: 'Research Program Home' },
+    required_home_roles: {
+      verification: 'group_absent',
+      required: 1,
+      filled: 0,
+      missing: 1,
+      roles: [{ label: 'Portfolio Coordinator', state: 'empty' }]
+    },
+    actions: ['review_create_home']
+  };
+  manager.renderWorkspaceGroupDestinationCard();
+  assert.match(
+    elements.get('workspaceGroupDestinationRoute').innerHTML,
+    /Proposed group · not created/
+  );
+  assert.equal(elements.get('workspaceGroupDestinationBadge').textContent, 'Needs setup');
+  assert.equal(
+    elements.get('workspaceGroupDestinationActions').children[0].textContent,
+    'Review Research Program Home setup'
+  );
+
+  manager.groupRequirementDraft.projection = {
+    state: 'ready_grouped',
+    summary: 'Use the exact group.',
+    home: { exists: true, workspace_id: 'home-1', name: 'Renamed Research Home' },
+    required_home_roles: {
+      verification: 'verified',
+      required: 1,
+      filled: 1,
+      missing: 0,
+      roles: [{ label: 'Portfolio Coordinator', state: 'filled' }]
+    },
+    actions: []
+  };
+  manager.renderWorkspaceGroupDestinationCard();
+  assert.match(elements.get('workspaceGroupDestinationRoute').innerHTML, /Existing verified group/);
+  assert.equal(elements.get('workspaceGroupDestinationBadge').textContent, 'Ready');
+  assert.equal(elements.get('workspaceGroupDestinationActions').children.length, 0);
+
+  manager.groupRequirementDraft.policy = 'none';
+  manager.groupRequirementDraft.composition = 'standalone';
+  manager.groupRequirementDraft.projection = {
+    state: 'ready_standalone',
+    summary: 'Create independently.',
+    required_home_roles: { verification: 'not_applicable' },
+    actions: []
+  };
+  manager.renderWorkspaceGroupDestinationCard();
+  assert.match(elements.get('workspaceGroupDestinationRoute').innerHTML, /Standalone workspace/);
+  assert.equal(
+    elements.get('workspaceGroupDestinationProgress').textContent,
+    'Group coordinator · Not applicable for standalone placement'
+  );
+
+  manager.groupRequirementDraft.policy = 'recommended';
+  manager.groupRequirementDraft.composition = '';
+  manager.groupRequirementDraft.projection = {
+    state: 'choice_required',
+    summary: 'Choose grouped or standalone.',
+    required_home_roles: { verification: 'unavailable' },
+    actions: ['choose_grouped', 'choose_standalone']
+  };
+  manager.renderWorkspaceGroupDestinationCard();
+  assert.equal(elements.get('workspaceGroupDestinationBadge').textContent, 'Choose');
+  assert.equal(elements.get('workspaceGroupCompositionChoice').hidden, false);
+  assert.equal(
+    elements.get('workspaceGroupCompositionChoice').inputs.some(input => input.checked),
+    false
+  );
+
+  manager.groupRequirementDraft.policy = 'required';
+  manager.groupRequirementDraft.composition = 'grouped';
+  manager.groupRequirementDraft.projection = {
+    state: 'target_ambiguous',
+    summary: 'The exact group is ambiguous.',
+    required_home_roles: { verification: 'unavailable' },
+    actions: ['retry']
+  };
+  manager.renderWorkspaceGroupDestinationCard();
+  assert.equal(
+    elements.get('workspaceGroupDestinationProgress').textContent,
+    'Required group role status is unavailable'
+  );
+  assert.doesNotMatch(elements.get('workspaceGroupDestinationProgress').textContent, /0 of/);
+});
+
 test('group requirement creation reviews before committing and reuses only the exact receipt', async () => {
   const calls = [];
   const manager = loadSessionManager(async (url, options) => {
@@ -899,14 +1075,81 @@ test('group requirement creation reviews before committing and reuses only the e
   assert.equal(calls.length, 2, 'changed request gets a fresh inert review');
 });
 
-test('missing required Home is created alone before a fresh workspace receipt is prepared', async () => {
+test('final placement review never creates a missing required Home as a surprise consequence', async () => {
   const calls = [];
-  let workspaceReviews = 0;
+  const manager = loadSessionManager(async (url, options) => {
+    calls.push({ url, body: JSON.parse(options.body) });
+    return {
+      ok: true,
+      json: async () => ({
+        group_requirement_review: {
+          state: 'home_creation_review_required',
+          home_name: 'Music Production Home'
+        }
+      })
+    };
+  });
+  manager.groupRequirementDraft = {
+    policy: 'required',
+    composition: 'grouped',
+    review: null,
+    preparedHome: null
+  };
+  manager.refreshWorkspaceReview = () => {};
+  manager.refreshWizardChrome = () => {};
+  manager.showWorkspaceCreateError = () => {};
+  manager.goToWizardStep = step => {
+    manager.wizardStep = step;
+  };
+
+  assert.equal(
+    await manager.prepareGroupRequirementCommit('/api/workspaces', {
+      name: 'Song',
+      template_id: 'reaper'
+    }),
+    false
+  );
+  assert.deepEqual(
+    calls.map(call => call.url),
+    ['/api/workspaces']
+  );
+  assert.equal(manager.wizardStep, 2);
+  assert.equal(manager.groupRequirementDraft.preparedHome, null);
+});
+
+function setUpMissingGroupCard(manager) {
+  manager.groupRequirementDraft = {
+    templateKey: 'reaper|revision-6',
+    policy: 'required',
+    composition: 'grouped',
+    status: 'ready',
+    projection: {
+      state: 'home_creation_review_required',
+      source_revision: 'source-6',
+      home: { exists: false, proposed_name: 'Music Production Home' },
+      actions: ['review_create_home']
+    },
+    review: null,
+    preparedHome: null,
+    homeOperation: null
+  };
+  manager.renderWorkspaceGroupDestinationCard = () => {};
+  manager.setWorkspaceGroupDestinationMessage = message => {
+    manager.groupDestinationMessage = message;
+  };
+  manager.invalidateGroupRequirementReview = () => {
+    manager.groupRequirementDraft.review = null;
+  };
+  manager.refreshWorkspaceSurfacesAfterGroupPreparation = async () => {};
+}
+
+test('Details reviews and commits only the missing canonical Home before any project action', async () => {
+  const calls = [];
   const manager = loadSessionManager(
     async (url, options) => {
       const body = JSON.parse(options.body);
       calls.push({ url, body });
-      if (url === '/api/workspaces/group-requirement/home/review') {
+      if (url.endsWith('/review')) {
         return {
           ok: true,
           json: async () => ({
@@ -919,71 +1162,115 @@ test('missing required Home is created alone before a fresh workspace receipt is
           })
         };
       }
-      if (url === '/api/workspaces/group-requirement/home/commit') {
-        return {
-          ok: true,
-          json: async () => ({
-            group_requirement: {
-              state: 'home_ready',
-              home_name: 'Music Production Home',
-              home_workspace_id: 'home-1',
-              home_created: true
-            }
-          })
-        };
-      }
-      workspaceReviews += 1;
       return {
         ok: true,
         json: async () => ({
-          group_requirement_review:
-            workspaceReviews === 1
-              ? {
-                  state: 'home_creation_review_required',
-                  home_name: 'Music Production Home'
-                }
-              : {
-                  state: 'ready_grouped',
-                  selected_composition: 'grouped',
-                  home_name: 'Music Production Home',
-                  home_workspace_id: 'home-1',
-                  review_token: 'workspace-receipt'
-                }
+          group_requirement: {
+            state: 'home_ready',
+            home_name: 'Music Production Home',
+            home_workspace_id: 'home-1',
+            home_created: true
+          }
         })
       };
     },
-    { confirm: () => true }
+    {
+      ProjectTemplateCard: { getPayloadFields: () => ({ template_id: 'reaper' }) }
+    }
   );
-  manager.groupRequirementDraft = {
-    policy: 'required',
-    composition: 'grouped',
-    review: null,
-    preparedHome: null
+  setUpMissingGroupCard(manager);
+  manager.refreshTemplateAgentPlan = async () => {
+    manager.groupRequirementDraft.projection = {
+      state: 'ready_grouped',
+      source_revision: 'source-6',
+      home: { exists: true, workspace_id: 'home-1', name: 'Music Production Home' },
+      actions: []
+    };
   };
-  manager.refreshWorkspaceReview = () => {};
-  manager.refreshWizardChrome = () => {};
-  const surfaceRefreshes = [];
-  manager.refreshWorkspaceSurfacesAfterGroupPreparation = async () => surfaceRefreshes.push('home');
-  const payload = { name: 'Song', template_id: 'reaper' };
 
-  assert.equal(await manager.prepareGroupRequirementCommit('/api/workspaces', payload), false);
-  assert.equal(calls.length, 4);
+  assert.equal(await manager.prepareRequiredGroupHomeFromCard(), true);
+  assert.equal(manager.groupRequirementDraft.homeOperation.phase, 'awaiting_confirmation');
+  assert.deepEqual(
+    calls.map(call => call.url),
+    ['/api/workspaces/group-requirement/home/review']
+  );
+  assert.equal(manager.groupRequirementDraft.preparedHome, null);
+
+  assert.equal(await manager.commitRequiredGroupHome(), true);
   assert.deepEqual(
     calls.map(call => call.url),
     [
-      '/api/workspaces',
       '/api/workspaces/group-requirement/home/review',
-      '/api/workspaces/group-requirement/home/commit',
-      '/api/workspaces'
+      '/api/workspaces/group-requirement/home/commit'
     ]
   );
-  assert.equal(calls[0].body.create_required_home, undefined);
-  assert.deepEqual(calls[1].body, { template_id: 'reaper' });
-  assert.equal(calls[2].body.group_review_token, 'home-receipt');
-  assert.equal(calls[3].body.create_required_home, undefined);
+  assert.deepEqual(calls[0].body, { template_id: 'reaper' });
+  assert.equal(calls[1].body.group_review_token, 'home-receipt');
+  assert.equal(calls[1].body.idempotency_key, 'review-key');
   assert.equal(manager.groupRequirementDraft.preparedHome.home_workspace_id, 'home-1');
-  assert.equal(manager.groupRequirementDraft.review.review_token, 'workspace-receipt');
-  assert.deepEqual(surfaceRefreshes, ['home'], 'the empty Home becomes visible behind the creator');
+});
+
+test('Home setup double clicks issue one review and one commit', async () => {
+  const calls = [];
+  let releaseReview;
+  let releaseCommit;
+  const manager = loadSessionManager(
+    (url, options) => {
+      calls.push({ url, body: JSON.parse(options.body) });
+      if (url.endsWith('/review')) {
+        return new Promise(resolve => {
+          releaseReview = () =>
+            resolve({
+              ok: true,
+              json: async () => ({
+                group_requirement_review: {
+                  state: 'ready_grouped',
+                  home_name: 'Music Production Home',
+                  review_token: 'home-receipt'
+                }
+              })
+            });
+        });
+      }
+      return new Promise(resolve => {
+        releaseCommit = () =>
+          resolve({
+            ok: true,
+            json: async () => ({
+              group_requirement: {
+                state: 'home_ready',
+                home_name: 'Music Production Home',
+                home_workspace_id: 'home-1'
+              }
+            })
+          });
+      });
+    },
+    { ProjectTemplateCard: { getPayloadFields: () => ({ template_id: 'reaper' }) } }
+  );
+  setUpMissingGroupCard(manager);
+  manager.refreshTemplateAgentPlan = async () => {
+    manager.groupRequirementDraft.projection = {
+      state: 'ready_grouped',
+      source_revision: 'source-6',
+      home: { exists: true, workspace_id: 'home-1', name: 'Music Production Home' },
+      actions: []
+    };
+  };
+
+  const firstReview = manager.prepareRequiredGroupHomeFromCard();
+  const secondReview = manager.prepareRequiredGroupHomeFromCard();
+  assert.equal(calls.filter(call => call.url.endsWith('/review')).length, 1);
+  releaseReview();
+  assert.equal(await firstReview, true);
+  assert.equal(await secondReview, true);
+
+  const firstCommit = manager.commitRequiredGroupHome();
+  const secondCommit = manager.commitRequiredGroupHome();
+  assert.equal(calls.filter(call => call.url.endsWith('/commit')).length, 1);
+  assert.equal(await secondCommit, false);
+  releaseCommit();
+  assert.equal(await firstCommit, true);
 });
 
 test('normal grouped creation requests a Map site while explicit Build keeps its coordinate', async () => {
@@ -1037,7 +1324,7 @@ test('a failed group-aware Map save never turns workspace creation into a failur
   }
 });
 
-test('declining required Home creation leaves the workspace and Home untouched', async () => {
+test('cancelling the reviewed Home-only action leaves every workspace untouched', async () => {
   const calls = [];
   const manager = loadSessionManager(
     async (url, options) => {
@@ -1046,32 +1333,225 @@ test('declining required Home creation leaves the workspace and Home untouched',
         ok: true,
         json: async () => ({
           group_requirement_review: {
-            state: 'home_creation_review_required',
-            home_name: 'Music Production Home'
+            state: 'ready_grouped',
+            home_name: 'Music Production Home',
+            home_will_be_created: true,
+            review_token: 'home-receipt'
           }
         })
       };
     },
-    { confirm: () => false }
+    { ProjectTemplateCard: { getPayloadFields: () => ({ template_id: 'reaper' }) } }
+  );
+  setUpMissingGroupCard(manager);
+
+  assert.equal(await manager.prepareRequiredGroupHomeFromCard(), true);
+  assert.equal(manager.cancelRequiredGroupHomeReview(), true);
+  assert.deepEqual(
+    calls.map(call => call.url),
+    ['/api/workspaces/group-requirement/home/review']
+  );
+  assert.equal(manager.groupRequirementDraft.homeOperation, null);
+  assert.equal(manager.groupRequirementDraft.preparedHome, null);
+});
+
+test('an interrupted Home commit retries the same confirmed idempotency key', async () => {
+  const calls = [];
+  let commitAttempts = 0;
+  const manager = loadSessionManager(
+    async (url, options) => {
+      const body = JSON.parse(options.body);
+      calls.push({ url, body });
+      if (url.endsWith('/review')) {
+        return {
+          ok: true,
+          json: async () => ({
+            group_requirement_review: {
+              state: 'ready_grouped',
+              home_name: 'Music Production Home',
+              review_token: 'home-receipt'
+            }
+          })
+        };
+      }
+      commitAttempts += 1;
+      if (commitAttempts === 1) throw new Error('response lost');
+      return {
+        ok: true,
+        json: async () => ({
+          group_requirement: {
+            state: 'home_ready',
+            home_name: 'Music Production Home',
+            home_workspace_id: 'home-1',
+            home_created: false
+          }
+        })
+      };
+    },
+    { ProjectTemplateCard: { getPayloadFields: () => ({ template_id: 'reaper' }) } }
+  );
+  setUpMissingGroupCard(manager);
+  manager.refreshTemplateAgentPlan = async () => {};
+
+  await manager.prepareRequiredGroupHomeFromCard();
+  assert.equal(await manager.commitRequiredGroupHome(), false);
+  assert.equal(manager.groupRequirementDraft.homeOperation.phase, 'unknown');
+
+  manager.refreshTemplateAgentPlan = async () => {
+    manager.groupRequirementDraft.projection = {
+      state: 'ready_grouped',
+      source_revision: 'source-6',
+      home: { exists: true, workspace_id: 'home-1', name: 'Music Production Home' },
+      actions: []
+    };
+  };
+  assert.equal(await manager.commitRequiredGroupHome(), true);
+  const commits = calls.filter(call => call.url.endsWith('/commit'));
+  assert.equal(commits.length, 2);
+  assert.equal(commits[0].body.idempotency_key, commits[1].body.idempotency_key);
+  assert.equal(commits[0].body.group_review_token, commits[1].body.group_review_token);
+});
+
+test('live Home role setup explicitly clears a stale binding before another fill', async () => {
+  const button = new CardElement();
+  button.disabled = false;
+  const error = new CardElement();
+  const elements = new Map([
+    ['createAgentBtn', button],
+    ['agentCreateDraftError', error]
+  ]);
+  const requests = [];
+  const manager = loadSessionManager(
+    async (url, options = {}) => {
+      requests.push({ url, method: options.method || 'GET', body: options.body || '' });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          roles: {
+            workspace_id: 'home-1',
+            roles: [
+              {
+                role_id: 'portfolio-coordinator',
+                scope: 'home',
+                state: 'empty',
+                needs_clear: false
+              }
+            ]
+          }
+        })
+      };
+    },
+    {},
+    { getElementById: id => elements.get(id) || null }
   );
   manager.groupRequirementDraft = {
-    policy: 'required',
-    composition: 'grouped',
-    review: null,
-    preparedHome: null
+    templateKey: 'workspace-group-fixture',
+    projection: {
+      source_revision: 'source-1',
+      home: { workspace_id: 'home-1', name: 'Research Program Home' },
+      required_home_roles: {
+        roles: [{ role_id: 'portfolio-coordinator', state: 'empty' }]
+      }
+    }
   };
-  manager.refreshWorkspaceReview = () => {};
-  manager.refreshWizardChrome = () => {};
+  const operation = {
+    templateKey: 'workspace-group-fixture',
+    sourceRevision: 'source-1',
+    workspaceID: 'home-1',
+    roleID: 'portfolio-coordinator',
+    roleLabel: 'Portfolio Coordinator',
+    phase: 'editing',
+    mode: 'clear',
+    completed: ''
+  };
+  manager.workspaceGroupRoleSetup = operation;
+  manager.workspaceGroupRoleSetupForm = {
+    extract() {
+      throw new Error('the create form must not submit while clearing stale state');
+    }
+  };
+  manager.refreshTemplateAgentPlan = async () => {};
+  let closed = false;
+  manager.closeWorkspaceGroupRoleSetup = () => {
+    closed = true;
+  };
 
-  assert.equal(
-    await manager.prepareGroupRequirementCommit('/api/workspaces', {
-      name: 'Song',
-      template_id: 'reaper'
-    }),
-    false
+  assert.equal(await manager.saveWorkspaceGroupRoleSetup(), true);
+  assert.deepEqual(
+    requests.map(request => [request.method, request.url]),
+    [
+      ['DELETE', '/api/workspaces/home-1/roles/portfolio-coordinator'],
+      ['GET', '/api/workspaces/home-1/roles']
+    ]
   );
-  assert.equal(calls.length, 1, 'decline must not call either Home mutation endpoint');
-  assert.equal(manager.groupRequirementDraft.preparedHome, null);
+  assert.equal(closed, true);
+  assert.match(operation.completed, /stale assignment was cleared/);
+});
+
+test('live Home-role assignment preserves the unfinished project team draft and rereads canonical state', async () => {
+  const calls = [];
+  const elements = new Map([
+    ['workspaceGroupRoleAgentSelect', { value: 'My Coordinator', focus() {} }],
+    ['createAgentBtn', { disabled: false, textContent: '' }],
+    ['agentCreateDraftError', { hidden: true, textContent: '', focus() {} }]
+  ]);
+  const manager = loadSessionManager(
+    async (url, options) => {
+      calls.push({ url, body: JSON.parse(options.body) });
+      return { ok: true, status: 200, json: async () => ({ roles: {} }) };
+    },
+    {},
+    { getElementById: id => elements.get(id) || null }
+  );
+  const projectDraft = {
+    plan: { revision: 'before-home-role' },
+    roleFills: { project_lead: { mode: 'create', name: 'Draft Lead' } }
+  };
+  manager.teamDraft = projectDraft;
+  manager.groupRequirementDraft = {
+    templateKey: 'fixture-6',
+    projection: {
+      state: 'ready_grouped',
+      source_revision: 'source-6',
+      home: { exists: true, workspace_id: 'home-1', name: 'Research Home' },
+      required_home_roles: {
+        roles: [
+          { role_id: 'portfolio_coordinator', label: 'Portfolio Coordinator', state: 'empty' }
+        ]
+      }
+    },
+    review: { review_token: 'stale-project-receipt' }
+  };
+  manager.workspaceGroupRoleSetup = {
+    workspaceID: 'home-1',
+    roleID: 'portfolio_coordinator',
+    roleLabel: 'Portfolio Coordinator',
+    templateKey: 'fixture-6',
+    sourceRevision: 'source-6',
+    projectDraft,
+    phase: 'editing',
+    mode: 'assign',
+    completed: ''
+  };
+  manager.refreshTemplateAgentPlan = async () => {
+    manager.groupRequirementDraft.projection.required_home_roles.roles[0].state = 'filled';
+  };
+  manager.closeWorkspaceGroupRoleSetup = () => {
+    manager.closedGroupRoleSetup = true;
+  };
+
+  assert.equal(await manager.saveWorkspaceGroupRoleSetup(), true);
+  assert.deepEqual(calls, [
+    {
+      url: '/api/workspaces/home-1/roles/portfolio_coordinator',
+      body: { mode: 'assign', name: 'My Coordinator' }
+    }
+  ]);
+  assert.equal(manager.teamDraft, projectDraft);
+  assert.equal(manager.teamDraft.roleFills.project_lead.name, 'Draft Lead');
+  assert.equal(manager.groupRequirementDraft.review, null);
+  assert.equal(manager.closedGroupRoleSetup, true);
 });
 
 test('workspace post-create action keeps the standard workspace destination by default', async () => {

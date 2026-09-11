@@ -92,6 +92,10 @@
                     <span class="workspace-template-briefing-row-label">Agents</span>
                     <div id="templateBriefingAgentsValue" class="workspace-template-briefing-chips workspace-template-briefing-agents"></div>
                   </div>
+                  <div id="templateBriefingGroupRow" class="workspace-template-briefing-row" hidden>
+                    <span class="workspace-template-briefing-row-label">Workspace shape</span>
+                    <span id="templateBriefingGroupValue" class="workspace-template-briefing-row-value"></span>
+                  </div>
                   <!-- Non-blocking nudge (PRD FR23): shown when the blueprint seeds 3+
                        agents and none has the Commander role. Never blocks selection. -->
                   <div id="templateBriefingNoCommanderNudge" class="workspace-template-briefing-nudge" hidden>
@@ -138,6 +142,40 @@
                 <span id="wizardStep2RecapName" class="workspace-create-recap-name">Blank workspace</span>
                 <button type="button" id="wizardEditBlueprintBtn" class="workspace-wizard-inline-action">Edit</button>
               </div>
+
+              <section id="workspaceGroupDestinationCard" class="workspace-group-destination mb-3" aria-labelledby="workspaceGroupDestinationTitle" hidden>
+                <div class="workspace-group-destination-head">
+                  <div>
+                    <span class="workspace-wizard-eyebrow">Create in</span>
+                    <h3 id="workspaceGroupDestinationTitle" tabindex="-1">Project destination</h3>
+                  </div>
+                  <span id="workspaceGroupDestinationBadge" class="workspace-group-destination-badge"></span>
+                </div>
+                <div id="workspaceGroupDestinationRoute" class="workspace-group-destination-route"></div>
+                <p id="workspaceGroupDestinationSummary" class="workspace-group-destination-summary"></p>
+                <div id="workspaceGroupDestinationProgress" class="workspace-group-destination-progress"></div>
+                <fieldset id="workspaceGroupCompositionChoice" class="workspace-group-composition-choice" hidden>
+                  <legend>Choose this project's structure</legend>
+                  <label>
+                    <input type="radio" name="workspace-group-composition-details" value="grouped">
+                    <span><strong>Grouped</strong><small>Use the exact program Home and its separately owned coordinator.</small></span>
+                  </label>
+                  <label>
+                    <input type="radio" name="workspace-group-composition-details" value="standalone">
+                    <span><strong>Standalone</strong><small>Create only this workspace with the blueprint's Home-free project team.</small></span>
+                  </label>
+                </fieldset>
+                <div id="workspaceGroupHomeReview" class="workspace-group-home-review" hidden>
+                  <strong id="workspaceGroupHomeReviewTitle" tabindex="-1">Prepare group</strong>
+                  <p id="workspaceGroupHomeReviewCopy"></p>
+                  <div class="workspace-group-destination-actions">
+                    <button type="button" id="workspaceGroupHomeConfirm" class="modern-btn modern-btn-primary">Create group only</button>
+                    <button type="button" id="workspaceGroupHomeCancel" class="modern-btn modern-btn-secondary">Cancel</button>
+                  </div>
+                </div>
+                <div id="workspaceGroupDestinationActions" class="workspace-group-destination-actions"></div>
+                <p id="workspaceGroupDestinationMessage" class="workspace-group-destination-message" role="status" aria-live="polite"></p>
+              </section>
 
               <div id="wizardNameField" class="workspace-create-name-field mb-3">
                 <label for="folderNameInput" class="workspace-create-section-title" style="display: block; margin-bottom: 6px;">Workspace name</label>
@@ -206,12 +244,14 @@
                     Scaffolds the chosen folder's files into the workspace as its project. Overrides the template selection above.
                   </div>
 
-                  <label for="folderParentSelect" style="font-size: 12px; color: var(--text-secondary);">Group (optional)</label>
-                  <select id="folderParentSelect" class="modern-input w-100 mb-2" aria-label="Select workspace group" aria-describedby="folderParentHelp">
-                    <option value="">No group</option>
-                  </select>
-                  <div id="folderParentHelp" style="margin-top: -6px; margin-bottom: 10px; font-size: 12px; color: var(--text-secondary);">
-                    Optional. Choose a group for this workspace.
+                  <div id="workspaceOptionalParentField">
+                    <label for="folderParentSelect" style="font-size: 12px; color: var(--text-secondary);">Group (optional)</label>
+                    <select id="folderParentSelect" class="modern-input w-100 mb-2" aria-label="Select workspace group" aria-describedby="folderParentHelp">
+                      <option value="">No group</option>
+                    </select>
+                    <div id="folderParentHelp" style="margin-top: -6px; margin-bottom: 10px; font-size: 12px; color: var(--text-secondary);">
+                      Optional. Choose an organizational group for this workspace. This does not grant program membership.
+                    </div>
                   </div>
 
                   <label style="font-size: 12px; color: var(--text-secondary);">Tags <span style="opacity: 0.8;">(optional)</span></label>

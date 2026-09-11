@@ -6071,6 +6071,25 @@ body.chat-panel-open .chat-panel-backdrop {
   font-size: 0.8125rem;
 }
 
+.ws-role-roster__scope + .ws-role-roster__scope {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.ws-role-roster__scope-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.ws-role-roster__scope-progress {
+  margin: 0.2rem 0 0.5rem;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
 .ws-role-roster__list {
   display: grid;
   gap: 0.5rem;
@@ -6169,6 +6188,13 @@ body.chat-panel-open .chat-panel-backdrop {
    and an almost invisible one in the light palette (#e8eaed), so the tag that
    reads clearly in dark disappears in light. */
 .ws-role-tag--missing {
+  border-color: var(--border-color);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.ws-role-tag--stale {
+  border-style: dashed;
   border-color: var(--border-color);
   color: var(--text-primary);
   font-weight: 600;

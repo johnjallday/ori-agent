@@ -459,6 +459,7 @@ test('group-owned holders remain filled and cannot be recommended or reused loca
   const view = Draft.derive(draft);
   assert.equal(view.roleRoster.roles[0].state, 'filled');
   assert.equal(view.roleRoster.roles[0].read_only, true);
+  assert.equal(view.roleRoster.roles[0].source, 'group');
   assert.equal(
     view.recommendations.some(item => item.agent.name === 'Shared Producer'),
     false

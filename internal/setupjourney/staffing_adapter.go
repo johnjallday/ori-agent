@@ -245,6 +245,14 @@ func (a *AssistantStaffingAdapter) Commit(_ context.Context, scope ReadScope, ac
 	if err != nil {
 		return CanonicalResult{}, ErrConflict
 	}
+	return a.commitReviewedRoles(scope, owner, targetScope, action, input, reviewed)
+}
+
+// commitReviewedRoles applies one already-reviewed scope while the caller holds
+// a.mu. Keeping this single mutation path lets the setup journey and the live
+// workspace-role endpoint resolve different owners without duplicating the
+// binding, rollback, or revision rules.
+func (a *AssistantStaffingAdapter) commitReviewedRoles(scope ReadScope, owner *staffingOwner, targetScope workspace.AssistantRoleScope, action ActionID, input staffingInput, reviewed ActionReviewMaterial) (CanonicalResult, error) {
 	projection, err := a.reviewProjection(scope, owner, targetScope, input, action == ActionAddOptionalHomeStaffing)
 	// An agent assigned at review time and deleted before commit is a specific,
 	// explainable situation — say which one went away rather than "reload and
@@ -482,6 +490,103 @@ type RoleFill struct {
 	Model    string
 }
 
+// StaffRoleOnWorkspace fills one role owned by the exact workspace in the
+// route. A station can fill only a Home role; a linked child can fill only a
+// project role. This target-derived authority is deliberately narrower than
+// the Create Workspace helper below, which may coordinate both scopes from a
+// reviewed project draft.
+func (a *AssistantStaffingAdapter) StaffRoleOnWorkspace(_ context.Context, workspaceID string, fills []RoleFill) error {
+	if len(fills) != 1 {
+		return ErrInvalid
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	owner, targetScope, err := a.workspaceRoleOwner(strings.TrimSpace(workspaceID))
+	if err != nil {
+		return err
+	}
+	requested := fills[0]
+	declaredScope := workspace.AssistantRoleScope("")
+	optional := false
+	for _, role := range owner.declaration.Roles {
+		if role.ID != strings.ToLower(strings.TrimSpace(requested.RoleID)) {
+			continue
+		}
+		declaredScope = role.Scope
+		if declaredScope == "" {
+			declaredScope = workspace.AssistantRoleScopeProject
+		}
+		optional = !role.Required
+		break
+	}
+	if declaredScope == "" || declaredScope != targetScope {
+		return ErrInvalid
+	}
+	wireInput := staffingInput{Roles: []staffingRoleInput{{
+		RoleID: requested.RoleID, Mode: requested.Mode, Name: requested.Name,
+		Provider: requested.Provider, Model: requested.Model,
+	}}}
+	raw, err := json.Marshal(wireInput)
+	if err != nil {
+		return ErrInvalid
+	}
+	input, err := decodeStaffingInput(raw)
+	if err != nil {
+		return err
+	}
+	commitAction := ActionAddHomeStaffing
+	if targetScope == workspace.AssistantRoleScopeProject {
+		commitAction = ActionAddProjectStaffing
+	} else if optional {
+		commitAction = ActionAddOptionalHomeStaffing
+	}
+	scope := ReadScope{
+		OwnerUserID:                owner.station.GetAssistantProgramState().Key.OwnerUserID,
+		ExpectedAssistantProgramID: owner.station.GetAssistantProgramState().Key.ProgramID,
+		HomeWorkspaceID:            owner.station.ID,
+	}
+	if owner.project != nil {
+		scope.ProjectWorkspaceID = owner.project.ID
+	}
+	projection, err := a.reviewProjection(scope, owner, targetScope, input, optional)
+	if err != nil {
+		return err
+	}
+	reviewed := ActionReviewMaterial{CommitAction: commitAction, Staffing: projection}
+	_, err = a.commitReviewedRoles(scope, owner, targetScope, commitAction, input, reviewed)
+	return err
+}
+
+func (a *AssistantStaffingAdapter) workspaceRoleOwner(targetID string) (*staffingOwner, workspace.AssistantRoleScope, error) {
+	if a == nil || a.workspaces == nil || targetID == "" {
+		return nil, "", ErrInvalid
+	}
+	target, err := a.workspaces.Get(targetID)
+	if err != nil || target == nil {
+		return nil, "", ErrConflict
+	}
+	if state := target.GetAssistantProgramState(); state != nil {
+		if state.SchemaVersion < workspace.AssistantProgramStateSchemaVersion || state.Declaration == nil {
+			return nil, "", ErrConflict
+		}
+		return &staffingOwner{station: target, declaration: state.Declaration}, workspace.AssistantRoleScopeHome, nil
+	}
+	link := target.GetAssistantProjectLink()
+	if link == nil || link.SchemaVersion < workspace.AssistantProjectLinkSchemaVersion {
+		return nil, "", ErrConflict
+	}
+	station, err := a.workspaces.Get(link.StationWorkspaceID)
+	if err != nil || station == nil {
+		return nil, "", ErrConflict
+	}
+	state := station.GetAssistantProgramState()
+	if state == nil || state.SchemaVersion < workspace.AssistantProgramStateSchemaVersion || state.Declaration == nil || link.Key.Normalize() != state.Key.Normalize() {
+		return nil, "", ErrConflict
+	}
+	return &staffingOwner{station: station, project: target, declaration: state.Declaration}, workspace.AssistantRoleScopeProject, nil
+}
+
 // StaffRolesFromReviewedWorkspaceSetup commits EXACTLY the roles the user
 // filled, and never a role they left empty. It is the vacancy-model counterpart
 // of StaffFromReviewedWorkspaceSetup, which staffs every required role.
@@ -577,7 +682,7 @@ func (a *AssistantStaffingAdapter) StaffRolesFromReviewedWorkspaceSetup(ctx cont
 // nothing, deletes no definition, and is immediately reversible has nothing to
 // disclose. It still respects the same binding-revision discipline as Commit,
 // so a concurrent staffing cannot be silently overwritten.
-func (a *AssistantStaffingAdapter) UnstaffRoleFromWorkspace(_ context.Context, projectID, roleID string) error {
+func (a *AssistantStaffingAdapter) UnstaffRoleFromWorkspace(_ context.Context, workspaceID, roleID string) error {
 	roleID = strings.ToLower(strings.TrimSpace(roleID))
 	if roleID == "" {
 		return ErrInvalid
@@ -585,39 +690,32 @@ func (a *AssistantStaffingAdapter) UnstaffRoleFromWorkspace(_ context.Context, p
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	project, err := a.workspaces.Get(strings.TrimSpace(projectID))
+	owner, targetScope, err := a.workspaceRoleOwner(strings.TrimSpace(workspaceID))
 	if err != nil {
-		return ErrConflict
+		return err
 	}
-	link := project.GetAssistantProjectLink()
-	if link == nil {
-		return ErrConflict
-	}
-	station, err := a.workspaces.Get(link.StationWorkspaceID)
-	if err != nil {
-		return ErrConflict
-	}
-	state := station.GetAssistantProgramState()
-	if state == nil || state.Declaration == nil {
-		return ErrConflict
-	}
-	scope := workspace.AssistantRoleScopeProject
-	for _, role := range state.Declaration.Roles {
-		if role.ID == roleID {
-			if role.Scope == workspace.AssistantRoleScopeHome {
-				scope = workspace.AssistantRoleScopeHome
-			}
-			break
+	declaredScope := workspace.AssistantRoleScope("")
+	for _, role := range owner.declaration.Roles {
+		if role.ID != roleID {
+			continue
 		}
+		declaredScope = role.Scope
+		if declaredScope == "" {
+			declaredScope = workspace.AssistantRoleScopeProject
+		}
+		break
 	}
-	target := project
-	if scope == workspace.AssistantRoleScopeHome {
-		target = station
+	if declaredScope == "" || declaredScope != targetScope {
+		return ErrInvalid
+	}
+	target := owner.station
+	if targetScope == workspace.AssistantRoleScopeProject {
+		target = owner.project
 	}
 
 	removedName := ""
 	err = a.workspaces.Update(target.ID, func(current *workspace.Workspace) error {
-		set := currentBindingSet(current, scope)
+		set := currentBindingSet(current, targetScope)
 		kept := make([]workspace.AssistantRoleBinding, 0, len(set.Bindings))
 		removedID := ""
 		for _, binding := range set.Bindings {
@@ -640,7 +738,7 @@ func (a *AssistantStaffingAdapter) UnstaffRoleFromWorkspace(_ context.Context, p
 		current.AgentInstances = instances
 		set.StateRevision++
 		set.Bindings = kept
-		if scope == workspace.AssistantRoleScopeHome {
+		if targetScope == workspace.AssistantRoleScopeHome {
 			programState := current.GetAssistantProgramState()
 			programState.HomeBindings = set
 			if strings.EqualFold(programState.PrimaryName, removedName) {
@@ -734,11 +832,30 @@ func (a *AssistantStaffingAdapter) owner(scope ReadScope) (*staffingOwner, error
 }
 
 func (a *AssistantStaffingAdapter) currentProjection(scope ReadScope, owner *staffingOwner) (*StaffingProjection, bool) {
-	state := owner.station.GetAssistantProgramState()
-	home, homeMalformed := a.scopeProjection(owner.station, owner.declaration, workspace.AssistantRoleScopeHome, state.HomeBindings, "")
-	link := owner.project.GetAssistantProjectLink()
-	project, projectMalformed := a.scopeProjection(owner.project, owner.declaration, workspace.AssistantRoleScopeProject, link.ProjectBindings, scope.SelectedModeID)
+	home, homeMalformed := a.currentScopeProjection(owner, workspace.AssistantRoleScopeHome, "")
+	project, projectMalformed := a.currentScopeProjection(owner, workspace.AssistantRoleScopeProject, scope.SelectedModeID)
 	return &StaffingProjection{Scopes: []StaffingScopeProjection{home, project}}, homeMalformed || projectMalformed
+}
+
+func (a *AssistantStaffingAdapter) currentScopeProjection(owner *staffingOwner, targetScope workspace.AssistantRoleScope, selectedModeID string) (StaffingScopeProjection, bool) {
+	if owner == nil || owner.station == nil || owner.declaration == nil {
+		return StaffingScopeProjection{}, true
+	}
+	if targetScope == workspace.AssistantRoleScopeHome {
+		state := owner.station.GetAssistantProgramState()
+		if state == nil {
+			return StaffingScopeProjection{}, true
+		}
+		return a.scopeProjection(owner.station, owner.declaration, targetScope, state.HomeBindings, "")
+	}
+	if targetScope != workspace.AssistantRoleScopeProject || owner.project == nil {
+		return StaffingScopeProjection{}, true
+	}
+	link := owner.project.GetAssistantProjectLink()
+	if link == nil {
+		return StaffingScopeProjection{}, true
+	}
+	return a.scopeProjection(owner.project, owner.declaration, targetScope, link.ProjectBindings, selectedModeID)
 }
 
 func (a *AssistantStaffingAdapter) scopeProjection(target *workspace.Workspace, declaration *workspace.AssistantProgramDeclaration, roleScope workspace.AssistantRoleScope, set workspace.AssistantRoleBindingSet, modeID string) (StaffingScopeProjection, bool) {
@@ -799,22 +916,15 @@ func (a *AssistantStaffingAdapter) scopeProjection(target *workspace.Workspace, 
 }
 
 func (a *AssistantStaffingAdapter) reviewProjection(scope ReadScope, owner *staffingOwner, targetScope workspace.AssistantRoleScope, input staffingInput, optional bool) (*StaffingProjection, error) {
-	current, malformed := a.currentProjection(scope, owner)
+	target, malformed := a.currentScopeProjection(owner, targetScope, scope.SelectedModeID)
 	if malformed {
 		return nil, ErrConflict
-	}
-	var target StaffingScopeProjection
-	for _, candidate := range current.Scopes {
-		if candidate.Scope == targetScope {
-			target = candidate
-			break
-		}
 	}
 	target.ModelsReady = true
 	target.ToolGrantsReady = true
 	missing := make(map[string]workspace.AssistantProgramRoleSpec)
 	for _, role := range owner.declaration.Roles {
-		if role.Scope != targetScope || role.Required == optional {
+		if role.Scope != targetScope || (targetScope == workspace.AssistantRoleScopeHome && role.Required == optional) {
 			continue
 		}
 		configured := false

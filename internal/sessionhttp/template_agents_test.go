@@ -191,11 +191,11 @@ func TestBuildTemplateAgentPlan_ExposesExistingSharedRosterWithoutOfferingRename
 		t.Fatalf("save station: %v", err)
 	}
 
-	plan := handler.buildTemplateAgentPlan(projecttemplates.Template{
+	plan := handler.buildTemplateAgentPlanForOwner(projecttemplates.Template{
 		ID:               "plugin:neutral:project",
 		PluginOwner:      &agentworkspace.PluginTemplateOwner{PluginID: "neutral"},
 		AssistantProgram: declaration,
-	})
+	}, "local")
 	program := plan.AssistantProgram
 	if program == nil || !program.ExistingHired || program.ExistingProvider != "ollama" || program.ExistingModel != "gemma" {
 		t.Fatalf("existing assistant plan = %+v", program)
@@ -218,7 +218,7 @@ func TestBuildTemplateAgentPlan_ExposesExistingSharedRosterWithoutOfferingRename
 	if err := handler.workspaceTaskStore.Save(station); err != nil {
 		t.Fatal(err)
 	}
-	scoped := handler.buildTemplateAgentPlan(projecttemplates.Template{ID: "plugin:neutral:project", PluginOwner: &agentworkspace.PluginTemplateOwner{PluginID: "neutral"}, AssistantProgram: declaration}).AssistantProgram
+	scoped := handler.buildTemplateAgentPlanForOwner(projecttemplates.Template{ID: "plugin:neutral:project", PluginOwner: &agentworkspace.PluginTemplateOwner{PluginID: "neutral"}, AssistantProgram: declaration}, "local").AssistantProgram
 	if scoped == nil || scoped.ExistingHired || scoped.StationName != "My Studio" || scoped.Roles[0].AgentName != "June" || scoped.Roles[1].AgentName != "" {
 		t.Fatalf("Home implied a staffed project: %+v", scoped)
 	}

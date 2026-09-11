@@ -311,6 +311,7 @@ func TestWorkspaceTeamReadinessAcceptsOnlyVerifiedInheritedHomeHolder(t *testing
 	defer cleanup()
 	store := agentworkspace.NewInMemoryStore()
 	handler.SetWorkspaceTaskStore(store)
+	handler.currentUserID = func(context.Context) (string, error) { return "local", nil }
 	declaration := &agentworkspace.AssistantProgramDeclaration{
 		SchemaVersion: agentworkspace.AssistantProgramSchemaVersion,
 		ID:            "inherited-team",
@@ -348,7 +349,7 @@ func TestWorkspaceTeamReadinessAcceptsOnlyVerifiedInheritedHomeHolder(t *testing
 	if err := store.Save(station); err != nil {
 		t.Fatal(err)
 	}
-	planWithoutSnapshot := handler.buildTemplateAgentPlan(tpl)
+	planWithoutSnapshot := handler.buildTemplateAgentPlanForOwner(tpl, "local")
 	if planWithoutSnapshot.AssistantProgram.Roles[0].AgentName != "Home Lead" {
 		t.Fatalf("plan did not project Home binding: %#v", planWithoutSnapshot.AssistantProgram.Roles)
 	}
@@ -359,15 +360,15 @@ func TestWorkspaceTeamReadinessAcceptsOnlyVerifiedInheritedHomeHolder(t *testing
 		TeamIntent:        json.RawMessage(fmt.Sprintf(`{"version":1,"mode":"staffed","plan_revision":%q}`, planWithoutSnapshot.Revision)),
 		teamIntentPresent: true, roleStaffingPresent: true, RoleStaffing: []roleStaffingInput{},
 	}
-	if _, err := handler.validateWorkspaceTeamReadiness(req, tpl, true, "workspace"); err == nil {
+	if _, err := handler.validateWorkspaceTeamReadiness(context.Background(), req, tpl, tpl, true, "workspace"); err == nil {
 		t.Fatal("a binding without a workspace snapshot was accepted")
 	}
 	if err := store.SaveWorkspaceAgent(station.ID, "Home Lead", saved); err != nil {
 		t.Fatal(err)
 	}
-	plan := handler.buildTemplateAgentPlan(tpl)
+	plan := handler.buildTemplateAgentPlanForOwner(tpl, "local")
 	req.TeamIntent = json.RawMessage(fmt.Sprintf(`{"version":1,"mode":"staffed","plan_revision":%q}`, plan.Revision))
-	if _, err := handler.validateWorkspaceTeamReadiness(req, tpl, true, "workspace"); err != nil {
+	if _, err := handler.validateWorkspaceTeamReadiness(context.Background(), req, tpl, tpl, true, "workspace"); err != nil {
 		t.Fatalf("verified inherited holder was rejected: %v", err)
 	}
 }

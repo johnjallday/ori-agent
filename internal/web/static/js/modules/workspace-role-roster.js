@@ -42,10 +42,12 @@
     create: 'Create',
     assign: 'Assign…',
     clear: 'Clear',
+    needsClear: 'Needs clear',
     scopeProject: 'this workspace only',
     scopeHome: 'group scope only',
     sourceCreated: 'New agent',
     sourceAssigned: 'Your saved agent',
+    sourceGroup: 'Existing group holder',
     openEditor: 'Open in Agents',
     emptyRoster: 'This blueprint declares no roles.',
     alsoHere: 'Also in this workspace',
@@ -76,6 +78,7 @@
   }
 
   function sourceLabel(source) {
+    if (source === 'group') return COPY.sourceGroup;
     return source === SOURCE_ASSIGNED ? COPY.sourceAssigned : COPY.sourceCreated;
   }
 
@@ -107,6 +110,7 @@
           source: text(role && role.source),
           readOnly: Boolean(role && role.read_only),
           readOnlyReason: text(role && role.read_only_reason),
+          needsClear: Boolean(role && role.needs_clear),
           // What the blueprint proposes for this role, so the Create form can
           // show the instructions the agent would actually get rather than an
           // empty box that hides them.
@@ -118,9 +122,15 @@
         if (normalized.state === STATE_FILLED && !normalized.agent) {
           normalized.state = STATE_EMPTY;
         }
-        normalized.designation = normalized.primary ? COPY.primary : COPY.specialist;
+        normalized.designation = normalized.primary
+          ? normalized.scope === SCOPE_HOME
+            ? 'GROUP COORDINATOR'
+            : 'PROJECT LEAD'
+          : COPY.specialist;
         normalized.scopeLine = scopeLine(normalized.scope);
-        normalized.tag = stateTag(normalized);
+        normalized.tag = normalized.needsClear
+          ? { key: 'stale', label: COPY.needsClear }
+          : stateTag(normalized);
         normalized.sourceLabel =
           normalized.state === STATE_FILLED ? sourceLabel(normalized.source) : '';
         normalized.quiet = normalized.state === STATE_EMPTY && !normalized.required;
@@ -266,6 +276,16 @@
         options.onClear(row.roleId, row);
       });
       actions.append(clear);
+    } else if (row.needsClear) {
+      var clearStale = actionButton(
+        COPY.clear,
+        'Clear stale assignment from ' + row.label,
+        'btn btn-sm btn-outline-secondary'
+      );
+      clearStale.addEventListener('click', function () {
+        options.onClear(row.roleId, row);
+      });
+      actions.append(clearStale);
     } else {
       var create = actionButton(
         COPY.create,
@@ -289,12 +309,57 @@
     return item;
   }
 
+  function requiredProgress(rows) {
+    var required = (Array.isArray(rows) ? rows : []).filter(function (row) {
+      return row.required;
+    });
+    var filled = required.filter(function (row) {
+      return row.state === STATE_FILLED;
+    }).length;
+    if (!required.length) return 'Optional roles · none required';
+    return (
+      filled +
+      ' of ' +
+      required.length +
+      ' required role' +
+      (required.length === 1 ? '' : 's') +
+      ' filled'
+    );
+  }
+
+  function sectionsFrom(rows, options) {
+    var list = Array.isArray(rows) ? rows : [];
+    var home = list.filter(function (row) {
+      return row.scope === SCOPE_HOME;
+    });
+    var project = list.filter(function (row) {
+      return row.scope === SCOPE_PROJECT;
+    });
+    if (!home.length || !project.length) {
+      return [{ scope: home.length ? SCOPE_HOME : SCOPE_PROJECT, title: '', rows: list }];
+    }
+    return [
+      {
+        scope: SCOPE_HOME,
+        title: text(options && options.groupTitle) || 'Group coordination',
+        rows: home
+      },
+      {
+        scope: SCOPE_PROJECT,
+        title: text(options && options.projectTitle) || 'Project team',
+        rows: project
+      }
+    ];
+  }
+
   function noop() {}
 
   function withDefaults(options) {
     var given = options || {};
     return {
       title: text(given.title) || 'Roles',
+      groupTitle: text(given.groupTitle),
+      projectTitle: text(given.projectTitle),
       groupWorkspaceHref: given.groupWorkspaceHref,
       agentHref: typeof given.agentHref === 'function' ? given.agentHref : null,
       // Create hands the role back; the host opens the canonical Create Agent
@@ -360,12 +425,8 @@
     var rows = rowsFrom(roster);
     container.replaceChildren();
 
-    var list = element('ul', 'ws-role-roster__list');
-    // A list with an accessible name, so the roster announces itself as one
-    // thing rather than a run of unlabelled buttons (FR70).
-    list.setAttribute('aria-label', opts.title);
-
-    if (opts.showHeader) {
+    var sections = sectionsFrom(rows, opts);
+    if (opts.showHeader && sections.length === 1) {
       var header = element('p', 'ws-role-roster__count', headerCount(roster));
       container.append(header);
     }
@@ -373,10 +434,25 @@
       container.append(element('p', 'ws-role-roster__empty', COPY.emptyRoster));
       return [];
     }
-    rows.forEach(function (row) {
-      list.append(renderRow(row, opts));
+    sections.forEach(function (scopeSection) {
+      var list = element('ul', 'ws-role-roster__list');
+      list.setAttribute('aria-label', scopeSection.title || opts.title);
+      scopeSection.rows.forEach(function (row) {
+        list.append(renderRow(row, opts));
+      });
+      if (sections.length === 1) {
+        container.append(list);
+        return;
+      }
+      var section = element('section', 'ws-role-roster__scope');
+      section.dataset.scope = scopeSection.scope;
+      section.append(element('h4', 'ws-role-roster__scope-title', scopeSection.title));
+      section.append(
+        element('p', 'ws-role-roster__scope-progress', requiredProgress(scopeSection.rows))
+      );
+      section.append(list);
+      container.append(section);
     });
-    container.append(list);
     renderUnassigned(container, roster, opts);
     return rows;
   }
@@ -407,6 +483,8 @@
     },
     rowsFrom: rowsFrom,
     headerCount: headerCount,
+    requiredProgress: requiredProgress,
+    sectionsFrom: sectionsFrom,
     render: render,
     focusRole: focusRole
   };

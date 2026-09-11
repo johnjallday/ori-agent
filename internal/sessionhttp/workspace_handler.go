@@ -499,7 +499,9 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			teamTemplate = standalone
 		}
 	}
-	teamIntent, teamErr := h.validateWorkspaceTeamReadiness(&req, teamTemplate, teamTemplateResolved, string(kind))
+	teamIntent, teamErr := h.validateWorkspaceTeamReadiness(
+		r.Context(), &req, teamTemplate, resolvedTemplate, teamTemplateResolved, string(kind),
+	)
 	if teamErr != nil {
 		if !respondWorkspaceTeamReadinessError(w, teamErr) {
 			_ = orihttp.RespondBadRequest(w, teamErr.Error())

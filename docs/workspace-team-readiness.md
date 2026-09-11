@@ -125,21 +125,40 @@ use it to satisfy a project-scoped primary role.
 
 The non-circular recovery path is:
 
-1. If the canonical group does not exist, the Team blocker offers the existing
-   reviewed Home-only preparation operation. That confirmed operation creates
-   or reuses only the inert group; it does not create the project.
-2. Refresh the plan. If a required group role is empty, open the canonical group
-   workspace's existing Roles roster and use its Create or Assign action. The
-   per-role endpoint commits only that Home-owned role.
-3. Return to/reload Team. The plan re-reads the authoritative binding and the
-   strict gate unblocks only after verifying its saved definition.
-4. Project placement receives its own fresh receipt and confirmation.
+1. The passive template-agent plan projects the exact existing Home or a
+   proposed, not-yet-created Home on Details. It reports required Home-role
+   progress only from current binding, instance, workspace snapshot, and saved
+   definition evidence.
+2. If no canonical group exists and policy allows `offer_create`, Details offers
+   an inert Home-only review. A separate explicit commit creates or reuses only
+   the canonical group; it does not create the project or either team. Required
+   `existing_only` never receives this action.
+3. Refresh the plan and exact group roster. If a required group role is empty,
+   **Set Up <role>** suspends the workspace creator for a bounded live Home-role
+   action. The canonical agent form may Create, or the user may explicitly
+   Assign one saved definition. `GET /api/workspaces/{homeID}/roles` verifies
+   the editable target and one role-specific `PUT` commits immediately. If old
+   storage still names a holder whose saved definition was deleted, the role is
+   empty with `needs_clear: true`; setup exposes only an explicit role-specific
+   `DELETE` until a fresh roster proves the stale assignment is gone.
+4. Resume Details with the project draft intact and re-read canonical state.
+   Team remains blocked until the holder is verified; no clicked button or
+   submitted name is treated as success.
+5. Project placement receives its own fresh receipt and confirmation.
 
-This requires the existing live role endpoint to recognize an Assistant Program
-station as the target for Home-role staffing; it does not grant a project the
-right to mutate its group. The prepared-group ID and role link are durable, so
-recovery can happen in another tab without losing or fabricating project
-ownership.
+The live staffing adapter derives authority from the route target. A genuine
+Assistant Program station can mutate only declaration-owned Home roles without
+requiring a child link. A linked child can mutate only project roles; passing a
+Home role ID through a child or a project role ID through a station fails before
+creating an agent. Clear uses the same target rule. Create-name collisions,
+missing assigned definitions, malformed holders, and binding revision changes
+fail closed.
+
+Home creation and Home staffing survive creator cancellation because they were
+separately confirmed durable consequences. Modal suspension itself is not
+cancellation: workspace name/details, tags/colour, source/composition, valid
+project fills, connection selection, and Map intent remain in memory. Neither
+operation grants runtime readiness or project access.
 
 ## Blank
 
@@ -238,23 +257,23 @@ must not omit the object to bypass readiness.
   bindings, then routes to persistent per-role recovery.
 - Staffing copy says `team staffed`, never `fully ready`.
 
-## Evidence at feature start
+## Group-first creator evidence
 
-The implementation worktree and `origin/dev` were both
-`4474098d261bb03ecad006e0d8e9dd81c4066819` when the contract spike began. The
-named frontend, handler, role, staffing, template, and browser fixtures were
-present except for the planned new readiness helper/tests/spec. `docs/agents.md`
-was referenced by `CLAUDE.md` but absent in this base; no substitute guidance
-was invented.
+The group-first implementation started from Ori feature HEAD and `origin/dev`
+`aa76b6e9ce3a569bc5514b71032a86ec7587ab4b`. A disposable, non-executable
+workspace-group plugin fixture now exercises the generic contract through the
+real server and browser. The clean first-time path proves passive Blueprint and
+Details reads are inert; explicit Home commit creates exactly one empty group;
+Home-role Create targets only that group; modal suspension preserves a staged
+project fill; Team shows separate group/project leadership and required
+progress; and final confirmation creates one exact linked child with only its
+project role. Crafted inverse-scope role IDs are rejected without agent or
+workspace mutation.
 
-The host-only companion assessment remains **not required**. All declarations,
-plan projection, matching, role roster, create validation, staffing adapter, and
-the Downloads Janitor blueprint are Ori-owned in this repository. No plugin
-schema, plugin source, shared SDK, installed checkout, release, or reviewed pin
-is changed. Installed plugin stores and real runtime state are not test inputs.
-
-Code inspection established the paths above. At feature start the focused draft,
-controller, shared-roster, `internal/workspaceroles`, and scoped setup staffing
-tests all passed (107 JavaScript tests plus both Go package commands). No live
-provider, external plugin, personal folder, or browser behavior was claimed by
-that baseline.
+This host evidence does not prove the companion release. The requested REAPER
+plugin 0.5.2 candidate is a separate repository deliverable based on canonical
+v0.5.1 commit `972c33fb50b813c73beaafd779c71ced266477fa`.
+No authorized 0.5.2 source, tag, release, branch, or artifact was available when
+this host slice was implemented. Historical 0.6.0 candidate bytes are evidence
+only and must not be presented as 0.5.2 acceptance. No live provider, personal
+folder, or REAPER command is implied by team-staffed status.

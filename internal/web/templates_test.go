@@ -448,12 +448,9 @@ func TestSharedAgentCreateFormIsCanonicalAndLoadsBeforeConsumers(t *testing.T) {
 }
 
 // TestCreateWorkspaceTeamDraftLoadsBeforeSessions guards the script-order
-// dependency for the Create Workspace wizard: sessions.js reads
-// window.CreateWorkspaceTeamDraft while binding the modal, so the helper must be
-// deferred ahead of it on every page that renders the modal. Both tags are
-// `defer`, which executes in document order, making tag position the contract —
-// and a silent one, because a helper that loads too late leaves the wizard
-// bound to an undefined draft while every API call still succeeds.
+// dependencies for the Create Workspace wizard: sessions.js reads both draft
+// helpers while binding the modal, so they must be deferred ahead of it on
+// every page that renders the modal. Deferred scripts execute in document order.
 func TestCreateWorkspaceTeamDraftLoadsBeforeSessions(t *testing.T) {
 	r := NewTemplateRenderer()
 	if err := r.LoadTemplates(); err != nil {
@@ -464,10 +461,11 @@ func TestCreateWorkspaceTeamDraftLoadsBeforeSessions(t *testing.T) {
 	// components/workspaces/create-workspace-modal.tmpl. "index" covers
 	// layout/base.tmpl, which owns its own script block.
 	pages := []string{"index", "workspaces", "workspace-detail", "workspace-canvas", "workspace-task"}
-	const (
-		helper   = `/js/modules/create-workspace-team-draft.js`
-		sessions = `/js/modules/sessions.js`
-	)
+	helpers := []string{
+		`/js/modules/create-workspace-team-draft.js`,
+		`/js/modules/create-workspace-placement-draft.js`,
+	}
+	const sessions = `/js/modules/sessions.js`
 
 	for _, page := range pages {
 		data := TemplateData{
@@ -485,19 +483,21 @@ func TestCreateWorkspaceTeamDraftLoadsBeforeSessions(t *testing.T) {
 			t.Fatalf("page %s no longer renders the Create Workspace modal; update this test", page)
 		}
 
-		helperAt := strings.Index(html, helper)
 		sessionsAt := strings.Index(html, sessions)
-		if helperAt < 0 {
-			t.Errorf("page %s does not load %s", page, helper)
-			continue
-		}
 		if sessionsAt < 0 {
 			t.Errorf("page %s does not load %s", page, sessions)
 			continue
 		}
-		if helperAt > sessionsAt {
-			t.Errorf("page %s loads %s after %s; the team-draft helper must come first",
-				page, helper, sessions)
+		for _, helper := range helpers {
+			helperAt := strings.Index(html, helper)
+			if helperAt < 0 {
+				t.Errorf("page %s does not load %s", page, helper)
+				continue
+			}
+			if helperAt > sessionsAt {
+				t.Errorf("page %s loads %s after %s; draft helpers must come first",
+					page, helper, sessions)
+			}
 		}
 	}
 }

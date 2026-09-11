@@ -167,7 +167,7 @@ func (b *ServerBuilder) initializeSetupJourney() {
 			// adapted here rather than sharing a signature so the session
 			// package keeps no dependency on setupjourney's types.
 			b.sessionHandler.SetAssistantRoleStaffer(
-				func(ctx context.Context, projectID string, fills []sessionhttp.RoleStaffingFill) error {
+				func(ctx context.Context, workspaceID string, fills []sessionhttp.RoleStaffingFill) error {
 					roles := make([]setupjourney.RoleFill, 0, len(fills))
 					for _, fill := range fills {
 						mode := setupjourney.StaffingModeCreate
@@ -179,7 +179,7 @@ func (b *ServerBuilder) initializeSetupJourney() {
 							Provider: fill.Provider, Model: fill.Model,
 						})
 					}
-					return staffingAdapter.StaffRolesFromReviewedWorkspaceSetup(ctx, projectID, roles)
+					return staffingAdapter.StaffRoleOnWorkspace(ctx, workspaceID, roles)
 				},
 			)
 			b.sessionHandler.SetAssistantRoleUnstaffer(staffingAdapter.UnstaffRoleFromWorkspace)

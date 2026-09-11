@@ -87,6 +87,7 @@ func (h *Handler) handleTemplateAgentPlan(w http.ResponseWriter, r *http.Request
 		h.respondWorkspaceProjectError(w, err)
 		return
 	}
+	sourceTemplate := tpl
 	if strings.TrimSpace(req.GroupComposition) == "standalone" {
 		if tpl.GroupRequirement == nil || tpl.GroupRequirement.Policy == projecttemplates.GroupPolicyRequired {
 			_ = orihttp.RespondBadRequest(w, "this blueprint does not support standalone composition")
@@ -99,7 +100,24 @@ func (h *Handler) handleTemplateAgentPlan(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	_ = orihttp.RespondSuccess(w, h.buildTemplateAgentPlan(tpl))
+	ownerUserID := ""
+	var ownerErr error
+	if sourceTemplate.AssistantProgram != nil || sourceTemplate.GroupRequirement != nil {
+		if h == nil || h.currentUserID == nil {
+			ownerErr = grouprequirements.ErrUnavailable
+		} else {
+			ownerUserID, ownerErr = h.currentUserID(r.Context())
+			ownerUserID = strings.TrimSpace(ownerUserID)
+			if ownerErr == nil && ownerUserID == "" {
+				ownerErr = grouprequirements.ErrUnavailable
+			}
+		}
+	}
+	plan := h.buildTemplateAgentPlanForOwner(tpl, ownerUserID)
+	plan.GroupRequirement = h.buildTemplateGroupRequirementPlan(
+		sourceTemplate, req.GroupComposition, ownerUserID, ownerErr,
+	)
+	_ = orihttp.RespondSuccess(w, finalizeTemplateAgentPlan(plan))
 }
 
 // handleTemplateAgentCreate immediately saves one template-declared agent as a
