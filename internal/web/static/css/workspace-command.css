@@ -1227,6 +1227,16 @@
   letter-spacing: 0.8px;
   text-transform: uppercase;
 }
+.ws-cmd-map-hq-station-location {
+  min-width: 0;
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .ws-cmd-map-hq-station-state {
   min-width: 0;
   align-self: start;
@@ -1236,6 +1246,87 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* File Janitor's descriptor opts into the curated depot silhouette. It remains
+   one button: the sorting line, parcels, folder, location, and state are all
+   inert content inside the same keyboard/click target. */
+.ws-cmd-map-hq-station[data-station-visual="depot"] {
+  grid-template-columns: 88px minmax(0, 1fr);
+  grid-template-rows: auto auto auto;
+  width: 226px;
+  min-height: 118px;
+  padding: 11px 13px 12px 10px;
+  column-gap: 11px;
+  row-gap: 3px;
+  background:
+    linear-gradient(120deg, rgba(232, 181, 75, 0.1), transparent 48%),
+    linear-gradient(180deg, var(--ws-panel-2), var(--ws-panel));
+  border-color: var(--ws-line-bright);
+  border-top-color: var(--ws-keeper);
+  box-shadow: var(--ws-glow);
+}
+.ws-cmd-map-hq-station-visual {
+  grid-row: 1 / span 3;
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: 88px;
+  height: 78px;
+  overflow: hidden;
+  color: var(--ws-keeper);
+  background: var(--ws-bg-2);
+  border: 1px solid var(--ws-keeper-deep);
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%);
+}
+.ws-cmd-map-hq-station-visual .ws-cmd-map-station-art {
+  display: block;
+  width: 92px;
+  height: 68px;
+}
+.ws-cmd-map-hq-station[data-station-visual="depot"] .ws-cmd-map-hq-station-label {
+  align-self: end;
+  color: var(--ws-ink);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.1px;
+}
+.ws-cmd-map-hq-station[data-station-visual="depot"] .ws-cmd-map-hq-station-location {
+  align-self: center;
+}
+.ws-cmd-map-hq-station[data-station-visual="depot"] .ws-cmd-map-hq-station-state {
+  align-self: start;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: 0.35px;
+  text-transform: uppercase;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+.ws-cmd-map-hq-station[data-station-visual="depot"] .ws-cmd-map-hq-station-state::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  background: currentColor;
+  box-shadow: 0 0 0 2px var(--ws-bg-2);
+}
+.ws-cmd-map-hq-station[data-station-visual="depot"]:hover {
+  background:
+    linear-gradient(120deg, rgba(232, 181, 75, 0.16), transparent 48%),
+    linear-gradient(180deg, var(--ws-panel-2), var(--ws-panel));
+}
+.ws-cmd-map-hq-station[data-station-visual="depot"]:active {
+  border-color: var(--ws-keeper);
+  background: var(--ws-bg-2);
+}
+.ws-cmd-map-hq-station[data-station-visual="depot"]:focus-visible {
+  outline-offset: 4px;
 }
 .ws-cmd-map-hq-station:hover {
   border-color: var(--ws-keeper);

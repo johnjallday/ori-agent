@@ -9,7 +9,7 @@ import {
   realpathSync
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 /**
  * Downloads Janitor end-to-end coverage (PRD task 7.2).
@@ -55,6 +55,11 @@ import { join } from 'node:path';
 // the alias later a deliberate act.
 const TEMPLATE_ID = 'downloads-janitor';
 const RUN = Date.now().toString(36);
+const workspaceSlugs = new Map<string, string>();
+
+function workspaceURL(workspaceId: string): string {
+  return `/workspaces/${encodeURIComponent(workspaceSlugs.get(workspaceId) || workspaceId)}`;
+}
 
 // A file must look finished for the scanner to propose it: backdated well past
 // the settling interval.
@@ -108,7 +113,9 @@ async function createJanitorWorkspace(
   });
   expect(res.ok(), await res.text()).toBeTruthy();
   const body = await res.json();
-  return (body.folder?.id || body.workspace?.id) as string;
+  const workspace = body.folder || body.workspace;
+  workspaceSlugs.set(workspace.id, workspace.folder_slug || workspace.id);
+  return workspace.id as string;
 }
 
 /**
@@ -129,7 +136,7 @@ async function completeSetup(page: Page, workspaceId: string, root: string) {
   );
   expect(confirmed.ok(), await confirmed.text()).toBeTruthy();
 
-  await page.goto(`/workspaces/${workspaceId}`);
+  await page.goto(workspaceURL(workspaceId));
   const dialog = page.locator('#setupWizardDialog');
   // A fresh workspace opens the wizard itself; one whose wizard was dismissed
   // waits to be asked, which is the whole point of dismissal.
@@ -245,7 +252,7 @@ test.describe('Downloads Janitor', () => {
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(String(error)));
 
-    await page.goto(`/workspaces/${id}`);
+    await page.goto(workspaceURL(id));
 
     const mount = page.locator('#downloadsJanitorMount');
     await expect(mount).toBeVisible({ timeout: 15000 });
@@ -278,9 +285,11 @@ test.describe('Downloads Janitor', () => {
     });
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
-    const id = (body.folder?.id || body.workspace?.id) as string;
+    const workspace = body.folder || body.workspace;
+    const id = workspace.id as string;
+    workspaceSlugs.set(id, workspace.folder_slug || id);
 
-    await page.goto(`/workspaces/${id}`);
+    await page.goto(workspaceURL(id));
     await page.waitForTimeout(1500);
     await expect(page.locator('#downloadsJanitorMount')).toBeHidden();
   });
@@ -294,14 +303,14 @@ test.describe('Downloads Janitor', () => {
 
     // Dismissing an unfinished wizard leaves the workspace visibly unfinished
     // and starts nothing.
-    await page.goto(`/workspaces/${id}`);
+    await page.goto(workspaceURL(id));
     await expect(page.locator('#setupWizardDialog')).toBeVisible({ timeout: 15000 });
     await page.locator('#setupWizardClose').click();
     await expect(page.locator('#setupWizardDialog')).toBeHidden();
     await expect(page.locator('#setupWizardBannerState')).toHaveText('Setup required');
 
     // A reload does not ambush the user again, and Details still offers a way in.
-    await page.goto(`/workspaces/${id}`);
+    await page.goto(workspaceURL(id));
     await expect(page.locator('#fileJanitorCardOpen')).toBeVisible({ timeout: 15000 });
     await expect(page.locator('#setupWizardDialog')).toBeHidden();
 
@@ -318,7 +327,7 @@ test.describe('Downloads Janitor', () => {
     await completeSetup(page, id, root);
 
     // A workspace that is already set up is not asked again.
-    await page.goto(`/workspaces/${id}`);
+    await page.goto(workspaceURL(id));
     await openConsole(page);
     await expect(page.locator('#setupWizardDialog')).toBeHidden();
     await expect(page.locator('#setupWizardBannerState')).toHaveText('Ready');
@@ -337,7 +346,7 @@ test.describe('Downloads Janitor', () => {
     });
     expect(confirmed.ok(), await confirmed.text()).toBeTruthy();
 
-    await page.goto(`/workspaces/${id}`);
+    await page.goto(workspaceURL(id));
     // Pause and Scan live in the console header now, not in Workspace Details.
     await openConsole(page);
     await expect(page.locator('#downloadsJanitorPause')).toBeVisible({ timeout: 15000 });
@@ -358,9 +367,11 @@ test.describe('Downloads Janitor', () => {
     await completeSetup(page, id, root);
 
     // Every readiness row reports, and the folder is named back to the user.
-    // The compact card carries that line now (.fj-card-sub), where the inline
-    // panel's .dj-sub used to.
-    await expect(page.locator('.fj-card-sub')).toContainText(root);
+    // Details keeps the managed folder compact while its title and the
+    // immediately opened console retain the full canonical path.
+    const folderFact = page.locator('.fj-card-fact').filter({ hasText: 'Managed folder' });
+    await expect(folderFact).toContainText(basename(root));
+    await expect(folderFact.locator('.fj-card-fact-value')).toHaveAttribute('title', root);
     await expect(page.locator('#downloadsJanitorActivity')).toHaveText('Watching');
     // The destination is created eagerly; category folders are not.
     expect(existsSync(join(root, 'Filed'))).toBeTruthy();
@@ -653,7 +664,7 @@ test.describe('Downloads Janitor', () => {
     expect((await setup()).state).toBe('ready');
 
     // A finished workspace does not reopen its wizard on the next visit.
-    await page.goto(`/workspaces/${id}`);
+    await page.goto(workspaceURL(id));
     await expect(page.locator('#setupWizardBannerState')).toHaveText('Ready', { timeout: 15000 });
     await expect(page.locator('#setupWizardDialog')).toBeHidden();
 
@@ -669,7 +680,7 @@ test.describe('Downloads Janitor', () => {
     expect(degraded.completed_at, 'it completed once; that history is kept').toBeTruthy();
     expect(degraded.auto_open, 'a regression invites repair, it does not ambush').toBe(false);
 
-    await page.goto(`/workspaces/${id}`);
+    await page.goto(workspaceURL(id));
     await expect(page.locator('#setupWizardBannerState')).toHaveText('Needs attention', {
       timeout: 15000
     });

@@ -1,7 +1,7 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, utimesSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 /**
  * File Janitor as a workspace capability, end to end (PRD task 8.9).
@@ -43,6 +43,12 @@ import { join } from 'node:path';
 
 const RUN = Date.now().toString(36);
 const OLD = new Date(Date.now() - 6 * 60 * 60 * 1000);
+const workspaceSlugs = new Map<string, string>();
+
+function workspacePath(workspaceId: string, query = ''): string {
+  const slug = workspaceSlugs.get(workspaceId) || workspaceId;
+  return `/workspaces/${encodeURIComponent(slug)}${query}`;
+}
 
 function fixtureFolder(label: string, files: Record<string, string>): string {
   const root = mkdtempSync(join(tmpdir(), `fj-${label}-`));
@@ -85,6 +91,8 @@ async function createPlainWorkspace(request: APIRequestContext, name: string): P
   expect(res.ok(), await res.text()).toBeTruthy();
   const body = await res.json();
   const workspaceId = (body.folder?.id || body.workspace?.id) as string;
+  const workspaceSlug = (body.folder?.folder_slug || body.workspace?.folder_slug) as string;
+  workspaceSlugs.set(workspaceId, workspaceSlug || workspaceId);
 
   const agentName = `${name} Manager`;
   const created = await request.post('/api/agents', {
@@ -182,8 +190,8 @@ async function clearCommanderNudge(page: Page, url: string) {
   await clearBlockingModals(page);
 }
 
-async function openWorkspace(page: Page, workspaceId: string) {
-  await clearCommanderNudge(page, `/workspaces/${workspaceId}`);
+async function openWorkspace(page: Page, workspaceId: string, query = '') {
+  await clearCommanderNudge(page, workspacePath(workspaceId, query));
 }
 
 async function openConsoleFromCard(page: Page) {
@@ -217,6 +225,135 @@ test.describe('File Janitor capability', () => {
     await expect(page.locator('#fileJanitorCardOpen')).toHaveText('Set up File Janitor');
     await openConsoleFromCard(page);
     await expect(consoleBody(page).locator('#downloadsJanitorPath')).toBeVisible();
+  });
+
+  test('keeps the summary in Details while Map remains station-first across slow status and refresh', async ({
+    page,
+    request
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const workspaceId = await createPlainWorkspace(request, `FJ Views ${RUN}`);
+    const root = fixtureFolder('views-with-an-intentionally-long-managed-folder-name', {
+      'map-entry.pdf': 'fixture'
+    });
+    await installCapability(request, workspaceId);
+    await grantFolder(request, workspaceId, root);
+    const scanned = await request.post(`/api/workspaces/${workspaceId}/file-janitor/scan`);
+    expect(scanned.ok(), await scanned.text()).toBeTruthy();
+
+    await skipOnboarding(page);
+    let releaseStatus!: () => void;
+    const statusGate = new Promise<void>(resolve => {
+      releaseStatus = resolve;
+    });
+    let heldStatus = false;
+    await page.route(`**/api/workspaces/${workspaceId}/file-janitor`, async route => {
+      if (!heldStatus) {
+        heldStatus = true;
+        await statusGate;
+      }
+      await route.continue();
+    });
+
+    await page.goto(workspacePath(workspaceId, '?mode=map'), {
+      waitUntil: 'domcontentloaded'
+    });
+    await expect(page.locator('#downloadsJanitorMount')).toBeHidden();
+    releaseStatus();
+    await clearBlockingModals(page);
+
+    const station = page.locator('[data-cmd-hq-station="file-janitor"]');
+    await expect(station).toBeVisible({ timeout: 15000 });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await expect(station.locator('[data-building-variant="depot"]')).toBeVisible();
+    await expect(station.locator('.ws-cmd-map-hq-station-label')).toHaveText('File Janitor');
+    await expect(station.locator('.ws-cmd-map-hq-station-location')).toHaveAttribute(
+      'title',
+      basename(root)
+    );
+    await expect(station).toHaveAttribute(
+      'aria-label',
+      new RegExp(`managed folder ${basename(root)}.*ready for review`)
+    );
+    await expect(page.locator('#downloadsJanitorMount')).toBeHidden();
+
+    // The curated depot art resolves through Command's theme token in both
+    // themes instead of freezing one swatch onto the map. Drive the real theme
+    // control so its in-memory preference cannot overwrite a bare DOM change.
+    if ((await page.locator('html').getAttribute('data-bs-theme')) !== 'light') {
+      await page.locator('#darkModeToggle').click();
+    }
+    await expect(page.locator('html')).toHaveAttribute('data-bs-theme', 'light');
+    await page.waitForTimeout(100);
+    const lightDepotColor = await station
+      .locator('[data-building-variant="depot"]')
+      .evaluate(node => getComputedStyle(node).color);
+    await page.locator('#darkModeToggle').click();
+    await expect(page.locator('html')).toHaveAttribute('data-bs-theme', 'dark');
+    await page.waitForTimeout(100);
+    const darkDepotColor = await station
+      .locator('[data-building-variant="depot"]')
+      .evaluate(node => getComputedStyle(node).color);
+    expect(lightDepotColor).not.toBe(darkDepotColor);
+    await expect(station).toBeVisible();
+
+    // The larger illustrated station remains inside the map at desktop width,
+    // including when its visible folder line has to truncate.
+    const [stationBox, worldBox] = await Promise.all([
+      station.boundingBox(),
+      page.locator('.ws-cmd-map-world').boundingBox()
+    ]);
+    expect(stationBox).toBeTruthy();
+    expect(worldBox).toBeTruthy();
+    expect(stationBox!.x + stationBox!.width).toBeLessThanOrEqual(
+      worldBox!.x + worldBox!.width + 1
+    );
+    expect(stationBox!.x).toBeGreaterThanOrEqual(worldBox!.x - 1);
+
+    // A later capability status refresh may update station text, but it cannot
+    // grant presentation permission to the Details-only summary.
+    await page.evaluate(async () => {
+      await (window as any).FileJanitorConsole.refresh();
+    });
+    await expect(page.locator('#downloadsJanitorMount')).toBeHidden();
+
+    // The station is the real Map entry point, not decoration.
+    await station.click();
+    await expect(console_(page)).toBeVisible({ timeout: 15000 });
+    await page.locator('[data-fj-console-close]').click();
+    await expect(station).toBeFocused();
+
+    await page.getByRole('button', { name: 'Tickets', exact: true }).click();
+    await expect(page.locator('#downloadsJanitorMount')).toBeHidden();
+
+    await page.getByRole('button', { name: 'Details', exact: true }).click();
+    const summary = page.getByRole('group', { name: 'File Janitor' });
+    await expect(summary).toBeVisible();
+    const summaryBox = await summary.boundingBox();
+    expect(summaryBox).toBeTruthy();
+    expect(summaryBox!.height).toBeLessThanOrEqual(120);
+    await expect(summary).toContainText('Managed folder');
+    await expect(summary).toContainText(basename(root));
+    await expect(summary).toContainText('1 file waiting for review');
+    await expect(page.locator('#downloadsJanitorActivity')).toHaveText('Review ready');
+    await expect(summary).toHaveClass(/is-review-ready/);
+    await expect(summary).toContainText('Privacy mode');
+    await expect(summary).toContainText('Local only');
+    await expect(
+      summary.getByRole('button', { name: 'Review files · 1', exact: true })
+    ).toBeVisible();
+
+    await page.getByRole('button', { name: 'Map', exact: true }).click();
+    await expect(page.locator('#downloadsJanitorMount')).toBeHidden();
+    await page.goBack();
+    await expect(page.getByRole('button', { name: 'Details', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+    await expect(page.locator('#downloadsJanitorMount')).toBeVisible();
+    await page.goForward();
+    await expect(station).toBeVisible();
+    await expect(page.locator('#downloadsJanitorMount')).toBeHidden();
   });
 
   // A generic in-place install must NOT propose a folder. Pre-filling a real
@@ -256,13 +393,41 @@ test.describe('File Janitor capability', () => {
     // Scan from the console header.
     await page.locator('#downloadsJanitorScan').click();
     await expect(consoleBody(page).locator('.dj-row-item').first()).toBeVisible({ timeout: 15000 });
+    const progress = consoleBody(page).locator('.dj-batch-progress');
+    await expect(progress).toContainText('2 remaining of 2 candidates');
+    await expect(progress).toContainText('need review within remaining');
 
+    await expect(consoleBody(page).locator('.dj-table th')).toHaveText([
+      'Select',
+      'File',
+      'Destination',
+      'Why / Status',
+      'Actions'
+    ]);
     const row = consoleBody(page).locator('.dj-row-item').filter({ hasText: 'invoice.pdf' });
     await expect(row).toBeVisible();
     // The row shows what the decision rests on: where it would go.
     await expect(row).toContainText('Filed/Documents');
+    const details = row.locator('.dj-file-details-toggle');
+    await expect(details).toHaveAccessibleName('Show file details for invoice.pdf');
+    await details.click();
+    await expect(details).toHaveAttribute('aria-expanded', 'true');
+    await expect(details).toHaveAccessibleName('Hide file details for invoice.pdf');
+    const fileDetails = row.locator('.dj-file-details');
+    await expect(fileDetails.locator('dt')).toHaveText(['Type', 'Size', 'Modified']);
+    await expect(fileDetails.locator('dd').nth(0)).toHaveText('.pdf');
+    await expect(fileDetails.locator('dd').nth(1)).toHaveText('7 B');
+    const [detailsBox, footerBox] = await Promise.all([
+      fileDetails.boundingBox(),
+      page.locator('.dj-footer').boundingBox()
+    ]);
+    expect(detailsBox).toBeTruthy();
+    expect(footerBox).toBeTruthy();
+    expect(detailsBox!.y + detailsBox!.height).toBeLessThanOrEqual(footerBox!.y);
 
     await row.locator('.dj-select').check();
+    await expect(page.locator('.dj-footer')).toBeInViewport();
+    await expect(page.locator('#downloadsJanitorApprove')).toHaveText('Review 1 move');
     await page.locator('#downloadsJanitorApprove').click();
 
     // Nothing has moved yet: this is the confirmation, in the console.
@@ -283,6 +448,56 @@ test.describe('File Janitor capability', () => {
     expect(existsSync(join(root, 'invoice.pdf'))).toBe(false);
     // The file nobody approved is untouched.
     expect(existsSync(join(root, 'holiday.png'))).toBe(true);
+
+    const results = consoleBody(page).locator('.dj-results');
+    await expect(results).toContainText('1 file filed');
+    await expect(results).toContainText('invoice.pdf');
+    await results.getByRole('button', { name: 'View History' }).click();
+    await expect(console_(page).locator('[data-fj-tab="history"]')).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    await expect(consoleBody(page)).toContainText('invoice.pdf');
+  });
+
+  test('a failed batch refresh keeps the last known review visible but inert', async ({
+    page,
+    request
+  }) => {
+    const workspaceId = await createPlainWorkspace(request, `FJ Batch failure ${RUN}`);
+    const root = fixtureFolder('batch-failure', { 'invoice.pdf': 'invoice' });
+    await installCapability(request, workspaceId);
+    await grantFolder(request, workspaceId, root);
+
+    await openWorkspace(page, workspaceId);
+    await openConsoleFromCard(page);
+    await page.locator('#downloadsJanitorScan').click();
+    const row = consoleBody(page).locator('.dj-row-item').filter({ hasText: 'invoice.pdf' });
+    await expect(row).toBeVisible({ timeout: 15000 });
+
+    const latestBatch = `**/api/workspaces/${workspaceId}/file-janitor/batches/latest*`;
+    await page.route(latestBatch, route =>
+      route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { message: 'Simulated batch read failure.' } })
+      })
+    );
+    await page.evaluate(async () => {
+      await (window as any).FileJanitorConsole._reloadBatch();
+    });
+
+    const unavailable = consoleBody(page).locator('.dj-batch-load-error');
+    await expect(unavailable).toContainText('Review unavailable');
+    await expect(unavailable).toContainText('Showing the last known batch');
+    await expect(row).toBeVisible();
+    await expect(row.locator('.dj-select')).toBeDisabled();
+    await expect(page.locator('#downloadsJanitorApprove')).toBeDisabled();
+    await expect(consoleBody(page)).not.toContainText('Nothing to review');
+
+    await page.unroute(latestBatch);
+    await unavailable.getByRole('button', { name: 'Retry' }).click();
+    await expect(row.locator('.dj-select')).toBeEnabled({ timeout: 15000 });
   });
 
   test('History records the move and offers to undo it', async ({ page, request }) => {
@@ -378,7 +593,7 @@ test.describe('File Janitor capability', () => {
     // The next Back leaves the console entirely, without leaving the workspace.
     await page.goBack();
     await expect(console_(page)).toBeHidden({ timeout: 15000 });
-    expect(page.url()).toContain(`/workspaces/${workspaceId}`);
+    expect(page.url()).toContain(workspacePath(workspaceId));
     await expect(page).not.toHaveURL(/panel=file-janitor/);
   });
 
@@ -389,7 +604,10 @@ test.describe('File Janitor capability', () => {
     await installCapability(request, workspaceId);
     await grantFolder(request, workspaceId, root);
 
-    await clearCommanderNudge(page, `/workspaces/${workspaceId}?panel=file-janitor&tab=not-a-tab`);
+    await clearCommanderNudge(
+      page,
+      workspacePath(workspaceId, '?panel=file-janitor&tab=not-a-tab')
+    );
     await expect(console_(page)).toBeVisible({ timeout: 15000 });
     await expect(console_(page).locator('[data-fj-tab="review"]')).toHaveAttribute(
       'aria-selected',
@@ -471,9 +689,11 @@ test.describe('File Janitor capability', () => {
     expect(created.ok(), await created.text()).toBeTruthy();
     const body = await created.json();
     const workspaceId = (body.folder?.id || body.workspace?.id) as string;
+    const workspaceSlug = (body.folder?.folder_slug || body.workspace?.folder_slug) as string;
+    workspaceSlugs.set(workspaceId, workspaceSlug || workspaceId);
 
     await skipOnboarding(page);
-    await page.goto(`/workspaces/${workspaceId}`);
+    await page.goto(workspacePath(workspaceId));
 
     const dialog = page.locator('#setupWizardDialog');
     if (!(await dialog.isVisible().catch(() => false))) {

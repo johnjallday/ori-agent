@@ -266,7 +266,9 @@ function trapFocus(container) {
   const onKeydown = event => {
     if (event.key !== 'Tab') return;
     const focusable = Array.from(container.querySelectorAll?.(FOCUSABLE) || []).filter(
-      node => node.offsetParent !== null || node === document.activeElement
+      node =>
+        node.getAttribute?.('tabindex') !== '-1' &&
+        (node.offsetParent !== null || node === document.activeElement)
     );
     if (focusable.length === 0) return;
     const first = focusable[0];

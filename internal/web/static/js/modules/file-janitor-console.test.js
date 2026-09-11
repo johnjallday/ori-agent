@@ -79,13 +79,18 @@ class FakeElement {
   set selected(v) {
     this._selected = v;
   }
-  dispatch(event) {
-    (this._listeners[event] || []).forEach(fn => fn());
+  dispatch(event, payload = {}) {
+    (this._listeners[event] || []).forEach(fn => fn(payload));
   }
   focus() {
-    // A disabled control cannot take focus in a real browser, and the panel
-    // relies on that being true.
+    // A disabled control or one inside a hidden view cannot take focus in a
+    // real browser, and the panel relies on both being true.
     if (this.disabled) return;
+    let node = this;
+    while (node) {
+      if (node.hidden) return;
+      node = node.parent;
+    }
     globalThis.document.activeElement = this;
   }
   removeAttribute(k) {
@@ -557,6 +562,104 @@ test('review table renders a row per candidate with the facts needed to judge it
   assert.match(body, /200 KB/); // human-readable size
 });
 
+test('review rows present five decisions-first columns with expandable file details', () => {
+  const doc = setup();
+  const host = renderReview(doc);
+  const headers = host.all(node => node.tagName === 'TH').map(node => node.textContent);
+  assert.deepEqual(headers, ['Select', 'File', 'Destination', 'Why / Status', 'Actions']);
+
+  const row = rowsIn(host).find(node => node.getAttribute('data-candidate-id') === 'c1');
+  const disclosure = row.all(
+    node => node.tagName === 'BUTTON' && node.getAttribute('data-fj-file-details') === 'c1'
+  )[0];
+  assert.ok(disclosure, 'the file cell has one details control');
+  assert.equal(disclosure.getAttribute('aria-expanded'), 'false');
+  assert.match(disclosure.getAttribute('aria-label'), /Show file details for invoice-2026-07.pdf/);
+
+  disclosure.click();
+  assert.equal(disclosure.getAttribute('aria-expanded'), 'true');
+  const details = row.all(node => node.className === 'dj-file-details')[0];
+  assert.equal(details.hidden, false);
+  assert.match(details.textContent, /Type \.pdf/);
+  assert.match(details.textContent, /Size 200 KB/);
+  assert.match(details.textContent, /Modified/);
+
+  panel.renderBatch();
+  const refreshed = rowsIn(doc.getElementById('downloadsJanitorBatch')).find(
+    node => node.getAttribute('data-candidate-id') === 'c1'
+  );
+  const refreshedDisclosure = refreshed.all(
+    node => node.tagName === 'BUTTON' && node.getAttribute('data-fj-file-details') === 'c1'
+  )[0];
+  assert.equal(refreshedDisclosure.getAttribute('aria-expanded'), 'true');
+  assert.equal(refreshed.all(node => node.className === 'dj-file-details')[0].hidden, false);
+
+  panel._setBatch({ ...batchFixture(), id: 'batch-2' }, candidatesFixture(), CATEGORIES);
+  panel.renderBatch();
+  const replacement = rowsIn(doc.getElementById('downloadsJanitorBatch')).find(
+    node => node.getAttribute('data-candidate-id') === 'c1'
+  );
+  assert.equal(
+    replacement
+      .all(
+        node => node.tagName === 'BUTTON' && node.getAttribute('data-fj-file-details') === 'c1'
+      )[0]
+      .getAttribute('aria-expanded'),
+    'false'
+  );
+});
+
+test('whole-batch progress separates remaining, subset, outcomes, and ineligible observations', () => {
+  const doc = setup();
+  const batch = batchFixture({
+    state: 'partially_applied',
+    summary: {
+      proposed: 3,
+      needs_review: 2,
+      skipped: 4,
+      ineligible: 5,
+      stale: 1,
+      applied: 6,
+      failed: 1,
+      total: 15
+    }
+  });
+  renderReview(doc, batch, candidatesFixture());
+
+  const progress = surface(doc).all(node => node.className === 'dj-batch-progress')[0];
+  assert.ok(progress, 'the review needs a whole-batch progress readout');
+  assert.match(progress.textContent, /3 remaining of 15 candidates/);
+  assert.match(progress.textContent, /2 need review within remaining/);
+  assert.match(progress.textContent, /6 completed/);
+  assert.match(progress.textContent, /4 skipped/);
+  assert.match(progress.textContent, /2 problems/);
+  assert.match(progress.textContent, /5 observed but not eligible/);
+});
+
+test('a resolved batch with failures reads as complete with problems, not all clear', () => {
+  const doc = setup();
+  const batch = batchFixture({
+    state: 'resolved',
+    summary: {
+      proposed: 0,
+      needs_review: 0,
+      skipped: 1,
+      ineligible: 2,
+      stale: 1,
+      applied: 3,
+      failed: 1,
+      total: 6
+    }
+  });
+  renderReview(doc, batch, []);
+
+  const body = text(doc);
+  assert.match(body, /Review complete with problems/);
+  assert.match(body, /2 problems/);
+  assert.match(body, /No files are waiting, but 2 problems still need attention/);
+  assert.doesNotMatch(body, /all clear/i);
+});
+
 test('the batch summary states counts, scan source, and when it ran', () => {
   const doc = setup();
   renderReview(doc);
@@ -720,7 +823,7 @@ test('the table and its controls carry screen-reader labels', () => {
   assert.ok(table.getAttribute('aria-label'), 'the table needs a label');
 
   const headers = host.all(n => n.tagName === 'TH');
-  assert.equal(headers.length, 9);
+  assert.equal(headers.length, 5);
   headers.forEach(header => assert.equal(header.getAttribute('scope'), 'col'));
 
   const box = host.all(n => n.className === 'dj-select')[0];
@@ -738,8 +841,8 @@ test('an empty workspace explains what will appear rather than showing a bare ta
   const doc = setup();
   renderReview(doc, null, []);
   const body = text(doc);
-  assert.match(body, /Nothing to review/);
-  assert.match(body, /Nothing is moved without your approval/);
+  assert.match(body, /Not scanned in this session/);
+  assert.match(body, /Nothing moves without your approval/);
   assert.match(cardText(doc), /No files waiting for review/);
 });
 
@@ -765,10 +868,61 @@ test('Scan now reports honestly when a scan finds nothing new', async () => {
   await new Promise(r => setTimeout(r, 0));
 
   const error = doc.getElementById('downloadsJanitorError');
-  assert.equal(error.hidden, false);
-  assert.match(error.textContent, /Nothing new to review/);
+  assert.equal(error.hidden, true, 'an empty successful scan is not an error');
+  assert.match(text(doc), /Scan complete — no new proposals/);
+  assert.match(text(doc), /No changes were made/);
   // The button is usable again.
   assert.equal(doc.getElementById('downloadsJanitorScan').disabled, false);
+});
+
+test('a scan with no new proposals keeps an existing review batch and reports that fact', async () => {
+  const doc = setup();
+  renderReview(doc);
+  await settle();
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.renderBatch();
+  globalThis.fetch = async (url, opts) => {
+    if (opts && opts.method === 'POST') {
+      return { ok: true, json: async () => ({ success: true, created: false }) };
+    }
+    return {
+      ok: true,
+      json: async () => ({
+        batch: batchFixture(),
+        candidates: candidatesFixture(),
+        total: 3,
+        filtered_total: 3,
+        counts: { all: 3, needs_review: 1, pending: 2, skipped: 1 }
+      })
+    };
+  };
+
+  doc.getElementById('downloadsJanitorScan').click();
+  await settle();
+  await settle();
+
+  assert.match(text(doc), /Scan complete — no new proposals/);
+  assert.match(text(doc), /current review batch is unchanged/);
+  assert.match(text(doc), /invoice-2026-07\.pdf/);
+  assert.equal(doc.getElementById('downloadsJanitorError').hidden, true);
+});
+
+test('a resolved pending batch becomes a completed-batch empty state', async () => {
+  const doc = setup();
+  renderReview(doc);
+  await settle();
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.renderBatch();
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({ batch: null, candidates: [], total: 0, filtered_total: 0, counts: {} })
+  });
+
+  await panel._reloadBatch();
+
+  assert.match(text(doc), /Batch complete/);
+  assert.match(text(doc), /Every candidate has a recorded outcome/);
+  assert.match(text(doc), /View History/);
 });
 
 test('a rejected decision is not left on screen as though it were saved', async () => {
@@ -826,14 +980,14 @@ test('the approve control states the count and is disabled until something is se
   renderReview(doc);
   const approve = doc.getElementById('downloadsJanitorApprove');
   assert.equal(approve.disabled, true);
-  assert.match(approve.textContent, /Approve selected/);
+  assert.match(approve.textContent, /Review selected changes/);
 
   panel._select('c1');
   assert.equal(approve.disabled, false);
-  assert.match(approve.textContent, /Approve 1 move$/);
+  assert.match(approve.textContent, /Review 1 move$/);
 
   panel._select('c2');
-  assert.match(approve.textContent, /Approve 2 moves$/);
+  assert.match(approve.textContent, /Review 2 moves$/);
 });
 
 test('approving previews the plan without moving anything', async () => {
@@ -896,6 +1050,9 @@ test('the confirmation shows each resolved destination and flags forced renames'
 test('confirming sends the approval token and reports per-file results', async () => {
   const doc = setup();
   renderReview(doc);
+  await settle();
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.renderBatch();
   panel._select('c1');
   let applyBody = null;
   globalThis.fetch = async (url, opts) => {
@@ -915,6 +1072,7 @@ test('confirming sends the approval token and reports per-file results', async (
               {
                 candidate_id: 'c1',
                 name: 'invoice-2026-07.pdf',
+                operation: 'move',
                 result: 'applied',
                 destination: 'Filed/Documents/invoice-2026-07.pdf'
               },
@@ -952,9 +1110,94 @@ test('confirming sends the approval token and reports per-file results', async (
   assert.doesNotMatch(body, /All files? moved/);
 });
 
+test('mixed outcomes name moves, Trash, failures, stale files, and replay truthfully', async () => {
+  const doc = setup();
+  renderReview(doc);
+  await settle();
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.renderBatch();
+  panel._select('c1');
+  globalThis.fetch = async url => {
+    if (String(url).endsWith('/preview')) {
+      return { ok: true, json: async () => ({ preview: PREVIEW }) };
+    }
+    if (String(url).endsWith('/apply')) {
+      return {
+        ok: true,
+        json: async () => ({
+          result: {
+            applied: 3,
+            failed: 1,
+            stale: 1,
+            replayed: true,
+            outcomes: [
+              {
+                candidate_id: 'c1',
+                name: 'invoice.pdf',
+                operation: 'move',
+                result: 'applied',
+                destination: 'Filed/Documents/invoice.pdf'
+              },
+              {
+                candidate_id: 'c2',
+                name: 'old.zip',
+                operation: 'trash',
+                result: 'applied'
+              },
+              {
+                candidate_id: 'legacy',
+                name: 'older-response.dat',
+                result: 'applied',
+                destination: 'Filed/Documents/older-response.dat'
+              },
+              {
+                candidate_id: 'c3',
+                name: 'blocked.pdf',
+                operation: 'move',
+                result: 'failed',
+                message: 'Permission denied.'
+              },
+              {
+                candidate_id: 'c4',
+                name: 'changed.pdf',
+                operation: 'move',
+                result: 'stale',
+                message: 'Changed after review.'
+              }
+            ]
+          }
+        })
+      };
+    }
+    return { ok: true, json: async () => ({ batch: null, candidates: [] }) };
+  };
+
+  doc.getElementById('downloadsJanitorApprove').click();
+  await settle();
+  doc.getElementById('downloadsJanitorConfirmApply').click();
+  await settle();
+  await settle();
+
+  const body = text(doc);
+  assert.match(body, /1 file filed/);
+  assert.match(body, /1 moved to Trash/);
+  assert.match(body, /1 changes completed/);
+  assert.match(body, /older-response\.dat\s+— Completed/);
+  assert.doesNotMatch(body, /→ Filed\/Documents\/older-response\.dat/);
+  assert.doesNotMatch(body, /3 files filed/);
+  assert.match(body, /1 could not be moved/);
+  assert.match(body, /1 changed since you approved/);
+  assert.match(body, /Already completed earlier; nothing ran again/);
+  assert.match(body, /old\.zip\s+— Moved to Trash/);
+  assert.match(body, /View History/);
+});
+
 test('a stale result explains itself and offers a rescan', async () => {
   const doc = setup();
   renderReview(doc);
+  await settle();
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.renderBatch();
   panel._select('c1');
   globalThis.fetch = async url => {
     if (String(url).endsWith('/preview'))
@@ -1062,7 +1305,12 @@ test('a rejected approval is reported and nothing is left looking approved', asy
 // still be on screen afterwards — that moment is the whole point of the flow.
 test('results survive the batch they emptied', async () => {
   const doc = setup();
-  renderReview(doc, batchFixture(), [candidatesFixture()[0]]);
+  const batch = batchFixture();
+  const candidates = [candidatesFixture()[0]];
+  renderReview(doc, batch, candidates);
+  await settle();
+  panel._setBatch(batch, candidates, CATEGORIES);
+  panel.renderBatch();
   panel._select('c1');
   globalThis.fetch = async url => {
     if (String(url).endsWith('/preview')) {
@@ -1083,6 +1331,7 @@ test('results survive the batch they emptied', async () => {
               {
                 candidate_id: 'c1',
                 name: 'invoice-2026-07.pdf',
+                operation: 'move',
                 result: 'applied',
                 destination: 'Filed/Documents/invoice-2026-07.pdf'
               }
@@ -1104,18 +1353,70 @@ test('results survive the batch they emptied', async () => {
   const body = text(doc);
   assert.match(body, /1 file filed/, 'the outcome must remain visible after the batch empties');
   assert.match(body, /Filed\/Documents\/invoice-2026-07\.pdf/);
-  // And the now-empty batch still explains itself.
-  assert.match(body, /Nothing to review/);
+  // And the now-empty batch states why it is empty.
+  assert.match(body, /Batch complete/);
 });
 
 // ------------------------------------------------------------------- Trash
 
 function trashToggleFor(doc, name) {
   const host = surface(doc);
-  return host.all(
-    n => n.tagName === 'BUTTON' && String(n.getAttribute('aria-label') || '').includes(name)
-  )[0];
+  return host.all(n => {
+    const label = String(n.getAttribute('aria-label') || '');
+    return n.tagName === 'BUTTON' && label.includes(name) && label.includes('for Trash');
+  })[0];
 }
+
+test('authoritative results survive when their follow-up batch refresh fails', async () => {
+  const doc = setup();
+  renderReview(doc);
+  await settle();
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.renderBatch();
+  panel._select('c1');
+  globalThis.fetch = async url => {
+    if (String(url).endsWith('/preview')) {
+      return { ok: true, json: async () => ({ preview: PREVIEW }) };
+    }
+    if (String(url).endsWith('/apply')) {
+      return {
+        ok: true,
+        json: async () => ({
+          result: {
+            applied: 1,
+            failed: 0,
+            stale: 0,
+            outcomes: [
+              {
+                candidate_id: 'c1',
+                name: 'invoice.pdf',
+                operation: 'move',
+                result: 'applied',
+                destination: 'Filed/Documents/invoice.pdf'
+              }
+            ]
+          }
+        })
+      };
+    }
+    return { ok: false, json: async () => ({}) };
+  };
+
+  doc.getElementById('downloadsJanitorApprove').click();
+  await settle();
+  doc.getElementById('downloadsJanitorConfirmApply').click();
+  await settle();
+  await settle();
+
+  const body = text(doc);
+  assert.match(body, /Review unavailable/);
+  assert.match(body, /Showing the last known batch/);
+  assert.match(body, /1 file filed/);
+  assert.match(body, /Filed\/Documents\/invoice\.pdf/);
+  assert.doesNotMatch(body, /Nothing to review/);
+});
+
+// ------------------------------------------------------------------- Trash
 
 test('Trash is a per-file choice, never part of the move selection', () => {
   const doc = setup();
@@ -1471,7 +1772,8 @@ function statusFixture(overrides = {}) {
         root_path: '/tmp/Inbox',
         directory_reference_id: 'ref-1',
         filing_root_name: 'Filed',
-        daily_scan_local_time: '09:00'
+        daily_scan_local_time: '09:00',
+        content_mode: 'metadata_only'
       },
       readiness: { state: 'ready', checks: [{ component: 'directory_access', status: 'ok' }] }
     },
@@ -1609,8 +1911,9 @@ test('the card always states what Ori reads, without opening settings', () => {
     })
   );
   const body = cardText(doc);
-  assert.match(body, /names, types, sizes, and dates only/);
-  assert.match(body, /No file contents are opened or read/);
+  assert.match(body, /Local only · file details/);
+  assert.match(body, /Names, types, sizes, and dates/);
+  assert.match(body, /no file contents are read/);
 });
 
 test('a cloud provider is named, and the pending confirmation is the action', () => {
@@ -1628,15 +1931,64 @@ test('a cloud provider is named, and the pending confirmation is the action', ()
     })
   );
   const body = cardText(doc);
-  assert.match(body, /SomeCloud/);
-  assert.match(body, /outside this device/);
-  assert.match(body, /Nothing has been sent yet/);
+  assert.match(body, /Cloud with consent · SomeCloud/);
+  assert.match(body, /Consent required before any extract is sent/);
 
   const host = doc.getElementById('downloadsJanitorMount');
-  const confirm = host.all(
-    n => n.tagName === 'BUTTON' && /Confirm SomeCloud/.test(n.textContent)
+  const consentReview = host.all(
+    n => n.tagName === 'BUTTON' && /Review consent/.test(n.textContent)
   )[0];
-  assert.ok(confirm, 'an unconfirmed provider must offer the confirmation');
+  assert.ok(consentReview, 'an unconfirmed provider must make consent the primary next step');
+});
+
+test('compact privacy distinguishes local inspection and unavailable data', () => {
+  const doc = setup();
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(
+    privacyStatus({
+      mode: 'local_model',
+      provider: 'LocalModel',
+      leaves_device: false
+    })
+  );
+  assert.match(cardText(doc), /Local only · on-device text/);
+  assert.match(cardText(doc), /stay on this device with LocalModel/);
+
+  panel.render(
+    statusFixture({
+      settings: {
+        ...statusFixture().settings,
+        content_mode: 'future_unknown_mode'
+      },
+      privacy: { mode: 'future_unknown_mode' }
+    })
+  );
+  assert.match(cardText(doc), /Privacy unavailable/);
+  assert.match(cardText(doc), /Open Settings to confirm/);
+});
+
+test('compact server-derived privacy remains visible in the console on every tab', () => {
+  const doc = setup();
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  openConsole(
+    privacyStatus({
+      mode: 'cloud_model',
+      provider: 'SomeCloud',
+      leaves_device: true,
+      consent_required: false
+    })
+  );
+
+  for (const tab of ['review', 'history', 'settings']) {
+    panel._selectTab(tab);
+    const lines = surface(doc).all(node =>
+      String(node.className || '')
+        .split(/\s+/)
+        .includes('fj-console-privacy')
+    );
+    assert.equal(lines.length, 1, `${tab} keeps the shared privacy line`);
+    assert.match(lines[0].textContent, /Cloud with consent · SomeCloud/);
+  }
 });
 
 test('settings spell out the consequence of each content option', () => {
@@ -1729,6 +2081,38 @@ test('stopping use of a folder confirms first and explains what is kept', async 
   stop.click();
   await new Promise(r => setTimeout(r, 0));
   assert.equal(called, true, 'the second press confirms');
+});
+
+test('console tabs expose their panel and support arrow, Home, and End navigation', () => {
+  const doc = setup();
+  renderReview(doc);
+  const event = key => ({ key, preventDefault() {} });
+
+  let review = doc.getElementById('fileJanitorTab-review');
+  assert.equal(review.getAttribute('aria-selected'), 'true');
+  assert.equal(review.getAttribute('tabindex'), '0');
+  assert.equal(review.getAttribute('aria-controls'), 'fileJanitorConsoleBody');
+  assert.equal(doc.getElementById('fileJanitorConsoleBody').getAttribute('role'), 'tabpanel');
+  assert.equal(
+    doc.getElementById('fileJanitorConsoleBody').getAttribute('aria-labelledby'),
+    'fileJanitorTab-review'
+  );
+
+  review.dispatch('keydown', event('ArrowRight'));
+  let history = doc.getElementById('fileJanitorTab-history');
+  assert.equal(panel.activeTab(), 'history');
+  assert.equal(history.getAttribute('aria-selected'), 'true');
+  assert.equal(doc.activeElement, history);
+
+  history.dispatch('keydown', event('End'));
+  const settings = doc.getElementById('fileJanitorTab-settings');
+  assert.equal(panel.activeTab(), 'settings');
+  assert.equal(doc.activeElement, settings);
+
+  settings.dispatch('keydown', event('Home'));
+  review = doc.getElementById('fileJanitorTab-review');
+  assert.equal(panel.activeTab(), 'review');
+  assert.equal(doc.activeElement, review);
 });
 
 test('the Settings tab reports whether it is the selected tab', () => {
@@ -2381,6 +2765,28 @@ test('closing returns focus to the control that opened it', () => {
   assert.equal(doc.activeElement, station, 'focus must go back where the user left it');
 });
 
+test('closing after a view switch never restores focus to the now-hidden Details card', () => {
+  const doc = setup();
+  doc.body.dataset = { workspaceViewMode: 'details' };
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(statusFixture());
+  const cardTrigger = doc.getElementById('fileJanitorCardOpen');
+
+  const station = new FakeElement('button');
+  station.setAttribute('data-cmd-hq-station', 'file-janitor');
+  doc.body.appendChild(station);
+  doc.querySelector = selector =>
+    selector === '[data-cmd-hq-station="file-janitor"]' ? station : null;
+
+  panel.open({ source: 'workspace-details', trigger: cardTrigger });
+  doc.body.dataset.workspaceViewMode = 'map';
+  panel._syncSummaryVisibility();
+  assert.equal(doc.getElementById('downloadsJanitorMount').hidden, true);
+
+  panel.close();
+  assert.equal(doc.activeElement, station, 'the visible station is the live equivalent entry');
+});
+
 test('opening puts focus inside the console', () => {
   const doc = setup();
   renderReview(doc);
@@ -2515,7 +2921,22 @@ test('station state follows the required priority order', () => {
   });
   assert.equal(panel.stationState().value, 'Setup needed');
 
-  // Files waiting outrank both Paused and Watching.
+  // Consent is an explicit prerequisite and leads to the Settings control,
+  // before ordinary pending work.
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.render(
+    statusFixture({
+      privacy: {
+        mode: 'cloud_model',
+        provider: 'Example Cloud',
+        consent_required: true
+      }
+    })
+  );
+  assert.equal(panel.stationState().value, 'Consent required');
+  assert.equal(panel.stationState().actionTab, 'settings');
+
+  // Files waiting outrank both Paused and Watching once prerequisites are met.
   panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
   panel.render(statusFixture({ settings: { ...statusFixture().settings, paused: true } }));
   assert.equal(panel.stationState().value, '2 files ready for review');
@@ -2530,15 +2951,74 @@ test('station state follows the required priority order', () => {
   assert.equal(panel.stationState().value, 'Watching');
 });
 
+test('the station keeps product identity, managed folder, depot art, and state distinct', () => {
+  setup();
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.render(statusFixture());
+  globalThis.window.WorkspaceCapabilities = {
+    find: () => ({
+      installed: true,
+      available: true,
+      status: { folder_display_name: 'A very long approved inbox folder' }
+    })
+  };
+  const adapter = globalThis.window.WorkspaceBuiltinStationAdapters.find(
+    entry => entry.key === 'file-janitor'
+  );
+
+  const station = adapter.station();
+  assert.equal(station.label, 'File Janitor');
+  assert.equal(station.location, 'A very long approved inbox folder');
+  assert.equal(station.visualVariant, 'depot');
+  assert.equal(station.state().value, '2 files ready for review');
+});
+
+test('the station sends consent-required workspaces to the existing consent control', () => {
+  const doc = setup();
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(
+    statusFixture({
+      privacy: {
+        mode: 'cloud_model',
+        headline: 'Ori may inspect a short text extract.',
+        detail: 'Nothing has been sent yet.',
+        provider: 'Example Cloud',
+        leaves_device: true,
+        consent_required: true
+      }
+    })
+  );
+  globalThis.window.WorkspaceCapabilities = {
+    find: () => ({ installed: true, available: true, status: {} })
+  };
+  const adapter = globalThis.window.WorkspaceBuiltinStationAdapters.find(
+    entry => entry.key === 'file-janitor'
+  );
+  const station = adapter.station();
+  const trigger = new FakeElement('button');
+  doc.body.appendChild(trigger);
+
+  station.action(trigger);
+
+  assert.equal(panel.activeTab(), 'settings');
+  assert.match(surface(doc).textContent, /Confirm Example Cloud/);
+});
+
 test('Workspace Details carries no review table and no settings form', () => {
   const doc = setup();
+  doc.body.dataset = { workspaceViewMode: 'details' };
   renderReview(doc);
+  panel.render(statusFixture());
   const card = doc.getElementById('downloadsJanitorMount');
 
   // The compact card answers "is anything waiting?" and offers a way in.
+  assert.match(card.textContent, /File depot/);
   assert.match(card.textContent, /File Janitor/);
-  assert.match(card.textContent, /2 files waiting for review/);
-  assert.ok(doc.getElementById('fileJanitorCardOpen'), 'expected a way into the console');
+  assert.match(card.textContent, /Current status Review ready/);
+  assert.match(card.textContent, /Managed folder Inbox/);
+  assert.match(card.textContent, /Review queue 2 files waiting for review/);
+  assert.match(card.textContent, /Privacy mode Local only/);
+  assert.equal(doc.getElementById('fileJanitorCardOpen').textContent, 'Review files · 2');
 
   // And nothing else. A hidden second copy of the review table or the settings
   // form is exactly what this split removes: two surfaces acting on the same
@@ -2548,6 +3028,157 @@ test('Workspace Details carries no review table and no settings form', () => {
   assert.equal(card.all(n => n.id === 'downloadsJanitorSettingsHost').length, 0);
   assert.equal(card.all(n => n.id === 'downloadsJanitorBatch').length, 0);
   assert.equal(card.all(n => n.id === 'downloadsJanitorHistoryHost').length, 0);
+});
+
+test('the compact card keeps a 179-file paused queue review-led', () => {
+  const doc = setup();
+  doc.body.dataset = { workspaceViewMode: 'details' };
+  const batch = batchFixture();
+  batch.summary = { ...batch.summary, proposed: 179 };
+  panel._setBatch(batch, candidatesFixture(), CATEGORIES);
+  panel.render(statusFixture({ settings: { ...statusFixture().settings, paused: true } }));
+
+  assert.equal(badgeText(doc), 'Review ready');
+  assert.match(cardText(doc), /179 files waiting for review/);
+  assert.match(cardText(doc), /automatic scanning paused/);
+  assert.equal(doc.getElementById('fileJanitorCardOpen').textContent, 'Review files · 179');
+});
+
+test('compact queue actions remain explicit at zero, one, and large counts', () => {
+  const doc = setup();
+  doc.body.dataset = { workspaceViewMode: 'details' };
+
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(statusFixture());
+  assert.equal(doc.getElementById('fileJanitorCardOpen').textContent, 'Open review');
+  assert.equal(badgeText(doc), 'Watching');
+
+  for (const count of [1, 12345]) {
+    const batch = batchFixture();
+    batch.summary = { ...batch.summary, proposed: count };
+    panel._setBatch(batch, candidatesFixture(), CATEGORIES);
+    panel.render(statusFixture());
+    assert.equal(doc.getElementById('fileJanitorCardOpen').textContent, `Review files · ${count}`);
+    assert.match(cardText(doc), new RegExp(`${count} files? waiting for review`));
+  }
+});
+
+test('a batch loaded after status refreshes the compact review action', async () => {
+  const doc = setup();
+  doc.body.dataset = { workspaceViewMode: 'details' };
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(statusFixture());
+  assert.equal(doc.getElementById('fileJanitorCardOpen').textContent, 'Open review');
+
+  globalThis.fetch = async url => {
+    const target = String(url);
+    if (target.includes('/batches/latest')) {
+      return {
+        ok: true,
+        json: async () => ({
+          batch: batchFixture(),
+          candidates: candidatesFixture(),
+          total: 2,
+          filtered_total: 2,
+          counts: { all: 2, needs_review: 1, pending: 2, skipped: 1 }
+        })
+      };
+    }
+    if (target.includes('/categories')) {
+      return { ok: true, json: async () => ({ categories: CATEGORIES }) };
+    }
+    return { ok: true, json: async () => ({ status: statusFixture() }) };
+  };
+
+  panel.open({ source: 'workspace-details', tab: 'review' });
+  await settle();
+  await settle();
+
+  assert.equal(doc.getElementById('fileJanitorCardOpen').textContent, 'Review files · 2');
+  assert.equal(badgeText(doc), 'Review ready');
+});
+
+test('a review-labelled Details action explicitly leaves remembered History for Review', () => {
+  const doc = setup();
+  doc.body.dataset = { workspaceViewMode: 'details' };
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(statusFixture());
+  panel.open({ source: 'test', tab: 'history' });
+  panel._selectTab('history');
+  panel.close();
+
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.render(statusFixture());
+  const action = doc.getElementById('fileJanitorCardOpen');
+  assert.equal(action.textContent, 'Review files · 2');
+  action.click();
+
+  assert.equal(panel.activeTab(), 'review');
+});
+
+test('the compact card sends consent-required work to Settings', () => {
+  const doc = setup();
+  doc.body.dataset = { workspaceViewMode: 'details' };
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(
+    statusFixture({
+      privacy: {
+        mode: 'cloud_model',
+        headline: 'Ori may read a short extract.',
+        detail: 'Nothing has been sent yet.',
+        provider: 'Example Cloud',
+        leaves_device: true,
+        consent_required: true
+      }
+    })
+  );
+
+  assert.equal(badgeText(doc), 'Consent required');
+  assert.match(cardText(doc), /Privacy mode Cloud with consent · Example Cloud/);
+  assert.match(cardText(doc), /Consent required before any extract is sent/);
+  const action = doc.getElementById('fileJanitorCardOpen');
+  assert.equal(action.textContent, 'Review consent');
+  action.click();
+  assert.equal(panel.activeTab(), 'settings');
+});
+
+test('the configured summary is visible only in Details across status refreshes', () => {
+  const doc = setup();
+  const status = statusFixture();
+  const card = doc.getElementById('downloadsJanitorMount');
+
+  doc.body.dataset = { workspaceViewMode: 'details' };
+  panel.render(status);
+  assert.equal(card.hidden, false, 'Details owns the compact fallback summary');
+
+  for (const mode of ['map', 'tickets', 'dashboard']) {
+    doc.body.dataset.workspaceViewMode = mode;
+    // A status refresh is the path that used to set hidden=false regardless of
+    // the active view, resurrecting the full-width banner over Map.
+    panel.render(status);
+    assert.equal(card.hidden, true, `${mode} must not inherit the Details summary`);
+  }
+});
+
+test('slow capability status cannot reveal the summary in a direct Map entry', () => {
+  const doc = setup();
+  doc.body.dataset = { workspaceViewMode: 'map' };
+  const card = doc.getElementById('downloadsJanitorMount');
+
+  panel.render({ applies: false });
+  assert.equal(card.hidden, true);
+  // This render represents the delayed status response arriving after Command
+  // has already resolved ?mode=map.
+  panel.render(statusFixture());
+  assert.equal(card.hidden, true, 'late installed state is not presentation permission');
+  assert.ok(card.children.length > 0, 'the Details fallback remains ready for a later view switch');
+});
+
+test('the summary falls back to Details when Workspace Command is unavailable', () => {
+  const doc = setup();
+  delete doc.body.dataset;
+  panel.render(statusFixture());
+  assert.equal(doc.getElementById('downloadsJanitorMount').hidden, false);
 });
 
 test('the console header carries the real scan and pause controls', () => {
@@ -2665,6 +3296,27 @@ function pagedFetch(total, pageSize = 50) {
 // The point of server-side paging: a 500-file batch must never become 500 DOM
 // rows. This is the assertion that fails if anyone reintroduces client-side
 // rendering of the whole batch (FR-150).
+test('a failed batch read is unavailable, not an empty folder, and keeps stale data inert', async () => {
+  const doc = setup();
+  renderReview(doc);
+  await settle();
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.render(statusFixture());
+  panel.renderBatch();
+
+  globalThis.fetch = async () => ({ ok: false, json: async () => ({}) });
+  await panel._reloadBatch();
+
+  const host = surface(doc);
+  assert.match(host.textContent, /Review unavailable/);
+  assert.match(host.textContent, /Showing the last known batch/);
+  assert.match(host.textContent, /invoice-2026-07\.pdf/);
+  assert.doesNotMatch(host.textContent, /Nothing to review/);
+  assert.equal(host.all(node => node.className === 'dj-select')[0].disabled, true);
+  assert.equal(doc.getElementById('downloadsJanitorApprove').disabled, true);
+  assert.ok(host.all(node => node.tagName === 'BUTTON' && node.textContent === 'Retry')[0]);
+});
+
 test('a 500-file batch renders one page of rows, not five hundred', async () => {
   const doc = setup();
   renderReview(doc);
@@ -2701,6 +3353,40 @@ test('paging forward asks for the next page and keeps the counts', async () => {
   assert.equal(surface(doc).all(n => n.id === 'downloadsJanitorPagePrev')[0].disabled, false);
 });
 
+test('a shrunken last page refetches the real final page instead of stranding an empty view', async () => {
+  const doc = setup();
+  renderReview(doc);
+  globalThis.fetch = pagedFetch(120);
+  await settle();
+  await panel._reloadBatch();
+
+  surface(doc)
+    .all(n => n.id === 'downloadsJanitorPageNext')[0]
+    .click();
+  await settle();
+  surface(doc)
+    .all(n => n.id === 'downloadsJanitorPageNext')[0]
+    .click();
+  await settle();
+  assert.match(surface(doc).textContent, /Showing 101–120/);
+
+  const offsets = [];
+  const shrunkFetch = pagedFetch(75);
+  globalThis.fetch = async url => {
+    if (String(url).includes('/batches/latest')) {
+      const params = new URLSearchParams(String(url).split('?')[1] || '');
+      offsets.push(Number(params.get('offset')) || 0);
+    }
+    return shrunkFetch(url);
+  };
+  await panel._reloadBatch();
+
+  assert.deepEqual(offsets, [100, 50]);
+  assert.equal(rowsIn(surface(doc)).length, 25);
+  assert.match(surface(doc).textContent, /Showing 51–75 of 75 files/);
+  assert.doesNotMatch(surface(doc).textContent, /No files match this filter/);
+});
+
 // A user reviewing 300 files must not lose their work by turning a page.
 test('selections survive a page change', async () => {
   const doc = setup();
@@ -2723,8 +3409,14 @@ test('selections survive a page change', async () => {
     ['c0', 'c1'],
     'turning a page must not discard decisions already made'
   );
-  // And the approve control still reflects them, from the new page.
-  assert.equal(doc.getElementById('downloadsJanitorApprove').disabled, false);
+  panel._select('c50');
+  assert.deepEqual(
+    panel._selected().sort(),
+    ['c0', 'c1', 'c50'],
+    'the selection may intentionally span server pages'
+  );
+  // And the review control reflects both off-page and current-page choices.
+  assert.equal(doc.getElementById('downloadsJanitorApprove').textContent, 'Review 3 moves');
 });
 
 // The other half of the rule: a file that has since been filed, skipped, or
@@ -2834,22 +3526,49 @@ test('a flagged row cannot be selected until the user chooses a category', () =>
   assert.equal(confidentRow.all(n => n.className === 'dj-select')[0].disabled, false);
 });
 
-test('choosing a category makes a flagged row selectable', async () => {
+test('choosing a category makes a flagged row selectable and keeps focus', async () => {
   const doc = setup();
   renderReview(doc);
   await settle();
-
-  const resolved = candidatesFixture().map(c =>
-    c.id === 'c2' ? { ...c, decision_category: 'documents' } : c
-  );
-  panel._setBatch(batchFixture(), resolved, CATEGORIES);
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.render(statusFixture());
   panel.renderBatch();
 
-  const flaggedRow = rowsIn(surface(doc)).find(r => r.textContent.includes('payload.bin'));
+  const resolved = candidatesFixture().map(candidate =>
+    candidate.id === 'c2' ? { ...candidate, decision_category: 'documents' } : candidate
+  );
+  globalThis.fetch = async (_url, options) =>
+    options?.method === 'POST'
+      ? { ok: true, json: async () => ({}) }
+      : {
+          ok: true,
+          json: async () => ({
+            batch: batchFixture(),
+            candidates: resolved,
+            total: resolved.length,
+            filtered_total: resolved.length,
+            counts: { all: resolved.length, needs_review: 1, pending: 2, skipped: 1 }
+          })
+        };
+
+  const before = rowsIn(surface(doc)).find(row => row.textContent.includes('payload.bin'));
+  const category = before.all(node => node.className === 'dj-category')[0];
+  category.focus();
+  category.value = 'documents';
+  category.dispatch('change');
+  await settle();
+  await settle();
+
+  const flaggedRow = rowsIn(surface(doc)).find(row => row.textContent.includes('payload.bin'));
   assert.equal(
-    flaggedRow.all(n => n.className === 'dj-select')[0].disabled,
+    flaggedRow.all(node => node.className === 'dj-select')[0].disabled,
     false,
     'the user has now said where it goes'
+  );
+  assert.equal(
+    doc.activeElement,
+    flaggedRow.all(node => node.className === 'dj-category')[0],
+    'the server repaint must not drop focus from the decision control'
   );
 });
 

@@ -216,10 +216,124 @@
   margin-top: 1rem;
 }
 
-.dj-batch-summary {
-  font-size: 0.82rem;
-  margin: 0 0 0.6rem;
+.dj-batch-progress {
+  display: grid;
+  grid-template-columns: minmax(9rem, 0.7fr) minmax(13rem, 1fr);
+  gap: 0.2rem 1rem;
+  margin-bottom: 0.4rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg-tertiary, #242424) 62%, transparent);
+}
+
+.dj-batch-progress-title,
+.dj-batch-progress-main {
+  margin: 0;
+}
+
+.dj-batch-progress-title {
+  color: var(--text-secondary, #9aa0a6);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.dj-batch-progress-main {
+  grid-row: 2;
   color: var(--text-primary, #e8e8e8);
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+
+.dj-batch-progress-counts {
+  display: flex;
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.8rem;
+  align-content: center;
+  margin: 0;
+}
+
+.dj-batch-progress-count {
+  display: flex;
+  gap: 0.25rem;
+  align-items: baseline;
+  min-width: max-content;
+}
+
+.dj-batch-progress-number,
+.dj-batch-progress-label {
+  margin: 0;
+  font-size: 0.72rem;
+}
+
+.dj-batch-progress-number {
+  color: var(--text-primary, #e8e8e8);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.dj-batch-progress-label {
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-batch-progress-count.is-attention .dj-batch-progress-number,
+.dj-batch-progress-count.is-problem .dj-batch-progress-number {
+  color: var(--warning-color, #b26a00);
+}
+
+.dj-batch-summary {
+  font-size: 0.76rem;
+  margin: 0 0 0.6rem;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-batch-load-notice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.65rem;
+  align-items: center;
+  margin-bottom: 0.65rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border-color, #2f2f2f);
+  border-radius: 8px;
+  background: var(--surface-1, rgba(255, 255, 255, 0.03));
+}
+
+.dj-batch-load-error {
+  border-color: color-mix(in srgb, var(--warning-color, #b26a00) 55%, transparent);
+}
+
+.dj-batch-load-title,
+.dj-batch-load-copy {
+  margin: 0;
+}
+
+.dj-batch-load-title {
+  color: var(--text-primary, #e8e8e8);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.dj-batch-load-copy {
+  flex: 1 1 18rem;
+  color: var(--text-secondary, #9aa0a6);
+  font-size: 0.78rem;
+}
+
+.dj-batch-load-notice .dj-btn {
+  margin-left: auto;
+}
+
+.dj-batch-scan-status {
+  margin: 0 0 0.65rem;
+  padding: 0.45rem 0.6rem;
+  border-left: 3px solid var(--accent-color, #3b7dd8);
+  color: var(--text-secondary, #9aa0a6);
+  font-size: 0.78rem;
 }
 
 .dj-filters {
@@ -239,6 +353,11 @@
   cursor: pointer;
 }
 
+.dj-filter:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 .dj-filter-active {
   color: var(--text-primary, #e8e8e8);
   border-color: var(--accent-color, #3b7dd8);
@@ -252,18 +371,20 @@
   outline-offset: 2px;
 }
 
-/* A hundred-file batch has to stay usable: the table scrolls inside its own
-   container rather than pushing the page sideways. */
+/* Review scrolling belongs to the console body. Keeping the table wrapper out
+   of the scroll chain prevents a focused row from disappearing underneath a
+   second nested viewport. */
 .dj-table-scroll {
-  overflow-x: auto;
-  max-height: 28rem;
-  overflow-y: auto;
+  min-width: 0;
+  margin-bottom: 4.5rem;
+  overflow: visible;
   border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
   border-radius: 8px;
 }
 
 .dj-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 0.8rem;
 }
@@ -277,8 +398,29 @@
   background: var(--bg-secondary, #1c1c1e);
   color: var(--text-secondary, #9aa0a6);
   font-weight: 600;
-  white-space: nowrap;
+  white-space: normal;
   border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.dj-th:nth-child(1),
+.dj-cell-select {
+  width: 3.25rem;
+}
+
+.dj-th:nth-child(2) {
+  width: 24%;
+}
+
+.dj-th:nth-child(3) {
+  width: 24%;
+}
+
+.dj-th:nth-child(4) {
+  width: 30%;
+}
+
+.dj-th:nth-child(5) {
+  width: 10.5rem;
 }
 
 .dj-cell {
@@ -290,12 +432,61 @@
 
 .dj-cell-name {
   color: var(--text-primary, #e8e8e8);
-  max-width: 22rem;
   overflow-wrap: anywhere;
 }
 
 .dj-name {
   font-weight: 500;
+}
+
+.dj-file-disclosure {
+  margin-top: 0.28rem;
+}
+
+.dj-file-details-toggle {
+  min-height: 28px;
+  padding: 0.1rem 0;
+  color: var(--accent-color, #3b7dd8);
+  font: inherit;
+  font-size: 0.72rem;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.dj-file-details-toggle:hover {
+  color: var(--accent-hover, #2f6ec3);
+}
+
+.dj-file-details {
+  display: grid;
+  gap: 0.18rem;
+  margin: 0.2rem 0 0;
+  scroll-margin-bottom: 5.5rem;
+  font-size: 0.72rem;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-file-details[hidden] {
+  display: none;
+}
+
+.dj-file-detail {
+  display: grid;
+  grid-template-columns: 4.2rem minmax(0, 1fr);
+  gap: 0.35rem;
+}
+
+.dj-file-detail-label,
+.dj-file-detail-value {
+  margin: 0;
+}
+
+.dj-file-detail-label {
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
 }
 
 .dj-flag {
@@ -309,13 +500,9 @@
   color: var(--warning-color, #b26a00);
 }
 
-.dj-cell-size,
-.dj-cell-modified {
-  white-space: nowrap;
-}
-
 .dj-category {
-  max-width: 11rem;
+  width: 100%;
+  max-width: 13rem;
   padding: 0.2rem 0.35rem;
   border-radius: 6px;
   border: 1px solid var(--border-color, rgba(255, 255, 255, 0.14));
@@ -334,7 +521,6 @@
 }
 
 .dj-cell-reason {
-  max-width: 18rem;
   overflow-wrap: anywhere;
 }
 
@@ -350,13 +536,25 @@
 }
 
 .dj-state {
-  white-space: nowrap;
+  display: block;
+  width: fit-content;
+  margin-top: 0.3rem;
+  padding: 0.08rem 0.34rem;
+  color: var(--text-primary, #e8e8e8);
+  white-space: normal;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.14));
+  border-radius: 999px;
+}
+
+.dj-cell-mobile-label {
+  display: none;
 }
 
 /* Low-confidence and changed rows are marked by text as well as tint, so the
    distinction survives without colour. */
 .dj-row-state-stale,
-.dj-row-state-failed {
+.dj-row-state-failed,
+.dj-row-item.is-needs-review {
   background: color-mix(in srgb, var(--warning-color, #b26a00) 8%, transparent);
 }
 
@@ -402,6 +600,103 @@
   color: var(--text-secondary, #9aa0a6);
 }
 
+.dj-empty .dj-btn {
+  margin-top: 0.65rem;
+}
+
+@media (max-width: 680px) {
+  .dj-batch-progress {
+    grid-template-columns: 1fr;
+  }
+
+  .dj-batch-progress-main,
+  .dj-batch-progress-counts {
+    grid-row: auto;
+    grid-column: 1;
+  }
+
+  .dj-batch-progress-counts {
+    margin-top: 0.35rem;
+  }
+
+  .dj-batch-load-notice .dj-btn {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .dj-table-scroll {
+    border: 0;
+  }
+
+  .dj-table,
+  .dj-tbody {
+    display: block;
+  }
+
+  .dj-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .dj-row-item {
+    display: grid;
+    grid-template-columns: 2.25rem minmax(0, 1fr);
+    gap: 0.25rem 0.5rem;
+    margin-bottom: 0.65rem;
+    padding: 0.65rem;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+    border-radius: 8px;
+  }
+
+  .dj-cell {
+    display: block;
+    min-width: 0;
+    padding: 0.18rem 0;
+    border: 0;
+  }
+
+  .dj-cell-select {
+    grid-row: 1;
+    grid-column: 1;
+    width: auto;
+  }
+
+  .dj-cell-name {
+    grid-row: 1;
+    grid-column: 2;
+  }
+
+  .dj-cell-destination,
+  .dj-cell-why-status,
+  .dj-cell-actions {
+    grid-column: 1 / -1;
+  }
+
+  .dj-cell-mobile-label {
+    display: block;
+    margin-bottom: 0.2rem;
+    color: var(--text-secondary, #9aa0a6);
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .dj-category {
+    max-width: none;
+  }
+
+  .dj-cell-actions .dj-btn {
+    min-height: 44px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .dj-btn,
   .dj-filter {
@@ -412,16 +707,29 @@
 /* --------------------------------------------------- confirmation & results */
 
 .dj-footer {
+  position: sticky;
+  bottom: -1.25rem;
+  z-index: 2;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
   margin-top: 0.6rem;
+  padding: 0.65rem 0 0.7rem;
+  background: var(--bg-secondary, #1a1a1a);
+  border-top: 1px solid var(--border-color, #2f2f2f);
+  box-shadow: 0 -10px 20px color-mix(in srgb, var(--bg-secondary, #1a1a1a) 88%, transparent);
 }
 
 .dj-footer .dj-selection {
   margin: 0;
+}
+
+.dj-footer .dj-btn-primary:disabled {
+  color: var(--text-secondary, #9aa0a6);
+  background: var(--bg-tertiary, #2a2a2a);
+  border-color: var(--border-color, #2f2f2f);
 }
 
 .dj-confirm {
@@ -492,6 +800,19 @@
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--text-primary, #e8e8e8);
+}
+
+.dj-results-replayed {
+  margin: -0.2rem 0 0.55rem;
+  color: var(--text-secondary, #9aa0a6);
+  font-size: 0.78rem;
+}
+
+.dj-results-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.7rem;
 }
 
 .dj-results-mark {
@@ -827,6 +1148,13 @@
   color: var(--text-primary, #e8e8e8);
 }
 
+.fj-console-privacy {
+  margin: 0.2rem 0 0;
+  color: var(--text-secondary, #9aa0a6);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
 .fj-console-actions {
   display: flex;
   flex-wrap: wrap;
@@ -887,8 +1215,9 @@
   min-width: 0;
   min-height: 0;
   padding: 1rem 1.25rem 1.25rem;
-  overflow-x: auto;
+  overflow-x: hidden;
   overflow-y: auto;
+  scroll-padding-block: 0.75rem 5.5rem;
   overscroll-behavior: contain;
 }
 
@@ -928,58 +1257,356 @@
   }
 }
 
-/* ------------------------------------------------------- compact card
+/* ------------------------------------------------------- compact depot card
 
-   Workspace Details carries a summary and a way in — never the review table.
-   Its job is to answer "is anything waiting?" at a glance (FR-114). */
+   Workspace Details carries an operational summary and a way in — never the
+   review table. Its clipped shell, mono readouts, folder, and sorting rail echo
+   Workspace Command without copying the whole Map surface (FR-114). All
+   surfaces and semantic colours resolve through Ori's light/dark theme tokens. */
+
+.downloads-janitor-mount {
+  --fj-depot-accent: var(--warning-color);
+  --fj-depot-surface: var(--bg-secondary);
+  --fj-depot-surface-raised: var(--bg-tertiary);
+  --fj-depot-line: var(--border-color);
+  --fj-depot-line-bright: var(--border-light);
+  --fj-depot-ink: var(--text-primary);
+  --fj-depot-ink-dim: var(--text-secondary);
+  --fj-depot-ink-faint: var(--text-muted);
+  --fj-depot-display: "Chakra Petch", system-ui, sans-serif;
+  --fj-depot-mono: "JetBrains Mono", ui-monospace, monospace;
+}
 
 .fj-card {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  padding: 0.9rem 1rem;
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(17rem, 0.85fr) minmax(0, 2fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  min-width: 0;
+  padding: 0.45rem 0.8rem;
   margin-bottom: 1rem;
-  background: var(--bg-secondary, #1a1a1a);
-  border: 1px solid var(--border-color, #2f2f2f);
-  border-radius: 10px;
+  overflow: hidden;
+  color: var(--fj-depot-ink);
+  font-family: var(--fj-depot-display);
+  background:
+    linear-gradient(
+      110deg,
+      color-mix(in srgb, var(--fj-depot-accent) 8%, transparent),
+      transparent 38%
+    ),
+    var(--fj-depot-surface);
+  border: 1px solid var(--fj-depot-line);
+  border-top: 2px solid var(--fj-depot-accent);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%);
+}
+
+/* Static rail ticks make the card read as a sorting depot without animation or
+   decorative click targets. */
+.fj-card::after {
+  content: "";
+  position: absolute;
+  right: 1rem;
+  bottom: 0;
+  width: min(28%, 15rem);
+  height: 4px;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--fj-depot-accent) 0 10px,
+    transparent 10px 16px
+  );
+  opacity: 0.45;
 }
 
 .fj-card-head {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-  align-items: flex-start;
-  justify-content: space-between;
-}
-
-.fj-card-heading {
+  gap: 0.75rem;
+  align-items: center;
   min-width: 0;
 }
 
-.fj-card-title {
-  margin: 0;
-  font-size: 1rem;
+.fj-card-heading {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.fj-card-kicker,
+.fj-card-fact-label {
+  display: block;
+  color: var(--fj-depot-ink-faint);
+  font-family: var(--fj-depot-mono);
+  font-size: 0.64rem;
   font-weight: 600;
-  color: var(--text-primary, #e8e8e8);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.fj-card-title {
+  margin: 0.05rem 0 0;
+  color: var(--fj-depot-ink);
+  font-family: var(--fj-depot-display);
+  font-size: 1.12rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .fj-card-sub {
-  margin: 0.15rem 0 0;
-  font-size: 0.82rem;
-  color: var(--text-secondary, #9aa0a6);
+  margin: 0.12rem 0 0;
+  color: var(--fj-depot-ink-dim);
+  font-size: 0.78rem;
   overflow-wrap: anywhere;
 }
 
-.fj-card-stats {
-  margin: 0.2rem 0 0;
+.fj-card-depot-mark {
+  position: relative;
+  flex: 0 0 76px;
+  width: 76px;
+  height: 58px;
+  overflow: hidden;
+  color: var(--fj-depot-accent);
+  background: var(--fj-depot-surface-raised);
+  border: 1px solid var(--fj-depot-line-bright);
+  border-radius: var(--radius-sm);
+}
+
+.fj-card-depot-folder {
+  position: absolute;
+  top: 12px;
+  left: 11px;
+  width: 31px;
+  height: 23px;
+  background: color-mix(in srgb, currentColor 24%, transparent);
+  border: 2px solid currentColor;
+  border-radius: 2px;
+}
+
+.fj-card-depot-folder::before {
+  content: "";
+  position: absolute;
+  top: -8px;
+  left: -2px;
+  width: 15px;
+  height: 7px;
+  border: 2px solid currentColor;
+  border-bottom: 0;
+  border-radius: 2px 2px 0 0;
+}
+
+.fj-card-depot-folder::after {
+  content: "↓";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--fj-depot-ink);
+  font-family: var(--fj-depot-mono);
   font-size: 0.8rem;
-  color: var(--text-primary, #e8e8e8);
+  font-weight: 700;
+}
+
+.fj-card-depot-rail {
+  position: absolute;
+  right: -6px;
+  bottom: 10px;
+  width: 48px;
+  height: 13px;
+  transform: rotate(-13deg);
+  background: repeating-linear-gradient(
+    90deg,
+    var(--fj-depot-line-bright) 0 3px,
+    transparent 3px 8px
+  );
+  border-block: 1px solid currentColor;
+}
+
+.fj-card-depot-parcel {
+  position: absolute;
+  width: 12px;
+  height: 10px;
+  background: var(--fj-depot-surface-raised);
+  border: 1px solid currentColor;
+  transform: rotate(-13deg);
+}
+
+.fj-card-depot-parcel-one {
+  right: 26px;
+  bottom: 23px;
+}
+
+.fj-card-depot-parcel-two {
+  right: 7px;
+  bottom: 29px;
+}
+
+.fj-card-facts {
+  display: grid;
+  grid-template-columns:
+    minmax(7.5rem, 0.7fr) minmax(12rem, 1.25fr) minmax(12rem, 1.25fr)
+    minmax(13.5rem, 1.4fr);
+  gap: 1px;
+  margin: 0;
+  overflow: hidden;
+  background: var(--fj-depot-line);
+  border: 1px solid var(--fj-depot-line);
+  border-radius: var(--radius-sm);
+}
+
+.fj-card-fact {
+  min-width: 0;
+  padding: 0.38rem 0.6rem;
+  background: var(--fj-depot-surface-raised);
+}
+
+.fj-card-fact-value {
+  min-width: 0;
+  margin: 0.22rem 0 0;
+  color: var(--fj-depot-ink);
+  font-family: var(--fj-depot-display);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.fj-card-fact-main {
+  display: block;
+}
+
+.fj-card-fact-value.dj-badge {
+  display: inline-flex;
+  width: fit-content;
+  padding: 0.14rem 0.45rem;
+  font-family: var(--fj-depot-mono);
+  font-size: 0.66rem;
+  border: 1px solid var(--fj-depot-line-bright);
+  border-radius: 2px;
+}
+
+.fj-card-fact-note {
+  display: block;
+  margin-top: 0.16rem;
+  color: var(--fj-depot-ink-dim);
+  font-size: 0.7rem;
+  font-weight: 400;
+  line-height: 1.35;
+}
+
+.fj-card.is-review-ready {
+  border-top-color: var(--warning-color);
+}
+
+.fj-card.is-needs-attention,
+.fj-card.is-consent-required {
+  border-top-color: var(--danger-color);
+}
+
+.fj-card.is-watching {
+  border-top-color: var(--success-color);
+}
+
+.fj-card .dj-badge-review-ready {
+  color: var(--warning-color);
+}
+
+.fj-card .dj-badge-needs-attention,
+.fj-card .dj-badge-consent-required {
+  color: var(--danger-color);
+}
+
+.fj-card .dj-badge-watching {
+  color: var(--success-color);
 }
 
 .fj-card-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: 0.45rem;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.fj-card > .dj-error {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.fj-card .dj-btn {
+  min-height: 34px;
+  font-family: var(--fj-depot-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+}
+
+.fj-card .dj-btn-primary {
+  background: var(--primary-color);
+}
+
+.fj-card .dj-btn-secondary {
+  background: var(--fj-depot-surface-raised);
+  border-color: var(--fj-depot-line-bright);
+}
+
+.fj-card .dj-btn-primary:hover:not(:disabled) {
+  background: var(--primary-light);
+}
+
+.fj-card .dj-btn-secondary:hover:not(:disabled) {
+  color: var(--fj-depot-ink);
+  border-color: var(--fj-depot-accent);
+}
+
+.fj-card .dj-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.fj-card .dj-btn:disabled {
+  color: var(--fj-depot-ink-faint);
+  background: var(--fj-depot-surface-raised);
+  border-color: var(--fj-depot-line);
+}
+
+.fj-card :focus-visible {
+  outline: 2px solid var(--info-color);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1180px) {
+  .fj-card {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 0.85rem 1rem;
+  }
+
+  .fj-card-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .fj-card-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 680px) {
+  .fj-card {
+    padding: 0.85rem;
+  }
+
+  .fj-card-depot-mark {
+    flex-basis: 64px;
+    width: 64px;
+  }
+
+  .fj-card-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .fj-card-actions .dj-btn-primary {
+    flex: 1 1 auto;
+  }
 }
 
 /* ------------------------------------------------------------------- paging
@@ -1027,34 +1654,12 @@
   border-top: 1px solid var(--border-color, #2f2f2f);
 }
 
-/* The table scrolls inside its own box at any width, so a wide batch never
-   makes the page itself scroll sideways. */
-.dj-table-scroll {
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-}
-
 /* ----------------------------------------------------------- narrow screens
 
-   The table drops its secondary columns — type, size, and modified date — and
-   keeps what a decision actually rests on: the file's name, where it would go,
-   and the controls that act on it.
-
-   Those columns are hidden rather than reflowed because the approval
-   consequence ("Filed/Documents") must stay visible at every width. A user who
-   cannot see the destination is being asked to approve a move they cannot
-   evaluate (FR-118). */
+   Decision rows reflow above at phone width; no columns are hidden. These
+   remaining rules keep page controls and the selected-action footer compact. */
 
 @media (max-width: 720px) {
-  .dj-cell-type,
-  .dj-cell-size,
-  .dj-cell-modified,
-  .dj-table thead th:nth-child(3),
-  .dj-table thead th:nth-child(4),
-  .dj-table thead th:nth-child(5) {
-    display: none;
-  }
-
   .dj-pager {
     justify-content: center;
   }

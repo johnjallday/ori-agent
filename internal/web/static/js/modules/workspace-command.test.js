@@ -4714,8 +4714,11 @@ function installJanitorStationAdapter(target) {
         const folder = status.folder_display_name || '';
         return {
           key: 'file-janitor',
-          label: folder ? 'File Janitor · ' + folder : 'File Janitor',
+          label: 'File Janitor',
+          location: folder || 'No folder approved',
           icon: 'bi-folder-symlink',
+          visualVariant: 'depot',
+          defaultX: 0.87,
           state: () =>
             target.FileJanitorConsole?.stationState?.() || {
               applies: true,
@@ -4752,6 +4755,10 @@ function janitorCommandView(catalogItem) {
   globalThis.window = {
     WorkspaceCapabilities: {
       find: id => (id === 'file-janitor' ? catalogItem : null)
+    },
+    OriWorkspaceBuildingArt: {
+      svgForVariant: (variant, options) =>
+        `<svg class="ws-cmd-map-station-art" data-building-variant="${variant}" data-context="${options?.context}"></svg>`
     }
   };
   installJanitorStationAdapter(globalThis.window);
@@ -4798,7 +4805,13 @@ test('a configured File Janitor station shows its folder and derived status', ()
     );
     const html = commandView.renderOperationsMap();
     assert.match(html, /data-cmd-hq-station="file-janitor"/);
-    assert.match(html, /File Janitor · Downloads/);
+    assert.match(html, /data-station-visual="depot"/);
+    assert.match(html, /--station-x:87\.00%/);
+    assert.match(html, /data-building-variant="depot"/);
+    assert.match(html, /data-context="station"/);
+    assert.match(html, /ws-cmd-map-hq-station-label">File Janitor/);
+    assert.match(html, /ws-cmd-map-hq-station-location[^>]*>Downloads/);
+    assert.match(html, /managed folder Downloads, 12 ready for review/);
     assert.match(html, /12 ready for review/);
   } finally {
     globalThis.window = originalWindow;
