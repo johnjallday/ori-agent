@@ -46,6 +46,77 @@ class PreviewElement {
   }
 }
 
+async function runCreateWithTeamCompletion(teamCompletion) {
+  const toasts = [];
+  const requests = [];
+  const elements = new Map([
+    [
+      'folderNameInput',
+      { value: 'Completion workspace', focus() {}, classList: { add() {}, remove() {} } }
+    ],
+    ['folderDescriptionInput', { value: '' }],
+    ['folderParentSelect', { value: '' }],
+    ['addFolderModal', { dataset: {} }],
+    ['createFolderBtn', { textContent: 'Create workspace', disabled: false }],
+    ['folderImportToggle', { checked: false }]
+  ]);
+  const document = {
+    addEventListener() {},
+    getElementById: id => elements.get(id) || null,
+    querySelector: selector =>
+      selector === '#addFolderModal .folder-color-btn.active' ? { dataset: { color: '' } } : null
+  };
+  const window = {
+    location: { href: '' },
+    ProjectTemplateCard: {
+      recheckSelection: async () => ({ state: 'ready' }),
+      getPayloadFields: () => ({ template_id: 'assistant-team' }),
+      getSelectedTemplate: () => ({ id: 'assistant-team' }),
+      shouldOpenAfterCreate: () => false,
+      reset() {}
+    },
+    OriTagInput: { clearTagPoolCache() {} }
+  };
+  const bootstrap = { Modal: { getInstance: () => ({ hide() {} }) } };
+  vm.runInNewContext(
+    source,
+    {
+      window,
+      document,
+      bootstrap,
+      fetch: async (url, options) => {
+        requests.push({ url, body: JSON.parse(options.body) });
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({
+            folder: { id: 'durable-1', folder_slug: 'completion-workspace' },
+            team_completion: teamCompletion
+          })
+        };
+      },
+      console,
+      crypto: { randomUUID: () => 'completion-request' }
+    },
+    { filename: 'sessions.js' }
+  );
+  const manager = window.sessionManager;
+  manager.getWorkspaceBootstrapFromModal = () => ({ hasAny: false });
+  manager.teamView = () => ({
+    canContinueFromTeam: true,
+    payload: {
+      team_intent: { version: 1, mode: 'staffed', plan_revision: 'reviewed' },
+      role_staffing: [{ role_id: 'lead', mode: 'create', name: 'Project Lead' }],
+      existing_agent_names: []
+    }
+  });
+  manager.clearWorkspaceCreateError = () => {};
+  manager.showToast = (message, kind) => toasts.push({ message, kind });
+  manager.resetAddWorkspaceModalForm = () => {};
+  await manager.createFolder();
+  return { manager, requests, toasts, window };
+}
+
 function loadSessionManagerWithSetupPreview() {
   const elements = new Map();
   for (const id of [
@@ -113,6 +184,114 @@ function loadSessionManagerWithModal() {
   );
   return { manager: window.sessionManager, modalElement, shown };
 }
+
+test('a suggestion assigns its explicit role without ambient Assign state', () => {
+  const calls = [];
+  const draftAPI = {
+    FILL_ASSIGN: 'assign',
+    findSavedAgent: (_draft, name) => ({ name }),
+    setRoleFill: (_draft, roleId, fill) => {
+      calls.push({ roleId, fill });
+      return true;
+    },
+    derive: () => ({
+      roleRoster: {
+        roles: [{ role_id: 'downloads-curator', label: 'Downloads Curator' }]
+      },
+      roleSummary: '1 saved agent will be attached.'
+    })
+  };
+  const manager = loadSessionManager(undefined, { CreateWorkspaceTeamDraft: draftAPI });
+  manager.teamDraft = { roleFills: new Map() };
+  manager.workspaceRoleAssigning = '';
+  manager.refreshWorkspaceReview = () => {};
+  manager.renderExistingAgentRoster = () => {};
+  manager.focusWorkspaceRoleRow = () => true;
+  manager.announceWorkspaceTeamChange = () => {};
+
+  manager.assignWorkspaceRole('downloads-curator', 'Downloads Curator');
+
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    {
+      roleId: 'downloads-curator',
+      fill: { mode: 'assign', name: 'Downloads Curator' }
+    }
+  ]);
+  assert.equal(manager.workspaceRoleAssigning, '');
+});
+
+test('complete team observation keeps the normal workspace destination', async () => {
+  const result = await runCreateWithTeamCompletion({
+    state: 'complete',
+    workspace_id: 'durable-1',
+    team_staffed: true,
+    applied_role_ids: ['lead'],
+    missing_required_roles: [],
+    requested_unapplied_role_ids: [],
+    action: { label: '', href: '' }
+  });
+
+  assert.equal(result.requests.length, 1);
+  assert.equal(result.window.location.href, '/workspaces/completion-workspace');
+  assert.equal(
+    result.toasts.some(toast => toast.kind === 'warning' && toast.message.includes('team setup')),
+    false
+  );
+});
+
+test('incomplete team observation routes to the existing workspace without replaying create', async () => {
+  const result = await runCreateWithTeamCompletion({
+    state: 'incomplete',
+    workspace_id: 'durable-1',
+    team_staffed: false,
+    applied_role_ids: [],
+    missing_required_roles: [{ role_id: 'lead', label: 'Lead' }],
+    requested_unapplied_role_ids: ['lead'],
+    action: { label: 'Complete team setup', href: '/workspaces/completion-workspace' }
+  });
+
+  assert.equal(result.requests.length, 1, 'recovery must not replay workspace creation');
+  assert.equal(result.window.location.href, '/workspaces/completion-workspace');
+  const warnings = result.toasts.filter(toast => toast.kind === 'warning');
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0].message, /team setup is incomplete/);
+  assert.match(warnings[0].message, /1 required role missing/);
+  assert.match(warnings[0].message, /will not create another workspace/);
+});
+
+test('an abandoned saved-roster response cannot repopulate a newer draft', async () => {
+  const pending = [];
+  const applied = [];
+  const draftAPI = {
+    createDraft: () => ({}),
+    resetDraft() {},
+    setSavedRosterLoading() {},
+    setSavedRosterReady: (_draft, agents) => applied.push(agents.map(agent => agent.name)),
+    setSavedRosterError() {},
+    clearPlan() {}
+  };
+  const manager = loadSessionManager(
+    () =>
+      new Promise(resolve => {
+        pending.push(resolve);
+      }),
+    { CreateWorkspaceTeamDraft: draftAPI }
+  );
+  manager.teamDraft = {};
+  manager.renderExistingAgentRoster = () => {};
+  manager.refreshWorkspaceReview = () => {};
+
+  const abandoned = manager.loadExistingAgentRoster();
+  manager.discardWorkspaceTeamDraft();
+  const current = manager.loadExistingAgentRoster();
+
+  pending[1]({ ok: true, json: async () => [{ name: 'Current Agent' }] });
+  await current;
+  pending[0]({ ok: true, json: async () => [{ name: 'Stale Agent' }] });
+  await abandoned;
+
+  assert.deepEqual(JSON.parse(JSON.stringify(applied)), [['Current Agent']]);
+});
 
 test('runtime contract review lists modes, immediate behavior, and post-create setup without probes', () => {
   const { manager, elements, calls } = loadSessionManagerWithSetupPreview();

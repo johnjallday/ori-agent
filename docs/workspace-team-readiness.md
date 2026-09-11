@@ -175,7 +175,7 @@ workspace ID and reports observed state:
 ```json
 {
   "success": true,
-  "folder": { "id": "..." },
+  "folder": { "id": "...", "folder_slug": "..." },
   "team_completion": {
     "state": "incomplete",
     "workspace_id": "...",

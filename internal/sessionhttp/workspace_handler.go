@@ -233,6 +233,10 @@ type createWorkspaceRequest struct {
 	CreateTemplateAgents   *bool                      `json:"create_template_agents,omitempty"`
 	TemplateAgentOverrides []templateAgentOverride    `json:"template_agent_overrides,omitempty"`
 	TemplateAgentReview    *templateAgentReview       `json:"template_agent_review,omitempty"`
+	// TeamIntent is raw so absence (legacy), explicit null, malformed objects,
+	// and unknown fields remain distinguishable at the strict creation gate.
+	TeamIntent        json.RawMessage `json:"team_intent,omitempty"`
+	teamIntentPresent bool
 	// RoleStaffing carries the user's per-role choices: which of the
 	// blueprint's declared roles to fill, and how. A role the user left empty
 	// is simply absent, so an empty (but present) slice means "create this
@@ -244,7 +248,11 @@ type createWorkspaceRequest struct {
 	// the wizard, not of this API, which is why CreateFromTemplate and the
 	// Personal HQ setup coordinator are unaffected.
 	RoleStaffing []roleStaffingInput `json:"role_staffing,omitempty"`
-	Blank        bool                `json:"blank,omitempty"` // The Blank blueprint: seed the synthetic single-agent roster (no template, no project)
+	// JSON presence is tracked separately because strict intent requires an
+	// explicit array; nil remains meaningful to legacy callers.
+	roleStaffingPresent bool
+	roleStaffingNull    bool
+	Blank               bool `json:"blank,omitempty"` // The Blank blueprint: seed the synthetic single-agent roster (no template, no project)
 	// GroupRequirementReview makes this request an inert review. A policy-aware
 	// commit must replay the same request with the returned token and one caller
 	// idempotency key; neither field is accepted as a trusted destination.
@@ -253,6 +261,28 @@ type createWorkspaceRequest struct {
 	CreateRequiredHome     bool   `json:"create_required_home,omitempty"`
 	GroupReviewToken       string `json:"group_review_token,omitempty"`
 	IdempotencyKey         string `json:"idempotency_key,omitempty"`
+}
+
+func (req *createWorkspaceRequest) UnmarshalJSON(data []byte) error {
+	type requestAlias createWorkspaceRequest
+	var decoded requestAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*req = createWorkspaceRequest(decoded)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	teamRaw, teamPresent := fields["team_intent"]
+	req.teamIntentPresent = teamPresent
+	if teamPresent {
+		req.TeamIntent = append(json.RawMessage(nil), teamRaw...)
+	}
+	raw, present := fields["role_staffing"]
+	req.roleStaffingPresent = present
+	req.roleStaffingNull = present && bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
+	return nil
 }
 
 // roleStaffingInput is one filled role in a create request.
@@ -374,6 +404,10 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
+	if envelopeErr := validateWorkspaceTeamIntentEnvelope(&req); envelopeErr != nil {
+		respondWorkspaceTeamReadinessError(w, envelopeErr)
+		return
+	}
 
 	if req.Name == "" {
 		_ = orihttp.RespondBadRequest(w, "name is required")
@@ -448,6 +482,33 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			respondBlueprintReadinessConflict(w, resolvedTemplate, readiness)
 			return
 		}
+	}
+
+	// A versioned wizard request must prove its reviewed team before any group
+	// claim or creation side effect. Blank joins the same synthetic template
+	// machinery only on this strict path; legacy Blank behavior remains below.
+	teamTemplate := resolvedTemplate
+	teamTemplateResolved := templateResolved
+	if req.teamIntentPresent && req.Blank && !wantsProject {
+		teamTemplate = blankWorkspaceTemplate()
+		teamTemplateResolved = true
+	}
+	if req.teamIntentPresent && teamTemplateResolved && strings.TrimSpace(req.GroupComposition) == string(grouprequirements.CompositionStandalone) {
+		standalone, standaloneErr := projecttemplates.StandaloneTemplate(teamTemplate)
+		if standaloneErr == nil {
+			teamTemplate = standalone
+		}
+	}
+	teamIntent, teamErr := h.validateWorkspaceTeamReadiness(&req, teamTemplate, teamTemplateResolved, string(kind))
+	if teamErr != nil {
+		if !respondWorkspaceTeamReadinessError(w, teamErr) {
+			_ = orihttp.RespondBadRequest(w, teamErr.Error())
+		}
+		return
+	}
+	if teamIntent != nil && req.Blank && !wantsProject {
+		resolvedTemplate = teamTemplate
+		templateResolved = true
 	}
 
 	var groupPlan *createWorkspaceGroupPlan
@@ -621,6 +682,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Must run after starter-task seeding above — see
 	// persistCreateWorkspaceTemplateProvenance's doc comment for why.
 	assistantStationID := ""
+	var teamCompletion *workspaceTeamCompletion
 	var groupSnapshot *agentworkspace.GroupRequirementSnapshot
 	if groupPlan != nil {
 		groupSnapshot = groupPlan.claim.Snapshot
@@ -665,6 +727,9 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		if teamIntent != nil {
+			teamCompletion = h.observeAssistantTeamCompletion(ws.ID, ws.FolderSlug, req.RoleStaffing)
+		}
 	}
 
 	// Completeness/ordering backstop: when the workspace was created with an
@@ -695,6 +760,9 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	if assistantStationID != "" {
 		response["assistant_station_id"] = assistantStationID
+	}
+	if teamCompletion != nil {
+		response["team_completion"] = teamCompletion
 	}
 	if groupSnapshot != nil {
 		response["group_requirement"] = groupSnapshot
@@ -814,7 +882,11 @@ func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *ses
 			attachWorkspaceSpecialist(ws, name)
 		}
 		if !seed.EntrySet && len(req.ExistingAgentNames) > 0 {
-			setWorkspaceEntryAgent(ws, req.ExistingAgentNames[0])
+			entryName := req.ExistingAgentNames[0]
+			if req.EntryAgentName != "" {
+				entryName = req.EntryAgentName
+			}
+			setWorkspaceEntryAgent(ws, entryName)
 			seed.EntrySet = true
 		}
 		return seed, true

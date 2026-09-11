@@ -179,14 +179,11 @@ test('assistant programs become a named shared roster in Team instead of an empt
     undefined,
     'assistant_hire would staff every required role, so it is never sent alongside vacancies'
   );
-  assert.equal(
-    view.roleSummary,
-    'No agent will be attached to this workspace. You can fill these roles any time from the workspace.'
-  );
-  // Leaving roles empty is advisory at most, never a blocker (FR19).
-  const emptyIssue = view.issues.find(issue => issue.id === 'empty-team');
-  assert.equal(emptyIssue.severity, 'advisory');
-  assert.equal(view.canContinueFromTeam, true);
+  assert.equal(view.roleSummary, '0 of 2 required roles filled · 3 roles will stay empty.');
+  const missingIssue = view.issues.find(issue => issue.id === 'required-roles-missing');
+  assert.equal(missingIssue.severity, 'blocking');
+  assert.match(missingIssue.message, /all 2 required roles/);
+  assert.equal(view.canContinueFromTeam, false);
 });
 
 test('filling a role by Create and another by Assign counts both and staffs exactly those', () => {
@@ -208,7 +205,7 @@ test('filling a role by Create and another by Assign counts both and staffs exac
   assert.equal(view.roleRoster.empty_count, 1);
   assert.equal(
     view.roleSummary,
-    '1 new agent will be created · 1 saved agent will be attached · 1 role will stay empty.'
+    '2 of 2 required roles filled · 1 new agent will be created · 1 saved agent will be attached · 1 role will stay empty.'
   );
   assert.deepEqual(view.payload.role_staffing, [
     { role_id: 'producer', mode: 'create', name: 'June', provider: 'openai' },
@@ -237,22 +234,23 @@ test('clearing a role returns it to empty and drops it from the request', () => 
   assert.equal(view.roleRoster.roles[0].state, 'empty');
 });
 
-// FR25: one agent fills at most one role. Assigning someone already holding a
-// slot moves them rather than attaching two copies of one definition.
-test('assigning an agent that already fills another role moves it', () => {
+// One agent fills at most one role. A stale action must not silently move the
+// holder after another role-specific action has already won.
+test('assigning an agent that already fills another role is rejected', () => {
   const draft = Draft.createDraft();
   Draft.setPlanReady(
     draft,
     'template:studio',
     planResponse([], { assistant_program: assistantProgramPlan() })
   );
-  Draft.setRoleFill(draft, 'producer', { mode: 'assign', name: 'My Mixer' });
-  Draft.setRoleFill(draft, 'engineer', { mode: 'assign', name: 'my mixer' });
+  Draft.setSavedRosterReady(draft, [{ name: 'My Mixer' }]);
+  assert.equal(Draft.setRoleFill(draft, 'producer', { mode: 'assign', name: 'My Mixer' }), true);
+  assert.equal(Draft.setRoleFill(draft, 'engineer', { mode: 'assign', name: 'my mixer' }), false);
   const view = Draft.derive(draft);
 
-  assert.equal(Draft.roleFilledBy(draft, 'My Mixer'), 'engineer');
+  assert.equal(Draft.roleFilledBy(draft, 'My Mixer'), 'producer');
   assert.deepEqual(view.payload.role_staffing, [
-    { role_id: 'engineer', mode: 'assign', name: 'my mixer' }
+    { role_id: 'producer', mode: 'assign', name: 'My Mixer' }
   ]);
 });
 
@@ -324,6 +322,7 @@ test('an unedited fill sends no prompt, leaving the blueprint’s in force', () 
 // carry setup that would imply this request could rewrite it.
 test('assigning an agent carries nothing but its name', () => {
   const draft = readyDraft([planAgent('Content Lead', { entry_point: true })]);
+  Draft.setSavedRosterReady(draft, [{ name: 'My Mixer' }]);
   Draft.setRoleFill(draft, 'content-lead', {
     mode: 'assign',
     name: 'My Mixer',
@@ -363,43 +362,160 @@ test('an ordinary blueprint declares roles from its roster, entry agent first', 
   assert.deepEqual(view.payload.role_staffing, []);
 });
 
+test('a matching saved Downloads Curator is suggested without filling the role', () => {
+  const draft = readyDraft([
+    planAgent('Downloads Curator', {
+      entry_point: true,
+      action: 'reuse',
+      role: 'specialist'
+    })
+  ]);
+  Draft.setSavedRosterReady(draft, [
+    { name: 'Downloads Curator', role: 'specialist', model: 'saved-model' }
+  ]);
+
+  let view = Draft.derive(draft);
+  assert.equal(view.roleRoster.roles[0].state, 'empty');
+  assert.equal(Draft.isActuallyIncluded(draft, 'Downloads Curator'), false);
+  assert.deepEqual(
+    view.recommendations.map(item => [item.roleId, item.agent.name, item.matchKind, item.reason]),
+    [['downloads-curator', 'Downloads Curator', 'exact-name', "Matches this role's name"]]
+  );
+
+  assert.equal(
+    Draft.setRoleFill(draft, 'downloads-curator', {
+      mode: 'assign',
+      name: 'Downloads Curator'
+    }),
+    true,
+    'the role-specific action does not need ambient picker state'
+  );
+  view = Draft.derive(draft);
+  assert.equal(view.roleRoster.roles[0].state, 'filled');
+  assert.equal(view.roleRoster.roles[0].source, 'assigned');
+  assert.equal(Draft.isActuallyIncluded(draft, 'Downloads Curator'), true);
+  assert.deepEqual(view.recommendations, []);
+  assert.deepEqual(view.payload.role_staffing, [
+    { role_id: 'downloads-curator', mode: 'assign', name: 'Downloads Curator' }
+  ]);
+});
+
+test('recommendations are ordered by role and exclude unavailable or included agents', () => {
+  const program = assistantProgramPlan();
+  program.roles.push({
+    id: 'critic',
+    label: 'Critic',
+    required: false,
+    entry_point: false
+  });
+  const draft = Draft.createDraft();
+  Draft.setPlanReady(draft, 'template:studio', planResponse([], { assistant_program: program }));
+  Draft.setSavedRosterReady(draft, [
+    { name: 'Producer' },
+    { name: 'Mix Engineer' },
+    { name: 'Alternate Engineer', role: 'Mix Engineer' },
+    { name: 'Critic', source: 'cli' },
+    { name: 'Review Partner', role: 'Critic' },
+    { name: 'Selected Critic', role: 'Critic' }
+  ]);
+  Draft.addSavedAgent(draft, 'Selected Critic');
+
+  let recommendations = Draft.derive(draft).recommendations;
+  assert.deepEqual(
+    recommendations.map(item => [item.roleId, item.agent.name, item.matchKind]),
+    [
+      ['producer', 'Producer', 'exact-name'],
+      ['engineer', 'Mix Engineer', 'exact-name'],
+      ['engineer', 'Alternate Engineer', 'exact-role'],
+      ['critic', 'Review Partner', 'exact-role']
+    ],
+    'primary required, other required, then optional; exact names precede exact role labels'
+  );
+
+  Draft.setRoleFill(draft, 'producer', { mode: 'assign', name: 'Producer' });
+  recommendations = Draft.derive(draft).recommendations;
+  assert.equal(
+    recommendations.some(item => item.roleId === 'producer'),
+    false
+  );
+  assert.equal(
+    recommendations.some(item => item.agent.name === 'Selected Critic'),
+    false
+  );
+  assert.equal(
+    recommendations.some(item => item.agent.name === 'Critic'),
+    false
+  );
+});
+
+test('group-owned holders remain filled and cannot be recommended or reused locally', () => {
+  const program = assistantProgramPlan();
+  program.roles[0].scope = 'home';
+  program.roles[0].agent_name = 'Shared Producer';
+  const draft = Draft.createDraft();
+  Draft.setPlanReady(draft, 'template:studio', planResponse([], { assistant_program: program }));
+  Draft.setSavedRosterReady(draft, [{ name: 'Shared Producer', role: 'Producer' }]);
+
+  const view = Draft.derive(draft);
+  assert.equal(view.roleRoster.roles[0].state, 'filled');
+  assert.equal(view.roleRoster.roles[0].read_only, true);
+  assert.equal(
+    view.recommendations.some(item => item.agent.name === 'Shared Producer'),
+    false
+  );
+  assert.equal(Draft.addSavedAgent(draft, 'Shared Producer'), false);
+  assert.equal(
+    Draft.setRoleFill(draft, 'engineer', { mode: 'assign', name: 'Shared Producer' }),
+    false
+  );
+});
+
 test('scoped Home and project primaries keep separate names and select the project entry role', () => {
   const program = assistantProgramPlan();
   program.default_primary_name = 'Portfolio Lead';
+  program.station_workspace_slug = 'portfolio-home';
   program.roles = [
     {
       id: 'portfolio',
       label: 'Portfolio Manager',
       scope: 'home',
       description: 'Coordinates portfolio.',
-      primary: true
+      primary: true,
+      required: true
     },
     {
       id: 'producer',
       label: 'Producer',
       scope: 'project',
       description: 'Coordinates project.',
-      primary: true
+      primary: true,
+      required: true
     },
     {
       id: 'engineer',
       label: 'Engineer',
       scope: 'project',
       description: 'Handles technical work.',
-      primary: false
+      primary: false,
+      required: false
     }
   ];
   const draft = Draft.createDraft();
   Draft.setPlanReady(draft, 'template:scoped', planResponse([], { assistant_program: program }));
   Draft.setAssistantHire(draft, { name: 'June' });
-  Draft.setRoleFill(draft, 'portfolio', { mode: 'create', name: 'June' });
-  const view = Draft.derive(draft);
-  assert.deepEqual(
-    view.roster.map(entry => entry.name),
-    ['Producer', 'June', 'Engineer']
+  assert.equal(
+    Draft.setRoleFill(draft, 'portfolio', { mode: 'create', name: 'June' }),
+    false,
+    'a project draft cannot staff a Home-owned role'
   );
-  assert.equal(view.primaryName, 'Producer');
-  assert.equal(view.canContinueFromTeam, true);
+  Draft.setRoleFill(draft, 'producer', { mode: 'create', name: 'Project Producer' });
+  const view = Draft.derive(draft);
+  assert.equal(view.primaryName, 'Project Producer');
+  assert.equal(view.canContinueFromTeam, false, 'the missing required Home holder still blocks');
+  const missingHome = view.roleRoster.roles.find(role => role.role_id === 'portfolio');
+  assert.equal(missingHome.state, 'empty');
+  assert.equal(missingHome.read_only, true);
+  assert.equal(view.assistantProgram.stationWorkspaceSlug, 'portfolio-home');
   assert.ok(!view.issues.some(issue => issue.id === 'duplicate-names'));
 
   // A subsequent workspace reuses only the group coordinator. It still asks
@@ -407,8 +523,10 @@ test('scoped Home and project primaries keep separate names and select the proje
   program.roles[0].agent_name = 'June';
   const next = Draft.createDraft();
   Draft.setPlanReady(next, 'template:scoped', planResponse([], { assistant_program: program }));
+  Draft.setRoleFill(next, 'producer', { mode: 'create', name: 'Project Producer' });
   Draft.setAssistantHire(next, { name: 'Do not rename June' });
   const nextView = Draft.derive(next);
+  assert.equal(nextView.primaryName, 'Project Producer');
   assert.equal(nextView.assistantProgram.homeAlreadyStaffed, true);
   assert.equal(nextView.assistantProgram.existingHired, false);
   assert.equal(nextView.roster.find(entry => entry.assistantScope === 'home').name, 'June');
@@ -422,18 +540,21 @@ test('scoped Home and project primaries keep separate names and select the proje
       .every(entry => entry.lifecycle === 'assistant-create')
   );
   // The group coordinator is reported as already filled and read-only — it
-  // belongs to the group workspace (D2) — while the project roles stay empty
-  // slots this workspace can fill.
+  // belongs to the group workspace (D2) — while project roles are filled only
+  // by this workspace's explicit choices.
   const homeRole = nextView.roleRoster.roles.find(role => role.role_id === 'portfolio');
   assert.equal(homeRole.state, 'filled');
   assert.equal(homeRole.read_only, true);
   assert.equal(homeRole.agent.name, 'June');
   assert.deepEqual(
     nextView.roleRoster.roles.filter(role => role.scope === 'project').map(role => role.state),
-    ['empty', 'empty']
+    ['filled', 'empty']
   );
   // A role the group already holds is neither created nor attached from here.
-  assert.deepEqual(nextView.payload.role_staffing, []);
+  assert.deepEqual(
+    nextView.payload.role_staffing.map(fill => fill.role_id),
+    ['producer']
+  );
   assert.equal(nextView.payload.assistant_hire, undefined);
 });
 
@@ -484,7 +605,7 @@ test('an existing shared roster is linked without offering a second identity', (
   Draft.setAssistantHire(draft, { name: 'Ignored rename', provider: 'other', model: 'other' });
   const view = Draft.derive(draft);
   assert.equal(view.assistantProgram.existingHired, true);
-  assert.equal(view.primaryName, 'June');
+  assert.equal(view.primaryName, '', 'project membership is not inferred from a shared proposal');
   assert.ok(view.roster.every(entry => entry.lifecycle === 'assistant-link'));
   assert.equal(view.payload.assistant_hire, undefined);
   assert.equal(view.isModifiedFromBlueprint, false);
@@ -503,7 +624,7 @@ test('assistant hire choices are staged, validated, and reset with the blueprint
     model: 'gemma4:e4b'
   });
   let view = Draft.derive(draft);
-  assert.equal(view.primaryName, 'June');
+  assert.equal(view.primaryName, '', 'the legacy hire name is not a role fill');
   assert.equal(view.roster[0].name, 'June');
   assert.equal(view.isModifiedFromBlueprint, true);
   // The hire fields still stage the primary's identity, but the request that
@@ -515,19 +636,25 @@ test('assistant hire choices are staged, validated, and reset with the blueprint
   view = Draft.derive(draft);
   assert.equal(view.canContinueFromTeam, false);
   assert.equal(
-    view.issues.find(issue => issue.id === 'duplicate-names').anchor,
-    'assistantProgramCreateName'
+    view.issues.find(issue => issue.id === 'duplicate-names'),
+    undefined,
+    'legacy hire naming is not membership under explicit role staffing'
   );
 
-  // An EMPTY primary name is not an error — it is an unfilled slot, and a
-  // workspace may be created with every role empty (FR7, FR19).
+  // An EMPTY legacy hire name is not a naming error, but strict required roles
+  // still block until they are explicitly filled.
   Draft.setAssistantHire(draft, { name: '' });
   view = Draft.derive(draft);
   assert.equal(
     view.issues.find(issue => issue.id === 'assistant-name'),
     undefined
   );
+  assert.equal(view.canContinueFromTeam, false);
+  Draft.setRoleFill(draft, 'producer', { mode: 'create', name: 'June' });
+  Draft.setRoleFill(draft, 'engineer', { mode: 'create', name: 'Mixer' });
+  view = Draft.derive(draft);
   assert.equal(view.canContinueFromTeam, true);
+  assert.equal(view.primaryName, 'June');
 
   Draft.setPlanReady(draft, 'template:other', planResponse([]));
   assert.equal(Draft.derive(draft).isAssistantProgram, false);
@@ -562,7 +689,7 @@ test('the declared primary sorts first and every other member is a specialist (F
     view.roster.map(entry => entry.designation),
     ['primary', 'specialist', 'specialist']
   );
-  assert.equal(view.primaryName, 'Downloads Curator');
+  assert.equal(view.primaryName, '', 'a declared primary is still only a proposal');
   assert.deepEqual(
     view.specialists.map(entry => entry.name),
     ['Filing Scout', 'Report Writer']
@@ -584,18 +711,17 @@ test('new blueprint agents require explicit setup acknowledgement before Team ca
   assert.equal(proposed.actionLabel, 'Set up agent');
   assert.equal(reused.setupState, 'ready', 'exact-name reuse needs no acknowledgement');
 
-  // Setup state is still tracked per proposed agent, but it no longer BLOCKS.
-  // A blueprint that declares roles creates nothing unless the user fills one,
-  // so demanding setup for agents the request will not make would block Review
-  // on work that is not going to happen — and leaving a role empty must never
-  // block (FR19).
-  assert.equal(view.canContinueFromTeam, true);
+  // Setup acknowledgement is no longer the gate; the required declared role is.
+  assert.equal(view.canContinueFromTeam, false);
   assert.equal(
     view.blockingIssues.find(issue => issue.id === 'template-agent-setup-required'),
     undefined
   );
 
   Draft.acceptRecommended(draft, 0);
+  view = Draft.derive(draft);
+  assert.equal(view.canContinueFromTeam, false, 'acknowledgement alone does not fill a role');
+  Draft.setRoleFill(draft, 'brand-new', { mode: 'create', name: 'Brand New' });
   view = Draft.derive(draft);
   assert.equal(view.roster[0].setupState, 'ready');
   assert.equal(view.roster[0].statusLabel, 'Ready · Will be created with workspace');
@@ -624,13 +750,26 @@ test('saving customized setup acknowledges the proposed agent and stages only ch
     systemPrompt: 'Custom prompt'
   });
 
+  Draft.setRoleFill(draft, 'brand-new', {
+    mode: 'create',
+    name: 'Brand New',
+    model: 'gpt-5.1',
+    systemPrompt: 'Custom prompt'
+  });
   const view = Draft.derive(draft);
   assert.equal(view.canContinueFromTeam, true);
   assert.equal(view.roster[0].setupState, 'ready');
   assert.equal(view.roster[0].statusLabel, 'Customized · Will be created with workspace');
   assert.equal(view.roster[0].actionLabel, 'Edit setup');
-  assert.deepEqual(view.payload.template_agent_overrides, [
-    { index: 0, model: 'gpt-5.1', system_prompt: 'Custom prompt' }
+  assert.equal(view.payload.template_agent_overrides, undefined);
+  assert.deepEqual(view.payload.role_staffing, [
+    {
+      role_id: 'brand-new',
+      mode: 'create',
+      name: 'Brand New',
+      model: 'gpt-5.1',
+      system_prompt: 'Custom prompt'
+    }
   ]);
 });
 
@@ -654,6 +793,7 @@ test('an acknowledged ordinary blueprint staffs the roles the user filled, not t
     )
   );
   Draft.acceptRecommended(draft, 0);
+  Draft.setSavedRosterReady(draft, [{ name: 'Saved Scout' }]);
 
   const untouched = Draft.toCreatePayload(draft);
   assert.deepEqual(untouched.role_staffing, [], 'reviewing a plan staffs nothing on its own');
@@ -666,12 +806,10 @@ test('an acknowledged ordinary blueprint staffs the roles the user filled, not t
     { role_id: 'saved-scout', mode: 'assign', name: 'Saved Scout' }
   ]);
 
-  // Staged customizations still ride the override field — they describe the
-  // blueprint entry, independent of whether its role is filled.
+  // Whole-roster overrides never ride alongside strict role fills. Per-role
+  // Create setup belongs on that role_staffing item instead.
   Draft.stageOverride(draft, 1, { name: 'Saved Scout copy' });
-  assert.deepEqual(Draft.toCreatePayload(draft).template_agent_overrides, [
-    { index: 1, name: 'Saved Scout copy' }
-  ]);
+  assert.equal(Draft.toCreatePayload(draft).template_agent_overrides, undefined);
 });
 
 test('strict review is omitted for pending, excluded, empty, and assistant-program teams', () => {
@@ -721,6 +859,7 @@ test('recommended batch setup is idempotent and never overwrites individual work
     planAgent('Three')
   ]);
   Draft.saveSetup(draft, 2, { name: 'Two Custom' });
+  Draft.setRoleFill(draft, 'one', { mode: 'create', name: 'One' });
 
   assert.equal(Draft.derive(draft).batchSetup.canAcceptAll, true);
   assert.equal(Draft.acceptAllRecommended(draft), 2, 'only pending create rows are accepted');
@@ -736,8 +875,7 @@ test('recommended batch setup is idempotent and never overwrites individual work
 
   assert.equal(Draft.undoBatchRecommended(draft), 2);
   view = Draft.derive(draft);
-  // Undoing the batch returns both rows to "needs setup" without blocking:
-  // an unreviewed proposal is only a proposal until its role is filled.
+  // Undoing proposal acknowledgements does not clear the required role fill.
   assert.equal(view.canContinueFromTeam, true);
   assert.equal(view.batchSetup.pendingCount, 2);
   assert.equal(view.roster.find(row => row.originalName === 'Two').name, 'Two Custom');
@@ -805,6 +943,7 @@ test('stale-plan recovery blocks payloads until changed entries are reviewed and
     { revision: 'revision-before' }
   );
   Draft.acceptRecommended(draft, 0);
+  Draft.setRoleFill(draft, 'lead', { mode: 'create', name: 'Lead' });
 
   Draft.setPlanReady(
     draft,
@@ -826,7 +965,7 @@ test('stale-plan recovery blocks payloads until changed entries are reviewed and
   assert.equal(Draft.confirmFreshPlan(draft), true);
   view = Draft.derive(draft);
   assert.equal(view.canContinueFromTeam, true);
-  assert.deepEqual(view.payload.role_staffing, []);
+  assert.deepEqual(view.payload.role_staffing, [{ role_id: 'lead', mode: 'create', name: 'Lead' }]);
 });
 
 test('a byte-equivalent stale plan keeps setup acknowledgement but still requires confirmation', () => {
@@ -852,6 +991,11 @@ test('a byte-equivalent stale plan keeps setup acknowledgement but still require
 test('fatal strict creation failure belongs to one row and is retryable without losing setup', () => {
   const draft = readyDraft([planAgent('Lead', { entry_point: true })]);
   Draft.saveSetup(draft, 0, { name: 'Reviewed Lead', systemPrompt: 'keep this' });
+  Draft.setRoleFill(draft, 'lead', {
+    mode: 'create',
+    name: 'Reviewed Lead',
+    systemPrompt: 'keep this'
+  });
   Draft.markCreationFailure(draft, 0, 'Reviewed Lead', 'Reviewed Lead could not be created.');
 
   let view = Draft.derive(draft);
@@ -956,7 +1100,7 @@ test('a renamed reuse stages the recommended blueprint definition without mutati
   assert.equal(Draft.toCreatePayload(draft).template_agent_overrides, undefined);
 });
 
-test('renaming a reused agent stages a customized copy and leaves the original untouched (FR40-FR43)', () => {
+test('renaming a reused proposal does not leak a whole-roster override into strict staffing', () => {
   const draft = readyDraft([planAgent('Shared Scout', { action: 'reuse', entry_point: true })]);
   Draft.stageOverride(draft, 0, { name: 'Shared Scout copy' });
   const view = Draft.derive(draft);
@@ -965,9 +1109,7 @@ test('renaming a reused agent stages a customized copy and leaves the original u
   assert.equal(view.roster[0].lifecycle, 'customized-copy');
   assert.equal(view.roster[0].lifecycleLabel, 'Customized copy · will be created and attached');
   assert.equal(view.roster[0].originalName, 'Shared Scout', 'the shared definition is identified');
-  assert.deepEqual(view.payload.template_agent_overrides, [
-    { index: 0, name: 'Shared Scout copy' }
-  ]);
+  assert.equal(view.payload.template_agent_overrides, undefined);
 });
 
 test('an unmodified reused agent stages no override at all (FR41)', () => {
@@ -988,15 +1130,7 @@ test('customizing a new blueprint agent edits it in place instead of adding a ro
   assert.equal(view.roster.length, 1, 'still one roster entry');
   assert.equal(view.roster[0].name, 'Renamed New');
   assert.equal(view.roster[0].lifecycle, 'create', 'a new agent stays a create, not a copy');
-  assert.deepEqual(view.payload.template_agent_overrides, [
-    {
-      index: 0,
-      name: 'Renamed New',
-      model: 'claude-opus-5',
-      provider: 'anthropic',
-      system_prompt: 'Be brief.'
-    }
-  ]);
+  assert.equal(view.payload.template_agent_overrides, undefined);
 });
 
 test('an explicitly emptied model is staged as empty, not dropped (inherit survives conversion, FR69)', () => {
@@ -1006,11 +1140,7 @@ test('an explicitly emptied model is staged as empty, not dropped (inherit survi
   Draft.stageOverride(draft, 0, { model: '', provider: '' });
   const view = Draft.derive(draft);
 
-  assert.deepEqual(
-    view.payload.template_agent_overrides,
-    [{ index: 0, model: '', provider: '' }],
-    'present-but-empty must survive: the server reads it as "inherit the default"'
-  );
+  assert.equal(view.payload.template_agent_overrides, undefined);
   assert.equal(view.roster[0].modelLabel, 'App default');
   assert.equal(view.roster[0].inheritsModel, true);
 });
@@ -1034,27 +1164,22 @@ test('a case-only rename of a reused agent is not treated as a copy', () => {
   assert.equal(view.roster[0].name, 'Shared Scout');
 });
 
-test('a customized name colliding with another roster member blocks continuation (FR45)', () => {
+test('a created role holder cannot take the name of a saved agent', () => {
   const draft = readyDraft([
     planAgent('Curator', { action: 'reuse', entry_point: true }),
     planAgent('Scout', { action: 'create' })
   ]);
-  Draft.stageOverride(draft, 1, { name: 'curator' });
-  const view = Draft.derive(draft);
-
-  // Regression guard: promoting the primary by name-key rather than by position
-  // silently dropped the colliding member here, which hid the duplicate entirely.
-  assert.equal(view.roster.length, 2, 'the colliding member must stay visible in the roster');
-
-  const collision = view.issues.find(issue => issue.id === 'duplicate-names');
-  assert.ok(collision, 'a case-insensitive collision must be reported');
-  assert.equal(collision.severity, 'blocking');
-  assert.equal(collision.anchor, 'team-agent-name-1', 'anchored to the offending field (FR104)');
-  assert.equal(collision.templateAgentIndex, 1, 'points at the customized entry, not the original');
-  assert.equal(view.canContinueFromTeam, false);
+  withSavedRoster(draft, [{ name: 'Curator', model: 'gpt-5' }]);
+  assert.equal(Draft.addSavedAgent(draft, 'Curator'), true);
+  assert.equal(
+    Draft.setRoleFill(draft, 'curator', { mode: 'create', name: 'curator' }),
+    false,
+    'the stale create action must not replace or duplicate a saved identity'
+  );
+  assert.equal(Draft.derive(draft).roleRoster.roles[0].state, 'empty');
 });
 
-test('excluding the blueprint team empties the roster and recomputes the primary (FR48-FR50)', () => {
+test('a real blueprint team cannot be omitted through the old general opt-out', () => {
   const draft = readyDraft([planAgent('Blueprint Lead', { entry_point: true })]);
   withSavedRoster(draft, [{ name: 'Research Scout', model: 'gpt-5' }]);
   Draft.addSavedAgent(draft, 'Research Scout');
@@ -1062,21 +1187,19 @@ test('excluding the blueprint team empties the roster and recomputes the primary
   let view = Draft.derive(draft);
   assert.equal(
     view.primaryName,
-    'Blueprint Lead',
-    'the blueprint owns the primary slot by default'
+    'Research Scout',
+    'only the explicitly added teammate is currently a member'
   );
 
-  Draft.setIncludeBlueprintTeam(draft, false);
+  assert.equal(Draft.setIncludeBlueprintTeam(draft, false), false);
   view = Draft.derive(draft);
   assert.deepEqual(
     view.roster.map(entry => entry.name),
-    ['Research Scout'],
-    'blueprint entries leave the roster'
+    ['Blueprint Lead', 'Research Scout']
   );
-  assert.equal(view.primaryName, 'Research Scout', 'the first saved agent becomes primary');
-  assert.equal(view.primaryIsAutomatic, true, 'an automatic promotion is flagged for announcement');
-  assert.equal(view.payload.create_template_agents, false);
-  assert.equal(view.payload.entry_agent_name, 'Research Scout');
+  assert.equal(view.includeBlueprintTeam, true);
+  assert.equal(view.payload.create_template_agents, undefined);
+  assert.equal(view.payload.team_intent.mode, 'staffed');
 });
 
 test('an unavailable blueprint plan blocks Team while its team is included (FR94, FR95)', () => {
@@ -1086,19 +1209,20 @@ test('an unavailable blueprint plan blocks Team while its team is included (FR94
   let view = Draft.derive(draft);
   const blocker = view.issues.find(issue => issue.id === 'plan-error');
   assert.equal(blocker.severity, 'blocking');
-  assert.deepEqual(blocker.recovery, ['retry-plan', 'edit-blueprint', 'exclude-blueprint-team']);
+  assert.deepEqual(blocker.recovery, ['retry-plan', 'edit-blueprint']);
   assert.equal(view.canContinueFromTeam, false);
 
-  // Taking the documented recovery path clears the blocker (FR95).
-  Draft.setIncludeBlueprintTeam(draft, false);
+  // The old general omission path is not an escape hatch for unknown roles.
+  assert.equal(Draft.setIncludeBlueprintTeam(draft, false), false);
   view = Draft.derive(draft);
-  assert.ok(!view.issues.some(issue => issue.id === 'plan-error'));
-  assert.equal(view.canContinueFromTeam, true);
+  assert.ok(view.issues.some(issue => issue.id === 'plan-error'));
+  assert.equal(view.canContinueFromTeam, false);
 });
 
 test('a saved-agent roster failure stays advisory when the team is otherwise valid (FR66, FR96)', () => {
   const draft = readyDraft([planAgent('Blueprint Lead', { entry_point: true, action: 'reuse' })]);
   Draft.setSavedRosterError(draft, 'Your saved agents could not be loaded.');
+  Draft.setRoleFill(draft, 'blueprint-lead', { mode: 'create', name: 'New Lead' });
   const view = Draft.derive(draft);
 
   const issue = view.issues.find(issue => issue.id === 'saved-roster-error');
@@ -1119,31 +1243,35 @@ test('saved agents attach in selection order and are refused when already includ
   assert.equal(Draft.addSavedAgent(draft, 'Data Miner'), true);
   assert.equal(Draft.addSavedAgent(draft, 'Research Scout'), true);
   assert.equal(Draft.addSavedAgent(draft, 'data miner'), false, 'no case-insensitive duplicate');
-  assert.equal(Draft.addSavedAgent(draft, 'Curator'), false, 'already included by the blueprint');
+  assert.equal(
+    Draft.addSavedAgent(draft, 'Curator'),
+    true,
+    'a same-name blueprint proposal is not membership until its role is filled'
+  );
   assert.equal(Draft.addSavedAgent(draft, 'Claude Code'), false, 'CLI agents are not attachable');
   assert.equal(Draft.addSavedAgent(draft, 'Nobody'), false, 'unknown agents are refused');
 
   const view = Draft.derive(draft);
-  assert.deepEqual(view.payload.existing_agent_names, ['Data Miner', 'Research Scout']);
+  assert.deepEqual(view.payload.existing_agent_names, ['Data Miner', 'Research Scout', 'Curator']);
 });
 
-test('choosing a saved agent as primary demotes the previous primary to specialist (FR51, FR52)', () => {
-  const draft = readyDraft([planAgent('Blueprint Lead', { entry_point: true, action: 'reuse' })]);
-  withSavedRoster(draft, [{ name: 'Research Scout' }]);
+test('a no-role blueprint may choose one added saved agent as primary (FR51, FR52)', () => {
+  const draft = readyDraft([]);
+  withSavedRoster(draft, [{ name: 'Research Scout' }, { name: 'Data Miner' }]);
   Draft.addSavedAgent(draft, 'Research Scout');
+  Draft.addSavedAgent(draft, 'Data Miner');
 
-  assert.equal(Draft.setExplicitPrimary(draft, 'Research Scout'), true);
+  assert.equal(Draft.setExplicitPrimary(draft, 'Data Miner'), true);
   const view = Draft.derive(draft);
 
-  assert.equal(view.roster[0].name, 'Research Scout');
+  assert.equal(view.roster[0].name, 'Data Miner');
   assert.equal(view.roster[0].designation, 'primary');
-  const demoted = view.roster.find(entry => entry.name === 'Blueprint Lead');
-  assert.equal(demoted.designation, 'specialist', 'the previous primary stays attached');
+  assert.equal(view.roster[1].designation, 'specialist');
   assert.equal(view.primaryIsAutomatic, false);
-  assert.equal(view.payload.entry_agent_name, 'Research Scout');
+  assert.equal(view.payload.entry_agent_name, 'Data Miner');
 });
 
-test('only a selected saved agent may be made primary', () => {
+test('declared roles own primary selection and an unselected saved agent cannot take it', () => {
   const draft = readyDraft([planAgent('Blueprint Lead', { entry_point: true })]);
   withSavedRoster(draft, [{ name: 'Research Scout' }]);
 
@@ -1152,10 +1280,11 @@ test('only a selected saved agent may be made primary', () => {
     false,
     'an unselected agent cannot hold the primary slot'
   );
+  Draft.addSavedAgent(draft, 'Research Scout');
   assert.equal(
-    Draft.setExplicitPrimary(draft, 'Blueprint Lead'),
+    Draft.setExplicitPrimary(draft, 'Research Scout'),
     false,
-    'a blueprint primary is derived from roster order, not entry_agent_name'
+    'a saved extra cannot displace the declared primary role'
   );
   assert.equal(draft.explicitPrimary, '');
 });
@@ -1211,7 +1340,7 @@ test('retrying the same blueprint preserves staged customizations', () => {
   assert.equal(draft.overrides.size, 1, 'a retry of the same blueprint is not a blueprint change');
 });
 
-test('a retained saved agent the new blueprint also includes is attached once (FR23)', () => {
+test('a retained saved agent is not absorbed by a same-name blueprint proposal', () => {
   const draft = Draft.createDraft();
   withSavedRoster(draft, [{ name: 'Research Scout' }]);
   Draft.setPlanReady(draft, 'template:a', planResponse([]));
@@ -1224,17 +1353,14 @@ test('a retained saved agent the new blueprint also includes is attached once (F
   );
   const view = Draft.derive(draft);
 
-  assert.equal(view.roster.length, 1, 'one attachment, not two');
-  assert.equal(view.roster[0].source, 'blueprint', 'the blueprint owns the roster entry');
-  assert.deepEqual(view.shadowedSelections, [{ name: 'Research Scout', ownedBy: 'blueprint' }]);
-  const notice = view.issues.find(issue => issue.id === 'shadowed-selection');
-  assert.equal(notice.severity, 'advisory');
-  assert.equal(view.payload.existing_agent_names, undefined, 'not sent twice');
+  assert.equal(view.roleRoster.roles[0].state, 'empty', 'the proposal did not fill its role');
+  assert.deepEqual(view.shadowedSelections, []);
   assert.equal(
-    draft.savedSelections.length,
-    1,
-    'the selection is retained in the draft in case the blueprint changes again'
+    view.issues.some(issue => issue.id === 'shadowed-selection'),
+    false
   );
+  assert.deepEqual(view.payload.existing_agent_names, ['Research Scout']);
+  assert.deepEqual(view.payload.role_staffing, []);
 });
 
 test('roster rows expose the right per-source actions (FR53, FR54)', () => {
@@ -1332,11 +1458,12 @@ test('derive is pure: repeated calls neither mutate the draft nor differ', () =>
   assert.deepEqual(JSON.parse(JSON.stringify(first)), JSON.parse(JSON.stringify(second)));
 });
 
-test('a legacy request shape is preserved when no saved agent is selected (compatibility)', () => {
+test('strict wizard intent does not ask the legacy whole-roster path to seed agents', () => {
   const draft = readyDraft([planAgent('Lead', { entry_point: true, action: 'reuse' })]);
   const payload = Draft.toCreatePayload(draft);
 
-  assert.equal(payload.create_template_agents, true);
+  assert.equal(payload.create_template_agents, undefined);
+  assert.equal(payload.team_intent.mode, 'staffed');
   assert.ok(
     !Object.prototype.hasOwnProperty.call(payload, 'existing_agent_names'),
     'omitted entirely so the server keeps its legacy entry-agent path'
@@ -1344,12 +1471,15 @@ test('a legacy request shape is preserved when no saved agent is selected (compa
   assert.ok(!Object.prototype.hasOwnProperty.call(payload, 'entry_agent_name'));
 });
 
-test('create_template_agents is omitted when the blueprint declares no agents', () => {
+test('a wizard plan with no declared roles still carries explicit staffed intent', () => {
   const draft = readyDraft([]);
-  assert.deepEqual(Draft.toCreatePayload(draft), {});
+  assert.deepEqual(Draft.toCreatePayload(draft), {
+    team_intent: { version: 1, mode: 'staffed', plan_revision: 'test-plan-revision' },
+    role_staffing: []
+  });
 });
 
-test('the roster keeps a stable order as members are added and promoted', () => {
+test('a declared-role roster keeps stable order and refuses extra-agent promotion', () => {
   const draft = readyDraft([
     planAgent('Lead', { entry_point: true, action: 'reuse' }),
     planAgent('Helper A'),
@@ -1365,11 +1495,11 @@ test('the roster keeps a stable order as members are added and promoted', () => 
     'blueprint order first, then selection order'
   );
 
-  // Promoting a saved agent moves only that entry; everything else holds its place.
-  Draft.setExplicitPrimary(draft, 'Miner');
+  assert.equal(Draft.setExplicitPrimary(draft, 'Miner'), false);
   assert.deepEqual(
     Draft.derive(draft).roster.map(entry => entry.name),
-    ['Miner', 'Lead', 'Helper A', 'Helper B', 'Scout']
+    ['Lead', 'Helper A', 'Helper B', 'Scout', 'Miner'],
+    'the declared primary role retains authority'
   );
 });
 
@@ -1397,19 +1527,10 @@ test('a customized copy of a reused agent leaves the blueprint entry identifiabl
   assert.equal(row.lifecycle, 'customized-copy');
   assert.equal(row.isCustomized, true);
   assert.equal(row.modelLabel, 'anthropic / claude-opus-5');
-  assert.deepEqual(view.payload.template_agent_overrides, [
-    {
-      index: 0,
-      name: 'Shared Lead Studio',
-      model: 'claude-opus-5',
-      provider: 'anthropic',
-      system_prompt: 'Be terse.',
-      role: 'orchestrator'
-    }
-  ]);
+  assert.equal(view.payload.template_agent_overrides, undefined);
 });
 
-test('overrides serialize in index order regardless of the order they were staged', () => {
+test('whole-roster overrides remain local and are omitted from strict staffing', () => {
   const draft = readyDraft([
     planAgent('Zero', { entry_point: true }),
     planAgent('One'),
@@ -1419,44 +1540,45 @@ test('overrides serialize in index order regardless of the order they were stage
   Draft.stageOverride(draft, 0, { name: 'Zero Renamed' });
   Draft.stageOverride(draft, 1, { name: 'One Renamed' });
 
-  assert.deepEqual(
-    Draft.derive(draft).payload.template_agent_overrides.map(override => override.index),
-    [0, 1, 2]
-  );
+  assert.deepEqual(Array.from(draft.overrides.keys()), [2, 0, 1]);
+  assert.equal(Draft.derive(draft).payload.template_agent_overrides, undefined);
 });
 
-test('excluding the blueprint team drops its overrides from the request but not the draft', () => {
+test('the retired team opt-out cannot bypass strict role staffing', () => {
   const draft = readyDraft([planAgent('Lead', { entry_point: true })]);
   Draft.stageOverride(draft, 0, { name: 'Renamed Lead' });
-  Draft.setIncludeBlueprintTeam(draft, false);
+  assert.equal(Draft.setIncludeBlueprintTeam(draft, false), false);
 
   const view = Draft.derive(draft);
-  assert.equal(view.payload.create_template_agents, false);
+  assert.equal(view.payload.create_template_agents, undefined);
   assert.equal(
     view.payload.template_agent_overrides,
     undefined,
     'no point sending overrides for a team that is not being created'
   );
-  assert.equal(draft.overrides.size, 1, 'the staged edit survives so re-enabling restores it');
-
-  Draft.setIncludeBlueprintTeam(draft, true);
-  assert.deepEqual(Draft.derive(draft).payload.template_agent_overrides, [
-    { index: 0, name: 'Renamed Lead' }
-  ]);
+  assert.equal(draft.overrides.size, 1, 'the local proposal edit is retained');
+  assert.equal(view.includeBlueprintTeam, true);
 });
 
-test('an agent-less team is advisory and still produces a valid request', () => {
-  const draft = readyDraft([planAgent('Lead', { entry_point: true })]);
-  Draft.setIncludeBlueprintTeam(draft, false);
+test('Blank agentless is explicit, advisory, and suppresses all team seeding', () => {
+  const draft = readyDraft([planAgent('Ask Ori', { entry_point: true })], 'blank', {
+    template_id: 'blank'
+  });
+  assert.equal(Draft.derive(draft).canContinueFromTeam, false, 'Ask Ori is required by default');
+  assert.equal(Draft.setAgentless(draft, true), true);
   const view = Draft.derive(draft);
 
-  assert.deepEqual(view.roster, []);
-  assert.equal(view.primaryName, '');
-  const empty = view.issues.find(issue => issue.id === 'empty-team');
-  assert.equal(empty.severity, 'advisory');
-  assert.match(empty.message, /may remain unassigned/);
-  assert.equal(view.canContinueFromTeam, true, 'never blocks creation (FR55)');
-  assert.equal(view.payload.create_template_agents, false);
+  assert.equal(view.agentless, true);
+  assert.deepEqual(view.recommendations, []);
+  const notice = view.issues.find(issue => issue.id === 'agentless-workspace');
+  assert.equal(notice.severity, 'advisory');
+  assert.match(notice.message, /Chat and agent work require adding one later/);
+  assert.equal(view.canContinueFromTeam, true);
+  assert.deepEqual(view.payload, {
+    team_intent: { version: 1, mode: 'agentless', plan_revision: 'test-plan-revision' },
+    role_staffing: [],
+    create_template_agents: false
+  });
 });
 
 test('a saved roster row carries the canonical appearance the shared renderer needs', () => {

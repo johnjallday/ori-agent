@@ -1163,6 +1163,73 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
   color: var(--wc-ink-dim);
   font-size: 11px;
 }
+.workspace-create-modal .workspace-blank-agentless-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--wc-line-bright);
+  background: var(--wc-panel-2);
+  color: var(--wc-ink);
+  cursor: pointer;
+}
+.workspace-create-modal .workspace-blank-agentless-choice[hidden] {
+  display: none;
+}
+.workspace-create-modal .workspace-blank-agentless-choice input {
+  margin-top: 3px;
+}
+.workspace-create-modal .workspace-blank-agentless-choice span,
+.workspace-create-modal .workspace-blank-agentless-choice small {
+  display: block;
+}
+.workspace-create-modal .workspace-blank-agentless-choice small {
+  margin-top: 2px;
+  color: var(--wc-ink-dim);
+}
+.workspace-create-modal .workspace-saved-agent-suggestions {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--wc-faction) 42%, var(--wc-line));
+  background: color-mix(in srgb, var(--wc-faction) 7%, var(--wc-panel-2));
+}
+.workspace-create-modal .workspace-saved-agent-suggestions[hidden] {
+  display: none;
+}
+.workspace-create-modal .workspace-saved-agent-suggestions > h4,
+.workspace-create-modal .workspace-saved-agent-suggestion-group > h5 {
+  margin: 0;
+  color: var(--wc-ink-heading);
+}
+.workspace-create-modal .workspace-saved-agent-suggestions > h4 {
+  font-size: 14px;
+}
+.workspace-create-modal .workspace-saved-agent-suggestions > p,
+.workspace-create-modal .workspace-saved-agent-suggestion-group > h5 {
+  font-size: 11px;
+}
+.workspace-create-modal .workspace-saved-agent-suggestions > p {
+  margin: 0;
+  color: var(--wc-ink-dim);
+}
+.workspace-create-modal .workspace-saved-agent-suggestions-list,
+.workspace-create-modal .workspace-saved-agent-suggestion-group,
+.workspace-create-modal .workspace-saved-agent-suggestion-group [role="list"] {
+  display: grid;
+  gap: 7px;
+}
+.workspace-create-modal
+  .workspace-saved-agent-suggestion-group
+  + .workspace-saved-agent-suggestion-group {
+  padding-top: 8px;
+  border-top: 1px solid var(--wc-line);
+}
+.workspace-create-modal .workspace-saved-agent-suggestion {
+  background: var(--wc-panel);
+}
 .workspace-create-modal .workspace-wizard-icon-action {
   border: 0;
   background: transparent;

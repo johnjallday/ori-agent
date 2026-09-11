@@ -157,12 +157,21 @@
     if (!agent) return '';
     if (typeof window === 'undefined' || !window.AgentAvatar || !window.AgentAvatar.markup)
       return '';
+    var appearance = agent.appearance || null;
+    var characterId = String(
+      (appearance && appearance.character && appearance.character.catalog_id) || ''
+    ).trim();
     return window.AgentAvatar.markup(
       {
         name: agent.name,
         role: agent.role,
         type: agent.type,
-        appearance: agent.appearance || null
+        appearance: appearance,
+        // Character portraits require their catalog asset as well as the saved
+        // appearance choice. Keep this synchronous, like the other workspace
+        // roster: an unloaded or withdrawn entry truthfully falls back.
+        character:
+          characterId && window.CharacterCatalog ? window.CharacterCatalog.get(characterId) : null
       },
       { size: 32, className: 'ws-role-row__avatar' }
     );

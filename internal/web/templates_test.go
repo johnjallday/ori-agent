@@ -316,20 +316,24 @@ func TestRenderCreateWorkspaceWizardReviewContract(t *testing.T) {
 		// Details keeps the project-open preference. Runtime setup is disclosed
 		// read-only on Review and never blocks creation.
 		`id="projectTemplateOpenAfterCreate"`,
-		// Team owns ONE roster plus the inline saved-agent picker, and the
-		// Advanced include-team disclosure now lives here rather than on Details.
+		// Team owns one role roster plus first-render suggestions and the full
+		// saved-agent picker. Only Blank exposes an explicit agentless choice.
 		`id="workspaceTeamLayout"`,
 		`id="workspaceTeamReview"`,
+		`id="workspaceRoleRoster"`,
 		`id="workspaceTeamRoster"`,
 		`id="workspaceTeamIssues"`,
-		`id="workspaceTeamAdvanced"`,
-		`id="templateAgentReviewToggle"`,
+		`id="workspaceBlankAgentlessChoice"`,
+		`id="workspaceBlankAgentlessToggle"`,
+		`id="workspaceSavedAgentSuggestions"`,
+		`id="workspaceSavedAgentSuggestionsList"`,
 		`id="existingAgentRosterPanel"`,
 		`id="existingAgentRosterSearch"`,
 		`id="workspaceTeamLiveRegion"`,
 		`id="workspaceTeamBatchActions"`,
 		`Resulting workspace team`,
-		`Advanced team options`,
+		`Suggested for this workspace`,
+		`Create without agents`,
 		// Review keeps the read-only post-create setup preview.
 		`id="workspaceSetupPreview"`,
 		`aria-label="Close create workspace"`,

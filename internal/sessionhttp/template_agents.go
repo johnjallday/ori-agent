@@ -62,17 +62,18 @@ type templateAgentPlan struct {
 }
 
 type templateAssistantProgramPlan struct {
-	ID                 string                              `json:"id"`
-	StationName        string                              `json:"station_name"`
-	StationDescription string                              `json:"station_description"`
-	DefaultPrimaryName string                              `json:"default_primary_name"`
-	HireTitle          string                              `json:"hire_title"`
-	HireDescription    string                              `json:"hire_description"`
-	ExistingHired      bool                                `json:"existing_hired,omitempty"`
-	ExistingProvider   string                              `json:"existing_provider,omitempty"`
-	ExistingModel      string                              `json:"existing_model,omitempty"`
-	Roles              []templateAssistantProgramRolePlan  `json:"roles"`
-	Stages             []templateAssistantProgramStagePlan `json:"stages"`
+	ID                   string                              `json:"id"`
+	StationName          string                              `json:"station_name"`
+	StationWorkspaceSlug string                              `json:"station_workspace_slug,omitempty"`
+	StationDescription   string                              `json:"station_description"`
+	DefaultPrimaryName   string                              `json:"default_primary_name"`
+	HireTitle            string                              `json:"hire_title"`
+	HireDescription      string                              `json:"hire_description"`
+	ExistingHired        bool                                `json:"existing_hired,omitempty"`
+	ExistingProvider     string                              `json:"existing_provider,omitempty"`
+	ExistingModel        string                              `json:"existing_model,omitempty"`
+	Roles                []templateAssistantProgramRolePlan  `json:"roles"`
+	Stages               []templateAssistantProgramStagePlan `json:"stages"`
 }
 
 type templateAssistantProgramRolePlan struct {
@@ -161,7 +162,10 @@ func (e *templateAgentOverrideValidationError) Unwrap() error {
 //
 // A new blank workspace must never mint a record under a retired name (FR59), so
 // this tracks the canonical identity rather than restating it.
-const blankWorkspaceEntryAgentName = systemassistant.CanonicalName
+const (
+	blankWorkspaceTemplateID     = "blank"
+	blankWorkspaceEntryAgentName = systemassistant.CanonicalName
+)
 
 const blankWorkspaceEntryPrompt = "You are this workspace's front door: " +
 	"clarify user intent, answer directly when the request only needs shared context, and break work into " +
@@ -173,7 +177,7 @@ const blankWorkspaceEntryPrompt = "You are this workspace's front door: " +
 // no skeleton, starter tasks, or project, so only its Agents roster is ever used.
 func blankWorkspaceTemplate() projecttemplates.Template {
 	return projecttemplates.Template{
-		Name: "Blank workspace",
+		ID: blankWorkspaceTemplateID, Name: "Blank workspace", Builtin: true,
 		Agents: []projecttemplates.AgentSpec{{
 			Name:         blankWorkspaceEntryAgentName,
 			Role:         string(types.RoleOrchestrator),
@@ -525,8 +529,9 @@ func (h *Handler) buildTemplateAgentPlan(tpl projecttemplates.Template) template
 				PluginID:    tpl.PluginOwner.PluginID,
 				ProgramID:   declaration.ID,
 			}
-			if station, err := workspace.NewAssistantProgramStore(h.workspaceTaskStore).FindStation(key); err == nil {
+			if station, err := workspace.NewAssistantProgramStore(h.workspaceTaskStore).FindStation(key); err == nil && station != nil {
 				assistantPlan.StationName = station.Name
+				assistantPlan.StationWorkspaceSlug = station.FolderSlug
 				state := station.GetAssistantProgramState()
 				if state != nil && state.Hired {
 					// A staffed Home does not staff a new project's scoped roles.
