@@ -636,7 +636,18 @@ const sessionManager = {
       this.importEntryPoint =
         entryPoint || (importMode ? 'workspace_hub_import' : 'workspace_hub_create');
       this.workspacePostCreateAction = postCreateAction;
-      this.workspaceMapOrigin = String(addFolderModal.dataset.pendingMapOrigin || '') === 'true';
+      const mapHeaderEligible =
+        trigger?.dataset?.workspaceMapEligible === 'true' &&
+        ((entryPoint === 'home_cockpit_create' &&
+          document.getElementById('homeCockpit')?.dataset?.view === 'map') ||
+          (entryPoint === 'workspace_hub_create' &&
+            document.getElementById('workspaceHub')?.dataset?.launcherView === 'map'));
+      // Canvas/district Build provides an explicit pending origin. Header
+      // actions qualify only while their own visible host is in Map view; a
+      // mounted-but-hidden map or a stale modal dataset must never redirect a
+      // normal Tree/import create into placement.
+      this.workspaceMapOrigin =
+        String(addFolderModal.dataset.pendingMapOrigin || '') === 'true' || mapHeaderEligible;
       if (importMode) {
         this.setImportModeEnabled(true);
       } else if (pendingBlueprint) {

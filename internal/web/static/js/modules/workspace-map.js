@@ -7731,8 +7731,12 @@
     var state = placementSession;
     if (!state || !state.candidate) return '';
     var problem = placementProblem(state.candidate);
+    var groupName = String((state.payload && state.payload.group_name) || '').trim();
     var detail =
-      problem || 'Move to preview, click open ground to create. Drag navigates; Arrow keys nudge.';
+      problem ||
+      (groupName
+        ? 'Reviewed district: ' + groupName + '. Move to preview, click open ground to create.'
+        : 'Move to preview, click open ground to create. Drag navigates; Arrow keys nudge.');
     return (
       '<div class="ws-map-placement-controls" data-ws-map-placement-controls role="group" aria-label="Place new workspace">' +
       '<div class="ws-map-placement-copy"><strong>Place ' +
@@ -7796,7 +7800,8 @@
     return {
       name: preview.name,
       blueprint_id: preview.blueprintID,
-      blueprint_builtin: preview.blueprintBuiltin === true
+      blueprint_builtin: preview.blueprintBuiltin === true,
+      group_name: preview.groupName
     };
   }
 

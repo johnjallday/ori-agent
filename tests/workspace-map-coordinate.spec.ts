@@ -503,6 +503,32 @@ test.describe('Coordinate Workspace Map', () => {
     await page.getByRole('button', { name: 'Close create workspace' }).click();
   });
 
+  test('Home Map header uses the reviewed placement flow', async ({ page }) => {
+    await ensureWorkspace(page);
+    await openMap(page);
+    await page.locator('#cockpitCreateWorkspaceBtn').click();
+    await expect(page.locator('#addFolderModal')).toBeVisible();
+    await reviewCreateWizard(page, `Header Map ${Date.now()}`);
+    await expect(page.locator('#createFolderBtn')).toContainText('Place');
+    await page.locator('#createFolderBtn').click();
+    await expect(page.locator('[data-ws-map-placement-preview]')).toBeVisible();
+    await page.locator('[data-ws-map-viewport]').press('Escape');
+    await expect(page.locator('#addFolderModal')).toBeVisible();
+    await page.getByRole('button', { name: 'Close create workspace' }).click();
+  });
+
+  test('Home Tree header keeps the ordinary create flow', async ({ page }) => {
+    await ensureWorkspace(page);
+    await openMap(page);
+    await page.locator('#cockpitViewTree').click();
+    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-view', 'tree');
+    await page.locator('#cockpitCreateWorkspaceBtn').click();
+    await reviewCreateWizard(page, `Header Tree ${Date.now()}`);
+    await expect(page.locator('#createFolderBtn')).toContainText('Create');
+    await expect(page.locator('#createFolderBtn')).not.toContainText('Place');
+    await page.getByRole('button', { name: 'Close create workspace' }).click();
+  });
+
   test('placement renders a reviewed markup-like name as literal text', async ({ page }) => {
     await ensureWorkspace(page);
     await openMap(page);
