@@ -53,6 +53,13 @@
   let batchTotal = 0;
   let filteredTotal = 0;
   let filterCounts = {};
+  // A failed read is not an empty batch. Keep its state separate from the last
+  // successful payload so stale facts can be labelled and made inert.
+  let batchLoadState = 'idle';
+  // The latest successful transition distinguishes first use, a scan with no
+  // proposals, and a batch whose candidates all reached outcomes.
+  let emptyReviewState = 'unscanned';
+  let reviewStatusMessage = '';
   // The approval issued by a preview, held only until the user confirms or
   // cancels. It is never persisted: an abandoned approval simply expires.
   let pendingPreview = null;
@@ -359,6 +366,10 @@
     return (value < 10 ? value.toFixed(1) : Math.round(value)) + ' ' + units[unit];
   }
 
+  function formatCount(value) {
+    return Math.max(0, Number(value) || 0).toLocaleString();
+  }
+
   function formatWhen(iso) {
     if (!iso) return '';
     const when = new Date(iso);
@@ -408,10 +419,55 @@
     return parts.join(' · ') + ' — ' + source + (when ? ', ' + when : '');
   }
 
+  function batchProgress(batch) {
+    const summary = batch?.summary || {};
+    const progress = el('section', 'dj-batch-progress');
+    progress.setAttribute('aria-label', 'Whole batch progress');
+    const stateLabels = {
+      pending: 'Review in progress',
+      partially_applied: 'Partially completed',
+      resolved:
+        summary.failed || summary.stale ? 'Review complete with problems' : 'Review complete'
+    };
+    progress.appendChild(
+      el('p', 'dj-batch-progress-title', stateLabels[batch?.state] || 'Batch status')
+    );
+    progress.appendChild(
+      el(
+        'p',
+        'dj-batch-progress-main',
+        formatCount(summary.proposed) +
+          ' remaining of ' +
+          formatCount(summary.total) +
+          ' candidates'
+      )
+    );
+
+    const counts = el('dl', 'dj-batch-progress-counts');
+    const add = (value, label, className = '') => {
+      const item = el('div', 'dj-batch-progress-count' + (className ? ' ' + className : ''));
+      item.appendChild(el('dt', 'dj-batch-progress-number', formatCount(value)));
+      item.appendChild(el('dd', 'dj-batch-progress-label', label));
+      counts.appendChild(item);
+    };
+    add(summary.needs_review, 'need review within remaining', 'is-attention');
+    add(summary.applied, 'completed');
+    add(summary.skipped, 'skipped');
+    add((summary.failed || 0) + (summary.stale || 0), 'problems', 'is-problem');
+    add(summary.ineligible, 'observed but not eligible');
+    progress.appendChild(counts);
+    return progress;
+  }
+
+  function batchActionsAvailable() {
+    return batchLoadState !== 'loading' && batchLoadState !== 'error';
+  }
+
   function categoryPicker(candidate) {
     const select = document.createElement('select');
     select.className = 'dj-category';
     select.id = 'fileJanitorCategory-' + candidateDOMToken(candidate.id);
+    select.disabled = !batchActionsAvailable();
     select.setAttribute('aria-label', 'Category for ' + displayName(candidate));
     const chosen = candidate.decision_category || candidate.category || '';
     const options = categories.length
@@ -518,7 +574,8 @@
     checkbox.checked = selected.has(candidate.id);
     checkbox.setAttribute('aria-label', 'Select ' + displayName(candidate));
     checkbox.disabled = candidate.state !== 'pending' && candidate.state !== 'approved';
-    checkbox.disabled = checkbox.disabled || trashMarked.has(candidate.id);
+    checkbox.disabled =
+      checkbox.disabled || trashMarked.has(candidate.id) || !batchActionsAvailable();
     // A row Ori could not place confidently cannot be filed until the user
     // says where it goes. Leaving it selectable meant "Needs review" was
     // decoration: the row rode along in a bulk approval and was filed using
@@ -604,6 +661,7 @@
         }
       );
       trashToggle.id = 'fileJanitorTrash-' + token;
+      trashToggle.disabled = !batchActionsAvailable();
       trashToggle.setAttribute('aria-pressed', marked ? 'true' : 'false');
       trashToggle.setAttribute(
         'aria-label',
@@ -614,6 +672,7 @@
         void submitDecisions([{ candidate_id: candidate.id, decision: 'skip' }]);
       });
       skip.id = 'fileJanitorSkip-' + token;
+      skip.disabled = !batchActionsAvailable();
       actionCell.appendChild(skip);
     } else if (candidate.state === 'skipped') {
       actionCell.appendChild(el('span', 'dj-muted', 'Dismissed'));
@@ -676,10 +735,11 @@
       // The count comes from the server's whole-batch tally, not from the rows
       // on screen — those are one page of them.
       if (typeof count === 'number') {
-        control.appendChild(el('span', 'dj-filter-count', String(count)));
-        control.setAttribute('aria-label', option.label + ', ' + count + ' files');
+        control.appendChild(el('span', 'dj-filter-count', formatCount(count)));
+        control.setAttribute('aria-label', option.label + ', ' + formatCount(count) + ' files');
       }
       control.setAttribute('aria-pressed', filter === option.id ? 'true' : 'false');
+      control.disabled = !batchActionsAvailable();
       bar.appendChild(control);
     });
     return bar;
@@ -710,11 +770,20 @@
     // how much they have filtered out rather than believing the batch is
     // smaller than it is.
     const filtered =
-      filter && batchTotal > filteredTotal ? ' (filtered from ' + batchTotal + ')' : '';
+      filter && batchTotal > filteredTotal
+        ? ' (filtered from ' + formatCount(batchTotal) + ')'
+        : '';
     const status = el(
       'p',
       'dj-pager-status',
-      'Showing ' + from + '\u2013' + to + ' of ' + filteredTotal + ' files' + filtered
+      'Showing ' +
+        formatCount(from) +
+        '\u2013' +
+        formatCount(to) +
+        ' of ' +
+        formatCount(filteredTotal) +
+        ' files' +
+        filtered
     );
     status.id = 'downloadsJanitorPagerStatus';
     status.setAttribute('role', 'status');
@@ -724,10 +793,10 @@
       goToPage(pageOffset - PAGE_SIZE)
     );
     previous.id = 'downloadsJanitorPagePrev';
-    previous.disabled = pageOffset <= 0;
+    previous.disabled = pageOffset <= 0 || !batchActionsAvailable();
     const next = button('Next', 'dj-btn dj-btn-secondary', () => goToPage(pageOffset + PAGE_SIZE));
     next.id = 'downloadsJanitorPageNext';
-    next.disabled = to >= filteredTotal;
+    next.disabled = to >= filteredTotal || !batchActionsAvailable();
 
     nav.appendChild(previous);
     nav.appendChild(status);
@@ -802,13 +871,43 @@
       if (trashes) parts.push(trashes + ' to Trash');
       approve.textContent =
         parts.length === 0 ? 'Review selected changes' : 'Review ' + parts.join(' and ');
-      approve.disabled = moves + trashes === 0;
+      approve.disabled = moves + trashes === 0 || !batchActionsAvailable();
       approve.setAttribute('aria-disabled', approve.disabled ? 'true' : 'false');
       // Point the disabled control at the line that says why ("No files
       // selected."), so the reason is available to a screen reader reading the
       // button rather than only to someone who happens to look above it.
       approve.setAttribute('aria-describedby', 'downloadsJanitorSelection');
     }
+  }
+
+  function batchLoadNotice(hasLastKnownBatch) {
+    if (batchLoadState !== 'loading' && batchLoadState !== 'error') return null;
+    const failed = batchLoadState === 'error';
+    const notice = el(
+      'div',
+      'dj-batch-load-notice ' + (failed ? 'dj-batch-load-error' : 'dj-batch-loading')
+    );
+    notice.setAttribute('role', failed ? 'alert' : 'status');
+    notice.appendChild(
+      el('p', 'dj-batch-load-title', failed ? 'Review unavailable' : 'Loading latest review…')
+    );
+    notice.appendChild(
+      el(
+        'p',
+        'dj-batch-load-copy',
+        failed
+          ? hasLastKnownBatch
+            ? 'Showing the last known batch. Review actions are disabled until the latest data loads.'
+            : 'Ori could not load the review data. This does not mean the folder is empty.'
+          : hasLastKnownBatch
+            ? 'Last known counts remain visible but cannot be acted on while they refresh.'
+            : 'Checking for the latest scan and proposals.'
+      )
+    );
+    if (failed) {
+      notice.appendChild(button('Retry', 'dj-btn dj-btn-secondary', () => void loadBatch()));
+    }
+    return notice;
   }
 
   // renderBatch repaints only the review section, so changing a filter or
@@ -819,20 +918,45 @@
     const focusedReviewControlID = String(document.activeElement?.id || '');
     clear(container);
 
+    const loadNotice = batchLoadNotice(Boolean(lastBatch));
+    if (loadNotice) container.appendChild(loadNotice);
+    if (reviewStatusMessage) {
+      const notice = el('p', 'dj-batch-scan-status', reviewStatusMessage);
+      notice.setAttribute('role', 'status');
+      notice.setAttribute('aria-live', 'polite');
+      container.appendChild(notice);
+    }
+
     if (!lastBatch) {
+      if (batchLoadState === 'loading' || batchLoadState === 'error') return;
       const empty = el('div', 'dj-empty');
-      empty.appendChild(el('p', 'dj-empty-title', 'Nothing to review'));
-      empty.appendChild(
-        el(
-          'p',
-          'dj-empty-copy',
-          'New downloads appear here after a scan. Nothing is moved without your approval.'
-        )
-      );
+      const states = {
+        scan_empty: {
+          title: 'Scan complete — no new proposals',
+          copy: 'Ori found no new eligible files. No changes were made.'
+        },
+        completed: {
+          title: 'Batch complete',
+          copy: 'Every candidate has a recorded outcome. View History for the item-by-item record.'
+        },
+        unscanned: {
+          title: 'Not scanned in this session',
+          copy: 'Scan this folder to look for files to review. Nothing moves without your approval.'
+        }
+      };
+      const state = states[emptyReviewState] || states.unscanned;
+      empty.appendChild(el('p', 'dj-empty-title', state.title));
+      empty.appendChild(el('p', 'dj-empty-copy', state.copy));
+      if (emptyReviewState === 'completed') {
+        empty.appendChild(
+          button('View History', 'dj-btn dj-btn-secondary', () => selectTab('history'))
+        );
+      }
       container.appendChild(empty);
       return;
     }
 
+    container.appendChild(batchProgress(lastBatch));
     const summary = el('p', 'dj-batch-summary', batchSummaryLine(lastBatch));
     summary.setAttribute('role', 'status');
     summary.setAttribute('aria-live', 'polite');
@@ -841,7 +965,19 @@
 
     const rows = visibleCandidates();
     if (rows.length === 0) {
-      container.appendChild(el('p', 'dj-empty-copy', 'No files match this filter.'));
+      const summaryData = lastBatch.summary || {};
+      let emptyCopy = 'No files match this filter.';
+      if (!filter && lastBatch.state === 'resolved') {
+        const problems = (summaryData.failed || 0) + (summaryData.stale || 0);
+        emptyCopy = problems
+          ? 'No files are waiting, but ' +
+            formatCount(problems) +
+            (problems === 1 ? ' problem still needs attention.' : ' problems still need attention.')
+          : summaryData.total
+            ? 'Review complete. Every candidate has a recorded outcome.'
+            : 'Scan complete. No files needed filing.';
+      }
+      container.appendChild(el('p', 'dj-empty-copy', emptyCopy));
     } else {
       const scroller = el('div', 'dj-table-scroll');
       scroller.appendChild(reviewTable());
@@ -1761,6 +1897,10 @@
       const body = await response.json();
       historyActions = Array.isArray(body.actions) ? body.actions : [];
       historyLoaded = true;
+      if (!lastBatch && historyActions.length > 0 && emptyReviewState === 'unscanned') {
+        emptyReviewState = 'completed';
+        renderBatch();
+      }
     } catch (_) {
       historyActions = [];
       historyLoaded = true;
@@ -1801,17 +1941,28 @@
     }
   }
 
-  const RESULT_LABELS = {
-    applied: 'Filed',
-    failed: 'Not moved',
-    stale: 'Changed — not moved'
-  };
-
   const RESULT_MARKS = { applied: '✓', failed: '!', stale: '•' };
 
-  // renderResults reports what happened per file. A batch where some files
-  // moved and others did not is stated as exactly that — never summarized as
-  // success (FR-72).
+  function outcomeOperation(outcome) {
+    // Only the operation field is authoritative. A destination-looking string,
+    // filename, or clicked control is not evidence that an apply actually ran
+    // as a move.
+    return outcome.operation === 'move' || outcome.operation === 'trash' ? outcome.operation : '';
+  }
+
+  function outcomeLabel(outcome) {
+    const operation = outcomeOperation(outcome);
+    if (outcome.result === 'stale') return 'Changed — not moved';
+    if (outcome.result === 'failed') return 'Not moved';
+    if (outcome.result === 'applied' && operation === 'move') return 'Filed';
+    if (outcome.result === 'applied' && operation === 'trash') return 'Moved to Trash';
+    if (outcome.result === 'applied') return 'Completed';
+    return safeName(outcome.result, 'Not completed');
+  }
+
+  // renderResults reports what happened per file. Operation evidence comes
+  // from each authoritative outcome: an applied Trash is never called "filed",
+  // and an older response without operation data gets neutral wording.
   function renderResults(result) {
     const host = document.getElementById('downloadsJanitorConfirmHost');
     if (!host) return;
@@ -1825,27 +1976,57 @@
     panel.setAttribute('tabindex', '-1');
     panel.setAttribute('aria-labelledby', 'downloadsJanitorResultsSummary');
 
+    const outcomes = Array.isArray(result.outcomes) ? result.outcomes : [];
+    let filed = 0;
+    let trashed = 0;
+    let completed = 0;
+    let failed = 0;
+    let stale = 0;
+    outcomes.forEach(outcome => {
+      const operation = outcomeOperation(outcome);
+      if (outcome.result === 'applied' && operation === 'move') filed += 1;
+      else if (outcome.result === 'applied' && operation === 'trash') trashed += 1;
+      else if (outcome.result === 'applied') completed += 1;
+      else if (outcome.result === 'failed') failed += 1;
+      else if (outcome.result === 'stale') stale += 1;
+    });
+    // Older aggregate-only replies cannot prove which operation succeeded, so
+    // they are deliberately reported as completed changes rather than files.
+    if (outcomes.length === 0) {
+      completed = Number(result.applied) || 0;
+      failed = Number(result.failed) || 0;
+      stale = Number(result.stale) || 0;
+    }
+
     const parts = [];
-    if (result.applied)
-      parts.push(result.applied + (result.applied === 1 ? ' file filed' : ' files filed'));
-    if (result.failed) parts.push(result.failed + ' could not be moved');
-    if (result.stale) parts.push(result.stale + ' changed since you approved');
+    if (filed) parts.push(filed + (filed === 1 ? ' file filed' : ' files filed'));
+    if (trashed) parts.push(formatCount(trashed) + ' moved to Trash');
+    if (completed) parts.push(formatCount(completed) + ' changes completed');
+    if (failed) parts.push(formatCount(failed) + ' could not be moved');
+    if (stale) parts.push(formatCount(stale) + ' changed since you approved');
     if (parts.length === 0) parts.push('Nothing was moved');
     const resultsSummary = el('p', 'dj-results-summary', parts.join(' · ') + '.');
     resultsSummary.id = 'downloadsJanitorResultsSummary';
     panel.appendChild(resultsSummary);
+    if (result.replayed) {
+      panel.appendChild(
+        el('p', 'dj-results-replayed', 'Already completed earlier; nothing ran again.')
+      );
+    }
 
     const list = el('ul', 'dj-results-list');
-    (result.outcomes || []).forEach(outcome => {
+    outcomes.forEach(outcome => {
       const entry = el('li', 'dj-results-item dj-results-' + (outcome.result || 'failed'));
       const mark = el('span', 'dj-results-mark', RESULT_MARKS[outcome.result] || '!');
       mark.setAttribute('aria-hidden', 'true');
       entry.appendChild(mark);
       entry.appendChild(el('span', 'dj-results-name', displayName(outcome)));
-      entry.appendChild(
-        el('span', 'dj-results-state', ' — ' + (RESULT_LABELS[outcome.result] || outcome.result))
-      );
-      if (outcome.destination && outcome.result === 'applied') {
+      entry.appendChild(el('span', 'dj-results-state', ' — ' + outcomeLabel(outcome)));
+      if (
+        outcome.destination &&
+        outcome.result === 'applied' &&
+        outcomeOperation(outcome) === 'move'
+      ) {
         entry.appendChild(el('span', 'dj-results-destination', ' → ' + outcome.destination));
       }
       if (outcome.message) {
@@ -1855,9 +2036,14 @@
     });
     panel.appendChild(list);
 
-    if (result.stale) {
-      panel.appendChild(button('Scan again', 'dj-btn dj-btn-secondary', () => void scanNow()));
+    const actions = el('div', 'dj-results-actions');
+    actions.appendChild(
+      button('View History', 'dj-btn dj-btn-secondary', () => selectTab('history'))
+    );
+    if (stale) {
+      actions.appendChild(button('Scan again', 'dj-btn dj-btn-secondary', () => void scanNow()));
     }
+    panel.appendChild(actions);
     host.appendChild(panel);
     // The button that was pressed no longer exists. Move focus to the outcome
     // so a keyboard user lands on what happened instead of at the top of the
@@ -1870,7 +2056,14 @@
   // confirmation. Nothing moves at this step.
   async function startApproval() {
     const id = wsId();
-    if (!id || busy || selected.size + trashMarked.size === 0) return;
+    if (
+      !id ||
+      !lastBatch ||
+      !batchActionsAvailable() ||
+      busy ||
+      selected.size + trashMarked.size === 0
+    )
+      return;
     busy = true;
     showError('');
     rememberFocus();
@@ -3075,6 +3268,7 @@
     if (!id || busy) return;
     busy = true;
     scanning = true;
+    reviewStatusMessage = '';
     showError('');
     refreshActivity();
     const control = document.getElementById('downloadsJanitorScan');
@@ -3094,9 +3288,13 @@
       }
       await loadBatch();
       if (!result.created) {
-        showError(
-          'Nothing new to review — every file here has already been proposed or dismissed.'
-        );
+        if (!lastBatch) {
+          emptyReviewState = 'scan_empty';
+        } else {
+          reviewStatusMessage =
+            'Scan complete — no new proposals. The current review batch is unchanged.';
+        }
+        renderBatch();
       }
     } catch (error) {
       showError(error.message || 'The scan could not run.');
@@ -3212,12 +3410,13 @@
     if (!id) return;
     // The rows about to be rendered need the category vocabulary: without it
     // the picker collapses to a single dead option showing the raw category id.
-    // refresh() loads it on a page visit to an already-configured workspace,
-    // which meant it was missing for the whole session after a fresh setup —
-    // exactly the session in which the first batch gets reviewed. Loading it
-    // here ties it to the thing that needs it. It is a no-op once cached.
     await loadCategories();
     const previousBatchID = lastBatch && lastBatch.id;
+    batchLoadState = 'loading';
+    renderBatch();
+    const pendingControl = document.getElementById('downloadsJanitorConfirmApply');
+    if (pendingPreview && pendingControl) pendingControl.disabled = true;
+
     try {
       const query =
         '?limit=' +
@@ -3229,23 +3428,34 @@
       if (!response.ok) throw new Error('batch failed');
       const body = await response.json();
       lastBatch = body.batch || null;
+      emptyReviewState = lastBatch ? 'active' : previousBatchID ? 'completed' : emptyReviewState;
       lastCandidates = Array.isArray(body.candidates) ? body.candidates : [];
       batchTotal = Number(body.total) || 0;
       filteredTotal = Number(body.filtered_total) || 0;
       filterCounts = body.counts || {};
-      // An offset the server clamped past the end leaves an empty page with
-      // rows still behind it. Snap back so the user is never stranded on
-      // nothing with no way to tell why.
+      batchLoadState = 'loaded';
+
+      // A last page can shrink after decisions. Fetch the corrected final page
+      // immediately instead of rendering an empty out-of-range page.
       if (lastCandidates.length === 0 && filteredTotal > 0 && pageOffset >= filteredTotal) {
+        const currentBatchID = lastBatch && lastBatch.id;
+        if (currentBatchID !== previousBatchID) {
+          selected = new Set();
+          trashMarked = new Set();
+          expandedCandidates = new Set();
+        }
         pageOffset = Math.max(0, (Math.ceil(filteredTotal / PAGE_SIZE) - 1) * PAGE_SIZE);
+        return loadBatch();
       }
     } catch (_) {
-      lastBatch = null;
-      lastCandidates = [];
-      batchTotal = 0;
-      filteredTotal = 0;
-      filterCounts = {};
+      batchLoadState = 'error';
+      const hadPendingPreview = Boolean(pendingPreview);
+      pendingPreview = null;
+      if (hadPendingPreview) clear(document.getElementById('downloadsJanitorConfirmHost'));
+      renderBatch();
+      return;
     }
+
     // A different batch invalidates every decision made against the old one.
     if ((lastBatch && lastBatch.id) !== previousBatchID) {
       selected = new Set();
@@ -3253,18 +3463,10 @@
       expandedCandidates = new Set();
     }
     dropIneligibleSelections();
-    // A confirmation already on screen must survive a batch reload that did not
-    // change the batch.
-    //
-    // The confirmation panel lives in its own host, outside the batch
-    // container, so a repaint leaves it standing. Clearing pendingPreview
-    // unconditionally therefore left the confirm button visible and enabled
-    // while the approval behind it was gone: pressing it did nothing, sent
-    // nothing, and said nothing. A loadBatch() still in flight when the
-    // approval returned — from the scan that produced the batch — was enough
-    // to trigger it, which made it intermittent and load-dependent.
-    //
-    // Only discard the approval when it no longer describes what is on screen.
+
+    // A confirmation survives only when it still names this exact batch. While
+    // the refresh was in flight its final action was disabled.
+    const hadPendingPreview = Boolean(pendingPreview);
     const approvalStillApplies =
       pendingPreview &&
       lastBatch &&
@@ -3272,14 +3474,16 @@
       pendingPreview.preview.batch_id === lastBatch.id;
     if (!approvalStillApplies) {
       pendingPreview = null;
+      if (hadPendingPreview) clear(document.getElementById('downloadsJanitorConfirmHost'));
+    } else {
+      const control = document.getElementById('downloadsJanitorConfirmApply');
+      const acknowledgement = document.getElementById('downloadsJanitorTrashAck');
+      if (control) {
+        control.textContent = confirmLabel(pendingPreview.preview);
+        control.disabled = Boolean(acknowledgement && !acknowledgement.checked);
+      }
     }
-    // This used to clear `selected` and `trashMarked` here too. That was
-    // correct when a reload only ever meant "a new scan happened", but a reload
-    // is now also how the user turns a page — so it silently discarded the
-    // decisions of anyone reviewing more files than fit on one screen, which is
-    // exactly the case paging exists to serve. The narrower rules above own it:
-    // a changed batch clears everything, and a candidate that is no longer
-    // eligible is dropped individually.
+
     renderBatch();
     refreshStats();
     // Status arrives before the paged batch on a cold workspace load. Once the
@@ -3632,6 +3836,11 @@
       const changed = (lastBatch && lastBatch.id) !== (batch && batch.id);
       lastBatch = batch;
       lastCandidates = candidates || [];
+      batchLoadState = 'loaded';
+      emptyReviewState = batch ? 'active' : 'unscanned';
+      batchTotal = Number(batch?.summary?.total) || lastCandidates.length;
+      filteredTotal = lastCandidates.length;
+      filterCounts = {};
       if (cats) categories = cats;
       selected = new Set();
       trashMarked = new Set();
@@ -3683,6 +3892,15 @@
       removalCompanionChecked = false;
       pageOffset = 0;
       filter = '';
+      batchTotal = 0;
+      filteredTotal = 0;
+      filterCounts = {};
+      batchLoadState = 'idle';
+      emptyReviewState = 'unscanned';
+      reviewStatusMessage = '';
+      selected = new Set();
+      trashMarked = new Set();
+      pendingPreview = null;
       historyActions = [];
       historyLoaded = false;
       settingsOpen = false;

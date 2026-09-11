@@ -216,10 +216,124 @@
   margin-top: 1rem;
 }
 
-.dj-batch-summary {
-  font-size: 0.82rem;
-  margin: 0 0 0.6rem;
+.dj-batch-progress {
+  display: grid;
+  grid-template-columns: minmax(9rem, 0.7fr) minmax(13rem, 1fr);
+  gap: 0.2rem 1rem;
+  margin-bottom: 0.4rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg-tertiary, #242424) 62%, transparent);
+}
+
+.dj-batch-progress-title,
+.dj-batch-progress-main {
+  margin: 0;
+}
+
+.dj-batch-progress-title {
+  color: var(--text-secondary, #9aa0a6);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.dj-batch-progress-main {
+  grid-row: 2;
   color: var(--text-primary, #e8e8e8);
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+
+.dj-batch-progress-counts {
+  display: flex;
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.8rem;
+  align-content: center;
+  margin: 0;
+}
+
+.dj-batch-progress-count {
+  display: flex;
+  gap: 0.25rem;
+  align-items: baseline;
+  min-width: max-content;
+}
+
+.dj-batch-progress-number,
+.dj-batch-progress-label {
+  margin: 0;
+  font-size: 0.72rem;
+}
+
+.dj-batch-progress-number {
+  color: var(--text-primary, #e8e8e8);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.dj-batch-progress-label {
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-batch-progress-count.is-attention .dj-batch-progress-number,
+.dj-batch-progress-count.is-problem .dj-batch-progress-number {
+  color: var(--warning-color, #b26a00);
+}
+
+.dj-batch-summary {
+  font-size: 0.76rem;
+  margin: 0 0 0.6rem;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-batch-load-notice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.65rem;
+  align-items: center;
+  margin-bottom: 0.65rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border-color, #2f2f2f);
+  border-radius: 8px;
+  background: var(--surface-1, rgba(255, 255, 255, 0.03));
+}
+
+.dj-batch-load-error {
+  border-color: color-mix(in srgb, var(--warning-color, #b26a00) 55%, transparent);
+}
+
+.dj-batch-load-title,
+.dj-batch-load-copy {
+  margin: 0;
+}
+
+.dj-batch-load-title {
+  color: var(--text-primary, #e8e8e8);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.dj-batch-load-copy {
+  flex: 1 1 18rem;
+  color: var(--text-secondary, #9aa0a6);
+  font-size: 0.78rem;
+}
+
+.dj-batch-load-notice .dj-btn {
+  margin-left: auto;
+}
+
+.dj-batch-scan-status {
+  margin: 0 0 0.65rem;
+  padding: 0.45rem 0.6rem;
+  border-left: 3px solid var(--accent-color, #3b7dd8);
+  color: var(--text-secondary, #9aa0a6);
+  font-size: 0.78rem;
 }
 
 .dj-filters {
@@ -237,6 +351,11 @@
   color: var(--text-secondary, #9aa0a6);
   font-size: 0.78rem;
   cursor: pointer;
+}
+
+.dj-filter:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
 }
 
 .dj-filter-active {
@@ -481,7 +600,30 @@
   color: var(--text-secondary, #9aa0a6);
 }
 
+.dj-empty .dj-btn {
+  margin-top: 0.65rem;
+}
+
 @media (max-width: 680px) {
+  .dj-batch-progress {
+    grid-template-columns: 1fr;
+  }
+
+  .dj-batch-progress-main,
+  .dj-batch-progress-counts {
+    grid-row: auto;
+    grid-column: 1;
+  }
+
+  .dj-batch-progress-counts {
+    margin-top: 0.35rem;
+  }
+
+  .dj-batch-load-notice .dj-btn {
+    width: 100%;
+    margin-left: 0;
+  }
+
   .dj-table-scroll {
     border: 0;
   }
@@ -658,6 +800,19 @@
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--text-primary, #e8e8e8);
+}
+
+.dj-results-replayed {
+  margin: -0.2rem 0 0.55rem;
+  color: var(--text-secondary, #9aa0a6);
+  font-size: 0.78rem;
+}
+
+.dj-results-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.7rem;
 }
 
 .dj-results-mark {

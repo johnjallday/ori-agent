@@ -393,6 +393,9 @@ test.describe('File Janitor capability', () => {
     // Scan from the console header.
     await page.locator('#downloadsJanitorScan').click();
     await expect(consoleBody(page).locator('.dj-row-item').first()).toBeVisible({ timeout: 15000 });
+    const progress = consoleBody(page).locator('.dj-batch-progress');
+    await expect(progress).toContainText('2 remaining of 2 candidates');
+    await expect(progress).toContainText('need review within remaining');
 
     await expect(consoleBody(page).locator('.dj-table th')).toHaveText([
       'Select',
@@ -445,6 +448,56 @@ test.describe('File Janitor capability', () => {
     expect(existsSync(join(root, 'invoice.pdf'))).toBe(false);
     // The file nobody approved is untouched.
     expect(existsSync(join(root, 'holiday.png'))).toBe(true);
+
+    const results = consoleBody(page).locator('.dj-results');
+    await expect(results).toContainText('1 file filed');
+    await expect(results).toContainText('invoice.pdf');
+    await results.getByRole('button', { name: 'View History' }).click();
+    await expect(console_(page).locator('[data-fj-tab="history"]')).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    await expect(consoleBody(page)).toContainText('invoice.pdf');
+  });
+
+  test('a failed batch refresh keeps the last known review visible but inert', async ({
+    page,
+    request
+  }) => {
+    const workspaceId = await createPlainWorkspace(request, `FJ Batch failure ${RUN}`);
+    const root = fixtureFolder('batch-failure', { 'invoice.pdf': 'invoice' });
+    await installCapability(request, workspaceId);
+    await grantFolder(request, workspaceId, root);
+
+    await openWorkspace(page, workspaceId);
+    await openConsoleFromCard(page);
+    await page.locator('#downloadsJanitorScan').click();
+    const row = consoleBody(page).locator('.dj-row-item').filter({ hasText: 'invoice.pdf' });
+    await expect(row).toBeVisible({ timeout: 15000 });
+
+    const latestBatch = `**/api/workspaces/${workspaceId}/file-janitor/batches/latest*`;
+    await page.route(latestBatch, route =>
+      route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { message: 'Simulated batch read failure.' } })
+      })
+    );
+    await page.evaluate(async () => {
+      await (window as any).FileJanitorConsole._reloadBatch();
+    });
+
+    const unavailable = consoleBody(page).locator('.dj-batch-load-error');
+    await expect(unavailable).toContainText('Review unavailable');
+    await expect(unavailable).toContainText('Showing the last known batch');
+    await expect(row).toBeVisible();
+    await expect(row.locator('.dj-select')).toBeDisabled();
+    await expect(page.locator('#downloadsJanitorApprove')).toBeDisabled();
+    await expect(consoleBody(page)).not.toContainText('Nothing to review');
+
+    await page.unroute(latestBatch);
+    await unavailable.getByRole('button', { name: 'Retry' }).click();
+    await expect(row.locator('.dj-select')).toBeEnabled({ timeout: 15000 });
   });
 
   test('History records the move and offers to undo it', async ({ page, request }) => {

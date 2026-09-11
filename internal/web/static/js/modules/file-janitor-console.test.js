@@ -609,6 +609,57 @@ test('review rows present five decisions-first columns with expandable file deta
   );
 });
 
+test('whole-batch progress separates remaining, subset, outcomes, and ineligible observations', () => {
+  const doc = setup();
+  const batch = batchFixture({
+    state: 'partially_applied',
+    summary: {
+      proposed: 3,
+      needs_review: 2,
+      skipped: 4,
+      ineligible: 5,
+      stale: 1,
+      applied: 6,
+      failed: 1,
+      total: 15
+    }
+  });
+  renderReview(doc, batch, candidatesFixture());
+
+  const progress = surface(doc).all(node => node.className === 'dj-batch-progress')[0];
+  assert.ok(progress, 'the review needs a whole-batch progress readout');
+  assert.match(progress.textContent, /3 remaining of 15 candidates/);
+  assert.match(progress.textContent, /2 need review within remaining/);
+  assert.match(progress.textContent, /6 completed/);
+  assert.match(progress.textContent, /4 skipped/);
+  assert.match(progress.textContent, /2 problems/);
+  assert.match(progress.textContent, /5 observed but not eligible/);
+});
+
+test('a resolved batch with failures reads as complete with problems, not all clear', () => {
+  const doc = setup();
+  const batch = batchFixture({
+    state: 'resolved',
+    summary: {
+      proposed: 0,
+      needs_review: 0,
+      skipped: 1,
+      ineligible: 2,
+      stale: 1,
+      applied: 3,
+      failed: 1,
+      total: 6
+    }
+  });
+  renderReview(doc, batch, []);
+
+  const body = text(doc);
+  assert.match(body, /Review complete with problems/);
+  assert.match(body, /2 problems/);
+  assert.match(body, /No files are waiting, but 2 problems still need attention/);
+  assert.doesNotMatch(body, /all clear/i);
+});
+
 test('the batch summary states counts, scan source, and when it ran', () => {
   const doc = setup();
   renderReview(doc);
@@ -790,8 +841,8 @@ test('an empty workspace explains what will appear rather than showing a bare ta
   const doc = setup();
   renderReview(doc, null, []);
   const body = text(doc);
-  assert.match(body, /Nothing to review/);
-  assert.match(body, /Nothing is moved without your approval/);
+  assert.match(body, /Not scanned in this session/);
+  assert.match(body, /Nothing moves without your approval/);
   assert.match(cardText(doc), /No files waiting for review/);
 });
 
@@ -817,10 +868,61 @@ test('Scan now reports honestly when a scan finds nothing new', async () => {
   await new Promise(r => setTimeout(r, 0));
 
   const error = doc.getElementById('downloadsJanitorError');
-  assert.equal(error.hidden, false);
-  assert.match(error.textContent, /Nothing new to review/);
+  assert.equal(error.hidden, true, 'an empty successful scan is not an error');
+  assert.match(text(doc), /Scan complete — no new proposals/);
+  assert.match(text(doc), /No changes were made/);
   // The button is usable again.
   assert.equal(doc.getElementById('downloadsJanitorScan').disabled, false);
+});
+
+test('a scan with no new proposals keeps an existing review batch and reports that fact', async () => {
+  const doc = setup();
+  renderReview(doc);
+  await settle();
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.renderBatch();
+  globalThis.fetch = async (url, opts) => {
+    if (opts && opts.method === 'POST') {
+      return { ok: true, json: async () => ({ success: true, created: false }) };
+    }
+    return {
+      ok: true,
+      json: async () => ({
+        batch: batchFixture(),
+        candidates: candidatesFixture(),
+        total: 3,
+        filtered_total: 3,
+        counts: { all: 3, needs_review: 1, pending: 2, skipped: 1 }
+      })
+    };
+  };
+
+  doc.getElementById('downloadsJanitorScan').click();
+  await settle();
+  await settle();
+
+  assert.match(text(doc), /Scan complete — no new proposals/);
+  assert.match(text(doc), /current review batch is unchanged/);
+  assert.match(text(doc), /invoice-2026-07\.pdf/);
+  assert.equal(doc.getElementById('downloadsJanitorError').hidden, true);
+});
+
+test('a resolved pending batch becomes a completed-batch empty state', async () => {
+  const doc = setup();
+  renderReview(doc);
+  await settle();
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.renderBatch();
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({ batch: null, candidates: [], total: 0, filtered_total: 0, counts: {} })
+  });
+
+  await panel._reloadBatch();
+
+  assert.match(text(doc), /Batch complete/);
+  assert.match(text(doc), /Every candidate has a recorded outcome/);
+  assert.match(text(doc), /View History/);
 });
 
 test('a rejected decision is not left on screen as though it were saved', async () => {
@@ -948,6 +1050,9 @@ test('the confirmation shows each resolved destination and flags forced renames'
 test('confirming sends the approval token and reports per-file results', async () => {
   const doc = setup();
   renderReview(doc);
+  await settle();
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.renderBatch();
   panel._select('c1');
   let applyBody = null;
   globalThis.fetch = async (url, opts) => {
@@ -967,6 +1072,7 @@ test('confirming sends the approval token and reports per-file results', async (
               {
                 candidate_id: 'c1',
                 name: 'invoice-2026-07.pdf',
+                operation: 'move',
                 result: 'applied',
                 destination: 'Filed/Documents/invoice-2026-07.pdf'
               },
@@ -1004,9 +1110,94 @@ test('confirming sends the approval token and reports per-file results', async (
   assert.doesNotMatch(body, /All files? moved/);
 });
 
+test('mixed outcomes name moves, Trash, failures, stale files, and replay truthfully', async () => {
+  const doc = setup();
+  renderReview(doc);
+  await settle();
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.renderBatch();
+  panel._select('c1');
+  globalThis.fetch = async url => {
+    if (String(url).endsWith('/preview')) {
+      return { ok: true, json: async () => ({ preview: PREVIEW }) };
+    }
+    if (String(url).endsWith('/apply')) {
+      return {
+        ok: true,
+        json: async () => ({
+          result: {
+            applied: 3,
+            failed: 1,
+            stale: 1,
+            replayed: true,
+            outcomes: [
+              {
+                candidate_id: 'c1',
+                name: 'invoice.pdf',
+                operation: 'move',
+                result: 'applied',
+                destination: 'Filed/Documents/invoice.pdf'
+              },
+              {
+                candidate_id: 'c2',
+                name: 'old.zip',
+                operation: 'trash',
+                result: 'applied'
+              },
+              {
+                candidate_id: 'legacy',
+                name: 'older-response.dat',
+                result: 'applied',
+                destination: 'Filed/Documents/older-response.dat'
+              },
+              {
+                candidate_id: 'c3',
+                name: 'blocked.pdf',
+                operation: 'move',
+                result: 'failed',
+                message: 'Permission denied.'
+              },
+              {
+                candidate_id: 'c4',
+                name: 'changed.pdf',
+                operation: 'move',
+                result: 'stale',
+                message: 'Changed after review.'
+              }
+            ]
+          }
+        })
+      };
+    }
+    return { ok: true, json: async () => ({ batch: null, candidates: [] }) };
+  };
+
+  doc.getElementById('downloadsJanitorApprove').click();
+  await settle();
+  doc.getElementById('downloadsJanitorConfirmApply').click();
+  await settle();
+  await settle();
+
+  const body = text(doc);
+  assert.match(body, /1 file filed/);
+  assert.match(body, /1 moved to Trash/);
+  assert.match(body, /1 changes completed/);
+  assert.match(body, /older-response\.dat\s+— Completed/);
+  assert.doesNotMatch(body, /→ Filed\/Documents\/older-response\.dat/);
+  assert.doesNotMatch(body, /3 files filed/);
+  assert.match(body, /1 could not be moved/);
+  assert.match(body, /1 changed since you approved/);
+  assert.match(body, /Already completed earlier; nothing ran again/);
+  assert.match(body, /old\.zip\s+— Moved to Trash/);
+  assert.match(body, /View History/);
+});
+
 test('a stale result explains itself and offers a rescan', async () => {
   const doc = setup();
   renderReview(doc);
+  await settle();
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.renderBatch();
   panel._select('c1');
   globalThis.fetch = async url => {
     if (String(url).endsWith('/preview'))
@@ -1114,7 +1305,12 @@ test('a rejected approval is reported and nothing is left looking approved', asy
 // still be on screen afterwards — that moment is the whole point of the flow.
 test('results survive the batch they emptied', async () => {
   const doc = setup();
-  renderReview(doc, batchFixture(), [candidatesFixture()[0]]);
+  const batch = batchFixture();
+  const candidates = [candidatesFixture()[0]];
+  renderReview(doc, batch, candidates);
+  await settle();
+  panel._setBatch(batch, candidates, CATEGORIES);
+  panel.renderBatch();
   panel._select('c1');
   globalThis.fetch = async url => {
     if (String(url).endsWith('/preview')) {
@@ -1135,6 +1331,7 @@ test('results survive the batch they emptied', async () => {
               {
                 candidate_id: 'c1',
                 name: 'invoice-2026-07.pdf',
+                operation: 'move',
                 result: 'applied',
                 destination: 'Filed/Documents/invoice-2026-07.pdf'
               }
@@ -1156,8 +1353,8 @@ test('results survive the batch they emptied', async () => {
   const body = text(doc);
   assert.match(body, /1 file filed/, 'the outcome must remain visible after the batch empties');
   assert.match(body, /Filed\/Documents\/invoice-2026-07\.pdf/);
-  // And the now-empty batch still explains itself.
-  assert.match(body, /Nothing to review/);
+  // And the now-empty batch states why it is empty.
+  assert.match(body, /Batch complete/);
 });
 
 // ------------------------------------------------------------------- Trash
@@ -1169,6 +1366,57 @@ function trashToggleFor(doc, name) {
     return n.tagName === 'BUTTON' && label.includes(name) && label.includes('for Trash');
   })[0];
 }
+
+test('authoritative results survive when their follow-up batch refresh fails', async () => {
+  const doc = setup();
+  renderReview(doc);
+  await settle();
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.renderBatch();
+  panel._select('c1');
+  globalThis.fetch = async url => {
+    if (String(url).endsWith('/preview')) {
+      return { ok: true, json: async () => ({ preview: PREVIEW }) };
+    }
+    if (String(url).endsWith('/apply')) {
+      return {
+        ok: true,
+        json: async () => ({
+          result: {
+            applied: 1,
+            failed: 0,
+            stale: 0,
+            outcomes: [
+              {
+                candidate_id: 'c1',
+                name: 'invoice.pdf',
+                operation: 'move',
+                result: 'applied',
+                destination: 'Filed/Documents/invoice.pdf'
+              }
+            ]
+          }
+        })
+      };
+    }
+    return { ok: false, json: async () => ({}) };
+  };
+
+  doc.getElementById('downloadsJanitorApprove').click();
+  await settle();
+  doc.getElementById('downloadsJanitorConfirmApply').click();
+  await settle();
+  await settle();
+
+  const body = text(doc);
+  assert.match(body, /Review unavailable/);
+  assert.match(body, /Showing the last known batch/);
+  assert.match(body, /1 file filed/);
+  assert.match(body, /Filed\/Documents\/invoice\.pdf/);
+  assert.doesNotMatch(body, /Nothing to review/);
+});
+
+// ------------------------------------------------------------------- Trash
 
 test('Trash is a per-file choice, never part of the move selection', () => {
   const doc = setup();
@@ -3048,6 +3296,27 @@ function pagedFetch(total, pageSize = 50) {
 // The point of server-side paging: a 500-file batch must never become 500 DOM
 // rows. This is the assertion that fails if anyone reintroduces client-side
 // rendering of the whole batch (FR-150).
+test('a failed batch read is unavailable, not an empty folder, and keeps stale data inert', async () => {
+  const doc = setup();
+  renderReview(doc);
+  await settle();
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.render(statusFixture());
+  panel.renderBatch();
+
+  globalThis.fetch = async () => ({ ok: false, json: async () => ({}) });
+  await panel._reloadBatch();
+
+  const host = surface(doc);
+  assert.match(host.textContent, /Review unavailable/);
+  assert.match(host.textContent, /Showing the last known batch/);
+  assert.match(host.textContent, /invoice-2026-07\.pdf/);
+  assert.doesNotMatch(host.textContent, /Nothing to review/);
+  assert.equal(host.all(node => node.className === 'dj-select')[0].disabled, true);
+  assert.equal(doc.getElementById('downloadsJanitorApprove').disabled, true);
+  assert.ok(host.all(node => node.tagName === 'BUTTON' && node.textContent === 'Retry')[0]);
+});
+
 test('a 500-file batch renders one page of rows, not five hundred', async () => {
   const doc = setup();
   renderReview(doc);
@@ -3082,6 +3351,40 @@ test('paging forward asks for the next page and keeps the counts', async () => {
   assert.match(surface(doc).textContent, /Showing 51/);
   assert.equal(rowsIn(surface(doc)).length, 50);
   assert.equal(surface(doc).all(n => n.id === 'downloadsJanitorPagePrev')[0].disabled, false);
+});
+
+test('a shrunken last page refetches the real final page instead of stranding an empty view', async () => {
+  const doc = setup();
+  renderReview(doc);
+  globalThis.fetch = pagedFetch(120);
+  await settle();
+  await panel._reloadBatch();
+
+  surface(doc)
+    .all(n => n.id === 'downloadsJanitorPageNext')[0]
+    .click();
+  await settle();
+  surface(doc)
+    .all(n => n.id === 'downloadsJanitorPageNext')[0]
+    .click();
+  await settle();
+  assert.match(surface(doc).textContent, /Showing 101–120/);
+
+  const offsets = [];
+  const shrunkFetch = pagedFetch(75);
+  globalThis.fetch = async url => {
+    if (String(url).includes('/batches/latest')) {
+      const params = new URLSearchParams(String(url).split('?')[1] || '');
+      offsets.push(Number(params.get('offset')) || 0);
+    }
+    return shrunkFetch(url);
+  };
+  await panel._reloadBatch();
+
+  assert.deepEqual(offsets, [100, 50]);
+  assert.equal(rowsIn(surface(doc)).length, 25);
+  assert.match(surface(doc).textContent, /Showing 51–75 of 75 files/);
+  assert.doesNotMatch(surface(doc).textContent, /No files match this filter/);
 });
 
 // A user reviewing 300 files must not lose their work by turning a page.
