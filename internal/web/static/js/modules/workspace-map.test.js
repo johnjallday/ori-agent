@@ -4079,12 +4079,333 @@ test('focus intent still selects and announces the reserved site it frames (#322
 });
 
 // ---------------------------------------------------------------------------
-// Build mode (#292 FR-47 – FR-62)
-//
-// An explicit, single-use placement state. Outside it, an empty-space click
-// means what it always meant; inside it, exactly one selection chooses a build
-// site and the mode ends.
+// Reviewed placement and legacy Build compatibility
 // ---------------------------------------------------------------------------
+
+// The Map's reviewed placement is intentionally not the legacy pre-wizard
+// Build coordinate: it has one page-local preview, never writes a fake record,
+// and hands its exact candidate back to the wizard owner only on confirmation.
+test('reviewed placement previews the reviewed name/art and confirms one exact candidate', async () => {
+  const { map, harness, patches } = buildHarness({
+    windowExtras: {
+      OriWorkspaceBuildingArt: {
+        variantForBlueprint: (id, builtin) => {
+          if (!builtin) return '';
+          if (id === 'email-ops') return 'mail';
+          return id === 'personal-ops' ? 'hq' : '';
+        },
+        svgForVariant: variant => `<svg data-building-variant="${variant}"></svg>`
+      }
+    }
+  });
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+
+  const confirmations = [];
+  assert.equal(
+    map.beginPlacement({
+      token: 'reviewed-placement',
+      initialCandidate: { x: 456, y: 228 },
+      preview: { name: 'Inbox command', blueprintID: 'email-ops', blueprintBuiltin: true },
+      onConfirm: (token, candidate) => confirmations.push({ token, candidate })
+    }),
+    true
+  );
+  assert.match(harness.container.innerHTML, /ws-map-placement-preview/);
+  assert.match(harness.container.innerHTML, /Inbox command/);
+  assert.match(harness.container.innerHTML, /data-building-variant="mail"/);
+  assert.match(harness.container.innerHTML, /Back to review/);
+  assert.match(harness.container.innerHTML, /Create workspace here/);
+  assert.match(harness.container.innerHTML, /data-ws-map-placement-instruction role="status"/);
+  assert.equal(patches.length, 0, 'a preview is never a layout write');
+
+  harness.fire('keydown', keyEvent('Enter'));
+  await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(confirmations)), [
+    { token: 'reviewed-placement', candidate: { x: 456, y: 228 } }
+  ]);
+  assert.equal(patches.length, 0, 'Map confirmation still leaves creation to the wizard owner');
+
+  const saved = await map.commitPlacement('ws-new', {
+    token: 'reviewed-placement',
+    candidate: { x: 456, y: 228 }
+  });
+  assert.equal(saved.saved, true);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(patches[0].operations[0].positions['ws-new'])),
+    { x: 456, y: 228 },
+    'the exact reviewed coordinate is saved without nearest-free resolution'
+  );
+  assert.doesNotMatch(harness.container.innerHTML, /ws-map-placement-preview/);
+
+  map.mount(harness.container, {
+    workspaces: [
+      { id: 'ws-1', name: 'Alpha' },
+      { id: 'ws-new', name: 'Inbox command' }
+    ],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true
+  });
+  assert.equal(
+    map.getSelectedId(),
+    'ws-new',
+    'the returned id becomes selected once its tile arrives'
+  );
+
+  assert.equal(
+    map.beginPlacement({
+      token: 'no-fake-hq',
+      initialCandidate: { x: 684, y: 380 },
+      preview: { name: '<HQ draft>', blueprintID: 'personal-ops', blueprintBuiltin: true }
+    }),
+    true
+  );
+  assert.doesNotMatch(harness.container.innerHTML, /data-building-variant="hq"/);
+  assert.match(harness.container.innerHTML, /&lt;HQ draft&gt;/);
+  assert.equal(map.endPlacement('no-fake-hq'), true);
+
+  assert.equal(
+    map.beginPlacement({
+      token: 'custom-fallback',
+      initialCandidate: { x: 684, y: 380 },
+      preview: { name: 'Custom draft', blueprintID: 'plugin:custom', blueprintBuiltin: false }
+    }),
+    true
+  );
+  assert.doesNotMatch(harness.container.innerHTML, /data-building-variant=/);
+  assert.match(harness.container.innerHTML, /ws-map-struct/);
+  assert.equal(map.endPlacement('custom-fallback'), true);
+});
+
+test('reviewed pointer placement uses current screen/world camera math and shared snap rules', async () => {
+  const { map, harness } = buildHarness({
+    layout: {
+      schema_version: 1,
+      positions: { 'ws-1': { x: 114, y: 114 } },
+      snap_to_grid: true,
+      viewport: { center_x: 500, center_y: 300, zoom: 1.25 }
+    }
+  });
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+
+  const confirmations = [];
+  const screen = { x: 713, y: 271 };
+  const expected = map.snapPoint(
+    map.camera.screenToWorld(screen, map.getCamera(), { width: 1000, height: 600 })
+  );
+  map.beginPlacement({
+    token: 'screen-snapped',
+    initialCandidate: { x: 456, y: 228 },
+    onConfirm: (token, candidate) => confirmations.push({ token, candidate })
+  });
+  harness.fire('pointermove', pointerEvent(screen.x, screen.y));
+  harness.fire('keydown', keyEvent('Enter'));
+  assert.deepEqual(JSON.parse(JSON.stringify(confirmations)), [
+    { token: 'screen-snapped', candidate: JSON.parse(JSON.stringify(expected)) }
+  ]);
+  assert.equal(map.endPlacement('screen-snapped'), true);
+
+  // A resized viewport changes screen-space, never the candidate's world-space
+  // conversion; Alt bypasses the persisted snap preference for this one move.
+  harness.canvas.clientWidth = 640;
+  harness.canvas.clientHeight = 480;
+  const resizedScreen = { x: 419, y: 199 };
+  const free = map.camera.screenToWorld(resizedScreen, map.getCamera(), {
+    width: 640,
+    height: 480
+  });
+  map.beginPlacement({
+    token: 'screen-free',
+    initialCandidate: { x: 456, y: 228 },
+    onConfirm: (token, candidate) => confirmations.push({ token, candidate })
+  });
+  harness.fire('pointermove', pointerEvent(resizedScreen.x, resizedScreen.y, { altKey: true }));
+  harness.fire('keydown', keyEvent('Enter'));
+  assert.deepEqual(JSON.parse(JSON.stringify(confirmations[1])), {
+    token: 'screen-free',
+    candidate: JSON.parse(JSON.stringify(free))
+  });
+  assert.equal(map.endPlacement('screen-free'), true);
+
+  map._setLayoutForTest({ schema_version: 1, positions: {}, snap_to_grid: false }, 'ready');
+  map.beginPlacement({
+    token: 'snap-off',
+    initialCandidate: { x: 456, y: 228 },
+    onConfirm: (token, candidate) => confirmations.push({ token, candidate })
+  });
+  harness.fire('pointermove', pointerEvent(resizedScreen.x, resizedScreen.y));
+  harness.fire('keydown', keyEvent('Enter'));
+  assert.deepEqual(JSON.parse(JSON.stringify(confirmations[2])), {
+    token: 'snap-off',
+    candidate: JSON.parse(JSON.stringify(free))
+  });
+  assert.equal(map.endPlacement('snap-off'), true);
+});
+
+test('reviewed placement confirms an ordinary primary click while drag, wheel, and secondary controls stay navigation', async () => {
+  const { map, harness } = buildHarness({
+    layout: {
+      schema_version: 1,
+      positions: { distant: { x: 4800, y: 2800 } },
+      viewport: { center_x: 2000, center_y: 1400, zoom: 1 }
+    }
+  });
+  mountWithCamera(map, harness, [{ id: 'distant', name: 'Distant' }]);
+  await flush();
+  const confirmations = [];
+  map.beginPlacement({
+    token: 'pointer-contract',
+    initialCandidate: { x: 760, y: 456 },
+    onConfirm: (token, candidate) => confirmations.push({ token, candidate })
+  });
+
+  harness.fire('pointerdown', pointerEvent(500, 300, { button: 2 }));
+  harness.fire('pointerup', pointerEvent(500, 300, { button: 2 }));
+  harness.fire('pointerdown', pointerEvent(500, 300, { button: 1 }));
+  harness.fire('pointerup', pointerEvent(500, 300, { button: 1 }));
+  assert.equal(confirmations.length, 0, 'right and middle input cannot create a workspace');
+
+  const beforePan = { ...map.getCamera() };
+  harness.fire('pointerdown', pointerEvent(500, 300));
+  harness.fire('pointermove', pointerEvent(320, 300));
+  harness.fire('pointerup', pointerEvent(320, 300));
+  assert.equal(confirmations.length, 0, 'a drag remains map navigation, not confirmation');
+  assert.notEqual(map.getCamera().centerX, beforePan.centerX, 'the drag panned the camera');
+
+  const beforeZoom = map.getCamera().zoom;
+  harness.fire('wheel', {
+    deltaY: -100,
+    deltaX: 0,
+    ctrlKey: true,
+    clientX: 500,
+    clientY: 300,
+    target: { closest: () => null },
+    preventDefault() {}
+  });
+  assert.ok(map.getCamera().zoom > beforeZoom, 'wheel/pinch zoom remains available while placing');
+
+  const click = { x: 640, y: 260 };
+  const expected = map.snapPoint(
+    map.camera.screenToWorld(click, map.getCamera(), { width: 1000, height: 600 })
+  );
+  harness.fire('pointerdown', pointerEvent(click.x, click.y));
+  harness.fire('pointerup', pointerEvent(click.x, click.y));
+  assert.deepEqual(JSON.parse(JSON.stringify(confirmations)), [
+    { token: 'pointer-contract', candidate: JSON.parse(JSON.stringify(expected)) }
+  ]);
+});
+
+test('reviewed placement keyboard controls share exact candidate state and Escape returns to review', async () => {
+  const { map, harness } = buildHarness({
+    layout: { schema_version: 1, positions: { 'ws-1': { x: 114, y: 114 } }, snap_to_grid: false }
+  });
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+  enableDragMode(harness);
+  const confirmations = [];
+  map.beginPlacement({
+    token: 'keyboard',
+    initialCandidate: { x: 456, y: 228 },
+    onConfirm: (token, candidate) => confirmations.push({ token, candidate })
+  });
+  assert.equal(harness.control('[data-map-drag]').getAttribute('aria-pressed'), 'false');
+  harness.fire('keydown', keyEvent('Enter', { target: { closest: () => ({}) } }));
+  assert.equal(confirmations.length, 0, 'Enter on a focused control is not canvas confirmation');
+  harness.fire('keydown', keyEvent('ArrowRight'));
+  harness.fire('keydown', keyEvent('ArrowDown', { shiftKey: true }));
+  harness.fire('keydown', keyEvent('Enter'));
+  assert.deepEqual(JSON.parse(JSON.stringify(confirmations)), [
+    { token: 'keyboard', candidate: { x: 457, y: 238 } }
+  ]);
+  assert.equal(map.endPlacement('keyboard'), true);
+  assert.equal(
+    harness.control('[data-map-drag]').getAttribute('aria-pressed'),
+    'true',
+    'placement restores the caller’s Move preference'
+  );
+
+  let back = null;
+  map.beginPlacement({
+    token: 'escape',
+    initialCandidate: { x: 456, y: 228 },
+    onBack: (token, reason) => (back = { token, reason })
+  });
+  harness.fire('keydown', keyEvent('Escape'));
+  assert.deepEqual(back, { token: 'escape', reason: 'back' });
+  assert.equal(map.endPlacement('escape'), false, 'Escape already ended the preview');
+});
+
+test('reviewed placement blocks full visible and collapsed footprints without writing a position', async () => {
+  const { map, harness, patches } = buildHarness({
+    layout: {
+      schema_version: 1,
+      positions: { visible: { x: 380, y: 228 } },
+      groups: { collapsed: { collapsed: true } },
+      snap_to_grid: true
+    }
+  });
+  const workspaces = [
+    { id: 'visible', name: 'Visible' },
+    { id: 'collapsed', name: 'Compact', kind: 'group' },
+    { id: 'hidden', name: 'Hidden member', parent_id: 'collapsed' }
+  ];
+  mountWithCamera(map, harness, workspaces);
+  await flush();
+  const world = map.computeWorldLayout(workspaces, map.getLayoutState());
+  const hidden = world.hiddenNodes.find(node => node.id === 'hidden');
+  assert.ok(hidden, 'the fixture member is hidden only by presentation');
+  const point = map.snapPoint({ x: hidden.x, y: hidden.y });
+  const screen = map.camera.worldToScreen(point, map.getCamera(), { width: 1000, height: 600 });
+  let confirmed = 0;
+  map.beginPlacement({
+    token: 'hidden-collision',
+    initialCandidate: { x: 760, y: 456 },
+    onConfirm: () => confirmed++
+  });
+  harness.fire('pointermove', pointerEvent(screen.x, screen.y));
+  harness.fire('keydown', keyEvent('Enter'));
+  assert.equal(confirmed, 0, 'Enter cannot confirm a full-footprint collision');
+  const result = await map.commitPlacement('new-workspace', {
+    token: 'hidden-collision',
+    candidate: point
+  });
+  assert.equal(result.saved, false);
+  assert.equal(result.reason, 'blocked');
+  assert.equal(patches.length, 0, 'a blocked candidate never patches layout');
+
+  map.beginPlacement({ token: 'world-limit', initialCandidate: { x: 760, y: 456 } });
+  const outOfBounds = await map.commitPlacement('new-workspace', {
+    token: 'world-limit',
+    candidate: { x: 1000000000, y: 0 }
+  });
+  assert.equal(outOfBounds.saved, false);
+  assert.equal(outOfBounds.reason, 'blocked');
+  assert.equal(patches.length, 0, 'an out-of-range full footprint never patches layout');
+
+  map.beginPlacement({ token: 'negative', initialCandidate: { x: 760, y: 456 } });
+  const negative = await map.commitPlacement('new-workspace', {
+    token: 'negative',
+    candidate: { x: -1, y: 0 }
+  });
+  assert.equal(negative.saved, true, 'the supported negative world quadrant remains placeable');
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(patches[0].operations[0].positions['new-workspace'])),
+    { x: -1, y: 0 },
+    'a valid negative candidate is preserved rather than clamped to an origin'
+  );
+
+  map._setLayoutForTest({ schema_version: 1, positions: {} }, 'unavailable');
+  assert.equal(
+    map.beginPlacement({ token: 'readonly', initialCandidate: { x: 456, y: 228 } }),
+    false,
+    'an unavailable layout never turns a reviewed create into an immediate create'
+  );
+});
+
+// Legacy Build coverage remains while old callers migrate to the reviewed
+// handoff above. Its pre-wizard coordinate is isolated from the new API.
 
 function buildHarness({ layout, patchResponse, membershipResponse, windowExtras = {} } = {}) {
   const modalCalls = [];

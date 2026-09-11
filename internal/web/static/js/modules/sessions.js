@@ -38,6 +38,12 @@ const sessionManager = {
   // True while the open Create Workspace modal was launched from the Workspace
   // Map's Build mode, which changes only where the flow returns to (#292 FR-53).
   workspaceMapOrigin: false,
+  // One in-memory placement handoff belongs to the open Create Workspace
+  // draft. It is deliberately separate from the legacy Map Build flag and the
+  // sibling-agent suspension flags: a placement preview is navigation inside a
+  // reviewed draft, never a second wizard or a persisted workspace.
+  workspaceMapPlacement: null,
+  workspaceMapPlacementSequence: 0,
 
   // Create-workspace "Starting point" template currently picked in the modal.
   // Populated when the modal opens (defaults to the first/Blank template).
@@ -599,8 +605,13 @@ const sessionManager = {
     addFolderModal?.addEventListener(
       'show.bs.modal',
       event => {
-        if (addFolderModal.dataset.resumingFromAgentSetup !== 'true') return;
+        const resumingFromAgentSetup = addFolderModal.dataset.resumingFromAgentSetup === 'true';
+        const resumingFromMapPlacement = Boolean(addFolderModal.dataset.resumingFromMapPlacement);
+        if (!resumingFromAgentSetup && !resumingFromMapPlacement) return;
         delete addFolderModal.dataset.resumingFromAgentSetup;
+        delete addFolderModal.dataset.resumingFromMapPlacement;
+        // Both sibling-agent setup and Map placement are navigation inside the
+        // same wizard draft. Do not let the ordinary show listener reset it.
         event.stopImmediatePropagation();
       },
       true
@@ -625,7 +636,18 @@ const sessionManager = {
       this.importEntryPoint =
         entryPoint || (importMode ? 'workspace_hub_import' : 'workspace_hub_create');
       this.workspacePostCreateAction = postCreateAction;
-      this.workspaceMapOrigin = String(addFolderModal.dataset.pendingMapOrigin || '') === 'true';
+      const mapHeaderEligible =
+        trigger?.dataset?.workspaceMapEligible === 'true' &&
+        ((entryPoint === 'home_cockpit_create' &&
+          document.getElementById('homeCockpit')?.dataset?.view === 'map') ||
+          (entryPoint === 'workspace_hub_create' &&
+            document.getElementById('workspaceHub')?.dataset?.launcherView === 'map'));
+      // Canvas/district Build provides an explicit pending origin. Header
+      // actions qualify only while their own visible host is in Map view; a
+      // mounted-but-hidden map or a stale modal dataset must never redirect a
+      // normal Tree/import create into placement.
+      this.workspaceMapOrigin =
+        String(addFolderModal.dataset.pendingMapOrigin || '') === 'true' || mapHeaderEligible;
       if (importMode) {
         this.setImportModeEnabled(true);
       } else if (pendingBlueprint) {
@@ -644,9 +666,11 @@ const sessionManager = {
     // request still in flight so a late response cannot repopulate a closed
     // wizard. Nothing was persisted, so nothing needs undoing (FR13).
     addFolderModal?.addEventListener('hidden.bs.modal', () => {
-      // Agent setup reuses the sibling Create New Agent modal. Suspending this
-      // modal is navigation inside one draft, not cancellation of the draft.
+      // Agent setup reuses the sibling Create New Agent modal. Map placement
+      // is another, distinct in-draft navigation. Neither is cancellation.
       if (addFolderModal.dataset.suspendedForAgentSetup === 'true') return;
+      if (addFolderModal.dataset.suspendedForMapPlacement) return;
+      this.abandonWorkspaceMapPlacement();
       this.discardWorkspaceTeamDraft();
       // Closing without creating leaves the map exactly as it was: no workspace,
       // no position record, no lingering placement mode (#292 FR-54). A pending
@@ -3858,6 +3882,200 @@ const sessionManager = {
     this.updateWorkspaceNameHint();
   },
 
+  // Placement handoff -------------------------------------------------------
+  //
+  // The wizard owns the reviewed payload/receipts and the sole create attempt;
+  // the Map receives only a safe preview projection plus geometry callbacks.
+  // A token identifies the modal lifetime and a revision fences work started
+  // before an edit. Nothing in this state is persisted across a real close or
+  // page navigation.
+  cloneWorkspaceMapPlacementValue(value) {
+    if (value == null) return value;
+    return JSON.parse(JSON.stringify(value));
+  },
+
+  nextWorkspaceMapPlacementToken() {
+    this.workspaceMapPlacementSequence += 1;
+    const random =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `placement-${Date.now()}`;
+    return `${random}-${this.workspaceMapPlacementSequence}`;
+  },
+
+  workspaceMapPlacementPreview(payload, origin) {
+    const selectedTemplate = window.ProjectTemplateCard?.getSelectedTemplate?.() || null;
+    return {
+      name: String(payload?.name || '').trim(),
+      blueprintID: String(payload?.template_id || selectedTemplate?.id || '').trim(),
+      blueprintBuiltin: selectedTemplate?.builtin === true,
+      groupName: String(origin?.group?.name || '').trim()
+    };
+  },
+
+  beginWorkspaceMapPlacement(options = {}) {
+    const existing = this.workspaceMapPlacement;
+    if (existing?.phase === 'committing') return null;
+    if (existing && existing.phase !== 'review') return null;
+    const payload = this.cloneWorkspaceMapPlacementValue(options.payload || {});
+    const payloadChanged =
+      existing && JSON.stringify(existing.payload || {}) !== JSON.stringify(payload || {});
+    const state = existing || {
+      token: this.nextWorkspaceMapPlacementToken(),
+      revision: Number(options.revision) || 1,
+      createdWorkspaceID: ''
+    };
+    if (payloadChanged) state.revision += 1;
+    state.phase = 'starting';
+    state.origin = this.cloneWorkspaceMapPlacementValue(options.origin || {});
+    state.candidate = this.cloneWorkspaceMapPlacementValue(options.candidate || null);
+    state.payload = payload;
+    state.review = this.cloneWorkspaceMapPlacementValue(options.review || null);
+    state.inFlight = null;
+    this.workspaceMapPlacement = state;
+
+    const activate = () => {
+      if (this.workspaceMapPlacement !== state || state.phase !== 'starting') return;
+      state.phase = 'placing';
+      const map = window.OriWorkspaceMap;
+      if (typeof map?.beginPlacement !== 'function') {
+        this.returnFromWorkspaceMapPlacement(state.token, 'map-unavailable');
+        return;
+      }
+      const started = map.beginPlacement({
+        token: state.token,
+        revision: state.revision,
+        origin: this.cloneWorkspaceMapPlacementValue(state.origin),
+        initialCandidate: this.cloneWorkspaceMapPlacementValue(state.candidate),
+        preview: this.workspaceMapPlacementPreview(state.payload, state.origin),
+        onConfirm: (token, candidate) => this.confirmWorkspaceMapPlacement(token, candidate),
+        onBack: (token, reason) => this.returnFromWorkspaceMapPlacement(token, reason || 'back')
+      });
+      if (started === false) this.returnFromWorkspaceMapPlacement(state.token, 'map-unavailable');
+    };
+
+    const modalElement = document.getElementById('addFolderModal');
+    const modalAPI = typeof bootstrap !== 'undefined' ? bootstrap.Modal : window.bootstrap?.Modal;
+    if (!modalElement || !modalElement.classList?.contains('show') || !modalAPI) {
+      activate();
+      return state;
+    }
+
+    // Begin only after Bootstrap has fully hidden the wizard. The click that
+    // activated Place on map therefore cannot fall through into the Map.
+    modalElement.dataset.suspendedForMapPlacement = state.token;
+    modalElement.addEventListener('hidden.bs.modal', activate, { once: true });
+    modalAPI.getOrCreateInstance?.(modalElement)?.hide();
+    return state;
+  },
+
+  deferWorkspaceMapPlacement(callback) {
+    if (typeof window.setTimeout === 'function') {
+      window.setTimeout(callback, 0);
+      return;
+    }
+    callback();
+  },
+
+  returnFromWorkspaceMapPlacement(token, reason = 'back') {
+    const state = this.workspaceMapPlacement;
+    if (!state || state.token !== token || state.phase !== 'placing') return false;
+    const mapUnavailable = reason === 'map-unavailable';
+    state.phase = 'resuming';
+    window.OriWorkspaceMap?.endPlacement?.(token, { reason });
+
+    const modalElement = document.getElementById('addFolderModal');
+    const modalAPI = typeof bootstrap !== 'undefined' ? bootstrap.Modal : window.bootstrap?.Modal;
+    if (!modalElement || !modalAPI) {
+      state.phase = 'review';
+      if (mapUnavailable) {
+        this.showWorkspaceCreateError(
+          'Map placement is unavailable. Retry after the map finishes loading, or cancel this workspace.'
+        );
+      }
+      return true;
+    }
+
+    delete modalElement.dataset.suspendedForMapPlacement;
+    // Defer reopening until the Escape/click event that left the preview has
+    // finished propagating, otherwise Bootstrap can treat that same Escape as
+    // a request to close the newly resumed wizard.
+    this.deferWorkspaceMapPlacement(() => {
+      if (this.workspaceMapPlacement !== state || state.phase !== 'resuming') return;
+      modalElement.dataset.resumingFromMapPlacement = state.token;
+      modalElement.addEventListener(
+        'shown.bs.modal',
+        () => {
+          if (this.workspaceMapPlacement !== state || state.phase !== 'resuming') return;
+          state.phase = 'review';
+          this.wizardStep = this.wizardStepCount;
+          this.refreshWizardChrome();
+          if (mapUnavailable) {
+            this.showWorkspaceCreateError(
+              'Map placement is unavailable. Retry after the map finishes loading, or cancel this workspace.'
+            );
+          }
+          document.getElementById('wizardStep4Title')?.focus();
+        },
+        { once: true }
+      );
+      modalAPI.getOrCreateInstance?.(modalElement)?.show();
+    });
+    return true;
+  },
+
+  completeWorkspaceMapPlacement(token, workspaceID) {
+    const state = this.workspaceMapPlacement;
+    const id = String(workspaceID || '').trim();
+    if (!state || state.token !== token || !id) return null;
+    // The ID is latched before any modal cleanup or follow-up effect. The
+    // position saver may fail later, but it must retain this exact ID for a
+    // geometry-only retry rather than re-entering creation.
+    state.createdWorkspaceID = id;
+    state.inFlight = null;
+    state.phase = 'created';
+    const modalElement = document.getElementById('addFolderModal');
+    if (modalElement?.dataset.suspendedForMapPlacement === state.token) {
+      delete modalElement.dataset.suspendedForMapPlacement;
+    }
+    return state;
+  },
+
+  abandonWorkspaceMapPlacement(token = '') {
+    const state = this.workspaceMapPlacement;
+    if (!state || (token && state.token !== token) || state.phase === 'committing') return false;
+    window.OriWorkspaceMap?.cancelPlacement?.(state.token);
+    const modalElement = document.getElementById('addFolderModal');
+    if (modalElement?.dataset.suspendedForMapPlacement === state.token) {
+      delete modalElement.dataset.suspendedForMapPlacement;
+    }
+    this.workspaceMapPlacement = null;
+    return true;
+  },
+
+  async confirmWorkspaceMapPlacement(token, candidate) {
+    const state = this.workspaceMapPlacement;
+    if (!state || state.token !== token || state.phase !== 'placing' || state.inFlight)
+      return false;
+    state.candidate = this.cloneWorkspaceMapPlacementValue(candidate || state.candidate);
+    if (!state.candidate) return false;
+    state.inFlight = { token, revision: state.revision };
+    state.phase = 'committing';
+    try {
+      await this.createFolder({ placement: state });
+      return true;
+    } finally {
+      // createFolder will replace this transition once placement submission is
+      // wired in task 1.4. Until then, leave a failed/delegated test attempt in
+      // a truthful, non-submitting state rather than allowing an overlapping
+      // call while the first promise is unresolved.
+      if (this.workspaceMapPlacement === state && !state.createdWorkspaceID) {
+        state.inFlight = null;
+        if (state.phase === 'committing') state.phase = 'placing';
+      }
+    }
+  },
+
   // Returns the wizard's team draft, creating it on first use. The helper module
   // is loaded ahead of this file on every surface that renders the modal, but a
   // missing global must degrade to null rather than throw mid-render.
@@ -6484,6 +6702,13 @@ const sessionManager = {
   workspaceCreateCtaLabel() {
     if (window.SetupWorkspaceCreator?.hasPending()) return 'Retry Confirmed Change';
     const name = String(document.getElementById('folderNameInput')?.value || '').trim();
+    if (
+      this.workspaceMapOrigin &&
+      !this.importModeEnabled &&
+      !window.SetupWorkspaceCreator?.isActive?.()
+    ) {
+      return name ? `Place “${name}” on map →` : 'Place on map →';
+    }
     if (this.groupRequirementDraft?.review?.review_token) {
       return name ? `Confirm create “${name}”` : 'Confirm reviewed creation';
     }
@@ -6935,8 +7160,9 @@ const sessionManager = {
   },
 
   // Create folder
-  async createFolder() {
+  async createFolder(options = {}) {
     if (this.isCreatingFolder) return;
+    const placement = options.placement || null;
 
     const nameInput = document.getElementById('folderNameInput');
     const descriptionInput = document.getElementById('folderDescriptionInput');
@@ -7120,13 +7346,51 @@ const sessionManager = {
         }
       }
 
+      const requestsMapPlacement =
+        !importEnabled &&
+        !placement &&
+        this.workspaceMapOrigin &&
+        !window.SetupWorkspaceCreator?.isActive?.();
+      const pendingMapBuild = requestsMapPlacement
+        ? window.OriWorkspaceMap?.getPendingBuild?.() || null
+        : null;
+      // Preserve the existing district-Build behavior through the ordinary
+      // create owner: an explicit parent the reviewer chose still wins, but an
+      // otherwise blank form carries its originating district in the one POST.
+      if (!payload.parent_id && pendingMapBuild?.group?.id) {
+        payload.parent_id = pendingMapBuild.group.id;
+      }
+      let groupRequirementReady = true;
       if (!importEnabled && this.groupRequirementDraft) {
         if (this.groupRequirementBlocked()) {
           this.showWorkspaceCreateError('Choose grouped or standalone placement before creating.');
           return;
         }
-        const readyToCommit = await this.prepareGroupRequirementCommit(endpoint, payload);
-        if (!readyToCommit) return;
+        groupRequirementReady = await this.prepareGroupRequirementCommit(endpoint, payload);
+        if (!groupRequirementReady && !requestsMapPlacement) return;
+      }
+
+      if (requestsMapPlacement) {
+        // A false return can mean an inert receipt was just prepared. It may
+        // enter placement only when that exact payload now has a receipt; a
+        // declined Home setup or an unavailable/stale review remains on Review.
+        const review = this.groupRequirementDraft?.review;
+        const reviewedCurrentPayload =
+          !this.groupRequirementDraft ||
+          (review?.review_token && review.payloadKey === JSON.stringify(payload));
+        if (!groupRequirementReady && !reviewedCurrentPayload) return;
+        const pending = pendingMapBuild;
+        this.beginWorkspaceMapPlacement({
+          origin: {
+            entryPoint: this.importEntryPoint || 'workspace_map_build',
+            kind: String(pending?.group?.id || '') ? 'district' : 'canvas',
+            group: pending?.group || null
+          },
+          candidate: pending?.point || null,
+          payload,
+          review: review || null
+        });
+        return;
       }
 
       const requestPayload = { ...payload };
@@ -7332,6 +7596,32 @@ const sessionManager = {
 
       const createdWorkspaceId =
         result && result.folder && result.folder.id ? String(result.folder.id) : '';
+      if (placement && !createdWorkspaceId) {
+        throw new Error(
+          'Workspace creation response is incomplete; check the workspace list before retrying.'
+        );
+      }
+      const completedPlacement = placement
+        ? this.completeWorkspaceMapPlacement(placement.token, createdWorkspaceId)
+        : null;
+      // The immutable id is now authoritative. Save the reviewed coordinate
+      // before any post-create effect can refresh or reset the modal, and never
+      // route it through legacy completeBuild() (which collision-resolves).
+      // A page-local session that disappeared after dispatch is a partial
+      // success, not evidence the ordinary create can be replayed.
+      let placementResult = completedPlacement ? null : { saved: false, reason: 'session_expired' };
+      if (placement && completedPlacement) {
+        const commitPlacement = window.OriWorkspaceMap?.commitPlacement;
+        if (typeof commitPlacement === 'function') {
+          placementResult = await commitPlacement(createdWorkspaceId, {
+            token: placement.token,
+            revision: placement.revision,
+            candidate: this.cloneWorkspaceMapPlacementValue(placement.candidate)
+          });
+        } else {
+          placementResult = { saved: false, reason: 'map_unavailable' };
+        }
+      }
       const createdWorkspaceSlug =
         result && result.folder && result.folder.folder_slug
           ? String(result.folder.folder_slug)
@@ -7535,15 +7825,27 @@ const sessionManager = {
       // by the map, which owns it — and saving it is deliberately not allowed to
       // fail the create: a workspace that exists stays created even if its
       // position does not save (FR-56).
-      const mapOrigin = this.workspaceMapOrigin;
+      const mapOrigin = this.workspaceMapOrigin || Boolean(placement);
       this.workspaceMapOrigin = false;
       if (createdWorkspaceId && mapOrigin) {
-        if (window.OriWorkspaceMap && typeof window.OriWorkspaceMap.completeBuild === 'function') {
+        // Reviewed placement saved its exact candidate immediately after the id
+        // was latched. Legacy callers keep their existing completeBuild seam.
+        if (
+          !placement &&
+          window.OriWorkspaceMap &&
+          typeof window.OriWorkspaceMap.completeBuild === 'function'
+        ) {
           try {
             await window.OriWorkspaceMap.completeBuild(createdWorkspaceId);
           } catch (error) {
             console.warn('Workspace created but its map position did not save:', error);
           }
+        }
+        if (placementResult && !placementResult.saved) {
+          this.showToast(
+            'Workspace created, but its reviewed map position still needs attention. No second workspace was created.',
+            'warning'
+          );
         }
         await this.loadFolders();
         if (window.WorkspaceHub && typeof window.WorkspaceHub.loadWorkspaces === 'function') {
@@ -7555,6 +7857,7 @@ const sessionManager = {
             window.OriHomeCockpit.select(createdWorkspaceId);
           }
         }
+        if (placement) this.abandonWorkspaceMapPlacement(placement.token);
         return;
       }
 

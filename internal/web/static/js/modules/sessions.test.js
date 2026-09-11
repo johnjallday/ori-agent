@@ -207,6 +207,457 @@ test('a Map-origin create flags the existing modal rather than opening a second 
   );
 });
 
+function loadSessionManagerWithPlacementModal() {
+  const listeners = new Map();
+  let visible = true;
+  const modalElement = {
+    dataset: {},
+    classList: { contains: name => name === 'show' && visible },
+    addEventListener(type, listener, options = {}) {
+      const entries = listeners.get(type) || [];
+      entries.push({ listener, once: Boolean(options?.once), capture: options === true });
+      listeners.set(type, entries);
+    },
+    emit(type) {
+      const event = {
+        stopImmediatePropagation() {
+          this.stopped = true;
+        },
+        stopped: false
+      };
+      const entries = [...(listeners.get(type) || [])].sort(
+        (a, b) => Number(b.capture) - Number(a.capture)
+      );
+      for (const entry of entries) {
+        entry.listener(event);
+        if (entry.once) {
+          const active = listeners.get(type) || [];
+          listeners.set(
+            type,
+            active.filter(candidate => candidate !== entry)
+          );
+        }
+        if (event.stopped) break;
+      }
+    }
+  };
+  const reviewTitle = {
+    focusCalls: 0,
+    focus() {
+      this.focusCalls += 1;
+    }
+  };
+  const document = {
+    addEventListener() {},
+    getElementById: id => {
+      if (id === 'addFolderModal') return modalElement;
+      if (id === 'wizardStep4Title') return reviewTitle;
+      return null;
+    },
+    querySelector: () => null,
+    querySelectorAll: () => []
+  };
+  const placementCalls = [];
+  const window = {
+    setTimeout: callback => callback(),
+    OriWorkspaceMap: { beginPlacement: placement => placementCalls.push(placement) }
+  };
+  const bootstrap = {
+    Modal: {
+      getOrCreateInstance() {
+        return {
+          hide() {
+            visible = false;
+            modalElement.emit('hidden.bs.modal');
+          },
+          show() {
+            visible = true;
+            modalElement.emit('show.bs.modal');
+            modalElement.emit('shown.bs.modal');
+          }
+        };
+      }
+    }
+  };
+  vm.runInNewContext(
+    source,
+    {
+      window,
+      document,
+      bootstrap,
+      fetch: async () => ({ ok: true, json: async () => ({}) }),
+      console
+    },
+    { filename: 'sessions.js' }
+  );
+  return { manager: window.sessionManager, modalElement, placementCalls, reviewTitle };
+}
+
+test('Map placement suspends and resumes independently from sibling agent setup', () => {
+  const { manager, modalElement, placementCalls, reviewTitle } =
+    loadSessionManagerWithPlacementModal();
+  let resets = 0;
+  let discards = 0;
+  manager.resetAddWorkspaceModalForm = () => {
+    resets += 1;
+  };
+  manager.discardWorkspaceTeamDraft = () => {
+    discards += 1;
+  };
+  manager.refreshWizardChrome = () => {};
+  manager.bindEvents();
+
+  const placement = manager.beginWorkspaceMapPlacement({
+    origin: { entryPoint: 'workspace_map_build', kind: 'canvas' },
+    candidate: { x: 76, y: 114 },
+    payload: { name: 'Suspended review' },
+    review: { signature: 'suspended-review' }
+  });
+  assert.equal(placement.phase, 'placing', 'the preview starts only after modal hidden');
+  assert.equal(placementCalls.length, 1);
+  assert.equal(discards, 0, 'hiding for placement does not cancel the wizard draft');
+  assert.equal(resets, 0, 'resuming placement never runs the ordinary show reset');
+  assert.equal(modalElement.dataset.suspendedForAgentSetup, undefined);
+  assert.equal(modalElement.dataset.suspendedForMapPlacement, placement.token);
+
+  assert.equal(manager.returnFromWorkspaceMapPlacement(placement.token, 'escape'), true);
+  assert.equal(manager.workspaceMapPlacement.phase, 'review');
+  assert.equal(resets, 0, 'the Review form is resumed, not rebuilt');
+  assert.equal(reviewTitle.focusCalls, 1, 'Review heading receives restored focus');
+  assert.equal(modalElement.dataset.suspendedForMapPlacement, undefined);
+
+  modalElement.emit('hidden.bs.modal');
+  assert.equal(
+    manager.workspaceMapPlacement,
+    null,
+    'a later real cancellation clears placement state'
+  );
+  assert.equal(discards, 1, 'the normal hidden cleanup still owns real cancellation');
+});
+
+test('Map placement holds the reviewed draft without creating before a final map confirmation', () => {
+  const fetches = [];
+  const placementCalls = [];
+  const manager = loadSessionManager(
+    async (url, options = {}) => {
+      fetches.push({ url, options });
+      return { ok: true, json: async () => ({}) };
+    },
+    {
+      OriWorkspaceMap: {
+        beginPlacement: placement => placementCalls.push(placement)
+      }
+    }
+  );
+  const payload = {
+    name: 'Canvas studio',
+    template_id: 'built-in:canvas',
+    existing_agent_names: ['Mina'],
+    template_agent_overrides: [{ name: 'Mina', model: 'test-model' }],
+    role_staffing: []
+  };
+
+  const placement = manager.beginWorkspaceMapPlacement({
+    origin: { entryPoint: 'workspace_map_build', kind: 'canvas' },
+    candidate: { x: 456, y: 228 },
+    payload,
+    review: { signature: 'reviewed-canvas' }
+  });
+
+  assert.ok(placement?.token, 'one modal-local draft token is minted');
+  assert.equal(placement.phase, 'placing');
+  assert.equal(fetches.length, 0, 'the placement CTA sends no create request');
+  assert.equal(placementCalls.length, 1, 'the Map receives geometry only after review');
+  assert.deepEqual(JSON.parse(JSON.stringify(placement.payload)), payload);
+  assert.equal(
+    'payload' in placementCalls[0],
+    false,
+    'the Map receives geometry/preview details, never the wizard-owned create payload'
+  );
+  let confirmed = null;
+  manager.confirmWorkspaceMapPlacement = (token, candidate) => {
+    confirmed = { token, candidate };
+    return true;
+  };
+  placementCalls[0].onConfirm(placement.token, { x: 456, y: 228 });
+  assert.deepEqual(JSON.parse(JSON.stringify(confirmed)), {
+    token: placement.token,
+    candidate: { x: 456, y: 228 }
+  });
+
+  assert.equal(manager.returnFromWorkspaceMapPlacement(placement.token, 'escape'), true);
+  assert.equal(manager.workspaceMapPlacement.phase, 'review');
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(manager.workspaceMapPlacement.payload)),
+    payload,
+    'Escape returns the exact reviewed payload instead of rebuilding an older draft'
+  );
+  assert.equal(fetches.length, 0, 'Escape remains non-mutating');
+});
+
+test('unavailable Map placement returns to Review with an actionable non-create error', () => {
+  let endCalls = 0;
+  const manager = loadSessionManager(undefined, {
+    OriWorkspaceMap: {
+      beginPlacement: () => false,
+      endPlacement: () => endCalls++
+    }
+  });
+  let error = '';
+  manager.showWorkspaceCreateError = message => {
+    error = message;
+  };
+
+  const placement = manager.beginWorkspaceMapPlacement({
+    origin: { entryPoint: 'workspace_map_build', kind: 'canvas' },
+    candidate: { x: 456, y: 228 },
+    payload: { name: 'Wait for Map' },
+    review: { signature: 'map-loading' }
+  });
+
+  assert.equal(placement.phase, 'review');
+  assert.equal(endCalls, 1, 'the failed start clears the page-local session only');
+  assert.match(error, /Map placement is unavailable/);
+  assert.equal(manager.workspaceMapPlacement, placement);
+});
+
+test('Map placement keeps an agent-less vacancy snapshot and true cancellation discards it', () => {
+  const placementCalls = [];
+  const manager = loadSessionManager(undefined, {
+    OriWorkspaceMap: { beginPlacement: placement => placementCalls.push(placement) }
+  });
+  const vacancyPayload = {
+    name: 'Quiet canvas',
+    blank: true,
+    existing_agent_names: [],
+    role_staffing: [],
+    template_agent_review: { version: 1, expectations: [] }
+  };
+  const placement = manager.beginWorkspaceMapPlacement({
+    origin: { entryPoint: 'workspace_map_build', kind: 'canvas' },
+    candidate: { x: 38, y: 76 },
+    payload: vacancyPayload,
+    review: { signature: 'agentless-vacancy' }
+  });
+
+  assert.equal(placementCalls.length, 1, 'the map receives a preview, not the team payload');
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(placement.payload.role_staffing)),
+    [],
+    'an intentionally empty role roster stays an explicit wizard-owned vacancy payload'
+  );
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(placement.payload.existing_agent_names)),
+    [],
+    'an agent-less draft is not silently repopulated while placing'
+  );
+  assert.equal(manager.abandonWorkspaceMapPlacement(placement.token), true);
+  assert.equal(
+    manager.workspaceMapPlacement,
+    null,
+    'real wizard cancellation forgets the in-memory draft'
+  );
+});
+
+test('rapid map confirmations delegate one ordinary create attempt to the wizard owner', async () => {
+  const manager = loadSessionManager(undefined, {
+    OriWorkspaceMap: { beginPlacement() {} }
+  });
+  const placement = manager.beginWorkspaceMapPlacement({
+    origin: { entryPoint: 'workspace_map_build', kind: 'canvas' },
+    candidate: { x: 76, y: 114 },
+    payload: { name: 'One submission', blank: true, existing_agent_names: [], role_staffing: [] },
+    review: { signature: 'one-submit' }
+  });
+  let releaseCreate;
+  let createCalls = 0;
+  manager.createFolder = async options => {
+    createCalls += 1;
+    assert.equal(options.placement.token, placement.token);
+    assert.deepEqual(JSON.parse(JSON.stringify(options.placement.candidate)), { x: 76, y: 114 });
+    await new Promise(resolve => {
+      releaseCreate = resolve;
+    });
+  };
+
+  const first = manager.confirmWorkspaceMapPlacement(placement.token, { x: 76, y: 114 });
+  const second = manager.confirmWorkspaceMapPlacement(placement.token, { x: 76, y: 114 });
+  assert.equal(createCalls, 1, 'the first confirmation owns the only submit attempt');
+  assert.equal(await second, false, 'a repeated click or Enter cannot create again');
+  releaseCreate();
+  await first;
+  assert.equal(createCalls, 1);
+});
+
+test('the Review placement CTA prepares the ordinary payload without posting a workspace', async () => {
+  const fetches = [];
+  const elements = new Map([
+    [
+      'folderNameInput',
+      { value: 'Prepared canvas', focus() {}, classList: { add() {}, remove() {} } }
+    ],
+    ['folderDescriptionInput', { value: 'Reviewed description' }],
+    ['folderParentSelect', { value: '' }],
+    ['addFolderModal', { dataset: {} }],
+    ['createFolderBtn', { textContent: 'Place on map →', disabled: false }],
+    ['folderImportToggle', { checked: false }]
+  ]);
+  const document = {
+    addEventListener() {},
+    getElementById: id => elements.get(id) || null,
+    querySelector: selector =>
+      selector === '#addFolderModal .folder-color-btn.active' ? { dataset: { color: '' } } : null
+  };
+  const window = {
+    ProjectTemplateCard: {
+      recheckSelection: async () => ({ state: 'ready' }),
+      getPayloadFields: () => ({}),
+      getSelectedTemplate: () => ({ blank: true })
+    },
+    OriWorkspaceMap: { getPendingBuild: () => ({ point: { x: 114, y: 152 }, group: null }) }
+  };
+  vm.runInNewContext(
+    source,
+    {
+      window,
+      document,
+      fetch: async (url, options) => {
+        fetches.push({ url, options });
+        return { ok: true, json: async () => ({}) };
+      },
+      console,
+      crypto: { randomUUID: () => 'placement-review' }
+    },
+    { filename: 'sessions.js' }
+  );
+  const manager = window.sessionManager;
+  manager.workspaceMapOrigin = true;
+  manager.getWorkspaceBootstrapFromModal = () => ({ hasAny: false });
+  manager.teamView = () => ({
+    canContinueFromTeam: true,
+    payload: { existing_agent_names: [], role_staffing: [] }
+  });
+  const beginnings = [];
+  manager.beginWorkspaceMapPlacement = options => {
+    beginnings.push(options);
+    return { token: 'placement-review-1' };
+  };
+
+  await manager.createFolder();
+
+  assert.equal(fetches.length, 0, 'review preparation did not post /api/workspaces');
+  assert.equal(beginnings.length, 1, 'the Map handoff replaces the final create');
+  assert.deepEqual(JSON.parse(JSON.stringify(beginnings[0].candidate)), { x: 114, y: 152 });
+  assert.deepEqual(JSON.parse(JSON.stringify(beginnings[0].payload.existing_agent_names)), []);
+  assert.deepEqual(JSON.parse(JSON.stringify(beginnings[0].payload.role_staffing)), []);
+  assert.equal(
+    beginnings[0].payload.blank,
+    true,
+    'the existing payload builder remains authoritative'
+  );
+});
+
+test('a confirmed Map placement latches the returned id and saves its exact coordinate before refresh', async () => {
+  const events = [];
+  const elements = new Map([
+    [
+      'folderNameInput',
+      { value: 'Placed workspace', focus() {}, classList: { add() {}, remove() {} } }
+    ],
+    ['folderDescriptionInput', { value: 'Reviewed description' }],
+    ['folderParentSelect', { value: '' }],
+    ['addFolderModal', { dataset: {} }],
+    ['createFolderBtn', { textContent: 'Create workspace', disabled: false }],
+    ['folderImportToggle', { checked: false }]
+  ]);
+  const document = {
+    addEventListener() {},
+    getElementById: id => elements.get(id) || null,
+    querySelector: selector =>
+      selector === '#addFolderModal .folder-color-btn.active' ? { dataset: { color: '' } } : null
+  };
+  const window = {
+    ProjectTemplateCard: {
+      recheckSelection: async () => ({ state: 'ready' }),
+      getPayloadFields: () => ({}),
+      getSelectedTemplate: () => ({ blank: true }),
+      shouldOpenAfterCreate: () => false,
+      reset() {}
+    },
+    OriWorkspaceMap: {
+      commitPlacement: async (id, placement) => {
+        events.push({ kind: 'placement', id, placement });
+        return { saved: true, point: placement.candidate };
+      },
+      cancelPlacement() {}
+    },
+    OriTagInput: { clearTagPoolCache() {} }
+  };
+  const bootstrap = {
+    Modal: { getInstance: () => ({ hide() {} }) }
+  };
+  vm.runInNewContext(
+    source,
+    {
+      window,
+      document,
+      bootstrap,
+      fetch: async (url, options) => {
+        events.push({ kind: 'create', url, body: JSON.parse(options.body) });
+        return {
+          ok: true,
+          json: async () => ({ folder: { id: 'placed-1', folder_slug: 'placed-workspace' } })
+        };
+      },
+      console,
+      crypto: { randomUUID: () => 'placement-commit' }
+    },
+    { filename: 'sessions.js' }
+  );
+  const manager = window.sessionManager;
+  const placement = {
+    token: 'placement-commit',
+    revision: 1,
+    phase: 'committing',
+    candidate: { x: 456, y: 228 },
+    createdWorkspaceID: ''
+  };
+  manager.workspaceMapPlacement = placement;
+  manager.workspaceMapOrigin = true;
+  manager.getWorkspaceBootstrapFromModal = () => ({ hasAny: false });
+  manager.teamView = () => ({
+    canContinueFromTeam: true,
+    payload: { existing_agent_names: [], role_staffing: [] }
+  });
+  manager.clearWorkspaceCreateError = () => {};
+  manager.showToast = () => {};
+  manager.resetAddWorkspaceModalForm = () => {};
+  manager.loadFolders = async () => events.push({ kind: 'refresh' });
+
+  await manager.createFolder({ placement });
+
+  assert.equal(events.filter(event => event.kind === 'create').length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(events.map(event => event.kind))), [
+    'create',
+    'placement',
+    'refresh'
+  ]);
+  assert.deepEqual(JSON.parse(JSON.stringify(events[1])), {
+    kind: 'placement',
+    id: 'placed-1',
+    placement: {
+      token: 'placement-commit',
+      revision: 1,
+      candidate: { x: 456, y: 228 }
+    }
+  });
+  assert.equal(
+    manager.workspaceMapPlacement,
+    null,
+    'successful Map cleanup cannot leave the completed draft able to submit again'
+  );
+});
+
 test('an unchanged readiness recheck preserves group receipts while a template revision clears them', () => {
   const manager = loadSessionManager();
   manager.syncGroupRequirementParentControl = () => {};
