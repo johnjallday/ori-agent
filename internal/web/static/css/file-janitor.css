@@ -827,6 +827,13 @@
   color: var(--text-primary, #e8e8e8);
 }
 
+.fj-console-privacy {
+  margin: 0.2rem 0 0;
+  color: var(--text-secondary, #9aa0a6);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
 .fj-console-actions {
   display: flex;
   flex-wrap: wrap;
@@ -928,58 +935,356 @@
   }
 }
 
-/* ------------------------------------------------------- compact card
+/* ------------------------------------------------------- compact depot card
 
-   Workspace Details carries a summary and a way in — never the review table.
-   Its job is to answer "is anything waiting?" at a glance (FR-114). */
+   Workspace Details carries an operational summary and a way in — never the
+   review table. Its clipped shell, mono readouts, folder, and sorting rail echo
+   Workspace Command without copying the whole Map surface (FR-114). All
+   surfaces and semantic colours resolve through Ori's light/dark theme tokens. */
+
+.downloads-janitor-mount {
+  --fj-depot-accent: var(--warning-color);
+  --fj-depot-surface: var(--bg-secondary);
+  --fj-depot-surface-raised: var(--bg-tertiary);
+  --fj-depot-line: var(--border-color);
+  --fj-depot-line-bright: var(--border-light);
+  --fj-depot-ink: var(--text-primary);
+  --fj-depot-ink-dim: var(--text-secondary);
+  --fj-depot-ink-faint: var(--text-muted);
+  --fj-depot-display: "Chakra Petch", system-ui, sans-serif;
+  --fj-depot-mono: "JetBrains Mono", ui-monospace, monospace;
+}
 
 .fj-card {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  padding: 0.9rem 1rem;
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(17rem, 0.85fr) minmax(0, 2fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  min-width: 0;
+  padding: 0.45rem 0.8rem;
   margin-bottom: 1rem;
-  background: var(--bg-secondary, #1a1a1a);
-  border: 1px solid var(--border-color, #2f2f2f);
-  border-radius: 10px;
+  overflow: hidden;
+  color: var(--fj-depot-ink);
+  font-family: var(--fj-depot-display);
+  background:
+    linear-gradient(
+      110deg,
+      color-mix(in srgb, var(--fj-depot-accent) 8%, transparent),
+      transparent 38%
+    ),
+    var(--fj-depot-surface);
+  border: 1px solid var(--fj-depot-line);
+  border-top: 2px solid var(--fj-depot-accent);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%);
+}
+
+/* Static rail ticks make the card read as a sorting depot without animation or
+   decorative click targets. */
+.fj-card::after {
+  content: "";
+  position: absolute;
+  right: 1rem;
+  bottom: 0;
+  width: min(28%, 15rem);
+  height: 4px;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--fj-depot-accent) 0 10px,
+    transparent 10px 16px
+  );
+  opacity: 0.45;
 }
 
 .fj-card-head {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-  align-items: flex-start;
-  justify-content: space-between;
-}
-
-.fj-card-heading {
+  gap: 0.75rem;
+  align-items: center;
   min-width: 0;
 }
 
-.fj-card-title {
-  margin: 0;
-  font-size: 1rem;
+.fj-card-heading {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.fj-card-kicker,
+.fj-card-fact-label {
+  display: block;
+  color: var(--fj-depot-ink-faint);
+  font-family: var(--fj-depot-mono);
+  font-size: 0.64rem;
   font-weight: 600;
-  color: var(--text-primary, #e8e8e8);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.fj-card-title {
+  margin: 0.05rem 0 0;
+  color: var(--fj-depot-ink);
+  font-family: var(--fj-depot-display);
+  font-size: 1.12rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .fj-card-sub {
-  margin: 0.15rem 0 0;
-  font-size: 0.82rem;
-  color: var(--text-secondary, #9aa0a6);
+  margin: 0.12rem 0 0;
+  color: var(--fj-depot-ink-dim);
+  font-size: 0.78rem;
   overflow-wrap: anywhere;
 }
 
-.fj-card-stats {
-  margin: 0.2rem 0 0;
+.fj-card-depot-mark {
+  position: relative;
+  flex: 0 0 76px;
+  width: 76px;
+  height: 58px;
+  overflow: hidden;
+  color: var(--fj-depot-accent);
+  background: var(--fj-depot-surface-raised);
+  border: 1px solid var(--fj-depot-line-bright);
+  border-radius: var(--radius-sm);
+}
+
+.fj-card-depot-folder {
+  position: absolute;
+  top: 12px;
+  left: 11px;
+  width: 31px;
+  height: 23px;
+  background: color-mix(in srgb, currentColor 24%, transparent);
+  border: 2px solid currentColor;
+  border-radius: 2px;
+}
+
+.fj-card-depot-folder::before {
+  content: "";
+  position: absolute;
+  top: -8px;
+  left: -2px;
+  width: 15px;
+  height: 7px;
+  border: 2px solid currentColor;
+  border-bottom: 0;
+  border-radius: 2px 2px 0 0;
+}
+
+.fj-card-depot-folder::after {
+  content: "↓";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--fj-depot-ink);
+  font-family: var(--fj-depot-mono);
   font-size: 0.8rem;
-  color: var(--text-primary, #e8e8e8);
+  font-weight: 700;
+}
+
+.fj-card-depot-rail {
+  position: absolute;
+  right: -6px;
+  bottom: 10px;
+  width: 48px;
+  height: 13px;
+  transform: rotate(-13deg);
+  background: repeating-linear-gradient(
+    90deg,
+    var(--fj-depot-line-bright) 0 3px,
+    transparent 3px 8px
+  );
+  border-block: 1px solid currentColor;
+}
+
+.fj-card-depot-parcel {
+  position: absolute;
+  width: 12px;
+  height: 10px;
+  background: var(--fj-depot-surface-raised);
+  border: 1px solid currentColor;
+  transform: rotate(-13deg);
+}
+
+.fj-card-depot-parcel-one {
+  right: 26px;
+  bottom: 23px;
+}
+
+.fj-card-depot-parcel-two {
+  right: 7px;
+  bottom: 29px;
+}
+
+.fj-card-facts {
+  display: grid;
+  grid-template-columns:
+    minmax(7.5rem, 0.7fr) minmax(12rem, 1.25fr) minmax(12rem, 1.25fr)
+    minmax(13.5rem, 1.4fr);
+  gap: 1px;
+  margin: 0;
+  overflow: hidden;
+  background: var(--fj-depot-line);
+  border: 1px solid var(--fj-depot-line);
+  border-radius: var(--radius-sm);
+}
+
+.fj-card-fact {
+  min-width: 0;
+  padding: 0.38rem 0.6rem;
+  background: var(--fj-depot-surface-raised);
+}
+
+.fj-card-fact-value {
+  min-width: 0;
+  margin: 0.22rem 0 0;
+  color: var(--fj-depot-ink);
+  font-family: var(--fj-depot-display);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.fj-card-fact-main {
+  display: block;
+}
+
+.fj-card-fact-value.dj-badge {
+  display: inline-flex;
+  width: fit-content;
+  padding: 0.14rem 0.45rem;
+  font-family: var(--fj-depot-mono);
+  font-size: 0.66rem;
+  border: 1px solid var(--fj-depot-line-bright);
+  border-radius: 2px;
+}
+
+.fj-card-fact-note {
+  display: block;
+  margin-top: 0.16rem;
+  color: var(--fj-depot-ink-dim);
+  font-size: 0.7rem;
+  font-weight: 400;
+  line-height: 1.35;
+}
+
+.fj-card.is-review-ready {
+  border-top-color: var(--warning-color);
+}
+
+.fj-card.is-needs-attention,
+.fj-card.is-consent-required {
+  border-top-color: var(--danger-color);
+}
+
+.fj-card.is-watching {
+  border-top-color: var(--success-color);
+}
+
+.fj-card .dj-badge-review-ready {
+  color: var(--warning-color);
+}
+
+.fj-card .dj-badge-needs-attention,
+.fj-card .dj-badge-consent-required {
+  color: var(--danger-color);
+}
+
+.fj-card .dj-badge-watching {
+  color: var(--success-color);
 }
 
 .fj-card-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: 0.45rem;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.fj-card > .dj-error {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.fj-card .dj-btn {
+  min-height: 34px;
+  font-family: var(--fj-depot-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+}
+
+.fj-card .dj-btn-primary {
+  background: var(--primary-color);
+}
+
+.fj-card .dj-btn-secondary {
+  background: var(--fj-depot-surface-raised);
+  border-color: var(--fj-depot-line-bright);
+}
+
+.fj-card .dj-btn-primary:hover:not(:disabled) {
+  background: var(--primary-light);
+}
+
+.fj-card .dj-btn-secondary:hover:not(:disabled) {
+  color: var(--fj-depot-ink);
+  border-color: var(--fj-depot-accent);
+}
+
+.fj-card .dj-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.fj-card .dj-btn:disabled {
+  color: var(--fj-depot-ink-faint);
+  background: var(--fj-depot-surface-raised);
+  border-color: var(--fj-depot-line);
+}
+
+.fj-card :focus-visible {
+  outline: 2px solid var(--info-color);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1180px) {
+  .fj-card {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 0.85rem 1rem;
+  }
+
+  .fj-card-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .fj-card-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 680px) {
+  .fj-card {
+    padding: 0.85rem;
+  }
+
+  .fj-card-depot-mark {
+    flex-basis: 64px;
+    width: 64px;
+  }
+
+  .fj-card-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .fj-card-actions .dj-btn-primary {
+    flex: 1 1 auto;
+  }
 }
 
 /* ------------------------------------------------------------------- paging

@@ -6672,6 +6672,8 @@ export class WorkspaceCommandView {
     const registry = this.mapStationRegistry();
     const index = registry.findIndex(entry => entry.key === key);
     const fallback = this.hqStationDefaultPosition(index);
+    const preferredX = Number(registry[index]?.defaultX);
+    if (Number.isFinite(preferredX)) fallback.x = clampFraction(preferredX);
     const layout = (this.page && this.page.workspace && this.page.workspace.layout) || null;
     const saved = layout && layout.station_positions ? layout.station_positions[key] : null;
     if (!saved) return fallback;
@@ -6692,27 +6694,53 @@ export class WorkspaceCommandView {
       .map(station => {
         const state = station.state() || {};
         const pos = this.hqStationPosition(station.key);
+        const visualVariant = String(station.visualVariant || '').trim();
+        const buildingArt = typeof window === 'undefined' ? null : window.OriWorkspaceBuildingArt;
+        const visualMarkup =
+          visualVariant && buildingArt && typeof buildingArt.svgForVariant === 'function'
+            ? buildingArt.svgForVariant(visualVariant, { context: 'station' })
+            : '';
         const icon = station.icon
           ? '<i class="bi ' + escapeHtml(station.icon) + '" aria-hidden="true"></i>'
           : '';
+        const location = String(station.location || '').trim();
+        const accessibleParts = [String(station.label || '') + ' station'];
+        if (location) accessibleParts.push('managed folder ' + location);
+        if (state.value) accessibleParts.push(String(state.value));
+        if (state.description && state.description !== state.value) {
+          accessibleParts.push(String(state.description));
+        }
         return (
           '<button type="button" class="ws-cmd-map-hq-station' +
+          (visualMarkup ? ' has-visual' : '') +
+          (location ? ' has-location' : '') +
           (state.tone ? ' is-' + escapeHtml(state.tone) : '') +
           '" data-cmd-hq-station="' +
           escapeHtml(station.key) +
+          (visualMarkup ? '" data-station-visual="' + escapeHtml(visualVariant) : '') +
           '" style="--station-x:' +
           (pos.x * 100).toFixed(2) +
           '%;--station-y:' +
           (pos.y * 100).toFixed(2) +
           '%" aria-label="' +
+          escapeHtml(accessibleParts.join(', ')) +
+          '">' +
+          (visualMarkup
+            ? '<span class="ws-cmd-map-hq-station-visual" aria-hidden="true">' +
+              visualMarkup +
+              '</span>'
+            : '<span class="ws-cmd-map-hq-station-icon">' + icon + '</span>') +
+          '<span class="ws-cmd-map-hq-station-label">' +
           escapeHtml(station.label) +
-          ' station, ' +
-          escapeHtml(state.description || '') +
-          '"><span class="ws-cmd-map-hq-station-icon">' +
-          icon +
-          '</span><span class="ws-cmd-map-hq-station-label">' +
-          escapeHtml(station.label) +
-          '</span><span class="ws-cmd-map-hq-station-state">' +
+          '</span>' +
+          (location
+            ? '<span class="ws-cmd-map-hq-station-location" title="' +
+              escapeHtml(location) +
+              '">' +
+              escapeHtml(location) +
+              '</span>'
+            : '') +
+          '<span class="ws-cmd-map-hq-station-state">' +
           escapeHtml(state.value || '') +
           '</span></button>'
         );

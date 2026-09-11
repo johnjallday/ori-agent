@@ -1,7 +1,7 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, utimesSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 /**
  * File Janitor as a workspace capability, end to end (PRD task 8.9).
@@ -231,8 +231,11 @@ test.describe('File Janitor capability', () => {
     page,
     request
   }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
     const workspaceId = await createPlainWorkspace(request, `FJ Views ${RUN}`);
-    const root = fixtureFolder('views', { 'map-entry.pdf': 'fixture' });
+    const root = fixtureFolder('views-with-an-intentionally-long-managed-folder-name', {
+      'map-entry.pdf': 'fixture'
+    });
     await installCapability(request, workspaceId);
     await grantFolder(request, workspaceId, root);
     const scanned = await request.post(`/api/workspaces/${workspaceId}/file-janitor/scan`);
@@ -261,7 +264,51 @@ test.describe('File Janitor capability', () => {
 
     const station = page.locator('[data-cmd-hq-station="file-janitor"]');
     await expect(station).toBeVisible({ timeout: 15000 });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await expect(station.locator('[data-building-variant="depot"]')).toBeVisible();
+    await expect(station.locator('.ws-cmd-map-hq-station-label')).toHaveText('File Janitor');
+    await expect(station.locator('.ws-cmd-map-hq-station-location')).toHaveAttribute(
+      'title',
+      basename(root)
+    );
+    await expect(station).toHaveAttribute(
+      'aria-label',
+      new RegExp(`managed folder ${basename(root)}.*ready for review`)
+    );
     await expect(page.locator('#downloadsJanitorMount')).toBeHidden();
+
+    // The curated depot art resolves through Command's theme token in both
+    // themes instead of freezing one swatch onto the map. Drive the real theme
+    // control so its in-memory preference cannot overwrite a bare DOM change.
+    if ((await page.locator('html').getAttribute('data-bs-theme')) !== 'light') {
+      await page.locator('#darkModeToggle').click();
+    }
+    await expect(page.locator('html')).toHaveAttribute('data-bs-theme', 'light');
+    await page.waitForTimeout(100);
+    const lightDepotColor = await station
+      .locator('[data-building-variant="depot"]')
+      .evaluate(node => getComputedStyle(node).color);
+    await page.locator('#darkModeToggle').click();
+    await expect(page.locator('html')).toHaveAttribute('data-bs-theme', 'dark');
+    await page.waitForTimeout(100);
+    const darkDepotColor = await station
+      .locator('[data-building-variant="depot"]')
+      .evaluate(node => getComputedStyle(node).color);
+    expect(lightDepotColor).not.toBe(darkDepotColor);
+    await expect(station).toBeVisible();
+
+    // The larger illustrated station remains inside the map at desktop width,
+    // including when its visible folder line has to truncate.
+    const [stationBox, worldBox] = await Promise.all([
+      station.boundingBox(),
+      page.locator('.ws-cmd-map-world').boundingBox()
+    ]);
+    expect(stationBox).toBeTruthy();
+    expect(worldBox).toBeTruthy();
+    expect(stationBox!.x + stationBox!.width).toBeLessThanOrEqual(
+      worldBox!.x + worldBox!.width + 1
+    );
+    expect(stationBox!.x).toBeGreaterThanOrEqual(worldBox!.x - 1);
 
     // A later capability status refresh may update station text, but it cannot
     // grant presentation permission to the Details-only summary.
@@ -280,8 +327,21 @@ test.describe('File Janitor capability', () => {
     await expect(page.locator('#downloadsJanitorMount')).toBeHidden();
 
     await page.getByRole('button', { name: 'Details', exact: true }).click();
-    await expect(page.locator('#downloadsJanitorMount')).toBeVisible();
-    await expect(page.locator('#downloadsJanitorMount')).toContainText('1 file waiting for review');
+    const summary = page.getByRole('group', { name: 'File Janitor' });
+    await expect(summary).toBeVisible();
+    const summaryBox = await summary.boundingBox();
+    expect(summaryBox).toBeTruthy();
+    expect(summaryBox!.height).toBeLessThanOrEqual(120);
+    await expect(summary).toContainText('Managed folder');
+    await expect(summary).toContainText(basename(root));
+    await expect(summary).toContainText('1 file waiting for review');
+    await expect(page.locator('#downloadsJanitorActivity')).toHaveText('Review ready');
+    await expect(summary).toHaveClass(/is-review-ready/);
+    await expect(summary).toContainText('Privacy mode');
+    await expect(summary).toContainText('Local only');
+    await expect(
+      summary.getByRole('button', { name: 'Review files · 1', exact: true })
+    ).toBeVisible();
 
     await page.getByRole('button', { name: 'Map', exact: true }).click();
     await expect(page.locator('#downloadsJanitorMount')).toBeHidden();

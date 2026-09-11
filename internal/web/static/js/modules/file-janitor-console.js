@@ -216,6 +216,9 @@
     if (scanning) {
       return { id: 'scanning', label: 'Scanning…' };
     }
+    if (status?.privacy?.consent_required) {
+      return { id: 'consent_required', label: 'Consent required' };
+    }
     const pending = (lastBatch && lastBatch.summary && lastBatch.summary.proposed) || 0;
     if (pending > 0) {
       return { id: 'review_ready', label: 'Review ready' };
@@ -1919,54 +1922,160 @@
     return control;
   }
 
-  // renderCompactCard is all Workspace Details carries now: what state File
-  // Janitor is in, which folder it manages, what is waiting, when it looks
-  // next, and a way in. The review table, the settings form, and history are
-  // the console's and appear nowhere else on the page (FR-114, FR-115).
+  function compactFolderName(path) {
+    const fullPath = safeName(path, 'Not connected');
+    if (fullPath === 'Not connected') return fullPath;
+    const trimmed = fullPath.replace(/[\\/]+$/, '');
+    const parts = trimmed.split(/[\\/]/).filter(Boolean);
+    return parts.length > 0 ? safeName(parts[parts.length - 1], fullPath) : fullPath;
+  }
+
+  // The Details card uses the same small depot identity as the Map station,
+  // without making its decorative pieces separate controls. The folder and
+  // parcels are CSS-drawn so they remain crisp and theme-aware at any density.
+  function compactDepotMark() {
+    const mark = el('span', 'fj-card-depot-mark');
+    mark.setAttribute('aria-hidden', 'true');
+    mark.appendChild(el('span', 'fj-card-depot-folder'));
+    mark.appendChild(el('span', 'fj-card-depot-rail'));
+    mark.appendChild(el('span', 'fj-card-depot-parcel fj-card-depot-parcel-one'));
+    mark.appendChild(el('span', 'fj-card-depot-parcel fj-card-depot-parcel-two'));
+    return mark;
+  }
+
+  function compactFact(list, label, value, options = {}) {
+    const fact = el('div', 'fj-card-fact' + (options.wide ? ' is-wide' : ''));
+    fact.appendChild(el('dt', 'fj-card-fact-label', label));
+    const detail = el('dd', 'fj-card-fact-value');
+    detail.appendChild(el('span', 'fj-card-fact-main', value));
+    if (options.id) detail.id = options.id;
+    if (options.title) detail.setAttribute('title', options.title);
+    if (options.status) {
+      detail.setAttribute('role', 'status');
+      detail.setAttribute('aria-live', 'polite');
+    }
+    if (options.note) detail.appendChild(el('span', 'fj-card-fact-note', options.note));
+    fact.appendChild(detail);
+    list.appendChild(fact);
+    return detail;
+  }
+
+  // Privacy gets a short mode label for scanning and keeps the complete server
+  // disclosure directly underneath. This preserves the explicit answer to
+  // "what does Ori read?" without turning the card into another Settings form.
+  function compactPrivacy(status) {
+    const privacy = status?.privacy || {};
+    const mode = String(privacy.mode || status?.settings?.content_mode || '');
+    const provider = safeName(privacy.provider || status?.settings?.content_provider || '', '');
+    if (mode === 'metadata_only') {
+      return {
+        value: 'Local only · file details',
+        note: 'Names, types, sizes, and dates; no file contents are read.'
+      };
+    }
+    if (mode === 'local_model') {
+      return {
+        value: 'Local only · on-device text',
+        note: provider
+          ? 'Short text extracts stay on this device with ' + provider + '.'
+          : 'Short text extracts stay on this device.'
+      };
+    }
+    if (mode === 'cloud_model') {
+      return {
+        value: 'Cloud with consent' + (provider ? ' · ' + provider : ''),
+        note: privacy.consent_required
+          ? 'Consent required before any extract is sent.'
+          : 'Short text extracts may leave this device.'
+      };
+    }
+    return {
+      value: 'Privacy unavailable',
+      note: 'Open Settings to confirm what Ori may inspect.'
+    };
+  }
+
+  function compactPrimaryAction(status) {
+    const configured = isConfigured(status);
+    const activity = activityState(status);
+    if (!configured) return { label: 'Set up File Janitor', tab: '' };
+    if (activity.id === 'needs_attention') return { label: 'Repair setup', tab: 'review' };
+    if (activity.id === 'consent_required') return { label: 'Review consent', tab: 'settings' };
+    const waiting = pendingCount();
+    return {
+      label: waiting > 0 ? 'Review files · ' + waiting : 'Open review',
+      tab: 'review'
+    };
+  }
+
+  // renderCompactCard is all Workspace Details carries now: a depot-flavoured
+  // operational readout and one dominant next step. The review table, settings
+  // form, and history remain solely inside the console (FR-114, FR-115).
   function renderCompactCard(host, status) {
     const settings = status.settings || {};
     const configured = isConfigured(status);
+    const activity = activityState(status);
+    const privacy = compactPrivacy(status);
+    const managedFolderPath = configured ? safeName(settings.root_path) : 'Not connected';
+    const managedFolder = configured ? compactFolderName(settings.root_path) : managedFolderPath;
 
-    const card = el('section', 'fj-card');
+    const card = el('section', 'fj-card is-' + activity.id.replace(/_/g, '-'));
     card.setAttribute('role', 'group');
     card.setAttribute('aria-labelledby', 'downloadsJanitorTitle');
 
     const head = el('div', 'fj-card-head');
+    head.appendChild(compactDepotMark());
     const heading = el('div', 'fj-card-heading');
+    heading.appendChild(el('span', 'fj-card-kicker', 'File depot'));
     const title = el('h2', 'fj-card-title', 'File Janitor');
     title.id = 'downloadsJanitorTitle';
     heading.appendChild(title);
-    const sub = el('p', 'fj-card-sub');
-    sub.textContent = configured
-      ? 'Tidying ' + safeName(settings.root_path)
-      : 'No folder chosen yet. Nothing is scanned or moved until you choose one.';
-    heading.appendChild(sub);
-    const stats = el('p', 'fj-card-stats');
-    stats.id = 'downloadsJanitorStats';
-    stats.setAttribute('role', 'status');
-    stats.setAttribute('aria-live', 'polite');
-    stats.textContent = configured ? statsLine() : '';
-    stats.hidden = !configured;
-    heading.appendChild(stats);
+    heading.appendChild(
+      el(
+        'p',
+        'fj-card-sub',
+        configured
+          ? 'Sort proposed destinations, then decide what moves.'
+          : 'No folder chosen yet. Nothing is scanned or moved until you choose one.'
+      )
+    );
     head.appendChild(heading);
-
-    const activity = activityState(status);
-    const badge = el('span', 'dj-badge dj-badge-' + activity.id.replace(/_/g, '-'), activity.label);
-    badge.id = 'downloadsJanitorActivity';
-    head.appendChild(badge);
     card.appendChild(head);
 
-    const actions = el('div', 'fj-card-actions');
-    const openLabel = configured ? 'Open File Janitor' : 'Set up File Janitor';
-    const openButton = button('', 'dj-btn dj-btn-primary', event => {
-      open({ source: 'workspace-details', trigger: event && event.currentTarget });
+    const facts = el('dl', 'fj-card-facts');
+    const badge = compactFact(facts, 'Current status', activity.label, {
+      id: 'downloadsJanitorActivity',
+      status: true
     });
-    openButton.textContent = openLabel;
+    badge.className += ' dj-badge dj-badge-' + activity.id.replace(/_/g, '-');
+    compactFact(facts, 'Managed folder', managedFolder, {
+      title: managedFolderPath,
+      wide: true
+    });
+    compactFact(facts, 'Review queue', configured ? statsLine() : 'Available after setup.', {
+      id: 'downloadsJanitorStats',
+      status: true,
+      wide: true
+    });
+    compactFact(facts, 'Privacy mode', privacy.value, { note: privacy.note, wide: true });
+    card.appendChild(facts);
+
+    const actions = el('div', 'fj-card-actions');
+    const primaryAction = compactPrimaryAction(status);
+    // A control that promises Review always requests Review explicitly. It must
+    // not inherit History or Settings merely because that was the last tab.
+    const openButton = button(primaryAction.label, 'dj-btn dj-btn-primary', event => {
+      open({
+        source: 'workspace-details',
+        tab: primaryAction.tab || undefined,
+        trigger: event && event.currentTarget
+      });
+    });
     openButton.id = 'fileJanitorCardOpen';
     actions.appendChild(openButton);
 
-    // Scanning on demand is offered from the card only once there is a folder
-    // to scan; before that the single action is the one that sets it up.
+    // Scan now is a subordinate utility, never a second primary destination.
+    // Before setup, the sole action is the one that grants folder access.
     if (configured) {
       const scan = button('Scan now', 'dj-btn dj-btn-secondary', () => void scanNow());
       scan.id = 'fileJanitorCardScan';
@@ -1974,11 +2083,6 @@
       actions.appendChild(scan);
     }
     card.appendChild(actions);
-    // What Ori reads is stated on the card itself, not behind the Settings
-    // tab. A disclosure the user must go looking for is one they will not
-    // read, and this is the sentence that says whether their file contents are
-    // being opened.
-    if (configured) card.appendChild(privacyLine(status));
     card.appendChild(cardErrorRegion());
     host.appendChild(card);
   }
@@ -2546,6 +2650,10 @@
     // filename is: a folder can be named as adversarially as a file.
     const folder = settings.root_path ? safeName(settings.root_path) : '';
     if (folder) heading.appendChild(el('p', 'fj-console-folder', folder));
+    const privacy = compactPrivacy(status);
+    heading.appendChild(
+      el('p', 'fj-console-privacy', privacy.value + (privacy.note ? ' · ' + privacy.note : ''))
+    );
     const activity = activityState(status);
     const statusLine = el('p', 'fj-console-status');
     statusLine.id = 'fileJanitorConsoleStatus';
@@ -2795,6 +2903,12 @@
     if (node) node.textContent = statsLine();
   }
 
+  function refreshCompactAction() {
+    const node = document.getElementById('fileJanitorCardOpen');
+    if (!node || !lastStatus) return;
+    node.textContent = compactPrimaryAction(lastStatus).label;
+  }
+
   // ------------------------------------------------------------------ actions
 
   async function browse() {
@@ -2899,8 +3013,20 @@
     const node = document.getElementById('downloadsJanitorActivity');
     if (!node) return;
     const activity = activityState(lastStatus);
-    node.textContent = activity.label;
-    node.className = 'dj-badge dj-badge-' + activity.id.replace(/_/g, '-');
+    node.textContent = '';
+    node.appendChild(el('span', 'fj-card-fact-main', activity.label));
+    const stateClass = activity.id.replace(/_/g, '-');
+    node.className = 'fj-card-fact-value dj-badge dj-badge-' + stateClass;
+    let card = node.parentElement || node.parent || null;
+    while (
+      card &&
+      !String(card.className || '')
+        .split(/\s+/)
+        .includes('fj-card')
+    ) {
+      card = card.parentElement || card.parent || null;
+    }
+    if (card) card.className = 'fj-card is-' + stateClass;
   }
 
   // setPaused stops or resumes the unattended work. The panel repaints from the
@@ -3052,6 +3178,11 @@
     // eligible is dropped individually.
     renderBatch();
     refreshStats();
+    // Status arrives before the paged batch on a cold workspace load. Once the
+    // queue count is known, promote Watching to Review ready on the compact
+    // card instead of leaving two readouts that contradict each other.
+    refreshActivity();
+    refreshCompactAction();
   }
 
   async function refresh() {
@@ -3487,8 +3618,11 @@
         const folder = status.folder_display_name || '';
         return {
           key: 'file-janitor',
-          label: folder ? 'File Janitor · ' + folder : 'File Janitor',
+          label: 'File Janitor',
+          location: folder || 'No folder approved',
           icon: 'bi-folder-symlink',
+          visualVariant: 'depot',
+          defaultX: 0.87,
           state: () => {
             const derived = controller.stationState();
             if (derived && derived.applies) return derived;

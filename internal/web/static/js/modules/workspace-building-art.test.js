@@ -73,13 +73,18 @@ test('GitHub Ops and Travels use distinct repository and flight emblems', () => 
   assert.doesNotMatch(travelSVG, /data-building-emblem="travel"/);
 });
 
-test('renders catalog and map contexts from the same inert artwork', () => {
+test('renders catalog, map, and station contexts from the same inert artwork', () => {
   const art = loadBuildingArt();
   const mapSVG = art.svgForVariant('research', { context: 'map' });
   const catalogSVG = art.svgForVariant('research', { context: 'catalog' });
+  const stationSVG = art.svgForVariant('depot', { context: 'station' });
 
   assert.match(mapSVG, /class="ws-map-struct ws-map-struct--blueprint"/);
   assert.match(catalogSVG, /class="workspace-template-building-art"/);
+  assert.match(stationSVG, /class="ws-cmd-map-station-art"/);
+  assert.match(stationSVG, /style="color:var\(--ws-keeper\)"/);
+  assert.match(stationSVG, /data-building-emblem="folder"/);
+  assert.match(stationSVG, /data-depot-conveyor="sorting-line"/);
   assert.match(mapSVG, /data-building-emblem="research"/);
   assert.match(catalogSVG, /data-building-emblem="research"/);
   assert.equal(art.svgForVariant('unknown', { context: 'map' }), '');

@@ -1,7 +1,7 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { mkdtempSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 /**
  * File Janitor console accessibility (PRD task 8.10, FR-118–FR-123).
@@ -185,6 +185,53 @@ test.describe('File Janitor console accessibility', () => {
     const labelledBy = await dialog.getAttribute('aria-labelledby');
     expect(labelledBy).toBeTruthy();
     await expect(page.locator(`#${labelledBy}`)).toHaveText('File Janitor');
+  });
+
+  test('the depot card and station expose name, folder, state, and one keyboard entry', async ({
+    page,
+    request
+  }) => {
+    const root = inbox('depot-semantics-with-a-long-folder-name', ['review-me.pdf']);
+    const workspaceId = await workspaceWithFolder(request, `FJ A11y Depot Semantics ${RUN}`, root);
+    const scanned = await request.post(`/api/workspaces/${workspaceId}/file-janitor/scan`);
+    expect(scanned.ok(), await scanned.text()).toBeTruthy();
+
+    await page.route('**/api/onboarding/status', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true })
+      })
+    );
+    const workspaceSlug = workspaceSlugs.get(workspaceId) || workspaceId;
+    await page.goto(`/workspaces/${encodeURIComponent(workspaceSlug)}`);
+
+    const card = page.getByRole('group', { name: 'File Janitor' });
+    await expect(card).toBeVisible({ timeout: 15000 });
+    await expect(card.locator('dt')).toHaveText([
+      'Current status',
+      'Managed folder',
+      'Review queue',
+      'Privacy mode'
+    ]);
+    await expect(card).toContainText(basename(root));
+    await expect(page.locator('#downloadsJanitorStats')).toContainText('1 file waiting for review');
+    await expect(card.getByRole('button', { name: 'Review files · 1', exact: true })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Map', exact: true }).click();
+    const station = page.getByRole('button', {
+      name: new RegExp(
+        `File Janitor station, managed folder ${basename(root)}, 1 file ready for review`
+      )
+    });
+    await expect(station).toBeVisible();
+    await station.focus();
+    await expect(station).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('dialog', { name: 'File Janitor' })).toBeVisible();
+
+    await page.locator('[data-fj-console-close]').click();
+    await expect(station).toBeFocused();
   });
 
   test('puts focus inside on open and returns it to the opener on close', async ({

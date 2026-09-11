@@ -1476,7 +1476,8 @@ function statusFixture(overrides = {}) {
         root_path: '/tmp/Inbox',
         directory_reference_id: 'ref-1',
         filing_root_name: 'Filed',
-        daily_scan_local_time: '09:00'
+        daily_scan_local_time: '09:00',
+        content_mode: 'metadata_only'
       },
       readiness: { state: 'ready', checks: [{ component: 'directory_access', status: 'ok' }] }
     },
@@ -1614,8 +1615,9 @@ test('the card always states what Ori reads, without opening settings', () => {
     })
   );
   const body = cardText(doc);
-  assert.match(body, /names, types, sizes, and dates only/);
-  assert.match(body, /No file contents are opened or read/);
+  assert.match(body, /Local only · file details/);
+  assert.match(body, /Names, types, sizes, and dates/);
+  assert.match(body, /no file contents are read/);
 });
 
 test('a cloud provider is named, and the pending confirmation is the action', () => {
@@ -1633,15 +1635,64 @@ test('a cloud provider is named, and the pending confirmation is the action', ()
     })
   );
   const body = cardText(doc);
-  assert.match(body, /SomeCloud/);
-  assert.match(body, /outside this device/);
-  assert.match(body, /Nothing has been sent yet/);
+  assert.match(body, /Cloud with consent · SomeCloud/);
+  assert.match(body, /Consent required before any extract is sent/);
 
   const host = doc.getElementById('downloadsJanitorMount');
-  const confirm = host.all(
-    n => n.tagName === 'BUTTON' && /Confirm SomeCloud/.test(n.textContent)
+  const consentReview = host.all(
+    n => n.tagName === 'BUTTON' && /Review consent/.test(n.textContent)
   )[0];
-  assert.ok(confirm, 'an unconfirmed provider must offer the confirmation');
+  assert.ok(consentReview, 'an unconfirmed provider must make consent the primary next step');
+});
+
+test('compact privacy distinguishes local inspection and unavailable data', () => {
+  const doc = setup();
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(
+    privacyStatus({
+      mode: 'local_model',
+      provider: 'LocalModel',
+      leaves_device: false
+    })
+  );
+  assert.match(cardText(doc), /Local only · on-device text/);
+  assert.match(cardText(doc), /stay on this device with LocalModel/);
+
+  panel.render(
+    statusFixture({
+      settings: {
+        ...statusFixture().settings,
+        content_mode: 'future_unknown_mode'
+      },
+      privacy: { mode: 'future_unknown_mode' }
+    })
+  );
+  assert.match(cardText(doc), /Privacy unavailable/);
+  assert.match(cardText(doc), /Open Settings to confirm/);
+});
+
+test('compact server-derived privacy remains visible in the console on every tab', () => {
+  const doc = setup();
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  openConsole(
+    privacyStatus({
+      mode: 'cloud_model',
+      provider: 'SomeCloud',
+      leaves_device: true,
+      consent_required: false
+    })
+  );
+
+  for (const tab of ['review', 'history', 'settings']) {
+    panel._selectTab(tab);
+    const lines = surface(doc).all(node =>
+      String(node.className || '')
+        .split(/\s+/)
+        .includes('fj-console-privacy')
+    );
+    assert.equal(lines.length, 1, `${tab} keeps the shared privacy line`);
+    assert.match(lines[0].textContent, /Cloud with consent · SomeCloud/);
+  }
 });
 
 test('settings spell out the consequence of each content option', () => {
@@ -2572,6 +2623,28 @@ test('station state follows the required priority order', () => {
   assert.equal(panel.stationState().value, 'Watching');
 });
 
+test('the station keeps product identity, managed folder, depot art, and state distinct', () => {
+  setup();
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.render(statusFixture());
+  globalThis.window.WorkspaceCapabilities = {
+    find: () => ({
+      installed: true,
+      available: true,
+      status: { folder_display_name: 'A very long approved inbox folder' }
+    })
+  };
+  const adapter = globalThis.window.WorkspaceBuiltinStationAdapters.find(
+    entry => entry.key === 'file-janitor'
+  );
+
+  const station = adapter.station();
+  assert.equal(station.label, 'File Janitor');
+  assert.equal(station.location, 'A very long approved inbox folder');
+  assert.equal(station.visualVariant, 'depot');
+  assert.equal(station.state().value, '2 files ready for review');
+});
+
 test('the station sends consent-required workspaces to the existing consent control', () => {
   const doc = setup();
   panel._setBatch(null, [], CATEGORIES);
@@ -2607,12 +2680,17 @@ test('Workspace Details carries no review table and no settings form', () => {
   const doc = setup();
   doc.body.dataset = { workspaceViewMode: 'details' };
   renderReview(doc);
+  panel.render(statusFixture());
   const card = doc.getElementById('downloadsJanitorMount');
 
   // The compact card answers "is anything waiting?" and offers a way in.
+  assert.match(card.textContent, /File depot/);
   assert.match(card.textContent, /File Janitor/);
-  assert.match(card.textContent, /2 files waiting for review/);
-  assert.ok(doc.getElementById('fileJanitorCardOpen'), 'expected a way into the console');
+  assert.match(card.textContent, /Current status Review ready/);
+  assert.match(card.textContent, /Managed folder Inbox/);
+  assert.match(card.textContent, /Review queue 2 files waiting for review/);
+  assert.match(card.textContent, /Privacy mode Local only/);
+  assert.equal(doc.getElementById('fileJanitorCardOpen').textContent, 'Review files · 2');
 
   // And nothing else. A hidden second copy of the review table or the settings
   // form is exactly what this split removes: two surfaces acting on the same
@@ -2622,6 +2700,118 @@ test('Workspace Details carries no review table and no settings form', () => {
   assert.equal(card.all(n => n.id === 'downloadsJanitorSettingsHost').length, 0);
   assert.equal(card.all(n => n.id === 'downloadsJanitorBatch').length, 0);
   assert.equal(card.all(n => n.id === 'downloadsJanitorHistoryHost').length, 0);
+});
+
+test('the compact card keeps a 179-file paused queue review-led', () => {
+  const doc = setup();
+  doc.body.dataset = { workspaceViewMode: 'details' };
+  const batch = batchFixture();
+  batch.summary = { ...batch.summary, proposed: 179 };
+  panel._setBatch(batch, candidatesFixture(), CATEGORIES);
+  panel.render(statusFixture({ settings: { ...statusFixture().settings, paused: true } }));
+
+  assert.equal(badgeText(doc), 'Review ready');
+  assert.match(cardText(doc), /179 files waiting for review/);
+  assert.match(cardText(doc), /automatic scanning paused/);
+  assert.equal(doc.getElementById('fileJanitorCardOpen').textContent, 'Review files · 179');
+});
+
+test('compact queue actions remain explicit at zero, one, and large counts', () => {
+  const doc = setup();
+  doc.body.dataset = { workspaceViewMode: 'details' };
+
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(statusFixture());
+  assert.equal(doc.getElementById('fileJanitorCardOpen').textContent, 'Open review');
+  assert.equal(badgeText(doc), 'Watching');
+
+  for (const count of [1, 12345]) {
+    const batch = batchFixture();
+    batch.summary = { ...batch.summary, proposed: count };
+    panel._setBatch(batch, candidatesFixture(), CATEGORIES);
+    panel.render(statusFixture());
+    assert.equal(doc.getElementById('fileJanitorCardOpen').textContent, `Review files · ${count}`);
+    assert.match(cardText(doc), new RegExp(`${count} files? waiting for review`));
+  }
+});
+
+test('a batch loaded after status refreshes the compact review action', async () => {
+  const doc = setup();
+  doc.body.dataset = { workspaceViewMode: 'details' };
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(statusFixture());
+  assert.equal(doc.getElementById('fileJanitorCardOpen').textContent, 'Open review');
+
+  globalThis.fetch = async url => {
+    const target = String(url);
+    if (target.includes('/batches/latest')) {
+      return {
+        ok: true,
+        json: async () => ({
+          batch: batchFixture(),
+          candidates: candidatesFixture(),
+          total: 2,
+          filtered_total: 2,
+          counts: { all: 2, needs_review: 1, pending: 2, skipped: 1 }
+        })
+      };
+    }
+    if (target.includes('/categories')) {
+      return { ok: true, json: async () => ({ categories: CATEGORIES }) };
+    }
+    return { ok: true, json: async () => ({ status: statusFixture() }) };
+  };
+
+  panel.open({ source: 'workspace-details', tab: 'review' });
+  await settle();
+  await settle();
+
+  assert.equal(doc.getElementById('fileJanitorCardOpen').textContent, 'Review files · 2');
+  assert.equal(badgeText(doc), 'Review ready');
+});
+
+test('a review-labelled Details action explicitly leaves remembered History for Review', () => {
+  const doc = setup();
+  doc.body.dataset = { workspaceViewMode: 'details' };
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(statusFixture());
+  panel.open({ source: 'test', tab: 'history' });
+  panel._selectTab('history');
+  panel.close();
+
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.render(statusFixture());
+  const action = doc.getElementById('fileJanitorCardOpen');
+  assert.equal(action.textContent, 'Review files · 2');
+  action.click();
+
+  assert.equal(panel.activeTab(), 'review');
+});
+
+test('the compact card sends consent-required work to Settings', () => {
+  const doc = setup();
+  doc.body.dataset = { workspaceViewMode: 'details' };
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(
+    statusFixture({
+      privacy: {
+        mode: 'cloud_model',
+        headline: 'Ori may read a short extract.',
+        detail: 'Nothing has been sent yet.',
+        provider: 'Example Cloud',
+        leaves_device: true,
+        consent_required: true
+      }
+    })
+  );
+
+  assert.equal(badgeText(doc), 'Consent required');
+  assert.match(cardText(doc), /Privacy mode Cloud with consent · Example Cloud/);
+  assert.match(cardText(doc), /Consent required before any extract is sent/);
+  const action = doc.getElementById('fileJanitorCardOpen');
+  assert.equal(action.textContent, 'Review consent');
+  action.click();
+  assert.equal(panel.activeTab(), 'settings');
 });
 
 test('the configured summary is visible only in Details across status refreshes', () => {

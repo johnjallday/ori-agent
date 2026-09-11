@@ -122,16 +122,22 @@
     depot: Object.freeze({
       color: '#c3b56d',
       markup: `
-        <polygon points="60 54 110 70 60 87 10 70" fill="currentColor" opacity=".13" stroke="currentColor" stroke-opacity=".45"/>
-        <polygon points="18 41 60 56 60 79 18 64" fill="currentColor" opacity=".4"/>
-        <polygon points="102 41 60 56 60 79 102 64" fill="currentColor" opacity=".58"/>
-        <polygon points="18 41 60 26 102 41 60 57" fill="currentColor" opacity=".88"/>
-        <path d="M29 46v20M39 50v20M49 53v20M71 53v20M81 50v20M91 46v20" stroke="#101619" stroke-opacity=".5" stroke-width="2"/>
-        <rect x="48" y="17" width="24" height="10" fill="currentColor"/>
-        <path d="M52 22h16" stroke="#101619" stroke-width="2"/>
+        <polygon points="60 54 112 71 60 87 8 71" fill="currentColor" opacity=".13" stroke="currentColor" stroke-opacity=".48"/>
+        <polygon points="16 40 59 54 59 78 16 64" fill="currentColor" opacity=".4"/>
+        <polygon points="103 40 59 54 59 78 103 64" fill="currentColor" opacity=".58"/>
+        <polygon points="16 40 59 25 103 40 59 55" fill="currentColor" opacity=".9"/>
+        <path d="M27 45v20M38 49v20M49 52v20M70 52v20M81 49v20M92 45v20" stroke="#101619" stroke-opacity=".48" stroke-width="2"/>
+        <rect x="47" y="16" width="24" height="10" rx="1" fill="currentColor"/>
+        <path d="M51 21h16" stroke="#101619" stroke-width="2"/>
+        <g data-depot-conveyor="sorting-line">
+          <polygon points="55 61 94 48 108 53 68 67" fill="#101619" fill-opacity=".76" stroke="currentColor" stroke-width="1.2"/>
+          <path d="M65 61l5 2M76 57l5 2M87 53l5 2M98 50l5 2" stroke="#f6f0df" stroke-opacity=".72" stroke-width="1.4" stroke-linecap="round"/>
+          <circle cx="70" cy="68" r="2.2" fill="currentColor"/><circle cx="100" cy="58" r="2.2" fill="currentColor"/>
+          <path d="M79 48l9-3 7 3-9 3z" fill="#f6f0df" fill-opacity=".9" stroke="currentColor" stroke-width="1"/>
+        </g>
         <g data-building-emblem="folder">
-          <path d="M43 32h14l5 5h16v18H43z" fill="#101619" fill-opacity=".74" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
-          <path d="M48 43h25M60 39v11M56 47l4 4 4-4" fill="none" stroke="#f6f0df" stroke-opacity=".88" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M37 31h14l5 5h16v18H37z" fill="#101619" fill-opacity=".78" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+          <path d="M42 42h25M54 38v11M50 46l4 4 4-4" fill="none" stroke="#f6f0df" stroke-opacity=".9" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
         </g>`
     }),
     github: Object.freeze({
@@ -193,13 +199,21 @@
     if (!Object.prototype.hasOwnProperty.call(VARIANTS, normalized)) return '';
     const definition = VARIANTS[normalized];
 
-    const context = options && options.context === 'catalog' ? 'catalog' : 'map';
+    const requestedContext = options && options.context;
+    const context =
+      requestedContext === 'catalog' || requestedContext === 'station' ? requestedContext : 'map';
     const className =
       context === 'catalog'
         ? 'workspace-template-building-art'
-        : 'ws-map-struct ws-map-struct--blueprint';
+        : context === 'station'
+          ? 'ws-cmd-map-station-art'
+          : 'ws-map-struct ws-map-struct--blueprint';
+    // A station is already inside Workspace Command's theme token scope. Its
+    // depot art therefore inherits the keeper accent instead of freezing the
+    // catalog's curated swatch into both light and dark map themes.
+    const color = context === 'station' ? 'var(--ws-keeper)' : definition.color;
 
-    return `<svg class="${className}" data-building-variant="${normalized}" viewBox="0 0 120 88" width="112" height="92" style="color:${definition.color}" aria-hidden="true" focusable="false">${definition.markup}</svg>`;
+    return `<svg class="${className}" data-building-variant="${normalized}" viewBox="0 0 120 88" width="112" height="92" style="color:${color}" aria-hidden="true" focusable="false">${definition.markup}</svg>`;
   }
 
   window.OriWorkspaceBuildingArt = Object.freeze({
