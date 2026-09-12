@@ -5,10 +5,42 @@ on:
     tags:
       - 'v*.*.*'
 
+permissions:
+  contents: read
+
+concurrency:
+  group: release-build-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+
 jobs:
+  verify:
+    name: Verify release authorization
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      prerelease: ${{ steps.tag.outputs.prerelease }}
+      previous_tag: ${{ steps.tag.outputs.previous_tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Require an RC or an explicit tested-RC promotion receipt
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTO_RELEASE_HOLD: ${{ vars.AUTO_RELEASE_HOLD }}
+          TAG: ${{ github.ref_name }}
+        run: python3 scripts/release-candidate.py verify-build --tag "$TAG"
+
   # Main release job - builds Linux/Windows binaries and Linux packages
   release:
-    name: Create Release (Linux/Windows)
+    name: Create Draft (Linux/Windows)
+    needs: verify
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -52,6 +84,7 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_PREVIOUS_TAG: ${{ needs.verify.outputs.previous_tag }}
 
   # macOS DMG build job
   build-dmg:
@@ -91,8 +124,9 @@ jobs:
           goreleaser build --clean --skip=before --id=server-macos --id=menubar
 
       - name: Create macOS DMG installers
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
         run: |
-          VERSION="${{ needs.release.outputs.version }}"
           SHORT_VERSION="${VERSION#v}"
 
           echo "Creating DMGs for version $SHORT_VERSION..."
@@ -122,12 +156,11 @@ jobs:
           echo "Created DMGs:"
           ls -la dist/*.dmg 2>/dev/null || echo "No DMGs found"
 
-      - name: Upload DMGs to release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: dist/*.dmg
+      - name: Upload DMGs without publishing the draft
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release upload "$TAG" dist/*.dmg --clobber
 
       - name: Verify both DMG architectures were built
         run: |
@@ -180,8 +213,10 @@ jobs:
           }
 
       - name: Build Windows binaries
+        env:
+          RELEASE_VERSION: ${{ needs.release.outputs.version }}
         run: |
-          $version = "${{ needs.release.outputs.version }}"
+          $version = $env:RELEASE_VERSION
           $env:CGO_ENABLED = "0"
 
           # Create dist structure expected by create-msi.ps1
@@ -191,13 +226,80 @@ jobs:
           go build -ldflags="-s -w -X 'github.com/johnjallday/ori-agent/internal/version.Version=$version'" -o dist\server_windows_amd64\ori-agent.exe .\cmd\server
 
       - name: Create MSI installer
+        env:
+          RELEASE_VERSION: ${{ needs.release.outputs.version }}
         run: |
-          $version = "${{ needs.release.outputs.version }}".TrimStart('v')
+          $version = $env:RELEASE_VERSION.TrimStart('v')
           .\build\windows\create-msi.ps1 -Version $version -Arch amd64 -DistDir dist
 
-      - name: Upload MSI to release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: dist/ori-agent-*.msi
+      - name: Upload MSI without publishing the draft
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release upload "$TAG" dist/ori-agent-*.msi --clobber
+
+  smoke:
+    name: Verify actual release installers
+    needs: [release, build-dmg, build-msi]
+    uses: ./.github/workflows/smoke-tests.yml
+    with:
+      release_tag: ${{ github.ref_name }}
+    permissions:
+      contents: read
+
+  publish:
+    name: Publish verified release
+    needs: [verify, smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Attach the exact RC's manual test report before publishing
+        if: needs.verify.outputs.prerelease == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          PREVIOUS_TAG: ${{ needs.verify.outputs.previous_tag }}
+          REPOSITORY: ${{ github.repository }}
+          AUTO_RELEASE_HOLD: ${{ vars.AUTO_RELEASE_HOLD }}
+        run: python3 scripts/release-candidate.py attach-test-report --rc "$TAG" --previous "$PREVIOUS_TAG" --repository "$REPOSITORY"
+      - name: Publish only after every installer check succeeds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+          AUTO_RELEASE_HOLD: ${{ vars.AUTO_RELEASE_HOLD }}
+        run: |
+          case "${AUTO_RELEASE_HOLD,,}" in
+            1|true|yes|on) echo 'Release held before publication'; exit 1 ;;
+          esac
+          latest=false
+          if [ "$PRERELEASE" = false ]; then latest=true; fi
+          gh release edit "$TAG" --draft=false --prerelease="$PRERELEASE" --latest="$latest"
+          echo "Published $TAG (prerelease: $PRERELEASE); installer checks passed." >> "$GITHUB_STEP_SUMMARY"
+          if [ "$PRERELEASE" = true ]; then
+            echo "Download rc-test-report-$TAG.md from the prerelease, complete it using docs/RC_TEST_PROTOCOL.md, then request promotion of this exact RC." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  sync-dev:
+    name: Open release merge-back PR
+    needs: [verify, publish]
+    if: needs.verify.outputs.prerelease == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Preserve stabilization fixes and release ancestry on dev
+        env:
+          # PAT-created PRs trigger CI; GITHUB_TOKEN-created PRs do not.
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          VERSION: ${{ github.ref_name }}
+        run: python3 scripts/release-candidate.py sync-pr --version "$VERSION"

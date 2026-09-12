@@ -272,7 +272,8 @@ release:
   github:
     owner: johnjallday
     name: ori-agent
-  draft: false
+  # release.yml publishes only after ALL actual installers pass smoke tests.
+  draft: true
   prerelease: auto
   mode: replace
   # Disable parallel uploads to prevent rate limiting and timeouts
