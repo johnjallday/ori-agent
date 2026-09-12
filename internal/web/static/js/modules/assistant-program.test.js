@@ -22,6 +22,27 @@ test('assistant page keeps UUID APIs separate from slug navigation', async () =>
   assert.equal(requests[0].options.headers['Content-Type'], 'application/json');
 });
 
+test('completed Home removal returns to the workspace map instead of the deleted Home', async () => {
+  const requests = [];
+  const destinations = [];
+  const page = new AssistantProgramPage({
+    workspaceId: 'home-uuid',
+    workspaceSlug: 'music-production-home',
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      return { ok: true, json: async () => ({ success: true }) };
+    },
+    navigateImpl: url => destinations.push(url)
+  });
+
+  await page.commitHomeRemoval('review-token');
+
+  assert.equal(requests[0].url, '/api/workspaces/home-uuid/assistant-program/remove-home/commit');
+  assert.equal(requests[0].options.method, 'POST');
+  assert.deepEqual(JSON.parse(requests[0].options.body), { token: 'review-token' });
+  assert.deepEqual(destinations, ['/']);
+});
+
 test('assistant route presents the declaration-named optional team home', () => {
   const page = new AssistantProgramPage({ workspaceId: 'workspace-uuid', workspaceSlug: 'song' });
   assert.equal(

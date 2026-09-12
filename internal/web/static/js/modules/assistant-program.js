@@ -26,13 +26,19 @@ async function responseJSON(response) {
 }
 
 export class AssistantProgramPage {
-  constructor({ workspaceId, workspaceSlug, fetchImpl = globalThis.fetch } = {}) {
+  constructor({
+    workspaceId,
+    workspaceSlug,
+    fetchImpl = globalThis.fetch,
+    navigateImpl = url => globalThis.location.assign(url)
+  } = {}) {
     this.workspaceId = text(workspaceId).trim();
     this.workspaceSlug = text(workspaceSlug).trim();
     // Keep browser fetch as a plain invocation. Calling a stored Window.fetch as
     // an instance method gives it the wrong receiver and fails before any API
     // request is made.
     this.fetchImpl = (...args) => fetchImpl(...args);
+    this.navigateImpl = navigateImpl;
     this.program = null;
     this.learningDocument = null;
     this.providers = [];
@@ -112,6 +118,16 @@ export class AssistantProgramPage {
       throw new Error(text(payload.error || `Request failed (${response.status})`));
     }
     return payload;
+  }
+
+  async commitHomeRemoval(token) {
+    await this.request('/remove-home/commit', {
+      method: 'POST',
+      body: JSON.stringify({ token })
+    });
+    // The commit deletes the current Home, so its former workspace route now
+    // correctly returns 404. Return to the workspace map instead.
+    this.navigateImpl('/');
   }
 
   async loadProviderCatalog() {
@@ -533,11 +549,7 @@ export class AssistantProgramPage {
         cancel.disabled = true;
         progress.textContent = 'Removing Home…';
         try {
-          await this.request('/remove-home/commit', {
-            method: 'POST',
-            body: JSON.stringify({ token: review.token })
-          });
-          globalThis.location.assign(this.workspaceURL());
+          await this.commitHomeRemoval(review.token);
         } catch (error) {
           progress.textContent = error.message || 'The Home could not be removed.';
           confirm.disabled = false;
