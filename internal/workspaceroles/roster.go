@@ -105,6 +105,10 @@ type RoleProjection struct {
 	// Source and Agent are present only on a filled role.
 	Source string         `json:"source,omitempty"`
 	Agent  *AgentIdentity `json:"agent,omitempty"`
+	// NeedsClear means storage still names a holder whose saved definition no
+	// longer exists. It exposes no stale identity; the only valid next action is
+	// an explicit role clear before another Create or Assign.
+	NeedsClear bool `json:"needs_clear,omitempty"`
 	// ReadOnly marks a role this workspace may display but not change — a
 	// group-scoped role seen from a project (D2).
 	ReadOnly       bool   `json:"read_only,omitempty"`
@@ -216,6 +220,8 @@ func Build(in Input) Roster {
 				item.Proposed = nil
 				claimed[strings.ToLower(holder)] = struct{}{}
 				roster.FilledCount++
+			} else {
+				item.NeedsClear = true
 			}
 			// A holder whose definition is gone leaves the role empty (FR42).
 			// The stale attachment is not reported as "also in this workspace"

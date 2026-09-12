@@ -392,6 +392,8 @@ function ptcElements() {
     briefingDeploys: document.getElementById('templateBriefingDeploys'),
     briefingAgentsRow: document.getElementById('templateBriefingAgentsRow'),
     briefingAgentsValue: document.getElementById('templateBriefingAgentsValue'),
+    briefingGroupRow: document.getElementById('templateBriefingGroupRow'),
+    briefingGroupValue: document.getElementById('templateBriefingGroupValue'),
     briefingNoCommanderNudge: document.getElementById('templateBriefingNoCommanderNudge'),
     briefingScaffoldRow: document.getElementById('templateBriefingScaffoldRow'),
     briefingScaffoldValue: document.getElementById('templateBriefingScaffoldValue'),
@@ -658,6 +660,35 @@ function ptcUpdateUI() {
 // chips). When nothing meaningful is selected — Blank, an ad-hoc folder path,
 // or import mode — it falls back to the default helper text. Each deploys row
 // is hidden individually when the template declares nothing for it.
+function ptcGroupDependencyCopy(template) {
+  const program = template?.assistant_program;
+  if (!program || !Array.isArray(program.roles)) return '';
+  const requirement = template?.group_requirement;
+  const policy = String(requirement?.policy || '').trim();
+  if (policy === 'none') return '';
+
+  const homeRoles = program.roles
+    .filter(role => String(role?.scope || '').trim() === 'home')
+    .map(role => String(role?.label || '').trim())
+    .filter(Boolean);
+  const projectRoles = program.roles
+    .filter(role => String(role?.scope || '').trim() === 'project')
+    .map(role => String(role?.label || '').trim())
+    .filter(Boolean);
+  if (!homeRoles.length || !projectRoles.length) return '';
+
+  const destination = String(
+    requirement?.default_home_name || program.station_name || 'its program Home'
+  ).trim();
+  let opening = `Creates a project workspace inside its exact ${destination}.`;
+  if (policy === 'recommended') {
+    opening = `Can create a project workspace inside its exact ${destination} when you choose grouped placement.`;
+  } else if (policy !== 'required') {
+    opening = `Creates a project workspace with a separate ${destination}.`;
+  }
+  return `${opening} Group roles (${homeRoles.join(', ')}) stay on that group. Project roles (${projectRoles.join(', ')}) belong only to the new workspace.`;
+}
+
 function ptcRenderBriefing(els, importMode, templatePath) {
   if (!els.briefing) return;
 
@@ -717,6 +748,10 @@ function ptcRenderBriefing(els, importMode, templatePath) {
     });
   }
 
+  const groupDependencyCopy = showBriefing ? ptcGroupDependencyCopy(template) : '';
+  if (els.briefingGroupRow) els.briefingGroupRow.hidden = !groupDependencyCopy;
+  if (els.briefingGroupValue) els.briefingGroupValue.textContent = groupDependencyCopy;
+
   // No-Commander nudge (PRD FR23): non-blocking — the blueprint remains
   // selectable and creatable either way; this only informs the choice.
   if (els.briefingNoCommanderNudge) {
@@ -750,7 +785,7 @@ function ptcRenderBriefing(els, importMode, templatePath) {
   }
 
   if (els.briefingDeploys) {
-    els.briefingDeploys.hidden = !(showAgents || showScaffold || showAddons);
+    els.briefingDeploys.hidden = !(showAgents || groupDependencyCopy || showScaffold || showAddons);
   }
 
   ptcRenderReadiness(els, showBriefing ? template : null);
@@ -759,6 +794,24 @@ function ptcRenderBriefing(els, importMode, templatePath) {
 
 // Selecting a template never starts setup. This explicit action opens the same
 // saved quest as Plugins and the assistant, outside the workspace-owned wizard.
+function ptcOpenSelectedGuidedSetup() {
+  const quest = ptcQuestForTemplate(ptcSelected, ptcQuests);
+  if (!quest) return false;
+  const open = () =>
+    window.dispatchEvent(
+      new CustomEvent('ori:open-specialist-setup', {
+        detail: { plugin_id: quest.plugin_id, quest_id: quest.id }
+      })
+    );
+  const modal = document.getElementById('addFolderModal');
+  const instance = window.bootstrap?.Modal.getInstance(modal);
+  if (instance && modal.classList.contains('show')) {
+    modal.addEventListener('hidden.bs.modal', open, { once: true });
+    instance.hide();
+  } else open();
+  return true;
+}
+
 function ptcRenderQuest(host, template) {
   if (!host) return;
   host.textContent = '';
@@ -772,18 +825,7 @@ function ptcRenderQuest(host, template) {
   link.addEventListener('click', event => {
     if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
-    const open = () =>
-      window.dispatchEvent(
-        new CustomEvent('ori:open-specialist-setup', {
-          detail: { plugin_id: quest.plugin_id, quest_id: quest.id }
-        })
-      );
-    const modal = document.getElementById('addFolderModal');
-    const instance = window.bootstrap?.Modal.getInstance(modal);
-    if (instance && modal.classList.contains('show')) {
-      modal.addEventListener('hidden.bs.modal', open, { once: true });
-      instance.hide();
-    } else open();
+    ptcOpenSelectedGuidedSetup();
   });
   const help = document.createElement('p');
   help.className = 'small text-muted mt-2 mb-0';
@@ -1521,6 +1563,7 @@ window.ProjectTemplateCard = {
   syncState: ptcSyncImportVisibility,
   getPayloadFields: ptcGetPayloadFields,
   getSelectedTemplate: ptcGetSelectedTemplate,
+  openSelectedGuidedSetup: ptcOpenSelectedGuidedSetup,
   shouldOpenAfterCreate: ptcShouldOpenAfterCreate
 };
 

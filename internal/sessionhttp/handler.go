@@ -48,6 +48,11 @@ type Handler struct {
 	// which staffs every required role: under the vacancy model a role the user
 	// left empty must stay empty.
 	assistantRoleStaffer func(context.Context, string, []RoleStaffingFill) error
+	// assistantWorkspaceRoleStaffer serves one exact workspace-role PUT. It is
+	// deliberately separate from the create-request batch callback above: the
+	// route derives Home/project authority from its target, while final project
+	// creation may commit several already-reviewed project roles together.
+	assistantWorkspaceRoleStaffer func(context.Context, string, []RoleStaffingFill) error
 	// assistantRoleUnstaffer clears one role. Clearing unbinds; it never
 	// deletes an agent definition.
 	assistantRoleUnstaffer assistantRoleUnstaffer
@@ -227,11 +232,18 @@ type RoleStaffingFill struct {
 	Model    string
 }
 
-// SetAssistantRoleStaffer supplies the per-role staffing callback used when a
-// create request carries role_staffing for an assistant-program blueprint.
+// SetAssistantRoleStaffer supplies the reviewed project-role batch callback
+// used when a create request carries role_staffing for an Assistant Program.
 func (h *Handler) SetAssistantRoleStaffer(staff func(context.Context, string, []RoleStaffingFill) error) {
 	h.assistantRoleStaffer = staff
 }
+
+// SetAssistantWorkspaceRoleStaffer supplies the target-aware single-role
+// callback used by PUT /api/workspaces/{workspaceID}/roles/{roleID}.
+func (h *Handler) SetAssistantWorkspaceRoleStaffer(staff func(context.Context, string, []RoleStaffingFill) error) {
+	h.assistantWorkspaceRoleStaffer = staff
+}
+
 func (h *Handler) SetAssistantHomeRemoved(finalize func(workspaceID string) error) {
 	h.assistantHomeRemoved = finalize
 }

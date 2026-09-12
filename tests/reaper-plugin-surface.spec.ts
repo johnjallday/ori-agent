@@ -33,7 +33,7 @@ async function cleanupAssistantTopology(
           })
           .catch(() => {});
     }
-    await request.delete(`/api/workspaces/${projectID}`).catch(() => {});
+    await request.delete(`/api/workspaces/${projectID}?confirm=true`).catch(() => {});
   }
   const home = await request
     .get(`/api/workspaces/${stationID}/assistant-program`)
@@ -53,7 +53,7 @@ async function cleanupAssistantTopology(
         })
         .catch(() => {});
   }
-  await request.delete(`/api/workspaces/${stationID}`).catch(() => {});
+  await request.delete(`/api/workspaces/${stationID}?confirm=true`).catch(() => {});
 }
 
 async function captureEvidence(page: import('@playwright/test').Page, name: string) {
@@ -114,10 +114,12 @@ test.skip(
   'set ORI_REAPER_PLUGIN_PATH to the locally built coordinated plugin checkout'
 );
 
-test('Create Workspace prepares the required Home before creating and staffing the project', async ({
+test('Create Workspace builds and staffs the required Home before two project teams', async ({
   page,
   request
 }) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await request.post('/api/onboarding/skip').catch(() => {});
   await request.delete(`/api/plugins/${pluginName}`).catch(() => {});
   const install = await request.post('/api/plugins/install', {
@@ -127,190 +129,360 @@ test('Create Workspace prepares the required Home before creating and staffing t
   const enable = await request.post(`/api/plugins/${pluginName}/enable`);
   expect(enable.ok(), await enable.text()).toBeTruthy();
 
-  let workspaceID = '';
+  const run = Date.now().toString(36);
+  const coordinatorName = `Music Portfolio Manager ${run}`;
+  const firstProjectName = `Wizard REAPER ${run}`;
+  const secondProjectName = `Second Wizard REAPER ${run}`;
+  const firstRoleNames: Record<string, string> = {
+    producer: `Producer ${run}`,
+    engineer: `Mix Engineer ${run}`,
+    songwriter: `Songwriter ${run}`
+  };
+  const secondRoleNames: Record<string, string> = {
+    producer: `Producer Two ${run}`,
+    engineer: `Mix Engineer Two ${run}`,
+    songwriter: `Songwriter Two ${run}`
+  };
+  const roleLabels: Record<string, string> = {
+    producer: 'Producer',
+    engineer: 'Mix Engineer',
+    songwriter: 'Songwriter'
+  };
+  const createdAgentNames = [
+    coordinatorName,
+    ...Object.values(firstRoleNames),
+    ...Object.values(secondRoleNames)
+  ];
   let stationID = '';
-  try {
-    await page.goto('/workspaces');
-    await page.evaluate(() => {
-      const modal = document.getElementById('addFolderModal');
-      // @ts-expect-error bootstrap is a page global
-      window.bootstrap.Modal.getOrCreateInstance(modal).show();
-    });
-    await expect(page.locator('#addFolderModal')).toBeVisible();
-    const reaperCard = page.locator('#templatePicker').getByRole('radio', {
-      name: 'Reaper Song',
-      exact: true
-    });
-    await expect(reaperCard).toBeVisible();
-    await reaperCard.click();
+  let firstProjectID = '';
+  let secondProjectID = '';
+
+  const creator = page.locator('#addFolderModal');
+  const destination = page.locator('#workspaceGroupDestinationCard');
+  const openWizard = async (workspaceName: string, mapOrigin = false, captureBlueprint = false) => {
+    if (mapOrigin) {
+      await page.goto('/');
+      await page.locator('#cockpitMap .ws-map-world').waitFor();
+      await page.locator('#cockpitCreateWorkspaceBtn').click();
+    } else {
+      await page.goto('/workspaces');
+      await page.evaluate(() => {
+        const modal = document.getElementById('addFolderModal');
+        // @ts-expect-error bootstrap is a page global
+        window.bootstrap.Modal.getOrCreateInstance(modal).show();
+      });
+    }
+    await expect(creator).toBeVisible();
+    await page
+      .locator('#templatePicker')
+      .getByRole('radio', { name: 'Reaper Song', exact: true })
+      .click();
+    if (captureBlueprint) {
+      await expect(page.locator('#templateBriefingGroupValue')).toContainText(
+        'Creates a project workspace inside its exact Music Production Home'
+      );
+      await page.locator('#templateBriefingGroupRow').scrollIntoViewIfNeeded();
+      await captureEvidence(page, 'music-producer-00-blueprint-dependency.png');
+    }
     await page.locator('#wizardNextBtn').click();
     await expect(page.locator('#wizardStep2')).toBeVisible();
-    const workspaceName = `Wizard REAPER ${Date.now().toString(36)}`;
     await page.locator('#folderNameInput').fill(workspaceName);
     const openProject = page.locator('#projectTemplateOpenAfterCreateToggle');
     if (await openProject.isChecked()) await openProject.uncheck();
-
-    await page.locator('#wizardNextBtn').click();
-    await expect(page.locator('#wizardStep3')).toBeVisible();
-    await expect(page.locator('#wizardStep3Title')).toHaveText(
-      'Staff your music production assistants'
-    );
-    await expect(page.locator('#workspaceAssistantProgramCreate')).toBeVisible();
-    await expect(page.locator('#wizardStep3')).toContainText('Mix Engineer');
-    await expect(page.locator('#wizardStep3')).toContainText('Songwriter');
-    await expect(page.locator('#wizardStep3')).toContainText('Missing');
-
-    await page.locator('#wizardNextBtn').click();
-    await expect(page.locator('#wizardStep4')).toBeVisible();
-    await expect(page.locator('#workspaceReviewSummary')).toContainText(
-      'Required group: Music Production Home'
-    );
-
-    const homeResponsePromise = page.waitForResponse(
-      response =>
-        response.url().endsWith('/api/workspaces/group-requirement/home/commit') &&
-        response.request().method() === 'POST'
-    );
-    page.once('dialog', async dialog => {
-      expect(dialog.message()).toContain('must exist before this workspace can be created');
-      expect(dialog.message()).toContain('creates only the empty group');
-      await dialog.accept();
-    });
-    await page.locator('#createFolderBtn').click();
-    const homeResponse = await homeResponsePromise;
-    expect(homeResponse.ok(), await homeResponse.text()).toBeTruthy();
-    const prepared = (await homeResponse.json()).group_requirement;
-    expect(prepared.state).toBe('home_ready');
-    expect(prepared.home_created).toBeTruthy();
-    stationID = prepared.home_workspace_id;
-    await expect(page.locator('#addFolderModal')).toBeVisible();
-    await expect(page.locator('#workspaceReviewReadiness')).toContainText(
-      'No workspace was created'
-    );
-    await expect(page.locator('#workspaceReviewReadiness')).toContainText(
-      'Click Confirm create to create the workspace separately'
-    );
-    await expect(page.locator('#createFolderBtn')).toHaveText(`Confirm create “${workspaceName}”`);
-    const homeOnly = await request.get('/api/workspaces').then(response => response.json());
-    const homeOnlyRecords = Array.isArray(homeOnly.folders) ? homeOnly.folders : [];
-    expect(homeOnlyRecords.some((item: { id?: string }) => item.id === stationID)).toBeTruthy();
-    await expect(page.locator(`.ws-map-district[data-group-id="${stationID}"]`)).toBeAttached();
-    expect(
-      homeOnlyRecords.some((item: { name?: string }) => item.name === workspaceName)
-    ).toBeFalsy();
-    await captureEvidence(page, 'music-producer-01-home-before-project.png');
-
-    // Cancelling after Home preparation closes the wizard but leaves only the
-    // reviewed empty Home. Reopening must obtain another fresh project receipt.
-    await page.locator('#addFolderModal .modal-footer [data-bs-dismiss="modal"]').click();
-    await expect(page.locator('#addFolderModal')).toBeHidden();
-    const afterCancel = await request.get('/api/workspaces').then(response => response.json());
-    expect((afterCancel.folders || []).map((item: { id: string }) => item.id)).toEqual([stationID]);
-
-    await page.evaluate(() => {
-      const modal = document.getElementById('addFolderModal');
-      // @ts-expect-error bootstrap is a page global
-      window.bootstrap.Modal.getOrCreateInstance(modal).show();
-    });
-    await expect(page.locator('#addFolderModal')).toBeVisible();
-    await page.locator('#templatePicker').getByRole('radio', { name: 'Reaper Song' }).click();
-    await page.locator('#wizardNextBtn').click();
-    await page.locator('#folderNameInput').fill(workspaceName);
-    if (await openProject.isChecked()) await openProject.uncheck();
-    await page.locator('#wizardNextBtn').click();
-    await page.locator('#wizardNextBtn').click();
-    await expect(page.locator('#wizardStep4')).toBeVisible();
-    const freshReviewPromise = page.waitForResponse(
+  };
+  const fillProjectRoles = async (names: Record<string, string>) => {
+    for (const roleID of ['producer', 'engineer', 'songwriter']) {
+      const row = page.locator(`#workspaceRoleRoster [data-role-id="${roleID}"]`);
+      await row.getByRole('button', { name: `Create an agent for ${roleLabels[roleID]}` }).click();
+      await expect(page.locator('#addAgentModal')).toBeVisible();
+      await page.locator('[data-agent-create-field="name"]').fill(names[roleID]);
+      await expect(page.locator('#toastContainer .toast.show')).toHaveCount(0, {
+        timeout: 10_000
+      });
+      await page.locator('#createAgentBtn').click();
+      await expect(page.locator('#addAgentModal')).toBeHidden();
+      await expect(creator).toBeVisible();
+      await expect(row).toContainText(names[roleID]);
+    }
+  };
+  const createReviewedProject = async (workspaceName: string, mapPlacement = false) => {
+    const reviewPromise = page.waitForResponse(
       response =>
         response.url().endsWith('/api/workspaces') &&
         response.request().method() === 'POST' &&
         response.request().postDataJSON()?.group_requirement_review === true
     );
     await page.locator('#createFolderBtn').click();
-    const freshReview = await freshReviewPromise;
-    expect(freshReview.ok(), await freshReview.text()).toBeTruthy();
-    await expect(page.locator('#createFolderBtn')).toHaveText(`Confirm create “${workspaceName}”`);
+    const review = await reviewPromise;
+    expect(review.ok(), await review.text()).toBeTruthy();
+    if (mapPlacement) {
+      await expect(page.locator('[data-ws-map-placement-preview]')).toBeVisible();
+      await captureEvidence(page, 'music-producer-07-map-placement.png');
+    } else {
+      await expect(page.locator('#createFolderBtn')).toHaveText(
+        `Confirm create “${workspaceName}”`
+      );
+    }
 
-    const createResponsePromise = page.waitForResponse(
+    const createPromise = page.waitForResponse(
       response =>
         response.url().endsWith('/api/workspaces') &&
         response.request().method() === 'POST' &&
         Boolean(response.request().postDataJSON()?.group_review_token)
     );
-    const groupPlacementPromise = page.waitForRequest(request => {
-      if (!request.url().endsWith('/api/workspace-map/layout') || request.method() !== 'PATCH') {
-        return false;
+    if (mapPlacement) {
+      await page.locator('[data-ws-map-placement-confirm]').click();
+    } else {
+      await page.locator('#createFolderBtn').click();
+    }
+    const create = await createPromise;
+    expect(create.ok(), await create.text()).toBeTruthy();
+    const payload = create.request().postDataJSON();
+    expect(payload.create_required_home).toBeUndefined();
+    expect(payload.assistant_hire).toBeUndefined();
+    expect(payload.role_staffing).toHaveLength(3);
+    expect(payload.role_staffing.map((item: { role_id: string }) => item.role_id).sort()).toEqual([
+      'engineer',
+      'producer',
+      'songwriter'
+    ]);
+    return create.json();
+  };
+
+  try {
+    const templates = await request.get('/api/project-templates').then(response => response.json());
+    expect(
+      templates.templates.find((item: { id: string }) => item.id === templateID)
+    ).toMatchObject({
+      plugin_owner: { plugin_version: '0.5.2', blueprint_version: 6 },
+      group_requirement: {
+        policy: 'required',
+        assistant_program_id: 'music-producer-assistant',
+        missing_home: 'offer_create',
+        default_home_name: 'Music Production Home'
       }
-      return request
-        .postDataJSON()
-        ?.operations?.some((operation: { op?: string }) => operation.op === 'set_positions');
-    });
-    await page.locator('#createFolderBtn').click();
-    const createResponse = await createResponsePromise;
-    expect(createResponse.ok(), await createResponse.text()).toBeTruthy();
-    const createPayload = createResponse.request().postDataJSON();
-    expect(createPayload.create_required_home).toBeUndefined();
-    expect(createPayload.template_agent_review).toBeUndefined();
-    expect(createPayload.assistant_hire).toBeUndefined();
-    const created = await createResponse.json();
-    workspaceID = created.folder.id;
-    const placementRequest = await groupPlacementPromise;
-    const positions = placementRequest
-      .postDataJSON()
-      .operations.find((operation: { op?: string }) => operation.op === 'set_positions')?.positions;
-    expect(positions?.[stationID]).toBeTruthy();
-    expect(positions?.[workspaceID]).toBeTruthy();
-    expect(positions[workspaceID].x).toBeGreaterThanOrEqual(positions[stationID].x);
-    expect(positions[workspaceID].x).toBeLessThan(positions[stationID].x + 176);
-    expect(positions[workspaceID].y).toBeGreaterThanOrEqual(positions[stationID].y);
-    expect(positions[workspaceID].y).toBeLessThan(positions[stationID].y + 170);
-    await page.waitForURL(`**/workspaces/${encodeURIComponent(created.folder.folder_slug)}`, {
-      timeout: 20_000
     });
 
-    const programResponse = await request.get(`/api/workspaces/${workspaceID}/assistant-program`);
-    expect(programResponse.ok(), await programResponse.text()).toBeTruthy();
-    const program = await programResponse.json();
-    expect(program.station_id).toBe(stationID);
-    const createdWorkspace = await request
-      .get(`/api/workspaces/${workspaceID}`)
+    const before = await request.get('/api/workspaces').then(response => response.json());
+    await openWizard(firstProjectName, false, true);
+    await expect(destination).toContainText('Proposed group · not created');
+    await expect(destination).toContainText('Music Production Home');
+    await destination.scrollIntoViewIfNeeded();
+    await captureEvidence(page, 'music-producer-01-details-absent.png');
+    expect(
+      (await request.get('/api/workspaces').then(response => response.json())).folders
+    ).toEqual(before.folders);
+
+    await page.locator('#wizardNextBtn').click();
+    await expect(page.locator('#wizardStep3')).toBeVisible();
+    const missingIssue = page.locator(
+      '#workspaceTeamIssues [data-issue-id="required-roles-missing"]'
+    );
+    await expect(missingIssue).toContainText('Fill all 4 required roles');
+    await expect(
+      missingIssue.getByRole('button', { name: 'Build Music Production Home' })
+    ).toBeVisible();
+    await captureEvidence(page, 'music-producer-02-team-build-home.png');
+
+    await missingIssue.getByRole('button', { name: 'Build Music Production Home' }).click();
+    await expect(page.locator('#wizardStep2')).toBeVisible();
+    await expect(page.locator('#workspaceGroupHomeReview')).toContainText(
+      'does not create this project'
+    );
+    const homeCommitPromise = page.waitForResponse(
+      response =>
+        response.url().endsWith('/api/workspaces/group-requirement/home/commit') &&
+        response.request().method() === 'POST'
+    );
+    await page.locator('#workspaceGroupHomeConfirm').click();
+    const homeCommit = await homeCommitPromise;
+    expect(homeCommit.ok(), await homeCommit.text()).toBeTruthy();
+    const prepared = (await homeCommit.json()).group_requirement;
+    expect(prepared).toMatchObject({ state: 'home_ready', home_created: true });
+    stationID = prepared.home_workspace_id;
+    const homeOnly = await request.get('/api/workspaces').then(response => response.json());
+    expect(homeOnly.folders.some((item: { id: string }) => item.id === stationID)).toBeTruthy();
+    expect(
+      homeOnly.folders.some((item: { name: string }) => item.name === firstProjectName)
+    ).toBeFalsy();
+    await destination.scrollIntoViewIfNeeded();
+    await captureEvidence(page, 'music-producer-03-details-home-prepared.png');
+
+    await page.locator('#wizardNextBtn').click();
+    await expect(page.locator('#wizardStep3')).toBeVisible();
+    const managerRow = page.locator('#workspaceRoleRoster [data-role-id="portfolio_manager"]');
+    await expect(
+      missingIssue.getByRole('button', { name: 'Set up Music Portfolio Manager' })
+    ).toBeVisible();
+    await expect(
+      managerRow.getByRole('button', { name: 'Set up Music Portfolio Manager' })
+    ).toBeVisible();
+    await captureEvidence(page, 'music-producer-04-team-setup-manager.png');
+
+    await missingIssue.getByRole('button', { name: 'Set up Music Portfolio Manager' }).click();
+    await expect(page.locator('#addAgentModal')).toBeVisible();
+    await expect(page.locator('#agentCreateDraftContext')).toContainText('Home only');
+    await expect(page.locator('#workspaceGroupRoleRosterPreview')).toContainText(
+      'Music Portfolio Manager'
+    );
+    await page.locator('[data-agent-create-field="name"]').fill(coordinatorName);
+    const managerCommitPromise = page.waitForResponse(
+      response =>
+        response.url().endsWith(`/api/workspaces/${stationID}/roles/portfolio_manager`) &&
+        response.request().method() === 'PUT'
+    );
+    await page.locator('#createAgentBtn').click();
+    const managerCommit = await managerCommitPromise;
+    expect(managerCommit.ok(), await managerCommit.text()).toBeTruthy();
+    await expect(page.locator('#addAgentModal')).toBeHidden();
+    await expect(page.locator('#wizardStep3')).toBeVisible();
+    await expect(managerRow).toContainText(coordinatorName);
+
+    await fillProjectRoles(firstRoleNames);
+    await captureEvidence(page, 'music-producer-05-team-scoped.png');
+    await page.locator('#wizardNextBtn').click();
+    await expect(page.locator('#wizardStep4')).toBeVisible();
+    await expect(page.locator('#workspaceReviewSummary')).toContainText('Resulting hierarchy');
+    await expect(page.locator('#workspaceReviewSummary')).toContainText(
+      `${coordinatorName} · already staffed on the group`
+    );
+    await captureEvidence(page, 'music-producer-06-reviewed-hierarchy.png');
+
+    const firstCreated = await createReviewedProject(firstProjectName);
+    firstProjectID = firstCreated.folder.id;
+    expect(firstCreated.assistant_station_id).toBe(stationID);
+    await expect(creator).toBeHidden();
+
+    const firstWorkspace = await request
+      .get(`/api/workspaces/${firstProjectID}`)
       .then(response => response.json());
-    expect(createdWorkspace.parent_id).toBe(stationID);
-    expect(createdWorkspace.group_requirement_status?.state).toBe('ready_grouped');
+    expect(firstWorkspace.parent_id).toBe(stationID);
+    expect(firstWorkspace.group_requirement_status?.state).toBe('ready_grouped');
+    const firstRoles = await request
+      .get(`/api/workspaces/${firstProjectID}/roles`)
+      .then(response => response.json());
+    expect(
+      firstRoles.roles.roles.filter(
+        (role: { scope: string; required: boolean; state: string }) =>
+          role.scope === 'project' && role.required && role.state === 'filled'
+      )
+    ).toHaveLength(3);
+
+    await openWizard(secondProjectName, true);
+    await expect(destination).toContainText('Existing verified group');
+    await expect(destination).toContainText('1 of 1 required group role filled');
+    await expect(page.locator('#workspaceGroupDestinationActions button')).toHaveCount(0);
+    await page.locator('#wizardNextBtn').click();
+    await expect(managerRow).toContainText(coordinatorName);
+    await expect(managerRow.getByRole('button')).toHaveCount(0);
+    await fillProjectRoles(secondRoleNames);
+    await page.locator('#wizardNextBtn').click();
+    await expect(page.locator('#wizardStep4')).toBeVisible();
+    const secondCreated = await createReviewedProject(secondProjectName, true);
+    secondProjectID = secondCreated.folder.id;
+    expect(secondCreated.assistant_station_id).toBe(stationID);
+    await expect(page.locator('[data-ws-map-placement-preview]')).toBeHidden();
+    await expect(creator).toBeHidden();
+    await expect
+      .poll(async () => {
+        const layout = await request
+          .get('/api/workspace-map/layout')
+          .then(response => response.json());
+        return layout.layout?.positions?.[secondProjectID] || null;
+      })
+      .toEqual({ x: expect.any(Number), y: expect.any(Number) });
+
+    const secondWorkspace = await request
+      .get(`/api/workspaces/${secondProjectID}`)
+      .then(response => response.json());
+    expect(secondWorkspace.parent_id).toBe(stationID);
+    const secondRoles = await request
+      .get(`/api/workspaces/${secondProjectID}/roles`)
+      .then(response => response.json());
+    expect(
+      secondRoles.roles.roles.filter(
+        (role: { scope: string; required: boolean; state: string }) =>
+          role.scope === 'project' && role.required && role.state === 'filled'
+      )
+    ).toHaveLength(3);
+    const homeRoles = await request
+      .get(`/api/workspaces/${stationID}/roles`)
+      .then(response => response.json());
+    expect(homeRoles.roles.roles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role_id: 'portfolio_manager',
+          scope: 'home',
+          state: 'filled',
+          agent: expect.objectContaining({ name: coordinatorName })
+        })
+      ])
+    );
 
     await page.goto('/workspaces');
-    const district = page.locator(`.ws-map-district[data-group-id="${stationID}"]`);
-    const tile = page.locator(`.ws-map-tile[data-ws-id="${workspaceID}"]`);
-    await expect(district).toBeVisible();
-    await expect(tile).toBeVisible();
-    const geometry = await page.evaluate(
-      ({ homeID, childID }) => {
-        const group = document.querySelector(`.ws-map-district[data-group-id="${homeID}"]`);
-        const child = document.querySelector(`.ws-map-tile[data-ws-id="${childID}"]`);
-        const value = (element: Element | null, property: string) =>
-          Number.parseFloat((element as HTMLElement | null)?.style[property] || 'NaN');
-        return {
-          group: {
-            x: value(group, 'left'),
-            y: value(group, 'top'),
-            width: value(group, 'width'),
-            height: value(group, 'height')
-          },
-          child: { x: value(child, 'left'), y: value(child, 'top') }
-        };
-      },
-      { homeID: stationID, childID: workspaceID }
+    await expect(page.locator(`.ws-map-district[data-group-id="${stationID}"]`)).toBeVisible();
+    await expect(page.locator(`.ws-map-tile[data-ws-id="${firstProjectID}"]`)).toBeVisible();
+    await expect(page.locator(`.ws-map-tile[data-ws-id="${secondProjectID}"]`)).toBeVisible();
+    await captureEvidence(page, 'music-producer-08-group-with-two-projects.png');
+
+    const cleared = await request.delete(`/api/workspaces/${stationID}/roles/portfolio_manager`);
+    expect(cleared.ok(), await cleared.text()).toBeTruthy();
+    const uncreatedProjectName = `Uncreated REAPER ${run}`;
+    await openWizard(uncreatedProjectName);
+    await expect(destination).toContainText('0 of 1 required group role filled');
+    await page.locator('#wizardNextBtn').click();
+    await expect(
+      missingIssue.getByRole('button', { name: 'Set up Music Portfolio Manager' })
+    ).toBeVisible();
+    await missingIssue.getByRole('button', { name: 'Set up Music Portfolio Manager' }).click();
+    await expect(page.locator('#addAgentModal')).toBeVisible();
+    await page.locator('[name="workspace-group-role-fill-mode"][value="assign"]').check();
+    await page.locator('#workspaceGroupRoleAgentSelect').selectOption({ label: coordinatorName });
+    const assignPromise = page.waitForResponse(
+      response =>
+        response.url().endsWith(`/api/workspaces/${stationID}/roles/portfolio_manager`) &&
+        response.request().method() === 'PUT'
     );
-    expect(geometry.child.x).toBeGreaterThanOrEqual(geometry.group.x);
-    expect(geometry.child.y).toBeGreaterThanOrEqual(geometry.group.y);
-    expect(geometry.child.x).toBeLessThan(geometry.group.x + geometry.group.width);
-    expect(geometry.child.y).toBeLessThan(geometry.group.y + geometry.group.height);
-    await page.locator('[data-map-zoom-out]').click();
-    await page.waitForTimeout(650); // let the Map's deliberate rise animation finish
-    await captureEvidence(page, 'music-producer-02-group-aware-map.png');
+    await page.locator('#createAgentBtn').click();
+    const assigned = await assignPromise;
+    expect(assigned.ok(), await assigned.text()).toBeTruthy();
+    expect(assigned.request().postDataJSON()).toEqual({
+      mode: 'assign',
+      name: coordinatorName
+    });
+    await expect(page.locator('#addAgentModal')).toBeHidden();
+    await expect(page.locator('#wizardStep3')).toBeVisible();
+    page.once('dialog', dialog => dialog.accept());
+    await creator.locator('.btn-close').click();
+    await expect(creator).toBeHidden();
+    const afterAssign = await request.get('/api/workspaces').then(response => response.json());
+    expect(
+      afterAssign.folders.some((item: { name: string }) => item.name === uncreatedProjectName)
+    ).toBeFalsy();
+    const reassignedRoles = await request
+      .get(`/api/workspaces/${stationID}/roles`)
+      .then(response => response.json());
+    expect(reassignedRoles.roles.roles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role_id: 'portfolio_manager',
+          state: 'filled',
+          source: 'assigned',
+          agent: expect.objectContaining({ name: coordinatorName })
+        })
+      ])
+    );
   } finally {
-    if (stationID)
-      await cleanupAssistantTopology(request, stationID, workspaceID ? [workspaceID] : []);
+    if (stationID) {
+      await cleanupAssistantTopology(
+        request,
+        stationID,
+        [firstProjectID, secondProjectID].filter(Boolean)
+      );
+    }
+    for (const name of createdAgentNames) {
+      await request.delete(`/api/agents/${encodeURIComponent(name)}`).catch(() => {});
+    }
     await request.delete(`/api/plugins/${pluginName}`).catch(() => {});
   }
 });

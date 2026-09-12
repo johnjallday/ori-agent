@@ -163,23 +163,32 @@ func (b *ServerBuilder) initializeSetupJourney() {
 		readers[specialist.SetupStepAssistantProgramStaffing] = staffingAdapter
 		if b.sessionHandler != nil {
 			b.sessionHandler.SetAssistantReviewedStaffer(staffingAdapter.StaffFromReviewedWorkspaceSetup)
-			// The vacancy path staffs only the roles the user filled. It is
-			// adapted here rather than sharing a signature so the session
-			// package keeps no dependency on setupjourney's types.
-			b.sessionHandler.SetAssistantRoleStaffer(
-				func(ctx context.Context, projectID string, fills []sessionhttp.RoleStaffingFill) error {
-					roles := make([]setupjourney.RoleFill, 0, len(fills))
-					for _, fill := range fills {
-						mode := setupjourney.StaffingModeCreate
-						if fill.Mode == "assign" {
-							mode = setupjourney.StaffingModeBind
-						}
-						roles = append(roles, setupjourney.RoleFill{
-							RoleID: fill.RoleID, Mode: mode, Name: fill.Name,
-							Provider: fill.Provider, Model: fill.Model,
-						})
+			// Keep final project batches separate from one exact live workspace-role
+			// route. Both callbacks adapt here so sessionhttp has no setupjourney
+			// dependency, but only the route callback derives authority from one
+			// Home/project target and requires exactly one fill.
+			adaptRoleFills := func(fills []sessionhttp.RoleStaffingFill) []setupjourney.RoleFill {
+				roles := make([]setupjourney.RoleFill, 0, len(fills))
+				for _, fill := range fills {
+					mode := setupjourney.StaffingModeCreate
+					if fill.Mode == "assign" {
+						mode = setupjourney.StaffingModeBind
 					}
-					return staffingAdapter.StaffRolesFromReviewedWorkspaceSetup(ctx, projectID, roles)
+					roles = append(roles, setupjourney.RoleFill{
+						RoleID: fill.RoleID, Mode: mode, Name: fill.Name,
+						Provider: fill.Provider, Model: fill.Model,
+					})
+				}
+				return roles
+			}
+			b.sessionHandler.SetAssistantRoleStaffer(
+				func(ctx context.Context, workspaceID string, fills []sessionhttp.RoleStaffingFill) error {
+					return staffingAdapter.StaffRolesFromReviewedWorkspaceSetup(ctx, workspaceID, adaptRoleFills(fills))
+				},
+			)
+			b.sessionHandler.SetAssistantWorkspaceRoleStaffer(
+				func(ctx context.Context, workspaceID string, fills []sessionhttp.RoleStaffingFill) error {
+					return staffingAdapter.StaffRoleOnWorkspace(ctx, workspaceID, adaptRoleFills(fills))
 				},
 			)
 			b.sessionHandler.SetAssistantRoleUnstaffer(staffingAdapter.UnstaffRoleFromWorkspace)

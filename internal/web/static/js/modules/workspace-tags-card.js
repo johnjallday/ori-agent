@@ -28,7 +28,8 @@ function wtcEnsureWidget() {
   if (!els.mount || !window.OriTagInput?.createTagInput) return null;
   wtcWidget = window.OriTagInput.createTagInput({
     container: els.mount,
-    placeholder: 'Add tag…'
+    placeholder: 'Add tag…',
+    onChange: () => els.modal?.dispatchEvent(new CustomEvent('workspace-tags-changed'))
   });
   return wtcWidget;
 }

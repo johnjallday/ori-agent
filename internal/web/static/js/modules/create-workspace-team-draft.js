@@ -1237,7 +1237,7 @@
         item.read_only_reason = GROUP_ROLE_READ_ONLY;
         if (role.heldElsewhere) {
           item.state = 'filled';
-          item.source = SOURCE_ASSIGNED_WIRE;
+          item.source = SOURCE_GROUP_WIRE;
           item.agent = { name: role.heldElsewhere };
         }
         return item;
@@ -1277,6 +1277,7 @@
 
   const SOURCE_CREATED_WIRE = 'created';
   const SOURCE_ASSIGNED_WIRE = 'assigned';
+  const SOURCE_GROUP_WIRE = 'group';
   const GROUP_ROLE_READ_ONLY = 'This role belongs to the group workspace. Fill or clear it there.';
 
   // roleStaffingSummary states the request in FUTURE tense and counts every
@@ -1566,9 +1567,12 @@
         anchor: 'saved-agent-picker'
       });
     }
-    const missingRequired = roleRoster.roles.filter(
-      role => role.required && role.state !== 'filled'
-    );
+    const missingRequired = roleRoster.roles
+      .filter(role => role.required && role.state !== 'filled')
+      // Group prerequisites must be recoverable before project-local staffing.
+      // A plugin may declare roles in either order, so do not let its first
+      // project role hide the one Team action that can prepare the Home.
+      .sort((left, right) => Number(right.scope === 'home') - Number(left.scope === 'home'));
     if (!agentless && missingRequired.length > 0) {
       issues.push({
         id: 'required-roles-missing',

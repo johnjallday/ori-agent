@@ -74,6 +74,7 @@ func templateAgentPlanRevision(plan templateAgentPlan) string {
 		SystemModel           string                        `json:"system_model"`
 		SystemModelConfigured bool                          `json:"system_model_configured"`
 		AssistantProgram      *templateAssistantProgramPlan `json:"assistant_program"`
+		GroupRequirement      *templateGroupRequirementPlan `json:"group_requirement"`
 		Agents                []templateAgentPlanItem       `json:"agents"`
 	}{
 		TemplateID:            strings.TrimSpace(plan.TemplateID),
@@ -83,6 +84,7 @@ func templateAgentPlanRevision(plan templateAgentPlan) string {
 		SystemModel:           strings.TrimSpace(plan.SystemModel),
 		SystemModelConfigured: plan.SystemModelConfigured,
 		AssistantProgram:      plan.AssistantProgram,
+		GroupRequirement:      plan.GroupRequirement,
 		Agents:                agents,
 	}
 	encoded, err := json.Marshal(canonical)

@@ -85,8 +85,8 @@ func TestBuildShowsARoleEmptyAgainWhenItsAgentIsDeleted(t *testing.T) {
 		Attachments: []Attachment{{Name: "Deleted Producer", RoleID: "producer"}},
 		Lookup:      lookupOf(),
 	})
-	if roster.FilledCount != 0 || roster.Roles[0].State != StateEmpty {
-		t.Fatalf("stale holder still fills the role: %#v", roster.Roles[0])
+	if roster.FilledCount != 0 || roster.Roles[0].State != StateEmpty || !roster.Roles[0].NeedsClear {
+		t.Fatalf("stale holder was not projected as an empty role needing an explicit clear: %#v", roster.Roles[0])
 	}
 	if len(roster.Unassigned) != 0 {
 		t.Fatalf("a deleted agent was reported as present: %#v", roster.Unassigned)

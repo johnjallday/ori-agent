@@ -136,6 +136,8 @@ const ELEMENT_IDS = [
   'templateBriefingDeploys',
   'templateBriefingAgentsRow',
   'templateBriefingAgentsValue',
+  'templateBriefingGroupRow',
+  'templateBriefingGroupValue',
   'templateBriefingNoCommanderNudge',
   'templateBriefingScaffoldRow',
   'templateBriefingScaffoldValue',
@@ -398,6 +400,86 @@ test('selecting a blocked blueprint renders its state in the briefing', async ()
   assert.ok(panel, 'expected a readiness panel');
   assert.match(panel.textContent, /not installed yet/);
   assert.match(panel.textContent, /owner-plugin — not installed/);
+});
+
+test('a grouped blueprint explains separate group and project role ownership', async () => {
+  await setup([
+    template('grouped-research', {
+      assistant_program: {
+        station_name: 'Research Program Home',
+        roles: [
+          { id: 'portfolio', label: 'Portfolio Coordinator', scope: 'home' },
+          { id: 'archive', label: 'Archive Curator', scope: 'home' },
+          { id: 'lead', label: 'Research Lead', scope: 'project' }
+        ]
+      },
+      group_requirement: {
+        policy: 'required',
+        default_home_name: 'Research Program Home'
+      }
+    })
+  ]);
+  optionById('grouped-research').click();
+
+  assert.equal(elements.get('templateBriefingGroupRow').hidden, false);
+  assert.match(
+    elements.get('templateBriefingGroupValue').textContent,
+    /project workspace inside its exact Research Program Home/
+  );
+  assert.match(
+    elements.get('templateBriefingGroupValue').textContent,
+    /Group roles \(Portfolio Coordinator, Archive Curator\) stay on that group/
+  );
+  assert.match(
+    elements.get('templateBriefingGroupValue').textContent,
+    /Project roles \(Research Lead\) belong only to the new workspace/
+  );
+  assert.equal(
+    elements.get('templateBriefingAgentsRow').hidden,
+    true,
+    'scoped roles were incorrectly counted as agents attached to the new workspace'
+  );
+});
+
+test('recommended grouping says the destination depends on the Details choice', async () => {
+  await setup([
+    template('recommended-research', {
+      assistant_program: {
+        station_name: 'Research Home',
+        roles: [
+          { label: 'Coordinator', scope: 'home' },
+          { label: 'Lead', scope: 'project' }
+        ]
+      },
+      group_requirement: {
+        policy: 'recommended',
+        default_home_name: 'Research Home'
+      }
+    })
+  ]);
+  optionById('recommended-research').click();
+  assert.match(
+    elements.get('templateBriefingGroupValue').textContent,
+    /when you choose grouped placement/
+  );
+});
+
+test('standalone policy does not claim a group dependency', async () => {
+  await setup([
+    template('standalone-research', {
+      assistant_program: {
+        station_name: 'Unused Home',
+        roles: [
+          { label: 'Coordinator', scope: 'home' },
+          { label: 'Lead', scope: 'project' }
+        ]
+      },
+      group_requirement: { policy: 'none' }
+    })
+  ]);
+  optionById('standalone-research').click();
+  assert.equal(elements.get('templateBriefingGroupRow').hidden, true);
+  assert.equal(elements.get('templateBriefingGroupValue').textContent, '');
 });
 
 test('selecting a ready blueprint leaves the briefing panel empty', async () => {

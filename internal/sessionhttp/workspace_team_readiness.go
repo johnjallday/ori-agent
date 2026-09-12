@@ -2,12 +2,14 @@ package sessionhttp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
@@ -156,8 +158,10 @@ func validateWorkspaceTeamIntentEnvelope(req *createWorkspaceRequest) error {
 // workspace persistence, folders, grants, plugins, watchers, or automations.
 // Absence of team_intent is the deliberate legacy compatibility branch.
 func (h *Handler) validateWorkspaceTeamReadiness(
+	ctx context.Context,
 	req *createWorkspaceRequest,
 	tpl projecttemplates.Template,
+	groupSourceTemplate projecttemplates.Template,
 	templateResolved bool,
 	kind string,
 ) (*workspaceTeamIntent, error) {
@@ -201,7 +205,24 @@ func (h *Handler) validateWorkspaceTeamReadiness(
 		return nil, workspaceTeamConflict("The selected blueprint is no longer available; choose it again.", nil, nil)
 	}
 
-	plan := h.buildTemplateAgentPlan(tpl)
+	ownerUserID := ""
+	var ownerErr error
+	if tpl.AssistantProgram != nil || groupSourceTemplate.GroupRequirement != nil {
+		if h == nil || h.currentUserID == nil {
+			ownerErr = grouprequirements.ErrUnavailable
+		} else {
+			ownerUserID, ownerErr = h.currentUserID(ctx)
+			ownerUserID = strings.TrimSpace(ownerUserID)
+			if ownerErr == nil && ownerUserID == "" {
+				ownerErr = grouprequirements.ErrUnavailable
+			}
+		}
+	}
+	plan := h.buildTemplateAgentPlanForOwner(tpl, ownerUserID)
+	plan.GroupRequirement = h.buildTemplateGroupRequirementPlan(
+		groupSourceTemplate, req.GroupComposition, ownerUserID, ownerErr,
+	)
+	plan = finalizeTemplateAgentPlan(plan)
 	roles := workspaceTeamRoles(tpl, plan)
 	if len(roles) > 0 && strings.TrimSpace(req.EntryAgentName) != "" {
 		return nil, workspaceTeamConflict("The declared primary role determines this workspace's entry agent.", roles, nil)
@@ -212,7 +233,7 @@ func (h *Handler) validateWorkspaceTeamReadiness(
 				continue
 			}
 			declared := plan.AssistantProgram.Roles[index]
-			if !h.assistantInheritedRoleVerified(tpl, declared.ID, declared.AgentName) {
+			if !h.assistantInheritedRoleVerified(tpl, ownerUserID, declared.ID, declared.AgentName) {
 				roles[index].State = "empty"
 				roles[index].Reason = "inherited holder could not be verified"
 			}
@@ -311,47 +332,21 @@ func (h *Handler) validateWorkspaceTeamReadiness(
 	return intent, nil
 }
 
-func (h *Handler) assistantInheritedRoleVerified(tpl projecttemplates.Template, roleID, name string) bool {
-	if h == nil || h.agentStore == nil || h.workspaceTaskStore == nil || tpl.PluginOwner == nil {
+func (h *Handler) assistantInheritedRoleVerified(tpl projecttemplates.Template, ownerUserID, roleID, name string) bool {
+	if h == nil || h.workspaceTaskStore == nil {
 		return false
 	}
-	if _, err := h.validateAttachableWorkspaceAgent(name); err != nil {
+	key, ok := templateAssistantProgramKey(ownerUserID, tpl)
+	if !ok {
 		return false
-	}
-	key := agentworkspace.AssistantProgramKey{
-		OwnerUserID: "local", PluginID: tpl.PluginOwner.PluginID,
-		ProgramID: tpl.AssistantProgram.ID,
 	}
 	station, err := agentworkspace.NewAssistantProgramStore(h.workspaceTaskStore).FindStation(key)
 	if err != nil || station == nil {
 		return false
 	}
-	state := station.GetAssistantProgramState()
-	if state == nil {
-		return false
-	}
-	bindings := append([]agentworkspace.AssistantRoleBinding(nil), state.HomeBindings.Bindings...)
-	if state.Declaration != nil && state.Declaration.SchemaVersion < 2 {
-		bindings = append(bindings, state.Roster...)
-	}
-	for _, binding := range bindings {
-		if binding.RoleID != roleID || !strings.EqualFold(strings.TrimSpace(binding.AgentName), strings.TrimSpace(name)) || strings.TrimSpace(binding.AgentInstanceID) == "" {
-			continue
-		}
-		instanceFound := false
-		for _, instance := range station.GetAgentInstances() {
-			if instance.ID == binding.AgentInstanceID && strings.EqualFold(strings.TrimSpace(instance.Name), strings.TrimSpace(name)) {
-				instanceFound = true
-				break
-			}
-		}
-		if !instanceFound {
-			return false
-		}
-		_, snapshotFound, snapshotErr := h.workspaceTaskStore.GetWorkspaceAgent(station.ID, binding.AgentName)
-		return snapshotErr == nil && snapshotFound
-	}
-	return false
+	holder, state := h.verifiedAssistantHomeRoleHolder(&key, station, roleID)
+	return state == templateGroupRoleHolderVerified && holder != nil &&
+		strings.EqualFold(strings.TrimSpace(holder.Name), strings.TrimSpace(name))
 }
 
 func workspaceTeamRoles(tpl projecttemplates.Template, plan templateAgentPlan) []workspaceTeamRoleReadiness {

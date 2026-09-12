@@ -83,6 +83,10 @@ test('a filled role names its agent and how it was filled', () => {
   assert.equal(rows[0].tag.label, 'Mix Engineer');
   assert.equal(rows[0].sourceLabel, 'New agent');
   assert.equal(rows[1].sourceLabel, 'Your saved agent');
+  const groupHolder = Roster.rowsFrom({
+    roles: [filled({ scope: 'home', source: 'group', agent: { name: 'Shared Coordinator' } })]
+  })[0];
+  assert.equal(groupHolder.sourceLabel, 'Existing group holder');
 });
 
 // A projection claiming "filled" with nobody in it would draw a row with an
@@ -100,10 +104,43 @@ test('rows carry designation and scope in words', () => {
       role({ role_id: 'coordinator', scope: 'home', primary: false })
     ]
   });
-  assert.equal(rows[0].designation, 'PRIMARY');
+  assert.equal(rows[0].designation, 'PROJECT LEAD');
   assert.equal(rows[0].scopeLine, 'this workspace only');
   assert.equal(rows[1].designation, 'SPECIALIST');
   assert.equal(rows[1].scopeLine, 'group scope only');
+
+  const coordinator = Roster.rowsFrom({
+    roles: [role({ role_id: 'home-lead', scope: 'home', primary: true })]
+  })[0];
+  assert.equal(coordinator.designation, 'GROUP COORDINATOR');
+});
+
+test('mixed scopes become separately named sections with required-only progress', () => {
+  const rows = Roster.rowsFrom({
+    roles: [
+      filled({ role_id: 'home-lead', scope: 'home', primary: true }),
+      role({ role_id: 'home-extra', scope: 'home', required: false }),
+      role({ role_id: 'project-lead', primary: true }),
+      role({ role_id: 'project-extra', required: false })
+    ]
+  });
+  const sections = Roster.sectionsFrom(rows, {
+    groupTitle: 'Group coordination — Research Home',
+    projectTitle: 'Team for Field Notes'
+  });
+  assert.equal(sections.length, 2);
+  assert.equal(sections[0].title, 'Group coordination — Research Home');
+  assert.equal(sections[1].title, 'Team for Field Notes');
+  assert.equal(Roster.requiredProgress(sections[0].rows), '1 of 1 required role filled');
+  assert.equal(Roster.requiredProgress(sections[1].rows), '0 of 1 required role filled');
+});
+
+test('a project-only roster keeps one unlabelled section', () => {
+  const rows = Roster.rowsFrom({ roles: [role({ primary: true }), role()] });
+  const sections = Roster.sectionsFrom(rows, {});
+  assert.equal(sections.length, 1);
+  assert.equal(sections[0].scope, 'project');
+  assert.equal(sections[0].title, '');
 });
 
 // FR40: primary first, then the required roles still waiting, then the settled
@@ -149,6 +186,14 @@ test('an empty optional role is marked quiet and a Missing one is not', () => {
   assert.equal(rows[0].quiet, false);
   assert.equal(rows[2].quiet, true, 'an empty optional role is quiet');
   assert.equal(rows[1].quiet, false, 'a filled optional role is not quiet');
+});
+
+test('a stale holder is explicit and must be cleared before another fill', () => {
+  const row = Roster.rowsFrom({ roles: [role({ needs_clear: true })] })[0];
+  assert.equal(row.state, 'empty');
+  assert.equal(row.needsClear, true);
+  assert.equal(row.tag.key, 'stale');
+  assert.equal(row.tag.label, 'Needs clear');
 });
 
 test('an out-of-scope role is projected read-only with its reason', () => {

@@ -47,10 +47,13 @@ const (
 	ActionChooseStandalone Action = "choose_standalone"
 	ActionReviewCreateHome Action = "review_create_home"
 	ActionOpenGuidedSetup  Action = "open_guided_setup"
-	ActionCustomize        Action = "customize_template"
-	ActionChangeTemplate   Action = "change_template"
-	ActionManagePlugins    Action = "manage_plugins"
-	ActionRetry            Action = "retry"
+	// ActionOpenGroupRoles routes to the exact canonical Home's role roster.
+	// It is inert navigation projected only after that Home is resolved.
+	ActionOpenGroupRoles Action = "open_group_roles"
+	ActionCustomize      Action = "customize_template"
+	ActionChangeTemplate Action = "change_template"
+	ActionManagePlugins  Action = "manage_plugins"
+	ActionRetry          Action = "retry"
 )
 
 type OperationKind string

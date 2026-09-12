@@ -1,0 +1,76 @@
+{
+  "name": "Research Project",
+  "description": "A domain-neutral project whose portfolio coordination belongs to one exact Research Program Home.",
+  "icon": "🔬",
+  "tagline": "Test exact group and role ownership without a domain integration.",
+  "behavior_profile": "general",
+  "assistant_program": {
+    "schema_version": 2,
+    "id": "research-program",
+    "station_name": "Research Program Home",
+    "station_description": "Coordinates a portfolio of separately linked research projects.",
+    "default_primary_name": "Portfolio Coordinator",
+    "hire_title": "Staff the research program",
+    "hire_description": "Add one Home coordinator separately from each project's research lead.",
+    "disabled_message": "The fixture contribution is unavailable; existing project data remains readable.",
+    "roles": [
+      {
+        "id": "portfolio_coordinator",
+        "label": "Portfolio Coordinator",
+        "description": "Coordinates portfolio status and explicit handoffs without project access.",
+        "scope": "home",
+        "required": true,
+        "primary": true,
+        "role": "orchestrator",
+        "type": "tool_calling",
+        "system_prompt": "Coordinate only trusted portfolio records and exact reviewed handoffs. Never infer project access from names."
+      },
+      {
+        "id": "project_lead",
+        "label": "Research Lead",
+        "description": "Coordinates only the exact linked research project.",
+        "scope": "project",
+        "required": true,
+        "primary": true,
+        "role": "orchestrator",
+        "type": "tool_calling",
+        "system_prompt": "Coordinate only this exact linked research project. Never claim Home or sibling authority."
+      },
+      {
+        "id": "archive_curator",
+        "label": "Archive Curator",
+        "description": "Optional Home role for reviewed portfolio archive organization.",
+        "scope": "home",
+        "required": false,
+        "capability_id": "research-archive",
+        "role": "specialist",
+        "type": "general",
+        "system_prompt": "Organize only reviewed portfolio archive records."
+      }
+    ],
+    "stages": [
+      {
+        "id": "helper",
+        "label": "Helper",
+        "description": "Coordinates work the user explicitly requests.",
+        "accepted_completion_threshold": 0
+      }
+    ],
+    "reflection": {
+      "minimum_projects": 3,
+      "cadence_hours": 24,
+      "max_projects": 8,
+      "max_events_per_project": 8,
+      "max_candidates": 4,
+      "max_evidence": 4,
+      "rubric": "Find stable preferences only in reviewed evidence from separately linked projects."
+    }
+  },
+  "group_requirement": {
+    "schema_version": 1,
+    "policy": "required",
+    "assistant_program_id": "research-program",
+    "missing_home": "offer_create",
+    "default_home_name": "Research Program Home"
+  }
+}

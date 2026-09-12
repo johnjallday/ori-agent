@@ -1,6 +1,6 @@
 # Template Group Requirements v1
 
-Status: accepted contract; host and coordinated plugin implementation in progress
+Status: accepted contract; generic host creator implemented; coordinated REAPER 0.5.2 candidate acceptance pending
 
 ## Purpose
 
@@ -228,6 +228,58 @@ compositions, stable Assistant Program key, and zero or one exact Home. A client
 | `source_unavailable` | Exact source/owner state cannot be proven. |
 | `target_ambiguous` | Multiple Homes carry one stable key or canonical state conflicts. |
 | `contract_invalid` | Declaration/composition/owner validation failed. |
+
+### Create Workspace read model and sequence
+
+`POST /api/workspaces/template-agent-plan` includes an additive, versioned
+`group_requirement` projection when the selected effective template declares
+this contract. Legacy templates omit it. The projection contains only
+server-derived source revision, policy/composition, state and summary, the exact
+existing Home identity or a clearly labelled proposed name, verified required
+Home-role progress, and closed recovery actions. `group_absent`, `verified`,
+`unavailable`, and `not_applicable` distinguish role evidence; unavailable
+storage or identity never becomes a fabricated zero count.
+
+The projection is passive. Reading it cannot create a Home, role, agent, child,
+link, task, grant, watcher, runtime setup, or consent receipt. The browser owns
+each request generation, ignores late source/composition responses, and
+invalidates a final project receipt when the trusted source, destination, or
+verified holder fingerprint changes.
+
+The four-step creator remains **Blueprint → Details → Team → Review**:
+
+1. Blueprint discloses grouped placement and separates group-owned from
+   project-owned roles.
+2. Details shows the exact `Home → new project` route. Required placement hides
+   the unrelated organizational parent selector. Recommended chooses grouped or
+   standalone here, before team derivation.
+3. Missing `offer_create` Home preparation has its own inert review and explicit
+   Home-only commit. Details owns the receipt, while Team's missing-role blocker
+   also exposes **Build <Home>…** and returns to that same review instead of
+   leaving a dead-end warning. The UI keeps one stable operation key for
+   confirmed retries, reconciles uncertain responses from canonical state, and
+   never creates the project from this action.
+4. A prepared Home's required role is filled through the exact station route:
+   `GET /api/workspaces/{homeID}/roles` followed by one reviewed adapter-backed
+   `PUT /api/workspaces/{homeID}/roles/{roleID}`. The shared agent form may
+   Create a definition or explicitly Assign a saved definition. This exact-route
+   single-role callback is distinct from the reviewed final project batch. The
+   station can mutate only Home roles; a linked child can mutate only its own
+   project roles.
+5. Team presents separate group/project sections. Group holders remain read-only
+   project prerequisites and never enter the child's `role_staffing` payload.
+   A missing required Home role has an explicit **Set up <role>** action both in
+   the blocker and on its row; that action suspends the creator and changes to
+   the separately confirmed Home-owned route before mutation.
+6. Review is a hierarchy receipt: it names the already-existing/prepared Home
+   and coordinator separately from the not-yet-created child and project team.
+   Final placement obtains a new project receipt and requires another explicit
+   confirmation.
+
+Closing after Home preparation leaves that durable, reusable group visible.
+Suspending the creator for Home-role setup preserves workspace details, project
+role fills, composition, and Map intent; it does not make the agent modal a
+second project-creation owner.
 
 Review is side-effect free. Its 15-minute durable receipt binds owner,
 operation kind, template/variant/source revisions and digests, selected
@@ -475,11 +527,19 @@ plugin declaring either new block must require it. Older hosts reject such a
 plugin through existing feature negotiation; new hosts preserve legacy absence
 for old plugins.
 
-The coordinated REAPER candidate is plugin `0.6.0`, Reaper Song blueprint v6,
-setup quest v1, with Required/`offer_create` policy and standalone-composition
-support for user variants. Ori host support lands first. Candidate changes are
-made in a separate plugin worktree based on canonical `v0.5.1` commit
-`972c33fb50b813c73beaafd779c71ced266477fa`.
+The earlier coordinated evidence used an unpublished REAPER `0.6.0` candidate,
+Reaper Song blueprint v6, and setup quest v1. Those source bytes and artifact
+digest remain historical evidence; they are not relabelled as the requested
+release.
+
+The current coordinated target is a new plugin `0.5.2` candidate based on
+canonical `v0.5.1` commit
+`972c33fb50b813c73beaafd779c71ced266477fa`, retaining blueprint v6,
+Required/`offer_create`, standalone-composition support, Assistant Program
+schema 2, and setup quest v1. Generic host behavior is covered by a
+non-executable domain-neutral plugin fixture. Exact REAPER 0.5.2 staging,
+artifact identity, and release acceptance remain blocked until a separately
+authorized companion worktree/owner supplies that candidate.
 
 Ori's current reviewed entry still expects plugin `0.5.0`, commit
 `1f494db5d6f52c697dcf0682db1c7e6cb6479733`, and blueprint v4. It is not changed

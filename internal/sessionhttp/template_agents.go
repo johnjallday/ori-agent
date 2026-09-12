@@ -57,6 +57,7 @@ type templateAgentPlan struct {
 	SystemProvider        string                        `json:"system_provider,omitempty"`
 	SystemModel           string                        `json:"system_model,omitempty"`
 	AssistantProgram      *templateAssistantProgramPlan `json:"assistant_program,omitempty"`
+	GroupRequirement      *templateGroupRequirementPlan `json:"group_requirement,omitempty"`
 	Agents                []templateAgentPlanItem       `json:"agents"`
 	Warnings              []string                      `json:"warnings,omitempty"`
 }
@@ -489,6 +490,10 @@ func (h *Handler) templateAgentModelDefaults(spec projecttemplates.AgentSpec) (m
 }
 
 func (h *Handler) buildTemplateAgentPlan(tpl projecttemplates.Template) templateAgentPlan {
+	return h.buildTemplateAgentPlanForOwner(tpl, "")
+}
+
+func (h *Handler) buildTemplateAgentPlanForOwner(tpl projecttemplates.Template, ownerUserID string) templateAgentPlan {
 	plan := templateAgentPlan{
 		HasAgents:    tpl.HasAgents(),
 		TemplateID:   tpl.ID,
@@ -523,12 +528,7 @@ func (h *Handler) buildTemplateAgentPlan(tpl projecttemplates.Template) template
 				ID: stage.ID, Label: stage.Label, Description: stage.Description,
 			})
 		}
-		if h != nil && h.workspaceTaskStore != nil && tpl.PluginOwner != nil {
-			key := workspace.AssistantProgramKey{
-				OwnerUserID: "local",
-				PluginID:    tpl.PluginOwner.PluginID,
-				ProgramID:   declaration.ID,
-			}
+		if key, ok := templateAssistantProgramKey(ownerUserID, tpl); ok && h != nil && h.workspaceTaskStore != nil {
 			if station, err := workspace.NewAssistantProgramStore(h.workspaceTaskStore).FindStation(key); err == nil && station != nil {
 				assistantPlan.StationName = station.Name
 				assistantPlan.StationWorkspaceSlug = station.FolderSlug

@@ -2,6 +2,7 @@ package setupjourney
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -28,6 +29,164 @@ func TestStaffRolesFromReviewedWorkspaceSetup_StaffsNothingWhenNoRoleIsFilled(t 
 	}
 	if project.EntryAgentName() != "" {
 		t.Fatalf("an unstaffed workspace named an entry agent: %q", project.EntryAgentName())
+	}
+}
+
+// TestStaffRolesFromReviewedWorkspaceSetup_RequiresAProjectTarget records the
+// current adapter boundary behind the live workspace-role callback: this
+// workspace-setup helper resolves ownership from an Assistant Project Link, so
+// passing a genuine Home ID cannot reach its Home Review/Commit path. A direct
+// group-role operation needs a separately target-aware adapter entry point; it
+// must not weaken this project-owned coordinator or let a child fill Home roles.
+func TestStaffRolesFromReviewedWorkspaceSetup_RequiresAProjectTarget(t *testing.T) {
+	adapter, workspaces, scope, _ := staffingFixture(t)
+
+	err := adapter.StaffRolesFromReviewedWorkspaceSetup(context.Background(), scope.HomeWorkspaceID, []RoleFill{
+		{RoleID: "home_guide", Mode: StaffingModeCreate, Name: "June Home"},
+	})
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("station-target staffing error = %v, want conflict", err)
+	}
+	station, _ := workspaces.Get(scope.HomeWorkspaceID)
+	if got := len(station.GetAssistantProgramState().HomeBindings.Bindings); got != 0 {
+		t.Fatalf("station-target project helper added %d Home bindings", got)
+	}
+	if _, found := adapter.profiles.GetAgent("June Home"); found {
+		t.Fatal("station-target project helper created an agent before resolving an owner")
+	}
+}
+
+func TestStaffRoleOnWorkspace_HomeTargetFillsAndClearsOnlyAHomeRole(t *testing.T) {
+	adapter, workspaces, scope, _ := staffingFixture(t)
+
+	err := adapter.StaffRoleOnWorkspace(context.Background(), scope.HomeWorkspaceID, []RoleFill{
+		{RoleID: "home_guide", Mode: StaffingModeCreate, Name: "June Home"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	station, _ := workspaces.Get(scope.HomeWorkspaceID)
+	project, _ := workspaces.Get(scope.ProjectWorkspaceID)
+	bindings := station.GetAssistantProgramState().HomeBindings.Bindings
+	if len(bindings) != 1 || bindings[0].RoleID != "home_guide" || bindings[0].AgentName != "June Home" {
+		t.Fatalf("Home bindings = %#v", bindings)
+	}
+	if got := len(project.GetAssistantProjectLink().ProjectBindings.Bindings); got != 0 {
+		t.Fatalf("Home role write added %d project bindings", got)
+	}
+	if got := len(project.GetAgentInstances()); got != 0 {
+		t.Fatalf("Home role write attached %d project agents", got)
+	}
+
+	if err := adapter.UnstaffRoleFromWorkspace(context.Background(), scope.HomeWorkspaceID, "home_guide"); err != nil {
+		t.Fatal(err)
+	}
+	station, _ = workspaces.Get(scope.HomeWorkspaceID)
+	if got := len(station.GetAssistantProgramState().HomeBindings.Bindings); got != 0 {
+		t.Fatalf("cleared Home still has %d bindings", got)
+	}
+	if got := len(station.GetAgentInstances()); got != 0 {
+		t.Fatalf("cleared Home still has %d attached agents", got)
+	}
+	if _, found := adapter.profiles.GetAgent("June Home"); !found {
+		t.Fatal("clearing a Home role deleted its reusable agent definition")
+	}
+}
+
+func TestUnstaffRoleFromWorkspace_HomeTargetClearsAStaleDeletedHolder(t *testing.T) {
+	adapter, workspaces, scope, _ := staffingFixture(t)
+	if err := adapter.StaffRoleOnWorkspace(context.Background(), scope.HomeWorkspaceID, []RoleFill{
+		{RoleID: "home_guide", Mode: StaffingModeCreate, Name: "Deleted June Home"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.profiles.DeleteAgent("Deleted June Home"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := adapter.UnstaffRoleFromWorkspace(context.Background(), scope.HomeWorkspaceID, "home_guide"); err != nil {
+		t.Fatalf("explicit stale-holder clear failed: %v", err)
+	}
+	station, _ := workspaces.Get(scope.HomeWorkspaceID)
+	if len(station.GetAssistantProgramState().HomeBindings.Bindings) != 0 || len(station.GetAgentInstances()) != 0 {
+		t.Fatalf("stale holder survived explicit clear: state=%#v instances=%#v",
+			station.GetAssistantProgramState(), station.GetAgentInstances())
+	}
+}
+
+func TestStaffRoleOnWorkspace_HomeTargetAssignsWithoutChangingTheSavedDefinition(t *testing.T) {
+	adapter, workspaces, scope, _ := staffingFixture(t)
+	saveExistingAgent(t, adapter)
+	before := len(adapter.profiles.ListAgents())
+
+	err := adapter.StaffRoleOnWorkspace(context.Background(), scope.HomeWorkspaceID, []RoleFill{
+		{RoleID: "home_guide", Mode: StaffingModeBind, Name: existingAgentName},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after := len(adapter.profiles.ListAgents()); after != before {
+		t.Fatalf("assign changed saved agent count from %d to %d", before, after)
+	}
+	station, _ := workspaces.Get(scope.HomeWorkspaceID)
+	instances := station.GetAgentInstances()
+	if len(instances) != 1 || instances[0].RoleSource != workspace.RoleSourceAssigned {
+		t.Fatalf("assigned Home instances = %#v", instances)
+	}
+	profile, found := adapter.profiles.GetAgent(existingAgentName)
+	if !found || profile.Settings.SystemPrompt != "the user's own prompt" {
+		t.Fatalf("saved definition changed = %#v, found=%v", profile, found)
+	}
+}
+
+func TestStaffRoleOnWorkspace_ProjectTargetFillsOnlyAProjectRole(t *testing.T) {
+	adapter, workspaces, scope, _ := staffingFixture(t)
+
+	err := adapter.StaffRoleOnWorkspace(context.Background(), scope.ProjectWorkspaceID, []RoleFill{
+		{RoleID: "project_lead", Mode: StaffingModeCreate, Name: "Alex Lead"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	station, _ := workspaces.Get(scope.HomeWorkspaceID)
+	project, _ := workspaces.Get(scope.ProjectWorkspaceID)
+	if got := len(station.GetAssistantProgramState().HomeBindings.Bindings); got != 0 {
+		t.Fatalf("project role write added %d Home bindings", got)
+	}
+	bindings := project.GetAssistantProjectLink().ProjectBindings.Bindings
+	if len(bindings) != 1 || bindings[0].RoleID != "project_lead" {
+		t.Fatalf("project bindings = %#v", bindings)
+	}
+}
+
+func TestStaffRoleOnWorkspace_RejectsInverseScopeAuthority(t *testing.T) {
+	tests := []struct {
+		name        string
+		target      func(ReadScope) string
+		roleID      string
+		profileName string
+	}{
+		{name: "station cannot fill project role", target: func(scope ReadScope) string { return scope.HomeWorkspaceID }, roleID: "project_lead", profileName: "Wrong Project"},
+		{name: "child cannot fill Home role", target: func(scope ReadScope) string { return scope.ProjectWorkspaceID }, roleID: "home_guide", profileName: "Wrong Home"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			adapter, workspaces, scope, _ := staffingFixture(t)
+			err := adapter.StaffRoleOnWorkspace(context.Background(), tt.target(scope), []RoleFill{
+				{RoleID: tt.roleID, Mode: StaffingModeCreate, Name: tt.profileName},
+			})
+			if !errors.Is(err, ErrInvalid) {
+				t.Fatalf("inverse-scope error = %v, want invalid", err)
+			}
+			station, _ := workspaces.Get(scope.HomeWorkspaceID)
+			project, _ := workspaces.Get(scope.ProjectWorkspaceID)
+			if len(station.GetAgentInstances()) != 0 || len(project.GetAgentInstances()) != 0 {
+				t.Fatalf("inverse write attached agents: Home=%#v project=%#v", station.GetAgentInstances(), project.GetAgentInstances())
+			}
+			if _, found := adapter.profiles.GetAgent(tt.profileName); found {
+				t.Fatal("inverse write created an agent definition")
+			}
+		})
 	}
 }
 
