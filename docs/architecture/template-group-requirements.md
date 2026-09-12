@@ -254,16 +254,23 @@ The four-step creator remains **Blueprint → Details → Team → Review**:
    the unrelated organizational parent selector. Recommended chooses grouped or
    standalone here, before team derivation.
 3. Missing `offer_create` Home preparation has its own inert review and explicit
-   Home-only commit. The UI keeps one stable operation key for confirmed retries,
-   reconciles uncertain responses from canonical state, and never creates the
-   project from this action.
+   Home-only commit. Details owns the receipt, while Team's missing-role blocker
+   also exposes **Build <Home>…** and returns to that same review instead of
+   leaving a dead-end warning. The UI keeps one stable operation key for
+   confirmed retries, reconciles uncertain responses from canonical state, and
+   never creates the project from this action.
 4. A prepared Home's required role is filled through the exact station route:
    `GET /api/workspaces/{homeID}/roles` followed by one reviewed adapter-backed
    `PUT /api/workspaces/{homeID}/roles/{roleID}`. The shared agent form may
-   Create a definition or explicitly Assign a saved definition. The station can
-   mutate only Home roles; a linked child can mutate only its own project roles.
-5. Team presents separate group/project sections. Group holders are read-only
-   existing prerequisites and never enter the child's `role_staffing` payload.
+   Create a definition or explicitly Assign a saved definition. This exact-route
+   single-role callback is distinct from the reviewed final project batch. The
+   station can mutate only Home roles; a linked child can mutate only its own
+   project roles.
+5. Team presents separate group/project sections. Group holders remain read-only
+   project prerequisites and never enter the child's `role_staffing` payload.
+   A missing required Home role has an explicit **Set up <role>** action both in
+   the blocker and on its row; that action suspends the creator and changes to
+   the separately confirmed Home-owned route before mutation.
 6. Review is a hierarchy receipt: it names the already-existing/prepared Home
    and coordinator separately from the not-yet-created child and project team.
    Final placement obtains a new project receipt and requires another explicit

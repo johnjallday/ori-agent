@@ -25,11 +25,69 @@ function loadSessionManager(
   };
   vm.runInNewContext(
     source,
-    { window, document, fetch: fetchImpl, console, crypto: { randomUUID: () => 'review-key' } },
+    {
+      window,
+      document,
+      bootstrap: windowOverrides.bootstrap,
+      fetch: fetchImpl,
+      console,
+      crypto: { randomUUID: () => 'review-key' }
+    },
     { filename: 'sessions.js' }
   );
   return window.sessionManager;
 }
+
+test('agent setup retries workspace suspension after an opening transition', () => {
+  const listeners = new Map();
+  let visible = true;
+  let transitioning = true;
+  let hideCalls = 0;
+  let hiddenCalls = 0;
+  const modalElement = {
+    classList: { contains: name => name === 'show' && visible },
+    addEventListener(type, listener, options = {}) {
+      const entries = listeners.get(type) || [];
+      entries.push({ listener, once: Boolean(options.once) });
+      listeners.set(type, entries);
+    },
+    emit(type) {
+      const entries = [...(listeners.get(type) || [])];
+      for (const entry of entries) {
+        entry.listener();
+        if (entry.once) {
+          listeners.set(
+            type,
+            (listeners.get(type) || []).filter(candidate => candidate !== entry)
+          );
+        }
+      }
+    }
+  };
+  const modal = {
+    hide() {
+      hideCalls += 1;
+      if (transitioning) return;
+      visible = false;
+      modalElement.emit('hidden.bs.modal');
+    }
+  };
+  const manager = loadSessionManager(undefined, {
+    bootstrap: { Modal: { getOrCreateInstance: () => modal } }
+  });
+
+  manager.suspendWorkspaceModalForAgentSetup(modalElement, () => {
+    hiddenCalls += 1;
+  });
+  assert.equal(hideCalls, 1);
+  assert.equal(hiddenCalls, 0);
+
+  transitioning = false;
+  modalElement.emit('shown.bs.modal');
+  assert.equal(hideCalls, 2, 'the ignored hide is retried when the opening transition settles');
+  assert.equal(hiddenCalls, 1, 'the agent form can continue after the workspace actually hides');
+  assert.equal(visible, false);
+});
 
 class CardElement {
   constructor() {
@@ -901,6 +959,67 @@ test('an unchanged readiness recheck preserves group receipts while a template r
   manager.resetGroupRequirementDraft({ ...template, revision: 'b'.repeat(64) });
   assert.equal(manager.groupRequirementDraft.review, null);
   assert.equal(manager.groupRequirementDraft.preparedHome, null);
+});
+
+test('Team missing-role recovery builds an absent group or opens exact Home staffing', () => {
+  const detailsButton = { disabled: false };
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    {
+      querySelector: selector =>
+        selector === '[data-group-destination-action="review_create_home"]' ? detailsButton : null,
+      getElementById: () => null
+    }
+  );
+  const view = {
+    blockingIssues: [{ id: 'required-roles-missing', roleId: 'portfolio-coordinator' }],
+    roleRoster: {
+      roles: [
+        {
+          role_id: 'portfolio-coordinator',
+          label: 'Portfolio Coordinator',
+          scope: 'home',
+          required: true,
+          state: 'empty'
+        }
+      ]
+    },
+    assistantProgram: { stationName: 'Research Program Home' }
+  };
+  manager.teamView = () => view;
+  manager.groupRequirementDraft = {
+    projection: {
+      home: { exists: false, proposed_name: 'Research Program Home' },
+      actions: ['review_create_home']
+    }
+  };
+
+  assert.equal(manager.teamRecoveryLabel('fill-required-role'), 'Build Research Program Home…');
+  let returnedStep = 0;
+  let destinationAction = '';
+  manager.goToWizardStep = step => {
+    returnedStep = step;
+  };
+  manager.runWorkspaceGroupDestinationAction = action => {
+    destinationAction = action;
+  };
+  manager.runTeamRecovery('fill-required-role', { id: 'team-recovery' });
+  assert.equal(returnedStep, 2);
+  assert.equal(destinationAction, 'review_create_home');
+
+  manager.groupRequirementDraft.projection = {
+    home: { exists: true, workspace_id: 'home-1', name: 'Research Program Home' },
+    actions: ['open_group_roles']
+  };
+  assert.equal(manager.teamRecoveryLabel('fill-required-role'), 'Set up Portfolio Coordinator');
+  let opened = null;
+  const opener = { id: 'setup-group-role' };
+  manager.openWorkspaceGroupRoleSetup = (receivedOpener, roleID) => {
+    opened = { opener: receivedOpener, roleID };
+  };
+  manager.runTeamRecovery('fill-required-role', opener);
+  assert.deepEqual(opened, { opener, roleID: 'portfolio-coordinator' });
 });
 
 test('Details destination card distinguishes loading, proposed, existing, standalone, and unavailable state', () => {

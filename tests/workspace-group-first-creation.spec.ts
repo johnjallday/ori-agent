@@ -226,7 +226,21 @@ test('first-time UI prepares and staffs the exact Home before one reviewed proje
   expect(await workspaces(request)).toHaveLength(beforeWorkspaces.length);
   expect(await agentNames(request)).toEqual(beforeAgents);
 
-  await destination.getByRole('button', { name: 'Review Research Program Home setup' }).click();
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#wizardStep3')).toBeVisible();
+  const requiredRoleIssue = page.locator(
+    '#workspaceTeamIssues [data-issue-id="required-roles-missing"]'
+  );
+  await expect(requiredRoleIssue).toContainText('Fill all 2 required roles');
+  await expect(
+    requiredRoleIssue.getByRole('button', { name: 'Build Research Program Home' })
+  ).toBeVisible();
+  await page.screenshot({
+    path: 'tasks/screenshots/workspace-group-first-creation/synthetic-team-build-home.png',
+    fullPage: true
+  });
+  await requiredRoleIssue.getByRole('button', { name: 'Build Research Program Home' }).click();
+  await expect(page.locator('#wizardStep2')).toBeVisible();
   await expect(page.locator('#workspaceGroupHomeReview')).toBeVisible();
   await expect(page.locator('#workspaceGroupHomeReview')).toContainText(
     'does not create this project'
@@ -278,13 +292,6 @@ test('first-time UI prepares and staffs the exact Home before one reviewed proje
 
   await expect(destination).toContainText('Existing verified group');
   await expect(destination).toContainText('0 of 1 required group role filled');
-  await destination.getByRole('button', { name: 'Set up Portfolio Coordinator' }).click();
-  await expect(page.locator('#addAgentModal')).toBeVisible();
-  await page.locator('#addAgentModal .btn-close').click();
-  await expect(page.locator('#addAgentModal')).toBeHidden();
-  await expect(creator).toBeVisible();
-  await expect(destination).toContainText('0 of 1 required group role filled');
-  await expect(page.locator('#workspaceGroupDestinationTitle')).toBeFocused();
   const stagedBeforeHomeRole = await page.evaluate(() => {
     // @ts-expect-error CreateWorkspaceTeamDraft and sessionManager are page globals.
     return window.CreateWorkspaceTeamDraft.setRoleFill(
@@ -294,7 +301,32 @@ test('first-time UI prepares and staffs the exact Home before one reviewed proje
     );
   });
   expect(stagedBeforeHomeRole).toBeTruthy();
-  await destination.getByRole('button', { name: 'Set up Portfolio Coordinator' }).click();
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#wizardStep3')).toBeVisible();
+  const existingGroupIssue = page.locator(
+    '#workspaceTeamIssues [data-issue-id="required-roles-missing"]'
+  );
+  const homeCoordinatorRow = page.locator(
+    '#workspaceRoleRoster [data-role-id="portfolio_coordinator"]'
+  );
+  await expect(
+    existingGroupIssue.getByRole('button', { name: 'Set up Portfolio Coordinator' })
+  ).toBeVisible();
+  await expect(
+    homeCoordinatorRow.getByRole('button', { name: 'Set up Portfolio Coordinator' })
+  ).toBeVisible();
+  await page.screenshot({
+    path: 'tasks/screenshots/workspace-group-first-creation/synthetic-team-setup-home-role.png',
+    fullPage: true
+  });
+  await existingGroupIssue.getByRole('button', { name: 'Set up Portfolio Coordinator' }).click();
+  await expect(page.locator('#addAgentModal')).toBeVisible();
+  await page.locator('#addAgentModal .btn-close').click();
+  await expect(page.locator('#addAgentModal')).toBeHidden();
+  await expect(creator).toBeVisible();
+  await expect(page.locator('#wizardStep3')).toBeVisible();
+  await expect(existingGroupIssue).toBeFocused();
+  await homeCoordinatorRow.getByRole('button', { name: 'Set up Portfolio Coordinator' }).click();
   await expect(page.locator('#addAgentModal')).toBeVisible();
   await expect(page.locator('#workspaceGroupRoleMode')).toBeVisible();
   await expect(page.locator('#agentCreateDraftContext')).toContainText('Home only');
@@ -324,6 +356,8 @@ test('first-time UI prepares and staffs the exact Home before one reviewed proje
   expect(homeRole.ok(), await homeRole.text()).toBeTruthy();
   await expect(page.locator('#addAgentModal')).toBeHidden();
   await expect(creator).toBeVisible();
+  await expect(page.locator('#wizardStep3')).toBeVisible();
+  await expect(page.locator('#wizardNextBtn')).toBeFocused();
   await expect(destination).toContainText('1 of 1 required group role filled');
   await expect(destination).toContainText('Ready');
   await expect(page.locator('#workspaceGroupDestinationActions button')).toHaveCount(0);
@@ -339,6 +373,8 @@ test('first-time UI prepares and staffs the exact Home before one reviewed proje
       })
     ])
   );
+  await page.locator('#wizardBackBtn').click();
+  await expect(page.locator('#wizardStep2')).toBeVisible();
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.screenshot({
     path: 'tasks/screenshots/workspace-group-first-creation/synthetic-details-staffed-home.png',

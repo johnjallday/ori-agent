@@ -4663,7 +4663,7 @@ const sessionManager = {
 
     host.querySelectorAll('[data-team-recovery]').forEach(button => {
       button.addEventListener('click', () =>
-        this.runTeamRecovery(button.dataset.teamRecovery || '')
+        this.runTeamRecovery(button.dataset.teamRecovery || '', button)
       );
     });
   },
@@ -4677,6 +4677,15 @@ const sessionManager = {
       default:
         return 'Note';
     }
+  },
+
+  requiredRoleRecoveryContext() {
+    const view = this.teamView();
+    const issue = view?.blockingIssues?.find?.(item => item.id === 'required-roles-missing');
+    const role = view?.roleRoster?.roles?.find?.(item => item.role_id === issue?.roleId);
+    const projection =
+      this.groupRequirementDraft?.projection || this.templateAgentPlan?.group_requirement || null;
+    return { issue, role, projection };
   },
 
   teamRecoveryLabel(action) {
@@ -4695,12 +4704,28 @@ const sessionManager = {
         return 'Confirm updated plan';
       case 'retry-creation':
         return 'Retry creation';
+      case 'fill-required-role': {
+        const { role, projection } = this.requiredRoleRecoveryContext();
+        if (!role) return 'Go to missing role';
+        if (role.scope !== 'home') return `Go to ${role.label}`;
+        const actions = Array.isArray(projection?.actions) ? projection.actions : [];
+        if (actions.includes('review_create_home')) {
+          const homeName = String(
+            projection?.home?.proposed_name ||
+              this.teamView()?.assistantProgram?.stationName ||
+              'required group'
+          ).trim();
+          return `Build ${homeName}…`;
+        }
+        if (actions.includes('open_group_roles')) return `Set up ${role.label}`;
+        return 'Review group setup';
+      }
       default:
         return '';
     }
   },
 
-  runTeamRecovery(action) {
+  runTeamRecovery(action, opener = null) {
     switch (action) {
       case 'retry-plan':
         void this.refreshTemplateAgentPlan();
@@ -4733,6 +4758,28 @@ const sessionManager = {
           issue => issue.id === 'template-agent-creation-failed'
         )?.templateAgentIndex;
         if (Number.isInteger(index)) void this.retryWorkspaceAgentCreation(index);
+        break;
+      }
+      case 'fill-required-role': {
+        const { issue, role, projection } = this.requiredRoleRecoveryContext();
+        if (!role || role.scope !== 'home') {
+          this.focusWorkspaceRoleRow(issue?.roleId || role?.role_id);
+          break;
+        }
+        const actions = Array.isArray(projection?.actions) ? projection.actions : [];
+        if (actions.includes('open_group_roles')) {
+          void this.openWorkspaceGroupRoleSetup(opener, role.role_id);
+          break;
+        }
+        this.goToWizardStep(2);
+        if (actions.includes('review_create_home')) {
+          const detailsButton = document.querySelector(
+            '[data-group-destination-action="review_create_home"]'
+          );
+          void this.runWorkspaceGroupDestinationAction('review_create_home', detailsButton);
+        } else {
+          document.getElementById('workspaceGroupDestinationTitle')?.focus();
+        }
         break;
       }
       case 'confirm-fresh-plan': {
@@ -4770,6 +4817,20 @@ const sessionManager = {
       ['MCP servers', values('mcp_servers').join(', ') || 'None'],
       ['Plugins', values('plugins').join(', ') || 'None']
     ];
+  },
+
+  suspendWorkspaceModalForAgentSetup(workspaceModalElement, onHidden) {
+    const workspaceModal = bootstrap.Modal.getOrCreateInstance(workspaceModalElement);
+    workspaceModalElement.addEventListener('hidden.bs.modal', onHidden, { once: true });
+    workspaceModal.hide();
+    // Bootstrap ignores hide() while the workspace modal's opening transition
+    // is in flight. Retry once after shown so a fast role action cannot leave
+    // both the workspace and agent forms visible-but-inactive.
+    if (workspaceModalElement.classList.contains('show')) {
+      workspaceModalElement.addEventListener('shown.bs.modal', () => workspaceModal.hide(), {
+        once: true
+      });
+    }
   },
 
   openWorkspaceAgentSetup(index, opener) {
@@ -4873,8 +4934,7 @@ const sessionManager = {
     };
     workspaceModalElement.dataset.suspendedForAgentSetup = 'true';
     if (workspaceModalElement.classList.contains('show')) {
-      workspaceModalElement.addEventListener('hidden.bs.modal', showAgentModal, { once: true });
-      bootstrap.Modal.getOrCreateInstance(workspaceModalElement).hide();
+      this.suspendWorkspaceModalForAgentSetup(workspaceModalElement, showAgentModal);
     } else {
       showAgentModal();
     }
@@ -5498,17 +5558,25 @@ const sessionManager = {
       groupWorkspaceHref: view?.assistantProgram?.stationWorkspaceSlug
         ? `/workspaces/${encodeURIComponent(view.assistantProgram.stationWorkspaceSlug)}`
         : '',
+      onManageGroupRole: this.groupRequirementDraft?.projection?.actions?.includes?.(
+        'open_group_roles'
+      )
+        ? (roleId, _row, opener) => this.openWorkspaceGroupRoleSetup(opener, roleId)
+        : null,
       onRequestCreate: (roleId, row) => this.openWorkspaceRoleSetup(roleId, row),
       onAssign: (roleId, row) => this.openWorkspaceRoleAssignPicker(roleId, row),
       onClear: (roleId, row) => this.clearWorkspaceRole(roleId, row)
     });
   },
 
-  async openWorkspaceGroupRoleSetup(opener) {
+  async openWorkspaceGroupRoleSetup(opener, requestedRoleID = '') {
     const draft = this.groupRequirementDraft;
     const projection = draft?.projection || this.templateAgentPlan?.group_requirement || null;
+    const roleIDRequested = String(requestedRoleID || '').trim();
     const missingRole = projection?.required_home_roles?.roles?.find?.(
-      role => role.state !== 'filled'
+      role =>
+        role.state !== 'filled' &&
+        (!roleIDRequested || String(role.role_id || '') === roleIDRequested)
     );
     const workspaceID = String(projection?.home?.workspace_id || '').trim();
     const roleID = String(missingRole?.role_id || '').trim();
@@ -5578,6 +5646,7 @@ const sessionManager = {
       projectDraft: this.teamDraft,
       phase: 'editing',
       mode: canonicalRole.needs_clear ? 'clear' : 'create',
+      returnStep: this.wizardStep,
       completed: ''
     };
     this.workspaceGroupRoleSetup = operation;
@@ -5674,8 +5743,7 @@ const sessionManager = {
     };
     workspaceModalElement.dataset.suspendedForAgentSetup = 'workspace-group-role-live';
     if (workspaceModalElement.classList.contains('show')) {
-      workspaceModalElement.addEventListener('hidden.bs.modal', showAgentModal, { once: true });
-      bootstrap.Modal.getOrCreateInstance(workspaceModalElement).hide();
+      this.suspendWorkspaceModalForAgentSetup(workspaceModalElement, showAgentModal);
     } else {
       showAgentModal();
     }
@@ -5914,6 +5982,7 @@ const sessionManager = {
     if (operation?.phase === 'committing') return;
     const completed = operation?.completed || '';
     const opener = operation?.opener;
+    const returnStep = operation?.returnStep || 2;
 
     this.workspaceGroupRoleSetupRequestId += 1;
     this.workspaceGroupRoleSetup = null;
@@ -5948,6 +6017,14 @@ const sessionManager = {
       if (completed) {
         this.setWorkspaceGroupDestinationMessage(completed);
         this.showToast(completed, 'success');
+      }
+      if (returnStep === 3) {
+        const teamTarget = completed
+          ? document.getElementById('wizardNextBtn')
+          : document.querySelector('#workspaceTeamIssues .workspace-team-issue.is-blocking');
+        if (teamTarget) teamTarget.focus();
+        else opener?.focus?.();
+        return;
       }
       const destinationTitle = document.getElementById('workspaceGroupDestinationTitle');
       if (destinationTitle) destinationTitle.focus();
@@ -6058,8 +6135,7 @@ const sessionManager = {
     };
     workspaceModalElement.dataset.suspendedForAgentSetup = 'true';
     if (workspaceModalElement.classList.contains('show')) {
-      workspaceModalElement.addEventListener('hidden.bs.modal', showAgentModal, { once: true });
-      bootstrap.Modal.getOrCreateInstance(workspaceModalElement).hide();
+      this.suspendWorkspaceModalForAgentSetup(workspaceModalElement, showAgentModal);
     } else {
       showAgentModal();
     }

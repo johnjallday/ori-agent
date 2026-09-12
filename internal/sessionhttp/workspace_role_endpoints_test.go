@@ -33,7 +33,7 @@ func TestPutWorkspaceRole_AssistantHomeDispatchesCreateAndAssignToTheExactTarget
 		t.Run(tc.name, func(t *testing.T) {
 			var calledWorkspace string
 			var called []RoleStaffingFill
-			handler.SetAssistantRoleStaffer(func(_ context.Context, workspaceID string, fills []RoleStaffingFill) error {
+			handler.SetAssistantWorkspaceRoleStaffer(func(_ context.Context, workspaceID string, fills []RoleStaffingFill) error {
 				calledWorkspace = workspaceID
 				called = append([]RoleStaffingFill(nil), fills...)
 				return nil

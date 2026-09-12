@@ -254,6 +254,24 @@
         readOnly.append(document.createTextNode(' '), link);
       }
       item.append(readOnly);
+      if (
+        row.scope === SCOPE_HOME &&
+        row.required &&
+        row.state !== STATE_FILLED &&
+        typeof options.onManageGroupRole === 'function'
+      ) {
+        var groupActions = element('div', 'ws-role-row__actions');
+        var setupGroupRole = actionButton(
+          'Set up ' + row.label,
+          'Set up ' + row.label + ' in the group workspace',
+          'btn btn-sm btn-primary'
+        );
+        setupGroupRole.addEventListener('click', function () {
+          options.onManageGroupRole(row.roleId, row, setupGroupRole);
+        });
+        groupActions.append(setupGroupRole);
+        item.append(groupActions);
+      }
       return item;
     }
 
@@ -367,6 +385,11 @@
       onRequestCreate: given.onRequestCreate || noop,
       onAssign: given.onAssign || noop,
       onClear: given.onClear || noop,
+      // A project host may offer a separately confirmed Home-owned subflow for
+      // a missing required group role. The role stays read-only to the project;
+      // this callback changes authority and target before any mutation.
+      onManageGroupRole:
+        typeof given.onManageGroupRole === 'function' ? given.onManageGroupRole : null,
       // Optional: when absent, unbound agents are listed without an action,
       // which is the right answer for the wizard where none exist yet.
       onAssignExisting: given.onAssignExisting,

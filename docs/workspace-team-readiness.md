@@ -130,14 +130,20 @@ The non-circular recovery path is:
    progress only from current binding, instance, workspace snapshot, and saved
    definition evidence.
 2. If no canonical group exists and policy allows `offer_create`, Details offers
-   an inert Home-only review. A separate explicit commit creates or reuses only
-   the canonical group; it does not create the project or either team. Required
-   `existing_only` never receives this action.
+   an inert Home-only review. Team's required-role blocker also offers **Build
+   <Home>…** and returns to that same review, so entering Team early is not a
+   dead end. A separate explicit commit creates or reuses only the canonical
+   group; it does not create the project or either team. Required `existing_only`
+   never receives this action.
 3. Refresh the plan and exact group roster. If a required group role is empty,
-   **Set Up <role>** suspends the workspace creator for a bounded live Home-role
+   **Set Up <role>** is available from both Team's blocker and the group-role row
+   and suspends the workspace creator for a bounded live Home-role
    action. The canonical agent form may Create, or the user may explicitly
    Assign one saved definition. `GET /api/workspaces/{homeID}/roles` verifies
-   the editable target and one role-specific `PUT` commits immediately. If old
+   the editable target and one role-specific `PUT` commits immediately. That
+   route uses a target-aware single-role callback; final project creation uses a
+   separate reviewed batch callback so multiple project roles are not mistaken
+   for one live role mutation. If old
    storage still names a holder whose saved definition was deleted, the role is
    empty with `needs_clear: true`; setup exposes only an explicit role-specific
    `DELETE` until a fresh roster proves the stale assignment is gone.

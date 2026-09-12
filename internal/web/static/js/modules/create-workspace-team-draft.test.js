@@ -471,6 +471,34 @@ test('group-owned holders remain filled and cannot be recommended or reused loca
   );
 });
 
+test('a missing Home prerequisite owns Team recovery even when a project role is declared first', () => {
+  const program = assistantProgramPlan();
+  program.roles = [
+    {
+      id: 'project-lead',
+      label: 'Project Lead',
+      scope: 'project',
+      description: 'Leads this project.',
+      primary: true,
+      required: true
+    },
+    {
+      id: 'portfolio-coordinator',
+      label: 'Portfolio Coordinator',
+      scope: 'home',
+      description: 'Coordinates the portfolio.',
+      primary: true,
+      required: true
+    }
+  ];
+  const draft = Draft.createDraft();
+  Draft.setPlanReady(draft, 'template:scoped', planResponse([], { assistant_program: program }));
+
+  const issue = Draft.derive(draft).issues.find(item => item.id === 'required-roles-missing');
+  assert.equal(issue.roleId, 'portfolio-coordinator');
+  assert.equal(issue.anchor, 'workspace-role-portfolio-coordinator');
+});
+
 test('scoped Home and project primaries keep separate names and select the project entry role', () => {
   const program = assistantProgramPlan();
   program.default_primary_name = 'Portfolio Lead';

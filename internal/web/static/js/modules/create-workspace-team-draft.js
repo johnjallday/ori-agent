@@ -1567,9 +1567,12 @@
         anchor: 'saved-agent-picker'
       });
     }
-    const missingRequired = roleRoster.roles.filter(
-      role => role.required && role.state !== 'filled'
-    );
+    const missingRequired = roleRoster.roles
+      .filter(role => role.required && role.state !== 'filled')
+      // Group prerequisites must be recoverable before project-local staffing.
+      // A plugin may declare roles in either order, so do not let its first
+      // project role hide the one Team action that can prepare the Home.
+      .sort((left, right) => Number(right.scope === 'home') - Number(left.scope === 'home'));
     if (!agentless && missingRequired.length > 0) {
       issues.push({
         id: 'required-roles-missing',

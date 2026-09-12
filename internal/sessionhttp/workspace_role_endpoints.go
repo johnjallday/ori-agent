@@ -66,11 +66,11 @@ func (h *Handler) PutWorkspaceRole(w http.ResponseWriter, r *http.Request) {
 			RoleID: item.RoleID, Mode: item.Mode, Name: item.Name,
 			Provider: item.Provider, Model: item.Model,
 		}}
-		if h.assistantRoleStaffer == nil {
+		if h.assistantWorkspaceRoleStaffer == nil {
 			_ = orihttp.RespondInternalError(w, "Role staffing is unavailable")
 			return
 		}
-		if err := h.assistantRoleStaffer(r.Context(), workspaceID, fills); err != nil {
+		if err := h.assistantWorkspaceRoleStaffer(r.Context(), workspaceID, fills); err != nil {
 			logger.Warn("Filling a workspace role failed",
 				logger.Fields{"workspace_id": workspaceID, "role_id": roleID, "error": err})
 			_ = orihttp.RespondConflict(w, "That role could not be filled; reload and try again.")
