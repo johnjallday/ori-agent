@@ -1013,15 +1013,17 @@ Content-Type: application/json
   "name": "Client Work",
   "kind": "group",
   "description": "Shared client initiative",
-  "entry_agent_name": "Client Manager"   // optional; must be an existing agent
+  "create_template_agents": false
 }
 ```
 
-When `entry_agent_name` is omitted, the server auto-creates a `"<Group Name> Manager"` agent (type `general`, role `orchestrator`, workspace-manager system prompt) and sets it as the group's entry agent, so new groups are chat-ready immediately. Name collisions get a numeric suffix (`"<Name> Manager 2"`).
+The ordinary **Create Group** UI always sends `create_template_agents: false`, so its groups start as empty organizational containers with no agent side effects. Its optional post-create action only opens the existing group's team surface; it does not create or hire an agent.
+
+This explicit UI behavior does not change legacy API defaults. A direct API caller that omits `create_template_agents` still gets the historical `"<Group Name> Manager"` entry agent (type `general`, role `orchestrator`); a caller may instead supply `entry_agent_name` for an existing agent. Name collisions for an auto-created manager get a numeric suffix (`"<Name> Manager 2"`).
 
 Group folders are provisioned with `sub-workspaces/` (members), plus their own `files/` and `notes/` directories. The auto-provisioned `workspace-files` filesystem MCP binding is **scoped to `files/` and `notes/` only** — member sub-workspaces are never exposed to the group's agents. Groups created before this behavior existed are upgraded automatically by an idempotent backfill at server startup.
 
-**Listing:** the flat `GET /api/workspaces` list includes groups (check `kind` to distinguish them); `GET /api/workspaces?tree=true` returns the nested tree.
+**Listing and membership:** the flat `GET /api/workspaces` list includes groups (check `kind` to distinguish them); `GET /api/workspaces?tree=true` returns the nested tree. The UI's **Group selected** action creates one explicit agentless group, then patches only its reviewed top-level member snapshot using `PATCH /api/workspaces/:id` with `parent_id` and `order_index`. A partial member move leaves the created group and every successful move intact; a lost response is reconciled by refresh rather than retrying group creation.
 
 **Deleting a group** uses a two-mode flow:
 

@@ -371,8 +371,9 @@ workspace screen complete after a regression.
 - `projectconnection` can review/create only the canonical named Home, or reuse
   it without renaming. No child, agent, schedule, or runtime grant is created by
   group preparation. Legacy/unavailable ownership fails closed.
-  Step 2 opens the shared map **Build Group** dialog with a setup-bound name
-  and reviewed owner transport; it never falls back to generic group creation.
+  Step 2 opens the shared Create Workspace dialog in a fixed guided-Group
+  context with a setup-bound name and reviewed owner transport; it never falls
+  back to generic group creation.
   The ordinary map action explicitly sends `create_template_agents: false` to
   build an empty group. Existing API callers that omit that flag retain their
   historical manager behavior, and no selected workspaces are silently moved.
