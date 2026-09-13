@@ -271,13 +271,18 @@ test.describe('Home workspace cockpit', () => {
     await page.locator('#cockpitMap [data-ws-check]').nth(1).click();
     await page.getByRole('button', { name: 'Group selected', exact: true }).click();
     await expect(page.locator('#addFolderModal')).toBeVisible();
-    await expect(page.locator('#workspaceCreatorKindFixedNotice')).toContainText('keeps that choice fixed');
+    await expect(page.locator('#workspaceCreatorKindFixedNotice')).toContainText(
+      'keeps that choice fixed'
+    );
     await dismissCreator(page);
 
-    await page.getByRole('button', { name: 'Create Group', exact: true }).click();
+    // The header now offers only the adaptive creator. Group remains a choice
+    // inside it, while explicit empty/selected grouping stays in the Tree.
+    await expect(page.getByRole('button', { name: 'Create Group', exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: 'New Workspace', exact: true }).click();
     await expect(page.locator('#addFolderModal')).toBeVisible();
-    await expect(page.locator('#folderModalTitle')).toHaveText('Create Group');
-    await expect(page.locator('#workspaceCreatorKindGroup')).toBeChecked();
+    await expect(page.locator('#workspaceCreatorKindWorkspace')).toBeChecked();
+    await expect(page.locator('#workspaceCreatorKindGroup')).toBeEnabled();
     await dismissCreator(page);
 
     await page.getByRole('button', { name: 'Tree', exact: true }).click();
@@ -291,13 +296,22 @@ test.describe('Home workspace cockpit', () => {
     await expect(page.getByRole('button', { name: 'Group selected', exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Group selected', exact: true }).click();
     await expect(page.locator('#addFolderModal')).toBeVisible();
-    await expect(page.locator('#workspaceCreatorKindFixedNotice')).toContainText('keeps that choice fixed');
-    const reviewedMember = await page.locator('[data-tree-check]').first().getAttribute('data-tree-check');
+    await expect(page.locator('#workspaceCreatorKindFixedNotice')).toContainText(
+      'keeps that choice fixed'
+    );
+    const reviewedMember = await page
+      .locator('[data-tree-check]')
+      .first()
+      .getAttribute('data-tree-check');
     await page.locator('#folderNameInput').fill('Reviewed Tree Group');
     await page.locator('#wizardNextBtn').click();
-    await expect(page.locator('#workspaceReviewSummary')).toContainText('top-level workspace will move');
+    await expect(page.locator('#workspaceReviewSummary')).toContainText(
+      'top-level workspace will move'
+    );
     const groupCreated = page.waitForResponse(
-      response => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/workspaces'
+      response =>
+        response.request().method() === 'POST' &&
+        new URL(response.url()).pathname === '/api/workspaces'
     );
     await page.locator('#createFolderBtn').click();
     const body = await (await groupCreated).json();

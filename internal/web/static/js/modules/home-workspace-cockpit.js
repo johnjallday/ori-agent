@@ -3496,13 +3496,6 @@ import {
   // Every create/import/delete/move/tag/undo path funnels through here, so one
   // authoritative reload updates Map, Tree, Summary, and the rail together
   // rather than each view refetching for itself (FR108, FR117).
-  document.getElementById('cockpitBuildGroupBtn')?.addEventListener('click', event =>
-    openGroupCreator([], {
-      entryPoint: 'home_cockpit_create_group',
-      invoker: event.currentTarget
-    })
-  );
-
   window.addEventListener('ori:workspaces-changed', () => {
     if (canHydrateWorkspaceData()) void refreshQuietly();
   });
