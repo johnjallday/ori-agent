@@ -178,6 +178,13 @@ test: ## Run all tests (unit + integration; excludes node_modules)
 	$(TEST_RUNNER) $(GOTEST) -v $$(go list ./... | grep -v '/node_modules/')
 	@echo "$(GREEN)✓ All tests passed$(NC)"
 
+.PHONY: test-release
+test-release: ## Test RC lifecycle and installer probes offline (temporary Git remotes only)
+	@python3 scripts/release-candidate.test.py
+	@python3 scripts/rc-test-report.test.py
+	@python3 scripts/smoke-installed.test.py
+
+
 test-unit: ## Run unit tests only (concise; see test-unit-verbose for -v)
 	@echo "$(BLUE)Running unit tests...$(NC)"
 	$(TEST_RUNNER) $(GOTEST) -short $$(./scripts/list-unit-packages.sh)

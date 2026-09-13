@@ -41,6 +41,15 @@ if [ -z "$MENUBAR_CHECK" ]; then
     exit 0
 fi
 
+# Finder/LaunchServices require numeric bundle versions. Keep the full RC tag
+# in the DMG filename and embedded binaries, not CFBundleShortVersionString.
+BUNDLE_VERSION="${VERSION#v}"
+BUNDLE_VERSION="${BUNDLE_VERSION%%-*}"
+if ! [[ "$BUNDLE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Invalid bundle version: $VERSION" >&2
+    exit 1
+fi
+
 APP_NAME="Ori Agent"
 APP_BUNDLE="OriAgent.app"
 DMG_NAME="OriAgent-${VERSION}-${ARCH}.dmg"
@@ -88,9 +97,9 @@ cat >"${APP_PATH}/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>${VERSION}</string>
+    <string>${BUNDLE_VERSION}</string>
     <key>CFBundleVersion</key>
-    <string>${VERSION}</string>
+    <string>${BUNDLE_VERSION}</string>
     <key>LSMinimumSystemVersion</key>
     <string>10.15</string>
     <key>NSHighResolutionCapable</key>

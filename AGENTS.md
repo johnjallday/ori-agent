@@ -91,7 +91,7 @@ scripts and agents.
 | `./scripts/devops.sh backlog` | reads open Issues labeled `backlog` |
 | `./scripts/devops.sh proposals` | reads open Issues labeled `feature-proposal` |
 | `./scripts/devops.sh status` | reads the shared feature overview for checked-out implementation worktrees: task progress, Git/PR, agent, and attention state |
-| `./scripts/devops.sh release` | reads the latest Release's tag/publish time and counts delivery PRs merged into `dev` strictly after it |
+| `./scripts/devops.sh release` | reads the latest stable Release and counts delivery PRs on `dev` absent from its frozen revision |
 | `./scripts/devops.sh agent-defaults` | reads or confirm-gates persistent primary and role-fallback kind/model pairs in `.herdr/devflow.toml` — local only |
 | `./scripts/devops.sh explore [preset] [options]` | global `e` prompt menu; display with `--print` or confirm a fresh read/search-only Claude/Pi advisory session |
 | `./scripts/devops.sh view <n>` | reads one Issue in full |
@@ -120,11 +120,11 @@ separate human actions. Native session/runtime housekeeping is disclosed in the
 preview. Scripted launches require `--kind` and `--yes`; see
 `docs/devops-explore.md` for exact limits and native compatibility.
 
-`release` additionally delegates to `gh release view` and `gh pr list --base
-dev --state merged`. Feature delivery targets `dev`, while Releases snapshot
-`main`, so this is the queue that has landed but not shipped. It compares each
-PR's `mergedAt` against the release's `publishedAt` as an exact timestamp, so a PR
-merged earlier the same day as the release is correctly excluded. The picker
+`release` additionally delegates to `gh release view` and a paginated GitHub
+compare read of `<stable-tag>...dev`. Feature delivery targets `dev`, while
+Releases snapshot `main`, so this is the queue that has landed but not shipped.
+It counts squash-merge subjects (`(#N)`) by commit ancestry, not publication
+time: PRs merged while an RC was being tested remain in the unshipped queue. The picker
 loads this count and the implementation overview once on entry and again on
 `r`; either dashboard section can report itself unavailable without hiding the
 Issue list. The one-shot
@@ -359,6 +359,23 @@ isolated worktree with `wt new`.
 
 Ori-specific command bindings and the Issue-number-first naming convention are
 recorded in the skill and in the lifecycle sections above.
+
+## Release Candidates
+
+`docs/RELEASE_CHECKLIST.md` is the canonical release procedure. Scheduled cadence
+(at least ten PRs plus green CI) prepares a frozen `release/vX.Y.Z` branch and
+`vX.Y.Z-rc.N` prerelease; it never publishes stable automatically. New feature
+PRs continue targeting `dev`. Stable promotion requires explicit approval of the
+exact tested RC and successful candidate CI/installer checks; stable installers
+are tested again before publication. Each prerelease includes a pinned
+`rc-test-report-<tag>.md` card; follow `docs/RC_TEST_PROTOCOL.md`, keep observations
+NOT RUN until exercised, and share a separately named sanitized completed report
+before sign-off. Path-based suggestions do not replace diff-informed test cases. Merge the release branch back into `dev`
+with a **merge commit, not squash/rebase**, before the next candidate. This is
+the release-only exception to feature PR squash merges. Never move published
+tags, merge newer dev features into an active RC, or follow obsolete local skill
+instructions that bypass the RC gate. Rollout and GitHub settings are separate
+operator actions; changing workflow code alone does not enable them on `main`.
 
 ## Terminology Note
 

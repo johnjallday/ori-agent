@@ -1,467 +1,148 @@
-# Smoke Tests: Validates distribution packages (DMG, MSI, DEB, RPM) work correctly
-# These tests are expensive (4-20 minutes) so they only run on releases/tags.
-# For regular CI validation, see ci.yml which tests builds on every push.
-#
-# When do these run?
-#   - When you push a version tag (e.g., git push origin v1.0.0)
-#   - When you publish a GitHub release
-#   - When you manually trigger via workflow_dispatch
-#
-# Why not on every push?
-#   - These test the full installation process (DMG mounting, MSI install, etc.)
-#   - CI already validates builds work on all platforms
-#   - Saves ~15-20 minutes of CI time per push
-
 name: Cross-Platform Smoke Tests
 
+# Called BEFORE publication by release.yml. Download and install the actual draft
+# assets, rather than rebuilding a different snapshot. Manual rechecks are safe.
 on:
-  workflow_dispatch:  # Manual trigger
-  push:
-    tags:
-      - 'v*'  # Only run on version tags (e.g., v1.0.0, v2.1.3)
-  release:
-    types: [published]  # Also run when a GitHub release is published
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Exact existing release tag whose installers should be tested'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_TAG: ${{ inputs.release_tag }}
 
 jobs:
   test-macos:
-    name: macOS Smoke Test
-    runs-on: macos-latest
-    timeout-minutes: 20
-    # Smoke tests run AFTER the release publishes — they verify installers
-    # rebuild cleanly. Treat infra flakes (hdiutil busy, setup-go cache hiccups)
-    # as advisory rather than rolling the release back.
-    continue-on-error: true
+    name: macOS DMG (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15-intel
+            arch: amd64
+          - os: macos-15
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
         with:
-          go-version-file: go.mod
-
-      - name: Install GoReleaser
-        run: brew install goreleaser
-
-      - name: Build binaries
+          python-version: '3.12'
+      - name: Download the actual DMG
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCH: ${{ matrix.arch }}
+        run: gh release download "$RELEASE_TAG" --pattern "OriAgent-*-${ARCH}.dmg" --dir artifacts
+      - name: Mount, copy and probe the installed application
         run: |
-          # macOS can run all builds including CGO menubar
-          # Skip nfpm (Linux packages) since we're only building macOS binaries
-          goreleaser release --snapshot --clean --skip=publish,nfpm
-
-      - name: Build folder picker app
-        run: ./scripts/build-folder-picker.sh
-
-      - name: Create DMG
-        run: |
-          VERSION=$(cat VERSION)-next
-          ARCH=$(uname -m)
-          # Script expects: <version> <os> <architecture> <dist-dir>
-          ./build/macos/create-dmg.sh "$VERSION" "darwin" "$ARCH" dist
-
-      - name: Run smoke test
-        run: |
-          set -e
-          ARCH=$(uname -m)
-          DMG_FILE=$(ls dist/OriAgent-*-${ARCH}.dmg | head -1)
-
-          echo "📦 Testing DMG: $DMG_FILE"
-
-          # Mount DMG
-          hdiutil attach "$DMG_FILE" -quiet
-          sleep 2
-
-          VOLUME=$(ls -d /Volumes/Ori\ Agent* | head -1)
-          echo "✓ DMG mounted at: $VOLUME"
-
-          # Copy app to temporary location
-          TEMP_APP="/tmp/OriAgent-test.app"
-          rm -rf "$TEMP_APP"
-          cp -R "$VOLUME/OriAgent.app" "$TEMP_APP"
-
-          # Unmount DMG (free up resources)
-          hdiutil detach "$VOLUME" -quiet
-
-          # Test server binary
-          SERVER_BIN="$TEMP_APP/Contents/Resources/ori-agent"
-          if [ ! -f "$SERVER_BIN" ]; then
-            echo "❌ Server binary not found"
-            exit 1
-          fi
-          echo "✓ Server binary found"
-
-          # Start server
-          PORT=18765
-          "$SERVER_BIN" --port=$PORT > /tmp/ori-agent-test.log 2>&1 &
-          SERVER_PID=$!
-          echo "✓ Server started (PID: $SERVER_PID)"
-
-          # Wait for server to respond
-          echo "⏳ Waiting for server to start..."
-          for i in {1..30}; do
-            if curl -sf "http://localhost:$PORT/health" > /dev/null 2>&1; then
-              echo "✓ Server responded to HTTP"
-              break
-            fi
-            if [ $i -eq 30 ]; then
-              echo "❌ Server failed to start within 15 seconds"
-              cat /tmp/ori-agent-test.log
-              kill $SERVER_PID 2>/dev/null || true
-              exit 1
-            fi
-            sleep 0.5
-          done
-
-          # Test health endpoint
-          HEALTH_RESPONSE=$(curl -s "http://localhost:$PORT/health")
-          if echo "$HEALTH_RESPONSE" | grep -q "ok"; then
-            echo "✓ Health check passed"
-          else
-            echo "⚠️  Health check response: $HEALTH_RESPONSE"
-          fi
-
-          # Cleanup
-          kill $SERVER_PID 2>/dev/null || true
-          wait $SERVER_PID 2>/dev/null || true
-          rm -rf "$TEMP_APP"
-          echo "✅ macOS smoke test PASSED"
+          set -euo pipefail
+          mount="$RUNNER_TEMP/ori-dmg"
+          app="$RUNNER_TEMP/OriAgent-smoke.app"
+          mkdir -p "$mount"
+          hdiutil attach artifacts/*.dmg -mountpoint "$mount" -nobrowse -quiet
+          trap 'hdiutil detach "$mount" -quiet || true' EXIT
+          test -x "$mount/OriAgent.app/Contents/MacOS/OriAgent"
+          cp -R "$mount/OriAgent.app" "$app"
+          hdiutil detach "$mount" -quiet
+          trap - EXIT
+          python3 scripts/smoke-installed.py "$app/Contents/Resources/ori-agent" "$RELEASE_TAG"
 
   test-linux-deb:
-    name: Linux .deb Smoke Test
+    name: Linux DEB (amd64)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    continue-on-error: true
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-
-      - name: Install GoReleaser
-        uses: goreleaser/goreleaser-action@v7
-        with:
-          install-only: true
-          version: latest  # Use latest for 'ids' field support in archives
-
-      - name: Install folder picker build deps
+      - uses: actions/checkout@v5
+      - name: Download the actual DEB
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "$RELEASE_TAG" --pattern '*_amd64.deb' --dir artifacts
+      - name: Install and probe
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev build-essential pkg-config
-
-      - name: Build folder picker app
-        run: ./scripts/build-folder-picker.sh
-
-      - name: Build packages
-        run: |
-          # Build server binaries and create Linux packages
-          # The menubar build is automatically skipped on Linux (skip template in .goreleaser.yaml)
-          goreleaser release --snapshot --clean --skip=publish,before
-
-      - name: Install package
-        run: |
-          set -e
-          echo "📦 Installing .deb package..."
-          # nfpm creates: ori-agent_<version>_amd64.deb (no 'linux_' in name)
-          echo "Available .deb packages:"
-          ls -la dist/*.deb || true
-          sudo dpkg -i dist/ori-agent_*_amd64.deb || sudo apt-get install -f -y
-
-      - name: Run smoke test
-        run: |
-          set -e
-          echo "🧪 Running smoke test..."
-
-          # Start server
-          PORT=18765
-          /usr/bin/ori-agent --port=$PORT > /tmp/ori-agent.log 2>&1 &
-          SERVER_PID=$!
-          echo "✓ Server started (PID: $SERVER_PID)"
-
-          # Wait for server
-          echo "⏳ Waiting for server to start..."
-          for i in {1..30}; do
-            if curl -sf "http://localhost:$PORT/health" > /dev/null 2>&1; then
-              echo "✓ Server responded to HTTP"
-              break
-            fi
-            if [ $i -eq 30 ]; then
-              echo "❌ Server failed to start"
-              cat /tmp/ori-agent.log
-              kill $SERVER_PID 2>/dev/null || true
-              exit 1
-            fi
-            sleep 0.5
-          done
-
-          # Test health endpoint
-          HEALTH_RESPONSE=$(curl -s "http://localhost:$PORT/health")
-          if echo "$HEALTH_RESPONSE" | grep -q "ok"; then
-            echo "✓ Health check passed"
-          else
-            echo "⚠️  Health check response: $HEALTH_RESPONSE"
-          fi
-
-          # Verify installed files
-          echo "📋 Verifying installation..."
-          test -f /usr/bin/ori-agent && echo "✓ Binary installed"
-          test -f /lib/systemd/system/ori-agent.service && echo "✓ systemd service"
-          test -d /etc/ori-agent && echo "✓ Config directory"
-
-          # Cleanup
-          kill $SERVER_PID 2>/dev/null || true
-          echo "✅ Linux .deb smoke test PASSED"
+          set -euo pipefail
+          sudo apt-get install -y ./artifacts/*.deb
+          test -f /lib/systemd/system/ori-agent.service
+          test -x /usr/bin/ori-folder-picker
+          python3 scripts/smoke-installed.py /usr/bin/ori-agent "$RELEASE_TAG"
 
   test-linux-rpm:
-    name: Linux .rpm Smoke Test
+    name: Linux RPM (amd64)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    continue-on-error: true
-    container:
-      image: fedora:38
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-
-      - name: Install GoReleaser
+      - uses: actions/checkout@v5
+      - name: Download the actual RPM
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "$RELEASE_TAG" --pattern '*_amd64.rpm' --dir artifacts
+      - name: Install and probe inside Fedora
         run: |
-          dnf install -y curl git tar
-          # Install latest goreleaser (for 'ids' field support in archives)
-          curl -Lo goreleaser.tar.gz https://github.com/goreleaser/goreleaser/releases/latest/download/goreleaser_Linux_x86_64.tar.gz
-          tar xzf goreleaser.tar.gz -C /usr/local/bin goreleaser
-
-      - name: Install folder picker build deps
-        run: |
-          dnf install -y gtk3-devel webkit2gtk4.1-devel gcc gcc-c++ make pkgconf-pkg-config
-
-      - name: Build folder picker app
-        run: ./scripts/build-folder-picker.sh
-
-      - name: Build packages
-        run: |
-          # Build server binaries and create Linux packages
-          # The menubar build is automatically skipped on Linux (skip template in .goreleaser.yaml)
-          goreleaser release --snapshot --clean --skip=publish,before
-
-      - name: Install package
-        run: |
-          set -e
-          echo "📦 Installing .rpm package..."
-          # goreleaser/nfpm creates: ori-agent_<version>_linux_amd64.rpm
-          echo "Available .rpm packages:"
-          ls -la dist/*.rpm || true
-          dnf install -y dist/ori-agent_*_linux_amd64.rpm
-
-      - name: Run smoke test
-        run: |
-          set -e
-          echo "🧪 Running smoke test..."
-
-          # Start server
-          PORT=18765
-          /usr/bin/ori-agent --port=$PORT > /tmp/ori-agent.log 2>&1 &
-          SERVER_PID=$!
-          echo "✓ Server started (PID: $SERVER_PID)"
-
-          # Wait for server
-          echo "⏳ Waiting for server to start..."
-          for i in {1..30}; do
-            if curl -sf "http://localhost:$PORT/health" > /dev/null 2>&1; then
-              echo "✓ Server responded to HTTP"
-              break
-            fi
-            if [ $i -eq 30 ]; then
-              echo "❌ Server failed to start"
-              cat /tmp/ori-agent.log
-              kill $SERVER_PID 2>/dev/null || true
-              exit 1
-            fi
-            sleep 0.5
-          done
-
-          # Test health endpoint
-          HEALTH_RESPONSE=$(curl -s "http://localhost:$PORT/health")
-          if echo "$HEALTH_RESPONSE" | grep -q "ok"; then
-            echo "✓ Health check passed"
-          else
-            echo "⚠️  Health check response: $HEALTH_RESPONSE"
-          fi
-
-          # Verify installed files
-          echo "📋 Verifying installation..."
-          test -f /usr/bin/ori-agent && echo "✓ Binary installed"
-          test -f /lib/systemd/system/ori-agent.service && echo "✓ systemd service"
-          test -d /etc/ori-agent && echo "✓ Config directory"
-
-          # Cleanup
-          kill $SERVER_PID 2>/dev/null || true
-          echo "✅ Linux .rpm smoke test PASSED"
+          docker run --rm \
+            -v "$PWD/artifacts:/artifacts:ro" \
+            -v "$PWD/scripts/smoke-installed.py:/smoke-installed.py:ro" \
+            -e RELEASE_TAG fedora:43 bash -ec '
+              dnf install -y python3 /artifacts/*.rpm
+              test -f /lib/systemd/system/ori-agent.service
+              test -x /usr/bin/ori-folder-picker
+              python3 /smoke-installed.py /usr/bin/ori-agent "$RELEASE_TAG"
+            '
 
   test-windows:
-    name: Windows MSI Smoke Test
+    name: Windows MSI (amd64)
     runs-on: windows-latest
-    timeout-minutes: 20
-    continue-on-error: true
+    timeout-minutes: 15
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
         with:
-          go-version-file: go.mod
-
-      - name: Install WiX Toolset
-        run: |
-          choco install wixtoolset -y
-          # Refresh environment variables for this session
-          $env:WIX = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment' -Name 'WIX' -ErrorAction SilentlyContinue).WIX
-          if ($env:WIX) {
-            Write-Host "WIX environment variable set to: $env:WIX"
-            echo "WIX=$env:WIX" >> $env:GITHUB_ENV
-          } else {
-            # Fallback: find WiX installation
-            $wixDir = Get-ChildItem "C:\Program Files (x86)" -Filter "WiX Toolset*" -Directory | Select-Object -First 1
-            if ($wixDir) {
-              $env:WIX = $wixDir.FullName + "\"
-              Write-Host "WIX found at: $env:WIX"
-              echo "WIX=$env:WIX" >> $env:GITHUB_ENV
-            }
-          }
-        shell: pwsh
-
-      - name: Install GoReleaser
-        run: choco install goreleaser -y
-
-      - name: Build binaries
-        shell: pwsh
-        run: |
-          # Build server binary only, skip before hooks (bash scripts don't work on Windows)
-          goreleaser build --id=server-windows --snapshot --clean --skip=before
-
-      - name: Build folder picker app
+          python-version: '3.12'
+      - name: Download the actual MSI
         shell: bash
-        run: ./scripts/build-folder-picker.sh
-
-      - name: Create MSI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "$RELEASE_TAG" --pattern 'ori-agent-*-amd64.msi' --dir artifacts
+      - name: Install and probe
         shell: pwsh
         run: |
-          # WiX requires numeric versions like x.x.x.x (no 'v' prefix or text suffixes)
-          $VERSION = (Get-Content VERSION).Trim() -replace '^v', ''
-          $VERSION = "$VERSION.0"  # Add fourth component for WiX compatibility
-          .\build\windows\create-msi.ps1 -Version $VERSION -Arch "amd64"
-
-      - name: Install MSI
-        shell: pwsh
-        run: |
-          $MSI = Get-Item dist\ori-agent-*-amd64.msi
-          Write-Host "📦 Installing MSI: $($MSI.Name)"
-
-          # Install silently
-          Start-Process msiexec.exe -ArgumentList "/i `"$($MSI.FullName)`" /qn /l*v install.log" -Wait
-
-          # Wait for installation to complete
-          Start-Sleep -Seconds 5
-
-          # Verify installation
-          $exePath = "C:\Program Files\OriAgent\bin\ori-agent.exe"
-          if (Test-Path $exePath) {
-            Write-Host "✓ Binary installed at: $exePath"
-          } else {
-            Write-Host "❌ Binary not found"
+          $ErrorActionPreference = 'Stop'
+          $packages = @(Get-ChildItem artifacts/*.msi)
+          if ($packages.Count -ne 1) { throw 'Expected exactly one MSI' }
+          $install = Start-Process msiexec.exe -ArgumentList "/i `"$($packages[0].FullName)`" /qn /norestart /l*v install.log" -Wait -PassThru
+          if ($install.ExitCode -notin @(0, 3010)) {
             Get-Content install.log
-            exit 1
+            throw "MSI installation failed: $($install.ExitCode)"
           }
-
-      - name: Run smoke test
-        shell: pwsh
-        run: |
-          $exePath = "C:\Program Files\OriAgent\bin\ori-agent.exe"
-
-          Write-Host "🧪 Running smoke test..."
-
-          # Start server
-          $port = 18765
-          $process = Start-Process -FilePath $exePath -ArgumentList "--port=$port" -RedirectStandardOutput "server-out.log" -RedirectStandardError "server-err.log" -PassThru -NoNewWindow
-          Write-Host "✓ Server started (PID: $($process.Id))"
-
-          # Wait for server (use 127.0.0.1 to avoid IPv6 resolution issues on Windows)
-          Write-Host "⏳ Waiting for server to start..."
-          $started = $false
-          for ($i = 0; $i -lt 30; $i++) {
-            try {
-              $response = Invoke-WebRequest -Uri "http://127.0.0.1:$port/health" -UseBasicParsing -TimeoutSec 1
-              if ($response.StatusCode -eq 200) {
-                Write-Host "✓ Server responded to HTTP"
-                $started = $true
-                break
-              }
-            } catch {
-              Start-Sleep -Milliseconds 500
-            }
-          }
-
-          if (-not $started) {
-            Write-Host "❌ Server failed to start"
-            Get-Content server-out.log
-            Get-Content server-err.log
-            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-            exit 1
-          }
-
-          # Test health endpoint
-          try {
-            $health = Invoke-WebRequest -Uri "http://127.0.0.1:$port/health" -UseBasicParsing
-            $content = $health.Content
-            if ($content -like "*ok*") {
-              Write-Host "✓ Health check passed"
-            } else {
-              Write-Host "⚠️  Health check response: $content"
-            }
-          } catch {
-            Write-Host "⚠️  Health check failed: $($_.Exception.Message)"
-          }
-
-          # Cleanup
-          Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-          Write-Host "✅ Windows MSI smoke test PASSED"
+          $bin = 'C:\Program Files\OriAgent\bin\ori-agent.exe'
+          if (-not (Test-Path $bin)) { throw 'Installed server is missing' }
+          python scripts/smoke-installed.py $bin $env:RELEASE_TAG
+          if ($LASTEXITCODE -ne 0) { throw 'Installed server probe failed' }
 
   summary:
-    name: Test Summary
+    name: Installer gate
     runs-on: ubuntu-latest
     needs: [test-macos, test-linux-deb, test-linux-rpm, test-windows]
     if: always()
     steps:
-      - name: Check results
+      - name: Require every platform (failures and skipped jobs block publication)
+        env:
+          RESULTS: ${{ toJSON(needs) }}
         run: |
-          echo "╔══════════════════════════════════════════╗"
-          echo "║  Cross-Platform Smoke Test Summary      ║"
-          echo "╚══════════════════════════════════════════╝"
-          echo ""
-          echo "Test Results:"
-          echo "  macOS:       ${{ needs.test-macos.result }}"
-          echo "  Linux .deb:  ${{ needs.test-linux-deb.result }}"
-          echo "  Linux .rpm:  ${{ needs.test-linux-rpm.result }}"
-          echo "  Windows MSI: ${{ needs.test-windows.result }}"
-          echo ""
-
-          # Smoke tests are advisory (post-release verification). Surface failures
-          # in the summary but don't fail the workflow — the release artifacts
-          # were already built and published by release.yml. Re-run failing jobs
-          # via `gh run rerun --failed` if you suspect a real regression.
-          if [ "${{ needs.test-macos.result }}" != "success" ] || \
-             [ "${{ needs.test-linux-deb.result }}" != "success" ] || \
-             [ "${{ needs.test-linux-rpm.result }}" != "success" ] || \
-             [ "${{ needs.test-windows.result }}" != "success" ]; then
-            echo "⚠️  Some smoke tests failed — see job logs."
-            echo "   These are post-release checks; investigate before next release."
-          else
-            echo "✅ All smoke tests passed!"
-          fi
+          python3 - <<'PY'
+          import json, os
+          results = json.loads(os.environ['RESULTS'])
+          for name, result in results.items():
+              print(f"{name}: {result['result']}")
+          if not all(result['result'] == 'success' for result in results.values()):
+              raise SystemExit('Installer gate failed; release stays a draft')
+          PY

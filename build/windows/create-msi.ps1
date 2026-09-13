@@ -14,6 +14,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Keep the RC suffix in the filename and embedded server version, but WiX's
+# ProductVersion must be numeric. Same-version upgrades are enabled in the WXS.
+if ($Version -notmatch '^(\d+\.\d+\.\d+(?:\.\d+)?)(?:-rc\.[1-9]\d*)?$') {
+    throw "Expected a numeric version or an -rc.N candidate: $Version"
+}
+$ProductVersion = $Matches[1]
+
 Write-Host "🚀 Creating Windows MSI for Ori Agent v$Version ($Arch)" -ForegroundColor Blue
 Write-Host "==========================================================" -ForegroundColor Blue
 
@@ -127,7 +134,7 @@ Copy-Item -Path $WxsFile -Destination $wxsBuildFile
 # Replace template variables in WXS file
 Write-Host "  Replacing template variables..." -ForegroundColor Yellow
 $wxsContent = Get-Content -Path $wxsBuildFile -Raw
-$wxsContent = $wxsContent -replace '\{\{\.Version\}\}', $Version
+$wxsContent = $wxsContent -replace '\{\{\.Version\}\}', $ProductVersion
 $wxsContent = $wxsContent -replace '\{\{\.Binary\}\}', $binaryPath
 $wxsContent = $wxsContent -replace '\{\{\.FolderPickerBinary\}\}', $folderPickerPath
 $wxsContent = $wxsContent -replace '\{\{\.MsiArch\}\}', $(if ($Arch -eq "amd64") { "x64" } else { $Arch })
