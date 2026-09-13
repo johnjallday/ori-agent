@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -102,29 +101,10 @@ func NewSQLiteStore(db *database.DB) (*SQLiteStore, error) {
 	if db == nil {
 		return nil, ErrUnavailable
 	}
-	store := &SQLiteStore{db: db}
-	if _, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS group_requirement_reviews (
-			token TEXT PRIMARY KEY,
-			payload_json BLOB NOT NULL,
-			expires_at TEXT NOT NULL,
-			consumed_at TEXT
-		);
-		CREATE TABLE IF NOT EXISTS group_requirement_operations (
-			owner_user_id TEXT NOT NULL,
-			operation_kind TEXT NOT NULL,
-			idempotency_key TEXT NOT NULL,
-			input_digest TEXT NOT NULL,
-			review_digest TEXT NOT NULL,
-			child_workspace_id TEXT NOT NULL,
-			payload_json BLOB NOT NULL,
-			updated_at TEXT NOT NULL,
-			PRIMARY KEY (owner_user_id, operation_kind, idempotency_key)
-		);
-	`); err != nil {
-		return nil, fmt.Errorf("initialize group requirement receipts: %w", err)
-	}
-	return store, nil
+	// The database migration owner creates these tables before services start.
+	// Keeping schema changes out of this constructor makes reset inspection and
+	// pre-start recovery see the same complete, versioned schema.
+	return &SQLiteStore{db: db}, nil
 }
 
 func (s *SQLiteStore) SaveReceipt(ctx context.Context, receipt Receipt) error {

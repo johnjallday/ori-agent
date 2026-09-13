@@ -34,6 +34,7 @@ func ResetRecordTables() []string {
 		"sample_library_content_fact", "sample_library_annotation", "sample_library_collection",
 		"sample_library_collection_member", "sample_library_child_copy",
 		"sample_library_review_receipt", "sample_library_operation_receipt",
+		"group_requirement_reviews", "group_requirement_operations",
 		"agent_map_layouts", "agent_map_positions",
 		// The City Economy ledger is an app record: resetting app records
 		// clears the city (both balances and every pending Harvest) and the

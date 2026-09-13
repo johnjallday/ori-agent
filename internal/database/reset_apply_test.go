@@ -28,6 +28,13 @@ func TestResetAppRecordsClearsFixedDomainsAndPreservesSchemaAndBackingFiles(t *t
 		`INSERT INTO agent_map_layouts (
 			user_id, schema_version, revision, snap_to_grid, created_at, updated_at
 		) VALUES ('local', 1, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		`INSERT INTO group_requirement_reviews(token, payload_json, expires_at)
+			VALUES ('reset-review', '{}', '2026-09-13T00:00:00Z')`,
+		`INSERT INTO group_requirement_operations(
+			owner_user_id, operation_kind, idempotency_key, input_digest,
+			review_digest, child_workspace_id, payload_json, updated_at
+		) VALUES ('local', 'create_workspace', 'reset-operation', 'input',
+			'review', 'child', '{}', '2026-09-13T00:00:00Z')`,
 	} {
 		if _, err := db.ExecContext(t.Context(), statement); err != nil {
 			_ = db.Close()
@@ -41,7 +48,10 @@ func TestResetAppRecordsClearsFixedDomainsAndPreservesSchemaAndBackingFiles(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"sessions", "messages", "setup_journey_run", "sample_library_state", "agent_map_layouts"} {
+	for _, name := range []string{
+		"sessions", "messages", "setup_journey_run", "sample_library_state", "agent_map_layouts",
+		"group_requirement_reviews", "group_requirement_operations",
+	} {
 		if before.Counts[name] == nil || *before.Counts[name] == 0 {
 			t.Fatalf("fixture app-record domain %s is empty: %#v", name, before.Counts)
 		}
@@ -51,7 +61,10 @@ func TestResetAppRecordsClearsFixedDomainsAndPreservesSchemaAndBackingFiles(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"sessions", "messages", "setup_journey_run", "sample_library_state", "agent_map_layouts"} {
+	for _, name := range []string{
+		"sessions", "messages", "setup_journey_run", "sample_library_state", "agent_map_layouts",
+		"group_requirement_reviews", "group_requirement_operations",
+	} {
 		if deleted[name] == 0 {
 			t.Fatalf("deletion count for %s = 0: %#v", name, deleted)
 		}
