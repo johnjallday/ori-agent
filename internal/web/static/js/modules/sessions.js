@@ -361,6 +361,13 @@ const sessionManager = {
     const workspaceNameInput = document.getElementById('folderNameInput');
     workspaceNameInput?.addEventListener('input', () => {
       this.invalidateGroupRequirementReview();
+      // A Group Manager's proposed identity and prompt are derived from the
+      // Group name. Once a roster has loaded, editing that name invalidates its
+      // plan/acknowledgement so Review can never submit a manager for the old
+      // Group. Saved teammates remain staged by the draft's normal semantics.
+      if (this.usesGroupRosterCreator() && this.teamDraft?.plan?.blueprintKey) {
+        this.resetTemplateAgentReview();
+      }
       this.clearWorkspaceNameError();
       this.updateWorkspaceNameHint();
       // The final CTA and destination route name the workspace, so both track it as it is typed.
@@ -3950,8 +3957,8 @@ const sessionManager = {
 
   resetAddWorkspaceModalForm(options = {}) {
     const { preserveAskOri = false } = options;
-    // A Workspace starts at Blueprint; Group starts at Details. Import flips to
-    // its fixed Details-only layout immediately below.
+    // A Workspace starts at Blueprint; Group starts at Details before its
+    // reviewed roster. Import flips to its fixed Details-only layout below.
     this.wizardStep = this.isGroupCreator() ? 2 : 1;
     const modalElement = document.getElementById('addFolderModal');
     const nameInput = document.getElementById('folderNameInput');
@@ -4398,6 +4405,10 @@ const sessionManager = {
   // to decide whether staged overrides belong to the blueprint still on screen:
   // a change discards them (FR21), while a retry of the same blueprint keeps them.
   currentBlueprintKey() {
+    if (this.usesGroupRosterCreator()) {
+      const name = String(document.getElementById('folderNameInput')?.value || '').trim();
+      return name ? `group-roster:${name.toLocaleLowerCase()}` : 'group-roster';
+    }
     const fields = window.ProjectTemplateCard?.getPayloadFields?.() || {};
     const templateId = String(fields.template_id || '').trim();
     const templatePath = String(fields.template_path || '').trim();
@@ -4407,22 +4418,29 @@ const sessionManager = {
   },
 
   async refreshTemplateAgentPlan() {
-    const fields = window.ProjectTemplateCard?.getPayloadFields?.() || {};
+    const groupRoster = this.usesGroupRosterCreator();
+    const fields = groupRoster ? {} : window.ProjectTemplateCard?.getPayloadFields?.() || {};
     const templateId = String(fields.template_id || '').trim();
     const templatePath = String(fields.template_path || '').trim();
     // Blank ships a synthetic single-agent roster (Workspace Manager). It has no
     // template_id/path, so signal it explicitly — but an ad-hoc folder override
     // (template_path) takes precedence and is no longer "blank".
     const isBlank =
+      !groupRoster &&
       Boolean(window.ProjectTemplateCard?.getSelectedTemplate?.()?.blank) &&
       !templateId &&
       !templatePath;
+    const groupName = String(document.getElementById('folderNameInput')?.value || '').trim();
     const requestId = ++this.templateAgentPlanRequestId;
     const blueprintKey = this.currentBlueprintKey();
     const draft = this.ensureWorkspaceTeamDraft();
     const api = window.CreateWorkspaceTeamDraft;
 
-    if (this.importModeEnabled || (!templateId && !templatePath && !isBlank)) {
+    if (
+      this.importModeEnabled ||
+      (!groupRoster && !templateId && !templatePath && !isBlank) ||
+      (groupRoster && !groupName)
+    ) {
       this.resetTemplateAgentReview();
       return;
     }
@@ -4441,6 +4459,8 @@ const sessionManager = {
           template_id: templateId || undefined,
           template_path: templatePath || undefined,
           blank: isBlank || undefined,
+          group_roster: groupRoster || undefined,
+          group_name: groupRoster ? groupName : undefined,
           group_composition: this.groupRequirementDraft?.composition || undefined
         })
       });
@@ -6934,7 +6954,7 @@ const sessionManager = {
 
   refreshWorkspaceReview() {
     const summary = document.getElementById('workspaceReviewSummary');
-    if (this.isGroupCreator()) {
+    if (this.isGroupCreator() && !this.usesGroupRosterCreator()) {
       if (summary) summary.innerHTML = this.renderOrdinaryGroupReceipt();
       document.getElementById('workspaceReviewIssues')?.replaceChildren();
       document.getElementById('workspaceReviewIssues')?.setAttribute('hidden', '');
@@ -6942,11 +6962,14 @@ const sessionManager = {
       this.renderSetupPreview(null);
       return;
     }
+    const groupRoster = this.usesGroupRosterCreator();
     document.getElementById('workspaceReviewIssues')?.removeAttribute('hidden');
     this.syncGroupRequirementParentControl();
     const heading = document.getElementById('workspaceTeamHeading');
     const teamSummary = document.getElementById('workspaceTeamSummary');
-    const selectedTemplate = window.ProjectTemplateCard?.getSelectedTemplate?.();
+    const selectedTemplate = groupRoster
+      ? null
+      : window.ProjectTemplateCard?.getSelectedTemplate?.();
     const name = String(document.getElementById('folderNameInput')?.value || '').trim();
     const view = this.teamView();
     const roster = view ? view.roster : [];
@@ -6961,25 +6984,41 @@ const sessionManager = {
     if (heading) {
       // "Workspace Assistant" is a retired product label (Issue #350); this
       // heading describes the roster, so it says what the roster is.
-      heading.textContent = view?.isAssistantProgram
-        ? view.assistantProgram.stationName || 'Shared assistant team'
-        : roster.length === 1
-          ? 'Entry Assistant'
-          : 'Workspace Team';
+      heading.textContent = groupRoster
+        ? 'Group roster'
+        : view?.isAssistantProgram
+          ? view.assistantProgram.stationName || 'Shared assistant team'
+          : roster.length === 1
+            ? 'Entry Assistant'
+            : 'Workspace Team';
     }
-    if (teamSummary) teamSummary.textContent = this.workspaceTeamSummaryText(view);
-    if (summary) summary.innerHTML = this.renderWorkspaceReceipt(view, selectedTemplate, name);
-    this.renderSetupPreview(selectedTemplate);
+    if (teamSummary) {
+      teamSummary.textContent = groupRoster
+        ? 'Review the required Group Manager and add saved teammates if useful. No agent exists until Create.'
+        : this.workspaceTeamSummaryText(view);
+    }
+    if (summary) {
+      summary.innerHTML = groupRoster
+        ? this.renderOrdinaryGroupReceipt(view)
+        : this.renderWorkspaceReceipt(view, selectedTemplate, name);
+    }
+    this.renderSetupPreview(groupRoster ? null : selectedTemplate);
     this.renderWorkspaceTeamIssues();
     this.renderWorkspaceTeamIssues('workspaceReviewIssues');
     this.renderWorkspaceTeamBatchActions();
-    this.renderWorkspaceRoleRoster(view);
+    if (groupRoster) {
+      const roleRoster = document.getElementById('workspaceRoleRoster');
+      roleRoster?.replaceChildren();
+      roleRoster?.setAttribute('hidden', '');
+    } else {
+      this.renderWorkspaceRoleRoster(view);
+    }
     this.renderWorkspaceTeamRoster();
-    this.renderBlueprintAgentSummary();
+    if (!groupRoster) this.renderBlueprintAgentSummary();
     window.SetupWorkspaceCreator?.refreshReview();
   },
 
-  renderOrdinaryGroupReceipt() {
+  renderOrdinaryGroupReceipt(view = null) {
     const guided =
       this.workspaceCreatorContext?.mode === 'guided' ? this.workspaceCreatorContext.guided : null;
     if (guided) return this.renderGuidedGroupReceipt(guided);
@@ -7005,6 +7044,7 @@ const sessionManager = {
           </div>
         </div>`
       : '';
+    const rosterReceipt = view ? this.renderGroupRosterReceipt(view) : '';
     return `
       <div class="workspace-review-card">
         <div class="workspace-review-card-main">
@@ -7019,8 +7059,8 @@ const sessionManager = {
       <div class="workspace-review-card">
         <div class="workspace-review-card-main">
           <span class="workspace-review-card-label">What will be created</span>
-          <strong>One empty organizational group</strong>
-          <span class="workspace-review-card-note">No agents, project files, runtime setup, or Assistant Program membership will be created.</span>
+          <strong>One organizational group and its reviewed roster</strong>
+          <span class="workspace-review-card-note">The required Manager and any selected saved teammates are created or attached only after confirmation. The Manager is scoped to this group’s files and notes, not member workspaces or their runtime setup.</span>
         </div>
       </div>
       ${memberReceipt}
@@ -7028,10 +7068,36 @@ const sessionManager = {
         <div class="workspace-review-card-main">
           <span class="workspace-review-card-label">Parent group</span>
           <span class="workspace-review-card-meta">${this.escapeHtml(parentName)}</span>
-          <span class="workspace-review-card-note">Parentage organizes this group only; it does not grant program membership.</span>
+          <span class="workspace-review-card-note">Parentage organizes this group only; it grants neither program membership nor Manager access to members.</span>
         </div>
         <div class="workspace-review-card-actions">
           <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="2">Edit</button>
+        </div>
+      </div>
+      ${rosterReceipt}`;
+  },
+
+  renderGroupRosterReceipt(view) {
+    const roster = view?.roster || [];
+    const lines = roster.length
+      ? roster.map(entry => {
+          const action =
+            entry.lifecycle === 'reuse'
+              ? 'saved agent will be attached'
+              : 'new agent will be created';
+          const designation = entry.designation === 'primary' ? 'Group Manager' : 'Teammate';
+          return `${entry.name} · ${designation} · ${action}`;
+        })
+      : ['Group Manager is still being loaded.'];
+    return `
+      <div class="workspace-review-card">
+        <div class="workspace-review-card-main">
+          <span class="workspace-review-card-label">Group roster</span>
+          ${lines.map(line => `<span class="workspace-review-card-meta">${this.escapeHtml(line)}</span>`).join('')}
+          <span class="workspace-review-card-note">This roster was reviewed before creation; it does not grant access to member workspaces.</span>
+        </div>
+        <div class="workspace-review-card-actions">
+          <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="3">Edit roster</button>
         </div>
       </div>`;
   },
@@ -7858,8 +7924,8 @@ const sessionManager = {
   // ----- Shared Workspace / Group creator -----
 
   // These are the stable DOM step IDs. Visible order comes from the active
-  // operation context: a Workspace is 1→2→3→4, while an ordinary Group is
-  // deliberately 2→4. Import remains a fixed Details-only operation.
+  // operation context: a Workspace is 1→2→3→4, while an ordinary Group uses
+  // Details → Group Roster → Review (2→3→4). Import remains Details-only.
   wizardStepCount: 4,
 
   creatorKind() {
@@ -7881,13 +7947,22 @@ const sessionManager = {
     );
   },
 
+  usesGroupRosterCreator() {
+    return this.isOrdinaryGroupCreator();
+  },
+
+  usesTeamRosterCreator() {
+    return this.isWorkspaceCreator() || this.usesGroupRosterCreator();
+  },
+
   ordinaryGroupPayload(values) {
     const build = window.WorkspaceCreatorState?.buildOrdinaryGroupPayload;
     if (typeof build === 'function') return build(values);
     const payload = {
       name: String(values?.name || '').trim(),
       kind: 'group',
-      create_template_agents: false
+      group_roster: true,
+      create_template_agents: true
     };
     for (const key of ['description', 'parent_id', 'color']) {
       const value = String(values?.[key] || '').trim();
@@ -7898,6 +7973,7 @@ const sessionManager = {
 
   creatorWizardSteps() {
     if (this.importModeEnabled) return [2];
+    if (this.usesGroupRosterCreator()) return [2, 3, 4];
     return this.isGroupCreator() ? [2, 4] : [1, 2, 3, 4];
   },
 
@@ -7980,6 +8056,9 @@ const sessionManager = {
       this.renderWorkspaceGroupDestinationCard();
       void this.refreshTemplateAgentPlan();
     }
+    if (nextContext.kind === 'group' && this.usesGroupRosterCreator()) {
+      this.resetTemplateAgentReview();
+    }
     this.clearWorkspaceCreateError();
     this.wizardStep = nextContext.kind === 'group' ? 2 : 1;
     this.restoreWorkspaceCreatorDetailsDraft(nextContext.kind);
@@ -8004,6 +8083,9 @@ const sessionManager = {
     const step2Description = document.getElementById('wizardStep2Description');
     const step4Title = document.getElementById('wizardStep4Title');
     const step4Description = document.getElementById('wizardStep4Description');
+    const step3Name = document.querySelector('[data-workspace-creator-step-name="3"]');
+    const step3Title = document.getElementById('wizardStep3Title');
+    const step3Description = document.getElementById('wizardStep3Description');
     const groupNotice = document.getElementById('workspaceGroupDetailsNotice');
     const nameLabel = document.getElementById('folderNameLabel');
     const nameInput = document.getElementById('folderNameInput');
@@ -8019,6 +8101,7 @@ const sessionManager = {
     const projectOpen = document.getElementById('projectTemplateOpenAfterCreate');
     const groupDestination = document.getElementById('workspaceGroupDestinationCard');
     const guidedCreator = context?.mode === 'guided' && Boolean(context?.guided);
+    const ordinaryGroup = kind === 'group' && !importMode;
 
     if (workspaceChoice) {
       workspaceChoice.checked = kind === 'workspace';
@@ -8053,28 +8136,35 @@ const sessionManager = {
       step2Description.textContent = guidedCreator
         ? 'Name the canonical Home this setup will review. Its setup owner decides whether it is created or reused.'
         : kind === 'group'
-          ? 'Name the home for related workspaces. Groups start empty, without agents.'
+          ? 'Name the home for related workspaces, then review the agents that will be created with it.'
           : 'Name the space and add the context Ori should carry into its review.';
+    }
+    if (step3Name) step3Name.textContent = ordinaryGroup ? 'Group roster' : 'Team';
+    if (step3Title)
+      step3Title.textContent = ordinaryGroup ? 'Review the Group Roster' : 'Confirm your team';
+    if (step3Description) {
+      step3Description.textContent = ordinaryGroup
+        ? 'Customize the Group Manager and add saved teammates. Nothing is created until final confirmation.'
+        : 'Review the proposed agent roster, customize any agents, and add saved teammates.';
     }
     if (step4Title)
       step4Title.textContent = guidedCreator
         ? 'Review the canonical Home'
         : kind === 'group'
-          ? 'Ready to create this group?'
+          ? 'Review this group and its roster'
           : 'Ready to create?';
     if (step4Description) {
       step4Description.textContent = guidedCreator
         ? 'This setup will only create or reuse its canonical Home through the reviewed setup action.'
         : kind === 'group'
-          ? 'Check the group name and destination. It will be created empty, without agents.'
+          ? 'Check the group name, destination, and reviewed roster. Agents are created only after you confirm.'
           : 'Check the workspace, its team, and anything it will ask for after creation.';
     }
-    const ordinaryGroup = kind === 'group' && !importMode;
     if (groupNotice) {
       groupNotice.hidden = !ordinaryGroup;
       groupNotice.innerHTML = guidedCreator
         ? "<strong>This is the setup's canonical Home.</strong><span>It is reviewed and created or reused only by the guided setup action. No project, team, or replacement group is created here.</span>"
-        : '<strong>Groups organize related workspaces.</strong><span>This creates an empty group. Agents, projects, and Assistant Program membership are separate choices.</span>';
+        : '<strong>Groups organize related workspaces.</strong><span>Review the Group Manager and any saved teammates before creating anything. Managers use only group files and notes, never member workspaces.</span>';
     }
     if (nameLabel) nameLabel.textContent = ordinaryGroup ? 'Group name' : 'Workspace name';
     if (nameInput)
@@ -8180,7 +8270,7 @@ const sessionManager = {
       // The last transition always names Review, regardless of whether Team is
       // in this operation's sequence.
       nextBtn.textContent = this.nextWizardStep() === finalStep ? 'Review →' : 'Continue →';
-      nextBtn.disabled = this.isWorkspaceCreator() && step === 3 && this.hasBlockingTeamIssue();
+      nextBtn.disabled = this.usesTeamRosterCreator() && step === 3 && this.hasBlockingTeamIssue();
     }
     if (backBtn) backBtn.hidden = importMode || onFirstStep;
     if (createBtn) {
@@ -8196,18 +8286,21 @@ const sessionManager = {
         // blockers remain exactly as before.
         createBtn.disabled =
           !importMode &&
-          this.isWorkspaceCreator() &&
-          (this.hasBlockingTeamIssue() ||
-            this.blueprintSelectionBlocked() ||
-            this.groupRequirementBlocked() ||
-            window.SetupWorkspaceCreator?.canSubmit() === false);
+          ((this.usesTeamRosterCreator() && this.hasBlockingTeamIssue()) ||
+            (this.isWorkspaceCreator() &&
+              (this.blueprintSelectionBlocked() ||
+                this.groupRequirementBlocked() ||
+                window.SetupWorkspaceCreator?.canSubmit() === false)));
       }
     }
     if (onFinalStep && this.isWorkspaceCreator()) this.renderReviewReadiness();
     // The step-2 recap names a Workspace blueprint; Groups and Import have none.
     const recap = document.getElementById('wizardStep2Recap');
     if (recap) recap.hidden = importMode || this.isGroupCreator();
-    if (!importMode && this.isWorkspaceCreator() && step === 3) {
+    if (!importMode && this.usesTeamRosterCreator() && step === 3) {
+      if (this.usesGroupRosterCreator() && this.teamView()?.planStatus !== 'ready') {
+        void this.refreshTemplateAgentPlan();
+      }
       this.refreshWorkspaceReview();
       // Assistant programs own one declaration-defined shared roster; attaching
       // an unrelated saved agent here would violate that stable identity.
@@ -8234,7 +8327,7 @@ const sessionManager = {
   // valid create request. Advisory issues (an intentionally agent-less team, a
   // picker that failed to load) deliberately do not count.
   hasBlockingTeamIssue() {
-    if (!this.isWorkspaceCreator()) return false;
+    if (!this.usesTeamRosterCreator()) return false;
     const view = this.teamView();
     return Boolean(view && view.blockingIssues.length > 0);
   },
@@ -8321,13 +8414,13 @@ const sessionManager = {
       ? failed || uncertain
         ? `${name} was created. ${moved} selected workspace${moved === 1 ? '' : 's'} moved; review the group for the remaining result.`
         : `${name} was created with ${moved} selected workspace${moved === 1 ? '' : 's'}.`
-      : `${name} is ready as an empty group.`;
+      : `${name} is ready with its reviewed Group Roster.`;
     const options = slug
       ? {
           title: 'Group created',
           duration: 9000,
           action: {
-            label: 'Open group / Set up team',
+            label: 'Open group / Manage team',
             onClick: () => this.openCreatedGroupTeamSurface(folder)
           }
         }
@@ -8777,7 +8870,7 @@ const sessionManager = {
     // Team refuses to hand off to Review while the resulting roster cannot be
     // resolved: Review would otherwise present a receipt for a team nobody can
     // see, and Create would build a request the server will reject.
-    if (this.isWorkspaceCreator() && targetStep > 3 && this.wizardStep === 3) {
+    if (this.usesTeamRosterCreator() && targetStep > 3 && this.wizardStep === 3) {
       if (this.hasBlockingTeamIssue()) {
         this.refreshWizardChrome();
         const blockers = this.teamView()?.blockingIssues || [];
@@ -8821,6 +8914,9 @@ const sessionManager = {
       this.clearWorkspaceCreateError();
     }
     this.wizardStep = targetStep;
+    if (targetStep === 3 && this.usesGroupRosterCreator()) {
+      void this.refreshTemplateAgentPlan();
+    }
     this.refreshWizardChrome();
     const body = document.querySelector('#addFolderModal .modal-body');
     if (body) body.scrollTop = 0;
@@ -8985,9 +9081,11 @@ const sessionManager = {
     const importEnabled = this.importModeEnabled || Boolean(importToggle?.checked);
     const ordinaryGroup = !importEnabled && this.isOrdinaryGroupCreator();
     const workspaceBootstrap = ordinaryGroup ? null : this.getWorkspaceBootstrapFromModal();
-    // Snapshot the confirmed Team receipt before the final readiness refresh.
-    // Group creation intentionally has no Team payload or Team prerequisite.
-    const confirmedTeamView = importEnabled || ordinaryGroup ? null : this.teamView();
+    // Snapshot the roster receipt before the final readiness refresh. An
+    // ordinary Group uses the same draft mechanics for its reviewed Manager;
+    // guided Home preparation remains owned by its separate setup action.
+    const requiresReviewedRoster = !importEnabled && this.usesTeamRosterCreator();
+    const confirmedTeamView = requiresReviewedRoster ? this.teamView() : null;
     const confirmedTeamPayload = confirmedTeamView?.payload || {};
     const assistantRosterAlreadyHired = Boolean(confirmedTeamView?.assistantProgram?.existingHired);
     const openProjectAfterCreate = Boolean(
@@ -9015,11 +9113,7 @@ const sessionManager = {
       await guided.submit({ name });
       return;
     }
-    if (
-      !importEnabled &&
-      !ordinaryGroup &&
-      (!confirmedTeamView || !confirmedTeamView.canContinueFromTeam)
-    ) {
+    if (requiresReviewedRoster && (!confirmedTeamView || !confirmedTeamView.canContinueFromTeam)) {
       this.goToWizardStep(3);
       this.refreshWorkspaceReview();
       const blocking = this.teamView()?.blockingIssues[0];
@@ -9122,8 +9216,8 @@ const sessionManager = {
         payload.path = importPath;
         payload.allow_duplicate = Boolean(this.importAllowDuplicate);
         payload.entry_point = this.importEntryPoint || 'workspace_hub_create';
-      } else if (!ordinaryGroup) {
-        if (window.ProjectTemplateCard) {
+      } else if (requiresReviewedRoster || !ordinaryGroup) {
+        if (!ordinaryGroup && window.ProjectTemplateCard) {
           // Optional project scaffolding from the template picker
           // (template_id/template_path). The scaffolded project folder name
           // defaults to the workspace name server-side.
@@ -9166,13 +9260,13 @@ const sessionManager = {
             }))
           };
         }
-        if (teamPayload.team_intent) {
+        if (!this.usesGroupRosterCreator() && teamPayload.team_intent) {
           payload.team_intent = { ...teamPayload.team_intent };
         }
-        // Strict intent always carries the explicit array, including when it is
-        // empty. Legacy API clients preserve their historical behavior by
-        // omitting team_intent entirely.
-        if (Array.isArray(teamPayload.role_staffing)) {
+        // Strict project intent always carries the explicit array, including
+        // when empty. A Group Roster instead uses template_agent_review; this
+        // preserves the server boundary that rejects team_intent for groups.
+        if (!this.usesGroupRosterCreator() && Array.isArray(teamPayload.role_staffing)) {
           payload.role_staffing = teamPayload.role_staffing.map(entry => ({ ...entry }));
         }
         if (Array.isArray(teamPayload.existing_agent_names)) {

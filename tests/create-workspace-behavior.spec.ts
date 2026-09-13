@@ -690,7 +690,7 @@ test('createFolder submits workspace_preset for create and import', async ({ pag
   await expect.poll(() => captured.import).toBe('research');
 });
 
-test('the shared creator makes an ordinary Group through Details and Review only', async ({
+test('the shared creator makes an ordinary Group through Details, Roster, and Review', async ({
   page
 }) => {
   let payload: Record<string, unknown> | undefined;
@@ -721,20 +721,24 @@ test('the shared creator makes an ordinary Group through Details and Review only
   await expect(page.locator('#workspaceBootstrapFields')).toBeHidden();
 
   await page.fill('#folderNameInput', 'Browser group');
-  await page.fill('#folderDescriptionInput', 'An empty group created by the shared dialog.');
+  await page.fill('#folderDescriptionInput', 'A managed group created by the shared dialog.');
   await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#wizardStep3')).toBeVisible();
+  await expect(page.locator('#workspaceTeamHeading')).toHaveText('Group roster');
+  await advanceToReviewFromTeam(page);
   await expect(page.locator('#wizardStep4')).toBeVisible();
   await expect(page.locator('#workspaceReviewSummary')).toContainText(
-    'One empty organizational group'
+    'One organizational group and its reviewed roster'
   );
   await expect(page.locator('#createFolderBtn')).toHaveText('Create group “Browser group”');
   await page.locator('#createFolderBtn').click();
   await expect.poll(() => payload).toBeDefined();
   expect(payload).toMatchObject({
     name: 'Browser group',
-    description: 'An empty group created by the shared dialog.',
+    description: 'A managed group created by the shared dialog.',
     kind: 'group',
-    create_template_agents: false
+    group_roster: true,
+    create_template_agents: true
   });
   for (const field of [
     'template_id',
@@ -745,14 +749,17 @@ test('the shared creator makes an ordinary Group through Details and Review only
     'team_intent',
     'role_staffing',
     'existing_agent_names',
-    'entry_agent_name',
-    'template_agent_overrides',
-    'template_agent_review'
+    'entry_agent_name'
   ]) {
     expect(payload).not.toHaveProperty(field);
   }
+  expect(payload).toHaveProperty('template_agent_review');
+  expect(payload?.template_agent_review).toMatchObject({
+    version: 1,
+    expectations: [{ index: 0, name: 'Browser group Manager', action: 'create' }]
+  });
   await expect(page.locator('#toastContainer .toast-action')).toHaveText(
-    'Open group / Set up team'
+    'Open group / Manage team'
   );
 });
 
@@ -785,8 +792,10 @@ test('creator lifecycle keeps ordinary drafts isolated across kind switches and 
   await expect(page.locator('#folderNameInput')).toHaveValue('Draft stays local');
   await page.locator('#folderDescriptionInput').fill('Group description');
   await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#wizardStep3')).toBeVisible();
+  await advanceToReviewFromTeam(page);
   await expect(page.locator('#workspaceReviewSummary')).toContainText(
-    'One empty organizational group'
+    'One organizational group and its reviewed roster'
   );
 
   await page.locator('#workspaceCreatorKindWorkspace').check();

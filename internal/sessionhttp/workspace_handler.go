@@ -224,15 +224,19 @@ type createWorkspaceRequest struct {
 	// attach while the workspace is created. A nil slice preserves the legacy
 	// entry-agent-only behavior; a present (including empty) slice opts into the
 	// additive template-plus-existing composition contract.
-	ExistingAgentNames     []string                   `json:"existing_agent_names,omitempty"`
-	WorkspaceBootstrap     *workspaceBootstrapRequest `json:"workspace_bootstrap,omitempty"`
-	TemplateID             string                     `json:"template_id,omitempty"`   // Optional project template from the library
-	TemplatePath           string                     `json:"template_path,omitempty"` // Optional arbitrary folder used as a project template. NOT restricted to the templates library: resolveProjectTemplate/LoadFolder will stat and copy from any path the caller supplies. Acceptable for this admin-facing, local-first, single-user app; do not expose this endpoint to untrusted callers without adding a path allowlist.
-	ProjectName            string                     `json:"project_name,omitempty"`  // Project name for template instantiation (defaults to the workspace name)
-	Tags                   []string                   `json:"tags,omitempty"`          // Optional initial tags; merged with template tags
-	CreateTemplateAgents   *bool                      `json:"create_template_agents,omitempty"`
-	TemplateAgentOverrides []templateAgentOverride    `json:"template_agent_overrides,omitempty"`
-	TemplateAgentReview    *templateAgentReview       `json:"template_agent_review,omitempty"`
+	ExistingAgentNames   []string                   `json:"existing_agent_names,omitempty"`
+	WorkspaceBootstrap   *workspaceBootstrapRequest `json:"workspace_bootstrap,omitempty"`
+	TemplateID           string                     `json:"template_id,omitempty"`   // Optional project template from the library
+	TemplatePath         string                     `json:"template_path,omitempty"` // Optional arbitrary folder used as a project template. NOT restricted to the templates library: resolveProjectTemplate/LoadFolder will stat and copy from any path the caller supplies. Acceptable for this admin-facing, local-first, single-user app; do not expose this endpoint to untrusted callers without adding a path allowlist.
+	ProjectName          string                     `json:"project_name,omitempty"`  // Project name for template instantiation (defaults to the workspace name)
+	Tags                 []string                   `json:"tags,omitempty"`          // Optional initial tags; merged with template tags
+	CreateTemplateAgents *bool                      `json:"create_template_agents,omitempty"`
+	// GroupRoster opts a Group into the separate reviewed roster contract. It is
+	// intentionally not team_intent: project role staffing remains invalid for
+	// groups and cannot be smuggled in through this UI path.
+	GroupRoster            bool                    `json:"group_roster,omitempty"`
+	TemplateAgentOverrides []templateAgentOverride `json:"template_agent_overrides,omitempty"`
+	TemplateAgentReview    *templateAgentReview    `json:"template_agent_review,omitempty"`
 	// TeamIntent is raw so absence (legacy), explicit null, malformed objects,
 	// and unknown fields remain distinguishable at the strict creation gate.
 	TeamIntent        json.RawMessage `json:"team_intent,omitempty"`
@@ -425,6 +429,31 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		_ = orihttp.RespondBadRequest(w, err.Error())
 		return
 	}
+	if req.GroupRoster && kind != session.WorkspaceKindGroup {
+		_ = orihttp.RespondBadRequest(w, "group_roster is available only when kind is group")
+		return
+	}
+	if kind == session.WorkspaceKindGroup && req.GroupRoster {
+		if !createTemplateAgentsEnabled(req) {
+			_ = orihttp.RespondBadRequest(w, "group_roster requires create_template_agents to be true")
+			return
+		}
+		if req.TemplateAgentReview == nil {
+			_ = orihttp.RespondBadRequest(w, "group_roster requires a reviewed Group Manager")
+			return
+		}
+		if req.teamIntentPresent || req.roleStaffingPresent {
+			_ = orihttp.RespondBadRequest(w, "group_roster cannot use project team_intent or role_staffing")
+			return
+		}
+		if strings.TrimSpace(req.EntryAgentName) != "" {
+			_ = orihttp.RespondBadRequest(w, "group_roster chooses its Group Manager; use template_agent_overrides to customize it")
+			return
+		}
+	} else if kind == session.WorkspaceKindGroup && req.TemplateAgentReview != nil {
+		_ = orihttp.RespondBadRequest(w, "template_agent_review for a group requires group_roster")
+		return
+	}
 	if err := h.requireGroupParent(r.Context(), req.ParentID); err != nil {
 		handleWorkspaceParentError(w, err)
 		return
@@ -512,6 +541,10 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		resolvedTemplate = teamTemplate
 		templateResolved = true
 	}
+	if kind == session.WorkspaceKindGroup && !req.GroupRoster {
+		_ = orihttp.RespondBadRequest(w, "groups require a reviewed group_roster")
+		return
+	}
 
 	var groupPlan *createWorkspaceGroupPlan
 	if templateResolved {
@@ -536,7 +569,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var strictTemplate *projecttemplates.Template
+	var strictTemplate, strictFreshTemplate *projecttemplates.Template
 	if req.TemplateAgentReview != nil {
 		if !createTemplateAgentsEnabled(req) {
 			_ = orihttp.RespondBadRequest(w, "template_agent_review cannot be used when the blueprint team is excluded")
@@ -557,8 +590,18 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 				}
 				return
 			}
+		case kind == session.WorkspaceKindGroup && req.GroupRoster:
+			rawReviewTemplate = groupRosterTemplate(req.Name)
+			var applyErr error
+			effectiveReviewTemplate, applyErr = applyTemplateAgentOverrides(rawReviewTemplate, req.TemplateAgentOverrides)
+			if applyErr != nil {
+				if !respondTemplateAgentOverrideValidationError(w, applyErr) {
+					_ = orihttp.RespondBadRequest(w, applyErr.Error())
+				}
+				return
+			}
 		default:
-			_ = orihttp.RespondBadRequest(w, "template_agent_review requires an ordinary or Blank blueprint roster")
+			_ = orihttp.RespondBadRequest(w, "template_agent_review requires an ordinary, Blank, or reviewed Group roster")
 			return
 		}
 		if err := h.validateTemplateAgentReview(req.TemplateAgentReview, rawReviewTemplate, effectiveReviewTemplate); err != nil {
@@ -566,6 +609,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		strictTemplate = &effectiveReviewTemplate
+		strictFreshTemplate = &rawReviewTemplate
 	}
 
 	composition, err := h.validateCreateWorkspaceAgentComposition(req)
@@ -587,6 +631,11 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			_ = orihttp.RespondBadRequest(w, err.Error())
 			return
 		}
+	} else if req.GroupRoster && strictFreshTemplate != nil {
+		if err := validateRosterNameCollisions(*strictFreshTemplate, req.TemplateAgentOverrides, composition.existingAgentNames); err != nil {
+			_ = orihttp.RespondBadRequest(w, err.Error())
+			return
+		}
 	}
 
 	ws := buildCreateWorkspace(req, kind, requestedTags, resolvedTemplate, templateResolved)
@@ -600,7 +649,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	seed, ok := h.selectCreateWorkspaceEntryAgent(w, ws, req, kind, resolvedTemplate, templateResolved, strictTemplate)
+	seed, ok := h.selectCreateWorkspaceEntryAgent(w, ws, req, kind, resolvedTemplate, templateResolved, strictTemplate, strictFreshTemplate)
 	if !ok {
 		return
 	}
@@ -847,7 +896,7 @@ func buildCreateWorkspace(req createWorkspaceRequest, kind session.WorkspaceKind
 // explicit primary. This keeps creation atomic and never requires best-effort
 // post-create attachment requests.
 // Returns ok=false when an error response has already been written.
-func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *session.Workspace, req createWorkspaceRequest, kind session.WorkspaceKind, tmpl projecttemplates.Template, templateResolved bool, strictTemplate *projecttemplates.Template) (seedAgentsResult, bool) {
+func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *session.Workspace, req createWorkspaceRequest, kind session.WorkspaceKind, tmpl projecttemplates.Template, templateResolved bool, strictTemplate, strictFreshTemplate *projecttemplates.Template) (seedAgentsResult, bool) {
 	var seed seedAgentsResult
 	usesExistingAgentRoster := req.ExistingAgentNames != nil
 
@@ -895,8 +944,12 @@ func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *ses
 	}
 
 	if strictTemplate != nil && req.TemplateAgentReview != nil {
+		freshTemplate := tmpl
+		if strictFreshTemplate != nil {
+			freshTemplate = *strictFreshTemplate
+		}
 		var err error
-		seed, err = h.seedTemplateAgentsStrict(ws, *strictTemplate, tmpl, *req.TemplateAgentReview)
+		seed, err = h.seedTemplateAgentsStrict(ws, *strictTemplate, freshTemplate, *req.TemplateAgentReview)
 		if err != nil {
 			h.respondStrictTemplateAgentSeedError(w, seed, err)
 			return seed, false
@@ -930,11 +983,6 @@ func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *ses
 				return seed, false
 			}
 			seed = h.seedTemplateAgents(ws, blankTpl)
-		case kind == session.WorkspaceKindGroup && createTemplateAgentsEnabled(req):
-			if agentName := h.autoCreateManagerEntryAgent(ws); agentName != "" {
-				setWorkspaceEntryAgent(ws, agentName)
-				seed.EntrySet = true
-			}
 		}
 
 		for _, name := range req.ExistingAgentNames {
@@ -993,13 +1041,6 @@ func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *ses
 			return seed, false
 		}
 		seed = h.seedTemplateAgents(ws, blankTpl)
-	case kind == session.WorkspaceKindGroup && createTemplateAgentsEnabled(req):
-		// Empty-group creation explicitly defers staffing. Legacy callers that
-		// omit the flag retain their automatic manager.
-		if agentName := h.autoCreateManagerEntryAgent(ws); agentName != "" {
-			setWorkspaceEntryAgent(ws, agentName)
-			seed.EntrySet = true
-		}
 	}
 	return seed, true
 }

@@ -27,7 +27,7 @@ test('ordinary creator defaults to the complete Workspace sequence and can prese
   });
   assert.equal(group.kind, 'group');
   assert.equal(group.fixedKind, '');
-  assert.deepEqual(asData(creatorSteps(group)), ['details', 'review']);
+  assert.deepEqual(asData(creatorSteps(group)), ['details', 'roster', 'review']);
 });
 
 test('import, guided, and selected-member creators retain their fixed operation kind', () => {
@@ -55,6 +55,7 @@ test('import, guided, and selected-member creators retain their fixed operation 
     ids: ['parent', 'child'],
     names: ['Parent', 'Child']
   });
+  assert.deepEqual(asData(creatorSteps(selected)), ['details', 'roster', 'review']);
   assert.equal(switchCreatorKind(selected, 'workspace').changed, false);
 });
 
@@ -63,7 +64,7 @@ test('ordinary kind switching restores isolated drafts and invalidates final rev
     kind: 'workspace',
     drafts: {
       workspace: { name: 'Project Atlas', description: 'Strict team remains staged.' },
-      group: { name: 'Atlas homes', description: 'No agents.' }
+      group: { name: 'Atlas homes', description: 'Managed separately.' }
     },
     review: { token: 'stale-review' }
   });
@@ -81,7 +82,7 @@ test('ordinary kind switching restores isolated drafts and invalidates final rev
   assert.equal(returned.context.review, null);
 });
 
-test('ordinary Group payload is an allowlist and cannot leak Workspace-only fields', () => {
+test('ordinary Group payload declares its reviewed roster without leaking Workspace-only fields', () => {
   const payload = buildOrdinaryGroupPayload({
     name: 'Client homes',
     description: 'A home for related workspaces.',
@@ -109,7 +110,8 @@ test('ordinary Group payload is an allowlist and cannot leak Workspace-only fiel
     parent_id: 'parent-group',
     color: '#22c55e',
     kind: 'group',
-    create_template_agents: false
+    group_roster: true,
+    create_template_agents: true
   });
   for (const key of [
     'template_id',

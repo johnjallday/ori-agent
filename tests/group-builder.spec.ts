@@ -52,26 +52,43 @@ function evidence(page, name) {
   return page.screenshot({ path: `${dir}/${name}.png` });
 }
 
-// Ordinary Map creation is a Group-prefilled instance of the one creator; it
-// retains the real generic POST and explicit agentless payload.
-test('Map Create Group reviews an empty group and refreshes the map without adding members', async ({
+async function reviewGroupRoster(page, creator) {
+  await expect(creator.locator('#wizardStep3')).toBeVisible();
+  await creator.locator('[data-team-agent-setup]').click();
+  await expect(page.locator('#addAgentModal')).toBeVisible();
+  await page.locator('#createAgentBtn').click();
+  await expect(page.locator('#addAgentModal')).toBeHidden();
+  await expect(creator).toBeVisible();
+  await creator.getByRole('button', { name: 'Review →' }).click();
+  await expect(creator.locator('#wizardStep4')).toBeVisible();
+}
+
+// Ordinary Tree creation is a Group-prefilled instance of the one creator; it
+// presents a customizable roster and creates its reviewed Manager only at final Create.
+test('Tree Create Group reviews its Manager and refreshes the workspace views without adding members', async ({
   page,
   request
 }) => {
   await settled(page);
   await page.goto('/');
   await page.getByRole('button', { name: 'Switch to dark mode' }).click();
-  await page.getByRole('button', { name: 'Create Group', exact: true }).click();
+  await page.getByRole('button', { name: 'Tree', exact: true }).click();
+  await expect(page.locator('#cockpitTree')).toBeVisible();
+  await page
+    .locator('#cockpitTree')
+    .getByRole('button', { name: 'Create Group', exact: true })
+    .click();
   const creator = page.locator('#addFolderModal');
   await expect(creator).toBeVisible();
   await expect(creator).toContainText('Groups organize related workspaces');
   const name = `Map Group ${Date.now()}`;
   await creator.getByRole('textbox', { name: 'Group name' }).fill(name);
-  await creator.getByRole('button', { name: 'Review →' }).click();
+  await creator.getByRole('button', { name: 'Continue →' }).click();
+  await reviewGroupRoster(page, creator);
   await expect(creator.locator('#workspaceReviewSummary')).toContainText(
-    'One empty organizational group'
+    'One organizational group and its reviewed roster'
   );
-  await evidence(page, '24-map-create-group');
+  await evidence(page, '24-tree-create-group');
   const response = page.waitForResponse(
     res => new URL(res.url()).pathname === '/api/workspaces' && res.request().method() === 'POST'
   );
@@ -81,11 +98,18 @@ test('Map Create Group reviews an empty group and refreshes the map without addi
   const payload = await result.json();
   const id = payload.folder.id;
   try {
-    expect(result.request().postDataJSON()).toEqual({
+    expect(result.request().postDataJSON()).toMatchObject({
       name,
       kind: 'group',
-      create_template_agents: false
+      group_roster: true,
+      create_template_agents: true,
+      template_agent_review: expect.objectContaining({
+        version: 1,
+        expectations: [expect.objectContaining({ name: `${name} Manager`, action: 'create' })]
+      })
     });
+    expect(result.request().postDataJSON()).not.toHaveProperty('team_intent');
+    expect(result.request().postDataJSON()).not.toHaveProperty('role_staffing');
     await expect(creator).toBeHidden();
     await expect
       .poll(() =>
@@ -99,7 +123,11 @@ test('Map Create Group reviews an empty group and refreshes the map without addi
     const group = await (await request.get(`/api/workspaces/${id}`)).json();
     const record = group.folder || group;
     expect(record.kind).toBe('group');
-    expect(record.agent_instances || []).toHaveLength(0);
+    expect(record.agent_instances || []).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: `${name} Manager`, entry_point: true })
+      ])
+    );
     expect(record.assistant_program_state).toBeFalsy();
   } finally {
     await request.delete(`/api/workspaces/${id}?confirm=true`);

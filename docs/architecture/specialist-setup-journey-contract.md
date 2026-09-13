@@ -374,9 +374,12 @@ workspace screen complete after a regression.
   Step 2 opens the shared Create Workspace dialog in a fixed guided-Group
   context with a setup-bound name and reviewed owner transport; it never falls
   back to generic group creation.
-  The ordinary map action explicitly sends `create_template_agents: false` to
-  build an empty group. Existing API callers that omit that flag retain their
-  historical manager behavior, and no selected workspaces are silently moved.
+  The ordinary Group creator uses **Details → Group Roster → Review**. It
+  proposes an editable Group Manager and lets the person attach saved teammates;
+  no agent is created until the final reviewed request supplies
+  `group_roster: true`, its plan receipt, and `create_template_agents: true`.
+  Missing, excluded, or stale rosters are rejected. The Manager is scoped to the
+  group's own files and notes, and no selected workspaces are silently moved.
   An existing project receipt cannot mark setup complete or offer replacement
   group creation when its canonical Home is unverified.
 - A template-identity-bound preparation acknowledgement lives in canonical Home
@@ -979,8 +982,9 @@ managed workspaces:
 - Group creation through the generic session route provisions
   `sub-workspaces/`, `files/`, `notes/`, a Directory Reference to only
   `files/`, and a `workspace-files` binding rooted at only `files/` and
-  `notes/`. It also currently creates a generic group manager. Startup backfill
-  applies the same scoped scaffolding to legacy groups.
+  `notes/`. Generic Group requests must carry a reviewed Group Roster; only its
+  final confirmed request creates or reuses the selected manager/teammates.
+  Startup backfill applies the same scoped scaffolding to legacy groups.
 - `AssistantProgramStore.EnsureProjectStation` currently creates a plain root
   workspace only after loading a compatible project, finds it by stable
   `(owner_user_id, plugin_id, program_id)`, and then writes reciprocal station

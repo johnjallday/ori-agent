@@ -61,6 +61,8 @@ func (h *Handler) handleTemplateAgentPlan(w http.ResponseWriter, r *http.Request
 		TemplateID       string `json:"template_id,omitempty"`
 		TemplatePath     string `json:"template_path,omitempty"`
 		Blank            bool   `json:"blank,omitempty"`
+		GroupRoster      bool   `json:"group_roster,omitempty"`
+		GroupName        string `json:"group_name,omitempty"`
 		GroupComposition string `json:"group_composition,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -71,7 +73,24 @@ func (h *Handler) handleTemplateAgentPlan(w http.ResponseWriter, r *http.Request
 		_ = orihttp.RespondBadRequest(w, "specify either template_id or template_path, not both")
 		return
 	}
+	if req.GroupRoster && (strings.TrimSpace(req.TemplateID) != "" || strings.TrimSpace(req.TemplatePath) != "") {
+		_ = orihttp.RespondBadRequest(w, "group_roster cannot be combined with a project template")
+		return
+	}
 	if strings.TrimSpace(req.TemplateID) == "" && strings.TrimSpace(req.TemplatePath) == "" {
+		if req.GroupRoster {
+			if req.Blank {
+				_ = orihttp.RespondBadRequest(w, "group_roster cannot be combined with blank")
+				return
+			}
+			name := strings.TrimSpace(req.GroupName)
+			if name == "" {
+				_ = orihttp.RespondBadRequest(w, "group_name is required for a group roster")
+				return
+			}
+			_ = orihttp.RespondSuccess(w, h.buildTemplateAgentPlan(groupRosterTemplate(name)))
+			return
+		}
 		// The Blank blueprint has no library template; serve its synthetic
 		// single-agent roster so the review panel can show/edit the entry agent.
 		if req.Blank {

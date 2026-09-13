@@ -172,6 +172,29 @@ const blankWorkspaceEntryPrompt = "You are this workspace's front door: " +
 	"clarify user intent, answer directly when the request only needs shared context, and break work into " +
 	"tasks for specialists when needed."
 
+// groupRosterTemplate is the synthetic, reviewed roster used only while creating
+// a Group. It deliberately uses the Group name in its manager identity: a person
+// must review or edit that identity before Create, and an existing name is shown
+// as reuse rather than silently receiving a collision-suffixed agent. This does
+// not make a project template or grant access to member workspaces.
+func groupRosterTemplate(groupName string) projecttemplates.Template {
+	name := defaultGroupEntryAgentName(groupName)
+	return projecttemplates.Template{
+		ID: "group-roster", Name: "Group roster", Builtin: true,
+		Agents: []projecttemplates.AgentSpec{{
+			Name: name,
+			Role: string(types.RoleOrchestrator),
+			Type: agent.TypeGeneral,
+			SystemPrompt: fmt.Sprintf(
+				"You are the Group Manager for %q. Manage only this group's files and notes; "+
+					"member workspaces remain separate. Clarify intent, answer requests using group context, "+
+					"and coordinate the group's specialists when needed.",
+				strings.TrimSpace(groupName),
+			),
+		}},
+	}
+}
+
 // blankWorkspaceTemplate is the synthetic single-agent roster for the Blank
 // blueprint. It flows through the normal template-agent plan/seed machinery so a
 // blank workspace ships with a reviewable, editable entry agent — but it carries

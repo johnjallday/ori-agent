@@ -267,7 +267,7 @@ func createWorkspaceModalMarkup(t *testing.T, page string) string {
 
 // TestRenderCreateWorkspaceWizardReviewContract pins the four-step Create mode
 // shell: Blueprint → Details → Team → Review, each step numbered "of 4", with
-// Team owning the roster surface and Review reading as a confirmation.
+// Team owning the editable roster surface and Review reading as a confirmation.
 func TestRenderCreateWorkspaceWizardReviewContract(t *testing.T) {
 	r := NewTemplateRenderer()
 	if err := r.LoadTemplates(); err != nil {
@@ -300,8 +300,8 @@ func TestRenderCreateWorkspaceWizardReviewContract(t *testing.T) {
 		`Step 2 of 4`,
 		`Step 3 of 4`,
 		`Step 4 of 4`,
-		// Step headings: Team assembles, Review confirms.
-		`Build your workspace team`,
+		// Step headings: Team/Group Roster assembles, Review confirms.
+		`Confirm your team`,
 		`Ready to create?`,
 		// Blueprint shows a read-only, plan-derived included-agent summary.
 		`id="blueprintAgentSummary"`,

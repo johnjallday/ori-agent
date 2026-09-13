@@ -7,7 +7,7 @@
   'use strict';
 
   const WORKSPACE_STEPS = ['blueprint', 'details', 'team', 'review'];
-  const GROUP_STEPS = ['details', 'review'];
+  const GROUP_STEPS = ['details', 'roster', 'review'];
   const IMPORT_STEPS = ['details'];
 
   function kind(value) {
@@ -73,7 +73,10 @@
 
   function creatorSteps(context) {
     if (context?.mode === 'import') return [...IMPORT_STEPS];
-    return context?.kind === 'group' ? [...GROUP_STEPS] : [...WORKSPACE_STEPS];
+    // Guided Home preparation has its own reviewed setup owner and deliberately
+    // cannot add a roster in this dialog.
+    if (context?.kind === 'group' && context?.mode !== 'guided') return [...GROUP_STEPS];
+    return context?.kind === 'group' ? ['details', 'review'] : [...WORKSPACE_STEPS];
   }
 
   function switchCreatorKind(context, nextKind) {
@@ -103,7 +106,11 @@
     const payload = {
       name: String(values.name || '').trim(),
       kind: 'group',
-      create_template_agents: false
+      // This declares a reviewed Group Roster. sessions.js adds only the
+      // final roster receipt/overrides at Create; nothing creates an agent
+      // while the person is editing this draft.
+      group_roster: true,
+      create_template_agents: true
     };
     const description = String(values.description || '').trim();
     const parentID = String(values.parent_id || '').trim();

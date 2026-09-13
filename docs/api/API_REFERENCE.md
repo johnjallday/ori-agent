@@ -1013,17 +1013,25 @@ Content-Type: application/json
   "name": "Client Work",
   "kind": "group",
   "description": "Shared client initiative",
-  "create_template_agents": false
+  "group_roster": true,
+  "create_template_agents": true,
+  "template_agent_review": {
+    "version": 1,
+    "plan_revision": "<revision returned by template-agent-plan>",
+    "expectations": [
+      { "index": 0, "name": "Client Work Manager", "action": "create" }
+    ]
+  }
 }
 ```
 
-The ordinary **Create Group** UI always sends `create_template_agents: false`, so its groups start as empty organizational containers with no agent side effects. Its optional post-create action only opens the existing group's team surface; it does not create or hire an agent.
+Ordinary **Create Group** uses **Details → Group Roster → Review**. It first requests `POST /api/workspaces/template-agent-plan` with `{"group_roster":true,"group_name":"Client Work"}`, then presents the required, editable `"<Group Name> Manager"` entry agent (type `general`, role `orchestrator`) and optional saved teammates. No agent is created while the roster is edited. The final Create request supplies `group_roster: true`, `create_template_agents: true`, the plan revision/expectations, any `template_agent_overrides`, and selected `existing_agent_names`.
 
-This explicit UI behavior does not change legacy API defaults. A direct API caller that omits `create_template_agents` still gets the historical `"<Group Name> Manager"` entry agent (type `general`, role `orchestrator`); a caller may instead supply `entry_agent_name` for an existing agent. Name collisions for an auto-created manager get a numeric suffix (`"<Name> Manager 2"`).
+Groups require that reviewed roster. The server rejects a missing roster, `create_template_agents: false`, missing/stale review, project `team_intent`/`role_staffing`, or project template before creating anything. It then atomically creates or reuses exactly the reviewed definitions; an existing matching manager is an explicit reviewed reuse, not a collision-suffixed automatic agent. `create_template_agents` retains its ordinary template-team meaning for non-Group workspaces.
 
-Group folders are provisioned with `sub-workspaces/` (members), plus their own `files/` and `notes/` directories. The auto-provisioned `workspace-files` filesystem MCP binding is **scoped to `files/` and `notes/` only** — member sub-workspaces are never exposed to the group's agents. Groups created before this behavior existed are upgraded automatically by an idempotent backfill at server startup.
+Group folders are provisioned with `sub-workspaces/` (members), plus their own `files/` and `notes/` directories. The `workspace-files` filesystem MCP binding is **scoped to `files/` and `notes/` only** — member sub-workspaces are never exposed to the group's agents. Groups created before this behavior existed are upgraded automatically by an idempotent backfill at server startup.
 
-**Listing and membership:** the flat `GET /api/workspaces` list includes groups (check `kind` to distinguish them); `GET /api/workspaces?tree=true` returns the nested tree. The UI's **Group selected** action creates one explicit agentless group, then patches only its reviewed top-level member snapshot using `PATCH /api/workspaces/:id` with `parent_id` and `order_index`. A partial member move leaves the created group and every successful move intact; a lost response is reconciled by refresh rather than retrying group creation.
+**Listing and membership:** the flat `GET /api/workspaces` list includes groups (check `kind` to distinguish them); `GET /api/workspaces?tree=true` returns the nested tree. The UI's **Group selected** action first reviews and creates one rostered Group, then patches only its reviewed top-level member snapshot using `PATCH /api/workspaces/:id` with `parent_id` and `order_index`. A partial member move leaves the created group, its reviewed roster, and every successful move intact; a lost response is reconciled by refresh rather than retrying group creation.
 
 **Deleting a group** uses a two-mode flow:
 

@@ -199,8 +199,9 @@ func canonicalWorkspaceEntryNodeID(agentName string) string {
 	return fmt.Sprintf("%s-node-1", name)
 }
 
-// defaultGroupEntryAgentName returns the manager-agent name seeded for a
-// group, matching the detail page's entry-agent defaults ("<Name> Manager").
+// defaultGroupEntryAgentName returns the default identity proposed by a
+// Group Roster ("<Name> Manager"). The browser reviews it before creation and
+// may rename it; this helper performs no creation.
 func defaultGroupEntryAgentName(workspaceName string) string {
 	name := strings.TrimSpace(workspaceName)
 	if name == "" {
@@ -212,15 +213,11 @@ func defaultGroupEntryAgentName(workspaceName string) string {
 	return name + " Manager"
 }
 
-// autoCreateManagerEntryAgent creates the default "<Name> Manager" agent for a
-// newly created workspace and returns its name. Groups always get one so they
-// are chat-ready the moment they exist; template-created workspaces get one as
-// the fallback when the template declares no roster (every template workspace
-// must have an entry agent to own its starter tasks). A fresh agent is always
-// created — name collisions get a numeric suffix rather than adopting an
-// unrelated existing agent, because a workspace's entry agent is deleted along
-// with the workspace. Failures are non-fatal and return "": the detail page
-// then falls back to its standard missing-entry-agent prompt.
+// autoCreateManagerEntryAgent creates a fallback "<Name> Manager" only for a
+// legacy ordinary-template workspace whose declared roster cannot provide an
+// entry agent. Groups never take this path: their reviewed Group Roster is the
+// sole source of a Manager. Failures leave the workspace agent-less so its
+// normal missing-entry-agent recovery can guide the person.
 func (h *Handler) autoCreateManagerEntryAgent(ws *session.Workspace) string {
 	if h == nil || h.agentStore == nil || ws == nil {
 		return ""
@@ -233,7 +230,7 @@ func (h *Handler) autoCreateManagerEntryAgent(ws *session.Workspace) string {
 			break
 		}
 		if i > 50 {
-			logger.Warn("Could not find a free group entry agent name", logger.Fields{"base": base})
+			logger.Warn("Could not find a free workspace entry agent name", logger.Fields{"base": base})
 			return ""
 		}
 		name = fmt.Sprintf("%s %d", base, i)
@@ -250,11 +247,11 @@ func (h *Handler) autoCreateManagerEntryAgent(ws *session.Workspace) string {
 		Role:         types.RoleOrchestrator,
 		SystemPrompt: systemPrompt,
 	}); err != nil {
-		logger.Warn("Failed to auto-create group entry agent", logger.Fields{"agent": name, "error": err})
+		logger.Warn("Failed to auto-create workspace entry agent", logger.Fields{"agent": name, "error": err})
 		return ""
 	}
 
-	logger.Info("Auto-created group entry agent", logger.Fields{"agent": name, "workspace": ws.Name})
+	logger.Info("Auto-created fallback workspace entry agent", logger.Fields{"agent": name, "workspace": ws.Name})
 	return name
 }
 

@@ -20,8 +20,44 @@ func TestGroupWorkspaceServesWorkspaceDetailPage(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	handler := newRoutesTestHandler(t)
 
-	body := bytes.NewBufferString(`{"name":"Routing Group","kind":"group"}`)
-	createReq := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
+	planReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/workspaces/template-agent-plan",
+		bytes.NewBufferString(`{"group_roster":true,"group_name":"Routing Group"}`),
+	)
+	planReq.Header.Set("Content-Type", "application/json")
+	planRec := httptest.NewRecorder()
+	handler.ServeHTTP(planRec, planReq)
+	if planRec.Code != http.StatusOK {
+		t.Fatalf("load group roster: got %d: %s", planRec.Code, planRec.Body.String())
+	}
+	var plan struct {
+		Revision string `json:"revision"`
+		Agents   []struct {
+			Name   string `json:"name"`
+			Action string `json:"action"`
+		} `json:"agents"`
+	}
+	if err := json.Unmarshal(planRec.Body.Bytes(), &plan); err != nil {
+		t.Fatalf("decode group roster: %v", err)
+	}
+	body, err := json.Marshal(map[string]any{
+		"name":                   "Routing Group",
+		"kind":                   "group",
+		"group_roster":           true,
+		"create_template_agents": true,
+		"template_agent_review": map[string]any{
+			"version":       1,
+			"plan_revision": plan.Revision,
+			"expectations": []map[string]any{{
+				"index": 0, "name": plan.Agents[0].Name, "action": plan.Agents[0].Action,
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("encode group create: %v", err)
+	}
+	createReq := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewBuffer(body))
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
 	handler.ServeHTTP(createRec, createReq)

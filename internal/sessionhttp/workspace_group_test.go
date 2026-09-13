@@ -9,18 +9,57 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/session"
 	agentstore "github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
+
+func groupRosterCreateBody(t *testing.T, handler *Handler, name, managerName string) string {
+	t.Helper()
+	plan := handler.buildTemplateAgentPlan(groupRosterTemplate(name))
+	review := templateAgentReview{
+		Version:      templateAgentReviewVersion,
+		PlanRevision: plan.Revision,
+		Expectations: make([]templateAgentReviewExpectation, len(plan.Agents)),
+	}
+	for index, item := range plan.Agents {
+		review.Expectations[index] = templateAgentReviewExpectation{
+			Index: index, Name: item.Name, Action: item.Action,
+		}
+	}
+	body := map[string]any{
+		"name":                   name,
+		"kind":                   "group",
+		"group_roster":           true,
+		"create_template_agents": true,
+		"template_agent_review":  review,
+	}
+	if managerName != "" {
+		body["template_agent_overrides"] = []map[string]any{{"index": 0, "name": managerName}}
+		review.Expectations[0].Name = managerName
+		if _, exists := handler.agentStore.GetAgent(managerName); exists {
+			review.Expectations[0].Action = "reuse"
+		} else {
+			review.Expectations[0].Action = "create"
+		}
+		body["template_agent_review"] = review
+	}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(encoded)
+}
 
 func createTestGroup(t *testing.T, handler *Handler, name string) string {
 	t.Helper()
 
-	body := `{"name":"` + name + `","kind":"group"}`
+	body := groupRosterCreateBody(t, handler, name, "")
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -817,44 +856,150 @@ func TestGroupNotesAndSettings(t *testing.T) {
 	}
 }
 
-func TestCreateGroupCanExplicitlyDeferStaffing(t *testing.T) {
-	for _, roster := range []string{"", `,"existing_agent_names":[]`} {
-		t.Run("roster="+roster, func(t *testing.T) {
+func TestGroupRosterPlanProposesEditableManager(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/workspaces/template-agent-plan",
+		bytes.NewBufferString(`{"group_roster":true,"group_name":"Client Work"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.HandleWorkspaces(response, req)
+	if response.Code != http.StatusOK {
+		t.Fatalf("group roster plan: got %d, want 200: %s", response.Code, response.Body.String())
+	}
+	var plan templateAgentPlan
+	if err := json.Unmarshal(response.Body.Bytes(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan.TemplateID != "group-roster" || plan.Revision == "" || len(plan.Agents) != 1 ||
+		plan.Agents[0].Name != "Client Work Manager" || !plan.Agents[0].EntryPoint ||
+		plan.Agents[0].Role != string(types.RoleOrchestrator) || plan.Agents[0].Type != agent.TypeGeneral {
+		t.Fatalf("group roster plan = %#v", plan)
+	}
+	if !strings.Contains(plan.Agents[0].SystemPrompt, "member workspaces remain separate") {
+		t.Fatalf("Group Manager prompt must state member boundary: %q", plan.Agents[0].SystemPrompt)
+	}
+}
+
+func TestGroupRosterRequiresReviewedManager(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		wantStatus int
+	}{
+		{
+			name: "excluded",
+			body: `{"name":"Unmanaged Group","kind":"group","group_roster":true,"create_template_agents":false}`,
+		},
+		{
+			name: "unreviewed",
+			body: `{"name":"Unmanaged Group","kind":"group","group_roster":true,"create_template_agents":true}`,
+		},
+		{
+			name:       "stale-review",
+			body:       `{"name":"Unmanaged Group","kind":"group","group_roster":true,"create_template_agents":true,"template_agent_review":{"version":1,"plan_revision":"stale","expectations":[{"index":0,"name":"Unmanaged Group Manager","action":"create"}]}}`,
+			wantStatus: http.StatusConflict,
+		},
+		{
+			name: "project-strict-intent",
+			body: `{"name":"Unmanaged Group","kind":"group","group_roster":true,"create_template_agents":true,"team_intent":{"version":1,"mode":"staffed","plan_revision":"stale"},"role_staffing":[]}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			handler, cleanup := createTestHandler(t)
 			defer cleanup()
 			newTestFileStore(t, handler)
-			body := `{"name":"Empty Group","kind":"group","create_template_agents":false` + roster + `}`
-			req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewBufferString(body))
+			req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewBufferString(tt.body))
 			req.Header.Set("Content-Type", "application/json")
 			response := httptest.NewRecorder()
 			handler.HandleWorkspaces(response, req)
-			if response.Code != http.StatusCreated {
-				t.Fatalf("create: %d %s", response.Code, response.Body.String())
+			wantStatus := tt.wantStatus
+			if wantStatus == 0 {
+				wantStatus = http.StatusBadRequest
 			}
-			var result struct {
-				Folder struct {
-					Kind   string            `json:"kind"`
-					Agents []json.RawMessage `json:"agent_instances"`
-				} `json:"folder"`
+			if response.Code != wantStatus {
+				t.Fatalf("create: got %d, want %d: %s", response.Code, wantStatus, response.Body.String())
 			}
-			if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
-				t.Fatal(err)
-			}
-			if result.Folder.Kind != "group" || len(result.Folder.Agents) != 0 {
-				t.Fatalf("staffed empty group: %s", response.Body.String())
-			}
-			if _, exists := handler.agentStore.GetAgent("Empty Group Manager"); exists {
-				t.Fatal("created an unreviewed manager")
+			if _, exists := handler.agentStore.GetAgent("Unmanaged Group Manager"); exists {
+				t.Fatal("an invalid Group Roster must not create a manager")
 			}
 		})
 	}
 }
 
-// TestCreateGroupWithEntryAgent verifies the New Group modal flow: a group
-// created with entry_agent_name resolves that agent as the default session
-// agent, and a group created without one gets a "<Name> Manager" entry agent
-// auto-created (with numeric suffixes on name collisions).
-func TestCreateGroupWithEntryAgent(t *testing.T) {
+func TestCreateGroupFromReviewedRoster(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+	_, baseDir := newTestFileStore(t, handler)
+	ctx := context.Background()
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/workspaces",
+		bytes.NewBufferString(groupRosterCreateBody(t, handler, "Managed Group", "Custom Group Manager")),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.HandleWorkspaces(response, req)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("create: got %d, want %d: %s", response.Code, http.StatusCreated, response.Body.String())
+	}
+
+	var result struct {
+		Folder struct {
+			ID     string `json:"id"`
+			Kind   string `json:"kind"`
+			Agents []struct {
+				Name       string `json:"name"`
+				EntryPoint bool   `json:"entry_point"`
+			} `json:"agent_instances"`
+		} `json:"folder"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Folder.Kind != string(session.WorkspaceKindGroup) || len(result.Folder.Agents) != 1 ||
+		result.Folder.Agents[0].Name != "Custom Group Manager" || !result.Folder.Agents[0].EntryPoint {
+		t.Fatalf("group manager response = %#v", result.Folder)
+	}
+	if got := handler.defaultSessionAgentNameForWorkspace(ctx, result.Folder.ID); got != "Custom Group Manager" {
+		t.Fatalf("default session agent = %q, want Custom Group Manager", got)
+	}
+	manager, exists := handler.agentStore.GetAgent("Custom Group Manager")
+	if !exists || manager.Type != agent.TypeGeneral || manager.Role != types.RoleOrchestrator {
+		t.Fatalf("Group Manager = %#v, exists=%v", manager, exists)
+	}
+	// The manager is bound to group-owned files and notes only: provisioning
+	// never turns physical child containment into Manager access.
+	assertScopedGroupScaffolding(t, handler, result.Folder.ID, filepath.Join(baseDir, "managed-group"))
+
+	// A failed Group persistence rolls back an agent created from the reviewed
+	// roster; the request never invents a collision-suffixed Manager.
+	conflictReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/workspaces",
+		bytes.NewBufferString(groupRosterCreateBody(t, handler, "Managed Group", "Discarded Group Manager")),
+	)
+	conflictReq.Header.Set("Content-Type", "application/json")
+	conflictResponse := httptest.NewRecorder()
+	handler.HandleWorkspaces(conflictResponse, conflictReq)
+	if conflictResponse.Code != http.StatusConflict {
+		t.Fatalf("duplicate create: got %d, want %d: %s", conflictResponse.Code, http.StatusConflict, conflictResponse.Body.String())
+	}
+	if _, exists := handler.agentStore.GetAgent("Discarded Group Manager"); exists {
+		t.Fatal("failed Group create left its reviewed Manager behind")
+	}
+}
+
+// TestCreateGroupRosterReusesSelectedManager proves a roster can deliberately
+// reuse an existing manager, while a missing roster is rejected rather than
+// receiving an automatic one.
+func TestCreateGroupRosterReusesSelectedManager(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 	newTestFileStore(t, handler)
@@ -866,8 +1011,7 @@ func TestCreateGroupWithEntryAgent(t *testing.T) {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
-	// Explicit entry agent: used as-is, no auto-creation.
-	body := `{"name":"Managed Group","kind":"group","entry_agent_name":"Existing Manager"}`
+	body := groupRosterCreateBody(t, handler, "Managed Group", "Existing Manager")
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -881,32 +1025,22 @@ func TestCreateGroupWithEntryAgent(t *testing.T) {
 		t.Fatalf("decode create response: %v", err)
 	}
 	groupID := resp["folder"].(map[string]any)["id"].(string)
-
 	if got := handler.defaultSessionAgentNameForWorkspace(ctx, groupID); got != "Existing Manager" {
 		t.Fatalf("default session agent for group = %q, want %q", got, "Existing Manager")
 	}
-	if _, exists := handler.agentStore.GetAgent("Managed Group Manager"); exists {
-		t.Fatalf("explicit entry agent must suppress auto-creation")
-	}
 
-	// Omitted entry agent: a "<Name> Manager" agent is auto-created and set.
-	plainID := createTestGroup(t, handler, "Plain Group")
-	if got := handler.defaultSessionAgentNameForWorkspace(ctx, plainID); got != "Plain Group Manager" {
-		t.Fatalf("default session agent for plain group = %q, want %q", got, "Plain Group Manager")
+	plainReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/workspaces",
+		bytes.NewBufferString(`{"name":"Plain Group","kind":"group"}`),
+	)
+	plainReq.Header.Set("Content-Type", "application/json")
+	plainResponse := httptest.NewRecorder()
+	handler.HandleWorkspaces(plainResponse, plainReq)
+	if plainResponse.Code != http.StatusBadRequest || !bytes.Contains(plainResponse.Body.Bytes(), []byte("group_roster")) {
+		t.Fatalf("roster-less Group = %d: %s", plainResponse.Code, plainResponse.Body.String())
 	}
-	if _, exists := handler.agentStore.GetAgent("Plain Group Manager"); !exists {
-		t.Fatalf("expected auto-created agent %q in the agent store", "Plain Group Manager")
-	}
-
-	// Name collision: the auto-created agent gets a numeric suffix instead of
-	// adopting the existing agent (entry agents are deleted with their group).
-	if err := handler.agentStore.CreateAgent("Collide Group Manager", &agentstore.CreateAgentConfig{
-		Type: agent.TypeGeneral,
-	}); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-	collideID := createTestGroup(t, handler, "Collide Group")
-	if got := handler.defaultSessionAgentNameForWorkspace(ctx, collideID); got != "Collide Group Manager 2" {
-		t.Fatalf("default session agent for colliding group = %q, want %q", got, "Collide Group Manager 2")
+	if _, exists := handler.agentStore.GetAgent("Plain Group Manager"); exists {
+		t.Fatal("roster-less direct Group create must not auto-create a manager")
 	}
 }

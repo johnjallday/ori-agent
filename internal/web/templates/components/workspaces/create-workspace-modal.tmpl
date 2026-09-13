@@ -21,15 +21,15 @@
                 </label>
                 <label class="workspace-creator-kind-option" for="workspaceCreatorKindGroup">
                   <input id="workspaceCreatorKindGroup" type="radio" name="workspace-creator-kind" value="group">
-                  <span><strong>Group</strong><small>An empty home for related workspaces.</small></span>
+                  <span><strong>Group</strong><small>A home for related workspaces, with its own manager.</small></span>
                 </label>
               </div>
               <p id="workspaceCreatorKindFixedNotice" class="workspace-creator-kind-fixed" role="status" hidden></p>
             </fieldset>
 
-            <!-- The type choice stays outside progress. A Workspace needs its
-                 blueprint and team; a Group intentionally has only Details and
-                 Review. Import remains a fixed, single-details operation. -->
+            <!-- The type choice stays outside progress. A Workspace needs a
+                 blueprint and team; an ordinary Group has Details, its reviewed
+                 Group Roster, and Review. Import remains Details-only. -->
             <div id="wizardStepper" class="workspace-create-stepper" aria-label="Create Workspace progress">
               <span class="workspace-create-step is-active" data-step="1" aria-current="step">
                 <span class="workspace-create-step-num">1</span>Blueprint
@@ -40,7 +40,7 @@
               </span>
               <span class="workspace-create-step-sep" data-step-separator="2">→</span>
               <span class="workspace-create-step" data-step="3">
-                <span class="workspace-create-step-num">3</span>Team
+                <span class="workspace-create-step-num">3</span><span data-workspace-creator-step-name="3">Team</span>
               </span>
               <span class="workspace-create-step-sep" data-step-separator="3">→</span>
               <span class="workspace-create-step" data-step="4">
@@ -194,7 +194,7 @@
 
               <div id="workspaceGroupDetailsNotice" class="workspace-group-details-notice" hidden>
                 <strong>Groups organize related workspaces.</strong>
-                <span>This creates an empty group. Agents, projects, and Assistant Program membership are separate choices.</span>
+                <span>Review and customize the Group Manager before final creation. Projects and Assistant Program membership are separate choices; the Manager cannot access member workspaces.</span>
               </div>
 
               <div id="wizardNameField" class="workspace-create-name-field mb-3">
@@ -327,15 +327,16 @@
 
             </section>
 
-            <!-- ===== STEP 3 · TEAM ===== -->
+            <!-- ===== STEP 3 · TEAM / GROUP ROSTER ===== -->
             <!-- The only step where the resulting roster is edited. Blueprint
                  agents and manually added saved agents appear as ONE team here;
-                 Review (step 4) restates the result read-only. -->
+                 an ordinary Group uses the same reviewed mechanics for its
+                 required Manager. Review restates the result read-only. -->
             <section id="wizardStep3" hidden aria-labelledby="wizardStep3Title">
               <div class="workspace-wizard-step-heading">
                 <span class="workspace-wizard-eyebrow" data-wizard-step-label="3">Step 3 of 4</span>
-                <h2 id="wizardStep3Title" tabindex="-1">Build your workspace team</h2>
-                <p id="wizardStep3Description">Confirm who will work in this workspace, and add saved agents if you need more.</p>
+                <h2 id="wizardStep3Title" tabindex="-1">Confirm your team</h2>
+                <p id="wizardStep3Description">Review the proposed agent roster, customize any agents, and add saved teammates.</p>
               </div>
 
               <div id="workspaceTeamLayout" class="workspace-team-layout">

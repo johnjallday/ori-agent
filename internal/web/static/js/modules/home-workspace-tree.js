@@ -15,7 +15,7 @@
 // (FR117). Server contracts are the launcher's existing ones, unchanged:
 //
 //   move/reorder   PATCH  /api/workspaces/{id}  { parent_id, order_index }
-//   create group   POST   /api/workspaces       { name, kind: 'group' }
+//   create group   POST   /api/workspaces       { name, kind: 'group', create_template_agents: true }
 //   delete         DELETE /api/workspaces/{id}?confirm=true[&delete_mode=...]
 //   undo delete    POST   /api/workspaces/{id}/restore
 //   rescan         POST   /api/workspaces/rescan

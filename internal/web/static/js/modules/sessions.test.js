@@ -271,7 +271,7 @@ test('Workspace create still requires its reviewed strict Team envelope before p
   assert.equal(requests.length, 0, 'Workspace cannot bypass strict Team validation');
 });
 
-test('ordinary Group submits the agentless allowlist before Workspace Team or blueprint work', async () => {
+test('ordinary Group submits its reviewed roster without Workspace blueprint work', async () => {
   const requests = [];
   const elements = new Map([
     [
@@ -332,9 +332,17 @@ test('ordinary Group submits the agentless allowlist before Workspace Team or bl
   manager.resetAddWorkspaceModalForm = () => {};
   manager.refreshWorkspaceSurfacesAfterOrdinaryGroupCreate = async () => {};
   manager.showCreatedGroupFollowUp = () => {};
-  manager.teamView = () => {
-    throw new Error('Group must not validate a Workspace Team');
-  };
+  manager.teamView = () => ({
+    canContinueFromTeam: true,
+    payload: {
+      create_template_agents: true,
+      template_agent_review: {
+        version: 1,
+        plan_revision: 'reviewed-group-roster',
+        expectations: [{ index: 0, name: 'Client Homes Manager', action: 'create' }]
+      }
+    }
+  });
 
   await manager.createFolder();
 
@@ -346,7 +354,13 @@ test('ordinary Group submits the agentless allowlist before Workspace Team or bl
     parent_id: 'parent-group',
     color: '#22c55e',
     kind: 'group',
-    create_template_agents: false
+    group_roster: true,
+    create_template_agents: true,
+    template_agent_review: {
+      version: 1,
+      plan_revision: 'reviewed-group-roster',
+      expectations: [{ index: 0, name: 'Client Homes Manager', action: 'create' }]
+    }
   });
 });
 
@@ -436,7 +450,7 @@ test('created Group follow-up navigates only to its returned team surface', () =
     folder_slug: 'client-homes'
   });
 
-  assert.equal(options.action.label, 'Open group / Set up team');
+  assert.equal(options.action.label, 'Open group / Manage team');
   options.action.onClick();
   assert.equal(location.href, '/workspaces/client-homes/assistant');
 });
@@ -663,7 +677,7 @@ test('the shared entry point creates one generation-fenced creator context befor
   assert.equal(manager.workspaceCreatorContext.kind, 'group');
 });
 
-test('Group creator navigation exposes only Details then Review while Workspace stays four steps', () => {
+test('Group creator navigation exposes Details, Roster, then Review while Workspace stays four steps', () => {
   const manager = loadSessionManager();
   manager.workspaceCreatorContext = { mode: 'ordinary', kind: 'workspace' };
   manager.wizardStep = 1;
@@ -672,7 +686,9 @@ test('Group creator navigation exposes only Details then Review while Workspace 
 
   manager.workspaceCreatorContext = { mode: 'ordinary', kind: 'group' };
   manager.wizardStep = 2;
-  assert.deepEqual(JSON.parse(JSON.stringify(manager.creatorWizardSteps())), [2, 4]);
+  assert.deepEqual(JSON.parse(JSON.stringify(manager.creatorWizardSteps())), [2, 3, 4]);
+  assert.equal(manager.nextWizardStep(), 3);
+  manager.wizardStep = 3;
   assert.equal(manager.nextWizardStep(), 4);
   assert.equal(manager.previousWizardStep(), 2);
   manager.wizardStep = 4;
