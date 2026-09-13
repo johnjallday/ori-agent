@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   confirmDelete,
-  createGroupFrom,
+  moveMembersIntoGroup,
   deleteWorkspace,
   deleteWorkspaces,
   isGroupRow,
@@ -35,7 +35,7 @@ function recorder(responses = {}) {
   return { calls, fetchImpl };
 }
 
-function ctxFor({ answers = [], promptWith = 'New group', responses, rows = ROWS } = {}) {
+function ctxFor({ answers = [], responses, rows = ROWS } = {}) {
   const asked = [];
   const announced = [];
   const toasted = [];
@@ -60,7 +60,6 @@ function ctxFor({ answers = [], promptWith = 'New group', responses, rows = ROWS
         asked.push(message);
         return queue.length ? queue.shift() : false;
       },
-      prompt: () => promptWith,
       announce: message => announced.push(message),
       toast: (message, variant) => toasted.push({ message, variant }),
       onTrashed: (id, name) => trashed.push({ id, name }),
@@ -99,46 +98,28 @@ test('isGroupRow reads kind case-insensitively', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Grouping — the reason topLevelIds exists
+// Member moves — the reason topLevelIds exists
 // ---------------------------------------------------------------------------
 
-test('grouping a parent and its own child never lifts the child out of the parent', async () => {
-  const created = { ok: true, status: 201, json: () => Promise.resolve({ folder: { id: 'g2' } }) };
-  const h = ctxFor({
-    responses: { 'POST /api/workspaces': created, default: { ok: true, status: 204 } }
-  });
+const CREATED_GROUP = { id: 'g2', name: 'New group' };
 
-  await createGroupFrom(['g1', 'w1'], h.ctx);
+test('moving a parent and its own child never lifts the child out of the parent', async () => {
+  const h = ctxFor({ responses: { default: { ok: true, status: 204 } } });
+
+  await moveMembersIntoGroup(CREATED_GROUP, ['g1', 'w1'], h.ctx);
 
   const patched = h.calls.filter(c => c.method === 'PATCH').map(c => c.url);
   assert.equal(patched.length, 1, 'only the top-level group moves: ' + JSON.stringify(patched));
   assert.match(patched[0], /g1$/);
-  assert.ok(
-    !patched.some(url => url.endsWith('w1')),
-    'a child of a moving group must not be reparented out of it'
-  );
+  assert.ok(!patched.some(url => url.endsWith('w1')));
+  assert.equal(h.calls.filter(c => c.method === 'POST').length, 0, 'moves never create a group');
 });
 
-test('a cancelled name prompt creates nothing', async () => {
-  const h = ctxFor({ promptWith: '   ' });
-  const groupId = await createGroupFrom(['w3'], h.ctx);
-  assert.equal(groupId, null);
-  assert.equal(h.calls.length, 0, 'an empty name must not hit the network');
-});
-
-test('a failed reparent still reports that the group exists', async () => {
+test('a failed reparent still reports the durable group identity', async () => {
   const h = ctxFor({
-    responses: {
-      'POST /api/workspaces': {
-        ok: true,
-        status: 201,
-        json: () => Promise.resolve({ folder: { id: 'g2' } })
-      },
-      default: { ok: false, status: 500, text: () => Promise.resolve('boom') }
-    }
+    responses: { default: { ok: false, status: 500, text: () => Promise.resolve('boom') } }
   });
-
-  const result = await createGroupFrom(['w3'], h.ctx);
+  const result = await moveMembersIntoGroup(CREATED_GROUP, ['w3'], h.ctx);
 
   assert.equal(h.toasted.length, 1, 'the user is told');
   assert.match(h.toasted[0].message, /could not be moved/);
@@ -150,77 +131,73 @@ test('a failed reparent still reports that the group exists', async () => {
 
 // ---------------------------------------------------------------------------
 // Grouping outcome (#346 FR-13, FR-14, FR-28)
-//
-// The Map needs more than "did it work": it has to frame exactly the members
-// the authoritative hierarchy actually placed in the new group, and it must be
-// able to say truthfully when only some of them moved.
 // ---------------------------------------------------------------------------
 
-const CREATED_G2 = {
-  ok: true,
-  status: 201,
-  json: () => Promise.resolve({ folder: { id: 'g2' } })
-};
-
-test('a successful group reports its id and every member the hierarchy placed (#346 FR-28)', async () => {
-  const h = ctxFor({
-    responses: { 'POST /api/workspaces': CREATED_G2, default: { ok: true, status: 204 } }
-  });
-
-  const result = await createGroupFrom(['w1', 'w3'], h.ctx);
+test('a successful member move reports its group id and every member the hierarchy placed (#346 FR-28)', async () => {
+  const h = ctxFor({ responses: { default: { ok: true, status: 204 } } });
+  const result = await moveMembersIntoGroup(CREATED_GROUP, ['w1', 'w3'], h.ctx);
 
   assert.equal(result.groupId, 'g2');
   assert.equal(result.name, 'New group');
-  assert.deepEqual(result.placed.sort(), ['w1', 'w3']);
+  assert.deepEqual(result.placed, ['w1', 'w3']);
   assert.deepEqual(result.failed, []);
+  assert.deepEqual(result.uncertain, []);
   assert.equal(result.partial, false);
 });
 
 test('a partly failed group reports which members actually moved (#346 FR-28)', async () => {
   const h = ctxFor({
     responses: {
-      'POST /api/workspaces': CREATED_G2,
       default: (url, init) =>
         init.method === 'PATCH' && String(url).endsWith('w3')
           ? { ok: false, status: 500, text: () => Promise.resolve('boom') }
           : { ok: true, status: 204 }
     }
   });
-
-  const result = await createGroupFrom(['w1', 'w3'], h.ctx);
+  const result = await moveMembersIntoGroup(CREATED_GROUP, ['w1', 'w3'], h.ctx);
 
   assert.equal(result.groupId, 'g2', 'the group still exists and is still reported');
   assert.deepEqual(result.placed, ['w1']);
   assert.deepEqual(result.failed, ['w3']);
   assert.equal(result.partial, true);
   assert.equal(h.toasted.length, 1, 'the partial outcome is surfaced');
-  assert.match(h.toasted[0].message, /1 of 2|could not be moved/i);
+  assert.match(h.toasted[0].message, /could not be moved/i);
 });
 
-test('a failed group creation reports nothing created and moves nobody (#346 FR-27)', async () => {
-  const h = ctxFor({
-    responses: {
-      'POST /api/workspaces': { ok: false, status: 500, text: () => Promise.resolve('nope') },
-      default: { ok: true, status: 204 }
-    }
-  });
-
-  const result = await createGroupFrom(['w1', 'w3'], h.ctx);
-
-  assert.equal(result, null);
-  assert.equal(
-    h.calls.filter(c => c.method === 'PATCH').length,
-    0,
-    'nothing is reparented when there is no group to reparent into'
-  );
+test('a lost member response is verified after refresh before it is reported', async () => {
+  const h = ctxFor({ responses: { default: () => Promise.reject(new Error('connection lost')) } });
+  h.ctx.verifyMembership = ({ groupId, memberIds }) => {
+    assert.equal(groupId, 'g2');
+    assert.deepEqual(memberIds, ['w3']);
+    return new Set(['w3']);
+  };
+  const result = await moveMembersIntoGroup(CREATED_GROUP, ['w3'], h.ctx);
+  assert.deepEqual(result.placed, ['w3']);
+  assert.deepEqual(result.uncertain, []);
+  assert.equal(result.partial, false);
+  assert.ok(h.changedCount() >= 1, 'refresh happens before verification');
 });
 
-test('grouping never touches the Map layout or a coordinate (#346 FR-13, FR-14)', async () => {
-  const h = ctxFor({
-    responses: { 'POST /api/workspaces': CREATED_G2, default: { ok: true, status: 204 } }
-  });
+test('an unverifiable lost member response stays uncertain without a retry', async () => {
+  const h = ctxFor({ responses: { default: () => Promise.reject(new Error('connection lost')) } });
+  h.ctx.verifyMembership = () => new Set();
+  const result = await moveMembersIntoGroup(CREATED_GROUP, ['w3'], h.ctx);
+  assert.deepEqual(result.placed, []);
+  assert.deepEqual(result.uncertain, ['w3']);
+  assert.equal(result.partial, true);
+  assert.equal(h.calls.filter(call => call.method === 'PATCH').length, 1, 'no automatic retry');
+});
 
-  await createGroupFrom(['w1', 'w3'], h.ctx);
+test('moving members requires the already-created group identity', async () => {
+  const h = ctxFor();
+  await assert.rejects(() => moveMembersIntoGroup({}, ['w1', 'w3'], h.ctx), /identity/);
+  assert.equal(h.calls.length, 0);
+});
+
+test('member moves never touch the Map layout or a coordinate (#346 FR-13, FR-14)', async () => {
+  const h = ctxFor({ responses: { default: { ok: true, status: 204 } } });
+
+  await moveMembersIntoGroup(CREATED_GROUP, ['w1', 'w3'], h.ctx);
 
   assert.equal(
     h.calls.filter(c => String(c.url).includes('workspace-map')).length,
@@ -341,32 +318,10 @@ test('confirmDelete never proceeds when there is no way to ask', () => {
 // Error reporting
 // ---------------------------------------------------------------------------
 
-test('a failure surfaces the API error text, not the raw JSON envelope', async () => {
-  // The real shape returned by a folder-slug conflict, which is the most
-  // common way creating a group actually fails.
-  const conflict = {
-    ok: false,
-    status: 409,
-    text: () =>
-      Promise.resolve(
-        JSON.stringify({
-          success: false,
-          error: 'A workspace folder named "verified-group" already exists.',
-          conflict: { type: 'folder_slug', suggested_slug: 'verified-group-2' }
-        })
-      )
-  };
-  const h = ctxFor({ responses: { 'POST /api/workspaces': conflict } });
-
-  await createGroupFrom(['w3'], h.ctx);
-
-  assert.equal(h.toasted.length, 1);
-  assert.equal(
-    h.toasted[0].message,
-    'A workspace folder named "verified-group" already exists.',
-    'the user must see the sentence, not the envelope'
-  );
-  assert.ok(!h.toasted[0].message.includes('{'), 'no JSON leaks into the toast');
+test('member moves never send a group creation request', async () => {
+  const h = ctxFor({ responses: { default: { ok: true, status: 204 } } });
+  await moveMembersIntoGroup(CREATED_GROUP, ['w3'], h.ctx);
+  assert.equal(h.calls.filter(call => call.method === 'POST').length, 0);
 });
 
 test('a failure with only a message field still reads correctly', async () => {

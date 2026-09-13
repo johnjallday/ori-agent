@@ -23,6 +23,18 @@ async function skipOnboarding(page: Page) {
   );
 }
 
+async function dismissCreator(page: Page) {
+  // Bootstrap marks the shell visible before its transition finishes; wait for
+  // that short transition so the test does not ask Modal.hide() while it is
+  // intentionally ignoring lifecycle changes.
+  await page.waitForTimeout(200);
+  await page.evaluate(() => {
+    // @ts-expect-error Bootstrap is a page global.
+    window.bootstrap.Modal.getInstance(document.getElementById('addFolderModal'))?.hide();
+  });
+  await expect(page.locator('#addFolderModal')).toBeHidden();
+}
+
 test.describe('Home onboarding workspace gate', () => {
   test('pending onboarding makes no workspace request and reveals no seeded workspace', async ({
     page
@@ -245,6 +257,75 @@ async function openContextModalViaSelection(page: Page) {
 test.describe('Home workspace cockpit', () => {
   test.beforeEach(async ({ page }) => {
     await skipOnboarding(page);
+  });
+
+  test('routes Map and Tree Group actions through the shared creator', async ({ page }) => {
+    await ensureWorkspace(page);
+    await page.request.post('/api/workspaces', {
+      data: { name: `Second groupable workspace ${Date.now()}`, workspace_preset: 'general' }
+    });
+    await page.goto('/');
+    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-state', 'ready');
+
+    await page.locator('#cockpitMap [data-ws-check]').nth(0).click();
+    await page.locator('#cockpitMap [data-ws-check]').nth(1).click();
+    await page.getByRole('button', { name: 'Group selected', exact: true }).click();
+    await expect(page.locator('#addFolderModal')).toBeVisible();
+    await expect(page.locator('#workspaceCreatorKindFixedNotice')).toContainText(
+      'keeps that choice fixed'
+    );
+    await dismissCreator(page);
+
+    // The header now offers only the adaptive creator. Group remains a choice
+    // inside it, while explicit empty/selected grouping stays in the Tree.
+    await expect(page.getByRole('button', { name: 'Create Group', exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: 'New Workspace', exact: true }).click();
+    await expect(page.locator('#addFolderModal')).toBeVisible();
+    await expect(page.locator('#workspaceCreatorKindWorkspace')).toBeChecked();
+    await expect(page.locator('#workspaceCreatorKindGroup')).toBeEnabled();
+    await dismissCreator(page);
+
+    await page.getByRole('button', { name: 'Tree', exact: true }).click();
+    await expect(page.locator('#cockpitTree')).toBeVisible();
+    await page.locator('[data-tree-new-group]').click();
+    await expect(page.locator('#addFolderModal')).toBeVisible();
+    await expect(page.locator('#workspaceCreatorKindGroup')).toBeChecked();
+    await dismissCreator(page);
+
+    await page.locator('[data-tree-check]').first().check();
+    await expect(page.getByRole('button', { name: 'Group selected', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Group selected', exact: true }).click();
+    await expect(page.locator('#addFolderModal')).toBeVisible();
+    await expect(page.locator('#workspaceCreatorKindFixedNotice')).toContainText(
+      'keeps that choice fixed'
+    );
+    const reviewedMember = await page
+      .locator('[data-tree-check]')
+      .first()
+      .getAttribute('data-tree-check');
+    await page.locator('#folderNameInput').fill('Reviewed Tree Group');
+    await page.locator('#wizardNextBtn').click();
+    await expect(page.locator('#workspaceReviewSummary')).toContainText(
+      'top-level workspace will move'
+    );
+    const groupCreated = page.waitForResponse(
+      response =>
+        response.request().method() === 'POST' &&
+        new URL(response.url()).pathname === '/api/workspaces'
+    );
+    await page.locator('#createFolderBtn').click();
+    const body = await (await groupCreated).json();
+    const groupID = body?.folder?.id as string;
+    await expect(page.locator('#addFolderModal')).toBeHidden();
+    await expect
+      .poll(async () => {
+        const list = await (await page.request.get('/api/workspaces')).json();
+        const rows = list.workspaces || list.folders || [];
+        return rows.find((workspace: { id: string }) => workspace.id === reviewedMember)?.parent_id;
+      })
+      .toBe(groupID);
+    // Keep the suite's shared demo state flat for later Map geometry cases.
+    await page.request.delete(`/api/workspaces/${groupID}?confirm=true&delete_mode=group_only`);
   });
 
   test('renders the cockpit shell full-width, with no flyout open on a bare load', async ({
@@ -693,8 +774,8 @@ test.describe('Home workspace cockpit', () => {
     // FR127: exactly one row is tabbable (roving tabindex).
     await expect(page.locator('[data-tree-row][tabindex="0"]')).toHaveCount(1);
     // FR40/FR51: management actions and a non-drag Move path are present.
-    for (const label of ['Create Workspace', 'New Group', 'Import Folder', 'Rescan']) {
-      await expect(page.getByRole('button', { name: label })).toBeVisible();
+    for (const label of ['Create Workspace', 'Create Group', 'Import Folder', 'Rescan']) {
+      await expect(page.locator('#cockpitTree').getByRole('button', { name: label })).toBeVisible();
     }
     await expect(page.locator('[data-tree-move]').first()).toBeVisible();
   });

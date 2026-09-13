@@ -171,6 +171,10 @@
       hasAgents: Boolean(data && data.has_agents) && agents.length > 0,
       revision: text(data && data.revision),
       templateId: text(data && data.template_id),
+      // The Group Manager follows the whole-roster review contract rather than
+      // project role staffing. Its template id is server-owned and never a
+      // user-selectable project blueprint.
+      groupRoster: text(data && data.template_id) === 'group-roster',
       templateName: text(data && data.template_name),
       declaredPrimary: text(data && data.entry_agent_name),
       systemProvider: text(data && data.system_provider),
@@ -231,6 +235,7 @@
   // failures for a team the user never asked for.
   function declaredRoles(source) {
     const plan = source.plan || {};
+    if (plan.data?.groupRoster) return [];
     const program = plan.data?.assistantProgram || null;
     if (program) {
       return program.roles.map(role => ({
@@ -1622,7 +1627,12 @@
     // Every non-import wizard create carries an explicit versioned intent and
     // an explicit staffing array. API callers that omit team_intent still use
     // the legacy behavior; the wizard never relies on omission as permission.
-    if (includeTeam && plan.status === PLAN_READY && text(plan.data?.revision)) {
+    if (
+      includeTeam &&
+      !plan.data?.groupRoster &&
+      plan.status === PLAN_READY &&
+      text(plan.data?.revision)
+    ) {
       payload.team_intent = {
         version: 1,
         mode: agentless ? 'agentless' : 'staffed',

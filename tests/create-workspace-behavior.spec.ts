@@ -690,6 +690,163 @@ test('createFolder submits workspace_preset for create and import', async ({ pag
   await expect.poll(() => captured.import).toBe('research');
 });
 
+test('the shared creator makes an ordinary Group through Details, Roster, and Review', async ({
+  page
+}) => {
+  let payload: Record<string, unknown> | undefined;
+  await page.route('**/api/workspaces', async route => {
+    if (route.request().method() !== 'POST') return route.continue();
+    payload = route.request().postDataJSON();
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        folder: { id: 'browser-group', name: 'Browser group', folder_slug: 'browser-group' }
+      })
+    });
+  });
+
+  await page.evaluate(() => {
+    (
+      window as unknown as { sessionManager: { showAddWorkspaceModal: (options: unknown) => void } }
+    ).sessionManager.showAddWorkspaceModal({ kind: 'group', entryPoint: 'browser-group-test' });
+  });
+  await expect(page.locator('#addFolderModal')).toBeVisible();
+  await expect(page.locator('#folderModalTitle')).toHaveText('Create Group');
+  await expect(page.locator('#workspaceCreatorKindGroup')).toBeChecked();
+  await expect(page.locator('#wizardStep1')).toBeHidden();
+  await expect(page.locator('#wizardStep3')).toBeHidden();
+  await expect(page.locator('#wizardStep2')).toBeVisible();
+  await expect(page.locator('#folderAdvancedDisclosure')).toBeHidden();
+  await expect(page.locator('#workspaceBootstrapFields')).toBeHidden();
+
+  await page.fill('#folderNameInput', 'Browser group');
+  await page.fill('#folderDescriptionInput', 'A managed group created by the shared dialog.');
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#wizardStep3')).toBeVisible();
+  await expect(page.locator('#workspaceTeamHeading')).toHaveText('Group roster');
+  await advanceToReviewFromTeam(page);
+  await expect(page.locator('#wizardStep4')).toBeVisible();
+  await expect(page.locator('#workspaceReviewSummary')).toContainText(
+    'One organizational group and its reviewed roster'
+  );
+  await expect(page.locator('#createFolderBtn')).toHaveText('Create group “Browser group”');
+  await page.locator('#createFolderBtn').click();
+  await expect.poll(() => payload).toBeDefined();
+  expect(payload).toMatchObject({
+    name: 'Browser group',
+    description: 'A managed group created by the shared dialog.',
+    kind: 'group',
+    group_roster: true,
+    create_template_agents: true
+  });
+  for (const field of [
+    'template_id',
+    'template_path',
+    'blank',
+    'workspace_bootstrap',
+    'workspace_preset',
+    'team_intent',
+    'role_staffing',
+    'existing_agent_names',
+    'entry_agent_name'
+  ]) {
+    expect(payload).not.toHaveProperty(field);
+  }
+  expect(payload).toHaveProperty('template_agent_review');
+  expect(payload?.template_agent_review).toMatchObject({
+    version: 1,
+    expectations: [{ index: 0, name: 'Browser group Manager', action: 'create' }]
+  });
+  await expect(page.locator('#toastContainer .toast-action')).toHaveText(
+    'Open group / Manage team'
+  );
+});
+
+test('creator lifecycle keeps ordinary drafts isolated across kind switches and cancellation', async ({
+  page
+}) => {
+  const creator = page.locator('#addFolderModal');
+  const open = async (options: Record<string, unknown> = {}) => {
+    await page.evaluate(options => {
+      (
+        window as unknown as {
+          sessionManager: { showAddWorkspaceModal: (options: Record<string, unknown>) => void };
+        }
+      ).sessionManager.showAddWorkspaceModal(options);
+    }, options);
+    await expect(creator).toBeVisible();
+  };
+
+  await open({ entryPoint: 'lifecycle-workspace' });
+  await cardByLabel(page, 'Blank').click();
+  await advanceToWorkspaceDetails(page);
+  await page.locator('#folderNameInput').fill('Draft stays local');
+  await page.locator('#folderDescriptionInput').fill('Workspace description');
+
+  await page.locator('#workspaceCreatorKindGroup').check();
+  await expect(page.locator('#folderModalTitle')).toHaveText('Create Group');
+  await expect(page.locator('#wizardStep2')).toBeVisible();
+  await expect(page.locator('#wizardStep1')).toBeHidden();
+  await expect(page.locator('#wizardStep3')).toBeHidden();
+  await expect(page.locator('#folderNameInput')).toHaveValue('Draft stays local');
+  await page.locator('#folderDescriptionInput').fill('Group description');
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#wizardStep3')).toBeVisible();
+  await advanceToReviewFromTeam(page);
+  await expect(page.locator('#workspaceReviewSummary')).toContainText(
+    'One organizational group and its reviewed roster'
+  );
+
+  await page.locator('#workspaceCreatorKindWorkspace').check();
+  await expect(page.locator('#wizardStep1')).toBeVisible();
+  await cardByLabel(page, 'Blank').click();
+  await advanceToWorkspaceDetails(page);
+  await expect(page.locator('#folderNameInput')).toHaveValue('Draft stays local');
+  await expect(page.locator('#folderDescriptionInput')).toHaveValue('Workspace description');
+
+  await page.locator('#workspaceCreatorKindGroup').check();
+  await expect(page.locator('#folderDescriptionInput')).toHaveValue('Group description');
+  await page.keyboard.press('Escape');
+  await expect(creator).toBeHidden();
+
+  // A cancelled selected-member operation does not leave a fixed Group or its
+  // reviewed members behind when the next caller starts an ordinary draft.
+  await open({
+    mode: 'selected-members',
+    kind: 'group',
+    selection: { ids: ['reviewed-workspace'], names: ['Reviewed workspace'] }
+  });
+  await expect(page.locator('#workspaceCreatorKindFixedNotice')).toContainText(
+    'keeps that choice fixed'
+  );
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(creator).toBeHidden();
+
+  await open({ kind: 'group', entryPoint: 'ordinary-after-selected-cancel' });
+  await expect(page.locator('#workspaceCreatorKindFixedNotice')).toBeHidden();
+  await expect(page.locator('#workspaceCreatorKindGroup')).toBeEnabled();
+  await expect(page.locator('#folderNameInput')).toHaveValue('');
+  await expect(page.locator('#workspaceReviewSummary')).not.toContainText('Reviewed workspace');
+  await page.keyboard.press('Escape');
+  await expect(creator).toBeHidden();
+
+  // Import remains a fixed Workspace operation, and cancelling it cannot make
+  // the following ordinary Group operation inherit import-only state.
+  await open({ importMode: true, entryPoint: 'lifecycle-import' });
+  await expect(page.locator('#workspaceCreatorKindWorkspace')).toBeChecked();
+  await expect(page.locator('#workspaceCreatorKindGroup')).toBeDisabled();
+  await page.keyboard.press('Escape');
+  await expect(creator).toBeHidden();
+
+  await open({ kind: 'group', entryPoint: 'ordinary-after-import-cancel' });
+  await expect(page.locator('#workspaceCreatorKindGroup')).toBeChecked();
+  await expect(page.locator('#workspaceCreatorKindGroup')).toBeEnabled();
+  await expect(page.locator('#workspaceCreatorKindFixedNotice')).toBeHidden();
+  await page.keyboard.press('Escape');
+  await expect(creator).toBeHidden();
+});
+
 test('Team attaches a saved agent and submits the complete team atomically', async ({ page }) => {
   await page.route('**/api/workspaces/template-agent-plan**', async route => {
     await route.fulfill({
@@ -809,13 +966,13 @@ test('Team visualizes every included template agent and its lifecycle', async ({
   // The blueprint roster is edited on Team, not Review (FR32, FR83).
   await advanceToTeam(page);
 
-  // The server plan declares slots, not members. Primary and specialist roles
-  // appear in declaration order with explicit Create/Assign actions.
+  // The server plan declares slots, not members. Project Lead and specialist
+  // roles appear in declaration order with explicit Create/Assign actions.
   const rows = page.locator('#workspaceRoleRoster .ws-role-row');
   await expect(rows).toHaveCount(3);
   await expect(page.locator('#templateAgentReview')).toHaveCount(0);
   await expect(rows.nth(0)).toContainText('Research Lead');
-  await expect(rows.nth(0).locator('.ws-role-row__designation')).toHaveText('PRIMARY');
+  await expect(rows.nth(0).locator('.ws-role-row__designation')).toHaveText('PROJECT LEAD');
   await expect(rows.nth(0).locator('.ws-role-tag')).toHaveText('Missing');
   await expect(rows.nth(1).locator('.ws-role-row__designation')).toHaveText('SPECIALIST');
   await expect(rows.nth(1).locator('.ws-role-tag')).toHaveText('Optional');
@@ -1984,8 +2141,10 @@ test('Review reads as a receipt: name once, blueprint as provenance, team summar
 
   // The receipt distinguishes filled roles, optional vacancies, and saved
   // teammates that were explicitly added outside a role.
-  await expect(receipt).toContainText('Reaper Producer · Primary · Reaper Producer · New agent');
-  await expect(receipt).toContainText('Session Scout · Specialist · Optional');
+  await expect(receipt).toContainText(
+    'Reaper Producer · PROJECT LEAD · Reaper Producer · new agent will be created'
+  );
+  await expect(receipt).toContainText('Session Scout · SPECIALIST · Optional');
   await expect(receipt).toContainText('Research Scout · Also in this workspace · Saved agent');
   await expect(receipt).toContainText('1 new agent will be created');
   await expect(receipt).toContainText('1 saved agent will be attached');
@@ -2196,7 +2355,7 @@ test('Team carries text semantics, list roles, and quiet live-region updates', a
 
   // Designation and vacancy are words, not colour.
   await expect(page.locator('#workspaceRoleRoster .ws-role-row__designation').first()).toHaveText(
-    'PRIMARY'
+    'PROJECT LEAD'
   );
   await expect(page.locator('#workspaceRoleRoster .ws-role-tag').first()).toHaveText('Missing');
 

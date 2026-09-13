@@ -412,20 +412,21 @@ test('the local demo creates a real project from one name and observes it after 
   await expect(dialog).toBeVisible();
   await expect(dialog.locator('.setup-journey__step-button')).toHaveCount(4);
   await dialog.getByRole('button', { name: 'Build Group', exact: true }).click();
-  const groupBuilder = page.locator('#buildGroupModal');
-  await expect(groupBuilder).toBeVisible();
+  const creator = page.locator('#addFolderModal');
+  await expect(creator).toBeVisible();
   await expect(dialog).toBeHidden();
-  await expect(groupBuilder.getByRole('textbox', { name: 'Group name' })).toHaveValue(
-    'Music Production'
+  await expect(creator.getByRole('textbox', { name: 'Group name' })).toHaveValue('Music Production');
+  await creator.getByRole('textbox', { name: 'Group name' }).fill('My Studio');
+  await creator.getByRole('button', { name: 'Review →' }).click();
+  await creator.getByRole('button', { name: 'Review canonical Home' }).click();
+  await expect(creator.locator('#workspaceReviewSummary')).toContainText(
+    'This exact Home has been reviewed by setup'
   );
-  await groupBuilder.getByRole('textbox', { name: 'Group name' }).fill('My Studio');
-  await groupBuilder.getByRole('button', { name: 'Review Group' }).click();
-  await expect(groupBuilder.getByRole('heading', { name: 'Build “My Studio”?' })).toBeVisible();
   await captureProjectScreen(page, '23-shared-group-review');
   const groupResponse = page.waitForResponse(response =>
     response.url().endsWith('/actions/create_group')
   );
-  await groupBuilder.getByRole('button', { name: 'Build Group', exact: true }).click();
+  await creator.getByRole('button', { name: 'Create canonical Home “My Studio”' }).click();
   const groupCommit = await groupResponse;
   expect(groupCommit.ok(), await groupCommit.text()).toBeTruthy();
   const grouped = (await groupCommit.json()).setup_journey;
@@ -443,21 +444,21 @@ test('the local demo creates a real project from one name and observes it after 
   await dialog.getByRole('button', { name: 'Set up later' }).click();
   await dialog.getByRole('button', { name: 'Create New Workspace', exact: true }).click();
   await expect(dialog).toBeHidden();
-  const creator = page.locator('#addFolderModal');
-  await expect(creator).toBeVisible();
-  await expect(creator.locator('#wizardStep2')).toBeVisible();
-  await expect(creator.locator('#projectTemplateOpenAfterCreateToggle')).not.toBeChecked();
-  await expect(creator.locator('#folderParentSelect')).toHaveValue(
+  const workspaceCreator = page.locator('#addFolderModal');
+  await expect(workspaceCreator).toBeVisible();
+  await expect(workspaceCreator.locator('#wizardStep2')).toBeVisible();
+  await expect(workspaceCreator.locator('#projectTemplateOpenAfterCreateToggle')).not.toBeChecked();
+  await expect(workspaceCreator.locator('#folderParentSelect')).toHaveValue(
     grouped.receipts.home_workspace_id
   );
   const name = 'First Idea';
-  await creator.getByRole('textbox', { name: 'Workspace name', exact: true }).fill(name);
+  await workspaceCreator.getByRole('textbox', { name: 'Workspace name', exact: true }).fill(name);
   await captureProjectScreen(page, '16-real-project-name');
-  await creator.locator('#wizardNextBtn').click();
-  await creator.locator('#wizardNextBtn').click();
-  await expect(creator.locator('#wizardStep4')).toBeVisible();
-  await expect(creator.locator('#workspaceJourneyReview')).toContainText('first-idea.rpp');
-  await expect(creator.locator('#workspaceJourneyReview')).toContainText('Group: My Studio');
+  await workspaceCreator.locator('#wizardNextBtn').click();
+  await workspaceCreator.locator('#wizardNextBtn').click();
+  await expect(workspaceCreator.locator('#wizardStep4')).toBeVisible();
+  await expect(workspaceCreator.locator('#workspaceJourneyReview')).toContainText('first-idea.rpp');
+  await expect(workspaceCreator.locator('#workspaceJourneyReview')).toContainText('Group: My Studio');
   await captureProjectScreen(page, '17-real-project-review');
   const commitEnvelopes: unknown[] = [];
   let releaseRetry!: () => void;

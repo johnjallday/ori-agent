@@ -1,4 +1,3 @@
-import { openGroupBuilder } from './group-builder.js';
 // Importing this also registers window.OriEconomy, which is how dashboard.js —
 // a plain script, not a module — reaches the same harvest client.
 import { ECONOMY_CHANGED_EVENT } from './economy-harvest.js';
@@ -1623,9 +1622,10 @@ export function renderWorkspaceAreaStatusHTML(status) {
 // modal context stay single-authority (FR117).
 import { mountTree, ancestorIds } from './home-workspace-tree.js';
 import {
-  createGroupFrom as createGroupAction,
   deleteWorkspace as deleteWorkspaceAction,
-  deleteWorkspaces as deleteWorkspacesAction
+  deleteWorkspaces as deleteWorkspacesAction,
+  moveMembersIntoGroup,
+  topLevelIds
 } from './workspace-bulk-actions.js';
 import {
   ONBOARDING_GATE_LOADING,
@@ -1947,6 +1947,8 @@ import {
         state.undoStack.push({ id, name });
       },
       onUndo: () => undoLastDelete(),
+      onCreateGroup: (ids, onComplete) =>
+        openGroupCreator(ids, { entryPoint: 'home_cockpit_tree_group', onComplete }),
       onChanged: async () => {
         await refreshQuietly();
       }
@@ -1967,41 +1969,81 @@ import {
    * trashed from either view is restorable by the same Undo (FR52).
    */
   /**
-   * Group a Map selection (#346 FR-13 – FR-22, FR-28).
-   *
-   * The hierarchy mutation is the same shared one Tree runs — this only adds the
-   * Map's before and after. Before: pin the coordinates of any selected
-   * workspace that has never been placed by hand, so grouping cannot make it
-   * jump to a different automatic cell. After: select and frame the district the
-   * hierarchy actually produced, using the members it actually placed.
+   * Open the one shared Group creator for an empty group or a snapshotted Map /
+   * Tree selection. Its callback runs only after the durable group POST, so a
+   * partial member move can never create a replacement group.
    */
-  async function groupFromMap(ids) {
-    const map = window.OriWorkspaceMap;
+  function openGroupCreator(ids = [], options = {}) {
+    const manager = window.sessionManager;
+    if (!manager || typeof manager.showAddWorkspaceModal !== 'function') {
+      const message = 'Create Group is unavailable. Refresh the page and try again.';
+      announce(message);
+      window.Toast?.error?.(message);
+      return null;
+    }
+    const memberIDs = topLevelIds(ids, state.flattened);
+    const selection = memberIDs.length
+      ? {
+          ids: memberIDs,
+          names: memberIDs.map(
+            id => state.flattened.find(row => row?.id === id)?.name || 'Workspace'
+          )
+        }
+      : null;
+    const map = options.map ? window.OriWorkspaceMap : null;
     const anchors =
       map && typeof map.captureGroupingAnchors === 'function'
-        ? map.captureGroupingAnchors(ids)
+        ? map.captureGroupingAnchors(memberIDs)
         : {};
 
-    const outcome = await createGroupAction(ids, bulkContext());
-    if (!outcome || !outcome.groupId) return;
+    manager.showAddWorkspaceModal({
+      kind: 'group',
+      fixedKind: selection ? 'group' : '',
+      selection,
+      entryPoint: options.entryPoint || 'home_cockpit_create_group',
+      invoker: options.invoker || document.activeElement,
+      onCreated: async created => {
+        const outcome = selection
+          ? await moveMembersIntoGroup(
+              { id: created.groupId, name: created.folder?.name },
+              selection.ids,
+              bulkContext()
+            )
+          : {
+              groupId: created.groupId,
+              name: created.folder?.name || 'Group',
+              placed: [],
+              failed: [],
+              uncertain: [],
+              partial: false
+            };
+        if (!map) {
+          options.onComplete?.(outcome);
+          return outcome;
+        }
 
-    // createGroupAction has already refreshed shared state, so the new group is
-    // in state.flattened and the Map can resolve its district.
-    if (map && typeof map.adoptNewGroup === 'function') {
-      const pinned = {};
-      // Only the members the hierarchy really placed changed islands; a member
-      // that failed to move is still where it was (FR-28).
-      outcome.placed.forEach(id => {
-        if (anchors[id]) pinned[id] = anchors[id];
-      });
-      await map.adoptNewGroup(outcome.groupId, pinned);
-    } else if (map && typeof map.clearMultiSelection === 'function') {
-      map.clearMultiSelection();
-    }
+        // Membership refresh occurs in moveMembersIntoGroup before framing.
+        // Only confirmed members receive pinned anchors; failures stay put.
+        if (typeof map.adoptNewGroup === 'function') {
+          const pinned = {};
+          outcome.placed.forEach(id => {
+            if (anchors[id]) pinned[id] = anchors[id];
+          });
+          await map.adoptNewGroup(outcome.groupId, pinned);
+        } else if (typeof map.clearMultiSelection === 'function') {
+          map.clearMultiSelection();
+        }
+        selectItem(outcome.groupId);
+        options.onComplete?.(outcome);
+        return outcome;
+      }
+    });
+    return selection;
+  }
 
-    // One selection change, through the one shared path, so the Map highlight
-    // and modal context cannot disagree (FR-21).
-    selectItem(outcome.groupId);
+  /** Group a Map selection while retaining its coordinate anchors. */
+  function groupFromMap(ids) {
+    return openGroupCreator(ids, { entryPoint: 'home_cockpit_map_group_selected', map: true });
   }
 
   function bulkContext() {
@@ -2013,7 +2055,13 @@ import {
       },
       onChanged: async () => {
         await refreshQuietly();
-      }
+      },
+      verifyMembership: ({ groupId, memberIds }) =>
+        new Set(
+          (memberIds || []).filter(
+            id => state.flattened.find(row => row?.id === id)?.parent_id === groupId
+          )
+        )
     };
   }
 
@@ -3448,10 +3496,6 @@ import {
   // Every create/import/delete/move/tag/undo path funnels through here, so one
   // authoritative reload updates Map, Tree, Summary, and the rail together
   // rather than each view refetching for itself (FR108, FR117).
-  document
-    .getElementById('cockpitBuildGroupBtn')
-    ?.addEventListener('click', () => openGroupBuilder());
-
   window.addEventListener('ori:workspaces-changed', () => {
     if (canHydrateWorkspaceData()) void refreshQuietly();
   });

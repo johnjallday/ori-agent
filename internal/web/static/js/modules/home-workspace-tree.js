@@ -15,7 +15,7 @@
 // (FR117). Server contracts are the launcher's existing ones, unchanged:
 //
 //   move/reorder   PATCH  /api/workspaces/{id}  { parent_id, order_index }
-//   create group   POST   /api/workspaces       { name, kind: 'group' }
+//   create group   POST   /api/workspaces       { name, kind: 'group', create_template_agents: true }
 //   delete         DELETE /api/workspaces/{id}?confirm=true[&delete_mode=...]
 //   undo delete    POST   /api/workspaces/{id}/restore
 //   rescan         POST   /api/workspaces/rescan
@@ -30,7 +30,6 @@ import {
   workspaceSignals
 } from './home-workspace-cockpit.js';
 import {
-  createGroupFrom as createGroupAction,
   deleteWorkspace as deleteWorkspaceAction,
   deleteWorkspaces as deleteWorkspacesAction
 } from './workspace-bulk-actions.js';
@@ -537,7 +536,7 @@ function renderToolbarHTML(state) {
     '</div>' +
     '<div class="cockpit-tree-toolbar-actions">' +
     '<button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-bs-toggle="modal" data-bs-target="#addFolderModal" data-workspace-import-mode="false" data-workspace-entry-point="home_cockpit_tree_create">Create Workspace</button>' +
-    '<button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-tree-new-group>New Group</button>' +
+    '<button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-tree-new-group aria-haspopup="dialog" aria-controls="addFolderModal">Create Group</button>' +
     '<button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-bs-toggle="modal" data-bs-target="#addFolderModal" data-workspace-import-mode="true" data-workspace-entry-point="home_cockpit_tree_import">Import Folder</button>' +
     '<button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-tree-rescan>Rescan</button>' +
     '<a class="modern-btn modern-btn-secondary modern-btn-sm" href="/settings">Manage directory</a>' +
@@ -606,7 +605,7 @@ function renderBulkBarHTML(count) {
     '<div class="cockpit-tree-bulkbar" data-tree-bulkbar role="group" aria-label="Bulk actions">' +
     `<span class="cockpit-tree-bulkcount">${count} selected</span>` +
     '<button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-tree-select-all>Select all</button>' +
-    '<button type="button" class="modern-btn modern-btn-primary modern-btn-sm" data-tree-group-selected>Group selected</button>' +
+    '<button type="button" class="modern-btn modern-btn-primary modern-btn-sm" data-tree-group-selected aria-haspopup="dialog" aria-controls="addFolderModal">Group selected</button>' +
     '<button type="button" class="modern-btn modern-btn-danger modern-btn-sm" data-tree-delete-selected>Delete selected</button>' +
     '<button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-tree-cancel-selection>Cancel</button>' +
     '</div>'
@@ -904,10 +903,19 @@ function bindTree(container, state, cb, rows) {
   }
 
   async function createGroup(memberIds) {
-    // Tree only needs to know a group exists; the Map is the view that also
-    // frames and selects it (#346).
-    const outcome = await createGroupAction(memberIds, bulkContext());
-    if (outcome && outcome.groupId) state.bulkSelection.clear();
+    // The cockpit owns the shared dialog and mutation callback. Tree only
+    // captures its current selection and clears it after the durable group is
+    // confirmed, never falling back to a second form or a native prompt.
+    if (typeof cb.onCreateGroup !== 'function') {
+      const message = 'Create Group is unavailable. Refresh the page and try again.';
+      announce(message);
+      toast(message, 'error');
+      return;
+    }
+    cb.onCreateGroup(memberIds, () => {
+      state.bulkSelection.clear();
+      rerender();
+    });
   }
 
   /**

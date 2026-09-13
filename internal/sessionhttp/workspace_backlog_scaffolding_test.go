@@ -61,7 +61,7 @@ func TestCreateGroupWorkspace_ScaffoldsBacklogMarkdownUnderFiles(t *testing.T) {
 	handler.SetWorkspaceStore(fileStore)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces",
-		bytes.NewBufferString(`{"name":"Album","kind":"group"}`))
+		bytes.NewBufferString(groupRosterCreateBody(t, handler, "Album", "")))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	handler.HandleWorkspaces(w, req)

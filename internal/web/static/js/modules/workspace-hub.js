@@ -126,11 +126,6 @@
     launcherCancelSelectionBtn: document.getElementById('launcherCancelSelectionBtn'),
     launcherSelectAllBtn: document.getElementById('launcherSelectAllBtn'),
     launcherSelectionCount: document.getElementById('launcherSelectionCount'),
-    launcherGroupModal: document.getElementById('launcherGroupModal'),
-    launcherGroupNameInput: document.getElementById('launcherGroupNameInput'),
-    launcherGroupDescriptionInput: document.getElementById('launcherGroupDescriptionInput'),
-    launcherGroupEntryAgentSelect: document.getElementById('launcherGroupEntryAgentSelect'),
-    launcherCreateGroupBtn: document.getElementById('launcherCreateGroupBtn'),
     launcherSelectionBar: document.getElementById('launcherSelectionBar'),
     launcherRootDropZone: document.getElementById('launcherRootDropZone'),
     launcherDeleteGroupModal: document.getElementById('launcherDeleteGroupModal'),
@@ -3814,127 +3809,67 @@
     await deleteWorkspacesByIds(selected);
   }
 
-  // Populate the entry-agent dropdown in the Create Group modal from the
-  // global agent catalog. The default option leaves the field empty, which
-  // makes the server auto-create a "<Group Name> Manager" entry agent.
-  async function populateGroupEntryAgentOptions() {
-    const select = elements.launcherGroupEntryAgentSelect;
-    if (!select) return;
-    select.innerHTML = '<option value="" selected>Auto-create group manager</option>';
-    try {
-      const res = await fetch('/api/agents');
-      if (!res.ok) return;
-      const data = await res.json();
-      const agents = Array.isArray(data?.agents) ? data.agents : [];
-      agents.forEach(agent => {
-        const name = String(typeof agent === 'string' ? agent : agent?.name || '').trim();
-        if (!name) return;
-        const option = document.createElement('option');
-        option.value = name;
-        option.textContent = name;
-        select.appendChild(option);
-      });
-    } catch (err) {
-      console.warn('Failed to load agents for group modal:', err);
-    }
-  }
-
-  // When set, the Create Group modal groups this explicit id set instead of the
-  // List view's checkbox selection. The Map view's "Group selected" action uses
-  // it to funnel its own multi-select set through the same modal + create flow.
-  // Reset to null on every modal open so a cancelled map-group never leaks into
-  // a later List-view group.
-  let pendingGroupMemberIds = null;
-
-  // Reset and open the Create Group modal. Called by the List toolbar button,
-  // the Cmd/Ctrl+G shortcut (no arg → group the List selection), and the Map
-  // view's "Group selected" action (memberIds → group that explicit set).
+  // List and legacy Map callers enter the same creator as Home. The selected
+  // ids and names are copied now; an unrelated later checkbox change can never
+  // alter the reviewed member move after Create is clicked.
   function openCreateGroupModal(memberIds) {
-    pendingGroupMemberIds = Array.isArray(memberIds) && memberIds.length ? memberIds.slice() : null;
-    if (!elements.launcherGroupModal || typeof bootstrap === 'undefined' || !bootstrap.Modal)
-      return;
-    const modal =
-      bootstrap.Modal.getInstance(elements.launcherGroupModal) ||
-      new bootstrap.Modal(elements.launcherGroupModal);
-    if (elements.launcherGroupNameInput) elements.launcherGroupNameInput.value = '';
-    if (elements.launcherGroupDescriptionInput) elements.launcherGroupDescriptionInput.value = '';
-    if (elements.launcherGroupEntryAgentSelect) elements.launcherGroupEntryAgentSelect.value = '';
-    void populateGroupEntryAgentOptions();
-    modal.show();
-  }
-
-  async function createGroupFromSelection() {
-    // Map view supplies an explicit id set; List view derives one from its
-    // checkbox selection. Top-level ids only: moving a checked group into the
-    // new group carries its members with it, so we must not also move the
-    // members (that would flatten them out of their group).
-    const selected = pendingGroupMemberIds || getTopLevelSelectedIds();
-    if (selected.length === 0) return;
-
-    const name = (elements.launcherGroupNameInput?.value || '').trim();
-    const description = (elements.launcherGroupDescriptionInput?.value || '').trim();
-    const entryAgentName = (elements.launcherGroupEntryAgentSelect?.value || '').trim();
-    if (!name) {
-      if (window.Toast) window.Toast.error('Group name is required');
-      return;
+    const manager = window.sessionManager;
+    if (!manager || typeof manager.showAddWorkspaceModal !== 'function') {
+      window.Toast?.error?.('Create Group is unavailable. Refresh the page and try again.');
+      return false;
     }
-
-    const payload = { name, description, kind: 'group' };
-    if (entryAgentName) payload.entry_agent_name = entryAgentName;
-
-    try {
-      const createRes = await fetch('/api/workspaces', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (!createRes.ok) {
-        const msg = await extractErrorMessage(createRes, 'Failed to create group');
-        throw new Error(msg);
-      }
-      const created = await createRes.json();
-      const groupId = created?.folder?.id;
-      if (!groupId) throw new Error('Failed to create group');
-
-      const moveResults = await Promise.all(
-        selected.map(id =>
-          fetch(`/api/workspaces/${encodeURIComponent(id)}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ parent_id: groupId })
-          })
-        )
-      );
-
-      const failed = moveResults.find(r => !r.ok);
-      if (failed) {
-        const msg = await extractErrorMessage(
-          failed,
-          'Failed to move one or more workspaces into the group'
+    const state = window.WorkspaceHubState.getState();
+    const selected =
+      Array.isArray(memberIds) && memberIds.length ? memberIds : getTopLevelSelectedIds();
+    const rows = flattenWorkspaces(state.workspaces || []);
+    const selection = selected.length
+      ? {
+          ids: selected.slice(),
+          names: selected.map(id => state.workspaceMap.get(id)?.name || 'Workspace')
+        }
+      : null;
+    manager.showAddWorkspaceModal({
+      kind: 'group',
+      fixedKind: selection ? 'group' : '',
+      selection,
+      entryPoint: selection ? 'workspace_hub_group_selected' : 'workspace_hub_create_group',
+      invoker: document.activeElement,
+      onCreated: async created => {
+        if (!selection) {
+          return {
+            groupId: created.groupId,
+            placed: [],
+            failed: [],
+            uncertain: [],
+            partial: false
+          };
+        }
+        // workspace-hub.js remains a deferred classic script. Load the shared
+        // move-only helper here rather than recreating its retired prompt/POST.
+        const { moveMembersIntoGroup } = await import('/js/modules/workspace-bulk-actions.js');
+        const outcome = await moveMembersIntoGroup(
+          { id: created.groupId, name: created.folder?.name },
+          selection.ids,
+          {
+            rows,
+            announce: message => window.Toast?.info?.(message),
+            toast: (message, variant) => window.Toast?.[variant]?.(message),
+            onChanged: () => loadWorkspaces(),
+            verifyMembership: ({ groupId, memberIds }) => {
+              const refreshed = window.WorkspaceHubState.getState();
+              return new Set(
+                (memberIds || []).filter(
+                  id => refreshed.workspaceMap.get(id)?.parent_id === groupId
+                )
+              );
+            }
+          }
         );
-        throw new Error(msg);
+        clearLauncherSelection({ render: false });
+        return outcome;
       }
-
-      if (window.Toast) window.Toast.success(`Group "${name}" created`);
-
-      // Close modal
-      if (elements.launcherGroupModal && typeof bootstrap !== 'undefined' && bootstrap.Modal) {
-        const modal = bootstrap.Modal.getInstance(elements.launcherGroupModal);
-        if (modal) modal.hide();
-      }
-      if (elements.launcherGroupNameInput) elements.launcherGroupNameInput.value = '';
-      if (elements.launcherGroupDescriptionInput) elements.launcherGroupDescriptionInput.value = '';
-      if (elements.launcherGroupEntryAgentSelect) elements.launcherGroupEntryAgentSelect.value = '';
-
-      // Reset selection + refresh. Clearing the List selection is harmless when
-      // the members came from the Map view (that selection set is empty).
-      pendingGroupMemberIds = null;
-      clearLauncherSelection({ render: false });
-      await loadWorkspaces();
-    } catch (err) {
-      console.error('Failed to create group:', err);
-      if (window.Toast) window.Toast.error(err.message || 'Failed to create group');
-    }
+    });
+    return true;
   }
 
   /**
@@ -4916,12 +4851,8 @@
       });
     }
 
-    if (elements.launcherGroupSelectedBtn && elements.launcherGroupModal) {
+    if (elements.launcherGroupSelectedBtn) {
       elements.launcherGroupSelectedBtn.addEventListener('click', () => openCreateGroupModal());
-    }
-
-    if (elements.launcherCreateGroupBtn) {
-      elements.launcherCreateGroupBtn.addEventListener('click', () => createGroupFromSelection());
     }
 
     if (elements.launcherDeleteSelectedBtn) {

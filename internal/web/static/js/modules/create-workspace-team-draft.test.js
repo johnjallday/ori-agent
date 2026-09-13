@@ -1500,6 +1500,28 @@ test('strict wizard intent does not ask the legacy whole-roster path to seed age
   assert.ok(!Object.prototype.hasOwnProperty.call(payload, 'entry_agent_name'));
 });
 
+test('a reviewed Group Roster uses whole-roster review, not project team intent', () => {
+  const draft = readyDraft(
+    [planAgent('Client Homes Manager', { entry_point: true })],
+    'group-roster:client-homes',
+    { template_id: 'group-roster', template_name: 'Group roster' }
+  );
+  const initial = Draft.derive(draft);
+  assert.equal(initial.roleRoster.total_count, 0, 'a Group Manager is not a project role');
+  assert.equal(initial.canContinueFromTeam, false, 'the proposed Manager must be reviewed');
+
+  assert.equal(Draft.acceptRecommended(draft, 0), true);
+  const payload = Draft.toCreatePayload(draft);
+  assert.equal(payload.create_template_agents, true);
+  assert.equal(payload.team_intent, undefined);
+  assert.equal(payload.role_staffing, undefined);
+  assert.deepEqual(payload.template_agent_review, {
+    version: 1,
+    plan_revision: 'test-plan-revision',
+    expectations: [{ index: 0, name: 'Client Homes Manager', action: 'create' }]
+  });
+});
+
 test('a wizard plan with no declared roles still carries explicit staffed intent', () => {
   const draft = readyDraft([]);
   assert.deepEqual(Draft.toCreatePayload(draft), {

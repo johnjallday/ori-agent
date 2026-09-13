@@ -11,23 +11,38 @@
         <div class="workspace-create-layout">
           <div class="workspace-create-main-fields">
 
-            <!-- Wizard stepper: hidden in Import mode, which remains single-step.
-                 Four steps, each answering one question — Blueprint: what
-                 starting point? Details: what is this workspace? Team: who works
-                 in it? Review: is this what I meant to create? -->
+            <fieldset id="workspaceCreatorKindChoice" class="workspace-creator-kind-choice" aria-describedby="workspaceCreatorKindHelp">
+              <legend>What are you creating?</legend>
+              <p id="workspaceCreatorKindHelp">A Workspace is a place to do work. A Group is a home for related workspaces.</p>
+              <div class="workspace-creator-kind-options">
+                <label class="workspace-creator-kind-option" for="workspaceCreatorKindWorkspace">
+                  <input id="workspaceCreatorKindWorkspace" type="radio" name="workspace-creator-kind" value="workspace" checked>
+                  <span><strong>Workspace</strong><small>A place for a project and its team.</small></span>
+                </label>
+                <label class="workspace-creator-kind-option" for="workspaceCreatorKindGroup">
+                  <input id="workspaceCreatorKindGroup" type="radio" name="workspace-creator-kind" value="group">
+                  <span><strong>Group</strong><small>A home for related workspaces, with its own manager.</small></span>
+                </label>
+              </div>
+              <p id="workspaceCreatorKindFixedNotice" class="workspace-creator-kind-fixed" role="status" hidden></p>
+            </fieldset>
+
+            <!-- The type choice stays outside progress. A Workspace needs a
+                 blueprint and team; an ordinary Group has Details, its reviewed
+                 Group Roster, and Review. Import remains Details-only. -->
             <div id="wizardStepper" class="workspace-create-stepper" aria-label="Create Workspace progress">
               <span class="workspace-create-step is-active" data-step="1" aria-current="step">
                 <span class="workspace-create-step-num">1</span>Blueprint
               </span>
-              <span class="workspace-create-step-sep">→</span>
+              <span class="workspace-create-step-sep" data-step-separator="1">→</span>
               <span class="workspace-create-step" data-step="2">
                 <span class="workspace-create-step-num">2</span>Details
               </span>
-              <span class="workspace-create-step-sep">→</span>
+              <span class="workspace-create-step-sep" data-step-separator="2">→</span>
               <span class="workspace-create-step" data-step="3">
-                <span class="workspace-create-step-num">3</span>Team
+                <span class="workspace-create-step-num">3</span><span data-workspace-creator-step-name="3">Team</span>
               </span>
-              <span class="workspace-create-step-sep">→</span>
+              <span class="workspace-create-step-sep" data-step-separator="3">→</span>
               <span class="workspace-create-step" data-step="4">
                 <span class="workspace-create-step-num">4</span>Review
               </span>
@@ -36,7 +51,7 @@
             <!-- ===== STEP 1 · BLUEPRINT ===== -->
             <section id="wizardStep1" aria-labelledby="wizardStep1Title">
               <div class="workspace-wizard-step-heading">
-                <span class="workspace-wizard-eyebrow">Step 1 of 4</span>
+                <span class="workspace-wizard-eyebrow" data-wizard-step-label="1">Step 1 of 4</span>
                 <h2 id="wizardStep1Title" tabindex="-1">Choose a blueprint</h2>
                 <p>Start with a proven workspace shape, or begin with a clean slate.</p>
               </div>
@@ -130,9 +145,9 @@
             <!-- ===== STEP 2 · DETAILS ===== -->
             <section id="wizardStep2" hidden aria-labelledby="wizardStep2Title">
               <div class="workspace-wizard-step-heading">
-                <span class="workspace-wizard-eyebrow">Step 2 of 4</span>
+                <span class="workspace-wizard-eyebrow" data-wizard-step-label="2">Step 2 of 4</span>
                 <h2 id="wizardStep2Title" tabindex="-1">Workspace details</h2>
-                <p>Name the space and add the context Ori should carry into its review.</p>
+                <p id="wizardStep2Description">Name the space and add the context Ori should carry into its review.</p>
               </div>
 
               <!-- Recap of the blueprint chosen on step 1. -->
@@ -177,8 +192,13 @@
                 <p id="workspaceGroupDestinationMessage" class="workspace-group-destination-message" role="status" aria-live="polite"></p>
               </section>
 
+              <div id="workspaceGroupDetailsNotice" class="workspace-group-details-notice" hidden>
+                <strong>Groups organize related workspaces.</strong>
+                <span>Review and customize the Group Manager before final creation. Projects and Assistant Program membership are separate choices; the Manager cannot access member workspaces.</span>
+              </div>
+
               <div id="wizardNameField" class="workspace-create-name-field mb-3">
-                <label for="folderNameInput" class="workspace-create-section-title" style="display: block; margin-bottom: 6px;">Workspace name</label>
+                <label id="folderNameLabel" for="folderNameInput" class="workspace-create-section-title" style="display: block; margin-bottom: 6px;">Workspace name</label>
                 <input type="text" id="folderNameInput" class="modern-input w-100" placeholder="Name your workspace" aria-describedby="workspaceNameHint">
                 <div id="workspaceNameHint" class="workspace-create-name-hint" aria-live="polite"></div>
               </div>
@@ -199,24 +219,48 @@
 
               <!-- Designation: name (relocated above via #wizardStep2NameMount) +
                    description feed Ori's setup review. -->
-              <div class="workspace-setup-card mb-2">
+              <div id="workspaceDetailsDescriptionCard" class="workspace-setup-card mb-2">
                 <div class="workspace-setup-header" style="align-items: flex-start;">
                   <div>
-                    <label for="folderDescriptionInput" class="workspace-setup-title">Workspace Description <span style="opacity: 0.8; font-weight: 400;">(optional)</span></label>
-                    <p class="workspace-setup-help mb-0">Describe what this workspace is for so Ori can review the setup and recommend the right agents, MCPs, and skills.</p>
+                    <label id="folderDescriptionLabel" for="folderDescriptionInput" class="workspace-setup-title">Workspace Description <span style="opacity: 0.8; font-weight: 400;">(optional)</span></label>
+                    <p id="folderDescriptionHelp" class="workspace-setup-help mb-0">Describe what this workspace is for so Ori can review the setup and recommend the right agents, MCPs, and skills.</p>
                   </div>
                 </div>
 
                 <textarea id="folderDescriptionInput" class="modern-input w-100 mb-2" placeholder="What this workspace is for and what Ori should help with" rows="3" style="resize: vertical;"></textarea>
 
-                <label for="folderSystemsInput" style="font-size: 12px; color: var(--text-secondary);">Apps and systems <span style="opacity: 0.8;">(optional)</span></label>
-                <input type="text" id="folderSystemsInput" class="modern-input w-100 mb-2" placeholder="Keynote, Finder, Google Drive">
+                <div id="workspaceBootstrapFields">
+                  <label for="folderSystemsInput" style="font-size: 12px; color: var(--text-secondary);">Apps and systems <span style="opacity: 0.8;">(optional)</span></label>
+                  <input type="text" id="folderSystemsInput" class="modern-input w-100 mb-2" placeholder="Keynote, Finder, Google Drive">
 
-                <label for="folderContextInput" style="font-size: 12px; color: var(--text-secondary);">Key files or context <span style="opacity: 0.8;">(optional)</span></label>
-                <textarea id="folderContextInput" class="modern-input w-100" placeholder="Folder paths, source docs, launch notes, brand references" rows="2" style="resize: vertical;"></textarea>
+                  <label for="folderContextInput" style="font-size: 12px; color: var(--text-secondary);">Key files or context <span style="opacity: 0.8;">(optional)</span></label>
+                  <textarea id="folderContextInput" class="modern-input w-100" placeholder="Folder paths, source docs, launch notes, brand references" rows="2" style="resize: vertical;"></textarea>
+                </div>
               </div>
 
-              <!-- Advanced: agent behavior, folder-as-template, group, tags, color. -->
+              <section id="workspaceCreatorDestinationCard" class="workspace-setup-card mb-2">
+                <label id="folderParentLabel" for="folderParentSelect" class="workspace-setup-title">Create in <span style="opacity: 0.8; font-weight: 400;">(optional)</span></label>
+                <select id="folderParentSelect" class="modern-input w-100 mb-2" aria-label="Select parent group" aria-describedby="folderParentHelp">
+                  <option value="">No group</option>
+                </select>
+                <div id="folderParentHelp" class="workspace-setup-help" style="margin-top: -6px; margin-bottom: 10px;">
+                  Optional. Choose an organizational group for this workspace. This does not grant program membership.
+                </div>
+                <div class="folder-color-picker">
+                  <label style="font-size: 12px; color: var(--text-secondary);">Color <span style="opacity: 0.8;">(optional)</span></label>
+                  <div id="folderColorOptions" class="folder-color-options mt-1">
+                    <button type="button" class="folder-color-btn active" data-color="" title="Default" aria-label="Default color"></button>
+                    <button type="button" class="folder-color-btn" data-color="#ef4444" title="Red" aria-label="Red color" style="background: #ef4444;"></button>
+                    <button type="button" class="folder-color-btn" data-color="#f59e0b" title="Orange" aria-label="Orange color" style="background: #f59e0b;"></button>
+                    <button type="button" class="folder-color-btn" data-color="#22c55e" title="Green" aria-label="Green color" style="background: #22c55e;"></button>
+                    <button type="button" class="folder-color-btn" data-color="#3b82f6" title="Blue" aria-label="Blue color" style="background: #3b82f6;"></button>
+                    <button type="button" class="folder-color-btn" data-color="#8b5cf6" title="Purple" aria-label="Purple color" style="background: #8b5cf6;"></button>
+                    <button type="button" class="folder-color-btn" data-color="#ec4899" title="Pink" aria-label="Pink color" style="background: #ec4899;"></button>
+                  </div>
+                </div>
+              </section>
+
+              <!-- Advanced Workspace-only controls. -->
               <details id="folderAdvancedDisclosure" class="workspace-advanced-details mb-2">
                 <summary class="workspace-advanced-summary">
                   <span class="workspace-advanced-summary-title">Advanced</span>
@@ -244,32 +288,9 @@
                     Scaffolds the chosen folder's files into the workspace as its project. Overrides the template selection above.
                   </div>
 
-                  <div id="workspaceOptionalParentField">
-                    <label for="folderParentSelect" style="font-size: 12px; color: var(--text-secondary);">Group (optional)</label>
-                    <select id="folderParentSelect" class="modern-input w-100 mb-2" aria-label="Select workspace group" aria-describedby="folderParentHelp">
-                      <option value="">No group</option>
-                    </select>
-                    <div id="folderParentHelp" style="margin-top: -6px; margin-bottom: 10px; font-size: 12px; color: var(--text-secondary);">
-                      Optional. Choose an organizational group for this workspace. This does not grant program membership.
-                    </div>
-                  </div>
-
                   <label style="font-size: 12px; color: var(--text-secondary);">Tags <span style="opacity: 0.8;">(optional)</span></label>
                   <div id="folderTagsMount" class="mb-1"></div>
                   <div id="folderTemplateTagsHint" style="margin-bottom: 10px; font-size: 12px; color: var(--text-secondary);" aria-live="polite" hidden></div>
-
-                  <div class="folder-color-picker">
-                    <label style="font-size: 12px; color: var(--text-secondary);">Color:</label>
-                    <div id="folderColorOptions" class="folder-color-options mt-1">
-                      <button type="button" class="folder-color-btn active" data-color="" title="Default" aria-label="Default color"></button>
-                      <button type="button" class="folder-color-btn" data-color="#ef4444" title="Red" aria-label="Red color" style="background: #ef4444;"></button>
-                      <button type="button" class="folder-color-btn" data-color="#f59e0b" title="Orange" aria-label="Orange color" style="background: #f59e0b;"></button>
-                      <button type="button" class="folder-color-btn" data-color="#22c55e" title="Green" aria-label="Green color" style="background: #22c55e;"></button>
-                      <button type="button" class="folder-color-btn" data-color="#3b82f6" title="Blue" aria-label="Blue color" style="background: #3b82f6;"></button>
-                      <button type="button" class="folder-color-btn" data-color="#8b5cf6" title="Purple" aria-label="Purple color" style="background: #8b5cf6;"></button>
-                      <button type="button" class="folder-color-btn" data-color="#ec4899" title="Pink" aria-label="Pink color" style="background: #ec4899;"></button>
-                    </div>
-                  </div>
                 </div>
               </details>
 
@@ -306,15 +327,16 @@
 
             </section>
 
-            <!-- ===== STEP 3 · TEAM ===== -->
+            <!-- ===== STEP 3 · TEAM / GROUP ROSTER ===== -->
             <!-- The only step where the resulting roster is edited. Blueprint
                  agents and manually added saved agents appear as ONE team here;
-                 Review (step 4) restates the result read-only. -->
+                 an ordinary Group uses the same reviewed mechanics for its
+                 required Manager. Review restates the result read-only. -->
             <section id="wizardStep3" hidden aria-labelledby="wizardStep3Title">
               <div class="workspace-wizard-step-heading">
-                <span class="workspace-wizard-eyebrow">Step 3 of 4</span>
-                <h2 id="wizardStep3Title" tabindex="-1">Build your workspace team</h2>
-                <p id="wizardStep3Description">Confirm who will work in this workspace, and add saved agents if you need more.</p>
+                <span class="workspace-wizard-eyebrow" data-wizard-step-label="3">Step 3 of 4</span>
+                <h2 id="wizardStep3Title" tabindex="-1">Confirm your team</h2>
+                <p id="wizardStep3Description">Review the proposed agent roster, customize any agents, and add saved teammates.</p>
               </div>
 
               <div id="workspaceTeamLayout" class="workspace-team-layout">
@@ -419,9 +441,9 @@
                  with Edit links back to the step that owns each value. -->
             <section id="wizardStep4" hidden aria-labelledby="wizardStep4Title">
               <div class="workspace-wizard-step-heading">
-                <span class="workspace-wizard-eyebrow">Step 4 of 4</span>
+                <span class="workspace-wizard-eyebrow" data-wizard-step-label="4">Step 4 of 4</span>
                 <h2 id="wizardStep4Title" tabindex="-1">Ready to create?</h2>
-                <p>Check the workspace, its team, and anything it will ask for after creation.</p>
+                <p id="wizardStep4Description">Check the workspace, its team, and anything it will ask for after creation.</p>
               </div>
 
               <!-- Not a live region either: the receipt re-renders on every

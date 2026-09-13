@@ -41,6 +41,30 @@ async function ensureWorkspace(page: Page, name?: string): Promise<string> {
   return (await res.json())?.folder?.id;
 }
 
+async function createReviewedGroup(page: Page, name: string): Promise<string> {
+  const planResponse = await page.request.post('/api/workspaces/template-agent-plan', {
+    data: { group_roster: true, group_name: name }
+  });
+  expect(planResponse.ok(), await planResponse.text()).toBe(true);
+  const plan = await planResponse.json();
+  const manager = plan.agents?.[0];
+  const response = await page.request.post('/api/workspaces', {
+    data: {
+      name,
+      kind: 'group',
+      group_roster: true,
+      create_template_agents: true,
+      template_agent_review: {
+        version: 1,
+        plan_revision: plan.revision,
+        expectations: [{ index: 0, name: manager.name, action: manager.action }]
+      }
+    }
+  });
+  expect(response.ok(), await response.text()).toBe(true);
+  return (await response.json())?.folder?.id;
+}
+
 async function listWorkspaces(
   page: Page
 ): Promise<Array<{ id: string; name?: string; parent_id?: string; kind?: string }>> {
@@ -781,10 +805,7 @@ test.describe('Coordinate Workspace Map', () => {
     page
   }) => {
     test.setTimeout(60_000);
-    const created = await page.request.post('/api/workspaces', {
-      data: { name: `Automatic drag group ${Date.now()}`, kind: 'group' }
-    });
-    const group = (await created.json())?.folder?.id as string;
+    const group = await createReviewedGroup(page, `Automatic drag group ${Date.now()}`);
     const childA = await ensureWorkspace(page, `Automatic drag child A ${Date.now()}`);
     const childB = await ensureWorkspace(page, `Automatic drag child B ${Date.now()}`);
     const outsider = await ensureWorkspace(page, `Automatic stationary outsider ${Date.now()}`);
@@ -896,10 +917,7 @@ test.describe('Coordinate Workspace Map', () => {
       y: number;
     }>;
     const y = (placed.length ? Math.max(...placed.map(position => position.y)) : 0) + 760;
-    const created = await page.request.post('/api/workspaces', {
-      data: { name: `Surface drag group ${Date.now()}`, kind: 'group' }
-    });
-    const group = (await created.json())?.folder?.id as string;
+    const group = await createReviewedGroup(page, `Surface drag group ${Date.now()}`);
     const childA = await ensureWorkspace(page, `Surface drag child A ${Date.now()}`);
     const childB = await ensureWorkspace(page, `Surface drag child B ${Date.now()}`);
     for (const child of [childA, childB]) {

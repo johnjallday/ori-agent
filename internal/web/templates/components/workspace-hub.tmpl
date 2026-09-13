@@ -108,11 +108,11 @@
           <span id="launcherSelectionCount" class="launcher-selection-count">0 selected</span>
           <button id="launcherSelectAllBtn" class="launcher-select-all-btn" type="button">Select all</button>
           <div class="launcher-selection-actions">
-            <button id="launcherGroupSelectedBtn" class="modern-btn modern-btn-primary modern-btn-sm" type="button" disabled>
+            <button id="launcherGroupSelectedBtn" class="modern-btn modern-btn-primary modern-btn-sm" type="button" disabled aria-haspopup="dialog" aria-controls="addFolderModal">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1" aria-hidden="true">
                 <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
               </svg>
-              Group
+              Group selected
             </button>
             <button id="launcherDeleteSelectedBtn" class="modern-btn modern-btn-danger modern-btn-sm" type="button" disabled>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1" aria-hidden="true">
@@ -228,35 +228,6 @@
       </section>
     </div>
   </section>
-
-  <!-- Create Group Modal (Launcher) -->
-  <div class="modal fade" id="launcherGroupModal" tabindex="-1" aria-labelledby="launcherGroupModalTitle" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered modal-sm">
-      <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
-        <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
-          <h6 class="modal-title" id="launcherGroupModalTitle" style="color: var(--text-primary);">Create Group</h6>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <label for="launcherGroupNameInput" style="display: block; margin-bottom: 6px; font-size: 12px; color: var(--text-secondary);">Group name</label>
-          <input id="launcherGroupNameInput" type="text" class="modern-input w-100 mb-2" placeholder="Group Name" autocomplete="off">
-          <label for="launcherGroupDescriptionInput" style="display: block; margin-bottom: 6px; font-size: 12px; color: var(--text-secondary);">What this group is for</label>
-          <textarea id="launcherGroupDescriptionInput" class="modern-input w-100" placeholder="Shared client, team, or initiative" rows="2" style="resize: vertical;"></textarea>
-          <label for="launcherGroupEntryAgentSelect" style="display: block; margin-top: 8px; margin-bottom: 6px; font-size: 12px; color: var(--text-secondary);">Commander</label>
-          <select id="launcherGroupEntryAgentSelect" class="form-select form-select-sm w-100" aria-label="Commander for this group">
-            <option value="" selected>Auto-create group manager</option>
-          </select>
-          <div style="margin-top: 8px; font-size: 12px; color: var(--text-secondary);">
-            Selected workspaces will be organized under this group. The group is a full workspace too: it gets its own folder and Commander, and can hold sessions, notes, and tasks.
-          </div>
-        </div>
-        <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
-          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
-          <button type="button" id="launcherCreateGroupBtn" class="modern-btn modern-btn-primary">Create Group</button>
-        </div>
-      </div>
-    </div>
-  </div>
 
   <!-- Delete Group Modal (Launcher) -->
   <div class="modal fade" id="launcherDeleteGroupModal" tabindex="-1" aria-labelledby="launcherDeleteGroupModalTitle" aria-hidden="true">
