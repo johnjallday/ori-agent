@@ -2691,9 +2691,9 @@
       n +
       ' selected</span>' +
       '<div class="ws-map-selbar-actions">' +
-      '<button type="button" class="ws-map-selbar-group" data-ws-selbar-group' +
+      '<button type="button" class="ws-map-selbar-group" data-ws-selbar-group aria-haspopup="dialog" aria-controls="addFolderModal"' +
       mutationsDisabled +
-      '>Group</button>' +
+      '>Group selected</button>' +
       '<button type="button" class="ws-map-selbar-delete" data-ws-selbar-delete' +
       mutationsDisabled +
       '>Delete</button>' +

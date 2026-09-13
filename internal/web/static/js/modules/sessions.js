@@ -758,6 +758,22 @@ const sessionManager = {
       delete addFolderModal.dataset.pendingMapOrigin;
     });
 
+    // A fixed selected-member Group keeps its kind radios disabled. Some
+    // Bootstrap builds treat a dismiss click while that fixed fieldset owns
+    // focus as an inert click, so own the ordinary cancel explicitly rather
+    // than trapping a reviewed-but-unsubmitted selection in the modal.
+    addFolderModal?.addEventListener('click', event => {
+      const dismiss = event.target?.closest?.('[data-bs-dismiss="modal"]');
+      if (!dismiss || this.workspaceCreatorContext?.mode !== 'selected-members') return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (this.workspaceCreatorContext?.submitting) {
+        this.showToast('Finish the confirmed group change before closing.', 'warning');
+        return;
+      }
+      bootstrap.Modal.getInstance(addFolderModal)?.hide();
+    });
+
     // Closing or cancelling discards the team draft immediately rather than
     // leaving it to be overwritten on the next open, and invalidates any plan
     // request still in flight so a late response cannot repopulate a closed
@@ -6938,6 +6954,21 @@ const sessionManager = {
     const parentName = parent?.value
       ? String(parent.options?.[parent.selectedIndex]?.textContent || '').trim()
       : 'Top level';
+    const selection = this.workspaceCreatorContext?.mode === 'selected-members'
+      ? this.workspaceCreatorContext.selection
+      : null;
+    const memberNames = Array.isArray(selection?.names) ? selection.names : [];
+    const memberCount = Array.isArray(selection?.ids) ? selection.ids.length : 0;
+    const memberReceipt = selection
+      ? `<div class="workspace-review-card">
+          <div class="workspace-review-card-main">
+            <span class="workspace-review-card-label">Selected workspaces</span>
+            <strong>${memberCount} top-level workspace${memberCount === 1 ? '' : 's'} will move into this group</strong>
+            <span class="workspace-review-card-note">Their existing nested workspaces and order stay together. Moving them updates their managed-folder organization after this group is created.</span>
+            ${memberNames.length ? `<span class="workspace-review-card-meta">${this.escapeHtml(memberNames.join(' · '))}</span>` : ''}
+          </div>
+        </div>`
+      : '';
     return `
       <div class="workspace-review-card">
         <div class="workspace-review-card-main">
@@ -6956,6 +6987,7 @@ const sessionManager = {
           <span class="workspace-review-card-note">No agents, project files, runtime setup, or Assistant Program membership will be created.</span>
         </div>
       </div>
+      ${memberReceipt}
       <div class="workspace-review-card">
         <div class="workspace-review-card-main">
           <span class="workspace-review-card-label">Parent group</span>
@@ -8191,9 +8223,17 @@ const sessionManager = {
     return true;
   },
 
-  showCreatedGroupFollowUp(folder) {
+  showCreatedGroupFollowUp(folder, outcome = null) {
     const name = String(folder?.name || 'Group').trim() || 'Group';
     const slug = String(folder?.folder_slug || '').trim();
+    const moved = Array.isArray(outcome?.placed) ? outcome.placed.length : 0;
+    const failed = Array.isArray(outcome?.failed) ? outcome.failed.length : 0;
+    const uncertain = Array.isArray(outcome?.uncertain) ? outcome.uncertain.length : 0;
+    const message = outcome
+      ? failed || uncertain
+        ? `${name} was created. ${moved} selected workspace${moved === 1 ? '' : 's'} moved; review the group for the remaining result.`
+        : `${name} was created with ${moved} selected workspace${moved === 1 ? '' : 's'}.`
+      : `${name} is ready as an empty group.`;
     const options = slug
       ? {
           title: 'Group created',
@@ -8205,10 +8245,10 @@ const sessionManager = {
         }
       : { title: 'Group created' };
     if (window.Toast?.success) {
-      window.Toast.success(`${name} is ready as an empty group.`, options);
+      window.Toast.success(message, options);
       return;
     }
-    this.showToast(`${name} is ready as an empty group.`, 'success');
+    this.showToast(message, 'success');
   },
 
   async finishOrdinaryGroupCreate(result, creatorContext, creatorGeneration) {
@@ -8226,13 +8266,25 @@ const sessionManager = {
         folder_slug: String(folder?.folder_slug || '').trim()
       };
     }
+    let outcome = null;
+    const onCreated = creatorContext?.onCreated;
+    if (typeof onCreated === 'function') {
+      try {
+        outcome = await onCreated({ folder, groupId: id, placed: [], failed: [], uncertain: [] });
+      } catch (error) {
+        // The group POST has already succeeded. Preserve that fact and make the
+        // group reachable rather than treating a display/member-move callback
+        // as permission to retry creation.
+        console.warn('Group was created but its follow-up could not complete:', error);
+        outcome = { groupId: id, placed: [], failed: [], uncertain: ['follow_up_unavailable'] };
+      }
+    }
     await this.refreshWorkspaceSurfacesAfterOrdinaryGroupCreate();
     const modalElement = document.getElementById('addFolderModal');
     bootstrap.Modal.getInstance(modalElement)?.hide();
     this.resetAddWorkspaceModalForm();
-    this.showCreatedGroupFollowUp(folder);
-    const onCreated = creatorContext?.onCreated;
-    if (typeof onCreated === 'function') onCreated({ folder, groupId: id, placed: [], failed: [] });
+    this.showCreatedGroupFollowUp(folder, outcome);
+    return outcome;
   },
 
   async placeCreatedWorkspaceInGroup(result, options = {}) {
@@ -10482,7 +10534,10 @@ const sessionManager = {
       delete modalElement.dataset.pendingBlueprint;
     }
 
-    const modal = new bootstrap.Modal(modalElement);
+    // The shared dialog also opens through Bootstrap data attributes. Reuse
+    // that instance so repeated Map/Tree/keyboard launches cannot leave a
+    // stale instance holding the dismiss transition.
+    const modal = bootstrap.Modal.getOrCreateInstance(modalElement);
     modal.show();
   },
 

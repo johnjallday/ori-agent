@@ -77,14 +77,6 @@ function ctxConfirm(ctx) {
   return () => false;
 }
 
-function ctxPrompt(ctx) {
-  if (ctx && typeof ctx.prompt === 'function') return ctx.prompt;
-  if (typeof window !== 'undefined' && typeof window.prompt === 'function') {
-    return message => window.prompt(message);
-  }
-  return () => null;
-}
-
 function ctxFetch(ctx) {
   if (ctx && typeof ctx.fetch === 'function') return ctx.fetch;
   return (...args) => globalThis.fetch(...args);
@@ -147,10 +139,6 @@ async function requestError(response, fallback) {
     error.reviewHomeSlug = payload.details.review_home_slug;
   }
   return error;
-}
-
-async function errorText(response, fallback) {
-  return (await requestError(response, fallback)).message;
 }
 
 // Navigating to a review is not permission to disconnect or remove anything.
@@ -299,71 +287,90 @@ export async function deleteWorkspaces(ids, ctx) {
 }
 
 /**
- * Create a group and move the checked set into it.
+ * Move a reviewed member snapshot into an already-created group.
  *
- * The selection is reduced to top-level ids first — see topLevelIds for why a
- * nested child must not be reparented out of a parent that is moving too.
+ * Creation belongs to the shared creator, so this helper deliberately owns no
+ * name prompt or POST. It only performs the existing membership PATCHes and
+ * returns enough truth for the caller to frame a Map district or report a
+ * partial result without ever creating a second group.
  *
- * Returns the outcome rather than a bare id (#346 FR-28). The Map draws the new
- * district around exactly the members the *authoritative hierarchy* placed in
- * the group, so "it worked" is not enough information: a run where two of three
- * reparents succeeded has to frame two workspaces and say so. `null` means
- * nothing was created at all — a cancelled name, or a failed create — and is
- * the only case where no group exists afterwards.
+ * A rejected response is known failure. A lost response is different: after an
+ * authoritative refresh, `ctx.verifyMembership` can confirm it; otherwise it
+ * remains explicitly uncertain rather than being falsely reported as failed.
  *
- * @returns {Promise<null | {groupId: string, name: string, placed: string[],
- *   failed: string[], partial: boolean}>}
+ * @returns {Promise<{groupId: string, name: string, placed: string[], failed:
+ *   string[], uncertain: string[], partial: boolean}>}
  */
-export async function createGroupFrom(memberIds, ctx) {
-  const members = topLevelIds(memberIds, ctxRows(ctx));
-  const name = ctxPrompt(ctx)('Name for the new group:');
-  if (!name || !String(name).trim()) return null;
-  const trimmed = String(name).trim();
+export async function moveMembersIntoGroup(group, memberIds, ctx) {
+  const groupId = String(group?.groupId || group?.id || '').trim();
+  const name = String(group?.name || 'Group').trim() || 'Group';
+  if (!groupId) throw new Error('Created group identity is unavailable; refresh before moving members.');
 
-  let groupId = '';
-  try {
-    const res = await ctxFetch(ctx)('/api/workspaces', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: trimmed, kind: 'group' })
-    });
-    if (!res.ok) throw new Error(await errorText(res, 'Failed to create group'));
-    const body = await res.json().catch(() => ({}));
-    groupId = (body && body.folder && body.folder.id) || '';
-    if (!groupId) throw new Error('Failed to create group');
-  } catch (err) {
-    // No group, no members moved: this is the one clean failure.
-    fail(ctx, err, 'Failed to create group.');
-    await changed(ctx);
-    return null;
+  // Callers should have snapped the selection at dialog open. Normalize again
+  // against that same captured row set as a defensive boundary, never against a
+  // later live checkbox selection.
+  const members = topLevelIds(memberIds, ctxRows(ctx));
+  if (members.length === 0) {
+    return { groupId, name, placed: [], failed: [], uncertain: [], partial: false };
   }
 
-  // Each reparent is reported on its own. Throwing on the first failure used to
-  // discard which of the others had succeeded, which is exactly the fact a
-  // truthful partial report — and a correctly framed district — needs.
-  const placed = [];
-  const failed = [];
-  const responses = await Promise.all(
+  const outcomes = await Promise.all(
     members.map((id, index) =>
       ctxFetch(ctx)(`/api/workspaces/${encodeURIComponent(id)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ parent_id: groupId, order_index: index + 1 })
       })
-        .then(response => ({ id, ok: !!(response && response.ok) }))
-        // A network error is a member that did not move, not a lost group.
-        .catch(() => ({ id, ok: false }))
+        .then(response => ({ id, state: response?.ok ? 'placed' : 'failed' }))
+        .catch(() => ({ id, state: 'uncertain' }))
     )
   );
-  responses.forEach(outcome => (outcome.ok ? placed : failed).push(outcome.id));
 
-  if (failed.length) {
-    const message = `Group "${trimmed}" created, but ${failed.length} of ${members.length} workspaces could not be moved into it.`;
+  const placed = outcomes.filter(outcome => outcome.state === 'placed').map(outcome => outcome.id);
+  const failed = outcomes.filter(outcome => outcome.state === 'failed').map(outcome => outcome.id);
+  let uncertain = outcomes
+    .filter(outcome => outcome.state === 'uncertain')
+    .map(outcome => outcome.id);
+
+  // Reconcile a lost PATCH before reporting it. A refresh error leaves the
+  // member uncertain; it never authorizes an automatic mutation retry.
+  if (uncertain.length) {
+    try {
+      await changed(ctx);
+      if (typeof ctx?.verifyMembership === 'function') {
+        const confirmed = await ctx.verifyMembership({ groupId, memberIds: uncertain });
+        const confirmedSet = confirmed instanceof Set ? confirmed : new Set(confirmed || []);
+        const confirmedIds = uncertain.filter(id => confirmedSet.has(id));
+        placed.push(...confirmedIds);
+        uncertain = uncertain.filter(id => !confirmedSet.has(id));
+      }
+    } catch (_) {
+      // The durable group still exists. The caller receives uncertainty and can
+      // offer refresh/open-group guidance instead of asserting a false result.
+    }
+  }
+
+  if (!uncertain.length) await changed(ctx);
+
+  const result = {
+    groupId,
+    name,
+    // Promise settlement and lost-response reconciliation can complete out of
+    // order; preserve the reviewed input order in the observable outcome.
+    placed: members.filter(id => placed.includes(id)),
+    failed: members.filter(id => failed.includes(id)),
+    uncertain: members.filter(id => uncertain.includes(id)),
+    partial: failed.length > 0 || uncertain.length > 0
+  };
+  if (result.partial) {
+    const pieces = [];
+    if (failed.length) pieces.push(`${failed.length} could not be moved`);
+    if (uncertain.length) pieces.push(`${uncertain.length} could not be verified after refresh`);
+    const message = `Group "${name}" was created, but ${pieces.join('; ')}.`;
     announce(ctx, message);
     toast(ctx, message, 'error');
   } else {
-    announce(ctx, `Group "${trimmed}" created.`);
+    announce(ctx, `Moved ${placed.length} workspace${placed.length === 1 ? '' : 's'} into "${name}".`);
   }
-  await changed(ctx);
-  return { groupId, name: trimmed, placed, failed, partial: failed.length > 0 };
+  return result;
 }
