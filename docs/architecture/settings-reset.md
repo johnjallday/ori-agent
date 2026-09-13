@@ -922,3 +922,107 @@ permission sweep found no reusable shell operation that warranted a new checked-
 entry point or allowlist request. No production fault endpoint, mock-backed
 production deletion path, real credential value, or machine-specific absolute
 path is checked in.
+
+## Installed-plugin ownership and receipt compatibility
+
+Reset can remove installed plugins exactly, as an explicit selected-data category
+and as the plugin portion of Start Fresh. The contract below is what makes that
+possible without weakening the path or receipt safeguards above.
+
+### Offline ownership owner
+
+`internal/plugin/reset.go` is the single owner of "what does an installed plugin
+own, and how is it removed". It is file-level and manager-free: it constructs no
+`plugin.Manager`, resolves no source, clones nothing, starts no service, and runs
+no plugin-authored uninstall hook. The same code therefore serves both the live
+preview and the pre-store recovery boundary, where no runtime owner exists.
+
+A **valid installed record is the ownership authority**, exactly as it is for the
+explicit uninstall path. Reset never infers an additional file from a manifest
+and never enumerates a shared directory to decide what to delete.
+
+Recorded plugin and skill names come from external manifests and directory
+listings and are otherwise unvalidated, yet the plugin name is used as a path
+segment by the artifact installer and by the Workspace Surface data root.
+`validResetSegment` is the boundary: a plain, visible, single path component with
+no separator, traversal, control character, or leading dot. Anything else blocks
+the whole review rather than being skipped, and a blocked inspection returns an
+empty inventory so a partial view cannot be mistaken for the reviewed scope.
+
+Per plugin, the owned locations are:
+
+| Location | Note |
+|---|---|
+| `<plugins>/installed.json` record | removed last, so a retry keeps its authority |
+| `<data>/mcp_registry.json` entries | exact recorded names only, each required to be namespaced `"<plugin>/<server>"` |
+| `<HOME>/.agents/skills/<name>` | exact recorded direct children only; the root is never enumerated or removed |
+| `<plugins>/state/<sha256(name)>` | host-owned namespaced key/value state |
+| `<plugins>/state/<name>` | the plugin service's own data root, addressed by raw id in the Workspace Surface context |
+| `<plugins>/artifacts/<name>` | managed verified artifacts |
+| `<plugins>/src/<clone>` | only when the resolved install root is inside the managed clone directory |
+
+A linked external source — any resolved install root outside the managed clone
+directory — is never removed. Marketplace registrations are never touched by the
+selected category; Start Fresh still removes them under its existing broader
+`integrations` policy, and that difference is deliberate.
+
+Two plugins recording the same personal skill name is **ambiguous ownership and
+blocks**, because the shared skills directory has no plugin namespacing and the
+second install silently overwrote the first.
+
+### Boundaries, not a relaxed rule
+
+The personal skills root is the only location outside the installation. It does
+not become a generic reset target: generic targets keep their existing
+confinement (absolute, inside the installation, outside `.ori-reset`, no overlap
+with retained paths). The skills root is carried in a separate validated plugin
+evidence structure that admits only normalized recorded direct children of that
+exact root. Recovery re-resolves it independently from the process environment
+rather than trusting the receipt.
+
+### Receipt compatibility: additive v1
+
+`decodeJournal` accepts a stored receipt only when re-encoding the decoded value
+reproduces the stored bytes exactly, so the encoded shape of a v1 journal is a
+hard compatibility contract. The decision is **additive v1 with no schema bump**:
+
+1. Every new field is `omitempty` and of a type `omitempty` actually applies to —
+   plugin evidence enters as a pointer, per-plugin outcomes as slices. A struct
+   field is never `omitempty`-able and would strand every stored receipt.
+2. No existing field changes name, type, or `omitempty` status.
+3. **Check lists in `definition()` are frozen for existing categories.**
+   `validateJournal` compares each result's check count and names against the
+   live definition, so adding a check to `integrations` would invalidate every
+   legacy Start Fresh receipt. Labels and descriptions are not compared and may
+   change.
+4. Start Fresh keeps its nine categories in their current order.
+   `installed_plugins` is exposed only to selected data, where `integrations` is
+   not selectable, so no plan contains both and no target kind is duplicated.
+5. `StartupPolicy` gains nothing; it has the same byte-exact contract and no new
+   suppression is required, because nothing at startup re-imports plugins.
+
+A legacy Start Fresh receipt therefore keeps its original raw managed-root
+semantics automatically: its evidence carries no plugin block, so recovery takes
+the unchanged `removeFreshTargets` path. `journal_compat_test.go` and
+`internal/settingsreset/testdata/journal-v1-*.json` freeze this — eight checked-in
+receipts covering selected and Start Fresh intents in awaiting-restart, applying,
+completed, partial-failure, and blocked states must keep decoding, re-encoding
+byte-for-byte, and producing exactly the v1 key set.
+
+Reset metadata is capped at 64 KiB (and admission requires the encoded journal to
+fit in `MaxRecordBytes - 2048`), so the reviewed plugin inventory is bounded at
+64 plugins with bounded per-plugin component counts. An installation above the
+cap blocks with a precise reason instead of reviewing a truncated scope.
+
+### Ordering and completion
+
+Removal per plugin mirrors `Manager.Uninstall`: namespaced state, managed
+artifacts, managed clone, recorded personal skill copies, recorded MCP
+registrations, then the installed record. Inside Start Fresh, the exact plugin
+pass runs **before** `removeFreshTargets` deletes `installed.json` and
+`mcp_registry.json`, which are the authority for it. Exactly one plugin-removal
+pass ever runs.
+
+Every operation is idempotent, and **a missing registry row alone never proves
+removal**: the copied skills live outside the installation, so
+`ResetItemRemoved` re-checks every recorded external component independently.
