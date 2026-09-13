@@ -1,0 +1,70 @@
+name: Promote Release
+run-name: Promote ${{ inputs.rc_tag }} to stable
+
+# No schedule and no workflow_run trigger: promotion is a separate human action.
+on:
+  workflow_dispatch:
+    inputs:
+      rc_tag:
+        description: 'Exact candidate you installed and tested, e.g. v0.0.112-rc.2'
+        required: true
+        type: string
+      confirm_tested:
+        description: 'I completed and reviewed the test report for this exact RC and approve stable release'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: release-lifecycle
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate tested candidate
+    if: github.ref == 'refs/heads/main' && inputs.confirm_tested
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.candidate.outputs.sha }}
+      version: ${{ steps.candidate.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Verify exact RC, branch CI and installer workflow
+        id: candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTO_RELEASE_HOLD: ${{ vars.AUTO_RELEASE_HOLD }}
+          RC_TAG: ${{ inputs.rc_tag }}
+        run: python3 scripts/release-candidate.py check-promotion --rc "$RC_TAG"
+
+  promote:
+    name: Approve ${{ inputs.rc_tag }} → ${{ needs.validate.outputs.version }}
+    needs: validate
+    runs-on: ubuntu-latest
+    # Configure required reviewers for a second, platform-enforced approval.
+    # Even without reviewers, the explicit manual dispatch/checkbox is required.
+    environment: release
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PAT }}
+      - name: Revalidate after approval and atomically promote the pinned SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTO_RELEASE_HOLD: ${{ vars.AUTO_RELEASE_HOLD }}
+          RC_TAG: ${{ inputs.rc_tag }}
+          SHA: ${{ needs.validate.outputs.sha }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python3 scripts/release-candidate.py promote --rc "$RC_TAG" --sha "$SHA"

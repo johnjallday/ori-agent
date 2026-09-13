@@ -36,13 +36,24 @@ Invoked by the release and smoke-test workflows.
 
 The full release flow is documented in `docs/RELEASE_CHECKLIST.md`.
 
-- `release.sh` — Main release driver (tag, changelog, goreleaser). Guarded; do
-  not run casually.
-- `create-release.sh` — Wrapper that runs `pre-release-check.sh` then `release.sh`.
-- `pre-release-check.sh` — Aggregate pre-release gate (lint, cross-platform,
-  Go version, installer tests, docs, dependabot).
-- `release-ready.sh` — Lightweight readiness probe used by the auto-release
-  workflow.
+- `release.sh candidate [--force]` — Confirm and dispatch RC preparation on
+  GitHub. A frozen release branch lets `dev` keep accepting feature PRs.
+- `release.sh candidate vX.Y.Z` — Build the next RC after stabilization fixes.
+- `release.sh promote vX.Y.Z-rc.N` — Explicitly approve the exact tested RC.
+- `create-release.sh vX.Y.Z-rc.N` — Compatibility wrapper for promotion; direct
+  stable tagging is no longer supported.
+- `release-ready.sh` — Read readiness without pushing or publishing.
+- `release-candidate.py` — Internal Actions lifecycle: exact refs, green workflow
+  evidence, atomic tagging/promotion and a release merge-back PR.
+- `rc_test_report.py` — Generate the RC's blank manual test card from pinned
+  commits/changed paths; includes baseline, risk prompts and retest scope. The
+  lifecycle attaches it without overwriting existing evidence. Follow
+  `docs/RC_TEST_PROTOCOL.md`; generation never awards manual PASS results.
+- `smoke-installed.py` — Verify a downloaded installer's server is healthy and
+  has the exact expected version, using disposable application state.
+- `pre-release-check.sh` — Legacy local aggregate checks. Not a release driver;
+  do not use its version-bump/autocommit behavior on shared or live profiles.
+- `make test-release` — Offline regression tests for the lifecycle and probes.
 
 ## Testing & diagnostics
 
@@ -282,8 +293,8 @@ honest as the file — a shipped feature whose boxes were never ticked will read
 `0/6`.
 
 **`release` — what has not shipped yet.** `./scripts/devops.sh release` prints
-the latest GitHub Release's tag and publish time, plus how many PRs have merged
-into `dev` strictly after that instant:
+the latest stable GitHub Release's tag and publish time, plus how many delivery
+PRs on `dev` are absent from that released revision:
 
 ```
 Latest release: v0.0.106 (published 2026-08-15T10:00:00Z)
@@ -297,15 +308,14 @@ The full-screen Issue picker displays the compact count directly below its
 fails, the banner reports `Release status unavailable` while the Issue list
 remains usable.
 
-It is read-only — one `gh release view` and one `gh pr list --base dev
---state merged`, nothing else. Feature PRs merge into `dev`; a Release snapshots
-`main`, so those post-release `dev` merges are the unshipped delivery queue. The
-comparison is an **exact timestamp**, not a calendar date, so a PR merged earlier
-the same day as the release correctly does *not* count. A release with nothing
-merged since prints `No PRs merged into dev since <tag>.` rather than a blank
-line, and either read failing
-(no release exists, the PR query errors) exits non-zero with `gh`'s own
-message on stderr rather than reporting a misleading zero.
+It is read-only — `gh release view` plus a paginated GitHub compare read of
+`<stable-tag>...dev`. It counts the same squash-merge subjects (`(#N)`) as the
+cadence gate. Membership follows **commit ancestry**, not publication time:
+PRs merged while an RC was being tested are still unshipped, even when their
+merge preceded stable publication. A release with nothing merged since prints
+`No PRs merged into dev since <tag>.` rather than a blank line. Either read
+failing exits non-zero with `gh`'s own message rather than reporting a misleading
+zero.
 
 **GitHub writes.** `new`, `plan-new`, `decide`, `approve` and `unapprove` are the only GitHub-mutating
 commands; `answer` is a backwards-compatible alias for `decide`. Each prints

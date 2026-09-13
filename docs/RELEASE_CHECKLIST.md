@@ -1,645 +1,237 @@
-# Pre-Release Checklist
+# Release candidates and stable releases
 
-This checklist ensures code quality, functionality, and installer integrity before every release.
+This is the canonical release procedure. Older local release-manager prompts
+that say to merge all of `dev`, tag stable directly, or delete/recreate published
+tags are obsolete. Planning and feature delivery are unchanged.
 
----
+## The flow
 
-## Quick Reference (TL;DR)
+```text
+Feature PRs → dev ─────────────────────────────────→ more feature PRs
+               │ at least 10 unshipped PRs + green CI
+               ▼
+        release/vX.Y.Z → vX.Y.Z-rc.1 → install and test
+               │          ↑ fixes produce rc.2, rc.3…
+               │ explicit approval of an exact tested RC
+               ▼
+             main → vX.Y.Z → stable installer checks → publish
+               │
+        release branch → merge-back PR to dev (merge commit, NOT squash)
+```
 
-**Golden Rule:** Test on `dev` → Merge to `main` → Release → Back to `dev`
+**RC means release candidate.** It is installable, but not the stable update.
+There is at most one active candidate branch. Reaching another ten PRs while
+an RC is being tested holds only the next candidate, never development.
 
-### Release in 3 Commands
+The candidate branch starts at the validated `dev` commit plus one VERSION-only
+commit. `VERSION` contains the final numeric `vX.Y.Z`; installed binaries get
+their actual version (`X.Y.Z-rc.N` or `X.Y.Z`) from the build tag. Ordinary patch
+versions increment automatically; editorial major/minor version changes are not
+part of this first RC workflow.
+
+## One-time rollout and GitHub settings
+
+1. Land the implementation through its feature PR to `dev`.
+2. GitHub schedules and manual entry points run from the default branch, `main`.
+   **Merging to dev alone does not activate this workflow.** With separate
+   approval, land a workflow-only bootstrap PR on `main` containing the new
+   lifecycle's complete diff (including scripts/tests, workflows, Makefile,
+   GoReleaser configuration, installer changes and documentation). Do not
+   merge unrelated, untested dev features just to activate automation. Merge
+   those bootstrap commits back into `dev` with a merge commit before cutting
+   the first RC. Keep `AUTO_RELEASE_HOLD=1` during this coordinated rollout.
+3. `RELEASE_PAT` must be allowed to push `release/**`, update `main`, create tags,
+   and open PRs. It must also be allowed to trigger Actions. The default
+   `GITHUB_TOKEN` does not trigger new workflows from its pushes/PRs.
+4. In **Settings → Environments → release**, add a required reviewer. Promotion
+   already requires a manual dispatch with an exact RC and an explicit
+   `confirm_tested` checkbox, even if environment protection is absent; a
+   required reviewer adds GitHub-enforced approval after validation.
+5. Allow pushes/PR CI on `release/**`; require the **CI** workflow on candidate
+   heads. Do not exclude candidate branches from Actions with a repository rule.
+   Preserve the required-check names currently configured for `dev`.
+6. Require review for release-branch fixes and protect `main`/version tags from
+   casual edits. Operators with permission to change workflows/tags remain
+   trusted; a repository script is not a substitute for GitHub permissions.
+7. Release merge-back PRs must use **Create a merge commit**. Keep that merge
+   method enabled; do not squash or rebase those PRs. Feature PRs still squash
+   into `dev` as usual.
+8. Clear the hold only when ready to enable candidate creation. No live GitHub
+   setting, release, tag, or branch is changed merely by running local tests.
 
 ```bash
-# 1. Test on dev (while on dev branch)
-git switch dev
-./scripts/pre-release-check.sh v0.X.Y
-
-# 2. Merge to main
-./scripts/prepare-release.sh
-
-# 3. Release
-./scripts/create-release.sh v0.X.Y              # Release branch (default)
-./scripts/create-release.sh v0.X.Y --immediate  # Immediate publish
+# Operator commands; these mutate repository settings when explicitly run.
+gh variable set AUTO_RELEASE_HOLD --body 1
+gh variable delete AUTO_RELEASE_HOLD
 ```
 
-### One-Liner (Immediate Publish)
+The hold is checked at evaluation, preparation, promotion, build authorization
+and immediately before publication. It does not cancel jobs already running.
+
+## Prepare a candidate
+
+The daily **Auto Release** workflow counts squash-merged PR subjects absent from
+the last stable tag. It requires the exact source commit's successful **CI** push
+run, not merely an unrelated successful check. Fetch/API failures fail closed.
 
 ```bash
-./scripts/pre-release-check.sh v0.X.Y && ./scripts/prepare-release.sh && ./scripts/create-release.sh v0.X.Y --immediate
+# Read readiness without pushing or publishing:
+./scripts/release-ready.sh
+
+# Evaluate now; below 10 PRs this will hold:
+./scripts/release.sh candidate
+
+# Prepare sooner, without bypassing CI or an existing candidate:
+./scripts/release.sh candidate --force
 ```
 
-### Visual Flow
-
-```
-┌──────────────────────────────────┐
-│  DEV BRANCH (your home)          │
-│  ● Features, bug fixes, testing  │
-└──────────────────────────────────┘
-              ↓
-┌──────────────────────────────────┐
-│  1. Test on dev                  │
-│     pre-release-check.sh         │
-│     ✅ All pass                  │
-└──────────────────────────────────┘
-              ↓
-┌──────────────────────────────────┐
-│  2. Merge dev → main             │
-│     prepare-release.sh           │
-└──────────────────────────────────┘
-              ↓
-┌──────────────────────────────────┐
-│  3. Release                      │
-│     create-release.sh            │
-└──────────────────────────────────┘
-              ↓
-        Back on dev!
-```
-
-### Branch Purpose
-
-| Branch | Purpose | When |
-|--------|---------|------|
-| `dev` | Daily work, features, testing | Always (95%) |
-| `main` | Releases only | Release day (5%) |
-
----
-
-## Full Checklist
-
-## 1. Code Quality Checks (5 minutes)
-
-### Format Check
-```bash
-make fmt
-# Should output: "All files formatted correctly"
-```
-
-**What it does**: Formats all Go code with `gofmt`
-**Must pass**: Yes
-**Fix**: Automatically fixes formatting
-
-### Lint Check
-```bash
-make lint
-# Requires: golangci-lint installed (make install-tools)
-```
-
-**What it does**: Runs `golangci-lint` for code quality issues
-**Must pass**: Yes
-**Fix**: Follow linter suggestions in output
-
-### Vet Check
-```bash
-make vet
-```
-
-**What it does**: Runs `go vet` to find suspicious code
-**Must pass**: Yes
-**Fix**: Address issues reported by vet
-
-### Security Scan
-```bash
-make security
-# Requires: govulncheck installed (make install-tools)
-```
-
-**What it does**: Scans for known vulnerabilities in dependencies
-**Must pass**: Yes
-**Fix**: Update vulnerable dependencies
-
----
-
-## 2. Unit Tests (2 minutes)
-
-### Run All Unit Tests
-```bash
-make test-unit
-# OR
-go test ./...
-```
-
-**What it does**: Runs all unit tests across the codebase
-**Must pass**: Yes
-**Fix**: Fix failing tests before proceeding
-
-### Run with Coverage
-```bash
-make test-coverage
-# Generates coverage report in coverage.html
-```
-
-**What it does**: Runs tests and generates coverage report
-**Must pass**: Coverage > 60% (recommended)
-**View report**: `open coverage.html`
-
-### Run Specific Package Tests
-```bash
-# Test specific package
-go test ./internal/llm/
-go test ./internal/registry/
-go test ./internal/pluginloader/
-
-# Test with verbose output
-go test -v ./internal/llm/
-```
-
----
-
-## 3. Integration Tests (3 minutes)
-
-### LLM Integration Tests
-```bash
-# Requires API keys
-export OPENAI_API_KEY="your-key"
-export ANTHROPIC_API_KEY="your-key"
-
-go test ./internal/llm/integration_test.go
-```
-
-**What it does**: Tests real LLM provider integrations
-**Must pass**: Yes (if you have API keys)
-**Skip if**: No API keys available
-
-### Agent HTTP Integration Tests
-```bash
-go test ./internal/agenthttp/integration_test.go
-```
-
-**What it does**: Tests HTTP endpoints
-**Must pass**: Yes
-
----
-
-## 4. Build Verification (5 minutes)
-
-### Build All Binaries
-```bash
-make build-all
-# OR
-./scripts/build.sh
-```
-
-**What it does**: Builds server, menubar, and all plugins
-**Must pass**: Yes
-**Output**: Binaries in `bin/`
-
-### Cross-Platform Build Test
-```bash
-# Test that all platforms build
-GOOS=linux GOARCH=amd64 go build -o /tmp/ori-agent-linux ./cmd/server
-GOOS=darwin GOARCH=arm64 go build -o /tmp/ori-agent-macos ./cmd/server
-GOOS=windows GOARCH=amd64 go build -o /tmp/ori-agent-windows.exe ./cmd/server
-```
-
-**What it does**: Verifies cross-platform compilation
-**Must pass**: Yes
-
-### Plugin Build Verification
-```bash
-./scripts/build-plugins.sh
-ls -lh plugins/*/[plugin-name]
-```
-
-**What it does**: Builds all plugins as RPC executables
-**Must pass**: Yes
-**Output**: Plugin executables in `plugins/*/`
-
-### Open-Core Boundary Check
-
-- Confirm `ori-platform-services` (private repo) is not included in build artifacts.
-- Verify no private service endpoints, keys, or secrets are referenced in release binaries.
-
----
-
-## 5. Installer Tests (10-15 minutes)
-
-### Local Smoke Tests
-```bash
-./scripts/test-all-installers.sh
-```
-
-**What it does**:
-- Builds all installers (DMG, .deb, .rpm)
-- Tests installation
-- Starts server
-- Verifies HTTP responses
-- Tests health endpoint
-
-**Must pass**: Yes
-**Time**: ~10 minutes
-**Platforms tested**: macOS + Linux (via Docker)
-
-### Windows VM Test (Optional)
-```bash
-# On Windows machine or VM:
-# 1. Build MSI
-goreleaser release --snapshot --clean --skip=publish
-.\build\windows\create-msi.ps1 -Version "0.0.12-test" -Arch "amd64"
-
-# 2. Install
-msiexec /i dist\ori-agent-0.0.12-test-amd64.msi /l*v install.log
-
-# 3. Test
-& "C:\Program Files\OriAgent\bin\ori-agent.exe" --port=18765
-
-# 4. Verify
-Invoke-WebRequest -Uri "http://localhost:18765/health"
-```
-
-**Must pass**: Yes (if Windows available)
-**Skip if**: No Windows machine (CI/CD will test)
-
----
-
-## 6. Manual Functional Tests (10 minutes)
-
-### Server Functionality
-```bash
-# 1. Start server
-./bin/ori-agent
-
-# 2. Open browser
-open http://localhost:8765
-
-# 3. Test core features:
-# ✓ Create an agent
-# ✓ Add a plugin to the agent
-# ✓ Send a chat message
-# ✓ Verify agent responds
-# ✓ Check plugin works
-# ✓ Verify UI renders correctly
-```
-
-**Must pass**: Core workflows work
-**Time**: ~5 minutes
-
-### Plugin System Test
-```bash
-# 1. Upload a plugin
-curl -X POST http://localhost:8765/api/plugins/upload \
-  -F "file=@plugins/math/math"
-
-# 2. List plugins
-curl http://localhost:8765/api/plugins
-
-# 3. Configure plugin for agent
-# (via UI or API)
-
-# 4. Test plugin in chat
-# Ask agent: "What is 2 + 2?"
-```
-
-**Must pass**: Plugins load and work
-**Time**: ~3 minutes
-
-### Multi-Agent Test (Optional)
-```bash
-# 1. Create multiple agents
-# 2. Test agent isolation (different plugins)
-# 3. Test workspace collaboration
-# 4. Test orchestration
-```
-
-**Must pass**: Agents isolated correctly
-**Time**: ~5 minutes
-**Skip if**: Not using multi-agent features
-
----
-
-## 7. Documentation Check (5 minutes)
-
-### Update Version Numbers
-```bash
-# 1. Update VERSION file
-echo "0.0.12" > VERSION
-
-# 2. Update CHANGELOG.md
-# Add new version section with changes
-```
-
-### Verify Documentation
-```bash
-# Check that key docs are up to date:
-make readme-check
-cat README.md | grep -i "version"
-cat docs/INSTALLATION_MACOS.md | head -20
-cat docs/INSTALLATION_WINDOWS.md | head -20
-cat docs/INSTALLATION_LINUX.md | head -20
-```
-
-**Must verify**:
-- README reflects current features
-- `make readme-check` passes the README screenshot, link, image, and checksum contract
-- Installation guides are current
-- No broken links
-- Version numbers correct
-
-`make readme-check` is read-only. It does not capture screenshots or accept
-staged README assets; see `docs/README_MAINTENANCE.md` for the separately
-approved refresh workflow. The existing `scripts/update-readme.sh` remains
-limited to release badge updates.
-
-### Generate Release Notes
-```bash
-# Use git log to create release notes
-git log v0.0.11..HEAD --oneline --no-merges
-
-# Or use GitHub's auto-generate feature
-gh release create v0.0.12 --generate-notes --draft
-```
-
----
-
-## 8. Dependency Check (2 minutes)
-
-### Update Dependencies
-```bash
-# Check for outdated dependencies
-go list -u -m all
-
-# Update dependencies
-go get -u ./...
-go mod tidy
-
-# Re-run tests after updating
-make test-unit
-```
-
-**Must pass**: All tests pass after updates
-**When**: Before every release
-
-### Verify go.mod and go.sum
-```bash
-# Verify consistency
-go mod verify
-```
-
-**Must pass**: Yes
-
----
-
-## 9. Git Workflow (2 minutes)
-
-### Ensure Clean State
-```bash
-git status
-# Should show: "nothing to commit, working tree clean"
-```
-
-**Must pass**: Yes
-**Fix**: Commit or stash changes
-
-### Verify Branch
-```bash
-git branch --show-current
-# Should be: main (or release branch)
-```
-
-**Must pass**: On correct branch
-**Fix**: Switch to main or create release branch
-
-### Check Commits
-```bash
-git log --oneline -10
-# Verify commit messages are descriptive
-```
-
-**Must verify**: Commit messages follow conventions
-
----
-
-## 10. CI/CD Verification (15 minutes)
-
-### Run CI Tests
-```bash
-# Push to dev branch first
-git push origin dev
-
-# Check CI status
-gh run list --branch dev
-
-# Wait for all checks to pass
-gh run watch
-```
-
-**Must pass**: All CI checks pass
-**Includes**:
-- Unit tests
-- Smoke tests (all platforms)
-- Linting
-- Security scans
-
-### Manual Workflow Trigger
-```bash
-# Trigger smoke tests manually
-gh workflow run smoke-tests.yml
-
-# Watch results
-gh run watch
-```
-
-**Must pass**: All smoke tests pass on all platforms
-
----
-
-## Complete Pre-Release Checklist
-
-Use this checklist before tagging any release:
-
-```
-Pre-Release Checklist for v0.0.12
-==================================
-
-Code Quality:
-[ ] make fmt - Code formatted
-[ ] make lint - No linting errors
-[ ] make vet - No suspicious code
-[ ] make security - No vulnerabilities
-
-Testing:
-[ ] make test-unit - All unit tests pass
-[ ] Integration tests pass (with API keys)
-[ ] ./scripts/test-all-installers.sh - Smoke tests pass
-[ ] Manual functional tests complete
-
-Build:
-[ ] make build-all - All binaries build
-[ ] ./scripts/build-plugins.sh - All plugins build
-[ ] Cross-platform builds work
-
-Documentation:
-[ ] VERSION file updated
-[ ] CHANGELOG.md updated
-[ ] Release notes drafted
-[ ] Documentation reviewed
-
-Dependencies:
-[ ] go mod tidy executed
-[ ] go mod verify passes
-[ ] Dependencies updated (if needed)
-
-Git:
-[ ] Working tree clean
-[ ] On main branch
-[ ] All changes committed
-[ ] Commit messages descriptive
-
-CI/CD:
-[ ] Pushed to dev, all checks pass
-[ ] Smoke tests pass on all platforms
-[ ] No failing workflows
-
-Final Steps:
-[ ] Tag release: git tag v0.0.12
-[ ] Push tag: git push origin v0.0.12
-[ ] Monitor release workflow
-[ ] Verify installers uploaded to GitHub Releases
-```
-
----
-
-## Automated Pre-Release Script
-
-For convenience, run all checks with one command:
+The shell commands confirm before dispatching Actions on `main`; non-interactive
+use requires `--yes`. They do not release local working-tree changes. Existing
+`--pre-release` is an alias for `candidate`. Direct stable-version arguments and
+`--skip-checks` are deliberately rejected.
+
+Preparation atomically creates `release/vX.Y.Z` and `vX.Y.Z-rc.1`. It changes
+neither `dev` nor `main`. The candidate branch receives CI; the tag triggers
+**Release**. GoReleaser first creates a **draft**. After both DMGs, the MSI and
+Linux packages are built, the reusable smoke workflow downloads the actual
+draft installers and probes their installed server with disposable data.
+It requires a healthy response and the exact embedded tag version.
+
+Current runtime coverage: macOS Intel and Apple Silicon DMGs, Windows amd64 MSI,
+Linux amd64 DEB and RPM. Linux arm64 packages are built but not runtime-tested in
+this gate. Smoke checks do not replace manual UX, real integrations, upgrade or
+migration testing. Windows MSI ProductVersion is numeric (without `-rc.N`),
+while the installer filename and server retain the RC suffix; same-version
+upgrades are supported by the existing WiX configuration. macOS bundle metadata
+also remains numeric; the DMG filename and embedded binaries retain the RC suffix.
+
+Any build or smoke failure leaves a draft; nothing becomes stable or Latest.
+After installer success, the workflow attaches `rc-test-report-vX.Y.Z-rc.N.md`
+and links it from the release notes, then publishes the RC as a **prerelease**,
+excluded from normal stable update checks. Report-generation/attachment failures
+leave a draft for retry; edited reports are never overwritten. Wait for both
+candidate CI and its full Release workflow to succeed before promotion.
+
+## Install and test the RC
+
+Follow [RC_TEST_PROTOCOL.md](RC_TEST_PROTOCOL.md) and complete the report attached
+to this exact prerelease. It includes a core baseline, pinned change inventory,
+path-based risk suggestions and previous-RC retest scope. An agent/reviewer must
+fill feature-specific steps from the actual diffs before testing; generated
+cards start NOT RUN / HOLD and are not proof of coverage. Keep completed results
+in a separately named, sanitized review record. The promotion checkbox is human
+attestation that the report was completed and reviewed, not an automatic report
+validator.
+
+1. Open GitHub Releases and select the exact `vX.Y.Z-rc.N` prerelease.
+2. Download its platform installer. Record the tag and commit, not just “dev”.
+3. Use a disposable OS user/VM for installer and native-app tests, with separate
+   test profiles and workspaces. `ORI_DATA_DIR` alone does not isolate installers,
+   startup services or external paths. Never reset/migrate a real profile for RC
+   testing; use the protocol's previous-stable fixture for upgrade coverage.
+4. Verify the displayed version includes the expected RC suffix.
+5. Exercise the PRs included in the candidate plus these core paths:
+   - Launch, onboarding and workspace creation/opening.
+   - Agent setup, chat and the integrations affected by this batch.
+   - Save, restart, reopen and verify persisted state.
+   - Negative cases, permissions, and any changed migrations/upgrade paths.
+6. Record observed results and an APPROVE/HOLD decision against that exact RC.
+   Share a sanitized completed-report link with the release approver. Keep
+   developing on `dev` normally.
+
+Inspect the batch using its frozen branch, not current `dev`:
 
 ```bash
-# Create and run pre-release script
-./scripts/pre-release-check.sh v0.0.12
+git fetch origin --tags
+git log <previous-stable-tag>..origin/release/vX.Y.Z --oneline
+gh run list --workflow release.yml --branch vX.Y.Z-rc.1
 ```
 
-This script will:
-1. Run all code quality checks
-2. Run all tests
-3. Build all binaries
-4. Run smoke tests
-5. Generate checklist summary
-6. Exit with error if anything fails
+## Fix a candidate
 
----
+Use an isolated fix worktree/branch based on the active `release/vX.Y.Z`, and open
+a stabilization PR **targeting that release branch**. Do not merge all of `dev`
+into it: later features belong to the next batch. `wt pr` remains a feature
+helper targeting `dev`; use an explicitly reviewed `gh pr create --base
+release/vX.Y.Z` for stabilization PRs.
 
-## Release Process
-
-Once all checks pass, you have two options for creating a release:
-
-### Option A: Automated Script (Recommended)
+After that PR merges and branch CI is green:
 
 ```bash
-# Default: create release branch from dev for stabilization
-./scripts/create-release.sh v0.0.12
-
-# Immediate publish (after prepare-release.sh, on main):
-./scripts/create-release.sh v0.0.12 --immediate
+./scripts/release.sh candidate vX.Y.Z
 ```
 
-What the script does now:
-- Validates version and clean working tree
-- Default (no flag): ensures you are on dev, creates `release/v0.0.12`, writes `VERSION` with `v0.0.12`, commits, and pushes branch (CI + scheduled release entry point)
-- `--immediate`: ensures main is up to date (or merges dev → main), writes `VERSION` with `v0.0.12`, tags, pushes tag, and runs the release workflow; then syncs back to dev
+This tags the current candidate head with the next `-rc.N`. An unchanged head
+reuses the existing tag instead of inventing another candidate; retry failed
+Release jobs when the problem was infrastructure. Old tags are immutable.
+A moved branch or a newer candidate invalidates promotion of an older RC.
 
-**Note**: `VERSION` is stored with the `v` prefix (e.g., `v0.0.12`) in both flows.
-
-### Option B: Manual Process
-
-If you prefer manual control:
+## Promote the tested candidate
 
 ```bash
-# Immediate publish path (main):
-# 1. Ensure main has the dev merge (./scripts/prepare-release.sh)
-git switch main && git pull
-
-# 2. Bump VERSION with v-prefix
-echo "v0.0.12" > VERSION
-git add VERSION
-git commit -m "chore: bump version to v0.0.12"
-git push origin main
-
-# 3. Tag and push
-git tag v0.0.12
-git push origin v0.0.12
-
-# 4. Monitor GitHub Actions and verify release artifacts
-gh run watch
-gh release view v0.0.12
-gh release download v0.0.12
+./scripts/release.sh promote vX.Y.Z-rc.2
+# Compatibility spelling:
+./scripts/create-release.sh vX.Y.Z-rc.2
 ```
 
----
+Alternatively: **Actions → Promote Release → Run workflow**, select `main`,
+enter the exact RC tag and attest that its test report was completed and
+reviewed. Include the completed-report URL in the release-environment approval
+comment when approving.
 
-## Common Issues
+The workflow checks the published prerelease, latest RC, release-branch head,
+exact candidate CI and successful installer workflow. It repeats those checks
+after environment approval. It atomically advances `main` and creates the stable
+tag at the **same source commit as the approved RC**. Advancing `dev` never
+invalidates or changes that selection. A changed `main` or candidate refuses
+instead of force-overwriting history.
 
-### "Tests fail on CI but pass locally"
-- **Cause**: Environment differences
-- **Fix**: Check for hardcoded paths, ensure tests are isolated
+Stable installers are rebuilt with the final version, so they are not claimed
+to be byte-identical to RC installers. Their actual packages go through the same
+blocking smoke gate before the draft becomes the stable **Latest** release.
+Raw stable tags without a promotion receipt are rejected by the build workflow.
 
-### "Smoke tests timeout"
-- **Cause**: Server takes too long to start
-- **Fix**: Check server logs, increase timeout in smoke test script
+## Merge back and continue
 
-### "Linter fails on code that compiled"
-- **Cause**: Linter has stricter rules
-- **Fix**: Follow linter suggestions, improve code quality
+After stable publication, Release opens an idempotent `release/vX.Y.Z → dev` PR.
+Merge it with a **merge commit**, preserving new dev work and all stabilization
+fixes. Conflicts require review and a new CI run; do not resolve them by replacing
+all of dev with the release tree. Do not edit the shipped release branch to
+resolve conflicts: use a separate integration branch incorporating both parents,
+then PR that branch to dev with a merge commit.
 
-### "Security scan finds vulnerabilities"
-- **Cause**: Outdated dependencies
-- **Fix**: Update dependencies, re-test
+The next candidate waits until the previous stable revision is an ancestor of
+`dev`. Feature PRs continue throughout. The cadence and DevOps dashboard compare
+the stable tag's ancestry rather than publication time, so work merged while you
+were testing is correctly included in the next batch.
 
-### "Cross-platform build fails"
-- **Cause**: Platform-specific code without build tags
-- **Fix**: Use build tags or conditional compilation
+After merge-back, delete the temporary release branch if desired. Keep RC and
+stable tags for provenance. Automatic release pruning is intentionally not part
+of this workflow.
 
----
+## Recovery
 
-## Rollback Procedure
+- **Build/smoke failed:** inspect `gh run view <id> --log-failed`, then
+  `gh run rerun <id> --failed` for an infrastructure retry. Do not delete/retag.
+  Product fixes require a new RC and testing.
+- **Promotion already created the stable tag:** inspect/retry its Release run;
+  do not dispatch a second promotion or move the tag.
+- **Stable published but merge-back PR creation failed:** the release remains
+  published. Retry only the failed `sync-dev` job. Creating another stable tag
+  is neither necessary nor safe.
+- **Release branch diverged / multiple candidates / API unavailable:** stop and
+  inspect. The gate will not guess, merge unrelated work, or overwrite refs.
+- **Rollback:** retain published tags and downloads. Use a separately approved
+  corrective candidate/release; never silently replace a published version.
 
-If issues are found after release:
+## Local validation of lifecycle changes
 
 ```bash
-# 1. Delete the tag
-git tag -d v0.0.12
-git push origin :refs/tags/v0.0.12
-
-# 2. Delete the GitHub release
-gh release delete v0.0.12
-
-# 3. Fix issues
-# ... make fixes ...
-
-# 4. Re-run checklist
-./scripts/pre-release-check.sh v0.0.12
-
-# 5. Re-tag and release
-git tag v0.0.12
-git push origin v0.0.12
+make test-release                 # offline temp Git remotes + installed-server fixture
+bash scripts/devops-cli.test.sh    # ancestry-based dashboard regression
 ```
 
----
-
-## Quick Commands Summary
-
-```bash
-# Code quality (1 min)
-make fmt && make lint && make vet && make security
-
-# Tests (3 min)
-make test-unit
-
-# Build (5 min)
-make build-all
-
-# Smoke tests (10 min)
-./scripts/pre-release-check.sh --full
-
-# Complete check (20 min)
-./scripts/pre-release-check.sh v0.0.12
-
-# Release (1 min)
-# Default (release branch): ./scripts/create-release.sh v0.0.12
-# Immediate publish: ./scripts/prepare-release.sh && ./scripts/create-release.sh v0.0.12 --immediate
-```
-
----
-
-**Last Updated**: November 18, 2025
-**Recommended**: Run full checklist before every release
-**Minimum**: Run code quality + tests before every commit
+Workflow YAML also needs actionlint. For a delivery PR, run the repository's
+normal `make test`, `make lint-new`, scoped security checks where applicable,
+and `make test-js` gates. Local tests do not prove GitHub permissions, live
+prerelease behavior or cross-platform installers; confirm those during rollout.

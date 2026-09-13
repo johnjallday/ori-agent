@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main, dev, develop, 'release/**' ]
   pull_request:
-    branches: [ main, dev, develop, 'epic/**' ]
+    branches: [ main, dev, develop, 'epic/**', 'release/**' ]
 
 # Cancel an in-flight run when the same ref is pushed again. Without this, a
 # quick follow-up push left the previous full matrix running to completion: 59
@@ -21,6 +21,19 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/dev' && github.ref != 'refs/heads/main' }}
 
 jobs:
+  release-contract:
+    name: Release lifecycle contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Validate workflow definitions
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -shellcheck= -pyflakes=
+      - name: Offline RC, promotion and installer-probe regression tests
+        run: make test-release
+
   lint:
     name: Lint
     runs-on: ubuntu-latest

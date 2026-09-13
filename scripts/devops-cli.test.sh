@@ -1395,7 +1395,11 @@ case "$1 $2" in
     fi
     printf 'v0.0.106\t2026-08-15T10:00:00Z\thttps://github.com/johnjallday/ori-agent/releases/tag/v0.0.106\n'
     ;;
-  "pr list")
+  "api --paginate")
+    case "${3:-}" in
+      'repos/{owner}/{repo}/compare/v0.0.106...dev?per_page=100') ;;
+      *) printf 'unexpected comparison: %s\n' "$*" >&2; exit 99 ;;
+    esac
     if [ -n "${GH_FAIL_PR:-}" ]; then
       printf 'simulated GitHub failure\n' >&2
       exit 7
@@ -1403,15 +1407,12 @@ case "$1 $2" in
     if [ -n "${GH_PR_EMPTY:-}" ]; then
       exit 0
     fi
-    # Two PRs merged strictly after the release's publish instant (381, 380);
-    # three that must NOT count - one at the exact same instant (379), one
-    # earlier the SAME DAY (378), and one from a prior day (377). The boundary
-    # is the exact instant, not the calendar date.
-    printf '381\t2026-08-18T12:00:00Z\tanother PR after release\n'
-    printf '380\t2026-08-19T08:00:00Z\tnewest PR after release\n'
-    printf '379\t2026-08-15T10:00:00Z\tsame instant as release, must not count\n'
-    printf '378\t2026-08-15T09:59:59Z\tsame day before release, must not count\n'
-    printf '377\t2026-08-14T09:00:00Z\tbefore release, must not count\n'
+    # Compare returns commits absent from the frozen release, including work
+    # merged BEFORE publication while its RC was being tested. No date filter.
+    printf 'feat: merged during RC testing (#381)\n'
+    printf 'feat: merged after stable publication (#380)\n'
+    printf 'chore: local maintenance without a delivery PR\n'
+    printf 'Merge released branch back into dev\n'
     ;;
   *)
     printf 'unexpected gh invocation: %s\n' "$*" >&2
@@ -1773,24 +1774,22 @@ grep -Fq "demo     Implementing" "$fixture_root/status-output"
 grep -Fq "Snapshot: complete" "$fixture_root/status-output"
 assert_no_github "status shell (the overview helper owns remote reads)"
 
-# `release` reads the latest GitHub Release, then counts PRs merged into
-# `dev` strictly after its publish instant. Two calls, both reads.
+# `release` reads the latest stable Release, then compares its frozen tag with
+# dev. The second read is paginated; publication time does not define membership.
 : > "$gh_calls"
 "$script" release > "$fixture_root/release-output"
 grep -Fq "Latest release: v0.0.106 (published 2026-08-15T10:00:00Z)" \
   "$fixture_root/release-output"
 grep -Fq "https://github.com/johnjallday/ori-agent/releases/tag/v0.0.106" \
   "$fixture_root/release-output"
-# The boundary is exact: only the two PRs strictly after the publish instant
-# count. The same-instant PR, the same-day-but-earlier PR, and the prior-day
-# PR must all be excluded - a date-only comparison would wrongly count two
-# of those three.
-check "release counts only PRs strictly after the publish instant" \
+# Both PRs absent from the released tree count, including the one merged
+# during RC testing. Non-PR subjects do not contribute to the cadence count.
+check "release counts unshipped PRs by ancestry, not publication time" \
   "$(grep -Fc 'PR(s) merged into dev since v0.0.106' "$fixture_root/release-output" || true)" "1"
 grep -Fq "2 PR(s) merged into dev since v0.0.106." "$fixture_root/release-output"
 grep -Fq $'CALL\trelease\tview\t--json\ttagName,publishedAt,url\t--template' \
   "$gh_calls"
-grep -Fq $'CALL\tpr\tlist\t--state\tmerged\t--base\tdev\t--limit\t500\t--json\tnumber,mergedAt,title' \
+grep -Fq $'CALL\tapi\t--paginate\trepos/{owner}/{repo}/compare/v0.0.106...dev?per_page=100\t--jq' \
   "$gh_calls"
 check "release makes exactly two calls" "$(count_gh_calls)" "2"
 assert_no_github_write "release"
@@ -1801,7 +1800,7 @@ GH_PR_EMPTY=1 "$script" release > "$fixture_root/release-zero-output"
 grep -Fq "No PRs merged into dev since v0.0.106." "$fixture_root/release-zero-output"
 
 # The full-screen picker embeds the shared implementation table and reuses the
-# exact same release timestamp count. Loading happens once per refresh;
+# exact same release ancestry count. Loading happens once per refresh;
 # rendering itself makes no network call.
 : > "$gh_calls"
 load_implementation_summary

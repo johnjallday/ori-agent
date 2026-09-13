@@ -18,14 +18,6 @@
 set -uo pipefail
 
 readonly issue_limit=1000
-# A practical cap on how many merged-into-dev PRs `release` will scan looking
-# for ones after the latest release's publish instant. GitHub returns merged
-# PRs newest-first, so the count this Issue actually cares about - PRs merged
-# since the last release - sits well inside this limit for any sane release
-# cadence; it exists to keep one query bounded, not to model an unbounded
-# repository history.
-readonly release_pr_limit=500
-
 script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 if ! repo_root="$(git -C "$script_dir/.." rev-parse --show-toplevel 2>/dev/null)"; then
   printf '%s\n' "devops.sh must live inside a Git checkout" >&2
@@ -489,7 +481,7 @@ release_merged_count=0
 
 load_release_status() {
   local release_line pr_output
-  local number merged title
+  local subject
 
   release_tag=""
   release_published=""
@@ -508,20 +500,19 @@ load_release_status() {
     return 1
   fi
 
-  # Newest-first by default, and release_pr_limit is a practical cap on that
-  # scan - see its declaration for why the count this Issue cares about always
-  # sits well inside it.
-  pr_output="$(gh pr list --state merged --base dev --limit "$release_pr_limit" \
-    --json number,mergedAt,title \
-    --template '{{range .}}{{printf "%v\t%s\t%s\n" .number .mergedAt .title}}{{end}}')" || return $?
+  # Publication may happen days after the RC was frozen. Compare ancestry,
+  # not publishedAt: PRs merged while the RC was tested are still unshipped.
+  # Match the same squash-merge subjects used by the release cadence gate.
+  if ! [[ "$release_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    printf 'latest release is not a stable vX.Y.Z tag.\n' >&2
+    return 1
+  fi
+  pr_output="$(gh api --paginate \
+    "repos/{owner}/{repo}/compare/${release_tag}...dev?per_page=100" \
+    --jq '.commits[].commit.message | split("\n")[0]')" || return $?
 
-  while IFS=$'\t' read -r number merged title; do
-    [[ -z "$number" ]] && continue
-    # Exact-timestamp comparison, not a date match: a PR merged earlier the
-    # SAME DAY as the release must not count as unreleased just because the
-    # two dates are equal. ISO 8601 UTC timestamps sort lexicographically, so
-    # a plain string compare is exact.
-    if [[ "$merged" > "$release_published" ]]; then
+  while IFS= read -r subject; do
+    if [[ "$subject" =~ \(#[0-9]+\)$ ]]; then
       release_merged_count=$((release_merged_count + 1))
     fi
   done <<< "$pr_output"
