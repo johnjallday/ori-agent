@@ -60,6 +60,7 @@
       selection: selectionFor(options.selection),
       invoker: options.invoker || null,
       onCreated: typeof options.onCreated === 'function' ? options.onCreated : null,
+      guided: options.guided && typeof options.guided === 'object' ? options.guided : null,
       drafts: {
         workspace: cloneDraft(options.drafts?.workspace),
         group: cloneDraft(options.drafts?.group)

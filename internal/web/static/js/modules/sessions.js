@@ -6948,6 +6948,10 @@ const sessionManager = {
   },
 
   renderOrdinaryGroupReceipt() {
+    const guided = this.workspaceCreatorContext?.mode === 'guided'
+      ? this.workspaceCreatorContext.guided
+      : null;
+    if (guided) return this.renderGuidedGroupReceipt(guided);
     const name = String(document.getElementById('folderNameInput')?.value || '').trim();
     const slug = name ? this.slugifyWorkspaceName(name) : '';
     const parent = document.getElementById('folderParentSelect');
@@ -6996,6 +7000,36 @@ const sessionManager = {
         </div>
         <div class="workspace-review-card-actions">
           <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="2">Edit</button>
+        </div>
+      </div>`;
+  },
+
+  renderGuidedGroupReceipt(guided) {
+    const review = guided.review;
+    const name = String(review?.name || document.getElementById('folderNameInput')?.value || '').trim();
+    const status = review?.existing
+      ? 'The existing canonical Home will be reused unchanged.'
+      : review
+        ? 'This exact Home has been reviewed by setup. Confirming uses the recorded approval only.'
+        : 'Confirming will ask setup to review this canonical Home. It cannot create an unrelated replacement.';
+    const error = String(guided.error || '').trim();
+    return `
+      <div class="workspace-review-card">
+        <div class="workspace-review-card-main">
+          <span class="workspace-review-card-label">Canonical Home</span>
+          <strong class="workspace-review-identity-name">${this.escapeHtml(name || 'Untitled Home')}</strong>
+          <span class="workspace-review-card-note">${this.escapeHtml(status)}</span>
+          ${error ? `<span class="workspace-review-card-note is-error">${this.escapeHtml(error)}</span>` : ''}
+        </div>
+        <div class="workspace-review-card-actions">
+          <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="2">Edit</button>
+        </div>
+      </div>
+      <div class="workspace-review-card">
+        <div class="workspace-review-card-main">
+          <span class="workspace-review-card-label">Setup boundary</span>
+          <strong>Only the canonical Home may be created or reused</strong>
+          <span class="workspace-review-card-note">No child workspace, roster, parent change, project, or generic workspace request is sent from this dialog.</span>
         </div>
       </div>`;
   },
@@ -7950,6 +7984,7 @@ const sessionManager = {
     const advanced = document.getElementById('folderAdvancedDisclosure');
     const projectOpen = document.getElementById('projectTemplateOpenAfterCreate');
     const groupDestination = document.getElementById('workspaceGroupDestinationCard');
+    const guidedCreator = context?.mode === 'guided' && Boolean(context?.guided);
 
     if (workspaceChoice) {
       workspaceChoice.checked = kind === 'workspace';
@@ -7981,25 +8016,37 @@ const sessionManager = {
     if (step2Title)
       step2Title.textContent = kind === 'group' ? 'Group details' : 'Workspace details';
     if (step2Description) {
-      step2Description.textContent =
-        kind === 'group'
+      step2Description.textContent = guidedCreator
+        ? 'Name the canonical Home this setup will review. Its setup owner decides whether it is created or reused.'
+        : kind === 'group'
           ? 'Name the home for related workspaces. Groups start empty, without agents.'
           : 'Name the space and add the context Ori should carry into its review.';
     }
     if (step4Title)
-      step4Title.textContent =
-        kind === 'group' ? 'Ready to create this group?' : 'Ready to create?';
+      step4Title.textContent = guidedCreator
+        ? 'Review the canonical Home'
+        : kind === 'group'
+          ? 'Ready to create this group?'
+          : 'Ready to create?';
     if (step4Description) {
-      step4Description.textContent =
-        kind === 'group'
+      step4Description.textContent = guidedCreator
+        ? 'This setup will only create or reuse its canonical Home through the reviewed setup action.'
+        : kind === 'group'
           ? 'Check the group name and destination. It will be created empty, without agents.'
           : 'Check the workspace, its team, and anything it will ask for after creation.';
     }
     const ordinaryGroup = kind === 'group' && !importMode;
-    if (groupNotice) groupNotice.hidden = !ordinaryGroup;
+    if (groupNotice) {
+      groupNotice.hidden = !ordinaryGroup;
+      groupNotice.innerHTML = guidedCreator
+        ? '<strong>This is the setup\'s canonical Home.</strong><span>It is reviewed and created or reused only by the guided setup action. No project, team, or replacement group is created here.</span>'
+        : '<strong>Groups organize related workspaces.</strong><span>This creates an empty group. Agents, projects, and Assistant Program membership are separate choices.</span>';
+    }
     if (nameLabel) nameLabel.textContent = ordinaryGroup ? 'Group name' : 'Workspace name';
     if (nameInput)
       nameInput.placeholder = ordinaryGroup ? 'Name your group' : 'Name your workspace';
+    const descriptionCard = document.getElementById('workspaceDetailsDescriptionCard');
+    if (descriptionCard) descriptionCard.hidden = guidedCreator;
     if (descriptionLabel) {
       descriptionLabel.innerHTML = ordinaryGroup
         ? 'Group description <span style="opacity: 0.8; font-weight: 400;">(optional)</span>'
@@ -8016,7 +8063,7 @@ const sessionManager = {
         : 'What this workspace is for and what Ori should help with';
     }
     if (bootstrapFields) bootstrapFields.hidden = ordinaryGroup;
-    if (destinationCard) destinationCard.hidden = importMode;
+    if (destinationCard) destinationCard.hidden = importMode || guidedCreator;
     if (parentLabel) {
       parentLabel.innerHTML = ordinaryGroup
         ? 'Parent group <span style="opacity: 0.8; font-weight: 400;">(optional)</span>'
@@ -8163,6 +8210,13 @@ const sessionManager = {
   // until the name is set.
   workspaceCreateCtaLabel() {
     if (window.SetupWorkspaceCreator?.hasPending()) return 'Retry Confirmed Change';
+    const guided = this.workspaceCreatorContext?.guided;
+    if (this.workspaceCreatorContext?.mode === 'guided' && guided) {
+      if (guided.error && guided.review?.pending) return 'Retry Confirmed Change';
+      if (guided.review?.existing) return 'Use canonical Home';
+      if (guided.review) return `Create canonical Home “${guided.review.name || 'Group'}”`;
+      return 'Review canonical Home';
+    }
     const name = String(document.getElementById('folderNameInput')?.value || '').trim();
     if (
       this.workspaceMapOrigin &&
@@ -8911,9 +8965,21 @@ const sessionManager = {
     if (!name && !importEnabled) {
       // Inline error belongs to Details, rather than a transient toast.
       this.setWorkspaceNameError(
-        ordinaryGroup ? 'Group name is required' : 'Workspace name is required'
+        ordinaryGroup || this.workspaceCreatorContext?.mode === 'guided'
+          ? 'Group name is required'
+          : 'Workspace name is required'
       );
       nameInput?.focus();
+      return;
+    }
+    const guided = this.workspaceCreatorContext?.mode === 'guided'
+      ? this.workspaceCreatorContext.guided
+      : null;
+    if (guided?.submit) {
+      // Guided Home preparation has its own reviewed setup owner. It receives
+      // only the accepted name and never falls through to POST /api/workspaces
+      // or Workspace Team/template validation.
+      await guided.submit({ name });
       return;
     }
     if (
@@ -10495,6 +10561,10 @@ const sessionManager = {
           selection: null,
           onCreated:
             typeof contextOptions.onCreated === 'function' ? contextOptions.onCreated : null,
+          guided:
+            contextOptions.guided && typeof contextOptions.guided === 'object'
+              ? contextOptions.guided
+              : null,
           drafts: { workspace: {}, group: {} },
           review: null,
           submitting: false,
@@ -10537,7 +10607,9 @@ const sessionManager = {
     // The shared dialog also opens through Bootstrap data attributes. Reuse
     // that instance so repeated Map/Tree/keyboard launches cannot leave a
     // stale instance holding the dismiss transition.
-    const modal = bootstrap.Modal.getOrCreateInstance(modalElement);
+    const modal = bootstrap.Modal.getOrCreateInstance
+      ? bootstrap.Modal.getOrCreateInstance(modalElement)
+      : new bootstrap.Modal(modalElement);
     modal.show();
   },
 

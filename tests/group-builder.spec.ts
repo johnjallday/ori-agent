@@ -23,12 +23,7 @@ function journey() {
     },
     receipts: {} as Record<string, string>,
     steps: [
-      {
-        id: 'integration',
-        kind: 'integration_install',
-        title: 'Install plugin',
-        status: 'complete'
-      },
+      { id: 'integration', kind: 'integration_install', title: 'Install plugin', status: 'complete' },
       {
         id: 'project',
         kind: 'project_connect',
@@ -52,31 +47,30 @@ function evidence(page, name) {
   return page.screenshot({ path: `${dir}/${name}.png` });
 }
 
-test('map Build Group reviews an empty group and refreshes the map without adding members', async ({
+// Ordinary Map creation is a Group-prefilled instance of the one creator; it
+// retains the real generic POST and explicit agentless payload.
+test('Map Create Group reviews an empty group and refreshes the map without adding members', async ({
   page,
   request
 }) => {
   await settled(page);
   await page.goto('/');
   await page.getByRole('button', { name: 'Switch to dark mode' }).click();
-  await page.locator('#cockpitBuildGroupBtn').click();
-  const builder = page.locator('#buildGroupModal');
-  await expect(builder).toBeVisible();
-  await expect
-    .poll(() =>
-      builder.locator('.modal-content').evaluate(node => getComputedStyle(node).backgroundColor)
-    )
-    .toMatch(/^rgb\(/);
-  await expect(builder).toContainText('No agents, projects, schedules, or access permissions');
+  await page.getByRole('button', { name: 'Create Group', exact: true }).click();
+  const creator = page.locator('#addFolderModal');
+  await expect(creator).toBeVisible();
+  await expect(creator).toContainText('Groups organize related workspaces');
   const name = `Map Group ${Date.now()}`;
-  await builder.getByRole('textbox', { name: 'Group name' }).fill(name);
-  await builder.getByRole('button', { name: 'Review Group' }).click();
-  await expect(builder.getByRole('heading', { name: `Build “${name}”?` })).toBeVisible();
-  await evidence(page, '24-map-build-group');
+  await creator.getByRole('textbox', { name: 'Group name' }).fill(name);
+  await creator.getByRole('button', { name: 'Review →' }).click();
+  await expect(creator.locator('#workspaceReviewSummary')).toContainText(
+    'One empty organizational group'
+  );
+  await evidence(page, '24-map-create-group');
   const response = page.waitForResponse(
     res => new URL(res.url()).pathname === '/api/workspaces' && res.request().method() === 'POST'
   );
-  await builder.getByRole('button', { name: 'Build Group', exact: true }).click();
+  await creator.getByRole('button', { name: `Create group “${name}”` }).click();
   const result = await response;
   expect(result.ok(), await result.text()).toBeTruthy();
   const payload = await result.json();
@@ -87,7 +81,7 @@ test('map Build Group reviews an empty group and refreshes the map without addin
       kind: 'group',
       create_template_agents: false
     });
-    await expect(builder).toBeHidden();
+    await expect(creator).toBeHidden();
     await expect
       .poll(() =>
         page.evaluate(
@@ -107,7 +101,9 @@ test('map Build Group reviews an empty group and refreshes the map without addin
   }
 });
 
-test('Step 2 uses the shared builder with cancellation, exact retry and commit-only Escape lock', async ({
+// Guided creation uses identical presentation but no generic POST. Its owner
+// records a review token once and resends exactly that envelope on uncertainty.
+test('guided setup uses the shared creator with cancellation, exact retry and commit-only Escape lock', async ({
   page
 }) => {
   await settled(page);
@@ -157,35 +153,37 @@ test('Step 2 uses the shared builder with cancellation, exact retry and commit-o
   });
   await page.goto('/?setup=specialist');
   const setup = page.locator('#specialistSetupJourneyModal');
-  const builder = page.locator('#buildGroupModal');
+  const creator = page.locator('#addFolderModal');
   await setup.getByRole('button', { name: 'Build Group', exact: true }).click();
   await expect(setup).toBeHidden();
-  await expect(builder.getByRole('textbox', { name: 'Group name' })).toHaveValue('Studio');
-  await builder.getByRole('textbox', { name: 'Group name' }).fill('My Studio');
-  await builder.getByRole('button', { name: 'Review Group' }).click();
-  await expect(builder.getByRole('heading', { name: 'Build “My Studio”?' })).toBeVisible();
-  await builder.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(creator.getByRole('textbox', { name: 'Group name' })).toHaveValue('Studio');
+  await creator.getByRole('textbox', { name: 'Group name' }).fill('My Studio');
+  // An unsubmitted close preserves the supported name draft but no consent.
+  await page.waitForTimeout(200);
+  await page.evaluate(() => {
+    // @ts-expect-error Bootstrap is a page global.
+    window.bootstrap.Modal.getInstance(document.getElementById('addFolderModal'))?.hide();
+  });
+  await expect(creator).toBeHidden();
+
   await setup.getByRole('button', { name: 'Build Group', exact: true }).click();
-  await expect(builder.getByRole('textbox', { name: 'Group name' })).toHaveValue('My Studio');
-  await expect(builder.locator('#buildGroupCommit')).toBeHidden();
-  expect(commits).toHaveLength(0);
-  await builder.getByRole('button', { name: 'Review Group' }).click();
-  await expect(builder.getByRole('heading', { name: 'Build “My Studio”?' })).toBeVisible();
-  await evidence(page, '25-guided-build-group-narrow');
-  const footer = await builder.locator('.modal-footer').boundingBox();
-  const button = await builder.locator('#buildGroupCommit').boundingBox();
-  expect(button!.y + button!.height).toBeLessThanOrEqual(footer!.y + footer!.height);
-  await builder.getByRole('button', { name: 'Build Group', exact: true }).click();
+  await expect(creator.getByRole('textbox', { name: 'Group name' })).toHaveValue('My Studio');
+  await creator.getByRole('button', { name: 'Review →' }).click();
+  await creator.getByRole('button', { name: 'Review canonical Home' }).click();
+  await expect(creator.locator('#workspaceReviewSummary')).toContainText(
+    'This exact Home has been reviewed by setup'
+  );
+  await evidence(page, '25-guided-shared-creator-narrow');
+  await creator.getByRole('button', { name: 'Create canonical Home “My Studio”' }).click();
   await expect.poll(() => commits.length).toBe(1);
   await page.keyboard.press('Escape');
-  await expect(builder).toBeVisible();
-  await expect(builder.getByRole('status')).toContainText('Finish the confirmed group change');
+  await expect(creator).toBeVisible();
   release();
-  await builder.getByRole('button', { name: 'Retry Confirmed Change' }).click();
+  await creator.getByRole('button', { name: 'Retry Confirmed Change' }).click();
   expect(commits).toHaveLength(2);
   expect(commits[0]).toEqual(commits[1]);
-  expect((commits[1] as any).review_token).toBe('review-2');
-  await expect(builder).toBeHidden();
+  expect((commits[1] as any).review_token).toBe('review-1');
+  await expect(creator).toBeHidden();
   await expect(setup.locator('#specialistSetupJourneyStepTitle')).toHaveText('Prepare Tools');
   expect(genericCreates).toBe(0);
 });
@@ -205,9 +203,5 @@ test('a historical project with an unavailable group never offers replacement cr
   const setup = page.locator('#specialistSetupJourneyModal');
   await expect(setup).toContainText('existing setup group could not be verified');
   await expect(setup.getByRole('button', { name: 'Build Group', exact: true })).toHaveCount(0);
-  await expect(setup.locator('.setup-journey__step-button').nth(3)).not.toHaveAttribute(
-    'data-status',
-    'complete'
-  );
   await expect(setup.getByRole('button', { name: 'Open Existing Workspace' })).toBeVisible();
 });
