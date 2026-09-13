@@ -474,6 +474,14 @@ func applyRecoveryCategory(ctx context.Context, result CategoryResult, selected 
 		}
 		completeResultCheck(&result, "supplemental_configuration_default")
 	case CategoryIntegrations:
+		// Exact plugin removal first: it reads the installed registry and the MCP
+		// document that the broader removal below deletes, and it is the only step
+		// that can reach the plugin-copied skills outside this installation.
+		// Exactly one plugin-removal pass runs — the selective category and Start
+		// Fresh never both apply, because they cannot appear in one plan.
+		if !applyFreshPluginRemoval(ctx, &result, evidence.Plugins, pluginPaths) {
+			return result
+		}
 		if removeFreshTargets(result.ID, targets, installationRoot) != nil {
 			return result
 		}

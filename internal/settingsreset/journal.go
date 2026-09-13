@@ -124,11 +124,15 @@ func validateJournal(j *journal) error {
 	// generic target rules above. It is required exactly when the reviewed scope
 	// owns installed plugins and refused otherwise, so an unrelated receipt can
 	// never smuggle an external deletion root in.
-	if pluginEvidenceRequired(selected) {
+	switch {
+	case evidence.Plugins != nil:
+		if !pluginEvidencePermitted(selected) {
+			return ErrJournalInvalid
+		}
 		if err := validatePluginEvidence(root, evidence.Plugins, evidence.ProtectedPaths); err != nil {
 			return err
 		}
-	} else if evidence.Plugins != nil {
+	case pluginEvidenceRequired(selected):
 		return ErrJournalInvalid
 	}
 	wantKinds := make(map[string]CategoryID)

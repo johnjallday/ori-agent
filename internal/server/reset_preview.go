@@ -65,7 +65,6 @@ func resetPluginPaths(dataDir string) plugin.ResetPaths {
 
 func (b *ServerBuilder) resetFreshOwners() ([]settingsreset.FreshTarget, func(context.Context) []settingsreset.Blocker) {
 	var targets []settingsreset.FreshTarget
-	var checkPluginSkills func() []settingsreset.Blocker
 	add := func(category settingsreset.CategoryID, kind, path, reason string) {
 		if strings.TrimSpace(path) == "" {
 			return
@@ -96,21 +95,13 @@ func (b *ServerBuilder) resetFreshOwners() ([]settingsreset.FreshTarget, func(co
 		add(settingsreset.CategoryIntegrations, "mcp_search_cache", cache, "Remove fetched MCP registry cache.")
 	}
 	if b.pluginHandler != nil && b.pluginHandler.Manager() != nil {
-		manager := b.pluginHandler.Manager()
-		for kind, path := range manager.FreshPersistencePaths() {
-			add(settingsreset.CategoryIntegrations, kind, path, "Remove enumerated managed plugin registration, clone, artifact or state; linked external sources and personal skills remain.")
-		}
-		checkPluginSkills = func() []settingsreset.Blocker {
-			installed, err := manager.List()
-			if err != nil {
-				return []settingsreset.Blocker{{Code: "plugin_inventory_unavailable", Category: settingsreset.CategoryIntegrations, Message: "Managed plugin registrations cannot be inspected safely.", Recovery: "Restore the plugin registry and review Start Fresh again."}}
-			}
-			for _, item := range installed {
-				if len(item.Skills) != 0 {
-					return []settingsreset.Blocker{{Code: "external_plugin_skills_present", Category: settingsreset.CategoryIntegrations, Message: "An installed plugin copied skills into the shared personal skills directory.", Recovery: "Uninstall plugins with skill components first so Ori can remove only their recorded copies without touching personal skills, then review Start Fresh again."}}
-				}
-			}
-			return nil
+		// Start Fresh keeps these broader targets. Its plugin portion now runs the
+		// same exact offline removal the selective category uses, before these
+		// roots are deleted, so reviewed plugin-copied skills no longer need a
+		// manual-uninstall blocker. Plugin ownership that cannot be established
+		// safely still blocks, through the planner's own inventory inspection.
+		for kind, path := range b.pluginHandler.Manager().FreshPersistencePaths() {
+			add(settingsreset.CategoryIntegrations, kind, path, "Remove enumerated managed plugin registration, marketplace, clone, artifact or state after each installed plugin's exact components have been removed; linked external sources and personal skills you wrote remain.")
 		}
 	}
 	if b.configManager != nil {
@@ -135,9 +126,6 @@ func (b *ServerBuilder) resetFreshOwners() ([]settingsreset.FreshTarget, func(co
 		var blockers []settingsreset.Blocker
 		if err := ctx.Err(); err != nil {
 			return []settingsreset.Blocker{{Code: "fresh_inspection_cancelled", Message: "Start Fresh owner inspection did not finish.", Recovery: "Review Start Fresh again when the installation is idle."}}
-		}
-		if checkPluginSkills != nil {
-			blockers = append(blockers, checkPluginSkills()...)
 		}
 		legacyUsage := filepath.Join(os.Getenv("HOME"), ".ori-agent", "usage_data", "usage_records.json")
 		if active := filepath.Join(config.DefaultDataDir(), "usage_data", "usage_records.json"); legacyUsage != active {

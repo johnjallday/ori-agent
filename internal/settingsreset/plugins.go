@@ -3,7 +3,6 @@ package settingsreset
 import (
 	"context"
 	"encoding/hex"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -59,9 +58,14 @@ func pluginTargetPaths(paths plugin.ResetPaths) map[string]string {
 
 // inspectPlugins fills the reviewed category and returns the private evidence.
 // It performs no mutation and never constructs a live plugin manager.
-func inspectPlugins(ctx context.Context, owners Owners, category *CategoryPreview,
+//
+// It serves both owners of plugin removal. The selective category passes a
+// target function and takes the six installation-local scopes; Start Fresh
+// passes none, because its broader `integrations` targets already cover them —
+// but it needs the same evidence so its plugin portion can run the identical
+// exact cleanup before those broader roots are deleted.
+func inspectPlugins(ctx context.Context, owners Owners, id CategoryID, category *CategoryPreview,
 	target func(string, string, string), block func(string, CategoryID, string, string)) *pluginEvidence {
-	id := CategoryInstalledPlugins
 	if !owners.PluginPaths.Resolved() {
 		block("plugin_owner_unavailable", id, "The authoritative installed-plugin owner is unavailable.",
 			"Restore the plugin registry and personal skills locations before reviewing reset; no plugin layout will be guessed.")
@@ -110,8 +114,10 @@ func inspectPlugins(ctx context.Context, owners Owners, category *CategoryPrevie
 		category.Items = append(category.Items, pluginCategoryItem(item))
 	}
 
-	for _, kind := range targetKinds(id) {
-		target(kind, pluginTargetPaths(paths)[kind], pluginTargetReason(kind))
+	if target != nil {
+		for _, kind := range targetKinds(id) {
+			target(kind, pluginTargetPaths(paths)[kind], pluginTargetReason(kind))
+		}
 	}
 	for _, item := range inventory.Items {
 		for _, skill := range item.Skills {
@@ -127,8 +133,13 @@ func inspectPlugins(ctx context.Context, owners Owners, category *CategoryPrevie
 			})
 		}
 	}
+	if id == CategoryInstalledPlugins {
+		category.Retained = append(category.Retained, Location{
+			DisplayPath: paths.MarketplacesPath(),
+			Reason:      "Marketplace registrations and search sources are preserved by this category; only Start Fresh removes them.",
+		})
+	}
 	category.Retained = append(category.Retained,
-		Location{DisplayPath: paths.MarketplacesPath(), Reason: "Marketplace registrations and search sources are preserved by this category; only Start Fresh removes them."},
 		Location{DisplayPath: paths.SkillsRoot, Reason: "The shared personal skills folder and every skill outside the recorded plugin copies above."},
 		Location{DisplayPath: "Workspace files, history and plugin bindings", Reason: "Plugin-backed workspace data stays readable; its provider is shown as unavailable through existing behavior."},
 	)
@@ -277,7 +288,9 @@ func validatePluginEvidence(root string, evidence *pluginEvidence, protected []s
 // must be one the reviewed evidence named, and a pending category can never
 // carry an outcome for one.
 func validateCategoryMembers(category CategoryPreview, result CategoryResult, evidence *pluginEvidence) error {
-	if category.ID != CategoryInstalledPlugins {
+	ownsPlugins := category.ID == CategoryInstalledPlugins ||
+		(category.ID == CategoryIntegrations && evidence != nil)
+	if !ownsPlugins {
 		if len(category.Items) != 0 || len(result.Items) != 0 {
 			return ErrJournalInvalid
 		}
@@ -362,9 +375,59 @@ func recoveredPluginPaths(root string, evidence *pluginEvidence, resolve func() 
 // plugin installed after the review is never touched because only the recorded
 // evidence items are acted on.
 func applyPluginRecovery(ctx context.Context, result CategoryResult, evidence *pluginEvidence, paths plugin.ResetPaths) CategoryResult {
+	if !removePluginItems(ctx, &result, evidence, paths) {
+		return result
+	}
+	completeResultCheck(&result, "plugin_components_absent")
+
+	if empty, err := plugin.ResetRegistryEmpty(paths); err == nil {
+		// Plugins installed after the review legitimately remain. The reviewed
+		// set is verified absent above, which is what this category promised.
+		_ = empty
+		completeResultCheck(&result, "installed_plugins_absent")
+	}
+	// The preview cache is shared and re-derivable, so it is cleared once, only
+	// after every reviewed plugin is verifiably gone.
+	if err := plugin.RemoveResetPreviewCache(paths); err != nil {
+		result.Message = "Managed plugin preview state could not be cleared."
+		return result
+	}
+	if pluginPreservationVerified(ctx, evidence, paths, true) {
+		completeResultCheck(&result, "unrelated_integrations_preserved")
+	} else {
+		result.Message = "Preserved marketplace, linked source or personal skills evidence changed during plugin removal."
+	}
+	return result
+}
+
+// applyFreshPluginRemoval is Start Fresh's plugin portion. It runs the identical
+// exact removal owner, and must complete before the broader integration targets
+// delete the installed registry and MCP document that are its authority.
+//
+// Start Fresh legitimately removes marketplaces afterwards, so preservation
+// here covers linked sources and the shared personal skills root only.
+func applyFreshPluginRemoval(ctx context.Context, result *CategoryResult, evidence *pluginEvidence, paths plugin.ResetPaths) bool {
+	if evidence == nil {
+		// A receipt written before plugin reset existed keeps its original raw
+		// managed-root semantics; there is no exact pass to run.
+		return true
+	}
+	if !removePluginItems(ctx, result, evidence, paths) {
+		return false
+	}
+	if !pluginPreservationVerified(ctx, evidence, paths, false) {
+		result.Message = "Linked plugin sources or the shared personal skills folder changed during plugin removal."
+		return false
+	}
+	return true
+}
+
+// removePluginItems removes every reviewed plugin and records a bounded
+// per-plugin outcome. It reports whether all of them are verifiably gone.
+func removePluginItems(ctx context.Context, result *CategoryResult, evidence *pluginEvidence, paths plugin.ResetPaths) bool {
 	if err := ctx.Err(); err != nil {
 		result.Message = "Plugin removal stopped before it could be verified."
-		return result
+		return false
 	}
 	completed := map[string]bool{}
 	for _, item := range result.Items {
@@ -397,39 +460,23 @@ func applyPluginRecovery(ctx context.Context, result CategoryResult, evidence *p
 	result.Items = items
 	if unresolved != 0 {
 		result.Message = "One or more installed plugins could not be removed and verified."
-		return result
+		return false
 	}
-	completeResultCheck(&result, "plugin_components_absent")
-
-	empty, err := plugin.ResetRegistryEmpty(paths)
-	if err == nil && empty {
-		completeResultCheck(&result, "installed_plugins_absent")
-	} else if err == nil {
-		// Plugins installed after the review legitimately remain. The reviewed
-		// set is still absent, which is what this category promised.
-		completeResultCheck(&result, "installed_plugins_absent")
-	}
-	// The preview cache is shared and re-derivable, so it is cleared once, only
-	// after every reviewed plugin is verifiably gone.
-	if err := plugin.RemoveResetPreviewCache(paths); err != nil {
-		result.Message = "Managed plugin preview state could not be cleared."
-		return result
-	}
-	if pluginPreservationVerified(ctx, evidence, paths) {
-		completeResultCheck(&result, "unrelated_integrations_preserved")
-	} else {
-		result.Message = "Preserved marketplace, linked source or personal skills evidence changed during plugin removal."
-	}
-	return result
+	return true
 }
 
 // pluginPreservationVerified proves the named preservation postcondition with
 // the evidence bound at review time. The shared personal skills root is checked
 // for presence only: enumerating it is exactly what this feature must not do.
-func pluginPreservationVerified(ctx context.Context, evidence *pluginEvidence, paths plugin.ResetPaths) bool {
-	digest, err := digestProtectedPath(ctx, paths.MarketplacesPath())
-	if err != nil || digest != evidence.MarketplacesDigest {
-		return false
+//
+// marketplaces is false for Start Fresh, which legitimately removes marketplace
+// registrations under its own broader policy after this exact pass completes.
+func pluginPreservationVerified(ctx context.Context, evidence *pluginEvidence, paths plugin.ResetPaths, marketplaces bool) bool {
+	if marketplaces {
+		digest, err := digestProtectedPath(ctx, paths.MarketplacesPath())
+		if err != nil || digest != evidence.MarketplacesDigest {
+			return false
+		}
 	}
 	if evidence.SkillsRootPresent {
 		if present, err := pathPresent(paths.SkillsRoot); err != nil || !present {
@@ -457,18 +504,16 @@ func pathPresent(path string) (bool, error) {
 	return true, nil
 }
 
-// pluginEvidenceRequired reports whether a selection must carry plugin evidence.
+// pluginEvidenceRequired reports whether a selection must carry plugin
+// evidence. The selective category cannot function without it.
 func pluginEvidenceRequired(selected []CategoryID) bool {
 	return slices.Contains(selected, CategoryInstalledPlugins)
 }
 
-func pluginItemNames(evidence *pluginEvidence) string {
-	if evidence == nil {
-		return ""
-	}
-	names := make([]string, 0, len(evidence.Items))
-	for _, item := range evidence.Items {
-		names = append(names, item.Name)
-	}
-	return fmt.Sprint(names)
+// pluginEvidencePermitted reports whether a selection may carry plugin
+// evidence. Start Fresh may, but must not require it: every Start Fresh receipt
+// written before this feature existed has none, and must keep recovering under
+// its original raw managed-root semantics rather than being stranded.
+func pluginEvidencePermitted(selected []CategoryID) bool {
+	return pluginEvidenceRequired(selected) || slices.Contains(selected, CategoryIntegrations)
 }
