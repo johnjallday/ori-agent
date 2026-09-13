@@ -220,6 +220,136 @@ async function runCreateWithTeamCompletion(teamCompletion) {
   return { manager, requests, toasts, window };
 }
 
+test('Workspace create still requires its reviewed strict Team envelope before posting', async () => {
+  const requests = [];
+  const elements = new Map([
+    [
+      'folderNameInput',
+      { value: 'Strict workspace', focus() {}, classList: { add() {}, remove() {} } }
+    ],
+    ['folderDescriptionInput', { value: '' }],
+    ['folderParentSelect', { value: '' }],
+    ['addFolderModal', { dataset: {} }],
+    ['createFolderBtn', { textContent: 'Create workspace', disabled: false }],
+    ['folderImportToggle', { checked: false }]
+  ]);
+  const document = {
+    addEventListener() {},
+    getElementById: id => elements.get(id) || null,
+    querySelector: () => null
+  };
+  const window = {};
+  vm.runInNewContext(
+    source,
+    {
+      window,
+      document,
+      bootstrap: { Modal: { getInstance: () => ({ hide() {} }) } },
+      fetch: async (url, options) => {
+        requests.push({ url, options });
+        return { ok: true, json: async () => ({}) };
+      },
+      console,
+      crypto: { randomUUID: () => 'strict-team' }
+    },
+    { filename: 'sessions.js' }
+  );
+  const manager = window.sessionManager;
+  let routedTo = 0;
+  manager.teamView = () => ({
+    canContinueFromTeam: false,
+    blockingIssues: [{ id: 'required-roles-missing', anchor: '' }]
+  });
+  manager.goToWizardStep = step => {
+    routedTo = step;
+  };
+  manager.refreshWorkspaceReview = () => {};
+
+  await manager.createFolder();
+
+  assert.equal(routedTo, 3);
+  assert.equal(requests.length, 0, 'Workspace cannot bypass strict Team validation');
+});
+
+test('ordinary Group submits the agentless allowlist before Workspace Team or blueprint work', async () => {
+  const requests = [];
+  const elements = new Map([
+    [
+      'folderNameInput',
+      { value: 'Client Homes', focus() {}, classList: { add() {}, remove() {} } }
+    ],
+    ['folderDescriptionInput', { value: 'Organize client work.' }],
+    ['folderParentSelect', { value: 'parent-group' }],
+    ['addFolderModal', { dataset: {} }],
+    ['createFolderBtn', { textContent: 'Create group', disabled: false }],
+    ['folderImportToggle', { checked: false }]
+  ]);
+  const document = {
+    addEventListener() {},
+    getElementById: id => elements.get(id) || null,
+    querySelector: selector =>
+      selector === '#addFolderModal .folder-color-btn.active'
+        ? { dataset: { color: '#22c55e' } }
+        : null
+  };
+  const window = {
+    ProjectTemplateCard: {
+      recheckSelection: async () => {
+        throw new Error('Group must not recheck Workspace blueprints');
+      }
+    }
+  };
+  const bootstrap = { Modal: { getInstance: () => ({ hide() {} }) } };
+  vm.runInNewContext(
+    source,
+    {
+      window,
+      document,
+      bootstrap,
+      fetch: async (url, options) => {
+        requests.push({ url, body: JSON.parse(options.body) });
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({
+            folder: { id: 'group-1', name: 'Client Homes', folder_slug: 'client-homes' }
+          })
+        };
+      },
+      console,
+      crypto: { randomUUID: () => 'ordinary-group' }
+    },
+    { filename: 'sessions.js' }
+  );
+  const manager = window.sessionManager;
+  manager.workspaceCreatorContext = {
+    generation: 1,
+    mode: 'ordinary',
+    kind: 'group',
+    drafts: { workspace: {}, group: {} }
+  };
+  manager.clearWorkspaceCreateError = () => {};
+  manager.resetAddWorkspaceModalForm = () => {};
+  manager.refreshWorkspaceSurfacesAfterOrdinaryGroupCreate = async () => {};
+  manager.showCreatedGroupFollowUp = () => {};
+  manager.teamView = () => {
+    throw new Error('Group must not validate a Workspace Team');
+  };
+
+  await manager.createFolder();
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, '/api/workspaces');
+  assert.deepEqual(JSON.parse(JSON.stringify(requests[0].body)), {
+    name: 'Client Homes',
+    description: 'Organize client work.',
+    parent_id: 'parent-group',
+    color: '#22c55e',
+    kind: 'group',
+    create_template_agents: false
+  });
+});
+
 function loadSessionManagerWithSetupPreview() {
   const elements = new Map();
   for (const id of [
@@ -287,6 +417,29 @@ function loadSessionManagerWithModal() {
   );
   return { manager: window.sessionManager, modalElement, shown };
 }
+
+test('created Group follow-up navigates only to its returned team surface', () => {
+  let options = null;
+  const location = { href: '' };
+  const manager = loadSessionManager(undefined, {
+    location,
+    Toast: {
+      success: (_message, received) => {
+        options = received;
+      }
+    }
+  });
+
+  manager.showCreatedGroupFollowUp({
+    id: 'durable-group',
+    name: 'Client Homes',
+    folder_slug: 'client-homes'
+  });
+
+  assert.equal(options.action.label, 'Open group / Set up team');
+  options.action.onClick();
+  assert.equal(location.href, '/workspaces/client-homes/assistant');
+});
 
 test('a suggestion assigns its explicit role without ambient Assign state', () => {
   const calls = [];
@@ -470,6 +623,63 @@ test('runtime review hides for a no-contract blueprint and fails visibly for an 
   assert.equal(elements.get('workspaceSetupPreview').hidden, false);
   assert.match(elements.get('workspaceSetupPreviewList').textContent, /cannot be read/i);
   assert.match(elements.get('workspaceSetupPreviewList').textContent, /unknown adapter/i);
+});
+
+test('the shared entry point creates one generation-fenced creator context before opening', () => {
+  const modalElement = { dataset: {} };
+  const contexts = [];
+  const manager = loadSessionManager(
+    undefined,
+    {
+      WorkspaceCreatorState: {
+        createCreatorContext: options => {
+          contexts.push(options);
+          return { ...options, kind: options.kind || 'workspace' };
+        }
+      },
+      bootstrap: {
+        Modal: class {
+          show() {}
+        }
+      }
+    },
+    { getElementById: id => (id === 'addFolderModal' ? modalElement : null) }
+  );
+
+  manager.showAddWorkspaceModal({
+    kind: 'group',
+    entryPoint: 'tree_new_group',
+    selection: { ids: ['parent'], names: ['Parent'] }
+  });
+
+  assert.equal(contexts.length, 1);
+  assert.equal(contexts[0].generation, 1);
+  assert.equal(contexts[0].kind, 'group');
+  assert.equal(contexts[0].entryPoint, 'tree_new_group');
+  assert.deepEqual(JSON.parse(JSON.stringify(contexts[0].selection)), {
+    ids: ['parent'],
+    names: ['Parent']
+  });
+  assert.equal(manager.workspaceCreatorContext.kind, 'group');
+});
+
+test('Group creator navigation exposes only Details then Review while Workspace stays four steps', () => {
+  const manager = loadSessionManager();
+  manager.workspaceCreatorContext = { mode: 'ordinary', kind: 'workspace' };
+  manager.wizardStep = 1;
+  assert.deepEqual(JSON.parse(JSON.stringify(manager.creatorWizardSteps())), [1, 2, 3, 4]);
+  assert.equal(manager.nextWizardStep(), 2);
+
+  manager.workspaceCreatorContext = { mode: 'ordinary', kind: 'group' };
+  manager.wizardStep = 2;
+  assert.deepEqual(JSON.parse(JSON.stringify(manager.creatorWizardSteps())), [2, 4]);
+  assert.equal(manager.nextWizardStep(), 4);
+  assert.equal(manager.previousWizardStep(), 2);
+  manager.wizardStep = 4;
+  assert.equal(manager.isFinalWizardStep(), true);
+
+  manager.importModeEnabled = true;
+  assert.deepEqual(JSON.parse(JSON.stringify(manager.creatorWizardSteps())), [2]);
 });
 
 test('a Map-origin create flags the existing modal rather than opening a second form (#292 FR-51)', () => {

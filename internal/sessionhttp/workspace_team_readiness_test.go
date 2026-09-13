@@ -219,6 +219,21 @@ func TestWorkspaceTeamIntentMalformedFailsClosedBeforeCreation(t *testing.T) {
 	}
 }
 
+func TestWorkspaceTeamIntentRejectsGroupsBeforeAnySideEffect(t *testing.T) {
+	handler, _, cleanup := strictReadinessHandler(t)
+	defer cleanup()
+
+	body := `{"name":"Rejected Group","kind":"group","team_intent":{"version":1,"mode":"staffed","plan_revision":"reviewed"},"role_staffing":[]}`
+	w, response := postCreateWorkspace(t, handler, body)
+	if w.Code != http.StatusBadRequest || response["code"] != "team_intent_invalid" {
+		t.Fatalf("status/code = %d/%v, want 400/team_intent_invalid: %s", w.Code, response["code"], w.Body.String())
+	}
+	if message, _ := response["error"].(string); !strings.Contains(message, "cannot create a group") {
+		t.Fatalf("error = %q, want strict group rejection", message)
+	}
+	assertNoReadinessSideEffects(t, handler)
+}
+
 func TestWorkspaceTeamReadinessRejectsStaleMalformedAndInsufficientFills(t *testing.T) {
 	tests := []struct {
 		name     string

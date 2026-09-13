@@ -235,6 +235,9 @@
     undefined (reading 'collectWorkspaceGroupOptions')".
   -->
   <script defer src="/js/modules/workspace-group-options.js"></script>
+  <!-- Pure operation-context helpers must be ready before sessions.js creates
+       an adaptive Workspace/Group draft. -->
+  <script defer src="/js/modules/workspace-creator-state.js"></script>
   <script defer src="/js/modules/sessions.js"></script>
   <script defer src="/js/modules/plugin-lifecycle.js"></script>
   <script defer src="/js/modules/blueprint-readiness.js"></script>

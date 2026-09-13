@@ -690,6 +690,72 @@ test('createFolder submits workspace_preset for create and import', async ({ pag
   await expect.poll(() => captured.import).toBe('research');
 });
 
+test('the shared creator makes an ordinary Group through Details and Review only', async ({
+  page
+}) => {
+  let payload: Record<string, unknown> | undefined;
+  await page.route('**/api/workspaces', async route => {
+    if (route.request().method() !== 'POST') return route.continue();
+    payload = route.request().postDataJSON();
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        folder: { id: 'browser-group', name: 'Browser group', folder_slug: 'browser-group' }
+      })
+    });
+  });
+
+  await page.evaluate(() => {
+    (
+      window as unknown as { sessionManager: { showAddWorkspaceModal: (options: unknown) => void } }
+    ).sessionManager.showAddWorkspaceModal({ kind: 'group', entryPoint: 'browser-group-test' });
+  });
+  await expect(page.locator('#addFolderModal')).toBeVisible();
+  await expect(page.locator('#folderModalTitle')).toHaveText('Create Group');
+  await expect(page.locator('#workspaceCreatorKindGroup')).toBeChecked();
+  await expect(page.locator('#wizardStep1')).toBeHidden();
+  await expect(page.locator('#wizardStep3')).toBeHidden();
+  await expect(page.locator('#wizardStep2')).toBeVisible();
+  await expect(page.locator('#folderAdvancedDisclosure')).toBeHidden();
+  await expect(page.locator('#workspaceBootstrapFields')).toBeHidden();
+
+  await page.fill('#folderNameInput', 'Browser group');
+  await page.fill('#folderDescriptionInput', 'An empty group created by the shared dialog.');
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#wizardStep4')).toBeVisible();
+  await expect(page.locator('#workspaceReviewSummary')).toContainText(
+    'One empty organizational group'
+  );
+  await expect(page.locator('#createFolderBtn')).toHaveText('Create group “Browser group”');
+  await page.locator('#createFolderBtn').click();
+  await expect.poll(() => payload).toBeDefined();
+  expect(payload).toMatchObject({
+    name: 'Browser group',
+    description: 'An empty group created by the shared dialog.',
+    kind: 'group',
+    create_template_agents: false
+  });
+  for (const field of [
+    'template_id',
+    'template_path',
+    'blank',
+    'workspace_bootstrap',
+    'workspace_preset',
+    'team_intent',
+    'role_staffing',
+    'existing_agent_names',
+    'entry_agent_name',
+    'template_agent_overrides',
+    'template_agent_review'
+  ]) {
+    expect(payload).not.toHaveProperty(field);
+  }
+  await expect(page.locator('#toastContainer .toast-action')).toHaveText(
+    'Open group / Set up team'
+  );
+});
+
 test('Team attaches a saved agent and submits the complete team atomically', async ({ page }) => {
   await page.route('**/api/workspaces/template-agent-plan**', async route => {
     await route.fulfill({

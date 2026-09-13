@@ -35,6 +35,12 @@ const sessionManager = {
   importDuplicateWorkspaceName: '',
   importEntryPoint: 'workspace_hub_create',
   workspacePostCreateAction: '',
+  // One page-local creation context is minted for each ordinary modal open.
+  // It owns only the active generation and caller intent; sessions.js remains
+  // the single controller/mutation owner for the shared dialog.
+  workspaceCreatorContext: null,
+  workspaceCreatorGeneration: 0,
+  pendingWorkspaceCreatorOptions: null,
   // True while the open Create Workspace modal was launched from the Workspace
   // Map's Build mode, which changes only where the flow returns to (#292 FR-53).
   workspaceMapOrigin: false,
@@ -336,10 +342,10 @@ const sessionManager = {
     // Wizard navigation (Choose Blueprint → Details → Review).
     document
       .getElementById('wizardNextBtn')
-      ?.addEventListener('click', () => this.goToWizardStep(this.wizardStep + 1));
+      ?.addEventListener('click', () => this.goToWizardStep(this.nextWizardStep()));
     document
       .getElementById('wizardBackBtn')
-      ?.addEventListener('click', () => this.goToWizardStep(this.wizardStep - 1));
+      ?.addEventListener('click', () => this.goToWizardStep(this.previousWizardStep()));
     document
       .getElementById('wizardEditBlueprintBtn')
       ?.addEventListener('click', () => this.goToWizardStep(1));
@@ -369,15 +375,20 @@ const sessionManager = {
     workspaceNameInput?.addEventListener('keydown', event => {
       if (event.key !== 'Enter') return;
       event.preventDefault();
-      if (this.importModeEnabled || this.wizardStep === this.wizardStepCount) {
+      if (this.importModeEnabled || this.isFinalWizardStep()) {
         this.createFolder();
       } else {
-        this.goToWizardStep(this.wizardStep + 1);
+        this.goToWizardStep(this.nextWizardStep());
       }
     });
 
     // Agent behavior (formerly "Workspace preset"): a manual change marks the
     // value as overridden so picking a Template won't clobber it.
+    document.getElementById('workspaceCreatorKindChoice')?.addEventListener('change', event => {
+      const choice = event.target.closest('[name="workspace-creator-kind"]');
+      if (choice?.checked) this.switchWorkspaceCreatorKind(choice.value);
+    });
+
     document.getElementById('folderPresetSelect')?.addEventListener('change', () => {
       this.behaviorOverridden = true;
       this.invalidateGroupRequirementReview();
@@ -703,7 +714,21 @@ const sessionManager = {
       ).trim();
 
       const pendingBlueprint = String(addFolderModal.dataset.pendingBlueprint || '').trim();
+      const pendingOptions = this.pendingWorkspaceCreatorOptions || {};
 
+      if (!this.workspaceCreatorContext || !this.pendingWorkspaceCreatorOptions) {
+        this.beginWorkspaceCreatorContext({
+          ...pendingOptions,
+          importMode,
+          entryPoint: entryPoint || pendingOptions.entryPoint,
+          postCreateAction: postCreateAction || pendingOptions.postCreateAction,
+          mapOrigin:
+            String(addFolderModal.dataset.pendingMapOrigin || '') === 'true' ||
+            Boolean(pendingOptions.mapOrigin),
+          blueprint: pendingBlueprint || pendingOptions.blueprint
+        });
+      }
+      this.pendingWorkspaceCreatorOptions = null;
       this.resetAddWorkspaceModalForm({ preserveAskOri: true });
       this.importEntryPoint =
         entryPoint || (importMode ? 'workspace_hub_import' : 'workspace_hub_create');
@@ -749,6 +774,8 @@ const sessionManager = {
       // coordinate that a successful create already consumed is gone by now, so
       // this only ever clears an abandoned one.
       this.workspaceMapOrigin = false;
+      this.workspaceCreatorContext = null;
+      this.pendingWorkspaceCreatorOptions = null;
       if (window.OriWorkspaceMap && typeof window.OriWorkspaceMap.cancelBuild === 'function') {
         window.OriWorkspaceMap.cancelBuild();
       }
@@ -3875,9 +3902,9 @@ const sessionManager = {
 
   resetAddWorkspaceModalForm(options = {}) {
     const { preserveAskOri = false } = options;
-    // Every open starts on step 1; setImportModeEnabled(false) below re-renders
-    // the wizard chrome, and an import open flips it to the single-step layout.
-    this.wizardStep = 1;
+    // A Workspace starts at Blueprint; Group starts at Details. Import flips to
+    // its fixed Details-only layout immediately below.
+    this.wizardStep = this.isGroupCreator() ? 2 : 1;
     const modalElement = document.getElementById('addFolderModal');
     const nameInput = document.getElementById('folderNameInput');
     const descriptionInput = document.getElementById('folderDescriptionInput');
@@ -4300,7 +4327,7 @@ const sessionManager = {
 
   syncGroupRequirementParentControl() {
     const parent = document.getElementById('folderParentSelect');
-    const field = document.getElementById('workspaceOptionalParentField');
+    const field = document.getElementById('workspaceCreatorDestinationCard');
     if (!parent) return;
     const draft = this.groupRequirementDraft;
     const grouped = draft?.composition === 'grouped';
@@ -6858,8 +6885,17 @@ const sessionManager = {
   },
 
   refreshWorkspaceReview() {
-    this.syncGroupRequirementParentControl();
     const summary = document.getElementById('workspaceReviewSummary');
+    if (this.isGroupCreator()) {
+      if (summary) summary.innerHTML = this.renderOrdinaryGroupReceipt();
+      document.getElementById('workspaceReviewIssues')?.replaceChildren();
+      document.getElementById('workspaceReviewIssues')?.setAttribute('hidden', '');
+      document.getElementById('workspaceReviewReadiness')?.replaceChildren();
+      this.renderSetupPreview(null);
+      return;
+    }
+    document.getElementById('workspaceReviewIssues')?.removeAttribute('hidden');
+    this.syncGroupRequirementParentControl();
     const heading = document.getElementById('workspaceTeamHeading');
     const teamSummary = document.getElementById('workspaceTeamSummary');
     const selectedTemplate = window.ProjectTemplateCard?.getSelectedTemplate?.();
@@ -6893,6 +6929,43 @@ const sessionManager = {
     this.renderWorkspaceTeamRoster();
     this.renderBlueprintAgentSummary();
     window.SetupWorkspaceCreator?.refreshReview();
+  },
+
+  renderOrdinaryGroupReceipt() {
+    const name = String(document.getElementById('folderNameInput')?.value || '').trim();
+    const slug = name ? this.slugifyWorkspaceName(name) : '';
+    const parent = document.getElementById('folderParentSelect');
+    const parentName = parent?.value
+      ? String(parent.options?.[parent.selectedIndex]?.textContent || '').trim()
+      : 'Top level';
+    return `
+      <div class="workspace-review-card">
+        <div class="workspace-review-card-main">
+          <span class="workspace-review-card-label">Group</span>
+          <strong class="workspace-review-identity-name">${this.escapeHtml(name || 'Untitled group')}</strong>
+          ${slug ? `<span class="workspace-review-card-meta">Folder: ${this.escapeHtml(slug)}</span>` : ''}
+        </div>
+        <div class="workspace-review-card-actions">
+          <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="2">Edit</button>
+        </div>
+      </div>
+      <div class="workspace-review-card">
+        <div class="workspace-review-card-main">
+          <span class="workspace-review-card-label">What will be created</span>
+          <strong>One empty organizational group</strong>
+          <span class="workspace-review-card-note">No agents, project files, runtime setup, or Assistant Program membership will be created.</span>
+        </div>
+      </div>
+      <div class="workspace-review-card">
+        <div class="workspace-review-card-main">
+          <span class="workspace-review-card-label">Parent group</span>
+          <span class="workspace-review-card-meta">${this.escapeHtml(parentName)}</span>
+          <span class="workspace-review-card-note">Parentage organizes this group only; it does not grant program membership.</span>
+        </div>
+        <div class="workspace-review-card-actions">
+          <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="2">Edit</button>
+        </div>
+      </div>`;
   },
 
   renderBlankAgentlessChoice(view) {
@@ -7682,18 +7755,271 @@ const sessionManager = {
     hint.textContent = parts.join(' · ');
   },
 
-  // ----- Create-workspace wizard (Blueprint → Details → Team → Review) -----
+  // ----- Shared Workspace / Group creator -----
 
-  // Total Create-mode steps. Import mode is deliberately outside this state
-  // machine: it renders the Details layout only and never reaches Team/Review.
+  // These are the stable DOM step IDs. Visible order comes from the active
+  // operation context: a Workspace is 1→2→3→4, while an ordinary Group is
+  // deliberately 2→4. Import remains a fixed Details-only operation.
   wizardStepCount: 4,
+
+  creatorKind() {
+    return this.workspaceCreatorContext?.kind === 'group' ? 'group' : 'workspace';
+  },
+
+  isGroupCreator() {
+    return !this.importModeEnabled && this.creatorKind() === 'group';
+  },
+
+  isWorkspaceCreator() {
+    return !this.importModeEnabled && this.creatorKind() === 'workspace';
+  },
+
+  isOrdinaryGroupCreator() {
+    return (
+      this.isGroupCreator() &&
+      ['ordinary', 'selected-members'].includes(this.workspaceCreatorContext?.mode || 'ordinary')
+    );
+  },
+
+  ordinaryGroupPayload(values) {
+    const build = window.WorkspaceCreatorState?.buildOrdinaryGroupPayload;
+    if (typeof build === 'function') return build(values);
+    const payload = {
+      name: String(values?.name || '').trim(),
+      kind: 'group',
+      create_template_agents: false
+    };
+    for (const key of ['description', 'parent_id', 'color']) {
+      const value = String(values?.[key] || '').trim();
+      if (value) payload[key] = value;
+    }
+    return payload;
+  },
+
+  creatorWizardSteps() {
+    if (this.importModeEnabled) return [2];
+    return this.isGroupCreator() ? [2, 4] : [1, 2, 3, 4];
+  },
+
+  isFinalWizardStep() {
+    const steps = this.creatorWizardSteps();
+    return this.wizardStep === steps[steps.length - 1];
+  },
+
+  nextWizardStep() {
+    const steps = this.creatorWizardSteps();
+    const index = Math.max(0, steps.indexOf(this.wizardStep));
+    return steps[Math.min(index + 1, steps.length - 1)];
+  },
+
+  previousWizardStep() {
+    const steps = this.creatorWizardSteps();
+    const index = Math.max(0, steps.indexOf(this.wizardStep));
+    return steps[Math.max(index - 1, 0)];
+  },
+
+  captureWorkspaceCreatorDetailsDraft(kind = this.creatorKind()) {
+    const context = this.workspaceCreatorContext;
+    if (!context?.drafts) return;
+    const activeColor = document.querySelector('#addFolderModal .folder-color-btn.active');
+    context.drafts[kind] = {
+      ...context.drafts[kind],
+      name: String(document.getElementById('folderNameInput')?.value || ''),
+      description: String(document.getElementById('folderDescriptionInput')?.value || ''),
+      parent_id: String(document.getElementById('folderParentSelect')?.value || ''),
+      color: String(activeColor?.dataset?.color || '')
+    };
+  },
+
+  restoreWorkspaceCreatorDetailsDraft(kind = this.creatorKind()) {
+    const draft = this.workspaceCreatorContext?.drafts?.[kind] || {};
+    const name = document.getElementById('folderNameInput');
+    const description = document.getElementById('folderDescriptionInput');
+    const parent = document.getElementById('folderParentSelect');
+    if (name) name.value = String(draft.name || '');
+    if (description) description.value = String(draft.description || '');
+    if (parent) parent.value = String(draft.parent_id || '');
+    if (draft.color !== undefined) {
+      document.querySelectorAll('#addFolderModal .folder-color-btn').forEach(button => {
+        button.classList.toggle(
+          'active',
+          String(button.dataset.color || '') === String(draft.color)
+        );
+      });
+    }
+    this.updateWorkspaceNameHint();
+  },
+
+  switchWorkspaceCreatorKind(nextKind) {
+    const context = this.workspaceCreatorContext;
+    const api = window.WorkspaceCreatorState;
+    if (!context || !api?.switchCreatorKind) return false;
+    this.captureWorkspaceCreatorDetailsDraft(context.kind);
+    const switched = api.switchCreatorKind(context, nextKind);
+    if (!switched.changed) {
+      this.syncWorkspaceCreatorPresentation();
+      return false;
+    }
+    const nextContext = switched.context;
+    // A first switch carries the user's identity into the other mode, then the
+    // two drafts diverge. This retains deliberate text without reusing a
+    // Workspace-specific parent/team/review as Group consent.
+    const prior = context.drafts?.[context.kind] || {};
+    const nextDraft = nextContext.drafts?.[nextContext.kind] || {};
+    if (!nextDraft.name && prior.name) nextDraft.name = prior.name;
+    if (!nextDraft.description && prior.description) nextDraft.description = prior.description;
+    nextContext.drafts[nextContext.kind] = nextDraft;
+    this.workspaceCreatorContext = nextContext;
+    if (nextContext.kind === 'group') {
+      this.workspaceMapOrigin = false;
+      this.groupRequirementDraft = null;
+    } else {
+      // Returning to Workspace restores its existing blueprint/team draft but
+      // requires a fresh placement review; a Group switch never carries consent.
+      this.resetGroupRequirementDraft(this.workspaceTemplate);
+      this.renderWorkspaceGroupDestinationCard();
+      void this.refreshTemplateAgentPlan();
+    }
+    this.clearWorkspaceCreateError();
+    this.wizardStep = nextContext.kind === 'group' ? 2 : 1;
+    this.restoreWorkspaceCreatorDetailsDraft(nextContext.kind);
+    this.syncWorkspaceCreatorPresentation();
+    this.refreshWizardChrome();
+    document.getElementById(`wizardStep${this.wizardStep}Title`)?.focus();
+    return true;
+  },
+
+  syncWorkspaceCreatorPresentation() {
+    const context = this.workspaceCreatorContext;
+    const kind = this.creatorKind();
+    const fixedKind = context?.fixedKind || '';
+    const importMode = Boolean(this.importModeEnabled || context?.mode === 'import');
+    const workspaceChoice = document.getElementById('workspaceCreatorKindWorkspace');
+    const groupChoice = document.getElementById('workspaceCreatorKindGroup');
+    const kindChoice = document.getElementById('workspaceCreatorKindChoice');
+    const fixedNotice = document.getElementById('workspaceCreatorKindFixedNotice');
+    const title = document.getElementById('folderModalTitle');
+    const stepper = document.getElementById('wizardStepper');
+    const step2Title = document.getElementById('wizardStep2Title');
+    const step2Description = document.getElementById('wizardStep2Description');
+    const step4Title = document.getElementById('wizardStep4Title');
+    const step4Description = document.getElementById('wizardStep4Description');
+    const groupNotice = document.getElementById('workspaceGroupDetailsNotice');
+    const nameLabel = document.getElementById('folderNameLabel');
+    const nameInput = document.getElementById('folderNameInput');
+    const descriptionLabel = document.getElementById('folderDescriptionLabel');
+    const descriptionHelp = document.getElementById('folderDescriptionHelp');
+    const descriptionInput = document.getElementById('folderDescriptionInput');
+    const bootstrapFields = document.getElementById('workspaceBootstrapFields');
+    const destinationCard = document.getElementById('workspaceCreatorDestinationCard');
+    const parentLabel = document.getElementById('folderParentLabel');
+    const parentSelect = document.getElementById('folderParentSelect');
+    const parentHelp = document.getElementById('folderParentHelp');
+    const advanced = document.getElementById('folderAdvancedDisclosure');
+    const projectOpen = document.getElementById('projectTemplateOpenAfterCreate');
+    const groupDestination = document.getElementById('workspaceGroupDestinationCard');
+
+    if (workspaceChoice) {
+      workspaceChoice.checked = kind === 'workspace';
+      workspaceChoice.disabled = Boolean(fixedKind);
+    }
+    if (groupChoice) {
+      groupChoice.checked = kind === 'group';
+      groupChoice.disabled = Boolean(fixedKind);
+    }
+    if (kindChoice) kindChoice.setAttribute('aria-disabled', String(Boolean(fixedKind)));
+    if (fixedNotice) {
+      const copy = importMode
+        ? 'Import creates a Workspace. Group import is not available.'
+        : fixedKind === 'group'
+          ? 'This operation creates a Group and keeps that choice fixed.'
+          : fixedKind === 'workspace'
+            ? 'This operation creates a Workspace and keeps that choice fixed.'
+            : '';
+      fixedNotice.textContent = copy;
+      fixedNotice.hidden = !copy;
+    }
+    if (title && !this.importModeEnabled)
+      title.textContent = kind === 'group' ? 'Create Group' : 'Create Workspace';
+    if (stepper)
+      stepper.setAttribute(
+        'aria-label',
+        `Create ${kind === 'group' ? 'Group' : 'Workspace'} progress`
+      );
+    if (step2Title)
+      step2Title.textContent = kind === 'group' ? 'Group details' : 'Workspace details';
+    if (step2Description) {
+      step2Description.textContent =
+        kind === 'group'
+          ? 'Name the home for related workspaces. Groups start empty, without agents.'
+          : 'Name the space and add the context Ori should carry into its review.';
+    }
+    if (step4Title)
+      step4Title.textContent =
+        kind === 'group' ? 'Ready to create this group?' : 'Ready to create?';
+    if (step4Description) {
+      step4Description.textContent =
+        kind === 'group'
+          ? 'Check the group name and destination. It will be created empty, without agents.'
+          : 'Check the workspace, its team, and anything it will ask for after creation.';
+    }
+    const ordinaryGroup = kind === 'group' && !importMode;
+    if (groupNotice) groupNotice.hidden = !ordinaryGroup;
+    if (nameLabel) nameLabel.textContent = ordinaryGroup ? 'Group name' : 'Workspace name';
+    if (nameInput)
+      nameInput.placeholder = ordinaryGroup ? 'Name your group' : 'Name your workspace';
+    if (descriptionLabel) {
+      descriptionLabel.innerHTML = ordinaryGroup
+        ? 'Group description <span style="opacity: 0.8; font-weight: 400;">(optional)</span>'
+        : 'Workspace Description <span style="opacity: 0.8; font-weight: 400;">(optional)</span>';
+    }
+    if (descriptionHelp) {
+      descriptionHelp.textContent = ordinaryGroup
+        ? 'Describe the work this group will organize. It does not create a project or team.'
+        : 'Describe what this workspace is for so Ori can review the setup and recommend the right agents, MCPs, and skills.';
+    }
+    if (descriptionInput) {
+      descriptionInput.placeholder = ordinaryGroup
+        ? 'What related workspaces this group organizes'
+        : 'What this workspace is for and what Ori should help with';
+    }
+    if (bootstrapFields) bootstrapFields.hidden = ordinaryGroup;
+    if (destinationCard) destinationCard.hidden = importMode;
+    if (parentLabel) {
+      parentLabel.innerHTML = ordinaryGroup
+        ? 'Parent group <span style="opacity: 0.8; font-weight: 400;">(optional)</span>'
+        : 'Create in <span style="opacity: 0.8; font-weight: 400;">(optional)</span>';
+    }
+    if (parentSelect) {
+      parentSelect.setAttribute(
+        'aria-label',
+        ordinaryGroup
+          ? 'Select parent group for this group'
+          : 'Select parent group for this workspace'
+      );
+      if (parentSelect.options?.[0])
+        parentSelect.options[0].textContent = ordinaryGroup ? 'Top level' : 'No group';
+    }
+    if (parentHelp) {
+      parentHelp.textContent = ordinaryGroup
+        ? 'Optional. Nest this group inside another group. This does not grant Assistant Program membership.'
+        : 'Optional. Choose an organizational group for this workspace. This does not grant program membership.';
+    }
+    if (advanced) advanced.hidden = ordinaryGroup;
+    if (projectOpen && ordinaryGroup) projectOpen.hidden = true;
+    if (groupDestination && ordinaryGroup) groupDestination.hidden = true;
+  },
 
   // Renders the wizard chrome for the current mode + step. Import remains a
   // single-step workflow and never exposes Create-only progress or review UI.
   refreshWizardChrome() {
     const importMode = Boolean(this.importModeEnabled);
+    const visibleSteps = this.creatorWizardSteps();
     const step = importMode ? 2 : this.wizardStep;
+    const stepPosition = Math.max(0, visibleSteps.indexOf(step));
+    const finalStep = visibleSteps[visibleSteps.length - 1];
 
+    this.syncWorkspaceCreatorPresentation();
     const sections = [1, 2, 3, 4].map(index => document.getElementById(`wizardStep${index}`));
     const stepper = document.getElementById('wizardStepper');
     const backBtn = document.getElementById('wizardBackBtn');
@@ -7705,32 +8031,45 @@ const sessionManager = {
     sections.forEach((section, offset) => {
       if (!section) return;
       const sectionStep = offset + 1;
-      // Import mode shows only the Details layout; every Create-only step stays
-      // hidden so its controls are unreachable rather than merely off-screen.
-      section.hidden = sectionStep === 2 ? step !== 2 : importMode || step !== sectionStep;
+      // Every hidden section uses the actual hidden attribute so controls in
+      // Blueprint/Team cannot receive focus or act as Group validators.
+      section.hidden = sectionStep !== step || !visibleSteps.includes(sectionStep);
       section.setAttribute('aria-hidden', String(section.hidden));
     });
     if (stepper) {
       stepper.hidden = importMode;
       stepper.setAttribute('aria-hidden', String(importMode));
     }
-    stepper?.querySelectorAll('.workspace-create-step').forEach(el => {
-      const current = !importMode && String(el.dataset.step || '') === String(step);
-      el.classList.toggle('is-active', current);
-      if (current) el.setAttribute('aria-current', 'step');
-      else el.removeAttribute('aria-current');
+    stepper?.querySelectorAll('.workspace-create-step').forEach(element => {
+      const number = Number(element.dataset.step);
+      const visible = !importMode && visibleSteps.includes(number);
+      const current = visible && number === step;
+      element.hidden = !visible;
+      element.classList.toggle('is-active', current);
+      if (current) element.setAttribute('aria-current', 'step');
+      else element.removeAttribute('aria-current');
+    });
+    stepper?.querySelectorAll('[data-step-separator]').forEach(element => {
+      const after = Number(element.dataset.stepSeparator);
+      const index = visibleSteps.indexOf(after);
+      element.hidden = importMode || index < 0 || index === visibleSteps.length - 1;
+    });
+    document.querySelectorAll('[data-wizard-step-label]').forEach(element => {
+      const number = Number(element.dataset.wizardStepLabel);
+      const index = visibleSteps.indexOf(number);
+      if (index >= 0) element.textContent = `Step ${index + 1} of ${visibleSteps.length}`;
     });
 
-    const onStep1 = !importMode && step === 1;
-    const onFinalStep = !importMode && step === this.wizardStepCount;
+    const onFirstStep = !importMode && stepPosition === 0;
+    const onFinalStep = !importMode && step === finalStep;
     if (nextBtn) {
       nextBtn.hidden = importMode || onFinalStep;
-      // Continue through Blueprint and Details; the last hop names its target so
-      // the user knows the next screen confirms rather than configures.
-      nextBtn.textContent = step === 3 ? 'Review →' : 'Continue →';
-      nextBtn.disabled = step === 3 && this.hasBlockingTeamIssue();
+      // The last transition always names Review, regardless of whether Team is
+      // in this operation's sequence.
+      nextBtn.textContent = this.nextWizardStep() === finalStep ? 'Review →' : 'Continue →';
+      nextBtn.disabled = this.isWorkspaceCreator() && step === 3 && this.hasBlockingTeamIssue();
     }
-    if (backBtn) backBtn.hidden = importMode || onStep1;
+    if (backBtn) backBtn.hidden = importMode || onFirstStep;
     if (createBtn) {
       // The final create action exists only on Review (or in import mode).
       createBtn.hidden = !importMode && !onFinalStep;
@@ -7740,23 +8079,22 @@ const sessionManager = {
             ? 'Import HQ'
             : 'Import Folder'
           : this.workspaceCreateCtaLabel();
-        // A known blocker means no trustworthy request can be built yet, so the
-        // final action is unavailable until it is resolved. An unresolved
-        // blueprint dependency counts: the server would refuse the request, and
-        // offering Create anyway turns a knowable state into a failed attempt.
+        // Groups have no blueprint/team/project readiness dependency. Workspace
+        // blockers remain exactly as before.
         createBtn.disabled =
           !importMode &&
+          this.isWorkspaceCreator() &&
           (this.hasBlockingTeamIssue() ||
             this.blueprintSelectionBlocked() ||
             this.groupRequirementBlocked() ||
             window.SetupWorkspaceCreator?.canSubmit() === false);
       }
     }
-    if (onFinalStep) this.renderReviewReadiness();
-    // The step-2 recap names the chosen blueprint; import mode has no blueprint.
+    if (onFinalStep && this.isWorkspaceCreator()) this.renderReviewReadiness();
+    // The step-2 recap names a Workspace blueprint; Groups and Import have none.
     const recap = document.getElementById('wizardStep2Recap');
-    if (recap) recap.hidden = importMode;
-    if (!importMode && step === 3) {
+    if (recap) recap.hidden = importMode || this.isGroupCreator();
+    if (!importMode && this.isWorkspaceCreator() && step === 3) {
       this.refreshWorkspaceReview();
       // Assistant programs own one declaration-defined shared roster; attaching
       // an unrelated saved agent here would violate that stable identity.
@@ -7775,7 +8113,7 @@ const sessionManager = {
   // ad-hoc template folder, and import mode all report false: they depend on
   // nothing the catalog can fail to provide.
   blueprintSelectionBlocked() {
-    if (this.importModeEnabled) return false;
+    if (!this.isWorkspaceCreator()) return false;
     return Boolean(window.ProjectTemplateCard?.isSelectionBlocked?.());
   },
 
@@ -7783,6 +8121,7 @@ const sessionManager = {
   // valid create request. Advisory issues (an intentionally agent-less team, a
   // picker that failed to load) deliberately do not count.
   hasBlockingTeamIssue() {
+    if (!this.isWorkspaceCreator()) return false;
     const view = this.teamView();
     return Boolean(view && view.blockingIssues.length > 0);
   },
@@ -7803,6 +8142,7 @@ const sessionManager = {
     if (this.groupRequirementDraft?.review?.review_token) {
       return name ? `Confirm create “${name}”` : 'Confirm reviewed creation';
     }
+    if (this.isGroupCreator()) return name ? `Create group “${name}”` : 'Create Group';
     return name ? `Create “${name}”` : 'Create Workspace';
   },
 
@@ -7825,6 +8165,74 @@ const sessionManager = {
         );
       }
     }
+  },
+
+  async refreshWorkspaceSurfacesAfterOrdinaryGroupCreate() {
+    // The POST is durable independently of any screen that happens to be
+    // mounted. A rendering/refresh failure must never reclassify it as a failed
+    // group create or cause a duplicate POST.
+    for (const refresh of [
+      () => this.loadFolders(),
+      () => window.WorkspaceHub?.loadWorkspaces?.(),
+      () => window.OriHomeCockpit?.refreshQuietly?.()
+    ]) {
+      try {
+        await refresh();
+      } catch (error) {
+        console.warn('Group was created but a workspace surface did not refresh:', error);
+      }
+    }
+  },
+
+  openCreatedGroupTeamSurface(folder) {
+    const slug = String(folder?.folder_slug || '').trim();
+    if (!slug) return false;
+    window.location.href = `/workspaces/${encodeURIComponent(slug)}/assistant`;
+    return true;
+  },
+
+  showCreatedGroupFollowUp(folder) {
+    const name = String(folder?.name || 'Group').trim() || 'Group';
+    const slug = String(folder?.folder_slug || '').trim();
+    const options = slug
+      ? {
+          title: 'Group created',
+          duration: 9000,
+          action: {
+            label: 'Open group / Set up team',
+            onClick: () => this.openCreatedGroupTeamSurface(folder)
+          }
+        }
+      : { title: 'Group created' };
+    if (window.Toast?.success) {
+      window.Toast.success(`${name} is ready as an empty group.`, options);
+      return;
+    }
+    this.showToast(`${name} is ready as an empty group.`, 'success');
+  },
+
+  async finishOrdinaryGroupCreate(result, creatorContext, creatorGeneration) {
+    const folder = result?.folder || null;
+    const id = String(folder?.id || '').trim();
+    if (!id) {
+      throw new Error('Group creation response is incomplete; refresh before trying again.');
+    }
+    if (
+      this.workspaceCreatorContext === creatorContext &&
+      this.workspaceCreatorContext?.generation === creatorGeneration
+    ) {
+      this.workspaceCreatorContext.knownCreatedGroup = {
+        id,
+        folder_slug: String(folder?.folder_slug || '').trim()
+      };
+    }
+    await this.refreshWorkspaceSurfacesAfterOrdinaryGroupCreate();
+    const modalElement = document.getElementById('addFolderModal');
+    bootstrap.Modal.getInstance(modalElement)?.hide();
+    this.resetAddWorkspaceModalForm();
+    this.showCreatedGroupFollowUp(folder);
+    const onCreated = creatorContext?.onCreated;
+    if (typeof onCreated === 'function') onCreated({ folder, groupId: id, placed: [], failed: [] });
   },
 
   async placeCreatedWorkspaceInGroup(result, options = {}) {
@@ -8143,7 +8551,8 @@ const sessionManager = {
   // suggested slug.
   workspaceIdentityProblem() {
     const name = String(document.getElementById('folderNameInput')?.value || '').trim();
-    if (!name) return 'Workspace name is required';
+    const label = this.isGroupCreator() ? 'Group' : 'Workspace';
+    if (!name) return `${label} name is required`;
 
     const slug = this.slugifyWorkspaceName(name);
     const taken = (this.folders || []).some(
@@ -8153,7 +8562,7 @@ const sessionManager = {
           .toLowerCase() === slug
     );
     if (taken) {
-      return `Another workspace already uses the folder “${slug}”. Choose a different name.`;
+      return `Another ${label.toLowerCase()} already uses the folder “${slug}”. Choose a different name.`;
     }
     return '';
   },
@@ -8189,10 +8598,13 @@ const sessionManager = {
   // the top and moves focus to the new step heading — or, when a step's own
   // validation refuses the move, to the control that has to be fixed first.
   goToWizardStep(step) {
-    const targetStep = Math.max(
-      window.SetupWorkspaceCreator?.isActive() ? 2 : 1,
-      Math.min(this.wizardStepCount, Number(step) || 1)
-    );
+    const visibleSteps = this.creatorWizardSteps();
+    const requestedStep = Number(step) || visibleSteps[0];
+    // Callers that know only the old numeric step IDs still land on a visible
+    // Group step rather than reviving a hidden Blueprint/Team section.
+    const targetStep =
+      visibleSteps.find(candidate => candidate >= requestedStep) ||
+      visibleSteps[visibleSteps.length - 1];
     // Leaving Blueprint requires a blueprint that can actually produce a
     // workspace. A blueprint whose plugin is missing, disabled, or unusable
     // here would otherwise be carried silently through Details and Team, and
@@ -8201,7 +8613,7 @@ const sessionManager = {
     //
     // The blueprint stays selected either way: this refuses to move on, it does
     // not undo the choice.
-    if (!this.importModeEnabled && targetStep > 1 && this.wizardStep === 1) {
+    if (this.isWorkspaceCreator() && targetStep > 1 && this.wizardStep === 1) {
       if (this.blueprintSelectionBlocked()) {
         this.refreshWizardChrome();
         window.ProjectTemplateCard?.announceBlocked?.();
@@ -8212,7 +8624,7 @@ const sessionManager = {
     // Leaving Details requires a workspace name and a folder slug that isn't
     // already taken: without them neither the Team roster nor the Review receipt
     // can describe a workspace that could exist.
-    if (!this.importModeEnabled && targetStep >= 3) {
+    if (!this.importModeEnabled && visibleSteps.indexOf(targetStep) > visibleSteps.indexOf(2)) {
       const problem = this.workspaceIdentityProblem();
       if (problem) {
         this.wizardStep = 2;
@@ -8225,7 +8637,7 @@ const sessionManager = {
     // Team refuses to hand off to Review while the resulting roster cannot be
     // resolved: Review would otherwise present a receipt for a team nobody can
     // see, and Create would build a request the server will reject.
-    if (!this.importModeEnabled && targetStep > 3 && this.wizardStep === 3) {
+    if (this.isWorkspaceCreator() && targetStep > 3 && this.wizardStep === 3) {
       if (this.hasBlockingTeamIssue()) {
         this.refreshWizardChrome();
         const blockers = this.teamView()?.blockingIssues || [];
@@ -8265,7 +8677,7 @@ const sessionManager = {
     // A create failure belongs to the attempt that produced it. Leaving Review to
     // go and fix something ends that attempt, so the message does not linger and
     // become stale advice about a problem the user has already addressed.
-    if (this.wizardStep === this.wizardStepCount && targetStep !== this.wizardStepCount) {
+    if (this.isFinalWizardStep() && targetStep !== this.wizardStep) {
       this.clearWorkspaceCreateError();
     }
     this.wizardStep = targetStep;
@@ -8430,30 +8842,33 @@ const sessionManager = {
     const createBtn = document.getElementById('createFolderBtn');
     const importToggle = document.getElementById('folderImportToggle');
     const importPathInput = document.getElementById('folderImportPathInput');
-    const workspaceBootstrap = this.getWorkspaceBootstrapFromModal();
-
     const importEnabled = this.importModeEnabled || Boolean(importToggle?.checked);
+    const ordinaryGroup = !importEnabled && this.isOrdinaryGroupCreator();
+    const workspaceBootstrap = ordinaryGroup ? null : this.getWorkspaceBootstrapFromModal();
     // Snapshot the confirmed Team receipt before the final readiness refresh.
-    // Re-populating the blueprint catalog can emit a same-selection loading
-    // event while its fresh plan request is in flight; that must not erase the
-    // roster the user just reviewed.
-    const confirmedTeamView = importEnabled ? null : this.teamView();
+    // Group creation intentionally has no Team payload or Team prerequisite.
+    const confirmedTeamView = importEnabled || ordinaryGroup ? null : this.teamView();
     const confirmedTeamPayload = confirmedTeamView?.payload || {};
     const assistantRosterAlreadyHired = Boolean(confirmedTeamView?.assistantProgram?.existingHired);
     const openProjectAfterCreate = Boolean(
-      !importEnabled && window.ProjectTemplateCard?.shouldOpenAfterCreate?.()
+      !importEnabled && !ordinaryGroup && window.ProjectTemplateCard?.shouldOpenAfterCreate?.()
     );
     const importPath = importPathInput?.value?.trim() || '';
     const name = nameInput?.value.trim() || '';
     const description = descriptionInput?.value.trim() || '';
     if (!name && !importEnabled) {
-      // Inline error on the field (which is now the first thing on step 1) rather
-      // than a toast that fires only after the user reaches the end.
-      this.setWorkspaceNameError('Workspace name is required');
+      // Inline error belongs to Details, rather than a transient toast.
+      this.setWorkspaceNameError(
+        ordinaryGroup ? 'Group name is required' : 'Workspace name is required'
+      );
       nameInput?.focus();
       return;
     }
-    if (!importEnabled && (!confirmedTeamView || !confirmedTeamView.canContinueFromTeam)) {
+    if (
+      !importEnabled &&
+      !ordinaryGroup &&
+      (!confirmedTeamView || !confirmedTeamView.canContinueFromTeam)
+    ) {
       this.goToWizardStep(3);
       this.refreshWorkspaceReview();
       const blocking = this.teamView()?.blockingIssues[0];
@@ -8463,7 +8878,7 @@ const sessionManager = {
         document.querySelector('#workspaceTeamIssues .workspace-team-issue.is-blocking')?.focus();
       return;
     }
-    if (!importEnabled) {
+    if (!importEnabled && !ordinaryGroup) {
       // Re-read the blueprint's dependency state immediately before creating.
       // The catalog on screen can be minutes old, and a plugin disabled in
       // another tab would otherwise turn a considered Create into a server
@@ -8490,6 +8905,9 @@ const sessionManager = {
     // A fresh attempt starts without the previous attempt's failure on screen.
     this.clearWorkspaceCreateError();
     this.isCreatingFolder = true;
+    const creatorContext = this.workspaceCreatorContext;
+    const creatorGeneration = creatorContext?.generation || 0;
+    if (creatorContext) creatorContext.submitting = true;
     window.SetupWorkspaceCreator?.setSubmitting(true);
     if (createBtn) {
       createBtn.disabled = true;
@@ -8497,13 +8915,20 @@ const sessionManager = {
     }
 
     try {
-      const payload = {
-        name,
-        description,
-        parent_id: parentId,
-        color
-      };
-      if (workspaceBootstrap.hasAny) {
+      const payload = ordinaryGroup
+        ? this.ordinaryGroupPayload({
+            name,
+            description,
+            parent_id: parentId,
+            color
+          })
+        : {
+            name,
+            description,
+            parent_id: parentId,
+            color
+          };
+      if (!ordinaryGroup && workspaceBootstrap.hasAny) {
         payload.workspace_bootstrap = {
           goal: workspaceBootstrap.description || workspaceBootstrap.goal,
           systems: workspaceBootstrap.systems,
@@ -8513,8 +8938,10 @@ const sessionManager = {
       // Agent behavior profile (mapped from the Starting point or manually
       // overridden). Sent for both create and import; the backend maps it via
       // workspacesettings.ProfileDefaults.
-      payload.workspace_preset =
-        document.getElementById('folderPresetSelect')?.value?.trim() || 'general';
+      if (!ordinaryGroup) {
+        payload.workspace_preset =
+          document.getElementById('folderPresetSelect')?.value?.trim() || 'general';
+      }
       const buildSlugConflictMessage = conflict => {
         const requestedSlug =
           typeof conflict?.requested_slug === 'string' ? conflict.requested_slug.trim() : '';
@@ -8525,8 +8952,9 @@ const sessionManager = {
             ? conflict.location.trim().replace(/[\\/]+$/, '')
             : '';
         const suggestedPath = location && suggestedSlug ? `${location}/${suggestedSlug}` : '';
+        const item = ordinaryGroup ? 'group' : 'workspace';
         const parts = [
-          `A workspace folder named "${requestedSlug || 'this workspace'}" already exists on disk.`
+          `A ${item} folder named "${requestedSlug || `this ${item}`}" already exists on disk.`
         ];
         if (suggestedSlug) {
           parts.push(`Create this workspace with the folder name "${suggestedSlug}" instead?`);
@@ -8543,7 +8971,7 @@ const sessionManager = {
         payload.path = importPath;
         payload.allow_duplicate = Boolean(this.importAllowDuplicate);
         payload.entry_point = this.importEntryPoint || 'workspace_hub_create';
-      } else {
+      } else if (!ordinaryGroup) {
         if (window.ProjectTemplateCard) {
           // Optional project scaffolding from the template picker
           // (template_id/template_path). The scaffolded project folder name
@@ -8609,6 +9037,7 @@ const sessionManager = {
 
       const requestsMapPlacement =
         !importEnabled &&
+        !ordinaryGroup &&
         !placement &&
         this.workspaceMapOrigin &&
         !window.SetupWorkspaceCreator?.isActive?.();
@@ -8622,7 +9051,7 @@ const sessionManager = {
         payload.parent_id = pendingMapBuild.group.id;
       }
       let groupRequirementReady = true;
-      if (!importEnabled && this.groupRequirementDraft) {
+      if (!importEnabled && !ordinaryGroup && this.groupRequirementDraft) {
         if (this.groupRequirementBlocked()) {
           this.showWorkspaceCreateError('Choose grouped or standalone placement before creating.');
           return;
@@ -8854,8 +9283,15 @@ const sessionManager = {
       if (!response.ok || result.error) {
         const fallbackMessage = importEnabled
           ? 'Failed to import folder as workspace'
-          : 'Failed to create workspace';
+          : ordinaryGroup
+            ? 'Failed to create group'
+            : 'Failed to create workspace';
         throw new Error(result.error || fallbackMessage);
+      }
+
+      if (ordinaryGroup) {
+        await this.finishOrdinaryGroupCreate(result, creatorContext, creatorGeneration);
+        return;
       }
 
       const teamSuccessParts = importEnabled
@@ -9193,13 +9629,24 @@ const sessionManager = {
       }
     } catch (error) {
       console.error('Failed to create folder:', error);
-      const message = error && error.message ? error.message : 'Failed to create workspace';
+      const message =
+        error && error.message
+          ? error.message
+          : ordinaryGroup
+            ? 'Failed to create group'
+            : 'Failed to create workspace';
       this.showToast(message, 'error');
       // The modal stays open and the draft is untouched, so the user can fix the
       // problem and resubmit rather than rebuilding the team from scratch.
       if (!importEnabled) this.showWorkspaceCreateError(message);
     } finally {
       this.isCreatingFolder = false;
+      if (
+        this.workspaceCreatorContext === creatorContext &&
+        this.workspaceCreatorContext?.generation === creatorGeneration
+      ) {
+        this.workspaceCreatorContext.submitting = false;
+      }
       window.SetupWorkspaceCreator?.setSubmitting(false);
       if (createBtn) {
         createBtn.disabled = window.SetupWorkspaceCreator?.canSubmit() === false;
@@ -9971,15 +10418,55 @@ const sessionManager = {
     modal.show();
   },
 
+  // Creates a fresh, generation-fenced operation context before Bootstrap
+  // shows the one shared dialog. Direct data-attribute launchers pass through
+  // the same show listener with no options and retain the Workspace default.
+  beginWorkspaceCreatorContext(options = {}) {
+    this.workspaceCreatorGeneration += 1;
+    const contextOptions = {
+      ...options,
+      generation: this.workspaceCreatorGeneration,
+      invoker: options.invoker || document.activeElement || null
+    };
+    const api = window.WorkspaceCreatorState;
+    this.workspaceCreatorContext = api?.createCreatorContext
+      ? api.createCreatorContext(contextOptions)
+      : {
+          generation: contextOptions.generation,
+          mode: contextOptions.importMode ? 'import' : 'ordinary',
+          kind: contextOptions.importMode ? 'workspace' : 'workspace',
+          fixedKind: contextOptions.importMode ? 'workspace' : '',
+          entryPoint: String(contextOptions.entryPoint || ''),
+          blueprint: String(contextOptions.blueprint || ''),
+          postCreateAction: String(contextOptions.postCreateAction || ''),
+          mapOrigin: Boolean(contextOptions.mapOrigin),
+          selection: null,
+          onCreated:
+            typeof contextOptions.onCreated === 'function' ? contextOptions.onCreated : null,
+          drafts: { workspace: {}, group: {} },
+          review: null,
+          submitting: false,
+          knownCreatedGroup: null
+        };
+    return this.workspaceCreatorContext;
+  },
+
   // Show add folder modal
   showAddWorkspaceModal(options = {}) {
     const modalElement = document.getElementById('addFolderModal');
     if (!modalElement) return;
 
+    const contextOptions = {
+      ...options,
+      entryPoint:
+        options.entryPoint ||
+        (options.importMode ? 'workspace_hub_import' : 'workspace_hub_create'),
+      invoker: options.invoker || document.activeElement
+    };
+    this.pendingWorkspaceCreatorOptions = contextOptions;
+    this.beginWorkspaceCreatorContext(contextOptions);
     modalElement.dataset.pendingImportMode = options.importMode ? 'true' : 'false';
-    modalElement.dataset.pendingEntryPoint = String(
-      options.entryPoint || (options.importMode ? 'workspace_hub_import' : 'workspace_hub_create')
-    );
+    modalElement.dataset.pendingEntryPoint = String(contextOptions.entryPoint);
     // Map-origin creation (#292 FR-51). The Workspace Map holds the coordinate
     // the user chose; this flag only records that the create came from there, so
     // a successful create returns to the map instead of navigating into the new
