@@ -48,6 +48,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/personalhqhttp"
+	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginworkspace"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
@@ -576,10 +577,15 @@ func (b *ServerBuilder) initializeHandlers() {
 		"durable": b.sessionStore != nil,
 	})
 
-	// Initialize skills manager and handler (local + external)
+	// Initialize skills manager and handler (local + external).
+	//
+	// The personal skills root is resolved through plugin.DefaultPersonalSkillsRoot
+	// rather than composed here, because staged reset must resolve the very same
+	// location independently at the pre-store boundary. Two copies of this join
+	// would let a divergence delete, or fail to delete, the wrong directory.
 	personalSkillsDir := ""
-	if homeDir, err := os.UserHomeDir(); err == nil {
-		personalSkillsDir = filepath.Join(homeDir, ".agents", "skills")
+	if resolved, err := plugin.DefaultPersonalSkillsRoot(); err == nil {
+		personalSkillsDir = resolved
 	}
 	b.skillsManager = skills.NewManager(skills.ManagerConfig{
 		AgentStorePath:    b.agentStorePath,

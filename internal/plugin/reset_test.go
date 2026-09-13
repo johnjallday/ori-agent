@@ -68,12 +68,12 @@ func (h *resetHarness) writeRegistry(records ...InstalledPlugin) {
 	if err != nil {
 		h.t.Fatalf("encode registry: %v", err)
 	}
-	h.write(h.paths.registryPath(), string(data))
+	h.write(h.paths.RegistryPath(), string(data))
 }
 
 func (h *resetHarness) writeRawRegistry(content string) {
 	h.t.Helper()
-	h.write(h.paths.registryPath(), content)
+	h.write(h.paths.RegistryPath(), content)
 }
 
 func (h *resetHarness) writeMCPRegistry(names ...string) {
@@ -414,7 +414,7 @@ func TestInspectResetBlocksUnreadableRegistries(t *testing.T) {
 	})
 	t.Run("directory in place of the registry", func(t *testing.T) {
 		h := newResetHarness(t)
-		if err := os.MkdirAll(h.paths.registryPath(), 0o750); err != nil {
+		if err := os.MkdirAll(h.paths.RegistryPath(), 0o750); err != nil {
 			t.Fatalf("create directory: %v", err)
 		}
 		_, problems := InspectReset(h.paths)
@@ -495,7 +495,7 @@ func TestRemoveResetItemRemovesExactlyItsOwnComponents(t *testing.T) {
 		t.Fatalf("unrelated MCP registrations were not preserved exactly: %v", names)
 	}
 
-	remaining, _, err := readResetRegistry(h.paths.registryPath())
+	remaining, _, err := readResetRegistry(h.paths.RegistryPath())
 	if err != nil {
 		t.Fatalf("read registry: %v", err)
 	}
@@ -535,7 +535,7 @@ func TestResetItemRemovedRejectsRegistryAbsenceAlone(t *testing.T) {
 	item := inventory.Items[0]
 	// Drop only the registry row, exactly as a hand-edited or partially applied
 	// installation would. The external skill copy still exists.
-	if err := deleteResetRecord(h.paths.registryPath(), item.Name); err != nil {
+	if err := deleteResetRecord(h.paths.RegistryPath(), item.Name); err != nil {
 		t.Fatalf("delete record: %v", err)
 	}
 	removed, err := ResetItemRemoved(h.paths, item)
@@ -549,11 +549,11 @@ func TestResetItemRemovedRejectsRegistryAbsenceAlone(t *testing.T) {
 
 func TestRemoveResetPreviewCacheKeepsOwnedRoot(t *testing.T) {
 	h := newResetHarness(t)
-	h.write(filepath.Join(h.paths.previewRoot(), "harness-alpha-repo", "plugin.json"), "{}")
+	h.write(filepath.Join(h.paths.PreviewRoot(), "harness-alpha-repo", "plugin.json"), "{}")
 	if err := RemoveResetPreviewCache(h.paths); err != nil {
 		t.Fatalf("remove preview cache: %v", err)
 	}
-	if h.exists(h.paths.previewRoot()) {
+	if h.exists(h.paths.PreviewRoot()) {
 		t.Fatal("preview cache was not removed")
 	}
 	if !h.exists(h.paths.PluginsDir) {

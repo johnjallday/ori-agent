@@ -17,6 +17,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
+	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/sessionfiles"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -49,15 +50,19 @@ type FreshTarget struct {
 }
 
 type Owners struct {
-	DataDir        string
-	Config         *config.Manager
-	Agents         store.Store
-	Setup          *onboarding.Manager
-	Database       *database.DB
-	Uploads        *sessionfiles.Store
-	Workspaces     *workspace.FileStore
-	Allowlist      *workspace.Allowlist
-	Vaults         *vault.Store
+	DataDir    string
+	Config     *config.Manager
+	Agents     store.Store
+	Setup      *onboarding.Manager
+	Database   *database.DB
+	Uploads    *sessionfiles.Store
+	Workspaces *workspace.FileStore
+	Allowlist  *workspace.Allowlist
+	Vaults     *vault.Store
+	// PluginPaths are the owner-resolved installed-plugin locations. A zero value
+	// is an unavailable owner and produces a blocker; no layout is ever guessed
+	// and no live plugin manager is constructed for inspection.
+	PluginPaths    plugin.ResetPaths
 	FreshTargets   []FreshTarget
 	FreshBlockers  []Blocker
 	CheckFresh     func(context.Context) []Blocker
@@ -92,6 +97,10 @@ type resolvedEvidence struct {
 	DatabaseSchema         string            `json:"database_schema"`
 	DatabaseSchemaVersion  int               `json:"database_schema_version"`
 	WorkspaceRootConfirmed bool              `json:"workspace_root_confirmed"`
+	// Plugins is additive and omitted whenever the reviewed scope owns no
+	// installed plugin, so receipts written before plugin reset existed keep
+	// their canonical bytes and their original recovery semantics.
+	Plugins *pluginEvidence `json:"plugins,omitempty"`
 }
 
 type resolvedPlan struct {
@@ -296,6 +305,7 @@ func (p *Planner) inspect(ctx context.Context, intent Intent, selected []Categor
 		}
 		protectedDigests = append(protectedDigests, protectedDigest{Path: path, Digest: digest})
 	}
+	var plugins *pluginEvidence
 	for _, id := range selected {
 		def, _ := definition(id)
 		category := CategoryPreview{ID: id, Label: def.Label, Description: def.Description, Facts: []CountFact{}, Removed: []Location{}, Retained: []Location{}}
@@ -328,7 +338,11 @@ func (p *Planner) inspect(ctx context.Context, intent Intent, selected []Categor
 				}
 			}
 		}
-		inspectCategory(ctx, owners, id, &category, report, target, block)
+		if id == CategoryInstalledPlugins {
+			plugins = inspectPlugins(ctx, owners, &category, target, block)
+		} else {
+			inspectCategory(ctx, owners, id, &category, report, target, block)
+		}
 		view.Categories = append(view.Categories, category)
 	}
 	if slices.Contains(selected, CategoryAppRecords) && os.Getenv("WORKSPACE_DIR") != "" {
@@ -348,7 +362,12 @@ func (p *Planner) inspect(ctx context.Context, intent Intent, selected []Categor
 		DatabasePath  string
 		RootConfirmed bool
 		Blockers      []Blocker
-	}{SchemaVersion, intent, selected, root, plan.Targets, protectedDigests, report.SchemaDigest, report.Version, databasePath, rootConfirmed, view.Blockers}
+		// The registry digest, every plugin identity/generation/component, the
+		// managed-versus-linked disposition, and both external owner roots are
+		// bound here, so installing, updating, or removing any plugin after the
+		// review invalidates the confirmation.
+		Plugins *pluginEvidence
+	}{SchemaVersion, intent, selected, root, plan.Targets, protectedDigests, report.SchemaDigest, report.Version, databasePath, rootConfirmed, view.Blockers, plugins}
 	data, err := json.Marshal(binding)
 	if err != nil {
 		return resolvedPlan{}, err
@@ -363,6 +382,7 @@ func (p *Planner) inspect(ctx context.Context, intent Intent, selected []Categor
 		DatabaseSchema:         report.SchemaDigest,
 		DatabaseSchemaVersion:  report.Version,
 		WorkspaceRootConfirmed: rootConfirmed,
+		Plugins:                plugins,
 	}
 	digest := sha256.Sum256(data)
 	view.ScopeDigest = hex.EncodeToString(digest[:])
@@ -545,6 +565,7 @@ func countFreshTarget(ctx context.Context, path string) *int64 {
 func directoryTarget(kind string) bool {
 	return slices.Contains([]string{
 		"agent_profiles", "owned_uploads", "plugin_clones", "plugin_state", "plugin_artifacts", "plugin_preview",
+		"plugin_surface_state", "plugin_managed_artifacts", "plugin_managed_clones", "plugin_preview_state",
 		"project_templates", "post_reset_project_templates", "workflow_templates", "usage_records", "activity_logs", "cli_event_logs", "cli_mcp_configs",
 	}, kind)
 }

@@ -87,10 +87,51 @@ func DefaultResetPaths(dataDir, skillsRoot string) ResetPaths {
 	}
 }
 
-func (p ResetPaths) registryPath() string  { return filepath.Join(p.PluginsDir, "installed.json") }
-func (p ResetPaths) stateRoot() string     { return filepath.Join(p.PluginsDir, "state") }
-func (p ResetPaths) artifactsRoot() string { return filepath.Join(p.PluginsDir, "artifacts") }
-func (p ResetPaths) previewRoot() string   { return filepath.Join(p.PluginsDir, "preview") }
+func (p ResetPaths) RegistryPath() string  { return filepath.Join(p.PluginsDir, "installed.json") }
+func (p ResetPaths) StateRoot() string     { return filepath.Join(p.PluginsDir, "state") }
+func (p ResetPaths) ArtifactsRoot() string { return filepath.Join(p.PluginsDir, "artifacts") }
+func (p ResetPaths) PreviewRoot() string   { return filepath.Join(p.PluginsDir, "preview") }
+
+// MarketplacesPath is never a reset target. Selected plugin reset preserves it
+// and verifies that it is unchanged; only Start Fresh removes it under its own
+// broader integration policy.
+func (p ResetPaths) MarketplacesPath() string {
+	return filepath.Join(p.PluginsDir, "marketplaces.json")
+}
+
+// Resolved reports whether these roots are usable at all.
+func (p ResetPaths) Resolved() bool { return p.validate() == nil }
+
+// DefaultPersonalSkillsRoot resolves the shared skills directory plugins copy
+// their skills into. It is the one location outside the Ori installation that
+// plugin reset touches, so both the live handler wiring and the independent
+// pre-store recovery resolver must derive it here rather than each guessing.
+func DefaultPersonalSkillsRoot() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".agents", "skills"), nil
+}
+
+// ResetStateNamespace reports the managed directory name that holds a plugin's
+// host-owned namespaced Workspace Surface state. Tests and fixtures use it so
+// the layout is stated in exactly one place.
+func ResetStateNamespace(pluginID string) string {
+	digest := sha256.Sum256([]byte(pluginID))
+	return hex.EncodeToString(digest[:])
+}
+
+// ValidResetName reports whether a recorded plugin or skill name is a plain,
+// visible, single path component. Callers outside this package use it to
+// validate persisted reset evidence before it can address a location.
+func ValidResetName(name string) bool { return validResetSegment(name) }
+
+// ValidResetServerName reports whether a recorded MCP registration is namespaced
+// to the plugin that claims it, which is what registration always produces.
+func ValidResetServerName(pluginName, server string) bool {
+	return validResetServerName(pluginName, server)
+}
 
 func (p ResetPaths) validate() error {
 	for _, path := range []string{p.PluginsDir, p.CloneDir, p.SkillsRoot, p.MCPRegistry} {
@@ -150,7 +191,7 @@ func InspectReset(paths ResetPaths) (ResetInventory, []ResetProblem) {
 	if err := paths.validate(); err != nil {
 		return inventory, []ResetProblem{{Code: ResetProblemOwnerUnavailable, Detail: "plugin reset roots are unresolved"}}
 	}
-	inventory.RegistryPath = paths.registryPath()
+	inventory.RegistryPath = paths.RegistryPath()
 	inventory.SkillsRoot = paths.SkillsRoot
 
 	records, digest, err := readResetRegistry(inventory.RegistryPath)
@@ -278,11 +319,11 @@ func RemoveResetItem(paths ResetPaths, item ResetItem) error {
 	// root are different directories under the same managed root. Both belong to
 	// this plugin and neither is reachable by name alone without validation.
 	for _, directory := range resetStateDirectories(paths, item.Name) {
-		if err := removeResetTree(paths.stateRoot(), directory); err != nil {
+		if err := removeResetTree(paths.StateRoot(), directory); err != nil {
 			return err
 		}
 	}
-	if err := removeResetTree(paths.artifactsRoot(), filepath.Join(paths.artifactsRoot(), item.Name)); err != nil {
+	if err := removeResetTree(paths.ArtifactsRoot(), filepath.Join(paths.ArtifactsRoot(), item.Name)); err != nil {
 		return err
 	}
 	if item.Managed {
@@ -304,7 +345,7 @@ func RemoveResetItem(paths ResetPaths, item ResetItem) error {
 			return err
 		}
 	}
-	return deleteResetRecord(paths.registryPath(), item.Name)
+	return deleteResetRecord(paths.RegistryPath(), item.Name)
 }
 
 // validateResetItem rejects any evidence that could name a location outside an
@@ -344,7 +385,7 @@ func ResetItemRemoved(paths ResetPaths, item ResetItem) (bool, error) {
 	if err := validateResetItem(paths, item); err != nil {
 		return false, err
 	}
-	records, _, err := readResetRegistry(paths.registryPath())
+	records, _, err := readResetRegistry(paths.RegistryPath())
 	if err != nil {
 		return false, err
 	}
@@ -358,7 +399,7 @@ func ResetItemRemoved(paths ResetPaths, item ResetItem) (bool, error) {
 			return false, err
 		}
 	}
-	if exists, err := resetPathExists(filepath.Join(paths.artifactsRoot(), item.Name)); err != nil || exists {
+	if exists, err := resetPathExists(filepath.Join(paths.ArtifactsRoot(), item.Name)); err != nil || exists {
 		return false, err
 	}
 	if item.Managed && item.InstallRoot != "" {
@@ -397,7 +438,7 @@ func RemoveResetPreviewCache(paths ResetPaths) error {
 	if err := paths.validate(); err != nil {
 		return err
 	}
-	return removeResetTree(paths.PluginsDir, paths.previewRoot())
+	return removeResetTree(paths.PluginsDir, paths.PreviewRoot())
 }
 
 // ResetRegistryEmpty reports whether the installed registry lists no plugin.
@@ -405,7 +446,7 @@ func ResetRegistryEmpty(paths ResetPaths) (bool, error) {
 	if err := paths.validate(); err != nil {
 		return false, err
 	}
-	records, _, err := readResetRegistry(paths.registryPath())
+	records, _, err := readResetRegistry(paths.RegistryPath())
 	if err != nil {
 		return false, err
 	}
@@ -416,10 +457,9 @@ func ResetRegistryEmpty(paths ResetPaths) (bool, error) {
 // plugin: the hashed host-owned key/value namespace and the plugin service's own
 // data root, which the Workspace Surface context addresses by raw plugin id.
 func resetStateDirectories(paths ResetPaths, name string) []string {
-	root := paths.stateRoot()
-	digest := sha256.Sum256([]byte(name))
+	root := paths.StateRoot()
 	return []string{
-		filepath.Join(root, hex.EncodeToString(digest[:])),
+		filepath.Join(root, ResetStateNamespace(name)),
 		filepath.Join(root, name),
 	}
 }
@@ -565,14 +605,81 @@ func readResetRegistry(path string) ([]InstalledPlugin, string, error) {
 	return records, resetDigest(data), nil
 }
 
-// deleteResetRecord removes one record and rewrites the registry through the
-// existing store so the persisted format stays identical to what install writes.
+// deleteResetRecord removes one record and rewrites the registry.
+//
+// The encoding matches Store.save byte-for-byte so the file install and
+// uninstall write is the file reset leaves behind. The write itself is atomic
+// and fsynced, which Store.save is not: recovery runs before any store exists
+// to repair a torn registry, and the registry is the ownership authority a
+// retry depends on.
 func deleteResetRecord(path, name string) error {
-	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
-	store := &Store{path: path}
-	return store.Delete(name)
+	if err != nil {
+		return err
+	}
+	records, _, err := readResetRegistry(path)
+	if err != nil {
+		return err
+	}
+	remaining := make([]InstalledPlugin, 0, len(records))
+	for _, record := range records {
+		if record.Name != name {
+			remaining = append(remaining, record)
+		}
+	}
+	if len(remaining) == len(records) {
+		return nil
+	}
+	data, err := json.MarshalIndent(remaining, "", "  ")
+	if err != nil {
+		return fmt.Errorf("plugin: encode installed registry: %w", err)
+	}
+	return writeResetFileAtomic(path, data, info.Mode().Perm())
+}
+
+func writeResetFileAtomic(path string, data []byte, mode os.FileMode) error {
+	if mode == 0 {
+		mode = 0o600
+	}
+	directory := filepath.Dir(path)
+	temp, err := os.CreateTemp(directory, ".installed-*.tmp")
+	if err != nil {
+		return err
+	}
+	tempPath := temp.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(tempPath)
+		}
+	}()
+	if err := temp.Chmod(mode); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if _, err := temp.Write(data); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		return err
+	}
+	committed = true
+	parent, err := os.Open(directory) // #nosec G304 -- parent of the canonical managed registry
+	if err != nil {
+		return err
+	}
+	return errors.Join(parent.Sync(), parent.Close())
 }
 
 func resetDigest(data []byte) string {

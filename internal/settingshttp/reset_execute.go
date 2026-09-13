@@ -165,6 +165,8 @@ func operationResponse(op settingsreset.Operation) ResetResponse {
 			response.ResetItems = append(response.ResetItems, "sessions")
 		case settingsreset.CategorySetupSteps:
 			response.ResetItems = append(response.ResetItems, "onboarding")
+		case settingsreset.CategoryInstalledPlugins:
+			response.ResetItems = append(response.ResetItems, "installed_plugins")
 		}
 	}
 	return response

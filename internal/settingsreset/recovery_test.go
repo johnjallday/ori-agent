@@ -368,7 +368,7 @@ func TestStartFreshAppliesEveryEnumeratedOwnerAndPreservesProtectedBytes(t *test
 	mustPreview(t, err)
 	privateJournal, err := decodeJournal(receipt)
 	mustPreview(t, err)
-	if _, _, err := validateRecoveryScope(t.Context(), coordinator.lease, privateJournal, RecoveryOptions{DataDir: root, SecretStore: f.Secrets()}); err != nil {
+	if _, _, _, err := validateRecoveryScope(t.Context(), coordinator.lease, privateJournal, RecoveryOptions{DataDir: root, SecretStore: f.Secrets()}); err != nil {
 		expected, _ := independentlyResolvedTargets(root)
 		for _, target := range privateJournal.Plan.Targets {
 			if expected[target.Kind] != target.Path {

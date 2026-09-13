@@ -27,6 +27,8 @@ func definition(id CategoryID) (Definition, bool) {
 		return Definition{id, "Conversation & app records", "The shared database includes messages, profiles/HQ, notes, plans, jobs, reviews, assistant state and vault registrations, not just chat. Detach workspaces and vaults; keep their backing files and encryption material. Remove only owned uploads, never linked external documents.", []string{"app_records_default", "registrations_detached", "automatic_reattachment_disabled", "retained_files_usable"}}, true
 	case CategorySetupSteps:
 		return Definition{id, "Setup steps", "Reset only setup completion and steps through the onboarding owner. Keep names/profile, agents, workspaces, history, credentials and quest progress.", []string{"setup_incomplete", "identity_and_progress_unchanged"}}, true
+	case CategoryInstalledPlugins:
+		return Definition{id, "Installed plugins", "Uninstall every plugin this Ori installation has installed: its registry record, namespaced MCP registrations, copied personal skills, Workspace Surface state and sessions, managed clones and downloaded artifacts. Keep marketplace registrations, linked source folders, unrelated personal skills and MCP servers, workspace files/history/plugin bindings, credentials and external authentication. Plugin-backed workspace data stays readable with its provider shown as unavailable.", []string{"installed_plugins_absent", "plugin_components_absent", "unrelated_integrations_preserved"}}, true
 	case CategoryIdentityProgress:
 		return Definition{id, "Identity, setup & progress", "Return Ori's app-state identity, profile, setup, assistant evolution, Getting Started progress and app preferences to canonical first-run values.", []string{"first_run_state_default"}}, true
 	case CategoryAppConfiguration:
@@ -57,15 +59,23 @@ func Selection(intent Intent, categories []CategoryID) ([]CategoryID, error) {
 			CategoryTemplates, CategoryActivity, CategoryRuntimeCache,
 		}, nil
 	}
-	if intent != IntentSelectedData || len(categories) == 0 || len(categories) > 4 {
+	if intent != IntentSelectedData || len(categories) == 0 || len(categories) > len(selectableCategories) {
 		return nil, ErrInvalidSelection
 	}
 	selected := slices.Clone(categories)
 	slices.Sort(selected)
 	for i, id := range selected {
-		if _, ok := definition(id); !ok || !slices.Contains([]CategoryID{CategorySettings, CategoryAgents, CategoryAppRecords, CategorySetupSteps}, id) || (i > 0 && selected[i-1] == id) {
+		if _, ok := definition(id); !ok || !slices.Contains(selectableCategories, id) || (i > 0 && selected[i-1] == id) {
 			return nil, ErrInvalidSelection
 		}
 	}
 	return selected, nil
+}
+
+// selectableCategories is the exact set a client may choose for selected data.
+// Start Fresh's own categories stay server-owned and unselectable, so no plan
+// can ever combine the selective plugin category with the broader integrations
+// cleanup, and no target kind is resolved twice.
+var selectableCategories = []CategoryID{
+	CategorySettings, CategoryAgents, CategoryAppRecords, CategorySetupSteps, CategoryInstalledPlugins,
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/settingsreset"
 )
 
@@ -23,6 +24,7 @@ func (b *ServerBuilder) resetPreviewOwners() settingsreset.Owners {
 	}
 	if b.resetHandler != nil {
 		owners.DataDir = b.resetHandler.DataDir()
+		owners.PluginPaths = resetPluginPaths(owners.DataDir)
 	}
 	if b.sessionStore != nil {
 		owners.Database = b.sessionStore.DB()
@@ -43,6 +45,22 @@ func (b *ServerBuilder) resetPreviewOwners() settingsreset.Owners {
 		}
 	}
 	return owners
+}
+
+// resetPluginPaths resolves the installed-plugin locations the same way the
+// live handler wiring does, and the same way pre-store recovery will resolve
+// them independently. An unresolvable personal skills root leaves the owner
+// zero-valued, which the planner reports as unavailable rather than guessing a
+// layout or silently reviewing a smaller scope.
+func resetPluginPaths(dataDir string) plugin.ResetPaths {
+	if strings.TrimSpace(dataDir) == "" {
+		return plugin.ResetPaths{}
+	}
+	skillsRoot, err := plugin.DefaultPersonalSkillsRoot()
+	if err != nil {
+		return plugin.ResetPaths{}
+	}
+	return plugin.DefaultResetPaths(dataDir, skillsRoot)
 }
 
 func (b *ServerBuilder) resetFreshOwners() ([]settingsreset.FreshTarget, func(context.Context) []settingsreset.Blocker) {
