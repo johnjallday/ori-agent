@@ -12,7 +12,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 58
+const schemaVersion = 59
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -183,6 +183,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration057UserSetupQuestBindings(ctx)
 	case 58:
 		return db.migration058Economy(ctx)
+	case 59:
+		return db.migration059GroupRequirementReceipts(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -3084,6 +3086,38 @@ func (db *DB) migration058Economy(ctx context.Context) error {
 	for _, stmt := range statements {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("failed to create economy ledger schema: %w", err)
+		}
+	}
+	return nil
+}
+
+// migration059GroupRequirementReceipts moves the group requirement service's
+// durable review and operation records under the database schema owner. Earlier
+// builds created these tables at service construction without classifying them,
+// so reset inspection correctly treated them as unknown domains.
+func (db *DB) migration059GroupRequirementReceipts(ctx context.Context) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS group_requirement_reviews (
+			token TEXT PRIMARY KEY,
+			payload_json BLOB NOT NULL,
+			expires_at TEXT NOT NULL,
+			consumed_at TEXT
+		)`,
+		`CREATE TABLE IF NOT EXISTS group_requirement_operations (
+			owner_user_id TEXT NOT NULL,
+			operation_kind TEXT NOT NULL,
+			idempotency_key TEXT NOT NULL,
+			input_digest TEXT NOT NULL,
+			review_digest TEXT NOT NULL,
+			child_workspace_id TEXT NOT NULL,
+			payload_json BLOB NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (owner_user_id, operation_kind, idempotency_key)
+		)`,
+	}
+	for _, statement := range statements {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("failed to create group requirement receipt schema: %w", err)
 		}
 	}
 	return nil
