@@ -751,6 +751,7 @@ function loadSessionManagerWithPlacementModal() {
   };
   const placementCalls = [];
   const window = {
+    addEventListener() {},
     setTimeout: callback => callback(),
     OriWorkspaceMap: { beginPlacement: placement => placementCalls.push(placement) }
   };

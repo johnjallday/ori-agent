@@ -957,13 +957,13 @@ test('Team visualizes every included template agent and its lifecycle', async ({
   // The blueprint roster is edited on Team, not Review (FR32, FR83).
   await advanceToTeam(page);
 
-  // The server plan declares slots, not members. Primary and specialist roles
-  // appear in declaration order with explicit Create/Assign actions.
+  // The server plan declares slots, not members. Project Lead and specialist
+  // roles appear in declaration order with explicit Create/Assign actions.
   const rows = page.locator('#workspaceRoleRoster .ws-role-row');
   await expect(rows).toHaveCount(3);
   await expect(page.locator('#templateAgentReview')).toHaveCount(0);
   await expect(rows.nth(0)).toContainText('Research Lead');
-  await expect(rows.nth(0).locator('.ws-role-row__designation')).toHaveText('PRIMARY');
+  await expect(rows.nth(0).locator('.ws-role-row__designation')).toHaveText('PROJECT LEAD');
   await expect(rows.nth(0).locator('.ws-role-tag')).toHaveText('Missing');
   await expect(rows.nth(1).locator('.ws-role-row__designation')).toHaveText('SPECIALIST');
   await expect(rows.nth(1).locator('.ws-role-tag')).toHaveText('Optional');
@@ -2132,8 +2132,10 @@ test('Review reads as a receipt: name once, blueprint as provenance, team summar
 
   // The receipt distinguishes filled roles, optional vacancies, and saved
   // teammates that were explicitly added outside a role.
-  await expect(receipt).toContainText('Reaper Producer · Primary · Reaper Producer · New agent');
-  await expect(receipt).toContainText('Session Scout · Specialist · Optional');
+  await expect(receipt).toContainText(
+    'Reaper Producer · PROJECT LEAD · Reaper Producer · new agent will be created'
+  );
+  await expect(receipt).toContainText('Session Scout · SPECIALIST · Optional');
   await expect(receipt).toContainText('Research Scout · Also in this workspace · Saved agent');
   await expect(receipt).toContainText('1 new agent will be created');
   await expect(receipt).toContainText('1 saved agent will be attached');
@@ -2344,7 +2346,7 @@ test('Team carries text semantics, list roles, and quiet live-region updates', a
 
   // Designation and vacancy are words, not colour.
   await expect(page.locator('#workspaceRoleRoster .ws-role-row__designation').first()).toHaveText(
-    'PRIMARY'
+    'PROJECT LEAD'
   );
   await expect(page.locator('#workspaceRoleRoster .ws-role-tag').first()).toHaveText('Missing');
 
