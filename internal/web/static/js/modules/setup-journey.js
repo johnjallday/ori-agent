@@ -130,7 +130,10 @@ function hideJourneyPresentation() {
   if (state.modal) {
     // Bootstrap ignores hide() during its opening transition. Honor a quick
     // Escape/Back even then, and remove the queued hide after normal closure.
-    const hideWhenShown = () => state.modal?.hide();
+    // Bootstrap finishes its internal transition bookkeeping after it emits
+    // shown.bs.modal, so queue the hide one turn later instead of issuing a
+    // second request while the instance still considers itself transitioning.
+    const hideWhenShown = () => window.setTimeout(() => state.modal?.hide(), 0);
     elements.root.addEventListener('shown.bs.modal', hideWhenShown, { once: true });
     elements.root.addEventListener(
       'hidden.bs.modal',
@@ -514,7 +517,7 @@ function renderWorkspaceLaunch(journey) {
         true
       );
     } else {
-      elements.stepDescription.textContent = `Use Build Group on the workspace map to create one place for your projects. The shared builder opens with “${copy.group_name}” prefilled; workspaces and teams come later.`;
+      elements.stepDescription.textContent = `Use Create Group on the workspace map to create one place for your projects. The shared creator opens with “${copy.group_name}” prefilled; workspaces and teams come later.`;
       button('Build Group', launchGroupBuilder, true);
     }
   } else if (stage.id === 'preparation') {

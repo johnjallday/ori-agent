@@ -304,7 +304,8 @@ export async function deleteWorkspaces(ids, ctx) {
 export async function moveMembersIntoGroup(group, memberIds, ctx) {
   const groupId = String(group?.groupId || group?.id || '').trim();
   const name = String(group?.name || 'Group').trim() || 'Group';
-  if (!groupId) throw new Error('Created group identity is unavailable; refresh before moving members.');
+  if (!groupId)
+    throw new Error('Created group identity is unavailable; refresh before moving members.');
 
   // Callers should have snapped the selection at dialog open. Normalize again
   // against that same captured row set as a defensive boundary, never against a
@@ -370,7 +371,10 @@ export async function moveMembersIntoGroup(group, memberIds, ctx) {
     announce(ctx, message);
     toast(ctx, message, 'error');
   } else {
-    announce(ctx, `Moved ${placed.length} workspace${placed.length === 1 ? '' : 's'} into "${name}".`);
+    announce(
+      ctx,
+      `Moved ${placed.length} workspace${placed.length === 1 ? '' : 's'} into "${name}".`
+    );
   }
   return result;
 }

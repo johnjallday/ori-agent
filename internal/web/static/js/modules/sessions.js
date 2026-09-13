@@ -758,21 +758,53 @@ const sessionManager = {
       delete addFolderModal.dataset.pendingMapOrigin;
     });
 
-    // A fixed selected-member Group keeps its kind radios disabled. Some
-    // Bootstrap builds treat a dismiss click while that fixed fieldset owns
-    // focus as an inert click, so own the ordinary cancel explicitly rather
-    // than trapping a reviewed-but-unsubmitted selection in the modal.
+    // A dismissed creator must not leave a fixed selected-member Group or a
+    // just-opened ordinary draft behind. Own every dismiss control so a click
+    // during Bootstrap's show transition is queued rather than ignored.
     addFolderModal?.addEventListener('click', event => {
       const dismiss = event.target?.closest?.('[data-bs-dismiss="modal"]');
-      if (!dismiss || this.workspaceCreatorContext?.mode !== 'selected-members') return;
+      if (!dismiss) return;
       event.preventDefault();
       event.stopPropagation();
       if (this.workspaceCreatorContext?.submitting) {
-        this.showToast('Finish the confirmed group change before closing.', 'warning');
+        this.showToast('Finish the confirmed workspace change before closing.', 'warning');
         return;
       }
-      bootstrap.Modal.getInstance(addFolderModal)?.hide();
+      this.hideWorkspaceCreatorModal();
     });
+
+    // The workspace creator may be opened while another page-level keyboard
+    // handler still owns focus. Handle Escape on the dialog itself so ordinary
+    // drafts always close, while an accepted create remains atomic.
+    addFolderModal?.addEventListener('keydown', event => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (this.workspaceCreatorContext?.submitting) {
+        this.showToast('Finish the confirmed workspace change before closing.', 'warning');
+        return;
+      }
+      this.hideWorkspaceCreatorModal();
+    });
+
+    // Focus can remain on a just-dismissed invoker during Bootstrap's modal
+    // hand-off, so this capture listener backs up the dialog handler above.
+    // It is deliberately scoped to this visible dialog; all other overlays
+    // retain their own Escape behavior.
+    window.addEventListener(
+      'keydown',
+      event => {
+        if (event.key !== 'Escape' || !addFolderModal?.classList.contains('show')) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (this.workspaceCreatorContext?.submitting) {
+          this.showToast('Finish the confirmed workspace change before closing.', 'warning');
+          return;
+        }
+        this.hideWorkspaceCreatorModal();
+      },
+      true
+    );
 
     // Closing or cancelling discards the team draft immediately rather than
     // leaving it to be overwritten on the next open, and invalidates any plan
@@ -6948,9 +6980,8 @@ const sessionManager = {
   },
 
   renderOrdinaryGroupReceipt() {
-    const guided = this.workspaceCreatorContext?.mode === 'guided'
-      ? this.workspaceCreatorContext.guided
-      : null;
+    const guided =
+      this.workspaceCreatorContext?.mode === 'guided' ? this.workspaceCreatorContext.guided : null;
     if (guided) return this.renderGuidedGroupReceipt(guided);
     const name = String(document.getElementById('folderNameInput')?.value || '').trim();
     const slug = name ? this.slugifyWorkspaceName(name) : '';
@@ -6958,9 +6989,10 @@ const sessionManager = {
     const parentName = parent?.value
       ? String(parent.options?.[parent.selectedIndex]?.textContent || '').trim()
       : 'Top level';
-    const selection = this.workspaceCreatorContext?.mode === 'selected-members'
-      ? this.workspaceCreatorContext.selection
-      : null;
+    const selection =
+      this.workspaceCreatorContext?.mode === 'selected-members'
+        ? this.workspaceCreatorContext.selection
+        : null;
     const memberNames = Array.isArray(selection?.names) ? selection.names : [];
     const memberCount = Array.isArray(selection?.ids) ? selection.ids.length : 0;
     const memberReceipt = selection
@@ -7006,7 +7038,9 @@ const sessionManager = {
 
   renderGuidedGroupReceipt(guided) {
     const review = guided.review;
-    const name = String(review?.name || document.getElementById('folderNameInput')?.value || '').trim();
+    const name = String(
+      review?.name || document.getElementById('folderNameInput')?.value || ''
+    ).trim();
     const status = review?.existing
       ? 'The existing canonical Home will be reused unchanged.'
       : review
@@ -8039,7 +8073,7 @@ const sessionManager = {
     if (groupNotice) {
       groupNotice.hidden = !ordinaryGroup;
       groupNotice.innerHTML = guidedCreator
-        ? '<strong>This is the setup\'s canonical Home.</strong><span>It is reviewed and created or reused only by the guided setup action. No project, team, or replacement group is created here.</span>'
+        ? "<strong>This is the setup's canonical Home.</strong><span>It is reviewed and created or reused only by the guided setup action. No project, team, or replacement group is created here.</span>"
         : '<strong>Groups organize related workspaces.</strong><span>This creates an empty group. Agents, projects, and Assistant Program membership are separate choices.</span>';
     }
     if (nameLabel) nameLabel.textContent = ordinaryGroup ? 'Group name' : 'Workspace name';
@@ -8972,9 +9006,8 @@ const sessionManager = {
       nameInput?.focus();
       return;
     }
-    const guided = this.workspaceCreatorContext?.mode === 'guided'
-      ? this.workspaceCreatorContext.guided
-      : null;
+    const guided =
+      this.workspaceCreatorContext?.mode === 'guided' ? this.workspaceCreatorContext.guided : null;
     if (guided?.submit) {
       // Guided Home preparation has its own reviewed setup owner. It receives
       // only the accepted name and never falls through to POST /api/workspaces
@@ -10534,6 +10567,32 @@ const sessionManager = {
     // Show modal
     const modal = new bootstrap.Modal(document.getElementById('editTagsModal'));
     modal.show();
+  },
+
+  // Bootstrap ignores hide() while the show transition is in progress. Queue
+  // one dismissal after the transition instead, so Escape/Cancel work as soon
+  // as the dialog becomes visible without ever bypassing commit-time guards.
+  hideWorkspaceCreatorModal() {
+    const element = document.getElementById('addFolderModal');
+    if (!element) return;
+    const modal = bootstrap.Modal.getInstance(element);
+    const instance = modal || bootstrap.Modal.getOrCreateInstance?.(element);
+    if (!instance) return;
+    if (instance._isTransitioning) {
+      const context = this.workspaceCreatorContext;
+      const hideWhenShown = () => {
+        // A prior dismissal must never close a newer creator generation.
+        if (this.workspaceCreatorContext === context) window.setTimeout(() => instance.hide(), 0);
+      };
+      element.addEventListener('shown.bs.modal', hideWhenShown, { once: true });
+      element.addEventListener(
+        'hidden.bs.modal',
+        () => element.removeEventListener('shown.bs.modal', hideWhenShown),
+        { once: true }
+      );
+      return;
+    }
+    instance.hide();
   },
 
   // Creates a fresh, generation-fenced operation context before Bootstrap

@@ -23,7 +23,12 @@ function journey() {
     },
     receipts: {} as Record<string, string>,
     steps: [
-      { id: 'integration', kind: 'integration_install', title: 'Install plugin', status: 'complete' },
+      {
+        id: 'integration',
+        kind: 'integration_install',
+        title: 'Install plugin',
+        status: 'complete'
+      },
       {
         id: 'project',
         kind: 'project_connect',
@@ -160,13 +165,12 @@ test('guided setup uses the shared creator with cancellation, exact retry and co
   await creator.getByRole('textbox', { name: 'Group name' }).fill('My Studio');
   // An unsubmitted close preserves the supported name draft but no consent.
   await page.waitForTimeout(200);
-  await page.evaluate(() => {
-    // @ts-expect-error Bootstrap is a page global.
-    window.bootstrap.Modal.getInstance(document.getElementById('addFolderModal'))?.hide();
-  });
+  await creator.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(creator).toBeHidden();
+  await expect(setup).toBeVisible();
 
   await setup.getByRole('button', { name: 'Build Group', exact: true }).click();
+  await expect(creator).toBeVisible();
   await expect(creator.getByRole('textbox', { name: 'Group name' })).toHaveValue('My Studio');
   await creator.getByRole('button', { name: 'Review →' }).click();
   await creator.getByRole('button', { name: 'Review canonical Home' }).click();

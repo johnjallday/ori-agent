@@ -756,6 +756,88 @@ test('the shared creator makes an ordinary Group through Details and Review only
   );
 });
 
+test('creator lifecycle keeps ordinary drafts isolated across kind switches and cancellation', async ({
+  page
+}) => {
+  const creator = page.locator('#addFolderModal');
+  const open = async (options: Record<string, unknown> = {}) => {
+    await page.evaluate(options => {
+      (
+        window as unknown as {
+          sessionManager: { showAddWorkspaceModal: (options: Record<string, unknown>) => void };
+        }
+      ).sessionManager.showAddWorkspaceModal(options);
+    }, options);
+    await expect(creator).toBeVisible();
+  };
+
+  await open({ entryPoint: 'lifecycle-workspace' });
+  await cardByLabel(page, 'Blank').click();
+  await advanceToWorkspaceDetails(page);
+  await page.locator('#folderNameInput').fill('Draft stays local');
+  await page.locator('#folderDescriptionInput').fill('Workspace description');
+
+  await page.locator('#workspaceCreatorKindGroup').check();
+  await expect(page.locator('#folderModalTitle')).toHaveText('Create Group');
+  await expect(page.locator('#wizardStep2')).toBeVisible();
+  await expect(page.locator('#wizardStep1')).toBeHidden();
+  await expect(page.locator('#wizardStep3')).toBeHidden();
+  await expect(page.locator('#folderNameInput')).toHaveValue('Draft stays local');
+  await page.locator('#folderDescriptionInput').fill('Group description');
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#workspaceReviewSummary')).toContainText(
+    'One empty organizational group'
+  );
+
+  await page.locator('#workspaceCreatorKindWorkspace').check();
+  await expect(page.locator('#wizardStep1')).toBeVisible();
+  await cardByLabel(page, 'Blank').click();
+  await advanceToWorkspaceDetails(page);
+  await expect(page.locator('#folderNameInput')).toHaveValue('Draft stays local');
+  await expect(page.locator('#folderDescriptionInput')).toHaveValue('Workspace description');
+
+  await page.locator('#workspaceCreatorKindGroup').check();
+  await expect(page.locator('#folderDescriptionInput')).toHaveValue('Group description');
+  await page.keyboard.press('Escape');
+  await expect(creator).toBeHidden();
+
+  // A cancelled selected-member operation does not leave a fixed Group or its
+  // reviewed members behind when the next caller starts an ordinary draft.
+  await open({
+    mode: 'selected-members',
+    kind: 'group',
+    selection: { ids: ['reviewed-workspace'], names: ['Reviewed workspace'] }
+  });
+  await expect(page.locator('#workspaceCreatorKindFixedNotice')).toContainText(
+    'keeps that choice fixed'
+  );
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(creator).toBeHidden();
+
+  await open({ kind: 'group', entryPoint: 'ordinary-after-selected-cancel' });
+  await expect(page.locator('#workspaceCreatorKindFixedNotice')).toBeHidden();
+  await expect(page.locator('#workspaceCreatorKindGroup')).toBeEnabled();
+  await expect(page.locator('#folderNameInput')).toHaveValue('');
+  await expect(page.locator('#workspaceReviewSummary')).not.toContainText('Reviewed workspace');
+  await page.keyboard.press('Escape');
+  await expect(creator).toBeHidden();
+
+  // Import remains a fixed Workspace operation, and cancelling it cannot make
+  // the following ordinary Group operation inherit import-only state.
+  await open({ importMode: true, entryPoint: 'lifecycle-import' });
+  await expect(page.locator('#workspaceCreatorKindWorkspace')).toBeChecked();
+  await expect(page.locator('#workspaceCreatorKindGroup')).toBeDisabled();
+  await page.keyboard.press('Escape');
+  await expect(creator).toBeHidden();
+
+  await open({ kind: 'group', entryPoint: 'ordinary-after-import-cancel' });
+  await expect(page.locator('#workspaceCreatorKindGroup')).toBeChecked();
+  await expect(page.locator('#workspaceCreatorKindGroup')).toBeEnabled();
+  await expect(page.locator('#workspaceCreatorKindFixedNotice')).toBeHidden();
+  await page.keyboard.press('Escape');
+  await expect(creator).toBeHidden();
+});
+
 test('Team attaches a saved agent and submits the complete team atomically', async ({ page }) => {
   await page.route('**/api/workspaces/template-agent-plan**', async route => {
     await route.fulfill({

@@ -13,7 +13,11 @@ export function groupBuildState(journey) {
   const preparation = project?.preparation;
   if (preparation?.exists) return 'existing';
   if (journey?.busy) return 'busy';
-  if (!preparation || journey?.receipts?.home_workspace_id || journey?.receipts?.project_workspace_id) {
+  if (
+    !preparation ||
+    journey?.receipts?.home_workspace_id ||
+    journey?.receipts?.project_workspace_id
+  ) {
     return 'unavailable';
   }
   return project.actions?.some(action => action.id === 'review_create_group')
@@ -101,7 +105,9 @@ async function review(state, name) {
     updateJourney(state, current.setup_journey);
     const status = groupBuildState(state.journey);
     if (status === 'existing') {
-      const preparation = state.journey.steps.find(step => step.kind === 'project_connect')?.preparation;
+      const preparation = state.journey.steps.find(
+        step => step.kind === 'project_connect'
+      )?.preparation;
       state.review = {
         existing: true,
         input: { name: String(preparation?.name || name).trim() },
@@ -172,7 +178,9 @@ async function commit(state) {
       if (active !== state) return;
       updateJourney(state, payload.setup_journey);
       if (groupBuildState(state.journey) !== 'existing') {
-        throw new Error('The confirmed group is not yet observable. Check setup status before continuing.');
+        throw new Error(
+          'The confirmed group is not yet observable. Check setup status before continuing.'
+        );
       }
     }
     state.pending = null;
@@ -228,11 +236,15 @@ export function isGroupBuilderOpen() {
  */
 export function openGroupBuilder({ journey = null, onJourneyChange, onClose } = {}) {
   if (active) return false;
-  if (!journey) throw new Error('Guided group preparation is unavailable. Return to setup and try again.');
+  if (!journey)
+    throw new Error('Guided group preparation is unavailable. Return to setup and try again.');
   const status = groupBuildState(journey);
-  if (status === 'busy') throw new Error('Group setup is already in progress. Check setup status first.');
+  if (status === 'busy')
+    throw new Error('Group setup is already in progress. Check setup status first.');
   if (status === 'unavailable') {
-    throw new Error('The existing setup group could not be verified. No replacement will be created.');
+    throw new Error(
+      'The existing setup group could not be verified. No replacement will be created.'
+    );
   }
   const saved = retained?.runID === journey.run_id ? retained : null;
   const existing = status === 'existing';
@@ -242,7 +254,9 @@ export function openGroupBuilder({ journey = null, onJourneyChange, onClose } = 
     onJourneyChange,
     onClose,
     invoker: document.activeElement,
-    name: saved?.name || String(preparation?.name || journey?.journey?.workspace_launch?.group_name || ''),
+    name:
+      saved?.name ||
+      String(preparation?.name || journey?.journey?.workspace_launch?.group_name || ''),
     review: existing
       ? {
           existing: true,

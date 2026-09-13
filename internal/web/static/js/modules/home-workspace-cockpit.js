@@ -1985,7 +1985,9 @@ import {
     const selection = memberIDs.length
       ? {
           ids: memberIDs,
-          names: memberIDs.map(id => state.flattened.find(row => row?.id === id)?.name || 'Workspace')
+          names: memberIDs.map(
+            id => state.flattened.find(row => row?.id === id)?.name || 'Workspace'
+          )
         }
       : null;
     const map = options.map ? window.OriWorkspaceMap : null;
@@ -3494,14 +3496,12 @@ import {
   // Every create/import/delete/move/tag/undo path funnels through here, so one
   // authoritative reload updates Map, Tree, Summary, and the rail together
   // rather than each view refetching for itself (FR108, FR117).
-  document
-    .getElementById('cockpitBuildGroupBtn')
-    ?.addEventListener('click', event =>
-      openGroupCreator([], {
-        entryPoint: 'home_cockpit_create_group',
-        invoker: event.currentTarget
-      })
-    );
+  document.getElementById('cockpitBuildGroupBtn')?.addEventListener('click', event =>
+    openGroupCreator([], {
+      entryPoint: 'home_cockpit_create_group',
+      invoker: event.currentTarget
+    })
+  );
 
   window.addEventListener('ori:workspaces-changed', () => {
     if (canHydrateWorkspaceData()) void refreshQuietly();

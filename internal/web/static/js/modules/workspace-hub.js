@@ -3819,7 +3819,8 @@
       return false;
     }
     const state = window.WorkspaceHubState.getState();
-    const selected = Array.isArray(memberIds) && memberIds.length ? memberIds : getTopLevelSelectedIds();
+    const selected =
+      Array.isArray(memberIds) && memberIds.length ? memberIds : getTopLevelSelectedIds();
     const rows = flattenWorkspaces(state.workspaces || []);
     const selection = selected.length
       ? {
@@ -3835,7 +3836,13 @@
       invoker: document.activeElement,
       onCreated: async created => {
         if (!selection) {
-          return { groupId: created.groupId, placed: [], failed: [], uncertain: [], partial: false };
+          return {
+            groupId: created.groupId,
+            placed: [],
+            failed: [],
+            uncertain: [],
+            partial: false
+          };
         }
         // workspace-hub.js remains a deferred classic script. Load the shared
         // move-only helper here rather than recreating its retired prompt/POST.
