@@ -192,6 +192,15 @@
                 <p id="workspaceGroupDestinationMessage" class="workspace-group-destination-message" role="status" aria-live="polite"></p>
               </section>
 
+              <!-- Group Templates: General keeps its reviewed Group Manager roster;
+                   a managed template creates or reuses only its program's group.
+                   Rendered by group-template-creator.js from the server projection. -->
+              <fieldset id="workspaceGroupTemplateChoice" class="workspace-group-template-choice mb-3" hidden>
+                <legend class="workspace-create-section-title">Group template</legend>
+                <p id="workspaceGroupTemplateStatus" class="workspace-group-template-status" role="status" aria-live="polite" hidden></p>
+                <div id="workspaceGroupTemplateOptions" class="workspace-group-template-options"></div>
+              </fieldset>
+
               <div id="workspaceGroupDetailsNotice" class="workspace-group-details-notice" hidden>
                 <strong>Groups organize related workspaces.</strong>
                 <span>Review and customize the Group Manager before final creation. Projects and Assistant Program membership are separate choices; the Manager cannot access member workspaces.</span>

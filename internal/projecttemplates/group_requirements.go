@@ -132,6 +132,12 @@ func normalizeGroupRequirement(raw json.RawMessage) (*GroupRequirement, error) {
 	return CloneGroupRequirement(&requirement), nil
 }
 
+// ValidateHomeDisplayName applies the declaration's Home display-name bounds to
+// a user-chosen group name, so reviewed and declared names share one rule.
+func ValidateHomeDisplayName(value string) error {
+	return validateHomeDisplayName(value)
+}
+
 func validateHomeDisplayName(value string) error {
 	if value == "" || len(value) > 120 || !utf8.ValidString(value) {
 		return fmt.Errorf("%w: default_home_name must contain 1-120 bytes of display text", ErrInvalidGroupRequirement)

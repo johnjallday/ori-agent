@@ -395,6 +395,10 @@ const sessionManager = {
       const choice = event.target.closest('[name="workspace-creator-kind"]');
       if (choice?.checked) this.switchWorkspaceCreatorKind(choice.value);
     });
+    document.getElementById('workspaceGroupTemplateOptions')?.addEventListener('change', event => {
+      const choice = event.target.closest('[name="workspace-group-template"]');
+      if (choice?.checked) window.GroupTemplateCreator?.select(this, choice.value);
+    });
 
     document.getElementById('folderPresetSelect')?.addEventListener('change', () => {
       this.behaviorOverridden = true;
@@ -824,6 +828,11 @@ const sessionManager = {
       if (addFolderModal.dataset.suspendedForMapPlacement) return;
       this.abandonWorkspaceMapPlacement();
       this.discardWorkspaceTeamDraft();
+      // A confirmed Group Template change whose response was lost may already
+      // be durable; closing must reveal canonical state rather than hide it.
+      if (this.workspaceCreatorContext?.groupTemplates?.pending) {
+        void this.refreshWorkspaceSurfacesAfterOrdinaryGroupCreate();
+      }
       // Closing without creating leaves the map exactly as it was: no workspace,
       // no position record, no lingering placement mode (#292 FR-54). A pending
       // coordinate that a successful create already consumed is gone by now, so
@@ -6954,6 +6963,15 @@ const sessionManager = {
 
   refreshWorkspaceReview() {
     const summary = document.getElementById('workspaceReviewSummary');
+    if (this.usesManagedGroupTemplate()) {
+      if (summary) summary.innerHTML = window.GroupTemplateCreator.renderReceipt(this);
+      document.getElementById('workspaceReviewIssues')?.replaceChildren();
+      document.getElementById('workspaceReviewIssues')?.setAttribute('hidden', '');
+      document.getElementById('workspaceReviewReadiness')?.replaceChildren();
+      this.renderSetupPreview(null);
+      if (this.isFinalWizardStep()) void window.GroupTemplateCreator.ensureReview(this);
+      return;
+    }
     if (this.isGroupCreator() && !this.usesGroupRosterCreator()) {
       if (summary) summary.innerHTML = this.renderOrdinaryGroupReceipt();
       document.getElementById('workspaceReviewIssues')?.replaceChildren();
@@ -7948,7 +7966,13 @@ const sessionManager = {
   },
 
   usesGroupRosterCreator() {
-    return this.isOrdinaryGroupCreator();
+    // A managed Group Template prepares only its program Home; General keeps
+    // the reviewed Group Manager roster.
+    return this.isOrdinaryGroupCreator() && !this.usesManagedGroupTemplate();
+  },
+
+  usesManagedGroupTemplate() {
+    return Boolean(window.GroupTemplateCreator?.managedActive?.(this));
   },
 
   usesTeamRosterCreator() {
@@ -8211,6 +8235,7 @@ const sessionManager = {
     if (advanced) advanced.hidden = ordinaryGroup;
     if (projectOpen && ordinaryGroup) projectOpen.hidden = true;
     if (groupDestination && ordinaryGroup) groupDestination.hidden = true;
+    window.GroupTemplateCreator?.syncPresentation?.(this);
   },
 
   // Renders the wizard chrome for the current mode + step. Import remains a
@@ -8286,7 +8311,8 @@ const sessionManager = {
         // blockers remain exactly as before.
         createBtn.disabled =
           !importMode &&
-          ((this.usesTeamRosterCreator() && this.hasBlockingTeamIssue()) ||
+          ((this.usesManagedGroupTemplate() && !window.GroupTemplateCreator.canSubmit(this)) ||
+            (this.usesTeamRosterCreator() && this.hasBlockingTeamIssue()) ||
             (this.isWorkspaceCreator() &&
               (this.blueprintSelectionBlocked() ||
                 this.groupRequirementBlocked() ||
@@ -8355,6 +8381,7 @@ const sessionManager = {
     if (this.groupRequirementDraft?.review?.review_token) {
       return name ? `Confirm create “${name}”` : 'Confirm reviewed creation';
     }
+    if (this.usesManagedGroupTemplate()) return window.GroupTemplateCreator.ctaLabel(this);
     if (this.isGroupCreator()) return name ? `Create group “${name}”` : 'Create Group';
     return name ? `Create “${name}”` : 'Create Workspace';
   },
@@ -8764,7 +8791,7 @@ const sessionManager = {
     if (!hint) return;
     if (hint.classList.contains('is-error')) return; // an active error owns the slot
     const name = document.getElementById('folderNameInput')?.value.trim() || '';
-    if (this.importModeEnabled || !name) {
+    if (this.importModeEnabled || !name || this.usesManagedGroupTemplate()) {
       hint.textContent = '';
       hint.hidden = true;
       return;
@@ -8858,7 +8885,11 @@ const sessionManager = {
     // already taken: without them neither the Team roster nor the Review receipt
     // can describe a workspace that could exist.
     if (!this.importModeEnabled && visibleSteps.indexOf(targetStep) > visibleSteps.indexOf(2)) {
-      const problem = this.workspaceIdentityProblem();
+      // A managed Home's folder is keyed to its program, not its display name,
+      // so only the reviewed name rule applies there.
+      const problem = this.usesManagedGroupTemplate()
+        ? window.GroupTemplateCreator.identityProblem(this)
+        : this.workspaceIdentityProblem();
       if (problem) {
         this.wizardStep = 2;
         this.refreshWizardChrome();
@@ -9111,6 +9142,12 @@ const sessionManager = {
       // only the accepted name and never falls through to POST /api/workspaces
       // or Workspace Team/template validation.
       await guided.submit({ name });
+      return;
+    }
+    if (!importEnabled && this.usesManagedGroupTemplate()) {
+      // A managed Group Template commits only its reviewed Home operation and
+      // never falls back to the ordinary Group roster request.
+      await window.GroupTemplateCreator.submit(this);
       return;
     }
     if (requiresReviewedRoster && (!confirmedTeamView || !confirmedTeamView.canContinueFromTeam)) {

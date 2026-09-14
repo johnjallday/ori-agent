@@ -77,6 +77,14 @@ type Input struct {
 	RequestedParentID string
 	TargetWorkspaceID string
 	InputDigest       string
+	// HomeName is a reviewed user-chosen display name for a Home created by
+	// OperationPrepareHome. It never renames an existing Home.
+	HomeName string
+	// GroupTemplateID and GroupTemplateRevision bind a Home-only operation to
+	// one derived Group Template selection. When set, first creation records
+	// inert Group Template provenance in the same write as the Home.
+	GroupTemplateID       string
+	GroupTemplateRevision string
 }
 
 type Evaluation struct {
@@ -130,6 +138,8 @@ type Receipt struct {
 	DefaultHomeName   string                         `json:"default_home_name,omitempty"`
 	RequestedParentID string                         `json:"requested_parent_id,omitempty"`
 	TargetWorkspaceID string                         `json:"target_workspace_id,omitempty"`
+	GroupTemplateID   string                         `json:"group_template_id,omitempty"`
+	GroupTemplateRev  string                         `json:"group_template_revision,omitempty"`
 	ReviewDigest      string                         `json:"review_digest"`
 	CreatedAt         time.Time                      `json:"created_at"`
 	ExpiresAt         time.Time                      `json:"expires_at"`
@@ -292,6 +302,12 @@ func (s *Service) Evaluate(input Input) Evaluation {
 	}
 	evaluation.State = StateReadyGrouped
 	evaluation.HomeName = requirement.DefaultHomeName
+	if name := strings.TrimSpace(input.HomeName); name != "" {
+		if projecttemplates.ValidateHomeDisplayName(name) != nil {
+			return unavailable(StateContractInvalid, "The group name is not valid.", ActionRetry)
+		}
+		evaluation.HomeName = name
+	}
 	evaluation.HomeWillBeCreated = true
 	evaluation.Summary = "Only the canonical group will be created by this action."
 	return evaluation
@@ -315,7 +331,12 @@ func (s *Service) Review(ctx context.Context, input Input) (Review, error) {
 		DefinitionDigest: evaluation.DefinitionDigest, Policy: evaluation.Policy, Composition: evaluation.SelectedComposition,
 		HomeWorkspaceID: evaluation.HomeWorkspaceID, CreateHome: evaluation.HomeWillBeCreated, DefaultHomeName: evaluation.HomeName,
 		RequestedParentID: strings.TrimSpace(input.RequestedParentID), TargetWorkspaceID: strings.TrimSpace(input.TargetWorkspaceID),
+		GroupTemplateID: strings.TrimSpace(input.GroupTemplateID), GroupTemplateRev: strings.TrimSpace(input.GroupTemplateRevision),
 		CreatedAt: now, ExpiresAt: now.Add(ReviewTTL),
+	}
+	if (receipt.GroupTemplateID != "" || receipt.GroupTemplateRev != "") &&
+		(input.OperationKind != OperationPrepareHome || receipt.GroupTemplateID == "" || receipt.GroupTemplateRev == "") {
+		return Review{}, fmt.Errorf("%w: a group template selection binds only a complete Home-only review", ErrReviewRequired)
 	}
 	if input.Template.TemplateVariant != nil {
 		receipt.VariantID = input.Template.TemplateVariant.VariantID
@@ -359,7 +380,14 @@ func (s *Service) Claim(ctx context.Context, input Input, token, idempotencyKey 
 		return Claim{}, ErrUnavailable
 	}
 	if receipt.OwnerUserID != strings.TrimSpace(input.OwnerUserID) || receipt.OperationKind != input.OperationKind ||
-		receipt.InputDigest != strings.ToLower(strings.TrimSpace(input.InputDigest)) || !s.now().Before(receipt.ExpiresAt) {
+		receipt.InputDigest != strings.ToLower(strings.TrimSpace(input.InputDigest)) {
+		return Claim{}, ErrReviewStale
+	}
+	expired := !s.now().Before(receipt.ExpiresAt)
+	// A committed Home-only operation stays replayable after its review expires:
+	// a lost response must never force a second confirmation or another create.
+	// Project-bearing operations keep refusing expired reviews outright.
+	if expired && receipt.OperationKind != OperationPrepareHome {
 		return Claim{}, ErrReviewStale
 	}
 	if existing, getErr := s.receipts.GetOperation(ctx, receipt.OwnerUserID, receipt.OperationKind, idempotencyKey); getErr == nil {
@@ -367,7 +395,7 @@ func (s *Service) Claim(ctx context.Context, input Input, token, idempotencyKey 
 			return Claim{}, ErrOperationConflict
 		}
 		current := s.Evaluate(input)
-		if err := receiptMatches(receipt, input.Template, current); err != nil {
+		if err := receiptMatches(receipt, input, current); err != nil {
 			return Claim{}, err
 		}
 		var snapshot *workspace.GroupRequirementSnapshot
@@ -378,12 +406,12 @@ func (s *Service) Claim(ctx context.Context, input Input, token, idempotencyKey 
 	} else if !errors.Is(getErr, ErrNotFound) {
 		return Claim{}, ErrUnavailable
 	}
-	if receipt.ConsumedAt != nil {
+	if expired || receipt.ConsumedAt != nil {
 		return Claim{}, ErrReviewStale
 	}
 
 	current := s.Evaluate(input)
-	if err := receiptMatches(receipt, input.Template, current); err != nil {
+	if err := receiptMatches(receipt, input, current); err != nil {
 		return Claim{}, err
 	}
 	operation := Operation{
@@ -402,7 +430,12 @@ func (s *Service) Claim(ctx context.Context, input Input, token, idempotencyKey 
 		if receipt.CreateHome {
 			var home *workspace.Workspace
 			var ensureErr error
-			home, homeCreated, ensureErr = workspace.NewAssistantProgramStore(s.workspaces).EnsureNamedStation(key, input.Template.AssistantProgram, receipt.DefaultHomeName)
+			programs := workspace.NewAssistantProgramStore(s.workspaces)
+			if receipt.GroupTemplateID != "" {
+				home, homeCreated, ensureErr = programs.EnsureNamedStationWithProvenance(key, input.Template.AssistantProgram, receipt.DefaultHomeName, groupTemplateProvenance(receipt, key, input.Template))
+			} else {
+				home, homeCreated, ensureErr = programs.EnsureNamedStation(key, input.Template.AssistantProgram, receipt.DefaultHomeName)
+			}
 			if ensureErr != nil || home == nil {
 				return Claim{}, ErrUnavailable
 			}
@@ -495,8 +528,12 @@ func (s *Service) Mark(ctx context.Context, operation Operation, status Operatio
 	return s.receipts.SaveOperation(ctx, operation)
 }
 
-func receiptMatches(receipt Receipt, template projecttemplates.Template, current Evaluation) error {
+func receiptMatches(receipt Receipt, input Input, current Evaluation) error {
+	template := input.Template
 	if current.State != StateReadyGrouped && current.State != StateReadyStandalone {
+		return ErrReviewStale
+	}
+	if receipt.GroupTemplateID != strings.TrimSpace(input.GroupTemplateID) || receipt.GroupTemplateRev != strings.TrimSpace(input.GroupTemplateRevision) {
 		return ErrReviewStale
 	}
 	if receipt.TemplateID != template.ID || receipt.TemplateRevision != template.Revision ||
@@ -554,6 +591,33 @@ func snapshotFor(receipt Receipt, operation Operation, template projecttemplates
 		snapshot.ProjectLinkID = operation.ProjectLinkID
 	}
 	return snapshot
+}
+
+// groupTemplateProvenance derives inert creation provenance only from the
+// consumed-once receipt, the server-resolved key, and the trusted template.
+func groupTemplateProvenance(receipt Receipt, key workspace.AssistantProgramKey, template projecttemplates.Template) *workspace.AssistantGroupTemplateProvenance {
+	provenance := &workspace.AssistantGroupTemplateProvenance{
+		SchemaVersion:   workspace.AssistantGroupTemplateProvenanceSchemaVersion,
+		GroupTemplateID: receipt.GroupTemplateID, GroupTemplateRevision: receipt.GroupTemplateRev,
+		SourceKind: string(projecttemplates.GroupTemplateSourceUserTemplate), TemplateID: receipt.TemplateID,
+		TemplateRevision: receipt.TemplateRevision, VariantID: receipt.VariantID, VariantRevision: receipt.VariantRevision,
+		HomeDigest: projecttemplates.GroupTemplateHomeDigest(template.AssistantProgram), ReviewDigest: receipt.ReviewDigest,
+	}
+	if key.Normalize().PluginID == "" {
+		return provenance
+	}
+	provenance.SourceKind = string(projecttemplates.GroupTemplateSourcePlugin)
+	switch {
+	case template.PluginOwner != nil:
+		owner := template.PluginOwner.Clone()
+		provenance.PluginOwner = &owner
+	case template.TemplateVariant != nil:
+		source := template.TemplateVariant.Source
+		provenance.PluginOwner = &workspace.PluginTemplateOwner{
+			PluginID: source.PluginID, PluginVersion: source.PluginVersion, BlueprintID: source.BlueprintID, BlueprintVersion: source.BlueprintVersion,
+		}
+	}
+	return provenance
 }
 
 func programKey(ownerUserID string, template projecttemplates.Template) (workspace.AssistantProgramKey, error) {
