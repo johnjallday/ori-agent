@@ -9,6 +9,7 @@ import path from 'node:path';
 const RUN = Date.now().toString(36);
 const PLUGIN_NAME = `group-templates-fixture-${RUN}`;
 const GROUP_NAME = `Lab Portfolio ${RUN}`;
+const HOSTILE_PLUGIN_NAME = `group-templates-hostile-${RUN}`;
 
 let sourceRoot = '';
 
@@ -77,28 +78,46 @@ async function chooseTemplate(page: Page, id: string) {
 
 test.describe.configure({ mode: 'serial' });
 
-test.beforeAll(async ({ request }) => {
-  await json(await request.post('/api/onboarding/skip'));
-  sourceRoot = mkdtempSync(path.join(tmpdir(), 'ori-group-templates-fixture-'));
-  const source = path.join(sourceRoot, PLUGIN_NAME);
+// Installs a renamed copy of the fixture plugin. `editTemplate` may rewrite the
+// blueprint declaration, for example to give it hostile display text.
+async function installFixtureCopy(
+  request: APIRequestContext,
+  pluginName: string,
+  capabilitySuffix: string,
+  editTemplate?: (template: any) => void
+) {
+  const source = path.join(sourceRoot, pluginName);
   cpSync(path.resolve('tests/fixtures/workspace-group-plugin'), source, { recursive: true });
   for (const manifest of ['.ori-plugin/plugin.json', '.claude-plugin/plugin.json']) {
     const file = path.join(source, manifest);
     const parsed = JSON.parse(readFileSync(file, 'utf8'));
-    parsed.name = PLUGIN_NAME;
+    parsed.name = pluginName;
     // Capability definitions are owner-exclusive host-wide; keep this copy's
     // marker distinct from any other enabled fixture on a shared test server.
     for (const capability of parsed.capabilities || []) {
-      capability.id = `${capability.id}-${RUN}`;
+      capability.id = `${capability.id}-${capabilitySuffix}`;
     }
     writeFileSync(file, `${JSON.stringify(parsed, null, 2)}\n`);
   }
+  if (editTemplate) {
+    const file = path.join(source, 'blueprints/research-project/template.json');
+    const parsed = JSON.parse(readFileSync(file, 'utf8'));
+    editTemplate(parsed);
+    writeFileSync(file, `${JSON.stringify(parsed, null, 2)}\n`);
+  }
   await json(await request.post('/api/plugins/install', { data: { source, confirm: true } }));
-  await json(await request.post(`/api/plugins/${PLUGIN_NAME}/enable`));
+  await json(await request.post(`/api/plugins/${pluginName}/enable`));
+}
+
+test.beforeAll(async ({ request }) => {
+  await json(await request.post('/api/onboarding/skip'));
+  sourceRoot = mkdtempSync(path.join(tmpdir(), 'ori-group-templates-fixture-'));
+  await installFixtureCopy(request, PLUGIN_NAME, RUN);
 });
 
 test.afterAll(async ({ request }) => {
   await request.delete(`/api/plugins/${PLUGIN_NAME}`).catch(() => {});
+  await request.delete(`/api/plugins/${HOSTILE_PLUGIN_NAME}`).catch(() => {});
   if (sourceRoot) rmSync(sourceRoot, { recursive: true, force: true });
 });
 
@@ -229,6 +248,9 @@ test('the group page separates template, coordinator and integration through set
 
   await strip.getByRole('button', { name: 'Set up Portfolio Coordinator' }).click();
   await expect(page.locator('#addAgentModal')).toBeVisible();
+  // The form focuses its name once fully open; a submit during the opening
+  // transition would be ignored by Bootstrap's hide().
+  await expect(page.locator('[data-agent-create-field="name"]')).toBeFocused();
   await page.locator('[data-agent-create-field="name"]').fill(coordinator);
   await page.locator('#createAgentBtn').click();
   await expect(page.locator('#addAgentModal')).toBeHidden();
@@ -427,4 +449,94 @@ test('the template chooser and review fit a phone-width viewport', async ({
   await page.screenshot({ path: testInfo.outputPath('group-template-review-mobile.png') });
   await page.keyboard.press('Escape');
   await expect(page.locator('#addFolderModal')).toBeHidden();
+});
+
+test('hostile and long source labels stay literal and keyboard-operable at phone width in both themes', async ({
+  page,
+  request
+}, testInfo) => {
+  const hostileName = '<img src=x onerror="window.__groupTemplateInjected=1">Hostile Home';
+  const longName = `Portfolio ${'Coordination '.repeat(8)}`.trim();
+  await installFixtureCopy(request, HOSTILE_PLUGIN_NAME, `h${RUN}`, template => {
+    template.assistant_program.station_name = hostileName;
+    template.assistant_program.station_description = `<script>window.__groupTemplateInjected=1</script>${'A long description. '.repeat(20)}`;
+    template.assistant_program.roles[0].label =
+      '<b onclick="window.__groupTemplateInjected=1">Lead</b>';
+    template.group_requirement.default_home_name = longName;
+  });
+  try {
+    const beforeWorkspaces = await workspaceIDs(request);
+    const body = await json(await request.get('/api/workspaces/group-templates'));
+    const entry = (body.group_templates as GroupTemplate[]).find(
+      template => template.provider?.plugin_id === HOSTILE_PLUGIN_NAME
+    );
+    expect(entry).toMatchObject({ name: hostileName, availability: { state: 'creatable' } });
+
+    await page.setViewportSize({ width: 400, height: 860 });
+    for (const theme of ['light', 'dark']) {
+      await openGroupCreator(page);
+      await page.evaluate(
+        value => document.documentElement.setAttribute('data-bs-theme', value),
+        theme
+      );
+      // The chooser is a native radio group: arrow keys move the selection and
+      // re-rendering keeps focus on the chosen option.
+      await page
+        .locator('#workspaceGroupTemplateOptions [data-group-template-id="general"] input')
+        .focus();
+      const option = page.locator(
+        `#workspaceGroupTemplateOptions [data-group-template-id="${entry!.id}"]`
+      );
+      for (let step = 0; step < 6 && !(await option.locator('input').isChecked()); step++) {
+        await page.keyboard.press('ArrowDown');
+      }
+      await expect(option.locator('input')).toBeChecked();
+      await expect(option.locator('input')).toBeFocused();
+      await expect(option).toContainText(hostileName);
+      await expect(option).toContainText('<b onclick="window.__groupTemplateInjected=1">Lead</b>');
+      expect(await option.locator('img, script, b').count()).toBe(0);
+      await expect(page.locator('#folderNameInput')).toHaveValue(longName);
+      const overflow = await page.evaluate(() => {
+        const dialog = document.querySelector('#addFolderModal .modal-body') as HTMLElement | null;
+        return {
+          page: document.documentElement.scrollWidth > window.innerWidth,
+          dialog: dialog ? dialog.scrollWidth > dialog.clientWidth : true
+        };
+      });
+      expect(overflow).toEqual({ page: false, dialog: false });
+      await page.screenshot({ path: testInfo.outputPath(`hostile-chooser-${theme}.png`) });
+
+      await page.locator('#wizardNextBtn').click();
+      const status = page.locator('[data-group-template-review-status]');
+      await expect(status).toHaveAttribute('role', 'status');
+      await expect(status).toContainText('Only this group will be created');
+      const summary = page.locator('#workspaceReviewSummary');
+      await expect(summary).toContainText(`Template: ${hostileName}`);
+      await expect(summary).toContainText(longName);
+      expect(await summary.locator('img, script, b').count()).toBe(0);
+      // The final action names the long group but stays one line inside the dialog.
+      const cta = await page.evaluate(() => {
+        const button = document.getElementById('createFolderBtn')!.getBoundingClientRect();
+        const dialog = document
+          .querySelector('#addFolderModal .modal-content')!
+          .getBoundingClientRect();
+        return {
+          inside:
+            button.bottom <= dialog.bottom + 1 &&
+            button.left >= dialog.left - 1 &&
+            button.right <= dialog.right + 1,
+          height: button.height
+        };
+      });
+      expect(cta.inside).toBe(true);
+      expect(cta.height).toBeLessThan(64);
+      await page.screenshot({ path: testInfo.outputPath(`hostile-review-${theme}.png`) });
+      await page.keyboard.press('Escape');
+      await expect(page.locator('#addFolderModal')).toBeHidden();
+    }
+    expect(await page.evaluate(() => (window as any).__groupTemplateInjected)).toBeUndefined();
+    expect(await workspaceIDs(request)).toEqual(beforeWorkspaces);
+  } finally {
+    await request.delete(`/api/plugins/${HOSTILE_PLUGIN_NAME}`).catch(() => {});
+  }
 });

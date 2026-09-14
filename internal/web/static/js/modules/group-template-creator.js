@@ -463,8 +463,14 @@
     return nameProblem(currentName());
   }
 
+  // Receipts are HTML strings built from source-supplied text; never fall back
+  // to raw text when the caller has no escaper of its own.
+  const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
   function escape(manager, value) {
-    return manager?.escapeHtml ? manager.escapeHtml(String(value ?? '')) : String(value ?? '');
+    const text = String(value ?? '');
+    return manager?.escapeHtml
+      ? manager.escapeHtml(text)
+      : text.replace(/[&<>"']/g, character => HTML_ESCAPES[character]);
   }
 
   function renderReceipt(manager) {
@@ -499,7 +505,7 @@
         <div class="workspace-review-card-main">
           <span class="workspace-review-card-label">What will happen</span>
           <strong>${reuse ? 'The existing group is reused unchanged' : 'One group is created, initially unstaffed'}</strong>
-          <span class="workspace-review-card-note ${review?.status === 'error' ? 'is-error' : ''}" data-group-template-review-status>${escape(manager, status)}</span>
+          <span class="workspace-review-card-note ${review?.status === 'error' ? 'is-error' : ''}" data-group-template-review-status role="status" aria-live="polite">${escape(manager, status)}</span>
         </div>
       </div>
       ${rolesCardHTML(manager, entry)}`;

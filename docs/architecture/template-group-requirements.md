@@ -439,6 +439,7 @@ observed.
 | Plugin blueprint resolver | Strict declaration and required-host-feature validation; no fallback to same-named library data. |
 | Templates editor | Preview/save/cancel against owner endpoints; installed source is read-only and offers Customize. |
 | `POST /api/workspaces/group-requirement/home/{review,commit}` | Inert review plus idempotent Home-only preparation; no project identity or project consequence. |
+| `GET/POST /api/workspaces/group-templates[/{review,commit}]` | Create Group's owner-free projection of eligible declarations; separately consented, named Home-only create/reuse ([Group Templates](group-templates.md)). |
 | `POST /api/workspaces` and legacy `/api/folders` | Shared evaluator/review-commit owner for policy-bearing templates; missing grouped Home blocks rather than being created in the project commit. |
 | `/api/workspaces/{id}/project`, map/group creator | Same effective resolver and evaluator; no arbitrary-parent or combined Home/project bypass. |
 | Setup quest/journey new/existing project | Existing project-connection owner plus the same group review; exact external file remains unchanged. |

@@ -220,6 +220,20 @@ test('guided setup describes its one template read-only with the chooser wording
   assert.equal(api.rolesCardHTML(guided, null), '');
 });
 
+test('role receipts escape source text even without a caller escaper', () => {
+  const { api } = environment();
+  const html = api.rolesCardHTML(
+    {},
+    managed({
+      home_roles: [{ role_id: 'x', label: '<img src=x onerror="alert(1)">', required: true }],
+      project_roles_note: ["Lead's <b>"]
+    })
+  );
+  assert.doesNotMatch(html, /<img|<b>/);
+  assert.match(html, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/);
+  assert.match(html, /Lead&#39;s &lt;b&gt;/);
+});
+
 test('catalog lookups for other surfaces resolve only managed entries by exact ID', async () => {
   const { api } = environment({
     fetch: async () => ({

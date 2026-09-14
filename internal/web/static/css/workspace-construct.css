@@ -124,6 +124,22 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
   background: linear-gradient(0deg, var(--wc-panel-2), var(--wc-panel)) !important;
   border-top-color: var(--wc-line) !important;
 }
+/* The final action names what it creates ("Create group “…” only"). A long,
+   user- or source-supplied name must shrink to one line on the footer row
+   instead of wrapping into a pill that spills past the dialog. */
+.workspace-create-modal .modal-footer #createFolderBtn {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 575.98px) {
+  .workspace-create-modal .modal-footer #createFolderBtn {
+    /* Its own row, less Bootstrap's per-item footer margins. */
+    flex-basis: calc(100% - var(--bs-modal-footer-gap, 0.5rem));
+  }
+}
 
 /* kicker line under the title area */
 .workspace-create-modal .modal-title::after {
@@ -394,6 +410,7 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
 }
 .workspace-create-modal .workspace-group-template-option input {
   flex: 0 0 auto;
+  align-self: flex-start;
   margin-top: 3px;
   accent-color: var(--wc-faction);
 }
