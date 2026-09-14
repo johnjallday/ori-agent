@@ -125,4 +125,51 @@ func TestResetPreviewLegacyAllOptionsDoNotBecomeStartFresh(t *testing.T) {
 	if intent != settingsreset.IntentSelectedData || len(categories) != 4 || !slices.Contains(categories, settingsreset.CategoryAppRecords) || !slices.Contains(categories, settingsreset.CategorySetupSteps) {
 		t.Fatal("legacy options were broadened or renamed incorrectly")
 	}
+	// The legacy boolean form has no plugin member and must not acquire one: it
+	// normalizes only to the four families it always meant.
+	if slices.Contains(categories, settingsreset.CategoryInstalledPlugins) {
+		t.Fatal("legacy options silently gained the installed plugins category")
+	}
+}
+
+func TestResetPreviewAcceptsInstalledPluginsThroughTheHeldPreviewAPI(t *testing.T) {
+	intent, categories, err := resetPreviewSelection("intent=selected_data&category=installed_plugins")
+	if err != nil || intent != settingsreset.IntentSelectedData ||
+		!slices.Equal(categories, []settingsreset.CategoryID{settingsreset.CategoryInstalledPlugins}) {
+		t.Fatalf("plugin-only selection = %q %v, %v", intent, categories, err)
+	}
+	_, five, err := resetPreviewSelection(
+		"intent=selected_data&category=settings&category=agents&category=app_records&category=setup_steps&category=installed_plugins")
+	if err != nil || len(five) != 5 {
+		t.Fatalf("five-category selection = %v, %v", five, err)
+	}
+	// POST authority is not broadened: categories still travel only on the
+	// preview query, never in the confirmation body.
+	for _, body := range []string{
+		`{"preview_id":"p","request_id":"r","confirmation":"RESET","installed_plugins":true}`,
+		`{"preview_id":"p","request_id":"r","confirmation":"RESET","category":"installed_plugins"}`,
+	} {
+		if _, _, err := decodeResetRequest(strings.NewReader(body)); err == nil {
+			t.Fatalf("execution accepted a client-supplied category: %s", body)
+		}
+	}
+	h := NewResetHandler(nil, nil, "")
+	h.SetPreviewPlanner(settingsreset.NewPlanner(func() settingsreset.Owners { return settingsreset.Owners{} }))
+	w := httptest.NewRecorder()
+	h.GetResetPreview(w, httptest.NewRequest(http.MethodGet, "/api/reset/preview?intent=selected_data&category=installed_plugins", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("plugin preview status = %d: %s", w.Code, w.Body.String())
+	}
+	var preview settingsreset.Preview
+	if err := json.Unmarshal(w.Body.Bytes(), &preview); err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.Categories) != 1 || preview.Categories[0].ID != settingsreset.CategoryInstalledPlugins {
+		t.Fatalf("plugin preview did not return the category: %+v", preview.Categories)
+	}
+	// Without an attached plugin owner the preview blocks rather than claiming a
+	// safe empty inventory.
+	if !slices.ContainsFunc(preview.Blockers, func(item settingsreset.Blocker) bool { return item.Code == "plugin_owner_unavailable" }) {
+		t.Fatalf("a missing plugin owner was presented as safe: %+v", preview.Blockers)
+	}
 }

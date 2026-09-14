@@ -23,6 +23,7 @@ const (
 	CategoryAgents           CategoryID = "agents"
 	CategoryAppRecords       CategoryID = "app_records"
 	CategorySetupSteps       CategoryID = "setup_steps"
+	CategoryInstalledPlugins CategoryID = "installed_plugins"
 	CategoryIdentityProgress CategoryID = "identity_progress"
 	CategoryAppConfiguration CategoryID = "app_configuration"
 	CategoryIntegrations     CategoryID = "integrations"
@@ -53,13 +54,25 @@ type Blocker struct {
 	Recovery string     `json:"recovery"`
 }
 
+// CategoryItem names one member of a category's reviewed scope, such as a single
+// installed plugin. Every string is bounded and sanitized by the owner that
+// produced it; none is executable, a filesystem target, or raw plugin markup.
+// The field is additive: a category without members omits it entirely, so
+// receipts written before items existed stay byte-identical.
+type CategoryItem struct {
+	Name    string   `json:"name"`
+	Summary string   `json:"summary"`
+	Details []string `json:"details,omitempty"`
+}
+
 type CategoryPreview struct {
-	ID          CategoryID  `json:"id"`
-	Label       string      `json:"label"`
-	Description string      `json:"description"`
-	Facts       []CountFact `json:"facts"`
-	Removed     []Location  `json:"removed"`
-	Retained    []Location  `json:"retained"`
+	ID          CategoryID     `json:"id"`
+	Label       string         `json:"label"`
+	Description string         `json:"description"`
+	Facts       []CountFact    `json:"facts"`
+	Items       []CategoryItem `json:"items,omitempty"`
+	Removed     []Location     `json:"removed"`
+	Retained    []Location     `json:"retained"`
 }
 
 type RestartMode string
@@ -133,12 +146,22 @@ type CheckResult struct {
 	Message string  `json:"message,omitempty"`
 }
 
+// ItemResult reports one member of a category's scope. It exists so a partial
+// failure can say which plugin is unresolved without replaying verified work or
+// leaking a raw path or error string. Additive and omitted when unused.
+type ItemResult struct {
+	Name    string  `json:"name"`
+	Outcome Outcome `json:"outcome"`
+	Message string  `json:"message,omitempty"`
+}
+
 type CategoryResult struct {
 	ID        CategoryID    `json:"id"`
 	Outcome   Outcome       `json:"outcome"`
 	Message   string        `json:"message,omitempty"`
 	Retryable bool          `json:"retryable"`
 	Checks    []CheckResult `json:"checks"`
+	Items     []ItemResult  `json:"items,omitempty"`
 	Retained  []Location    `json:"retained"`
 }
 

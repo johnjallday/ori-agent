@@ -1823,31 +1823,38 @@
             <!-- Reset Options -->
             <div class="settings-field">
               <div class="form-check mb-2">
-                <input class="form-check-input" type="checkbox" id="resetSettings">
+                <input class="form-check-input reset-category-checkbox" type="checkbox" id="resetSettings">
                 <label class="form-check-label" for="resetSettings" style="color: var(--text-primary);">
                   <strong>Settings & API Keys</strong>
                   <small class="d-block" style="color: var(--text-secondary);">Remove API keys and global configuration</small>
                 </label>
               </div>
               <div class="form-check mb-2">
-                <input class="form-check-input" type="checkbox" id="resetAgents">
+                <input class="form-check-input reset-category-checkbox" type="checkbox" id="resetAgents">
                 <label class="form-check-label" for="resetAgents" style="color: var(--text-primary);">
                   <strong>Agents</strong>
                   <small class="d-block" style="color: var(--text-secondary);">Delete all agents and their configurations</small>
                 </label>
               </div>
               <div class="form-check mb-2">
-                <input class="form-check-input" type="checkbox" id="resetSessions">
+                <input class="form-check-input reset-category-checkbox" type="checkbox" id="resetSessions">
                 <label class="form-check-label" for="resetSessions" style="color: var(--text-primary);">
                   <strong>Conversation &amp; app records</strong>
                   <small class="d-block" style="color: var(--text-secondary);">Shared app records and owned uploads; preserve and detach workspace/project folders and vault packages</small>
                 </label>
               </div>
               <div class="form-check mb-2">
-                <input class="form-check-input" type="checkbox" id="resetOnboarding">
+                <input class="form-check-input reset-category-checkbox" type="checkbox" id="resetOnboarding">
                 <label class="form-check-label" for="resetOnboarding" style="color: var(--text-primary);">
                   <strong>Setup steps</strong>
                   <small class="d-block" style="color: var(--text-secondary);">Replay setup completion only; keep identity, data, credentials, and quest progress</small>
+                </label>
+              </div>
+              <div class="form-check mb-2">
+                <input class="form-check-input reset-category-checkbox" type="checkbox" id="resetInstalledPlugins" aria-describedby="resetInstalledPluginsHelp">
+                <label class="form-check-label" for="resetInstalledPlugins" style="color: var(--text-primary);">
+                  <strong>Installed plugins</strong>
+                  <small class="d-block" id="resetInstalledPluginsHelp" style="color: var(--text-secondary);">Uninstall every installed plugin: its registration, MCP servers, copied skills, Workspace Surface state, managed clones and artifacts. Keep marketplaces, linked source folders, your own skills and MCP servers, and workspace files and history</small>
                 </label>
               </div>
             </div>
@@ -1870,7 +1877,7 @@
             <section id="resetOperationPanel" class="mt-4 p-3 modern-card" aria-labelledby="resetOperationTitle" hidden>
               <h3 id="resetOperationTitle" class="h6">Reset result</h3>
               <p id="resetOperationStatus" role="status" aria-live="polite" aria-atomic="true" tabindex="-1"></p>
-              <ul id="resetOperationResults" class="mb-0"></ul>
+              <ul id="resetOperationResults" class="mb-0" style="overflow-wrap: anywhere;"></ul>
               <button id="openStartFreshSetupBtn" class="btn btn-primary mt-3" type="button" hidden>Open first-run setup</button>
             </section>
 
@@ -1913,7 +1920,11 @@
           <div id="resetConfirmWarning" class="alert alert-danger mb-3">
             <strong>Warning:</strong> You are about to permanently delete the following:
           </div>
-          <ul id="resetItemsList" class="mb-3" style="color: var(--text-primary);"></ul>
+          <!-- Reviewed scope includes absolute owner paths and plugin-supplied
+               names, which are single unbreakable tokens. Without anywhere-wrap
+               they run past the dialog at phone width and the reviewer cannot
+               read what is about to be deleted. -->
+          <ul id="resetItemsList" class="mb-3" style="color: var(--text-primary); overflow-wrap: anywhere;"></ul>
           <label for="resetConfirmInput" id="resetConfirmInstructions" class="mb-2" style="color: var(--text-secondary);">
             To confirm, type <strong>RESET</strong> in the box below:
           </label>

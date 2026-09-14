@@ -115,6 +115,7 @@ function harness({
       'resetAgents',
       'resetSessions',
       'resetOnboarding',
+      'resetInstalledPlugins',
       'resetAppBtn',
       'startFreshBtn',
       'selectAllResetBtn',
@@ -159,8 +160,11 @@ function harness({
     setItem: (key, value) => values.set(key, value),
     removeItem: key => values.delete(key)
   });
+  let modalConstructions = 0;
   const modal = {
-    show() {},
+    show() {
+      elements.resetConfirmModal.hidden = false;
+    },
     hide() {
       elements.resetConfirmModal.hidden = true;
     }
@@ -185,7 +189,8 @@ function harness({
               elements.resetSettings,
               elements.resetAgents,
               elements.resetSessions,
-              elements.resetOnboarding
+              elements.resetOnboarding,
+              elements.resetInstalledPlugins
             ]
           : []
     },
@@ -200,9 +205,13 @@ function harness({
     bootstrap: {
       Modal: class {
         constructor() {
+          modalConstructions += 1;
           return modal;
         }
         static getInstance() {
+          return modal;
+        }
+        static getOrCreateInstance() {
           return modal;
         }
       }
@@ -232,6 +241,7 @@ function harness({
     context,
     storage,
     sessionStorage,
+    modalConstructions: () => modalConstructions,
     async review(ids = ['resetSettings']) {
       for (const id of ids) elements[id].checked = true;
       await elements.resetSettings.emit('change');
@@ -505,4 +515,263 @@ test('saved operation identity recovers durable status after a page load', async
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(h.calls[0].url, '/api/reset/operations/operation-1');
   assert.match(h.resultText(), /partial|retry later/i);
+});
+
+// --- Installed plugins ------------------------------------------------------
+
+const pluginPreview = {
+  ...preview,
+  id: 'plugin-preview',
+  operation_id: 'plugin-operation',
+  selected: ['installed_plugins'],
+  categories: [
+    {
+      id: 'installed_plugins',
+      label: 'Installed plugins',
+      description: 'Uninstall every plugin this Ori installation has installed.',
+      facts: [
+        { name: 'installed plugins', count: 2 },
+        { name: 'plugin-copied personal skills removed', count: 2 },
+        { name: 'linked plugin sources kept', count: 1 }
+      ],
+      items: [
+        {
+          name: 'demo-managed',
+          summary: 'version 1.4.0 · enabled · managed clone (removed)',
+          details: ['MCP registrations: demo-managed/tools', 'Personal skills: demo-managed-skill']
+        },
+        {
+          name: 'demo-linked',
+          summary: 'version 0.2.0 · disabled · linked source (kept)',
+          details: ['Personal skills: demo-linked-skill']
+        }
+      ],
+      removed: [
+        { display_path: '/home/.agents/skills/demo-managed-skill', reason: 'Exact copied skill.' }
+      ],
+      retained: [
+        { display_path: '/data/plugins/marketplaces.json', reason: 'Marketplaces are preserved.' }
+      ]
+    }
+  ]
+};
+
+test('Installed plugins is a selectable fifth category with its own preview query', async () => {
+  const h = harness({ previewResult: pluginPreview });
+  await h.review(['resetInstalledPlugins']);
+  assert.equal(h.calls.length, 1);
+  assert.match(h.calls[0].url, /intent=selected_data/);
+  assert.match(h.calls[0].url, /category=installed_plugins/);
+  assert.equal(h.calls[0].url.includes('category=settings'), false);
+  assert.equal(h.elements.confirmResetBtn.disabled, false);
+  // Start Fresh stays a distinct control and intent.
+  assert.match(h.elements.resetConfirmTitleText.textContent, /reviewed data reset/i);
+  assert.equal(h.elements.startFreshBtn.disabled, true);
+});
+
+test('Select every category selects five boxes and stays a selected-data reset', async () => {
+  const h = harness({ previewResult: pluginPreview });
+  await h.elements.selectAllResetBtn.click();
+  const boxes = [
+    'resetSettings',
+    'resetAgents',
+    'resetSessions',
+    'resetOnboarding',
+    'resetInstalledPlugins'
+  ];
+  for (const id of boxes) assert.equal(h.elements[id].checked, true, `${id} was not selected`);
+  await h.elements.clearAllResetBtn.click();
+  for (const id of boxes) assert.equal(h.elements[id].checked, false, `${id} was not cleared`);
+
+  await h.elements.selectAllResetBtn.click();
+  await h.elements.resetAppBtn.click();
+  assert.match(h.calls[0].url, /intent=selected_data/);
+  assert.equal(h.calls[0].url.includes('intent=start_fresh'), false);
+  for (const category of [
+    'settings',
+    'agents',
+    'app_records',
+    'setup_steps',
+    'installed_plugins'
+  ]) {
+    assert.ok(h.calls[0].url.includes(`category=${category}`), `${category} was not requested`);
+  }
+  // Choices lock once review begins, so neither quick-select control can widen
+  // a held preview.
+  await h.elements.clearAllResetBtn.click();
+  for (const id of boxes)
+    assert.equal(h.elements[id].checked, true, `${id} was cleared mid-review`);
+});
+
+test('plugin review names each plugin and its components as literal text', async () => {
+  const h = harness({ previewResult: pluginPreview });
+  await h.review(['resetInstalledPlugins']);
+  assert.match(h.previewText(), /installed plugins: 2/);
+  assert.match(h.previewText(), /Item: demo-managed/);
+  assert.match(h.previewText(), /managed clone \(removed\)/);
+  assert.match(h.previewText(), /Item: demo-linked/);
+  assert.match(h.previewText(), /linked source \(kept\)/);
+  assert.match(h.previewText(), /MCP registrations: demo-managed\/tools/);
+  assert.match(h.previewText(), /Remove: \/home\/\.agents\/skills\/demo-managed-skill/);
+  assert.match(h.previewText(), /Keep: \/data\/plugins\/marketplaces\.json/);
+  assert.equal(
+    h.elements.resetItemsList.children.some(node => node.innerHTML),
+    false
+  );
+});
+
+test('untrusted plugin text renders literally and never as markup', async () => {
+  const hostile = {
+    ...pluginPreview,
+    categories: [
+      {
+        ...pluginPreview.categories[0],
+        items: [
+          {
+            name: '<img src=x onerror=alert(1)>',
+            summary: '<script>alert(2)</script>',
+            details: ['<b>not bold</b>']
+          }
+        ]
+      }
+    ]
+  };
+  const h = harness({ previewResult: hostile });
+  await h.review(['resetInstalledPlugins']);
+  assert.match(h.previewText(), /<img src=x onerror=alert\(1\)>/);
+  assert.match(h.previewText(), /<script>alert\(2\)<\/script>/);
+  assert.match(h.previewText(), /<b>not bold<\/b>/);
+  assert.equal(
+    h.elements.resetItemsList.children.some(node => node.innerHTML),
+    false
+  );
+});
+
+test('zero installed plugins reviews as a safe no-op rather than a blocker', async () => {
+  const empty = {
+    ...pluginPreview,
+    categories: [
+      {
+        ...pluginPreview.categories[0],
+        facts: [{ name: 'installed plugins', count: 0 }],
+        items: [],
+        removed: []
+      }
+    ]
+  };
+  const h = harness({ previewResult: empty });
+  await h.review(['resetInstalledPlugins']);
+  assert.match(h.previewText(), /installed plugins: 0/);
+  assert.equal(h.previewText().includes('Item:'), false);
+  assert.equal(h.elements.confirmResetBtn.disabled, false);
+});
+
+test('unsafe plugin ownership blocks confirmation with the server message', async () => {
+  const blocked = {
+    ...pluginPreview,
+    blockers: [
+      {
+        code: 'plugin_skill_ownership_ambiguous',
+        category: 'installed_plugins',
+        message: 'Two installed plugins claim the same personal skill directory.',
+        recovery: 'Uninstall one of them manually, then review reset again.'
+      }
+    ]
+  };
+  const h = harness({ previewResult: blocked });
+  await h.review(['resetInstalledPlugins']);
+  assert.equal(h.elements.confirmResetBtn.disabled, true);
+  await h.elements.confirmResetBtn.emit('click');
+  assert.equal(h.calls.filter(call => call.url === '/api/reset').length, 0);
+  assert.match(h.previewText(), /claim the same personal skill directory/);
+  assert.match(h.previewText(), /Uninstall one of them manually/);
+});
+
+test('a partial plugin failure names the unresolved plugin and keeps the recovery identity', async () => {
+  const partial = operation('partial_failure', [
+    {
+      id: 'installed_plugins',
+      outcome: 'failed',
+      message: 'One or more installed plugins could not be removed and verified.',
+      retryable: true,
+      checks: [{ name: 'plugin_components_absent', outcome: 'failed' }],
+      items: [
+        { name: 'demo-managed', outcome: 'completed' },
+        {
+          name: 'demo-linked',
+          outcome: 'failed',
+          message: "One or more of this plugin's components remain."
+        }
+      ]
+    }
+  ]);
+  partial.operation.id = 'plugin-operation';
+  const h = harness({ previewResult: pluginPreview, executeResult: partial });
+  await h.review(['resetInstalledPlugins']);
+  await h.elements.confirmResetBtn.click();
+  assert.match(h.resultText(), /Installed plugins: failed/);
+  assert.match(h.resultText(), /Installed plugins \/ demo-managed: completed/);
+  assert.match(h.resultText(), /Installed plugins \/ demo-linked: failed/);
+  assert.match(h.resultText(), /partially completed|retry only unresolved/i);
+  assert.equal(/rolled back|nothing was deleted/i.test(h.resultText()), false);
+  assert.equal(h.storage.get('ori.reset.operation_id'), 'plugin-operation');
+});
+
+test('a recovered plugin reset reports verified completion per plugin', async () => {
+  const completed = operation('completed', [
+    {
+      id: 'installed_plugins',
+      outcome: 'completed',
+      checks: [{ name: 'plugin_components_absent', outcome: 'completed' }],
+      items: [
+        { name: 'demo-managed', outcome: 'completed' },
+        { name: 'demo-linked', outcome: 'completed' }
+      ]
+    }
+  ]);
+  completed.operation.id = 'plugin-operation';
+  const h = harness({ storedOperation: 'plugin-operation', executeResult: completed });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.calls[0].url, '/api/reset/operations/plugin-operation');
+  assert.match(h.resultText(), /completed and its named postconditions were verified/i);
+  assert.match(h.resultText(), /Installed plugins \/ demo-linked: completed/);
+  assert.equal(h.elements.openStartFreshSetupBtn.hidden, true);
+});
+
+test('repeated reviews reuse one dialog instance so Cancel always closes it', async () => {
+  const h = harness({ previewResult: pluginPreview });
+  await h.review(['resetInstalledPlugins']);
+  await h.elements.resetConfirmModal.emit('hidden.bs.modal');
+  // A second review of a different scope must not construct a competing dialog
+  // instance: the stale one keeps its listeners and can leave the reviewed
+  // dialog stuck open with the destructive controls behind it.
+  h.elements.resetInstalledPlugins.checked = false;
+  await h.elements.startFreshBtn.click();
+  assert.equal(h.modalConstructions(), 0, 'a fresh Modal instance was constructed');
+  assert.equal(h.elements.resetConfirmModal.hidden, false);
+  await h.elements.resetConfirmModal.emit('hidden.bs.modal');
+  assert.equal(h.elements.resetAppBtn.disabled, true, 'no selection should re-lock review');
+  assert.equal(h.elements.startFreshBtn.disabled, false);
+});
+
+test('the Installed plugins checkbox is described and kept out of Start Fresh', () => {
+  const template = readFileSync(
+    new URL('../../../templates/pages/settings.tmpl', import.meta.url),
+    'utf8'
+  );
+  assert.match(template, /id="resetInstalledPlugins"/);
+  assert.match(template, /aria-describedby="resetInstalledPluginsHelp"/);
+  assert.match(template, /id="resetInstalledPluginsHelp"/);
+  assert.match(template, /for="resetInstalledPlugins"[^>]*>\s*<strong>Installed plugins<\/strong>/);
+  // Copy states both sides of the contract.
+  const help = template.slice(template.indexOf('resetInstalledPluginsHelp'));
+  assert.match(help, /marketplaces/i);
+  assert.match(help, /linked source/i);
+  // Start Fresh remains its own separately described control.
+  assert.match(template, /id="startFreshBtn"/);
+  assert.equal(
+    /id="startFreshBtn"[^>]*>[\s\S]{0,200}Installed plugins/.test(template),
+    false,
+    'Start Fresh must not present itself as the installed-plugins control'
+  );
 });

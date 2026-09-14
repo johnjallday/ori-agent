@@ -73,6 +73,9 @@ func New(t testing.TB) *Fixture {
 	for _, name := range []string{
 		"external/settings.json", "data-backup/settings.json", "data/unknown-unclassified.txt",
 		"home/.config/other-app/auth.json", "home/.codex/auth.json", "home/.claude/settings.json",
+		// A personal skill no plugin installed. Reset must remove only the exact
+		// recorded plugin copies beside it, never enumerate or clear this root.
+		"home/.agents/skills/user-authored-skill/SKILL.md",
 		"projects/retained/source.txt", "vaults/retained.bin",
 		"data/workspaces/retained-project/source.txt", "data/retained-vaults/retained.bin",
 	} {

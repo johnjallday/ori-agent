@@ -13,6 +13,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
+	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/sessionfiles"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -31,7 +32,12 @@ type RecoveryOptions struct {
 	DataDir         string
 	SecretStore     vault.SecretStore
 	OpenSecretStore func() (vault.SecretStore, error)
-	Now             func() time.Time
+	// PersonalSkillsRoot resolves the shared skills directory independently of
+	// the receipt. It defaults to the same resolver the live handler wiring
+	// uses; a receipt naming a different root is a scope change, never an
+	// instruction to delete somewhere else.
+	PersonalSkillsRoot func() (string, error)
+	Now                func() time.Time
 }
 
 // ProductionRecoveryOptions resolves and migrates the canonical Settings
@@ -39,7 +45,8 @@ type RecoveryOptions struct {
 // not contact a provider or inspect external CLI authentication.
 func ProductionRecoveryOptions(dataDir string) RecoveryOptions {
 	return RecoveryOptions{
-		DataDir: dataDir,
+		DataDir:            dataDir,
+		PersonalSkillsRoot: plugin.DefaultPersonalSkillsRoot,
 		OpenSecretStore: func() (vault.SecretStore, error) {
 			settingsPath := filepath.Join(dataDir, "settings.json")
 			canonical := vault.NewDefaultSecretStoreForNamespace(settingsPath)
@@ -103,7 +110,7 @@ func RecoverBeforeStores(ctx context.Context, lease *resetstate.Lease, options R
 		return ErrJournalInvalid
 	}
 
-	targets, configManager, err := validateRecoveryScope(ctx, lease, j, options)
+	targets, configManager, pluginPaths, err := validateRecoveryScope(ctx, lease, j, options)
 	if err != nil {
 		if allResultsPending(j.Operation.Results) {
 			blockRecovery(j, "recovery_scope_changed", options.Now(), "Reset scope changed before pre-start application; no pending category was applied.")
@@ -149,7 +156,7 @@ func RecoverBeforeStores(ctx context.Context, lease *resetstate.Lease, options R
 		}
 		j.Operation.Results[i] = applyRecoveryCategory(
 			ctx, j.Operation.Results[i], j.Plan.Preview.Selected, j.Plan.Evidence,
-			targets, configManager, lease,
+			targets, configManager, pluginPaths, lease,
 		)
 		if i == len(j.Operation.Results)-1 || noUnresolvedResults(j.Operation.Results) {
 			j.Operation.State = StateVerifying
@@ -185,65 +192,96 @@ func finishRecovery(lease *resetstate.Lease, j *journal) error {
 	return lease.AuthorizeRecoveredRuntime()
 }
 
-func validateRecoveryScope(ctx context.Context, lease *resetstate.Lease, j *journal, options RecoveryOptions) (map[string]string, *config.Manager, error) {
+func validateRecoveryScope(ctx context.Context, lease *resetstate.Lease, j *journal, options RecoveryOptions) (map[string]string, *config.Manager, plugin.ResetPaths, error) {
+	var noPlugins plugin.ResetPaths
 	if err := ctx.Err(); err != nil {
-		return nil, nil, err
+		return nil, nil, noPlugins, err
 	}
 	root := lease.Path()
 	if !protectedDigestsUnchanged(ctx, j.Plan.Evidence) {
-		return nil, nil, ErrScopeChanged
+		return nil, nil, noPlugins, ErrScopeChanged
 	}
 	expected, err := independentlyResolvedTargets(root)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, noPlugins, err
 	}
 	actual := make(map[string]string, len(j.Plan.Targets))
 	for _, target := range j.Plan.Targets {
 		want, ok := expected[target.Kind]
 		if !ok {
-			return nil, nil, ErrJournalInvalid
+			return nil, nil, noPlugins, ErrJournalInvalid
 		}
 		resolved, err := resolvePath(want)
 		if err != nil || resolved != target.Path {
-			return nil, nil, ErrScopeChanged
+			return nil, nil, noPlugins, ErrScopeChanged
 		}
 		for _, kept := range j.Plan.Evidence.ProtectedPaths {
 			if pathsOverlap(resolved, kept) {
-				return nil, nil, ErrScopeChanged
+				return nil, nil, noPlugins, ErrScopeChanged
 			}
 		}
 		actual[target.Kind] = resolved
 	}
 	if len(actual) != len(expectedKinds(j.Plan.Preview.Selected)) {
-		return nil, nil, ErrJournalInvalid
+		return nil, nil, noPlugins, ErrJournalInvalid
 	}
 	resolvedDatabase, err := resolvePath(expected["database_records"])
 	if err != nil || resolvedDatabase != j.Plan.Evidence.DatabasePath {
-		return nil, nil, ErrScopeChanged
+		return nil, nil, noPlugins, ErrScopeChanged
 	}
 	report, err := database.InspectResetFile(ctx, resolvedDatabase)
 	if err != nil || len(report.Problems) != 0 || report.SchemaDigest != j.Plan.Evidence.DatabaseSchema || report.Version != j.Plan.Evidence.DatabaseSchemaVersion {
-		return nil, nil, ErrScopeChanged
+		return nil, nil, noPlugins, ErrScopeChanged
+	}
+	pluginPaths, err := validatePluginRecoveryScope(root, j, options)
+	if err != nil {
+		return nil, nil, noPlugins, err
 	}
 	secretStore := options.SecretStore
 	if slices.Contains(j.Plan.Preview.Selected, CategorySettings) && secretStore == nil {
 		if options.OpenSecretStore == nil {
-			return nil, nil, ErrScopeChanged
+			return nil, nil, noPlugins, ErrScopeChanged
 		}
 		secretStore, err = options.OpenSecretStore()
 		if err != nil || secretStore == nil {
-			return nil, nil, ErrScopeChanged
+			return nil, nil, noPlugins, ErrScopeChanged
 		}
 	}
 	settingsPath := expected["settings_fields"]
 	manager := config.NewManagerWithSecretStore(settingsPath, secretStore)
 	if err := manager.Load(); err != nil {
-		return nil, nil, ErrScopeChanged
+		return nil, nil, noPlugins, ErrScopeChanged
 	}
 	if !slices.Contains(j.Plan.Preview.Selected, CategoryAppRecords) && manager.IsWorkspaceRootConfirmed() != j.Plan.Evidence.WorkspaceRootConfirmed {
-		return nil, nil, ErrScopeChanged
+		return nil, nil, noPlugins, ErrScopeChanged
 	}
-	return actual, manager, nil
+	return actual, manager, pluginPaths, nil
+}
+
+// validatePluginRecoveryScope re-resolves the plugin roots independently and
+// confirms the reviewed inventory is still the one on disk.
+//
+// The registry digest is required to match only while nothing has been applied.
+// Once this operation has started removing plugins the registry legitimately
+// differs from the review, and per-plugin verification takes over. In neither
+// case can a plugin installed after the review be removed: only the recorded
+// evidence items are ever acted on.
+func validatePluginRecoveryScope(root string, j *journal, options RecoveryOptions) (plugin.ResetPaths, error) {
+	evidence := j.Plan.Evidence.Plugins
+	if evidence == nil {
+		return plugin.ResetPaths{}, nil
+	}
+	paths, err := recoveredPluginPaths(root, evidence, options.PersonalSkillsRoot)
+	if err != nil {
+		return plugin.ResetPaths{}, err
+	}
+	if j.Operation.State == StateAwaitingRestart && allResultsPending(j.Operation.Results) {
+		inventory, problems := plugin.InspectReset(paths)
+		if len(problems) != 0 || inventory.RegistryDigest != evidence.RegistryDigest {
+			return plugin.ResetPaths{}, ErrScopeChanged
+		}
+	}
+	return paths, nil
 }
 
 func independentlyResolvedTargets(root string) (map[string]string, error) {
@@ -283,7 +321,16 @@ func independentlyResolvedTargets(root string) (map[string]string, error) {
 		}
 	}
 	pluginsRoot := filepath.Join(root, "plugins")
+	pluginPaths := plugin.DefaultResetPaths(root, filepath.Join(root, "unused-skills-placeholder"))
 	return map[string]string{
+		// Selected installed-plugin reset edits within these owner scopes; the
+		// personal skills root is resolved separately and never appears here.
+		"plugin_registry_records":       pluginPaths.RegistryPath(),
+		"plugin_mcp_entries":            pluginPaths.MCPRegistry,
+		"plugin_surface_state":          pluginPaths.StateRoot(),
+		"plugin_managed_artifacts":      pluginPaths.ArtifactsRoot(),
+		"plugin_managed_clones":         pluginPaths.CloneDir,
+		"plugin_preview_state":          pluginPaths.PreviewRoot(),
 		"settings_fields":               settingsPath,
 		"agent_index":                   cleanIndex,
 		"agent_profiles":                agentProfiles,
@@ -327,7 +374,7 @@ func expectedKinds(selected []CategoryID) map[string]bool {
 	return result
 }
 
-func applyRecoveryCategory(ctx context.Context, result CategoryResult, selected []CategoryID, evidence resolvedEvidence, targets map[string]string, manager *config.Manager, lease *resetstate.Lease) CategoryResult {
+func applyRecoveryCategory(ctx context.Context, result CategoryResult, selected []CategoryID, evidence resolvedEvidence, targets map[string]string, manager *config.Manager, pluginPaths plugin.ResetPaths, lease *resetstate.Lease) CategoryResult {
 	installationRoot := filepath.Dir(targets["settings_fields"])
 	for i := range result.Checks {
 		result.Checks[i].Outcome = OutcomeFailed
@@ -411,6 +458,10 @@ func applyRecoveryCategory(ctx context.Context, result CategoryResult, selected 
 			reflect.DeepEqual(beforeAssistantProgress, verified.GetAssistantProgress()) {
 			completeResultCheck(&result, "identity_and_progress_unchanged")
 		}
+	case CategoryInstalledPlugins:
+		// No live plugin manager, service, or uninstall hook is involved: the
+		// offline owner rewrites the recorded files directly.
+		result = applyPluginRecovery(ctx, result, evidence.Plugins, pluginPaths)
 	case CategoryIdentityProgress:
 		setup, err := onboarding.OpenForReset(targets["first_run_state"])
 		if err != nil || setup.ResetFirstRunVerified() != nil {
@@ -423,6 +474,14 @@ func applyRecoveryCategory(ctx context.Context, result CategoryResult, selected 
 		}
 		completeResultCheck(&result, "supplemental_configuration_default")
 	case CategoryIntegrations:
+		// Exact plugin removal first: it reads the installed registry and the MCP
+		// document that the broader removal below deletes, and it is the only step
+		// that can reach the plugin-copied skills outside this installation.
+		// Exactly one plugin-removal pass runs — the selective category and Start
+		// Fresh never both apply, because they cannot appear in one plan.
+		if !applyFreshPluginRemoval(ctx, &result, evidence.Plugins, pluginPaths) {
+			return result
+		}
 		if removeFreshTargets(result.ID, targets, installationRoot) != nil {
 			return result
 		}

@@ -120,6 +120,21 @@ func validateJournal(j *journal) error {
 			return ErrJournalInvalid
 		}
 	}
+	// Plugin ownership carries its own narrower boundary rather than relaxing the
+	// generic target rules above. It is required exactly when the reviewed scope
+	// owns installed plugins and refused otherwise, so an unrelated receipt can
+	// never smuggle an external deletion root in.
+	switch {
+	case evidence.Plugins != nil:
+		if !pluginEvidencePermitted(selected) {
+			return ErrJournalInvalid
+		}
+		if err := validatePluginEvidence(root, evidence.Plugins, evidence.ProtectedPaths); err != nil {
+			return err
+		}
+	case pluginEvidenceRequired(selected):
+		return ErrJournalInvalid
+	}
 	wantKinds := make(map[string]CategoryID)
 	allPending, allComplete, hasUnresolved := true, true, false
 	for i, id := range selected {
@@ -128,6 +143,9 @@ func validateJournal(j *journal) error {
 		if category.ID != id || result.ID != id || len(result.Checks) != len(def.Checks) ||
 			!reflect.DeepEqual(category.Retained, result.Retained) {
 			return ErrJournalInvalid
+		}
+		if err := validateCategoryMembers(category, result, evidence.Plugins); err != nil {
+			return err
 		}
 		switch result.Outcome {
 		case OutcomePending:
@@ -236,6 +254,11 @@ func targetKinds(id CategoryID) []string {
 		return []string{"workspace_registration_fields", "workspace_permissions", "database_records", "owned_uploads"}
 	case CategorySetupSteps:
 		return []string{"setup_fields"}
+	case CategoryInstalledPlugins:
+		// These are scopes the category edits within, not roots it deletes. The
+		// personal skills root is deliberately absent: it lives outside the
+		// installation and is carried by the dedicated plugin evidence instead.
+		return []string{"plugin_registry_records", "plugin_mcp_entries", "plugin_surface_state", "plugin_managed_artifacts", "plugin_managed_clones", "plugin_preview_state"}
 	case CategoryIdentityProgress:
 		return []string{"first_run_state"}
 	case CategoryAppConfiguration:

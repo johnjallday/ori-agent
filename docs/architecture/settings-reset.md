@@ -922,3 +922,182 @@ permission sweep found no reusable shell operation that warranted a new checked-
 entry point or allowlist request. No production fault endpoint, mock-backed
 production deletion path, real credential value, or machine-specific absolute
 path is checked in.
+
+## Installed-plugin ownership and receipt compatibility
+
+Reset removes installed plugins exactly, as an explicit selected-data category
+and as the plugin portion of Start Fresh. The contract below is what makes that
+possible without weakening the path or receipt safeguards above.
+
+**Reset selected data now offers five categories** — Settings & API keys,
+Agents, Conversation & app records, Setup steps, and **Installed plugins**.
+Start Fresh keeps its nine server-owned categories and its ordering. Selecting
+every checkbox is still a selected-data reset, never Start Fresh.
+
+### Offline ownership owner
+
+`internal/plugin/reset.go` is the single owner of "what does an installed plugin
+own, and how is it removed". It is file-level and manager-free: it constructs no
+`plugin.Manager`, resolves no source, clones nothing, starts no service, and runs
+no plugin-authored uninstall hook. The same code therefore serves both the live
+preview and the pre-store recovery boundary, where no runtime owner exists.
+
+A **valid installed record is the ownership authority**, exactly as it is for the
+explicit uninstall path. Reset never infers an additional file from a manifest
+and never enumerates a shared directory to decide what to delete.
+
+Recorded plugin and skill names come from external manifests and directory
+listings and are otherwise unvalidated, yet the plugin name is used as a path
+segment by the artifact installer and by the Workspace Surface data root.
+`validResetSegment` is the boundary: a plain, visible, single path component with
+no separator, traversal, control character, or leading dot. Anything else blocks
+the whole review rather than being skipped, and a blocked inspection returns an
+empty inventory so a partial view cannot be mistaken for the reviewed scope.
+
+Per plugin, the owned locations are:
+
+| Location | Note |
+|---|---|
+| `<plugins>/installed.json` record | removed last, so a retry keeps its authority |
+| `<data>/mcp_registry.json` entries | exact recorded names only, each required to be namespaced `"<plugin>/<server>"` |
+| `<HOME>/.agents/skills/<name>` | exact recorded direct children only; the root is never enumerated or removed |
+| `<plugins>/state/<sha256(name)>` | host-owned namespaced key/value state |
+| `<plugins>/state/<name>` | the plugin service's own data root, addressed by raw id in the Workspace Surface context |
+| `<plugins>/artifacts/<name>` | managed verified artifacts |
+| `<plugins>/src/<clone>` | only when the resolved install root is inside the managed clone directory |
+
+A linked external source — any resolved install root outside the managed clone
+directory — is never removed. Marketplace registrations are never touched by the
+selected category; Start Fresh still removes them under its existing broader
+`integrations` policy, and that difference is deliberate.
+
+Two plugins recording the same personal skill name is **ambiguous ownership and
+blocks**, because the shared skills directory has no plugin namespacing and the
+second install silently overwrote the first.
+
+### Boundaries, not a relaxed rule
+
+The personal skills root is the only location outside the installation. It does
+not become a generic reset target: generic targets keep their existing
+confinement (absolute, inside the installation, outside `.ori-reset`, no overlap
+with retained paths). The skills root is carried in a separate validated plugin
+evidence structure that admits only normalized recorded direct children of that
+exact root. Recovery re-resolves it independently from the process environment
+rather than trusting the receipt.
+
+### Receipt compatibility: additive v1
+
+`decodeJournal` accepts a stored receipt only when re-encoding the decoded value
+reproduces the stored bytes exactly, so the encoded shape of a v1 journal is a
+hard compatibility contract. The decision is **additive v1 with no schema bump**:
+
+1. Every new field is `omitempty` and of a type `omitempty` actually applies to —
+   plugin evidence enters as a pointer, per-plugin outcomes as slices. A struct
+   field is never `omitempty`-able and would strand every stored receipt.
+2. No existing field changes name, type, or `omitempty` status.
+3. **Check lists in `definition()` are frozen for existing categories.**
+   `validateJournal` compares each result's check count and names against the
+   live definition, so adding a check to `integrations` would invalidate every
+   legacy Start Fresh receipt. Labels and descriptions are not compared and may
+   change.
+4. Start Fresh keeps its nine categories in their current order.
+   `installed_plugins` is exposed only to selected data, where `integrations` is
+   not selectable, so no plan contains both and no target kind is duplicated.
+5. `StartupPolicy` gains nothing; it has the same byte-exact contract and no new
+   suppression is required, because nothing at startup re-imports plugins.
+
+A legacy Start Fresh receipt therefore keeps its original raw managed-root
+semantics automatically: its evidence carries no plugin block, so recovery takes
+the unchanged `removeFreshTargets` path. `journal_compat_test.go` and
+`internal/settingsreset/testdata/journal-v1-*.json` freeze this — eight checked-in
+receipts covering selected and Start Fresh intents in awaiting-restart, applying,
+completed, partial-failure, and blocked states must keep decoding, re-encoding
+byte-for-byte, and producing exactly the v1 key set.
+
+Reset metadata is capped at 64 KiB (and admission requires the encoded journal to
+fit in `MaxRecordBytes - 2048`), so the reviewed plugin inventory is bounded at
+64 plugins with bounded per-plugin component counts. An installation above the
+cap blocks with a precise reason instead of reviewing a truncated scope.
+
+### Ordering and completion
+
+Removal per plugin mirrors `Manager.Uninstall`: namespaced state, managed
+artifacts, managed clone, recorded personal skill copies, recorded MCP
+registrations, then the installed record. Inside Start Fresh, the exact plugin
+pass runs **before** `removeFreshTargets` deletes `installed.json` and
+`mcp_registry.json`, which are the authority for it. Exactly one plugin-removal
+pass ever runs.
+
+Every operation is idempotent, and **a missing registry row alone never proves
+removal**: the copied skills live outside the installation, so
+`ResetItemRemoved` re-checks every recorded external component independently.
+
+### Removal and preservation matrix
+
+| Location | Installed plugins | Start Fresh |
+|---|---|---|
+| `installed.json` records | reviewed records removed, others kept | whole file removed |
+| plugin MCP registrations | exact recorded namespaced names | exact names, then the whole registry |
+| `~/.agents/skills/<recorded name>` | removed | removed |
+| shared personal skills root and skills Ori did not install | **kept** | **kept** |
+| `plugins/state/<sha256(id)>` and `plugins/state/<id>` | removed | removed |
+| `plugins/artifacts/<id>` | removed | removed |
+| managed clone under `plugins/src` | removed | removed |
+| linked external source folder | **kept, byte-for-byte** | **kept, byte-for-byte** |
+| `plugins/marketplaces.json` | **kept, and verified unchanged** | removed |
+| MCP catalog/search, connection metadata and consent | **kept** | removed |
+| workspace files, history, plugin bindings and provenance | **kept** | **kept** (detached) |
+| vault packages and encryption material | **kept** | **kept** (detached) |
+| credentials, external CLI authentication, third-party accounts | **kept** | **kept** |
+
+Plugin-backed workspace data stays readable after either path; its provider is
+reported unavailable through the existing Workspace Surface behavior. Nothing
+reactivates a removed plugin at startup — `SurfaceLifecycle.Restore` simply
+finds an empty registry.
+
+### Failure, blocking, and retry semantics
+
+- Empty inventory is a verified no-op: preview reports zero and confirmation
+  completes without removing anything.
+- Unsafe or uninspectable ownership blocks **before any effect**, with a precise
+  code: unreadable or unparsable registry, a name that is not a safe single path
+  segment, a registration a record does not namespace, two plugins claiming one
+  personal skill, an unexpected file type at a recorded skill destination, an
+  unresolvable install root, or an inventory above the supported size.
+- Inventory change between review and confirmation fails the confirmation
+  (`scope_changed`); a change between confirmation and relaunch blocks recovery
+  and removes nothing. A plugin installed after the review is never acted on,
+  because only recorded evidence items are.
+- Partial failure keeps per-plugin evidence, retains the installed record of
+  every unresolved plugin as the authority for a retry, keeps startup fenced,
+  and converges on retry without replaying verified work.
+- Both resolvers derive the plugin layout from the resolved installation root
+  and the same personal-skills resolver, so a HOME reached through a symlink
+  cannot make a reviewed operation look like a changed scope.
+
+### Validation evidence for this change
+
+- `go test ./...` (`make test`): passed.
+- `-race` passed for `internal/plugin`, `internal/pluginhttp`, `internal/mcp`,
+  `internal/settingsreset`, `internal/settingshttp`, `internal/resetstate`,
+  `internal/workspacesurface`, `internal/testutil/resetfixture`, and
+  `internal/server`.
+- `make lint-new`: 0 new issues. `gosec` over every changed package: 8 findings,
+  all pre-existing lines, none in the files added here.
+- `make test-js`: 2,753 tests passed; ESLint and Prettier clean.
+- `tests/settings-reset.spec.ts`: both journeys pass in Chromium, including a
+  plugin-only journey that installs a plugin through the real plugin manager,
+  cancels a review without mutation, confirms, stops and relaunches the actual
+  server process, and verifies removal plus marketplace, linked-source and
+  personal-skill preservation. This suite could not run at all before: it
+  asserted on a checkbox class that did not exist, exceeded Playwright's default
+  timeout, was blocked by Settings' first-run modal, and clicked Cancel during
+  the dialog's fade transition, which Bootstrap drops.
+- `tests/smoke.spec.ts` against an isolated server: 49 of 51 passed. The two
+  failures (`Task Output Contracts › CSV storage` and `Home Advisory Routing ›
+  answers implementation advisory questions inline with Ori`) reproduce on an
+  `origin/dev` build of the same suite and are unrelated to reset.
+- Native Keychain behavior remains unexercised: Start Fresh's credential
+  deletion is verified through the fixture's injected memory secret store, and
+  the browser suite disables the native store. Windows and Linux reset remain
+  compile-only.

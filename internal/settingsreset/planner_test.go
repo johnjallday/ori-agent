@@ -47,6 +47,11 @@ func previewFixture(t *testing.T) (*resetfixture.Fixture, *Owners, *Planner) {
 		Setup: onboarding.NewManager(filepath.Join(paths.DataDir, "app_state.json")), Workspaces: folders,
 		Allowlist: workspace.NewAllowlist(filepath.Join(paths.DataDir, workspace.DefaultAllowlistFilename)),
 		Vaults:    vault.NewStore(db, vault.StoreOptions{VaultFilesBaseDir: paths.DataDir, ManagedVaultRoot: paths.Vaults}),
+		// Production always attaches this owner. Start Fresh now depends on it to
+		// remove each plugin's exact components before the broader integration
+		// roots go, so leaving it unset would model an installation that must
+		// block rather than the ordinary one these tests describe.
+		PluginPaths: f.PluginResetPaths(),
 		// Only a read-only fixture readiness seam; no apply is exposed by Planner.
 		CheckLifecycle: func(context.Context) []Blocker { return nil },
 	}

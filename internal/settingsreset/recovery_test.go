@@ -332,13 +332,28 @@ func TestStartFreshAppliesEveryEnumeratedOwnerAndPreservesProtectedBytes(t *test
 	owners.FreshTargets = fixtureFreshTargets(root)
 	for _, relative := range []string{
 		"data/model_categories.json", "data/locations.json", "data/connections/google.json", "data/connections/consent.json",
-		"data/mcp_registry.json", "data/mcp_search_sources.json", "data/mcp_search_cache.json", "data/plugins/installed.json",
-		"data/plugins/marketplaces.json", "data/plugins/src/plugin/file", "data/plugins/state/plugin/file", "data/plugins/artifacts/plugin/file",
+		"data/mcp_search_sources.json", "data/mcp_search_cache.json",
+		"data/plugins/src/plugin/file", "data/plugins/state/plugin/file", "data/plugins/artifacts/plugin/file",
 		"data/plugins/preview/plugin/file", "data/templates/custom/file", "data/workflow_templates/custom.json", "data/usage_data/usage_records.json",
 		"data/activity_logs/agent.jsonl", "data/cli_agent_tasks/task/events.json", "data/cli-mcp/workspace.mcp.json",
 	} {
 		mustPreview(t, f.WriteFile(relative, []byte("owned reset fixture\n")))
 	}
+	// A real installed inventory: one enabled managed plugin with every owned
+	// component, and one linked-source plugin whose bytes must survive. Start
+	// Fresh's plugin portion delegates to the same exact removal owner the
+	// selective category uses, so the registry has to be genuine here.
+	f.SeedPlugins(t,
+		resetfixture.PluginSeed{
+			Name: "fresh-managed", Version: "2.0.0", Enabled: true, Managed: true,
+			MCPServers: []string{"tools"}, Skills: []string{"fresh-managed-skill"},
+			Surfaces: true, Artifacts: true,
+		},
+		resetfixture.PluginSeed{Name: "fresh-linked", Version: "0.3.0", Skills: []string{"fresh-linked-skill"}},
+	)
+	pluginPaths := f.PluginResetPaths()
+	linkedSource := filepath.Join(f.Paths().Root, "external", "plugin-fresh-linked")
+	linkedBefore := treeBytes(t, linkedSource)
 	vaultDEK, err := f.Secrets().Get(vault.SecretKeyVaultDEK)
 	mustPreview(t, err)
 	otherKey, err := f.OtherSecrets().Get(vault.SecretKeyOpenAIAPIKey)
@@ -368,7 +383,7 @@ func TestStartFreshAppliesEveryEnumeratedOwnerAndPreservesProtectedBytes(t *test
 	mustPreview(t, err)
 	privateJournal, err := decodeJournal(receipt)
 	mustPreview(t, err)
-	if _, _, err := validateRecoveryScope(t.Context(), coordinator.lease, privateJournal, RecoveryOptions{DataDir: root, SecretStore: f.Secrets()}); err != nil {
+	if _, _, _, err := validateRecoveryScope(t.Context(), coordinator.lease, privateJournal, RecoveryOptions{DataDir: root, SecretStore: f.Secrets()}); err != nil {
 		expected, _ := independentlyResolvedTargets(root)
 		for _, target := range privateJournal.Plan.Targets {
 			if expected[target.Kind] != target.Path {
@@ -392,6 +407,39 @@ func TestStartFreshAppliesEveryEnumeratedOwnerAndPreservesProtectedBytes(t *test
 	mustPreview(t, err)
 	if operation.Revision != completedRevision || !operation.VerifiedComplete() {
 		t.Fatal("relaunch retried an already completed Start Fresh category")
+	}
+
+	// The plugin portion ran the exact removal owner before the broader roots
+	// went, so components outside this installation are gone too.
+	outcomes := map[string]Outcome{}
+	for _, result := range operation.Results {
+		for _, item := range result.Items {
+			outcomes[item.Name] = item.Outcome
+		}
+	}
+	if outcomes["fresh-managed"] != OutcomeCompleted || outcomes["fresh-linked"] != OutcomeCompleted {
+		t.Fatalf("Start Fresh did not report per-plugin outcomes: %v", outcomes)
+	}
+	for _, gone := range []string{
+		filepath.Join(f.PersonalSkillsRoot(), "fresh-managed-skill"),
+		filepath.Join(f.PersonalSkillsRoot(), "fresh-linked-skill"),
+		pluginPaths.MarketplacesPath(), // Start Fresh's broader policy, unlike selected plugin reset
+	} {
+		if _, err := os.Lstat(gone); !os.IsNotExist(err) {
+			t.Fatalf("Start Fresh left %s: %v", gone, err)
+		}
+	}
+	if _, err := os.Lstat(f.PersonalSkillsRoot()); err != nil {
+		t.Fatal("Start Fresh removed the shared personal skills root:", err)
+	}
+	if after := treeBytes(t, linkedSource); len(after) != len(linkedBefore) {
+		t.Fatal("Start Fresh modified a linked plugin source")
+	} else {
+		for path, digest := range linkedBefore {
+			if after[path] != digest {
+				t.Fatalf("Start Fresh modified linked plugin source file %s", path)
+			}
+		}
 	}
 
 	state, err := onboarding.OpenForReset(filepath.Join(root, "app_state.json"))
