@@ -1,8 +1,8 @@
 # Group Templates v1
 
-Status: implemented host feature (domain-neutral). Exact REAPER 0.5.2 acceptance
-and positive guided REAPER acceptance are not demonstrated; see
-[Limitations](#limitations).
+Status: implemented host feature (domain-neutral). Demonstrated with the
+published REAPER plugin 0.5.2 in a disposable server. Positive guided REAPER
+acceptance is not demonstrated; see [Limitations](#limitations).
 
 ## Purpose
 
@@ -20,14 +20,16 @@ new host feature flag.
 
 | | Workspace (project) template | Group Template |
 | --- | --- | --- |
-| Chosen in | Create Workspace → Blueprint | Create Group → Details → Group template |
+| Chosen in | Create Workspace → Blueprint | Create Group → Blueprint |
 | Creates | a project workspace, its team, optional project files | exactly one group (program Home), initially unstaffed |
 | Source | library, plugin blueprint, source-linked variant | derived from an eligible project blueprint; never edited |
 | Team | reviewed project roster | none at creation; group roles are staffed afterward |
 
 **General** is the ordinary group. It keeps its reviewed Group Manager roster
-(Details → Group Roster → Review) and never joins a program. A managed template
-goes Details → Review and creates no agent.
+(Blueprint → Details → Group Roster → Review) and never joins a program. A
+managed template goes Blueprint → Details → Review and creates no agent.
+Selected-member grouping and guided setup have no choice to make, so they start
+at Details.
 
 ## Eligibility and catalog
 
@@ -122,12 +124,16 @@ staffed roles therefore survive a restart.
 
 ## Presentation
 
-- **Create Group** lists General and managed entries. Each entry shows the
-  template name, provider (`Plugin: <id> <version>` or `Your template`), a "what
-  this creates" line, required and optional Home roles, and project-local roles.
-  Unavailable entries are disabled with a reason.
-- **Guided setup** shows its template as a fixed, read-only card with the same
-  wording, and its own review/commit actions.
+- **Create Group** opens on a **Blueprint** step ("Choose a group blueprint")
+  listing General and managed entries, with General selected. Each entry shows
+  the template name, provider (`Plugin: <id> <version>` or `Your template`), a
+  "what this creates" line, required and optional Home roles, and project-local
+  roles. Unavailable entries are disabled with a reason. Choosing an entry stays
+  on the step, so arrow keys can browse; **Continue** moves to Details, which
+  shows the chosen blueprint with an Edit link.
+- **Guided setup** has no Blueprint step. It shows its template as a fixed,
+  read-only card on Details with the same wording, and its own review/commit
+  actions.
 - **Project destination card and final review** name the template behind the
   proposed or reused group. Home coordination is read-only in the project team;
   only project-local staffing enters project creation.
@@ -166,10 +172,17 @@ automatically.
 
 ## Limitations
 
-- **Exact REAPER 0.5.2 not run.** The catalog path for REAPER 0.5.2 (blueprint
-  6, `group_requirement` required) is expected to list "Music Production Home",
-  but it was not exercised. Only the domain-neutral fixture
-  (`tests/fixtures/workspace-group-plugin`) was.
+- **Exact REAPER evidence is limited to 0.5.2 in a disposable server.** The
+  published release (`#sha=9fde099d…`, blueprint `reaper-song` v6, artifact
+  sha256 `999dda37…`, 8,780,098 bytes) lists **Music Production Home**:
+  - Music Portfolio Manager required, Sample Library Manager optional.
+  - Producer, Mix Engineer and Songwriter project-local.
+
+  `tests/reaper-group-templates.spec.ts` (opt-in,
+  `ORI_REAPER_052_ACCEPTANCE=1`) covers creating the group, setting up its
+  coordinator, adding two songs and reusing the renamed group. No live REAPER
+  was involved. REAPER 0.5.0 and 0.5.1 declare no group requirement and are not
+  listed.
 - **Positive guided REAPER acceptance blocked.** The reviewed integration pin is
   0.5.0, which declares no group requirement. A guided quest for any other
   source is refused by the reviewed-integration gate, which is unchanged.

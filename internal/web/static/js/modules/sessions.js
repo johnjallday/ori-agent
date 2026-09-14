@@ -588,6 +588,9 @@ const sessionManager = {
       const edit = event.target.closest('[data-wizard-edit-step]');
       if (edit) this.goToWizardStep(Number(edit.dataset.wizardEditStep));
     });
+    document
+      .getElementById('workspaceGroupBlueprintRecapEdit')
+      ?.addEventListener('click', () => this.goToWizardStep(1));
     document.getElementById('workspaceReviewSummary')?.addEventListener('change', event => {
       const choice = event.target.closest('[name="workspace-group-composition"]');
       if (choice) this.setGroupRequirementComposition(choice.value);
@@ -3966,9 +3969,10 @@ const sessionManager = {
 
   resetAddWorkspaceModalForm(options = {}) {
     const { preserveAskOri = false } = options;
-    // A Workspace starts at Blueprint; Group starts at Details before its
-    // reviewed roster. Import flips to its fixed Details-only layout below.
-    this.wizardStep = this.isGroupCreator() ? 2 : 1;
+    // Both kinds start at their first visible step: Blueprint for a Workspace
+    // and an ordinary Group, Details for selected-member or guided groups.
+    // Import flips to its fixed Details-only layout below.
+    this.wizardStep = this.isGroupCreator() ? this.creatorWizardSteps()[0] : 1;
     const modalElement = document.getElementById('addFolderModal');
     const nameInput = document.getElementById('folderNameInput');
     const descriptionInput = document.getElementById('folderDescriptionInput');
@@ -8048,8 +8052,12 @@ const sessionManager = {
 
   creatorWizardSteps() {
     if (this.importModeEnabled) return [2];
-    if (this.usesGroupRosterCreator()) return [2, 3, 4];
-    return this.isGroupCreator() ? [2, 4] : [1, 2, 3, 4];
+    // An ordinary Group starts on its Blueprint step (General or a Group
+    // Template). Selected-member grouping and guided setup have no choice to
+    // make there, so they keep starting at Details.
+    const blueprint = window.GroupTemplateCreator?.hasBlueprintStep?.(this) ? [1] : [];
+    if (this.usesGroupRosterCreator()) return [...blueprint, 2, 3, 4];
+    return this.isGroupCreator() ? [...blueprint, 2, 4] : [1, 2, 3, 4];
   },
 
   isFinalWizardStep() {
@@ -8135,7 +8143,7 @@ const sessionManager = {
       this.resetTemplateAgentReview();
     }
     this.clearWorkspaceCreateError();
-    this.wizardStep = nextContext.kind === 'group' ? 2 : 1;
+    this.wizardStep = nextContext.kind === 'group' ? this.creatorWizardSteps()[0] : 1;
     this.restoreWorkspaceCreatorDetailsDraft(nextContext.kind);
     this.syncWorkspaceCreatorPresentation();
     this.refreshWizardChrome();
@@ -8324,6 +8332,10 @@ const sessionManager = {
       const visible = !importMode && visibleSteps.includes(number);
       const current = visible && number === step;
       element.hidden = !visible;
+      // Number what is shown (1 Blueprint → 2 Details → 3 Review), not the
+      // stable section IDs a shorter operation skips.
+      const numeral = element.querySelector('.workspace-create-step-num');
+      if (numeral && visible) numeral.textContent = String(visibleSteps.indexOf(number) + 1);
       element.classList.toggle('is-active', current);
       if (current) element.setAttribute('aria-current', 'step');
       else element.removeAttribute('aria-current');

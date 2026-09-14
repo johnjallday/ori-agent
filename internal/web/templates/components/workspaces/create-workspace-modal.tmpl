@@ -53,9 +53,21 @@
               <div class="workspace-wizard-step-heading">
                 <span class="workspace-wizard-eyebrow" data-wizard-step-label="1">Step 1 of 4</span>
                 <h2 id="wizardStep1Title" tabindex="-1">Choose a blueprint</h2>
-                <p>Start with a proven workspace shape, or begin with a clean slate.</p>
+                <p id="wizardStep1Description">Start with a proven workspace shape, or begin with a clean slate.</p>
               </div>
 
+              <!-- Group blueprints: General keeps its reviewed Group Manager roster;
+                   a managed template creates or reuses only its program's group.
+                   Rendered by group-template-creator.js from the server projection. -->
+              <div id="workspaceGroupBlueprintStep" hidden>
+                <fieldset id="workspaceGroupTemplateChoice" class="workspace-group-template-choice mb-3" hidden>
+                  <legend class="workspace-create-section-title">Group blueprints</legend>
+                  <p id="workspaceGroupTemplateStatus" class="workspace-group-template-status" role="status" aria-live="polite" hidden></p>
+                  <div id="workspaceGroupTemplateOptions" class="workspace-group-template-options" role="radiogroup" aria-label="Group blueprint"></div>
+                </fieldset>
+              </div>
+
+              <div id="workspaceBlueprintStepBody">
               <div id="workspaceCreateBlueprintHeader" class="workspace-create-section-header d-flex align-items-center justify-content-between" style="margin-bottom: 6px;">
                 <span class="workspace-create-section-title">Blueprints</span>
                 <button type="button" id="projectTemplateManageLink" class="modern-btn modern-btn-secondary" style="font-size: 11px; padding: 2px 8px; white-space: nowrap;">Manage…</button>
@@ -140,6 +152,7 @@
                 <p id="blueprintAgentSummaryText" class="workspace-blueprint-agents-text" aria-live="polite"></p>
                 <p id="blueprintAgentSummaryHint" class="workspace-blueprint-agents-hint">You'll confirm and adjust the team in step 3.</p>
               </section>
+              </div>
             </section>
 
             <!-- ===== STEP 2 · DETAILS ===== -->
@@ -192,14 +205,20 @@
                 <p id="workspaceGroupDestinationMessage" class="workspace-group-destination-message" role="status" aria-live="polite"></p>
               </section>
 
-              <!-- Group Templates: General keeps its reviewed Group Manager roster;
-                   a managed template creates or reuses only its program's group.
-                   Rendered by group-template-creator.js from the server projection. -->
-              <fieldset id="workspaceGroupTemplateChoice" class="workspace-group-template-choice mb-3" hidden>
-                <legend class="workspace-create-section-title">Group template</legend>
-                <p id="workspaceGroupTemplateStatus" class="workspace-group-template-status" role="status" aria-live="polite" hidden></p>
-                <div id="workspaceGroupTemplateOptions" class="workspace-group-template-options"></div>
-              </fieldset>
+              <!-- Guided setup's one fixed group blueprint, described read-only.
+                   Its setup action stays the only review/commit owner. -->
+              <div id="workspaceGroupTemplateFixed" class="workspace-group-template-choice mb-3" hidden>
+                <span class="workspace-create-section-title">Group blueprint</span>
+                <p id="workspaceGroupTemplateFixedStatus" class="workspace-group-template-status" role="status" aria-live="polite" hidden></p>
+                <div id="workspaceGroupTemplateFixedOptions" class="workspace-group-template-options"></div>
+              </div>
+
+              <!-- Group recap: the blueprint chosen on step 1. -->
+              <div id="workspaceGroupBlueprintRecap" class="workspace-create-recap mb-2" hidden>
+                <span class="workspace-create-recap-label">Group blueprint</span>
+                <span id="workspaceGroupBlueprintRecapName" class="workspace-create-recap-name">General</span>
+                <button type="button" id="workspaceGroupBlueprintRecapEdit" class="workspace-wizard-inline-action" data-wizard-edit-step="1">Edit</button>
+              </div>
 
               <div id="workspaceGroupDetailsNotice" class="workspace-group-details-notice" hidden>
                 <strong>Groups organize related workspaces.</strong>

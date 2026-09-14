@@ -65,6 +65,15 @@ async function openGroupCreator(page: Page) {
   );
   await expect(page.locator('#addFolderModal')).toBeVisible();
   await expect(page.locator('#workspaceCreatorKindGroup')).toBeChecked();
+  // An ordinary Group opens on its Blueprint step.
+  await expect(page.locator('#wizardStep1Title')).toHaveText('Choose a group blueprint');
+  await expect(page.locator('#workspaceGroupTemplateChoice')).toBeVisible();
+}
+
+async function continueToDetails(page: Page) {
+  await expect(page.locator('#wizardNextBtn')).toHaveText('Continue →');
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#wizardStep2')).toBeVisible();
 }
 
 async function chooseTemplate(page: Page, id: string) {
@@ -171,6 +180,13 @@ test('a person creates a named group from its template, then reuses it unchanged
 
   await openGroupCreator(page);
   await chooseTemplate(page, entry.id);
+  // Choosing stays on Blueprint; a managed blueprint drops the roster step.
+  await expect(page.locator('#wizardStep1')).toBeVisible();
+  await expect(page.locator('#wizardStepper [data-step="3"]')).toBeHidden();
+  await continueToDetails(page);
+  await expect(page.locator('#workspaceGroupBlueprintRecap')).toContainText(
+    'Research Program Home'
+  );
   await expect(page.locator('#workspaceGroupDetailsNotice')).toContainText(
     'Only the group is created.'
   );
@@ -204,6 +220,7 @@ test('a person creates a named group from its template, then reuses it unchanged
 
   await openGroupCreator(page);
   await chooseTemplate(page, entry.id);
+  await continueToDetails(page);
   const name = page.locator('#folderNameInput');
   await expect(name).toHaveValue(GROUP_NAME);
   await expect(name).toHaveJSProperty('readOnly', true);
@@ -411,6 +428,10 @@ test('General keeps its reviewed Group Manager roster and creates nothing when c
   await expect(
     page.locator('#workspaceGroupTemplateOptions [data-group-template-id="general"] input')
   ).toBeChecked();
+  // General keeps Blueprint → Details → Group roster → Review.
+  await expect(page.locator('#wizardStepper [data-step="3"]')).toBeVisible();
+  await continueToDetails(page);
+  await expect(page.locator('#workspaceGroupBlueprintRecap')).toContainText('General');
   await page.locator('#folderNameInput').fill(`Ordinary Group ${RUN}`);
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep3')).toBeVisible();
@@ -444,6 +465,7 @@ test('the template chooser and review fit a phone-width viewport', async ({
   });
   expect(overflow).toEqual({ page: false, dialog: false, option: false });
   await page.screenshot({ path: testInfo.outputPath('group-template-chooser-mobile.png') });
+  await continueToDetails(page);
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('[data-group-template-review-status]')).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('group-template-review-mobile.png') });
@@ -506,6 +528,8 @@ test('hostile and long source labels stay literal and keyboard-operable at phone
       expect(overflow).toEqual({ page: false, dialog: false });
       await page.screenshot({ path: testInfo.outputPath(`hostile-chooser-${theme}.png`) });
 
+      await continueToDetails(page);
+      await expect(page.locator('#workspaceGroupBlueprintRecap')).toContainText(hostileName);
       await page.locator('#wizardNextBtn').click();
       const status = page.locator('[data-group-template-review-status]');
       await expect(status).toHaveAttribute('role', 'status');

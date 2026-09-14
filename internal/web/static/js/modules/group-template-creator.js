@@ -208,6 +208,13 @@
       : 'Creates one group only — no project, team, schedule, or tool access.';
   }
 
+  // Only an ordinary Group has a Blueprint step. Selected-member grouping is
+  // General-only and guided setup's blueprint is fixed, so neither offers a
+  // choice there.
+  function hasBlueprintStep(manager) {
+    return chooserMode(manager) === 'full';
+  }
+
   function managedActive(manager) {
     return (
       chooserMode(manager) === 'full' && Boolean(selectedManaged(manager?.workspaceCreatorContext))
@@ -273,7 +280,10 @@
     }
     manager.clearWorkspaceNameError?.();
     if (isManaged(next)) manager.resetTemplateAgentReview?.();
-    manager.wizardStep = 2;
+    // Choosing stays on the Blueprint step (arrow keys browse options); Continue
+    // moves on. A choice made from a later step never strands a now-hidden one.
+    const steps = manager.creatorWizardSteps?.() || [];
+    if (steps.length && !steps.includes(manager.wizardStep)) manager.wizardStep = steps[0];
     manager.refreshWizardChrome?.();
     return true;
   }
@@ -295,7 +305,11 @@
 
   // Guided setup shows its one template as a read-only card: no radio, no
   // alternative, and nothing here can review or create.
-  function renderFixed(manager, state, container, list, status) {
+  function renderFixed(manager, state) {
+    const container = document.getElementById('workspaceGroupTemplateFixed');
+    const list = document.getElementById('workspaceGroupTemplateFixedOptions');
+    const status = document.getElementById('workspaceGroupTemplateFixedStatus');
+    if (!container || !list) return;
     const context = manager.workspaceCreatorContext;
     const entry = fixedEntry(manager);
     list.replaceChildren();
@@ -328,21 +342,26 @@
 
   function render(manager) {
     const container = document.getElementById('workspaceGroupTemplateChoice');
-    if (!container) return;
+    const step = document.getElementById('workspaceGroupBlueprintStep');
+    const fixed = document.getElementById('workspaceGroupTemplateFixed');
     const mode = chooserMode(manager);
-    container.hidden = mode === 'hidden';
-    if (mode === 'hidden') return;
+    // The chooser lives on the Blueprint step; guided setup's fixed card lives
+    // on Details. Every other context shows neither.
+    if (container) container.hidden = mode !== 'full';
+    if (step) step.hidden = mode !== 'full';
+    if (fixed && mode !== 'fixed') fixed.hidden = true;
+    if (mode !== 'full' && mode !== 'fixed') return;
     const context = manager.workspaceCreatorContext;
     const state = stateFor(context);
     if (state.status === 'idle') void load(manager);
+    if (mode === 'fixed') {
+      renderFixed(manager, state);
+      return;
+    }
 
     const list = document.getElementById('workspaceGroupTemplateOptions');
     const status = document.getElementById('workspaceGroupTemplateStatus');
-    if (!list) return;
-    if (mode === 'fixed') {
-      renderFixed(manager, state, container, list, status);
-      return;
-    }
+    if (!container || !list) return;
     // Re-rendering replaces the radios; keep keyboard focus on the same option.
     const active = document.activeElement;
     const focusedId = active?.name === 'workspace-group-template' ? String(active.value) : '';
@@ -353,8 +372,7 @@
       : [{ id: GENERAL_ID, kind: 'ordinary_group', name: 'General' }];
     for (const entry of items) {
       const managed = isManaged(entry);
-      const disabled =
-        !isSelectable(entry) || (mode === 'general-only' && managed) || Boolean(state.pending);
+      const disabled = !isSelectable(entry) || Boolean(state.pending);
       const label = el('label', 'workspace-group-template-option');
       label.dataset.groupTemplateId = entry.id;
       label.classList.toggle('is-disabled', disabled);
@@ -380,10 +398,7 @@
       body.append(head);
       if (managed) {
         appendSummary(body, entry, isReusable(entry) ? String(entry.home?.name || '') : '');
-        const note =
-          mode === 'general-only'
-            ? 'Group templates cannot adopt selected workspaces. Use General to group them.'
-            : unavailableNote(entry);
+        const note = unavailableNote(entry);
         if (note) body.append(el('small', 'workspace-group-template-note', note));
       } else {
         body.append(
@@ -411,6 +426,29 @@
   // Applied after sessions.js has synced the ordinary Group presentation.
   function syncPresentation(manager) {
     render(manager);
+    const blueprintStep = hasBlueprintStep(manager);
+    const workspaceBlueprint = document.getElementById('workspaceBlueprintStepBody');
+    const step1Title = document.getElementById('wizardStep1Title');
+    const step1Description = document.getElementById('wizardStep1Description');
+    const recap = document.getElementById('workspaceGroupBlueprintRecap');
+    const recapName = document.getElementById('workspaceGroupBlueprintRecapName');
+    // Step 1 is one section: the Workspace picker or the Group blueprints.
+    const groupKind = manager?.workspaceCreatorContext?.kind === 'group';
+    if (workspaceBlueprint) workspaceBlueprint.hidden = groupKind;
+    if (step1Title) {
+      step1Title.textContent = groupKind ? 'Choose a group blueprint' : 'Choose a blueprint';
+    }
+    if (step1Description) {
+      step1Description.textContent = groupKind
+        ? 'Start with General, or build the group an installed plugin defines.'
+        : 'Start with a proven workspace shape, or begin with a clean slate.';
+    }
+    if (recap) recap.hidden = !blueprintStep;
+    if (recapName && blueprintStep) {
+      recapName.textContent = String(
+        selectedEntry(manager.workspaceCreatorContext)?.name || 'General'
+      );
+    }
     const active = managedActive(manager);
     const entry = active ? selectedManaged(manager.workspaceCreatorContext) : null;
     const input = document.getElementById('folderNameInput');
@@ -739,6 +777,7 @@
     stateFor,
     selectedManaged,
     chooserMode,
+    hasBlueprintStep,
     fixedEntry,
     catalogEntry,
     templateMeta,

@@ -698,6 +698,35 @@ test('Group creator navigation exposes Details, Roster, then Review while Worksp
   assert.deepEqual(JSON.parse(JSON.stringify(manager.creatorWizardSteps())), [2]);
 });
 
+test('an ordinary Group starts on its Blueprint step; a managed blueprint skips the roster', () => {
+  let blueprintStep = true;
+  let managed = false;
+  const manager = loadSessionManager(undefined, {
+    GroupTemplateCreator: {
+      hasBlueprintStep: () => blueprintStep,
+      managedActive: () => managed
+    }
+  });
+  manager.workspaceCreatorContext = { mode: 'ordinary', kind: 'group' };
+  manager.wizardStep = 1;
+  assert.deepEqual(JSON.parse(JSON.stringify(manager.creatorWizardSteps())), [1, 2, 3, 4]);
+  assert.equal(manager.nextWizardStep(), 2);
+
+  managed = true;
+  assert.deepEqual(JSON.parse(JSON.stringify(manager.creatorWizardSteps())), [1, 2, 4]);
+  manager.wizardStep = 2;
+  assert.equal(manager.nextWizardStep(), 4);
+  assert.equal(manager.previousWizardStep(), 1);
+
+  // Selected-member grouping and guided setup have no blueprint choice.
+  managed = false;
+  blueprintStep = false;
+  manager.workspaceCreatorContext = { mode: 'selected-members', kind: 'group' };
+  assert.deepEqual(JSON.parse(JSON.stringify(manager.creatorWizardSteps())), [2, 3, 4]);
+  manager.workspaceCreatorContext = { mode: 'guided', kind: 'group' };
+  assert.deepEqual(JSON.parse(JSON.stringify(manager.creatorWizardSteps())), [2, 4]);
+});
+
 test('a Map-origin create flags the existing modal rather than opening a second form (#292 FR-51)', () => {
   const { manager, modalElement, shown } = loadSessionManagerWithModal();
 

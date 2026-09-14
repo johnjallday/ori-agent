@@ -164,8 +164,10 @@ test('templates are offered only to ordinary Group creators; bulk grouping is Ge
   guided.workspaceCreatorContext.guided = { groupTemplateId: managed().id };
   assert.equal(api.chooserMode(guided), 'fixed');
   assert.equal(api.managedActive(guided), false, 'guided setup keeps its own review owner');
+  assert.equal(api.hasBlueprintStep(ordinary), true);
   const bulk = manager(api, 'selected-members');
   assert.equal(api.chooserMode(bulk), 'general-only');
+  assert.equal(api.hasBlueprintStep(bulk), false);
   assert.equal(api.select(bulk, managed().id), false);
   assert.equal(api.managedActive(bulk), false);
   assert.equal(
@@ -188,9 +190,13 @@ test('guided setup describes its one template read-only with the chooser wording
   context.guided = { groupTemplateId: managed().id, state: { review: null } };
 
   api.render(guided);
-  const container = element('workspaceGroupTemplateChoice');
-  const list = element('workspaceGroupTemplateOptions');
+  // Guided setup describes its blueprint on Details; the Blueprint-step chooser
+  // stays hidden.
+  const container = element('workspaceGroupTemplateFixed');
+  const list = element('workspaceGroupTemplateFixedOptions');
   assert.equal(container.hidden, false);
+  assert.equal(element('workspaceGroupBlueprintStep').hidden, true);
+  assert.equal(api.hasBlueprintStep(guided), false);
   assert.equal(list.children.length, 1);
   assert.equal(tagsOf(list.children[0]).includes('input'), false, 'no selectable control');
   const text = textOf(list.children[0]);
@@ -252,6 +258,24 @@ test('catalog lookups for other surfaces resolve only managed entries by exact I
     'Optional: Archive Curator',
     'Stays project-local: Research Lead'
   ]);
+});
+
+test('choosing a blueprint stays on the Blueprint step and renders the step-1 chooser', () => {
+  const { api, element } = environment();
+  const creator = manager(api);
+  creator.wizardStep = 1;
+  creator.creatorWizardSteps = () => (api.managedActive(creator) ? [1, 2, 4] : [1, 2, 3, 4]);
+  api.render(creator);
+  assert.equal(element('workspaceGroupBlueprintStep').hidden, false);
+  assert.equal(element('workspaceGroupTemplateChoice').hidden, false);
+  assert.equal(element('workspaceGroupTemplateOptions').children.length, 4);
+  assert.equal(api.select(creator, managed().id), true);
+  assert.equal(creator.wizardStep, 1, 'arrow-key browsing never jumps to Details');
+
+  // A choice made from a step the new blueprint no longer has lands on a valid one.
+  creator.wizardStep = 3;
+  assert.equal(api.select(creator, 'group-template:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'), true);
+  assert.equal(creator.wizardStep, 1);
 });
 
 test('selection keeps per-template names, fixes a reused name, and refuses unusable templates', () => {

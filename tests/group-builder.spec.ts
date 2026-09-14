@@ -92,6 +92,12 @@ test('Tree Create Group reviews its Manager and refreshes the workspace views wi
     .click();
   const creator = page.locator('#addFolderModal');
   await expect(creator).toBeVisible();
+  // Create Group opens on its Blueprint step with General selected.
+  await expect(creator.locator('#wizardStep1Title')).toHaveText('Choose a group blueprint');
+  await expect(
+    creator.locator('#workspaceGroupTemplateOptions [data-group-template-id="general"] input')
+  ).toBeChecked();
+  await creator.getByRole('button', { name: 'Continue →' }).click();
   await expect(creator).toContainText('Groups organize related workspaces');
   const name = `Map Group ${Date.now()}`;
   await creator.getByRole('textbox', { name: 'Group name' }).fill(name);
@@ -220,7 +226,9 @@ test('guided setup uses the shared creator with cancellation, exact retry and co
   await setup.getByRole('button', { name: 'Build Group', exact: true }).click();
   await expect(setup).toBeHidden();
   await expect(creator.getByRole('textbox', { name: 'Group name' })).toHaveValue('Studio');
-  const fixed = creator.locator('#workspaceGroupTemplateOptions');
+  // Guided setup has no Blueprint step; its fixed blueprint is described on Details.
+  await expect(creator.locator('#wizardStep1')).toBeHidden();
+  const fixed = creator.locator('#workspaceGroupTemplateFixedOptions');
   await expect(fixed).toContainText('Studio Program Home');
   await expect(fixed).toContainText('Creates one group only');
   await expect(fixed).toContainText('Set up after: Studio Coordinator (required)');
