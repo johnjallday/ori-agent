@@ -769,10 +769,15 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		// subtree does not interpret "group-requirement" as a workspace ID.
 		mux.HandleFunc("POST /api/workspaces/group-requirement/home/review", s.Handlers.Session.ReviewGroupRequirementHome)
 		mux.HandleFunc("POST /api/workspaces/group-requirement/home/commit", s.Handlers.Session.CommitGroupRequirementHome)
+		// Group Templates are a read-only projection; never a project template.
+		mux.HandleFunc("GET /api/workspaces/group-templates", s.Handlers.Session.ListGroupTemplates)
+		mux.HandleFunc("POST /api/workspaces/group-templates/review", s.Handlers.Session.ReviewGroupTemplateHome)
+		mux.HandleFunc("POST /api/workspaces/group-templates/commit", s.Handlers.Session.CommitGroupTemplateHome)
 
 		// Generic assistant-program routes are explicit so they cannot be
 		// swallowed by the legacy workspace subtree router.
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program", s.Handlers.Session.GetAssistantProgram)
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/group-template", s.Handlers.Session.GetGroupTemplateStatus)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/activate", s.Handlers.Session.ActivateAssistantProgram)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/hire", s.Handlers.Session.HireAssistantProgram)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/portfolio", s.Handlers.Session.GetAssistantPortfolio)

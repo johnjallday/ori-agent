@@ -472,6 +472,9 @@ func (h *Handler) CommitGroupRequirementHome(w http.ResponseWriter, r *http.Requ
 		respondGroupRequirementUnavailable(w)
 		return
 	}
+	if claim.HomeCreated {
+		h.allowlistLocallyCreatedWorkspace(homeID)
+	}
 	_ = orihttp.RespondSuccess(w, map[string]any{
 		"success": true,
 		"group_requirement": map[string]any{

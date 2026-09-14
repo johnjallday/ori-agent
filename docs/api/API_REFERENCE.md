@@ -1031,6 +1031,20 @@ Groups require that reviewed roster. The server rejects a missing roster, `creat
 
 Group folders are provisioned with `sub-workspaces/` (members), plus their own `files/` and `notes/` directories. The `workspace-files` filesystem MCP binding is **scoped to `files/` and `notes/` only** — member sub-workspaces are never exposed to the group's agents. Groups created before this behavior existed are upgraded automatically by an idempotent backfill at server startup.
 
+**Group Templates:** Create Group can also create — or reuse — the one Assistant Program Home an eligible project blueprint declares. See [Group Templates](../architecture/group-templates.md) for eligibility, identity and lifecycle.
+
+```http
+GET  /api/workspaces/group-templates
+POST /api/workspaces/group-templates/review   {"group_template_id","revision","name"}
+POST /api/workspaces/group-templates/commit   {"group_template_id","revision","name","group_review_token","idempotency_key"}
+GET  /api/workspaces/{workspaceID}/group-template
+```
+
+- `GET /api/workspaces/group-templates` is read-only. It returns `group_templates` (General first, then `managed_home` entries with `id`, `revision`, `name`, `description`, `provider`, `proposed_group_name`, `home_roles`, `project_roles_note`, `availability {state, reason, actions}`, `home {state, workspace_id, name}` and `required_home_roles`), plus `catalog_unavailable` and `dependency_state_unavailable`.
+- Review and commit bodies are strict (4 KiB, unknown fields and trailing data → `400`). The server derives owner, source and program; General, a parent, a project template or team fields → `400`; a stale revision or source → `409`. Review creates nothing and returns `group_template_review {reuse, home_workspace_id?, home_name, summary, review_token, expires_at}`. Commit creates or reuses exactly one Home with no agents or project and returns `group_template {state: "home_ready", home_workspace_id, home_name, home_created, created_by_this_operation, name_applied, idempotent_replay}`. Retry a lost response with the identical body.
+- `GET /api/workspaces/{workspaceID}/group-template` is read-only. For a group it returns `group_template {kind, name, template, provider, group, team, integration}`: `team.state` is `ready|incomplete|unverified|migration_required` from verified bindings only, and `integration.state` is `available|unavailable|unknown` with a `reason`. Ordinary groups report `kind: "ordinary_group"` (General). Non-groups → `400`.
+- Group entries in `GET /api/workspaces` carry `group_template {kind, name, provider_kind, plugin_id}` only for program Homes.
+
 **Listing and membership:** the flat `GET /api/workspaces` list includes groups (check `kind` to distinguish them); `GET /api/workspaces?tree=true` returns the nested tree. The UI's **Group selected** action first reviews and creates one rostered Group, then patches only its reviewed top-level member snapshot using `PATCH /api/workspaces/:id` with `parent_id` and `order_index`. A partial member move leaves the created group, its reviewed roster, and every successful move intact; a lost response is reconciled by refresh rather than retrying group creation.
 
 **Deleting a group** uses a two-mode flow:

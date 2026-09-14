@@ -13,6 +13,7 @@ import (
 var (
 	ErrAssistantProgramUnavailable = errors.New("workspace has no assistant program declaration")
 	ErrAssistantStationNotFound    = errors.New("assistant station not found")
+	ErrAssistantStationAmbiguous   = errors.New("multiple assistant stations exist for stable key")
 	ErrAssistantProgramProtected   = errors.New("assistant program topology requires an explicit removal review")
 )
 
@@ -104,7 +105,7 @@ func (service *AssistantProgramStore) FindStation(key AssistantProgramKey) (*Wor
 			continue
 		}
 		if found != nil && found.ID != candidate.ID {
-			return nil, fmt.Errorf("multiple assistant stations exist for stable key")
+			return nil, ErrAssistantStationAmbiguous
 		}
 		found = candidate
 	}
@@ -146,6 +147,13 @@ func (service *AssistantProgramStore) ensureStationLocked(key AssistantProgramKe
 }
 
 func (service *AssistantProgramStore) ensureStationNamedLocked(key AssistantProgramKey, declaration *AssistantProgramDeclaration, name string) (*Workspace, bool, error) {
+	return service.ensureStationWithOptionsLocked(key, declaration, name, nil)
+}
+
+// ensureStationWithOptionsLocked is the single first-creation write. Optional
+// Group Template provenance is part of that same Save and is never applied to
+// a reused Home.
+func (service *AssistantProgramStore) ensureStationWithOptionsLocked(key AssistantProgramKey, declaration *AssistantProgramDeclaration, name string, groupTemplate *AssistantGroupTemplateProvenance) (*Workspace, bool, error) {
 	key = key.Normalize()
 	if !key.Valid() || declaration == nil || strings.TrimSpace(declaration.ID) != key.ProgramID {
 		return nil, false, ErrAssistantProgramUnavailable
@@ -187,6 +195,7 @@ func (service *AssistantProgramStore) ensureStationNamedLocked(key AssistantProg
 		Key:             key,
 		Declaration:     declaration,
 		PluginAvailable: true,
+		GroupTemplate:   groupTemplate,
 	})
 	if err := service.store.Save(station); err != nil {
 		return nil, false, fmt.Errorf("create assistant station: %w", err)

@@ -36,6 +36,7 @@ type Handler struct {
 	templatesRootResolver     func() string // resolves the project templates library directory
 	projectTemplateResolver   func(templateID, templatePath string) (projecttemplates.Template, error)
 	groupRequirements         *grouprequirements.Service
+	groupTemplateCatalog      GroupTemplateCatalog
 	currentUserID             func(context.Context) (string, error)
 	templateCapabilityService *workspacecapability.Service
 	installedPluginLister     installedPluginLister

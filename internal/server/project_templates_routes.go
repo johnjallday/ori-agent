@@ -18,6 +18,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/runtimecapability"
+	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 )
@@ -84,6 +85,25 @@ func (b *ServerBuilder) wireProjectTemplateResolver() {
 		return projecttemplates.Template{}, errors.New("no template specified")
 	}
 	b.sessionHandler.SetProjectTemplateResolver(resolveTemplate)
+	b.sessionHandler.SetGroupTemplateCatalog(func(ownerUserID string) ([]sessionhttp.GroupTemplateCatalogEntry, bool, error) {
+		var plugins installedPluginSource
+		if b.pluginHandler != nil {
+			plugins = b.pluginHandler.Manager()
+		}
+		snapshot, err := buildBlueprintCatalogSnapshot(resolveTemplatesRoot(b.configManager), templateRuntimeCatalog{
+			capabilities: b.workspaceCapabilityRegistry, runtimes: b.runtimeCapabilityRegistry,
+		}, plugins, ownerUserID)
+		if err != nil {
+			return nil, false, err
+		}
+		entries := make([]sessionhttp.GroupTemplateCatalogEntry, 0, len(snapshot.Entries))
+		for _, entry := range snapshot.Entries {
+			entries = append(entries, sessionhttp.GroupTemplateCatalogEntry{
+				Template: entry.Template, Readiness: entry.Readiness, Active: snapshot.Active[entry.ID],
+			})
+		}
+		return entries, snapshot.DependencyStateUnavailable, nil
+	})
 	if b.chatHandler != nil {
 		b.chatHandler.SetProjectTemplateCatalog(
 			func(id string) (projecttemplates.Template, error) { return resolveTemplate(id, "") },
@@ -187,7 +207,33 @@ func (s *Server) buildBlueprintCatalog(root string) ([]blueprintCatalogEntry, er
 }
 
 func (s *Server) buildBlueprintCatalogForOwner(root, ownerUserID string) ([]blueprintCatalogEntry, error) {
-	catalog := s.projectTemplateCatalog
+	var plugins installedPluginSource
+	if s.Handlers != nil && s.Handlers.Plugin != nil {
+		plugins = s.Handlers.Plugin.Manager()
+	}
+	snapshot, err := buildBlueprintCatalogSnapshot(root, s.projectTemplateCatalog, plugins, ownerUserID)
+	if err != nil {
+		return nil, err
+	}
+	return snapshot.Entries, nil
+}
+
+type installedPluginSource interface {
+	List() ([]plugin.InstalledPlugin, error)
+}
+
+// blueprintCatalogSnapshot is one consistent read of the creation catalog.
+// Active records, per template ID, whether its trusted source can currently be
+// instantiated: the plugin lifecycle decision for plugin candidates and a
+// ready source for variants. It is carried explicitly for derived views such
+// as Group Templates, which must not reconstruct it from display fields.
+type blueprintCatalogSnapshot struct {
+	Entries                    []blueprintCatalogEntry
+	Active                     map[string]bool
+	DependencyStateUnavailable bool
+}
+
+func buildBlueprintCatalogSnapshot(root string, catalog projecttemplates.RuntimeCatalog, plugins installedPluginSource, ownerUserID string) (blueprintCatalogSnapshot, error) {
 	var templates []projecttemplates.Template
 	var err error
 	if catalog == nil {
@@ -196,13 +242,13 @@ func (s *Server) buildBlueprintCatalogForOwner(root, ownerUserID string) ([]blue
 		templates, err = projecttemplates.ListLibraryWithCatalog(root, catalog)
 	}
 	if err != nil {
-		return nil, err
+		return blueprintCatalogSnapshot{}, err
 	}
 
 	sources := blueprintreadiness.Sources{Catalog: catalog}
 	var candidates []pluginBlueprintCandidate
-	if s.Handlers != nil && s.Handlers.Plugin != nil {
-		installed, listErr := s.Handlers.Plugin.Manager().List()
+	if plugins != nil {
+		installed, listErr := plugins.List()
 		if listErr != nil {
 			// A failed read is not "nothing is installed". Recording it here is
 			// what turns a blueprint's card into "could not check — retry"
@@ -217,14 +263,30 @@ func (s *Server) buildBlueprintCatalogForOwner(root, ownerUserID string) ([]blue
 
 	templates = resolveCatalogVariants(templates, sources.Installed, ownerUserID)
 	merged := mergePluginBlueprintCandidates(templates, candidates)
-	entries := make([]blueprintCatalogEntry, 0, len(merged))
+	snapshot := blueprintCatalogSnapshot{
+		Entries:                    make([]blueprintCatalogEntry, 0, len(merged)),
+		Active:                     make(map[string]bool, len(merged)),
+		DependencyStateUnavailable: sources.DependencyStateUnavailable,
+	}
+	pluginActive := make(map[string]bool, len(candidates))
+	for _, candidate := range candidates {
+		pluginActive[candidate.Template.ID] = candidate.Active
+	}
 	for _, template := range merged {
-		entries = append(entries, blueprintCatalogEntry{
+		active := true
+		switch {
+		case template.PluginOwner != nil:
+			active = pluginActive[template.ID]
+		case template.TemplateVariant != nil:
+			active = template.VariantSourceState == "" || template.VariantSourceState == projecttemplates.VariantSourceReady
+		}
+		snapshot.Active[template.ID] = active
+		snapshot.Entries = append(snapshot.Entries, blueprintCatalogEntry{
 			Template:  template,
 			Readiness: blueprintreadiness.Derive(template, sources),
 		})
 	}
-	return entries, nil
+	return snapshot, nil
 }
 
 // mergePluginBlueprintCandidates folds plugin-contributed blueprints into the

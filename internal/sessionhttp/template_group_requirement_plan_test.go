@@ -122,6 +122,10 @@ func TestTemplateGroupRequirementPlan_AbsentHomeIsInertAndDistinguishesProposal(
 	if group.Home == nil || group.Home.Exists || group.Home.ProposedName != "Neutral Program Home" || group.Home.Name != "" || group.Home.WorkspaceID != "" {
 		t.Fatalf("absent Home was not projected as a proposal: %+v", group.Home)
 	}
+	wantTemplateID := projecttemplates.GroupTemplateIDForKey(agentworkspace.AssistantProgramKey{PluginID: "neutral", ProgramID: template.AssistantProgram.ID})
+	if !projecttemplates.ValidManagedGroupTemplateID(group.GroupTemplateID) || group.GroupTemplateID != wantTemplateID {
+		t.Fatalf("group template id = %q, want %q", group.GroupTemplateID, wantTemplateID)
+	}
 	if group.RequiredHomeRoles.Verification != templateGroupRoleVerificationAbsent || len(group.RequiredHomeRoles.Roles) != 1 || group.RequiredHomeRoles.Roles[0].RoleID != "home-lead" {
 		t.Fatalf("required Home roles = %+v", group.RequiredHomeRoles)
 	}

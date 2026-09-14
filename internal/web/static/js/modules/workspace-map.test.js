@@ -1227,6 +1227,42 @@ test('a district wears its presets as bounded classes, never inline style (#346 
   );
 });
 
+test('a program Home names its template type apart from its name; ordinary groups never guess one', () => {
+  const { districtHTML } = loadOriWorkspaceMap();
+  const base = { left: 0, top: 0, width: 400, height: 300, memberCount: 0 };
+
+  const home = districtHTML(
+    {
+      ...base,
+      ws: {
+        id: 'home',
+        name: 'Studio <Portfolio>',
+        group_template: { kind: 'managed_home', name: 'Research <Program> Home' }
+      }
+    },
+    ''
+  );
+  assert.match(home, /<span class="ws-map-district-name">Studio &lt;Portfolio&gt;<\/span>/);
+  assert.match(home, /<span class="ws-map-district-type">Research &lt;Program&gt; Home<\/span>/);
+  assert.match(
+    home,
+    /aria-label="Studio &lt;Portfolio&gt; group, Research &lt;Program&gt; Home template, No workspaces"/
+  );
+
+  assert.match(home, /title="Studio &lt;Portfolio&gt; — Research &lt;Program&gt; Home template"/);
+
+  const namedLikeAHome = districtHTML(
+    { ...base, ws: { id: 'plain', name: 'Research Program Home' } },
+    ''
+  );
+  assert.ok(!namedLikeAHome.includes('ws-map-district-type'));
+  const unknownKind = districtHTML(
+    { ...base, ws: { id: 'odd', name: 'Odd', group_template: { kind: 'other', name: 'Nope' } } },
+    ''
+  );
+  assert.ok(!unknownKind.includes('ws-map-district-type'));
+});
+
 test('appearance is offered for reset only once it has been customized (#346 FR-137, FR-146)', async () => {
   const { map } = await mountedCollapsible();
   const target = { type: 'district', id: 'grp', ws: { id: 'grp', kind: 'group', name: 'Ops' } };

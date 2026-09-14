@@ -5007,3 +5007,102 @@ test('plugin stations are consumed from the generic surface host without name co
     globalThis.window = originalWindow;
   }
 });
+
+function groupTemplateCommandView(status, kind = 'group') {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    page: { workspaceId: 'home-1', workspace: { name: 'Studio Portfolio', kind } },
+    groupTemplateStatus: status
+  });
+  return commandView;
+}
+
+const managedStatus = overrides => ({
+  kind: 'managed_home',
+  template: { name: 'Research <Program> Home' },
+  provider: { kind: 'plugin', plugin_id: 'fixture', plugin_version: '1.0.0' },
+  group: { state: 'created' },
+  team: {
+    state: 'incomplete',
+    actions: ['open_group_roles'],
+    required_home_roles: {
+      verification: 'verified',
+      required: 1,
+      filled: 0,
+      missing: 1,
+      roles: [{ role_id: 'coordinator', label: 'Portfolio Coordinator', state: 'empty' }]
+    },
+    optional_home_roles: [{ role_id: 'curator', label: 'Archive Curator' }],
+    project_roles_note: ['Research Lead']
+  },
+  integration: { state: 'available' },
+  ...overrides
+});
+
+test('group template status keeps group, coordinator, and integration as separate facts', () => {
+  const incomplete = groupTemplateCommandView(managedStatus()).groupTemplateStatusHTML();
+  assert.match(incomplete, /Research &lt;Program&gt; Home/);
+  assert.match(incomplete, /Plugin: fixture 1\.0\.0/);
+  assert.match(incomplete, /<li class="is-ready"><span>Group<\/span> Created<\/li>/);
+  assert.match(
+    incomplete,
+    /is-incomplete"><span>Coordinator<\/span> Incomplete — 0 of 1 required set up \(Portfolio Coordinator\)/
+  );
+  assert.match(incomplete, /is-ready"><span>Integration<\/span> Available/);
+  assert.match(
+    incomplete,
+    /data-cmd-group-template-setup="coordinator">Set up Portfolio Coordinator</
+  );
+  assert.match(incomplete, /Optional: Archive Curator · Project-local: Research Lead/);
+
+  const staffedButOffline = groupTemplateCommandView(
+    managedStatus({
+      team: {
+        state: 'ready',
+        required_home_roles: {
+          verification: 'verified',
+          required: 1,
+          filled: 1,
+          missing: 0,
+          roles: [{ role_id: 'coordinator', label: 'Portfolio Coordinator', state: 'filled' }]
+        }
+      },
+      integration: {
+        state: 'unavailable',
+        reason: 'plugin_enable_required',
+        actions: ['manage_plugins']
+      }
+    })
+  ).groupTemplateStatusHTML();
+  assert.match(
+    staffedButOffline,
+    /is-ready"><span>Coordinator<\/span> Ready — 1 of 1 required set up/
+  );
+  assert.match(
+    staffedButOffline,
+    /is-unavailable"><span>Integration<\/span> Unavailable — its plugin is disabled/
+  );
+  assert.match(staffedButOffline, /href="\/plugins">Manage plugins/);
+  assert.ok(
+    !staffedButOffline.includes('data-cmd-group-template-setup'),
+    'a staffed Home offers no setup'
+  );
+
+  const unverified = groupTemplateCommandView(
+    managedStatus({
+      team: { state: 'unverified', required_home_roles: { verification: 'unavailable' } }
+    })
+  ).groupTemplateStatusHTML();
+  assert.match(unverified, /is-unknown"><span>Coordinator<\/span> Could not be verified/);
+  assert.ok(
+    !unverified.includes('data-cmd-group-template-setup'),
+    'no count is fabricated from unverified evidence'
+  );
+
+  assert.equal(groupTemplateCommandView({ kind: 'ordinary_group' }).groupTemplateStatusHTML(), '');
+  assert.equal(
+    groupTemplateCommandView(managedStatus(), 'workspace').groupTemplateStatusHTML(),
+    ''
+  );
+  assert.equal(groupTemplateCommandView(null).groupTemplateStatusHTML(), '');
+});

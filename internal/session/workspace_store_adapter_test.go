@@ -154,6 +154,32 @@ func TestWorkspaceStoreAdapter_OwnerUserIDRoundTrip(t *testing.T) {
 	}
 }
 
+// Group Template provenance lives inside the SQLite-mirrored Assistant Program
+// envelope, so primary-store reads never lose it the way folder-only
+// TemplateProvenance would.
+func TestWorkspaceStoreAdapter_AssistantGroupTemplateProvenanceRoundTrip(t *testing.T) {
+	adapter := &WorkspaceStoreAdapter{}
+	created := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
+	input := &workspace.Workspace{ID: "home-1", Name: "Lab Portfolio", Kind: "group"}
+	input.SetAssistantProgramState(&workspace.AssistantProgramState{
+		SchemaVersion: workspace.AssistantProgramStateSchemaVersion, StateRevision: 1,
+		Key: workspace.AssistantProgramKey{OwnerUserID: "local", PluginID: "neutral", ProgramID: "research-program"},
+		GroupTemplate: &workspace.AssistantGroupTemplateProvenance{
+			SchemaVersion: workspace.AssistantGroupTemplateProvenanceSchemaVersion, GroupTemplateID: "group-template:" + strings.Repeat("a", 32),
+			GroupTemplateRevision: strings.Repeat("b", 64), SourceKind: "plugin", TemplateID: "plugin:neutral:project",
+			PluginOwner: &workspace.PluginTemplateOwner{PluginID: "neutral", PluginVersion: "1.0.0", BlueprintID: "project", BlueprintVersion: 1},
+			HomeDigest:  strings.Repeat("c", 64), ReviewDigest: strings.Repeat("d", 64), CreatedAt: created,
+		},
+	})
+
+	roundTripped := adapter.toAgentWorkspace(adapter.toSessionWorkspace(input))
+	got := roundTripped.GetAssistantProgramState()
+	if got == nil || got.GroupTemplate == nil || got.GroupTemplate.ReviewDigest != strings.Repeat("d", 64) ||
+		got.GroupTemplate.PluginOwner == nil || got.GroupTemplate.PluginOwner.PluginID != "neutral" || !got.GroupTemplate.CreatedAt.Equal(created) {
+		t.Fatalf("round-tripped group template provenance = %+v", got)
+	}
+}
+
 func TestWorkspaceStoreAdapter_FolderSlugRoundTrip(t *testing.T) {
 	adapter := &WorkspaceStoreAdapter{}
 	input := &workspace.Workspace{

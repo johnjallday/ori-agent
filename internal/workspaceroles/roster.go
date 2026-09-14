@@ -42,6 +42,10 @@ const (
 // group-scoped role seen from a project (PRD D2).
 const readOnlyGroupRoleReason = "This role belongs to the group workspace. Fill or clear it there."
 
+// readOnlyProjectRoleReason explains a project-scoped role seen from its
+// group: each linked project staffs it independently, never the group.
+const readOnlyProjectRoleReason = "Each linked project staffs this role in its own workspace. It is not set up on the group."
+
 // Role is one slot a blueprint declares.
 type Role struct {
 	ID          string
@@ -202,6 +206,9 @@ func Build(in Input) Roster {
 		if in.ViewScope != "" && item.Scope != in.ViewScope {
 			item.ReadOnly = true
 			item.ReadOnlyReason = readOnlyGroupRoleReason
+			if item.Scope == ScopeProject {
+				item.ReadOnlyReason = readOnlyProjectRoleReason
+			}
 		}
 
 		if role.Proposed != nil {

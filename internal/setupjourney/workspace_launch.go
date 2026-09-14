@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/specialist"
 )
 
@@ -33,6 +34,9 @@ func validHomePreparation(value *projectconnection.HomePreparation) bool {
 		return true
 	}
 	if len(value.Name) == 0 || len(value.Name) > 128 || len(value.TemplateID) == 0 || len(value.TemplateID) > 256 || !validateCanonicalRef(value.HomeID, true) {
+		return false
+	}
+	if value.GroupTemplateID != "" && !projecttemplates.ValidManagedGroupTemplateID(value.GroupTemplateID) {
 		return false
 	}
 	if value.GroupPolicy == "" {

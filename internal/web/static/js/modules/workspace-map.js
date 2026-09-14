@@ -2288,6 +2288,12 @@
     var name = ws.name || 'Group';
     var label = name + ' group';
     var countLabel = districtCountLabel(d.memberCount);
+    // A program Home names its template type separately from its editable name.
+    // The server derives it from the Home's program state, never from the name.
+    var templateType =
+      ws.group_template && ws.group_template.kind === 'managed_home'
+        ? String(ws.group_template.name || '').trim()
+        : '';
     // A district whose frame has ended up around something that is not in it —
     // always because the hierarchy changed underneath it, never because of
     // anything the user did on the Map (#346 FR-88).
@@ -2299,7 +2305,8 @@
     // Home selects on click and opens on Enter, so the control cannot promise
     // "Open" as its only meaning. It names the group and its state instead, and
     // aria-pressed carries the selection (FR-141, FR-143).
-    var selectLabel = name + ' group, ' + countLabel;
+    var selectLabel =
+      name + ' group, ' + (templateType ? templateType + ' template, ' : '') + countLabel;
     // Preset CLASSES, never inline style. The identifier is validated against
     // the catalog first, so an unknown or hostile one becomes the default and
     // can never be interpolated into a rule (#346 FR-125, FR-194).
@@ -2340,7 +2347,7 @@
       // The full name stays available to assistive technology even when the
       // visible label truncates (FR-135).
       'title="' +
-      escapeHtml(name) +
+      escapeHtml(templateType ? name + ' — ' + templateType + ' template' : name) +
       '" ' +
       'aria-label="' +
       escapeHtml(selectLabel) +
@@ -2348,6 +2355,9 @@
       '<span class="ws-map-district-name">' +
       escapeHtml(name) +
       '</span>' +
+      (templateType
+        ? '<span class="ws-map-district-type">' + escapeHtml(templateType) + '</span>'
+        : '') +
       '<span class="ws-map-district-count">' +
       escapeHtml(countLabel) +
       '</span>' +

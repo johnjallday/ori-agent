@@ -18,6 +18,9 @@ const (
 	templateGroupRoleVerificationNotApplicable = "not_applicable"
 )
 
+// templateGroupRequirementPlan's GroupTemplateID names the Group Template the
+// destination Home belongs to, for presentation only. Home preparation stays
+// bound to the project template selection and its own reviewed receipt.
 type templateGroupRequirementPlan struct {
 	Version             int                                       `json:"version"`
 	SourceRevision      string                                    `json:"source_revision,omitempty"`
@@ -25,6 +28,7 @@ type templateGroupRequirementPlan struct {
 	Policy              projecttemplates.GroupPolicy              `json:"policy,omitempty"`
 	SelectedComposition string                                    `json:"selected_composition,omitempty"`
 	Summary             string                                    `json:"summary"`
+	GroupTemplateID     string                                    `json:"group_template_id,omitempty"`
 	Home                *templateGroupRequirementHomePlan         `json:"home,omitempty"`
 	RequiredHomeRoles   templateGroupRequirementRequiredRolesPlan `json:"required_home_roles"`
 	Actions             []grouprequirements.Action                `json:"actions,omitempty"`
@@ -157,6 +161,9 @@ func (h *Handler) buildTemplateGroupRequirementPlan(
 	plan := &templateGroupRequirementPlan{
 		Version: templateGroupRequirementPlanVersion, SourceRevision: templateGroupSourceRevision(template),
 		Policy: template.GroupRequirement.Policy,
+	}
+	if key, ok := templateAssistantProgramKey(ownerUserID, template); ok && template.GroupRequirement.Policy != projecttemplates.GroupPolicyNone {
+		plan.GroupTemplateID = projecttemplates.GroupTemplateIDForKey(key)
 	}
 	if h == nil || h.groupRequirements == nil || h.workspaceTaskStore == nil || ownerErr != nil || strings.TrimSpace(ownerUserID) == "" {
 		plan.State = grouprequirements.StateSourceUnavailable

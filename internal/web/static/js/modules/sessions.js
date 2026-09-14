@@ -395,6 +395,10 @@ const sessionManager = {
       const choice = event.target.closest('[name="workspace-creator-kind"]');
       if (choice?.checked) this.switchWorkspaceCreatorKind(choice.value);
     });
+    document.getElementById('workspaceGroupTemplateOptions')?.addEventListener('change', event => {
+      const choice = event.target.closest('[name="workspace-group-template"]');
+      if (choice?.checked) window.GroupTemplateCreator?.select(this, choice.value);
+    });
 
     document.getElementById('folderPresetSelect')?.addEventListener('change', () => {
       this.behaviorOverridden = true;
@@ -584,6 +588,9 @@ const sessionManager = {
       const edit = event.target.closest('[data-wizard-edit-step]');
       if (edit) this.goToWizardStep(Number(edit.dataset.wizardEditStep));
     });
+    document
+      .getElementById('workspaceGroupBlueprintRecapEdit')
+      ?.addEventListener('click', () => this.goToWizardStep(1));
     document.getElementById('workspaceReviewSummary')?.addEventListener('change', event => {
       const choice = event.target.closest('[name="workspace-group-composition"]');
       if (choice) this.setGroupRequirementComposition(choice.value);
@@ -824,6 +831,11 @@ const sessionManager = {
       if (addFolderModal.dataset.suspendedForMapPlacement) return;
       this.abandonWorkspaceMapPlacement();
       this.discardWorkspaceTeamDraft();
+      // A confirmed Group Template change whose response was lost may already
+      // be durable; closing must reveal canonical state rather than hide it.
+      if (this.workspaceCreatorContext?.groupTemplates?.pending) {
+        void this.refreshWorkspaceSurfacesAfterOrdinaryGroupCreate();
+      }
       // Closing without creating leaves the map exactly as it was: no workspace,
       // no position record, no lingering placement mode (#292 FR-54). A pending
       // coordinate that a successful create already consumed is gone by now, so
@@ -3957,9 +3969,10 @@ const sessionManager = {
 
   resetAddWorkspaceModalForm(options = {}) {
     const { preserveAskOri = false } = options;
-    // A Workspace starts at Blueprint; Group starts at Details before its
-    // reviewed roster. Import flips to its fixed Details-only layout below.
-    this.wizardStep = this.isGroupCreator() ? 2 : 1;
+    // Both kinds start at their first visible step: Blueprint for a Workspace
+    // and an ordinary Group, Details for selected-member or guided groups.
+    // Import flips to its fixed Details-only layout below.
+    this.wizardStep = this.isGroupCreator() ? this.creatorWizardSteps()[0] : 1;
     const modalElement = document.getElementById('addFolderModal');
     const nameInput = document.getElementById('folderNameInput');
     const descriptionInput = document.getElementById('folderDescriptionInput');
@@ -6798,12 +6811,19 @@ const sessionManager = {
       destinationMeta =
         status === 'loading' ? 'No destination assumed yet' : 'No group identity was guessed';
     }
+    const groupTemplate = standalone
+      ? null
+      : this.workspaceGroupDestinationTemplate(draft, projection);
+    const templateMeta = groupTemplate
+      ? window.GroupTemplateCreator.templateMeta(groupTemplate)
+      : '';
     if (route) {
       route.innerHTML = `
         <div class="workspace-group-destination-node${destinationClass}">
           <span>${standalone ? 'Structure' : 'Program Home'}</span>
           <strong>${this.escapeHtml(destinationName)}</strong>
           <small>${this.escapeHtml(destinationMeta)}</small>
+          ${templateMeta ? `<small class="workspace-group-destination-template">${this.escapeHtml(templateMeta)}</small>` : ''}
         </div>
         <div class="workspace-group-destination-arrow" aria-hidden="true"></div>
         <div class="workspace-group-destination-node">
@@ -6857,8 +6877,14 @@ const sessionManager = {
       const reviewedName = String(homeOperation.review?.home_name || destinationName);
       if (homeReviewTitle) homeReviewTitle.textContent = `Prepare ${reviewedName}`;
       if (homeReviewCopy) {
-        homeReviewCopy.textContent =
-          'This confirmation creates or reuses only the empty canonical group. It does not create this project, staff either team, link a child, grant tools, or run setup.';
+        const roles = groupTemplate ? window.GroupTemplateCreator.roleSummary(groupTemplate) : [];
+        homeReviewCopy.textContent = [
+          'This confirmation creates or reuses only the empty canonical group. It does not create this project, staff either team, link a child, grant tools, or run setup.',
+          templateMeta ? `${templateMeta}.` : '',
+          roles.length ? `${roles.join('. ')}.` : ''
+        ]
+          .filter(Boolean)
+          .join(' ');
       }
       if (homeConfirm) {
         homeConfirm.disabled = homeOperation.phase === 'committing';
@@ -6904,6 +6930,30 @@ const sessionManager = {
         actionsHost.appendChild(button);
       }
     }
+  },
+
+  // Describes the destination's Group Template with the creator's own wording.
+  // The lookup is presentation only and bound to this draft: Home preparation
+  // still reviews the selected project template through its own receipt.
+  workspaceGroupDestinationTemplate(draft, projection) {
+    const id = String(projection?.group_template_id || '');
+    const creator = window.GroupTemplateCreator;
+    if (!id || !creator?.catalogEntry) return null;
+    if (draft.groupTemplate?.id !== id) {
+      const lookup = { id, entry: null };
+      draft.groupTemplate = lookup;
+      creator
+        .catalogEntry(id)
+        .catch(() => null)
+        .then(entry => {
+          if (this.groupRequirementDraft !== draft || draft.groupTemplate !== lookup || !entry) {
+            return;
+          }
+          lookup.entry = entry;
+          this.renderWorkspaceGroupDestinationCard();
+        });
+    }
+    return draft.groupTemplate.entry;
   },
 
   setWorkspaceGroupDestinationMessage(message) {
@@ -6954,6 +7004,15 @@ const sessionManager = {
 
   refreshWorkspaceReview() {
     const summary = document.getElementById('workspaceReviewSummary');
+    if (this.usesManagedGroupTemplate()) {
+      if (summary) summary.innerHTML = window.GroupTemplateCreator.renderReceipt(this);
+      document.getElementById('workspaceReviewIssues')?.replaceChildren();
+      document.getElementById('workspaceReviewIssues')?.setAttribute('hidden', '');
+      document.getElementById('workspaceReviewReadiness')?.replaceChildren();
+      this.renderSetupPreview(null);
+      if (this.isFinalWizardStep()) void window.GroupTemplateCreator.ensureReview(this);
+      return;
+    }
     if (this.isGroupCreator() && !this.usesGroupRosterCreator()) {
       if (summary) summary.innerHTML = this.renderOrdinaryGroupReceipt();
       document.getElementById('workspaceReviewIssues')?.replaceChildren();
@@ -7108,16 +7167,22 @@ const sessionManager = {
       review?.name || document.getElementById('folderNameInput')?.value || ''
     ).trim();
     const status = review?.existing
-      ? 'The existing canonical Home will be reused unchanged.'
+      ? 'This group already exists and will be reused unchanged.'
       : review
-        ? 'This exact Home has been reviewed by setup. Confirming uses the recorded approval only.'
-        : 'Confirming will ask setup to review this canonical Home. It cannot create an unrelated replacement.';
+        ? 'Setup reviewed this exact group. Confirming uses that approval only.'
+        : 'Confirming asks setup to review this group first. It cannot create an unrelated replacement.';
     const error = String(guided.error || '').trim();
+    // The same template wording the Group Templates chooser uses; guided setup
+    // still reviews and creates through its own action.
+    const creator = window.GroupTemplateCreator;
+    const entry = creator?.fixedEntry?.(this) || null;
+    const meta = entry ? creator.templateMeta(entry) : '';
     return `
       <div class="workspace-review-card">
         <div class="workspace-review-card-main">
-          <span class="workspace-review-card-label">Canonical Home</span>
-          <strong class="workspace-review-identity-name">${this.escapeHtml(name || 'Untitled Home')}</strong>
+          <span class="workspace-review-card-label">${review?.existing ? 'Existing group' : 'Group'}</span>
+          <strong class="workspace-review-identity-name">${this.escapeHtml(name || 'Untitled group')}</strong>
+          ${meta ? `<span class="workspace-review-card-meta">${this.escapeHtml(meta)}</span>` : ''}
           <span class="workspace-review-card-note">${this.escapeHtml(status)}</span>
           ${error ? `<span class="workspace-review-card-note is-error">${this.escapeHtml(error)}</span>` : ''}
         </div>
@@ -7127,11 +7192,12 @@ const sessionManager = {
       </div>
       <div class="workspace-review-card">
         <div class="workspace-review-card-main">
-          <span class="workspace-review-card-label">Setup boundary</span>
-          <strong>Only the canonical Home may be created or reused</strong>
-          <span class="workspace-review-card-note">No child workspace, roster, parent change, project, or generic workspace request is sent from this dialog.</span>
+          <span class="workspace-review-card-label">What will happen</span>
+          <strong>${review?.existing ? 'The existing group is reused unchanged' : 'One group is created, initially unstaffed'}</strong>
+          <span class="workspace-review-card-note">No project, team, parent change, or tool access is created from this dialog.</span>
         </div>
-      </div>`;
+      </div>
+      ${entry ? creator.rolesCardHTML(this, entry) : ''}`;
   },
 
   renderBlankAgentlessChoice(view) {
@@ -7232,6 +7298,12 @@ const sessionManager = {
       const state = holder ? `${holder} · already staffed on the group` : 'Missing on the group';
       return `<span class="workspace-review-hierarchy-role"><b>${this.escapeHtml(role.label)}</b><small>${this.escapeHtml(state)}</small></span>`;
     });
+    const groupTemplate = grouped
+      ? this.workspaceGroupDestinationTemplate(draft, projection)
+      : null;
+    const templateMeta = groupTemplate
+      ? `<small>${this.escapeHtml(window.GroupTemplateCreator.templateMeta(groupTemplate))}</small>`
+      : '';
     const hierarchy = !draft.composition
       ? '<strong>Choose grouped or standalone placement in Details</strong>'
       : grouped
@@ -7239,6 +7311,7 @@ const sessionManager = {
             <div class="workspace-review-hierarchy-node is-group">
               <span>${draft.preparedHome ? 'Prepared group · already persisted' : 'Existing verified group · reused'}</span>
               <strong>${this.escapeHtml(homeName)}</strong>
+              ${templateMeta}
               ${coordinatorLines.join('')}
             </div>
             <div class="workspace-review-hierarchy-branch" aria-hidden="true">↳</div>
@@ -7948,7 +8021,13 @@ const sessionManager = {
   },
 
   usesGroupRosterCreator() {
-    return this.isOrdinaryGroupCreator();
+    // A managed Group Template prepares only its program Home; General keeps
+    // the reviewed Group Manager roster.
+    return this.isOrdinaryGroupCreator() && !this.usesManagedGroupTemplate();
+  },
+
+  usesManagedGroupTemplate() {
+    return Boolean(window.GroupTemplateCreator?.managedActive?.(this));
   },
 
   usesTeamRosterCreator() {
@@ -7973,8 +8052,12 @@ const sessionManager = {
 
   creatorWizardSteps() {
     if (this.importModeEnabled) return [2];
-    if (this.usesGroupRosterCreator()) return [2, 3, 4];
-    return this.isGroupCreator() ? [2, 4] : [1, 2, 3, 4];
+    // An ordinary Group starts on its Blueprint step (General or a Group
+    // Template). Selected-member grouping and guided setup have no choice to
+    // make there, so they keep starting at Details.
+    const blueprint = window.GroupTemplateCreator?.hasBlueprintStep?.(this) ? [1] : [];
+    if (this.usesGroupRosterCreator()) return [...blueprint, 2, 3, 4];
+    return this.isGroupCreator() ? [...blueprint, 2, 4] : [1, 2, 3, 4];
   },
 
   isFinalWizardStep() {
@@ -8060,7 +8143,7 @@ const sessionManager = {
       this.resetTemplateAgentReview();
     }
     this.clearWorkspaceCreateError();
-    this.wizardStep = nextContext.kind === 'group' ? 2 : 1;
+    this.wizardStep = nextContext.kind === 'group' ? this.creatorWizardSteps()[0] : 1;
     this.restoreWorkspaceCreatorDetailsDraft(nextContext.kind);
     this.syncWorkspaceCreatorPresentation();
     this.refreshWizardChrome();
@@ -8134,7 +8217,7 @@ const sessionManager = {
       step2Title.textContent = kind === 'group' ? 'Group details' : 'Workspace details';
     if (step2Description) {
       step2Description.textContent = guidedCreator
-        ? 'Name the canonical Home this setup will review. Its setup owner decides whether it is created or reused.'
+        ? 'Name the group this setup creates. You can rename it later; an existing group is reused unchanged.'
         : kind === 'group'
           ? 'Name the home for related workspaces, then review the agents that will be created with it.'
           : 'Name the space and add the context Ori should carry into its review.';
@@ -8149,13 +8232,13 @@ const sessionManager = {
     }
     if (step4Title)
       step4Title.textContent = guidedCreator
-        ? 'Review the canonical Home'
+        ? 'Review this group'
         : kind === 'group'
           ? 'Review this group and its roster'
           : 'Ready to create?';
     if (step4Description) {
       step4Description.textContent = guidedCreator
-        ? 'This setup will only create or reuse its canonical Home through the reviewed setup action.'
+        ? 'Setup reviews this exact group before anything is created. Nothing else is created here.'
         : kind === 'group'
           ? 'Check the group name, destination, and reviewed roster. Agents are created only after you confirm.'
           : 'Check the workspace, its team, and anything it will ask for after creation.';
@@ -8163,7 +8246,7 @@ const sessionManager = {
     if (groupNotice) {
       groupNotice.hidden = !ordinaryGroup;
       groupNotice.innerHTML = guidedCreator
-        ? "<strong>This is the setup's canonical Home.</strong><span>It is reviewed and created or reused only by the guided setup action. No project, team, or replacement group is created here.</span>"
+        ? '<strong>Only the group is created.</strong><span>Its coordinator is set up separately afterward. Projects, teams, and tool access are never created here, and an existing group is never replaced.</span>'
         : '<strong>Groups organize related workspaces.</strong><span>Review the Group Manager and any saved teammates before creating anything. Managers use only group files and notes, never member workspaces.</span>';
     }
     if (nameLabel) nameLabel.textContent = ordinaryGroup ? 'Group name' : 'Workspace name';
@@ -8211,6 +8294,7 @@ const sessionManager = {
     if (advanced) advanced.hidden = ordinaryGroup;
     if (projectOpen && ordinaryGroup) projectOpen.hidden = true;
     if (groupDestination && ordinaryGroup) groupDestination.hidden = true;
+    window.GroupTemplateCreator?.syncPresentation?.(this);
   },
 
   // Renders the wizard chrome for the current mode + step. Import remains a
@@ -8248,6 +8332,10 @@ const sessionManager = {
       const visible = !importMode && visibleSteps.includes(number);
       const current = visible && number === step;
       element.hidden = !visible;
+      // Number what is shown (1 Blueprint → 2 Details → 3 Review), not the
+      // stable section IDs a shorter operation skips.
+      const numeral = element.querySelector('.workspace-create-step-num');
+      if (numeral && visible) numeral.textContent = String(visibleSteps.indexOf(number) + 1);
       element.classList.toggle('is-active', current);
       if (current) element.setAttribute('aria-current', 'step');
       else element.removeAttribute('aria-current');
@@ -8286,7 +8374,8 @@ const sessionManager = {
         // blockers remain exactly as before.
         createBtn.disabled =
           !importMode &&
-          ((this.usesTeamRosterCreator() && this.hasBlockingTeamIssue()) ||
+          ((this.usesManagedGroupTemplate() && !window.GroupTemplateCreator.canSubmit(this)) ||
+            (this.usesTeamRosterCreator() && this.hasBlockingTeamIssue()) ||
             (this.isWorkspaceCreator() &&
               (this.blueprintSelectionBlocked() ||
                 this.groupRequirementBlocked() ||
@@ -8340,9 +8429,9 @@ const sessionManager = {
     const guided = this.workspaceCreatorContext?.guided;
     if (this.workspaceCreatorContext?.mode === 'guided' && guided) {
       if (guided.error && guided.review?.pending) return 'Retry Confirmed Change';
-      if (guided.review?.existing) return 'Use canonical Home';
-      if (guided.review) return `Create canonical Home “${guided.review.name || 'Group'}”`;
-      return 'Review canonical Home';
+      if (guided.review?.existing) return `Use existing group “${guided.review.name || 'Group'}”`;
+      if (guided.review) return `Create group “${guided.review.name || 'Group'}” only`;
+      return 'Review group';
     }
     const name = String(document.getElementById('folderNameInput')?.value || '').trim();
     if (
@@ -8355,6 +8444,7 @@ const sessionManager = {
     if (this.groupRequirementDraft?.review?.review_token) {
       return name ? `Confirm create “${name}”` : 'Confirm reviewed creation';
     }
+    if (this.usesManagedGroupTemplate()) return window.GroupTemplateCreator.ctaLabel(this);
     if (this.isGroupCreator()) return name ? `Create group “${name}”` : 'Create Group';
     return name ? `Create “${name}”` : 'Create Workspace';
   },
@@ -8764,7 +8854,7 @@ const sessionManager = {
     if (!hint) return;
     if (hint.classList.contains('is-error')) return; // an active error owns the slot
     const name = document.getElementById('folderNameInput')?.value.trim() || '';
-    if (this.importModeEnabled || !name) {
+    if (this.importModeEnabled || !name || this.usesManagedGroupTemplate()) {
       hint.textContent = '';
       hint.hidden = true;
       return;
@@ -8858,7 +8948,11 @@ const sessionManager = {
     // already taken: without them neither the Team roster nor the Review receipt
     // can describe a workspace that could exist.
     if (!this.importModeEnabled && visibleSteps.indexOf(targetStep) > visibleSteps.indexOf(2)) {
-      const problem = this.workspaceIdentityProblem();
+      // A managed Home's folder is keyed to its program, not its display name,
+      // so only the reviewed name rule applies there.
+      const problem = this.usesManagedGroupTemplate()
+        ? window.GroupTemplateCreator.identityProblem(this)
+        : this.workspaceIdentityProblem();
       if (problem) {
         this.wizardStep = 2;
         this.refreshWizardChrome();
@@ -9111,6 +9205,12 @@ const sessionManager = {
       // only the accepted name and never falls through to POST /api/workspaces
       // or Workspace Team/template validation.
       await guided.submit({ name });
+      return;
+    }
+    if (!importEnabled && this.usesManagedGroupTemplate()) {
+      // A managed Group Template commits only its reviewed Home operation and
+      // never falls back to the ordinary Group roster request.
+      await window.GroupTemplateCreator.submit(this);
       return;
     }
     if (requiresReviewedRoster && (!confirmedTeamView || !confirmedTeamView.canContinueFromTeam)) {

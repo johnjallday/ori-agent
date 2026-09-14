@@ -714,7 +714,12 @@ test('the shared creator makes an ordinary Group through Details, Roster, and Re
   await expect(page.locator('#addFolderModal')).toBeVisible();
   await expect(page.locator('#folderModalTitle')).toHaveText('Create Group');
   await expect(page.locator('#workspaceCreatorKindGroup')).toBeChecked();
-  await expect(page.locator('#wizardStep1')).toBeHidden();
+  // An ordinary Group opens on its Blueprint step (General selected), not the
+  // Workspace blueprint picker.
+  await expect(page.locator('#wizardStep1')).toBeVisible();
+  await expect(page.locator('#workspaceBlueprintStepBody')).toBeHidden();
+  await expect(page.locator('#wizardStep1Title')).toHaveText('Choose a group blueprint');
+  await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep3')).toBeHidden();
   await expect(page.locator('#wizardStep2')).toBeVisible();
   await expect(page.locator('#folderAdvancedDisclosure')).toBeHidden();
@@ -786,6 +791,8 @@ test('creator lifecycle keeps ordinary drafts isolated across kind switches and 
 
   await page.locator('#workspaceCreatorKindGroup').check();
   await expect(page.locator('#folderModalTitle')).toHaveText('Create Group');
+  await expect(page.locator('#wizardStep1Title')).toHaveText('Choose a group blueprint');
+  await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep2')).toBeVisible();
   await expect(page.locator('#wizardStep1')).toBeHidden();
   await expect(page.locator('#wizardStep3')).toBeHidden();

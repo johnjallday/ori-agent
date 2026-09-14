@@ -881,6 +881,16 @@
   opacity: 0.72;
   font-size: 9px;
 }
+/* A program Home's template type: bounded and truncated like the name, and
+   quieter, so it never displaces the name or the header controls. */
+.ws-map-district-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 18ch;
+  opacity: 0.72;
+  font-size: 9px;
+}
 .ws-map-district-tag:hover {
   background: rgba(var(--ws-district-accent), 0.14);
 }

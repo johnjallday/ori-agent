@@ -128,6 +128,25 @@ func TestBuildMarksOutOfScopeRolesReadOnly(t *testing.T) {
 	}
 }
 
+// A project-scoped role seen from its group is read-only for the opposite
+// reason: each linked project staffs it, so the group must not claim it.
+func TestBuildExplainsProjectRolesFromTheGroup(t *testing.T) {
+	roles := append(musicRoles(), Role{ID: "portfolio", Label: "Portfolio Manager", Scope: ScopeHome, Required: true})
+	roster := Build(Input{WorkspaceID: "station-1", ViewScope: ScopeHome, GroupWorkspaceID: "station-1", Roles: roles, Lookup: lookupOf()})
+	for _, role := range roster.Roles {
+		switch role.Scope {
+		case ScopeProject:
+			if !role.ReadOnly || role.ReadOnlyReason != readOnlyProjectRoleReason {
+				t.Fatalf("project role seen from the group = %#v", role)
+			}
+		case ScopeHome:
+			if role.ReadOnly {
+				t.Fatalf("group role marked read-only on its own group: %#v", role)
+			}
+		}
+	}
+}
+
 // TestEntryAgentFallsBackToDeclarationOrder covers D3: a workspace with agents
 // in it is never dead just because the primary slot is empty.
 func TestEntryAgentFallsBackToDeclarationOrder(t *testing.T) {

@@ -1,6 +1,8 @@
 package server
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/plugin"
@@ -117,3 +119,69 @@ func TestActivePluginBlueprintCatalogRequiresEnabledCompatibleOwner(t *testing.T
 		t.Fatalf("active candidates = %d, want 1", activeCount)
 	}
 }
+
+type staticInstalledPlugins struct {
+	installed []plugin.InstalledPlugin
+	err       error
+}
+
+func (s staticInstalledPlugins) List() ([]plugin.InstalledPlugin, error) { return s.installed, s.err }
+
+// Derived catalog views (Group Templates) consume the lifecycle decision
+// explicitly rather than inferring it from a template's display fields.
+func TestBlueprintCatalogSnapshotCarriesExplicitActiveState(t *testing.T) {
+	blueprint := func(pluginID string) plugin.ResolvedBlueprint {
+		owner := &workspace.PluginTemplateOwner{PluginID: pluginID, PluginVersion: "1.0.0", BlueprintID: "starter", BlueprintVersion: 1}
+		return plugin.ResolvedBlueprint{
+			ID: "starter", QualifiedID: "plugin:" + pluginID + ":starter", Version: 1,
+			Template: projecttemplates.Template{ID: "plugin:" + pluginID + ":starter", Name: pluginID, PluginOwner: owner},
+		}
+	}
+	installed := func(name string, enabled bool) plugin.InstalledPlugin {
+		return plugin.InstalledPlugin{
+			Name: name, Version: "1.0.0", Enabled: enabled,
+			WorkspaceSurfaces: &plugin.SurfaceContribution{
+				Protocol: plugin.ProtocolRange{Min: plugin.SurfaceProtocolVersion, Max: plugin.SurfaceProtocolVersion},
+			},
+			ResolvedBlueprints: []plugin.ResolvedBlueprint{blueprint(name)},
+			ResolvedArtifacts:  []plugin.ResolvedArtifact{{Available: true}},
+		}
+	}
+
+	snapshot, err := buildBlueprintCatalogSnapshot(t.TempDir(), nil, staticInstalledPlugins{installed: []plugin.InstalledPlugin{
+		installed("enabled", true), installed("disabled", false),
+	}}, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.DependencyStateUnavailable {
+		t.Fatal("readable plugin state reported unavailable")
+	}
+	active, seenEnabled, seenDisabled := snapshot.Active, false, false
+	for _, entry := range snapshot.Entries {
+		switch entry.ID {
+		case "plugin:enabled:starter":
+			seenEnabled = true
+		case "plugin:disabled:starter":
+			seenDisabled = true
+		}
+	}
+	if !seenEnabled || !seenDisabled || !active["plugin:enabled:starter"] || active["plugin:disabled:starter"] {
+		t.Fatalf("snapshot entries/active = %d/%v", len(snapshot.Entries), active)
+	}
+
+	unreadable, err := buildBlueprintCatalogSnapshot(t.TempDir(), nil, staticInstalledPlugins{err: errTestPluginListUnavailable}, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !unreadable.DependencyStateUnavailable {
+		t.Fatal("unreadable plugin state must be reported, not treated as nothing installed")
+	}
+	for id := range unreadable.Active {
+		if strings.HasPrefix(id, "plugin:") {
+			t.Fatalf("unreadable plugin state produced plugin entry %q", id)
+		}
+	}
+}
+
+var errTestPluginListUnavailable = errors.New("plugin store unavailable")
