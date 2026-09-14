@@ -340,14 +340,14 @@ func (p *Planner) inspect(ctx context.Context, intent Intent, selected []Categor
 		}
 		switch id {
 		case CategoryInstalledPlugins:
-			plugins = inspectPlugins(ctx, owners, id, &category, target, block)
+			plugins = inspectPlugins(ctx, owners, id, root, &category, target, block)
 		case CategoryIntegrations:
 			// Start Fresh keeps its existing broader targets for this category and
 			// adds no new one; it needs the same evidence so its plugin portion can
 			// delegate to the identical exact removal owner before those broader
 			// roots — the registry and MCP document it reads from — are deleted.
 			inspectCategory(ctx, owners, id, &category, report, target, block)
-			plugins = inspectPlugins(ctx, owners, id, &category, nil, block)
+			plugins = inspectPlugins(ctx, owners, id, root, &category, nil, block)
 		default:
 			inspectCategory(ctx, owners, id, &category, report, target, block)
 		}

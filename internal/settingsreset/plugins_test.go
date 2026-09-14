@@ -381,6 +381,38 @@ func TestPluginInventoryChangeAfterReviewInvalidatesConfirmation(t *testing.T) {
 	})
 }
 
+// TestPluginResetAgreesOnRootsAcrossASymlinkedHome is a regression guard. The
+// planner used to record the personal skills root exactly as the owner declared
+// it while recovery canonicalized symlinks, so a HOME reached through a symlink
+// — an ordinary macOS temporary directory, for one — made every reviewed plugin
+// reset look like a changed scope and stranded the receipt.
+func TestPluginResetAgreesOnRootsAcrossASymlinkedHome(t *testing.T) {
+	f, owners, c, _ := pluginFixture(t, demoSeeds()...)
+	real := f.PersonalSkillsRoot()
+	link := filepath.Join(f.Paths().Root, "home-link")
+	if err := os.Symlink(f.Paths().Home, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	// The owner declares the location through the symlink, exactly as a host
+	// whose HOME traverses one would.
+	viaLink := filepath.Join(link, ".agents", "skills")
+	owners.PluginPaths = plugin.DefaultResetPaths(f.Paths().DataDir, viaLink)
+
+	operation := stagePluginReset(t, c)
+	options := recoveryOptions(f)
+	options.PersonalSkillsRoot = func() (string, error) { return viaLink, nil }
+	mustPreview(t, RecoverBeforeStores(t.Context(), c.lease, options))
+	recovered, err := c.Status(t.Context(), operation.ID)
+	mustPreview(t, err)
+	if !recovered.VerifiedComplete() {
+		t.Fatalf("a symlinked personal skills root stranded the receipt: %+v", recovered)
+	}
+	if pathExists(t, filepath.Join(real, "demo-managed-skill")) {
+		t.Error("the reviewed skill copy survived under the canonical root")
+	}
+	f.AssertPreserved(t)
+}
+
 func TestRecoveryRefusesAReceiptNamingAnotherSkillsRoot(t *testing.T) {
 	f, _, c, _ := pluginFixture(t, demoSeeds()...)
 	operation := stagePluginReset(t, c)

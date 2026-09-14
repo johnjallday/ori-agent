@@ -42,6 +42,32 @@ type pluginEvidence struct {
 	Items              []plugin.ResetItem `json:"items"`
 }
 
+// resolvedPluginPaths derives the plugin layout from the installation root the
+// planner already resolved, plus the personal skills root resolved through the
+// same helper the pre-store recovery resolver uses.
+//
+// Both sides must agree byte-for-byte or a reviewed operation looks like a
+// changed scope and refuses to apply. Storing an unresolved root here and
+// resolving it at recovery is exactly that bug: on macOS a temporary or
+// symlinked HOME resolves to a different absolute path, and the receipt is
+// stranded through no fault of the user.
+func resolvedPluginPaths(installationRoot, skillsRoot string) (plugin.ResetPaths, bool) {
+	if strings.TrimSpace(installationRoot) == "" || strings.TrimSpace(skillsRoot) == "" {
+		return plugin.ResetPaths{}, false
+	}
+	paths := plugin.DefaultResetPaths(installationRoot, resolveOwnedRoot(skillsRoot))
+	return paths, paths.Resolved()
+}
+
+// resolveOwnedRoot canonicalizes a location that may not exist yet. An absent
+// personal skills folder is ordinary — nothing was ever copied into it.
+func resolveOwnedRoot(path string) string {
+	if resolved, err := resolvePath(path); err == nil {
+		return resolved
+	}
+	return filepath.Clean(path)
+}
+
 // pluginTargetPaths maps this category's installation-local target kinds to the
 // concrete owner paths. They bound where the category may edit; they are not
 // roots it deletes wholesale.
@@ -64,9 +90,10 @@ func pluginTargetPaths(paths plugin.ResetPaths) map[string]string {
 // passes none, because its broader `integrations` targets already cover them —
 // but it needs the same evidence so its plugin portion can run the identical
 // exact cleanup before those broader roots are deleted.
-func inspectPlugins(ctx context.Context, owners Owners, id CategoryID, category *CategoryPreview,
+func inspectPlugins(ctx context.Context, owners Owners, id CategoryID, installationRoot string, category *CategoryPreview,
 	target func(string, string, string), block func(string, CategoryID, string, string)) *pluginEvidence {
-	if !owners.PluginPaths.Resolved() {
+	paths, ok := resolvedPluginPaths(installationRoot, owners.PluginPaths.SkillsRoot)
+	if !ok {
 		block("plugin_owner_unavailable", id, "The authoritative installed-plugin owner is unavailable.",
 			"Restore the plugin registry and personal skills locations before reviewing reset; no plugin layout will be guessed.")
 		category.Facts = append(category.Facts, CountFact{Name: "installed plugins", UnavailableReason: "Authoritative owner or non-interactive inspection unavailable."})
@@ -76,7 +103,6 @@ func inspectPlugins(ctx context.Context, owners Owners, id CategoryID, category 
 		block("plugin_inspection_cancelled", id, "Installed-plugin inspection did not finish.", "Review reset again when the installation is idle.")
 		return nil
 	}
-	paths := owners.PluginPaths
 	inventory, problems := plugin.InspectReset(paths)
 	if len(problems) != 0 {
 		for _, problem := range problems {
@@ -354,17 +380,8 @@ func recoveredPluginPaths(root string, evidence *pluginEvidence, resolve func() 
 	if err != nil {
 		return plugin.ResetPaths{}, ErrScopeChanged
 	}
-	resolved, err := resolvePath(skillsRoot)
-	if err != nil {
-		// An absent personal skills folder is ordinary: nothing was ever copied
-		// there, or it has already been reviewed and removed by hand.
-		resolved = filepath.Clean(skillsRoot)
-	}
-	if resolved != evidence.SkillsRoot {
-		return plugin.ResetPaths{}, ErrScopeChanged
-	}
-	paths := plugin.DefaultResetPaths(root, resolved)
-	if !paths.Resolved() || paths.RegistryPath() != evidence.RegistryPath {
+	paths, ok := resolvedPluginPaths(root, skillsRoot)
+	if !ok || paths.SkillsRoot != evidence.SkillsRoot || paths.RegistryPath() != evidence.RegistryPath {
 		return plugin.ResetPaths{}, ErrScopeChanged
 	}
 	return paths, nil

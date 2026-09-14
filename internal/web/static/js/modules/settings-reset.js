@@ -94,13 +94,15 @@
     settings: { node: byId('resetSettings'), category: 'settings' },
     agents: { node: byId('resetAgents'), category: 'agents' },
     sessions: { node: byId('resetSessions'), category: 'app_records' },
-    onboarding: { node: byId('resetOnboarding'), category: 'setup_steps' }
+    onboarding: { node: byId('resetOnboarding'), category: 'setup_steps' },
+    installedPlugins: { node: byId('resetInstalledPlugins'), category: 'installed_plugins' }
   };
   const labels = {
     settings: 'Settings & API keys',
     agents: 'Agents',
     app_records: 'Conversation & app records',
     setup_steps: 'Setup steps',
+    installed_plugins: 'Installed plugins',
     identity_progress: 'Identity, setup & progress',
     app_configuration: 'Supplemental app configuration',
     integrations: 'Local integrations',
@@ -212,6 +214,13 @@
             : `${fact.name}: ${fact.count}`
         );
       }
+      // Named members of a category's scope — today, each installed plugin. The
+      // server bounds how many it names; a larger inventory reports the rest as
+      // a count fact above rather than growing this list without limit.
+      for (const item of category.items || []) {
+        rows.push(`Item: ${item.name} — ${item.summary || ''}`.trim());
+        for (const detail of item.details || []) rows.push(`  ${item.name}: ${detail}`);
+      }
       for (const location of category.removed || []) {
         rows.push(`Remove: ${location.display_path} — ${location.reason}`);
       }
@@ -260,6 +269,13 @@
       for (const check of result.checks || []) {
         rows.push(
           `${name} / ${check.name}: ${check.outcome}${check.message ? ` — ${check.message}` : ''}`
+        );
+      }
+      // Per-item outcomes name which plugin is unresolved after a partial
+      // failure, so a retry is not a blind repeat of the whole category.
+      for (const item of result.items || []) {
+        rows.push(
+          `${name} / ${item.name}: ${item.outcome}${item.message ? ` — ${item.message}` : ''}`
         );
       }
       for (const kept of result.retained || [])
@@ -490,7 +506,11 @@
       if (input) input.value = '';
       renderPreview(preview);
       updateControls();
-      new bootstrap.Modal(modalElement).show();
+      // getOrCreateInstance, not a fresh Modal: constructing a second instance
+      // for the same element replaces the stored one while the first keeps its
+      // listeners, and the competing pair can leave a reviewed dialog stuck open
+      // after Cancel — with the destructive controls still behind it.
+      bootstrap.Modal.getOrCreateInstance(modalElement).show();
     } catch (requestError) {
       phase = 'idle';
       showResult(requestError?.message || 'Reset preview is unavailable; no data was deleted.');
