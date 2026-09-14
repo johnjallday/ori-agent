@@ -246,6 +246,75 @@
   text-transform: uppercase;
   clip-path: polygon(0 0, 100% 0, 100% 70%, calc(100% - 6px) 100%, 0 100%);
 }
+/* Group Template status: template type and provider stay separate from the
+   editable group name; group, coordinator, and integration are distinct facts. */
+.ws-cmd-group-template {
+  margin: 6px 0 2px;
+  padding: 7px 10px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-panel);
+  max-width: 100%;
+}
+.ws-cmd-group-template-identity,
+.ws-cmd-group-template-note {
+  margin: 0;
+  color: var(--ws-ink);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-group-template-kicker,
+.ws-cmd-group-template-facts span {
+  color: var(--ws-ink-dim);
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+.ws-cmd-group-template-provider,
+.ws-cmd-group-template-note {
+  color: var(--ws-ink-dim);
+}
+.ws-cmd-group-template-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 5px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+.ws-cmd-group-template-facts li {
+  color: var(--ws-ink);
+  overflow-wrap: anywhere;
+}
+.ws-cmd-group-template-facts li::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--ws-ink-faint);
+  vertical-align: middle;
+}
+.ws-cmd-group-template-facts li.is-ready::before {
+  background: var(--ws-faction);
+}
+.ws-cmd-group-template-facts li.is-incomplete::before {
+  background: var(--ws-waiting);
+}
+.ws-cmd-group-template-facts li.is-unavailable::before {
+  background: var(--ws-alert);
+}
+.ws-cmd-group-template-note {
+  margin-top: 4px;
+}
+.ws-cmd-group-template-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
 /* Personal HQ map-header badge (FR15): reuses the citadel gold "keeper"
    tokens already mirrored into this file's tactical scale (no new colors),
    echoing ws-map-tile-hq-badge's treatment on the base /workspaces map for

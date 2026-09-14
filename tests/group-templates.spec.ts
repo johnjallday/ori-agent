@@ -200,6 +200,77 @@ test('a person creates a named group from its template, then reuses it unchanged
   expect(await agentNames(request)).toEqual(beforeAgents);
 });
 
+test('the group page separates template, coordinator and integration through setup, rename and plugin lifecycle', async ({
+  page,
+  request
+}) => {
+  const coordinator = `Fixture Coordinator ${RUN}`;
+  const entry = await fixtureTemplate(request);
+  const homeID = String(entry.home?.workspace_id || '');
+  expect(homeID).toBeTruthy();
+  const beforeWorkspaces = await workspaceIDs(request);
+  const listed = async () => {
+    const body = await json(await request.get('/api/workspaces'));
+    return (body.folders || []).find((folder: { id: string }) => folder.id === homeID);
+  };
+  const beforeFolder = await listed();
+  expect(beforeFolder.group_template).toMatchObject({
+    kind: 'managed_home',
+    name: 'Research Program Home',
+    plugin_id: PLUGIN_NAME
+  });
+
+  const strip = page.locator('.ws-cmd-group-template');
+  await page.goto(`/workspaces/${encodeURIComponent(beforeFolder.folder_slug)}`);
+  await expect(strip).toContainText('Research Program Home');
+  await expect(strip).toContainText(`Plugin: ${PLUGIN_NAME}`);
+  await expect(strip).toContainText('Incomplete — 0 of 1 required set up');
+  await expect(strip).toContainText('Available');
+
+  await strip.getByRole('button', { name: 'Set up Portfolio Coordinator' }).click();
+  await expect(page.locator('#addAgentModal')).toBeVisible();
+  await page.locator('[data-agent-create-field="name"]').fill(coordinator);
+  await page.locator('#createAgentBtn').click();
+  await expect(page.locator('#addAgentModal')).toBeHidden();
+  await expect(strip).toContainText('Ready — 1 of 1 required set up');
+  await expect(strip.getByRole('button', { name: /Set up/ })).toHaveCount(0);
+
+  const roles = await json(await request.get(`/api/workspaces/${homeID}/roles`));
+  const byID = Object.fromEntries(
+    roles.roles.roles.map((role: { role_id: string }) => [role.role_id, role])
+  );
+  expect(byID.portfolio_coordinator).toMatchObject({
+    state: 'filled',
+    agent: { name: coordinator }
+  });
+  expect(byID.archive_curator).toMatchObject({ state: 'empty', required: false });
+  expect(byID.project_lead).toMatchObject({ state: 'empty', read_only: true });
+  expect((await listed()).installed_capabilities || []).toEqual(
+    beforeFolder.installed_capabilities || []
+  );
+
+  const renamedName = `Renamed Studio ${RUN}`;
+  const renamed = await json(
+    await request.post(`/api/workspaces/${homeID}/rename`, { data: { name: renamedName } })
+  );
+  const renamedSlug = renamed.folder.folder_slug;
+  await json(await request.post(`/api/plugins/${PLUGIN_NAME}/disable`));
+  await page.goto(`/workspaces/${encodeURIComponent(renamedSlug)}`);
+  await expect(page.locator('.ws-cmd-title-row h2')).toHaveText(renamedName);
+  await expect(strip).toContainText('Research Program Home');
+  await expect(strip).toContainText('Ready — 1 of 1 required set up');
+  await expect(strip).toContainText('Unavailable — its plugin is disabled');
+
+  await json(await request.post(`/api/plugins/${PLUGIN_NAME}/enable`));
+  await page.reload();
+  await expect(strip).toContainText('Ready — 1 of 1 required set up');
+  await expect(strip).toContainText('Available');
+  await expect(strip).not.toContainText('Unavailable');
+
+  expect(await workspaceIDs(request)).toEqual(beforeWorkspaces);
+  expect((await listed()).group_template).toMatchObject({ name: 'Research Program Home' });
+});
+
 test('General keeps its reviewed Group Manager roster and creates nothing when closed', async ({
   page,
   request

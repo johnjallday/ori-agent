@@ -1959,6 +1959,9 @@ func (h *Handler) hydrateWorkspaceMetadataInto(workspace *session.Workspace) {
 	workspace.SkillCount = mapFields.SkillCount
 	workspace.OpsMode = mapFields.OpsMode
 	workspace.Active = mapFields.Active
+	// Template type and provider are derived from the Home's own program state,
+	// never from its editable name, so rename and source removal keep them.
+	workspace.GroupTemplate = groupTemplateSummary(diskWorkspace)
 
 	// Blueprint identity is inert provenance from the canonical workspace
 	// record. Expose only the stable ID and built-in ownership bit needed to

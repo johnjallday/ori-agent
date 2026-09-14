@@ -777,6 +777,7 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		// Generic assistant-program routes are explicit so they cannot be
 		// swallowed by the legacy workspace subtree router.
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program", s.Handlers.Session.GetAssistantProgram)
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/group-template", s.Handlers.Session.GetGroupTemplateStatus)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/activate", s.Handlers.Session.ActivateAssistantProgram)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/hire", s.Handlers.Session.HireAssistantProgram)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/portfolio", s.Handlers.Session.GetAssistantPortfolio)

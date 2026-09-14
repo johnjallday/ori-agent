@@ -208,6 +208,27 @@ func TestProjectGroupTemplates_RevisionTracksSourceNotDisplayState(t *testing.T)
 	}
 }
 
+func TestGroupTemplateIDForKeyMatchesTheProjectedEntry(t *testing.T) {
+	plugin := groupTemplateProgramSource("Fixture", "plugin:fixture:research-project")
+	attachment := groupTemplateProgramSource("", "Local-Research")
+	attachment.PluginOwner = nil
+	attachment.UserSetupQuest = &UserSetupQuest{AttachmentID: "Attachment-1"}
+	managed := managedGroupTemplates(t, usable(plugin), usable(attachment))
+
+	ids := map[string]bool{}
+	for _, entry := range managed {
+		ids[entry.ID] = true
+	}
+	pluginID := GroupTemplateIDForKey(workspace.AssistantProgramKey{OwnerUserID: "someone", PluginID: "fixture", ProgramID: "Research-Program"})
+	attachmentID := GroupTemplateIDForKey(workspace.AssistantProgramKey{TemplateID: "local-research", AttachmentID: "attachment-1", ProgramID: "research-program"})
+	if !ids[pluginID] || !ids[attachmentID] || pluginID == attachmentID {
+		t.Fatalf("key-derived IDs %q / %q do not match projected %v", pluginID, attachmentID, ids)
+	}
+	if GroupTemplateIDForKey(workspace.AssistantProgramKey{ProgramID: "research-program"}) != "" {
+		t.Fatal("an unowned key must not map to a selection")
+	}
+}
+
 func TestFindGroupTemplateResolvesOnlyProjectedIDs(t *testing.T) {
 	projected := ProjectGroupTemplates([]GroupTemplateCandidate{usable(groupTemplateProgramSource("fixture", "plugin:fixture:research-project"))})
 	if _, ok := FindGroupTemplate(projected, projected[1].ID); !ok {

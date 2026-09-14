@@ -353,7 +353,162 @@ export class WorkspaceCommandView {
     this.ensureCapabilityStations();
     this.ensureSurfaceStations();
     this.ensureRoleRoster();
+    this.ensureGroupTemplateStatus();
     this.applyBootURLState();
+  }
+
+  // A group's template type, provider, staffing, and integration are three
+  // independent server facts. They are re-read on activation and after every
+  // role change; nothing here is inferred from the group's name or agents.
+  ensureGroupTemplateStatus() {
+    if (!this.isGroupWorkspace()) {
+      this.groupTemplateStatus = null;
+      return Promise.resolve(null);
+    }
+    const workspaceId = this.workspaceId();
+    if (!workspaceId) return Promise.resolve(null);
+    const token = (this.groupTemplateStatusToken || 0) + 1;
+    this.groupTemplateStatusToken = token;
+    return fetch('/api/workspaces/' + encodeURIComponent(workspaceId) + '/group-template')
+      .then(response => (response.ok ? response.json() : null))
+      .catch(() => null)
+      .then(data => {
+        if (this.groupTemplateStatusToken !== token || this.workspaceId() !== workspaceId)
+          return null;
+        this.groupTemplateStatus = data?.group_template || null;
+        if (this.active) this.render();
+        return this.groupTemplateStatus;
+      });
+  }
+
+  groupTemplateIntegrationCopy(integration) {
+    const state = integration?.state || 'unknown';
+    const reasons = {
+      plugin_enable_required: 'Unavailable — its plugin is disabled',
+      plugin_install_required: 'Unavailable — its plugin is not installed',
+      dependency_state_unknown: 'Could not be checked',
+      home_incompatible: 'Needs its guided migration',
+      template_unavailable: 'Unavailable — its source template is missing',
+      not_offered_as_group_template: 'Available',
+      home_declaration_conflict: 'Unavailable — its sources disagree'
+    };
+    if (reasons[integration?.reason]) return reasons[integration.reason];
+    if (state === 'available') return 'Available';
+    if (state === 'unknown') return 'Could not be checked';
+    return 'Unavailable';
+  }
+
+  groupTemplateStatusHTML() {
+    const status = this.groupTemplateStatus;
+    if (!this.isGroupWorkspace() || !status || status.kind !== 'managed_home') return '';
+    const team = status.team || {};
+    const required = team.required_home_roles || {};
+    const roles = Array.isArray(required.roles) ? required.roles : [];
+    const missing = roles.filter(role => role.state !== 'filled');
+    const verified = required.verification === 'verified';
+    const provider = status.provider?.plugin_id
+      ? 'Plugin: ' +
+        status.provider.plugin_id +
+        (status.provider.plugin_version ? ' ' + status.provider.plugin_version : '')
+      : status.provider?.kind === 'user_template'
+        ? 'Your template'
+        : '';
+    let teamCopy = 'Could not be verified';
+    let teamClass = 'is-unknown';
+    if (team.state === 'migration_required') {
+      teamCopy = 'Needs its guided migration';
+    } else if (verified && team.state === 'ready') {
+      teamCopy = 'Ready — ' + required.filled + ' of ' + required.required + ' required set up';
+      teamClass = 'is-ready';
+    } else if (verified) {
+      teamCopy =
+        'Incomplete — ' +
+        required.filled +
+        ' of ' +
+        required.required +
+        ' required set up (' +
+        missing.map(role => role.label).join(', ') +
+        ')';
+      teamClass = 'is-incomplete';
+    }
+    const integration = status.integration || {};
+    const integrationClass =
+      integration.state === 'available'
+        ? 'is-ready'
+        : integration.state === 'unknown'
+          ? 'is-unknown'
+          : 'is-unavailable';
+    const optional = Array.isArray(team.optional_home_roles)
+      ? team.optional_home_roles.map(role => role.label).filter(Boolean)
+      : [];
+    const projectRoles = Array.isArray(team.project_roles_note) ? team.project_roles_note : [];
+    const setup =
+      verified && missing.length && (team.actions || []).includes('open_group_roles')
+        ? '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-group-template-setup="' +
+          escapeHtml(missing[0].role_id) +
+          '">Set up ' +
+          escapeHtml(missing[0].label) +
+          '</button>'
+        : '';
+    const manage = (integration.actions || []).includes('manage_plugins')
+      ? '<a class="ws-cmd-nav-btn" href="/plugins">Manage plugins</a>'
+      : '';
+    return (
+      '<section class="ws-cmd-group-template" aria-label="Group template status">' +
+      '<p class="ws-cmd-group-template-identity">' +
+      '<span class="ws-cmd-group-template-kicker">Template</span> ' +
+      '<strong>' +
+      escapeHtml(status.template?.name || 'Group template') +
+      '</strong>' +
+      (provider
+        ? ' <span class="ws-cmd-group-template-provider">· ' + escapeHtml(provider) + '</span>'
+        : '') +
+      '</p>' +
+      '<ul class="ws-cmd-group-template-facts">' +
+      '<li class="is-ready"><span>Group</span> Created</li>' +
+      '<li class="' +
+      teamClass +
+      '"><span>Coordinator</span> ' +
+      escapeHtml(teamCopy) +
+      '</li>' +
+      '<li class="' +
+      integrationClass +
+      '"><span>Integration</span> ' +
+      escapeHtml(this.groupTemplateIntegrationCopy(integration)) +
+      '</li>' +
+      '</ul>' +
+      (optional.length || projectRoles.length
+        ? '<p class="ws-cmd-group-template-note">' +
+          escapeHtml(
+            [
+              optional.length ? 'Optional: ' + optional.join(', ') : '',
+              projectRoles.length ? 'Project-local: ' + projectRoles.join(', ') : ''
+            ]
+              .filter(Boolean)
+              .join(' · ')
+          ) +
+          '</p>'
+        : '') +
+      (setup || manage
+        ? '<div class="ws-cmd-group-template-actions">' + setup + manage + '</div>'
+        : '') +
+      '</section>'
+    );
+  }
+
+  bindGroupTemplateStatus() {
+    const button = this.container?.querySelector('[data-cmd-group-template-setup]');
+    if (!button) return;
+    button.addEventListener('click', async () => {
+      const roleId = button.getAttribute('data-cmd-group-template-setup');
+      if (!this.roleRoster) await this.loadRoleRoster(true);
+      const row = (window.WorkspaceRoleRoster?.rowsFrom(this.roleRoster) || []).find(
+        item => item.roleId === roleId
+      );
+      this.container?.querySelector('[data-cmd-role-roster]')?.scrollIntoView({ block: 'nearest' });
+      if (row) this.openRoleCreateModal(roleId, row);
+      else this.announceRole('That role is not available on this group right now.');
+    });
   }
 
   // The roster is re-read on every activation rather than cached across them,
@@ -1185,6 +1340,7 @@ export class WorkspaceCommandView {
       hqBadge +
       '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="name" aria-label="Edit workspace name">Edit</button>' +
       '</div>' +
+      this.groupTemplateStatusHTML() +
       '<div class="ws-sub" id="workspace-command-subtitle" data-workflow-label="' +
       escapeHtml(workflowLabel) +
       '"' +
@@ -1542,6 +1698,12 @@ export class WorkspaceCommandView {
       this.destroyCommandTagInput();
     }
     const ws = (this.page && this.page.workspace) || {};
+    // The workspace kind may arrive after activation; request a group's
+    // template status once per workspace the first time it is known.
+    if (this.isGroupWorkspace() && this.groupTemplateStatusFor !== this.workspaceId()) {
+      this.groupTemplateStatusFor = this.workspaceId();
+      void this.ensureGroupTemplateStatus();
+    }
     const name = String(ws.name || 'Workspace');
     const mode = this.opsModeLabel();
     const stats = this.computeStats();
@@ -1586,6 +1748,7 @@ export class WorkspaceCommandView {
     }
     this.bindLoadoutAddModal();
     this.bindUnstaffedBanner();
+    this.bindGroupTemplateStatus();
     // Filled after innerHTML, never serialized into it: the roster is real DOM
     // with bound listeners and this container is rebuilt on every render.
     this.mountRoleRoster();
@@ -4003,21 +4166,35 @@ export class WorkspaceCommandView {
         // generic line that throws away "you already have an agent named X".
         const message = data?.message || data?.error || 'That role could not be filled.';
         this.announceRole(message);
+        // A refusal can mean another session already changed this role.
+        void this.refreshCanonicalRoleState();
         return { error: message };
       }
       this.roleRoster = data?.roles || this.roleRoster;
       this.mountRoleRoster();
       this.announceRoleChange(roleId, body.name + ' now fills');
+      void this.ensureGroupTemplateStatus();
       // The workspace's own agent list changed, so re-read it rather than
       // letting the deck describe a team the roster has already moved past.
       await this.page?.loadAgents?.();
       this.render();
       return { ok: true };
     } catch (err) {
-      const message = 'That role could not be filled.';
+      // A lost response may still have been applied; show the server's roster
+      // rather than guessing either way.
+      const message = 'That role could not be confirmed. Showing its current state.';
       this.announceRole(message);
+      void this.refreshCanonicalRoleState();
       return { error: message };
     }
+  }
+
+  // After a refused or unconfirmed role write, replace every local view of the
+  // roster and group status with the server's canonical answer.
+  async refreshCanonicalRoleState() {
+    await this.loadRoleRoster(true);
+    this.mountRoleRoster();
+    await this.ensureGroupTemplateStatus();
   }
 
   async clearRole(roleId, row) {
@@ -4048,15 +4225,18 @@ export class WorkspaceCommandView {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         this.announceRole(data?.message || data?.error || 'That role could not be cleared.');
+        void this.refreshCanonicalRoleState();
         return;
       }
       this.roleRoster = data?.roles || this.roleRoster;
       this.mountRoleRoster();
       this.announceRoleChange(roleId, 'Nobody fills');
+      void this.ensureGroupTemplateStatus();
       await this.page?.loadAgents?.();
       this.render();
     } catch (err) {
-      this.announceRole('That role could not be cleared.');
+      this.announceRole('That role change could not be confirmed. Showing its current state.');
+      void this.refreshCanonicalRoleState();
     }
   }
 

@@ -263,6 +263,21 @@ func projectGroupTemplate(groupKey string, sources []groupTemplateSource) GroupT
 	return entry
 }
 
+// GroupTemplateIDForKey returns the selection identity a Home's persisted
+// program key corresponds to, so status can match the current projection
+// (including conflicting entries) without resolving by name.
+func GroupTemplateIDForKey(key workspace.AssistantProgramKey) string {
+	key = key.Normalize()
+	switch {
+	case key.PluginID != "":
+		return GroupTemplateID(groupTemplateKey(GroupTemplateSourcePlugin, key.PluginID, key.ProgramID))
+	case key.TemplateID != "" && key.AttachmentID != "":
+		return GroupTemplateID(groupTemplateKey(GroupTemplateSourceUserTemplate, key.TemplateID+"\x00"+key.AttachmentID, key.ProgramID))
+	default:
+		return ""
+	}
+}
+
 // GroupTemplateID is the opaque, owner-free selection identity for one
 // source-scoped program key.
 func GroupTemplateID(groupKey string) string {

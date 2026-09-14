@@ -369,6 +369,12 @@ type Workspace struct {
 	BlueprintID      string `json:"blueprint_id,omitempty"`
 	BlueprintBuiltin bool   `json:"blueprint_builtin,omitempty"`
 
+	// GroupTemplate is a bounded display summary for a program Home, derived at
+	// read time from its canonical Assistant Program state. It carries no
+	// declaration, prompt, program key, or authority, and no SQLite column backs
+	// it. Ordinary groups and non-group workspaces omit it.
+	GroupTemplate *WorkspaceGroupTemplateSummary `json:"group_template,omitempty"`
+
 	// CreatedAt is when the workspace was created.
 	CreatedAt time.Time `json:"created_at"`
 
@@ -478,6 +484,16 @@ type Workspace struct {
 	// AssistantProgramJSON carries the generic station state or project link as
 	// one mirrored envelope so primary-store reads cannot erase portable state.
 	AssistantProgramJSON json.RawMessage `json:"assistant_program,omitempty"`
+}
+
+// WorkspaceGroupTemplateSummary names a program Home's template type and
+// provider for list and Map displays. It is derived, never persisted, and
+// never an identity or lookup authority.
+type WorkspaceGroupTemplateSummary struct {
+	Kind         string `json:"kind"`
+	Name         string `json:"name"`
+	ProviderKind string `json:"provider_kind,omitempty"`
+	PluginID     string `json:"plugin_id,omitempty"`
 }
 
 // Tag represents a unique tag used across sessions.
