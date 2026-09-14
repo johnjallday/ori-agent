@@ -15,6 +15,15 @@ import (
 	"time"
 )
 
+// The two synthetic plugins these tests use. Names are domain neutral and are
+// deliberately fixed: several cases depend on their exact relationship (same
+// name twice is a duplicate record, different names sharing one skill is
+// ambiguous ownership).
+const (
+	managedPluginName = "harness-alpha"
+	linkedPluginName  = "harness-beta"
+)
+
 // resetHarness builds a disposable installation with a personal skills root
 // outside it. Everything is domain neutral: no shipped plugin, marketplace,
 // account, or real user location is involved.
@@ -96,7 +105,8 @@ func (h *resetHarness) writeMCPRegistry(names ...string) {
 // seedManaged creates one fully-loaded managed plugin: a managed clone, a copied
 // personal skill, namespaced surface state in both managed locations, a managed
 // artifact, and a namespaced MCP registration.
-func (h *resetHarness) seedManaged(name string) InstalledPlugin {
+func (h *resetHarness) seedManaged() InstalledPlugin {
+	const name = managedPluginName
 	h.t.Helper()
 	clone := filepath.Join(h.paths.CloneDir, name+"-repo")
 	h.write(filepath.Join(clone, ".claude-plugin", "plugin.json"), `{"name":"`+name+`"}`)
@@ -118,7 +128,8 @@ func (h *resetHarness) seedManaged(name string) InstalledPlugin {
 
 // seedLinked creates a plugin installed from an external directory Ori did not
 // create. Its bytes must survive reset.
-func (h *resetHarness) seedLinked(name string) InstalledPlugin {
+func (h *resetHarness) seedLinked() InstalledPlugin {
+	const name = linkedPluginName
 	h.t.Helper()
 	source := filepath.Join(h.root, "external", name)
 	h.write(filepath.Join(source, ".claude-plugin", "plugin.json"), `{"name":"`+name+`"}`)
@@ -207,7 +218,7 @@ func problemCodes(problems []ResetProblem) []string {
 
 func TestInspectResetDescribesEveryOwnedComponent(t *testing.T) {
 	h := newResetHarness(t)
-	managed := h.seedManaged("harness-alpha")
+	managed := h.seedManaged()
 	h.writeRegistry(managed)
 	h.writeMCPRegistry(NamespacedServerName("harness-alpha", "tools"), "user-owned-server")
 
@@ -244,8 +255,8 @@ func TestInspectResetDescribesEveryOwnedComponent(t *testing.T) {
 
 func TestInspectResetSeparatesManagedFromLinkedSources(t *testing.T) {
 	h := newResetHarness(t)
-	managed := h.seedManaged("harness-alpha")
-	linked := h.seedLinked("harness-beta")
+	managed := h.seedManaged()
+	linked := h.seedLinked()
 	h.writeRegistry(managed, linked)
 
 	inventory, problems := InspectReset(h.paths)
@@ -311,7 +322,7 @@ func TestInspectResetBlocksUnsafeAndAmbiguousOwnership(t *testing.T) {
 		{
 			name: "duplicate records",
 			record: func(h *resetHarness) []InstalledPlugin {
-				first := h.seedManaged("harness-alpha")
+				first := h.seedManaged()
 				return []InstalledPlugin{first, first}
 			},
 			want: ResetProblemDuplicateRecord,
@@ -319,7 +330,7 @@ func TestInspectResetBlocksUnsafeAndAmbiguousOwnership(t *testing.T) {
 		{
 			name: "skill escaping the personal skills root",
 			record: func(h *resetHarness) []InstalledPlugin {
-				record := h.seedManaged("harness-alpha")
+				record := h.seedManaged()
 				record.Skills = []string{"../../escape"}
 				return []InstalledPlugin{record}
 			},
@@ -328,7 +339,7 @@ func TestInspectResetBlocksUnsafeAndAmbiguousOwnership(t *testing.T) {
 		{
 			name: "unnamespaced mcp registration",
 			record: func(h *resetHarness) []InstalledPlugin {
-				record := h.seedManaged("harness-alpha")
+				record := h.seedManaged()
 				record.MCPServers = []string{"user-owned-server"}
 				return []InstalledPlugin{record}
 			},
@@ -337,8 +348,8 @@ func TestInspectResetBlocksUnsafeAndAmbiguousOwnership(t *testing.T) {
 		{
 			name: "two plugins claiming one personal skill",
 			record: func(h *resetHarness) []InstalledPlugin {
-				first := h.seedManaged("harness-alpha")
-				second := h.seedLinked("harness-beta")
+				first := h.seedManaged()
+				second := h.seedLinked()
 				second.Skills = first.Skills
 				return []InstalledPlugin{first, second}
 			},
@@ -347,7 +358,7 @@ func TestInspectResetBlocksUnsafeAndAmbiguousOwnership(t *testing.T) {
 		{
 			name: "unresolvable relative install root",
 			record: func(h *resetHarness) []InstalledPlugin {
-				record := h.seedManaged("harness-alpha")
+				record := h.seedManaged()
 				record.InstallDir = filepath.Join("relative", "never-created")
 				record.Source = "https://example.test/harness-alpha.git"
 				return []InstalledPlugin{record}
@@ -376,7 +387,7 @@ func TestInspectResetBlocksUnexpectedSkillDestinations(t *testing.T) {
 	for _, kind := range []string{"symlink", "regular file"} {
 		t.Run(kind, func(t *testing.T) {
 			h := newResetHarness(t)
-			record := h.seedManaged("harness-alpha")
+			record := h.seedManaged()
 			destination := filepath.Join(h.paths.SkillsRoot, "harness-alpha-skill")
 			if err := os.RemoveAll(destination); err != nil {
 				t.Fatalf("clear destination: %v", err)
@@ -447,8 +458,8 @@ func TestInspectResetBlocksUnresolvedOwnerRoots(t *testing.T) {
 
 func TestRemoveResetItemRemovesExactlyItsOwnComponents(t *testing.T) {
 	h := newResetHarness(t)
-	managed := h.seedManaged("harness-alpha")
-	linked := h.seedLinked("harness-beta")
+	managed := h.seedManaged()
+	linked := h.seedLinked()
 	h.writeRegistry(managed, linked)
 	h.writeMCPRegistry(NamespacedServerName("harness-alpha", "tools"), "user-owned-server")
 	h.write(filepath.Join(h.paths.SkillsRoot, "user-authored-skill", "SKILL.md"), "# personal\n")
@@ -506,7 +517,7 @@ func TestRemoveResetItemRemovesExactlyItsOwnComponents(t *testing.T) {
 
 func TestRemoveResetItemIsIdempotent(t *testing.T) {
 	h := newResetHarness(t)
-	h.writeRegistry(h.seedManaged("harness-alpha"))
+	h.writeRegistry(h.seedManaged())
 	h.writeMCPRegistry(NamespacedServerName("harness-alpha", "tools"))
 	inventory, problems := InspectReset(h.paths)
 	if len(problems) != 0 {
@@ -526,7 +537,7 @@ func TestRemoveResetItemIsIdempotent(t *testing.T) {
 
 func TestResetItemRemovedRejectsRegistryAbsenceAlone(t *testing.T) {
 	h := newResetHarness(t)
-	record := h.seedManaged("harness-alpha")
+	record := h.seedManaged()
 	h.writeRegistry(record)
 	inventory, problems := InspectReset(h.paths)
 	if len(problems) != 0 {
@@ -566,7 +577,7 @@ func TestRemoveResetPreviewCacheKeepsOwnedRoot(t *testing.T) {
 
 func TestRemoveResetItemRefusesUnsafeEvidence(t *testing.T) {
 	h := newResetHarness(t)
-	h.writeRegistry(h.seedManaged("harness-alpha"))
+	h.writeRegistry(h.seedManaged())
 	before := h.snapshot()
 	if err := RemoveResetItem(h.paths, ResetItem{Name: "../escape"}); err == nil {
 		t.Fatal("an unsafe plugin name was accepted")

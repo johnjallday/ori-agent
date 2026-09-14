@@ -244,6 +244,14 @@ V1 state rules:
 - uninstall explicitly deletes that plugin's namespaced state only after service
   stop/session invalidation and as part of the disclosed uninstall. It is never
   copied into another plugin or a core workspace field;
+- a reviewed Settings reset that removes installed plugins deletes the same
+  namespaced state, plus the plugin's own service data root under the managed
+  state directory. It runs at the pre-store boundary after the runtime is
+  fenced and every plugin service has been drained, so no service is executing
+  while its state is removed, and it runs no plugin-authored code. Workspace
+  records, files, history, and plugin bindings are preserved; the removed
+  plugin's capability simply becomes unavailable. See
+  `docs/architecture/settings-reset.md`;
 - surface sessions, confirmations, pending plans, and other transient broker
   records are in memory and never written here.
 
