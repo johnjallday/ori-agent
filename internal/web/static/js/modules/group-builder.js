@@ -276,7 +276,15 @@ export function openGroupBuilder({ journey = null, onJourneyChange, onClose } = 
     active = null;
     throw new Error('Create Group is unavailable. Refresh the page and try again.');
   }
-  const guided = { state, submit: () => submit(state), review: null, error: '' };
+  const guided = {
+    state,
+    submit: () => submit(state),
+    review: null,
+    error: '',
+    // Presentation only: names the catalog entry the creator describes. The
+    // setup journey's own review/commit remains the only mutation path.
+    groupTemplateId: String(preparation?.group_template_id || '')
+  };
   manager.showAddWorkspaceModal({
     mode: 'guided',
     kind: 'group',

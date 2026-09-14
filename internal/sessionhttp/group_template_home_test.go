@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
@@ -82,6 +83,8 @@ func TestGroupTemplateHome_RejectsForgedAndMixedPayloadsBeforeSideEffects(t *tes
 func TestGroupTemplateHome_CreatesNamedHomeThenReplaysAndReusesHonestly(t *testing.T) {
 	handler, store, id, revision, cleanup := newGroupTemplateHomeHandler(t)
 	defer cleanup()
+	allowlist := agentworkspace.NewAllowlist(filepath.Join(t.TempDir(), agentworkspace.DefaultAllowlistFilename))
+	handler.SetWorkspaceAllowlist(allowlist)
 
 	selection := map[string]any{"group_template_id": id, "revision": revision, "name": "Lab Portfolio"}
 	code, body := postGroupTemplateHome(t, handler, false, groupTemplateHomeBody(t, selection))
@@ -107,6 +110,11 @@ func TestGroupTemplateHome_CreatesNamedHomeThenReplaysAndReusesHonestly(t *testi
 	home, err := store.Get(homeID)
 	if err != nil || home.Kind != "group" || home.GetAssistantProgramState().GroupTemplate == nil || len(home.GetAgentInstances()) != 0 {
 		t.Fatalf("created Home = %+v, %v", home, err)
+	}
+	// Like any local creation, the new Home is owned by this data directory, so
+	// a coordinator staffed on it later is restored after a restart.
+	if !allowlist.Contains(homeID) {
+		t.Fatal("a Home created by this operation was not recorded as locally owned")
 	}
 
 	code, body = postGroupTemplateHome(t, handler, true, groupTemplateHomeBody(t, commit))
@@ -137,5 +145,37 @@ func TestGroupTemplateHome_CreatesNamedHomeThenReplaysAndReusesHonestly(t *testi
 	}
 	if ids, _ := store.List(); len(ids) != 1 {
 		t.Fatalf("create/replay/reuse produced workspaces %v", ids)
+	}
+}
+
+func TestGroupTemplateHome_OnlyAHomeItCreatesIsRecordedAsLocallyOwned(t *testing.T) {
+	handler, _, id, revision, cleanup := newGroupTemplateHomeHandler(t)
+	defer cleanup()
+	allowlist := agentworkspace.NewAllowlist(filepath.Join(t.TempDir(), agentworkspace.DefaultAllowlistFilename))
+
+	// The direct-recovery path records the Home it creates.
+	handler.SetWorkspaceAllowlist(allowlist)
+	homeID := preparePolicyHome(t, handler)
+	if !allowlist.Contains(homeID) {
+		t.Fatal("direct recovery did not record the Home it created")
+	}
+
+	// Reusing a Home this data directory did not record never records it.
+	otherAllowlist := agentworkspace.NewAllowlist(filepath.Join(t.TempDir(), agentworkspace.DefaultAllowlistFilename))
+	handler.SetWorkspaceAllowlist(otherAllowlist)
+	selection := map[string]any{"group_template_id": id, "revision": revision, "name": "Ignored"}
+	_, body := postGroupTemplateHome(t, handler, false, groupTemplateHomeBody(t, selection))
+	review, _ := body["group_template_review"].(map[string]any)
+	commit := map[string]any{
+		"group_template_id": id, "revision": revision, "name": "Ignored",
+		"group_review_token": review["review_token"], "idempotency_key": "reuse-unrecorded",
+	}
+	code, body := postGroupTemplateHome(t, handler, true, groupTemplateHomeBody(t, commit))
+	result, _ := body["group_template"].(map[string]any)
+	if code != http.StatusOK || result["created_by_this_operation"] != false || result["home_workspace_id"] != homeID {
+		t.Fatalf("reuse commit = %d %v", code, body)
+	}
+	if otherAllowlist.Contains(homeID) {
+		t.Fatal("reuse recorded an existing Home as created here")
 	}
 }

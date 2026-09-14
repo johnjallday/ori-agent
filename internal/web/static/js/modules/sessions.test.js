@@ -1380,6 +1380,91 @@ test('Details destination card distinguishes loading, proposed, existing, standa
   assert.doesNotMatch(elements.get('workspaceGroupDestinationProgress').textContent, /0 of/);
 });
 
+test('Details destination describes its Group Template only for the draft that asked', async () => {
+  const ids = [
+    'workspaceGroupDestinationCard',
+    'workspaceGroupDestinationRoute',
+    'workspaceGroupHomeReview',
+    'workspaceGroupHomeReviewCopy',
+    'workspaceGroupDestinationActions',
+    'folderNameInput'
+  ];
+  const elements = new Map(ids.map(id => [id, new CardElement()]));
+  const lookups = [];
+  const entry = {
+    id: 'group-template:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    name: 'Research Program Home'
+  };
+  const creator = {
+    catalogEntry: id => {
+      let resolve;
+      const promise = new Promise(done => (resolve = done));
+      lookups.push({ id, resolve });
+      return promise;
+    },
+    templateMeta: value => `Template: ${value.name} · Plugin: fixture 1.0.0`,
+    roleSummary: () => ['Set up after: Portfolio Coordinator (required)']
+  };
+  const manager = loadSessionManager(
+    undefined,
+    { GroupTemplateCreator: creator },
+    {
+      getElementById: id => elements.get(id) || null,
+      createElement: () => new CardElement()
+    }
+  );
+  const projection = {
+    state: 'home_creation_review_required',
+    group_template_id: entry.id,
+    home: { exists: false, proposed_name: 'Research Program Home' },
+    required_home_roles: { verification: 'group_absent', required: 1, filled: 0, missing: 1 },
+    actions: ['review_create_home']
+  };
+  const first = { policy: 'required', composition: 'grouped', status: 'ready', projection };
+  manager.groupRequirementDraft = first;
+  manager.renderWorkspaceGroupDestinationCard();
+  manager.renderWorkspaceGroupDestinationCard();
+  assert.equal(lookups.length, 1, 'one lookup per template for a draft');
+  assert.doesNotMatch(elements.get('workspaceGroupDestinationRoute').innerHTML, /Template:/);
+
+  // A newer draft replaces the first before its lookup resolves.
+  const second = {
+    policy: 'required',
+    composition: 'grouped',
+    status: 'ready',
+    projection: { ...projection }
+  };
+  manager.groupRequirementDraft = second;
+  lookups[0].resolve(entry);
+  await new Promise(done => setTimeout(done, 0));
+  assert.equal(first.groupTemplate.entry, null, 'a stale draft is never described');
+  manager.renderWorkspaceGroupDestinationCard();
+  lookups[1].resolve(entry);
+  await new Promise(done => setTimeout(done, 0));
+  assert.match(
+    elements.get('workspaceGroupDestinationRoute').innerHTML,
+    /Template: Research Program Home · Plugin: fixture 1\.0\.0/
+  );
+
+  second.homeOperation = { phase: 'awaiting_confirmation', review: {} };
+  manager.renderWorkspaceGroupDestinationCard();
+  assert.match(
+    elements.get('workspaceGroupHomeReviewCopy').textContent,
+    /Set up after: Portfolio Coordinator \(required\)\./
+  );
+
+  // Standalone placement never names a group template.
+  manager.groupRequirementDraft = {
+    policy: 'recommended',
+    composition: 'standalone',
+    status: 'ready',
+    projection: { ...projection, state: 'ready_standalone', home: null, actions: [] }
+  };
+  manager.renderWorkspaceGroupDestinationCard();
+  assert.equal(lookups.length, 2);
+  assert.doesNotMatch(elements.get('workspaceGroupDestinationRoute').innerHTML, /Template:/);
+});
+
 test('group requirement creation reviews before committing and reuses only the exact receipt', async () => {
   const calls = [];
   const manager = loadSessionManager(async (url, options) => {

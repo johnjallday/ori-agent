@@ -285,6 +285,21 @@ func GroupTemplateID(groupKey string) string {
 	return groupTemplateIDPrefix + hex.EncodeToString(digest[:16])
 }
 
+// ValidManagedGroupTemplateID reports whether value has the exact shape
+// GroupTemplateID produces. It proves shape only, never that an entry exists.
+func ValidManagedGroupTemplateID(value string) bool {
+	digest, ok := strings.CutPrefix(value, groupTemplateIDPrefix)
+	if !ok || len(digest) != 32 {
+		return false
+	}
+	for _, character := range digest {
+		if (character < '0' || character > '9') && (character < 'a' || character > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 // GroupTemplateHomeDigest fingerprints the Home-defining declaration: the
 // whole Assistant Program except project-scoped roles, which may differ
 // between blueprints that share one Home.

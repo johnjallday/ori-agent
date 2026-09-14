@@ -22,6 +22,12 @@ import {
   FILTER
 } from './task-presentation.js';
 import { WorkspaceExecutionController, RUN_PHASE } from './workspace-execution-controller.js';
+import {
+  fetchGroupTemplateStatus,
+  groupTemplateIntegrationFact,
+  groupTemplateProviderLabel,
+  groupTemplateTeamFact
+} from './group-template-status.js';
 import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
 import {
   parseWorkspaceURLState,
@@ -369,75 +375,29 @@ export class WorkspaceCommandView {
     if (!workspaceId) return Promise.resolve(null);
     const token = (this.groupTemplateStatusToken || 0) + 1;
     this.groupTemplateStatusToken = token;
-    return fetch('/api/workspaces/' + encodeURIComponent(workspaceId) + '/group-template')
-      .then(response => (response.ok ? response.json() : null))
-      .catch(() => null)
-      .then(data => {
-        if (this.groupTemplateStatusToken !== token || this.workspaceId() !== workspaceId)
-          return null;
-        this.groupTemplateStatus = data?.group_template || null;
-        if (this.active) this.render();
-        return this.groupTemplateStatus;
-      });
-  }
-
-  groupTemplateIntegrationCopy(integration) {
-    const state = integration?.state || 'unknown';
-    const reasons = {
-      plugin_enable_required: 'Unavailable — its plugin is disabled',
-      plugin_install_required: 'Unavailable — its plugin is not installed',
-      dependency_state_unknown: 'Could not be checked',
-      home_incompatible: 'Needs its guided migration',
-      template_unavailable: 'Unavailable — its source template is missing',
-      not_offered_as_group_template: 'Available',
-      home_declaration_conflict: 'Unavailable — its sources disagree'
-    };
-    if (reasons[integration?.reason]) return reasons[integration.reason];
-    if (state === 'available') return 'Available';
-    if (state === 'unknown') return 'Could not be checked';
-    return 'Unavailable';
+    return fetchGroupTemplateStatus(workspaceId).then(status => {
+      if (this.groupTemplateStatusToken !== token || this.workspaceId() !== workspaceId)
+        return null;
+      this.groupTemplateStatus = status;
+      if (this.active) this.render();
+      return this.groupTemplateStatus;
+    });
   }
 
   groupTemplateStatusHTML() {
     const status = this.groupTemplateStatus;
     if (!this.isGroupWorkspace() || !status || status.kind !== 'managed_home') return '';
     const team = status.team || {};
-    const required = team.required_home_roles || {};
-    const roles = Array.isArray(required.roles) ? required.roles : [];
-    const missing = roles.filter(role => role.state !== 'filled');
-    const verified = required.verification === 'verified';
-    const provider = status.provider?.plugin_id
-      ? 'Plugin: ' +
-        status.provider.plugin_id +
-        (status.provider.plugin_version ? ' ' + status.provider.plugin_version : '')
-      : status.provider?.kind === 'user_template'
-        ? 'Your template'
-        : '';
-    let teamCopy = 'Could not be verified';
-    let teamClass = 'is-unknown';
-    if (team.state === 'migration_required') {
-      teamCopy = 'Needs its guided migration';
-    } else if (verified && team.state === 'ready') {
-      teamCopy = 'Ready — ' + required.filled + ' of ' + required.required + ' required set up';
-      teamClass = 'is-ready';
-    } else if (verified) {
-      teamCopy =
-        'Incomplete — ' +
-        required.filled +
-        ' of ' +
-        required.required +
-        ' required set up (' +
-        missing.map(role => role.label).join(', ') +
-        ')';
-      teamClass = 'is-incomplete';
-    }
+    const provider = groupTemplateProviderLabel(status);
+    const {
+      copy: teamCopy,
+      className: teamClass,
+      verified,
+      missing
+    } = groupTemplateTeamFact(status);
     const integration = status.integration || {};
-    const integrationClass =
-      integration.state === 'available'
-        ? 'is-ready'
-        : integration.state === 'unknown'
-          ? 'is-unknown'
-          : 'is-unavailable';
+    const { copy: integrationCopy, className: integrationClass } =
+      groupTemplateIntegrationFact(integration);
     const optional = Array.isArray(team.optional_home_roles)
       ? team.optional_home_roles.map(role => role.label).filter(Boolean)
       : [];
@@ -474,7 +434,7 @@ export class WorkspaceCommandView {
       '<li class="' +
       integrationClass +
       '"><span>Integration</span> ' +
-      escapeHtml(this.groupTemplateIntegrationCopy(integration)) +
+      escapeHtml(integrationCopy) +
       '</li>' +
       '</ul>' +
       (optional.length || projectRoles.length

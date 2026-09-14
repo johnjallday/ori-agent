@@ -19,6 +19,10 @@ type HomePreparation struct {
 	TemplateID            string   `json:"template_id"`
 	GroupPolicy           string   `json:"group_policy,omitempty"`
 	AvailableCompositions []string `json:"available_compositions,omitempty"`
+	// GroupTemplateID is the opaque, owner-free Group Template identity of this
+	// program key. It is presentation-only: it selects which catalog entry the
+	// shared creator describes and never authorizes this setup's own review.
+	GroupTemplateID string `json:"group_template_id,omitempty"`
 }
 
 func homeKey(scope Scope) (workspace.AssistantProgramKey, error) {
@@ -63,6 +67,7 @@ func (s *Service) HomePreparation(scope Scope) (HomePreparation, error) {
 	if err != nil {
 		return HomePreparation{}, ErrUnavailable
 	}
+	result.GroupTemplateID = projecttemplates.GroupTemplateIDForKey(key)
 	home, err := workspace.NewAssistantProgramStore(s.store).FindStation(key)
 	if errors.Is(err, workspace.ErrAssistantStationNotFound) {
 		return result, nil

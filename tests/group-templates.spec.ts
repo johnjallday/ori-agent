@@ -271,6 +271,115 @@ test('the group page separates template, coordinator and integration through set
   expect((await listed()).group_template).toMatchObject({ name: 'Research Program Home' });
 });
 
+test('a project blueprint reuses the renamed template group for two independent projects', async ({
+  page,
+  request
+}) => {
+  const entry = await fixtureTemplate(request);
+  expect(entry.availability?.state).toBe('reusable');
+  const homeID = String(entry.home?.workspace_id || '');
+  const homeName = String(entry.home?.name || '');
+  expect(homeName).toBe(`Renamed Studio ${RUN}`);
+  const coordinator = `Fixture Coordinator ${RUN}`;
+  const templateMeta = `Template: Research Program Home · Plugin: ${PLUGIN_NAME}`;
+  const blueprintID = `plugin:${PLUGIN_NAME}:research-project`;
+  const homeBefore = await json(await request.get(`/api/workspaces/${homeID}`));
+  expect(homeBefore.agent_instances).toEqual([
+    expect.objectContaining({ name: coordinator, role_id: 'portfolio_coordinator' })
+  ]);
+
+  const projects: string[] = [];
+  for (const [index, projectName] of [`Study One ${RUN}`, `Study Two ${RUN}`].entries()) {
+    const lead = `Study Lead ${index + 1} ${RUN}`;
+    await page.goto('/');
+    await page.waitForFunction(() =>
+      Boolean((window as any).sessionManager?.showAddWorkspaceModal)
+    );
+    await page.evaluate(() =>
+      (window as any).sessionManager.showAddWorkspaceModal({
+        kind: 'workspace',
+        entryPoint: 'group_templates_spec'
+      })
+    );
+    await page.locator(`#templatePicker [data-template-id="${blueprintID}"]`).click();
+    await page.locator('#wizardNextBtn').click();
+    await page.locator('#folderNameInput').fill(projectName);
+    const openProject = page.locator('#projectTemplateOpenAfterCreateToggle');
+    if (await openProject.isChecked()) await openProject.uncheck();
+
+    // The destination is the exact existing group under its current name,
+    // described with the same template wording as the Group Templates chooser.
+    const destination = page.locator('#workspaceGroupDestinationCard');
+    await expect(destination).toContainText(homeName);
+    await expect(destination).toContainText('Existing verified group');
+    await expect(destination).toContainText(templateMeta);
+    await expect(destination).toContainText('1 of 1 required group role filled');
+    await expect(page.locator('#workspaceGroupDestinationActions button')).toHaveCount(0);
+
+    await page.locator('#wizardNextBtn').click();
+    await expect(page.locator('#wizardStep3')).toBeVisible();
+    // Group coordination is shown, never staffed from a project.
+    const homeScope = page.locator('[data-scope="home"]');
+    await expect(homeScope).toContainText(coordinator);
+    await expect(homeScope.getByRole('button', { name: /Create an agent|Set up/ })).toHaveCount(0);
+    const projectRole = page.locator('.ws-role-row[data-role-id="project_lead"]');
+    await projectRole.getByRole('button', { name: 'Create an agent for Research Lead' }).click();
+    await expect(page.locator('#addAgentModal')).toBeVisible();
+    await page.locator('[data-agent-create-field="name"]').fill(lead);
+    await page.locator('#createAgentBtn').click();
+    await expect(page.locator('#addAgentModal')).toBeHidden();
+    await expect(projectRole).toContainText(lead);
+
+    await page.locator('#wizardNextBtn').click();
+    const review = page.locator('#workspaceReviewSummary');
+    await expect(review).toContainText(homeName);
+    await expect(review).toContainText(templateMeta);
+    await expect(review).toContainText(`${coordinator} · already staffed on the group`);
+    const placement = page.waitForResponse(
+      response =>
+        new URL(response.url()).pathname === '/api/workspaces' &&
+        response.request().method() === 'POST' &&
+        response.request().postDataJSON()?.group_requirement_review === true
+    );
+    await page.locator('#createFolderBtn').click();
+    expect((await placement).ok()).toBeTruthy();
+    const commit = page.waitForResponse(
+      response =>
+        new URL(response.url()).pathname === '/api/workspaces' &&
+        response.request().method() === 'POST' &&
+        Boolean(response.request().postDataJSON()?.group_review_token)
+    );
+    await page.locator('#createFolderBtn').click();
+    const committed = await commit;
+    expect(committed.ok(), await committed.text()).toBeTruthy();
+    const payload = committed.request().postDataJSON();
+    expect(payload.role_staffing).toEqual([
+      expect.objectContaining({ role_id: 'project_lead', mode: 'create', name: lead })
+    ]);
+    const body = await committed.json();
+    expect(body.assistant_station_id).toBe(homeID);
+    // Creation hands off to the new workspace; let that navigation settle
+    // before the next project starts from Home.
+    await page.waitForURL(url => /^\/workspaces\/[^/]+$/.test(url.pathname));
+    const project = await json(await request.get(`/api/workspaces/${body.folder.id}`));
+    expect(project).toMatchObject({ parent_id: homeID });
+    expect(project.agent_instances).toEqual([
+      expect.objectContaining({ name: lead, role_id: 'project_lead', entry_point: true })
+    ]);
+    projects.push(body.folder.id);
+  }
+
+  expect(new Set(projects).size).toBe(2);
+  const homeAfter = await json(await request.get(`/api/workspaces/${homeID}`));
+  expect(homeAfter.name).toBe(homeName);
+  expect(homeAfter.agent_instances).toEqual(homeBefore.agent_instances);
+  const after = await fixtureTemplate(request);
+  expect(after).toMatchObject({
+    availability: { state: 'reusable' },
+    home: { workspace_id: homeID, name: homeName }
+  });
+});
+
 test('General keeps its reviewed Group Manager roster and creates nothing when closed', async ({
   page,
   request

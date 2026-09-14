@@ -227,6 +227,14 @@ func TestGroupTemplateIDForKeyMatchesTheProjectedEntry(t *testing.T) {
 	if GroupTemplateIDForKey(workspace.AssistantProgramKey{ProgramID: "research-program"}) != "" {
 		t.Fatal("an unowned key must not map to a selection")
 	}
+	if !ValidManagedGroupTemplateID(pluginID) || !ValidManagedGroupTemplateID(attachmentID) {
+		t.Fatalf("derived IDs fail their own shape check: %q %q", pluginID, attachmentID)
+	}
+	for _, invalid := range []string{"", GroupTemplateGeneralID, "group-template:", pluginID + "0", strings.ToUpper(pluginID), "group-template:" + strings.Repeat("g", 32)} {
+		if ValidManagedGroupTemplateID(invalid) {
+			t.Fatalf("ValidManagedGroupTemplateID(%q) = true", invalid)
+		}
+	}
 }
 
 func TestFindGroupTemplateResolvesOnlyProjectedIDs(t *testing.T) {

@@ -219,6 +219,9 @@ test('first-time UI prepares and staffs the exact Home before one reviewed proje
   await expect(destination).toContainText('Research Program Home');
   await expect(destination).toContainText('Proposed group · not created');
   await expect(destination).toContainText('0 of 1 required group role filled');
+  await expect(destination).toContainText(
+    `Template: Research Program Home · Plugin: ${PLUGIN_NAME}`
+  );
   await page.screenshot({
     path: 'tasks/screenshots/workspace-group-first-creation/synthetic-details-absent.png',
     fullPage: true
@@ -244,6 +247,9 @@ test('first-time UI prepares and staffs the exact Home before one reviewed proje
   await expect(page.locator('#workspaceGroupHomeReview')).toBeVisible();
   await expect(page.locator('#workspaceGroupHomeReview')).toContainText(
     'does not create this project'
+  );
+  await expect(page.locator('#workspaceGroupHomeReview')).toContainText(
+    'Set up after: Portfolio Coordinator (required)'
   );
   expect(await workspaces(request)).toHaveLength(beforeWorkspaces.length);
 

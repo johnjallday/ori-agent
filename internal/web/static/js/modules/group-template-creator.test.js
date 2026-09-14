@@ -17,23 +17,32 @@ function environment({ fetch } = {}) {
         disabled: false,
         textContent: '',
         attributes: {},
+        children: [],
         setAttribute(name, value) {
           this.attributes[name] = value;
         },
-        replaceChildren() {},
-        append() {}
+        replaceChildren(...children) {
+          this.children = children;
+        },
+        append(...children) {
+          this.children.push(...children);
+        }
       });
     }
     return elements.get(id);
   };
   const document = {
     getElementById: id => element(id),
-    createElement: () => ({
+    createElement: tag => ({
+      tag,
       dataset: {},
+      children: [],
+      className: '',
+      textContent: '',
       classList: { toggle() {} },
-      append() {},
-      set className(value) {},
-      set textContent(value) {}
+      append(...children) {
+        this.children.push(...children);
+      }
     })
   };
   const window = {};
@@ -151,6 +160,10 @@ test('templates are offered only to ordinary Group creators; bulk grouping is Ge
   assert.equal(api.chooserMode(ordinary), 'full');
   assert.equal(api.chooserMode({ ...ordinary, importModeEnabled: true }), 'hidden');
   assert.equal(api.chooserMode(manager(api, 'guided')), 'hidden');
+  const guided = manager(api, 'guided');
+  guided.workspaceCreatorContext.guided = { groupTemplateId: managed().id };
+  assert.equal(api.chooserMode(guided), 'fixed');
+  assert.equal(api.managedActive(guided), false, 'guided setup keeps its own review owner');
   const bulk = manager(api, 'selected-members');
   assert.equal(api.chooserMode(bulk), 'general-only');
   assert.equal(api.select(bulk, managed().id), false);
@@ -162,6 +175,69 @@ test('templates are offered only to ordinary Group creators; bulk grouping is Ge
     }),
     'hidden'
   );
+});
+
+const textOf = node =>
+  [node.textContent, ...(node.children || []).map(textOf)].filter(Boolean).join(' | ');
+const tagsOf = node => [node.tag, ...(node.children || []).flatMap(tagsOf)].filter(Boolean);
+
+test('guided setup describes its one template read-only with the chooser wording', () => {
+  const { api, element } = environment();
+  const guided = manager(api, 'guided');
+  const context = guided.workspaceCreatorContext;
+  context.guided = { groupTemplateId: managed().id, state: { review: null } };
+
+  api.render(guided);
+  const container = element('workspaceGroupTemplateChoice');
+  const list = element('workspaceGroupTemplateOptions');
+  assert.equal(container.hidden, false);
+  assert.equal(list.children.length, 1);
+  assert.equal(tagsOf(list.children[0]).includes('input'), false, 'no selectable control');
+  const text = textOf(list.children[0]);
+  assert.match(text, /Research Program Home/);
+  assert.match(text, /Plugin: fixture 1\.0\.0/);
+  assert.match(text, /Creates one group only/);
+  assert.match(text, /Set up after: Portfolio Coordinator \(required\)/);
+  assert.match(text, /Optional: Archive Curator/);
+  assert.match(text, /Stays project-local: Research Lead/);
+  assert.equal(api.fixedEntry(guided).id, managed().id);
+  assert.equal(
+    api.templateMeta(api.fixedEntry(guided)),
+    'Template: Research Program Home · Plugin: fixture 1.0.0'
+  );
+
+  // After setup reports the group exists, the same card says it is reused.
+  context.guided.state.review = { existing: true, input: { name: 'My Lab' } };
+  api.render(guided);
+  assert.match(textOf(list.children[0]), /Reuses the existing group “My Lab” unchanged/);
+
+  // A source the catalog does not list is not described or guessed.
+  context.guided.groupTemplateId = 'group-template:dddddddddddddddddddddddddddddddd';
+  api.render(guided);
+  assert.equal(list.children.length, 0);
+  assert.equal(container.hidden, true);
+  assert.equal(api.fixedEntry(guided), null);
+  assert.equal(api.rolesCardHTML(guided, null), '');
+});
+
+test('catalog lookups for other surfaces resolve only managed entries by exact ID', async () => {
+  const { api } = environment({
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        group_templates: [{ id: 'general', kind: 'ordinary_group', name: 'General' }, managed()]
+      })
+    })
+  });
+  assert.equal((await api.catalogEntry(managed().id)).name, 'Research Program Home');
+  assert.equal(await api.catalogEntry('general'), null);
+  assert.equal(await api.catalogEntry(''), null);
+  assert.deepEqual(asData(api.roleSummary(managed())), [
+    'Set up after: Portfolio Coordinator (required)',
+    'Optional: Archive Curator',
+    'Stays project-local: Research Lead'
+  ]);
 });
 
 test('selection keeps per-template names, fixes a reused name, and refuses unusable templates', () => {

@@ -230,6 +230,11 @@ func (h *Handler) CommitGroupTemplateHome(w http.ResponseWriter, r *http.Request
 		return
 	}
 	createdByThisOperation := state.GroupTemplate != nil && state.GroupTemplate.ReviewDigest == claim.Operation.ReviewDigest
+	if createdByThisOperation {
+		// Without this a coordinator later staffed on the Home is dropped from
+		// the agent registry on restart whenever the workspace root is unconfirmed.
+		h.allowlistLocallyCreatedWorkspace(home.ID)
+	}
 	summary := "The group is ready. No project workspace or team was created."
 	if !createdByThisOperation {
 		summary = "An existing group was reused unchanged. No project workspace or team was created."

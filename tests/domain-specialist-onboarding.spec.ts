@@ -418,15 +418,15 @@ test('the local demo creates a real project from one name and observes it after 
   await expect(creator.getByRole('textbox', { name: 'Group name' })).toHaveValue('Music Production');
   await creator.getByRole('textbox', { name: 'Group name' }).fill('My Studio');
   await creator.getByRole('button', { name: 'Review →' }).click();
-  await creator.getByRole('button', { name: 'Review canonical Home' }).click();
+  await creator.getByRole('button', { name: 'Review group', exact: true }).click();
   await expect(creator.locator('#workspaceReviewSummary')).toContainText(
-    'This exact Home has been reviewed by setup'
+    'Setup reviewed this exact group'
   );
   await captureProjectScreen(page, '23-shared-group-review');
   const groupResponse = page.waitForResponse(response =>
     response.url().endsWith('/actions/create_group')
   );
-  await creator.getByRole('button', { name: 'Create canonical Home “My Studio”' }).click();
+  await creator.getByRole('button', { name: 'Create group “My Studio” only' }).click();
   const groupCommit = await groupResponse;
   expect(groupCommit.ok(), await groupCommit.text()).toBeTruthy();
   const grouped = (await groupCommit.json()).setup_journey;

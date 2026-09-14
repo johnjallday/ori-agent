@@ -143,14 +143,69 @@
     return isManaged(entry) ? entry : null;
   }
 
-  // Only an ordinary Group creator offers templates. Guided setup owns its fixed
-  // Home, and a selected-members Group cannot adopt workspaces into a program.
+  // Only an ordinary Group creator offers a choice. Guided setup describes its
+  // one fixed template read-only (its own setup action stays the only
+  // mutation owner), and a selected-members Group cannot adopt workspaces into
+  // a program.
   function chooserMode(manager) {
     const context = manager?.workspaceCreatorContext;
     if (!context || manager.importModeEnabled || context.kind !== 'group') return 'hidden';
     if (context.mode === 'selected-members') return 'general-only';
+    if (context.mode === 'guided') return context.guided?.groupTemplateId ? 'fixed' : 'hidden';
     if (context.mode !== 'ordinary') return 'hidden';
     return 'full';
+  }
+
+  // The template a guided setup is preparing, once the catalog lists it. A
+  // source without a Group Template (for example a legacy declaration) has none.
+  function fixedEntry(manager) {
+    const context = manager?.workspaceCreatorContext;
+    if (chooserMode(manager) !== 'fixed') return null;
+    const entry = context.groupTemplates?.items.find(
+      item => item.id === context.guided.groupTemplateId
+    );
+    return isManaged(entry) ? entry : null;
+  }
+
+  // Resolves one catalog entry by ID for surfaces outside the creator (guided
+  // setup, a project's destination card). Presentation only: the entry never
+  // replaces the caller's own review or its server-derived Home identity.
+  async function catalogEntry(id) {
+    if (!id) return null;
+    const response = await fetch(LIST_URL, { headers: { Accept: 'application/json' } });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body?.error || 'Group templates could not be loaded.');
+    const items = Array.isArray(body.group_templates) ? body.group_templates : [];
+    const entry = items.find(item => item.id === id);
+    return isManaged(entry) ? entry : null;
+  }
+
+  function templateMeta(entry) {
+    if (!entry) return '';
+    const provider = providerLabel(entry);
+    return `Template: ${entry.name}${provider ? ` · ${provider}` : ''}`;
+  }
+
+  function projectRoleLabels(entry) {
+    return Array.isArray(entry?.project_roles_note) ? entry.project_roles_note : [];
+  }
+
+  // One wording for a managed template's roles on every surface.
+  function roleSummary(entry) {
+    const required = roleLabels(entry, true);
+    const optional = roleLabels(entry, false);
+    const projectRoles = projectRoleLabels(entry);
+    return [
+      required.length ? `Set up after: ${required.join(', ')} (required)` : '',
+      optional.length ? `Optional: ${optional.join(', ')}` : '',
+      projectRoles.length ? `Stays project-local: ${projectRoles.join(', ')}` : ''
+    ].filter(Boolean);
+  }
+
+  function createsCopy(existingName) {
+    return existingName
+      ? `Reuses the existing group “${existingName}” unchanged.`
+      : 'Creates one group only — no project, team, schedule, or tool access.';
   }
 
   function managedActive(manager) {
@@ -230,6 +285,47 @@
     return node;
   }
 
+  function appendSummary(body, entry, existingName) {
+    const provider = providerLabel(entry);
+    if (provider) body.append(el('small', 'workspace-group-template-provider', provider));
+    if (entry.description) body.append(el('small', '', String(entry.description)));
+    body.append(el('small', 'workspace-group-template-creates', createsCopy(existingName)));
+    for (const line of roleSummary(entry)) body.append(el('small', '', line));
+  }
+
+  // Guided setup shows its one template as a read-only card: no radio, no
+  // alternative, and nothing here can review or create.
+  function renderFixed(manager, state, container, list, status) {
+    const context = manager.workspaceCreatorContext;
+    const entry = fixedEntry(manager);
+    list.replaceChildren();
+    if (entry) {
+      const review = context.guided?.state?.review;
+      const existingName = review?.existing
+        ? String(review.input?.name || '')
+        : isReusable(entry)
+          ? String(entry.home?.name || '')
+          : '';
+      const card = el('div', 'workspace-group-template-option is-fixed');
+      card.dataset.groupTemplateId = entry.id;
+      const body = el('span', 'workspace-group-template-body');
+      const head = el('span', 'workspace-group-template-head');
+      head.append(el('strong', '', String(entry.name || 'Group template')));
+      body.append(head);
+      appendSummary(body, entry, existingName);
+      card.append(body);
+      list.append(card);
+    }
+    const message = state.status === 'loading' ? 'Checking this group template…' : '';
+    // A template the catalog does not list is simply not described; guided
+    // setup still reviews its own group.
+    container.hidden = !entry && !message;
+    if (status) {
+      status.textContent = message;
+      status.hidden = !message;
+    }
+  }
+
   function render(manager) {
     const container = document.getElementById('workspaceGroupTemplateChoice');
     if (!container) return;
@@ -243,6 +339,10 @@
     const list = document.getElementById('workspaceGroupTemplateOptions');
     const status = document.getElementById('workspaceGroupTemplateStatus');
     if (!list) return;
+    if (mode === 'fixed') {
+      renderFixed(manager, state, container, list, status);
+      return;
+    }
     // Re-rendering replaces the radios; keep keyboard focus on the same option.
     const active = document.activeElement;
     const focusedId = active?.name === 'workspace-group-template' ? String(active.value) : '';
@@ -279,25 +379,7 @@
       }
       body.append(head);
       if (managed) {
-        const provider = providerLabel(entry);
-        if (provider) body.append(el('small', 'workspace-group-template-provider', provider));
-        body.append(el('small', '', String(entry.description || '')));
-        const required = roleLabels(entry, true);
-        const optional = roleLabels(entry, false);
-        const creates = isReusable(entry)
-          ? `Reuses the existing group “${entry.home?.name || ''}” unchanged.`
-          : 'Creates one group only — no project, team, schedule, or tool access.';
-        body.append(el('small', 'workspace-group-template-creates', creates));
-        if (required.length) {
-          body.append(el('small', '', `Set up after: ${required.join(', ')} (required)`));
-        }
-        if (optional.length) body.append(el('small', '', `Optional: ${optional.join(', ')}`));
-        const projectRoles = Array.isArray(entry.project_roles_note)
-          ? entry.project_roles_note
-          : [];
-        if (projectRoles.length) {
-          body.append(el('small', '', `Stays project-local: ${projectRoles.join(', ')}`));
-        }
+        appendSummary(body, entry, isReusable(entry) ? String(entry.home?.name || '') : '');
         const note =
           mode === 'general-only'
             ? 'Group templates cannot adopt selected workspaces. Use General to group them.'
@@ -393,9 +475,6 @@
     const name = currentName();
     const review =
       state.review && state.review.key === reviewKey(entry, name) ? state.review : null;
-    const required = roleLabels(entry, true);
-    const optional = roleLabels(entry, false);
-    const projectRoles = Array.isArray(entry.project_roles_note) ? entry.project_roles_note : [];
     let status = 'Preparing a review… nothing has been created.';
     if (review?.status === 'ready') status = review.data?.summary || '';
     if (review?.status === 'error') status = review.error;
@@ -405,13 +484,12 @@
     }
     const reuse = review?.status === 'ready' ? Boolean(review.data?.reuse) : isReusable(entry);
     const groupName = reuse ? review?.data?.home_name || entry.home?.name || name : name;
-    const provider = providerLabel(entry);
     return `
       <div class="workspace-review-card">
         <div class="workspace-review-card-main">
           <span class="workspace-review-card-label">${reuse ? 'Existing group' : 'Group'}</span>
           <strong class="workspace-review-identity-name">${escape(manager, groupName || 'Untitled group')}</strong>
-          <span class="workspace-review-card-meta">${escape(manager, `Template: ${entry.name}`)}${provider ? ` · ${escape(manager, provider)}` : ''}</span>
+          <span class="workspace-review-card-meta">${escape(manager, templateMeta(entry))}</span>
         </div>
         <div class="workspace-review-card-actions">
           <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="2">Edit</button>
@@ -424,6 +502,16 @@
           <span class="workspace-review-card-note ${review?.status === 'error' ? 'is-error' : ''}" data-group-template-review-status>${escape(manager, status)}</span>
         </div>
       </div>
+      ${rolesCardHTML(manager, entry)}`;
+  }
+
+  function rolesCardHTML(manager, entry) {
+    if (!entry) return '';
+    const required = roleLabels(entry, true);
+    const optional = roleLabels(entry, false);
+    const projectRoles = projectRoleLabels(entry);
+    if (!required.length && !optional.length && !projectRoles.length) return '';
+    return `
       <div class="workspace-review-card">
         <div class="workspace-review-card-main">
           <span class="workspace-review-card-label">Group roles</span>
@@ -645,6 +733,11 @@
     stateFor,
     selectedManaged,
     chooserMode,
+    fixedEntry,
+    catalogEntry,
+    templateMeta,
+    roleSummary,
+    rolesCardHTML,
     managedActive,
     load,
     select,

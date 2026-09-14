@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 )
 
 func TestHomePreparationIsIndependentAndReusesTheCanonicalGroup(t *testing.T) {
@@ -13,6 +15,16 @@ func TestHomePreparationIsIndependentAndReusesTheCanonicalGroup(t *testing.T) {
 	before, err := service.HomePreparation(scope)
 	if err != nil || before.Exists || before.Acknowledged {
 		t.Fatalf("before: %+v %v", before, err)
+	}
+	key, _ := homeKey(scope)
+	wantTemplateID := projecttemplates.GroupTemplateIDForKey(key)
+	if wantTemplateID == "" || before.GroupTemplateID != wantTemplateID {
+		t.Fatalf("group template id = %q, want %q", before.GroupTemplateID, wantTemplateID)
+	}
+	otherOwner := scope
+	otherOwner.OwnerUserID = "owner-2"
+	if other, err := service.HomePreparation(otherOwner); err != nil || other.GroupTemplateID != wantTemplateID {
+		t.Fatalf("group template id must be owner-free: %+v %v", other, err)
 	}
 	if _, err := service.AcknowledgePreparation(scope); err == nil {
 		t.Fatal("acknowledged absent group")

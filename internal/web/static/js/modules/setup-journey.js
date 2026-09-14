@@ -1,5 +1,10 @@
 import { openSetupWorkspaceCreator } from './setup-workspace-creator.js';
 import { groupBuildState, isGroupBuilderOpen, openGroupBuilder } from './group-builder.js';
+import {
+  fetchGroupTemplateStatus,
+  groupTemplateProviderLabel,
+  groupTemplateTeamFact
+} from './group-template-status.js';
 
 import {
   ASSISTANT_SETUP_ROOT,
@@ -21,7 +26,8 @@ const state = {
   returnFocus: null,
   busy: false,
   commitLocked: false,
-  modal: null
+  modal: null,
+  groupTemplate: null
 };
 
 function byID(id) {
@@ -476,6 +482,7 @@ function renderWorkspaceLaunch(journey) {
         true
       );
   } else if (stage.id === 'group') {
+    appendRows(elements.receipt, groupTemplateRows(preparation));
     if (preparation?.exists) {
       elements.stepDescription.textContent = `Using your existing group: ${preparation.name}. No duplicate group will be created.`;
       button(
@@ -517,7 +524,7 @@ function renderWorkspaceLaunch(journey) {
         true
       );
     } else {
-      elements.stepDescription.textContent = `Use Create Group on the workspace map to create one place for your projects. The shared creator opens with “${copy.group_name}” prefilled; workspaces and teams come later.`;
+      elements.stepDescription.textContent = `Create “${copy.group_name}”, the one group for these projects. Only the group is created now; its coordinator and each project's team are set up afterward.`;
       button('Build Group', launchGroupBuilder, true);
     }
   } else if (stage.id === 'preparation') {
@@ -597,6 +604,52 @@ function renderWorkspaceLaunch(journey) {
     } else button('Create New Workspace', launchWorkspaceCreator, true);
   }
   renderReview();
+}
+
+// The group stage names the same Group Template and the same group/coordinator
+// facts the creator and the group page show. Both reads are presentation only;
+// an unreadable fact is omitted rather than guessed.
+function groupTemplateRows(preparation) {
+  const templateID = String(preparation?.group_template_id || '');
+  const groupID = preparation?.exists ? String(preparation?.group_id || '') : '';
+  const key = `${templateID}|${groupID}`;
+  if (!templateID && !groupID) return [];
+  if (state.groupTemplate?.key !== key) {
+    const context = { key, entry: null, status: null };
+    state.groupTemplate = context;
+    const creator = window.GroupTemplateCreator;
+    Promise.all([
+      templateID && creator?.catalogEntry
+        ? creator.catalogEntry(templateID).catch(() => null)
+        : null,
+      fetchGroupTemplateStatus(groupID)
+    ]).then(([entry, status]) => {
+      if (state.groupTemplate !== context) return;
+      context.entry = entry;
+      context.status = status?.kind === 'managed_home' ? status : null;
+      if (context.entry || context.status) render();
+    });
+    return [];
+  }
+  const { entry, status } = state.groupTemplate;
+  const rows = [];
+  const templateName = entry?.name || status?.template?.name || '';
+  const provider = entry
+    ? window.GroupTemplateCreator.providerLabel(entry)
+    : groupTemplateProviderLabel(status);
+  if (templateName) {
+    rows.push(['Group template', `${templateName}${provider ? ` · ${provider}` : ''}`]);
+  }
+  if (status) {
+    rows.push(['Group', 'Created']);
+    rows.push(['Coordinator', groupTemplateTeamFact(status).copy]);
+  } else if (entry && !groupID) {
+    for (const line of window.GroupTemplateCreator.roleSummary(entry)) {
+      const [label, ...rest] = line.split(': ');
+      rows.push([label, rest.join(': ')]);
+    }
+  }
+  return rows;
 }
 
 async function checkPreparation() {
@@ -1543,6 +1596,8 @@ async function refreshJourney() {
   try {
     const payload = await request(runURL());
     state.journey = payload?.setup_journey || state.journey;
+    // Check Again also re-reads the group's template and coordinator facts.
+    state.groupTemplate = null;
     if (!state.journey.busy) {
       state.pendingCommit = null;
       state.selectedStepID = state.journey.current_step_id || '';
@@ -1606,6 +1661,7 @@ export async function openSpecialistSetupJourney(requested = null) {
     const endpoint = requestedRunID ? `${root}/runs/${encodeURIComponent(requestedRunID)}` : root;
     let payload = await request(endpoint);
     state.journey = payload?.setup_journey;
+    state.groupTemplate = null;
     if (!state.journey) return false;
     // An unresolved owner operation blocks presentation writes, not access
     // to its status. Show the authorized read without claiming another action.

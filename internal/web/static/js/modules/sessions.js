@@ -6807,12 +6807,19 @@ const sessionManager = {
       destinationMeta =
         status === 'loading' ? 'No destination assumed yet' : 'No group identity was guessed';
     }
+    const groupTemplate = standalone
+      ? null
+      : this.workspaceGroupDestinationTemplate(draft, projection);
+    const templateMeta = groupTemplate
+      ? window.GroupTemplateCreator.templateMeta(groupTemplate)
+      : '';
     if (route) {
       route.innerHTML = `
         <div class="workspace-group-destination-node${destinationClass}">
           <span>${standalone ? 'Structure' : 'Program Home'}</span>
           <strong>${this.escapeHtml(destinationName)}</strong>
           <small>${this.escapeHtml(destinationMeta)}</small>
+          ${templateMeta ? `<small class="workspace-group-destination-template">${this.escapeHtml(templateMeta)}</small>` : ''}
         </div>
         <div class="workspace-group-destination-arrow" aria-hidden="true"></div>
         <div class="workspace-group-destination-node">
@@ -6866,8 +6873,14 @@ const sessionManager = {
       const reviewedName = String(homeOperation.review?.home_name || destinationName);
       if (homeReviewTitle) homeReviewTitle.textContent = `Prepare ${reviewedName}`;
       if (homeReviewCopy) {
-        homeReviewCopy.textContent =
-          'This confirmation creates or reuses only the empty canonical group. It does not create this project, staff either team, link a child, grant tools, or run setup.';
+        const roles = groupTemplate ? window.GroupTemplateCreator.roleSummary(groupTemplate) : [];
+        homeReviewCopy.textContent = [
+          'This confirmation creates or reuses only the empty canonical group. It does not create this project, staff either team, link a child, grant tools, or run setup.',
+          templateMeta ? `${templateMeta}.` : '',
+          roles.length ? `${roles.join('. ')}.` : ''
+        ]
+          .filter(Boolean)
+          .join(' ');
       }
       if (homeConfirm) {
         homeConfirm.disabled = homeOperation.phase === 'committing';
@@ -6913,6 +6926,30 @@ const sessionManager = {
         actionsHost.appendChild(button);
       }
     }
+  },
+
+  // Describes the destination's Group Template with the creator's own wording.
+  // The lookup is presentation only and bound to this draft: Home preparation
+  // still reviews the selected project template through its own receipt.
+  workspaceGroupDestinationTemplate(draft, projection) {
+    const id = String(projection?.group_template_id || '');
+    const creator = window.GroupTemplateCreator;
+    if (!id || !creator?.catalogEntry) return null;
+    if (draft.groupTemplate?.id !== id) {
+      const lookup = { id, entry: null };
+      draft.groupTemplate = lookup;
+      creator
+        .catalogEntry(id)
+        .catch(() => null)
+        .then(entry => {
+          if (this.groupRequirementDraft !== draft || draft.groupTemplate !== lookup || !entry) {
+            return;
+          }
+          lookup.entry = entry;
+          this.renderWorkspaceGroupDestinationCard();
+        });
+    }
+    return draft.groupTemplate.entry;
   },
 
   setWorkspaceGroupDestinationMessage(message) {
@@ -7126,16 +7163,22 @@ const sessionManager = {
       review?.name || document.getElementById('folderNameInput')?.value || ''
     ).trim();
     const status = review?.existing
-      ? 'The existing canonical Home will be reused unchanged.'
+      ? 'This group already exists and will be reused unchanged.'
       : review
-        ? 'This exact Home has been reviewed by setup. Confirming uses the recorded approval only.'
-        : 'Confirming will ask setup to review this canonical Home. It cannot create an unrelated replacement.';
+        ? 'Setup reviewed this exact group. Confirming uses that approval only.'
+        : 'Confirming asks setup to review this group first. It cannot create an unrelated replacement.';
     const error = String(guided.error || '').trim();
+    // The same template wording the Group Templates chooser uses; guided setup
+    // still reviews and creates through its own action.
+    const creator = window.GroupTemplateCreator;
+    const entry = creator?.fixedEntry?.(this) || null;
+    const meta = entry ? creator.templateMeta(entry) : '';
     return `
       <div class="workspace-review-card">
         <div class="workspace-review-card-main">
-          <span class="workspace-review-card-label">Canonical Home</span>
-          <strong class="workspace-review-identity-name">${this.escapeHtml(name || 'Untitled Home')}</strong>
+          <span class="workspace-review-card-label">${review?.existing ? 'Existing group' : 'Group'}</span>
+          <strong class="workspace-review-identity-name">${this.escapeHtml(name || 'Untitled group')}</strong>
+          ${meta ? `<span class="workspace-review-card-meta">${this.escapeHtml(meta)}</span>` : ''}
           <span class="workspace-review-card-note">${this.escapeHtml(status)}</span>
           ${error ? `<span class="workspace-review-card-note is-error">${this.escapeHtml(error)}</span>` : ''}
         </div>
@@ -7145,11 +7188,12 @@ const sessionManager = {
       </div>
       <div class="workspace-review-card">
         <div class="workspace-review-card-main">
-          <span class="workspace-review-card-label">Setup boundary</span>
-          <strong>Only the canonical Home may be created or reused</strong>
-          <span class="workspace-review-card-note">No child workspace, roster, parent change, project, or generic workspace request is sent from this dialog.</span>
+          <span class="workspace-review-card-label">What will happen</span>
+          <strong>${review?.existing ? 'The existing group is reused unchanged' : 'One group is created, initially unstaffed'}</strong>
+          <span class="workspace-review-card-note">No project, team, parent change, or tool access is created from this dialog.</span>
         </div>
-      </div>`;
+      </div>
+      ${entry ? creator.rolesCardHTML(this, entry) : ''}`;
   },
 
   renderBlankAgentlessChoice(view) {
@@ -7250,6 +7294,12 @@ const sessionManager = {
       const state = holder ? `${holder} · already staffed on the group` : 'Missing on the group';
       return `<span class="workspace-review-hierarchy-role"><b>${this.escapeHtml(role.label)}</b><small>${this.escapeHtml(state)}</small></span>`;
     });
+    const groupTemplate = grouped
+      ? this.workspaceGroupDestinationTemplate(draft, projection)
+      : null;
+    const templateMeta = groupTemplate
+      ? `<small>${this.escapeHtml(window.GroupTemplateCreator.templateMeta(groupTemplate))}</small>`
+      : '';
     const hierarchy = !draft.composition
       ? '<strong>Choose grouped or standalone placement in Details</strong>'
       : grouped
@@ -7257,6 +7307,7 @@ const sessionManager = {
             <div class="workspace-review-hierarchy-node is-group">
               <span>${draft.preparedHome ? 'Prepared group · already persisted' : 'Existing verified group · reused'}</span>
               <strong>${this.escapeHtml(homeName)}</strong>
+              ${templateMeta}
               ${coordinatorLines.join('')}
             </div>
             <div class="workspace-review-hierarchy-branch" aria-hidden="true">↳</div>
@@ -8158,7 +8209,7 @@ const sessionManager = {
       step2Title.textContent = kind === 'group' ? 'Group details' : 'Workspace details';
     if (step2Description) {
       step2Description.textContent = guidedCreator
-        ? 'Name the canonical Home this setup will review. Its setup owner decides whether it is created or reused.'
+        ? 'Name the group this setup creates. You can rename it later; an existing group is reused unchanged.'
         : kind === 'group'
           ? 'Name the home for related workspaces, then review the agents that will be created with it.'
           : 'Name the space and add the context Ori should carry into its review.';
@@ -8173,13 +8224,13 @@ const sessionManager = {
     }
     if (step4Title)
       step4Title.textContent = guidedCreator
-        ? 'Review the canonical Home'
+        ? 'Review this group'
         : kind === 'group'
           ? 'Review this group and its roster'
           : 'Ready to create?';
     if (step4Description) {
       step4Description.textContent = guidedCreator
-        ? 'This setup will only create or reuse its canonical Home through the reviewed setup action.'
+        ? 'Setup reviews this exact group before anything is created. Nothing else is created here.'
         : kind === 'group'
           ? 'Check the group name, destination, and reviewed roster. Agents are created only after you confirm.'
           : 'Check the workspace, its team, and anything it will ask for after creation.';
@@ -8187,7 +8238,7 @@ const sessionManager = {
     if (groupNotice) {
       groupNotice.hidden = !ordinaryGroup;
       groupNotice.innerHTML = guidedCreator
-        ? "<strong>This is the setup's canonical Home.</strong><span>It is reviewed and created or reused only by the guided setup action. No project, team, or replacement group is created here.</span>"
+        ? '<strong>Only the group is created.</strong><span>Its coordinator is set up separately afterward. Projects, teams, and tool access are never created here, and an existing group is never replaced.</span>'
         : '<strong>Groups organize related workspaces.</strong><span>Review the Group Manager and any saved teammates before creating anything. Managers use only group files and notes, never member workspaces.</span>';
     }
     if (nameLabel) nameLabel.textContent = ordinaryGroup ? 'Group name' : 'Workspace name';
@@ -8366,9 +8417,9 @@ const sessionManager = {
     const guided = this.workspaceCreatorContext?.guided;
     if (this.workspaceCreatorContext?.mode === 'guided' && guided) {
       if (guided.error && guided.review?.pending) return 'Retry Confirmed Change';
-      if (guided.review?.existing) return 'Use canonical Home';
-      if (guided.review) return `Create canonical Home “${guided.review.name || 'Group'}”`;
-      return 'Review canonical Home';
+      if (guided.review?.existing) return `Use existing group “${guided.review.name || 'Group'}”`;
+      if (guided.review) return `Create group “${guided.review.name || 'Group'}” only`;
+      return 'Review group';
     }
     const name = String(document.getElementById('folderNameInput')?.value || '').trim();
     if (

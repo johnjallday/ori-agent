@@ -64,6 +64,11 @@ func TestWorkspaceLaunchGroupReviewAcknowledgementAndPrerequisiteBoundaries(t *t
 	if project.Preparation == nil || !project.Preparation.Acknowledged || project.Status == StepComplete {
 		t.Fatalf("preparation implied project readiness: %+v", project)
 	}
+	// The guided Home names the same Group Template the creator lists, so both
+	// surfaces describe one program Home rather than two look-alike groups.
+	if id := review.Review.Group.GroupTemplateID; !projecttemplates.ValidManagedGroupTemplateID(id) || project.Preparation.GroupTemplateID != id {
+		t.Fatalf("group template identity: review %q, preparation %q", id, project.Preparation.GroupTemplateID)
+	}
 	reads[specialist.SetupStepIntegrationInstall] = CanonicalStepRead{BlockedReason: ReasonIntegrationDisabled}
 	if _, err := service.CheckPreparation(ctx, "local", projection.RunID); err == nil || calls != 1 {
 		t.Fatal("disabled plugin still invoked")
@@ -105,6 +110,20 @@ func TestWorkspaceLaunchDoesNotReplaceAnUnverifiedHistoricalHome(t *testing.T) {
 	ids, _ := store.List()
 	if len(ids) != 2 {
 		t.Fatalf("read created another resource: %v", ids)
+	}
+}
+
+func TestHomePreparationRejectsMalformedGroupTemplateIdentity(t *testing.T) {
+	valid := projectconnection.HomePreparation{Name: "Studio", TemplateID: "plugin:neutral:song", GroupTemplateID: "group-template:" + "0123456789abcdef0123456789abcdef"}
+	if !validHomePreparation(&valid) {
+		t.Fatal("rejected a well-formed group template identity")
+	}
+	for _, id := range []string{"general", "group-template:../../etc", "plugin:neutral:song"} {
+		invalid := valid
+		invalid.GroupTemplateID = id
+		if validHomePreparation(&invalid) {
+			t.Fatalf("accepted group template identity %q", id)
+		}
 	}
 }
 

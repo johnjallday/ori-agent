@@ -6,6 +6,17 @@ async function settled(page) {
     route.fulfill({ json: { needs_onboarding: false, completed: true, current_step: 'complete' } })
   );
 }
+const guidedTemplate = {
+  id: `group-template:${'a'.repeat(32)}`,
+  kind: 'managed_home',
+  revision: 'r1',
+  name: 'Studio Program Home',
+  provider: { kind: 'plugin', plugin_id: 'neutral-studio', plugin_version: '1.0.0' },
+  home_roles: [{ role_id: 'coordinator', label: 'Studio Coordinator', required: true }],
+  project_roles_note: ['Project Lead'],
+  availability: { state: 'creatable' },
+  home: { state: 'absent' }
+};
 function journey() {
   return {
     run_id: 'group-builder-run',
@@ -39,7 +50,8 @@ function journey() {
           acknowledged: false,
           name: 'Studio',
           group_id: '',
-          template_id: 'neutral-template'
+          template_id: 'neutral-template',
+          group_template_id: guidedTemplate.id
         },
         actions: [{ id: 'review_create_group', label: 'Review Group', effect: 'review' }]
       }
@@ -184,12 +196,35 @@ test('guided setup uses the shared creator with cancellation, exact retry and co
     }
     return route.fulfill({ json: { setup_journey: current } });
   });
+  // The catalog only describes the fixed template; setup stays the review and
+  // commit owner, so no Group Template review or commit may be sent.
+  const groupTemplateWrites: string[] = [];
+  await page.route('**/api/workspaces/group-templates**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path !== '/api/workspaces/group-templates') {
+      groupTemplateWrites.push(path);
+      return route.abort('failed');
+    }
+    return route.fulfill({ json: { group_templates: [guidedTemplate] } });
+  });
   await page.goto('/?setup=specialist');
   const setup = page.locator('#specialistSetupJourneyModal');
   const creator = page.locator('#addFolderModal');
+  await expect(setup.locator('#specialistSetupJourneyReceipt')).toContainText(
+    'Group template: Studio Program Home · Plugin: neutral-studio 1.0.0'
+  );
+  await expect(setup.locator('#specialistSetupJourneyReceipt')).toContainText(
+    'Set up after: Studio Coordinator (required)'
+  );
+  await expect(setup).not.toContainText('workspace map');
   await setup.getByRole('button', { name: 'Build Group', exact: true }).click();
   await expect(setup).toBeHidden();
   await expect(creator.getByRole('textbox', { name: 'Group name' })).toHaveValue('Studio');
+  const fixed = creator.locator('#workspaceGroupTemplateOptions');
+  await expect(fixed).toContainText('Studio Program Home');
+  await expect(fixed).toContainText('Creates one group only');
+  await expect(fixed).toContainText('Set up after: Studio Coordinator (required)');
+  await expect(fixed.locator('input')).toHaveCount(0);
   await creator.getByRole('textbox', { name: 'Group name' }).fill('My Studio');
   // An unsubmitted close preserves the supported name draft but no consent.
   await page.waitForTimeout(200);
@@ -201,12 +236,15 @@ test('guided setup uses the shared creator with cancellation, exact retry and co
   await expect(creator).toBeVisible();
   await expect(creator.getByRole('textbox', { name: 'Group name' })).toHaveValue('My Studio');
   await creator.getByRole('button', { name: 'Review →' }).click();
-  await creator.getByRole('button', { name: 'Review canonical Home' }).click();
+  await creator.getByRole('button', { name: 'Review group', exact: true }).click();
   await expect(creator.locator('#workspaceReviewSummary')).toContainText(
-    'This exact Home has been reviewed by setup'
+    'Setup reviewed this exact group'
+  );
+  await expect(creator.locator('#workspaceReviewSummary')).toContainText(
+    'Template: Studio Program Home · Plugin: neutral-studio 1.0.0'
   );
   await evidence(page, '25-guided-shared-creator-narrow');
-  await creator.getByRole('button', { name: 'Create canonical Home “My Studio”' }).click();
+  await creator.getByRole('button', { name: 'Create group “My Studio” only' }).click();
   await expect.poll(() => commits.length).toBe(1);
   await page.keyboard.press('Escape');
   await expect(creator).toBeVisible();
@@ -218,6 +256,7 @@ test('guided setup uses the shared creator with cancellation, exact retry and co
   await expect(creator).toBeHidden();
   await expect(setup.locator('#specialistSetupJourneyStepTitle')).toHaveText('Prepare Tools');
   expect(genericCreates).toBe(0);
+  expect(groupTemplateWrites).toEqual([]);
 });
 
 test('a historical project with an unavailable group never offers replacement creation', async ({

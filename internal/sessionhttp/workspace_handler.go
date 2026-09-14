@@ -705,14 +705,8 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	// reciprocal group membership are durable. Declarations alone grant nothing.
 	prov.agentToolWarnings = h.bindSeededAgentTools(ws.ID, seed.Created)
 
-	// Local creation implies this data directory owns the workspace: allowlist it
-	// so its agent snapshots are restored (and not wiped) on subsequent startups,
-	// mirroring the import flow. Best-effort; a failure only affects later agent
-	// hydration, not this creation.
-	if h.workspaceAllowlist != nil && ws != nil {
-		if err := h.workspaceAllowlist.Add(ws.ID); err != nil {
-			logger.Warn("Failed to allowlist created workspace", logger.Fields{"id": ws.ID, "error": err.Error()})
-		}
+	if ws != nil {
+		h.allowlistLocallyCreatedWorkspace(ws.ID)
 	}
 
 	if ws != nil {
@@ -831,6 +825,20 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		response["seeded_starter_tasks"] = seededStarterTasks
 	}
 	_ = orihttp.RespondCreated(w, response)
+}
+
+// allowlistLocallyCreatedWorkspace records that this data directory owns a
+// workspace it just created, so its agent snapshots are restored (and not
+// wiped) on subsequent startups, mirroring the import flow. It applies to every
+// local creation path, including a program Home a reviewed operation created.
+// Best-effort; a failure only affects later agent hydration, not the creation.
+func (h *Handler) allowlistLocallyCreatedWorkspace(workspaceID string) {
+	if h == nil || h.workspaceAllowlist == nil || strings.TrimSpace(workspaceID) == "" {
+		return
+	}
+	if err := h.workspaceAllowlist.Add(workspaceID); err != nil {
+		logger.Warn("Failed to allowlist created workspace", logger.Fields{"id": workspaceID, "error": err.Error()})
+	}
 }
 
 // publishWorkspaceCreated emits a workspace.created event after a workspace is
