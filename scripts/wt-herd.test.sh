@@ -438,6 +438,39 @@ fi
 wt new adhoc <<< "n" > /dev/null 2>&1
 [[ ! -f "$fixture_root/decline-mutations" ]]
 
+# wt new test also empties the manual-test workspace folder. The summary names
+# it, declining leaves it alone, and other names never touch it.
+test_workspace="$fixture_root/Test"
+mkdir -p "$test_workspace/leftover"
+print -r -- "stale" > "$test_workspace/leftover/file"
+WT_TEST_WORKSPACE_DIR="$test_workspace" wt new test <<< "n" > "$fixture_root/test-decline-output" 2>&1
+rg -q "Test folder .*$test_workspace.*deleted and recreated empty" "$fixture_root/test-decline-output"
+[[ -f "$test_workspace/leftover/file" ]]
+
+WT_TEST_WORKSPACE_DIR="$test_workspace" wt new adhoc --no-herdr --yes > "$fixture_root/not-test-output" 2>&1
+[[ -f "$test_workspace/leftover/file" ]]
+if rg -q "Test folder" "$fixture_root/not-test-output"; then
+  print -r -- "wt new adhoc planned a test folder reset" >&2
+  exit 1
+fi
+
+WT_TEST_WORKSPACE_DIR="$test_workspace" wt new fix/test --no-herdr --yes > /dev/null 2>&1
+[[ -d "$test_workspace" ]]
+[[ -z "$(ls -A "$test_workspace")" ]]
+rm -f "$fixture_root/decline-mutations"
+
+# The reset refuses paths an unconditional rm -rf must never reach.
+fake_home="$fixture_root/home"
+mkdir -p "$fake_home/keep"
+ln -s "$fake_home" "$fixture_root/home-link"
+for unsafe_dir in "" "relative/Test" "/" "$fake_home" "$fixture_root/home-link"; do
+  if HOME="$fake_home" wt_reset_test_workspace_dir "$unsafe_dir" > /dev/null 2>&1; then
+    print -r -- "wt_reset_test_workspace_dir accepted an unsafe path: '$unsafe_dir'" >&2
+    exit 1
+  fi
+done
+[[ -d "$fake_home/keep" ]]
+
 # start and new share one flag parser but not one voice. Each command names
 # itself, prints its own usage line, and calls its positional what it calls it —
 # the wording is the user-visible surface, so a shared parser must carry it
