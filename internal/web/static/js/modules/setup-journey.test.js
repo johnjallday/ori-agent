@@ -12,6 +12,7 @@ const {
   projectReviewPresentation,
   projectFailureGuidance,
   newJourneyIdempotencyKey,
+  setupJourneyCloseDismisses,
   setupJourneyControlDisabled,
   setupJourneyCurrentStep,
   setupJourneyReceiptRows,
@@ -142,6 +143,19 @@ test('file-only receipt stays honest about unconfigured and untested live contro
     ['Live control configured', 'No'],
     ['Live control tested', 'No']
   ]);
+});
+
+test('closing a host quest only hides it; other journeys keep close-as-dismiss', () => {
+  assert.equal(
+    setupJourneyCloseDismisses({ journey: { source: 'host', id: 'email_ops_setup' } }),
+    false
+  );
+  assert.equal(
+    setupJourneyCloseDismisses({ journey: { source: 'plugin', id: 'reaper_setup' } }),
+    true
+  );
+  assert.equal(setupJourneyCloseDismisses({ journey: { source: 'user_template' } }), true);
+  assert.equal(setupJourneyCloseDismisses({ journey: {} }), true);
 });
 
 test('busy work keeps close available except during the atomic commit section', () => {

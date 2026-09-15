@@ -349,6 +349,28 @@
               <p class="quest-log-why" data-role="why"></p>
             </div>
           </div>
+          <!-- Populated by email-setup-quest-card.js from the non-creating
+               GET /api/host-setup-quests/email_ops_setup/status read. It renders
+               only while that quest is started, unfinished, and not dismissed. -->
+          <section id="emailSetupQuestCard" class="quest-log-first-mission email-setup-quest-card"
+                   aria-labelledby="emailSetupQuestTitle" hidden>
+            <div class="quest-log-first-mission-meta">
+              <span class="quest-log-first-mission-kicker"><span class="quest-log-first-mission-signal" aria-hidden="true"></span>Guided setup</span>
+            </div>
+            <div class="quest-log-first-mission-body">
+              <div class="quest-log-first-mission-copy">
+                <h3 id="emailSetupQuestTitle" class="quest-log-first-mission-title" data-role="email-setup-title">Set up Email Ops</h3>
+                <p class="quest-log-first-mission-why" data-role="email-setup-progress"></p>
+              </div>
+              <div class="quest-log-first-mission-actions">
+                <a class="quest-log-first-mission-action" data-role="email-setup-resume" href="/?setup=quest&amp;source=host&amp;quest=email_ops_setup">
+                  <span>Resume</span>
+                  <span aria-hidden="true">&#8594;</span>
+                </a>
+                <button type="button" class="quest-log-first-mission-skip" data-role="email-setup-dismiss">Not now</button>
+              </div>
+            </div>
+          </section>
           <div id="questLogRestore" class="quest-log-restore" hidden>
             <button type="button" class="quest-log-restore-btn" data-role="restore" aria-label="Expand quest log">
               <span class="quest-log-restore-insignia" data-role="restore-insignia" aria-hidden="true">01</span>

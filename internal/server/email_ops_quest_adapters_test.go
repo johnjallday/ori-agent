@@ -101,6 +101,29 @@ func TestEmailOpsWorkspaceCreateReaderResolvesWithoutCreating(t *testing.T) {
 	}
 }
 
+func TestEmailOpsWorkspaceLocatorUsesTheQuestResolver(t *testing.T) {
+	source := &questWorkspaceSource{}
+	locator := emailOpsWorkspaceLocator{source: source}
+	if exists, err := locator.HasEmailOpsWorkspace("local"); err != nil || exists {
+		t.Fatalf("empty store exists=%v err=%v", exists, err)
+	}
+	source.workspaces = []*workspace.Workspace{emailOpsQuestWorkspace("foreign", "Email Ops", "email-ops", "someone-else", time.Now())}
+	if exists, _ := locator.HasEmailOpsWorkspace("local"); exists {
+		t.Fatal("another user's Email Ops workspace counted")
+	}
+	source.workspaces = append(source.workspaces, emailOpsQuestWorkspace("mine", "Email Ops", "email-ops-2", "local", time.Now()))
+	if exists, err := locator.HasEmailOpsWorkspace("local"); err != nil || !exists {
+		t.Fatalf("owned workspace exists=%v err=%v", exists, err)
+	}
+	source.listErr = errors.New("store unavailable")
+	if _, err := locator.HasEmailOpsWorkspace("local"); err == nil {
+		t.Fatal("a store failure read as no workspace")
+	}
+	if _, err := (emailOpsWorkspaceLocator{}).HasEmailOpsWorkspace("local"); err == nil {
+		t.Fatal("a locator without a source answered")
+	}
+}
+
 func TestQuestWorkspaceLabelAndRouteAreBounded(t *testing.T) {
 	if got := questWorkspaceLabel("  Email   Ops  "); got != "Email Ops" {
 		t.Fatalf("label = %q", got)

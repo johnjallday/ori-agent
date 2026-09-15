@@ -254,6 +254,45 @@ review, secret scan, parity with workspace email status) is proven by the Go
 integration tests in `internal/server/email_ops_quest_mailbox_test.go`. The
 server log shows no model request.
 
+**D14 — Group 4: where the resume card lives and what closing means.**
+- *Mount.* FR 48 places the card "below the first mission in the quest-log
+  area". Since the PRD was written, Home's quest log moved into the on-demand
+  Quests flyout (`#cockpitQuestsFlyout`). The card mounts there, directly
+  after `#questLog`, so it appears only when the user opens Quests. It never
+  auto-opens the flyout, the quest, or a coachmark.
+- *Closing a host quest only hides it.* The shared modal's close button and
+  Escape recorded the journey's persisted dismissal ("Saving your place…").
+  For the host quest that made FR 44 unreachable: leaving the quest
+  unfinished always set `dismissed: true`, so the card could never show.
+  Closing a `source: "host"` journey now hides the modal without a mutation.
+  The card's "Not now" is the one explicit dismissal, and any Open clears it
+  (FR 46). Plugin and user-template journeys keep close-as-dismiss unchanged.
+  Nothing else reads the host run's `dismissed` flag. `JourneyDismissed` is emitted for the
+  host quest only on "Not now".
+- *Parameter isolation.* The Build-HQ walkthrough starts only on
+  `?quest=build-hq`, and the setup journey opens only on `?setup=quest`. JS
+  tests pin both directions.
+- *Pre-existing Home failures.* Two `tests/home-workspace-cockpit.spec.ts`
+  Group-creation tests fail at the Group Manager setup gate added by #486. They
+  fail identically on the base commit `48392740` built separately, and three
+  serial tests after them do not run. The other 47 tests pass.
+
+Demo evidence for Group 4 (fresh provider-less sandbox, headless Chromium,
+2026-09-15). What ran against the real server: hire and Build HQ through the
+assistant API made the capability cards active. The Email card reads "Set up
+email" and links to the quest URL, and clicking it opened the quest. Before
+that, the Quests flyout showed no card and the status read reported no root.
+After closing on step 1, the root was `in_progress` with `dismissed: false`,
+and the flyout showed "Set up Email Ops · Step 1 of 4 · Review your Email Ops
+team". At 400px both Resume and Not now were reachable, with nothing floating
+over them. "Not now" set `dismissed: true` and hid the card across a reload.
+"Open Guided Setup" on Templates cleared it, and closing again brought the card
+back. Resume opened the quest in place. What was mocked: completion. The status
+response was replaced with a ready run and with a regressed run that has
+`first_completed_at`, and neither showed the card, because finishing live needs
+a Google account and vault. The same rules are unit-tested in
+`email-setup-quest-card.test.js`.
+
 ### 1.4 Not drift, but worth stating
 
 - `gh` fails under the sandbox with a keychain TLS error; the merge-state check

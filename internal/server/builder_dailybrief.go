@@ -276,9 +276,13 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		renameCoordinator.SetSessionRenamer(sessionRenamer)
 	}
 	b.personalAssistantHandler.SetRenameService(renameCoordinator)
-	b.personalAssistantHandler.SetCapabilityService(personalassistant.NewCapabilityService(
+	capabilities := personalassistant.NewCapabilityService(
 		b.personalAssistantService, b.workspaceStore, personalAssistantEmailCapability{readiness: b.emailReadiness},
-	))
+	)
+	if b.workspaceFileStore != nil {
+		capabilities.SetEmailOpsWorkspaceLocator(emailOpsWorkspaceLocator{source: b.workspaceFileStore})
+	}
+	b.personalAssistantHandler.SetCapabilityService(capabilities)
 	b.personalAssistantHandler.SetSpecialistOfferService(
 		personalassistant.NewSpecialistOfferService(b.personalAssistantStore),
 	)

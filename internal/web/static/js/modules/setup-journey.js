@@ -141,6 +141,15 @@ export function newJourneyIdempotencyKey() {
   return `journey-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+// setupJourneyCloseDismisses decides whether closing the modal records the
+// journey's persisted dismissal. Plugin and user-template journeys keep their
+// existing close-as-dismiss contract. A host quest only hides: leaving it
+// unfinished is what lets Home's resume card offer it again, and the card's
+// "Not now" is its one explicit dismissal (#455 FR 44-46).
+export function setupJourneyCloseDismisses(journey) {
+  return journey?.journey?.source !== 'host';
+}
+
 export function setupJourneyControlDisabled(busy, lockClose, isCloseControl) {
   return Boolean(busy && (!isCloseControl || lockClose));
 }
@@ -1749,7 +1758,8 @@ async function dismissJourney() {
     state.busy ||
     state.pendingCommit ||
     state.journey?.busy ||
-    (state.journey.lifecycle_state || state.journey.lifecycle) === 'ready'
+    (state.journey.lifecycle_state || state.journey.lifecycle) === 'ready' ||
+    !setupJourneyCloseDismisses(state.journey)
   ) {
     hideJourneyPresentation();
     return;

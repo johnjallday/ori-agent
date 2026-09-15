@@ -18,6 +18,12 @@
  *   link     MOCKED: replays fixture journey responses to show the link review
  *            card and the ready summary. The real commit is covered by the Go
  *            integration tests; nothing here reaches Google or a vault.
+ *   card     The quiet Home resume card on a fresh sandbox: hire + HQ through
+ *            the assistant API (the sandbox owns it), the capability card's
+ *            "Set up email" route, no card before the quest starts, the card
+ *            after closing mid-quest (desktop and 400px), Not now, reopening
+ *            from Templates, Resume, and (MOCKED status only) a completed
+ *            quest that never shows the card again.
  *
  * Every stage prints the quest status it observed and any console errors or
  * failed requests, so a quietly broken page does not pass as a clean demo.
@@ -68,7 +74,7 @@ function summarize(label, body) {
   const journey = body?.setup_journey;
   const steps = (journey?.steps || []).map(s => `${s.id}=${s.status}${s.reason_code ? `(${s.reason_code})` : ""}`);
   console.log(
-    `${label}: exists=${body?.exists} lifecycle=${journey?.lifecycle_state || "-"} current=${journey?.current_step_id || "-"} ` +
+    `${label}: exists=${body?.exists} lifecycle=${journey?.lifecycle_state || "-"} current=${journey?.current_step_id || "-"} dismissed=${journey?.dismissed ?? "-"} ` +
       `workspace=${journey?.receipts?.project_workspace_id || "-"} steps=[${steps.join(", ")}]`
   );
 }
@@ -137,6 +143,161 @@ async function mockLinkFlow(page) {
   console.log(`summary receipt: ${JSON.stringify((await page.locator("#specialistSetupJourneyReceipt").innerText()).replace(/\s+/g, " "))}`);
   console.log(`summary actions: ${JSON.stringify(await page.locator("#specialistSetupJourneyActions button").allTextContents())}`);
   await shot(page, "13-summary-ready-mocked");
+}
+
+async function api(page, method, url, body) {
+  return page.evaluate(
+    async ({ method, url, body }) => {
+      const response = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        ...(body ? { body: JSON.stringify(body) } : {})
+      });
+      let json = null;
+      try {
+        json = await response.json();
+      } catch (_) {}
+      return { status: response.status, json };
+    },
+    { method, url, body }
+  );
+}
+
+// openQuestsFlyout opens Home's Quests flyout, where the quest log and the
+// resume card live, and reports whether the card is showing.
+async function openQuestsFlyout(page) {
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  const toggle = page.locator("#cockpitQuestsToggle");
+  await toggle.waitFor({ state: "visible", timeout: 20000 });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await page.locator("#cockpitQuestsFlyout").waitFor({ state: "visible", timeout: 10000 });
+  // The card's own status read settles after the page's first paint.
+  await page.waitForTimeout(1200);
+  const card = page.locator("#emailSetupQuestCard");
+  const visible = await card.isVisible();
+  if (visible) await card.scrollIntoViewIfNeeded();
+  const text = visible ? (await card.innerText()).replace(/\s+/g, " ").trim() : "";
+  console.log(`quests flyout: card visible=${visible}${text ? ` text="${text}"` : ""}`);
+  return visible;
+}
+
+async function closeJourney(page) {
+  await page.locator("#specialistSetupJourneyClose").click();
+  await page.locator("#specialistSetupJourneyModal").waitFor({ state: "hidden", timeout: 10000 });
+}
+
+async function cardStage(page) {
+  // A hired assistant with an HQ makes the capability cards real.
+  const assistant = async () => (await api(page, "GET", "/api/personal-assistant")).json?.personal_assistant || {};
+  let current = await assistant();
+  if (current.state === "needs_hire") {
+    const hire = await api(page, "POST", "/api/personal-assistant/hire", {
+      request_id: `demo-hire-${Date.now()}`,
+      if_version: current.state_version ?? 0,
+      display_name: "Atlas",
+      mandate: "Keep my week organised.",
+      focus_areas: []
+    });
+    console.log(`hire: HTTP ${hire.status}`);
+    current = await assistant();
+  }
+  if (current.state === "needs_hq") {
+    const hq = await api(page, "POST", "/api/personal-assistant/hq", {
+      request_id: `demo-hq-${Date.now()}`,
+      if_version: current.state_version ?? 0,
+      name: "Demo HQ"
+    });
+    console.log(`hq: HTTP ${hq.status} ${hq.json?.code || ""}`);
+    current = await assistant();
+  }
+  console.log(`assistant state: ${current.state}`);
+  const capabilities = (await api(page, "GET", "/api/personal-assistant/capabilities")).json?.capabilities;
+  const email = (capabilities?.cards || []).find(card => card.key === "email");
+  console.log(
+    `capabilities: state=${capabilities?.state} email card=${JSON.stringify(
+      email ? { status: email.status, label: email.action_label, route: email.action_route } : null
+    )}`
+  );
+
+  summarize("status before any quest", await status(page));
+  const never = await openQuestsFlyout(page);
+  await shot(page, "20-quests-flyout-never-started");
+  if (never) throw new Error("card showed before the quest was started");
+
+  // Start from the assistant's capability card, the goal-first entry point.
+  await page.goto(`${baseUrl}/?personal-assistant=working-agreement`, { waitUntil: "domcontentloaded" });
+  const setUpEmail = page.locator("#personalAssistantCapabilities a", { hasText: "Set up email" });
+  await setUpEmail.waitFor({ state: "visible", timeout: 20000 });
+  await setUpEmail.scrollIntoViewIfNeeded();
+  console.log(`capability link href=${await setUpEmail.getAttribute("href")}`);
+  await shot(page, "19-capability-set-up-email");
+  await setUpEmail.click();
+  await waitForJourney(page);
+  await shot(page, "19b-quest-opened-from-capability");
+  await closeJourney(page);
+  summarize("status after closing on step 1", await status(page));
+
+  if (!(await openQuestsFlyout(page))) throw new Error("card missing after closing mid-quest");
+  await shot(page, "21-card-after-close-desktop");
+  await page.setViewportSize({ width: 400, height: 860 });
+  await page.waitForTimeout(400);
+  await page.locator("#emailSetupQuestCard").evaluate(card => card.scrollIntoView({ block: "center" }));
+  await page.waitForTimeout(300);
+  // Report whether anything floats over the card's own controls at this width.
+  const covered = await page.evaluate(() =>
+    ["email-setup-resume", "email-setup-dismiss"].map(role => {
+      const control = document.querySelector(`#emailSetupQuestCard [data-role="${role}"]`);
+      const box = control.getBoundingClientRect();
+      const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      return `${role}: y=${Math.round(box.top)} ${control.contains(top) ? "reachable" : `covered by ${top?.id || top?.className || top?.tagName}`}`;
+    })
+  );
+  console.log(`400px controls: ${covered.join("; ")}`);
+  await shot(page, "22-card-after-close-400px");
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  await page.locator('#emailSetupQuestCard [data-role="email-setup-dismiss"]').click();
+  await page.waitForTimeout(800);
+  console.log(`after Not now: card visible=${await page.locator("#emailSetupQuestCard").isVisible()}`);
+  summarize("status after Not now", await status(page));
+  await shot(page, "23-card-not-now");
+  if (await openQuestsFlyout(page)) throw new Error("card came back after Not now");
+
+  await page.goto(`${baseUrl}/templates`, { waitUntil: "domcontentloaded" });
+  await page.locator('#tplList button[role="listitem"]', { hasText: "Email Ops" }).first().click();
+  await page.locator("#tplQuestOpen").waitFor({ state: "visible", timeout: 15000 });
+  await page.locator("#tplQuestOpen").click();
+  await waitForJourney(page);
+  summarize("status after reopening from Templates", await status(page));
+  await closeJourney(page);
+
+  if (!(await openQuestsFlyout(page))) throw new Error("card missing after reopening and closing");
+  await shot(page, "24-card-returns-after-reopen");
+  await page.locator('#emailSetupQuestCard [data-role="email-setup-resume"]').click();
+  await waitForJourney(page);
+  console.log(`Resume opened: ${await page.locator("#specialistSetupJourneyTitle, #specialistSetupJourneyModal .modal-title").first().innerText()}`);
+  await shot(page, "25-resume-opens-quest");
+  await closeJourney(page);
+
+  // MOCKED status only: a completed quest (even one that later regressed)
+  // never brings the card back.
+  for (const [name, overrides] of [
+    ["ready", { lifecycle_state: "ready", current_step_id: "", first_completed_at: "2026-09-15T10:05:00Z" }],
+    ["regressed", { lifecycle_state: "needs_attention", current_step_id: "mailbox", first_completed_at: "2026-09-15T10:05:00Z" }]
+  ]) {
+    await page.route("**/api/host-setup-quests/email_ops_setup/status", route =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ exists: true, setup_journey: { ...fixtureJourney("ready"), ...overrides } })
+      })
+    );
+    const shown = await openQuestsFlyout(page);
+    console.log(`completed (${name}, mocked status): card visible=${shown}`);
+    if (name === "ready") await shot(page, "26-completed-no-card-mocked");
+    await page.unroute("**/api/host-setup-quests/email_ops_setup/status");
+    if (shown) throw new Error(`card showed for a completed quest (${name})`);
+  }
 }
 
 async function waitForJourney(page) {
@@ -263,6 +424,8 @@ try {
     console.log(`seeded ${file}`);
   } else if (stage === "link") {
     await mockLinkFlow(setup);
+  } else if (stage === "card") {
+    await cardStage(setup);
   }
 } catch (error) {
   exitCode = 1;

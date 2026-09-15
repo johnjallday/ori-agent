@@ -64,6 +64,20 @@ func (r emailOpsWorkspaceCreateReader) Read(_ context.Context, scope setupjourne
 	}, nil
 }
 
+// emailOpsWorkspaceLocator answers the Home email card's one question with the
+// same resolver and provenance-hydrated source as quest step 1.
+type emailOpsWorkspaceLocator struct {
+	source workspace.EmailOpsWorkspaceSource
+}
+
+func (l emailOpsWorkspaceLocator) HasEmailOpsWorkspace(userID string) (bool, error) {
+	if l.source == nil {
+		return false, errEmailOpsQuestUnavailable
+	}
+	id, err := workspace.ResolveEmailOpsWorkspace(l.source, userID)
+	return id != "", err
+}
+
 // questWorkspaceLabel bounds a user-chosen name for display without splitting
 // a character; an empty name falls back to the template title.
 func questWorkspaceLabel(name string) string {

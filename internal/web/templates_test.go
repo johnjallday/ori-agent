@@ -629,6 +629,10 @@ func TestRenderHomeCockpitShell(t *testing.T) {
 		`id="homeCalendarOpsPortal"`,
 		`id="homeRecentActivity"`,
 		`id="questLog"`,
+		// The Email Ops setup quest's quiet resume card mounts beside the quest
+		// log and loads its own module (#455 FR 44-48).
+		`id="emailSetupQuestCard"`,
+		`/js/modules/email-setup-quest-card.js`,
 		// Optional Personal HQ mounts survive the migration (FR115).
 		`id="hqUpgradeMount"`,
 		`id="hqEmailMount"`,
@@ -788,6 +792,59 @@ func TestHomeCockpitLoadsMapBeforeCoordinator(t *testing.T) {
 	}
 	if !strings.Contains(html, `<script defer src="`+mapJS+`">`) {
 		t.Errorf("%s must load as a classic deferred script to keep the ordering guarantee", mapJS)
+	}
+}
+
+// TestEmailSetupQuestCardMountIsQuietAndSeparate pins the Email Ops resume
+// card as a passive mount: server-rendered hidden, below Build My HQ's first
+// mission, with no coachmark, autofocus, or modal trigger, and a Resume link
+// that uses the setup-quest parameters rather than the Build-HQ `?quest=`
+// value (#455 FR 44-48).
+func TestEmailSetupQuestCardMountIsQuietAndSeparate(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatalf("LoadTemplates failed: %v", err)
+	}
+	html, err := r.RenderTemplate("index", TemplateData{
+		Title: "Ori Agent",
+		Extra: map[string]any{"HomeCommandBridge": true, "WorkspaceCount": 0, "IsFirstRun": true},
+	})
+	if err != nil {
+		t.Fatalf("RenderTemplate(index) failed: %v", err)
+	}
+
+	start := strings.Index(html, `<section id="emailSetupQuestCard"`)
+	if start < 0 {
+		t.Fatal("Home page does not mount the Email Ops setup quest card")
+	}
+	end := strings.Index(html[start:], `</section>`)
+	if end < 0 {
+		t.Fatal("Email Ops setup quest card section is not closed")
+	}
+	card := html[start : start+end]
+	openTag := card[:strings.Index(card, ">")+1]
+
+	if !strings.Contains(openTag, " hidden") {
+		t.Errorf("card must render hidden until its status read says otherwise: %s", openTag)
+	}
+	for _, forbidden := range []string{"data-coachmark", "autofocus", "data-bs-toggle", "data-bs-target"} {
+		if strings.Contains(card, forbidden) {
+			t.Errorf("card must not claim focus or open anything by itself; found %q", forbidden)
+		}
+	}
+	if !strings.Contains(card, `href="/?setup=quest&amp;source=host&amp;quest=email_ops_setup"`) {
+		t.Error("Resume must link to the host setup quest URL")
+	}
+	if strings.Contains(card, "build-hq") || strings.Contains(card, "focus=personal-hq") {
+		t.Error("card must not reuse the Build-HQ walkthrough's parameters")
+	}
+
+	firstMission := strings.Index(html, `id="questFirstMissionTitle"`)
+	if firstMission < 0 || firstMission > start {
+		t.Errorf("card must mount below the first mission (first mission at %d, card at %d)", firstMission, start)
+	}
+	if strings.Count(html, `id="emailSetupQuestCard"`) != 1 {
+		t.Error("card must mount exactly once")
 	}
 }
 
