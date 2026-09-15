@@ -40,7 +40,7 @@ function installQuest(ready: boolean): Journey {
         },
         actions: ready
           ? [{ id: 'manage_integration', label: 'Manage integration', effect: 'navigation' }]
-          : [{ id: 'review_install', label: 'Review integration', effect: 'review' }]
+          : [{ id: 'review_install', label: 'Install plugin', effect: 'review' }]
       },
       {
         id: 'summary',
@@ -204,6 +204,24 @@ async function mockSetup(page: Page, server: Server) {
       }
       if (path.startsWith(installRoot)) {
         server.calls.push(`${method} ${path}`);
+        if (path.endsWith('/actions/review_install')) {
+          return route.fulfill({
+            json: {
+              setup_journey: server.install,
+              review: {
+                token: 'install-review',
+                commit_action: 'install',
+                expires_at: '2035-01-01T00:00:00Z',
+                integration: {
+                  ...server.install.steps[0].integration,
+                  publisher: 'Ori',
+                  source_label: 'johnjallday/reaper-plugin',
+                  supported_platforms: ['darwin/arm64']
+                }
+              }
+            }
+          });
+        }
         return route.fulfill({ json: { setup_journey: server.install } });
       }
       if (path.startsWith(pluginRoot)) {
@@ -273,11 +291,29 @@ for (const width of [1280, 390]) {
     await expect(dialog.locator('#specialistSetupJourneyStepState')).toHaveText(
       'Step 1 of 2 · Next step'
     );
-    await expect(
-      dialog.locator('#specialistSetupJourneyActions').getByRole('button', {
-        name: 'Review integration'
-      })
-    ).toBeVisible();
+    // Before install the receipt names only the version to install.
+    const receipt = dialog.locator('#specialistSetupJourneyReceipt');
+    await expect(receipt).toContainText('Installed: No');
+    await expect(receipt).toContainText('Version to install: 0.6.0');
+    await expect(receipt).not.toContainText('Enabled');
+    await expect(receipt).not.toContainText('Verification');
+    const install = dialog
+      .locator('#specialistSetupJourneyActions')
+      .getByRole('button', { name: 'Install plugin', exact: true });
+    await expect(install).toBeVisible();
+
+    // The install button still reviews first; nothing is committed here.
+    await install.click();
+    await expect(dialog.getByRole('heading', { name: 'Install Ori REAPER Plugin?' })).toBeFocused();
+    const review = dialog.locator('#specialistSetupJourneyReview');
+    await expect(review).toContainText(
+      'Ori downloads the reviewed 0.6.0 release from johnjallday/reaper-plugin, checks its fingerprint, and installs it. Nothing runs until you enable it.'
+    );
+    await expect(review.getByRole('button', { name: 'Install', exact: true })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath(`install-review-${width}.png`) });
+    await review.getByRole('button', { name: 'Back', exact: true }).click();
+    expect(server.calls.some(call => call.endsWith('/actions/install'))).toBe(false);
+
     // The summary step offers nothing to do until the plugin is installed.
     await rail.nth(1).click();
     await expect(dialog.locator('#specialistSetupJourneyStepTitle')).toHaveText(

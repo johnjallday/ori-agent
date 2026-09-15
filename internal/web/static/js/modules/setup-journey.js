@@ -133,19 +133,26 @@ export function setupJourneyReceiptRows(journey, step) {
   const rows = [];
   if (step?.integration) {
     rows.push(['Integration', step.integration.plugin_id]);
-    rows.push(['Installed', step.integration.installed_version ? 'Yes' : 'No']);
-    rows.push(['Version', step.integration.installed_version || step.integration.expected_version]);
-    rows.push(['Enabled', step.integration.enabled ? 'Yes' : 'Not yet']);
-    rows.push([
-      'Verification',
-      step.integration.development_copy
-        ? 'Local development copy — not release-verified'
-        : step.integration.verified
-          ? 'Verified release'
-          : 'Not verified for guided setup'
-    ]);
-    if (step.integration.replacement_required) {
-      rows.push(['Next step', 'Review the verified replacement before continuing']);
+    if (!step.integration.installed_version) {
+      // Before install, enablement and verification are not states yet; the
+      // version is the one that will be installed.
+      rows.push(['Installed', 'No']);
+      rows.push(['Version to install', step.integration.expected_version]);
+    } else {
+      rows.push(['Installed', 'Yes']);
+      rows.push(['Version', step.integration.installed_version]);
+      rows.push(['Enabled', step.integration.enabled ? 'Yes' : 'Not yet']);
+      rows.push([
+        'Verification',
+        step.integration.development_copy
+          ? 'Local development copy — not release-verified'
+          : step.integration.verified
+            ? 'Verified release'
+            : 'Not verified for guided setup'
+      ]);
+      if (step.integration.replacement_required) {
+        rows.push(['Next step', 'Review the verified replacement before continuing']);
+      }
     }
   }
   if (step?.workspace_setup) {
@@ -1368,6 +1375,41 @@ async function reviewAction(actionID, input) {
   }
 }
 
+// integrationReviewPresentation names an integration review by its outcome:
+// install, enable, or replace. stepTitle is the integration step's own title,
+// which the registry supplies. Other reviews return null.
+export function integrationReviewPresentation(review, stepTitle = '') {
+  const integration = review?.integration;
+  if (!integration) return null;
+  if (integration.replacement_required === true || review.commit_action === 'update') {
+    return {
+      title: 'Replace installed integration?',
+      description:
+        'Replace the current installation with Ori’s reviewed version, even if the version number is unchanged. Its enabled state is preserved. Existing workspaces and project files are not deleted; runtime access may need review again.',
+      confirm: 'Replace with reviewed version'
+    };
+  }
+  if (review.commit_action === 'install') {
+    const version = integration.expected_version ? ` ${integration.expected_version}` : '';
+    const source = integration.source_label ? ` from ${integration.source_label}` : '';
+    const title = String(stepTitle || '').trim();
+    return {
+      title: title ? `${title}?` : 'Install this plugin?',
+      description: `Ori downloads the reviewed${version} release${source}, checks its fingerprint, and installs it. Nothing runs until you enable it.`,
+      confirm: 'Install'
+    };
+  }
+  if (review.commit_action === 'enable') {
+    return {
+      title: 'Enable this plugin?',
+      description:
+        'Enabling lets Ori use the installed plugin’s blueprints, tools and guided setup. You can disable it again on the Plugins page.',
+      confirm: 'Enable'
+    };
+  }
+  return null;
+}
+
 function renderReview() {
   const container = ui().review;
   container.replaceChildren();
@@ -1377,7 +1419,11 @@ function renderReview() {
   const project = state.review.project_connection;
   const group = state.review.group;
   const accountLink = accountLinkReviewPresentation(state.review);
-  const replacement = state.review.integration?.replacement_required === true;
+  const reviewedStep = setupJourneyCurrentStep(state.journey, state.selectedStepID);
+  const integrationPresentation = integrationReviewPresentation(
+    state.review,
+    reviewedStep?.kind === 'integration_install' ? reviewedStep.title : ''
+  );
   const presentation = project
     ? projectReviewPresentation(project)
     : group
@@ -1391,8 +1437,7 @@ function renderReview() {
   const heading = makeText(
     'h4',
     '',
-    presentation?.title ||
-      (replacement ? 'Replace installed integration?' : 'Review before making changes')
+    presentation?.title || integrationPresentation?.title || 'Review before making changes'
   );
   heading.tabIndex = -1;
   container.appendChild(heading);
@@ -1455,14 +1500,8 @@ function renderReview() {
     if (project.defaults_statement)
       container.appendChild(makeText('p', 'setup-journey__scope-note', project.defaults_statement));
   } else {
-    if (replacement) {
-      container.appendChild(
-        makeText(
-          'p',
-          '',
-          'Replace the current installation with Ori’s reviewed version, even if the version number is unchanged. Its enabled state is preserved. Existing workspaces and project files are not deleted; runtime access may need review again.'
-        )
-      );
+    if (integrationPresentation) {
+      container.appendChild(makeText('p', '', integrationPresentation.description));
     }
     appendRows(container, reviewRows(state.review), 'setup-journey__review-list');
   }
@@ -1482,7 +1521,7 @@ function renderReview() {
   const confirm = makeText(
     'button',
     'setup-journey__action setup-journey__review-confirm',
-    presentation?.confirm || (replacement ? 'Replace with reviewed version' : 'Confirm this change')
+    presentation?.confirm || integrationPresentation?.confirm || 'Confirm this change'
   );
   confirm.type = 'button';
   confirm.addEventListener('click', commitReview);
@@ -1490,7 +1529,7 @@ function renderReview() {
   container.appendChild(controls);
 }
 
-function reviewRows(review) {
+export function reviewRows(review) {
   const rows = [];
   const integration = review.integration;
   if (integration) {
@@ -1504,7 +1543,10 @@ function reviewRows(review) {
       ['Reviewed version', integration.expected_version],
       ['Platform', (integration.supported_platforms || []).join(', ')],
       ['Required host features', (integration.required_host_features || []).join(', ')],
-      ['Enabled after this action', integration.enabled ? 'Already enabled' : 'No']
+      [
+        'Enabled after this action',
+        review.commit_action === 'enable' ? 'Yes' : integration.enabled ? 'Already enabled' : 'No'
+      ]
     );
     const trust = integration.trust || {};
     Object.entries(trust).forEach(([key, value]) => {

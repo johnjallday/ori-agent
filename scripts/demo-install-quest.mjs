@@ -192,6 +192,61 @@ async function installStage() {
     problems.push('Home and Plugins opened different quests');
 }
 
+// installFlowStage installs the pinned release from the install quest on a
+// plain demo server (it downloads from the reviewed source): Install plugin →
+// review → Install, then Enable plugin → review → Enable.
+async function installFlowStage() {
+  const page = await newPage();
+  await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+  await api(page, 'POST', '/api/onboarding/skip');
+  await page.goto(`${baseUrl}/?setup=quest&source=host&quest=install_ori_reaper`, {
+    waitUntil: 'domcontentloaded'
+  });
+  const setup = page.locator('#specialistSetupJourneyModal');
+  const receipt = page.locator('#specialistSetupJourneyReceipt');
+  const review = page.locator('#specialistSetupJourneyReview');
+  const text = async locator => JSON.stringify((await locator.innerText()).replace(/\s+/g, ' '));
+  await describeModal(page, 'before install');
+  console.log(`receipt before install: ${await text(receipt)}`);
+  await shot(page, '40-install-step-before');
+
+  await clickAndSettle(
+    page,
+    setup.getByRole('button', { name: 'Install plugin', exact: true }),
+    'Install plugin'
+  );
+  await review.waitFor({ state: 'visible', timeout: 60000 });
+  console.log(`install review: ${await text(review)}`);
+  await shot(page, '41-install-review');
+  await clickAndSettle(
+    page,
+    review.getByRole('button', { name: 'Install', exact: true }),
+    'Install'
+  );
+  await review.waitFor({ state: 'hidden', timeout: 180000 });
+  await describeModal(page, 'after install');
+  console.log(`receipt after install: ${await text(receipt)}`);
+  await shot(page, '42-after-install');
+
+  const enable = setup.getByRole('button', { name: 'Enable plugin', exact: true });
+  if (await enable.isVisible()) {
+    await clickAndSettle(page, enable, 'Enable plugin');
+    await review.waitFor({ state: 'visible', timeout: 60000 });
+    console.log(`enable review: ${await text(review)}`);
+    await shot(page, '43-enable-review');
+    await clickAndSettle(
+      page,
+      review.getByRole('button', { name: 'Enable', exact: true }),
+      'Enable'
+    );
+    await review.waitFor({ state: 'hidden', timeout: 60000 });
+    await describeModal(page, 'after enable');
+    await shot(page, '44-after-enable');
+  } else {
+    problems.push('no Enable plugin button after install');
+  }
+}
+
 async function clickAndSettle(page, locator, label) {
   await locator.waitFor({ state: 'visible', timeout: 20000 });
   console.log(`click: ${label}`);
@@ -488,6 +543,7 @@ try {
   else if (stage === 'plugin') await pluginStage();
   else if (stage === 'templates') await templatesStage();
   else if (stage === 'restart') await restartStage();
+  else if (stage === 'installflow') await installFlowStage();
   else throw new Error(`unknown stage ${stage}`);
 } catch (error) {
   problems.push(`stage failed: ${error.message}`);

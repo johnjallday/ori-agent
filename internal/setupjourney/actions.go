@@ -148,9 +148,11 @@ const (
 
 var actionDefinitionsByKind = map[specialist.SetupStepKind][]ActionDefinition{
 	specialist.SetupStepIntegrationInstall: {
-		{ID: ActionReviewInstall, Label: "Review integration", Effect: ActionEffectReview},
+		// Review actions are labelled by their outcome; the review panel still
+		// shows the disclosure before anything changes.
+		{ID: ActionReviewInstall, Label: "Install plugin", Effect: ActionEffectReview},
 		{ID: ActionInstall, Label: "Install integration", Effect: ActionEffectCommit, RequiresReview: true},
-		{ID: ActionReviewEnable, Label: "Review enabling", Effect: ActionEffectReview},
+		{ID: ActionReviewEnable, Label: "Enable plugin", Effect: ActionEffectReview},
 		{ID: ActionEnable, Label: "Enable integration", Effect: ActionEffectCommit, RequiresReview: true},
 		{ID: ActionReviewUpdate, Label: "Review verified replacement", Effect: ActionEffectReview},
 		{ID: ActionUpdate, Label: "Update integration", Effect: ActionEffectCommit, RequiresReview: true},

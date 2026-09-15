@@ -11,12 +11,14 @@ const {
   START_OVER_EXPLANATION,
   WORKSPACE_LAUNCH_DESCRIPTION,
   integrationHandoffNavigation,
+  integrationReviewPresentation,
   setupJourneyActionLabel,
   setupJourneyPreconditionView,
   workspaceLaunchStages,
   projectDraftInput,
   projectReviewPresentation,
   projectFailureGuidance,
+  reviewRows,
   newJourneyIdempotencyKey,
   setupJourneyCloseDismisses,
   setupJourneyControlDisabled,
@@ -98,6 +100,76 @@ test('a permitted development integration stays visibly distinct from a reviewed
     ['Enabled', 'Yes'],
     ['Verification', 'Local development copy — not release-verified']
   ]);
+});
+
+test('before install the receipt shows only what will be installed', () => {
+  const rows = setupJourneyReceiptRows(
+    {},
+    {
+      integration: {
+        plugin_id: 'reaper-plugin',
+        installed_version: '',
+        expected_version: '0.5.0',
+        enabled: false,
+        verified: false
+      }
+    }
+  );
+  assert.deepEqual(rows, [
+    ['Integration', 'reaper-plugin'],
+    ['Installed', 'No'],
+    ['Version to install', '0.5.0']
+  ]);
+});
+
+test('integration reviews are named by their outcome', () => {
+  const integration = {
+    plugin_id: 'reaper-plugin',
+    expected_version: '0.5.0',
+    source_label: 'johnjallday/reaper-plugin'
+  };
+  assert.deepEqual(
+    integrationReviewPresentation(
+      { commit_action: 'install', integration },
+      'Install Ori REAPER Plugin'
+    ),
+    {
+      title: 'Install Ori REAPER Plugin?',
+      description:
+        'Ori downloads the reviewed 0.5.0 release from johnjallday/reaper-plugin, checks its fingerprint, and installs it. Nothing runs until you enable it.',
+      confirm: 'Install'
+    }
+  );
+  assert.equal(
+    integrationReviewPresentation({ commit_action: 'install', integration: { plugin_id: 'p' } })
+      .description,
+    'Ori downloads the reviewed release, checks its fingerprint, and installs it. Nothing runs until you enable it.'
+  );
+  assert.equal(
+    integrationReviewPresentation({ commit_action: 'install', integration }).title,
+    'Install this plugin?'
+  );
+  const enable = integrationReviewPresentation({ commit_action: 'enable', integration });
+  assert.equal(enable.title, 'Enable this plugin?');
+  assert.equal(enable.confirm, 'Enable');
+  for (const review of [
+    { commit_action: 'update', integration },
+    { commit_action: 'install', integration: { ...integration, replacement_required: true } }
+  ]) {
+    const replace = integrationReviewPresentation(review, 'Install Ori REAPER Plugin');
+    assert.equal(replace.title, 'Replace installed integration?');
+    assert.equal(replace.confirm, 'Replace with reviewed version');
+  }
+  const enabledAfter = review =>
+    reviewRows(review).find(([label]) => label === 'Enabled after this action')[1];
+  assert.equal(enabledAfter({ commit_action: 'install', integration }), 'No');
+  assert.equal(enabledAfter({ commit_action: 'enable', integration }), 'Yes');
+  assert.equal(
+    enabledAfter({ commit_action: 'update', integration: { ...integration, enabled: true } }),
+    'Already enabled'
+  );
+  assert.equal(integrationReviewPresentation({ commit_action: 'install' }), null);
+  assert.equal(integrationReviewPresentation({ commit_action: 'other', integration }), null);
 });
 
 test('installation and enablement never imply verified release provenance', () => {
