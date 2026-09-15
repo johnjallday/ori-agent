@@ -179,13 +179,16 @@ REAPER **0.6.0** is the first release that declares its quest under
 `setup_quests_v2`: `reaper_setup` version 2 with four steps, group-only launch
 copy and blueprint version 7. Installed v0.5.1 and v0.5.2 plugins require the
 retired `setup_quests_v1`, so this host refuses their manifests until they
-update. The pinned v0.5.0 declares no quest: it still installs, and its install
-quest offers only **Open Plugins**.
+update. The earlier pinned v0.5.0 declared no quest: it installed, and its
+install quest offered only **Open Plugins**.
 
-This host change **does not publish a plugin release, change the reviewed
-pin, or rewrite anyone's installed plugin**. Moving the pin to 0.6.0 is a
-separate reviewed step after the release is published; see
-[REAPER integration](reaper-integration.md). Until then, a local demo uses
+The reviewed pin now points at the published v0.6.0 release, so the install
+quest hands off into the plugin's four-step quest once the plugin is installed,
+enabled and verified. An existing installation from the official unpinned Git
+URL is offered **Review verified replacement** first; nothing rewrites an
+installed plugin without that confirmation. The pin's verification evidence and
+the procedure for moving it again live in
+[REAPER integration](reaper-integration.md). A local demo can still use
 `scripts/reaper-demo.sh` with a development source.
 
 ## Progress, reset and Start over

@@ -21,21 +21,27 @@ func TestBuiltInRegistryMatchesSpecialistConstraintsAndPublishedRelease(t *testi
 		entry.ExpectedBlueprintID != specialistEntry.SuggestedTemplateID {
 		t.Fatalf("registry/specialist identity drift: %#v / %#v", entry, specialistEntry)
 	}
-	if entry.ExpectedVersion != "0.5.0" || entry.ExpectedBlueprintVersion != 4 ||
+	if entry.ExpectedVersion != "0.6.0" || entry.ExpectedBlueprintVersion != 7 ||
 		entry.ExpectedProgramSchema != 2 || entry.ExpectedProtocol != plugin.SurfaceProtocolVersion {
 		t.Fatalf("reviewed candidate versions drifted: %#v", entry)
 	}
-	if entry.SourceCommit != "1f494db5a39d8c13f6149943b28e6a506d19631a" {
+	if entry.SourceCommit != "03af9fda3e6b9d8cc3c0496c5e9ef6df99e870b9" {
 		t.Fatalf("reviewed candidate commit drifted: %q", entry.SourceCommit)
 	}
 	if !entry.ReleaseReady || entry.Source() != entry.SourceRepository+"#sha="+entry.SourceCommit {
 		t.Fatalf("published release missing immutable install source: ready=%v source=%q", entry.ReleaseReady, entry.Source())
 	}
-	features := strings.Join(entry.RequiredHostFeatures, ",")
-	for _, required := range []string{plugin.HostFeatureAssistantProgramV1, plugin.HostFeatureSpecialistSetupJourneyV1} {
-		if !strings.Contains(features, required) {
-			t.Errorf("required host feature %q missing from %q", required, features)
-		}
+	// The pin must require exactly what the v0.6.0 manifest declares: a
+	// narrower list would accept a plugin this host cannot honor, a wider one
+	// would refuse the published release.
+	expectedFeatures := []string{
+		plugin.HostFeatureAssistantProgramV1,
+		plugin.HostFeatureSetupQuestsV2,
+		plugin.HostFeatureSpecialistSetupJourneyV1,
+		plugin.HostFeatureTemplateGroupRequirementsV1,
+	}
+	if features := strings.Join(entry.RequiredHostFeatures, ","); features != strings.Join(expectedFeatures, ",") {
+		t.Errorf("required host features = %q, want %q", features, strings.Join(expectedFeatures, ","))
 	}
 }
 

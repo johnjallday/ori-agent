@@ -88,7 +88,7 @@ func TestReviewedIntegrationPublishedRelease(t *testing.T) {
 			}
 			artifacts := installed[0].ResolvedArtifacts
 			if len(artifacts) != 1 || !artifacts[0].Available || artifacts[0].Size != 8780098 ||
-				artifacts[0].SHA256 != "2bbf6b77418119cb21e827a407c8d5886e3effdb593ec0ad274e20d7d69c2ca9" {
+				artifacts[0].SHA256 != "4def4fec14ecf083b0358c686c608514d4b9afff99dd810f1184213312770119" {
 				t.Fatalf("unexpected verified release artifact: %#v", artifacts)
 			}
 			info, err := os.Stat(artifacts[0].ManagedPath)
