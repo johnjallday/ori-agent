@@ -385,11 +385,6 @@
         )
       ) +
       '</div>' +
-      (questCache.some(
-        quest => quest.plugin_id === rawName && quest.ownership === 'host_compatibility'
-      )
-        ? '<div class="small text-muted mt-1">Ori compatibility setup for this plugin version.</div>'
-        : '') +
       '</div>' +
       '<div class="d-flex flex-wrap gap-2">' +
       questLinks +

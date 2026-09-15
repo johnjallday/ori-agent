@@ -339,9 +339,76 @@ async function pluginStage() {
   );
 }
 
+// templatesStage imports the quest-eligible fixture as a user template, authors
+// its setup quest on the Templates page, and checks the four-step editor and
+// that Guided Setup stays hidden while the integration is not installed.
+async function templatesStage() {
+  const page = await newPage();
+  await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+  await api(page, 'POST', '/api/onboarding/skip');
+  const fixture = resolve('internal/projecttemplates/testdata/user-setup-quest-eligible');
+  const imported = await api(page, 'POST', '/api/project-templates/import', {
+    path: fixture,
+    name: 'Eligible local project'
+  });
+  const templateID = imported.json?.template?.id || imported.json?.id || '';
+  console.log(`import fixture: HTTP ${imported.status} id=${templateID}`);
+
+  const selectTemplate = async () => {
+    await page.goto(`${baseUrl}/templates`, { waitUntil: 'domcontentloaded' });
+    const row = page.locator('#tplList button', { hasText: 'Eligible local project' }).first();
+    await clickAndSettle(page, row, 'select template');
+  };
+  await selectTemplate();
+  await clickAndSettle(page, page.locator('#tplTabSetupQuest'), 'Setup quest tab');
+  const create = page.locator('#tplUserQuestCreate');
+  if (await create.isVisible()) await clickAndSettle(page, create, 'Create setup quest');
+  await page.locator('#tplUserQuestForm').waitFor({ state: 'visible', timeout: 20000 });
+  const stepRows = await page
+    .locator('#tplUserQuestSteps [data-quest-step]')
+    .evaluateAll(rows => rows.map(row => row.dataset.questStep));
+  const launchInputs = await page
+    .locator(
+      '#tplUserQuestForm input[id^="tplUserQuestGroup"], #tplUserQuestForm [id^="tplUserQuestRuntime"]'
+    )
+    .evaluateAll(inputs => inputs.map(input => input.id));
+  console.log(
+    `editor steps=${JSON.stringify(stepRows)} launch inputs=${JSON.stringify(launchInputs)}`
+  );
+  if (stepRows.length !== 4 || launchInputs.some(id => id.includes('Runtime')))
+    problems.push('editor is not the four-step, group-only form');
+  await page.locator('#tplUserQuestForm').scrollIntoViewIfNeeded();
+  await shot(page, '30-templates-quest-editor');
+  const integration = page.locator('#tplUserQuestIntegration');
+  if (await integration.isVisible()) await integration.selectOption('ori_reaper').catch(() => {});
+  await clickAndSettle(page, page.locator('#tplUserQuestSaveBtn'), 'Save setup quest');
+  await page.waitForTimeout(1500);
+  console.log(
+    `after save: ${JSON.stringify((await page.locator('#tplUserQuestStatus').innerText()).replace(/\s+/g, ' '))}`
+  );
+  const saved = await api(page, 'GET', `/api/project-templates/${templateID}/setup-quest`);
+  const steps = saved.json?.user_setup_quest?.steps || saved.json?.setup_quest?.steps || [];
+  console.log(
+    `saved quest: HTTP ${saved.status} steps=${JSON.stringify(steps.map(step => step.kind))}`
+  );
+  await shot(page, '31-templates-quest-saved');
+
+  const catalog = await api(page, 'GET', '/api/setup-quests');
+  const listed = (catalog.json?.quests || []).filter(quest => quest.source === 'user_template');
+  console.log(`catalog user-template quests while not installed: ${listed.length}`);
+  await selectTemplate();
+  const open = page.locator('#tplQuestOpen');
+  await page.waitForTimeout(1500);
+  console.log(`Open Guided Setup visible: ${await open.isVisible()}`);
+  if (await open.isVisible())
+    problems.push('Open Guided Setup shown while the integration is not installed');
+  await shot(page, '32-templates-overview-no-guided-setup');
+}
+
 try {
   if (stage === 'install') await installStage();
   else if (stage === 'plugin') await pluginStage();
+  else if (stage === 'templates') await templatesStage();
   else throw new Error(`unknown stage ${stage}`);
 } catch (error) {
   problems.push(`stage failed: ${error.message}`);
