@@ -325,6 +325,16 @@ func TestResolveTidyDownloads(t *testing.T) {
 	}
 }
 
+func TestResolveFirstBrief_AsksForAModelOnlyWhenNoneIsConfigured(t *testing.T) {
+	if got := resolveFirstBrief(MissionContext{ModelConfigured: true}); got != (MissionPresentation{}) {
+		t.Fatalf("with a model the copy changed: %+v", got)
+	}
+	got := resolveFirstBrief(MissionContext{})
+	if got.Why != firstBriefWhy+" Add a model in Settings to generate one." || got.ActionURL != "" || got.InProgress {
+		t.Fatalf("without a model = %+v", got)
+	}
+}
+
 func TestChooseConnectSourceBranch_PriorityAndFallbacks(t *testing.T) {
 	cases := []struct {
 		focus []string

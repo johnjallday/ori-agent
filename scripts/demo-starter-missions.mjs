@@ -23,12 +23,16 @@
  *   plan     Mission 03 for a --focus=plan_my_day hire: the first-day plan
  *            completes it and Mission 04 takes the card; then the Calendar
  *            capability card opens the creator on Calendar Ops.
+ *   results  Today Results after File Janitor files files: continue a tidy
+ *            sandbox with --workspace=<slug> --folder=<its folder>. Scans,
+ *            approves, confirms, reads the Today line, follows it to History,
+ *            then requests a brief and checks Mission 04 completes on Today.
  *
  * Every stage prints the missions it observed and any console errors or failed
  * requests, so a quietly broken page does not pass as a clean demo.
  */
 import { chromium } from 'playwright';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const [baseUrl, outDir, stage = 'card', ...flags] = process.argv.slice(2);
@@ -222,12 +226,129 @@ function fixtureFolder() {
   const root = join(resolve(sandboxDir), `Downloads-demo-${Date.now().toString(36)}`);
   if (!root.startsWith(resolve(sandboxDir))) throw new Error(`refusing fixture ${root}`);
   mkdirSync(root, { recursive: true });
-  const old = new Date(Date.now() - 6 * 60 * 60 * 1000);
-  for (const name of ['invoice-march.pdf', 'holiday-photo.jpg']) {
-    writeFileSync(join(root, name), `demo ${name}`);
-  }
-  console.log(`fixture folder: ${root} (files dated ${old.toISOString()})`);
+  writeSettledFiles(root, ['invoice-march.pdf', 'holiday-photo.jpg']);
   return root;
+}
+
+// writeSettledFiles drops files dated hours ago, so the janitor's settle window
+// (it ignores a file that may still be downloading) never hides them.
+function writeSettledFiles(root, names) {
+  const old = new Date(Date.now() - 6 * 60 * 60 * 1000);
+  for (const name of names) {
+    writeFileSync(join(root, name), `demo ${name}`);
+    utimesSync(join(root, name), old, old);
+  }
+  console.log(`files in ${root}: ${names.join(', ')} (dated ${old.toISOString()})`);
+}
+
+async function resultsStage() {
+  const slug = flag('workspace');
+  const root = flag('folder');
+  if (!slug || !root || !sandboxDir || !resolve(root).startsWith(resolve(sandboxDir))) {
+    throw new Error(
+      'results needs --workspace=<janitor slug> and --folder=<its folder inside --sandbox>'
+    );
+  }
+  const width = stageWidth;
+  const page = await newPage(width, width < 600 ? 860 : 800);
+  writeSettledFiles(root, ['receipt-april.pdf', 'screenshot-notes.png']);
+
+  // Scan, select every proposal, review, confirm: the console's own flow.
+  await page.goto(`${baseUrl}/workspaces/${encodeURIComponent(slug)}`, {
+    waitUntil: 'domcontentloaded'
+  });
+  const wizard = page.locator('#setupWizardDialog');
+  if (await wizard.isVisible().catch(() => false)) await page.locator('#setupWizardClose').click();
+  await page.locator('#fileJanitorCardOpen').click();
+  await page.locator('#fileJanitorConsole').waitFor({ state: 'visible', timeout: 15000 });
+  await page.locator('#fileJanitorScan').click();
+  const rows = page.locator('#fileJanitorConsoleBody .fj-row-item');
+  await rows.first().waitFor({ state: 'visible', timeout: 20000 });
+  const count = await rows.count();
+  for (let i = 0; i < count; i++) {
+    const select = rows.nth(i).locator('.fj-select');
+    if (await select.isEnabled().catch(() => false)) await select.check();
+  }
+  await shot(page, `g4-janitor-review-${width}`);
+  await page.locator('#fileJanitorApprove').click();
+  await page
+    .locator('#fileJanitorConsoleBody')
+    .getByRole('button', { name: /Move|Apply|Confirm these/ })
+    .first()
+    .click();
+  const results = page.locator('#fileJanitorConsoleBody .fj-results');
+  await results.waitFor({ state: 'visible', timeout: 30000 });
+  console.log(
+    `janitor results: ${((await results.textContent()) || '').replace(/\s+/g, ' ').trim()}`
+  );
+
+  // Today shows what was filed, where the user looks every day.
+  await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+  await page.locator('#personalAssistantLauncher').click();
+  await page.locator('#personalAssistantTodayPanel').waitFor({ state: 'visible', timeout: 15000 });
+  const line = page.locator('#personalAssistantTodayResults li', {
+    hasText: /Filed \d+ files? into/
+  });
+  await line.first().waitFor({ state: 'visible', timeout: 15000 });
+  const text = ((await line.first().textContent()) || '').replace(/\s+/g, ' ').trim();
+  console.log(`today line: ${text}`);
+  expect(
+    /Filed \d+ files? into .+\/Filed/.test(text),
+    'Today Results shows what File Janitor filed'
+  );
+  expect(text.includes('Undo from History'), 'the line points at History for undo');
+  await line.first().scrollIntoViewIfNeeded();
+  await shot(page, `g4-today-results-${width}`);
+
+  await Promise.all([
+    page.waitForURL(/panel=file-janitor&tab=history/, { timeout: 15000 }),
+    line.first().locator('a').click()
+  ]);
+  await page.locator('#fileJanitorConsole').waitFor({ state: 'visible', timeout: 15000 });
+  await page
+    .locator('#fileJanitorConsole [data-fj-tab="history"][aria-selected="true"]')
+    .waitFor({ timeout: 15000 });
+  expect(true, "the line's link opens the console on History");
+  await page.waitForTimeout(1500);
+  expect(
+    !(await page
+      .getByText('Some link details were out of date')
+      .isVisible()
+      .catch(() => false)),
+    'arriving from Today does not claim the link was out of date'
+  );
+  await shot(page, `g4-history-${width}`);
+
+  // Mission 04: before any brief, the card asks for a model when none is set.
+  const before = await missions(page);
+  const brief = (before.missions || []).find(m => m.id === 'pa-first-brief');
+  console.log(`Mission 04 before a brief: ${brief?.status} "${brief?.why}"`);
+  if (brief?.status !== 'completed') {
+    const card = await openQuests(page);
+    if (card.kicker === 'Mission 04') {
+      await page.locator('[data-role="first-mission"]').scrollIntoViewIfNeeded();
+      await shot(page, `g4-mission04-no-brief-${width}`);
+    }
+    const refresh = await api(page, 'POST', '/api/personal-hq/brief/refresh');
+    console.log(`brief refresh: HTTP ${refresh.status}`);
+    let revision = '';
+    for (let i = 0; i < 30 && !revision; i++) {
+      await page.waitForTimeout(1000);
+      const current = await api(page, 'GET', '/api/personal-hq/brief/current');
+      revision = current.json?.revision?.id || current.json?.id || '';
+    }
+    console.log(`brief revision: ${revision || '(none)'}`);
+    // Today serves the brief; that first view completes Mission 04.
+    await api(page, 'GET', '/api/personal-assistant/today');
+    const after = await missions(page);
+    const done = (after.missions || []).find(m => m.id === 'pa-first-brief');
+    expect(done?.status === 'completed', 'Today served with a brief completed Mission 04');
+    const final = await openQuests(page);
+    await page.locator('[data-role="first-mission"]').scrollIntoViewIfNeeded();
+    console.log(`final card: ${final.kicker} ${final.status}`);
+    await shot(page, `g4-mission04-after-brief-${width}`);
+  }
+  await page.close();
 }
 
 async function tidyStage() {
@@ -502,6 +623,7 @@ try {
   else if (stage === 'tidy') await tidyStage();
   else if (stage === 'email') await emailStage();
   else if (stage === 'plan') await planStage();
+  else if (stage === 'results') await resultsStage();
   else throw new Error(`unknown stage ${stage}`);
 } catch (error) {
   console.error(`FAIL: ${error.message}`);

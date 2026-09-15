@@ -9,10 +9,12 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/followup"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/specialist"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -204,6 +206,29 @@ type todaySpecialistSetupReader interface {
 	GetSpecialistSetup(ctx context.Context, userID string) (*TodaySpecialistSetupProjection, error)
 }
 
+// JanitorResult summarizes one File Janitor workspace's recent applied actions
+// for Today's Results line.
+type JanitorResult struct {
+	WorkspaceID   string
+	WorkspaceName string
+	Slug          string
+	// FolderName is the base name of the folder the janitor tidies.
+	FolderName string
+	// Moved and Trashed count applied, not-undone actions in the window.
+	Moved   int
+	Trashed int
+	// NewestActionID and NewestAt identify the most recent of those actions.
+	NewestActionID string
+	NewestAt       time.Time
+}
+
+// JanitorResultReader returns, for a user, the recent applied File Janitor
+// actions of each workspace they own. Implemented in the server over
+// filejanitor, so this package gains no dependency on it.
+type JanitorResultReader interface {
+	JanitorResults(ctx context.Context, userID string) ([]JanitorResult, error)
+}
+
 // TodayService reads canonical stores independently; it never generates a
 // brief, mutates a Ticket, or changes a follow-up.
 type TodayService struct {
@@ -213,7 +238,13 @@ type TodayService struct {
 	followUpWorkspaces dailybrief.WorkspaceSource
 	followUps          todayFollowUpReader
 	setup              todaySpecialistSetupReader
+	janitorResults     JanitorResultReader
 	now                func() time.Time
+
+	// onBriefSeen fires the first time this process serves a user Today with a
+	// Daily Brief. briefSeen records who it already fired for.
+	onBriefSeen func(userID string)
+	briefSeen   sync.Map
 }
 
 func NewTodayService(relationship todayRelationshipReader, briefs todayBriefReader, workspaces workspace.Store, followUps todayFollowUpReader) *TodayService {
@@ -240,6 +271,35 @@ func (s *TodayService) SetSpecialistSetupReader(reader todaySpecialistSetupReade
 	if s != nil {
 		s.setup = reader
 	}
+}
+
+// SetJanitorResultReader adds File Janitor's recent results to Today's Results
+// section. Unset, Today is exactly what it was without it. Startup wiring only.
+func (s *TodayService) SetJanitorResultReader(reader JanitorResultReader) {
+	if s != nil {
+		s.janitorResults = reader
+	}
+}
+
+// SetOnBriefSeen installs the callback fired the first time this process serves
+// a user Today with a Daily Brief revision, for an active or paused
+// relationship. It fires at most once per user per process and outside any
+// lock; the consumer must be idempotent across restarts. Startup wiring only.
+func (s *TodayService) SetOnBriefSeen(fn func(userID string)) {
+	if s != nil {
+		s.onBriefSeen = fn
+	}
+}
+
+// noteBriefSeen fires onBriefSeen once per user for this process.
+func (s *TodayService) noteBriefSeen(userID string) {
+	if s.onBriefSeen == nil {
+		return
+	}
+	if _, already := s.briefSeen.LoadOrStore(strings.TrimSpace(userID), struct{}{}); already {
+		return
+	}
+	s.onBriefSeen(userID)
 }
 
 func (s *TodayService) Get(ctx context.Context, userID string) (*TodayProjection, error) {
@@ -313,8 +373,13 @@ func (s *TodayService) Get(ctx context.Context, userID string) (*TodayProjection
 		tasksByID[task.ID] = task
 	}
 	s.loadTicketsAndResults(ws, route, now, out)
+	s.loadJanitorResults(ctx, userID, now, out)
 	followUpsByRef := s.loadFollowUps(ctx, userID, relationship, now, out)
 	s.loadBrief(ctx, userID, ws.ID, route, tasksByID, followUpsByRef, out)
+	if out.Brief.RevisionID != "" {
+		// Only the active and paused states reach this point.
+		s.noteBriefSeen(userID)
+	}
 	out.Decisions = decisionsFromFollowUps(followUpsByRef, out.FollowUps.Health, now)
 	out.Studio = s.loadStudio(userID, relationship.SpecialistSlug, relationship.HQWorkspaceID)
 	out.SpecialistSetup = s.loadSpecialistSetup(ctx, userID, relationship.SpecialistSlug)
@@ -578,6 +643,77 @@ func (s *TodayService) loadTicketsAndResults(ws *workspace.Workspace, route stri
 	out.Priorities = taskTodaySection(priorities, route, "ticket", todayPriorityCap)
 	out.Results = taskTodaySection(results, route, "result", todayResultCap)
 	_ = now
+}
+
+// todayJanitorWindow is how recent a File Janitor action must be to appear.
+const todayJanitorWindow = 24 * time.Hour
+
+// loadJanitorResults appends one "janitor_result" line per File Janitor
+// workspace that applied actions in the last day, after the HQ results and
+// within the same cap. It is one decorative line, not a source the brief
+// depends on: a read failure logs and adds nothing, and the section's health is
+// never changed by it.
+func (s *TodayService) loadJanitorResults(ctx context.Context, userID string, now time.Time, out *TodayProjection) {
+	if s.janitorResults == nil || out.Results.Health.Status == TodaySectionUnavailable {
+		return
+	}
+	results, err := s.janitorResults.JanitorResults(ctx, strings.TrimSpace(userID))
+	if err != nil {
+		logger.Warn("personal assistant today: File Janitor results unavailable", logger.Fields{"error": err.Error()})
+		return
+	}
+	sort.SliceStable(results, func(i, j int) bool { return results[i].NewestAt.After(results[j].NewestAt) })
+	for _, result := range results {
+		if len(out.Results.Items) >= todayResultCap {
+			return
+		}
+		item, ok := janitorTodayItem(result, now)
+		if ok {
+			out.Results.Items = append(out.Results.Items, item)
+		}
+	}
+}
+
+// janitorTodayItem renders one File Janitor result, or false when it has
+// nothing recent to report or no safe route.
+func janitorTodayItem(result JanitorResult, now time.Time) (TodayItem, bool) {
+	slug := strings.TrimSpace(result.Slug)
+	folder := strings.TrimSpace(result.FolderName)
+	if (result.Moved <= 0 && result.Trashed <= 0) || !todaySafeSlug.MatchString(slug) || folder == "" ||
+		result.NewestAt.IsZero() || now.Sub(result.NewestAt) > todayJanitorWindow {
+		return TodayItem{}, false
+	}
+	var title string
+	switch {
+	case result.Moved > 0:
+		title = fmt.Sprintf("Filed %s into %s/Filed", countFiles(result.Moved), folder)
+	default:
+		title = fmt.Sprintf("Sent %s to Trash from %s", countFiles(result.Trashed), folder)
+	}
+	detail := "Undo from History"
+	if result.Moved > 0 && result.Trashed > 0 {
+		detail = fmt.Sprintf("%d sent to Trash · %s", result.Trashed, detail)
+	}
+	return TodayItem{
+		ID: result.NewestActionID, Kind: "janitor_result",
+		Title: truncateRunes(title, 200), Detail: detail,
+		Attribution: truncateRunes(strings.TrimSpace(result.WorkspaceName), 120),
+		// The workspace page's File Janitor console, opened on its History tab.
+		Route: "/workspaces/" + url.PathEscape(slug) + "?panel=file-janitor&tab=history",
+		Ref: dailybrief.SourceRef{
+			WorkspaceID: result.WorkspaceID, EntityType: "file_janitor_batch",
+			EntityID: result.NewestActionID, Timestamp: result.NewestAt,
+		},
+		SourceAt: result.NewestAt,
+	}, true
+}
+
+// countFiles says "1 file" or "N files".
+func countFiles(n int) string {
+	if n == 1 {
+		return "1 file"
+	}
+	return fmt.Sprintf("%d files", n)
 }
 
 func taskTodaySection(tasks []workspace.Task, route, kind string, cap int) TodaySection {

@@ -337,6 +337,10 @@ type ServerBuilder struct {
 	sampleLibraryService     *samplelibrary.Service
 	sampleLibraryHandler     *samplelibraryhttp.Handler
 
+	// personalAssistantToday is kept so progression can observe the first
+	// Daily Brief the user is shown (starter missions Mission 04).
+	personalAssistantToday *personalassistant.TodayService
+
 	// Personal HQ designation and onboarding state
 	personalHQService *personalhq.Service
 	personalHQHandler *personalhqhttp.Handler

@@ -121,6 +121,13 @@ func (b *ServerBuilder) completeProgressionWiring() {
 		})
 	}
 
+	// Read your first Daily Brief (Mission 04): Today served with a brief.
+	if b.personalAssistantToday != nil {
+		b.personalAssistantToday.SetOnBriefSeen(func(string) {
+			engine.Complete(progression.FirstBriefQuestID)
+		})
+	}
+
 	// One-time backfill so established installs are grandfathered silently.
 	if err := engine.Backfill(progression.ScannerFunc(b.scanProgression)); err != nil {
 		logger.Warn("Onboarding progression backfill failed", logger.Fields{"error": err})
@@ -182,6 +189,11 @@ func (b *ServerBuilder) scanProgression() progression.Snapshot {
 	snap.CalendarReady, snap.ProjectWorkspaces = scanStarterWorkspaces(b.starterWorkspaces(), hqWorkspaceID)
 	if b.progressionEngine != nil {
 		snap.LegacyFirstDayCompleted = b.progressionEngine.HasCompleted(progression.PersonalAssistantFirstDayQuestID)
+	}
+
+	// Mission 04: HQ already has a Daily Brief revision.
+	if b.dailyBriefService != nil {
+		snap.HasBriefRevision = briefRevisionExists(b.dailyBriefService, hqWorkspaceID)
 	}
 
 	// Count notes only until we find one — the quest just needs "> 0".

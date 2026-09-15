@@ -59,6 +59,7 @@ func (b *ServerBuilder) starterMissionContext() progression.MissionContext {
 			for _, focus := range state.FocusAreas {
 				mission.FocusAreas = append(mission.FocusAreas, string(focus))
 			}
+			mission.ModelConfigured = state.Availability.Model.Available
 		}
 	}
 

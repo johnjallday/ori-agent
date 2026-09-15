@@ -255,10 +255,11 @@ func PersonalAssistantGraph() Graph {
 		{
 			ID: FirstBriefQuestID, Tier: 1, Featured: true, Order: 4, Optional: true,
 			Title:       "Read your first Daily Brief",
-			Why:         "Ori pulls your priorities, follow-ups, and anything you connected into one morning brief.",
+			Why:         firstBriefWhy,
 			ActionURL:   "/",
 			ActionLabel: "Open Today",
 			Satisfied:   func(s Snapshot) bool { return s.HasBriefRevision },
+			Resolve:     resolveFirstBrief,
 		},
 		retier("t1-first-message", 2),
 		retier("t1-personalize", 2),
@@ -292,6 +293,19 @@ func resolveTidyDownloads(ctx MissionContext) MissionPresentation {
 		ActionLabel: "Finish setup",
 		InProgress:  true,
 	}
+}
+
+// firstBriefWhy is Mission 04's static why line.
+const firstBriefWhy = "Ori pulls your priorities, follow-ups, and anything you connected into one morning brief."
+
+// resolveFirstBrief tells a user with no model that one is needed before a
+// brief can be generated (PRD FR21). The mission stays optional, so this never
+// locks the next tier.
+func resolveFirstBrief(ctx MissionContext) MissionPresentation {
+	if ctx.ModelConfigured {
+		return MissionPresentation{}
+	}
+	return MissionPresentation{Why: firstBriefWhy + " Add a model in Settings to generate one."}
 }
 
 // ConnectSourceBranch is the destination Mission 03 offers a user.
