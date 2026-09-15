@@ -3,8 +3,10 @@ package setupjourneyhttp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -143,5 +145,55 @@ func TestHostQuestHTTPListsStatusesAndScopesWithoutCreatingProgress(t *testing.T
 	// A plugin-scoped route cannot reach the host quest.
 	if response := request(mux, http.MethodGet, "/api/setup-quests/reaper-plugin/"+hostquests.EmailOpsSetupQuestID, ""); response.Code == http.StatusOK {
 		t.Fatalf("plugin route served a host quest: %s", response.Body.String())
+	}
+}
+
+// FR 49: top-level request fields cannot name a source, owner, workspace,
+// account, or vault on any host mutation route. Each forged body is refused
+// before the service runs, so the run's revision and presentation stay put.
+func TestHostQuestHTTPRefusesForgedTopLevelBodyFields(t *testing.T) {
+	service, db := hostQuestHTTPFixture(t)
+	mux := hostQuestHTTPMux(service, "local")
+	root := "/api/host-setup-quests/" + hostquests.EmailOpsSetupQuestID
+	request := func(method, path, body string) *httptest.ResponseRecorder {
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, httptest.NewRequest(method, path, strings.NewReader(body)))
+		return response
+	}
+	opened := request(http.MethodGet, root, "")
+	var body journeyResponse
+	if err := json.Unmarshal(opened.Body.Bytes(), &body); err != nil || body.Journey == nil {
+		t.Fatalf("root read: %d %s", opened.Code, opened.Body.String())
+	}
+	revision := body.Journey.StateRevision
+	base := `"if_revision":` + strconv.FormatInt(revision, 10) + `,"idempotency_key":"forged-%d"`
+
+	i := 0
+	for _, path := range []string{root + "/open", root + "/dismiss", root + "/runs/" + body.Journey.RunID + "/actions/review_mailbox_link"} {
+		for _, forged := range []string{
+			`"source":"plugin"`, `"plugin_id":"reaper-plugin"`, `"quest_id":"other"`, `"owner_user_id":"intruder"`,
+			`"workspace_id":"ws-other"`, `"account_id":"acct-evil"`, `"vault_id":"v-evil"`,
+		} {
+			i++
+			payload := "{" + fmt.Sprintf(base, i) + "," + forged + "}"
+			if response := request(http.MethodPost, path, payload); response.Code != http.StatusBadRequest {
+				t.Fatalf("%s accepted %s: %d %s", path, forged, response.Code, response.Body.String())
+			}
+		}
+	}
+
+	status := request(http.MethodGet, root+"/status", "")
+	var after statusResponse
+	if err := json.Unmarshal(status.Body.Bytes(), &after); err != nil || after.Journey == nil ||
+		after.Journey.StateRevision != revision || after.Journey.Dismissed {
+		t.Fatalf("forged bodies changed the run: %s", status.Body.String())
+	}
+	if count := journeyRunCount(t, db); count != 1 {
+		t.Fatalf("forged bodies created rows: %d", count)
+	}
+	// Control: the same body without the forged field is accepted, so the
+	// refusals above came from the forged field alone.
+	if response := request(http.MethodPost, root+"/dismiss", "{"+fmt.Sprintf(base, 0)+"}"); response.Code != http.StatusOK {
+		t.Fatalf("control dismiss: %d %s", response.Code, response.Body.String())
 	}
 }

@@ -535,6 +535,52 @@ revocation, missing roles/workspaces/links, invalid project containment, or
 runtime regression moves only the narrowest dependent scope back to blocked or
 `needs_attention`; it never repeats an unrelated consequence.
 
+### 3.4 Addendum: compiled journey shapes (#455)
+
+The five-step sequence above is now one of two compiled **shapes**. The full
+contract, drift notes, and demo evidence are in
+[Host-owned setup quests](host-setup-quests.md). This addendum records what
+changed for readers of this document.
+
+| Shape | Ordered step kinds | Who may declare it |
+| --- | --- | --- |
+| `specialist` | `integration_install`, `project_connect`, `workspace_setup`, `assistant_program_staffing`, `summary` | Built-in specialists, plugins, user templates |
+| `account_link` | `workspace_create`, `account_connect`, `account_link`, `summary` | Ori's host quest catalog only |
+
+- **Inferred, never authored.** `(*SetupJourney).Shape()` derives the shape
+  from the normalized step kinds. There is no `shape` JSON field, and
+  `ParseSetupJourney` still rejects unknown fields. A declaration must match
+  one sequence exactly, position by position.
+- **Existing declarations are unchanged.** For the specialist sequence every
+  check, its order, and its error text are as before, so every declaration
+  that normalized before still normalizes to the same value.
+  `SetupJourneyRequiredSteps` still means five.
+- **Field rules differ by shape.** An `account_link` declaration requires
+  `expected_blueprint_id`, and must leave `integration_key` and
+  `expected_assistant_program_id` empty and omit `workspace_launch`.
+- **Plugin and user validators name the shape.** Both reject any declaration
+  whose `Shape()` is not `specialist`, so the account-link kinds cannot be
+  declared outside Ori.
+- **Readers cover every kind.** `SetupStepKinds()` lists all eight compiled
+  kinds, and the fail-closed reader registry must have a reader for each one.
+  `ReadScope.Shape` lets a reader branch on shape.
+- **A third quest source.** `QuestSourceHost` joins plugin and user-template
+  quests, with its own root identity. It never adopts a plugin, user, or
+  assistant root. Its routes live under `/api/host-setup-quests/{questID}`
+  and add a `status` read that never creates a root.
+- **New action IDs.** `review_team`, `open_workspace`,
+  `open_account_settings`, `recheck_connection`, `start_inbox_triage`, and
+  `open_model_settings` are navigation actions. `review_mailbox_link` reviews
+  and `link_mailbox` is the one reviewed commit, with the same review token,
+  idempotency, owner-digest, and reconcile rules as §4.3.
+- **Receipts stay narrow.** A `workspace_create` result may carry only
+  `project_workspace_id`. `account_connect` and `account_link` results carry
+  no resource IDs and no canonical receipt ID; readiness is re-derived from
+  the mailbox readiness owner on every read.
+- **Presentation.** Closing a host quest only hides it; the Home resume card's
+  "Not now" is its persisted dismissal. Specialist, plugin, and user-template
+  journeys keep close-as-dismiss.
+
 ## 4. Durable root and child runs
 
 ### 4.1 Identity and persisted shape

@@ -5,7 +5,12 @@
 # run it as a tracked background process (see "Smoke Testing" in CLAUDE.md).
 #
 # Usage:
-#   ./scripts/demo-server.sh [port] [sandbox_dir]
+#   ./scripts/demo-server.sh [--rev REV] [port] [sandbox_dir]
+#
+# --rev REV serves a build of another commit instead of the working tree, so a
+# failing browser test can be checked against its baseline (for example the
+# branch's merge base) without creating a Git worktree. The commit is exported
+# with `git archive` and built once under $TMPDIR/ori-rev-<sha>/.
 #
 # Both HOME and ORI_DATA_DIR are redirected into the sandbox, and the server is
 # started from INSIDE it so the plugin store is isolated too. Nothing is ever
@@ -15,6 +20,16 @@
 # caller can clean it up with a single `rm -rf` of a temp path.
 
 set -euo pipefail
+
+rev=""
+if [[ "${1:-}" == "--rev" ]]; then
+	rev="${2:-}"
+	[[ -n "$rev" ]] || {
+		echo "--rev needs a commit" >&2
+		exit 2
+	}
+	shift 2
+fi
 
 port="${1:-8931}"
 sandbox="${2:-}"
@@ -26,16 +41,37 @@ repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 }
 cd "$repo_root"
 
-go build -o bin/ori-agent ./cmd/server
+tmp_root="${TMPDIR:-/tmp}"
+tmp_root="${tmp_root%/}"
+
+if [[ -n "$rev" ]]; then
+	sha="$(git rev-parse --verify --quiet "${rev}^{commit}" || true)"
+	[[ -n "$sha" ]] || {
+		echo "unknown commit: $rev" >&2
+		exit 2
+	}
+	build_root="$tmp_root/ori-rev-${sha:0:12}"
+	binary="$build_root/ori-agent"
+	if [[ ! -x "$binary" ]]; then
+		mkdir -p "$build_root/src"
+		git archive "$sha" | tar -x -C "$build_root/src"
+		(cd "$build_root/src" && go build -o "$binary" ./cmd/server)
+	fi
+	label="rev ${sha:0:12}"
+else
+	go build -o bin/ori-agent ./cmd/server
+	binary="$repo_root/bin/ori-agent"
+	label="$(git branch --show-current)"
+fi
 
 if [[ -z "$sandbox" ]]; then
-	sandbox="$(mktemp -d "${TMPDIR:-/tmp}/ori-demo.XXXXXX")"
+	sandbox="$(mktemp -d "$tmp_root/ori-demo.XXXXXX")"
 fi
 mkdir -p "$sandbox"
 
 echo "SANDBOX=$sandbox"
-echo "BRANCH=$(git branch --show-current)"
+echo "BRANCH=$label"
 echo "URL=http://localhost:$port"
 
 cd "$sandbox"
-exec env HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" "$repo_root/bin/ori-agent"
+exec env HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" "$binary"

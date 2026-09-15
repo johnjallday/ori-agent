@@ -1,10 +1,27 @@
 # Host-owned setup quests
 
-Status: **Group 1 spike complete, implementation not started** (2026-09-14).
-This document records the decided contract for host-owned setup quests,
-starting from the seam recheck against the feature checkout. Groups 2–5 update
-it to the implemented contract; until then every line reference is to
-`48392740`.
+Status: **Implemented** on `feature/455-goal-first-gmail-setup-quest`
+(2026-09-15). This document records the contract for host-owned setup quests.
+Sections 2–7 were written as the plan in the Group 1 spike. Where the
+implementation differed, the drift register in §1.3 wins: D11–D14 record the
+Group 2–4 refinements and their demo evidence. Line references in §1 point at
+the base commit `48392740`. Line references in later sections are approximate
+after implementation, so use the named function instead.
+
+What shipped, in one place:
+
+| Area | Where |
+| --- | --- |
+| Account-link shape and step kinds | `internal/specialist/setup_journey.go` |
+| Host quest data (`email_ops_setup`) | `internal/hostquests/` |
+| Host source, catalog, identity, status read | `internal/setupjourney/quests.go`, `host_quest_catalog.go` |
+| Routes and the non-creating status handler | `internal/setupjourneyhttp/quests.go`, `internal/server/routes.go` |
+| Readers and the reviewed mailbox link | `internal/server/email_ops_quest_adapters.go`, `email_ops_quest_mailbox.go` |
+| Capability card routing | `internal/personalassistant/capabilities.go` |
+| Journey UI for the new kinds | `internal/web/static/js/modules/setup-journey.js`, `setup-journey-account-steps.js` |
+| Creator team lock | `workspace-creator-state.js`, `sessions.js` |
+| Home resume card | `email-setup-quest-card.js`, `components/dashboard.tmpl` |
+| Adversarial and browser coverage | `internal/server/email_ops_quest_adversarial_test.go`, `tests/email-setup-quest.spec.ts` |
 
 Source of truth for requirements: `tasks/prd-455-goal-first-gmail-setup-quest.md`
 (Issue #455). Requirement IDs (`FR n`) below refer to that PRD.
@@ -292,6 +309,35 @@ response was replaced with a ready run and with a regressed run that has
 `first_completed_at`, and neither showed the card, because finishing live needs
 a Google account and vault. The same rules are unit-tested in
 `email-setup-quest-card.test.js`.
+
+**Final validation (Group 5, 2026-09-15).**
+
+Final demo on a fresh build and sandbox, headless Chromium, at 1440px and
+400px. Live against the real server: hire and HQ, the capability card, every
+resume-card rule, Templates, the creator Team step with the Inbox lock, and
+workspace creation. Also live: step 2 blocked with no OAuth client, and step 2
+naming **Repair vault** with a seeded connection. A server restart kept the
+quest at step 2 and the workspace roster as Postmaster and Inbox. Mocked: the
+link review, the ready summary, and completed-quest card states. No live Google
+account or vault was used, so no mail binding existed to check across the
+restart. The reviewed link, its binding, replay, and every refusal path are
+proven by the Go tests instead.
+
+Gates on the branch:
+
+| Gate | Result |
+| --- | --- |
+| `make test` | Pass |
+| `make test-js` | Pass |
+| `make lint-new`, `make vet`, `gofmt` on changed files | Clean |
+| `npm run lint`, `npm run format:check` | Clean |
+| `make readme-check` | Pass |
+| Scoped `gosec` over changed packages | 4 findings, all in files this branch does not touch (`server/initialization.go`, `projecttemplates/starter.go`) |
+| `tests/email-setup-quest.spec.ts` | 6 of 6 at 1280px and 400px, stable over repeated runs |
+| 21 affected Playwright specs: 204 passed, 17 failed, 14 skipped or not run | 13 failures reproduce identically on base `48392740`. 4 more pass on a fresh branch server and fail only after other specs leave state behind, such as a hired assistant whose dock covers 390px controls, or under parallel load |
+
+`internal/sessionhttp` is untouched. `scripts/demo-server.sh --rev <commit>`
+now serves any commit from its own sandbox for baseline comparisons.
 
 ### 1.4 Not drift, but worth stating
 
