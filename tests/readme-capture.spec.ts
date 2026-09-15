@@ -364,6 +364,13 @@ async function installFixtureRoutes(page: Page) {
       });
       return;
     }
+    // Email Ops setup quest resume card: Home reads this non-creating status on
+    // every load. The README user never started the quest, so the real API's
+    // answer is exactly this and the card stays hidden.
+    if (url.pathname === '/api/host-setup-quests/email_ops_setup/status') {
+      await json(route, { exists: false });
+      return;
+    }
     // Calendar Ops portal: fired unconditionally by home-calendar-ops-portal.js
     // on every page load. None of these README fixtures have a Calendar Ops
     // workspace, so the real API's own "no workspace" shape is the accurate
