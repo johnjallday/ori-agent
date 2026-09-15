@@ -1503,7 +1503,24 @@ function renderReview() {
     if (integrationPresentation) {
       container.appendChild(makeText('p', '', integrationPresentation.description));
     }
-    appendRows(container, reviewRows(state.review), 'setup-journey__review-list');
+    const integrationRows = integrationReviewRows(state.review);
+    appendRows(
+      container,
+      [
+        ...(integrationRows?.summary || []),
+        ...reviewRows({ ...state.review, integration: undefined })
+      ],
+      'setup-journey__review-list'
+    );
+    if (integrationRows?.details.length) {
+      // The full trust disclosure stays available but collapsed, so the
+      // decision and its buttons are not pushed below a wall of data.
+      const technical = document.createElement('details');
+      technical.className = 'setup-journey__options setup-journey__technical';
+      technical.appendChild(makeText('summary', '', 'Technical details'));
+      appendRows(technical, integrationRows.details, 'setup-journey__review-list');
+      container.appendChild(technical);
+    }
   }
   const controls = document.createElement('div');
   controls.className = 'setup-journey__review-controls';
@@ -1529,36 +1546,46 @@ function renderReview() {
   container.appendChild(controls);
 }
 
+// integrationReviewRows splits an integration review into the few facts a
+// person decides on and the technical trust disclosure, which the review panel
+// keeps collapsed. Returns null for reviews without an integration.
+export function integrationReviewRows(review) {
+  const integration = review?.integration;
+  if (!integration) return null;
+  const summary = [
+    ['Publisher', integration.publisher],
+    ['Source', integration.source_label],
+    ...(integration.installed_version
+      ? [['Installed version', integration.installed_version]]
+      : []),
+    ['Reviewed version', integration.expected_version],
+    [
+      'Enabled after this action',
+      review.commit_action === 'enable' ? 'Yes' : integration.enabled ? 'Already enabled' : 'No'
+    ]
+  ];
+  const details = [
+    ['Integration', integration.plugin_id],
+    ['Platform', (integration.supported_platforms || []).join(', ')],
+    ['Required host features', (integration.required_host_features || []).join(', ')]
+  ];
+  Object.entries(integration.trust || {}).forEach(([key, value]) => {
+    if (value === null || value === '' || (Array.isArray(value) && !value.length)) return;
+    details.push([
+      humanize(key),
+      Array.isArray(value)
+        ? value.map(item => (typeof item === 'object' ? JSON.stringify(item) : item)).join('; ')
+        : String(value)
+    ]);
+  });
+  const present = row => row[1] !== undefined && row[1] !== null && row[1] !== '';
+  return { summary: summary.filter(present), details: details.filter(present) };
+}
+
 export function reviewRows(review) {
   const rows = [];
-  const integration = review.integration;
-  if (integration) {
-    rows.push(
-      ['Integration', integration.plugin_id],
-      ['Publisher', integration.publisher],
-      ['Source', integration.source_label],
-      ...(integration.installed_version
-        ? [['Installed version', integration.installed_version]]
-        : []),
-      ['Reviewed version', integration.expected_version],
-      ['Platform', (integration.supported_platforms || []).join(', ')],
-      ['Required host features', (integration.required_host_features || []).join(', ')],
-      [
-        'Enabled after this action',
-        review.commit_action === 'enable' ? 'Yes' : integration.enabled ? 'Already enabled' : 'No'
-      ]
-    );
-    const trust = integration.trust || {};
-    Object.entries(trust).forEach(([key, value]) => {
-      if (value === null || value === '' || (Array.isArray(value) && !value.length)) return;
-      rows.push([
-        humanize(key),
-        Array.isArray(value)
-          ? value.map(item => (typeof item === 'object' ? JSON.stringify(item) : item)).join('; ')
-          : String(value)
-      ]);
-    });
-  }
+  const integrationRows = integrationReviewRows(review);
+  if (integrationRows) rows.push(...integrationRows.summary, ...integrationRows.details);
   const project = review.project_connection;
   if (project) {
     rows.push(['Workspace', project.workspace_name]);

@@ -18,6 +18,7 @@ const {
   projectDraftInput,
   projectReviewPresentation,
   projectFailureGuidance,
+  integrationReviewRows,
   reviewRows,
   newJourneyIdempotencyKey,
   setupJourneyCloseDismisses,
@@ -168,6 +169,33 @@ test('integration reviews are named by their outcome', () => {
     enabledAfter({ commit_action: 'update', integration: { ...integration, enabled: true } }),
     'Already enabled'
   );
+  // The decision facts stay visible; the trust disclosure is technical detail.
+  const split = integrationReviewRows({
+    commit_action: 'install',
+    integration: {
+      ...integration,
+      publisher: 'Ori',
+      supported_platforms: ['darwin/arm64'],
+      required_host_features: ['assistant_program_v1'],
+      trust: { skills: ['tidy'], artifacts: [{ sha256: 'abc', size: 1 }], empty: [] }
+    }
+  });
+  assert.deepEqual(
+    split.summary.map(([label]) => label),
+    ['Publisher', 'Source', 'Reviewed version', 'Enabled after this action']
+  );
+  assert.deepEqual(
+    split.details.map(([label]) => label),
+    ['Integration', 'Platform', 'Required host features', 'Skills', 'Artifacts']
+  );
+  // The flat row list still carries every integration row, summary first.
+  const flat = { commit_action: 'install', integration, expires_at: '2035-01-01T00:00:00Z' };
+  const parts = integrationReviewRows(flat);
+  assert.deepEqual(reviewRows(flat).slice(0, parts.summary.length + parts.details.length), [
+    ...parts.summary,
+    ...parts.details
+  ]);
+  assert.equal(integrationReviewRows({ project_connection: {} }), null);
   assert.equal(integrationReviewPresentation({ commit_action: 'install' }), null);
   assert.equal(integrationReviewPresentation({ commit_action: 'other', integration }), null);
 });

@@ -149,9 +149,13 @@ for (const width of [1280, 390]) {
     await expect(review).toContainText('even if the version number is unchanged');
     await expect(review).toContainText('Installed version: 0.5.0');
     await expect(review).toContainText('Reviewed version: 0.5.0');
-    await expect(review).toContainText(
-      '2bbf6b77418119cb21e827a407c8d5886e3effdb593ec0ad274e20d7d69c2ca9'
-    );
+    // The artifact fingerprint is part of the collapsed technical details.
+    const technical = review.locator('details.setup-journey__technical');
+    await expect(technical).not.toHaveAttribute('open', '');
+    await technical.getByText('Technical details', { exact: true }).click();
+    await expect(
+      technical.getByText('2bbf6b77418119cb21e827a407c8d5886e3effdb593ec0ad274e20d7d69c2ca9')
+    ).toBeVisible();
     expect(commits).toHaveLength(0);
     await review.getByRole('button', { name: 'Back', exact: true }).click();
     await expect(receipt).toContainText('Not verified for guided setup');

@@ -309,8 +309,16 @@ for (const width of [1280, 390]) {
     await expect(review).toContainText(
       'Ori downloads the reviewed 0.6.0 release from johnjallday/reaper-plugin, checks its fingerprint, and installs it. Nothing runs until you enable it.'
     );
-    await expect(review.getByRole('button', { name: 'Install', exact: true })).toBeVisible();
+    await expect(review).toContainText('Source: johnjallday/reaper-plugin');
+    await expect(review).toContainText('Enabled after this action: No');
+    // Technical rows stay collapsed so the buttons are in view without scrolling.
+    const technical = review.locator('details.setup-journey__technical');
+    await expect(technical.getByText('Platform: darwin/arm64')).toBeHidden();
+    const installButton = review.getByRole('button', { name: 'Install', exact: true });
+    await expect(installButton).toBeInViewport();
     await page.screenshot({ path: testInfo.outputPath(`install-review-${width}.png`) });
+    await technical.getByText('Technical details', { exact: true }).click();
+    await expect(technical.getByText('Platform: darwin/arm64')).toBeVisible();
     await review.getByRole('button', { name: 'Back', exact: true }).click();
     expect(server.calls.some(call => call.endsWith('/actions/install'))).toBe(false);
 

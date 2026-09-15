@@ -228,6 +228,9 @@
   outline: 3px solid rgb(189 91 50 / 30%);
   outline-offset: 3px;
 }
+.setup-journey__technical {
+  margin-top: 1rem;
+}
 .setup-journey__file-list {
   padding-left: 1.25rem;
   font-family: var(--font-mono, monospace);
