@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -50,13 +49,13 @@ func TestListAgents_AnnotatesWorkspaceMembership(t *testing.T) {
 		t.Fatalf("NewFileStore failed: %v", err)
 	}
 
-	if err := st.CreateAgent("Regular Agent", &store.CreateAgentConfig{Type: agent.TypeGeneral}); err != nil {
+	if err := st.CreateAgent("Regular Agent", &store.CreateAgentConfig{}); err != nil {
 		t.Fatalf("CreateAgent regular failed: %v", err)
 	}
-	if err := st.CreateAgent("Workspace Manager", &store.CreateAgentConfig{Type: "orchestration"}); err != nil {
+	if err := st.CreateAgent("Workspace Manager", &store.CreateAgentConfig{}); err != nil {
 		t.Fatalf("CreateAgent workspace manager failed: %v", err)
 	}
-	if err := st.CreateAgent("Specialist", &store.CreateAgentConfig{Type: agent.TypeGeneral}); err != nil {
+	if err := st.CreateAgent("Specialist", &store.CreateAgentConfig{}); err != nil {
 		t.Fatalf("CreateAgent specialist failed: %v", err)
 	}
 
@@ -166,7 +165,7 @@ func TestListAgents_NoWorkspaceStore_NoMembership(t *testing.T) {
 		t.Fatalf("NewFileStore failed: %v", err)
 	}
 
-	if err := st.CreateAgent("Alpha", &store.CreateAgentConfig{Type: agent.TypeGeneral}); err != nil {
+	if err := st.CreateAgent("Alpha", &store.CreateAgentConfig{}); err != nil {
 		t.Fatalf("CreateAgent failed: %v", err)
 	}
 

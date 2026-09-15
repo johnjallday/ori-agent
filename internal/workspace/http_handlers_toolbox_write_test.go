@@ -441,7 +441,6 @@ func TestToolboxWrites_CannotMutateTheGlobalAgent(t *testing.T) {
 	handler, workspaceID := newToolboxWriteFixture(t)
 
 	globalAgent := &agent.Agent{
-		Type: agent.TypeResearch,
 		Role: types.RoleGeneral,
 		Settings: types.Settings{
 			SystemPrompt: "You are a careful researcher.",
@@ -469,7 +468,6 @@ func TestToolboxWrites_CannotMutateTheGlobalAgent(t *testing.T) {
 	if globalAgent.Settings.Model != before.Settings.Model ||
 		globalAgent.Settings.SystemPrompt != before.Settings.SystemPrompt ||
 		globalAgent.Role != before.Role ||
-		globalAgent.Type != before.Type ||
 		globalAgent.Evolution.Level != before.Evolution.Level ||
 		globalAgent.Evolution.Stage != before.Evolution.Stage {
 		t.Fatalf("expected toolbox writes to leave the reusable agent untouched, got %+v", globalAgent)

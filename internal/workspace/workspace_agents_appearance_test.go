@@ -114,7 +114,7 @@ func TestWorkspaceSnapshotWriteCanonicalizesEvenWithoutARead(t *testing.T) {
 	// A caller that constructs an agent in memory and writes it directly must
 	// still produce a canonical snapshot; otherwise one write path becomes the
 	// hole that keeps the retired schema alive (FR-77).
-	if err := writeWorkspaceAgent(folder, "Fresh", &agent.Agent{Type: "general"}); err != nil {
+	if err := writeWorkspaceAgent(folder, "Fresh", &agent.Agent{}); err != nil {
 		t.Fatalf("write snapshot: %v", err)
 	}
 	ag, found, err := readWorkspaceAgent(folder, "Fresh")

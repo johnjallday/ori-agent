@@ -18,8 +18,8 @@ func (f fakeCalendarOpsPreference) PreferredCalendarAgent(context.Context) (stri
 
 func TestCalendarOpsPreferredMatch_PrefersSchedulerForPersonalCalendarPrompt(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	addHomeRouteTestAgent(t, st, "Scheduler", &store.CreateAgentConfig{Type: "tool-calling"}, "", nil, nil)
-	addHomeRouteTestAgent(t, st, "Generic Helper", &store.CreateAgentConfig{Type: "general"}, "handles calendar and scheduling requests", nil, nil)
+	addHomeRouteTestAgent(t, st, "Scheduler", &store.CreateAgentConfig{}, "", nil, nil)
+	addHomeRouteTestAgent(t, st, "Generic Helper", &store.CreateAgentConfig{}, "handles calendar and scheduling requests", nil, nil)
 
 	h := NewHomeAssistantRouteHandler(st)
 	h.SetWorkspaceResolver(newHomeWorkspaceResolverForTest(t, st))
@@ -39,7 +39,7 @@ func TestCalendarOpsPreferredMatch_PrefersSchedulerForPersonalCalendarPrompt(t *
 
 func TestCalendarOpsPreferredMatch_NoOpWithoutPreferenceWired(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	addHomeRouteTestAgent(t, st, "Scheduler", &store.CreateAgentConfig{Type: "tool-calling"}, "", nil, nil)
+	addHomeRouteTestAgent(t, st, "Scheduler", &store.CreateAgentConfig{}, "", nil, nil)
 
 	h := NewHomeAssistantRouteHandler(st)
 	h.SetWorkspaceResolver(newHomeWorkspaceResolverForTest(t, st))
@@ -61,7 +61,7 @@ func TestCalendarOpsPreferredMatch_NoOpWithoutPreferenceWired(t *testing.T) {
 
 func TestCalendarOpsPreferredMatch_FallsBackWhenPreferenceSaysNo(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	addHomeRouteTestAgent(t, st, "Scheduler", &store.CreateAgentConfig{Type: "tool-calling"}, "", nil, nil)
+	addHomeRouteTestAgent(t, st, "Scheduler", &store.CreateAgentConfig{}, "", nil, nil)
 
 	h := NewHomeAssistantRouteHandler(st)
 	h.SetWorkspaceResolver(newHomeWorkspaceResolverForTest(t, st))
@@ -95,7 +95,7 @@ func TestCalendarOpsPreferredMatch_UnknownAgentNameFallsBackToGeneric(t *testing
 
 func TestCalendarOpsPreferredMatch_NotAppliedForNonCalendarIntent(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	addHomeRouteTestAgent(t, st, "Scheduler", &store.CreateAgentConfig{Type: "tool-calling"}, "", nil, nil)
+	addHomeRouteTestAgent(t, st, "Scheduler", &store.CreateAgentConfig{}, "", nil, nil)
 
 	h := NewHomeAssistantRouteHandler(st)
 	h.SetWorkspaceResolver(newHomeWorkspaceResolverForTest(t, st))
@@ -121,7 +121,7 @@ func TestCalendarOpsPreferredMatch_NotAppliedForNonCalendarIntent(t *testing.T) 
 // assertion on RoutePrompt's MatchedAgent.
 func TestCalendarOpsPreferredMatch_WorkspaceScheduleAmbiguityIsNotPreferred(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	addHomeRouteTestAgent(t, st, "Scheduler", &store.CreateAgentConfig{Type: "tool-calling"}, "", nil, nil)
+	addHomeRouteTestAgent(t, st, "Scheduler", &store.CreateAgentConfig{}, "", nil, nil)
 
 	h := NewHomeAssistantRouteHandler(st)
 	h.SetCalendarOpsPreference(fakeCalendarOpsPreference{agentName: "Scheduler", ok: true})

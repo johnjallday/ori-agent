@@ -165,7 +165,6 @@ func (h *Handler) lookupRoleAgentIdentity(name string) (workspaceroles.AgentIden
 	return workspaceroles.AgentIdentity{
 		Name:       name,
 		Role:       string(ag.Role),
-		Type:       ag.Type,
 		Appearance: ag.Appearance.Clone(),
 	}, true
 }

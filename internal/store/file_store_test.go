@@ -30,7 +30,6 @@ func TestFileStore_SaveLoad_NestedRoundTrip(t *testing.T) {
 		path: indexPath,
 		agents: map[string]*agent.Agent{
 			"alpha": {
-				Type:         agent.TypeGeneral,
 				Role:         types.RoleAnalyzer,
 				Capabilities: []string{types.CapabilityWebSearch, types.CapabilityCodeAnalysis},
 				Settings: types.Settings{
@@ -80,9 +79,6 @@ func TestFileStore_SaveLoad_NestedRoundTrip(t *testing.T) {
 		t.Fatal("expected agent alpha to be loaded")
 	}
 
-	if got.Type != agent.TypeGeneral {
-		t.Errorf("expected type %q, got %q", agent.TypeGeneral, got.Type)
-	}
 	if got.Role != types.RoleAnalyzer {
 		t.Errorf("expected role %q, got %q", types.RoleAnalyzer, got.Role)
 	}
@@ -227,7 +223,6 @@ func TestFileStore_Load_OldTopLevelFormat_MigratesDefaults(t *testing.T) {
 	}{
 		Agents: map[string]*agent.Agent{
 			"legacy-top": {
-				Type: "general",
 				Settings: types.Settings{
 					Model:       "gpt-4o-mini",
 					Temperature: 1.0,
@@ -279,17 +274,7 @@ func TestFileStore_Load_LegacyFlatAgentFile_IgnoresLegacyMCPOverrideAndDefaults(
 		t.Fatalf("failed creating agents directory: %v", err)
 	}
 
-	legacyAgent := agent.Agent{
-		Type: "research",
-		Settings: types.Settings{
-			Model:       "gpt-5",
-			Temperature: 0.2,
-		},
-	}
-	agentData, err := json.Marshal(legacyAgent)
-	if err != nil {
-		t.Fatalf("failed marshaling flat legacy agent: %v", err)
-	}
+	agentData := []byte(`{"type":"research","Settings":{"model":"gpt-5","temperature":0.2}}`)
 	if err := os.WriteFile(filepath.Join(agentsDir, "flat.json"), agentData, 0o644); err != nil {
 		t.Fatalf("failed writing flat legacy agent: %v", err)
 	}
@@ -317,8 +302,8 @@ func TestFileStore_Load_LegacyFlatAgentFile_IgnoresLegacyMCPOverrideAndDefaults(
 	if !ok || got == nil {
 		t.Fatal("expected flat agent to load")
 	}
-	if got.Type != "research" {
-		t.Errorf("expected type research, got %q", got.Type)
+	if got.Settings.Model != "gpt-5" {
+		t.Errorf("expected model gpt-5, got %q", got.Settings.Model)
 	}
 
 	if got.Status != types.AgentStatusIdle {
@@ -399,7 +384,7 @@ func TestFileStore_CreateAgent_InitializesSkillsStateWithDisabledDefault(t *test
 		t.Fatalf("NewFileStore() failed: %v", err)
 	}
 
-	if err := fs.CreateAgent("new-agent", &CreateAgentConfig{Type: agent.TypeGeneral}); err != nil {
+	if err := fs.CreateAgent("new-agent", &CreateAgentConfig{}); err != nil {
 		t.Fatalf("CreateAgent() failed: %v", err)
 	}
 
@@ -425,7 +410,6 @@ func TestFileStore_SetAgent_InitializesSkillsStateWithDisabledDefault(t *testing
 	}
 
 	if err := fs.SetAgent("snapshot-agent", &agent.Agent{
-		Type: agent.TypeGeneral,
 		Settings: types.Settings{
 			Model:       "gpt-4o-mini",
 			Temperature: 1.0,
@@ -457,7 +441,6 @@ func TestFileStore_CreateAgent_AppliesAllowWebSearchOverride(t *testing.T) {
 
 	allowWebSearch := false
 	if err := fs.CreateAgent("restricted-agent", &CreateAgentConfig{
-		Type:           agent.TypeGeneral,
 		AllowWebSearch: &allowWebSearch,
 	}); err != nil {
 		t.Fatalf("CreateAgent() failed: %v", err)
@@ -489,7 +472,6 @@ func TestFileStore_CreateAgent_AppliesReasoningEffortOverride(t *testing.T) {
 	}
 
 	if err := fs.CreateAgent("codex-agent", &CreateAgentConfig{
-		Type:            agent.TypeResearch,
 		Model:           "gpt-5.4",
 		LLMProvider:     "codex",
 		ReasoningEffort: "xhigh",
@@ -503,35 +485,5 @@ func TestFileStore_CreateAgent_AppliesReasoningEffortOverride(t *testing.T) {
 	}
 	if created.Settings.ReasoningEffort != "xhigh" {
 		t.Fatalf("expected reasoning_effort xhigh, got %q", created.Settings.ReasoningEffort)
-	}
-}
-
-func TestFileStore_CreateAgent_OrchestrationDefaultsToOrchestratorRole(t *testing.T) {
-	tempDir := t.TempDir()
-	indexPath := filepath.Join(tempDir, "agents_index.json")
-
-	fs, err := NewFileStore(indexPath, types.Settings{
-		Model:       "gpt-5",
-		Temperature: 0.5,
-	})
-	if err != nil {
-		t.Fatalf("NewFileStore() failed: %v", err)
-	}
-
-	if err := fs.CreateAgent("orchestration-agent", &CreateAgentConfig{
-		Type: "orchestration",
-	}); err != nil {
-		t.Fatalf("CreateAgent() failed: %v", err)
-	}
-
-	created, ok := fs.GetAgent("orchestration-agent")
-	if !ok || created == nil {
-		t.Fatalf("expected created agent to exist")
-	}
-	if created.Type != "orchestration" {
-		t.Fatalf("expected type orchestration, got %q", created.Type)
-	}
-	if created.Role != types.RoleOrchestrator {
-		t.Fatalf("expected role %q, got %q", types.RoleOrchestrator, created.Role)
 	}
 }

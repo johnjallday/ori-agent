@@ -229,7 +229,6 @@ func (h *HTTPHandler) ListAgentSnapshots(w http.ResponseWriter, r *http.Request)
 // the UI show their real model and offer in-place model editing.
 type WorkspaceAgentProfile struct {
 	Name     string `json:"name"`
-	Type     string `json:"type"`
 	Role     string `json:"role,omitempty"`
 	Model    string `json:"model"`
 	Provider string `json:"provider"`
@@ -242,7 +241,7 @@ type WorkspaceAgentProfile struct {
 }
 
 // ListWorkspaceAgentProfiles handles GET /api/workspaces/:id/agents and returns
-// the model/provider/type for each workspace-local agent that has an on-disk
+// the model/provider/role for each workspace-local agent that has an on-disk
 // config.json snapshot.
 func (h *HTTPHandler) ListWorkspaceAgentProfiles(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspaceID")
@@ -264,7 +263,6 @@ func (h *HTTPHandler) ListWorkspaceAgentProfiles(w http.ResponseWriter, r *http.
 		ag.EnsureAppearance()
 		profiles = append(profiles, WorkspaceAgentProfile{
 			Name:       name,
-			Type:       ag.Type,
 			Role:       string(ag.Role),
 			Model:      ag.Settings.Model,
 			Provider:   ag.Settings.Provider,

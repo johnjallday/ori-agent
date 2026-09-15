@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/session"
 	agentstore "github.com/johnjallday/ori-agent/internal/store"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
@@ -35,9 +34,7 @@ func TestDeleteWorkspace_DeletesEntryAgent(t *testing.T) {
 
 	// Create the entry agent and attach it to the folder-based workspace.
 	entryAgentName := "Travel Plans Manager"
-	if err := handler.agentStore.CreateAgent(entryAgentName, &agentstore.CreateAgentConfig{
-		Type: agent.TypeGeneral,
-	}); err != nil {
+	if err := handler.agentStore.CreateAgent(entryAgentName, &agentstore.CreateAgentConfig{}); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -96,9 +93,7 @@ func TestDeleteWorkspace_PurgesSessionsForEntryAgent(t *testing.T) {
 	workspaceID := createTestWorkspace(t, handler, "Travel Plans")
 
 	entryAgentName := "Travel Plans Manager"
-	if err := handler.agentStore.CreateAgent(entryAgentName, &agentstore.CreateAgentConfig{
-		Type: agent.TypeGeneral,
-	}); err != nil {
+	if err := handler.agentStore.CreateAgent(entryAgentName, &agentstore.CreateAgentConfig{}); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 

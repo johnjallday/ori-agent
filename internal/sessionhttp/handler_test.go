@@ -114,7 +114,7 @@ func TestHandler_CreateSessionRejectsPausedAgent(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 
-	if err := handler.agentStore.CreateAgent("paused-agent", &agentstore.CreateAgentConfig{Type: agent.TypeGeneral}); err != nil {
+	if err := handler.agentStore.CreateAgent("paused-agent", &agentstore.CreateAgentConfig{}); err != nil {
 		t.Fatalf("CreateAgent() error = %v", err)
 	}
 	if err := handler.agentStore.UpdateAgent("paused-agent", func(ag *agent.Agent) error {
@@ -140,7 +140,7 @@ func TestHandler_CreateSessionInWorkspaceUsesEntryAgent(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 
-	if err := handler.agentStore.CreateAgent("Spain Manager", &agentstore.CreateAgentConfig{Type: agent.TypeGeneral}); err != nil {
+	if err := handler.agentStore.CreateAgent("Spain Manager", &agentstore.CreateAgentConfig{}); err != nil {
 		t.Fatalf("failed to create workspace agent: %v", err)
 	}
 
@@ -1072,7 +1072,7 @@ func TestHandler_CreateWorkspaceUsesExplicitEntryAgent(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 
-	if err := handler.agentStore.CreateAgent("Reusable Manager", &agentstore.CreateAgentConfig{Type: agent.TypeGeneral}); err != nil {
+	if err := handler.agentStore.CreateAgent("Reusable Manager", &agentstore.CreateAgentConfig{}); err != nil {
 		t.Fatalf("failed to create reusable agent: %v", err)
 	}
 
@@ -1111,9 +1111,7 @@ func TestValidateWorkspaceEntryAgent_ExistingAgent(t *testing.T) {
 	defer cleanup()
 
 	// Create an agent first
-	if err := handler.agentStore.CreateAgent("test-agent", &agentstore.CreateAgentConfig{
-		Type: "general",
-	}); err != nil {
+	if err := handler.agentStore.CreateAgent("test-agent", &agentstore.CreateAgentConfig{}); err != nil {
 		t.Fatalf("failed to create test agent: %v", err)
 	}
 

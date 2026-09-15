@@ -25,7 +25,7 @@ func TestFromTemplateAgentsProposesTheBlueprintSetup(t *testing.T) {
 	if proposed.SystemPrompt != "You are the content lead. Hold the brand voice." {
 		t.Fatalf("proposed prompt = %q", proposed.SystemPrompt)
 	}
-	if proposed.Type != "general" || proposed.Model != "gpt-5" || proposed.Provider != "openai" {
+	if proposed.Model != "gpt-5" || proposed.Provider != "openai" {
 		t.Fatalf("proposed setup = %#v", proposed)
 	}
 }

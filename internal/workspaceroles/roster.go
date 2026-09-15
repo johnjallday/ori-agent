@@ -71,7 +71,6 @@ type Role struct {
 // template-agent-plan endpoint returns it in full — so carrying it here
 // discloses nothing new.
 type ProposedSetup struct {
-	Type         string `json:"type,omitempty"`
 	Model        string `json:"model,omitempty"`
 	Provider     string `json:"provider,omitempty"`
 	SystemPrompt string `json:"system_prompt,omitempty"`
@@ -93,7 +92,6 @@ type Attachment struct {
 type AgentIdentity struct {
 	Name       string                 `json:"name"`
 	Role       string                 `json:"role,omitempty"`
-	Type       string                 `json:"type,omitempty"`
 	Appearance *types.AgentAppearance `json:"appearance,omitempty"`
 }
 

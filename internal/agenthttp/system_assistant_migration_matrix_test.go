@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -79,7 +78,6 @@ func TestSystemAssistantMigrationMatrix(t *testing.T) {
 			st := renameTestStore(t)
 			for _, name := range tc.seed {
 				if err := st.CreateAgent(name, &store.CreateAgentConfig{
-					Type:         agent.TypeGeneral,
 					SystemPrompt: "seeded:" + name,
 				}); err != nil {
 					t.Fatalf("seed %q: %v", name, err)
@@ -128,7 +126,6 @@ func TestSystemAssistantMigrationMatrix(t *testing.T) {
 func TestMigrationPreservesEveryCustomizedSetting(t *testing.T) {
 	st := renameTestStore(t)
 	if err := st.CreateAgent("Workspace Manager", &store.CreateAgentConfig{
-		Type:         agent.TypeGeneral,
 		Role:         types.RoleOrchestrator,
 		Model:        "claude-opus-5",
 		LLMProvider:  "anthropic",
@@ -193,7 +190,6 @@ func TestMigrationRecoversFromAnInterruptedUpgrade(t *testing.T) {
 		t.Fatalf("NewFileStore: %v", err)
 	}
 	if err := first.CreateAgent("Workspace Manager", &store.CreateAgentConfig{
-		Type:         agent.TypeGeneral,
 		SystemPrompt: "survivor",
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -237,9 +233,7 @@ func TestMigrationRecoversFromAnInterruptedUpgrade(t *testing.T) {
 // resolve after the assistant has moved.
 func TestPersistedLegacyReferenceStillResolvesAfterMigration(t *testing.T) {
 	st := renameTestStore(t)
-	if err := st.CreateAgent("Workspace Manager", &store.CreateAgentConfig{
-		Type: agent.TypeGeneral,
-	}); err != nil {
+	if err := st.CreateAgent("Workspace Manager", &store.CreateAgentConfig{}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	if err := ensureSystemAssistantAgent(st); err != nil {

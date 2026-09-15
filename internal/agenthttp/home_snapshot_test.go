@@ -114,7 +114,7 @@ func TestBuildHomeSnapshot_WithData(t *testing.T) {
 		Opportunities: workspace.NewOpportunityStore(store),
 		Sessions:      stubSessionsReader{sessions: []HomeSessionSummary{{ID: "s1", Title: "Chat", AgentName: "Ori", MessageCount: 4, UpdatedAt: now}}},
 		Usage:         stubUsageReader{summary: HomeUsageSummary{TodayCost: 0.12, TodayTokens: 1000, MonthCost: 3.4, MonthTokens: 50000, Currency: "USD"}, ok: true},
-		Agents:        stubAgentsReader{roster: []HomeAgentSummary{{Name: "Ori", Type: "tool-calling", Role: "orchestrator", Model: "gpt-5", Provider: "openai"}}, ok: true},
+		Agents:        stubAgentsReader{roster: []HomeAgentSummary{{Name: "Ori", Role: "orchestrator", Model: "gpt-5", Provider: "openai"}}, ok: true},
 		Now:           fixedNow,
 	}, HomeWindowThisWeek)
 

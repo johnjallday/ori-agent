@@ -12,7 +12,7 @@ import (
 func TestAgentSnapshotStore_SaveSnapshotsReferencedAgents(t *testing.T) {
 	primary := NewInMemoryStore()
 	agents := &resolverAgentStoreStub{agents: map[string]*agent.Agent{}}
-	manager := &agent.Agent{Type: agent.TypeToolCalling}
+	manager := &agent.Agent{}
 	manager.Settings.Model = "gpt-5-nano"
 	agents.agents["Manager"] = manager
 
@@ -45,7 +45,7 @@ func TestAgentSnapshotStore_SaveSnapshotsReferencedAgents(t *testing.T) {
 
 func TestAgentSnapshotStore_SavePreservesWorkspaceEditedSnapshot(t *testing.T) {
 	primary := NewInMemoryStore()
-	global := &agent.Agent{Type: agent.TypeToolCalling}
+	global := &agent.Agent{}
 	global.Settings.Model = "global-model"
 	global.Settings.Provider = "ollama"
 	agents := &resolverAgentStoreStub{agents: map[string]*agent.Agent{"Manager": global}}
@@ -61,7 +61,7 @@ func TestAgentSnapshotStore_SavePreservesWorkspaceEditedSnapshot(t *testing.T) {
 		t.Fatalf("initial Save: %v", err)
 	}
 
-	local := &agent.Agent{Type: agent.TypeToolCalling}
+	local := &agent.Agent{}
 	local.Settings.Model = "gpt-5.4"
 	local.Settings.Provider = "codex"
 	if err := store.SaveWorkspaceAgent(ws.ID, "Manager", local); err != nil {
@@ -107,7 +107,7 @@ func TestAgentSnapshotStore_NoGlobalAgentSkipsSnapshot(t *testing.T) {
 
 func TestSnapshotAllWorkspaces_HealsExistingWorkspaces(t *testing.T) {
 	primary := NewInMemoryStore()
-	manager := &agent.Agent{Type: agent.TypeToolCalling}
+	manager := &agent.Agent{}
 	manager.Settings.Model = "local-model"
 	agents := &resolverAgentStoreStub{agents: map[string]*agent.Agent{"Manager": manager}}
 
@@ -144,7 +144,7 @@ func TestAgentSnapshotStore_SyncStoreWritesSnapshotToDisk(t *testing.T) {
 	primary := NewInMemoryStore()
 	sync := NewSyncStore(primary, fileStore)
 
-	manager := &agent.Agent{Type: agent.TypeToolCalling}
+	manager := &agent.Agent{}
 	manager.Settings.Model = "gpt-5-nano"
 	agents := &resolverAgentStoreStub{agents: map[string]*agent.Agent{"Manager": manager}}
 
@@ -468,7 +468,7 @@ func TestAgentSnapshotStore_InstalledCapabilitySurvivesAgentWork(t *testing.T) {
 
 func TestRestoreWorkspaceAgents_RegistersMissingAgents(t *testing.T) {
 	primary := NewInMemoryStore()
-	manager := &agent.Agent{Type: agent.TypeToolCalling}
+	manager := &agent.Agent{}
 	manager.Settings.Model = "imported-model"
 	if err := primary.SaveWorkspaceAgent("ws-imported", "Manager", manager); err != nil {
 		t.Fatalf("seed snapshot: %v", err)
@@ -519,7 +519,7 @@ func TestRestoreAllWorkspaceAgents_RestoresSnapshotsFromLoadedFileStore(t *testi
 	if err := fileStore.Save(ws); err != nil {
 		t.Fatalf("save workspace: %v", err)
 	}
-	manager := &agent.Agent{Type: agent.TypeToolCalling}
+	manager := &agent.Agent{}
 	manager.Settings.Model = "imported-pollen-model"
 	if err := fileStore.SaveWorkspaceAgent(ws.ID, "Pollen Manager", manager); err != nil {
 		t.Fatalf("save snapshot: %v", err)
@@ -548,7 +548,7 @@ func TestRestoreAllWorkspaceAgents_RestoresSnapshotsFromLoadedFileStore(t *testi
 
 func TestRestoreWorkspaceAgents_DoesNotOverwriteExistingGlobal(t *testing.T) {
 	primary := NewInMemoryStore()
-	imported := &agent.Agent{Type: agent.TypeToolCalling}
+	imported := &agent.Agent{}
 	imported.Settings.Model = "imported-model"
 	if err := primary.SaveWorkspaceAgent("ws-x", "Manager", imported); err != nil {
 		t.Fatalf("seed snapshot: %v", err)
@@ -562,7 +562,7 @@ func TestRestoreWorkspaceAgents_DoesNotOverwriteExistingGlobal(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 
-	existingGlobal := &agent.Agent{Type: agent.TypeGeneral}
+	existingGlobal := &agent.Agent{}
 	existingGlobal.Settings.Model = "global-model"
 	agents := &resolverAgentStoreStub{agents: map[string]*agent.Agent{"Manager": existingGlobal}}
 
@@ -581,12 +581,12 @@ func TestRestoreWorkspaceAgents_DoesNotOverwriteExistingGlobal(t *testing.T) {
 func TestRestoreAllowlistedWorkspaceAgents_OnlyRestoresAllowlisted(t *testing.T) {
 	primary := NewInMemoryStore()
 
-	allowedAg := &agent.Agent{Type: agent.TypeToolCalling}
+	allowedAg := &agent.Agent{}
 	allowedAg.Settings.Model = "allowed-model"
 	if err := primary.SaveWorkspaceAgent("ws-allow", "AllowedManager", allowedAg); err != nil {
 		t.Fatalf("seed allow snapshot: %v", err)
 	}
-	deniedAg := &agent.Agent{Type: agent.TypeToolCalling}
+	deniedAg := &agent.Agent{}
 	deniedAg.Settings.Model = "denied-model"
 	if err := primary.SaveWorkspaceAgent("ws-deny", "DeniedManager", deniedAg); err != nil {
 		t.Fatalf("seed deny snapshot: %v", err)
@@ -624,7 +624,7 @@ func TestRestoreAllowlistedWorkspaceAgents_OnlyRestoresAllowlisted(t *testing.T)
 
 func TestRestoreAllowlistedWorkspaceAgents_NilAllowlistRestoresNothing(t *testing.T) {
 	primary := NewInMemoryStore()
-	managerAg := &agent.Agent{Type: agent.TypeToolCalling}
+	managerAg := &agent.Agent{}
 	if err := primary.SaveWorkspaceAgent("ws-x", "Manager", managerAg); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -646,9 +646,9 @@ func TestWipeNonAllowlistedAgentSnapshots_RemovesUnallowedKeepsAllowedAndSystem(
 	// Snapshots mirror the global definition at snapshot time (as SaveWorkspaceAgent
 	// does in production). One allowlisted workspace, two not: one holding a pure
 	// mirror, one holding a *stale* snapshot of a since-edited global.
-	allowedDef := &agent.Agent{Type: agent.TypeGeneral}
-	deniedDef := &agent.Agent{Type: agent.TypeGeneral}
-	editedSnapshot := &agent.Agent{Type: agent.TypeGeneral, Settings: types.Settings{SystemPrompt: "OLD"}}
+	allowedDef := &agent.Agent{}
+	deniedDef := &agent.Agent{}
+	editedSnapshot := &agent.Agent{Settings: types.Settings{SystemPrompt: "OLD"}}
 	if err := primary.SaveWorkspaceAgent("ws-allow", "AllowedManager", allowedDef); err != nil {
 		t.Fatalf("seed allow snapshot: %v", err)
 	}
@@ -672,11 +672,11 @@ func TestWipeNonAllowlistedAgentSnapshots_RemovesUnallowedKeepsAllowedAndSystem(
 	// agents, a user-owned agent no workspace knows about, and EditedManager
 	// whose global system prompt has since diverged from its stale snapshot.
 	agents := &resolverAgentStoreStub{agents: map[string]*agent.Agent{
-		"Ori":             {Type: agent.TypeToolCalling},
-		"AllowedManager":  {Type: agent.TypeGeneral},
-		"DeniedManager":   {Type: agent.TypeGeneral},
-		"EditedManager":   {Type: agent.TypeGeneral, Settings: types.Settings{SystemPrompt: "EDITED"}},
-		"UserOwnedHelper": {Type: agent.TypeGeneral},
+		"Ori":             {},
+		"AllowedManager":  {},
+		"DeniedManager":   {},
+		"EditedManager":   {Settings: types.Settings{SystemPrompt: "EDITED"}},
+		"UserOwnedHelper": {},
 	}}
 	allowlist := NewAllowlist(filepath.Join(t.TempDir(), "wl.json"))
 	if err := allowlist.Add("ws-allow"); err != nil {
@@ -722,7 +722,7 @@ func TestWipeNonAllowlistedAgentSnapshots_KeepsAgentReferencedByOneAllowlistedWo
 	}
 
 	agents := &resolverAgentStoreStub{agents: map[string]*agent.Agent{
-		"Manager": {Type: agent.TypeToolCalling},
+		"Manager": {},
 	}}
 	allowlist := NewAllowlist(filepath.Join(t.TempDir(), "wl.json"))
 	if err := allowlist.Add("ws-allow"); err != nil {

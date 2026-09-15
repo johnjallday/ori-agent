@@ -51,6 +51,10 @@ const (
 	AssistantRoleScopeProject AssistantRoleScope = "project"
 )
 
+// AssistantProgramRoleSpec.Type is the retired agent type. The key is accepted
+// and ignored because plugin manifests decode with DisallowUnknownFields.
+// Nothing interprets it; normalization only trims it so manifest-derived
+// revisions stay stable.
 type AssistantProgramRoleSpec struct {
 	ID           string             `json:"id"`
 	Label        string             `json:"label"`
@@ -60,7 +64,7 @@ type AssistantProgramRoleSpec struct {
 	CapabilityID string             `json:"capability_id,omitempty"`
 	Primary      bool               `json:"primary,omitempty"`
 	Role         string             `json:"role,omitempty"`
-	Type         string             `json:"type,omitempty"`
+	Type         string             `json:"type,omitempty"` // retired: accepted and ignored, see above
 	SystemPrompt string             `json:"system_prompt"`
 	Skills       []string           `json:"skills,omitempty"`
 }

@@ -21,14 +21,8 @@ func TestIsStaleWorkspaceManagerAgent(t *testing.T) {
 			expect: false,
 		},
 		{
-			name:   "workspace-manager type",
-			agent:  &agent.Agent{Type: "workspace-manager"},
-			expect: true,
-		},
-		{
 			name: "workspace-manager metadata tag",
 			agent: &agent.Agent{
-				Type:     "general",
 				Metadata: &types.AgentMetadata{Tags: []string{"workspace-manager"}},
 			},
 			expect: true,
@@ -36,20 +30,18 @@ func TestIsStaleWorkspaceManagerAgent(t *testing.T) {
 		{
 			name: "workspace-manager tag mixed case",
 			agent: &agent.Agent{
-				Type:     "general",
 				Metadata: &types.AgentMetadata{Tags: []string{"Workspace-Manager"}},
 			},
 			expect: true,
 		},
 		{
 			name:   "general agent no tags",
-			agent:  &agent.Agent{Type: "general"},
+			agent:  &agent.Agent{},
 			expect: false,
 		},
 		{
 			name: "general agent with unrelated tags",
 			agent: &agent.Agent{
-				Type:     "general",
 				Metadata: &types.AgentMetadata{Tags: []string{"travel", "specialist"}},
 			},
 			expect: false,
@@ -74,15 +66,19 @@ func TestCleanupStaleWorkspaceManagerAgents(t *testing.T) {
 
 	// Create a stale workspace-manager agent
 	if err := agentStore.CreateAgent("Spain Manager", &store.CreateAgentConfig{
-		Type: "workspace-manager",
 		Role: "orchestrator",
 	}); err != nil {
 		t.Fatalf("failed to create agent: %v", err)
 	}
+	if err := agentStore.UpdateAgent("Spain Manager", func(ag *agent.Agent) error {
+		ag.Metadata = &types.AgentMetadata{Tags: []string{"workspace-manager"}}
+		return nil
+	}); err != nil {
+		t.Fatalf("failed to tag agent: %v", err)
+	}
 
 	// Create a normal agent that should survive
 	if err := agentStore.CreateAgent("Travel Expert", &store.CreateAgentConfig{
-		Type: "specialist",
 		Role: "specialist",
 	}); err != nil {
 		t.Fatalf("failed to create agent: %v", err)

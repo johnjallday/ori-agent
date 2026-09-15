@@ -39,7 +39,7 @@ func newHomeAssistantWorkspaceFixtureHandler(t *testing.T) *HomeAssistantRouteHa
 
 	st := newHomeRouteTestStore(t)
 	for _, name := range []string{"Launch Manager", "Robotics Manager"} {
-		addHomeRouteTestAgent(t, st, name, &store.CreateAgentConfig{Type: "general"}, "", nil, nil)
+		addHomeRouteTestAgent(t, st, name, &store.CreateAgentConfig{}, "", nil, nil)
 	}
 
 	resolver := newHomeWorkspaceResolverForTest(

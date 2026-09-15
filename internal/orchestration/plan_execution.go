@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -496,7 +495,7 @@ func (o *Orchestrator) ensureDynamicAgents(ws *workspace.Workspace, planID strin
 			continue
 		}
 
-		if err := o.agentStore.CreateAgent(req.Name, &store.CreateAgentConfig{Type: agent.TypeGeneral}); err != nil {
+		if err := o.agentStore.CreateAgent(req.Name, &store.CreateAgentConfig{}); err != nil {
 			return fmt.Errorf("failed to create dynamic agent %s: %w", req.Name, err)
 		}
 

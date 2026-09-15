@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
@@ -44,7 +43,6 @@ func TestEnsureSystemAssistantAgentUpgradesExistingRole(t *testing.T) {
 	// Simulate a pre-existing Ori agent created before the orchestrator role
 	// was assigned (the historical default was the general role).
 	if err := st.CreateAgent(systemAssistantAgentName, &store.CreateAgentConfig{
-		Type: agent.TypeGeneral,
 		Role: types.RoleGeneral,
 	}); err != nil {
 		t.Fatalf("CreateAgent() error = %v", err)

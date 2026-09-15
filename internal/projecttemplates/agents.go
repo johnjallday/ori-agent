@@ -31,15 +31,19 @@ const MaxTemplateAgents = 10
 
 // AgentSpec declares one reusable agent a template recommends and attaches to a
 // workspace created from it. Like ToolDefaults, this package carries the spec as
-// data only — it never creates or resolves agents. Role/Type/Model/Provider are
+// data only — it never creates or resolves agents. Role/Model/Provider are
 // trimmed and carried verbatim; canonicalizing them against the real agent enums
 // and resolving empty values to defaults happens in the workspace-creation layer,
 // keeping this file-copy engine domain-blind. The first surviving entry becomes
 // the workspace's primary routing agent; the rest are workspace specialists.
+//
+// Type is the retired agent type. The key is accepted and ignored because plugin
+// manifests decode with DisallowUnknownFields. Nothing interprets it;
+// normalization only trims it so manifest-derived revisions stay stable.
 type AgentSpec struct {
 	Name         string                 `json:"name"`
 	Role         string                 `json:"role,omitempty"`
-	Type         string                 `json:"type,omitempty"`
+	Type         string                 `json:"type,omitempty"` // retired: accepted and ignored, see above
 	SystemPrompt string                 `json:"system_prompt,omitempty"`
 	Model        string                 `json:"model,omitempty"`
 	Provider     string                 `json:"provider,omitempty"`

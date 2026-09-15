@@ -19,6 +19,31 @@ type fileStore struct {
 	path            string
 	agents          map[string]*agent.Agent
 	defaultSettings types.Settings
+
+	// legacyWorkspaceManagerAgents holds the names of agents whose on-disk
+	// record still carries the retired "type": "workspace-manager" value.
+	// agent.Agent no longer has a Type field, so this is captured by a second,
+	// shim-typed decode of the raw bytes at load time (see detectLegacyType)
+	// and consumed by stripLegacyAgentTypeUnlocked to preserve the metadata
+	// tag that isStaleWorkspaceManagerAgent relies on.
+	legacyWorkspaceManagerAgents map[string]bool
+}
+
+// legacyAgentTypeShim decodes only the retired "type" key from a raw agent
+// record, independent of agent.Agent's current field set.
+type legacyAgentTypeShim struct {
+	Type string `json:"type"`
+}
+
+// detectLegacyType reports the raw "type" value (if any) still present in an
+// agent record on disk. agent.Agent dropped the Type field, so this is the
+// only way to see it.
+func detectLegacyType(raw []byte) string {
+	var shim legacyAgentTypeShim
+	if err := json.Unmarshal(raw, &shim); err != nil {
+		return ""
+	}
+	return shim.Type
 }
 
 func NewFileStore(path string, defaultSettings types.Settings) (Store, error) {
@@ -35,8 +60,8 @@ func NewFileStore(path string, defaultSettings types.Settings) (Store, error) {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
-	// Migrate existing agents to have types
-	fs.migrateAgentTypesUnlocked()
+	// Strip the retired "type" field, preserving the workspace-manager tag
+	fs.stripLegacyAgentTypeUnlocked()
 
 	if err := fs.initializeMissingAgentSkillsStateUnlocked(); err != nil {
 		logger.Verbosef("Warning: failed to initialize missing agent skills state: %v", err)
@@ -78,21 +103,13 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 		defaultSettings := s.defaultSettings
 
 		// Apply config overrides if provided
-		agentType := agent.TypeToolCalling // Default to cheapest tier
 		role := types.RoleGeneral
 		if config != nil {
-			if config.Type != "" {
-				agentType = config.Type
-			}
 			if config.Role != "" {
 				role = config.Role
 			}
 			if config.Model != "" {
 				defaultSettings.Model = config.Model
-				// Auto-detect agent type from model if type not explicitly provided
-				if config.Type == "" {
-					agentType = agent.GetTypeForModel(config.Model)
-				}
 			}
 			if config.Temperature > 0 {
 				defaultSettings.Temperature = config.Temperature
@@ -115,17 +132,13 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 			}
 		}
 		if role == "" {
-			role = defaultRoleForAgentType(agentType)
-		}
-		if role == types.RoleGeneral {
-			role = defaultRoleForAgentType(agentType)
+			role = types.RoleGeneral
 		}
 		if defaultSettings.EffectiveReasoningEffort(defaultSettings.Provider) == "" {
 			defaultSettings.ReasoningEffort = ""
 		}
 
 		newAgent := &agent.Agent{
-			Type:         agentType,
 			Role:         role,
 			Capabilities: []string{}, // Empty capabilities by default
 			Settings:     defaultSettings,
@@ -150,15 +163,6 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 	}
 
 	return s.saveUnlocked()
-}
-
-func defaultRoleForAgentType(agentType string) types.AgentRole {
-	switch strings.ToLower(strings.TrimSpace(agentType)) {
-	case "orchestration":
-		return types.RoleOrchestrator
-	default:
-		return types.RoleGeneral
-	}
 }
 
 // agentsDir resolves the directory that holds one folder per agent.
@@ -403,7 +407,6 @@ func (s *fileStore) saveUnlocked() error {
 	// first-class field is invisible on disk until it is listed here. Appearance
 	// is listed for exactly that reason (FR-1/FR-68).
 	type persistSettings struct {
-		Type         string                 `json:"type"` // Agent type
 		Role         types.AgentRole        `json:"role,omitempty"`
 		Capabilities []string               `json:"capabilities,omitempty"`
 		Settings     types.Settings         `json:"Settings"`
@@ -421,14 +424,13 @@ func (s *fileStore) saveUnlocked() error {
 			return err
 		}
 
-		// Only save agent_settings.json with everything (Type + Settings)
+		// Only save agent_settings.json with everything (Role + Settings)
 		// Don't create config.json unless necessary
 		// Canonicalize immediately before serializing, so a record written by any
 		// code path — not just the migrating load path — is canonical on disk.
 		agent.EnsureAppearance()
 
 		agentSettings := persistSettings{
-			Type:         agent.Type,
 			Role:         agent.Role,
 			Capabilities: agent.Capabilities,
 			Settings:     agent.Settings,
@@ -502,6 +504,14 @@ func (s *fileStore) load() error {
 			if err := json.Unmarshal(b, &in); err != nil {
 				return err
 			}
+			var rawIn struct {
+				Agents map[string]json.RawMessage `json:"agents"`
+			}
+			if err := json.Unmarshal(b, &rawIn); err == nil {
+				for agentName, raw := range rawIn.Agents {
+					s.recordLegacyTypeUnlocked(agentName, detectLegacyType(raw))
+				}
+			}
 			if in.Agents != nil {
 				s.agents = in.Agents
 			}
@@ -531,6 +541,7 @@ func (s *fileStore) load() error {
 					if settingsData, err := os.ReadFile(settingsPath); err == nil {
 						if err := json.Unmarshal(settingsData, &ag); err == nil {
 							logger.Verbosef("✅ Loaded agent '%s' from %s", agentName, settingsPath)
+							s.recordLegacyTypeUnlocked(agentName, detectLegacyType(settingsData))
 						} else {
 							logger.Verbosef("❌ Failed to unmarshal agent_settings.json for '%s': %v", agentName, err)
 						}
@@ -554,6 +565,7 @@ func (s *fileStore) load() error {
 					if err := json.Unmarshal(agentData, &ag); err != nil {
 						continue
 					}
+					s.recordLegacyTypeUnlocked(agentName, detectLegacyType(agentData))
 
 					s.normalizeLoadedAgent(agentName, &ag)
 					s.agents[agentName] = &ag
@@ -606,21 +618,48 @@ func (s *fileStore) normalizeLoadedAgent(name string, ag *agent.Agent) {
 	}
 }
 
-// migrateAgentTypesUnlocked migrates existing agents to have types based on their current model
-// Assumes lock is already held
-func (s *fileStore) migrateAgentTypesUnlocked() {
-	for _, ag := range s.agents {
-		// If agent already has a type, skip migration
-		if ag.Type != "" {
+// recordLegacyTypeUnlocked notes that an agent's on-disk record still carries
+// the retired "type": "workspace-manager" value, so stripLegacyAgentTypeUnlocked
+// can preserve it as a metadata tag. Assumes the lock is already held.
+func (s *fileStore) recordLegacyTypeUnlocked(agentName, rawType string) {
+	if rawType != "workspace-manager" {
+		return
+	}
+	if s.legacyWorkspaceManagerAgents == nil {
+		s.legacyWorkspaceManagerAgents = make(map[string]bool)
+	}
+	s.legacyWorkspaceManagerAgents[agentName] = true
+}
+
+// stripLegacyAgentTypeUnlocked completes the removal of the retired "type"
+// field. agent.Agent no longer has a Type field, so every agent file is
+// already stripped of "type" as soon as it round-trips through load() and
+// saveUnlocked(). The only remaining job is to preserve the one thing that
+// field's value was used for: an agent whose raw "type" was
+// "workspace-manager" gets that value added to Metadata.Tags, so
+// isStaleWorkspaceManagerAgent keeps recognizing it (FR7, FR10). No other
+// state is touched — a user's model is never rewritten. Idempotent: running
+// it again on an already-stripped store is a no-op because the tag is
+// already present and legacyWorkspaceManagerAgents is empty.
+// Assumes the lock is already held.
+func (s *fileStore) stripLegacyAgentTypeUnlocked() {
+	for agentName := range s.legacyWorkspaceManagerAgents {
+		ag, ok := s.agents[agentName]
+		if !ok || ag == nil {
 			continue
 		}
-
-		// Determine type based on current model
-		ag.Type = agent.GetTypeForModel(ag.Settings.Model)
-
-		// If model wasn't found in any tier, set it to default cheap model
-		if ag.Type == agent.TypeToolCalling && !agent.IsModelAllowedForType(ag.Settings.Model, agent.TypeToolCalling) {
-			ag.Settings.Model = "gpt-5-nano"
+		if ag.Metadata == nil {
+			ag.Metadata = &types.AgentMetadata{}
+		}
+		hasTag := false
+		for _, tag := range ag.Metadata.Tags {
+			if strings.EqualFold(strings.TrimSpace(tag), "workspace-manager") {
+				hasTag = true
+				break
+			}
+		}
+		if !hasTag {
+			ag.Metadata.Tags = append(ag.Metadata.Tags, "workspace-manager")
 		}
 	}
 }

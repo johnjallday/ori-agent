@@ -100,7 +100,7 @@ func (h *Handler) seedRoleStaffedAgents(
 }
 
 // roleStaffedSpec applies the user's per-role choices on top of the blueprint's
-// spec. The blueprint supplies the defaults — its prompt, type, tools — and each
+// spec. The blueprint supplies the defaults — its prompt, model, tools — and each
 // field the user actually edited overrides one.
 //
 // The prompt matters most: the Create form shows the blueprint's, and an edit
@@ -111,9 +111,6 @@ func roleStaffedSpec(spec projecttemplates.AgentSpec, requested roleStaffingInpu
 	if requested.Provider != "" || requested.Model != "" {
 		spec.Provider = requested.Provider
 		spec.Model = requested.Model
-	}
-	if requested.Type != "" {
-		spec.Type = requested.Type
 	}
 	if requested.SystemPrompt != "" {
 		spec.SystemPrompt = requested.SystemPrompt

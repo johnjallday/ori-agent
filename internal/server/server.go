@@ -124,7 +124,9 @@ func (s *Server) Start() {
 
 // cleanupStaleWorkspaceManagerAgents removes leftover workspace-manager agents
 // that were auto-created by the legacy system. These agents are identified by
-// having the "workspace-manager" metadata tag or type.
+// having the "workspace-manager" metadata tag. Agents that carried the retired
+// "type": "workspace-manager" value get that tag from the store's load-time
+// strip migration, so they are still found here.
 func (s *Server) cleanupStaleWorkspaceManagerAgents() {
 	if s.Storage == nil || s.Storage.AgentStore == nil {
 		return
@@ -155,9 +157,6 @@ func (s *Server) cleanupStaleWorkspaceManagerAgents() {
 func isStaleWorkspaceManagerAgent(ag *agent.Agent) bool {
 	if ag == nil {
 		return false
-	}
-	if ag.Type == "workspace-manager" {
-		return true
 	}
 	if ag.Metadata != nil {
 		for _, tag := range ag.Metadata.Tags {

@@ -118,7 +118,6 @@ func TestChatHandler_ClaudeCodeUsesSessionHistoryPerSession(t *testing.T) {
 		t.Fatalf("failed to create store: %v", err)
 	}
 	if err := st.CreateAgent("claude-agent", &store.CreateAgentConfig{
-		Type:         "general",
 		Model:        "sonnet",
 		LLMProvider:  "claude_code",
 		Temperature:  1.0,

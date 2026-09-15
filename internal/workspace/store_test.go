@@ -26,7 +26,7 @@ func TestFileStore_SaveAndGetWorkspaceAgent(t *testing.T) {
 		t.Fatalf("expected no snapshot yet, got ok=%v err=%v", ok, err)
 	}
 
-	ag := &agent.Agent{Type: agent.TypeToolCalling}
+	ag := &agent.Agent{}
 	ag.Settings.Model = "gpt-5-nano"
 	if err := st.SaveWorkspaceAgent(ws.ID, "Manager", ag); err != nil {
 		t.Fatalf("SaveWorkspaceAgent: %v", err)

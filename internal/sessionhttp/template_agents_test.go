@@ -242,7 +242,7 @@ func TestBuildTemplateAgentPlan_CreateReuseAndSystemModel(t *testing.T) {
 
 	tpl := rosterTemplate(
 		projecttemplates.AgentSpec{
-			Name: "Shared", Role: "researcher", Type: "research", Model: "ignored-model",
+			Name: "Shared", Role: "researcher", Model: "ignored-model",
 			SystemPrompt: "blueprint shared prompt",
 			Tools:        projecttemplates.ToolDefaults{Skills: []string{"blueprint-research"}},
 		},
@@ -269,7 +269,7 @@ func TestBuildTemplateAgentPlan_CreateReuseAndSystemModel(t *testing.T) {
 		t.Fatalf("expected existing prompt to be surfaced, got %q", plan.Agents[0].SystemPrompt)
 	}
 	recommended := plan.Agents[0].Recommended
-	if recommended == nil || recommended.Role != "researcher" || recommended.Type != "research" || recommended.Model != "ignored-model" || recommended.SystemPrompt != "blueprint shared prompt" {
+	if recommended == nil || recommended.Role != "researcher" || recommended.Model != "ignored-model" || recommended.SystemPrompt != "blueprint shared prompt" {
 		t.Fatalf("expected blueprint setup to remain available for a customized copy, got %+v", recommended)
 	}
 	if len(recommended.Tools.Skills) != 1 || recommended.Tools.Skills[0] != "blueprint-research" {
@@ -433,13 +433,7 @@ func TestBlankWorkspaceTemplate_SeedsSingleEntryAgent(t *testing.T) {
 	}
 }
 
-func TestCanonicalAgentTypeAndRole(t *testing.T) {
-	if got := canonicalAgentType("General"); got != agent.TypeGeneral {
-		t.Fatalf("type General -> %q", got)
-	}
-	if got := canonicalAgentType("bogus"); got != "" {
-		t.Fatalf("invalid type should be empty, got %q", got)
-	}
+func TestCanonicalAgentRole(t *testing.T) {
 	if got := canonicalAgentRole("Orchestrator"); got != "orchestrator" {
 		t.Fatalf("role Orchestrator -> %q", got)
 	}

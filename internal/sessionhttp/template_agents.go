@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
@@ -103,7 +102,6 @@ type templateAgentPlanItem struct {
 	Action          string                         `json:"action"`
 	EntryPoint      bool                           `json:"entry_point"`
 	Role            string                         `json:"role,omitempty"`
-	Type            string                         `json:"type,omitempty"`
 	Model           string                         `json:"model,omitempty"`
 	Provider        string                         `json:"provider,omitempty"`
 	ReasoningEffort string                         `json:"reasoning_effort,omitempty"`
@@ -117,7 +115,6 @@ type templateAgentPlanItem struct {
 
 type templateAgentRecommendedSetup struct {
 	Role            string                        `json:"role,omitempty"`
-	Type            string                        `json:"type,omitempty"`
 	Model           string                        `json:"model,omitempty"`
 	Provider        string                        `json:"provider,omitempty"`
 	ReasoningEffort string                        `json:"reasoning_effort,omitempty"`
@@ -131,7 +128,6 @@ type templateAgentOverride struct {
 	Index        *int    `json:"index"`
 	Name         *string `json:"name,omitempty"`
 	Role         *string `json:"role,omitempty"`
-	Type         *string `json:"type,omitempty"`
 	Model        *string `json:"model,omitempty"`
 	Provider     *string `json:"provider,omitempty"`
 	SystemPrompt *string `json:"system_prompt,omitempty"`
@@ -184,7 +180,6 @@ func groupRosterTemplate(groupName string) projecttemplates.Template {
 		Agents: []projecttemplates.AgentSpec{{
 			Name: name,
 			Role: string(types.RoleOrchestrator),
-			Type: agent.TypeGeneral,
 			SystemPrompt: fmt.Sprintf(
 				"You are the Group Manager for %q. Manage only this group's files and notes; "+
 					"member workspaces remain separate. Clarify intent, answer requests using group context, "+
@@ -205,19 +200,9 @@ func blankWorkspaceTemplate() projecttemplates.Template {
 		Agents: []projecttemplates.AgentSpec{{
 			Name:         blankWorkspaceEntryAgentName,
 			Role:         string(types.RoleOrchestrator),
-			Type:         agent.TypeGeneral,
 			SystemPrompt: blankWorkspaceEntryPrompt,
 		}},
 	}
-}
-
-// validAgentTypes canonicalizes a template-declared agent type to the real
-// vocabulary; an empty/unrecognized value maps to "" so the store applies its
-// own default (PRD FR8).
-var validAgentTypes = map[string]string{
-	agent.TypeToolCalling: agent.TypeToolCalling,
-	agent.TypeGeneral:     agent.TypeGeneral,
-	agent.TypeResearch:    agent.TypeResearch,
 }
 
 // validAgentRoles canonicalizes a template-declared role. cli_agent is
@@ -231,10 +216,6 @@ var validAgentRoles = map[string]string{
 	string(types.RoleValidator):    string(types.RoleValidator),
 	string(types.RoleSpecialist):   string(types.RoleSpecialist),
 	string(types.RoleGeneral):      string(types.RoleGeneral),
-}
-
-func canonicalAgentType(s string) string {
-	return validAgentTypes[strings.ToLower(strings.TrimSpace(s))]
 }
 
 func canonicalAgentRole(s string) string {
@@ -275,9 +256,6 @@ func applyTemplateAgentOverrides(tpl projecttemplates.Template, overrides []temp
 		}
 		if override.Role != nil {
 			spec.Role = strings.TrimSpace(*override.Role)
-		}
-		if override.Type != nil {
-			spec.Type = strings.TrimSpace(*override.Type)
 		}
 		if override.Model != nil {
 			spec.Model = strings.TrimSpace(*override.Model)
@@ -383,7 +361,6 @@ func validateTemplateAgentOverrideNames(specs []projecttemplates.AgentSpec) erro
 func (h *Handler) templateAgentCreateConfig(spec projecttemplates.AgentSpec) (*store.CreateAgentConfig, string) {
 	model, provider, reasoningEffort, modelSource := h.templateAgentModelDefaults(spec)
 	return &store.CreateAgentConfig{
-		Type:            canonicalAgentType(spec.Type),
 		Role:            types.AgentRole(canonicalAgentRole(spec.Role)),
 		Model:           model,
 		LLMProvider:     provider,
@@ -600,14 +577,6 @@ func (h *Handler) buildTemplateAgentPlanForOwner(tpl projecttemplates.Template, 
 func (h *Handler) buildTemplateAgentPlanItem(spec projecttemplates.AgentSpec, entryPoint bool) templateAgentPlanItem {
 	name := strings.TrimSpace(spec.Name)
 	cfg, modelSource := h.templateAgentCreateConfig(spec)
-	proposedType := strings.TrimSpace(cfg.Type)
-	if proposedType == "" {
-		if cfg.Model != "" {
-			proposedType = agent.GetTypeForModel(cfg.Model)
-		} else {
-			proposedType = agent.TypeToolCalling
-		}
-	}
 	proposedRole := strings.TrimSpace(string(cfg.Role))
 	if proposedRole == "" {
 		proposedRole = string(types.RoleGeneral)
@@ -620,7 +589,6 @@ func (h *Handler) buildTemplateAgentPlanItem(spec projecttemplates.AgentSpec, en
 		Tools:      spec.Tools,
 		Recommended: &templateAgentRecommendedSetup{
 			Role:            proposedRole,
-			Type:            proposedType,
 			Model:           strings.TrimSpace(cfg.Model),
 			Provider:        strings.TrimSpace(cfg.LLMProvider),
 			ReasoningEffort: strings.TrimSpace(cfg.ReasoningEffort),
@@ -634,7 +602,6 @@ func (h *Handler) buildTemplateAgentPlanItem(spec projecttemplates.AgentSpec, en
 	if h != nil && h.agentStore != nil {
 		if ag, exists := h.agentStore.GetAgent(name); exists && ag != nil {
 			item.Action = "reuse"
-			item.Type = strings.TrimSpace(ag.Type)
 			item.Role = strings.TrimSpace(string(ag.Role))
 			item.Model = strings.TrimSpace(ag.Settings.Model)
 			item.Provider = strings.TrimSpace(ag.Settings.Provider)
@@ -648,7 +615,6 @@ func (h *Handler) buildTemplateAgentPlanItem(spec projecttemplates.AgentSpec, en
 		}
 	}
 
-	item.Type = proposedType
 	item.Role = proposedRole
 	item.Model = strings.TrimSpace(cfg.Model)
 	item.Provider = strings.TrimSpace(cfg.LLMProvider)

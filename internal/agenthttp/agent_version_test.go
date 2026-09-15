@@ -19,7 +19,6 @@ import (
 // Statistics.UpdatedAt on every message, which must not trigger false 409s).
 func TestAgentConfigVersion_StableAndSensitive(t *testing.T) {
 	base := &agent.Agent{
-		Type: agent.TypeGeneral,
 		Role: types.RoleGeneral,
 		Settings: types.Settings{
 			Model:        "gpt-4o-mini",
@@ -64,7 +63,7 @@ func versionTestHandlers(t *testing.T, agentName string) (*Handler, *DashboardHa
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	if err := st.CreateAgent(agentName, &store.CreateAgentConfig{Type: agent.TypeGeneral}); err != nil {
+	if err := st.CreateAgent(agentName, &store.CreateAgentConfig{}); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	return New(st), NewDashboardHandler(st)

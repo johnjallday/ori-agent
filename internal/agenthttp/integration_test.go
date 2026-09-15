@@ -151,12 +151,11 @@ func assertStatus(t *testing.T, rr *httptest.ResponseRecorder, expected int) {
 }
 
 // Helper: Create test agent with metadata
-func createTestAgent(t *testing.T, ts *TestServer, name, agentType string) {
+func createTestAgent(t *testing.T, ts *TestServer, name string) {
 	t.Helper()
 
 	reqBody := map[string]any{
 		"name":         name,
-		"type":         agentType,
 		"role":         "general",
 		"llm_provider": "openai",
 		"model":        "gpt-4o",
@@ -179,7 +178,6 @@ func TestCreateAgent_WithAllowWebSearchSetting(t *testing.T) {
 
 	reqBody := map[string]any{
 		"name":             "restricted-web-agent",
-		"type":             "tool-calling",
 		"model":            "gpt-4o-mini",
 		"allow_web_search": false,
 	}
@@ -210,7 +208,6 @@ func TestCreateAgent_WithCodexReasoningEffort(t *testing.T) {
 
 	reqBody := map[string]any{
 		"name":             "codex-reasoning-agent",
-		"type":             "research",
 		"llm_provider":     "codex",
 		"model":            "gpt-5.4",
 		"reasoning_effort": "xhigh",
@@ -243,7 +240,6 @@ func TestCreateAgent_WithInvalidReasoningEffort(t *testing.T) {
 
 	reqBody := map[string]any{
 		"name":             "invalid-reasoning-agent",
-		"type":             "research",
 		"llm_provider":     "codex",
 		"model":            "gpt-5.4",
 		"reasoning_effort": "ultra",
@@ -260,7 +256,7 @@ func TestCompleteAgentLifecycle(t *testing.T) {
 
 	// Step 1: Create agent with metadata
 	t.Run("CreateAgent", func(t *testing.T) {
-		createTestAgent(t, ts, "lifecycle-agent", "tool-calling")
+		createTestAgent(t, ts, "lifecycle-agent")
 
 		// Verify agent was created by getting it from store
 		ag, ok := ts.store.GetAgent("lifecycle-agent")
@@ -269,8 +265,8 @@ func TestCompleteAgentLifecycle(t *testing.T) {
 		}
 
 		// Verify basic properties
-		if ag.Type != "tool-calling" {
-			t.Errorf("Expected type 'tool-calling', got %v", ag.Type)
+		if ag.Settings.Model != "gpt-4o" {
+			t.Errorf("Expected model 'gpt-4o', got %v", ag.Settings.Model)
 		}
 
 		// Verify statistics are initialized
@@ -456,9 +452,9 @@ func TestDashboardListFiltering(t *testing.T) {
 	defer ts.cleanup()
 
 	// Create multiple test agents
-	createTestAgent(t, ts, "agent-1", "tool-calling")
-	createTestAgent(t, ts, "agent-2", "conversational")
-	createTestAgent(t, ts, "agent-3", "tool-calling")
+	createTestAgent(t, ts, "agent-1")
+	createTestAgent(t, ts, "agent-2")
+	createTestAgent(t, ts, "agent-3")
 
 	t.Run("ListAllAgents", func(t *testing.T) {
 		rr := ts.doRequest(t, http.MethodGet, "/api/agents/dashboard/list", nil)
@@ -554,7 +550,6 @@ func TestErrorHandling(t *testing.T) {
 
 	t.Run("CreateAgentWithoutName", func(t *testing.T) {
 		reqBody := map[string]any{
-			"type":         "tool-calling",
 			"llm_provider": "openai",
 			"model":        "gpt-4o",
 		}
@@ -587,7 +582,7 @@ func TestErrorHandling(t *testing.T) {
 	})
 
 	t.Run("InvalidStatusValue", func(t *testing.T) {
-		createTestAgent(t, ts, "status-test", "tool-calling")
+		createTestAgent(t, ts, "status-test")
 
 		updateBody := map[string]any{
 			"status": "invalid-status",
@@ -607,7 +602,7 @@ func TestConcurrentAccess(t *testing.T) {
 	defer ts.cleanup()
 
 	// Create test agent
-	createTestAgent(t, ts, "concurrent-agent", "tool-calling")
+	createTestAgent(t, ts, "concurrent-agent")
 
 	// Load agent and simulate concurrent statistics updates
 	ag, ok := ts.store.GetAgent("concurrent-agent")
@@ -657,7 +652,6 @@ func TestBackwardCompatibility(t *testing.T) {
 		// This simulates a legacy agent
 		reqBody := map[string]any{
 			"name":  "legacy-agent",
-			"type":  "tool-calling",
 			"role":  "general",
 			"model": "gpt-4o",
 		}
@@ -703,7 +697,7 @@ func TestStatisticsAccuracy(t *testing.T) {
 	ts := setupTestServer(t)
 	defer ts.cleanup()
 
-	createTestAgent(t, ts, "stats-agent", "tool-calling")
+	createTestAgent(t, ts, "stats-agent")
 
 	ag, ok := ts.store.GetAgent("stats-agent")
 	if !ok {
@@ -755,7 +749,7 @@ func TestEvolutionAndFeedEndpoints(t *testing.T) {
 	ts := setupTestServer(t)
 	defer ts.cleanup()
 
-	createTestAgent(t, ts, "evo-agent", "tool-calling")
+	createTestAgent(t, ts, "evo-agent")
 
 	t.Run("GetAgentEvolutionSuccess", func(t *testing.T) {
 		rr := ts.doRequest(t, http.MethodGet, "/api/agents/evo-agent/evolution", nil)
@@ -908,7 +902,7 @@ func TestReservedSystemAssistantProtection(t *testing.T) {
 	})
 
 	t.Run("RenameIntoReservedAssistantBlocked", func(t *testing.T) {
-		createTestAgent(t, ts, "rename-source-agent", "general")
+		createTestAgent(t, ts, "rename-source-agent")
 		rr := ts.doRequest(t, http.MethodPatch, "/api/agents?name=rename-source-agent", map[string]any{
 			"name": systemAssistantAgentName,
 		})
@@ -920,7 +914,7 @@ func TestPutAgentSwitchIsDeprecated(t *testing.T) {
 	ts := setupTestServer(t)
 	defer ts.cleanup()
 
-	createTestAgent(t, ts, "reviewer", "general")
+	createTestAgent(t, ts, "reviewer")
 
 	rr := ts.doRequest(t, http.MethodPut, "/api/agents?name=reviewer", nil)
 	assertStatus(t, rr, http.StatusOK)

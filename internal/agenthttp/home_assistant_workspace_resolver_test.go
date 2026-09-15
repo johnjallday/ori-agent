@@ -68,7 +68,7 @@ func (s *homeWorkspaceResolverFeedbackReaderStub) RecentWorkspaceCorrections(_ c
 
 func TestHomeAssistantWorkspaceResolver_ConfidentMatch(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	addHomeRouteTestAgent(t, st, "Launch Manager", &store.CreateAgentConfig{Type: "general"}, "", nil, nil)
+	addHomeRouteTestAgent(t, st, "Launch Manager", &store.CreateAgentConfig{}, "", nil, nil)
 
 	resolver := newHomeWorkspaceResolverForTest(
 		t,
@@ -91,7 +91,7 @@ func TestHomeAssistantWorkspaceResolver_ConfidentMatch(t *testing.T) {
 
 func TestHomeAssistantWorkspaceResolver_AmbiguousMatch(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	addHomeRouteTestAgent(t, st, "Project Manager", &store.CreateAgentConfig{Type: "general"}, "", nil, nil)
+	addHomeRouteTestAgent(t, st, "Project Manager", &store.CreateAgentConfig{}, "", nil, nil)
 
 	resolver := newHomeWorkspaceResolverForTest(
 		t,
@@ -111,7 +111,7 @@ func TestHomeAssistantWorkspaceResolver_AmbiguousMatch(t *testing.T) {
 
 func TestHomeAssistantWorkspaceResolver_NoFit(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	addHomeRouteTestAgent(t, st, "Travel Manager", &store.CreateAgentConfig{Type: "general"}, "", nil, nil)
+	addHomeRouteTestAgent(t, st, "Travel Manager", &store.CreateAgentConfig{}, "", nil, nil)
 
 	resolver := newHomeWorkspaceResolverForTest(
 		t,
@@ -127,7 +127,7 @@ func TestHomeAssistantWorkspaceResolver_NoFit(t *testing.T) {
 
 func TestHomeAssistantWorkspaceResolver_UsesActiveWorkspaceContext(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	addHomeRouteTestAgent(t, st, "Workspace Manager", &store.CreateAgentConfig{Type: "general"}, "", nil, nil)
+	addHomeRouteTestAgent(t, st, "Workspace Manager", &store.CreateAgentConfig{}, "", nil, nil)
 
 	resolver := newHomeWorkspaceResolverForTest(
 		t,
@@ -147,7 +147,7 @@ func TestHomeAssistantWorkspaceResolver_UsesActiveWorkspaceContext(t *testing.T)
 
 func TestHomeAssistantWorkspaceResolver_ExcludesGroupWorkspaces(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	addHomeRouteTestAgent(t, st, "Launch Manager", &store.CreateAgentConfig{Type: "general"}, "", nil, nil)
+	addHomeRouteTestAgent(t, st, "Launch Manager", &store.CreateAgentConfig{}, "", nil, nil)
 
 	group := newHomeWorkspaceResolverTestWorkspace("ws-group", "Launch Ops", "Ship the launch deck", "Launch Manager")
 	group.Kind = "group"
@@ -187,7 +187,7 @@ func TestHomeAssistantWorkspaceResolver_NeedsRepairWhenEntryAgentMissing(t *test
 
 func TestHomeAssistantWorkspaceResolver_UsesProjectPathAndDirectoryReferences(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	addHomeRouteTestAgent(t, st, "Workspace Manager", &store.CreateAgentConfig{Type: "general"}, "", nil, nil)
+	addHomeRouteTestAgent(t, st, "Workspace Manager", &store.CreateAgentConfig{}, "", nil, nil)
 
 	cabinet := newHomeWorkspaceResolverTestWorkspace("ws-cabinet", "Woodworking", "Build home storage", "Workspace Manager")
 	cabinet.ProjectPath = "apps/cabinet-api"
@@ -216,7 +216,7 @@ func TestHomeAssistantWorkspaceResolver_UsesProjectPathAndDirectoryReferences(t 
 
 func TestHomeAssistantWorkspaceResolver_BootstrapContextBreaksMetadataTie(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	addHomeRouteTestAgent(t, st, "Project Manager", &store.CreateAgentConfig{Type: "general"}, "", nil, nil)
+	addHomeRouteTestAgent(t, st, "Project Manager", &store.CreateAgentConfig{}, "", nil, nil)
 
 	// Two workspaces identical on name/description; only the bootstrap context
 	// of ws-alpha mentions the brand guide. This used to live in the canonical
@@ -241,7 +241,7 @@ func TestHomeAssistantWorkspaceResolver_BootstrapContextBreaksMetadataTie(t *tes
 
 func TestHomeAssistantWorkspaceResolver_DoesNotUseSubstringOnlyMatches(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	addHomeRouteTestAgent(t, st, "Workspace Manager", &store.CreateAgentConfig{Type: "general"}, "", nil, nil)
+	addHomeRouteTestAgent(t, st, "Workspace Manager", &store.CreateAgentConfig{}, "", nil, nil)
 
 	resolver := newHomeWorkspaceResolverForTest(
 		t,
@@ -257,7 +257,7 @@ func TestHomeAssistantWorkspaceResolver_DoesNotUseSubstringOnlyMatches(t *testin
 
 func TestHomeAssistantWorkspaceResolver_UsesPriorCorrectionForExactPrompt(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	addHomeRouteTestAgent(t, st, "Workspace Manager", &store.CreateAgentConfig{Type: "general"}, "", nil, nil)
+	addHomeRouteTestAgent(t, st, "Workspace Manager", &store.CreateAgentConfig{}, "", nil, nil)
 
 	resolver := newHomeWorkspaceResolverForTest(
 		t,
@@ -284,7 +284,7 @@ func TestHomeAssistantWorkspaceResolver_UsesPriorCorrectionForExactPrompt(t *tes
 
 func TestHomeAssistantWorkspaceResolver_IgnoresPriorCorrectionForExplicitSwitch(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	addHomeRouteTestAgent(t, st, "Workspace Manager", &store.CreateAgentConfig{Type: "general"}, "", nil, nil)
+	addHomeRouteTestAgent(t, st, "Workspace Manager", &store.CreateAgentConfig{}, "", nil, nil)
 
 	resolver := newHomeWorkspaceResolverForTest(
 		t,
@@ -311,7 +311,7 @@ func TestHomeAssistantWorkspaceResolver_IgnoresPriorCorrectionForExplicitSwitch(
 
 func TestHomeAssistantWorkspaceResolver_UsesSimilarPriorCorrectionForStrongPromptVariant(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	addHomeRouteTestAgent(t, st, "Workspace Manager", &store.CreateAgentConfig{Type: "general"}, "", nil, nil)
+	addHomeRouteTestAgent(t, st, "Workspace Manager", &store.CreateAgentConfig{}, "", nil, nil)
 
 	resolver := newHomeWorkspaceResolverForTest(
 		t,
@@ -339,7 +339,7 @@ func TestHomeAssistantWorkspaceResolver_UsesSimilarPriorCorrectionForStrongPromp
 
 func TestHomeAssistantWorkspaceResolver_RejectsWeakFuzzyCorrection(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	addHomeRouteTestAgent(t, st, "Workspace Manager", &store.CreateAgentConfig{Type: "general"}, "", nil, nil)
+	addHomeRouteTestAgent(t, st, "Workspace Manager", &store.CreateAgentConfig{}, "", nil, nil)
 
 	resolver := newHomeWorkspaceResolverForTest(
 		t,
@@ -367,7 +367,7 @@ func TestHomeAssistantWorkspaceResolver_RejectsWeakFuzzyCorrection(t *testing.T)
 
 func TestHomeAssistantWorkspaceResolver_RejectsConflictingFuzzyCorrections(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	addHomeRouteTestAgent(t, st, "Workspace Manager", &store.CreateAgentConfig{Type: "general"}, "", nil, nil)
+	addHomeRouteTestAgent(t, st, "Workspace Manager", &store.CreateAgentConfig{}, "", nil, nil)
 
 	resolver := newHomeWorkspaceResolverForTest(
 		t,
@@ -419,7 +419,7 @@ func (s *homeWorkspaceResolverHQProviderStub) CurrentHQWorkspaceID(context.Conte
 // default to the designated Personal HQ rather than reporting no_fit.
 func TestHomeAssistantWorkspaceResolver_NoFitDefaultsToHQForUntargetedPrompt(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	addHomeRouteTestAgent(t, st, "Chief of Staff", &store.CreateAgentConfig{Type: "general"}, "", nil, nil)
+	addHomeRouteTestAgent(t, st, "Chief of Staff", &store.CreateAgentConfig{}, "", nil, nil)
 
 	resolver := newHomeWorkspaceResolverForTest(
 		t,
@@ -443,7 +443,7 @@ func TestHomeAssistantWorkspaceResolver_NoFitDefaultsToHQForUntargetedPrompt(t *
 // scoped to it, never hijacked to the HQ merely because one is designated.
 func TestHomeAssistantWorkspaceResolver_NamedProjectStillWinsOverHQ(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	addHomeRouteTestAgent(t, st, "Launch Manager", &store.CreateAgentConfig{Type: "general"}, "", nil, nil)
+	addHomeRouteTestAgent(t, st, "Launch Manager", &store.CreateAgentConfig{}, "", nil, nil)
 
 	resolver := newHomeWorkspaceResolverForTest(
 		t,
@@ -464,7 +464,7 @@ func TestHomeAssistantWorkspaceResolver_NamedProjectStillWinsOverHQ(t *testing.T
 // anything real must not silently land on the HQ instead.
 func TestHomeAssistantWorkspaceResolver_NoFitIgnoresHQWhenPromptRequestsExplicitSwitch(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	addHomeRouteTestAgent(t, st, "Chief of Staff", &store.CreateAgentConfig{Type: "general"}, "", nil, nil)
+	addHomeRouteTestAgent(t, st, "Chief of Staff", &store.CreateAgentConfig{}, "", nil, nil)
 
 	resolver := newHomeWorkspaceResolverForTest(
 		t,
@@ -485,7 +485,7 @@ func TestHomeAssistantWorkspaceResolver_NoFitIgnoresHQWhenPromptRequestsExplicit
 // (if currently broken) workspace, not an untargeted app-wide prompt.
 func TestHomeAssistantWorkspaceResolver_NoFitIgnoresHQWhenExplicitContextGiven(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	addHomeRouteTestAgent(t, st, "Chief of Staff", &store.CreateAgentConfig{Type: "general"}, "", nil, nil)
+	addHomeRouteTestAgent(t, st, "Chief of Staff", &store.CreateAgentConfig{}, "", nil, nil)
 
 	resolver := newHomeWorkspaceResolverForTest(
 		t,
@@ -524,7 +524,7 @@ func TestHomeAssistantWorkspaceResolver_NoFitWhenHQNotReady(t *testing.T) {
 // unchanged from before task 7.10.
 func TestHomeAssistantWorkspaceResolver_NoFitWhenNoHQDesignated(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	addHomeRouteTestAgent(t, st, "Travel Manager", &store.CreateAgentConfig{Type: "general"}, "", nil, nil)
+	addHomeRouteTestAgent(t, st, "Travel Manager", &store.CreateAgentConfig{}, "", nil, nil)
 
 	resolver := newHomeWorkspaceResolverForTest(
 		t,

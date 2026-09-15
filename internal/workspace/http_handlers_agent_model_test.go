@@ -27,7 +27,6 @@ func TestHTTPHandler_ListWorkspaceAgentProfiles(t *testing.T) {
 	}
 	// Only Manager has an on-disk snapshot; Helper does not.
 	if err := store.SaveWorkspaceAgent(ws.ID, "Manager", &agent.Agent{
-		Type: "orchestration",
 		Role: "orchestrator",
 		Settings: types.Settings{
 			Model:    "google/gemma-4-e4b",
@@ -60,7 +59,7 @@ func TestHTTPHandler_ListWorkspaceAgentProfiles(t *testing.T) {
 	}
 	got := resp.Agents[0]
 	if got.Name != "Manager" || got.Model != "google/gemma-4-e4b" ||
-		got.Provider != "lmstudio" || got.Type != "orchestration" || got.Source != "workspace" {
+		got.Provider != "lmstudio" || got.Source != "workspace" {
 		t.Fatalf("profile=%+v", got)
 	}
 }
@@ -94,7 +93,6 @@ func TestHTTPHandler_UpdateWorkspaceAgentModel(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 	if err := store.SaveWorkspaceAgent(ws.ID, "ReaperDAW Manager", &agent.Agent{
-		Type: "orchestration",
 		Role: "orchestrator",
 		Settings: types.Settings{
 			Model:        "google/gemma-4-e4b",
@@ -149,7 +147,6 @@ func TestHTTPHandler_WorkspaceAgentSystemPrompt_RoundTrip(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 	if err := store.SaveWorkspaceAgent(ws.ID, "Chief of Staff", &agent.Agent{
-		Type: "orchestration",
 		Role: "orchestrator",
 		Settings: types.Settings{
 			Model:        "gpt-5.5",
@@ -219,7 +216,6 @@ func TestHTTPHandler_UpdateWorkspaceAgentSystemPrompt_Validation(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 	if err := store.SaveWorkspaceAgent(ws.ID, "Manager", &agent.Agent{
-		Type:     "general",
 		Settings: types.Settings{Model: "m", Provider: "p"},
 	}); err != nil {
 		t.Fatalf("save snapshot: %v", err)
@@ -262,7 +258,6 @@ func TestHTTPHandler_UpdateWorkspaceAgentModel_Validation(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 	if err := store.SaveWorkspaceAgent(ws.ID, "Manager", &agent.Agent{
-		Type:     "general",
 		Settings: types.Settings{Model: "m", Provider: "p"},
 	}); err != nil {
 		t.Fatalf("save snapshot: %v", err)

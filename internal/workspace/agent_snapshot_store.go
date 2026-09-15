@@ -468,7 +468,7 @@ func isSystemAgentName(name string) bool {
 }
 
 // agentDefinitionEquivalent reports whether two agents share the same core
-// definition (type, role, model, system prompt). The boot-wipe uses it to tell
+// definition (role, model, system prompt). The boot-wipe uses it to tell
 // a pristine workspace-snapshot mirror (safe to reconcile away under the
 // allowlist gate) from a global definition the user has since edited, which is
 // user-owned and must be preserved (PRD FR11).
@@ -476,8 +476,7 @@ func agentDefinitionEquivalent(a, b *agent.Agent) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return a.Type == b.Type &&
-		a.Role == b.Role &&
+	return a.Role == b.Role &&
 		a.Settings.Model == b.Settings.Model &&
 		a.Settings.SystemPrompt == b.Settings.SystemPrompt
 }

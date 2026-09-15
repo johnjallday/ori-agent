@@ -23,9 +23,9 @@ func makeTestWorkspaceWithAgents(t *testing.T, store workspace.Store, id, name s
 
 func agentRoster() stubAgentsReader {
 	return stubAgentsReader{ok: true, roster: []HomeAgentSummary{
-		{Name: "Ori", Type: "tool-calling", Role: "orchestrator", Model: "gpt-5", Provider: "openai", Capabilities: []string{"planning"}},
-		{Name: "Scout", Type: "research", Role: "researcher", Model: "claude-sonnet-4-6", Provider: "anthropic"},
-		{Name: "Idle", Type: "general", Role: "assistant", Model: "gpt-5-mini", Provider: "openai"},
+		{Name: "Ori", Role: "orchestrator", Model: "gpt-5", Provider: "openai", Capabilities: []string{"planning"}},
+		{Name: "Scout", Role: "researcher", Model: "claude-sonnet-4-6", Provider: "anthropic"},
+		{Name: "Idle", Role: "assistant", Model: "gpt-5-mini", Provider: "openai"},
 	}}
 }
 

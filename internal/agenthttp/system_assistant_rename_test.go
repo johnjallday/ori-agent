@@ -4,7 +4,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/charactercatalog"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -44,7 +43,6 @@ func TestSystemAssistantIsNotNamedOri(t *testing.T) {
 func TestLegacyOriIsMigratedForward(t *testing.T) {
 	st := renameTestStore(t)
 	if err := st.CreateAgent("Ori", &store.CreateAgentConfig{
-		Type:         agent.TypeGeneral,
 		Role:         types.RoleOrchestrator,
 		Model:        "gpt-4o",
 		LLMProvider:  "openai",
@@ -75,7 +73,6 @@ func TestLegacyOriIsMigratedForward(t *testing.T) {
 func TestLegacyUnderscoreAssistantIsMigratedForward(t *testing.T) {
 	st := renameTestStore(t)
 	if err := st.CreateAgent("__assistant__", &store.CreateAgentConfig{
-		Type:         agent.TypeGeneral,
 		SystemPrompt: "ancient",
 	}); err != nil {
 		t.Fatalf("seed legacy agent: %v", err)
@@ -103,13 +100,11 @@ func TestLegacyUnderscoreAssistantIsMigratedForward(t *testing.T) {
 func TestMigrationDoesNotClobberAUserAgentWithTheSameName(t *testing.T) {
 	st := renameTestStore(t)
 	if err := st.CreateAgent(systemAssistantAgentName, &store.CreateAgentConfig{
-		Type:         agent.TypeGeneral,
 		SystemPrompt: "MINE — user authored",
 	}); err != nil {
 		t.Fatalf("seed user agent: %v", err)
 	}
 	if err := st.CreateAgent("Ori", &store.CreateAgentConfig{
-		Type:         agent.TypeGeneral,
 		SystemPrompt: "legacy assistant",
 	}); err != nil {
 		t.Fatalf("seed legacy agent: %v", err)
@@ -130,7 +125,7 @@ func TestMigrationDoesNotClobberAUserAgentWithTheSameName(t *testing.T) {
 
 func TestMigrationIsIdempotent(t *testing.T) {
 	st := renameTestStore(t)
-	if err := st.CreateAgent("Ori", &store.CreateAgentConfig{Type: agent.TypeGeneral}); err != nil {
+	if err := st.CreateAgent("Ori", &store.CreateAgentConfig{}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	for i := range 3 {
