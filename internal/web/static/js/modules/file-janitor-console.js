@@ -98,7 +98,7 @@
   // The server still serves the legacy `downloads-janitor` prefix, and will for
   // this whole release — persisted deep links and any out-of-repo caller still
   // use it, and Go route-parity tests cover it (see
-  // internal/downloadsjanitorhttp/route_parity_test.go). In-repo callers use the
+  // internal/filejanitorhttp/route_parity_test.go). In-repo callers use the
   // canonical prefix so the legacy alias can eventually be retired by deleting
   // it rather than by hunting for stragglers (FR-132).
   const API_PREFIX = 'file-janitor';
@@ -143,7 +143,7 @@
   // a screen or a screen reader. Control characters forge line breaks and
   // bidirectional overrides disguise an extension: "invoice<RLO>gpj.exe"
   // renders as "invoice exe.jpg". The server sends a rendered-safe
-  // display_name for candidates (downloadsjanitor.DisplayFileName), but history
+  // display_name for candidates (filejanitor.DisplayFileName), but history
   // and journal entries carry the on-disk name by necessity, so the same rule
   // is applied here rather than trusting the field to have been cleaned
   // upstream. textContent already prevents markup; this is about what the
@@ -3645,7 +3645,7 @@
   // ---------------------------------------------------- setup wizard steps
   //
   // The blueprint's setup runs in the shared wizard; these renderers supply the
-  // content of its Downloads-specific steps. They own no navigation, no
+  // content of its File Janitor-specific steps. They own no navigation, no
   // progress, and no readiness — the shell asks the server for all three.
 
   // ownsStep keeps these renderers scoped to this blueprint's steps: the
