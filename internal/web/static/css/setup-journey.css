@@ -231,6 +231,18 @@
 .setup-journey__technical {
   margin-top: 1rem;
 }
+.setup-journey__review-list a {
+  color: var(--journey-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.setup-journey__review-list a:hover {
+  color: var(--journey-accent);
+}
+.setup-journey__review-list a:focus-visible {
+  outline: 3px solid rgb(189 91 50 / 30%);
+  outline-offset: 2px;
+}
 .setup-journey__file-list {
   padding-left: 1.25rem;
   font-family: var(--font-mono, monospace);

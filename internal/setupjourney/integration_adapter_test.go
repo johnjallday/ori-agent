@@ -164,6 +164,29 @@ func TestReviewedIntegrationReadAbsentSurfacesExactReview(t *testing.T) {
 		read.Integration.ExpectedVersion != "0.5.0" || read.Integration.StateRevision == "" {
 		t.Fatalf("missing reviewed disclosure: %#v", read.Integration)
 	}
+	// The reviewed repository is disclosed so a person can inspect it.
+	if read.Integration.SourceURL != "https://github.com/example/reaper-plugin" {
+		t.Fatalf("source URL = %q", read.Integration.SourceURL)
+	}
+}
+
+func TestIntegrationSourceURLAcceptsOnlyPlainHTTPSLinks(t *testing.T) {
+	for value, want := range map[string]bool{
+		"": true,
+		"https://github.com/example/reaper-plugin": true,
+		"http://github.com/example/reaper-plugin":  false,
+		"javascript:alert(1)":                      false,
+		"https://user:pass@github.com/example":     false,
+		"https://github.com/example?x=1":           false,
+		"https://github.com/example#readme":        false,
+		"https:///example":                         false,
+		"github.com/example/reaper-plugin":         false,
+		"https://github.com/exa mple":              false,
+	} {
+		if got := safeIntegrationSourceURL(value); got != want {
+			t.Errorf("safeIntegrationSourceURL(%q) = %v, want %v", value, got, want)
+		}
+	}
 }
 
 func TestReviewedIntegrationReadInstalledSeparatesEnablement(t *testing.T) {

@@ -303,6 +303,28 @@ function makeText(tag, className, text) {
   return node;
 }
 
+// safeExternalLink returns a plain https URL suitable for an outbound link, or
+// '' when the value has another scheme, credentials, a query or a fragment.
+export function safeExternalLink(value) {
+  try {
+    const parsed = new URL(String(value || ''));
+    if (
+      parsed.protocol !== 'https:' ||
+      !parsed.hostname ||
+      parsed.username ||
+      parsed.password ||
+      parsed.search ||
+      parsed.hash
+    )
+      return '';
+    return parsed.href;
+  } catch (_) {
+    return '';
+  }
+}
+
+// appendRows renders label/value rows. A value may be { text, href } for a
+// link that opens in a new tab; the href must already be a safe https URL.
 function appendRows(container, rows, className = 'setup-journey__receipt-list') {
   if (!rows.length) return;
   const list = document.createElement('ul');
@@ -310,7 +332,19 @@ function appendRows(container, rows, className = 'setup-journey__receipt-list') 
   rows.forEach(([label, value]) => {
     const item = document.createElement('li');
     const strong = makeText('strong', '', `${label}: `);
-    item.append(strong, document.createTextNode(String(value)));
+    const href = value && typeof value === 'object' ? safeExternalLink(value.href) : '';
+    if (href) {
+      const link = makeText('a', '', value.text || href);
+      link.href = href;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      item.append(strong, link);
+    } else {
+      item.append(
+        strong,
+        document.createTextNode(value && typeof value === 'object' ? value.text : String(value))
+      );
+    }
     list.appendChild(item);
   });
   container.appendChild(list);
@@ -1552,9 +1586,14 @@ function renderReview() {
 export function integrationReviewRows(review) {
   const integration = review?.integration;
   if (!integration) return null;
+  // The full repository URL links out so the source can be checked first.
+  const sourceURL = safeExternalLink(integration.source_url);
   const summary = [
     ['Publisher', integration.publisher],
-    ['Source', integration.source_label],
+    [
+      'Source',
+      sourceURL ? { text: integration.source_url, href: sourceURL } : integration.source_label
+    ],
     ...(integration.installed_version
       ? [['Installed version', integration.installed_version]]
       : []),

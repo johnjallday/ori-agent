@@ -216,6 +216,7 @@ async function mockSetup(page: Page, server: Server) {
                   ...server.install.steps[0].integration,
                   publisher: 'Ori',
                   source_label: 'johnjallday/reaper-plugin',
+                  source_url: 'https://github.com/johnjallday/reaper-plugin',
                   supported_platforms: ['darwin/arm64']
                 }
               }
@@ -309,7 +310,17 @@ for (const width of [1280, 390]) {
     await expect(review).toContainText(
       'Ori downloads the reviewed 0.6.0 release from johnjallday/reaper-plugin, checks its fingerprint, and installs it. Nothing runs until you enable it.'
     );
-    await expect(review).toContainText('Source: johnjallday/reaper-plugin');
+    // The source is the full repository URL, opening in a new tab.
+    const sourceLink = review.getByRole('link', {
+      name: 'https://github.com/johnjallday/reaper-plugin',
+      exact: true
+    });
+    await expect(sourceLink).toHaveAttribute(
+      'href',
+      'https://github.com/johnjallday/reaper-plugin'
+    );
+    await expect(sourceLink).toHaveAttribute('target', '_blank');
+    await expect(sourceLink).toHaveAttribute('rel', 'noopener noreferrer');
     await expect(review).toContainText('Enabled after this action: No');
     // Technical rows stay collapsed so the buttons are in view without scrolling.
     const technical = review.locator('details.setup-journey__technical');

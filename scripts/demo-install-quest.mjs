@@ -40,8 +40,8 @@ mkdirSync(out, { recursive: true });
 const browser = await chromium.launch();
 const problems = [];
 
-async function newPage(width = 1280, height = 900) {
-  const page = await browser.newPage({ viewport: { width, height } });
+async function newPage(width = 1280, height = 900, colorScheme = 'light') {
+  const page = await browser.newPage({ viewport: { width, height }, colorScheme });
   page.on('console', m => {
     if (m.type() === 'error') problems.push(`console: ${m.text()}`);
   });
@@ -196,9 +196,33 @@ async function installStage() {
 // plain demo server (it downloads from the reviewed source): Install plugin →
 // review → Install, then Enable plugin → review → Enable.
 async function installFlowStage() {
+  // First look at the review in dark mode without committing. It runs before
+  // the main page opens the quest, because opening advances the revision and
+  // would make an earlier review stale.
+  const dark = await newPage(1280, 900, 'dark');
+  await dark.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+  await api(dark, 'POST', '/api/onboarding/skip');
+  await dark.goto(`${baseUrl}/?setup=quest&source=host&quest=install_ori_reaper`, {
+    waitUntil: 'domcontentloaded'
+  });
+  await describeModal(dark, 'dark before install');
+  await clickAndSettle(
+    dark,
+    dark
+      .locator('#specialistSetupJourneyModal')
+      .getByRole('button', { name: 'Install plugin', exact: true }),
+    'Install plugin (dark)'
+  );
+  await dark.locator('#specialistSetupJourneyReview').waitFor({ state: 'visible', timeout: 60000 });
+  const sourceLink = dark.locator('#specialistSetupJourneyReview a').first();
+  console.log(
+    `dark source link: href=${await sourceLink.getAttribute('href')} color=${await sourceLink.evaluate(a => getComputedStyle(a).color)}`
+  );
+  await shot(dark, '41b-install-review-dark');
+  await dark.close();
+
   const page = await newPage();
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
-  await api(page, 'POST', '/api/onboarding/skip');
   await page.goto(`${baseUrl}/?setup=quest&source=host&quest=install_ori_reaper`, {
     waitUntil: 'domcontentloaded'
   });

@@ -364,8 +364,9 @@ func integrationReviewForCommit(action ActionID) (ActionID, bool) {
 func integrationProjection(entry reviewedintegration.Entry) *IntegrationProjection {
 	return &IntegrationProjection{
 		Key: entry.Key, PluginID: entry.PluginID, Publisher: entry.PublisherLabel,
-		SourceLabel: entry.SourceLabel, ExpectedVersion: entry.ExpectedVersion,
-		ReleaseReady: entry.ReleaseReady, ExpectedBlueprintID: entry.ExpectedBlueprintID,
+		SourceLabel: entry.SourceLabel, SourceURL: entry.SourceRepository,
+		ExpectedVersion: entry.ExpectedVersion,
+		ReleaseReady:    entry.ReleaseReady, ExpectedBlueprintID: entry.ExpectedBlueprintID,
 		ExpectedProgramID:    entry.ExpectedProgramID,
 		RequiredHostFeatures: append([]string(nil), entry.RequiredHostFeatures...),
 		ExpectedProtocol:     entry.ExpectedProtocol,

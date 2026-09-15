@@ -20,6 +20,7 @@ const {
   projectFailureGuidance,
   integrationReviewRows,
   reviewRows,
+  safeExternalLink,
   newJourneyIdempotencyKey,
   setupJourneyCloseDismisses,
   setupJourneyControlDisabled,
@@ -196,6 +197,35 @@ test('integration reviews are named by their outcome', () => {
     ...parts.details
   ]);
   assert.equal(integrationReviewRows({ project_connection: {} }), null);
+
+  // The reviewed repository shows as its full URL and links out.
+  const linked = integrationReviewRows({
+    commit_action: 'install',
+    integration: { ...integration, source_url: 'https://github.com/johnjallday/reaper-plugin' }
+  });
+  assert.deepEqual(linked.summary.find(([label]) => label === 'Source')[1], {
+    text: 'https://github.com/johnjallday/reaper-plugin',
+    href: 'https://github.com/johnjallday/reaper-plugin'
+  });
+  // An unsafe URL falls back to the plain label, never a link.
+  for (const unsafe of [
+    'javascript:alert(1)',
+    'http://github.com/x',
+    'https://u:p@github.com/x',
+    'https://github.com/x?q=1',
+    'https://github.com/x#readme',
+    'not a url'
+  ]) {
+    assert.equal(safeExternalLink(unsafe), '', unsafe);
+    const fallback = integrationReviewRows({
+      commit_action: 'install',
+      integration: { ...integration, source_url: unsafe }
+    });
+    assert.equal(
+      fallback.summary.find(([label]) => label === 'Source')[1],
+      'johnjallday/reaper-plugin'
+    );
+  }
   assert.equal(integrationReviewPresentation({ commit_action: 'install' }), null);
   assert.equal(integrationReviewPresentation({ commit_action: 'other', integration }), null);
 });
