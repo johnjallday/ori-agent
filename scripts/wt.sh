@@ -1033,13 +1033,23 @@ function wt_start_execute {
   if (( WT_PLAN_COPY_DOCS )) && [[ -n "$WT_PLAN_PRD" || -n "$WT_PLAN_ISSUE_SNAPSHOT" || "$WT_PLAN_TASKS_STATE" != "none" ]]; then
     echo "Copying planning documents into new worktree..."
     mkdir -p "$WT_PLAN_TARGET/tasks"
-    [[ -n "$WT_PLAN_PRD" ]] && cp "$WT_PLAN_PRD" "$WT_PLAN_TARGET/tasks/"
-    [[ -n "$WT_PLAN_ISSUE_SNAPSHOT" ]] && cp "$WT_PLAN_ISSUE_SNAPSHOT" "$WT_PLAN_TARGET/tasks/"
+    # Each file is removed from dev's tasks/ only once its copy has landed in
+    # the worktree, so dev's queue always reflects work that hasn't been
+    # fanned out yet, and a failed cp leaves the dev source alone.
+    if [[ -n "$WT_PLAN_PRD" ]] && cp "$WT_PLAN_PRD" "$WT_PLAN_TARGET/tasks/"; then
+      rm -f -- "$WT_PLAN_PRD"
+    fi
+    if [[ -n "$WT_PLAN_ISSUE_SNAPSHOT" ]] && cp "$WT_PLAN_ISSUE_SNAPSHOT" "$WT_PLAN_TARGET/tasks/"; then
+      rm -f -- "$WT_PLAN_ISSUE_SNAPSHOT"
+    fi
     if [[ "$WT_PLAN_TASKS_STATE" == "present" && -n "$WT_PLAN_TASKS" ]]; then
-      cp "$WT_PLAN_TASKS" "$WT_PLAN_TARGET/tasks/"
+      if cp "$WT_PLAN_TASKS" "$WT_PLAN_TARGET/tasks/"; then
+        rm -f -- "$WT_PLAN_TASKS"
+      fi
     elif [[ "$WT_PLAN_TASKS_STATE" == "generate" ]]; then
       wt_write_starter_tasklist "$WT_PLAN_TARGET/tasks/tasks-$WT_PLAN_FEATURE.md" "$WT_PLAN_FEATURE"
     fi
+    echo "Removed source planning documents from dev/tasks/ (now living only in the new worktree)."
   fi
 
   # Nothing is recorded anywhere else. Starting a feature used to also write and
