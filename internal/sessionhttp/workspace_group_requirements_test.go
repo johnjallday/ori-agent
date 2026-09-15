@@ -42,6 +42,14 @@ func policyTemplate(policy projecttemplates.GroupPolicy) projecttemplates.Templa
 
 func newPolicyHandler(t *testing.T, template *projecttemplates.Template) (*Handler, agentworkspace.Store, func()) {
 	t.Helper()
+	return newPolicyHandlerAt(t, template, t.TempDir())
+}
+
+// newPolicyHandlerAt is newPolicyHandler with the FileStore root passed in
+// explicitly, so callers can point the fixture at a confirmed or staging
+// root layout instead of always getting a fresh t.TempDir().
+func newPolicyHandlerAt(t *testing.T, template *projecttemplates.Template, root string) (*Handler, agentworkspace.Store, func()) {
+	t.Helper()
 	skeleton := t.TempDir()
 	if err := os.WriteFile(filepath.Join(skeleton, "project.demo"), []byte("neutral project\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -55,7 +63,7 @@ func newPolicyHandler(t *testing.T, template *projecttemplates.Template) (*Handl
 		t.Fatal(err)
 	}
 	hybrid := session.NewHybridStoreWithDB(db, 20)
-	fileStore, err := agentworkspace.NewFileStore(t.TempDir())
+	fileStore, err := agentworkspace.NewFileStore(root)
 	if err != nil {
 		t.Fatal(err)
 	}
