@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,15 +19,61 @@ func questContribution(t *testing.T) *SurfaceContribution {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry, _ := specialist.Get("music_production")
-	q, err := specialist.NormalizeSetupJourney(*entry.SetupJourney)
+	q, err := specialist.NormalizeSetupJourney(projectSetupQuestFixture(c.Blueprints[0].ID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	q.ExpectedBlueprintID = c.Blueprints[0].ID
-	c.RequiresHostFeatures = append(c.RequiresHostFeatures, HostFeatureSetupQuestsV1)
+	c.RequiresHostFeatures = append(c.RequiresHostFeatures, HostFeatureSetupQuestsV2)
 	c.SetupQuests = []SetupQuest{*q}
 	return c
+}
+
+// projectSetupQuestFixture is a valid four-step plugin quest for one blueprint.
+func projectSetupQuestFixture(blueprintID string) specialist.SetupJourney {
+	return specialist.SetupJourney{
+		SchemaVersion: specialist.SetupJourneySchemaVersion, Version: 2, ID: "demo_setup",
+		Title: "Set up the demo", Description: "Connect a demo project and choose how Ori can help.",
+		IntegrationKey: "demo_integration", ExpectedBlueprintID: blueprintID, ExpectedAssistantProgramID: "demo-assistant",
+		Steps: []specialist.SetupJourneyStep{
+			{ID: "project", Kind: specialist.SetupStepProjectConnect, Title: "Connect a project", Description: "Connect a project."},
+			{ID: "workspace", Kind: specialist.SetupStepWorkspaceSetup, Title: "Choose how Ori works", Description: "Choose a mode."},
+			{ID: "staffing", Kind: specialist.SetupStepAssistantProgramStaffing, Title: "Add your team", Description: "Add roles."},
+			{ID: "summary", Kind: specialist.SetupStepSummary, Title: "Review setup", Description: "Review setup."},
+		},
+		WorkspaceLaunch: &specialist.WorkspaceLaunchCopy{GroupTitle: "Build your group", GroupName: "Demo group"},
+	}
+}
+
+// FR 7: a v2 four-step quest is accepted; the retired five-step layout and the
+// runtime launch copy are rejected, and the error names setup_quests_v2.
+func TestSetupQuestContributionAcceptsOnlyTheFourStepV2Shape(t *testing.T) {
+	if err := questContribution(t).Validate(); err != nil {
+		t.Fatalf("four-step v2 quest rejected: %v", err)
+	}
+
+	fiveStep := questContribution(t)
+	fiveStep.SetupQuests[0].Steps = append([]specialist.SetupJourneyStep{{
+		ID: "integration", Kind: specialist.SetupStepIntegrationInstall, Title: "Install", Description: "Install the plugin.",
+	}}, fiveStep.SetupQuests[0].Steps...)
+	err := fiveStep.Validate()
+	if !ContributionErrorIs(err, CodeContributionInvalid) || !strings.Contains(errors.Unwrap(err).Error(), HostFeatureSetupQuestsV2) {
+		t.Fatalf("five-step v2 quest error = %v (cause %v)", err, errors.Unwrap(err))
+	}
+
+	data, err := json.Marshal(questContribution(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
+	}
+	launch := document["setup_quests"].([]any)[0].(map[string]any)["workspace_launch"].(map[string]any)
+	launch["runtime_title"] = "Set up the app"
+	withRuntime, _ := json.Marshal(document)
+	if _, err := ParseSurfaceContribution(withRuntime); err == nil {
+		t.Fatal("manifest with runtime launch copy was accepted")
+	}
 }
 
 func TestSetupQuestContributionRequiresHostFeatureAndRejectsExecutableFields(t *testing.T) {
@@ -81,10 +128,28 @@ func TestSetupQuestContributionRequiresHostFeatureAndRejectsExecutableFields(t *
 	}
 }
 
-// FR 4: host account-link quests are a valid host shape, but a plugin may
-// author only the five-step specialist shape.
-func TestSetupQuestContributionRejectsHostAccountLinkShape(t *testing.T) {
+// Host account-link and install quests are valid host shapes, but a plugin may
+// author only the four-step project_setup shape.
+func TestSetupQuestContributionRejectsHostShapes(t *testing.T) {
 	c := questContribution(t)
+	install, err := specialist.NormalizeSetupJourney(specialist.SetupJourney{
+		SchemaVersion: specialist.SetupJourneySchemaVersion, Version: 1, ID: "install_demo_integration",
+		Title: "Install the demo plugin", Description: "Install the demo plugin.",
+		IntegrationKey: "demo_integration", ExpectedBlueprintID: c.Blueprints[0].ID, ExpectedAssistantProgramID: "demo-assistant",
+		Steps: []specialist.SetupJourneyStep{
+			{ID: "integration", Kind: specialist.SetupStepIntegrationInstall, Title: "Install", Description: "Install the plugin."},
+			{ID: "summary", Kind: specialist.SetupStepSummary, Title: "Ready", Description: "Continue setup."},
+		},
+	})
+	if err != nil {
+		t.Fatalf("host normalizer rejected the install fixture: %v", err)
+	}
+	c.SetupQuests = []SetupQuest{*install}
+	if err := c.Validate(); err == nil {
+		t.Fatal("plugin contribution accepted an install-shape setup quest")
+	}
+
+	c = questContribution(t)
 	accountLink, err := specialist.NormalizeSetupJourney(specialist.SetupJourney{
 		SchemaVersion: specialist.SetupJourneySchemaVersion, Version: 1, ID: "plugin_account_setup",
 		Title: "Set up an account", Description: "Create a workspace and link an account.",
@@ -112,14 +177,22 @@ func TestSetupQuestContributionRejectsHostAccountLinkShape(t *testing.T) {
 	}
 }
 
-// The published plugin schema stays exactly the five fixed specialist steps.
-func TestSetupQuestSchemaKeepsTheFiveFixedSteps(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("schema", "setup-quest-v1.schema.json"))
+// FR 8: the published plugin schema is exactly the four fixed project_setup
+// steps and a group-only launch object; the v1 schema is gone.
+func TestSetupQuestSchemaIsTheFourFixedSteps(t *testing.T) {
+	if _, err := os.Stat(filepath.Join("schema", "setup-quest-v1.schema.json")); !os.IsNotExist(err) {
+		t.Fatalf("retired v1 schema still exists: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join("schema", "setup-quest-v2.schema.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var schema struct {
 		Properties struct {
+			WorkspaceLaunch struct {
+				Required   []string                   `json:"required"`
+				Properties map[string]json.RawMessage `json:"properties"`
+			} `json:"workspace_launch"`
 			Steps struct {
 				MinItems    int `json:"minItems"`
 				MaxItems    int `json:"maxItems"`
@@ -137,12 +210,23 @@ func TestSetupQuestSchemaKeepsTheFiveFixedSteps(t *testing.T) {
 	if err := json.Unmarshal(data, &schema); err != nil {
 		t.Fatal(err)
 	}
+	want := specialist.SetupJourneyShapeSteps(specialist.SetupJourneyShapeProjectSetup)
 	steps := schema.Properties.Steps
-	if steps.MinItems != specialist.SetupJourneyRequiredSteps || steps.MaxItems != specialist.SetupJourneyRequiredSteps ||
-		steps.Items == nil || *steps.Items {
+	if steps.MinItems != len(want) || steps.MaxItems != len(want) || steps.Items == nil || *steps.Items {
 		t.Fatalf("schema step bounds changed: %+v", steps)
 	}
-	want := specialist.SetupJourneyShapeSteps(specialist.SetupJourneyShapeSpecialist)
+	launch := schema.Properties.WorkspaceLaunch
+	if len(launch.Properties) != 2 || launch.Properties["group_title"] == nil || launch.Properties["group_name"] == nil || len(launch.Required) != 2 {
+		t.Fatalf("schema launch copy = %+v", launch)
+	}
+	surface, err := os.ReadFile(filepath.Join("schema", "workspace-surface-v1.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(surface), `"setup-quest-v2.schema.json"`) || !strings.Contains(string(surface), `"setup_quests_v2"`) ||
+		strings.Contains(string(surface), "setup_quests_v1") {
+		t.Fatal("workspace surface schema does not reference the v2 quest contract")
+	}
 	if len(steps.PrefixItems) != len(want) {
 		t.Fatalf("schema declares %d steps, want %d", len(steps.PrefixItems), len(want))
 	}

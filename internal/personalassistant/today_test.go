@@ -541,6 +541,11 @@ func TestTodayServiceSpecialistSetupFailureIsBoundedAndDoesNotHideOtherSources(t
 	if got.State != "partial" || got.SpecialistSetup == nil || got.SpecialistSetup.Health.Reason != "read_failed" || got.Priorities.Health.Status != TodaySectionAvailable {
 		t.Fatalf("setup source failure was not isolated: %+v", got)
 	}
+	// FR 21: without a read, the card names the integration's install quest,
+	// the one quest that resolves whatever the plugin's state.
+	if got.SpecialistSetup.JourneyID != "install_ori_reaper" || got.SpecialistSetup.Title != "Install Ori REAPER Plugin" {
+		t.Fatalf("read-failed fallback = %q / %q", got.SpecialistSetup.JourneyID, got.SpecialistSetup.Title)
+	}
 	encoded, _ := json.Marshal(got.SpecialistSetup)
 	if strings.Contains(string(encoded), "/Users/") || strings.Contains(string(encoded), "secret-token") {
 		t.Fatalf("setup error leaked through Today: %s", encoded)

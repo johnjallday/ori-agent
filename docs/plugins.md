@@ -270,12 +270,16 @@ The Ori manifest's top-level fields are:
 - `services`: MCP stdio entrypoints, platform artifacts, and operations;
 - `blueprints`: bounded inert template references;
 - `requires_host_features`: explicit host feature requirements; and
-- `setup_quests`: optional bounded pre-workspace setup declarations, requiring `setup_quests_v1`.
+- `setup_quests`: optional bounded pre-workspace setup declarations, requiring `setup_quests_v2`. Each is a four-step `project_setup` quest; `setup_quests_v1` and its five-step layout are retired, so a manifest requiring v1 is refused.
 
 [Plugin-owned setup quests](plugin-setup-quests.md) are shared across Plugins,
 the template picker, and the assistant. A plugin blueprint references its own
 quest with `setup_quest`; the existing workspace `setup_wizard` remains the
 post-creation continuation. Ori retains all confirmations and execution authority.
+Installing a reviewed integration is not part of the plugin's quest: Ori
+generates an install quest for each reviewed integration, lists it under
+**Plugins → Available integrations** while the plugin is not installed, and
+hands off to the plugin's quest once it is.
 
 Unknown fields, blank or duplicate IDs, owner collisions, unsafe paths,
 unsupported placements/transports, invalid protocol ranges, unknown symbolic

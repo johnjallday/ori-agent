@@ -8,21 +8,20 @@ globalThis.document ||= { getElementById: () => null };
 
 const { setupWorkspacePlacement } = await import('./setup-workspace-creator.js');
 
-test('Required setup placement stays grouped and cannot bypass preparation', () => {
+test('Required setup placement stays grouped and opens once the group exists', () => {
   const missing = setupWorkspacePlacement({
     group_policy: 'required',
     available_compositions: ['grouped'],
-    exists: false,
-    acknowledged: false
+    exists: false
   });
   assert.equal(missing.groupComposition, 'grouped');
   assert.equal(missing.canOpen, false);
 
+  // No preparation acknowledgement is needed: the group existing is enough.
   const ready = setupWorkspacePlacement({
     group_policy: 'required',
     available_compositions: ['grouped'],
-    exists: true,
-    acknowledged: true
+    exists: true
   });
   assert.equal(ready.canOpen, true);
   assert.deepEqual(ready.availableCompositions, ['grouped']);

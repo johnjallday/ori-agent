@@ -10,18 +10,30 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/plugin"
+	"github.com/johnjallday/ori-agent/internal/specialist"
 )
 
 const (
 	RegistryRevision     = 2
 	MaxRegistryItems     = 16
 	reviewedClaudeFormat = plugin.FormatClaude
+
+	// Display copy feeds the host-generated install quest, whose step titles
+	// append a short suffix to DisplayName.
+	MaxDisplayNameBytes        = 100
+	MaxInstallTitleBytes       = specialist.MaxSetupJourneyTitleBytes
+	MaxInstallDescriptionBytes = specialist.MaxSetupJourneyTextBytes
 )
 
 // Entry is one host-reviewed immutable integration identity.
 type Entry struct {
-	Key                      string
-	PluginID                 string
+	Key      string
+	PluginID string
+	// DisplayName, InstallTitle and InstallDescription are inert plain-text
+	// copy for the generated install quest. They select no behavior.
+	DisplayName              string
+	InstallTitle             string
+	InstallDescription       string
 	ExpectedVersion          string
 	SourceRepository         string
 	SourceCommit             string
@@ -46,6 +58,15 @@ func (entry Entry) Source() string {
 		return ""
 	}
 	return entry.SourceRepository + "#sha=" + entry.SourceCommit
+}
+
+// InstallQuestPrefix prefixes an integration key to form the ID of the install
+// quest Ori generates for it.
+const InstallQuestPrefix = "install_"
+
+// InstallQuestID is the host quest ID generated for this integration.
+func (entry Entry) InstallQuestID() string {
+	return InstallQuestPrefix + strings.ToLower(strings.TrimSpace(entry.Key))
 }
 
 func (entry Entry) Clone() Entry {
@@ -89,6 +110,16 @@ func normalize(entry Entry) (Entry, error) {
 	entry.SourceLabel = strings.TrimSpace(entry.SourceLabel)
 	entry.ExpectedBlueprintID = strings.ToLower(strings.TrimSpace(entry.ExpectedBlueprintID))
 	entry.ExpectedProgramID = strings.ToLower(strings.TrimSpace(entry.ExpectedProgramID))
+	entry.DisplayName = strings.TrimSpace(entry.DisplayName)
+	entry.InstallTitle = strings.TrimSpace(entry.InstallTitle)
+	entry.InstallDescription = strings.TrimSpace(entry.InstallDescription)
+	if specialist.ValidateSetupJourneyText("display_name", entry.DisplayName, MaxDisplayNameBytes) != nil ||
+		strings.ContainsAny(entry.DisplayName, "\n\t") ||
+		specialist.ValidateSetupJourneyText("install_title", entry.InstallTitle, MaxInstallTitleBytes) != nil ||
+		strings.ContainsAny(entry.InstallTitle, "\n\t") ||
+		specialist.ValidateSetupJourneyText("install_description", entry.InstallDescription, MaxInstallDescriptionBytes) != nil {
+		return Entry{}, errors.New("reviewed integration display copy is invalid")
+	}
 	if !registryIDPattern.MatchString(entry.Key) || !registryIDPattern.MatchString(entry.PluginID) ||
 		!registryIDPattern.MatchString(entry.ExpectedBlueprintID) || !registryIDPattern.MatchString(entry.ExpectedProgramID) ||
 		!versionPattern.MatchString(entry.ExpectedVersion) || entry.PublisherLabel == "" || len(entry.PublisherLabel) > 100 ||

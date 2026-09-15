@@ -13,7 +13,7 @@ func TestHomePreparationIsIndependentAndReusesTheCanonicalGroup(t *testing.T) {
 	service, store, _ := connectionService(t)
 	scope := Scope{OwnerUserID: "owner-1", RunID: "first-run", Template: connectionTemplate(t)}
 	before, err := service.HomePreparation(scope)
-	if err != nil || before.Exists || before.Acknowledged {
+	if err != nil || before.Exists {
 		t.Fatalf("before: %+v %v", before, err)
 	}
 	key, _ := homeKey(scope)
@@ -26,11 +26,8 @@ func TestHomePreparationIsIndependentAndReusesTheCanonicalGroup(t *testing.T) {
 	if other, err := service.HomePreparation(otherOwner); err != nil || other.GroupTemplateID != wantTemplateID {
 		t.Fatalf("group template id must be owner-free: %+v %v", other, err)
 	}
-	if _, err := service.AcknowledgePreparation(scope); err == nil {
-		t.Fatal("acknowledged absent group")
-	}
 	home, err := service.CreateHome(scope, "My Studio")
-	if err != nil || !home.Exists || home.Name != "My Studio" || home.Acknowledged {
+	if err != nil || !home.Exists || home.Name != "My Studio" {
 		t.Fatalf("home: %+v %v", home, err)
 	}
 	ids, _ := store.List()
@@ -49,15 +46,15 @@ func TestHomePreparationIsIndependentAndReusesTheCanonicalGroup(t *testing.T) {
 	if err != nil || again.HomeID != home.HomeID || again.Name != "My Studio" {
 		t.Fatalf("reuse: %+v %v", again, err)
 	}
-	home, err = service.AcknowledgePreparation(scope)
-	if err != nil || !home.Acknowledged {
-		t.Fatalf("acknowledge: %+v %v", home, err)
-	}
-	// The acknowledgement survives a fresh service, but is not a runtime mode.
+	// The group is the only preparation readiness, and it survives a restart.
+	// Reading it never writes a shared-data acknowledgement.
 	restarted := NewService(store, nil)
 	observed, err := restarted.HomePreparation(scope)
-	if err != nil || !observed.Acknowledged {
+	if err != nil || !observed.Exists || observed.HomeID != home.HomeID {
 		t.Fatalf("restart: %+v %v", observed, err)
+	}
+	if stored, _ := store.Get(home.HomeID); stored != nil && stored.SharedData["setup_preparation_acknowledgement"] != nil {
+		t.Fatal("a preparation acknowledgement was written")
 	}
 	request := Request{ModeID: "new_project", WorkspaceName: "First Song", ProjectName: "First Song"}
 	preview, err := restarted.Preview(context.Background(), scope, request)
@@ -66,11 +63,12 @@ func TestHomePreparationIsIndependentAndReusesTheCanonicalGroup(t *testing.T) {
 	}
 	scope.Template.PluginOwner.PluginVersion = "2.0.0"
 	changed, err := restarted.HomePreparation(scope)
-	if err != nil || changed.Acknowledged {
-		t.Fatalf("changed integration retained acknowledgement: %+v %v", changed, err)
+	if err != nil || !changed.Exists {
+		t.Fatalf("group readiness depended on the integration version: %+v %v", changed, err)
 	}
 	data, _ := json.Marshal(changed)
-	if strings.Contains(string(data), "shared_data") || strings.Contains(string(data), "system_prompt") {
+	if strings.Contains(string(data), "shared_data") || strings.Contains(string(data), "system_prompt") ||
+		strings.Contains(string(data), "acknowledged") {
 		t.Fatal("preparation leaked owner internals")
 	}
 }

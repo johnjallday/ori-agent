@@ -834,10 +834,7 @@ function ptcRenderQuest(host, template) {
   help.textContent =
     quest.source === 'host'
       ? 'Ori built-in setup: review the team and create the workspace, connect your account, then confirm the link. Saved setup progress is shared across entry points.'
-      : 'Build or reuse your group, optionally prepare the app, then create or import a workspace. Saved setup progress is shared across entry points.' +
-        (quest.ownership === 'host_compatibility'
-          ? ' Ori provides compatibility setup for this plugin version.'
-          : '');
+      : 'Build or reuse your group, then create or import a workspace. Saved setup progress is shared across entry points.';
   host.append(link, help);
 }
 

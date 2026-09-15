@@ -27,19 +27,11 @@ function journey() {
       title: 'Set up your studio',
       workspace_launch: {
         group_title: 'Build Your Studio Group',
-        group_name: 'Studio',
-        runtime_title: 'Prepare Tools',
-        runtime_instructions: 'Check application prerequisites separately.'
+        group_name: 'Studio'
       }
     },
     receipts: {} as Record<string, string>,
     steps: [
-      {
-        id: 'integration',
-        kind: 'integration_install',
-        title: 'Install plugin',
-        status: 'complete'
-      },
       {
         id: 'project',
         kind: 'project_connect',
@@ -47,14 +39,16 @@ function journey() {
         status: 'current',
         preparation: {
           exists: false,
-          acknowledged: false,
           name: 'Studio',
           group_id: '',
           template_id: 'neutral-template',
           group_template_id: guidedTemplate.id
         },
         actions: [{ id: 'review_create_group', label: 'Review Group', effect: 'review' }]
-      }
+      },
+      { id: 'workspace', kind: 'workspace_setup', title: 'Choose a mode', status: 'pending' },
+      { id: 'staffing', kind: 'assistant_program_staffing', title: 'Add roles', status: 'pending' },
+      { id: 'summary', kind: 'summary', title: 'Review setup', status: 'pending' }
     ]
   };
 }
@@ -194,7 +188,7 @@ test('guided setup uses the shared creator with cancellation, exact retry and co
         return;
       }
       current.receipts.home_workspace_id = 'canonical-home';
-      Object.assign(current.steps[1].preparation!, {
+      Object.assign(current.steps[0].preparation!, {
         exists: true,
         group_id: 'canonical-home',
         name: 'My Studio'
@@ -262,7 +256,10 @@ test('guided setup uses the shared creator with cancellation, exact retry and co
   expect(commits[0]).toEqual(commits[1]);
   expect((commits[1] as any).review_token).toBe('review-1');
   await expect(creator).toBeHidden();
-  await expect(setup.locator('#specialistSetupJourneyStepTitle')).toHaveText('Prepare Tools');
+  // With the group built, the launch view moves straight to the workspace screen.
+  await expect(setup.locator('#specialistSetupJourneyStepTitle')).toHaveText(
+    'Create New Workspace'
+  );
   expect(genericCreates).toBe(0);
   expect(groupTemplateWrites).toEqual([]);
 });
@@ -273,8 +270,8 @@ test('a historical project with an unavailable group never offers replacement cr
   await settled(page);
   const current = journey();
   current.receipts = { home_workspace_id: 'old-home', project_workspace_id: 'old-project' };
-  current.steps[1].status = 'complete';
-  current.steps[1].actions = [];
+  current.steps[0].status = 'complete';
+  current.steps[0].actions = [];
   await page.route('**/api/personal-assistant/setup-journey**', route =>
     route.fulfill({ json: { setup_journey: current } })
   );

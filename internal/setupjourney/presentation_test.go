@@ -112,10 +112,7 @@ func TestServiceCreateOrResumeChildIsIdempotentAndCreatesNoCanonicalResource(t *
 	if err != nil {
 		t.Fatalf("new registry: %v", err)
 	}
-	service, err := NewService(store, &relationshipStub{state: acceptedRelationship()}, registry)
-	if err != nil {
-		t.Fatalf("new service: %v", err)
-	}
+	service := aliasService(t, store, &relationshipStub{state: acceptedRelationship()}, registry)
 	ctx := context.Background()
 	root, err := service.Read(ctx, "local", "")
 	if err != nil || root.Lifecycle != LifecycleReady {

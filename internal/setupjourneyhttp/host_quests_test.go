@@ -12,7 +12,9 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/hostquests"
+	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/setupjourney"
+	"github.com/johnjallday/ori-agent/internal/specialist"
 )
 
 func hostQuestHTTPMux(service *setupjourney.Service, user string) *http.ServeMux {
@@ -45,6 +47,64 @@ func journeyRunCount(t *testing.T, db *database.DB) int {
 		t.Fatal(err)
 	}
 	return count
+}
+
+// FR 14: the generated install quest uses the host-quest route family. Its
+// status read never creates a root; its first read creates one with two steps.
+func TestInstallQuestHTTPStatusNeverCreatesAndReadReturnsTwoSteps(t *testing.T) {
+	service, db := questHTTPFixture(t)
+	service.SetQuestCatalog(setupjourney.CombineQuestCatalogs(
+		setupjourney.NewHostQuestCatalog(hostquests.All()),
+		setupjourney.NewIntegrationInstallQuestCatalog(reviewedintegration.All, emptyQuestPlugins{}),
+		setupjourney.NewInstalledQuestCatalog(emptyQuestPlugins{}),
+	))
+	mux := hostQuestHTTPMux(service, "local")
+	request := func(method, path string) *httptest.ResponseRecorder {
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, httptest.NewRequest(method, path, nil))
+		return response
+	}
+	root := "/api/host-setup-quests/install_ori_reaper"
+
+	listed := request(http.MethodGet, "/api/setup-quests")
+	var list struct {
+		Quests []setupjourney.QuestSummary `json:"quests"`
+	}
+	if err := json.Unmarshal(listed.Body.Bytes(), &list); err != nil || listed.Code != http.StatusOK {
+		t.Fatalf("list: %d %s", listed.Code, listed.Body.String())
+	}
+	found := false
+	for _, quest := range list.Quests {
+		found = found || (quest.ID == "install_ori_reaper" && quest.IntegrationKey == "ori_reaper" &&
+			quest.DisplayName == "REAPER" && quest.PublisherLabel == "Ori" && quest.TemplateID == "")
+	}
+	if !found || !strings.Contains(listed.Body.String(), `"integration_key":"ori_reaper"`) {
+		t.Fatalf("install quest missing from the catalog: %s", listed.Body.String())
+	}
+
+	for range 2 {
+		status := request(http.MethodGet, root+"/status")
+		if status.Code != http.StatusOK || strings.TrimSpace(status.Body.String()) != `{"exists":false}` {
+			t.Fatalf("status before start: %d %s", status.Code, status.Body.String())
+		}
+	}
+	if count := journeyRunCount(t, db); count != 0 {
+		t.Fatalf("install quest status created %d rows", count)
+	}
+
+	opened := request(http.MethodGet, root)
+	var body journeyResponse
+	if err := json.Unmarshal(opened.Body.Bytes(), &body); err != nil || opened.Code != http.StatusOK || body.Journey == nil {
+		t.Fatalf("root read: %d %s", opened.Code, opened.Body.String())
+	}
+	if len(body.Journey.Steps) != 2 || body.Journey.Steps[0].Kind != specialist.SetupStepIntegrationInstall ||
+		body.Journey.Steps[1].Kind != specialist.SetupStepSummary || body.Journey.Journey.Source != setupjourney.QuestSourceHost ||
+		body.Journey.Journey.Title != "Install Ori REAPER Plugin" || body.Journey.Journey.WorkspaceLaunch != nil {
+		t.Fatalf("install projection: %s", opened.Body.String())
+	}
+	if count := journeyRunCount(t, db); count != 1 {
+		t.Fatalf("install quest read created %d roots, want 1", count)
+	}
 }
 
 func TestHostQuestHTTPListsStatusesAndScopesWithoutCreatingProgress(t *testing.T) {

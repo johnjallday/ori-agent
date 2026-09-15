@@ -2,6 +2,7 @@ package setupjourney
 
 import (
 	"encoding/json"
+	"net/url"
 	"strings"
 	"unicode"
 
@@ -10,12 +11,14 @@ import (
 
 // IntegrationProjection is the bounded reviewed identity plus the complete
 // plugin.Manager trust report. It is response-only and is never serialized to
-// setup journey persistence.
+// setup journey persistence. SourceURL is the registry's reviewed repository,
+// so a person can inspect the source before installing; it is https-only.
 type IntegrationProjection struct {
 	Key                  string              `json:"key"`
 	PluginID             string              `json:"plugin_id"`
 	Publisher            string              `json:"publisher"`
 	SourceLabel          string              `json:"source_label"`
+	SourceURL            string              `json:"source_url,omitempty"`
 	ExpectedVersion      string              `json:"expected_version"`
 	InstalledVersion     string              `json:"installed_version,omitempty"`
 	Enabled              bool                `json:"enabled"`
@@ -43,7 +46,7 @@ func validIntegrationProjection(value *IntegrationProjection) bool {
 		len(value.RequiredHostFeatures) == 0 || len(value.RequiredHostFeatures) > 8 ||
 		len(value.SupportedPlatforms) == 0 || len(value.SupportedPlatforms) > 8 ||
 		!safeIntegrationLabel(value.Publisher, 100) || !safeIntegrationLabel(value.SourceLabel, 200) ||
-		!validateDigest(value.StateRevision, false) {
+		!safeIntegrationSourceURL(value.SourceURL) || !validateDigest(value.StateRevision, false) {
 		return false
 	}
 	if value.Verified && (!value.ReleaseReady || value.DevelopmentCopy || value.ReplacementRequired ||
@@ -87,6 +90,20 @@ func safeIntegrationLabel(value string, max int) bool {
 		}
 	}
 	return true
+}
+
+// safeIntegrationSourceURL accepts an empty value or an absolute https URL
+// with a host and no credentials, query or fragment.
+func safeIntegrationSourceURL(value string) bool {
+	if value == "" {
+		return true
+	}
+	if len(value) > 300 || !safeIntegrationLabel(value, 300) || strings.ContainsAny(value, " \t") {
+		return false
+	}
+	parsed, err := url.Parse(value)
+	return err == nil && parsed.Scheme == "https" && parsed.Host != "" && parsed.User == nil &&
+		parsed.RawQuery == "" && parsed.Fragment == "" && !strings.HasSuffix(parsed.Host, ".")
 }
 
 func cloneIntegrationProjection(source *IntegrationProjection) *IntegrationProjection {

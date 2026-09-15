@@ -23,8 +23,38 @@ import {
   hostSetupQuestAPIRoot,
   setupJourneyAPIRoot,
   setupQuestAPIRoot,
+  setupQuestOpenDetail,
   userTemplateSetupQuestAPIRoot
 } from './setup-quest-links.js';
+
+export const PLUGINS_PAGE_URL = '/plugins';
+
+// integrationHandoffNavigation turns an install quest's summary offer into the
+// one browser request it makes. The target is the server-resolved handoff on
+// the summary step; its key is validated through the host route helper and the
+// event detail is built by the shared helper, never from display text.
+export function integrationHandoffNavigation(step, actionID) {
+  if (actionID === 'open_plugins') return { kind: 'location', url: PLUGINS_PAGE_URL };
+  if (actionID !== 'continue_integration_setup') return null;
+  const handoff = step?.handoff;
+  if (handoff?.source !== 'plugin') return null;
+  try {
+    setupQuestAPIRoot(handoff.plugin_id, handoff.id);
+  } catch (_) {
+    return null;
+  }
+  return {
+    kind: 'open_quest',
+    detail: setupQuestOpenDetail({ source: 'plugin', plugin_id: handoff.plugin_id, id: handoff.id })
+  };
+}
+
+// setupJourneyActionLabel names the continue offer after the quest it opens.
+export function setupJourneyActionLabel(step, action) {
+  const title = String(step?.handoff?.title || '').trim();
+  if (action?.id === 'continue_integration_setup' && title) return `Continue: ${title}`;
+  return accountActionLabel(step, action);
+}
 
 // setupQuestSelectionFromParams turns a `?setup=quest` deep link into the
 // selection openSpecialistSetupJourney understands. The parameters are only a
@@ -47,7 +77,6 @@ const state = {
   journey: null,
   selectedStepID: '',
   launchStage: '',
-  preparationCheck: null,
   draft: null,
   projectDrafts: {},
   review: null,
@@ -104,19 +133,26 @@ export function setupJourneyReceiptRows(journey, step) {
   const rows = [];
   if (step?.integration) {
     rows.push(['Integration', step.integration.plugin_id]);
-    rows.push(['Installed', step.integration.installed_version ? 'Yes' : 'No']);
-    rows.push(['Version', step.integration.installed_version || step.integration.expected_version]);
-    rows.push(['Enabled', step.integration.enabled ? 'Yes' : 'Not yet']);
-    rows.push([
-      'Verification',
-      step.integration.development_copy
-        ? 'Local development copy — not release-verified'
-        : step.integration.verified
-          ? 'Verified release'
-          : 'Not verified for guided setup'
-    ]);
-    if (step.integration.replacement_required) {
-      rows.push(['Next step', 'Review the verified replacement before continuing']);
+    if (!step.integration.installed_version) {
+      // Before install, enablement and verification are not states yet; the
+      // version is the one that will be installed.
+      rows.push(['Installed', 'No']);
+      rows.push(['Version to install', step.integration.expected_version]);
+    } else {
+      rows.push(['Installed', 'Yes']);
+      rows.push(['Version', step.integration.installed_version]);
+      rows.push(['Enabled', step.integration.enabled ? 'Yes' : 'Not yet']);
+      rows.push([
+        'Verification',
+        step.integration.development_copy
+          ? 'Local development copy — not release-verified'
+          : step.integration.verified
+            ? 'Verified release'
+            : 'Not verified for guided setup'
+      ]);
+      if (step.integration.replacement_required) {
+        rows.push(['Next step', 'Review the verified replacement before continuing']);
+      }
     }
   }
   if (step?.workspace_setup) {
@@ -130,6 +166,20 @@ export function setupJourneyReceiptRows(journey, step) {
   }
   if (step?.kind === 'project_connect' && journey?.receipts?.project_workspace_id) {
     rows.push(['Project', 'Connected']);
+  }
+  // An install quest's summary restates what its install step verified.
+  if (
+    step?.kind === 'summary' &&
+    journey?.journey?.source === 'host' &&
+    !journey?.journey?.workspace_launch &&
+    journey?.receipts?.integration_plugin_id
+  ) {
+    rows.push([
+      'Installed',
+      [journey.receipts.integration_plugin_id, journey.receipts.integration_version]
+        .filter(Boolean)
+        .join(' ')
+    ]);
   }
   rows.push(...accountStepReceiptRows(step));
   if (journey?.lifecycle === 'ready') rows.push(['Setup', 'Ready']);
@@ -253,6 +303,28 @@ function makeText(tag, className, text) {
   return node;
 }
 
+// safeExternalLink returns a plain https URL suitable for an outbound link, or
+// '' when the value has another scheme, credentials, a query or a fragment.
+export function safeExternalLink(value) {
+  try {
+    const parsed = new URL(String(value || ''));
+    if (
+      parsed.protocol !== 'https:' ||
+      !parsed.hostname ||
+      parsed.username ||
+      parsed.password ||
+      parsed.search ||
+      parsed.hash
+    )
+      return '';
+    return parsed.href;
+  } catch (_) {
+    return '';
+  }
+}
+
+// appendRows renders label/value rows. A value may be { text, href } for a
+// link that opens in a new tab; the href must already be a safe https URL.
 function appendRows(container, rows, className = 'setup-journey__receipt-list') {
   if (!rows.length) return;
   const list = document.createElement('ul');
@@ -260,7 +332,19 @@ function appendRows(container, rows, className = 'setup-journey__receipt-list') 
   rows.forEach(([label, value]) => {
     const item = document.createElement('li');
     const strong = makeText('strong', '', `${label}: `);
-    item.append(strong, document.createTextNode(String(value)));
+    const href = value && typeof value === 'object' ? safeExternalLink(value.href) : '';
+    if (href) {
+      const link = makeText('a', '', value.text || href);
+      link.href = href;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      item.append(strong, link);
+    } else {
+      item.append(
+        strong,
+        document.createTextNode(value && typeof value === 'object' ? value.text : String(value))
+      );
+    }
     list.appendChild(item);
   });
   container.appendChild(list);
@@ -325,6 +409,10 @@ function render() {
   const elements = ui();
   if (!elements || !state.journey) return;
   const journey = state.journey;
+  if (journey.precondition && !journey.declaration_incompatible) {
+    renderPrecondition(journey);
+    return;
+  }
   if (
     journey.journey?.workspace_launch &&
     !journey.declaration_incompatible &&
@@ -402,48 +490,170 @@ function render() {
   appendRows(elements.receipt, setupJourneyReceiptRows(journey, step));
   renderDraft(step);
   renderActions(step);
+  renderStartOver(journey);
   renderReview();
   elements.live.textContent = journey.busy
     ? 'Ori is checking the previous change. Check its status before trying again.'
     : '';
 }
 
+export const START_OVER_EXPLANATION =
+  'Your group, project and team stay. Only your setup progress is reset.';
+
+// setupJourneyStartOverView offers Start over for a root whose saved
+// declaration is incompatible (FR 38). User-template quests reset by removing
+// and recreating the quest, so they have no restart route.
+export function setupJourneyStartOverView(journey) {
+  if (!journey?.declaration_incompatible) return null;
+  if (journey.run_kind && journey.run_kind !== 'root') return null;
+  if (journey.journey?.source === 'user_template') return null;
+  let root = '';
+  try {
+    root = setupJourneyAPIRoot(journey);
+  } catch (_) {
+    return null;
+  }
+  return { label: 'Start over', explanation: START_OVER_EXPLANATION, url: `${root}/restart` };
+}
+
+function renderStartOver(journey) {
+  const view = setupJourneyStartOverView(journey);
+  if (!view || state.pendingCommit || journey.busy) return;
+  const elements = ui();
+  elements.receipt.appendChild(makeText('p', 'setup-journey__start-over-note', view.explanation));
+  const button = makeText('button', 'setup-journey__action', view.label);
+  button.type = 'button';
+  button.dataset.effect = 'commit';
+  button.dataset.action = 'start_over';
+  button.dataset.primary = 'true';
+  button.addEventListener('click', () => startOver(view.url, button));
+  elements.actions.appendChild(button);
+}
+
+async function startOver(url, trigger) {
+  if (state.busy) return;
+  state.returnFocus = trigger;
+  showError('');
+  setBusy(true, 'Starting setup over…');
+  try {
+    const payload = await request(url, { method: 'POST' });
+    state.journey = payload?.setup_journey || state.journey;
+    state.selectedStepID = state.journey?.current_step_id || '';
+    state.managementView = false;
+    state.launchStage = '';
+    state.draft = null;
+    state.projectDrafts = {};
+    state.pendingCommit = null;
+    state.review = null;
+    render();
+    ui()?.stepTitle?.focus();
+  } catch (error) {
+    if (error.current) {
+      state.journey = error.current;
+      render();
+    }
+    showError(error.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+export const WORKSPACE_LAUNCH_DESCRIPTION = 'Create your group, then create a workspace.';
+
+// workspaceLaunchStages is the two-screen launch view of a project_setup quest.
+// Installing the integration is a precondition, not a screen, and live-control
+// readiness belongs to the workspace's own Setup Wizard.
 export function workspaceLaunchStages(journey) {
   const copy = journey.journey.workspace_launch;
-  const integration = journey.steps.find(step => step.kind === 'integration_install');
   const project = journey.steps.find(step => step.kind === 'project_connect');
   const preparation = project?.preparation;
   const connected =
     project?.status === 'complete' && Boolean(journey.receipts?.project_workspace_id);
-  const installed = integration?.status === 'complete';
   const grouped = Boolean(preparation?.exists);
   const policy = preparation?.group_policy || 'required';
   const groupOptional = policy === 'recommended' || policy === 'none';
   const groupComplete = grouped || policy === 'none';
-  const acknowledged = Boolean(preparation?.acknowledged || connected);
-  const preparationComplete = acknowledged || (groupOptional && !grouped);
-  const workspaceEnabled = installed && (groupOptional || (grouped && acknowledged));
   return [
-    {
-      id: 'integration',
-      title: integration?.title || 'Install plugin',
-      complete: installed,
-      enabled: true
-    },
-    { id: 'group', title: copy.group_title, complete: groupComplete, enabled: installed },
-    {
-      id: 'preparation',
-      title: copy.runtime_title,
-      complete: preparationComplete,
-      enabled: installed && grouped
-    },
+    { id: 'group', title: copy.group_title, complete: groupComplete, enabled: true },
     {
       id: 'workspace',
       title: 'Create New Workspace',
       complete: connected,
-      enabled: workspaceEnabled
+      enabled: groupComplete || groupOptional
     }
   ];
+}
+
+// setupJourneyPreconditionView describes the single blocked panel shown while a
+// project_setup quest's integration is not ready. The install quest detail is
+// built only from the server's install quest ID, validated as a host route.
+export function setupJourneyPreconditionView(journey) {
+  const precondition = journey?.precondition;
+  if (!precondition) return null;
+  let installDetail = null;
+  try {
+    hostSetupQuestAPIRoot(precondition.install_quest_id);
+    installDetail = setupQuestOpenDetail({ source: 'host', id: precondition.install_quest_id });
+  } catch (_) {
+    installDetail = null;
+  }
+  return {
+    guidance: String(precondition.guidance || ''),
+    rows: setupJourneyReceiptRows({}, { integration: precondition.integration }),
+    installDetail
+  };
+}
+
+// renderPrecondition shows the one blocked panel of a project_setup quest whose
+// integration is not ready (FR 28): guidance, the integration receipt, and the
+// install quest. No launch screen is enabled.
+function renderPrecondition(journey) {
+  const elements = ui();
+  const view = setupJourneyPreconditionView(journey);
+  elements.title.textContent = journey.journey?.title || 'Setup';
+  elements.description.textContent = journey.journey?.workspace_launch
+    ? WORKSPACE_LAUNCH_DESCRIPTION
+    : journey.journey?.description || '';
+  elements.steps.replaceChildren();
+  const labels = journey.journey?.workspace_launch
+    ? workspaceLaunchStages(journey).map(stage => stage.title)
+    : (journey.steps || []).map(step => step.title);
+  labels.forEach((label, index) => {
+    const button = makeText('button', 'setup-journey__step-button', '');
+    button.type = 'button';
+    button.dataset.status = 'blocked';
+    button.disabled = true;
+    button.dataset.unavailable = 'true';
+    button.append(
+      makeText('span', 'setup-journey__step-number', String(index + 1)),
+      makeText('span', 'setup-journey__step-label', label)
+    );
+    const li = document.createElement('li');
+    li.appendChild(button);
+    elements.steps.appendChild(li);
+  });
+  elements.stepState.textContent = statusLabel('blocked');
+  elements.stepTitle.textContent = 'The integration needs attention';
+  elements.stepDescription.textContent = view.guidance;
+  elements.receipt.replaceChildren();
+  appendRows(elements.receipt, view.rows);
+  elements.draft.replaceChildren();
+  elements.review.replaceChildren();
+  elements.review.hidden = true;
+  elements.actions.replaceChildren();
+  if (view.installDetail) {
+    const open = makeText('button', 'setup-journey__action', 'Open install quest');
+    open.type = 'button';
+    open.dataset.effect = 'review';
+    open.addEventListener('click', () => {
+      // Opens the install quest in this same modal; this quest is unchanged.
+      window.dispatchEvent(
+        new CustomEvent('ori:open-specialist-setup', { detail: view.installDetail })
+      );
+    });
+    elements.actions.appendChild(open);
+  }
+  elements.live.textContent = '';
 }
 
 function renderWorkspaceLaunch(journey) {
@@ -453,31 +663,21 @@ function renderWorkspaceLaunch(journey) {
   const current = stages.find(stage => !stage.complete) || stages.at(-1);
   const stage = stages.find(item => item.id === state.launchStage && item.enabled) || current;
   state.launchStage = stage.id;
-  const integration = journey.steps.find(step => step.kind === 'integration_install');
   const project = journey.steps.find(step => step.kind === 'project_connect');
   const preparation = project?.preparation;
-  state.selectedStepID = stage.id === 'integration' ? integration.id : project.id;
+  state.selectedStepID = project.id;
   elements.title.textContent = journey.journey.title;
-  elements.description.textContent =
-    'Install the plugin, create your group, prepare the application, then create a workspace.';
+  elements.description.textContent = WORKSPACE_LAUNCH_DESCRIPTION;
   elements.steps.replaceChildren();
   stages.forEach((item, index) => {
     const button = makeText('button', 'setup-journey__step-button', '');
     button.type = 'button';
-    button.dataset.status = item.complete
-      ? item.id === 'preparation'
-        ? 'acknowledged'
-        : 'complete'
-      : 'pending';
+    button.dataset.status = item.complete ? 'complete' : 'pending';
     button.disabled = !item.enabled;
     button.dataset.unavailable = item.enabled ? 'false' : 'true';
     if (item.id === stage.id) button.setAttribute('aria-current', 'step');
     button.append(
-      makeText(
-        'span',
-        'setup-journey__step-number',
-        item.complete ? (item.id === 'preparation' ? '–' : '✓') : String(index + 1)
-      ),
+      makeText('span', 'setup-journey__step-number', item.complete ? '✓' : String(index + 1)),
       makeText('span', 'setup-journey__step-label', item.title)
     );
     button.addEventListener('click', () => {
@@ -493,7 +693,7 @@ function renderWorkspaceLaunch(journey) {
     li.appendChild(button);
     elements.steps.appendChild(li);
   });
-  elements.stepState.textContent = `Step ${stages.indexOf(stage) + 1} of 4`;
+  elements.stepState.textContent = `Step ${stages.indexOf(stage) + 1} of ${stages.length}`;
   elements.stepTitle.textContent = stage.title;
   elements.stepDescription.textContent = '';
   elements.receipt.replaceChildren();
@@ -507,23 +707,7 @@ function renderWorkspaceLaunch(journey) {
     elements.actions.appendChild(control);
   };
   if (journey.busy || state.pendingCommit) {
-    renderActions(stage.id === 'integration' ? integration : project);
-  } else if (stage.id === 'integration') {
-    elements.stepDescription.textContent = integration.description;
-    appendRows(elements.receipt, setupJourneyReceiptRows(journey, integration));
-    if (integration.guidance) elements.receipt.appendChild(makeText('p', '', integration.guidance));
-    renderActions(integration);
-    button('Check Again', refreshJourney);
-    if (stage.complete)
-      button(
-        'Continue',
-        () => {
-          state.launchStage = 'group';
-          render();
-          elements.stepTitle.focus();
-        },
-        true
-      );
+    renderActions(project);
   } else if (stage.id === 'group') {
     appendRows(elements.receipt, groupTemplateRows(preparation));
     if (preparation?.exists) {
@@ -531,7 +715,7 @@ function renderWorkspaceLaunch(journey) {
       button(
         'Continue',
         () => {
-          state.launchStage = 'preparation';
+          state.launchStage = 'workspace';
           render();
           elements.stepTitle.focus();
         },
@@ -570,21 +754,6 @@ function renderWorkspaceLaunch(journey) {
       elements.stepDescription.textContent = `Create “${copy.group_name}”, the one group for these projects. Only the group is created now; its coordinator and each project's team are set up afterward.`;
       button('Build Group', launchGroupBuilder, true);
     }
-  } else if (stage.id === 'preparation') {
-    elements.stepDescription.textContent = copy.runtime_instructions;
-    elements.receipt.appendChild(
-      makeText(
-        'p',
-        '',
-        state.preparationCheck == null
-          ? 'Not checked. Live project control is not enabled.'
-          : state.preparationCheck
-            ? 'Application prerequisites are available. Project access is still not approved or tested.'
-            : 'More setup is needed. You can continue with files and finish live-control setup from workspace Settings.'
-      )
-    );
-    button('Check Setup', checkPreparation);
-    button(state.preparationCheck ? 'Continue' : 'Set up later', acknowledgePreparation, true);
   } else {
     if (preparation?.group_policy === 'none') {
       elements.stepDescription.textContent =
@@ -695,51 +864,6 @@ function groupTemplateRows(preparation) {
   return rows;
 }
 
-async function checkPreparation() {
-  if (state.busy) return;
-  state.preparationCheck = null;
-  setBusy(true, 'Checking application prerequisites…');
-  showError('');
-  try {
-    const result = await request(runURL('/preparation'));
-    state.preparationCheck = result.ready === true;
-    render();
-  } catch (_) {
-    render();
-    showError(
-      'Application setup could not be checked. You can try again or set it up later; live control is not enabled.'
-    );
-  } finally {
-    setBusy(false);
-  }
-}
-
-async function acknowledgePreparation() {
-  if (state.busy) return;
-  const preparation = state.journey.steps.find(
-    step => step.kind === 'project_connect'
-  )?.preparation;
-  if (!preparation?.acknowledged && !state.journey.receipts?.project_workspace_id) {
-    setBusy(true, 'Saving your place…');
-    showError('');
-    try {
-      const payload = await request(runURL('/actions/acknowledge_preparation'), {
-        method: 'POST',
-        body: JSON.stringify(mutationBody({ input: {} }))
-      });
-      state.journey = payload.setup_journey;
-    } catch (error) {
-      showError(error.message);
-      return;
-    } finally {
-      setBusy(false);
-    }
-  }
-  state.launchStage = 'workspace';
-  render();
-  ui().stepTitle.focus();
-}
-
 async function launchGroupBuilder() {
   if (state.launchingGroup || isGroupBuilderOpen() || state.busy || state.journey?.busy) return;
   state.launchingGroup = true;
@@ -754,7 +878,7 @@ async function launchGroupBuilder() {
         onClose: current => {
           state.launchingGroup = false;
           if (state.journey?.run_id !== journey.run_id) return;
-          state.launchStage = groupBuildState(current) === 'existing' ? 'preparation' : 'group';
+          state.launchStage = groupBuildState(current) === 'existing' ? 'workspace' : 'group';
           render();
           state.modal?.show();
         }
@@ -842,10 +966,16 @@ function renderActions(step) {
   }
   if (step?.kind === 'project_connect' && state.draft) return;
   (step?.actions || []).forEach(action => {
-    const button = makeText('button', 'setup-journey__action', accountActionLabel(step, action));
+    const button = makeText(
+      'button',
+      'setup-journey__action',
+      setupJourneyActionLabel(step, action)
+    );
     button.type = 'button';
     button.dataset.effect = action.effect || '';
     button.dataset.action = action.id || '';
+    // Continuing into the plugin's quest is the install summary's next step.
+    if (action.id === 'continue_integration_setup') button.dataset.primary = 'true';
     button.addEventListener('click', () => handleAction(action, button));
     container.appendChild(button);
   });
@@ -1279,6 +1409,41 @@ async function reviewAction(actionID, input) {
   }
 }
 
+// integrationReviewPresentation names an integration review by its outcome:
+// install, enable, or replace. stepTitle is the integration step's own title,
+// which the registry supplies. Other reviews return null.
+export function integrationReviewPresentation(review, stepTitle = '') {
+  const integration = review?.integration;
+  if (!integration) return null;
+  if (integration.replacement_required === true || review.commit_action === 'update') {
+    return {
+      title: 'Replace installed integration?',
+      description:
+        'Replace the current installation with Ori’s reviewed version, even if the version number is unchanged. Its enabled state is preserved. Existing workspaces and project files are not deleted; runtime access may need review again.',
+      confirm: 'Replace with reviewed version'
+    };
+  }
+  if (review.commit_action === 'install') {
+    const version = integration.expected_version ? ` ${integration.expected_version}` : '';
+    const source = integration.source_label ? ` from ${integration.source_label}` : '';
+    const title = String(stepTitle || '').trim();
+    return {
+      title: title ? `${title}?` : 'Install this plugin?',
+      description: `Ori downloads the reviewed${version} release${source}, checks its fingerprint, and installs it. Nothing runs until you enable it.`,
+      confirm: 'Install'
+    };
+  }
+  if (review.commit_action === 'enable') {
+    return {
+      title: 'Enable this plugin?',
+      description:
+        'Enabling lets Ori use the installed plugin’s blueprints, tools and guided setup. You can disable it again on the Plugins page.',
+      confirm: 'Enable'
+    };
+  }
+  return null;
+}
+
 function renderReview() {
   const container = ui().review;
   container.replaceChildren();
@@ -1288,7 +1453,11 @@ function renderReview() {
   const project = state.review.project_connection;
   const group = state.review.group;
   const accountLink = accountLinkReviewPresentation(state.review);
-  const replacement = state.review.integration?.replacement_required === true;
+  const reviewedStep = setupJourneyCurrentStep(state.journey, state.selectedStepID);
+  const integrationPresentation = integrationReviewPresentation(
+    state.review,
+    reviewedStep?.kind === 'integration_install' ? reviewedStep.title : ''
+  );
   const presentation = project
     ? projectReviewPresentation(project)
     : group
@@ -1302,8 +1471,7 @@ function renderReview() {
   const heading = makeText(
     'h4',
     '',
-    presentation?.title ||
-      (replacement ? 'Replace installed integration?' : 'Review before making changes')
+    presentation?.title || integrationPresentation?.title || 'Review before making changes'
   );
   heading.tabIndex = -1;
   container.appendChild(heading);
@@ -1366,16 +1534,27 @@ function renderReview() {
     if (project.defaults_statement)
       container.appendChild(makeText('p', 'setup-journey__scope-note', project.defaults_statement));
   } else {
-    if (replacement) {
-      container.appendChild(
-        makeText(
-          'p',
-          '',
-          'Replace the current installation with Ori’s reviewed version, even if the version number is unchanged. Its enabled state is preserved. Existing workspaces and project files are not deleted; runtime access may need review again.'
-        )
-      );
+    if (integrationPresentation) {
+      container.appendChild(makeText('p', '', integrationPresentation.description));
     }
-    appendRows(container, reviewRows(state.review), 'setup-journey__review-list');
+    const integrationRows = integrationReviewRows(state.review);
+    appendRows(
+      container,
+      [
+        ...(integrationRows?.summary || []),
+        ...reviewRows({ ...state.review, integration: undefined })
+      ],
+      'setup-journey__review-list'
+    );
+    if (integrationRows?.details.length) {
+      // The full trust disclosure stays available but collapsed, so the
+      // decision and its buttons are not pushed below a wall of data.
+      const technical = document.createElement('details');
+      technical.className = 'setup-journey__options setup-journey__technical';
+      technical.appendChild(makeText('summary', '', 'Technical details'));
+      appendRows(technical, integrationRows.details, 'setup-journey__review-list');
+      container.appendChild(technical);
+    }
   }
   const controls = document.createElement('div');
   controls.className = 'setup-journey__review-controls';
@@ -1393,7 +1572,7 @@ function renderReview() {
   const confirm = makeText(
     'button',
     'setup-journey__action setup-journey__review-confirm',
-    presentation?.confirm || (replacement ? 'Replace with reviewed version' : 'Confirm this change')
+    presentation?.confirm || integrationPresentation?.confirm || 'Confirm this change'
   );
   confirm.type = 'button';
   confirm.addEventListener('click', commitReview);
@@ -1401,33 +1580,51 @@ function renderReview() {
   container.appendChild(controls);
 }
 
-function reviewRows(review) {
+// integrationReviewRows splits an integration review into the few facts a
+// person decides on and the technical trust disclosure, which the review panel
+// keeps collapsed. Returns null for reviews without an integration.
+export function integrationReviewRows(review) {
+  const integration = review?.integration;
+  if (!integration) return null;
+  // The full repository URL links out so the source can be checked first.
+  const sourceURL = safeExternalLink(integration.source_url);
+  const summary = [
+    ['Publisher', integration.publisher],
+    [
+      'Source',
+      sourceURL ? { text: integration.source_url, href: sourceURL } : integration.source_label
+    ],
+    ...(integration.installed_version
+      ? [['Installed version', integration.installed_version]]
+      : []),
+    ['Reviewed version', integration.expected_version],
+    [
+      'Enabled after this action',
+      review.commit_action === 'enable' ? 'Yes' : integration.enabled ? 'Already enabled' : 'No'
+    ]
+  ];
+  const details = [
+    ['Integration', integration.plugin_id],
+    ['Platform', (integration.supported_platforms || []).join(', ')],
+    ['Required host features', (integration.required_host_features || []).join(', ')]
+  ];
+  Object.entries(integration.trust || {}).forEach(([key, value]) => {
+    if (value === null || value === '' || (Array.isArray(value) && !value.length)) return;
+    details.push([
+      humanize(key),
+      Array.isArray(value)
+        ? value.map(item => (typeof item === 'object' ? JSON.stringify(item) : item)).join('; ')
+        : String(value)
+    ]);
+  });
+  const present = row => row[1] !== undefined && row[1] !== null && row[1] !== '';
+  return { summary: summary.filter(present), details: details.filter(present) };
+}
+
+export function reviewRows(review) {
   const rows = [];
-  const integration = review.integration;
-  if (integration) {
-    rows.push(
-      ['Integration', integration.plugin_id],
-      ['Publisher', integration.publisher],
-      ['Source', integration.source_label],
-      ...(integration.installed_version
-        ? [['Installed version', integration.installed_version]]
-        : []),
-      ['Reviewed version', integration.expected_version],
-      ['Platform', (integration.supported_platforms || []).join(', ')],
-      ['Required host features', (integration.required_host_features || []).join(', ')],
-      ['Enabled after this action', integration.enabled ? 'Already enabled' : 'No']
-    );
-    const trust = integration.trust || {};
-    Object.entries(trust).forEach(([key, value]) => {
-      if (value === null || value === '' || (Array.isArray(value) && !value.length)) return;
-      rows.push([
-        humanize(key),
-        Array.isArray(value)
-          ? value.map(item => (typeof item === 'object' ? JSON.stringify(item) : item)).join('; ')
-          : String(value)
-      ]);
-    });
-  }
+  const integrationRows = integrationReviewRows(review);
+  if (integrationRows) rows.push(...integrationRows.summary, ...integrationRows.details);
   const project = review.project_connection;
   if (project) {
     rows.push(['Workspace', project.workspace_name]);
@@ -1569,8 +1766,27 @@ async function navigateAction(actionID) {
     state.journey?.steps.find(step => step.kind === 'project_connect')?.preparation?.group_id;
   switch (actionID) {
     case 'manage_integration':
-      window.location.assign('/plugins');
+      window.location.assign(PLUGINS_PAGE_URL);
       return;
+    case 'open_plugins':
+    case 'continue_integration_setup': {
+      const summary = (state.journey?.steps || []).find(step => step.kind === 'summary');
+      const navigation = integrationHandoffNavigation(summary, actionID);
+      if (!navigation) {
+        showError('That setup is unavailable right now. Refresh setup and try again.');
+        return;
+      }
+      if (navigation.kind === 'location') {
+        window.location.assign(navigation.url);
+        return;
+      }
+      // Opens the plugin's quest in this same modal. The install quest stays
+      // ready; it is neither dismissed nor changed.
+      window.dispatchEvent(
+        new CustomEvent('ori:open-specialist-setup', { detail: navigation.detail })
+      );
+      return;
+    }
     case 'open_project':
       if (!receipts.project_workspace_id) return;
       setBusy(true, 'Sending an operating-system open request…');
@@ -1830,7 +2046,6 @@ export async function openSpecialistSetupJourney(requested = null) {
     state.selectedStepID = state.journey.current_step_id || '';
     state.launchStage = '';
     state.managementView = false;
-    state.preparationCheck = null;
     if (
       previousRunID !== state.journey.run_id ||
       (!state.journey.busy && state.journey.receipts?.project_workspace_id)

@@ -221,7 +221,7 @@ func TestUserSetupQuestStrictParserRejectsExecutableUnknownAndFixedStepDrift(t *
 		"foreign source": func(raw map[string]any) { raw["source"] = "plugin" },
 		"owner plugin":   func(raw map[string]any) { raw["owner_plugin_id"] = "reaper-plugin" },
 		"missing step": func(raw map[string]any) {
-			raw["steps"] = raw["steps"].([]any)[:4]
+			raw["steps"] = raw["steps"].([]any)[:3]
 		},
 		"reordered steps": func(raw map[string]any) {
 			steps := raw["steps"].([]any)
@@ -260,6 +260,106 @@ func TestUserSetupQuestStrictParserRejectsExecutableUnknownAndFixedStepDrift(t *
 
 // FR 4: the host account-link shape is valid for the host normalizer but never
 // authorable on a user template, through either the parser or the editor.
+// FR 31: the default draft and every saved quest use the four project_setup
+// steps and group-only launch copy.
+func TestUserSetupQuestAuthorsTheFourStepProjectSetupShape(t *testing.T) {
+	_, template := userQuestTemplateFixture(t)
+	draft := DefaultUserSetupQuestDraft()
+	want := specialist.SetupJourneyShapeSteps(specialist.SetupJourneyShapeProjectSetup)
+	if len(draft.Steps) != len(want) || draft.WorkspaceLaunch == nil || draft.WorkspaceLaunch.GroupTitle == "" || draft.WorkspaceLaunch.GroupName == "" {
+		t.Fatalf("default draft = %+v", draft)
+	}
+	for index, step := range draft.Steps {
+		if step.Kind != want[index] {
+			t.Fatalf("default draft step %d kind = %q, want %q", index, step.Kind, want[index])
+		}
+	}
+	quest, err := NewUserSetupQuest(template, nil, draft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if quest.Declaration.Shape() != specialist.SetupJourneyShapeProjectSetup || len(quest.Declaration.Steps) != 4 {
+		t.Fatalf("saved quest = %+v", quest.Declaration)
+	}
+	encoded, _ := json.Marshal(quest)
+	if strings.Contains(string(encoded), "runtime_title") || strings.Contains(string(encoded), "runtime_instructions") ||
+		strings.Contains(string(encoded), "integration_install") {
+		t.Fatalf("saved quest carries retired fields: %s", encoded)
+	}
+	fiveDraft := draft
+	fiveDraft.Steps = append([]UserSetupQuestStepDraft{{Kind: specialist.SetupStepIntegrationInstall, Title: "Install", Description: "Install."}}, draft.Steps...)
+	if _, err := NewUserSetupQuest(template, nil, fiveDraft); !errors.Is(err, ErrInvalidUserSetupQuest) {
+		t.Fatalf("five-step draft error = %v", err)
+	}
+	launchURL := draft
+	launchURL.WorkspaceLaunch = &specialist.WorkspaceLaunchCopy{GroupTitle: "Build it", GroupName: "Open www.example.invalid"}
+	if _, err := NewUserSetupQuest(template, nil, launchURL); !errors.Is(err, ErrInvalidUserSetupQuest) {
+		t.Fatalf("URL in launch copy error = %v", err)
+	}
+}
+
+// FR 33: an attachment saved in the retired five-step layout, or still
+// carrying runtime launch copy, loads as that template's quest error with the
+// exact guidance. It is never rewritten.
+func TestRetiredUserSetupQuestLayoutSurfacesGuidanceOnTheTemplate(t *testing.T) {
+	_, template := userQuestTemplateFixture(t)
+	quest, err := NewUserSetupQuest(template, nil, DefaultUserSetupQuestDraft())
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid, _ := json.Marshal(quest)
+	for name, mutate := range map[string]func(map[string]any){
+		"five steps": func(raw map[string]any) {
+			raw["steps"] = append([]any{map[string]any{
+				"id": "step_integration", "kind": "integration_install", "title": "Install", "description": "Install.",
+			}}, raw["steps"].([]any)...)
+		},
+		"runtime launch copy": func(raw map[string]any) {
+			launch := raw["workspace_launch"].(map[string]any)
+			launch["runtime_title"] = "Set up the app"
+			launch["runtime_instructions"] = "Open the app first."
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var raw map[string]any
+			if err := json.Unmarshal(valid, &raw); err != nil {
+				t.Fatal(err)
+			}
+			mutate(raw)
+			retired, _ := json.Marshal(raw)
+			if _, err := ParseUserSetupQuest(retired); !errors.Is(err, ErrInvalidUserSetupQuest) || err.Error() != RetiredUserSetupQuestLayoutGuidance {
+				t.Fatalf("parse error = %v", err)
+			}
+
+			manifestPath := filepath.Join(template.Path, ManifestFileName)
+			data, err := os.ReadFile(manifestPath) // #nosec G304 -- test fixture under t.TempDir
+			if err != nil {
+				t.Fatal(err)
+			}
+			var manifest map[string]json.RawMessage
+			if err := json.Unmarshal(data, &manifest); err != nil {
+				t.Fatal(err)
+			}
+			manifest["user_setup_quest"] = retired
+			rewritten, _ := json.MarshalIndent(manifest, "", "  ")
+			if err := os.WriteFile(manifestPath, rewritten, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := LoadFolder(template.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if loaded.UserSetupQuest != nil || loaded.UserSetupQuestError != RetiredUserSetupQuestLayoutGuidance {
+				t.Fatalf("loaded quest = %+v, error = %q", loaded.UserSetupQuest, loaded.UserSetupQuestError)
+			}
+			after, _ := os.ReadFile(manifestPath) // #nosec G304 -- test fixture under t.TempDir
+			if string(after) != string(rewritten) {
+				t.Fatal("loading rewrote the retired attachment")
+			}
+		})
+	}
+}
+
 func TestUserSetupQuestRejectsHostAccountLinkShape(t *testing.T) {
 	_, template := userQuestTemplateFixture(t)
 	quest, err := NewUserSetupQuest(template, nil, DefaultUserSetupQuestDraft())

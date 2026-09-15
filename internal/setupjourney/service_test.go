@@ -9,17 +9,27 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/plugin"
+	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/specialist"
 )
 
-type syntheticJourneyAdapter struct{ reviews int }
+// syntheticJourneyAdapter reviews one commit action without executing it.
+type syntheticJourneyAdapter struct {
+	reviews int
+	commit  ActionID
+}
 
 func (a *syntheticJourneyAdapter) InputDigest(_ ActionID, input json.RawMessage) (string, error) {
 	return Digest(input), nil
 }
 func (a *syntheticJourneyAdapter) Review(_ context.Context, _ ReadScope, _ ActionID, input json.RawMessage) (ActionReviewMaterial, error) {
 	a.reviews++
-	return ActionReviewMaterial{CommitAction: ActionInstall, InputDigest: Digest(input), OwnerRevisionDigest: Digest([]byte("synthetic-owner-v1")), DisclosureDigest: Digest([]byte("synthetic-disclosure-v1"))}, nil
+	commit := a.commit
+	if commit == "" {
+		commit = ActionInstall
+	}
+	return ActionReviewMaterial{CommitAction: commit, InputDigest: Digest(input), OwnerRevisionDigest: Digest([]byte("synthetic-owner-v1")), DisclosureDigest: Digest([]byte("synthetic-disclosure-v1"))}, nil
 }
 func (a *syntheticJourneyAdapter) PrepareCommit(context.Context, ReadScope, ActionID, json.RawMessage) (ActionReviewMaterial, error) {
 	return ActionReviewMaterial{}, errors.New("not used")
@@ -50,9 +60,31 @@ func acceptedRelationship() *personalassistant.State {
 	}
 }
 
+// reaperQuestDeclaration is the installed plugin's four-step setup quest for the
+// built-in reviewed REAPER integration.
+func reaperQuestDeclaration() specialist.SetupJourney {
+	return specialist.SetupJourney{
+		SchemaVersion: specialist.SetupJourneySchemaVersion, Version: 1, ID: "reaper_setup",
+		Title: "Set up REAPER", Description: "Connect a REAPER project and choose how Ori can help.",
+		IntegrationKey: "ori_reaper", ExpectedBlueprintID: "reaper-song", ExpectedAssistantProgramID: "music-producer-assistant",
+		Steps: []specialist.SetupJourneyStep{
+			{ID: "project", Kind: specialist.SetupStepProjectConnect, Title: "Connect a project", Description: "Connect a project."},
+			{ID: "workspace", Kind: specialist.SetupStepWorkspaceSetup, Title: "Choose how Ori works", Description: "Choose a mode."},
+			{ID: "staffing", Kind: specialist.SetupStepAssistantProgramStaffing, Title: "Add your studio team", Description: "Add roles."},
+			{ID: "summary", Kind: specialist.SetupStepSummary, Title: "Review setup", Description: "Review setup."},
+		},
+		WorkspaceLaunch: &specialist.WorkspaceLaunchCopy{GroupTitle: "Build Your Music Production Group", GroupName: "Music Production"},
+	}
+}
+
+// defaultCanonicalReads has the integration precondition met, so a project
+// setup quest starts at its project step.
 func defaultCanonicalReads() map[specialist.SetupStepKind]CanonicalStepRead {
 	return map[specialist.SetupStepKind]CanonicalStepRead{
-		specialist.SetupStepIntegrationInstall:       {AvailableActions: []ActionID{ActionReviewInstall}},
+		specialist.SetupStepIntegrationInstall: {
+			Complete: true, AvailableActions: []ActionID{ActionManageIntegration},
+			Result: CanonicalResult{IntegrationPluginID: "reaper-plugin", IntegrationVersion: "0.6.0"},
+		},
 		specialist.SetupStepProjectConnect:           {AvailableActions: []ActionID{ActionReviewExistingProject, ActionReviewNewProject}},
 		specialist.SetupStepWorkspaceSetup:           {AvailableActions: []ActionID{ActionOpenWorkspaceSetup}},
 		specialist.SetupStepAssistantProgramStaffing: {AvailableActions: []ActionID{ActionReviewHomeStaffing}},
@@ -85,18 +117,31 @@ func readerRegistryStub(t *testing.T, reads map[specialist.SetupStepKind]Canonic
 	return registry
 }
 
-func serviceFixture(t *testing.T, reads map[specialist.SetupStepKind]CanonicalStepRead) (*Service, *SQLiteStore) {
-	t.Helper()
-	_, store := openTestStore(t)
-	service, err := NewService(
-		store,
-		&relationshipStub{state: acceptedRelationship()},
-		readerRegistryStub(t, reads, nil, nil, nil),
+// standardQuestCatalog serves the generated install quests and the installed
+// plugins' own quests from one plugin store.
+func standardQuestCatalog(plugins *questPlugins) QuestCatalog {
+	return CombineQuestCatalogs(
+		NewIntegrationInstallQuestCatalog(reviewedintegration.All, plugins),
+		NewInstalledQuestCatalog(plugins),
 	)
+}
+
+// aliasService serves the accepted music specialist with the REAPER plugin
+// installed, so the assistant alias resolves the plugin's four-step quest.
+func aliasService(t *testing.T, store Store, relationships RelationshipReader, registry *ReaderRegistry) *Service {
+	t.Helper()
+	service, err := NewService(store, relationships, registry)
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}
-	return service, store
+	service.SetQuestCatalog(standardQuestCatalog(&questPlugins{items: []plugin.InstalledPlugin{questPluginFixture(t)}}))
+	return service
+}
+
+func serviceFixture(t *testing.T, reads map[specialist.SetupStepKind]CanonicalStepRead) (*Service, *SQLiteStore) {
+	t.Helper()
+	_, store := openTestStore(t)
+	return aliasService(t, store, &relationshipStub{state: acceptedRelationship()}, readerRegistryStub(t, reads, nil, nil, nil)), store
 }
 
 func TestReaderRegistryRequiresExactlyTheClosedV1Kinds(t *testing.T) {
@@ -135,26 +180,47 @@ func TestReaderRegistryRequiresExactlyTheClosedV1Kinds(t *testing.T) {
 
 func TestSyntheticNonDomainDeclarationUsesGenericSetupShell(t *testing.T) {
 	_, store := openTestStore(t)
-	journey, err := specialist.NormalizeSetupJourney(specialist.SetupJourney{SchemaVersion: 1, Version: 1, ID: "visual_archive_setup", Title: "Set up visual archives", Description: "Connect a reviewed archive workflow.", IntegrationKey: "archive_bridge", ExpectedBlueprintID: "visual_archive", ExpectedAssistantProgramID: "archive_assistant", Steps: []specialist.SetupJourneyStep{{ID: "integration", Kind: specialist.SetupStepIntegrationInstall, Title: "Integration", Description: "Review the archive bridge."}, {ID: "project", Kind: specialist.SetupStepProjectConnect, Title: "Archive", Description: "Connect an archive."}, {ID: "workspace", Kind: specialist.SetupStepWorkspaceSetup, Title: "Workspace", Description: "Choose workspace access."}, {ID: "staffing", Kind: specialist.SetupStepAssistantProgramStaffing, Title: "Team", Description: "Review scoped roles."}, {ID: "summary", Kind: specialist.SetupStepSummary, Title: "Summary", Description: "Review the setup."}}})
+	journey, err := specialist.NormalizeSetupJourney(specialist.SetupJourney{
+		SchemaVersion: 1, Version: 1, ID: "visual_archive_setup", Title: "Set up visual archives", Description: "Connect a reviewed archive workflow.",
+		IntegrationKey: "archive_bridge", ExpectedBlueprintID: "visual_archive", ExpectedAssistantProgramID: "archive_assistant",
+		Steps: []specialist.SetupJourneyStep{
+			{ID: "project", Kind: specialist.SetupStepProjectConnect, Title: "Archive", Description: "Connect an archive."},
+			{ID: "workspace", Kind: specialist.SetupStepWorkspaceSetup, Title: "Workspace", Description: "Choose workspace access."},
+			{ID: "staffing", Kind: specialist.SetupStepAssistantProgramStaffing, Title: "Team", Description: "Review scoped roles."},
+			{ID: "summary", Kind: specialist.SetupStepSummary, Title: "Summary", Description: "Review the setup."},
+		},
+		WorkspaceLaunch: &specialist.WorkspaceLaunchCopy{GroupTitle: "Build your archive group", GroupName: "Archives"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry := specialist.Entry{Slug: "visual_archive", DisplayName: "visual archives", SetupJourney: journey}
-	relationship := acceptedRelationship()
-	relationship.SpecialistSlug = entry.Slug
-	service, err := newService(store, &relationshipStub{state: relationship}, readerRegistryStub(t, defaultCanonicalReads(), nil, nil, nil), func(slug string) (specialist.Entry, bool) { return entry, slug == entry.Slug }, nil)
-	if err != nil {
-		t.Fatal(err)
+	journey.OwnerPluginID = "archive-plugin"
+	reads := defaultCanonicalReads()
+	reads[specialist.SetupStepIntegrationInstall] = CanonicalStepRead{
+		Complete: true, Result: CanonicalResult{IntegrationPluginID: "archive-plugin", IntegrationVersion: "1.0.0"},
 	}
-	adapter := &syntheticJourneyAdapter{}
-	if err = service.SetActionAdapter(specialist.SetupStepIntegrationInstall, adapter); err != nil {
-		t.Fatal(err)
+	newScoped := func() (*Service, *syntheticJourneyAdapter) {
+		service, err := NewService(store, &relationshipStub{err: errors.New("plugin quests need no assistant")}, readerRegistryStub(t, reads, nil, nil, nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		service.SetQuestCatalog(fixedQuestCatalog{definition: QuestDefinition{Declaration: journey, Ownership: "plugin"}})
+		adapter := &syntheticJourneyAdapter{commit: ActionCreateNewProject}
+		if err := service.SetActionAdapter(specialist.SetupStepProjectConnect, adapter); err != nil {
+			t.Fatal(err)
+		}
+		scoped, err := service.ForQuest(context.Background(), "local", journey.OwnerPluginID, journey.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return scoped, adapter
 	}
+	service, _ := newScoped()
 	projection, err := service.Read(context.Background(), "local", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if projection.Journey.ID != journey.ID || len(projection.Steps) != specialist.SetupJourneyRequiredSteps || projection.CurrentStepID != "integration" || projection.Steps[4].Title != "Summary" {
+	if projection.Journey.ID != journey.ID || len(projection.Steps) != 4 || projection.CurrentStepID != "project" || projection.Steps[3].Title != "Summary" {
 		t.Fatalf("generic projection=%#v", projection)
 	}
 	opened, err := service.Open(context.Background(), "local", projection.RunID, PresentationMutation{IfRevision: projection.StateRevision, IdempotencyKey: "synthetic-open"})
@@ -165,19 +231,12 @@ func TestSyntheticNonDomainDeclarationUsesGenericSetupShell(t *testing.T) {
 	if err != nil || !dismissed.Dismissed {
 		t.Fatalf("dismiss=%#v err=%v", dismissed, err)
 	}
-	resumedService, err := newService(store, &relationshipStub{state: relationship}, readerRegistryStub(t, defaultCanonicalReads(), nil, nil, nil), func(slug string) (specialist.Entry, bool) { return entry, slug == entry.Slug }, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resumedAdapter := &syntheticJourneyAdapter{}
-	if err = resumedService.SetActionAdapter(specialist.SetupStepIntegrationInstall, resumedAdapter); err != nil {
-		t.Fatal(err)
-	}
+	resumedService, resumedAdapter := newScoped()
 	resumed, err := resumedService.Read(context.Background(), "local", projection.RunID)
 	if err != nil || !resumed.Dismissed {
 		t.Fatalf("resume=%#v err=%v", resumed, err)
 	}
-	action, err := resumedService.Mutate(context.Background(), "local", projection.RunID, ActionReviewInstall, ActionMutation{IfRevision: resumed.StateRevision, IdempotencyKey: "synthetic-review", Input: json.RawMessage(`{}`)})
+	action, err := resumedService.Mutate(context.Background(), "local", projection.RunID, ActionReviewNewProject, ActionMutation{IfRevision: resumed.StateRevision, IdempotencyKey: "synthetic-review", Input: json.RawMessage(`{}`)})
 	if err != nil || action.Review == nil || resumedAdapter.reviews != 1 {
 		t.Fatalf("generic action=%#v reviews=%d err=%v", action, resumedAdapter.reviews, err)
 	}
@@ -217,11 +276,8 @@ func TestServiceRequiresCurrentAcceptedActiveOrPausedRelationship(t *testing.T) 
 	}
 	for name, state := range cases {
 		t.Run(name, func(t *testing.T) {
-			service, err := NewService(store, &relationshipStub{state: state}, registry)
-			if err != nil {
-				t.Fatalf("new service: %v", err)
-			}
-			_, err = service.Read(context.Background(), "local", "")
+			service := aliasService(t, store, &relationshipStub{state: state}, registry)
+			_, err := service.Read(context.Background(), "local", "")
 			var publicFailure *Failure
 			if !errors.As(err, &publicFailure) {
 				t.Fatalf("error = %v; want safe Failure", err)
@@ -230,6 +286,24 @@ func TestServiceRequiresCurrentAcceptedActiveOrPausedRelationship(t *testing.T) 
 				t.Fatalf("unexpected closed reason: %#v", publicFailure)
 			}
 		})
+	}
+	// An accepted specialist without an integration, or a service without a
+	// quest catalog, has no guided setup.
+	withoutKey, err := newService(store, &relationshipStub{state: acceptedRelationship()}, registry,
+		func(slug string) (specialist.Entry, bool) { return specialist.Entry{Slug: slug}, true }, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withoutKey.SetQuestCatalog(standardQuestCatalog(&questPlugins{}))
+	withoutCatalog, err := NewService(store, &relationshipStub{state: acceptedRelationship()}, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, service := range map[string]*Service{"no integration key": withoutKey, "no catalog": withoutCatalog} {
+		var publicFailure *Failure
+		if _, err := service.Read(context.Background(), "local", ""); !errors.As(err, &publicFailure) || publicFailure.ReasonCode != ReasonJourneyUnavailable {
+			t.Fatalf("%s error = %v", name, err)
+		}
 	}
 	var count int
 	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM setup_journey_run`).Scan(&count); err != nil {
@@ -243,10 +317,6 @@ func TestServiceRequiresCurrentAcceptedActiveOrPausedRelationship(t *testing.T) 
 func TestServiceReconcilesEveryOwnerAndSelectsFirstUnresolvedStep(t *testing.T) {
 	_, store := openTestStore(t)
 	reads := defaultCanonicalReads()
-	reads[specialist.SetupStepIntegrationInstall] = CanonicalStepRead{
-		Complete: true, AvailableActions: []ActionID{ActionManageIntegration},
-		Result: CanonicalResult{IntegrationPluginID: "com.ori.reaper", IntegrationVersion: "0.5.0"},
-	}
 	reads[specialist.SetupStepWorkspaceSetup] = CanonicalStepRead{
 		Complete: true, AvailableActions: []ActionID{ActionOpenWorkspaceSetup},
 		Result: CanonicalResult{SelectedModeID: "file_only"},
@@ -255,17 +325,16 @@ func TestServiceReconcilesEveryOwnerAndSelectsFirstUnresolvedStep(t *testing.T) 
 	// A summary reader cannot claim completion while a consequence is missing.
 	reads[specialist.SetupStepSummary] = CanonicalStepRead{Complete: true, AvailableActions: []ActionID{ActionReviewSetup}}
 	calls := make(map[specialist.SetupStepKind]int)
-	service, err := NewService(store, &relationshipStub{state: acceptedRelationship()}, readerRegistryStub(t, reads, nil, calls, nil))
-	if err != nil {
-		t.Fatalf("new service: %v", err)
-	}
+	service := aliasService(t, store, &relationshipStub{state: acceptedRelationship()}, readerRegistryStub(t, reads, nil, calls, nil))
 
 	projection, err := service.Read(context.Background(), "local", "")
 	if err != nil {
 		t.Fatalf("read journey: %v", err)
 	}
-	declared := make(map[specialist.SetupStepKind]bool)
-	for _, kind := range specialist.SetupJourneyShapeSteps(specialist.SetupJourneyShapeSpecialist) {
+	// The integration precondition is read once per read, then each declared
+	// step once; nothing else.
+	declared := map[specialist.SetupStepKind]bool{specialist.SetupStepIntegrationInstall: true}
+	for _, kind := range specialist.SetupJourneyShapeSteps(specialist.SetupJourneyShapeProjectSetup) {
 		declared[kind] = true
 	}
 	for kind := range actionDefinitionsByKind {
@@ -277,18 +346,18 @@ func TestServiceReconcilesEveryOwnerAndSelectsFirstUnresolvedStep(t *testing.T) 
 			t.Errorf("reader %s called %d times; want %d", kind, calls[kind], want)
 		}
 	}
-	if projection.Lifecycle != LifecycleInProgress || projection.CurrentStepID != "project" {
+	if projection.Lifecycle != LifecycleInProgress || projection.CurrentStepID != "project" || projection.Precondition != nil {
 		t.Fatalf("unexpected first unresolved projection: %#v", projection)
 	}
-	if projection.Steps[0].Status != StepComplete || projection.Steps[1].Status != StepActive ||
-		projection.Steps[2].Status != StepComplete || projection.Steps[3].Status != StepPending ||
-		projection.Steps[4].Status != StepPending {
+	if projection.Steps[0].Status != StepActive || projection.Steps[1].Status != StepComplete ||
+		projection.Steps[2].Status != StepPending || projection.Steps[3].Status != StepPending {
 		t.Fatalf("unexpected independently reconciled statuses: %#v", projection.Steps)
 	}
-	if len(projection.Steps[1].Actions) != 2 || len(projection.Steps[3].Actions) != 0 {
+	if len(projection.Steps[0].Actions) != 2 || len(projection.Steps[2].Actions) != 0 {
 		t.Fatalf("actions were not limited to safe current/complete steps: %#v", projection.Steps)
 	}
-	if projection.Receipts.IntegrationPluginID != "com.ori.reaper" || projection.Receipts.SelectedModeID != "file_only" {
+	if projection.Receipts.IntegrationPluginID != "reaper-plugin" || projection.Receipts.IntegrationVersion != "0.6.0" ||
+		projection.Receipts.SelectedModeID != "file_only" {
 		t.Fatalf("bounded canonical receipts missing: %#v", projection.Receipts)
 	}
 	firstRevision := projection.StateRevision
@@ -333,10 +402,7 @@ func TestServiceConcurrentReadsConvergeOnOneRootAndProjection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new registry: %v", err)
 	}
-	service, err := NewService(store, &relationshipStub{state: acceptedRelationship()}, registry)
-	if err != nil {
-		t.Fatalf("new service: %v", err)
-	}
+	service := aliasService(t, store, &relationshipStub{state: acceptedRelationship()}, registry)
 	type result struct {
 		projection *JourneyProjection
 		err        error
@@ -371,9 +437,6 @@ func TestServiceConcurrentReadsConvergeOnOneRootAndProjection(t *testing.T) {
 
 func TestServiceReadyThenNarrowRegressionPreservesHistoryAndDownstreamResults(t *testing.T) {
 	reads := defaultCanonicalReads()
-	reads[specialist.SetupStepIntegrationInstall] = CanonicalStepRead{
-		Complete: true, Result: CanonicalResult{IntegrationPluginID: "com.ori.reaper", IntegrationVersion: "0.5.0"},
-	}
 	reads[specialist.SetupStepProjectConnect] = CanonicalStepRead{
 		Complete: true, Result: CanonicalResult{HomeWorkspaceID: "workspace-home", ProjectWorkspaceID: "workspace-project"},
 	}
@@ -392,26 +455,26 @@ func TestServiceReadyThenNarrowRegressionPreservesHistoryAndDownstreamResults(t 
 	}
 	completedAt := *ready.FirstCompletedAt
 
-	reads[specialist.SetupStepIntegrationInstall] = CanonicalStepRead{
-		BlockedReason: ReasonIntegrationDisabled, AvailableActions: []ActionID{ActionReviewEnable},
+	reads[specialist.SetupStepWorkspaceSetup] = CanonicalStepRead{
+		BlockedReason: ReasonRuntimeNeedsAttention, AvailableActions: []ActionID{ActionOpenWorkspaceSetup},
 	}
 	regressed, err := service.Read(context.Background(), "local", "")
 	if err != nil {
 		t.Fatalf("read regressed journey: %v", err)
 	}
-	if regressed.Lifecycle != LifecycleNeedsAttention || regressed.CurrentStepID != "integration" ||
-		regressed.Steps[0].Status != StepBlocked || regressed.Steps[0].ReasonCode != ReasonIntegrationDisabled {
-		t.Fatalf("regression was not narrowed to integration: %#v", regressed)
+	if regressed.Lifecycle != LifecycleNeedsAttention || regressed.CurrentStepID != "workspace" ||
+		regressed.Steps[1].Status != StepBlocked || regressed.Steps[1].ReasonCode != ReasonRuntimeNeedsAttention {
+		t.Fatalf("regression was not narrowed to workspace setup: %#v", regressed)
 	}
-	for _, index := range []int{1, 2, 3} {
+	for _, index := range []int{0, 2} {
 		if regressed.Steps[index].Status != StepComplete {
-			t.Errorf("downstream step %d was discarded: %#v", index, regressed.Steps[index])
+			t.Errorf("independent step %d was discarded: %#v", index, regressed.Steps[index])
 		}
 	}
 	if regressed.FirstCompletedAt == nil || !regressed.FirstCompletedAt.Equal(completedAt) {
 		t.Fatalf("historical completion changed: before=%v after=%v", completedAt, regressed.FirstCompletedAt)
 	}
-	if regressed.Receipts.IntegrationPluginID != "com.ori.reaper" || regressed.Receipts.ProjectWorkspaceID != "workspace-project" {
+	if regressed.Receipts.IntegrationPluginID != "reaper-plugin" || regressed.Receipts.ProjectWorkspaceID != "workspace-project" {
 		t.Fatalf("historical resume receipts were discarded: %#v", regressed.Receipts)
 	}
 }
@@ -454,23 +517,16 @@ func TestServiceOwnerErrorsAndInvalidAdapterOutputStayClosed(t *testing.T) {
 		AvailableActions: []ActionID{ActionID("client_chosen_adapter")},
 	}
 	failures := map[specialist.SetupStepKind]error{
-		specialist.SetupStepIntegrationInstall: fmt.Errorf("provider failed at /private/Music/song.rpp with secret-token"),
+		specialist.SetupStepWorkspaceSetup: fmt.Errorf("provider failed at /private/Music/song.rpp with secret-token"),
 	}
 	_, store := openTestStore(t)
-	service, err := NewService(
-		store,
-		&relationshipStub{state: acceptedRelationship()},
-		readerRegistryStub(t, reads, failures, nil, nil),
-	)
-	if err != nil {
-		t.Fatalf("new service: %v", err)
-	}
+	service := aliasService(t, store, &relationshipStub{state: acceptedRelationship()}, readerRegistryStub(t, reads, failures, nil, nil))
 	projection, err := service.Read(context.Background(), "local", "")
 	if err != nil {
 		t.Fatalf("owner error escaped read: %v", err)
 	}
 	if projection.Steps[0].Status != StepBlocked || projection.Steps[0].ReasonCode != ReasonOwnerUnavailable {
-		t.Fatalf("owner error was not normalized: %#v", projection.Steps[0])
+		t.Fatalf("invalid adapter output was not normalized: %#v", projection.Steps[0])
 	}
 	encoded, err := json.Marshal(projection)
 	if err != nil {
@@ -481,15 +537,23 @@ func TestServiceOwnerErrorsAndInvalidAdapterOutputStayClosed(t *testing.T) {
 			t.Fatalf("projection leaked %q: %s", secret, encoded)
 		}
 	}
+
+	// An integration owner error is the precondition's closed reason, never
+	// its text.
+	failures[specialist.SetupStepIntegrationInstall] = errors.New("manager exploded at /private/plugins")
+	blocked, err := service.Read(context.Background(), "local", "")
+	if err != nil || blocked.Precondition == nil || blocked.Precondition.ReasonCode != ReasonOwnerUnavailable {
+		t.Fatalf("integration owner error = %#v, err = %v", blocked, err)
+	}
+	if encoded, _ := json.Marshal(blocked); strings.Contains(string(encoded), "/private") {
+		t.Fatalf("precondition leaked owner text: %s", encoded)
+	}
 }
 
 func TestServiceRepairsMalformedStructuralProgressFromCanonicalOwners(t *testing.T) {
 	db, store := openTestStore(t)
 	reads := defaultCanonicalReads()
-	service, err := NewService(store, &relationshipStub{state: acceptedRelationship()}, readerRegistryStub(t, reads, nil, nil, nil))
-	if err != nil {
-		t.Fatalf("new service: %v", err)
-	}
+	service := aliasService(t, store, &relationshipStub{state: acceptedRelationship()}, readerRegistryStub(t, reads, nil, nil, nil))
 	first, err := service.Read(context.Background(), "local", "")
 	if err != nil {
 		t.Fatalf("initial read: %v", err)
@@ -504,8 +568,7 @@ func TestServiceRepairsMalformedStructuralProgressFromCanonicalOwners(t *testing
 	if err != nil {
 		t.Fatalf("repair read: %v", err)
 	}
-	if len(repaired.Steps) != specialist.SetupJourneyRequiredSteps || repaired.CurrentStepID != "integration" ||
-		repaired.Steps[0].Status != StepActive {
+	if len(repaired.Steps) != 4 || repaired.CurrentStepID != "project" || repaired.Steps[0].Status != StepActive {
 		t.Fatalf("malformed progress was not canonically rebuilt: %#v", repaired)
 	}
 	persisted, err := store.GetRun(context.Background(), first.RunID)
@@ -517,13 +580,7 @@ func TestServiceRepairsMalformedStructuralProgressFromCanonicalOwners(t *testing
 func TestServiceIncompatibleDeclarationPreservesStoredProgressAndReceipts(t *testing.T) {
 	db, store := openTestStore(t)
 	reads := defaultCanonicalReads()
-	reads[specialist.SetupStepIntegrationInstall] = CanonicalStepRead{
-		Complete: true, Result: CanonicalResult{IntegrationPluginID: "com.ori.reaper", IntegrationVersion: "0.5.0"},
-	}
-	service, err := NewService(store, &relationshipStub{state: acceptedRelationship()}, readerRegistryStub(t, reads, nil, nil, nil))
-	if err != nil {
-		t.Fatalf("new service: %v", err)
-	}
+	service := aliasService(t, store, &relationshipStub{state: acceptedRelationship()}, readerRegistryStub(t, reads, nil, nil, nil))
 	first, err := service.Read(context.Background(), "local", "")
 	if err != nil {
 		t.Fatalf("initial read: %v", err)
@@ -555,7 +612,7 @@ func TestServiceIncompatibleDeclarationPreservesStoredProgressAndReceipts(t *tes
 	`, first.RunID).Scan(&version, &revision, &afterJSON, &pluginID); err != nil {
 		t.Fatalf("read preserved incompatible row: %v", err)
 	}
-	if version != 99 || revision != first.StateRevision || beforeJSON != afterJSON || pluginID != "com.ori.reaper" {
+	if version != 99 || revision != first.StateRevision || beforeJSON != afterJSON || pluginID != "reaper-plugin" {
 		t.Fatalf("incompatible row was reinterpreted: version=%d revision=%d plugin=%q before=%q after=%q",
 			version, revision, pluginID, beforeJSON, afterJSON)
 	}
@@ -564,50 +621,38 @@ func TestServiceIncompatibleDeclarationPreservesStoredProgressAndReceipts(t *tes
 func TestServiceAppliesOnlyExactCompiledDeclarationMigration(t *testing.T) {
 	db, store := openTestStore(t)
 	reads := defaultCanonicalReads()
-	baseService, err := NewService(store, &relationshipStub{state: acceptedRelationship()}, readerRegistryStub(t, reads, nil, nil, nil))
-	if err != nil {
-		t.Fatalf("new base service: %v", err)
-	}
+	baseService := aliasService(t, store, &relationshipStub{state: acceptedRelationship()}, readerRegistryStub(t, reads, nil, nil, nil))
 	before, err := baseService.Read(context.Background(), "local", "")
 	if err != nil {
 		t.Fatalf("create v1 run: %v", err)
 	}
 
-	entry, ok := specialist.Get("music_production")
-	if !ok {
-		t.Fatal("music specialist fixture missing")
-	}
-	entry.SetupJourney.Version = 2
-	entry.SetupJourney.Steps[3].ID = "team"
-	resolver := func(slug string) (specialist.Entry, bool) {
-		if slug != entry.Slug {
-			return specialist.Entry{}, false
-		}
-		return entry, true
-	}
+	revised := questPluginFixture(t)
+	revised.WorkspaceSurfaces.SetupQuests[0].Version = 2
+	revised.WorkspaceSurfaces.SetupQuests[0].Steps[2].ID = "team"
 	migrationKey := declarationMigrationKey{
-		JourneyID:         entry.SetupJourney.ID,
+		JourneyID:         "reaper_setup",
 		FromSchemaVersion: 1, FromDeclarationVersion: 1,
 		ToSchemaVersion: 1, ToDeclarationVersion: 2,
 	}
 	migrations := map[declarationMigrationKey]DeclarationMigration{
 		migrationKey: {StepIDMap: map[string]string{
-			"integration": "integration", "project": "project", "workspace": "workspace",
-			"staffing": "team", "summary": "summary",
+			"project": "project", "workspace": "workspace", "staffing": "team", "summary": "summary",
 		}},
 	}
 	service, err := newService(
 		store, &relationshipStub{state: acceptedRelationship()},
-		readerRegistryStub(t, reads, nil, nil, nil), resolver, migrations,
+		readerRegistryStub(t, reads, nil, nil, nil), specialist.Get, migrations,
 	)
 	if err != nil {
 		t.Fatalf("new migrating service: %v", err)
 	}
+	service.SetQuestCatalog(standardQuestCatalog(&questPlugins{items: []plugin.InstalledPlugin{revised}}))
 	migrated, err := service.Read(context.Background(), "local", "")
 	if err != nil {
 		t.Fatalf("read migrated declaration: %v", err)
 	}
-	if migrated.Journey.Version != 2 || migrated.Steps[3].ID != "team" || migrated.DeclarationIncompatible {
+	if migrated.Journey.Version != 2 || migrated.Steps[2].ID != "team" || migrated.DeclarationIncompatible || migrated.RunID != before.RunID {
 		t.Fatalf("exact migration was not applied: %#v", migrated)
 	}
 	if migrated.StateRevision <= before.StateRevision {
@@ -653,20 +698,11 @@ func TestServiceOverviewReconcilesRootAndBoundedChildrenWithoutOpeningThem(t *te
 func TestServiceChildReadsReuseRootScopeWithoutCopyingSharedReceipts(t *testing.T) {
 	_, store := openTestStore(t)
 	reads := defaultCanonicalReads()
-	reads[specialist.SetupStepIntegrationInstall] = CanonicalStepRead{
-		Complete: true, Result: CanonicalResult{IntegrationPluginID: "com.ori.reaper", IntegrationVersion: "0.5.0"},
-	}
 	reads[specialist.SetupStepProjectConnect] = CanonicalStepRead{
 		Complete: true, Result: CanonicalResult{HomeWorkspaceID: "workspace-home", ProjectWorkspaceID: "workspace-first"},
 	}
 	scopes := make(map[specialist.SetupStepKind][]ReadScope)
-	service, err := NewService(
-		store, &relationshipStub{state: acceptedRelationship()},
-		readerRegistryStub(t, reads, nil, nil, scopes),
-	)
-	if err != nil {
-		t.Fatalf("new service: %v", err)
-	}
+	service := aliasService(t, store, &relationshipStub{state: acceptedRelationship()}, readerRegistryStub(t, reads, nil, nil, scopes))
 	rootProjection, err := service.Read(context.Background(), "local", "")
 	if err != nil {
 		t.Fatalf("read root: %v", err)
@@ -684,10 +720,12 @@ func TestServiceChildReadsReuseRootScopeWithoutCopyingSharedReceipts(t *testing.
 	if childProjection.Receipts.IntegrationPluginID != "" || childProjection.Receipts.HomeWorkspaceID != "" {
 		t.Fatalf("child projection copied root-owned receipts: %#v", childProjection.Receipts)
 	}
-	integrationScopes := scopes[specialist.SetupStepIntegrationInstall]
-	lastScope := integrationScopes[len(integrationScopes)-1]
-	if lastScope.RunKind != RunKindChild || lastScope.IntegrationPluginID != "com.ori.reaper" || lastScope.HomeWorkspaceID != "workspace-home" {
-		t.Fatalf("child reader did not receive bounded shared root scope: %#v", lastScope)
+	for _, kind := range []specialist.SetupStepKind{specialist.SetupStepIntegrationInstall, specialist.SetupStepProjectConnect} {
+		kindScopes := scopes[kind]
+		lastScope := kindScopes[len(kindScopes)-1]
+		if lastScope.RunKind != RunKindChild || lastScope.IntegrationPluginID != "reaper-plugin" || lastScope.HomeWorkspaceID != "workspace-home" {
+			t.Fatalf("child %s reader did not receive bounded shared root scope: %#v", kind, lastScope)
+		}
 	}
 	persisted, err := store.GetRun(context.Background(), child.ID)
 	if err != nil {

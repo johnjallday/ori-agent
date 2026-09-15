@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/johnjallday/ori-agent/internal/specialist"
 )
 
 func canonicalSurfaceFixture(t *testing.T) []byte {
@@ -92,6 +94,36 @@ func TestSurfaceContributionNewHostRequirementFailsClosedOnOlderHost(t *testing.
 		HostFeatureTemplateGroupRequirementsV1,
 	}); err != nil {
 		t.Fatalf("current host rejected current feature set: %v", err)
+	}
+}
+
+// FR 9: setup_quests_v2 fails closed on a host that knows only v1, and a
+// manifest still requiring setup_quests_v1 fails closed on this host.
+func TestSetupQuestFeatureVersionsFailClosedAcrossHosts(t *testing.T) {
+	const retiredSetupQuestsV1 = "setup_quests_v1"
+	oldHostFeatures := []string{
+		HostFeatureAssistantProgramV1, HostFeatureSpecialistSetupJourneyV1,
+		retiredSetupQuestsV1, HostFeatureTemplateGroupRequirementsV1,
+	}
+	contribution, err := ParseSurfaceContribution(canonicalSurfaceFixture(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contribution.RequiresHostFeatures = []string{HostFeatureAssistantProgramV1, HostFeatureSetupQuestsV2}
+	if err := contribution.ValidateForHost(1, oldHostFeatures); !ContributionErrorIs(err, CodeHostFeatureUnsupported) {
+		t.Fatalf("setup_quests_v2 manifest accepted by a v1-only host: %v", err)
+	}
+
+	contribution, err = ParseSurfaceContribution(canonicalSurfaceFixture(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contribution.RequiresHostFeatures = []string{HostFeatureAssistantProgramV1, retiredSetupQuestsV1}
+	if err := contribution.Validate(); !ContributionErrorIs(err, CodeHostFeatureUnsupported) {
+		t.Fatalf("setup_quests_v1 manifest accepted by this host: %v", err)
+	}
+	if HostFeatureSetupQuestsV2 != specialist.SetupQuestsFeature {
+		t.Fatalf("plugin feature %q and normalizer contract %q differ", HostFeatureSetupQuestsV2, specialist.SetupQuestsFeature)
 	}
 }
 

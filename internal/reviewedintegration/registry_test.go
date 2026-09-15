@@ -13,15 +13,13 @@ func TestBuiltInRegistryMatchesSpecialistConstraintsAndPublishedRelease(t *testi
 	if !ok {
 		t.Fatal("reviewed REAPER integration is missing")
 	}
-	declarationEntry, ok := specialist.Get("music_production")
-	if !ok || declarationEntry.SetupJourney == nil {
-		t.Fatal("specialist declaration fixture is missing")
+	specialistEntry, ok := specialist.Get("music_production")
+	if !ok || specialistEntry.IntegrationKey != entry.Key {
+		t.Fatalf("music specialist does not name the reviewed integration: %#v", specialistEntry)
 	}
-	declaration := declarationEntry.SetupJourney
-	if entry.Key != declaration.IntegrationKey ||
-		entry.ExpectedBlueprintID != declaration.ExpectedBlueprintID ||
-		entry.ExpectedProgramID != declaration.ExpectedAssistantProgramID {
-		t.Fatalf("registry/declaration identity drift: %#v / %#v", entry, declaration)
+	if entry.ExpectedBlueprintID != "reaper-song" || entry.ExpectedProgramID != "music-producer-assistant" ||
+		entry.ExpectedBlueprintID != specialistEntry.SuggestedTemplateID {
+		t.Fatalf("registry/specialist identity drift: %#v / %#v", entry, specialistEntry)
 	}
 	if entry.ExpectedVersion != "0.5.0" || entry.ExpectedBlueprintVersion != 4 ||
 		entry.ExpectedProgramSchema != 2 || entry.ExpectedProtocol != plugin.SurfaceProtocolVersion {
@@ -38,6 +36,72 @@ func TestBuiltInRegistryMatchesSpecialistConstraintsAndPublishedRelease(t *testi
 		if !strings.Contains(features, required) {
 			t.Errorf("required host feature %q missing from %q", required, features)
 		}
+	}
+}
+
+// FR 19: every specialist's integration key names a reviewed integration. The
+// specialist package cannot import this one, so the check lives here.
+func TestEverySpecialistIntegrationKeyIsReviewed(t *testing.T) {
+	keyed := 0
+	for _, entry := range specialist.All() {
+		if entry.IntegrationKey == "" {
+			continue
+		}
+		keyed++
+		if _, ok := Get(entry.IntegrationKey); !ok {
+			t.Errorf("specialist %q names unreviewed integration %q", entry.Slug, entry.IntegrationKey)
+		}
+	}
+	if keyed == 0 {
+		t.Fatal("no specialist names a reviewed integration")
+	}
+	reaper, _ := Get("ori_reaper")
+	if reaper.InstallQuestID() != "install_ori_reaper" {
+		t.Fatalf("install quest id = %q", reaper.InstallQuestID())
+	}
+}
+
+func TestBuiltInRegistryCarriesInstallQuestCopy(t *testing.T) {
+	entry, ok := Get("ori_reaper")
+	if !ok {
+		t.Fatal("reviewed REAPER integration is missing")
+	}
+	const explanation = "Ori's REAPER integration is a local integration for Ori, not an audio plug-in, VST, effect, or instrument. It will not appear in REAPER's FX browser."
+	if entry.DisplayName != "REAPER" || entry.InstallTitle != "Install Ori REAPER Plugin" || entry.InstallDescription != explanation {
+		t.Fatalf("install copy = %q / %q / %q", entry.DisplayName, entry.InstallTitle, entry.InstallDescription)
+	}
+}
+
+func TestRegistryNormalizationRejectsUnsafeDisplayCopy(t *testing.T) {
+	base, _ := Get("ori_reaper")
+	cases := map[string]func(*Entry){
+		"empty display name":        func(entry *Entry) { entry.DisplayName = "  " },
+		"empty install title":       func(entry *Entry) { entry.InstallTitle = "" },
+		"empty install description": func(entry *Entry) { entry.InstallDescription = "" },
+		"markup display name":       func(entry *Entry) { entry.DisplayName = "<b>REAPER</b>" },
+		"url install title":         func(entry *Entry) { entry.InstallTitle = "Install from https://example.invalid" },
+		"markdown link description": func(entry *Entry) { entry.InstallDescription = "See [docs](somewhere)." },
+		"control character":         func(entry *Entry) { entry.InstallDescription = "Install\x07now." },
+		"format character":          func(entry *Entry) { entry.DisplayName = "REA" + string(rune(0x202E)) + "PER" },
+		"multi-line display name":   func(entry *Entry) { entry.DisplayName = "REA\nPER" },
+		"multi-line install title":  func(entry *Entry) { entry.InstallTitle = "Install\tplugin" },
+		"long display name":         func(entry *Entry) { entry.DisplayName = strings.Repeat("R", MaxDisplayNameBytes+1) },
+		"long install title":        func(entry *Entry) { entry.InstallTitle = strings.Repeat("I", MaxInstallTitleBytes+1) },
+		"long install description":  func(entry *Entry) { entry.InstallDescription = strings.Repeat("d", MaxInstallDescriptionBytes+1) },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			entry := base.Clone()
+			mutate(&entry)
+			if _, err := normalize(entry); err == nil {
+				t.Fatal("unsafe display copy was accepted")
+			}
+		})
+	}
+	trimmed := base.Clone()
+	trimmed.DisplayName = "  REAPER  "
+	if normalized, err := normalize(trimmed); err != nil || normalized.DisplayName != "REAPER" {
+		t.Fatalf("trimmed display name = %q, err = %v", normalized.DisplayName, err)
 	}
 }
 

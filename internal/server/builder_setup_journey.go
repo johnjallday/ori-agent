@@ -13,6 +13,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/samplelibrary"
 	"github.com/johnjallday/ori-agent/internal/samplelibraryhttp"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
@@ -60,7 +61,13 @@ func (b *ServerBuilder) initializeSetupJourney() {
 			return setupjourney.CanonicalStepRead{BlockedReason: setupjourney.ReasonOwnerUnavailable}, nil
 		})
 	}
-	readers[specialist.SetupStepSummary] = setupSummaryReader{modelAvailable: b.systemModelAvailable}
+	var pluginQuestCatalog setupjourney.QuestCatalog
+	if b.pluginHandler != nil {
+		pluginQuestCatalog = setupjourney.NewInstalledQuestCatalog(b.pluginHandler.Manager())
+	}
+	readers[specialist.SetupStepSummary] = setupSummaryReader{
+		modelAvailable: b.systemModelAvailable, pluginQuests: pluginQuestCatalog,
+	}
 	mailboxAdapter := b.emailOpsQuestReaders(readers)
 	var integrationAdapter *setupjourney.ReviewedIntegrationAdapter
 	var projectAdapter *setupjourney.ProjectConnectionAdapter
@@ -102,30 +109,6 @@ func (b *ServerBuilder) initializeSetupJourney() {
 				connectionService,
 				installedProjectTemplateResolver{manager: b.pluginHandler.Manager(), userTemplates: userTemplates},
 			)
-			projectAdapter.CheckPrerequisites = func(ctx context.Context, template projecttemplates.Template) (bool, error) {
-				if template.RuntimeRequirements == nil || b.runtimeCapabilityRegistry == nil {
-					return false, errors.New("runtime prerequisites unavailable")
-				}
-				checked := false
-				for _, requirement := range template.RuntimeRequirements.Requirements {
-					adapter, ok := b.runtimeCapabilityRegistry.Lookup(requirement.Adapter)
-					if !ok {
-						return false, errors.New("runtime prerequisites unavailable")
-					}
-					checker, ok := adapter.(interface {
-						CheckPrerequisites(context.Context) (bool, error)
-					})
-					if !ok {
-						return false, errors.New("runtime prerequisites unavailable")
-					}
-					ready, err := checker.CheckPrerequisites(ctx)
-					if err != nil || !ready {
-						return false, err
-					}
-					checked = true
-				}
-				return checked, nil
-			}
 			readers[specialist.SetupStepProjectConnect] = projectAdapter
 		}
 	} else {
@@ -217,13 +200,26 @@ func (b *ServerBuilder) initializeSetupJourney() {
 	// library, so they are always served.
 	questCatalogs := []setupjourney.QuestCatalog{setupjourney.NewHostQuestCatalog(hostquests.All())}
 	if b.pluginHandler != nil {
-		questCatalogs = append(questCatalogs, setupjourney.NewInstalledQuestCatalog(b.pluginHandler.Manager()))
+		// The generated install quests come before the plugin quests they hand
+		// off into; both read the same installed plugin store.
+		questCatalogs = append(questCatalogs,
+			setupjourney.NewIntegrationInstallQuestCatalog(reviewedintegration.All, b.pluginHandler.Manager()),
+			pluginQuestCatalog,
+		)
 	}
 	if b.configManager != nil {
+		// Without a plugin store no integration can be installed, so the catalog
+		// lists no user-template quest (its lookups still resolve).
+		var installedPlugins interface {
+			List() ([]plugin.InstalledPlugin, error)
+		}
+		if b.pluginHandler != nil {
+			installedPlugins = b.pluginHandler.Manager()
+		}
 		questCatalogs = append(questCatalogs, setupjourney.NewUserTemplateQuestCatalog(configuredUserTemplateQuestLibrary{
 			config:  b.configManager,
 			catalog: templateRuntimeCatalog{capabilities: b.workspaceCapabilityRegistry, runtimes: b.runtimeCapabilityRegistry},
-		}))
+		}, installedPlugins))
 	}
 	b.setupJourneyService.SetQuestCatalog(setupjourney.CombineQuestCatalogs(questCatalogs...))
 	b.setupJourneyHandler = setupjourneyhttp.NewHandler(b.setupJourneyService, b.userProvider)

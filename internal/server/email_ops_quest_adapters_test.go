@@ -153,20 +153,48 @@ func TestQuestWorkspaceLabelAndRouteAreBounded(t *testing.T) {
 
 // FR 10: specialist summaries are exactly what they were; account-link
 // summaries offer only the host shape's closed actions, gated on a model.
+// fakeQuestList is a catalog that lists fixed quests and resolves none.
+type fakeQuestList []setupjourney.QuestSummary
+
+func (l fakeQuestList) List(context.Context) ([]setupjourney.QuestSummary, error) { return l, nil }
+func (l fakeQuestList) Lookup(context.Context, setupjourney.QuestKey) (setupjourney.QuestDefinition, error) {
+	return setupjourney.QuestDefinition{}, errors.New("not resolvable")
+}
+
 func TestSetupSummaryReaderOffersActionsByShape(t *testing.T) {
 	ctx := context.Background()
 	for _, scope := range []setupjourney.ReadScope{
 		{RunKind: setupjourney.RunKindRoot},
-		{RunKind: setupjourney.RunKindRoot, Shape: specialist.SetupJourneyShapeSpecialist, HomeWorkspaceID: "home", ProjectWorkspaceID: "project"},
-		{RunKind: setupjourney.RunKindChild, Shape: specialist.SetupJourneyShapeSpecialist, HomeWorkspaceID: "home", ProjectWorkspaceID: "project"},
+		{RunKind: setupjourney.RunKindRoot, Shape: specialist.SetupJourneyShapeProjectSetup, HomeWorkspaceID: "home", ProjectWorkspaceID: "project"},
+		{RunKind: setupjourney.RunKindChild, Shape: specialist.SetupJourneyShapeProjectSetup, HomeWorkspaceID: "home", ProjectWorkspaceID: "project"},
 	} {
 		legacy, legacyErr := readSetupSummary(ctx, scope)
 		for _, available := range []bool{false, true} {
 			got, err := setupSummaryReader{modelAvailable: func() bool { return available }}.Read(ctx, scope)
 			if !reflect.DeepEqual(got, legacy) || !errors.Is(err, legacyErr) {
-				t.Fatalf("specialist summary changed for %+v: %+v, want %+v", scope, got, legacy)
+				t.Fatalf("project-setup summary changed for %+v: %+v, want %+v", scope, got, legacy)
 			}
 		}
+	}
+
+	// An install quest's summary offers only its handoff and the Plugins page.
+	install := setupjourney.ReadScope{
+		RunKind: setupjourney.RunKindRoot, Shape: specialist.SetupJourneyShapeIntegrationInstall,
+		IntegrationKey: "ori_reaper", HomeWorkspaceID: "home", ProjectWorkspaceID: "project",
+	}
+	withoutQuest, err := setupSummaryReader{pluginQuests: fakeQuestList{}}.Read(ctx, install)
+	if err != nil || !reflect.DeepEqual(withoutQuest.AvailableActions, []setupjourney.ActionID{setupjourney.ActionOpenPlugins}) ||
+		withoutQuest.Handoff != nil {
+		t.Fatalf("install summary without a plugin quest = %+v", withoutQuest)
+	}
+	pluginQuest := setupjourney.QuestSummary{
+		QuestKey: setupjourney.QuestKey{Source: setupjourney.QuestSourcePlugin, PluginID: "reaper-plugin", ID: "reaper_setup"},
+		Title:    "Set up REAPER",
+	}
+	withQuest, err := setupSummaryReader{pluginQuests: fakeQuestList{pluginQuest}}.Read(ctx, install)
+	if err != nil || !reflect.DeepEqual(withQuest.AvailableActions, []setupjourney.ActionID{setupjourney.ActionContinueIntegrationSetup, setupjourney.ActionOpenPlugins}) ||
+		withQuest.Handoff == nil || withQuest.Handoff.ID != "reaper_setup" || withQuest.Handoff.PluginID != "reaper-plugin" || withQuest.Handoff.Title != "Set up REAPER" {
+		t.Fatalf("install summary with a plugin quest = %+v", withQuest)
 	}
 
 	account := emailOpsQuestScope()

@@ -16,26 +16,18 @@ test('shared creator keeps the approved group, exact import choice and browser-o
     current_step_id: 'project',
     journey: {
       title: 'Set up REAPER',
-      description: 'Prepare your group, then create a workspace.',
+      description: 'Create your group, then create a workspace.',
       workspace_launch: {
         group_title: 'Create Your Music Production Group',
-        runtime_title: 'Set Up REAPER',
-        runtime_instructions: 'Check prerequisites; project access stays workspace-owned.'
+        group_name: 'Music Production'
       }
     },
-    receipts: { home_workspace_id: 'reviewed-home' },
+    receipts: {
+      home_workspace_id: 'reviewed-home',
+      integration_plugin_id: 'reaper-plugin',
+      integration_version: '0.6.0'
+    },
     steps: [
-      {
-        id: 'integration',
-        kind: 'integration_install',
-        title: 'Install Ori REAPER Plugin',
-        status: 'complete',
-        integration: {
-          plugin_id: 'reaper-plugin',
-          installed_version: '0.5.0',
-          development_copy: true
-        }
-      },
       {
         id: 'project',
         kind: 'project_connect',
@@ -43,7 +35,6 @@ test('shared creator keeps the approved group, exact import choice and browser-o
         status: 'current',
         preparation: {
           exists: true,
-          acknowledged: true,
           name: 'My Studio',
           group_id: 'reviewed-home',
           template_id: 'plugin:reaper-plugin:reaper-song'
@@ -57,7 +48,7 @@ test('shared creator keeps the approved group, exact import choice and browser-o
   };
   const inputs: Record<string, unknown>[] = [];
   const mutations: string[] = [];
-  let checks = 0;
+  const paths: string[] = [];
   await page.route('**/api/onboarding/status', route =>
     route.fulfill({ json: { completed: true, current_step: 'complete' } })
   );
@@ -68,23 +59,7 @@ test('shared creator keeps the approved group, exact import choice and browser-o
   );
   await page.route('**/api/personal-assistant/setup-journey**', async route => {
     const path = new URL(route.request().url()).pathname;
-    if (path.endsWith('/preparation')) {
-      checks++;
-      await route.fulfill(
-        checks === 1
-          ? { json: { ready: true } }
-          : {
-              status: 503,
-              json: {
-                error: {
-                  reason_code: 'owner_unavailable',
-                  guidance: 'Prerequisites could not be checked.'
-                }
-              }
-            }
-      );
-      return;
-    }
+    paths.push(path);
     if (path.includes('/actions/review_')) {
       const input = route.request().postDataJSON().input;
       inputs.push(input);
@@ -114,13 +89,11 @@ test('shared creator keeps the approved group, exact import choice and browser-o
   await page.goto('/?setup=specialist');
   const setup = page.locator('#specialistSetupJourneyModal');
   const creator = page.locator('#addFolderModal');
-  await setup.locator('.setup-journey__step-button').nth(2).click();
-  await setup.getByRole('button', { name: 'Check Setup' }).click();
-  await expect(setup).toContainText('Application prerequisites are available');
-  await setup.getByRole('button', { name: 'Check Setup' }).click();
-  await expect(setup.getByRole('alert')).toBeVisible();
-  await expect(setup).not.toContainText('Application prerequisites are available');
-  await setup.locator('.setup-journey__step-button').nth(3).click();
+  // Two launch screens: the approved group is complete, so the workspace
+  // screen is current and there is no preparation screen or check.
+  await expect(setup.locator('.setup-journey__step-button')).toHaveCount(2);
+  await expect(setup.locator('#specialistSetupJourneyStepState')).toHaveText('Step 2 of 2');
+  await expect(setup).not.toContainText('Check Setup');
   await setup.getByRole('button', { name: 'Create New Workspace', exact: true }).click();
   await expect(creator.locator('#wizardStep2')).toBeVisible();
   await expect(creator.locator('#wizardStep1')).toBeHidden();
@@ -169,6 +142,7 @@ test('shared creator keeps the approved group, exact import choice and browser-o
     '/approved/Album'
   );
   expect(mutations).toEqual([]);
+  expect(paths.some(path => path.endsWith('/preparation'))).toBe(false);
   await creator.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(creator).toBeHidden();
   await page.evaluate(() => (window as any).sessionManager.showAddWorkspaceModal());

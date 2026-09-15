@@ -274,7 +274,7 @@ HOME="$SMOKE_DIR" ORI_DATA_DIR="$SMOKE_DIR" PORT=8931 ./bin/ori-agent
 **Do NOT use `$(mktemp -d)` here.** Agent sandboxes deny it, and the failure is silent: `SMOKE_DIR` ends up empty, so `HOME=""` and `ORI_DATA_DIR=""` resolve the data dir to the **current working directory** and the server starts writing `sessions.db`, `agents.json`, and `model_categories.json` into your worktree. Those files are gitignored, so `git status` will not show the damage — but a polluted worktree fails `TestSetupWizardRegistry_MatchesTheAuthorableAdapters` (its stale `sessions.db` breaks migration 13, the session store dies, and several adapters never register) while a clean checkout passes. `$TMPDIR` is always set and always writable.
 
 Rules:
-- Start the server as a tracked background process (`run_in_background`) and stop it by PID — never `pkill -f <pattern>`.
+- Start the server as a tracked background process (`run_in_background`) and stop it by PID — never `pkill -f <pattern>`. `./scripts/stop-demo-server.sh [port]` does this in one command and only stops an `ori-agent` on that port.
 - Keep every smoke artifact under `$SMOKE_DIR`; cleanup is then a single `rm -rf "$SMOKE_DIR"` of a temp path. Nothing under the real `$HOME` should ever need deleting after a smoke test.
 - Verify the sandbox exists before starting the server. An empty `$SMOKE_DIR` is the failure above, not a no-op.
 - Run destructive commands (`rm`, `kill`) as standalone commands, not chained with `&&`/`;` onto safe ones — chaining forces a permission prompt for the whole compound and a denial kills the safe parts too.

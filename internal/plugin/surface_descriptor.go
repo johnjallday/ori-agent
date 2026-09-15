@@ -43,9 +43,12 @@ const (
 )
 
 const (
-	HostFeatureAssistantProgramV1          = "assistant_program_v1"
-	HostFeatureSpecialistSetupJourneyV1    = "specialist_setup_journey_v1"
-	HostFeatureSetupQuestsV1               = "setup_quests_v1"
+	HostFeatureAssistantProgramV1       = "assistant_program_v1"
+	HostFeatureSpecialistSetupJourneyV1 = "specialist_setup_journey_v1"
+	// HostFeatureSetupQuestsV2 is the four-step project_setup quest contract.
+	// setup_quests_v1 (the retired five-step shape) is no longer supported, so
+	// a manifest requiring it fails like any unknown feature.
+	HostFeatureSetupQuestsV2               = "setup_quests_v2"
 	HostFeatureTemplateGroupRequirementsV1 = "template_group_requirements_v1"
 )
 
@@ -299,7 +302,7 @@ func (c *SurfaceContribution) Validate() error {
 	return c.ValidateForHost(SurfaceProtocolVersion, []string{
 		HostFeatureAssistantProgramV1,
 		HostFeatureSpecialistSetupJourneyV1,
-		HostFeatureSetupQuestsV1,
+		HostFeatureSetupQuestsV2,
 		HostFeatureTemplateGroupRequirementsV1,
 	})
 }

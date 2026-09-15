@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
+	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/specialist"
 )
 
@@ -104,7 +105,6 @@ const (
 
 	ActionReviewCreateGroup      ActionID = "review_create_group"
 	ActionCreateGroup            ActionID = "create_group"
-	ActionAcknowledgePreparation ActionID = "acknowledge_preparation"
 	ActionReviewExistingProject  ActionID = "review_existing_project"
 	ActionConnectExistingProject ActionID = "connect_existing_project"
 	ActionReviewNewProject       ActionID = "review_new_project"
@@ -139,13 +139,20 @@ const (
 	ActionLinkMailbox         ActionID = "link_mailbox"
 	ActionStartInboxTriage    ActionID = "start_inbox_triage"
 	ActionOpenModelSettings   ActionID = "open_model_settings"
+
+	// Install-quest summary offers. Continuing opens the plugin's own quest,
+	// named by the summary step's host-resolved handoff.
+	ActionContinueIntegrationSetup ActionID = "continue_integration_setup"
+	ActionOpenPlugins              ActionID = "open_plugins"
 )
 
 var actionDefinitionsByKind = map[specialist.SetupStepKind][]ActionDefinition{
 	specialist.SetupStepIntegrationInstall: {
-		{ID: ActionReviewInstall, Label: "Review integration", Effect: ActionEffectReview},
+		// Review actions are labelled by their outcome; the review panel still
+		// shows the disclosure before anything changes.
+		{ID: ActionReviewInstall, Label: "Install plugin", Effect: ActionEffectReview},
 		{ID: ActionInstall, Label: "Install integration", Effect: ActionEffectCommit, RequiresReview: true},
-		{ID: ActionReviewEnable, Label: "Review enabling", Effect: ActionEffectReview},
+		{ID: ActionReviewEnable, Label: "Enable plugin", Effect: ActionEffectReview},
 		{ID: ActionEnable, Label: "Enable integration", Effect: ActionEffectCommit, RequiresReview: true},
 		{ID: ActionReviewUpdate, Label: "Review verified replacement", Effect: ActionEffectReview},
 		{ID: ActionUpdate, Label: "Update integration", Effect: ActionEffectCommit, RequiresReview: true},
@@ -154,7 +161,6 @@ var actionDefinitionsByKind = map[specialist.SetupStepKind][]ActionDefinition{
 	specialist.SetupStepProjectConnect: {
 		{ID: ActionReviewCreateGroup, Label: "Review Group", Effect: ActionEffectReview},
 		{ID: ActionCreateGroup, Label: "Create Group", Effect: ActionEffectCommit, RequiresReview: true},
-		{ID: ActionAcknowledgePreparation, Label: "Continue to workspace creation", Effect: ActionEffectCommit},
 		{ID: ActionReviewExistingProject, Label: "Import Existing Project", Effect: ActionEffectReview},
 		{ID: ActionConnectExistingProject, Label: "Connect existing project", Effect: ActionEffectCommit, RequiresReview: true},
 		{ID: ActionReviewNewProject, Label: "Create New Project", Effect: ActionEffectReview},
@@ -190,6 +196,9 @@ var actionDefinitionsByKind = map[specialist.SetupStepKind][]ActionDefinition{
 		{ID: ActionOpenWorkspace, Label: "Open Email Ops", Effect: ActionEffectNavigation},
 		{ID: ActionStartInboxTriage, Label: "Start inbox triage", Effect: ActionEffectNavigation},
 		{ID: ActionOpenModelSettings, Label: "Set up a model", Effect: ActionEffectNavigation},
+		// Integration-install shape summary offers.
+		{ID: ActionContinueIntegrationSetup, Label: "Continue setup", Effect: ActionEffectNavigation},
+		{ID: ActionOpenPlugins, Label: "Open Plugins", Effect: ActionEffectNavigation},
 	},
 	specialist.SetupStepWorkspaceCreate: {
 		{ID: ActionReviewTeam, Label: "Review your team", Effect: ActionEffectNavigation},
@@ -248,6 +257,72 @@ type CanonicalStepRead struct {
 	WorkspaceCreate  *WorkspaceCreateProjection
 	AccountConnect   *AccountConnectProjection
 	AccountLink      *AccountLinkProjection
+	// Handoff is the quest an install quest's summary continues into. Only a
+	// summary read carries it, and only together with its continue action.
+	Handoff *QuestHandoffProjection
+}
+
+// QuestHandoffProjection names one installed plugin quest by its host-resolved
+// key and display title. It carries no route, URL or action handler; the
+// browser builds the open request from the key through the host route helper.
+type QuestHandoffProjection struct {
+	Source   QuestSource `json:"source"`
+	PluginID string      `json:"plugin_id"`
+	ID       string      `json:"id"`
+	Title    string      `json:"title"`
+}
+
+func cloneQuestHandoffProjection(source *QuestHandoffProjection) *QuestHandoffProjection {
+	if source == nil {
+		return nil
+	}
+	copy := *source
+	return &copy
+}
+
+func validQuestHandoffProjection(handoff *QuestHandoffProjection) bool {
+	if handoff == nil {
+		return true
+	}
+	key := QuestKey{Source: handoff.Source, PluginID: handoff.PluginID, ID: handoff.ID}
+	return handoff.Source == QuestSourcePlugin && validQuestKey(key) && normalizeQuestKey(key) == key &&
+		specialist.ValidateSetupJourneyText("handoff title", handoff.Title, specialist.MaxSetupJourneyTitleBytes) == nil
+}
+
+// IntegrationHandoff resolves the plugin quest an install quest continues into:
+// the first quest, by ID, that the catalog lists for the reviewed integration's
+// plugin. It returns nil when none is listed or the catalog cannot be read.
+// Only plugin-source catalogs are read.
+func IntegrationHandoff(ctx context.Context, catalog QuestCatalog, integrationKey string) *QuestHandoffProjection {
+	entry, reviewed := reviewedintegration.Get(integrationKey)
+	if catalog == nil || !reviewed {
+		return nil
+	}
+	quests, err := listQuestSource(ctx, catalog, QuestSourcePlugin)
+	if err != nil {
+		return nil
+	}
+	var found *QuestSummary
+	for index := range quests {
+		quest := normalizeQuestKey(quests[index].QuestKey)
+		if quest.Source != QuestSourcePlugin || quest.PluginID != entry.PluginID {
+			continue
+		}
+		if found == nil || quest.ID < found.ID {
+			found = &quests[index]
+		}
+	}
+	if found == nil {
+		return nil
+	}
+	handoff := &QuestHandoffProjection{
+		Source: QuestSourcePlugin, PluginID: entry.PluginID,
+		ID: normalizeQuestKey(found.QuestKey).ID, Title: strings.TrimSpace(found.Title),
+	}
+	if !validQuestHandoffProjection(handoff) {
+		return nil
+	}
+	return handoff
 }
 
 // CanonicalReader asks one canonical owner for current state. Implementations
@@ -305,6 +380,7 @@ func (r *ReaderRegistry) read(ctx context.Context, kind specialist.SetupStepKind
 	state.WorkspaceCreate = cloneWorkspaceCreateProjection(state.WorkspaceCreate)
 	state.AccountConnect = cloneAccountConnectProjection(state.AccountConnect)
 	state.AccountLink = cloneAccountLinkProjection(state.AccountLink)
+	state.Handoff = cloneQuestHandoffProjection(state.Handoff)
 	return state
 }
 
@@ -326,7 +402,18 @@ func validCanonicalRead(kind specialist.SetupStepKind, state CanonicalStepRead) 
 		(state.AccountConnect != nil && kind != specialist.SetupStepAccountConnect) ||
 		!validAccountConnectProjection(state.AccountConnect) ||
 		(state.AccountLink != nil && kind != specialist.SetupStepAccountLink) ||
-		!validAccountLinkProjection(state.AccountLink) {
+		!validAccountLinkProjection(state.AccountLink) ||
+		(state.Handoff != nil && kind != specialist.SetupStepSummary) ||
+		!validQuestHandoffProjection(state.Handoff) {
+		return false
+	}
+	// The continue action and its target travel together: an offer without a
+	// target, or a target without the offer, is not a valid read.
+	continues := false
+	for _, actionID := range state.AvailableActions {
+		continues = continues || actionID == ActionContinueIntegrationSetup
+	}
+	if continues != (state.Handoff != nil) {
 		return false
 	}
 	if !validateReasonCode(state.BlockedReason, true) {

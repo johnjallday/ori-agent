@@ -31,15 +31,16 @@ func accountLinkServiceFixture(t *testing.T, reads map[specialist.SetupStepKind]
 	t.Helper()
 	_, store := openTestStore(t)
 	declaration := accountLinkDeclarationFixture(t)
-	entry := specialist.Entry{Slug: "account_fixture", DisplayName: "account fixture", SetupJourney: declaration}
-	relationship := acceptedRelationship()
-	relationship.SpecialistSlug = entry.Slug
-	service, err := newService(store, &relationshipStub{state: relationship}, readerRegistryStub(t, reads, nil, nil, scopes),
-		func(slug string) (specialist.Entry, bool) { return entry, slug == entry.Slug }, nil)
+	service, err := NewService(store, &relationshipStub{state: acceptedRelationship()}, readerRegistryStub(t, reads, nil, nil, scopes))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return service
+	service.SetQuestCatalog(NewHostQuestCatalog([]specialist.SetupJourney{*declaration}))
+	scoped, err := service.ForHostQuest(context.Background(), "local", declaration.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return scoped
 }
 
 func stepByID(t *testing.T, projection *JourneyProjection, id string) StepProjection {

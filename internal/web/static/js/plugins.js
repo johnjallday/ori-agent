@@ -75,6 +75,47 @@
     list.innerHTML = installedCache.length
       ? installedCache.map(renderPlugin).join('')
       : '<p class="text-muted mb-0">No plugins installed yet.</p>';
+    renderAvailableIntegrations();
+  }
+
+  // Host-generated install quests carry an integration key. The catalog lists
+  // one only while its plugin is not installed, so no client filter is needed.
+  function availableIntegrations(quests) {
+    return (quests || []).filter(
+      quest => quest && quest.source === 'host' && String(quest.integration_key || '') !== ''
+    );
+  }
+
+  function renderAvailableIntegrations() {
+    const card = byId('availableIntegrationsCard');
+    const list = byId('availableIntegrationsList');
+    if (!card || !list) return;
+    const items = availableIntegrations(questCache);
+    card.hidden = items.length === 0;
+    list.innerHTML = items
+      .map(
+        quest =>
+          '<div class="d-flex flex-wrap align-items-start justify-content-between gap-2 border-bottom py-3" data-integration-key="' +
+          esc(quest.integration_key) +
+          '">' +
+          '<div style="min-width: 0; flex: 1 1 240px;">' +
+          '<div class="fw-semibold">' +
+          esc(quest.display_name || quest.title) +
+          '</div>' +
+          (quest.publisher_label
+            ? '<div class="small text-muted">Reviewed by ' + esc(quest.publisher_label) + '</div>'
+            : '') +
+          '</div>' +
+          '<div class="d-flex flex-wrap gap-2">' +
+          '<a class="modern-btn modern-btn-primary" href="' +
+          esc(quest.launch_url) +
+          '" title="' +
+          esc(quest.title) +
+          '">Guided Setup</a>' +
+          '</div>' +
+          '</div>'
+      )
+      .join('');
   }
 
   const updateController = updateNotifications.createController({
@@ -344,11 +385,6 @@
         )
       ) +
       '</div>' +
-      (questCache.some(
-        quest => quest.plugin_id === rawName && quest.ownership === 'host_compatibility'
-      )
-        ? '<div class="small text-muted mt-1">Ori compatibility setup for this plugin version.</div>'
-        : '') +
       '</div>' +
       '<div class="d-flex flex-wrap gap-2">' +
       questLinks +

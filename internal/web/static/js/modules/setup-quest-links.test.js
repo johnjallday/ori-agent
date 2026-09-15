@@ -167,6 +167,36 @@ test('open detail carries only the identity fields of its own quest source', () 
   });
 });
 
+test('a generated install quest routes as a host quest and matches no template', () => {
+  const install = {
+    source: 'host',
+    id: 'install_ori_reaper',
+    template_id: '',
+    integration_key: 'ori_reaper',
+    ownership: 'host'
+  };
+  assert.equal(setupQuestURL(install), '/?setup=quest&source=host&quest=install_ori_reaper');
+  assert.deepEqual(setupQuestOpenDetail(install), {
+    source: 'host',
+    quest_id: 'install_ori_reaper'
+  });
+  assert.equal(hostSetupQuestAPIRoot(install.id), '/api/host-setup-quests/install_ori_reaper');
+  assert.equal(
+    setupJourneyAPIRoot({ journey: { source: 'host', id: 'install_ori_reaper' } }),
+    '/api/host-setup-quests/install_ori_reaper'
+  );
+  for (const template of [
+    {
+      id: 'reaper-song',
+      plugin_owner: { plugin_id: 'reaper-plugin', blueprint_id: 'reaper-song' }
+    },
+    { id: 'reaper-song', builtin: true, setup_quest: 'reaper_setup' },
+    { id: 'reaper-song', builtin: true, setup_quest: 'install_ori_reaper' }
+  ]) {
+    assert.equal(setupQuestForTemplate(template, [install]), null);
+  }
+});
+
 test('catalog discovery makes one read and generates its own safe launch URL', async t => {
   const calls = [];
   t.mock.method(globalThis, 'fetch', async (url, options) => {

@@ -5,6 +5,12 @@ approved as **Go A** keeps all five v1 setup steps required, exactly once, in
 their current order. This document records the checkout observed before product
 code changed and the additive contract selected for implementation.
 
+> **Superseded layout.** The setup-quest install split moved user-owned quests
+> to the four-step `project_setup` shape. See
+> [the addendum](#addendum-four-step-project_setup-quests) at the end. The
+> five-step order, runtime launch fields and compatibility references below
+> describe the earlier contract.
+
 ## Scope
 
 A user-owned setup quest is one inert declaration embedded in one user-owned
@@ -313,3 +319,34 @@ No code in this feature may relax the fixed-step validator, action allowlist,
 review receipt/idempotency checks, reviewed integration source/artifact checks,
 project selection ownership, Setup Wizard authority, staffing scope, or runtime
 grant rules.
+
+## Addendum: four-step `project_setup` quests
+
+The setup-quest install split changes the user-owned declaration without
+relaxing any rule above.
+
+- **Four steps.** A user quest is `project_setup`-shaped:
+  `project_connect`, `workspace_setup`, `assistant_program_staffing`,
+  `summary`, each exactly once and in that order. `NewUserSetupQuest` sizes
+  drafts from the shape, and the default draft has four steps.
+- **Group-only launch copy.** `workspace_launch` carries only `group_title` and
+  `group_name`. `runtime_title` and `runtime_instructions` are unknown fields.
+  The Templates page editor shows four step rows and two launch inputs.
+- **Installation is a precondition.** The integration install step moved to
+  Ori's generated install quest. A user quest reads the integration before its
+  steps and shows a single blocked panel with **Open install quest** until the
+  integration is ready. Its root still records the verified integration
+  receipts that `installedProjectTemplateResolver` needs.
+- **Install-gated listing.** The catalog lists a user quest only while the
+  plugin for its `integration_key` is installed. Authoring, eligibility,
+  scoping an attachment and reading existing progress ignore that gate.
+- **Old attachments.** An attachment with five steps or runtime fields no
+  longer normalizes. Its template reports "This quest uses an old five-step
+  layout. Remove it and create it again." Ori does not rewrite it, and its
+  lock binding blocks nothing else.
+- **No Start over.** The attachment binding locks a definition, so
+  `POST .../restart` is not routed for user-template quests and the service
+  returns `action_unavailable`. Removing and recreating the quest is the reset.
+- **Compatibility gone.** The host compatibility declaration and the
+  `host_compatibility` ownership described in the observed request path no
+  longer exist.

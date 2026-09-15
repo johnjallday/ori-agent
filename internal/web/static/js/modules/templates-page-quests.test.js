@@ -92,13 +92,29 @@ test('Templates shows an inert plugin-owned quest and its canonical launch link'
   assert.match(node('tplQuestOwnership').textContent, /plugin-owned declaration · read-only/);
   assert.match(node('tplQuestStatus').textContent, /resumes your saved progress/);
   assert.deepEqual(calls, []);
-  subject.tplQuests.items = [
-    { ...quest, ownership: 'host_compatibility', title: '<img src=x onerror=alert(1)>' }
-  ];
+  subject.tplQuests.items = [{ ...quest, title: '<img src=x onerror=alert(1)>' }];
   subject.tplRenderQuest();
-  assert.match(node('tplQuestOwnership').textContent, /Ori compatibility/);
+  assert.match(node('tplQuestOwnership').textContent, /plugin-owned declaration/);
   assert.equal(node('tplQuestHeading').textContent, '<img src=x onerror=alert(1)>');
   assert.equal(node('tplQuestHeading').innerHTML, '');
+});
+
+// FR 16: the catalog omits a user-template quest while its integration's
+// plugin is not installed, so the template offers no Guided Setup link.
+test('a user template whose quest the catalog omits shows no Guided Setup link', () => {
+  const { subject, node, calls } = harness();
+  const userTemplate = {
+    id: 'local-project',
+    name: 'Local project',
+    user_setup_quest: { attachment_id: 'uqatt_0123456789abcdef01234567' }
+  };
+  assert.equal(setupQuestForTemplate(userTemplate, []), null);
+  subject.tplState.templates = [userTemplate];
+  subject.tplState.selectedId = userTemplate.id;
+  subject.tplQuests.items = [];
+  subject.tplRenderQuest();
+  assert.equal(node('tplQuestOpen').hidden, true);
+  assert.deepEqual(calls, []);
 });
 
 test('user-owned templates show their source-aware attachment quest without plugin ownership', () => {

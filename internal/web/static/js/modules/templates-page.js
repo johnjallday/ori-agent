@@ -407,9 +407,7 @@ function tplRenderQuest() {
       ? 'User-owned · Source: user template'
       : quest.source === 'host'
         ? 'Ori built-in · read-only.'
-        : quest.ownership === 'host_compatibility'
-          ? `Ori compatibility setup for ${quest.plugin_id} · read-only.`
-          : `Provided by ${quest.plugin_id} · plugin-owned declaration · read-only.`;
+        : `Provided by ${quest.plugin_id} · plugin-owned declaration · read-only.`;
   ownership.hidden = false;
   status.textContent =
     quest.source === 'user_template'
@@ -1072,12 +1070,13 @@ async function tplReveal(id) {
 
 // --- User-owned setup quest ---
 
+// The four project_setup steps. Installing the reviewed integration is the
+// quest's precondition, not a step, so it has no row here.
 const tplUserQuestKinds = [
-  ['integration_install', '1. Integration'],
-  ['project_connect', '2. Project'],
-  ['workspace_setup', '3. Workspace'],
-  ['assistant_program_staffing', '4. Staffing'],
-  ['summary', '5. Summary']
+  ['project_connect', '1. Project'],
+  ['workspace_setup', '2. Workspace'],
+  ['assistant_program_staffing', '3. Staffing'],
+  ['summary', '4. Summary']
 ];
 
 function tplUserQuestReset() {
@@ -1206,8 +1205,6 @@ function tplUserQuestFill(draft) {
   const launch = draft.workspace_launch || {};
   set('tplUserQuestGroupTitle', launch.group_title);
   set('tplUserQuestGroupName', launch.group_name);
-  set('tplUserQuestRuntimeTitle', launch.runtime_title);
-  set('tplUserQuestRuntimeInstructions', launch.runtime_instructions);
   const steps = tplEl('tplUserQuestSteps');
   if (!steps) return;
   steps.innerHTML = '';
@@ -1258,9 +1255,7 @@ function tplUserQuestCollect() {
     steps,
     workspace_launch: {
       group_title: value('tplUserQuestGroupTitle'),
-      group_name: value('tplUserQuestGroupName'),
-      runtime_title: value('tplUserQuestRuntimeTitle'),
-      runtime_instructions: value('tplUserQuestRuntimeInstructions')
+      group_name: value('tplUserQuestGroupName')
     }
   };
 }

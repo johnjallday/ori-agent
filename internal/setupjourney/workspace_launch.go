@@ -57,7 +57,7 @@ func validHomePreparation(value *projectconnection.HomePreparation) bool {
 	return true
 }
 func isPreparationAction(action ActionID) bool {
-	return action == ActionReviewCreateGroup || action == ActionCreateGroup || action == ActionAcknowledgePreparation
+	return action == ActionReviewCreateGroup || action == ActionCreateGroup
 }
 func groupName(raw json.RawMessage) (string, error) {
 	var input struct {
@@ -77,13 +77,7 @@ func groupName(raw json.RawMessage) (string, error) {
 	}
 	return name, nil
 }
-func preparationInputDigest(action ActionID, raw json.RawMessage) (string, error) {
-	if action == ActionAcknowledgePreparation {
-		if err := decodeEmptyActionInput(raw); err != nil {
-			return "", err
-		}
-		return Digest([]byte("acknowledge_preparation:v1")), nil
-	}
+func preparationInputDigest(_ ActionID, raw json.RawMessage) (string, error) {
 	name, err := groupName(raw)
 	if err != nil {
 		return "", err
@@ -107,16 +101,15 @@ func (a *ProjectConnectionAdapter) prepareGroup(ctx context.Context, scope ReadS
 		return ActionReviewMaterial{}, err
 	}
 	ownerDigest := Digest([]byte(template.ID + ":" + scope.IntegrationVersion + ":" + home.HomeID + ":" + home.Name))
-	if action == ActionCreateGroup {
-		if home.Exists {
-			return ActionReviewMaterial{}, ErrConflict
-		}
-		home.Name, err = groupName(raw)
-		if err != nil {
-			return ActionReviewMaterial{}, err
-		}
-	} else if action != ActionAcknowledgePreparation || !home.Exists {
+	if action != ActionCreateGroup {
 		return ActionReviewMaterial{}, ErrInvalid
+	}
+	if home.Exists {
+		return ActionReviewMaterial{}, ErrConflict
+	}
+	home.Name, err = groupName(raw)
+	if err != nil {
+		return ActionReviewMaterial{}, err
 	}
 	disclosure, err := json.Marshal(home)
 	if err != nil {
@@ -129,19 +122,14 @@ func (a *ProjectConnectionAdapter) commitGroup(ctx context.Context, scope ReadSc
 	if err != nil {
 		return CanonicalResult{}, projectconnection.ErrUnavailable
 	}
-	var home projectconnection.HomePreparation
-	switch action {
-	case ActionCreateGroup:
-		name, nameErr := groupName(raw)
-		if nameErr != nil {
-			return CanonicalResult{}, nameErr
-		}
-		home, err = a.owner.CreateHome(projectConnectionScope(scope, template), name)
-	case ActionAcknowledgePreparation:
-		home, err = a.owner.AcknowledgePreparation(projectConnectionScope(scope, template))
-	default:
+	if action != ActionCreateGroup {
 		return CanonicalResult{}, ErrInvalid
 	}
+	name, nameErr := groupName(raw)
+	if nameErr != nil {
+		return CanonicalResult{}, nameErr
+	}
+	home, err := a.owner.CreateHome(projectConnectionScope(scope, template), name)
 	if err != nil {
 		return CanonicalResult{}, projectConnectionFailure(err)
 	}
@@ -150,42 +138,4 @@ func (a *ProjectConnectionAdapter) commitGroup(ctx context.Context, scope ReadSc
 		result.HomeWorkspaceID = home.HomeID
 	}
 	return result, nil
-}
-
-// PreparationCheck reports application prerequisites only. There is no project
-// identity, grant, runner destination, provider error text, or live verdict here.
-type PreparationCheck struct {
-	Ready bool `json:"ready"`
-}
-
-func (s *Service) CheckPreparation(ctx context.Context, userID, runID string) (*PreparationCheck, error) {
-	projection, err := s.Read(ctx, userID, runID)
-	if err != nil {
-		return nil, err
-	}
-	scope, err := s.authorizedActionScope(ctx, userID, projection.RunID)
-	if err != nil {
-		return nil, err
-	}
-	if !scope.WorkspaceLaunch || scope.HomeWorkspaceID == "" {
-		return nil, failure(ReasonActionUnavailable, projection.StateRevision)
-	}
-	for _, step := range projection.Steps {
-		if step.Kind == specialist.SetupStepIntegrationInstall && step.Status != StepComplete {
-			return nil, failure(ReasonOwnerUnavailable, projection.StateRevision)
-		}
-	}
-	adapter, ok := s.actionAdapters[specialist.SetupStepProjectConnect].(*ProjectConnectionAdapter)
-	if !ok || adapter.CheckPrerequisites == nil {
-		return nil, failure(ReasonOwnerUnavailable, projection.StateRevision)
-	}
-	template, err := adapter.templates.ResolveProjectTemplate(ctx, scope)
-	if err != nil {
-		return nil, failure(ReasonOwnerUnavailable, projection.StateRevision)
-	}
-	ready, err := adapter.CheckPrerequisites(ctx, template)
-	if err != nil {
-		return nil, failure(ReasonOwnerUnavailable, projection.StateRevision)
-	}
-	return &PreparationCheck{Ready: ready}, nil
 }
