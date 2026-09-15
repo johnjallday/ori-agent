@@ -867,11 +867,20 @@ test('the registry matches the keys the server knows about', () => {
 test('local coachmark keys are not server-addressable', () => {
   const { coachmarks } = load();
   const local = [...coachmarks.keys()].filter(key => !coachmarks.serverKeys().includes(key));
-  assert.deepEqual(local.sort(), ['select_agent', 'select_agent_check']);
+  // Each local key and the one page that owns it.
+  const owners = {
+    select_agent: '/agents',
+    select_agent_check: '/agents',
+    create_workspace_submit: '/'
+  };
+  assert.deepEqual(local.sort(), Object.keys(owners).sort());
   for (const key of local) {
     // Still resolvable by the page that owns them, on their own route only.
-    assert.ok(coachmarks.supports(key, '/agents'), `${key} should work on /agents`);
-    assert.ok(!coachmarks.supports(key, '/'), `${key} leaked onto Home`);
+    const owner = owners[key];
+    assert.ok(coachmarks.supports(key, owner), `${key} should work on ${owner}`);
+    for (const elsewhere of ['/', '/agents', '/workspaces'].filter(route => route !== owner)) {
+      assert.ok(!coachmarks.supports(key, elsewhere), `${key} leaked onto ${elsewhere}`);
+    }
   }
 });
 

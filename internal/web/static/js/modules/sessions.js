@@ -848,6 +848,12 @@ const sessionManager = {
       }
     });
 
+    // Once the dialog has finished opening, its controls have real layout. A
+    // guided walkthrough waiting to mark one of them re-presents on this.
+    addFolderModal?.addEventListener('shown.bs.modal', () => {
+      this.announceWorkspaceCreatorStep({ force: true });
+    });
+
     // Close dropdowns when clicking outside
     document.addEventListener('click', () => this.closeDropdowns());
 
@@ -8512,6 +8518,40 @@ const sessionManager = {
       }
     }
     if (onFinalStep) this.refreshWorkspaceReview();
+    this.announceWorkspaceCreatorStep();
+  },
+
+  // announceWorkspaceCreatorStep tells observers which creator step is showing,
+  // as a window `ori:workspace-creator-step` event with { step, entryPoint,
+  // final }. The creator is user-paced and its Create button exists only on the
+  // last step, so a walkthrough pointing at that button re-presents on each
+  // step instead of relying on a bounded retry.
+  //
+  // The chrome re-renders often (a template click, a team edit), so an event
+  // fires only when the step, mode, or creator generation actually changes.
+  // `force` announces regardless, for the dialog's shown transition.
+  announceWorkspaceCreatorStep({ force = false } = {}) {
+    if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return;
+    const importMode = Boolean(this.importModeEnabled);
+    const step = importMode ? 2 : this.wizardStep;
+    const steps = this.creatorWizardSteps();
+    const context = this.workspaceCreatorContext;
+    const key = `${context?.generation || 0}:${importMode}:${step}`;
+    if (!force && this.lastAnnouncedCreatorStep === key) return;
+    this.lastAnnouncedCreatorStep = key;
+    try {
+      window.dispatchEvent(
+        new CustomEvent('ori:workspace-creator-step', {
+          detail: {
+            step,
+            entryPoint: String(context?.entryPoint || this.importEntryPoint || ''),
+            final: importMode || step === steps[steps.length - 1]
+          }
+        })
+      );
+    } catch (_) {
+      /* an observer must never break the creator */
+    }
   },
 
   // Whether the selected blueprint's dependencies are unresolved. Blank, an
@@ -10928,6 +10968,9 @@ const sessionManager = {
   // Creates a fresh, generation-fenced operation context before Bootstrap
   // shows the one shared dialog. Direct data-attribute launchers pass through
   // the same show listener with no options and retain the Workspace default.
+  //
+  // entryPoint is a label only (telemetry and observers such as the Tidy your
+  // Downloads walkthrough's 'tidy_downloads_quest'); it never changes behaviour.
   beginWorkspaceCreatorContext(options = {}) {
     this.workspaceCreatorGeneration += 1;
     const contextOptions = {

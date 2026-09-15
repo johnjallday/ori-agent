@@ -299,6 +299,30 @@ func TestStatus_CallsTheProviderOutsideTheLock(t *testing.T) {
 	}
 }
 
+func TestResolveTidyDownloads(t *testing.T) {
+	cases := []struct {
+		name    string
+		janitor *MissionWorkspace
+		want    MissionPresentation
+	}{
+		{"no workspace starts the walkthrough", nil, MissionPresentation{}},
+		{
+			"unfinished setup resumes that workspace",
+			&MissionWorkspace{Slug: "tidy-downloads"},
+			MissionPresentation{ActionURL: "/workspaces/tidy-downloads", ActionLabel: "Finish setup", InProgress: true},
+		},
+		{"ready setup changes nothing", &MissionWorkspace{Slug: "tidy-downloads", WizardReady: true}, MissionPresentation{}},
+		{"a workspace without a slug has nowhere to go", &MissionWorkspace{}, MissionPresentation{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveTidyDownloads(MissionContext{FileJanitor: tc.janitor}); got != tc.want {
+				t.Fatalf("got %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestHasCompleted_SeesRetiredQuestIDs(t *testing.T) {
 	store := &fakeStore{}
 	store.state.CompletedQuests = map[string]time.Time{PersonalAssistantFirstDayQuestID: time.Now()}

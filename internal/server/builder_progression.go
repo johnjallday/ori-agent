@@ -139,6 +139,11 @@ func (b *ServerBuilder) scanProgression() progression.Snapshot {
 		}
 	}
 
+	// Mission 02: a File Janitor workspace whose setup already reached ready.
+	if _, ready, ok := findJanitorWorkspace(b.starterWorkspaces()); ok {
+		snap.FileJanitorReady = ready
+	}
+
 	// Count notes only until we find one — the quest just needs "> 0".
 	if b.sessionStore != nil {
 		ctx := context.Background()

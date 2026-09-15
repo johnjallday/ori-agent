@@ -8,6 +8,7 @@
 package progression
 
 import (
+	"net/url"
 	"strings"
 
 	ws "github.com/johnjallday/ori-agent/internal/workspace"
@@ -229,6 +230,7 @@ func PersonalAssistantGraph() Graph {
 			ActionURL:   TidyDownloadsActionURL,
 			ActionLabel: "Start",
 			Satisfied:   func(s Snapshot) bool { return s.FileJanitorReady },
+			Resolve:     resolveTidyDownloads,
 		},
 		{
 			ID: ConnectSourceQuestID, Tier: 1, Featured: true, Order: 3, Optional: true,
@@ -264,6 +266,23 @@ func PersonalAssistantGraph() Graph {
 	names[1] = "Starter"
 	names[2] = "Daily loop"
 	return Graph{Quests: quests, TierNames: names, TotalTiers: TotalTiers}
+}
+
+// resolveTidyDownloads points Mission 02 at the right place for where the user
+// is (PRD FR9). With no File Janitor workspace the card starts the guided
+// walkthrough. With one whose setup is unfinished it sends the user back to
+// that workspace, where the wizard reopens. Once the wizard is ready the quest
+// is complete, so nothing changes.
+func resolveTidyDownloads(ctx MissionContext) MissionPresentation {
+	janitor := ctx.FileJanitor
+	if janitor == nil || janitor.WizardReady || strings.TrimSpace(janitor.Slug) == "" {
+		return MissionPresentation{}
+	}
+	return MissionPresentation{
+		ActionURL:   "/workspaces/" + url.PathEscape(strings.TrimSpace(janitor.Slug)),
+		ActionLabel: "Finish setup",
+		InProgress:  true,
+	}
 }
 
 // BuiltinQuests returns the ordered built-in quest graph. The slice is freshly

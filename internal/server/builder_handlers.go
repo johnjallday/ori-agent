@@ -1023,15 +1023,22 @@ func (b *ServerBuilder) wireSetupWizard() {
 	b.setupWizardService = service
 	b.setupWizardHandler = setupwizardhttp.NewHandler(service, b.workspaceStore, b.userProvider)
 
+	// The completion hook is a single slot, so its consumers are composed here.
+	//
 	// When setup first passes, the blueprint's `setup: true` help task is marked
 	// complete — no model call, no agent run. The wizard did the work; the task
 	// only ever explained it.
+	var onReady []setupwizard.CompletionHook
 	if b.sessionHandler != nil {
 		sessionHandler := b.sessionHandler
-		service.SetCompletionHook(func(_ context.Context, workspaceID string) {
+		onReady = append(onReady, func(_ context.Context, workspaceID string) {
 			sessionHandler.CompleteSetupHelpTaskOnWizardReady(workspaceID)
 		})
 	}
+	// A File Janitor workspace reaching ready completes Mission 02, Tidy your
+	// Downloads (tasks/prd-starter-missions.md FR10).
+	onReady = append(onReady, b.completeTidyDownloadsOnWizardReady)
+	service.SetCompletionHook(composeCompletionHooks(onReady...))
 }
 
 // blueprintWizardLookup resolves a blueprint by the template ID a workspace
