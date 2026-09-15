@@ -9,6 +9,7 @@ const {
   EMAIL_SETUP_STATUS_URL,
   createEmailSetupQuestCard,
   dismissRequestBody,
+  featuredMissionCoversQuest,
   resumeCardView
 } = await import('./email-setup-quest-card.js');
 
@@ -248,4 +249,64 @@ test('showing the card never opens the quest or dispatches anything by itself', 
 
 test('dismiss request bodies carry only the revision and a fresh key', () => {
   assert.deepEqual(dismissRequestBody('7', 'key-1'), { if_revision: 7, idempotency_key: 'key-1' });
+});
+
+// Mission 03's email branch offers the same Resume on the featured card, so
+// this card must not show a second one for the same setup.
+test('featuredMissionCoversQuest matches only an open featured mission on this setup', () => {
+  const url = '/?setup=quest&source=host&quest=email_ops_setup';
+  assert.equal(featuredMissionCoversQuest({ visible: true, actionURL: url }), true);
+  assert.equal(
+    featuredMissionCoversQuest({ visible: true, completed: true, actionURL: url }),
+    false
+  );
+  assert.equal(featuredMissionCoversQuest({ visible: false, actionURL: url }), false);
+  assert.equal(
+    featuredMissionCoversQuest({ visible: true, actionURL: '/?quest=plan-first-day' }),
+    false
+  );
+  assert.equal(featuredMissionCoversQuest(undefined), false);
+});
+
+test('the card stays hidden while the featured mission offers this setup, and returns after', async () => {
+  const root = fakeRoot();
+  let featured = { visible: true, actionURL: '/?setup=quest&source=host&quest=email_ops_setup' };
+  const { fetchImpl } = recordingFetch([{ body: { exists: true, setup_journey: journey() } }]);
+  const card = createEmailSetupQuestCard(root, {
+    fetchImpl,
+    loadOnboarding: ready,
+    featuredMission: () => featured
+  });
+
+  const view = await card.refresh();
+  assert.ok(view, 'the quest is still resumable');
+  assert.equal(root.hidden, true, 'a second Resume for the same setup was shown');
+
+  // The mission moves on (for example, the user deferred it).
+  featured = { visible: true, actionURL: '/' };
+  card.featuredMissionChanged();
+  assert.equal(root.hidden, false);
+  assert.equal(root.parts['email-setup-progress'].textContent, 'Step 2 of 4 · Connect Gmail');
+
+  featured = { visible: true, actionURL: '/?setup=quest&source=host&quest=email_ops_setup' };
+  card.featuredMissionChanged();
+  assert.equal(root.hidden, true);
+});
+
+test('a dismissed card never comes back when the featured mission changes', async () => {
+  const root = fakeRoot();
+  const { fetchImpl } = recordingFetch([
+    { body: { exists: true, setup_journey: journey() } },
+    { ok: true, body: {} }
+  ]);
+  const card = createEmailSetupQuestCard(root, {
+    fetchImpl,
+    loadOnboarding: ready,
+    featuredMission: () => ({ visible: false })
+  });
+  await card.refresh();
+  assert.equal(root.hidden, false);
+  assert.equal(await card.dismiss(), true);
+  card.featuredMissionChanged();
+  assert.equal(root.hidden, true);
 });

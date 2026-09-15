@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	ws "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // The built-in graph serves every non-cohort caller and the tests above. The
@@ -320,6 +322,152 @@ func TestResolveTidyDownloads(t *testing.T) {
 				t.Fatalf("got %+v, want %+v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestChooseConnectSourceBranch_PriorityAndFallbacks(t *testing.T) {
+	cases := []struct {
+		focus []string
+		want  ConnectSourceBranch
+	}{
+		{nil, BranchPlan},
+		{[]string{}, BranchPlan},
+		{[]string{"plan_my_day"}, BranchPlan},
+		{[]string{"track_commitments_and_follow_ups"}, BranchPlan},
+		{[]string{"something_else"}, BranchPlan},
+		{[]string{"a_music_domain_focus"}, BranchPlan},
+		{[]string{"keep_projects_moving"}, BranchProject},
+		{[]string{"prepare_for_meetings"}, BranchCalendar},
+		{[]string{"help_with_email"}, BranchEmail},
+		// Priority: email, then calendar, then project, then plan.
+		{[]string{"plan_my_day", "keep_projects_moving", "prepare_for_meetings", "help_with_email"}, BranchEmail},
+		{[]string{"keep_projects_moving", "prepare_for_meetings"}, BranchCalendar},
+		{[]string{"plan_my_day", "keep_projects_moving"}, BranchProject},
+		{[]string{" help_with_email "}, BranchEmail},
+	}
+	for _, tc := range cases {
+		if got := ChooseConnectSourceBranch(tc.focus); got != tc.want {
+			t.Errorf("ChooseConnectSourceBranch(%v) = %s, want %s", tc.focus, got, tc.want)
+		}
+	}
+}
+
+func TestResolveConnectSource_PresentsTheChosenBranch(t *testing.T) {
+	emailURL := "/?setup=quest&source=host&quest=email_ops_setup"
+	cases := []struct {
+		name string
+		ctx  MissionContext
+		want MissionPresentation
+	}{
+		{"plan keeps the static copy", MissionContext{FocusAreas: []string{"plan_my_day"}}, MissionPresentation{}},
+		{
+			"email starts the guided setup",
+			MissionContext{FocusAreas: []string{"help_with_email"}, EmailQuestURL: emailURL},
+			MissionPresentation{Title: "Set up email", Why: "So your brief can show what is waiting on you.", ActionURL: emailURL, ActionLabel: "Start"},
+		},
+		{
+			"email in progress resumes it",
+			MissionContext{FocusAreas: []string{"help_with_email"}, EmailQuestURL: emailURL, EmailQuestStarted: true},
+			MissionPresentation{Title: "Set up email", Why: "So your brief can show what is waiting on you.", ActionURL: emailURL, ActionLabel: "Resume", InProgress: true},
+		},
+		{
+			"email without a wired setup falls back to the plan",
+			MissionContext{FocusAreas: []string{"help_with_email"}},
+			MissionPresentation{},
+		},
+		{
+			"calendar opens the creator on Calendar Ops",
+			MissionContext{FocusAreas: []string{"prepare_for_meetings"}, EmailQuestStarted: true},
+			MissionPresentation{Title: "Connect your calendar", Why: "So your brief can prepare you for today's meetings.", ActionURL: CalendarOpsCreateURL, ActionLabel: "Start"},
+		},
+		{
+			"project opens the creator",
+			MissionContext{FocusAreas: []string{"keep_projects_moving"}},
+			MissionPresentation{Title: "Start a project workspace", Why: "So your brief can track what each project is waiting on.", ActionURL: ProjectWorkspaceCreateURL, ActionLabel: "Start"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveConnectSource(tc.ctx); got != tc.want {
+				t.Fatalf("got %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsProjectWorkspaceCreated(t *testing.T) {
+	created := func(data map[string]any) ws.Event {
+		return ws.Event{Type: ws.EventWorkspaceCreated, WorkspaceID: "w", Data: data}
+	}
+	cases := []struct {
+		name string
+		ev   ws.Event
+		want bool
+	}{
+		{"blank workspace", created(map[string]any{"template_id": "", "kind": "workspace"}), true},
+		{"other blueprint", created(map[string]any{"template_id": "content-production"}), true},
+		{"Personal HQ", created(map[string]any{"template_id": "personal-ops"}), false},
+		{"File Janitor", created(map[string]any{"template_id": "file-janitor"}), false},
+		{"retired Downloads Janitor", created(map[string]any{"template_id": "downloads-janitor"}), false},
+		{"Email Ops", created(map[string]any{"template_id": "email-ops"}), false},
+		{"Calendar Ops", created(map[string]any{"template_id": "calendar-ops"}), false},
+		{"a group", created(map[string]any{"template_id": "", "kind": "group"}), false},
+		{"another producer without template_id", created(map[string]any{"name": "Orchestration"}), false},
+		{"no data", created(nil), false},
+		{"not a create", ws.Event{Type: ws.EventWorkspaceUpdated, Data: map[string]any{"template_id": ""}}, false},
+	}
+	for _, tc := range cases {
+		if got := IsProjectWorkspaceCreated(tc.ev); got != tc.want {
+			t.Errorf("%s: got %t, want %t", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestConnectSource_ProjectEventCompletesOnce(t *testing.T) {
+	fires := 0
+	e := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()), WithOnComplete(func(q Quest) {
+		if q.ID == ConnectSourceQuestID {
+			fires++
+		}
+	}))
+	e.HandleEvent(ws.Event{Type: ws.EventWorkspaceCreated, Data: map[string]any{"template_id": "file-janitor"}})
+	if completed(e, ConnectSourceQuestID) {
+		t.Fatal("a starter blueprint completed Connect one source")
+	}
+	project := ws.Event{Type: ws.EventWorkspaceCreated, Data: map[string]any{"template_id": "", "kind": "workspace"}}
+	e.HandleEvent(project)
+	e.HandleEvent(project)
+	if !completed(e, ConnectSourceQuestID) || fires != 1 {
+		t.Fatalf("completed=%t fires=%d, want completed once", completed(e, ConnectSourceQuestID), fires)
+	}
+}
+
+func TestConnectSource_BackfillFromAnyBranch(t *testing.T) {
+	for name, snap := range map[string]Snapshot{
+		"email ready":       {EmailOpsReady: true},
+		"calendar ready":    {CalendarReady: true},
+		"project workspace": {ProjectWorkspaces: 1},
+		"first assignment":  {FirstAssignmentCompleted: true},
+		"legacy first day":  {LegacyFirstDayCompleted: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()))
+			if err := e.Backfill(ScannerFunc(func() Snapshot { return snap })); err != nil {
+				t.Fatal(err)
+			}
+			if !completed(e, ConnectSourceQuestID) {
+				t.Fatalf("%s did not grandfather Connect one source", name)
+			}
+		})
+	}
+	e := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()))
+	if err := e.Backfill(ScannerFunc(func() Snapshot {
+		return Snapshot{Workspaces: 3, HasPersonalHQ: true, FileJanitorReady: true}
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if completed(e, ConnectSourceQuestID) {
+		t.Fatal("HQ and File Janitor alone grandfathered Connect one source")
 	}
 }
 

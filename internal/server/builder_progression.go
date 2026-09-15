@@ -14,8 +14,15 @@ import (
 
 // initializeProgression wires the onboarding quest-log: it builds the engine
 // (persisting through the onboarding manager), subscribes it to the event bus,
-// runs the one-time backfill scan, and connects the "personalize" rename hook.
-// Safe to call once the event bus and onboarding manager exist.
+// and connects the hooks whose owners already exist in Phase 19 (personalize
+// and Personal HQ designation).
+//
+// The personal assistant, its first-assignment handler, the setup journey,
+// and the Daily Brief are built later, in initializeDailyBrief (Phase 22.6).
+// Everything that reads or hooks them, including the one-time backfill, runs
+// in completeProgressionWiring after that phase. Wiring them here bound nil:
+// the first-day hook and its reconcile were silently never installed on a
+// real server.
 func (b *ServerBuilder) initializeProgression() {
 	if b.onboardingMgr == nil || b.eventBus == nil {
 		return
@@ -78,13 +85,39 @@ func (b *ServerBuilder) initializeProgression() {
 		})
 	}
 
-	// A first-assignment apply has its own atomic durability boundary. Progression
-	// observes only the successful result and remains safe to retry independently.
-	// Planning the first day is the plan branch of Connect one source; any branch
-	// completes the mission.
+	b.progressionHandler = progressionhttp.NewHandler(engine)
+}
+
+// completeProgressionWiring installs the progression hooks whose owners are
+// built in initializeDailyBrief, then runs the one-time backfill and the
+// startup reconcile. Call it after that phase. Safe when progression was not
+// initialized.
+func (b *ServerBuilder) completeProgressionWiring() {
+	engine := b.progressionEngine
+	if engine == nil {
+		return
+	}
+
+	// Connect one source (Mission 03) completes from ANY branch (PRD FR14).
+	//
+	// Plan: a first-assignment apply has its own atomic durability boundary.
+	// Progression observes only the successful result.
 	if b.personalAssistantHandler != nil {
 		b.personalAssistantHandler.SetOnFirstAssignmentCompleted(func() {
 			engine.Complete(progression.ConnectSourceQuestID)
+		})
+	}
+	// Email: the guided Email Ops setup first reaching ready.
+	if b.setupJourneyService != nil {
+		b.setupJourneyService.SetOnFirstReady(onEmailSetupFirstReady(engine))
+	}
+	// Calendar: a ready calendar binding on a Calendar Ops workspace. Project:
+	// the engine's own Match on workspace.created.
+	if b.eventBus != nil {
+		b.eventBus.SubscribeToEventType(workspace.EventWorkspaceUpdated, func(ev workspace.Event) {
+			if calendarBindingConnected(b.starterWorkspaces(), ev) {
+				engine.Complete(progression.ConnectSourceQuestID)
+			}
 		})
 	}
 
@@ -100,8 +133,6 @@ func (b *ServerBuilder) initializeProgression() {
 			engine.Complete(progression.ConnectSourceQuestID)
 		}
 	}
-
-	b.progressionHandler = progressionhttp.NewHandler(engine)
 }
 
 // scanProgression gathers a best-effort Snapshot of existing state for the
@@ -127,9 +158,11 @@ func (b *ServerBuilder) scanProgression() progression.Snapshot {
 		snap.Personalized = true
 	}
 
+	hqWorkspaceID := ""
 	if b.personalHQService != nil {
 		if status, err := b.personalHQService.Status(context.Background(), userprofile.LocalUserID); err == nil && status.Valid {
 			snap.HasPersonalHQ = true
+			hqWorkspaceID = status.WorkspaceID
 		}
 	}
 
@@ -142,6 +175,13 @@ func (b *ServerBuilder) scanProgression() progression.Snapshot {
 	// Mission 02: a File Janitor workspace whose setup already reached ready.
 	if _, ready, ok := findJanitorWorkspace(b.starterWorkspaces()); ok {
 		snap.FileJanitorReady = ready
+	}
+
+	// Mission 03: any source already connected, on any branch.
+	snap.EmailOpsReady = b.emailSetupEverReady()
+	snap.CalendarReady, snap.ProjectWorkspaces = scanStarterWorkspaces(b.starterWorkspaces(), hqWorkspaceID)
+	if b.progressionEngine != nil {
+		snap.LegacyFirstDayCompleted = b.progressionEngine.HasCompleted(progression.PersonalAssistantFirstDayQuestID)
 	}
 
 	// Count notes only until we find one — the quest just needs "> 0".

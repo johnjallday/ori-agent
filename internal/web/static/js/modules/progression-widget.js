@@ -355,11 +355,35 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     return li;
   }
 
+  // Other Quests-flyout cards need to know what the featured mission offers, so
+  // a setup with its own resume card (Email Ops) does not show two Resumes for
+  // one destination. The latest view is kept on window for a card that loads
+  // after this render, and each change is announced.
+  function announceFeaturedMission(view) {
+    const featured = {
+      visible: !!view.visible,
+      completed: !!view.completed,
+      actionURL: view.visible ? view.actionURL : ''
+    };
+    const previous = window.OriFeaturedMission;
+    window.OriFeaturedMission = featured;
+    if (
+      previous &&
+      previous.visible === featured.visible &&
+      previous.completed === featured.completed &&
+      previous.actionURL === featured.actionURL
+    ) {
+      return;
+    }
+    window.dispatchEvent(new CustomEvent('ori:featured-mission', { detail: featured }));
+  }
+
   function renderFirstMission(status) {
     const mission = el('first-mission');
     if (!mission) return;
 
     const view = firstMissionView(status);
+    announceFeaturedMission(view);
     if (!view.visible) {
       mission.hidden = true;
       return;

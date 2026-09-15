@@ -24,6 +24,25 @@ func writeCapabilityTemplate(t *testing.T, libDir, id, manifest string) {
 	}
 }
 
+// assertCreatedEventTemplate checks the workspace.created event published for
+// workspaceID carries template_id want ("" for blank) and a workspace kind.
+func assertCreatedEventTemplate(t *testing.T, bus *agentworkspace.EventBus, workspaceID, want string) {
+	t.Helper()
+	events := bus.GetHistory(func(ev agentworkspace.Event) bool {
+		return ev.Type == agentworkspace.EventWorkspaceCreated && ev.WorkspaceID == workspaceID
+	}, 16)
+	if len(events) != 1 {
+		t.Fatalf("workspace.created events for %s = %d, want 1", workspaceID, len(events))
+	}
+	got, present := events[0].Data["template_id"]
+	if !present || got != want {
+		t.Fatalf("template_id = %v (present %t), want %q", got, present, want)
+	}
+	if kind, _ := events[0].Data["kind"].(string); kind == "" {
+		t.Fatalf("workspace.created carries no kind: %v", events[0].Data)
+	}
+}
+
 // capabilityTemplateEnv is templateTestEnv plus a library the test controls.
 func capabilityTemplateEnv(t *testing.T) (*Handler, string, func()) {
 	t.Helper()
@@ -63,12 +82,20 @@ func TestCreateWorkspace_PersistsABlueprintDeclaredCapability(t *testing.T) {
 		"capabilities": [{"id": "file-janitor", "source": "downloads-janitor-preset"}]
 	}`)
 
+	bus := agentworkspace.NewEventBus(4, 16)
+	defer bus.Shutdown()
+	handler.SetEventBus(bus)
+
 	w, resp := postCreateWorkspace(t, handler, `{"name":"Tidy","template_id":"file-janitor"}`)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
 	}
 	folder := resp["folder"].(map[string]any)
 	workspaceID := folder["id"].(string)
+
+	// The created event names the blueprint, which the starter missions read to
+	// tell a starter workspace from a project one.
+	assertCreatedEventTemplate(t, bus, workspaceID, "file-janitor")
 
 	ws, err := handler.workspaceStore.Get(workspaceID)
 	if err != nil {
@@ -108,11 +135,24 @@ func TestCreateWorkspace_WithoutADeclarationInstallsNothing(t *testing.T) {
 		"name": "Downloads Janitor Helper"
 	}`)
 
+	bus := agentworkspace.NewEventBus(4, 16)
+	defer bus.Shutdown()
+	handler.SetEventBus(bus)
+
 	w, resp := postCreateWorkspace(t, handler, `{"name":"Downloads Janitor","template_id":"plain-blueprint"}`)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
 	}
 	workspaceID := resp["folder"].(map[string]any)["id"].(string)
+	assertCreatedEventTemplate(t, bus, workspaceID, "plain-blueprint")
+
+	// A blank workspace still carries the key, empty, so a consumer can tell
+	// "no blueprint" from "not this creator".
+	blankW, blankResp := postCreateWorkspace(t, handler, `{"name":"Launch Plan"}`)
+	if blankW.Code != http.StatusCreated {
+		t.Fatalf("blank status = %d: %s", blankW.Code, blankW.Body.String())
+	}
+	assertCreatedEventTemplate(t, bus, blankResp["folder"].(map[string]any)["id"].(string), "")
 
 	ws, err := handler.workspaceStore.Get(workspaceID)
 	if err != nil {

@@ -89,7 +89,7 @@ func (s *Service) mutatePresentation(
 	}
 	candidate, reads := s.deriveCanonical(ctx, declaration, root, claimed, nil)
 	completion := OperationCompletion{Status: OperationSucceeded, ResultCode: resultCode}
-	_, finalized, finalizeReplayed, finalizeErr := s.store.FinalizeOperation(
+	_, finalized, finalizeReplayed, finalizeErr := s.finalizeOperation(
 		ctx, candidate, request.IdempotencyKey, completion,
 	)
 	if finalizeErr != nil {
@@ -156,7 +156,7 @@ func (s *Service) CreateOrResumeChild(ctx context.Context, userID string, reques
 		Status: OperationSucceeded, ResultCode: ResultChildRunCreated,
 		Result: CanonicalResult{ChildRunID: child.ID},
 	}
-	finalReceipt, _, _, finalizeErr := s.store.FinalizeOperation(
+	finalReceipt, _, _, finalizeErr := s.finalizeOperation(
 		ctx, candidate, request.IdempotencyKey, completion,
 	)
 	if finalizeErr != nil {

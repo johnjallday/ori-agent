@@ -553,6 +553,7 @@ func (b *ServerBuilder) Build() (*Server, error) {
 	b.wireCalendarOpsPrepTaskExecutor() // Phase 22.1 — Calendar Ops meeting-prep needs the orchestrator
 	b.initializeMissionBridge()         // Phase 22.5 — wire mission cadence → run lifecycle
 	b.initializeDailyBrief()            // Phase 22.6 — wire personal hq daily brief storage/scheduling/synthesis
+	b.completeProgressionWiring()       // Phase 22.7 — progression hooks + backfill that need the assistant, journeys, and brief
 	b.initializeTemplateManager()       // Phase 23
 
 	// ═══════════════════════════════════════════════════════════════════════════

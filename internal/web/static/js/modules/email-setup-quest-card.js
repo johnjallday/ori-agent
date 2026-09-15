@@ -19,6 +19,22 @@ export const EMAIL_SETUP_QUEST_URL = `/?setup=quest&source=host&quest=${EMAIL_SE
 
 const RESUMABLE = new Set(['in_progress', 'needs_attention']);
 
+// FEATURED_MISSION_EVENT is announced by progression-widget.js whenever the
+// Quests card's featured mission renders, with { visible, completed, actionURL }.
+export const FEATURED_MISSION_EVENT = 'ori:featured-mission';
+
+// featuredMissionCoversQuest reports whether the featured starter mission is
+// already offering this same setup (Mission 03's email branch). This card would
+// then be a second Resume for one setup, so it stays hidden.
+export function featuredMissionCoversQuest(featured) {
+  return Boolean(
+    featured &&
+    featured.visible === true &&
+    featured.completed !== true &&
+    featured.actionURL === EMAIL_SETUP_QUEST_URL
+  );
+}
+
 // resumeCardView decides whether the card renders and what it says. Anything
 // unexpected renders nothing: the card is optional and must stay quiet.
 export function resumeCardView(status) {
@@ -64,8 +80,12 @@ export function createEmailSetupQuestCard(root, deps = {}) {
     deps.dispatch ||
     (detail =>
       globalThis.window?.dispatchEvent(new CustomEvent('ori:open-specialist-setup', { detail })));
+  const featuredMission = deps.featuredMission || (() => globalThis.window?.OriFeaturedMission);
   let generation = 0;
   let view = null;
+  // The last resumable view, kept even while the featured mission covers it,
+  // so the card can reappear the moment the mission moves on.
+  let resumable = null;
 
   const part = role => root?.querySelector?.(`[data-role="${role}"]`) || null;
 
@@ -104,7 +124,8 @@ export function createEmailSetupQuestCard(root, deps = {}) {
       }
       const next = resumeCardView(await response.json());
       if (current !== generation) return null;
-      if (next) show(next);
+      resumable = next;
+      if (next && !featuredMissionCoversQuest(featuredMission())) show(next);
       else hide();
       return next;
     } catch (_) {
@@ -117,6 +138,7 @@ export function createEmailSetupQuestCard(root, deps = {}) {
     if (event?.ctrlKey || event?.metaKey || event?.shiftKey || event?.altKey) return;
     event?.preventDefault?.();
     generation++;
+    resumable = null;
     hide();
     dispatch({ source: 'host', quest_id: EMAIL_SETUP_QUEST_ID });
   }
@@ -125,6 +147,7 @@ export function createEmailSetupQuestCard(root, deps = {}) {
     if (!view) return false;
     const revision = view.revision;
     generation++;
+    resumable = null;
     hide();
     try {
       const response = await fetchImpl(EMAIL_SETUP_DISMISS_URL, {
@@ -140,6 +163,13 @@ export function createEmailSetupQuestCard(root, deps = {}) {
     }
   }
 
+  // featuredMissionChanged re-applies the covered rule without a new read.
+  function featuredMissionChanged() {
+    if (!resumable) return;
+    if (featuredMissionCoversQuest(featuredMission())) hide();
+    else show(resumable);
+  }
+
   part('email-setup-resume')?.addEventListener?.('click', resume);
   part('email-setup-dismiss')?.addEventListener?.('click', () => void dismiss());
 
@@ -147,6 +177,7 @@ export function createEmailSetupQuestCard(root, deps = {}) {
     refresh,
     resume,
     dismiss,
+    featuredMissionChanged,
     get view() {
       return view;
     }
@@ -158,6 +189,9 @@ function initialize() {
   if (!root) return;
   const card = createEmailSetupQuestCard(root);
   void card.refresh();
+  globalThis.window?.addEventListener?.(FEATURED_MISSION_EVENT, () =>
+    card.featuredMissionChanged()
+  );
   // The quest modal owns progress; when it closes, re-read the card's state.
   globalThis.document
     ?.getElementById?.('specialistSetupJourneyModal')

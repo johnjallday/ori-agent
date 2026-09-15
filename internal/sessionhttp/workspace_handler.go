@@ -730,7 +730,11 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if ws != nil {
-		h.publishWorkspaceCreated(ws.ID, ws.Name)
+		createdTemplateID := ""
+		if templateResolved {
+			createdTemplateID = resolvedTemplate.ID
+		}
+		h.publishWorkspaceCreated(ws.ID, ws.Name, createdTemplateID, string(ws.Kind))
 	}
 
 	agentSeedWarnings := append(seed.Warnings, prov.agentToolWarnings...)
@@ -862,9 +866,16 @@ func (h *Handler) allowlistLocallyCreatedWorkspace(workspaceID string) {
 }
 
 // publishWorkspaceCreated emits a workspace.created event after a workspace is
-// persisted. Consumed by the onboarding progression detector (Tier 2 "create
-// your first workspace"). No-op when the event bus is not configured.
-func (h *Handler) publishWorkspaceCreated(workspaceID, name string) {
+// persisted. Consumed by the onboarding progression detector. No-op when the
+// event bus is not configured.
+//
+// template_id is always present: the blueprint the workspace came from, or ""
+// for a blank one. Its presence is what marks an event from this creator, and
+// the starter missions' "Start a project workspace" branch reads it to tell a
+// project apart from Personal HQ and the starter blueprints
+// (tasks/prd-starter-missions.md FR16). kind separates a group from a
+// workspace.
+func (h *Handler) publishWorkspaceCreated(workspaceID, name, templateID, kind string) {
 	if h == nil || h.eventBus == nil {
 		return
 	}
@@ -872,7 +883,11 @@ func (h *Handler) publishWorkspaceCreated(workspaceID, name string) {
 		Type:        agentworkspace.EventWorkspaceCreated,
 		WorkspaceID: workspaceID,
 		Source:      "api",
-		Data:        map[string]any{"name": name},
+		Data: map[string]any{
+			"name":        name,
+			"template_id": strings.TrimSpace(templateID),
+			"kind":        kind,
+		},
 	})
 }
 

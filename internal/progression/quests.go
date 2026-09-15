@@ -53,6 +53,9 @@ type MissionContext struct {
 	// EmailQuestStarted is true when the guided email setup exists but is not
 	// ready yet.
 	EmailQuestStarted bool
+	// EmailQuestURL opens the guided email setup. The server passes it in so
+	// this package does not import the host quest catalog.
+	EmailQuestURL string
 	// ModelConfigured is true when a model is available to generate a brief.
 	ModelConfigured bool
 }
@@ -239,9 +242,15 @@ func PersonalAssistantGraph() Graph {
 			Why:         "Give your assistant today's priorities and commitments so it can prepare a useful Daily Brief.",
 			ActionURL:   PlanFirstDayActionURL,
 			ActionLabel: "Start",
+			// Any branch completes it, not only the one the card offers (FR14).
+			// Live, a project workspace is observed here; email, calendar, and the
+			// first-day plan complete it from server hooks.
+			Match: IsProjectWorkspaceCreated,
 			Satisfied: func(s Snapshot) bool {
-				return s.FirstAssignmentCompleted || s.LegacyFirstDayCompleted
+				return s.FirstAssignmentCompleted || s.LegacyFirstDayCompleted ||
+					s.EmailOpsReady || s.CalendarReady || s.ProjectWorkspaces > 0
 			},
+			Resolve: resolveConnectSource,
 		},
 		{
 			ID: FirstBriefQuestID, Tier: 1, Featured: true, Order: 4, Optional: true,
@@ -283,6 +292,123 @@ func resolveTidyDownloads(ctx MissionContext) MissionPresentation {
 		ActionLabel: "Finish setup",
 		InProgress:  true,
 	}
+}
+
+// ConnectSourceBranch is the destination Mission 03 offers a user.
+type ConnectSourceBranch string
+
+// The Mission 03 branches, in priority order.
+const (
+	BranchEmail    ConnectSourceBranch = "email"
+	BranchCalendar ConnectSourceBranch = "calendar"
+	BranchProject  ConnectSourceBranch = "project"
+	BranchPlan     ConnectSourceBranch = "plan"
+)
+
+// CalendarOpsCreateURL opens the unified creator with Calendar Ops preselected.
+const CalendarOpsCreateURL = "/?create=1&blueprint=calendar-ops"
+
+// ProjectWorkspaceCreateURL opens the unified creator on its blueprint step.
+const ProjectWorkspaceCreateURL = "/?create=1"
+
+// ChooseConnectSourceBranch picks Mission 03's destination from the focus
+// areas chosen at hire (PRD FR13). When several match, the source the user
+// asked for help with and that brings the most outside signal wins: email,
+// then calendar, then a project workspace. Everything else, including
+// "something else" and no focus at all, plans the first day.
+//
+// Any branch completes the mission; this only decides which one the card
+// offers.
+func ChooseConnectSourceBranch(focus []string) ConnectSourceBranch {
+	has := map[string]bool{}
+	for _, value := range focus {
+		has[strings.TrimSpace(value)] = true
+	}
+	switch {
+	case has["help_with_email"]:
+		return BranchEmail
+	case has["prepare_for_meetings"]:
+		return BranchCalendar
+	case has["keep_projects_moving"]:
+		return BranchProject
+	default:
+		return BranchPlan
+	}
+}
+
+// resolveConnectSource presents Mission 03 as the branch the hire's focus
+// chose. The plan branch is the quest's static copy, so it changes nothing.
+func resolveConnectSource(ctx MissionContext) MissionPresentation {
+	switch ChooseConnectSourceBranch(ctx.FocusAreas) {
+	case BranchEmail:
+		url := strings.TrimSpace(ctx.EmailQuestURL)
+		if url == "" {
+			// No guided email setup is wired: offer the plan rather than a dead link.
+			return MissionPresentation{}
+		}
+		presentation := MissionPresentation{
+			Title:       "Set up email",
+			Why:         "So your brief can show what is waiting on you.",
+			ActionURL:   url,
+			ActionLabel: "Start",
+		}
+		if ctx.EmailQuestStarted {
+			presentation.ActionLabel = "Resume"
+			presentation.InProgress = true
+		}
+		return presentation
+	case BranchCalendar:
+		return MissionPresentation{
+			Title:       "Connect your calendar",
+			Why:         "So your brief can prepare you for today's meetings.",
+			ActionURL:   CalendarOpsCreateURL,
+			ActionLabel: "Start",
+		}
+	case BranchProject:
+		return MissionPresentation{
+			Title:       "Start a project workspace",
+			Why:         "So your brief can track what each project is waiting on.",
+			ActionURL:   ProjectWorkspaceCreateURL,
+			ActionLabel: "Start",
+		}
+	default:
+		return MissionPresentation{}
+	}
+}
+
+// starterTemplateIDs are the blueprints that are not a "project workspace" for
+// Mission 03: Personal HQ and the other starter destinations.
+var starterTemplateIDs = map[string]bool{
+	"personal-ops":      true,
+	"file-janitor":      true,
+	"downloads-janitor": true,
+	"email-ops":         true,
+	"calendar-ops":      true,
+}
+
+// IsProjectWorkspaceCreated reports whether a workspace.created event is the
+// project branch of Mission 03: a workspace (not a group) from the unified
+// creator whose blueprint is blank or not a starter one. An event without a
+// template_id key came from another producer and never counts.
+func IsProjectWorkspaceCreated(ev ws.Event) bool {
+	if ev.Type != ws.EventWorkspaceCreated || ev.Data == nil {
+		return false
+	}
+	raw, present := ev.Data["template_id"]
+	if !present {
+		return false
+	}
+	templateID, isString := raw.(string)
+	if !isString || starterTemplateIDs[strings.TrimSpace(templateID)] {
+		return false
+	}
+	return dataString(ev, "kind") != "group"
+}
+
+// IsStarterTemplateID reports whether a template ID is one of the starter
+// destinations that do not count as a project workspace.
+func IsStarterTemplateID(templateID string) bool {
+	return starterTemplateIDs[strings.TrimSpace(templateID)]
 }
 
 // BuiltinQuests returns the ordered built-in quest graph. The slice is freshly

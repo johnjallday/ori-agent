@@ -5,7 +5,10 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
+	"github.com/johnjallday/ori-agent/internal/hostquests"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/progression"
+	"github.com/johnjallday/ori-agent/internal/setupjourney"
 	"github.com/johnjallday/ori-agent/internal/setupwizard"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -15,6 +18,9 @@ import (
 // new workspaces record. The retired Downloads Janitor ID still identifies a
 // File Janitor workspace created before the rename.
 const fileJanitorBlueprintID = "file-janitor"
+
+// calendarOpsBlueprintID is the Calendar Ops blueprint's template ID.
+const calendarOpsBlueprintID = "calendar-ops"
 
 // starterWorkspaceSource is the provenance-hydrated workspace read the starter
 // missions use. The SQLite-primary list does not carry TemplateProvenance, so
@@ -60,7 +66,100 @@ func (b *ServerBuilder) starterMissionContext() progression.MissionContext {
 		mission.FileJanitor = &progression.MissionWorkspace{Slug: slug, WizardReady: ready}
 	}
 
+	mission.EmailQuestURL = hostquests.EmailOpsSetupQuestURL
+	// Only the email branch shows "In progress", and only while Mission 03 is
+	// open, so the setup journey is read just for that case.
+	if progression.ChooseConnectSourceBranch(mission.FocusAreas) == progression.BranchEmail &&
+		(b.progressionEngine == nil || !b.progressionEngine.HasCompleted(progression.ConnectSourceQuestID)) {
+		mission.EmailQuestStarted = b.emailSetupStarted()
+	}
+
 	return mission
+}
+
+// emailSetupStatus reads the guided Email Ops setup without creating it.
+func (b *ServerBuilder) emailSetupStatus() (*setupjourney.JourneyProjection, bool) {
+	if b.setupJourneyService == nil {
+		return nil, false
+	}
+	ctx := context.Background()
+	scoped, err := b.setupJourneyService.ForHostQuest(ctx, userprofile.LocalUserID, hostquests.EmailOpsSetupQuestID)
+	if err != nil {
+		return nil, false
+	}
+	projection, exists, err := scoped.Status(ctx, userprofile.LocalUserID)
+	if err != nil || !exists || projection == nil {
+		return nil, false
+	}
+	return projection, true
+}
+
+// emailSetupStarted is true when the guided email setup exists and is not ready.
+func (b *ServerBuilder) emailSetupStarted() bool {
+	projection, exists := b.emailSetupStatus()
+	return exists && projection.Lifecycle != setupjourney.LifecycleReady
+}
+
+// emailSetupEverReady is true when the guided email setup has been ready once.
+func (b *ServerBuilder) emailSetupEverReady() bool {
+	projection, exists := b.emailSetupStatus()
+	return exists && projection.FirstCompletedAt != nil
+}
+
+// onEmailSetupFirstReady completes Mission 03 when the guided Email Ops setup
+// first reaches ready. Every other journey is ignored.
+func onEmailSetupFirstReady(engine *progression.Engine) func(userID string, key setupjourney.QuestKey) {
+	return func(_ string, key setupjourney.QuestKey) {
+		if engine == nil || key.Source != setupjourney.QuestSourceHost || key.ID != hostquests.EmailOpsSetupQuestID {
+			return
+		}
+		engine.Complete(progression.ConnectSourceQuestID)
+	}
+}
+
+// calendarBindingConnected reports whether a workspace.updated event is a new
+// MCP binding that leaves a Calendar Ops workspace connected, the calendar
+// branch of Mission 03. The event names only the workspace, so the folder store
+// supplies its provenance and bindings.
+func calendarBindingConnected(src starterWorkspaceSource, ev workspace.Event) bool {
+	if src == nil || ev.Type != workspace.EventWorkspaceUpdated || strings.TrimSpace(ev.WorkspaceID) == "" {
+		return false
+	}
+	if action, _ := ev.Data["action"].(string); action != "mcp_binding_created" {
+		return false
+	}
+	ws, err := src.Get(ev.WorkspaceID)
+	return err == nil && ws != nil && ws.IsFromTemplate(calendarOpsBlueprintID) &&
+		personalassistant.HasReadyCalendarBinding(ws)
+}
+
+// scanStarterWorkspaces reads the backfill evidence for Mission 03 from the
+// folder store: whether a Calendar Ops workspace is already connected, and how
+// many active workspaces are projects (not a group, not HQ, not a starter
+// blueprint).
+func scanStarterWorkspaces(src starterWorkspaceSource, hqWorkspaceID string) (calendarReady bool, projects int) {
+	if src == nil {
+		return false, 0
+	}
+	for id, lean := range src.CachedWorkspaces() {
+		if lean == nil || lean.GetStatus() != workspace.StatusActive || !ownedBy(lean, userprofile.LocalUserID) {
+			continue
+		}
+		templateID := ""
+		if provenance := lean.GetTemplateProvenance(); provenance != nil {
+			templateID = provenance.TemplateID
+		}
+		if templateID == calendarOpsBlueprintID && !calendarReady {
+			if ws, err := src.Get(id); err == nil && personalassistant.HasReadyCalendarBinding(ws) {
+				calendarReady = true
+			}
+		}
+		if id == hqWorkspaceID || strings.EqualFold(lean.Kind, "group") || progression.IsStarterTemplateID(templateID) {
+			continue
+		}
+		projects++
+	}
+	return calendarReady, projects
 }
 
 // isFileJanitorWorkspace reports whether a workspace was created from the File

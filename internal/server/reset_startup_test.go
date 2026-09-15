@@ -147,6 +147,7 @@ func TestResetLifecycleBuilderRecompletesConnectSourceAfterIntentionalQuestReset
 	}
 	t.Cleanup(builder.eventBus.Shutdown)
 	builder.initializeProgression()
+	builder.completeProgressionWiring()
 	if _, found := builder.onboardingMgr.GetProgression().CompletedQuests[progression.ConnectSourceQuestID]; !found {
 		t.Fatal("characterization changed: builder no longer re-completes the reset Connect one source mission")
 	}

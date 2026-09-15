@@ -18,6 +18,11 @@
  *            card afterwards. The OS folder dialog is the one thing mocked: its
  *            endpoint answers with the fixture path, and every request after it
  *            is real.
+ *   email    Mission 03 for a --focus=help_with_email hire: Set up email opens
+ *            the guided setup, and closing it mid-way reads In progress.
+ *   plan     Mission 03 for a --focus=plan_my_day hire: the first-day plan
+ *            completes it and Mission 04 takes the card; then the Calendar
+ *            capability card opens the creator on Calendar Ops.
  *
  * Every stage prints the missions it observed and any console errors or failed
  * requests, so a quietly broken page does not pass as a clean demo.
@@ -375,9 +380,128 @@ async function tidyStage() {
   await page.close();
 }
 
+// missionThreeOnCard hires with --focus, builds HQ, and defers Mission 02 the
+// way a user would, so Mission 03 is the mission on the card.
+async function missionThreeOnCard(width) {
+  const page = await newPage(width, width < 600 ? 860 : 800);
+  await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+  await api(page, 'POST', '/api/onboarding/skip');
+  await hire(page);
+  await buildHQ(page);
+  const skipped = await api(page, 'POST', '/api/progression/skip', {
+    quest_id: 'pa-tidy-downloads'
+  });
+  console.log(`deferred Mission 02: HTTP ${skipped.status}`);
+  await missions(page);
+  return page;
+}
+
+async function emailStage() {
+  const page = await missionThreeOnCard(stageWidth);
+  const card = await openQuests(page);
+  expect(card.kicker === 'Mission 03', 'Mission 03 is on the card');
+  expect(card.title === 'Set up email', 'a help-with-email hire is offered Set up email');
+  expect(
+    card.action === 'Start /?setup=quest&source=host&quest=email_ops_setup',
+    'Start opens the guided email setup'
+  );
+  await page.locator('[data-role="first-mission"]').scrollIntoViewIfNeeded();
+  await shot(page, `g3-email-ready-${stageWidth}`);
+
+  await page.locator('[data-role="first-mission-action"]').click();
+  await page
+    .locator('#specialistSetupJourneyModal.show')
+    .waitFor({ state: 'visible', timeout: 15000 });
+  await page.waitForTimeout(800);
+  await shot(page, `g3-email-quest-open-${stageWidth}`);
+  await page.locator('#specialistSetupJourneyClose').click();
+  await page.locator('#specialistSetupJourneyModal').waitFor({ state: 'hidden', timeout: 10000 });
+
+  await missions(page);
+  const after = await openQuests(page);
+  expect(after.status === 'In progress', 'after closing mid-setup the card reads In progress');
+  expect(after.action.startsWith('Resume '), 'the in-progress email card offers Resume');
+  const guided = page.locator('#emailSetupQuestCard');
+  console.log(`Email Ops guided-setup card also visible: ${await guided.isVisible()}`);
+  await page.locator('[data-role="first-mission"]').scrollIntoViewIfNeeded();
+  await shot(page, `g3-email-in-progress-${stageWidth}`);
+  await page.close();
+}
+
+async function planStage() {
+  const page = await missionThreeOnCard(stageWidth);
+  const card = await openQuests(page);
+  expect(card.kicker === 'Mission 03', 'Mission 03 is on the card');
+  expect(card.title === 'Plan my first day', 'a plan-my-day hire is offered Plan my first day');
+  await page.locator('[data-role="first-mission"]').scrollIntoViewIfNeeded();
+  await shot(page, `g3-plan-ready-${stageWidth}`);
+
+  await page.locator('[data-role="first-mission-action"]').click();
+  await page
+    .locator('#onboardingPersonalAssistantAssignment')
+    .waitFor({ state: 'visible', timeout: 15000 });
+  await page.locator('#pafPriorityRows [data-field="title"]').first().fill('Review the launch');
+  await page.locator('#pafPreviewAssignmentBtn').click();
+  await page
+    .locator('#pafCommitmentRows [data-paf-assignment-row="i_owe"] [data-field="title"]')
+    .fill('Send Maya the draft');
+  await page
+    .locator('#pafCommitmentRows [data-paf-assignment-row="i_owe"] [data-field="counterparty"]')
+    .fill('Maya');
+  await page.locator('#pafPreviewAssignmentBtn').click();
+  await page.locator('#pafPreviewAssignmentBtn').click();
+  await page.locator('#pafAssignmentPreview').waitFor({ state: 'visible', timeout: 15000 });
+  await page.locator('#pafAssignmentConfirm').check();
+  await page.locator('#pafApplyAssignmentBtn').click();
+  await page.locator('#pafAssignmentResult').waitFor({ state: 'visible', timeout: 60000 });
+  console.log(
+    `first assignment result: ${((await page.locator('#pafAssignmentResultSummary').textContent()) || '').trim()}`
+  );
+  await shot(page, `g3-plan-applied-${stageWidth}`);
+
+  const status = await missions(page);
+  const connect = (status.missions || []).find(m => m.id === 'pa-connect-source');
+  expect(connect?.status === 'completed', 'applying the first-day plan completed Mission 03');
+  const after = await openQuests(page);
+  expect(after.kicker === 'Mission 04', 'Mission 04 is on the card afterwards');
+  expect(
+    after.rows.some(row => row.includes('✓') && row.includes('Plan my first day')),
+    'Mission 03 shows ✓ beneath the card'
+  );
+  await page.locator('[data-role="first-mission"]').scrollIntoViewIfNeeded();
+  await shot(page, `g3-plan-mission04-${stageWidth}`);
+
+  // The Calendar capability card's Set up opens the creator on Calendar Ops.
+  await page.goto(`${baseUrl}/?personal-assistant=working-agreement`, {
+    waitUntil: 'domcontentloaded'
+  });
+  const setUpCalendar = page.locator('#personalAssistantCapabilities a', {
+    hasText: 'Set up Calendar Ops'
+  });
+  await setUpCalendar.waitFor({ state: 'visible', timeout: 20000 });
+  expect(
+    (await setUpCalendar.getAttribute('href')) === '/?create=1&blueprint=calendar-ops',
+    'the Calendar card links to the creator deep link'
+  );
+  await setUpCalendar.scrollIntoViewIfNeeded();
+  await shot(page, `g3-calendar-card-${stageWidth}`);
+  await setUpCalendar.click();
+  await page.locator('#addFolderModal').waitFor({ state: 'visible', timeout: 15000 });
+  await page.waitForFunction(
+    () => window.ProjectTemplateCard?.getSelectedTemplate?.()?.id === 'calendar-ops',
+    null,
+    { timeout: 15000 }
+  );
+  expect(true, 'the creator opened with Calendar Ops preselected');
+  await shot(page, `g3-calendar-creator-${stageWidth}`);
+  await page.close();
+}
+
 try {
   if (stage === 'card') await cardStage();
   else if (stage === 'tidy') await tidyStage();
+  else if (stage === 'email') await emailStage();
+  else if (stage === 'plan') await planStage();
   else throw new Error(`unknown stage ${stage}`);
 } catch (error) {
   console.error(`FAIL: ${error.message}`);

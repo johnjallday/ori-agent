@@ -86,6 +86,12 @@ func TestCapabilityService_DistinguishesEmptyRevokedAndPreHire(t *testing.T) {
 		projection.Cards[2].Status != CapabilityHealthyEmpty || projection.Cards[3].Status != CapabilityHealthyEmpty {
 		t.Fatalf("empty/revoked states=%+v", projection.Cards)
 	}
+	// With no Calendar Ops workspace, Set up opens the creator with the
+	// blueprint preselected: a route that exists (starter missions FR41).
+	if calendar := projection.Cards[1]; calendar.ActionLabel != "Set up Calendar Ops" ||
+		calendar.ActionRoute != "/?create=1&blueprint=calendar-ops" {
+		t.Fatalf("calendar setup action = %q %q", calendar.ActionLabel, calendar.ActionRoute)
+	}
 
 	preHire, _, _, _, _ := serviceMatrixFixture(StatusNotHired)
 	projection, err = NewCapabilityService(preHire, workspaces, nil).Get(context.Background(), "local")
