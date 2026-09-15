@@ -258,6 +258,7 @@
   font-weight: 680;
 }
 .setup-journey__action[data-effect="review"],
+.setup-journey__action[data-primary="true"],
 .setup-journey__review-confirm {
   color: white;
   border-color: var(--journey-accent-dark);

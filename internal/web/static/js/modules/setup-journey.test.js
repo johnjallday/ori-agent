@@ -8,8 +8,10 @@ globalThis.window ||= { addEventListener() {}, location: { search: '' } };
 
 const {
   PLUGINS_PAGE_URL,
+  WORKSPACE_LAUNCH_DESCRIPTION,
   integrationHandoffNavigation,
   setupJourneyActionLabel,
+  setupJourneyPreconditionView,
   workspaceLaunchStages,
   projectDraftInput,
   projectReviewPresentation,
@@ -325,48 +327,49 @@ test('project reviews describe outcomes and commit errors never claim that nothi
   assert.doesNotMatch(projectFailureGuidance('commit'), /nothing|did not create/i);
 });
 
-test('four launch screens separate group preparation from canonical project readiness', () => {
+test('two launch screens separate the group from canonical project readiness', () => {
   const journey = {
-    journey: { workspace_launch: { group_title: 'Create Group', runtime_title: 'Set Up App' } },
+    journey: { workspace_launch: { group_title: 'Create Group', group_name: 'Group' } },
     receipts: {},
     steps: [
-      { kind: 'integration_install', title: 'Install Plugin', status: 'complete' },
       {
         kind: 'project_connect',
         status: 'active',
-        preparation: { exists: false, acknowledged: false }
+        preparation: { exists: false }
       }
     ]
   };
+  assert.equal(WORKSPACE_LAUNCH_DESCRIPTION, 'Create your group, then create a workspace.');
   assert.deepEqual(
-    workspaceLaunchStages(journey).map(step => step.title),
-    ['Install Plugin', 'Create Group', 'Set Up App', 'Create New Workspace']
+    workspaceLaunchStages(journey).map(stage => [stage.id, stage.title]),
+    [
+      ['group', 'Create Group'],
+      ['workspace', 'Create New Workspace']
+    ]
   );
-  assert.equal(workspaceLaunchStages(journey)[3].enabled, false);
-  journey.steps[1].preparation.exists = true;
-  assert.equal(workspaceLaunchStages(journey)[2].enabled, true);
-  assert.equal(workspaceLaunchStages(journey)[3].enabled, false);
-  journey.steps[1].preparation.acknowledged = true;
-  assert.equal(workspaceLaunchStages(journey)[3].enabled, true);
+  assert.equal(workspaceLaunchStages(journey)[0].enabled, true);
+  assert.equal(workspaceLaunchStages(journey)[1].enabled, false);
+  // The group existing is the only gate on the workspace screen.
+  journey.steps[0].preparation.exists = true;
+  assert.equal(workspaceLaunchStages(journey)[0].complete, true);
+  assert.equal(workspaceLaunchStages(journey)[1].enabled, true);
   // Historical resource IDs do not establish readiness after a regression.
   journey.receipts.project_workspace_id = 'previous';
-  assert.equal(workspaceLaunchStages(journey)[3].complete, false);
-  journey.steps[0].status = 'blocked';
-  assert.equal(workspaceLaunchStages(journey)[3].enabled, false);
+  assert.equal(workspaceLaunchStages(journey)[1].complete, false);
+  journey.steps[0].status = 'complete';
+  assert.equal(workspaceLaunchStages(journey)[1].complete, true);
 });
 
 test('Recommended and None launch paths can reach an explicit standalone review without a Home', () => {
   const base = policy => ({
-    journey: { workspace_launch: { group_title: 'Create Group', runtime_title: 'Set Up App' } },
+    journey: { workspace_launch: { group_title: 'Create Group', group_name: 'Group' } },
     receipts: {},
     steps: [
-      { kind: 'integration_install', title: 'Install Plugin', status: 'complete' },
       {
         kind: 'project_connect',
         status: 'active',
         preparation: {
           exists: false,
-          acknowledged: false,
           group_policy: policy,
           available_compositions: policy === 'none' ? ['standalone'] : ['grouped', 'standalone']
         }
@@ -374,12 +377,57 @@ test('Recommended and None launch paths can reach an explicit standalone review 
     ]
   });
   const recommended = workspaceLaunchStages(base('recommended'));
+  assert.equal(recommended.length, 2);
   assert.equal(recommended.find(stage => stage.id === 'group').complete, false);
   assert.equal(recommended.find(stage => stage.id === 'workspace').enabled, true);
   const none = workspaceLaunchStages(base('none'));
   assert.equal(none.find(stage => stage.id === 'group').complete, true);
-  assert.equal(none.find(stage => stage.id === 'preparation').complete, true);
   assert.equal(none.find(stage => stage.id === 'workspace').enabled, true);
+});
+
+test('an unmet integration precondition offers only the install quest', () => {
+  const journey = {
+    journey: { workspace_launch: { group_title: 'Create Group', group_name: 'Group' } },
+    precondition: {
+      reason_code: 'integration_disabled',
+      guidance: 'Review and enable the required integration to continue.',
+      install_quest_id: 'install_ori_reaper',
+      integration: {
+        plugin_id: 'reaper-plugin',
+        installed_version: '0.6.0',
+        expected_version: '0.6.0',
+        enabled: false,
+        verified: true
+      }
+    },
+    steps: []
+  };
+  const view = setupJourneyPreconditionView(journey);
+  assert.equal(view.guidance, 'Review and enable the required integration to continue.');
+  assert.deepEqual(view.installDetail, { source: 'host', quest_id: 'install_ori_reaper' });
+  assert.ok(view.rows.some(([label, value]) => label === 'Enabled' && value === 'Not yet'));
+  assert.equal(setupJourneyPreconditionView({ ...journey, precondition: undefined }), null);
+  assert.equal(
+    setupJourneyPreconditionView({
+      ...journey,
+      precondition: { ...journey.precondition, install_quest_id: '../other' }
+    }).installDetail,
+    null
+  );
+});
+
+test('the launch view carries no preparation screen or acknowledgement', async () => {
+  const source = await readFile(new URL('./setup-journey.js', import.meta.url), 'utf8');
+  for (const retired of [
+    'checkPreparation',
+    'acknowledgePreparation',
+    'preparationCheck',
+    'acknowledge_preparation',
+    'runtime_instructions',
+    "'acknowledged'"
+  ]) {
+    assert.equal(source.includes(retired), false, `${retired} is still referenced`);
+  }
 });
 
 test('idempotency keys are non-empty and distinct', () => {

@@ -13,15 +13,13 @@ func TestBuiltInRegistryMatchesSpecialistConstraintsAndPublishedRelease(t *testi
 	if !ok {
 		t.Fatal("reviewed REAPER integration is missing")
 	}
-	declarationEntry, ok := specialist.Get("music_production")
-	if !ok || declarationEntry.SetupJourney == nil {
-		t.Fatal("specialist declaration fixture is missing")
+	specialistEntry, ok := specialist.Get("music_production")
+	if !ok || specialistEntry.IntegrationKey != entry.Key {
+		t.Fatalf("music specialist does not name the reviewed integration: %#v", specialistEntry)
 	}
-	declaration := declarationEntry.SetupJourney
-	if entry.Key != declaration.IntegrationKey ||
-		entry.ExpectedBlueprintID != declaration.ExpectedBlueprintID ||
-		entry.ExpectedProgramID != declaration.ExpectedAssistantProgramID {
-		t.Fatalf("registry/declaration identity drift: %#v / %#v", entry, declaration)
+	if entry.ExpectedBlueprintID != "reaper-song" || entry.ExpectedProgramID != "music-producer-assistant" ||
+		entry.ExpectedBlueprintID != specialistEntry.SuggestedTemplateID {
+		t.Fatalf("registry/specialist identity drift: %#v / %#v", entry, specialistEntry)
 	}
 	if entry.ExpectedVersion != "0.5.0" || entry.ExpectedBlueprintVersion != 4 ||
 		entry.ExpectedProgramSchema != 2 || entry.ExpectedProtocol != plugin.SurfaceProtocolVersion {
@@ -38,6 +36,28 @@ func TestBuiltInRegistryMatchesSpecialistConstraintsAndPublishedRelease(t *testi
 		if !strings.Contains(features, required) {
 			t.Errorf("required host feature %q missing from %q", required, features)
 		}
+	}
+}
+
+// FR 19: every specialist's integration key names a reviewed integration. The
+// specialist package cannot import this one, so the check lives here.
+func TestEverySpecialistIntegrationKeyIsReviewed(t *testing.T) {
+	keyed := 0
+	for _, entry := range specialist.All() {
+		if entry.IntegrationKey == "" {
+			continue
+		}
+		keyed++
+		if _, ok := Get(entry.IntegrationKey); !ok {
+			t.Errorf("specialist %q names unreviewed integration %q", entry.Slug, entry.IntegrationKey)
+		}
+	}
+	if keyed == 0 {
+		t.Fatal("no specialist names a reviewed integration")
+	}
+	reaper, _ := Get("ori_reaper")
+	if reaper.InstallQuestID() != "install_ori_reaper" {
+		t.Fatalf("install quest id = %q", reaper.InstallQuestID())
 	}
 }
 

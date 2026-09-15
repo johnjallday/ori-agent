@@ -20,9 +20,8 @@ type ProjectTemplateResolver interface {
 }
 
 type ProjectConnectionAdapter struct {
-	owner              *projectconnection.Service
-	templates          ProjectTemplateResolver
-	CheckPrerequisites func(context.Context, projecttemplates.Template) (bool, error)
+	owner     *projectconnection.Service
+	templates ProjectTemplateResolver
 }
 
 func NewProjectConnectionAdapter(owner *projectconnection.Service, templates ProjectTemplateResolver) *ProjectConnectionAdapter {
@@ -75,7 +74,7 @@ func (a *ProjectConnectionAdapter) prepare(ctx context.Context, scope ReadScope,
 	}
 	if scope.WorkspaceLaunch && projectRequestNeedsPreparedGroup(template, request) {
 		preparation, prepErr := a.owner.HomePreparation(projectConnectionScope(scope, template))
-		if prepErr != nil || !preparation.Exists || !preparation.Acknowledged {
+		if prepErr != nil || !preparation.Exists {
 			return ActionReviewMaterial{}, ErrConflict
 		}
 	}
@@ -152,11 +151,10 @@ func (a *ProjectConnectionAdapter) Read(ctx context.Context, scope ReadScope) (C
 	}
 	observed, ok := a.owner.ObservedResult(projectConnectionScope(scope, template), scope.HomeWorkspaceID, scope.ProjectWorkspaceID)
 	if !ok {
+		// A required group must exist before a grouped project is offered. Once
+		// it exists, project creation is available straight away.
 		if requiresPreparedGroup && preparation != nil && !preparation.Exists {
 			return CanonicalStepRead{AvailableActions: []ActionID{ActionReviewCreateGroup}, Preparation: preparation}, nil
-		}
-		if requiresPreparedGroup && preparation != nil && !preparation.Acknowledged {
-			return CanonicalStepRead{AvailableActions: []ActionID{ActionAcknowledgePreparation}, Preparation: preparation, Result: homeResult}, nil
 		}
 		actions := make([]ActionID, 0, 3)
 		if preparation != nil && !preparation.Exists && template.GroupRequirement != nil && template.GroupRequirement.Policy == projecttemplates.GroupPolicyRecommended {
@@ -183,9 +181,6 @@ func (a *ProjectConnectionAdapter) Read(ctx context.Context, scope ReadScope) (C
 func (a *ProjectConnectionAdapter) ConsequenceObserved(action ActionID, state CanonicalStepRead) bool {
 	if action == ActionCreateGroup {
 		return state.Preparation != nil && state.Preparation.Exists
-	}
-	if action == ActionAcknowledgePreparation {
-		return state.Preparation != nil && state.Preparation.Acknowledged
 	}
 	return (action == ActionConnectExistingProject || action == ActionCreateNewProject) && state.Complete &&
 		state.Result.ProjectWorkspaceID != ""

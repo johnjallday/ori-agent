@@ -38,7 +38,6 @@
 /api/host-setup-quests/email_ops_setup/runs/x/actions/x
 /api/host-setup-quests/email_ops_setup/runs/x/dismiss
 /api/host-setup-quests/email_ops_setup/runs/x/open
-/api/host-setup-quests/email_ops_setup/runs/x/preparation
 /api/host-setup-quests/email_ops_setup/status
 /api/host-setup-quests/x
 /api/host-setup-quests/x/status
@@ -190,7 +189,6 @@
 /api/setup-quests/x/x/dismiss
 /api/setup-quests/x/x/open
 /api/setup-quests/x/x/runs/x
-/api/setup-quests/x/x/runs/x/preparation
 /api/setup-quests/x/x/runs/x/steps/x/actions/x
 /api/setup-quests/x/x/runs/x/steps/x/review
 /api/skills
@@ -214,7 +212,6 @@
 /api/user-template-setup-quests/x/x/dismiss
 /api/user-template-setup-quests/x/x/open
 /api/user-template-setup-quests/x/x/runs/x
-/api/user-template-setup-quests/x/x/runs/x/preparation
 /api/user-template-setup-quests/x/x/runs/x/steps/x/actions/x
 /api/user-template-setup-quests/x/x/runs/x/steps/x/review
 /api/user/profile

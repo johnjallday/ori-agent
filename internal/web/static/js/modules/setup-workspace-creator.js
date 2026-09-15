@@ -44,10 +44,9 @@ export function setupWorkspacePlacement(preparation, draftComposition = '') {
     groupPolicy,
     availableCompositions: allowed,
     groupComposition,
-    canOpen: Boolean(
-      preparation &&
-      (groupPolicy !== 'required' || (preparation.exists && preparation.acknowledged))
-    )
+    // A required group only has to exist; live-control readiness is asked in
+    // the workspace's Setup Wizard, never here.
+    canOpen: Boolean(preparation && (groupPolicy !== 'required' || preparation.exists))
   };
 }
 

@@ -105,7 +105,6 @@ const (
 
 	ActionReviewCreateGroup      ActionID = "review_create_group"
 	ActionCreateGroup            ActionID = "create_group"
-	ActionAcknowledgePreparation ActionID = "acknowledge_preparation"
 	ActionReviewExistingProject  ActionID = "review_existing_project"
 	ActionConnectExistingProject ActionID = "connect_existing_project"
 	ActionReviewNewProject       ActionID = "review_new_project"
@@ -160,7 +159,6 @@ var actionDefinitionsByKind = map[specialist.SetupStepKind][]ActionDefinition{
 	specialist.SetupStepProjectConnect: {
 		{ID: ActionReviewCreateGroup, Label: "Review Group", Effect: ActionEffectReview},
 		{ID: ActionCreateGroup, Label: "Create Group", Effect: ActionEffectCommit, RequiresReview: true},
-		{ID: ActionAcknowledgePreparation, Label: "Continue to workspace creation", Effect: ActionEffectCommit},
 		{ID: ActionReviewExistingProject, Label: "Import Existing Project", Effect: ActionEffectReview},
 		{ID: ActionConnectExistingProject, Label: "Connect existing project", Effect: ActionEffectCommit, RequiresReview: true},
 		{ID: ActionReviewNewProject, Label: "Create New Project", Effect: ActionEffectReview},
@@ -292,12 +290,13 @@ func validQuestHandoffProjection(handoff *QuestHandoffProjection) bool {
 // IntegrationHandoff resolves the plugin quest an install quest continues into:
 // the first quest, by ID, that the catalog lists for the reviewed integration's
 // plugin. It returns nil when none is listed or the catalog cannot be read.
+// Only plugin-source catalogs are read.
 func IntegrationHandoff(ctx context.Context, catalog QuestCatalog, integrationKey string) *QuestHandoffProjection {
 	entry, reviewed := reviewedintegration.Get(integrationKey)
 	if catalog == nil || !reviewed {
 		return nil
 	}
-	quests, err := catalog.List(ctx)
+	quests, err := listQuestSource(ctx, catalog, QuestSourcePlugin)
 	if err != nil {
 		return nil
 	}

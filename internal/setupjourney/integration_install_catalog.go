@@ -13,7 +13,7 @@ import (
 const (
 	// integrationInstallQuestPrefix prefixes a reviewed integration key to form
 	// its generated install quest ID, for example install_<integration_key>.
-	integrationInstallQuestPrefix = "install_"
+	integrationInstallQuestPrefix = reviewedintegration.InstallQuestPrefix
 	// Step IDs are fixed for every generated install quest.
 	integrationInstallStepID        = "integration"
 	integrationInstallSummaryStepID = "summary"
@@ -22,7 +22,7 @@ const (
 // IntegrationInstallQuestID returns the host quest ID generated for one
 // reviewed integration key.
 func IntegrationInstallQuestID(integrationKey string) string {
-	return integrationInstallQuestPrefix + strings.ToLower(strings.TrimSpace(integrationKey))
+	return reviewedintegration.Entry{Key: integrationKey}.InstallQuestID()
 }
 
 type installedPluginLister interface {

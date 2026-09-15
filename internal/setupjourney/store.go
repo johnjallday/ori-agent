@@ -16,7 +16,7 @@ import (
 // Store is the bounded setup-progress persistence contract. Consequence owners
 // are intentionally absent from this interface.
 type Store interface {
-	FindQuestRoot(ctx context.Context, userID string, key QuestKey, legacySlug string) (*Run, error)
+	FindQuestRoot(ctx context.Context, userID string, key QuestKey) (*Run, error)
 	CreateOrGetRoot(ctx context.Context, spec RootSpec) (*Run, bool, error)
 	CreateOrGetUserTemplateRoot(ctx context.Context, spec RootSpec, binding UserTemplateBinding) (*Run, bool, error)
 	ClaimUserTemplateRoot(ctx context.Context, claim UserTemplateRootClaim) (*UserTemplateRootClaim, bool, error)

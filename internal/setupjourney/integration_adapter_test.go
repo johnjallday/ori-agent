@@ -354,6 +354,7 @@ func TestReviewedIntegrationReviewInstallEnableAndReplayThroughService(t *testin
 	if err := service.SetActionAdapter(specialist.SetupStepIntegrationInstall, adapter); err != nil {
 		t.Fatal(err)
 	}
+	service = installQuestScope(t, service)
 	ctx := context.Background()
 	journey, err := service.Read(ctx, "local", "")
 	if err != nil || !projectionHasAction(journey, ActionReviewInstall) {
@@ -416,6 +417,7 @@ func TestReviewedIntegrationCommitRejectsStaleOwnerReviewWithoutClaim(t *testing
 	if err := service.SetActionAdapter(specialist.SetupStepIntegrationInstall, adapter); err != nil {
 		t.Fatal(err)
 	}
+	service = installQuestScope(t, service)
 	journey, _ := service.Read(context.Background(), "local", "")
 	review, err := service.Mutate(context.Background(), "local", journey.RunID, ActionReviewEnable, ActionMutation{
 		IfRevision: journey.StateRevision, IdempotencyKey: "review-stale-owner", Input: json.RawMessage(`{}`),

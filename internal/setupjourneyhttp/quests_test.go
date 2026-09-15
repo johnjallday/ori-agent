@@ -15,6 +15,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/setupjourney"
 	"github.com/johnjallday/ori-agent/internal/specialist"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 type absentQuestRelationship struct{}
@@ -26,6 +27,44 @@ func (absentQuestRelationship) GetState(context.Context, string) (*personalassis
 type emptyQuestPlugins struct{}
 
 func (emptyQuestPlugins) List() ([]plugin.InstalledPlugin, error) { return nil, nil }
+
+// installedReaperPlugin reports the reviewed REAPER plugin as installed, with
+// no quest-declaring manifest.
+type installedReaperPlugin struct{}
+
+func (installedReaperPlugin) List() ([]plugin.InstalledPlugin, error) {
+	return []plugin.InstalledPlugin{{Name: "reaper-plugin", Version: "0.6.0", Enabled: true}}, nil
+}
+
+// reaperQuestPlugins reports the REAPER plugin installed with its four-step
+// setup_quests_v2 quest, referenced by its blueprint.
+type reaperQuestPlugins struct{}
+
+func (reaperQuestPlugins) List() ([]plugin.InstalledPlugin, error) {
+	quest, err := specialist.NormalizeSetupJourney(specialist.SetupJourney{
+		SchemaVersion: 1, Version: 1, ID: "reaper_setup", Title: "Set up REAPER", Description: "Connect a REAPER project.",
+		IntegrationKey: "ori_reaper", ExpectedBlueprintID: "reaper-song", ExpectedAssistantProgramID: "music-producer-assistant",
+		Steps: []specialist.SetupJourneyStep{
+			{ID: "project", Kind: specialist.SetupStepProjectConnect, Title: "Project", Description: "Connect a project."},
+			{ID: "workspace", Kind: specialist.SetupStepWorkspaceSetup, Title: "Workspace", Description: "Choose a mode."},
+			{ID: "staffing", Kind: specialist.SetupStepAssistantProgramStaffing, Title: "Team", Description: "Add roles."},
+			{ID: "summary", Kind: specialist.SetupStepSummary, Title: "Review", Description: "Review setup."},
+		},
+		WorkspaceLaunch: &specialist.WorkspaceLaunchCopy{GroupTitle: "Build Your Music Production Group", GroupName: "Music Production"},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return []plugin.InstalledPlugin{{
+		Name: "reaper-plugin", Version: "0.6.0", Enabled: true,
+		WorkspaceSurfaces: &plugin.SurfaceContribution{
+			RequiresHostFeatures: []string{plugin.HostFeatureSetupQuestsV2}, SetupQuests: []plugin.SetupQuest{*quest},
+		},
+		ResolvedBlueprints: []plugin.ResolvedBlueprint{{ID: "reaper-song", Template: projecttemplates.Template{
+			SetupQuestID: quest.ID, AssistantProgram: &workspace.AssistantProgramDeclaration{ID: quest.ExpectedAssistantProgramID},
+		}}},
+	}}, nil
+}
 
 type httpUserQuestLibrary struct{ template projecttemplates.Template }
 
@@ -81,6 +120,7 @@ func questHTTPMux(service *setupjourney.Service, user string) *http.ServeMux {
 
 func TestQuestHTTPDiscoveryIsReadOnlyAndScopeComesOnlyFromTrustedPathAndUser(t *testing.T) {
 	service, db := questHTTPFixture(t)
+	service.SetQuestCatalog(setupjourney.NewInstalledQuestCatalog(reaperQuestPlugins{}))
 	mux := questHTTPMux(service, "local")
 	const root = "/api/setup-quests/reaper-plugin/reaper_setup"
 	request := func(method, path, body string) *httptest.ResponseRecorder {
@@ -138,9 +178,10 @@ func TestUserTemplateQuestHTTPRouteUsesAttachmentIdentityWithoutPluginOwnership(
 	}
 	template.UserSetupQuest = quest
 	template.UserSetupQuestRevision = projecttemplates.UserSetupQuestRevision(quest)
+	// The user quest is listed only while its integration's plugin is installed.
 	service.SetQuestCatalog(setupjourney.CombineQuestCatalogs(
 		setupjourney.NewInstalledQuestCatalog(emptyQuestPlugins{}),
-		setupjourney.NewUserTemplateQuestCatalog(httpUserQuestLibrary{template: template}),
+		setupjourney.NewUserTemplateQuestCatalog(httpUserQuestLibrary{template: template}, installedReaperPlugin{}),
 	))
 	mux := questHTTPMux(service, "local")
 	root := "/api/user-template-setup-quests/" + template.ID + "/" + quest.AttachmentID

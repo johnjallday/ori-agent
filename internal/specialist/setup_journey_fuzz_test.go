@@ -16,13 +16,19 @@ func FuzzParseSetupJourneyFailsClosed(f *testing.F) {
 		ExpectedBlueprintID:        "fixture_project",
 		ExpectedAssistantProgramID: "fixture_assistant",
 		Steps: []SetupJourneyStep{
-			{ID: "integration", Kind: SetupStepIntegrationInstall, Title: "Integration", Description: "Review the integration."},
 			{ID: "project", Kind: SetupStepProjectConnect, Title: "Project", Description: "Connect the project."},
 			{ID: "workspace", Kind: SetupStepWorkspaceSetup, Title: "Workspace", Description: "Choose a mode."},
 			{ID: "staffing", Kind: SetupStepAssistantProgramStaffing, Title: "Staffing", Description: "Review staffing."},
 			{ID: "summary", Kind: SetupStepSummary, Title: "Summary", Description: "Review completion."},
 		},
+		WorkspaceLaunch: &WorkspaceLaunchCopy{GroupTitle: "Build your group", GroupName: "Fixture group"},
 	}
+	// The retired five-step layout stays a seed so the fuzzer keeps probing it.
+	retired := valid
+	retired.WorkspaceLaunch = nil
+	retired.Steps = append([]SetupJourneyStep{
+		{ID: "integration", Kind: SetupStepIntegrationInstall, Title: "Integration", Description: "Review the integration."},
+	}, valid.Steps...)
 	account := SetupJourney{
 		SchemaVersion:       SetupJourneySchemaVersion,
 		Version:             1,
@@ -51,7 +57,7 @@ func FuzzParseSetupJourneyFailsClosed(f *testing.F) {
 			{ID: "summary", Kind: SetupStepSummary, Title: "Ready", Description: "Continue in the plugin's quest."},
 		},
 	}
-	for _, seed := range []SetupJourney{valid, account, install} {
+	for _, seed := range []SetupJourney{valid, account, install, retired} {
 		encoded, err := json.Marshal(seed)
 		if err != nil {
 			f.Fatal(err)
@@ -80,10 +86,10 @@ func FuzzParseSetupJourneyFailsClosed(f *testing.F) {
 			}
 		}
 		switch shape {
-		case SetupJourneyShapeSpecialist:
-			if len(declaration.Steps) != SetupJourneyRequiredSteps || declaration.IntegrationKey == "" ||
-				declaration.ExpectedAssistantProgramID == "" {
-				t.Fatalf("accepted specialist declaration without its references: %+v", declaration)
+		case SetupJourneyShapeProjectSetup:
+			if len(declaration.Steps) != 4 || declaration.IntegrationKey == "" ||
+				declaration.ExpectedBlueprintID == "" || declaration.ExpectedAssistantProgramID == "" {
+				t.Fatalf("accepted project-setup declaration without its references: %+v", declaration)
 			}
 		case SetupJourneyShapeIntegrationInstall:
 			if declaration.IntegrationKey == "" || declaration.ExpectedBlueprintID == "" ||

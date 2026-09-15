@@ -77,7 +77,6 @@ const state = {
   journey: null,
   selectedStepID: '',
   launchStage: '',
-  preparationCheck: null,
   draft: null,
   projectDrafts: {},
   review: null,
@@ -369,6 +368,10 @@ function render() {
   const elements = ui();
   if (!elements || !state.journey) return;
   const journey = state.journey;
+  if (journey.precondition && !journey.declaration_incompatible) {
+    renderPrecondition(journey);
+    return;
+  }
   if (
     journey.journey?.workspace_launch &&
     !journey.declaration_incompatible &&
@@ -452,42 +455,102 @@ function render() {
     : '';
 }
 
+export const WORKSPACE_LAUNCH_DESCRIPTION = 'Create your group, then create a workspace.';
+
+// workspaceLaunchStages is the two-screen launch view of a project_setup quest.
+// Installing the integration is a precondition, not a screen, and live-control
+// readiness belongs to the workspace's own Setup Wizard.
 export function workspaceLaunchStages(journey) {
   const copy = journey.journey.workspace_launch;
-  const integration = journey.steps.find(step => step.kind === 'integration_install');
   const project = journey.steps.find(step => step.kind === 'project_connect');
   const preparation = project?.preparation;
   const connected =
     project?.status === 'complete' && Boolean(journey.receipts?.project_workspace_id);
-  const installed = integration?.status === 'complete';
   const grouped = Boolean(preparation?.exists);
   const policy = preparation?.group_policy || 'required';
   const groupOptional = policy === 'recommended' || policy === 'none';
   const groupComplete = grouped || policy === 'none';
-  const acknowledged = Boolean(preparation?.acknowledged || connected);
-  const preparationComplete = acknowledged || (groupOptional && !grouped);
-  const workspaceEnabled = installed && (groupOptional || (grouped && acknowledged));
   return [
-    {
-      id: 'integration',
-      title: integration?.title || 'Install plugin',
-      complete: installed,
-      enabled: true
-    },
-    { id: 'group', title: copy.group_title, complete: groupComplete, enabled: installed },
-    {
-      id: 'preparation',
-      title: copy.runtime_title,
-      complete: preparationComplete,
-      enabled: installed && grouped
-    },
+    { id: 'group', title: copy.group_title, complete: groupComplete, enabled: true },
     {
       id: 'workspace',
       title: 'Create New Workspace',
       complete: connected,
-      enabled: workspaceEnabled
+      enabled: groupComplete || groupOptional
     }
   ];
+}
+
+// setupJourneyPreconditionView describes the single blocked panel shown while a
+// project_setup quest's integration is not ready. The install quest detail is
+// built only from the server's install quest ID, validated as a host route.
+export function setupJourneyPreconditionView(journey) {
+  const precondition = journey?.precondition;
+  if (!precondition) return null;
+  let installDetail = null;
+  try {
+    hostSetupQuestAPIRoot(precondition.install_quest_id);
+    installDetail = setupQuestOpenDetail({ source: 'host', id: precondition.install_quest_id });
+  } catch (_) {
+    installDetail = null;
+  }
+  return {
+    guidance: String(precondition.guidance || ''),
+    rows: setupJourneyReceiptRows({}, { integration: precondition.integration }),
+    installDetail
+  };
+}
+
+// renderPrecondition shows the one blocked panel of a project_setup quest whose
+// integration is not ready (FR 28): guidance, the integration receipt, and the
+// install quest. No launch screen is enabled.
+function renderPrecondition(journey) {
+  const elements = ui();
+  const view = setupJourneyPreconditionView(journey);
+  elements.title.textContent = journey.journey?.title || 'Setup';
+  elements.description.textContent = journey.journey?.workspace_launch
+    ? WORKSPACE_LAUNCH_DESCRIPTION
+    : journey.journey?.description || '';
+  elements.steps.replaceChildren();
+  const labels = journey.journey?.workspace_launch
+    ? workspaceLaunchStages(journey).map(stage => stage.title)
+    : (journey.steps || []).map(step => step.title);
+  labels.forEach((label, index) => {
+    const button = makeText('button', 'setup-journey__step-button', '');
+    button.type = 'button';
+    button.dataset.status = 'blocked';
+    button.disabled = true;
+    button.dataset.unavailable = 'true';
+    button.append(
+      makeText('span', 'setup-journey__step-number', String(index + 1)),
+      makeText('span', 'setup-journey__step-label', label)
+    );
+    const li = document.createElement('li');
+    li.appendChild(button);
+    elements.steps.appendChild(li);
+  });
+  elements.stepState.textContent = statusLabel('blocked');
+  elements.stepTitle.textContent = 'The integration needs attention';
+  elements.stepDescription.textContent = view.guidance;
+  elements.receipt.replaceChildren();
+  appendRows(elements.receipt, view.rows);
+  elements.draft.replaceChildren();
+  elements.review.replaceChildren();
+  elements.review.hidden = true;
+  elements.actions.replaceChildren();
+  if (view.installDetail) {
+    const open = makeText('button', 'setup-journey__action', 'Open install quest');
+    open.type = 'button';
+    open.dataset.effect = 'review';
+    open.addEventListener('click', () => {
+      // Opens the install quest in this same modal; this quest is unchanged.
+      window.dispatchEvent(
+        new CustomEvent('ori:open-specialist-setup', { detail: view.installDetail })
+      );
+    });
+    elements.actions.appendChild(open);
+  }
+  elements.live.textContent = '';
 }
 
 function renderWorkspaceLaunch(journey) {
@@ -497,31 +560,21 @@ function renderWorkspaceLaunch(journey) {
   const current = stages.find(stage => !stage.complete) || stages.at(-1);
   const stage = stages.find(item => item.id === state.launchStage && item.enabled) || current;
   state.launchStage = stage.id;
-  const integration = journey.steps.find(step => step.kind === 'integration_install');
   const project = journey.steps.find(step => step.kind === 'project_connect');
   const preparation = project?.preparation;
-  state.selectedStepID = stage.id === 'integration' ? integration.id : project.id;
+  state.selectedStepID = project.id;
   elements.title.textContent = journey.journey.title;
-  elements.description.textContent =
-    'Install the plugin, create your group, prepare the application, then create a workspace.';
+  elements.description.textContent = WORKSPACE_LAUNCH_DESCRIPTION;
   elements.steps.replaceChildren();
   stages.forEach((item, index) => {
     const button = makeText('button', 'setup-journey__step-button', '');
     button.type = 'button';
-    button.dataset.status = item.complete
-      ? item.id === 'preparation'
-        ? 'acknowledged'
-        : 'complete'
-      : 'pending';
+    button.dataset.status = item.complete ? 'complete' : 'pending';
     button.disabled = !item.enabled;
     button.dataset.unavailable = item.enabled ? 'false' : 'true';
     if (item.id === stage.id) button.setAttribute('aria-current', 'step');
     button.append(
-      makeText(
-        'span',
-        'setup-journey__step-number',
-        item.complete ? (item.id === 'preparation' ? '–' : '✓') : String(index + 1)
-      ),
+      makeText('span', 'setup-journey__step-number', item.complete ? '✓' : String(index + 1)),
       makeText('span', 'setup-journey__step-label', item.title)
     );
     button.addEventListener('click', () => {
@@ -537,7 +590,7 @@ function renderWorkspaceLaunch(journey) {
     li.appendChild(button);
     elements.steps.appendChild(li);
   });
-  elements.stepState.textContent = `Step ${stages.indexOf(stage) + 1} of 4`;
+  elements.stepState.textContent = `Step ${stages.indexOf(stage) + 1} of ${stages.length}`;
   elements.stepTitle.textContent = stage.title;
   elements.stepDescription.textContent = '';
   elements.receipt.replaceChildren();
@@ -551,23 +604,7 @@ function renderWorkspaceLaunch(journey) {
     elements.actions.appendChild(control);
   };
   if (journey.busy || state.pendingCommit) {
-    renderActions(stage.id === 'integration' ? integration : project);
-  } else if (stage.id === 'integration') {
-    elements.stepDescription.textContent = integration.description;
-    appendRows(elements.receipt, setupJourneyReceiptRows(journey, integration));
-    if (integration.guidance) elements.receipt.appendChild(makeText('p', '', integration.guidance));
-    renderActions(integration);
-    button('Check Again', refreshJourney);
-    if (stage.complete)
-      button(
-        'Continue',
-        () => {
-          state.launchStage = 'group';
-          render();
-          elements.stepTitle.focus();
-        },
-        true
-      );
+    renderActions(project);
   } else if (stage.id === 'group') {
     appendRows(elements.receipt, groupTemplateRows(preparation));
     if (preparation?.exists) {
@@ -575,7 +612,7 @@ function renderWorkspaceLaunch(journey) {
       button(
         'Continue',
         () => {
-          state.launchStage = 'preparation';
+          state.launchStage = 'workspace';
           render();
           elements.stepTitle.focus();
         },
@@ -614,21 +651,6 @@ function renderWorkspaceLaunch(journey) {
       elements.stepDescription.textContent = `Create “${copy.group_name}”, the one group for these projects. Only the group is created now; its coordinator and each project's team are set up afterward.`;
       button('Build Group', launchGroupBuilder, true);
     }
-  } else if (stage.id === 'preparation') {
-    elements.stepDescription.textContent = copy.runtime_instructions;
-    elements.receipt.appendChild(
-      makeText(
-        'p',
-        '',
-        state.preparationCheck == null
-          ? 'Not checked. Live project control is not enabled.'
-          : state.preparationCheck
-            ? 'Application prerequisites are available. Project access is still not approved or tested.'
-            : 'More setup is needed. You can continue with files and finish live-control setup from workspace Settings.'
-      )
-    );
-    button('Check Setup', checkPreparation);
-    button(state.preparationCheck ? 'Continue' : 'Set up later', acknowledgePreparation, true);
   } else {
     if (preparation?.group_policy === 'none') {
       elements.stepDescription.textContent =
@@ -739,51 +761,6 @@ function groupTemplateRows(preparation) {
   return rows;
 }
 
-async function checkPreparation() {
-  if (state.busy) return;
-  state.preparationCheck = null;
-  setBusy(true, 'Checking application prerequisites…');
-  showError('');
-  try {
-    const result = await request(runURL('/preparation'));
-    state.preparationCheck = result.ready === true;
-    render();
-  } catch (_) {
-    render();
-    showError(
-      'Application setup could not be checked. You can try again or set it up later; live control is not enabled.'
-    );
-  } finally {
-    setBusy(false);
-  }
-}
-
-async function acknowledgePreparation() {
-  if (state.busy) return;
-  const preparation = state.journey.steps.find(
-    step => step.kind === 'project_connect'
-  )?.preparation;
-  if (!preparation?.acknowledged && !state.journey.receipts?.project_workspace_id) {
-    setBusy(true, 'Saving your place…');
-    showError('');
-    try {
-      const payload = await request(runURL('/actions/acknowledge_preparation'), {
-        method: 'POST',
-        body: JSON.stringify(mutationBody({ input: {} }))
-      });
-      state.journey = payload.setup_journey;
-    } catch (error) {
-      showError(error.message);
-      return;
-    } finally {
-      setBusy(false);
-    }
-  }
-  state.launchStage = 'workspace';
-  render();
-  ui().stepTitle.focus();
-}
-
 async function launchGroupBuilder() {
   if (state.launchingGroup || isGroupBuilderOpen() || state.busy || state.journey?.busy) return;
   state.launchingGroup = true;
@@ -798,7 +775,7 @@ async function launchGroupBuilder() {
         onClose: current => {
           state.launchingGroup = false;
           if (state.journey?.run_id !== journey.run_id) return;
-          state.launchStage = groupBuildState(current) === 'existing' ? 'preparation' : 'group';
+          state.launchStage = groupBuildState(current) === 'existing' ? 'workspace' : 'group';
           render();
           state.modal?.show();
         }
@@ -894,6 +871,8 @@ function renderActions(step) {
     button.type = 'button';
     button.dataset.effect = action.effect || '';
     button.dataset.action = action.id || '';
+    // Continuing into the plugin's quest is the install summary's next step.
+    if (action.id === 'continue_integration_setup') button.dataset.primary = 'true';
     button.addEventListener('click', () => handleAction(action, button));
     container.appendChild(button);
   });
@@ -1897,7 +1876,6 @@ export async function openSpecialistSetupJourney(requested = null) {
     state.selectedStepID = state.journey.current_step_id || '';
     state.launchStage = '';
     state.managementView = false;
-    state.preparationCheck = null;
     if (
       previousRunID !== state.journey.run_id ||
       (!state.journey.busy && state.journey.receipts?.project_workspace_id)

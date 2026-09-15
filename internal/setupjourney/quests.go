@@ -57,7 +57,6 @@ type QuestSummary struct {
 type QuestDefinition struct {
 	Key              QuestKey
 	Declaration      *specialist.SetupJourney
-	LegacySlug       string
 	Ownership        string
 	DefinitionDigest string
 	ExecutionDigest  string
@@ -124,81 +123,65 @@ func (c *installedQuestCatalog) definitions(_ context.Context) ([]QuestDefinitio
 		return nil, failure(ReasonOwnerUnavailable, 0)
 	}
 	result := make([]QuestDefinition, 0)
-	// V1 keeps the host-reviewed installation boundary. A plugin cannot claim
-	// another integration's key, blueprint, program, or legacy progress.
+	// Only an installed reviewed integration's own valid setup_quests_v2
+	// declarations are listed. Before install there is nothing here: the
+	// generated install quest is the only guidance. A plugin cannot claim another
+	// integration's key, blueprint or program.
 	for _, entry := range reviewedintegration.All() {
-		var current *plugin.InstalledPlugin
-		for i := range installed {
-			if installed[i].Name == entry.PluginID {
-				if current != nil {
-					return nil, failure(ReasonJourneyUnavailable, 0)
-				}
-				current = &installed[i]
-			}
-		}
-		var legacy *specialist.Entry
-		for _, item := range specialist.All() {
-			if item.SetupJourney != nil && item.SetupJourney.IntegrationKey == entry.Key {
-				copy := item
-				legacy = &copy
-			}
-		}
-		declaresQuests := false
-		if current != nil && current.WorkspaceSurfaces != nil {
-			for _, feature := range current.WorkspaceSurfaces.RequiresHostFeatures {
-				declaresQuests = declaresQuests || feature == plugin.HostFeatureSetupQuestsV1
-			}
-			if declaresQuests && len(current.WorkspaceSurfaces.SetupQuests) == 0 {
-				return nil, failure(ReasonJourneyUnavailable, 0)
-			}
-		}
-		if current != nil && current.WorkspaceSurfaces != nil && len(current.WorkspaceSurfaces.SetupQuests) > 0 {
-			if !declaresQuests {
-				return nil, failure(ReasonDeclarationInvalid, 0)
-			}
-			if len(current.WorkspaceSurfaces.SetupQuests) > 8 {
-				return nil, failure(ReasonDeclarationInvalid, 0)
-			}
-			seen := make(map[string]bool)
-			for _, authored := range current.WorkspaceSurfaces.SetupQuests {
-				d, err := specialist.NormalizeSetupJourney(authored)
-				if err != nil || d.WorkspaceLaunch == nil || seen[d.ID] || d.IntegrationKey != entry.Key ||
-					d.ExpectedBlueprintID != entry.ExpectedBlueprintID || d.ExpectedAssistantProgramID != entry.ExpectedProgramID {
-					return nil, failure(ReasonDeclarationInvalid, 0)
-				}
-				seen[d.ID] = true
-				found := false
-				for _, b := range current.ResolvedBlueprints {
-					if b.ID == d.ExpectedBlueprintID && b.Template.SetupQuestID == d.ID &&
-						b.Template.AssistantProgram != nil && b.Template.AssistantProgram.ID == d.ExpectedAssistantProgramID {
-						found = true
-					}
-				}
-				if !found {
-					return nil, failure(ReasonDeclarationInvalid, 0)
-				}
-				d.OwnerPluginID = entry.PluginID
-				definition := QuestDefinition{Declaration: d, Ownership: "plugin"}
-				if legacy != nil && legacy.SetupJourney.ID == d.ID {
-					definition.LegacySlug = legacy.Slug
-				}
-				result = append(result, definition)
-			}
-			continue
-		}
-		// Published older integrations and pre-install discovery need a trusted
-		// bootstrap. This compatibility copy is never claimed as plugin-owned;
-		// once a plugin declares quests, missing/invalid IDs never fall back.
-		if legacy != nil {
-			d, err := specialist.NormalizeSetupJourney(*legacy.SetupJourney)
-			if err != nil {
-				return nil, failure(ReasonDeclarationInvalid, 0)
-			}
-			d.OwnerPluginID = entry.PluginID
-			result = append(result, QuestDefinition{Declaration: d, LegacySlug: legacy.Slug, Ownership: "host_compatibility"})
-		}
+		result = append(result, installedIntegrationQuests(entry, installed)...)
 	}
 	return result, nil
+}
+
+// installedIntegrationQuests returns one integration's valid plugin quests, or
+// none. Any invalid declaration, an ambiguous install, or a manifest that does
+// not require setup_quests_v2 lists nothing for that integration, so one
+// outdated plugin fails closed without hiding every other quest.
+func installedIntegrationQuests(entry reviewedintegration.Entry, installed []plugin.InstalledPlugin) []QuestDefinition {
+	var current *plugin.InstalledPlugin
+	for i := range installed {
+		if installed[i].Name == entry.PluginID {
+			if current != nil {
+				return nil
+			}
+			current = &installed[i]
+		}
+	}
+	if current == nil || current.WorkspaceSurfaces == nil {
+		return nil
+	}
+	surfaces := current.WorkspaceSurfaces
+	requiresV2 := false
+	for _, feature := range surfaces.RequiresHostFeatures {
+		requiresV2 = requiresV2 || feature == plugin.HostFeatureSetupQuestsV2
+	}
+	if !requiresV2 || len(surfaces.SetupQuests) == 0 || len(surfaces.SetupQuests) > 8 {
+		return nil
+	}
+	result := make([]QuestDefinition, 0, len(surfaces.SetupQuests))
+	seen := make(map[string]bool, len(surfaces.SetupQuests))
+	for _, authored := range surfaces.SetupQuests {
+		d, err := specialist.NormalizeSetupJourney(authored)
+		if err != nil || d.Shape() != specialist.SetupJourneyShapeProjectSetup || d.WorkspaceLaunch == nil || seen[d.ID] ||
+			d.IntegrationKey != entry.Key || d.ExpectedBlueprintID != entry.ExpectedBlueprintID ||
+			d.ExpectedAssistantProgramID != entry.ExpectedProgramID {
+			return nil
+		}
+		seen[d.ID] = true
+		found := false
+		for _, b := range current.ResolvedBlueprints {
+			if b.ID == d.ExpectedBlueprintID && b.Template.SetupQuestID == d.ID &&
+				b.Template.AssistantProgram != nil && b.Template.AssistantProgram.ID == d.ExpectedAssistantProgramID {
+				found = true
+			}
+		}
+		if !found {
+			return nil
+		}
+		d.OwnerPluginID = entry.PluginID
+		result = append(result, QuestDefinition{Declaration: d, Ownership: "plugin"})
+	}
+	return result
 }
 
 // UserTemplateQuestLibrary keeps filesystem/config knowledge outside the
@@ -215,13 +198,66 @@ type userTemplateQuestMutationLocker interface {
 
 type userTemplateQuestCatalog struct {
 	library UserTemplateQuestLibrary
+	plugins installedPluginLister
 }
 
-func NewUserTemplateQuestCatalog(library UserTemplateQuestLibrary) QuestCatalog {
-	return &userTemplateQuestCatalog{library: library}
+// NewUserTemplateQuestCatalog serves quests attached to user-owned templates.
+// List offers a quest only while its integration's plugin is installed (FR 16);
+// Lookup and scoping resolve regardless, so an open run can show the
+// integration precondition instead of disappearing.
+func NewUserTemplateQuestCatalog(library UserTemplateQuestLibrary, plugins installedPluginLister) QuestCatalog {
+	return &userTemplateQuestCatalog{library: library, plugins: plugins}
 }
 
 func (c *userTemplateQuestCatalog) List(ctx context.Context) ([]QuestSummary, error) {
+	all, err := c.listAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if c.plugins == nil {
+		return []QuestSummary{}, nil
+	}
+	installed, err := c.plugins.List()
+	if err != nil {
+		return nil, failure(ReasonOwnerUnavailable, 0)
+	}
+	present := make(map[string]bool, len(installed))
+	for _, item := range installed {
+		present[strings.ToLower(strings.TrimSpace(item.Name))] = true
+	}
+	result := make([]QuestSummary, 0, len(all))
+	for _, summary := range all {
+		if present[summary.integrationPluginID] {
+			result = append(result, summary.QuestSummary)
+		}
+	}
+	return result, nil
+}
+
+// userTemplateQuestID resolves the quest ID bound to one attachment without the
+// install gate, so an existing run stays reachable.
+func (c *userTemplateQuestCatalog) userTemplateQuestID(ctx context.Context, templateID, attachmentID string) (string, error) {
+	all, err := c.listAll(ctx)
+	if err != nil {
+		return "", err
+	}
+	templateID = strings.ToLower(strings.TrimSpace(templateID))
+	attachmentID = strings.ToLower(strings.TrimSpace(attachmentID))
+	for _, item := range all {
+		if item.TemplateID == templateID && item.AttachmentID == attachmentID {
+			return item.ID, nil
+		}
+	}
+	return "", failure(ReasonJourneyUnavailable, 0)
+}
+
+type userTemplateQuestSummary struct {
+	QuestSummary
+	integrationPluginID string
+}
+
+// listAll lists every valid, unambiguous user-template quest, installed or not.
+func (c *userTemplateQuestCatalog) listAll(ctx context.Context) ([]userTemplateQuestSummary, error) {
 	if c == nil || c.library == nil {
 		return nil, failure(ReasonJourneyUnavailable, 0)
 	}
@@ -237,16 +273,20 @@ func (c *userTemplateQuestCatalog) List(ctx context.Context) ([]QuestSummary, er
 			questCounts[template.UserSetupQuest.Declaration.ID]++
 		}
 	}
-	result := make([]QuestSummary, 0, len(templates))
+	result := make([]userTemplateQuestSummary, 0, len(templates))
 	for _, template := range templates {
 		if !validUserTemplateQuest(template) || attachmentCounts[template.UserSetupQuest.AttachmentID] != 1 ||
 			questCounts[template.UserSetupQuest.Declaration.ID] != 1 {
 			continue
 		}
 		declaration := template.UserSetupQuest.Declaration
-		result = append(result, QuestSummary{
-			QuestKey: QuestKey{Source: QuestSourceUserTemplate, TemplateID: template.ID, AttachmentID: template.UserSetupQuest.AttachmentID, ID: declaration.ID},
-			Title:    declaration.Title, Description: declaration.Description, TemplateID: template.ID, Ownership: string(QuestSourceUserTemplate),
+		integration, _ := reviewedintegration.Get(declaration.IntegrationKey)
+		result = append(result, userTemplateQuestSummary{
+			QuestSummary: QuestSummary{
+				QuestKey: QuestKey{Source: QuestSourceUserTemplate, TemplateID: template.ID, AttachmentID: template.UserSetupQuest.AttachmentID, ID: declaration.ID},
+				Title:    declaration.Title, Description: declaration.Description, TemplateID: template.ID, Ownership: string(QuestSourceUserTemplate),
+			},
+			integrationPluginID: integration.PluginID,
 		})
 	}
 	sort.Slice(result, func(i, j int) bool {
@@ -270,7 +310,8 @@ func (c *userTemplateQuestCatalog) Lookup(ctx context.Context, key QuestKey) (Qu
 	}
 	// Fail closed when a copied/imported attachment collides anywhere in the
 	// current library. A writer must remap identities before this catalog sees it.
-	all, err := c.List(ctx)
+	// The install gate does not apply here: an open run keeps resolving.
+	all, err := c.listAll(ctx)
 	if err != nil {
 		return QuestDefinition{}, err
 	}
@@ -370,6 +411,20 @@ func (c *combinedQuestCatalog) List(ctx context.Context) ([]QuestSummary, error)
 			string(right.Source)+right.PluginID+right.TemplateID+right.AttachmentID+right.ID
 	})
 	return result, nil
+}
+
+// userTemplateQuestResolver resolves the quest bound to one attachment.
+type userTemplateQuestResolver interface {
+	userTemplateQuestID(ctx context.Context, templateID, attachmentID string) (string, error)
+}
+
+func (c *combinedQuestCatalog) userTemplateQuestID(ctx context.Context, templateID, attachmentID string) (string, error) {
+	for _, catalog := range c.catalogs {
+		if resolver, ok := catalog.(userTemplateQuestResolver); ok {
+			return resolver.userTemplateQuestID(ctx, templateID, attachmentID)
+		}
+	}
+	return "", failure(ReasonJourneyUnavailable, 0)
 }
 
 func (c *combinedQuestCatalog) WithUserSetupQuestMutationLock(ctx context.Context, operation func() error) error {
@@ -489,16 +544,23 @@ func (s *Service) ForUserTemplateQuest(ctx context.Context, userID, templateID, 
 	}
 	key := QuestKey{Source: QuestSourceUserTemplate, TemplateID: templateID, AttachmentID: attachmentID}
 	// The route intentionally omits a separately caller-selectable quest ID.
-	// Resolve it from the catalog summary bound to this exact attachment.
-	items, err := s.quests.List(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, item := range items {
-		if item.Source == QuestSourceUserTemplate && item.TemplateID == strings.ToLower(strings.TrimSpace(templateID)) &&
-			item.AttachmentID == strings.ToLower(strings.TrimSpace(attachmentID)) {
-			key.ID = item.ID
-			break
+	// Resolve it from the catalog entry bound to this exact attachment, without
+	// the catalog's install gate so an existing run stays reachable.
+	if resolver, ok := s.quests.(userTemplateQuestResolver); ok {
+		if id, err := resolver.userTemplateQuestID(ctx, templateID, attachmentID); err == nil {
+			key.ID = id
+		}
+	} else {
+		items, err := s.quests.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range items {
+			if item.Source == QuestSourceUserTemplate && item.TemplateID == strings.ToLower(strings.TrimSpace(templateID)) &&
+				item.AttachmentID == strings.ToLower(strings.TrimSpace(attachmentID)) {
+				key.ID = item.ID
+				break
+			}
 		}
 	}
 	key = normalizeQuestKey(key)
@@ -546,7 +608,10 @@ func (s *Service) Status(ctx context.Context, userID string) (*JourneyProjection
 	if err != nil {
 		return nil, false, err
 	}
-	if _, err := s.store.FindQuestRoot(ctx, userID, *s.quest, definition.LegacySlug); err != nil {
+	if definition.Declaration == nil {
+		return nil, false, failure(ReasonDeclarationInvalid, 0)
+	}
+	if _, err := s.store.FindQuestRoot(ctx, userID, *s.quest); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, false, nil
 		}
@@ -573,16 +638,18 @@ func (s *Service) questDeclaration(ctx context.Context, userID string, key Quest
 		return nil, nil, failure(ReasonDeclarationInvalid, 0)
 	}
 	identity := &declarationIdentity{UserID: userID, AssistantID: questRelationshipID(key), QuestKey: key}
-	shape := d.Shape()
+	// Plugin and user-template quests are project_setup-shaped; the host shapes
+	// are checked in their own branch.
+	authored := d.Shape() == specialist.SetupJourneyShapeProjectSetup
 	switch key.Source {
 	case QuestSourcePlugin:
-		if d.OwnerPluginID != key.PluginID || shape == specialist.SetupJourneyShapeIntegrationInstall {
+		if d.OwnerPluginID != key.PluginID || !authored {
 			return nil, nil, failure(ReasonDeclarationInvalid, 0)
 		}
 		d.OwnerPluginID = key.PluginID
 		identity.SpecialistSlug = pluginQuestSlug
 	case QuestSourceUserTemplate:
-		if d.OwnerPluginID != "" || d.ExpectedBlueprintID != key.TemplateID ||
+		if d.OwnerPluginID != "" || d.ExpectedBlueprintID != key.TemplateID || !authored ||
 			!validateDigest(definition.DefinitionDigest, false) || !validateDigest(definition.ExecutionDigest, false) {
 			return nil, nil, failure(ReasonDeclarationInvalid, 0)
 		}
@@ -596,14 +663,14 @@ func (s *Service) questDeclaration(ctx context.Context, userID string, key Quest
 		// and no legacy assistant-owned progress to adopt. They are either an
 		// embedded account-link quest or the install quest the host generated for
 		// exactly one reviewed integration.
-		if d.OwnerPluginID != "" || definition.LegacySlug != "" || !validHostQuestShape(d) {
+		if d.OwnerPluginID != "" || !validHostQuestShape(d) {
 			return nil, nil, failure(ReasonDeclarationInvalid, 0)
 		}
 		identity.SpecialistSlug = hostQuestSlug
 	default:
 		return nil, nil, failure(ReasonDeclarationInvalid, 0)
 	}
-	root, err := s.store.FindQuestRoot(ctx, userID, key, definition.LegacySlug)
+	root, err := s.store.FindQuestRoot(ctx, userID, key)
 	if err == nil {
 		identity.AssistantID, identity.SpecialistSlug = root.RelationshipID, root.SpecialistSlug
 	} else if !errors.Is(err, ErrNotFound) {

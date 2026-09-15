@@ -56,6 +56,8 @@ func installAliasFixture(t *testing.T) (*Service, *SQLiteStore, *questPlugins) {
 			switch {
 			case kind == specialist.SetupStepIntegrationInstall && len(plugins.items) > 0:
 				return CanonicalStepRead{Complete: true, Result: CanonicalResult{IntegrationPluginID: plugins.items[0].Name, IntegrationVersion: plugins.items[0].Version}}, nil
+			case kind == specialist.SetupStepIntegrationInstall:
+				return CanonicalStepRead{AvailableActions: []ActionID{ActionReviewInstall}}, nil
 			case kind == specialist.SetupStepSummary && scope.Shape == specialist.SetupJourneyShapeIntegrationInstall:
 				return CanonicalStepRead{AvailableActions: []ActionID{ActionOpenPlugins}}, nil
 			}
@@ -77,9 +79,10 @@ func installAliasFixture(t *testing.T) (*Service, *SQLiteStore, *questPlugins) {
 	return service, store, plugins
 }
 
-// FR 20 (group 1 form): the accepted specialist's alias is the install quest
-// until its plugin is installed, then the plugin quest.
-func TestAssistantAliasResolvesInstallQuestUntilThePluginIsInstalled(t *testing.T) {
+// FR 20: the accepted specialist's alias is the install quest while the plugin
+// is not installed, or is installed but lists no quest for the integration;
+// otherwise it is the plugin's own quest.
+func TestAssistantAliasResolvesInstallQuestUntilThePluginListsItsQuest(t *testing.T) {
 	ctx := context.Background()
 	service, _, plugins := installAliasFixture(t)
 
@@ -96,23 +99,32 @@ func TestAssistantAliasResolvesInstallQuestUntilThePluginIsInstalled(t *testing.
 		t.Fatalf("pre-install Home overview = %+v, err = %v", overview, err)
 	}
 
+	// Installed, but an older manifest declares no setup_quests_v2 quest.
+	older := questPluginFixture(t)
+	older.Version = "0.5.2"
+	older.WorkspaceSurfaces.RequiresHostFeatures = []string{"setup_quests_v1"}
+	plugins.items = []plugin.InstalledPlugin{older}
+	stillInstall, err := service.Read(ctx, "local", "")
+	if err != nil || stillInstall.Journey.ID != "install_ori_reaper" || stillInstall.RunID != before.RunID {
+		t.Fatalf("installed-without-quest alias = %+v, err = %v", stillInstall, err)
+	}
+
 	plugins.items = []plugin.InstalledPlugin{questPluginFixture(t)}
 	after, err := service.Read(ctx, "local", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if after.Journey.Source != "" || after.Journey.PluginID != "reaper-plugin" || after.Journey.ID != "reaper_setup" ||
+	if after.Journey.PluginID != "reaper-plugin" || after.Journey.ID != "reaper_setup" || len(after.Steps) != 4 ||
 		after.RunID == before.RunID {
 		t.Fatalf("post-install alias = %+v", after.Journey)
 	}
 
-	// A plugin store that cannot be read keeps today's plugin-quest resolution.
+	// A plugin store that cannot be read fails safe to the install quest,
+	// whose own read reports the problem.
 	plugins.err = errors.New("plugin store unavailable")
-	if _, err := service.listQuestSource(ctx, QuestSourceHost); err == nil {
-		t.Fatal("host source listing ignored the failing install catalog")
-	}
-	if service.installQuestListed(ctx, "ori_reaper") {
-		t.Fatal("an unreadable plugin store reported the install quest as listed")
+	unreadable, err := service.Read(ctx, "local", "")
+	if err != nil || unreadable.Journey.ID != "install_ori_reaper" {
+		t.Fatalf("unreadable store alias = %+v, err = %v", unreadable, err)
 	}
 }
 
@@ -147,7 +159,7 @@ func TestAssistantAliasActionStaysOnTheQuestItStartedOn(t *testing.T) {
 		t.Fatalf("install result = %+v", result.Journey)
 	}
 	stored, err := store.GetRun(ctx, root.RunID)
-	if err != nil || stored.IntegrationVersion != "0.5.0" {
+	if err != nil || stored.IntegrationVersion != "0.6.0" {
 		t.Fatalf("install root = %+v, err = %v", stored, err)
 	}
 

@@ -96,7 +96,7 @@ func (s *Service) mutatePresentation(
 	} else {
 		root = claimed
 	}
-	candidate, reads := s.deriveCanonical(ctx, declaration, root, claimed, nil)
+	candidate, reads, precondition := s.deriveCanonical(ctx, declaration, root, claimed, nil)
 	completion := OperationCompletion{Status: OperationSucceeded, ResultCode: resultCode}
 	_, finalized, finalizeReplayed, finalizeErr := s.store.FinalizeOperation(
 		ctx, candidate, request.IdempotencyKey, completion,
@@ -108,7 +108,7 @@ func (s *Service) mutatePresentation(
 	if finalizeReplayed {
 		return s.Read(ctx, userID, run.ID)
 	}
-	projection := projectionFromRun(declaration, finalized, reads, nil)
+	projection := projectionFromRun(declaration, finalized, reads, nil, precondition)
 	emitProjectionLifecycleTransition(current, projection)
 	if open {
 		switch {
@@ -169,7 +169,7 @@ func (s *Service) CreateOrResumeChild(ctx context.Context, userID string, reques
 		_, _ = s.store.MarkOperationReconcileRequired(ctx, claimed.Kind, claimed.ID, request.IdempotencyKey)
 		return nil, safeStoreFailure(childErr, claimed.StateRevision)
 	}
-	candidate, _ := s.deriveCanonical(ctx, declaration, claimed, claimed, nil)
+	candidate, _, _ := s.deriveCanonical(ctx, declaration, claimed, claimed, nil)
 	completion := OperationCompletion{
 		Status: OperationSucceeded, ResultCode: ResultChildRunCreated,
 		Result: CanonicalResult{ChildRunID: child.ID},

@@ -121,28 +121,22 @@ func (s *Service) Mutate(ctx context.Context, userID, runID string, actionID Act
 		}}, nil
 	}
 
-	// The sole no-review adapter action records a decision to proceed, not a
-	// resource or permission change. All other consequences retain exact review.
-	acknowledgement := actionID == ActionAcknowledgePreparation && !definition.RequiresReview
-	if (!acknowledgement && (!definition.RequiresReview || request.ReviewToken == "")) ||
-		(acknowledgement && (request.ReviewToken != "" || !projectionHasAction(projection, actionID))) {
+	// Every adapter consequence retains exact review. The preparation
+	// acknowledgement, the one no-review action, was removed with its screen.
+	if !definition.RequiresReview || request.ReviewToken == "" {
 		return nil, failure(ReasonReviewRequired, projection.StateRevision)
 	}
 	material, prepareErr := adapter.PrepareCommit(ctx, scope, actionID, request.Input)
 	if prepareErr != nil || material.CommitAction != actionID || material.InputDigest != inputDigest {
 		return nil, adapterFailure(prepareErr, projection.StateRevision)
 	}
-	if !acknowledgement {
-		review, reviewErr := s.store.GetReviewReceipt(ctx, request.ReviewToken)
-		if reviewErr != nil || review.RunKind != projection.RunKind || review.RunID != projection.RunID ||
-			review.StepID != stepID || review.ActionID != string(actionID) || review.InputDigest != inputDigest ||
-			review.RunRevision != projection.StateRevision || review.OwnerRevisionDigest != material.OwnerRevisionDigest ||
-			review.DisclosureDigest != material.DisclosureDigest || review.ConsumedAt != nil ||
-			!review.ExpiresAt.After(s.now().UTC()) {
-			return nil, failure(ReasonReviewStale, projection.StateRevision)
-		}
-	} else {
-		material.DisclosureDigest = ""
+	review, reviewErr := s.store.GetReviewReceipt(ctx, request.ReviewToken)
+	if reviewErr != nil || review.RunKind != projection.RunKind || review.RunID != projection.RunID ||
+		review.StepID != stepID || review.ActionID != string(actionID) || review.InputDigest != inputDigest ||
+		review.RunRevision != projection.StateRevision || review.OwnerRevisionDigest != material.OwnerRevisionDigest ||
+		review.DisclosureDigest != material.DisclosureDigest || review.ConsumedAt != nil ||
+		!review.ExpiresAt.After(s.now().UTC()) {
+		return nil, failure(ReasonReviewStale, projection.StateRevision)
 	}
 
 	claim, claimedRun, replayed, claimErr := s.store.ClaimOperation(ctx, OperationClaim{
@@ -313,7 +307,7 @@ func (s *Service) actionFinalRun(ctx context.Context, userID, runID string) (*Ru
 			return nil, storeErr
 		}
 	}
-	candidate, _ := s.deriveCanonical(ctx, declaration, root, run, nil)
+	candidate, _, _ := s.deriveCanonical(ctx, declaration, root, run, nil)
 	return candidate, nil
 }
 

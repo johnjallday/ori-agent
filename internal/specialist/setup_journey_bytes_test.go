@@ -25,21 +25,16 @@ func normalizedDigest(t *testing.T, declaration specialist.SetupJourney) string 
 	return hex.EncodeToString(sum[:])
 }
 
-// Adding a shape must not change how any existing declaration normalizes. The
-// digests were recorded from the build before the integration_install shape.
+// FR 5: changing the compiled shapes must not change how an existing host
+// declaration normalizes. The digest was recorded from the build before this
+// feature added the integration_install and project_setup shapes.
 func TestExistingDeclarationsNormalizeByteIdentically(t *testing.T) {
 	declarations := map[string]specialist.SetupJourney{}
 	for _, quest := range hostquests.All() {
 		declarations["host:"+quest.ID] = quest
 	}
-	for _, entry := range specialist.All() {
-		if entry.SetupJourney != nil {
-			declarations["specialist:"+entry.Slug] = *entry.SetupJourney
-		}
-	}
 	want := map[string]string{
-		"host:email_ops_setup":        "29e433af71b15096943c4c9af211b3db61c519221328ec0594f28c5b094e6542",
-		"specialist:music_production": "a1dfb1f72bfb2e3188edcd8f3a2b93cda3276644786dfe5b8a1d88f6c7424ac1",
+		"host:email_ops_setup": "29e433af71b15096943c4c9af211b3db61c519221328ec0594f28c5b094e6542",
 	}
 	for name, declaration := range declarations {
 		got := normalizedDigest(t, declaration)

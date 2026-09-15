@@ -42,12 +42,34 @@ type JourneyProjection struct {
 	Busy                    bool                  `json:"busy,omitempty"`
 	ReconciliationRequired  bool                  `json:"reconciliation_required,omitempty"`
 	DeclarationIncompatible bool                  `json:"declaration_incompatible,omitempty"`
-	Receipts                ResourceProjection    `json:"receipts"`
-	Steps                   []StepProjection      `json:"steps"`
-	FirstOpenedAt           *time.Time            `json:"first_opened_at,omitempty"`
-	LastDismissedAt         *time.Time            `json:"last_dismissed_at,omitempty"`
-	FirstCompletedAt        *time.Time            `json:"first_completed_at,omitempty"`
-	UpdatedAt               time.Time             `json:"updated_at"`
+	// Precondition is set while a project_setup quest's integration is not
+	// ready. Every step is then blocked and the install quest is the repair.
+	Precondition     *PreconditionProjection `json:"precondition,omitempty"`
+	Receipts         ResourceProjection      `json:"receipts"`
+	Steps            []StepProjection        `json:"steps"`
+	FirstOpenedAt    *time.Time              `json:"first_opened_at,omitempty"`
+	LastDismissedAt  *time.Time              `json:"last_dismissed_at,omitempty"`
+	FirstCompletedAt *time.Time              `json:"first_completed_at,omitempty"`
+	UpdatedAt        time.Time               `json:"updated_at"`
+}
+
+// PreconditionProjection explains why a project_setup quest cannot proceed:
+// the closed reason and guidance of its integration read, the read's receipt,
+// and the host install quest that repairs it. It selects no route or action.
+type PreconditionProjection struct {
+	ReasonCode     ReasonCode             `json:"reason_code"`
+	Guidance       string                 `json:"guidance"`
+	Integration    *IntegrationProjection `json:"integration,omitempty"`
+	InstallQuestID string                 `json:"install_quest_id"`
+}
+
+func clonePreconditionProjection(source *PreconditionProjection) *PreconditionProjection {
+	if source == nil {
+		return nil
+	}
+	clone := *source
+	clone.Integration = cloneIntegrationProjection(source.Integration)
+	return &clone
 }
 
 // OverviewProjection is the bounded canonical root/child read used by Home
@@ -384,53 +406,32 @@ func (s *Service) currentDeclaration(ctx context.Context, userID string) (*decla
 		return nil, nil, failure(ReasonRelationshipNotAccepted, 0)
 	}
 	entry, ok := s.resolveEntry(state.SpecialistSlug)
-	if !ok || entry.Slug != state.SpecialistSlug || entry.SetupJourney == nil {
+	if !ok || entry.Slug != state.SpecialistSlug || strings.TrimSpace(entry.IntegrationKey) == "" || s.quests == nil {
 		return nil, nil, failure(ReasonJourneyUnavailable, 0)
 	}
-	declaration, err := specialist.NormalizeSetupJourney(*entry.SetupJourney)
-	if err != nil {
-		return nil, nil, failure(ReasonDeclarationInvalid, 0)
+	integration, reviewed := reviewedintegration.Get(entry.IntegrationKey)
+	if !reviewed {
+		return nil, nil, failure(ReasonJourneyUnavailable, 0)
 	}
-	if s.quests != nil {
-		if integration, ok := reviewedintegration.Get(declaration.IntegrationKey); ok {
-			// Before the integration's plugin is installed the only guidance is its
-			// generated install quest, which the catalog lists only in that state.
-			if s.installQuestListed(ctx, integration.Key) {
-				return s.questDeclaration(ctx, userID, QuestKey{Source: QuestSourceHost, ID: IntegrationInstallQuestID(integration.Key)})
-			}
-			return s.questDeclaration(ctx, userID, QuestKey{PluginID: integration.PluginID, ID: declaration.ID})
-		}
+	// FR 20: the plugin's own quest once the catalog lists one for this
+	// integration (it lists plugin quests only for an installed plugin);
+	// otherwise the generated install quest, which always resolves.
+	if handoff := IntegrationHandoff(ctx, s.quests, integration.Key); handoff != nil {
+		return s.questDeclaration(ctx, userID, QuestKey{Source: QuestSourcePlugin, PluginID: handoff.PluginID, ID: handoff.ID})
 	}
-	return &declarationIdentity{UserID: state.UserID, AssistantID: state.AssistantID, SpecialistSlug: state.SpecialistSlug}, declaration, nil
-}
-
-// installQuestListed reports whether the catalog currently offers the install
-// quest for one integration. A catalog that cannot be read reports false, so
-// the alias keeps resolving the integration's plugin quest.
-func (s *Service) installQuestListed(ctx context.Context, integrationKey string) bool {
-	quests, err := s.listQuestSource(ctx, QuestSourceHost)
-	if err != nil {
-		return false
-	}
-	id := IntegrationInstallQuestID(integrationKey)
-	for _, quest := range quests {
-		if quest.Source == QuestSourceHost && quest.ID == id && quest.IntegrationKey == integrationKey {
-			return true
-		}
-	}
-	return false
+	return s.questDeclaration(ctx, userID, QuestKey{Source: QuestSourceHost, ID: integration.InstallQuestID()})
 }
 
 // listQuestSource lists only the catalogs serving one source, so resolving the
 // alias never reads the user-template library.
-func (s *Service) listQuestSource(ctx context.Context, source QuestSource) ([]QuestSummary, error) {
-	if s == nil || s.quests == nil {
+func listQuestSource(ctx context.Context, catalog QuestCatalog, source QuestSource) ([]QuestSummary, error) {
+	if catalog == nil {
 		return nil, failure(ReasonJourneyUnavailable, 0)
 	}
-	if lister, ok := s.quests.(questSourceLister); ok {
+	if lister, ok := catalog.(questSourceLister); ok {
 		return lister.listSource(ctx, source)
 	}
-	quests, err := s.quests.List(ctx)
+	quests, err := catalog.List(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -505,7 +506,7 @@ func (s *Service) reconcile(ctx context.Context, declaration *specialist.SetupJo
 		if busyErr != nil && !errors.Is(busyErr, ErrNotFound) {
 			return nil, safeStoreFailure(busyErr, run.StateRevision)
 		}
-		candidate, reads := s.deriveCanonical(ctx, declaration, root, run, busy)
+		candidate, reads, precondition := s.deriveCanonical(ctx, declaration, root, run, busy)
 		if busy != nil {
 			// An interrupted response must not strand an observed consequence.
 			// Only finish the durable receipt from the owner's observed result;
@@ -520,7 +521,7 @@ func (s *Service) reconcile(ctx context.Context, declaration *specialist.SetupJo
 				recoverable := kind == specialist.SetupStepProjectConnect ||
 					ActionID(busy.ActionID) == ActionSelectFileOnlyMode || ActionID(busy.ActionID) == ActionLinkMailbox
 				if recoverable && known && definition.Effect == ActionEffectCommit && adapter != nil {
-					settled, settledReads := s.deriveCanonical(ctx, declaration, root, run, nil)
+					settled, settledReads, settledPrecondition := s.deriveCanonical(ctx, declaration, root, run, nil)
 					for index, step := range declaration.Steps {
 						if step.ID != busy.StepID || step.Kind != kind || !validCanonicalRead(kind, settledReads[index]) ||
 							!adapter.ConsequenceObserved(ActionID(busy.ActionID), settledReads[index]) {
@@ -535,7 +536,7 @@ func (s *Service) reconcile(ctx context.Context, declaration *specialist.SetupJo
 						if finalizeErr != nil {
 							return nil, safeStoreFailure(finalizeErr, run.StateRevision)
 						}
-						projection := projectionFromRun(declaration, updated, settledReads, nil)
+						projection := projectionFromRun(declaration, updated, settledReads, nil, settledPrecondition)
 						if !replayed {
 							emitActionOutcome(projection, step.ID, ActionID(busy.ActionID), specialistevents.OutcomeSucceeded, "")
 							emitLifecycleTransition(declaration, run, updated)
@@ -544,15 +545,15 @@ func (s *Service) reconcile(ctx context.Context, declaration *specialist.SetupJo
 					}
 				}
 			}
-			return projectionFromRun(declaration, candidate, reads, busy), nil
+			return projectionFromRun(declaration, candidate, reads, busy, precondition), nil
 		}
 		if !materialRunChange(run, candidate) {
-			return projectionFromRun(declaration, run, reads, nil), nil
+			return projectionFromRun(declaration, run, reads, nil, precondition), nil
 		}
 		updated, updateErr := s.store.CompareAndSwapRun(ctx, candidate, run.StateRevision)
 		if updateErr == nil {
 			emitLifecycleTransition(declaration, run, updated)
-			return projectionFromRun(declaration, updated, reads, nil), nil
+			return projectionFromRun(declaration, updated, reads, nil, precondition), nil
 		}
 		if errors.Is(updateErr, ErrConflict) {
 			run, updateErr = s.store.GetRun(ctx, run.ID)
@@ -579,7 +580,7 @@ func (s *Service) deriveCanonical(
 	root *Run,
 	current *Run,
 	busy *OperationReceipt,
-) (*Run, []CanonicalStepRead) {
+) (*Run, []CanonicalStepRead, *PreconditionProjection) {
 	candidate := current.Clone()
 	candidate.NeedsNormalization = false
 	candidate.DeclarationSchemaVersion = declaration.SchemaVersion
@@ -588,6 +589,28 @@ func (s *Service) deriveCanonical(
 	reads := make([]CanonicalStepRead, len(declaration.Steps))
 
 	scope := scopeForRun(declaration, root, candidate)
+	// FR 18: a project_setup quest has no install step, so the integration read
+	// runs first as a precondition. It fills the same receipts the install step
+	// filled, and while it is not met no step reader runs.
+	var integration *CanonicalStepRead
+	if declaration.Shape() == specialist.SetupJourneyShapeProjectSetup {
+		read := s.readers.read(ctx, specialist.SetupStepIntegrationInstall, scope)
+		if !read.Complete {
+			return blockedByPrecondition(declaration, candidate, reads, read)
+		}
+		applyCanonicalRead(candidate, specialist.SetupStepIntegrationInstall, read.Result)
+		integration = &read
+	}
+	withIntegration := func(scope ReadScope) ReadScope {
+		// A child run never stores integration receipts; its readers use the
+		// ones this read just verified, even before the root row is updated.
+		if integration != nil && integration.Result.IntegrationPluginID != "" {
+			scope.IntegrationPluginID = integration.Result.IntegrationPluginID
+			scope.IntegrationVersion = integration.Result.IntegrationVersion
+		}
+		return scope
+	}
+	scope = withIntegration(scopeForRun(declaration, root, candidate))
 	for index, step := range declaration.Steps {
 		read := s.readers.read(ctx, step.Kind, scope)
 		reads[index] = read
@@ -599,7 +622,7 @@ func (s *Service) deriveCanonical(
 		}
 		candidate.StepStates[index] = StepState{StepID: step.ID, Status: status, ReasonCode: read.BlockedReason}
 		applyCanonicalRead(candidate, step.Kind, read.Result)
-		scope = scopeForRun(declaration, root, candidate)
+		scope = withIntegration(scopeForRun(declaration, root, candidate))
 	}
 
 	// Summary completion is owned by this read-only reconciler, not by an
@@ -667,7 +690,33 @@ func (s *Service) deriveCanonical(
 			candidate.Lifecycle = LifecycleInProgress
 		}
 	}
-	return candidate, reads
+	return candidate, reads, nil
+}
+
+// blockedByPrecondition is the derivation for a project_setup run whose
+// integration read is not complete: every step is blocked with the
+// integration's reason, the run needs attention, and the projection names the
+// install quest that repairs it. Nothing is read or changed beyond that.
+func blockedByPrecondition(
+	declaration *specialist.SetupJourney,
+	candidate *Run,
+	reads []CanonicalStepRead,
+	integration CanonicalStepRead,
+) (*Run, []CanonicalStepRead, *PreconditionProjection) {
+	reason := integration.BlockedReason
+	if reason == "" {
+		reason = ReasonIntegrationNotInstalled
+	}
+	for index, step := range declaration.Steps {
+		candidate.StepStates[index] = StepState{StepID: step.ID, Status: StepBlocked, ReasonCode: reason}
+	}
+	candidate.CurrentStepID = declaration.Steps[0].ID
+	candidate.Lifecycle = LifecycleNeedsAttention
+	return candidate, reads, &PreconditionProjection{
+		ReasonCode: reason, Guidance: safeGuidance[reason],
+		Integration:    cloneIntegrationProjection(integration.Integration),
+		InstallQuestID: IntegrationInstallQuestID(declaration.IntegrationKey),
+	}
 }
 
 func scopeForRun(declaration *specialist.SetupJourney, root, run *Run) ReadScope {
@@ -845,8 +894,10 @@ func projectionFromRun(
 	run *Run,
 	reads []CanonicalStepRead,
 	busy *OperationReceipt,
+	precondition *PreconditionProjection,
 ) *JourneyProjection {
 	projection := baseProjection(declaration, run)
+	projection.Precondition = clonePreconditionProjection(precondition)
 	projection.Steps = make([]StepProjection, len(declaration.Steps))
 	for index, step := range declaration.Steps {
 		state := run.StepStates[index]

@@ -109,30 +109,6 @@ func (b *ServerBuilder) initializeSetupJourney() {
 				connectionService,
 				installedProjectTemplateResolver{manager: b.pluginHandler.Manager(), userTemplates: userTemplates},
 			)
-			projectAdapter.CheckPrerequisites = func(ctx context.Context, template projecttemplates.Template) (bool, error) {
-				if template.RuntimeRequirements == nil || b.runtimeCapabilityRegistry == nil {
-					return false, errors.New("runtime prerequisites unavailable")
-				}
-				checked := false
-				for _, requirement := range template.RuntimeRequirements.Requirements {
-					adapter, ok := b.runtimeCapabilityRegistry.Lookup(requirement.Adapter)
-					if !ok {
-						return false, errors.New("runtime prerequisites unavailable")
-					}
-					checker, ok := adapter.(interface {
-						CheckPrerequisites(context.Context) (bool, error)
-					})
-					if !ok {
-						return false, errors.New("runtime prerequisites unavailable")
-					}
-					ready, err := checker.CheckPrerequisites(ctx)
-					if err != nil || !ready {
-						return false, err
-					}
-					checked = true
-				}
-				return checked, nil
-			}
 			readers[specialist.SetupStepProjectConnect] = projectAdapter
 		}
 	} else {
@@ -232,10 +208,18 @@ func (b *ServerBuilder) initializeSetupJourney() {
 		)
 	}
 	if b.configManager != nil {
+		// Without a plugin store no integration can be installed, so the catalog
+		// lists no user-template quest (its lookups still resolve).
+		var installedPlugins interface {
+			List() ([]plugin.InstalledPlugin, error)
+		}
+		if b.pluginHandler != nil {
+			installedPlugins = b.pluginHandler.Manager()
+		}
 		questCatalogs = append(questCatalogs, setupjourney.NewUserTemplateQuestCatalog(configuredUserTemplateQuestLibrary{
 			config:  b.configManager,
 			catalog: templateRuntimeCatalog{capabilities: b.workspaceCapabilityRegistry, runtimes: b.runtimeCapabilityRegistry},
-		}))
+		}, installedPlugins))
 	}
 	b.setupJourneyService.SetQuestCatalog(setupjourney.CombineQuestCatalogs(questCatalogs...))
 	b.setupJourneyHandler = setupjourneyhttp.NewHandler(b.setupJourneyService, b.userProvider)

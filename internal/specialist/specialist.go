@@ -108,10 +108,13 @@ type Entry struct {
 	// knows but this list omits keep their default relative order at the end.
 	CapabilityOrder []string `json:"capability_order"`
 
-	// SetupJourney is an optional inert, versioned setup declaration. Its step
-	// kinds select only host-owned adapters; entries without one retain their
-	// existing suggestion behavior.
-	SetupJourney *SetupJourney `json:"setup_journey,omitempty"`
+	// IntegrationKey optionally names the reviewed integration this domain is
+	// set up with. Its guided setup is the integration's generated install quest
+	// until the plugin is installed, then the quest the plugin declares. Entries
+	// without one retain their existing suggestion behavior. The key must exist
+	// in the reviewed-integration registry; that package's tests prove it, since
+	// it imports this one.
+	IntegrationKey string `json:"integration_key,omitempty"`
 }
 
 // The mapping's entries live in domains.go, which is data only. Nothing in
@@ -274,6 +277,5 @@ func cloneEntry(source Entry) Entry {
 	clone.AssignmentLabels = append([]AssignmentLabel(nil), source.AssignmentLabels...)
 	clone.AssignmentSteps = append([]AssignmentStep(nil), source.AssignmentSteps...)
 	clone.CapabilityOrder = append([]string(nil), source.CapabilityOrder...)
-	clone.SetupJourney = cloneSetupJourney(source.SetupJourney)
 	return clone
 }

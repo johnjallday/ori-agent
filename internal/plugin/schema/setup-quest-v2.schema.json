@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ori.local/schemas/setup-quest-v1.schema.json",
-  "title": "Ori plugin setup quest v1 (inert declaration)",
-  "description": "The host normalizer additionally enforces plain text, UTF-8 byte limits, a 16 KiB total limit, and exact plugin/blueprint/program ownership.",
+  "$id": "https://ori.local/schemas/setup-quest-v2.schema.json",
+  "title": "Ori plugin setup quest v2 (inert project_setup declaration)",
+  "description": "Requires the setup_quests_v2 host feature. Installing the plugin is Ori's generated install quest, not a step here. The host normalizer additionally enforces plain text, UTF-8 byte limits, a 16 KiB total limit, and exact plugin/blueprint/program ownership.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -29,20 +29,17 @@
     "workspace_launch": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["group_title", "group_name", "runtime_title", "runtime_instructions"],
+      "required": ["group_title", "group_name"],
       "properties": {
         "group_title": { "$ref": "#/$defs/launchText" },
-        "group_name": { "$ref": "#/$defs/launchText" },
-        "runtime_title": { "$ref": "#/$defs/launchText" },
-        "runtime_instructions": { "$ref": "#/$defs/launchText" }
+        "group_name": { "$ref": "#/$defs/launchText" }
       }
     },
     "steps": {
       "type": "array",
-      "minItems": 5,
-      "maxItems": 5,
+      "minItems": 4,
+      "maxItems": 4,
       "prefixItems": [
-        { "$ref": "#/$defs/step", "properties": { "kind": { "const": "integration_install" } } },
         { "$ref": "#/$defs/step", "properties": { "kind": { "const": "project_connect" } } },
         { "$ref": "#/$defs/step", "properties": { "kind": { "const": "workspace_setup" } } },
         {

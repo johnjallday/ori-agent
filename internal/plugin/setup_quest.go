@@ -20,18 +20,22 @@ func validateSetupQuests(c *SurfaceContribution) error {
 	}
 	feature := false
 	for _, name := range c.RequiresHostFeatures {
-		feature = feature || name == HostFeatureSetupQuestsV1
+		feature = feature || name == HostFeatureSetupQuestsV2
 	}
 	if !feature {
-		return fmt.Errorf("plugin setup quests require %s", HostFeatureSetupQuestsV1)
+		return fmt.Errorf("plugin setup quests require %s", HostFeatureSetupQuestsV2)
 	}
 	seen := make(map[string]bool, len(c.SetupQuests))
 	for index, quest := range c.SetupQuests {
 		normalized, err := specialist.NormalizeSetupJourney(quest)
-		// Plugins may author only the five-step specialist shape. The explicit
-		// shape check keeps that true if the host normalizer gains more shapes.
-		if err != nil || normalized.Shape() != specialist.SetupJourneyShapeSpecialist || normalized.WorkspaceLaunch == nil {
-			return fmt.Errorf("plugin setup quest %d is invalid", index)
+		// Plugins may author only the four-step project_setup shape, with launch
+		// copy. The explicit shape check keeps that true as the normalizer
+		// compiles host-only shapes.
+		if err != nil {
+			return fmt.Errorf("plugin setup quest %d is invalid: %w", index, err)
+		}
+		if normalized.Shape() != specialist.SetupJourneyShapeProjectSetup || normalized.WorkspaceLaunch == nil {
+			return fmt.Errorf("plugin setup quest %d must use the %s shape with workspace_launch", index, specialist.SetupJourneyShapeProjectSetup)
 		}
 		if seen[normalized.ID] {
 			return fmt.Errorf("plugin setup quest id is duplicated")

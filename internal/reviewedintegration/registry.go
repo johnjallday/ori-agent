@@ -60,6 +60,15 @@ func (entry Entry) Source() string {
 	return entry.SourceRepository + "#sha=" + entry.SourceCommit
 }
 
+// InstallQuestPrefix prefixes an integration key to form the ID of the install
+// quest Ori generates for it.
+const InstallQuestPrefix = "install_"
+
+// InstallQuestID is the host quest ID generated for this integration.
+func (entry Entry) InstallQuestID() string {
+	return InstallQuestPrefix + strings.ToLower(strings.TrimSpace(entry.Key))
+}
+
 func (entry Entry) Clone() Entry {
 	entry.RequiredHostFeatures = append([]string(nil), entry.RequiredHostFeatures...)
 	entry.SupportedPlatforms = append([]string(nil), entry.SupportedPlatforms...)

@@ -165,14 +165,14 @@ func TestSetupSummaryReaderOffersActionsByShape(t *testing.T) {
 	ctx := context.Background()
 	for _, scope := range []setupjourney.ReadScope{
 		{RunKind: setupjourney.RunKindRoot},
-		{RunKind: setupjourney.RunKindRoot, Shape: specialist.SetupJourneyShapeSpecialist, HomeWorkspaceID: "home", ProjectWorkspaceID: "project"},
-		{RunKind: setupjourney.RunKindChild, Shape: specialist.SetupJourneyShapeSpecialist, HomeWorkspaceID: "home", ProjectWorkspaceID: "project"},
+		{RunKind: setupjourney.RunKindRoot, Shape: specialist.SetupJourneyShapeProjectSetup, HomeWorkspaceID: "home", ProjectWorkspaceID: "project"},
+		{RunKind: setupjourney.RunKindChild, Shape: specialist.SetupJourneyShapeProjectSetup, HomeWorkspaceID: "home", ProjectWorkspaceID: "project"},
 	} {
 		legacy, legacyErr := readSetupSummary(ctx, scope)
 		for _, available := range []bool{false, true} {
 			got, err := setupSummaryReader{modelAvailable: func() bool { return available }}.Read(ctx, scope)
 			if !reflect.DeepEqual(got, legacy) || !errors.Is(err, legacyErr) {
-				t.Fatalf("specialist summary changed for %+v: %+v, want %+v", scope, got, legacy)
+				t.Fatalf("project-setup summary changed for %+v: %+v, want %+v", scope, got, legacy)
 			}
 		}
 	}
