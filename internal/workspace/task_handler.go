@@ -1818,7 +1818,7 @@ func (h *LLMTaskHandler) getMCPToolsForServer(serverName string) ([]toolapi.Tool
 	// "already running", not because starting genuinely failed but because the
 	// winner already brought it up. That's not an error — the server is ready,
 	// so fall through to fetch its tools same as the winner does (mirrors
-	// downloadsjanitor's isAlreadyRunning tolerance for the identical race).
+	// filejanitor's isAlreadyRunning tolerance for the identical race).
 	if startErr := h.mcpRegistry.StartServer(serverName); startErr != nil && !isMCPServerAlreadyRunningError(startErr) {
 		return nil, fmt.Errorf("failed to start MCP server %q: %w", serverName, startErr)
 	}

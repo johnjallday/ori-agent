@@ -14,8 +14,8 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/cliagent"
-	"github.com/johnjallday/ori-agent/internal/downloadsjanitor"
 	"github.com/johnjallday/ori-agent/internal/featureflags"
+	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/platform"
@@ -50,12 +50,12 @@ type Server struct {
 	// workspacePlanAuto drives approved automatic Plans. Its loops are not
 	// owned by any request, so shutdown has to stop them explicitly or a
 	// closing process keeps dispatching work.
-	workspacePlanAuto          *workspaceplan.AutoRunner
-	downloadsJanitorAutomation *downloadsjanitor.Automation
-	workspaceSurfaceServices   *workspacesurface.ServiceManager
-	workspaceFileStore         *workspace.FileStore
-	projectTemplateCatalog     projecttemplates.RuntimeCatalog
-	setupJourneyStore          *setupjourney.SQLiteStore
+	workspacePlanAuto        *workspaceplan.AutoRunner
+	fileJanitorAutomation    *filejanitor.Automation
+	workspaceSurfaceServices *workspacesurface.ServiceManager
+	workspaceFileStore       *workspace.FileStore
+	projectTemplateCatalog   projecttemplates.RuntimeCatalog
+	setupJourneyStore        *setupjourney.SQLiteStore
 
 	shutdownOnce   sync.Once
 	shutdownErr    error
@@ -189,8 +189,8 @@ func (s *Server) shutdownBackground(ctx context.Context) error {
 		if s.workspacePlanAuto != nil {
 			s.workspacePlanAuto.Stop()
 		}
-		if s.downloadsJanitorAutomation != nil {
-			s.downloadsJanitorAutomation.Stop()
+		if s.fileJanitorAutomation != nil {
+			s.fileJanitorAutomation.Stop()
 		}
 		if s.Workflow != nil {
 			s.Workflow.Shutdown()

@@ -36,7 +36,7 @@ func TestFileJanitorCompanion_IsDeclaredReadOnlyAndOptional(t *testing.T) {
 // TestCompanionDescriptor_GrantsNoTools is the FR-42 structural guarantee.
 //
 // The companion's read-only allowlist is compiled into the binding logic
-// (downloadsjanitor.JanitorReadTools), deliberately NOT described here. If a
+// (filejanitor.JanitorReadTools), deliberately NOT described here. If a
 // descriptor could name tools, a capability definition — and eventually a
 // manifest that selects one — would become a place where a grant is written,
 // which is exactly the authority this data must never carry.

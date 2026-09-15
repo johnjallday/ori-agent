@@ -24,13 +24,13 @@ import (
 	"github.com/johnjallday/ori-agent/internal/connections"
 	"github.com/johnjallday/ori-agent/internal/connectionshttp"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
-	"github.com/johnjallday/ori-agent/internal/downloadsjanitor"
-	"github.com/johnjallday/ori-agent/internal/downloadsjanitorhttp"
 	"github.com/johnjallday/ori-agent/internal/evolution"
 	"github.com/johnjallday/ori-agent/internal/evolutionhttp"
 	"github.com/johnjallday/ori-agent/internal/externalagents"
 	"github.com/johnjallday/ori-agent/internal/externalagentshttp"
 	"github.com/johnjallday/ori-agent/internal/featureflags"
+	"github.com/johnjallday/ori-agent/internal/filejanitor"
+	"github.com/johnjallday/ori-agent/internal/filejanitorhttp"
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	"github.com/johnjallday/ori-agent/internal/filewatcher"
 	"github.com/johnjallday/ori-agent/internal/followup"
@@ -729,26 +729,26 @@ func (b *ServerBuilder) wireCalendarOpsSetup() {
 	}
 }
 
-// wireDownloadsJanitor constructs the Downloads Janitor service and handler.
+// wireFileJanitor constructs the File Janitor service and handler.
 // Like wireCalendarOpsSetup it runs in the workspace-store
 // phase (18) rather than initializeHandlers (17): the service needs the
 // composed workspace store to record the approved folder's directory reference
 // and read-only MCP binding, and the folder store to resolve where each
 // workspace's Janitor state lives on disk.
-func (b *ServerBuilder) wireDownloadsJanitor() {
+func (b *ServerBuilder) wireFileJanitor() {
 	if b.workspaceStore == nil || b.workspaceFileStore == nil {
 		return
 	}
-	service := downloadsjanitor.NewService(downloadsjanitor.NewStore(b.workspaceFileStore), b.workspaceStore)
-	b.downloadsJanitorService = service
-	b.downloadsJanitorHandler = downloadsjanitorhttp.NewHandler(service, b.workspaceStore, b.userProvider)
+	service := filejanitor.NewService(filejanitor.NewStore(b.workspaceFileStore), b.workspaceStore)
+	b.fileJanitorService = service
+	b.fileJanitorHandler = filejanitorhttp.NewHandler(service, b.workspaceStore, b.userProvider)
 }
 
 // wireWorkspaceCapabilities constructs the built-in Workspace Capability
 // registry, the install lifecycle service over it, and its HTTP handler, then
 // binds each capability's compiled runtime.
 //
-// Like wireDownloadsJanitor it runs in the workspace-store phase (18): the
+// Like wireFileJanitor it runs in the workspace-store phase (18): the
 // lifecycle service reads and updates the composed workspace store, which does
 // not exist during initializeHandlers (17).
 //
@@ -775,8 +775,8 @@ func (b *ServerBuilder) wireWorkspaceCapabilities() {
 	// Runtimes are bound from code, never from configuration: a persisted
 	// capability ID is a key into this registry and nothing else (FR-14).
 	var legacyProbe workspacecapability.LegacyStateProbe
-	if b.downloadsJanitorService != nil {
-		runtime := downloadsjanitor.NewCapabilityRuntime(b.downloadsJanitorService)
+	if b.fileJanitorService != nil {
+		runtime := filejanitor.NewCapabilityRuntime(b.fileJanitorService)
 		if err := registry.BindRuntime(workspace.CapabilityFileJanitor, runtime); err != nil {
 			// The definition stays listed; its status reports unavailable.
 			logger.Warn("File Janitor capability runtime not bound", logger.Fields{"error": err})
@@ -913,7 +913,7 @@ type agentListerFunc func() []string
 func (f agentListerFunc) ListAgents() []string { return f() }
 
 // backfillLegacyCapabilities records the file-janitor install for workspaces
-// that were already using Downloads Janitor before capabilities existed
+// that were already using File Janitor before capabilities existed
 // (FR-125).
 //
 // It runs on every startup and is idempotent: a workspace that already holds
@@ -938,9 +938,9 @@ func (b *ServerBuilder) backfillLegacyCapabilities(registry *workspacecapability
 	// same folder — nothing stopped it before. Reconcile those once at startup:
 	// it preserves every folder and all state, keeps the earliest owner running,
 	// and pauses later conflicts with a repairable explanation.
-	if b.downloadsJanitorService != nil {
+	if b.fileJanitorService != nil {
 		if ids, err := store.List(); err == nil {
-			b.downloadsJanitorService.ReconcileOverlappingRoots(ids)
+			b.fileJanitorService.ReconcileOverlappingRoots(ids)
 		}
 	}
 }
@@ -1010,11 +1010,11 @@ func (b *ServerBuilder) wireSetupWizard() {
 			}
 		}
 	}
-	if b.downloadsJanitorService != nil {
-		adapter := downloadsjanitor.NewSetupAdapter(b.downloadsJanitorService)
-		b.downloadsJanitorSetupAdapter = adapter
+	if b.fileJanitorService != nil {
+		adapter := filejanitor.NewSetupAdapter(b.fileJanitorService)
+		b.fileJanitorSetupAdapter = adapter
 		if err := registry.Register(adapter); err != nil {
-			logger.Warn("Downloads Janitor setup adapter not registered", logger.Fields{"error": err})
+			logger.Warn("File Janitor setup adapter not registered", logger.Fields{"error": err})
 		}
 	}
 	service := setupwizard.NewService(folders, registry)
@@ -1071,22 +1071,22 @@ func (b *ServerBuilder) blueprintWizardLookup() setupwizard.BlueprintLookup {
 	}
 }
 
-// wireDownloadsJanitorMover gives the Janitor its execution mechanism: the
+// wireFileJanitorMover gives the Janitor its execution mechanism: the
 // workspace's own root-scoped filesystem MCP binding.
 //
-// Split from wireDownloadsJanitor because the runtime resolver is built later
+// Split from wireFileJanitor because the runtime resolver is built later
 // in the same phase. Until this runs the service has no mover, and an apply
 // fails loudly rather than pretending — which is the right failure: a Janitor
 // that cannot move files must say so, not silently report success.
-func (b *ServerBuilder) wireDownloadsJanitorMover() {
-	if b.downloadsJanitorService == nil || b.runtimeResolver == nil || b.mcpRegistry == nil {
+func (b *ServerBuilder) wireFileJanitorMover() {
+	if b.fileJanitorService == nil || b.runtimeResolver == nil || b.mcpRegistry == nil {
 		return
 	}
 	// The Trash mechanism is Ori's own recoverable-Trash abstraction, never
 	// filesystem MCP: delete_file unlinks, and an unlinked file has no restore
 	// token and no way back.
-	b.downloadsJanitorService.SetTrash(downloadsjanitor.NewPlatformTrash())
-	mover := downloadsjanitor.NewMCPMover(
+	b.fileJanitorService.SetTrash(filejanitor.NewPlatformTrash())
+	mover := filejanitor.NewMCPMover(
 		b.workspaceStore,
 		b.runtimeResolver,
 		janitorToolCaller{registry: b.mcpRegistry},
@@ -1094,7 +1094,7 @@ func (b *ServerBuilder) wireDownloadsJanitorMover() {
 	// The connector is a process; it may not be running when the first approved
 	// move arrives. Lazy-start it the same way the chat path does.
 	mover.SetStarter(b.mcpRegistry)
-	b.downloadsJanitorService.SetMover(mover)
+	b.fileJanitorService.SetMover(mover)
 }
 
 // janitorToolCaller adapts the MCP registry to the narrow caller the Janitor

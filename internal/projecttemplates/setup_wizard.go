@@ -48,7 +48,7 @@ type SetupWizardStep = workspace.SetupWizardStep
 // Downloads preset still names the legacy `downloads_janitor` (and every
 // workspace mid-setup persisted it), while the generic File Janitor blueprint
 // names the canonical `file_janitor`. One compiled adapter serves both — see
-// downloadsjanitor.SetupAdapter.Aliases.
+// filejanitor.SetupAdapter.Aliases.
 var ValidSetupWizardAdapters = []string{
 	"downloads_janitor",
 	"file_janitor",
