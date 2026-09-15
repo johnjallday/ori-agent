@@ -81,6 +81,78 @@ func TestSetupQuestContributionRequiresHostFeatureAndRejectsExecutableFields(t *
 	}
 }
 
+// FR 4: host account-link quests are a valid host shape, but a plugin may
+// author only the five-step specialist shape.
+func TestSetupQuestContributionRejectsHostAccountLinkShape(t *testing.T) {
+	c := questContribution(t)
+	accountLink, err := specialist.NormalizeSetupJourney(specialist.SetupJourney{
+		SchemaVersion: specialist.SetupJourneySchemaVersion, Version: 1, ID: "plugin_account_setup",
+		Title: "Set up an account", Description: "Create a workspace and link an account.",
+		ExpectedBlueprintID: c.Blueprints[0].ID,
+		Steps: []specialist.SetupJourneyStep{
+			{ID: "team", Kind: specialist.SetupStepWorkspaceCreate, Title: "Team", Description: "Create the workspace."},
+			{ID: "connect", Kind: specialist.SetupStepAccountConnect, Title: "Connect", Description: "Connect the account."},
+			{ID: "link", Kind: specialist.SetupStepAccountLink, Title: "Link", Description: "Link the account."},
+			{ID: "summary", Kind: specialist.SetupStepSummary, Title: "Summary", Description: "Review completion."},
+		},
+	})
+	if err != nil {
+		t.Fatalf("host normalizer rejected the account-link fixture: %v", err)
+	}
+	c.SetupQuests = []SetupQuest{*accountLink}
+	if err := c.Validate(); err == nil {
+		t.Fatal("plugin contribution accepted an account-link-shape setup quest")
+	}
+	data, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseSurfaceContribution(data); err == nil {
+		t.Fatal("plugin manifest parse accepted an account-link-shape setup quest")
+	}
+}
+
+// The published plugin schema stays exactly the five fixed specialist steps.
+func TestSetupQuestSchemaKeepsTheFiveFixedSteps(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("schema", "setup-quest-v1.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema struct {
+		Properties struct {
+			Steps struct {
+				MinItems    int `json:"minItems"`
+				MaxItems    int `json:"maxItems"`
+				PrefixItems []struct {
+					Properties struct {
+						Kind struct {
+							Const string `json:"const"`
+						} `json:"kind"`
+					} `json:"properties"`
+				} `json:"prefixItems"`
+				Items *bool `json:"items"`
+			} `json:"steps"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(data, &schema); err != nil {
+		t.Fatal(err)
+	}
+	steps := schema.Properties.Steps
+	if steps.MinItems != specialist.SetupJourneyRequiredSteps || steps.MaxItems != specialist.SetupJourneyRequiredSteps ||
+		steps.Items == nil || *steps.Items {
+		t.Fatalf("schema step bounds changed: %+v", steps)
+	}
+	want := specialist.SetupJourneyShapeSteps(specialist.SetupJourneyShapeSpecialist)
+	if len(steps.PrefixItems) != len(want) {
+		t.Fatalf("schema declares %d steps, want %d", len(steps.PrefixItems), len(want))
+	}
+	for index, item := range steps.PrefixItems {
+		if specialist.SetupStepKind(item.Properties.Kind.Const) != want[index] {
+			t.Fatalf("schema step %d kind = %q, want %q", index, item.Properties.Kind.Const, want[index])
+		}
+	}
+}
+
 func TestQuestBlueprintReferencesStayWithinTheirOwnerAndProgram(t *testing.T) {
 	c := questContribution(t)
 	q := c.SetupQuests[0]

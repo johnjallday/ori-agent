@@ -80,7 +80,9 @@ func (s *Service) Mutate(ctx context.Context, userID, runID string, actionID Act
 			!validWorkspaceSetupProjection(material.WorkspaceSetup) ||
 			(material.WorkspaceSetup != nil && kind != specialist.SetupStepWorkspaceSetup) ||
 			!validStaffingProjection(material.Staffing) ||
-			(material.Staffing != nil && kind != specialist.SetupStepAssistantProgramStaffing) {
+			(material.Staffing != nil && kind != specialist.SetupStepAssistantProgramStaffing) ||
+			!validAccountLinkProjection(material.AccountLink) ||
+			(material.AccountLink != nil && kind != specialist.SetupStepAccountLink) {
 			return nil, adapterFailure(reviewErr, projection.StateRevision)
 		}
 		commitKind, commitDefinition, exists := actionKindAndDefinition(material.CommitAction)
@@ -106,6 +108,7 @@ func (s *Service) Mutate(ctx context.Context, userID, runID string, actionID Act
 			WorkspaceSetup:    cloneWorkspaceSetupProjection(material.WorkspaceSetup),
 			Staffing:          cloneStaffingProjection(material.Staffing),
 			Group:             cloneHomePreparation(material.Group),
+			AccountLink:       cloneAccountLinkProjection(material.AccountLink),
 		}}, nil
 	}
 

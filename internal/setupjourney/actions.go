@@ -64,6 +64,7 @@ type ReviewProjection struct {
 	WorkspaceSetup    *WorkspaceSetupProjection          `json:"workspace_setup,omitempty"`
 	Staffing          *StaffingProjection                `json:"staffing,omitempty"`
 	Group             *projectconnection.HomePreparation `json:"group,omitempty"`
+	AccountLink       *AccountLinkProjection             `json:"account_link,omitempty"`
 }
 
 // ActionReviewMaterial is produced only by one compiled action adapter. Digests
@@ -78,6 +79,7 @@ type ActionReviewMaterial struct {
 	WorkspaceSetup      *WorkspaceSetupProjection
 	Staffing            *StaffingProjection
 	Group               *projectconnection.HomePreparation
+	AccountLink         *AccountLinkProjection
 }
 
 // JourneyActionAdapter is the closed review/commit contract for one setup step
@@ -128,6 +130,15 @@ const (
 	ActionOpenLiveSetup          ActionID = "open_live_setup"
 	ActionOpenSampleLibrarySetup ActionID = "open_sample_library_setup"
 	ActionReviewSetup            ActionID = "review_setup"
+
+	ActionReviewTeam          ActionID = "review_team"
+	ActionOpenWorkspace       ActionID = "open_workspace"
+	ActionOpenAccountSettings ActionID = "open_account_settings"
+	ActionRecheckConnection   ActionID = "recheck_connection"
+	ActionReviewMailboxLink   ActionID = "review_mailbox_link"
+	ActionLinkMailbox         ActionID = "link_mailbox"
+	ActionStartInboxTriage    ActionID = "start_inbox_triage"
+	ActionOpenModelSettings   ActionID = "open_model_settings"
 )
 
 var actionDefinitionsByKind = map[specialist.SetupStepKind][]ActionDefinition{
@@ -174,6 +185,24 @@ var actionDefinitionsByKind = map[specialist.SetupStepKind][]ActionDefinition{
 		{ID: ActionOpenLiveSetup, Label: "Set up live control", Effect: ActionEffectNavigation},
 		{ID: ActionOpenSampleLibrarySetup, Label: "Set up sample library", Effect: ActionEffectNavigation},
 		{ID: ActionReviewSetup, Label: "Review setup", Effect: ActionEffectNavigation},
+		// Account-link shape summary offers. The summary reader selects by shape,
+		// so a specialist summary never publishes these.
+		{ID: ActionOpenWorkspace, Label: "Open Email Ops", Effect: ActionEffectNavigation},
+		{ID: ActionStartInboxTriage, Label: "Start inbox triage", Effect: ActionEffectNavigation},
+		{ID: ActionOpenModelSettings, Label: "Set up a model", Effect: ActionEffectNavigation},
+	},
+	specialist.SetupStepWorkspaceCreate: {
+		{ID: ActionReviewTeam, Label: "Review your team", Effect: ActionEffectNavigation},
+		{ID: ActionOpenWorkspace, Label: "Open workspace", Effect: ActionEffectNavigation},
+	},
+	specialist.SetupStepAccountConnect: {
+		{ID: ActionOpenAccountSettings, Label: "Open Google Account", Effect: ActionEffectNavigation},
+		{ID: ActionRecheckConnection, Label: "Check again", Effect: ActionEffectNavigation},
+	},
+	specialist.SetupStepAccountLink: {
+		{ID: ActionReviewMailboxLink, Label: "Review mailbox link", Effect: ActionEffectReview},
+		{ID: ActionLinkMailbox, Label: "Link mailbox", Effect: ActionEffectCommit, RequiresReview: true},
+		{ID: ActionOpenAccountSettings, Label: "Open Google Account", Effect: ActionEffectNavigation},
 	},
 }
 
@@ -181,7 +210,11 @@ var actionDefinitionsByKind = map[specialist.SetupStepKind][]ActionDefinition{
 // Shared root receipts are supplied separately for child runs; no path or
 // declaration-selected adapter can enter this value.
 type ReadScope struct {
-	OwnerUserID                string
+	OwnerUserID string
+	// Shape is the compiled step sequence of the declaration being read, so a
+	// reader shared by several shapes (the summary) can offer shape-specific
+	// actions without inspecting receipts.
+	Shape                      specialist.SetupJourneyShape
 	QuestSource                QuestSource
 	UserTemplateID             string
 	RelationshipID             string
@@ -212,6 +245,9 @@ type CanonicalStepRead struct {
 	WorkspaceSetup   *WorkspaceSetupProjection
 	Staffing         *StaffingProjection
 	Preparation      *projectconnection.HomePreparation
+	WorkspaceCreate  *WorkspaceCreateProjection
+	AccountConnect   *AccountConnectProjection
+	AccountLink      *AccountLinkProjection
 }
 
 // CanonicalReader asks one canonical owner for current state. Implementations
@@ -226,14 +262,16 @@ func (fn CanonicalReaderFunc) Read(ctx context.Context, scope ReadScope) (Canoni
 	return fn(ctx, scope)
 }
 
-// ReaderRegistry is the closed one-reader-per-v1-kind host registry.
+// ReaderRegistry is the closed one-reader-per-compiled-kind host registry.
 type ReaderRegistry struct {
 	readers map[specialist.SetupStepKind]CanonicalReader
 }
 
+// NewReaderRegistry requires exactly one reader for every compiled step kind in
+// every shape, so a host build cannot serve a declaration it cannot reconcile.
 func NewReaderRegistry(readers map[specialist.SetupStepKind]CanonicalReader) (*ReaderRegistry, error) {
 	if len(readers) != len(actionDefinitionsByKind) {
-		return nil, errors.New("setup journey reader registry must cover every v1 step kind")
+		return nil, errors.New("setup journey reader registry must cover every compiled step kind")
 	}
 	copyReaders := make(map[specialist.SetupStepKind]CanonicalReader, len(readers))
 	for kind := range actionDefinitionsByKind {
@@ -264,6 +302,9 @@ func (r *ReaderRegistry) read(ctx context.Context, kind specialist.SetupStepKind
 	state.WorkspaceSetup = cloneWorkspaceSetupProjection(state.WorkspaceSetup)
 	state.Staffing = cloneStaffingProjection(state.Staffing)
 	state.Preparation = cloneHomePreparation(state.Preparation)
+	state.WorkspaceCreate = cloneWorkspaceCreateProjection(state.WorkspaceCreate)
+	state.AccountConnect = cloneAccountConnectProjection(state.AccountConnect)
+	state.AccountLink = cloneAccountLinkProjection(state.AccountLink)
 	return state
 }
 
@@ -279,7 +320,13 @@ func validCanonicalRead(kind specialist.SetupStepKind, state CanonicalStepRead) 
 		(state.WorkspaceSetup != nil && kind != specialist.SetupStepWorkspaceSetup) ||
 		!validWorkspaceSetupProjection(state.WorkspaceSetup) ||
 		(state.Staffing != nil && kind != specialist.SetupStepAssistantProgramStaffing) ||
-		!validStaffingProjection(state.Staffing) {
+		!validStaffingProjection(state.Staffing) ||
+		(state.WorkspaceCreate != nil && kind != specialist.SetupStepWorkspaceCreate) ||
+		!validWorkspaceCreateProjection(state.WorkspaceCreate) ||
+		(state.AccountConnect != nil && kind != specialist.SetupStepAccountConnect) ||
+		!validAccountConnectProjection(state.AccountConnect) ||
+		(state.AccountLink != nil && kind != specialist.SetupStepAccountLink) ||
+		!validAccountLinkProjection(state.AccountLink) {
 		return false
 	}
 	if !validateReasonCode(state.BlockedReason, true) {
@@ -317,10 +364,23 @@ func validResultForKind(kind specialist.SetupStepKind, result CanonicalResult) b
 		return result.ChildRunID == "" && result.IntegrationPluginID == "" &&
 			result.IntegrationVersion == "" && result.HomeWorkspaceID == "" &&
 			result.ProjectWorkspaceID == ""
-	case specialist.SetupStepAssistantProgramStaffing, specialist.SetupStepSummary:
+	case specialist.SetupStepAssistantProgramStaffing, specialist.SetupStepSummary,
+		specialist.SetupStepAccountConnect:
 		return result.ChildRunID == "" && result.IntegrationPluginID == "" &&
 			result.IntegrationVersion == "" && result.HomeWorkspaceID == "" &&
-			result.ProjectWorkspaceID == "" && result.SelectedModeID == ""
+			result.ProjectWorkspaceID == "" && result.SelectedModeID == "" &&
+			(kind != specialist.SetupStepAccountConnect || result.CanonicalReceiptID == "")
+	case specialist.SetupStepWorkspaceCreate:
+		// The created workspace is the one receipt this shape persists.
+		return result.ChildRunID == "" && result.IntegrationPluginID == "" &&
+			result.IntegrationVersion == "" && result.HomeWorkspaceID == "" &&
+			result.SelectedModeID == "" && result.CanonicalReceiptID == ""
+	case specialist.SetupStepAccountLink:
+		// No account, credential, or binding identity is ever a journey receipt.
+		return result.ChildRunID == "" && result.IntegrationPluginID == "" &&
+			result.IntegrationVersion == "" && result.HomeWorkspaceID == "" &&
+			result.ProjectWorkspaceID == "" && result.SelectedModeID == "" &&
+			result.CanonicalReceiptID == ""
 	default:
 		return false
 	}

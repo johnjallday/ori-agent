@@ -366,6 +366,8 @@ function ptcIsBlocked(template) {
 let ptcSelected = PTC_BLANK;
 let ptcQuests = [];
 let ptcQuestForTemplate = () => null;
+// Replaced by the shared link module once quest discovery loads.
+let ptcQuestOpenDetail = quest => ({ plugin_id: quest?.plugin_id, quest_id: quest?.id });
 
 function ptcElements() {
   return {
@@ -800,7 +802,7 @@ function ptcOpenSelectedGuidedSetup() {
   const open = () =>
     window.dispatchEvent(
       new CustomEvent('ori:open-specialist-setup', {
-        detail: { plugin_id: quest.plugin_id, quest_id: quest.id }
+        detail: ptcQuestOpenDetail(quest)
       })
     );
   const modal = document.getElementById('addFolderModal');
@@ -830,10 +832,12 @@ function ptcRenderQuest(host, template) {
   const help = document.createElement('p');
   help.className = 'small text-muted mt-2 mb-0';
   help.textContent =
-    'Build or reuse your group, optionally prepare the app, then create or import a workspace. Saved setup progress is shared across entry points.' +
-    (quest.ownership === 'host_compatibility'
-      ? ' Ori provides compatibility setup for this plugin version.'
-      : '');
+    quest.source === 'host'
+      ? 'Ori built-in setup: review the team and create the workspace, connect your account, then confirm the link. Saved setup progress is shared across entry points.'
+      : 'Build or reuse your group, optionally prepare the app, then create or import a workspace. Saved setup progress is shared across entry points.' +
+        (quest.ownership === 'host_compatibility'
+          ? ' Ori provides compatibility setup for this plugin version.'
+          : '');
   host.append(link, help);
 }
 
@@ -1357,13 +1361,15 @@ async function ptcPopulate(options) {
   let loadFailed = false;
   let quests = [];
   let questResolver = () => null;
+  let questOpenDetail = ptcQuestOpenDetail;
   try {
     data = await ptmFetchJSON('/api/project-templates');
     try {
-      const { loadSetupQuests, setupQuestForTemplate } =
+      const { loadSetupQuests, setupQuestForTemplate, setupQuestOpenDetail } =
         await import('/js/modules/setup-quest-links.js');
       quests = await loadSetupQuests();
       questResolver = setupQuestForTemplate;
+      questOpenDetail = setupQuestOpenDetail;
     } catch {
       // Keep the ordinary template picker usable when quest discovery fails.
     }
@@ -1376,6 +1382,7 @@ async function ptcPopulate(options) {
   if (generation !== ptcCatalogGeneration) return;
   ptcQuests = quests;
   ptcQuestForTemplate = questResolver;
+  ptcQuestOpenDetail = questOpenDetail;
 
   els.grid.innerHTML = '';
   if (els.userList) els.userList.innerHTML = '';

@@ -10,8 +10,49 @@ function creatorState() {
   return window.WorkspaceCreatorState;
 }
 
-const { buildOrdinaryGroupPayload, createCreatorContext, creatorSteps, switchCreatorKind } =
-  creatorState();
+const {
+  buildOrdinaryGroupPayload,
+  createCreatorContext,
+  creatorSteps,
+  switchCreatorKind,
+  teamLockReason,
+  lockedRenameRefusal
+} = creatorState();
+
+test('a team lock names agents to keep and survives a kind switch; ordinary creators have none', () => {
+  const reason = 'Mail access is granted to the agent named Inbox.';
+  const locked = createCreatorContext({
+    entryPoint: 'host_setup_quest',
+    blueprint: 'email-ops',
+    stayAfterCreate: true,
+    stageBlueprintRoles: true,
+    teamLock: { agentNames: [' Inbox ', ''], reason }
+  });
+  assert.equal(locked.mode, 'ordinary');
+  assert.equal(locked.stayAfterCreate, true);
+  assert.equal(locked.stageBlueprintRoles, true);
+  assert.equal(locked.blueprintRolesStaged, false);
+  assert.deepEqual(asData(locked.teamLock), { agentNames: ['Inbox'], reason });
+  assert.equal(teamLockReason(locked, 'inbox'), reason);
+  assert.equal(teamLockReason(locked, 'Postmaster'), '');
+  assert.equal(lockedRenameRefusal(locked, 'Inbox', 'Mailroom'), reason);
+  assert.equal(lockedRenameRefusal(locked, 'Inbox', ' inbox '), '');
+  assert.equal(lockedRenameRefusal(locked, 'Postmaster', 'Head of Mail'), '');
+  assert.equal(teamLockReason(switchCreatorKind(locked, 'group').context, 'Inbox'), reason);
+
+  const ordinary = createCreatorContext({});
+  assert.equal(ordinary.teamLock, null);
+  assert.equal(ordinary.stayAfterCreate, false);
+  assert.equal(lockedRenameRefusal(ordinary, 'Inbox', 'Mailroom'), '');
+  for (const teamLock of [
+    { agentNames: ['Inbox'] },
+    { reason },
+    { agentNames: [], reason },
+    'Inbox'
+  ]) {
+    assert.equal(createCreatorContext({ teamLock }).teamLock, null);
+  }
+});
 const asData = value => JSON.parse(JSON.stringify(value));
 
 test('ordinary creator defaults to the complete Workspace sequence and can preselect Group', () => {

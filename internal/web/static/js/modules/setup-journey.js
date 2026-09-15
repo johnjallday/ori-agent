@@ -1,4 +1,16 @@
 import { openSetupWorkspaceCreator } from './setup-workspace-creator.js';
+import {
+  MODEL_SETTINGS_URL,
+  SETTINGS_TAB_NOTE,
+  accountActionLabel,
+  accountLinkReviewPresentation,
+  accountSettingsURL,
+  accountStepReceiptRows,
+  accountStepWorkspaceRoute,
+  advanceCreatorToTeam,
+  summaryModelNote,
+  teamReviewCreatorOptions
+} from './setup-journey-account-steps.js';
 import { groupBuildState, isGroupBuilderOpen, openGroupBuilder } from './group-builder.js';
 import {
   fetchGroupTemplateStatus,
@@ -8,10 +20,28 @@ import {
 
 import {
   ASSISTANT_SETUP_ROOT,
+  hostSetupQuestAPIRoot,
   setupJourneyAPIRoot,
   setupQuestAPIRoot,
   userTemplateSetupQuestAPIRoot
 } from './setup-quest-links.js';
+
+// setupQuestSelectionFromParams turns a `?setup=quest` deep link into the
+// selection openSpecialistSetupJourney understands. The parameters are only a
+// request: every ID is validated again when its API root is built, and the
+// server checks it against the catalog.
+export function setupQuestSelectionFromParams(params) {
+  const source = params.get('source');
+  if (source === 'host') return { source: 'host', quest_id: params.get('quest') || '' };
+  if (source === 'user_template') {
+    return {
+      source: 'user_template',
+      template_id: params.get('template') || '',
+      attachment_id: params.get('attachment') || ''
+    };
+  }
+  return { plugin_id: params.get('plugin') || '', quest_id: params.get('quest') || '' };
+}
 
 const state = {
   journey: null,
@@ -64,7 +94,8 @@ export function setupJourneyCurrentStep(journey, selectedID = '') {
     steps.find(step => step?.id === selectedID) ||
     steps.find(step => step?.id === journey?.current_step_id) ||
     steps.find(step => step?.status !== 'complete') ||
-    steps[0] ||
+    // A ready run has no current step; its summary is what to show.
+    steps[steps.length - 1] ||
     null
   );
 }
@@ -100,6 +131,7 @@ export function setupJourneyReceiptRows(journey, step) {
   if (step?.kind === 'project_connect' && journey?.receipts?.project_workspace_id) {
     rows.push(['Project', 'Connected']);
   }
+  rows.push(...accountStepReceiptRows(step));
   if (journey?.lifecycle === 'ready') rows.push(['Setup', 'Ready']);
   return rows.filter(row => row[1]);
 }
@@ -107,6 +139,15 @@ export function setupJourneyReceiptRows(journey, step) {
 export function newJourneyIdempotencyKey() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   return `journey-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+// setupJourneyCloseDismisses decides whether closing the modal records the
+// journey's persisted dismissal. Plugin and user-template journeys keep their
+// existing close-as-dismiss contract. A host quest only hides: leaving it
+// unfinished is what lets Home's resume card offer it again, and the card's
+// "Not now" is its one explicit dismissal (#455 FR 44-46).
+export function setupJourneyCloseDismisses(journey) {
+  return journey?.journey?.source !== 'host';
 }
 
 export function setupJourneyControlDisabled(busy, lockClose, isCloseControl) {
@@ -356,6 +397,8 @@ function render() {
   elements.receipt.replaceChildren();
   if (step?.guidance && !projectDraft)
     elements.receipt.appendChild(makeText('p', '', step.guidance));
+  const modelNote = summaryModelNote(step);
+  if (modelNote) elements.receipt.appendChild(makeText('p', '', modelNote));
   appendRows(elements.receipt, setupJourneyReceiptRows(journey, step));
   renderDraft(step);
   renderActions(step);
@@ -799,7 +842,7 @@ function renderActions(step) {
   }
   if (step?.kind === 'project_connect' && state.draft) return;
   (step?.actions || []).forEach(action => {
-    const button = makeText('button', 'setup-journey__action', action.label);
+    const button = makeText('button', 'setup-journey__action', accountActionLabel(step, action));
     button.type = 'button';
     button.dataset.effect = action.effect || '';
     button.dataset.action = action.id || '';
@@ -1244,6 +1287,7 @@ function renderReview() {
   if (!state.review) return;
   const project = state.review.project_connection;
   const group = state.review.group;
+  const accountLink = accountLinkReviewPresentation(state.review);
   const replacement = state.review.integration?.replacement_required === true;
   const presentation = project
     ? projectReviewPresentation(project)
@@ -1254,7 +1298,7 @@ function renderReview() {
           description:
             'Create your group. No project, agent, schedule, or access permission will be added.'
         }
-      : null;
+      : accountLink;
   const heading = makeText(
     'h4',
     '',
@@ -1271,6 +1315,16 @@ function renderReview() {
         'setup-journey__scope-note',
         'Your workspaces will go inside this group. The group coordinates projects without inheriting their access.'
       )
+    );
+  } else if (accountLink) {
+    container.appendChild(makeText('p', '', accountLink.description));
+    appendRows(
+      container,
+      [
+        ...accountLink.rows,
+        ['Consent expires', new Date(state.review.expires_at).toLocaleString()]
+      ],
+      'setup-journey__review-list'
     );
   } else if (presentation) {
     container.appendChild(makeText('p', '', presentation.description));
@@ -1562,8 +1616,93 @@ async function navigateAction(actionID) {
     case 'refresh_workspace_setup':
     case 'review_setup':
       return refreshJourney();
+    case 'review_team':
+      return launchTeamReview();
+    case 'open_account_settings': {
+      // Google sign-in lives on the Settings card. The quest stays open here
+      // and never starts OAuth itself; Check again re-reads afterwards.
+      window.open(accountSettingsURL(state.journey), '_blank', 'noopener');
+      ui().live.textContent = SETTINGS_TAB_NOTE;
+      return;
+    }
+    case 'recheck_connection':
+      return refreshJourney();
+    case 'start_inbox_triage': {
+      // Opens the workspace's tasks; it never starts, assigns, or runs one.
+      const route =
+        accountStepWorkspaceRoute(state.journey, '?panel=tasks') ||
+        (await workspaceRoute(receipts.project_workspace_id, '?panel=tasks'));
+      if (route) window.location.assign(route);
+      return;
+    }
+    case 'open_model_settings':
+      window.location.assign(MODEL_SETTINGS_URL);
+      return;
+    case 'open_workspace': {
+      const route =
+        accountStepWorkspaceRoute(state.journey) ||
+        (await workspaceRoute(receipts.project_workspace_id));
+      if (route) window.location.assign(route);
+      return;
+    }
     default:
       return;
+  }
+}
+
+// launchTeamReview hands the user to the shared Workspace creator on the
+// Email Ops blueprint's Team step. The quest does not create anything: when
+// the creator closes — after a create or a cancel — the quest re-reads its
+// canonical state and reopens where the server says the user is.
+async function launchTeamReview() {
+  const manager = window.sessionManager;
+  const creatorModal = document.getElementById('addFolderModal');
+  if (state.launchingTeamReview || state.commitLocked || state.journey?.busy) return;
+  if (!manager?.showAddWorkspaceModal || !creatorModal) {
+    showError('The workspace creator is unavailable. Refresh the page and try again.');
+    return;
+  }
+  state.launchingTeamReview = true;
+  const questID = String(state.journey?.journey?.id || '');
+  const elements = ui();
+  let current = true;
+  const onCreatorHidden = () => {
+    // The creator hides itself while a teammate's setup form or a Map
+    // placement is open; only a real close returns to the quest.
+    if (
+      creatorModal.dataset.suspendedForAgentSetup ||
+      creatorModal.dataset.suspendedForMapPlacement
+    ) {
+      return;
+    }
+    creatorModal.removeEventListener('hidden.bs.modal', onCreatorHidden);
+    current = false;
+    state.launchingTeamReview = false;
+    void openSpecialistSetupJourney({ source: 'host', quest_id: questID });
+  };
+  const open = async () => {
+    creatorModal.addEventListener('hidden.bs.modal', onCreatorHidden);
+    try {
+      manager.showAddWorkspaceModal(teamReviewCreatorOptions());
+      await advanceCreatorToTeam({
+        manager,
+        getSelectedTemplate: () => window.ProjectTemplateCard?.getSelectedTemplate?.(),
+        nameInput: document.getElementById('folderNameInput'),
+        isCurrent: () => current
+      });
+    } catch (error) {
+      creatorModal.removeEventListener('hidden.bs.modal', onCreatorHidden);
+      state.launchingTeamReview = false;
+      showError(error.message);
+      if (state.modal) state.modal.show();
+    }
+  };
+  if (state.modal) {
+    elements.root.addEventListener('hidden.bs.modal', open, { once: true });
+    hideJourneyPresentation();
+  } else {
+    hideJourneyPresentation();
+    await open();
   }
 }
 
@@ -1619,7 +1758,8 @@ async function dismissJourney() {
     state.busy ||
     state.pendingCommit ||
     state.journey?.busy ||
-    (state.journey.lifecycle_state || state.journey.lifecycle) === 'ready'
+    (state.journey.lifecycle_state || state.journey.lifecycle) === 'ready' ||
+    !setupJourneyCloseDismisses(state.journey)
   ) {
     hideJourneyPresentation();
     return;
@@ -1651,13 +1791,15 @@ export async function openSpecialistSetupJourney(requested = null) {
   try {
     const previousRunID = state.journey?.run_id;
     const root =
-      selection.source === 'user_template' ||
-      selection.template_id != null ||
-      selection.attachment_id != null
-        ? userTemplateSetupQuestAPIRoot(selection.template_id, selection.attachment_id)
-        : selection.plugin_id != null || selection.quest_id != null
-          ? setupQuestAPIRoot(selection.plugin_id, selection.quest_id)
-          : ASSISTANT_SETUP_ROOT;
+      selection.source === 'host'
+        ? hostSetupQuestAPIRoot(selection.quest_id)
+        : selection.source === 'user_template' ||
+            selection.template_id != null ||
+            selection.attachment_id != null
+          ? userTemplateSetupQuestAPIRoot(selection.template_id, selection.attachment_id)
+          : selection.plugin_id != null || selection.quest_id != null
+            ? setupQuestAPIRoot(selection.plugin_id, selection.quest_id)
+            : ASSISTANT_SETUP_ROOT;
     const endpoint = requestedRunID ? `${root}/runs/${encodeURIComponent(requestedRunID)}` : root;
     let payload = await request(endpoint);
     state.journey = payload?.setup_journey;
@@ -1752,18 +1894,7 @@ function initialize() {
   const params = new URLSearchParams(window.location.search);
   if (params.get('setup') === 'specialist') openSpecialistSetupJourney();
   if (params.get('setup') === 'quest') {
-    openSpecialistSetupJourney(
-      params.get('source') === 'user_template'
-        ? {
-            source: 'user_template',
-            template_id: params.get('template') || '',
-            attachment_id: params.get('attachment') || ''
-          }
-        : {
-            plugin_id: params.get('plugin') || '',
-            quest_id: params.get('quest') || ''
-          }
-    );
+    openSpecialistSetupJourney(setupQuestSelectionFromParams(params));
   }
 }
 

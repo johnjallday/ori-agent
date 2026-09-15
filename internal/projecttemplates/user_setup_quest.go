@@ -168,6 +168,10 @@ func parseUserSetupQuest(data []byte) (*UserSetupQuest, error) {
 		WorkspaceLaunch:            cloneUserQuestLaunch(document.WorkspaceLaunch),
 	}
 	normalized, err := specialist.NormalizeSetupJourney(declaration)
+	if err == nil && normalized.Shape() != specialist.SetupJourneyShapeSpecialist {
+		// User templates may author only the five-step specialist shape.
+		err = errors.New("exactly five fixed steps are required")
+	}
 	if err != nil || normalized.WorkspaceLaunch == nil || normalized.OwnerPluginID != "" || userSetupQuestContainsURL(normalized) {
 		if err == nil {
 			err = errors.New("workspace_launch is required and display copy cannot contain URLs")
@@ -345,6 +349,9 @@ func NewUserSetupQuest(template Template, current *UserSetupQuest, draft UserSet
 		ExpectedBlueprintID: template.ID, ExpectedAssistantProgramID: template.AssistantProgram.ID,
 		Steps: steps, WorkspaceLaunch: cloneUserQuestLaunch(draft.WorkspaceLaunch),
 	})
+	if err == nil && declaration.Shape() != specialist.SetupJourneyShapeSpecialist {
+		err = errors.New("exactly five fixed steps are required")
+	}
 	if err != nil || declaration.WorkspaceLaunch == nil {
 		if err == nil {
 			err = errors.New("workspace_launch is required")

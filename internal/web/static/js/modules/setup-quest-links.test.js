@@ -4,9 +4,11 @@ import {
   ASSISTANT_SETUP_ROOT,
   setupQuestAPIRoot,
   userTemplateSetupQuestAPIRoot,
+  hostSetupQuestAPIRoot,
   setupJourneyAPIRoot,
   setupQuestURL,
   setupQuestForTemplate,
+  setupQuestOpenDetail,
   loadSetupQuests
 } from './setup-quest-links.js';
 
@@ -102,6 +104,67 @@ test('template lookup matches exact ownership, optional legacy reference, and re
   assert.equal(setupQuestForTemplate(template, [quest, quest]), null);
   assert.equal(setupQuestForTemplate(template, [null]), null);
   assert.equal(setupQuestForTemplate(null, [quest]), null);
+});
+
+test('host quests route by quest ID only and match only the built-in template that names them', () => {
+  const hostQuest = {
+    source: 'host',
+    id: 'email_ops_setup',
+    template_id: 'email-ops',
+    ownership: 'host'
+  };
+  assert.equal(hostSetupQuestAPIRoot('email_ops_setup'), '/api/host-setup-quests/email_ops_setup');
+  assert.equal(
+    setupJourneyAPIRoot({ journey: { source: 'host', id: 'email_ops_setup' } }),
+    '/api/host-setup-quests/email_ops_setup'
+  );
+  assert.equal(
+    setupQuestURL({ ...hostQuest, launch_url: 'https://untrusted.test' }),
+    '/?setup=quest&source=host&quest=email_ops_setup'
+  );
+  for (const bad of ['', null, 'Email', '../quest', 'quest/other', ' quest', 'a'.repeat(65)]) {
+    assert.throws(() => hostSetupQuestAPIRoot(bad));
+    assert.throws(() => setupQuestURL({ source: 'host', id: bad }));
+  }
+  assert.throws(() => setupJourneyAPIRoot({ journey: { source: 'host', id: '../other' } }));
+
+  const builtin = { id: 'email-ops', builtin: true, setup_quest: 'email_ops_setup' };
+  assert.equal(setupQuestForTemplate(builtin, [quest, hostQuest]), hostQuest);
+  assert.equal(setupQuestForTemplate({ ...builtin, setup_quest: '' }, [hostQuest]), null);
+  assert.equal(
+    setupQuestForTemplate({ ...builtin, setup_quest: 'other_setup' }, [hostQuest]),
+    null
+  );
+  assert.equal(setupQuestForTemplate({ ...builtin, id: 'calendar-ops' }, [hostQuest]), null);
+  assert.equal(setupQuestForTemplate(builtin, [{ ...hostQuest, source: 'plugin' }]), null);
+  assert.equal(setupQuestForTemplate(builtin, [{ ...hostQuest, plugin_id: 'demo-plugin' }]), null);
+  assert.equal(setupQuestForTemplate(builtin, [hostQuest, hostQuest]), null);
+  // A user copy of the built-in cannot claim the host quest by naming it.
+  assert.equal(
+    setupQuestForTemplate({ id: 'email-ops', setup_quest: 'email_ops_setup' }, [hostQuest]),
+    null
+  );
+});
+
+test('open detail carries only the identity fields of its own quest source', () => {
+  assert.deepEqual(
+    setupQuestOpenDetail({
+      source: 'host',
+      id: 'email_ops_setup',
+      template_id: 'email-ops',
+      plugin_id: 'x'
+    }),
+    { source: 'host', quest_id: 'email_ops_setup' }
+  );
+  assert.deepEqual(setupQuestOpenDetail(userQuest), {
+    source: 'user_template',
+    template_id: userQuest.template_id,
+    attachment_id: userQuest.attachment_id
+  });
+  assert.deepEqual(setupQuestOpenDetail(quest), {
+    plugin_id: 'demo-plugin',
+    quest_id: 'demo_setup'
+  });
 });
 
 test('catalog discovery makes one read and generates its own safe launch URL', async t => {

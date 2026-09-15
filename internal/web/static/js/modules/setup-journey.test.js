@@ -12,10 +12,36 @@ const {
   projectReviewPresentation,
   projectFailureGuidance,
   newJourneyIdempotencyKey,
+  setupJourneyCloseDismisses,
   setupJourneyControlDisabled,
   setupJourneyCurrentStep,
-  setupJourneyReceiptRows
+  setupJourneyReceiptRows,
+  setupQuestSelectionFromParams
 } = await import('./setup-journey.js');
+
+test('quest deep links select a host, user-template, or plugin quest by explicit source', () => {
+  const select = query => setupQuestSelectionFromParams(new URLSearchParams(query));
+  assert.deepEqual(select('setup=quest&source=host&quest=email_ops_setup'), {
+    source: 'host',
+    quest_id: 'email_ops_setup'
+  });
+  // A host link never borrows plugin or template identity from other params.
+  assert.deepEqual(select('setup=quest&source=host&quest=email_ops_setup&plugin=reaper-plugin'), {
+    source: 'host',
+    quest_id: 'email_ops_setup'
+  });
+  assert.deepEqual(select('setup=quest&source=user_template&template=local&attachment=uqatt_x'), {
+    source: 'user_template',
+    template_id: 'local',
+    attachment_id: 'uqatt_x'
+  });
+  assert.deepEqual(select('setup=quest&plugin=reaper-plugin&quest=reaper_setup'), {
+    plugin_id: 'reaper-plugin',
+    quest_id: 'reaper_setup'
+  });
+  // The Build-HQ walkthrough's own parameter is not a setup quest link.
+  assert.deepEqual(select('quest=build-hq'), { plugin_id: '', quest_id: 'build-hq' });
+});
 
 test('current step follows server identity and preserves an explicit rail selection', () => {
   const journey = {
@@ -31,6 +57,17 @@ test('current step follows server identity and preserves an explicit rail select
   assert.equal(
     setupJourneyCurrentStep({ steps: [{ id: 'pending', status: 'pending' }] }).id,
     'pending'
+  );
+  // A ready run has no current step and shows its summary, not its first step.
+  assert.equal(
+    setupJourneyCurrentStep({
+      current_step_id: '',
+      steps: [
+        { id: 'team', status: 'complete' },
+        { id: 'summary', status: 'complete' }
+      ]
+    }).id,
+    'summary'
   );
 });
 
@@ -106,6 +143,19 @@ test('file-only receipt stays honest about unconfigured and untested live contro
     ['Live control configured', 'No'],
     ['Live control tested', 'No']
   ]);
+});
+
+test('closing a host quest only hides it; other journeys keep close-as-dismiss', () => {
+  assert.equal(
+    setupJourneyCloseDismisses({ journey: { source: 'host', id: 'email_ops_setup' } }),
+    false
+  );
+  assert.equal(
+    setupJourneyCloseDismisses({ journey: { source: 'plugin', id: 'reaper_setup' } }),
+    true
+  );
+  assert.equal(setupJourneyCloseDismisses({ journey: { source: 'user_template' } }), true);
+  assert.equal(setupJourneyCloseDismisses({ journey: {} }), true);
 });
 
 test('busy work keeps close available except during the atomic commit section', () => {

@@ -4984,12 +4984,19 @@ const sessionManager = {
             reasoningEffort: entry.reasoningEffort,
             systemPrompt: entry.systemPrompt
           };
+    const lockReason =
+      window.WorkspaceCreatorState?.teamLockReason?.(
+        this.workspaceCreatorContext,
+        entry.originalName
+      ) || '';
+    if (lockReason) setupValues.name = entry.originalName;
     this.workspaceAgentSetupForm = formApi.mount(host, {
       idPrefix: 'agent',
       profile: formApi.PROFILE_TEMPLATE,
       providers: Array.isArray(this.editAgentProvidersData) ? this.editAgentProvidersData : [],
       values: setupValues
     });
+    this.applyWorkspaceAgentNameLock(this.workspaceAgentSetupForm, lockReason);
 
     const createButton = document.getElementById('createAgentBtn');
     if (createButton) {
@@ -5014,6 +5021,27 @@ const sessionManager = {
     } else {
       showAgentModal();
     }
+  },
+
+  // A guided caller can lock a blueprint agent's name (for example, mail access
+  // is granted to the agent named Inbox). The field stays visible but read-only
+  // with the reason beside it; every other setup field remains editable.
+  applyWorkspaceAgentNameLock(form, reason) {
+    const input = form?.get?.('name');
+    if (!input) return;
+    const noteID = 'agentCreateNameLockReason';
+    input.parentElement?.querySelector(`#${noteID}`)?.remove();
+    input.readOnly = Boolean(reason);
+    if (!reason) {
+      input.removeAttribute('aria-describedby');
+      return;
+    }
+    const note = document.createElement('p');
+    note.id = noteID;
+    note.className = 'small text-muted mt-1 mb-0';
+    note.textContent = reason;
+    input.setAttribute('aria-describedby', noteID);
+    input.after(note);
   },
 
   closeWorkspaceAgentSetup(options = {}) {
@@ -5119,6 +5147,21 @@ const sessionManager = {
     const values = result.values;
     const originalName = String(planAgent.name || '').trim();
     const isReuse = String(planAgent.action || '').toLowerCase() === 'reuse';
+    const lockRefusal =
+      window.WorkspaceCreatorState?.lockedRenameRefusal?.(
+        this.workspaceCreatorContext,
+        originalName,
+        values.name
+      ) || '';
+    if (lockRefusal) {
+      const error = document.getElementById('agentCreateDraftError');
+      if (error) {
+        error.textContent = `Keep the name “${originalName}”. ${lockRefusal}`;
+        error.hidden = false;
+      }
+      form.focus('name');
+      return;
+    }
     if (
       draftEntry.staleOccupiedName &&
       api.agentKey(values.name) === api.agentKey(draftEntry.staleOccupiedName)
@@ -6181,6 +6224,10 @@ const sessionManager = {
         systemPrompt: proposed.system_prompt || ''
       }
     });
+    this.applyWorkspaceAgentNameLock(
+      this.workspaceRoleSetupForm,
+      this.workspaceRoleLockReason(roleId)
+    );
 
     const createButton = document.getElementById('createAgentBtn');
     if (createButton) {
@@ -6236,6 +6283,21 @@ const sessionManager = {
     const values = result.values;
     const name = String(values.name || '').trim();
     const error = document.getElementById('agentCreateDraftError');
+    const lockedLabel = this.workspaceRoleLabel(roleId);
+    const lockRefusal =
+      window.WorkspaceCreatorState?.lockedRenameRefusal?.(
+        this.workspaceCreatorContext,
+        lockedLabel,
+        name
+      ) || '';
+    if (lockRefusal) {
+      if (error) {
+        error.textContent = `Keep the name “${lockedLabel}”. ${lockRefusal}`;
+        error.hidden = false;
+      }
+      form.focus('name');
+      return;
+    }
     const existing = api.findSavedAgent(draft, name);
     if (existing) {
       if (error) {
@@ -6337,11 +6399,86 @@ const sessionManager = {
     }
   },
 
+  // The declared label of one role in the current draft, or ''.
+  workspaceRoleLabel(roleId) {
+    const api = window.CreateWorkspaceTeamDraft;
+    const draft = this.ensureWorkspaceTeamDraft();
+    if (!api?.declaredRoles || !draft) return '';
+    return String(api.declaredRoles(draft).find(role => role.roleId === roleId)?.label || '');
+  },
+
+  // A guided creator can lock a role to its declared agent name. The lock
+  // covers every path that could leave that role without the named agent:
+  // Create under another name, Assign a differently named agent, or Clear.
+  workspaceRoleLockReason(roleId) {
+    return (
+      window.WorkspaceCreatorState?.teamLockReason?.(
+        this.workspaceCreatorContext,
+        this.workspaceRoleLabel(roleId)
+      ) || ''
+    );
+  },
+
+  refuseLockedWorkspaceRoleChange(roleId, reason) {
+    const label = this.workspaceRoleLabel(roleId);
+    this.announceWorkspaceTeamChange(`${label} stays on this team. ${reason}`);
+    this.showToast(`Keep “${label}” on this team. ${reason}`, 'warning');
+    this.focusWorkspaceRoleRow(roleId);
+  },
+
+  // stageGuidedBlueprintRoles proposes the blueprint's whole team once, for a
+  // guided creator that asked for it: each project role gets a Create fill
+  // under its declared name, or Assign when a saved agent already has that
+  // name. It only edits the draft; nothing exists until the user confirms.
+  stageGuidedBlueprintRoles() {
+    const context = this.workspaceCreatorContext;
+    const api = window.CreateWorkspaceTeamDraft;
+    if (!context?.stageBlueprintRoles || context.blueprintRolesStaged || !api?.declaredRoles)
+      return;
+    const draft = this.ensureWorkspaceTeamDraft();
+    if (
+      !draft ||
+      draft.plan?.status !== 'ready' ||
+      draft.savedRoster?.status !== 'ready' ||
+      draft.plan.data?.templateId !== context.blueprint
+    ) {
+      return;
+    }
+    for (const role of api.declaredRoles(draft)) {
+      if (role.scope === 'home' || role.heldElsewhere || draft.roleFills?.has(role.roleId))
+        continue;
+      const saved = api.findSavedAgent(draft, role.label);
+      api.setRoleFill(
+        draft,
+        role.roleId,
+        saved && api.isAttachableSavedAgent?.(saved)
+          ? { mode: api.FILL_ASSIGN, name: role.label }
+          : {
+              mode: api.FILL_CREATE,
+              name: role.label,
+              type: role.proposed?.type || '',
+              systemPrompt: role.proposed?.system_prompt || ''
+            }
+      );
+    }
+    context.blueprintRolesStaged = true;
+  },
+
   assignWorkspaceRole(roleId, name) {
     const api = window.CreateWorkspaceTeamDraft;
     const draft = this.ensureWorkspaceTeamDraft();
     if (!draft || !api) return;
     const canonical = String(api.findSavedAgent(draft, name)?.name || name).trim();
+    const lockRefusal =
+      window.WorkspaceCreatorState?.lockedRenameRefusal?.(
+        this.workspaceCreatorContext,
+        this.workspaceRoleLabel(roleId),
+        canonical
+      ) || '';
+    if (lockRefusal) {
+      this.refuseLockedWorkspaceRoleChange(roleId, lockRefusal);
+      return;
+    }
     if (!api.setRoleFill(draft, roleId, { mode: api.FILL_ASSIGN, name: canonical })) {
       this.refreshWorkspaceReview();
       this.renderExistingAgentRoster();
@@ -6363,7 +6500,13 @@ const sessionManager = {
   clearWorkspaceRole(roleId) {
     const api = window.CreateWorkspaceTeamDraft;
     const draft = this.ensureWorkspaceTeamDraft();
-    if (!draft || !api || !api.clearRoleFill(draft, roleId)) return;
+    if (!draft || !api) return;
+    const lockReason = this.workspaceRoleLockReason(roleId);
+    if (lockReason) {
+      this.refuseLockedWorkspaceRoleChange(roleId, lockReason);
+      return;
+    }
+    if (!api.clearRoleFill(draft, roleId)) return;
     this.invalidateGroupRequirementReview();
     this.refreshWorkspaceReview();
     this.renderExistingAgentRoster();
@@ -6987,6 +7130,7 @@ const sessionManager = {
       this.renderSetupPreview(null);
       return;
     }
+    this.stageGuidedBlueprintRoles();
     const groupRoster = this.usesGroupRosterCreator();
     document.getElementById('workspaceReviewIssues')?.removeAttribute('hidden');
     this.syncGroupRequirementParentControl();
@@ -9875,6 +10019,32 @@ const sessionManager = {
       modal?.hide();
       this.resetAddWorkspaceModalForm();
 
+      // The workspace POST has already succeeded. A caller's follow-up is told
+      // about it, but its failure never turns into a retry of creation.
+      if (createdWorkspaceId && typeof creatorContext?.onCreated === 'function') {
+        try {
+          await creatorContext.onCreated({
+            folder: result?.folder || null,
+            workspaceId: createdWorkspaceId
+          });
+        } catch (error) {
+          console.warn('Workspace was created but its follow-up could not complete:', error);
+        }
+      }
+      if (createdWorkspaceId && creatorContext?.stayAfterCreate && !placement) {
+        // A guided caller (a setup quest) continues on this page; refresh the
+        // surfaces that list workspaces instead of navigating into the new one.
+        this.workspaceMapOrigin = false;
+        await this.loadFolders();
+        if (window.WorkspaceHub && typeof window.WorkspaceHub.loadWorkspaces === 'function') {
+          await window.WorkspaceHub.loadWorkspaces();
+        }
+        if (window.OriHomeCockpit && typeof window.OriHomeCockpit.refreshQuietly === 'function') {
+          await window.OriHomeCockpit.refreshQuietly();
+        }
+        return;
+      }
+
       // A Map-origin create returns to the map (#292 FR-53). The user asked for
       // a workspace at a point they chose; navigating into it would take them
       // away from the arrangement they were building. The coordinate is saved
@@ -10784,6 +10954,11 @@ const sessionManager = {
             contextOptions.guided && typeof contextOptions.guided === 'object'
               ? contextOptions.guided
               : null,
+          // Without the state helper a lock cannot be enforced, so none is kept.
+          teamLock: null,
+          stayAfterCreate: Boolean(contextOptions.stayAfterCreate),
+          stageBlueprintRoles: false,
+          blueprintRolesStaged: false,
           drafts: { workspace: {}, group: {} },
           review: null,
           submitting: false,

@@ -47,7 +47,7 @@ func questHTTPFixture(t *testing.T) (*setupjourney.Service, *database.DB) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	readers := make(map[specialist.SetupStepKind]setupjourney.CanonicalReader)
-	for _, kind := range []specialist.SetupStepKind{specialist.SetupStepIntegrationInstall, specialist.SetupStepProjectConnect, specialist.SetupStepWorkspaceSetup, specialist.SetupStepAssistantProgramStaffing, specialist.SetupStepSummary} {
+	for _, kind := range specialist.SetupStepKinds() {
 		readers[kind] = setupjourney.CanonicalReaderFunc(func(context.Context, setupjourney.ReadScope) (setupjourney.CanonicalStepRead, error) {
 			return setupjourney.CanonicalStepRead{}, nil
 		})

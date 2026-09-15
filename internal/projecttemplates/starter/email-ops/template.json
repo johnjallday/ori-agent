@@ -4,7 +4,8 @@
   "icon": "📬",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 4,
+  "builtin_version": 5,
+  "setup_quest": "email_ops_setup",
   "tags": [
     "email",
     "personal"

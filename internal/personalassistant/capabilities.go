@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/hostquests"
 	"github.com/johnjallday/ori-agent/internal/specialist"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -63,14 +64,28 @@ type EmailCapabilityReader interface {
 	EmailCapability(ctx context.Context, workspaceID string) EmailCapabilityStatus
 }
 
+// EmailOpsWorkspaceLocator reports whether a user already has an Email Ops
+// workspace. Implementations must read template provenance from a hydrated
+// source; the SQLite-primary workspace list does not carry it.
+type EmailOpsWorkspaceLocator interface {
+	HasEmailOpsWorkspace(userID string) (bool, error)
+}
+
 type CapabilityService struct {
 	relationships *Service
 	workspaces    workspace.Store
 	email         EmailCapabilityReader
+	emailOps      EmailOpsWorkspaceLocator
 }
 
 func NewCapabilityService(relationships *Service, workspaces workspace.Store, email EmailCapabilityReader) *CapabilityService {
 	return &CapabilityService{relationships: relationships, workspaces: workspaces, email: email}
+}
+
+// SetEmailOpsWorkspaceLocator lets the email card send a user who has no Email
+// Ops workspace to the guided Email Ops setup quest. Startup wiring only.
+func (s *CapabilityService) SetEmailOpsWorkspaceLocator(locator EmailOpsWorkspaceLocator) {
+	s.emailOps = locator
 }
 
 func (s *CapabilityService) Get(ctx context.Context, userID string) (*CapabilityProjection, error) {
@@ -87,7 +102,9 @@ func (s *CapabilityService) Get(ctx context.Context, userID string) (*Capability
 	// An unrecognised persisted slug reads as no specialist, which is the
 	// current fixed order and no suggestion.
 	entry, hasSpecialist := specialist.Get(relationship.SpecialistSlug)
-	cards := []CapabilityCard{emailCapabilityCard(ctx, s.email, relationship.HQWorkspaceID)}
+	emailCard := emailCapabilityCard(ctx, s.email, relationship.HQWorkspaceID)
+	s.routeEmailSetupToQuest(&emailCard, userID)
+	cards := []CapabilityCard{emailCard}
 	workspaceCards, domainWorkspaceExists := s.workspaceCapabilityCards(userID, relationship.HQWorkspaceID, entry, hasSpecialist)
 	cards = append(cards, workspaceCards...)
 	projection := &CapabilityProjection{State: string(relationship.State), Cards: cards}
@@ -164,6 +181,22 @@ func emailCapabilityCard(ctx context.Context, reader EmailCapabilityReader, hqID
 		card.ActionLabel = "Repair email connection"
 	}
 	return card
+}
+
+// routeEmailSetupToQuest changes only the "Set up email" state: when the user
+// has no Email Ops workspace, setting up email means the guided quest rather
+// than the Settings card. Available and revoked states keep their own repair,
+// and an unknown workspace answer keeps the existing route.
+func (s *CapabilityService) routeEmailSetupToQuest(card *CapabilityCard, userID string) {
+	if s.emailOps == nil || card == nil || card.Status == CapabilityAvailable || card.Status == CapabilityRevoked {
+		return
+	}
+	exists, err := s.emailOps.HasEmailOpsWorkspace(strings.TrimSpace(userID))
+	if err != nil || exists {
+		return
+	}
+	card.ActionLabel = "Set up email"
+	card.ActionRoute = hostquests.EmailOpsSetupQuestURL
 }
 
 // workspaceCapabilityCards returns the three workspace-backed cards and, when

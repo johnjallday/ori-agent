@@ -1093,6 +1093,17 @@ func registerSetupJourneyRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("POST "+userQuestRoot+"/runs/{runID}/dismiss", handler.ScopeUserTemplateQuest((*setupjourneyhttp.Handler).DismissRun))
 	mux.HandleFunc("POST "+userQuestRoot+"/children", handler.ScopeUserTemplateQuest((*setupjourneyhttp.Handler).CreateChild))
 	mux.HandleFunc("POST "+userQuestRoot+"/runs/{runID}/actions/{actionID}", handler.ScopeUserTemplateQuest((*setupjourneyhttp.Handler).Mutate))
+	// Host-compiled quests for built-in templates. There are no child runs or
+	// group preparation in their shape, so those routes are not registered.
+	const hostQuestRoot = "/api/host-setup-quests/{questID}"
+	mux.HandleFunc("GET "+hostQuestRoot, handler.ScopeHostQuest((*setupjourneyhttp.Handler).GetRoot))
+	mux.HandleFunc("GET "+hostQuestRoot+"/status", handler.ScopeHostQuest((*setupjourneyhttp.Handler).Status))
+	mux.HandleFunc("GET "+hostQuestRoot+"/runs/{runID}", handler.ScopeHostQuest((*setupjourneyhttp.Handler).GetRun))
+	mux.HandleFunc("POST "+hostQuestRoot+"/open", handler.ScopeHostQuest((*setupjourneyhttp.Handler).OpenRoot))
+	mux.HandleFunc("POST "+hostQuestRoot+"/runs/{runID}/open", handler.ScopeHostQuest((*setupjourneyhttp.Handler).OpenRun))
+	mux.HandleFunc("POST "+hostQuestRoot+"/dismiss", handler.ScopeHostQuest((*setupjourneyhttp.Handler).DismissRoot))
+	mux.HandleFunc("POST "+hostQuestRoot+"/runs/{runID}/dismiss", handler.ScopeHostQuest((*setupjourneyhttp.Handler).DismissRun))
+	mux.HandleFunc("POST "+hostQuestRoot+"/runs/{runID}/actions/{actionID}", handler.ScopeHostQuest((*setupjourneyhttp.Handler).Mutate))
 	mux.HandleFunc("GET /api/personal-assistant/setup-journey", handler.GetRoot)
 	mux.HandleFunc("GET /api/personal-assistant/setup-journey/runs/{runID}", handler.GetRun)
 	mux.HandleFunc("GET /api/personal-assistant/setup-journey/runs/{runID}/preparation", handler.CheckPreparation)

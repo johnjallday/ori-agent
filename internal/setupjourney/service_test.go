@@ -106,6 +106,14 @@ func TestReaderRegistryRequiresExactlyTheClosedV1Kinds(t *testing.T) {
 			return CanonicalStepRead{}, nil
 		})
 	}
+	if len(readers) != len(specialist.SetupStepKinds()) {
+		t.Fatalf("action registry covers %d kinds, compiled shapes declare %d", len(readers), len(specialist.SetupStepKinds()))
+	}
+	for _, kind := range specialist.SetupStepKinds() {
+		if _, ok := actionDefinitionsByKind[kind]; !ok {
+			t.Fatalf("compiled kind %q has no action definitions", kind)
+		}
+	}
 	delete(readers, specialist.SetupStepSummary)
 	if _, err := NewReaderRegistry(readers); err == nil {
 		t.Fatal("registry accepted a missing summary reader")
@@ -113,6 +121,12 @@ func TestReaderRegistryRequiresExactlyTheClosedV1Kinds(t *testing.T) {
 	readers[specialist.SetupStepSummary] = CanonicalReaderFunc(func(context.Context, ReadScope) (CanonicalStepRead, error) {
 		return CanonicalStepRead{}, nil
 	})
+	accountLink := readers[specialist.SetupStepAccountLink]
+	delete(readers, specialist.SetupStepAccountLink)
+	if _, err := NewReaderRegistry(readers); err == nil {
+		t.Fatal("registry accepted a missing account-link reader")
+	}
+	readers[specialist.SetupStepAccountLink] = accountLink
 	readers[specialist.SetupStepKind("custom")] = readers[specialist.SetupStepSummary]
 	if _, err := NewReaderRegistry(readers); err == nil {
 		t.Fatal("registry accepted an extra executable step kind")
@@ -250,9 +264,17 @@ func TestServiceReconcilesEveryOwnerAndSelectsFirstUnresolvedStep(t *testing.T) 
 	if err != nil {
 		t.Fatalf("read journey: %v", err)
 	}
+	declared := make(map[specialist.SetupStepKind]bool)
+	for _, kind := range specialist.SetupJourneyShapeSteps(specialist.SetupJourneyShapeSpecialist) {
+		declared[kind] = true
+	}
 	for kind := range actionDefinitionsByKind {
-		if calls[kind] != 1 {
-			t.Errorf("reader %s called %d times; want 1", kind, calls[kind])
+		want := 0
+		if declared[kind] {
+			want = 1
+		}
+		if calls[kind] != want {
+			t.Errorf("reader %s called %d times; want %d", kind, calls[kind], want)
 		}
 	}
 	if projection.Lifecycle != LifecycleInProgress || projection.CurrentStepID != "project" {
@@ -278,8 +300,12 @@ func TestServiceReconcilesEveryOwnerAndSelectsFirstUnresolvedStep(t *testing.T) 
 		t.Fatalf("unchanged GET advanced revision from %d to %d", firstRevision, second.StateRevision)
 	}
 	for kind := range actionDefinitionsByKind {
-		if calls[kind] != 2 {
-			t.Errorf("repeat GET did not reread %s: calls=%d", kind, calls[kind])
+		want := 0
+		if declared[kind] {
+			want = 2
+		}
+		if calls[kind] != want {
+			t.Errorf("repeat GET read %s %d times; want %d", kind, calls[kind], want)
 		}
 	}
 }

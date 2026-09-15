@@ -28,8 +28,12 @@ func runEventFields(run *Run, declaration *specialist.SetupJourney) specialistev
 		JourneyID: declaration.ID, RunKind: string(run.Kind), Lifecycle: string(run.Lifecycle),
 		SchemaVersion: declaration.SchemaVersion, DeclarationVersion: declaration.Version,
 	}
-	if run.SpecialistSlug == "user_template_quest" {
+	switch run.SpecialistSlug {
+	case userTemplateQuestSlug:
 		fields.Source = string(QuestSourceUserTemplate)
+		fields.TemplateID = declaration.ExpectedBlueprintID
+	case hostQuestSlug:
+		fields.Source = string(QuestSourceHost)
 		fields.TemplateID = declaration.ExpectedBlueprintID
 	}
 	return fields
@@ -81,6 +85,8 @@ func emitActionOutcome(projection *JourneyProjection, stepID string, action Acti
 		recordSpecialistEvent(specialistevents.ProjectTeamOutcome, fields)
 	case ActionAddOptionalHomeStaffing:
 		recordSpecialistEvent(specialistevents.SampleAddonOutcome, fields)
+	case ActionLinkMailbox:
+		recordSpecialistEvent(specialistevents.AccountLinkOutcome, fields)
 	}
 }
 

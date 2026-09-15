@@ -133,12 +133,91 @@ folder, selected mode, team or permissions. Canonical owners still derive all
 readiness. Unsupported declaration-version changes remain blocked until an
 explicit host migration exists; saved progress remains intact.
 
+## Host-owned setup quests
+
+Ori can also ship a setup quest for one of its **built-in** templates. The
+first is **Set up Email Ops** (`email_ops_setup`), which takes a user from the
+goal "set up email" to a linked, readable mailbox. Host quests are compiled
+into Ori from `internal/hostquests/`. No plugin, template file, or request
+can add, replace, or edit one. The full contract is in
+[Host-owned setup quests](architecture/host-setup-quests.md).
+
+A host quest uses a different compiled **shape** from plugin and user quests.
+The shape is inferred from its step kinds; there is no field to author:
+
+| Shape | Steps |
+| --- | --- |
+| Specialist (plugin and user quests) | integration → project → workspace → staffing → summary |
+| Account link (host quests) | workspace_create → account_connect → account_link → summary |
+
+The Email Ops steps are:
+
+1. **Review your Email Ops team** opens the shared Workspace creator on its
+   Team step. The Inbox role is staffed and locked, because mail access is
+   granted to the agent named Inbox. The step completes when an Email Ops
+   workspace exists; the quest never creates one itself.
+2. **Connect Gmail** reads the Google connection. Settings opens in a new tab
+   and **Check again** re-reads it. The quest never starts OAuth.
+3. **Link the mailbox** is a reviewed consequence. The review names the
+   workspace and account; confirming links the connection's existing Gmail
+   credential with read and search only, through the same linker as the
+   workspace's own **Connect email** action.
+4. **Email Ops is ready** offers the workspace, and inbox triage only when a
+   system model can run. Triage is always a separate task the user starts.
+
+Entry points all open the same saved progress:
+
+- The assistant's **Email** capability shows **Set up email** while email is
+  not set up and no Email Ops workspace exists. Available and revoked email
+  keep their existing actions.
+- **Templates → Email Ops → Open Guided Setup**, labelled "Ori built-in ·
+  read-only."
+- **Create Workspace → Email Ops → Open Guided Setup**.
+- The link `/?setup=quest&source=host&quest=email_ops_setup`.
+- A quiet **Resume** card in Home's Quests flyout while the quest is started,
+  unfinished, not dismissed, and never completed. **Not now** records the
+  quest's dismissal, and opening the quest again clears it. Closing the quest
+  window only hides it, so an unfinished quest can be resumed from the card.
+
+Routes mirror the plugin family without `children` or `preparation`, and add
+one read that never creates progress:
+
+```text
+GET  /api/host-setup-quests/{questID}
+GET  /api/host-setup-quests/{questID}/status
+GET  /api/host-setup-quests/{questID}/runs/{runID}
+POST /api/host-setup-quests/{questID}/open | /dismiss
+POST /api/host-setup-quests/{questID}/runs/{runID}/open | /dismiss
+POST /api/host-setup-quests/{questID}/runs/{runID}/actions/{actionID}
+```
+
+The catalog lists host quests with `source: "host"` and `ownership: "host"`.
+A built-in template names its quest with `setup_quest`, and the match needs
+both sides, so neither the template nor the quest can claim the other alone.
+
+### Why plugin and user quests stay five-step
+
+Plugin and user-template validators require the specialist shape explicitly.
+A plugin or user declaration that uses the account-link kinds is rejected, and
+the plugin JSON schema is unchanged. Three reasons:
+
+- **The consequences are host-reviewed.** Connecting an account and linking a
+  mailbox touch credentials and a vault. Those adapters exist only for Ori's
+  own readiness owner, and a declaration cannot point them at another account,
+  vault, or workspace.
+- **Existing progress stays valid.** Specialist runs, receipts, and review
+  tokens were written against the five-step order. Widening what a plugin may
+  declare would let an updated declaration change the meaning of saved steps.
+- **Older hosts fail closed.** A plugin that required a new shape would need a
+  new host feature flag first; `setup_quests_v1` promises five steps.
+
 ## Validation
 
 ```bash
 go test ./internal/plugin ./internal/projecttemplates ./internal/setupjourney ./internal/setupjourneyhttp ./internal/specialist
+go test ./internal/hostquests ./internal/server -run 'EmailOps|HostQuest|SetupJourney'
 make test-js
-PLAYWRIGHT_BASE_URL=http://localhost:8976 npx playwright test tests/plugin-setup-quests.spec.ts
+PLAYWRIGHT_BASE_URL=http://localhost:8976 npx playwright test tests/plugin-setup-quests.spec.ts tests/email-setup-quest.spec.ts
 ```
 
 Browser tests mock consequence endpoints and exercise desktop/mobile discovery

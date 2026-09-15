@@ -30,11 +30,7 @@ func TestPersonalAssistantSetupReportingUsesCanonicalRunsAndExactLinks(t *testin
 		SpecialistOfferState: personalassistant.SpecialistOfferAccepted, SpecialistSlug: "music_production",
 	}}
 	readers := map[specialist.SetupStepKind]setupjourney.CanonicalReader{}
-	for _, kind := range []specialist.SetupStepKind{
-		specialist.SetupStepIntegrationInstall, specialist.SetupStepProjectConnect,
-		specialist.SetupStepWorkspaceSetup, specialist.SetupStepAssistantProgramStaffing,
-		specialist.SetupStepSummary,
-	} {
+	for _, kind := range specialist.SetupStepKinds() {
 		kind := kind
 		readers[kind] = setupjourney.CanonicalReaderFunc(func(_ context.Context, scope setupjourney.ReadScope) (setupjourney.CanonicalStepRead, error) {
 			switch kind {

@@ -19,17 +19,30 @@ func (s *SQLiteStore) FindQuestRoot(ctx context.Context, userID string, key Ques
 	}
 	var rows *sql.Rows
 	var err error
-	if key.Source == QuestSourceUserTemplate {
+	switch key.Source {
+	case QuestSourceUserTemplate:
 		rows, err = s.db.QueryContext(ctx, `SELECT `+runColumns+` FROM setup_journey_run
 			WHERE run_kind = 'root' AND owner_user_id = ? AND journey_id = ?
 			  AND relationship_id = ? AND specialist_slug = 'user_template_quest'
 			ORDER BY created_at LIMIT 2`, userID, key.ID, questRelationshipID(key))
-	} else {
+	case QuestSourceHost:
+		// A host root is only ever its exact relationship + slug; it never adopts
+		// a plugin, user-template, or assistant-owned root.
+		if legacySlug != "" {
+			return nil, ErrInvalid
+		}
+		rows, err = s.db.QueryContext(ctx, `SELECT `+runColumns+` FROM setup_journey_run
+			WHERE run_kind = 'root' AND owner_user_id = ? AND journey_id = ?
+			  AND relationship_id = ? AND specialist_slug = 'host_quest'
+			ORDER BY created_at LIMIT 2`, userID, key.ID, questRelationshipID(key))
+	case QuestSourcePlugin:
 		rows, err = s.db.QueryContext(ctx, `SELECT `+runColumns+` FROM setup_journey_run
 			WHERE run_kind = 'root' AND owner_user_id = ? AND journey_id = ? AND (
 				(relationship_id = ? AND specialist_slug = 'plugin_quest') OR
 				(? != '' AND specialist_slug = ? AND (integration_plugin_id = '' OR integration_plugin_id = ?))
 			) ORDER BY created_at LIMIT 2`, userID, key.ID, questRelationshipID(key), legacySlug, legacySlug, key.PluginID)
+	default:
+		return nil, ErrInvalid
 	}
 	if err != nil {
 		return nil, fmt.Errorf("setup quest: find root: %w", err)

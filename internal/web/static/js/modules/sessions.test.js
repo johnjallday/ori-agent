@@ -220,6 +220,212 @@ async function runCreateWithTeamCompletion(teamCompletion) {
   return { manager, requests, toasts, window };
 }
 
+async function runGuidedCreate(creatorContext) {
+  const events = [];
+  const elements = new Map([
+    ['folderNameInput', { value: 'Email Ops', focus() {}, classList: { add() {}, remove() {} } }],
+    ['folderDescriptionInput', { value: '' }],
+    ['folderParentSelect', { value: '' }],
+    ['addFolderModal', { dataset: {} }],
+    ['createFolderBtn', { textContent: 'Create workspace', disabled: false }],
+    ['folderImportToggle', { checked: false }]
+  ]);
+  const document = {
+    addEventListener() {},
+    getElementById: id => elements.get(id) || null,
+    querySelector: selector =>
+      selector === '#addFolderModal .folder-color-btn.active' ? { dataset: { color: '' } } : null
+  };
+  const window = {
+    location: { href: '' },
+    ProjectTemplateCard: {
+      recheckSelection: async () => ({ state: 'ready' }),
+      getPayloadFields: () => ({ template_id: 'email-ops' }),
+      getSelectedTemplate: () => ({ id: 'email-ops' }),
+      shouldOpenAfterCreate: () => false,
+      reset() {}
+    },
+    OriTagInput: { clearTagPoolCache() {} }
+  };
+  const bootstrap = { Modal: { getInstance: () => ({ hide: () => events.push('hide') }) } };
+  vm.runInNewContext(
+    source,
+    {
+      window,
+      document,
+      bootstrap,
+      fetch: async url => {
+        events.push(`fetch ${url}`);
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({ folder: { id: 'email-ops-1', folder_slug: 'email-ops' } })
+        };
+      },
+      console,
+      crypto: { randomUUID: () => 'guided-create' }
+    },
+    { filename: 'sessions.js' }
+  );
+  const manager = window.sessionManager;
+  manager.getWorkspaceBootstrapFromModal = () => ({ hasAny: false });
+  manager.teamView = () => ({
+    canContinueFromTeam: true,
+    payload: { existing_agent_names: [], role_staffing: [] }
+  });
+  manager.clearWorkspaceCreateError = () => {};
+  manager.showToast = () => {};
+  manager.resetAddWorkspaceModalForm = () => events.push('reset');
+  manager.loadFolders = async () => events.push('refresh');
+  manager.workspaceCreatorContext = { generation: 1, mode: 'ordinary', ...creatorContext };
+  await manager.createFolder();
+  return { events, window };
+}
+
+test('a guided workspace create reports its id and stays on the page for the caller', async () => {
+  const created = [];
+  const { events, window } = await runGuidedCreate({
+    entryPoint: 'host_setup_quest',
+    stayAfterCreate: true,
+    onCreated: detail => created.push(detail)
+  });
+  assert.equal(events.filter(event => event.startsWith('fetch /api/workspaces')).length, 1);
+  assert.equal(created.length, 1);
+  assert.equal(created[0].workspaceId, 'email-ops-1');
+  assert.equal(created[0].folder.folder_slug, 'email-ops');
+  assert.equal(window.location.href, '', 'a staying create must not navigate away');
+  assert.ok(events.indexOf('hide') < events.indexOf('refresh'));
+});
+
+test('an ordinary workspace create still navigates and a failing follow-up never retries', async () => {
+  const { events, window } = await runGuidedCreate({
+    onCreated: () => {
+      throw new Error('follow-up failed');
+    }
+  });
+  assert.equal(events.filter(event => event.startsWith('fetch /api/workspaces')).length, 1);
+  assert.equal(window.location.href, '/workspaces/email-ops');
+});
+
+test('a locked blueprint agent name is read-only with its reason, and unlocking restores it', () => {
+  const attributes = new Map();
+  const siblings = [];
+  const input = {
+    readOnly: false,
+    parentElement: {
+      querySelector: selector =>
+        siblings.find(node => `#${node.id}` === selector && !node.removed) || null
+    },
+    setAttribute: (name, value) => attributes.set(name, value),
+    removeAttribute: name => attributes.delete(name),
+    after: node => siblings.push(node)
+  };
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    {
+      createElement: () => ({
+        id: '',
+        className: '',
+        textContent: '',
+        remove() {
+          this.removed = true;
+        }
+      })
+    }
+  );
+  const form = { get: name => (name === 'name' ? input : null) };
+  manager.applyWorkspaceAgentNameLock(form, 'Mail access is granted to the agent named Inbox.');
+  assert.equal(input.readOnly, true);
+  assert.equal(attributes.get('aria-describedby'), 'agentCreateNameLockReason');
+  assert.equal(siblings.at(-1).textContent, 'Mail access is granted to the agent named Inbox.');
+  manager.applyWorkspaceAgentNameLock(form, '');
+  assert.equal(input.readOnly, false);
+  assert.equal(attributes.has('aria-describedby'), false);
+  assert.equal(siblings.at(-1).removed, true);
+});
+
+function loadGuidedTeamManager(savedAgents) {
+  const shared = {};
+  for (const file of ['./create-workspace-team-draft.js', './workspace-creator-state.js']) {
+    vm.runInNewContext(readFileSync(new URL(file, import.meta.url), 'utf8'), {
+      window: shared,
+      console
+    });
+  }
+  const manager = loadSessionManager(undefined, shared);
+  const api = shared.CreateWorkspaceTeamDraft;
+  const events = [];
+  Object.assign(manager, {
+    showToast: (message, kind) => events.push(`toast:${kind}:${message}`),
+    announceWorkspaceTeamChange: message => events.push(`announce:${message}`),
+    focusWorkspaceRoleRow: () => true,
+    refreshWorkspaceReview() {},
+    renderExistingAgentRoster() {},
+    invalidateGroupRequirementReview() {}
+  });
+  manager.workspaceCreatorContext = shared.WorkspaceCreatorState.createCreatorContext({
+    blueprint: 'email-ops',
+    entryPoint: 'host_setup_quest',
+    stageBlueprintRoles: true,
+    teamLock: { agentNames: ['Inbox'], reason: 'Mail access is granted to the agent named Inbox.' }
+  });
+  const draft = manager.ensureWorkspaceTeamDraft();
+  api.setPlanReady(draft, 'email-ops', {
+    has_agents: true,
+    revision: 'email-ops-plan',
+    template_id: 'email-ops',
+    agents: [
+      { name: 'Postmaster', scope: 'reusable', action: 'create', entry_point: true },
+      { name: 'Inbox', scope: 'reusable', action: 'create', entry_point: false }
+    ],
+    warnings: []
+  });
+  api.setSavedRosterReady(draft, savedAgents);
+  return { manager, api, draft, events };
+}
+
+test('a guided Email Ops creator proposes its whole team once and keeps Inbox named and staffed', () => {
+  const { manager, api, draft, events } = loadGuidedTeamManager([
+    { name: 'Mailroom', source: 'user' }
+  ]);
+  manager.stageGuidedBlueprintRoles();
+  assert.equal(api.getRoleFill(draft, 'postmaster')?.mode, 'create');
+  assert.equal(api.getRoleFill(draft, 'postmaster')?.name, 'Postmaster');
+  assert.equal(api.getRoleFill(draft, 'inbox')?.mode, 'create');
+  assert.equal(api.getRoleFill(draft, 'inbox')?.name, 'Inbox');
+
+  // Postmaster stays the user's to change; staging never runs twice.
+  manager.clearWorkspaceRole('postmaster');
+  assert.equal(api.getRoleFill(draft, 'postmaster'), null);
+  manager.stageGuidedBlueprintRoles();
+  assert.equal(api.getRoleFill(draft, 'postmaster'), null);
+
+  // Inbox cannot be cleared or reassigned to a differently named agent.
+  manager.clearWorkspaceRole('inbox');
+  assert.equal(api.getRoleFill(draft, 'inbox')?.name, 'Inbox');
+  assert.ok(events.some(event => event.startsWith('toast:warning:Keep “Inbox” on this team.')));
+  manager.assignWorkspaceRole('inbox', 'Mailroom');
+  assert.equal(api.getRoleFill(draft, 'inbox')?.mode, 'create');
+  assert.equal(manager.workspaceRoleLockReason('postmaster'), '');
+});
+
+test('a saved agent already named Inbox is assigned instead of creating a duplicate', () => {
+  const { manager, api, draft } = loadGuidedTeamManager([{ name: 'Inbox', source: 'user' }]);
+  manager.stageGuidedBlueprintRoles();
+  assert.equal(api.getRoleFill(draft, 'inbox')?.mode, 'assign');
+  assert.equal(api.getRoleFill(draft, 'inbox')?.name, 'Inbox');
+  assert.equal(api.getRoleFill(draft, 'postmaster')?.mode, 'create');
+});
+
+test('an ordinary creator never stages roles or locks names', () => {
+  const { manager, api, draft } = loadGuidedTeamManager([]);
+  manager.workspaceCreatorContext = { generation: 2, mode: 'ordinary' };
+  manager.stageGuidedBlueprintRoles();
+  assert.equal(api.getRoleFill(draft, 'inbox'), null);
+  assert.equal(manager.workspaceRoleLockReason('inbox'), '');
+});
+
 test('Workspace create still requires its reviewed strict Team envelope before posting', async () => {
   const requests = [];
   const elements = new Map([

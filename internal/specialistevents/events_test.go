@@ -17,7 +17,7 @@ func TestVocabularyIsCompleteAndClosed(t *testing.T) {
 		ProjectRouteSelected, ProjectOutcome, ModeSelected, LiveVerifyOutcome,
 		HomeRoleOutcome, ProjectTeamOutcome,
 		SampleAddonOutcome, SampleCapabilityOutcome, SampleRootOutcome,
-		SampleAnalysisOutcome, SampleHandoffOutcome,
+		SampleAnalysisOutcome, SampleHandoffOutcome, AccountLinkOutcome,
 		JourneyCompleted, JourneyRegressed,
 	}
 	for _, name := range wanted {

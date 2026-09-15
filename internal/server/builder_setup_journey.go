@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/config"
+	"github.com/johnjallday/ori-agent/internal/hostquests"
 	"github.com/johnjallday/ori-agent/internal/pathselection"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
@@ -45,15 +46,22 @@ func (b *ServerBuilder) initializeSetupJourney() {
 	if b == nil || b.sessionStore == nil || b.personalAssistantStore == nil {
 		return
 	}
-	readers := make(map[specialist.SetupStepKind]setupjourney.CanonicalReader, specialist.SetupJourneyRequiredSteps)
+	readers := make(map[specialist.SetupStepKind]setupjourney.CanonicalReader, len(specialist.SetupStepKinds()))
+	// Every compiled kind starts fail-closed; owners that exist in this build
+	// replace their reader below. A build without the mailbox runtime keeps the
+	// account steps owner_unavailable rather than guessing readiness.
 	for _, kind := range []specialist.SetupStepKind{
 		specialist.SetupStepAssistantProgramStaffing,
+		specialist.SetupStepWorkspaceCreate,
+		specialist.SetupStepAccountConnect,
+		specialist.SetupStepAccountLink,
 	} {
 		readers[kind] = setupjourney.CanonicalReaderFunc(func(context.Context, setupjourney.ReadScope) (setupjourney.CanonicalStepRead, error) {
 			return setupjourney.CanonicalStepRead{BlockedReason: setupjourney.ReasonOwnerUnavailable}, nil
 		})
 	}
-	readers[specialist.SetupStepSummary] = setupjourney.CanonicalReaderFunc(readSetupSummary)
+	readers[specialist.SetupStepSummary] = setupSummaryReader{modelAvailable: b.systemModelAvailable}
+	mailboxAdapter := b.emailOpsQuestReaders(readers)
 	var integrationAdapter *setupjourney.ReviewedIntegrationAdapter
 	var projectAdapter *setupjourney.ProjectConnectionAdapter
 	var workspaceSetupAdapter *setupjourney.WorkspaceSetupAdapter
@@ -133,32 +141,7 @@ func (b *ServerBuilder) initializeSetupJourney() {
 	if b.workspaceStore != nil && b.st != nil {
 		staffingAdapter = setupjourney.NewAssistantStaffingAdapter(
 			b.workspaceStore, b.st, serverStaffingToolGrants{builder: b},
-			func() (string, string) {
-				if b.configManager == nil {
-					return "", ""
-				}
-				return b.configManager.GetSystemModel()
-			},
-			func(providerName, modelName string) error {
-				providerName = strings.ToLower(strings.TrimSpace(providerName))
-				modelName = strings.TrimSpace(modelName)
-				if providerName == "" || b.llmFactory == nil {
-					return fmt.Errorf("model provider is unavailable")
-				}
-				provider, err := b.llmFactory.GetProvider(providerName)
-				if err != nil {
-					return err
-				}
-				if modelName == "" {
-					return nil
-				}
-				for _, available := range provider.DefaultModels() {
-					if available == modelName {
-						return nil
-					}
-				}
-				return fmt.Errorf("model is unavailable")
-			},
+			b.systemModel, b.validateModel,
 		)
 		readers[specialist.SetupStepAssistantProgramStaffing] = staffingAdapter
 		if b.sessionHandler != nil {
@@ -225,7 +208,14 @@ func (b *ServerBuilder) initializeSetupJourney() {
 			panic("invalid built-in setup journey staffing adapter")
 		}
 	}
-	var questCatalogs []setupjourney.QuestCatalog
+	if mailboxAdapter != nil {
+		if err := b.setupJourneyService.SetActionAdapter(specialist.SetupStepAccountLink, mailboxAdapter); err != nil {
+			panic("invalid built-in setup journey mailbox link adapter")
+		}
+	}
+	// Host-compiled quests for built-in templates need no plugin or template
+	// library, so they are always served.
+	questCatalogs := []setupjourney.QuestCatalog{setupjourney.NewHostQuestCatalog(hostquests.All())}
 	if b.pluginHandler != nil {
 		questCatalogs = append(questCatalogs, setupjourney.NewInstalledQuestCatalog(b.pluginHandler.Manager()))
 	}
@@ -235,9 +225,7 @@ func (b *ServerBuilder) initializeSetupJourney() {
 			catalog: templateRuntimeCatalog{capabilities: b.workspaceCapabilityRegistry, runtimes: b.runtimeCapabilityRegistry},
 		}))
 	}
-	if len(questCatalogs) > 0 {
-		b.setupJourneyService.SetQuestCatalog(setupjourney.CombineQuestCatalogs(questCatalogs...))
-	}
+	b.setupJourneyService.SetQuestCatalog(setupjourney.CombineQuestCatalogs(questCatalogs...))
 	b.setupJourneyHandler = setupjourneyhttp.NewHandler(b.setupJourneyService, b.userProvider)
 	if b.workspaceStore != nil {
 		if b.pathSelectionStore == nil {
@@ -255,6 +243,76 @@ func (b *ServerBuilder) initializeSetupJourney() {
 			}
 		}
 	}
+}
+
+// emailOpsQuestReaders installs the Email Ops host quest's readers for the
+// owners this build has and returns the mailbox link adapter when every
+// dependency of the link exists. The dependencies are all wired in Phase 18
+// (wireMailboxRuntime), before this runs in Phase 22.6.
+func (b *ServerBuilder) emailOpsQuestReaders(readers map[specialist.SetupStepKind]setupjourney.CanonicalReader) *emailOpsMailboxLinkAdapter {
+	if b.workspaceFileStore == nil {
+		return nil
+	}
+	// Provenance lives only in the folder store; see emailOpsWorkspaceCreateReader.
+	readers[specialist.SetupStepWorkspaceCreate] = emailOpsWorkspaceCreateReader{source: b.workspaceFileStore}
+	if b.emailReadiness == nil || b.emailReadiness.connections == nil {
+		return nil
+	}
+	readers[specialist.SetupStepAccountConnect] = emailOpsAccountConnectReader{
+		readiness: b.emailReadiness, clientConfigured: defaultOAuthClientConfigured,
+	}
+	readers[specialist.SetupStepAccountLink] = emailOpsAccountLinkReader{
+		readiness: b.emailReadiness, workspaces: b.workspaceFileStore,
+	}
+	if b.gmailSink == nil || b.mailboxLinker == nil {
+		return nil
+	}
+	adapter := &emailOpsMailboxLinkAdapter{
+		readiness: b.emailReadiness, resolver: b.workspaceFileStore, workspaces: b.workspaceFileStore,
+		sink: b.gmailSink, linker: b.mailboxLinker,
+	}
+	if b.setupWizardService != nil {
+		adapter.wizard = b.setupWizardService
+	}
+	return adapter
+}
+
+// systemModel returns the configured system provider and model, if any.
+func (b *ServerBuilder) systemModel() (string, string) {
+	if b == nil || b.configManager == nil {
+		return "", ""
+	}
+	return b.configManager.GetSystemModel()
+}
+
+// validateModel reports whether a provider is registered and, when a model is
+// named, whether that provider offers it. Staffing and the setup summary share
+// this one check so "a model can run" means the same thing in both.
+func (b *ServerBuilder) validateModel(providerName, modelName string) error {
+	providerName = strings.ToLower(strings.TrimSpace(providerName))
+	modelName = strings.TrimSpace(modelName)
+	if providerName == "" || b == nil || b.llmFactory == nil {
+		return fmt.Errorf("model provider is unavailable")
+	}
+	provider, err := b.llmFactory.GetProvider(providerName)
+	if err != nil {
+		return err
+	}
+	if modelName == "" {
+		return nil
+	}
+	for _, available := range provider.DefaultModels() {
+		if available == modelName {
+			return nil
+		}
+	}
+	return fmt.Errorf("model is unavailable")
+}
+
+// systemModelAvailable reports whether the configured system model can run.
+func (b *ServerBuilder) systemModelAvailable() bool {
+	provider, model := b.systemModel()
+	return strings.TrimSpace(provider) != "" && b.validateModel(provider, model) == nil
 }
 
 type serverStaffingToolGrants struct {

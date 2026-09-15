@@ -1,7 +1,10 @@
 package specialist
 
 import (
+	"bytes"
 	"encoding/json"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -180,5 +183,203 @@ func TestRegistryReturnsDeepCopiesOfSetupJourney(t *testing.T) {
 	}
 	if fresh.SetupJourney.Title == "mutated" || fresh.SetupJourney.Steps[0].Title == "mutated" || fresh.AppPatterns[0][0] == "mutated" || fresh.CapabilityOrder[0] == "mutated" {
 		t.Fatal("registry state was mutated through a returned entry")
+	}
+}
+
+func validAccountLinkSetupJourney() SetupJourney {
+	return SetupJourney{
+		SchemaVersion:       SetupJourneySchemaVersion,
+		Version:             1,
+		ID:                  "example_account_setup",
+		Title:               "Set up an account workspace",
+		Description:         "Create a workspace, connect an account, and link it.",
+		ExpectedBlueprintID: "example-blueprint",
+		Steps: []SetupJourneyStep{
+			{ID: "team", Kind: SetupStepWorkspaceCreate, Title: "Review your team", Description: "Create the workspace after reviewing its team."},
+			{ID: "connect", Kind: SetupStepAccountConnect, Title: "Connect the account", Description: "Connect the account in Settings."},
+			{ID: "mailbox", Kind: SetupStepAccountLink, Title: "Link the account", Description: "Confirm linking the account to this workspace."},
+			{ID: "summary", Kind: SetupStepSummary, Title: "Ready", Description: "Review what is ready."},
+		},
+	}
+}
+
+func TestNormalizeSetupJourneyAcceptsAccountLinkShape(t *testing.T) {
+	input := validAccountLinkSetupJourney()
+	input.Steps[1].Kind = " ACCOUNT_CONNECT "
+	got, err := NormalizeSetupJourney(input)
+	if err != nil {
+		t.Fatalf("NormalizeSetupJourney: %v", err)
+	}
+	if got.Shape() != SetupJourneyShapeAccountLink {
+		t.Fatalf("shape = %q, want %q", got.Shape(), SetupJourneyShapeAccountLink)
+	}
+	if got.Steps[1].Kind != SetupStepAccountConnect || got.IntegrationKey != "" || got.ExpectedAssistantProgramID != "" || got.WorkspaceLaunch != nil {
+		t.Fatalf("account-link declaration was not normalized: %+v", got)
+	}
+}
+
+func TestNormalizeSetupJourneyRejectsInvalidAccountLinkShape(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*SetupJourney)
+		message string
+	}{
+		{name: "integration key set", mutate: func(j *SetupJourney) { j.IntegrationKey = "example_integration" }, message: "integration_key must be empty"},
+		{name: "assistant program set", mutate: func(j *SetupJourney) { j.ExpectedAssistantProgramID = "example-program" }, message: "expected_assistant_program_id must be empty"},
+		{name: "workspace launch present", mutate: func(j *SetupJourney) {
+			j.WorkspaceLaunch = &WorkspaceLaunchCopy{GroupTitle: "Group", GroupName: "Group", RuntimeTitle: "Runtime", RuntimeInstructions: "Plain text."}
+		}, message: "workspace_launch is not allowed"},
+		{name: "missing blueprint", mutate: func(j *SetupJourney) { j.ExpectedBlueprintID = "" }, message: "expected_blueprint_id"},
+		{name: "missing step", mutate: func(j *SetupJourney) { j.Steps = j.Steps[:3] }, message: "exactly 4 steps for the account_link shape"},
+		{name: "five steps", mutate: func(j *SetupJourney) {
+			j.Steps = append(j.Steps, SetupJourneyStep{ID: "extra", Kind: SetupStepSummary, Title: "Extra", Description: "Extra."})
+		}, message: "exactly 4 steps"},
+		{name: "duplicated summary", mutate: func(j *SetupJourney) {
+			j.Steps[2] = SetupJourneyStep{ID: "early", Kind: SetupStepSummary, Title: "Early", Description: "Early."}
+		}, message: "kind must be"},
+		{name: "reordered kinds", mutate: func(j *SetupJourney) { j.Steps[1], j.Steps[2] = j.Steps[2], j.Steps[1] }, message: "kind must be"},
+		{name: "specialist kind inserted", mutate: func(j *SetupJourney) { j.Steps[1].Kind = SetupStepProjectConnect }, message: "kind must be"},
+		{name: "unknown kind", mutate: func(j *SetupJourney) { j.Steps[2].Kind = "custom" }, message: "kind must be"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			declaration := validAccountLinkSetupJourney()
+			test.mutate(&declaration)
+			_, err := NormalizeSetupJourney(declaration)
+			if err == nil || !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("error = %v, want it to mention %q", err, test.message)
+			}
+		})
+	}
+}
+
+func TestNormalizeSetupJourneyCannotMixShapes(t *testing.T) {
+	// Specialist references on an account-link sequence are rejected, and an
+	// account-link kind inside the specialist sequence is rejected, so neither
+	// shape can borrow the other's steps or fields.
+	mixed := validSetupJourney()
+	mixed.Steps = validAccountLinkSetupJourney().Steps
+	if _, err := NormalizeSetupJourney(mixed); err == nil {
+		t.Fatal("account-link steps with specialist references were accepted")
+	}
+	specialist := validSetupJourney()
+	specialist.Steps[2].Kind = SetupStepAccountLink
+	if _, err := NormalizeSetupJourney(specialist); err == nil {
+		t.Fatal("specialist sequence with an account-link kind was accepted")
+	}
+	shortSpecialist := validSetupJourney()
+	shortSpecialist.Steps = shortSpecialist.Steps[:4]
+	if _, err := NormalizeSetupJourney(shortSpecialist); err == nil || err.Error() != "setup journey must contain exactly 5 steps" {
+		t.Fatalf("specialist count error changed: %v", err)
+	}
+}
+
+func TestParseSetupJourneyRejectsAuthoredShapeField(t *testing.T) {
+	data, err := json.Marshal(validAccountLinkSetupJourney())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var object map[string]any
+	if err := json.Unmarshal(data, &object); err != nil {
+		t.Fatal(err)
+	}
+	object["shape"] = "specialist"
+	withShape, _ := json.Marshal(object)
+	if _, err := ParseSetupJourney(withShape); err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("authored shape field error = %v", err)
+	}
+}
+
+func TestSetupJourneyShapeIsInferredFromExactSequence(t *testing.T) {
+	specialist := validSetupJourney()
+	if got := specialist.Shape(); got != SetupJourneyShapeSpecialist {
+		t.Fatalf("specialist shape = %q", got)
+	}
+	account := validAccountLinkSetupJourney()
+	if got := account.Shape(); got != SetupJourneyShapeAccountLink {
+		t.Fatalf("account-link shape = %q", got)
+	}
+	account.Steps = account.Steps[:3]
+	if got := account.Shape(); got != "" {
+		t.Fatalf("truncated sequence shape = %q, want none", got)
+	}
+	var missing *SetupJourney
+	if got := missing.Shape(); got != "" {
+		t.Fatalf("nil declaration shape = %q", got)
+	}
+	steps := SetupJourneyShapeSteps(SetupJourneyShapeSpecialist)
+	steps[0] = "mutated"
+	if SetupJourneyShapeSteps(SetupJourneyShapeSpecialist)[0] != SetupStepIntegrationInstall {
+		t.Fatal("shape steps were mutated through a returned slice")
+	}
+	if SetupJourneyShapeSteps("custom") != nil {
+		t.Fatal("unknown shape returned steps")
+	}
+}
+
+func TestSetupStepKindsListsEveryCompiledKindOnce(t *testing.T) {
+	want := []SetupStepKind{
+		SetupStepIntegrationInstall, SetupStepProjectConnect, SetupStepWorkspaceSetup,
+		SetupStepAssistantProgramStaffing, SetupStepSummary,
+		SetupStepWorkspaceCreate, SetupStepAccountConnect, SetupStepAccountLink,
+	}
+	if got := SetupStepKinds(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("SetupStepKinds() = %v, want %v", got, want)
+	}
+}
+
+// FR 3: no field may be added to the declaration encoding, which is what keeps
+// every existing declaration's normalized bytes identical across the widening.
+func TestNormalizeSetupJourneyDeclaresNoNewFields(t *testing.T) {
+	tags := func(value any) []string {
+		kind := reflect.TypeOf(value)
+		result := make([]string, 0, kind.NumField())
+		for field := range kind.Fields() {
+			result = append(result, field.Tag.Get("json"))
+		}
+		sort.Strings(result)
+		return result
+	}
+	wantJourney := []string{
+		"-", "description", "expected_assistant_program_id", "expected_blueprint_id", "id",
+		"integration_key", "schema_version", "steps", "title", "version", "workspace_launch,omitempty",
+	}
+	sort.Strings(wantJourney)
+	if got := tags(SetupJourney{}); !reflect.DeepEqual(got, wantJourney) {
+		t.Fatalf("SetupJourney JSON tags = %v, want %v", got, wantJourney)
+	}
+	wantStep := []string{"description", "id", "kind", "title"}
+	if got := tags(SetupJourneyStep{}); !reflect.DeepEqual(got, wantStep) {
+		t.Fatalf("SetupJourneyStep JSON tags = %v, want %v", got, wantStep)
+	}
+}
+
+func TestCompatibilityDeclarationNormalizesToItself(t *testing.T) {
+	data, err := legacySetupDeclarations.ReadFile("compatibility/reaper-setup.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw SetupJourney
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	normalized, err := ParseSetupJourney(data)
+	if err != nil {
+		t.Fatalf("compatibility declaration no longer parses: %v", err)
+	}
+	if normalized.Shape() != SetupJourneyShapeSpecialist {
+		t.Fatalf("compatibility shape = %q", normalized.Shape())
+	}
+	want, _ := json.Marshal(raw)
+	got, _ := json.Marshal(normalized)
+	if !bytes.Equal(got, want) {
+		t.Fatalf("compatibility declaration changed under normalization:\n got %s\nwant %s", got, want)
+	}
+	again, err := NormalizeSetupJourney(*normalized)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if encoded, _ := json.Marshal(again); !bytes.Equal(encoded, got) {
+		t.Fatal("normalization is not idempotent for the compatibility declaration")
 	}
 }

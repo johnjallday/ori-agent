@@ -89,18 +89,21 @@ type ResourceProjection struct {
 // StepProjection combines inert declaration copy with the current canonical
 // read and only the closed host actions currently available.
 type StepProjection struct {
-	ID             string                             `json:"id"`
-	Kind           specialist.SetupStepKind           `json:"kind"`
-	Title          string                             `json:"title"`
-	Description    string                             `json:"description"`
-	Status         StepStatus                         `json:"status"`
-	ReasonCode     ReasonCode                         `json:"reason_code,omitempty"`
-	Guidance       string                             `json:"guidance,omitempty"`
-	Actions        []ActionDefinition                 `json:"actions,omitempty"`
-	Integration    *IntegrationProjection             `json:"integration,omitempty"`
-	WorkspaceSetup *WorkspaceSetupProjection          `json:"workspace_setup,omitempty"`
-	Staffing       *StaffingProjection                `json:"staffing,omitempty"`
-	Preparation    *projectconnection.HomePreparation `json:"preparation,omitempty"`
+	ID              string                             `json:"id"`
+	Kind            specialist.SetupStepKind           `json:"kind"`
+	Title           string                             `json:"title"`
+	Description     string                             `json:"description"`
+	Status          StepStatus                         `json:"status"`
+	ReasonCode      ReasonCode                         `json:"reason_code,omitempty"`
+	Guidance        string                             `json:"guidance,omitempty"`
+	Actions         []ActionDefinition                 `json:"actions,omitempty"`
+	Integration     *IntegrationProjection             `json:"integration,omitempty"`
+	WorkspaceSetup  *WorkspaceSetupProjection          `json:"workspace_setup,omitempty"`
+	Staffing        *StaffingProjection                `json:"staffing,omitempty"`
+	Preparation     *projectconnection.HomePreparation `json:"preparation,omitempty"`
+	WorkspaceCreate *WorkspaceCreateProjection         `json:"workspace_create,omitempty"`
+	AccountConnect  *AccountConnectProjection          `json:"account_connect,omitempty"`
+	AccountLink     *AccountLinkProjection             `json:"account_link,omitempty"`
 }
 
 // Failure is a safe public service error. Error returns only compiled guidance;
@@ -164,6 +167,13 @@ var safeGuidance = map[ReasonCode]string{
 	ReasonHomeUnavailable:             "Ori could not verify the linked Home workspace.",
 	ReasonStaffingRequired:            "Review the required Home and project staffing to continue.",
 	ReasonStaffingNeedsAttention:      "One or more required roles need attention.",
+
+	ReasonWorkspaceRequired:              "Create the Email Ops workspace to continue.",
+	ReasonAccountConnectionNotConfigured: "Google sign-in isn't configured on this Ori server yet. Ask whoever runs it to set up the Google connection, then check again.",
+	ReasonAccountReconnectRequired:       "Reconnect Gmail in Settings, then choose Check again.",
+	ReasonAccountVaultRepairRequired:     "Repair the vault that holds your email credentials in Settings, then choose Check again.",
+	ReasonMailboxLinkRequired:            "Review and confirm linking the connected account to this workspace.",
+	ReasonMailboxAccountUnavailable:      "The linked email account is no longer available. Reconnect it in Settings, then check again.",
 }
 
 // DeclarationMigration is one compiled exact old-to-new step identity mapping.
@@ -321,6 +331,10 @@ func (s *Service) read(ctx context.Context, userID, runID string) (*JourneyProje
 		projection.Journey.TemplateID = relationship.QuestKey.TemplateID
 		projection.Journey.AttachmentID = relationship.QuestKey.AttachmentID
 	}
+	if err == nil && projection != nil && relationship.QuestKey.Source == QuestSourceHost {
+		projection.Journey.Source = QuestSourceHost
+		projection.Journey.TemplateID = declaration.ExpectedBlueprintID
+	}
 	return projection, err
 }
 
@@ -433,9 +447,12 @@ func (s *Service) reconcile(ctx context.Context, declaration *specialist.SetupJo
 			if busy.Status == OperationReconcileRequired {
 				kind, definition, known := actionKindAndDefinition(ActionID(busy.ActionID))
 				adapter := s.actionAdapters[kind]
-				// Group/project connection and File-only have unambiguous observed
-				// consequences. Do not generalize this to staffing or plugin actions.
-				recoverable := kind == specialist.SetupStepProjectConnect || ActionID(busy.ActionID) == ActionSelectFileOnlyMode
+				// Group/project connection, File-only, and the mailbox link have
+				// unambiguous observed consequences: each is one idempotent write whose
+				// presence the owner read shows directly. Do not generalize this to
+				// staffing or plugin actions.
+				recoverable := kind == specialist.SetupStepProjectConnect ||
+					ActionID(busy.ActionID) == ActionSelectFileOnlyMode || ActionID(busy.ActionID) == ActionLinkMailbox
 				if recoverable && known && definition.Effect == ActionEffectCommit && adapter != nil {
 					settled, settledReads := s.deriveCanonical(ctx, declaration, root, run, nil)
 					for index, step := range declaration.Steps {
@@ -589,7 +606,8 @@ func (s *Service) deriveCanonical(
 
 func scopeForRun(declaration *specialist.SetupJourney, root, run *Run) ReadScope {
 	scope := ReadScope{
-		OwnerUserID: root.OwnerUserID, RelationshipID: root.RelationshipID, WorkspaceLaunch: declaration.WorkspaceLaunch != nil,
+		OwnerUserID: root.OwnerUserID, Shape: declaration.Shape(),
+		RelationshipID: root.RelationshipID, WorkspaceLaunch: declaration.WorkspaceLaunch != nil,
 		SpecialistSlug: root.SpecialistSlug, JourneyID: run.JourneyID,
 		IntegrationKey:             declaration.IntegrationKey,
 		ExpectedBlueprintID:        declaration.ExpectedBlueprintID,
@@ -599,13 +617,23 @@ func scopeForRun(declaration *specialist.SetupJourney, root, run *Run) ReadScope
 		HomeWorkspaceID: root.HomeWorkspaceID, ProjectWorkspaceID: run.ProjectWorkspaceID,
 		SelectedModeID: run.SelectedModeID,
 	}
-	if root.SpecialistSlug == "user_template_quest" {
+	switch root.SpecialistSlug {
+	case userTemplateQuestSlug:
 		scope.QuestSource = QuestSourceUserTemplate
 		scope.UserTemplateID = declaration.ExpectedBlueprintID
+	case hostQuestSlug:
+		scope.QuestSource = QuestSourceHost
 	}
 	if run.Kind == RunKindRoot {
 		scope.ProjectWorkspaceID = root.ProjectWorkspaceID
 		scope.SelectedModeID = root.SelectedModeID
+		if scope.Shape == specialist.SetupJourneyShapeAccountLink {
+			// The account-link shape's later steps all act on the workspace step 1
+			// just resolved. During reconciliation run is the fresh candidate, so
+			// read its receipt instead of the not-yet-persisted root row; otherwise
+			// the link step would read an empty or stale workspace for one read.
+			scope.ProjectWorkspaceID = run.ProjectWorkspaceID
+		}
 	}
 	return scope
 }
@@ -631,6 +659,12 @@ func applyCanonicalRead(run *Run, kind specialist.SetupStepKind, result Canonica
 	case specialist.SetupStepWorkspaceSetup:
 		if result.SelectedModeID != "" {
 			run.SelectedModeID = result.SelectedModeID
+		}
+	case specialist.SetupStepWorkspaceCreate:
+		// The account-link shape's created workspace reuses the existing target
+		// workspace receipt column; later steps read it back through the scope.
+		if result.ProjectWorkspaceID != "" {
+			run.ProjectWorkspaceID = result.ProjectWorkspaceID
 		}
 	}
 }
@@ -753,10 +787,13 @@ func projectionFromRun(
 		stepProjection := StepProjection{
 			ID: step.ID, Kind: step.Kind, Title: step.Title, Description: step.Description,
 			Status: state.Status, ReasonCode: state.ReasonCode,
-			Integration:    cloneIntegrationProjection(reads[index].Integration),
-			WorkspaceSetup: cloneWorkspaceSetupProjection(reads[index].WorkspaceSetup),
-			Staffing:       cloneStaffingProjection(reads[index].Staffing),
-			Preparation:    cloneHomePreparation(reads[index].Preparation),
+			Integration:     cloneIntegrationProjection(reads[index].Integration),
+			WorkspaceSetup:  cloneWorkspaceSetupProjection(reads[index].WorkspaceSetup),
+			Staffing:        cloneStaffingProjection(reads[index].Staffing),
+			Preparation:     cloneHomePreparation(reads[index].Preparation),
+			WorkspaceCreate: cloneWorkspaceCreateProjection(reads[index].WorkspaceCreate),
+			AccountConnect:  cloneAccountConnectProjection(reads[index].AccountConnect),
+			AccountLink:     cloneAccountLinkProjection(reads[index].AccountLink),
 		}
 		if state.ReasonCode != "" {
 			stepProjection.Guidance = safeGuidance[state.ReasonCode]
@@ -794,8 +831,12 @@ func baseProjection(declaration *specialist.SetupJourney, run *Run) *JourneyProj
 		FirstOpenedAt: cloneTime(run.FirstOpenedAt), LastDismissedAt: cloneTime(run.LastDismissedAt),
 		FirstCompletedAt: cloneTime(run.FirstCompletedAt), UpdatedAt: run.UpdatedAt.UTC(),
 	}
-	if run.SpecialistSlug == "user_template_quest" {
+	switch run.SpecialistSlug {
+	case userTemplateQuestSlug:
 		projection.Journey.Source = QuestSourceUserTemplate
+		projection.Journey.TemplateID = declaration.ExpectedBlueprintID
+	case hostQuestSlug:
+		projection.Journey.Source = QuestSourceHost
 		projection.Journey.TemplateID = declaration.ExpectedBlueprintID
 	}
 	return projection

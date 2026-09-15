@@ -258,6 +258,47 @@ func TestUserSetupQuestStrictParserRejectsExecutableUnknownAndFixedStepDrift(t *
 	}
 }
 
+// FR 4: the host account-link shape is valid for the host normalizer but never
+// authorable on a user template, through either the parser or the editor.
+func TestUserSetupQuestRejectsHostAccountLinkShape(t *testing.T) {
+	_, template := userQuestTemplateFixture(t)
+	quest, err := NewUserSetupQuest(template, nil, DefaultUserSetupQuestDraft())
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid, _ := json.Marshal(quest)
+	var raw map[string]any
+	if err := json.Unmarshal(valid, &raw); err != nil {
+		t.Fatal(err)
+	}
+	raw["integration_key"] = ""
+	raw["expected_assistant_program_id"] = ""
+	delete(raw, "workspace_launch")
+	raw["steps"] = []any{
+		map[string]any{"id": "team", "kind": "workspace_create", "title": "Team", "description": "Create the workspace."},
+		map[string]any{"id": "connect", "kind": "account_connect", "title": "Connect", "description": "Connect the account."},
+		map[string]any{"id": "link", "kind": "account_link", "title": "Link", "description": "Link the account."},
+		map[string]any{"id": "summary", "kind": "summary", "title": "Summary", "description": "Review completion."},
+	}
+	encoded, _ := json.Marshal(raw)
+	if _, err := ParseUserSetupQuest(encoded); !errors.Is(err, ErrInvalidUserSetupQuest) {
+		t.Fatalf("parser accepted an account-link-shape user quest: %v", err)
+	}
+
+	accountDraft := DefaultUserSetupQuestDraft()
+	accountDraft.IntegrationKey = ""
+	accountDraft.WorkspaceLaunch = nil
+	accountDraft.Steps = []UserSetupQuestStepDraft{
+		{Kind: specialist.SetupStepWorkspaceCreate, Title: "Team", Description: "Create the workspace."},
+		{Kind: specialist.SetupStepAccountConnect, Title: "Connect", Description: "Connect the account."},
+		{Kind: specialist.SetupStepAccountLink, Title: "Link", Description: "Link the account."},
+		{Kind: specialist.SetupStepSummary, Title: "Summary", Description: "Review completion."},
+	}
+	if _, err := NewUserSetupQuest(template, nil, accountDraft); !errors.Is(err, ErrInvalidUserSetupQuest) {
+		t.Fatalf("editor accepted an account-link-shape user quest: %v", err)
+	}
+}
+
 func TestUserSetupQuestEligibilityReportsEachMissingOwner(t *testing.T) {
 	cases := []struct {
 		name string
