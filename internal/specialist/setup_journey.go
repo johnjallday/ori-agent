@@ -22,6 +22,8 @@ const (
 	MaxSetupJourneyTitleBytes = 200
 	MaxSetupJourneyTextBytes  = 2_000
 	MaxSetupJourneyVersion    = 1_000_000
+	// SetupJourneyRequiredSteps is the step count of the specialist shape, the
+	// only shape plugins and user templates may author.
 	SetupJourneyRequiredSteps = 5
 )
 
@@ -35,6 +37,21 @@ const (
 	SetupStepWorkspaceSetup           SetupStepKind = "workspace_setup"
 	SetupStepAssistantProgramStaffing SetupStepKind = "assistant_program_staffing"
 	SetupStepSummary                  SetupStepKind = "summary"
+
+	// Host-owned account-link primitives. They are compiled into Ori like the
+	// specialist kinds and are not authorable by plugins or user templates.
+	SetupStepWorkspaceCreate SetupStepKind = "workspace_create"
+	SetupStepAccountConnect  SetupStepKind = "account_connect"
+	SetupStepAccountLink     SetupStepKind = "account_link"
+)
+
+// SetupJourneyShape names one compiled ordered step-kind sequence. A shape is
+// inferred from a declaration's steps; no declaration field can select one.
+type SetupJourneyShape string
+
+const (
+	SetupJourneyShapeSpecialist  SetupJourneyShape = "specialist"
+	SetupJourneyShapeAccountLink SetupJourneyShape = "account_link"
 )
 
 var setupJourneyStepOrder = [...]SetupStepKind{
@@ -43,6 +60,71 @@ var setupJourneyStepOrder = [...]SetupStepKind{
 	SetupStepWorkspaceSetup,
 	SetupStepAssistantProgramStaffing,
 	SetupStepSummary,
+}
+
+var accountLinkStepOrder = [...]SetupStepKind{
+	SetupStepWorkspaceCreate,
+	SetupStepAccountConnect,
+	SetupStepAccountLink,
+	SetupStepSummary,
+}
+
+// SetupJourneyShapeSteps returns a copy of a compiled shape's ordered kinds, or
+// nil for an unknown shape.
+func SetupJourneyShapeSteps(shape SetupJourneyShape) []SetupStepKind {
+	switch shape {
+	case SetupJourneyShapeSpecialist:
+		return append([]SetupStepKind(nil), setupJourneyStepOrder[:]...)
+	case SetupJourneyShapeAccountLink:
+		return append([]SetupStepKind(nil), accountLinkStepOrder[:]...)
+	default:
+		return nil
+	}
+}
+
+// SetupStepKinds returns every compiled step kind across all shapes, once each,
+// in a fixed order. Host registries use it to prove they cover the closed set.
+func SetupStepKinds() []SetupStepKind {
+	kinds := append([]SetupStepKind(nil), setupJourneyStepOrder[:]...)
+	for _, kind := range accountLinkStepOrder {
+		if kind != SetupStepSummary {
+			kinds = append(kinds, kind)
+		}
+	}
+	return kinds
+}
+
+// Shape reports which compiled shape the declaration's step kinds match
+// position by position, or "" when they match none.
+func (j *SetupJourney) Shape() SetupJourneyShape {
+	if j == nil {
+		return ""
+	}
+	for _, shape := range []SetupJourneyShape{SetupJourneyShapeSpecialist, SetupJourneyShapeAccountLink} {
+		expected := SetupJourneyShapeSteps(shape)
+		if len(j.Steps) != len(expected) {
+			continue
+		}
+		matches := true
+		for index, step := range j.Steps {
+			matches = matches && step.Kind == expected[index]
+		}
+		if matches {
+			return shape
+		}
+	}
+	return ""
+}
+
+// candidateSetupJourneyShape picks which compiled sequence a declaration is
+// checked against. It only selects error text and expectations: acceptance
+// still requires an exact positional match, and the two sequences differ in
+// both first kind and length, so no declaration can match the other shape.
+func candidateSetupJourneyShape(steps []SetupJourneyStep) SetupJourneyShape {
+	if len(steps) > 0 && SetupStepKind(normalizeSetupJourneyID(string(steps[0].Kind))) == SetupStepWorkspaceCreate {
+		return SetupJourneyShapeAccountLink
+	}
+	return SetupJourneyShapeSpecialist
 }
 
 // SetupJourney is bounded inert discovery data. Behavior for each step kind is
@@ -73,7 +155,7 @@ type WorkspaceLaunchCopy struct {
 	RuntimeInstructions string `json:"runtime_instructions"`
 }
 
-// SetupJourneyStep is one display-only item in the fixed v1 order.
+// SetupJourneyStep is one display-only item in its shape's fixed order.
 type SetupJourneyStep struct {
 	ID          string        `json:"id"`
 	Kind        SetupStepKind `json:"kind"`
@@ -142,17 +224,42 @@ func NormalizeSetupJourney(declaration SetupJourney) (*SetupJourney, error) {
 	if err := validateSetupJourneyText("description", declaration.Description, MaxSetupJourneyTextBytes); err != nil {
 		return nil, err
 	}
-	for field, value := range map[string]string{
-		"integration_key":               declaration.IntegrationKey,
-		"expected_blueprint_id":         declaration.ExpectedBlueprintID,
-		"expected_assistant_program_id": declaration.ExpectedAssistantProgramID,
-	} {
-		if err := validateSetupJourneyID(field, value); err != nil {
+	shape := candidateSetupJourneyShape(declaration.Steps)
+	expectedKinds := SetupJourneyShapeSteps(shape)
+	if shape == SetupJourneyShapeAccountLink {
+		// Host account-link quests target one built-in template and carry no
+		// integration or Assistant Program. Built-in membership is checked by the
+		// host catalog, which can see the template library without an import cycle.
+		if err := validateSetupJourneyID("expected_blueprint_id", declaration.ExpectedBlueprintID); err != nil {
 			return nil, err
 		}
-	}
-	if len(declaration.Steps) != SetupJourneyRequiredSteps {
-		return nil, fmt.Errorf("setup journey must contain exactly %d steps", SetupJourneyRequiredSteps)
+		for field, value := range map[string]string{
+			"integration_key":               declaration.IntegrationKey,
+			"expected_assistant_program_id": declaration.ExpectedAssistantProgramID,
+		} {
+			if value != "" {
+				return nil, fmt.Errorf("setup journey %s must be empty for the %s shape", field, shape)
+			}
+		}
+		if declaration.WorkspaceLaunch != nil {
+			return nil, fmt.Errorf("setup journey workspace_launch is not allowed for the %s shape", shape)
+		}
+		if len(declaration.Steps) != len(expectedKinds) {
+			return nil, fmt.Errorf("setup journey must contain exactly %d steps for the %s shape", len(expectedKinds), shape)
+		}
+	} else {
+		for field, value := range map[string]string{
+			"integration_key":               declaration.IntegrationKey,
+			"expected_blueprint_id":         declaration.ExpectedBlueprintID,
+			"expected_assistant_program_id": declaration.ExpectedAssistantProgramID,
+		} {
+			if err := validateSetupJourneyID(field, value); err != nil {
+				return nil, err
+			}
+		}
+		if len(declaration.Steps) != SetupJourneyRequiredSteps {
+			return nil, fmt.Errorf("setup journey must contain exactly %d steps", SetupJourneyRequiredSteps)
+		}
 	}
 
 	seenIDs := make(map[string]struct{}, len(declaration.Steps))
@@ -171,8 +278,8 @@ func NormalizeSetupJourney(declaration SetupJourney) (*SetupJourney, error) {
 			return nil, fmt.Errorf("setup journey step id %q is duplicated", step.ID)
 		}
 		seenIDs[step.ID] = struct{}{}
-		if step.Kind != setupJourneyStepOrder[index] {
-			return nil, fmt.Errorf("setup journey step %d kind must be %q", index, setupJourneyStepOrder[index])
+		if step.Kind != expectedKinds[index] {
+			return nil, fmt.Errorf("setup journey step %d kind must be %q", index, expectedKinds[index])
 		}
 		if err := validateSetupJourneyText(fmt.Sprintf("steps[%d].title", index), step.Title, MaxSetupJourneyTitleBytes); err != nil {
 			return nil, err

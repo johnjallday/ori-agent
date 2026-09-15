@@ -28,7 +28,9 @@ func validateSetupQuests(c *SurfaceContribution) error {
 	seen := make(map[string]bool, len(c.SetupQuests))
 	for index, quest := range c.SetupQuests {
 		normalized, err := specialist.NormalizeSetupJourney(quest)
-		if err != nil || normalized.WorkspaceLaunch == nil {
+		// Plugins may author only the five-step specialist shape. The explicit
+		// shape check keeps that true if the host normalizer gains more shapes.
+		if err != nil || normalized.Shape() != specialist.SetupJourneyShapeSpecialist || normalized.WorkspaceLaunch == nil {
 			return fmt.Errorf("plugin setup quest %d is invalid", index)
 		}
 		if seen[normalized.ID] {

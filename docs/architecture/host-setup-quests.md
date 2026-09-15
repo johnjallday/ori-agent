@@ -152,6 +152,23 @@ build their own `readers` map; 4 of them size it from
 automatically; the rest enumerate kinds by hand and must add the three new
 kinds mechanically. The exact list is in task 1.2.
 
+**D11 — Refinements found while implementing Group 2 (supersede §4 where they differ).**
+
+- *Receipt lag.* During reconciliation `scopeForRun` reads a root run's
+  `ProjectWorkspaceID` from the persisted root row, so a receipt produced by
+  one step reaches later steps only on the *next* read. Specialist journeys
+  already live with that lag. For the account-link shape `scopeForRun` now
+  reads the fresh candidate's receipt, so steps 2–3 see the workspace step 1
+  resolved on the same read. The specialist path is unchanged.
+- *`Linked` does not imply an address.* A binding whose vault account vanished
+  is linked but has no readable email, so `validAccountLinkProjection`
+  requires only `Ready ⇒ Linked && AccountEmail != ""`.
+- *No `CanonicalReceiptID` on `account_link`.* §5.2's final decision is
+  enforced by `validResultForKind`: an account-link result carries no ID at
+  all, and an account-connect result carries none either.
+- *Workspace route is optional.* A slug that would need escaping is omitted
+  and the client resolves the workspace by ID; the ID and label stay paired.
+
 ### 1.4 Not drift, but worth stating
 
 - `gh` fails under the sandbox with a keychain TLS error; the merge-state check

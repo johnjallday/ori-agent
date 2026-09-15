@@ -45,9 +45,14 @@ func (b *ServerBuilder) initializeSetupJourney() {
 	if b == nil || b.sessionStore == nil || b.personalAssistantStore == nil {
 		return
 	}
-	readers := make(map[specialist.SetupStepKind]setupjourney.CanonicalReader, specialist.SetupJourneyRequiredSteps)
+	readers := make(map[specialist.SetupStepKind]setupjourney.CanonicalReader, len(specialist.SetupStepKinds()))
 	for _, kind := range []specialist.SetupStepKind{
 		specialist.SetupStepAssistantProgramStaffing,
+		// TEMPORARY (#455 Group 2): the account-link kinds fail closed until
+		// their Email Ops readers are wired below.
+		specialist.SetupStepWorkspaceCreate,
+		specialist.SetupStepAccountConnect,
+		specialist.SetupStepAccountLink,
 	} {
 		readers[kind] = setupjourney.CanonicalReaderFunc(func(context.Context, setupjourney.ReadScope) (setupjourney.CanonicalStepRead, error) {
 			return setupjourney.CanonicalStepRead{BlockedReason: setupjourney.ReasonOwnerUnavailable}, nil

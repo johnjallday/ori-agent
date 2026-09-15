@@ -120,6 +120,17 @@ const (
 	ReasonHomeUnavailable             ReasonCode = "home_unavailable"
 	ReasonStaffingRequired            ReasonCode = "staffing_required"
 	ReasonStaffingNeedsAttention      ReasonCode = "staffing_needs_attention"
+
+	// Account-link shape reasons. Each maps from one mailbox readiness verdict;
+	// none carries an address, vault name, path, or account identifier.
+	ReasonWorkspaceRequired              ReasonCode = "workspace_required"
+	ReasonAccountConnectionNotConfigured ReasonCode = "account_connection_not_configured"
+	ReasonAccountConnectionRequired      ReasonCode = "account_connection_required"
+	ReasonAccountCapabilityNotEnabled    ReasonCode = "account_capability_not_enabled"
+	ReasonAccountReconnectRequired       ReasonCode = "account_reconnect_required"
+	ReasonAccountVaultRepairRequired     ReasonCode = "account_vault_repair_required"
+	ReasonMailboxLinkRequired            ReasonCode = "mailbox_link_required"
+	ReasonMailboxAccountUnavailable      ReasonCode = "mailbox_account_unavailable"
 )
 
 var validReasonCodes = map[ReasonCode]struct{}{
@@ -134,6 +145,9 @@ var validReasonCodes = map[ReasonCode]struct{}{
 	ReasonProjectSelectionRequired: {}, ReasonProjectScopeInvalid: {}, ReasonProjectAlreadyConnected: {},
 	ReasonProjectUnavailable: {}, ReasonRuntimeSetupRequired: {}, ReasonRuntimeNeedsAttention: {},
 	ReasonHomeUnavailable: {}, ReasonStaffingRequired: {}, ReasonStaffingNeedsAttention: {},
+	ReasonWorkspaceRequired: {}, ReasonAccountConnectionNotConfigured: {}, ReasonAccountConnectionRequired: {},
+	ReasonAccountCapabilityNotEnabled: {}, ReasonAccountReconnectRequired: {}, ReasonAccountVaultRepairRequired: {},
+	ReasonMailboxLinkRequired: {}, ReasonMailboxAccountUnavailable: {},
 }
 
 // StepState is bounded ordered structural state for one declaration step.
