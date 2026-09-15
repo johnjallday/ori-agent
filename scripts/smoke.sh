@@ -9,9 +9,11 @@
 # analyzer, so it prompts no matter how many rules exist. A script is one
 # stable token. Put the shell in here, not in the tool call.
 #
-# This worktree's feature: City Economy (tasks/prd-city-economy.md).
+# This worktree's feature: Retire the Agent Type field
+# (tasks/prd-retire-agent-type.md): agent-type-api, agent-type-strip.
 # Earlier features' checks are kept, because the point of one stable name is
-# that it accumulates: Agents Page UX (tasks/prd-agents-page-ux.md), Workspace
+# that it accumulates: City Economy (tasks/prd-city-economy.md), Agents Page
+# UX (tasks/prd-agents-page-ux.md), Workspace
 # Planning Workflow (tasks/prd-workspace-planning-policy.md) and the
 # domain-specialist onboarding checks all still live below.
 #
@@ -1823,8 +1825,110 @@ smoke_economy_pending() {
   echo "PASS economy pending"
 }
 
+# assert_no_agent_type reads JSON on stdin and fails if any agent object, or any
+# model row under providers[].models[], still carries the retired "type" key.
+# A provider's own "type" (cloud/local) is a different field and is allowed.
+assert_no_agent_type() {
+  python3 -c 'import sys, json
+label = sys.argv[1]
+doc = json.load(sys.stdin)
+hits = []
+def check(obj, where):
+    if isinstance(obj, dict) and "type" in obj:
+        hits.append("%s type=%r" % (where, obj["type"]))
+if isinstance(doc, dict) and isinstance(doc.get("providers"), list):
+    for p in doc["providers"]:
+        for m in p.get("models") or []:
+            check(m, "%s model %s" % (p.get("name"), m.get("value")))
+elif isinstance(doc, dict) and isinstance(doc.get("agents"), list):
+    for a in doc["agents"]:
+        check(a, "agent %s" % a.get("name"))
+else:
+    check(doc, "object")
+if hits:
+    print("FAIL: %s: %s" % (label, "; ".join(hits)), file=sys.stderr)
+    sys.exit(1)
+print("ok   %s has no agent type" % label)' "$1"
+}
+
+# smoke_agent_type_api checks that an API client still posting the retired
+# "type" key succeeds, and that no agent or model response echoes it
+# (retire-agent-type, PRD FR11-FR13).
+smoke_agent_type_api() {
+  local name="Smoke Legacy Type $$" encoded
+  encoded=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$name")
+  echo "== create with a legacy type key =="
+  expect_status 200 POST "$BASE_URL/api/agents" \
+    "{\"name\":\"$name\",\"type\":\"tool-calling\",\"model\":\"gpt-5-mini\"}"
+
+  echo "== responses carry no agent type =="
+  curl -s "$BASE_URL/api/agents" | assert_no_agent_type "/api/agents"
+  curl -s "$BASE_URL/api/agents/dashboard/list" | assert_no_agent_type "/api/agents/dashboard/list"
+  curl -s "$BASE_URL/api/agents?name=$encoded" | assert_no_agent_type "agent detail"
+  curl -s "$BASE_URL/api/agents/$encoded/detail" | assert_no_agent_type "dashboard agent detail"
+  curl -s "$BASE_URL/api/providers" | assert_no_agent_type "/api/providers models"
+
+  expect_status 200 DELETE "$BASE_URL/api/agents?name=$encoded"
+  echo "PASS agent-type-api"
+}
+
+# smoke_agent_type_strip boots a fresh sandbox seeded with pre-upgrade agent
+# files and checks the one-time strip: "type" is gone from disk, the model is
+# untouched, and a "workspace-manager" typed agent was still recognized as
+# stale (it became a tagged agent, which the boot cleanup removes).
+smoke_agent_type_strip() {
+  local port="${2:-8932}"
+  local dir="${TMPDIR:-/tmp}/ori-smoke-agent-type-strip-$$"
+  local binary
+  binary="$(cd "$(dirname "$0")/.." && pwd -P)/bin/ori-agent"
+  [[ -x "$binary" ]] || fail "build first: go build -o bin/ori-agent ./cmd/server"
+  [[ ! -e "$dir" ]] || fail "sandbox $dir already exists; remove it and re-run"
+  mkdir -p "$dir/agents/legacy" "$dir/agents/manager" || fail "could not create $dir"
+  [[ -d "$dir/agents/legacy" ]] || fail "sandbox $dir does not exist"
+
+  printf '%s\n' '{"type":"research","role":"researcher","Settings":{"model":"claude-sonnet-5","provider":"claude","temperature":1}}' \
+    >"$dir/agents/legacy/agent_settings.json"
+  printf '%s\n' '{"type":"workspace-manager","Settings":{"model":"gpt-5-mini","temperature":1}}' \
+    >"$dir/agents/manager/agent_settings.json"
+
+  local base="http://localhost:$port" pid
+  (cd "$dir" && HOME="$dir" ORI_DATA_DIR="$dir" PORT="$port" exec "$binary" >"$dir/server.log" 2>&1) &
+  pid=$!
+  trap 'kill "$pid" 2>/dev/null || true' EXIT
+  local i
+  for i in $(seq 1 60); do
+    [[ "$(curl -s -o /dev/null -w '%{http_code}' "$base/api/agents" || true)" == "200" ]] && break
+    kill -0 "$pid" 2>/dev/null || fail "server exited early; see $dir/server.log"
+    sleep 1
+  done
+  echo "ok   server $pid up on $base (sandbox $dir)"
+
+  if grep -l '"type"' "$dir"/agents/*/agent_settings.json 2>/dev/null; then
+    fail "agent files above still carry a type key"
+  fi
+  echo "ok   no agent_settings.json carries a type key"
+
+  local model
+  model=$(json_field Settings.model <"$dir/agents/legacy/agent_settings.json")
+  [[ "$model" == "claude-sonnet-5" ]] || fail "legacy agent model changed to '$model'"
+  echo "ok   legacy agent kept model $model"
+
+  local names
+  names=$(curl -s "$base/api/agents" | python3 -c 'import sys, json; print(" ".join(a["name"] for a in json.load(sys.stdin)["agents"]))')
+  [[ " $names " == *" legacy "* ]] || fail "legacy agent missing from /api/agents: $names"
+  [[ " $names " != *" manager "* ]] || fail "workspace-manager typed agent survived boot cleanup: $names"
+  echo "ok   workspace-manager typed agent was recognized as stale"
+
+  kill "$pid"
+  wait "$pid" 2>/dev/null || true
+  trap - EXIT
+  echo "PASS agent-type-strip (sandbox left at $dir)"
+}
+
 case "${1:-}" in
 serve) serve_isolated "${2:-8931}" "${3:-default}" ;;
+agent-type-api) smoke_agent_type_api ;;
+agent-type-strip) smoke_agent_type_strip "$@" ;;
 economyseed) smoke_economy_seed ;;
 economyearn) smoke_economy_earn "$@" ;;
 economyquote) smoke_economy_quote "$@" ;;
@@ -1848,6 +1952,8 @@ execution) smoke_execution "${3:-}" ;;
 *)
   echo "usage:" >&2
   echo "  $0 serve [port] [sandbox-name]           # run an ISOLATED demo server (Ctrl-C to stop)" >&2
+  echo "  $0 agent-type-api <base-url>             # retired agent type: API accepts and never echoes it" >&2
+  echo "  $0 agent-type-strip [port]               # retired agent type: boot strips it from a seeded sandbox" >&2
   echo "  $0 agentseed <base-url> [sandbox-name]   # fill a sandbox with a demo agent roster" >&2
   echo "  $0 agentmap <base-url>                   # Agent Map layout API checks" >&2
   echo "  $0 specialist <base-url>                 # domain-specialist onboarding API checks" >&2

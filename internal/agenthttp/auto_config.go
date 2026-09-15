@@ -13,6 +13,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 // AutoConfigHandler handles auto-configuration requests for new agents
@@ -29,16 +30,25 @@ func NewAutoConfigHandler(llmFactory *llm.Factory, configManager *config.Manager
 	}
 }
 
+// Auto-config falls back to the configured system model when the LLM names no
+// model. These apply only when no system model is configured either.
+const (
+	defaultAutoConfigModel    = "gpt-5-mini"
+	defaultAutoConfigProvider = "openai"
+)
+
 // AutoConfigRequest represents the request to auto-configure an agent
 type AutoConfigRequest struct {
 	Description string `json:"description"`
+	// Role is the create form's current Role selection. An orchestrator is
+	// configured on the system model, the user's choice for coordination work.
+	Role string `json:"role,omitempty"`
 }
 
 // AutoConfigResponse represents the auto-generated configuration
 type AutoConfigResponse struct {
 	AgentName          string   `json:"agent_name"`
 	Description        string   `json:"description"`
-	AgentType          string   `json:"agent_type"`
 	Model              string   `json:"model"`
 	Provider           string   `json:"provider"`
 	Temperature        float64  `json:"temperature"`
@@ -165,7 +175,7 @@ func (h *AutoConfigHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate auto-config using the configured system model
-	config, err := h.generateAutoConfig(r.Context(), result.Provider, result.Model, systemReasoningEffort, req.Description)
+	config, err := h.generateAutoConfig(r.Context(), result.Provider, result.Model, systemReasoningEffort, req.Description, req.Role)
 	if err != nil {
 		logger.Warn("Auto-config generation failed; using defaults", logger.Fields{
 			"provider": systemProvider,
@@ -173,7 +183,7 @@ func (h *AutoConfigHandler) Handle(w http.ResponseWriter, r *http.Request) {
 			"error":    err,
 		})
 		// Return defaults on failure
-		config = h.getDefaultConfig()
+		config = h.getDefaultConfig(req.Role)
 		config.Description = resolveAutoConfigDescription("", req.Description, config.AgentName)
 		config.Reasoning = "Auto-config failed, using defaults: " + err.Error()
 	}
@@ -182,7 +192,7 @@ func (h *AutoConfigHandler) Handle(w http.ResponseWriter, r *http.Request) {
 }
 
 // generateAutoConfig uses LLM to analyze the description and generate configuration
-func (h *AutoConfigHandler) generateAutoConfig(ctx context.Context, provider llm.Provider, model, reasoningEffort, description string) (*AutoConfigResponse, error) {
+func (h *AutoConfigHandler) generateAutoConfig(ctx context.Context, provider llm.Provider, model, reasoningEffort, description, role string) (*AutoConfigResponse, error) {
 	systemPrompt := `You are an AI agent configuration assistant. Based on the user's description, generate optimal configuration as a JSON object.
 
 IMPORTANT: All string values must be on a single line. Do not use literal newlines in strings - use \n for line breaks if needed.
@@ -190,8 +200,7 @@ IMPORTANT: All string values must be on a single line. Do not use literal newlin
 Required JSON fields:
 - agent_name: A short, descriptive name for the agent (e.g., "Weather Assistant", "Code Reviewer")
 - description: A short, polished 1-2 sentence description for the agent details field
-- agent_type: One of "tool-calling" (for tool/plugin tasks), "general" (balanced), "orchestration" (multi-agent coordination), or "research" (complex reasoning)
-- model: Choose a model that matches the requested role. For orchestration agents, prefer the currently configured system model when it fits. Valid families include OpenAI, Codex, Claude Code, Claude, Gemini, Ollama, LM Studio, and MLX-LM.
+- model: Choose a model that matches the requested work. Valid families include OpenAI, Codex, Claude Code, Claude, Gemini, Ollama, LM Studio, and MLX-LM.
 - provider: One of "openai", "codex", "claude_code", "claude", "gemini", "ollama", "lmstudio", or "mlx_lm" based on model
 - temperature: 0.0-0.3 for precise tasks, 0.4-0.7 for balanced, 0.7-1.0 for creative
 - system_prompt: A concise system prompt for this agent (single line, use \n for breaks)
@@ -199,11 +208,12 @@ Required JSON fields:
 - reasoning: Brief explanation (single line)
 
 Example:
-{"agent_name":"Weather Assistant","description":"Provides current conditions, forecasts, and weather-related guidance with clear, reliable answers.","agent_type":"tool-calling","model":"gpt-4.1-nano","provider":"openai","temperature":0.2,"system_prompt":"You are a weather assistant that provides accurate weather information.","recommended_plugins":["weather"],"reasoning":"Tool-calling for API-based weather lookups."}
-
-If the request describes multi-agent coordination, return "orchestration" as the agent_type.`
+{"agent_name":"Weather Assistant","description":"Provides current conditions, forecasts, and weather-related guidance with clear, reliable answers.","model":"gpt-4.1-nano","provider":"openai","temperature":0.2,"system_prompt":"You are a weather assistant that provides accurate weather information.","recommended_plugins":["weather"],"reasoning":"A small model is enough for API-based weather lookups."}`
 
 	userMessage := fmt.Sprintf("Configure an agent for the following purpose:\n\n%s", description)
+	if role = strings.TrimSpace(role); role != "" {
+		userMessage += fmt.Sprintf("\n\nThe agent's role is %q.", role)
+	}
 
 	// Create a context with timeout
 	// Use a longer timeout for local LLM providers (Ollama) which may need to load models
@@ -256,20 +266,15 @@ If the request describes multi-agent coordination, return "orchestration" as the
 	}
 
 	// Validate and sanitize the response
-	config = h.validateAndSanitizeConfig(config)
+	config = h.validateAndSanitizeConfig(config, role)
 	config.Description = resolveAutoConfigDescription(config.Description, description, config.AgentName)
 
 	return &config, nil
 }
 
-// validateAndSanitizeConfig ensures the config values are valid
-func (h *AutoConfigHandler) validateAndSanitizeConfig(config AutoConfigResponse) AutoConfigResponse {
-	// Validate agent type
-	validTypes := map[string]bool{"tool-calling": true, "general": true, "orchestration": true, "research": true}
-	if !validTypes[config.AgentType] {
-		config.AgentType = "tool-calling"
-	}
-
+// validateAndSanitizeConfig ensures the config values are valid. role is the
+// create form's Role selection.
+func (h *AutoConfigHandler) validateAndSanitizeConfig(config AutoConfigResponse, role string) AutoConfigResponse {
 	systemProvider := ""
 	systemModel := ""
 	if h != nil && h.configManager != nil {
@@ -289,44 +294,24 @@ func (h *AutoConfigHandler) validateAndSanitizeConfig(config AutoConfigResponse)
 		config.Temperature = 1
 	}
 
-	// For orchestration agents, always prefer the configured system model over
+	// For orchestrator agents, always prefer the configured system model over
 	// whatever the LLM suggested. The LLM tends to echo the example model
 	// (gpt-4.1-nano) from its prompt, which isn't suitable for coordination —
 	// and the system model represents the user's explicit choice for
 	// orchestration-grade work.
-	if config.AgentType == "orchestration" && systemModel != "" {
+	useSystemModel := strings.EqualFold(strings.TrimSpace(role), string(types.RoleOrchestrator)) || config.Model == ""
+	if useSystemModel && systemModel != "" {
 		config.Model = systemModel
 		if systemProvider != "" {
 			config.Provider = systemProvider
 		}
 	}
 
-	// Ensure model is set
 	if config.Model == "" {
-		switch config.AgentType {
-		case "tool-calling":
-			config.Model = "gpt-4.1-nano"
-		case "general":
-			config.Model = "gpt-5"
-		case "orchestration":
-			// systemModel was empty; fall back to a capable default.
-			config.Model = "gpt-5"
-		case "research":
-			config.Model = "gpt-5"
-		}
+		config.Model = defaultAutoConfigModel
 	}
-
 	if config.Provider == "" {
-		switch config.AgentType {
-		case "orchestration":
-			if systemProvider != "" {
-				config.Provider = systemProvider
-			}
-		}
-	}
-
-	if config.Provider == "" {
-		config.Provider = "openai"
+		config.Provider = defaultAutoConfigProvider
 	}
 
 	// Ensure system prompt is set
@@ -337,17 +322,16 @@ func (h *AutoConfigHandler) validateAndSanitizeConfig(config AutoConfigResponse)
 	return config
 }
 
-// getDefaultConfig returns default configuration when auto-config fails
-func (h *AutoConfigHandler) getDefaultConfig() *AutoConfigResponse {
-	return &AutoConfigResponse{
+// getDefaultConfig returns default configuration when auto-config fails. The
+// model follows the same fallback as an LLM answer that names none.
+func (h *AutoConfigHandler) getDefaultConfig(role string) *AutoConfigResponse {
+	config := h.validateAndSanitizeConfig(AutoConfigResponse{
 		AgentName:    "New Agent",
 		Description:  "Helpful AI assistant for general tasks.",
-		AgentType:    "tool-calling",
-		Model:        "gpt-4.1-nano",
-		Provider:     "openai",
 		Temperature:  0.7,
 		SystemPrompt: "You are a helpful AI assistant.",
-	}
+	}, role)
+	return &config
 }
 
 func resolveAutoConfigDescription(generatedDescription, sourceDescription, agentName string) string {

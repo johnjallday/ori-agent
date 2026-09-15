@@ -130,6 +130,24 @@ func TestStaleEditRejected(t *testing.T) {
 	}
 }
 
+// TestUpdateWithRetiredTypeIsIgnored verifies an older client that still sends
+// the retired "type" key alongside its version token is accepted, and that a
+// type-only edit changes nothing the token covers.
+func TestUpdateWithRetiredTypeIsIgnored(t *testing.T) {
+	h, dash := versionTestHandlers(t, "Solo")
+	version := fetchAgentVersion(t, dash, "Solo")
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/agents/Solo", strings.NewReader(`{"type":"research","expected_version":"`+version+`"}`))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("update with type: expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := fetchAgentVersion(t, dash, "Solo"); got != version {
+		t.Errorf("a type-only update moved the version: %q -> %q", version, got)
+	}
+}
+
 // TestUpdateWithoutVersionSkipsCheck verifies back-compat: an update that omits
 // expected_version is not subjected to the concurrency check.
 func TestUpdateWithoutVersionSkipsCheck(t *testing.T) {

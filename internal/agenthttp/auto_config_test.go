@@ -276,133 +276,41 @@ func TestAutoConfigHandler_validateAndSanitizeConfig(t *testing.T) {
 		expected AutoConfigResponse
 	}{
 		{
-			name: "valid config unchanged",
-			input: AutoConfigResponse{
-				AgentType:    "tool-calling",
-				Model:        "gpt-4o-mini",
-				Provider:     "openai",
-				Temperature:  0.5,
-				SystemPrompt: "You are helpful.",
-			},
-			expected: AutoConfigResponse{
-				AgentType:    "tool-calling",
-				Model:        "gpt-4o-mini",
-				Provider:     "openai",
-				Temperature:  0.5,
-				SystemPrompt: "You are helpful.",
-			},
+			name:     "valid config unchanged",
+			input:    AutoConfigResponse{Model: "gpt-4o-mini", Provider: "openai", Temperature: 0.5, SystemPrompt: "You are helpful."},
+			expected: AutoConfigResponse{Model: "gpt-4o-mini", Provider: "openai", Temperature: 0.5, SystemPrompt: "You are helpful."},
 		},
 		{
-			name: "invalid agent type defaults to tool-calling",
-			input: AutoConfigResponse{
-				AgentType:    "invalid-type",
-				Model:        "gpt-4o",
-				Provider:     "openai",
-				Temperature:  0.7,
-				SystemPrompt: "Test",
-			},
-			expected: AutoConfigResponse{
-				AgentType:    "tool-calling",
-				Model:        "gpt-4o",
-				Provider:     "openai",
-				Temperature:  0.7,
-				SystemPrompt: "Test",
-			},
+			name:     "negative temperature corrected to 0",
+			input:    AutoConfigResponse{Model: "gpt-4o", Provider: "openai", Temperature: -0.5, SystemPrompt: "Test"},
+			expected: AutoConfigResponse{Model: "gpt-4o", Provider: "openai", Temperature: 0, SystemPrompt: "Test"},
 		},
 		{
-			name: "negative temperature corrected to 0",
-			input: AutoConfigResponse{
-				AgentType:    "general",
-				Model:        "gpt-4o",
-				Provider:     "openai",
-				Temperature:  -0.5,
-				SystemPrompt: "Test",
-			},
-			expected: AutoConfigResponse{
-				AgentType:    "general",
-				Model:        "gpt-4o",
-				Provider:     "openai",
-				Temperature:  0,
-				SystemPrompt: "Test",
-			},
+			name:     "temperature above 2 corrected to 1",
+			input:    AutoConfigResponse{Model: "gpt-4o", Provider: "openai", Temperature: 3.0, SystemPrompt: "Test"},
+			expected: AutoConfigResponse{Model: "gpt-4o", Provider: "openai", Temperature: 1.0, SystemPrompt: "Test"},
 		},
 		{
-			name: "temperature above 2 corrected to 1",
-			input: AutoConfigResponse{
-				AgentType:    "research",
-				Model:        "gpt-4o",
-				Provider:     "openai",
-				Temperature:  3.0,
-				SystemPrompt: "Test",
-			},
-			expected: AutoConfigResponse{
-				AgentType:    "research",
-				Model:        "gpt-4o",
-				Provider:     "openai",
-				Temperature:  1.0,
-				SystemPrompt: "Test",
-			},
+			name:     "empty model without a system model gets the default",
+			input:    AutoConfigResponse{Model: "", Provider: "", Temperature: 0.7, SystemPrompt: "Test"},
+			expected: AutoConfigResponse{Model: defaultAutoConfigModel, Provider: defaultAutoConfigProvider, Temperature: 0.7, SystemPrompt: "Test"},
 		},
 		{
-			name: "empty model gets default for type",
-			input: AutoConfigResponse{
-				AgentType:    "tool-calling",
-				Model:        "",
-				Provider:     "openai",
-				Temperature:  0.7,
-				SystemPrompt: "Test",
-			},
-			expected: AutoConfigResponse{
-				AgentType:    "tool-calling",
-				Model:        "gpt-4.1-nano",
-				Provider:     "openai",
-				Temperature:  0.7,
-				SystemPrompt: "Test",
-			},
+			name:     "empty system prompt gets default",
+			input:    AutoConfigResponse{Model: "gpt-4o", Provider: "openai", Temperature: 0.7, SystemPrompt: ""},
+			expected: AutoConfigResponse{Model: "gpt-4o", Provider: "openai", Temperature: 0.7, SystemPrompt: "You are a helpful AI assistant."},
 		},
 		{
-			name: "empty system prompt gets default",
-			input: AutoConfigResponse{
-				AgentType:    "general",
-				Model:        "gpt-4o",
-				Provider:     "openai",
-				Temperature:  0.7,
-				SystemPrompt: "",
-			},
-			expected: AutoConfigResponse{
-				AgentType:    "general",
-				Model:        "gpt-4o",
-				Provider:     "openai",
-				Temperature:  0.7,
-				SystemPrompt: "You are a helpful AI assistant.",
-			},
-		},
-		{
-			name: "invalid provider defaults to openai",
-			input: AutoConfigResponse{
-				AgentType:    "general",
-				Model:        "gpt-4o",
-				Provider:     "invalid-provider",
-				Temperature:  0.7,
-				SystemPrompt: "Test",
-			},
-			expected: AutoConfigResponse{
-				AgentType:    "general",
-				Model:        "gpt-4o",
-				Provider:     "openai",
-				Temperature:  0.7,
-				SystemPrompt: "Test",
-			},
+			name:     "invalid provider defaults to openai",
+			input:    AutoConfigResponse{Model: "gpt-4o", Provider: "invalid-provider", Temperature: 0.7, SystemPrompt: "Test"},
+			expected: AutoConfigResponse{Model: "gpt-4o", Provider: "openai", Temperature: 0.7, SystemPrompt: "Test"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := handler.validateAndSanitizeConfig(tt.input)
+			result := handler.validateAndSanitizeConfig(tt.input, "")
 
-			if result.AgentType != tt.expected.AgentType {
-				t.Errorf("AgentType: expected %q, got %q", tt.expected.AgentType, result.AgentType)
-			}
 			if result.Model != tt.expected.Model {
 				t.Errorf("Model: expected %q, got %q", tt.expected.Model, result.Model)
 			}
@@ -419,54 +327,47 @@ func TestAutoConfigHandler_validateAndSanitizeConfig(t *testing.T) {
 	}
 }
 
-// TestAutoConfigHandler_validateAndSanitizeConfig_OrchestrationPrefersSystemModel
-// verifies that orchestration agents always use the configured system model,
-// overriding whatever the LLM returned. The LLM often echoes the example
-// model (gpt-4.1-nano) from its prompt, which isn't suitable for
-// coordination work.
-func TestAutoConfigHandler_validateAndSanitizeConfig_OrchestrationPrefersSystemModel(t *testing.T) {
+// TestAutoConfigHandler_validateAndSanitizeConfig_SystemModel verifies the
+// orchestrator role always lands on the configured system model, overriding
+// whatever the LLM returned (it often echoes the prompt's gpt-4.1-nano
+// example), and that any role falls back to the system model when the LLM
+// names no model.
+func TestAutoConfigHandler_validateAndSanitizeConfig_SystemModel(t *testing.T) {
 	configManager := createTestConfigManager(t, "ollama", "gemma4:e4b")
 	handler := &AutoConfigHandler{configManager: configManager}
 
 	tests := []struct {
 		name             string
+		role             string
 		input            AutoConfigResponse
 		expectedModel    string
 		expectedProvider string
 	}{
 		{
-			name: "orchestration with LLM-returned gpt-4.1-nano is overridden",
-			input: AutoConfigResponse{
-				AgentType:    "orchestration",
-				Model:        "gpt-4.1-nano",
-				Provider:     "openai",
-				Temperature:  0.5,
-				SystemPrompt: "You coordinate.",
-			},
+			name:             "orchestrator with LLM-returned gpt-4.1-nano is overridden",
+			role:             "orchestrator",
+			input:            AutoConfigResponse{Model: "gpt-4.1-nano", Provider: "openai", Temperature: 0.5, SystemPrompt: "You coordinate."},
 			expectedModel:    "gemma4:e4b",
 			expectedProvider: "ollama",
 		},
 		{
-			name: "orchestration with empty model picks up system model",
-			input: AutoConfigResponse{
-				AgentType:    "orchestration",
-				Model:        "",
-				Provider:     "",
-				Temperature:  0.5,
-				SystemPrompt: "You coordinate.",
-			},
+			name:             "role match is case-insensitive",
+			role:             " Orchestrator ",
+			input:            AutoConfigResponse{Model: "gpt-4.1-nano", Provider: "openai", Temperature: 0.5, SystemPrompt: "You coordinate."},
 			expectedModel:    "gemma4:e4b",
 			expectedProvider: "ollama",
 		},
 		{
-			name: "non-orchestration is left alone",
-			input: AutoConfigResponse{
-				AgentType:    "tool-calling",
-				Model:        "gpt-4.1-nano",
-				Provider:     "openai",
-				Temperature:  0.5,
-				SystemPrompt: "You are helpful.",
-			},
+			name:             "any role with an empty model picks up the system model",
+			role:             "researcher",
+			input:            AutoConfigResponse{Model: "", Provider: "openai", Temperature: 0.5, SystemPrompt: "You research."},
+			expectedModel:    "gemma4:e4b",
+			expectedProvider: "ollama",
+		},
+		{
+			name:             "non-orchestrator with a model is left alone",
+			role:             "researcher",
+			input:            AutoConfigResponse{Model: "gpt-4.1-nano", Provider: "openai", Temperature: 0.5, SystemPrompt: "You are helpful."},
 			expectedModel:    "gpt-4.1-nano",
 			expectedProvider: "openai",
 		},
@@ -474,7 +375,7 @@ func TestAutoConfigHandler_validateAndSanitizeConfig_OrchestrationPrefersSystemM
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := handler.validateAndSanitizeConfig(tt.input)
+			result := handler.validateAndSanitizeConfig(tt.input, tt.role)
 			if result.Model != tt.expectedModel {
 				t.Errorf("Model: expected %q, got %q", tt.expectedModel, result.Model)
 			}
@@ -485,41 +386,44 @@ func TestAutoConfigHandler_validateAndSanitizeConfig_OrchestrationPrefersSystemM
 	}
 }
 
-// TestAutoConfigHandler_validateAndSanitizeConfig_OrchestrationWithoutSystemModel
-// verifies that when no system model is configured, orchestration agents
-// fall back to a capable default (gpt-5) rather than gpt-4.1-nano.
-func TestAutoConfigHandler_validateAndSanitizeConfig_OrchestrationWithoutSystemModel(t *testing.T) {
-	configManager := createTestConfigManager(t, "", "")
-	handler := &AutoConfigHandler{configManager: configManager}
+// TestAutoConfigHandler_AutoConfig_OrchestratorRoleUsesSystemModel drives the
+// endpoint: the mock LLM answers gpt-4o-mini/openai, but an orchestrator role
+// comes back on the configured system model, and no agent_type is returned.
+func TestAutoConfigHandler_AutoConfig_OrchestratorRoleUsesSystemModel(t *testing.T) {
+	factory := llm.NewFactory()
+	factory.Register("claude", &mockProvider{})
+	handler := NewAutoConfigHandler(factory, createTestConfigManager(t, "claude", "mock-model"))
 
-	input := AutoConfigResponse{
-		AgentType:    "orchestration",
-		Model:        "",
-		Provider:     "",
-		Temperature:  0.5,
-		SystemPrompt: "You coordinate.",
+	body, _ := json.Marshal(AutoConfigRequest{Description: "Coordinate a research team", Role: "orchestrator"})
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/auto-config", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	handler.Handle(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusOK, rr.Code, rr.Body.String())
 	}
-
-	result := handler.validateAndSanitizeConfig(input)
-	if result.Model != "gpt-5" {
-		t.Errorf("expected orchestration fallback model 'gpt-5', got %q", result.Model)
+	var fields map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &fields); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+	if fields["model"] != "mock-model" || fields["provider"] != "claude" {
+		t.Fatalf("expected the system model claude/mock-model, got %v/%v", fields["provider"], fields["model"])
+	}
+	if _, has := fields["agent_type"]; has {
+		t.Fatalf("response still carries agent_type: %v", fields["agent_type"])
 	}
 }
 
 // TestAutoConfigHandler_getDefaultConfig tests default config generation
 func TestAutoConfigHandler_getDefaultConfig(t *testing.T) {
-	handler := &AutoConfigHandler{}
+	config := (&AutoConfigHandler{}).getDefaultConfig("")
 
-	config := handler.getDefaultConfig()
-
-	if config.AgentType != "tool-calling" {
-		t.Errorf("Expected default agent type 'tool-calling', got %q", config.AgentType)
+	if config.Model != defaultAutoConfigModel {
+		t.Errorf("Expected default model %q, got %q", defaultAutoConfigModel, config.Model)
 	}
-	if config.Model != "gpt-4.1-nano" {
-		t.Errorf("Expected default model 'gpt-4.1-nano', got %q", config.Model)
-	}
-	if config.Provider != "openai" {
-		t.Errorf("Expected default provider 'openai', got %q", config.Provider)
+	if config.Provider != defaultAutoConfigProvider {
+		t.Errorf("Expected default provider %q, got %q", defaultAutoConfigProvider, config.Provider)
 	}
 	if config.Temperature != 0.7 {
 		t.Errorf("Expected default temperature 0.7, got %v", config.Temperature)
@@ -529,6 +433,11 @@ func TestAutoConfigHandler_getDefaultConfig(t *testing.T) {
 	}
 	if config.Description == "" {
 		t.Error("Expected non-empty default description")
+	}
+
+	withSystem := (&AutoConfigHandler{configManager: createTestConfigManager(t, "ollama", "gemma4:e4b")}).getDefaultConfig("")
+	if withSystem.Model != "gemma4:e4b" || withSystem.Provider != "ollama" {
+		t.Errorf("Expected the failure default to use the system model, got %s/%s", withSystem.Provider, withSystem.Model)
 	}
 }
 
@@ -583,7 +492,6 @@ func (m *mockProvider) Chat(ctx context.Context, req llm.ChatRequest) (*llm.Chat
 		Content: `{
 			"agent_name": "Weather Assistant",
 			"description": "Provides weather forecasts, current conditions, and alert guidance in a concise format.",
-			"agent_type": "tool-calling",
 			"model": "gpt-4o-mini",
 			"provider": "openai",
 			"temperature": 0.5,

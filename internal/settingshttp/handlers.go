@@ -983,7 +983,6 @@ type ProviderModel struct {
 	Value           string   `json:"value"`
 	Label           string   `json:"label"`
 	Provider        string   `json:"provider"`
-	Type            string   `json:"type"`                       // tool-calling, general, research
 	GoodFor         []string `json:"good_for"`                   // use-case recommendations
 	Pricing         string   `json:"pricing,omitempty"`          // pricing info (e.g., "$2.50 in / $10 out")
 	DeprecationDate string   `json:"deprecation_date,omitempty"` // when the model will be deprecated (YYYY-MM-DD)
@@ -1038,10 +1037,9 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 			providerType = string(provider.Type())
 			requiresKey = caps.RequiresAPIKey
 
-			// Convert models to ProviderModel format with categorization
-			providerModels = make([]ProviderModel, 0, len(models)*2)
+			// Convert models to ProviderModel format, one row per model
+			providerModels = make([]ProviderModel, 0, len(models))
 			for _, modelName := range models {
-				categories := getModelCategories(name, modelName)
 				goodFor := modelinfo.GetGoodFor(modelName)
 				pricingInfo := modelinfo.GetPricing(modelName)
 				pricing := ""
@@ -1060,18 +1058,15 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 					deprecationDate = pricingInfo.DeprecationDate
 					isLegacy = pricingInfo.IsLegacy()
 				}
-				for _, category := range categories {
-					providerModels = append(providerModels, ProviderModel{
-						Value:           modelName,
-						Label:           modelName,
-						Provider:        name,
-						Type:            category,
-						GoodFor:         goodFor,
-						Pricing:         pricing,
-						DeprecationDate: deprecationDate,
-						IsLegacy:        isLegacy,
-					})
-				}
+				providerModels = append(providerModels, ProviderModel{
+					Value:           modelName,
+					Label:           modelName,
+					Provider:        name,
+					GoodFor:         goodFor,
+					Pricing:         pricing,
+					DeprecationDate: deprecationDate,
+					IsLegacy:        isLegacy,
+				})
 			}
 		}
 
@@ -1088,163 +1083,6 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 	orihttp.WriteJSON(w, map[string]any{
 		"providers": providers,
 	})
-}
-
-// getModelCategories returns all categories a model should appear in
-// Some models (like llama3) appear in multiple categories
-func getModelCategories(provider, modelName string) []string {
-	switch provider {
-	case "openai":
-		// Flagship models (gpt-5, gpt-4.1) appear in orchestration and research
-		if modelName == "gpt-5" || modelName == "gpt-4.1" {
-			return []string{"orchestration", "research"}
-		}
-		// O-series models (reasoning models) are perfect for orchestration
-		if strings.HasPrefix(modelName, "o1") || strings.HasPrefix(modelName, "o3") {
-			return []string{"orchestration", "research"}
-		}
-		// General tier models can do orchestration too
-		if modelName == "gpt-5-mini" || modelName == "gpt-4.1-mini" {
-			return []string{"general", "orchestration"}
-		}
-		return []string{categorizeModel(provider, modelName)}
-
-	case "claude", "claude_code":
-		// Sonnet and Opus are great for orchestration
-		if strings.Contains(modelName, "sonnet") || strings.Contains(modelName, "opus") {
-			return []string{categorizeModel(provider, modelName), "orchestration"}
-		}
-		return []string{categorizeModel(provider, modelName)}
-
-	case "ollama", "lmstudio", "mlx_lm":
-		lowerName := strings.ToLower(modelName)
-
-		// llama3 models appear in all categories (they're versatile local models)
-		if strings.Contains(lowerName, "llama3") {
-			return []string{"tool-calling", "general", "orchestration", "research"}
-		}
-
-		// Larger models can do orchestration
-		if strings.Contains(lowerName, "70b") || strings.Contains(lowerName, "mixtral") {
-			return []string{"general", "orchestration", "research"}
-		}
-
-		// Other models get their single category
-		return []string{categorizeModel(provider, modelName)}
-	case "gemini":
-		lowerName := strings.ToLower(modelName)
-		if strings.Contains(lowerName, "pro") {
-			return []string{"research", "orchestration"}
-		}
-		if strings.Contains(lowerName, "flash") {
-			return []string{"tool-calling", "general"}
-		}
-		return []string{categorizeModel(provider, modelName)}
-	case "codex":
-		tier := categorizeModel(provider, modelName)
-		switch tier {
-		case "tool-calling":
-			return []string{"tool-calling", "general"}
-		case "general":
-			// Treat Codex mini as both tool-calling and general so it can be used
-			// for lightweight agents while remaining available in general flows.
-			return []string{"tool-calling", "general", "orchestration"}
-		default:
-			return []string{"research", "orchestration"}
-		}
-
-	default:
-		// Non-Ollama providers use single category
-		return []string{categorizeModel(provider, modelName)}
-	}
-}
-
-// categorizeModel categorizes models into tool-calling, general, orchestration, or research tiers
-func categorizeModel(provider, modelName string) string {
-	switch provider {
-	case "openai":
-		// Tool-calling tier (cheapest - nano models)
-		if modelName == "gpt-5-nano" || modelName == "gpt-4.1-nano" {
-			return "tool-calling"
-		}
-		// General purpose tier (mid-tier - mini models)
-		if modelName == "gpt-5-mini" || modelName == "gpt-4.1-mini" {
-			return "general"
-		}
-		// Flagship models (gpt-5, gpt-4.1) - research tier
-		if modelName == "gpt-5" || modelName == "gpt-4.1" {
-			return "research"
-		}
-		// All other OpenAI models default to research tier (expensive)
-		return "research"
-	case "codex":
-		lowerName := strings.ToLower(modelName)
-		if strings.Contains(lowerName, "nano") {
-			return "tool-calling"
-		}
-		if strings.Contains(lowerName, "mini") {
-			return "general"
-		}
-		// Standard and max Codex variants are best treated as research-tier.
-		return "research"
-	case "claude", "claude_code":
-		// Haiku is the lightweight model for tool calling
-		if strings.Contains(modelName, "haiku") {
-			return "tool-calling"
-		}
-		// Sonnet 4.5 and 4 are general purpose
-		if modelName == "claude-sonnet-4-5" || modelName == "claude-sonnet-4" {
-			return "general"
-		}
-		if modelName == "sonnet" {
-			return "general"
-		}
-		// Claude 3 Sonnet is general
-		if modelName == "claude-3-sonnet-20240229" {
-			return "general"
-		}
-		// Opus models are research tier (most capable)
-		return "research"
-	case "ollama", "lmstudio", "mlx_lm":
-		// Categorize Ollama models - use pattern matching for flexibility
-		lowerName := strings.ToLower(modelName)
-
-		// Tool-calling tier - smaller/faster models (good for function calling)
-		if strings.Contains(lowerName, "llama3") ||
-			strings.Contains(lowerName, "llama2") && !strings.Contains(lowerName, "70b") ||
-			strings.Contains(lowerName, "mistral") ||
-			strings.Contains(lowerName, "phi") ||
-			strings.Contains(lowerName, "qwen") {
-			return "tool-calling"
-		}
-
-		// General purpose tier - mid-size models
-		if strings.Contains(lowerName, "codellama") ||
-			strings.Contains(lowerName, "13b") ||
-			strings.Contains(lowerName, "mixtral") {
-			return "general"
-		}
-
-		// Research tier - large models
-		if strings.Contains(lowerName, "70b") ||
-			strings.Contains(lowerName, "neural-chat") ||
-			strings.Contains(lowerName, "starling") {
-			return "research"
-		}
-
-		// Default to tool-calling for unknown Ollama models (they're local, so cost is not a concern)
-		return "tool-calling"
-	case "gemini":
-		lowerName := strings.ToLower(modelName)
-		if strings.Contains(lowerName, "flash") {
-			return "tool-calling"
-		}
-		if strings.Contains(lowerName, "pro") {
-			return "research"
-		}
-		return "general"
-	}
-	return "general" // default
 }
 
 // getProviderDisplayName returns a human-readable name for the provider
