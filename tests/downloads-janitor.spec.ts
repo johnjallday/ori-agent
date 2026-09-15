@@ -203,12 +203,12 @@ async function openConsole(page: Page) {
 }
 
 async function scan(page: Page) {
-  await page.locator('#downloadsJanitorScan').click();
-  await expect(page.locator('.dj-row-item').first()).toBeVisible({ timeout: 15000 });
+  await page.locator('#fileJanitorScan').click();
+  await expect(page.locator('.fj-row-item').first()).toBeVisible({ timeout: 15000 });
 }
 
 function rowFor(page: Page, name: string) {
-  return page.locator('.dj-row-item').filter({ hasText: name });
+  return page.locator('.fj-row-item').filter({ hasText: name });
 }
 
 /**
@@ -221,12 +221,12 @@ function rowFor(page: Page, name: string) {
  * broken button. Asserting on the panel's text pins it down before clicking.
  */
 async function confirmApply(page: Page) {
-  const panel = page.locator('.dj-confirm');
+  const panel = page.locator('.fj-confirm');
   await expect(panel).toBeVisible({ timeout: 15000 });
   await expect(panel).toContainText('Confirm these moves');
-  await expect(page.locator('#downloadsJanitorConfirmApply')).toBeEnabled();
-  await page.locator('#downloadsJanitorConfirmApply').click();
-  await expect(page.locator('.dj-results')).toBeVisible({ timeout: 30000 });
+  await expect(page.locator('#fileJanitorConfirmApply')).toBeEnabled();
+  await page.locator('#fileJanitorConfirmApply').click();
+  await expect(page.locator('.fj-results')).toBeVisible({ timeout: 30000 });
 }
 
 test.describe.configure({ mode: 'serial' });
@@ -254,19 +254,19 @@ test.describe('Downloads Janitor', () => {
 
     await page.goto(workspaceURL(id));
 
-    const mount = page.locator('#downloadsJanitorMount');
+    const mount = page.locator('#fileJanitorMount');
     await expect(mount).toBeVisible({ timeout: 15000 });
     await expect(mount).not.toHaveAttribute('hidden', /.*/);
-    await expect(page.locator('#downloadsJanitorMount')).toContainText('Setup required');
+    await expect(page.locator('#fileJanitorMount')).toContainText('Setup required');
     // The blueprint's wizard owns setup, so this surface offers a way into it
     // rather than a second folder chooser (FR-82).
     //
     // The control moved: Workspace Details now carries a compact card whose
     // single action opens the console, replacing the old inline panel's
-    // "Continue setup" button (#downloadsJanitorOpenSetup). The intent asserted
+    // "Continue setup" button (#fileJanitorOpenSetup). The intent asserted
     // here is unchanged — one way in, and no editable path field anywhere.
     await expect(page.locator('#fileJanitorCardOpen')).toBeVisible();
-    await expect(page.locator('#downloadsJanitorPath')).toHaveCount(0);
+    await expect(page.locator('#fileJanitorPath')).toHaveCount(0);
 
     // The wizard opens itself, and states what access it is asking for before
     // anything is granted.
@@ -291,7 +291,7 @@ test.describe('Downloads Janitor', () => {
 
     await page.goto(workspaceURL(id));
     await page.waitForTimeout(1500);
-    await expect(page.locator('#downloadsJanitorMount')).toBeHidden();
+    await expect(page.locator('#fileJanitorMount')).toBeHidden();
   });
 
   test('setup can be dismissed and picked up again, and never reopens once ready', async ({
@@ -319,7 +319,7 @@ test.describe('Downloads Janitor', () => {
     // of the surface; Details is a summary now.)
     await page.locator('#fileJanitorCardOpen').click();
     await expect(page.locator('#fileJanitorConsole')).toBeVisible({ timeout: 15000 });
-    await page.locator('#downloadsJanitorOpenSetup').click();
+    await page.locator('#fileJanitorOpenSetup').click();
     await expect(page.locator('#setupWizardDialog')).toBeVisible();
     await expect(page.locator('#setupWizardStepTitle')).toHaveText('Choose the folder to tidy');
     await page.locator('#setupWizardClose').click();
@@ -349,10 +349,10 @@ test.describe('Downloads Janitor', () => {
     await page.goto(workspaceURL(id));
     // Pause and Scan live in the console header now, not in Workspace Details.
     await openConsole(page);
-    await expect(page.locator('#downloadsJanitorPause')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('#fileJanitorPause')).toBeVisible({ timeout: 15000 });
     // The control points at the step that discloses what it would start.
-    await expect(page.locator('#downloadsJanitorPause')).toHaveText('Approve in setup');
-    await expect(page.locator('#downloadsJanitorScan')).toBeEnabled();
+    await expect(page.locator('#fileJanitorPause')).toHaveText('Approve in setup');
+    await expect(page.locator('#fileJanitorScan')).toBeEnabled();
 
     const status = await (await request.get(`/api/workspaces/${id}/downloads-janitor`)).json();
     expect(status.status.settings.paused, 'nothing unattended may be running yet').toBeTruthy();
@@ -372,7 +372,7 @@ test.describe('Downloads Janitor', () => {
     const folderFact = page.locator('.fj-card-fact').filter({ hasText: 'Managed folder' });
     await expect(folderFact).toContainText(basename(root));
     await expect(folderFact.locator('.fj-card-fact-value')).toHaveAttribute('title', root);
-    await expect(page.locator('#downloadsJanitorActivity')).toHaveText('Watching');
+    await expect(page.locator('#fileJanitorActivity')).toHaveText('Watching');
     // The destination is created eagerly; category folders are not.
     expect(existsSync(join(root, 'Filed'))).toBeTruthy();
     expect(readdirSync(join(root, 'Filed'))).toEqual([]);
@@ -399,18 +399,18 @@ test.describe('Downloads Janitor', () => {
     await completeSetup(page, id, root);
     await scan(page);
 
-    await expect(page.locator('.dj-row-item')).toHaveCount(4);
+    await expect(page.locator('.fj-row-item')).toHaveCount(4);
     await expect(rowFor(page, 'big-movie.mp4')).toHaveCount(0);
 
     // Nothing is selected. Opening the review surface can never move anything.
-    const boxes = page.locator('.dj-select');
+    const boxes = page.locator('.fj-select');
     for (let i = 0; i < (await boxes.count()); i += 1) {
       await expect(boxes.nth(i)).not.toBeChecked();
     }
     // The approve control is disabled and says why.
-    const approve = page.locator('#downloadsJanitorApprove');
+    const approve = page.locator('#fileJanitorApprove');
     await expect(approve).toBeDisabled();
-    await expect(page.locator('#downloadsJanitorSelection')).toContainText('No files selected');
+    await expect(page.locator('#fileJanitorSelection')).toContainText('No files selected');
 
     // An unclassifiable file is flagged rather than guessed at.
     await expect(rowFor(page, 'payload.bin')).toContainText('Needs review');
@@ -446,15 +446,15 @@ test.describe('Downloads Janitor', () => {
     await completeSetup(page, id, root);
     await scan(page);
 
-    await rowFor(page, 'report.pdf').locator('.dj-select').check();
-    await rowFor(page, 'photo.png').locator('.dj-select').check();
+    await rowFor(page, 'report.pdf').locator('.fj-select').check();
+    await rowFor(page, 'photo.png').locator('.fj-select').check();
 
-    const approve = page.locator('#downloadsJanitorApprove');
+    const approve = page.locator('#fileJanitorApprove');
     await expect(approve).toContainText('2 moves');
     await approve.click();
 
     // The confirmation names every destination before anything happens.
-    const confirm = page.locator('.dj-confirm');
+    const confirm = page.locator('.fj-confirm');
     await expect(confirm).toContainText('Filed/Documents');
     await expect(confirm).toContainText('Filed/Images');
     expect(existsSync(join(root, 'report.pdf')), 'nothing moves at approval').toBeTruthy();
@@ -475,12 +475,12 @@ test.describe('Downloads Janitor', () => {
 
     await completeSetup(page, id, root);
     await scan(page);
-    await rowFor(page, 'invoice.pdf').locator('.dj-select').check();
-    await page.locator('#downloadsJanitorApprove').click();
+    await rowFor(page, 'invoice.pdf').locator('.fj-select').check();
+    await page.locator('#fileJanitorApprove').click();
 
     // The rename is disclosed at approval time, with the reason.
-    await expect(page.locator('.dj-confirm')).toContainText('invoice (2).pdf');
-    await expect(page.locator('.dj-confirm')).toContainText('already there');
+    await expect(page.locator('.fj-confirm')).toContainText('invoice (2).pdf');
+    await expect(page.locator('.fj-confirm')).toContainText('already there');
 
     await confirmApply(page);
 
@@ -500,14 +500,14 @@ test.describe('Downloads Janitor', () => {
     await scan(page);
 
     await rowFor(page, 'junk.bin').getByRole('button', { name: /Trash/ }).click();
-    await page.locator('#downloadsJanitorApprove').click();
+    await page.locator('#fileJanitorApprove').click();
 
-    const confirmButton = page.locator('#downloadsJanitorConfirmApply');
+    const confirmButton = page.locator('#fileJanitorConfirmApply');
     await expect(confirmButton).toBeDisabled();
-    await expect(page.locator('.dj-confirm')).toContainText('Nothing is deleted permanently');
+    await expect(page.locator('.fj-confirm')).toContainText('Nothing is deleted permanently');
 
-    const ack = page.locator('#downloadsJanitorTrashAck');
-    await expect(page.locator('.dj-trash-ack')).toContainText('Yes, move 1 file to the Trash');
+    const ack = page.locator('#fileJanitorTrashAck');
+    await expect(page.locator('.fj-trash-ack')).toContainText('Yes, move 1 file to the Trash');
     // Focus is on the acknowledgement, not lost to the body behind a disabled
     // button — the destructive path is where losing your place matters most.
     await expect(ack).toBeFocused();
@@ -516,7 +516,7 @@ test.describe('Downloads Janitor', () => {
     await expect(confirmButton).toBeEnabled();
     await confirmButton.click();
 
-    await expect(page.locator('.dj-results')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('.fj-results')).toBeVisible({ timeout: 15000 });
     expect(existsSync(join(root, 'junk.bin'))).toBeFalsy();
   });
 
@@ -528,8 +528,8 @@ test.describe('Downloads Janitor', () => {
 
     await completeSetup(page, id, root);
     await scan(page);
-    await rowFor(page, 'contract.pdf').locator('.dj-select').check();
-    await page.locator('#downloadsJanitorApprove').click();
+    await rowFor(page, 'contract.pdf').locator('.fj-select').check();
+    await page.locator('#fileJanitorApprove').click();
     await confirmApply(page);
     expect(existsSync(join(root, 'Filed', 'Documents', 'contract.pdf'))).toBeTruthy();
 
@@ -538,16 +538,13 @@ test.describe('Downloads Janitor', () => {
     // find them moved.
     await page.locator('#fileJanitorConsole [data-fj-tab="history"]').click();
 
-    const entry = page.locator('.dj-history-item').filter({ hasText: 'contract.pdf' }).first();
+    const entry = page.locator('.fj-history-item').filter({ hasText: 'contract.pdf' }).first();
     await expect(entry).toBeVisible({ timeout: 15000 });
     await entry.getByRole('button', { name: /Undo/ }).click();
 
-    await expect(page.locator('#downloadsJanitorHistoryStatus')).toContainText(
-      /put back|restored/i,
-      {
-        timeout: 15000
-      }
-    );
+    await expect(page.locator('#fileJanitorHistoryStatus')).toContainText(/put back|restored/i, {
+      timeout: 15000
+    });
     expect(
       existsSync(join(root, 'contract.pdf')),
       'the file comes back to where it was'
@@ -557,9 +554,7 @@ test.describe('Downloads Janitor', () => {
     const again = entry.getByRole('button', { name: /Undo/ });
     if (await again.count()) {
       await again.click();
-      await expect(page.locator('#downloadsJanitorHistoryStatus')).not.toContainText(
-        'put back again'
-      );
+      await expect(page.locator('#fileJanitorHistoryStatus')).not.toContainText('put back again');
     }
   });
 
@@ -571,11 +566,11 @@ test.describe('Downloads Janitor', () => {
 
     await completeSetup(page, id, root);
     await page.getByRole('button', { name: 'Pause watching' }).click();
-    await expect(page.locator('#downloadsJanitorActivity')).toHaveText('Paused', {
+    await expect(page.locator('#fileJanitorActivity')).toHaveText('Paused', {
       timeout: 15000
     });
     // A paused watcher is not a disabled feature.
-    await expect(page.locator('#downloadsJanitorScan')).toBeEnabled();
+    await expect(page.locator('#fileJanitorScan')).toBeEnabled();
   });
 
   test('access can be given up, and history survives it', async ({ page, request }) => {
@@ -584,15 +579,15 @@ test.describe('Downloads Janitor', () => {
 
     await completeSetup(page, id, root);
     await scan(page);
-    await rowFor(page, 'keep.pdf').locator('.dj-select').check();
-    await page.locator('#downloadsJanitorApprove').click();
+    await rowFor(page, 'keep.pdf').locator('.fj-select').check();
+    await page.locator('#fileJanitorApprove').click();
     await confirmApply(page);
 
     const revoked = await request.post(`/api/workspaces/${id}/downloads-janitor/revoke`);
     expect(revoked.ok()).toBeTruthy();
 
     await page.reload();
-    await expect(page.locator('#downloadsJanitorMount')).toContainText('Setup required', {
+    await expect(page.locator('#fileJanitorMount')).toContainText('Setup required', {
       timeout: 15000
     });
     // Files stay where they were put; giving up access does not undo work.
@@ -628,7 +623,7 @@ test.describe('Downloads Janitor', () => {
     // state, and the readiness rows that name the specific failure live in the
     // console the card opens. Both halves are asserted, because a card that
     // reported trouble with no way to find out what would be worse than either.
-    await expect(page.locator('#downloadsJanitorMount')).toContainText('Needs attention', {
+    await expect(page.locator('#fileJanitorMount')).toContainText('Needs attention', {
       timeout: 15000
     });
     await openConsole(page);

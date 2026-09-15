@@ -145,7 +145,7 @@ function setup() {
   // The global goes first: registering a node attaches it, and attachment
   // records ids against globalThis.document.
   globalThis.document = doc;
-  doc.register('downloadsJanitorMount');
+  doc.register('fileJanitorMount');
   globalThis.window = globalThis;
   globalThis.window.currentWorkspaceId = 'ws-1';
   globalThis.fetch = async () => ({ ok: true, json: async () => ({ status: { applies: false } }) });
@@ -204,7 +204,7 @@ const setupRequiredStatus = {
 // console — header included, since the folder and the status live there —
 // while it is open, and the compact Workspace Details card otherwise.
 function surface(doc) {
-  return doc.getElementById('fileJanitorConsole') || doc.getElementById('downloadsJanitorMount');
+  return doc.getElementById('fileJanitorConsole') || doc.getElementById('fileJanitorMount');
 }
 
 // settle drains the status re-read that open() fires. Opening the console
@@ -223,13 +223,13 @@ function text(doc) {
 // cardText reads only the compact Workspace Details card, for the assertions
 // about what Details does and does not contain.
 function cardText(doc) {
-  return doc.getElementById('downloadsJanitorMount').textContent;
+  return doc.getElementById('fileJanitorMount').textContent;
 }
 
 test('a workspace without the capability renders nothing and opens no console', () => {
   const doc = setup();
   openConsole({ applies: false });
-  const host = doc.getElementById('downloadsJanitorMount');
+  const host = doc.getElementById('fileJanitorMount');
   assert.equal(host.hidden, true);
   assert.equal(host.children.length, 0);
   // There is nothing to open: a console over a workspace that never installed
@@ -242,7 +242,7 @@ test('setup card pre-fills the suggested folder without selecting it', () => {
   openConsole(setupRequiredStatus);
   const host = surface(doc);
   assert.equal(host.hidden, false);
-  const input = doc.getElementById('downloadsJanitorPath');
+  const input = doc.getElementById('fileJanitorPath');
   assert.ok(input, 'expected a folder input');
   // Still the unresolved suggestion: the card offers it, the user confirms it.
   assert.equal(input.value, '~/Downloads');
@@ -290,9 +290,9 @@ test('setup card proposes no folder when the server suggests none', () => {
       daily_scan_local_time: '09:00'
     }
   });
-  const input = doc.getElementById('downloadsJanitorPath');
+  const input = doc.getElementById('fileJanitorPath');
   assert.equal(input.value, '', 'a generic install must not invent a folder');
-  const confirm = doc.getElementById('downloadsJanitorConfirm');
+  const confirm = doc.getElementById('fileJanitorConfirm');
   assert.equal(confirm.disabled, true, 'there is nothing to approve yet');
 });
 
@@ -306,8 +306,8 @@ test('the confirm button enables once a folder is supplied', () => {
       daily_scan_local_time: '09:00'
     }
   });
-  const input = doc.getElementById('downloadsJanitorPath');
-  const confirm = doc.getElementById('downloadsJanitorConfirm');
+  const input = doc.getElementById('fileJanitorPath');
+  const confirm = doc.getElementById('fileJanitorConfirm');
   assert.equal(confirm.disabled, true);
 
   input.value = '/Users/someone/Scans';
@@ -322,16 +322,16 @@ test('the confirm button enables once a folder is supplied', () => {
 test('a preset suggestion still pre-fills and is immediately approvable', () => {
   const doc = setup();
   openConsole(setupRequiredStatus);
-  const input = doc.getElementById('downloadsJanitorPath');
+  const input = doc.getElementById('fileJanitorPath');
   assert.equal(input.value, '~/Downloads', 'the Downloads preset still suggests its folder');
-  const confirm = doc.getElementById('downloadsJanitorConfirm');
+  const confirm = doc.getElementById('fileJanitorConfirm');
   assert.equal(confirm.disabled, false);
 });
 
 test('the setup card is titled File Janitor, not Downloads Janitor', () => {
   const doc = setup();
   openConsole(setupRequiredStatus);
-  const title = doc.getElementById('downloadsJanitorTitle');
+  const title = doc.getElementById('fileJanitorTitle');
   assert.equal(title.textContent, 'File Janitor');
 });
 
@@ -341,10 +341,10 @@ test('the folder input is labelled and described for screen readers', () => {
   const host = surface(doc);
   const label = host.all(n => n.tagName === 'LABEL')[0];
   assert.ok(label, 'expected a label');
-  assert.equal(label.getAttribute('for'), 'downloadsJanitorPath');
-  const input = doc.getElementById('downloadsJanitorPath');
-  assert.equal(input.getAttribute('aria-describedby'), 'downloadsJanitorDisclosure');
-  const error = doc.getElementById('downloadsJanitorError');
+  assert.equal(label.getAttribute('for'), 'fileJanitorPath');
+  const input = doc.getElementById('fileJanitorPath');
+  assert.equal(input.getAttribute('aria-describedby'), 'fileJanitorDisclosure');
+  const error = doc.getElementById('fileJanitorError');
   assert.equal(error.getAttribute('aria-live'), 'polite');
 });
 
@@ -356,11 +356,11 @@ test('confirming with an empty folder reports an error and calls no endpoint', a
     called = true;
     return { ok: true, json: async () => ({}) };
   };
-  doc.getElementById('downloadsJanitorPath').value = '   ';
-  doc.getElementById('downloadsJanitorConfirm').click();
+  doc.getElementById('fileJanitorPath').value = '   ';
+  doc.getElementById('fileJanitorConfirm').click();
   await new Promise(r => setTimeout(r, 0));
   assert.equal(called, false, 'an empty selection must not reach the server');
-  assert.equal(doc.getElementById('downloadsJanitorError').hidden, false);
+  assert.equal(doc.getElementById('fileJanitorError').hidden, false);
 });
 
 test('confirming posts the confirmed path and renders the returned status', async () => {
@@ -394,8 +394,8 @@ test('confirming posts the confirmed path and renders the returned status', asyn
       })
     };
   };
-  doc.getElementById('downloadsJanitorPath').value = '/tmp/Inbox';
-  doc.getElementById('downloadsJanitorConfirm').click();
+  doc.getElementById('fileJanitorPath').value = '/tmp/Inbox';
+  doc.getElementById('fileJanitorConfirm').click();
   await new Promise(r => setTimeout(r, 0));
 
   assert.match(sent.url, /\/api\/workspaces\/ws-1\/file-janitor\/setup$/);
@@ -417,14 +417,14 @@ test('a setup failure shows the server message and re-enables the button', async
       }
     })
   });
-  doc.getElementById('downloadsJanitorPath').value = '/tmp/blocked';
-  doc.getElementById('downloadsJanitorConfirm').click();
+  doc.getElementById('fileJanitorPath').value = '/tmp/blocked';
+  doc.getElementById('fileJanitorConfirm').click();
   await new Promise(r => setTimeout(r, 0));
 
-  const error = doc.getElementById('downloadsJanitorError');
+  const error = doc.getElementById('fileJanitorError');
   assert.equal(error.hidden, false);
   assert.match(error.textContent, /permission/i);
-  assert.equal(doc.getElementById('downloadsJanitorConfirm').disabled, false);
+  assert.equal(doc.getElementById('fileJanitorConfirm').disabled, false);
 });
 
 test('readiness rows carry a non-color mark and a status word per component', () => {
@@ -447,7 +447,7 @@ test('readiness rows carry a non-color mark and a status word per component', ()
     }
   });
   const host = surface(doc);
-  const marks = host.all(n => n.className === 'dj-row-mark');
+  const marks = host.all(n => n.className === 'fj-row-mark');
   assert.equal(marks.length, 3);
   assert.deepEqual(
     marks.map(m => m.textContent),
@@ -545,7 +545,7 @@ function renderReview(doc, batch = batchFixture(), candidates = candidatesFixtur
 }
 
 function rowsIn(host) {
-  return host.all(n => n.className && String(n.className).includes('dj-row-item'));
+  return host.all(n => n.className && String(n.className).includes('fj-row-item'));
 }
 
 test('review table renders a row per candidate with the facts needed to judge it', () => {
@@ -578,25 +578,25 @@ test('review rows present five decisions-first columns with expandable file deta
 
   disclosure.click();
   assert.equal(disclosure.getAttribute('aria-expanded'), 'true');
-  const details = row.all(node => node.className === 'dj-file-details')[0];
+  const details = row.all(node => node.className === 'fj-file-details')[0];
   assert.equal(details.hidden, false);
   assert.match(details.textContent, /Type \.pdf/);
   assert.match(details.textContent, /Size 200 KB/);
   assert.match(details.textContent, /Modified/);
 
   panel.renderBatch();
-  const refreshed = rowsIn(doc.getElementById('downloadsJanitorBatch')).find(
+  const refreshed = rowsIn(doc.getElementById('fileJanitorBatch')).find(
     node => node.getAttribute('data-candidate-id') === 'c1'
   );
   const refreshedDisclosure = refreshed.all(
     node => node.tagName === 'BUTTON' && node.getAttribute('data-fj-file-details') === 'c1'
   )[0];
   assert.equal(refreshedDisclosure.getAttribute('aria-expanded'), 'true');
-  assert.equal(refreshed.all(node => node.className === 'dj-file-details')[0].hidden, false);
+  assert.equal(refreshed.all(node => node.className === 'fj-file-details')[0].hidden, false);
 
   panel._setBatch({ ...batchFixture(), id: 'batch-2' }, candidatesFixture(), CATEGORIES);
   panel.renderBatch();
-  const replacement = rowsIn(doc.getElementById('downloadsJanitorBatch')).find(
+  const replacement = rowsIn(doc.getElementById('fileJanitorBatch')).find(
     node => node.getAttribute('data-candidate-id') === 'c1'
   );
   assert.equal(
@@ -626,7 +626,7 @@ test('whole-batch progress separates remaining, subset, outcomes, and ineligible
   });
   renderReview(doc, batch, candidatesFixture());
 
-  const progress = surface(doc).all(node => node.className === 'dj-batch-progress')[0];
+  const progress = surface(doc).all(node => node.className === 'fj-batch-progress')[0];
   assert.ok(progress, 'the review needs a whole-batch progress readout');
   assert.match(progress.textContent, /3 remaining of 15 candidates/);
   assert.match(progress.textContent, /2 need review within remaining/);
@@ -674,7 +674,7 @@ test('the batch summary states counts, scan source, and when it ran', () => {
 test('every row starts unselected', () => {
   const doc = setup();
   const host = renderReview(doc);
-  const boxes = host.all(n => n.className === 'dj-select');
+  const boxes = host.all(n => n.className === 'fj-select');
   assert.equal(boxes.length, 3);
   boxes.forEach(box => assert.equal(box.checked, false));
   assert.deepEqual(panel._selected(), []);
@@ -684,7 +684,7 @@ test('every row starts unselected', () => {
 test('a low-confidence candidate is flagged for review in text, not colour alone', () => {
   const doc = setup();
   const host = renderReview(doc);
-  const flags = host.all(n => n.className === 'dj-flag');
+  const flags = host.all(n => n.className === 'fj-flag');
   assert.equal(flags.length, 1);
   assert.match(flags[0].textContent, /Needs review/);
 });
@@ -698,7 +698,7 @@ test('changing a category records the decision immediately', async () => {
     return { ok: true, json: async () => ({ batch: null, candidates: [] }) };
   };
 
-  const select = host.all(n => n.className === 'dj-category')[0];
+  const select = host.all(n => n.className === 'fj-category')[0];
   select.value = 'archives';
   select.dispatch('change');
   await new Promise(r => setTimeout(r, 0));
@@ -733,11 +733,11 @@ test('Skip records a skip decision for that candidate only', async () => {
 test('an already-skipped row offers no category control and no Skip', () => {
   const doc = setup();
   const host = renderReview(doc);
-  const skipped = rowsIn(host).find(row => String(row.className).includes('dj-row-state-skipped'));
+  const skipped = rowsIn(host).find(row => String(row.className).includes('fj-row-state-skipped'));
   assert.ok(skipped, 'expected the skipped row');
-  assert.equal(skipped.all(n => n.className === 'dj-category').length, 0);
+  assert.equal(skipped.all(n => n.className === 'fj-category').length, 0);
   assert.equal(skipped.all(n => n.tagName === 'BUTTON' && n.textContent === 'Skip').length, 0);
-  const box = skipped.all(n => n.className === 'dj-select')[0];
+  const box = skipped.all(n => n.className === 'fj-select')[0];
   assert.equal(box.disabled, true, 'a resolved row cannot be selected for action');
 });
 
@@ -826,13 +826,13 @@ test('the table and its controls carry screen-reader labels', () => {
   assert.equal(headers.length, 5);
   headers.forEach(header => assert.equal(header.getAttribute('scope'), 'col'));
 
-  const box = host.all(n => n.className === 'dj-select')[0];
+  const box = host.all(n => n.className === 'fj-select')[0];
   assert.match(box.getAttribute('aria-label'), /Select invoice-2026-07\.pdf/);
-  const select = host.all(n => n.className === 'dj-category')[0];
+  const select = host.all(n => n.className === 'fj-category')[0];
   assert.match(select.getAttribute('aria-label'), /Category for invoice-2026-07\.pdf/);
 
   const filterButton = host.all(
-    n => n.tagName === 'BUTTON' && String(n.className).startsWith('dj-filter')
+    n => n.tagName === 'BUTTON' && String(n.className).startsWith('fj-filter')
   )[0];
   assert.ok(filterButton.getAttribute('aria-pressed'), 'filters expose pressed state');
 });
@@ -863,16 +863,16 @@ test('Scan now reports honestly when a scan finds nothing new', async () => {
     return { ok: true, json: async () => ({ batch: null, candidates: [] }) };
   };
 
-  doc.getElementById('downloadsJanitorScan').click();
+  doc.getElementById('fileJanitorScan').click();
   await new Promise(r => setTimeout(r, 0));
   await new Promise(r => setTimeout(r, 0));
 
-  const error = doc.getElementById('downloadsJanitorError');
+  const error = doc.getElementById('fileJanitorError');
   assert.equal(error.hidden, true, 'an empty successful scan is not an error');
   assert.match(text(doc), /Scan complete — no new proposals/);
   assert.match(text(doc), /No changes were made/);
   // The button is usable again.
-  assert.equal(doc.getElementById('downloadsJanitorScan').disabled, false);
+  assert.equal(doc.getElementById('fileJanitorScan').disabled, false);
 });
 
 test('a scan with no new proposals keeps an existing review batch and reports that fact', async () => {
@@ -897,14 +897,14 @@ test('a scan with no new proposals keeps an existing review batch and reports th
     };
   };
 
-  doc.getElementById('downloadsJanitorScan').click();
+  doc.getElementById('fileJanitorScan').click();
   await settle();
   await settle();
 
   assert.match(text(doc), /Scan complete — no new proposals/);
   assert.match(text(doc), /current review batch is unchanged/);
   assert.match(text(doc), /invoice-2026-07\.pdf/);
-  assert.equal(doc.getElementById('downloadsJanitorError').hidden, true);
+  assert.equal(doc.getElementById('fileJanitorError').hidden, true);
 });
 
 test('a resolved pending batch becomes a completed-batch empty state', async () => {
@@ -943,13 +943,13 @@ test('a rejected decision is not left on screen as though it were saved', async 
     };
   };
 
-  const select = host.all(n => n.className === 'dj-category')[0];
+  const select = host.all(n => n.className === 'fj-category')[0];
   select.value = 'archives';
   select.dispatch('change');
   await new Promise(r => setTimeout(r, 0));
   await new Promise(r => setTimeout(r, 0));
 
-  assert.match(doc.getElementById('downloadsJanitorError').textContent, /not allowed/);
+  assert.match(doc.getElementById('fileJanitorError').textContent, /not allowed/);
   assert.ok(reloaded, 'the panel must repaint from the server after a rejected change');
 });
 
@@ -978,7 +978,7 @@ const PREVIEW = {
 test('the approve control states the count and is disabled until something is selected', () => {
   const doc = setup();
   renderReview(doc);
-  const approve = doc.getElementById('downloadsJanitorApprove');
+  const approve = doc.getElementById('fileJanitorApprove');
   assert.equal(approve.disabled, true);
   assert.match(approve.textContent, /Review selected changes/);
 
@@ -1007,7 +1007,7 @@ test('approving previews the plan without moving anything', async () => {
     };
   };
 
-  doc.getElementById('downloadsJanitorApprove').click();
+  doc.getElementById('fileJanitorApprove').click();
   await new Promise(r => setTimeout(r, 0));
 
   assert.ok(
@@ -1037,7 +1037,7 @@ test('the confirmation shows each resolved destination and flags forced renames'
           json: async () => ({ batch: batchFixture(), candidates: candidatesFixture() })
         };
 
-  doc.getElementById('downloadsJanitorApprove').click();
+  doc.getElementById('fileJanitorApprove').click();
   await new Promise(r => setTimeout(r, 0));
 
   const body = text(doc);
@@ -1090,9 +1090,9 @@ test('confirming sends the approval token and reports per-file results', async (
     return { ok: true, json: async () => ({ batch: null, candidates: [] }) };
   };
 
-  doc.getElementById('downloadsJanitorApprove').click();
+  doc.getElementById('fileJanitorApprove').click();
   await new Promise(r => setTimeout(r, 0));
-  doc.getElementById('downloadsJanitorConfirmApply').click();
+  doc.getElementById('fileJanitorConfirmApply').click();
   await new Promise(r => setTimeout(r, 0));
   await new Promise(r => setTimeout(r, 0));
 
@@ -1172,9 +1172,9 @@ test('mixed outcomes name moves, Trash, failures, stale files, and replay truthf
     return { ok: true, json: async () => ({ batch: null, candidates: [] }) };
   };
 
-  doc.getElementById('downloadsJanitorApprove').click();
+  doc.getElementById('fileJanitorApprove').click();
   await settle();
-  doc.getElementById('downloadsJanitorConfirmApply').click();
+  doc.getElementById('fileJanitorConfirmApply').click();
   await settle();
   await settle();
 
@@ -1225,9 +1225,9 @@ test('a stale result explains itself and offers a rescan', async () => {
     return { ok: true, json: async () => ({ batch: null, candidates: [] }) };
   };
 
-  doc.getElementById('downloadsJanitorApprove').click();
+  doc.getElementById('fileJanitorApprove').click();
   await new Promise(r => setTimeout(r, 0));
-  doc.getElementById('downloadsJanitorConfirmApply').click();
+  doc.getElementById('fileJanitorConfirmApply').click();
   await new Promise(r => setTimeout(r, 0));
   await new Promise(r => setTimeout(r, 0));
 
@@ -1252,7 +1252,7 @@ test('cancelling abandons the approval and moves nothing', async () => {
     };
   };
 
-  doc.getElementById('downloadsJanitorApprove').click();
+  doc.getElementById('fileJanitorApprove').click();
   await new Promise(r => setTimeout(r, 0));
 
   const host = surface(doc);
@@ -1292,13 +1292,13 @@ test('a rejected approval is reported and nothing is left looking approved', asy
     };
   };
 
-  doc.getElementById('downloadsJanitorApprove').click();
+  doc.getElementById('fileJanitorApprove').click();
   await new Promise(r => setTimeout(r, 0));
 
-  assert.match(doc.getElementById('downloadsJanitorError').textContent, /rescan/);
+  assert.match(doc.getElementById('fileJanitorError').textContent, /rescan/);
   assert.doesNotMatch(text(doc), /Confirm these moves/);
   // The approve control is usable again.
-  assert.equal(doc.getElementById('downloadsJanitorApprove').disabled, false);
+  assert.equal(doc.getElementById('fileJanitorApprove').disabled, false);
 });
 
 // Applying every file in a batch empties it. The report of what happened must
@@ -1344,9 +1344,9 @@ test('results survive the batch they emptied', async () => {
     return { ok: true, json: async () => ({ batch: null, candidates: [] }) };
   };
 
-  doc.getElementById('downloadsJanitorApprove').click();
+  doc.getElementById('fileJanitorApprove').click();
   await new Promise(r => setTimeout(r, 0));
-  doc.getElementById('downloadsJanitorConfirmApply').click();
+  doc.getElementById('fileJanitorConfirmApply').click();
   await new Promise(r => setTimeout(r, 0));
   await new Promise(r => setTimeout(r, 0));
 
@@ -1402,9 +1402,9 @@ test('authoritative results survive when their follow-up batch refresh fails', a
     return { ok: false, json: async () => ({}) };
   };
 
-  doc.getElementById('downloadsJanitorApprove').click();
+  doc.getElementById('fileJanitorApprove').click();
   await settle();
-  doc.getElementById('downloadsJanitorConfirmApply').click();
+  doc.getElementById('fileJanitorConfirmApply').click();
   await settle();
   await settle();
 
@@ -1444,7 +1444,7 @@ test('a file marked for Trash cannot also be selected for a move', () => {
   // The move selection released it, and its checkbox is no longer selectable.
   assert.deepEqual(panel._selected(), []);
   const host = surface(doc);
-  const box = host.all(n => n.className === 'dj-select')[0];
+  const box = host.all(n => n.className === 'fj-select')[0];
   assert.equal(box.disabled, true, 'a file bound for Trash is not a move candidate');
 });
 
@@ -1454,7 +1454,7 @@ test('the approve control counts moves and removals separately', () => {
   panel._select('c1');
   trashToggleFor(doc, 'payload.bin').click();
 
-  const approve = doc.getElementById('downloadsJanitorApprove');
+  const approve = doc.getElementById('fileJanitorApprove');
   assert.match(approve.textContent, /1 move/);
   assert.match(approve.textContent, /1 to Trash/);
 });
@@ -1482,7 +1482,7 @@ test('a batch containing a removal requires a separate acknowledgement of the ex
           json: async () => ({ batch: batchFixture(), candidates: candidatesFixture() })
         };
 
-  doc.getElementById('downloadsJanitorApprove').click();
+  doc.getElementById('fileJanitorApprove').click();
   await new Promise(r => setTimeout(r, 0));
 
   const body = text(doc);
@@ -1493,9 +1493,9 @@ test('a batch containing a removal requires a separate acknowledgement of the ex
   assert.match(body, /Trash \(restorable\)/);
 
   // The confirm control is blocked until the removal is acknowledged by count.
-  const confirm = doc.getElementById('downloadsJanitorConfirmApply');
+  const confirm = doc.getElementById('fileJanitorConfirmApply');
   assert.equal(confirm.disabled, true, 'a removal must not be one click away');
-  const ack = doc.getElementById('downloadsJanitorTrashAck');
+  const ack = doc.getElementById('fileJanitorTrashAck');
   assert.ok(ack, 'expected a separate acknowledgement for the removal');
   assert.match(body, /Yes, move 1 file to the Trash/);
 
@@ -1516,11 +1516,11 @@ test('a move-only batch needs no extra acknowledgement', async () => {
           json: async () => ({ batch: batchFixture(), candidates: candidatesFixture() })
         };
 
-  doc.getElementById('downloadsJanitorApprove').click();
+  doc.getElementById('fileJanitorApprove').click();
   await new Promise(r => setTimeout(r, 0));
 
-  assert.equal(doc.getElementById('downloadsJanitorTrashAck'), null);
-  assert.equal(doc.getElementById('downloadsJanitorConfirmApply').disabled, false);
+  assert.equal(doc.getElementById('fileJanitorTrashAck'), null);
+  assert.equal(doc.getElementById('fileJanitorConfirmApply').disabled, false);
   assert.match(text(doc), /Nothing is deleted/);
 });
 
@@ -1544,7 +1544,7 @@ test('approving sends each file under the operation it was marked with', async (
     };
   };
 
-  doc.getElementById('downloadsJanitorApprove').click();
+  doc.getElementById('fileJanitorApprove').click();
   await new Promise(r => setTimeout(r, 0));
 
   const byId = Object.fromEntries(sent.decisions.map(d => [d.candidate_id, d]));
@@ -1564,7 +1564,7 @@ test('Trash marks never survive a repaint into a different batch', () => {
   // A fresh batch arrives.
   renderReview(doc, batchFixture(), candidatesFixture());
   assert.doesNotMatch(text(doc), /marked for Trash/);
-  const approve = doc.getElementById('downloadsJanitorApprove');
+  const approve = doc.getElementById('fileJanitorApprove');
   assert.equal(approve.disabled, true, 'nothing should be pending from the previous batch');
 });
 
@@ -1597,7 +1597,7 @@ test('a Trash-only batch can be approved', async () => {
     };
   };
 
-  doc.getElementById('downloadsJanitorApprove').click();
+  doc.getElementById('fileJanitorApprove').click();
   await new Promise(r => setTimeout(r, 0));
   assert.ok(previewed, 'a Trash-only batch must reach the preview');
   assert.match(text(doc), /Confirm these moves/);
@@ -1735,7 +1735,7 @@ test('a refused undo is reported with its reason, not as a failure of the app', 
   await new Promise(r => setTimeout(r, 0));
 
   assert.match(
-    doc.getElementById('downloadsJanitorHistoryStatus').textContent,
+    doc.getElementById('fileJanitorHistoryStatus').textContent,
     /already using the original name/
   );
 });
@@ -1782,7 +1782,7 @@ function statusFixture(overrides = {}) {
 }
 
 function badgeText(doc) {
-  const node = doc.getElementById('downloadsJanitorActivity');
+  const node = doc.getElementById('fileJanitorActivity');
   return node ? node.textContent : '';
 }
 
@@ -1826,17 +1826,17 @@ test('a paused workspace says so, and says what pausing does not stop', () => {
 
   assert.equal(badgeText(doc), 'Paused');
   assert.match(cardText(doc), /automatic scanning paused/);
-  const control = doc.getElementById('downloadsJanitorPause');
+  const control = doc.getElementById('fileJanitorPause');
   assert.match(control.textContent, /Resume watching/);
   // Scanning on demand is still available while paused.
-  assert.equal(doc.getElementById('downloadsJanitorScan').disabled, false);
+  assert.equal(doc.getElementById('fileJanitorScan').disabled, false);
 });
 
 test('the pause control explains what is kept', () => {
   const doc = setup();
   panel._setBatch(null, [], CATEGORIES);
   openConsole(statusFixture());
-  const control = doc.getElementById('downloadsJanitorPause');
+  const control = doc.getElementById('fileJanitorPause');
   assert.match(control.textContent, /Pause watching/);
   assert.match(control.getAttribute('title'), /settings, pending review, and history are kept/);
 });
@@ -1861,7 +1861,7 @@ test('pausing posts the new state and repaints from the server answer', async ()
     return { ok: true, json: async () => ({ batch: null, candidates: [] }) };
   };
 
-  doc.getElementById('downloadsJanitorPause').click();
+  doc.getElementById('fileJanitorPause').click();
   await new Promise(r => setTimeout(r, 0));
   await new Promise(r => setTimeout(r, 0));
 
@@ -1884,7 +1884,7 @@ test('the header says Scanning while a scan the user started is running', async 
     return { ok: true, json: async () => ({ batch: null, candidates: [] }) };
   };
 
-  doc.getElementById('downloadsJanitorScan').click();
+  doc.getElementById('fileJanitorScan').click();
   await new Promise(r => setTimeout(r, 0));
   await new Promise(r => setTimeout(r, 0));
 
@@ -1934,7 +1934,7 @@ test('a cloud provider is named, and the pending confirmation is the action', ()
   assert.match(body, /Cloud with consent · SomeCloud/);
   assert.match(body, /Consent required before any extract is sent/);
 
-  const host = doc.getElementById('downloadsJanitorMount');
+  const host = doc.getElementById('fileJanitorMount');
   const consentReview = host.all(
     n => n.tagName === 'BUTTON' && /Review consent/.test(n.textContent)
   )[0];
@@ -2019,7 +2019,7 @@ test('changing a setting patches only that field', async () => {
     return { ok: true, json: async () => ({ batch: null, candidates: [] }) };
   };
 
-  const input = doc.getElementById('downloadsJanitorDailyTime');
+  const input = doc.getElementById('fileJanitorDailyTime');
   input.value = '07:30';
   input.dispatch('change');
   await new Promise(r => setTimeout(r, 0));
@@ -2044,7 +2044,7 @@ test('a test scan reports what it would do and says nothing changed', async () =
   host.all(n => n.tagName === 'BUTTON' && n.textContent === 'Run a test scan')[0].click();
   await new Promise(r => setTimeout(r, 0));
 
-  const status = doc.getElementById('downloadsJanitorSettingsStatus').textContent;
+  const status = doc.getElementById('fileJanitorSettingsStatus').textContent;
   assert.match(status, /3 files would be proposed/);
   assert.match(status, /2 skipped/);
   assert.match(status, /Nothing was changed/);
@@ -2073,7 +2073,7 @@ test('stopping use of a folder confirms first and explains what is kept', async 
   await new Promise(r => setTimeout(r, 0));
   assert.equal(called, false, 'the first press must only warn');
 
-  const warning = doc.getElementById('downloadsJanitorSettingsStatus').textContent;
+  const warning = doc.getElementById('fileJanitorSettingsStatus').textContent;
   assert.match(warning, /Your files stay exactly where they are/);
   assert.match(warning, /history is kept/);
   assert.match(warning, /again to confirm/);
@@ -2129,7 +2129,7 @@ test('the Settings tab reports whether it is the selected tab', () => {
   tabFor('settings').click();
   assert.equal(tabFor('settings').getAttribute('aria-selected'), 'true');
   assert.equal(tabFor('review').getAttribute('aria-selected'), 'false');
-  assert.ok(doc.getElementById('downloadsJanitorSettingsHost'), 'the settings form is on screen');
+  assert.ok(doc.getElementById('fileJanitorSettingsHost'), 'the settings form is on screen');
 });
 
 // --- Accessibility ------------------------------------------------------
@@ -2208,11 +2208,11 @@ test('focus goes to the acknowledgement, not the disabled button, on a removal',
           json: async () => ({ batch: batchFixture(), candidates: candidatesFixture() })
         };
 
-  doc.getElementById('downloadsJanitorApprove').click();
+  doc.getElementById('fileJanitorApprove').click();
   await new Promise(r => setTimeout(r, 0));
 
-  const ack = doc.getElementById('downloadsJanitorTrashAck');
-  const confirm = doc.getElementById('downloadsJanitorConfirmApply');
+  const ack = doc.getElementById('fileJanitorTrashAck');
+  const confirm = doc.getElementById('fileJanitorConfirmApply');
   assert.equal(confirm.disabled, true);
   assert.equal(
     doc.activeElement,
@@ -2220,7 +2220,7 @@ test('focus goes to the acknowledgement, not the disabled button, on a removal',
     'focusing the disabled confirm button would drop focus to the body'
   );
   // The button says why it is unavailable rather than being inert and silent.
-  assert.equal(confirm.getAttribute('aria-describedby'), 'downloadsJanitorTrashAckText');
+  assert.equal(confirm.getAttribute('aria-describedby'), 'fileJanitorTrashAckText');
 
   // Acknowledging hands the user straight to the action it unlocks.
   ack.checked = true;
@@ -2241,7 +2241,7 @@ test('cancelling the confirmation returns focus to the control that opened it', 
           json: async () => ({ batch: batchFixture(), candidates: candidatesFixture() })
         };
 
-  const approve = doc.getElementById('downloadsJanitorApprove');
+  const approve = doc.getElementById('fileJanitorApprove');
   approve.focus();
   approve.click();
   await new Promise(r => setTimeout(r, 0));
@@ -2326,11 +2326,11 @@ test('the confirm button works the instant it appears', async () => {
     };
   };
 
-  doc.getElementById('downloadsJanitorApprove').click();
+  doc.getElementById('fileJanitorApprove').click();
   await new Promise(r => setTimeout(r, 0));
 
   // Press it immediately, with no intervening turns.
-  doc.getElementById('downloadsJanitorConfirmApply').click();
+  doc.getElementById('fileJanitorConfirmApply').click();
   await new Promise(r => setTimeout(r, 0));
 
   assert.ok(
@@ -2362,15 +2362,15 @@ test('a batch reload does not invalidate a confirmation already on screen', asyn
     };
   };
 
-  doc.getElementById('downloadsJanitorApprove').click();
+  doc.getElementById('fileJanitorApprove').click();
   await new Promise(r => setTimeout(r, 0));
-  assert.ok(doc.getElementById('downloadsJanitorConfirmApply'), 'expected a confirmation');
+  assert.ok(doc.getElementById('fileJanitorConfirmApply'), 'expected a confirmation');
 
   // A reload of the same batch lands while the confirmation is up — exactly
   // what an in-flight loadBatch from the preceding scan does.
   await panel._reloadBatch();
 
-  doc.getElementById('downloadsJanitorConfirmApply').click();
+  doc.getElementById('fileJanitorConfirmApply').click();
   await new Promise(r => setTimeout(r, 0));
   assert.ok(
     requested.some(url => url.endsWith('/apply')),
@@ -2402,8 +2402,8 @@ test('a wizard-enabled workspace shows a setup entry, not a second folder choose
   openConsole(setupRequiredStatus);
 
   // The retired card's controls are gone: one authoritative setup surface.
-  assert.equal(doc.getElementById('downloadsJanitorPath'), null);
-  assert.equal(doc.getElementById('downloadsJanitorConfirm'), null);
+  assert.equal(doc.getElementById('fileJanitorPath'), null);
+  assert.equal(doc.getElementById('fileJanitorConfirm'), null);
   assert.match(text(doc), /Continue setup/);
   assert.match(text(doc), /Setup is not finished/);
   withoutSetupWizard();
@@ -2424,7 +2424,7 @@ test('a workspace whose blueprint has no wizard keeps the original setup card', 
   openConsole(setupRequiredStatus);
   // Nobody loses their way to set up because their workspace predates the
   // wizard.
-  assert.ok(doc.getElementById('downloadsJanitorPath'), 'the legacy card still renders');
+  assert.ok(doc.getElementById('fileJanitorPath'), 'the legacy card still renders');
   assert.match(text(doc), /Use this folder/);
 });
 
@@ -2443,7 +2443,7 @@ test('the directory step offers a picker and never an editable path field', () =
   assert.match(container.textContent, /~\/Downloads/);
   // FR-52: the picker is the only way in. A text field would let a typo or a
   // paste become a grant the user did not mean to give.
-  assert.equal(doc.getElementById('downloadsJanitorPath'), null);
+  assert.equal(doc.getElementById('fileJanitorPath'), null);
   const label = panel._setupSteps.directory.primaryLabel({
     step: { adapter: 'downloads_janitor' }
   });
@@ -2601,12 +2601,12 @@ test('unattended watching cannot be resumed from the panel before setup approves
     privacy: {}
   });
 
-  const control = doc.getElementById('downloadsJanitorPause');
+  const control = doc.getElementById('fileJanitorPause');
   assert.ok(control, 'the control stays visible rather than disappearing');
   // FR-56: the action that needs the missing approval says where the decision
   // lives instead of quietly doing it.
   assert.equal(control.textContent, 'Approve in setup');
-  assert.ok(doc.getElementById('downloadsJanitorScan'), 'scanning on demand is unaffected');
+  assert.ok(doc.getElementById('fileJanitorScan'), 'scanning on demand is unaffected');
   withoutSetupWizard();
 });
 
@@ -2626,7 +2626,7 @@ test('once setup is ready the panel resumes watching normally', () => {
     readiness: { state: 'ready', checks: [] },
     privacy: {}
   });
-  assert.equal(doc.getElementById('downloadsJanitorPause').textContent, 'Resume watching');
+  assert.equal(doc.getElementById('fileJanitorPause').textContent, 'Resume watching');
   withoutSetupWizard();
 });
 
@@ -2680,7 +2680,7 @@ test('an unconfigured install opens straight into setup, with no empty tabs', ()
   openConsole(setupRequiredStatus);
   assert.equal(panel.isOpen(), true);
   // The real folder chooser, not a placeholder.
-  assert.ok(doc.getElementById('downloadsJanitorPath'), 'expected the real setup surface');
+  assert.ok(doc.getElementById('fileJanitorPath'), 'expected the real setup surface');
   // Review/History/Settings would all be empty before there is a folder.
   const tabs = surface(doc).all(n => n.getAttribute('role') === 'tab');
   assert.equal(tabs.length, 0, 'tabs must not appear before setup finishes');
@@ -2781,7 +2781,7 @@ test('closing after a view switch never restores focus to the now-hidden Details
   panel.open({ source: 'workspace-details', trigger: cardTrigger });
   doc.body.dataset.workspaceViewMode = 'map';
   panel._syncSummaryVisibility();
-  assert.equal(doc.getElementById('downloadsJanitorMount').hidden, true);
+  assert.equal(doc.getElementById('fileJanitorMount').hidden, true);
 
   panel.close();
   assert.equal(doc.activeElement, station, 'the visible station is the live equivalent entry');
@@ -3009,7 +3009,7 @@ test('Workspace Details carries no review table and no settings form', () => {
   doc.body.dataset = { workspaceViewMode: 'details' };
   renderReview(doc);
   panel.render(statusFixture());
-  const card = doc.getElementById('downloadsJanitorMount');
+  const card = doc.getElementById('fileJanitorMount');
 
   // The compact card answers "is anything waiting?" and offers a way in.
   assert.match(card.textContent, /File depot/);
@@ -3024,10 +3024,10 @@ test('Workspace Details carries no review table and no settings form', () => {
   // form is exactly what this split removes: two surfaces acting on the same
   // files, one of them stale and unseen.
   assert.equal(card.all(n => n.tagName === 'TABLE').length, 0);
-  assert.equal(card.all(n => String(n.className).startsWith('dj-row-item')).length, 0);
-  assert.equal(card.all(n => n.id === 'downloadsJanitorSettingsHost').length, 0);
-  assert.equal(card.all(n => n.id === 'downloadsJanitorBatch').length, 0);
-  assert.equal(card.all(n => n.id === 'downloadsJanitorHistoryHost').length, 0);
+  assert.equal(card.all(n => String(n.className).startsWith('fj-row-item')).length, 0);
+  assert.equal(card.all(n => n.id === 'fileJanitorSettingsHost').length, 0);
+  assert.equal(card.all(n => n.id === 'fileJanitorBatch').length, 0);
+  assert.equal(card.all(n => n.id === 'fileJanitorHistoryHost').length, 0);
 });
 
 test('the compact card keeps a 179-file paused queue review-led', () => {
@@ -3145,7 +3145,7 @@ test('the compact card sends consent-required work to Settings', () => {
 test('the configured summary is visible only in Details across status refreshes', () => {
   const doc = setup();
   const status = statusFixture();
-  const card = doc.getElementById('downloadsJanitorMount');
+  const card = doc.getElementById('fileJanitorMount');
 
   doc.body.dataset = { workspaceViewMode: 'details' };
   panel.render(status);
@@ -3163,7 +3163,7 @@ test('the configured summary is visible only in Details across status refreshes'
 test('slow capability status cannot reveal the summary in a direct Map entry', () => {
   const doc = setup();
   doc.body.dataset = { workspaceViewMode: 'map' };
-  const card = doc.getElementById('downloadsJanitorMount');
+  const card = doc.getElementById('fileJanitorMount');
 
   panel.render({ applies: false });
   assert.equal(card.hidden, true);
@@ -3178,15 +3178,15 @@ test('the summary falls back to Details when Workspace Command is unavailable', 
   const doc = setup();
   delete doc.body.dataset;
   panel.render(statusFixture());
-  assert.equal(doc.getElementById('downloadsJanitorMount').hidden, false);
+  assert.equal(doc.getElementById('fileJanitorMount').hidden, false);
 });
 
 test('the console header carries the real scan and pause controls', () => {
   const doc = setup();
   renderReview(doc);
   const header = surface(doc);
-  assert.ok(header.all(n => n.id === 'downloadsJanitorScan')[0], 'expected a real Scan now');
-  assert.ok(header.all(n => n.id === 'downloadsJanitorPause')[0], 'expected a real Pause');
+  assert.ok(header.all(n => n.id === 'fileJanitorScan')[0], 'expected a real Scan now');
+  assert.ok(header.all(n => n.id === 'fileJanitorPause')[0], 'expected a real Pause');
   assert.match(surface(doc).textContent, /2 files ready for review/);
 });
 
@@ -3195,8 +3195,8 @@ test('before setup the header offers no scan or pause', () => {
   openConsole(setupRequiredStatus);
   // Neither applies to a folder that has not been chosen; offering them would
   // suggest File Janitor is already doing something.
-  assert.equal(surface(doc).all(n => n.id === 'downloadsJanitorScan').length, 0);
-  assert.equal(surface(doc).all(n => n.id === 'downloadsJanitorPause').length, 0);
+  assert.equal(surface(doc).all(n => n.id === 'fileJanitorScan').length, 0);
+  assert.equal(surface(doc).all(n => n.id === 'fileJanitorPause').length, 0);
   assert.ok(surface(doc).all(n => n.getAttribute('data-fj-console-close') === '')[0]);
 });
 
@@ -3251,7 +3251,7 @@ test('a deep link to a candidate that is gone still opens a working tab', () => 
   // Focus lands on the dialog itself, which puts a screen reader at the title
   // rather than partway into the controls.
   assert.equal(doc.activeElement.id, 'fileJanitorConsoleDialog');
-  assert.equal(doc.getElementById('downloadsJanitorError').hidden, true, 'not an error');
+  assert.equal(doc.getElementById('fileJanitorError').hidden, true, 'not an error');
 });
 
 // ------------------------------------------------------ paging and selection
@@ -3312,8 +3312,8 @@ test('a failed batch read is unavailable, not an empty folder, and keeps stale d
   assert.match(host.textContent, /Showing the last known batch/);
   assert.match(host.textContent, /invoice-2026-07\.pdf/);
   assert.doesNotMatch(host.textContent, /Nothing to review/);
-  assert.equal(host.all(node => node.className === 'dj-select')[0].disabled, true);
-  assert.equal(doc.getElementById('downloadsJanitorApprove').disabled, true);
+  assert.equal(host.all(node => node.className === 'fj-select')[0].disabled, true);
+  assert.equal(doc.getElementById('fileJanitorApprove').disabled, true);
   assert.ok(host.all(node => node.tagName === 'BUTTON' && node.textContent === 'Retry')[0]);
 });
 
@@ -3337,10 +3337,10 @@ test('paging forward asks for the next page and keeps the counts', async () => {
   await settle();
   await panel._reloadBatch();
 
-  const next = surface(doc).all(n => n.id === 'downloadsJanitorPageNext')[0];
+  const next = surface(doc).all(n => n.id === 'fileJanitorPageNext')[0];
   assert.ok(next, 'expected a Next control');
   assert.equal(
-    surface(doc).all(n => n.id === 'downloadsJanitorPagePrev')[0].disabled,
+    surface(doc).all(n => n.id === 'fileJanitorPagePrev')[0].disabled,
     true,
     'Previous is unavailable on the first page'
   );
@@ -3350,7 +3350,7 @@ test('paging forward asks for the next page and keeps the counts', async () => {
 
   assert.match(surface(doc).textContent, /Showing 51/);
   assert.equal(rowsIn(surface(doc)).length, 50);
-  assert.equal(surface(doc).all(n => n.id === 'downloadsJanitorPagePrev')[0].disabled, false);
+  assert.equal(surface(doc).all(n => n.id === 'fileJanitorPagePrev')[0].disabled, false);
 });
 
 test('a shrunken last page refetches the real final page instead of stranding an empty view', async () => {
@@ -3361,11 +3361,11 @@ test('a shrunken last page refetches the real final page instead of stranding an
   await panel._reloadBatch();
 
   surface(doc)
-    .all(n => n.id === 'downloadsJanitorPageNext')[0]
+    .all(n => n.id === 'fileJanitorPageNext')[0]
     .click();
   await settle();
   surface(doc)
-    .all(n => n.id === 'downloadsJanitorPageNext')[0]
+    .all(n => n.id === 'fileJanitorPageNext')[0]
     .click();
   await settle();
   assert.match(surface(doc).textContent, /Showing 101–120/);
@@ -3400,7 +3400,7 @@ test('selections survive a page change', async () => {
   assert.deepEqual(panel._selected().sort(), ['c0', 'c1']);
 
   surface(doc)
-    .all(n => n.id === 'downloadsJanitorPageNext')[0]
+    .all(n => n.id === 'fileJanitorPageNext')[0]
     .click();
   await settle();
 
@@ -3416,7 +3416,7 @@ test('selections survive a page change', async () => {
     'the selection may intentionally span server pages'
   );
   // And the review control reflects both off-page and current-page choices.
-  assert.equal(doc.getElementById('downloadsJanitorApprove').textContent, 'Review 3 moves');
+  assert.equal(doc.getElementById('fileJanitorApprove').textContent, 'Review 3 moves');
 });
 
 // The other half of the rule: a file that has since been filed, skipped, or
@@ -3446,7 +3446,7 @@ test('a selection that is no longer eligible is dropped on refresh', async () =>
   await panel._reloadBatch();
 
   assert.deepEqual(panel._selected(), [], 'a resolved file must not stay selected');
-  assert.equal(doc.getElementById('downloadsJanitorApprove').disabled, true);
+  assert.equal(doc.getElementById('fileJanitorApprove').disabled, true);
 });
 
 // A different batch invalidates every decision made against the old one.
@@ -3517,13 +3517,13 @@ test('a flagged row cannot be selected until the user chooses a category', () =>
   const flaggedRow = rows.find(r => r.textContent.includes('payload.bin'));
   assert.ok(flaggedRow, 'expected the low-confidence fixture row');
 
-  const box = flaggedRow.all(n => n.className === 'dj-select')[0];
+  const box = flaggedRow.all(n => n.className === 'fj-select')[0];
   assert.equal(box.disabled, true, 'a flagged row must not be selectable on the guess');
   assert.match(box.getAttribute('title') || '', /Choose a category/i);
 
   // A confident row beside it is unaffected.
   const confidentRow = rows.find(r => r.textContent.includes('invoice-2026-07.pdf'));
-  assert.equal(confidentRow.all(n => n.className === 'dj-select')[0].disabled, false);
+  assert.equal(confidentRow.all(n => n.className === 'fj-select')[0].disabled, false);
 });
 
 test('choosing a category makes a flagged row selectable and keeps focus', async () => {
@@ -3552,7 +3552,7 @@ test('choosing a category makes a flagged row selectable and keeps focus', async
         };
 
   const before = rowsIn(surface(doc)).find(row => row.textContent.includes('payload.bin'));
-  const category = before.all(node => node.className === 'dj-category')[0];
+  const category = before.all(node => node.className === 'fj-category')[0];
   category.focus();
   category.value = 'documents';
   category.dispatch('change');
@@ -3561,13 +3561,13 @@ test('choosing a category makes a flagged row selectable and keeps focus', async
 
   const flaggedRow = rowsIn(surface(doc)).find(row => row.textContent.includes('payload.bin'));
   assert.equal(
-    flaggedRow.all(node => node.className === 'dj-select')[0].disabled,
+    flaggedRow.all(node => node.className === 'fj-select')[0].disabled,
     false,
     'the user has now said where it goes'
   );
   assert.equal(
     doc.activeElement,
-    flaggedRow.all(node => node.className === 'dj-category')[0],
+    flaggedRow.all(node => node.className === 'fj-category')[0],
     'the server repaint must not drop focus from the decision control'
   );
 });
@@ -3588,12 +3588,12 @@ test('the confirmation renders inside the console, not as a second dialog', asyn
       ? { ok: true, json: async () => ({ preview: PREVIEW }) }
       : { ok: true, json: async () => ({ status: statusFixture(), categories: CATEGORIES }) };
 
-  doc.getElementById('downloadsJanitorApprove').click();
+  doc.getElementById('fileJanitorApprove').click();
   await settle();
 
   const dialogs = surface(doc).all(n => n.getAttribute('role') === 'dialog');
   assert.equal(dialogs.length, 1, 'the console must remain the only dialog');
-  const confirmHost = doc.getElementById('downloadsJanitorConfirmHost');
+  const confirmHost = doc.getElementById('fileJanitorConfirmHost');
   assert.ok(confirmHost.textContent.length > 0, 'the confirmation belongs in the console body');
 });
 
@@ -3661,7 +3661,7 @@ test('Settings offers a Curator when there is none', () => {
   assert.match(body, /No Curator in this workspace/);
   assert.match(body, /works fully without one/);
   assert.match(body, /can never act on your files/);
-  assert.ok(doc.getElementById('downloadsJanitorAddCurator'), 'expected an add control');
+  assert.ok(doc.getElementById('fileJanitorAddCurator'), 'expected an add control');
   restore();
 });
 
@@ -3680,7 +3680,7 @@ test('Settings reports an existing Curator from the install record', () => {
   const body = text(doc);
   assert.match(body, /A Curator is helping in this workspace/);
   assert.match(body, /cannot approve, move, or delete/);
-  assert.equal(doc.getElementById('downloadsJanitorAddCurator'), null, 'no second Curator offer');
+  assert.equal(doc.getElementById('fileJanitorAddCurator'), null, 'no second Curator offer');
   restore();
 });
 
@@ -3703,13 +3703,13 @@ test('adding a Curator posts to the companion endpoint and reports the result', 
     return { ok: true, json: async () => ({ status: statusFixture() }) };
   };
 
-  doc.getElementById('downloadsJanitorAddCurator').click();
+  doc.getElementById('fileJanitorAddCurator').click();
   await settle();
 
   assert.ok(posted, 'expected a request');
   assert.equal(posted.method, 'POST');
   assert.match(posted.url, /\/capabilities\/file-janitor\/companion$/);
-  assert.match(doc.getElementById('downloadsJanitorSettingsStatus').textContent, /File Curator/);
+  assert.match(doc.getElementById('fileJanitorSettingsStatus').textContent, /File Curator/);
   restore();
 });
 
@@ -3725,11 +3725,11 @@ test('a refused Curator request is reported, not swallowed', async () => {
       ? { ok: false, json: async () => ({ message: 'Agents are unavailable right now.' }) }
       : { ok: true, json: async () => ({ status: statusFixture() }) };
 
-  doc.getElementById('downloadsJanitorAddCurator').click();
+  doc.getElementById('fileJanitorAddCurator').click();
   await settle();
 
   assert.match(
-    doc.getElementById('downloadsJanitorSettingsStatus').textContent,
+    doc.getElementById('fileJanitorSettingsStatus').textContent,
     /Agents are unavailable/
   );
   restore();
@@ -3759,7 +3759,7 @@ test('Settings offers removal and says plainly that files are not touched', () =
   const doc = setup();
   const restore = openSettings();
 
-  assert.ok(doc.getElementById('downloadsJanitorRemove'), 'expected a Remove File Janitor control');
+  assert.ok(doc.getElementById('fileJanitorRemove'), 'expected a Remove File Janitor control');
   assert.match(text(doc), /Your files are not moved or deleted/);
   restore();
 });
@@ -3780,7 +3780,7 @@ test('the confirmation is built from the server dry run', async () => {
     return { ok: true, json: async () => ({ removal: REMOVAL_SUMMARY }) };
   };
 
-  doc.getElementById('downloadsJanitorRemove').click();
+  doc.getElementById('fileJanitorRemove').click();
   await settle();
 
   assert.ok(asked, 'expected the dry-run request');
@@ -3804,13 +3804,13 @@ test('cancelling removal changes nothing and returns to Settings', async () => {
     return { ok: true, json: async () => ({ removal: REMOVAL_SUMMARY }) };
   };
 
-  doc.getElementById('downloadsJanitorRemove').click();
+  doc.getElementById('fileJanitorRemove').click();
   await settle();
-  doc.getElementById('downloadsJanitorRemoveCancel').click();
+  doc.getElementById('fileJanitorRemoveCancel').click();
 
   assert.equal(deleted, false, 'cancelling must not remove anything');
-  assert.ok(doc.getElementById('downloadsJanitorRemove'), 'back to the entry point');
-  assert.equal(doc.getElementById('downloadsJanitorRemoveConfirm'), null);
+  assert.ok(doc.getElementById('fileJanitorRemove'), 'back to the entry point');
+  assert.equal(doc.getElementById('fileJanitorRemoveConfirm'), null);
   restore();
 });
 
@@ -3843,16 +3843,16 @@ test('removal does not remove the Curator unless separately ticked', async () =>
     return { ok: true, json: async () => ({ status: { applies: false } }) };
   };
 
-  doc.getElementById('downloadsJanitorRemove').click();
+  doc.getElementById('fileJanitorRemove').click();
   await settle();
-  assert.ok(doc.getElementById('downloadsJanitorRemoveCompanion'), 'expected a separate choice');
+  assert.ok(doc.getElementById('fileJanitorRemoveCompanion'), 'expected a separate choice');
   assert.equal(
-    doc.getElementById('downloadsJanitorRemoveCompanion').checked,
+    doc.getElementById('fileJanitorRemoveCompanion').checked,
     false,
     'the companion choice must default to off'
   );
 
-  doc.getElementById('downloadsJanitorRemoveConfirm').click();
+  doc.getElementById('fileJanitorRemoveConfirm').click();
   await settle();
   assert.deepEqual(sent, { remove_companion: false });
   restore();
@@ -3877,10 +3877,10 @@ test('an adopted Curator is described as left alone, with no checkbox', async ()
     })
   });
 
-  doc.getElementById('downloadsJanitorRemove').click();
+  doc.getElementById('fileJanitorRemove').click();
   await settle();
 
-  assert.equal(doc.getElementById('downloadsJanitorRemoveCompanion'), null);
+  assert.equal(doc.getElementById('fileJanitorRemoveCompanion'), null);
   assert.match(text(doc), /existed before File Janitor was installed/);
   restore();
 });
@@ -3908,13 +3908,13 @@ test('a successful removal closes the console and clears the card', async () => 
     return { ok: true, json: async () => ({ status: { applies: false } }) };
   };
 
-  doc.getElementById('downloadsJanitorRemove').click();
+  doc.getElementById('fileJanitorRemove').click();
   await settle();
-  doc.getElementById('downloadsJanitorRemoveConfirm').click();
+  doc.getElementById('fileJanitorRemoveConfirm').click();
   await settle();
 
   assert.equal(panel.isOpen(), false, 'the console must not linger over a removed capability');
-  assert.equal(doc.getElementById('downloadsJanitorMount').hidden, true, 'the card goes too');
+  assert.equal(doc.getElementById('fileJanitorMount').hidden, true, 'the card goes too');
   assert.equal(panel.stationState().applies, false, 'and so does the Map station');
   assert.ok(reloaded > 0, 'the catalog must re-read so the capability offers itself again');
   restore();
@@ -3936,13 +3936,13 @@ test('a failed removal is reported and leaves File Janitor in place', async () =
     return { ok: true, json: async () => ({ removal: REMOVAL_SUMMARY }) };
   };
 
-  doc.getElementById('downloadsJanitorRemove').click();
+  doc.getElementById('fileJanitorRemove').click();
   await settle();
-  doc.getElementById('downloadsJanitorRemoveConfirm').click();
+  doc.getElementById('fileJanitorRemoveConfirm').click();
   await settle();
 
   assert.match(
-    doc.getElementById('downloadsJanitorSettingsStatus').textContent,
+    doc.getElementById('fileJanitorSettingsStatus').textContent,
     /could not stop the background work/
   );
   assert.equal(panel.isOpen(), true, 'the console stays open after a failed removal');

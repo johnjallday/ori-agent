@@ -1,4 +1,4 @@
-// downloads-janitor.js — the Downloads Janitor panel on the workspace detail
+// file-janitor-console.js — the File Janitor panel on the workspace detail
 // page.
 //
 // It renders two states from one server response
@@ -14,14 +14,14 @@
 //     proposed file with its category, destination, reason, and confidence.
 //
 // Two rules this module follows deliberately:
-//   • It mounts only when the server says the workspace is a Downloads Janitor
+//   • It mounts only when the server says the workspace is a File Janitor
 //     workspace (status.applies). Provenance is decided server-side.
 //   • The only path it ever sends is the one the user picked or typed and then
 //     explicitly confirmed. Nothing here selects a folder on its own.
 (function () {
   'use strict';
 
-  const MOUNT_ID = 'downloadsJanitorMount';
+  const MOUNT_ID = 'fileJanitorMount';
   const WORKSPACE_VIEW_MODE_EVENT = 'ori:workspace-view-mode-changed';
   const WORKSPACE_VIEW_MODES = new Set(['details', 'map', 'tickets', 'dashboard']);
 
@@ -203,7 +203,7 @@
   const STATUS_MARKS = { ok: '✓', failed: '!', pending: '–' };
 
   function stateBadge(state) {
-    const badge = el('span', 'dj-badge dj-badge-' + String(state || '').replace(/_/g, '-'));
+    const badge = el('span', 'fj-badge fj-badge-' + String(state || '').replace(/_/g, '-'));
     badge.textContent = STATE_LABELS[state] || 'Unknown';
     return badge;
   }
@@ -241,7 +241,7 @@
   }
 
   function disclosureList(rootLabel, filingRootName, dailyTime) {
-    const list = el('ul', 'dj-disclosure');
+    const list = el('ul', 'fj-disclosure');
     const points = [
       'Ori lists the files directly inside ' +
         rootLabel +
@@ -256,7 +256,7 @@
       'A catch-up scan runs daily at ' + (dailyTime || '09:00') + ' your local time.',
       'Reading what is inside your files is off, and is a separate choice you can make later.'
     ];
-    points.forEach(text => list.appendChild(el('li', 'dj-disclosure-item', text)));
+    points.forEach(text => list.appendChild(el('li', 'fj-disclosure-item', text)));
     return list;
   }
 
@@ -270,22 +270,22 @@
     // explicit approval into a default (FR-44, FR-50).
     const suggestedPath = suggestion.suggested_path || '';
 
-    const card = el('section', 'dj-card');
+    const card = el('section', 'fj-card');
     card.setAttribute('role', 'group');
-    card.setAttribute('aria-labelledby', 'downloadsJanitorTitle');
+    card.setAttribute('aria-labelledby', 'fileJanitorTitle');
 
-    const head = el('div', 'dj-head');
-    const heading = el('div', 'dj-heading');
-    const title = el('h2', 'dj-title', 'File Janitor');
-    title.id = 'downloadsJanitorTitle';
+    const head = el('div', 'fj-head');
+    const heading = el('div', 'fj-heading');
+    const title = el('h2', 'fj-title', 'File Janitor');
+    title.id = 'fileJanitorTitle';
     heading.appendChild(title);
     heading.appendChild(
-      el('p', 'dj-sub', 'Choose the folder to tidy. Nothing is scanned or moved until you do.')
+      el('p', 'fj-sub', 'Choose the folder to tidy. Nothing is scanned or moved until you do.')
     );
     heading.appendChild(
       el(
         'p',
-        'dj-sub dj-sub-muted',
+        'fj-sub fj-sub-muted',
         'Best for an inbox-style folder whose loose files pile up — Downloads, Desktop, Scans, an upload drop. ' +
           'Ori looks only at the files sitting directly in it, and never reorganizes folders inside it.'
       )
@@ -294,28 +294,28 @@
     head.appendChild(stateBadge('setup_required'));
     card.appendChild(head);
 
-    const field = el('div', 'dj-field');
-    const inputId = 'downloadsJanitorPath';
-    const inputLabel = el('label', 'dj-label', label);
+    const field = el('div', 'fj-field');
+    const inputId = 'fileJanitorPath';
+    const inputLabel = el('label', 'fj-label', label);
     inputLabel.setAttribute('for', inputId);
-    const input = el('input', 'dj-input');
+    const input = el('input', 'fj-input');
     input.id = inputId;
     input.setAttribute('type', 'text');
     input.setAttribute('spellcheck', 'false');
-    input.setAttribute('aria-describedby', 'downloadsJanitorDisclosure');
+    input.setAttribute('aria-describedby', 'fileJanitorDisclosure');
     input.setAttribute('placeholder', 'Choose a folder, or type its path');
     input.value = suggestedPath;
-    const row = el('div', 'dj-field-row');
+    const row = el('div', 'fj-field-row');
     row.appendChild(input);
-    row.appendChild(button('Browse…', 'dj-btn dj-btn-secondary', browse));
+    row.appendChild(button('Browse…', 'fj-btn fj-btn-secondary', browse));
     field.appendChild(inputLabel);
     field.appendChild(row);
     card.appendChild(field);
 
-    const disclosure = el('div', 'dj-disclosure-wrap');
-    disclosure.id = 'downloadsJanitorDisclosure';
+    const disclosure = el('div', 'fj-disclosure-wrap');
+    disclosure.id = 'fileJanitorDisclosure';
     if (suggestion.access_disclosure) {
-      disclosure.appendChild(el('p', 'dj-disclosure-lead', suggestion.access_disclosure));
+      disclosure.appendChild(el('p', 'fj-disclosure-lead', suggestion.access_disclosure));
     }
     disclosure.appendChild(
       disclosureList(
@@ -326,12 +326,12 @@
     );
     card.appendChild(disclosure);
 
-    const actions = el('div', 'dj-actions');
-    const confirm = button('Use this folder', 'dj-btn dj-btn-primary', () => {
+    const actions = el('div', 'fj-actions');
+    const confirm = button('Use this folder', 'fj-btn fj-btn-primary', () => {
       const chosen = document.getElementById(inputId);
       void confirmSetup(chosen ? chosen.value : '');
     });
-    confirm.id = 'downloadsJanitorConfirm';
+    confirm.id = 'fileJanitorConfirm';
     // The grant needs a folder AND this explicit press. Browsing or typing a
     // path selects nothing on its own (FR-50), and with no pre-filled path
     // there is nothing to approve until the user supplies one.
@@ -421,7 +421,7 @@
 
   function batchProgress(batch) {
     const summary = batch?.summary || {};
-    const progress = el('section', 'dj-batch-progress');
+    const progress = el('section', 'fj-batch-progress');
     progress.setAttribute('aria-label', 'Whole batch progress');
     const stateLabels = {
       pending: 'Review in progress',
@@ -430,12 +430,12 @@
         summary.failed || summary.stale ? 'Review complete with problems' : 'Review complete'
     };
     progress.appendChild(
-      el('p', 'dj-batch-progress-title', stateLabels[batch?.state] || 'Batch status')
+      el('p', 'fj-batch-progress-title', stateLabels[batch?.state] || 'Batch status')
     );
     progress.appendChild(
       el(
         'p',
-        'dj-batch-progress-main',
+        'fj-batch-progress-main',
         formatCount(summary.proposed) +
           ' remaining of ' +
           formatCount(summary.total) +
@@ -443,11 +443,11 @@
       )
     );
 
-    const counts = el('dl', 'dj-batch-progress-counts');
+    const counts = el('dl', 'fj-batch-progress-counts');
     const add = (value, label, className = '') => {
-      const item = el('div', 'dj-batch-progress-count' + (className ? ' ' + className : ''));
-      item.appendChild(el('dt', 'dj-batch-progress-number', formatCount(value)));
-      item.appendChild(el('dd', 'dj-batch-progress-label', label));
+      const item = el('div', 'fj-batch-progress-count' + (className ? ' ' + className : ''));
+      item.appendChild(el('dt', 'fj-batch-progress-number', formatCount(value)));
+      item.appendChild(el('dd', 'fj-batch-progress-label', label));
       counts.appendChild(item);
     };
     add(summary.needs_review, 'need review within remaining', 'is-attention');
@@ -465,7 +465,7 @@
 
   function categoryPicker(candidate) {
     const select = document.createElement('select');
-    select.className = 'dj-category';
+    select.className = 'fj-category';
     select.id = 'fileJanitorCategory-' + candidateDOMToken(candidate.id);
     select.disabled = !batchActionsAvailable();
     select.setAttribute('aria-label', 'Category for ' + displayName(candidate));
@@ -501,10 +501,10 @@
     const controlID = 'fileJanitorFileDetailsToggle-' + token;
     const panelID = 'fileJanitorFileDetails-' + token;
     const expanded = expandedCandidates.has(candidate.id);
-    const wrap = el('div', 'dj-file-disclosure');
+    const wrap = el('div', 'fj-file-disclosure');
     const control = button(
       expanded ? 'Hide details' : 'File details',
-      'dj-file-details-toggle',
+      'fj-file-details-toggle',
       () => {
         const next = !expandedCandidates.has(candidate.id);
         if (next) expandedCandidates.add(candidate.id);
@@ -529,7 +529,7 @@
     );
     wrap.appendChild(control);
 
-    const details = el('dl', 'dj-file-details');
+    const details = el('dl', 'fj-file-details');
     details.id = panelID;
     details.hidden = !expanded;
     [
@@ -537,9 +537,9 @@
       ['Size', formatSize(candidate.size)],
       ['Modified', formatWhen(candidate.modified_at) || 'Unknown']
     ].forEach(([label, value]) => {
-      const item = el('div', 'dj-file-detail');
-      item.appendChild(el('dt', 'dj-file-detail-label', label));
-      item.appendChild(el('dd', 'dj-file-detail-value', value));
+      const item = el('div', 'fj-file-detail');
+      item.appendChild(el('dt', 'fj-file-detail-label', label));
+      item.appendChild(el('dd', 'fj-file-detail-value', value));
       details.appendChild(item);
     });
     wrap.appendChild(details);
@@ -550,7 +550,7 @@
     const token = candidateDOMToken(candidate.id);
     const row = el(
       'tr',
-      'dj-row-item dj-row-state-' +
+      'fj-row-item fj-row-state-' +
         (candidate.state || 'pending') +
         (candidate.needs_review ? ' is-needs-review' : '')
     );
@@ -565,11 +565,11 @@
       row.setAttribute('tabindex', '-1');
     }
 
-    const selectCell = el('td', 'dj-cell dj-cell-select');
+    const selectCell = el('td', 'fj-cell fj-cell-select');
     selectCell.setAttribute('role', 'cell');
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
-    checkbox.className = 'dj-select';
+    checkbox.className = 'fj-select';
     checkbox.id = 'fileJanitorSelect-' + token;
     checkbox.checked = selected.has(candidate.id);
     checkbox.setAttribute('aria-label', 'Select ' + displayName(candidate));
@@ -595,60 +595,60 @@
     selectCell.appendChild(checkbox);
     row.appendChild(selectCell);
 
-    const nameCell = el('td', 'dj-cell dj-cell-name');
+    const nameCell = el('td', 'fj-cell fj-cell-name');
     nameCell.setAttribute('role', 'cell');
-    nameCell.appendChild(el('span', 'dj-name', displayName(candidate)));
+    nameCell.appendChild(el('span', 'fj-name', displayName(candidate)));
     if (candidate.needs_review) {
-      const flag = el('span', 'dj-flag', 'Needs review');
+      const flag = el('span', 'fj-flag', 'Needs review');
       flag.setAttribute('title', 'Ori could not place this confidently');
       nameCell.appendChild(flag);
     }
     nameCell.appendChild(fileDetails(candidate));
     row.appendChild(nameCell);
 
-    const categoryCell = el('td', 'dj-cell dj-cell-category dj-cell-destination');
+    const categoryCell = el('td', 'fj-cell fj-cell-category fj-cell-destination');
     categoryCell.setAttribute('role', 'cell');
-    categoryCell.appendChild(el('span', 'dj-cell-mobile-label', 'Destination'));
+    categoryCell.appendChild(el('span', 'fj-cell-mobile-label', 'Destination'));
     if (candidate.state === 'pending' || candidate.state === 'approved') {
       categoryCell.appendChild(categoryPicker(candidate));
     } else {
       categoryCell.appendChild(
-        el('span', 'dj-category-static', candidate.decision_category || candidate.category || '—')
+        el('span', 'fj-category-static', candidate.decision_category || candidate.category || '—')
       );
     }
-    categoryCell.appendChild(el('span', 'dj-destination', candidate.destination || ''));
+    categoryCell.appendChild(el('span', 'fj-destination', candidate.destination || ''));
     row.appendChild(categoryCell);
 
-    const reasonCell = el('td', 'dj-cell dj-cell-reason dj-cell-why-status');
+    const reasonCell = el('td', 'fj-cell fj-cell-reason fj-cell-why-status');
     reasonCell.setAttribute('role', 'cell');
-    reasonCell.appendChild(el('span', 'dj-cell-mobile-label', 'Why / Status'));
-    reasonCell.appendChild(el('span', 'dj-reason', candidate.reason || 'No rationale available.'));
+    reasonCell.appendChild(el('span', 'fj-cell-mobile-label', 'Why / Status'));
+    reasonCell.appendChild(el('span', 'fj-reason', candidate.reason || 'No rationale available.'));
     if (candidate.confidence) {
       const confidence = el(
         'span',
-        'dj-confidence dj-confidence-' + candidate.confidence,
+        'fj-confidence fj-confidence-' + candidate.confidence,
         candidate.confidence + ' confidence'
       );
       reasonCell.appendChild(confidence);
     }
     reasonCell.appendChild(
-      el('span', 'dj-state', STATE_ROW_LABELS[candidate.state] || candidate.state || 'Unknown')
+      el('span', 'fj-state', STATE_ROW_LABELS[candidate.state] || candidate.state || 'Unknown')
     );
     if (candidate.state_reason) {
-      reasonCell.appendChild(el('span', 'dj-state-reason', candidate.state_reason));
+      reasonCell.appendChild(el('span', 'fj-state-reason', candidate.state_reason));
     }
     row.appendChild(reasonCell);
 
-    const actionCell = el('td', 'dj-cell dj-cell-actions');
+    const actionCell = el('td', 'fj-cell fj-cell-actions');
     actionCell.setAttribute('role', 'cell');
-    actionCell.appendChild(el('span', 'dj-cell-mobile-label', 'Actions'));
+    actionCell.appendChild(el('span', 'fj-cell-mobile-label', 'Actions'));
     if (candidate.state === 'pending' || candidate.state === 'approved') {
       // Trash is a per-file choice with its own toggle. It is never part of the
       // move selection, so a bulk selection cannot become a removal (FR-66).
       const marked = trashMarked.has(candidate.id);
       const trashToggle = button(
         marked ? 'Trash ✓' : 'Trash',
-        'dj-btn dj-btn-quiet' + (marked ? ' dj-btn-destructive' : ''),
+        'fj-btn fj-btn-quiet' + (marked ? ' fj-btn-destructive' : ''),
         () => {
           if (trashMarked.has(candidate.id)) trashMarked.delete(candidate.id);
           else {
@@ -668,14 +668,14 @@
         (marked ? 'Unmark' : 'Mark') + ' ' + displayName(candidate) + ' for Trash'
       );
       actionCell.appendChild(trashToggle);
-      const skip = button('Skip', 'dj-btn dj-btn-quiet', () => {
+      const skip = button('Skip', 'fj-btn fj-btn-quiet', () => {
         void submitDecisions([{ candidate_id: candidate.id, decision: 'skip' }]);
       });
       skip.id = 'fileJanitorSkip-' + token;
       skip.disabled = !batchActionsAvailable();
       actionCell.appendChild(skip);
     } else if (candidate.state === 'skipped') {
-      actionCell.appendChild(el('span', 'dj-muted', 'Dismissed'));
+      actionCell.appendChild(el('span', 'fj-muted', 'Dismissed'));
     }
     row.appendChild(actionCell);
 
@@ -722,20 +722,20 @@
   ];
 
   function filterBar() {
-    const bar = el('div', 'dj-filters');
+    const bar = el('div', 'fj-filters');
     bar.setAttribute('role', 'group');
     bar.setAttribute('aria-label', 'Filter review items');
     FILTERS.forEach(option => {
       const count = filterCounts[option.id || 'all'];
       const control = button(
         option.label,
-        'dj-filter' + (filter === option.id ? ' dj-filter-active' : ''),
+        'fj-filter' + (filter === option.id ? ' fj-filter-active' : ''),
         () => selectFilter(option.id)
       );
       // The count comes from the server's whole-batch tally, not from the rows
       // on screen — those are one page of them.
       if (typeof count === 'number') {
-        control.appendChild(el('span', 'dj-filter-count', formatCount(count)));
+        control.appendChild(el('span', 'fj-filter-count', formatCount(count)));
         control.setAttribute('aria-label', option.label + ', ' + formatCount(count) + ' files');
       }
       control.setAttribute('aria-pressed', filter === option.id ? 'true' : 'false');
@@ -760,7 +760,7 @@
   // as three numbers scattered across controls.
   function pager() {
     if (filteredTotal <= lastCandidates.length && pageOffset === 0) return null;
-    const nav = el('div', 'dj-pager');
+    const nav = el('div', 'fj-pager');
     nav.setAttribute('role', 'navigation');
     nav.setAttribute('aria-label', 'Review pages');
 
@@ -775,7 +775,7 @@
         : '';
     const status = el(
       'p',
-      'dj-pager-status',
+      'fj-pager-status',
       'Showing ' +
         formatCount(from) +
         '\u2013' +
@@ -785,17 +785,17 @@
         ' files' +
         filtered
     );
-    status.id = 'downloadsJanitorPagerStatus';
+    status.id = 'fileJanitorPagerStatus';
     status.setAttribute('role', 'status');
     status.setAttribute('aria-live', 'polite');
 
-    const previous = button('Previous', 'dj-btn dj-btn-secondary', () =>
+    const previous = button('Previous', 'fj-btn fj-btn-secondary', () =>
       goToPage(pageOffset - PAGE_SIZE)
     );
-    previous.id = 'downloadsJanitorPagePrev';
+    previous.id = 'fileJanitorPagePrev';
     previous.disabled = pageOffset <= 0 || !batchActionsAvailable();
-    const next = button('Next', 'dj-btn dj-btn-secondary', () => goToPage(pageOffset + PAGE_SIZE));
-    next.id = 'downloadsJanitorPageNext';
+    const next = button('Next', 'fj-btn fj-btn-secondary', () => goToPage(pageOffset + PAGE_SIZE));
+    next.id = 'fileJanitorPageNext';
     next.disabled = to >= filteredTotal || !batchActionsAvailable();
 
     nav.appendChild(previous);
@@ -812,7 +812,7 @@
   }
 
   function reviewTable() {
-    const table = el('table', 'dj-table');
+    const table = el('table', 'fj-table');
     table.setAttribute('role', 'table');
     table.setAttribute('aria-label', 'Files proposed for filing');
 
@@ -824,13 +824,13 @@
     // a select-all control on a list that can include Trash decisions is how
     // bulk mistakes happen.
     [
-      { label: 'Select', className: 'dj-th-select' },
+      { label: 'Select', className: 'fj-th-select' },
       { label: 'File' },
       { label: 'Destination' },
       { label: 'Why / Status' },
       { label: 'Actions' }
     ].forEach(column => {
-      const cell = el('th', 'dj-th ' + (column.className || ''), column.label);
+      const cell = el('th', 'fj-th ' + (column.className || ''), column.label);
       cell.setAttribute('scope', 'col');
       cell.setAttribute('role', 'columnheader');
       headRow.appendChild(cell);
@@ -839,7 +839,7 @@
     table.appendChild(head);
 
     const body = document.createElement('tbody');
-    body.className = 'dj-tbody';
+    body.className = 'fj-tbody';
     body.setAttribute('role', 'rowgroup');
     visibleCandidates().forEach(candidate => body.appendChild(candidateRow(candidate)));
     table.appendChild(body);
@@ -847,7 +847,7 @@
   }
 
   function updateSelectionSummary() {
-    const node = document.getElementById('downloadsJanitorSelection');
+    const node = document.getElementById('fileJanitorSelection');
     if (node) {
       const count = selected.size;
       const trashes = trashMarked.size;
@@ -859,7 +859,7 @@
         );
       node.textContent = parts.length === 0 ? 'No files selected.' : parts.join(' · ') + '.';
     }
-    const approve = document.getElementById('downloadsJanitorApprove');
+    const approve = document.getElementById('fileJanitorApprove');
     if (approve) {
       const moves = selected.size;
       const trashes = trashMarked.size;
@@ -876,7 +876,7 @@
       // Point the disabled control at the line that says why ("No files
       // selected."), so the reason is available to a screen reader reading the
       // button rather than only to someone who happens to look above it.
-      approve.setAttribute('aria-describedby', 'downloadsJanitorSelection');
+      approve.setAttribute('aria-describedby', 'fileJanitorSelection');
     }
   }
 
@@ -885,16 +885,16 @@
     const failed = batchLoadState === 'error';
     const notice = el(
       'div',
-      'dj-batch-load-notice ' + (failed ? 'dj-batch-load-error' : 'dj-batch-loading')
+      'fj-batch-load-notice ' + (failed ? 'fj-batch-load-error' : 'fj-batch-loading')
     );
     notice.setAttribute('role', failed ? 'alert' : 'status');
     notice.appendChild(
-      el('p', 'dj-batch-load-title', failed ? 'Review unavailable' : 'Loading latest review…')
+      el('p', 'fj-batch-load-title', failed ? 'Review unavailable' : 'Loading latest review…')
     );
     notice.appendChild(
       el(
         'p',
-        'dj-batch-load-copy',
+        'fj-batch-load-copy',
         failed
           ? hasLastKnownBatch
             ? 'Showing the last known batch. Review actions are disabled until the latest data loads.'
@@ -905,7 +905,7 @@
       )
     );
     if (failed) {
-      notice.appendChild(button('Retry', 'dj-btn dj-btn-secondary', () => void loadBatch()));
+      notice.appendChild(button('Retry', 'fj-btn fj-btn-secondary', () => void loadBatch()));
     }
     return notice;
   }
@@ -913,7 +913,7 @@
   // renderBatch repaints only the review section, so changing a filter or
   // recording one decision does not rebuild (and re-focus) the whole card.
   function renderBatch() {
-    const container = document.getElementById('downloadsJanitorBatch');
+    const container = document.getElementById('fileJanitorBatch');
     if (!container) return;
     const focusedReviewControlID = String(document.activeElement?.id || '');
     clear(container);
@@ -921,7 +921,7 @@
     const loadNotice = batchLoadNotice(Boolean(lastBatch));
     if (loadNotice) container.appendChild(loadNotice);
     if (reviewStatusMessage) {
-      const notice = el('p', 'dj-batch-scan-status', reviewStatusMessage);
+      const notice = el('p', 'fj-batch-scan-status', reviewStatusMessage);
       notice.setAttribute('role', 'status');
       notice.setAttribute('aria-live', 'polite');
       container.appendChild(notice);
@@ -929,7 +929,7 @@
 
     if (!lastBatch) {
       if (batchLoadState === 'loading' || batchLoadState === 'error') return;
-      const empty = el('div', 'dj-empty');
+      const empty = el('div', 'fj-empty');
       const states = {
         scan_empty: {
           title: 'Scan complete — no new proposals',
@@ -945,11 +945,11 @@
         }
       };
       const state = states[emptyReviewState] || states.unscanned;
-      empty.appendChild(el('p', 'dj-empty-title', state.title));
-      empty.appendChild(el('p', 'dj-empty-copy', state.copy));
+      empty.appendChild(el('p', 'fj-empty-title', state.title));
+      empty.appendChild(el('p', 'fj-empty-copy', state.copy));
       if (emptyReviewState === 'completed') {
         empty.appendChild(
-          button('View History', 'dj-btn dj-btn-secondary', () => selectTab('history'))
+          button('View History', 'fj-btn fj-btn-secondary', () => selectTab('history'))
         );
       }
       container.appendChild(empty);
@@ -957,7 +957,7 @@
     }
 
     container.appendChild(batchProgress(lastBatch));
-    const summary = el('p', 'dj-batch-summary', batchSummaryLine(lastBatch));
+    const summary = el('p', 'fj-batch-summary', batchSummaryLine(lastBatch));
     summary.setAttribute('role', 'status');
     summary.setAttribute('aria-live', 'polite');
     container.appendChild(summary);
@@ -977,28 +977,28 @@
             ? 'Review complete. Every candidate has a recorded outcome.'
             : 'Scan complete. No files needed filing.';
       }
-      container.appendChild(el('p', 'dj-empty-copy', emptyCopy));
+      container.appendChild(el('p', 'fj-empty-copy', emptyCopy));
     } else {
-      const scroller = el('div', 'dj-table-scroll');
+      const scroller = el('div', 'fj-table-scroll');
       scroller.appendChild(reviewTable());
       container.appendChild(scroller);
     }
     const pageControls = pager();
     if (pageControls) container.appendChild(pageControls);
 
-    const footer = el('div', 'dj-footer');
-    const selection = el('p', 'dj-selection');
-    selection.id = 'downloadsJanitorSelection';
+    const footer = el('div', 'fj-footer');
+    const selection = el('p', 'fj-selection');
+    selection.id = 'fileJanitorSelection';
     selection.setAttribute('role', 'status');
     selection.setAttribute('aria-live', 'polite');
     footer.appendChild(selection);
 
     const approve = button(
       'Review selected changes',
-      'dj-btn dj-btn-primary',
+      'fj-btn fj-btn-primary',
       () => void startApproval()
     );
-    approve.id = 'downloadsJanitorApprove';
+    approve.id = 'fileJanitorApprove';
     footer.appendChild(approve);
     container.appendChild(footer);
 
@@ -1021,16 +1021,16 @@
   // confirmation and the user clicking it can quietly empty the button.
   function renderConfirmation(approval) {
     const previewResult = (approval && approval.preview) || {};
-    const host = document.getElementById('downloadsJanitorConfirmHost');
+    const host = document.getElementById('fileJanitorConfirmHost');
     if (!host) return;
     clear(host);
 
-    const panel = el('section', 'dj-confirm');
+    const panel = el('section', 'fj-confirm');
     panel.setAttribute('role', 'group');
-    panel.setAttribute('aria-labelledby', 'downloadsJanitorConfirmTitle');
+    panel.setAttribute('aria-labelledby', 'fileJanitorConfirmTitle');
 
-    const title = el('h3', 'dj-confirm-title', 'Confirm these moves');
-    title.id = 'downloadsJanitorConfirmTitle';
+    const title = el('h3', 'fj-confirm-title', 'Confirm these moves');
+    title.id = 'fileJanitorConfirmTitle';
     panel.appendChild(title);
 
     const moveCount = previewResult.move_count || 0;
@@ -1051,25 +1051,25 @@
     } else {
       sentences.push('Nothing is deleted.');
     }
-    const lead = el('p', 'dj-confirm-lead', sentences.join(' '));
+    const lead = el('p', 'fj-confirm-lead', sentences.join(' '));
     lead.setAttribute('role', 'status');
     panel.appendChild(lead);
 
-    const list = el('ul', 'dj-confirm-list');
+    const list = el('ul', 'fj-confirm-list');
     (previewResult.items || []).forEach(item => {
       const isTrash = item.operation === 'trash';
-      const entry = el('li', 'dj-confirm-item' + (isTrash ? ' dj-confirm-trash' : ''));
-      entry.appendChild(el('span', 'dj-confirm-name', displayName(item)));
-      entry.appendChild(el('span', 'dj-confirm-arrow', ' → '));
+      const entry = el('li', 'fj-confirm-item' + (isTrash ? ' fj-confirm-trash' : ''));
+      entry.appendChild(el('span', 'fj-confirm-name', displayName(item)));
+      entry.appendChild(el('span', 'fj-confirm-arrow', ' → '));
       entry.appendChild(
-        el('span', 'dj-confirm-destination', isTrash ? 'Trash (restorable)' : item.destination)
+        el('span', 'fj-confirm-destination', isTrash ? 'Trash (restorable)' : item.destination)
       );
       if (item.renamed) {
         // Ori never overwrites, so a taken name means a new one. Saying so here
         // is the difference between a surprise and an informed choice.
         const note = el(
           'span',
-          'dj-confirm-renamed',
+          'fj-confirm-renamed',
           ' (renamed — a file with that name is already there)'
         );
         entry.appendChild(note);
@@ -1078,13 +1078,13 @@
     });
     panel.appendChild(list);
 
-    const actions = el('div', 'dj-actions');
+    const actions = el('div', 'fj-actions');
     const confirm = button(
       confirmLabel(previewResult),
-      'dj-btn dj-btn-primary' + (trashCount > 0 ? ' dj-btn-destructive' : ''),
+      'fj-btn fj-btn-primary' + (trashCount > 0 ? ' fj-btn-destructive' : ''),
       () => void applyApproval(approval)
     );
-    confirm.id = 'downloadsJanitorConfirmApply';
+    confirm.id = 'fileJanitorConfirmApply';
     // A batch containing any removal needs a second, explicit acknowledgement
     // stating the exact number of files going to Trash. Moves alone do not:
     // reserving the extra step for the destructive case is what keeps it
@@ -1096,13 +1096,13 @@
       // to the document body — on the destructive path, where losing your place
       // matters most. Focus goes to the acknowledgement instead, which is the
       // thing the user has to act on next anyway.
-      const ack = el('label', 'dj-trash-ack');
+      const ack = el('label', 'fj-trash-ack');
       const box = document.createElement('input');
       box.type = 'checkbox';
-      box.id = 'downloadsJanitorTrashAck';
+      box.id = 'fileJanitorTrashAck';
       // Say why the button is unavailable rather than leaving it inert and
       // unexplained.
-      confirm.setAttribute('aria-describedby', 'downloadsJanitorTrashAckText');
+      confirm.setAttribute('aria-describedby', 'fileJanitorTrashAckText');
       box.addEventListener('change', () => {
         confirm.disabled = !box.checked;
         // Ticking the box is the moment the action becomes available, so hand
@@ -1113,18 +1113,18 @@
       ack.appendChild(box);
       const ackText = el(
         'span',
-        'dj-trash-ack-text',
+        'fj-trash-ack-text',
         trashCount === 1
           ? 'Yes, move 1 file to the Trash.'
           : 'Yes, move ' + trashCount + ' files to the Trash.'
       );
-      ackText.id = 'downloadsJanitorTrashAckText';
+      ackText.id = 'fileJanitorTrashAckText';
       ack.appendChild(ackText);
       panel.appendChild(ack);
     }
     actions.appendChild(confirm);
     actions.appendChild(
-      button('Cancel', 'dj-btn dj-btn-secondary', () => {
+      button('Cancel', 'fj-btn fj-btn-secondary', () => {
         // Cancelling abandons the approval; the decisions themselves are still
         // recorded, so nothing the user chose is lost.
         pendingPreview = null;
@@ -1159,7 +1159,7 @@
       target.focus?.();
       return;
     }
-    document.getElementById('downloadsJanitorApprove')?.focus?.();
+    document.getElementById('fileJanitorApprove')?.focus?.();
   }
 
   // confirmLabel names both halves of a mixed batch so the button never
@@ -1180,16 +1180,16 @@
   // their files are being read.
   function privacyLine(status) {
     const privacy = (status && status.privacy) || {};
-    const wrap = el('div', 'dj-privacy');
-    wrap.id = 'downloadsJanitorPrivacy';
+    const wrap = el('div', 'fj-privacy');
+    wrap.id = 'fileJanitorPrivacy';
 
-    const mark = el('span', 'dj-privacy-mark', privacy.leaves_device ? '↗' : '⌂');
+    const mark = el('span', 'fj-privacy-mark', privacy.leaves_device ? '↗' : '⌂');
     mark.setAttribute('aria-hidden', 'true');
     wrap.appendChild(mark);
 
-    const text = el('span', 'dj-privacy-text');
-    text.appendChild(el('span', 'dj-privacy-headline', privacy.headline || ''));
-    if (privacy.detail) text.appendChild(el('span', 'dj-privacy-detail', ' ' + privacy.detail));
+    const text = el('span', 'fj-privacy-text');
+    text.appendChild(el('span', 'fj-privacy-headline', privacy.headline || ''));
+    if (privacy.detail) text.appendChild(el('span', 'fj-privacy-detail', ' ' + privacy.detail));
     wrap.appendChild(text);
 
     // A configured-but-unconfirmed provider is the one state where something
@@ -1198,7 +1198,7 @@
       wrap.appendChild(
         button(
           'Confirm ' + (privacy.provider || 'provider'),
-          'dj-btn dj-btn-quiet',
+          'fj-btn fj-btn-quiet',
           () => void grantConsent(privacy.provider)
         )
       );
@@ -1225,53 +1225,53 @@
   ];
 
   function renderSettings() {
-    const host = document.getElementById('downloadsJanitorSettingsHost');
+    const host = document.getElementById('fileJanitorSettingsHost');
     if (!host) return;
     clear(host);
     if (!settingsOpen) return;
 
     const settings = (lastStatus && lastStatus.settings) || {};
-    const panel = el('section', 'dj-settings');
-    panel.setAttribute('aria-labelledby', 'downloadsJanitorSettingsTitle');
-    const title = el('h3', 'dj-settings-title', 'Settings');
-    title.id = 'downloadsJanitorSettingsTitle';
+    const panel = el('section', 'fj-settings');
+    panel.setAttribute('aria-labelledby', 'fileJanitorSettingsTitle');
+    const title = el('h3', 'fj-settings-title', 'Settings');
+    title.id = 'fileJanitorSettingsTitle';
     panel.appendChild(title);
 
     // Daily catch-up time.
-    const timeRow = el('div', 'dj-setting');
-    const timeLabel = el('label', 'dj-label', 'Daily catch-up time');
-    timeLabel.setAttribute('for', 'downloadsJanitorDailyTime');
+    const timeRow = el('div', 'fj-setting');
+    const timeLabel = el('label', 'fj-label', 'Daily catch-up time');
+    timeLabel.setAttribute('for', 'fileJanitorDailyTime');
     const timeInput = document.createElement('input');
     timeInput.type = 'time';
-    timeInput.id = 'downloadsJanitorDailyTime';
-    timeInput.className = 'dj-input dj-input-time';
+    timeInput.id = 'fileJanitorDailyTime';
+    timeInput.className = 'fj-input fj-input-time';
     timeInput.value = settings.daily_scan_local_time || '09:00';
     timeInput.addEventListener('change', () => {
       void saveSettings({ daily_scan_local_time: timeInput.value });
     });
     timeRow.appendChild(timeLabel);
     timeRow.appendChild(timeInput);
-    timeRow.appendChild(el('p', 'dj-setting-help', 'Shown in your local time.'));
+    timeRow.appendChild(el('p', 'fj-setting-help', 'Shown in your local time.'));
     panel.appendChild(timeRow);
 
     // Content inspection, with each option's consequence spelled out.
-    const contentRow = el('fieldset', 'dj-setting dj-setting-content');
-    const legend = el('legend', 'dj-label', 'What Ori may read');
+    const contentRow = el('fieldset', 'fj-setting fj-setting-content');
+    const legend = el('legend', 'fj-label', 'What Ori may read');
     contentRow.appendChild(legend);
     const currentMode = settings.content_mode || 'metadata_only';
     CONTENT_MODES.forEach(mode => {
-      const option = el('label', 'dj-radio');
+      const option = el('label', 'fj-radio');
       const input = document.createElement('input');
       input.type = 'radio';
-      input.name = 'downloadsJanitorContentMode';
+      input.name = 'fileJanitorContentMode';
       input.value = mode.id;
       input.checked = currentMode === mode.id;
       input.addEventListener('change', () => {
         if (input.checked) void saveSettings({ content_mode: mode.id });
       });
       option.appendChild(input);
-      option.appendChild(el('span', 'dj-radio-label', mode.label));
-      option.appendChild(el('span', 'dj-radio-help', mode.help));
+      option.appendChild(el('span', 'fj-radio-label', mode.label));
+      option.appendChild(el('span', 'fj-radio-help', mode.help));
       contentRow.appendChild(option);
     });
     panel.appendChild(contentRow);
@@ -1280,9 +1280,9 @@
     // every readiness check with its repair. Settings is where a user goes when
     // something seems wrong, so the diagnosis belongs here and not only on the
     // Review tab they may never reach (FR-58, FR-112).
-    const health = el('div', 'dj-setting dj-setting-health');
-    health.appendChild(el('h4', 'dj-setting-heading', 'How it is working'));
-    const folderLine = el('p', 'dj-setting-help');
+    const health = el('div', 'fj-setting fj-setting-health');
+    health.appendChild(el('h4', 'fj-setting-heading', 'How it is working'));
+    const folderLine = el('p', 'fj-setting-help');
     folderLine.textContent = settings.root_path
       ? 'Managing ' + safeName(settings.root_path)
       : 'No folder chosen yet.';
@@ -1290,7 +1290,7 @@
     health.appendChild(
       el(
         'p',
-        'dj-setting-help',
+        'fj-setting-help',
         settings.paused
           ? 'Automatic scanning is paused. You can still scan on demand.'
           : 'Watching this folder, with a daily catch-up.'
@@ -1305,28 +1305,28 @@
 
     // Folder actions. Relink and revoke are grouped away from the rest and
     // labelled by what they do to the user's access, not by verb.
-    const actions = el('div', 'dj-settings-actions');
+    const actions = el('div', 'fj-settings-actions');
     actions.appendChild(
-      button('Run a test scan', 'dj-btn dj-btn-secondary', () => void testScan())
+      button('Run a test scan', 'fj-btn fj-btn-secondary', () => void testScan())
     );
     actions.appendChild(
-      button('Reset skipped files', 'dj-btn dj-btn-secondary', () => void resetSkipped())
+      button('Reset skipped files', 'fj-btn fj-btn-secondary', () => void resetSkipped())
     );
     actions.appendChild(
-      button('Choose a different folder', 'dj-btn dj-btn-secondary', () => void relink())
+      button('Choose a different folder', 'fj-btn fj-btn-secondary', () => void relink())
     );
     actions.appendChild(
       button(
         'Stop using this folder',
-        'dj-btn dj-btn-secondary dj-btn-destructive',
+        'fj-btn fj-btn-secondary fj-btn-destructive',
         () => void revoke()
       )
     );
     panel.appendChild(actions);
     panel.appendChild(removalSection());
 
-    const status = el('p', 'dj-settings-status', settingsMessage);
-    status.id = 'downloadsJanitorSettingsStatus';
+    const status = el('p', 'fj-settings-status', settingsMessage);
+    status.id = 'fileJanitorSettingsStatus';
     status.setAttribute('role', 'status');
     status.setAttribute('aria-live', 'polite');
     panel.appendChild(status);
@@ -1349,30 +1349,30 @@
   // put the destructive question above the context that explains it (FR-112,
   // FR-119).
   function removalSection() {
-    const section = el('div', 'dj-setting dj-setting-removal');
-    section.appendChild(el('h4', 'dj-setting-heading', 'Remove File Janitor'));
+    const section = el('div', 'fj-setting fj-setting-removal');
+    section.appendChild(el('h4', 'fj-setting-heading', 'Remove File Janitor'));
 
     if (!removalConfirming) {
       section.appendChild(
         el(
           'p',
-          'dj-setting-help',
+          'fj-setting-help',
           'Stops managing this folder and removes File Janitor from this workspace. ' +
             'Your files are not moved or deleted.'
         )
       );
       const start = button(
         'Remove File Janitor',
-        'dj-btn dj-btn-secondary dj-btn-destructive',
+        'fj-btn fj-btn-secondary fj-btn-destructive',
         () => void beginRemoval()
       );
-      start.id = 'downloadsJanitorRemove';
+      start.id = 'fileJanitorRemove';
       section.appendChild(start);
       return section;
     }
 
     const summary = removalSummary || {};
-    const confirmation = el('div', 'dj-removal-confirm');
+    const confirmation = el('div', 'fj-removal-confirm');
     confirmation.setAttribute('role', 'group');
     confirmation.setAttribute('aria-label', 'Confirm removing File Janitor');
 
@@ -1380,36 +1380,36 @@
     confirmation.appendChild(
       el(
         'p',
-        'dj-removal-lead',
+        'fj-removal-lead',
         summary.managed_folder
           ? 'Ori will stop managing ' + safeName(summary.managed_folder) + '.'
           : 'Ori will remove File Janitor from this workspace.'
       )
     );
 
-    const consequences = el('ul', 'dj-disclosure-list');
+    const consequences = el('ul', 'fj-disclosure-list');
     (summary.stops_automation || []).forEach(line =>
-      consequences.appendChild(el('li', 'dj-disclosure-item', 'Stops: ' + line))
+      consequences.appendChild(el('li', 'fj-disclosure-item', 'Stops: ' + line))
     );
     consequences.appendChild(
-      el('li', 'dj-disclosure-item', 'Ori gives up its access to the folder.')
+      el('li', 'fj-disclosure-item', 'Ori gives up its access to the folder.')
     );
     // The single most important sentence in the dialog.
     consequences.appendChild(
       el(
         'li',
-        'dj-disclosure-item',
+        'fj-disclosure-item',
         'No files are moved, renamed, deleted, or restored. Your folder is left exactly as it is.'
       )
     );
     (summary.retained_audit || []).forEach(line =>
-      consequences.appendChild(el('li', 'dj-disclosure-item', 'Kept: ' + line))
+      consequences.appendChild(el('li', 'fj-disclosure-item', 'Kept: ' + line))
     );
     if ((summary.kept_shared || summary.shared || []).length > 0) {
       consequences.appendChild(
         el(
           'li',
-          'dj-disclosure-item',
+          'fj-disclosure-item',
           'Anything shared with another feature stays available to it.'
         )
       );
@@ -1418,10 +1418,10 @@
 
     // The companion is a separate decision, presented as one.
     if (summary.companion && summary.companion.removable) {
-      const label = el('label', 'dj-removal-companion');
+      const label = el('label', 'fj-removal-companion');
       const box = document.createElement('input');
       box.type = 'checkbox';
-      box.id = 'downloadsJanitorRemoveCompanion';
+      box.id = 'fileJanitorRemoveCompanion';
       box.checked = removalCompanionChecked;
       box.addEventListener('change', () => {
         removalCompanionChecked = box.checked;
@@ -1431,25 +1431,25 @@
       confirmation.appendChild(label);
     } else if (summary.companion) {
       confirmation.appendChild(
-        el('p', 'dj-setting-help', summary.companion.reason || 'The Curator agent is left alone.')
+        el('p', 'fj-setting-help', summary.companion.reason || 'The Curator agent is left alone.')
       );
     }
 
-    const buttons = el('div', 'dj-settings-actions');
+    const buttons = el('div', 'fj-settings-actions');
     const confirm = button(
       'Remove File Janitor',
-      'dj-btn dj-btn-destructive',
+      'fj-btn fj-btn-destructive',
       () => void completeRemoval()
     );
-    confirm.id = 'downloadsJanitorRemoveConfirm';
-    const cancel = button('Keep File Janitor', 'dj-btn dj-btn-secondary', () => {
+    confirm.id = 'fileJanitorRemoveConfirm';
+    const cancel = button('Keep File Janitor', 'fj-btn fj-btn-secondary', () => {
       removalConfirming = false;
       removalSummary = null;
       removalCompanionChecked = false;
       setSettingsMessage('');
       renderSettings();
     });
-    cancel.id = 'downloadsJanitorRemoveCancel';
+    cancel.id = 'fileJanitorRemoveCancel';
     buttons.appendChild(cancel);
     buttons.appendChild(confirm);
     confirmation.appendChild(buttons);
@@ -1536,8 +1536,8 @@
   // same association the server uses for idempotency — never from an agent's
   // display name.
   function curatorSection() {
-    const section = el('div', 'dj-setting dj-setting-curator');
-    section.appendChild(el('h4', 'dj-setting-heading', 'Curator'));
+    const section = el('div', 'fj-setting fj-setting-curator');
+    section.appendChild(el('h4', 'fj-setting-heading', 'Curator'));
 
     const record = capabilityRecord();
     const companions = (record && record.owned_resources ? record.owned_resources : []).filter(
@@ -1548,7 +1548,7 @@
       section.appendChild(
         el(
           'p',
-          'dj-setting-help',
+          'fj-setting-help',
           'A Curator is helping in this workspace. It explains proposals and answers questions; ' +
             'it cannot approve, move, or delete anything.'
         )
@@ -1559,13 +1559,13 @@
     section.appendChild(
       el(
         'p',
-        'dj-setting-help',
+        'fj-setting-help',
         'No Curator in this workspace. File Janitor works fully without one — a Curator only ' +
           'helps you understand what is proposed, and can never act on your files.'
       )
     );
-    const add = button('Add a Curator', 'dj-btn dj-btn-secondary', () => void addCurator());
-    add.id = 'downloadsJanitorAddCurator';
+    const add = button('Add a Curator', 'fj-btn fj-btn-secondary', () => void addCurator());
+    add.id = 'fileJanitorAddCurator';
     section.appendChild(add);
     return section;
   }
@@ -1612,7 +1612,7 @@
 
   function setSettingsMessage(message) {
     settingsMessage = message || '';
-    const node = document.getElementById('downloadsJanitorSettingsStatus');
+    const node = document.getElementById('fileJanitorSettingsStatus');
     if (node) node.textContent = settingsMessage;
   }
 
@@ -1790,12 +1790,12 @@
   ];
 
   function historyLine(action) {
-    const entry = el('li', 'dj-history-item dj-history-' + (action.result || 'failed'));
+    const entry = el('li', 'fj-history-item fj-history-' + (action.result || 'failed'));
 
-    const mark = el('span', 'dj-results-mark', RESULT_MARKS[action.result] || '!');
+    const mark = el('span', 'fj-results-mark', RESULT_MARKS[action.result] || '!');
     mark.setAttribute('aria-hidden', 'true');
     entry.appendChild(mark);
-    entry.appendChild(el('span', 'dj-history-name', displayName(action)));
+    entry.appendChild(el('span', 'fj-history-name', displayName(action)));
 
     const what =
       action.operation === 'trash'
@@ -1805,16 +1805,16 @@
         : action.result === 'applied'
           ? ' — filed to ' + (action.destination_relative || '')
           : ' — not moved';
-    entry.appendChild(el('span', 'dj-history-what', what));
+    entry.appendChild(el('span', 'fj-history-what', what));
 
     if (action.undo === 'undone') {
-      entry.appendChild(el('span', 'dj-history-undone', ' · put back'));
+      entry.appendChild(el('span', 'fj-history-undone', ' · put back'));
     }
     if (action.error_summary) {
-      entry.appendChild(el('span', 'dj-history-message', ' ' + action.error_summary));
+      entry.appendChild(el('span', 'fj-history-message', ' ' + action.error_summary));
     }
     if (action.undo_error) {
-      entry.appendChild(el('span', 'dj-history-message', ' ' + action.undo_error));
+      entry.appendChild(el('span', 'fj-history-message', ' ' + action.undo_error));
     }
 
     // Undo is offered only where the server says it is still possible, and the
@@ -1823,36 +1823,36 @@
       entry.appendChild(
         button(
           action.operation === 'trash' ? 'Restore from Trash' : 'Undo move',
-          'dj-btn dj-btn-quiet',
+          'fj-btn fj-btn-quiet',
           () => void undoAction(action.id)
         )
       );
     } else if (action.result === 'applied' && action.undo !== 'undone') {
       // Saying why it cannot be undone is more useful than hiding the control.
-      entry.appendChild(el('span', 'dj-muted', ' Cannot be undone'));
+      entry.appendChild(el('span', 'fj-muted', ' Cannot be undone'));
     }
     return entry;
   }
 
   function renderHistory() {
-    const host = document.getElementById('downloadsJanitorHistoryHost');
+    const host = document.getElementById('fileJanitorHistoryHost');
     if (!host) return;
     clear(host);
     if (!historyLoaded) return;
 
-    const panel = el('section', 'dj-history');
-    panel.setAttribute('aria-labelledby', 'downloadsJanitorHistoryTitle');
-    const title = el('h3', 'dj-history-title', 'History');
-    title.id = 'downloadsJanitorHistoryTitle';
+    const panel = el('section', 'fj-history');
+    panel.setAttribute('aria-labelledby', 'fileJanitorHistoryTitle');
+    const title = el('h3', 'fj-history-title', 'History');
+    title.id = 'fileJanitorHistoryTitle';
     panel.appendChild(title);
 
-    const bar = el('div', 'dj-filters');
+    const bar = el('div', 'fj-filters');
     bar.setAttribute('role', 'group');
     bar.setAttribute('aria-label', 'Filter history');
     HISTORY_FILTERS.forEach(option => {
       const control = button(
         option.label,
-        'dj-filter' + (historyFilter === option.id ? ' dj-filter-active' : ''),
+        'fj-filter' + (historyFilter === option.id ? ' fj-filter-active' : ''),
         () => {
           historyFilter = option.id;
           void loadHistory();
@@ -1867,18 +1867,18 @@
       panel.appendChild(
         el(
           'p',
-          'dj-empty-copy',
+          'fj-empty-copy',
           'Nothing here yet. Applied moves and Trash actions are listed here.'
         )
       );
     } else {
-      const list = el('ul', 'dj-history-list');
+      const list = el('ul', 'fj-history-list');
       historyActions.forEach(action => list.appendChild(historyLine(action)));
       panel.appendChild(list);
     }
 
-    const status = el('p', 'dj-history-status', historyStatusMessage);
-    status.id = 'downloadsJanitorHistoryStatus';
+    const status = el('p', 'fj-history-status', historyStatusMessage);
+    status.id = 'fileJanitorHistoryStatus';
     status.setAttribute('role', 'status');
     status.setAttribute('aria-live', 'polite');
     panel.appendChild(status);
@@ -1915,7 +1915,7 @@
     if (!id || busy) return;
     busy = true;
     historyStatusMessage = 'Putting it back…';
-    const status = document.getElementById('downloadsJanitorHistoryStatus');
+    const status = document.getElementById('fileJanitorHistoryStatus');
     if (status) status.textContent = historyStatusMessage;
     try {
       const response = await fetch(
@@ -1964,17 +1964,17 @@
   // from each authoritative outcome: an applied Trash is never called "filed",
   // and an older response without operation data gets neutral wording.
   function renderResults(result) {
-    const host = document.getElementById('downloadsJanitorConfirmHost');
+    const host = document.getElementById('fileJanitorConfirmHost');
     if (!host) return;
     clear(host);
 
-    const panel = el('section', 'dj-results');
+    const panel = el('section', 'fj-results');
     // Focus moves here below, so the user is taken to the outcome rather than
     // told about it from elsewhere. A live region as well would announce the
     // same text twice, so this is a labelled group instead of role="status".
     panel.setAttribute('role', 'group');
     panel.setAttribute('tabindex', '-1');
-    panel.setAttribute('aria-labelledby', 'downloadsJanitorResultsSummary');
+    panel.setAttribute('aria-labelledby', 'fileJanitorResultsSummary');
 
     const outcomes = Array.isArray(result.outcomes) ? result.outcomes : [];
     let filed = 0;
@@ -2005,43 +2005,43 @@
     if (failed) parts.push(formatCount(failed) + ' could not be moved');
     if (stale) parts.push(formatCount(stale) + ' changed since you approved');
     if (parts.length === 0) parts.push('Nothing was moved');
-    const resultsSummary = el('p', 'dj-results-summary', parts.join(' · ') + '.');
-    resultsSummary.id = 'downloadsJanitorResultsSummary';
+    const resultsSummary = el('p', 'fj-results-summary', parts.join(' · ') + '.');
+    resultsSummary.id = 'fileJanitorResultsSummary';
     panel.appendChild(resultsSummary);
     if (result.replayed) {
       panel.appendChild(
-        el('p', 'dj-results-replayed', 'Already completed earlier; nothing ran again.')
+        el('p', 'fj-results-replayed', 'Already completed earlier; nothing ran again.')
       );
     }
 
-    const list = el('ul', 'dj-results-list');
+    const list = el('ul', 'fj-results-list');
     outcomes.forEach(outcome => {
-      const entry = el('li', 'dj-results-item dj-results-' + (outcome.result || 'failed'));
-      const mark = el('span', 'dj-results-mark', RESULT_MARKS[outcome.result] || '!');
+      const entry = el('li', 'fj-results-item fj-results-' + (outcome.result || 'failed'));
+      const mark = el('span', 'fj-results-mark', RESULT_MARKS[outcome.result] || '!');
       mark.setAttribute('aria-hidden', 'true');
       entry.appendChild(mark);
-      entry.appendChild(el('span', 'dj-results-name', displayName(outcome)));
-      entry.appendChild(el('span', 'dj-results-state', ' — ' + outcomeLabel(outcome)));
+      entry.appendChild(el('span', 'fj-results-name', displayName(outcome)));
+      entry.appendChild(el('span', 'fj-results-state', ' — ' + outcomeLabel(outcome)));
       if (
         outcome.destination &&
         outcome.result === 'applied' &&
         outcomeOperation(outcome) === 'move'
       ) {
-        entry.appendChild(el('span', 'dj-results-destination', ' → ' + outcome.destination));
+        entry.appendChild(el('span', 'fj-results-destination', ' → ' + outcome.destination));
       }
       if (outcome.message) {
-        entry.appendChild(el('span', 'dj-results-message', ' ' + outcome.message));
+        entry.appendChild(el('span', 'fj-results-message', ' ' + outcome.message));
       }
       list.appendChild(entry);
     });
     panel.appendChild(list);
 
-    const actions = el('div', 'dj-results-actions');
+    const actions = el('div', 'fj-results-actions');
     actions.appendChild(
-      button('View History', 'dj-btn dj-btn-secondary', () => selectTab('history'))
+      button('View History', 'fj-btn fj-btn-secondary', () => selectTab('history'))
     );
     if (stale) {
-      actions.appendChild(button('Scan again', 'dj-btn dj-btn-secondary', () => void scanNow()));
+      actions.appendChild(button('Scan again', 'fj-btn fj-btn-secondary', () => void scanNow()));
     }
     panel.appendChild(actions);
     host.appendChild(panel);
@@ -2067,7 +2067,7 @@
     busy = true;
     showError('');
     rememberFocus();
-    const control = document.getElementById('downloadsJanitorApprove');
+    const control = document.getElementById('fileJanitorApprove');
     if (control) control.disabled = true;
     try {
       const decisions = Array.from(selected).map(candidateId => {
@@ -2122,7 +2122,7 @@
     if (!id || busy || !active) return;
     busy = true;
     showError('');
-    const control = document.getElementById('downloadsJanitorConfirmApply');
+    const control = document.getElementById('fileJanitorConfirmApply');
     if (control) {
       control.disabled = true;
       control.textContent = 'Moving…';
@@ -2167,10 +2167,10 @@
     const paused = Boolean(settings && settings.paused);
     const control = button(
       paused ? 'Resume watching' : 'Pause watching',
-      'dj-btn dj-btn-secondary',
+      'fj-btn fj-btn-secondary',
       () => void setPaused(!paused)
     );
-    control.id = 'downloadsJanitorPause';
+    control.id = 'fileJanitorPause';
     control.setAttribute(
       'title',
       paused
@@ -2292,14 +2292,14 @@
 
     const card = el('section', 'fj-card is-' + activity.id.replace(/_/g, '-'));
     card.setAttribute('role', 'group');
-    card.setAttribute('aria-labelledby', 'downloadsJanitorTitle');
+    card.setAttribute('aria-labelledby', 'fileJanitorTitle');
 
     const head = el('div', 'fj-card-head');
     head.appendChild(compactDepotMark());
     const heading = el('div', 'fj-card-heading');
     heading.appendChild(el('span', 'fj-card-kicker', 'File depot'));
     const title = el('h2', 'fj-card-title', 'File Janitor');
-    title.id = 'downloadsJanitorTitle';
+    title.id = 'fileJanitorTitle';
     heading.appendChild(title);
     heading.appendChild(
       el(
@@ -2315,16 +2315,16 @@
 
     const facts = el('dl', 'fj-card-facts');
     const badge = compactFact(facts, 'Current status', activity.label, {
-      id: 'downloadsJanitorActivity',
+      id: 'fileJanitorActivity',
       status: true
     });
-    badge.className += ' dj-badge dj-badge-' + activity.id.replace(/_/g, '-');
+    badge.className += ' fj-badge fj-badge-' + activity.id.replace(/_/g, '-');
     compactFact(facts, 'Managed folder', managedFolder, {
       title: managedFolderPath,
       wide: true
     });
     compactFact(facts, 'Review queue', configured ? statsLine() : 'Available after setup.', {
-      id: 'downloadsJanitorStats',
+      id: 'fileJanitorStats',
       status: true,
       wide: true
     });
@@ -2335,7 +2335,7 @@
     const primaryAction = compactPrimaryAction(status);
     // A control that promises Review always requests Review explicitly. It must
     // not inherit History or Settings merely because that was the last tab.
-    const openButton = button(primaryAction.label, 'dj-btn dj-btn-primary', event => {
+    const openButton = button(primaryAction.label, 'fj-btn fj-btn-primary', event => {
       open({
         source: 'workspace-details',
         tab: primaryAction.tab || undefined,
@@ -2348,7 +2348,7 @@
     // Scan now is a subordinate utility, never a second primary destination.
     // Before setup, the sole action is the one that grants folder access.
     if (configured) {
-      const scan = button('Scan now', 'dj-btn dj-btn-secondary', () => void scanNow());
+      const scan = button('Scan now', 'fj-btn fj-btn-secondary', () => void scanNow());
       scan.id = 'fileJanitorCardScan';
       scan.disabled = scanning;
       actions.appendChild(scan);
@@ -2382,8 +2382,8 @@
   }
 
   function errorRegion() {
-    const region = el('p', 'dj-error');
-    region.id = 'downloadsJanitorError';
+    const region = el('p', 'fj-error');
+    region.id = 'fileJanitorError';
     region.setAttribute('role', 'status');
     region.setAttribute('aria-live', 'polite');
     region.hidden = true;
@@ -2418,9 +2418,9 @@
 
   function paintError() {
     const region =
-      (consoleOpen && document.getElementById('downloadsJanitorError')) ||
+      (consoleOpen && document.getElementById('fileJanitorError')) ||
       document.getElementById('fileJanitorCardError') ||
-      document.getElementById('downloadsJanitorError');
+      document.getElementById('fileJanitorError');
     if (!region) return;
     region.textContent = lastErrorMessage;
     region.hidden = !lastErrorMessage;
@@ -2506,8 +2506,8 @@
     host.setAttribute('aria-labelledby', 'fileJanitorTab-' + consoleTab);
 
     if (consoleTab === 'history') {
-      const historyHost = el('div', 'dj-history-host');
-      historyHost.id = 'downloadsJanitorHistoryHost';
+      const historyHost = el('div', 'fj-history-host');
+      historyHost.id = 'fileJanitorHistoryHost';
       host.appendChild(historyHost);
       host.appendChild(errorRegion());
       renderHistory();
@@ -2515,8 +2515,8 @@
       return;
     }
     if (consoleTab === 'settings') {
-      const settingsHost = el('div', 'dj-settings-host');
-      settingsHost.id = 'downloadsJanitorSettingsHost';
+      const settingsHost = el('div', 'fj-settings-host');
+      settingsHost.id = 'fileJanitorSettingsHost';
       host.appendChild(settingsHost);
       host.appendChild(privacyLine(status));
       host.appendChild(errorRegion());
@@ -2532,11 +2532,11 @@
     host.appendChild(readinessRows(status));
     const repair = repairAction(status);
     if (repair) host.appendChild(repair);
-    const batchHost = el('div', 'dj-batch');
-    batchHost.id = 'downloadsJanitorBatch';
+    const batchHost = el('div', 'fj-batch');
+    batchHost.id = 'fileJanitorBatch';
     host.appendChild(batchHost);
-    const confirmHost = el('div', 'dj-confirm-host');
-    confirmHost.id = 'downloadsJanitorConfirmHost';
+    const confirmHost = el('div', 'fj-confirm-host');
+    confirmHost.id = 'fileJanitorConfirmHost';
     host.appendChild(confirmHost);
     host.appendChild(errorRegion());
     renderBatch();
@@ -2556,26 +2556,26 @@
           check.repair === 'grant_permission')
     );
     if (!repairable) return null;
-    const actions = el('div', 'dj-actions');
+    const actions = el('div', 'fj-actions');
     actions.appendChild(
-      button('Choose the folder again', 'dj-btn dj-btn-secondary', () => renderSetupPrompt(status))
+      button('Choose the folder again', 'fj-btn fj-btn-secondary', () => renderSetupPrompt(status))
     );
-    actions.appendChild(button('Check again', 'dj-btn dj-btn-secondary', () => void refresh()));
+    actions.appendChild(button('Check again', 'fj-btn fj-btn-secondary', () => void refresh()));
     return actions;
   }
 
   function readinessRows(status) {
     const readiness = (status && status.readiness) || {};
-    const rows = el('ul', 'dj-rows');
+    const rows = el('ul', 'fj-rows');
     (readiness.checks || []).forEach(check => {
-      const li = el('li', 'dj-row dj-row-' + (check.status || 'pending'));
-      const mark = el('span', 'dj-row-mark', STATUS_MARKS[check.status] || '–');
+      const li = el('li', 'fj-row fj-row-' + (check.status || 'pending'));
+      const mark = el('span', 'fj-row-mark', STATUS_MARKS[check.status] || '–');
       mark.setAttribute('aria-hidden', 'true');
       li.appendChild(mark);
       li.appendChild(
-        el('span', 'dj-row-label', (COMPONENT_LABELS[check.component] || check.component) + ': ')
+        el('span', 'fj-row-label', (COMPONENT_LABELS[check.component] || check.component) + ': ')
       );
-      const value = el('span', 'dj-row-value');
+      const value = el('span', 'fj-row-value');
       // Screen readers get the status word; sighted users get the mark + text.
       value.textContent =
         (check.status === 'ok'
@@ -2859,8 +2859,8 @@
     // Attach BEFORE filling the body.
     //
     // The tab renderers find their hosts with getElementById — renderSettings
-    // looks up downloadsJanitorSettingsHost, renderBatch looks up
-    // downloadsJanitorBatch. A node that has been appended to a detached
+    // looks up fileJanitorSettingsHost, renderBatch looks up
+    // fileJanitorBatch. A node that has been appended to a detached
     // subtree is not in the document yet, so those lookups returned null and
     // each renderer bailed silently: Settings showed only its privacy line and
     // Review showed only its readiness rows, on first paint, with no error
@@ -2942,13 +2942,13 @@
 
     const actions = el('div', 'fj-console-actions');
     if (configured) {
-      const scan = button('Scan now', 'dj-btn dj-btn-secondary', () => void scanNow());
-      scan.id = 'downloadsJanitorScan';
+      const scan = button('Scan now', 'fj-btn fj-btn-secondary', () => void scanNow());
+      scan.id = 'fileJanitorScan';
       scan.disabled = scanning;
       actions.appendChild(scan);
       actions.appendChild(pauseControl(settings));
     }
-    const closeButton = button('Close', 'dj-btn dj-btn-secondary', () => close());
+    const closeButton = button('Close', 'fj-btn fj-btn-secondary', () => close());
     closeButton.setAttribute('data-fj-console-close', '');
     closeButton.setAttribute('aria-label', 'Close File Janitor');
     consoleCloseButton = closeButton;
@@ -3134,16 +3134,16 @@
   // says what state setup is in and opens the wizard.
   function renderSetupEntry(host) {
     const setup = window.SetupWizard?.getStatus?.() || {};
-    const card = el('section', 'dj-card');
-    const head = el('div', 'dj-head');
-    const heading = el('div', 'dj-heading');
-    const title = el('h2', 'dj-title', 'File Janitor');
-    title.id = 'downloadsJanitorTitle';
+    const card = el('section', 'fj-card');
+    const head = el('div', 'fj-head');
+    const heading = el('div', 'fj-heading');
+    const title = el('h2', 'fj-title', 'File Janitor');
+    title.id = 'fileJanitorTitle';
     heading.appendChild(title);
     heading.appendChild(
       el(
         'p',
-        'dj-sub',
+        'fj-sub',
         setup.state === 'needs_attention'
           ? 'Something this workspace depends on stopped working.'
           : 'Setup is not finished. Nothing is scanned or moved until it is.'
@@ -3155,13 +3155,13 @@
     );
     card.appendChild(head);
 
-    const actions = el('div', 'dj-actions');
+    const actions = el('div', 'fj-actions');
     const open = button(
       setup.state === 'needs_attention' ? 'Repair setup' : 'Continue setup',
-      'dj-btn dj-btn-primary',
+      'fj-btn fj-btn-primary',
       () => window.SetupWizard?.open?.()
     );
-    open.id = 'downloadsJanitorOpenSetup';
+    open.id = 'fileJanitorOpenSetup';
     actions.appendChild(open);
     card.appendChild(actions);
     card.appendChild(errorRegion());
@@ -3195,7 +3195,7 @@
   }
 
   function refreshStats() {
-    const node = document.getElementById('downloadsJanitorStats');
+    const node = document.getElementById('fileJanitorStats');
     if (node) node.textContent = statsLine();
   }
 
@@ -3220,7 +3220,7 @@
       if (!response.ok || !result.success)
         throw new Error(result.error || 'Folder picker unavailable');
       if (result.selected && result.path) {
-        const input = document.getElementById('downloadsJanitorPath');
+        const input = document.getElementById('fileJanitorPath');
         if (input) input.value = result.path;
         if (typeof syncSetupConfirmEnabled === 'function') syncSetupConfirmEnabled();
       }
@@ -3239,7 +3239,7 @@
     }
     busy = true;
     showError('');
-    const confirm = document.getElementById('downloadsJanitorConfirm');
+    const confirm = document.getElementById('fileJanitorConfirm');
     if (confirm) confirm.disabled = true;
     try {
       const response = await fetch(apiBase(id) + '/setup', {
@@ -3271,7 +3271,7 @@
     reviewStatusMessage = '';
     showError('');
     refreshActivity();
-    const control = document.getElementById('downloadsJanitorScan');
+    const control = document.getElementById('fileJanitorScan');
     if (control) {
       control.disabled = true;
       control.textContent = 'Scanning…';
@@ -3302,7 +3302,7 @@
       busy = false;
       scanning = false;
       refreshActivity();
-      const done = document.getElementById('downloadsJanitorScan');
+      const done = document.getElementById('fileJanitorScan');
       if (done) {
         done.disabled = false;
         done.textContent = 'Scan now';
@@ -3311,13 +3311,13 @@
   }
 
   function refreshActivity() {
-    const node = document.getElementById('downloadsJanitorActivity');
+    const node = document.getElementById('fileJanitorActivity');
     if (!node) return;
     const activity = activityState(lastStatus);
     node.textContent = '';
     node.appendChild(el('span', 'fj-card-fact-main', activity.label));
     const stateClass = activity.id.replace(/_/g, '-');
-    node.className = 'fj-card-fact-value dj-badge dj-badge-' + stateClass;
+    node.className = 'fj-card-fact-value fj-badge fj-badge-' + stateClass;
     let card = node.parentElement || node.parent || null;
     while (
       card &&
@@ -3337,7 +3337,7 @@
     if (!id || busy) return;
     busy = true;
     showError('');
-    const control = document.getElementById('downloadsJanitorPause');
+    const control = document.getElementById('fileJanitorPause');
     if (control) control.disabled = true;
     try {
       const response = await fetch(apiBase(id) + '/pause', {
@@ -3359,7 +3359,7 @@
       showError(error.message || 'Ori could not change that setting.');
     } finally {
       busy = false;
-      const done = document.getElementById('downloadsJanitorPause');
+      const done = document.getElementById('fileJanitorPause');
       if (done) done.disabled = false;
     }
   }
@@ -3414,7 +3414,7 @@
     const previousBatchID = lastBatch && lastBatch.id;
     batchLoadState = 'loading';
     renderBatch();
-    const pendingControl = document.getElementById('downloadsJanitorConfirmApply');
+    const pendingControl = document.getElementById('fileJanitorConfirmApply');
     if (pendingPreview && pendingControl) pendingControl.disabled = true;
 
     try {
@@ -3451,7 +3451,7 @@
       batchLoadState = 'error';
       const hadPendingPreview = Boolean(pendingPreview);
       pendingPreview = null;
-      if (hadPendingPreview) clear(document.getElementById('downloadsJanitorConfirmHost'));
+      if (hadPendingPreview) clear(document.getElementById('fileJanitorConfirmHost'));
       renderBatch();
       return;
     }
@@ -3474,10 +3474,10 @@
       pendingPreview.preview.batch_id === lastBatch.id;
     if (!approvalStillApplies) {
       pendingPreview = null;
-      if (hadPendingPreview) clear(document.getElementById('downloadsJanitorConfirmHost'));
+      if (hadPendingPreview) clear(document.getElementById('fileJanitorConfirmHost'));
     } else {
-      const control = document.getElementById('downloadsJanitorConfirmApply');
-      const acknowledgement = document.getElementById('downloadsJanitorTrashAck');
+      const control = document.getElementById('fileJanitorConfirmApply');
+      const acknowledgement = document.getElementById('fileJanitorTrashAck');
       if (control) {
         control.textContent = confirmLabel(pendingPreview.preview);
         control.disabled = Boolean(acknowledgement && !acknowledgement.checked);
@@ -3509,7 +3509,7 @@
       }
       return;
     } catch (_) {
-      // A workspace that is not a Downloads Janitor workspace, or a server that
+      // A workspace that is not a File Janitor workspace, or a server that
       // has not wired the feature, simply shows nothing here.
       const host = mount();
       if (host && !lastStatus) host.hidden = true;
@@ -3725,20 +3725,20 @@
       const root = chosenRoot();
       const suggestion = (lastStatus && lastStatus.suggestion) || {};
 
-      const field = el('div', 'dj-field');
-      field.appendChild(el('span', 'dj-label', root ? 'Folder Ori will tidy' : 'Suggested folder'));
-      const value = el('p', 'dj-sub', root || suggestion.suggested_path || '~/Downloads');
-      value.id = 'downloadsJanitorWizardPath';
+      const field = el('div', 'fj-field');
+      field.appendChild(el('span', 'fj-label', root ? 'Folder Ori will tidy' : 'Suggested folder'));
+      const value = el('p', 'fj-sub', root || suggestion.suggested_path || '~/Downloads');
+      value.id = 'fileJanitorWizardPath';
       field.appendChild(value);
       container.appendChild(field);
 
-      const actions = el('div', 'dj-actions');
+      const actions = el('div', 'fj-actions');
       const pick = button(
         root ? 'Choose a different folder…' : 'Choose folder…',
-        'dj-btn dj-btn-primary',
+        'fj-btn fj-btn-primary',
         () => void chooseFolder(ctx)
       );
-      pick.id = 'downloadsJanitorWizardPick';
+      pick.id = 'fileJanitorWizardPick';
       actions.appendChild(pick);
       container.appendChild(actions);
     },
@@ -3757,7 +3757,7 @@
     render(container, ctx) {
       if (!ownsStep(ctx.step)) return;
       const settings = (lastStatus && lastStatus.settings) || {};
-      const list = el('ul', 'dj-disclosure-list');
+      const list = el('ul', 'fj-disclosure-list');
       [
         'Watches this folder for files you download or rename, and waits five minutes so a download can finish.',
         'Skips the ' + (settings.filing_root_name || 'Filed') + ' folder it files into.',
@@ -3765,7 +3765,7 @@
           (settings.daily_scan_local_time || '09:00') +
           ' your local time.',
         'Every scan only proposes a batch. Nothing moves until you approve it.'
-      ].forEach(text => list.appendChild(el('li', 'dj-disclosure-item', text)));
+      ].forEach(text => list.appendChild(el('li', 'fj-disclosure-item', text)));
       container.appendChild(list);
     },
     primaryLabel(ctx) {
