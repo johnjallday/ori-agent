@@ -3,6 +3,7 @@ package progression
 import (
 	"errors"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -274,6 +275,67 @@ func (e *Engine) Backfill(scanner Scanner) error {
 	return e.persistLocked()
 }
 
+// ReconcileOnce grandfathers quests added to the graph after this install's
+// one-time Backfill already ran. Under key, it runs at most once per install:
+//
+//   - Backfill has not run yet (a fresh install): the key is only recorded,
+//     because the Backfill about to run evaluates every quest anyway.
+//   - Backfill already ran: a fresh snapshot is taken and each named quest
+//     whose Satisfied holds is marked complete.
+//
+// Like Backfill it is SILENT: no onComplete, so no reward is paid for work done
+// before the quest existed. It returns how many quests it marked. Call it
+// before Backfill at startup.
+func (e *Engine) ReconcileOnce(key string, scanner Scanner, questIDs ...string) (int, error) {
+	if scanner == nil || key == "" {
+		return 0, nil
+	}
+
+	e.mu.Lock()
+	if _, done := e.state.Reconciled[key]; done {
+		e.mu.Unlock()
+		return 0, nil
+	}
+	if e.state.BackfilledAt.IsZero() {
+		defer e.mu.Unlock()
+		e.recordReconciledLocked(key)
+		return 0, e.persistLocked()
+	}
+	e.mu.Unlock()
+
+	snap := scanner.Scan()
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if _, done := e.state.Reconciled[key]; done {
+		return 0, nil
+	}
+	marked := 0
+	for _, id := range questIDs {
+		q, ok := e.questByID(id)
+		if !ok || q.Satisfied == nil {
+			continue
+		}
+		if _, done := e.state.CompletedQuests[id]; done {
+			continue
+		}
+		if q.Satisfied(snap) {
+			e.markLocked(id)
+			marked++
+		}
+	}
+	e.recordReconciledLocked(key)
+	return marked, e.persistLocked()
+}
+
+// recordReconciledLocked notes that a reconcile pass ran. Caller holds the lock.
+func (e *Engine) recordReconciledLocked(key string) {
+	if e.state.Reconciled == nil {
+		e.state.Reconciled = map[string]time.Time{}
+	}
+	e.state.Reconciled[key] = e.now()
+}
+
 // SetDismissed persists whether the user has hidden the quest-log widget.
 func (e *Engine) SetDismissed(dismissed bool) error {
 	e.mu.Lock()
@@ -286,15 +348,21 @@ func (e *Engine) SetDismissed(dismissed bool) error {
 // consumed (BackfilledAt = now) so an explicit reset is a blank slate that
 // survives restarts — existing workspaces/agents will not silently re-complete
 // quests via the startup backfill. Live events still complete quests going
-// forward.
+// forward. Reconcile passes that already ran stay recorded for the same
+// reason: a reset must not be undone by a grandfathering pass on restart.
 func (e *Engine) Reset() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	previous := e.state
+	reconciled := make(map[string]time.Time, len(previous.Reconciled))
+	for key, at := range previous.Reconciled {
+		reconciled[key] = at
+	}
 	e.state = types.ProgressionState{
 		CompletedQuests: map[string]time.Time{},
 		SkippedQuests:   map[string]time.Time{},
 		BackfilledAt:    e.now(),
+		Reconciled:      reconciled,
 	}
 	if err := e.persistLocked(); err != nil {
 		e.state = previous
@@ -477,14 +545,18 @@ func (e *Engine) statusLocked(mission MissionContext) Status {
 }
 
 // applyPresentation overlays a mission's resolved copy onto its view. Empty
-// strings keep the static value. InProgress applies only while the quest is
-// unresolved: a completed or skipped mission is never "in progress".
+// strings keep the static value. InProgress and Hint apply only while the quest
+// is unresolved: a completed or skipped mission is never "in progress", and
+// advice about finishing it no longer applies.
 func applyPresentation(qv *QuestView, p MissionPresentation, resolved bool) {
 	if p.Title != "" {
 		qv.Title = p.Title
 	}
 	if p.Why != "" {
 		qv.Why = p.Why
+	}
+	if hint := strings.TrimSpace(p.Hint); hint != "" && !resolved {
+		qv.Why = strings.TrimSpace(qv.Why + " " + hint)
 	}
 	if p.ActionURL != "" {
 		qv.ActionURL = p.ActionURL

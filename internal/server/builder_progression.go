@@ -88,6 +88,10 @@ func (b *ServerBuilder) initializeProgression() {
 	b.progressionHandler = progressionhttp.NewHandler(engine)
 }
 
+// starterMissionsReconcileKey names the one-time grandfathering pass for the
+// starter missions. Never change it: a new key re-runs the pass.
+const starterMissionsReconcileKey = "starter-missions-v1"
+
 // completeProgressionWiring installs the progression hooks whose owners are
 // built in initializeDailyBrief, then runs the one-time backfill and the
 // startup reconcile. Call it after that phase. Safe when progression was not
@@ -128,8 +132,22 @@ func (b *ServerBuilder) completeProgressionWiring() {
 		})
 	}
 
+	// Installs whose backfill ran before the starter missions existed get one
+	// silent grandfathering pass for them (PRD FR44): a ready File Janitor, a
+	// connected source, or an existing brief shows as done, with no toast
+	// storm and no Craft paid for past work. Runs before Backfill, which covers
+	// a fresh install on its own.
+	scanner := progression.ScannerFunc(b.scanProgression)
+	if marked, err := engine.ReconcileOnce(starterMissionsReconcileKey, scanner,
+		progression.TidyDownloadsQuestID, progression.ConnectSourceQuestID, progression.FirstBriefQuestID,
+	); err != nil {
+		logger.Warn("Starter missions reconcile failed", logger.Fields{"error": err})
+	} else if marked > 0 {
+		logger.Info("Starter missions grandfathered", logger.Fields{"quests": marked})
+	}
+
 	// One-time backfill so established installs are grandfathered silently.
-	if err := engine.Backfill(progression.ScannerFunc(b.scanProgression)); err != nil {
+	if err := engine.Backfill(scanner); err != nil {
 		logger.Warn("Onboarding progression backfill failed", logger.Fields{"error": err})
 	}
 	// Reconcile installs whose one-time progression backfill predates this quest.

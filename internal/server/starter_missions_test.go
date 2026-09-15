@@ -365,6 +365,54 @@ func TestScanStarterWorkspaces_CountsProjectsAndCalendarReadiness(t *testing.T) 
 	}
 }
 
+// An install that backfilled before the starter missions existed, with a
+// ready File Janitor, sees Mission 02 done after the upgrade: once, silently,
+// and never again.
+func TestCompleteProgressionWiring_GrandfathersAnUpgradedInstallOnce(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "app_state.json")
+	mgr := onboarding.NewManager(statePath)
+	state := mgr.GetProgression()
+	state.BackfilledAt = time.Now().Add(-90 * 24 * time.Hour)
+	state.CompletedQuests = map[string]time.Time{"t1-first-message": time.Now().Add(-80 * 24 * time.Hour)}
+	if err := mgr.SetProgression(state); err != nil {
+		t.Fatal(err)
+	}
+	s := newStarterStore(t)
+	now := time.Now()
+	s.add("ws-janitor", "Tidy Downloads", "file-janitor", "", &now)
+
+	start := func() (*progression.Engine, *int) {
+		fires := 0
+		engine := progression.New(mgr,
+			progression.WithGraph(progression.PersonalAssistantGraph()),
+			progression.WithOnComplete(func(progression.Quest) { fires++ }),
+		)
+		b := &ServerBuilder{workspaceFileStore: s.store, onboardingMgr: mgr, progressionEngine: engine}
+		b.completeProgressionWiring()
+		return engine, &fires
+	}
+
+	engine, fires := start()
+	if !engine.HasCompleted(progression.TidyDownloadsQuestID) {
+		t.Fatal("a ready File Janitor on an upgraded install was not grandfathered")
+	}
+	if *fires != 0 {
+		t.Fatalf("grandfathering fired %d completions; it must be silent", *fires)
+	}
+	if _, recorded := mgr.GetProgression().Reconciled[starterMissionsReconcileKey]; !recorded {
+		t.Fatal("the pass was not persisted")
+	}
+
+	// A reset after the upgrade stays a blank slate across restarts.
+	if err := engine.Reset(); err != nil {
+		t.Fatal(err)
+	}
+	restarted, _ := start()
+	if restarted.HasCompleted(progression.TidyDownloadsQuestID) {
+		t.Fatal("a restart after a reset re-grandfathered Mission 02")
+	}
+}
+
 func TestScanProgression_LegacyFirstDayCompletion(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "app_state.json")
 	mgr := onboarding.NewManager(statePath)

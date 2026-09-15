@@ -325,13 +325,101 @@ func TestResolveTidyDownloads(t *testing.T) {
 	}
 }
 
+func TestReconcileOnce_GrandfathersNewQuestsSilentlyOnce(t *testing.T) {
+	store := &fakeStore{}
+	store.state.BackfilledAt = time.Now().Add(-30 * 24 * time.Hour) // an established install
+	fires := 0
+	e := New(store, WithGraph(PersonalAssistantGraph()), WithOnComplete(func(Quest) { fires++ }))
+
+	scans := 0
+	snap := Snapshot{FileJanitorReady: true, HasBriefRevision: true, Workspaces: 4}
+	scanner := ScannerFunc(func() Snapshot { scans++; return snap })
+
+	marked, err := e.ReconcileOnce("starter-missions-v1", scanner, TidyDownloadsQuestID, ConnectSourceQuestID, FirstBriefQuestID)
+	if err != nil || marked != 2 {
+		t.Fatalf("marked=%d err=%v, want 2 (tidy and brief)", marked, err)
+	}
+	if !completed(e, TidyDownloadsQuestID) || !completed(e, FirstBriefQuestID) || completed(e, ConnectSourceQuestID) {
+		t.Fatalf("reconcile outcome wrong: %+v", e.Status().Missions)
+	}
+	// Only the named quests are reconciled: first contact stays for the live path.
+	if completed(e, "t1-first-message") {
+		t.Fatal("a quest outside the pass was grandfathered")
+	}
+	if fires != 0 {
+		t.Fatalf("reconcile fired onComplete %d times; past work must not pay", fires)
+	}
+
+	// The pass never runs again, even when more evidence appears.
+	snap.EmailOpsReady = true
+	if marked, err := e.ReconcileOnce("starter-missions-v1", scanner, ConnectSourceQuestID); err != nil || marked != 0 {
+		t.Fatalf("second pass marked %d err=%v", marked, err)
+	}
+	if scans != 1 || completed(e, ConnectSourceQuestID) {
+		t.Fatalf("second pass scanned (%d scans) or completed Mission 03", scans)
+	}
+
+	// It survives a restart and a reset.
+	if err := New(store, WithGraph(PersonalAssistantGraph())).Reset(); err != nil {
+		t.Fatal(err)
+	}
+	after := New(store, WithGraph(PersonalAssistantGraph()))
+	if marked, _ := after.ReconcileOnce("starter-missions-v1", scanner, ConnectSourceQuestID); marked != 0 || scans != 1 {
+		t.Fatalf("a reset re-ran the pass: marked=%d scans=%d", marked, scans)
+	}
+}
+
+func TestReconcileOnce_FreshInstallDefersToBackfill(t *testing.T) {
+	store := &fakeStore{}
+	e := New(store, WithGraph(PersonalAssistantGraph()))
+	scans := 0
+	scanner := ScannerFunc(func() Snapshot { scans++; return Snapshot{FileJanitorReady: true} })
+
+	if marked, err := e.ReconcileOnce("starter-missions-v1", scanner, TidyDownloadsQuestID); err != nil || marked != 0 {
+		t.Fatalf("marked=%d err=%v on a fresh install", marked, err)
+	}
+	if scans != 0 {
+		t.Fatal("a fresh install scanned twice; Backfill covers it")
+	}
+	if _, recorded := store.state.Reconciled["starter-missions-v1"]; !recorded {
+		t.Fatal("the pass was not recorded, so it would run after the first Backfill")
+	}
+	if err := e.Backfill(scanner); err != nil {
+		t.Fatal(err)
+	}
+	if !completed(e, TidyDownloadsQuestID) || scans != 1 {
+		t.Fatalf("Backfill did not grandfather Mission 02 (scans=%d)", scans)
+	}
+}
+
 func TestResolveFirstBrief_AsksForAModelOnlyWhenNoneIsConfigured(t *testing.T) {
 	if got := resolveFirstBrief(MissionContext{ModelConfigured: true}); got != (MissionPresentation{}) {
 		t.Fatalf("with a model the copy changed: %+v", got)
 	}
 	got := resolveFirstBrief(MissionContext{})
-	if got.Why != firstBriefWhy+" Add a model in Settings to generate one." || got.ActionURL != "" || got.InProgress {
+	if got.Hint != "Add a model in Settings to generate one." || got.Why != "" || got.ActionURL != "" || got.InProgress {
 		t.Fatalf("without a model = %+v", got)
+	}
+
+	// Through the engine: the hint follows the why line while Mission 04 is
+	// open, and disappears once it is done, where the advice no longer applies.
+	e := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()),
+		WithMissionContext(func() MissionContext { return MissionContext{} }))
+	brief := func() QuestView {
+		for _, m := range e.Status().Missions {
+			if m.ID == FirstBriefQuestID {
+				return m
+			}
+		}
+		t.Fatal("Mission 04 missing")
+		return QuestView{}
+	}
+	if why := brief().Why; why != firstBriefWhy+" Add a model in Settings to generate one." {
+		t.Fatalf("open Mission 04 why = %q", why)
+	}
+	e.Complete(FirstBriefQuestID)
+	if why := brief().Why; why != firstBriefWhy {
+		t.Fatalf("completed Mission 04 still advises: %q", why)
 	}
 }
 

@@ -77,6 +77,9 @@ type MissionPresentation struct {
 	// InProgress is true when the user has started the mission but not
 	// finished it. It is ignored once the quest is completed or skipped.
 	InProgress bool
+	// Hint is a sentence appended to the why line only while the mission is
+	// open, for advice that stops being true once it is done.
+	Hint string
 }
 
 // Graph is a quest graph together with its tier metadata. Tier names belong
@@ -305,7 +308,7 @@ func resolveFirstBrief(ctx MissionContext) MissionPresentation {
 	if ctx.ModelConfigured {
 		return MissionPresentation{}
 	}
-	return MissionPresentation{Why: firstBriefWhy + " Add a model in Settings to generate one."}
+	return MissionPresentation{Hint: "Add a model in Settings to generate one."}
 }
 
 // ConnectSourceBranch is the destination Mission 03 offers a user.

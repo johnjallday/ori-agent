@@ -27,6 +27,8 @@
  *            sandbox with --workspace=<slug> --folder=<its folder>. Scans,
  *            approves, confirms, reads the Today line, follows it to History,
  *            then requests a brief and checks Mission 04 completes on Today.
+ *   states   The card at rest: every mission deferred reads Saved for later with
+ *            Resume, then a served brief turns Mission 04 Complete.
  *
  * Every stage prints the missions it observed and any console errors or failed
  * requests, so a quietly broken page does not pass as a clean demo.
@@ -251,7 +253,10 @@ async function resultsStage() {
   }
   const width = stageWidth;
   const page = await newPage(width, width < 600 ? 860 : 800);
-  writeSettledFiles(root, ['receipt-april.pdf', 'screenshot-notes.png']);
+  // Fresh names each run: the janitor does not re-propose a name it already
+  // handled, so a rerun with the same names would find nothing to file.
+  const stamp = Date.now().toString(36);
+  writeSettledFiles(root, [`receipt-${stamp}.pdf`, `screenshot-${stamp}.png`]);
 
   // Scan, select every proposal, review, confirm: the console's own flow.
   await page.goto(`${baseUrl}/workspaces/${encodeURIComponent(slug)}`, {
@@ -297,7 +302,12 @@ async function resultsStage() {
     'Today Results shows what File Janitor filed'
   );
   expect(text.includes('Undo from History'), 'the line points at History for undo');
-  await line.first().scrollIntoViewIfNeeded();
+  // Today re-renders when its reads settle; wait for that, then scroll.
+  await page.waitForTimeout(1500);
+  await line
+    .first()
+    .scrollIntoViewIfNeeded()
+    .catch(() => {});
   await shot(page, `g4-today-results-${width}`);
 
   await Promise.all([
@@ -618,8 +628,44 @@ async function planStage() {
   await page.close();
 }
 
+// statesStage captures the card at rest: every mission deferred ("Saved for
+// later", still resumable from the card), then the last one completed by Today
+// serving a brief ("Complete", no action).
+async function statesStage() {
+  const width = stageWidth;
+  const page = await missionThreeOnCard(width);
+  for (const id of ['pa-connect-source', 'pa-first-brief']) {
+    const skipped = await api(page, 'POST', '/api/progression/skip', { quest_id: id });
+    console.log(`deferred ${id}: HTTP ${skipped.status}`);
+  }
+  const saved = await openQuests(page);
+  expect(saved.kicker === 'Mission 04', 'with every mission resolved the card rests on Mission 04');
+  expect(saved.status === 'Saved for later', 'a deferred last mission reads Saved for later');
+  expect(saved.action.startsWith('Resume quest'), 'and stays resumable from the card');
+  await page.locator('[data-role="first-mission"]').scrollIntoViewIfNeeded();
+  await shot(page, `g5-card-saved-for-later-${width}`);
+
+  const refresh = await api(page, 'POST', '/api/personal-hq/brief/refresh');
+  console.log(`brief refresh: HTTP ${refresh.status}`);
+  let revision = '';
+  for (let i = 0; i < 30 && !revision; i++) {
+    await page.waitForTimeout(1000);
+    const current = await api(page, 'GET', '/api/personal-hq/brief/current');
+    revision = current.json?.revision?.id || current.json?.id || current.json?.revision_id || '';
+  }
+  console.log(`brief revision: ${revision || '(none)'}`);
+  await api(page, 'GET', '/api/personal-assistant/today');
+  const done = await openQuests(page);
+  expect(done.status === 'Complete', 'Today serving a brief replaces the deferral with Complete');
+  expect(done.action === '(no action)', 'a completed card offers no action');
+  await page.locator('[data-role="first-mission"]').scrollIntoViewIfNeeded();
+  await shot(page, `g5-card-complete-${width}`);
+  await page.close();
+}
+
 try {
   if (stage === 'card') await cardStage();
+  else if (stage === 'states') await statesStage();
   else if (stage === 'tidy') await tidyStage();
   else if (stage === 'email') await emailStage();
   else if (stage === 'plan') await planStage();

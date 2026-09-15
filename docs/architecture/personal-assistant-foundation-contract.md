@@ -188,11 +188,10 @@ other support profile, no workspace membership, no Daily Brief configuration,
 and no tool/skill/MCP/Vault/filesystem change.
 
 After completion, the client navigates to `/?quest=build-hq` and Home features
-the optional **Build My HQ** mission, followed by **Plan my first day**. Build My
-HQ stays featured while it is available or skipped; designation completes it
-exactly once. Plan my first day is featured only after the relationship reads
-back `active` with validated HQ and entry-instance linkage; `?quest=plan-first-day`
-does not open while `needs_hq`.
+the optional **Build My HQ** mission, the first of the four starter missions
+(see [Starter missions](#starter-missions)). Designation completes it exactly
+once. Plan my first day is now one branch of Mission 03, and
+`?quest=plan-first-day` still does not open while `needs_hq`.
 
 Confirming the Map's Build My HQ form is the sole HQ creation boundary. That one
 confirmed request:
@@ -331,6 +330,61 @@ PAF provenance enters `needs_hire`. Durable PAF provenance is not a cohort
 marker: if it survives without its relationship row, the bounded recovery path
 runs instead of offering a duplicate hire. No parallel legacy adoption wizard
 is maintained.
+
+## Starter missions
+
+Source: `tasks/prd-starter-missions.md`. The personal-assistant graph
+(`progression.PersonalAssistantGraph`) opens with a Tier 1 named **Starter**:
+four featured, optional missions, each ending with Ori visibly doing something.
+Tier 2, **Daily loop**, holds first contact, personalize, first note, and first
+task. Tiers 3 to 6 are the built-in ones. `t1-plan-first-day` and
+`t2-create-workspace` are not in this graph; their persisted completions stay in
+place, and a `t1-plan-first-day` completion counts as evidence for Mission 03.
+
+| Order | ID | Card | Completes when |
+| --- | --- | --- | --- |
+| 01 | `t2-build-hq` | Build My HQ, `/?quest=build-hq` | a Personal HQ designation |
+| 02 | `pa-tidy-downloads` | Tidy your Downloads, `/?quest=tidy-downloads`, or "In progress · Finish setup" on an unfinished File Janitor workspace | a `file-janitor` (or retired `downloads-janitor`) workspace's setup wizard first reaches ready |
+| 03 | `pa-connect-source` | resolved from the hire's focus areas (below) | any branch's signal, not only the one offered |
+| 04 | `pa-first-brief` | Read your first Daily Brief, `/`; while open and with no model configured, adds "Add a model in Settings to generate one." | Today is first served with a Daily Brief revision for an active or paused relationship |
+
+Mission 03 branches, in priority order when several focus areas match:
+
+| Branch | Focus area | Card | Completion signal |
+| --- | --- | --- | --- |
+| email | `help_with_email` | Set up email, the host `email_ops_setup` quest; "In progress · Resume" once started | the journey's first ready (`setupjourney.Service.SetOnFirstReady`) |
+| calendar | `prepare_for_meetings` | Connect your calendar, `/?create=1&blueprint=calendar-ops` | `workspace.updated` with `mcp_binding_created` on a `calendar-ops` workspace that has a ready calendar binding |
+| project | `keep_projects_moving` | Start a project workspace, `/?create=1` | `workspace.created` from the creator whose `template_id` is blank or not `personal-ops`, `file-janitor`, `downloads-janitor`, `email-ops`, or `calendar-ops`, and which is not a group |
+| plan | anything else, or none | Plan my first day, `/?quest=plan-first-day` | a successful first-assignment apply |
+
+How the card works:
+
+- `GET /api/progression` returns `missions`, the featured quests in order,
+  resolved per user by each quest's `Resolve` from a server-supplied
+  `MissionContext`. The widget shows the first mission that is neither
+  completed nor skipped and lists the others beneath it. It holds no quest IDs.
+- Every completion is observed on the server. The browser never claims one.
+- Mission 02's walkthrough (`tidy-downloads-quest.js`) opens the unified creator
+  with File Janitor preselected and marks Create
+  (`create_workspace_submit`) once the creator reaches its last step. It offers
+  no panel choice, because Ori's panel sits beneath the creator's backdrop. The
+  exits are the creator's Cancel, which pauses, and the card's Do this later.
+- Hooks that need the assistant, the setup journey, or Today are installed in
+  `completeProgressionWiring`, after the Daily Brief phase. Wiring them with
+  progression itself bound nil on a real server.
+
+Grandfathering: the one-time backfill reads each mission's evidence (a ready
+File Janitor, a connected source, a project workspace, a completed first
+assignment or legacy first day, an existing brief). An install whose backfill
+predates the starter missions gets one silent pass, recorded under the
+`starter-missions-v1` key in `ProgressionState.Reconciled`. It pays no Craft
+and survives a reset, so a reset stays a blank slate.
+
+Today's Results section also gains one `janitor_result` line per File Janitor
+workspace with applied, not-undone actions in the last 24 hours ("Filed N files
+into <folder>/Filed", "M sent to Trash · Undo from History"), linking to
+`/workspaces/<slug>?panel=file-janitor&tab=history`. It respects the results
+cap and never changes the section's health.
 
 ## Surfaces and routing
 
