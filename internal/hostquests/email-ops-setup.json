@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "version": 1,
+  "id": "email_ops_setup",
+  "title": "Set up Email Ops",
+  "description": "Create your inbox command post, connect Gmail, and link the mailbox. Ori reads and drafts; it never sends without you.",
+  "integration_key": "",
+  "expected_blueprint_id": "email-ops",
+  "expected_assistant_program_id": "",
+  "steps": [
+    {
+      "id": "team",
+      "kind": "workspace_create",
+      "title": "Review your Email Ops team",
+      "description": "Meet the Postmaster and the Inbox specialist, adjust what you like, and create the workspace. Nothing is created until you confirm in the creator."
+    },
+    {
+      "id": "connect",
+      "kind": "account_connect",
+      "title": "Connect Gmail",
+      "description": "Connect your Google account and enable Gmail in Settings. This happens once and is shared by every workspace you allow. Come back here and choose Check again."
+    },
+    {
+      "id": "mailbox",
+      "kind": "account_link",
+      "title": "Link the mailbox",
+      "description": "Link the connected account to this workspace. Email Ops will read and search this mailbox and prepare drafts. It never sends a message without your confirmation of that specific message."
+    },
+    {
+      "id": "summary",
+      "kind": "summary",
+      "title": "Email Ops is ready",
+      "description": "Your mailbox is linked and Ori can read it. Triaging the inbox is a separate task that needs an AI model; mailbox readiness does not."
+    }
+  ]
+}

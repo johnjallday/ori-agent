@@ -333,6 +333,10 @@ func (s *Service) read(ctx context.Context, userID, runID string) (*JourneyProje
 		projection.Journey.TemplateID = relationship.QuestKey.TemplateID
 		projection.Journey.AttachmentID = relationship.QuestKey.AttachmentID
 	}
+	if err == nil && projection != nil && relationship.QuestKey.Source == QuestSourceHost {
+		projection.Journey.Source = QuestSourceHost
+		projection.Journey.TemplateID = declaration.ExpectedBlueprintID
+	}
 	return projection, err
 }
 
@@ -612,9 +616,12 @@ func scopeForRun(declaration *specialist.SetupJourney, root, run *Run) ReadScope
 		HomeWorkspaceID: root.HomeWorkspaceID, ProjectWorkspaceID: run.ProjectWorkspaceID,
 		SelectedModeID: run.SelectedModeID,
 	}
-	if root.SpecialistSlug == "user_template_quest" {
+	switch root.SpecialistSlug {
+	case userTemplateQuestSlug:
 		scope.QuestSource = QuestSourceUserTemplate
 		scope.UserTemplateID = declaration.ExpectedBlueprintID
+	case hostQuestSlug:
+		scope.QuestSource = QuestSourceHost
 	}
 	if run.Kind == RunKindRoot {
 		scope.ProjectWorkspaceID = root.ProjectWorkspaceID
@@ -823,8 +830,12 @@ func baseProjection(declaration *specialist.SetupJourney, run *Run) *JourneyProj
 		FirstOpenedAt: cloneTime(run.FirstOpenedAt), LastDismissedAt: cloneTime(run.LastDismissedAt),
 		FirstCompletedAt: cloneTime(run.FirstCompletedAt), UpdatedAt: run.UpdatedAt.UTC(),
 	}
-	if run.SpecialistSlug == "user_template_quest" {
+	switch run.SpecialistSlug {
+	case userTemplateQuestSlug:
 		projection.Journey.Source = QuestSourceUserTemplate
+		projection.Journey.TemplateID = declaration.ExpectedBlueprintID
+	case hostQuestSlug:
+		projection.Journey.Source = QuestSourceHost
 		projection.Journey.TemplateID = declaration.ExpectedBlueprintID
 	}
 	return projection

@@ -8,10 +8,28 @@ import {
 
 import {
   ASSISTANT_SETUP_ROOT,
+  hostSetupQuestAPIRoot,
   setupJourneyAPIRoot,
   setupQuestAPIRoot,
   userTemplateSetupQuestAPIRoot
 } from './setup-quest-links.js';
+
+// setupQuestSelectionFromParams turns a `?setup=quest` deep link into the
+// selection openSpecialistSetupJourney understands. The parameters are only a
+// request: every ID is validated again when its API root is built, and the
+// server checks it against the catalog.
+export function setupQuestSelectionFromParams(params) {
+  const source = params.get('source');
+  if (source === 'host') return { source: 'host', quest_id: params.get('quest') || '' };
+  if (source === 'user_template') {
+    return {
+      source: 'user_template',
+      template_id: params.get('template') || '',
+      attachment_id: params.get('attachment') || ''
+    };
+  }
+  return { plugin_id: params.get('plugin') || '', quest_id: params.get('quest') || '' };
+}
 
 const state = {
   journey: null,
@@ -1651,13 +1669,15 @@ export async function openSpecialistSetupJourney(requested = null) {
   try {
     const previousRunID = state.journey?.run_id;
     const root =
-      selection.source === 'user_template' ||
-      selection.template_id != null ||
-      selection.attachment_id != null
-        ? userTemplateSetupQuestAPIRoot(selection.template_id, selection.attachment_id)
-        : selection.plugin_id != null || selection.quest_id != null
-          ? setupQuestAPIRoot(selection.plugin_id, selection.quest_id)
-          : ASSISTANT_SETUP_ROOT;
+      selection.source === 'host'
+        ? hostSetupQuestAPIRoot(selection.quest_id)
+        : selection.source === 'user_template' ||
+            selection.template_id != null ||
+            selection.attachment_id != null
+          ? userTemplateSetupQuestAPIRoot(selection.template_id, selection.attachment_id)
+          : selection.plugin_id != null || selection.quest_id != null
+            ? setupQuestAPIRoot(selection.plugin_id, selection.quest_id)
+            : ASSISTANT_SETUP_ROOT;
     const endpoint = requestedRunID ? `${root}/runs/${encodeURIComponent(requestedRunID)}` : root;
     let payload = await request(endpoint);
     state.journey = payload?.setup_journey;
@@ -1752,18 +1772,7 @@ function initialize() {
   const params = new URLSearchParams(window.location.search);
   if (params.get('setup') === 'specialist') openSpecialistSetupJourney();
   if (params.get('setup') === 'quest') {
-    openSpecialistSetupJourney(
-      params.get('source') === 'user_template'
-        ? {
-            source: 'user_template',
-            template_id: params.get('template') || '',
-            attachment_id: params.get('attachment') || ''
-          }
-        : {
-            plugin_id: params.get('plugin') || '',
-            quest_id: params.get('quest') || ''
-          }
-    );
+    openSpecialistSetupJourney(setupQuestSelectionFromParams(params));
   }
 }
 

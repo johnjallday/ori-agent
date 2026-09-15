@@ -32,10 +32,22 @@ export function userTemplateSetupQuestAPIRoot(templateID, attachmentID) {
   return `/api/user-template-setup-quests/${encodeURIComponent(templateID)}/${encodeURIComponent(attachmentID)}`;
 }
 
+// Host quests are compiled into Ori for a built-in template; their only
+// identity is the quest ID.
+export function hostSetupQuestAPIRoot(questID) {
+  if (typeof questID !== 'string' || questID.trim() !== questID || !idPattern.test(questID)) {
+    throw new Error('This setup quest is unavailable. Refresh to check again.');
+  }
+  return `/api/host-setup-quests/${encodeURIComponent(questID)}`;
+}
+
 export function setupJourneyAPIRoot(projection) {
   const declaration = projection?.journey;
   if (declaration?.source === 'user_template') {
     return userTemplateSetupQuestAPIRoot(declaration.template_id, declaration.attachment_id);
+  }
+  if (declaration?.source === 'host') {
+    return hostSetupQuestAPIRoot(declaration.id);
   }
   return declaration?.plugin_id
     ? setupQuestAPIRoot(declaration.plugin_id, declaration.id)
@@ -43,6 +55,11 @@ export function setupJourneyAPIRoot(projection) {
 }
 
 export function setupQuestURL(quest) {
+  if (quest?.source === 'host') {
+    hostSetupQuestAPIRoot(quest.id);
+    const query = new URLSearchParams({ setup: 'quest', source: 'host', quest: quest.id });
+    return `/?${query}`;
+  }
   if (quest?.source === 'user_template') {
     userTemplateSetupQuestAPIRoot(quest.template_id, quest.attachment_id);
     const query = new URLSearchParams({
@@ -62,6 +79,19 @@ export function setupQuestURL(quest) {
 // Local copies cannot select another plugin's quest by naming its ID alone.
 export function setupQuestForTemplate(template, quests) {
   if (!template) return null;
+  // A built-in template matches only a host quest that targets it and that it
+  // names back, so neither side can claim the other alone.
+  if (template.builtin === true && !template.plugin_owner) {
+    if (typeof template.setup_quest !== 'string' || !template.setup_quest) return null;
+    const matches = (Array.isArray(quests) ? quests : []).filter(
+      quest =>
+        quest?.source === 'host' &&
+        quest.template_id === template.id &&
+        quest.id === template.setup_quest &&
+        !quest.plugin_id
+    );
+    return matches.length === 1 ? matches[0] : null;
+  }
   if (template.user_setup_quest?.attachment_id) {
     const matches = (Array.isArray(quests) ? quests : []).filter(
       quest =>

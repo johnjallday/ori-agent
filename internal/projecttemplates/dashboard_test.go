@@ -263,7 +263,7 @@ func TestEnsureLibraryInstallsAShippedDashboardIntoAnExistingTemplate(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	older := strings.Replace(string(data), `"builtin_version": 4`, `"builtin_version": 1`, 1)
+	older := strings.Replace(string(data), `"builtin_version": 5`, `"builtin_version": 1`, 1)
 	if older == string(data) {
 		t.Fatal("could not roll the manifest version back; update this test alongside builtin_version")
 	}
@@ -299,7 +299,7 @@ func TestEnsureLibraryDoesNotOverwriteAnEditedDashboard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	older := strings.Replace(string(data), `"builtin_version": 4`, `"builtin_version": 1`, 1)
+	older := strings.Replace(string(data), `"builtin_version": 5`, `"builtin_version": 1`, 1)
 	if err := os.WriteFile(manifest, []byte(older), 0o640); err != nil {
 		t.Fatal(err)
 	}

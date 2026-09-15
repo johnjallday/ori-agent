@@ -17,6 +17,16 @@ type QuestSource string
 const (
 	QuestSourcePlugin       QuestSource = "plugin"
 	QuestSourceUserTemplate QuestSource = "user_template"
+	// QuestSourceHost is a quest compiled into Ori for a built-in template. It
+	// has no plugin owner or template attachment, and its declaration is inert
+	// embedded data normalized at startup.
+	QuestSourceHost QuestSource = "host"
+)
+
+const (
+	pluginQuestSlug       = "plugin_quest"
+	userTemplateQuestSlug = "user_template_quest"
+	hostQuestSlug         = "host_quest"
 )
 
 // QuestKey is source-aware. Plugin identity and user-template attachment
@@ -353,6 +363,8 @@ func validQuestKey(key QuestKey) bool {
 		return validateStableID(key.PluginID) && key.TemplateID == "" && key.AttachmentID == ""
 	case QuestSourceUserTemplate:
 		return validateStableID(key.TemplateID) && userTemplateAttachmentPattern.MatchString(key.AttachmentID) && key.PluginID == ""
+	case QuestSourceHost:
+		return key.PluginID == "" && key.TemplateID == "" && key.AttachmentID == ""
 	default:
 		return false
 	}
@@ -442,6 +454,52 @@ func (s *Service) ForUserTemplateQuest(ctx context.Context, userID, templateID, 
 	return &copy, nil
 }
 
+// ForHostQuest scopes a service copy to one host-compiled quest for one user.
+// An unknown ID fails before any handler runs; nothing is created here.
+func (s *Service) ForHostQuest(ctx context.Context, userID, questID string) (*Service, error) {
+	if s == nil || s.quests == nil {
+		return nil, failure(ReasonJourneyUnavailable, 0)
+	}
+	key := normalizeQuestKey(QuestKey{Source: QuestSourceHost, ID: questID})
+	if !validQuestKey(key) || !validateCanonicalRef(userID, false) {
+		return nil, failure(ReasonInputInvalid, 0)
+	}
+	copy := *s
+	copy.quest = &key
+	if _, _, err := copy.questDeclaration(ctx, userID, key); err != nil {
+		return nil, err
+	}
+	return &copy, nil
+}
+
+// Status reports the scoped quest's current projection without ever creating
+// a root. A user who has never opened the quest gets exists=false; otherwise
+// it is an ordinary Read of the one existing root.
+func (s *Service) Status(ctx context.Context, userID string) (*JourneyProjection, bool, error) {
+	if s == nil || s.quest == nil || s.store == nil {
+		return nil, false, failure(ReasonJourneyUnavailable, 0)
+	}
+	userID = strings.TrimSpace(userID)
+	if !validateCanonicalRef(userID, false) {
+		return nil, false, failure(ReasonInputInvalid, 0)
+	}
+	definition, err := s.quests.Lookup(ctx, normalizeQuestKey(*s.quest))
+	if err != nil {
+		return nil, false, err
+	}
+	if _, err := s.store.FindQuestRoot(ctx, userID, *s.quest, definition.LegacySlug); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, false, nil
+		}
+		return nil, false, failure(ReasonJourneyUnavailable, 0)
+	}
+	projection, err := s.Read(ctx, userID, "")
+	if err != nil {
+		return nil, false, err
+	}
+	return projection, true, nil
+}
+
 func (s *Service) questDeclaration(ctx context.Context, userID string, key QuestKey) (*declarationIdentity, *specialist.SetupJourney, error) {
 	key = normalizeQuestKey(key)
 	definition, err := s.quests.Lookup(ctx, key)
@@ -462,17 +520,24 @@ func (s *Service) questDeclaration(ctx context.Context, userID string, key Quest
 			return nil, nil, failure(ReasonDeclarationInvalid, 0)
 		}
 		d.OwnerPluginID = key.PluginID
-		identity.SpecialistSlug = "plugin_quest"
+		identity.SpecialistSlug = pluginQuestSlug
 	case QuestSourceUserTemplate:
 		if d.OwnerPluginID != "" || d.ExpectedBlueprintID != key.TemplateID ||
 			!validateDigest(definition.DefinitionDigest, false) || !validateDigest(definition.ExecutionDigest, false) {
 			return nil, nil, failure(ReasonDeclarationInvalid, 0)
 		}
-		identity.SpecialistSlug = "user_template_quest"
+		identity.SpecialistSlug = userTemplateQuestSlug
 		identity.Binding = &UserTemplateBinding{
 			UserID: userID, TemplateID: key.TemplateID, AttachmentID: key.AttachmentID, QuestID: key.ID,
 			DefinitionDigest: definition.DefinitionDigest, ExecutionDigest: definition.ExecutionDigest,
 		}
+	case QuestSourceHost:
+		// Host quests are compiled data: no plugin owner, no attachment binding,
+		// and no legacy assistant-owned progress to adopt.
+		if d.OwnerPluginID != "" || definition.LegacySlug != "" {
+			return nil, nil, failure(ReasonDeclarationInvalid, 0)
+		}
+		identity.SpecialistSlug = hostQuestSlug
 	default:
 		return nil, nil, failure(ReasonDeclarationInvalid, 0)
 	}

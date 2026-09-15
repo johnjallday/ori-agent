@@ -381,8 +381,9 @@ type Template struct {
 	// — a declaration that could not be understood yields nil plus
 	// SetupWizardError rather than a partially interpreted wizard.
 	SetupWizard *SetupWizard `json:"setup_wizard,omitempty"`
-	// SetupQuestID references a pre-workspace quest in this template's owning
-	// plugin. It grants no authority and is resolved only from installed data.
+	// SetupQuestID references a pre-workspace quest owned by this template's
+	// plugin, or by the host catalog for a built-in template. It grants no
+	// authority and is resolved only from installed or compiled data.
 	SetupQuestID string `json:"setup_quest,omitempty"`
 	// UserSetupQuest is one strict inert declaration attached to a user-owned
 	// template. Its identity is host-generated and it never fabricates plugin

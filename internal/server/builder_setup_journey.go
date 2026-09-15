@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/config"
+	"github.com/johnjallday/ori-agent/internal/hostquests"
 	"github.com/johnjallday/ori-agent/internal/pathselection"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
@@ -230,7 +231,9 @@ func (b *ServerBuilder) initializeSetupJourney() {
 			panic("invalid built-in setup journey staffing adapter")
 		}
 	}
-	var questCatalogs []setupjourney.QuestCatalog
+	// Host-compiled quests for built-in templates need no plugin or template
+	// library, so they are always served.
+	questCatalogs := []setupjourney.QuestCatalog{setupjourney.NewHostQuestCatalog(hostquests.All())}
 	if b.pluginHandler != nil {
 		questCatalogs = append(questCatalogs, setupjourney.NewInstalledQuestCatalog(b.pluginHandler.Manager()))
 	}
@@ -240,9 +243,7 @@ func (b *ServerBuilder) initializeSetupJourney() {
 			catalog: templateRuntimeCatalog{capabilities: b.workspaceCapabilityRegistry, runtimes: b.runtimeCapabilityRegistry},
 		}))
 	}
-	if len(questCatalogs) > 0 {
-		b.setupJourneyService.SetQuestCatalog(setupjourney.CombineQuestCatalogs(questCatalogs...))
-	}
+	b.setupJourneyService.SetQuestCatalog(setupjourney.CombineQuestCatalogs(questCatalogs...))
 	b.setupJourneyHandler = setupjourneyhttp.NewHandler(b.setupJourneyService, b.userProvider)
 	if b.workspaceStore != nil {
 		if b.pathSelectionStore == nil {
