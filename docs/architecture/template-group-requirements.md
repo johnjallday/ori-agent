@@ -103,6 +103,9 @@ The block is at most 64 KiB and strict at every level. It requires:
 - at least one constructible new/existing project connection mode; and
 - when runtime requirements exist, at least one mode without live requirements.
 
+An `assistant_program.roles[]` entry or `agents[]` roster entry may declare a
+`type` key; it is accepted and ignored, because the agent type has been retired.
+
 For standalone creation, the host removes the Assistant Program, Home roles,
 stages, reflection/portfolio/learning behavior, project link, and pre-workspace
 plugin/user quest. It converts project-scoped roles into ordinary workspace

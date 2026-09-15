@@ -38,7 +38,7 @@ test.describe('Agents roster', () => {
     const name = `PW Roster ${Date.now()}`;
 
     const create = await request.post(`${baseUrl}/api/agents`, {
-      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+      data: { name, model: 'gpt-4o-mini' }
     });
     expect(create.ok()).toBeTruthy();
 
@@ -110,7 +110,7 @@ test.describe('Agents roster', () => {
 
     for (const n of names) {
       const r = await request.post(`${baseUrl}/api/agents`, {
-        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+        data: { name: n, model: 'gpt-4o-mini' }
       });
       expect(r.ok()).toBeTruthy();
     }
@@ -192,7 +192,7 @@ test.describe('Agents roster', () => {
     const names = [loose1, loose2, attached];
     for (const n of names) {
       const r = await request.post(`${baseUrl}/api/agents`, {
-        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+        data: { name: n, model: 'gpt-4o-mini' }
       });
       expect(r.ok()).toBeTruthy();
     }
@@ -268,7 +268,7 @@ test.describe('Agents roster', () => {
     const names = [`${prefix} One`, `${prefix} Two`];
     for (const n of names) {
       const r = await request.post(`${baseUrl}/api/agents`, {
-        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini', tags: ['keep'] }
+        data: { name: n, model: 'gpt-4o-mini', tags: ['keep'] }
       });
       expect(r.ok()).toBeTruthy();
     }
@@ -334,7 +334,7 @@ test.describe('Agents roster', () => {
   }) => {
     const name = `PWOv ${Date.now()}`;
     const create = await request.post(`${baseUrl}/api/agents`, {
-      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+      data: { name, model: 'gpt-4o-mini' }
     });
     expect(create.ok()).toBeTruthy();
 
@@ -386,7 +386,6 @@ test.describe('Agents roster', () => {
     await request.post(`${baseUrl}/api/agents`, {
       data: {
         name,
-        type: 'tool-calling',
         model: 'gpt-4o-mini',
         description: 'A readable purpose.',
         tags: ['alpha']
@@ -430,7 +429,7 @@ test.describe('Agents roster', () => {
     const names = [`${prefix} One`, `${prefix} Two`];
     for (const n of names) {
       await request.post(`${baseUrl}/api/agents`, {
-        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+        data: { name: n, model: 'gpt-4o-mini' }
       });
     }
 
@@ -478,10 +477,10 @@ test.describe('Agents roster', () => {
     const tagged = `${prefix} Tagged`;
     const plain = `${prefix} Plain`;
     const r1 = await request.post(`${baseUrl}/api/agents`, {
-      data: { name: tagged, type: 'tool-calling', model: 'gpt-4o-mini', tags: [`${prefix}tag`] }
+      data: { name: tagged, model: 'gpt-4o-mini', tags: [`${prefix}tag`] }
     });
     const r2 = await request.post(`${baseUrl}/api/agents`, {
-      data: { name: plain, type: 'tool-calling', model: 'gpt-4o-mini' }
+      data: { name: plain, model: 'gpt-4o-mini' }
     });
     expect(r1.ok() && r2.ok()).toBeTruthy();
 
@@ -542,7 +541,7 @@ test.describe('Agents roster', () => {
     const b = `${prefix} B`;
     for (const n of [a, b]) {
       const r = await request.post(`${baseUrl}/api/agents`, {
-        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+        data: { name: n, model: 'gpt-4o-mini' }
       });
       expect(r.ok()).toBeTruthy();
     }
@@ -635,7 +634,6 @@ test.describe('Agents gallery', () => {
     await request.post(`${baseUrl}/api/agents`, {
       data: {
         name: rich,
-        type: 'tool-calling',
         role: 'researcher',
         model: 'gpt-4o-mini',
         description: 'Finds primary sources and leaves an evidence trail.',
@@ -717,7 +715,7 @@ test.describe('Agents gallery', () => {
     const prefix = `PWOrbit${Date.now()}`;
     const name = `${prefix} Hub`;
     await request.post(`${baseUrl}/api/agents`, {
-      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+      data: { name, model: 'gpt-4o-mini' }
     });
 
     const wsIds: string[] = [];
@@ -800,7 +798,7 @@ test.describe('Agents gallery', () => {
     for (const n of names) {
       await request.post(`${baseUrl}/api/agents`, {
         // Same role for all three: they must still look different (FR71).
-        data: { name: n, type: 'tool-calling', role: 'researcher', model: 'gpt-4o-mini' }
+        data: { name: n, role: 'researcher', model: 'gpt-4o-mini' }
       });
     }
 
@@ -853,7 +851,7 @@ test.describe('Agents gallery', () => {
   }) => {
     const name = `PWImg${Date.now()}`;
     await request.post(`${baseUrl}/api/agents`, {
-      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+      data: { name, model: 'gpt-4o-mini' }
     });
 
     // Smallest valid PNG: 1x1 transparent.
@@ -907,7 +905,7 @@ test.describe('Agents gallery', () => {
   }) => {
     const name = `PWBroken${Date.now()}`;
     await request.post(`${baseUrl}/api/agents`, {
-      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+      data: { name, model: 'gpt-4o-mini' }
     });
     const png = Buffer.from(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
@@ -1118,7 +1116,7 @@ test.describe('Agents single-agent editing', () => {
   }) => {
     const name = `PWDetailErr${Date.now()}`;
     await request.post(`${baseUrl}/api/agents`, {
-      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+      data: { name, model: 'gpt-4o-mini' }
     });
 
     try {
@@ -1156,7 +1154,7 @@ test.describe('Agents single-agent editing', () => {
     const prefix = `PWWsRead${Date.now()}`;
     const name = `${prefix} Agent`;
     await request.post(`${baseUrl}/api/agents`, {
-      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+      data: { name, model: 'gpt-4o-mini' }
     });
     let wsId = '';
     let slug = '';
@@ -1226,14 +1224,13 @@ test.describe('Agents inspector', () => {
     await request.post(`${baseUrl}/api/agents`, {
       data: {
         name,
-        type: 'tool-calling',
         model: 'gpt-4o-mini',
         description: 'Repeats on every tab, not just Overview.',
         favorite: true
       }
     });
     await request.post(`${baseUrl}/api/agents`, {
-      data: { name: bare, type: 'tool-calling', model: 'gpt-4o-mini' }
+      data: { name: bare, model: 'gpt-4o-mini' }
     });
 
     try {
@@ -1279,7 +1276,7 @@ test.describe('Agents inspector', () => {
     const b = `${prefix} Bravo`;
     for (const n of [a, b]) {
       await request.post(`${baseUrl}/api/agents`, {
-        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+        data: { name: n, model: 'gpt-4o-mini' }
       });
     }
 
@@ -1323,7 +1320,7 @@ test.describe('Agents inspector', () => {
   }) => {
     const name = `PWSheet${Date.now()}`;
     await request.post(`${baseUrl}/api/agents`, {
-      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+      data: { name, model: 'gpt-4o-mini' }
     });
 
     try {
@@ -1360,7 +1357,7 @@ test.describe('Agents inspector', () => {
   test('four tabs follow the ARIA tabs pattern and survive a reload', async ({ page, request }) => {
     const name = `PWTabs${Date.now()}`;
     await request.post(`${baseUrl}/api/agents`, {
-      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+      data: { name, model: 'gpt-4o-mini' }
     });
 
     try {
@@ -1406,7 +1403,7 @@ test.describe('Agents inspector', () => {
   }) => {
     const plain = `PWTbox${Date.now()}`;
     await request.post(`${baseUrl}/api/agents`, {
-      data: { name: plain, type: 'tool-calling', model: 'gpt-4o-mini' }
+      data: { name: plain, model: 'gpt-4o-mini' }
     });
 
     try {
@@ -1444,7 +1441,7 @@ test.describe('Agents inspector', () => {
   }) => {
     const name = `PWTboxErr${Date.now()}`;
     await request.post(`${baseUrl}/api/agents`, {
-      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+      data: { name, model: 'gpt-4o-mini' }
     });
 
     try {
@@ -1531,7 +1528,7 @@ test.describe('Agents collection controls', () => {
     const created = [`${prefix} Cee`, `${prefix} Aay`, `${prefix} Bee`];
     for (const n of created) {
       await request.post(`${baseUrl}/api/agents`, {
-        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+        data: { name: n, model: 'gpt-4o-mini' }
       });
     }
 
@@ -1578,7 +1575,7 @@ test.describe('Agents collection controls', () => {
     const b = `${prefix} Bravo`;
     for (const n of [a, b]) {
       await request.post(`${baseUrl}/api/agents`, {
-        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+        data: { name: n, model: 'gpt-4o-mini' }
       });
     }
 
@@ -1616,7 +1613,7 @@ test.describe('Agents collection controls', () => {
   }) => {
     const name = `PWViewGuard${Date.now()}`;
     await request.post(`${baseUrl}/api/agents`, {
-      data: { name, type: 'tool-calling', model: 'gpt-4o-mini', description: 'Kept across views.' }
+      data: { name, model: 'gpt-4o-mini', description: 'Kept across views.' }
     });
 
     try {
@@ -1650,10 +1647,10 @@ test.describe('Agents collection controls', () => {
     const wsAgent = `PWSrchWs${stamp}`;
     const wsName = `PWSrchSpace${stamp}`;
     await request.post(`${baseUrl}/api/agents`, {
-      data: { name: modelAgent, type: 'tool-calling', model: 'gpt-4o-mini' }
+      data: { name: modelAgent, model: 'gpt-4o-mini' }
     });
     await request.post(`${baseUrl}/api/agents`, {
-      data: { name: wsAgent, type: 'tool-calling', model: 'gpt-4o-mini' }
+      data: { name: wsAgent, model: 'gpt-4o-mini' }
     });
     let wsId = '';
     const ws = await request.post(`${baseUrl}/api/workspaces`, {
@@ -1784,7 +1781,7 @@ test.describe('Agents collection controls', () => {
   test('the card menu favorites one agent in two clicks', async ({ page, request }) => {
     const name = `PWMenuFav${Date.now()}`;
     await request.post(`${baseUrl}/api/agents`, {
-      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+      data: { name, model: 'gpt-4o-mini' }
     });
     try {
       await openAgents(page);
@@ -1900,7 +1897,7 @@ test.describe('Agents collection controls', () => {
     const loose = `PWGrp Loose ${stamp}`;
     for (const n of [shared, loose]) {
       await request.post(`${baseUrl}/api/agents`, {
-        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+        data: { name: n, model: 'gpt-4o-mini' }
       });
     }
     const wsIds: string[] = [];
@@ -2053,7 +2050,7 @@ test.describe('Agents collection controls', () => {
     const wsName = `PWWsPick${stamp}`;
     for (const n of [inside, outside]) {
       await request.post(`${baseUrl}/api/agents`, {
-        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+        data: { name: n, model: 'gpt-4o-mini' }
       });
     }
     let wsId = '';
@@ -2102,7 +2099,7 @@ test.describe('Agents collection controls', () => {
     const created = [`${prefix} Charlie`, `${prefix} Alpha`, `${prefix} Bravo`];
     for (const n of created) {
       await request.post(`${baseUrl}/api/agents`, {
-        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+        data: { name: n, model: 'gpt-4o-mini' }
       });
     }
 
@@ -2140,7 +2137,7 @@ test.describe('Agents collection controls', () => {
     const tag = `${prefix.toLowerCase()}tag`;
     const name = `${prefix} Tagged`;
     await request.post(`${baseUrl}/api/agents`, {
-      data: { name, type: 'tool-calling', model: 'gpt-4o-mini', tags: [tag] }
+      data: { name, model: 'gpt-4o-mini', tags: [tag] }
     });
 
     try {
@@ -2184,7 +2181,7 @@ test.describe('Agents collection controls', () => {
     const b = `${prefix} Bravo`;
     for (const n of [a, b]) {
       await request.post(`${baseUrl}/api/agents`, {
-        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+        data: { name: n, model: 'gpt-4o-mini' }
       });
     }
 
@@ -2219,7 +2216,7 @@ test.describe('Agents collection controls', () => {
     const names3 = [`${prefix} Alpha`, `${prefix} Bravo`, `${prefix} Charlie`];
     for (const n of names3) {
       await request.post(`${baseUrl}/api/agents`, {
-        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+        data: { name: n, model: 'gpt-4o-mini' }
       });
     }
 
@@ -2279,7 +2276,7 @@ test.describe('Agents selection and bulk management', () => {
     const b = `${prefix} Bravo`;
     for (const n of [a, b]) {
       await request.post(`${baseUrl}/api/agents`, {
-        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+        data: { name: n, model: 'gpt-4o-mini' }
       });
     }
 
@@ -2320,7 +2317,7 @@ test.describe('Agents selection and bulk management', () => {
     const names = [`${prefix} Alpha`, `${prefix} Bravo`, `${prefix} Charlie`, `${prefix} Delta`];
     for (const n of names) {
       await request.post(`${baseUrl}/api/agents`, {
-        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+        data: { name: n, model: 'gpt-4o-mini' }
       });
     }
 
@@ -2361,7 +2358,7 @@ test.describe('Agents selection and bulk management', () => {
     const survivor = `${prefix} Survivor`;
     for (const n of [target, survivor]) {
       await request.post(`${baseUrl}/api/agents`, {
-        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+        data: { name: n, model: 'gpt-4o-mini' }
       });
     }
 
@@ -2409,7 +2406,7 @@ test.describe('Agents selection and bulk management', () => {
     const names = [`${prefix} One`, `${prefix} Two`];
     for (const n of names) {
       await request.post(`${baseUrl}/api/agents`, {
-        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+        data: { name: n, model: 'gpt-4o-mini' }
       });
     }
 

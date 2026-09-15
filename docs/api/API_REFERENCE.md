@@ -85,7 +85,6 @@ Create a new agent with the specified name and optional configuration.
 ```json
 {
   "name": "my-new-agent",
-  "type": "tool-calling",
   "model": "gpt-4o-mini",
   "temperature": 0.7,
   "system_prompt": "You are a helpful assistant."
@@ -94,7 +93,6 @@ Create a new agent with the specified name and optional configuration.
 
 **Parameters:**
 - `name` (required): Name of the agent
-- `type` (optional): Agent type - `"tool-calling"`, `"general"`, or `"research"`. Defaults to `"tool-calling"`. If `model` is provided without `type`, the type is auto-detected based on the model.
 - `model` (optional): Model to use (e.g., `"gpt-4o-mini"`, `"claude-3-haiku-20240307"`). Defaults to system defaults.
 - `temperature` (optional): Temperature setting (0.0-2.0). Defaults to system defaults.
 - `system_prompt` (optional): Custom system prompt. Defaults to the agent template or empty.
@@ -171,8 +169,7 @@ Classify a home page assistant prompt and find the best matching existing agent.
     "matches \"trip\"",
     "has plugin support for weather"
   ],
-  "suggested_agent_name": "Travel Planner",
-  "suggested_agent_type": "research"
+  "suggested_agent_name": "Travel Planner"
 }
 ```
 
@@ -184,7 +181,6 @@ Classify a home page assistant prompt and find the best matching existing agent.
 - `requires_creation`: `true` when no suitable existing agent is found.
 - `reasons`: Short explanation list for why the agent was matched.
 - `suggested_agent_name`: Suggested name when creating a new agent.
-- `suggested_agent_type`: Suggested type when creating a new agent.
 
 **No-match example:**
 ```json
@@ -193,8 +189,7 @@ Classify a home page assistant prompt and find the best matching existing agent.
   "intent_label": "email triage",
   "score": 0,
   "requires_creation": true,
-  "suggested_agent_name": "Email Assistant",
-  "suggested_agent_type": "tool-calling"
+  "suggested_agent_name": "Email Assistant"
 }
 ```
 
@@ -1481,7 +1476,6 @@ Check if all agents required by a workflow are available in a specific studio.
   "type": "agent",
   "config": {
     "name": "agent-name",
-    "type": "tool-calling",
     "model": "gpt-4o"
   }
 }

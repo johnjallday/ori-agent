@@ -1316,7 +1316,8 @@ test.describe('Agent Management', () => {
 
       // Verify form fields exist
       await expect(page.locator('#agentName')).toBeVisible();
-      await expect(page.locator('#agentType')).toBeVisible();
+      await expect(page.locator('#agentModel')).toBeVisible();
+      await expect(page.locator('#agentType')).toHaveCount(0);
     }
   });
 
@@ -2843,8 +2844,7 @@ test.describe('Home Advisory Routing', () => {
           route_mode: 'specialist_handoff',
           target_surface: 'chat',
           reasons: ['fallback to system assistant'],
-          suggested_agent_name: 'Task Assistant',
-          suggested_agent_type: 'general'
+          suggested_agent_name: 'Task Assistant'
         })
       });
     });
@@ -3001,7 +3001,6 @@ test.describe('Home Workspace Routing', () => {
           route_mode: 'workspace_task',
           target_surface: 'workspace',
           suggested_agent_name: 'Task Assistant',
-          suggested_agent_type: 'general',
           workspace_resolution: {
             state: 'ambiguous',
             candidates: [
@@ -3047,7 +3046,6 @@ test.describe('Home Workspace Routing', () => {
           route_mode: 'workspace_task',
           target_surface: 'workspace',
           suggested_agent_name: 'Task Assistant',
-          suggested_agent_type: 'general',
           workspace_resolution: {
             state: 'no_fit',
             candidates: []
@@ -3093,7 +3091,6 @@ test.describe('Home Workspace Routing', () => {
           route_mode: 'workspace_task',
           target_surface: 'workspace',
           suggested_agent_name: 'Task Assistant',
-          suggested_agent_type: 'general',
           workspace_resolution: {
             state: 'confident',
             selected_workspace_id: 'ws-cabinet',
@@ -3175,7 +3172,6 @@ test.describe('Home Workspace Routing', () => {
           route_mode: 'workspace_task',
           target_surface: 'workspace',
           suggested_agent_name: 'Task Assistant',
-          suggested_agent_type: 'general',
           workspace_resolution: {
             state: 'confident',
             selected_workspace_id: 'ws-cabinet',
@@ -3239,7 +3235,6 @@ test.describe('Home Workspace Routing', () => {
           route_mode: 'workspace_task',
           target_surface: 'workspace',
           suggested_agent_name: 'Task Assistant',
-          suggested_agent_type: 'general',
           workspace_resolution: {
             state: 'needs_repair',
             selected_workspace_id: 'ws-broken',
@@ -3295,7 +3290,6 @@ test.describe('Home Workspace Routing', () => {
           route_mode: 'workspace_task',
           target_surface: 'workspace',
           suggested_agent_name: 'Task Assistant',
-          suggested_agent_type: 'general',
           workspace_resolution: {
             state: 'no_fit',
             candidates: []

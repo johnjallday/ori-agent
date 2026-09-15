@@ -23,7 +23,7 @@ import (
 //
 // Why a synthetic Task: the OriAgentExecutor expects an
 // OriAgentExecutorConfig.TaskPayload because the underlying TaskHandler is
-// already wired for tool-calling, MCP/skill resolution, and trace capture.
+// already wired for tool calling, MCP/skill resolution, and trace capture.
 // Reusing that machinery for missions means we get the autonomy gate plus
 // tool plumbing "for free" — we just have to feed the gate the workspace's
 // AutonomyPolicy and the binding side-effect classifications (done elsewhere).

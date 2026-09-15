@@ -14,14 +14,14 @@ import (
 type ModelTier string
 
 const (
-	TierFast     ModelTier = "fast"     // cost-optimized, tool-calling oriented
+	TierFast     ModelTier = "fast"     // cost-optimized, oriented to tool calls
 	TierBalanced ModelTier = "balanced" // general purpose
 	TierDeep     ModelTier = "deep"     // deepest reasoning tier
 )
 
 // defaultCategoryIDs maps a tier to the built-in model-category ID it
 // resolves through. These IDs come from types.DefaultCategories(); the
-// mapping is 1:1 by design (tool-calling/general-purpose/research).
+// mapping is 1:1 by design (tool_calling/general_purpose/research).
 var defaultCategoryIDs = map[ModelTier]string{
 	TierFast:     "cat_default_tool_calling",
 	TierBalanced: "cat_default_general_purpose",

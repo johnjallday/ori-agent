@@ -108,34 +108,7 @@ This guide shows you how the form is styled and structured on the main chat page
 
 ---
 
-### 2. Agent Type Dropdown
-```html
-<div class="mb-3">
-  <label for="agentType" class="form-label" style="color: var(--text-primary);">
-    Agent Type
-  </label>
-  <select id="agentType" class="modern-input w-100">
-    <option value="tool-calling">Tool Calling (Cheapest - Optimized for tool use)</option>
-    <option value="general">General Purpose (Mid-tier - Balanced capability)</option>
-    <option value="research">Research (Expensive - Complex thinking)</option>
-  </select>
-</div>
-```
-
-**Styling Details**:
-- Class: `modern-input` (same as text inputs)
-- Full width: `w-100`
-- Options include helpful descriptions
-- Default selected: "tool-calling" (cheapest tier)
-
-**Key Feature**: Options include descriptions to help users understand the difference:
-- **Tool Calling** - Cheapest, optimized for tool use
-- **General Purpose** - Mid-tier, balanced
-- **Research** - Most expensive, complex thinking
-
----
-
-### 3. Model Dropdown
+### 2. Model Dropdown
 ```html
 <div class="mb-3">
   <label for="agentModel" class="form-label" style="color: var(--text-primary);">
@@ -152,12 +125,12 @@ This guide shows you how the form is styled and structured on the main chat page
 - Class: `modern-input` (consistent with other form fields)
 - Dynamically populated by JavaScript
 - Default: "Loading models..." placeholder option
-- Models filtered by selected agent type
+- Lists every model for each available provider, grouped by provider
 
 **Related Functions** (from agents.js):
 ```javascript
 // Populate model select with options from available providers
-function populateModelSelect(modelSelect, selectedType = 'tool-calling') {
+function populateModelSelect(modelSelect) {
   if (!modelSelect || availableProviders.length === 0) return;
 
   // Clear existing options
@@ -172,34 +145,22 @@ function populateModelSelect(modelSelect, selectedType = 'tool-calling') {
       const option = document.createElement('option');
       option.value = model.value;
       option.textContent = model.label;
-      option.setAttribute('data-type', model.type);
       option.setAttribute('data-provider', model.provider);
-
-      // Only show models matching the selected type
-      if (model.type !== selectedType) {
-        option.style.display = 'none';
-        option.disabled = true;
-      }
-
       providerGroup.appendChild(option);
     });
 
     modelSelect.appendChild(providerGroup);
   });
 
-  // Select first available option
-  for (let i = 0; i < modelSelect.options.length; i++) {
-    if (!modelSelect.options[i].disabled) {
-      modelSelect.selectedIndex = i;
-      break;
-    }
+  if (modelSelect.options.length > 0) {
+    modelSelect.selectedIndex = 0;
   }
 }
 ```
 
 ---
 
-### 4. Temperature Slider
+### 3. Temperature Slider
 ```html
 <div class="mb-3">
   <label for="agentTemperature" class="form-label" style="color: var(--text-primary);">
@@ -240,7 +201,7 @@ if (agentTemperatureInput && temperatureValueSpan) {
 
 ---
 
-### 5. System Prompt Textarea
+### 4. System Prompt Textarea
 ```html
 <div class="mb-3">
   <label for="agentSystemPrompt" class="form-label"
@@ -375,9 +336,6 @@ if (agentTemperatureInput && temperatureValueSpan) {
   <!-- Agent Name -->
   <div class="mb-3">...</div>
 
-  <!-- Agent Type -->
-  <div class="mb-3">...</div>
-
   <!-- Model -->
   <div class="mb-3">...</div>
 
@@ -501,7 +459,7 @@ async function initializeModels() {
   // Populate the model select in the create agent modal
   const agentModelSelect = document.getElementById('agentModel');
   if (agentModelSelect) {
-    populateModelSelect(agentModelSelect, 'tool-calling');
+    populateModelSelect(agentModelSelect);
   }
 }
 
@@ -513,33 +471,6 @@ if (document.readyState === 'loading') {
 }
 ```
 
-### Filtering Models by Agent Type
-**Lines**: 134-139
-
-```javascript
-// Filter models based on agent type
-function filterModelsByType(agentType, modelSelect) {
-  if (!modelSelect) return;
-
-  // Repopulate the select with filtered models
-  populateModelSelect(modelSelect, agentType);
-}
-```
-
-### Event Listener for Type Change
-**Lines**: 603-609
-
-```javascript
-// Agent type selector update - filter models when type changes
-const agentTypeInput = document.getElementById('agentType');
-const agentModelInput = document.getElementById('agentModel');
-if (agentTypeInput && agentModelInput) {
-  agentTypeInput.addEventListener('change', (e) => {
-    filterModelsByType(e.target.value, agentModelInput);
-  });
-}
-```
-
 ### Creating New Agent
 **Lines**: 142-241
 
@@ -547,7 +478,6 @@ if (agentTypeInput && agentModelInput) {
 // Create new agent
 async function createNewAgent() {
   const agentNameInput = document.getElementById('agentName');
-  const agentTypeInput = document.getElementById('agentType');
   const agentSystemPromptInput = document.getElementById('agentSystemPrompt');
   const agentModelInput = document.getElementById('agentModel');
   const agentTemperatureInput = document.getElementById('agentTemperature');
@@ -569,11 +499,6 @@ async function createNewAgent() {
 
   try {
     const requestBody = { name: agentName };
-
-    // Add agent type if provided
-    if (agentTypeInput && agentTypeInput.value) {
-      requestBody.type = agentTypeInput.value;
-    }
 
     // Add model if provided
     if (agentModelInput && agentModelInput.value) {
@@ -657,7 +582,7 @@ async function createNewAgent() {
 
 5. **JavaScript Initialization**
    - Models loaded asynchronously from /api/providers
-   - Models grouped by provider and filtered by agent type
+   - Models grouped by provider, every model listed
    - Temperature value displayed in real-time
    - Form submission validation before API call
 

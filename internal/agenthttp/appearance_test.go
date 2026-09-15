@@ -28,7 +28,6 @@ func createPlainAgent(t *testing.T, ts *TestServer, name string) {
 	t.Helper()
 	rr := ts.doRequest(t, http.MethodPost, "/api/agents", map[string]any{
 		"name":  name,
-		"type":  "tool-calling",
 		"model": "gpt-4o-mini",
 	})
 	assertStatus(t, rr, http.StatusOK)

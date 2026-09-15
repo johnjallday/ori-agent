@@ -431,7 +431,7 @@ func TestSharedAgentCreateFormIsCanonicalAndLoadsBeforeConsumers(t *testing.T) {
 				t.Errorf("page %s marker %q count = %d, want %d", page, marker, got, want)
 			}
 		}
-		for _, fieldID := range []string{"agentName", "agentType", "agentModel", "agentReasoning", "agentSystemPrompt"} {
+		for _, fieldID := range []string{"agentName", "agentModel", "agentReasoning", "agentSystemPrompt"} {
 			if got := strings.Count(html, `id="`+fieldID+`"`); got != 0 {
 				t.Errorf("page %s preassigns shared field ID %q %d times; IDs must be mount-scoped", page, fieldID, got)
 			}

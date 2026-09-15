@@ -99,7 +99,7 @@ func (a *LLMFactoryAdapter) ChatCompletion(ctx context.Context, messages []opena
 	return completion, nil
 }
 
-// ChatWithTools implements tool-calling support for task execution
+// ChatWithTools implements tool calling support for task execution
 func (a *LLMFactoryAdapter) ChatWithTools(ctx context.Context, systemPrompt, userPrompt string, tools []llm.Tool) (*llm.ChatResponse, error) {
 	// Build messages
 	messages := []llm.Message{
@@ -113,7 +113,7 @@ func (a *LLMFactoryAdapter) ChatWithTools(ctx context.Context, systemPrompt, use
 	return a.ChatWithMessages(ctx, messages, tools)
 }
 
-// ChatWithMessages implements tool-calling support with full message history
+// ChatWithMessages implements tool calling support with full message history
 func (a *LLMFactoryAdapter) ChatWithMessages(ctx context.Context, messages []llm.Message, tools []llm.Tool) (*llm.ChatResponse, error) {
 	// Get the provider from the factory
 	provider, err := a.factory.GetProvider(a.providerName)

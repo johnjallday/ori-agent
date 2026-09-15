@@ -17,7 +17,6 @@ async function resetAgent(request: APIRequestContext) {
   const created = await request.post('/api/agents', {
     data: {
       name: AGENT,
-      type: 'tool-calling',
       model: 'gpt-4o-mini',
       description: 'unified appearance end-to-end fixture'
     }

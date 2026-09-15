@@ -15,18 +15,6 @@
          placeholder="Enter agent name..." required>
 </div>
 
-<!-- Agent Type -->
-<div class="mb-3">
-  <label for="agentType" class="form-label" style="color: var(--text-primary);">
-    Agent Type
-  </label>
-  <select id="agentType" class="modern-input w-100">
-    <option value="tool-calling">Tool Calling (Cheapest - Optimized for tool use)</option>
-    <option value="general">General Purpose (Mid-tier - Balanced capability)</option>
-    <option value="research">Research (Expensive - Complex thinking)</option>
-  </select>
-</div>
-
 <!-- Model -->
 <div class="mb-3">
   <label for="agentModel" class="form-label" style="color: var(--text-primary);">
@@ -89,16 +77,6 @@
          placeholder="my-agent" required>
 </div>
 
-<div class="col-md-6 mb-3">
-  <label class="form-label" style="color: var(--text-primary);">
-    Type
-  </label>
-  <select id="new-agent-type" class="form-control">
-    <option value="tool-calling">Tool-Calling Agent</option>
-    <option value="chat">Chat Agent</option>
-  </select>
-</div>
-
 <div class="col-md-8 mb-3">
   <label class="form-label" style="color: var(--text-primary);">
     Model
@@ -131,7 +109,6 @@
 3. Temperature is number input instead of slider
 4. Missing temperature helper labels (Focused/Balanced/Creative)
 5. System prompt is 2 rows instead of 4
-6. Missing descriptive option labels in Agent Type dropdown
 
 ---
 
@@ -185,29 +162,6 @@
 - Doesn't match the modern design theme
 - Less elegant visual appearance
 - Inconsistent with rest of the sidebar forms
-
----
-
-## Option Labels Comparison
-
-### Agent Type - MAIN PAGE (Better UX)
-```
-Tool Calling (Cheapest - Optimized for tool use)
-General Purpose (Mid-tier - Balanced capability)
-Research (Expensive - Complex thinking)
-```
-- Includes cost tier information
-- Includes capabilities description
-- Helps users make informed choice
-
-### Agent Type - WORKSPACE (Less Helpful)
-```
-Tool-Calling Agent
-Chat Agent
-```
-- Generic labels
-- No context about differences
-- User doesn't know which to choose
 
 ---
 
@@ -296,8 +250,6 @@ Chat Agent
 | Temperature Labels | Focused/Balanced/Creative | None | Add helper labels |
 | System Prompt Rows | 4 | 2 | Increase to 4 |
 | Textarea Background | var(--bg-tertiary) | default | Style with darker background |
-| Agent Type Options | Detailed descriptions | Generic labels | Add descriptions for each option |
-| Agent Type Options | 3 types (tool-calling, general, research) | 2 types (tool-calling, chat) | Match option values with main page |
 
 ---
 
@@ -314,23 +266,7 @@ Chat Agent
 <input type="text" id="new-agent-name" class="modern-input w-100" placeholder="my-agent" required>
 ```
 
-2. **Update Agent Type Options**
-```html
-<!-- BEFORE -->
-<select id="new-agent-type" class="form-control">
-  <option value="tool-calling">Tool-Calling Agent</option>
-  <option value="chat">Chat Agent</option>
-</select>
-
-<!-- AFTER -->
-<select id="new-agent-type" class="modern-input w-100">
-  <option value="tool-calling">Tool Calling (Cheapest - Optimized for tool use)</option>
-  <option value="general">General Purpose (Mid-tier - Balanced capability)</option>
-  <option value="research">Research (Expensive - Complex thinking)</option>
-</select>
-```
-
-3. **Replace Temperature Number Input with Slider**
+2. **Replace Temperature Number Input with Slider**
 ```html
 <!-- BEFORE -->
 <input type="number" id="new-agent-temperature" class="form-control"
@@ -352,7 +288,7 @@ Chat Agent
 </div>
 ```
 
-4. **Update System Prompt Textarea**
+3. **Update System Prompt Textarea**
 ```html
 <!-- BEFORE -->
 <textarea id="new-agent-prompt" class="form-control" rows="2"
@@ -365,7 +301,7 @@ Chat Agent
           placeholder="You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses."></textarea>
 ```
 
-5. **Layout Changes** (move form fields to single column if using grid)
+4. **Layout Changes** (move form fields to single column if using grid)
 ```html
 <!-- Change from multi-column grid to full-width fields -->
 <form id="createAgentForm" class="modern-card p-3">
@@ -373,9 +309,6 @@ Chat Agent
   <!-- Make each field full width with mb-3 spacing -->
   <div class="mb-3">
     <!-- Agent Name -->
-  </div>
-  <div class="mb-3">
-    <!-- Agent Type -->
   </div>
   <div class="mb-3">
     <!-- Model -->

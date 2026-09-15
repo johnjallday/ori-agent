@@ -454,7 +454,7 @@ func TestDefaultModelAssignments(t *testing.T) {
 		t.Error("Expected gpt-5-nano to have default assignments")
 	}
 
-	// Verify it includes tool-calling category
+	// Verify it includes the tool_calling category
 	hasToolCalling := false
 	for _, catID := range gpt5NanoAssignments {
 		if catID == "cat_default_tool_calling" {
@@ -463,7 +463,7 @@ func TestDefaultModelAssignments(t *testing.T) {
 		}
 	}
 	if !hasToolCalling {
-		t.Error("Expected gpt-5-nano to be assigned to tool-calling category")
+		t.Error("Expected gpt-5-nano to be assigned to the tool_calling category")
 	}
 }
 

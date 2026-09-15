@@ -73,7 +73,6 @@ test.describe('Agents collection performance (100 agents)', () => {
         request.post(`${baseUrl}/api/agents`, {
           data: {
             name: n,
-            type: 'tool-calling',
             model: 'gpt-4o-mini',
             tags: ['perf-fixture'],
             ...identityFor(i)
