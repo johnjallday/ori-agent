@@ -12,10 +12,10 @@ func TestResetAgentPersistenceRemovesOwnedProfilesAndPreservesUnknownEntries(t *
 	if err := os.MkdirAll(filepath.Join(profiles, "Owned Agent"), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(profiles, "Owned Agent", "agent_settings.json"), []byte(`{"type":"tool-calling"}`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(profiles, "Owned Agent", "agent_settings.json"), []byte(`{"Settings":{}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(profiles, "legacy.json"), []byte(`{"type":"tool-calling"}`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(profiles, "legacy.json"), []byte(`{"Settings":{}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	unknown := filepath.Join(profiles, "README.txt")

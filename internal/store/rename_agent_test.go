@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -38,7 +37,7 @@ func TestFileStoreImplementsAgentRenamer(t *testing.T) {
 // every sidecar that is not part of the in-memory record was destroyed.
 func TestRenameAgentSupportsCaseOnlyIdentityChange(t *testing.T) {
 	fs, _ := renameStore(t)
-	if err := fs.CreateAgent("Atlas", &CreateAgentConfig{Type: agent.TypeGeneral}); err != nil {
+	if err := fs.CreateAgent("Atlas", &CreateAgentConfig{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := fs.RenameAgent("Atlas", "ATLAS"); err != nil {
@@ -56,7 +55,6 @@ func TestRenameAgentPreservesSidecarFiles(t *testing.T) {
 	fs, agentsDir := renameStore(t)
 
 	if err := fs.CreateAgent("Workspace Manager", &CreateAgentConfig{
-		Type:         agent.TypeGeneral,
 		Model:        "claude-opus-5",
 		LLMProvider:  "anthropic",
 		SystemPrompt: "user customized this",
@@ -110,7 +108,6 @@ func TestRenameAgentPreservesTheAgentRecord(t *testing.T) {
 	fs, _ := renameStore(t)
 
 	if err := fs.CreateAgent("Workspace Manager", &CreateAgentConfig{
-		Type:         agent.TypeGeneral,
 		Role:         types.RoleOrchestrator,
 		Model:        "claude-opus-5",
 		LLMProvider:  "anthropic",
@@ -159,13 +156,11 @@ func TestRenameAgentRefusesToOverwriteAnExistingAgent(t *testing.T) {
 	fs, _ := renameStore(t)
 
 	if err := fs.CreateAgent("Workspace Manager", &CreateAgentConfig{
-		Type:         agent.TypeGeneral,
 		SystemPrompt: "system record",
 	}); err != nil {
 		t.Fatalf("seed system: %v", err)
 	}
 	if err := fs.CreateAgent("Ask Ori", &CreateAgentConfig{
-		Type:         agent.TypeGeneral,
 		SystemPrompt: "MINE — user authored",
 	}); err != nil {
 		t.Fatalf("seed user: %v", err)
@@ -191,7 +186,7 @@ func TestRenameAgentRejectsUnknownSourceAndEmptyNames(t *testing.T) {
 	if err := fs.RenameAgent("Nope", "Ask Ori"); err == nil {
 		t.Error("renaming an agent that does not exist must fail")
 	}
-	if err := fs.CreateAgent("Real", &CreateAgentConfig{Type: agent.TypeGeneral}); err != nil {
+	if err := fs.CreateAgent("Real", &CreateAgentConfig{}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	if err := fs.RenameAgent("Real", "   "); err == nil {
@@ -211,7 +206,6 @@ func TestRenameAgentSucceedsWhenTheSourceFolderIsMissing(t *testing.T) {
 	fs, agentsDir := renameStore(t)
 
 	if err := fs.CreateAgent("Workspace Manager", &CreateAgentConfig{
-		Type:         agent.TypeGeneral,
 		SystemPrompt: "no folder",
 	}); err != nil {
 		t.Fatalf("seed: %v", err)

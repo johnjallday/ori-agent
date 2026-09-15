@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -26,7 +25,7 @@ func guardTestHandler(t *testing.T, agents []string, wsAgents map[string][]strin
 		t.Fatalf("NewFileStore: %v", err)
 	}
 	for _, name := range agents {
-		if err := st.CreateAgent(name, &store.CreateAgentConfig{Type: agent.TypeGeneral}); err != nil {
+		if err := st.CreateAgent(name, &store.CreateAgentConfig{}); err != nil {
 			t.Fatalf("CreateAgent %s: %v", name, err)
 		}
 	}

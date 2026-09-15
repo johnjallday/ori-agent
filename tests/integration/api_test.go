@@ -308,7 +308,6 @@ func startTestServer(t *testing.T) *testutil.TestServer {
 					"score":                6,
 					"requires_creation":    false,
 					"suggested_agent_name": "Utility Assistant",
-					"suggested_agent_type": "general",
 				})
 				return
 			}

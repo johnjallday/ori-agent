@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -64,7 +63,6 @@ func TestSystemAssistantNameComesFromTheSharedContract(t *testing.T) {
 func TestWorkspaceManagerInstallMigratesToAskOri(t *testing.T) {
 	st := renameTestStore(t)
 	if err := st.CreateAgent("Workspace Manager", &store.CreateAgentConfig{
-		Type:         agent.TypeGeneral,
 		Role:         types.RoleOrchestrator,
 		Model:        "claude-opus-5",
 		LLMProvider:  "anthropic",
@@ -120,9 +118,7 @@ func TestProtectionRecognizesOnlyTheCanonicalIdentity(t *testing.T) {
 // it apart from a user-created agent with the same name.
 func TestMigratedAssistantCarriesTheProtectedMarker(t *testing.T) {
 	st := renameTestStore(t)
-	if err := st.CreateAgent("Workspace Manager", &store.CreateAgentConfig{
-		Type: agent.TypeGeneral,
-	}); err != nil {
+	if err := st.CreateAgent("Workspace Manager", &store.CreateAgentConfig{}); err != nil {
 		t.Fatalf("seed legacy agent: %v", err)
 	}
 
@@ -144,9 +140,7 @@ func TestMigratedAssistantCarriesTheProtectedMarker(t *testing.T) {
 // pair passed the record tests while silently deleting these files.
 func TestMigrationPreservesPerAgentSidecarState(t *testing.T) {
 	st, agentsDir := renameTestStoreWithDir(t)
-	if err := st.CreateAgent("Workspace Manager", &store.CreateAgentConfig{
-		Type: agent.TypeGeneral,
-	}); err != nil {
+	if err := st.CreateAgent("Workspace Manager", &store.CreateAgentConfig{}); err != nil {
 		t.Fatalf("seed legacy agent: %v", err)
 	}
 
@@ -190,13 +184,11 @@ func TestMigrationPreservesPerAgentSidecarState(t *testing.T) {
 func TestUserCreatedAskOriBlocksMigrationWithoutDataLoss(t *testing.T) {
 	st := renameTestStore(t)
 	if err := st.CreateAgent(systemassistant.CanonicalName, &store.CreateAgentConfig{
-		Type:         agent.TypeGeneral,
 		SystemPrompt: "MINE — user authored",
 	}); err != nil {
 		t.Fatalf("seed user agent: %v", err)
 	}
 	if err := st.CreateAgent("Workspace Manager", &store.CreateAgentConfig{
-		Type:         agent.TypeGeneral,
 		SystemPrompt: "the real assistant",
 		Model:        "claude-opus-5",
 	}); err != nil {
@@ -236,7 +228,6 @@ func TestUserCreatedAskOriBlocksMigrationWithoutDataLoss(t *testing.T) {
 func TestRepeatedEnsureIsStable(t *testing.T) {
 	st := renameTestStore(t)
 	if err := st.CreateAgent("Workspace Manager", &store.CreateAgentConfig{
-		Type:         agent.TypeGeneral,
 		SystemPrompt: "carried forward",
 	}); err != nil {
 		t.Fatalf("seed: %v", err)

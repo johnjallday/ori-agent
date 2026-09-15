@@ -801,7 +801,7 @@ func TestSyncStore_SaveWorkspaceAgentSkipsTrashedWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := store.SaveWorkspaceAgent(ws.ID, "Manager", &agent.Agent{Type: agent.TypeToolCalling}); err != nil {
+	if err := store.SaveWorkspaceAgent(ws.ID, "Manager", &agent.Agent{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok, err := primary.GetWorkspaceAgent(ws.ID, "Manager"); err != nil || ok {
@@ -836,7 +836,7 @@ func TestSyncStore_SaveWorkspaceAgentSkipsMissingWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := store.SaveWorkspaceAgent(ws.ID, "Manager", &agent.Agent{Type: agent.TypeToolCalling}); err != nil {
+	if err := store.SaveWorkspaceAgent(ws.ID, "Manager", &agent.Agent{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok, err := primary.GetWorkspaceAgent(ws.ID, "Manager"); err != nil || ok {

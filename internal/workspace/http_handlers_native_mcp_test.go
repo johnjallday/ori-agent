@@ -34,7 +34,6 @@ func TestNativeMCPHTTP_ToggleAndRead(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 	if err := store.SaveWorkspaceAgent(ws.ID, "reaper", &agent.Agent{
-		Type:     "orchestration",
 		Settings: types.Settings{Model: "gpt-5.5", Provider: "codex"},
 	}); err != nil {
 		t.Fatalf("save agent: %v", err)

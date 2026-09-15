@@ -9,7 +9,6 @@ import (
 
 // CreateAgentConfig holds optional configuration for creating a new agent
 type CreateAgentConfig struct {
-	Type            string // Agent type: "tool-calling", "general", "research"
 	Role            types.AgentRole
 	Model           string                 // Model to use
 	Temperature     float64                // Temperature (0.0-2.0)

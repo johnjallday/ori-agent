@@ -62,7 +62,6 @@ func newTestService(cfg *Config) (*Service, *fakeAgentStore, *fakeAssistantProgr
 	agentStore := &fakeAgentStore{
 		agents: map[string]*agent.Agent{
 			"alpha": {
-				Type:     agent.TypeGeneral,
 				Settings: types.Settings{Model: "gpt-4o-mini", Temperature: 1.0},
 			},
 		},

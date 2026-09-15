@@ -287,15 +287,6 @@
               <input type="text" id="canvasAgentName" class="modern-input w-100" placeholder="Enter agent name..." required>
             </div>
             <div class="mb-3">
-              <label for="canvasAgentType" class="form-label" style="color: var(--text-primary);">Agent Type</label>
-              <select id="canvasAgentType" class="modern-input w-100">
-                <option value="tool-calling">Tool Calling (Cheapest - Optimized for tool use)</option>
-                <option value="general">General Purpose (Mid-tier - Balanced capability)</option>
-                <option value="orchestration">Orchestration (Advanced - Multi-agent coordination)</option>
-                <option value="research">Research (Expensive - Complex thinking)</option>
-              </select>
-            </div>
-            <div class="mb-3">
               <label for="canvasAgentModel" class="form-label" style="color: var(--text-primary);">Model</label>
               <select id="canvasAgentModel" class="modern-input w-100">
                 <option value="">Loading models...</option>
@@ -940,7 +931,7 @@
               </div>
               <div class="flex-grow-1">
                 <div style="color: var(--text-primary); font-weight: 500;">${escapeHtml(agent.name)}</div>
-                <div style="color: var(--text-secondary); font-size: 0.8rem;">${escapeHtml(agent.type || 'tool-calling')} ${agent.model ? '• ' + escapeHtml(agent.model) : ''}</div>
+                <div style="color: var(--text-secondary); font-size: 0.8rem;">${agent.model ? escapeHtml(agent.model) : ''}</div>
               </div>
               <div class="agent-check-icon" style="display: none;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="var(--primary-color)">
@@ -1125,7 +1116,6 @@
     async function showCreateAgentModal() {
       const modal = new bootstrap.Modal(document.getElementById('createAgentModal'));
       const agentNameInput = document.getElementById('canvasAgentName');
-      const agentTypeInput = document.getElementById('canvasAgentType');
       const agentModelInput = document.getElementById('canvasAgentModel');
       const agentTemperatureInput = document.getElementById('canvasAgentTemperature');
       const temperatureValueSpan = document.getElementById('canvasTemperatureValue');
@@ -1133,7 +1123,6 @@
 
       // Clear previous inputs
       if (agentNameInput) agentNameInput.value = '';
-      if (agentTypeInput) agentTypeInput.value = 'tool-calling';
       if (agentSystemPromptInput) agentSystemPromptInput.value = '';
       if (agentTemperatureInput) {
         agentTemperatureInput.value = '1.0';
@@ -1156,23 +1145,13 @@
               const option = document.createElement('option');
               option.value = model.value;
               option.textContent = model.label;
-              option.setAttribute('data-type', model.type);
-              // Only show tool-calling models by default
-              if (model.type !== 'tool-calling') {
-                option.style.display = 'none';
-                option.disabled = true;
-              }
               providerGroup.appendChild(option);
             });
             agentModelInput.appendChild(providerGroup);
           });
 
-          // Select first available option
-          for (let i = 0; i < agentModelInput.options.length; i++) {
-            if (!agentModelInput.options[i].disabled) {
-              agentModelInput.selectedIndex = i;
-              break;
-            }
+          if (agentModelInput.options.length > 0) {
+            agentModelInput.selectedIndex = 0;
           }
         } catch (error) {
           console.error('Failed to load models:', error);
@@ -1183,30 +1162,6 @@
       if (agentTemperatureInput && temperatureValueSpan) {
         agentTemperatureInput.oninput = (e) => {
           temperatureValueSpan.textContent = e.target.value;
-        };
-      }
-
-      // Setup agent type change to filter models
-      if (agentTypeInput && agentModelInput) {
-        agentTypeInput.onchange = (e) => {
-          const selectedType = e.target.value;
-          const options = agentModelInput.querySelectorAll('option');
-          options.forEach(option => {
-            if (option.getAttribute('data-type') === selectedType) {
-              option.style.display = '';
-              option.disabled = false;
-            } else {
-              option.style.display = 'none';
-              option.disabled = true;
-            }
-          });
-          // Select first visible option
-          for (let i = 0; i < agentModelInput.options.length; i++) {
-            if (!agentModelInput.options[i].disabled) {
-              agentModelInput.selectedIndex = i;
-              break;
-            }
-          }
         };
       }
 
@@ -1221,7 +1176,6 @@
     // Create new agent from canvas modal
     async function createNewAgentFromCanvas() {
       const agentNameInput = document.getElementById('canvasAgentName');
-      const agentTypeInput = document.getElementById('canvasAgentType');
       const agentModelInput = document.getElementById('canvasAgentModel');
       const agentTemperatureInput = document.getElementById('canvasAgentTemperature');
       const agentSystemPromptInput = document.getElementById('canvasAgentSystemPrompt');
@@ -1245,7 +1199,6 @@
       try {
         const requestBody = { name: agentName };
         requestBody.allow_web_search = allowWebSearchInput ? Boolean(allowWebSearchInput.checked) : true;
-        if (agentTypeInput && agentTypeInput.value) requestBody.type = agentTypeInput.value;
         if (agentModelInput && agentModelInput.value) requestBody.model = agentModelInput.value;
         if (agentTemperatureInput && agentTemperatureInput.value) requestBody.temperature = parseFloat(agentTemperatureInput.value);
         if (agentSystemPromptInput && agentSystemPromptInput.value.trim()) requestBody.system_prompt = agentSystemPromptInput.value.trim();

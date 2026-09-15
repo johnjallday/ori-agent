@@ -65,7 +65,6 @@ func TestChatHandler_RoutesClaudeCodeWithoutOpenAIKey(t *testing.T) {
 	}
 
 	if err := st.CreateAgent("claude-agent", &store.CreateAgentConfig{
-		Type:         "general",
 		Model:        "sonnet",
 		LLMProvider:  "claude_code",
 		Temperature:  1.0,
@@ -130,7 +129,6 @@ func TestChatHandler_RoutesAssistantModeToOriWithoutCurrentAgent(t *testing.T) {
 	}
 
 	if err := st.CreateAgent(assistantExecutionAgentName, &store.CreateAgentConfig{
-		Type:         "general",
 		Model:        "sonnet",
 		LLMProvider:  "claude_code",
 		Temperature:  1.0,
@@ -184,7 +182,6 @@ func TestChatHandler_ClaudeCodePermissionDenialEmitsDependencyResolution(t *test
 	}
 
 	if err := st.CreateAgent("claude-agent", &store.CreateAgentConfig{
-		Type:         "general",
 		Model:        "sonnet",
 		LLMProvider:  "claude_code",
 		Temperature:  1.0,
@@ -256,7 +253,6 @@ func TestChatHandler_ReturnsErrorForProviderlessAgent(t *testing.T) {
 	}
 
 	if err := st.CreateAgent("skills", &store.CreateAgentConfig{
-		Type:        "tool-calling",
 		Model:       "gpt-5-nano",
 		Temperature: 1.0,
 	}); err != nil {

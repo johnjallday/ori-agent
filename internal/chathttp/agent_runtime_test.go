@@ -74,7 +74,7 @@ func TestResolveEffectiveAgent_UsesRuntimeResolverWhenBaseAgentIsMissing(t *test
 	h := NewHandler(st, nil)
 	resolver := &stubChatRuntimeResolver{
 		resolved: &workspace.ResolvedAgentRuntime{
-			Agent: &agent.Agent{Type: "workspace-manager"},
+			Agent: &agent.Agent{Role: types.RoleOrchestrator},
 		},
 	}
 	h.SetRuntimeResolver(resolver)
@@ -86,16 +86,16 @@ func TestResolveEffectiveAgent_UsesRuntimeResolverWhenBaseAgentIsMissing(t *test
 	if resolved == nil || resolved.Agent == nil {
 		t.Fatal("expected resolved agent")
 	}
-	if resolved.Type != "workspace-manager" {
-		t.Fatalf("expected workspace-manager type, got %q", resolved.Type)
+	if resolved.Role != types.RoleOrchestrator {
+		t.Fatalf("expected the runtime resolver's orchestrator agent, got role %q", resolved.Role)
 	}
 	if len(resolver.calls) != 1 {
 		t.Fatalf("expected runtime resolver to be called once, got %d", len(resolver.calls))
 	}
 }
 
-func TestResolveEffectiveAgent_WorkspaceEntryAgentKeepsOriginalType(t *testing.T) {
-	st := newPreflightStore("Espana Manager", &agent.Agent{Type: "general"})
+func TestResolveEffectiveAgent_WorkspaceEntryAgentKeepsOriginalRole(t *testing.T) {
+	st := newPreflightStore("Espana Manager", &agent.Agent{Role: types.RoleAnalyzer})
 	h := NewHandler(st, nil)
 	h.workspaceStore = &preflightWorkspaceStore{
 		workspaces: map[string]*workspace.Workspace{
@@ -117,8 +117,8 @@ func TestResolveEffectiveAgent_WorkspaceEntryAgentKeepsOriginalType(t *testing.T
 	if resolved == nil || resolved.Agent == nil {
 		t.Fatal("expected resolved agent")
 	}
-	if resolved.Type != "general" {
-		t.Fatalf("expected workspace entry agent to keep original type 'general', got %q", resolved.Type)
+	if resolved.Role != types.RoleAnalyzer {
+		t.Fatalf("expected workspace entry agent to keep original role %q, got %q", types.RoleAnalyzer, resolved.Role)
 	}
 }
 
@@ -162,7 +162,7 @@ func TestChatHandler_WorkspaceEntryGeneralAgent_UsesPlanningForm(t *testing.T) {
 		t.Fatalf("failed to create session workspace: %v", err)
 	}
 
-	h := NewHandler(newPreflightStore("Spain Manager", &agent.Agent{Type: "general"}), nil)
+	h := NewHandler(newPreflightStore("Spain Manager", &agent.Agent{}), nil)
 	h.SetSessionStore(sessionStore)
 	h.workspaceStore = &preflightWorkspaceStore{
 		workspaces: map[string]*workspace.Workspace{

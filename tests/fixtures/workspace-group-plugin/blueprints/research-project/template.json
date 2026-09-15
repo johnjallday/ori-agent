@@ -22,7 +22,6 @@
         "required": true,
         "primary": true,
         "role": "orchestrator",
-        "type": "tool_calling",
         "system_prompt": "Coordinate only trusted portfolio records and exact reviewed handoffs. Never infer project access from names."
       },
       {
@@ -33,7 +32,6 @@
         "required": true,
         "primary": true,
         "role": "orchestrator",
-        "type": "tool_calling",
         "system_prompt": "Coordinate only this exact linked research project. Never claim Home or sibling authority."
       },
       {
@@ -44,7 +42,6 @@
         "required": false,
         "capability_id": "research-archive",
         "role": "specialist",
-        "type": "general",
         "system_prompt": "Organize only reviewed portfolio archive records."
       }
     ],

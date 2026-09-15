@@ -35,7 +35,7 @@ async function openProfileModal(page: Page) {
 
 test.beforeAll(async ({ request }) => {
   const res = await request.post('/api/agents', {
-    data: { name: AGENT, type: 'tool-calling', model: 'gpt-4o-mini' }
+    data: { name: AGENT, model: 'gpt-4o-mini' }
   });
   expect(res.ok(), await res.text()).toBeTruthy();
 });

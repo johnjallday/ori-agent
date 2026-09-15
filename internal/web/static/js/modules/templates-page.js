@@ -1879,7 +1879,6 @@ const TPL_AGENT_ROLES = [
   'validator',
   'general'
 ];
-const TPL_AGENT_TYPES = ['', 'tool-calling', 'general', 'research'];
 
 const tplAgents = {
   templateId: '',
@@ -1894,7 +1893,6 @@ function tplAgentsBlank() {
   return {
     name: '',
     role: '',
-    type: '',
     model: '',
     system_prompt: '',
     tools: { skills: [], mcp_servers: [] }
@@ -1905,7 +1903,6 @@ function tplAgentsNormalizeList(agents) {
   return (Array.isArray(agents) ? agents : []).map(a => ({
     name: a.name || '',
     role: a.role || '',
-    type: a.type || '',
     model: a.model || '',
     system_prompt: a.system_prompt || '',
     tools: {
@@ -1946,12 +1943,6 @@ function tplAgentsRoleLabel(agent, index) {
   const role = String(agent?.role || '').trim();
   if (!role) return 'Specialist';
   return role.replace(/[_-]+/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase());
-}
-
-function tplAgentsTypeLabel(type) {
-  const value = String(type || '').trim();
-  if (!value) return 'Default type';
-  return value.replace(/[_-]+/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase());
 }
 
 function tplAgentsChip(text, kind = '') {
@@ -2215,7 +2206,6 @@ function tplAgentsCard(agent, index) {
   summary.appendChild(
     tplAgentsChip(tplAgentsRoleLabel(agent, index), index === 0 ? 'entry' : 'role')
   );
-  summary.appendChild(tplAgentsChip(tplAgentsTypeLabel(agent.type), 'type'));
   summary.appendChild(
     tplAgentsChip(agent.model ? agent.model : 'Workspace model', agent.model ? 'model' : 'empty')
   );
@@ -2281,9 +2271,6 @@ function tplAgentsCard(agent, index) {
     rt.className = 'tpl-agent-form-row';
     rt.appendChild(
       tplAgentsCol('Role', tplAgentsSelect('tpl-agent-role', TPL_AGENT_ROLES, agent.role || ''))
-    );
-    rt.appendChild(
-      tplAgentsCol('Type', tplAgentsSelect('tpl-agent-type', TPL_AGENT_TYPES, agent.type || ''))
     );
     form.appendChild(rt);
 
@@ -2369,7 +2356,6 @@ function tplAgentsCollect() {
   return Array.from(list.querySelectorAll('.tpl-agent-card')).map(card => ({
     name: (card.querySelector('.tpl-agent-name')?.value || '').trim(),
     role: card.querySelector('.tpl-agent-role')?.value || '',
-    type: card.querySelector('.tpl-agent-type')?.value || '',
     model: (card.querySelector('.tpl-agent-model')?.value || '').trim(),
     system_prompt: (card.querySelector('.tpl-agent-prompt')?.value || '').trim(),
     tools: {

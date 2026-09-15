@@ -14,7 +14,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -303,9 +302,8 @@ func (a *AssistantStaffingAdapter) commitReviewedRoles(scope ReadScope, owner *s
 				return CanonicalResult{}, ErrBoundAgentMissing
 			}
 		} else {
-			profileType := normalizeStaffingAgentType(role.Type)
 			if err := a.profiles.CreateAgent(requested.Name, &store.CreateAgentConfig{
-				Type: profileType, Role: types.AgentRole(role.Role), Model: requested.Model,
+				Role: types.AgentRole(role.Role), Model: requested.Model,
 				LLMProvider: requested.Provider, SystemPrompt: role.SystemPrompt,
 			}); err != nil {
 				rollback()
@@ -1160,17 +1158,6 @@ func staffingModelAvailable(validate StaffingModelValidator, provider, model str
 		return false
 	}
 	return validate == nil || validate(provider, model) == nil
-}
-
-func normalizeStaffingAgentType(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "general":
-		return agent.TypeGeneral
-	case "research":
-		return agent.TypeResearch
-	default:
-		return agent.TypeToolCalling
-	}
 }
 
 func equalStaffingProjection(left, right *StaffingProjection) bool {

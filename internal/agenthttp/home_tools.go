@@ -412,7 +412,6 @@ func (r *homeToolRegistry) agents(args map[string]any) (string, error) {
 
 	type row struct {
 		Name           string   `json:"name"`
-		Type           string   `json:"type"`
 		Role           string   `json:"role"`
 		Model          string   `json:"model"`
 		Provider       string   `json:"provider"`
@@ -434,7 +433,6 @@ func (r *homeToolRegistry) agents(args map[string]any) (string, error) {
 		}
 		rows = append(rows, row{
 			Name:           a.Name,
-			Type:           a.Type,
 			Role:           a.Role,
 			Model:          a.Model,
 			Provider:       a.Provider,

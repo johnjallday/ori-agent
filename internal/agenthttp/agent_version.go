@@ -44,7 +44,6 @@ func agentConfigVersion(a *agent.Agent) string {
 		RoutingProfile *types.AgentRoutingProfile `json:"routing_profile"`
 	}
 	payload := struct {
-		Type     string            `json:"type"`
 		Role     types.AgentRole   `json:"role"`
 		Settings versionedSettings `json:"settings"`
 		Metadata versionedMetadata `json:"metadata"`
@@ -58,7 +57,6 @@ func agentConfigVersion(a *agent.Agent) string {
 		// silently overwrite the other.
 		Appearance *types.AgentAppearance `json:"appearance"`
 	}{
-		Type: a.Type,
 		Role: a.Role,
 		Settings: versionedSettings{
 			Model:           a.Settings.Model,

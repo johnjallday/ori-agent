@@ -22,7 +22,7 @@ func TestResolveExecutionAgent_UsesWorkspaceSnapshotWhenGlobalMissing(t *testing
 		},
 	}
 	workspaceStore := newTestWorkspaceStore(t, ws)
-	localAgent := &agent.Agent{Type: agent.TypeToolCalling}
+	localAgent := &agent.Agent{}
 	localAgent.Settings.Model = "workspace-local-model"
 	if err := workspaceStore.SaveWorkspaceAgent(ws.ID, "Imported Manager", localAgent); err != nil {
 		t.Fatalf("seed workspace-local agent: %v", err)
@@ -66,7 +66,7 @@ func TestResolveExecutionAgent_DoesNotReportMissingWhenWorkspaceSnapshotExists(t
 		},
 	}
 	workspaceStore := newTestWorkspaceStore(t, ws)
-	localAgent := &agent.Agent{Type: agent.TypeToolCalling}
+	localAgent := &agent.Agent{}
 	localAgent.Settings.Model = "workspace-local-model"
 	if err := workspaceStore.SaveWorkspaceAgent(ws.ID, "Runtime Manager", localAgent); err != nil {
 		t.Fatalf("seed workspace-local agent: %v", err)

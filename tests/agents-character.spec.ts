@@ -26,7 +26,7 @@ async function skipOnboarding(page: Page) {
 
 async function makeAgent(page: Page, name: string) {
   const res = await page.request.post('/api/agents', {
-    data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+    data: { name, model: 'gpt-4o-mini' }
   });
   expect(res.ok()).toBeTruthy();
 }

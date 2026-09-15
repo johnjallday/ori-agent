@@ -84,18 +84,10 @@ All colors are defined with CSS variables (auto dark-mode support):
 - Placeholder: "Enter agent name..."
 - Required: yes
 
-### Agent Type
-- Class: `modern-input w-100`
-- Options:
-  - "Tool Calling (Cheapest - Optimized for tool use)"
-  - "General Purpose (Mid-tier - Balanced capability)"
-  - "Research (Expensive - Complex thinking)"
-- Default: "tool-calling"
-
 ### Model
 - Class: `modern-input w-100`
 - Populated by: `populateModelSelect()` function
-- Filtered by agent type
+- Lists every model for each available provider, grouped by provider
 - Placeholder: "Loading models..."
 
 ### Temperature
@@ -124,7 +116,6 @@ All colors are defined with CSS variables (auto dark-mode support):
 // Already exists in agents.js
 loadAvailableProviders()      // Fetch from /api/providers
 populateModelSelect()          // Populate dropdown with models
-filterModelsByType()           // Filter by agent type
 ```
 
 ### Event Handlers
@@ -132,12 +123,6 @@ filterModelsByType()           // Filter by agent type
 // Temperature slider
 document.getElementById('new-agent-temperature').addEventListener('input', (e) => {
   document.getElementById('new-agent-temperature-value').textContent = e.target.value;
-});
-
-// Agent type change
-document.getElementById('new-agent-type').addEventListener('change', (e) => {
-  const modelSelect = document.getElementById('new-agent-model');
-  populateModelSelect(modelSelect, e.target.value);
 });
 
 // Form submit
@@ -163,15 +148,11 @@ document.getElementById('createAgentForm').addEventListener('submit', async (e) 
    - Not enough space for detailed prompts
    - Should be 4 rows
 
-4. **Missing descriptive option labels**
-   - Agent Type options need to explain cost/capability differences
-   - Users need context to make informed choices
-
-5. **Wrong form layout**
+4. **Wrong form layout**
    - Main page: single column (each field full width)
    - Workspace: currently multi-column (inconsistent)
 
-6. **Forgetting to import JavaScript functions**
+5. **Forgetting to import JavaScript functions**
    - `agents.js` already loaded on both pages
    - Reuse existing functions instead of duplicating
 
@@ -184,11 +165,9 @@ document.getElementById('createAgentForm').addEventListener('submit', async (e) 
 - [ ] Labels are styled with `color: var(--text-primary)`
 - [ ] Temperature uses slider with helper labels
 - [ ] Temperature value displays in real-time
-- [ ] Agent Type options have descriptive text
 - [ ] System prompt textarea is 4 rows high
 - [ ] System prompt textarea has dark background
 - [ ] Models populate dynamically from API
-- [ ] Models filter when agent type changes
 - [ ] Form submission validation works
 - [ ] Buttons use `modern-btn` classes
 - [ ] Dark mode works correctly
@@ -277,7 +256,7 @@ document.getElementById('createAgentForm').addEventListener('submit', async (e) 
 POST /api/agents
 Body: {
   name: string (required),
-  type: string (tool-calling|general|research),
+  role: string,
   model: string,
   temperature: number (0-2),
   system_prompt: string
@@ -295,7 +274,6 @@ Returns: {
         {
           value: string,
           label: string,
-          type: string (tool-calling|general|research),
           provider: string
         }
       ]

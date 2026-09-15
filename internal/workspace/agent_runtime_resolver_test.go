@@ -40,7 +40,6 @@ func (s *resolverAgentStoreStub) CreateAgent(name string, cfg *store.CreateAgent
 	}
 	created := &agent.Agent{}
 	if cfg != nil {
-		created.Type = cfg.Type
 		created.Role = cfg.Role
 		created.Settings.SystemPrompt = cfg.SystemPrompt
 	}
@@ -698,7 +697,7 @@ func TestResolveAgentForWorkspace_UsesWorkspaceLocalSnapshotWhenGlobalMissing(t 
 		},
 	}
 
-	localAgent := &agent.Agent{Type: agent.TypeToolCalling}
+	localAgent := &agent.Agent{}
 	localAgent.Settings.Model = "gpt-5-nano"
 
 	agentStore := &resolverAgentStoreStub{agents: map[string]*agent.Agent{}}
@@ -735,9 +734,9 @@ func TestResolveAgentForWorkspace_LocalSnapshotPreferredOverGlobal(t *testing.T)
 		},
 	}
 
-	globalAgent := &agent.Agent{Type: agent.TypeGeneral}
+	globalAgent := &agent.Agent{}
 	globalAgent.Settings.Model = "global-model"
-	localAgent := &agent.Agent{Type: agent.TypeToolCalling}
+	localAgent := &agent.Agent{}
 	localAgent.Settings.Model = "local-model"
 
 	agentStore := &resolverAgentStoreStub{agents: map[string]*agent.Agent{"Manager": globalAgent}}
@@ -945,7 +944,6 @@ func TestAgentRuntimeResolver_UsesUpdatedWorkspaceLocalModel(t *testing.T) {
 	templates := &templateLookupStub{servers: map[string]mcp.ServerConfig{}}
 
 	if err := workspaceStore.SaveWorkspaceAgent(ws.ID, "ReaperDAW Manager", &agent.Agent{
-		Type:     "orchestration",
 		Settings: types.Settings{Model: "google/gemma-4-e4b", Provider: "lmstudio"},
 	}); err != nil {
 		t.Fatalf("seed workspace agent: %v", err)
@@ -964,7 +962,6 @@ func TestAgentRuntimeResolver_UsesUpdatedWorkspaceLocalModel(t *testing.T) {
 
 	// Simulate the PATCH endpoint updating model + provider.
 	if err := workspaceStore.SaveWorkspaceAgent(ws.ID, "ReaperDAW Manager", &agent.Agent{
-		Type:     "orchestration",
 		Settings: types.Settings{Model: "claude-opus-4", Provider: "claude"},
 	}); err != nil {
 		t.Fatalf("update workspace agent: %v", err)

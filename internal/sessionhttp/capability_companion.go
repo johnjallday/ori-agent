@@ -135,7 +135,6 @@ func (p *CapabilityCompanionProvisioner) RemoveCompanionAgent(workspaceID, agent
 // read_file and every mutation tool. Nothing here can widen that.
 func (p *CapabilityCompanionProvisioner) companionConfig(name string) *store.CreateAgentConfig {
 	return &store.CreateAgentConfig{
-		Type:         "general",
 		Role:         types.RoleSpecialist,
 		SystemPrompt: companionSystemPrompt(name),
 	}

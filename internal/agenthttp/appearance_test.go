@@ -28,7 +28,6 @@ func createPlainAgent(t *testing.T, ts *TestServer, name string) {
 	t.Helper()
 	rr := ts.doRequest(t, http.MethodPost, "/api/agents", map[string]any{
 		"name":  name,
-		"type":  "tool-calling",
 		"model": "gpt-4o-mini",
 	})
 	assertStatus(t, rr, http.StatusOK)
@@ -312,7 +311,6 @@ func TestAppearanceChangeLeavesTheRestOfTheDefinitionUntouched(t *testing.T) {
 
 	rr := ts.doRequest(t, http.MethodPost, "/api/agents", map[string]any{
 		"name":          "isolated",
-		"type":          "tool-calling",
 		"model":         "gpt-4o-mini",
 		"system_prompt": "You are precise.",
 		"role":          "analyzer",
@@ -322,7 +320,7 @@ func TestAppearanceChangeLeavesTheRestOfTheDefinitionUntouched(t *testing.T) {
 	assertStatus(t, rr, http.StatusOK)
 
 	before, _ := ts.store.GetAgent("isolated")
-	prompt, model, role, agentType := before.Settings.SystemPrompt, before.Settings.Model, before.Role, before.Type
+	prompt, model, role := before.Settings.SystemPrompt, before.Settings.Model, before.Role
 	description := before.Metadata.Description
 	tags := append([]string{}, before.Metadata.Tags...)
 	entry := assignableCharacter(t)
@@ -343,9 +341,6 @@ func TestAppearanceChangeLeavesTheRestOfTheDefinitionUntouched(t *testing.T) {
 	}
 	if after.Role != role {
 		t.Errorf("role changed: %q -> %q", role, after.Role)
-	}
-	if after.Type != agentType {
-		t.Errorf("type changed: %q -> %q", agentType, after.Type)
 	}
 	if after.Metadata.Description != description {
 		t.Errorf("description changed: %q -> %q", description, after.Metadata.Description)

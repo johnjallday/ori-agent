@@ -4001,7 +4001,6 @@ export class WorkspaceCommandView {
       providers: Array.isArray(this.roleRosterProviders) ? this.roleRosterProviders : [],
       values: {
         name: row.label,
-        type: proposed.type || '',
         model: proposed.model || '',
         provider: proposed.provider || '',
         systemPrompt: proposed.system_prompt || ''
@@ -4059,9 +4058,8 @@ export class WorkspaceCommandView {
       name: String(values.name || '').trim(),
       provider: values.provider || '',
       model: values.model || '',
-      // Sent so an edit to either actually reaches the created agent. They
-      // used to be collected by the form and dropped on the way out.
-      type: values.type || '',
+      // Sent so an edit actually reaches the created agent. It used to be
+      // collected by the form and dropped on the way out.
       system_prompt: values.systemPrompt || ''
     });
     if (outcome && outcome.error) {

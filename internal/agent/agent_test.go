@@ -7,72 +7,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
-func TestGetTypeForModel(t *testing.T) {
-	tests := []struct {
-		model    string
-		expected string
-	}{
-		// Tool-calling models
-		{"gpt-4o-mini", TypeToolCalling},
-		{"claude-3-haiku-20240307", TypeToolCalling},
-		// General models
-		{"gpt-4o", TypeGeneral},
-		{"claude-3-5-sonnet-20241022", TypeGeneral},
-		// Research models
-		{"gpt-5", TypeResearch},
-		{"claude-opus-4-1", TypeResearch},
-		{"gpt-5.3-codex", TypeResearch},
-		{"gpt-5.1-codex-max", TypeResearch},
-		// Codex general-tier models
-		{"gpt-5.1-codex-mini", TypeGeneral},
-		{"codex-mini-latest", TypeGeneral},
-		// Unknown model defaults to tool-calling
-		{"unknown-model", TypeToolCalling},
-		{"", TypeToolCalling},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.model, func(t *testing.T) {
-			result := GetTypeForModel(tt.model)
-			if result != tt.expected {
-				t.Errorf("GetTypeForModel(%q) = %q, want %q", tt.model, result, tt.expected)
-			}
-		})
-	}
-}
-
-func TestIsModelAllowedForType(t *testing.T) {
-	tests := []struct {
-		name      string
-		model     string
-		agentType string
-		expected  bool
-	}{
-		{"tool-calling model for tool-calling type", "gpt-4o-mini", TypeToolCalling, true},
-		{"general model for general type", "gpt-4o", TypeGeneral, true},
-		{"research model for research type", "gpt-5", TypeResearch, true},
-		{"tool-calling model for general type", "gpt-4o-mini", TypeGeneral, true}, // gpt-4o-mini is also in general
-		{"research model for tool-calling type", "gpt-5", TypeToolCalling, false},
-		{"codex research model for research type", "gpt-5.3-codex", TypeResearch, true},
-		{"codex research model for general type", "gpt-5.3-codex", TypeGeneral, false},
-		{"codex mini model for general type", "gpt-5.1-codex-mini", TypeGeneral, true},
-		{"codex mini model for tool-calling type", "gpt-5.1-codex-mini", TypeToolCalling, true},
-		{"unknown model for any type", "unknown-model", TypeToolCalling, false},
-		{"valid model for unknown type", "gpt-4o", "unknown-type", false},
-		{"empty model", "", TypeToolCalling, false},
-		{"empty type", "gpt-4o", "", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := IsModelAllowedForType(tt.model, tt.agentType)
-			if result != tt.expected {
-				t.Errorf("IsModelAllowedForType(%q, %q) = %v, want %v", tt.model, tt.agentType, result, tt.expected)
-			}
-		})
-	}
-}
-
 func TestAgent_InitializeStatistics(t *testing.T) {
 	t.Run("initializes nil statistics", func(t *testing.T) {
 		agent := &Agent{}
@@ -166,35 +100,4 @@ func TestAgent_InitializeEvolution(t *testing.T) {
 			t.Errorf("expected default stage %q, got %q", types.AgentStageSpark, agent.Evolution.Stage)
 		}
 	})
-}
-
-func TestTypeConstants(t *testing.T) {
-	// Verify type constants have expected values
-	if TypeToolCalling != "tool-calling" {
-		t.Errorf("TypeToolCalling = %q, want %q", TypeToolCalling, "tool-calling")
-	}
-	if TypeGeneral != "general" {
-		t.Errorf("TypeGeneral = %q, want %q", TypeGeneral, "general")
-	}
-	if TypeResearch != "research" {
-		t.Errorf("TypeResearch = %q, want %q", TypeResearch, "research")
-	}
-}
-
-func TestTypeModels(t *testing.T) {
-	// Verify each type has models defined
-	types := []string{TypeToolCalling, TypeGeneral, TypeResearch}
-
-	for _, agentType := range types {
-		t.Run(agentType, func(t *testing.T) {
-			models, exists := TypeModels[agentType]
-			if !exists {
-				t.Errorf("TypeModels[%q] should exist", agentType)
-				return
-			}
-			if len(models) == 0 {
-				t.Errorf("TypeModels[%q] should have at least one model", agentType)
-			}
-		})
-	}
 }

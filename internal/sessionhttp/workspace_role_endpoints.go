@@ -37,7 +37,7 @@ func (h *Handler) PutWorkspaceRole(w http.ResponseWriter, r *http.Request) {
 	}
 	// Decoded straight into the shared input so a field added to the wire
 	// format reaches this endpoint too. Re-listing them here is what dropped
-	// the Create form's system prompt and agent type on the way through.
+	// the Create form's system prompt on the way through.
 	var request roleStaffingInput
 	if !orihttp.ParseJSONBody(w, r, &request) {
 		return

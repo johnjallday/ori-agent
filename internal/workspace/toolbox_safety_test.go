@@ -24,7 +24,6 @@ func TestSafety_WorkspaceOperationsNeverTouchTheGlobalAgent(t *testing.T) {
 	ws, lean, wide := newUseFixture(t)
 
 	globalAgent := &agent.Agent{
-		Type:      agent.TypeResearch,
 		Role:      types.RoleGeneral,
 		Settings:  types.Settings{Model: "gpt-5", SystemPrompt: "Be careful."},
 		Metadata:  &types.AgentMetadata{Description: "reusable"},
@@ -63,7 +62,6 @@ func TestSafety_WorkspaceOperationsNeverTouchTheGlobalAgent(t *testing.T) {
 	if globalAgent.Settings.Model != before.Settings.Model ||
 		globalAgent.Settings.SystemPrompt != before.Settings.SystemPrompt ||
 		globalAgent.Role != before.Role ||
-		globalAgent.Type != before.Type ||
 		globalAgent.Metadata.Description != before.Metadata.Description ||
 		globalAgent.Evolution.Level != before.Evolution.Level ||
 		globalAgent.Evolution.Stage != before.Evolution.Stage {

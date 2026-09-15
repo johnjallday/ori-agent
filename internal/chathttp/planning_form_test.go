@@ -37,7 +37,7 @@ func TestChatHandler_WorkspaceManagerTravelRequest_ReturnsPlanningForm(t *testin
 		t.Fatalf("failed to create session workspace: %v", err)
 	}
 
-	h := NewHandler(newPreflightStore("Spain Manager", &agent.Agent{Type: "general"}), nil)
+	h := NewHandler(newPreflightStore("Spain Manager", &agent.Agent{}), nil)
 	h.SetSessionStore(sessionStore)
 	h.workspaceStore = &preflightWorkspaceStore{
 		workspaces: map[string]*workspace.Workspace{

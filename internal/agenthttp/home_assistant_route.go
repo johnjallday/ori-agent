@@ -120,7 +120,6 @@ type HomeAssistantRouteResponse struct {
 	TargetSurface          string                            `json:"target_surface"`
 	Reasons                []string                          `json:"reasons,omitempty"`
 	SuggestedAgentName     string                            `json:"suggested_agent_name"`
-	SuggestedAgentType     string                            `json:"suggested_agent_type"`
 }
 
 var errHomeAssistantPromptRequired = errors.New("prompt is required")
@@ -130,8 +129,6 @@ type homeAssistantIntent struct {
 	Label            string
 	Keywords         []string
 	PreferredPlugins []string
-	PreferredTypes   []string
-	DefaultType      string
 	SuggestedName    string
 	MinScore         int
 }
@@ -177,8 +174,6 @@ var (
 		Label:            "daily utility",
 		Keywords:         []string{"time", "timezone", "clock", "date", "weather", "forecast", "temperature", "air quality", "aqi", "pollution", "pm2.5", "pm10", "convert", "conversion", "calculate", "calculator", "quick fact", "fact", "capital", "define", "definition"},
 		PreferredPlugins: []string{"time", "weather", "calculator", "math", "search", "web"},
-		PreferredTypes:   []string{"general", "tool-calling", "research"},
-		DefaultType:      "general",
 		SuggestedName:    "Utility Assistant",
 		MinScore:         4,
 	}
@@ -187,8 +182,6 @@ var (
 		Label:            "travel planning",
 		Keywords:         []string{"trip", "travel", "itinerary", "vacation", "los angeles", "la", "weekend", "hotel", "flight"},
 		PreferredPlugins: []string{"web", "weather", "maps", "search", "travel"},
-		PreferredTypes:   []string{"research", "general", "tool-calling"},
-		DefaultType:      "research",
 		SuggestedName:    "Travel Planner",
 		MinScore:         4,
 	}
@@ -197,8 +190,6 @@ var (
 		Label:            "email triage",
 		Keywords:         []string{"email", "inbox", "mail", "gmail", "outlook", "unread", "reply", "messages"},
 		PreferredPlugins: []string{"email", "gmail", "outlook", "imap"},
-		PreferredTypes:   []string{"tool-calling", "general"},
-		DefaultType:      "tool-calling",
 		SuggestedName:    "Email Assistant",
 		MinScore:         4,
 	}
@@ -207,8 +198,6 @@ var (
 		Label:            "calendar or schedule",
 		Keywords:         []string{"calendar", "schedule", "meeting", "meetings", "appointment", "appointments", "availability", "free time", "busy", "free", "events"},
 		PreferredPlugins: []string{"calendar", "schedule", "google-calendar"},
-		PreferredTypes:   []string{"tool-calling", "general"},
-		DefaultType:      "tool-calling",
 		SuggestedName:    "Calendar Assistant",
 		MinScore:         4,
 	}
@@ -217,8 +206,6 @@ var (
 		Label:            "workspace creation",
 		Keywords:         []string{"create workspace", "new workspace", "workspace called", "workspace named"},
 		PreferredPlugins: []string{},
-		PreferredTypes:   []string{"general", "tool-calling"},
-		DefaultType:      "general",
 		// Not "Workspace Assistant": that is one of the labels Issue #350 retires,
 		// and this string is offered to the user as a name to create (FR61).
 		SuggestedName: "Workspace Builder",
@@ -229,8 +216,6 @@ var (
 		Label:            "app launch",
 		Keywords:         []string{"open", "launch", "start", "run", "application", "app", "obsidian", "finder"},
 		PreferredPlugins: []string{"shell", "executor", "desktop", "automation", "os-shell", "command"},
-		PreferredTypes:   []string{"tool-calling", "general"},
-		DefaultType:      "tool-calling",
 		SuggestedName:    "Desktop Launcher",
 		MinScore:         4,
 	}
@@ -239,8 +224,6 @@ var (
 		Label:            "general task",
 		Keywords:         []string{},
 		PreferredPlugins: []string{},
-		PreferredTypes:   []string{"general", "tool-calling", "research"},
-		DefaultType:      "general",
 		// Not "Task Assistant": another retired label, and this one surfaces in the
 		// panel's routing summary for every unmatched request (FR61).
 		SuggestedName: "Task Specialist",
@@ -250,23 +233,19 @@ var (
 	// Ori data (activity/summary/recap over tasks, sessions, workspaces, usage).
 	// Answered inline by the home harness.
 	homeAssistantAppIntrospectionIntent = homeAssistantIntent{
-		Key:            "app_introspection",
-		Label:          "app activity",
-		PreferredTypes: []string{"general"},
-		DefaultType:    "general",
-		SuggestedName:  systemAssistantAgentName,
-		MinScore:       3,
+		Key:           "app_introspection",
+		Label:         "app activity",
+		SuggestedName: systemAssistantAgentName,
+		MinScore:      3,
 	}
 	// homeAssistantAppNavigationIntent matches "where/how do I…/open <feature>"
 	// requests about app features and locations. Answered inline + grounded in the
 	// navigation catalog.
 	homeAssistantAppNavigationIntent = homeAssistantIntent{
-		Key:            "app_navigation",
-		Label:          "app navigation",
-		PreferredTypes: []string{"general"},
-		DefaultType:    "general",
-		SuggestedName:  systemAssistantAgentName,
-		MinScore:       3,
+		Key:           "app_navigation",
+		Label:         "app navigation",
+		SuggestedName: systemAssistantAgentName,
+		MinScore:      3,
 	}
 	homeAssistantSpecificIntents = []homeAssistantIntent{
 		homeAssistantUtilityIntent,
@@ -349,8 +328,8 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(ctx context.Context, prompt stri
 			RoutingPolicy:          homeAssistantPolicyAssistantOnly, ContextMode: homeAssistantContextDirect,
 			HandoffPolicy: homeAssistantHandoffAssistant, RequiresCreation: false,
 			RouteMode: routeMode, TargetSurface: targetSurface,
-			SuggestedAgentName: "Personal Assistant", SuggestedAgentType: "personal_assistant",
-			Reasons: []string{reason},
+			SuggestedAgentName: "Personal Assistant",
+			Reasons:            []string{reason},
 		}, nil
 	}
 
@@ -397,7 +376,6 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(ctx context.Context, prompt stri
 		RouteMode:            routeMode,
 		TargetSurface:        targetSurface,
 		SuggestedAgentName:   intent.SuggestedName,
-		SuggestedAgentType:   intent.DefaultType,
 	}
 	if workContext != nil && workContext.ReadyForWork() {
 		resp.PersonalAssistantState = workContext.State
@@ -759,9 +737,6 @@ func scoreAgentForIntent(name, current string, ag *resolvedRouteAgent, intent ho
 		}
 	}
 
-	if containsNormalized(intent.PreferredTypes, ag.Type) {
-		score++
-	}
 	if ag.Status == types.AgentStatusActive {
 		score++
 	}
@@ -812,7 +787,6 @@ func isSignalPromptToken(token string) bool {
 func buildAgentSummary(name string, ag *resolvedRouteAgent) string {
 	parts := []string{
 		normalizeRouteToken(name),
-		normalizeRouteToken(ag.Type),
 		normalizeRouteToken(string(ag.Role)),
 	}
 

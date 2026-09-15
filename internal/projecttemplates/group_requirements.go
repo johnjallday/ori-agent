@@ -290,7 +290,7 @@ func StandaloneTemplate(source Template) (Template, error) {
 		}
 		adaptation := roles[role.ID]
 		result.Agents = append(result.Agents, AgentSpec{
-			Name: role.Label, Role: role.Role, Type: role.Type, SystemPrompt: adaptation.SystemPrompt,
+			Name: role.Label, Role: role.Role, SystemPrompt: adaptation.SystemPrompt,
 			Tools: ToolDefaults{Skills: append([]string(nil), role.Skills...)},
 		})
 	}

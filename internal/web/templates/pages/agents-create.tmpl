@@ -768,31 +768,17 @@
             <div class="form-help">Optional: Help others understand the agent's purpose</div>
           </div>
 
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label required" for="agentType">Agent Type</label>
-              <select id="agentType" class="form-select" name="agent_type" aria-describedby="agentTypeError" required onchange="updateModelOptions()">
-                <option value="tool-calling">Tool Calling</option>
-                <option value="general">General Purpose</option>
-                <option value="research">Research</option>
-                <option value="orchestration">Orchestration</option>
-              </select>
-              <div class="form-help">Defines the agent's interaction style and available models</div>
-              <div id="agentTypeError" class="field-error" aria-live="polite"></div>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label required" for="agentRole">Role</label>
-              <select id="agentRole" class="form-select" name="agent_role" aria-describedby="agentRoleError" required>
-                <option value="general">General</option>
-                <option value="coding">Coding</option>
-                <option value="research">Research</option>
-                <option value="creative">Creative</option>
-                <option value="analysis">Analysis</option>
-              </select>
-              <div class="form-help">The agent's primary role or specialty</div>
-              <div id="agentRoleError" class="field-error" aria-live="polite"></div>
-            </div>
+          <div class="form-group">
+            <label class="form-label required" for="agentRole">Role</label>
+            <select id="agentRole" class="form-select" name="agent_role" aria-describedby="agentRoleError" required>
+              <option value="general">General</option>
+              <option value="coding">Coding</option>
+              <option value="research">Research</option>
+              <option value="creative">Creative</option>
+              <option value="analysis">Analysis</option>
+            </select>
+            <div class="form-help">The agent's primary role or specialty</div>
+            <div id="agentRoleError" class="field-error" aria-live="polite"></div>
           </div>
         </div>
 

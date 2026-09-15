@@ -222,7 +222,6 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 
 		response := map[string]any{
 			"name":              agentName,
-			"type":              agent.Type,
 			"role":              agent.Role,
 			"capabilities":      agent.Capabilities,
 			"status":            agent.Status,
@@ -256,10 +255,9 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 	// longer used to hide workspace entry agents (PRD FR1/FR2).
 	memberships := workspace.AgentWorkspaceMemberships(h.workspaceStore)
 
-	// Build agent details list with name and type
+	// Build agent details list
 	type AgentInfo struct {
 		Name           string                   `json:"name"`
-		Type           string                   `json:"type"`
 		Source         string                   `json:"source"`
 		Scope          string                   `json:"scope,omitempty"`
 		WorkspaceID    string                   `json:"workspace_id,omitempty"`
@@ -293,7 +291,6 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 		if ok && agent != nil {
 			agentInfos = append(agentInfos, annotate(AgentInfo{
 				Name:       name,
-				Type:       agent.Type,
 				Source:     "user",
 				Status:     agent.Status,
 				Evolution:  cloneAgentEvolution(agent),
@@ -303,7 +300,6 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 			// Fallback for agents that couldn't be loaded
 			agentInfos = append(agentInfos, annotate(AgentInfo{
 				Name:       name,
-				Type:       "tool-calling", // default
 				Source:     "user",
 				Appearance: appearanceForAgent(nil),
 			}))
@@ -318,7 +314,6 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 			}
 			agentInfos = append(agentInfos, AgentInfo{
 				Name:       cliAgentDisplayName(info.Backend),
-				Type:       "research",
 				Source:     "cli",
 				Status:     getCLIAgentOperationalStatus(info.Backend),
 				Appearance: appearanceForAgent(nil),
@@ -335,7 +330,6 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name            string                     `json:"name"`
-		Type            string                     `json:"type,omitempty"`
 		Role            string                     `json:"role,omitempty"`
 		Model           string                     `json:"model,omitempty"`
 		Temperature     float64                    `json:"temperature,omitempty"`
@@ -366,7 +360,7 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	logger.Debug("CreateAgent request", logger.Fields{
-		"name": req.Name, "type": req.Type, "model": req.Model, "temperature": req.Temperature,
+		"name": req.Name, "model": req.Model, "temperature": req.Temperature,
 		"catalog_role": req.CatalogRole,
 	})
 
@@ -404,7 +398,6 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 
 	// Build config from request
 	config := &store.CreateAgentConfig{
-		Type:            req.Type,
 		Role:            types.AgentRole(req.Role),
 		Model:           req.Model,
 		Temperature:     req.Temperature,
@@ -449,7 +442,6 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 	// Log activity
 	if h.ActivityLogger != nil {
 		details := map[string]any{
-			"type":        req.Type,
 			"model":       req.Model,
 			"description": req.Description,
 		}
@@ -494,7 +486,6 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		// Core fields
 		Name            *string  `json:"name,omitempty"`
-		Type            *string  `json:"type,omitempty"`
 		Role            *string  `json:"role,omitempty"`
 		Model           *string  `json:"model,omitempty"`
 		Temperature     *float64 `json:"temperature,omitempty"`
@@ -561,7 +552,7 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	// workspace the agent is attached to and gets the same confirmation as a
 	// prompt or model change (FR-42).
 	touchesSharedDefinition := req.SystemPrompt != nil || req.Model != nil || req.LLMProvider != nil ||
-		req.Type != nil || req.Role != nil || req.Tags != nil ||
+		req.Role != nil || req.Tags != nil ||
 		req.RoutingProfile != nil || req.Temperature != nil || req.ReasoningEffort != nil ||
 		req.MaxTokens != nil || req.AllowWebSearch != nil || !req.Appearance.isEmpty()
 	confirmed := req.ConfirmSharedEdit != nil && *req.ConfirmSharedEdit
@@ -581,9 +572,6 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update core fields if provided (partial update)
-	if req.Type != nil {
-		agent.Type = *req.Type
-	}
 	if req.Role != nil {
 		agent.Role = types.AgentRole(*req.Role)
 	}
@@ -736,9 +724,6 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		updatedFields := []string{}
 		if req.Name != nil {
 			updatedFields = append(updatedFields, "name")
-		}
-		if req.Type != nil {
-			updatedFields = append(updatedFields, "type")
 		}
 		if req.Role != nil {
 			updatedFields = append(updatedFields, "role")
@@ -976,7 +961,6 @@ func (h *Handler) getCLIAgentDetail(name string) (map[string]any, bool) {
 	}
 	detail := map[string]any{
 		"name":               cliAgentDisplayName(backend),
-		"type":               "research",
 		"role":               types.RoleCLIAgent,
 		"capabilities":       []string{"file_operations", "code_generation", "code_analysis"},
 		"model":              defaultModel,

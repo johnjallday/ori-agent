@@ -607,8 +607,7 @@
       seen.add(key);
       result.push({
         name,
-        description: String(agent?.description || agent?.metadata?.description || '').trim(),
-        type: String(agent?.type || '').trim()
+        description: String(agent?.description || agent?.metadata?.description || '').trim()
       });
     });
 
@@ -644,7 +643,6 @@
         role: 'lead',
         selected: true,
         locked: true,
-        type: primaryExisting.type || 'general',
         autoDescription: buildPrimaryAgentDescription(input)
       });
     } else {
@@ -656,7 +654,7 @@
         role: 'lead',
         selected: true,
         locked: true,
-        type: 'orchestration',
+        agentRole: 'orchestrator',
         autoDescription: buildPrimaryAgentDescription(input)
       });
     }
@@ -675,7 +673,6 @@
             role: 'specialist',
             selected: true,
             locked: false,
-            type: agent.type || 'tool-calling',
             focusSystem: system,
             autoDescription: buildSpecialistDescription(input, system)
           };
@@ -705,7 +702,6 @@
         role: 'specialist',
         selected: true,
         locked: false,
-        type: 'tool-calling',
         focusSystem: system,
         autoDescription: buildSpecialistDescription(input, system)
       });
@@ -1320,31 +1316,25 @@
     }
   }
 
-  async function maybeAutoConfigureAgent(description, fallbackType) {
+  async function maybeAutoConfigureAgent(description, role) {
+    const fallback = {
+      provider: '',
+      model: '',
+      temperature: 0.4,
+      system_prompt: ''
+    };
     const available = await checkAutoConfigAvailability();
     if (!available) {
-      return {
-        agent_type: fallbackType || 'general',
-        provider: '',
-        model: '',
-        temperature: 0.4,
-        system_prompt: ''
-      };
+      return fallback;
     }
 
     try {
       return await apiRequest('/api/agents/auto-config', {
         method: 'POST',
-        body: { description }
+        body: { description, role: role || '' }
       });
     } catch (_error) {
-      return {
-        agent_type: fallbackType || 'general',
-        provider: '',
-        model: '',
-        temperature: 0.4,
-        system_prompt: ''
-      };
+      return fallback;
     }
   }
 
@@ -1355,18 +1345,19 @@
       return agentPlan?.name || '';
     }
 
+    const agentRole = String(agentPlan.agentRole || '').trim();
     const requestConfig = await maybeAutoConfigureAgent(
       agentPlan.autoDescription || agentPlan.summary || '',
-      agentPlan.type
+      agentRole
     );
-    const plannedType = String(agentPlan.type || '').trim();
-    const type = requestConfig?.agent_type || plannedType || 'general';
     const payload = {
       name: agentPlan.name,
-      type,
       description: agentPlan.summary || agentPlan.autoDescription || '',
       allow_web_search: true
     };
+    if (agentRole) {
+      payload.role = agentRole;
+    }
 
     // Entry agents always inherit the system model so they match the
     // user's configured orchestration model rather than whatever the

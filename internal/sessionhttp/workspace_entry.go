@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -243,7 +242,6 @@ func (h *Handler) autoCreateManagerEntryAgent(ws *session.Workspace) string {
 		strings.TrimSpace(ws.Name),
 	)
 	if err := h.agentStore.CreateAgent(name, &store.CreateAgentConfig{
-		Type:         agent.TypeGeneral,
 		Role:         types.RoleOrchestrator,
 		SystemPrompt: systemPrompt,
 	}); err != nil {

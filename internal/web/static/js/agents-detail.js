@@ -22,10 +22,6 @@ function supportsCodexReasoning(providerName, modelName) {
   return provider === 'codex' || model.includes('codex');
 }
 
-function formatAgentTypeLabel(typeValue) {
-  return capitalize(typeValue || 'tool-calling');
-}
-
 function formatAgentRoleLabel(roleValue) {
   return capitalize(roleValue || 'general');
 }
@@ -442,14 +438,12 @@ async function loadGlobalMCPServers() {
 function populateEditModelOptions() {
   const modelSelect = document.getElementById('editModel');
   const providerFilter = document.getElementById('editProviderFilter');
-  const typeSelect = document.getElementById('editType');
 
   if (!modelSelect || availableProviders.length === 0) {
     return;
   }
 
   const selectedProvider = providerFilter ? providerFilter.value : '';
-  const selectedAgentType = typeSelect ? typeSelect.value : currentAgent?.type || 'tool-calling';
 
   // Store current value to re-select it after populating
   const currentModelValue = currentAgent?.model || '';
@@ -485,18 +479,10 @@ function populateEditModelOptions() {
     let hasMatchingModels = false;
 
     provider.models.forEach(model => {
-      // Filter by agent type if the model has a type specified
-      if (model.type && model.type !== selectedAgentType) {
-        return;
-      }
-
       const option = document.createElement('option');
       option.value = model.value;
       option.textContent = model.label;
       option.setAttribute('data-provider', providerKey);
-      if (model.type) {
-        option.setAttribute('data-type', model.type);
-      }
       providerGroup.appendChild(option);
       hasMatchingModels = true;
     });
@@ -515,13 +501,24 @@ function populateEditModelOptions() {
     modelSelect.appendChild(option);
   }
 
-  // Try to select the current model
+  // Select the current model, keeping it selectable even when its provider no
+  // longer lists it (only in the unfiltered view, so a filter stays honest).
   if (currentModelValue) {
+    let found = false;
     for (let i = 0; i < modelSelect.options.length; i++) {
       if (modelSelect.options[i].value === currentModelValue) {
         modelSelect.selectedIndex = i;
+        found = true;
         break;
       }
+    }
+    if (!found && !selectedProvider) {
+      const current = document.createElement('option');
+      current.value = currentModelValue;
+      current.textContent = `${currentModelValue} (current)`;
+      current.setAttribute('data-provider', currentAgent?.provider || '');
+      modelSelect.insertBefore(current, modelSelect.firstChild);
+      modelSelect.value = currentModelValue;
     }
   }
 
@@ -706,9 +703,6 @@ function renderAgentDetails() {
   const descEl = document.getElementById('agentDescription');
   if (descEl) descEl.textContent = description;
 
-  const typeEl = document.getElementById('agentType');
-  if (typeEl) typeEl.textContent = capitalize(currentAgent.type || 'tool-calling');
-
   const modelEl = document.getElementById('agentModel');
   if (modelEl) modelEl.textContent = currentAgent.model || 'Not set';
 
@@ -756,13 +750,11 @@ function renderAgentDetails() {
   if (configModel) configModel.textContent = currentAgent.model || 'Not set';
   const configTemp = document.getElementById('configTemp');
   if (configTemp) configTemp.textContent = currentAgent.temperature ?? 1.0;
-  const configType = document.getElementById('configType');
-  if (configType) configType.textContent = formatAgentTypeLabel(currentAgent.type);
   const configRole = document.getElementById('configRole');
   if (configRole)
     configRole.textContent = currentAgent.presentation_role
       ? currentAgent.presentation_role
-      : formatAgentRoleLabel(currentAgent.role, currentAgent.type);
+      : formatAgentRoleLabel(currentAgent.role);
 
   const systemPrompt = currentAgent.system_prompt || 'Default system prompt';
   const promptEl = document.getElementById('configPrompt');
@@ -1200,12 +1192,9 @@ function populateConfigForm() {
   const providerFilter = document.getElementById('editProviderFilter');
   const tempInput = document.getElementById('editTemperature');
   const maxTokensInput = document.getElementById('editMaxTokens');
-  const typeSelect = document.getElementById('editType');
   const roleSelect = document.getElementById('editRole');
   const reasoningSelect = document.getElementById('editReasoningEffort');
 
-  // Set type and role first as they affect model filtering
-  if (typeSelect) typeSelect.value = currentAgent.type || 'tool-calling';
   if (roleSelect) roleSelect.value = currentAgent.role || 'general';
   if (reasoningSelect) reasoningSelect.value = currentAgent.reasoning_effort || 'medium';
   if (tempInput) tempInput.value = currentAgent.temperature ?? '';
@@ -1237,7 +1226,6 @@ async function saveConfigChanges() {
   const model = modelSelect?.value || '';
   const tempRaw = document.getElementById('editTemperature')?.value;
   const maxTokensRaw = document.getElementById('editMaxTokens')?.value;
-  const type = document.getElementById('editType')?.value || 'tool-calling';
   const role = document.getElementById('editRole')?.value || 'general';
   const reasoningEffort = document.getElementById('editReasoningEffort')?.value || 'medium';
 
@@ -1252,7 +1240,6 @@ async function saveConfigChanges() {
 
   const payload = {
     model,
-    type,
     role
   };
 

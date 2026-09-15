@@ -564,7 +564,7 @@ func (h *Handler) HireAssistantProgram(w http.ResponseWriter, r *http.Request) {
 	}
 	for index, role := range state.Declaration.Roles {
 		spec := projecttemplates.AgentSpec{
-			Name: names[index], Role: role.Role, Type: role.Type, SystemPrompt: role.SystemPrompt,
+			Name: names[index], Role: role.Role, SystemPrompt: role.SystemPrompt,
 			Provider: request.Provider, Model: request.Model,
 			Tools: projecttemplates.ToolDefaults{Skills: append([]string(nil), role.Skills...)},
 		}

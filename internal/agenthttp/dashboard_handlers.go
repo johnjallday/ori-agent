@@ -95,7 +95,6 @@ func (h *DashboardHandler) SetCodexSyncProvider(provider func() any) {
 // AgentListItem represents an agent in the dashboard list view
 type AgentListItem struct {
 	Name           string                   `json:"name"`
-	Type           string                   `json:"type"`
 	Role           types.AgentRole          `json:"role"`
 	Source         string                   `json:"source"`
 	Scope          string                   `json:"scope,omitempty"`
@@ -119,7 +118,6 @@ type AgentListItem struct {
 // AgentDetailResponse represents detailed agent information
 type AgentDetailResponse struct {
 	Name            string                 `json:"name"`
-	Type            string                 `json:"type"`
 	Role            types.AgentRole        `json:"role"`
 	Capabilities    []string               `json:"capabilities"`
 	Status          types.AgentStatus      `json:"status"`
@@ -203,7 +201,6 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 
 		item := AgentListItem{
 			Name:           name,
-			Type:           ag.Type,
 			Role:           ag.Role,
 			Source:         "user",
 			Capabilities:   append([]string{}, ag.Capabilities...),
@@ -250,7 +247,6 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 			}
 			agents = append(agents, AgentListItem{
 				Name:         cliAgentDisplayName(info.Backend),
-				Type:         "research",
 				Role:         types.RoleCLIAgent,
 				Source:       "cli",
 				Capabilities: []string{"file_operations", "code_generation", "code_analysis"},
@@ -335,7 +331,6 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 					}
 					response := AgentDetailResponse{
 						Name:         cliAgentDisplayName(backend),
-						Type:         "research",
 						Role:         types.RoleCLIAgent,
 						Capabilities: []string{"file_operations", "code_generation", "code_analysis"},
 						Status:       getCLIAgentOperationalStatus(backend),
@@ -375,7 +370,6 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 	// Build response
 	response := AgentDetailResponse{
 		Name:            agentName,
-		Type:            ag.Type,
 		Role:            ag.Role,
 		Capabilities:    ag.Capabilities,
 		Status:          ag.Status,

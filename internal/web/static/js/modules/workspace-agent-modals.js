@@ -34,9 +34,9 @@ async function loadWorkspaceProviders() {
 }
 
 /**
- * Populate model select dropdown based on agent type
+ * Populate the model select dropdown with every available model
  */
-function populateWorkspaceModelSelect(modelSelect, selectedType = 'tool-calling') {
+function populateWorkspaceModelSelect(modelSelect) {
   if (!modelSelect || workspaceAvailableProviders.length === 0) {
     console.warn('Cannot populate models: modelSelect or providers missing');
     return;
@@ -52,26 +52,15 @@ function populateWorkspaceModelSelect(modelSelect, selectedType = 'tool-calling'
       const option = document.createElement('option');
       option.value = model.value;
       option.textContent = model.label;
-      option.setAttribute('data-type', model.type);
       option.setAttribute('data-provider', model.provider);
-
-      if (model.type !== selectedType) {
-        option.style.display = 'none';
-        option.disabled = true;
-      }
-
       providerGroup.appendChild(option);
     });
 
     modelSelect.appendChild(providerGroup);
   });
 
-  // Select first available option
-  for (let i = 0; i < modelSelect.options.length; i++) {
-    if (!modelSelect.options[i].disabled) {
-      modelSelect.selectedIndex = i;
-      break;
-    }
+  if (modelSelect.options.length > 0) {
+    modelSelect.selectedIndex = 0;
   }
 }
 
@@ -92,9 +81,8 @@ async function openManageAgentsModal() {
   try {
     await loadWorkspaceProviders();
     const modelSelect = document.getElementById('workspace-new-agent-model');
-    const typeSelect = document.getElementById('workspace-new-agent-type');
-    if (modelSelect && typeSelect) {
-      populateWorkspaceModelSelect(modelSelect, typeSelect.value);
+    if (modelSelect) {
+      populateWorkspaceModelSelect(modelSelect);
     }
   } catch (error) {
     console.error('Error loading providers:', error);
@@ -142,7 +130,6 @@ function renderWorkspaceAgentsListModal() {
                 <div class="status-indicator status-online" style="width: 8px; height: 8px; border-radius: 50%; background: var(--success-color);"></div>
                 <div>
                     <div style="color: var(--text-primary); font-weight: 500;">${escapeHtml(agent.name)}</div>
-                    <div class="text-muted small">${escapeHtml(agent.type || 'tool-calling')}</div>
                 </div>
             </div>
             <div class="d-flex gap-2">
@@ -406,14 +393,6 @@ async function generateAutoConfig() {
  * Apply auto-generated config to form fields
  */
 function applyAutoConfig(config) {
-  // Apply agent type
-  const typeSelect = document.getElementById('workspace-new-agent-type');
-  if (typeSelect && config.agent_type) {
-    typeSelect.value = config.agent_type;
-    // Trigger change to update model list
-    typeSelect.dispatchEvent(new Event('change'));
-  }
-
   // Apply model (need to wait a moment for model list to repopulate)
   setTimeout(() => {
     const modelSelect = document.getElementById('workspace-new-agent-model');
@@ -453,7 +432,6 @@ function applyAutoConfig(config) {
  */
 function highlightAutoConfiguredFields() {
   const fields = [
-    'workspace-new-agent-type',
     'workspace-new-agent-model',
     'workspace-new-agent-temperature',
     'workspace-new-agent-prompt'
@@ -501,17 +479,6 @@ function initializeAgentModalListeners() {
     generateBtn.addEventListener('click', generateAutoConfig);
   }
 
-  // Update model dropdown when agent type changes
-  const typeSelect = document.getElementById('workspace-new-agent-type');
-  if (typeSelect) {
-    typeSelect.addEventListener('change', function (e) {
-      const modelSelect = document.getElementById('workspace-new-agent-model');
-      if (modelSelect && workspaceAvailableProviders.length > 0) {
-        populateWorkspaceModelSelect(modelSelect, e.target.value);
-      }
-    });
-  }
-
   // Update temperature value display when slider changes
   const tempSlider = document.getElementById('workspace-new-agent-temperature');
   if (tempSlider) {
@@ -530,7 +497,6 @@ function initializeAgentModalListeners() {
       e.preventDefault();
 
       const name = document.getElementById('workspace-new-agent-name').value.trim();
-      const type = document.getElementById('workspace-new-agent-type').value;
       const modelSelectEl = document.getElementById('workspace-new-agent-model');
       const model = modelSelectEl?.value?.trim() || '';
       const temperature = document.getElementById('workspace-new-agent-temperature').value;
@@ -549,7 +515,7 @@ function initializeAgentModalListeners() {
       }
 
       try {
-        const requestBody = { name, type };
+        const requestBody = { name };
         requestBody.allow_web_search = allowWebSearchInput
           ? Boolean(allowWebSearchInput.checked)
           : true;

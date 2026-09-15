@@ -1,125 +1,12 @@
 package agent
 
 import (
-	"strings"
-
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/openai/openai-go/v3"
 )
 
-// Type constants define agent capability tiers
-const (
-	TypeToolCalling = "tool-calling" // Cost-optimized for tool calls (DEFAULT)
-	TypeGeneral     = "general"      // General purpose
-	TypeResearch    = "research"     // Complex thinking
-)
-
-// TypeModels defines model restrictions by agent type
-// Models are listed from cheapest/fastest to most expensive/capable
-var TypeModels = map[string][]string{
-	TypeToolCalling: {
-		"gpt-5-nano",
-		"gpt-4o-mini",
-		"claude-3-haiku-20240307",
-	},
-	TypeGeneral: {
-		"gpt-5-mini",
-		"gpt-4o-mini",
-		"gpt-4o",
-		"gpt-5-codex-mini",
-		"gpt-5.1-codex-mini",
-		"codex-mini-latest",
-		"claude-3-5-sonnet-20241022",
-		"claude-3-sonnet-20240229",
-	},
-	TypeResearch: {
-		"gpt-5",
-		"gpt-4o",
-		"gpt-5-codex",
-		"gpt-5.1-codex",
-		"gpt-5.2-codex",
-		"gpt-5.3-codex",
-		"gpt-5.1-codex-max",
-		"claude-3-5-sonnet-20241022",
-		"claude-sonnet-4-5",
-		"claude-opus-4-1",
-	},
-}
-
-// GetTypeForModel returns the agent type that supports the given model.
-// When a model appears in multiple types, priority is: tool-calling > general > research
-// (returns the most cost-efficient type that supports the model)
-func GetTypeForModel(model string) string {
-	if inferredType, ok := inferCodexModelType(model); ok {
-		return inferredType
-	}
-
-	// Check in priority order: tool-calling (cheapest) → general → research (most capable)
-	typePriority := []string{TypeToolCalling, TypeGeneral, TypeResearch}
-	for _, agentType := range typePriority {
-		models := TypeModels[agentType]
-		for _, m := range models {
-			if m == model {
-				return agentType
-			}
-		}
-	}
-	// Default to tool-calling if model not found
-	return TypeToolCalling
-}
-
-// IsModelAllowedForType checks if a model is allowed for the given agent type
-func IsModelAllowedForType(model, agentType string) bool {
-	if allowed, handled := codexModelAllowedForType(model, agentType); handled {
-		return allowed
-	}
-
-	models, exists := TypeModels[agentType]
-	if !exists {
-		return false
-	}
-	for _, m := range models {
-		if m == model {
-			return true
-		}
-	}
-	return false
-}
-
-func codexModelAllowedForType(model, agentType string) (allowed bool, handled bool) {
-	normalized := strings.ToLower(strings.TrimSpace(model))
-	if normalized == "" || !strings.Contains(normalized, "codex") {
-		return false, false
-	}
-
-	switch {
-	case strings.Contains(normalized, "nano"):
-		return agentType == TypeToolCalling, true
-	case strings.Contains(normalized, "mini"):
-		return agentType == TypeToolCalling || agentType == TypeGeneral, true
-	default:
-		return agentType == TypeResearch, true
-	}
-}
-
-func inferCodexModelType(model string) (string, bool) {
-	normalized := strings.ToLower(strings.TrimSpace(model))
-	if normalized == "" || !strings.Contains(normalized, "codex") {
-		return "", false
-	}
-
-	if strings.Contains(normalized, "nano") {
-		return TypeToolCalling, true
-	}
-	if strings.Contains(normalized, "mini") {
-		return TypeGeneral, true
-	}
-	return TypeResearch, true
-}
-
 // Agent represents a configured AI agent with its settings and state
 type Agent struct {
-	Type         string                                   `json:"type"`         // Agent type (tool-calling, general, research)
 	Role         types.AgentRole                          `json:"role"`         // Agent role for orchestration (orchestrator, researcher, analyzer, etc.)
 	Capabilities []string                                 `json:"capabilities"` // Agent capabilities (web_search, code_analysis, etc.)
 	Settings     types.Settings                           `json:"Settings"`

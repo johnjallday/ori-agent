@@ -23,7 +23,6 @@ function ensureStandaloneAgentCreateForm() {
       providers: availableProviders,
       values: {
         name: '',
-        type: 'tool-calling',
         model: '',
         provider: '',
         reasoningEffort: 'medium',
@@ -68,7 +67,7 @@ const agentCreationCapabilityState = {
 function createDefaultAgentCreationFlowState() {
   return {
     seedName: '',
-    seedType: '',
+    seedRole: '',
     autoDescription: '',
     preferAutoConfig: false,
     workspaceId: '',
@@ -211,7 +210,7 @@ async function loadAvailableProviders() {
 }
 
 // Populate model select with options from available providers
-function populateModelSelect(modelSelect, selectedType = 'tool-calling') {
+function populateModelSelect(modelSelect) {
   if (!modelSelect || availableProviders.length === 0) return;
 
   const sharedForm = ensureStandaloneAgentCreateForm();
@@ -221,17 +220,8 @@ function populateModelSelect(modelSelect, selectedType = 'tool-calling') {
       model: modelSelect.value,
       provider: selectedOption?.getAttribute('data-provider') || ''
     });
-    sharedForm.filterModels(selectedType);
     return;
   }
-
-  // For orchestration agents, the user's configured system model is the right
-  // default even when it wasn't categorized as "orchestration" (e.g. a local
-  // Ollama model that defaults to tool-calling). Surface it in the dropdown so
-  // it remains selectable.
-  const systemPref = cachedSystemModelPreference || {};
-  const systemProviderName = normalizeProviderName(systemPref.provider);
-  const systemModelName = String(systemPref.model || '').trim();
 
   // Clear existing options
   modelSelect.innerHTML = '';
@@ -245,34 +235,15 @@ function populateModelSelect(modelSelect, selectedType = 'tool-calling') {
       const option = document.createElement('option');
       option.value = model.value;
       option.textContent = model.label;
-      option.setAttribute('data-type', model.type);
       option.setAttribute('data-provider', model.provider);
-
-      const isSystemModel =
-        selectedType === 'orchestration' &&
-        systemModelName &&
-        model.value === systemModelName &&
-        normalizeProviderName(model.provider) === systemProviderName;
-
-      // Only show models matching the selected type (plus the system model
-      // when building the orchestration view).
-      if (model.type !== selectedType && !isSystemModel) {
-        option.style.display = 'none';
-        option.disabled = true;
-      }
-
       providerGroup.appendChild(option);
     });
 
     modelSelect.appendChild(providerGroup);
   });
 
-  // Select first available option
-  for (let i = 0; i < modelSelect.options.length; i++) {
-    if (!modelSelect.options[i].disabled) {
-      modelSelect.selectedIndex = i;
-      break;
-    }
+  if (modelSelect.options.length > 0) {
+    modelSelect.selectedIndex = 0;
   }
 }
 
@@ -283,7 +254,7 @@ async function initializeModels() {
   // Populate the model select in the create agent modal
   const agentModelSelect = document.getElementById('agentModel');
   if (agentModelSelect) {
-    populateModelSelect(agentModelSelect, 'tool-calling');
+    populateModelSelect(agentModelSelect);
     updateAgentReasoningVisibility();
   }
 }
@@ -344,7 +315,6 @@ function showAddAgentModal(options = {}) {
   }
   const modal = new bootstrap.Modal(modalElement);
   const agentNameInput = document.getElementById('agentName');
-  const agentTypeInput = document.getElementById('agentType');
   const agentSystemPromptInput = document.getElementById('agentSystemPrompt');
   const agentModelInput = document.getElementById('agentModel');
   const agentTemperatureInput = document.getElementById('agentTemperature');
@@ -355,15 +325,12 @@ function showAddAgentModal(options = {}) {
   if (agentNameInput) {
     agentNameInput.value = '';
   }
-  if (agentTypeInput) {
-    agentTypeInput.value = 'tool-calling'; // Default to cheapest tier
-  }
   if (agentSystemPromptInput) {
     agentSystemPromptInput.value = '';
   }
   if (agentModelInput) {
-    // Re-filter models based on default type (models already loaded on page init)
-    populateModelSelect(agentModelInput, 'tool-calling');
+    // Models are already loaded on page init
+    populateModelSelect(agentModelInput);
   }
   setAgentModelRecommendationMessage('');
   const agentReasoningInput = document.getElementById('agentReasoning');
@@ -397,14 +364,6 @@ function showAddAgentModal(options = {}) {
   }, 500);
 }
 
-// Filter models based on agent type
-function filterModelsByType(agentType, modelSelect) {
-  if (!modelSelect) return;
-
-  // Repopulate the select with filtered models
-  populateModelSelect(modelSelect, agentType);
-}
-
 function normalizeAgentCreationFlowSelections(values) {
   const source = Array.isArray(values) ? values : [values];
   const seen = new Set();
@@ -424,7 +383,9 @@ function normalizeAgentCreationFlowSelections(values) {
 function normalizeAgentCreationFlowOptions(options = {}) {
   return {
     seedName: String(options?.seedName || '').trim(),
-    seedType: String(options?.seedType || '').trim(),
+    seedRole: String(options?.seedRole || '')
+      .trim()
+      .toLowerCase(),
     seedModel: String(options?.seedModel || '').trim(),
     seedProvider: String(options?.seedProvider || '').trim(),
     seedReasoningEffort: String(options?.seedReasoningEffort || '').trim(),
@@ -448,7 +409,6 @@ async function applyPendingAgentCreationFlowToModal() {
   if (!options) return;
 
   const agentNameInput = document.getElementById('agentName');
-  const agentTypeInput = document.getElementById('agentType');
   const agentModelInput = document.getElementById('agentModel');
   const agentReasoningInput = document.getElementById('agentReasoning');
   const descriptionTextarea = document.getElementById('baseAutoConfigDescription');
@@ -459,17 +419,9 @@ async function applyPendingAgentCreationFlowToModal() {
     agentNameInput.value = options.seedName;
   }
 
-  // For orchestration agents, ensure the system model preference is cached
-  // before populateModelSelect runs — otherwise the dropdown would drop the
-  // configured model if its category doesn't match 'orchestration'.
   let systemPref = null;
-  if (options.seedType === 'orchestration') {
+  if (options.seedRole === 'orchestrator') {
     systemPref = await loadSystemModelPreference();
-  }
-
-  if (options.seedType && agentTypeInput) {
-    agentTypeInput.value = options.seedType;
-    agentTypeInput.dispatchEvent(new Event('change'));
   }
 
   if (options.seedModel && agentModelInput) {
@@ -478,14 +430,14 @@ async function applyPendingAgentCreationFlowToModal() {
       agentReasoningInput.value = options.seedReasoningEffort || 'medium';
     }
   } else if (
-    options.seedType === 'orchestration' &&
+    options.seedRole === 'orchestrator' &&
     agentModelInput &&
     systemPref &&
     systemPref.configured &&
     systemPref.model
   ) {
     // No explicit seed model — the user's configured system model is the
-    // right default for orchestration, matching the backend auto-config
+    // right default for an orchestrator, matching the backend auto-config
     // override in validateAndSanitizeConfig.
     selectModelOption(agentModelInput, systemPref.provider, systemPref.model);
     if (agentReasoningInput && supportsCodexReasoning(systemPref.provider, systemPref.model)) {
@@ -521,16 +473,6 @@ function normalizeAgentCapabilityName(value) {
   return String(value || '')
     .trim()
     .toLowerCase();
-}
-
-function deriveAgentRoleForType(agentType) {
-  const normalized = String(agentType || '')
-    .trim()
-    .toLowerCase();
-  if (normalized === 'orchestration') {
-    return 'orchestrator';
-  }
-  return '';
 }
 
 function getAgentCreationCapabilityElements() {
@@ -1349,7 +1291,6 @@ async function createNewAgent() {
   const sharedForm = ensureStandaloneAgentCreateForm();
   const agentNameInput = document.getElementById('agentName');
   const agentSystemPromptInput = document.getElementById('agentSystemPrompt');
-  const agentModelInput = document.getElementById('agentModel');
   const agentReasoningInput = document.getElementById('agentReasoning');
   const agentTemperatureInput = document.getElementById('agentTemperature');
   const agentAllowWebSearchInput = document.getElementById('agentAllowWebSearch');
@@ -1381,13 +1322,10 @@ async function createNewAgent() {
       ? Boolean(agentAllowWebSearchInput.checked)
       : true;
 
-    // Add agent type if provided
-    if (formValues.type) {
-      requestBody.type = formValues.type;
-      const inferredRole = deriveAgentRoleForType(formValues.type);
-      if (inferredRole) {
-        requestBody.role = inferredRole;
-      }
+    // A flow that opened this modal for a specific role (e.g. a workspace
+    // manager hire) creates the agent in that role.
+    if (pendingAgentCreationFlow.seedRole) {
+      requestBody.role = pendingAgentCreationFlow.seedRole;
     }
 
     // Add model if provided
@@ -1454,15 +1392,6 @@ async function createNewAgent() {
     if (agentSystemPromptInput) {
       agentSystemPromptInput.value = '';
     }
-    if (agentModelInput) {
-      // Select first available tool-calling model
-      const firstToolCallingOption = agentModelInput.querySelector(
-        'option[data-type="tool-calling"]:not([disabled])'
-      );
-      if (firstToolCallingOption) {
-        agentModelInput.value = firstToolCallingOption.value;
-      }
-    }
     if (agentTemperatureInput) {
       agentTemperatureInput.value = '1.0';
     }
@@ -1505,7 +1434,7 @@ async function createNewAgent() {
     }
 
     // Emit event for other modules
-    EventBus.emit('agent:created', { name: agentName, type: requestBody.type });
+    EventBus.emit('agent:created', { name: agentName, role: requestBody.role });
 
     // Refresh the agent list
     agentsLog.debug('Refreshing agent list...');
@@ -1653,7 +1582,7 @@ function renderAgents() {
 
     if (collapseElement) {
       collapseElement.addEventListener('shown.bs.collapse', async function () {
-        await loadAgentSettings(agentName, getAgentType(agent), accordionId);
+        await loadAgentSettings(agentName, accordionId);
       });
     }
   });
@@ -1671,10 +1600,6 @@ function hideAgents() {
 
 function getAgentName(agent) {
   return typeof agent === 'string' ? agent : agent?.name;
-}
-
-function getAgentType(agent) {
-  return typeof agent === 'string' ? 'tool-calling' : agent?.type || 'tool-calling';
 }
 
 function getAgentStatus(agent) {
@@ -1781,20 +1706,11 @@ function renderAssistantProgressSlot() {
 // Create agent element with accordion
 function createAgentElement(agent, currentAgent) {
   const agentName = getAgentName(agent);
-  const agentType = getAgentType(agent);
   const evolution = normalizeAgentEvolution(agent);
   const isCurrentAgent = agentName === currentAgent;
   const isSystemAssistant = isSystemAssistantAgentName(agentName);
   const isDisabled = getAgentStatus(agent) === 'disabled';
   const accordionId = `agent-${agentName.replace(/\s+/g, '-')}`;
-
-  // Format type label
-  const typeLabels = {
-    'tool-calling': 'Tool Calling',
-    general: 'General',
-    research: 'Research'
-  };
-  const typeLabel = typeLabels[agentType] || agentType;
 
   const agentDiv = document.createElement('div');
   agentDiv.className = 'accordion-item mb-2';
@@ -1806,7 +1722,6 @@ function createAgentElement(agent, currentAgent) {
   const safeAgentName = escapeHtml(agentName);
   const safeAgentNameJs = escapeJs(agentName);
   const safeAgentNameAttr = escapeAttr(agentName);
-  const safeTypeLabel = escapeHtml(typeLabel);
   const evolutionSummary = isSystemAssistant
     ? renderAssistantProgressSlot()
     : renderAgentEvolutionSummary(evolution);
@@ -1857,7 +1772,6 @@ function createAgentElement(agent, currentAgent) {
         <div class="d-flex align-items-center gap-2 flex-grow-1">
           <div class="d-flex flex-column">
             <span style="color: var(--text-primary); font-weight: 500;">${safeAgentName}</span>
-            <span style="color: var(--text-secondary); font-size: 0.7rem;">${safeTypeLabel}</span>
             ${disabledBadge}
             ${evolutionSummary}
           </div>
@@ -1884,18 +1798,6 @@ function createAgentElement(agent, currentAgent) {
                    value="${safeAgentNameAttr}"
                    style="background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.85rem;"
                    placeholder="Enter agent name">
-          </div>
-        </div>
-
-        <div class="setting-item mb-3">
-          <div class="d-flex flex-column">
-            <label style="color: var(--text-primary); font-size: 0.85rem; margin-bottom: 0.5rem;">Agent Type</label>
-            <select id="agentTypeSelect-${accordionId}" class="form-select form-select-sm"
-                    style="background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.85rem;">
-              <option value="tool-calling" ${agentType === 'tool-calling' ? 'selected' : ''}>Tool Calling</option>
-              <option value="general" ${agentType === 'general' ? 'selected' : ''}>General</option>
-              <option value="research" ${agentType === 'research' ? 'selected' : ''}>Research</option>
-            </select>
           </div>
         </div>
 
@@ -2176,17 +2078,7 @@ function setupAgentManagement() {
     });
   }
 
-  // Agent type selector update - filter models when type changes
-  const agentTypeInput = document.getElementById('agentType');
   const agentModelInput = document.getElementById('agentModel');
-  if (agentTypeInput && agentModelInput) {
-    agentTypeInput.addEventListener('change', async e => {
-      filterModelsByType(e.target.value, agentModelInput);
-      setAgentModelRecommendationMessage('');
-      updateAgentReasoningVisibility();
-    });
-  }
-
   if (agentModelInput) {
     agentModelInput.addEventListener('change', () => {
       updateAgentReasoningVisibility();
@@ -2323,7 +2215,10 @@ async function generateBaseAutoConfig() {
   }
 
   try {
-    const config = await API.post('/api/agents/auto-config', { description });
+    const config = await API.post('/api/agents/auto-config', {
+      description,
+      role: pendingAgentCreationFlow.seedRole || ''
+    });
 
     // Apply the configuration to form fields
     applyBaseAutoConfig(config);
@@ -2371,14 +2266,6 @@ async function generateBaseAutoConfig() {
 
 // Apply auto-generated config to form fields
 function applyBaseAutoConfig(config) {
-  // Apply agent type
-  const typeSelect = document.getElementById('agentType');
-  if (typeSelect && config.agent_type) {
-    typeSelect.value = config.agent_type;
-    // Trigger change to update model list
-    typeSelect.dispatchEvent(new Event('change'));
-  }
-
   // Apply model (need to wait a moment for model list to repopulate)
   setTimeout(() => {
     const modelSelect = document.getElementById('agentModel');
@@ -2415,7 +2302,7 @@ function applyBaseAutoConfig(config) {
 
 // Briefly highlight fields that were auto-configured
 function highlightBaseAutoConfiguredFields() {
-  const fields = ['agentType', 'agentModel', 'agentTemperature', 'agentSystemPrompt'];
+  const fields = ['agentModel', 'agentTemperature', 'agentSystemPrompt'];
 
   fields.forEach(id => {
     const element = document.getElementById(id);
@@ -2455,7 +2342,6 @@ function resetBaseAutoConfigState() {
 async function updateAgentSettings(agentName, accordionId) {
   try {
     const agentNameInput = document.getElementById(`agentNameInput-${accordionId}`);
-    const agentTypeSelect = document.getElementById(`agentTypeSelect-${accordionId}`);
     const modelSelect = document.getElementById(`gptModelSelect-${accordionId}`);
     const temperatureSlider = document.getElementById(`temperatureSlider-${accordionId}`);
     const systemPromptInput = document.getElementById(`systemPromptInput-${accordionId}`);
@@ -2466,20 +2352,17 @@ async function updateAgentSettings(agentName, accordionId) {
     }
 
     const newAgentName = agentNameInput ? agentNameInput.value.trim() : agentName;
-    const newAgentType = agentTypeSelect ? agentTypeSelect.value : 'tool-calling';
 
     // If agent name changed, we need to rename the agent first
     if (newAgentName !== agentName) {
       await API.put(`/api/agents/${encodeURIComponent(agentName)}`, {
-        new_name: newAgentName,
-        type: newAgentType
+        new_name: newAgentName
       });
     }
 
     const settingsData = {
       model: modelSelect.value,
-      temperature: parseFloat(temperatureSlider.value),
-      type: newAgentType
+      temperature: parseFloat(temperatureSlider.value)
     };
 
     // Add system prompt if it exists
@@ -2557,42 +2440,33 @@ function setupAccordionListeners() {
 }
 
 // Load settings for a specific agent accordion
-async function loadAgentSettings(agentName, agentType, accordionId) {
+async function loadAgentSettings(agentName, accordionId) {
   try {
     // Ensure providers are loaded
     if (availableProviders.length === 0) {
       await loadAvailableProviders();
     }
 
-    // Populate model dropdown from API, filtering by agent type
+    // Populate model dropdown with every model from every provider
     const modelSelect = document.getElementById(`gptModelSelect-${accordionId}`);
     if (modelSelect) {
       // Clear existing options
       modelSelect.innerHTML = '';
 
-      // Add models matching the agent's type from all providers
       availableProviders.forEach(provider => {
+        if (!provider.models || provider.models.length === 0) return;
         const providerGroup = document.createElement('optgroup');
         providerGroup.label = provider.display_name;
-        let hasMatchingModels = false;
 
         provider.models.forEach(model => {
-          // Only add models matching the agent type
-          if (model.type === agentType) {
-            const option = document.createElement('option');
-            option.value = model.value;
-            option.textContent = model.label;
-            option.setAttribute('data-type', model.type);
-            option.setAttribute('data-provider', model.provider);
-            providerGroup.appendChild(option);
-            hasMatchingModels = true;
-          }
+          const option = document.createElement('option');
+          option.value = model.value;
+          option.textContent = model.label;
+          option.setAttribute('data-provider', model.provider);
+          providerGroup.appendChild(option);
         });
 
-        // Only add the provider group if it has matching models
-        if (hasMatchingModels) {
-          modelSelect.appendChild(providerGroup);
-        }
+        modelSelect.appendChild(providerGroup);
       });
     }
 
@@ -2601,6 +2475,13 @@ async function loadAgentSettings(agentName, agentType, accordionId) {
     // Update model dropdown with current value
     const modelValue = (settings.Settings && settings.Settings.model) || settings.model;
     if (modelSelect && modelValue) {
+      const known = Array.from(modelSelect.options).some(option => option.value === modelValue);
+      if (!known) {
+        const current = document.createElement('option');
+        current.value = modelValue;
+        current.textContent = `${modelValue} (current)`;
+        modelSelect.insertBefore(current, modelSelect.firstChild);
+      }
       modelSelect.value = modelValue;
     }
 

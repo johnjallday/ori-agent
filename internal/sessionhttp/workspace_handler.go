@@ -321,12 +321,11 @@ type roleStaffingInput struct {
 	Name     string `json:"name"`
 	Provider string `json:"provider,omitempty"`
 	Model    string `json:"model,omitempty"`
-	// Type and SystemPrompt are the user's edits to what the blueprint
-	// proposed. Absent means "use the blueprint's", which is what every caller
-	// that does not show a form sends. Accepting them is what stops the Create
-	// form's Agent Type and System Prompt fields from being decorative — they
-	// used to be collected and silently dropped.
-	Type         string `json:"type,omitempty"`
+	// SystemPrompt is the user's edit to what the blueprint proposed. Absent
+	// means "use the blueprint's", which is what every caller that does not
+	// show a form sends. Accepting it is what stops the Create form's System
+	// Prompt field from being decorative — it used to be collected and
+	// silently dropped.
 	SystemPrompt string `json:"system_prompt,omitempty"`
 }
 
@@ -348,7 +347,6 @@ func normalizeRoleStaffing(items []roleStaffingInput) (map[string]roleStaffingIn
 		item.Name = strings.TrimSpace(item.Name)
 		item.Provider = strings.ToLower(strings.TrimSpace(item.Provider))
 		item.Model = strings.TrimSpace(item.Model)
-		item.Type = strings.TrimSpace(item.Type)
 		item.SystemPrompt = strings.TrimSpace(item.SystemPrompt)
 		if item.Mode == "" {
 			item.Mode = roleStaffingModeCreate
@@ -362,7 +360,7 @@ func normalizeRoleStaffing(items []roleStaffingInput) (map[string]roleStaffingIn
 		// An assigned agent keeps its own definition entirely — accepting any of
 		// these would imply this request could rewrite an agent the user owns.
 		if item.Mode == roleStaffingModeAssign &&
-			(item.Provider != "" || item.Model != "" || item.Type != "" || item.SystemPrompt != "") {
+			(item.Provider != "" || item.Model != "" || item.SystemPrompt != "") {
 			return nil, fmt.Errorf("assigning %q cannot change its setup; edit it on the Agents page", item.Name)
 		}
 		if _, duplicate := out[item.RoleID]; duplicate {

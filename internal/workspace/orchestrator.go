@@ -32,7 +32,7 @@ type Orchestrator struct {
 // LLMProvider interface for calling AI models
 type LLMProvider interface {
 	ChatCompletion(ctx context.Context, messages []openai.ChatCompletionMessageParamUnion, tools []openai.ChatCompletionToolUnionParam) (*openai.ChatCompletion, error)
-	// ChatWithTools provides tool-calling support using llm.Tool type
+	// ChatWithTools provides tool calling support using llm.Tool type
 	ChatWithTools(ctx context.Context, systemPrompt, userPrompt string, tools []llm.Tool) (*llm.ChatResponse, error)
 	// ChatWithMessages continues a conversation with full message history
 	ChatWithMessages(ctx context.Context, messages []llm.Message, tools []llm.Tool) (*llm.ChatResponse, error)

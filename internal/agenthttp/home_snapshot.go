@@ -118,7 +118,6 @@ type HomeTaskSummary struct {
 // they used").
 type HomeAgentSummary struct {
 	Name           string
-	Type           string
 	Role           string
 	Model          string
 	Provider       string
@@ -563,8 +562,8 @@ func (s HomeSnapshot) PromptText() string {
 		}
 	}
 	for _, a := range s.Agents {
-		fmt.Fprintf(&b, "- %q type=%s role=%s model=%s/%s used_in=%d workspace(s)%s%s\n",
-			homeSnapshotClip(a.Name, homeSnapshotTextLimit), emptyTo(a.Type, "n/a"), emptyTo(a.Role, "n/a"),
+		fmt.Fprintf(&b, "- %q role=%s model=%s/%s used_in=%d workspace(s)%s%s\n",
+			homeSnapshotClip(a.Name, homeSnapshotTextLimit), emptyTo(a.Role, "n/a"),
 			emptyTo(a.Provider, "n/a"), emptyTo(a.Model, "n/a"), a.WorkspaceCount,
 			homeAgentWorkspacesText(a.Workspaces), homeAgentDescriptionText(a.Description))
 	}

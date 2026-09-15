@@ -68,7 +68,6 @@ func FromTemplateAgents(specs []projecttemplates.AgentSpec) []Role {
 			// shows the instructions the agent would actually get rather than
 			// an empty box that hides a 250-character prompt.
 			Proposed: &ProposedSetup{
-				Type:         strings.TrimSpace(spec.Type),
 				Model:        strings.TrimSpace(spec.Model),
 				Provider:     strings.TrimSpace(spec.Provider),
 				SystemPrompt: strings.TrimSpace(spec.SystemPrompt),

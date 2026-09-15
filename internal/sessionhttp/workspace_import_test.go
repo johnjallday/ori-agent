@@ -906,7 +906,7 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(exportRoot, agentworkspace.WorkspaceConfigFile), rootData, 0644); err != nil {
 		t.Fatalf("failed to write root workspace.json: %v", err)
 	}
-	rootAgent := &agent.Agent{Type: agent.TypeToolCalling}
+	rootAgent := &agent.Agent{}
 	rootAgent.Settings.Model = "imported-trip-model"
 	if err := agentworkspace.WriteWorkspaceAgentToFolder(exportRoot, "Trip Manager", rootAgent); err != nil {
 		t.Fatalf("failed to write root workspace agent snapshot: %v", err)
@@ -961,7 +961,7 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(childDir, agentworkspace.WorkspaceConfigFile), childData, 0644); err != nil {
 		t.Fatalf("failed to write child workspace.json: %v", err)
 	}
-	childAgent := &agent.Agent{Type: agent.TypeToolCalling}
+	childAgent := &agent.Agent{}
 	childAgent.Settings.Model = "imported-madrid-model"
 	if err := agentworkspace.WriteWorkspaceAgentToFolder(childDir, "Madrid Planner", childAgent); err != nil {
 		t.Fatalf("failed to write child workspace agent snapshot: %v", err)

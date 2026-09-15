@@ -1098,12 +1098,7 @@ function dedupeModels(models) {
   const uniqueModels = new Map();
   models.forEach(model => {
     if (!uniqueModels.has(model.value)) {
-      uniqueModels.set(model.value, { ...model, categories: [model.type] });
-    } else {
-      const existing = uniqueModels.get(model.value);
-      if (!existing.categories.includes(model.type)) {
-        existing.categories.push(model.type);
-      }
+      uniqueModels.set(model.value, model);
     }
   });
   return uniqueModels;

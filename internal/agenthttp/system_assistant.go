@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/systemassistant"
@@ -74,7 +73,6 @@ func ensureSystemAssistantAgentWithSystemModel(st store.Store, systemProvider, s
 
 	if _, exists := st.GetAgent(effectiveName); !exists {
 		cfg := &store.CreateAgentConfig{
-			Type:         agent.TypeGeneral,
 			Role:         types.RoleOrchestrator,
 			SystemPrompt: systemAssistantPrompt,
 		}
@@ -94,10 +92,6 @@ func ensureSystemAssistantAgentWithSystemModel(st store.Store, systemProvider, s
 
 	changed := false
 
-	if ag.Type == "" {
-		ag.Type = agent.TypeGeneral
-		changed = true
-	}
 	if ag.Status == "" {
 		ag.Status = types.AgentStatusActive
 		changed = true

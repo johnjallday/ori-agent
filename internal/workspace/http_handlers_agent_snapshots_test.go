@@ -25,7 +25,7 @@ func TestHTTPHandler_ListAgentSnapshots(t *testing.T) {
 	if err := store.Save(ws); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	if err := store.SaveWorkspaceAgent(ws.ID, "Manager", &agent.Agent{Type: agent.TypeToolCalling}); err != nil {
+	if err := store.SaveWorkspaceAgent(ws.ID, "Manager", &agent.Agent{}); err != nil {
 		t.Fatalf("save snapshot: %v", err)
 	}
 

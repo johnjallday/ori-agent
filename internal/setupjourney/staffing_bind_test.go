@@ -19,7 +19,7 @@ const existingAgentName = "My Reviewer"
 func saveExistingAgent(t *testing.T, adapter *AssistantStaffingAdapter) {
 	t.Helper()
 	if err := adapter.profiles.CreateAgent(existingAgentName, &agentstore.CreateAgentConfig{
-		Type: "tool-calling", Role: "specialist", LLMProvider: "openai", Model: "gpt-4o-mini",
+		Role: "specialist", LLMProvider: "openai", Model: "gpt-4o-mini",
 		SystemPrompt: "the user's own prompt",
 	}); err != nil {
 		t.Fatal(err)

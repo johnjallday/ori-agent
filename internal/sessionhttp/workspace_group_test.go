@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/session"
 	agentstore "github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -877,7 +876,7 @@ func TestGroupRosterPlanProposesEditableManager(t *testing.T) {
 	}
 	if plan.TemplateID != "group-roster" || plan.Revision == "" || len(plan.Agents) != 1 ||
 		plan.Agents[0].Name != "Client Work Manager" || !plan.Agents[0].EntryPoint ||
-		plan.Agents[0].Role != string(types.RoleOrchestrator) || plan.Agents[0].Type != agent.TypeGeneral {
+		plan.Agents[0].Role != string(types.RoleOrchestrator) {
 		t.Fatalf("group roster plan = %#v", plan)
 	}
 	if !strings.Contains(plan.Agents[0].SystemPrompt, "member workspaces remain separate") {
@@ -971,7 +970,7 @@ func TestCreateGroupFromReviewedRoster(t *testing.T) {
 		t.Fatalf("default session agent = %q, want Custom Group Manager", got)
 	}
 	manager, exists := handler.agentStore.GetAgent("Custom Group Manager")
-	if !exists || manager.Type != agent.TypeGeneral || manager.Role != types.RoleOrchestrator {
+	if !exists || manager.Role != types.RoleOrchestrator {
 		t.Fatalf("Group Manager = %#v, exists=%v", manager, exists)
 	}
 	// The manager is bound to group-owned files and notes only: provisioning
@@ -1005,9 +1004,7 @@ func TestCreateGroupRosterReusesSelectedManager(t *testing.T) {
 	newTestFileStore(t, handler)
 	ctx := context.Background()
 
-	if err := handler.agentStore.CreateAgent("Existing Manager", &agentstore.CreateAgentConfig{
-		Type: agent.TypeGeneral,
-	}); err != nil {
+	if err := handler.agentStore.CreateAgent("Existing Manager", &agentstore.CreateAgentConfig{}); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 

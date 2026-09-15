@@ -1210,52 +1210,55 @@ func TestSessionSettingsHandler_Post(t *testing.T) {
 	}
 }
 
-func TestCategorizeModel_Codex(t *testing.T) {
-	tests := []struct {
-		name     string
-		model    string
-		expected string
-	}{
-		{name: "codex nano is tool-calling", model: "gpt-5-codex-nano", expected: "tool-calling"},
-		{name: "codex mini is general", model: "gpt-5.1-codex-mini", expected: "general"},
-		{name: "codex standard is research", model: "gpt-5.3-codex", expected: "research"},
-		{name: "codex max is research", model: "gpt-5.1-codex-max", expected: "research"},
+// TestProvidersHandler_OneRowPerModel pins the retired tiering: a model used to
+// appear once per agent-type tier it belonged to, carrying that tier as "type".
+func TestProvidersHandler_OneRowPerModel(t *testing.T) {
+	configManager := config.NewManager(filepath.Join(t.TempDir(), "settings.json"))
+	_ = configManager.Load()
+
+	llmFactory := llm.NewFactory()
+	llmFactory.Register("codex", &mockCodexProvider{})
+	handler := NewHandler(nil, configManager, nil, llmFactory)
+
+	rec := httptest.NewRecorder()
+	handler.ProvidersHandler(rec, httptest.NewRequest(http.MethodGet, "/api/providers", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", rec.Code)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := categorizeModel("codex", tt.model)
-			if got != tt.expected {
-				t.Fatalf("categorizeModel(\"codex\", %q) = %q, want %q", tt.model, got, tt.expected)
-			}
-		})
+	var resp struct {
+		Providers []struct {
+			Name   string                       `json:"name"`
+			Models []map[string]json.RawMessage `json:"models"`
+		} `json:"providers"`
 	}
-}
-
-func TestGetModelCategories_Codex(t *testing.T) {
-	tests := []struct {
-		name     string
-		model    string
-		expected []string
-	}{
-		{name: "codex nano has tool-calling and general", model: "gpt-5-codex-nano", expected: []string{"tool-calling", "general"}},
-		{name: "codex mini has tool-calling, general, and orchestration", model: "gpt-5.1-codex-mini", expected: []string{"tool-calling", "general", "orchestration"}},
-		{name: "codex standard has research and orchestration", model: "gpt-5.3-codex", expected: []string{"research", "orchestration"}},
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := getModelCategories("codex", tt.model)
-			if len(got) != len(tt.expected) {
-				t.Fatalf("getModelCategories(\"codex\", %q) = %v, want %v", tt.model, got, tt.expected)
+	want := (&mockCodexProvider{}).DefaultModels()
+	for _, provider := range resp.Providers {
+		if provider.Name != "codex" {
+			continue
+		}
+		if len(provider.Models) != len(want) {
+			t.Fatalf("codex rows = %d, want one per model (%d)", len(provider.Models), len(want))
+		}
+		seen := map[string]bool{}
+		for _, row := range provider.Models {
+			if value, has := row["type"]; has {
+				t.Errorf("model row still carries type=%s", value)
 			}
-			for i := range tt.expected {
-				if got[i] != tt.expected[i] {
-					t.Fatalf("getModelCategories(\"codex\", %q) = %v, want %v", tt.model, got, tt.expected)
-				}
+			var name string
+			_ = json.Unmarshal(row["value"], &name)
+			if seen[name] {
+				t.Errorf("model %q listed more than once", name)
 			}
-		})
+			seen[name] = true
+		}
+		return
 	}
+	t.Fatal("Expected codex provider in response")
 }
 
 func TestProvidersHandler_CodexPricingHidden(t *testing.T) {

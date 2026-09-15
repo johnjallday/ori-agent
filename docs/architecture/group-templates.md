@@ -25,6 +25,10 @@ new host feature flag.
 | Source | library, plugin blueprint, source-linked variant | derived from an eligible project blueprint; never edited |
 | Team | reviewed project roster | none at creation; group roles are staffed afterward |
 
+A source blueprint's `agents[]` roster and `assistant_program.roles[]` may still
+carry a `type` key from before the agent type was retired. The key is accepted
+and ignored.
+
 **General** is the ordinary group. It keeps its reviewed Group Manager roster
 (Blueprint → Details → Group Roster → Review) and never joins a program. A
 managed template goes Blueprint → Details → Review and creates no agent.

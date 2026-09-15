@@ -274,7 +274,7 @@ func TestAssistantStaffingAdapter_AddsOptionalHomeRoleWithoutModelOrCapabilitySi
 func TestAssistantStaffingAdapter_ProjectReviewPreservesValidPartialBinding(t *testing.T) {
 	adapter, workspaces, scope, _ := staffingFixture(t)
 	if err := adapter.profiles.CreateAgent("Existing Lead", &agentstore.CreateAgentConfig{
-		Type: "tool-calling", Role: "orchestrator", LLMProvider: "openai", Model: "gpt-4o-mini", SystemPrompt: "project-lead-only prompt",
+		Role: "orchestrator", LLMProvider: "openai", Model: "gpt-4o-mini", SystemPrompt: "project-lead-only prompt",
 	}); err != nil {
 		t.Fatal(err)
 	}

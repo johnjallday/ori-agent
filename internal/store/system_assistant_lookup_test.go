@@ -4,7 +4,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
@@ -19,7 +18,7 @@ func lookupStore(t *testing.T, names ...string) Store {
 		t.Fatalf("NewFileStore: %v", err)
 	}
 	for _, name := range names {
-		if err := st.CreateAgent(name, &CreateAgentConfig{Type: agent.TypeGeneral}); err != nil {
+		if err := st.CreateAgent(name, &CreateAgentConfig{}); err != nil {
 			t.Fatalf("CreateAgent(%q): %v", name, err)
 		}
 	}

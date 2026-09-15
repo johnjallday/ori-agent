@@ -59,9 +59,10 @@ function fakeHost(values) {
 test('the inert shared core has one template ID and no preassigned field IDs', () => {
   assert.match(template, /id="agentCreateFormTemplate"/);
   assert.equal((template.match(/\sid="/g) || []).length, 1);
-  for (const field of ['name', 'type', 'model', 'reasoningEffort', 'systemPrompt']) {
+  for (const field of ['name', 'model', 'reasoningEffort', 'systemPrompt']) {
     assert.match(template, new RegExp(`data-agent-create-field="${field}"`));
   }
+  assert.doesNotMatch(template, /data-agent-create-field="type"/);
   assert.match(template, /data-agent-create-for="Name"/);
   assert.match(template, /data-agent-create-describedby="NameHelp NameError"/);
 });
@@ -75,19 +76,12 @@ test('scoped IDs are deterministic and reject an empty prefix', () => {
 test('profiles expose only fields backed by their contracts', () => {
   assert.deepEqual(Form.profileFields('standalone'), [
     'name',
-    'type',
     'model',
     'provider',
     'reasoningEffort',
     'systemPrompt'
   ]);
-  assert.deepEqual(Form.profileFields('template'), [
-    'name',
-    'type',
-    'model',
-    'provider',
-    'systemPrompt'
-  ]);
+  assert.deepEqual(Form.profileFields('template'), ['name', 'model', 'provider', 'systemPrompt']);
 });
 
 test('name validation matches the Go create and override contract', () => {
@@ -109,7 +103,7 @@ test('unknown current model is preserved as an explicit choice', () => {
     {
       name: 'openai',
       display_name: 'OpenAI',
-      models: [{ value: 'gpt-5', label: 'GPT-5', type: 'general', provider: 'openai' }]
+      models: [{ value: 'gpt-5', label: 'GPT-5', provider: 'openai' }]
     }
   ];
   const known = Form.modelChoices(providers, 'gpt-5', 'openai');
@@ -126,7 +120,6 @@ test('template extraction omits read-only reasoning and preserves long prompts',
   const longPrompt = `  ${'x'.repeat(4100)}  `;
   const host = fakeHost({
     name: '  Blueprint Agent  ',
-    type: 'general',
     model: 'private-model',
     provider: 'custom',
     reasoningEffort: 'high',
@@ -136,7 +129,6 @@ test('template extraction omits read-only reasoning and preserves long prompts',
   assert.equal(result.valid, true);
   assert.deepEqual(result.values, {
     name: 'Blueprint Agent',
-    type: 'general',
     model: 'private-model',
     provider: 'custom',
     systemPrompt: 'x'.repeat(4100)
@@ -147,7 +139,6 @@ test('template extraction omits read-only reasoning and preserves long prompts',
 test('standalone extraction validates the prompt cap and reports field errors', () => {
   const host = fakeHost({
     name: 'bad/name',
-    type: 'tool-calling',
     model: 'gpt-5',
     provider: 'openai',
     reasoningEffort: 'medium',

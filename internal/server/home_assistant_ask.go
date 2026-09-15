@@ -93,7 +93,6 @@ func (a homeAgentsAdapter) AgentRoster() ([]agenthttp.HomeAgentSummary, bool) {
 		}
 		summary := agenthttp.HomeAgentSummary{
 			Name:         name,
-			Type:         ag.Type,
 			Role:         string(ag.Role),
 			Model:        ag.Settings.Model,
 			Provider:     ag.Settings.Provider,

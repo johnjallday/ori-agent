@@ -349,7 +349,6 @@ func (r *TestRunner) interactiveChat() {
 func (r *TestRunner) apiCreateAgent(name, model string) error {
 	body, err := json.Marshal(map[string]any{
 		"name":        name,
-		"type":        "tool-calling",
 		"model":       model,
 		"description": "Created by test-cli",
 	})

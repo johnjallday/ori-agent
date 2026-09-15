@@ -378,7 +378,7 @@ func writeAgent(t *testing.T, agentsDir, name string) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir agent: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "agent_settings.json"), []byte(`{"type":"tool-calling","Settings":{}}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "agent_settings.json"), []byte(`{"Settings":{}}`), 0o644); err != nil {
 		t.Fatalf("write agent settings: %v", err)
 	}
 }

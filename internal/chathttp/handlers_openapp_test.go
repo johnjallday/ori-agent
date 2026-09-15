@@ -24,14 +24,10 @@ func newChatHandlerForOpenAppTests(t *testing.T) *Handler {
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
-	if err := st.CreateAgent(assistantExecutionAgentName, &store.CreateAgentConfig{
-		Type: "general",
-	}); err != nil {
+	if err := st.CreateAgent(assistantExecutionAgentName, &store.CreateAgentConfig{}); err != nil {
 		t.Fatalf("failed to create assistant agent: %v", err)
 	}
-	if err := st.CreateAgent("Desktop Launcher", &store.CreateAgentConfig{
-		Type: "tool-calling",
-	}); err != nil {
+	if err := st.CreateAgent("Desktop Launcher", &store.CreateAgentConfig{}); err != nil {
 		t.Fatalf("failed to create desktop launcher agent: %v", err)
 	}
 	launcher, ok := st.GetAgent("Desktop Launcher")
@@ -50,9 +46,7 @@ func newChatHandlerForOpenAppTests(t *testing.T) *Handler {
 	if err := st.SetAgent("Desktop Launcher", launcher); err != nil {
 		t.Fatalf("failed to update desktop launcher agent: %v", err)
 	}
-	if err := st.CreateAgent("REAPER Assistant", &store.CreateAgentConfig{
-		Type: "tool-calling",
-	}); err != nil {
+	if err := st.CreateAgent("REAPER Assistant", &store.CreateAgentConfig{}); err != nil {
 		t.Fatalf("failed to create reaper assistant agent: %v", err)
 	}
 	reaper, ok := st.GetAgent("REAPER Assistant")

@@ -44,8 +44,7 @@
     model: 'model',
     provider: 'provider',
     systemPrompt: 'system_prompt',
-    role: 'role',
-    type: 'type'
+    role: 'role'
   };
 
   function has(object, key) {
@@ -67,7 +66,6 @@
     if (!setup || typeof setup !== 'object') return null;
     return {
       role: text(setup.role),
-      type: text(setup.type),
       model: text(setup.model),
       provider: text(setup.provider),
       reasoningEffort: text(setup.reasoning_effort),
@@ -84,7 +82,6 @@
       action: text(agent && agent.action).toLowerCase() === 'reuse' ? 'reuse' : 'create',
       entryPoint: Boolean(agent && agent.entry_point),
       role: text(agent && agent.role),
-      type: text(agent && agent.type),
       model: text(agent && agent.model),
       provider: text(agent && agent.provider),
       reasoningEffort: text(agent && agent.reasoning_effort),
@@ -274,7 +271,6 @@
         heldElsewhere: '',
         templateAgentIndex: index,
         proposed: {
-          type: text(recommended.type),
           model: text(recommended.model),
           provider: text(recommended.provider),
           system_prompt: text(recommended.systemPrompt),
@@ -306,7 +302,6 @@
       model: text(fill.model),
       // Carried so an edit made in the Create form reaches the created agent.
       // Empty means "use what the blueprint proposes".
-      type: text(fill.type),
       systemPrompt: text(fill.systemPrompt)
     };
   }
@@ -1075,7 +1070,6 @@
         : modelSourceLabel(definition.modelSource),
       inheritsModel: text(model) === '',
       role: definition.role,
-      type: has(override, 'type') ? override.type : definition.type,
       reasoningEffort: definition.reasoningEffort,
       systemPrompt: has(override, 'systemPrompt') ? override.systemPrompt : definition.systemPrompt,
       appearance: definition.appearance,
@@ -1108,7 +1102,6 @@
       modelSourceLabel: 'Saved agent model',
       inheritsModel: false,
       role: text(agent.role),
-      type: text(agent.type),
       templateAgentIndex: null,
       declaredPrimary: false,
       originalName: canonical,
@@ -1163,7 +1156,6 @@
         inheritsModel: !text(hire.model),
         role: role.label,
         description: role.description,
-        type: '',
         templateAgentIndex: null,
         assistantRoleId: role.id,
         declaredPrimary: role.primary && role.scope !== 'home',
@@ -1255,7 +1247,6 @@
         item.agent = {
           name: fill.name,
           role: saved ? text(saved.role) : '',
-          type: saved ? text(saved.type) : '',
           appearance: (saved && saved.appearance) || null
         };
         // A filled role has nothing left to propose.
@@ -1374,7 +1365,6 @@
     roleRoster.unassigned = savedEntries.map(entry => ({
       name: entry.name,
       role: entry.role || '',
-      type: entry.type || '',
       appearance: entry.identity?.appearance || null
     }));
     const roleSummary = agentless
@@ -1646,9 +1636,8 @@
           if (fill.mode === FILL_CREATE) {
             if (fill.provider) item.provider = fill.provider;
             if (fill.model) item.model = fill.model;
-            // Sent only when the user actually edited them; absent means the
+            // Sent only when the user actually edited it; absent means the
             // server applies what the blueprint declared.
-            if (fill.type) item.type = fill.type;
             if (fill.systemPrompt) item.system_prompt = fill.systemPrompt;
           }
           return item;
