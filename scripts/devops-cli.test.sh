@@ -803,16 +803,45 @@ implementation_choice_result() {
     printf '%s' "$implementation_mode"
   )
 }
-check "Claude choice maps to its wt kind" "$(implementation_choice_result 1)" "claude"
+implementation_model_result() {
+  local choice="$1"
+  (
+    prompt_implementation_agent 777 777-sample <<< "$choice" >/dev/null 2>&1
+    printf '%s' "$implementation_model"
+  )
+}
+# Claude gets the planner's model prompt as a second answer. A blank second
+# line is Enter (keep the configured primary model); no second line at all is
+# an unanswered prompt, which cancels like any other declined selection.
+check "Claude choice maps to its wt kind" "$(implementation_choice_result $'1\n')" "claude"
+check "Claude with Enter keeps the configured model" "$(implementation_model_result $'1\n')" ""
+check "Claude with Opus records the opus alias" "$(implementation_model_result $'1\n2')" "opus"
+check "Claude with Opus still maps to its wt kind" "$(implementation_choice_result $'1\n2')" "claude"
+check "Claude with a custom model records it verbatim" \
+  "$(implementation_model_result $'1\nc\nclaude-opus-5')" "claude-opus-5"
+check "cancelling the model prompt cancels the start" "$(implementation_choice_result $'1\nq')" ""
+check "an unanswered model prompt cancels the start" "$(implementation_choice_result 1)" ""
 check "Codex choice maps to its wt kind" "$(implementation_choice_result 2)" "codex"
+check "Codex choice records no model" "$(implementation_model_result 2)" ""
 check "Pi choice maps to its wt kind" "$(implementation_choice_result 3)" "pi"
 check "worktree-only choice maps to no-herdr" "$(implementation_choice_result 4)" "no-herdr"
 check "cancel maps to no launch mode" "$(implementation_choice_result q)" ""
-implementation_prompt_output="$(prompt_implementation_agent 777 777-sample <<< q 2>/dev/null)"
-if [[ "$implementation_prompt_output" == *"model"* || "$implementation_prompt_output" == *"Model"* ]]; then
-  printf 'FAIL the one-run implementation picker gained a model prompt: %s\n' "$implementation_prompt_output" >&2
+implementation_prompt_output="$(prompt_implementation_agent 777 777-sample <<< $'1\n' 2>/dev/null)"
+if [[ "$implementation_prompt_output" != *"Choose the Claude model for this implementation session."* ]]; then
+  printf 'FAIL the Claude implementation picker did not offer the model prompt: %s\n' "$implementation_prompt_output" >&2
   failures=$((failures + 1))
 fi
+if [[ "$implementation_prompt_output" != *"[Enter] Integration default (or the configured primary model)"* ]]; then
+  printf 'FAIL the implementation model prompt does not explain what Enter keeps: %s\n' "$implementation_prompt_output" >&2
+  failures=$((failures + 1))
+fi
+for implementation_prompt_fixture in 2 3 4 q; do
+  implementation_prompt_output="$(prompt_implementation_agent 777 777-sample <<< "$implementation_prompt_fixture" 2>/dev/null)"
+  if [[ "$implementation_prompt_output" == *"model"* || "$implementation_prompt_output" == *"Model"* ]]; then
+    printf 'FAIL the non-Claude implementation picker (%s) gained a model prompt: %s\n' "$implementation_prompt_fixture" "$implementation_prompt_output" >&2
+    failures=$((failures + 1))
+  fi
+done
 
 # Persistent agent defaults stay behind the Go helper boundary. These tests
 # stub only that process, then assert current rendering, preview/confirmation,
@@ -936,7 +965,7 @@ implementation_start_fixture() {
     flight_state_of() { printf '%s' "$fixture_state"; }
     gh() { printf 'github\n' >> "$implementation_side_effects"; return 97; }
     launch_implementation() {
-      printf '%s\t%s\n' "$1" "$2" >> "$implementation_start_calls"
+      printf '%s\t%s\t%s\n' "$1" "$2" "${3-}" >> "$implementation_start_calls"
     }
     start_issue_implementation "$issue_number" <<< "$choice" >/dev/null
   )
@@ -949,13 +978,23 @@ check "a refused planning starter launches nothing" \
   "$(wc -c < "$implementation_start_calls" | tr -d ' ')" "0"
 
 printf '%s\n' '## Tasks' > "$implementation_tasks/tasks-782-demo.md"
-for implementation_choice_fixture in '1:claude' '2:codex' '3:pi' '4:no-herdr'; do
-  choice="${implementation_choice_fixture%%:*}"
-  expected_mode="${implementation_choice_fixture#*:}"
+# Each fixture is "<stdin answers>|<expected mode>\t<expected model>". Claude
+# answers the agent prompt and then the model prompt; the other kinds answer
+# once and launch with no model.
+implementation_launch_fixtures=(
+  $'1\n|claude\t'
+  $'1\n2|claude\topus'
+  $'2|codex\t'
+  $'3|pi\t'
+  $'4|no-herdr\t'
+)
+for implementation_choice_fixture in "${implementation_launch_fixtures[@]}"; do
+  choice="${implementation_choice_fixture%%|*}"
+  expected="${implementation_choice_fixture#*|}"
   : > "$implementation_start_calls"
   implementation_start_fixture 782 "" "$choice"
-  check "the implementation action launches $expected_mode" \
-    "$(<"$implementation_start_calls")" $'782-demo\t'"$expected_mode"
+  check "the implementation action launches ${expected%%$'\t'*} with model '${expected#*$'\t'}'" \
+    "$(<"$implementation_start_calls")" $'782-demo\t'"$expected"
 done
 : > "$implementation_start_calls"
 check "the implementation action refuses duplicate work" \
@@ -1446,7 +1485,7 @@ case "$3" in
     fi
     ;;
   devops-bundle-plan) printf 'Bundle planner launched\n' ;;
-  devops-start) printf 'Implementation start launched for %s with %s\n' "$5" "$6" ;;
+  devops-start) printf 'Implementation start launched for %s with %s%s\n' "$5" "$6" "${7:+ ($7)}" ;;
 esac
 SH
 chmod +x "$fake_bin/zsh"
@@ -1683,16 +1722,33 @@ check "invalid planner confirmation launches no child" \
   "$(wc -c < "$wt_calls" | tr -d ' ')" "0"
 
 # The implementation launcher crosses the same bash-to-zsh boundary as Plan.
-# Its constrained child receives the feature and validated mode as separate
-# words, then chooses exactly --kind or --no-herdr inside the child.
-implementation_bridge=$'source "$1" && if [[ "$3" == no-herdr ]]; then wt start "$2" --no-herdr; else wt start "$2" --kind "$3"; fi'
+# Its constrained child receives the feature, validated mode, and optional
+# model as separate words, then chooses exactly --kind, --kind --model, or
+# --no-herdr inside the child. The model word is always present, so the vector
+# shape never depends on whether a model was chosen.
+implementation_bridge=$'source "$1" && if [[ "$3" == no-herdr ]]; then wt start "$2" --no-herdr; elif [[ -n "$4" ]]; then wt start "$2" --kind "$3" --model "$4"; else wt start "$2" --kind "$3"; fi'
 for implementation_mode_fixture in claude codex pi no-herdr; do
   : > "$wt_calls"
   launch_implementation "777-sample" "$implementation_mode_fixture" > /dev/null
   check "implementation $implementation_mode_fixture uses the exact zsh argument vector" \
     "$(<"$wt_calls")" \
-    $'CALL\t-c\t'"$implementation_bridge"$'\tdevops-start\t'"$repo_root"$'/scripts/wt.sh\t777-sample\t'"$implementation_mode_fixture"
+    $'CALL\t-c\t'"$implementation_bridge"$'\tdevops-start\t'"$repo_root"$'/scripts/wt.sh\t777-sample\t'"$implementation_mode_fixture"$'\t'
 done
+: > "$wt_calls"
+launch_implementation "777-sample" claude opus > /dev/null
+check "implementation claude forwards the chosen model as its own word" \
+  "$(<"$wt_calls")" \
+  $'CALL\t-c\t'"$implementation_bridge"$'\tdevops-start\t'"$repo_root"$'/scripts/wt.sh\t777-sample\tclaude\topus'
+: > "$wt_calls"
+check "a model with a non-Claude mode is rejected" \
+  "$(launch_implementation 777-sample codex opus >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "a rejected non-Claude model launches no child" \
+  "$(wc -c < "$wt_calls" | tr -d ' ')" "0"
+: > "$wt_calls"
+check "a dash-leading model is rejected" \
+  "$(launch_implementation 777-sample claude --model >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "a rejected dash-leading model launches no child" \
+  "$(wc -c < "$wt_calls" | tr -d ' ')" "0"
 : > "$wt_calls"
 check "an unsupported implementation mode is rejected" \
   "$(launch_implementation 777-sample shell >/dev/null 2>&1 && echo yes || echo no)" "no"

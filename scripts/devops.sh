@@ -104,7 +104,10 @@ Any other label state, or a failed label read, is a clear refusal instead.
 
 Planning is asynchronous. Return later and press `i` on the selected or opened
 Issue to resolve its completed local task list, choose Claude, Codex, Pi, or a
-worktree without Herdr, and delegate the confirmed start to `wt start`.
+worktree without Herdr, and delegate the confirmed start to `wt start`. Choosing
+Claude also offers the planner's Sonnet, Opus, Fable, custom, or default model
+choice; Enter keeps the configured primary model (`agent-defaults`), and a pick
+is passed through as `wt start --model`.
 
 `agent-defaults` (picker/REPL key `g`) reads or changes the checked-in primary
 and role-fallback kind/model pairs. Interactive use prompts for all four values;
@@ -2492,10 +2495,12 @@ start_issue_plan() {
 }
 
 implementation_mode=""
+implementation_model=""
 prompt_implementation_agent() {
   local issue_number="$1" feature="$2" choice
 
   implementation_mode=""
+  implementation_model=""
   printf '\nStart implementation for #%s (%s).\n' "$issue_number" "$feature"
   printf '  [1/c] Claude\n'
   printf '  [2/x] Codex\n'
@@ -2505,7 +2510,15 @@ prompt_implementation_agent() {
   printf 'agent> '
   IFS= read -r choice || return 0
   case "$choice" in
-    1|c|C|claude|Claude) implementation_mode="claude" ;;
+    1|c|C|claude|Claude)
+      implementation_mode="claude"
+      # Cancelling the model prompt cancels the whole start: a builder must
+      # never launch on a model the owner declined to choose.
+      if ! prompt_implementation_model; then
+        implementation_mode=""
+        implementation_model=""
+      fi
+      ;;
     2|x|X|codex|Codex) implementation_mode="codex" ;;
     3|p|P|pi|Pi) implementation_mode="pi" ;;
     4|w|W|worktree|worktree-only) implementation_mode="no-herdr" ;;
@@ -2518,11 +2531,28 @@ prompt_implementation_agent() {
   esac
 }
 
+# A Claude implementation start reuses the planner's model selector, so `s` and
+# `i` offer the same Sonnet, Opus, Fable, custom, or default choices. Enter
+# leaves the model unset: `wt start` then applies the configured primary model
+# from .herdr/devflow.toml, or the integration default when that is empty.
+# Codex and Pi keep their integration defaults; Pi's provider catalog stays a
+# planning-only concern.
+prompt_implementation_model() {
+  local agent_session_purpose="implementation"
+  local agent_model_retry_hint=" (or the configured primary model)"
+  planner_model_choice=""
+  prompt_claude_planner_model || return 1
+  implementation_model="$planner_model_choice"
+  return 0
+}
+
 # wt remains the owner of plan display, confirmation, worktree creation, and
 # handoff. The child validates the already constrained mode again and receives
 # every value as a separate argument; no Issue-derived text becomes shell code.
+# The model travels the same way and is only ever the value after --model, so a
+# model that looks like a flag can never reach wt as one.
 launch_implementation() {
-  local feature="$1" mode="$2"
+  local feature="$1" mode="$2" model="${3-}"
 
   case "$mode" in
     claude|codex|pi|no-herdr) ;;
@@ -2531,6 +2561,14 @@ launch_implementation() {
       return 2
       ;;
   esac
+  if [[ -n "$model" && "$mode" != claude ]]; then
+    printf 'An implementation model is only supported with Claude, not %s.\n' "$mode" >&2
+    return 2
+  fi
+  if [[ "$model" == -* ]]; then
+    printf 'Implementation model cannot begin with a dash.\n' >&2
+    return 2
+  fi
   if ! command -v zsh >/dev/null 2>&1; then
     printf 'Starting implementation requires zsh to run scripts/wt.sh.\n' >&2
     return 1
@@ -2539,7 +2577,7 @@ launch_implementation() {
     printf 'Implementation entrypoint not found: %s\n' "$script_dir/wt.sh" >&2
     return 1
   fi
-  zsh -c 'source "$1" && if [[ "$3" == no-herdr ]]; then wt start "$2" --no-herdr; else wt start "$2" --kind "$3"; fi' devops-start "$script_dir/wt.sh" "$feature" "$mode"
+  zsh -c 'source "$1" && if [[ "$3" == no-herdr ]]; then wt start "$2" --no-herdr; elif [[ -n "$4" ]]; then wt start "$2" --kind "$3" --model "$4"; else wt start "$2" --kind "$3"; fi' devops-start "$script_dir/wt.sh" "$feature" "$mode" "$model"
 }
 
 start_issue_implementation() {
@@ -2549,7 +2587,7 @@ start_issue_implementation() {
   feature="$implementation_feature"
   prompt_implementation_agent "$issue_number" "$feature"
   [[ -n "$implementation_mode" ]] || return 0
-  launch_implementation "$feature" "$implementation_mode"
+  launch_implementation "$feature" "$implementation_mode" "$implementation_model"
 }
 
 edited_issue_body=""
