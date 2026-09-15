@@ -607,12 +607,31 @@ func TestStarterQuestsCoverAFirstFarm(t *testing.T) {
 	}
 }
 
+// The exact onboarding payout is pinned so a change to it is always a decision.
+//
+// tasks/prd-starter-missions.md moved it from 30 to 40: three starter missions
+// were added (Tidy your Downloads, Connect one source, Read your first Daily
+// Brief) and "Create your first workspace" was retired, eight quests at 5 Craft.
+// A first Farm still costs 25, so a new user reaches it a little earlier.
+func TestStarterQuestTotalIsPinned(t *testing.T) {
+	const want int64 = 40
+	if got := StarterQuestTotal(); got != want {
+		t.Fatalf("starter quests pay %d in total, pinned at %d; if this change is "+
+			"deliberate, update the pin and say why here", got, want)
+	}
+}
+
 // Every id in the reward table must be a quest that actually exists, or the
 // reward is dead weight nobody can earn. The ids are checked against
-// internal/progression in that package's own test, which can import both.
+// internal/progression in that package's own test, which also checks their
+// tier, because it can import both.
+//
+// The `pa-` prefix is the personal-assistant cohort's starter missions, which
+// are Tier 1 in that graph (tasks/prd-starter-missions.md).
 func TestStarterQuestIdsAreTierOneAndTwo(t *testing.T) {
 	for questID := range starterQuests {
-		if !strings.HasPrefix(questID, "t1-") && !strings.HasPrefix(questID, "t2-") {
+		if !strings.HasPrefix(questID, "t1-") && !strings.HasPrefix(questID, "t2-") &&
+			!strings.HasPrefix(questID, "pa-") {
 			t.Fatalf("quest %q pays Craft but is not a Tier 1 or 2 quest; later tiers "+
 				"are past the cold start and should not pay", questID)
 		}

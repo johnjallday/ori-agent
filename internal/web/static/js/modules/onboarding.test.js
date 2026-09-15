@@ -280,6 +280,41 @@ test('?quest=plan-first-day never opens while a hired assistant has no HQ', () =
   }
 });
 
+test('Do this later on the first-day plan defers Mission 03, Connect one source', async () => {
+  const priorWindow = globalThis.window;
+  const priorDocument = globalThis.document;
+  const priorFetch = globalThis.fetch;
+  const posts = [];
+  const events = [];
+  globalThis.document = { getElementById: () => null };
+  globalThis.window = {
+    location: { search: '?quest=plan-first-day' },
+    history: { replaceState() {} },
+    dispatchEvent: event => events.push(event.type)
+  };
+  globalThis.fetch = async (url, options = {}) => {
+    posts.push({ url: String(url), body: JSON.parse(options.body || '{}') });
+    return { ok: true, json: async () => ({}) };
+  };
+  try {
+    const manager = new OnboardingManager();
+    manager.assignmentQuestMode = true;
+    manager.modalInstance = { hide() {} };
+    manager.showAssignmentError = () => {};
+    await manager.deferFirstAssignmentQuest();
+
+    assert.deepEqual(posts, [
+      { url: '/api/progression/skip', body: { quest_id: 'pa-connect-source' } }
+    ]);
+    assert.deepEqual(events, ['ori:progression-refresh']);
+    assert.equal(manager.assignmentQuestMode, false);
+  } finally {
+    globalThis.window = priorWindow;
+    globalThis.document = priorDocument;
+    globalThis.fetch = priorFetch;
+  }
+});
+
 // stubHireDom gives the OnboardingManager just enough DOM to run the hire and
 // onboarding-completion paths without a browser.
 function stubHireDom() {

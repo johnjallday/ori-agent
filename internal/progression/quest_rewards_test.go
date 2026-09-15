@@ -109,7 +109,11 @@ func TestRewardedQuestsCanCompleteLive(t *testing.T) {
 // non-event code path (see initializeProgression).
 func completedByDirectCall(questID string) bool {
 	switch questID {
-	case "t1-personalize", "t2-build-hq":
+	case "t1-personalize", "t2-build-hq",
+		// Starter missions complete from server hooks: the File Janitor wizard
+		// reaching ready, a source connecting, and Today serving a brief.
+		progression.TidyDownloadsQuestID, progression.ConnectSourceQuestID,
+		progression.FirstBriefQuestID:
 		return true
 	default:
 		return false
@@ -123,6 +127,8 @@ func rewardedQuestIDs() []string {
 	candidates := []string{
 		"t1-first-message", "t1-personalize",
 		"t2-create-workspace", "t2-create-note", "t2-run-task", "t2-build-hq",
+		progression.TidyDownloadsQuestID, progression.ConnectSourceQuestID,
+		progression.FirstBriefQuestID,
 		"t3-second-agent", "t3-delegate", "t4-enable-skill",
 		"t5-create-trigger", "t6-memory",
 	}

@@ -184,7 +184,13 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     await expect(page).toHaveURL(/\/$/);
     await expect(page.locator('#homeHQResume')).toHaveCount(0);
     await expect(page.locator('#homeDailyBrief')).toBeHidden();
-    await expect(page.locator('[data-role="first-mission-status"]')).toHaveText('Saved for later');
+    // Deferring Build My HQ never blocks the next starter mission: the card
+    // moves on to Mission 02, and Build My HQ stays resumable beneath it.
+    await expect(page.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 02');
+    await expect(page.locator('[data-role="first-mission-status"]')).toHaveText('Ready');
+    await expect(
+      page.locator('[data-role="quests"] .quest-item').filter({ hasText: 'Build My HQ' })
+    ).toContainText('Skipped');
   });
 
   // The Map-native action hands off to the existing setup modal and then

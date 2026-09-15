@@ -23,7 +23,10 @@ func (b *ServerBuilder) initializeProgression() {
 
 	engine := progression.New(
 		b.onboardingMgr,
-		progression.WithQuests(progression.PersonalAssistantQuests()),
+		progression.WithGraph(progression.PersonalAssistantGraph()),
+		// The starter missions resolve their card from per-user state read at
+		// status time (focus areas, File Janitor setup, email setup, model).
+		progression.WithMissionContext(b.starterMissionContext),
 		// What each quest pays, for the quest log to display. The amounts live
 		// in the economy's own tuning file; progression only renders them.
 		progression.WithRewards(economy.StarterQuestCraft),
@@ -77,9 +80,11 @@ func (b *ServerBuilder) initializeProgression() {
 
 	// A first-assignment apply has its own atomic durability boundary. Progression
 	// observes only the successful result and remains safe to retry independently.
+	// Planning the first day is the plan branch of Connect one source; any branch
+	// completes the mission.
 	if b.personalAssistantHandler != nil {
 		b.personalAssistantHandler.SetOnFirstAssignmentCompleted(func() {
-			engine.Complete(progression.PersonalAssistantFirstDayQuestID)
+			engine.Complete(progression.ConnectSourceQuestID)
 		})
 	}
 
@@ -92,7 +97,7 @@ func (b *ServerBuilder) initializeProgression() {
 	// status load, so a restart cannot replay the first-day flow or toast old work.
 	if b.personalAssistantService != nil {
 		if state, err := b.personalAssistantService.Get(context.Background(), userprofile.LocalUserID); err == nil && state.FirstAssignment == personalassistant.FirstAssignmentCompleted {
-			engine.Complete(progression.PersonalAssistantFirstDayQuestID)
+			engine.Complete(progression.ConnectSourceQuestID)
 		}
 	}
 

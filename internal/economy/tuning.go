@@ -64,21 +64,27 @@ const CraftPerStarterQuest int64 = 5
 // hourly cap makes that two clock hours. That is a wall in front of the loop
 // the PRD's first success metric says a user should complete in one sitting.
 //
-// These six quests are exactly the stretch before that wall. Finishing ordinary
+// These quests are exactly the stretch before that wall. Finishing ordinary
 // setup now leaves a user able to afford their first Farm right about when
 // Tier 5 asks them to set up a schedule. Tier 3 and beyond pay nothing: by then
 // the user is earning normally and does not need the help.
+//
+// The starter missions (tasks/prd-starter-missions.md) added the three `pa-`
+// missions and retired "Create your first workspace", which Mission 02 now
+// does. Its Craft moved to Tidy your Downloads rather than vanishing.
 //
 // Ids are the durable identifiers from internal/progression/quests.go. A quest
 // this map does not name simply pays nothing, so a renamed or retired quest
 // degrades to silence rather than to a crash.
 var starterQuests = map[string]int64{
-	"t1-first-message":    CraftPerStarterQuest,
-	"t1-personalize":      CraftPerStarterQuest,
-	"t2-create-workspace": CraftPerStarterQuest,
-	"t2-create-note":      CraftPerStarterQuest,
-	"t2-run-task":         CraftPerStarterQuest,
-	"t2-build-hq":         CraftPerStarterQuest,
+	"t1-first-message":  CraftPerStarterQuest,
+	"t1-personalize":    CraftPerStarterQuest,
+	"t2-create-note":    CraftPerStarterQuest,
+	"t2-run-task":       CraftPerStarterQuest,
+	"t2-build-hq":       CraftPerStarterQuest,
+	"pa-tidy-downloads": CraftPerStarterQuest,
+	"pa-connect-source": CraftPerStarterQuest,
+	"pa-first-brief":    CraftPerStarterQuest,
 }
 
 // StarterQuestCraft reports what completing a quest pays, and whether it pays at

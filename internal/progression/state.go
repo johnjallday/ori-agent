@@ -37,8 +37,26 @@ type Snapshot struct {
 	// HasPersonalHQ is true when the user already has a valid Personal HQ
 	// designation, grandfathering the optional t2-build-hq quest.
 	HasPersonalHQ bool
-	// FirstAssignmentCompleted grandfathers the PAF cohort's first mission.
+	// FirstAssignmentCompleted is the plan branch of Connect one source.
 	FirstAssignmentCompleted bool
+
+	// The starter missions' grandfathering evidence.
+
+	// FileJanitorReady is true when a File Janitor workspace's setup wizard has
+	// reached ready (Tidy your Downloads).
+	FileJanitorReady bool
+	// EmailOpsReady is true when the guided email setup has been ready once.
+	EmailOpsReady bool
+	// CalendarReady is true when a Calendar Ops workspace has a ready binding.
+	CalendarReady bool
+	// ProjectWorkspaces counts active workspaces that are neither HQ nor one of
+	// the starter blueprints, the project branch of Connect one source.
+	ProjectWorkspaces int
+	// HasBriefRevision is true when HQ already has a Daily Brief revision.
+	HasBriefRevision bool
+	// LegacyFirstDayCompleted is true when the retired Plan my first day quest
+	// was completed before the starter missions replaced it.
+	LegacyFirstDayCompleted bool
 }
 
 // Scanner produces a Snapshot of existing state for the backfill scan. The
@@ -92,6 +110,13 @@ type QuestView struct {
 	// in one file. Shown by the quest log: a reward the user cannot see teaches
 	// them nothing about where resources come from.
 	RewardCraft int64 `json:"reward_craft,omitempty"`
+	// Featured and Order mirror Quest: the card reads Status.Missions, which
+	// holds only featured quests in Order.
+	Featured bool `json:"featured,omitempty"`
+	Order    int  `json:"order,omitempty"`
+	// InProgress is true when an unresolved mission has been started but not
+	// finished, so the card can say "In progress" instead of "Ready".
+	InProgress bool `json:"in_progress,omitempty"`
 }
 
 // TierView groups a tier's quests for the API.
@@ -122,4 +147,8 @@ type Status struct {
 	// NextQuest is the next actionable quest (lowest tier, first incomplete),
 	// or nil when everything is complete.
 	NextQuest *QuestView `json:"next_quest,omitempty"`
+	// Missions are the graph's featured quests in Order, resolved for the
+	// current user. The Quests card renders from this, never from quest IDs it
+	// knows. Empty for a graph with no featured quests.
+	Missions []QuestView `json:"missions"`
 }

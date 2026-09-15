@@ -1,11 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   currentTier,
   completedCount,
   resolvedCount,
   tierInsignia,
   compactSummaryView,
+  missionKicker,
   firstMissionView,
   tierQuestRows,
   questRowState,
@@ -151,261 +153,210 @@ test('compactSummaryView text never resembles the bare-number Updates attention 
   assert.doesNotMatch(view.text, /^\d+$/);
 });
 
-test('firstMissionView exposes the HQ quest before its tier unlocks', () => {
+test('compactSummaryView is unaffected by missions: it reads the current tier only', () => {
   const status = {
     current_tier: 1,
-    tiers: [
-      tier({ tier: 1, quests: [quest({ id: 'hello' })] }),
-      tier({
-        tier: 2,
-        quests: [
-          quest({
-            id: 't2-build-hq',
-            title: 'Build My HQ',
-            why: 'Give Ori a home base.',
-            status: 'locked-tier',
-            action_url: '/workspaces?view=map&focus=personal-hq',
-            action_label: 'Build My HQ'
-          })
-        ]
-      })
-    ]
+    missions: starterMissions({}).map(m => ({ ...m, status: 'completed' })),
+    tiers: [tier({ tier: 1, quests: [quest({ status: 'available' }), quest({ id: 'q2' })] })]
   };
+  assert.equal(compactSummaryView(status).text, 'Tier 1 · 0/2');
+});
 
-  assert.deepEqual(firstMissionView(status), {
-    visible: true,
-    questID: 't2-build-hq',
-    completed: false,
-    skipped: false,
-    title: 'Build My HQ',
-    why: 'Give Ori a home base.',
-    statusLabel: 'Ready',
-    actionLabel: 'Build My HQ',
-    actionURL: '/workspaces?view=map&focus=personal-hq',
-    showAction: true,
-    showSkip: false
+// ===========================================================================
+// The featured card, driven by status.missions (starter missions FR22-FR27)
+// ===========================================================================
+
+// The IDs below are fixture data only: the module under test must never know
+// them, which the source scan at the end of this section enforces.
+function mission(order, overrides = {}) {
+  return quest({
+    id: `mission-${order}`,
+    tier: 1,
+    order,
+    featured: true,
+    optional: true,
+    title: `Mission title ${order}`,
+    why: `Why ${order}`,
+    action_url: `/mission-${order}`,
+    action_label: 'Start',
+    ...overrides
   });
-});
+}
 
-test('firstMissionView prefers the PAF first-day quest and makes deferral explicit', () => {
-  const status = {
-    tiers: [
-      tier({
-        tier: 1,
-        quests: [
-          quest({
-            id: 't1-plan-first-day',
-            title: 'Plan my first day',
-            status: 'available',
-            optional: true,
-            action_url: '/?quest=plan-first-day',
-            action_label: 'Start first quest'
-          })
-        ]
-      }),
-      tier({
-        tier: 2,
-        quests: [quest({ id: 't2-build-hq', title: 'Build My HQ', status: 'completed' })]
-      })
-    ]
-  };
+// starterMissions builds the four missions with per-order overrides.
+function starterMissions(overrides) {
+  return [1, 2, 3, 4].map(order => mission(order, overrides[order] || {}));
+}
 
-  const view = firstMissionView(status);
-  assert.equal(view.questID, 't1-plan-first-day');
-  assert.equal(view.title, 'Plan my first day');
-  assert.equal(view.actionLabel, 'Start first quest');
-  assert.equal(view.showSkip, true);
-});
-
-test('firstMissionView turns a deferred first-day quest into a resumable mission', () => {
-  const status = {
-    tiers: [
-      tier({
-        quests: [
-          quest({
-            id: 't1-plan-first-day',
-            status: 'skipped',
-            optional: true,
-            action_url: '/?quest=plan-first-day',
-            action_label: 'Start first quest'
-          })
-        ]
-      })
-    ]
-  };
-
-  const view = firstMissionView(status);
-  assert.equal(view.statusLabel, 'Saved for later');
-  assert.equal(view.actionLabel, 'Resume first quest');
-  assert.equal(view.showAction, true);
-  assert.equal(view.showSkip, false);
-});
-
-test('firstMissionView turns a skipped HQ quest into a resumable mission', () => {
-  const status = {
-    tiers: [
-      tier({
-        quests: [
-          quest({
-            id: 't2-build-hq',
-            status: 'skipped',
-            action_url: '/workspaces?view=map&focus=personal-hq',
-            action_label: 'Build My HQ'
-          })
-        ]
-      })
-    ]
-  };
-
-  const view = firstMissionView(status);
-  assert.equal(view.statusLabel, 'Not set up');
-  assert.equal(view.actionLabel, 'Build My HQ');
-  assert.equal(view.showAction, true);
-});
-
-// pafStatus builds a personal-assistant-cohort status: the first-day quest is
-// what distinguishes the cohort from a legacy install.
-function pafStatus(buildHQFields, firstDayFields = {}) {
+function missionStatus(overrides = {}, extra = {}) {
+  const missions = starterMissions(overrides);
   return {
-    tiers: [
-      tier({
-        tier: 1,
-        quests: [
-          quest({
-            id: 't1-plan-first-day',
-            title: 'Plan my first day',
-            status: 'available',
-            optional: true,
-            action_url: '/?quest=plan-first-day',
-            action_label: 'Start first quest',
-            ...firstDayFields
-          })
-        ]
-      }),
-      tier({
-        tier: 2,
-        quests: [
-          quest({
-            id: 't2-build-hq',
-            title: 'Build My HQ',
-            why: 'Give your assistant a home base.',
-            optional: true,
-            action_url: '/?quest=build-hq',
-            action_label: 'Build My HQ',
-            ...buildHQFields
-          })
-        ]
-      })
-    ]
+    current_tier: 1,
+    all_complete: false,
+    missions,
+    tiers: [tier({ tier: 1, name: 'Starter', quests: missions })],
+    ...extra
   };
 }
 
-test('firstMissionView features Build My HQ before Plan my first day', () => {
-  // Hiring creates the assistant but no home base, so HQ is the mission first.
-  const view = firstMissionView(pafStatus({ status: 'available' }));
-  assert.equal(view.questID, 't2-build-hq');
-  assert.equal(view.title, 'Build My HQ');
-  assert.equal(view.actionLabel, 'Build My HQ');
-  // The guided route carries no focus parameter: the user selects the landmark.
-  assert.equal(view.actionURL, '/?quest=build-hq');
-  assert.doesNotMatch(view.actionURL, /focus=/);
-  assert.equal(view.showAction, true);
-  assert.equal(view.showSkip, true, 'Do this later must be offered');
+test('missionKicker zero-pads the server order', () => {
+  assert.equal(missionKicker(2), 'Mission 02');
+  assert.equal(missionKicker(12), 'Mission 12');
+  assert.equal(missionKicker(0), '');
+  assert.equal(missionKicker(undefined), '');
 });
 
-test('firstMissionView keeps a deferred guided HQ quest prominent and resumable', () => {
-  const view = firstMissionView(pafStatus({ status: 'skipped' }));
-  assert.equal(view.questID, 't2-build-hq', 'a deferred HQ must not hand over to first day');
-  assert.equal(view.statusLabel, 'Saved for later');
-  assert.equal(view.actionLabel, 'Resume quest');
-  assert.equal(view.actionURL, '/?quest=build-hq');
-  assert.equal(view.showAction, true);
-  assert.equal(view.showSkip, false, 'an already-deferred quest cannot be deferred again');
+test('firstMissionView: Ready shows the first unresolved mission with its own action', () => {
+  const view = firstMissionView(missionStatus({ 1: { status: 'completed' } }));
+  assert.deepEqual(view, {
+    visible: true,
+    questID: 'mission-2',
+    kicker: 'Mission 02',
+    completed: false,
+    skipped: false,
+    inProgress: false,
+    title: 'Mission title 2',
+    why: 'Why 2',
+    statusLabel: 'Ready',
+    actionLabel: 'Start',
+    actionURL: '/mission-2',
+    showAction: true,
+    showSkip: true
+  });
 });
 
-test('firstMissionView advances to Plan my first day only once HQ is completed', () => {
-  for (const status of ['available', 'locked-tier', 'skipped']) {
-    assert.equal(
-      firstMissionView(pafStatus({ status })).questID,
-      't2-build-hq',
-      `HQ status ${status} should keep HQ featured`
-    );
-  }
-  const view = firstMissionView(pafStatus({ status: 'completed' }));
-  assert.equal(view.questID, 't1-plan-first-day');
-  assert.equal(view.actionLabel, 'Start first quest');
+test('firstMissionView: In progress comes from the server, with its resolved action', () => {
+  const view = firstMissionView(
+    missionStatus({
+      1: { status: 'completed' },
+      2: { in_progress: true, action_url: '/workspaces/tidy', action_label: 'Finish setup' }
+    })
+  );
+  assert.equal(view.questID, 'mission-2');
+  assert.equal(view.inProgress, true);
+  assert.equal(view.statusLabel, 'In progress');
+  assert.equal(view.actionLabel, 'Finish setup');
+  assert.equal(view.actionURL, '/workspaces/tidy');
+  assert.equal(view.showSkip, true);
 });
 
-test('firstMissionView keeps both featured missions out of the tier rows', () => {
-  const status = pafStatus({ status: 'available' });
-  for (const tierEntry of status.tiers) {
-    for (const row of tierQuestRows(tierEntry)) {
-      assert.ok(
-        !['t1-plan-first-day', 't2-build-hq'].includes(row.id),
-        `featured mission ${row.id} duplicated into a tier row`
-      );
-    }
-  }
+test('firstMissionView: a deferred mission never blocks the next one', () => {
+  const view = firstMissionView(
+    missionStatus({ 1: { status: 'completed' }, 2: { status: 'skipped' } })
+  );
+  assert.equal(view.questID, 'mission-3');
+  assert.equal(view.kicker, 'Mission 03');
+  assert.equal(view.statusLabel, 'Ready');
 });
 
-test('firstMissionView leaves a legacy install its own Build My HQ presentation', () => {
-  // No first-day quest: this is not the personal-assistant cohort, so the copy
-  // and destination must be exactly what they were before.
-  const status = {
-    tiers: [
-      tier({
-        quests: [
-          quest({
-            id: 't2-build-hq',
-            status: 'skipped',
-            action_url: '/?focus=personal-hq',
-            action_label: 'Build My HQ'
-          })
-        ]
-      })
-    ]
-  };
-  const view = firstMissionView(status);
-  assert.equal(view.statusLabel, 'Not set up');
-  assert.equal(view.actionLabel, 'Build My HQ');
-  assert.equal(view.actionURL, '/?focus=personal-hq');
+test('firstMissionView: all resolved rests on the last mission, Complete, with no action', () => {
+  const view = firstMissionView(
+    missionStatus({
+      1: { status: 'completed' },
+      2: { status: 'skipped' },
+      3: { status: 'completed' },
+      4: { status: 'completed' }
+    })
+  );
+  assert.equal(view.visible, true);
+  assert.equal(view.questID, 'mission-4');
+  assert.equal(view.kicker, 'Mission 04');
+  assert.equal(view.statusLabel, 'Complete');
+  assert.equal(view.completed, true);
+  assert.equal(view.showAction, false);
   assert.equal(view.showSkip, false);
 });
 
-test('firstMissionView keeps completion visible without a redundant action', () => {
-  const status = {
-    tiers: [tier({ quests: [quest({ id: 't2-build-hq', status: 'completed' })] })]
-  };
-
-  const view = firstMissionView(status);
-  assert.equal(view.visible, true);
-  assert.equal(view.statusLabel, 'Complete');
-  assert.equal(view.showAction, false);
-});
-
-test('firstMissionView hides once all progression is complete', () => {
-  const status = {
-    all_complete: true,
-    tiers: [tier({ quests: [quest({ id: 't2-build-hq', status: 'completed' })] })]
-  };
-  assert.deepEqual(firstMissionView(status), { visible: false });
-});
-
-test('tierQuestRows omits both cohort-specific Mission 01 candidates', () => {
-  const rows = tierQuestRows(
-    tier({
-      quests: [
-        quest({ id: 'workspace' }),
-        quest({ id: 't1-plan-first-day' }),
-        quest({ id: 't2-build-hq' }),
-        quest({ id: 'note' })
-      ]
+test('firstMissionView: a deferred last mission stays resumable from the card (Saved for later)', () => {
+  const view = firstMissionView(
+    missionStatus({
+      1: { status: 'completed' },
+      2: { status: 'completed' },
+      3: { status: 'completed' },
+      4: { status: 'skipped' }
     })
   );
-  assert.deepEqual(
-    rows.map(item => item.id),
-    ['workspace', 'note']
+  assert.equal(view.questID, 'mission-4');
+  assert.equal(view.statusLabel, 'Saved for later');
+  assert.equal(view.actionLabel, 'Resume quest');
+  assert.equal(view.showAction, true);
+  assert.equal(view.showSkip, false, 'an already-deferred mission cannot be deferred again');
+});
+
+test('firstMissionView: a completed mission is never in progress', () => {
+  const view = firstMissionView(
+    missionStatus({
+      1: { status: 'completed' },
+      2: { status: 'completed', in_progress: true },
+      3: { status: 'completed' },
+      4: { status: 'completed' }
+    })
   );
+  assert.equal(view.inProgress, false);
+});
+
+test('firstMissionView: a required mission offers no Skip', () => {
+  const view = firstMissionView(missionStatus({ 1: { optional: false } }));
+  assert.equal(view.questID, 'mission-1');
+  assert.equal(view.showSkip, false);
+});
+
+test('firstMissionView: order comes from the server, not from list position', () => {
+  const status = missionStatus();
+  status.missions = [mission(3), mission(1, { status: 'completed' })];
+  // The server sends missions sorted; the view trusts that and reads order.
+  const view = firstMissionView(status);
+  assert.equal(view.questID, 'mission-3');
+  assert.equal(view.kicker, 'Mission 03');
+});
+
+test('firstMissionView hides without missions or once all progression is complete', () => {
+  assert.deepEqual(firstMissionView(null), { visible: false });
+  assert.deepEqual(firstMissionView({ tiers: [tier({ quests: [quest()] })] }), {
+    visible: false
+  });
+  assert.deepEqual(firstMissionView(missionStatus({}, { missions: [] })), { visible: false });
+  assert.deepEqual(firstMissionView(missionStatus({}, { all_complete: true })), {
+    visible: false
+  });
+});
+
+test('tierQuestRows omits only the mission on the card', () => {
+  const status = missionStatus({ 1: { status: 'completed' } });
+  const shown = firstMissionView(status).questID;
+  const rows = tierQuestRows(status.tiers[0], shown).map(row => row.id);
+  assert.deepEqual(rows, ['mission-1', 'mission-3', 'mission-4']);
+});
+
+test('tierQuestRows keeps every row when no mission is shown', () => {
+  const t = tier({ quests: [quest({ id: 'a' }), quest({ id: 'b' })] });
+  assert.deepEqual(
+    tierQuestRows(t, '').map(row => row.id),
+    ['a', 'b']
+  );
+  assert.deepEqual(
+    tierQuestRows(t).map(row => row.id),
+    ['a', 'b']
+  );
+});
+
+test('checklist rows keep their Skip and Resume affordances beside the card', () => {
+  const status = missionStatus({ 1: { status: 'skipped' }, 2: { status: 'completed' } });
+  const shown = firstMissionView(status).questID;
+  assert.equal(shown, 'mission-3');
+  const rows = tierQuestRows(status.tiers[0], shown);
+  const states = Object.fromEntries(rows.map(row => [row.id, questRowState(row)]));
+  assert.equal(states['mission-1'].showResume, true, 'a deferred mission stays reachable');
+  assert.equal(states['mission-2'].mark, '✓');
+  assert.equal(states['mission-4'].showSkip, true);
+});
+
+test('progression-widget.js contains no quest ID literals', () => {
+  const source = readFileSync(new URL('./progression-widget.js', import.meta.url), 'utf8');
+  for (const pattern of [/['"`]t\d-[a-z-]+['"`]/, /['"`]pa-[a-z-]+['"`]/]) {
+    assert.doesNotMatch(source, pattern);
+  }
+  assert.doesNotMatch(source, /FIRST_MISSION_QUEST_ID|featuredMissionIDs/);
 });
 
 test('questRowState: an available optional quest shows the Skip control and a link', () => {
@@ -496,6 +447,13 @@ test('diffAnnouncements never reports a skip as a completion', () => {
   };
   const diff = diffAnnouncements(status, new Set(), {});
   assert.deepEqual(diff.newCompletions, [], 'skip must never toast as a quest completion');
+});
+
+test('diffAnnouncements never toasts a skipped starter mission', () => {
+  const status = missionStatus({ 1: { status: 'completed' }, 2: { status: 'skipped' } });
+  const diff = diffAnnouncements(status, new Set(['mission-1']), { 1: false });
+  assert.deepEqual(diff.newCompletions, []);
+  assert.deepEqual(diff.newTierCompletions, []);
 });
 
 test('diffAnnouncements reports a tier-complete transition when a real completion drove it', () => {

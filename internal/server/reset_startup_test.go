@@ -119,7 +119,10 @@ func TestResetLifecycleWorkspacePolicyOverridesOperatorAdoption(t *testing.T) {
 	}
 }
 
-func TestResetLifecycleBuilderRecompletesFirstDayAfterIntentionalQuestReset(t *testing.T) {
+// The retired Plan my first day quest is now the plan branch of Connect one
+// source (tasks/prd-starter-missions.md FR2), so the builder's first-assignment
+// reconcile re-completes that mission instead.
+func TestResetLifecycleBuilderRecompletesConnectSourceAfterIntentionalQuestReset(t *testing.T) {
 	f := resetfixture.NewSeeded(t)
 	db, err := database.Open(t.Context(), &database.Config{Path: filepath.Join(f.Paths().DataDir, "sessions.db"), WALMode: true})
 	requireResetNoError(t, err)
@@ -144,8 +147,8 @@ func TestResetLifecycleBuilderRecompletesFirstDayAfterIntentionalQuestReset(t *t
 	}
 	t.Cleanup(builder.eventBus.Shutdown)
 	builder.initializeProgression()
-	if _, found := builder.onboardingMgr.GetProgression().CompletedQuests[progression.PersonalAssistantFirstDayQuestID]; !found {
-		t.Fatal("characterization changed: builder no longer re-completes reset first-day quest")
+	if _, found := builder.onboardingMgr.GetProgression().CompletedQuests[progression.ConnectSourceQuestID]; !found {
+		t.Fatal("characterization changed: builder no longer re-completes the reset Connect one source mission")
 	}
 }
 
