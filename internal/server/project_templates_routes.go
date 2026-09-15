@@ -330,7 +330,7 @@ func mergePluginBlueprintCandidates(existing []projecttemplates.Template, candid
 			if _, replaced := supersededByActive[template.ID]; replaced {
 				continue
 			}
-			if _, replaced := supersededWhenRetired[template.ID]; replaced && !projecttemplates.IsBuiltinStarterID(template.ID) {
+			if _, replaced := supersededWhenRetired[template.ID]; replaced && (template.Retired || !projecttemplates.IsBuiltinStarterID(template.ID)) {
 				continue
 			}
 		}

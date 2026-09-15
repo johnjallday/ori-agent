@@ -27,6 +27,28 @@ import (
 
 var errParentWorkspaceMustBeGroup = errors.New("parent workspace must be a group")
 
+// Sentinel errors renameWorkspace wraps so callers can map a non-conflict
+// failure to the same 500 body handleWorkspaceRename has always returned,
+// without the helper writing the HTTP response itself.
+var (
+	errWorkspaceRenameSQLite   = errors.New("failed to rename workspace")
+	errWorkspaceRenameFolder   = errors.New("failed to rename workspace folder")
+	errWorkspaceRenameRollback = errors.New("failed to rollback workspace rename")
+)
+
+// workspaceRenameConflictError signals a slug conflict encountered while
+// renaming a workspace, whether the conflict surfaced at the SQLite layer
+// (ErrWorkspaceSlugConflict) or the folder-store layer (FolderSlugConflictError).
+// Both render the same 409 body, built from globalWorkspaceSlugConflict.
+type workspaceRenameConflictError struct {
+	targetSlug string
+	parentDir  string
+}
+
+func (e *workspaceRenameConflictError) Error() string {
+	return fmt.Sprintf("workspace slug %q is already in use", e.targetSlug)
+}
+
 // workspaceSharedDataPrimaryDirectoryIDKey mirrors projecttemplates.PrimaryDirectoryIDKey
 // so this package and the workspace_create_project chat tool agree on the
 // SharedData key used to record a workspace's primary linked directory.
@@ -1535,13 +1557,24 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 		return
 	}
 
+	// Reject a blank name up front, before any other field is applied, so a
+	// 400 here never leaves a partial mutation - matching /rename's
+	// "name is required" behavior for the same field.
+	var trimmedName string
+	if req.Name != nil {
+		trimmedName = strings.TrimSpace(*req.Name)
+		if trimmedName == "" {
+			_ = orihttp.RespondBadRequest(w, "name is required")
+			return
+		}
+	}
+
 	h.hydrateWorkspaceMetadataInto(workspace)
 
-	// Apply partial updates
-	if req.Name != nil {
-		workspace.Name = *req.Name
-		workspace.FolderSlug = agentworkspace.Slugify(*req.Name)
-	}
+	// Apply partial updates. The "name" field is handled last, via the same
+	// renameWorkspace helper POST .../rename uses: it moves the backing
+	// folder and keeps SQLite's FolderSlug in sync with it, closing the gap
+	// that used to rewrite FolderSlug here without ever touching disk.
 	if req.Description != nil {
 		workspace.Description = *req.Description
 	}
@@ -1629,8 +1662,20 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 					return
 				}
 				h.applyMoveReferenceUpdates(r.Context(), workspace, moved)
+				workspace.ParentID = newParentID
+				// Persist the move immediately: the folder already changed on
+				// disk, so SQLite's parent_id must agree with it right away.
+				// Without this, a later rename failure in this same request
+				// would roll back only the name/slug fields, leaving SQLite
+				// pointing at the pre-move parent while disk already moved.
+				if err := h.store.UpdateWorkspace(r.Context(), workspace); err != nil {
+					logger.Error("Failed to persist workspace parent move", logger.Fields{"id": id, "error": err})
+					_ = orihttp.RespondInternalError(w, "Failed to update workspace")
+					return
+				}
+			} else {
+				workspace.ParentID = newParentID
 			}
-			workspace.ParentID = newParentID
 		}
 	}
 	if req.OrderIndex != nil {
@@ -1640,18 +1685,27 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 		workspace.Color = *req.Color
 	}
 
-	if err := h.store.UpdateWorkspace(r.Context(), workspace); err != nil {
-		logger.Error("Failed to update workspace", logger.Fields{"id": id, "error": err})
-		_ = orihttp.RespondInternalError(w, "Failed to update workspace")
-		return
-	}
-	if req.Name == nil && req.ParentID == nil {
-		if err := h.syncWorkspacePortableStateToFileStore(workspace); err != nil {
-			logger.Warn("Failed to sync workspace.json after workspace update", logger.Fields{"id": id, "error": err})
+	if req.Name != nil {
+		if err := h.renameWorkspace(r.Context(), workspace, trimmedName, ""); err != nil {
+			h.writeWorkspaceRenameError(w, r.Context(), trimmedName, id, err)
+			return
 		}
-	} else if req.Tags != nil {
-		if err := h.syncWorkspaceTagsToFileStore(workspace); err != nil {
-			logger.Warn("Failed to sync workspace tags after workspace update", logger.Fields{"id": id, "error": err})
+		// renameWorkspace already synced workspace.json (unconditionally, even
+		// when the slug didn't change), so no further sync is needed here.
+	} else {
+		if err := h.store.UpdateWorkspace(r.Context(), workspace); err != nil {
+			logger.Error("Failed to update workspace", logger.Fields{"id": id, "error": err})
+			_ = orihttp.RespondInternalError(w, "Failed to update workspace")
+			return
+		}
+		if req.ParentID == nil {
+			if err := h.syncWorkspacePortableStateToFileStore(workspace); err != nil {
+				logger.Warn("Failed to sync workspace.json after workspace update", logger.Fields{"id": id, "error": err})
+			}
+		} else if req.Tags != nil {
+			if err := h.syncWorkspaceTagsToFileStore(workspace); err != nil {
+				logger.Warn("Failed to sync workspace tags after workspace update", logger.Fields{"id": id, "error": err})
+			}
 		}
 	}
 
@@ -2019,6 +2073,122 @@ func setWorkspacePrimaryDirectoryID(workspace *session.Workspace, directoryID st
 	workspace.SharedData[workspaceSharedDataPrimaryDirectoryIDKey] = trimmed
 }
 
+// renameWorkspace is the shared rename mechanism behind both POST
+// .../rename and the generic update's "name" field. It computes the target
+// slug, updates SQLite (rolling back the in-memory name/slug on failure),
+// and - when the workspace is folder-tracked - renames the backing folder,
+// rewrites path-keyed references for every moved descendant, and syncs
+// workspace.json. On every return path SQLite and disk agree: a folder-level
+// failure rolls SQLite back to the pre-rename name and slug before returning.
+//
+// ws is mutated in place (Name, FolderSlug, UpdatedAt) so a successful
+// caller can respond with the same record. Errors are typed so a caller can
+// build its own response: a *workspaceRenameConflictError means "409, folder
+// or slug is already taken"; anything else is a 500, distinguished (if the
+// caller cares) via errors.Is against errWorkspaceRenameSQLite/
+// errWorkspaceRenameFolder/errWorkspaceRenameRollback.
+func (h *Handler) renameWorkspace(ctx context.Context, ws *session.Workspace, name, requestedSlug string) error {
+	oldName := ws.Name
+	oldFolderSlug := ws.FolderSlug
+
+	targetSlug := ""
+	if trimmedSlug := strings.TrimSpace(requestedSlug); trimmedSlug != "" {
+		targetSlug = agentworkspace.Slugify(trimmedSlug)
+	}
+	if targetSlug == "" {
+		targetSlug = agentworkspace.Slugify(name)
+	}
+
+	ws.Name = name
+	ws.FolderSlug = targetSlug
+	ws.UpdatedAt = time.Now()
+
+	if err := h.store.UpdateWorkspace(ctx, ws); err != nil {
+		ws.Name = oldName
+		ws.FolderSlug = oldFolderSlug
+		if errors.Is(err, session.ErrWorkspaceSlugConflict) {
+			parentDir := ""
+			if h.workspaceStore != nil {
+				if path, pathErr := h.workspaceStore.GetFolderPath(ws.ID); pathErr == nil {
+					parentDir = filepath.Dir(path)
+				}
+			}
+			return &workspaceRenameConflictError{targetSlug: targetSlug, parentDir: parentDir}
+		}
+		return fmt.Errorf("%w: %v", errWorkspaceRenameSQLite, err)
+	}
+
+	// Rename the backing folder when this workspace is tracked by the folder
+	// store. This includes groups (a group is a folder that may physically
+	// contain members); RenameWithSlug rewrites nested members' paths. DB-only
+	// workspaces have no folder to rename and are skipped.
+	folderTracked := false
+	if h.workspaceStore != nil {
+		if existing, getErr := h.workspaceStore.Get(ws.ID); getErr == nil && existing != nil {
+			folderTracked = true
+		}
+	}
+	if !folderTracked {
+		return nil
+	}
+
+	moved, err := h.workspaceStore.RenameWithSlug(ws.ID, name, targetSlug)
+	if err != nil {
+		ws.Name = oldName
+		ws.FolderSlug = oldFolderSlug
+		ws.UpdatedAt = time.Now()
+		if rollbackErr := h.store.UpdateWorkspace(ctx, ws); rollbackErr != nil {
+			logger.Error("Failed to rollback workspace rename after folder rename error", logger.Fields{"id": ws.ID, "error": rollbackErr})
+			return fmt.Errorf("%w: %v", errWorkspaceRenameRollback, rollbackErr)
+		}
+
+		var slugConflict *agentworkspace.FolderSlugConflictError
+		if errors.As(err, &slugConflict) {
+			return &workspaceRenameConflictError{targetSlug: targetSlug, parentDir: slugConflict.ParentDir}
+		}
+
+		logger.Error("Failed to rename workspace folder", logger.Fields{"id": ws.ID, "error": err})
+		return fmt.Errorf("%w: %v", errWorkspaceRenameFolder, err)
+	}
+
+	// The folder (and any nested members) changed paths: rewrite path-keyed
+	// references (directory references, MCP roots, project_path) and persist
+	// them.
+	if len(moved) > 0 {
+		h.applyMoveReferenceUpdates(ctx, ws, moved)
+		if err := h.store.UpdateWorkspace(ctx, ws); err != nil {
+			logger.Warn("Failed to persist renamed workspace references", logger.Fields{"id": ws.ID, "error": err})
+		}
+	}
+	// Sync workspace.json even when the slug did not change: RenameWithSlug
+	// returns no moved paths for a display-name-only change, but the folder
+	// still needs the new display name written into it.
+	if err := h.syncWorkspacePortableStateToFileStore(ws); err != nil {
+		logger.Warn("Failed to sync workspace.json after rename", logger.Fields{"id": ws.ID, "error": err})
+	}
+
+	return nil
+}
+
+// writeWorkspaceRenameError maps a renameWorkspace error to the HTTP response
+// handleWorkspaceRename has always returned, so a rename through the generic
+// update fails exactly the same way.
+func (h *Handler) writeWorkspaceRenameError(w http.ResponseWriter, ctx context.Context, requestedName, excludeID string, err error) {
+	var conflict *workspaceRenameConflictError
+	if errors.As(err, &conflict) {
+		writeWorkspaceCreateSlugConflict(w, requestedName, h.globalWorkspaceSlugConflict(ctx, conflict.targetSlug, excludeID, conflict.parentDir))
+		return
+	}
+	switch {
+	case errors.Is(err, errWorkspaceRenameRollback):
+		_ = orihttp.RespondInternalError(w, "Failed to rollback workspace rename")
+	case errors.Is(err, errWorkspaceRenameFolder):
+		_ = orihttp.RespondInternalError(w, "Failed to rename workspace folder")
+	default:
+		_ = orihttp.RespondInternalError(w, "Failed to rename workspace")
+	}
+}
+
 // handleWorkspaceRename handles POST /api/workspaces/{id}/rename.
 func (h *Handler) handleWorkspaceRename(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodPost {
@@ -2052,80 +2222,9 @@ func (h *Handler) handleWorkspaceRename(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	oldName := ws.Name
-	oldFolderSlug := ws.FolderSlug
-	targetSlug := ""
-	if requestedSlug := strings.TrimSpace(req.FolderSlug); requestedSlug != "" {
-		targetSlug = agentworkspace.Slugify(requestedSlug)
-	}
-	if targetSlug == "" {
-		targetSlug = agentworkspace.Slugify(req.Name)
-	}
-
-	ws.Name = req.Name
-	ws.FolderSlug = targetSlug
-	ws.UpdatedAt = time.Now()
-
-	if err := h.store.UpdateWorkspace(ctx, ws); err != nil {
-		if errors.Is(err, session.ErrWorkspaceSlugConflict) {
-			parentDir := ""
-			if h.workspaceStore != nil {
-				if path, pathErr := h.workspaceStore.GetFolderPath(id); pathErr == nil {
-					parentDir = filepath.Dir(path)
-				}
-			}
-			writeWorkspaceCreateSlugConflict(w, req.Name, h.globalWorkspaceSlugConflict(ctx, targetSlug, id, parentDir))
-			return
-		}
-		_ = orihttp.RespondInternalError(w, "Failed to rename workspace")
+	if err := h.renameWorkspace(ctx, ws, req.Name, req.FolderSlug); err != nil {
+		h.writeWorkspaceRenameError(w, ctx, req.Name, id, err)
 		return
-	}
-
-	// Rename the backing folder when this workspace is tracked by the folder
-	// store. This now includes groups (a group is a folder that may physically
-	// contain members); RenameWithSlug rewrites nested members' paths. DB-only
-	// workspaces have no folder to rename and are skipped.
-	folderTracked := false
-	if h.workspaceStore != nil {
-		if existing, getErr := h.workspaceStore.Get(id); getErr == nil && existing != nil {
-			folderTracked = true
-		}
-	}
-	if folderTracked {
-		moved, err := h.workspaceStore.RenameWithSlug(id, req.Name, targetSlug)
-		if err != nil {
-			ws.Name = oldName
-			ws.FolderSlug = oldFolderSlug
-			ws.UpdatedAt = time.Now()
-			if rollbackErr := h.store.UpdateWorkspace(ctx, ws); rollbackErr != nil {
-				logger.Error("Failed to rollback workspace rename after folder rename error", logger.Fields{"id": id, "error": rollbackErr})
-				_ = orihttp.RespondInternalError(w, "Failed to rollback workspace rename")
-				return
-			}
-
-			var slugConflict *agentworkspace.FolderSlugConflictError
-			if errors.As(err, &slugConflict) {
-				writeWorkspaceCreateSlugConflict(w, req.Name, h.globalWorkspaceSlugConflict(ctx, targetSlug, id, slugConflict.ParentDir))
-				return
-			}
-
-			logger.Error("Failed to rename workspace folder", logger.Fields{"id": id, "error": err})
-			_ = orihttp.RespondInternalError(w, "Failed to rename workspace folder")
-			return
-		}
-
-		// The folder (and any nested members) changed paths: rewrite
-		// path-keyed references (directory references, MCP roots,
-		// project_path) and persist them.
-		if len(moved) > 0 {
-			h.applyMoveReferenceUpdates(ctx, ws, moved)
-			if err := h.store.UpdateWorkspace(ctx, ws); err != nil {
-				logger.Warn("Failed to persist renamed workspace references", logger.Fields{"id": id, "error": err})
-			}
-			if err := h.syncWorkspacePortableStateToFileStore(ws); err != nil {
-				logger.Warn("Failed to sync workspace.json after rename", logger.Fields{"id": id, "error": err})
-			}
-		}
 	}
 
 	logger.Info("Workspace renamed", logger.Fields{"id": id, "new_name": req.Name})

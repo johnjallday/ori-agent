@@ -319,6 +319,10 @@ type Template struct {
 	// Builtin marks a template shipped with the app: read-only in the authoring
 	// UI and grouped as a built-in in the create-modal picker.
 	Builtin bool `json:"builtin"`
+	// Retired marks a built-in template that no longer appears in any listing
+	// (create-modal picker, /templates, plugin-blueprint merge) but still
+	// resolves by ID for backward compatibility with existing workspaces.
+	Retired bool `json:"retired,omitempty"`
 	// PluginOwner identifies an enabled trusted installed-plugin blueprint.
 	// It is inert provenance and is nil for built-in/user templates.
 	PluginOwner *workspace.PluginTemplateOwner `json:"plugin_owner,omitempty"`
@@ -535,6 +539,7 @@ type manifest struct {
 	ProjectEntry           json.RawMessage         `json:"project_entry,omitempty"`
 	ProjectConnection      json.RawMessage         `json:"project_connection,omitempty"`
 	Builtin                bool                    `json:"builtin,omitempty"`
+	Retired                bool                    `json:"retired,omitempty"`
 	BuiltinVersion         int                     `json:"builtin_version,omitempty"`
 	Onboarding             json.RawMessage         `json:"onboarding,omitempty"`
 	Tools                  *ToolDefaults           `json:"tools,omitempty"`
@@ -605,6 +610,7 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 	t.BehaviorProfile = NormalizeBehaviorProfile(m.BehaviorProfile)
 	t.StarterTasks = normalizeStarterTasks(m.StarterTasks)
 	t.Builtin = m.Builtin || IsBuiltinStarterID(t.ID)
+	t.Retired = m.Retired
 	t.BuiltinVersion = m.BuiltinVersion
 	t.HasSkeleton = hasSkeletonFiles(t.Path)
 	t.HasDashboard = HasDashboard(t.Path)
@@ -852,7 +858,11 @@ func ListLibraryWithCatalog(dir string, catalog RuntimeCatalog) ([]Template, err
 			continue
 		}
 		path := filepath.Join(dir, entry.Name())
-		templates = append(templates, newTemplateWithManifest(path, readManifest(path), catalog))
+		tmpl := newTemplateWithManifest(path, readManifest(path), catalog)
+		if tmpl.Retired {
+			continue
+		}
+		templates = append(templates, tmpl)
 	}
 
 	sort.Slice(templates, func(i, j int) bool { return templates[i].ID < templates[j].ID })

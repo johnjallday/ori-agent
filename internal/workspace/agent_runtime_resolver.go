@@ -371,7 +371,7 @@ func collectWorkspaceDirectoryRoots(ws *Workspace) []string {
 // binding.
 //
 // It is exported for features that call an MCP tool themselves rather than
-// through an agent — Downloads Janitor issues its own move_file after its own
+// through an agent — File Janitor issues its own move_file after its own
 // validation, precisely so the agent never holds a mutation tool. The binding's
 // scoping (its roots, and its AllowedTools) is the binding's own; this only
 // instantiates it.

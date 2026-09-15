@@ -119,8 +119,8 @@ test.describe('File Janitor console accessibility', () => {
     const workspaceId = await workspaceWithFolder(request, `FJ A11y Stack ${RUN}`, root);
     await page.setViewportSize({ width: 1400, height: 900 });
     await openConsole(page, workspaceId);
-    await page.locator('#downloadsJanitorScan').click();
-    await expect(page.locator('.dj-row-item').first()).toBeVisible({ timeout: 15000 });
+    await page.locator('#fileJanitorScan').click();
+    await expect(page.locator('.fj-row-item').first()).toBeVisible({ timeout: 15000 });
 
     // Compare the stacking directly rather than hit-testing a few points.
     //
@@ -215,7 +215,7 @@ test.describe('File Janitor console accessibility', () => {
       'Privacy mode'
     ]);
     await expect(card).toContainText(basename(root));
-    await expect(page.locator('#downloadsJanitorStats')).toContainText('1 file waiting for review');
+    await expect(page.locator('#fileJanitorStats')).toContainText('1 file waiting for review');
     await expect(card.getByRole('button', { name: 'Review files · 1', exact: true })).toBeVisible();
 
     await page.getByRole('button', { name: 'Map', exact: true }).click();
@@ -285,11 +285,11 @@ test.describe('File Janitor console accessibility', () => {
     const workspaceId = await workspaceWithFolder(request, `FJ A11y Confirm ${RUN}`, root);
     await openConsole(page, workspaceId);
 
-    await page.locator('#downloadsJanitorScan').click();
-    const row = page.locator('.dj-row-item').filter({ hasText: 'invoice.pdf' });
+    await page.locator('#fileJanitorScan').click();
+    const row = page.locator('.fj-row-item').filter({ hasText: 'invoice.pdf' });
     await expect(row).toBeVisible({ timeout: 15000 });
-    await row.locator('.dj-select').check();
-    await page.locator('#downloadsJanitorApprove').click();
+    await row.locator('.fj-select').check();
+    await page.locator('#fileJanitorApprove').click();
     await expect(page.locator('#fileJanitorConsoleBody')).toContainText('Confirm', {
       timeout: 15000
     });
@@ -329,17 +329,17 @@ test.describe('File Janitor console accessibility', () => {
     await page.keyboard.press('Home');
     await expect(reviewTab).toHaveAttribute('aria-selected', 'true');
     await expect(reviewTab).toBeFocused();
-    await page.locator('#downloadsJanitorScan').click();
-    await expect(page.locator('.dj-row-item').first()).toBeVisible({ timeout: 15000 });
+    await page.locator('#fileJanitorScan').click();
+    await expect(page.locator('.fj-row-item').first()).toBeVisible({ timeout: 15000 });
 
     // Filters report pressed state, and every row control is labelled with the
     // file it acts on — "Select" alone is useless in a list of twelve.
-    const filters = page.locator('.dj-filter');
+    const filters = page.locator('.fj-filter');
     expect(await filters.count()).toBeGreaterThan(0);
     for (let i = 0; i < (await filters.count()); i++) {
       await expect(filters.nth(i)).toHaveAttribute('aria-pressed', /true|false/);
     }
-    const firstBox = page.locator('.dj-select').first();
+    const firstBox = page.locator('.fj-select').first();
     await expect(firstBox).toHaveAttribute('aria-label', /Select .+/);
   });
 
@@ -351,9 +351,9 @@ test.describe('File Janitor console accessibility', () => {
     // The header status and the selection summary are both live regions, so a
     // scan finishing or a selection changing reaches a screen reader.
     await expect(page.locator('#fileJanitorConsoleStatus')).toHaveAttribute('aria-live', 'polite');
-    await page.locator('#downloadsJanitorScan').click();
-    await expect(page.locator('.dj-row-item').first()).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('#downloadsJanitorSelection')).toHaveAttribute('aria-live', 'polite');
+    await page.locator('#fileJanitorScan').click();
+    await expect(page.locator('.fj-row-item').first()).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('#fileJanitorSelection')).toHaveAttribute('aria-live', 'polite');
   });
 
   test('stays operable at a short 200%-zoom-equivalent viewport', async ({ page, request }) => {
@@ -368,15 +368,15 @@ test.describe('File Janitor console accessibility', () => {
     await page.setViewportSize({ width: 720, height: 450 });
 
     await openConsole(page, workspaceId);
-    await page.locator('#downloadsJanitorScan').click();
-    const firstRow = page.locator('.dj-row-item').first();
+    await page.locator('#fileJanitorScan').click();
+    const firstRow = page.locator('.fj-row-item').first();
     await expect(firstRow).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('.dj-batch-progress')).toContainText('60 remaining of 60 candidates');
+    await expect(page.locator('.fj-batch-progress')).toContainText('60 remaining of 60 candidates');
 
     const containment = await page.evaluate(() => {
       const dialog = document.querySelector('#fileJanitorConsoleDialog');
       const body = document.querySelector('#fileJanitorConsoleBody');
-      const progress = document.querySelector('.dj-batch-progress');
+      const progress = document.querySelector('.fj-batch-progress');
       return {
         viewport: innerWidth,
         dialog: dialog?.getBoundingClientRect().width || 0,
@@ -389,9 +389,9 @@ test.describe('File Janitor console accessibility', () => {
     expect(containment.progress).toBeLessThanOrEqual(containment.body);
     expect(containment.bodyScrollsSideways).toBe(false);
 
-    await firstRow.locator('.dj-select').check();
-    await expect(page.locator('#downloadsJanitorApprove')).toHaveText('Review 1 move');
-    await expect(page.locator('.dj-footer')).toBeInViewport();
+    await firstRow.locator('.fj-select').check();
+    await expect(page.locator('#fileJanitorApprove')).toHaveText('Review 1 move');
+    await expect(page.locator('.fj-footer')).toBeInViewport();
     await expect(page.locator('[data-fj-console-close]')).toBeInViewport();
   });
 
@@ -404,8 +404,8 @@ test.describe('File Janitor console accessibility', () => {
     await page.setViewportSize({ width: 390, height: 780 });
 
     await openConsole(page, workspaceId);
-    await page.locator('#downloadsJanitorScan').click();
-    await expect(page.locator('.dj-row-item').first()).toBeVisible({ timeout: 15000 });
+    await page.locator('#fileJanitorScan').click();
+    await expect(page.locator('.fj-row-item').first()).toBeVisible({ timeout: 15000 });
 
     // Containment is asserted on the console's own boxes rather than on the
     // document's scrollWidth.
@@ -423,14 +423,14 @@ test.describe('File Janitor console accessibility', () => {
         const el = document.querySelector(sel);
         return el ? Math.round(el.getBoundingClientRect().width) : -1;
       };
-      const scroller = document.querySelector('.dj-table-scroll');
+      const scroller = document.querySelector('.fj-table-scroll');
       return {
         viewport: window.innerWidth,
         dialog: box('#fileJanitorConsoleDialog'),
         body: box('#fileJanitorConsoleBody'),
-        scroller: box('.dj-table-scroll'),
-        table: box('.dj-table'),
-        row: box('.dj-row-item'),
+        scroller: box('.fj-table-scroll'),
+        table: box('.fj-table'),
+        row: box('.fj-row-item'),
         scrollerScrolls: scroller ? scroller.scrollWidth > scroller.clientWidth : false
       };
     });
@@ -451,18 +451,18 @@ test.describe('File Janitor console accessibility', () => {
       widths.scroller
     );
     expect(widths.scrollerScrolls, 'the table still creates sideways scrolling').toBe(false);
-    await expect(page.locator('.dj-row-item').first().locator('.dj-cell-mobile-label')).toHaveText([
+    await expect(page.locator('.fj-row-item').first().locator('.fj-cell-mobile-label')).toHaveText([
       'Destination',
       'Why / Status',
       'Actions'
     ]);
 
-    const details = page.locator('.dj-file-details-toggle').first();
+    const details = page.locator('.fj-file-details-toggle').first();
     await expect(details).toHaveAttribute('aria-expanded', 'false');
     await details.focus();
     await page.keyboard.press('Enter');
     await expect(details).toHaveAttribute('aria-expanded', 'true');
-    await expect(page.locator('.dj-file-details').first()).toBeVisible();
+    await expect(page.locator('.fj-file-details').first()).toBeVisible();
 
     // The header — and its Close — stay reachable however far the body scrolls.
     await page.locator('#fileJanitorConsoleBody').evaluate(el => el.scrollTo(0, el.scrollHeight));

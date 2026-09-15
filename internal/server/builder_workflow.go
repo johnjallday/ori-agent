@@ -400,7 +400,7 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	}
 
 	b.wireCalendarOpsSetup()
-	b.wireDownloadsJanitor()
+	b.wireFileJanitor()
 	// Build the compiled capability registry before restoring plugin surfaces:
 	// enabled plugin contributions register owner-aware definitions into this
 	// same catalog and must collide fail-closed with built-ins.
@@ -511,7 +511,7 @@ func (b *ServerBuilder) initializeTaskExecution() {
 	migrateWorkspaceToolboxes(b.workspaceStore, migrationSkillSource, newLoadoutResolverAdapter(b.st))
 
 	// The Janitor's mover needs the runtime resolver, which only exists here.
-	b.wireDownloadsJanitorMover()
+	b.wireFileJanitorMover()
 	b.taskHandler.SetRuntimeResolver(runtimeResolver)
 	b.taskHandler.SetExecutionScopeResolver(b.runtimeCapabilityService)
 	b.chatHandler.SetRuntimeResolver(runtimeResolver)
@@ -872,7 +872,7 @@ func (b *ServerBuilder) initializeTriggerService(opportunityStore workspace.Oppo
 	b.triggerHandler = triggerhttp.NewHandler(svc)
 	// The Janitor's watcher and daily catch-up need the trigger service, so
 	// they are wired here rather than at handler-construction time.
-	b.wireDownloadsJanitorAutomation()
+	b.wireFileJanitorAutomation()
 	// Note: b.server.Handlers is rebuilt after this phase, so the handler is
 	// attached to the facade in finalizeHandlers (alongside ActionCenter),
 	// not here.

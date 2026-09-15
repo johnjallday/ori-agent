@@ -1925,6 +1925,124 @@ smoke_agent_type_strip() {
   echo "PASS agent-type-strip (sandbox left at $dir)"
 }
 
+# canonical_dir resolves a directory to its real, symlink-free absolute path
+# (macOS temp dirs live under /var, itself a symlink to /private/var), so a
+# path this script writes and a path the server echoes back after resolving
+# the same folder compare equal.
+canonical_dir() {
+  (cd "$1" 2>/dev/null && pwd -P)
+}
+
+# smoke_janitor_upgrade_seed creates a Downloads Janitor workspace against the
+# OLD (pre-rename) binary, confirms setup against a throwaway folder inside
+# the sandbox holding a few "finished" dummy files, and runs one scan. The
+# workspace id is written to <sandbox>/janitor-workspace-id so a later run of
+# this script against the NEW binary (see smoke_janitor_upgrade_verify) can
+# find it. See tests/downloads-janitor.spec.ts for the request shapes this
+# mirrors.
+smoke_janitor_upgrade_seed() {
+  local sandbox="$1"
+  [[ -n "$sandbox" ]] || fail "usage: $0 janitor-upgrade-seed <base-url> <sandbox>"
+  mkdir -p "$sandbox"
+
+  local folder="$sandbox/janitor-inbox"
+  mkdir -p "$folder"
+  printf 'seed\n' >"$folder/report.pdf"
+  printf 'seed\n' >"$folder/photo.jpg"
+  printf 'seed\n' >"$folder/archive.zip"
+  # A file must look finished for the scanner to propose it: backdated well
+  # past the settling interval, same as the Playwright fixture's OLD stamp.
+  local old_stamp
+  old_stamp=$(date -v-6H +%Y%m%d%H%M 2>/dev/null || date -d '-6 hours' +%Y%m%d%H%M)
+  touch -t "$old_stamp" "$folder"/report.pdf "$folder"/photo.jpg "$folder"/archive.zip
+
+  echo "--- Downloads Janitor upgrade seed ($BASE_URL) ---"
+
+  local ws
+  ws=$(curl -s -X POST "$BASE_URL/api/workspaces" \
+    -H 'Content-Type: application/json' \
+    -d '{"name":"Janitor Upgrade Seed","description":"","template_id":"downloads-janitor","create_template_agents":true}' |
+    workspace_id)
+  [[ -n "$ws" ]] || fail "could not create a downloads-janitor workspace"
+  echo "ok   created workspace $ws"
+
+  local resolved_folder
+  resolved_folder=$(canonical_dir "$folder")
+  [[ -n "$resolved_folder" ]] || fail "could not resolve $folder"
+
+  local setup_status
+  setup_status=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+    "$BASE_URL/api/workspaces/$ws/downloads-janitor/setup" \
+    -H 'Content-Type: application/json' \
+    -d "$(FOLDER="$resolved_folder" python3 -c 'import json,os;print(json.dumps({"path":os.environ["FOLDER"],"paused":True}))')")
+  [[ "$setup_status" == "200" ]] || fail "setup confirmation => $setup_status"
+  echo "ok   setup confirmed against $resolved_folder"
+
+  local scan_status
+  scan_status=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/api/workspaces/$ws/downloads-janitor/scan")
+  [[ "$scan_status" == "200" ]] || fail "scan => $scan_status"
+  echo "ok   ran one scan"
+
+  printf '%s' "$ws" >"$sandbox/janitor-workspace-id"
+  echo "ok   wrote workspace id to $sandbox/janitor-workspace-id"
+  echo "PASS janitor upgrade seed"
+}
+
+# smoke_janitor_upgrade_verify re-reads the workspace smoke_janitor_upgrade_seed
+# created, against a (presumably upgraded) binary serving the same sandbox, and
+# checks the upgrade preserved everything: the confirmed folder, the pending
+# batch, the file-janitor capability install, and that the retired blueprint no
+# longer appears in the picker's source list.
+smoke_janitor_upgrade_verify() {
+  local sandbox="$1"
+  [[ -n "$sandbox" ]] || fail "usage: $0 janitor-upgrade-verify <base-url> <sandbox>"
+  local id_file="$sandbox/janitor-workspace-id"
+  [[ -f "$id_file" ]] || fail "$id_file not found; run janitor-upgrade-seed first"
+  local ws
+  ws=$(cat "$id_file")
+  [[ -n "$ws" ]] || fail "$id_file was empty"
+
+  echo "--- Downloads Janitor upgrade verify ($BASE_URL, workspace $ws) ---"
+
+  local expected_folder
+  expected_folder=$(canonical_dir "$sandbox/janitor-inbox")
+  [[ -n "$expected_folder" ]] || fail "could not resolve $sandbox/janitor-inbox"
+
+  local root_path
+  root_path=$(curl -s "$BASE_URL/api/workspaces/$ws/file-janitor" | json_field status.settings.root_path)
+  [[ "$root_path" == "$expected_folder" ]] || fail "root_path = '$root_path', want '$expected_folder'"
+  echo "ok   /file-janitor reports the confirmed folder"
+
+  local batch_total history_total
+  batch_total=$(curl -s "$BASE_URL/api/workspaces/$ws/file-janitor/batches/latest" | json_field total)
+  history_total=$(curl -s "$BASE_URL/api/workspaces/$ws/file-janitor/history" | json_field total)
+  [[ "${batch_total:-0}" -gt 0 || "${history_total:-0}" -gt 0 ]] ||
+    fail "neither the latest batch ($batch_total) nor history ($history_total) has any entries"
+  echo "ok   history or the latest batch is non-empty (batch=$batch_total, history=$history_total)"
+
+  local installed
+  installed=$(curl -s "$BASE_URL/api/workspaces/$ws/capabilities" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+for item in d.get("capabilities", []):
+    if item.get("definition", {}).get("id") == "file-janitor":
+        print(item.get("installed"))
+        break
+else:
+    print(False)')
+  [[ "$installed" == "True" ]] || fail "file-janitor capability is not installed on $ws"
+  echo "ok   file-janitor capability is installed"
+
+  local still_listed
+  still_listed=$(curl -s "$BASE_URL/api/project-templates" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+print(any(t.get("id") == "downloads-janitor" for t in d.get("templates", [])))')
+  [[ "$still_listed" == "False" ]] || fail "GET /api/project-templates still lists downloads-janitor"
+  echo "ok   /api/project-templates omits downloads-janitor"
+  echo "PASS janitor upgrade verify"
+}
+
 case "${1:-}" in
 serve) serve_isolated "${2:-8931}" "${3:-default}" ;;
 agent-type-api) smoke_agent_type_api ;;
@@ -1949,6 +2067,8 @@ drafting) smoke_drafting "${3:-}" ;;
 review) smoke_review "${3:-}" ;;
 materialize) smoke_materialize "${3:-}" ;;
 execution) smoke_execution "${3:-}" ;;
+janitor-upgrade-seed) smoke_janitor_upgrade_seed "${3:-}" ;;
+janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
 *)
   echo "usage:" >&2
   echo "  $0 serve [port] [sandbox-name]           # run an ISOLATED demo server (Ctrl-C to stop)" >&2
@@ -1963,6 +2083,8 @@ execution) smoke_execution "${3:-}" ;;
   echo "  $0 economypending <base-url> <db> <ws> <task> [n]  # City Economy: seed pending Harvest (demo sandboxes only)" >&2
   echo "  $0 seed <base-url>                       # seed plans and print URLs to review" >&2
   echo "  $0 {plans|drafting|review|materialize|execution|slot|reconcile|policy|boundary|hardening|packaged} <base-url> <workspace-id>" >&2
+  echo "  $0 janitor-upgrade-seed <base-url> <sandbox>    # seed a downloads-janitor workspace on the OLD binary" >&2
+  echo "  $0 janitor-upgrade-verify <base-url> <sandbox>  # verify it survived the rename on the NEW binary" >&2
   exit 2
   ;;
 esac

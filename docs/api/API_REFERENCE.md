@@ -1042,6 +1042,8 @@ GET  /api/workspaces/{workspaceID}/group-template
 
 **Listing and membership:** the flat `GET /api/workspaces` list includes groups (check `kind` to distinguish them); `GET /api/workspaces?tree=true` returns the nested tree. The UI's **Group selected** action first reviews and creates one rostered Group, then patches only its reviewed top-level member snapshot using `PATCH /api/workspaces/:id` with `parent_id` and `order_index`. A partial member move leaves the created group, its reviewed roster, and every successful move intact; a lost response is reconciled by refresh rather than retrying group creation.
 
+**Renaming through the generic update:** a `name` field on `PUT`/`PATCH /api/workspaces/:id` renames the workspace exactly like the dedicated `POST /api/workspaces/:id/rename` endpoint — it moves the backing folder (and any nested/linked members) to the new slug, rewrites path-keyed references, and rolls SQLite back to the pre-rename name and slug if the folder rename fails. A blank name (after trimming) is rejected with `400 name is required`; a slug already owned by another workspace is rejected with `409` and leaves the existing name, slug, and folder untouched. Sending `name` together with `parent_id` in one request applies the move first, then the rename, so the workspace ends up in exactly one folder at the new parent with the new slug.
+
 **Deleting a group** uses a two-mode flow:
 
 ```http

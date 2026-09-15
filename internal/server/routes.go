@@ -44,7 +44,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	registerTicketRoutes(mux, s)
 	registerTriggerRoutes(mux, s)
 	registerWorkspaceMemoryRoutes(mux, s)
-	registerDownloadsJanitorRoutes(mux, s)
+	registerFileJanitorRoutes(mux, s)
 	registerWorkspaceCapabilityRoutes(mux, s)
 	registerWorkspaceSurfaceRoutes(mux, s)
 	registerWorkspaceMapRoutes(mux, s)
@@ -1211,13 +1211,13 @@ func registerWorkspaceMemoryRoutes(mux *http.ServeMux, s *Server) {
 	}
 }
 
-// registerDownloadsJanitorRoutes registers the workspace-scoped Downloads
+// registerFileJanitorRoutes registers the workspace-scoped Downloads
 // Janitor setup/readiness endpoints.
-func registerDownloadsJanitorRoutes(mux *http.ServeMux, s *Server) {
+func registerFileJanitorRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
-	// Downloads Janitor Endpoints
+	// File Janitor Endpoints
 	// =============================================================================
-	s.Handlers.DownloadsJanitor.Register(mux)
+	s.Handlers.FileJanitor.Register(mux)
 }
 
 // registerWorkspaceCapabilityRoutes registers the workspace-scoped built-in

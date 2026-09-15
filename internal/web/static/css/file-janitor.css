@@ -4,11 +4,11 @@
    State is never carried by color alone: every readiness row also renders a
    text mark and a status word. */
 
-.downloads-janitor-mount[hidden] {
+.file-janitor-mount[hidden] {
   display: none;
 }
 
-.dj-card {
+.fj-card {
   margin-bottom: 1rem;
   padding: 1rem 1.25rem;
   border-radius: 12px;
@@ -16,7 +16,7 @@
   border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
 }
 
-.dj-head {
+.fj-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -24,21 +24,21 @@
   flex-wrap: wrap;
 }
 
-.dj-title {
+.fj-title {
   font-size: 1rem;
   font-weight: 600;
   margin: 0;
   color: var(--text-primary, #e8e8e8);
 }
 
-.dj-sub {
+.fj-sub {
   font-size: 0.8rem;
   margin: 0.15rem 0 0;
   color: var(--text-secondary, #9aa0a6);
   overflow-wrap: anywhere;
 }
 
-.dj-badge {
+.fj-badge {
   font-size: 0.72rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -50,19 +50,19 @@
   white-space: nowrap;
 }
 
-.dj-badge-ready {
+.fj-badge-ready {
   color: var(--success-color, #2e7d32);
 }
 
-.dj-badge-needs-attention {
+.fj-badge-needs-attention {
   color: var(--warning-color, #b26a00);
 }
 
-.dj-field {
+.fj-field {
   margin-top: 0.9rem;
 }
 
-.dj-label {
+.fj-label {
   display: block;
   font-size: 0.8rem;
   font-weight: 600;
@@ -70,13 +70,13 @@
   color: var(--text-primary, #e8e8e8);
 }
 
-.dj-field-row {
+.fj-field-row {
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
 }
 
-.dj-input {
+.fj-input {
   flex: 1 1 18rem;
   min-width: 0;
   padding: 0.4rem 0.6rem;
@@ -88,23 +88,23 @@
   font-size: 0.85rem;
 }
 
-.dj-input:focus-visible,
-.dj-btn:focus-visible {
+.fj-input:focus-visible,
+.fj-btn:focus-visible {
   outline: 2px solid var(--focus-ring, #5b9dd9);
   outline-offset: 2px;
 }
 
-.dj-disclosure-wrap {
+.fj-disclosure-wrap {
   margin-top: 0.9rem;
 }
 
-.dj-disclosure-lead {
+.fj-disclosure-lead {
   font-size: 0.82rem;
   margin: 0 0 0.4rem;
   color: var(--text-secondary, #9aa0a6);
 }
 
-.dj-disclosure {
+.fj-disclosure {
   margin: 0;
   padding-left: 1.1rem;
   display: flex;
@@ -112,13 +112,13 @@
   gap: 0.25rem;
 }
 
-.dj-disclosure-item {
+.fj-disclosure-item {
   font-size: 0.82rem;
   color: var(--text-secondary, #9aa0a6);
   overflow-wrap: anywhere;
 }
 
-.dj-rows {
+.fj-rows {
   list-style: none;
   margin: 0.9rem 0 0;
   padding: 0;
@@ -127,7 +127,7 @@
   gap: 0.3rem;
 }
 
-.dj-row {
+.fj-row {
   display: flex;
   align-items: baseline;
   gap: 0.4rem;
@@ -135,38 +135,38 @@
   color: var(--text-secondary, #9aa0a6);
 }
 
-.dj-row-mark {
+.fj-row-mark {
   flex: 0 0 auto;
   width: 1rem;
   text-align: center;
   font-weight: 700;
 }
 
-.dj-row-ok .dj-row-mark {
+.fj-row-ok .fj-row-mark {
   color: var(--success-color, #2e7d32);
 }
 
-.dj-row-failed .dj-row-mark {
+.fj-row-failed .fj-row-mark {
   color: var(--warning-color, #b26a00);
 }
 
-.dj-row-label {
+.fj-row-label {
   font-weight: 600;
   color: var(--text-primary, #e8e8e8);
 }
 
-.dj-row-value {
+.fj-row-value {
   overflow-wrap: anywhere;
 }
 
-.dj-actions {
+.fj-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
   margin-top: 0.9rem;
 }
 
-.dj-btn {
+.fj-btn {
   padding: 0.35rem 0.75rem;
   border-radius: 8px;
   border: 1px solid var(--border-color, rgba(255, 255, 255, 0.14));
@@ -176,47 +176,47 @@
   cursor: pointer;
 }
 
-.dj-btn:disabled {
+.fj-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
 
-.dj-btn-primary {
+.fj-btn-primary {
   background: var(--accent-color, #3b7dd8);
   border-color: transparent;
   color: #fff;
   font-weight: 600;
 }
 
-.dj-error[hidden] {
+.fj-error[hidden] {
   display: none;
 }
 
-.dj-error {
+.fj-error {
   margin: 0.75rem 0 0;
   font-size: 0.82rem;
   color: var(--danger-color, #c5442e);
 }
 
 @media (max-width: 640px) {
-  .dj-head {
+  .fj-head {
     flex-direction: column;
   }
 }
 
 /* ------------------------------------------------------------------ review */
 
-.dj-stats {
+.fj-stats {
   font-size: 0.8rem;
   margin: 0.25rem 0 0;
   color: var(--text-secondary, #9aa0a6);
 }
 
-.dj-batch {
+.fj-batch {
   margin-top: 1rem;
 }
 
-.dj-batch-progress {
+.fj-batch-progress {
   display: grid;
   grid-template-columns: minmax(9rem, 0.7fr) minmax(13rem, 1fr);
   gap: 0.2rem 1rem;
@@ -227,12 +227,12 @@
   background: color-mix(in srgb, var(--bg-tertiary, #242424) 62%, transparent);
 }
 
-.dj-batch-progress-title,
-.dj-batch-progress-main {
+.fj-batch-progress-title,
+.fj-batch-progress-main {
   margin: 0;
 }
 
-.dj-batch-progress-title {
+.fj-batch-progress-title {
   color: var(--text-secondary, #9aa0a6);
   font-size: 0.7rem;
   font-weight: 700;
@@ -240,14 +240,14 @@
   text-transform: uppercase;
 }
 
-.dj-batch-progress-main {
+.fj-batch-progress-main {
   grid-row: 2;
   color: var(--text-primary, #e8e8e8);
   font-size: 0.9rem;
   font-weight: 650;
 }
 
-.dj-batch-progress-counts {
+.fj-batch-progress-counts {
   display: flex;
   grid-row: 1 / span 2;
   grid-column: 2;
@@ -257,41 +257,41 @@
   margin: 0;
 }
 
-.dj-batch-progress-count {
+.fj-batch-progress-count {
   display: flex;
   gap: 0.25rem;
   align-items: baseline;
   min-width: max-content;
 }
 
-.dj-batch-progress-number,
-.dj-batch-progress-label {
+.fj-batch-progress-number,
+.fj-batch-progress-label {
   margin: 0;
   font-size: 0.72rem;
 }
 
-.dj-batch-progress-number {
+.fj-batch-progress-number {
   color: var(--text-primary, #e8e8e8);
   font-variant-numeric: tabular-nums;
   font-weight: 700;
 }
 
-.dj-batch-progress-label {
+.fj-batch-progress-label {
   color: var(--text-secondary, #9aa0a6);
 }
 
-.dj-batch-progress-count.is-attention .dj-batch-progress-number,
-.dj-batch-progress-count.is-problem .dj-batch-progress-number {
+.fj-batch-progress-count.is-attention .fj-batch-progress-number,
+.fj-batch-progress-count.is-problem .fj-batch-progress-number {
   color: var(--warning-color, #b26a00);
 }
 
-.dj-batch-summary {
+.fj-batch-summary {
   font-size: 0.76rem;
   margin: 0 0 0.6rem;
   color: var(--text-secondary, #9aa0a6);
 }
 
-.dj-batch-load-notice {
+.fj-batch-load-notice {
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem 0.65rem;
@@ -303,32 +303,32 @@
   background: var(--surface-1, rgba(255, 255, 255, 0.03));
 }
 
-.dj-batch-load-error {
+.fj-batch-load-error {
   border-color: color-mix(in srgb, var(--warning-color, #b26a00) 55%, transparent);
 }
 
-.dj-batch-load-title,
-.dj-batch-load-copy {
+.fj-batch-load-title,
+.fj-batch-load-copy {
   margin: 0;
 }
 
-.dj-batch-load-title {
+.fj-batch-load-title {
   color: var(--text-primary, #e8e8e8);
   font-size: 0.82rem;
   font-weight: 700;
 }
 
-.dj-batch-load-copy {
+.fj-batch-load-copy {
   flex: 1 1 18rem;
   color: var(--text-secondary, #9aa0a6);
   font-size: 0.78rem;
 }
 
-.dj-batch-load-notice .dj-btn {
+.fj-batch-load-notice .fj-btn {
   margin-left: auto;
 }
 
-.dj-batch-scan-status {
+.fj-batch-scan-status {
   margin: 0 0 0.65rem;
   padding: 0.45rem 0.6rem;
   border-left: 3px solid var(--accent-color, #3b7dd8);
@@ -336,14 +336,14 @@
   font-size: 0.78rem;
 }
 
-.dj-filters {
+.fj-filters {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
   margin-bottom: 0.6rem;
 }
 
-.dj-filter {
+.fj-filter {
   padding: 0.2rem 0.6rem;
   border-radius: 999px;
   border: 1px solid var(--border-color, rgba(255, 255, 255, 0.14));
@@ -353,20 +353,20 @@
   cursor: pointer;
 }
 
-.dj-filter:disabled {
+.fj-filter:disabled {
   cursor: not-allowed;
   opacity: 0.58;
 }
 
-.dj-filter-active {
+.fj-filter-active {
   color: var(--text-primary, #e8e8e8);
   border-color: var(--accent-color, #3b7dd8);
   font-weight: 600;
 }
 
-.dj-filter:focus-visible,
-.dj-select:focus-visible,
-.dj-category:focus-visible {
+.fj-filter:focus-visible,
+.fj-select:focus-visible,
+.fj-category:focus-visible {
   outline: 2px solid var(--focus-ring, #5b9dd9);
   outline-offset: 2px;
 }
@@ -374,7 +374,7 @@
 /* Review scrolling belongs to the console body. Keeping the table wrapper out
    of the scroll chain prevents a focused row from disappearing underneath a
    second nested viewport. */
-.dj-table-scroll {
+.fj-table-scroll {
   min-width: 0;
   margin-bottom: 4.5rem;
   overflow: visible;
@@ -382,14 +382,14 @@
   border-radius: 8px;
 }
 
-.dj-table {
+.fj-table {
   width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
   font-size: 0.8rem;
 }
 
-.dj-th {
+.fj-th {
   position: sticky;
   top: 0;
   z-index: 1;
@@ -402,48 +402,48 @@
   border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
 }
 
-.dj-th:nth-child(1),
-.dj-cell-select {
+.fj-th:nth-child(1),
+.fj-cell-select {
   width: 3.25rem;
 }
 
-.dj-th:nth-child(2) {
+.fj-th:nth-child(2) {
   width: 24%;
 }
 
-.dj-th:nth-child(3) {
+.fj-th:nth-child(3) {
   width: 24%;
 }
 
-.dj-th:nth-child(4) {
+.fj-th:nth-child(4) {
   width: 30%;
 }
 
-.dj-th:nth-child(5) {
+.fj-th:nth-child(5) {
   width: 10.5rem;
 }
 
-.dj-cell {
+.fj-cell {
   padding: 0.4rem 0.6rem;
   vertical-align: top;
   border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.05));
   color: var(--text-secondary, #9aa0a6);
 }
 
-.dj-cell-name {
+.fj-cell-name {
   color: var(--text-primary, #e8e8e8);
   overflow-wrap: anywhere;
 }
 
-.dj-name {
+.fj-name {
   font-weight: 500;
 }
 
-.dj-file-disclosure {
+.fj-file-disclosure {
   margin-top: 0.28rem;
 }
 
-.dj-file-details-toggle {
+.fj-file-details-toggle {
   min-height: 28px;
   padding: 0.1rem 0;
   color: var(--accent-color, #3b7dd8);
@@ -456,11 +456,11 @@
   cursor: pointer;
 }
 
-.dj-file-details-toggle:hover {
+.fj-file-details-toggle:hover {
   color: var(--accent-hover, #2f6ec3);
 }
 
-.dj-file-details {
+.fj-file-details {
   display: grid;
   gap: 0.18rem;
   margin: 0.2rem 0 0;
@@ -469,27 +469,27 @@
   color: var(--text-secondary, #9aa0a6);
 }
 
-.dj-file-details[hidden] {
+.fj-file-details[hidden] {
   display: none;
 }
 
-.dj-file-detail {
+.fj-file-detail {
   display: grid;
   grid-template-columns: 4.2rem minmax(0, 1fr);
   gap: 0.35rem;
 }
 
-.dj-file-detail-label,
-.dj-file-detail-value {
+.fj-file-detail-label,
+.fj-file-detail-value {
   margin: 0;
 }
 
-.dj-file-detail-label {
+.fj-file-detail-label {
   font-weight: 600;
   color: var(--text-primary, #e8e8e8);
 }
 
-.dj-flag {
+.fj-flag {
   display: inline-block;
   margin-left: 0.4rem;
   padding: 0.05rem 0.4rem;
@@ -500,7 +500,7 @@
   color: var(--warning-color, #b26a00);
 }
 
-.dj-category {
+.fj-category {
   width: 100%;
   max-width: 13rem;
   padding: 0.2rem 0.35rem;
@@ -511,7 +511,7 @@
   font-size: 0.78rem;
 }
 
-.dj-destination {
+.fj-destination {
   display: block;
   margin-top: 0.15rem;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
@@ -520,22 +520,22 @@
   overflow-wrap: anywhere;
 }
 
-.dj-cell-reason {
+.fj-cell-reason {
   overflow-wrap: anywhere;
 }
 
-.dj-confidence {
+.fj-confidence {
   display: block;
   margin-top: 0.15rem;
   font-size: 0.72rem;
 }
 
-.dj-confidence-low {
+.fj-confidence-low {
   color: var(--warning-color, #b26a00);
   font-weight: 600;
 }
 
-.dj-state {
+.fj-state {
   display: block;
   width: fit-content;
   margin-top: 0.3rem;
@@ -546,94 +546,94 @@
   border-radius: 999px;
 }
 
-.dj-cell-mobile-label {
+.fj-cell-mobile-label {
   display: none;
 }
 
 /* Low-confidence and changed rows are marked by text as well as tint, so the
    distinction survives without colour. */
-.dj-row-state-stale,
-.dj-row-state-failed,
-.dj-row-item.is-needs-review {
+.fj-row-state-stale,
+.fj-row-state-failed,
+.fj-row-item.is-needs-review {
   background: color-mix(in srgb, var(--warning-color, #b26a00) 8%, transparent);
 }
 
-.dj-row-state-skipped {
+.fj-row-state-skipped {
   opacity: 0.65;
 }
 
-.dj-state-reason {
+.fj-state-reason {
   display: block;
   font-size: 0.72rem;
 }
 
-.dj-btn-quiet {
+.fj-btn-quiet {
   padding: 0.15rem 0.5rem;
   font-size: 0.75rem;
 }
 
-.dj-muted {
+.fj-muted {
   font-size: 0.75rem;
   color: var(--text-secondary, #9aa0a6);
 }
 
-.dj-selection {
+.fj-selection {
   margin: 0.6rem 0 0;
   font-size: 0.78rem;
   color: var(--text-secondary, #9aa0a6);
 }
 
-.dj-empty {
+.fj-empty {
   padding: 0.75rem 0;
 }
 
-.dj-empty-title {
+.fj-empty-title {
   margin: 0;
   font-size: 0.9rem;
   font-weight: 600;
   color: var(--text-primary, #e8e8e8);
 }
 
-.dj-empty-copy {
+.fj-empty-copy {
   margin: 0.2rem 0 0;
   font-size: 0.8rem;
   color: var(--text-secondary, #9aa0a6);
 }
 
-.dj-empty .dj-btn {
+.fj-empty .fj-btn {
   margin-top: 0.65rem;
 }
 
 @media (max-width: 680px) {
-  .dj-batch-progress {
+  .fj-batch-progress {
     grid-template-columns: 1fr;
   }
 
-  .dj-batch-progress-main,
-  .dj-batch-progress-counts {
+  .fj-batch-progress-main,
+  .fj-batch-progress-counts {
     grid-row: auto;
     grid-column: 1;
   }
 
-  .dj-batch-progress-counts {
+  .fj-batch-progress-counts {
     margin-top: 0.35rem;
   }
 
-  .dj-batch-load-notice .dj-btn {
+  .fj-batch-load-notice .fj-btn {
     width: 100%;
     margin-left: 0;
   }
 
-  .dj-table-scroll {
+  .fj-table-scroll {
     border: 0;
   }
 
-  .dj-table,
-  .dj-tbody {
+  .fj-table,
+  .fj-tbody {
     display: block;
   }
 
-  .dj-table thead {
+  .fj-table thead {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -644,7 +644,7 @@
     border: 0;
   }
 
-  .dj-row-item {
+  .fj-row-item {
     display: grid;
     grid-template-columns: 2.25rem minmax(0, 1fr);
     gap: 0.25rem 0.5rem;
@@ -654,31 +654,31 @@
     border-radius: 8px;
   }
 
-  .dj-cell {
+  .fj-cell {
     display: block;
     min-width: 0;
     padding: 0.18rem 0;
     border: 0;
   }
 
-  .dj-cell-select {
+  .fj-cell-select {
     grid-row: 1;
     grid-column: 1;
     width: auto;
   }
 
-  .dj-cell-name {
+  .fj-cell-name {
     grid-row: 1;
     grid-column: 2;
   }
 
-  .dj-cell-destination,
-  .dj-cell-why-status,
-  .dj-cell-actions {
+  .fj-cell-destination,
+  .fj-cell-why-status,
+  .fj-cell-actions {
     grid-column: 1 / -1;
   }
 
-  .dj-cell-mobile-label {
+  .fj-cell-mobile-label {
     display: block;
     margin-bottom: 0.2rem;
     color: var(--text-secondary, #9aa0a6);
@@ -688,25 +688,25 @@
     text-transform: uppercase;
   }
 
-  .dj-category {
+  .fj-category {
     max-width: none;
   }
 
-  .dj-cell-actions .dj-btn {
+  .fj-cell-actions .fj-btn {
     min-height: 44px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dj-btn,
-  .dj-filter {
+  .fj-btn,
+  .fj-filter {
     transition: none;
   }
 }
 
 /* --------------------------------------------------- confirmation & results */
 
-.dj-footer {
+.fj-footer {
   position: sticky;
   bottom: -1.25rem;
   z-index: 2;
@@ -722,17 +722,17 @@
   box-shadow: 0 -10px 20px color-mix(in srgb, var(--bg-secondary, #1a1a1a) 88%, transparent);
 }
 
-.dj-footer .dj-selection {
+.fj-footer .fj-selection {
   margin: 0;
 }
 
-.dj-footer .dj-btn-primary:disabled {
+.fj-footer .fj-btn-primary:disabled {
   color: var(--text-secondary, #9aa0a6);
   background: var(--bg-tertiary, #2a2a2a);
   border-color: var(--border-color, #2f2f2f);
 }
 
-.dj-confirm {
+.fj-confirm {
   margin-top: 0.9rem;
   padding: 0.75rem 0.9rem;
   border-radius: 10px;
@@ -740,21 +740,21 @@
   background: var(--surface-2, rgba(255, 255, 255, 0.04));
 }
 
-.dj-confirm-title {
+.fj-confirm-title {
   margin: 0;
   font-size: 0.9rem;
   font-weight: 600;
   color: var(--text-primary, #e8e8e8);
 }
 
-.dj-confirm-lead {
+.fj-confirm-lead {
   margin: 0.2rem 0 0.5rem;
   font-size: 0.82rem;
   color: var(--text-secondary, #9aa0a6);
 }
 
-.dj-confirm-list,
-.dj-results-list {
+.fj-confirm-list,
+.fj-results-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -765,29 +765,29 @@
   overflow-y: auto;
 }
 
-.dj-confirm-item,
-.dj-results-item {
+.fj-confirm-item,
+.fj-results-item {
   font-size: 0.8rem;
   color: var(--text-secondary, #9aa0a6);
   overflow-wrap: anywhere;
 }
 
-.dj-confirm-name,
-.dj-results-name {
+.fj-confirm-name,
+.fj-results-name {
   color: var(--text-primary, #e8e8e8);
 }
 
-.dj-confirm-destination {
+.fj-confirm-destination {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
 }
 
 /* A forced rename is called out in words: the user is told the file will not
    land under the name they expected, and why. */
-.dj-confirm-renamed {
+.fj-confirm-renamed {
   color: var(--warning-color, #b26a00);
 }
 
-.dj-results {
+.fj-results {
   margin-top: 0.9rem;
   padding: 0.75rem 0.9rem;
   border-radius: 10px;
@@ -795,46 +795,46 @@
   background: var(--surface-1, rgba(255, 255, 255, 0.03));
 }
 
-.dj-results-summary {
+.fj-results-summary {
   margin: 0 0 0.5rem;
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--text-primary, #e8e8e8);
 }
 
-.dj-results-replayed {
+.fj-results-replayed {
   margin: -0.2rem 0 0.55rem;
   color: var(--text-secondary, #9aa0a6);
   font-size: 0.78rem;
 }
 
-.dj-results-actions {
+.fj-results-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
   margin-top: 0.7rem;
 }
 
-.dj-results-mark {
+.fj-results-mark {
   display: inline-block;
   width: 1rem;
   font-weight: 700;
 }
 
-.dj-results-applied .dj-results-mark {
+.fj-results-applied .fj-results-mark {
   color: var(--success-color, #2e7d32);
 }
 
-.dj-results-failed .dj-results-mark,
-.dj-results-stale .dj-results-mark {
+.fj-results-failed .fj-results-mark,
+.fj-results-stale .fj-results-mark {
   color: var(--warning-color, #b26a00);
 }
 
-.dj-results-destination {
+.fj-results-destination {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
 }
 
-.dj-results-message {
+.fj-results-message {
   display: block;
   padding-left: 1rem;
 }
@@ -842,23 +842,23 @@
 /* Destructive styling: a removal never looks like a move. The class is applied
    alongside text that states the consequence, so the distinction never rests on
    colour alone. */
-.dj-btn-destructive {
+.fj-btn-destructive {
   border-color: var(--danger-color, #c5442e);
   color: var(--danger-color, #c5442e);
   font-weight: 600;
 }
 
-.dj-btn-primary.dj-btn-destructive {
+.fj-btn-primary.fj-btn-destructive {
   background: var(--danger-color, #c5442e);
   border-color: transparent;
   color: #fff;
 }
 
-.dj-confirm-trash .dj-confirm-destination {
+.fj-confirm-trash .fj-confirm-destination {
   color: var(--danger-color, #c5442e);
 }
 
-.dj-trash-ack {
+.fj-trash-ack {
   display: flex;
   align-items: flex-start;
   gap: 0.4rem;
@@ -868,27 +868,27 @@
   cursor: pointer;
 }
 
-.dj-trash-ack input:focus-visible {
+.fj-trash-ack input:focus-visible {
   outline: 2px solid var(--focus-ring, #5b9dd9);
   outline-offset: 2px;
 }
 
 /* ---------------------------------------------------------------- history */
 
-.dj-history {
+.fj-history {
   margin-top: 1rem;
   padding-top: 0.75rem;
   border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
 }
 
-.dj-history-title {
+.fj-history-title {
   margin: 0 0 0.5rem;
   font-size: 0.9rem;
   font-weight: 600;
   color: var(--text-primary, #e8e8e8);
 }
 
-.dj-history-list {
+.fj-history-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -899,7 +899,7 @@
   overflow-y: auto;
 }
 
-.dj-history-item {
+.fj-history-item {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
@@ -909,20 +909,20 @@
   overflow-wrap: anywhere;
 }
 
-.dj-history-name {
+.fj-history-name {
   color: var(--text-primary, #e8e8e8);
 }
 
-.dj-history-undone {
+.fj-history-undone {
   color: var(--success-color, #2e7d32);
 }
 
-.dj-history-message {
+.fj-history-message {
   flex-basis: 100%;
   padding-left: 1rem;
 }
 
-.dj-history-status {
+.fj-history-status {
   margin: 0.5rem 0 0;
   font-size: 0.8rem;
   color: var(--text-primary, #e8e8e8);
@@ -930,27 +930,27 @@
 
 /* Activity states. Each is also spelled out in the badge text, so the
    distinction never depends on colour. */
-.dj-badge-watching {
+.fj-badge-watching {
   color: var(--text-secondary, #9aa0a6);
 }
 
-.dj-badge-scanning {
+.fj-badge-scanning {
   color: var(--accent-color, #3b7dd8);
 }
 
-.dj-badge-review-ready {
+.fj-badge-review-ready {
   color: var(--accent-color, #3b7dd8);
   font-weight: 700;
 }
 
-.dj-badge-paused {
+.fj-badge-paused {
   color: var(--text-secondary, #9aa0a6);
   font-style: italic;
 }
 
 /* ------------------------------------------------------ privacy & settings */
 
-.dj-privacy {
+.fj-privacy {
   display: flex;
   align-items: flex-start;
   gap: 0.4rem;
@@ -962,49 +962,49 @@
   color: var(--text-secondary, #9aa0a6);
 }
 
-.dj-privacy-mark {
+.fj-privacy-mark {
   flex: 0 0 auto;
   font-weight: 700;
 }
 
-.dj-privacy-headline {
+.fj-privacy-headline {
   color: var(--text-primary, #e8e8e8);
 }
 
-.dj-settings {
+.fj-settings {
   margin-top: 0.9rem;
   padding-top: 0.75rem;
   border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
 }
 
-.dj-settings-title {
+.fj-settings-title {
   margin: 0 0 0.6rem;
   font-size: 0.9rem;
   font-weight: 600;
   color: var(--text-primary, #e8e8e8);
 }
 
-.dj-setting {
+.fj-setting {
   margin-bottom: 0.9rem;
   border: 0;
   padding: 0;
 }
 
-.dj-setting-help,
-.dj-radio-help {
+.fj-setting-help,
+.fj-radio-help {
   display: block;
   margin: 0.15rem 0 0;
   font-size: 0.75rem;
   color: var(--text-secondary, #9aa0a6);
 }
 
-.dj-input-time {
+.fj-input-time {
   flex: 0 0 auto;
   max-width: 9rem;
   font-family: inherit;
 }
 
-.dj-radio {
+.fj-radio {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 0.1rem 0.45rem;
@@ -1013,31 +1013,31 @@
   cursor: pointer;
 }
 
-.dj-radio input {
+.fj-radio input {
   margin-top: 0.15rem;
 }
 
-.dj-radio-label {
+.fj-radio-label {
   color: var(--text-primary, #e8e8e8);
   font-size: 0.82rem;
 }
 
-.dj-radio-help {
+.fj-radio-help {
   grid-column: 2;
 }
 
-.dj-radio input:focus-visible {
+.fj-radio input:focus-visible {
   outline: 2px solid var(--focus-ring, #5b9dd9);
   outline-offset: 2px;
 }
 
-.dj-settings-actions {
+.fj-settings-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
 }
 
-.dj-settings-status {
+.fj-settings-status {
   margin: 0.6rem 0 0;
   font-size: 0.8rem;
   color: var(--text-primary, #e8e8e8);
@@ -1264,7 +1264,7 @@
    Workspace Command without copying the whole Map surface (FR-114). All
    surfaces and semantic colours resolve through Ori's light/dark theme tokens. */
 
-.downloads-janitor-mount {
+.file-janitor-mount {
   --fj-depot-accent: var(--warning-color);
   --fj-depot-surface: var(--bg-secondary);
   --fj-depot-surface-raised: var(--bg-tertiary);
@@ -1475,7 +1475,7 @@
   display: block;
 }
 
-.fj-card-fact-value.dj-badge {
+.fj-card-fact-value.fj-badge {
   display: inline-flex;
   width: fit-content;
   padding: 0.14rem 0.45rem;
@@ -1507,16 +1507,16 @@
   border-top-color: var(--success-color);
 }
 
-.fj-card .dj-badge-review-ready {
+.fj-card .fj-badge-review-ready {
   color: var(--warning-color);
 }
 
-.fj-card .dj-badge-needs-attention,
-.fj-card .dj-badge-consent-required {
+.fj-card .fj-badge-needs-attention,
+.fj-card .fj-badge-consent-required {
   color: var(--danger-color);
 }
 
-.fj-card .dj-badge-watching {
+.fj-card .fj-badge-watching {
   color: var(--success-color);
 }
 
@@ -1528,41 +1528,41 @@
   justify-content: flex-end;
 }
 
-.fj-card > .dj-error {
+.fj-card > .fj-error {
   grid-column: 1 / -1;
   margin: 0;
 }
 
-.fj-card .dj-btn {
+.fj-card .fj-btn {
   min-height: 34px;
   font-family: var(--fj-depot-mono);
   font-size: 0.72rem;
   letter-spacing: 0.04em;
 }
 
-.fj-card .dj-btn-primary {
+.fj-card .fj-btn-primary {
   background: var(--primary-color);
 }
 
-.fj-card .dj-btn-secondary {
+.fj-card .fj-btn-secondary {
   background: var(--fj-depot-surface-raised);
   border-color: var(--fj-depot-line-bright);
 }
 
-.fj-card .dj-btn-primary:hover:not(:disabled) {
+.fj-card .fj-btn-primary:hover:not(:disabled) {
   background: var(--primary-light);
 }
 
-.fj-card .dj-btn-secondary:hover:not(:disabled) {
+.fj-card .fj-btn-secondary:hover:not(:disabled) {
   color: var(--fj-depot-ink);
   border-color: var(--fj-depot-accent);
 }
 
-.fj-card .dj-btn:active:not(:disabled) {
+.fj-card .fj-btn:active:not(:disabled) {
   transform: translateY(1px);
 }
 
-.fj-card .dj-btn:disabled {
+.fj-card .fj-btn:disabled {
   color: var(--fj-depot-ink-faint);
   background: var(--fj-depot-surface-raised);
   border-color: var(--fj-depot-line);
@@ -1604,7 +1604,7 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .fj-card-actions .dj-btn-primary {
+  .fj-card-actions .fj-btn-primary {
     flex: 1 1 auto;
   }
 }
@@ -1615,7 +1615,7 @@
    controls sit below the table and stay in the flow, so the count and the way
    forward are read together. */
 
-.dj-pager {
+.fj-pager {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem 0.75rem;
@@ -1624,7 +1624,7 @@
   padding: 0.6rem 0;
 }
 
-.dj-pager-status {
+.fj-pager-status {
   flex: 1 1 auto;
   margin: 0;
   font-size: 0.8rem;
@@ -1634,22 +1634,22 @@
 
 /* The count beside a filter describes the whole batch, so it must not be
    mistaken for a badge on the current page. */
-.dj-filter-count {
+.fj-filter-count {
   margin-left: 0.35rem;
   font-size: 0.72rem;
   font-weight: 600;
   opacity: 0.85;
 }
 
-.dj-setting-heading {
+.fj-setting-heading {
   margin: 0 0 0.3rem;
   font-size: 0.88rem;
   font-weight: 600;
   color: var(--text-primary, #e8e8e8);
 }
 
-.dj-setting-health,
-.dj-setting-curator {
+.fj-setting-health,
+.fj-setting-curator {
   padding-top: 0.75rem;
   border-top: 1px solid var(--border-color, #2f2f2f);
 }
@@ -1660,11 +1660,11 @@
    remaining rules keep page controls and the selected-action footer compact. */
 
 @media (max-width: 720px) {
-  .dj-pager {
+  .fj-pager {
     justify-content: center;
   }
 
-  .dj-pager-status {
+  .fj-pager-status {
     flex: 1 0 100%;
     order: -1;
   }
@@ -1672,7 +1672,7 @@
   /* The footer holds the selected count and the approve control. It stays put
      at the bottom of the console so the consequence of a long scroll through
      the batch is always one press away, and never scrolled past. */
-  .dj-footer {
+  .fj-footer {
     position: sticky;
     bottom: 0;
     z-index: 1;

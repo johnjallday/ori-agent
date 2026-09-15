@@ -23,14 +23,14 @@ import (
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/dailybriefhttp"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
-	"github.com/johnjallday/ori-agent/internal/downloadsjanitor"
-	"github.com/johnjallday/ori-agent/internal/downloadsjanitorhttp"
 	"github.com/johnjallday/ori-agent/internal/economy"
 	"github.com/johnjallday/ori-agent/internal/economyhttp"
 	"github.com/johnjallday/ori-agent/internal/evolution"
 	"github.com/johnjallday/ori-agent/internal/evolutionhttp"
 	"github.com/johnjallday/ori-agent/internal/externalagents"
 	"github.com/johnjallday/ori-agent/internal/externalagentshttp"
+	"github.com/johnjallday/ori-agent/internal/filejanitor"
+	"github.com/johnjallday/ori-agent/internal/filejanitorhttp"
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	"github.com/johnjallday/ori-agent/internal/filewatcher"
 	"github.com/johnjallday/ori-agent/internal/followup"
@@ -367,14 +367,14 @@ type ServerBuilder struct {
 	oriGuideHandler *agenthttp.GuideHandler
 
 	// Daily Brief configuration, generation, and scheduling
-	dailyBriefService          *dailybrief.Service
-	dailyBriefHandler          *dailybriefhttp.Handler
-	downloadsJanitorHandler    *downloadsjanitorhttp.Handler
-	downloadsJanitorService    *downloadsjanitor.Service
-	downloadsJanitorAutomation *downloadsjanitor.Automation
+	dailyBriefService     *dailybrief.Service
+	dailyBriefHandler     *dailybriefhttp.Handler
+	fileJanitorHandler    *filejanitorhttp.Handler
+	fileJanitorService    *filejanitor.Service
+	fileJanitorAutomation *filejanitor.Automation
 	// fileJanitorCapabilityRuntime is held so a later wiring phase can give it
-	// the automation it needs for removal (see wireDownloadsJanitorAutomation).
-	fileJanitorCapabilityRuntime *downloadsjanitor.CapabilityRuntime
+	// the automation it needs for removal (see wireFileJanitorAutomation).
+	fileJanitorCapabilityRuntime *filejanitor.CapabilityRuntime
 	dailyBriefScheduler          *dailybrief.Scheduler
 
 	// Shared blueprint Setup Wizard: one lifecycle service over a compiled
@@ -391,9 +391,9 @@ type ServerBuilder struct {
 	runtimeCapabilityService  *runtimecapability.Service
 	runtimeCapabilityHandler  *runtimecapabilityhttp.Handler
 	taskCapabilityGate        *workspace.CompositeTaskCapabilityGate
-	// downloadsJanitorSetupAdapter is held so the watcher lifecycle can be
+	// fileJanitorSetupAdapter is held so the watcher lifecycle can be
 	// attached to it once the automation service exists (a later phase).
-	downloadsJanitorSetupAdapter *downloadsjanitor.SetupAdapter
+	fileJanitorSetupAdapter *filejanitor.SetupAdapter
 
 	// Built-in Workspace Capabilities: the compiled allowlist, the install
 	// lifecycle service over it, and its workspace-scoped HTTP handler. The
@@ -614,7 +614,7 @@ func (b *ServerBuilder) createDomainFacades() {
 	// mission-bridge init; stopped on Shutdown).
 	b.server.Workflow.TriggerService = b.triggerService
 	b.server.Workflow.DailyBriefScheduler = b.dailyBriefScheduler
-	b.server.downloadsJanitorAutomation = b.downloadsJanitorAutomation
+	b.server.fileJanitorAutomation = b.fileJanitorAutomation
 
 	// Integration System Facade
 	b.server.Integration = NewIntegrationSystemFacade(
@@ -676,7 +676,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		Characters:            b.characterHandler,
 		Economy:               b.economyHandler,
 		OriGuide:              b.oriGuideHandler,
-		DownloadsJanitor:      b.downloadsJanitorHandler,
+		FileJanitor:           b.fileJanitorHandler,
 		WorkspaceCapabilities: b.workspaceCapabilityHandler,
 		WorkspaceSurfaces:     b.workspaceSurfaceHandler,
 		WorkspaceMap:          b.workspaceMapHandler,

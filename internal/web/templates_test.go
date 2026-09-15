@@ -844,7 +844,7 @@ func TestWorkspaceDetailFileJanitorContract(t *testing.T) {
 		t.Fatalf("RenderTemplate(workspace-detail) failed: %v", err)
 	}
 
-	if got := strings.Count(html, `id="downloadsJanitorMount"`); got != 1 {
+	if got := strings.Count(html, `id="fileJanitorMount"`); got != 1 {
 		t.Errorf("File Janitor mount count = %d, want exactly 1", got)
 	}
 
@@ -856,10 +856,10 @@ func TestWorkspaceDetailFileJanitorContract(t *testing.T) {
 
 	// Nothing in the template may pre-render the surfaces the console owns.
 	for _, forbidden := range []string{
-		`id="downloadsJanitorBatch"`,
-		`id="downloadsJanitorSettingsHost"`,
-		`id="downloadsJanitorHistoryHost"`,
-		`id="downloadsJanitorConfirmHost"`,
+		`id="fileJanitorBatch"`,
+		`id="fileJanitorSettingsHost"`,
+		`id="fileJanitorHistoryHost"`,
+		`id="fileJanitorConfirmHost"`,
 	} {
 		if strings.Contains(html, forbidden) {
 			t.Errorf("workspace-detail must not contain %s; it belongs to the console", forbidden)

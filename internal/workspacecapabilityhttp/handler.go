@@ -3,7 +3,7 @@
 // installing one.
 //
 // Two invariants hold at this boundary and are enforced here, not deeper
-// (matching downloadsjanitorhttp, whose convention this follows):
+// (matching filejanitorhttp, whose convention this follows):
 //
 //   - Every request is scoped to a workspace the current user owns (FR-140).
 //   - A client-supplied capability ID may only select a definition compiled
