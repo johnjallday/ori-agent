@@ -170,8 +170,6 @@ var safeGuidance = map[ReasonCode]string{
 
 	ReasonWorkspaceRequired:              "Create the Email Ops workspace to continue.",
 	ReasonAccountConnectionNotConfigured: "Google sign-in isn't configured on this Ori server yet. Ask whoever runs it to set up the Google connection, then check again.",
-	ReasonAccountConnectionRequired:      "Connect your Google account in Settings, then choose Check again.",
-	ReasonAccountCapabilityNotEnabled:    "Enable Gmail on your connected Google account, then choose Check again.",
 	ReasonAccountReconnectRequired:       "Reconnect Gmail in Settings, then choose Check again.",
 	ReasonAccountVaultRepairRequired:     "Repair the vault that holds your email credentials in Settings, then choose Check again.",
 	ReasonMailboxLinkRequired:            "Review and confirm linking the connected account to this workspace.",
@@ -449,9 +447,12 @@ func (s *Service) reconcile(ctx context.Context, declaration *specialist.SetupJo
 			if busy.Status == OperationReconcileRequired {
 				kind, definition, known := actionKindAndDefinition(ActionID(busy.ActionID))
 				adapter := s.actionAdapters[kind]
-				// Group/project connection and File-only have unambiguous observed
-				// consequences. Do not generalize this to staffing or plugin actions.
-				recoverable := kind == specialist.SetupStepProjectConnect || ActionID(busy.ActionID) == ActionSelectFileOnlyMode
+				// Group/project connection, File-only, and the mailbox link have
+				// unambiguous observed consequences: each is one idempotent write whose
+				// presence the owner read shows directly. Do not generalize this to
+				// staffing or plugin actions.
+				recoverable := kind == specialist.SetupStepProjectConnect ||
+					ActionID(busy.ActionID) == ActionSelectFileOnlyMode || ActionID(busy.ActionID) == ActionLinkMailbox
 				if recoverable && known && definition.Effect == ActionEffectCommit && adapter != nil {
 					settled, settledReads := s.deriveCanonical(ctx, declaration, root, run, nil)
 					for index, step := range declaration.Steps {

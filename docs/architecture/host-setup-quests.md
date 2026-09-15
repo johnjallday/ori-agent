@@ -207,6 +207,53 @@ server restart the roster is Postmaster and Inbox and the workspace is in
 extension could not capture screenshots in this session, so the demo ran
 through `scripts/demo-455-email-quest.mjs`.
 
+**D13 — Group 3 refinements (supersede §4.3 and §5.4 where they differ).**
+
+- *Unfinished is not blocked.* Step 2 follows the readiness evaluator's own
+  split (`emailStepReadiness`): "connect Google" and "enable Gmail" are
+  unfinished first-time setup, so the step is active with its two navigation
+  actions and no reason code. Only a missing OAuth client, a grant that needs
+  reconnecting, and a vault repair block the step. The reason codes
+  `account_connection_required` and `account_capability_not_enabled` were
+  therefore never emitted and are removed from the closed set.
+- *Consequence observed means Ready.* `ConsequenceObserved` receives only the
+  step read, so it cannot recompute the binding-to-credential equality §5.4
+  described. It returns true when the link step is complete, which is exactly
+  the evaluator's Ready. The link is idempotent and readiness is the
+  consequence the user asked for, so an interrupted commit reconciles to
+  `already_current`. A Go test proves it without a second link.
+- *Stale review.* A receipt that no longer names the user's Email Ops
+  workspace, a changed connection or credential, or a binding written in
+  between (the workspace's own CTA) all surface as `review_stale` through the
+  owner digest or `ErrConflict`. After a CTA link the next read shows the step
+  complete with one binding.
+- *Ready shows its summary.* A ready run has no current step, and the shared
+  modal fell back to the first step, hiding the summary actions. The fallback
+  now picks the final step. Specialist journeys never reached that branch.
+- *Summary copy.* The summary description no longer repeats that triage needs
+  a model; the separate note appears only when the summary offers model
+  settings.
+- The mailbox linker is now built whenever the workspace and vault stores
+  exist and is stashed as `b.mailboxLinker`; the Personal HQ handler receives
+  the same instance as before.
+
+Demo evidence for Group 3 (provider-less sandbox, headless Chromium,
+2026-09-15). What ran against the real server: step 2 with no OAuth client
+shows "Google sign-in isn't configured on this Ori server yet" as blocked;
+Open Google Account opens `/settings#google-account` in a new tab with the
+quest still open; Check again re-reads. With a seeded connection file
+(identity and a healthy Gmail grant, no vault) step 2 names "Repair vault" and
+opens `/settings#google-account?gc_action=repair`; loading Settings then
+revalidated the seeded credential and Check again correctly showed "needs
+reconnecting". What was mocked: the link review card and the ready summary were
+rendered from fixture responses in the server's exact shape, because no live
+Google account or vault was used (creating a vault was avoided so the demo
+could not touch the real macOS keychain). The commit itself (sink → linker →
+wizard confirm, one read/search binding, replay without re-linking, stale
+review, secret scan, parity with workspace email status) is proven by the Go
+integration tests in `internal/server/email_ops_quest_mailbox_test.go`. The
+server log shows no model request.
+
 ### 1.4 Not drift, but worth stating
 
 - `gh` fails under the sandbox with a keychain TLS error; the merge-state check

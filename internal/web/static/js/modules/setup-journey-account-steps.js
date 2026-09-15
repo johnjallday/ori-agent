@@ -30,7 +30,87 @@ export function accountStepReceiptRows(step) {
     rows.push(['Blueprint', created.template_title]);
     rows.push(['Workspace', created.workspace_id ? created.workspace_label : 'Not created yet']);
   }
+  const connect = step?.account_connect;
+  if (step?.kind === 'account_connect' && connect) {
+    rows.push(['Google account', connect.identity_email || 'Not connected']);
+    rows.push(['Gmail', GMAIL_HEALTH_LABELS[connect.gmail_health] || 'Unknown']);
+  }
+  const link = step?.account_link;
+  if (step?.kind === 'account_link' && link) {
+    rows.push(['Workspace', link.workspace_label]);
+    rows.push([
+      'Mailbox',
+      link.ready ? link.account_email : link.linked ? 'Linked, needs repair' : 'Not linked yet'
+    ]);
+  }
   return rows;
+}
+
+const GMAIL_HEALTH_LABELS = Object.freeze({
+  unconfigured: 'Google sign-in is not configured on this Ori server',
+  not_connected: 'Connect Google first',
+  not_enabled: 'Not enabled yet',
+  unhealthy: 'Needs reconnecting',
+  vault_unavailable: 'Credential vault needs attention',
+  healthy: 'Enabled'
+});
+
+export const GOOGLE_ACCOUNT_SETTINGS_URL = '/settings#google-account';
+export const MODEL_SETTINGS_URL = '/settings#system-model';
+export const TRIAGE_MODEL_NOTE = 'Triage needs an AI model; mailbox readiness does not.';
+export const SETTINGS_TAB_NOTE =
+  'Google Account opened in a new tab. Finish there, then come back and choose Check again.';
+
+const SETTINGS_ROUTE_PATTERN = /^\/settings(?:[#?][^\s\\:<>"']*)?$/;
+
+// accountActionLabel lets the connection step name its exact repair ("Enable
+// Gmail", "Unlock vault") on the one compiled Settings action.
+export function accountActionLabel(step, action) {
+  const label = String(step?.account_connect?.action_label || '').trim();
+  if (step?.kind === 'account_connect' && action?.id === 'open_account_settings' && label) {
+    return label;
+  }
+  return action?.label || '';
+}
+
+// accountSettingsURL uses the readiness owner's own Settings route when it is a
+// plain same-origin Settings route, and the Google Account card otherwise.
+export function accountSettingsURL(journey) {
+  const step = (journey?.steps || []).find(item => item?.kind === 'account_connect');
+  const url = String(step?.account_connect?.action_url || '');
+  return SETTINGS_ROUTE_PATTERN.test(url) && !url.includes('//')
+    ? url
+    : GOOGLE_ACCOUNT_SETTINGS_URL;
+}
+
+// summaryModelNote explains why triage is not offered, only when the summary
+// offers model settings instead.
+export function summaryModelNote(step) {
+  if (step?.kind !== 'summary') return '';
+  return (step.actions || []).some(action => action?.id === 'open_model_settings')
+    ? TRIAGE_MODEL_NOTE
+    : '';
+}
+
+// accountLinkReviewPresentation is the consent card for the reviewed link. The
+// server bound this exact workspace, account, and disclosure into the token.
+export function accountLinkReviewPresentation(review) {
+  const link = review?.account_link;
+  if (!link) return null;
+  const workspace = link.workspace_label || 'this workspace';
+  return {
+    title: `Link this mailbox to “${workspace}”?`,
+    confirm: 'Link mailbox',
+    description:
+      'Ori uses the Google account you already connected. No new sign-in happens and no new permission is requested.',
+    rows: [
+      ['Workspace', workspace],
+      ['Google account', link.account_email || 'Your connected account'],
+      ['Email Ops can', 'Read and search this mailbox, and prepare drafts'],
+      ['Email Ops never', 'Sends a message without your confirmation of that specific message'],
+      ['Sign-in', 'No new sign-in happens']
+    ]
+  };
 }
 
 // teamReviewCreatorOptions opens the one shared Workspace creator on the Email

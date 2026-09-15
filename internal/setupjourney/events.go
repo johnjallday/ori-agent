@@ -85,6 +85,8 @@ func emitActionOutcome(projection *JourneyProjection, stepID string, action Acti
 		recordSpecialistEvent(specialistevents.ProjectTeamOutcome, fields)
 	case ActionAddOptionalHomeStaffing:
 		recordSpecialistEvent(specialistevents.SampleAddonOutcome, fields)
+	case ActionLinkMailbox:
+		recordSpecialistEvent(specialistevents.AccountLinkOutcome, fields)
 	}
 }
 

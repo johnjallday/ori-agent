@@ -306,8 +306,8 @@ func TestAccountProjectionValidators(t *testing.T) {
 // guidance never names an address, path, vault, or URL.
 func TestAccountLinkReasonGuidanceIsSafe(t *testing.T) {
 	for _, code := range []ReasonCode{
-		ReasonWorkspaceRequired, ReasonAccountConnectionNotConfigured, ReasonAccountConnectionRequired,
-		ReasonAccountCapabilityNotEnabled, ReasonAccountReconnectRequired, ReasonAccountVaultRepairRequired,
+		ReasonWorkspaceRequired, ReasonAccountConnectionNotConfigured,
+		ReasonAccountReconnectRequired, ReasonAccountVaultRepairRequired,
 		ReasonMailboxLinkRequired, ReasonMailboxAccountUnavailable,
 	} {
 		guidance := safeGuidance[code]

@@ -1,8 +1,14 @@
 import { openSetupWorkspaceCreator } from './setup-workspace-creator.js';
 import {
+  MODEL_SETTINGS_URL,
+  SETTINGS_TAB_NOTE,
+  accountActionLabel,
+  accountLinkReviewPresentation,
+  accountSettingsURL,
   accountStepReceiptRows,
   accountStepWorkspaceRoute,
   advanceCreatorToTeam,
+  summaryModelNote,
   teamReviewCreatorOptions
 } from './setup-journey-account-steps.js';
 import { groupBuildState, isGroupBuilderOpen, openGroupBuilder } from './group-builder.js';
@@ -88,7 +94,8 @@ export function setupJourneyCurrentStep(journey, selectedID = '') {
     steps.find(step => step?.id === selectedID) ||
     steps.find(step => step?.id === journey?.current_step_id) ||
     steps.find(step => step?.status !== 'complete') ||
-    steps[0] ||
+    // A ready run has no current step; its summary is what to show.
+    steps[steps.length - 1] ||
     null
   );
 }
@@ -381,6 +388,8 @@ function render() {
   elements.receipt.replaceChildren();
   if (step?.guidance && !projectDraft)
     elements.receipt.appendChild(makeText('p', '', step.guidance));
+  const modelNote = summaryModelNote(step);
+  if (modelNote) elements.receipt.appendChild(makeText('p', '', modelNote));
   appendRows(elements.receipt, setupJourneyReceiptRows(journey, step));
   renderDraft(step);
   renderActions(step);
@@ -824,7 +833,7 @@ function renderActions(step) {
   }
   if (step?.kind === 'project_connect' && state.draft) return;
   (step?.actions || []).forEach(action => {
-    const button = makeText('button', 'setup-journey__action', action.label);
+    const button = makeText('button', 'setup-journey__action', accountActionLabel(step, action));
     button.type = 'button';
     button.dataset.effect = action.effect || '';
     button.dataset.action = action.id || '';
@@ -1269,6 +1278,7 @@ function renderReview() {
   if (!state.review) return;
   const project = state.review.project_connection;
   const group = state.review.group;
+  const accountLink = accountLinkReviewPresentation(state.review);
   const replacement = state.review.integration?.replacement_required === true;
   const presentation = project
     ? projectReviewPresentation(project)
@@ -1279,7 +1289,7 @@ function renderReview() {
           description:
             'Create your group. No project, agent, schedule, or access permission will be added.'
         }
-      : null;
+      : accountLink;
   const heading = makeText(
     'h4',
     '',
@@ -1296,6 +1306,16 @@ function renderReview() {
         'setup-journey__scope-note',
         'Your workspaces will go inside this group. The group coordinates projects without inheriting their access.'
       )
+    );
+  } else if (accountLink) {
+    container.appendChild(makeText('p', '', accountLink.description));
+    appendRows(
+      container,
+      [
+        ...accountLink.rows,
+        ['Consent expires', new Date(state.review.expires_at).toLocaleString()]
+      ],
+      'setup-journey__review-list'
     );
   } else if (presentation) {
     container.appendChild(makeText('p', '', presentation.description));
@@ -1589,6 +1609,26 @@ async function navigateAction(actionID) {
       return refreshJourney();
     case 'review_team':
       return launchTeamReview();
+    case 'open_account_settings': {
+      // Google sign-in lives on the Settings card. The quest stays open here
+      // and never starts OAuth itself; Check again re-reads afterwards.
+      window.open(accountSettingsURL(state.journey), '_blank', 'noopener');
+      ui().live.textContent = SETTINGS_TAB_NOTE;
+      return;
+    }
+    case 'recheck_connection':
+      return refreshJourney();
+    case 'start_inbox_triage': {
+      // Opens the workspace's tasks; it never starts, assigns, or runs one.
+      const route =
+        accountStepWorkspaceRoute(state.journey, '?panel=tasks') ||
+        (await workspaceRoute(receipts.project_workspace_id, '?panel=tasks'));
+      if (route) window.location.assign(route);
+      return;
+    }
+    case 'open_model_settings':
+      window.location.assign(MODEL_SETTINGS_URL);
+      return;
     case 'open_workspace': {
       const route =
         accountStepWorkspaceRoute(state.journey) ||

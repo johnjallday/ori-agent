@@ -29,6 +29,7 @@ const (
 	SampleRootOutcome       Name = "specialist_setup.sample_root_outcome"
 	SampleAnalysisOutcome   Name = "specialist_setup.sample_analysis_outcome"
 	SampleHandoffOutcome    Name = "specialist_setup.sample_handoff_outcome"
+	AccountLinkOutcome      Name = "specialist_setup.account_link_outcome"
 	JourneyCompleted        Name = "specialist_setup.completed"
 	JourneyRegressed        Name = "specialist_setup.regressed"
 )
@@ -82,7 +83,7 @@ var knownEvents = map[Name]struct{}{
 	IntegrationReviewOpened: {}, IntegrationOutcome: {}, ProjectRouteSelected: {}, ProjectOutcome: {},
 	ModeSelected: {}, LiveVerifyOutcome: {}, HomeRoleOutcome: {}, ProjectTeamOutcome: {},
 	SampleAddonOutcome: {}, SampleCapabilityOutcome: {}, SampleRootOutcome: {}, SampleAnalysisOutcome: {},
-	SampleHandoffOutcome: {}, JourneyCompleted: {}, JourneyRegressed: {},
+	SampleHandoffOutcome: {}, AccountLinkOutcome: {}, JourneyCompleted: {}, JourneyRegressed: {},
 }
 
 var knownOutcomes = map[Outcome]struct{}{

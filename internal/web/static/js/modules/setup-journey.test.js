@@ -57,6 +57,17 @@ test('current step follows server identity and preserves an explicit rail select
     setupJourneyCurrentStep({ steps: [{ id: 'pending', status: 'pending' }] }).id,
     'pending'
   );
+  // A ready run has no current step and shows its summary, not its first step.
+  assert.equal(
+    setupJourneyCurrentStep({
+      current_step_id: '',
+      steps: [
+        { id: 'team', status: 'complete' },
+        { id: 'summary', status: 'complete' }
+      ]
+    }).id,
+    'summary'
+  );
 });
 
 test('a permitted development integration stays visibly distinct from a reviewed release', () => {

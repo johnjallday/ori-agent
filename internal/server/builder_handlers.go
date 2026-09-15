@@ -1174,9 +1174,12 @@ func (b *ServerBuilder) wireMailboxRuntime() {
 	// until now. Registering it earlier would silently produce an adapter that
 	// reports "unavailable" forever.
 	b.wireEmailSetupAdapter(b.setupWizardRegistry)
+	// The workspace-scoped link needs no Personal HQ, so the linker exists
+	// whenever the stores do; the Email Ops setup quest links through it too.
+	linker := newMailboxLinkerService(b.personalHQService, b.workspaceStore, b.vaultStore, cachedProvider)
+	linker.readiness = readiness
+	b.mailboxLinker = linker
 	if b.personalHQHandler != nil && b.personalHQService != nil {
-		linker := newMailboxLinkerService(b.personalHQService, b.workspaceStore, b.vaultStore, cachedProvider)
-		linker.readiness = readiness
 		b.personalHQHandler.SetMailboxLinker(linker)
 		b.personalHQHandler.SetWorkspaceMailboxLinker(linker)
 	}

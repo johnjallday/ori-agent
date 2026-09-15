@@ -186,6 +186,9 @@ type ServerBuilder struct {
 	// credential changed or was removed, so a disconnect takes effect
 	// immediately rather than at the next cache expiry (FR 75).
 	mailboxInvalidator accountInvalidator
+	// mailboxLinker attaches a connected account to a workspace. It is built in
+	// Phase 18 and consumed by the Email Ops setup quest in Phase 22.6.
+	mailboxLinker *mailboxLinkerService
 	// gmailSink is the connection's credential sink, stashed so the credential
 	// lifecycle can be attached once the workspace store exists (Phase 18).
 	gmailSink                *gmailCredentialSink

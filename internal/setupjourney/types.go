@@ -121,12 +121,12 @@ const (
 	ReasonStaffingRequired            ReasonCode = "staffing_required"
 	ReasonStaffingNeedsAttention      ReasonCode = "staffing_needs_attention"
 
-	// Account-link shape reasons. Each maps from one mailbox readiness verdict;
-	// none carries an address, vault name, path, or account identifier.
+	// Account-link shape reasons. Each maps from one mailbox readiness verdict
+	// that blocks progress; unfinished first-time setup (connect Google, enable
+	// Gmail) is an active step, not a blocked one. None carries an address,
+	// vault name, path, or account identifier.
 	ReasonWorkspaceRequired              ReasonCode = "workspace_required"
 	ReasonAccountConnectionNotConfigured ReasonCode = "account_connection_not_configured"
-	ReasonAccountConnectionRequired      ReasonCode = "account_connection_required"
-	ReasonAccountCapabilityNotEnabled    ReasonCode = "account_capability_not_enabled"
 	ReasonAccountReconnectRequired       ReasonCode = "account_reconnect_required"
 	ReasonAccountVaultRepairRequired     ReasonCode = "account_vault_repair_required"
 	ReasonMailboxLinkRequired            ReasonCode = "mailbox_link_required"
@@ -145,8 +145,8 @@ var validReasonCodes = map[ReasonCode]struct{}{
 	ReasonProjectSelectionRequired: {}, ReasonProjectScopeInvalid: {}, ReasonProjectAlreadyConnected: {},
 	ReasonProjectUnavailable: {}, ReasonRuntimeSetupRequired: {}, ReasonRuntimeNeedsAttention: {},
 	ReasonHomeUnavailable: {}, ReasonStaffingRequired: {}, ReasonStaffingNeedsAttention: {},
-	ReasonWorkspaceRequired: {}, ReasonAccountConnectionNotConfigured: {}, ReasonAccountConnectionRequired: {},
-	ReasonAccountCapabilityNotEnabled: {}, ReasonAccountReconnectRequired: {}, ReasonAccountVaultRepairRequired: {},
+	ReasonWorkspaceRequired: {}, ReasonAccountConnectionNotConfigured: {},
+	ReasonAccountReconnectRequired: {}, ReasonAccountVaultRepairRequired: {},
 	ReasonMailboxLinkRequired: {}, ReasonMailboxAccountUnavailable: {},
 }
 

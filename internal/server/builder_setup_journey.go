@@ -47,11 +47,12 @@ func (b *ServerBuilder) initializeSetupJourney() {
 		return
 	}
 	readers := make(map[specialist.SetupStepKind]setupjourney.CanonicalReader, len(specialist.SetupStepKinds()))
+	// Every compiled kind starts fail-closed; owners that exist in this build
+	// replace their reader below. A build without the mailbox runtime keeps the
+	// account steps owner_unavailable rather than guessing readiness.
 	for _, kind := range []specialist.SetupStepKind{
 		specialist.SetupStepAssistantProgramStaffing,
 		specialist.SetupStepWorkspaceCreate,
-		// TEMPORARY (#455 Group 2): the account steps fail closed until their
-		// readiness readers and the mailbox link adapter are wired in Group 3.
 		specialist.SetupStepAccountConnect,
 		specialist.SetupStepAccountLink,
 	} {
@@ -60,10 +61,7 @@ func (b *ServerBuilder) initializeSetupJourney() {
 		})
 	}
 	readers[specialist.SetupStepSummary] = setupSummaryReader{modelAvailable: b.systemModelAvailable}
-	if b.workspaceFileStore != nil {
-		// Provenance lives only in the folder store; see emailOpsWorkspaceCreateReader.
-		readers[specialist.SetupStepWorkspaceCreate] = emailOpsWorkspaceCreateReader{source: b.workspaceFileStore}
-	}
+	mailboxAdapter := b.emailOpsQuestReaders(readers)
 	var integrationAdapter *setupjourney.ReviewedIntegrationAdapter
 	var projectAdapter *setupjourney.ProjectConnectionAdapter
 	var workspaceSetupAdapter *setupjourney.WorkspaceSetupAdapter
@@ -210,6 +208,11 @@ func (b *ServerBuilder) initializeSetupJourney() {
 			panic("invalid built-in setup journey staffing adapter")
 		}
 	}
+	if mailboxAdapter != nil {
+		if err := b.setupJourneyService.SetActionAdapter(specialist.SetupStepAccountLink, mailboxAdapter); err != nil {
+			panic("invalid built-in setup journey mailbox link adapter")
+		}
+	}
 	// Host-compiled quests for built-in templates need no plugin or template
 	// library, so they are always served.
 	questCatalogs := []setupjourney.QuestCatalog{setupjourney.NewHostQuestCatalog(hostquests.All())}
@@ -240,6 +243,38 @@ func (b *ServerBuilder) initializeSetupJourney() {
 			}
 		}
 	}
+}
+
+// emailOpsQuestReaders installs the Email Ops host quest's readers for the
+// owners this build has and returns the mailbox link adapter when every
+// dependency of the link exists. The dependencies are all wired in Phase 18
+// (wireMailboxRuntime), before this runs in Phase 22.6.
+func (b *ServerBuilder) emailOpsQuestReaders(readers map[specialist.SetupStepKind]setupjourney.CanonicalReader) *emailOpsMailboxLinkAdapter {
+	if b.workspaceFileStore == nil {
+		return nil
+	}
+	// Provenance lives only in the folder store; see emailOpsWorkspaceCreateReader.
+	readers[specialist.SetupStepWorkspaceCreate] = emailOpsWorkspaceCreateReader{source: b.workspaceFileStore}
+	if b.emailReadiness == nil || b.emailReadiness.connections == nil {
+		return nil
+	}
+	readers[specialist.SetupStepAccountConnect] = emailOpsAccountConnectReader{
+		readiness: b.emailReadiness, clientConfigured: defaultOAuthClientConfigured,
+	}
+	readers[specialist.SetupStepAccountLink] = emailOpsAccountLinkReader{
+		readiness: b.emailReadiness, workspaces: b.workspaceFileStore,
+	}
+	if b.gmailSink == nil || b.mailboxLinker == nil {
+		return nil
+	}
+	adapter := &emailOpsMailboxLinkAdapter{
+		readiness: b.emailReadiness, resolver: b.workspaceFileStore, workspaces: b.workspaceFileStore,
+		sink: b.gmailSink, linker: b.mailboxLinker,
+	}
+	if b.setupWizardService != nil {
+		adapter.wizard = b.setupWizardService
+	}
+	return adapter
 }
 
 // systemModel returns the configured system provider and model, if any.
