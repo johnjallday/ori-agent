@@ -75,6 +75,20 @@ export function setupQuestURL(quest) {
   return `/?${query}`;
 }
 
+// setupQuestOpenDetail is the ori:open-specialist-setup event detail for a
+// catalog quest. Each source carries only its own identity fields.
+export function setupQuestOpenDetail(quest) {
+  if (quest?.source === 'host') return { source: 'host', quest_id: quest.id };
+  if (quest?.source === 'user_template') {
+    return {
+      source: 'user_template',
+      template_id: quest.template_id,
+      attachment_id: quest.attachment_id
+    };
+  }
+  return { plugin_id: quest?.plugin_id, quest_id: quest?.id };
+}
+
 // Match only canonical template ownership and an optional exact reference.
 // Local copies cannot select another plugin's quest by naming its ID alone.
 export function setupQuestForTemplate(template, quests) {

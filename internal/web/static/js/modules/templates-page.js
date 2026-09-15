@@ -405,9 +405,11 @@ function tplRenderQuest() {
   ownership.textContent =
     quest.source === 'user_template'
       ? 'User-owned · Source: user template'
-      : quest.ownership === 'host_compatibility'
-        ? `Ori compatibility setup for ${quest.plugin_id} · read-only.`
-        : `Provided by ${quest.plugin_id} · plugin-owned declaration · read-only.`;
+      : quest.source === 'host'
+        ? 'Ori built-in · read-only.'
+        : quest.ownership === 'host_compatibility'
+          ? `Ori compatibility setup for ${quest.plugin_id} · read-only.`
+          : `Provided by ${quest.plugin_id} · plugin-owned declaration · read-only.`;
   ownership.hidden = false;
   status.textContent =
     quest.source === 'user_template'

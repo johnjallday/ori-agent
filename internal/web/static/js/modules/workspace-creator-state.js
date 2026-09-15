@@ -44,6 +44,38 @@
     return requested === 'workspace' || requested === 'group' ? requested : '';
   }
 
+  function nameKey(value) {
+    return String(value || '')
+      .trim()
+      .toLowerCase();
+  }
+
+  // A team lock keeps named blueprint agents from being renamed in this
+  // creator, with a one-line reason. It is presentation plus a save guard; the
+  // server still validates the reviewed roster.
+  function normalizeTeamLock(value) {
+    if (!value || typeof value !== 'object') return null;
+    const agentNames = (Array.isArray(value.agentNames) ? value.agentNames : [])
+      .map(name => String(name || '').trim())
+      .filter(Boolean);
+    const reason = String(value.reason || '').trim();
+    return agentNames.length && reason ? { agentNames, reason } : null;
+  }
+
+  // teamLockReason returns the lock reason when originalName is locked, or ''.
+  function teamLockReason(context, originalName) {
+    const lock = normalizeTeamLock(context?.teamLock);
+    if (!lock || !nameKey(originalName)) return '';
+    return lock.agentNames.some(name => nameKey(name) === nameKey(originalName)) ? lock.reason : '';
+  }
+
+  // lockedRenameRefusal returns the reason to refuse saving a new name for a
+  // locked agent, or '' when the save may proceed.
+  function lockedRenameRefusal(context, originalName, requestedName) {
+    const reason = teamLockReason(context, originalName);
+    return reason && nameKey(requestedName) !== nameKey(originalName) ? reason : '';
+  }
+
   function createCreatorContext(options = {}) {
     const mode = modeFor(options);
     const fixedKind = fixedKindFor(options, mode);
@@ -61,6 +93,13 @@
       invoker: options.invoker || null,
       onCreated: typeof options.onCreated === 'function' ? options.onCreated : null,
       guided: options.guided && typeof options.guided === 'object' ? options.guided : null,
+      teamLock: normalizeTeamLock(options.teamLock),
+      // stayAfterCreate keeps the current page after a Workspace is created, so
+      // a caller such as a setup quest can continue instead of navigating away.
+      stayAfterCreate: Boolean(options.stayAfterCreate),
+      // stageBlueprintRoles proposes the blueprint's whole team once in the draft.
+      stageBlueprintRoles: Boolean(options.stageBlueprintRoles),
+      blueprintRolesStaged: false,
       drafts: {
         workspace: cloneDraft(options.drafts?.workspace),
         group: cloneDraft(options.drafts?.group)
@@ -125,6 +164,8 @@
     createCreatorContext,
     creatorSteps,
     switchCreatorKind,
-    buildOrdinaryGroupPayload
+    buildOrdinaryGroupPayload,
+    teamLockReason,
+    lockedRenameRefusal
   };
 })();

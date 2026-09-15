@@ -1,4 +1,10 @@
 import { openSetupWorkspaceCreator } from './setup-workspace-creator.js';
+import {
+  accountStepReceiptRows,
+  accountStepWorkspaceRoute,
+  advanceCreatorToTeam,
+  teamReviewCreatorOptions
+} from './setup-journey-account-steps.js';
 import { groupBuildState, isGroupBuilderOpen, openGroupBuilder } from './group-builder.js';
 import {
   fetchGroupTemplateStatus,
@@ -118,6 +124,7 @@ export function setupJourneyReceiptRows(journey, step) {
   if (step?.kind === 'project_connect' && journey?.receipts?.project_workspace_id) {
     rows.push(['Project', 'Connected']);
   }
+  rows.push(...accountStepReceiptRows(step));
   if (journey?.lifecycle === 'ready') rows.push(['Setup', 'Ready']);
   return rows.filter(row => row[1]);
 }
@@ -1580,8 +1587,73 @@ async function navigateAction(actionID) {
     case 'refresh_workspace_setup':
     case 'review_setup':
       return refreshJourney();
+    case 'review_team':
+      return launchTeamReview();
+    case 'open_workspace': {
+      const route =
+        accountStepWorkspaceRoute(state.journey) ||
+        (await workspaceRoute(receipts.project_workspace_id));
+      if (route) window.location.assign(route);
+      return;
+    }
     default:
       return;
+  }
+}
+
+// launchTeamReview hands the user to the shared Workspace creator on the
+// Email Ops blueprint's Team step. The quest does not create anything: when
+// the creator closes — after a create or a cancel — the quest re-reads its
+// canonical state and reopens where the server says the user is.
+async function launchTeamReview() {
+  const manager = window.sessionManager;
+  const creatorModal = document.getElementById('addFolderModal');
+  if (state.launchingTeamReview || state.commitLocked || state.journey?.busy) return;
+  if (!manager?.showAddWorkspaceModal || !creatorModal) {
+    showError('The workspace creator is unavailable. Refresh the page and try again.');
+    return;
+  }
+  state.launchingTeamReview = true;
+  const questID = String(state.journey?.journey?.id || '');
+  const elements = ui();
+  let current = true;
+  const onCreatorHidden = () => {
+    // The creator hides itself while a teammate's setup form or a Map
+    // placement is open; only a real close returns to the quest.
+    if (
+      creatorModal.dataset.suspendedForAgentSetup ||
+      creatorModal.dataset.suspendedForMapPlacement
+    ) {
+      return;
+    }
+    creatorModal.removeEventListener('hidden.bs.modal', onCreatorHidden);
+    current = false;
+    state.launchingTeamReview = false;
+    void openSpecialistSetupJourney({ source: 'host', quest_id: questID });
+  };
+  const open = async () => {
+    creatorModal.addEventListener('hidden.bs.modal', onCreatorHidden);
+    try {
+      manager.showAddWorkspaceModal(teamReviewCreatorOptions());
+      await advanceCreatorToTeam({
+        manager,
+        getSelectedTemplate: () => window.ProjectTemplateCard?.getSelectedTemplate?.(),
+        nameInput: document.getElementById('folderNameInput'),
+        isCurrent: () => current
+      });
+    } catch (error) {
+      creatorModal.removeEventListener('hidden.bs.modal', onCreatorHidden);
+      state.launchingTeamReview = false;
+      showError(error.message);
+      if (state.modal) state.modal.show();
+    }
+  };
+  if (state.modal) {
+    elements.root.addEventListener('hidden.bs.modal', open, { once: true });
+    hideJourneyPresentation();
+  } else {
+    hideJourneyPresentation();
+    await open();
   }
 }
 

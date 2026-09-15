@@ -49,9 +49,9 @@ func (b *ServerBuilder) initializeSetupJourney() {
 	readers := make(map[specialist.SetupStepKind]setupjourney.CanonicalReader, len(specialist.SetupStepKinds()))
 	for _, kind := range []specialist.SetupStepKind{
 		specialist.SetupStepAssistantProgramStaffing,
-		// TEMPORARY (#455 Group 2): the account-link kinds fail closed until
-		// their Email Ops readers are wired below.
 		specialist.SetupStepWorkspaceCreate,
+		// TEMPORARY (#455 Group 2): the account steps fail closed until their
+		// readiness readers and the mailbox link adapter are wired in Group 3.
 		specialist.SetupStepAccountConnect,
 		specialist.SetupStepAccountLink,
 	} {
@@ -59,7 +59,11 @@ func (b *ServerBuilder) initializeSetupJourney() {
 			return setupjourney.CanonicalStepRead{BlockedReason: setupjourney.ReasonOwnerUnavailable}, nil
 		})
 	}
-	readers[specialist.SetupStepSummary] = setupjourney.CanonicalReaderFunc(readSetupSummary)
+	readers[specialist.SetupStepSummary] = setupSummaryReader{modelAvailable: b.systemModelAvailable}
+	if b.workspaceFileStore != nil {
+		// Provenance lives only in the folder store; see emailOpsWorkspaceCreateReader.
+		readers[specialist.SetupStepWorkspaceCreate] = emailOpsWorkspaceCreateReader{source: b.workspaceFileStore}
+	}
 	var integrationAdapter *setupjourney.ReviewedIntegrationAdapter
 	var projectAdapter *setupjourney.ProjectConnectionAdapter
 	var workspaceSetupAdapter *setupjourney.WorkspaceSetupAdapter
@@ -139,32 +143,7 @@ func (b *ServerBuilder) initializeSetupJourney() {
 	if b.workspaceStore != nil && b.st != nil {
 		staffingAdapter = setupjourney.NewAssistantStaffingAdapter(
 			b.workspaceStore, b.st, serverStaffingToolGrants{builder: b},
-			func() (string, string) {
-				if b.configManager == nil {
-					return "", ""
-				}
-				return b.configManager.GetSystemModel()
-			},
-			func(providerName, modelName string) error {
-				providerName = strings.ToLower(strings.TrimSpace(providerName))
-				modelName = strings.TrimSpace(modelName)
-				if providerName == "" || b.llmFactory == nil {
-					return fmt.Errorf("model provider is unavailable")
-				}
-				provider, err := b.llmFactory.GetProvider(providerName)
-				if err != nil {
-					return err
-				}
-				if modelName == "" {
-					return nil
-				}
-				for _, available := range provider.DefaultModels() {
-					if available == modelName {
-						return nil
-					}
-				}
-				return fmt.Errorf("model is unavailable")
-			},
+			b.systemModel, b.validateModel,
 		)
 		readers[specialist.SetupStepAssistantProgramStaffing] = staffingAdapter
 		if b.sessionHandler != nil {
@@ -261,6 +240,44 @@ func (b *ServerBuilder) initializeSetupJourney() {
 			}
 		}
 	}
+}
+
+// systemModel returns the configured system provider and model, if any.
+func (b *ServerBuilder) systemModel() (string, string) {
+	if b == nil || b.configManager == nil {
+		return "", ""
+	}
+	return b.configManager.GetSystemModel()
+}
+
+// validateModel reports whether a provider is registered and, when a model is
+// named, whether that provider offers it. Staffing and the setup summary share
+// this one check so "a model can run" means the same thing in both.
+func (b *ServerBuilder) validateModel(providerName, modelName string) error {
+	providerName = strings.ToLower(strings.TrimSpace(providerName))
+	modelName = strings.TrimSpace(modelName)
+	if providerName == "" || b == nil || b.llmFactory == nil {
+		return fmt.Errorf("model provider is unavailable")
+	}
+	provider, err := b.llmFactory.GetProvider(providerName)
+	if err != nil {
+		return err
+	}
+	if modelName == "" {
+		return nil
+	}
+	for _, available := range provider.DefaultModels() {
+		if available == modelName {
+			return nil
+		}
+	}
+	return fmt.Errorf("model is unavailable")
+}
+
+// systemModelAvailable reports whether the configured system model can run.
+func (b *ServerBuilder) systemModelAvailable() bool {
+	provider, model := b.systemModel()
+	return strings.TrimSpace(provider) != "" && b.validateModel(provider, model) == nil
 }
 
 type serverStaffingToolGrants struct {

@@ -169,6 +169,44 @@ kinds mechanically. The exact list is in task 1.2.
 - *Workspace route is optional.* A slug that would need escaping is omitted
   and the client resolves the workspace by ID; the ID and label stay paired.
 
+**D12 — The Team step staffs roles, and Inbox is optional (found in the Group 2
+demo).** Since the role-vacancy work the creator's Team step renders each
+blueprint agent as a role with Create, Assign, and Clear, and an ordinary
+blueprint's non-first roles are optional and start empty. A workspace created
+that way can have no agent named Inbox, which leaves mail reading unusable
+(`isInboxAgent`) while the readiness evaluator still reports the mailbox as
+linked. The per-agent setup form §6.2 planned to lock is not on this path.
+Decisions, implemented:
+
+- The quest's creator options add `stageBlueprintRoles: true`. Once the plan and
+  saved roster are ready, `stageGuidedBlueprintRoles` stages every project role
+  as a Create fill under its declared name, or Assign when a saved agent
+  already has that name. It only edits the draft; creation still needs the
+  user's confirmation.
+- `teamLock` covers all three role paths for the locked label: the Create form's
+  name field is read-only with the reason, saving another name is refused,
+  Assign of a differently named agent is refused, and Clear is refused with a
+  warning toast. Postmaster stays fully editable. The per-agent setup form
+  keeps the same lock for blueprints that still use it.
+- The stay-on-page behaviour is a context option, `stayAfterCreate`, rather
+  than a check on `entryPoint`, so other guided callers can reuse it.
+- Known limitation: a workspace created from the picker outside the quest can
+  still leave Inbox empty. Step 1 completes for it, because FR 23 resolves the
+  workspace only. Surfacing a missing Inbox is left to #440/#445, which own the
+  Inbox role rule.
+
+Demo evidence (provider-less sandbox, headless Chromium, 2026-09-15): Templates
+shows "Ori built-in · read-only" with the host launch link; status is
+`exists:false` and the database holds no journey rows before the first open;
+the quest opens on step 1; Review your team opens the creator on Team with the
+name "Email Ops" and both roles staged; Clear on Inbox is refused with the lock
+reason; Create goes through `POST /api/workspaces`, the page stays on Home, and
+the quest reopens with step 1 complete and the workspace receipt; after a
+server restart the roster is Postmaster and Inbox and the workspace is in
+`workspace_allowlist.json`; the 400px layout holds. The in-browser Chrome
+extension could not capture screenshots in this session, so the demo ran
+through `scripts/demo-455-email-quest.mjs`.
+
 ### 1.4 Not drift, but worth stating
 
 - `gh` fails under the sandbox with a keychain TLS error; the merge-state check

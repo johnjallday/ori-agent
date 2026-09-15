@@ -8,6 +8,7 @@ import {
   setupJourneyAPIRoot,
   setupQuestURL,
   setupQuestForTemplate,
+  setupQuestOpenDetail,
   loadSetupQuests
 } from './setup-quest-links.js';
 
@@ -143,6 +144,27 @@ test('host quests route by quest ID only and match only the built-in template th
     setupQuestForTemplate({ id: 'email-ops', setup_quest: 'email_ops_setup' }, [hostQuest]),
     null
   );
+});
+
+test('open detail carries only the identity fields of its own quest source', () => {
+  assert.deepEqual(
+    setupQuestOpenDetail({
+      source: 'host',
+      id: 'email_ops_setup',
+      template_id: 'email-ops',
+      plugin_id: 'x'
+    }),
+    { source: 'host', quest_id: 'email_ops_setup' }
+  );
+  assert.deepEqual(setupQuestOpenDetail(userQuest), {
+    source: 'user_template',
+    template_id: userQuest.template_id,
+    attachment_id: userQuest.attachment_id
+  });
+  assert.deepEqual(setupQuestOpenDetail(quest), {
+    plugin_id: 'demo-plugin',
+    quest_id: 'demo_setup'
+  });
 });
 
 test('catalog discovery makes one read and generates its own safe launch URL', async t => {

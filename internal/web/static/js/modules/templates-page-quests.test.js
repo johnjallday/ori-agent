@@ -126,6 +126,36 @@ test('user-owned templates show their source-aware attachment quest without plug
   assert.equal(node('tplQuestHeading').textContent, userQuest.title);
 });
 
+test('a built-in template shows its Ori built-in quest and the host launch link', () => {
+  const { subject, node, calls } = harness();
+  const builtin = {
+    id: 'email-ops',
+    name: 'Email Ops',
+    builtin: true,
+    setup_quest: 'email_ops_setup'
+  };
+  const hostQuest = {
+    source: 'host',
+    id: 'email_ops_setup',
+    template_id: 'email-ops',
+    title: 'Set up Email Ops',
+    description: 'Create your inbox command post.',
+    ownership: 'host'
+  };
+  hostQuest.launch_url = setupQuestURL(hostQuest);
+  subject.tplState.templates = [builtin];
+  subject.tplState.selectedId = builtin.id;
+  subject.tplQuests.items = [quest, hostQuest];
+  subject.tplRenderQuest();
+  assert.equal(node('tplQuestOpen').hidden, false);
+  assert.equal(node('tplQuestOpen').href, '/?setup=quest&source=host&quest=email_ops_setup');
+  assert.equal(node('tplQuestOwnership').textContent, 'Ori built-in · read-only.');
+  assert.equal(node('tplQuestHeading').textContent, 'Set up Email Ops');
+  assert.deepEqual(calls, []);
+  // A built-in is read-only: no authoring or copy controls come with its quest.
+  assert.equal(subject.tplTemplateReadOnly(builtin), true);
+});
+
 test('selection changes, missing references, and failed reads clear stale quest links', () => {
   const { subject, node } = harness();
   for (const status of ['loading', 'error']) {
