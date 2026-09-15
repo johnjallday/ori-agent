@@ -14,8 +14,8 @@
   const controllers = new WeakMap();
 
   const PROFILE_FIELDS = {
-    [PROFILE_STANDALONE]: ['name', 'type', 'model', 'provider', 'reasoningEffort', 'systemPrompt'],
-    [PROFILE_TEMPLATE]: ['name', 'type', 'model', 'provider', 'systemPrompt']
+    [PROFILE_STANDALONE]: ['name', 'model', 'provider', 'reasoningEffort', 'systemPrompt'],
+    [PROFILE_TEMPLATE]: ['name', 'model', 'provider', 'systemPrompt']
   };
 
   function text(value) {
@@ -71,7 +71,6 @@
           .map(model => ({
             value: normalizedText(model && model.value),
             label: normalizedText(model && model.label) || normalizedText(model && model.value),
-            type: normalizedText(model && model.type),
             provider:
               normalizedText(model && model.provider) || normalizedText(provider && provider.name)
           }))
@@ -96,7 +95,6 @@
       choices.unshift({
         value: model,
         label: provider ? `${provider} / ${model} (current)` : `${model} (current)`,
-        type: '',
         provider,
         group: 'Current selection',
         current: true
@@ -197,7 +195,6 @@
       const option = document.createElement('option');
       option.value = choice.value;
       option.textContent = choice.label;
-      option.setAttribute('data-type', choice.type);
       option.setAttribute('data-provider', choice.provider);
       if (choice.current) option.setAttribute('data-current-model', 'true');
       groupElement.appendChild(option);
@@ -211,23 +208,8 @@
     if (wanted) wanted.selected = true;
     else select.value = '';
     controller.providers = normalizeProviders(providers);
-    filterModels(controller, field(controller.host, 'type')?.value || 'tool-calling');
-  }
-
-  function filterModels(controller, selectedType) {
-    const select = field(controller.host, 'model');
-    if (!select) return;
-    const current = select.selectedOptions && select.selectedOptions[0];
-    Array.from(select.options).forEach(option => {
-      const type = normalizedText(option.getAttribute('data-type'));
-      const matches = !option.value || !type || type === selectedType || option === current;
-      option.disabled = !matches;
-      option.hidden = !matches;
-    });
     if (controller.profile === PROFILE_STANDALONE && !select.value) {
-      const firstAvailable = Array.from(select.options).find(
-        option => option.value && !option.disabled
-      );
+      const firstAvailable = Array.from(select.options).find(option => option.value);
       if (firstAvailable) firstAvailable.selected = true;
     }
     updateReasoning(controller);
@@ -256,7 +238,7 @@
 
   function setValues(controller, values) {
     const input = values || {};
-    for (const name of ['name', 'type', 'systemPrompt']) {
+    for (const name of ['name', 'systemPrompt']) {
       if (!Object.prototype.hasOwnProperty.call(input, name)) continue;
       const element = field(controller.host, name);
       if (element) element.value = text(input[name]);
@@ -276,7 +258,6 @@
     const model = field(host, 'model');
     return {
       name: text(field(host, 'name')?.value),
-      type: text(field(host, 'type')?.value),
       model: text(model?.value),
       provider: selectedProvider(model),
       reasoningEffort: text(field(host, 'reasoningEffort')?.value),
@@ -343,10 +324,6 @@
         populateModels(controller, providers, values || readValues(host));
         return controller;
       },
-      filterModels(type) {
-        filterModels(controller, type);
-        return controller;
-      },
       extract() {
         return extract(controller);
       },
@@ -360,9 +337,6 @@
     };
     controllers.set(host, controller);
 
-    field(host, 'type')?.addEventListener('change', event => {
-      filterModels(controller, event.target.value);
-    });
     field(host, 'model')?.addEventListener('change', () => updateReasoning(controller));
     field(host, 'name')?.addEventListener('input', () => setFieldError(host, 'name', ''));
 

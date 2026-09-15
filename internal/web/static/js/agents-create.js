@@ -3,13 +3,7 @@
 let availablePlugins = [];
 let selectedTags = [];
 let availableProviders = []; // Cache for available providers and models from API
-const createValidatedFields = [
-  'createAutoConfigDescription',
-  'agentName',
-  'agentType',
-  'agentRole',
-  'llmModel'
-];
+const createValidatedFields = ['createAutoConfigDescription', 'agentName', 'agentRole', 'llmModel'];
 
 function supportsCodexReasoning(providerName, modelName) {
   const provider = String(providerName || '')
@@ -300,7 +294,7 @@ function renderTags() {
 
 function setupValidationListeners() {
   const inputFieldIds = ['createAutoConfigDescription', 'agentName'];
-  const selectFieldIds = ['agentType', 'agentRole', 'llmModel'];
+  const selectFieldIds = ['agentRole', 'llmModel'];
 
   inputFieldIds.forEach(fieldId => {
     const field = document.getElementById(fieldId);
@@ -325,18 +319,16 @@ function setupCreateFormSubmission() {
   });
 }
 
-// Update model options based on provider and agent type
+// Update model options based on the provider filter
 function updateModelOptions() {
   const providerSelect = document.getElementById('llmProvider');
   const modelSelect = document.getElementById('llmModel');
-  const agentTypeSelect = document.getElementById('agentType');
 
   if (!modelSelect || availableProviders.length === 0) {
     return;
   }
 
   const selectedProvider = providerSelect ? providerSelect.value : null;
-  const selectedAgentType = agentTypeSelect ? agentTypeSelect.value : 'tool-calling';
 
   // Clear existing options
   modelSelect.innerHTML = '';
@@ -368,18 +360,10 @@ function updateModelOptions() {
     let hasMatchingModels = false;
 
     provider.models.forEach(model => {
-      // Filter by agent type if the model has a type specified
-      if (model.type && model.type !== selectedAgentType) {
-        return;
-      }
-
       const option = document.createElement('option');
       option.value = model.value;
       option.textContent = model.label;
       option.setAttribute('data-provider', providerKey);
-      if (model.type) {
-        option.setAttribute('data-type', model.type);
-      }
       providerGroup.appendChild(option);
       hasMatchingModels = true;
     });
@@ -462,11 +446,6 @@ function validateCreateAgentForm() {
       message: 'Enter an agent name.'
     },
     {
-      id: 'agentType',
-      invalid: !document.getElementById('agentType')?.value,
-      message: 'Choose an agent type.'
-    },
-    {
       id: 'agentRole',
       invalid: !document.getElementById('agentRole')?.value,
       message: 'Choose a role.'
@@ -504,7 +483,6 @@ async function createAgent() {
 
   // Validate required fields
   const name = document.getElementById('agentName').value.trim();
-  const type = document.getElementById('agentType').value;
   const role = document.getElementById('agentRole').value;
   const modelSelect = document.getElementById('llmModel');
   const model = modelSelect.value;
@@ -528,7 +506,6 @@ async function createAgent() {
   // Build request
   const requestData = {
     name: name,
-    type: type,
     role: role,
     model: model,
     temperature: temperature,
@@ -772,7 +749,10 @@ async function generateCreateAutoConfig() {
     const response = await fetch('/api/agents/auto-config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ description })
+      body: JSON.stringify({
+        description,
+        role: document.getElementById('agentRole')?.value || ''
+      })
     });
 
     if (!response.ok) {
@@ -838,15 +818,6 @@ function applyCreateAutoConfig(config) {
   if (nameField && config.agent_name) {
     nameField.value = config.agent_name;
     clearFieldError('agentName');
-  }
-
-  // Apply agent type
-  const typeSelect = document.getElementById('agentType');
-  if (typeSelect && config.agent_type) {
-    typeSelect.value = config.agent_type;
-    clearFieldError('agentType');
-    // Trigger change to update model list
-    updateModelOptions();
   }
 
   // Apply description to the agent description field
@@ -920,14 +891,7 @@ function applyRecommendedPlugins(recommendedPlugins) {
 
 // Briefly highlight fields that were auto-configured
 function highlightCreateAutoConfiguredFields() {
-  const fields = [
-    'agentName',
-    'agentType',
-    'llmModel',
-    'temperature',
-    'systemPrompt',
-    'pluginsList'
-  ];
+  const fields = ['agentName', 'llmModel', 'temperature', 'systemPrompt', 'pluginsList'];
 
   fields.forEach(id => {
     const element = document.getElementById(id);

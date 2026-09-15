@@ -128,7 +128,6 @@ const TASK_ASSIST_TRAVEL_SPECIALISTS = Object.freeze({
     key: 'travel_itinerary',
     label: 'Travel Itinerary Planner',
     agentName: 'Travel Itinerary Planner',
-    agentType: 'tool-calling',
     description:
       'Plans day-by-day travel itineraries with neighborhood guidance, food picks, museum ideas, budget notes, and pacing.',
     systemPrompt:
@@ -160,7 +159,6 @@ const TASK_ASSIST_TRAVEL_SPECIALISTS = Object.freeze({
     key: 'hotel_booking',
     label: 'Hotel Booking Agent',
     agentName: 'Hotel Booking Agent',
-    agentType: 'tool-calling',
     description:
       'Finds and compares hotels by neighborhood, budget, amenities, and travel constraints.',
     systemPrompt:
@@ -182,7 +180,6 @@ const TASK_ASSIST_TRAVEL_SPECIALISTS = Object.freeze({
     key: 'flight_booking',
     label: 'Flight Booking Agent',
     agentName: 'Flight Booking Agent',
-    agentType: 'tool-calling',
     description:
       'Helps fill booking gaps for flights and longer-distance travel legs with schedule and transfer considerations.',
     systemPrompt:
@@ -3012,7 +3009,7 @@ export class WorkspaceDetailPage {
 
     this.openCreateAgentFlow({
       seedName: normalizedName,
-      seedType: normalizedName.toLowerCase().includes('manager') ? 'orchestration' : 'tool-calling'
+      seedRole: normalizedName.toLowerCase().includes('manager') ? 'orchestrator' : ''
     });
   }
 
@@ -5768,7 +5765,7 @@ export class WorkspaceDetailPage {
     return {
       workspaceId: this.workspaceId,
       seedName: agentName,
-      seedType: 'orchestration',
+      seedRole: 'orchestrator',
       seedSystemPrompt: systemPrompt,
       suggestedSkills: ['workspace-planning']
     };
@@ -6473,12 +6470,12 @@ export class WorkspaceDetailPage {
       )
     );
     if (keys.has(TASK_REQUIREMENT_KEYS.FILESYSTEM)) {
-      return { name: 'Folder Organizer', type: 'tool-calling' };
+      return { name: 'Folder Organizer' };
     }
     if (keys.has(TASK_REQUIREMENT_KEYS.BROWSER)) {
-      return { name: 'Browser Assistant', type: 'tool-calling' };
+      return { name: 'Browser Assistant' };
     }
-    return { name: 'Task Assistant', type: 'tool-calling' };
+    return { name: 'Task Assistant' };
   }
 
   getTaskRequirementMatches(values, signals) {
@@ -6929,7 +6926,6 @@ export class WorkspaceDetailPage {
 
     this.openCreateAgentFlow({
       seedName: defaults.name,
-      seedType: defaults.type,
       autoDescription: this.buildCapabilityAwareAgentDescription(
         task,
         normalizedRequirements,
@@ -7283,7 +7279,6 @@ export class WorkspaceDetailPage {
     const suggestedName =
       String(routeData?.suggested_agent_name || '').trim() ||
       (prefersBrowserAgent ? 'Browser Assistant' : 'Task Assistant');
-    const suggestedType = String(routeData?.suggested_agent_type || '').trim() || 'tool-calling';
     const reasonText = this.getTaskAgentSuggestionReasonText(routeData);
     if (window.Toast) {
       const message =
@@ -7295,7 +7290,6 @@ export class WorkspaceDetailPage {
 
     this.openCreateAgentFlow({
       seedName: suggestedName,
-      seedType: suggestedType,
       autoDescription: prompt || taskLabel,
       preferAutoConfig: true,
       workspaceId: this.workspaceId,
@@ -9020,7 +9014,6 @@ export class WorkspaceDetailPage {
 
       this.openCreateAgentFlow({
         seedName: specialistAction.agentName,
-        seedType: specialistAction.agentType || 'tool-calling',
         seedSystemPrompt: String(specialistAction.systemPrompt || '').trim(),
         autoDescription: String(specialistAction.description || '').trim(),
         preferAutoConfig: true,
@@ -10266,7 +10259,6 @@ export class WorkspaceDetailPage {
         this.storePendingAssistSpecialistHandoff(action);
         this.openCreateAgentFlow({
           seedName: action.agentName,
-          seedType: action.agentType || 'tool-calling',
           seedSystemPrompt: String(action.systemPrompt || '').trim(),
           autoDescription: String(action.description || '').trim(),
           preferAutoConfig: true,
@@ -10880,13 +10872,12 @@ export class WorkspaceDetailPage {
     );
     this.activeAgentModelEdit = {
       agentName,
-      agentType: String(profile.type || 'general').trim() || 'general',
       currentModel: String(profile.model || '').trim(),
       currentProvider: String(profile.provider || '').trim(),
       allowedProviders,
       selectionHelp: String(options.help || '').trim(),
       // Workspace-local agents persist to the workspace config.json via a
-      // workspace-scoped endpoint, and their model picker is not type-filtered.
+      // workspace-scoped endpoint.
       isWorkspaceAgent:
         String(profile.source || '')
           .trim()
@@ -10927,15 +10918,8 @@ export class WorkspaceDetailPage {
     const editState = this.activeAgentModelEdit;
     if (!select || !editState) return;
 
-    const normalizedType =
-      String(editState.agentType || 'general')
-        .trim()
-        .toLowerCase() || 'general';
     const currentModel = String(editState.currentModel || '').trim();
     const currentProvider = String(editState.currentProvider || '').trim();
-    // Workspace-local agents list every available model (no agent-type filter),
-    // so users can pick any model/provider including local ones (lmstudio, ollama).
-    const skipTypeFilter = Boolean(editState.isWorkspaceAgent);
     const allowedProviders = new Set(
       (Array.isArray(editState.allowedProviders) ? editState.allowedProviders : [])
         .map(provider =>
@@ -10965,13 +10949,7 @@ export class WorkspaceDetailPage {
       const models = Array.isArray(provider?.models) ? provider.models : [];
       models.forEach(model => {
         const value = String(model?.value || '').trim();
-        if (!value) return;
-
-        const modelType = String(model?.type || '')
-          .trim()
-          .toLowerCase();
-        const include = skipTypeFilter || modelType === normalizedType || value === currentModel;
-        if (!include || includedValues.has(value)) return;
+        if (!value || includedValues.has(value)) return;
         includedValues.add(value);
 
         const option = document.createElement('option');
@@ -10981,7 +10959,6 @@ export class WorkspaceDetailPage {
           'data-provider',
           String(model?.provider || provider?.name || '').trim()
         );
-        option.setAttribute('data-model-type', modelType);
         if (value === currentModel) {
           option.selected = true;
           selectedFound = true;
@@ -11014,7 +10991,7 @@ export class WorkspaceDetailPage {
     }
 
     if (!hasOptions) {
-      select.innerHTML = '<option value="">No compatible models available</option>';
+      select.innerHTML = '<option value="">No models available</option>';
     }
 
     if (this.elements.agentModelSubmitBtn) {
@@ -11036,9 +11013,7 @@ export class WorkspaceDetailPage {
     const selectedProvider = String(selectedOption?.getAttribute('data-provider') || '').trim();
 
     if (!editState || !selectedModel) {
-      help.textContent = withGuidance(
-        'No compatible models are currently available for this agent type.'
-      );
+      help.textContent = withGuidance('No models are currently available for this provider.');
       return;
     }
 
@@ -12396,7 +12371,6 @@ export class WorkspaceDetailPage {
         this.workspaceAgentSnapshots.add(key);
         this.workspaceAgentProfiles.set(key, {
           name,
-          type: String(agent?.type || '').trim(),
           role: String(agent?.role || '').trim(),
           model: String(agent?.model || '').trim(),
           provider: String(agent?.provider || '').trim(),
@@ -12451,7 +12425,6 @@ export class WorkspaceDetailPage {
 
         const profile = {
           name,
-          type: String(agent?.type || '').trim(),
           role: String(agent?.role || '').trim(),
           source: String(agent?.source || 'user')
             .trim()
@@ -12712,7 +12685,6 @@ export class WorkspaceDetailPage {
             'Create the travel specialist first, then assign this task there.'
           ].filter(Boolean),
           seedName: specialistAction.agentName,
-          seedType: specialistAction.agentType || 'tool-calling',
           seedSystemPrompt: String(specialistAction.systemPrompt || '').trim(),
           autoDescription: String(specialistAction.description || '').trim()
         };
@@ -12777,7 +12749,6 @@ export class WorkspaceDetailPage {
       suggestedMCPServers: suggestions.mcpServers,
       suggestedSkills: suggestions.skills,
       seedName: defaults.name,
-      seedType: defaults.type,
       autoDescription: this.buildCapabilityAwareAgentDescription(task, requirements, suggestions)
     };
   }
@@ -13355,7 +13326,6 @@ export class WorkspaceDetailPage {
         if (createAgent) {
           this.openCreateAgentFlow({
             seedName: String(preflight.seedName || '').trim(),
-            seedType: String(preflight.seedType || '').trim(),
             seedSystemPrompt: String(preflight.seedSystemPrompt || '').trim(),
             autoDescription: String(preflight.autoDescription || '').trim(),
             preferAutoConfig: true,

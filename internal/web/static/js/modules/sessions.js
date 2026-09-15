@@ -2895,16 +2895,6 @@ const sessionManager = {
         }
       });
     }
-
-    // Listen for Type changes to update Model options
-    const typeSelect = document.getElementById('editAgentTypeSelect');
-    if (typeSelect) {
-      typeSelect.addEventListener('change', event => {
-        const modelSelect = document.getElementById('editAgentModelSelect');
-        const currentModel = modelSelect?.value;
-        this.updateEditAgentModelOptions(event.target.value, currentModel);
-      });
-    }
   },
 
   async showEditAgentModal(agentName) {
@@ -2954,21 +2944,13 @@ const sessionManager = {
     const nameInput = document.getElementById('editAgentNameInput');
     if (nameInput) nameInput.value = agent.name || '';
 
-    const typeSelect = document.getElementById('editAgentTypeSelect');
-    if (typeSelect) {
-      this.ensureEditAgentSelectOption(typeSelect, agent.type);
-      typeSelect.value = agent.type || typeSelect.value;
-    }
-
     const roleSelect = document.getElementById('editAgentRoleSelect');
     if (roleSelect) {
       this.ensureEditAgentSelectOption(roleSelect, agent.role);
       roleSelect.value = agent.role || roleSelect.value;
     }
 
-    // Update model options based on agent type, then set the current model
-    const agentType = agent.type || 'tool-calling';
-    this.updateEditAgentModelOptions(agentType, agent.model);
+    this.updateEditAgentModelOptions(agent.model);
 
     const descriptionInput = document.getElementById('editAgentDescription');
     if (descriptionInput) {
@@ -3113,18 +3095,18 @@ const sessionManager = {
           name: 'default',
           display_name: 'Default',
           models: [
-            { value: 'gpt-5', label: 'gpt-5', type: 'research' },
-            { value: 'gpt-5-mini', label: 'gpt-5-mini', type: 'general' },
-            { value: 'gpt-5-nano', label: 'gpt-5-nano', type: 'tool-calling' },
-            { value: 'gpt-4o', label: 'gpt-4o', type: 'general' },
-            { value: 'gpt-4o-mini', label: 'gpt-4o-mini', type: 'tool-calling' },
-            { value: 'claude-3-5-sonnet-20241022', label: 'claude-3-5-sonnet', type: 'general' },
-            { value: 'claude-3-haiku-20240307', label: 'claude-3-haiku', type: 'tool-calling' },
-            { value: 'gemini-2.5-flash', label: 'gemini-2.5-flash', type: 'tool-calling' },
-            { value: 'gemini-2.5-pro', label: 'gemini-2.5-pro', type: 'research' },
-            { value: 'llama3.2', label: 'llama3.2', type: 'tool-calling' },
-            { value: 'mistral', label: 'mistral', type: 'tool-calling' },
-            { value: 'codellama', label: 'codellama', type: 'general' }
+            { value: 'gpt-5', label: 'gpt-5' },
+            { value: 'gpt-5-mini', label: 'gpt-5-mini' },
+            { value: 'gpt-5-nano', label: 'gpt-5-nano' },
+            { value: 'gpt-4o', label: 'gpt-4o' },
+            { value: 'gpt-4o-mini', label: 'gpt-4o-mini' },
+            { value: 'claude-3-5-sonnet-20241022', label: 'claude-3-5-sonnet' },
+            { value: 'claude-3-haiku-20240307', label: 'claude-3-haiku' },
+            { value: 'gemini-2.5-flash', label: 'gemini-2.5-flash' },
+            { value: 'gemini-2.5-pro', label: 'gemini-2.5-pro' },
+            { value: 'llama3.2', label: 'llama3.2' },
+            { value: 'mistral', label: 'mistral' },
+            { value: 'codellama', label: 'codellama' }
           ]
         }
       ];
@@ -3133,7 +3115,7 @@ const sessionManager = {
     this.editAgentModelOptionsLoaded = true;
   },
 
-  updateEditAgentModelOptions(agentType, currentModel = null) {
+  updateEditAgentModelOptions(currentModel = null) {
     const select = document.getElementById('editAgentModelSelect');
     if (!select) return;
 
@@ -3146,20 +3128,11 @@ const sessionManager = {
     this.editAgentProvidersData.forEach(provider => {
       if (!provider.models || provider.models.length === 0) return;
 
-      // Filter models by agent type
-      const filteredModels = provider.models.filter(model => {
-        // If model has no type, include it for all agent types
-        if (!model.type) return true;
-        return model.type === agentType;
-      });
-
-      if (filteredModels.length === 0) return;
-
       // Create optgroup for this provider
       const optgroup = document.createElement('optgroup');
       optgroup.label = provider.display_name || provider.name;
 
-      filteredModels.forEach(model => {
+      provider.models.forEach(model => {
         const option = document.createElement('option');
         option.value = model.value;
         option.textContent = model.label || model.value;
@@ -3173,7 +3146,7 @@ const sessionManager = {
       select.appendChild(optgroup);
     });
 
-    // If current model wasn't found in filtered list, add it as a custom option
+    // If current model wasn't found in the list, add it as a custom option
     if (currentModel && select.value !== currentModel) {
       const customOption = document.createElement('option');
       customOption.value = currentModel;
@@ -3291,14 +3264,12 @@ const sessionManager = {
 
   async saveEditAgentChanges() {
     const nameInput = document.getElementById('editAgentNameInput');
-    const typeSelect = document.getElementById('editAgentTypeSelect');
     const roleSelect = document.getElementById('editAgentRoleSelect');
     const modelSelect = document.getElementById('editAgentModelSelect');
     const descriptionInput = document.getElementById('editAgentDescription');
     const favoriteToggle = document.getElementById('editAgentFavoriteToggle');
 
     const newName = nameInput?.value.trim();
-    const type = typeSelect?.value;
     const role = roleSelect?.value;
     const model = modelSelect?.value;
     const selectedModelOption = modelSelect?.selectedOptions?.[0] || null;
@@ -3324,8 +3295,8 @@ const sessionManager = {
       nameInput?.focus();
       return;
     }
-    if (!type || !role) {
-      this.showEditAgentError('Type and role are required.');
+    if (!role) {
+      this.showEditAgentError('Role is required.');
       return;
     }
     if (!model) {
@@ -3336,7 +3307,6 @@ const sessionManager = {
 
     const payload = {
       name: newName,
-      type,
       role,
       model,
       description: descriptionInput?.value.trim() || '',
@@ -5002,7 +4972,6 @@ const sessionManager = {
       entry.lifecycle === 'reuse' && !entry.planChanged
         ? {
             name: `${entry.originalName} copy`,
-            type: recommended.type,
             model: recommended.model,
             provider: recommended.provider,
             reasoningEffort: recommended.reasoningEffort,
@@ -5010,7 +4979,6 @@ const sessionManager = {
           }
         : {
             name: entry.name,
-            type: entry.type,
             model: entry.model,
             provider: entry.provider,
             reasoningEffort: entry.reasoningEffort,
@@ -5973,7 +5941,6 @@ const sessionManager = {
         name: String(result.values.name || '').trim(),
         provider: result.values.provider || '',
         model: result.values.model || '',
-        type: result.values.type || '',
         system_prompt: result.values.systemPrompt || ''
       };
     }
@@ -6299,7 +6266,6 @@ const sessionManager = {
         name,
         provider: values.provider,
         model: values.model,
-        type: values.type,
         systemPrompt: values.systemPrompt
       })
     ) {

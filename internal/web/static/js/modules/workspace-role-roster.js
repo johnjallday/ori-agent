@@ -175,7 +175,6 @@
       {
         name: agent.name,
         role: agent.role,
-        type: agent.type,
         appearance: appearance,
         // Character portraits require their catalog asset as well as the saved
         // appearance choice. Keep this synchronous, like the other workspace

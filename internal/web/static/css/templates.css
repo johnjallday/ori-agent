@@ -267,8 +267,7 @@
   color: #92400e;
 }
 
-#templatesPage .tpl-agent-chip.is-role,
-#templatesPage .tpl-agent-chip.is-type {
+#templatesPage .tpl-agent-chip.is-role {
   background: rgba(14, 165, 233, 0.1);
   border-color: rgba(14, 165, 233, 0.23);
   color: #0369a1;
@@ -500,8 +499,7 @@
   color: #fcd34d;
 }
 
-[data-bs-theme="dark"] #templatesPage .tpl-agent-chip.is-role,
-[data-bs-theme="dark"] #templatesPage .tpl-agent-chip.is-type {
+[data-bs-theme="dark"] #templatesPage .tpl-agent-chip.is-role {
   color: #7dd3fc;
 }
 

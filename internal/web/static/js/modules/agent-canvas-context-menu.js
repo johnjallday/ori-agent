@@ -250,7 +250,6 @@ export class AgentCanvasContextMenu {
       case 'agent':
         return {
           name: node.name || node.nodeId || '',
-          type: node.type || 'tool-calling',
           model: node.model || ''
         };
       case 'store':

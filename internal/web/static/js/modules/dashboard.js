@@ -40,8 +40,6 @@
         'definition'
       ],
       preferredPlugins: ['time', 'weather', 'calculator', 'math', 'search', 'web'],
-      preferredTypes: ['general', 'tool-calling', 'research'],
-      defaultType: 'general',
       suggestedName: 'Utility Assistant',
       tags: ['utility', 'time', 'weather', 'facts']
     },
@@ -60,8 +58,6 @@
         'flight'
       ],
       preferredPlugins: ['web', 'weather', 'maps', 'search', 'travel'],
-      preferredTypes: ['research', 'general', 'tool-calling'],
-      defaultType: 'research',
       suggestedName: 'Travel Planner',
       tags: ['travel', 'itinerary', 'planning']
     },
@@ -70,8 +66,6 @@
       label: 'email triage',
       keywords: ['email', 'inbox', 'mail', 'gmail', 'outlook', 'unread', 'reply', 'messages'],
       preferredPlugins: ['email', 'gmail', 'outlook', 'imap'],
-      preferredTypes: ['tool-calling', 'general'],
-      defaultType: 'tool-calling',
       suggestedName: 'Email Assistant',
       tags: ['email', 'inbox', 'communication']
     },
@@ -91,8 +85,6 @@
         'events'
       ],
       preferredPlugins: ['calendar', 'schedule', 'google-calendar'],
-      preferredTypes: ['tool-calling', 'general'],
-      defaultType: 'tool-calling',
       suggestedName: 'Calendar Assistant',
       tags: ['calendar', 'schedule', 'planning']
     },
@@ -101,8 +93,6 @@
       label: 'app launch',
       keywords: ['open', 'launch', 'start', 'run', 'application', 'app', 'obsidian', 'finder'],
       preferredPlugins: ['shell', 'executor', 'desktop', 'automation', 'os-shell', 'command'],
-      preferredTypes: ['tool-calling', 'general'],
-      defaultType: 'tool-calling',
       suggestedName: 'Desktop Launcher',
       tags: ['desktop', 'automation', 'apps']
     },
@@ -111,8 +101,6 @@
       label: 'general task',
       keywords: [],
       preferredPlugins: [],
-      preferredTypes: ['general', 'tool-calling', 'research'],
-      defaultType: 'general',
       suggestedName: 'Task Specialist',
       tags: ['tasks', 'assistant']
     },
@@ -121,8 +109,6 @@
       label: 'app activity',
       keywords: [],
       preferredPlugins: [],
-      preferredTypes: ['general'],
-      defaultType: 'general',
       suggestedName: 'Ask Ori',
       tags: ['activity', 'introspection']
     },
@@ -131,8 +117,6 @@
       label: 'app navigation',
       keywords: [],
       preferredPlugins: [],
-      preferredTypes: ['general'],
-      defaultType: 'general',
       suggestedName: 'Ask Ori',
       tags: ['navigation']
     }
@@ -143,7 +127,6 @@
       key: 'travel_itinerary',
       agentName: 'Travel Itinerary Planner',
       label: 'Travel Itinerary Planner',
-      type: 'research',
       subtaskIndex: 1,
       taskTitle: 'Build the day-by-day itinerary',
       scorePhrases: [
@@ -179,7 +162,6 @@
       key: 'hotel_booking',
       agentName: 'Hotel Booking Agent',
       label: 'Hotel Booking Agent',
-      type: 'research',
       subtaskIndex: 2,
       taskTitle: 'Recommend hotels and neighborhoods',
       scorePhrases: [
@@ -205,7 +187,6 @@
       key: 'flight_booking',
       agentName: 'Flight Booking Agent',
       label: 'Flight Booking Agent',
-      type: 'research',
       subtaskIndex: 3,
       taskTitle: 'Fill the booking gaps for flights and transfers',
       scorePhrases: [
@@ -254,7 +235,6 @@
       skillMarketplaceQueries: ['calendar assistant', 'calendar'],
       preferredServerNames: ['google-calendar'],
       preferredCategories: ['productivity'],
-      preferredAgentType: 'tool-calling',
       defaultAgentName: 'Calendar Assistant',
       canAnswerInline: true,
       requiresMCP: true,
@@ -280,7 +260,6 @@
       skillMarketplaceQueries: ['github'],
       preferredServerNames: ['github'],
       preferredCategories: ['development'],
-      preferredAgentType: 'tool-calling',
       defaultAgentName: 'GitHub Assistant',
       canAnswerInline: false,
       requiresMCP: true,
@@ -304,7 +283,6 @@
       skillMarketplaceQueries: ['research'],
       preferredServerNames: ['brave-search'],
       preferredCategories: ['search'],
-      preferredAgentType: 'research',
       defaultAgentName: 'Research Assistant',
       canAnswerInline: false,
       requiresMCP: true,
@@ -331,7 +309,6 @@
       skillMarketplaceQueries: ['email assistant', 'email'],
       preferredServerNames: ['gmail', 'outlook', 'imap', 'microsoft-graph'],
       preferredCategories: ['communication', 'email', 'productivity'],
-      preferredAgentType: 'tool-calling',
       defaultAgentName: 'Email Assistant',
       canAnswerInline: true,
       requiresMCP: true,
@@ -356,7 +333,6 @@
       skillMarketplaceQueries: ['browser automation'],
       preferredServerNames: ['playwright', 'browserbase', 'puppeteer'],
       preferredCategories: ['automation', 'development', 'productivity'],
-      preferredAgentType: 'tool-calling',
       defaultAgentName: 'Browser Assistant',
       canAnswerInline: false,
       requiresMCP: true,
@@ -372,7 +348,6 @@
       skillMarketplaceQueries: ['database'],
       preferredServerNames: ['postgres'],
       preferredCategories: ['database'],
-      preferredAgentType: 'tool-calling',
       defaultAgentName: 'Database Assistant',
       canAnswerInline: false,
       requiresMCP: true,
@@ -396,7 +371,6 @@
       skillMarketplaceQueries: ['filesystem'],
       preferredServerNames: ['filesystem'],
       preferredCategories: ['file-system'],
-      preferredAgentType: 'tool-calling',
       defaultAgentName: 'Filesystem Assistant',
       canAnswerInline: false,
       requiresMCP: true,
@@ -415,7 +389,6 @@
     pendingIntentVariant: '',
     pendingAgentName: '',
     pendingSuggestedName: '',
-    pendingSuggestedType: '',
     pendingAppLaunch: null,
     pendingCapabilityPlan: null,
     pendingCapabilityBrief: '',
@@ -2834,7 +2807,6 @@
     var agentName = buildUniqueAgentName(config.agentName, existingNames);
     var payload = {
       name: agentName,
-      type: config.type,
       system_prompt: config.systemPrompt,
       description:
         config.description +
@@ -2844,7 +2816,7 @@
       tags: uniqueValues((config.tags || []).concat(['workspace-specialist', 'planning-review']))
     };
 
-    var selectedModel = await resolveAutoSelectedModel(payload.type, '');
+    var selectedModel = await resolveAutoSelectedModel('');
     if (selectedModel) payload.model = selectedModel;
 
     if (isSemiAutoMode() || !payload.model) {
@@ -7042,9 +7014,7 @@
       plan.actions.push({
         type: 'create_agent',
         desiredAgentName:
-          requirement.defaultAgentName || (intent && intent.suggestedName) || 'Task Specialist',
-        desiredAgentType:
-          requirement.preferredAgentType || (intent && intent.defaultType) || 'tool-calling'
+          requirement.defaultAgentName || (intent && intent.suggestedName) || 'Task Specialist'
       });
       plan.gaps.push('No existing agent is a strong match for ' + requirement.label + '.');
       if (repoScopedSkill) {
@@ -7198,16 +7168,8 @@
       autoConfig && autoConfig.agent_name ? autoConfig.agent_name : seedName,
       existingNames
     );
-    var agentType =
-      autoConfig && autoConfig.agent_type
-        ? autoConfig.agent_type
-        : (requirement && requirement.preferredAgentType) ||
-          (intent && intent.defaultType) ||
-          'tool-calling';
-
     var payload = {
       name: agentName,
-      type: agentType,
       system_prompt:
         autoConfig && autoConfig.system_prompt
           ? autoConfig.system_prompt
@@ -7222,10 +7184,7 @@
       )
     };
 
-    var selectedModel = await resolveAutoSelectedModel(
-      payload.type,
-      autoConfig && autoConfig.model
-    );
+    var selectedModel = await resolveAutoSelectedModel(autoConfig && autoConfig.model);
     if (selectedModel) payload.model = selectedModel;
     if (autoConfig && typeof autoConfig.temperature === 'number')
       payload.temperature = autoConfig.temperature;
@@ -7678,7 +7637,6 @@
   function getAgentSummaryText(agent) {
     var parts = [];
     parts.push(normalizeToken(agent && agent.name));
-    parts.push(normalizeToken(agent && agent.type));
     parts.push(normalizeToken(agent && agent.role));
 
     var metadata = agent && agent.metadata;
@@ -7726,9 +7684,6 @@
       }
     }
 
-    if (intent.preferredTypes.indexOf(normalizeToken(agent && agent.type)) >= 0) {
-      score += 1;
-    }
     if (normalizeToken(agent && agent.status) === 'active') {
       score += 1;
     }
@@ -8892,7 +8847,6 @@
         if (!model.value) continue;
         rows.push({
           provider: providerLabel,
-          type: normalizeToken(model.type),
           value: String(model.value),
           label: model.label || model.value
         });
@@ -8901,7 +8855,7 @@
     return rows;
   }
 
-  function findModelValueForType(modelRows, agentType, preferredValue) {
+  function findModelValue(modelRows, preferredValue) {
     if (!Array.isArray(modelRows) || modelRows.length === 0) return '';
 
     var preferred = String(preferredValue || '').trim();
@@ -8911,75 +8865,47 @@
       }
     }
 
-    var normalizedType = normalizeToken(agentType);
-    for (var m = 0; m < modelRows.length; m++) {
-      if (modelRows[m].type === normalizedType) return modelRows[m].value;
-    }
-
-    if (normalizedType !== 'general') {
-      for (var g = 0; g < modelRows.length; g++) {
-        if (modelRows[g].type === 'general') return modelRows[g].value;
-      }
-    }
-
-    if (normalizedType !== 'tool-calling') {
-      for (var t = 0; t < modelRows.length; t++) {
-        if (modelRows[t].type === 'tool-calling') return modelRows[t].value;
-      }
-    }
-
     return modelRows[0].value;
   }
 
-  async function resolveAutoSelectedModel(agentType, preferredValue) {
+  async function resolveAutoSelectedModel(preferredValue) {
     var providers = await fetchProvidersCatalog();
     var rows = buildModelRowsFromProviders(providers);
-    return findModelValueForType(rows, agentType, preferredValue);
+    return findModelValue(rows, preferredValue);
   }
 
-  function populateModalModelSelect(modelSelect, providers, agentType, preferredModel) {
+  function populateModalModelSelect(modelSelect, providers, preferredModel) {
     if (!modelSelect || !Array.isArray(providers)) return '';
     modelSelect.innerHTML = '';
 
-    var normalizedType = normalizeToken(agentType);
-    function appendOptionsByType(onlyMatchingType) {
-      var count = 0;
-      for (var i = 0; i < providers.length; i++) {
-        var provider = providers[i] || {};
-        var models = Array.isArray(provider.models) ? provider.models : [];
-        if (models.length === 0) continue;
+    var totalVisible = 0;
+    for (var i = 0; i < providers.length; i++) {
+      var provider = providers[i] || {};
+      var models = Array.isArray(provider.models) ? provider.models : [];
+      if (models.length === 0) continue;
 
-        var group = document.createElement('optgroup');
-        group.label = provider.display_name || provider.provider || 'Provider';
-        var groupVisible = 0;
+      var group = document.createElement('optgroup');
+      group.label = provider.display_name || provider.provider || 'Provider';
+      var groupVisible = 0;
 
-        for (var j = 0; j < models.length; j++) {
-          var model = models[j] || {};
-          if (!model.value) continue;
-          if (onlyMatchingType && normalizedType && normalizeToken(model.type) !== normalizedType)
-            continue;
+      for (var j = 0; j < models.length; j++) {
+        var model = models[j] || {};
+        if (!model.value) continue;
 
-          var option = document.createElement('option');
-          option.value = String(model.value);
-          option.textContent = model.label || model.value;
-          option.setAttribute('data-type', model.type || '');
-          option.setAttribute('data-provider', model.provider || '');
-          group.appendChild(option);
-          groupVisible += 1;
-        }
-
-        if (groupVisible > 0) {
-          count += groupVisible;
-          modelSelect.appendChild(group);
-        }
+        var option = document.createElement('option');
+        option.value = String(model.value);
+        option.textContent = model.label || model.value;
+        option.setAttribute('data-provider', model.provider || '');
+        group.appendChild(option);
+        groupVisible += 1;
       }
-      return count;
+
+      if (groupVisible > 0) {
+        totalVisible += groupVisible;
+        modelSelect.appendChild(group);
+      }
     }
 
-    var totalVisible = appendOptionsByType(true);
-    if (totalVisible === 0) {
-      totalVisible = appendOptionsByType(false);
-    }
     if (totalVisible === 0) {
       var emptyOption = document.createElement('option');
       emptyOption.value = '';
@@ -8988,11 +8914,7 @@
       return '';
     }
 
-    var selected = findModelValueForType(
-      buildModelRowsFromProviders(providers),
-      agentType,
-      preferredModel
-    );
+    var selected = findModelValue(buildModelRowsFromProviders(providers), preferredModel);
     if (selected) modelSelect.value = selected;
     if (!modelSelect.value && modelSelect.options.length > 0) {
       modelSelect.selectedIndex = 0;
@@ -9015,13 +8937,12 @@
     }
 
     var nameInput = document.getElementById('agentName');
-    var typeInput = document.getElementById('agentType');
     var modelInput = document.getElementById('agentModel');
     var tempInput = document.getElementById('agentTemperature');
     var tempValue = document.getElementById('temperatureValue');
     var promptInput = document.getElementById('agentSystemPrompt');
     var allowWebSearchInput = document.getElementById('agentAllowWebSearch');
-    if (!nameInput || !typeInput || !modelInput || !tempInput || !promptInput) {
+    if (!nameInput || !modelInput || !tempInput || !promptInput) {
       return { status: 'unavailable', reason: 'modal_fields_missing' };
     }
 
@@ -9030,7 +8951,6 @@
     }
 
     nameInput.value = seedPayload.name || '';
-    typeInput.value = seedPayload.type || 'tool-calling';
     tempInput.value =
       typeof seedPayload.temperature === 'number'
         ? String(seedPayload.temperature)
@@ -9044,7 +8964,7 @@
 
     var providers = await fetchProvidersCatalog();
     if (providers.length > 0) {
-      populateModalModelSelect(modelInput, providers, typeInput.value, seedPayload.model || '');
+      populateModalModelSelect(modelInput, providers, seedPayload.model || '');
     } else if (seedPayload.model) {
       modelInput.value = seedPayload.model;
     }
@@ -9098,7 +9018,6 @@
         try {
           var requestBody = {
             name: name,
-            type: typeInput.value || seedPayload.type || 'tool-calling',
             model: model,
             system_prompt: promptInput.value || seedPayload.system_prompt || '',
             allow_web_search: allowWebSearchInput ? Boolean(allowWebSearchInput.checked) : true,
@@ -9247,11 +9166,9 @@
           ? autoConfig.agent_name
           : homeAssistantState.pendingSuggestedName || intent.suggestedName;
       var agentName = buildUniqueAgentName(desiredBaseName, existingNames);
-      var fallbackType = homeAssistantState.pendingSuggestedType || intent.defaultType;
 
       var payload = {
         name: agentName,
-        type: autoConfig && autoConfig.agent_type ? autoConfig.agent_type : fallbackType,
         system_prompt:
           autoConfig && autoConfig.system_prompt
             ? autoConfig.system_prompt
@@ -9260,10 +9177,7 @@
         tags: uniqueValues((intent.tags || []).concat(['auto-created', 'home-assistant']))
       };
 
-      var selectedModel = await resolveAutoSelectedModel(
-        payload.type,
-        autoConfig && autoConfig.model
-      );
+      var selectedModel = await resolveAutoSelectedModel(autoConfig && autoConfig.model);
       if (selectedModel) payload.model = selectedModel;
       if (autoConfig && typeof autoConfig.temperature === 'number')
         payload.temperature = autoConfig.temperature;
@@ -13075,7 +12989,6 @@
     homeAssistantState.pendingIntentVariant = '';
     homeAssistantState.pendingAgentName = '';
     homeAssistantState.pendingSuggestedName = '';
-    homeAssistantState.pendingSuggestedType = '';
     homeAssistantState.pendingAppLaunch = appLaunchRequest;
     homeAssistantState.pendingCapabilityPlan = null;
     homeAssistantState.pendingCapabilityBrief = '';
@@ -13195,18 +13108,12 @@
         if (typeof routeData.suggested_agent_name === 'string') {
           homeAssistantState.pendingSuggestedName = routeData.suggested_agent_name.trim();
         }
-        if (typeof routeData.suggested_agent_type === 'string') {
-          homeAssistantState.pendingSuggestedType = routeData.suggested_agent_type.trim();
-        }
         if (typeof routeData.intent_variant === 'string') {
           homeAssistantState.pendingIntentVariant = normalizeToken(routeData.intent_variant);
         }
         if (appLaunchRequest) {
           if (!homeAssistantState.pendingSuggestedName) {
             homeAssistantState.pendingSuggestedName = HOME_INTENTS.app_launch.suggestedName;
-          }
-          if (!homeAssistantState.pendingSuggestedType) {
-            homeAssistantState.pendingSuggestedType = HOME_INTENTS.app_launch.defaultType;
           }
         }
         if (typeof routeData.workspace_recommended === 'boolean') {

@@ -2311,7 +2311,6 @@ async function showAgentDetails(agent) {
   // Defaults to keep UI responsive even if fetch fails
   let agentSettings = null;
   let enabledPlugins = [];
-  let agentType = 'tool-calling';
   let model = 'N/A';
   let temperature = 1.0;
   const lastResult = agent.lastResult || '';
@@ -2324,7 +2323,6 @@ async function showAgentDetails(agent) {
       agentSettings = await response.json();
       // API returns enabled_plugins as an array
       enabledPlugins = agentSettings.enabled_plugins || [];
-      agentType = agentSettings.type || 'tool-calling';
       model = agentSettings.model || 'N/A';
       temperature = agentSettings.temperature || 1.0;
       systemPrompt = agentSettings.system_prompt || '';
@@ -2357,7 +2355,7 @@ async function showAgentDetails(agent) {
     <div class="mb-3" style="border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
       <div class="d-flex justify-content-between align-items-center mb-2">
         <h6 style="color: var(--text-primary); font-size: 0.875rem; font-weight: 600; margin: 0;">Agent Configuration</h6>
-        <button class="modern-btn modern-btn-secondary" style="padding: 4px 8px; font-size: 0.75rem;" onclick="editAgentSettings('${escapeHtml(agent.name)}', '${escapeHtml(agentType)}', '${escapeHtml(model)}', ${temperature})">
+        <button class="modern-btn modern-btn-secondary" style="padding: 4px 8px; font-size: 0.75rem;" onclick="editAgentSettings()">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1">
             <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
           </svg>
@@ -2365,18 +2363,10 @@ async function showAgentDetails(agent) {
         </button>
       </div>
       <div class="small" style="color: var(--text-secondary);" id="agent-config-display">
-        <div class="mb-1"><strong>Type:</strong> ${escapeHtml(agentType)}</div>
         <div class="mb-1"><strong>Model:</strong> ${escapeHtml(model)}</div>
         <div class="mb-1"><strong>Temperature:</strong> ${temperature}</div>
       </div>
       <div id="agent-config-edit" style="display: none;">
-        <div class="mb-2">
-          <label class="form-label small" style="color: var(--text-primary); margin-bottom: 0.25rem;">Type:</label>
-          <select class="form-select form-select-sm" id="edit-agent-type">
-            <option value="tool-calling" ${agentType === 'tool-calling' ? 'selected' : ''}>Tool-Calling</option>
-            <option value="conversational" ${agentType === 'conversational' ? 'selected' : ''}>Conversational</option>
-          </select>
-        </div>
         <div class="mb-2">
           <label class="form-label small" style="color: var(--text-primary); margin-bottom: 0.25rem;">Model:</label>
           <input type="text" class="form-control form-control-sm" id="edit-agent-model" value="${escapeHtml(model)}">
@@ -2820,16 +2810,14 @@ function cancelEditAgentSettings() {
  * Save agent settings
  */
 async function saveAgentSettings(agentName) {
-  const typeInput = document.getElementById('edit-agent-type');
   const modelInput = document.getElementById('edit-agent-model');
   const tempInput = document.getElementById('edit-agent-temperature');
 
-  if (!typeInput || !modelInput || !tempInput) {
+  if (!modelInput || !tempInput) {
     alert('Error: Could not find input fields');
     return;
   }
 
-  const newType = typeInput.value;
   const newModel = modelInput.value.trim();
   const newTemp = parseFloat(tempInput.value);
 
@@ -2851,7 +2839,6 @@ async function saveAgentSettings(agentName) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name: agentName,
-        type: newType,
         settings: {
           model: newModel,
           temperature: newTemp
@@ -2868,7 +2855,6 @@ async function saveAgentSettings(agentName) {
     const displayDiv = document.getElementById('agent-config-display');
     if (displayDiv) {
       displayDiv.innerHTML = `
-                <div class="mb-1"><strong>Type:</strong> ${escapeHtml(newType)}</div>
                 <div class="mb-1"><strong>Model:</strong> ${escapeHtml(newModel)}</div>
                 <div class="mb-1"><strong>Temperature:</strong> ${newTemp}</div>
             `;
@@ -3559,7 +3545,6 @@ function extractNodeConfig(node, type) {
     case 'agent':
       return {
         name: node.name || node.nodeId || '',
-        type: node.type || 'tool-calling',
         model: node.model || ''
       };
     case 'store':

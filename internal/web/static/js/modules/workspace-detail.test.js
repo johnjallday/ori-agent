@@ -1123,28 +1123,28 @@ test('workspace-local agent profile resolves its model and renders an editable b
   assert.doesNotMatch(badge, /Model not set/);
 });
 
-test('workspace-local model picker lists every model; global picker filters by type', () => {
+test('workspace and global model pickers both list every model', () => {
   const page = new WorkspaceDetailPage('workspace-1');
   page.providerCatalog = [
     {
       name: 'claude',
       display_name: 'Claude',
       models: [
-        { value: 'claude-opus-4', type: 'orchestration', label: 'Opus' },
-        { value: 'claude-haiku', type: 'research', label: 'Haiku' }
+        { value: 'claude-opus-4', label: 'Opus' },
+        { value: 'claude-haiku', label: 'Haiku' }
       ]
     },
     {
       name: 'lmstudio',
       display_name: 'LM Studio',
-      models: [{ value: 'google/gemma-4-e4b', type: 'research', label: 'Gemma' }]
+      models: [{ value: 'google/gemma-4-e4b', label: 'Gemma' }]
     },
     {
       name: 'codex',
       display_name: 'OpenAI Codex (CLI)',
       models: [
-        { value: 'gpt-5.3-codex', type: 'research', label: 'gpt-5.3-codex' },
-        { value: 'gpt-5.3-codex', type: 'orchestration', label: 'gpt-5.3-codex' }
+        { value: 'gpt-5.3-codex', label: 'gpt-5.3-codex' },
+        { value: 'gpt-5.3-codex', label: 'gpt-5.3-codex' }
       ]
     }
   ];
@@ -1190,43 +1190,30 @@ test('workspace-local model picker lists every model; global picker filters by t
     page.elements = { agentModelSelect: select, agentModelSubmitBtn: makeEl('button') };
     const values = () => select.children.flatMap(g => g.children.map(o => o.value));
 
-    // Workspace-local: no type filter, every model from every provider.
+    const everyModel = ['claude-opus-4', 'claude-haiku', 'google/gemma-4-e4b', 'gpt-5.3-codex'];
+
+    // Workspace-local: every model from every provider, each listed once.
     page.activeAgentModelEdit = {
-      agentType: 'orchestration',
       currentModel: '',
       currentProvider: '',
       isWorkspaceAgent: true
     };
     page.populateAgentModelSelect();
-    const wsValues = values();
-    assert.equal(wsValues.length, 4, 'workspace-local lists every unique model');
-    assert.ok(wsValues.includes('google/gemma-4-e4b'), 'local provider model present');
-    assert.ok(wsValues.includes('claude-haiku'), 'non-matching type present');
-    assert.equal(
-      wsValues.filter(value => value === 'gpt-5.3-codex').length,
-      1,
-      'Codex model is available without duplicate capability entries'
-    );
+    assert.deepEqual(values(), everyModel, 'workspace-local lists every unique model');
 
-    // Global: only models whose type matches the agent type.
+    // Global: the same list; there is no agent type to filter by.
     page.activeAgentModelEdit = {
-      agentType: 'orchestration',
       currentModel: '',
       currentProvider: '',
       isWorkspaceAgent: false
     };
     page.populateAgentModelSelect();
-    assert.deepEqual(
-      values(),
-      ['claude-opus-4', 'gpt-5.3-codex'],
-      'global orchestration picker includes Commander-capable Codex models'
-    );
+    assert.deepEqual(values(), everyModel, 'global picker lists every unique model');
 
     // A capability repair can narrow an otherwise freely editable workspace
     // agent to providers that satisfy that capability. The incompatible current
     // model remains visible in the summary, but is not offered as a valid save.
     page.activeAgentModelEdit = {
-      agentType: 'orchestration',
       currentModel: 'google/gemma-4-e4b',
       currentProvider: 'lmstudio',
       isWorkspaceAgent: true,

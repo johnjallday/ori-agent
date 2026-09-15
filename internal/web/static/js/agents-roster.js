@@ -2204,21 +2204,6 @@
     return href;
   }
 
-  function typeLabel(v) {
-    switch (v) {
-      case 'tool-calling':
-        return 'Tool Calling';
-      case 'general':
-        return 'General Purpose';
-      case 'research':
-        return 'Research';
-      case 'orchestration':
-        return 'Orchestration';
-      default:
-        return titleCase(v || '');
-    }
-  }
-
   // Every configured fact, for every agent — the same list a built-in used to
   // get, now that no agent gets a form here. Model in particular is a card fact
   // that moved to this panel (FR-2/FR-42).
@@ -2229,7 +2214,6 @@
     var d = detail || {};
     var facts = [
       ['Role', d.role ? roleLabel(d.role) : ''],
-      ['Type', d.type ? typeLabel(d.type) : ''],
       ['Model', d.model || ''],
       ['Provider', d.provider ? titleCase(d.provider) : ''],
       ['Temperature', d.temperature != null ? String(d.temperature) : ''],
@@ -2479,7 +2463,6 @@
         : [];
     var body = {
       name: name,
-      type: 'tool-calling',
       role: val('cr-role'),
       model: val('cr-model').trim(),
       description: val('cr-description'),

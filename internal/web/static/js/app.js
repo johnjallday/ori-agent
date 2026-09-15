@@ -17,7 +17,6 @@ const pendingActionPlanContexts = new Map();
 let pendingChatRouteContext = null;
 const CHAT_SPECIALIST_INTENT_DEFAULTS = {
   utility_direct: {
-    defaultType: 'general',
     suggestedName: 'Utility Assistant',
     tags: ['utility', 'time', 'weather', 'facts'],
     domains: ['utility'],
@@ -29,7 +28,6 @@ const CHAT_SPECIALIST_INTENT_DEFAULTS = {
       'You are a utility assistant for quick requests. Handle time, weather, simple conversions, and short factual lookups with concise direct answers.'
   },
   travel_planning: {
-    defaultType: 'research',
     suggestedName: 'Travel Planner',
     tags: ['travel', 'itinerary', 'planning'],
     domains: ['travel'],
@@ -41,7 +39,6 @@ const CHAT_SPECIALIST_INTENT_DEFAULTS = {
       'You are a travel planning assistant. Build realistic day-by-day itineraries with concise options, practical transit notes, and budget-aware recommendations.'
   },
   email_check: {
-    defaultType: 'tool-calling',
     suggestedName: 'Email Assistant',
     tags: ['email', 'inbox', 'communication'],
     domains: ['email'],
@@ -53,7 +50,6 @@ const CHAT_SPECIALIST_INTENT_DEFAULTS = {
       'You are an email assistant. Summarize inbox content and draft responses. Never send or delete email without explicit user approval. Start in read-only mode.'
   },
   calendar_check: {
-    defaultType: 'tool-calling',
     suggestedName: 'Calendar Assistant',
     tags: ['calendar', 'schedule', 'planning'],
     domains: ['calendar'],
@@ -65,7 +61,6 @@ const CHAT_SPECIALIST_INTENT_DEFAULTS = {
       'You are a calendar assistant. Default to read-only behavior unless the user explicitly asks to create or edit events.'
   },
   app_launch: {
-    defaultType: 'tool-calling',
     suggestedName: 'Desktop Launcher',
     tags: ['desktop', 'automation', 'apps'],
     domains: ['desktop'],
@@ -77,7 +72,6 @@ const CHAT_SPECIALIST_INTENT_DEFAULTS = {
       'You are a desktop app launcher assistant. For requests like "open obsidian", launch the requested app immediately and confirm success or report the exact failure reason.'
   },
   general_task: {
-    defaultType: 'general',
     suggestedName: 'Task Assistant',
     tags: ['tasks', 'assistant'],
     domains: ['tasks'],
@@ -953,9 +947,6 @@ function normalizeSpecialistHandoff(payload) {
     intentLabel: String(handoff.intent_label || payload.intent_label || '').trim(),
     suggestedAgentName: String(
       handoff.suggested_agent_name || payload.suggested_agent_name || ''
-    ).trim(),
-    suggestedAgentType: String(
-      handoff.suggested_agent_type || payload.suggested_agent_type || ''
     ).trim()
   };
 }
@@ -1095,11 +1086,6 @@ async function createSpecialistAgentFromHandoff(payload, originalMessage) {
 
   const requestBody = {
     name: agentName,
-    type:
-      (autoConfig && autoConfig.agent_type) ||
-      handoff.suggestedAgentType ||
-      defaults.defaultType ||
-      'tool-calling',
     system_prompt:
       (autoConfig && autoConfig.system_prompt) || buildChatSpecialistSystemPrompt(handoff),
     description: (autoConfig && autoConfig.description) || description,

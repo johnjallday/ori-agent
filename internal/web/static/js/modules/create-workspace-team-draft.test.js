@@ -193,9 +193,7 @@ test('filling a role by Create and another by Assign counts both and staffs exac
     'template:studio',
     planResponse([], { assistant_program: assistantProgramPlan() })
   );
-  Draft.setSavedRosterReady(draft, [
-    { name: 'My Mixer', role: 'specialist', type: 'tool-calling' }
-  ]);
+  Draft.setSavedRosterReady(draft, [{ name: 'My Mixer', role: 'specialist' }]);
   Draft.setRoleFill(draft, 'producer', { mode: 'create', name: 'June', provider: 'openai' });
   Draft.setRoleFill(draft, 'engineer', { mode: 'assign', name: 'My Mixer' });
   const view = Draft.derive(draft);
@@ -266,14 +264,13 @@ test('role ids are derived from names the way the server derives them', () => {
 });
 
 // The Create form shows the blueprint's proposed setup, and an edit to it has
-// to reach the created agent. Both used to be silently dropped: the form
-// collected a system prompt and an agent type and sent neither, so the
-// blueprint's prompt won whatever the user typed.
+// to reach the created agent. It used to be silently dropped: the form
+// collected a system prompt and never sent it, so the blueprint's prompt won
+// whatever the user typed.
 test('a role carries the blueprint’s proposed setup so the Create form can show it', () => {
   const draft = readyDraft([
     planAgent('Content Lead', {
       entry_point: true,
-      type: 'general',
       model: 'gpt-5',
       provider: 'openai',
       system_prompt: 'You are the content lead. Hold the brand voice.'
@@ -282,19 +279,17 @@ test('a role carries the blueprint’s proposed setup so the Create form can sho
   const role = Draft.derive(draft).roleRoster.roles[0];
 
   assert.deepEqual(role.proposed, {
-    type: 'general',
     model: 'gpt-5',
     provider: 'openai',
     system_prompt: 'You are the content lead. Hold the brand voice.'
   });
 });
 
-test('an edited prompt and type travel all the way into the request', () => {
+test('an edited prompt travels all the way into the request', () => {
   const draft = readyDraft([planAgent('Content Lead', { entry_point: true })]);
   Draft.setRoleFill(draft, 'content-lead', {
     mode: 'create',
     name: 'Desk Chief',
-    type: 'research',
     systemPrompt: 'Only write headlines.'
   });
 
@@ -303,7 +298,6 @@ test('an edited prompt and type travel all the way into the request', () => {
       role_id: 'content-lead',
       mode: 'create',
       name: 'Desk Chief',
-      type: 'research',
       system_prompt: 'Only write headlines.'
     }
   ]);
@@ -326,8 +320,7 @@ test('assigning an agent carries nothing but its name', () => {
   Draft.setRoleFill(draft, 'content-lead', {
     mode: 'assign',
     name: 'My Mixer',
-    systemPrompt: 'ignored',
-    type: 'general'
+    systemPrompt: 'ignored'
   });
 
   assert.deepEqual(Draft.derive(draft).payload.role_staffing, [
@@ -764,7 +757,6 @@ test('saving customized setup acknowledges the proposed agent and stages only ch
     planAgent('Brand New', {
       entry_point: true,
       action: 'create',
-      type: 'general',
       model: 'gpt-5',
       provider: 'openai',
       system_prompt: 'Recommended prompt'
@@ -773,7 +765,6 @@ test('saving customized setup acknowledges the proposed agent and stages only ch
 
   Draft.saveSetup(draft, 0, {
     name: 'Brand New',
-    type: 'general',
     model: 'gpt-5.1',
     provider: 'openai',
     systemPrompt: 'Custom prompt'
@@ -1089,13 +1080,11 @@ test('a renamed reuse stages the recommended blueprint definition without mutati
       action: 'reuse',
       entry_point: true,
       role: 'saved-role',
-      type: 'general',
       model: 'saved-model',
       provider: 'saved-provider',
       system_prompt: 'saved prompt',
       recommended_setup: {
         role: 'researcher',
-        type: 'research',
         model: 'blueprint-model',
         provider: 'blueprint-provider',
         system_prompt: 'blueprint prompt',
@@ -1107,7 +1096,6 @@ test('a renamed reuse stages the recommended blueprint definition without mutati
 
   Draft.saveSetup(draft, 0, {
     name: 'Shared Scout copy',
-    type: 'research',
     model: 'blueprint-model',
     provider: 'blueprint-provider',
     systemPrompt: 'blueprint prompt'
@@ -1116,7 +1104,6 @@ test('a renamed reuse stages the recommended blueprint definition without mutati
   assert.equal(row.lifecycle, 'customized-copy');
   assert.equal(row.statusLabel, 'Customized copy · Will be created with workspace');
   assert.equal(row.role, 'researcher');
-  assert.equal(row.type, 'research');
   assert.deepEqual(row.tools, { skills: ['research-kit'] });
   assert.deepEqual(row.appearance, appearance);
   assert.equal(row.identity.characterId, 'sable');
