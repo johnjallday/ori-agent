@@ -2,7 +2,7 @@ import { test, expect, type APIRequestContext, type Page } from '@playwright/tes
 import { mkdirSync } from 'node:fs';
 
 const SHOTS = 'tasks/screenshots/workspace-team-readiness';
-const SAVED_AGENT = 'Downloads Curator';
+const SAVED_AGENT = 'File Curator';
 const RUN = Date.now().toString(36);
 const createdWorkspaceIds: string[] = [];
 let createdSavedAgent = false;
@@ -21,6 +21,10 @@ async function openCreateModal(page: Page) {
   });
   await expect(page.locator('#addFolderModal')).toBeVisible();
   await expect(cardByLabel(page, 'Blank')).toBeVisible();
+}
+
+async function expectNoDownloadsJanitorCard(page: Page) {
+  await expect(cardByLabel(page, 'Downloads Janitor')).toHaveCount(0);
 }
 
 async function savedAgentNames(request: APIRequestContext) {
@@ -59,23 +63,24 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/workspaces');
 });
 
-test('a saved Downloads Curator is suggested, assigned, and persisted without duplication', async ({
+test('a saved File Curator is suggested, assigned, and persisted without duplication', async ({
   page,
   request
 }) => {
   const beforeNames = await savedAgentNames(request);
   await openCreateModal(page);
-  await cardByLabel(page, 'Downloads Janitor').click();
+  await expectNoDownloadsJanitorCard(page);
+  await cardByLabel(page, 'File Janitor').click();
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep2')).toBeVisible();
-  await page.locator('#folderNameInput').fill(`Downloads Readiness ${RUN}`);
+  await page.locator('#folderNameInput').fill(`File Readiness ${RUN}`);
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep3')).toBeVisible();
 
   const role = page.locator('#workspaceRoleRoster .ws-role-row').first();
   await expect(role.locator('.ws-role-tag')).toHaveText('Missing');
   const suggestion = page.getByRole('button', {
-    name: 'Use Downloads Curator for Downloads Curator',
+    name: 'Use File Curator for File Curator',
     exact: true
   });
   await expect(suggestion).toBeVisible();
@@ -83,7 +88,7 @@ test('a saved Downloads Curator is suggested, assigned, and persisted without du
     "Matches this role's name"
   );
   await page.locator('#addFolderModal .modal-dialog').screenshot({
-    path: `${SHOTS}/downloads-curator-suggested.png`
+    path: `${SHOTS}/file-curator-suggested.png`
   });
 
   await suggestion.click();
@@ -92,7 +97,7 @@ test('a saved Downloads Curator is suggested, assigned, and persisted without du
   await expect(suggestion).toHaveCount(0);
   await expect(page.locator('#wizardNextBtn')).toBeEnabled();
   await page.locator('#addFolderModal .modal-dialog').screenshot({
-    path: `${SHOTS}/downloads-curator-assigned.png`
+    path: `${SHOTS}/file-curator-assigned.png`
   });
 
   await page.locator('#wizardNextBtn').click();
@@ -108,7 +113,7 @@ test('a saved Downloads Curator is suggested, assigned, and persisted without du
   expect(requestBody.team_intent).toEqual(expect.objectContaining({ version: 1, mode: 'staffed' }));
   expect(requestBody.role_staffing).toEqual([
     expect.objectContaining({
-      role_id: 'downloads-curator',
+      role_id: 'file-curator',
       mode: 'assign',
       name: SAVED_AGENT
     })
@@ -118,7 +123,7 @@ test('a saved Downloads Curator is suggested, assigned, and persisted without du
   expect(body.folder.agent_instances).toEqual([
     expect.objectContaining({
       name: SAVED_AGENT,
-      role_id: 'downloads-curator',
+      role_id: 'file-curator',
       role_source: 'assigned',
       entry_point: true
     })

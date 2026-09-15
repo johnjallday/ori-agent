@@ -85,7 +85,7 @@ func (h *Handler) ListBatches(w http.ResponseWriter, r *http.Request) {
 	}
 	batches, err := h.service.ListBatches(workspaceID)
 	if err != nil {
-		h.respondError(w, err, "Failed to list Downloads Janitor batches")
+		h.respondError(w, err, "Failed to list File Janitor batches")
 		return
 	}
 
@@ -140,7 +140,7 @@ func (h *Handler) GetBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	settings, err := h.service.Status(workspaceID)
 	if err != nil {
-		h.respondError(w, err, "Failed to read Downloads Janitor status")
+		h.respondError(w, err, "Failed to read File Janitor status")
 		return
 	}
 
@@ -153,7 +153,7 @@ func (h *Handler) GetBatch(w http.ResponseWriter, r *http.Request) {
 		var found bool
 		batch, candidates, found, err = h.service.LatestPendingBatch(workspaceID)
 		if err != nil {
-			h.respondError(w, err, "Failed to read the Downloads Janitor batch")
+			h.respondError(w, err, "Failed to read the File Janitor batch")
 			return
 		}
 		if !found {
@@ -179,7 +179,7 @@ func (h *Handler) GetBatch(w http.ResponseWriter, r *http.Request) {
 				_ = orihttp.RespondNotFound(w, "batch not found")
 				return
 			}
-			h.respondError(w, err, "Failed to read the Downloads Janitor batch")
+			h.respondError(w, err, "Failed to read the File Janitor batch")
 			return
 		}
 	}
@@ -337,7 +337,7 @@ func (h *Handler) TestScan(w http.ResponseWriter, r *http.Request) {
 	}
 	report, err := h.service.TestScan(workspaceID)
 	if err != nil {
-		h.respondError(w, err, "Failed to run the Downloads Janitor test scan")
+		h.respondError(w, err, "Failed to run the File Janitor test scan")
 		return
 	}
 	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "report": report})
@@ -353,7 +353,7 @@ func (h *Handler) ScanNow(w http.ResponseWriter, r *http.Request) {
 	}
 	batch, created, err := h.service.ScanNow(workspaceID, downloadsjanitor.ScanSourceManual)
 	if err != nil {
-		h.respondError(w, err, "Failed to run the Downloads Janitor scan")
+		h.respondError(w, err, "Failed to run the File Janitor scan")
 		return
 	}
 	response := map[string]any{"success": true, "created": created}
@@ -418,7 +418,7 @@ func (h *Handler) UpdateDecisions(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, downloadsjanitor.ErrUnknownCategory):
 			_ = orihttp.RespondBadRequest(w, err.Error())
 		default:
-			h.respondError(w, err, "Failed to record Downloads Janitor decisions")
+			h.respondError(w, err, "Failed to record File Janitor decisions")
 		}
 		return
 	}
@@ -450,7 +450,7 @@ func (h *Handler) ResetSkipped(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.service.ResetSkipped(workspaceID, req.Key); err != nil {
-		h.respondError(w, err, "Failed to reset skipped Downloads Janitor items")
+		h.respondError(w, err, "Failed to reset skipped File Janitor items")
 		return
 	}
 	_ = orihttp.RespondSuccess(w, map[string]any{"success": true})
@@ -535,7 +535,7 @@ func (h *Handler) PreviewMoves(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: workspaceID, UserID: userID, Items: items,
 	})
 	if err != nil {
-		h.respondReviewError(w, err, "Failed to prepare the Downloads Janitor preview")
+		h.respondReviewError(w, err, "Failed to prepare the File Janitor preview")
 		return
 	}
 	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "preview": preview})
@@ -572,7 +572,7 @@ func (h *Handler) ConfirmMoves(w http.ResponseWriter, r *http.Request) {
 		Token: req.Token, Items: items,
 	})
 	if err != nil {
-		h.respondReviewError(w, err, "Failed to apply the approved Downloads Janitor moves")
+		h.respondReviewError(w, err, "Failed to apply the approved File Janitor moves")
 		return
 	}
 	// A mixed result is a normal outcome, not an error: the response reports
@@ -600,7 +600,7 @@ func (h *Handler) Undo(w http.ResponseWriter, r *http.Request) {
 				orihttp.NewAPIError("undo_unavailable", err.Error()))
 			return
 		}
-		h.respondReviewError(w, err, "Failed to undo the Downloads Janitor action")
+		h.respondReviewError(w, err, "Failed to undo the File Janitor action")
 		return
 	}
 	// A refused undo is not an error response: the request was fine, the file
@@ -616,7 +616,7 @@ func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
 	}
 	actions, err := h.service.ListActions(workspaceID)
 	if err != nil {
-		h.respondError(w, err, "Failed to read Downloads Janitor history")
+		h.respondError(w, err, "Failed to read File Janitor history")
 		return
 	}
 	// Filters: operation (move|trash) and result (applied|failed|stale), plus
@@ -766,7 +766,7 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 	status, err := h.service.UpdateSettings(workspaceID, update)
 	if err != nil {
-		h.respondError(w, err, "Failed to update Downloads Janitor settings")
+		h.respondError(w, err, "Failed to update File Janitor settings")
 		return
 	}
 	status = h.syncAutomationAndRefresh(workspaceID, status)

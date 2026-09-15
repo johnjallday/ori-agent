@@ -3137,7 +3137,7 @@
     const card = el('section', 'dj-card');
     const head = el('div', 'dj-head');
     const heading = el('div', 'dj-heading');
-    const title = el('h2', 'dj-title', 'Downloads Janitor');
+    const title = el('h2', 'dj-title', 'File Janitor');
     title.id = 'downloadsJanitorTitle';
     heading.appendChild(title);
     heading.appendChild(

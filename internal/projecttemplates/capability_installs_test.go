@@ -131,13 +131,15 @@ func TestDownloadsPreset_StillOnlySuggestsItsFolder(t *testing.T) {
 	}
 }
 
-// TestFileJanitorBlueprint_IsGenericAndGrantsNothing pins the generic
-// blueprint's contract (FR-31-FR-34).
+// TestFileJanitorBlueprint_SuggestsDownloadsAndGrantsNothing pins the
+// blueprint's contract (FR-10, FR-11, FR-31-FR-34).
 //
-// The distinction from the Downloads preset is the whole point: the preset
-// suggests ~/Downloads, this one suggests nothing. A blueprint that quietly
-// proposed a real folder would make the user's approval a formality.
-func TestFileJanitorBlueprint_IsGenericAndGrantsNothing(t *testing.T) {
+// File Janitor absorbed the retired Downloads Janitor preset's default: it now
+// suggests ~/Downloads too, but a suggestion is not a grant. The requirement
+// stays unresolved (no "~" expansion, no absolute path) until the user
+// explicitly approves it in the wizard — a blueprint that quietly proposed a
+// resolved folder would make that approval a formality.
+func TestFileJanitorBlueprint_SuggestsDownloadsAndGrantsNothing(t *testing.T) {
 	libDir := t.TempDir()
 	if err := EnsureLibrary(libDir); err != nil {
 		t.Fatalf("EnsureLibrary: %v", err)
@@ -155,7 +157,8 @@ func TestFileJanitorBlueprint_IsGenericAndGrantsNothing(t *testing.T) {
 		t.Fatalf("install source = %q, want blueprint", tpl.Capabilities[0].Source)
 	}
 
-	// Asks for one folder, and proposes none.
+	// Asks for one folder, and suggests ~/Downloads unresolved — a proposal,
+	// not a grant.
 	if len(tpl.DirectoryRequirements) != 1 {
 		t.Fatalf("expected exactly one folder requirement, got %+v", tpl.DirectoryRequirements)
 	}
@@ -163,8 +166,11 @@ func TestFileJanitorBlueprint_IsGenericAndGrantsNothing(t *testing.T) {
 	if req.Key != "file-janitor-root" {
 		t.Fatalf("requirement key = %q, want the canonical one", req.Key)
 	}
-	if req.SuggestedPath != "" {
-		t.Fatalf("the generic blueprint proposed a folder (%q); only a preset may", req.SuggestedPath)
+	if req.SuggestedPath != "~/Downloads" {
+		t.Fatalf("suggested path = %q, want the unresolved ~/Downloads", req.SuggestedPath)
+	}
+	if strings.HasPrefix(req.SuggestedPath, "/") {
+		t.Fatalf("the suggestion was resolved to an absolute path: %q", req.SuggestedPath)
 	}
 	if req.AccessDisclosure == "" {
 		t.Fatal("the folder request must disclose what approving it grants")

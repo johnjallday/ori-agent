@@ -5,7 +5,7 @@
   "tagline": "Review and file one intake folder safely.",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 1,
+  "builtin_version": 2,
   "tags": [
     "files",
     "local-first",
@@ -25,6 +25,7 @@
     {
       "key": "file-janitor-root",
       "label": "Folder to tidy",
+      "suggested_path": "~/Downloads",
       "access_disclosure": "Ori lists the files directly inside this folder and reads their names, types, sizes, and dates. After you approve them, it can move files into a Filed folder inside this same folder or send them to your system Trash. It never reads file contents unless you turn that on separately, never touches anything outside this folder, and never deletes anything permanently."
     }
   ],

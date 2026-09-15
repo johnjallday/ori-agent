@@ -95,7 +95,7 @@ func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	status, err := h.service.Status(workspaceID)
 	if err != nil {
-		h.respondError(w, err, "Failed to read Downloads Janitor status")
+		h.respondError(w, err, "Failed to read File Janitor status")
 		return
 	}
 	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "status": status})
@@ -111,7 +111,7 @@ func (h *Handler) GetReadiness(w http.ResponseWriter, r *http.Request) {
 	}
 	status, err := h.service.Status(workspaceID)
 	if err != nil {
-		h.respondError(w, err, "Failed to check Downloads Janitor readiness")
+		h.respondError(w, err, "Failed to check File Janitor readiness")
 		return
 	}
 	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "readiness": status.Readiness})
@@ -148,7 +148,7 @@ func (h *Handler) ConfirmSetup(w http.ResponseWriter, r *http.Request) {
 		Paused:             req.Paused,
 	})
 	if err != nil {
-		h.respondError(w, err, "Failed to set up Downloads Janitor")
+		h.respondError(w, err, "Failed to set up File Janitor")
 		return
 	}
 	// Confirmed setup is what turns the automation on for the first time, and
@@ -176,7 +176,7 @@ func (h *Handler) SetPaused(w http.ResponseWriter, r *http.Request) {
 	}
 	status, err := h.service.SetPaused(workspaceID, req.Paused)
 	if err != nil {
-		h.respondError(w, err, "Failed to update Downloads Janitor")
+		h.respondError(w, err, "Failed to update File Janitor")
 		return
 	}
 	// The flag and the watcher move together: a paused workspace whose watcher
@@ -192,7 +192,7 @@ func (h *Handler) SetPaused(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) resolveWorkspace(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if h == nil || h.service == nil {
 		_ = orihttp.RespondAPIError(w, http.StatusServiceUnavailable,
-			orihttp.NewAPIError("unavailable", "Downloads Janitor is not available."))
+			orihttp.NewAPIError("unavailable", "File Janitor is not available."))
 		return "", false
 	}
 	workspaceID := strings.TrimSpace(r.PathValue("workspaceID"))
