@@ -36,7 +36,7 @@ const (
 	// handler instead of starting a mission or creating a task.
 	//
 	// It exists because some features want "something changed in this folder,
-	// go look" rather than "ask an agent about it". Downloads Janitor is the
+	// go look" rather than "ask an agent about it". File Janitor is the
 	// first: a hundred new files must produce one scan, not a hundred tasks and
 	// not a hundred prompts. The handler receives the workspace and a summary
 	// of the fire — never the filenames as instructions.

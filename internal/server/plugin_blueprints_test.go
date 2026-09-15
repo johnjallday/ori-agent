@@ -185,3 +185,50 @@ func TestBlueprintCatalogSnapshotCarriesExplicitActiveState(t *testing.T) {
 }
 
 var errTestPluginListUnavailable = errors.New("plugin store unavailable")
+
+// TestBlueprintCatalogSnapshotOmitsRetiredBuiltinBehindInertCandidate exercises
+// the retirement end to end at the snapshot level: a real library holding the
+// retired downloads-janitor built-in, plus an inert plugin candidate that
+// owns the same blueprint ID. The snapshot must list the plugin's candidate
+// (inactive, since its plugin is disabled) and never the built-in, because
+// ListLibrary already excludes retired templates before the merge runs
+// (FR-7).
+func TestBlueprintCatalogSnapshotOmitsRetiredBuiltinBehindInertCandidate(t *testing.T) {
+	root := t.TempDir()
+	if err := projecttemplates.EnsureLibrary(root); err != nil {
+		t.Fatalf("EnsureLibrary: %v", err)
+	}
+
+	owner := &workspace.PluginTemplateOwner{PluginID: "tidy", PluginVersion: "1.0.0", BlueprintID: "downloads-janitor", BlueprintVersion: 1}
+	inertPlugin := plugin.InstalledPlugin{
+		Name: "tidy", Version: "1.0.0", Enabled: false, // disabled: pluginBlueprintsActive returns false
+		WorkspaceSurfaces: &plugin.SurfaceContribution{
+			Protocol: plugin.ProtocolRange{Min: plugin.SurfaceProtocolVersion, Max: plugin.SurfaceProtocolVersion},
+		},
+		ResolvedBlueprints: []plugin.ResolvedBlueprint{{
+			ID: "downloads-janitor", QualifiedID: "plugin:tidy:downloads-janitor", Version: 1,
+			Template: projecttemplates.Template{ID: "plugin:tidy:downloads-janitor", Name: "Tidy", PluginOwner: owner},
+		}},
+		ResolvedArtifacts: []plugin.ResolvedArtifact{{Available: true}},
+	}
+
+	snapshot, err := buildBlueprintCatalogSnapshot(root, nil, staticInstalledPlugins{installed: []plugin.InstalledPlugin{inertPlugin}}, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawCandidate bool
+	for _, entry := range snapshot.Entries {
+		if entry.ID == "downloads-janitor" {
+			t.Fatalf("snapshot must omit the retired built-in downloads-janitor, got %+v", snapshot.Entries)
+		}
+		if entry.ID == "plugin:tidy:downloads-janitor" {
+			sawCandidate = true
+			if snapshot.Active[entry.ID] {
+				t.Fatalf("the plugin's disabled candidate must be inactive: %+v", snapshot.Active)
+			}
+		}
+	}
+	if !sawCandidate {
+		t.Fatalf("snapshot must list the inert plugin candidate for downloads-janitor: %+v", snapshot.Entries)
+	}
+}

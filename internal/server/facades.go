@@ -17,10 +17,10 @@ import (
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/dailybriefhttp"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
-	"github.com/johnjallday/ori-agent/internal/downloadsjanitorhttp"
 	"github.com/johnjallday/ori-agent/internal/economyhttp"
 	"github.com/johnjallday/ori-agent/internal/evolutionhttp"
 	"github.com/johnjallday/ori-agent/internal/externalagentshttp"
+	"github.com/johnjallday/ori-agent/internal/filejanitorhttp"
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	"github.com/johnjallday/ori-agent/internal/gateway"
 	"github.com/johnjallday/ori-agent/internal/githubhttp"
@@ -174,11 +174,11 @@ type HandlerFacade struct {
 	// WorkspacePlans serves the canonical Plan API. Plans are workspace
 	// workflow state, so the handler lives beside Runs rather than inside the
 	// Skills catalog (PRD section 6.1).
-	WorkspacePlans   *workspaceplan.Handler
-	ActionCenter     *actioncenterhttp.Handler
-	Triggers         *triggerhttp.Handler
-	WorkspaceMemory  *memoryhttp.Handler
-	DownloadsJanitor *downloadsjanitorhttp.Handler
+	WorkspacePlans  *workspaceplan.Handler
+	ActionCenter    *actioncenterhttp.Handler
+	Triggers        *triggerhttp.Handler
+	WorkspaceMemory *memoryhttp.Handler
+	FileJanitor     *filejanitorhttp.Handler
 	// WorkspaceCapabilities serves the built-in Workspace Capability catalog
 	// and install lifecycle. One set of routes serves every capability; there
 	// is no per-capability lifecycle API.

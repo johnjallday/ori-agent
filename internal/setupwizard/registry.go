@@ -2,7 +2,7 @@
 // steps a workspace must satisfy after it is created. It owns the lifecycle
 // (open, resume, dismiss, skip, complete, repair) and the readiness decisions;
 // the domain work itself belongs to registered adapters, which call the
-// existing Downloads Janitor, Calendar, email, and plugin services
+// existing File Janitor, Calendar, email, and plugin services
 // rather than reimplementing them.
 //
 // Two boundaries define this package:
