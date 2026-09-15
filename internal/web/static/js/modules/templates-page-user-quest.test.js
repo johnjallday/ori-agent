@@ -8,15 +8,9 @@ const page = readFileSync(
   'utf8'
 );
 
-test('user setup quest editor exposes only the fixed five-stage copy surface', () => {
+test('user setup quest editor exposes only the fixed four-step copy surface', () => {
   const kinds = source.match(/const tplUserQuestKinds = \[([\s\S]*?)\];/)?.[1] || '';
-  const expected = [
-    'integration_install',
-    'project_connect',
-    'workspace_setup',
-    'assistant_program_staffing',
-    'summary'
-  ];
+  const expected = ['project_connect', 'workspace_setup', 'assistant_program_staffing', 'summary'];
   assert.deepEqual(
     [...kinds.matchAll(/\['([^']+)'/g)].map(match => match[1]),
     expected
@@ -24,6 +18,11 @@ test('user setup quest editor exposes only the fixed five-stage copy surface', (
   assert.match(page, /Source · User template/);
   assert.match(page, /not their behavior/);
   assert.doesNotMatch(page, /tplUserQuest(?:Route|Command|Action|URL)/);
+  // FR 32: two launch inputs; the runtime title and instructions are gone.
+  assert.match(page, /id="tplUserQuestGroupTitle"/);
+  assert.match(page, /id="tplUserQuestGroupName"/);
+  assert.doesNotMatch(page, /tplUserQuestRuntime/);
+  assert.doesNotMatch(source, /runtime_title|runtime_instructions|tplUserQuestRuntime/);
 });
 
 test('preview and save communicate zero effects and use optimistic replacement semantics', () => {

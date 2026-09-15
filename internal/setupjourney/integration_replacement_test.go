@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/plugin"
+	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/specialist"
 )
 
@@ -178,7 +179,19 @@ func integrationServiceForReplacementTest(t *testing.T, adapter *ReviewedIntegra
 	if err := service.SetActionAdapter(specialist.SetupStepIntegrationInstall, adapter); err != nil {
 		t.Fatal(err)
 	}
-	return service
+	return installQuestScope(t, service)
+}
+
+// installQuestScope scopes a service to the generated REAPER install quest, the
+// one quest that carries the integration_install step.
+func installQuestScope(t *testing.T, service *Service) *Service {
+	t.Helper()
+	service.SetQuestCatalog(NewIntegrationInstallQuestCatalog(reviewedintegration.All, &questPlugins{}))
+	scoped, err := service.ForHostQuest(context.Background(), "local", "install_ori_reaper")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return scoped
 }
 
 func TestReviewedIntegrationReplacementConsentAndReplay(t *testing.T) {

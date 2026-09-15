@@ -6,15 +6,16 @@ import (
 	"fmt"
 )
 
-// FindQuestRoot reuses an exact user/quest root, including one historical
-// assistant-owned root for the compiled legacy specialist. It never rewrites
-// identity, copies receipts, chooses among ambiguous roots, or grants access.
-func (s *SQLiteStore) FindQuestRoot(ctx context.Context, userID string, key QuestKey, legacySlug string) (*Run, error) {
+// FindQuestRoot reuses the exact user/quest root. Roots created under the
+// retired assistant-slug identity are never adopted (they stay unreachable);
+// it never rewrites identity, copies receipts, chooses among ambiguous roots,
+// or grants access.
+func (s *SQLiteStore) FindQuestRoot(ctx context.Context, userID string, key QuestKey) (*Run, error) {
 	if err := s.configured(); err != nil {
 		return nil, err
 	}
 	key = normalizeQuestKey(key)
-	if !validateCanonicalRef(userID, false) || !validQuestKey(key) || (legacySlug != "" && !validateStableID(legacySlug)) {
+	if !validateCanonicalRef(userID, false) || !validQuestKey(key) {
 		return nil, ErrInvalid
 	}
 	var rows *sql.Rows
@@ -28,19 +29,15 @@ func (s *SQLiteStore) FindQuestRoot(ctx context.Context, userID string, key Ques
 	case QuestSourceHost:
 		// A host root is only ever its exact relationship + slug; it never adopts
 		// a plugin, user-template, or assistant-owned root.
-		if legacySlug != "" {
-			return nil, ErrInvalid
-		}
 		rows, err = s.db.QueryContext(ctx, `SELECT `+runColumns+` FROM setup_journey_run
 			WHERE run_kind = 'root' AND owner_user_id = ? AND journey_id = ?
 			  AND relationship_id = ? AND specialist_slug = 'host_quest'
 			ORDER BY created_at LIMIT 2`, userID, key.ID, questRelationshipID(key))
 	case QuestSourcePlugin:
 		rows, err = s.db.QueryContext(ctx, `SELECT `+runColumns+` FROM setup_journey_run
-			WHERE run_kind = 'root' AND owner_user_id = ? AND journey_id = ? AND (
-				(relationship_id = ? AND specialist_slug = 'plugin_quest') OR
-				(? != '' AND specialist_slug = ? AND (integration_plugin_id = '' OR integration_plugin_id = ?))
-			) ORDER BY created_at LIMIT 2`, userID, key.ID, questRelationshipID(key), legacySlug, legacySlug, key.PluginID)
+			WHERE run_kind = 'root' AND owner_user_id = ? AND journey_id = ?
+			  AND relationship_id = ? AND specialist_slug = 'plugin_quest'
+			ORDER BY created_at LIMIT 2`, userID, key.ID, questRelationshipID(key))
 	default:
 		return nil, ErrInvalid
 	}

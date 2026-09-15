@@ -4,16 +4,21 @@ Ori’s REAPER integration is an optional local contribution for organizing and 
 
 ## Start and resume setup
 
-Open **Plugins → Guided Setup**, or select Reaper Song in the workspace template picker and choose **Open Guided Setup**. The standalone **Templates** page also shows the selected template's quest and **Open Guided Setup** action, with plugin-owned declarations kept read-only. All three resume the same saved quest without requiring an accepted Personal Assistant offer. If the assistant offers music-production setup, its accepted setup action is another entry to that quest.
+Setup happens in two quests. Opening either one does not install software, connect a folder, create a workspace or agent, open REAPER, or enable live control. See [Plugin-owned setup quests](plugin-setup-quests.md) for the declaration and rollout contract.
 
-Opening setup does not install software, connect a folder, create a workspace or agent, open REAPER, or enable live control. Published plugin v0.5.0 uses labeled **Ori compatibility setup** until a reviewed plugin release supplies its own declaration. See [Plugin-owned setup quests](plugin-setup-quests.md) for the declaration and rollout contract.
+**1. Install Ori REAPER Plugin.** Before the plugin is installed, open it from **Plugins → Available integrations → Guided Setup**, from the accepted music-production assistant's setup card, or with `/?setup=quest&source=host&quest=install_ori_reaper`. It has two steps:
 
-Setup now follows four screens:
+1. **Install Ori REAPER Plugin** — or continue with a verified installed integration. Choose **Install plugin**, check the review, then choose **Install**: Ori downloads the reviewed release, checks its fingerprint, and installs it switched off. Then choose **Enable plugin** and **Enable**. Installed, enabled, and verified are separate states. An existing installation from the official unpinned Git URL offers **Review verified replacement**, including when its version already matches the pin. Review the disclosure, then choose **Replace with reviewed version**. This uses the pinned release, preserves the enabled state, and does not delete workspaces or project files; runtime access may need review again. Cancel changes nothing. **Check Again** refreshes status without installing or replacing anything.
+2. **REAPER plugin ready** — shows the installed version, with **Continue: Set up REAPER** as the primary action and **Open Plugins**. Continue opens the plugin's quest in the same window.
 
-1. **Install Ori REAPER Plugin** — or continue with a verified installed integration. Installed, enabled, and verified are separate states. An existing installation from the official unpinned Git URL offers **Review verified replacement**, including when its version is already `0.5.0`. Review the disclosure, then choose **Replace with reviewed version**. This uses the pinned release, preserves the enabled state, and does not delete workspaces or project files; runtime access may need review again. Cancel changes nothing. **Check Again** refreshes status without installing or replacing anything.
-2. **Build Your Music Production Group** — choose **Build Group** to open the shared Create Workspace dialog in its fixed guided-Group context, with **Music Production** prefilled. Review the name and build the canonical Music Production Home, or reuse the existing Home unchanged. This creates no agents, projects, schedules, or access grants. The ordinary Group creator instead presents a Group Roster before final creation; its reviewed Manager is scoped to that group's files and notes rather than member project access. Use Step 2 for the setup-specific Home.
-3. **Set Up REAPER** — manual Web Remote instructions and a read-only prerequisite check. **Set up later** keeps file-based work available. This check grants no access and does not verify a project; runner completion and exact-project verification remain in workspace Settings.
-4. **Create New Workspace** — the shared creator opens at **Details → Team → Review**, with the group and Reaper Song blueprint selected. Choose **Create New Project** or **Import Existing Project**. Its review covers the exact project files, File-only starting mode, and separately scoped group/project roles. Opening the project application is off by default in this flow.
+**2. Set up REAPER.** The installed plugin's own quest. Open it from Continue, **Plugins → Guided Setup**, the Reaper Song template's **Open Guided Setup** in the workspace picker or on **Templates**, or the assistant's setup card once the plugin is installed. All entries resume the same saved quest without requiring an accepted Personal Assistant offer. It has two screens:
+
+1. **Build Your Music Production Group** — choose **Build Group** to open the shared Create Workspace dialog in its fixed guided-Group context, with **Music Production** prefilled. Review the name and build the canonical Music Production Home, or reuse the existing Home unchanged. This creates no agents, projects, schedules, or access grants. The ordinary Group creator instead presents a Group Roster before final creation; its reviewed Manager is scoped to that group's files and notes rather than member project access. Use this screen for the setup-specific Home.
+2. **Create New Workspace** — the shared creator opens at **Details → Team → Review**, with the group and Reaper Song blueprint selected. Choose **Create New Project** or **Import Existing Project**. Its review covers the exact project files, File-only starting mode, and separately scoped group/project roles. Opening the project application is off by default in this flow.
+
+There is no separate REAPER preparation screen. Web Remote, runner and exact-project checks belong to the new workspace's own Setup Wizard in workspace Settings.
+
+If the plugin is later disabled, removed or unverified, the quest shows one **The integration needs attention** panel with **Open install quest**. If saved progress came from an older quest layout, the quest offers **Start over**, which resets only setup progress and keeps the group, project and team.
 
 Group creation and workspace creation are separately confirmed. Choose **Do this later** at any point. Home’s Today view reports the server-derived setup state and provides **Review setup** or **Continue setup** without repeating completed consequences.
 
@@ -60,16 +65,17 @@ Compatible older plugin-backed workspaces can be attached only through an explic
 
 ## Reviewed release and recovery
 
-Ori’s reviewed registry now enables the published macOS arm64 `v0.5.0` release:
+Ori’s reviewed registry now enables the published macOS arm64 `v0.6.0` release:
 
-- Immutable source commit: `1f494db5a39d8c13f6149943b28e6a506d19631a`.
-- Published asset: `reaper-plugin_v0.5.0_darwin_arm64`, **8,780,098 bytes**.
-- SHA-256: `2bbf6b77418119cb21e827a407c8d5886e3effdb593ec0ad274e20d7d69c2ca9`.
-- Release: https://github.com/johnjallday/reaper-plugin/releases/tag/v0.5.0 (published September 7, 2026).
-- Source CI: https://github.com/johnjallday/reaper-plugin/actions/runs/34069730655.
-- Release workflow: https://github.com/johnjallday/reaper-plugin/actions/runs/34069730639.
+- Immutable source commit: `03af9fda3e6b9d8cc3c0496c5e9ef6df99e870b9` (the annotated `v0.6.0` tag’s resolved commit).
+- Published asset: `reaper-plugin_v0.6.0_darwin_arm64`, **8,780,098 bytes**.
+- SHA-256: `4def4fec14ecf083b0358c686c608514d4b9afff99dd810f1184213312770119`.
+- Release: https://github.com/johnjallday/reaper-plugin/releases/tag/v0.6.0 (published September 15, 2026).
+- Source CI: https://github.com/johnjallday/reaper-plugin/actions/runs/35020185810.
+- Release workflow: https://github.com/johnjallday/reaper-plugin/actions/runs/35020185797.
+- Manifest identity at that commit: blueprint `reaper-song` version 7, assistant program `music-producer-assistant` schema 2, setup quest `reaper_setup` version 2 with four steps, required host features `assistant_program_v1`, `specialist_setup_journey_v1`, `setup_quests_v2` and `template_group_requirements_v1`.
 
-For host enablement, the actual published asset and checksum were downloaded and compared against the manifest at the tag’s resolved commit. Size and digest matched; the executable reported `0.5.0`. The obsolete candidate pin was replaced, not merely enabled. A repeatable GitHub-backed check exercises both fresh reviewed install → separate enable and ordinary official-URL install → reviewed same-version replacement, without a development override:
+For host enablement, the actual published asset and checksum were downloaded and compared against the manifest at the tag’s resolved commit. Size and digest matched; the executable reported `0.6.0`. The previous `v0.5.0` pin was replaced, not merely enabled. A repeatable GitHub-backed check exercises both fresh reviewed install → separate enable and ordinary official-URL install → reviewed same-version replacement, without a development override:
 
 ```bash
 ORI_TEST_REVIEWED_INTEGRATION_RELEASE=1 go test ./internal/setupjourney \
@@ -79,5 +85,20 @@ ORI_TEST_REVIEWED_INTEGRATION_RELEASE=1 go test ./internal/setupjourney \
 This opt-in check uses temporary plugin stores and inert component registrars. It downloads and verifies release bytes but does not launch a plugin service, open or control REAPER, or touch user workspaces. The ordinary-URL fixture intentionally fails for review if the external default branch changes versions. Release/install verification is not a live-project verification claim.
 
 Older Ori builds may still report an identity mismatch or an unavailable reviewed release even after the plugin is installed. Update Ori first: reinstalling the same unpinned plugin does not enable the host’s release gate. The recovery action accepts only the exact official repository URLs and its previously accepted pins; unrelated/local sources, incompatible formats/platforms, and newer or unrecognized versions do not bypass verification. A replacement is never applied from a status read or review alone.
+
+### Pin history and moving the pin
+
+Plugin **0.6.0** is the first release that declares its setup quest under `setup_quests_v2`: `reaper_setup` version 2 with four steps and blueprint version 7. This Ori host no longer supports `setup_quests_v1`. Installed v0.5.1 and v0.5.2 plugins require it, so they fail closed: their manifests are refused until the plugin is updated. The previous pin, `v0.5.0` at commit `1f494db5a39d8c13f6149943b28e6a506d19631a` (SHA-256 `2bbf6b77418119cb21e827a407c8d5886e3effdb593ec0ad274e20d7d69c2ca9`), declared no quest, so its install quest offered only **Open Plugins**.
+
+A stale pin has one visible symptom worth recognising: the gate never accepts an installation **newer** than the pin and never offers a downgrade, so once a newer release is installed from the official URL the install step reports “Ori could not verify this installation against the reviewed source, format, and version” with only **Manage integration** available. The fix is to move the pin in Ori, not to reinstall the plugin.
+
+Move the pin only through this procedure:
+
+1. Confirm the new tag and release exist on `johnjallday/reaper-plugin`, and record the tag's resolved commit.
+2. Download the published `darwin_arm64` asset and its checksum. Compare size and SHA-256 against the manifest at that commit, and confirm the executable reports the new version.
+3. In `internal/reviewedintegration/entries.go`, set `ExpectedVersion`, `SourceCommit`, `ExpectedBlueprintVersion` and `RequiredHostFeatures` from that manifest. Update the registry test, the artifact digest in the published-release check, and this section's evidence list.
+4. Run the opt-in published-release check above against the new pin.
+
+The locally built candidate is not release evidence. A squash merge upstream changes its commit identity, so always pin the published tag's commit.
 
 Local plugin development remains separate. `scripts/reaper-demo.sh` stages an isolated copy and uses an explicit process-local source override; it labels the copy **not release-verified**. Installing a local directory or setting an arbitrary override is not a production recovery path.

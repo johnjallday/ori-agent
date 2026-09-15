@@ -11,30 +11,29 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
-func TestWorkspaceLaunchGroupReviewAcknowledgementAndPrerequisiteBoundaries(t *testing.T) {
+// FR 29: the group is reviewed and created, and once it exists a project can
+// be reviewed straight away. No acknowledgement or preparation check remains.
+func TestWorkspaceLaunchGroupReviewLeadsDirectlyToProjectReview(t *testing.T) {
 	ctx := context.Background()
 	reads := defaultCanonicalReads()
-	reads[specialist.SetupStepIntegrationInstall] = CanonicalStepRead{Complete: true, Result: CanonicalResult{IntegrationPluginID: "neutral", IntegrationVersion: "1.0.0"}}
 	service, _ := serviceFixture(t, reads)
 	adapter, _ := setupJourneyProjectAdapter(t)
 	service.readers.readers[specialist.SetupStepProjectConnect] = adapter
 	if err := service.SetActionAdapter(specialist.SetupStepProjectConnect, adapter); err != nil {
 		t.Fatal(err)
 	}
-	calls := 0
-	adapter.CheckPrerequisites = func(context.Context, projecttemplates.Template) (bool, error) { calls++; return true, nil }
 	projection, err := service.Read(ctx, "local", "")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if first := projection.Steps[0]; first.Kind != specialist.SetupStepProjectConnect || len(first.Actions) != 1 || first.Actions[0].ID != ActionReviewCreateGroup {
+		t.Fatalf("first launch step = %+v", first)
 	}
 	revision := projection.StateRevision
 	input := json.RawMessage(`{"name":"My Studio"}`)
 	review, err := service.Mutate(ctx, "local", projection.RunID, ActionReviewCreateGroup, ActionMutation{IfRevision: revision, IdempotencyKey: "group-review", Input: input})
 	if err != nil || review.Review.Group.Name != "My Studio" || review.Journey.Receipts.HomeWorkspaceID != "" {
 		t.Fatalf("review: %+v %v", review, err)
-	}
-	if _, err := service.CheckPreparation(ctx, "local", projection.RunID); err == nil || calls != 0 {
-		t.Fatal("checked prerequisites before the group existed")
 	}
 	if _, err := service.Mutate(ctx, "local", projection.RunID, ActionCreateGroup, ActionMutation{IfRevision: revision, IdempotencyKey: "without-review", Input: input}); err == nil {
 		t.Fatal("group created without review")
@@ -48,30 +47,31 @@ func TestWorkspaceLaunchGroupReviewAcknowledgementAndPrerequisiteBoundaries(t *t
 	if err != nil || repeated.Journey.StateRevision != created.Journey.StateRevision {
 		t.Fatalf("replay: %+v %v", repeated, err)
 	}
-	check, err := service.CheckPreparation(ctx, "local", projection.RunID)
-	if err != nil || !check.Ready || calls != 1 {
-		t.Fatalf("check: %+v %v", check, err)
+	project := created.Journey.Steps[0]
+	if project.Preparation == nil || !project.Preparation.Exists || project.Status == StepComplete {
+		t.Fatalf("group creation implied project readiness: %+v", project)
 	}
-	if _, err := service.Mutate(ctx, "local", projection.RunID, ActionReviewNewProject, ActionMutation{IfRevision: created.Journey.StateRevision, IdempotencyKey: "premature-project", Input: json.RawMessage(`{"mode_id":"new_project","workspace_name":"Song","project_name":"Song"}`)}); err == nil {
-		t.Fatal("project allowed before preparation decision")
+	offers := map[ActionID]bool{}
+	for _, action := range project.Actions {
+		offers[action.ID] = true
 	}
-	ack := ActionMutation{IfRevision: created.Journey.StateRevision, IdempotencyKey: "continue-without-live", Input: json.RawMessage(`{}`)}
-	acknowledged, err := service.Mutate(ctx, "local", projection.RunID, ActionAcknowledgePreparation, ack)
-	if err != nil || acknowledged.Journey.Receipts.ProjectWorkspaceID != "" || acknowledged.Journey.Receipts.SelectedModeID != "" {
-		t.Fatalf("acknowledgement created permissions/project: %+v %v", acknowledged, err)
-	}
-	project := acknowledged.Journey.Steps[1]
-	if project.Preparation == nil || !project.Preparation.Acknowledged || project.Status == StepComplete {
-		t.Fatalf("preparation implied project readiness: %+v", project)
+	if !offers[ActionReviewNewProject] || offers[ActionReviewCreateGroup] {
+		t.Fatalf("project review was not offered once the group existed: %+v", project.Actions)
 	}
 	// The guided Home names the same Group Template the creator lists, so both
 	// surfaces describe one program Home rather than two look-alike groups.
 	if id := review.Review.Group.GroupTemplateID; !projecttemplates.ValidManagedGroupTemplateID(id) || project.Preparation.GroupTemplateID != id {
 		t.Fatalf("group template identity: review %q, preparation %q", id, project.Preparation.GroupTemplateID)
 	}
-	reads[specialist.SetupStepIntegrationInstall] = CanonicalStepRead{BlockedReason: ReasonIntegrationDisabled}
-	if _, err := service.CheckPreparation(ctx, "local", projection.RunID); err == nil || calls != 1 {
-		t.Fatal("disabled plugin still invoked")
+	projectReview, err := service.Mutate(ctx, "local", projection.RunID, ActionReviewNewProject, ActionMutation{
+		IfRevision: created.Journey.StateRevision, IdempotencyKey: "project-review",
+		Input: json.RawMessage(`{"mode_id":"new_project","workspace_name":"Song","project_name":"Song"}`),
+	})
+	if err != nil || projectReview.Review == nil || projectReview.Review.ProjectConnection == nil {
+		t.Fatalf("project review after the group: %+v %v", projectReview, err)
+	}
+	if _, known := NormalizeActionID("acknowledge_preparation"); known {
+		t.Fatal("the preparation acknowledgement is still a compiled action")
 	}
 }
 

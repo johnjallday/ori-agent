@@ -24,6 +24,18 @@ const (
 	userQuestSource        = "user_template"
 )
 
+// RetiredUserSetupQuestLayoutGuidance is the template error shown for an
+// attachment still in the retired five-step layout (FR 33). It is never
+// rewritten automatically.
+const RetiredUserSetupQuestLayoutGuidance = "This quest uses an old five-step layout. Remove it and create it again."
+
+// retiredLayoutError reports a five-step or runtime-copy attachment. Its text
+// is the user guidance itself, and it still matches ErrInvalidUserSetupQuest.
+type retiredLayoutError struct{}
+
+func (retiredLayoutError) Error() string        { return RetiredUserSetupQuestLayoutGuidance }
+func (retiredLayoutError) Is(target error) bool { return target == ErrInvalidUserSetupQuest }
+
 var (
 	ErrInvalidUserSetupQuest = errors.New("invalid user setup quest")
 	ErrUserSetupQuestStale   = errors.New("user setup quest changed in another window")
@@ -142,6 +154,9 @@ func parseUserSetupQuest(data []byte) (*UserSetupQuest, error) {
 	if len(data) > maxUserSetupQuestBytes {
 		return nil, fmt.Errorf("%w: declaration exceeds %d bytes", ErrInvalidUserSetupQuest, maxUserSetupQuestBytes)
 	}
+	if usesRetiredUserQuestLayout(data) {
+		return nil, retiredLayoutError{}
+	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	var document userSetupQuestDocument
@@ -168,9 +183,9 @@ func parseUserSetupQuest(data []byte) (*UserSetupQuest, error) {
 		WorkspaceLaunch:            cloneUserQuestLaunch(document.WorkspaceLaunch),
 	}
 	normalized, err := specialist.NormalizeSetupJourney(declaration)
-	if err == nil && normalized.Shape() != specialist.SetupJourneyShapeSpecialist {
-		// User templates may author only the five-step specialist shape.
-		err = errors.New("exactly five fixed steps are required")
+	if err == nil && normalized.Shape() != specialist.SetupJourneyShapeProjectSetup {
+		// User templates may author only the four-step project_setup shape.
+		err = errors.New("exactly four fixed steps are required")
 	}
 	if err != nil || normalized.WorkspaceLaunch == nil || normalized.OwnerPluginID != "" || userSetupQuestContainsURL(normalized) {
 		if err == nil {
@@ -179,6 +194,23 @@ func parseUserSetupQuest(data []byte) (*UserSetupQuest, error) {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidUserSetupQuest, err)
 	}
 	return &UserSetupQuest{AttachmentID: document.AttachmentID, Declaration: normalized}, nil
+}
+
+// usesRetiredUserQuestLayout reports an attachment saved before quests moved to
+// four steps: five steps, or launch copy that still carries runtime fields.
+// It reads the document leniently so the specific guidance can be shown instead
+// of a strict-decoding error.
+func usesRetiredUserQuestLayout(data []byte) bool {
+	var probe struct {
+		Steps           []json.RawMessage          `json:"steps"`
+		WorkspaceLaunch map[string]json.RawMessage `json:"workspace_launch"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return false
+	}
+	_, runtimeTitle := probe.WorkspaceLaunch["runtime_title"]
+	_, runtimeInstructions := probe.WorkspaceLaunch["runtime_instructions"]
+	return len(probe.Steps) == 5 || runtimeTitle || runtimeInstructions
 }
 
 func userSetupQuestContainsURL(declaration *specialist.SetupJourney) bool {
@@ -190,7 +222,7 @@ func userSetupQuestContainsURL(declaration *specialist.SetupJourney) bool {
 		values = append(values, step.Title, step.Description)
 	}
 	if launch := declaration.WorkspaceLaunch; launch != nil {
-		values = append(values, launch.GroupTitle, launch.GroupName, launch.RuntimeTitle, launch.RuntimeInstructions)
+		values = append(values, launch.GroupTitle, launch.GroupName)
 	}
 	for _, value := range values {
 		if userSetupQuestURLPattern.MatchString(value) {
@@ -310,31 +342,25 @@ func NewUserSetupQuest(template Template, current *UserSetupQuest, draft UserSet
 	if !EvaluateUserSetupQuestEligibility(template).Eligible {
 		return nil, fmt.Errorf("%w: template prerequisites are incomplete", ErrInvalidUserSetupQuest)
 	}
+	kinds := specialist.SetupJourneyShapeSteps(specialist.SetupJourneyShapeProjectSetup)
 	attachmentID := "uqatt_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:24]
 	questID := "quest_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:24]
-	stepIDs := make([]string, specialist.SetupJourneyRequiredSteps)
+	stepIDs := make([]string, len(kinds))
 	for index := range stepIDs {
 		stepIDs[index] = "step_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:20]
 	}
 	if current != nil && current.Declaration != nil {
 		attachmentID = current.AttachmentID
 		questID = current.Declaration.ID
-		if len(current.Declaration.Steps) != specialist.SetupJourneyRequiredSteps {
+		if len(current.Declaration.Steps) != len(kinds) {
 			return nil, fmt.Errorf("%w: current declaration is malformed", ErrInvalidUserSetupQuest)
 		}
 		for index := range stepIDs {
 			stepIDs[index] = current.Declaration.Steps[index].ID
 		}
 	}
-	if len(draft.Steps) != specialist.SetupJourneyRequiredSteps {
-		return nil, fmt.Errorf("%w: exactly five fixed steps are required", ErrInvalidUserSetupQuest)
-	}
-	kinds := []specialist.SetupStepKind{
-		specialist.SetupStepIntegrationInstall,
-		specialist.SetupStepProjectConnect,
-		specialist.SetupStepWorkspaceSetup,
-		specialist.SetupStepAssistantProgramStaffing,
-		specialist.SetupStepSummary,
+	if len(draft.Steps) != len(kinds) {
+		return nil, fmt.Errorf("%w: exactly %d fixed steps are required", ErrInvalidUserSetupQuest, len(kinds))
 	}
 	steps := make([]specialist.SetupJourneyStep, len(kinds))
 	for index, kind := range kinds {
@@ -349,8 +375,8 @@ func NewUserSetupQuest(template Template, current *UserSetupQuest, draft UserSet
 		ExpectedBlueprintID: template.ID, ExpectedAssistantProgramID: template.AssistantProgram.ID,
 		Steps: steps, WorkspaceLaunch: cloneUserQuestLaunch(draft.WorkspaceLaunch),
 	})
-	if err == nil && declaration.Shape() != specialist.SetupJourneyShapeSpecialist {
-		err = errors.New("exactly five fixed steps are required")
+	if err == nil && declaration.Shape() != specialist.SetupJourneyShapeProjectSetup {
+		err = errors.New("exactly four fixed steps are required")
 	}
 	if err != nil || declaration.WorkspaceLaunch == nil {
 		if err == nil {
@@ -482,10 +508,8 @@ func defaultUserSetupQuestDraft() UserSetupQuestDraft {
 		Title: "Set up this project", Description: "Connect a project and choose how Ori can help.", IntegrationKey: "reviewed_integration",
 		WorkspaceLaunch: &specialist.WorkspaceLaunchCopy{
 			GroupTitle: "Create a Home for these projects", GroupName: "My projects",
-			RuntimeTitle: "Choose how Ori works", RuntimeInstructions: "File-only remains available. Live application control is optional and must be configured for the exact project later.",
 		},
 		Steps: []UserSetupQuestStepDraft{
-			{Kind: specialist.SetupStepIntegrationInstall, Title: "Check the integration", Description: "Review the required host-approved integration before installing or enabling it."},
 			{Kind: specialist.SetupStepProjectConnect, Title: "Connect a project", Description: "Choose an existing project or create a new one after reviewing the exact files."},
 			{Kind: specialist.SetupStepWorkspaceSetup, Title: "Choose how Ori works", Description: "Choose File-only or finish an available live setup in the project's Setup Wizard."},
 			{Kind: specialist.SetupStepAssistantProgramStaffing, Title: "Staff the project", Description: "Review separate Home and exact-project roles before creating or assigning agents."},

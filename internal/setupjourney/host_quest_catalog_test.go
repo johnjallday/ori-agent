@@ -174,10 +174,7 @@ func TestHostQuestRootIdentityIsExactAndStatusNeverCreates(t *testing.T) {
 		t.Fatal("another user read a foreign host run")
 	}
 
-	if _, err := store.FindQuestRoot(ctx, "local", hostKey, "music_production"); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("host root lookup accepted a legacy slug: %v", err)
-	}
-	if _, err := store.FindQuestRoot(ctx, "local", QuestKey{Source: "custom", ID: declaration.ID}, ""); !errors.Is(err, ErrInvalid) {
+	if _, err := store.FindQuestRoot(ctx, "local", QuestKey{Source: "custom", ID: declaration.ID}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("unknown quest source was queried: %v", err)
 	}
 }
@@ -200,16 +197,18 @@ func TestHostQuestAppearsInTheCombinedCatalog(t *testing.T) {
 	}
 }
 
+// specialistJourneyForHostTest is a project_setup declaration, the shape only
+// plugins and user templates author; no host catalog serves it.
 func specialistJourneyForHostTest() *specialist.SetupJourney {
 	return &specialist.SetupJourney{
-		SchemaVersion: 1, Version: 1, ID: "specialist_fixture", Title: "Specialist", Description: "Specialist shape.",
+		SchemaVersion: 1, Version: 1, ID: "specialist_fixture", Title: "Specialist", Description: "Project setup shape.",
 		IntegrationKey: "fixture_integration", ExpectedBlueprintID: "fixture-blueprint", ExpectedAssistantProgramID: "fixture-program",
 		Steps: []specialist.SetupJourneyStep{
-			{ID: "integration", Kind: specialist.SetupStepIntegrationInstall, Title: "Integration", Description: "Install."},
 			{ID: "project", Kind: specialist.SetupStepProjectConnect, Title: "Project", Description: "Connect."},
 			{ID: "workspace", Kind: specialist.SetupStepWorkspaceSetup, Title: "Workspace", Description: "Choose."},
 			{ID: "staffing", Kind: specialist.SetupStepAssistantProgramStaffing, Title: "Staffing", Description: "Staff."},
 			{ID: "summary", Kind: specialist.SetupStepSummary, Title: "Summary", Description: "Review."},
 		},
+		WorkspaceLaunch: &specialist.WorkspaceLaunchCopy{GroupTitle: "Group", GroupName: "Group"},
 	}
 }

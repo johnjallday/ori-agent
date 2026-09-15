@@ -2,7 +2,6 @@ package setupjourney
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -65,19 +64,20 @@ type questPlugins struct {
 
 func (p *questPlugins) List() ([]plugin.InstalledPlugin, error) { return p.items, p.err }
 
-var reaperQuestKey = QuestKey{PluginID: "reaper-plugin", ID: "reaper_setup"}
+var reaperQuestKey = QuestKey{Source: QuestSourcePlugin, PluginID: "reaper-plugin", ID: "reaper_setup"}
 
+// questPluginFixture is the installed REAPER plugin declaring its four-step
+// quest under setup_quests_v2, referenced by its blueprint.
 func questPluginFixture(t *testing.T) plugin.InstalledPlugin {
 	t.Helper()
-	entry, _ := specialist.Get("music_production")
-	d, err := specialist.NormalizeSetupJourney(*entry.SetupJourney)
+	d, err := specialist.NormalizeSetupJourney(reaperQuestDeclaration())
 	if err != nil {
 		t.Fatal(err)
 	}
 	return plugin.InstalledPlugin{
-		Name: reaperQuestKey.PluginID, Version: "0.5.0", Enabled: true,
+		Name: reaperQuestKey.PluginID, Version: "0.6.0", Enabled: true,
 		WorkspaceSurfaces: &plugin.SurfaceContribution{
-			RequiresHostFeatures: []string{plugin.HostFeatureSetupQuestsV1}, SetupQuests: []plugin.SetupQuest{*d},
+			RequiresHostFeatures: []string{plugin.HostFeatureSetupQuestsV2}, SetupQuests: []plugin.SetupQuest{*d},
 		},
 		ResolvedBlueprints: []plugin.ResolvedBlueprint{{ID: d.ExpectedBlueprintID, Template: projecttemplates.Template{
 			SetupQuestID:     d.ID,
@@ -86,34 +86,53 @@ func questPluginFixture(t *testing.T) plugin.InstalledPlugin {
 	}
 }
 
-func TestQuestCatalogBindsInstalledDeclarationAndExplicitLegacyBootstrap(t *testing.T) {
+// FR 15: only an installed plugin's valid setup_quests_v2 declarations are
+// listed. Nothing is listed before install, and no compatibility copy exists.
+func TestQuestCatalogListsOnlyInstalledV2Declarations(t *testing.T) {
 	ctx := context.Background()
 	plugins := &questPlugins{}
 	catalog := NewInstalledQuestCatalog(plugins)
-	legacy, err := catalog.Lookup(ctx, reaperQuestKey)
-	if err != nil || legacy.Ownership != "host_compatibility" || legacy.LegacySlug != "music_production" {
-		t.Fatalf("legacy=%#v err=%v", legacy, err)
+	if list, err := catalog.List(ctx); err != nil || len(list) != 0 {
+		t.Fatalf("pre-install list=%#v err=%v", list, err)
 	}
+	if _, err := catalog.Lookup(ctx, reaperQuestKey); err == nil {
+		t.Fatal("a quest resolved before its plugin was installed")
+	}
+
 	p := questPluginFixture(t)
 	p.WorkspaceSurfaces.SetupQuests[0].Title = "Plugin-owned music setup"
 	plugins.items = []plugin.InstalledPlugin{p}
 	owned, err := catalog.Lookup(ctx, reaperQuestKey)
-	if err != nil || owned.Ownership != "plugin" || owned.Declaration.Title != "Plugin-owned music setup" || owned.Declaration.OwnerPluginID != p.Name {
+	if err != nil || owned.Ownership != "plugin" || owned.Declaration.Title != "Plugin-owned music setup" ||
+		owned.Declaration.OwnerPluginID != p.Name || owned.Declaration.Shape() != specialist.SetupJourneyShapeProjectSetup {
 		t.Fatalf("owned=%#v err=%v", owned, err)
 	}
 	list, err := catalog.List(ctx)
-	if err != nil || len(list) != 1 || list[0].TemplateID != "plugin:reaper-plugin:reaper-song" {
+	if err != nil || len(list) != 1 || list[0].TemplateID != "plugin:reaper-plugin:reaper-song" || list[0].Ownership != "plugin" {
 		t.Fatalf("list=%#v err=%v", list, err)
 	}
 	// Returned declarations cannot mutate persisted data or a later read.
 	owned.Declaration.Steps[0].ID = "changed"
 	again, err := catalog.Lookup(ctx, reaperQuestKey)
-	if err != nil || again.Declaration.Steps[0].ID != "integration" {
+	if err != nil || again.Declaration.Steps[0].ID != "project" {
 		t.Fatalf("aliased=%#v err=%v", again, err)
+	}
+
+	// A manifest still requiring the retired setup_quests_v1 lists nothing.
+	v1 := questPluginFixture(t)
+	v1.WorkspaceSurfaces.RequiresHostFeatures = []string{"setup_quests_v1"}
+	plugins.items = []plugin.InstalledPlugin{v1}
+	if list, err := catalog.List(ctx); err != nil || len(list) != 0 {
+		t.Fatalf("v1 manifest list=%#v err=%v", list, err)
+	}
+
+	plugins.err = errors.New("plugin store unavailable")
+	if _, err := catalog.List(ctx); err == nil {
+		t.Fatal("catalog listed without reading the plugin store")
 	}
 }
 
-func TestQuestCatalogRejectsInvalidOwnershipAndNeverDowngradesToLegacy(t *testing.T) {
+func TestQuestCatalogRejectsInvalidOwnershipAndShapes(t *testing.T) {
 	cases := map[string]func(*plugin.InstalledPlugin){
 		"foreign integration": func(p *plugin.InstalledPlugin) { p.WorkspaceSurfaces.SetupQuests[0].IntegrationKey = "other" },
 		"foreign blueprint":   func(p *plugin.InstalledPlugin) { p.WorkspaceSurfaces.SetupQuests[0].ExpectedBlueprintID = "other" },
@@ -129,6 +148,12 @@ func TestQuestCatalogRejectsInvalidOwnershipAndNeverDowngradesToLegacy(t *testin
 			p.WorkspaceSurfaces.SetupQuests = append(p.WorkspaceSurfaces.SetupQuests, p.WorkspaceSurfaces.SetupQuests[0])
 		},
 		"unsupported schema": func(p *plugin.InstalledPlugin) { p.WorkspaceSurfaces.SetupQuests[0].SchemaVersion = 99 },
+		"retired five steps": func(p *plugin.InstalledPlugin) {
+			quest := &p.WorkspaceSurfaces.SetupQuests[0]
+			quest.Steps = append([]specialist.SetupJourneyStep{{
+				ID: "integration", Kind: specialist.SetupStepIntegrationInstall, Title: "Install", Description: "Install the plugin.",
+			}}, quest.Steps...)
+		},
 	}
 	for name, change := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -136,7 +161,10 @@ func TestQuestCatalogRejectsInvalidOwnershipAndNeverDowngradesToLegacy(t *testin
 			change(&p)
 			catalog := NewInstalledQuestCatalog(&questPlugins{items: []plugin.InstalledPlugin{p}})
 			if _, err := catalog.Lookup(context.Background(), reaperQuestKey); err == nil {
-				t.Fatal("invalid authored declaration fell back to legacy")
+				t.Fatal("invalid authored declaration resolved")
+			}
+			if list, err := catalog.List(context.Background()); err != nil || len(list) != 0 {
+				t.Fatalf("invalid declaration listed=%#v err=%v", list, err)
 			}
 		})
 	}
@@ -145,7 +173,7 @@ func TestQuestCatalogRejectsInvalidOwnershipAndNeverDowngradesToLegacy(t *testin
 	p.ResolvedBlueprints[0].Template.SetupQuestID = "replacement_quest"
 	catalog := NewInstalledQuestCatalog(&questPlugins{items: []plugin.InstalledPlugin{p}})
 	if _, err := catalog.Lookup(context.Background(), reaperQuestKey); err == nil {
-		t.Fatal("removed ID silently fell back")
+		t.Fatal("removed ID still resolved")
 	}
 	if _, err := catalog.Lookup(context.Background(), QuestKey{PluginID: "foreign-plugin", ID: "replacement_quest"}); err == nil {
 		t.Fatal("foreign owner accepted")
@@ -157,9 +185,8 @@ func TestQuestRunsDoNotRequireOrCreateAnAssistantAcceptance(t *testing.T) {
 	service, store := serviceFixture(t, defaultCanonicalReads())
 	relationships := &relationshipStub{err: errors.New("no assistant relationship")}
 	service.relationships = relationships
-	service.SetQuestCatalog(NewInstalledQuestCatalog(&questPlugins{}))
 	quests, err := service.ListQuests(ctx)
-	if err != nil || len(quests) != 1 {
+	if err != nil || len(quests) != 1 || quests[0].QuestKey != reaperQuestKey {
 		t.Fatalf("catalog=%#v err=%v", quests, err)
 	}
 	var count int
@@ -202,61 +229,31 @@ func TestQuestRunsDoNotRequireOrCreateAnAssistantAcceptance(t *testing.T) {
 	}
 }
 
-func TestQuestResumesLegacyRootAndReviewWithoutRewritingIdentity(t *testing.T) {
+// FR 17: a root saved under the retired assistant-slug identity is never
+// adopted by the plugin quest; the plugin quest starts its own root.
+func TestQuestNeverAdoptsRetiredAssistantOwnedRoots(t *testing.T) {
 	ctx := context.Background()
 	service, store := serviceFixture(t, defaultCanonicalReads())
-	adapter := &syntheticJourneyAdapter{}
-	if err := service.SetActionAdapter(specialist.SetupStepIntegrationInstall, adapter); err != nil {
-		t.Fatal(err)
-	}
-	legacy, err := service.Read(ctx, "local", "")
+	legacy := testRootSpec()
+	legacy.RelationshipID, legacy.SpecialistSlug, legacy.JourneyID = "assistant-journey-1", "music_production", reaperQuestKey.ID
+	legacyRoot, _, err := store.CreateOrGetRoot(ctx, legacy)
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := ActionMutation{IfRevision: legacy.StateRevision, IdempotencyKey: "old-review", Input: json.RawMessage(`{}`)}
-	review, err := service.Mutate(ctx, "local", legacy.RunID, ActionReviewInstall, request)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := store.FindQuestRoot(ctx, "local", reaperQuestKey); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("quest root lookup adopted the assistant root: %v", err)
 	}
-	before, err := store.GetRun(ctx, legacy.RunID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	service.SetQuestCatalog(NewInstalledQuestCatalog(&questPlugins{}))
-	service.relationships = &relationshipStub{err: errors.New("offer no longer accepted")}
 	scoped, err := service.ForQuest(ctx, "local", reaperQuestKey.PluginID, reaperQuestKey.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resumed, err := scoped.Read(ctx, "local", "")
-	if err != nil || resumed.RunID != legacy.RunID {
-		t.Fatalf("resume=%#v err=%v", resumed, err)
+	projection, err := scoped.Read(ctx, "local", "")
+	if err != nil || projection.RunID == legacyRoot.ID {
+		t.Fatalf("plugin quest resumed the retired root: %#v err=%v", projection, err)
 	}
-	replayed, err := scoped.Mutate(ctx, "local", legacy.RunID, ActionReviewInstall, request)
-	if err != nil || replayed.Review.Token != review.Review.Token || adapter.reviews != 2 {
-		t.Fatalf("replay=%#v calls=%d err=%v", replayed, adapter.reviews, err)
-	}
-	after, err := store.GetRun(ctx, legacy.RunID)
-	if err != nil || after.RelationshipID != before.RelationshipID || after.SpecialistSlug != before.SpecialistSlug {
-		t.Fatalf("identity rewritten: before=%#v after=%#v err=%v", before, after, err)
-	}
-}
-
-func TestQuestRefusesAmbiguousLegacyRoots(t *testing.T) {
-	ctx := context.Background()
-	service, store := serviceFixture(t, defaultCanonicalReads())
-	root, err := service.Read(ctx, "local", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	spec := testRootSpec()
-	spec.RelationshipID, spec.SpecialistSlug, spec.JourneyID = "other-assistant", "music_production", root.Journey.ID
-	if _, _, err := store.CreateOrGetRoot(ctx, spec); err != nil {
-		t.Fatal(err)
-	}
-	service.SetQuestCatalog(NewInstalledQuestCatalog(&questPlugins{}))
-	if _, err := service.ForQuest(ctx, "local", reaperQuestKey.PluginID, reaperQuestKey.ID); err == nil {
-		t.Fatal("ambiguous roots selected silently")
+	stored, err := store.GetRun(ctx, projection.RunID)
+	if err != nil || stored.SpecialistSlug != pluginQuestSlug || stored.RelationshipID != questRelationshipID(reaperQuestKey) {
+		t.Fatalf("plugin quest root identity = %#v err=%v", stored, err)
 	}
 }
 
@@ -264,7 +261,7 @@ func TestUserTemplateQuestLockFailureCreatesNoBindingOrRoot(t *testing.T) {
 	template, library := userQuestCatalogFixture(t)
 	library.lockErr = errors.New("lock unavailable")
 	service, store := serviceFixture(t, defaultCanonicalReads())
-	service.SetQuestCatalog(CombineQuestCatalogs(NewUserTemplateQuestCatalog(library)))
+	service.SetQuestCatalog(CombineQuestCatalogs(NewUserTemplateQuestCatalog(library, &questPlugins{})))
 	scoped, err := service.ForUserTemplateQuest(context.Background(), "local", template.ID, template.UserSetupQuest.AttachmentID)
 	if err != nil {
 		t.Fatal(err)
@@ -286,7 +283,7 @@ func TestUserTemplateQuestLockFailureCreatesNoBindingOrRoot(t *testing.T) {
 
 func TestUserTemplateQuestCatalogAndServiceKeepSourceAwareDurableIdentity(t *testing.T) {
 	template, library := userQuestCatalogFixture(t)
-	catalog := NewUserTemplateQuestCatalog(library)
+	catalog := NewUserTemplateQuestCatalog(library, &questPlugins{items: []plugin.InstalledPlugin{questPluginFixture(t)}})
 	items, err := catalog.List(context.Background())
 	if err != nil || len(items) != 1 {
 		t.Fatalf("list=%+v err=%v", items, err)
@@ -313,7 +310,8 @@ func TestUserTemplateQuestCatalogAndServiceKeepSourceAwareDurableIdentity(t *tes
 		t.Fatal(err)
 	}
 	if projection.Journey.Source != QuestSourceUserTemplate || projection.Journey.PluginID != "" ||
-		projection.Journey.TemplateID != template.ID || projection.Journey.AttachmentID != template.UserSetupQuest.AttachmentID {
+		projection.Journey.TemplateID != template.ID || projection.Journey.AttachmentID != template.UserSetupQuest.AttachmentID ||
+		len(projection.Steps) != 4 {
 		t.Fatalf("projection identity=%+v", projection.Journey)
 	}
 	for kind, reads := range scopes {
@@ -360,6 +358,51 @@ func TestUserTemplateQuestCatalogAndServiceKeepSourceAwareDurableIdentity(t *tes
 	}
 }
 
+// FR 16: a user-template quest is listed only while its integration's plugin
+// is installed. Scoping and lookup still resolve, so an open run can show the
+// integration precondition.
+func TestUserTemplateQuestCatalogListsOnlyWhenIntegrationIsInstalled(t *testing.T) {
+	ctx := context.Background()
+	template, library := userQuestCatalogFixture(t)
+	plugins := &questPlugins{}
+	catalog := NewUserTemplateQuestCatalog(library, plugins)
+	if items, err := catalog.List(ctx); err != nil || len(items) != 0 {
+		t.Fatalf("list before install=%+v err=%v", items, err)
+	}
+	if items, err := NewUserTemplateQuestCatalog(library, nil).List(ctx); err != nil || len(items) != 0 {
+		t.Fatalf("list without a plugin store=%+v err=%v", items, err)
+	}
+	other := questPluginFixture(t)
+	other.Name = "some-other-plugin"
+	plugins.items = []plugin.InstalledPlugin{other}
+	if items, err := catalog.List(ctx); err != nil || len(items) != 0 {
+		t.Fatalf("list with an unrelated plugin=%+v err=%v", items, err)
+	}
+	plugins.items = []plugin.InstalledPlugin{{Name: "reaper-plugin", Version: "0.6.0", Enabled: false}}
+	if items, err := catalog.List(ctx); err != nil || len(items) != 1 || items[0].TemplateID != template.ID {
+		t.Fatalf("list once installed (even disabled)=%+v err=%v", items, err)
+	}
+
+	plugins.items = nil
+	_, store := openTestStore(t)
+	service, err := NewService(store, &relationshipStub{err: errors.New("not used")}, readerRegistryStub(t, defaultCanonicalReads(), nil, nil, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.SetQuestCatalog(CombineQuestCatalogs(catalog))
+	scoped, err := service.ForUserTemplateQuest(ctx, "local", template.ID, template.UserSetupQuest.AttachmentID)
+	if err != nil {
+		t.Fatalf("an uninstalled integration's user quest no longer scopes: %v", err)
+	}
+	if _, err := scoped.Read(ctx, "local", ""); err != nil {
+		t.Fatalf("an uninstalled integration's user quest no longer reads: %v", err)
+	}
+	plugins.err = errors.New("plugin store unavailable")
+	if _, err := catalog.List(ctx); err == nil {
+		t.Fatal("listed without reading install state")
+	}
+}
+
 func TestUserTemplateQuestCatalogRejectsAttachmentAndQuestCollisions(t *testing.T) {
 	first, library := userQuestCatalogFixture(t)
 	second := first
@@ -367,7 +410,7 @@ func TestUserTemplateQuestCatalogRejectsAttachmentAndQuestCollisions(t *testing.
 	second.UserSetupQuest = first.UserSetupQuest.Clone()
 	second.UserSetupQuest.Declaration.ExpectedBlueprintID = second.ID
 	library.items = append(library.items, second)
-	items, err := NewUserTemplateQuestCatalog(library).List(context.Background())
+	items, err := NewUserTemplateQuestCatalog(library, &questPlugins{items: []plugin.InstalledPlugin{questPluginFixture(t)}}).List(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

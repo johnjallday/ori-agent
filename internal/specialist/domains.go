@@ -49,11 +49,11 @@ var registryEntries = []Entry{
 		SuggestedTemplateID: "reaper-song",
 		Suggestion: Suggestion{
 			Title:       "Set up your music projects",
-			Body:        "Install the Ori REAPER plugin, create your music production group, prepare REAPER, then create a workspace for a new or existing project. There is no project monitoring or studio team until workspace setup is confirmed. Live access is approved and verified separately for each workspace.",
+			Body:        "Install the Ori REAPER plugin, create your music production group, then create a workspace for a new or existing project. There is no project monitoring or studio team until workspace setup is confirmed. Live access is approved and verified separately for each workspace.",
 			ActionLabel: "Continue reviewed setup",
 			ActionRoute: "/personal-assistant?setup=specialist",
 		},
 		CapabilityOrder: []string{"projects", "folders", "calendar", "email"},
-		SetupJourney:    legacySetup("reaper-setup.json"),
+		IntegrationKey:  "ori_reaper",
 	},
 }

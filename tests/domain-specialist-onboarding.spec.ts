@@ -198,23 +198,26 @@ test('Home offers help with the detected domain once setup is finished', async (
   await page.locator('#personalAssistantSpecialistAcceptBtn').click();
   const setup = page.locator('#specialistSetupJourneyModal');
   await expect(setup).toBeVisible();
-  await expect(page.locator('#specialistSetupJourneyTitle')).toHaveText('Set up REAPER');
   if (EXPECT_DEVELOPMENT_COPY) {
+    // The local plugin is installed, so the alias opens the plugin's own
+    // two-screen quest. Installation is not one of its screens.
+    await expect(page.locator('#specialistSetupJourneyTitle')).toHaveText('Set up REAPER');
     await expect(page.locator('#specialistSetupJourneyStepTitle')).toHaveText(
       'Build Your Music Production Group'
     );
-    const integrationStep = page
-      .locator('.setup-journey__step-button')
-      .filter({ hasText: 'Install Ori REAPER Plugin' });
-    await expect(integrationStep).toHaveAttribute('data-status', 'complete');
-    await integrationStep.click();
-    await expect(page.locator('#specialistSetupJourneyReceipt')).toContainText(
-      'Local development copy — not release-verified'
-    );
+    await expect(page.locator('.setup-journey__step-button')).toHaveCount(2);
+    await expect(
+      page.locator('.setup-journey__step-button').filter({ hasText: 'Install Ori REAPER Plugin' })
+    ).toHaveCount(0);
   } else {
+    // Without the plugin, the alias opens Ori's generated install quest.
+    await expect(page.locator('#specialistSetupJourneyTitle')).toHaveText(
+      'Install Ori REAPER Plugin'
+    );
     await expect(page.locator('#specialistSetupJourneyStepTitle')).toHaveText(
       'Install Ori REAPER Plugin'
     );
+    await expect(page.locator('.setup-journey__step-button')).toHaveCount(2);
   }
   await expect(page.locator('#specialistSetupJourneyLater')).toBeVisible();
   await expect(offer(page)).toHaveAttribute('data-decision', 'accepted');
@@ -410,12 +413,15 @@ test('the local demo creates a real project from one name and observes it after 
   await page.goto('/?setup=specialist');
   const dialog = page.locator('#specialistSetupJourneyModal');
   await expect(dialog).toBeVisible();
-  await expect(dialog.locator('.setup-journey__step-button')).toHaveCount(4);
+  await expect(dialog.locator('.setup-journey__step-button')).toHaveCount(2);
   await dialog.getByRole('button', { name: 'Build Group', exact: true }).click();
   const creator = page.locator('#addFolderModal');
   await expect(creator).toBeVisible();
   await expect(dialog).toBeHidden();
-  await expect(creator.getByRole('textbox', { name: 'Group name' })).toHaveValue('Music Production');
+  // The plugin's required group requirement names the canonical Home.
+  await expect(creator.getByRole('textbox', { name: 'Group name' })).toHaveValue(
+    'Music Production Home'
+  );
   await creator.getByRole('textbox', { name: 'Group name' }).fill('My Studio');
   await creator.getByRole('button', { name: 'Review →' }).click();
   await creator.getByRole('button', { name: 'Review group', exact: true }).click();
@@ -430,18 +436,14 @@ test('the local demo creates a real project from one name and observes it after 
   const groupCommit = await groupResponse;
   expect(groupCommit.ok(), await groupCommit.text()).toBeTruthy();
   const grouped = (await groupCommit.json()).setup_journey;
-  await expect(dialog.locator('#specialistSetupJourneyStepTitle')).toHaveText('Set Up REAPER');
+  // With the group built, the launch view moves straight to the workspace
+  // screen; there is no preparation screen or prerequisite check.
+  await expect(dialog.locator('#specialistSetupJourneyStepTitle')).toHaveText(
+    'Create New Workspace'
+  );
   expect(grouped.receipts.home_workspace_id).toBeTruthy();
   expect(grouped.receipts.project_workspace_id).toBeFalsy();
   await captureProjectScreen(page, '19-group-before-project');
-  const prerequisiteResponse = page.waitForResponse(response =>
-    response.url().endsWith('/preparation')
-  );
-  await dialog.getByRole('button', { name: 'Check Setup' }).click();
-  const prerequisites = await prerequisiteResponse;
-  expect(prerequisites.ok(), await prerequisites.text()).toBeTruthy();
-  await expect(dialog).toContainText('More setup is needed');
-  await dialog.getByRole('button', { name: 'Set up later' }).click();
   await dialog.getByRole('button', { name: 'Create New Workspace', exact: true }).click();
   await expect(dialog).toBeHidden();
   const workspaceCreator = page.locator('#addFolderModal');
@@ -458,7 +460,9 @@ test('the local demo creates a real project from one name and observes it after 
   await workspaceCreator.locator('#wizardNextBtn').click();
   await expect(workspaceCreator.locator('#wizardStep4')).toBeVisible();
   await expect(workspaceCreator.locator('#workspaceJourneyReview')).toContainText('first-idea.rpp');
-  await expect(workspaceCreator.locator('#workspaceJourneyReview')).toContainText('Group: My Studio');
+  await expect(workspaceCreator.locator('#workspaceJourneyReview')).toContainText(
+    'Group: My Studio'
+  );
   await captureProjectScreen(page, '17-real-project-review');
   const commitEnvelopes: unknown[] = [];
   let releaseRetry!: () => void;
@@ -519,7 +523,7 @@ test('the local demo creates a real project from one name and observes it after 
   await expect(dialog.locator('#specialistSetupJourneyError')).toBeHidden();
   await captureProjectScreen(page, '18-real-project-connected');
 
-  // Another project bypasses installation/group preparation, reuses the Home,
+  // Another project bypasses the group screen, reuses the Home,
   // and still confirms three new project roles instead of inheriting a roster.
   await dialog.getByRole('button', { name: 'Manage Team and Extras' }).click();
   await expect(dialog.getByRole('button', { name: 'Review optional Home role' })).toBeVisible();

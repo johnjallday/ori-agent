@@ -504,7 +504,7 @@ func pluginHostFeaturesAvailable(required []string) bool {
 	available := map[string]struct{}{
 		plugin.HostFeatureAssistantProgramV1:          {},
 		plugin.HostFeatureSpecialistSetupJourneyV1:    {},
-		plugin.HostFeatureSetupQuestsV1:               {},
+		plugin.HostFeatureSetupQuestsV2:               {},
 		plugin.HostFeatureTemplateGroupRequirementsV1: {},
 	}
 	seen := make(map[string]struct{}, len(required))

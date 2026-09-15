@@ -187,9 +187,11 @@ automatically.
   coordinator, adding two songs and reusing the renamed group. No live REAPER
   was involved. REAPER 0.5.0 and 0.5.1 declare no group requirement and are not
   listed.
-- **Positive guided REAPER acceptance blocked.** The reviewed integration pin is
-  0.5.0, which declares no group requirement. A guided quest for any other
-  source is refused by the reviewed-integration gate, which is unchanged.
+- **Positive guided REAPER acceptance was blocked at the time.** The reviewed
+  integration pin was 0.5.0, which declares no group requirement. The pin has
+  since moved to the published 0.6.0 release (blueprint v7, which declares one).
+  A guided quest for any other source is still refused by the
+  reviewed-integration gate, which is unchanged.
 - **Destination card uses the declared name.** Its receipt has no name input.
   Rename the group afterwards, or create it from Group Templates.
 - **Guided Home creation is not recorded as locally owned.** It does not add the

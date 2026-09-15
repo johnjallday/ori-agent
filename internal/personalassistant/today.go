@@ -15,6 +15,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/followup"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/specialist"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -393,7 +394,13 @@ func (s *TodayService) Get(ctx context.Context, userID string) (*TodayProjection
 // presentation and organization, not program-membership authority.
 func (s *TodayService) loadStudio(userID, slug, hqID string) *TodayStudioProjection {
 	entry, ok := specialist.Get(slug)
-	if !ok || entry.SetupJourney == nil || s.workspaces == nil {
+	if !ok || s.workspaces == nil {
+		return nil
+	}
+	// The expected program and blueprint are the reviewed integration's, never
+	// a copy carried by the specialist entry.
+	integration, reviewed := reviewedintegration.Get(entry.IntegrationKey)
+	if !reviewed {
 		return nil
 	}
 	workspaces, err := s.workspaces.ListActive()
@@ -404,7 +411,7 @@ func (s *TodayService) loadStudio(userID, slug, hqID string) *TodayStudioProject
 		}
 	}
 	userID = strings.TrimSpace(userID)
-	expectedProgramID := strings.TrimSpace(entry.SetupJourney.ExpectedAssistantProgramID)
+	expectedProgramID := strings.TrimSpace(integration.ExpectedProgramID)
 	var stations []*workspace.Workspace
 	for _, candidate := range workspaces {
 		if candidate == nil || strings.TrimSpace(candidate.ID) == strings.TrimSpace(hqID) {
@@ -467,7 +474,7 @@ func (s *TodayService) loadStudio(userID, slug, hqID string) *TodayStudioProject
 		provenance := project.GetTemplateProvenance()
 		link := project.GetAssistantProjectLink()
 		if provenance == nil || provenance.PluginOwner == nil || provenance.AssistantProgram == nil || link == nil ||
-			provenance.PluginOwner.BlueprintID != entry.SetupJourney.ExpectedBlueprintID ||
+			provenance.PluginOwner.BlueprintID != integration.ExpectedBlueprintID ||
 			!strings.EqualFold(provenance.PluginOwner.PluginID, state.Key.PluginID) ||
 			provenance.AssistantProgram.ID != expectedProgramID {
 			invalidProject = true
@@ -570,14 +577,20 @@ func primaryProjectAgentName(state *workspace.AssistantProgramState, project *wo
 
 func (s *TodayService) loadSpecialistSetup(ctx context.Context, userID, slug string) *TodaySpecialistSetupProjection {
 	entry, ok := specialist.Get(slug)
-	if !ok || entry.SetupJourney == nil || s.setup == nil {
+	if !ok || s.setup == nil {
+		return nil
+	}
+	integration, reviewed := reviewedintegration.Get(entry.IntegrationKey)
+	if !reviewed {
 		return nil
 	}
 	projection, err := s.setup.GetSpecialistSetup(ctx, strings.TrimSpace(userID))
 	if err != nil || projection == nil {
+		// Without a read, the one quest that can be named safely is the install
+		// quest: it resolves whatever the plugin's install state.
 		return &TodaySpecialistSetupProjection{
-			Health: todayUnavailable("read_failed"), JourneyID: entry.SetupJourney.ID,
-			Title: entry.SetupJourney.Title, Runs: []TodaySpecialistSetupRun{},
+			Health: todayUnavailable("read_failed"), JourneyID: integration.InstallQuestID(),
+			Title: integration.InstallTitle, Runs: []TodaySpecialistSetupRun{},
 			Actions: []TodaySpecialistSetupAction{},
 		}
 	}

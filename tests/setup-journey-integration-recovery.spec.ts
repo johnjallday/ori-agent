@@ -1,21 +1,20 @@
 import { expect, test } from '@playwright/test';
 
-function installedJourney() {
+// The assistant alias resolves to the host-generated install quest while the
+// integration is not verified. Its first step owns the replacement review.
+function installQuestJourney() {
   return {
     run_id: 'integration-recovery',
+    run_kind: 'root',
     state_revision: 3,
     lifecycle_state: 'in_progress',
     current_step_id: 'integration',
-    receipts: {},
+    receipts: {} as Record<string, string>,
     journey: {
-      id: 'reaper_setup',
-      title: 'Set up REAPER',
-      workspace_launch: {
-        group_title: 'Build Your Music Production Group',
-        group_name: 'Music Production',
-        runtime_title: 'Set Up REAPER',
-        runtime_instructions: 'Prepare Web Remote. Live access is approved per workspace.'
-      }
+      source: 'host',
+      id: 'install_ori_reaper',
+      title: 'Install Ori REAPER Plugin',
+      description: "Install and verify Ori's reviewed REAPER integration before setting it up."
     },
     steps: [
       {
@@ -51,29 +50,33 @@ function installedJourney() {
         ]
       },
       {
-        id: 'project',
-        kind: 'project_connect',
+        id: 'summary',
+        kind: 'summary',
+        title: 'REAPER plugin ready',
+        description: "Setup continues in the REAPER plugin's own guided setup.",
         status: 'pending',
-        preparation: { exists: false, acknowledged: false }
+        actions: [] as Array<Record<string, string>>,
+        handoff: undefined as Record<string, string> | undefined
       }
     ]
   };
 }
 
 for (const width of [1280, 390]) {
-  test(`installed integration recovery requires review and safely resumes at ${width}px`, async ({
+  test(`installed integration recovery requires review and hands off at ${width}px`, async ({
     page
   }, testInfo) => {
     await page.setViewportSize({ width, height: 820 });
-    const current = installedJourney();
+    const current = installQuestJourney();
     let reviews = 0;
-    let reads = 0;
     const commits: unknown[] = [];
+    const paths: string[] = [];
     await page.route('**/api/onboarding/status', route =>
       route.fulfill({ json: { completed: true, current_step: 'complete' } })
     );
-    await page.route('**/api/personal-assistant/setup-journey**', async route => {
+    const handler = async route => {
       const path = new URL(route.request().url()).pathname;
+      paths.push(path);
       if (path.endsWith('/actions/review_update')) {
         reviews++;
         await route.fulfill({
@@ -94,37 +97,50 @@ for (const width of [1280, 390]) {
           await route.abort('failed');
           return;
         }
-        current.steps[0].integration!.verified = true;
-        current.steps[0].integration!.replacement_required = false;
+        current.steps[0].integration.verified = true;
+        current.steps[0].integration.replacement_required = false;
         current.steps[0].status = 'complete';
         current.steps[0].actions = [
           { id: 'manage_integration', label: 'Manage integration', effect: 'navigation' }
         ];
-        current.steps[1].status = 'active';
+        current.steps[1].status = 'complete';
+        current.steps[1].handoff = {
+          source: 'plugin',
+          plugin_id: 'reaper-plugin',
+          id: 'reaper_setup',
+          title: 'Set up REAPER'
+        };
         current.steps[1].actions = [
-          { id: 'review_create_group', label: 'Review Group', effect: 'review' }
+          { id: 'continue_integration_setup', label: 'Continue setup', effect: 'navigation' },
+          { id: 'open_plugins', label: 'Open Plugins', effect: 'navigation' }
         ];
-        current.current_step_id = 'project';
+        current.receipts = { integration_plugin_id: 'reaper-plugin', integration_version: '0.5.0' };
+        current.lifecycle_state = 'ready';
+        current.current_step_id = '';
         current.state_revision++;
       }
-      if (route.request().method() === 'GET') reads++;
       await route.fulfill({ json: { setup_journey: current } });
-    });
+    };
+    await page.route('**/api/personal-assistant/setup-journey**', handler);
+    await page.route('**/api/host-setup-quests/install_ori_reaper**', handler);
+
     await page.goto('/?setup=specialist');
     const dialog = page.locator('#specialistSetupJourneyModal');
     await expect(dialog).toBeVisible();
+    await expect(dialog.locator('#specialistSetupJourneyTitle')).toHaveText(
+      'Install Ori REAPER Plugin'
+    );
     const receipt = dialog.locator('#specialistSetupJourneyReceipt');
     await expect(receipt).toContainText('Installed: Yes');
     await expect(receipt).toContainText('Enabled: Yes');
     await expect(receipt).toContainText('Not verified for guided setup');
-    const groupStep = dialog.getByRole('button', { name: /Build Your Music Production Group/ });
-    await expect(groupStep).toBeDisabled();
-    await expect(dialog.getByRole('button', { name: 'Continue', exact: true })).toHaveCount(0);
-    const before = reads;
-    await dialog.getByRole('button', { name: 'Check Again', exact: true }).click();
-    await expect.poll(() => reads).toBeGreaterThan(before);
-    await expect(groupStep).toBeDisabled();
+    // The install quest is a plain two-step rail with no launch screens.
+    await expect(dialog.locator('.setup-journey__step-button')).toHaveCount(2);
+    await expect(
+      dialog.getByRole('button', { name: /Build Your Music Production Group/ })
+    ).toHaveCount(0);
     await page.screenshot({ path: testInfo.outputPath('installed-recovery.png') });
+
     await dialog.getByRole('button', { name: 'Review verified replacement' }).click();
     await expect(
       dialog.getByRole('heading', { name: 'Replace installed integration?' })
@@ -133,27 +149,36 @@ for (const width of [1280, 390]) {
     await expect(review).toContainText('even if the version number is unchanged');
     await expect(review).toContainText('Installed version: 0.5.0');
     await expect(review).toContainText('Reviewed version: 0.5.0');
-    await expect(review).toContainText(
-      '2bbf6b77418119cb21e827a407c8d5886e3effdb593ec0ad274e20d7d69c2ca9'
-    );
+    // The artifact fingerprint is part of the collapsed technical details.
+    const technical = review.locator('details.setup-journey__technical');
+    await expect(technical).not.toHaveAttribute('open', '');
+    await technical.getByText('Technical details', { exact: true }).click();
+    await expect(
+      technical.getByText('2bbf6b77418119cb21e827a407c8d5886e3effdb593ec0ad274e20d7d69c2ca9')
+    ).toBeVisible();
     expect(commits).toHaveLength(0);
     await review.getByRole('button', { name: 'Back', exact: true }).click();
     await expect(receipt).toContainText('Not verified for guided setup');
     expect(commits).toHaveLength(0);
+
     await dialog.getByRole('button', { name: 'Review verified replacement' }).click();
     await review.getByRole('button', { name: 'Replace with reviewed version' }).click();
     await expect(dialog.getByRole('button', { name: 'Retry Confirmed Change' })).toBeVisible();
-    await expect(groupStep).toBeDisabled();
     await dialog.getByRole('button', { name: 'Retry Confirmed Change' }).click();
-    expect(commits).toHaveLength(2);
+    await expect.poll(() => commits.length).toBe(2);
     expect(commits[1]).toEqual(commits[0]);
-    await expect(
-      dialog.getByRole('heading', { name: 'Build Your Music Production Group' })
-    ).toBeVisible();
-    await expect(dialog.getByRole('button', { name: 'Build Group', exact: true })).toBeEnabled();
+    // Mutations after the first read address the install quest's own root.
+    expect(
+      paths.some(path => path.startsWith('/api/host-setup-quests/install_ori_reaper/runs/'))
+    ).toBe(true);
+
+    await expect(dialog.getByRole('heading', { name: 'REAPER plugin ready' })).toBeVisible();
+    const continueButton = dialog.getByRole('button', { name: 'Continue: Set up REAPER' });
+    await expect(continueButton).toBeVisible();
+    await expect(continueButton).toHaveAttribute('data-primary', 'true');
+    await expect(dialog.getByRole('button', { name: 'Open Plugins', exact: true })).toBeVisible();
     await dialog.getByRole('button', { name: /Install Ori REAPER Plugin/ }).click();
     await expect(receipt).toContainText('Verified release');
-    await expect(dialog.getByRole('button', { name: 'Continue', exact: true })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath('verified-integration.png') });
   });
 }

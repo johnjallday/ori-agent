@@ -36,9 +36,24 @@ func (s *Service) mutatePresentation(
 	if request.IfRevision <= 0 || strings.TrimSpace(request.IdempotencyKey) == "" {
 		return nil, failure(ReasonInputInvalid, 0)
 	}
+	if s != nil && s.quest == nil {
+		pinned, pinErr := s.pinAliasQuest(ctx, userID)
+		if pinErr != nil {
+			return nil, pinErr
+		}
+		if pinned != s {
+			return pinned.mutatePresentation(ctx, userID, runID, request, open)
+		}
+	}
 	current, declaration, _, run, err := s.authorizedCurrentRun(ctx, userID, runID)
 	if err != nil {
 		return nil, err
+	}
+	if current.DeclarationIncompatible {
+		// Reconciling here would write the current declaration version over an
+		// incompatible record and hide Start over. Showing or hiding the modal
+		// leaves the saved record exactly as it is.
+		return current, nil
 	}
 	stepID := current.CurrentStepID
 	if stepID == "" {
@@ -87,7 +102,7 @@ func (s *Service) mutatePresentation(
 	} else {
 		root = claimed
 	}
-	candidate, reads := s.deriveCanonical(ctx, declaration, root, claimed, nil)
+	candidate, reads, precondition := s.deriveCanonical(ctx, declaration, root, claimed, nil)
 	completion := OperationCompletion{Status: OperationSucceeded, ResultCode: resultCode}
 	_, finalized, finalizeReplayed, finalizeErr := s.finalizeOperation(
 		ctx, candidate, request.IdempotencyKey, completion,
@@ -99,7 +114,7 @@ func (s *Service) mutatePresentation(
 	if finalizeReplayed {
 		return s.Read(ctx, userID, run.ID)
 	}
-	projection := projectionFromRun(declaration, finalized, reads, nil)
+	projection := projectionFromRun(declaration, finalized, reads, nil, precondition)
 	emitProjectionLifecycleTransition(current, projection)
 	if open {
 		switch {
@@ -119,6 +134,15 @@ func (s *Service) mutatePresentation(
 func (s *Service) CreateOrResumeChild(ctx context.Context, userID string, request PresentationMutation) (*JourneyProjection, error) {
 	if request.IfRevision <= 0 || strings.TrimSpace(request.IdempotencyKey) == "" {
 		return nil, failure(ReasonInputInvalid, 0)
+	}
+	if s != nil && s.quest == nil {
+		pinned, pinErr := s.pinAliasQuest(ctx, userID)
+		if pinErr != nil {
+			return nil, pinErr
+		}
+		if pinned != s {
+			return pinned.CreateOrResumeChild(ctx, userID, request)
+		}
 	}
 	current, declaration, root, _, err := s.authorizedCurrentRun(ctx, userID, "")
 	if err != nil {
@@ -151,7 +175,7 @@ func (s *Service) CreateOrResumeChild(ctx context.Context, userID string, reques
 		_, _ = s.store.MarkOperationReconcileRequired(ctx, claimed.Kind, claimed.ID, request.IdempotencyKey)
 		return nil, safeStoreFailure(childErr, claimed.StateRevision)
 	}
-	candidate, _ := s.deriveCanonical(ctx, declaration, claimed, claimed, nil)
+	candidate, _, _ := s.deriveCanonical(ctx, declaration, claimed, claimed, nil)
 	completion := OperationCompletion{
 		Status: OperationSucceeded, ResultCode: ResultChildRunCreated,
 		Result: CanonicalResult{ChildRunID: child.ID},

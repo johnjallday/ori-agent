@@ -499,6 +499,25 @@ field:
   asserts `steps.minItems == steps.maxItems == 5` and the five `kind` consts,
   in order, so a schema edit cannot ride along silently.
 
+### 2.5.1 Addendum: the install split supersedes the specialist shape
+
+After the setup-quest install split, the `specialist` row in §2.1 no longer
+exists. The compiled shapes are `integration_install` (`integration_install`,
+`summary`), `project_setup` (`project_connect`, `workspace_setup`,
+`assistant_program_staffing`, `summary`) and `account_link` (unchanged).
+Candidate selection in §2.2 is by first kind: `integration_install`,
+`project_connect` or `workspace_create`. The §2.3 and §2.5 rules that name
+`specialist` now name `project_setup` for plugin and user validators.
+
+The host quest source gains a second catalog. Ori generates one
+`integration_install` quest per reviewed integration, `install_<key>`, beside
+the embedded `account_link` quests. `ForHostQuest` accepts both shapes; the
+embedded catalog still accepts only `account_link`. The host route family adds
+`POST /api/host-setup-quests/{questID}/restart` for **Start over** on an
+incompatible root. It adds no column, and database reset inspection in §3.6 is
+unchanged. See
+[specialist contract §3.5](specialist-setup-journey-contract.md#35-addendum-install-split-setup_quests_v2).
+
 ### 2.6 Every test that enumerates kinds or builds a reader registry
 
 `NewReaderRegistry` has 11 test call sites and one production site. Those
