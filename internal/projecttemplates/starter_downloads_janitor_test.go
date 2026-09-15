@@ -1,6 +1,8 @@
 package projecttemplates_test
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -22,7 +24,10 @@ func loadDownloadsJanitorTemplate(t *testing.T) projecttemplates.Template {
 }
 
 // TestDownloadsJanitorStarterTemplate_Identity pins the built-in's stable
-// identity and provenance metadata (PRD FR-1, FR-9).
+// identity and provenance metadata, and its retired state (PRD FR-1, FR-8,
+// FR-9). FindLibraryTemplate stays unfiltered: a retired built-in must still
+// resolve by ID for provenance, the startup migration, and
+// POST /api/workspaces with template_id: "downloads-janitor".
 func TestDownloadsJanitorStarterTemplate_Identity(t *testing.T) {
 	tpl := loadDownloadsJanitorTemplate(t)
 
@@ -35,14 +40,105 @@ func TestDownloadsJanitorStarterTemplate_Identity(t *testing.T) {
 	if !tpl.Builtin {
 		t.Fatal("downloads-janitor must be a built-in template")
 	}
-	if tpl.BuiltinVersion < 1 {
-		t.Fatalf("builtin_version = %d, want at least 1", tpl.BuiltinVersion)
+	if !tpl.Retired {
+		t.Fatal("downloads-janitor must be marked retired")
+	}
+	if tpl.BuiltinVersion < 4 {
+		t.Fatalf("builtin_version = %d, want at least 4", tpl.BuiltinVersion)
 	}
 	if len(tpl.Warnings) != 0 {
 		t.Fatalf("downloads-janitor should load without warnings, got %v", tpl.Warnings)
 	}
 	if tpl.HasSkeleton {
 		t.Fatal("downloads-janitor is metadata-only; it must not scaffold a project folder")
+	}
+}
+
+// TestDownloadsJanitorStarterTemplate_OmittedFromListing pins the single
+// filter point: a retired built-in never appears in ListLibrary, while other
+// built-ins (file-janitor) still do (PRD FR-1 to FR-6).
+func TestDownloadsJanitorStarterTemplate_OmittedFromListing(t *testing.T) {
+	libDir := filepath.Join(t.TempDir(), "templates")
+	if err := projecttemplates.EnsureLibrary(libDir); err != nil {
+		t.Fatalf("EnsureLibrary: %v", err)
+	}
+	templates, err := projecttemplates.ListLibrary(libDir)
+	if err != nil {
+		t.Fatalf("ListLibrary: %v", err)
+	}
+	var sawFileJanitor bool
+	for _, tpl := range templates {
+		if tpl.ID == "downloads-janitor" {
+			t.Fatalf("ListLibrary must omit the retired downloads-janitor built-in, got %+v", tpl)
+		}
+		if tpl.ID == "file-janitor" {
+			sawFileJanitor = true
+		}
+	}
+	if !sawFileJanitor {
+		t.Fatal("ListLibrary must still include the file-janitor built-in")
+	}
+}
+
+// TestDownloadsJanitorStarterTemplate_RefreshMarksExistingInstallRetired pins
+// the upgrade path (PRD FR-1, FR-18): an on-disk copy from before the retired
+// flag existed gets its manifest refreshed by EnsureLibrary because the
+// embedded builtin_version is higher, and the refreshed copy is then omitted
+// from the listing.
+func TestDownloadsJanitorStarterTemplate_RefreshMarksExistingInstallRetired(t *testing.T) {
+	libDir := filepath.Join(t.TempDir(), "templates")
+	if err := os.MkdirAll(libDir, 0o750); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	// Materialize a pre-retirement copy: builtin_version 3, no retired flag.
+	if err := projecttemplates.EnsureLibrary(libDir); err != nil {
+		t.Fatalf("EnsureLibrary (seed): %v", err)
+	}
+	dest := filepath.Join(libDir, "downloads-janitor", projecttemplates.ManifestFileName)
+	raw, err := os.ReadFile(dest) // #nosec G304 -- test-owned temp path
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	manifest["builtin_version"] = 3
+	delete(manifest, "retired")
+	downgraded, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if err := os.WriteFile(dest, downgraded, 0o640); err != nil { // #nosec G306 -- test-owned temp path
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// The refresh path: EnsureLibrary sees embedded (4) > on-disk (3) and
+	// rewrites template.json in place.
+	if err := projecttemplates.EnsureLibrary(libDir); err != nil {
+		t.Fatalf("EnsureLibrary (refresh): %v", err)
+	}
+
+	refreshed, err := os.ReadFile(dest) // #nosec G304 -- test-owned temp path
+	if err != nil {
+		t.Fatalf("ReadFile (refreshed): %v", err)
+	}
+	var refreshedManifest map[string]any
+	if err := json.Unmarshal(refreshed, &refreshedManifest); err != nil {
+		t.Fatalf("Unmarshal (refreshed): %v", err)
+	}
+	if retired, _ := refreshedManifest["retired"].(bool); !retired {
+		t.Fatalf("refreshed on-disk manifest must declare retired: true, got %+v", refreshedManifest)
+	}
+
+	templates, err := projecttemplates.ListLibrary(libDir)
+	if err != nil {
+		t.Fatalf("ListLibrary: %v", err)
+	}
+	for _, tpl := range templates {
+		if tpl.ID == "downloads-janitor" {
+			t.Fatalf("ListLibrary must omit downloads-janitor after the refresh, got %+v", tpl)
+		}
 	}
 }
 

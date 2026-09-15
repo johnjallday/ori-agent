@@ -5,7 +5,8 @@
   "tagline": "Your Downloads folder, filed on your approval.",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 3,
+  "retired": true,
+  "builtin_version": 4,
   "tags": [
     "files",
     "local-first",
