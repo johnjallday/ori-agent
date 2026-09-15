@@ -37,7 +37,21 @@ func FuzzParseSetupJourneyFailsClosed(f *testing.F) {
 			{ID: "summary", Kind: SetupStepSummary, Title: "Summary", Description: "Review completion."},
 		},
 	}
-	for _, seed := range []SetupJourney{valid, account} {
+	install := SetupJourney{
+		SchemaVersion:              SetupJourneySchemaVersion,
+		Version:                    1,
+		ID:                         "install_fixture_integration",
+		Title:                      "Install fixture plugin",
+		Description:                "Install the fixture plugin.",
+		IntegrationKey:             "fixture_integration",
+		ExpectedBlueprintID:        "fixture_project",
+		ExpectedAssistantProgramID: "fixture_assistant",
+		Steps: []SetupJourneyStep{
+			{ID: "integration", Kind: SetupStepIntegrationInstall, Title: "Integration", Description: "Install the plugin."},
+			{ID: "summary", Kind: SetupStepSummary, Title: "Ready", Description: "Continue in the plugin's quest."},
+		},
+	}
+	for _, seed := range []SetupJourney{valid, account, install} {
 		encoded, err := json.Marshal(seed)
 		if err != nil {
 			f.Fatal(err)
@@ -70,6 +84,11 @@ func FuzzParseSetupJourneyFailsClosed(f *testing.F) {
 			if len(declaration.Steps) != SetupJourneyRequiredSteps || declaration.IntegrationKey == "" ||
 				declaration.ExpectedAssistantProgramID == "" {
 				t.Fatalf("accepted specialist declaration without its references: %+v", declaration)
+			}
+		case SetupJourneyShapeIntegrationInstall:
+			if declaration.IntegrationKey == "" || declaration.ExpectedBlueprintID == "" ||
+				declaration.ExpectedAssistantProgramID == "" || declaration.WorkspaceLaunch != nil {
+				t.Fatalf("accepted install declaration without its references or with launch copy: %+v", declaration)
 			}
 		case SetupJourneyShapeAccountLink:
 			if declaration.IntegrationKey != "" || declaration.ExpectedAssistantProgramID != "" ||

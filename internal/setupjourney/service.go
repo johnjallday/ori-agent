@@ -104,6 +104,7 @@ type StepProjection struct {
 	WorkspaceCreate *WorkspaceCreateProjection         `json:"workspace_create,omitempty"`
 	AccountConnect  *AccountConnectProjection          `json:"account_connect,omitempty"`
 	AccountLink     *AccountLinkProjection             `json:"account_link,omitempty"`
+	Handoff         *QuestHandoffProjection            `json:"handoff,omitempty"`
 }
 
 // Failure is a safe public service error. Error returns only compiled guidance;
@@ -392,10 +393,75 @@ func (s *Service) currentDeclaration(ctx context.Context, userID string) (*decla
 	}
 	if s.quests != nil {
 		if integration, ok := reviewedintegration.Get(declaration.IntegrationKey); ok {
+			// Before the integration's plugin is installed the only guidance is its
+			// generated install quest, which the catalog lists only in that state.
+			if s.installQuestListed(ctx, integration.Key) {
+				return s.questDeclaration(ctx, userID, QuestKey{Source: QuestSourceHost, ID: IntegrationInstallQuestID(integration.Key)})
+			}
 			return s.questDeclaration(ctx, userID, QuestKey{PluginID: integration.PluginID, ID: declaration.ID})
 		}
 	}
 	return &declarationIdentity{UserID: state.UserID, AssistantID: state.AssistantID, SpecialistSlug: state.SpecialistSlug}, declaration, nil
+}
+
+// installQuestListed reports whether the catalog currently offers the install
+// quest for one integration. A catalog that cannot be read reports false, so
+// the alias keeps resolving the integration's plugin quest.
+func (s *Service) installQuestListed(ctx context.Context, integrationKey string) bool {
+	quests, err := s.listQuestSource(ctx, QuestSourceHost)
+	if err != nil {
+		return false
+	}
+	id := IntegrationInstallQuestID(integrationKey)
+	for _, quest := range quests {
+		if quest.Source == QuestSourceHost && quest.ID == id && quest.IntegrationKey == integrationKey {
+			return true
+		}
+	}
+	return false
+}
+
+// listQuestSource lists only the catalogs serving one source, so resolving the
+// alias never reads the user-template library.
+func (s *Service) listQuestSource(ctx context.Context, source QuestSource) ([]QuestSummary, error) {
+	if s == nil || s.quests == nil {
+		return nil, failure(ReasonJourneyUnavailable, 0)
+	}
+	if lister, ok := s.quests.(questSourceLister); ok {
+		return lister.listSource(ctx, source)
+	}
+	quests, err := s.quests.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]QuestSummary, 0, len(quests))
+	for _, quest := range quests {
+		if normalizeQuestKey(quest.QuestKey).Source == source {
+			result = append(result, quest)
+		}
+	}
+	return result, nil
+}
+
+// pinAliasQuest resolves the assistant alias once for an operation that reads
+// the journey several times. Without it, installing the integration inside an
+// action would switch the alias from the install quest to the plugin quest
+// between the claim and the final read.
+func (s *Service) pinAliasQuest(ctx context.Context, userID string) (*Service, error) {
+	if s == nil || s.quest != nil || s.quests == nil || s.relationships == nil || s.resolveEntry == nil {
+		return s, nil
+	}
+	identity, _, err := s.currentDeclaration(ctx, strings.TrimSpace(userID))
+	if err != nil {
+		return nil, err
+	}
+	if identity.QuestKey.ID == "" {
+		return s, nil
+	}
+	pinned := *s
+	key := identity.QuestKey
+	pinned.quest = &key
+	return &pinned, nil
 }
 
 func (s *Service) reconcile(ctx context.Context, declaration *specialist.SetupJourney, root, initial *Run) (*JourneyProjection, error) {
@@ -794,6 +860,10 @@ func projectionFromRun(
 			WorkspaceCreate: cloneWorkspaceCreateProjection(reads[index].WorkspaceCreate),
 			AccountConnect:  cloneAccountConnectProjection(reads[index].AccountConnect),
 			AccountLink:     cloneAccountLinkProjection(reads[index].AccountLink),
+		}
+		// The handoff is published only with the continue action it belongs to.
+		if state.Status == StepComplete || state.StepID == run.CurrentStepID {
+			stepProjection.Handoff = cloneQuestHandoffProjection(reads[index].Handoff)
 		}
 		if state.ReasonCode != "" {
 			stepProjection.Guidance = safeGuidance[state.ReasonCode]

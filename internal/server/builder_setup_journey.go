@@ -13,6 +13,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/samplelibrary"
 	"github.com/johnjallday/ori-agent/internal/samplelibraryhttp"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
@@ -60,7 +61,13 @@ func (b *ServerBuilder) initializeSetupJourney() {
 			return setupjourney.CanonicalStepRead{BlockedReason: setupjourney.ReasonOwnerUnavailable}, nil
 		})
 	}
-	readers[specialist.SetupStepSummary] = setupSummaryReader{modelAvailable: b.systemModelAvailable}
+	var pluginQuestCatalog setupjourney.QuestCatalog
+	if b.pluginHandler != nil {
+		pluginQuestCatalog = setupjourney.NewInstalledQuestCatalog(b.pluginHandler.Manager())
+	}
+	readers[specialist.SetupStepSummary] = setupSummaryReader{
+		modelAvailable: b.systemModelAvailable, pluginQuests: pluginQuestCatalog,
+	}
 	mailboxAdapter := b.emailOpsQuestReaders(readers)
 	var integrationAdapter *setupjourney.ReviewedIntegrationAdapter
 	var projectAdapter *setupjourney.ProjectConnectionAdapter
@@ -217,7 +224,12 @@ func (b *ServerBuilder) initializeSetupJourney() {
 	// library, so they are always served.
 	questCatalogs := []setupjourney.QuestCatalog{setupjourney.NewHostQuestCatalog(hostquests.All())}
 	if b.pluginHandler != nil {
-		questCatalogs = append(questCatalogs, setupjourney.NewInstalledQuestCatalog(b.pluginHandler.Manager()))
+		// The generated install quests come before the plugin quests they hand
+		// off into; both read the same installed plugin store.
+		questCatalogs = append(questCatalogs,
+			setupjourney.NewIntegrationInstallQuestCatalog(reviewedintegration.All, b.pluginHandler.Manager()),
+			pluginQuestCatalog,
+		)
 	}
 	if b.configManager != nil {
 		questCatalogs = append(questCatalogs, setupjourney.NewUserTemplateQuestCatalog(configuredUserTemplateQuestLibrary{

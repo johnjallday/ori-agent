@@ -7,6 +7,9 @@ globalThis.document ||= { readyState: 'complete', getElementById: () => null };
 globalThis.window ||= { addEventListener() {}, location: { search: '' } };
 
 const {
+  PLUGINS_PAGE_URL,
+  integrationHandoffNavigation,
+  setupJourneyActionLabel,
   workspaceLaunchStages,
   projectDraftInput,
   projectReviewPresentation,
@@ -143,6 +146,94 @@ test('file-only receipt stays honest about unconfigured and untested live contro
     ['Live control configured', 'No'],
     ['Live control tested', 'No']
   ]);
+});
+
+function installQuestJourney(summary = {}) {
+  return {
+    run_id: 'run-install',
+    lifecycle_state: 'ready',
+    journey: { source: 'host', id: 'install_ori_reaper', title: 'Install Ori REAPER Plugin' },
+    receipts: { integration_plugin_id: 'reaper-plugin', integration_version: '0.6.0' },
+    steps: [
+      {
+        id: 'integration',
+        kind: 'integration_install',
+        title: 'Install Ori REAPER Plugin',
+        status: 'complete'
+      },
+      {
+        id: 'summary',
+        kind: 'summary',
+        title: 'REAPER plugin ready',
+        status: 'complete',
+        ...summary
+      }
+    ]
+  };
+}
+
+test('an install quest renders its two steps with nothing disabled', () => {
+  const journey = installQuestJourney();
+  journey.lifecycle_state = 'in_progress';
+  journey.current_step_id = 'integration';
+  journey.steps[0].status = 'active';
+  journey.steps[1].status = 'pending';
+  assert.equal(journey.journey.workspace_launch, undefined);
+  assert.equal(setupJourneyCurrentStep(journey).id, 'integration');
+  assert.equal(setupJourneyCurrentStep(journey, 'summary').id, 'summary');
+});
+
+test('an install summary continues into the handed-off plugin quest in place', () => {
+  const handoff = {
+    source: 'plugin',
+    plugin_id: 'reaper-plugin',
+    id: 'reaper_setup',
+    title: 'Set up REAPER'
+  };
+  const summary = installQuestJourney({ handoff }).steps[1];
+  assert.deepEqual(integrationHandoffNavigation(summary, 'continue_integration_setup'), {
+    kind: 'open_quest',
+    detail: { plugin_id: 'reaper-plugin', quest_id: 'reaper_setup' }
+  });
+  assert.equal(
+    setupJourneyActionLabel(summary, {
+      id: 'continue_integration_setup',
+      label: 'Continue setup'
+    }),
+    'Continue: Set up REAPER'
+  );
+  assert.equal(
+    setupJourneyActionLabel(
+      { kind: 'summary' },
+      { id: 'continue_integration_setup', label: 'Continue setup' }
+    ),
+    'Continue setup'
+  );
+  assert.deepEqual(
+    setupJourneyReceiptRows(installQuestJourney({ handoff }), summary).find(
+      row => row[0] === 'Installed'
+    ),
+    ['Installed', 'reaper-plugin 0.6.0']
+  );
+
+  // Without a valid plugin handoff there is nothing to open.
+  for (const step of [
+    { kind: 'summary' },
+    { kind: 'summary', handoff: { ...handoff, source: 'host' } },
+    { kind: 'summary', handoff: { ...handoff, plugin_id: '../other' } },
+    { kind: 'summary', handoff: { ...handoff, id: '' } }
+  ]) {
+    assert.equal(integrationHandoffNavigation(step, 'continue_integration_setup'), null);
+  }
+  assert.equal(integrationHandoffNavigation({ kind: 'summary', handoff }, 'open_project'), null);
+});
+
+test('an install summary always offers the Plugins page', () => {
+  assert.equal(PLUGINS_PAGE_URL, '/plugins');
+  assert.deepEqual(integrationHandoffNavigation({ kind: 'summary' }, 'open_plugins'), {
+    kind: 'location',
+    url: '/plugins'
+  });
 });
 
 test('closing a host quest only hides it; other journeys keep close-as-dismiss', () => {

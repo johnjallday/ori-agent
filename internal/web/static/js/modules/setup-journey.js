@@ -23,8 +23,38 @@ import {
   hostSetupQuestAPIRoot,
   setupJourneyAPIRoot,
   setupQuestAPIRoot,
+  setupQuestOpenDetail,
   userTemplateSetupQuestAPIRoot
 } from './setup-quest-links.js';
+
+export const PLUGINS_PAGE_URL = '/plugins';
+
+// integrationHandoffNavigation turns an install quest's summary offer into the
+// one browser request it makes. The target is the server-resolved handoff on
+// the summary step; its key is validated through the host route helper and the
+// event detail is built by the shared helper, never from display text.
+export function integrationHandoffNavigation(step, actionID) {
+  if (actionID === 'open_plugins') return { kind: 'location', url: PLUGINS_PAGE_URL };
+  if (actionID !== 'continue_integration_setup') return null;
+  const handoff = step?.handoff;
+  if (handoff?.source !== 'plugin') return null;
+  try {
+    setupQuestAPIRoot(handoff.plugin_id, handoff.id);
+  } catch (_) {
+    return null;
+  }
+  return {
+    kind: 'open_quest',
+    detail: setupQuestOpenDetail({ source: 'plugin', plugin_id: handoff.plugin_id, id: handoff.id })
+  };
+}
+
+// setupJourneyActionLabel names the continue offer after the quest it opens.
+export function setupJourneyActionLabel(step, action) {
+  const title = String(step?.handoff?.title || '').trim();
+  if (action?.id === 'continue_integration_setup' && title) return `Continue: ${title}`;
+  return accountActionLabel(step, action);
+}
 
 // setupQuestSelectionFromParams turns a `?setup=quest` deep link into the
 // selection openSpecialistSetupJourney understands. The parameters are only a
@@ -130,6 +160,20 @@ export function setupJourneyReceiptRows(journey, step) {
   }
   if (step?.kind === 'project_connect' && journey?.receipts?.project_workspace_id) {
     rows.push(['Project', 'Connected']);
+  }
+  // An install quest's summary restates what its install step verified.
+  if (
+    step?.kind === 'summary' &&
+    journey?.journey?.source === 'host' &&
+    !journey?.journey?.workspace_launch &&
+    journey?.receipts?.integration_plugin_id
+  ) {
+    rows.push([
+      'Installed',
+      [journey.receipts.integration_plugin_id, journey.receipts.integration_version]
+        .filter(Boolean)
+        .join(' ')
+    ]);
   }
   rows.push(...accountStepReceiptRows(step));
   if (journey?.lifecycle === 'ready') rows.push(['Setup', 'Ready']);
@@ -842,7 +886,11 @@ function renderActions(step) {
   }
   if (step?.kind === 'project_connect' && state.draft) return;
   (step?.actions || []).forEach(action => {
-    const button = makeText('button', 'setup-journey__action', accountActionLabel(step, action));
+    const button = makeText(
+      'button',
+      'setup-journey__action',
+      setupJourneyActionLabel(step, action)
+    );
     button.type = 'button';
     button.dataset.effect = action.effect || '';
     button.dataset.action = action.id || '';
@@ -1569,8 +1617,27 @@ async function navigateAction(actionID) {
     state.journey?.steps.find(step => step.kind === 'project_connect')?.preparation?.group_id;
   switch (actionID) {
     case 'manage_integration':
-      window.location.assign('/plugins');
+      window.location.assign(PLUGINS_PAGE_URL);
       return;
+    case 'open_plugins':
+    case 'continue_integration_setup': {
+      const summary = (state.journey?.steps || []).find(step => step.kind === 'summary');
+      const navigation = integrationHandoffNavigation(summary, actionID);
+      if (!navigation) {
+        showError('That setup is unavailable right now. Refresh setup and try again.');
+        return;
+      }
+      if (navigation.kind === 'location') {
+        window.location.assign(navigation.url);
+        return;
+      }
+      // Opens the plugin's quest in this same modal. The install quest stays
+      // ready; it is neither dismissed nor changed.
+      window.dispatchEvent(
+        new CustomEvent('ori:open-specialist-setup', { detail: navigation.detail })
+      );
+      return;
+    }
     case 'open_project':
       if (!receipts.project_workspace_id) return;
       setBusy(true, 'Sending an operating-system open request…');

@@ -108,9 +108,23 @@ type setupSummaryReader struct {
 	// modelAvailable reports whether a system model is configured and its
 	// provider can serve it. Nil means no model.
 	modelAvailable func() bool
+	// pluginQuests is the installed plugin quest catalog an install quest's
+	// summary hands off into. Nil offers no continuation.
+	pluginQuests setupjourney.QuestCatalog
 }
 
 func (r setupSummaryReader) Read(ctx context.Context, scope setupjourney.ReadScope) (setupjourney.CanonicalStepRead, error) {
+	if scope.Shape == specialist.SetupJourneyShapeIntegrationInstall {
+		// FR 24: continue into the plugin's own quest when one is listed, and
+		// always offer the Plugins page. No project-setup offer applies here.
+		read := setupjourney.CanonicalStepRead{AvailableActions: []setupjourney.ActionID{}}
+		if handoff := setupjourney.IntegrationHandoff(ctx, r.pluginQuests, scope.IntegrationKey); handoff != nil {
+			read.AvailableActions = append(read.AvailableActions, setupjourney.ActionContinueIntegrationSetup)
+			read.Handoff = handoff
+		}
+		read.AvailableActions = append(read.AvailableActions, setupjourney.ActionOpenPlugins)
+		return read, nil
+	}
 	if scope.Shape == specialist.SetupJourneyShapeAccountLink {
 		// FR 36: nothing Email-Ops-specific is offered until the workspace exists,
 		// and triage is offered only when a model can run it. Mailbox readiness

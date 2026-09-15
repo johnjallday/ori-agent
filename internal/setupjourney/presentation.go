@@ -36,6 +36,15 @@ func (s *Service) mutatePresentation(
 	if request.IfRevision <= 0 || strings.TrimSpace(request.IdempotencyKey) == "" {
 		return nil, failure(ReasonInputInvalid, 0)
 	}
+	if s != nil && s.quest == nil {
+		pinned, pinErr := s.pinAliasQuest(ctx, userID)
+		if pinErr != nil {
+			return nil, pinErr
+		}
+		if pinned != s {
+			return pinned.mutatePresentation(ctx, userID, runID, request, open)
+		}
+	}
 	current, declaration, _, run, err := s.authorizedCurrentRun(ctx, userID, runID)
 	if err != nil {
 		return nil, err
@@ -119,6 +128,15 @@ func (s *Service) mutatePresentation(
 func (s *Service) CreateOrResumeChild(ctx context.Context, userID string, request PresentationMutation) (*JourneyProjection, error) {
 	if request.IfRevision <= 0 || strings.TrimSpace(request.IdempotencyKey) == "" {
 		return nil, failure(ReasonInputInvalid, 0)
+	}
+	if s != nil && s.quest == nil {
+		pinned, pinErr := s.pinAliasQuest(ctx, userID)
+		if pinErr != nil {
+			return nil, pinErr
+		}
+		if pinned != s {
+			return pinned.CreateOrResumeChild(ctx, userID, request)
+		}
 	}
 	current, declaration, root, _, err := s.authorizedCurrentRun(ctx, userID, "")
 	if err != nil {

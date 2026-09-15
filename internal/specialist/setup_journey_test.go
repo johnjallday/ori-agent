@@ -253,6 +253,70 @@ func TestNormalizeSetupJourneyRejectsInvalidAccountLinkShape(t *testing.T) {
 	}
 }
 
+func validIntegrationInstallSetupJourney() SetupJourney {
+	return SetupJourney{
+		SchemaVersion:              SetupJourneySchemaVersion,
+		Version:                    1,
+		ID:                         "install_example_integration",
+		Title:                      "Install Example Plugin",
+		Description:                "Install the Example plugin before setting it up.",
+		IntegrationKey:             "example_integration",
+		ExpectedBlueprintID:        "example-blueprint",
+		ExpectedAssistantProgramID: "example-program",
+		Steps: []SetupJourneyStep{
+			{ID: "integration", Kind: SetupStepIntegrationInstall, Title: "Install Example Plugin", Description: "Review and install the plugin."},
+			{ID: "summary", Kind: SetupStepSummary, Title: "Example plugin ready", Description: "Setup continues in the plugin's own quest."},
+		},
+	}
+}
+
+func TestNormalizeSetupJourneyAcceptsIntegrationInstallShape(t *testing.T) {
+	input := validIntegrationInstallSetupJourney()
+	input.Steps[0].Kind = " INTEGRATION_INSTALL "
+	got, err := NormalizeSetupJourney(input)
+	if err != nil {
+		t.Fatalf("NormalizeSetupJourney: %v", err)
+	}
+	if got.Shape() != SetupJourneyShapeIntegrationInstall {
+		t.Fatalf("shape = %q, want %q", got.Shape(), SetupJourneyShapeIntegrationInstall)
+	}
+	if got.Steps[0].Kind != SetupStepIntegrationInstall || got.WorkspaceLaunch != nil || got.IntegrationKey != "example_integration" {
+		t.Fatalf("install declaration was not normalized: %+v", got)
+	}
+}
+
+func TestNormalizeSetupJourneyRejectsInvalidIntegrationInstallShape(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*SetupJourney)
+		message string
+	}{
+		{name: "missing integration key", mutate: func(j *SetupJourney) { j.IntegrationKey = "" }, message: "integration_key"},
+		{name: "missing blueprint", mutate: func(j *SetupJourney) { j.ExpectedBlueprintID = "" }, message: "expected_blueprint_id"},
+		{name: "missing assistant program", mutate: func(j *SetupJourney) { j.ExpectedAssistantProgramID = "" }, message: "expected_assistant_program_id"},
+		{name: "workspace launch present", mutate: func(j *SetupJourney) {
+			j.WorkspaceLaunch = &WorkspaceLaunchCopy{GroupTitle: "Group", GroupName: "Group", RuntimeTitle: "Runtime", RuntimeInstructions: "Plain text."}
+		}, message: "workspace_launch is not allowed for the integration_install shape"},
+		// The first kind selects the candidate shape, so a pair that does not
+		// start with the install kind is checked against a longer shape.
+		{name: "summary first", mutate: func(j *SetupJourney) { j.Steps[0], j.Steps[1] = j.Steps[1], j.Steps[0] }, message: "exactly 5 steps"},
+		{name: "second step not summary", mutate: func(j *SetupJourney) { j.Steps[1].Kind = SetupStepProjectConnect }, message: "kind must be"},
+		{name: "account kind", mutate: func(j *SetupJourney) { j.Steps[1].Kind = SetupStepAccountLink }, message: "kind must be"},
+		{name: "duplicate step id", mutate: func(j *SetupJourney) { j.Steps[1].ID = j.Steps[0].ID }, message: "duplicated"},
+		{name: "markup title", mutate: func(j *SetupJourney) { j.Steps[0].Title = "<b>Install</b>" }, message: "plain display text"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			declaration := validIntegrationInstallSetupJourney()
+			test.mutate(&declaration)
+			_, err := NormalizeSetupJourney(declaration)
+			if err == nil || !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("error = %v, want it to mention %q", err, test.message)
+			}
+		})
+	}
+}
+
 func TestNormalizeSetupJourneyCannotMixShapes(t *testing.T) {
 	// Specialist references on an account-link sequence are rejected, and an
 	// account-link kind inside the specialist sequence is rejected, so neither
@@ -302,6 +366,17 @@ func TestSetupJourneyShapeIsInferredFromExactSequence(t *testing.T) {
 	account.Steps = account.Steps[:3]
 	if got := account.Shape(); got != "" {
 		t.Fatalf("truncated sequence shape = %q, want none", got)
+	}
+	install := validIntegrationInstallSetupJourney()
+	if got := install.Shape(); got != SetupJourneyShapeIntegrationInstall {
+		t.Fatalf("install shape = %q", got)
+	}
+	// The five-step sequence starting with the install kind is never the install
+	// shape, and the install pair is never the specialist shape.
+	firstTwo := validSetupJourney()
+	firstTwo.Steps = []SetupJourneyStep{firstTwo.Steps[0], firstTwo.Steps[4]}
+	if got := firstTwo.Shape(); got != SetupJourneyShapeIntegrationInstall {
+		t.Fatalf("install pair shape = %q", got)
 	}
 	var missing *SetupJourney
 	if got := missing.Shape(); got != "" {

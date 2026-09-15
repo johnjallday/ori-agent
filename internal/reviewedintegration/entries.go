@@ -6,6 +6,10 @@ package reviewedintegration
 var builtInEntries = mustRegistry([]Entry{
 	{
 		Key: "ori_reaper", PluginID: "reaper-plugin", ExpectedVersion: "0.5.0",
+		DisplayName:  "REAPER",
+		InstallTitle: "Install Ori REAPER Plugin",
+		InstallDescription: "Ori's REAPER integration is a local integration for Ori, not an audio plug-in, VST, " +
+			"effect, or instrument. It will not appear in REAPER's FX browser.",
 		SourceRepository: "https://github.com/johnjallday/reaper-plugin",
 		SourceCommit:     "1f494db5a39d8c13f6149943b28e6a506d19631a", SourceFormat: reviewedClaudeFormat,
 		PublisherLabel: "Ori", SourceLabel: "johnjallday/reaper-plugin",

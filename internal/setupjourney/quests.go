@@ -46,6 +46,12 @@ type QuestSummary struct {
 	Description string `json:"description"`
 	TemplateID  string `json:"template_id"`
 	Ownership   string `json:"ownership"`
+	// IntegrationKey, DisplayName and PublisherLabel are set only on
+	// host-generated install quests, so a surface can list them as available
+	// integrations. They are inert reviewed registry copy.
+	IntegrationKey string `json:"integration_key,omitempty"`
+	DisplayName    string `json:"display_name,omitempty"`
+	PublisherLabel string `json:"publisher_label,omitempty"`
 }
 
 type QuestDefinition struct {
@@ -298,8 +304,45 @@ func validUserTemplateQuest(template projecttemplates.Template) bool {
 	return reviewed
 }
 
+// questSourceLister lists the quests of one source without reading catalogs
+// that serve other sources.
+type questSourceLister interface {
+	listSource(context.Context, QuestSource) ([]QuestSummary, error)
+}
+
+// sourcedQuestCatalog is implemented by catalogs that serve exactly one source.
+type sourcedQuestCatalog interface {
+	questSource() QuestSource
+}
+
+func (c *installedQuestCatalog) questSource() QuestSource          { return QuestSourcePlugin }
+func (c *userTemplateQuestCatalog) questSource() QuestSource       { return QuestSourceUserTemplate }
+func (c *hostQuestCatalog) questSource() QuestSource               { return QuestSourceHost }
+func (c *integrationInstallQuestCatalog) questSource() QuestSource { return QuestSourceHost }
+
 type combinedQuestCatalog struct {
 	catalogs []QuestCatalog
+}
+
+// listSource lists every catalog that serves the source, or whose source is
+// unknown, and keeps only that source's quests.
+func (c *combinedQuestCatalog) listSource(ctx context.Context, source QuestSource) ([]QuestSummary, error) {
+	result := make([]QuestSummary, 0)
+	for _, catalog := range c.catalogs {
+		if sourced, ok := catalog.(sourcedQuestCatalog); ok && sourced.questSource() != source {
+			continue
+		}
+		items, err := catalog.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range items {
+			if normalizeQuestKey(item.QuestKey).Source == source {
+				result = append(result, item)
+			}
+		}
+	}
+	return result, nil
 }
 
 func CombineQuestCatalogs(catalogs ...QuestCatalog) QuestCatalog {
@@ -351,6 +394,22 @@ func (c *combinedQuestCatalog) Lookup(ctx context.Context, key QuestKey) (QuestD
 		}
 	}
 	return QuestDefinition{}, failure(ReasonJourneyUnavailable, 0)
+}
+
+// validHostQuestShape accepts the two shapes a host quest may have. An install
+// quest must be the one generated for its reviewed integration key.
+func validHostQuestShape(declaration *specialist.SetupJourney) bool {
+	switch declaration.Shape() {
+	case specialist.SetupJourneyShapeAccountLink:
+		return true
+	case specialist.SetupJourneyShapeIntegrationInstall:
+		entry, reviewed := reviewedintegration.Get(declaration.IntegrationKey)
+		return reviewed && declaration.ID == IntegrationInstallQuestID(entry.Key) &&
+			declaration.ExpectedBlueprintID == entry.ExpectedBlueprintID &&
+			declaration.ExpectedAssistantProgramID == entry.ExpectedProgramID
+	default:
+		return false
+	}
 }
 
 func validQuestKey(key QuestKey) bool {
@@ -514,9 +573,10 @@ func (s *Service) questDeclaration(ctx context.Context, userID string, key Quest
 		return nil, nil, failure(ReasonDeclarationInvalid, 0)
 	}
 	identity := &declarationIdentity{UserID: userID, AssistantID: questRelationshipID(key), QuestKey: key}
+	shape := d.Shape()
 	switch key.Source {
 	case QuestSourcePlugin:
-		if d.OwnerPluginID != key.PluginID {
+		if d.OwnerPluginID != key.PluginID || shape == specialist.SetupJourneyShapeIntegrationInstall {
 			return nil, nil, failure(ReasonDeclarationInvalid, 0)
 		}
 		d.OwnerPluginID = key.PluginID
@@ -533,8 +593,10 @@ func (s *Service) questDeclaration(ctx context.Context, userID string, key Quest
 		}
 	case QuestSourceHost:
 		// Host quests are compiled data: no plugin owner, no attachment binding,
-		// and no legacy assistant-owned progress to adopt.
-		if d.OwnerPluginID != "" || definition.LegacySlug != "" {
+		// and no legacy assistant-owned progress to adopt. They are either an
+		// embedded account-link quest or the install quest the host generated for
+		// exactly one reviewed integration.
+		if d.OwnerPluginID != "" || definition.LegacySlug != "" || !validHostQuestShape(d) {
 			return nil, nil, failure(ReasonDeclarationInvalid, 0)
 		}
 		identity.SpecialistSlug = hostQuestSlug

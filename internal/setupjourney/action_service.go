@@ -28,6 +28,15 @@ func (s *Service) Mutate(ctx context.Context, userID, runID string, actionID Act
 	if !ok {
 		return nil, failure(ReasonActionUnavailable, 0)
 	}
+	if s.quest == nil {
+		pinned, pinErr := s.pinAliasQuest(ctx, userID)
+		if pinErr != nil {
+			return nil, pinErr
+		}
+		if pinned != s {
+			return pinned.Mutate(ctx, userID, runID, actionID, request)
+		}
+	}
 	adapter := s.actionAdapters[kind]
 	if adapter == nil || definition.Effect == ActionEffectNavigation {
 		return nil, failure(ReasonActionUnavailable, 0)

@@ -6,6 +6,8 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/plugin"
+	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/setupjourney"
 	"github.com/johnjallday/ori-agent/internal/specialist"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -15,6 +17,65 @@ type setupReportingRelationship struct{ state *personalassistant.State }
 
 func (r setupReportingRelationship) GetState(context.Context, string) (*personalassistant.State, error) {
 	return r.state.Clone(), nil
+}
+
+type setupReportingPlugins struct{ items []plugin.InstalledPlugin }
+
+func (p *setupReportingPlugins) List() ([]plugin.InstalledPlugin, error) { return p.items, nil }
+
+// FR 22: Home's specialist setup card is titled by whichever quest the alias
+// resolves: the install quest before the plugin is installed, then the plugin's.
+func TestPersonalAssistantSetupReportingTitleFollowsTheResolvedQuest(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, &database.Config{InMemory: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	relationship := setupReportingRelationship{state: &personalassistant.State{
+		UserID: "local", AssistantID: "assistant-1", Status: personalassistant.StatusActive,
+		SpecialistOfferState: personalassistant.SpecialistOfferAccepted, SpecialistSlug: "music_production",
+	}}
+	readers := map[specialist.SetupStepKind]setupjourney.CanonicalReader{}
+	for _, kind := range specialist.SetupStepKinds() {
+		readers[kind] = setupjourney.CanonicalReaderFunc(func(context.Context, setupjourney.ReadScope) (setupjourney.CanonicalStepRead, error) {
+			return setupjourney.CanonicalStepRead{}, nil
+		})
+	}
+	registry, err := setupjourney.NewReaderRegistry(readers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journeys, err := setupjourney.NewService(setupjourney.NewSQLiteStore(db), relationship, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plugins := &setupReportingPlugins{}
+	journeys.SetQuestCatalog(setupjourney.CombineQuestCatalogs(
+		setupjourney.NewIntegrationInstallQuestCatalog(reviewedintegration.All, plugins),
+		setupjourney.NewInstalledQuestCatalog(plugins),
+	))
+	adapter := &personalAssistantSetupReportingAdapter{journeys: journeys, workspaces: workspace.NewInMemoryStore()}
+
+	before, err := adapter.GetSpecialistSetup(ctx, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Title != "Install Ori REAPER Plugin" || before.JourneyID != "install_ori_reaper" || before.CurrentStepID != "integration" {
+		t.Fatalf("pre-install card = %+v", before)
+	}
+	if len(before.Actions) == 0 || before.Actions[0].ID != "continue_setup" {
+		t.Fatalf("pre-install card actions = %+v", before.Actions)
+	}
+
+	plugins.items = []plugin.InstalledPlugin{{Name: "reaper-plugin", Version: "0.5.0", Enabled: true}}
+	after, err := adapter.GetSpecialistSetup(ctx, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Title != "Set up REAPER" || after.JourneyID != "reaper_setup" {
+		t.Fatalf("post-install card = %+v", after)
+	}
 }
 
 func TestPersonalAssistantSetupReportingUsesCanonicalRunsAndExactLinks(t *testing.T) {
