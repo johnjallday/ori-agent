@@ -8,6 +8,7 @@
 #   wt plan --issue <N> [--issue <N> ...] [--kind claude|pi] [--model MODEL] [--thinking LEVEL] [--yes]
 #   wt start [prd] [--kind KIND] [--model MODEL] [--no-herdr] # Create a planned worktree
 #   wt new <name> [--kind KIND] [--model MODEL] # Create a clean worktree (no PRD/tasks)
+#   wt new test             # ...and also empty ~/Test (override: WT_TEST_WORKSPACE_DIR)
 #   wt away arm|disarm|status|tick # Control unattended queued dispatches
 #   wt pr [name]            # Push branch and open a PR against dev
 #   wt done [name] [--keep-issue-open] [--herdr-override] # Finish all attached Issues, archive, and clean up
@@ -825,6 +826,7 @@ function wt_plan_reset {
   typeset -g WT_PLAN_KIND="" WT_PLAN_KIND_DISPLAY="" WT_PLAN_MODEL="" WT_PLAN_MODEL_DISPLAY=""
   typeset -g WT_PLAN_START_AGENT=1 WT_PLAN_COPY_DOCS=1 WT_PLAN_PROMPT=1
   typeset -g WT_PLAN_WORKSPACE="" WT_PLAN_WORKSPACE_STATE=""
+  typeset -g WT_PLAN_RESET_DIR=""
 }
 
 # The configured primary kind, so the summary names what will actually start.
@@ -930,6 +932,9 @@ function wt_plan_render {
     setup_note="$setup_note, .env copied"
   fi
   printf '  %-14s %s  %s\n' "Worktree" "$WT_PLAN_TARGET" "$marker ${WT_C_DIM}${setup_note}${WT_C_RESET}"
+  if [[ -n "$WT_PLAN_RESET_DIR" ]]; then
+    printf '  %-14s %s  %s\n' "Test folder" "$WT_PLAN_RESET_DIR" "$marker ${WT_C_DIM}deleted and recreated empty${WT_C_RESET}"
+  fi
 
   if [[ -n "$WT_PLAN_PRD" ]]; then
     printf '  %-14s %s\n' "PRD" "$WT_PLAN_PRD"
@@ -1015,6 +1020,12 @@ function wt_start_execute {
   fi
   WT_PLAN_TARGET="$WT_PROVISIONED_TARGET"
 
+  # Only after the worktree exists: a failed `wt new test` (say, the worktree is
+  # still there from last time) should leave the previous round's folder alone.
+  if [[ -n "$WT_PLAN_RESET_DIR" ]]; then
+    wt_reset_test_workspace_dir "$WT_PLAN_RESET_DIR"
+  fi
+
   # Each planning artifact is copied independently of the others (AR29): a
   # task-list-only feature has no PRD to gate the copy on, and an Issue
   # snapshot from `wt plan` is copied whenever one exists, regardless of
@@ -1044,6 +1055,25 @@ function wt_start_execute {
 
   cd "$WT_PLAN_TARGET"
   echo "Changed to: $WT_PLAN_TARGET"
+  return 0
+}
+
+# Empty the folder `wt new test` hands back for pointing the app's workspace
+# directory at. Non-fatal: the worktree is already made by the time this runs, so
+# a failure warns rather than undoing it. Because this is an unconditional
+# `rm -rf`, the guard refuses a relative path, root, $HOME itself, and any
+# symlink that resolves to either of those.
+function wt_reset_test_workspace_dir {
+  local dir="$1"
+  if [[ "$dir" != /?* || "${dir:A}" == "/" || ( -n "$HOME" && "${dir:A}" == "${HOME:A}" ) ]]; then
+    echo "Warning: refusing to reset test folder '$dir'"
+    return 1
+  fi
+  if ! rm -rf -- "$dir" || ! mkdir -p -- "$dir"; then
+    echo "Warning: could not reset $dir; empty it by hand before pointing a workspace at it."
+    return 1
+  fi
+  echo "Reset test folder: $dir (empty)"
   return 0
 }
 
@@ -1674,6 +1704,13 @@ function wt_dispatch {
     # is no PRD and no checklist, so any prompt would either name documents that
     # do not exist or say nothing the agent cannot already see.
     WT_PLAN_PROMPT=0
+
+    # `wt new test` is the manual-testing worktree, so it also hands back an
+    # empty ~/Test to set as the workspace directory with nothing left over from
+    # the previous round. Matched on the directory name, so fix/test counts too.
+    if [[ "$WT_DIR_NAME" == "test" ]]; then
+      WT_PLAN_RESET_DIR="${WT_TEST_WORKSPACE_DIR:-$HOME/Test}"
+    fi
 
     if (( no_herdr )); then
       WT_PLAN_START_AGENT=0
