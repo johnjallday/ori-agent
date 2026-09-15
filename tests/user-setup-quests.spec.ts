@@ -2,13 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 const attachmentID = 'uqatt_0123456789abcdef01234567';
 const questID = 'uquest_0123456789abcdef01234567';
-const kinds = [
-  'integration_install',
-  'project_connect',
-  'workspace_setup',
-  'assistant_program_staffing',
-  'summary'
-];
+const kinds = ['project_connect', 'workspace_setup', 'assistant_program_staffing', 'summary'];
 
 const template = {
   id: 'local-project',
@@ -27,9 +21,7 @@ const draft = {
   })),
   workspace_launch: {
     group_title: 'Choose a Home',
-    group_name: 'Projects',
-    runtime_title: 'Choose access',
-    runtime_instructions: 'File-only remains available.'
+    group_name: 'Projects'
   }
 };
 
@@ -190,14 +182,24 @@ for (const width of [390, 1280]) {
     const writes = await installRoutes(page);
     await page.goto('/templates');
     await page.locator('#tplList [role="listitem"]').filter({ hasText: template.name }).click();
+    // At phone width the fixed Ori Help root (#oriGuideRoot) is a full-width
+    // strip that intercepts pointer events at the bottom of the viewport. That
+    // overlay is outside this spec, so let clicks pass through it here.
+    await page.addStyleTag({ content: '#oriGuideRoot { pointer-events: none !important; }' });
     await page.locator('#tplTabSetupQuest').click();
     await page.locator('#tplUserQuestCreate').click();
 
     const steps = page.locator('#tplUserQuestSteps [data-quest-step]');
-    await expect(steps).toHaveCount(5);
+    await expect(steps).toHaveCount(4);
+    expect(await steps.evaluateAll(items => items.map(item => item.dataset.questStep))).toEqual(
+      kinds
+    );
     expect(
       await steps.evaluateAll(items => items.every(item => !item.hasAttribute('draggable')))
     ).toBe(true);
+    // The launch copy is group-only; runtime copy inputs are gone.
+    await expect(page.locator('#tplUserQuestForm [id^="tplUserQuestGroup"]')).toHaveCount(2);
+    await expect(page.locator('[id^="tplUserQuestRuntime"]')).toHaveCount(0);
     await expect(page.locator('#tplUserQuestIntegration')).toHaveValue(draft.integration_key);
 
     await page.locator('#tplUserQuestTitle').fill('Unsaved preview title');
