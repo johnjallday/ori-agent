@@ -49,6 +49,12 @@ func (s *Service) mutatePresentation(
 	if err != nil {
 		return nil, err
 	}
+	if current.DeclarationIncompatible {
+		// Reconciling here would write the current declaration version over an
+		// incompatible record and hide Start over. Showing or hiding the modal
+		// leaves the saved record exactly as it is.
+		return current, nil
+	}
 	stepID := current.CurrentStepID
 	if stepID == "" {
 		stepID = declaration.Steps[len(declaration.Steps)-1].ID

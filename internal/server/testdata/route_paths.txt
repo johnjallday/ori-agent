@@ -34,6 +34,7 @@
 /api/host-setup-quests/email_ops_setup/children
 /api/host-setup-quests/email_ops_setup/dismiss
 /api/host-setup-quests/email_ops_setup/open
+/api/host-setup-quests/email_ops_setup/restart
 /api/host-setup-quests/email_ops_setup/runs/x
 /api/host-setup-quests/email_ops_setup/runs/x/actions/x
 /api/host-setup-quests/email_ops_setup/runs/x/dismiss
@@ -109,6 +110,7 @@
 /api/personal-assistant/setup-journey/children
 /api/personal-assistant/setup-journey/dismiss
 /api/personal-assistant/setup-journey/open
+/api/personal-assistant/setup-journey/restart
 /api/personal-assistant/setup-journey/runs/00000000-0000-0000-0000-000000000001
 /api/personal-assistant/setup-journey/runs/00000000-0000-0000-0000-000000000001/actions/review_install
 /api/personal-assistant/setup-journey/runs/00000000-0000-0000-0000-000000000001/dismiss
@@ -188,6 +190,7 @@
 /api/setup-quests/x/x
 /api/setup-quests/x/x/dismiss
 /api/setup-quests/x/x/open
+/api/setup-quests/x/x/restart
 /api/setup-quests/x/x/runs/x
 /api/setup-quests/x/x/runs/x/steps/x/actions/x
 /api/setup-quests/x/x/runs/x/steps/x/review
@@ -211,6 +214,7 @@
 /api/user-template-setup-quests/x/x
 /api/user-template-setup-quests/x/x/dismiss
 /api/user-template-setup-quests/x/x/open
+/api/user-template-setup-quests/x/x/restart
 /api/user-template-setup-quests/x/x/runs/x
 /api/user-template-setup-quests/x/x/runs/x/steps/x/actions/x
 /api/user-template-setup-quests/x/x/runs/x/steps/x/review

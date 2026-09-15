@@ -8,6 +8,7 @@ globalThis.window ||= { addEventListener() {}, location: { search: '' } };
 
 const {
   PLUGINS_PAGE_URL,
+  START_OVER_EXPLANATION,
   WORKSPACE_LAUNCH_DESCRIPTION,
   integrationHandoffNavigation,
   setupJourneyActionLabel,
@@ -21,6 +22,7 @@ const {
   setupJourneyControlDisabled,
   setupJourneyCurrentStep,
   setupJourneyReceiptRows,
+  setupJourneyStartOverView,
   setupQuestSelectionFromParams
 } = await import('./setup-journey.js');
 
@@ -412,6 +414,47 @@ test('an unmet integration precondition offers only the install quest', () => {
       ...journey,
       precondition: { ...journey.precondition, install_quest_id: '../other' }
     }).installDetail,
+    null
+  );
+});
+
+test('an incompatible root offers Start over on its own restart route', () => {
+  const incompatible = {
+    run_kind: 'root',
+    declaration_incompatible: true,
+    journey: { source: 'plugin', plugin_id: 'reaper-plugin', id: 'reaper_setup' }
+  };
+  assert.equal(
+    START_OVER_EXPLANATION,
+    'Your group, project and team stay. Only your setup progress is reset.'
+  );
+  assert.deepEqual(setupJourneyStartOverView(incompatible), {
+    label: 'Start over',
+    explanation: START_OVER_EXPLANATION,
+    url: '/api/setup-quests/reaper-plugin/reaper_setup/restart'
+  });
+  assert.equal(
+    setupJourneyStartOverView({
+      ...incompatible,
+      journey: { source: 'host', id: 'email_ops_setup' }
+    }).url,
+    '/api/host-setup-quests/email_ops_setup/restart'
+  );
+  assert.equal(
+    setupJourneyStartOverView({ ...incompatible, journey: { id: 'music_setup' } }).url,
+    '/api/personal-assistant/setup-journey/restart'
+  );
+  // Compatible roots, children and user-template quests have no Start over.
+  assert.equal(
+    setupJourneyStartOverView({ ...incompatible, declaration_incompatible: false }),
+    null
+  );
+  assert.equal(setupJourneyStartOverView({ ...incompatible, run_kind: 'child' }), null);
+  assert.equal(
+    setupJourneyStartOverView({
+      ...incompatible,
+      journey: { source: 'user_template', template_id: 'song', attachment_id: 'quest', id: 'x' }
+    }),
     null
   );
 });

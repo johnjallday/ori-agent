@@ -15,17 +15,23 @@
  *            quest handoff → two-screen plugin quest → Build Group → Create
  *            New Workspace → disable the plugin → precondition panel → install
  *            quest.
+ *   restart  After plugin, with the sandbox sessions.db path as the fourth
+ *            argument: primary Continue styling, then a saved declaration
+ *            set to version 1 → Start over → fresh quest keeps the group.
  *
  * Every stage prints what it observed plus any console errors or failed
  * requests, so a quietly broken page does not pass as a clean demo.
  */
 import { chromium } from 'playwright';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-const [baseUrl, outDir, stage = 'install'] = process.argv.slice(2);
+const [baseUrl, outDir, stage = 'install', dbPath = ''] = process.argv.slice(2);
 if (!baseUrl || !outDir) {
-  console.error('usage: node scripts/demo-install-quest.mjs <baseUrl> <outDir> [install]');
+  console.error(
+    'usage: node scripts/demo-install-quest.mjs <baseUrl> <outDir> [install|plugin|templates|restart <sessions.db>]'
+  );
   process.exit(1);
 }
 const out = resolve(outDir);
@@ -339,6 +345,78 @@ async function pluginStage() {
   );
 }
 
+// restartStage runs against scripts/reaper-demo.sh after the plugin stage. It
+// checks the install summary's primary Continue styling, marks the started
+// plugin quest's saved declaration as version 1 in the sandbox database, then
+// uses Start over and checks the fresh quest keeps the existing group.
+async function restartStage() {
+  if (!dbPath) throw new Error('restart stage needs the sandbox sessions.db path');
+  const page = await newPage();
+  await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+  await acceptMusicSpecialist(page);
+  const enabled = await api(page, 'POST', '/api/plugins/reaper-plugin/enable');
+  console.log(`enable plugin: HTTP ${enabled.status}`);
+  const setup = page.locator('#specialistSetupJourneyModal');
+
+  // 1. The install summary's Continue button is the primary action.
+  await page.goto(`${baseUrl}/?setup=quest&source=host&quest=install_ori_reaper`, {
+    waitUntil: 'domcontentloaded'
+  });
+  await describeModal(page, 'install quest');
+  const styles = await page.locator('#specialistSetupJourneyActions button').evaluateAll(buttons =>
+    buttons.map(b => {
+      const style = getComputedStyle(b);
+      return `${b.innerText.trim()}: primary=${b.dataset.primary || 'false'} bg=${style.backgroundColor} color=${style.color}`;
+    })
+  );
+  console.log(`install summary buttons: ${JSON.stringify(styles)}`);
+  await shot(page, '20-install-summary-primary-continue');
+
+  // 2. Simulate a pre-split saved declaration on the started plugin quest.
+  const status = await api(page, 'GET', '/api/setup-quests/reaper-plugin/reaper_setup');
+  const runID = status.json?.setup_journey?.run_id || '';
+  const groupBefore = (status.json?.setup_journey?.steps || []).find(
+    step => step.kind === 'project_connect'
+  )?.preparation?.exists;
+  if (!/^[0-9a-f-]{36}$/.test(runID)) throw new Error(`no started plugin quest: ${runID}`);
+  // Bump the revision too, so a reconcile already in flight cannot write the
+  // current version back over the seed.
+  execFileSync('sqlite3', [
+    dbPath,
+    `UPDATE setup_journey_run SET declaration_version = 1, state_revision = state_revision + 1 WHERE id = '${runID}'`
+  ]);
+  const seeded = await api(page, 'GET', '/api/setup-quests/reaper-plugin/reaper_setup');
+  console.log(
+    `seeded declaration_version=1 on ${runID} (group exists=${groupBefore}) incompatible=${Boolean(seeded.json?.setup_journey?.declaration_incompatible)}`
+  );
+
+  await page.goto(`${baseUrl}/?setup=quest&plugin=reaper-plugin&quest=reaper_setup`, {
+    waitUntil: 'domcontentloaded'
+  });
+  await describeModal(page, 'incompatible');
+  const incompatibleText = (
+    await page.locator('#specialistSetupJourneyContent').innerText()
+  ).replace(/\s+/g, ' ');
+  console.log(`incompatible panel: ${JSON.stringify(incompatibleText)}`);
+  if (!incompatibleText.includes('Only your setup progress is reset.'))
+    problems.push('the Start over explanation is missing');
+  await shot(page, '21-incompatible-start-over');
+
+  // 3. Start over creates a fresh root that still sees the existing group.
+  const startOver = setup.getByRole('button', { name: 'Start over', exact: true });
+  await clickAndSettle(page, startOver, 'Start over');
+  const fresh = await describeModal(page, 'after start over');
+  const after = await api(page, 'GET', '/api/setup-quests/reaper-plugin/reaper_setup');
+  const journey = after.json?.setup_journey || {};
+  console.log(
+    `after start over: run=${journey.run_id} incompatible=${Boolean(journey.declaration_incompatible)} steps=${JSON.stringify((journey.steps || []).map(s => `${s.id}=${s.status}`))} group exists=${(journey.steps || []).find(s => s.kind === 'project_connect')?.preparation?.exists}`
+  );
+  if (journey.run_id === runID || journey.declaration_incompatible)
+    problems.push('Start over did not create a fresh compatible root');
+  await shot(page, '22-after-start-over');
+  console.log(`titles: fresh=${fresh.title}`);
+}
+
 // templatesStage imports the quest-eligible fixture as a user template, authors
 // its setup quest on the Templates page, and checks the four-step editor and
 // that Guided Setup stays hidden while the integration is not installed.
@@ -409,6 +487,7 @@ try {
   if (stage === 'install') await installStage();
   else if (stage === 'plugin') await pluginStage();
   else if (stage === 'templates') await templatesStage();
+  else if (stage === 'restart') await restartStage();
   else throw new Error(`unknown stage ${stage}`);
 } catch (error) {
   problems.push(`stage failed: ${error.message}`);

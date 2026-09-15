@@ -449,10 +449,72 @@ function render() {
   appendRows(elements.receipt, setupJourneyReceiptRows(journey, step));
   renderDraft(step);
   renderActions(step);
+  renderStartOver(journey);
   renderReview();
   elements.live.textContent = journey.busy
     ? 'Ori is checking the previous change. Check its status before trying again.'
     : '';
+}
+
+export const START_OVER_EXPLANATION =
+  'Your group, project and team stay. Only your setup progress is reset.';
+
+// setupJourneyStartOverView offers Start over for a root whose saved
+// declaration is incompatible (FR 38). User-template quests reset by removing
+// and recreating the quest, so they have no restart route.
+export function setupJourneyStartOverView(journey) {
+  if (!journey?.declaration_incompatible) return null;
+  if (journey.run_kind && journey.run_kind !== 'root') return null;
+  if (journey.journey?.source === 'user_template') return null;
+  let root = '';
+  try {
+    root = setupJourneyAPIRoot(journey);
+  } catch (_) {
+    return null;
+  }
+  return { label: 'Start over', explanation: START_OVER_EXPLANATION, url: `${root}/restart` };
+}
+
+function renderStartOver(journey) {
+  const view = setupJourneyStartOverView(journey);
+  if (!view || state.pendingCommit || journey.busy) return;
+  const elements = ui();
+  elements.receipt.appendChild(makeText('p', 'setup-journey__start-over-note', view.explanation));
+  const button = makeText('button', 'setup-journey__action', view.label);
+  button.type = 'button';
+  button.dataset.effect = 'commit';
+  button.dataset.action = 'start_over';
+  button.dataset.primary = 'true';
+  button.addEventListener('click', () => startOver(view.url, button));
+  elements.actions.appendChild(button);
+}
+
+async function startOver(url, trigger) {
+  if (state.busy) return;
+  state.returnFocus = trigger;
+  showError('');
+  setBusy(true, 'Starting setup over…');
+  try {
+    const payload = await request(url, { method: 'POST' });
+    state.journey = payload?.setup_journey || state.journey;
+    state.selectedStepID = state.journey?.current_step_id || '';
+    state.managementView = false;
+    state.launchStage = '';
+    state.draft = null;
+    state.projectDrafts = {};
+    state.pendingCommit = null;
+    state.review = null;
+    render();
+    ui()?.stepTitle?.focus();
+  } catch (error) {
+    if (error.current) {
+      state.journey = error.current;
+      render();
+    }
+    showError(error.message);
+  } finally {
+    setBusy(false);
+  }
 }
 
 export const WORKSPACE_LAUNCH_DESCRIPTION = 'Create your group, then create a workspace.';

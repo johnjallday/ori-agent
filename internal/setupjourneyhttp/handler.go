@@ -115,6 +115,49 @@ func (h *Handler) DismissRun(w http.ResponseWriter, r *http.Request) {
 	h.presentation(w, r, r.PathValue("runID"), false)
 }
 
+// restartService is the reset a root scope offers when its saved declaration
+// is incompatible.
+type restartService interface {
+	Restart(ctx context.Context, userID string) (*setupjourney.JourneyProjection, error)
+}
+
+// RestartRoot handles the bodyless POST .../restart on the assistant alias,
+// plugin-quest and host-quest roots (FR 37). The current user is the only
+// scope; the service refuses unless the root's declaration is incompatible.
+func (h *Handler) RestartRoot(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if !noQuery(r) || !emptyBody(w, r) {
+		h.writeFailure(w, r, "", "", setupjourney.FailureFor(setupjourney.ReasonInputInvalid, 0))
+		return
+	}
+	userID, ok := h.currentUser(w, r)
+	if !ok {
+		return
+	}
+	service, ok := h.service.(restartService)
+	if !ok {
+		h.writeFailure(w, r, userID, "", setupjourney.FailureFor(setupjourney.ReasonActionUnavailable, 0))
+		return
+	}
+	projection, err := service.Restart(r.Context(), userID)
+	if err != nil {
+		h.writeFailure(w, r, userID, "", err)
+		return
+	}
+	orihttp.Success(w, journeyResponse{Journey: projection})
+}
+
+// emptyBody accepts no body, an empty body, or whitespace only.
+func emptyBody(w http.ResponseWriter, r *http.Request) bool {
+	if r.Body == nil {
+		return true
+	}
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBodyBytes))
+	return err == nil && len(bytes.TrimSpace(data)) == 0
+}
+
 func (h *Handler) presentation(w http.ResponseWriter, r *http.Request, runID string, open bool) {
 	if !orihttp.RequireMethod(w, r, http.MethodPost) {
 		return

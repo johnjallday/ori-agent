@@ -34,6 +34,7 @@ type Store interface {
 	GetBusyOperationReceipt(ctx context.Context, kind RunKind, runID string) (*OperationReceipt, error)
 	FinalizeOperation(ctx context.Context, run *Run, idempotencyKey string, completion OperationCompletion) (*OperationReceipt, *Run, bool, error)
 	MarkOperationReconcileRequired(ctx context.Context, kind RunKind, runID, idempotencyKey string) (*OperationReceipt, error)
+	DeleteRoot(ctx context.Context, ownerUserID, rootID string) error
 }
 
 // SQLiteStore persists setup journey state in the shared application database.
@@ -869,6 +870,96 @@ func (s *SQLiteStore) MarkOperationReconcileRequired(ctx context.Context, kind R
 		return nil, fmt.Errorf("setup journey: mark operation for reconciliation: %w", err)
 	}
 	return receipt.Clone(), nil
+}
+
+// DeleteRoot removes one user's root run, its child runs, and every review,
+// operation and declaration-migration receipt of those runs, in one
+// transaction. It is setup progress only: workspaces, plugins, Homes, links,
+// roles and user-template bindings are never touched. A root that is not the
+// owner's reads as not found, and a run with an unsettled operation is refused
+// so a claimed consequence is never orphaned.
+func (s *SQLiteStore) DeleteRoot(ctx context.Context, ownerUserID, rootID string) error {
+	if err := s.configured(); err != nil {
+		return err
+	}
+	ownerUserID, rootID = strings.TrimSpace(ownerUserID), strings.TrimSpace(rootID)
+	if !validateCanonicalRef(ownerUserID, false) || !validateCanonicalRef(rootID, false) {
+		return ErrInvalid
+	}
+	return s.db.InTransaction(ctx, func(tx *sql.Tx) error {
+		root, err := getRunWith(ctx, tx, rootID)
+		if err != nil {
+			return err
+		}
+		if root.Kind != RunKindRoot || root.OwnerUserID != ownerUserID {
+			return ErrNotFound
+		}
+		rows, err := tx.QueryContext(ctx, `
+			SELECT id FROM setup_journey_run WHERE run_kind = 'child' AND root_run_id = ?
+		`, root.ID)
+		if err != nil {
+			return err
+		}
+		runs := []struct {
+			kind RunKind
+			id   string
+		}{{RunKindRoot, root.ID}}
+		for rows.Next() {
+			var childID string
+			if scanErr := rows.Scan(&childID); scanErr != nil {
+				_ = rows.Close()
+				return scanErr
+			}
+			runs = append(runs, struct {
+				kind RunKind
+				id   string
+			}{RunKindChild, childID})
+		}
+		if closeErr := rows.Close(); closeErr != nil {
+			return closeErr
+		}
+		if rowsErr := rows.Err(); rowsErr != nil {
+			return rowsErr
+		}
+		for _, run := range runs {
+			if busy, busyErr := hasBusyOperation(ctx, tx, run.kind, run.id); busyErr != nil {
+				return busyErr
+			} else if busy {
+				return ErrOperationBusy
+			}
+		}
+		// Receipts restrict deleting their run, so they go first, then children,
+		// then the root.
+		for _, run := range runs {
+			for _, table := range []string{
+				"setup_journey_review_receipt",
+				"setup_journey_operation_receipt",
+				"setup_journey_declaration_migration_receipt",
+			} {
+				// #nosec G202 -- table names are this closed compiled list, never input.
+				if _, execErr := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE run_kind = ? AND run_id = ?`, run.kind, run.id); execErr != nil {
+					return execErr
+				}
+			}
+		}
+		if _, execErr := tx.ExecContext(ctx, `
+			DELETE FROM setup_journey_run WHERE run_kind = 'child' AND root_run_id = ?
+		`, root.ID); execErr != nil {
+			return execErr
+		}
+		result, execErr := tx.ExecContext(ctx, `
+			DELETE FROM setup_journey_run WHERE id = ? AND run_kind = 'root' AND owner_user_id = ?
+		`, root.ID, ownerUserID)
+		if execErr != nil {
+			return execErr
+		}
+		if deleted, countErr := result.RowsAffected(); countErr != nil {
+			return countErr
+		} else if deleted != 1 {
+			return ErrConflict
+		}
+		return nil
+	})
 }
 
 func (s *SQLiteStore) configured() error {

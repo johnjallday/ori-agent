@@ -419,12 +419,19 @@ type userTemplateQuestResolver interface {
 }
 
 func (c *combinedQuestCatalog) userTemplateQuestID(ctx context.Context, templateID, attachmentID string) (string, error) {
+	// A nested combined catalog is a resolver even when it holds no user
+	// templates, so try each resolver until one knows the attachment.
+	var lastErr error = failure(ReasonJourneyUnavailable, 0)
 	for _, catalog := range c.catalogs {
 		if resolver, ok := catalog.(userTemplateQuestResolver); ok {
-			return resolver.userTemplateQuestID(ctx, templateID, attachmentID)
+			id, err := resolver.userTemplateQuestID(ctx, templateID, attachmentID)
+			if err == nil {
+				return id, nil
+			}
+			lastErr = err
 		}
 	}
-	return "", failure(ReasonJourneyUnavailable, 0)
+	return "", lastErr
 }
 
 func (c *combinedQuestCatalog) WithUserSetupQuestMutationLock(ctx context.Context, operation func() error) error {

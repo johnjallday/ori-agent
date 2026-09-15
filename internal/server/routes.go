@@ -1079,6 +1079,7 @@ func registerSetupJourneyRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("POST "+questRoot+"/open", handler.ScopeQuest((*setupjourneyhttp.Handler).OpenRoot))
 	mux.HandleFunc("POST "+questRoot+"/runs/{runID}/open", handler.ScopeQuest((*setupjourneyhttp.Handler).OpenRun))
 	mux.HandleFunc("POST "+questRoot+"/dismiss", handler.ScopeQuest((*setupjourneyhttp.Handler).DismissRoot))
+	mux.HandleFunc("POST "+questRoot+"/restart", handler.ScopeQuest((*setupjourneyhttp.Handler).RestartRoot))
 	mux.HandleFunc("POST "+questRoot+"/runs/{runID}/dismiss", handler.ScopeQuest((*setupjourneyhttp.Handler).DismissRun))
 	mux.HandleFunc("POST "+questRoot+"/children", handler.ScopeQuest((*setupjourneyhttp.Handler).CreateChild))
 	mux.HandleFunc("POST "+questRoot+"/runs/{runID}/actions/{actionID}", handler.ScopeQuest((*setupjourneyhttp.Handler).Mutate))
@@ -1101,6 +1102,7 @@ func registerSetupJourneyRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("POST "+hostQuestRoot+"/open", handler.ScopeHostQuest((*setupjourneyhttp.Handler).OpenRoot))
 	mux.HandleFunc("POST "+hostQuestRoot+"/runs/{runID}/open", handler.ScopeHostQuest((*setupjourneyhttp.Handler).OpenRun))
 	mux.HandleFunc("POST "+hostQuestRoot+"/dismiss", handler.ScopeHostQuest((*setupjourneyhttp.Handler).DismissRoot))
+	mux.HandleFunc("POST "+hostQuestRoot+"/restart", handler.ScopeHostQuest((*setupjourneyhttp.Handler).RestartRoot))
 	mux.HandleFunc("POST "+hostQuestRoot+"/runs/{runID}/dismiss", handler.ScopeHostQuest((*setupjourneyhttp.Handler).DismissRun))
 	mux.HandleFunc("POST "+hostQuestRoot+"/runs/{runID}/actions/{actionID}", handler.ScopeHostQuest((*setupjourneyhttp.Handler).Mutate))
 	mux.HandleFunc("GET /api/personal-assistant/setup-journey", handler.GetRoot)
@@ -1108,6 +1110,9 @@ func registerSetupJourneyRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("POST /api/personal-assistant/setup-journey/open", handler.OpenRoot)
 	mux.HandleFunc("POST /api/personal-assistant/setup-journey/runs/{runID}/open", handler.OpenRun)
 	mux.HandleFunc("POST /api/personal-assistant/setup-journey/dismiss", handler.DismissRoot)
+	// Start over for an incompatible saved declaration. User-template quests
+	// have no restart route; removing and recreating the quest resets them.
+	mux.HandleFunc("POST /api/personal-assistant/setup-journey/restart", handler.RestartRoot)
 	mux.HandleFunc("POST /api/personal-assistant/setup-journey/runs/{runID}/dismiss", handler.DismissRun)
 	mux.HandleFunc("POST /api/personal-assistant/setup-journey/children", handler.CreateChild)
 	mux.HandleFunc("POST /api/personal-assistant/setup-journey/runs/{runID}/actions/{actionID}", handler.Mutate)
