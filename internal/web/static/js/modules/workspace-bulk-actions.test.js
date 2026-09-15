@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  confirmDelete,
+  descendantCount,
   moveMembersIntoGroup,
   deleteWorkspace,
   deleteWorkspaces,
@@ -35,31 +35,77 @@ function recorder(responses = {}) {
   return { calls, fetchImpl };
 }
 
-function ctxFor({ answers = [], responses, rows = ROWS } = {}) {
-  const asked = [];
+/**
+ * A scripted stand-in for workspace-delete-dialog.js.
+ *
+ * Every question the controller asks consumes the next entry of `answers`:
+ * `chooseDelete` expects `{ mode }` or null, `confirmCount` and `review` expect
+ * a boolean. An exhausted queue declines, exactly like Escape. Every step is
+ * logged so a test can assert what the user was shown, not only what was sent.
+ */
+function fakeDialog(answers = []) {
+  const queue = [...answers];
+  const steps = [];
+  const next = declined => (queue.length ? queue.shift() : declined);
+  const open = ({ title }) => {
+    steps.push({ step: 'open', title });
+    return {
+      chooseDelete(spec) {
+        steps.push({ step: 'choose', ...spec });
+        return Promise.resolve(next(null));
+      },
+      confirmCount(spec) {
+        steps.push({ step: 'count', ...spec });
+        return Promise.resolve(next(false));
+      },
+      busy(text) {
+        steps.push({ step: 'busy', text });
+      },
+      async review({ heading, summary, impact, confirmLabel, confirm }) {
+        steps.push({ step: 'review', heading, summary, impact, confirmLabel });
+        if (!next(false)) return false;
+        try {
+          await confirm();
+          return true;
+        } catch (error) {
+          // The real dialog shows the error inline and waits for another click.
+          steps.push({ step: 'review-error', message: error.message });
+          return next(false)
+            ? this.review({ heading, summary, impact, confirmLabel, confirm })
+            : false;
+        }
+      },
+      notice({ message, action }) {
+        steps.push({ step: 'notice', message, action: action || null });
+        return Promise.resolve();
+      },
+      close() {
+        steps.push({ step: 'close' });
+      }
+    };
+  };
+  return { open, steps };
+}
+
+function ctxFor({ answers = [], responses, rows = ROWS, dialog } = {}) {
   const announced = [];
   const toasted = [];
   const trashed = [];
-  const navigated = [];
   let changed = 0;
   const { calls, fetchImpl } = recorder(responses);
-  const queue = [...answers];
+  const ui = dialog || fakeDialog(answers);
   return {
     calls,
-    asked,
+    steps: ui.steps,
+    stepsOf: name => ui.steps.filter(entry => entry.step === name),
     announced,
     toasted,
     trashed,
-    navigated,
     changedCount: () => changed,
     ctx: {
       rows,
-      navigate: url => navigated.push(url),
+      openDialog: ui.open,
       fetch: fetchImpl,
-      confirm: message => {
-        asked.push(message);
-        return queue.length ? queue.shift() : false;
-      },
       announce: message => announced.push(message),
       toast: (message, variant) => toasted.push({ message, variant }),
       onTrashed: (id, name) => trashed.push({ id, name }),
@@ -71,7 +117,7 @@ function ctxFor({ answers = [], responses, rows = ROWS } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// topLevelIds
+// topLevelIds / descendantCount
 // ---------------------------------------------------------------------------
 
 test('topLevelIds drops a child whose ancestor is also selected', () => {
@@ -95,6 +141,22 @@ test('isGroupRow reads kind case-insensitively', () => {
   assert.equal(isGroupRow({ kind: 'GROUP' }), true);
   assert.equal(isGroupRow({ kind: 'workspace' }), false);
   assert.equal(isGroupRow(null), false);
+});
+
+test('descendantCount counts every nesting level once and survives a cycle', () => {
+  const nested = [
+    ...ROWS,
+    { id: 'g2', name: 'Inner', kind: 'group', parent_id: 'g1' },
+    { id: 'w4', name: 'Delta', parent_id: 'g2' }
+  ];
+  assert.equal(descendantCount(nested, 'g1'), 4);
+  assert.equal(descendantCount(nested, 'g2'), 1);
+  assert.equal(descendantCount(nested, 'w3'), 0);
+  const cyclic = [
+    { id: 'a', parent_id: 'b' },
+    { id: 'b', parent_id: 'a' }
+  ];
+  assert.equal(descendantCount(cyclic, 'a'), 1);
 });
 
 // ---------------------------------------------------------------------------
@@ -215,36 +277,42 @@ test('member moves never touch the Map layout or a coordinate (#346 FR-13, FR-14
 // Delete
 // ---------------------------------------------------------------------------
 
-test('a declined confirmation deletes nothing', async () => {
-  const h = ctxFor({ answers: [false] });
+test('a declined confirmation deletes nothing and closes the dialog', async () => {
+  const h = ctxFor({ answers: [null] });
   const done = await deleteWorkspace('w3', h.ctx);
   assert.equal(done, false);
   assert.equal(h.calls.length, 0);
+  assert.equal(h.stepsOf('close').length, 1);
 });
 
-test('deleting a group offers the two-mode choice and sends the chosen mode', async () => {
-  const h = ctxFor({ answers: [true] }); // OK on "delete group AND contents"
+test('deleting a group shows the two modes as a choice and sends the chosen one', async () => {
+  const h = ctxFor({ answers: [{ mode: 'contents' }] });
   await deleteWorkspace('g1', h.ctx);
 
+  const [asked] = h.stepsOf('choose');
+  assert.equal(asked.group, true);
+  assert.equal(asked.memberCount, 2, 'the dialog can say how many workspaces ride along');
+  assert.equal(asked.name, 'Marketing');
   assert.equal(h.calls.length, 1);
   assert.match(h.calls[0].url, /delete_mode=contents/);
-  assert.match(h.asked[0], /everything inside it/);
 });
 
-test('declining "with contents" falls through to the group-only question', async () => {
-  const h = ctxFor({ answers: [false, true] });
+test('choosing "group only" sends group_only', async () => {
+  const h = ctxFor({ answers: [{ mode: 'group_only' }] });
   await deleteWorkspace('g1', h.ctx);
-
-  assert.equal(h.asked.length, 2, 'the second question must be asked');
   assert.match(h.calls[0].url, /delete_mode=group_only/);
 });
 
-test('a plain workspace delete asks once and sends no mode', async () => {
-  const h = ctxFor({ answers: [true] });
+test('a plain workspace delete asks once with no group choice and sends no mode', async () => {
+  const h = ctxFor({ answers: [{ mode: '' }] });
   await deleteWorkspace('w3', h.ctx);
 
-  assert.equal(h.asked.length, 1);
+  const asked = h.stepsOf('choose');
+  assert.equal(asked.length, 1);
+  assert.equal(asked[0].group, false);
   assert.ok(!h.calls[0].url.includes('delete_mode'), 'no mode for a non-group');
+  assert.deepEqual(h.stepsOf('close').length, 1, 'the dialog closes on success');
+  assert.deepEqual(h.announced, ['Gamma deleted.']);
 });
 
 test('a trashed delete becomes an undo entry; a permanent one does not', async () => {
@@ -253,20 +321,24 @@ test('a trashed delete becomes an undo entry; a permanent one does not', async (
     status: 200,
     json: () => Promise.resolve({ trashed: true })
   };
-  const h = ctxFor({ answers: [true], responses: { default: trashedReply } });
+  const h = ctxFor({ answers: [{ mode: '' }], responses: { default: trashedReply } });
   await deleteWorkspace('w3', h.ctx);
   assert.deepEqual(h.trashed, [{ id: 'w3', name: 'Gamma' }]);
 
-  const gone = ctxFor({ answers: [true], responses: { default: { ok: true, status: 204 } } });
+  const gone = ctxFor({
+    answers: [{ mode: '' }],
+    responses: { default: { ok: true, status: 204 } }
+  });
   await deleteWorkspace('w3', gone.ctx);
   assert.deepEqual(gone.trashed, [], 'a 204 carries no restore point');
 });
 
 test('a single-item batch still gets the per-item group question', async () => {
-  const h = ctxFor({ answers: [true] });
+  const h = ctxFor({ answers: [{ mode: 'contents' }] });
   await deleteWorkspaces(['g1'], h.ctx);
 
-  assert.match(h.asked[0], /everything inside it/, 'a lone group must not take a silent default');
+  assert.equal(h.stepsOf('choose')[0].group, true, 'a lone group must not take a silent default');
+  assert.equal(h.stepsOf('count').length, 0);
   assert.match(h.calls[0].url, /delete_mode=contents/);
 });
 
@@ -283,12 +355,14 @@ test('a batch delete confirms once and reports a partial failure honestly', asyn
 
   const deleted = await deleteWorkspaces(['w1', 'w2', 'w3'], h.ctx);
 
-  assert.equal(h.asked.length, 1, 'one batch confirmation, not one per item');
+  assert.equal(h.stepsOf('count').length, 1, 'one batch confirmation, not one per item');
+  assert.equal(h.stepsOf('count')[0].count, 3);
   assert.equal(deleted, 2);
   const said = h.announced.join(' ');
   assert.match(said, /Deleted 2 of 3/);
   assert.match(said, /Beta/, 'the failed item is named');
   assert.equal(h.toasted[0].variant, 'error');
+  assert.equal(h.stepsOf('close').length, 1);
 });
 
 test('a batch delete that fully succeeds reports the plain count', async () => {
@@ -307,11 +381,12 @@ test('a declined batch confirmation deletes nothing', async () => {
   assert.equal(h.calls.length, 0);
 });
 
-test('confirmDelete never proceeds when there is no way to ask', () => {
-  assert.equal(
-    confirmDelete({ name: 'X' }, false, () => false),
-    null
-  );
+test('nothing is deleted when there is no dialog to ask with', async () => {
+  const h = ctxFor();
+  h.ctx.openDialog = () => null;
+  assert.equal(await deleteWorkspace('w3', h.ctx), false);
+  assert.equal(await deleteWorkspaces(['w1', 'w3'], h.ctx), 0);
+  assert.equal(h.calls.length, 0);
 });
 
 // ---------------------------------------------------------------------------
@@ -326,7 +401,7 @@ test('member moves never send a group creation request', async () => {
 
 test('a failure with only a message field still reads correctly', async () => {
   const h = ctxFor({
-    answers: [true],
+    answers: [{ mode: '' }],
     responses: {
       default: {
         ok: false,
@@ -338,81 +413,12 @@ test('a failure with only a message field still reads correctly', async () => {
 
   await deleteWorkspace('w3', h.ctx);
   assert.equal(h.toasted[0].message, 'Disk is full');
-});
-
-function reviewRequired(slug = 'music-home') {
-  return {
-    ok: false,
-    status: 409,
-    text: async () =>
-      JSON.stringify({
-        code: 'assistant_program_review_required',
-        message: slug
-          ? 'Use Review disconnect in Music Home before deleting.'
-          : 'Restore Music Home from Trash first.',
-        details: slug ? { review_home_slug: slug } : {}
-      })
-  };
-}
-
-test('protected deletion offers the Home review without deleting or retrying', async () => {
-  const h = ctxFor({ answers: [true, true], responses: { default: reviewRequired() } });
-  assert.equal(await deleteWorkspace('w3', h.ctx), false);
-  assert.deepEqual(h.navigated, ['/workspaces/music-home/assistant']);
-  assert.match(h.toasted[0].message, /Review disconnect/);
-  assert.equal(h.calls.length, 1, 'no automatic disconnect or delete retry');
-  assert.equal(h.changedCount(), 0);
-  assert.deepEqual(h.trashed, []);
-});
-
-test('declining the review navigation leaves the protected workspace alone', async () => {
-  const h = ctxFor({ answers: [true, false], responses: { default: reviewRequired() } });
-  await deleteWorkspace('w3', h.ctx);
-  assert.deepEqual(h.navigated, []);
-  assert.equal(h.calls.length, 1);
-});
-
-test('a trashed Home gives recovery instructions rather than a broken review link', async () => {
-  const h = ctxFor({ answers: [true, true], responses: { default: reviewRequired('') } });
-  await deleteWorkspace('w3', h.ctx);
-  assert.match(h.toasted[0].message, /Restore Music Home/);
-  assert.equal(h.asked.length, 1);
-  assert.deepEqual(h.navigated, []);
-});
-
-test('bulk deletion keeps the review reason and offers a shared Home only once', async () => {
-  const h = ctxFor({
-    answers: [true, true],
-    responses: {
-      'DELETE /api/workspaces/w1': reviewRequired(),
-      'DELETE /api/workspaces/w2': reviewRequired(),
-      default: { ok: true, status: 204 }
-    }
-  });
-  assert.equal(await deleteWorkspaces(['w1', 'w2', 'w3'], h.ctx), 1);
-  assert.match(h.announced[0], /Deleted 1 of 3/);
-  assert.match(h.announced[0], /Review disconnect/);
-  assert.deepEqual(h.navigated, ['/workspaces/music-home/assistant']);
-  assert.equal(h.asked.length, 2);
-  assert.equal(h.calls.length, 3);
-});
-
-test('bulk deletion does not choose arbitrarily between multiple Assistant Homes', async () => {
-  const h = ctxFor({
-    answers: [true, true],
-    responses: {
-      'DELETE /api/workspaces/w1': reviewRequired('music-home'),
-      'DELETE /api/workspaces/w2': reviewRequired('another-home')
-    }
-  });
-  assert.equal(await deleteWorkspaces(['w1', 'w2'], h.ctx), 0);
-  assert.equal(h.asked.length, 1);
-  assert.deepEqual(h.navigated, []);
+  assert.equal(h.stepsOf('close').length, 1, 'a plain failure closes the dialog and toasts');
 });
 
 test('a non-JSON failure body is passed through verbatim', async () => {
   const h = ctxFor({
-    answers: [true],
+    answers: [{ mode: '' }],
     responses: {
       default: { ok: false, status: 502, text: () => Promise.resolve('upstream unavailable') }
     }
@@ -420,4 +426,320 @@ test('a non-JSON failure body is passed through verbatim', async () => {
 
   await deleteWorkspace('w3', h.ctx);
   assert.equal(h.toasted[0].message, 'upstream unavailable');
+});
+
+// ---------------------------------------------------------------------------
+// Assistant Home review, resolved inside the dialog
+// ---------------------------------------------------------------------------
+
+const HOME_ROWS = [
+  { id: 'home', name: 'Music Home', kind: 'group' },
+  { id: 'song', name: 'Song', parent_id: 'home' },
+  ...ROWS
+];
+
+function reviewRequired({
+  station = 'home',
+  action = 'Review Home removal',
+  slug = 'music-home',
+  message = 'Use Review Home removal in Music Home before deleting.'
+} = {}) {
+  return {
+    ok: false,
+    status: 409,
+    text: async () =>
+      JSON.stringify({
+        code: 'assistant_program_review_required',
+        message,
+        details: {
+          workspace_id: station,
+          station_workspace_id: station,
+          review_action: action,
+          ...(slug ? { review_home_slug: slug } : {})
+        }
+      })
+  };
+}
+
+const json = data => ({ ok: true, status: 200, json: async () => data });
+
+function homeResponses({
+  linked = 2,
+  roles = 1,
+  impact = ['Projects stay.', 'Folders stay.']
+} = {}) {
+  return {
+    'GET /api/workspaces/home/assistant-program': json({
+      available: true,
+      is_station: true,
+      state_revision: 7,
+      declaration: { station_name: 'Music Home' }
+    }),
+    'POST /api/workspaces/home/assistant-program/remove-home/review': json({
+      token: 'tok-1',
+      linked_project_count: linked,
+      home_role_count: roles,
+      impact
+    }),
+    'POST /api/workspaces/home/assistant-program/remove-home/commit': json({
+      station_workspace_id: 'home'
+    })
+  };
+}
+
+test('a protected group is reviewed and removed inside the same dialog', async () => {
+  const h = ctxFor({
+    rows: HOME_ROWS,
+    answers: [{ mode: 'group_only' }, true],
+    responses: { 'DELETE /api/workspaces/home': reviewRequired(), ...homeResponses() }
+  });
+
+  assert.equal(await deleteWorkspace('home', h.ctx), true);
+
+  const review = h.calls.find(c => c.url.endsWith('/remove-home/review'));
+  assert.deepEqual(review.body, { state_revision: 7 }, 'the review is bound to the live revision');
+  const commit = h.calls.find(c => c.url.endsWith('/remove-home/commit'));
+  assert.deepEqual(commit.body, { token: 'tok-1' });
+
+  const [shown] = h.stepsOf('review');
+  assert.equal(shown.heading, 'Remove "Music Home"?');
+  assert.match(shown.summary, /2 linked projects will be kept as standalone workspaces/);
+  assert.match(shown.summary, /permanently rather than moved to the Trash/);
+  assert.deepEqual(shown.impact, ['Projects stay.', 'Folders stay.']);
+  assert.equal(shown.confirmLabel, 'Remove Home');
+
+  assert.equal(h.stepsOf('notice').length, 0, 'no detour through another page');
+  assert.ok(h.announced.includes('Music Home removed.'));
+  assert.deepEqual(h.trashed, [], 'a Home removal is not a Trash entry');
+  assert.equal(h.changedCount(), 1);
+  assert.equal(h.stepsOf('close').length, 1);
+  assert.equal(h.calls.filter(c => c.method === 'DELETE').length, 1, 'the Home is gone, no retry');
+});
+
+test('an empty Home reads like a plain delete', async () => {
+  const h = ctxFor({
+    rows: HOME_ROWS,
+    answers: [{ mode: 'group_only' }, true],
+    responses: {
+      'DELETE /api/workspaces/home': reviewRequired(),
+      ...homeResponses({ linked: 0, roles: 0, impact: ['Every linked project is preserved.'] })
+    }
+  });
+
+  assert.equal(await deleteWorkspace('home', h.ctx), true);
+  const [shown] = h.stepsOf('review');
+  assert.match(shown.summary, /no linked projects, so removing it deletes only the group\./);
+  assert.deepEqual(shown.impact, [], 'nothing to preserve, so no preservation notes');
+});
+
+test('an empty Home with roles says the roles go with it', async () => {
+  const h = ctxFor({
+    rows: HOME_ROWS,
+    answers: [{ mode: 'group_only' }, true],
+    responses: {
+      'DELETE /api/workspaces/home': reviewRequired(),
+      ...homeResponses({ linked: 0, roles: 2 })
+    }
+  });
+  await deleteWorkspace('home', h.ctx);
+  assert.match(h.stepsOf('review')[0].summary, /deletes only the group and its 2 Home roles/);
+});
+
+test('declining the Home review removes nothing', async () => {
+  const h = ctxFor({
+    rows: HOME_ROWS,
+    answers: [{ mode: 'group_only' }, false],
+    responses: { 'DELETE /api/workspaces/home': reviewRequired(), ...homeResponses() }
+  });
+
+  assert.equal(await deleteWorkspace('home', h.ctx), false);
+  assert.equal(
+    h.calls.some(c => c.url.endsWith('/remove-home/commit')),
+    false
+  );
+  assert.equal(h.changedCount(), 0);
+  assert.equal(h.stepsOf('close').length, 1);
+});
+
+test('a failed commit stays in the dialog with the reason instead of closing', async () => {
+  const h = ctxFor({
+    rows: HOME_ROWS,
+    answers: [{ mode: 'group_only' }, true, false],
+    responses: {
+      'DELETE /api/workspaces/home': reviewRequired(),
+      ...homeResponses(),
+      'POST /api/workspaces/home/assistant-program/remove-home/commit': {
+        ok: false,
+        status: 409,
+        text: async () => JSON.stringify({ error: 'The review expired. Review again.' })
+      }
+    }
+  });
+
+  assert.equal(await deleteWorkspace('home', h.ctx), false);
+  assert.deepEqual(
+    h.stepsOf('review-error').map(entry => entry.message),
+    ['The review expired. Review again.']
+  );
+  assert.equal(h.changedCount(), 0);
+});
+
+test('a Home nested inside the group is removed, then the group delete continues', async () => {
+  const rows = [
+    { id: 'g1', name: 'Marketing', kind: 'group' },
+    { id: 'home', name: 'Music Home', kind: 'group', parent_id: 'g1' },
+    { id: 'w3', name: 'Gamma' }
+  ];
+  let attempts = 0;
+  const h = ctxFor({
+    rows,
+    answers: [{ mode: 'contents' }, true],
+    responses: {
+      'DELETE /api/workspaces/g1': () =>
+        ++attempts === 1 ? reviewRequired() : { ok: true, status: 204 },
+      ...homeResponses({ linked: 0, roles: 0 })
+    }
+  });
+
+  assert.equal(await deleteWorkspace('g1', h.ctx), true);
+
+  const deletes = h.calls.filter(c => c.method === 'DELETE');
+  assert.equal(deletes.length, 2, 'the original delete is retried once the blocker is gone');
+  assert.ok(
+    deletes.every(c => c.url.includes('delete_mode=contents')),
+    'with the mode the user chose'
+  );
+  assert.equal(h.calls.filter(c => c.url.endsWith('/remove-home/commit')).length, 1);
+  const [shown] = h.stepsOf('review');
+  assert.equal(shown.heading, 'Remove the Assistant Home in "Marketing"?');
+  assert.match(shown.summary, /"Marketing" contains the Assistant Home "Music Home"/);
+  assert.match(shown.summary, /Deleting "Marketing" then continues/);
+  assert.ok(h.announced.includes('Marketing deleted.'));
+});
+
+test('the review-and-retry loop is bounded', async () => {
+  const rows = [
+    { id: 'g1', name: 'Marketing', kind: 'group' },
+    { id: 'home', name: 'Music Home', kind: 'group', parent_id: 'g1' }
+  ];
+  const h = ctxFor({
+    rows,
+    answers: [{ mode: 'group_only' }, true, true, true, true, true],
+    responses: { 'DELETE /api/workspaces/g1': reviewRequired(), ...homeResponses() }
+  });
+
+  assert.equal(await deleteWorkspace('g1', h.ctx), false);
+  assert.equal(h.calls.filter(c => c.method === 'DELETE').length, 4, 'three reviews, then stop');
+  assert.equal(h.toasted.at(-1).variant, 'error');
+  assert.equal(h.stepsOf('close').length, 1);
+});
+
+test('a disconnect review is offered as a link, never performed automatically', async () => {
+  const h = ctxFor({
+    rows: HOME_ROWS,
+    answers: [{ mode: '' }],
+    responses: {
+      'DELETE /api/workspaces/song': reviewRequired({
+        station: 'home',
+        action: 'Review disconnect',
+        message: 'Use Review disconnect in Music Home before deleting.'
+      })
+    }
+  });
+
+  assert.equal(await deleteWorkspace('song', h.ctx), false);
+  const [notice] = h.stepsOf('notice');
+  assert.match(notice.message, /Review disconnect/);
+  assert.deepEqual(notice.action, {
+    label: 'Open Assistant Home',
+    href: '/workspaces/music-home/assistant'
+  });
+  assert.equal(h.calls.length, 1, 'no disconnect, no delete retry');
+  assert.equal(h.changedCount(), 0);
+});
+
+test('a trashed Home gives recovery instructions rather than a broken review', async () => {
+  const h = ctxFor({
+    rows: HOME_ROWS,
+    answers: [{ mode: 'group_only' }, true],
+    responses: {
+      'DELETE /api/workspaces/home': reviewRequired({
+        slug: '',
+        message: 'Restore Music Home from Trash first.'
+      })
+    }
+  });
+
+  assert.equal(await deleteWorkspace('home', h.ctx), false);
+  const [notice] = h.stepsOf('notice');
+  assert.match(notice.message, /Restore Music Home/);
+  assert.equal(notice.action, null);
+  assert.equal(h.calls.length, 1, 'nothing is fetched for a Home that has no page');
+});
+
+test('a Home the assistant API cannot read is reported, not guessed at', async () => {
+  const h = ctxFor({
+    rows: HOME_ROWS,
+    answers: [{ mode: 'group_only' }, true],
+    responses: {
+      'DELETE /api/workspaces/home': reviewRequired(),
+      'GET /api/workspaces/home/assistant-program': json({ available: false })
+    }
+  });
+
+  assert.equal(await deleteWorkspace('home', h.ctx), false);
+  assert.match(h.stepsOf('notice')[0].message, /could not be read/);
+  assert.equal(
+    h.calls.some(c => c.url.endsWith('/remove-home/review')),
+    false
+  );
+});
+
+test('bulk deletion keeps the review reason and reviews a shared Home once', async () => {
+  const h = ctxFor({
+    rows: HOME_ROWS,
+    answers: [true, true],
+    responses: {
+      'DELETE /api/workspaces/w1': reviewRequired(),
+      'DELETE /api/workspaces/w2': reviewRequired(),
+      ...homeResponses(),
+      default: { ok: true, status: 204 }
+    }
+  });
+
+  assert.equal(await deleteWorkspaces(['w1', 'w2', 'w3'], h.ctx), 1);
+  assert.match(h.announced[0], /Deleted 1 of 3/);
+  assert.match(h.announced[0], /Review Home removal/);
+  assert.equal(h.stepsOf('review').length, 1, 'one review for the one Home');
+  assert.equal(h.calls.filter(c => c.url.endsWith('/remove-home/commit')).length, 1);
+  assert.equal(h.stepsOf('close').length, 1);
+});
+
+test('bulk deletion counts a removed Home that was itself selected', async () => {
+  const h = ctxFor({
+    rows: HOME_ROWS,
+    answers: [true, true],
+    responses: {
+      'DELETE /api/workspaces/home': reviewRequired(),
+      ...homeResponses(),
+      default: { ok: true, status: 204 }
+    }
+  });
+  assert.equal(await deleteWorkspaces(['home', 'w3'], h.ctx), 2);
+});
+
+test('bulk deletion does not choose arbitrarily between multiple Assistant Homes', async () => {
+  const h = ctxFor({
+    rows: HOME_ROWS,
+    answers: [true, true],
+    responses: {
+      'DELETE /api/workspaces/w1': reviewRequired({ station: 'home', slug: 'music-home' }),
+      'DELETE /api/workspaces/w2': reviewRequired({ station: 'other', slug: 'another-home' })
+    }
+  });
+  assert.equal(await deleteWorkspaces(['w1', 'w2'], h.ctx), 0);
+  assert.equal(h.stepsOf('review').length, 0);
+  assert.equal(h.stepsOf('notice').length, 0);
+  assert.equal(h.calls.length, 2);
+  assert.equal(h.stepsOf('close').length, 1);
 });
