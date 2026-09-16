@@ -1667,7 +1667,7 @@ if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" || exit; kind=\
   print -r -- "scripts/devops.sh does not launch bundle planning through the constrained positional-argument bridge" >&2
   exit 1
 fi
-if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" && if [[ \"\$3\" == no-herdr ]]; then wt start \"\$2\" --no-herdr; else wt start \"\$2\" --kind \"\$3\"; fi' devops-start \"\$script_dir/wt.sh\" \"\$feature\" \"\$mode\""; then
+if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" && if [[ \"\$3\" == no-herdr ]]; then wt start \"\$2\" --no-herdr; elif [[ -n \"\$4\" ]]; then wt start \"\$2\" --kind \"\$3\" --model \"\$4\"; else wt start \"\$2\" --kind \"\$3\"; fi' devops-start \"\$script_dir/wt.sh\" \"\$feature\" \"\$mode\" \"\$model\""; then
   print -r -- "scripts/devops.sh does not launch wt start through the constrained zsh bridge" >&2
   exit 1
 fi

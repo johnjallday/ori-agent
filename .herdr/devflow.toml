@@ -13,7 +13,7 @@ source_id = "ori.devflow"
 [primary]
 role = "builder"
 kind = "claude"
-model = ""
+model = "opus"
 
 # Secondary roles use the fallback pair unless their role appears in the
 # parallel [roles.defaults] and/or [roles.models] maps below.

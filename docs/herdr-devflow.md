@@ -171,8 +171,10 @@ of an Issue that cannot change. That separation is the point:
   recorded before Herdr starts, retained across launch failure/reuse, and cannot
   be replaced by a conflicting retry. A bare `wt start` uses the
   configured primary pair; the Issue picker's later implementation action
-  passes the owner's explicit Claude, Codex, Pi, or worktree-only kind choice
-  and deliberately adds no implementation-model prompt.
+  passes the owner's explicit Claude, Codex, Pi, or worktree-only kind choice.
+  Choosing Claude there also offers the same Sonnet, Opus, Fable, custom, or
+  default model prompt: Enter keeps the configured primary model, and a pick is
+  forwarded as `wt start --model`. Codex and Pi starts add no model prompt.
 - A generic live-agent view may still truthfully show the running Claude or Pi
   process. It is real; it is simply not a *managed feature* agent.
 
@@ -281,7 +283,8 @@ or global `p` to collect a reviewed title, required context, explicit size, and
 the same Claude/Pi model/thinking selection before creating one. Return after
 the planner has replaced the planning starter, then press `i`. The later action resolves the
 number-first task list locally, prompts for Claude, Codex, Pi, worktree-only, or
-cancel, and invokes the corresponding `wt start --kind <kind>` or `--no-herdr`.
+cancel (and, for Claude, the model), and invokes the corresponding
+`wt start --kind <kind>`, `wt start --kind claude --model <model>`, or `--no-herdr`.
 It never chains to the planner or polls it; `wt start` still owns its normal plan
 summary, confirmation, worktree creation, and handoff.
 
