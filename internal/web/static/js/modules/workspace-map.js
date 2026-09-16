@@ -445,6 +445,67 @@
   var selectOnlyMode = false;
   var hideChromeMode = false;
 
+  // Scoped mode (group page Detachment map). Set from the mount's
+  // `scopeGroupId` and cleared on unmount; empty means the unscoped Home map.
+  // scopeNested marks a group nested inside another group: Home draws no
+  // district for it, so its frame here is automatic and has no layout record.
+  var scopeGroupId = '';
+  var scopeNested = false;
+  var SCOPED_NESTED_LAYOUT_TITLE =
+    'A group inside another group has no district of its own on Home, so its size and appearance cannot be changed here.';
+
+  /**
+   * The group plus every workspace beneath it, at any depth.
+   *
+   * Breadth-first with a visited set, the same rule the server uses to decide
+   * which anchors move with a district (internal/workspacemap/descendants.go),
+   * so the scoped map draws exactly what a district move would carry. An
+   * unknown group yields an empty list rather than the whole world.
+   */
+  function scopeWorkspacesToGroup(rows, groupId) {
+    var list = Array.isArray(rows) ? rows : [];
+    var id = String(groupId || '').trim();
+    if (!id) return list.slice();
+    var byId = Object.create(null);
+    var childrenByParent = Object.create(null);
+    list.forEach(function (row) {
+      if (!row || !row.id) return;
+      byId[row.id] = row;
+      if (row.parent_id) {
+        (childrenByParent[row.parent_id] = childrenByParent[row.parent_id] || []).push(row);
+      }
+    });
+    if (!byId[id]) return [];
+    var scoped = [byId[id]];
+    var visited = Object.create(null);
+    visited[id] = true;
+    for (var cursor = 0; cursor < scoped.length; cursor++) {
+      (childrenByParent[scoped[cursor].id] || []).forEach(function (child) {
+        if (visited[child.id]) return;
+        visited[child.id] = true;
+        scoped.push(child);
+      });
+    }
+    return scoped;
+  }
+
+  // A group whose parent is itself a group is nested: Home renders its members
+  // inside the top-level district, so no district record exists for it.
+  function isNestedGroup(rows, groupId) {
+    var group = findWs(rows, groupId);
+    if (!group || !group.parent_id) return false;
+    var parent = findWs(rows, group.parent_id);
+    return !!parent && isGroup(parent);
+  }
+
+  // The district presentation the scoped map draws. Collapse is a Home-only
+  // state (the whole zone would otherwise vanish), and a nested group has no
+  // record of its own, so it always draws the automatic default.
+  function scopedGroupPresentation(record, nested) {
+    if (nested) return defaultPresentation();
+    return Object.assign({}, record || defaultPresentation(), { collapsed: false });
+  }
+
   // Personal HQ status is owned by personal-hq-onboarding.js so the status,
   // setup actions, and existing modals all share one source of truth. The map
   // renders either the real HQ badge or a reserved site that explains what is
@@ -534,6 +595,8 @@
   }
 
   function hqSiteView(status) {
+    // The reserved site is a Home landmark; a group's own map never draws it.
+    if (scopeGroupId) return { show: false };
     if (!status || status.valid) return { show: false };
     var repair = !!status.workspace_id;
     var onboardingState = String(status.hq_onboarding_state || 'unseen');
@@ -1134,10 +1197,14 @@
       (membersByGroup[node.groupId] = membersByGroup[node.groupId] || []).push(node);
     });
     var presentations = opts.groupPresentations || null;
+    var scope = opts.scope || null;
     var districts = grid.districts.map(function (district) {
       var record = presentations
         ? safePresentation(presentations[district.id])
         : presentationFor(district.id);
+      if (scope && scope.groupId === district.id) {
+        record = scopedGroupPresentation(record, scope.nested);
+      }
       var members = membersByGroup[district.id] || [];
       // A collapsed district resolves its expanded frame anyway: its corner is
       // where the summary sits, and expanding has to restore exactly the
@@ -1560,6 +1627,36 @@
   }
 
   /**
+   * May a scoped map keep a building dropped at `point`?
+   *
+   * A group page moves members within their group and never reparents, so a
+   * drop counts only when the building's centre lands inside the group's own
+   * frame. Aimed from the centre for the same reason dropMembershipIntent is.
+   */
+  function scopedDropAllowed(point, layout, groupId) {
+    var world = layout || lastWorldLayout;
+    if (!world || !point || !groupId) return true;
+    var frame = null;
+    (world.districts || []).forEach(function (district) {
+      if (district.id === groupId) frame = district;
+    });
+    if (!frame) return true;
+    var center = memberCenter(point);
+    return (
+      center.x >= frame.x &&
+      center.x <= frame.x + frame.width &&
+      center.y >= frame.y &&
+      center.y <= frame.y + frame.height
+    );
+  }
+
+  function scopedGroupName() {
+    var workspaces = (lastMount && lastMount.state && lastMount.state.workspaces) || [];
+    var group = findWs(workspaces, scopeGroupId);
+    return (group && group.name) || 'this group';
+  }
+
+  /**
    * What a drop at `point` means for the dragged workspace's membership.
    *
    * An eligible expanded district means `join`, unless it is already the
@@ -1778,6 +1875,23 @@
     };
   }
 
+  // The bounds a scoped map opens framed on: its district's effective frame,
+  // or everything drawn when the district is somehow absent.
+  function scopedFrameBounds(layout, groupId) {
+    var found = null;
+    ((layout && layout.districts) || []).forEach(function (district) {
+      if (district.id === groupId) found = district;
+    });
+    if (!found)
+      return (layout && layout.bounds) || { minX: 0, minY: 0, maxX: CELL_W, maxY: CELL_H };
+    return {
+      minX: found.x,
+      minY: found.y,
+      maxX: found.x + found.width,
+      maxY: found.y + found.height
+    };
+  }
+
   /**
    * Look at one node without moving it (FR-41).
    *
@@ -1896,6 +2010,9 @@
   // hundreds of events and one intention (FR-44), and a camera that fails to
   // save is a lost view — never a lost building (FR-108).
   function scheduleCameraSave() {
+    // The shared layout's camera is Home's. A group page pans and zooms for
+    // this session only.
+    if (scopeGroupId) return;
     if (layoutState.status !== 'ready') return;
     if (typeof setTimeout !== 'function') return;
     if (cameraSaveTimer) clearTimeout(cameraSaveTimer);
@@ -1920,7 +2037,9 @@
   function ensureCamera(container) {
     if (cameraReady || !lastWorldLayout) return;
     if (layoutState.status === 'loading') return;
-    var stored = layoutState.viewport;
+    // A scoped map always opens framed on its district: Home's saved camera
+    // points at wherever Home was looking, which may be nowhere near this group.
+    var stored = scopeGroupId ? null : layoutState.viewport;
     if (stored) {
       camera = {
         centerX: stored.centerX,
@@ -1958,7 +2077,10 @@
     // differently depending on how the frames fell. watchResize re-enters here
     // when the canvas acquires its size, so the framing is deferred, not lost.
     if (!viewport.measured) return;
-    var fitted = fitBounds(lastWorldLayout.bounds, viewport);
+    var fitted = fitBounds(
+      scopeGroupId ? scopedFrameBounds(lastWorldLayout, scopeGroupId) : lastWorldLayout.bounds,
+      viewport
+    );
     // Fit All zooms in when there is little content; the opening view does not.
     // Landing at 200% on a two-workspace map is disorienting, and the button is
     // right there for anyone who wants it.
@@ -2188,7 +2310,10 @@
       (isMulti ? 'true' : 'false') +
       '" ' +
       'aria-label="Select for bulk action" ' +
-      'title="Select for bulk action (or Shift/Cmd + Enter on the tile)"></span>' +
+      'title="Select for bulk action (or Shift/Cmd + Enter on the tile)"' +
+      // A group page has no bulk actions, so it draws no bulk checkbox.
+      (scopeGroupId ? ' hidden' : '') +
+      '></span>' +
       '<span class="ws-map-tile-flag"><span class="ws-map-led' +
       (active ? ' is-working' : '') +
       '"></span>' +
@@ -2365,18 +2490,21 @@
       // Collapse is its own control with its own accurate label, distinct from
       // selecting, opening, moving, and deleting the group (#346 FR-109,
       // FR-145). aria-expanded lives here rather than on the outline because
-      // this is the control that changes it (FR-110).
-      '<button type="button" class="ws-map-district-collapse" data-group-collapse="' +
-      escapeHtml(ws.id) +
-      '" aria-expanded="' +
-      (collapsed ? 'false' : 'true') +
-      '" aria-label="' +
-      escapeHtml((collapsed ? 'Expand group: ' : 'Collapse group: ') + name) +
-      '" title="' +
-      escapeHtml(collapsed ? 'Expand group' : 'Collapse group') +
-      '"><span aria-hidden="true">' +
-      (collapsed ? '▸' : '▾') +
-      '</span></button>' +
+      // this is the control that changes it (FR-110). A group page never
+      // collapses its own district: that would hide the whole zone.
+      (scopeGroupId
+        ? ''
+        : '<button type="button" class="ws-map-district-collapse" data-group-collapse="' +
+          escapeHtml(ws.id) +
+          '" aria-expanded="' +
+          (collapsed ? 'false' : 'true') +
+          '" aria-label="' +
+          escapeHtml((collapsed ? 'Expand group: ' : 'Collapse group: ') + name) +
+          '" title="' +
+          escapeHtml(collapsed ? 'Expand group' : 'Collapse group') +
+          '"><span aria-hidden="true">' +
+          (collapsed ? '▸' : '▾') +
+          '</span></button>') +
       // A separate, touch-sized handle for cluster movement. The empty district
       // surface can also be dragged while Drag is on, but the label remains
       // selection-only and every existing group action — select, overview,
@@ -2435,7 +2563,8 @@
     var layout = computeWorldLayout(workspaces, {
       positions: layoutState.positions,
       viewport: opts.viewport,
-      hqSite: site.show
+      hqSite: site.show,
+      scope: scopeGroupId ? { groupId: scopeGroupId, nested: scopeNested } : null
     });
     // Nodes carry their raw world coordinates into the DOM; the world layer's
     // camera transform is the only thing standing between world space and the
@@ -3642,6 +3771,7 @@
           // Disabled items keep their place and their announcement; only the
           // activation and the arrow stop are withheld (FR-21).
           (item.disabled ? ' aria-disabled="true"' : '') +
+          (item.title ? ' title="' + escapeHtml(item.title) + '"' : '') +
           '>' +
           escapeHtml(item.label) +
           '</button>'
@@ -3869,7 +3999,7 @@
   // Single workspace tile. Every entry mirrors a control the Overview rail
   // already renders, including the rail's own "Delete group" wording for a
   // group and its condition for the Setup entry point.
-  function tileMenuItems(ws) {
+  function tileMenuItems(ws, scoped) {
     var id = (ws && ws.id) || '';
     var items = [
       { label: 'Open workspace', action: 'open' },
@@ -3878,6 +4008,9 @@
     if (setupPresentation(setupStatusCache[id])) {
       items.push({ label: 'Open → Setup', action: 'open-setup' });
     }
+    // A group page navigates; selection sets and deletion stay on Home, Tree,
+    // and the Details panel.
+    if (scoped) return items;
     items.push(menuDivider());
     items.push({
       label: multiSelected[id] ? 'Remove from selection' : 'Add to selection',
@@ -3924,11 +4057,12 @@
   // stays visually separated from the non-destructive ones (#346 FR-147), and
   // each carries a truthful disabled state rather than being hidden — a missing
   // item tells the user nothing about why (FR-148).
-  function districtMenuItems(ws) {
+  function districtMenuItems(ws, scoped, nested) {
     var groupId = (ws && ws.id) || '';
     var district = renderedDistrict(groupId);
     var readOnly = isMapReadOnly();
     var collapsed = !!(district && district.collapsed);
+    if (scoped) return scopedDistrictMenuItems(district, readOnly, nested);
     var items = [
       { label: 'Open group', action: 'open' },
       { label: 'Build', action: 'build', disabled: readOnly },
@@ -3972,6 +4106,34 @@
     return items;
   }
 
+  // The group page's own district. It is the page, so there is nothing to open,
+  // collapse, or delete from here. A nested group has no district record to
+  // write, so its layout actions stay listed but disabled with the reason.
+  function scopedDistrictMenuItems(district, readOnly, nested) {
+    var items = [{ label: 'Build', action: 'build' }, menuDivider()];
+    var resize = { label: 'Resize group', action: 'resize-group', disabled: readOnly || !district };
+    var fit = {
+      label: 'Fit to contents',
+      action: 'fit-group',
+      disabled: readOnly || !district || district.sizingMode !== 'custom'
+    };
+    var customized =
+      !!district && (district.accent !== DEFAULT_ACCENT || district.theme !== DEFAULT_THEME);
+    var appearance =
+      customized || nested
+        ? { label: 'Use default appearance', action: 'reset-appearance', disabled: readOnly }
+        : null;
+    if (nested) {
+      [resize, fit, appearance].forEach(function (item) {
+        item.disabled = true;
+        item.title = SCOPED_NESTED_LAYOUT_TITLE;
+      });
+    }
+    items.push(resize, fit);
+    if (appearance) items.push(appearance);
+    return items;
+  }
+
   // The reserved Personal HQ site. The conditions mirror hqOverviewHTML exactly:
   // build and import always; clear only while repairing a broken link; skip only
   // when not repairing and the offer has not been dismissed. Clear and skip are
@@ -3991,7 +4153,19 @@
   // control cluster used to offer — just under the cursor, and Build now knows
   // *where*: the workspace is created at the point that was right-clicked.
   // Centre is disabled with nothing selected, the same rule the control applied.
-  function canvasMenuItems() {
+  function canvasMenuItems(scoped) {
+    // On a group page empty ground is the group's ground. Build and Add
+    // existing never touch the layout until the workspace exists, so they stay
+    // enabled while the layout is read-only.
+    if (scoped) {
+      return [
+        { label: 'Build', action: 'build' },
+        { label: 'Add existing workspace…', action: 'add-existing' },
+        menuDivider(),
+        { label: 'Fit', action: 'fit' },
+        { label: 'Reset view', action: 'reset-view' }
+      ];
+    }
     var items = [
       { label: 'Build', action: 'build', disabled: isMapReadOnly() },
       menuDivider(),
@@ -4013,16 +4187,22 @@
   // be asserted without a DOM.
   function contextMenuItemsFor(target) {
     var spec = target || {};
+    // Explicit flags let a menu be asserted without mounting; a live menu reads
+    // the mount's scope.
+    var scoped = typeof spec.scoped === 'boolean' ? spec.scoped : !!scopeGroupId;
+    var nested = typeof spec.nested === 'boolean' ? spec.nested : scopeNested;
     if (spec.type === 'tile') {
       // A tile inside the checked set acts on the whole set; a tile outside it
       // acts on itself. Which menu you get is therefore a statement about what
       // is already selected, not a mode.
-      if (spec.id && multiSelected[spec.id]) return multiMenuItems();
-      return tileMenuItems(spec.ws || { id: spec.id });
+      if (!scoped && spec.id && multiSelected[spec.id]) return multiMenuItems();
+      return tileMenuItems(spec.ws || { id: spec.id }, scoped);
     }
-    if (spec.type === 'district') return districtMenuItems(spec.ws || { id: spec.id });
-    if (spec.type === 'hq') return hqMenuItems(spec.view || hqSiteView(hqStatus));
-    if (spec.type === 'canvas') return canvasMenuItems();
+    if (spec.type === 'district') {
+      return districtMenuItems(spec.ws || { id: spec.id }, scoped, nested);
+    }
+    if (spec.type === 'hq') return scoped ? [] : hqMenuItems(spec.view || hqSiteView(hqStatus));
+    if (spec.type === 'canvas') return canvasMenuItems(scoped);
     return [];
   }
 
@@ -4464,6 +4644,11 @@
       return { type: 'tile', id: tileId, ws: findWs(workspaces, tileId), element: tile };
     }
     var district = node.closest('.ws-map-district');
+    // On a group page the district's interior is the ground being built on;
+    // only its header stands for the group itself.
+    if (district && scopeGroupId && !node.closest('.ws-map-district-header')) {
+      district = null;
+    }
     if (district) {
       var groupId = district.getAttribute('data-group-id');
       // Focus goes back to the district's label button, not to the outline: the
@@ -4687,7 +4872,7 @@
           openHarvestPopover(container, id, { origin: el, event: e, at: anchorForElement(onPile) });
           return;
         }
-        if (isTile && (onCheck || e.metaKey || e.ctrlKey || e.shiftKey)) {
+        if (isTile && !scopeGroupId && (onCheck || e.metaKey || e.ctrlKey || e.shiftKey)) {
           e.preventDefault();
           toggleMulti(container, id);
           return;
@@ -4705,7 +4890,7 @@
       if (isTile) {
         el.addEventListener('keydown', function (e) {
           if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
-          if (!(e.metaKey || e.ctrlKey || e.shiftKey)) return;
+          if (scopeGroupId || !(e.metaKey || e.ctrlKey || e.shiftKey)) return;
           // Suppress the synthesized click so the tile does not also select.
           e.preventDefault();
           toggleMulti(container, el.getAttribute('data-ws-id'));
@@ -4744,6 +4929,16 @@
           }
           openWorkspace(id);
         });
+        // A group page has no rail to preview a selection in, so a member is
+        // also opened the direct way: double-clicking its building.
+        if (scopeGroupId && isTile) {
+          el.addEventListener('dblclick', function () {
+            var id = el.getAttribute('data-ws-id');
+            if (!id) return;
+            if (options && typeof options.onOpen === 'function') options.onOpen(id);
+            else openWorkspace(id);
+          });
+        }
         return;
       }
       el.addEventListener('dblclick', function () {
@@ -5219,9 +5414,10 @@
   // claiming success would send someone looking for a workspace that is not on
   // screen.
   function fitAllAnnouncement(result) {
-    return result && result.fitsEverything === false
-      ? 'Zoomed out as far as the map goes. Some workspaces are still off-screen — pan to reach them.'
-      : 'Showing every workspace';
+    if (result && result.fitsEverything === false) {
+      return 'Zoomed out as far as the map goes. Some workspaces are still off-screen — pan to reach them.';
+    }
+    return scopeGroupId ? 'Showing the whole group' : 'Showing every workspace';
   }
 
   // Reset View restores the default framing — the content, centred, at 100%.
@@ -5251,6 +5447,8 @@
   /** Is a district resizable right now? (FR-52, FR-115, FR-148) */
   function canResizeDistrict(groupId) {
     if (isMapReadOnly()) return false;
+    // A nested group's frame is automatic on its own page and has no record.
+    if (scopeGroupId && scopeNested) return false;
     var district = renderedDistrict(groupId);
     return !!district && !district.collapsed;
   }
@@ -6748,6 +6946,22 @@
         placeElement(el, dragState.candidate);
         var blocked = wouldOverlapOccupied(dragState.candidate, dragState.id);
         if (el.classList) el.classList.toggle('is-blocked', blocked);
+        if (scopeGroupId) {
+          var keeps = scopedDropAllowed(dragState.candidate, lastWorldLayout, scopeGroupId);
+          if (el.classList) el.classList.toggle('is-leaving', !keeps);
+          dragState.intent = { kind: 'none' };
+          setDragReadout(
+            container,
+            dragState.candidate,
+            blocked
+              ? MOVE_BLOCKED_INSTRUCTION
+              : keeps
+                ? undefined
+                : 'Release to put it back. It stays in ' + scopedGroupName() + '.',
+            'none'
+          );
+          return;
+        }
         // Show what releasing here would MEAN, not just where it would land. A
         // drop that changes which group a workspace belongs to must never be a
         // surprise discovered afterwards (#346 FR-6a).
@@ -6801,10 +7015,24 @@
           announce(container, 'Move cancelled. The workspace is back where it was.');
           return;
         }
+        if (scopeGroupId && !scopedDropAllowed(state.candidate, lastWorldLayout, scopeGroupId)) {
+          placeElement(el, state.origin);
+          announce(
+            container,
+            'Kept in ' +
+              scopedGroupName() +
+              '. Drop inside the group to move it; remove members from the Details panel.'
+          );
+          return;
+        }
         var target = resolveDropAnchor(state.id, state.candidate);
         if (target.resolved) {
           placeElement(el, target);
           announce(container, 'That spot was taken; moved to the nearest free one.');
+        }
+        if (scopeGroupId) {
+          commitMove(container, state.id, el, target, state.origin, { kind: 'none' });
+          return;
         }
         // Resolve membership against the frames as they stand NOW, before the
         // move is committed and they follow the workspace (#346 FR-6a).
@@ -7432,6 +7660,11 @@
     if (!commit) {
       placeElement(state.el, state.origin);
       announce(container, 'Move cancelled. The workspace is back where it was.');
+      return;
+    }
+    if (scopeGroupId && !scopedDropAllowed(state.candidate, lastWorldLayout, scopeGroupId)) {
+      placeElement(state.el, state.origin);
+      announce(container, 'Kept in ' + scopedGroupName() + '. Move it within the group.');
       return;
     }
     var target = resolveDropAnchor(state.id, state.candidate);
@@ -8409,10 +8642,18 @@
     // passes none — every surface other than Home — leaves it empty, and the
     // tiles render exactly as they did before the feature (city-economy FR35).
     setEconomySnapshot(state && state.economy);
-    var workspaces = (state && state.workspaces) || [];
+    var allWorkspaces = (state && state.workspaces) || [];
+    // Scoped mode is decided before anything reads the workspace list, so
+    // stats, layout, bindings, and selection all see only the group.
+    scopeGroupId = String((state && state.scopeGroupId) || '').trim();
+    scopeNested = !!scopeGroupId && isNestedGroup(allWorkspaces, scopeGroupId);
+    var workspaces = scopeGroupId
+      ? scopeWorkspacesToGroup(allWorkspaces, scopeGroupId)
+      : allWorkspaces;
     var incoming = (state && state.selectedId) || '';
     var site = hqSiteView(hqStatus);
-    var focusHQ = !hqFocusConsumed && hasHQFocusIntent();
+    // A URL focus intent is addressed to Home's map, never a group's.
+    var focusHQ = !scopeGroupId && !hqFocusConsumed && hasHQFocusIntent();
     // A focus intent selects on the host's behalf, so the host has to be told.
     // Every other selection reaches it through a click handler; this one has no
     // click, and the host cannot poll for it either — HQ status arrives async
@@ -8557,6 +8798,13 @@
     // no-op when it lands: settleLayout has nothing to repaint.
     lastMount = null;
     multiSelected = Object.create(null);
+    if (scopeGroupId) {
+      // The next scoped mount frames its district afresh; a session-only
+      // camera has nothing worth carrying into it.
+      cameraReady = false;
+      scopeGroupId = '';
+      scopeNested = false;
+    }
     if (abandonedPlacement) {
       var back =
         typeof abandonedPlacement.onBack === 'function'
@@ -8666,6 +8914,17 @@
       badgesHTML: economyBadgesHTML
     },
     computeLayout: computeMapLayout,
+    // Scoped mode's pure halves (group page Detachment map): which records a
+    // group's map draws, whether a group is nested, how its district presents,
+    // what the opening camera frames, and which drops it keeps.
+    getScopeGroupId: function () {
+      return scopeGroupId;
+    },
+    scopeWorkspacesToGroup: scopeWorkspacesToGroup,
+    isNestedGroup: isNestedGroup,
+    scopedGroupPresentation: scopedGroupPresentation,
+    scopedFrameBounds: scopedFrameBounds,
+    scopedDropAllowed: scopedDropAllowed,
     // The coordinate engine: saved anchors, deterministic fallback placement,
     // district effective frames, content bounds, and world sizing, all pure so
     // they can be asserted without a browser (FR-123).

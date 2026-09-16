@@ -5106,3 +5106,112 @@ test('group template status keeps group, coordinator, and integration as separat
   );
   assert.equal(groupTemplateCommandView(null).groupTemplateStatusHTML(), '');
 });
+
+// ---------- Detachment map zone (group-map-build FR-1 – FR-6) ----------
+
+function detachmentCommandView(kind = 'group', members = [{ id: 'm1', name: 'Mixing' }]) {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  const group = { id: 'g', name: 'Studio', kind: 'group', children: members };
+  Object.assign(commandView, {
+    viewMode: 'map',
+    selectedAgentKey: '',
+    activeMapWindow: '',
+    mapInventorySection: '',
+    activeSystemTab: 'memory',
+    detachmentPickerOpen: false,
+    detachmentMountedKey: '',
+    pendingDetachmentSelectionId: '',
+    detachmentMapEl: null,
+    page: {
+      workspaceId: 'g',
+      workspace: { id: 'g', name: 'Studio', kind, mcp_bindings: [], skill_bindings: [] },
+      tasks: [],
+      buildAgentGroups: () => [],
+      membersPanel: { group, tree: [group, { id: 'other', name: 'Office', kind: 'group' }] }
+    }
+  });
+  return commandView;
+}
+
+test('the Detachment zone renders for a group only, with a slot and no tiles of its own', () => {
+  const groupHTML = detachmentCommandView('group').renderOperationsMap();
+  assert.match(groupHTML, /data-map-zone="detachment"/);
+  assert.match(groupHTML, /role="region" aria-label="Detachment map"/);
+  assert.match(groupHTML, /<span>Detachment<\/span><strong>Studio<\/strong>/);
+  assert.match(groupHTML, /ws-cmd-map-zone-count">1</);
+  assert.match(groupHTML, /data-cmd-detachment-slot><\/div>/, 'the map mounts into an empty slot');
+  assert.match(groupHTML, /data-cmd-detachment-picker hidden/);
+  assert.doesNotMatch(groupHTML, /ws-map-tile/, 'the zone draws no member tiles itself');
+
+  // An ordinary workspace's Map mode is untouched: no zone, so no map and no
+  // layout request (FR-2).
+  const plainHTML = detachmentCommandView('workspace').renderOperationsMap();
+  assert.doesNotMatch(plainHTML, /detachment/);
+});
+
+test('the member count in the zone head follows the members panel', () => {
+  const empty = detachmentCommandView('group', []);
+  assert.match(empty.renderOperationsMap(), /ws-cmd-map-zone-count">0</);
+  const many = detachmentCommandView('group', [{ id: 'm1' }, { id: 'm2' }, { id: 'm3' }]);
+  assert.match(many.renderOperationsMap(), /ws-cmd-map-zone-count">3</);
+});
+
+test('the scoped map re-mounts only when membership changes, and unmounts off Map mode', () => {
+  const commandView = detachmentCommandView('group');
+  const mounts = [];
+  const unmounts = [];
+  const host = { className: '', parentNode: null, addEventListener() {} };
+  const slot = {
+    appendChild: node => {
+      node.parentNode = slot;
+    }
+  };
+  commandView.container = {
+    querySelector: sel => (sel.includes('data-cmd-detachment-slot') ? slot : null)
+  };
+  commandView.detachmentMapEl = host;
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    OriWorkspaceMap: {
+      mount: (el, state) => mounts.push({ el, state }),
+      unmount: el => unmounts.push(el),
+      scopeWorkspacesToGroup: (rows, id) =>
+        rows.filter(row => row.id === id || row.parent_id === id)
+    }
+  };
+  try {
+    commandView.syncDetachmentMap();
+    assert.equal(mounts.length, 1, 'the first sync mounts');
+    assert.equal(mounts[0].el, host);
+    assert.equal(mounts[0].state.scopeGroupId, 'g');
+    assert.equal(mounts[0].state.selectOnly, true);
+    assert.equal(mounts[0].state.hideChrome, true);
+    assert.equal(mounts[0].state.noAutoSelect, true);
+    assert.equal(mounts[0].state.economy, undefined, 'a group map draws no Farm badges');
+    assert.deepEqual(
+      mounts[0].state.workspaces.map(row => row.id),
+      ['g', 'm1', 'other']
+    );
+
+    commandView.syncDetachmentMap();
+    assert.equal(mounts.length, 1, 'a plain re-render must not re-mount the map');
+
+    commandView.page.membersPanel.group.children.push({ id: 'm2', name: 'Mastering' });
+    commandView.page.membersPanel.tree[0] = commandView.page.membersPanel.group;
+    commandView.syncDetachmentMap();
+    assert.equal(mounts.length, 2, 'a new member re-mounts');
+
+    commandView.unmountDetachmentMap();
+    assert.deepEqual(unmounts, [host]);
+    assert.equal(commandView.detachmentMountedKey, '');
+
+    // No slot in the DOM (any non-Map render) unmounts rather than leaking.
+    commandView.syncDetachmentMap();
+    assert.equal(mounts.length, 3);
+    commandView.container = { querySelector: () => null };
+    commandView.syncDetachmentMap();
+    assert.equal(unmounts.length, 2, 'leaving Map mode unmounts the map');
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});

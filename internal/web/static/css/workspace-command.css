@@ -622,6 +622,71 @@
   top: calc(50% - 80px);
   border-radius: 50%;
 }
+/* Detachment zone: the group's own district, under the agent zone
+   (group-map-build FR-1). A fixed height at desktop widths so the district is
+   framed on mount rather than found by panning (PRD §9 Q3). */
+.ws-cmd-map-detachment {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 420px;
+  margin-top: 14px;
+  padding: 12px 14px 14px;
+  border: 1px solid var(--ws-line);
+  background: linear-gradient(180deg, var(--ws-panel), #0c0d11 92%);
+  clip-path: polygon(
+    0 0,
+    calc(100% - 14px) 0,
+    100% 14px,
+    100% 100%,
+    14px 100%,
+    0 calc(100% - 14px)
+  );
+}
+/* The group's accent, already published on the command bar, marks the zone as
+   part of the same detachment. */
+.ws-cmd-map-detachment .ws-cmd-map-zone-head span {
+  color: var(--ws-group-accent, var(--ws-faction));
+}
+.ws-cmd-map-detachment .ws-cmd-map-zone-count {
+  border-color: var(--ws-group-accent-line, var(--ws-line-bright));
+  color: var(--ws-group-accent, var(--ws-faction));
+}
+.ws-cmd-map-detachment .ws-cmd-map-zone-actions {
+  align-items: center;
+}
+.ws-cmd-detachment-picker {
+  margin-bottom: 10px;
+}
+.ws-cmd-detachment-slot {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+/* The host is a child of the slot, not a flex item of the zone: it has to take
+   the slot's resolved height explicitly or the map canvas collapses to 0. */
+.ws-cmd-detachment-host {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+}
+/* Same contract as the Home cockpit's map host: the theatre owns the whole
+   slot and the camera moves inside it, so nothing clips or scrolls. */
+.ws-cmd-detachment-host .ws-map-layout.is-cockpit {
+  display: block;
+  height: 100%;
+  min-height: 0;
+}
+.ws-cmd-detachment-host .ws-map-layout.is-cockpit .ws-map-theatre {
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.ws-cmd-detachment-host .ws-map-canvas {
+  min-height: 0;
+}
+
 .ws-cmd-map-belt {
   position: absolute;
   right: 18px;
@@ -5632,6 +5697,11 @@ button.ws-cmd-rpg-class-card:focus-visible {
     /* A long generated-agent name must shrink inside the one-column command
        deck rather than making the grid track wider than the viewport. */
     grid-template-columns: minmax(0, 1fr);
+  }
+  /* Stacked under the agent zone, at the same height: a shorter map would put
+     the district back behind a pan. */
+  .ws-cmd-map-detachment {
+    padding: 10px 10px 12px;
   }
   .ws-cmd-map-world {
     padding: 28px 72px 72px 28px;
