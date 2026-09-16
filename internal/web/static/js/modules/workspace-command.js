@@ -23,6 +23,7 @@ import {
 } from './task-presentation.js';
 import { WorkspaceExecutionController, RUN_PHASE } from './workspace-execution-controller.js';
 import {
+  consumeGroupTemplateLanding,
   fetchGroupTemplateStatus,
   groupTemplateIntegrationFact,
   groupTemplateProviderLabel,
@@ -502,6 +503,7 @@ export class WorkspaceCommandView {
   ensureRoleRoster() {
     void this.loadRoleRoster(true).then(() => {
       if (this.active) this.mountRoleRoster();
+      this.showGroupTemplateLanding();
     });
     // Providers seed the Create modal's model choices. Loaded once, and a
     // failure just leaves the picker on "Use Ori default" rather than blocking.
@@ -515,6 +517,31 @@ export class WorkspaceCommandView {
         })
         .catch(() => {});
     }
+  }
+
+  // The group creator lands here after creating or reusing a group from its
+  // template, and leaves one notice naming which roles were staffed and which
+  // were not. It is shown once, as a toast, after the roster it describes has
+  // loaded; its error is kept for the role setup form the landing opens.
+  showGroupTemplateLanding() {
+    if (this.groupTemplateLandingRead || typeof window === 'undefined') return null;
+    const workspaceId = this.workspaceId();
+    if (!workspaceId) return null;
+    this.groupTemplateLandingRead = true;
+    let storage = null;
+    try {
+      storage = window.sessionStorage;
+    } catch (_error) {
+      storage = null;
+    }
+    const notice = consumeGroupTemplateLanding(storage, workspaceId);
+    this.groupTemplateLanding = notice;
+    if (!notice) return null;
+    const toast = window.Toast && window.Toast[notice.tone];
+    if (typeof toast === 'function') {
+      toast.call(window.Toast, notice.message, { title: notice.title, duration: 9000 });
+    }
+    return notice;
   }
 
   // Installed capabilities drive Map stations, so the catalog has to be loaded

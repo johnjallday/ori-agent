@@ -1039,6 +1039,11 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
   font-size: 12px;
   line-height: 1.45;
 }
+/* A consequence the user chose (an empty required group role), not an error:
+   the Create button stays enabled. */
+.workspace-create-modal .workspace-review-card-note.is-warning {
+  color: var(--warning-color);
+}
 .workspace-create-modal .workspace-group-placement-review {
   min-width: 0;
   margin: 0;

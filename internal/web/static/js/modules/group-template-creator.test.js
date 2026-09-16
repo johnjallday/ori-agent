@@ -45,7 +45,16 @@ function environment({ fetch } = {}) {
       }
     })
   };
-  const window = { location: { href: '' } };
+  const stored = new Map();
+  const window = {
+    location: { href: '' },
+    sessionStorage: {
+      stored,
+      getItem: key => (stored.has(key) ? stored.get(key) : null),
+      setItem: (key, value) => stored.set(key, String(value)),
+      removeItem: key => stored.delete(key)
+    }
+  };
   const calls = [];
   const context = {
     window,
@@ -652,6 +661,11 @@ test('fills are sent one role at a time, only after the commit, and never carry 
     assert.doesNotMatch(call.options.body, /system_prompt/);
   }
   assert.equal(env.window.location.href, '/workspaces/lab');
+  const landing = JSON.parse(env.window.sessionStorage.getItem('ori:group-template-landing'));
+  assert.equal(landing.workspace_id, 'home-9');
+  assert.equal(landing.tone, 'success');
+  assert.equal(landing.message, 'Lab is ready. Portfolio Coordinator and Archive Curator staffed.');
+  assert.equal(landing.role_id, '');
 });
 
 test('no role is filled when the commit fails or its response is lost', async () => {
@@ -740,4 +754,81 @@ test('landing words name the staffed, failed, and unstaffed roles', () => {
   assert.equal(cleared.message, 'Lab is ready. Portfolio Coordinator is not staffed yet.');
   assert.equal(cleared.roleId, 'coordinator');
   assert.equal(api.landingURL('my lab', 'coordinator'), '/workspaces/my%20lab?role=coordinator');
+});
+
+test('seeding waits for saved agents and assigns a saved agent that already has the default name', () => {
+  const { api } = environment();
+  let saved = 'loading';
+  const agents = { 'portfolio manager': { name: 'Portfolio Manager', source: 'user' } };
+  const creator = staffingCreator(api);
+  creator.groupTemplateSavedAgentsState = () => saved;
+  creator.findAttachableSavedAgent = name => agents[String(name).toLowerCase()] || null;
+
+  assert.equal(api.seedFills(creator), false, 'no proposal before saved agents are known');
+  assert.equal(api.stagedFill(creator, 'coordinator'), null);
+  saved = 'ready';
+  assert.equal(api.seedFills(creator), true);
+  assert.deepEqual(asData(api.stagedFill(creator, 'coordinator')), {
+    mode: 'assign',
+    name: 'Portfolio Manager',
+    provider: '',
+    model: ''
+  });
+
+  // No saved agent with that name (or the saved list failed): Create.
+  const fresh = staffingCreator(api);
+  fresh.groupTemplateSavedAgentsState = () => 'error';
+  fresh.findAttachableSavedAgent = () => null;
+  assert.equal(api.seedFills(fresh), true);
+  assert.equal(api.stagedFill(fresh, 'coordinator').mode, 'create');
+});
+
+test('one agent name fills one role; the prompt note names the template source', () => {
+  const { api } = environment();
+  const creator = staffingCreator(api);
+  api.seedFills(creator);
+  assert.match(
+    api.fillNameProblem(creator, 'curator', 'portfolio manager'),
+    /Portfolio Coordinator is already staffed by “Portfolio Manager”/
+  );
+  assert.equal(
+    api.setFill(creator, 'curator', { mode: 'create', name: 'Portfolio Manager' }),
+    false
+  );
+  assert.equal(api.fillNameProblem(creator, 'coordinator', 'Portfolio Manager'), '', 'itself');
+  assert.equal(
+    api.setFill(creator, 'coordinator', { mode: 'create', name: 'Studio Manager' }),
+    true
+  );
+  assert.equal(api.stagedFill(creator, 'coordinator').name, 'Studio Manager');
+
+  const entry = api.selectedManaged(creator.workspaceCreatorContext);
+  assert.equal(
+    api.promptNote(entry),
+    'Instructions for this role come from Plugin: fixture 1.0.0 and are applied by Ori.'
+  );
+  assert.equal(
+    api.promptNote({ provider: { kind: 'user_template' } }),
+    'Instructions for this role come from Your template and are applied by Ori.'
+  );
+});
+
+test('an empty required role is a Review warning, never a blocker', async () => {
+  const { api, element } = environment({ fetch: staffingFetch() });
+  const creator = staffingCreator(api);
+  element('folderNameInput').value = 'Lab';
+  api.seedFills(creator);
+  const entry = api.selectedManaged(creator.workspaceCreatorContext);
+  assert.doesNotMatch(api.rolesCardHTML(creator, entry), /data-group-template-role-warning/);
+
+  api.clearFill(creator, 'coordinator');
+  const html = api.rolesCardHTML(creator, entry);
+  assert.match(
+    html,
+    /This group will have no Portfolio Coordinator until you set one up\./,
+    'the required role is named'
+  );
+  assert.doesNotMatch(html, /no Archive Curator/, 'optional roles never warn');
+  await api.ensureReview(creator);
+  assert.equal(api.canSubmit(creator), true, 'Create stays enabled');
 });

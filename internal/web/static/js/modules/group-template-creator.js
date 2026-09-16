@@ -280,21 +280,74 @@
   }
 
   // Every required Home role starts as Create under its default name; optional
-  // roles start empty. Seeding runs once per template selection, so a role the
-  // user cleared stays cleared.
+  // roles start empty. When a saved agent already has that name, the role starts
+  // as Assign instead — a Create under a taken name is refused by the server, so
+  // the wizard never proposes one. Seeding waits for the saved agents to load
+  // (or fail) and runs once per template selection, so a role the user cleared
+  // stays cleared.
   function seedFills(manager) {
     const context = manager?.workspaceCreatorContext;
     const state = stateFor(context);
     const entry = selectedManaged(context);
     if (!state || !entry || !managedActive(manager) || state.seeded[entry.id]) return false;
+    const saved = manager.groupTemplateSavedAgentsState?.();
+    if (saved === 'idle' || saved === 'loading') return false;
     const fills = fillsFor(context, entry);
     for (const role of homeRoles(entry)) {
-      if (!role.required || fills.has(role.role_id)) continue;
+      if (!role.required || fills.has(role.role_id) || !roleEditable(entry, role)) continue;
       const name = roleDefaultName(role);
-      if (name) fills.set(role.role_id, normalizeFill({ mode: FILL_CREATE, name }));
+      if (!name) continue;
+      const attachable = manager.findAttachableSavedAgent?.(name);
+      fills.set(
+        role.role_id,
+        attachable
+          ? normalizeFill({ mode: FILL_ASSIGN, name: String(attachable.name || name) })
+          : normalizeFill({ mode: FILL_CREATE, name })
+      );
     }
     state.seeded[entry.id] = true;
     return true;
+  }
+
+  // Whether the wizard may stage a fill for this role at all. Group 4 narrows
+  // this for an existing Home.
+  function roleEditable(_entry, _role) {
+    return true;
+  }
+
+  // Another staged role already uses this agent name. One agent fills at most
+  // one role, and two Creates under one name would collide on the server.
+  function fillNameProblem(manager, roleId, name) {
+    const key = String(name || '')
+      .trim()
+      .toLowerCase();
+    if (!key) return '';
+    const context = manager?.workspaceCreatorContext;
+    const entry = selectedManaged(context);
+    if (!entry) return '';
+    for (const role of homeRoles(entry)) {
+      const fill = fillsFor(context, entry).get(role.role_id);
+      if (role.role_id !== roleId && fill && fill.name.toLowerCase() === key) {
+        return `${role.label || role.role_id} is already staffed by “${fill.name}”. Choose another name.`;
+      }
+    }
+    return '';
+  }
+
+  // Shown in place of the Create form's prompt box for a program Home role.
+  function promptNote(entry) {
+    const provider = providerLabel(entry) || 'this template';
+    return `Instructions for this role come from ${provider} and are applied by Ori.`;
+  }
+
+  function emptyRequiredWarnings(manager, entry) {
+    const fills = fillsFor(manager?.workspaceCreatorContext, entry);
+    return homeRoles(entry)
+      .filter(role => role.required && !fills.has(role.role_id) && roleEditable(entry, role))
+      .map(
+        role =>
+          `This group will have no ${String(role.label || role.role_id)} until you set one up.`
+      );
   }
 
   function setFill(manager, roleId, fill) {
@@ -303,6 +356,7 @@
     const role = homeRoles(entry).find(item => item.role_id === roleId);
     const next = normalizeFill(fill);
     if (!role || !next.name || context?.groupTemplates?.pending) return false;
+    if (!roleEditable(entry, role) || fillNameProblem(manager, roleId, next.name)) return false;
     fillsFor(context, entry).set(roleId, next);
     return true;
   }
@@ -400,8 +454,11 @@
     if (eyebrow) eyebrow.textContent = 'Resulting group team';
     if (heading) heading.textContent = `Group roles · ${String(entry?.name || 'Group template')}`;
     if (summary) {
+      const saved = manager.groupTemplateSavedAgentsState?.();
       summary.textContent =
-        'Nothing is created or staffed until you confirm on Review. Each role is filled right after the group exists.';
+        saved === 'idle' || saved === 'loading'
+          ? 'Checking your saved agents before proposing names…'
+          : 'Nothing is created or staffed until you confirm on Review. Each role is filled right after the group exists.';
     }
     for (const id of ['workspaceAssistantProgramCreate', 'workspaceBlankAgentlessChoice']) {
       const node = document.getElementById(id);
@@ -431,6 +488,7 @@
       title: 'Group roles',
       agentHref: null,
       onRequestCreate: (roleId, row) => manager.openGroupTemplateRoleSetup?.(roleId, row),
+      onEdit: (roleId, row, opener) => manager.openGroupTemplateRoleSetup?.(roleId, row, opener),
       onAssign: (roleId, row) => manager.openGroupTemplateRoleAssign?.(roleId, row),
       onClear: (roleId, row) => manager.clearGroupTemplateRole?.(roleId, row)
     });
@@ -838,11 +896,13 @@
     const lines = roles.map(role =>
       outcomeLine(String(role.label || role.role_id), fills.get(role.role_id))
     );
+    const warnings = emptyRequiredWarnings(manager, entry);
     return `
       <div class="workspace-review-card" data-group-template-staffing>
         <div class="workspace-review-card-main">
           <span class="workspace-review-card-label">Group roles</span>
           ${lines.map(line => `<span class="workspace-review-card-meta" data-group-template-role-outcome>${escape(manager, line)}</span>`).join('')}
+          ${warnings.map(line => `<span class="workspace-review-card-note is-warning" data-group-template-role-warning role="note">${escape(manager, line)}</span>`).join('')}
           ${roles.length ? `<span class="workspace-review-card-note">${escape(manager, 'Roles are filled one at a time right after the group exists. A role that cannot be filled never undoes the group.')}</span>` : ''}
           ${projectRoles.length ? `<span class="workspace-review-card-note">${escape(manager, `Stays project-local: ${projectRoles.join(', ')}. Each project keeps its own team.`)}</span>` : ''}
         </div>
@@ -1041,6 +1101,32 @@
     };
   }
 
+  // Read once by the group page (group-template-status.js
+  // consumeGroupTemplateLanding). Keep the key identical to
+  // GROUP_TEMPLATE_LANDING_KEY there.
+  const LANDING_KEY = 'ori:group-template-landing';
+
+  function storeLandingNotice(workspaceId, notice) {
+    try {
+      window.sessionStorage.setItem(
+        LANDING_KEY,
+        JSON.stringify({
+          workspace_id: String(workspaceId || ''),
+          created_at: Date.now(),
+          tone: notice.tone,
+          title: notice.title,
+          message: notice.message,
+          role_id: notice.roleId,
+          error: notice.error
+        })
+      );
+      return true;
+    } catch (_error) {
+      // Storage can be unavailable; the group page still shows its own status.
+      return false;
+    }
+  }
+
   function landingURL(slug, roleId) {
     const path = `/workspaces/${encodeURIComponent(slug)}`;
     return roleId ? `${path}?role=${encodeURIComponent(roleId)}` : path;
@@ -1156,7 +1242,9 @@
       const slug = String(folder?.folder_slug || '').trim();
       if (slug) {
         // The group page is where its roles are managed, so the user lands
-        // there instead of reading about it in a toast.
+        // there instead of reading about it in a toast; the page shows the
+        // same words once it has loaded.
+        storeLandingNotice(result.home_workspace_id, notice);
         window.location.href = landingURL(slug, notice.roleId);
         return true;
       }
@@ -1203,6 +1291,8 @@
     clearFill,
     stagedFill,
     staffingPlan,
+    fillNameProblem,
+    promptNote,
     teamRoster,
     renderTeam,
     fillRoles,

@@ -2,7 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  consumeGroupTemplateLanding,
   fetchGroupTemplateStatus,
+  GROUP_TEMPLATE_LANDING_KEY,
   groupTemplateIntegrationFact,
   groupTemplateProviderLabel,
   groupTemplateTeamFact
@@ -98,4 +100,56 @@ test('an unreadable status resolves to null rather than an empty group', async (
   } finally {
     globalThis.fetch = original;
   }
+});
+
+function memoryStorage(entries = {}) {
+  const values = new Map(Object.entries(entries));
+  return {
+    values,
+    getItem: key => (values.has(key) ? values.get(key) : null),
+    setItem: (key, value) => values.set(key, String(value)),
+    removeItem: key => values.delete(key)
+  };
+}
+
+test('the creator landing notice is read once, only on its own group, only while fresh', () => {
+  const now = 1_000_000;
+  const notice = {
+    workspace_id: 'home-1',
+    created_at: now - 1000,
+    tone: 'warning',
+    title: 'Group created',
+    message: 'Lab is ready. Portfolio Coordinator was not staffed: Nope.',
+    role_id: 'coordinator',
+    error: 'Nope.'
+  };
+  const storage = memoryStorage({ [GROUP_TEMPLATE_LANDING_KEY]: JSON.stringify(notice) });
+  assert.deepEqual(consumeGroupTemplateLanding(storage, 'home-1', now), {
+    tone: 'warning',
+    title: 'Group created',
+    message: notice.message,
+    roleId: 'coordinator',
+    error: 'Nope.'
+  });
+  assert.equal(storage.values.size, 0, 'consumed');
+  assert.equal(consumeGroupTemplateLanding(storage, 'home-1', now), null, 'never twice');
+
+  const elsewhere = memoryStorage({ [GROUP_TEMPLATE_LANDING_KEY]: JSON.stringify(notice) });
+  assert.equal(consumeGroupTemplateLanding(elsewhere, 'home-2', now), null);
+  assert.equal(elsewhere.values.size, 0, 'a notice for another group is discarded, not kept');
+
+  const stale = memoryStorage({
+    [GROUP_TEMPLATE_LANDING_KEY]: JSON.stringify({ ...notice, created_at: now - 10 * 60 * 1000 })
+  });
+  assert.equal(consumeGroupTemplateLanding(stale, 'home-1', now), null);
+
+  const garbage = memoryStorage({ [GROUP_TEMPLATE_LANDING_KEY]: '{not json' });
+  assert.equal(consumeGroupTemplateLanding(garbage, 'home-1', now), null);
+  assert.equal(consumeGroupTemplateLanding(null, 'home-1', now), null);
+  const throwing = {
+    getItem() {
+      throw new Error('blocked');
+    }
+  };
+  assert.equal(consumeGroupTemplateLanding(throwing, 'home-1', now), null);
 });
