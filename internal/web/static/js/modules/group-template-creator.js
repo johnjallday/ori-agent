@@ -309,10 +309,39 @@
     return true;
   }
 
-  // Whether the wizard may stage a fill for this role at all. Group 4 narrows
-  // this for an existing Home.
-  function roleEditable(_entry, _role) {
-    return true;
+  // What the catalog verified about one required role on an existing Home. It
+  // reports required roles only, and only when it could read the Home's roster.
+  function reportedRole(entry, roleId) {
+    const roles = entry?.required_home_roles?.roles;
+    return (Array.isArray(roles) ? roles : []).find(role => role?.role_id === roleId) || null;
+  }
+
+  function reuseVerified(entry) {
+    return entry?.required_home_roles?.verification === 'verified';
+  }
+
+  // Whether the wizard may stage a fill for this role. A new Home's roles are
+  // all staffable. An existing Home is reused unchanged except for required
+  // roles the catalog verified as empty: a filled role keeps its holder, an
+  // optional role's state is not reported here, and an unverified roster
+  // stages nothing at all.
+  function roleEditable(entry, role) {
+    if (!isReusable(entry)) return true;
+    if (!reuseVerified(entry)) return false;
+    const reported = reportedRole(entry, role?.role_id);
+    return Boolean(reported) && reported.state !== 'filled';
+  }
+
+  // Mirrors group-template-status.js groupTemplateTeamFact ("Could not be
+  // verified"); this classic script cannot import that module.
+  const UNVERIFIED_ROLE_REASON =
+    'Could not be verified. Nothing is staffed here; set this role up from the group page.';
+
+  function roleReadOnlyReason(entry, role) {
+    if (roleEditable(entry, role)) return '';
+    if (!reuseVerified(entry)) return UNVERIFIED_ROLE_REASON;
+    if (reportedRole(entry, role?.role_id)?.state === 'filled') return 'Already filled';
+    return 'Optional roles on an existing group are set up from the group page.';
   }
 
   // Another staged role already uses this agent name. One agent fills at most
@@ -381,7 +410,7 @@
     if (!entry || !managedActive(manager)) return [];
     const fills = fillsFor(context, entry);
     return homeRoles(entry)
-      .filter(role => fills.has(role.role_id))
+      .filter(role => fills.has(role.role_id) && roleEditable(entry, role))
       .map(role => ({
         roleId: role.role_id,
         label: String(role.label || role.role_id),
@@ -397,21 +426,32 @@
     const entry = selectedManaged(context);
     const fills = entry ? fillsFor(context, entry) : new Map();
     const roles = homeRoles(entry).map(role => {
-      const fill = fills.get(role.role_id);
+      const readOnlyReason = roleReadOnlyReason(entry, role);
+      // An existing holder is shown as it is; the wizard never replaces it.
+      const holder =
+        readOnlyReason && reportedRole(entry, role.role_id)?.state === 'filled'
+          ? reportedRole(entry, role.role_id).agent || null
+          : null;
+      const fill = readOnlyReason ? null : fills.get(role.role_id);
       // An empty row already says Missing or Optional in its tag; a filled
       // row's tag names its agent, so the marker moves into the description.
-      const marker = fill ? (role.required ? 'Required' : 'Optional') : '';
-      return {
+      const marker = fill || holder ? (role.required ? 'Required' : 'Optional') : '';
+      const row = {
         role_id: role.role_id,
         label: String(role.label || role.role_id),
         description: [marker, String(role.description || '')].filter(Boolean).join(' · '),
         scope: 'home',
         required: Boolean(role.required),
         primary: Boolean(role.primary),
-        state: fill ? 'filled' : 'empty',
-        agent: fill ? { name: fill.name } : null,
-        source: fill?.mode === FILL_ASSIGN ? 'assigned' : 'created'
+        state: fill || holder ? 'filled' : 'empty',
+        agent: holder || (fill ? { name: fill.name } : null),
+        source: holder ? 'group' : fill?.mode === FILL_ASSIGN ? 'assigned' : 'created'
       };
+      if (readOnlyReason) {
+        row.read_only = true;
+        row.read_only_reason = readOnlyReason;
+      }
+      return row;
     });
     const filled = roles.filter(role => role.state === 'filled').length;
     return {
@@ -455,10 +495,14 @@
     if (heading) heading.textContent = `Group roles · ${String(entry?.name || 'Group template')}`;
     if (summary) {
       const saved = manager.groupTemplateSavedAgentsState?.();
-      summary.textContent =
-        saved === 'idle' || saved === 'loading'
+      const staffable = homeRoles(entry).some(role => roleEditable(entry, role));
+      summary.textContent = !staffable
+        ? 'Nothing to staff here: this group’s roles are already filled or are set up from the group page.'
+        : saved === 'idle' || saved === 'loading'
           ? 'Checking your saved agents before proposing names…'
-          : 'Nothing is created or staffed until you confirm on Review. Each role is filled right after the group exists.';
+          : isReusable(entry)
+            ? 'The group is reused unchanged. Only its empty required roles can be staffed here, right after you confirm on Review.'
+            : 'Nothing is created or staffed until you confirm on Review. Each role is filled right after the group exists.';
     }
     for (const id of ['workspaceAssistantProgramCreate', 'workspaceBlankAgentlessChoice']) {
       const node = document.getElementById(id);
@@ -796,7 +840,9 @@
     const staffed = staffingPlan(manager).length;
     if (step4Title) {
       step4Title.textContent = isReusable(entry)
-        ? 'Reuse this group'
+        ? staffed
+          ? 'Reuse and staff this group'
+          : 'Reuse this group'
         : staffed
           ? 'Create and staff this group'
           : 'Create this group only';
@@ -830,8 +876,19 @@
     const name = currentName();
     const review =
       state.review && state.review.key === reviewKey(entry, name) ? state.review : null;
+    const plan = staffingPlan(manager);
+    const staffed = plan.length;
     let status = 'Preparing a review… nothing has been created.';
-    if (review?.status === 'ready') status = review.data?.summary || '';
+    if (review?.status === 'ready') {
+      // The server reviews the group alone ("nothing else is created"); the
+      // role fills are separate requests, so say where they come in.
+      status = [
+        review.data?.summary || '',
+        staffed ? 'The roles listed below are then staffed one at a time.' : ''
+      ]
+        .filter(Boolean)
+        .join(' ');
+    }
     if (review?.status === 'error') status = review.error;
     if (state.pending?.uncertain) {
       status =
@@ -839,9 +896,10 @@
     }
     const reuse = review?.status === 'ready' ? Boolean(review.data?.reuse) : isReusable(entry);
     const groupName = reuse ? review?.data?.home_name || entry.home?.name || name : name;
-    const staffed = staffingPlan(manager).length;
     const outcome = reuse
-      ? 'The existing group is reused unchanged'
+      ? staffed
+        ? `This existing group will be reused unchanged and ${joinLabels(plan.map(item => item.label))} will be staffed.`
+        : 'The existing group is reused unchanged'
       : staffed
         ? `One group is created, then ${staffCountLabel(staffed)} staffed`
         : 'One group is created, initially unstaffed';
@@ -893,9 +951,14 @@
     const projectRoles = projectRoleLabels(entry);
     if (!roles.length && !projectRoles.length) return '';
     const fills = fillsFor(manager.workspaceCreatorContext, entry);
-    const lines = roles.map(role =>
-      outcomeLine(String(role.label || role.role_id), fills.get(role.role_id))
-    );
+    const lines = roles.map(role => {
+      const label = String(role.label || role.role_id);
+      if (roleEditable(entry, role)) return outcomeLine(label, fills.get(role.role_id));
+      const holder = reportedRole(entry, role.role_id);
+      return holder?.state === 'filled'
+        ? `${label} · Already filled by “${String(holder.agent?.name || 'its holder')}”`
+        : `${label} · Not staffed here`;
+    });
     const warnings = emptyRequiredWarnings(manager, entry);
     return `
       <div class="workspace-review-card" data-group-template-staffing>

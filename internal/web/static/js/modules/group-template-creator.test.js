@@ -832,3 +832,143 @@ test('an empty required role is a Review warning, never a blocker', async () => 
   await api.ensureReview(creator);
   assert.equal(api.canSubmit(creator), true, 'Create stays enabled');
 });
+
+// ---- Reuse: an existing, unstaffed Home ----------------------------------------
+
+const REUSE_ID = 'group-template:dddddddddddddddddddddddddddddddd';
+
+const reusableTemplate = (requiredRoles = {}) =>
+  staffedTemplate({
+    id: REUSE_ID,
+    name: 'Studio Home',
+    availability: { state: 'reusable', actions: ['open_group'] },
+    home: { state: 'exists', workspace_id: 'home-9', name: 'My Studio' },
+    home_roles: [
+      {
+        role_id: 'coordinator',
+        label: 'Portfolio Coordinator',
+        required: true,
+        primary: true,
+        default_name: 'Portfolio Manager'
+      },
+      { role_id: 'second', label: 'Second Lead', required: true, default_name: 'Second Lead' },
+      { role_id: 'curator', label: 'Archive Curator', required: false }
+    ],
+    required_home_roles: {
+      verification: 'verified',
+      roles: [
+        {
+          role_id: 'coordinator',
+          label: 'Portfolio Coordinator',
+          state: 'filled',
+          agent: { name: 'Studio Boss' }
+        },
+        { role_id: 'second', label: 'Second Lead', state: 'empty' }
+      ],
+      ...requiredRoles
+    }
+  });
+
+test('reusing a verified Home staffs only its empty required roles and shows existing holders', () => {
+  const { api } = environment();
+  const creator = staffingCreator(api, reusableTemplate());
+  assert.equal(api.seedFills(creator), true);
+  assert.equal(api.stagedFill(creator, 'coordinator'), null, 'a filled role is never staged');
+  assert.equal(api.stagedFill(creator, 'second').name, 'Second Lead');
+  assert.equal(api.setFill(creator, 'coordinator', { mode: 'create', name: 'X' }), false);
+  assert.equal(api.setFill(creator, 'curator', { mode: 'create', name: 'Y' }), false);
+
+  const [coordinator, second, curator] = api.teamRoster(creator).roles;
+  assert.equal(coordinator.read_only, true);
+  assert.equal(coordinator.read_only_reason, 'Already filled');
+  assert.equal(coordinator.state, 'filled');
+  assert.equal(coordinator.agent.name, 'Studio Boss');
+  assert.equal(coordinator.source, 'group');
+  assert.equal(second.read_only, undefined);
+  assert.equal(second.agent.name, 'Second Lead');
+  assert.equal(curator.read_only, true, 'optional roles are not reported for an existing Home');
+});
+
+test('an unverified existing Home is shown read-only and stages nothing', () => {
+  const { api } = environment();
+  const creator = staffingCreator(
+    api,
+    reusableTemplate({ verification: 'unavailable', roles: undefined })
+  );
+  api.seedFills(creator);
+  assert.deepEqual(asData(api.staffingPlan(creator)), []);
+  const roles = api.teamRoster(creator).roles;
+  assert.equal(
+    roles.every(role => role.read_only),
+    true
+  );
+  assert.match(roles[0].read_only_reason, /Could not be verified/);
+  assert.equal(api.ctaLabel(creator), 'Use existing group “My Studio”');
+});
+
+test('reuse receipt and button name the roles it staffs; fills follow the unchanged reuse commit', async () => {
+  const env = environment({
+    fetch: async (url, options, count) => {
+      if (url.endsWith('/review')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            group_template_review: { review_token: 'tok', reuse: true, home_name: 'My Studio' }
+          })
+        };
+      }
+      if (url.endsWith('/commit')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            group_template: {
+              home_workspace_id: 'home-9',
+              home_name: 'My Studio',
+              created_by_this_operation: false
+            }
+          })
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({ count }) };
+    }
+  });
+  const creator = staffingCreator(env.api, reusableTemplate());
+  env.element('folderNameInput').value = 'My Studio';
+  creator.folders = [{ id: 'home-9', folder_slug: 'my-studio' }];
+  env.api.seedFills(creator);
+  await env.api.ensureReview(creator);
+  const entry = env.api.selectedManaged(creator.workspaceCreatorContext);
+
+  const receipt = env.api.renderReceipt(creator);
+  assert.match(
+    receipt,
+    /This existing group will be reused unchanged and Second Lead will be staffed\./
+  );
+  assert.match(receipt, /The roles listed below are then staffed one at a time\./);
+  const roles = env.api.rolesCardHTML(creator, entry);
+  assert.match(roles, /Portfolio Coordinator · Already filled by “Studio Boss”/);
+  assert.match(roles, /Second Lead · Create “Second Lead”/);
+  assert.match(roles, /Archive Curator · Not staffed here/);
+  assert.doesNotMatch(roles, /data-group-template-role-warning/);
+  assert.equal(env.api.ctaLabel(creator), 'Use existing group “My Studio” and staff 1 role');
+
+  assert.equal(await env.api.submit(creator), true);
+  assert.deepEqual(
+    env.calls.map(call => `${call.options.method || 'GET'} ${call.url}`),
+    [
+      'POST /api/workspaces/group-templates/review',
+      'POST /api/workspaces/group-templates/commit',
+      'PUT /api/workspaces/home-9/roles/second'
+    ]
+  );
+  assert.deepEqual(JSON.parse(env.calls[0].options.body), {
+    group_template_id: REUSE_ID,
+    revision: 'r1',
+    name: 'My Studio'
+  });
+  assert.equal(env.window.location.href, '/workspaces/my-studio');
+  const landing = JSON.parse(env.window.sessionStorage.getItem('ori:group-template-landing'));
+  assert.equal(landing.message, 'My Studio reused. Second Lead staffed.');
+});
