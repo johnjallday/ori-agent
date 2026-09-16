@@ -109,6 +109,16 @@
       // target yields no mark rather than a mark on something else.
       selector: '[data-hq-action="build"]',
       label: 'Build My HQ'
+    },
+    // The unified workspace creator's Create button, for the Tidy your
+    // Downloads walkthrough (starter missions Mission 02). Local: no server
+    // topic names it. The button is hidden until the creator's last step, so the
+    // walkthrough re-presents on each creator step until it resolves.
+    create_workspace_submit: {
+      routes: ['/'],
+      selector: '#createFolderBtn',
+      label: 'Create Workspace',
+      local: true
     }
     // Deliberately absent:
     //

@@ -1735,7 +1735,9 @@ export class OnboardingManager {
       const response = await fetch('/api/progression/skip', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ quest_id: 't1-plan-first-day' })
+        // Planning the first day is the plan branch of Mission 03, Connect one
+        // source, so deferring it defers that mission.
+        body: JSON.stringify({ quest_id: 'pa-connect-source' })
       });
       if (!response.ok) throw new Error('Could not save this quest for later. Try again.');
       this.modalInstance?.hide();

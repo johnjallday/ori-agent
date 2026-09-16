@@ -321,9 +321,16 @@ func (m *Manager) SetProgression(p types.ProgressionState) error {
 	return nil
 }
 
-// cloneProgression deep-copies the completion and skip maps so callers can't
-// mutate persisted state through a shared reference.
+// cloneProgression deep-copies the completion, skip, and reconcile maps so
+// callers can't mutate persisted state through a shared reference.
 func cloneProgression(p types.ProgressionState) types.ProgressionState {
+	if p.Reconciled != nil {
+		reconciled := make(map[string]time.Time, len(p.Reconciled))
+		for key, at := range p.Reconciled {
+			reconciled[key] = at
+		}
+		p.Reconciled = reconciled
+	}
 	if p.CompletedQuests != nil {
 		completed := make(map[string]time.Time, len(p.CompletedQuests))
 		for id, at := range p.CompletedQuests {

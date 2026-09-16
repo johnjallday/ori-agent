@@ -184,7 +184,7 @@ func (s *Service) Mutate(ctx context.Context, userID, runID string, actionID Act
 		return nil, failure(ReasonOwnerUnavailable, claimedRun.StateRevision)
 	}
 	if !adapter.ConsequenceObserved(actionID, ownerRead) {
-		_, _, _, finalizeErr := s.store.FinalizeOperation(ctx, finalRun, request.IdempotencyKey, OperationCompletion{
+		_, _, _, finalizeErr := s.finalizeOperation(ctx, finalRun, request.IdempotencyKey, OperationCompletion{
 			Status: OperationFailed, ResultCode: ResultNotApplied, ReasonCode: ReasonOperationFailed,
 		})
 		if finalizeErr != nil {
@@ -199,7 +199,7 @@ func (s *Service) Mutate(ctx context.Context, userID, runID string, actionID Act
 	} else {
 		result = ownerRead.Result
 	}
-	_, _, _, finalizeErr := s.store.FinalizeOperation(ctx, finalRun, request.IdempotencyKey, OperationCompletion{
+	_, _, _, finalizeErr := s.finalizeOperation(ctx, finalRun, request.IdempotencyKey, OperationCompletion{
 		Status: OperationSucceeded, ResultCode: ResultApplied, Result: result,
 	})
 	if finalizeErr != nil {
@@ -272,7 +272,7 @@ func (s *Service) replayAction(ctx context.Context, userID string, projection *J
 			emitActionOutcome(projection, stepID, actionID, specialistevents.OutcomeReconcileRequired, ReasonOwnerUnavailable)
 			return nil, failure(ReasonOwnerUnavailable, projection.StateRevision)
 		}
-		_, _, _, finalizeErr := s.store.FinalizeOperation(ctx, finalRun, receipt.IdempotencyKey, OperationCompletion{
+		_, _, _, finalizeErr := s.finalizeOperation(ctx, finalRun, receipt.IdempotencyKey, OperationCompletion{
 			Status: OperationSucceeded, ResultCode: ResultAlreadyCurrent, Result: ownerRead.Result,
 		})
 		if finalizeErr != nil {

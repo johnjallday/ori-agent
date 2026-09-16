@@ -196,7 +196,11 @@ type ProgressionState struct {
 	// BackfilledAt is non-zero once the startup backfill scan has run, so it
 	// never re-runs (and never re-fires "grandfathering" completions).
 	BackfilledAt time.Time `json:"backfilled_at,omitempty"`
-	UpdatedAt    time.Time `json:"updated_at,omitempty"`
+	// Reconciled records, by key, each one-time grandfathering pass for quests
+	// added after an install's backfill already ran (for example the starter
+	// missions), so each pass runs at most once. A reset keeps it.
+	Reconciled map[string]time.Time `json:"reconciled,omitempty"`
+	UpdatedAt  time.Time            `json:"updated_at,omitempty"`
 }
 
 // AppState tracks application-level state (persisted separately from agent data)

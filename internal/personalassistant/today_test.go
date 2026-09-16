@@ -582,3 +582,226 @@ func TestTodayService_RefusesForeignBriefInvalidSlugAndReplacedHQ(t *testing.T) 
 		t.Fatalf("replaced HQ leaked stale routes: %+v err=%v", got, err)
 	}
 }
+
+// todayBriefRevision is a minimal owned brief for hq-1.
+func todayBriefRevision(now time.Time) *dailybrief.Revision {
+	encoded, _ := json.Marshal(dailybrief.BriefContent{OpeningSummary: "Here is today."})
+	return &dailybrief.Revision{ID: "brief-1", WorkspaceID: "hq-1", UserID: "local", ContentJSON: string(encoded), GeneratedAt: now}
+}
+
+// Mission 04 completes the first time Today is served with a brief.
+func TestTodayService_OnBriefSeenFiresOnceWhenABriefIsServed(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	store, _ := newTodayWorkspace(t, now)
+
+	var seen []string
+	service := NewTodayService(stubTodayRelationship{projection: baseTodayProjection()},
+		stubTodayBrief{revision: todayBriefRevision(now)}, store, stubTodayFollowUps{})
+	service.now = func() time.Time { return now }
+	service.SetOnBriefSeen(func(userID string) { seen = append(seen, userID) })
+
+	for range 3 {
+		if _, err := service.Get(context.Background(), "local"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(seen) != 1 || seen[0] != "local" {
+		t.Fatalf("brief seen fired %v, want once for local", seen)
+	}
+
+	// Paused still shows the brief, so it counts too.
+	paused := baseTodayProjection()
+	paused.State = APIStatePaused
+	pausedService := NewTodayService(stubTodayRelationship{projection: paused},
+		stubTodayBrief{revision: todayBriefRevision(now)}, store, stubTodayFollowUps{})
+	pausedService.now = func() time.Time { return now }
+	var pausedSeen int
+	pausedService.SetOnBriefSeen(func(string) { pausedSeen++ })
+	if _, err := pausedService.Get(context.Background(), "local"); err != nil {
+		t.Fatal(err)
+	}
+	if pausedSeen != 1 {
+		t.Fatalf("paused relationship brief seen = %d, want 1", pausedSeen)
+	}
+}
+
+func TestTodayService_OnBriefSeenNeverFiresWithoutAServedBrief(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	store, _ := newTodayWorkspace(t, now)
+	var fires int
+	hook := func(string) { fires++ }
+
+	noBrief := NewTodayService(stubTodayRelationship{projection: baseTodayProjection()},
+		stubTodayBrief{err: dailybrief.ErrRevisionNotFound}, store, stubTodayFollowUps{})
+	noBrief.now = func() time.Time { return now }
+	noBrief.SetOnBriefSeen(hook)
+	if _, err := noBrief.Get(context.Background(), "local"); err != nil {
+		t.Fatal(err)
+	}
+
+	needsHQ := &Projection{State: APIStateNeedsHQ, Availability: Availability{Model: availableSource()}}
+	noHQ := NewTodayService(stubTodayRelationship{projection: needsHQ},
+		stubTodayBrief{revision: todayBriefRevision(now)}, store, stubTodayFollowUps{})
+	noHQ.SetOnBriefSeen(hook)
+	if _, err := noHQ.Get(context.Background(), "local"); err != nil {
+		t.Fatal(err)
+	}
+	if fires != 0 {
+		t.Fatalf("brief seen fired %d times without a served brief", fires)
+	}
+
+	// Unset, a served brief is simply not observed.
+	unset := NewTodayService(stubTodayRelationship{projection: baseTodayProjection()},
+		stubTodayBrief{revision: todayBriefRevision(now)}, store, stubTodayFollowUps{})
+	unset.now = func() time.Time { return now }
+	if _, err := unset.Get(context.Background(), "local"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type stubJanitorResults struct {
+	results []JanitorResult
+	err     error
+}
+
+func (s stubJanitorResults) JanitorResults(context.Context, string) ([]JanitorResult, error) {
+	return s.results, s.err
+}
+
+func todayJanitorService(t *testing.T, now time.Time, reader JanitorResultReader) *TodayService {
+	t.Helper()
+	store, _ := newTodayWorkspace(t, now)
+	service := NewTodayService(stubTodayRelationship{projection: baseTodayProjection()},
+		stubTodayBrief{err: dailybrief.ErrRevisionNotFound}, store, stubTodayFollowUps{})
+	service.now = func() time.Time { return now }
+	if reader != nil {
+		service.SetJanitorResultReader(reader)
+	}
+	return service
+}
+
+func janitorItems(items []TodayItem) []TodayItem {
+	var out []TodayItem
+	for _, item := range items {
+		if item.Kind == "janitor_result" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func TestTodayService_JanitorResultLine(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	result := JanitorResult{
+		WorkspaceID: "janitor-1", WorkspaceName: "File Janitor", Slug: "file-janitor", FolderName: "Downloads",
+		Moved: 14, Trashed: 2, NewestActionID: "action-9", NewestAt: now.Add(-time.Hour),
+	}
+	service := todayJanitorService(t, now, stubJanitorResults{results: []JanitorResult{result}})
+	got, err := service.Get(context.Background(), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := got.Results.Items
+	if len(items) != 2 || items[0].Kind != "result" {
+		t.Fatalf("janitor line must follow the HQ results: %+v", items)
+	}
+	line := items[1]
+	want := TodayItem{
+		ID: "action-9", Kind: "janitor_result", Title: "Filed 14 files into Downloads/Filed",
+		Detail: "2 sent to Trash · Undo from History", Attribution: "File Janitor",
+		Route: "/workspaces/file-janitor?panel=file-janitor&tab=history",
+		Ref: dailybrief.SourceRef{
+			WorkspaceID: "janitor-1", EntityType: "file_janitor_batch", EntityID: "action-9", Timestamp: now.Add(-time.Hour),
+		},
+		SourceAt: now.Add(-time.Hour),
+	}
+	if line.ID != want.ID || line.Kind != want.Kind || line.Title != want.Title || line.Detail != want.Detail ||
+		line.Attribution != want.Attribution || line.Route != want.Route || line.Ref != want.Ref || !line.SourceAt.Equal(want.SourceAt) {
+		t.Fatalf("janitor line = %+v\nwant %+v", line, want)
+	}
+	if got.Results.Health.Status != TodaySectionAvailable {
+		t.Fatalf("results health changed: %+v", got.Results.Health)
+	}
+}
+
+func TestTodayService_JanitorResultCopyAndWindow(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	base := JanitorResult{
+		WorkspaceID: "janitor-1", WorkspaceName: "File Janitor", Slug: "file-janitor", FolderName: "Downloads",
+		NewestActionID: "action-1", NewestAt: now.Add(-time.Hour),
+	}
+	cases := []struct {
+		name          string
+		mutate        func(*JanitorResult)
+		title, detail string
+		shown         bool
+	}{
+		{"one file", func(r *JanitorResult) { r.Moved = 1 }, "Filed 1 file into Downloads/Filed", "Undo from History", true},
+		{"many files", func(r *JanitorResult) { r.Moved = 3 }, "Filed 3 files into Downloads/Filed", "Undo from History", true},
+		{"moves and trash", func(r *JanitorResult) { r.Moved = 2; r.Trashed = 1 }, "Filed 2 files into Downloads/Filed", "1 sent to Trash · Undo from History", true},
+		{"trash only", func(r *JanitorResult) { r.Trashed = 1 }, "Sent 1 file to Trash from Downloads", "Undo from History", true},
+		{"older than a day", func(r *JanitorResult) { r.Moved = 2; r.NewestAt = now.Add(-25 * time.Hour) }, "", "", false},
+		{"nothing applied", func(r *JanitorResult) {}, "", "", false},
+		{"unsafe slug", func(r *JanitorResult) { r.Moved = 1; r.Slug = "../escape" }, "", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := base
+			tc.mutate(&result)
+			service := todayJanitorService(t, now, stubJanitorResults{results: []JanitorResult{result}})
+			got, err := service.Get(context.Background(), "local")
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines := janitorItems(got.Results.Items)
+			if !tc.shown {
+				if len(lines) != 0 {
+					t.Fatalf("unexpected janitor line: %+v", lines)
+				}
+				return
+			}
+			if len(lines) != 1 || lines[0].Title != tc.title || lines[0].Detail != tc.detail {
+				t.Fatalf("janitor line = %+v, want %q / %q", lines, tc.title, tc.detail)
+			}
+		})
+	}
+}
+
+func TestTodayService_JanitorResultsRespectTheCapAndFailQuietly(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	var many []JanitorResult
+	for i := range 8 {
+		many = append(many, JanitorResult{
+			WorkspaceID: fmt.Sprintf("janitor-%d", i), WorkspaceName: "File Janitor", Slug: fmt.Sprintf("janitor-%d", i),
+			FolderName: "Downloads", Moved: 1, NewestActionID: fmt.Sprintf("action-%d", i),
+			NewestAt: now.Add(-time.Duration(i+1) * time.Minute),
+		})
+	}
+	got, err := todayJanitorService(t, now, stubJanitorResults{results: many}).Get(context.Background(), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Results.Items) != todayResultCap {
+		t.Fatalf("results = %d, want the cap %d", len(got.Results.Items), todayResultCap)
+	}
+	if lines := janitorItems(got.Results.Items); len(lines) == 0 || lines[0].ID != "action-0" {
+		t.Fatalf("janitor lines are not newest first: %+v", lines)
+	}
+
+	baseline, err := todayJanitorService(t, now, nil).Get(context.Background(), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	failing, err := todayJanitorService(t, now, stubJanitorResults{err: errors.New("journal unreadable")}).Get(context.Background(), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failing.Results.Items) != len(baseline.Results.Items) || failing.Results.Health != baseline.Results.Health ||
+		failing.State != baseline.State {
+		t.Fatalf("a reader failure changed Today: results=%+v state=%s, baseline results=%+v state=%s",
+			failing.Results, failing.State, baseline.Results, baseline.State)
+	}
+	if len(janitorItems(baseline.Results.Items)) != 0 {
+		t.Fatal("no reader still produced a janitor line")
+	}
+}

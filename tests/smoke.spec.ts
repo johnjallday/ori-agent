@@ -591,7 +591,7 @@ test.describe('Home First Run', () => {
     expect(errors, `404 responses: ${failedResources.join(', ')}`).toEqual([]);
   });
 
-  test('surfaces Mission 01 in progression before the HQ tier unlocks', async ({ page }) => {
+  test('surfaces Mission 01 from the server-supplied starter missions', async ({ page }) => {
     await page.route('**/api/onboarding/status', async route => {
       await route.fulfill({
         status: 200,
@@ -600,6 +600,30 @@ test.describe('Home First Run', () => {
       });
     });
     await page.route('**/api/progression', async route => {
+      const buildHQ = {
+        id: 't2-build-hq',
+        tier: 1,
+        order: 1,
+        featured: true,
+        title: 'Build My HQ',
+        why: 'Give Ori a home base for your daily brief and follow-ups.',
+        status: 'available',
+        action_url: '/?quest=build-hq',
+        action_label: 'Build My HQ',
+        optional: true
+      };
+      const tidy = {
+        id: 'pa-tidy-downloads',
+        tier: 1,
+        order: 2,
+        featured: true,
+        title: 'Tidy your Downloads',
+        why: 'Let Ori sort one folder for you.',
+        status: 'available',
+        action_url: '/?quest=tidy-downloads',
+        action_label: 'Start',
+        optional: true
+      };
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -611,37 +635,15 @@ test.describe('Home First Run', () => {
           resolved_count: 0,
           dismissed: false,
           all_complete: false,
-          next_quest: {
-            id: 't1-first-message',
-            title: 'Say hello to Ori',
-            why: 'Send Ori a message on the home page.',
-            status: 'available'
-          },
+          next_quest: buildHQ,
+          missions: [buildHQ, tidy],
           tiers: [
-            {
-              tier: 1,
-              name: 'First Contact',
-              complete: false,
-              quests: [
-                { id: 't1-first-message', title: 'Say hello to Ori', status: 'available' },
-                { id: 't1-personalize', title: 'Personalize Ori', status: 'available' }
-              ]
-            },
+            { tier: 1, name: 'Starter', complete: false, quests: [buildHQ, tidy] },
             {
               tier: 2,
-              name: 'Establish a Base',
+              name: 'Daily loop',
               complete: false,
-              quests: [
-                {
-                  id: 't2-build-hq',
-                  title: 'Build My HQ',
-                  why: 'Give Ori a home base for your daily brief and follow-ups.',
-                  status: 'locked-tier',
-                  action_url: '/workspaces?view=map&focus=personal-hq',
-                  action_label: 'Build My HQ',
-                  optional: true
-                }
-              ]
+              quests: [{ id: 't1-first-message', title: 'Say hello to Ori', status: 'locked-tier' }]
             }
           ]
         })
@@ -665,8 +667,12 @@ test.describe('Home First Run', () => {
     await expect(mission.locator('[data-role="first-mission-status"]')).toHaveText('Ready');
     await expect(mission.locator('[data-role="first-mission-action"]')).toHaveAttribute(
       'href',
-      '/workspaces?view=map&focus=personal-hq'
+      '/?quest=build-hq'
     );
+    // The mission on the card is the only one the checklist omits.
+    const rows = page.locator('[data-role="quests"] .quest-item');
+    await expect(rows).toHaveCount(1);
+    await expect(rows.first()).toContainText('Tidy your Downloads');
 
     await page.setViewportSize({ width: 720, height: 800 });
     await expect(mission).toBeVisible();

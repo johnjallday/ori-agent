@@ -2,6 +2,8 @@ package progression
 
 import (
 	"errors"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,10 +25,17 @@ var (
 // StateStore. All methods are safe for concurrent use — HandleEvent is called
 // from event-bus goroutines.
 type Engine struct {
-	mu     sync.Mutex
-	store  StateStore
-	quests []Quest
-	state  types.ProgressionState
+	mu         sync.Mutex
+	store      StateStore
+	quests     []Quest
+	tierNames  map[int]string
+	totalTiers int
+	state      types.ProgressionState
+
+	// missionContext supplies the per-user state featured missions resolve
+	// from. Nil means every mission keeps its static copy. See
+	// WithMissionContext.
+	missionContext func() MissionContext
 
 	// rewards reports what a quest pays, for display only. Nil means no quest
 	// advertises a reward. See WithRewards.
@@ -40,10 +49,13 @@ type Engine struct {
 
 // New creates an engine backed by store, loading any persisted completions.
 func New(store StateStore, opts ...Option) *Engine {
+	builtin := BuiltinGraph()
 	e := &Engine{
-		store:  store,
-		quests: BuiltinQuests(),
-		now:    time.Now,
+		store:      store,
+		quests:     builtin.Quests,
+		tierNames:  builtin.TierNames,
+		totalTiers: builtin.TotalTiers,
+		now:        time.Now,
 	}
 	if store != nil {
 		e.state = store.GetProgression()
@@ -79,10 +91,38 @@ func WithRewards(fn func(questID string) (int64, bool)) Option {
 	return func(e *Engine) { e.rewards = fn }
 }
 
-// WithQuests replaces the default graph with a freshly copied cohort-specific
-// graph. It is intended for startup-time configuration only.
+// WithQuests replaces the default quests with a freshly copied list, keeping
+// the built-in tier names. It is intended for startup-time configuration only.
 func WithQuests(quests []Quest) Option {
-	return func(e *Engine) { e.quests = append([]Quest(nil), quests...) }
+	return WithGraph(Graph{Quests: quests, TierNames: builtinTierNames(), TotalTiers: TotalTiers})
+}
+
+// WithGraph replaces the default graph, its tier names, and its tier count
+// with a freshly copied cohort graph. It is intended for startup-time
+// configuration only.
+func WithGraph(g Graph) Option {
+	return func(e *Engine) {
+		e.quests = append([]Quest(nil), g.Quests...)
+		e.tierNames = make(map[int]string, len(g.TierNames))
+		for tier, name := range g.TierNames {
+			e.tierNames[tier] = name
+		}
+		e.totalTiers = g.TotalTiers
+		if e.totalTiers <= 0 {
+			e.totalTiers = TotalTiers
+		}
+	}
+}
+
+// WithMissionContext registers the provider featured missions resolve their
+// card from.
+//
+// Status calls it once per call, BEFORE taking the engine lock, because it
+// reads other services. It runs on the widget's poll, so it must be cheap and
+// must not touch the network. It must not call back into this engine's
+// Status, which would call the provider again without end.
+func WithMissionContext(fn func() MissionContext) Option {
+	return func(e *Engine) { e.missionContext = fn }
 }
 
 // questByID returns the quest with the given ID, or false.
@@ -235,6 +275,67 @@ func (e *Engine) Backfill(scanner Scanner) error {
 	return e.persistLocked()
 }
 
+// ReconcileOnce grandfathers quests added to the graph after this install's
+// one-time Backfill already ran. Under key, it runs at most once per install:
+//
+//   - Backfill has not run yet (a fresh install): the key is only recorded,
+//     because the Backfill about to run evaluates every quest anyway.
+//   - Backfill already ran: a fresh snapshot is taken and each named quest
+//     whose Satisfied holds is marked complete.
+//
+// Like Backfill it is SILENT: no onComplete, so no reward is paid for work done
+// before the quest existed. It returns how many quests it marked. Call it
+// before Backfill at startup.
+func (e *Engine) ReconcileOnce(key string, scanner Scanner, questIDs ...string) (int, error) {
+	if scanner == nil || key == "" {
+		return 0, nil
+	}
+
+	e.mu.Lock()
+	if _, done := e.state.Reconciled[key]; done {
+		e.mu.Unlock()
+		return 0, nil
+	}
+	if e.state.BackfilledAt.IsZero() {
+		defer e.mu.Unlock()
+		e.recordReconciledLocked(key)
+		return 0, e.persistLocked()
+	}
+	e.mu.Unlock()
+
+	snap := scanner.Scan()
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if _, done := e.state.Reconciled[key]; done {
+		return 0, nil
+	}
+	marked := 0
+	for _, id := range questIDs {
+		q, ok := e.questByID(id)
+		if !ok || q.Satisfied == nil {
+			continue
+		}
+		if _, done := e.state.CompletedQuests[id]; done {
+			continue
+		}
+		if q.Satisfied(snap) {
+			e.markLocked(id)
+			marked++
+		}
+	}
+	e.recordReconciledLocked(key)
+	return marked, e.persistLocked()
+}
+
+// recordReconciledLocked notes that a reconcile pass ran. Caller holds the lock.
+func (e *Engine) recordReconciledLocked(key string) {
+	if e.state.Reconciled == nil {
+		e.state.Reconciled = map[string]time.Time{}
+	}
+	e.state.Reconciled[key] = e.now()
+}
+
 // SetDismissed persists whether the user has hidden the quest-log widget.
 func (e *Engine) SetDismissed(dismissed bool) error {
 	e.mu.Lock()
@@ -247,15 +348,21 @@ func (e *Engine) SetDismissed(dismissed bool) error {
 // consumed (BackfilledAt = now) so an explicit reset is a blank slate that
 // survives restarts — existing workspaces/agents will not silently re-complete
 // quests via the startup backfill. Live events still complete quests going
-// forward.
+// forward. Reconcile passes that already ran stay recorded for the same
+// reason: a reset must not be undone by a grandfathering pass on restart.
 func (e *Engine) Reset() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	previous := e.state
+	reconciled := make(map[string]time.Time, len(previous.Reconciled))
+	for key, at := range previous.Reconciled {
+		reconciled[key] = at
+	}
 	e.state = types.ProgressionState{
 		CompletedQuests: map[string]time.Time{},
 		SkippedQuests:   map[string]time.Time{},
 		BackfilledAt:    e.now(),
+		Reconciled:      reconciled,
 	}
 	if err := e.persistLocked(); err != nil {
 		e.state = previous
@@ -267,9 +374,23 @@ func (e *Engine) Reset() error {
 // Status returns the full quest graph with derived per-quest status and the
 // current tier for the API/UI.
 func (e *Engine) Status() Status {
+	var mission MissionContext
+	if e.missionContext != nil {
+		mission = e.missionContext()
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.statusLocked()
+	return e.statusLocked(mission)
+}
+
+// HasCompleted reports whether a quest ID is recorded as completed, including
+// an ID the current graph no longer contains (a retired quest's completion is
+// still evidence for the quest that replaced it).
+func (e *Engine) HasCompleted(questID string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	_, done := e.state.CompletedQuests[questID]
+	return done
 }
 
 // --- lock-held helpers ---
@@ -310,11 +431,11 @@ func (e *Engine) resolvedLocked(questID string) bool {
 }
 
 // currentTierLocked returns the lowest tier that is not fully resolved
-// (completed or, for optional quests, skipped), or TotalTiers when everything
-// is done. A skipped optional quest never keeps a later tier locked. Caller
-// must hold the lock.
+// (completed or, for optional quests, skipped), or the graph's tier count when
+// everything is done. A skipped optional quest never keeps a later tier
+// locked. Caller must hold the lock.
 func (e *Engine) currentTierLocked() int {
-	for tier := 1; tier <= TotalTiers; tier++ {
+	for tier := 1; tier <= e.totalTiers; tier++ {
 		for _, q := range e.quests {
 			if q.Tier != tier {
 				continue
@@ -324,11 +445,12 @@ func (e *Engine) currentTierLocked() int {
 			}
 		}
 	}
-	return TotalTiers
+	return e.totalTiers
 }
 
-// statusLocked builds the API view. Caller must hold the lock.
-func (e *Engine) statusLocked() Status {
+// statusLocked builds the API view, resolving featured missions from mission.
+// Caller must hold the lock.
+func (e *Engine) statusLocked(mission MissionContext) Status {
 	current := e.currentTierLocked()
 
 	byTier := map[int]*TierView{}
@@ -336,6 +458,7 @@ func (e *Engine) statusLocked() Status {
 	completedCount := 0
 	resolvedCount := 0
 	var next *QuestView
+	missions := []QuestView{}
 
 	for _, q := range e.quests {
 		completedAt, done := e.state.CompletedQuests[q.ID]
@@ -358,6 +481,10 @@ func (e *Engine) statusLocked() Status {
 		qv := QuestView{
 			ID: q.ID, Tier: q.Tier, Title: q.Title, Why: q.Why, Status: status,
 			ActionURL: q.ActionURL, ActionLabel: q.ActionLabel, Optional: q.Optional,
+			Featured: q.Featured, Order: q.Order,
+		}
+		if q.Resolve != nil {
+			applyPresentation(&qv, q.Resolve(mission), resolved)
 		}
 		if e.rewards != nil {
 			if amount, ok := e.rewards(q.ID); ok {
@@ -373,9 +500,13 @@ func (e *Engine) statusLocked() Status {
 			qv.SkippedAt = &at
 		}
 
+		if q.Featured {
+			missions = append(missions, qv)
+		}
+
 		tv, ok := byTier[q.Tier]
 		if !ok {
-			tv = &TierView{Tier: q.Tier, Name: TierName(q.Tier), Complete: true}
+			tv = &TierView{Tier: q.Tier, Name: e.tierNames[q.Tier], Complete: true}
 			byTier[q.Tier] = tv
 			order = append(order, q.Tier)
 		}
@@ -395,16 +526,43 @@ func (e *Engine) statusLocked() Status {
 		tiers = append(tiers, *byTier[t])
 	}
 
+	// Stable, so two missions that share an Order keep their graph order.
+	sort.SliceStable(missions, func(i, j int) bool { return missions[i].Order < missions[j].Order })
+
 	total := len(e.quests)
 	return Status{
 		Tiers:          tiers,
 		CurrentTier:    current,
-		TotalTiers:     TotalTiers,
+		TotalTiers:     e.totalTiers,
 		CompletedCount: completedCount,
 		ResolvedCount:  resolvedCount,
 		TotalCount:     total,
 		AllComplete:    resolvedCount == total,
 		Dismissed:      e.state.Dismissed,
 		NextQuest:      next,
+		Missions:       missions,
 	}
+}
+
+// applyPresentation overlays a mission's resolved copy onto its view. Empty
+// strings keep the static value. InProgress and Hint apply only while the quest
+// is unresolved: a completed or skipped mission is never "in progress", and
+// advice about finishing it no longer applies.
+func applyPresentation(qv *QuestView, p MissionPresentation, resolved bool) {
+	if p.Title != "" {
+		qv.Title = p.Title
+	}
+	if p.Why != "" {
+		qv.Why = p.Why
+	}
+	if hint := strings.TrimSpace(p.Hint); hint != "" && !resolved {
+		qv.Why = strings.TrimSpace(qv.Why + " " + hint)
+	}
+	if p.ActionURL != "" {
+		qv.ActionURL = p.ActionURL
+	}
+	if p.ActionLabel != "" {
+		qv.ActionLabel = p.ActionLabel
+	}
+	qv.InProgress = p.InProgress && !resolved
 }

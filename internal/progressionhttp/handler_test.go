@@ -55,6 +55,49 @@ func TestGetStatus(t *testing.T) {
 	}
 }
 
+// The Quests card renders from `missions`, so the JSON must carry the
+// featured quests with their order, featured flag, and resolved state.
+func TestGetStatus_IncludesResolvedMissions(t *testing.T) {
+	engine := progression.New(&memStore{},
+		progression.WithGraph(progression.PersonalAssistantGraph()),
+		progression.WithMissionContext(func() progression.MissionContext { return progression.MissionContext{} }),
+	)
+	rec := httptest.NewRecorder()
+	NewHandler(engine).GetStatus(rec, httptest.NewRequest(http.MethodGet, "/api/progression", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want 200", rec.Code)
+	}
+
+	var raw struct {
+		Missions []map[string]any `json:"missions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(raw.Missions) != 4 {
+		t.Fatalf("missions = %d, want 4 (body=%s)", len(raw.Missions), rec.Body.String())
+	}
+	for i, mission := range raw.Missions {
+		if order, _ := mission["order"].(float64); int(order) != i+1 {
+			t.Fatalf("missions[%d].order = %v, want %d", i, mission["order"], i+1)
+		}
+		if featured, _ := mission["featured"].(bool); !featured {
+			t.Fatalf("missions[%d].featured = %v", i, mission["featured"])
+		}
+	}
+	if raw.Missions[1]["id"] != progression.TidyDownloadsQuestID {
+		t.Fatalf("missions[1] = %v", raw.Missions[1]["id"])
+	}
+
+	// A graph without featured quests still sends an empty list, never null.
+	h, _ := newHandler()
+	rec = httptest.NewRecorder()
+	h.GetStatus(rec, httptest.NewRequest(http.MethodGet, "/api/progression", nil))
+	if !strings.Contains(rec.Body.String(), `"missions":[]`) {
+		t.Fatalf("built-in graph missions not an empty list: %s", rec.Body.String())
+	}
+}
+
 func TestGetStatus_RejectsNonGet(t *testing.T) {
 	h, _ := newHandler()
 	rec := httptest.NewRecorder()

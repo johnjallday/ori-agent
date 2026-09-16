@@ -100,6 +100,17 @@ test('sanitizeWorkspaceURLState accepts panel=settings (the Plans page deep link
   assert.deepEqual(dropped, []);
 });
 
+// Today's File Janitor line links to ?panel=file-janitor&tab=history. That
+// panel belongs to the capability console, which reads it itself; the page must
+// neither open a drawer for it nor toast that the link was out of date.
+test('sanitizeWorkspaceURLState leaves capability console panels alone without a stale notice', () => {
+  for (const panel of ['file-janitor', 'calendar']) {
+    const { state, dropped } = sanitizeWorkspaceURLState({ panel }, {});
+    assert.equal(state.panel, '', `${panel} opened a workspace drawer`);
+    assert.deepEqual(dropped, [], `${panel} was reported as out of date`);
+  }
+});
+
 test('sanitizeWorkspaceURLState allows panel=tasks with no task id (drawer opens without a restored preview)', () => {
   const { state, dropped } = sanitizeWorkspaceURLState({ panel: 'tasks' }, { validTaskIds: [] });
   assert.equal(state.panel, 'tasks');

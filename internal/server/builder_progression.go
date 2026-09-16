@@ -14,8 +14,15 @@ import (
 
 // initializeProgression wires the onboarding quest-log: it builds the engine
 // (persisting through the onboarding manager), subscribes it to the event bus,
-// runs the one-time backfill scan, and connects the "personalize" rename hook.
-// Safe to call once the event bus and onboarding manager exist.
+// and connects the hooks whose owners already exist in Phase 19 (personalize
+// and Personal HQ designation).
+//
+// The personal assistant, its first-assignment handler, the setup journey,
+// and the Daily Brief are built later, in initializeDailyBrief (Phase 22.6).
+// Everything that reads or hooks them, including the one-time backfill, runs
+// in completeProgressionWiring after that phase. Wiring them here bound nil:
+// the first-day hook and its reconcile were silently never installed on a
+// real server.
 func (b *ServerBuilder) initializeProgression() {
 	if b.onboardingMgr == nil || b.eventBus == nil {
 		return
@@ -23,7 +30,10 @@ func (b *ServerBuilder) initializeProgression() {
 
 	engine := progression.New(
 		b.onboardingMgr,
-		progression.WithQuests(progression.PersonalAssistantQuests()),
+		progression.WithGraph(progression.PersonalAssistantGraph()),
+		// The starter missions resolve their card from per-user state read at
+		// status time (focus areas, File Janitor setup, email setup, model).
+		progression.WithMissionContext(b.starterMissionContext),
 		// What each quest pays, for the quest log to display. The amounts live
 		// in the economy's own tuning file; progression only renders them.
 		progression.WithRewards(economy.StarterQuestCraft),
@@ -75,16 +85,69 @@ func (b *ServerBuilder) initializeProgression() {
 		})
 	}
 
-	// A first-assignment apply has its own atomic durability boundary. Progression
-	// observes only the successful result and remains safe to retry independently.
+	b.progressionHandler = progressionhttp.NewHandler(engine)
+}
+
+// starterMissionsReconcileKey names the one-time grandfathering pass for the
+// starter missions. Never change it: a new key re-runs the pass.
+const starterMissionsReconcileKey = "starter-missions-v1"
+
+// completeProgressionWiring installs the progression hooks whose owners are
+// built in initializeDailyBrief, then runs the one-time backfill and the
+// startup reconcile. Call it after that phase. Safe when progression was not
+// initialized.
+func (b *ServerBuilder) completeProgressionWiring() {
+	engine := b.progressionEngine
+	if engine == nil {
+		return
+	}
+
+	// Connect one source (Mission 03) completes from ANY branch (PRD FR14).
+	//
+	// Plan: a first-assignment apply has its own atomic durability boundary.
+	// Progression observes only the successful result.
 	if b.personalAssistantHandler != nil {
 		b.personalAssistantHandler.SetOnFirstAssignmentCompleted(func() {
-			engine.Complete(progression.PersonalAssistantFirstDayQuestID)
+			engine.Complete(progression.ConnectSourceQuestID)
+		})
+	}
+	// Email: the guided Email Ops setup first reaching ready.
+	if b.setupJourneyService != nil {
+		b.setupJourneyService.SetOnFirstReady(onEmailSetupFirstReady(engine))
+	}
+	// Calendar: a ready calendar binding on a Calendar Ops workspace. Project:
+	// the engine's own Match on workspace.created.
+	if b.eventBus != nil {
+		b.eventBus.SubscribeToEventType(workspace.EventWorkspaceUpdated, func(ev workspace.Event) {
+			if calendarBindingConnected(b.starterWorkspaces(), ev) {
+				engine.Complete(progression.ConnectSourceQuestID)
+			}
 		})
 	}
 
+	// Read your first Daily Brief (Mission 04): Today served with a brief.
+	if b.personalAssistantToday != nil {
+		b.personalAssistantToday.SetOnBriefSeen(func(string) {
+			engine.Complete(progression.FirstBriefQuestID)
+		})
+	}
+
+	// Installs whose backfill ran before the starter missions existed get one
+	// silent grandfathering pass for them (PRD FR44): a ready File Janitor, a
+	// connected source, or an existing brief shows as done, with no toast
+	// storm and no Craft paid for past work. Runs before Backfill, which covers
+	// a fresh install on its own.
+	scanner := progression.ScannerFunc(b.scanProgression)
+	if marked, err := engine.ReconcileOnce(starterMissionsReconcileKey, scanner,
+		progression.TidyDownloadsQuestID, progression.ConnectSourceQuestID, progression.FirstBriefQuestID,
+	); err != nil {
+		logger.Warn("Starter missions reconcile failed", logger.Fields{"error": err})
+	} else if marked > 0 {
+		logger.Info("Starter missions grandfathered", logger.Fields{"quests": marked})
+	}
+
 	// One-time backfill so established installs are grandfathered silently.
-	if err := engine.Backfill(progression.ScannerFunc(b.scanProgression)); err != nil {
+	if err := engine.Backfill(scanner); err != nil {
 		logger.Warn("Onboarding progression backfill failed", logger.Fields{"error": err})
 	}
 	// Reconcile installs whose one-time progression backfill predates this quest.
@@ -92,11 +155,9 @@ func (b *ServerBuilder) initializeProgression() {
 	// status load, so a restart cannot replay the first-day flow or toast old work.
 	if b.personalAssistantService != nil {
 		if state, err := b.personalAssistantService.Get(context.Background(), userprofile.LocalUserID); err == nil && state.FirstAssignment == personalassistant.FirstAssignmentCompleted {
-			engine.Complete(progression.PersonalAssistantFirstDayQuestID)
+			engine.Complete(progression.ConnectSourceQuestID)
 		}
 	}
-
-	b.progressionHandler = progressionhttp.NewHandler(engine)
 }
 
 // scanProgression gathers a best-effort Snapshot of existing state for the
@@ -122,9 +183,11 @@ func (b *ServerBuilder) scanProgression() progression.Snapshot {
 		snap.Personalized = true
 	}
 
+	hqWorkspaceID := ""
 	if b.personalHQService != nil {
 		if status, err := b.personalHQService.Status(context.Background(), userprofile.LocalUserID); err == nil && status.Valid {
 			snap.HasPersonalHQ = true
+			hqWorkspaceID = status.WorkspaceID
 		}
 	}
 
@@ -132,6 +195,23 @@ func (b *ServerBuilder) scanProgression() progression.Snapshot {
 		if state, err := b.personalAssistantService.Get(context.Background(), userprofile.LocalUserID); err == nil {
 			snap.FirstAssignmentCompleted = state.FirstAssignment == personalassistant.FirstAssignmentCompleted
 		}
+	}
+
+	// Mission 02: a File Janitor workspace whose setup already reached ready.
+	if _, ready, ok := findJanitorWorkspace(b.starterWorkspaces()); ok {
+		snap.FileJanitorReady = ready
+	}
+
+	// Mission 03: any source already connected, on any branch.
+	snap.EmailOpsReady = b.emailSetupEverReady()
+	snap.CalendarReady, snap.ProjectWorkspaces = scanStarterWorkspaces(b.starterWorkspaces(), hqWorkspaceID)
+	if b.progressionEngine != nil {
+		snap.LegacyFirstDayCompleted = b.progressionEngine.HasCompleted(progression.PersonalAssistantFirstDayQuestID)
+	}
+
+	// Mission 04: HQ already has a Daily Brief revision.
+	if b.dailyBriefService != nil {
+		snap.HasBriefRevision = briefRevisionExists(b.dailyBriefService, hqWorkspaceID)
 	}
 
 	// Count notes only until we find one — the quest just needs "> 0".

@@ -1291,6 +1291,12 @@ body.home-command-page .home-command-bridge * {
   color: var(--hc-amber);
 }
 
+/* A started mission (a workspace created but not set up) reads as live work,
+   not as a fresh "Ready" objective. */
+.quest-log-first-mission.is-in-progress .quest-log-first-mission-status {
+  color: var(--hc-signal);
+}
+
 .quest-log-first-mission.is-complete {
   grid-template-columns: 1fr;
   border-color: var(--hc-line-bright);

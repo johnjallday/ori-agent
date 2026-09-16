@@ -9,10 +9,12 @@
 # analyzer, so it prompts no matter how many rules exist. A script is one
 # stable token. Put the shell in here, not in the tool call.
 #
-# This worktree's feature: Retire the Agent Type field
-# (tasks/prd-retire-agent-type.md): agent-type-api, agent-type-strip.
+# This worktree's feature: Starter missions (tasks/prd-starter-missions.md):
+# starter, which waits for the server and runs a stage of
+# scripts/demo-starter-missions.mjs.
 # Earlier features' checks are kept, because the point of one stable name is
-# that it accumulates: City Economy (tasks/prd-city-economy.md), Agents Page
+# that it accumulates: Retire the Agent Type field
+# (tasks/prd-retire-agent-type.md), City Economy (tasks/prd-city-economy.md), Agents Page
 # UX (tasks/prd-agents-page-ux.md), Workspace
 # Planning Workflow (tasks/prd-workspace-planning-policy.md) and the
 # domain-specialist onboarding checks all still live below.
@@ -1355,6 +1357,30 @@ serve_isolated() {
   HOME="$dir" ORI_DATA_DIR="$dir" PORT="$port" exec "$binary"
 }
 
+# smoke_starter waits for a running isolated server, then runs one stage of the
+# starter missions browser demo, saving screenshots under $TMPDIR/starter-demo.
+# The wait and the run were a repeated two-step shell during development; here
+# they are one stable command. Extra arguments go to the demo script, e.g.
+#   ./scripts/smoke.sh starter http://localhost:8947 email --focus=help_with_email
+#   ./scripts/smoke.sh starter http://localhost:8947 tidy --sandbox="$TMPDIR/ori-smoke-starter"
+smoke_starter() {
+  local stage="${3:-}"
+  [[ -n "$stage" ]] || fail "usage: $0 starter <base-url> <card|tidy|email|plan|results|states> [demo flags]"
+  local ready=""
+  for _ in $(seq 1 30); do
+    if curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/progression" | grep -q 200; then
+      ready=1
+      break
+    fi
+    sleep 1
+  done
+  [[ -n "$ready" ]] || fail "no server answered at $BASE_URL within 30s"
+  local root out
+  root="$(cd "$(dirname "$0")/.." && pwd -P)"
+  out="${TMPDIR:-/tmp}/starter-demo"
+  node "$root/scripts/demo-starter-missions.mjs" "$BASE_URL" "$out" "$stage" "${@:4}"
+}
+
 # smoke_specialist checks the server side of the detected-app offer. The
 # browser paths are covered by tests/domain-specialist-onboarding.spec.ts.
 smoke_specialist() {
@@ -2045,6 +2071,7 @@ print(any(t.get("id") == "downloads-janitor" for t in d.get("templates", [])))')
 
 case "${1:-}" in
 serve) serve_isolated "${2:-8931}" "${3:-default}" ;;
+starter) smoke_starter "$@" ;;
 agent-type-api) smoke_agent_type_api ;;
 agent-type-strip) smoke_agent_type_strip "$@" ;;
 economyseed) smoke_economy_seed ;;
@@ -2072,6 +2099,7 @@ janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
 *)
   echo "usage:" >&2
   echo "  $0 serve [port] [sandbox-name]           # run an ISOLATED demo server (Ctrl-C to stop)" >&2
+  echo "  $0 starter <base-url> <stage> [flags]    # starter missions: wait for the server, run a demo stage" >&2
   echo "  $0 agent-type-api <base-url>             # retired agent type: API accepts and never echoes it" >&2
   echo "  $0 agent-type-strip [port]               # retired agent type: boot strips it from a seeded sandbox" >&2
   echo "  $0 agentseed <base-url> [sandbox-name]   # fill a sandbox with a demo agent roster" >&2

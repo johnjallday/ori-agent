@@ -56,9 +56,10 @@ Characterized so far:
 - Emptying the global agent tree twice re-adopts legacy CWD profiles twice.
   Rebuilding a local workspace allowlist re-enables retained agent snapshots.
   A configured operator workspace root bypasses first-run staging consent.
-- The real progression builder re-completes first day after an engine reset
-  when the old relationship says its first assignment completed. Old app-state
-  names also seed a fresh database profile.
+- The real progression builder re-completes Connect one source (the starter
+  mission that replaced first day) after an engine reset when the old
+  relationship says its first assignment completed. Old app-state names also
+  seed a fresh database profile.
 - Clearing the MCP registry re-imports synthetic Codex config on every enabled
   startup; the existing explicit import-disable switch prevents it. Imported
   commands stay stopped, and the external config stays byte-identical.

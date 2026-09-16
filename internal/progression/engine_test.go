@@ -40,18 +40,24 @@ func completed(e *Engine, id string) bool {
 	return false
 }
 
-func TestPersonalAssistantQuests_FeatureFirstDayWithoutChangingLegacyGraph(t *testing.T) {
+func TestPersonalAssistantQuests_PlanFirstDayIsABranchNotAQuest(t *testing.T) {
 	legacy := New(&fakeStore{})
 	if questView(legacy, PersonalAssistantFirstDayQuestID) != nil {
 		t.Fatal("legacy graph unexpectedly contains the personal-assistant first-day quest")
 	}
 
-	paf := New(&fakeStore{}, WithQuests(PersonalAssistantQuests()))
-	firstDay := questView(paf, PersonalAssistantFirstDayQuestID)
-	if firstDay == nil || firstDay.Tier != 1 || !firstDay.Optional || firstDay.ActionURL != "/?quest=plan-first-day" {
-		t.Fatalf("unexpected PAF first-day quest: %+v", firstDay)
+	// The retired quest is gone from the cohort graph; its flow is the plan
+	// branch of Connect one source, whose static copy is that branch.
+	paf := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()))
+	if questView(paf, PersonalAssistantFirstDayQuestID) != nil {
+		t.Fatal("the cohort graph still contains the retired first-day quest")
 	}
-	if paf.Status().TotalCount != legacy.Status().TotalCount+1 {
+	connect := questView(paf, ConnectSourceQuestID)
+	if connect == nil || connect.Tier != 1 || !connect.Optional || connect.ActionURL != PlanFirstDayActionURL {
+		t.Fatalf("unexpected Connect one source mission: %+v", connect)
+	}
+	// Four missions added, first day and create-workspace dropped.
+	if paf.Status().TotalCount != legacy.Status().TotalCount+2 {
 		t.Fatalf("PAF total = %d, legacy total = %d", paf.Status().TotalCount, legacy.Status().TotalCount)
 	}
 }
@@ -139,8 +145,8 @@ func TestPersonalAssistantQuests_BackfillCompletedFirstAssignment(t *testing.T) 
 	})); err != nil {
 		t.Fatal(err)
 	}
-	if !completed(e, PersonalAssistantFirstDayQuestID) {
-		t.Fatal("completed first assignment did not backfill its quest")
+	if !completed(e, ConnectSourceQuestID) {
+		t.Fatal("completed first assignment did not backfill Connect one source")
 	}
 }
 

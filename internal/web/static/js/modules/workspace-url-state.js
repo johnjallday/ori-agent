@@ -32,6 +32,11 @@ const VALID_MODES = new Set([MODE.MAP, MODE.DETAILS, MODE.DASHBOARD]);
 // the workspace with a confusing "some link details were out of date" toast
 // and no settings in sight.
 const VALID_PANELS = new Set(['tasks', 'backlog', 'settings']);
+// Panels a capability console owns on the same page: File Janitor's console
+// (`?panel=file-janitor`, its History deep link from Today) and Calendar Ops'
+// (`?panel=calendar`). Those consoles read the parameter themselves. They are
+// not this page's drawers, so they are neither applied nor reported as stale.
+const CONSOLE_PANELS = new Set(['file-janitor', 'calendar']);
 
 /** Parse a query string (with or without a leading `?`) into raw URL state. */
 export function parseWorkspaceURLState(search) {
@@ -77,7 +82,7 @@ export function sanitizeWorkspaceURLState(state, context = {}) {
   const out = { mode: s.mode || null, panel: '', task: '', agent: '', run: '' };
 
   if (s.panel && VALID_PANELS.has(s.panel)) out.panel = s.panel;
-  else if (s.panel) dropped.push('panel');
+  else if (s.panel && !CONSOLE_PANELS.has(s.panel)) dropped.push('panel');
 
   // `task` names the selected item within whichever drawer `panel` opens —
   // validate it against that drawer's own ID set (tasks and backlog items

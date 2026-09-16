@@ -8,6 +8,7 @@
 package progression
 
 import (
+	"net/url"
 	"strings"
 
 	ws "github.com/johnjallday/ori-agent/internal/workspace"
@@ -16,9 +17,83 @@ import (
 // TotalTiers is the number of tiers in the built-in quest graph.
 const TotalTiers = 6
 
-// PersonalAssistantFirstDayQuestID is the PAF cohort's featured first mission.
-// It remains stable because progression completions are persisted by ID.
+// PersonalAssistantFirstDayQuestID was the PAF cohort's featured first mission
+// before the starter missions. It is no longer in any graph, but the ID stays
+// because completions are persisted by it: a recorded completion is evidence
+// that the user already connected a source (see ConnectSourceQuestID).
 const PersonalAssistantFirstDayQuestID = "t1-plan-first-day"
+
+// The starter missions' persisted IDs. Never change them once shipped.
+const (
+	// TidyDownloadsQuestID is Mission 02: a File Janitor workspace whose setup
+	// wizard reached ready.
+	TidyDownloadsQuestID = "pa-tidy-downloads"
+	// ConnectSourceQuestID is Mission 03: one source connected, chosen from the
+	// hire's focus areas.
+	ConnectSourceQuestID = "pa-connect-source"
+	// FirstBriefQuestID is Mission 04: Today served with a Daily Brief.
+	FirstBriefQuestID = "pa-first-brief"
+)
+
+// TidyDownloadsActionURL starts Ori's deterministic Mission 02 walkthrough.
+const TidyDownloadsActionURL = "/?quest=tidy-downloads"
+
+// PlanFirstDayActionURL opens the existing first-assignment flow, the plan
+// branch of Mission 03.
+const PlanFirstDayActionURL = "/?quest=plan-first-day"
+
+// MissionContext is the per-user state a featured mission resolves its card
+// from. The server fills it from the services that own each fact, so this
+// package never imports them.
+type MissionContext struct {
+	// FocusAreas are the focus-area values the user chose at hire.
+	FocusAreas []string
+	// FileJanitor is the user's File Janitor workspace, or nil when none exists.
+	FileJanitor *MissionWorkspace
+	// EmailQuestStarted is true when the guided email setup exists but is not
+	// ready yet.
+	EmailQuestStarted bool
+	// EmailQuestURL opens the guided email setup. The server passes it in so
+	// this package does not import the host quest catalog.
+	EmailQuestURL string
+	// ModelConfigured is true when a model is available to generate a brief.
+	ModelConfigured bool
+}
+
+// MissionWorkspace identifies a workspace a mission points at.
+type MissionWorkspace struct {
+	Slug        string
+	WizardReady bool
+}
+
+// MissionPresentation is what a mission's Resolve returns. An empty string
+// keeps the quest's static value, so a Resolve that has nothing to change
+// returns the zero value.
+type MissionPresentation struct {
+	Title       string
+	Why         string
+	ActionURL   string
+	ActionLabel string
+	// InProgress is true when the user has started the mission but not
+	// finished it. It is ignored once the quest is completed or skipped.
+	InProgress bool
+	// Hint is a sentence appended to the why line only while the mission is
+	// open, for advice that stops being true once it is done.
+	Hint string
+}
+
+// Graph is a quest graph together with its tier metadata. Tier names belong
+// to the graph because a cohort can rename its tiers without touching another.
+type Graph struct {
+	Quests     []Quest
+	TierNames  map[int]string
+	TotalTiers int
+}
+
+// BuiltinGraph returns the built-in quests with their original tier names.
+func BuiltinGraph() Graph {
+	return Graph{Quests: BuiltinQuests(), TierNames: builtinTierNames(), TotalTiers: TotalTiers}
+}
 
 // Quest is one objective in the onboarding quest graph.
 type Quest struct {
@@ -49,20 +124,32 @@ type Quest struct {
 	// recorded in CompletedQuests — only a real observed action (live event,
 	// backfill, or direct Complete call) does that.
 	Optional bool
+	// Featured marks a starter mission: the Quests card shows the first
+	// unresolved featured quest, ordered by Order (1-based). Non-featured quests
+	// carry Order 0.
+	Featured bool
+	Order    int
+	// Resolve, when set, fills the card's title, why, and action from per-user
+	// state at status time. See MissionContext.
+	Resolve func(MissionContext) MissionPresentation
 }
 
-// tierNames maps a tier number to its display name.
-var tierNames = map[int]string{
-	1: "First Contact",
-	2: "Establish a Base",
-	3: "Recruit",
-	4: "Equip",
-	5: "Automate",
-	6: "Command",
+// builtinTierNames maps a built-in tier number to its display name. It is
+// built per call so no graph can mutate another's names.
+func builtinTierNames() map[int]string {
+	return map[int]string{
+		1: "First Contact",
+		2: "Establish a Base",
+		3: "Recruit",
+		4: "Equip",
+		5: "Automate",
+		6: "Command",
+	}
 }
 
-// TierName returns the display name for a tier, or "" if unknown.
-func TierName(tier int) string { return tierNames[tier] }
+// TierName returns the built-in graph's display name for a tier, or "" if
+// unknown. A cohort graph's names come from its Graph.TierNames instead.
+func TierName(tier int) string { return builtinTierNames()[tier] }
 
 // onEvent builds a Match that fires on any of the given event types.
 func onEvent(types ...ws.EventType) func(ws.Event) bool {
@@ -106,34 +193,239 @@ const BuildHQQuestID = "t2-build-hq"
 // selection, which is the first real interaction of the walkthrough.
 const GuidedBuildHQActionURL = "/?quest=build-hq"
 
-// PersonalAssistantQuests returns the cohort-specific graph.
+// PersonalAssistantQuests returns the cohort graph's quests. See
+// PersonalAssistantGraph.
+func PersonalAssistantQuests() []Quest { return PersonalAssistantGraph().Quests }
+
+// PersonalAssistantGraph returns the personal-assistant cohort's graph.
 //
-// Hiring creates the assistant profile and relationship only, so the featured
-// order is Build My HQ and then Plan my first day. Build My HQ is the ordinary
-// optional t2-build-hq record — this cohort only points its action at Ori's
-// guided walkthrough. The legacy graph remains byte-for-byte unchanged for
-// ineligible installs.
-func PersonalAssistantQuests() []Quest {
-	firstDay := Quest{
-		ID: PersonalAssistantFirstDayQuestID, Tier: 1,
-		Title:       "Plan my first day",
-		Why:         "Give your assistant today's priorities and commitments so it can prepare a useful Daily Brief.",
-		Satisfied:   func(s Snapshot) bool { return s.FirstAssignmentCompleted },
-		ActionURL:   "/?quest=plan-first-day",
-		ActionLabel: "Start first quest",
-		Optional:    true,
+// Tier 1, "Starter", is the four featured missions, each ending with Ori
+// visibly doing something: Build My HQ, Tidy your Downloads, Connect one
+// source, Read your first Daily Brief. Tier 2, "Daily loop", holds the ordinary
+// first-contact and base quests, so nothing a hired user already did reads as
+// still open. Tiers 3-6 are the built-in ones.
+//
+// Two built-in quests are dropped from this graph only. Plan my first day is
+// now one branch of Connect one source, and Create your first workspace is
+// what Mission 02 does. Their persisted completions stay harmlessly in place.
+// BuiltinGraph is unchanged for any non-cohort caller.
+func PersonalAssistantGraph() Graph {
+	builtin := map[string]Quest{}
+	for _, q := range BuiltinQuests() {
+		builtin[q.ID] = q
 	}
-	quests := append([]Quest{firstDay}, BuiltinQuests()...)
-	for i := range quests {
-		if quests[i].ID != BuildHQQuestID {
-			continue
+	retier := func(id string, tier int) Quest {
+		q := builtin[id]
+		q.Tier = tier
+		return q
+	}
+
+	// Only the tier and destination change. Completion still comes from a real
+	// designation, never from opening the quest.
+	buildHQ := retier(BuildHQQuestID, 1)
+	buildHQ.ActionURL = GuidedBuildHQActionURL
+	buildHQ.Why = "Give your assistant a home base — where it prepares your daily brief, tracks follow-ups, and helps you resume work."
+	buildHQ.Featured, buildHQ.Order = true, 1
+
+	quests := []Quest{
+		buildHQ,
+		{
+			ID: TidyDownloadsQuestID, Tier: 1, Featured: true, Order: 2, Optional: true,
+			Title:       "Tidy your Downloads",
+			Why:         "Let Ori sort one folder for you. It proposes, you approve, every move is undoable, and nothing leaves your machine.",
+			ActionURL:   TidyDownloadsActionURL,
+			ActionLabel: "Start",
+			Satisfied:   func(s Snapshot) bool { return s.FileJanitorReady },
+			Resolve:     resolveTidyDownloads,
+		},
+		{
+			ID: ConnectSourceQuestID, Tier: 1, Featured: true, Order: 3, Optional: true,
+			// The static copy is the plan branch, the fallback for every focus.
+			Title:       "Plan my first day",
+			Why:         "Give your assistant today's priorities and commitments so it can prepare a useful Daily Brief.",
+			ActionURL:   PlanFirstDayActionURL,
+			ActionLabel: "Start",
+			// Any branch completes it, not only the one the card offers (FR14).
+			// Live, a project workspace is observed here; email, calendar, and the
+			// first-day plan complete it from server hooks.
+			Match: IsProjectWorkspaceCreated,
+			Satisfied: func(s Snapshot) bool {
+				return s.FirstAssignmentCompleted || s.LegacyFirstDayCompleted ||
+					s.EmailOpsReady || s.CalendarReady || s.ProjectWorkspaces > 0
+			},
+			Resolve: resolveConnectSource,
+		},
+		{
+			ID: FirstBriefQuestID, Tier: 1, Featured: true, Order: 4, Optional: true,
+			Title:       "Read your first Daily Brief",
+			Why:         firstBriefWhy,
+			ActionURL:   "/",
+			ActionLabel: "Open Today",
+			Satisfied:   func(s Snapshot) bool { return s.HasBriefRevision },
+			Resolve:     resolveFirstBrief,
+		},
+		retier("t1-first-message", 2),
+		retier("t1-personalize", 2),
+		retier("t2-create-note", 2),
+		retier("t2-run-task", 2),
+	}
+	for _, q := range BuiltinQuests() {
+		if q.Tier >= 3 {
+			quests = append(quests, q)
 		}
-		// Only the destination changes. Completion still comes from a real
-		// designation, never from opening the quest.
-		quests[i].ActionURL = GuidedBuildHQActionURL
-		quests[i].Why = "Give your assistant a home base — where it prepares your daily brief, tracks follow-ups, and helps you resume work."
 	}
-	return quests
+
+	names := builtinTierNames()
+	names[1] = "Starter"
+	names[2] = "Daily loop"
+	return Graph{Quests: quests, TierNames: names, TotalTiers: TotalTiers}
+}
+
+// resolveTidyDownloads points Mission 02 at the right place for where the user
+// is (PRD FR9). With no File Janitor workspace the card starts the guided
+// walkthrough. With one whose setup is unfinished it sends the user back to
+// that workspace, where the wizard reopens. Once the wizard is ready the quest
+// is complete, so nothing changes.
+func resolveTidyDownloads(ctx MissionContext) MissionPresentation {
+	janitor := ctx.FileJanitor
+	if janitor == nil || janitor.WizardReady || strings.TrimSpace(janitor.Slug) == "" {
+		return MissionPresentation{}
+	}
+	return MissionPresentation{
+		ActionURL:   "/workspaces/" + url.PathEscape(strings.TrimSpace(janitor.Slug)),
+		ActionLabel: "Finish setup",
+		InProgress:  true,
+	}
+}
+
+// firstBriefWhy is Mission 04's static why line.
+const firstBriefWhy = "Ori pulls your priorities, follow-ups, and anything you connected into one morning brief."
+
+// resolveFirstBrief tells a user with no model that one is needed before a
+// brief can be generated (PRD FR21). The mission stays optional, so this never
+// locks the next tier.
+func resolveFirstBrief(ctx MissionContext) MissionPresentation {
+	if ctx.ModelConfigured {
+		return MissionPresentation{}
+	}
+	return MissionPresentation{Hint: "Add a model in Settings to generate one."}
+}
+
+// ConnectSourceBranch is the destination Mission 03 offers a user.
+type ConnectSourceBranch string
+
+// The Mission 03 branches, in priority order.
+const (
+	BranchEmail    ConnectSourceBranch = "email"
+	BranchCalendar ConnectSourceBranch = "calendar"
+	BranchProject  ConnectSourceBranch = "project"
+	BranchPlan     ConnectSourceBranch = "plan"
+)
+
+// CalendarOpsCreateURL opens the unified creator with Calendar Ops preselected.
+const CalendarOpsCreateURL = "/?create=1&blueprint=calendar-ops"
+
+// ProjectWorkspaceCreateURL opens the unified creator on its blueprint step.
+const ProjectWorkspaceCreateURL = "/?create=1"
+
+// ChooseConnectSourceBranch picks Mission 03's destination from the focus
+// areas chosen at hire (PRD FR13). When several match, the source the user
+// asked for help with and that brings the most outside signal wins: email,
+// then calendar, then a project workspace. Everything else, including
+// "something else" and no focus at all, plans the first day.
+//
+// Any branch completes the mission; this only decides which one the card
+// offers.
+func ChooseConnectSourceBranch(focus []string) ConnectSourceBranch {
+	has := map[string]bool{}
+	for _, value := range focus {
+		has[strings.TrimSpace(value)] = true
+	}
+	switch {
+	case has["help_with_email"]:
+		return BranchEmail
+	case has["prepare_for_meetings"]:
+		return BranchCalendar
+	case has["keep_projects_moving"]:
+		return BranchProject
+	default:
+		return BranchPlan
+	}
+}
+
+// resolveConnectSource presents Mission 03 as the branch the hire's focus
+// chose. The plan branch is the quest's static copy, so it changes nothing.
+func resolveConnectSource(ctx MissionContext) MissionPresentation {
+	switch ChooseConnectSourceBranch(ctx.FocusAreas) {
+	case BranchEmail:
+		url := strings.TrimSpace(ctx.EmailQuestURL)
+		if url == "" {
+			// No guided email setup is wired: offer the plan rather than a dead link.
+			return MissionPresentation{}
+		}
+		presentation := MissionPresentation{
+			Title:       "Set up email",
+			Why:         "So your brief can show what is waiting on you.",
+			ActionURL:   url,
+			ActionLabel: "Start",
+		}
+		if ctx.EmailQuestStarted {
+			presentation.ActionLabel = "Resume"
+			presentation.InProgress = true
+		}
+		return presentation
+	case BranchCalendar:
+		return MissionPresentation{
+			Title:       "Connect your calendar",
+			Why:         "So your brief can prepare you for today's meetings.",
+			ActionURL:   CalendarOpsCreateURL,
+			ActionLabel: "Start",
+		}
+	case BranchProject:
+		return MissionPresentation{
+			Title:       "Start a project workspace",
+			Why:         "So your brief can track what each project is waiting on.",
+			ActionURL:   ProjectWorkspaceCreateURL,
+			ActionLabel: "Start",
+		}
+	default:
+		return MissionPresentation{}
+	}
+}
+
+// starterTemplateIDs are the blueprints that are not a "project workspace" for
+// Mission 03: Personal HQ and the other starter destinations.
+var starterTemplateIDs = map[string]bool{
+	"personal-ops":      true,
+	"file-janitor":      true,
+	"downloads-janitor": true,
+	"email-ops":         true,
+	"calendar-ops":      true,
+}
+
+// IsProjectWorkspaceCreated reports whether a workspace.created event is the
+// project branch of Mission 03: a workspace (not a group) from the unified
+// creator whose blueprint is blank or not a starter one. An event without a
+// template_id key came from another producer and never counts.
+func IsProjectWorkspaceCreated(ev ws.Event) bool {
+	if ev.Type != ws.EventWorkspaceCreated || ev.Data == nil {
+		return false
+	}
+	raw, present := ev.Data["template_id"]
+	if !present {
+		return false
+	}
+	templateID, isString := raw.(string)
+	if !isString || starterTemplateIDs[strings.TrimSpace(templateID)] {
+		return false
+	}
+	return dataString(ev, "kind") != "group"
+}
+
+// IsStarterTemplateID reports whether a template ID is one of the starter
+// destinations that do not count as a project workspace.
+func IsStarterTemplateID(templateID string) bool {
+	return starterTemplateIDs[strings.TrimSpace(templateID)]
 }
 
 // BuiltinQuests returns the ordered built-in quest graph. The slice is freshly

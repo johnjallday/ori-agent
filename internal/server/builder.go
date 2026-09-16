@@ -337,6 +337,10 @@ type ServerBuilder struct {
 	sampleLibraryService     *samplelibrary.Service
 	sampleLibraryHandler     *samplelibraryhttp.Handler
 
+	// personalAssistantToday is kept so progression can observe the first
+	// Daily Brief the user is shown (starter missions Mission 04).
+	personalAssistantToday *personalassistant.TodayService
+
 	// Personal HQ designation and onboarding state
 	personalHQService *personalhq.Service
 	personalHQHandler *personalhqhttp.Handler
@@ -553,6 +557,7 @@ func (b *ServerBuilder) Build() (*Server, error) {
 	b.wireCalendarOpsPrepTaskExecutor() // Phase 22.1 — Calendar Ops meeting-prep needs the orchestrator
 	b.initializeMissionBridge()         // Phase 22.5 — wire mission cadence → run lifecycle
 	b.initializeDailyBrief()            // Phase 22.6 — wire personal hq daily brief storage/scheduling/synthesis
+	b.completeProgressionWiring()       // Phase 22.7 — progression hooks + backfill that need the assistant, journeys, and brief
 	b.initializeTemplateManager()       // Phase 23
 
 	// ═══════════════════════════════════════════════════════════════════════════

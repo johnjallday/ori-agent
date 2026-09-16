@@ -209,7 +209,9 @@ func (s *CapabilityService) workspaceCapabilityCards(userID, hqID string, entry 
 		CanRead:              "Events exposed by an existing Calendar Ops connection.",
 		CanPropose:           "Meeting preparation and internal follow-up records.",
 		RequiresConfirmation: "No external calendar write is mapped in Personal Assistant v1.",
-		MappedWrite:          false, ActionLabel: "Set up Calendar Ops", ActionRoute: "/construct?template=calendar-ops",
+		// The unified creator's deep link with Calendar Ops preselected. The old
+		// /construct?template= route no longer existed anywhere.
+		MappedWrite: false, ActionLabel: "Set up Calendar Ops", ActionRoute: "/?create=1&blueprint=calendar-ops",
 	}
 	projects := CapabilityCard{
 		Key: "projects", Label: "Projects and workspaces", Status: CapabilityHealthyEmpty,
@@ -253,7 +255,7 @@ func (s *CapabilityService) workspaceCapabilityCards(userID, hqID string, entry 
 			domainWorkspaceExists = true
 		}
 		if ws.TemplateProvenance != nil && ws.TemplateProvenance.TemplateID == "calendar-ops" {
-			if hasReadyCalendarBinding(ws) {
+			if HasReadyCalendarBinding(ws) {
 				calendar.Status = CapabilityAvailable
 				calendar.ActionLabel = "Open Calendar Ops"
 			} else {
@@ -283,7 +285,10 @@ func (s *CapabilityService) workspaceCapabilityCards(userID, hqID string, entry 
 	return []CapabilityCard{calendar, projects, folders}, domainWorkspaceExists
 }
 
-func hasReadyCalendarBinding(ws *workspace.Workspace) bool {
+// HasReadyCalendarBinding reports whether a workspace has an enabled MCP
+// binding that can list calendars and events: the one definition of "Calendar
+// Ops is connected", shared by the capability card and the starter missions.
+func HasReadyCalendarBinding(ws *workspace.Workspace) bool {
 	if ws == nil {
 		return false
 	}

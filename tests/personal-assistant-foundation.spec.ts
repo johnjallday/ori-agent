@@ -199,81 +199,103 @@ test.describe('Personal Assistant Foundation first value', () => {
         body: '{"success":true}'
       });
     });
-    await page.route('**/api/progression', route =>
-      route.fulfill({
+    await page.route('**/api/progression', route => {
+      // The starter missions, as the server resolves them. Mission 02 is
+      // already done here so this journey stays about the plan branch of
+      // Mission 03, which is what a plan-focused hire gets.
+      const missions = [
+        {
+          id: 't2-build-hq',
+          tier: 1,
+          order: 1,
+          featured: true,
+          title: 'Build My HQ',
+          why: 'Give your assistant a home base.',
+          // Only a real designation completes this — never hiring,
+          // opening the quest, or selecting the site.
+          status: active() ? 'completed' : hqQuestDeferred ? 'skipped' : 'available',
+          action_url: '/?quest=build-hq',
+          action_label: 'Build My HQ',
+          optional: true
+        },
+        {
+          id: 'pa-tidy-downloads',
+          tier: 1,
+          order: 2,
+          featured: true,
+          title: 'Tidy your Downloads',
+          why: 'Let Ori sort one folder for you.',
+          status: active() ? 'completed' : 'available',
+          action_url: '/?quest=tidy-downloads',
+          action_label: 'Start',
+          optional: true
+        },
+        {
+          id: 'pa-connect-source',
+          tier: 1,
+          order: 3,
+          featured: true,
+          title: 'Plan my first day',
+          why: 'Prepare a useful Daily Brief.',
+          status: firstAssignmentCompleted
+            ? 'completed'
+            : firstQuestDeferred
+              ? 'skipped'
+              : 'available',
+          action_url: '/?quest=plan-first-day',
+          action_label: 'Start',
+          optional: true
+        },
+        {
+          id: 'pa-first-brief',
+          tier: 1,
+          order: 4,
+          featured: true,
+          title: 'Read your first Daily Brief',
+          why: 'Ori pulls your priorities into one morning brief.',
+          status: 'available',
+          action_url: '/',
+          action_label: 'Open Today',
+          optional: true
+        }
+      ];
+      return route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
           current_tier: 1,
           total_tiers: 6,
-          total_count: 17,
-          completed_count: firstAssignmentCompleted ? 2 : 1,
-          resolved_count: firstAssignmentCompleted ? 2 : 1,
+          total_count: 18,
+          completed_count: missions.filter(m => m.status === 'completed').length,
+          resolved_count: missions.filter(m => m.status !== 'available').length,
           all_complete: false,
           dismissed: false,
-          next_quest: firstAssignmentCompleted
-            ? { id: 't1-first-message', title: 'Send your first request', status: 'available' }
-            : {
-                id: 't1-plan-first-day',
-                title: 'Plan my first day',
-                status: 'available'
-              },
+          next_quest: missions.find(m => m.status === 'available'),
+          missions,
           tiers: [
-            {
-              tier: 1,
-              name: 'First Contact',
-              complete: false,
-              quests: [
-                {
-                  id: 't1-plan-first-day',
-                  tier: 1,
-                  title: 'Plan my first day',
-                  why: 'Prepare a useful Daily Brief.',
-                  status: firstAssignmentCompleted
-                    ? 'completed'
-                    : firstQuestDeferred
-                      ? 'skipped'
-                      : 'available',
-                  action_url: '/?quest=plan-first-day',
-                  action_label: 'Start first quest',
-                  optional: true
-                },
-                {
-                  id: 't1-first-message',
-                  tier: 1,
-                  title: 'Send your first request',
-                  why: 'Ask for something.',
-                  status: 'available'
-                }
-              ]
-            },
+            { tier: 1, name: 'Starter', complete: false, quests: missions },
             {
               tier: 2,
-              name: 'Establish a Base',
+              name: 'Daily loop',
               complete: false,
               quests: [
                 {
-                  id: 't2-build-hq',
+                  id: 't1-first-message',
                   tier: 2,
-                  title: 'Build My HQ',
-                  why: 'Give your assistant a home base.',
-                  // Only a real designation completes this — never hiring,
-                  // opening the quest, or selecting the site.
-                  status: active() ? 'completed' : hqQuestDeferred ? 'skipped' : 'available',
-                  action_url: '/?quest=build-hq',
-                  action_label: 'Build My HQ',
-                  optional: true
+                  title: 'Send your first request',
+                  why: 'Ask for something.',
+                  status: 'locked-tier'
                 }
               ]
             }
           ]
         })
-      })
-    );
+      });
+    });
     await page.route('**/api/progression/skip', async route => {
       const body = route.request().postDataJSON();
       if (body && body.quest_id === 't2-build-hq') hqQuestDeferred = true;
-      else firstQuestDeferred = true;
+      else if (body && body.quest_id === 'pa-connect-source') firstQuestDeferred = true;
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -463,6 +485,7 @@ test.describe('Personal Assistant Foundation first value', () => {
     await expect(page.locator('#cockpitQuestsToggle')).toBeVisible();
     await page.locator('#cockpitQuestsToggle').click();
     await expect(page.locator('[data-role="first-mission-title"]')).toHaveText('Plan my first day');
+    await expect(page.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 03');
     await page.locator('[data-role="first-mission-action"]').click();
 
     await expect(page.locator('#onboardingPersonalAssistantAssignment')).toBeVisible();
@@ -476,11 +499,15 @@ test.describe('Personal Assistant Foundation first value', () => {
     await page.locator('#pafAssignmentBackBtn').click();
     await expect(page.locator('#onboardingModal')).toBeHidden();
     await page.locator('#cockpitQuestsToggle').click();
-    await expect(page.locator('[data-role="first-mission-status"]')).toHaveText('Saved for later');
-    await expect(page.locator('[data-role="first-mission-action-label"]')).toHaveText(
-      'Resume first quest'
-    );
-    await page.locator('[data-role="first-mission-action"]').click();
+    // A deferred mission never blocks the next one: the card moves on to
+    // Mission 04, and the deferred plan stays resumable from the list beneath.
+    await expect(page.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 04');
+    await expect(page.locator('[data-role="first-mission-status"]')).toHaveText('Ready');
+    const deferredRow = page
+      .locator('[data-role="quests"] .quest-item')
+      .filter({ hasText: 'Plan my first day' });
+    await expect(deferredRow).toContainText('Skipped');
+    await deferredRow.locator('.quest-resume').click();
     await expect(page.locator('#onboardingPersonalAssistantAssignment')).toBeVisible();
     await page.locator('#pafPriorityRows [data-field="title"]').first().fill('Review the launch');
     await page.locator('#pafPreviewAssignmentBtn').click();

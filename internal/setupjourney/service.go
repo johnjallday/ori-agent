@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
@@ -233,6 +234,90 @@ type Service struct {
 	userTemplateLocker userTemplateQuestMutationLocker
 	migrations         map[declarationMigrationKey]DeclarationMigration
 	now                func() time.Time
+	// onFirstReady is shared by pointer, so every scoped copy of this service
+	// (ForHostQuest and friends copy the struct) sees a hook installed on the
+	// original at startup.
+	onFirstReady *firstReadyHook
+}
+
+// firstReadyHook holds the in-process callback for a journey's first ready.
+type firstReadyHook struct {
+	mu sync.RWMutex
+	fn func(userID string, key QuestKey)
+}
+
+// SetOnFirstReady installs the callback fired exactly once per journey root:
+// when its FirstCompletedAt goes from unset to set (the first LifecycleReady).
+// It never fires on a repair, a regression, or a second ready, and it runs
+// after the store write has committed. Journey lifecycle events are otherwise
+// log-only; this is the one in-process observer, for the starter missions'
+// "Connect one source". Intended for startup wiring.
+func (s *Service) SetOnFirstReady(fn func(userID string, key QuestKey)) {
+	if s == nil || s.onFirstReady == nil {
+		return
+	}
+	s.onFirstReady.mu.Lock()
+	s.onFirstReady.fn = fn
+	s.onFirstReady.mu.Unlock()
+}
+
+// notifyFirstReady fires the first-ready hook for a committed root transition.
+func (s *Service) notifyFirstReady(before, after *Run) {
+	if s == nil || s.onFirstReady == nil || before == nil || after == nil {
+		return
+	}
+	if after.Kind != RunKindRoot || before.FirstCompletedAt != nil || after.FirstCompletedAt == nil {
+		return
+	}
+	s.onFirstReady.mu.RLock()
+	fn := s.onFirstReady.fn
+	s.onFirstReady.mu.RUnlock()
+	if fn != nil {
+		fn(after.OwnerUserID, s.questKeyForRun(after))
+	}
+}
+
+// finalizeOperation finalizes an operation receipt together with its run and
+// fires the first-ready hook when that write is the one that first made the
+// root ready. The stored run is read first so the transition is judged against
+// what was persisted, not against the derived candidate (which already carries
+// the new completion time). A failed pre-read only suppresses the hook; the
+// finalize itself is unchanged.
+func (s *Service) finalizeOperation(
+	ctx context.Context,
+	candidate *Run,
+	idempotencyKey string,
+	completion OperationCompletion,
+) (*OperationReceipt, *Run, bool, error) {
+	var before *Run
+	if candidate != nil {
+		before, _ = s.store.GetRun(ctx, candidate.ID)
+	}
+	receipt, updated, replayed, err := s.store.FinalizeOperation(ctx, candidate, idempotencyKey, completion)
+	if err == nil && !replayed {
+		s.notifyFirstReady(before, updated)
+	}
+	return receipt, updated, replayed, err
+}
+
+// questKeyForRun names the quest a root belongs to. A scoped service already
+// knows its key; otherwise the root's identity slug says which catalog owns it.
+func (s *Service) questKeyForRun(run *Run) QuestKey {
+	if s.quest != nil {
+		return *s.quest
+	}
+	switch run.SpecialistSlug {
+	case hostQuestSlug:
+		return QuestKey{Source: QuestSourceHost, ID: run.JourneyID}
+	case userTemplateQuestSlug:
+		return QuestKey{Source: QuestSourceUserTemplate, ID: run.JourneyID}
+	case pluginQuestSlug:
+		// The owner plugin is not on the root row; a consumer that needs it
+		// scopes the service first.
+		return QuestKey{Source: QuestSourcePlugin, ID: run.JourneyID}
+	default:
+		return QuestKey{ID: run.JourneyID}
+	}
 }
 
 func NewService(store Store, relationships RelationshipReader, readers *ReaderRegistry) (*Service, error) {
@@ -261,6 +346,7 @@ func newService(
 		store: store, relationships: relationships, readers: readers,
 		actionAdapters: make(map[specialist.SetupStepKind]JourneyActionAdapter),
 		resolveEntry:   resolve, migrations: migrationCopy, now: time.Now,
+		onFirstReady: &firstReadyHook{},
 	}, nil
 }
 
@@ -540,6 +626,7 @@ func (s *Service) reconcile(ctx context.Context, declaration *specialist.SetupJo
 						if !replayed {
 							emitActionOutcome(projection, step.ID, ActionID(busy.ActionID), specialistevents.OutcomeSucceeded, "")
 							emitLifecycleTransition(declaration, run, updated)
+							s.notifyFirstReady(run, updated)
 						}
 						return projection, nil
 					}
@@ -553,6 +640,7 @@ func (s *Service) reconcile(ctx context.Context, declaration *specialist.SetupJo
 		updated, updateErr := s.store.CompareAndSwapRun(ctx, candidate, run.StateRevision)
 		if updateErr == nil {
 			emitLifecycleTransition(declaration, run, updated)
+			s.notifyFirstReady(run, updated)
 			return projectionFromRun(declaration, updated, reads, nil, precondition), nil
 		}
 		if errors.Is(updateErr, ErrConflict) {

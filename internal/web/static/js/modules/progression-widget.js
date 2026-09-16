@@ -84,73 +84,61 @@ export function compactSummaryView(status) {
   };
 }
 
-export const FIRST_MISSION_QUEST_ID = 't2-build-hq';
-export const PERSONAL_ASSISTANT_FIRST_MISSION_QUEST_ID = 't1-plan-first-day';
+// missionKicker names a mission by its server-supplied order ("Mission 02").
+export function missionKicker(order) {
+  const value = Number(order);
+  return Number.isFinite(value) && value > 0 ? `Mission ${String(value).padStart(2, '0')}` : '';
+}
 
-const featuredMissionIDs = new Set([
-  PERSONAL_ASSISTANT_FIRST_MISSION_QUEST_ID,
-  FIRST_MISSION_QUEST_ID
-]);
-
-// Mission 01 is intentionally featured independently of the current tier.
+// The featured card is driven entirely by `status.missions`: the server's
+// featured quests, already in order and resolved for this user (copy, action,
+// and whether the mission is in progress). This module knows no quest IDs.
 //
-// Ordering: Build My HQ comes first and stays featured while it is available or
-// skipped, because the hired assistant has no home base until the user builds
-// one. Plan my first day is featured only once HQ is genuinely complete — a
-// designation, never merely opening the quest. Legacy installs carry no
-// first-day quest and so keep their existing Build My HQ presentation.
+// The card shows the first mission that is neither completed nor skipped, so a
+// deferred mission never blocks the next one. Once every mission is resolved
+// the card rests on the last one. If that last one was only deferred, the card
+// keeps its Resume action, because the checklist beneath never repeats the
+// mission on the card and it would otherwise be unreachable.
 export function firstMissionView(status) {
-  const quests = (status?.tiers || []).flatMap(tier => tier.quests || []);
-  const buildHQ = quests.find(candidate => candidate.id === FIRST_MISSION_QUEST_ID);
-  const firstDay = quests.find(
-    candidate => candidate.id === PERSONAL_ASSISTANT_FIRST_MISSION_QUEST_ID
-  );
+  const missions = Array.isArray(status?.missions) ? status.missions : [];
+  if (!missions.length || status?.all_complete) return { visible: false };
 
-  // While HQ is unresolved or deliberately deferred it remains the mission.
-  const quest = buildHQ && buildHQ.status !== 'completed' ? buildHQ : firstDay || buildHQ;
-  if (!quest || status?.all_complete) return { visible: false };
+  const isResolved = mission => mission.status === 'completed' || mission.status === 'skipped';
+  const quest = missions.find(mission => !isResolved(mission)) || missions[missions.length - 1];
 
   const completed = quest.status === 'completed';
   const skipped = quest.status === 'skipped';
-  const personalFirstDay = quest.id === PERSONAL_ASSISTANT_FIRST_MISSION_QUEST_ID;
-  // A first-day quest in the graph is what identifies the personal-assistant
-  // cohort; legacy installs must keep their own copy and destination.
-  const guidedHQ = quest.id === FIRST_MISSION_QUEST_ID && !!firstDay;
-  const resumable = personalFirstDay || guidedHQ;
+  const inProgress = !completed && !skipped && !!quest.in_progress;
+  const actionURL = quest.action_url || '';
 
   return {
     visible: true,
     questID: quest.id,
+    kicker: missionKicker(quest.order),
     completed,
     skipped,
+    inProgress,
     title: quest.title,
     why: quest.why || '',
     statusLabel: completed
       ? 'Complete'
       : skipped
-        ? resumable
-          ? 'Saved for later'
-          : 'Not set up'
-        : 'Ready',
-    actionLabel:
-      skipped && resumable
-        ? personalFirstDay
-          ? 'Resume first quest'
-          : 'Resume quest'
-        : quest.action_label || (personalFirstDay ? 'Start first quest' : 'Build My HQ'),
-    actionURL:
-      quest.action_url ||
-      (personalFirstDay ? '/?quest=plan-first-day' : '/workspaces?view=map&focus=personal-hq'),
-    showAction: !completed,
-    showSkip: resumable && !!quest.optional && !completed && !skipped
+        ? 'Saved for later'
+        : inProgress
+          ? 'In progress'
+          : 'Ready',
+    actionLabel: skipped ? 'Resume quest' : quest.action_label || 'Start',
+    actionURL,
+    showAction: !completed && !!actionURL,
+    showSkip: !!quest.optional && !completed && !skipped
   };
 }
 
-// Featured objectives are omitted from the ordinary tier list so Mission 01
-// never appears twice. PAF's automatically built HQ remains completed and is
-// likewise unnecessary in the list.
-export function tierQuestRows(tier) {
-  return (tier?.quests || []).filter(quest => !featuredMissionIDs.has(quest.id));
+// The tier list under the card omits exactly the mission the card shows, so no
+// mission ever appears twice and every other mission stays reachable with its
+// usual mark, Skip, or Resume.
+export function tierQuestRows(tier, shownMissionID) {
+  return (tier?.quests || []).filter(quest => !shownMissionID || quest.id !== shownMissionID);
 }
 
 // questRowState derives the pure per-row rendering decision for one quest:
@@ -367,11 +355,35 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     return li;
   }
 
+  // Other Quests-flyout cards need to know what the featured mission offers, so
+  // a setup with its own resume card (Email Ops) does not show two Resumes for
+  // one destination. The latest view is kept on window for a card that loads
+  // after this render, and each change is announced.
+  function announceFeaturedMission(view) {
+    const featured = {
+      visible: !!view.visible,
+      completed: !!view.completed,
+      actionURL: view.visible ? view.actionURL : ''
+    };
+    const previous = window.OriFeaturedMission;
+    window.OriFeaturedMission = featured;
+    if (
+      previous &&
+      previous.visible === featured.visible &&
+      previous.completed === featured.completed &&
+      previous.actionURL === featured.actionURL
+    ) {
+      return;
+    }
+    window.dispatchEvent(new CustomEvent('ori:featured-mission', { detail: featured }));
+  }
+
   function renderFirstMission(status) {
     const mission = el('first-mission');
     if (!mission) return;
 
     const view = firstMissionView(status);
+    announceFeaturedMission(view);
     if (!view.visible) {
       mission.hidden = true;
       return;
@@ -379,6 +391,15 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
 
     mission.classList.toggle('is-complete', view.completed);
     mission.classList.toggle('is-paused', view.skipped);
+    mission.classList.toggle('is-in-progress', view.inProgress);
+    const kicker = el('first-mission-kicker');
+    if (kicker && view.kicker) {
+      // Keep the signal dot; replace only the text beside it.
+      const signal = kicker.querySelector('.quest-log-first-mission-signal');
+      kicker.textContent = '';
+      if (signal) kicker.append(signal);
+      kicker.append(view.kicker);
+    }
     const title = el('first-mission-title');
     const why = el('first-mission-why');
     const state = el('first-mission-status');
@@ -437,6 +458,7 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     }
 
     renderFirstMission(status);
+    const shownMission = firstMissionView(status);
 
     el('tier-name').textContent = current.name;
     el('tier-insignia').textContent = tierInsignia(status.current_tier);
@@ -448,10 +470,14 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
 
     const list = el('quests');
     list.innerHTML = '';
-    tierQuestRows(current).forEach(q => list.appendChild(renderQuestRow(q)));
+    tierQuestRows(current, shownMission.visible ? shownMission.questID : '').forEach(q =>
+      list.appendChild(renderQuestRow(q))
+    );
 
+    // The card already states why its mission matters; never say it twice.
     const why = el('why');
-    why.textContent = status.next_quest ? status.next_quest.why : '';
+    const next = status.next_quest;
+    why.textContent = next && next.id !== shownMission.questID ? next.why : '';
 
     widget.hidden = false;
   }

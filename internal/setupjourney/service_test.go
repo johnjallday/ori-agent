@@ -735,3 +735,93 @@ func TestServiceChildReadsReuseRootScopeWithoutCopyingSharedReceipts(t *testing.
 		t.Fatalf("child persisted shared root receipts: %#v", persisted)
 	}
 }
+
+// The starter missions observe a guided email setup through SetOnFirstReady.
+// It fires once, when a host quest root first becomes ready, and never again:
+// not on a re-read, not on a regression, and not when the setup is repaired.
+func TestServiceOnFirstReadyFiresOnceForAHostQuestRoot(t *testing.T) {
+	ctx := context.Background()
+	_, store := openTestStore(t)
+	declaration := accountLinkDeclarationFixture(t)
+	reads := map[specialist.SetupStepKind]CanonicalStepRead{
+		specialist.SetupStepWorkspaceCreate: {AvailableActions: []ActionID{ActionReviewTeam}},
+	}
+	service, err := NewService(store, &relationshipStub{err: errors.New("host quests need no relationship")},
+		readerRegistryStub(t, reads, nil, nil, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.SetQuestCatalog(CombineQuestCatalogs(
+		NewInstalledQuestCatalog(&questPlugins{}),
+		NewHostQuestCatalog([]specialist.SetupJourney{*declaration}),
+	))
+	scoped, err := service.ForHostQuest(ctx, "local", declaration.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type firing struct {
+		userID string
+		key    QuestKey
+	}
+	var fired []firing
+	// Installed on the original AFTER scoping: every copy shares the hook.
+	service.SetOnFirstReady(func(userID string, key QuestKey) {
+		fired = append(fired, firing{userID, key})
+	})
+	read := func(label string) *JourneyProjection {
+		t.Helper()
+		projection, readErr := scoped.Read(ctx, "local", "")
+		if readErr != nil {
+			t.Fatalf("%s: %v", label, readErr)
+		}
+		return projection
+	}
+
+	if started := read("started"); started.Lifecycle == LifecycleReady || len(fired) != 0 {
+		t.Fatalf("an unfinished journey fired: lifecycle %s, fired %v", started.Lifecycle, fired)
+	}
+
+	complete := func() {
+		reads[specialist.SetupStepWorkspaceCreate] = CanonicalStepRead{
+			Complete: true, Result: CanonicalResult{ProjectWorkspaceID: "workspace-email-ops"},
+			WorkspaceCreate: &WorkspaceCreateProjection{
+				TemplateTitle: "Email Ops", WorkspaceID: "workspace-email-ops", WorkspaceLabel: "Email Ops", WorkspaceRoute: "/workspaces/email-ops",
+			},
+		}
+		reads[specialist.SetupStepAccountConnect] = CanonicalStepRead{
+			Complete:       true,
+			AccountConnect: &AccountConnectProjection{Configured: true, IdentityEmail: "person@example.com", GmailHealth: AccountHealthHealthy},
+		}
+		reads[specialist.SetupStepAccountLink] = CanonicalStepRead{
+			Complete:    true,
+			AccountLink: &AccountLinkProjection{WorkspaceLabel: "Email Ops", AccountEmail: "person@example.com", Linked: true, Ready: true},
+		}
+	}
+	complete()
+	if ready := read("ready"); ready.Lifecycle != LifecycleReady || ready.FirstCompletedAt == nil {
+		t.Fatalf("journey did not become ready: %#v", ready)
+	}
+	want := firing{userID: "local", key: QuestKey{Source: QuestSourceHost, ID: declaration.ID}}
+	if len(fired) != 1 || fired[0] != want {
+		t.Fatalf("first ready fired %v, want once with %v", fired, want)
+	}
+
+	read("ready again")
+
+	reads[specialist.SetupStepAccountConnect] = CanonicalStepRead{
+		BlockedReason:    ReasonAccountReconnectRequired,
+		AvailableActions: []ActionID{ActionOpenAccountSettings, ActionRecheckConnection},
+	}
+	if regressed := read("regressed"); regressed.Lifecycle != LifecycleNeedsAttention {
+		t.Fatalf("journey did not regress: %s", regressed.Lifecycle)
+	}
+
+	complete()
+	if repaired := read("repaired"); repaired.Lifecycle != LifecycleReady {
+		t.Fatalf("journey was not repaired: %s", repaired.Lifecycle)
+	}
+	if len(fired) != 1 {
+		t.Fatalf("hook fired %d times across re-read, regression, and repair; want 1", len(fired))
+	}
+}
