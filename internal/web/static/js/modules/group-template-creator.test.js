@@ -45,7 +45,7 @@ function environment({ fetch } = {}) {
       }
     })
   };
-  const window = {};
+  const window = { location: { href: '' } };
   const calls = [];
   const context = {
     window,
@@ -68,7 +68,7 @@ function environment({ fetch } = {}) {
   };
   const source = readFileSync(new URL('./group-template-creator.js', import.meta.url), 'utf8');
   vm.runInNewContext(source, context, { filename: 'group-template-creator.js' });
-  return { api: window.GroupTemplateCreator, element, calls };
+  return { api: window.GroupTemplateCreator, element, calls, window };
 }
 
 const managed = (overrides = {}) => ({
@@ -455,4 +455,289 @@ test('launcher adoption runs only for a Home this operation created, never on re
     assert.equal(await api.submit(creator), true);
     assert.deepEqual(adopted, expectCall ? ['home-1'] : []);
   }
+});
+
+// ---- Home role staffing ------------------------------------------------------
+
+const staffedTemplate = (overrides = {}) =>
+  managed({
+    home_roles: [
+      {
+        role_id: 'coordinator',
+        label: 'Portfolio Coordinator',
+        required: true,
+        primary: true,
+        default_name: 'Portfolio Manager'
+      },
+      {
+        role_id: 'curator',
+        label: 'Archive Curator',
+        required: false,
+        default_name: 'Archive Curator'
+      }
+    ],
+    ...overrides
+  });
+
+function staffingCreator(api, entry = staffedTemplate()) {
+  const creator = manager(api);
+  const state = creator.workspaceCreatorContext.groupTemplates;
+  state.items = state.items.map(item => (item.id === entry.id ? entry : item));
+  if (!state.items.some(item => item.id === entry.id)) state.items.push(entry);
+  api.select(creator, entry.id);
+  creator.wizardStep = 3;
+  return creator;
+}
+
+test('a managed template adds a Team step; every other group creator keeps its own steps', () => {
+  const { api } = environment();
+  const creator = manager(api);
+  assert.equal(api.wizardSteps(creator), null, 'General keeps its Group Manager roster steps');
+  api.select(creator, managed().id);
+  assert.deepEqual(asData(api.wizardSteps(creator)), [1, 2, 3, 4]);
+  api.select(creator, 'group-template:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+  assert.deepEqual(asData(api.wizardSteps(creator)), [1, 2, 3, 4], 'reuse stages fills too');
+
+  const guided = manager(api, 'guided');
+  guided.workspaceCreatorContext.guided = { groupTemplateId: managed().id };
+  assert.equal(api.wizardSteps(guided), null, 'guided setup keeps its own steps');
+  assert.equal(api.wizardSteps(manager(api, 'selected-members')), null);
+});
+
+test('required Home roles seed as Create under their default name; optional roles stay empty', () => {
+  const { api } = environment();
+  const creator = staffingCreator(api);
+  assert.equal(api.seedFills(creator), true);
+  assert.deepEqual(asData(api.stagedFill(creator, 'coordinator')), {
+    mode: 'create',
+    name: 'Portfolio Manager',
+    provider: '',
+    model: ''
+  });
+  assert.equal(api.stagedFill(creator, 'curator'), null);
+
+  // Seeding happens once: a cleared role stays cleared.
+  assert.equal(api.clearFill(creator, 'coordinator'), true);
+  assert.equal(api.seedFills(creator), false);
+  assert.equal(api.stagedFill(creator, 'coordinator'), null);
+
+  // Choosing another template forgets the plan; coming back seeds afresh.
+  api.select(creator, 'general');
+  api.select(creator, managed().id);
+  assert.equal(api.seedFills(creator), true);
+  assert.equal(api.stagedFill(creator, 'coordinator').name, 'Portfolio Manager');
+
+  // The roster the Team step draws: program Home roles carry no proposal.
+  const roster = api.teamRoster(creator);
+  assert.equal(roster.filled_count, 1);
+  assert.equal(roster.roles[0].state, 'filled');
+  assert.equal(roster.roles[0].agent.name, 'Portfolio Manager');
+  assert.match(roster.roles[0].description, /^Required/);
+  assert.equal(roster.roles[1].description, '', 'an empty row says Optional in its own tag');
+  assert.equal(
+    roster.roles.some(role => 'proposed' in role),
+    false
+  );
+});
+
+test('the review receipt and button name every Home role outcome', () => {
+  const { api, element } = environment();
+  const creator = staffingCreator(api);
+  element('folderNameInput').value = 'Lab';
+  api.seedFills(creator);
+  const entry = api.selectedManaged(creator.workspaceCreatorContext);
+
+  let html = api.rolesCardHTML(creator, entry);
+  assert.match(html, /Portfolio Coordinator · Create “Portfolio Manager”/);
+  assert.match(html, /Archive Curator · Not staffed/);
+  assert.equal(api.ctaLabel(creator), 'Create group and staff 1 role');
+
+  assert.equal(api.setFill(creator, 'curator', { mode: 'assign', name: 'Librarian' }), true);
+  html = api.rolesCardHTML(creator, entry);
+  assert.match(html, /Archive Curator · Assign “Librarian”/);
+  assert.equal(api.ctaLabel(creator), 'Create group and staff 2 roles');
+
+  api.clearFill(creator, 'coordinator');
+  api.clearFill(creator, 'curator');
+  assert.match(api.rolesCardHTML(creator, entry), /Portfolio Coordinator · Not staffed/);
+  assert.equal(api.ctaLabel(creator), 'Create group “Lab” only');
+});
+
+function staffingFetch({ commit = 'ok', roles = {} } = {}) {
+  return async url => {
+    if (url.endsWith('/review')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          group_template_review: { review_token: 'tok', reuse: false, home_name: 'Lab' }
+        })
+      };
+    }
+    if (url.endsWith('/commit')) {
+      if (commit === 'network') throw new Error('offline');
+      if (commit === 'refused') {
+        return { ok: false, status: 409, json: async () => ({ error: 'changed' }) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          group_template: {
+            home_workspace_id: 'home-9',
+            home_name: 'Lab',
+            created_by_this_operation: true
+          }
+        })
+      };
+    }
+    const roleId = decodeURIComponent(url.split('/').pop());
+    const answer = roles[roleId] || { status: 200, body: { roles: { roles: [] } } };
+    if (answer.throws) throw new Error(answer.throws);
+    return {
+      ok: answer.status >= 200 && answer.status < 300,
+      status: answer.status,
+      json: async () => answer.body || {}
+    };
+  };
+}
+
+async function confirmStaffing(
+  api,
+  element,
+  creator,
+  folders = [{ id: 'home-9', folder_slug: 'lab' }]
+) {
+  creator.folders = folders;
+  element('folderNameInput').value = 'Lab';
+  api.seedFills(creator);
+  await api.ensureReview(creator);
+  return api.submit(creator);
+}
+
+test('fills are sent one role at a time, only after the commit, and never carry a prompt', async () => {
+  const env = environment({ fetch: staffingFetch() });
+  const creator = staffingCreator(env.api);
+  env.api.setFill(creator, 'curator', { mode: 'assign', name: 'Librarian', model: 'ignored' });
+  assert.equal(await confirmStaffing(env.api, env.element, creator), true);
+
+  const order = env.calls.map(call => `${call.options.method || 'GET'} ${call.url}`);
+  assert.deepEqual(order, [
+    'POST /api/workspaces/group-templates/review',
+    'POST /api/workspaces/group-templates/commit',
+    'PUT /api/workspaces/home-9/roles/coordinator',
+    'PUT /api/workspaces/home-9/roles/curator'
+  ]);
+  const commit = JSON.parse(env.calls[1].options.body);
+  assert.deepEqual(Object.keys(commit).sort(), [
+    'group_review_token',
+    'group_template_id',
+    'idempotency_key',
+    'name',
+    'revision'
+  ]);
+  assert.deepEqual(JSON.parse(env.calls[2].options.body), {
+    mode: 'create',
+    name: 'Portfolio Manager',
+    provider: '',
+    model: ''
+  });
+  assert.deepEqual(JSON.parse(env.calls[3].options.body), {
+    mode: 'assign',
+    name: 'Librarian',
+    provider: '',
+    model: ''
+  });
+  for (const call of env.calls.slice(2)) {
+    assert.doesNotMatch(call.options.body, /system_prompt/);
+  }
+  assert.equal(env.window.location.href, '/workspaces/lab');
+});
+
+test('no role is filled when the commit fails or its response is lost', async () => {
+  for (const commit of ['refused', 'network']) {
+    const env = environment({ fetch: staffingFetch({ commit }) });
+    const creator = staffingCreator(env.api);
+    assert.equal(await confirmStaffing(env.api, env.element, creator), false);
+    assert.equal(
+      env.calls.some(call => call.options.method === 'PUT'),
+      false,
+      `${commit}: no PUT`
+    );
+    assert.equal(env.window.location.href, '');
+  }
+});
+
+test('an already-filled 409 counts as staffed; a failed fill still lands on the group at that role', async () => {
+  const retried = environment({
+    fetch: staffingFetch({
+      roles: {
+        coordinator: {
+          status: 409,
+          body: {
+            code: 'CONFLICT',
+            message: '"Portfolio Manager" already fills this role. Clear it first.'
+          }
+        }
+      }
+    })
+  });
+  const again = staffingCreator(retried.api);
+  assert.equal(await confirmStaffing(retried.api, retried.element, again), true);
+  assert.equal(retried.window.location.href, '/workspaces/lab');
+
+  const failing = environment({
+    fetch: staffingFetch({
+      roles: {
+        coordinator: {
+          status: 409,
+          body: { message: 'That role could not be filled; reload and try again.' }
+        }
+      }
+    })
+  });
+  const creator = staffingCreator(failing.api);
+  failing.api.setFill(creator, 'curator', { mode: 'create', name: 'Archivist' });
+  assert.equal(await confirmStaffing(failing.api, failing.element, creator), true);
+  assert.equal(
+    failing.calls.filter(call => call.options.method === 'PUT').length,
+    2,
+    'a failed role never stops the remaining fills'
+  );
+  assert.equal(failing.window.location.href, '/workspaces/lab?role=coordinator');
+});
+
+test('landing words name the staffed, failed, and unstaffed roles', () => {
+  const { api } = environment();
+  const entry = staffedTemplate();
+  const staffing = [
+    { roleId: 'coordinator', label: 'Portfolio Coordinator', fill: { mode: 'create', name: 'PM' } }
+  ];
+  const created = { home_name: 'Lab', created_by_this_operation: true };
+
+  const ready = api.landingNotice(created, entry, staffing, [
+    { roleId: 'coordinator', label: 'Portfolio Coordinator', ok: true }
+  ]);
+  assert.equal(ready.tone, 'success');
+  assert.equal(ready.message, 'Lab is ready. Portfolio Coordinator staffed.');
+  assert.equal(ready.roleId, '');
+
+  const reused = api.landingNotice({ home_name: 'Lab' }, entry, staffing, [
+    { roleId: 'coordinator', label: 'Portfolio Coordinator', ok: true }
+  ]);
+  assert.equal(reused.message, 'Lab reused. Portfolio Coordinator staffed.');
+
+  const failed = api.landingNotice(created, entry, staffing, [
+    { roleId: 'coordinator', label: 'Portfolio Coordinator', ok: false, error: 'Nope.' }
+  ]);
+  assert.equal(failed.tone, 'warning');
+  assert.equal(failed.message, 'Lab is ready. Portfolio Coordinator was not staffed: Nope.');
+  assert.equal(failed.roleId, 'coordinator');
+  assert.equal(failed.error, 'Nope.');
+
+  const cleared = api.landingNotice(created, entry, [], []);
+  assert.equal(cleared.tone, 'success');
+  assert.equal(cleared.message, 'Lab is ready. Portfolio Coordinator is not staffed yet.');
+  assert.equal(cleared.roleId, 'coordinator');
+  assert.equal(api.landingURL('my lab', 'coordinator'), '/workspaces/my%20lab?role=coordinator');
 });

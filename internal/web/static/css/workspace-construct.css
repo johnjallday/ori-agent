@@ -1216,7 +1216,8 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
     grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
     align-items: start;
   }
-  .workspace-create-modal .workspace-team-layout.is-assistant-program {
+  .workspace-create-modal .workspace-team-layout.is-assistant-program,
+  .workspace-create-modal .workspace-team-layout.is-roster-only {
     grid-template-columns: minmax(0, 1fr);
   }
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
@@ -27,16 +28,22 @@ type groupTemplateListResponse struct {
 	CatalogUnavailable bool `json:"catalog_unavailable"`
 }
 
-func getGroupTemplates(t *testing.T, handler *Handler) groupTemplateListResponse {
+func getGroupTemplatesRaw(t *testing.T, handler *Handler) string {
 	t.Helper()
 	response := httptest.NewRecorder()
 	handler.ListGroupTemplates(response, httptest.NewRequest(http.MethodGet, "/api/workspaces/group-templates", nil))
 	if response.Code != http.StatusOK {
 		t.Fatalf("list status = %d: %s", response.Code, response.Body.String())
 	}
+	return response.Body.String()
+}
+
+func getGroupTemplates(t *testing.T, handler *Handler) groupTemplateListResponse {
+	t.Helper()
+	raw := getGroupTemplatesRaw(t, handler)
 	var body groupTemplateListResponse
-	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode %s: %v", response.Body.String(), err)
+	if err := json.Unmarshal([]byte(raw), &body); err != nil {
+		t.Fatalf("decode %s: %v", raw, err)
 	}
 	return body
 }
@@ -54,6 +61,7 @@ func TestListGroupTemplates_OffersOnlyGeneralWithoutTrustedCatalog(t *testing.T)
 
 func TestListGroupTemplates_ProjectsExactHomeLifecycleWithoutMutation(t *testing.T) {
 	template := groupedPlanTemplate(projecttemplates.GroupPolicyRequired)
+	template.AssistantProgram.DefaultPrimaryName = "Neutral Coordinator"
 	handler, workspaceStore, cleanup := newPolicyHandler(t, &template)
 	defer cleanup()
 	installPlanAgentStore(t, handler)
@@ -74,6 +82,16 @@ func TestListGroupTemplates_ProjectsExactHomeLifecycleWithoutMutation(t *testing
 		entry.ProposedGroupName != "Neutral Program Home" || entry.Provider == nil || entry.Provider.PluginID != "neutral" ||
 		len(entry.HomeRoles) != 2 || len(entry.ProjectRoles) != 1 {
 		t.Fatalf("managed entry = %+v", entry)
+	}
+	// The creator proposes names only: the primary role gets the declared
+	// default primary name, any other role its label, and no prompt rides along.
+	if entry.HomeRoles[0].RoleID != "home-lead" || entry.HomeRoles[0].DefaultName != "Neutral Coordinator" ||
+		entry.HomeRoles[1].RoleID != "home-addon" || entry.HomeRoles[1].DefaultName != "Home Add-on" {
+		t.Fatalf("Home role default names = %+v", entry.HomeRoles)
+	}
+	if raw := getGroupTemplatesRaw(t, handler); strings.Contains(raw, "Coordinate the Home.") ||
+		strings.Contains(raw, "Organize reviewed records.") || strings.Contains(raw, "system_prompt") {
+		t.Fatalf("catalog discloses a Home prompt: %s", raw)
 	}
 	if entry.Availability == nil || entry.Availability.State != groupTemplateAvailabilityCreatable ||
 		entry.Home == nil || entry.Home.State != groupTemplateHomeAbsent || entry.Home.WorkspaceID != "" ||

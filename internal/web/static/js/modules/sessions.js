@@ -8257,6 +8257,9 @@ const sessionManager = {
     // Template). Selected-member grouping and guided setup have no choice to
     // make there, so they keep starting at Details.
     const blueprint = window.GroupTemplateCreator?.hasBlueprintStep?.(this) ? [1] : [];
+    // A managed Group Template stages its Home role fills on its own Team step.
+    const managedSteps = window.GroupTemplateCreator?.wizardSteps?.(this);
+    if (managedSteps) return managedSteps;
     if (this.usesGroupRosterCreator()) return [...blueprint, 2, 3, 4];
     return this.isGroupCreator() ? [...blueprint, 2, 4] : [1, 2, 3, 4];
   },

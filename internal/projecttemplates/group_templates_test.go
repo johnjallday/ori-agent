@@ -1,6 +1,7 @@
 package projecttemplates
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -63,6 +64,31 @@ func TestProjectGroupTemplates_ManagedHomeUsesOnlyHomeDeclaration(t *testing.T) 
 	}
 	if strings.Contains(entry.ID, "fixture") || strings.Contains(entry.ID, "research-program") {
 		t.Fatalf("selection ID exposes source identity: %q", entry.ID)
+	}
+	// Without a declared primary name every role proposes its own label.
+	if entry.HomeRoles[0].DefaultName != "Portfolio Coordinator" || entry.HomeRoles[1].DefaultName != "Archive Curator" {
+		t.Fatalf("default names without a primary name = %#v", entry.HomeRoles)
+	}
+}
+
+func TestProjectGroupTemplates_HomeRoleDefaultNamesDiscloseNoPrompt(t *testing.T) {
+	source := groupTemplateProgramSource("fixture", "plugin:fixture:research-project")
+	source.AssistantProgram.DefaultPrimaryName = "  Portfolio Manager  "
+	entry := managedGroupTemplates(t, usable(source))[0]
+	if entry.HomeRoles[0].DefaultName != "Portfolio Manager" {
+		t.Fatalf("primary default name = %q, want the declaration's default primary name", entry.HomeRoles[0].DefaultName)
+	}
+	if entry.HomeRoles[1].DefaultName != "Archive Curator" {
+		t.Fatalf("non-primary default name = %q, want its label", entry.HomeRoles[1].DefaultName)
+	}
+	payload, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, leaked := range []string{"Coordinate.", "Curate.", "Lead.", "system_prompt", "skills", `"type"`} {
+		if strings.Contains(string(payload), leaked) {
+			t.Fatalf("catalog payload discloses %q: %s", leaked, payload)
+		}
 	}
 }
 
