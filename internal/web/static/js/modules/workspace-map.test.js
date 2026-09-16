@@ -9460,9 +9460,20 @@ test('a scoped mount draws only its group, without collapse or bulk controls, an
   }
   assert.doesNotMatch(container.innerHTML, /data-group-collapse/);
   assert.match(container.innerHTML, /aria-label="Select for bulk action"[^>]* hidden>/);
+  // The page is the group: its frame carries no header repeating the name and
+  // count, and no ⤧/⋯ controls — the toolbar owns those (PRD §10).
+  assert.match(container.innerHTML, /ws-map-district[^"]*" role="group"/, 'the frame is drawn');
+  assert.doesNotMatch(
+    container.innerHTML,
+    /ws-map-district-header|data-group-menu|data-group-drag/
+  );
 
   map.unmount(container);
   assert.equal(map.getScopeGroupId(), '');
+  // Home keeps the header.
+  map.mount(container, { workspaces: SCOPED_WORLD, hideChrome: true, noAutoSelect: true });
+  assert.match(container.innerHTML, /ws-map-district-header/);
+  assert.match(container.innerHTML, /data-group-menu="g"/);
 });
 
 test('a scoped mount suppresses the Personal HQ site and ignores the HQ focus intent', () => {
@@ -9780,6 +9791,25 @@ test('scoped empty-ground Build holds the coordinate and hands the creator to th
   });
   menu.item('add-existing').fire('click');
   assert.equal(adds.length, 1, 'Add existing is the host’s membership picker');
+});
+
+test('the host opens the scoped group layout menu from its own toolbar button', async () => {
+  const { map, harness } = await mountedScopedDrag();
+  const anchor = {
+    getBoundingClientRect: () => ({ left: 400, top: 20, width: 34, height: 30 })
+  };
+  assert.equal(map.openScopedGroupMenu(harness.container, anchor, null), true);
+  assert.ok(harness.menu.isOpen());
+  const labels = harness.menu.labels();
+  assert.ok(labels.includes('Resize group'), 'layout actions: ' + labels.join(', '));
+  assert.ok(labels.includes('Fit to contents'));
+  assert.ok(!labels.includes('Open group') && !labels.includes('Delete group'));
+
+  map.closeContextMenu();
+  // Unscoped, or a foreign container, opens nothing.
+  assert.equal(map.openScopedGroupMenu({}, anchor, null), false);
+  map.unmount(harness.container);
+  assert.equal(map.openScopedGroupMenu(harness.container, anchor, null), false);
 });
 
 test('a scoped drop outside the group snaps back and writes nothing', async () => {

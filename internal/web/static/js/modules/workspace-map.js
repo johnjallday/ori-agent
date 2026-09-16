@@ -2472,41 +2472,43 @@
       'px;height:' +
       height +
       'px">' +
-      '<div class="ws-map-district-header">' +
-      '<button type="button" class="ws-map-district-tag' +
-      (isSel ? ' is-selected' : '') +
-      '" data-ws-id="' +
-      escapeHtml(ws.id) +
-      '" ' +
-      'aria-pressed="' +
-      (isSel ? 'true' : 'false') +
-      '" ' +
-      // The full name stays available to assistive technology even when the
-      // visible label truncates (FR-135).
-      'title="' +
-      escapeHtml(templateType ? name + ' — ' + templateType + ' template' : name) +
-      '" ' +
-      'aria-label="' +
-      escapeHtml(selectLabel) +
-      '">' +
-      '<span class="ws-map-district-name">' +
-      escapeHtml(name) +
-      '</span>' +
-      (templateType
-        ? '<span class="ws-map-district-type">' + escapeHtml(templateType) + '</span>'
-        : '') +
-      '<span class="ws-map-district-count">' +
-      escapeHtml(countLabel) +
-      '</span>' +
-      '</button>' +
-      // Collapse is its own control with its own accurate label, distinct from
-      // selecting, opening, moving, and deleting the group (#346 FR-109,
-      // FR-145). aria-expanded lives here rather than on the outline because
-      // this is the control that changes it (FR-110). A group page never
-      // collapses its own district: that would hide the whole zone.
+      // On the group's own page the header would only repeat the page title
+      // and the toolbar's count, and its actions live in that toolbar instead
+      // (group-map-build PRD §10), so the frame stands alone there.
       (scopeGroupId
         ? ''
-        : '<button type="button" class="ws-map-district-collapse" data-group-collapse="' +
+        : '<div class="ws-map-district-header">' +
+          '<button type="button" class="ws-map-district-tag' +
+          (isSel ? ' is-selected' : '') +
+          '" data-ws-id="' +
+          escapeHtml(ws.id) +
+          '" ' +
+          'aria-pressed="' +
+          (isSel ? 'true' : 'false') +
+          '" ' +
+          // The full name stays available to assistive technology even when the
+          // visible label truncates (FR-135).
+          'title="' +
+          escapeHtml(templateType ? name + ' — ' + templateType + ' template' : name) +
+          '" ' +
+          'aria-label="' +
+          escapeHtml(selectLabel) +
+          '">' +
+          '<span class="ws-map-district-name">' +
+          escapeHtml(name) +
+          '</span>' +
+          (templateType
+            ? '<span class="ws-map-district-type">' + escapeHtml(templateType) + '</span>'
+            : '') +
+          '<span class="ws-map-district-count">' +
+          escapeHtml(countLabel) +
+          '</span>' +
+          '</button>' +
+          // Collapse is its own control with its own accurate label, distinct from
+          // selecting, opening, moving, and deleting the group (#346 FR-109,
+          // FR-145). aria-expanded lives here rather than on the outline because
+          // this is the control that changes it (FR-110).
+          '<button type="button" class="ws-map-district-collapse" data-group-collapse="' +
           escapeHtml(ws.id) +
           '" aria-expanded="' +
           (collapsed ? 'false' : 'true') +
@@ -2516,35 +2518,35 @@
           escapeHtml(collapsed ? 'Expand group' : 'Collapse group') +
           '"><span aria-hidden="true">' +
           (collapsed ? '▸' : '▾') +
-          '</span></button>') +
-      // A separate, touch-sized handle for cluster movement. The empty district
-      // surface can also be dragged while Drag is on, but the label remains
-      // selection-only and every existing group action — select, overview,
-      // open, delete, Tree management — stays reachable (FR-85, FR-94).
-      //
-      // The ⤧ glyph is the map's established symbol for this and stays. What
-      // made it cryptic was never the symbol — it was that the control had no
-      // name at all, so a screen reader read a bare character and a hover said
-      // nothing about what would move. The name is what FR-140 asked for, and
-      // the name is what changed.
-      '<button type="button" class="ws-map-district-handle" data-group-drag="' +
-      escapeHtml(ws.id) +
-      '" aria-label="' +
-      escapeHtml('Move group: ' + name) +
-      '" title="' +
-      escapeHtml('Move group: ' + name) +
-      '"><span class="ws-map-district-grip" aria-hidden="true">⤧</span></button>' +
-      // The overflow control opens the same menu right-click does, so a pointer
-      // user who never right-clicks and a keyboard user both reach the group's
-      // actions (FR-139, FR-149).
-      '<button type="button" class="ws-map-district-more" data-group-menu="' +
-      escapeHtml(ws.id) +
-      '" aria-haspopup="menu" aria-expanded="false" aria-label="' +
-      escapeHtml('Actions for ' + label) +
-      '" title="' +
-      escapeHtml('Actions for ' + name) +
-      '"><span aria-hidden="true">⋯</span></button>' +
-      '</div>' +
+          '</span></button>' +
+          // A separate, touch-sized handle for cluster movement. The empty district
+          // surface can also be dragged while Drag is on, but the label remains
+          // selection-only and every existing group action — select, overview,
+          // open, delete, Tree management — stays reachable (FR-85, FR-94).
+          //
+          // The ⤧ glyph is the map's established symbol for this and stays. What
+          // made it cryptic was never the symbol — it was that the control had no
+          // name at all, so a screen reader read a bare character and a hover said
+          // nothing about what would move. The name is what FR-140 asked for, and
+          // the name is what changed.
+          '<button type="button" class="ws-map-district-handle" data-group-drag="' +
+          escapeHtml(ws.id) +
+          '" aria-label="' +
+          escapeHtml('Move group: ' + name) +
+          '" title="' +
+          escapeHtml('Move group: ' + name) +
+          '"><span class="ws-map-district-grip" aria-hidden="true">⤧</span></button>' +
+          // The overflow control opens the same menu right-click does, so a pointer
+          // user who never right-clicks and a keyboard user both reach the group's
+          // actions (FR-139, FR-149).
+          '<button type="button" class="ws-map-district-more" data-group-menu="' +
+          escapeHtml(ws.id) +
+          '" aria-haspopup="menu" aria-expanded="false" aria-label="' +
+          escapeHtml('Actions for ' + label) +
+          '" title="' +
+          escapeHtml('Actions for ' + name) +
+          '"><span aria-hidden="true">⋯</span></button>' +
+          '</div>') +
       // A group page with no members yet says so inside its own frame, and the
       // zone header carries the two ways to fix it (group-map-build FR-27).
       (scopeGroupId && d.memberCount === 0
@@ -4768,6 +4770,37 @@
       options: options,
       event: event
     });
+  }
+
+  /**
+   * The scoped group's layout menu, opened from the host's toolbar.
+   *
+   * The group page draws its district without a header, so the Resize, Fit,
+   * and appearance actions that Home offers from the header's ⋯ are reached
+   * from the Detachment toolbar instead. Same items, same validation, same
+   * announcements as every other route into the district menu.
+   */
+  function openScopedGroupMenu(container, anchor, event) {
+    if (!scopeGroupId || !lastMount || lastMount.container !== container) return false;
+    if (dragState || clusterDrag) return false;
+    var options = lastMount.state || {};
+    var workspaces = options.workspaces || [];
+    var target = {
+      type: 'district',
+      id: scopeGroupId,
+      ws: findWs(workspaces, scopeGroupId),
+      element: anchor || null
+    };
+    if (!contextMenuItemsFor(target).length) return false;
+    return openMenuForTarget(
+      container,
+      workspaces,
+      options,
+      target,
+      anchorForElement(anchor),
+      event || null,
+      true
+    );
   }
 
   function bindContextMenu(container, workspaces, options) {
@@ -8966,6 +8999,7 @@
     scopedGroupPresentation: scopedGroupPresentation,
     scopedFrameBounds: scopedFrameBounds,
     normalizeFrameInsets: normalizeFrameInsets,
+    openScopedGroupMenu: openScopedGroupMenu,
     scopedDropAllowed: scopedDropAllowed,
     // The coordinate engine: saved anchors, deterministic fallback placement,
     // district effective frames, content bounds, and world sizing, all pure so

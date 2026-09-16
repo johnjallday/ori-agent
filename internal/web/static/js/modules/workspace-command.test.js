@@ -5178,6 +5178,39 @@ test('the toolbar offers Build and Add existing, enabled even when the layout is
   // Neither touches the layout until the workspace exists (FR-4, FR-11).
   assert.doesNotMatch(html, /data-cmd-detachment-(build|add)[^>]*disabled/);
   assert.match(html, /ws-cmd-map-zone-action is-primary" data-cmd-detachment-build/);
+  // The district's layout actions moved here from its (now absent) header.
+  assert.match(
+    html,
+    /data-cmd-detachment-layout aria-haspopup="menu" aria-label="Group layout actions"/
+  );
+});
+
+test('the toolbar’s ⋯ opens the scoped group menu on the mounted map host', () => {
+  const commandView = detachmentCommandView('group');
+  const host = { id: 'host' };
+  commandView.detachmentMapEl = host;
+  const calls = [];
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    OriWorkspaceMap: {
+      openScopedGroupMenu: (container, anchor, event) => {
+        calls.push({ container, anchor, event });
+        return true;
+      }
+    }
+  };
+  try {
+    const button = { id: 'layout' };
+    const event = { type: 'click' };
+    assert.equal(commandView.openDetachmentLayoutMenu(button, event), true);
+    assert.deepEqual(calls, [{ container: host, anchor: button, event }]);
+    // Before the map is mounted there is nothing to open on.
+    commandView.detachmentMapEl = null;
+    assert.equal(commandView.openDetachmentLayoutMenu(button, event), false);
+    assert.equal(calls.length, 1);
+  } finally {
+    globalThis.window = originalWindow;
+  }
 });
 
 test('zone Build opens the shared creator with this group locked, and clears any pending site', () => {

@@ -743,6 +743,13 @@
   border-color: var(--ws-group-accent-line, var(--ws-line-bright));
   color: var(--ws-group-accent, var(--ws-faction));
 }
+.ws-cmd-map-group-bar .ws-cmd-map-zone-action.is-icon {
+  min-width: 34px;
+  padding-left: 0;
+  padding-right: 0;
+  font-size: 16px;
+  line-height: 1;
+}
 /* With no members the two actions are the point of the map (FR-27). */
 .ws-cmd-map-group-bar.is-empty .ws-cmd-map-zone-action {
   border-color: var(--ws-group-accent-line, var(--ws-line-bright));

@@ -9560,6 +9560,11 @@ export class WorkspaceCommandView {
         else this.openDetachmentPicker();
         return;
       }
+      const detachmentLayout = event.target.closest('[data-cmd-detachment-layout]');
+      if (detachmentLayout) {
+        this.openDetachmentLayoutMenu(detachmentLayout, event);
+        return;
+      }
       if (this.handleLoadoutClick(event)) return;
       if (event.target.closest('[data-cmd-capability-back]')) {
         this.closeCapabilityInspector();
@@ -10593,8 +10598,21 @@ export class WorkspaceCommandView {
       'Build</button>' +
       '<button type="button" class="ws-cmd-map-zone-action" data-cmd-detachment-add aria-expanded="' +
       (this.detachmentPickerOpen ? 'true' : 'false') +
-      '">Add existing…</button>'
+      '">Add existing…</button>' +
+      // The district draws no header on its own page, so its layout actions
+      // (Resize, Fit, appearance) are reached from here (PRD §10).
+      '<button type="button" class="ws-cmd-map-zone-action is-icon" data-cmd-detachment-layout ' +
+      'aria-haspopup="menu" aria-label="Group layout actions" title="Group layout">' +
+      '<span aria-hidden="true">⋯</span></button>'
     );
+  }
+
+  openDetachmentLayoutMenu(anchor, event) {
+    const map = typeof window === 'undefined' ? null : window.OriWorkspaceMap;
+    if (!map || typeof map.openScopedGroupMenu !== 'function' || !this.detachmentMapEl) {
+      return false;
+    }
+    return map.openScopedGroupMenu(this.detachmentMapEl, anchor, event);
   }
 
   syncDetachmentAddExpanded() {
