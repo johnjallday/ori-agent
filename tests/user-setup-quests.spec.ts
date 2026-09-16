@@ -182,10 +182,6 @@ for (const width of [390, 1280]) {
     const writes = await installRoutes(page);
     await page.goto('/templates');
     await page.locator('#tplList [role="listitem"]').filter({ hasText: template.name }).click();
-    // At phone width the fixed Ori Help root (#oriGuideRoot) is a full-width
-    // strip that intercepts pointer events at the bottom of the viewport. That
-    // overlay is outside this spec, so let clicks pass through it here.
-    await page.addStyleTag({ content: '#oriGuideRoot { pointer-events: none !important; }' });
     await page.locator('#tplTabSetupQuest').click();
     await page.locator('#tplUserQuestCreate').click();
 

@@ -249,13 +249,6 @@ function newServer(overrides: Partial<Server> = {}): Server {
   };
 }
 
-// At phone width the fixed Ori Help root (#oriGuideRoot) is a full-width strip
-// that intercepts pointer events at the bottom of the viewport. That overlay is
-// outside this spec, so let clicks pass through it.
-async function clearGuideOverlay(page: Page) {
-  await page.addStyleTag({ content: '#oriGuideRoot { pointer-events: none !important; }' });
-}
-
 for (const width of [1280, 390]) {
   test(`before install, Plugins lists the integration and its quest has one actionable step at ${width}px`, async ({
     page
@@ -264,7 +257,6 @@ for (const width of [1280, 390]) {
     const server = newServer();
     await mockSetup(page, server);
     await page.goto('/plugins');
-    await clearGuideOverlay(page);
 
     const available = page.locator('#availableIntegrationsCard');
     await expect(available).toBeVisible();
@@ -280,7 +272,6 @@ for (const width of [1280, 390]) {
 
     await guided.click();
     await page.waitForURL('**/?setup=quest&source=host&quest=install_ori_reaper');
-    await clearGuideOverlay(page);
     const dialog = page.locator('#specialistSetupJourneyModal');
     await expect(dialog).toBeVisible();
     await expect(dialog.locator('#specialistSetupJourneyTitle')).toHaveText(

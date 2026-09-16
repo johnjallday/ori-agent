@@ -614,4 +614,38 @@ test.describe('narrow layout', () => {
     );
     expect(overflow).toBeLessThanOrEqual(1);
   });
+
+  // Below 760px the guide root stretches across the bottom of the viewport so
+  // its panel can be a sheet. The empty part of that strip used to swallow
+  // every tap on the page underneath it; specs clicking near the bottom had to
+  // switch it off. Only the launcher and panels may take pointer events.
+  test('the empty guide strip lets taps through to the page underneath', async ({ page }) => {
+    await gotoPage(page, '/agents');
+
+    const probe = await page.evaluate(() => {
+      const root = document.getElementById('oriGuideRoot')!;
+      const launcher = document.getElementById('oriGuideLauncher')!;
+      const rootBox = root.getBoundingClientRect();
+      const launcherBox = launcher.getBoundingClientRect();
+      const y = Math.round(launcherBox.top + launcherBox.height / 2);
+      const beside = document.elementFromPoint(20, y);
+      const onLauncher = document.elementFromPoint(
+        Math.round(launcherBox.left + launcherBox.width / 2),
+        y
+      );
+      return {
+        stripSpansViewport: rootBox.left <= 1 && rootBox.width >= window.innerWidth - 1,
+        besideLauncherHitsGuide: root.contains(beside),
+        launcherIsHit: launcher.contains(onLauncher)
+      };
+    });
+
+    // The strip is still full-width (the sheet layout depends on it) ...
+    expect(probe.stripSpansViewport).toBe(true);
+    // ... but its empty area belongs to the page, not the guide.
+    expect(probe.besideLauncherHitsGuide).toBe(false);
+    // The launcher itself stays a real target and still opens the panel.
+    expect(probe.launcherIsHit).toBe(true);
+    await openGuide(page);
+  });
 });
