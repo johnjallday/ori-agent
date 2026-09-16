@@ -9,6 +9,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/hostquests"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/pathselection"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
@@ -22,6 +23,21 @@ import (
 	"github.com/johnjallday/ori-agent/internal/specialist"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
+
+// allowlistLocallyCreatedWorkspace records that this data directory owns a
+// workspace a host service just created, so the startup agent wipe keeps its
+// staffed agents. It mirrors the session handler's helper for the generic
+// workspace API; services outside that handler, like guided setup, reach the
+// same allowlist through here. Best-effort: a failure only affects later agent
+// hydration, never the creation itself.
+func (b *ServerBuilder) allowlistLocallyCreatedWorkspace(workspaceID string) {
+	if b == nil || b.workspaceAllowlist == nil || strings.TrimSpace(workspaceID) == "" {
+		return
+	}
+	if err := b.workspaceAllowlist.Add(workspaceID); err != nil {
+		logger.Warn("Failed to allowlist created workspace", logger.Fields{"id": workspaceID, "error": err.Error()})
+	}
+}
 
 // readSetupSummary supplies only closed navigation/continuation offers. The
 // journey reconciler, not this reader, decides when all owners are ready and
@@ -105,6 +121,7 @@ func (b *ServerBuilder) initializeSetupJourney() {
 			}
 			connectionService := projectconnection.NewService(connectionStore, b.pathSelectionStore)
 			connectionService.SetGroupRequirementService(b.groupRequirements)
+			connectionService.SetCreatedWorkspaceRecorder(b.allowlistLocallyCreatedWorkspace)
 			projectAdapter = setupjourney.NewProjectConnectionAdapter(
 				connectionService,
 				installedProjectTemplateResolver{manager: b.pluginHandler.Manager(), userTemplates: userTemplates},
