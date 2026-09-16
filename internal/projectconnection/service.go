@@ -50,6 +50,9 @@ type Service struct {
 	selections SelectionResolver
 	grouping   *grouprequirements.Service
 	now        func() time.Time
+	// recordCreated is told about every workspace this service creates, so
+	// the host can mark it as owned by this data directory.
+	recordCreated func(workspaceID string)
 }
 
 func NewService(store folderStore, selections SelectionResolver) *Service {
@@ -58,6 +61,24 @@ func NewService(store folderStore, selections SelectionResolver) *Service {
 
 func (s *Service) SetGroupRequirementService(service *grouprequirements.Service) {
 	s.grouping = service
+}
+
+// SetCreatedWorkspaceRecorder registers the host's record of locally created
+// workspaces. On startup the host wipes agent snapshots that belong only to
+// workspaces it has no record of, so a Home or project created by guided
+// setup and then staffed would lose its agents on the next restart whenever
+// the workspace root is unconfirmed. The generic workspace API records its
+// creations the same way. The recorder is called only for workspaces this
+// service created, never for one it reused.
+func (s *Service) SetCreatedWorkspaceRecorder(record func(workspaceID string)) {
+	s.recordCreated = record
+}
+
+func (s *Service) recordCreatedWorkspace(workspaceID string) {
+	if s == nil || s.recordCreated == nil || strings.TrimSpace(workspaceID) == "" {
+		return
+	}
+	s.recordCreated(workspaceID)
 }
 
 type Scope struct {
@@ -304,6 +325,14 @@ func (s *Service) Commit(ctx context.Context, scope Scope, request Request, revi
 		s.rollbackNewState(scope.RunID, home, homeCreated, childID, childCreated)
 		return CommitResult{}, ErrUnavailable
 	}
+	// Recorded only once the commit can no longer roll back. The project is
+	// recorded even when a retry of this run reused it: ensureChild accepts an
+	// existing project only when it carries this run's marker, so it was
+	// created here, possibly by an attempt that stopped before recording it.
+	if homeCreated && home != nil {
+		s.recordCreatedWorkspace(home.ID)
+	}
+	s.recordCreatedWorkspace(child.ID)
 	result := CommitResult{ProjectWorkspaceID: child.ID, ModeID: request.ModeID}
 	if home != nil {
 		result.HomeWorkspaceID = home.ID

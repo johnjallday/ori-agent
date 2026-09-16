@@ -95,8 +95,12 @@ func (s *Service) CreateHome(scope Scope, name string) (HomePreparation, error) 
 	if err != nil {
 		return HomePreparation{}, err
 	}
-	if _, _, err := workspace.NewAssistantProgramStore(s.store).EnsureNamedStation(key, scope.Template.AssistantProgram, name); err != nil {
+	home, created, err := workspace.NewAssistantProgramStore(s.store).EnsureNamedStation(key, scope.Template.AssistantProgram, name)
+	if err != nil {
 		return HomePreparation{}, ErrUnavailable
+	}
+	if created && home != nil {
+		s.recordCreatedWorkspace(home.ID)
 	}
 	return s.HomePreparation(scope)
 }
