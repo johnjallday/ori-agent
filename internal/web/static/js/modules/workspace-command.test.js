@@ -5149,6 +5149,67 @@ test('the Detachment zone renders for a group only, with a slot and no tiles of 
   assert.doesNotMatch(plainHTML, /detachment/);
 });
 
+test('the zone header offers Build and Add existing, enabled even when the layout is read-only', () => {
+  const html = detachmentCommandView('group').renderOperationsMap();
+  assert.match(html, /data-cmd-detachment-build>Build<\/button>/);
+  assert.match(html, /data-cmd-detachment-add>Add existing…<\/button>/);
+  // Neither touches the layout until the workspace exists (FR-4, FR-11).
+  assert.doesNotMatch(html, /data-cmd-detachment-(build|add)[^>]*disabled/);
+  assert.match(html, /ws-cmd-map-zone-action is-primary" data-cmd-detachment-build/);
+});
+
+test('zone Build opens the shared creator with this group locked, and clears any pending site', () => {
+  const commandView = detachmentCommandView('group');
+  const opened = [];
+  let cancelled = 0;
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    OriWorkspaceMap: { cancelBuild: () => (cancelled += 1) },
+    sessionManager: { showAddWorkspaceModal: options => opened.push(options) }
+  };
+  try {
+    const button = { id: 'build' };
+    commandView.openDetachmentBuild(button);
+    assert.equal(cancelled, 1, 'a header Build holds no coordinate (FR-13)');
+    assert.equal(opened.length, 1);
+    assert.equal(opened[0].parentId, 'g');
+    assert.equal(opened[0].parentLocked, true);
+    assert.equal(opened[0].entryPoint, 'group_command_build');
+    assert.equal(opened[0].mapOrigin, true, 'the page stays on the group after create');
+    assert.equal(opened[0].invoker, button);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('Add existing renders the members panel’s own picker into the zone', () => {
+  const commandView = detachmentCommandView('group');
+  const host = { hidden: true, innerHTML: '' };
+  commandView.container = {
+    querySelector: sel => (sel.includes('data-cmd-detachment-picker') ? host : null)
+  };
+  const calls = [];
+  commandView.page.membersPanel.renderAddPickerInto = (target, hooks) => {
+    calls.push({ target, hooks });
+    return true;
+  };
+  assert.equal(commandView.openDetachmentPicker(), true);
+  assert.equal(calls[0].target, host);
+  assert.equal(host.hidden, false);
+  assert.equal(commandView.detachmentPickerOpen, true);
+
+  // A cancelled picker closes; an added workspace is selected on the re-mount.
+  calls[0].hooks.onCancel();
+  assert.equal(host.hidden, true);
+  assert.equal(commandView.detachmentPickerOpen, false);
+
+  commandView.page.membersPanel.reload = async () => {};
+  commandView.render = () => {};
+  commandView.openDetachmentPicker();
+  calls[1].hooks.onAdded('ws-moved');
+  assert.equal(commandView.pendingDetachmentSelectionId, 'ws-moved');
+});
+
 test('the member count in the zone head follows the members panel', () => {
   const empty = detachmentCommandView('group', []);
   assert.match(empty.renderOperationsMap(), /ws-cmd-map-zone-count">0</);
@@ -5170,11 +5231,13 @@ test('the scoped map re-mounts only when membership changes, and unmounts off Ma
     querySelector: sel => (sel.includes('data-cmd-detachment-slot') ? slot : null)
   };
   commandView.detachmentMapEl = host;
+  const selections = [];
   const originalWindow = globalThis.window;
   globalThis.window = {
     OriWorkspaceMap: {
       mount: (el, state) => mounts.push({ el, state }),
       unmount: el => unmounts.push(el),
+      setSelectedId: (el, rows, id) => selections.push(id),
       scopeWorkspacesToGroup: (rows, id) =>
         rows.filter(row => row.id === id || row.parent_id === id)
     }
@@ -5195,11 +5258,20 @@ test('the scoped map re-mounts only when membership changes, and unmounts off Ma
 
     commandView.syncDetachmentMap();
     assert.equal(mounts.length, 1, 'a plain re-render must not re-mount the map');
+    assert.deepEqual([...selections], [], 'nothing is selected without a request');
+
+    // A just-built or just-moved member is selected explicitly, because mount
+    // keeps a still-valid existing selection.
+    commandView.pendingDetachmentSelectionId = 'm1';
+    commandView.syncDetachmentMap();
+    assert.equal(mounts.length, 2, 'a selection request re-mounts');
+    assert.deepEqual([...selections], ['m1']);
+    assert.equal(commandView.pendingDetachmentSelectionId, '');
 
     commandView.page.membersPanel.group.children.push({ id: 'm2', name: 'Mastering' });
     commandView.page.membersPanel.tree[0] = commandView.page.membersPanel.group;
     commandView.syncDetachmentMap();
-    assert.equal(mounts.length, 2, 'a new member re-mounts');
+    assert.equal(mounts.length, 3, 'a new member re-mounts');
 
     commandView.unmountDetachmentMap();
     assert.deepEqual(unmounts, [host]);
@@ -5207,7 +5279,7 @@ test('the scoped map re-mounts only when membership changes, and unmounts off Ma
 
     // No slot in the DOM (any non-Map render) unmounts rather than leaking.
     commandView.syncDetachmentMap();
-    assert.equal(mounts.length, 3);
+    assert.equal(mounts.length, 4);
     commandView.container = { querySelector: () => null };
     commandView.syncDetachmentMap();
     assert.equal(unmounts.length, 2, 'leaving Map mode unmounts the map');

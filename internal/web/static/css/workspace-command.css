@@ -654,6 +654,11 @@
 }
 .ws-cmd-map-detachment .ws-cmd-map-zone-actions {
   align-items: center;
+  flex-wrap: nowrap;
+}
+/* "Add existing…" is one label, not two lines. */
+.ws-cmd-map-detachment .ws-cmd-map-zone-action {
+  white-space: nowrap;
 }
 .ws-cmd-detachment-picker {
   margin-bottom: 10px;

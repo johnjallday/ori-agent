@@ -9517,6 +9517,16 @@ export class WorkspaceCommandView {
     this.bindStationDrag(root);
     root.addEventListener('click', event => {
       const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+      const detachmentBuild = event.target.closest('[data-cmd-detachment-build]');
+      if (detachmentBuild) {
+        this.openDetachmentBuild(detachmentBuild);
+        return;
+      }
+      const detachmentAdd = event.target.closest('[data-cmd-detachment-add]');
+      if (detachmentAdd) {
+        this.openDetachmentPicker();
+        return;
+      }
       if (this.handleLoadoutClick(event)) return;
       if (event.target.closest('[data-cmd-capability-back]')) {
         this.closeCapabilityInspector();
@@ -10545,8 +10555,70 @@ export class WorkspaceCommandView {
     );
   }
 
+  // Build and Add existing are always offered and never disabled: neither
+  // touches the map layout until the workspace exists, so a read-only layout
+  // does not stop either of them (FR-4, FR-11).
   detachmentZoneActionsHTML() {
-    return '';
+    return (
+      '<button type="button" class="ws-cmd-map-zone-action is-primary" data-cmd-detachment-build>' +
+      'Build</button>' +
+      '<button type="button" class="ws-cmd-map-zone-action" data-cmd-detachment-add>' +
+      'Add existing…</button>'
+    );
+  }
+
+  // Open the shared creator with this group locked as the destination. No
+  // coordinate is held: a header Build takes the automatic placement the map
+  // already gives a new member (FR-13).
+  openDetachmentBuild(invoker) {
+    const map = typeof window === 'undefined' ? null : window.OriWorkspaceMap;
+    if (map && typeof map.cancelBuild === 'function') map.cancelBuild();
+    this.openGroupCreator({ entryPoint: 'group_command_build', invoker });
+  }
+
+  openGroupCreator({ entryPoint, invoker } = {}) {
+    const manager = typeof window === 'undefined' ? null : window.sessionManager;
+    if (!manager || typeof manager.showAddWorkspaceModal !== 'function') return false;
+    const ws = (this.page && this.page.workspace) || {};
+    manager.showAddWorkspaceModal({
+      parentId: this.workspaceId(),
+      parentName: String(ws.name || ''),
+      parentLocked: true,
+      entryPoint: entryPoint || 'group_command_build',
+      // The user is arranging this group's map; a successful create returns
+      // here rather than opening the new workspace (FR-18).
+      mapOrigin: true,
+      invoker: invoker || null
+    });
+    return true;
+  }
+
+  // Add existing: the members panel owns the eligible-target rule and the
+  // membership PATCH, so the zone borrows its picker rather than writing a
+  // second one (FR-24, FR-25).
+  openDetachmentPicker() {
+    const panel = this.page && this.page.membersPanel;
+    const host =
+      this.container && typeof this.container.querySelector === 'function'
+        ? this.container.querySelector('[data-cmd-detachment-picker]')
+        : null;
+    if (!panel || !host || typeof panel.renderAddPickerInto !== 'function') return false;
+    this.detachmentPickerOpen = true;
+    host.hidden = false;
+    panel.renderAddPickerInto(host, {
+      onAdded: id => {
+        this.detachmentPickerOpen = false;
+        host.hidden = true;
+        this.pendingDetachmentSelectionId = String(id || '');
+        void this.handleWorkspacesChanged({ detail: { workspaceId: id } });
+      },
+      onCancel: () => {
+        this.detachmentPickerOpen = false;
+        host.hidden = true;
+        host.innerHTML = '';
+      }
+    });
+    return true;
   }
 
   // The rows the scoped map draws from: the members panel's tree, shaped the
@@ -10635,8 +10707,17 @@ export class WorkspaceCommandView {
       selectOnly: true,
       hideChrome: true,
       noAutoSelect: true,
-      onOpen: id => this.openDetachmentMember(id, workspaces)
+      onOpen: id => this.openDetachmentMember(id, workspaces),
+      // Empty-ground Build holds the clicked coordinate; the creator it opens
+      // is the same one the zone header opens (FR-13, FR-24).
+      onBuild: () => this.openGroupCreator({ entryPoint: 'group_command_build' }),
+      onAddExisting: () => this.openDetachmentPicker()
     });
+    // mount keeps an existing selection when one is still valid, so a
+    // just-built or just-moved member is selected explicitly (FR-18, FR-25).
+    if (selectedId && typeof map.setSelectedId === 'function') {
+      map.setSelectedId(host, workspaces, selectedId);
+    }
   }
 
   openDetachmentMember(id, workspaces) {

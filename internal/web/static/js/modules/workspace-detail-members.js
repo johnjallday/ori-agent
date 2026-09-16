@@ -497,11 +497,24 @@ export class WorkspaceMembersPanel {
   openAddPicker() {
     const picker = this.els.picker;
     if (!picker) return;
+    this.renderAddPickerInto(picker, { onCancel: () => (picker.hidden = true) });
+  }
+
+  /**
+   * Render the eligible-workspace picker into any host.
+   *
+   * The Detachment map zone offers Add existing too, and there must be one
+   * picker, one eligibility rule, and one membership PATCH behind both
+   * (group-map-build FR-24). Callers supply the host and the outcome hooks;
+   * everything else stays here.
+   */
+  renderAddPickerInto(host, { onAdded, onCancel } = {}) {
+    if (!host) return false;
     const targets = eligibleAddTargets(this.tree, this.group);
+    host.hidden = false;
     if (targets.length === 0) {
-      picker.innerHTML = '<div class="group-detail-empty">No eligible workspaces to add.</div>';
-      picker.hidden = false;
-      return;
+      host.innerHTML = '<div class="group-detail-empty">No eligible workspaces to add.</div>';
+      return false;
     }
     const options = targets
       .map(
@@ -509,24 +522,30 @@ export class WorkspaceMembersPanel {
           `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name || t.id)}${isGroupNode(t) ? ' (group)' : ''}</option>`
       )
       .join('');
-    picker.innerHTML = `
+    host.innerHTML = `
       <div class="d-flex gap-2 align-items-center">
-        <select id="workspace-detail-member-add-select" class="form-select form-select-sm" aria-label="Workspace to add">${options}</select>
-        <button id="workspace-detail-member-add-confirm" type="button" class="modern-btn modern-btn-primary">Add</button>
-        <button id="workspace-detail-member-add-cancel" type="button" class="modern-btn modern-btn-secondary">Cancel</button>
+        <select class="form-select form-select-sm" data-member-add-select aria-label="Workspace to add">${options}</select>
+        <button type="button" class="modern-btn modern-btn-primary" data-member-add-confirm>Add</button>
+        <button type="button" class="modern-btn modern-btn-secondary" data-member-add-cancel>Cancel</button>
       </div>`;
-    picker.hidden = false;
-    picker.querySelector('#workspace-detail-member-add-confirm').addEventListener('click', () => {
-      const sel = picker.querySelector('#workspace-detail-member-add-select');
-      void this.addMember(sel && sel.value);
+    host.querySelector('[data-member-add-confirm]').addEventListener('click', () => {
+      const select = host.querySelector('[data-member-add-select]');
+      const id = select && select.value;
+      void this.addMember(id).then(added => {
+        if (added && typeof onAdded === 'function') onAdded(id);
+      });
     });
-    picker.querySelector('#workspace-detail-member-add-cancel').addEventListener('click', () => {
-      picker.hidden = true;
+    host.querySelector('[data-member-add-cancel]').addEventListener('click', () => {
+      if (typeof onCancel === 'function') onCancel();
+      else host.hidden = true;
     });
+    const select = host.querySelector('[data-member-add-select]');
+    if (select && typeof select.focus === 'function') select.focus();
+    return true;
   }
 
   async addMember(memberId) {
-    if (!memberId) return;
+    if (!memberId) return false;
     try {
       await this.sendJson(
         `/api/workspaces/${encodeURIComponent(memberId)}`,
@@ -536,9 +555,11 @@ export class WorkspaceMembersPanel {
       );
       if (this.els.picker) this.els.picker.hidden = true;
       await this.reload();
+      return true;
     } catch (err) {
       console.error('Failed to add member:', err);
       this.showError(err.message || 'Failed to add member.');
+      return false;
     }
   }
 

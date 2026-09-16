@@ -4593,7 +4593,14 @@
           chooseBuildSite(
             container,
             context.world,
-            context.type === 'district' ? { id: context.id, name: context.name } : null
+            context.type === 'district'
+              ? { id: context.id, name: context.name }
+              : // On a group page every patch of ground belongs to the group,
+                // so canvas Build builds into it exactly as district Build does.
+                scopeGroupId
+                ? { id: scopeGroupId, name: scopedGroupName() }
+                : null,
+            options
           );
           break;
         }
@@ -4620,6 +4627,14 @@
       case 'reset-view':
         resetView(container);
         announce(container, 'View reset. Workspace positions are unchanged');
+        break;
+      // Membership is the host's to change: it owns the eligible-target rule
+      // and the one PATCH behind both entry points (FR-24).
+      case 'add-existing':
+        if (options && typeof options.onAddExisting === 'function') {
+          announce(container, 'Choose a workspace to add to this group');
+          options.onAddExisting();
+        }
         break;
       default:
         break;
@@ -8465,7 +8480,7 @@
    * stray position behind (FR-54). The modal itself is Ori's existing one —
    * there is deliberately no second creation form (FR-51).
    */
-  function chooseBuildSite(container, point, group) {
+  function chooseBuildSite(container, point, group, options) {
     cancelBuild();
     if (!point) return;
     buildState.pending = { x: point.x, y: point.y };
@@ -8475,6 +8490,13 @@
       container,
       'Building at ' + formatCoordinate(point) + '. Complete the workspace details.'
     );
+    // A scoped host opens the creator itself, because only it knows to lock the
+    // parent to this group (group-map-build FR-13, FR-14). The coordinate is
+    // already pending, so the existing completeBuild path still saves it.
+    if (options && typeof options.onBuild === 'function') {
+      options.onBuild({ point: { x: point.x, y: point.y }, group: buildState.group });
+      return;
+    }
     var manager = typeof window !== 'undefined' ? window.sessionManager : null;
     if (manager && typeof manager.showAddWorkspaceModal === 'function') {
       manager.showAddWorkspaceModal({ mapOrigin: true, entryPoint: 'workspace_map_build' });

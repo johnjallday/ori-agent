@@ -9691,6 +9691,42 @@ test('a scoped drop inside the group saves one position and never reparents', as
   assert.ok(patches[0].body.operations[0].positions.m1, 'the moved member was saved');
 });
 
+test('scoped empty-ground Build holds the coordinate and hands the creator to the host', async () => {
+  const { map, harness } = await mountedScopedDrag();
+  const builds = [];
+  const adds = [];
+  map.mount(harness.container, {
+    ...scopedMountState(),
+    onBuild: detail => builds.push(detail),
+    onAddExisting: () => adds.push(true)
+  });
+  await flush();
+
+  const menu = harness.menu;
+  harness.fire('contextmenu', {
+    clientX: 500,
+    clientY: 300,
+    preventDefault() {},
+    target: { closest: sel => (sel.includes('ws-map-canvas') ? harness.canvas : null) }
+  });
+  assert.ok(menu.isOpen(), 'empty ground offers a menu');
+  menu.item('build').fire('click');
+
+  assert.equal(builds.length, 1, 'the host opens the creator, because only it can lock the parent');
+  assert.equal(builds[0].group.id, 'g', 'the group page builds into its own group');
+  assert.ok(Number.isFinite(builds[0].point.x) && Number.isFinite(builds[0].point.y));
+  assert.ok(map.hasPendingBuild(), 'the clicked coordinate is held for completeBuild');
+
+  harness.fire('contextmenu', {
+    clientX: 500,
+    clientY: 300,
+    preventDefault() {},
+    target: { closest: sel => (sel.includes('ws-map-canvas') ? harness.canvas : null) }
+  });
+  menu.item('add-existing').fire('click');
+  assert.equal(adds.length, 1, 'Add existing is the host’s membership picker');
+});
+
 test('a scoped drop outside the group snaps back and writes nothing', async () => {
   const { harness, patches } = await mountedScopedDrag();
   const tile = harness.tile('m1');
