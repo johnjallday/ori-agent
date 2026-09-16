@@ -4298,7 +4298,7 @@
   // stays visually separated from the non-destructive ones (#346 FR-147), and
   // each carries a truthful disabled state rather than being hidden — a missing
   // item tells the user nothing about why (FR-148).
-  function districtMenuItems(ws, scoped, nested) {
+  function districtMenuItems(ws, scoped) {
     var groupId = (ws && ws.id) || '';
     var district = renderedDistrict(groupId);
     var readOnly = isMapReadOnly();
@@ -4405,7 +4405,6 @@
     // Explicit flags let a menu be asserted without mounting; a live menu reads
     // the mount's scope.
     var scoped = typeof spec.scoped === 'boolean' ? spec.scoped : !!scopeGroupId;
-    var nested = typeof spec.nested === 'boolean' ? spec.nested : scopeNested;
     if (spec.type === 'tile') {
       // A tile inside the checked set acts on the whole set; a tile outside it
       // acts on itself. Which menu you get is therefore a statement about what
@@ -4414,7 +4413,7 @@
       return tileMenuItems(spec.ws || { id: spec.id }, scoped);
     }
     if (spec.type === 'district') {
-      return districtMenuItems(spec.ws || { id: spec.id }, scoped, nested);
+      return districtMenuItems(spec.ws || { id: spec.id }, scoped);
     }
     if (spec.type === 'hq') return scoped ? [] : hqMenuItems(spec.view || hqSiteView(hqStatus));
     if (spec.type === 'canvas') return canvasMenuItems(scoped);
