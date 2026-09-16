@@ -34,7 +34,11 @@ for pid in $pids; do
 		continue
 	fi
 	kill "$pid"
-	for _ in $(seq 1 50); do
+	# Graceful shutdown routinely takes longer than a few seconds, and until the
+	# process is gone it still owns the sandbox's installation lock: a restart
+	# on the same sandbox fails with "another Ori process owns this
+	# installation". Wait long enough that "stopped" means restartable.
+	for _ in $(seq 1 300); do
 		kill -0 "$pid" 2>/dev/null || break
 		sleep 0.1
 	done
