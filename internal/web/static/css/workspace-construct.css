@@ -1214,7 +1214,17 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
    browsing agents to add. */
 .workspace-create-modal .workspace-team-layout {
   display: grid;
+  /* minmax(0, …) lets a stacked column shrink to the dialog; an auto track
+     grows to its widest unbreakable content instead. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
+}
+/* A long agent name wraps inside its role tag at phone width rather than
+   pushing the whole Team step wider than the dialog. */
+.workspace-create-modal .ws-role-tag {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 @media (min-width: 900px) {
   .workspace-create-modal .workspace-team-layout {

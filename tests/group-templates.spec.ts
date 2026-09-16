@@ -170,7 +170,10 @@ test('browsing and review are inert, and forged or mixed payloads are refused', 
   expect(await agentNames(request)).toEqual(beforeAgents);
 });
 
-test('a person creates a named group from its template, then reuses it unchanged', async ({
+const roleRow = (page: Page, roleID: string) =>
+  page.locator(`#workspaceRoleRoster .ws-role-row[data-role-id="${roleID}"]`);
+
+test('a person creates a named group with its coordinator left empty and lands on its setup', async ({
   page,
   request
 }) => {
@@ -180,28 +183,64 @@ test('a person creates a named group from its template, then reuses it unchanged
 
   await openGroupCreator(page);
   await chooseTemplate(page, entry.id);
-  // Choosing stays on Blueprint; a managed blueprint drops the roster step.
+  // Choosing stays on Blueprint; a managed blueprint stages its roles on Team.
   await expect(page.locator('#wizardStep1')).toBeVisible();
-  await expect(page.locator('#wizardStepper [data-step="3"]')).toBeHidden();
+  await expect(page.locator('#wizardStepper [data-step="3"]')).toBeVisible();
+  await expect(page.locator('[data-workspace-creator-step-name="3"]')).toHaveText('Team');
   await continueToDetails(page);
   await expect(page.locator('#workspaceGroupBlueprintRecap')).toContainText(
     'Research Program Home'
   );
   await expect(page.locator('#workspaceGroupDetailsNotice')).toContainText(
-    'Only the group is created.'
+    'Only the group is created here.'
   );
-  await expect(page.locator('#wizardNextBtn')).toHaveText('Review →');
   await page.locator('#folderNameInput').fill(GROUP_NAME);
+  await expect(page.locator('#wizardNextBtn')).toHaveText('Continue →');
+  await page.locator('#wizardNextBtn').click();
+
+  // The required Home role starts prefilled; the optional one starts empty.
+  await expect(page.locator('#wizardStep3Title')).toHaveText('Staff the group');
+  const coordinator = roleRow(page, 'portfolio_coordinator');
+  await expect(coordinator).toHaveAttribute('data-state', 'filled');
+  await expect(coordinator).toContainText('Portfolio Coordinator');
+  await expect(roleRow(page, 'archive_curator')).toHaveAttribute('data-state', 'empty');
+  await coordinator.getByRole('button', { name: 'Clear Portfolio Coordinator' }).click();
+  await expect(coordinator).toHaveAttribute('data-state', 'empty');
+  await expect(page.locator('#wizardNextBtn')).toHaveText('Review →');
   await page.locator('#wizardNextBtn').click();
 
   await expect(page.locator('[data-group-template-review-status]')).toContainText(
     'Only this group will be created'
   );
+  const summary = page.locator('#workspaceReviewSummary');
+  await expect(summary).toContainText('Portfolio Coordinator · Not staffed');
+  // An empty required role is a warning, never a blocker.
+  await expect(summary).toContainText(
+    'This group will have no Portfolio Coordinator until you set one up.'
+  );
   const create = page.locator('#createFolderBtn');
   await expect(create).toHaveText(`Create group “${GROUP_NAME}” only`);
   await expect(create).toBeEnabled();
+  const roleWrites: string[] = [];
+  page.on('request', sent => {
+    if (sent.method() === 'PUT' && sent.url().includes('/roles/')) roleWrites.push(sent.url());
+  });
   await create.click();
-  await expect(page.locator('#addFolderModal')).toBeHidden();
+
+  // The person lands on the new group with the empty coordinator's setup open:
+  // no prompt box, because the template's instructions are applied by Ori.
+  await page.waitForURL(url => /^\/workspaces\/[^/]+$/.test(url.pathname));
+  const agentModal = page.locator('#addAgentModal');
+  await expect(agentModal).toBeVisible();
+  await expect(page.locator('#addAgentModalTitleText')).toContainText('Portfolio Coordinator');
+  await expect(agentModal.locator('[data-agent-create-field="systemPrompt"]')).toHaveCount(0);
+  await expect(agentModal.locator('[data-agent-create-note]')).toContainText(
+    `Plugin: ${PLUGIN_NAME}`
+  );
+  expect(new URL(page.url()).searchParams.has('role')).toBe(false);
+  await agentModal.getByRole('button', { name: 'Cancel' }).click();
+  await expect(agentModal).toBeHidden();
+  expect(roleWrites).toEqual([]);
 
   const created = await fixtureTemplate(request);
   expect(created).toMatchObject({
@@ -217,23 +256,103 @@ test('a person creates a named group from its template, then reuses it unchanged
   const folder = home.folder || home.workspace || home;
   expect(folder).toMatchObject({ kind: 'group' });
   expect(folder.parent_id || '').toBe('');
+});
+
+test('choosing the template again reuses the group unchanged and staffs its missing coordinator', async ({
+  page,
+  request
+}) => {
+  const beforeWorkspaces = await workspaceIDs(request);
+  const beforeAgents = await agentNames(request);
+  const entry = await fixtureTemplate(request);
+  const homeID = String(entry.home?.workspace_id || '');
+  const staffed = `Wizard Coordinator ${RUN}`;
 
   await openGroupCreator(page);
+  await expect(
+    page.locator(`#workspaceGroupTemplateOptions [data-group-template-id="${entry.id}"]`)
+  ).toContainText(`Reuses the existing group “${GROUP_NAME}” unchanged; you choose who fills`);
   await chooseTemplate(page, entry.id);
   await continueToDetails(page);
   const name = page.locator('#folderNameInput');
   await expect(name).toHaveValue(GROUP_NAME);
   await expect(name).toHaveJSProperty('readOnly', true);
   await page.locator('#wizardNextBtn').click();
-  await expect(page.locator('[data-group-template-review-status]')).toContainText(
-    'reused unchanged'
-  );
-  await expect(create).toHaveText(`Use existing group “${GROUP_NAME}”`);
-  await create.click();
-  await expect(page.locator('#addFolderModal')).toBeHidden();
 
-  expect(await workspaceIDs(request)).toEqual(afterCreate);
+  await expect(page.locator('#wizardStep3Title')).toHaveText('Staff the group');
+  const coordinator = roleRow(page, 'portfolio_coordinator');
+  await expect(coordinator).toHaveAttribute('data-state', 'filled');
+  await expect(roleRow(page, 'archive_curator')).toContainText(
+    'Optional roles on an existing group are set up from the group page.'
+  );
+  // Whatever was proposed, clear it and create a named agent for the role.
+  await coordinator.getByRole('button', { name: 'Clear Portfolio Coordinator' }).click();
+  await coordinator
+    .getByRole('button', { name: 'Create an agent for Portfolio Coordinator' })
+    .click();
+  const agentModal = page.locator('#addAgentModal');
+  await expect(agentModal).toBeVisible();
+  const agentName = page.locator('[data-agent-create-field="name"]');
+  await expect(agentName).toBeFocused();
+  await expect(agentName).toHaveValue('Portfolio Coordinator');
+  await expect(agentModal.locator('[data-agent-create-field="systemPrompt"]')).toHaveCount(0);
+  await expect(agentModal.locator('[data-agent-create-note]')).toContainText(
+    `Plugin: ${PLUGIN_NAME}`
+  );
+  await agentName.fill(staffed);
+  await page.locator('#createAgentBtn').click();
+  await expect(agentModal).toBeHidden();
+  await expect(page.locator('#addFolderModal')).toBeVisible();
+  await expect(coordinator).toContainText(staffed);
+  // Staging creates nothing.
   expect(await agentNames(request)).toEqual(beforeAgents);
+
+  await page.locator('#wizardNextBtn').click();
+  const summary = page.locator('#workspaceReviewSummary');
+  await expect(summary).toContainText(
+    'This existing group will be reused unchanged and Portfolio Coordinator will be staffed.'
+  );
+  await expect(summary).toContainText(`Portfolio Coordinator · Create “${staffed}”`);
+  const create = page.locator('#createFolderBtn');
+  await expect(create).toHaveText(`Use existing group “${GROUP_NAME}” and staff 1 role`);
+  const commit = page.waitForRequest(
+    sent =>
+      sent.method() === 'POST' &&
+      new URL(sent.url()).pathname === '/api/workspaces/group-templates/commit'
+  );
+  const fill = page.waitForRequest(
+    sent =>
+      sent.method() === 'PUT' &&
+      new URL(sent.url()).pathname ===
+        `/api/workspaces/${encodeURIComponent(homeID)}/roles/portfolio_coordinator`
+  );
+  await create.click();
+  // The reuse commit is exactly the Home-only request; the fill follows it.
+  expect(Object.keys((await commit).postDataJSON()).sort()).toEqual([
+    'group_review_token',
+    'group_template_id',
+    'idempotency_key',
+    'name',
+    'revision'
+  ]);
+  expect((await fill).postDataJSON()).toEqual({
+    mode: 'create',
+    name: staffed,
+    provider: '',
+    model: ''
+  });
+
+  await page.waitForURL(url => /^\/workspaces\/[^/]+$/.test(url.pathname));
+  await expect(page.locator('.ws-cmd-group-template')).toContainText(
+    'Ready — 1 of 1 required set up'
+  );
+  await expect(page.locator('#addAgentModal')).toBeHidden();
+  expect(await workspaceIDs(request)).toEqual(beforeWorkspaces);
+  expect(await agentNames(request)).toEqual([...beforeAgents, staffed].sort());
+  expect(await fixtureTemplate(request)).toMatchObject({
+    home: { workspace_id: homeID, name: GROUP_NAME },
+    required_home_roles: { verification: 'verified', filled: 1, missing: 0 }
+  });
 });
 
 test('the group page separates template, coordinator and integration through setup, rename and plugin lifecycle', async ({
@@ -256,6 +375,10 @@ test('the group page separates template, coordinator and integration through set
     plugin_id: PLUGIN_NAME
   });
 
+  // The wizard staffed the coordinator; clear it so the page's own setup path
+  // is exercised too. Clearing unbinds the role and deletes no agent.
+  await json(await request.delete(`/api/workspaces/${homeID}/roles/portfolio_coordinator`));
+
   const strip = page.locator('.ws-cmd-group-template');
   await page.goto(`/workspaces/${encodeURIComponent(beforeFolder.folder_slug)}`);
   await expect(strip).toContainText('Research Program Home');
@@ -264,12 +387,23 @@ test('the group page separates template, coordinator and integration through set
   await expect(strip).toContainText('Available');
 
   await strip.getByRole('button', { name: 'Set up Portfolio Coordinator' }).click();
-  await expect(page.locator('#addAgentModal')).toBeVisible();
+  const agentModal = page.locator('#addAgentModal');
+  await expect(agentModal).toBeVisible();
   // The form focuses its name once fully open; a submit during the opening
   // transition would be ignored by Bootstrap's hide().
   await expect(page.locator('[data-agent-create-field="name"]')).toBeFocused();
+  // A program Home role's instructions come from its template, so the form
+  // offers no prompt box and sends no prompt.
+  await expect(agentModal.locator('[data-agent-create-field="systemPrompt"]')).toHaveCount(0);
+  await expect(agentModal.locator('[data-agent-create-note]')).toContainText(
+    `Plugin: ${PLUGIN_NAME}`
+  );
   await page.locator('[data-agent-create-field="name"]').fill(coordinator);
+  const fill = page.waitForRequest(
+    sent => sent.method() === 'PUT' && sent.url().includes('/roles/portfolio_coordinator')
+  );
   await page.locator('#createAgentBtn').click();
+  expect('system_prompt' in (await fill).postDataJSON()).toBe(false);
   await expect(page.locator('#addAgentModal')).toBeHidden();
   await expect(strip).toContainText('Ready — 1 of 1 required set up');
   await expect(strip.getByRole('button', { name: /Set up/ })).toHaveCount(0);
@@ -467,6 +601,17 @@ test('the template chooser and review fit a phone-width viewport', async ({
   await page.screenshot({ path: testInfo.outputPath('group-template-chooser-mobile.png') });
   await continueToDetails(page);
   await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#wizardStep3Title')).toHaveText('Staff the group');
+  const teamOverflow = await page.evaluate(() => {
+    const body = document.querySelector('#addFolderModal .modal-body') as HTMLElement | null;
+    return {
+      page: document.documentElement.scrollWidth > window.innerWidth,
+      dialog: body ? body.scrollWidth > body.clientWidth : true
+    };
+  });
+  expect(teamOverflow).toEqual({ page: false, dialog: false });
+  await page.screenshot({ path: testInfo.outputPath('group-template-team-mobile.png') });
+  await page.locator('#wizardNextBtn').click();
   await expect(page.locator('[data-group-template-review-status]')).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('group-template-review-mobile.png') });
   await page.keyboard.press('Escape');
@@ -530,6 +675,11 @@ test('hostile and long source labels stay literal and keyboard-operable at phone
 
       await continueToDetails(page);
       await expect(page.locator('#workspaceGroupBlueprintRecap')).toContainText(hostileName);
+      await page.locator('#wizardNextBtn').click();
+      // The Team step draws the hostile role label as text, too.
+      const roster = page.locator('#workspaceRoleRoster');
+      await expect(roster).toContainText('<b onclick="window.__groupTemplateInjected=1">Lead</b>');
+      expect(await roster.locator('script, b').count()).toBe(0);
       await page.locator('#wizardNextBtn').click();
       const status = page.locator('[data-group-template-review-status]');
       await expect(status).toHaveAttribute('role', 'status');
