@@ -3212,7 +3212,13 @@ test('the camera cannot be panned outside the navigable world (FR-11)', () => {
 // canvas records its listeners so pointer and wheel gestures can be replayed
 // without a browser, and the world layer records the transform that was applied
 // to it.
-function createCameraHarness({ width = 1000, height = 600, tiles = [], districts = [] } = {}) {
+function createCameraHarness({
+  width = 1000,
+  height = 600,
+  tiles = [],
+  districts = [],
+  units = []
+} = {}) {
   const listeners = {};
   const styleProps = {};
   const classes = new Set();
@@ -3273,6 +3279,10 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
   };
 
   const tileEls = tiles.map(id => makeNode(id));
+  // A group map's agents: same stub shape, keyed by their anchor id.
+  const unitEls = units.map(id =>
+    makeNode(id, { attribute: 'data-unit-id', classes: ['ws-map-unit'] })
+  );
   const districtEls = districts.map(id =>
     makeNode(id, { attribute: 'data-group-id', classes: ['ws-map-district'] })
   );
@@ -3517,6 +3527,9 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
         // together; applySelection asks for the tags alone.
         return sel.includes('ws-map-tile') ? [...tileEls, ...districtTagEls] : districtTagEls;
       }
+      if (sel.includes('ws-map-unit')) {
+        return sel.includes('ws-map-tile') ? [...tileEls, ...unitEls] : unitEls;
+      }
       if (sel.includes('ws-map-tile')) return tileEls;
       return [];
     },
@@ -3527,6 +3540,8 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
       if (sel.includes('data-ws-map-confirm-host')) return confirmHost;
       const tileMatch = sel.match(/ws-map-tile\[data-ws-id="([^"]+)"\]/);
       if (tileMatch) return tileEls.find(el => el.id === tileMatch[1]) || null;
+      const unitMatch = sel.match(/ws-map-unit\[data-unit-id="([^"]+)"\]/);
+      if (unitMatch) return unitEls.find(el => el.id === unitMatch[1]) || null;
       const districtMatch = sel.match(/ws-map-district\[data-group-id="([^"]+)"\]/);
       if (districtMatch) return districtEls.find(el => el.id === districtMatch[1]) || null;
       const resizeMatch = sel.match(/data-resize-handle="([^"]+)"/);
@@ -3555,9 +3570,14 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
     set: value => {
       html = value;
       Object.keys(listeners).forEach(type => delete listeners[type]);
-      [...tileEls, ...districtEls, ...handleEls, ...districtTagEls, ...resizeHandleEls].forEach(
-        el => el.resetListeners()
-      );
+      [
+        ...tileEls,
+        ...unitEls,
+        ...districtEls,
+        ...handleEls,
+        ...districtTagEls,
+        ...resizeHandleEls
+      ].forEach(el => el.resetListeners());
     }
   });
 
@@ -3573,6 +3593,7 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
     menu: menuHost,
     confirm: confirmHost,
     tile: id => tileEls.find(el => el.id === id),
+    unit: id => unitEls.find(el => el.id === id),
     district: id => districtEls.find(el => el.id === id),
     districtTag: id => districtTagEls.find(el => el.id === id),
     handle: id => handleEls.find(el => el.id === id),
@@ -9377,4 +9398,745 @@ test('mounting without an economy clears a previous snapshot', () => {
   map.mount(container, cockpitState({}));
   assert.doesNotMatch(container.innerHTML, /data-harvest-pile/);
   assert.equal(map.economy.badgesHTML('ws-1'), '');
+});
+
+// ---------------------------------------------------------------------------
+// Scoped mode: the group page's Detachment map (group-map-build PRD §4.2)
+// ---------------------------------------------------------------------------
+
+const SCOPED_WORLD = [
+  { id: 'g', kind: 'group', name: 'Studio', folder_slug: 'studio' },
+  { id: 'm1', parent_id: 'g', name: 'Mixing', folder_slug: 'mixing' },
+  { id: 'sub', kind: 'group', parent_id: 'g', name: 'Stems', folder_slug: 'stems' },
+  { id: 'deep', parent_id: 'sub', name: 'Drums', folder_slug: 'drums' },
+  { id: 'other', kind: 'group', name: 'Office', folder_slug: 'office' },
+  { id: 'o1', parent_id: 'other', name: 'Taxes', folder_slug: 'taxes' },
+  { id: 'loose', name: 'Loose', folder_slug: 'loose' }
+];
+
+const rowIds = rows => rows.map(row => row.id);
+
+function scopedMountState(extra = {}) {
+  return {
+    workspaces: SCOPED_WORLD,
+    selectOnly: true,
+    hideChrome: true,
+    noAutoSelect: true,
+    scopeGroupId: 'g',
+    ...extra
+  };
+}
+
+test('scopeWorkspacesToGroup keeps the group and every descendant, and nothing else', () => {
+  const map = loadOriWorkspaceMap();
+  assert.deepEqual(
+    [...rowIds(map.scopeWorkspacesToGroup(SCOPED_WORLD, 'g'))],
+    ['g', 'm1', 'sub', 'deep']
+  );
+  assert.deepEqual([...rowIds(map.scopeWorkspacesToGroup(SCOPED_WORLD, 'sub'))], ['sub', 'deep']);
+  assert.deepEqual([...map.scopeWorkspacesToGroup(SCOPED_WORLD, 'missing')], []);
+});
+
+test('scopeWorkspacesToGroup survives a cyclic hierarchy', () => {
+  const map = loadOriWorkspaceMap();
+  const cyclic = [
+    { id: 'a', kind: 'group', parent_id: 'b' },
+    { id: 'b', kind: 'group', parent_id: 'a' }
+  ];
+  assert.deepEqual([...rowIds(map.scopeWorkspacesToGroup(cyclic, 'a'))], ['a', 'b']);
+});
+
+test('isNestedGroup is true only for a group whose parent is a group', () => {
+  const map = loadOriWorkspaceMap();
+  assert.equal(map.isNestedGroup(SCOPED_WORLD, 'g'), false);
+  assert.equal(map.isNestedGroup(SCOPED_WORLD, 'sub'), true);
+  assert.equal(map.isNestedGroup(SCOPED_WORLD, 'missing'), false);
+});
+
+test('a mount without scopeGroupId draws the whole world exactly as before', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness();
+  map.mount(container, scopedMountState({ scopeGroupId: undefined }));
+  assert.equal(map.getScopeGroupId(), '');
+  for (const id of ['m1', 'o1', 'loose']) {
+    assert.match(container.innerHTML, new RegExp('data-ws-id="' + id + '"'));
+  }
+  assert.match(container.innerHTML, /data-group-collapse="g"/);
+  assert.match(
+    container.innerHTML,
+    /data-ws-check role="checkbox" tabindex="-1" aria-checked="false" aria-label="Select for bulk action" title="Select for bulk action \(or Shift\/Cmd \+ Enter on the tile\)"><\/span>/
+  );
+});
+
+test('a scoped mount draws only its group, without collapse or bulk controls, and unmount clears it', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness();
+  map.mount(container, scopedMountState());
+  assert.equal(map.getScopeGroupId(), 'g');
+  for (const id of ['m1', 'sub', 'deep']) {
+    assert.match(container.innerHTML, new RegExp('data-ws-id="' + id + '"'));
+  }
+  for (const id of ['other', 'o1', 'loose']) {
+    assert.doesNotMatch(container.innerHTML, new RegExp('data-ws-id="' + id + '"'));
+  }
+  assert.doesNotMatch(container.innerHTML, /data-group-collapse/);
+  assert.match(container.innerHTML, /aria-label="Select for bulk action"[^>]* hidden>/);
+  // The page is the group: everything drawn is in it, so no district frame is
+  // drawn at all — no outline, no header, no ⤧/⋯ controls (PRD §10).
+  assert.doesNotMatch(container.innerHTML, /ws-map-district/);
+  assert.doesNotMatch(container.innerHTML, /No members yet/, 'members are drawn, so no empty note');
+
+  map.unmount(container);
+  assert.equal(map.getScopeGroupId(), '');
+  // Home keeps the district and its header.
+  map.mount(container, { workspaces: SCOPED_WORLD, hideChrome: true, noAutoSelect: true });
+  assert.match(container.innerHTML, /ws-map-district[^"]*" role="group"/);
+  assert.match(container.innerHTML, /ws-map-district-header/);
+  assert.match(container.innerHTML, /data-group-menu="g"/);
+});
+
+test('the scoped district is still resolved for placement even though it is not drawn', () => {
+  const map = loadOriWorkspaceMap();
+  const rows = map.scopeWorkspacesToGroup(SCOPED_WORLD, 'g');
+  const positions = { m1: { x: 380, y: 228 }, sub: { x: 760, y: 228 }, deep: { x: 1140, y: 228 } };
+  // The layout engine still resolves the district — that is what frames the
+  // opening camera and keeps a member's automatic spot relative to its group —
+  // and every saved anchor is drawn where Home draws it.
+  const scoped = map.computeWorldLayout(rows, {
+    positions,
+    scope: { groupId: 'g', nested: false }
+  });
+  const home = map.computeWorldLayout(SCOPED_WORLD, { positions });
+  assert.ok(
+    scoped.districts.some(d => d.id === 'g'),
+    'the district record exists'
+  );
+  for (const id of ['m1', 'sub', 'deep']) {
+    const here = scoped.nodes.find(n => n.id === id);
+    const there = home.nodes.find(n => n.id === id);
+    assert.deepEqual({ x: here.x, y: here.y }, { x: there.x, y: there.y }, id + ' matches Home');
+    assert.deepEqual({ x: here.x, y: here.y }, positions[id]);
+  }
+});
+
+test('a group map docks both control clusters together; Home keeps them apart', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness();
+  map.mount(container, scopedMountState());
+  // Zoom first, then the placement actions, inside one bottom-left dock that
+  // stays clear of the page's bottom-right floating widgets.
+  assert.match(
+    container.innerHTML,
+    /<div class="ws-map-control-dock"><div class="ws-map-controls"[^>]*>[\s\S]*?data-map-zoom-in[\s\S]*?<\/div><div class="ws-map-actions"[^>]*>[\s\S]*?data-map-help[\s\S]*?<\/div><\/div>/
+  );
+  assert.equal((container.innerHTML.match(/class="ws-map-controls"/g) || []).length, 1);
+  assert.equal((container.innerHTML.match(/class="ws-map-actions"/g) || []).length, 1);
+
+  map.unmount(container);
+  map.mount(container, { workspaces: SCOPED_WORLD, hideChrome: true, noAutoSelect: true });
+  assert.doesNotMatch(container.innerHTML, /ws-map-control-dock/);
+  // Home's order is unchanged: placement actions, help, then the zoom cluster.
+  assert.match(
+    container.innerHTML,
+    /class="ws-map-actions"[\s\S]*data-map-help-panel|class="ws-map-actions"[\s\S]*class="ws-map-controls"/
+  );
+  assert.ok(
+    container.innerHTML.indexOf('class="ws-map-actions"') <
+      container.innerHTML.indexOf('class="ws-map-controls"')
+  );
+});
+
+test('an empty group says what its ground is for, in screen space, and Home does not', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness();
+  const group = { id: 'g', kind: 'group', name: 'Studio', folder_slug: 'studio' };
+  map.mount(container, { ...scopedMountState(), workspaces: [group] });
+
+  assert.doesNotMatch(container.innerHTML, /ws-map-district/, 'no frame, even empty');
+  // Outside the world layer (so it is not scaled with the camera) and inert.
+  assert.match(
+    container.innerHTML,
+    /<\/div><p class="ws-map-scoped-empty" role="status">No members yet\. Build a workspace here or add an existing one\.<\/p>/
+  );
+  assert.doesNotMatch(container.innerHTML, /ws-map-tile[^-]/, 'no member tiles to draw');
+
+  map.unmount(container);
+  map.mount(container, { workspaces: [group], hideChrome: true, noAutoSelect: true });
+  assert.doesNotMatch(container.innerHTML, /No members yet/);
+  assert.match(container.innerHTML, /ws-map-district[^"]*" role="group"/, 'Home draws the frame');
+});
+
+test('a scoped mount suppresses the Personal HQ site and ignores the HQ focus intent', () => {
+  const window = { addEventListener() {}, location: { search: '?focus=personal-hq' } };
+  vm.runInNewContext(
+    source,
+    {
+      window,
+      document: { getElementById: () => null },
+      setTimeout,
+      clearTimeout,
+      fetch: () => new Promise(() => {}),
+      URLSearchParams
+    },
+    { filename: 'workspace-map.js' }
+  );
+  const map = window.OriWorkspaceMap;
+  const { container } = createMapHarness();
+  map._setHQWorkspaceIdForTest('m1');
+  map.mount(container, scopedMountState());
+  assert.equal(map.getSelectedId(), '', 'the focus intent is Home’s, not the group page’s');
+  assert.equal(map.hqSiteView({ valid: false }).show, false);
+
+  map.unmount(container);
+  assert.equal(map.hqSiteView({ valid: false }).show, true, 'Home still draws the site');
+});
+
+test('computeWorldLayout draws the scoped district expanded, and a nested one at its default', () => {
+  const map = loadOriWorkspaceMap();
+  const rows = map.scopeWorkspacesToGroup(SCOPED_WORLD, 'g');
+  const collapsed = { g: { collapsed: true, accent: 'orchid', theme: 'terrace' } };
+
+  const home = map.computeWorldLayout(rows, { groupPresentations: collapsed });
+  assert.equal(home.districts[0].collapsed, true);
+
+  map._setLayoutForTest({ groups: collapsed }, 'ready');
+  const scoped = map.computeWorldLayout(rows, { scope: { groupId: 'g', nested: false } });
+  const district = scoped.districts.find(d => d.id === 'g');
+  assert.equal(district.collapsed, false, 'Home’s collapse flag never hides the zone');
+  assert.equal(district.accent, 'orchid', 'appearance still comes from the shared layout');
+
+  const frame = { x: 0, y: 0, width: 900, height: 700 };
+  map._setLayoutForTest(
+    { groups: { sub: { sizing_mode: 'custom', frame, accent: 'tide' } } },
+    'ready'
+  );
+  const nestedRows = map.scopeWorkspacesToGroup(SCOPED_WORLD, 'sub');
+  const nested = map.computeWorldLayout(nestedRows, { scope: { groupId: 'sub', nested: true } });
+  const nestedDistrict = nested.districts.find(d => d.id === 'sub');
+  assert.equal(nestedDistrict.sizingMode, 'auto', 'a nested group draws an automatic frame');
+  assert.equal(nestedDistrict.accent, 'default');
+});
+
+test('scopedFrameBounds frames the district, falling back to everything drawn', () => {
+  const map = loadOriWorkspaceMap();
+  const layout = {
+    districts: [{ id: 'g', x: 10, y: 20, width: 300, height: 200 }],
+    bounds: { minX: -50, minY: -50, maxX: 900, maxY: 900 }
+  };
+  assert.deepEqual(
+    { ...map.scopedFrameBounds(layout, 'g') },
+    { minX: 10, minY: 20, maxX: 310, maxY: 220 }
+  );
+  assert.deepEqual({ ...map.scopedFrameBounds(layout, 'missing') }, { ...layout.bounds });
+});
+
+test('scoped menus offer navigation, group layout, and building only', () => {
+  const map = loadOriWorkspaceMap();
+  const labels = items => items.map(item => (item.divider ? '—' : item.label));
+
+  const tile = map.contextMenuItemsFor({ type: 'tile', id: 'm1', ws: { id: 'm1' }, scoped: true });
+  assert.deepEqual([...labels(tile)], ['Open workspace', 'Open → Backlog']);
+  map._setSetupStatusForTest('m1', { state: 'needs_setup', steps: [{ id: 'a', done: false }] });
+
+  // No district is drawn on a group page, so it has no menu of its own; the
+  // ground's menu is the whole story there (PRD §10).
+  const district = map.contextMenuItemsFor({
+    type: 'district',
+    id: 'g',
+    ws: { id: 'g', kind: 'group' },
+    scoped: true,
+    nested: false
+  });
+  assert.deepEqual([...district], []);
+
+  const canvas = map.contextMenuItemsFor({ type: 'canvas', scoped: true });
+  assert.deepEqual(
+    [...labels(canvas)],
+    ['Build', 'Add existing workspace…', '—', 'Fit', 'Reset view']
+  );
+  assert.deepEqual(
+    [...canvas.filter(item => !item.divider).map(item => item.action)],
+    ['build', 'add-existing', 'fit', 'reset-view']
+  );
+  // Neither touches the layout until the workspace exists (FR-11).
+  assert.ok(
+    canvas.every(item => !item.disabled),
+    'read-only layout still allows building'
+  );
+
+  assert.deepEqual([...map.contextMenuItemsFor({ type: 'hq', scoped: true })], []);
+});
+
+test('unscoped menus are unchanged by the scoped flag defaulting off', () => {
+  const map = loadOriWorkspaceMap();
+  const labels = items => items.filter(item => !item.divider).map(item => item.label);
+  assert.ok(
+    labels(map.contextMenuItemsFor({ type: 'tile', id: 'x', ws: { id: 'x' } })).includes(
+      'Delete workspace'
+    )
+  );
+  assert.ok(labels(map.contextMenuItemsFor({ type: 'canvas' })).includes('Fit all'));
+  assert.ok(
+    labels(
+      map.contextMenuItemsFor({ type: 'district', id: 'g', ws: { id: 'g', kind: 'group' } })
+    ).includes('Delete group')
+  );
+});
+
+async function mountedScopedDrag() {
+  const patches = [];
+  const map = loadMapWithFetch((url, init) => {
+    if (init && init.method === 'PATCH') {
+      const body = JSON.parse(init.body || '{}');
+      patches.push({ url, body });
+      const set = (body.operations || []).find(op => op.op === 'set_positions');
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            result: { schema_version: 1, revision: 5, positions: (set && set.positions) || {} }
+          })
+      });
+    }
+    return jsonResponse({
+      schema_version: 1,
+      revision: 4,
+      snap_to_grid: true,
+      positions: { m1: { x: 380, y: 228 }, sub: { x: 760, y: 228 }, deep: { x: 1140, y: 228 } },
+      viewport: { center_x: 99999, center_y: 99999, zoom: 1.75 }
+    });
+  });
+  const harness = createCameraHarness({ tiles: ['m1', 'sub', 'deep'], districts: ['g'] });
+  map.mount(harness.container, scopedMountState());
+  await flush();
+  enableDragMode(harness);
+  return { map, harness, patches };
+}
+
+test('normalizeFrameInsets keeps only positive finite edges', () => {
+  const map = loadOriWorkspaceMap();
+  assert.deepEqual({ ...map.normalizeFrameInsets({ top: 84, left: 240 }) }, { top: 84, left: 240 });
+  assert.deepEqual({ ...map.normalizeFrameInsets({ top: -5, left: 'wide' }) }, { top: 0, left: 0 });
+  assert.deepEqual({ ...map.normalizeFrameInsets(null) }, { top: 0, left: 0 });
+});
+
+test('frame insets centre the opening view in the clear area, whatever the zoom', async () => {
+  const positions = { m1: { x: 380, y: 228 }, sub: { x: 760, y: 228 }, deep: { x: 1140, y: 228 } };
+  const openWith = async frameInsets => {
+    const map = loadMapWithFetch(() => jsonResponse({ schema_version: 1, revision: 1, positions }));
+    const harness = createCameraHarness({ tiles: ['m1', 'sub', 'deep'], districts: ['g'] });
+    map.mount(harness.container, scopedMountState(frameInsets ? { frameInsets } : {}));
+    await flush();
+    const layout = map.computeWorldLayout(map.scopeWorkspacesToGroup(SCOPED_WORLD, 'g'), {
+      positions,
+      scope: { groupId: 'g', nested: false }
+    });
+    const frame = map.scopedFrameBounds(layout, 'g');
+    const center = { x: (frame.minX + frame.maxX) / 2, y: (frame.minY + frame.maxY) / 2 };
+    return map.camera.worldToScreen(center, map.getCamera(), { width: 1000, height: 600 });
+  };
+
+  const plain = await openWith(null);
+  const inset = await openWith({ top: 100, left: 240 });
+  // The frame's centre moves by half of each reserved edge: it is centred in
+  // the space the overlays leave, and zoom cancels out of that position.
+  assert.ok(Math.abs(inset.x - plain.x - 120) < 0.5, 'x shift ' + (inset.x - plain.x));
+  assert.ok(Math.abs(inset.y - plain.y - 50) < 0.5, 'y shift ' + (inset.y - plain.y));
+});
+
+test('a scoped mount frames its district instead of restoring Home’s camera, and never saves one', async () => {
+  const { map, harness, patches } = await mountedScopedDrag();
+  const cam = map.getCamera();
+  assert.notEqual(cam.centerX, 99999, 'Home’s saved camera is not the group page’s');
+  const screen = map.camera.worldToScreen({ x: 380, y: 228 }, cam, { width: 1000, height: 600 });
+  assert.ok(screen.x > 0 && screen.x < 1000 && screen.y > 0 && screen.y < 600, 'member on screen');
+
+  harness.fire('pointerdown', pointerEvent(500, 300));
+  for (let i = 0; i < 20; i += 1) harness.fire('pointermove', pointerEvent(500 - i * 6, 300));
+  harness.fire('pointerup', pointerEvent(380, 300));
+  await new Promise(resolve => setTimeout(resolve, 750));
+  await flush();
+  assert.equal(
+    patches.filter(p => p.body.operations.some(op => op.op === 'set_viewport')).length,
+    0,
+    'a scoped pan is session-only'
+  );
+});
+
+test('a scoped drop inside the group saves one position and never reparents', async () => {
+  const { harness, patches } = await mountedScopedDrag();
+  const tile = harness.tile('m1');
+  tile.fire('pointerdown', tilePointer(100, 100));
+  tile.fire('pointermove', tilePointer(130, 110));
+  tile.fire('pointerup', tilePointer(130, 110));
+  await flushDeep();
+
+  assert.equal(patches.length, 1, 'one drop, one request');
+  assert.match(patches[0].url, /workspace-map\/layout/);
+  assert.equal(patches[0].body.operations[0].op, 'set_positions');
+  assert.ok(patches[0].body.operations[0].positions.m1, 'the moved member was saved');
+});
+
+test('a scoped drop anywhere is a reposition: one position write, never a membership write', async () => {
+  const { harness, patches } = await mountedScopedDrag();
+  const tile = harness.tile('m1');
+  const live = harness.control('[data-map-live]');
+  // Far outside where the (undrawn) district frame would have been.
+  tile.fire('pointerdown', tilePointer(100, 100));
+  tile.fire('pointermove', tilePointer(4100, 3100));
+  assert.equal(tile.classList.contains('is-leaving'), false, 'no leave intent is ever shown');
+  tile.fire('pointerup', tilePointer(4100, 3100));
+  await flushDeep();
+
+  assert.equal(patches.length, 1, 'one drop, one request');
+  assert.match(
+    patches[0].url,
+    /workspace-map\/layout/,
+    'and it is a layout write, not a PATCH to the workspace'
+  );
+  assert.equal(patches[0].body.operations[0].op, 'set_positions');
+  assert.ok(patches[0].body.operations[0].positions.m1, 'the moved member was saved');
+  assert.match(live.textContent, /^Moved to /);
+});
+
+test('scoped empty-ground Build holds the coordinate and hands the creator to the host', async () => {
+  const { map, harness } = await mountedScopedDrag();
+  const builds = [];
+  const adds = [];
+  map.mount(harness.container, {
+    ...scopedMountState(),
+    onBuild: detail => builds.push(detail),
+    onAddExisting: () => adds.push(true)
+  });
+  await flush();
+
+  const menu = harness.menu;
+  harness.fire('contextmenu', {
+    clientX: 500,
+    clientY: 300,
+    preventDefault() {},
+    target: { closest: sel => (sel.includes('ws-map-canvas') ? harness.canvas : null) }
+  });
+  assert.ok(menu.isOpen(), 'empty ground offers a menu');
+  menu.item('build').fire('click');
+
+  assert.equal(builds.length, 1, 'the host opens the creator, because only it can lock the parent');
+  assert.equal(builds[0].group.id, 'g', 'the group page builds into its own group');
+  assert.ok(Number.isFinite(builds[0].point.x) && Number.isFinite(builds[0].point.y));
+  assert.ok(map.hasPendingBuild(), 'the clicked coordinate is held for completeBuild');
+
+  harness.fire('contextmenu', {
+    clientX: 500,
+    clientY: 300,
+    preventDefault() {},
+    target: { closest: sel => (sel.includes('ws-map-canvas') ? harness.canvas : null) }
+  });
+  menu.item('add-existing').fire('click');
+  assert.equal(adds.length, 1, 'Add existing is the host’s membership picker');
+});
+
+// ---------------------------------------------------------------------------
+// Agents on a group's own map (group-map-build PRD §10)
+// ---------------------------------------------------------------------------
+
+const AGENT_UNITS = [
+  { id: 'agent:g:scout', selectKey: 'Scout', name: 'Scout', role: 'Researcher', status: 'Idle' },
+  {
+    id: 'agent:g:boss',
+    selectKey: 'Boss',
+    name: 'Boss',
+    role: 'Commander',
+    status: 'Working',
+    tone: 'working',
+    working: true,
+    commander: true
+  },
+  { id: 'agent:g:scribe', selectKey: 'Scribe', name: 'Scribe', role: 'Writer', status: 'Idle' }
+];
+const MEMBER_POSITIONS = {
+  m1: { x: 380, y: 228 },
+  sub: { x: 760, y: 228 },
+  deep: { x: 1140, y: 228 }
+};
+
+test('normalizeScopeUnits keeps only agent anchors, once each, within the id limit', () => {
+  const map = loadOriWorkspaceMap();
+  const units = map.normalizeScopeUnits([
+    { id: 'agent:g:boss', name: 'Boss', commander: true },
+    { id: 'agent:g:boss', name: 'Impostor' },
+    { id: 'm1', name: 'Not an agent' },
+    { id: 'agent:g:' + 'x'.repeat(260), name: 'Too long' },
+    null,
+    { id: 'agent:g:quiet' }
+  ]);
+  assert.deepEqual([...units.map(unit => unit.id)], ['agent:g:boss', 'agent:g:quiet']);
+  assert.equal(units[0].name, 'Boss', 'the first of a duplicated id wins');
+  assert.equal(units[1].name, 'Agent');
+  assert.equal(units[1].status, 'Idle');
+  assert.equal(units[1].commander, false);
+  assert.deepEqual([...map.normalizeScopeUnits('nope')], []);
+});
+
+test('units stand left of the members: Commander first, specialists beneath, wrapping left', () => {
+  const map = loadOriWorkspaceMap();
+  const { padX, padY } = map.districtGeometry;
+  const frame = { x: 380 - padX, y: 228 - padY, width: 176, height: 170 };
+  const nodes = [{ id: 'm1', x: 380, y: 228 }];
+  const units = map.normalizeScopeUnits(AGENT_UNITS);
+  const placed = map.placeScopedUnits(units, { nodes, frame, positions: {} });
+  const at = Object.fromEntries(placed.map(record => [record.id, { x: record.x, y: record.y }]));
+
+  // One cell and one snap step left of the leftmost member, on its row.
+  assert.deepEqual({ ...at['agent:g:boss'] }, { x: 166, y: 228 });
+  assert.deepEqual({ ...at['agent:g:scout'] }, { x: 166, y: 398 });
+  assert.deepEqual({ ...at['agent:g:scribe'] }, { x: -10, y: 228 });
+  assert.deepEqual(
+    placed.map(record => record.id),
+    units.map(unit => unit.id),
+    'records keep the host’s order'
+  );
+  assert.ok(placed.every(record => record.saved === false && record.kind === 'unit'));
+
+  const again = map.placeScopedUnits(units, { nodes, frame, positions: {} });
+  assert.deepEqual(JSON.stringify(again), JSON.stringify(placed), 'deterministic');
+});
+
+test('a saved unit stands where it was put, unless a building now stands there', () => {
+  const map = loadOriWorkspaceMap();
+  const { padX, padY } = map.districtGeometry;
+  const frame = { x: 380 - padX, y: 228 - padY, width: 176, height: 170 };
+  const nodes = [{ id: 'm1', x: 380, y: 228 }];
+  const units = map.normalizeScopeUnits(AGENT_UNITS);
+  const placed = map.placeScopedUnits(units, {
+    nodes,
+    frame,
+    positions: {
+      'agent:g:boss': { x: 760, y: 608 },
+      // Under m1: a building took the spot on Home, so the unit gives way.
+      'agent:g:scout': { x: 400, y: 240 }
+    }
+  });
+  const byId = Object.fromEntries(placed.map(record => [record.id, record]));
+  assert.deepEqual({ x: byId['agent:g:boss'].x, y: byId['agent:g:boss'].y }, { x: 760, y: 608 });
+  assert.equal(byId['agent:g:boss'].saved, true);
+  assert.equal(byId['agent:g:scout'].saved, false);
+  assert.deepEqual(
+    { x: byId['agent:g:scout'].x, y: byId['agent:g:scout'].y },
+    { x: 166, y: 228 },
+    'with the Commander placed by hand, the first free slot goes to the next unit'
+  );
+});
+
+test('scoped layout stands the units and frames them; Home ignores both units and agent anchors', () => {
+  const map = loadOriWorkspaceMap();
+  const rows = map.scopeWorkspacesToGroup(SCOPED_WORLD, 'g');
+  const withAgents = { ...MEMBER_POSITIONS, 'agent:g:boss': { x: 0, y: 1000 } };
+  const scoped = map.computeWorldLayout(rows, {
+    positions: withAgents,
+    scope: { groupId: 'g', nested: false },
+    units: map.normalizeScopeUnits(AGENT_UNITS)
+  });
+  assert.equal(scoped.units.length, 3);
+  const frame = map.scopedFrameBounds(scoped, 'g');
+  for (const unit of scoped.units) {
+    assert.ok(unit.x >= frame.minX && unit.y >= frame.minY, unit.id + ' inside the opening frame');
+    assert.ok(unit.x + 176 <= frame.maxX && unit.y + 170 <= frame.maxY, unit.id + ' fully framed');
+    assert.ok(unit.x >= scoped.bounds.minX && unit.y + 170 <= scoped.bounds.maxY, 'and in bounds');
+  }
+
+  const home = map.computeWorldLayout(SCOPED_WORLD, {
+    positions: withAgents,
+    units: map.normalizeScopeUnits(AGENT_UNITS)
+  });
+  const homeWithout = map.computeWorldLayout(SCOPED_WORLD, { positions: MEMBER_POSITIONS });
+  assert.deepEqual([...home.units], [], 'Home draws no units');
+  assert.equal(
+    JSON.stringify(home.nodes.map(node => [node.id, node.x, node.y])),
+    JSON.stringify(homeWithout.nodes.map(node => [node.id, node.x, node.y])),
+    'an agent anchor never moves anything Home draws'
+  );
+});
+
+test('a scoped mount draws its agents as units; an unscoped one draws none', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness();
+  const units = [
+    { ...AGENT_UNITS[1], portraitHTML: '<span class="portrait-stub"></span>' },
+    { id: 'agent:g:odd', name: '<Odd & "Co">', role: 'Writer', status: 'Idle', selected: true }
+  ];
+  map.mount(container, scopedMountState({ units }));
+  const html = container.innerHTML;
+  assert.match(
+    html,
+    /<button type="button" class="ws-map-unit is-commander tone-working" data-unit-id="agent:g:boss" aria-pressed="false"/
+  );
+  assert.match(html, /<span class="portrait-stub"><\/span>/, 'the host’s portrait is used as-is');
+  assert.match(html, /aria-label="Boss, Commander, Working\. Activate to open the Unit Sheet"/);
+  assert.match(html, /class="ws-map-unit is-selected tone-idle" data-unit-id="agent:g:odd"/);
+  assert.match(html, /&lt;Odd &amp; &quot;Co&quot;&gt;/);
+  assert.doesNotMatch(html, /<Odd/, 'names are escaped');
+  assert.match(html, /<span class="ws-map-led is-working"><\/span>Working/);
+  assert.doesNotMatch(html, /ws-map-scoped-empty/, 'a group with members has no empty note');
+  assert.match(html, /<li><b>Agents<\/b>/, 'the help explains the units');
+
+  map.unmount(container);
+  map.mount(container, { workspaces: SCOPED_WORLD, hideChrome: true, noAutoSelect: true, units });
+  assert.doesNotMatch(container.innerHTML, /data-unit-id/);
+  assert.doesNotMatch(container.innerHTML, /<li><b>Agents<\/b>/);
+});
+
+test('an empty group with agents marks its empty lot on the ground instead of the screen', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness();
+  const group = SCOPED_WORLD[0];
+  map.mount(container, { ...scopedMountState({ units: AGENT_UNITS }), workspaces: [group] });
+  assert.match(
+    container.innerHTML,
+    /<p class="ws-map-scoped-empty is-lot" role="status" style="left:[-\d.]+px;top:[-\d.]+px;width:176px;height:170px">No members yet\./
+  );
+  assert.doesNotMatch(container.innerHTML, /<\/div><p class="ws-map-scoped-empty" role="status">/);
+  assert.equal((container.innerHTML.match(/data-unit-id=/g) || []).length, 3);
+});
+
+async function mountedScopedUnits(extra = {}) {
+  const ctx = await mountedScopedDrag();
+  const selected = [];
+  const harness = createCameraHarness({
+    tiles: ['m1', 'sub', 'deep'],
+    districts: ['g'],
+    units: AGENT_UNITS.map(unit => unit.id)
+  });
+  ctx.map.mount(
+    harness.container,
+    scopedMountState({ units: AGENT_UNITS, onSelectUnit: unit => selected.push(unit), ...extra })
+  );
+  await flush();
+  enableDragMode(harness);
+  return { ...ctx, harness, selected };
+}
+
+test('dragging an agent saves its own anchor beside the buildings, and never a membership', async () => {
+  const { map, harness, patches } = await mountedScopedUnits();
+  const boss = harness.unit('agent:g:boss');
+  const live = harness.control('[data-map-live]');
+  boss.fire('pointerdown', tilePointer(100, 100));
+  boss.fire('pointermove', tilePointer(130, 110));
+  assert.equal(boss.classList.contains('is-dragging'), true);
+  assert.equal(boss.classList.contains('is-blocked'), false);
+  boss.fire('pointerup', tilePointer(130, 110));
+  await flushDeep();
+
+  assert.equal(patches.length, 1, 'one drop, one request');
+  assert.match(patches[0].url, /workspace-map\/layout/);
+  const ops = patches[0].body.operations;
+  assert.deepEqual(
+    ops.map(op => op.op),
+    ['set_positions']
+  );
+  assert.ok(ops[0].positions['agent:g:boss'], 'the moved agent was saved');
+  // The other agents stood automatically beside the members; they are pinned
+  // so moving one agent never walks the rest.
+  assert.ok(ops[0].positions['agent:g:scout'] && ops[0].positions['agent:g:scribe']);
+  assert.equal(ops[0].positions.m1, undefined, 'saved buildings are not re-sent');
+  assert.match(live.textContent, /^Moved to /);
+  assert.ok(map.getLayoutState().positions['agent:g:boss']);
+});
+
+test('dropping an agent on a building is refused while dragging and resolved to a free spot', async () => {
+  const { harness, patches } = await mountedScopedUnits();
+  const boss = harness.unit('agent:g:boss');
+  const live = harness.control('[data-map-live]');
+  boss.fire('pointerdown', tilePointer(0, 0));
+  // Walk right until boss is over m1, whatever zoom the opening fit chose.
+  let blocked = false;
+  for (let dx = 20; dx <= 600 && !blocked; dx += 20) {
+    boss.fire('pointermove', tilePointer(dx, 0));
+    blocked = boss.classList.contains('is-blocked');
+    if (blocked) boss.fire('pointerup', tilePointer(dx, 0));
+  }
+  assert.ok(blocked, 'a building’s footprint blocks the unit');
+  await flushDeep();
+  assert.match(live.textContent, /Moved to/);
+  assert.equal(patches.length, 1);
+});
+
+test('activating a unit opens its Unit Sheet through the host, by click, keyboard move, or menu', async () => {
+  const { harness, selected, patches } = await mountedScopedUnits();
+  const scout = harness.unit('agent:g:scout');
+  scout.fire('click', {});
+  assert.deepEqual(
+    selected.map(unit => unit.selectKey),
+    ['Scout']
+  );
+
+  // Right-click the unit: its menu has one action, the same sheet.
+  harness.fire('contextmenu', {
+    clientX: 200,
+    clientY: 150,
+    preventDefault() {},
+    target: { closest: sel => (sel.includes('ws-map-unit') ? scout : null) }
+  });
+  assert.deepEqual([...harness.menu.labels()], ['Open Unit Sheet']);
+  harness.menu.item('open-unit').fire('click');
+  assert.deepEqual(
+    selected.map(unit => unit.selectKey),
+    ['Scout', 'Scout']
+  );
+
+  // With Move on, an arrow on a focused unit moves that unit, and Enter saves.
+  const keyOn = key => ({
+    key,
+    preventDefault() {},
+    stopPropagation() {},
+    target: { closest: sel => (sel.includes('ws-map-unit') ? scout : null) }
+  });
+  harness.fire('keydown', keyOn('ArrowDown'));
+  harness.fire('keydown', keyOn('ArrowDown'));
+  harness.fire('keydown', keyOn('Enter'));
+  await flushDeep();
+  assert.equal(patches.length, 1);
+  assert.ok(patches[0].body.operations[0].positions['agent:g:scout']);
+});
+
+test('updateUnits refreshes what agents show in place, and refuses a changed roster', async () => {
+  const { map, harness } = await mountedScopedUnits();
+  const before = harness.container.innerHTML;
+  const busy = AGENT_UNITS.map(unit =>
+    unit.id === 'agent:g:scout' ? { ...unit, status: 'Working', tone: 'working' } : unit
+  );
+  assert.equal(map.updateUnits(harness.container, busy), true);
+  assert.equal(harness.container.innerHTML, before, 'no re-mount');
+
+  assert.equal(map.updateUnits(harness.container, busy.slice(1)), false, 'an agent left');
+  assert.equal(
+    map.updateUnits(harness.container, [
+      ...busy,
+      { id: 'agent:g:new', name: 'New', status: 'Idle' }
+    ]),
+    false,
+    'an agent joined'
+  );
+  const promoted = busy.map(unit => ({ ...unit, commander: unit.id === 'agent:g:scout' }));
+  assert.equal(map.updateUnits(harness.container, promoted), false, 'a new Commander');
+  assert.equal(map.updateUnits({}, busy), false, 'another container');
+});
+
+test('on Home an agent anchor occupies nothing: a building can be dropped on it', async () => {
+  const { harness, patches } = await mountedDrag({
+    positions: {
+      'ws-1': { x: 380, y: 228 },
+      'ws-2': { x: 760, y: 228 },
+      // Where ws-1 already stands: claimed, it would block every small move.
+      'agent:g:boss': { x: 380, y: 228 }
+    }
+  });
+  const tile = harness.tile('ws-1');
+  const live = harness.control('[data-map-live]');
+  tile.fire('pointerdown', tilePointer(0, 0));
+  tile.fire('pointermove', tilePointer(12, 0));
+  assert.equal(tile.classList.contains('is-blocked'), false);
+  tile.fire('pointerup', tilePointer(12, 0));
+  await flushDeep();
+  assert.equal(patches.length, 1);
+  assert.doesNotMatch(live.textContent, /taken/);
 });

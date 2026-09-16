@@ -238,7 +238,58 @@ func (s *SQLiteStore) loadPositions(ctx context.Context, userID string) (map[str
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("failed to read workspace map positions: %w", err)
 	}
+	if err := s.loadAgentPositions(ctx, userID, positions); err != nil {
+		return nil, err
+	}
 	return positions, nil
+}
+
+// loadAgentPositions folds the user's agent anchors into positions under their
+// "agent:<workspace>:<key>" identifiers, with the same per-row tolerance as
+// building anchors.
+func (s *SQLiteStore) loadAgentPositions(ctx context.Context, userID string, positions map[string]Point) error {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT workspace_id, agent_key, x, y
+		FROM workspace_map_agent_positions
+		WHERE user_id = ?
+	`, userID)
+	if err != nil {
+		return fmt.Errorf("failed to read workspace map agent positions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var (
+			workspaceID string
+			agentKey    string
+			xRaw        any
+			yRaw        any
+		)
+		if err := rows.Scan(&workspaceID, &agentKey, &xRaw, &yRaw); err != nil {
+			continue
+		}
+		nodeID, err := NormalizeNodeID(AgentNodeID(workspaceID, agentKey))
+		if err != nil {
+			continue
+		}
+		if _, _, isAgent := ParseAgentNodeID(nodeID); !isAgent {
+			continue
+		}
+		x, xOK := floatValue(xRaw)
+		y, yOK := floatValue(yRaw)
+		if !xOK || !yOK {
+			continue
+		}
+		point, ok := SanitizePoint(Point{X: x, Y: y})
+		if !ok {
+			continue
+		}
+		positions[nodeID] = point
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("failed to read workspace map agent positions: %w", err)
+	}
+	return nil
 }
 
 // Apply commits a partial patch and returns the canonical values it produced.
@@ -415,9 +466,7 @@ func (s *SQLiteStore) applyOperation(ctx context.Context, tx *sql.Tx, userID str
 		return s.translateGroup(ctx, tx, userID, now, op, members[op.GroupID], state)
 
 	case OpReset:
-		if _, err := tx.ExecContext(ctx, `
-			DELETE FROM workspace_map_positions WHERE user_id = ?
-		`, userID); err != nil {
+		if err := s.clearPositions(ctx, tx, userID); err != nil {
 			return fmt.Errorf("failed to reset workspace map positions: %w", err)
 		}
 		// Reset clears the user's ARRANGEMENT: anchors, custom rectangles,
@@ -433,9 +482,7 @@ func (s *SQLiteStore) applyOperation(ctx context.Context, tx *sql.Tx, userID str
 		return nil
 
 	case OpRestoreGeometry:
-		if _, err := tx.ExecContext(ctx, `
-			DELETE FROM workspace_map_positions WHERE user_id = ?
-		`, userID); err != nil {
+		if err := s.clearPositions(ctx, tx, userID); err != nil {
 			return fmt.Errorf("failed to clear workspace map positions: %w", err)
 		}
 		state.committed = map[string]Point{}
@@ -445,9 +492,7 @@ func (s *SQLiteStore) applyOperation(ctx context.Context, tx *sql.Tx, userID str
 		return s.restoreGroupGeometry(ctx, tx, userID, now, op.Groups, state)
 
 	case OpRestorePositions:
-		if _, err := tx.ExecContext(ctx, `
-			DELETE FROM workspace_map_positions WHERE user_id = ?
-		`, userID); err != nil {
+		if err := s.clearPositions(ctx, tx, userID); err != nil {
 			return fmt.Errorf("failed to clear workspace map positions: %w", err)
 		}
 		state.committed = map[string]Point{}
@@ -677,8 +722,39 @@ func (s *SQLiteStore) writeGroupPresentation(ctx context.Context, tx *sql.Tx, us
 	return nil
 }
 
+// clearPositions removes every building and agent anchor the user has. The two
+// always clear together: an arrangement is both.
+func (s *SQLiteStore) clearPositions(ctx context.Context, tx *sql.Tx, userID string) error {
+	for _, stmt := range []string{
+		`DELETE FROM workspace_map_positions WHERE user_id = ?`,
+		`DELETE FROM workspace_map_agent_positions WHERE user_id = ?`,
+	} {
+		if _, err := tx.ExecContext(ctx, stmt, userID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *SQLiteStore) writePositions(ctx context.Context, tx *sql.Tx, userID string, now time.Time, positions map[string]Point, state *layoutState) error {
 	for id, point := range positions {
+		if workspaceID, agentKey, isAgent := ParseAgentNodeID(id); isAgent {
+			if workspaceID == "" {
+				return fmt.Errorf("%w: %q is not agent:<workspace>:<agent>", ErrInvalidNodeID, id)
+			}
+			if _, err := tx.ExecContext(ctx, `
+				INSERT INTO workspace_map_agent_positions (user_id, workspace_id, agent_key, x, y, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?)
+				ON CONFLICT(user_id, workspace_id, agent_key) DO UPDATE SET
+					x = excluded.x,
+					y = excluded.y,
+					updated_at = excluded.updated_at
+			`, userID, workspaceID, agentKey, point.X, point.Y, now); err != nil {
+				return fmt.Errorf("failed to save position for %q: %w", id, err)
+			}
+			state.committed[id] = point
+			continue
+		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO workspace_map_positions (user_id, workspace_id, x, y, updated_at)
 			VALUES (?, ?, ?, ?, ?)
@@ -786,8 +862,9 @@ func (s *SQLiteStore) translateGroupFrame(ctx context.Context, tx *sql.Tx, userI
 func (s *SQLiteStore) enforceLayoutSize(ctx context.Context, tx *sql.Tx, userID string) error {
 	var count int
 	if err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(1) FROM workspace_map_positions WHERE user_id = ?
-	`, userID).Scan(&count); err != nil {
+		SELECT (SELECT COUNT(1) FROM workspace_map_positions WHERE user_id = ?)
+			+ (SELECT COUNT(1) FROM workspace_map_agent_positions WHERE user_id = ?)
+	`, userID, userID).Scan(&count); err != nil {
 		return fmt.Errorf("failed to count workspace map positions: %w", err)
 	}
 	if count > MaxPositionsPerLayout {

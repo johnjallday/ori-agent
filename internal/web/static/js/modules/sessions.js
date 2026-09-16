@@ -728,6 +728,9 @@ const sessionManager = {
       ).trim();
 
       const pendingBlueprint = String(addFolderModal.dataset.pendingBlueprint || '').trim();
+      const pendingParentId = String(addFolderModal.dataset.pendingParentId || '').trim();
+      const pendingParentLocked =
+        String(addFolderModal.dataset.pendingParentLocked || '') === 'true';
       const pendingOptions = this.pendingWorkspaceCreatorOptions || {};
 
       if (!this.workspaceCreatorContext || !this.pendingWorkspaceCreatorOptions) {
@@ -739,7 +742,9 @@ const sessionManager = {
           mapOrigin:
             String(addFolderModal.dataset.pendingMapOrigin || '') === 'true' ||
             Boolean(pendingOptions.mapOrigin),
-          blueprint: pendingBlueprint || pendingOptions.blueprint
+          blueprint: pendingBlueprint || pendingOptions.blueprint,
+          parentId: pendingParentId || pendingOptions.parentId,
+          parentLocked: pendingParentLocked || Boolean(pendingOptions.parentLocked)
         });
       }
       this.pendingWorkspaceCreatorOptions = null;
@@ -770,6 +775,8 @@ const sessionManager = {
       delete addFolderModal.dataset.pendingPostCreateAction;
       delete addFolderModal.dataset.pendingBlueprint;
       delete addFolderModal.dataset.pendingMapOrigin;
+      delete addFolderModal.dataset.pendingParentId;
+      delete addFolderModal.dataset.pendingParentLocked;
     });
 
     // A dismissed creator must not leave a fixed selected-member Group or a
@@ -3983,6 +3990,9 @@ const sessionManager = {
       parentSelect.innerHTML = groupOptions.renderWorkspaceParentOptions(groups);
       parentSelect.value = '';
       groupOptions.setWorkspaceParentSelectState(parentSelect, groups.length);
+      // A group page's Build owns the destination; the reset must not offer it
+      // back as a choice (group-map-build FR-15).
+      this.applyLockedParentSelection();
     }
     document
       .querySelectorAll('#addFolderModal .folder-color-btn')
@@ -4369,10 +4379,82 @@ const sessionManager = {
     this.refreshWizardChrome();
   },
 
+  // One hierarchy-changed signal, carrying the workspace a listener may want to
+  // select. The Map dispatches the same event name after a membership change.
+  notifyWorkspacesChanged(detail = {}) {
+    if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return;
+    const Ctor =
+      typeof window.CustomEvent === 'function'
+        ? window.CustomEvent
+        : typeof CustomEvent === 'function'
+          ? CustomEvent
+          : null;
+    if (!Ctor) return;
+    window.dispatchEvent(new Ctor('ori:workspaces-changed', { detail }));
+  },
+
+  // The group this creator must build into, or '' when the user is free to
+  // choose. Set by a group page's Build (group-map-build FR-14).
+  lockedParentId() {
+    const context = this.workspaceCreatorContext;
+    return context?.parentLocked ? String(context.parentId || '').trim() : '';
+  },
+
+  lockedParentName() {
+    const id = this.lockedParentId();
+    if (!id) return '';
+    const groups = window.WorkspaceGroupOptions?.collectWorkspaceGroupOptions?.(this.folders || []);
+    const match = (groups || []).find(group => group.id === id);
+    if (match) return String(match.name || '');
+    // The page that opened the creator knows its own group even when the
+    // cached folder list has not caught up with it yet.
+    const named = String(this.workspaceCreatorContext?.parentName || '').trim();
+    if (named) return named;
+    const option = this.parentSelectOption(id);
+    return String(option?.textContent || '').replace(/^-+\s*/, '');
+  },
+
+  // Options are scanned rather than queried: a workspace id travels into a
+  // selector unescaped otherwise, and this list is short.
+  parentSelectOption(id) {
+    const select = document.getElementById('folderParentSelect');
+    const options = select ? Array.from(select.options || []) : [];
+    return options.find(option => String(option.value) === String(id)) || null;
+  },
+
+  // Preselect and freeze the destination, and say which group it is. The help
+  // slot setWorkspaceParentSelectState owns is reused rather than adding a
+  // second caption element (PRD §6).
+  applyLockedParentSelection() {
+    const parentId = this.lockedParentId();
+    const select = document.getElementById('folderParentSelect');
+    if (!select || !parentId) return;
+    if (!this.parentSelectOption(parentId)) {
+      const option = document.createElement('option');
+      option.value = parentId;
+      option.textContent = this.workspaceCreatorContext?.parentName || 'This group';
+      select.appendChild(option);
+    }
+    select.value = parentId;
+    select.disabled = true;
+    const help = document.getElementById('folderParentHelp');
+    if (help) {
+      const name = this.lockedParentName();
+      help.textContent = name ? `Building into ${name}` : 'Building into this group';
+    }
+  },
+
   syncGroupRequirementParentControl() {
     const parent = document.getElementById('folderParentSelect');
     const field = document.getElementById('workspaceCreatorDestinationCard');
     if (!parent) return;
+    // A locked destination answers this question already: keep the control
+    // showing the group rather than clearing it back to "No group".
+    if (this.lockedParentId()) {
+      this.applyLockedParentSelection();
+      if (field) field.hidden = false;
+      return;
+    }
     const draft = this.groupRequirementDraft;
     const grouped = draft?.composition === 'grouped';
     const awaitingRequiredChoice = draft?.policy === 'recommended' && !draft.composition;
@@ -4384,6 +4466,9 @@ const sessionManager = {
   },
 
   groupRequirementBlocked() {
+    // The placement question has one possible answer when the parent is locked:
+    // grouped, into that group (group-map-build FR-16).
+    if (this.lockedParentId()) return false;
     return Boolean(
       this.groupRequirementDraft?.policy === 'recommended' &&
       !this.groupRequirementDraft.composition
@@ -8407,6 +8492,9 @@ const sessionManager = {
         ? 'Optional. Nest this group inside another group. This does not grant Assistant Program membership.'
         : 'Optional. Choose an organizational group for this workspace. This does not grant program membership.';
     }
+    // A locked destination is not optional, so it keeps its own caption here
+    // too — this runs on every step change (group-map-build FR-15).
+    this.applyLockedParentSelection();
     if (advanced) advanced.hidden = ordinaryGroup;
     if (projectOpen && ordinaryGroup) projectOpen.hidden = true;
     if (groupDestination && ordinaryGroup) groupDestination.hidden = true;
@@ -9393,7 +9481,9 @@ const sessionManager = {
     // Description is optional: a workspace can start with just a name, and Ori
     // can still review the setup later. It only enriches the setup review.
 
-    const parentId = parentSelect?.value?.trim() || '';
+    // A locked destination outranks the (disabled) select and any pending map
+    // build: the page that opened this creator owns where the workspace lands.
+    const parentId = this.lockedParentId() || parentSelect?.value?.trim() || '';
     const color = colorBtn?.dataset.color || '';
     const originalCreateLabel = createBtn ? createBtn.textContent : '';
 
@@ -9545,6 +9635,8 @@ const sessionManager = {
       if (!payload.parent_id && pendingMapBuild?.group?.id) {
         payload.parent_id = pendingMapBuild.group.id;
       }
+      const lockedParent = this.lockedParentId();
+      if (lockedParent) payload.parent_id = lockedParent;
       let groupRequirementReady = true;
       if (!importEnabled && !ordinaryGroup && this.groupRequirementDraft) {
         if (this.groupRequirementBlocked()) {
@@ -10070,6 +10162,13 @@ const sessionManager = {
         } catch (error) {
           console.warn('Workspace was created but its follow-up could not complete:', error);
         }
+      }
+      // Every surface that lists workspaces hears about the new one, including
+      // a group page that opened this creator with a locked parent and stays
+      // put (group-map-build FR-18). Home and the launcher refresh explicitly
+      // below; this is the one signal a page with neither can listen for.
+      if (createdWorkspaceId) {
+        this.notifyWorkspacesChanged({ workspaceId: createdWorkspaceId });
       }
       if (createdWorkspaceId && creatorContext?.stayAfterCreate && !placement) {
         // A guided caller (a setup quest) continues on this page; refresh the
@@ -10997,6 +11096,11 @@ const sessionManager = {
             contextOptions.guided && typeof contextOptions.guided === 'object'
               ? contextOptions.guided
               : null,
+          parentId: String(contextOptions.parentId || '').trim(),
+          parentName: String(contextOptions.parentName || '').trim(),
+          parentLocked:
+            Boolean(contextOptions.parentLocked) &&
+            String(contextOptions.parentId || '').trim() !== '',
           // Without the state helper a lock cannot be enforced, so none is kept.
           teamLock: null,
           stayAfterCreate: Boolean(contextOptions.stayAfterCreate),
@@ -11034,6 +11138,16 @@ const sessionManager = {
       modalElement.dataset.pendingMapOrigin = 'true';
     } else {
       delete modalElement.dataset.pendingMapOrigin;
+    }
+    // A locked parent (group-page Build) travels on the dataset too, so the
+    // show listener applies it even when it rebuilds the context itself.
+    const lockedParent = String(options.parentId || '').trim();
+    if (lockedParent && options.parentLocked) {
+      modalElement.dataset.pendingParentId = lockedParent;
+      modalElement.dataset.pendingParentLocked = 'true';
+    } else {
+      delete modalElement.dataset.pendingParentId;
+      delete modalElement.dataset.pendingParentLocked;
     }
     if (options.blueprint) {
       modalElement.dataset.pendingBlueprint = String(options.blueprint);

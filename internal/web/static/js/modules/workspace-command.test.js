@@ -5106,3 +5106,447 @@ test('group template status keeps group, coordinator, and integration as separat
   );
   assert.equal(groupTemplateCommandView(null).groupTemplateStatusHTML(), '');
 });
+
+// ---------- Detachment map zone (group-map-build FR-1 – FR-6) ----------
+
+function detachmentCommandView(
+  kind = 'group',
+  members = [{ id: 'm1', name: 'Mixing' }],
+  { agents = [], entry = '' } = {}
+) {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  const group = { id: 'g', name: 'Studio', kind: 'group', children: members };
+  const agentGroups = () =>
+    agents.map(name => ({
+      key: name.toLowerCase(),
+      name,
+      isWorkspaceAgent: true,
+      instanceCount: 1,
+      roles: ['Agent'],
+      tasks: []
+    }));
+  Object.assign(commandView, {
+    viewMode: 'map',
+    selectedAgentKey: '',
+    activeMapWindow: '',
+    mapInventorySection: '',
+    activeSystemTab: 'memory',
+    detachmentPickerOpen: false,
+    detachmentMountedKey: '',
+    pendingDetachmentSelectionId: '',
+    detachmentMapEl: null,
+    page: {
+      workspaceId: 'g',
+      workspace: { id: 'g', name: 'Studio', kind, mcp_bindings: [], skill_bindings: [] },
+      tasks: [],
+      buildAgentGroups: agentGroups,
+      isWorkspaceEntryAgent: name => name === entry,
+      getAgentRosterStatus: name =>
+        name === entry
+          ? { key: 'working', label: 'Working', detail: 'Task in progress' }
+          : { key: 'idle', label: 'Idle', detail: 'No active tasks' },
+      membersPanel: { group, tree: [group, { id: 'other', name: 'Office', kind: 'group' }] }
+    }
+  });
+  return commandView;
+}
+
+test('a group’s Map mode is one combined surface: the map slot, agents over it, and the toolbar', () => {
+  const groupHTML = detachmentCommandView('group').renderOperationsMap();
+  assert.match(groupHTML, /ws-cmd-map-shell is-group/);
+  assert.match(groupHTML, /class="ws-cmd-opmap is-combined" role="region" aria-label="Group map"/);
+  assert.equal(
+    (groupHTML.match(/class="ws-cmd-opmap/g) || []).length,
+    1,
+    'one map, not an agent map plus a second zone'
+  );
+  // The map mounts into an empty slot inside the combined surface.
+  assert.match(
+    groupHTML,
+    /is-combined"[^>]*><div class="ws-cmd-detachment-slot" data-cmd-detachment-slot><\/div>/
+  );
+  // Agents and stations share the overlay layer the station drag measures.
+  assert.match(
+    groupHTML,
+    /<section class="ws-cmd-map-world is-overlay" data-map-zone="agents"[^>]*><div class="ws-cmd-map-command-post">/
+  );
+  assert.match(groupHTML, /Studio Group Manager|ws-cmd-map-empty|ws-cmd-map-command-row/);
+  // The toolbar, the tool belt, New Quest, and the map window all stay.
+  assert.match(groupHTML, /data-map-zone="detachment" role="toolbar" aria-label="Detachment"/);
+  assert.match(groupHTML, /class="ws-cmd-map-belt"/);
+  assert.match(groupHTML, /ws-cmd-map-quest-dock/);
+  assert.match(groupHTML, /data-cmd-detachment-picker hidden/);
+  assert.doesNotMatch(groupHTML, /ws-map-tile/, 'the view draws no member tiles itself');
+
+  // An ordinary workspace's Map mode is untouched: no toolbar, so no map and
+  // no layout request (FR-2).
+  const plainHTML = detachmentCommandView('workspace').renderOperationsMap();
+  assert.doesNotMatch(plainHTML, /detachment|is-combined|is-overlay|is-group/);
+  assert.match(
+    plainHTML,
+    /class="ws-cmd-opmap" role="region" aria-label="Workspace operations map"/
+  );
+  assert.match(plainHTML, /<section class="ws-cmd-map-world" data-map-zone="agents"/);
+});
+
+test('a group’s agents stand on the map; only a state needing action docks a card', () => {
+  const staffed = detachmentCommandView('group', undefined, {
+    agents: ['Boss', 'Scout'],
+    entry: 'Boss'
+  });
+  const html = staffed.renderOperationsMap();
+  assert.doesNotMatch(
+    html,
+    /ws-cmd-map-command-post/,
+    'no docked column once there is a Commander'
+  );
+  assert.doesNotMatch(html, /data-cmd-map-select-agent/, 'the agents are units on the map instead');
+  assert.match(html, /<section class="ws-cmd-map-world is-overlay" data-map-zone="agents"/);
+
+  const units = staffed.detachmentUnits();
+  assert.deepEqual(
+    units.map(unit => [unit.id, unit.selectKey, unit.commander, unit.working]),
+    [
+      ['agent:g:boss', 'Boss', true, true],
+      ['agent:g:scout', 'Scout', false, false]
+    ]
+  );
+  assert.match(units[0].role, /Commander/);
+  assert.equal(units[0].status, 'Working');
+  assert.equal(units[1].role, 'Agent');
+  assert.match(units[0].portraitHTML, /ws-cmd-character is-roster/);
+  assert.equal(units.filter(unit => unit.selected).length, 1, 'the selected agent is marked');
+
+  const leaderless = detachmentCommandView('group', undefined, { agents: ['Scout'] });
+  const repair = leaderless.renderOperationsMap();
+  assert.match(
+    repair,
+    /<div class="ws-cmd-map-command-post"><div class="ws-cmd-map-command-repair">/
+  );
+  assert.doesNotMatch(
+    repair,
+    /ws-cmd-map-agent-field/,
+    'specialists stand on the map, not the card'
+  );
+  assert.equal(leaderless.detachmentUnits().length, 1);
+
+  const empty = detachmentCommandView('group', undefined, { agents: [] }).renderOperationsMap();
+  assert.match(empty, /ws-cmd-map-command-post"><div class="ws-cmd-map-empty is-agent-empty">/);
+});
+
+test('an agent name too long for an anchor id falls back to a stable hashed key', () => {
+  const longName = 'Agent ' + 'with a very long name '.repeat(20);
+  const view = detachmentCommandView('group', undefined, { agents: [longName], entry: longName });
+  const [unit] = view.detachmentUnits();
+  assert.ok(unit.id.length <= 256, 'fits the server’s node id limit');
+  assert.match(unit.id, /^agent:g:h[0-9a-f]{8}$/);
+  assert.equal(view.detachmentUnits()[0].id, unit.id, 'stable across renders');
+  assert.equal(unit.selectKey, encodeURIComponent(longName));
+});
+
+test('the toolbar offers Build and Add existing, enabled even when the layout is read-only', () => {
+  const html = detachmentCommandView('group').renderOperationsMap();
+  assert.match(html, /data-cmd-detachment-build>Build<\/button>/);
+  assert.match(html, /data-cmd-detachment-add aria-expanded="false">Add existing…<\/button>/);
+  // Neither touches the layout until the workspace exists (FR-4, FR-11).
+  assert.doesNotMatch(html, /data-cmd-detachment-(build|add)[^>]*disabled/);
+  assert.match(html, /ws-cmd-map-zone-action is-primary" data-cmd-detachment-build/);
+  // Nothing else: the group page draws no district of its own to resize or
+  // restyle, so no layout menu rides along (PRD §10).
+  assert.doesNotMatch(html, /data-cmd-detachment-layout/);
+});
+
+test('zone Build opens the shared creator with this group locked, and clears any pending site', () => {
+  const commandView = detachmentCommandView('group');
+  const opened = [];
+  let cancelled = 0;
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    OriWorkspaceMap: { cancelBuild: () => (cancelled += 1) },
+    sessionManager: { showAddWorkspaceModal: options => opened.push(options) }
+  };
+  try {
+    const button = { id: 'build' };
+    commandView.openDetachmentBuild(button);
+    assert.equal(cancelled, 1, 'a header Build holds no coordinate (FR-13)');
+    assert.equal(opened.length, 1);
+    assert.equal(opened[0].parentId, 'g');
+    assert.equal(opened[0].parentLocked, true);
+    assert.equal(opened[0].entryPoint, 'group_command_build');
+    assert.equal(opened[0].mapOrigin, true, 'the page stays on the group after create');
+    assert.equal(opened[0].invoker, button);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('Add existing renders the members panel’s own picker into the toolbar', () => {
+  const commandView = detachmentCommandView('group');
+  const host = { hidden: true, innerHTML: '' };
+  const addButton = { attrs: {}, setAttribute: (k, v) => (addButton.attrs[k] = v) };
+  commandView.container = {
+    querySelector: sel =>
+      sel.includes('data-cmd-detachment-picker')
+        ? host
+        : sel.includes('data-cmd-detachment-add')
+          ? addButton
+          : null
+  };
+  const calls = [];
+  commandView.page.membersPanel.renderAddPickerInto = (target, hooks) => {
+    calls.push({ target, hooks });
+    return true;
+  };
+  assert.equal(commandView.openDetachmentPicker(), true);
+  assert.equal(calls[0].target, host);
+  assert.equal(calls[0].hooks.focus, true, 'a deliberate open moves focus into the picker');
+  assert.equal(host.hidden, false);
+  assert.equal(commandView.detachmentPickerOpen, true);
+  assert.equal(addButton.attrs['aria-expanded'], 'true');
+
+  // A cancelled picker closes; an added workspace is selected on the re-mount.
+  calls[0].hooks.onCancel();
+  assert.equal(host.hidden, true);
+  assert.equal(commandView.detachmentPickerOpen, false);
+  assert.equal(addButton.attrs['aria-expanded'], 'false');
+
+  commandView.page.membersPanel.reload = async () => {};
+  commandView.render = () => {};
+  commandView.openDetachmentPicker();
+  calls[1].hooks.onAdded('ws-moved');
+  assert.equal(commandView.pendingDetachmentSelectionId, 'ws-moved');
+  assert.equal(commandView.detachmentPickerOpen, false);
+});
+
+test('frame insets reserve the top band and, when it fits, the agent column', () => {
+  const rect = (left, top, width, height) => ({
+    left,
+    top,
+    width,
+    height,
+    right: left + width,
+    bottom: top + height
+  });
+  const viewWith = rects => {
+    const commandView = detachmentCommandView('group');
+    commandView.container = {
+      querySelector: sel => {
+        const key = Object.keys(rects).find(name => sel.includes(name));
+        return key ? { getBoundingClientRect: () => rects[key] } : null;
+      }
+    };
+    return commandView;
+  };
+
+  const desktop = viewWith({
+    'ws-cmd-opmap': rect(32, 100, 1436, 560),
+    'ws-cmd-map-quest-fab': rect(50, 118, 135, 45),
+    'ws-cmd-map-group-bar': rect(588, 119, 324, 57),
+    'ws-cmd-map-belt': rect(1183, 119, 266, 58),
+    'ws-cmd-map-command-post': rect(51, 172, 212, 184)
+  });
+  // Lowest overlay bottom (the belt, 177) less the map top (100), plus a gap.
+  assert.deepEqual(desktop.detachmentFrameInsets(), { top: 89, left: 243 });
+
+  // A phone still reserves its narrower column, so no building opens under it.
+  const narrow = viewWith({
+    'ws-cmd-opmap': rect(0, 0, 360, 560),
+    'ws-cmd-map-group-bar': rect(16, 84, 250, 44),
+    'ws-cmd-map-command-post': rect(16, 144, 132, 180)
+  });
+  assert.deepEqual(narrow.detachmentFrameInsets(), { top: 140, left: 160 });
+
+  // A column covering most of the map leaves nothing to frame into; float it.
+  const cramped = viewWith({
+    'ws-cmd-opmap': rect(0, 0, 300, 560),
+    'ws-cmd-map-command-post': rect(16, 144, 200, 180)
+  });
+  assert.deepEqual(cramped.detachmentFrameInsets(), { top: 0, left: 0 });
+
+  // Before layout (or under Node) there is nothing to reserve.
+  assert.deepEqual(viewWith({}).detachmentFrameInsets(), { top: 0, left: 0 });
+});
+
+test('an open picker survives a re-render without taking focus', () => {
+  const commandView = detachmentCommandView('group');
+  const picker = { hidden: true, innerHTML: '' };
+  const slot = { appendChild: node => (node.parentNode = slot) };
+  commandView.container = {
+    querySelector: sel =>
+      sel.includes('data-cmd-detachment-slot')
+        ? slot
+        : sel.includes('data-cmd-detachment-picker')
+          ? picker
+          : null
+  };
+  commandView.detachmentMapEl = { parentNode: null, addEventListener() {} };
+  commandView.detachmentPickerOpen = true;
+  const calls = [];
+  commandView.page.membersPanel.renderAddPickerInto = (target, hooks) => {
+    calls.push(hooks);
+    return true;
+  };
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    commandView.syncDetachmentMap();
+  } finally {
+    globalThis.window = originalWindow;
+  }
+  assert.equal(calls.length, 1, 'the rebuilt toolbar gets its picker back');
+  assert.equal(calls[0].focus, false, 'a background re-render never steals focus');
+  assert.equal(picker.hidden, false);
+});
+
+test('the member count in the toolbar follows the members panel', () => {
+  const empty = detachmentCommandView('group', []);
+  assert.match(empty.renderOperationsMap(), /aria-label="0 members">0</);
+  // With nothing in the group, the two actions are the point of the map.
+  assert.match(empty.renderOperationsMap(), /ws-cmd-map-group-bar is-empty/);
+  assert.doesNotMatch(detachmentCommandView('group').renderOperationsMap(), /is-empty/);
+  assert.match(detachmentCommandView('group').renderOperationsMap(), /aria-label="1 member">1</);
+  const many = detachmentCommandView('group', [{ id: 'm1' }, { id: 'm2' }, { id: 'm3' }]);
+  assert.match(many.renderOperationsMap(), /aria-label="3 members">3</);
+});
+
+test('the scoped map re-mounts only when membership changes, and unmounts off Map mode', () => {
+  const commandView = detachmentCommandView('group');
+  const mounts = [];
+  const unmounts = [];
+  const host = { className: '', parentNode: null, addEventListener() {} };
+  const slot = {
+    appendChild: node => {
+      node.parentNode = slot;
+    }
+  };
+  commandView.container = {
+    querySelector: sel => (sel.includes('data-cmd-detachment-slot') ? slot : null)
+  };
+  commandView.detachmentMapEl = host;
+  const selections = [];
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    OriWorkspaceMap: {
+      mount: (el, state) => mounts.push({ el, state }),
+      unmount: el => unmounts.push(el),
+      setSelectedId: (el, rows, id) => selections.push(id),
+      scopeWorkspacesToGroup: (rows, id) =>
+        rows.filter(row => row.id === id || row.parent_id === id)
+    }
+  };
+  try {
+    commandView.syncDetachmentMap();
+    assert.equal(mounts.length, 1, 'the first sync mounts');
+    assert.equal(mounts[0].el, host);
+    assert.equal(mounts[0].state.scopeGroupId, 'g');
+    assert.equal(mounts[0].state.selectOnly, true);
+    assert.equal(mounts[0].state.hideChrome, true);
+    assert.equal(mounts[0].state.noAutoSelect, true);
+    assert.equal(mounts[0].state.economy, undefined, 'a group map draws no Farm badges');
+    assert.deepEqual(
+      mounts[0].state.workspaces.map(row => row.id),
+      ['g', 'm1', 'other']
+    );
+
+    commandView.syncDetachmentMap();
+    assert.equal(mounts.length, 1, 'a plain re-render must not re-mount the map');
+    assert.deepEqual([...selections], [], 'nothing is selected without a request');
+
+    // A just-built or just-moved member is selected explicitly, because mount
+    // keeps a still-valid existing selection.
+    commandView.pendingDetachmentSelectionId = 'm1';
+    commandView.syncDetachmentMap();
+    assert.equal(mounts.length, 2, 'a selection request re-mounts');
+    assert.deepEqual([...selections], ['m1']);
+    assert.equal(commandView.pendingDetachmentSelectionId, '');
+
+    commandView.page.membersPanel.group.children.push({ id: 'm2', name: 'Mastering' });
+    commandView.page.membersPanel.tree[0] = commandView.page.membersPanel.group;
+    commandView.syncDetachmentMap();
+    assert.equal(mounts.length, 3, 'a new member re-mounts');
+
+    commandView.unmountDetachmentMap();
+    assert.deepEqual(unmounts, [host]);
+    assert.equal(commandView.detachmentMountedKey, '');
+
+    // No slot in the DOM (any non-Map render) unmounts rather than leaking.
+    commandView.syncDetachmentMap();
+    assert.equal(mounts.length, 4);
+    commandView.container = { querySelector: () => null };
+    commandView.syncDetachmentMap();
+    assert.equal(unmounts.length, 2, 'leaving Map mode unmounts the map');
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('agents reach the map as units; a status change patches them, a roster change re-mounts', () => {
+  const agents = ['Boss', 'Scout'];
+  const commandView = detachmentCommandView('group', undefined, { agents, entry: 'Boss' });
+  const mounts = [];
+  const updates = [];
+  let updateResult = true;
+  const host = { className: '', parentNode: null, addEventListener() {} };
+  const slot = {
+    appendChild: node => {
+      node.parentNode = slot;
+    }
+  };
+  commandView.container = {
+    querySelector: sel => (sel.includes('data-cmd-detachment-slot') ? slot : null)
+  };
+  commandView.detachmentMapEl = host;
+  const selected = [];
+  commandView.selectAgent = (key, options) => selected.push({ key, options });
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    OriWorkspaceMap: {
+      mount: (el, state) => mounts.push(state),
+      unmount() {},
+      updateUnits: (el, units) => {
+        updates.push(units);
+        return updateResult;
+      },
+      scopeWorkspacesToGroup: (rows, id) =>
+        rows.filter(row => row.id === id || row.parent_id === id)
+    }
+  };
+  try {
+    commandView.syncDetachmentMap();
+    assert.equal(mounts.length, 1);
+    assert.deepEqual(
+      mounts[0].units.map(unit => unit.id),
+      ['agent:g:boss', 'agent:g:scout']
+    );
+
+    // Clicking a unit opens that agent's Unit Sheet.
+    mounts[0].onSelectUnit({ id: 'agent:g:scout', selectKey: 'Scout', name: 'Scout' });
+    assert.equal(commandView.activeMapWindow, 'inspector');
+    assert.deepEqual(selected, [{ key: 'Scout', options: { focus: false } }]);
+
+    commandView.syncDetachmentMap();
+    assert.equal(updates.length, 0, 'nothing changed: no patch, no mount');
+
+    // A status change is patched in place.
+    commandView.page.getAgentRosterStatus = () => ({ key: 'working', label: 'Working' });
+    commandView.syncDetachmentMap();
+    assert.equal(mounts.length, 1, 'no re-mount for a status change');
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0][1].status, 'Working');
+
+    // If the map cannot patch (it saw a different roster), the view re-mounts.
+    updateResult = false;
+    commandView.page.getAgentRosterStatus = () => ({ key: 'waiting', label: 'Queued' });
+    commandView.syncDetachmentMap();
+    assert.equal(mounts.length, 2);
+
+    // A hired agent is structure: straight to a re-mount.
+    agents.push('Scribe');
+    commandView.syncDetachmentMap();
+    assert.equal(mounts.length, 3);
+    assert.equal(mounts[2].units.length, 3);
+    assert.equal(updates.length, 2, 'no patch attempt when the roster itself changed');
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});

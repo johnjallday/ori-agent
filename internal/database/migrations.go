@@ -12,7 +12,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 59
+const schemaVersion = 60
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -185,6 +185,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration058Economy(ctx)
 	case 59:
 		return db.migration059GroupRequirementReceipts(ctx)
+	case 60:
+		return db.migration060WorkspaceMapAgentPositions(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -3118,6 +3120,44 @@ func (db *DB) migration059GroupRequirementReceipts(ctx context.Context) error {
 	for _, statement := range statements {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("failed to create group requirement receipt schema: %w", err)
+		}
+	}
+	return nil
+}
+
+// migration060WorkspaceMapAgentPositions adds where the current user put a
+// workspace's agents on that group's own map (group-map-build).
+//
+// It is a sibling of workspace_map_positions rather than more rows in it: that
+// table's workspace_id is a foreign key to a real workspace, and an agent is not
+// one. The row is keyed by the workspace the agent belongs to plus a key the
+// client derives from the agent, so the same cascade applies — a permanently
+// deleted workspace takes its agents' anchors with it, and a trashed one keeps
+// them for restore. Agents live in workspace folders, not SQLite, so there is
+// no agent foreign key; the map simply never draws an anchor whose agent is
+// gone, exactly as migration 56 treats the Agent Map.
+//
+// The rows belong to the same per-user layout row, so an agent move bumps the
+// same revision as a building move and Reset layout clears both.
+func (db *DB) migration060WorkspaceMapAgentPositions(ctx context.Context) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS workspace_map_agent_positions (
+			user_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			agent_key TEXT NOT NULL,
+			x REAL NOT NULL,
+			y REAL NOT NULL,
+			updated_at DATETIME NOT NULL,
+			PRIMARY KEY (user_id, workspace_id, agent_key),
+			FOREIGN KEY (user_id) REFERENCES workspace_map_layouts(user_id) ON DELETE CASCADE,
+			FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_workspace_map_agent_positions_workspace
+			ON workspace_map_agent_positions(workspace_id)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("failed to create workspace map agent position schema: %w", err)
 		}
 	}
 	return nil

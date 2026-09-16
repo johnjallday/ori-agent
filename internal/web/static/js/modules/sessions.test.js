@@ -2372,6 +2372,139 @@ test('no session recovery line when nothing was done this session', () => {
   assert.equal(manager.workspaceReceiptSessionRecoveryLine(), '');
 });
 
+// ---------------------------------------------------------------------------
+// Locked parent: a group page's Build owns the destination (group-map-build
+// FR-14 – FR-16). The wizard preselects and freezes the group, skips the
+// placement question, and puts that group in the POST whatever else is set.
+// ---------------------------------------------------------------------------
+
+function lockedParentManager({ groups = [{ id: 'g-1', name: 'Studio Group', depth: 0 }] } = {}) {
+  const options = [{ value: '', textContent: 'No group' }];
+  groups.forEach(group => options.push({ value: group.id, textContent: group.name }));
+  const parentSelect = {
+    value: '',
+    disabled: false,
+    innerHTML: '',
+    options,
+    querySelector: selector => {
+      const match = /option\[value="([^"]*)"\]/.exec(selector);
+      const id = match ? match[1] : '';
+      return options.find(option => option.value === id) || null;
+    },
+    appendChild: option => options.push(option)
+  };
+  const parentHelp = { textContent: '' };
+  const elements = {
+    folderParentSelect: parentSelect,
+    folderParentHelp: parentHelp,
+    workspaceCreatorDestinationCard: { hidden: false }
+  };
+  const manager = loadSessionManager(
+    async () => ({ ok: true, json: async () => ({}) }),
+    {
+      WorkspaceGroupOptions: {
+        collectWorkspaceGroupOptions: () => groups,
+        renderWorkspaceParentOptions: () => '',
+        setWorkspaceParentSelectState: () => {}
+      },
+      CSS: { escape: value => value }
+    },
+    {
+      getElementById: id => elements[id] || null,
+      createElement: () => ({ value: '', textContent: '' })
+    }
+  );
+  manager.folders = groups.map(group => ({ ...group, kind: 'group' }));
+  return { manager, parentSelect, parentHelp, elements };
+}
+
+test('a locked parent preselects, disables, and captions the destination control', () => {
+  const { manager, parentSelect, parentHelp } = lockedParentManager();
+  manager.beginWorkspaceCreatorContext({
+    parentId: 'g-1',
+    parentName: 'Studio Group',
+    parentLocked: true,
+    entryPoint: 'group_detail_build'
+  });
+
+  assert.equal(manager.lockedParentId(), 'g-1');
+  manager.applyLockedParentSelection();
+  assert.equal(parentSelect.value, 'g-1');
+  assert.equal(parentSelect.disabled, true);
+  assert.equal(parentHelp.textContent, 'Building into Studio Group');
+});
+
+test('an unlocked creator leaves the destination control alone', () => {
+  const { manager, parentSelect, parentHelp } = lockedParentManager();
+  manager.beginWorkspaceCreatorContext({ entryPoint: 'home_cockpit_create' });
+  assert.equal(manager.lockedParentId(), '');
+  manager.applyLockedParentSelection();
+  assert.equal(parentSelect.value, '');
+  assert.equal(parentSelect.disabled, false);
+  assert.equal(parentHelp.textContent, '');
+});
+
+test('parentLocked without a parent id is not a lock', () => {
+  const { manager } = lockedParentManager();
+  manager.beginWorkspaceCreatorContext({ parentLocked: true });
+  assert.equal(manager.lockedParentId(), '');
+});
+
+test('a locked parent answers the grouped-or-standalone question', () => {
+  const { manager, parentSelect, elements } = lockedParentManager();
+  manager.groupRequirementDraft = { policy: 'recommended', composition: '' };
+  assert.equal(manager.groupRequirementBlocked(), true, 'unlocked still has to ask');
+
+  manager.beginWorkspaceCreatorContext({ parentId: 'g-1', parentLocked: true });
+  assert.equal(manager.groupRequirementBlocked(), false);
+
+  // And the control keeps showing the group rather than being cleared and
+  // hidden the way an unanswered placement question does.
+  manager.syncGroupRequirementParentControl();
+  assert.equal(parentSelect.value, 'g-1');
+  assert.equal(parentSelect.disabled, true);
+  assert.equal(elements.workspaceCreatorDestinationCard.hidden, false);
+});
+
+test('the locked parent wins over the select and over a pending map build', () => {
+  const { manager, parentSelect } = lockedParentManager();
+  manager.beginWorkspaceCreatorContext({ parentId: 'g-1', parentLocked: true });
+
+  // Three ways the destination could otherwise be decided.
+  const resolve = (selectValue, pendingGroupId) => {
+    parentSelect.value = selectValue;
+    const payload = { parent_id: manager.lockedParentId() || parentSelect.value };
+    if (!payload.parent_id && pendingGroupId) payload.parent_id = pendingGroupId;
+    const locked = manager.lockedParentId();
+    if (locked) payload.parent_id = locked;
+    return payload.parent_id;
+  };
+  assert.equal(resolve('', ''), 'g-1', 'blank form');
+  assert.equal(resolve('g-other', ''), 'g-1', 'a stale select value');
+  assert.equal(resolve('', 'g-district'), 'g-1', 'a pending district build');
+});
+
+test('a successful create announces the hierarchy change for pages that stay put', () => {
+  const events = [];
+  const { manager } = lockedParentManager();
+  manager.notifyWorkspacesChanged({ workspaceId: 'ws-new' });
+  // The stub window has no dispatchEvent, so nothing is thrown and nothing is
+  // sent; with one, the event carries the created id.
+  const withWindow = loadSessionManager(async () => ({ ok: true, json: async () => ({}) }), {
+    dispatchEvent: event => events.push(event),
+    CustomEvent: class {
+      constructor(type, init) {
+        this.type = type;
+        this.detail = init && init.detail;
+      }
+    }
+  });
+  withWindow.notifyWorkspacesChanged({ workspaceId: 'ws-new' });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].type, 'ori:workspaces-changed');
+  assert.equal(events[0].detail.workspaceId, 'ws-new');
+});
+
 test('session bootstrap consumes the shared initial workspace tree', async () => {
   resetOnboardingGateForTests(async () => ({
     ok: true,

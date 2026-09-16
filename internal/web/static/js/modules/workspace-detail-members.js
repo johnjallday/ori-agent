@@ -230,10 +230,6 @@ export class WorkspaceMembersPanel {
       addBtn: document.getElementById('workspace-detail-add-member-btn'),
       createBtn: document.getElementById('workspace-detail-create-member-btn'),
       picker: document.getElementById('workspace-detail-member-picker'),
-      createForm: document.getElementById('workspace-detail-member-create-form'),
-      createName: document.getElementById('workspace-detail-member-create-name'),
-      createDescription: document.getElementById('workspace-detail-member-create-description'),
-      createCancel: document.getElementById('workspace-detail-member-create-cancel'),
       rollups: document.getElementById('workspace-detail-members-rollups'),
       // Header identity
       badge: document.getElementById('workspace-group-badge'),
@@ -324,16 +320,9 @@ export class WorkspaceMembersPanel {
     if (this.controlsBound) return;
     this.controlsBound = true;
 
-    const { addBtn, createBtn, createForm, createCancel, swatch } = this.els;
+    const { addBtn, createBtn, swatch } = this.els;
     if (addBtn) addBtn.addEventListener('click', () => this.openAddPicker());
-    if (createBtn) createBtn.addEventListener('click', () => this.openCreateMember());
-    if (createCancel) createCancel.addEventListener('click', () => this.closeCreateMember());
-    if (createForm) {
-      createForm.addEventListener('submit', event => {
-        event.preventDefault();
-        void this.createMember();
-      });
-    }
+    if (createBtn) createBtn.addEventListener('click', () => this.openCreateMember(createBtn));
     if (swatch) swatch.addEventListener('click', () => this.toggleColorPopover());
   }
 
@@ -508,12 +497,24 @@ export class WorkspaceMembersPanel {
   openAddPicker() {
     const picker = this.els.picker;
     if (!picker) return;
-    this.closeCreateMember();
+    this.renderAddPickerInto(picker, { onCancel: () => (picker.hidden = true) });
+  }
+
+  /**
+   * Render the eligible-workspace picker into any host.
+   *
+   * The Detachment map zone offers Add existing too, and there must be one
+   * picker, one eligibility rule, and one membership PATCH behind both
+   * (group-map-build FR-24). Callers supply the host and the outcome hooks;
+   * everything else stays here.
+   */
+  renderAddPickerInto(host, { onAdded, onCancel, focus = true } = {}) {
+    if (!host) return false;
     const targets = eligibleAddTargets(this.tree, this.group);
+    host.hidden = false;
     if (targets.length === 0) {
-      picker.innerHTML = '<div class="group-detail-empty">No eligible workspaces to add.</div>';
-      picker.hidden = false;
-      return;
+      host.innerHTML = '<div class="group-detail-empty">No eligible workspaces to add.</div>';
+      return false;
     }
     const options = targets
       .map(
@@ -521,24 +522,30 @@ export class WorkspaceMembersPanel {
           `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name || t.id)}${isGroupNode(t) ? ' (group)' : ''}</option>`
       )
       .join('');
-    picker.innerHTML = `
+    host.innerHTML = `
       <div class="d-flex gap-2 align-items-center">
-        <select id="workspace-detail-member-add-select" class="form-select form-select-sm" aria-label="Workspace to add">${options}</select>
-        <button id="workspace-detail-member-add-confirm" type="button" class="modern-btn modern-btn-primary">Add</button>
-        <button id="workspace-detail-member-add-cancel" type="button" class="modern-btn modern-btn-secondary">Cancel</button>
+        <select class="form-select form-select-sm" data-member-add-select aria-label="Workspace to add">${options}</select>
+        <button type="button" class="modern-btn modern-btn-primary" data-member-add-confirm>Add</button>
+        <button type="button" class="modern-btn modern-btn-secondary" data-member-add-cancel>Cancel</button>
       </div>`;
-    picker.hidden = false;
-    picker.querySelector('#workspace-detail-member-add-confirm').addEventListener('click', () => {
-      const sel = picker.querySelector('#workspace-detail-member-add-select');
-      void this.addMember(sel && sel.value);
+    host.querySelector('[data-member-add-confirm]').addEventListener('click', () => {
+      const select = host.querySelector('[data-member-add-select]');
+      const id = select && select.value;
+      void this.addMember(id).then(added => {
+        if (added && typeof onAdded === 'function') onAdded(id);
+      });
     });
-    picker.querySelector('#workspace-detail-member-add-cancel').addEventListener('click', () => {
-      picker.hidden = true;
+    host.querySelector('[data-member-add-cancel]').addEventListener('click', () => {
+      if (typeof onCancel === 'function') onCancel();
+      else host.hidden = true;
     });
+    const select = host.querySelector('[data-member-add-select]');
+    if (focus && select && typeof select.focus === 'function') select.focus();
+    return true;
   }
 
   async addMember(memberId) {
-    if (!memberId) return;
+    if (!memberId) return false;
     try {
       await this.sendJson(
         `/api/workspaces/${encodeURIComponent(memberId)}`,
@@ -548,48 +555,41 @@ export class WorkspaceMembersPanel {
       );
       if (this.els.picker) this.els.picker.hidden = true;
       await this.reload();
+      return true;
     } catch (err) {
       console.error('Failed to add member:', err);
       this.showError(err.message || 'Failed to add member.');
+      return false;
     }
   }
 
-  // Create a new workspace directly into this group (parent_id = this group).
-  openCreateMember() {
+  /**
+   * Build a new member through the shared Create Workspace wizard.
+   *
+   * The panel used to POST /api/workspaces from a bare name+description form,
+   * which skipped blueprint and team selection entirely. There is one creator
+   * now; this page only says which group it must build into
+   * (group-map-build FR-21, FR-22).
+   */
+  openCreateMember(invoker) {
     if (this.els.picker) this.els.picker.hidden = true;
-    if (!this.els.createForm) return;
-    if (this.els.createName) this.els.createName.value = '';
-    if (this.els.createDescription) this.els.createDescription.value = '';
     this.hideError();
-    this.els.createForm.hidden = false;
-    if (this.els.createName) this.els.createName.focus();
-  }
-
-  closeCreateMember() {
-    if (this.els.createForm) this.els.createForm.hidden = true;
-  }
-
-  async createMember() {
-    const name = (this.els.createName?.value || '').trim();
-    const description = this.els.createDescription?.value || '';
-    if (!name) {
-      this.showError('Workspace name is required.');
-      this.els.createName?.focus();
+    const manager = typeof window === 'undefined' ? null : window.sessionManager;
+    if (!manager || typeof manager.showAddWorkspaceModal !== 'function') {
+      this.showError('The Create Workspace dialog is unavailable on this page.');
       return;
     }
-    try {
-      await this.sendJson(
-        '/api/workspaces',
-        'POST',
-        { name, description, parent_id: this.workspaceId },
-        'Failed to create workspace'
-      );
-      this.closeCreateMember();
-      await this.reload();
-    } catch (err) {
-      console.error('Failed to create workspace:', err);
-      this.showError(err.message || 'Failed to create workspace.');
-    }
+    manager.showAddWorkspaceModal({
+      parentId: this.workspaceId,
+      parentName: (this.group && this.group.name) || '',
+      parentLocked: true,
+      entryPoint: 'group_detail_build',
+      // The user is managing this group, not leaving it: creating a member
+      // returns to the group page rather than opening the new workspace
+      // (group-map-build FR-18).
+      stayAfterCreate: true,
+      invoker: invoker || null
+    });
   }
 
   // --- Group color (header swatch popover) --------------------------------------

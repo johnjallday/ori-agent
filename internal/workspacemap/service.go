@@ -146,7 +146,19 @@ func (s *Service) authorizeNode(userID, id string, checked map[string]bool) erro
 	if checked[id] {
 		return nil
 	}
-	if _, err := s.lookupOwned(userID, id); err != nil {
+	target := id
+	// An agent anchor is authorized through the workspace that owns the agent:
+	// only its owner may place that workspace's agents on their map.
+	if workspaceID, _, isAgent := ParseAgentNodeID(strings.TrimSpace(id)); isAgent {
+		if workspaceID == "" {
+			return fmt.Errorf("%w: %q is not agent:<workspace>:<agent>", ErrInvalidNodeID, id)
+		}
+		if _, err := NormalizeNodeID(id); err != nil {
+			return err
+		}
+		target = workspaceID
+	}
+	if _, err := s.lookupOwned(userID, target); err != nil {
 		return err
 	}
 	checked[id] = true

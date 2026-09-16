@@ -622,6 +622,176 @@
   top: calc(50% - 80px);
   border-radius: 50%;
 }
+/* ---------- Group pages: one combined map (group-map-build PRD §10) ----------
+   The scoped Workspace Map fills the operations map, and the agent map's parts
+   float over it. The surface needs a definite height for the map canvas, and
+   no clip-path: the map's context menu is position:fixed, and a clip-path on an
+   ancestor would cut it off near the edges. */
+.ws-cmd-opmap.is-combined {
+  height: clamp(560px, 62vh, 780px);
+  clip-path: none;
+}
+.ws-cmd-detachment-slot {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+/* The host is a child of the slot: it has to take the slot's height explicitly
+   or the map canvas collapses to 0. */
+.ws-cmd-detachment-host {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+}
+/* The operations map already draws the frame and owns the top-right corner
+   (the tool belt), so the map's own theatre border and compass step aside. */
+.ws-cmd-opmap.is-combined .ws-map-theatre {
+  border: 0;
+  clip-path: none;
+}
+.ws-cmd-opmap.is-combined .ws-map-compass {
+  display: none;
+}
+
+/* The agent layer becomes a transparent overlay. It keeps its size — stations
+   are placed and dragged as fractions of it — but lets every pointer event
+   through to the map except on its own controls. */
+.ws-cmd-map-world.is-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: block;
+  min-height: 0;
+  padding: 0;
+  pointer-events: none;
+}
+.ws-cmd-map-world.is-overlay .ws-cmd-map-hq-station,
+.ws-cmd-map-command-post {
+  pointer-events: auto;
+}
+/* The group's agents dock down the left edge, under New Quest. */
+.ws-cmd-map-command-post {
+  position: absolute;
+  top: 72px;
+  left: 18px;
+  width: 212px;
+  max-height: calc(100% - 72px - 92px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.ws-cmd-map-command-post .ws-cmd-map-command-row {
+  padding-bottom: 0;
+  margin-bottom: 0;
+  border-bottom: 0;
+}
+.ws-cmd-map-command-post .ws-cmd-map-agent-field {
+  width: 100%;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+.ws-cmd-map-command-post .ws-cmd-map-agent,
+.ws-cmd-map-command-post .ws-cmd-map-agent.is-command-node {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  background-color: color-mix(in srgb, var(--ws-panel) 92%, transparent);
+}
+.ws-cmd-map-command-post .ws-cmd-map-agent.is-command-node {
+  padding: 12px 12px 10px;
+}
+/* The card sits on the theme's panel here rather than on the dark map floor,
+   so its name follows the theme's ink like the rest of the card's text. */
+.ws-cmd-map-command-post .ws-cmd-map-agent-copy strong {
+  color: var(--ws-ink);
+}
+.ws-cmd-map-command-post .ws-cmd-map-empty,
+.ws-cmd-map-command-post .ws-cmd-map-command-repair {
+  margin: 0;
+  padding: 12px;
+  background: color-mix(in srgb, var(--ws-panel) 92%, transparent);
+}
+
+/* An agent standing on the group map wears its roster portrait, sized to the
+   unit's plate. */
+.ws-map-unit .ws-cmd-character.is-roster,
+.ws-map-unit .ws-cmd-character.is-roster.ws-map-av {
+  --aa-size: 58px;
+  width: 58px;
+  height: 58px;
+  flex-basis: 58px;
+}
+.ws-map-unit.is-commander .ws-cmd-character.is-roster,
+.ws-map-unit.is-commander .ws-cmd-character.is-roster.ws-map-av {
+  --aa-size: 76px;
+  width: 76px;
+  height: 76px;
+  flex-basis: 76px;
+}
+
+/* The Detachment toolbar, between New Quest and the tool belt. */
+.ws-cmd-map-group-bar {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  z-index: 4;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px 5px 12px;
+  border: 1px solid rgba(70, 211, 154, 0.18);
+  background: color-mix(in srgb, var(--ws-panel) 92%, transparent);
+  white-space: nowrap;
+}
+.ws-cmd-map-group-bar-label {
+  color: var(--ws-group-accent, var(--ws-faction));
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+}
+.ws-cmd-map-group-bar .ws-cmd-map-zone-count {
+  min-width: 28px;
+  min-height: 26px;
+  border-color: var(--ws-group-accent-line, var(--ws-line-bright));
+  color: var(--ws-group-accent, var(--ws-faction));
+}
+/* With no members the two actions are the point of the map (FR-27). */
+.ws-cmd-map-group-bar.is-empty .ws-cmd-map-zone-action {
+  border-color: var(--ws-group-accent-line, var(--ws-line-bright));
+}
+.ws-cmd-map-group-bar .ws-cmd-detachment-picker {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 340px;
+  padding: 8px;
+  border: 1px solid var(--ws-line-bright);
+  background: color-mix(in srgb, var(--ws-panel) 97%, transparent);
+  white-space: normal;
+}
+/* Same contract as the Home cockpit's map host: the theatre owns the whole
+   slot and the camera moves inside it, so nothing clips or scrolls. */
+.ws-cmd-detachment-host .ws-map-layout.is-cockpit {
+  display: block;
+  height: 100%;
+  min-height: 0;
+}
+.ws-cmd-detachment-host .ws-map-layout.is-cockpit .ws-map-theatre {
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.ws-cmd-detachment-host .ws-map-canvas {
+  min-height: 0;
+}
+
 .ws-cmd-map-belt {
   position: absolute;
   right: 18px;
@@ -5703,6 +5873,30 @@ button.ws-cmd-rpg-class-card:focus-visible {
   }
   .ws-cmd-opmap {
     min-height: 560px;
+  }
+  /* No room for three things across the top: the Detachment toolbar drops
+     under New Quest and the belt, and the agents dock under it. */
+  .ws-cmd-map-group-bar {
+    top: 84px;
+    left: 16px;
+    right: auto;
+    transform: none;
+  }
+  /* One row on a phone: the toolbar keeps "Detachment" as its accessible name,
+     so the visible label is the part that gives way. */
+  .ws-cmd-map-group-bar-label {
+    display: none;
+  }
+  .ws-cmd-map-group-bar .ws-cmd-detachment-picker {
+    left: 0;
+    min-width: min(340px, calc(100vw - 64px));
+    transform: none;
+  }
+  .ws-cmd-map-command-post {
+    top: 144px;
+    left: 16px;
+    width: min(132px, 38%);
+    max-height: calc(100% - 144px - 92px);
   }
   .ws-cmd-map-world {
     padding: 78px 16px 24px;

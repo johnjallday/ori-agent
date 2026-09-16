@@ -29,6 +29,7 @@ import {
   groupTemplateTeamFact
 } from './group-template-status.js';
 import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
+import { flattenWorkspaceTree, buildMapMetadata } from './workspace-map-snapshot.js';
 import {
   parseWorkspaceURLState,
   sanitizeWorkspaceURLState,
@@ -90,6 +91,18 @@ function clampFraction(value) {
   return Math.min(1, Math.max(0, n));
 }
 
+// A short, stable FNV-1a hex digest. Used only where a readable key would be
+// too long to be a map anchor id; the same input always yields the same key.
+function stableHash(value) {
+  let hash = 0x811c9dc5;
+  const text = String(value || '');
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}
+
 // Formats a Calendar Ops portal event's start_time as a short clock label
 // ("2:30 PM") for the HQ station/panel. Returns '' for a missing/unparsable
 // value rather than throwing.
@@ -142,6 +155,14 @@ export class WorkspaceCommandView {
     this.taskModalBoardMode = false;
     // Persistent, non-modal task drawer (group 3) — replaces the Objectives→Open
     // Tasks modal stack. Rendered as a side panel that survives full re-renders.
+    // The group page's Detachment map (group-map-build FR-1 – FR-6). The host
+    // element is owned here and survives the innerHTML rebuilds; see
+    // syncDetachmentMap for why.
+    this.detachmentMapEl = null;
+    this.detachmentMountedKey = '';
+    this.detachmentUnitsSignature = '';
+    this.detachmentPickerOpen = false;
+    this.pendingDetachmentSelectionId = '';
     this.taskDrawerOpen = false;
     this.taskDrawerEl = null;
     this.taskDrawerTrigger = null;
@@ -227,6 +248,7 @@ export class WorkspaceCommandView {
     this.sharedSurfaceAnchors = {};
     this.boundGlobalKeydown = event => this.handleGlobalKeydown(event);
     this.boundPopState = event => this.handlePopState(event);
+    this.boundWorkspacesChanged = event => void this.handleWorkspacesChanged(event);
     this.setup();
   }
 
@@ -355,6 +377,9 @@ export class WorkspaceCommandView {
     }
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
       window.addEventListener('popstate', this.boundPopState);
+      // A member built or moved from this page changes the detachment, and the
+      // creator that did it lives elsewhere (group-map-build FR-18, FR-25).
+      window.addEventListener('ori:workspaces-changed', this.boundWorkspacesChanged);
     }
     this.ensureCapabilityStations();
     this.ensureSurfaceStations();
@@ -1646,6 +1671,9 @@ export class WorkspaceCommandView {
     // re-renders while dragging; the drop path re-renders once the gesture
     // ends, picking up any data that changed in the meantime (FR11).
     if (this._stationDragActive) return;
+    // Same for a gesture inside the Detachment map: this render would move its
+    // host node out from under the pointer (group-map-build FR-5).
+    if (this._detachmentDragActive) return;
     this.rememberCapabilityInspectorFocus();
     this.rememberLoadoutAddFocus();
     this.captureAgentDeckViewState();
@@ -1702,9 +1730,13 @@ export class WorkspaceCommandView {
     this.bindMissionPanel();
     if (this.viewMode === 'map') {
       this.bindOperationsMap();
-    } else if (this.viewMode !== 'tickets' && this.viewMode !== 'dashboard') {
-      this.bindGarrison();
-      this.bindRail();
+    } else {
+      // Leaving Map mode takes the map's listeners and timers with it (FR-6).
+      this.unmountDetachmentMap();
+      if (this.viewMode !== 'tickets' && this.viewMode !== 'dashboard') {
+        this.bindGarrison();
+        this.bindRail();
+      }
     }
     this.bindLoadoutAddModal();
     this.bindUnstaffedBanner();
@@ -7238,6 +7270,17 @@ export class WorkspaceCommandView {
     );
   }
 
+  // The repair card that stands in the Commander's place when there is none.
+  renderMapCommandRepair() {
+    return (
+      '<div class="ws-cmd-map-command-repair">' +
+      '<strong>No Commander</strong>' +
+      '<span>Chats, routing, and task orchestration need a Commander.</span>' +
+      '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-add-agent>Create Commander</button>' +
+      '</div>'
+    );
+  }
+
   renderMapAgentUnits(agents) {
     if (!agents.length) {
       return (
@@ -7257,11 +7300,7 @@ export class WorkspaceCommandView {
     // and assignment rules are untouched (FR78) — this is presentation only.
     if (!entry) {
       return (
-        '<div class="ws-cmd-map-command-repair">' +
-        '<strong>No Commander</strong>' +
-        '<span>Chats, routing, and task orchestration need a Commander.</span>' +
-        '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-add-agent>Create Commander</button>' +
-        '</div>' +
+        this.renderMapCommandRepair() +
         '<div class="ws-cmd-map-agent-field">' +
         specialists.map((agent, index) => this.renderMapAgentUnit(agent, index, false)).join('') +
         '</div>'
@@ -9234,6 +9273,7 @@ export class WorkspaceCommandView {
 
   renderOperationsMap() {
     const { agents, selected } = this.mapAgentViewModels();
+    if (this.isGroupWorkspace()) return this.renderGroupOperationsMap(agents, selected);
     // is-hq scopes the citadel gold accent to the Stations panel (FR15) —
     // no whole-frame tint, layout/density unchanged.
     return (
@@ -9242,6 +9282,44 @@ export class WorkspaceCommandView {
       '">' +
       '<div class="ws-cmd-opmap" role="region" aria-label="Workspace operations map">' +
       this.renderMapAgentsZone(agents) +
+      this.renderMapToolTray() +
+      '</div>' +
+      this.renderMapQuickTask() +
+      this.renderMapWindow(selected) +
+      '</div>'
+    );
+  }
+
+  /**
+   * A group's Map mode is one surface (group-map-build PRD §10).
+   *
+   * The scoped Workspace Map fills the operations map, and the group's agents
+   * stand on its ground as units beside the member buildings (see
+   * detachmentUnits). Only a state that needs an action — no agents, or no
+   * Commander — docks as a command post card. Stations keep their saved
+   * fractional spots in the same overlay layer the station drag measures
+   * against, and the Detachment toolbar sits between New Quest and the tool
+   * belt. The overlay layer passes pointer events through to the map except on
+   * its own controls.
+   */
+  renderGroupOperationsMap(agents, selected) {
+    const entry = agents.find(agent => agent.entry);
+    const post = !agents.length
+      ? this.renderMapAgentUnits(agents)
+      : entry
+        ? ''
+        : this.renderMapCommandRepair();
+    return (
+      '<div class="ws-cmd-map-shell is-group' +
+      (this.isPersonalHQ() ? ' is-hq' : '') +
+      '">' +
+      '<div class="ws-cmd-opmap is-combined" role="region" aria-label="Group map">' +
+      '<div class="ws-cmd-detachment-slot" data-cmd-detachment-slot></div>' +
+      '<section class="ws-cmd-map-world is-overlay" data-map-zone="agents" aria-label="Agent units">' +
+      (post ? '<div class="ws-cmd-map-command-post">' + post + '</div>' : '') +
+      this.renderMapHQStations() +
+      '</section>' +
+      this.renderDetachmentToolbar() +
       this.renderMapToolTray() +
       '</div>' +
       this.renderMapQuickTask() +
@@ -9491,9 +9569,23 @@ export class WorkspaceCommandView {
   bindOperationsMap() {
     const root = this.container && this.container.querySelector('.ws-cmd-map-shell');
     if (!root) return;
+    // The Detachment map lives in real DOM this view owns, so it is re-attached
+    // rather than re-rendered (group-map-build FR-5).
+    this.syncDetachmentMap();
     this.bindStationDrag(root);
     root.addEventListener('click', event => {
       const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+      const detachmentBuild = event.target.closest('[data-cmd-detachment-build]');
+      if (detachmentBuild) {
+        this.openDetachmentBuild(detachmentBuild);
+        return;
+      }
+      const detachmentAdd = event.target.closest('[data-cmd-detachment-add]');
+      if (detachmentAdd) {
+        if (this.detachmentPickerOpen) this.closeDetachmentPicker();
+        else this.openDetachmentPicker();
+        return;
+      }
       if (this.handleLoadoutClick(event)) return;
       if (event.target.closest('[data-cmd-capability-back]')) {
         this.closeCapabilityInspector();
@@ -10471,6 +10563,353 @@ export class WorkspaceCommandView {
     const group = panel && panel.group;
     if (!group || !Array.isArray(group.children)) return 0;
     return group.children.length;
+  }
+
+  // Reload the group's members and repaint. The scoped map re-mounts by itself
+  // when the member snapshot actually changed (see syncDetachmentMap), so a
+  // signal about an unrelated workspace costs one tree fetch and no re-mount.
+  async handleWorkspacesChanged(event) {
+    if (!this.isGroupWorkspace()) return;
+    const panel = this.page && this.page.membersPanel;
+    if (!panel || typeof panel.reload !== 'function') return;
+    const created = String((event && event.detail && event.detail.workspaceId) || '');
+    if (created) this.pendingDetachmentSelectionId = created;
+    await panel.reload();
+    this.render();
+  }
+
+  // ---------- Detachment map (group-map-build FR-1 – FR-6, PRD §10) ----------
+
+  /**
+   * The Detachment toolbar that rides on a group's combined map.
+   *
+   * It draws no tiles: the scoped Workspace Map is mounted into a host that is
+   * moved into the combined surface's slot after every render (see
+   * syncDetachmentMap). Non-group workspaces never render it, so they get no
+   * map and no layout request (FR-2).
+   */
+  renderDetachmentToolbar() {
+    if (!this.isGroupWorkspace()) return '';
+    const count = this.detachmentMemberCount();
+    return (
+      '<div class="ws-cmd-map-group-bar' +
+      (count ? '' : ' is-empty') +
+      '" data-map-zone="detachment" role="toolbar" aria-label="Detachment">' +
+      '<span class="ws-cmd-map-group-bar-label" aria-hidden="true">Detachment</span>' +
+      '<span class="ws-cmd-map-zone-count" title="Members" aria-label="' +
+      count +
+      (count === 1 ? ' member' : ' members') +
+      '">' +
+      count +
+      '</span>' +
+      this.detachmentZoneActionsHTML() +
+      '<div class="ws-cmd-detachment-picker" data-cmd-detachment-picker' +
+      (this.detachmentPickerOpen ? '' : ' hidden') +
+      '></div>' +
+      '</div>'
+    );
+  }
+
+  // Build and Add existing are always offered and never disabled: neither
+  // touches the map layout until the workspace exists, so a read-only layout
+  // does not stop either of them (FR-4, FR-11).
+  detachmentZoneActionsHTML() {
+    return (
+      '<button type="button" class="ws-cmd-map-zone-action is-primary" data-cmd-detachment-build>' +
+      'Build</button>' +
+      '<button type="button" class="ws-cmd-map-zone-action" data-cmd-detachment-add aria-expanded="' +
+      (this.detachmentPickerOpen ? 'true' : 'false') +
+      '">Add existing…</button>'
+    );
+  }
+
+  syncDetachmentAddExpanded() {
+    const button =
+      this.container && typeof this.container.querySelector === 'function'
+        ? this.container.querySelector('[data-cmd-detachment-add]')
+        : null;
+    if (button && typeof button.setAttribute === 'function') {
+      button.setAttribute('aria-expanded', this.detachmentPickerOpen ? 'true' : 'false');
+    }
+  }
+
+  // Open the shared creator with this group locked as the destination. No
+  // coordinate is held: a header Build takes the automatic placement the map
+  // already gives a new member (FR-13).
+  openDetachmentBuild(invoker) {
+    const map = typeof window === 'undefined' ? null : window.OriWorkspaceMap;
+    if (map && typeof map.cancelBuild === 'function') map.cancelBuild();
+    this.openGroupCreator({ entryPoint: 'group_command_build', invoker });
+  }
+
+  openGroupCreator({ entryPoint, invoker } = {}) {
+    const manager = typeof window === 'undefined' ? null : window.sessionManager;
+    if (!manager || typeof manager.showAddWorkspaceModal !== 'function') return false;
+    const ws = (this.page && this.page.workspace) || {};
+    manager.showAddWorkspaceModal({
+      parentId: this.workspaceId(),
+      parentName: String(ws.name || ''),
+      parentLocked: true,
+      entryPoint: entryPoint || 'group_command_build',
+      // The user is arranging this group's map; a successful create returns
+      // here rather than opening the new workspace (FR-18).
+      mapOrigin: true,
+      invoker: invoker || null
+    });
+    return true;
+  }
+
+  // Add existing: the members panel owns the eligible-target rule and the
+  // membership PATCH, so the zone borrows its picker rather than writing a
+  // second one (FR-24, FR-25).
+  openDetachmentPicker({ focus = true } = {}) {
+    const panel = this.page && this.page.membersPanel;
+    const host =
+      this.container && typeof this.container.querySelector === 'function'
+        ? this.container.querySelector('[data-cmd-detachment-picker]')
+        : null;
+    if (!panel || !host || typeof panel.renderAddPickerInto !== 'function') return false;
+    this.detachmentPickerOpen = true;
+    host.hidden = false;
+    this.syncDetachmentAddExpanded();
+    panel.renderAddPickerInto(host, {
+      focus,
+      onAdded: id => {
+        this.closeDetachmentPicker();
+        this.pendingDetachmentSelectionId = String(id || '');
+        void this.handleWorkspacesChanged({ detail: { workspaceId: id } });
+      },
+      onCancel: () => this.closeDetachmentPicker()
+    });
+    return true;
+  }
+
+  /**
+   * The screen space the combined map's overlays occupy, measured after render.
+   *
+   * Top: the lowest of New Quest, the Detachment toolbar, and the tool belt.
+   * Left: the command post card, when one is docked (no agents yet, or no
+   * Commander), so no building opens hidden under it. Agents themselves stand
+   * on the map and need no inset. It is skipped only if the card somehow covers
+   * most of the map, where framing around it would leave nothing to frame into.
+   */
+  detachmentFrameInsets() {
+    const none = { top: 0, left: 0 };
+    const root =
+      this.container && typeof this.container.querySelector === 'function'
+        ? this.container.querySelector('.ws-cmd-opmap.is-combined')
+        : null;
+    if (!root || typeof root.getBoundingClientRect !== 'function') return none;
+    const base = root.getBoundingClientRect();
+    if (!base || !base.width || !base.height) return none;
+    const rectOf = selector => {
+      const el = this.container.querySelector(selector);
+      if (!el || typeof el.getBoundingClientRect !== 'function') return null;
+      const rect = el.getBoundingClientRect();
+      return rect && rect.width && rect.height ? rect : null;
+    };
+    const gap = 12;
+    const top = ['.ws-cmd-map-quest-fab', '.ws-cmd-map-group-bar', '.ws-cmd-map-belt']
+      .map(rectOf)
+      .filter(Boolean)
+      .reduce((lowest, rect) => Math.max(lowest, rect.bottom - base.top + gap), 0);
+    const post = rectOf('.ws-cmd-map-command-post');
+    const postRight = post ? post.right - base.left + gap : 0;
+    return {
+      top: Math.round(top),
+      left: postRight > 0 && postRight < base.width * 0.6 ? Math.round(postRight) : 0
+    };
+  }
+
+  // The toolbar button toggles, which is also the way out of the "No eligible
+  // workspaces to add." message, which has no Cancel of its own.
+  closeDetachmentPicker() {
+    this.detachmentPickerOpen = false;
+    this.syncDetachmentAddExpanded();
+    const host =
+      this.container && typeof this.container.querySelector === 'function'
+        ? this.container.querySelector('[data-cmd-detachment-picker]')
+        : null;
+    if (!host) return;
+    host.hidden = true;
+    host.innerHTML = '';
+  }
+
+  // The rows the scoped map draws from: the members panel's tree, shaped the
+  // way Home shapes it, so both surfaces hand the map the same thing.
+  detachmentSnapshot() {
+    const panel = this.page && this.page.membersPanel;
+    const tree = (panel && Array.isArray(panel.tree) && panel.tree) || [];
+    const workspaces = flattenWorkspaceTree(tree);
+    return { tree, workspaces, metadata: buildMapMetadata(workspaces, tree) };
+  }
+
+  // What the mounted map is currently showing. A re-mount costs the camera and
+  // the selection, so it happens only when membership actually changed.
+  detachmentMountKey(workspaces, units = []) {
+    const groupId = this.workspaceId();
+    const map = typeof window === 'undefined' ? null : window.OriWorkspaceMap;
+    const scoped =
+      map && typeof map.scopeWorkspacesToGroup === 'function'
+        ? map.scopeWorkspacesToGroup(workspaces, groupId)
+        : workspaces;
+    return (
+      groupId +
+      '::' +
+      scoped.map(row => row.id + ':' + (row.parent_id || '') + ':' + (row.name || '')).join('|') +
+      // Who stands on the ground is structure too: a hired or removed agent, or
+      // a new Commander, needs a place to stand.
+      '::' +
+      units.map(unit => unit.id + (unit.commander ? '*' : '')).join('|')
+    );
+  }
+
+  /**
+   * The group's agents as the map's units.
+   *
+   * The anchor id is "agent:<group id>:<agent key>", which the layout service
+   * authorizes through the group. The key is the agent's normalized name, so a
+   * unit keeps its spot through a change of case; a name too long for a node id
+   * falls back to a stable hash of it.
+   */
+  detachmentUnits() {
+    const groupId = this.workspaceId();
+    if (!groupId) return [];
+    const { agents } = this.mapAgentViewModels();
+    const prefix = 'agent:' + groupId + ':';
+    return agents.map(agent => {
+      let key = encodeURIComponent(agent.key || agent.name || '');
+      if (!key || prefix.length + key.length > 256) key = 'h' + stableHash(agent.key || agent.name);
+      return {
+        id: prefix + key,
+        selectKey: agent.encodedName,
+        name: agent.name,
+        role: agent.entry
+          ? this.commanderLabel(agent.profile && agent.profile.role)
+          : agent.role?.label || 'Agent',
+        status: agent.status?.label || 'Idle',
+        tone: agent.tone,
+        working: agent.tone === 'working',
+        commander: !!agent.entry,
+        selected: agent.key === this.selectedAgentKey,
+        portraitHTML: this.agentCharacterHTML(agent, 'roster')
+      };
+    });
+  }
+
+  ensureDetachmentHost() {
+    if (this.detachmentMapEl) return this.detachmentMapEl;
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function')
+      return null;
+    const host = document.createElement('div');
+    host.className = 'ws-cmd-detachment-host';
+    // A pointer gesture inside the map owns the DOM the map drew. A background
+    // re-render would rebuild this container and move the host mid-drag, which
+    // cancels the gesture — so the same guard the station drag uses applies
+    // here (PRD §9 Q1).
+    host.addEventListener('pointerdown', () => {
+      this._detachmentDragActive = true;
+    });
+    const release = () => {
+      this._detachmentDragActive = false;
+    };
+    host.addEventListener('pointerup', release);
+    host.addEventListener('pointercancel', release);
+    this.detachmentMapEl = host;
+    return host;
+  }
+
+  /**
+   * Keep the mounted map and the freshly rendered zone in step.
+   *
+   * PRD §9 Q1: the host node is owned by this view and re-attached after every
+   * render (the taskDrawerEl pattern), so a Command re-render never re-mounts
+   * the map. The map re-mounts only when the member snapshot changes.
+   */
+  syncDetachmentMap() {
+    const slot =
+      this.container && typeof this.container.querySelector === 'function'
+        ? this.container.querySelector('[data-cmd-detachment-slot]')
+        : null;
+    if (!slot) {
+      this.unmountDetachmentMap();
+      return;
+    }
+    const host = this.ensureDetachmentHost();
+    if (!host) return;
+    if (host.parentNode !== slot) slot.appendChild(host);
+    // The toolbar was rebuilt with the rest of the view; an Add existing picker
+    // the user had open comes back, without pulling focus from wherever they are.
+    if (this.detachmentPickerOpen) this.openDetachmentPicker({ focus: false });
+
+    const map = typeof window === 'undefined' ? null : window.OriWorkspaceMap;
+    if (!map || typeof map.mount !== 'function') return;
+    const { tree, workspaces, metadata } = this.detachmentSnapshot();
+    const units = this.detachmentUnits();
+    const key = this.detachmentMountKey(workspaces, units);
+    const selectedId = this.pendingDetachmentSelectionId;
+    const unitsSignature = JSON.stringify(units);
+    if (key === this.detachmentMountedKey && !selectedId) {
+      // Same buildings and the same agents: only what the agents show may have
+      // changed, and that is patched in place rather than rebuilding the ground.
+      if (unitsSignature === this.detachmentUnitsSignature) return;
+      if (typeof map.updateUnits === 'function' && map.updateUnits(host, units)) {
+        this.detachmentUnitsSignature = unitsSignature;
+        return;
+      }
+    }
+    this.detachmentMountedKey = key;
+    this.detachmentUnitsSignature = unitsSignature;
+    this.pendingDetachmentSelectionId = '';
+    map.mount(host, {
+      workspaces,
+      tree,
+      metadata,
+      selectedId,
+      units,
+      scopeGroupId: this.workspaceId(),
+      // The combined surface's overlays cover the top band and the left
+      // column; the district opens framed in what they leave clear.
+      frameInsets: this.detachmentFrameInsets(),
+      // Cockpit semantics without Home's chrome, and no economy: a group's map
+      // draws buildings, never Farm badges (PRD §5).
+      selectOnly: true,
+      hideChrome: true,
+      noAutoSelect: true,
+      onOpen: id => this.openDetachmentMember(id, workspaces),
+      // Empty-ground Build holds the clicked coordinate; the creator it opens
+      // is the same one the zone header opens (FR-13, FR-24).
+      onBuild: () => this.openGroupCreator({ entryPoint: 'group_command_build' }),
+      onAddExisting: () => this.openDetachmentPicker(),
+      // A unit on the ground opens the same Unit Sheet its roster card did.
+      onSelectUnit: unit => {
+        if (!unit || !unit.selectKey) return;
+        this.activeMapWindow = 'inspector';
+        this.selectAgent(unit.selectKey, { focus: false });
+      }
+    });
+    // mount keeps an existing selection when one is still valid, so a
+    // just-built or just-moved member is selected explicitly (FR-18, FR-25).
+    if (selectedId && typeof map.setSelectedId === 'function') {
+      map.setSelectedId(host, workspaces, selectedId);
+    }
+  }
+
+  openDetachmentMember(id, workspaces) {
+    const rows = Array.isArray(workspaces) ? workspaces : this.detachmentSnapshot().workspaces;
+    const member = rows.find(row => row && row.id === id);
+    if (!member) return;
+    this.navigateTo(workspacePageURL(member.folder_slug || member.id));
+  }
+
+  unmountDetachmentMap() {
+    const map = typeof window === 'undefined' ? null : window.OriWorkspaceMap;
+    if (this.detachmentMapEl && map && typeof map.unmount === 'function') {
+      map.unmount(this.detachmentMapEl);
+    }
+    this.detachmentMountedKey = '';
+    this.detachmentUnitsSignature = '';
+    this._detachmentDragActive = false;
   }
 
   renderDetachmentPanel(expanded) {
