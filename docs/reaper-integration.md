@@ -65,16 +65,17 @@ Compatible older plugin-backed workspaces can be attached only through an explic
 
 ## Reviewed release and recovery
 
-Ori’s reviewed registry now enables the published macOS arm64 `v0.5.0` release:
+Ori’s reviewed registry now enables the published macOS arm64 `v0.6.0` release:
 
-- Immutable source commit: `1f494db5a39d8c13f6149943b28e6a506d19631a`.
-- Published asset: `reaper-plugin_v0.5.0_darwin_arm64`, **8,780,098 bytes**.
-- SHA-256: `2bbf6b77418119cb21e827a407c8d5886e3effdb593ec0ad274e20d7d69c2ca9`.
-- Release: https://github.com/johnjallday/reaper-plugin/releases/tag/v0.5.0 (published September 7, 2026).
-- Source CI: https://github.com/johnjallday/reaper-plugin/actions/runs/34069730655.
-- Release workflow: https://github.com/johnjallday/reaper-plugin/actions/runs/34069730639.
+- Immutable source commit: `03af9fda3e6b9d8cc3c0496c5e9ef6df99e870b9` (the annotated `v0.6.0` tag’s resolved commit).
+- Published asset: `reaper-plugin_v0.6.0_darwin_arm64`, **8,780,098 bytes**.
+- SHA-256: `4def4fec14ecf083b0358c686c608514d4b9afff99dd810f1184213312770119`.
+- Release: https://github.com/johnjallday/reaper-plugin/releases/tag/v0.6.0 (published September 15, 2026).
+- Source CI: https://github.com/johnjallday/reaper-plugin/actions/runs/35020185810.
+- Release workflow: https://github.com/johnjallday/reaper-plugin/actions/runs/35020185797.
+- Manifest identity at that commit: blueprint `reaper-song` version 7, assistant program `music-producer-assistant` schema 2, setup quest `reaper_setup` version 2 with four steps, required host features `assistant_program_v1`, `specialist_setup_journey_v1`, `setup_quests_v2` and `template_group_requirements_v1`.
 
-For host enablement, the actual published asset and checksum were downloaded and compared against the manifest at the tag’s resolved commit. Size and digest matched; the executable reported `0.5.0`. The obsolete candidate pin was replaced, not merely enabled. A repeatable GitHub-backed check exercises both fresh reviewed install → separate enable and ordinary official-URL install → reviewed same-version replacement, without a development override:
+For host enablement, the actual published asset and checksum were downloaded and compared against the manifest at the tag’s resolved commit. Size and digest matched; the executable reported `0.6.0`. The previous `v0.5.0` pin was replaced, not merely enabled. A repeatable GitHub-backed check exercises both fresh reviewed install → separate enable and ordinary official-URL install → reviewed same-version replacement, without a development override:
 
 ```bash
 ORI_TEST_REVIEWED_INTEGRATION_RELEASE=1 go test ./internal/setupjourney \
@@ -85,15 +86,17 @@ This opt-in check uses temporary plugin stores and inert component registrars. I
 
 Older Ori builds may still report an identity mismatch or an unavailable reviewed release even after the plugin is installed. Update Ori first: reinstalling the same unpinned plugin does not enable the host’s release gate. The recovery action accepts only the exact official repository URLs and its previously accepted pins; unrelated/local sources, incompatible formats/platforms, and newer or unrecognized versions do not bypass verification. A replacement is never applied from a status read or review alone.
 
-### Moving the pin to 0.6.0
+### Pin history and moving the pin
 
-Plugin **0.6.0** declares its setup quest under `setup_quests_v2`: `reaper_setup` version 2 with four steps and blueprint version 7. This Ori host no longer supports `setup_quests_v1`. Installed v0.5.1 and v0.5.2 plugins require it, so they fail closed: their manifests are refused until the plugin is updated. The pinned v0.5.0 declares no quest, so it still installs and verifies, but the install quest has no plugin quest to continue into and offers only **Open Plugins**.
+Plugin **0.6.0** is the first release that declares its setup quest under `setup_quests_v2`: `reaper_setup` version 2 with four steps and blueprint version 7. This Ori host no longer supports `setup_quests_v1`. Installed v0.5.1 and v0.5.2 plugins require it, so they fail closed: their manifests are refused until the plugin is updated. The previous pin, `v0.5.0` at commit `1f494db5a39d8c13f6149943b28e6a506d19631a` (SHA-256 `2bbf6b77418119cb21e827a407c8d5886e3effdb593ec0ad274e20d7d69c2ca9`), declared no quest, so its install quest offered only **Open Plugins**.
 
-The reviewed pin above stays at `v0.5.0` until 0.6.0 is published. Update it only through this procedure:
+A stale pin has one visible symptom worth recognising: the gate never accepts an installation **newer** than the pin and never offers a downgrade, so once a newer release is installed from the official URL the install step reports “Ori could not verify this installation against the reviewed source, format, and version” with only **Manage integration** available. The fix is to move the pin in Ori, not to reinstall the plugin.
 
-1. Confirm the `v0.6.0` tag and release exist on `johnjallday/reaper-plugin`, and record the tag's resolved commit.
-2. Download the published `darwin_arm64` asset and its checksum. Compare size and SHA-256 against the manifest at that commit, and confirm the executable reports `0.6.0`.
-3. In `internal/reviewedintegration/entries.go`, set `ExpectedVersion` to `0.6.0`, `SourceCommit` to the resolved commit, `ExpectedBlueprintVersion` to `7`, and `RequiredHostFeatures` to the manifest's list, including `setup_quests_v2`. Update the registry test and this section's evidence list.
+Move the pin only through this procedure:
+
+1. Confirm the new tag and release exist on `johnjallday/reaper-plugin`, and record the tag's resolved commit.
+2. Download the published `darwin_arm64` asset and its checksum. Compare size and SHA-256 against the manifest at that commit, and confirm the executable reports the new version.
+3. In `internal/reviewedintegration/entries.go`, set `ExpectedVersion`, `SourceCommit`, `ExpectedBlueprintVersion` and `RequiredHostFeatures` from that manifest. Update the registry test, the artifact digest in the published-release check, and this section's evidence list.
 4. Run the opt-in published-release check above against the new pin.
 
 The locally built candidate is not release evidence. A squash merge upstream changes its commit identity, so always pin the published tag's commit.

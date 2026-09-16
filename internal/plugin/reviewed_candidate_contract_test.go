@@ -24,9 +24,10 @@ func TestReviewedCandidateHostContract(t *testing.T) {
 	if err := prepareTrustedBlueprints(&descriptor); err != nil {
 		t.Fatalf("resolve reviewed candidate blueprints: %v", err)
 	}
-	if descriptor.Name != "reaper-plugin" || descriptor.Version != "0.5.0" ||
+	if descriptor.Name != "reaper-plugin" || descriptor.Version != "0.6.0" ||
 		descriptor.WorkspaceSurfaces == nil ||
-		!slices.Contains(descriptor.WorkspaceSurfaces.RequiresHostFeatures, HostFeatureSpecialistSetupJourneyV1) {
+		!slices.Contains(descriptor.WorkspaceSurfaces.RequiresHostFeatures, HostFeatureSpecialistSetupJourneyV1) ||
+		!slices.Contains(descriptor.WorkspaceSurfaces.RequiresHostFeatures, HostFeatureSetupQuestsV2) {
 		t.Fatalf("candidate identity/host contract = %#v", descriptor)
 	}
 	if len(descriptor.ResolvedBlueprints) != 1 {
@@ -35,7 +36,7 @@ func TestReviewedCandidateHostContract(t *testing.T) {
 	blueprint := descriptor.ResolvedBlueprints[0]
 	connection := blueprint.Template.ProjectConnection
 	program := blueprint.Template.AssistantProgram
-	if blueprint.ID != "reaper-song" || blueprint.Version != 4 || connection == nil ||
+	if blueprint.ID != "reaper-song" || blueprint.Version != 7 || connection == nil ||
 		!slices.Equal(connection.SupportedModes, []projecttemplates.ProjectConnectionMode{
 			projecttemplates.ProjectConnectionExistingProject,
 			projecttemplates.ProjectConnectionNewProject,

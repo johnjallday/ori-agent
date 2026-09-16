@@ -545,12 +545,12 @@ non-executable domain-neutral plugin fixture. Exact REAPER 0.5.2 staging,
 artifact identity, and release acceptance remain blocked until a separately
 authorized companion worktree/owner supplies that candidate.
 
-Ori's current reviewed entry still expects plugin `0.5.0`, commit
-`1f494db5d6f52c697dcf0682db1c7e6cb6479733`, and blueprint v4. It is not changed
-from local evidence. Production pinning to `0.6.0` requires a separately
-approved, reachable tag/source and release artifact whose URL, digest, size,
-mode, package checksum, and binary version all match the exact reviewed commit
-and host compatibility evidence.
+At the time of this work Ori's reviewed entry still expected plugin `0.5.0`
+and blueprint v4; it was not changed from local evidence. The pin has since
+moved to the published `0.6.0` release, commit
+`03af9fda3e6b9d8cc3c0496c5e9ef6df99e870b9`, blueprint v7, after the release
+artifact's URL, digest, size, mode and binary version were verified against
+that exact commit; see [REAPER integration](../reaper-integration.md).
 
 A local build/staged demo is development evidence only. Publishing, tagging,
 pushing, installing into a user's current store, resetting user data, and
