@@ -9658,6 +9658,37 @@ async function mountedScopedDrag() {
   return { map, harness, patches };
 }
 
+test('normalizeFrameInsets keeps only positive finite edges', () => {
+  const map = loadOriWorkspaceMap();
+  assert.deepEqual({ ...map.normalizeFrameInsets({ top: 84, left: 240 }) }, { top: 84, left: 240 });
+  assert.deepEqual({ ...map.normalizeFrameInsets({ top: -5, left: 'wide' }) }, { top: 0, left: 0 });
+  assert.deepEqual({ ...map.normalizeFrameInsets(null) }, { top: 0, left: 0 });
+});
+
+test('frame insets centre the opening view in the clear area, whatever the zoom', async () => {
+  const positions = { m1: { x: 380, y: 228 }, sub: { x: 760, y: 228 }, deep: { x: 1140, y: 228 } };
+  const openWith = async frameInsets => {
+    const map = loadMapWithFetch(() => jsonResponse({ schema_version: 1, revision: 1, positions }));
+    const harness = createCameraHarness({ tiles: ['m1', 'sub', 'deep'], districts: ['g'] });
+    map.mount(harness.container, scopedMountState(frameInsets ? { frameInsets } : {}));
+    await flush();
+    const layout = map.computeWorldLayout(map.scopeWorkspacesToGroup(SCOPED_WORLD, 'g'), {
+      positions,
+      scope: { groupId: 'g', nested: false }
+    });
+    const frame = map.scopedFrameBounds(layout, 'g');
+    const center = { x: (frame.minX + frame.maxX) / 2, y: (frame.minY + frame.maxY) / 2 };
+    return map.camera.worldToScreen(center, map.getCamera(), { width: 1000, height: 600 });
+  };
+
+  const plain = await openWith(null);
+  const inset = await openWith({ top: 100, left: 240 });
+  // The frame's centre moves by half of each reserved edge: it is centred in
+  // the space the overlays leave, and zoom cancels out of that position.
+  assert.ok(Math.abs(inset.x - plain.x - 120) < 0.5, 'x shift ' + (inset.x - plain.x));
+  assert.ok(Math.abs(inset.y - plain.y - 50) < 0.5, 'y shift ' + (inset.y - plain.y));
+});
+
 test('a scoped mount frames its district instead of restoring Home’s camera, and never saves one', async () => {
   const { map, harness, patches } = await mountedScopedDrag();
   const cam = map.getCamera();

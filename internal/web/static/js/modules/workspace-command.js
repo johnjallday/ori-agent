@@ -9253,6 +9253,7 @@ export class WorkspaceCommandView {
 
   renderOperationsMap() {
     const { agents, selected } = this.mapAgentViewModels();
+    if (this.isGroupWorkspace()) return this.renderGroupOperationsMap(agents, selected);
     // is-hq scopes the citadel gold accent to the Stations panel (FR15) —
     // no whole-frame tint, layout/density unchanged.
     return (
@@ -9263,7 +9264,38 @@ export class WorkspaceCommandView {
       this.renderMapAgentsZone(agents) +
       this.renderMapToolTray() +
       '</div>' +
-      this.renderMapDetachmentZone() +
+      this.renderMapQuickTask() +
+      this.renderMapWindow(selected) +
+      '</div>'
+    );
+  }
+
+  /**
+   * A group's Map mode is one surface (group-map-build PRD §10).
+   *
+   * The scoped Workspace Map fills the operations map; everything the agent
+   * map offered floats over it. Agents dock as a command post, stations keep
+   * their saved fractional spots in the same overlay layer the station drag
+   * measures against, and the Detachment toolbar sits between New Quest and the
+   * tool belt. The overlay layer passes pointer events through to the map
+   * except on its own controls.
+   */
+  renderGroupOperationsMap(agents, selected) {
+    return (
+      '<div class="ws-cmd-map-shell is-group' +
+      (this.isPersonalHQ() ? ' is-hq' : '') +
+      '">' +
+      '<div class="ws-cmd-opmap is-combined" role="region" aria-label="Group map">' +
+      '<div class="ws-cmd-detachment-slot" data-cmd-detachment-slot></div>' +
+      '<section class="ws-cmd-map-world is-overlay" data-map-zone="agents" aria-label="Agent units">' +
+      '<div class="ws-cmd-map-command-post">' +
+      this.renderMapAgentUnits(agents) +
+      '</div>' +
+      this.renderMapHQStations() +
+      '</section>' +
+      this.renderDetachmentToolbar() +
+      this.renderMapToolTray() +
+      '</div>' +
       this.renderMapQuickTask() +
       this.renderMapWindow(selected) +
       '</div>'
@@ -9524,7 +9556,8 @@ export class WorkspaceCommandView {
       }
       const detachmentAdd = event.target.closest('[data-cmd-detachment-add]');
       if (detachmentAdd) {
-        this.openDetachmentPicker();
+        if (this.detachmentPickerOpen) this.closeDetachmentPicker();
+        else this.openDetachmentPicker();
         return;
       }
       if (this.handleLoadoutClick(event)) return;
@@ -10519,41 +10552,35 @@ export class WorkspaceCommandView {
     this.render();
   }
 
-  // ---------- Detachment map zone (group-map-build FR-1 – FR-6) ----------
+  // ---------- Detachment map (group-map-build FR-1 – FR-6, PRD §10) ----------
 
   /**
-   * The group's own district, drawn in Map mode under the agent zone.
+   * The Detachment toolbar that rides on a group's combined map.
    *
-   * The zone draws no tiles of its own: it renders a slot, and the shared
-   * Workspace Map is mounted into a host that is moved into that slot after
-   * every render (see syncDetachmentMap). Non-group workspaces get nothing at
-   * all — no markup, and no map, so no layout request (FR-2).
+   * It draws no tiles: the scoped Workspace Map is mounted into a host that is
+   * moved into the combined surface's slot after every render (see
+   * syncDetachmentMap). Non-group workspaces never render it, so they get no
+   * map and no layout request (FR-2).
    */
-  renderMapDetachmentZone() {
+  renderDetachmentToolbar() {
     if (!this.isGroupWorkspace()) return '';
-    const ws = (this.page && this.page.workspace) || {};
     const count = this.detachmentMemberCount();
     return (
-      '<section class="ws-cmd-map-detachment' +
+      '<div class="ws-cmd-map-group-bar' +
       (count ? '' : ' is-empty') +
-      '" data-map-zone="detachment" role="region" ' +
-      'aria-label="Detachment map">' +
-      '<header class="ws-cmd-map-zone-head">' +
-      '<div><span>Detachment</span><strong>' +
-      escapeHtml(String(ws.name || 'Group')) +
-      '</strong></div>' +
-      '<div class="ws-cmd-map-zone-actions">' +
-      this.detachmentZoneActionsHTML() +
-      '<span class="ws-cmd-map-zone-count">' +
+      '" data-map-zone="detachment" role="toolbar" aria-label="Detachment">' +
+      '<span class="ws-cmd-map-group-bar-label" aria-hidden="true">Detachment</span>' +
+      '<span class="ws-cmd-map-zone-count" title="Members" aria-label="' +
+      count +
+      (count === 1 ? ' member' : ' members') +
+      '">' +
       count +
       '</span>' +
-      '</div>' +
-      '</header>' +
+      this.detachmentZoneActionsHTML() +
       '<div class="ws-cmd-detachment-picker" data-cmd-detachment-picker' +
       (this.detachmentPickerOpen ? '' : ' hidden') +
       '></div>' +
-      '<div class="ws-cmd-detachment-slot" data-cmd-detachment-slot></div>' +
-      '</section>'
+      '</div>'
     );
   }
 
@@ -10564,9 +10591,20 @@ export class WorkspaceCommandView {
     return (
       '<button type="button" class="ws-cmd-map-zone-action is-primary" data-cmd-detachment-build>' +
       'Build</button>' +
-      '<button type="button" class="ws-cmd-map-zone-action" data-cmd-detachment-add>' +
-      'Add existing…</button>'
+      '<button type="button" class="ws-cmd-map-zone-action" data-cmd-detachment-add aria-expanded="' +
+      (this.detachmentPickerOpen ? 'true' : 'false') +
+      '">Add existing…</button>'
     );
+  }
+
+  syncDetachmentAddExpanded() {
+    const button =
+      this.container && typeof this.container.querySelector === 'function'
+        ? this.container.querySelector('[data-cmd-detachment-add]')
+        : null;
+    if (button && typeof button.setAttribute === 'function') {
+      button.setAttribute('aria-expanded', this.detachmentPickerOpen ? 'true' : 'false');
+    }
   }
 
   // Open the shared creator with this group locked as the destination. No
@@ -10598,7 +10636,7 @@ export class WorkspaceCommandView {
   // Add existing: the members panel owns the eligible-target rule and the
   // membership PATCH, so the zone borrows its picker rather than writing a
   // second one (FR-24, FR-25).
-  openDetachmentPicker() {
+  openDetachmentPicker({ focus = true } = {}) {
     const panel = this.page && this.page.membersPanel;
     const host =
       this.container && typeof this.container.querySelector === 'function'
@@ -10607,20 +10645,67 @@ export class WorkspaceCommandView {
     if (!panel || !host || typeof panel.renderAddPickerInto !== 'function') return false;
     this.detachmentPickerOpen = true;
     host.hidden = false;
+    this.syncDetachmentAddExpanded();
     panel.renderAddPickerInto(host, {
+      focus,
       onAdded: id => {
-        this.detachmentPickerOpen = false;
-        host.hidden = true;
+        this.closeDetachmentPicker();
         this.pendingDetachmentSelectionId = String(id || '');
         void this.handleWorkspacesChanged({ detail: { workspaceId: id } });
       },
-      onCancel: () => {
-        this.detachmentPickerOpen = false;
-        host.hidden = true;
-        host.innerHTML = '';
-      }
+      onCancel: () => this.closeDetachmentPicker()
     });
     return true;
+  }
+
+  /**
+   * The screen space the combined map's overlays occupy, measured after render.
+   *
+   * Top: the lowest of New Quest, the Detachment toolbar, and the tool belt.
+   * Left: the agent column, so no building opens hidden under an agent card.
+   * It is skipped only if the column somehow covers most of the map, where
+   * framing around it would leave nothing to frame into.
+   */
+  detachmentFrameInsets() {
+    const none = { top: 0, left: 0 };
+    const root =
+      this.container && typeof this.container.querySelector === 'function'
+        ? this.container.querySelector('.ws-cmd-opmap.is-combined')
+        : null;
+    if (!root || typeof root.getBoundingClientRect !== 'function') return none;
+    const base = root.getBoundingClientRect();
+    if (!base || !base.width || !base.height) return none;
+    const rectOf = selector => {
+      const el = this.container.querySelector(selector);
+      if (!el || typeof el.getBoundingClientRect !== 'function') return null;
+      const rect = el.getBoundingClientRect();
+      return rect && rect.width && rect.height ? rect : null;
+    };
+    const gap = 12;
+    const top = ['.ws-cmd-map-quest-fab', '.ws-cmd-map-group-bar', '.ws-cmd-map-belt']
+      .map(rectOf)
+      .filter(Boolean)
+      .reduce((lowest, rect) => Math.max(lowest, rect.bottom - base.top + gap), 0);
+    const post = rectOf('.ws-cmd-map-command-post');
+    const postRight = post ? post.right - base.left + gap : 0;
+    return {
+      top: Math.round(top),
+      left: postRight > 0 && postRight < base.width * 0.6 ? Math.round(postRight) : 0
+    };
+  }
+
+  // The toolbar button toggles, which is also the way out of the "No eligible
+  // workspaces to add." message, which has no Cancel of its own.
+  closeDetachmentPicker() {
+    this.detachmentPickerOpen = false;
+    this.syncDetachmentAddExpanded();
+    const host =
+      this.container && typeof this.container.querySelector === 'function'
+        ? this.container.querySelector('[data-cmd-detachment-picker]')
+        : null;
+    if (!host) return;
+    host.hidden = true;
+    host.innerHTML = '';
   }
 
   // The rows the scoped map draws from: the members panel's tree, shaped the
@@ -10689,6 +10774,9 @@ export class WorkspaceCommandView {
     const host = this.ensureDetachmentHost();
     if (!host) return;
     if (host.parentNode !== slot) slot.appendChild(host);
+    // The toolbar was rebuilt with the rest of the view; an Add existing picker
+    // the user had open comes back, without pulling focus from wherever they are.
+    if (this.detachmentPickerOpen) this.openDetachmentPicker({ focus: false });
 
     const map = typeof window === 'undefined' ? null : window.OriWorkspaceMap;
     if (!map || typeof map.mount !== 'function') return;
@@ -10704,6 +10792,9 @@ export class WorkspaceCommandView {
       metadata,
       selectedId,
       scopeGroupId: this.workspaceId(),
+      // The combined surface's overlays cover the top band and the left
+      // column; the district opens framed in what they leave clear.
+      frameInsets: this.detachmentFrameInsets(),
       // Cockpit semantics without Home's chrome, and no economy: a group's map
       // draws buildings, never Farm badges (PRD §5).
       selectOnly: true,

@@ -5133,26 +5133,48 @@ function detachmentCommandView(kind = 'group', members = [{ id: 'm1', name: 'Mix
   return commandView;
 }
 
-test('the Detachment zone renders for a group only, with a slot and no tiles of its own', () => {
+test('a group’s Map mode is one combined surface: the map slot, agents over it, and the toolbar', () => {
   const groupHTML = detachmentCommandView('group').renderOperationsMap();
-  assert.match(groupHTML, /data-map-zone="detachment"/);
-  assert.match(groupHTML, /role="region" aria-label="Detachment map"/);
-  assert.match(groupHTML, /<span>Detachment<\/span><strong>Studio<\/strong>/);
-  assert.match(groupHTML, /ws-cmd-map-zone-count">1</);
-  assert.match(groupHTML, /data-cmd-detachment-slot><\/div>/, 'the map mounts into an empty slot');
+  assert.match(groupHTML, /ws-cmd-map-shell is-group/);
+  assert.match(groupHTML, /class="ws-cmd-opmap is-combined" role="region" aria-label="Group map"/);
+  assert.equal(
+    (groupHTML.match(/class="ws-cmd-opmap/g) || []).length,
+    1,
+    'one map, not an agent map plus a second zone'
+  );
+  // The map mounts into an empty slot inside the combined surface.
+  assert.match(
+    groupHTML,
+    /is-combined"[^>]*><div class="ws-cmd-detachment-slot" data-cmd-detachment-slot><\/div>/
+  );
+  // Agents and stations share the overlay layer the station drag measures.
+  assert.match(
+    groupHTML,
+    /<section class="ws-cmd-map-world is-overlay" data-map-zone="agents"[^>]*><div class="ws-cmd-map-command-post">/
+  );
+  assert.match(groupHTML, /Studio Group Manager|ws-cmd-map-empty|ws-cmd-map-command-row/);
+  // The toolbar, the tool belt, New Quest, and the map window all stay.
+  assert.match(groupHTML, /data-map-zone="detachment" role="toolbar" aria-label="Detachment"/);
+  assert.match(groupHTML, /class="ws-cmd-map-belt"/);
+  assert.match(groupHTML, /ws-cmd-map-quest-dock/);
   assert.match(groupHTML, /data-cmd-detachment-picker hidden/);
-  assert.doesNotMatch(groupHTML, /ws-map-tile/, 'the zone draws no member tiles itself');
+  assert.doesNotMatch(groupHTML, /ws-map-tile/, 'the view draws no member tiles itself');
 
-  // An ordinary workspace's Map mode is untouched: no zone, so no map and no
-  // layout request (FR-2).
+  // An ordinary workspace's Map mode is untouched: no toolbar, so no map and
+  // no layout request (FR-2).
   const plainHTML = detachmentCommandView('workspace').renderOperationsMap();
-  assert.doesNotMatch(plainHTML, /detachment/);
+  assert.doesNotMatch(plainHTML, /detachment|is-combined|is-overlay|is-group/);
+  assert.match(
+    plainHTML,
+    /class="ws-cmd-opmap" role="region" aria-label="Workspace operations map"/
+  );
+  assert.match(plainHTML, /<section class="ws-cmd-map-world" data-map-zone="agents"/);
 });
 
-test('the zone header offers Build and Add existing, enabled even when the layout is read-only', () => {
+test('the toolbar offers Build and Add existing, enabled even when the layout is read-only', () => {
   const html = detachmentCommandView('group').renderOperationsMap();
   assert.match(html, /data-cmd-detachment-build>Build<\/button>/);
-  assert.match(html, /data-cmd-detachment-add>Add existing…<\/button>/);
+  assert.match(html, /data-cmd-detachment-add aria-expanded="false">Add existing…<\/button>/);
   // Neither touches the layout until the workspace exists (FR-4, FR-11).
   assert.doesNotMatch(html, /data-cmd-detachment-(build|add)[^>]*disabled/);
   assert.match(html, /ws-cmd-map-zone-action is-primary" data-cmd-detachment-build/);
@@ -5182,11 +5204,17 @@ test('zone Build opens the shared creator with this group locked, and clears any
   }
 });
 
-test('Add existing renders the members panel’s own picker into the zone', () => {
+test('Add existing renders the members panel’s own picker into the toolbar', () => {
   const commandView = detachmentCommandView('group');
   const host = { hidden: true, innerHTML: '' };
+  const addButton = { attrs: {}, setAttribute: (k, v) => (addButton.attrs[k] = v) };
   commandView.container = {
-    querySelector: sel => (sel.includes('data-cmd-detachment-picker') ? host : null)
+    querySelector: sel =>
+      sel.includes('data-cmd-detachment-picker')
+        ? host
+        : sel.includes('data-cmd-detachment-add')
+          ? addButton
+          : null
   };
   const calls = [];
   commandView.page.membersPanel.renderAddPickerInto = (target, hooks) => {
@@ -5195,29 +5223,114 @@ test('Add existing renders the members panel’s own picker into the zone', () =
   };
   assert.equal(commandView.openDetachmentPicker(), true);
   assert.equal(calls[0].target, host);
+  assert.equal(calls[0].hooks.focus, true, 'a deliberate open moves focus into the picker');
   assert.equal(host.hidden, false);
   assert.equal(commandView.detachmentPickerOpen, true);
+  assert.equal(addButton.attrs['aria-expanded'], 'true');
 
   // A cancelled picker closes; an added workspace is selected on the re-mount.
   calls[0].hooks.onCancel();
   assert.equal(host.hidden, true);
   assert.equal(commandView.detachmentPickerOpen, false);
+  assert.equal(addButton.attrs['aria-expanded'], 'false');
 
   commandView.page.membersPanel.reload = async () => {};
   commandView.render = () => {};
   commandView.openDetachmentPicker();
   calls[1].hooks.onAdded('ws-moved');
   assert.equal(commandView.pendingDetachmentSelectionId, 'ws-moved');
+  assert.equal(commandView.detachmentPickerOpen, false);
 });
 
-test('the member count in the zone head follows the members panel', () => {
+test('frame insets reserve the top band and, when it fits, the agent column', () => {
+  const rect = (left, top, width, height) => ({
+    left,
+    top,
+    width,
+    height,
+    right: left + width,
+    bottom: top + height
+  });
+  const viewWith = rects => {
+    const commandView = detachmentCommandView('group');
+    commandView.container = {
+      querySelector: sel => {
+        const key = Object.keys(rects).find(name => sel.includes(name));
+        return key ? { getBoundingClientRect: () => rects[key] } : null;
+      }
+    };
+    return commandView;
+  };
+
+  const desktop = viewWith({
+    'ws-cmd-opmap': rect(32, 100, 1436, 560),
+    'ws-cmd-map-quest-fab': rect(50, 118, 135, 45),
+    'ws-cmd-map-group-bar': rect(588, 119, 324, 57),
+    'ws-cmd-map-belt': rect(1183, 119, 266, 58),
+    'ws-cmd-map-command-post': rect(51, 172, 212, 184)
+  });
+  // Lowest overlay bottom (the belt, 177) less the map top (100), plus a gap.
+  assert.deepEqual(desktop.detachmentFrameInsets(), { top: 89, left: 243 });
+
+  // A phone still reserves its narrower column, so no building opens under it.
+  const narrow = viewWith({
+    'ws-cmd-opmap': rect(0, 0, 360, 560),
+    'ws-cmd-map-group-bar': rect(16, 84, 250, 44),
+    'ws-cmd-map-command-post': rect(16, 144, 132, 180)
+  });
+  assert.deepEqual(narrow.detachmentFrameInsets(), { top: 140, left: 160 });
+
+  // A column covering most of the map leaves nothing to frame into; float it.
+  const cramped = viewWith({
+    'ws-cmd-opmap': rect(0, 0, 300, 560),
+    'ws-cmd-map-command-post': rect(16, 144, 200, 180)
+  });
+  assert.deepEqual(cramped.detachmentFrameInsets(), { top: 0, left: 0 });
+
+  // Before layout (or under Node) there is nothing to reserve.
+  assert.deepEqual(viewWith({}).detachmentFrameInsets(), { top: 0, left: 0 });
+});
+
+test('an open picker survives a re-render without taking focus', () => {
+  const commandView = detachmentCommandView('group');
+  const picker = { hidden: true, innerHTML: '' };
+  const slot = { appendChild: node => (node.parentNode = slot) };
+  commandView.container = {
+    querySelector: sel =>
+      sel.includes('data-cmd-detachment-slot')
+        ? slot
+        : sel.includes('data-cmd-detachment-picker')
+          ? picker
+          : null
+  };
+  commandView.detachmentMapEl = { parentNode: null, addEventListener() {} };
+  commandView.detachmentPickerOpen = true;
+  const calls = [];
+  commandView.page.membersPanel.renderAddPickerInto = (target, hooks) => {
+    calls.push(hooks);
+    return true;
+  };
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    commandView.syncDetachmentMap();
+  } finally {
+    globalThis.window = originalWindow;
+  }
+  assert.equal(calls.length, 1, 'the rebuilt toolbar gets its picker back');
+  assert.equal(calls[0].focus, false, 'a background re-render never steals focus');
+  assert.equal(picker.hidden, false);
+});
+
+test('the member count in the toolbar follows the members panel', () => {
   const empty = detachmentCommandView('group', []);
-  assert.match(empty.renderOperationsMap(), /ws-cmd-map-zone-count">0</);
-  // With nothing in the group, the two actions are the point of the zone.
-  assert.match(empty.renderOperationsMap(), /ws-cmd-map-detachment is-empty/);
+  assert.match(empty.renderOperationsMap(), /aria-label="0 members">0</);
+  // With nothing in the group, the two actions are the point of the map.
+  assert.match(empty.renderOperationsMap(), /ws-cmd-map-group-bar is-empty/);
   assert.doesNotMatch(detachmentCommandView('group').renderOperationsMap(), /is-empty/);
+  assert.match(detachmentCommandView('group').renderOperationsMap(), /aria-label="1 member">1</);
   const many = detachmentCommandView('group', [{ id: 'm1' }, { id: 'm2' }, { id: 'm3' }]);
-  assert.match(many.renderOperationsMap(), /ws-cmd-map-zone-count">3</);
+  assert.match(many.renderOperationsMap(), /aria-label="3 members">3</);
 });
 
 test('the scoped map re-mounts only when membership changes, and unmounts off Map mode', () => {

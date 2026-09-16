@@ -508,7 +508,7 @@ export class WorkspaceMembersPanel {
    * (group-map-build FR-24). Callers supply the host and the outcome hooks;
    * everything else stays here.
    */
-  renderAddPickerInto(host, { onAdded, onCancel } = {}) {
+  renderAddPickerInto(host, { onAdded, onCancel, focus = true } = {}) {
     if (!host) return false;
     const targets = eligibleAddTargets(this.tree, this.group);
     host.hidden = false;
@@ -540,7 +540,7 @@ export class WorkspaceMembersPanel {
       else host.hidden = true;
     });
     const select = host.querySelector('[data-member-add-select]');
-    if (select && typeof select.focus === 'function') select.focus();
+    if (focus && select && typeof select.focus === 'function') select.focus();
     return true;
   }
 

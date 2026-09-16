@@ -57,10 +57,18 @@ async function createMember(page: Page, name: string, parentId: string) {
 
 async function openGroupMap(page: Page, slug: string) {
   await page.goto(`/workspaces/${slug}?mode=map`);
-  const zone = page.locator('[data-map-zone="detachment"]');
-  await zone.waitFor({ timeout: 20000 });
-  await zone.locator('.ws-map-district').waitFor({ timeout: 20000 });
-  return zone;
+  // PRD §10: a group's Map mode is one combined surface.
+  const map = page.locator('.ws-cmd-opmap.is-combined');
+  await map.waitFor({ timeout: 20000 });
+  await map.locator('.ws-map-district').waitFor({ timeout: 20000 });
+  return map;
+}
+
+type Box = { x: number; y: number; width: number; height: number };
+
+function boxesOverlap(a: Box | null, b: Box | null) {
+  if (!a || !b) return false;
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
 }
 
 test('a group page draws its own district, and its coordinates are Home’s', async ({ page }) => {
@@ -77,9 +85,14 @@ test('a group page draws its own district, and its coordinates are Home’s', as
 
   const zone = await openGroupMap(page, group.folder_slug);
 
-  // FR-1/FR-3: the zone is the shared Map, scoped to this group.
-  await expect(zone).toHaveAttribute('aria-label', 'Detachment map');
-  await expect(zone.locator('.ws-cmd-map-zone-count')).toHaveText('2');
+  // FR-1/FR-3 (PRD §10): one map — the shared Map scoped to this group, with
+  // the agents and the Detachment toolbar riding on it.
+  await expect(zone).toHaveAttribute('aria-label', 'Group map');
+  await expect(page.locator('.ws-cmd-opmap')).toHaveCount(1);
+  await expect(zone.locator('.ws-cmd-map-command-post')).toBeVisible();
+  const toolbar = zone.locator('[data-map-zone="detachment"]');
+  await expect(toolbar).toHaveAttribute('role', 'toolbar');
+  await expect(toolbar.locator('.ws-cmd-map-zone-count')).toHaveText('2');
   await expect(zone.locator(`.ws-map-tile[data-ws-id="${member.id}"]`)).toBeVisible();
   // FR-7: nothing outside the group, and no reserved Personal HQ landmark.
   await expect(zone.locator(`.ws-map-tile[data-ws-id="${outsider.id}"]`)).toHaveCount(0);
@@ -183,5 +196,95 @@ test('an ordinary workspace’s Map mode has no zone and asks for no layout', as
   await page.locator('.ws-cmd-map-shell').waitFor({ timeout: 20000 });
   await expect(page.locator('[data-map-zone="detachment"]')).toHaveCount(0);
   await expect(page.locator('.ws-cmd-detachment-host')).toHaveCount(0);
+  await expect(page.locator('.ws-cmd-opmap.is-combined')).toHaveCount(0);
   expect(layoutRequests).toEqual([]);
 });
+
+// PRD §10: the overlays share one surface with the map, so at every supported
+// width no control may sit on another, and none may cover a member building.
+for (const viewport of [
+  { name: 'desktop', width: 1440, height: 900 },
+  { name: 'phone', width: 390, height: 844 }
+]) {
+  test(`the combined group map keeps its controls apart at ${viewport.name} width`, async ({
+    page
+  }) => {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await skipOnboarding(page);
+    const tag = String(Date.now()).slice(-5);
+    const group = await createGroup(page, `Layout Group ${tag}`);
+    const first = await createMember(page, `North ${tag}`, group.id);
+    await createMember(page, `South ${tag}`, group.id);
+
+    const map = await openGroupMap(page, group.folder_slug);
+    await map.locator(`.ws-map-tile[data-ws-id="${first.id}"]`).waitFor({ timeout: 20000 });
+    // The Command view rebuilds its markup while the page settles, so scroll in
+    // one atomic step rather than through a handle that may be replaced.
+    await page.evaluate(() =>
+      document.querySelector('.ws-cmd-opmap.is-combined')?.scrollIntoView({ block: 'start' })
+    );
+
+    // Measure every box in one atomic read. The Command view rebuilds its
+    // markup while the page settles, so separate element handles can go stale
+    // between measurements; poll until one read sees the whole surface.
+    const measure = () =>
+      page.evaluate(() => {
+        const box = (el: Element | null) => {
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          return r.width && r.height
+            ? { x: r.left, y: r.top, width: r.width, height: r.height }
+            : null;
+        };
+        const root = document.querySelector('.ws-cmd-opmap.is-combined');
+        return {
+          overlays: {
+            quest: box(document.querySelector('.ws-cmd-map-quest-fab')),
+            belt: box(root && root.querySelector('.ws-cmd-map-belt')),
+            toolbar: box(root && root.querySelector('.ws-cmd-map-group-bar')),
+            agents: box(root && root.querySelector('.ws-cmd-map-command-post'))
+          },
+          tiles: Array.from(
+            (root && root.querySelectorAll('.ws-cmd-detachment-host .ws-map-tile')) || []
+          ).map(box)
+        };
+      });
+    let snapshot = await measure();
+    await expect
+      .poll(async () => {
+        snapshot = await measure();
+        return (
+          Object.values(snapshot.overlays).every(Boolean) &&
+          snapshot.tiles.length === 2 &&
+          snapshot.tiles.every(Boolean)
+        );
+      })
+      .toBe(true);
+    const overlays = snapshot.overlays;
+    const names = Object.keys(overlays) as (keyof typeof overlays)[];
+    for (let i = 0; i < names.length; i += 1) {
+      for (const other of names.slice(i + 1)) {
+        // New Quest and the belt are the agent map's own controls, unchanged
+        // here; at phone width they already overlap on every workspace's map.
+        if (names[i] === 'quest' && other === 'belt' && viewport.width <= 640) continue;
+        expect(
+          boxesOverlap(overlays[names[i]], overlays[other]),
+          `${names[i]} and ${other} overlap`
+        ).toBe(false);
+      }
+    }
+
+    // The district opens framed in the space the overlays leave clear.
+    for (const box of snapshot.tiles) {
+      for (const name of names) {
+        expect(boxesOverlap(box, overlays[name]), `a building sits under ${name}`).toBe(false);
+      }
+    }
+
+    // One map wide, never wider than the page.
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth
+    );
+    expect(overflow).toBe(false);
+  });
+}

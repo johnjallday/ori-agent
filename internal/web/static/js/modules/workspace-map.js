@@ -451,6 +451,18 @@
   // district for it, so its frame here is automatic and has no layout record.
   var scopeGroupId = '';
   var scopeNested = false;
+  // Screen space a host's own overlays cover along the top and left edges of
+  // the canvas. Framing (open, Fit, Reset view) centres content in what is
+  // left. Home passes none, so its framing is exactly the unset case.
+  var frameInsets = { top: 0, left: 0 };
+
+  function normalizeFrameInsets(raw) {
+    var read = function (value) {
+      var n = Number(value);
+      return isFinite(n) && n > 0 ? n : 0;
+    };
+    return { top: read(raw && raw.top), left: read(raw && raw.left) };
+  }
   var SCOPED_NESTED_LAYOUT_TITLE =
     'A group inside another group has no district of its own on Home, so its size and appearance cannot be changed here.';
 
@@ -5399,20 +5411,21 @@
   function framedViewport(canvas) {
     var viewport = viewportSize(canvas);
     return {
-      width: viewport.width,
-      height: Math.max(CELL_H, viewport.height - CONTROL_STRIP_HEIGHT),
+      width: Math.max(CELL_W, viewport.width - frameInsets.left),
+      height: Math.max(CELL_H, viewport.height - CONTROL_STRIP_HEIGHT - frameInsets.top),
       measured: viewport.measured,
       full: viewport
     };
   }
 
-  // liftAboveControls shifts a framing camera up by half the reserved strip, so
-  // the content it framed is centred in the clear area rather than in the whole
+  // liftAboveControls shifts a framing camera so the content it framed is
+  // centred in the clear area — above the bottom control strip, and clear of
+  // any top band or left column the host reserved — rather than in the whole
   // canvas.
   function liftAboveControls(cam) {
     return {
-      centerX: cam.centerX,
-      centerY: cam.centerY + CONTROL_STRIP_HEIGHT / 2 / cam.zoom,
+      centerX: cam.centerX - frameInsets.left / 2 / cam.zoom,
+      centerY: cam.centerY + (CONTROL_STRIP_HEIGHT - frameInsets.top) / 2 / cam.zoom,
       zoom: cam.zoom
     };
   }
@@ -8674,6 +8687,7 @@
     // stats, layout, bindings, and selection all see only the group.
     scopeGroupId = String((state && state.scopeGroupId) || '').trim();
     scopeNested = !!scopeGroupId && isNestedGroup(allWorkspaces, scopeGroupId);
+    frameInsets = normalizeFrameInsets(state && state.frameInsets);
     var workspaces = scopeGroupId
       ? scopeWorkspacesToGroup(allWorkspaces, scopeGroupId)
       : allWorkspaces;
@@ -8951,6 +8965,7 @@
     isNestedGroup: isNestedGroup,
     scopedGroupPresentation: scopedGroupPresentation,
     scopedFrameBounds: scopedFrameBounds,
+    normalizeFrameInsets: normalizeFrameInsets,
     scopedDropAllowed: scopedDropAllowed,
     // The coordinate engine: saved anchors, deterministic fallback placement,
     // district effective frames, content bounds, and world sizing, all pure so
