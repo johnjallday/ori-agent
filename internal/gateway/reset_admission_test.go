@@ -35,6 +35,19 @@ func (c *blockingResetChannel) Stop(context.Context) error {
 }
 func (c *blockingResetChannel) Send(context.Context, Message) error { return nil }
 
+// waitForOwners polls because the gateway releases a channel's lifetime owner
+// after Start returns, which is after the fixture has already closed done.
+func waitForOwners(gate *resetstate.WorkGate, want int) resetstate.WorkSnapshot {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		snapshot := gate.Snapshot()
+		if snapshot.Owners == want || time.Now().After(deadline) {
+			return snapshot
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestResetAdmissionGatewayChannelOwnershipSpansLifetime(t *testing.T) {
 	service := NewService(logger.New("reset-gateway-test"))
 	gate := &resetstate.WorkGate{}
@@ -74,7 +87,7 @@ func TestResetAdmissionGatewayChannelOwnershipSpansLifetime(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("channel did not finish after shutdown")
 	}
-	if snapshot := gate.Snapshot(); snapshot.Owners != 0 || !snapshot.Fenced {
+	if snapshot := waitForOwners(gate, 0); snapshot.Owners != 0 || !snapshot.Fenced {
 		t.Fatalf("channel owner not drained: %+v", snapshot)
 	}
 }
@@ -128,7 +141,7 @@ func TestResetAdmissionGatewayAmbiguousStopRetainsRetryableOwner(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("retried channel stop did not finish")
 	}
-	if snapshot := gate.Snapshot(); snapshot.Owners != 0 {
+	if snapshot := waitForOwners(gate, 0); snapshot.Owners != 0 {
 		t.Fatalf("retried channel owner remained: %+v", snapshot)
 	}
 }
