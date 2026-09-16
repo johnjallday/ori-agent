@@ -56,6 +56,16 @@
   align-items: flex-end;
   gap: 10px;
   font-size: 14px;
+  /* The root is only a positioning box. Its empty area (the gap between the
+     launcher and the panel, and at narrow widths the whole full-width strip
+     beside the launcher) must let taps through to the page underneath, or a
+     fixed band along the bottom of every page becomes unclickable. Only the
+     launchers and panels take pointer events. */
+  pointer-events: none;
+}
+
+.ori-guide > * {
+  pointer-events: auto;
 }
 
 /* ---- launcher -------------------------------------------------------------- */

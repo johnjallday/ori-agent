@@ -131,10 +131,7 @@ for (const width of [1280, 390]) {
     await page
       .locator('#pluginList')
       .screenshot({ path: testInfo.outputPath(`plugin-entry-${width}.png`) });
-    // At phone width the fixed Ori Help root (#oriGuideRoot) intercepts
-    // pointer events over this link even when it is scrolled to the centre.
-    // That overlay is outside this spec, so activate the link directly.
-    await guided.dispatchEvent('click');
+    await guided.click();
     const dialog = page.locator('#specialistSetupJourneyModal');
     await expect(dialog).toBeVisible();
     // Two launch screens; the existing group is already complete.
