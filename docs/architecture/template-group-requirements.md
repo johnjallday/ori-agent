@@ -550,7 +550,8 @@ and blueprint v4; it was not changed from local evidence. The pin has since
 moved to the published `0.6.0` release, commit
 `03af9fda3e6b9d8cc3c0496c5e9ef6df99e870b9`, blueprint v7, after the release
 artifact's URL, digest, size, mode and binary version were verified against
-that exact commit; see [REAPER integration](../reaper-integration.md).
+that exact commit. It has since moved again to `0.6.1`, which keeps blueprint v7;
+see [REAPER integration](../reaper-integration.md) for the current pin.
 
 A local build/staged demo is development evidence only. Publishing, tagging,
 pushing, installing into a user's current store, resetting user data, and

@@ -182,7 +182,8 @@ retired `setup_quests_v1`, so this host refuses their manifests until they
 update. The earlier pinned v0.5.0 declared no quest: it installed, and its
 install quest offered only **Open Plugins**.
 
-The reviewed pin now points at the published v0.6.0 release, so the install
+The reviewed pin now points at the published v0.6.1 release, which keeps 0.6.0's
+quest and blueprint and only drops the retired role `type` key, so the install
 quest hands off into the plugin's four-step quest once the plugin is installed,
 enabled and verified. An existing installation from the official unpinned Git
 URL is offered **Review verified replacement** first; nothing rewrites an

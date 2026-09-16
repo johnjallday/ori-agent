@@ -21,17 +21,17 @@ func TestBuiltInRegistryMatchesSpecialistConstraintsAndPublishedRelease(t *testi
 		entry.ExpectedBlueprintID != specialistEntry.SuggestedTemplateID {
 		t.Fatalf("registry/specialist identity drift: %#v / %#v", entry, specialistEntry)
 	}
-	if entry.ExpectedVersion != "0.6.0" || entry.ExpectedBlueprintVersion != 7 ||
+	if entry.ExpectedVersion != "0.6.1" || entry.ExpectedBlueprintVersion != 7 ||
 		entry.ExpectedProgramSchema != 2 || entry.ExpectedProtocol != plugin.SurfaceProtocolVersion {
 		t.Fatalf("reviewed candidate versions drifted: %#v", entry)
 	}
-	if entry.SourceCommit != "03af9fda3e6b9d8cc3c0496c5e9ef6df99e870b9" {
+	if entry.SourceCommit != "e11ca2942279af02a9a035039b18b146ff9fc89d" {
 		t.Fatalf("reviewed candidate commit drifted: %q", entry.SourceCommit)
 	}
 	if !entry.ReleaseReady || entry.Source() != entry.SourceRepository+"#sha="+entry.SourceCommit {
 		t.Fatalf("published release missing immutable install source: ready=%v source=%q", entry.ReleaseReady, entry.Source())
 	}
-	// The pin must require exactly what the v0.6.0 manifest declares: a
+	// The pin must require exactly what the v0.6.1 manifest declares: a
 	// narrower list would accept a plugin this host cannot honor, a wider one
 	// would refuse the published release.
 	expectedFeatures := []string{
