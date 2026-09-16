@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
+  WorkspaceMembersPanel,
   escapeHtml,
   normalizeWorkspaceKind,
   isGroupNode,
@@ -221,4 +223,64 @@ test('metadataChanges flags only the fields that changed', () => {
     nameChanged: false,
     metaChanged: false
   });
+});
+
+// ---------------------------------------------------------------------------
+// The plus button opens the shared creator (group-map-build FR-21, FR-22).
+// ---------------------------------------------------------------------------
+
+test('the bare create form is gone from the panel and from the page', () => {
+  const module = readFileSync(new URL('./workspace-detail-members.js', import.meta.url), 'utf8');
+  for (const gone of ['createMember(', 'closeCreateMember', 'createName', 'createDescription']) {
+    assert.ok(!module.includes(gone), `${gone} should be deleted from the panel`);
+  }
+  // The one creation POST it used to own is gone with it.
+  assert.ok(!module.includes("'/api/workspaces',\n        'POST'"));
+
+  const template = readFileSync(
+    new URL('../../../templates/pages/workspace-detail.tmpl', import.meta.url),
+    'utf8'
+  );
+  assert.ok(!template.includes('workspace-detail-member-create-form'));
+  assert.ok(!template.includes('workspace-detail-member-create-name'));
+  // Add Member and its picker are untouched (FR-23).
+  assert.ok(template.includes('workspace-detail-member-picker'));
+  assert.ok(template.includes('workspace-detail-add-member-btn'));
+});
+
+test('the plus button opens the shared wizard with this group locked as the parent', () => {
+  const panel = Object.create(WorkspaceMembersPanel.prototype);
+  const opened = [];
+  Object.assign(panel, {
+    workspaceId: 'g1',
+    group: { id: 'g1', name: 'Clients' },
+    els: { picker: { hidden: false } },
+    hideError() {},
+    showError(message) {
+      panel.error = message;
+    }
+  });
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    sessionManager: { showAddWorkspaceModal: options => opened.push(options) }
+  };
+  try {
+    const button = { id: 'plus' };
+    panel.openCreateMember(button);
+    assert.equal(opened.length, 1);
+    assert.equal(opened[0].parentId, 'g1');
+    assert.equal(opened[0].parentName, 'Clients');
+    assert.equal(opened[0].parentLocked, true);
+    assert.equal(opened[0].entryPoint, 'group_detail_build');
+    assert.equal(opened[0].stayAfterCreate, true, 'creating a member keeps the group page');
+    assert.equal(opened[0].invoker, button);
+    assert.equal(panel.els.picker.hidden, true, 'the Add picker closes first');
+
+    // No creator on the page is a stated failure, not a silent no-op.
+    globalThis.window = {};
+    panel.openCreateMember(button);
+    assert.match(panel.error, /Create Workspace dialog is unavailable/);
+  } finally {
+    globalThis.window = originalWindow;
+  }
 });

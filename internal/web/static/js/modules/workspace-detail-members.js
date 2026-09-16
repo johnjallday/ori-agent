@@ -230,10 +230,6 @@ export class WorkspaceMembersPanel {
       addBtn: document.getElementById('workspace-detail-add-member-btn'),
       createBtn: document.getElementById('workspace-detail-create-member-btn'),
       picker: document.getElementById('workspace-detail-member-picker'),
-      createForm: document.getElementById('workspace-detail-member-create-form'),
-      createName: document.getElementById('workspace-detail-member-create-name'),
-      createDescription: document.getElementById('workspace-detail-member-create-description'),
-      createCancel: document.getElementById('workspace-detail-member-create-cancel'),
       rollups: document.getElementById('workspace-detail-members-rollups'),
       // Header identity
       badge: document.getElementById('workspace-group-badge'),
@@ -324,16 +320,9 @@ export class WorkspaceMembersPanel {
     if (this.controlsBound) return;
     this.controlsBound = true;
 
-    const { addBtn, createBtn, createForm, createCancel, swatch } = this.els;
+    const { addBtn, createBtn, swatch } = this.els;
     if (addBtn) addBtn.addEventListener('click', () => this.openAddPicker());
-    if (createBtn) createBtn.addEventListener('click', () => this.openCreateMember());
-    if (createCancel) createCancel.addEventListener('click', () => this.closeCreateMember());
-    if (createForm) {
-      createForm.addEventListener('submit', event => {
-        event.preventDefault();
-        void this.createMember();
-      });
-    }
+    if (createBtn) createBtn.addEventListener('click', () => this.openCreateMember(createBtn));
     if (swatch) swatch.addEventListener('click', () => this.toggleColorPopover());
   }
 
@@ -508,7 +497,6 @@ export class WorkspaceMembersPanel {
   openAddPicker() {
     const picker = this.els.picker;
     if (!picker) return;
-    this.closeCreateMember();
     const targets = eligibleAddTargets(this.tree, this.group);
     if (targets.length === 0) {
       picker.innerHTML = '<div class="group-detail-empty">No eligible workspaces to add.</div>';
@@ -554,42 +542,33 @@ export class WorkspaceMembersPanel {
     }
   }
 
-  // Create a new workspace directly into this group (parent_id = this group).
-  openCreateMember() {
+  /**
+   * Build a new member through the shared Create Workspace wizard.
+   *
+   * The panel used to POST /api/workspaces from a bare name+description form,
+   * which skipped blueprint and team selection entirely. There is one creator
+   * now; this page only says which group it must build into
+   * (group-map-build FR-21, FR-22).
+   */
+  openCreateMember(invoker) {
     if (this.els.picker) this.els.picker.hidden = true;
-    if (!this.els.createForm) return;
-    if (this.els.createName) this.els.createName.value = '';
-    if (this.els.createDescription) this.els.createDescription.value = '';
     this.hideError();
-    this.els.createForm.hidden = false;
-    if (this.els.createName) this.els.createName.focus();
-  }
-
-  closeCreateMember() {
-    if (this.els.createForm) this.els.createForm.hidden = true;
-  }
-
-  async createMember() {
-    const name = (this.els.createName?.value || '').trim();
-    const description = this.els.createDescription?.value || '';
-    if (!name) {
-      this.showError('Workspace name is required.');
-      this.els.createName?.focus();
+    const manager = typeof window === 'undefined' ? null : window.sessionManager;
+    if (!manager || typeof manager.showAddWorkspaceModal !== 'function') {
+      this.showError('The Create Workspace dialog is unavailable on this page.');
       return;
     }
-    try {
-      await this.sendJson(
-        '/api/workspaces',
-        'POST',
-        { name, description, parent_id: this.workspaceId },
-        'Failed to create workspace'
-      );
-      this.closeCreateMember();
-      await this.reload();
-    } catch (err) {
-      console.error('Failed to create workspace:', err);
-      this.showError(err.message || 'Failed to create workspace.');
-    }
+    manager.showAddWorkspaceModal({
+      parentId: this.workspaceId,
+      parentName: (this.group && this.group.name) || '',
+      parentLocked: true,
+      entryPoint: 'group_detail_build',
+      // The user is managing this group, not leaving it: creating a member
+      // returns to the group page rather than opening the new workspace
+      // (group-map-build FR-18).
+      stayAfterCreate: true,
+      invoker: invoker || null
+    });
   }
 
   // --- Group color (header swatch popover) --------------------------------------

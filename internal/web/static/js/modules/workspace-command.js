@@ -235,6 +235,7 @@ export class WorkspaceCommandView {
     this.sharedSurfaceAnchors = {};
     this.boundGlobalKeydown = event => this.handleGlobalKeydown(event);
     this.boundPopState = event => this.handlePopState(event);
+    this.boundWorkspacesChanged = event => void this.handleWorkspacesChanged(event);
     this.setup();
   }
 
@@ -363,6 +364,9 @@ export class WorkspaceCommandView {
     }
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
       window.addEventListener('popstate', this.boundPopState);
+      // A member built or moved from this page changes the detachment, and the
+      // creator that did it lives elsewhere (group-map-build FR-18, FR-25).
+      window.addEventListener('ori:workspaces-changed', this.boundWorkspacesChanged);
     }
     this.ensureCapabilityStations();
     this.ensureSurfaceStations();
@@ -10490,6 +10494,19 @@ export class WorkspaceCommandView {
     const group = panel && panel.group;
     if (!group || !Array.isArray(group.children)) return 0;
     return group.children.length;
+  }
+
+  // Reload the group's members and repaint. The scoped map re-mounts by itself
+  // when the member snapshot actually changed (see syncDetachmentMap), so a
+  // signal about an unrelated workspace costs one tree fetch and no re-mount.
+  async handleWorkspacesChanged(event) {
+    if (!this.isGroupWorkspace()) return;
+    const panel = this.page && this.page.membersPanel;
+    if (!panel || typeof panel.reload !== 'function') return;
+    const created = String((event && event.detail && event.detail.workspaceId) || '');
+    if (created) this.pendingDetachmentSelectionId = created;
+    await panel.reload();
+    this.render();
   }
 
   // ---------- Detachment map zone (group-map-build FR-1 – FR-6) ----------

@@ -89,6 +89,12 @@
       blueprint: String(options.blueprint || '').trim(),
       postCreateAction: String(options.postCreateAction || '').trim(),
       mapOrigin: Boolean(options.mapOrigin),
+      // A caller that already owns the destination — a group page's Build —
+      // locks the parent, so the wizard preselects it, refuses to place the
+      // workspace anywhere else, and skips the placement question entirely.
+      parentId: String(options.parentId || '').trim(),
+      parentName: String(options.parentName || '').trim(),
+      parentLocked: Boolean(options.parentLocked) && String(options.parentId || '').trim() !== '',
       selection: selectionFor(options.selection),
       invoker: options.invoker || null,
       onCreated: typeof options.onCreated === 'function' ? options.onCreated : null,
