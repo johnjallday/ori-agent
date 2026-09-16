@@ -1088,18 +1088,23 @@
   line-height: 1.35;
 }
 
-/* An empty group's own page says what the frame is for. The two ways to fill
-   it live in the zone header, which stays readable at any zoom (the world layer
-   under this element is scaled by the camera). */
-.ws-map-district-empty {
+/* An empty group's own page says what the ground is for. Screen space, not the
+   world layer, so the copy reads at any zoom; inert, so a right-click through
+   it still reaches the ground it describes. */
+.ws-map-scoped-empty {
   position: absolute;
-  inset: auto 10px 10px;
+  left: 50%;
+  top: 50%;
+  z-index: 6;
+  max-width: 34ch;
   margin: 0;
+  transform: translate(-50%, -50%);
   color: var(--ws-muted, #9aa3ad);
   font-family: var(--ws-font-mono);
-  font-size: 9px;
-  line-height: 1.35;
+  font-size: 12px;
+  line-height: 1.5;
   text-align: center;
+  pointer-events: none;
 }
 
 /* ---------------------------------------------------------------------------

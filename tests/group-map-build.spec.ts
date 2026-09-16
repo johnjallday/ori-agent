@@ -60,7 +60,7 @@ async function openGroupMap(page: Page, slug: string) {
   // PRD §10: a group's Map mode is one combined surface.
   const map = page.locator('.ws-cmd-opmap.is-combined');
   await map.waitFor({ timeout: 20000 });
-  await map.locator('.ws-map-district').waitFor({ timeout: 20000 });
+  await map.locator('[data-ws-map-viewport]').waitFor({ timeout: 20000 });
   return map;
 }
 
@@ -97,7 +97,9 @@ test('a group page draws its own district, and its coordinates are Home’s', as
   // FR-7: nothing outside the group, and no reserved Personal HQ landmark.
   await expect(zone.locator(`.ws-map-tile[data-ws-id="${outsider.id}"]`)).toHaveCount(0);
   await expect(zone.locator('[data-hq-site]')).toHaveCount(0);
-  // FR-12: no Collapse control, because collapsing would hide the whole zone.
+  // PRD §10: the whole map is the group, so no district frame is drawn here
+  // and nothing of its header (name tag, collapse, ⤧, ⋯) either.
+  await expect(zone.locator('.ws-map-district')).toHaveCount(0);
   await expect(zone.locator('[data-group-collapse]')).toHaveCount(0);
 
   // FR-9: one layout, so the coordinate the group page draws is the coordinate
@@ -110,7 +112,7 @@ test('a group page draws its own district, and its coordinates are Home’s', as
   expect(saved.layout.positions[member.id]).toEqual(moved);
 
   await page.reload();
-  await zone.locator('.ws-map-district').waitFor({ timeout: 20000 });
+  await zone.locator(`.ws-map-tile[data-ws-id="${member.id}"]`).waitFor({ timeout: 20000 });
   const onGroupPage = await zone
     .locator(`.ws-map-tile[data-ws-id="${member.id}"]`)
     .evaluate(el => ({

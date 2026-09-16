@@ -9460,20 +9460,62 @@ test('a scoped mount draws only its group, without collapse or bulk controls, an
   }
   assert.doesNotMatch(container.innerHTML, /data-group-collapse/);
   assert.match(container.innerHTML, /aria-label="Select for bulk action"[^>]* hidden>/);
-  // The page is the group: its frame carries no header repeating the name and
-  // count, and no ⤧/⋯ controls — the toolbar owns those (PRD §10).
-  assert.match(container.innerHTML, /ws-map-district[^"]*" role="group"/, 'the frame is drawn');
-  assert.doesNotMatch(
-    container.innerHTML,
-    /ws-map-district-header|data-group-menu|data-group-drag/
-  );
+  // The page is the group: everything drawn is in it, so no district frame is
+  // drawn at all — no outline, no header, no ⤧/⋯ controls (PRD §10).
+  assert.doesNotMatch(container.innerHTML, /ws-map-district/);
+  assert.doesNotMatch(container.innerHTML, /No members yet/, 'members are drawn, so no empty note');
 
   map.unmount(container);
   assert.equal(map.getScopeGroupId(), '');
-  // Home keeps the header.
+  // Home keeps the district and its header.
   map.mount(container, { workspaces: SCOPED_WORLD, hideChrome: true, noAutoSelect: true });
+  assert.match(container.innerHTML, /ws-map-district[^"]*" role="group"/);
   assert.match(container.innerHTML, /ws-map-district-header/);
   assert.match(container.innerHTML, /data-group-menu="g"/);
+});
+
+test('the scoped district is still resolved for placement even though it is not drawn', () => {
+  const map = loadOriWorkspaceMap();
+  const rows = map.scopeWorkspacesToGroup(SCOPED_WORLD, 'g');
+  const positions = { m1: { x: 380, y: 228 }, sub: { x: 760, y: 228 }, deep: { x: 1140, y: 228 } };
+  // The layout engine still resolves the district — that is what frames the
+  // opening camera and keeps a member's automatic spot relative to its group —
+  // and every saved anchor is drawn where Home draws it.
+  const scoped = map.computeWorldLayout(rows, {
+    positions,
+    scope: { groupId: 'g', nested: false }
+  });
+  const home = map.computeWorldLayout(SCOPED_WORLD, { positions });
+  assert.ok(
+    scoped.districts.some(d => d.id === 'g'),
+    'the district record exists'
+  );
+  for (const id of ['m1', 'sub', 'deep']) {
+    const here = scoped.nodes.find(n => n.id === id);
+    const there = home.nodes.find(n => n.id === id);
+    assert.deepEqual({ x: here.x, y: here.y }, { x: there.x, y: there.y }, id + ' matches Home');
+    assert.deepEqual({ x: here.x, y: here.y }, positions[id]);
+  }
+});
+
+test('an empty group says what its ground is for, in screen space, and Home does not', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness();
+  const group = { id: 'g', kind: 'group', name: 'Studio', folder_slug: 'studio' };
+  map.mount(container, { ...scopedMountState(), workspaces: [group] });
+
+  assert.doesNotMatch(container.innerHTML, /ws-map-district/, 'no frame, even empty');
+  // Outside the world layer (so it is not scaled with the camera) and inert.
+  assert.match(
+    container.innerHTML,
+    /<\/div><p class="ws-map-scoped-empty" role="status">No members yet\. Build a workspace here or add an existing one\.<\/p>/
+  );
+  assert.doesNotMatch(container.innerHTML, /ws-map-tile[^-]/, 'no member tiles to draw');
+
+  map.unmount(container);
+  map.mount(container, { workspaces: [group], hideChrome: true, noAutoSelect: true });
+  assert.doesNotMatch(container.innerHTML, /No members yet/);
+  assert.match(container.innerHTML, /ws-map-district[^"]*" role="group"/, 'Home draws the frame');
 });
 
 test('a scoped mount suppresses the Personal HQ site and ignores the HQ focus intent', () => {
@@ -9548,6 +9590,8 @@ test('scoped menus offer navigation, group layout, and building only', () => {
   assert.deepEqual([...labels(tile)], ['Open workspace', 'Open → Backlog']);
   map._setSetupStatusForTest('m1', { state: 'needs_setup', steps: [{ id: 'a', done: false }] });
 
+  // No district is drawn on a group page, so it has no menu of its own; the
+  // ground's menu is the whole story there (PRD §10).
   const district = map.contextMenuItemsFor({
     type: 'district',
     id: 'g',
@@ -9555,11 +9599,7 @@ test('scoped menus offer navigation, group layout, and building only', () => {
     scoped: true,
     nested: false
   });
-  const districtLabels = labels(district);
-  for (const removed of ['Open group', 'Collapse group', 'Expand group', 'Delete group']) {
-    assert.ok(!districtLabels.includes(removed), removed + ' is not offered on a group page');
-  }
-  assert.deepEqual([...districtLabels], ['Build', '—', 'Resize group', 'Fit to contents']);
+  assert.deepEqual([...district], []);
 
   const canvas = map.contextMenuItemsFor({ type: 'canvas', scoped: true });
   assert.deepEqual(
@@ -9593,50 +9633,6 @@ test('unscoped menus are unchanged by the scoped flag defaulting off', () => {
       map.contextMenuItemsFor({ type: 'district', id: 'g', ws: { id: 'g', kind: 'group' } })
     ).includes('Delete group')
   );
-});
-
-test('a nested group page lists its layout actions disabled, with the reason', () => {
-  const map = loadOriWorkspaceMap();
-  const items = map.contextMenuItemsFor({
-    type: 'district',
-    id: 'sub',
-    ws: { id: 'sub', kind: 'group' },
-    scoped: true,
-    nested: true
-  });
-  const layoutActions = items.filter(item =>
-    ['resize-group', 'fit-group', 'reset-appearance'].includes(item.action)
-  );
-  assert.deepEqual(
-    [...layoutActions.map(item => item.action)],
-    ['resize-group', 'fit-group', 'reset-appearance']
-  );
-  for (const item of layoutActions) {
-    assert.equal(item.disabled, true, item.action + ' is disabled');
-    assert.match(item.title, /no district of its own on Home/);
-  }
-  assert.equal(items.find(item => item.action === 'build').disabled, undefined);
-  assert.match(
-    map.contextMenuHTML(layoutActions),
-    /aria-disabled="true" title="A group inside another group/
-  );
-});
-
-test('scopedDropAllowed keeps a drop only when the building centre is inside the group frame', () => {
-  const map = loadOriWorkspaceMap();
-  const { memberWidth, memberHeight } = map.districtGeometry;
-  const layout = { districts: [{ id: 'g', x: 0, y: 0, width: 600, height: 400 }] };
-  assert.equal(map.scopedDropAllowed({ x: 100, y: 100 }, layout, 'g'), true);
-  assert.equal(
-    map.scopedDropAllowed({ x: 600 - memberWidth / 2 + 1, y: 100 }, layout, 'g'),
-    false,
-    'a centre past the right edge is outside'
-  );
-  assert.equal(
-    map.scopedDropAllowed({ x: -memberWidth / 2, y: 400 - memberHeight / 2 }, layout, 'g'),
-    true
-  );
-  assert.equal(map.scopedDropAllowed({ x: 5000, y: 5000 }, layout, 'missing'), true);
 });
 
 async function mountedScopedDrag() {
@@ -9733,28 +9729,26 @@ test('a scoped drop inside the group saves one position and never reparents', as
   assert.ok(patches[0].body.operations[0].positions.m1, 'the moved member was saved');
 });
 
-test('an empty group still draws its district, at the minimum frame, and says what it is for', () => {
-  const map = loadMapForMount();
-  const { container } = createMapHarness();
-  const group = { id: 'g', kind: 'group', name: 'Studio', folder_slug: 'studio' };
-  map.mount(container, { ...scopedMountState(), workspaces: [group] });
+test('a scoped drop anywhere is a reposition: one position write, never a membership write', async () => {
+  const { harness, patches } = await mountedScopedDrag();
+  const tile = harness.tile('m1');
+  const live = harness.control('[data-map-live]');
+  // Far outside where the (undrawn) district frame would have been.
+  tile.fire('pointerdown', tilePointer(100, 100));
+  tile.fire('pointermove', tilePointer(4100, 3100));
+  assert.equal(tile.classList.contains('is-leaving'), false, 'no leave intent is ever shown');
+  tile.fire('pointerup', tilePointer(4100, 3100));
+  await flushDeep();
 
-  assert.match(container.innerHTML, /ws-map-district[^"]*" role="group"/, 'the frame is drawn');
+  assert.equal(patches.length, 1, 'one drop, one request');
   assert.match(
-    container.innerHTML,
-    /No members yet\. Build a workspace here or add an existing one\./
+    patches[0].url,
+    /workspace-map\/layout/,
+    'and it is a layout write, not a PATCH to the workspace'
   );
-  assert.doesNotMatch(container.innerHTML, /ws-map-tile[^-]/, 'no member tiles to draw');
-  // The minimum frame, from the shared geometry rather than a copied number.
-  const layout = map.computeWorldLayout([group], { scope: { groupId: 'g', nested: false } });
-  const district = layout.districts.find(d => d.id === 'g');
-  assert.equal(district.width, map.districtGeometry.minWidth);
-  assert.equal(district.height, map.districtGeometry.minHeight);
-
-  // Home never gets the group-page copy.
-  map.unmount(container);
-  map.mount(container, { workspaces: [group], hideChrome: true, noAutoSelect: true });
-  assert.doesNotMatch(container.innerHTML, /No members yet/);
+  assert.equal(patches[0].body.operations[0].op, 'set_positions');
+  assert.ok(patches[0].body.operations[0].positions.m1, 'the moved member was saved');
+  assert.match(live.textContent, /^Moved to /);
 });
 
 test('scoped empty-ground Build holds the coordinate and hands the creator to the host', async () => {
@@ -9791,38 +9785,4 @@ test('scoped empty-ground Build holds the coordinate and hands the creator to th
   });
   menu.item('add-existing').fire('click');
   assert.equal(adds.length, 1, 'Add existing is the host’s membership picker');
-});
-
-test('the host opens the scoped group layout menu from its own toolbar button', async () => {
-  const { map, harness } = await mountedScopedDrag();
-  const anchor = {
-    getBoundingClientRect: () => ({ left: 400, top: 20, width: 34, height: 30 })
-  };
-  assert.equal(map.openScopedGroupMenu(harness.container, anchor, null), true);
-  assert.ok(harness.menu.isOpen());
-  const labels = harness.menu.labels();
-  assert.ok(labels.includes('Resize group'), 'layout actions: ' + labels.join(', '));
-  assert.ok(labels.includes('Fit to contents'));
-  assert.ok(!labels.includes('Open group') && !labels.includes('Delete group'));
-
-  map.closeContextMenu();
-  // Unscoped, or a foreign container, opens nothing.
-  assert.equal(map.openScopedGroupMenu({}, anchor, null), false);
-  map.unmount(harness.container);
-  assert.equal(map.openScopedGroupMenu(harness.container, anchor, null), false);
-});
-
-test('a scoped drop outside the group snaps back and writes nothing', async () => {
-  const { harness, patches } = await mountedScopedDrag();
-  const tile = harness.tile('m1');
-  const live = harness.control('[data-map-live]');
-  tile.fire('pointerdown', tilePointer(100, 100));
-  tile.fire('pointermove', tilePointer(4100, 3100));
-  assert.ok(tile.classList.contains('is-leaving'), 'the drag shows it will not stay there');
-  tile.fire('pointerup', tilePointer(4100, 3100));
-  await flushDeep();
-
-  assert.equal(patches.length, 0, 'no layout write and no membership write');
-  assert.deepEqual({ ...tile.at() }, { x: 380, y: 228 }, 'back where it was');
-  assert.match(live.textContent, /Kept in Studio/);
 });

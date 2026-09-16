@@ -463,9 +463,6 @@
     };
     return { top: read(raw && raw.top), left: read(raw && raw.left) };
   }
-  var SCOPED_NESTED_LAYOUT_TITLE =
-    'A group inside another group has no district of its own on Home, so its size and appearance cannot be changed here.';
-
   /**
    * The group plus every workspace beneath it, at any depth.
    *
@@ -1638,30 +1635,6 @@
     return best ? best.district : null;
   }
 
-  /**
-   * May a scoped map keep a building dropped at `point`?
-   *
-   * A group page moves members within their group and never reparents, so a
-   * drop counts only when the building's centre lands inside the group's own
-   * frame. Aimed from the centre for the same reason dropMembershipIntent is.
-   */
-  function scopedDropAllowed(point, layout, groupId) {
-    var world = layout || lastWorldLayout;
-    if (!world || !point || !groupId) return true;
-    var frame = null;
-    (world.districts || []).forEach(function (district) {
-      if (district.id === groupId) frame = district;
-    });
-    if (!frame) return true;
-    var center = memberCenter(point);
-    return (
-      center.x >= frame.x &&
-      center.x <= frame.x + frame.width &&
-      center.y >= frame.y &&
-      center.y <= frame.y + frame.height
-    );
-  }
-
   function scopedGroupName() {
     var workspaces = (lastMount && lastMount.state && lastMount.state.workspaces) || [];
     var group = findWs(workspaces, scopeGroupId);
@@ -2472,86 +2445,76 @@
       'px;height:' +
       height +
       'px">' +
-      // On the group's own page the header would only repeat the page title
-      // and the toolbar's count, and its actions live in that toolbar instead
-      // (group-map-build PRD §10), so the frame stands alone there.
-      (scopeGroupId
-        ? ''
-        : '<div class="ws-map-district-header">' +
-          '<button type="button" class="ws-map-district-tag' +
-          (isSel ? ' is-selected' : '') +
-          '" data-ws-id="' +
-          escapeHtml(ws.id) +
-          '" ' +
-          'aria-pressed="' +
-          (isSel ? 'true' : 'false') +
-          '" ' +
-          // The full name stays available to assistive technology even when the
-          // visible label truncates (FR-135).
-          'title="' +
-          escapeHtml(templateType ? name + ' — ' + templateType + ' template' : name) +
-          '" ' +
-          'aria-label="' +
-          escapeHtml(selectLabel) +
-          '">' +
-          '<span class="ws-map-district-name">' +
-          escapeHtml(name) +
-          '</span>' +
-          (templateType
-            ? '<span class="ws-map-district-type">' + escapeHtml(templateType) + '</span>'
-            : '') +
-          '<span class="ws-map-district-count">' +
-          escapeHtml(countLabel) +
-          '</span>' +
-          '</button>' +
-          // Collapse is its own control with its own accurate label, distinct from
-          // selecting, opening, moving, and deleting the group (#346 FR-109,
-          // FR-145). aria-expanded lives here rather than on the outline because
-          // this is the control that changes it (FR-110).
-          '<button type="button" class="ws-map-district-collapse" data-group-collapse="' +
-          escapeHtml(ws.id) +
-          '" aria-expanded="' +
-          (collapsed ? 'false' : 'true') +
-          '" aria-label="' +
-          escapeHtml((collapsed ? 'Expand group: ' : 'Collapse group: ') + name) +
-          '" title="' +
-          escapeHtml(collapsed ? 'Expand group' : 'Collapse group') +
-          '"><span aria-hidden="true">' +
-          (collapsed ? '▸' : '▾') +
-          '</span></button>' +
-          // A separate, touch-sized handle for cluster movement. The empty district
-          // surface can also be dragged while Drag is on, but the label remains
-          // selection-only and every existing group action — select, overview,
-          // open, delete, Tree management — stays reachable (FR-85, FR-94).
-          //
-          // The ⤧ glyph is the map's established symbol for this and stays. What
-          // made it cryptic was never the symbol — it was that the control had no
-          // name at all, so a screen reader read a bare character and a hover said
-          // nothing about what would move. The name is what FR-140 asked for, and
-          // the name is what changed.
-          '<button type="button" class="ws-map-district-handle" data-group-drag="' +
-          escapeHtml(ws.id) +
-          '" aria-label="' +
-          escapeHtml('Move group: ' + name) +
-          '" title="' +
-          escapeHtml('Move group: ' + name) +
-          '"><span class="ws-map-district-grip" aria-hidden="true">⤧</span></button>' +
-          // The overflow control opens the same menu right-click does, so a pointer
-          // user who never right-clicks and a keyboard user both reach the group's
-          // actions (FR-139, FR-149).
-          '<button type="button" class="ws-map-district-more" data-group-menu="' +
-          escapeHtml(ws.id) +
-          '" aria-haspopup="menu" aria-expanded="false" aria-label="' +
-          escapeHtml('Actions for ' + label) +
-          '" title="' +
-          escapeHtml('Actions for ' + name) +
-          '"><span aria-hidden="true">⋯</span></button>' +
-          '</div>') +
-      // A group page with no members yet says so inside its own frame, and the
-      // zone header carries the two ways to fix it (group-map-build FR-27).
-      (scopeGroupId && d.memberCount === 0
-        ? '<p class="ws-map-district-empty">No members yet. Build a workspace here or add an existing one.</p>'
+      '<div class="ws-map-district-header">' +
+      '<button type="button" class="ws-map-district-tag' +
+      (isSel ? ' is-selected' : '') +
+      '" data-ws-id="' +
+      escapeHtml(ws.id) +
+      '" ' +
+      'aria-pressed="' +
+      (isSel ? 'true' : 'false') +
+      '" ' +
+      // The full name stays available to assistive technology even when the
+      // visible label truncates (FR-135).
+      'title="' +
+      escapeHtml(templateType ? name + ' — ' + templateType + ' template' : name) +
+      '" ' +
+      'aria-label="' +
+      escapeHtml(selectLabel) +
+      '">' +
+      '<span class="ws-map-district-name">' +
+      escapeHtml(name) +
+      '</span>' +
+      (templateType
+        ? '<span class="ws-map-district-type">' + escapeHtml(templateType) + '</span>'
         : '') +
+      '<span class="ws-map-district-count">' +
+      escapeHtml(countLabel) +
+      '</span>' +
+      '</button>' +
+      // Collapse is its own control with its own accurate label, distinct from
+      // selecting, opening, moving, and deleting the group (#346 FR-109,
+      // FR-145). aria-expanded lives here rather than on the outline because
+      // this is the control that changes it (FR-110).
+      '<button type="button" class="ws-map-district-collapse" data-group-collapse="' +
+      escapeHtml(ws.id) +
+      '" aria-expanded="' +
+      (collapsed ? 'false' : 'true') +
+      '" aria-label="' +
+      escapeHtml((collapsed ? 'Expand group: ' : 'Collapse group: ') + name) +
+      '" title="' +
+      escapeHtml(collapsed ? 'Expand group' : 'Collapse group') +
+      '"><span aria-hidden="true">' +
+      (collapsed ? '▸' : '▾') +
+      '</span></button>' +
+      // A separate, touch-sized handle for cluster movement. The empty district
+      // surface can also be dragged while Drag is on, but the label remains
+      // selection-only and every existing group action — select, overview,
+      // open, delete, Tree management — stays reachable (FR-85, FR-94).
+      //
+      // The ⤧ glyph is the map's established symbol for this and stays. What
+      // made it cryptic was never the symbol — it was that the control had no
+      // name at all, so a screen reader read a bare character and a hover said
+      // nothing about what would move. The name is what FR-140 asked for, and
+      // the name is what changed.
+      '<button type="button" class="ws-map-district-handle" data-group-drag="' +
+      escapeHtml(ws.id) +
+      '" aria-label="' +
+      escapeHtml('Move group: ' + name) +
+      '" title="' +
+      escapeHtml('Move group: ' + name) +
+      '"><span class="ws-map-district-grip" aria-hidden="true">⤧</span></button>' +
+      // The overflow control opens the same menu right-click does, so a pointer
+      // user who never right-clicks and a keyboard user both reach the group's
+      // actions (FR-139, FR-149).
+      '<button type="button" class="ws-map-district-more" data-group-menu="' +
+      escapeHtml(ws.id) +
+      '" aria-haspopup="menu" aria-expanded="false" aria-label="' +
+      escapeHtml('Actions for ' + label) +
+      '" title="' +
+      escapeHtml('Actions for ' + name) +
+      '"><span aria-hidden="true">⋯</span></button>' +
+      '</div>' +
       // Explanatory text, not a colour: it names what the frame has ended up
       // around and what the user can do about it (FR-88, FR-163).
       (conflict
@@ -2596,6 +2559,11 @@
 
     var parts = [];
     layout.districts.forEach(function (district) {
+      // On the group's own page everything drawn is in the group, so its frame
+      // would enclose the whole map and say nothing (group-map-build PRD §10).
+      // The district is still resolved — members keep Home's exact automatic
+      // placement — it is just not drawn.
+      if (scopeGroupId && district.id === scopeGroupId) return;
       var placed = toLayer(district);
       parts.push(
         districtHTML(
@@ -2647,6 +2615,12 @@
         parts.join('') +
         placementPreviewHTML() +
         '</div>' +
+        // A group with no members yet says so in screen space, where the copy
+        // stays readable at any zoom; the host's toolbar carries Build and Add
+        // existing (group-map-build FR-27).
+        (scopeGroupId && !layout.nodes.length
+          ? '<p class="ws-map-scoped-empty" role="status">No members yet. Build a workspace here or add an existing one.</p>'
+          : '') +
         placementControlsHTML() +
         // The resize overlay lives OUTSIDE the world layer on purpose. Inside
         // it, the camera transform would scale the handles with the map, so at
@@ -4081,7 +4055,9 @@
     var district = renderedDistrict(groupId);
     var readOnly = isMapReadOnly();
     var collapsed = !!(district && district.collapsed);
-    if (scoped) return scopedDistrictMenuItems(district, readOnly, nested);
+    // A group page draws no district of its own, so there is nothing here to
+    // open, resize, restyle, collapse, or delete (group-map-build PRD §10).
+    if (scoped) return [];
     var items = [
       { label: 'Open group', action: 'open' },
       { label: 'Build', action: 'build', disabled: readOnly },
@@ -4122,34 +4098,6 @@
       variant: 'danger',
       disabled: readOnly
     });
-    return items;
-  }
-
-  // The group page's own district. It is the page, so there is nothing to open,
-  // collapse, or delete from here. A nested group has no district record to
-  // write, so its layout actions stay listed but disabled with the reason.
-  function scopedDistrictMenuItems(district, readOnly, nested) {
-    var items = [{ label: 'Build', action: 'build' }, menuDivider()];
-    var resize = { label: 'Resize group', action: 'resize-group', disabled: readOnly || !district };
-    var fit = {
-      label: 'Fit to contents',
-      action: 'fit-group',
-      disabled: readOnly || !district || district.sizingMode !== 'custom'
-    };
-    var customized =
-      !!district && (district.accent !== DEFAULT_ACCENT || district.theme !== DEFAULT_THEME);
-    var appearance =
-      customized || nested
-        ? { label: 'Use default appearance', action: 'reset-appearance', disabled: readOnly }
-        : null;
-    if (nested) {
-      [resize, fit, appearance].forEach(function (item) {
-        item.disabled = true;
-        item.title = SCOPED_NESTED_LAYOUT_TITLE;
-      });
-    }
-    items.push(resize, fit);
-    if (appearance) items.push(appearance);
     return items;
   }
 
@@ -4678,11 +4626,9 @@
       return { type: 'tile', id: tileId, ws: findWs(workspaces, tileId), element: tile };
     }
     var district = node.closest('.ws-map-district');
-    // On a group page the district's interior is the ground being built on;
-    // only its header stands for the group itself.
-    if (district && scopeGroupId && !node.closest('.ws-map-district-header')) {
-      district = null;
-    }
+    // A group page draws no district of its own; anything that still resolves
+    // here is ground being built on.
+    if (district && scopeGroupId) district = null;
     if (district) {
       var groupId = district.getAttribute('data-group-id');
       // Focus goes back to the district's label button, not to the outline: the
@@ -4770,37 +4716,6 @@
       options: options,
       event: event
     });
-  }
-
-  /**
-   * The scoped group's layout menu, opened from the host's toolbar.
-   *
-   * The group page draws its district without a header, so the Resize, Fit,
-   * and appearance actions that Home offers from the header's ⋯ are reached
-   * from the Detachment toolbar instead. Same items, same validation, same
-   * announcements as every other route into the district menu.
-   */
-  function openScopedGroupMenu(container, anchor, event) {
-    if (!scopeGroupId || !lastMount || lastMount.container !== container) return false;
-    if (dragState || clusterDrag) return false;
-    var options = lastMount.state || {};
-    var workspaces = options.workspaces || [];
-    var target = {
-      type: 'district',
-      id: scopeGroupId,
-      ws: findWs(workspaces, scopeGroupId),
-      element: anchor || null
-    };
-    if (!contextMenuItemsFor(target).length) return false;
-    return openMenuForTarget(
-      container,
-      workspaces,
-      options,
-      target,
-      anchorForElement(anchor),
-      event || null,
-      true
-    );
   }
 
   function bindContextMenu(container, workspaces, options) {
@@ -5513,8 +5428,6 @@
   /** Is a district resizable right now? (FR-52, FR-115, FR-148) */
   function canResizeDistrict(groupId) {
     if (isMapReadOnly()) return false;
-    // A nested group's frame is automatic on its own page and has no record.
-    if (scopeGroupId && scopeNested) return false;
     var district = renderedDistrict(groupId);
     return !!district && !district.collapsed;
   }
@@ -7012,18 +6925,15 @@
         placeElement(el, dragState.candidate);
         var blocked = wouldOverlapOccupied(dragState.candidate, dragState.id);
         if (el.classList) el.classList.toggle('is-blocked', blocked);
+        // On a group page a drag only ever repositions: there is no other
+        // district to join and leaving is a Home, Tree, or Details-panel action
+        // (group-map-build FR-12), so no membership intent is shown or resolved.
         if (scopeGroupId) {
-          var keeps = scopedDropAllowed(dragState.candidate, lastWorldLayout, scopeGroupId);
-          if (el.classList) el.classList.toggle('is-leaving', !keeps);
           dragState.intent = { kind: 'none' };
           setDragReadout(
             container,
             dragState.candidate,
-            blocked
-              ? MOVE_BLOCKED_INSTRUCTION
-              : keeps
-                ? undefined
-                : 'Release to put it back. It stays in ' + scopedGroupName() + '.',
+            blocked ? MOVE_BLOCKED_INSTRUCTION : undefined,
             'none'
           );
           return;
@@ -7079,16 +6989,6 @@
         if (cancelled) {
           placeElement(el, state.origin);
           announce(container, 'Move cancelled. The workspace is back where it was.');
-          return;
-        }
-        if (scopeGroupId && !scopedDropAllowed(state.candidate, lastWorldLayout, scopeGroupId)) {
-          placeElement(el, state.origin);
-          announce(
-            container,
-            'Kept in ' +
-              scopedGroupName() +
-              '. Drop inside the group to move it; remove members from the Details panel.'
-          );
           return;
         }
         var target = resolveDropAnchor(state.id, state.candidate);
@@ -7728,13 +7628,16 @@
       announce(container, 'Move cancelled. The workspace is back where it was.');
       return;
     }
-    if (scopeGroupId && !scopedDropAllowed(state.candidate, lastWorldLayout, scopeGroupId)) {
-      placeElement(state.el, state.origin);
-      announce(container, 'Kept in ' + scopedGroupName() + '. Move it within the group.');
-      return;
-    }
     var target = resolveDropAnchor(state.id, state.candidate);
-    commitMove(container, state.id, state.el, target, state.origin);
+    // A group page never changes membership (FR-12); Home resolves intent.
+    commitMove(
+      container,
+      state.id,
+      state.el,
+      target,
+      state.origin,
+      scopeGroupId ? { kind: 'none' } : undefined
+    );
   }
 
   function handleMoveKey(container, event) {
@@ -8999,8 +8902,6 @@
     scopedGroupPresentation: scopedGroupPresentation,
     scopedFrameBounds: scopedFrameBounds,
     normalizeFrameInsets: normalizeFrameInsets,
-    openScopedGroupMenu: openScopedGroupMenu,
-    scopedDropAllowed: scopedDropAllowed,
     // The coordinate engine: saved anchors, deterministic fallback placement,
     // district effective frames, content bounds, and world sizing, all pure so
     // they can be asserted without a browser (FR-123).
