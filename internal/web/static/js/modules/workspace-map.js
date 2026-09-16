@@ -2069,11 +2069,14 @@
     // Fit All zooms in when there is little content; the opening view does not.
     // Landing at 200% on a two-workspace map is disorienting, and the button is
     // right there for anyone who wants it.
-    camera = liftAboveControls({
-      centerX: fitted.centerX,
-      centerY: fitted.centerY,
-      zoom: Math.min(DEFAULT_ZOOM, fitted.zoom)
-    });
+    camera = liftAboveControls(
+      {
+        centerX: fitted.centerX,
+        centerY: fitted.centerY,
+        zoom: Math.min(DEFAULT_ZOOM, fitted.zoom)
+      },
+      viewport.strip
+    );
     cameraReady = true;
   }
 
@@ -2681,12 +2684,11 @@
   function cameraControlsHTML() {
     var snapOn = layoutState.snapToGrid;
     var readOnly = layoutState.status !== 'ready';
-    return (
-      buildBannerHTML() +
-      // Two clusters, because they are two different jobs. Navigation moves the
-      // camera and can never change the map; the placement actions change where
-      // things are. Keeping them apart also keeps either group from growing into
-      // a bar that covers the buildings it is meant to help with.
+    // Two clusters, because they are two different jobs. Navigation moves the
+    // camera and can never change the map; the placement actions change where
+    // things are. Keeping them apart also keeps either group from growing into
+    // a bar that covers the buildings it is meant to help with.
+    var placementActions =
       '<div class="ws-map-actions" role="group" aria-label="Map placement actions">' +
       // Build is not a button any more (#317). It was a mode — press Build, then
       // click a spot — and the context menu already knows the spot: right-click
@@ -2714,22 +2716,34 @@
       '>Reset layout…</button>' +
       '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-undo-reset hidden>Undo reset</button>' +
       '<button type="button" class="ws-map-ctl" data-map-help aria-expanded="false" aria-label="How the map works">?</button>' +
-      '</div>' +
-      helpHTML() +
-      (readOnly
-        ? '<p class="ws-map-notice" role="status">Positions cannot be saved right now. You can still look around; building and moving are unavailable until the map layout loads.</p>'
-        : '') +
-      // Zoom only. Fit all, Center selected and Reset view moved into the
-      // canvas context menu (#317): they are framing choices you make about a
-      // spot on the map, so they belong under the cursor rather than in a
-      // permanent strip across the bottom of it. Keyboard users reach them by
-      // Shift+F10 on the focused canvas, which opens that same menu; 0 still
-      // resets the view directly.
+      '</div>';
+    // Zoom only. Fit all, Center selected and Reset view moved into the
+    // canvas context menu (#317): they are framing choices you make about a
+    // spot on the map, so they belong under the cursor rather than in a
+    // permanent strip across the bottom of it. Keyboard users reach them by
+    // Shift+F10 on the focused canvas, which opens that same menu; 0 still
+    // resets the view directly.
+    var viewControls =
       '<div class="ws-map-controls" role="group" aria-label="Map view controls">' +
       '<button type="button" class="ws-map-ctl" data-map-zoom-out aria-label="Zoom out">−</button>' +
       '<span class="ws-map-zoom" data-map-zoom-readout aria-hidden="true">100%</span>' +
       '<button type="button" class="ws-map-ctl" data-map-zoom-in aria-label="Zoom in">+</button>' +
-      '</div>' +
+      '</div>';
+    // A group page sits under page-wide floating widgets (Ori Help, the
+    // assistant) that own the viewport's bottom-right corner, so there both
+    // clusters dock together at the bottom-left instead of one sitting under
+    // them (group-map-build PRD §10).
+    var controls = scopeGroupId
+      ? '<div class="ws-map-control-dock">' + viewControls + placementActions + '</div>'
+      : placementActions;
+    return (
+      buildBannerHTML() +
+      controls +
+      helpHTML() +
+      (readOnly
+        ? '<p class="ws-map-notice" role="status">Positions cannot be saved right now. You can still look around; building and moving are unavailable until the map layout loads.</p>'
+        : '') +
+      (scopeGroupId ? '' : viewControls) +
       '<p class="ws-map-live" data-map-live role="status" aria-live="polite"></p>'
     );
   }
@@ -5358,22 +5372,39 @@
   // which is exactly what FR-73 forbids.
   function framedViewport(canvas) {
     var viewport = viewportSize(canvas);
+    var strip = controlStripHeight(canvas);
     return {
       width: Math.max(CELL_W, viewport.width - frameInsets.left),
-      height: Math.max(CELL_H, viewport.height - CONTROL_STRIP_HEIGHT - frameInsets.top),
+      height: Math.max(CELL_H, viewport.height - strip - frameInsets.top),
       measured: viewport.measured,
+      strip: strip,
       full: viewport
     };
+  }
+
+  // The height the bottom controls take. Normally the fixed one-row strip; the
+  // group page's docked controls wrap onto more rows on a narrow screen, so
+  // there the real dock is measured and the taller of the two is reserved.
+  function controlStripHeight(canvas) {
+    if (!scopeGroupId || !canvas || typeof canvas.closest !== 'function') {
+      return CONTROL_STRIP_HEIGHT;
+    }
+    var theatre = canvas.closest('.ws-map-theatre');
+    var dock = theatre && theatre.querySelector('.ws-map-control-dock');
+    var height = dock ? Number(dock.offsetHeight) || 0 : 0;
+    // The dock sits 14px off the bottom edge; keep a little air above it too.
+    return height > 0 ? Math.max(CONTROL_STRIP_HEIGHT, height + 14 + 8) : CONTROL_STRIP_HEIGHT;
   }
 
   // liftAboveControls shifts a framing camera so the content it framed is
   // centred in the clear area — above the bottom control strip, and clear of
   // any top band or left column the host reserved — rather than in the whole
   // canvas.
-  function liftAboveControls(cam) {
+  function liftAboveControls(cam, strip) {
+    var bottom = typeof strip === 'number' ? strip : CONTROL_STRIP_HEIGHT;
     return {
       centerX: cam.centerX - frameInsets.left / 2 / cam.zoom,
-      centerY: cam.centerY + (CONTROL_STRIP_HEIGHT - frameInsets.top) / 2 / cam.zoom,
+      centerY: cam.centerY + (bottom - frameInsets.top) / 2 / cam.zoom,
       zoom: cam.zoom
     };
   }
@@ -5384,8 +5415,9 @@
   function fitAll(container) {
     if (!lastWorldLayout) return null;
     var canvas = container.querySelector('[data-ws-map-viewport]');
-    var fitted = fitBounds(lastWorldLayout.bounds, framedViewport(canvas));
-    setCamera(liftAboveControls(fitted), container);
+    var framed = framedViewport(canvas);
+    var fitted = fitBounds(lastWorldLayout.bounds, framed);
+    setCamera(liftAboveControls(fitted, framed.strip), container);
     return fitted;
   }
 
@@ -5406,12 +5438,16 @@
   // preference is untouched (FR-42).
   function resetView(container) {
     if (!lastWorldLayout) return;
+    var canvas = container.querySelector('[data-ws-map-viewport]');
     setCamera(
-      liftAboveControls({
-        centerX: (lastWorldLayout.bounds.minX + lastWorldLayout.bounds.maxX) / 2,
-        centerY: (lastWorldLayout.bounds.minY + lastWorldLayout.bounds.maxY) / 2,
-        zoom: DEFAULT_ZOOM
-      }),
+      liftAboveControls(
+        {
+          centerX: (lastWorldLayout.bounds.minX + lastWorldLayout.bounds.maxX) / 2,
+          centerY: (lastWorldLayout.bounds.minY + lastWorldLayout.bounds.maxY) / 2,
+          zoom: DEFAULT_ZOOM
+        },
+        controlStripHeight(canvas)
+      ),
       container
     );
   }

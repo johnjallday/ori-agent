@@ -9498,6 +9498,33 @@ test('the scoped district is still resolved for placement even though it is not 
   }
 });
 
+test('a group map docks both control clusters together; Home keeps them apart', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness();
+  map.mount(container, scopedMountState());
+  // Zoom first, then the placement actions, inside one bottom-left dock that
+  // stays clear of the page's bottom-right floating widgets.
+  assert.match(
+    container.innerHTML,
+    /<div class="ws-map-control-dock"><div class="ws-map-controls"[^>]*>[\s\S]*?data-map-zoom-in[\s\S]*?<\/div><div class="ws-map-actions"[^>]*>[\s\S]*?data-map-help[\s\S]*?<\/div><\/div>/
+  );
+  assert.equal((container.innerHTML.match(/class="ws-map-controls"/g) || []).length, 1);
+  assert.equal((container.innerHTML.match(/class="ws-map-actions"/g) || []).length, 1);
+
+  map.unmount(container);
+  map.mount(container, { workspaces: SCOPED_WORLD, hideChrome: true, noAutoSelect: true });
+  assert.doesNotMatch(container.innerHTML, /ws-map-control-dock/);
+  // Home's order is unchanged: placement actions, help, then the zoom cluster.
+  assert.match(
+    container.innerHTML,
+    /class="ws-map-actions"[\s\S]*data-map-help-panel|class="ws-map-actions"[\s\S]*class="ws-map-controls"/
+  );
+  assert.ok(
+    container.innerHTML.indexOf('class="ws-map-actions"') <
+      container.innerHTML.indexOf('class="ws-map-controls"')
+  );
+});
+
 test('an empty group says what its ground is for, in screen space, and Home does not', () => {
   const map = loadMapForMount();
   const { container } = createMapHarness();

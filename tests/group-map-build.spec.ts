@@ -244,8 +244,11 @@ for (const viewport of [
             quest: box(document.querySelector('.ws-cmd-map-quest-fab')),
             belt: box(root && root.querySelector('.ws-cmd-map-belt')),
             toolbar: box(root && root.querySelector('.ws-cmd-map-group-bar')),
-            agents: box(root && root.querySelector('.ws-cmd-map-command-post'))
+            agents: box(root && root.querySelector('.ws-cmd-map-command-post')),
+            controls: box(root && root.querySelector('.ws-map-control-dock'))
           },
+          // Page-wide floating widgets pinned to the viewport's corner.
+          floating: box(document.querySelector('button[aria-label^="Open Ori Help"]')),
           tiles: Array.from(
             (root && root.querySelectorAll('.ws-cmd-detachment-host .ws-map-tile')) || []
           ).map(box)
@@ -274,6 +277,16 @@ for (const viewport of [
           `${names[i]} and ${other} overlap`
         ).toBe(false);
       }
+    }
+
+    // The map's own controls stay clear of the page's floating help widget,
+    // which owns the viewport's bottom-right corner (desktop; a phone has no
+    // width to keep them apart).
+    if (viewport.width > 640 && snapshot.floating) {
+      expect(
+        boxesOverlap(overlays.controls, snapshot.floating),
+        'map controls sit under the floating help widget'
+      ).toBe(false);
     }
 
     // The district opens framed in the space the overlays leave clear.

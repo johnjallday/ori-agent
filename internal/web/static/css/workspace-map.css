@@ -423,6 +423,26 @@
   right: 16px;
   bottom: 14px;
 }
+/* A group's own map docks both clusters bottom-left, clear of the page-wide
+   floating widgets in the viewport's bottom-right corner. They keep their own
+   frames; the dock only lines them up, wrapping upward when it runs out of
+   width. */
+.ws-map-control-dock {
+  position: absolute;
+  left: 16px;
+  bottom: 14px;
+  z-index: 7;
+  display: flex;
+  flex-wrap: wrap-reverse;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: calc(100% - 32px);
+}
+.ws-map-control-dock .ws-map-controls,
+.ws-map-control-dock .ws-map-actions {
+  position: static;
+  justify-content: flex-start;
+}
 /* Sentence case: these are actions. Uppercase is reserved for labels that name
    a region or a value (eyebrows, metric captions, status tags). */
 .ws-map-ctl {
