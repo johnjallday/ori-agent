@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -144,18 +145,172 @@ func TestAssistantProgramReviewedHomeRemovalPreservesChildren(t *testing.T) {
 	if err != nil || review.LinkedProjectCount != 2 || len(review.Impact) != 3 {
 		t.Fatalf("Home removal review = %+v, %v", review, err)
 	}
+	if !strings.Contains(review.Impact[0], "moves to the Trash") {
+		t.Fatalf("review impact should promise the Trash on a store that can trash: %q", review.Impact[0])
+	}
 	receipt, err := programs.CommitHomeRemoval(station.ID, review.Token)
-	if err != nil || receipt.RetainedProjects != 2 {
+	if err != nil || receipt.RetainedProjects != 2 || !receipt.Trashed {
 		t.Fatalf("Home removal receipt = %+v, %v", receipt, err)
 	}
-	if _, err := store.Get(station.ID); err == nil {
-		t.Fatal("removed Home remained in the store")
+	// The Home is soft-deleted, not gone: the record stays, marked trashed,
+	// with its live program state cleared (so it no longer answers as a
+	// station) and stashed for a restore.
+	trashed, err := store.Get(station.ID)
+	if err != nil || trashed == nil || trashed.Status != StatusTrashed {
+		t.Fatalf("trashed Home = %+v, %v", trashed, err)
+	}
+	if trashed.GetAssistantProgramState() != nil {
+		t.Fatal("trashed Home kept its live program state")
+	}
+	if stash := removedAssistantProgramState(trashed); stash == nil || len(stash.LinkedProjectIDs) != 0 {
+		t.Fatalf("trashed Home stash = %+v", stash)
 	}
 	for _, projectID := range []string{first.ID, second.ID} {
 		project, getErr := store.Get(projectID)
 		if getErr != nil || project.GetAssistantProjectLink() != nil || project.ParentID != "" {
 			t.Fatalf("retained project %q = %+v, %v", projectID, project, getErr)
 		}
+	}
+}
+
+// A store that cannot trash (a bare FileStore has no soft-delete) still removes
+// the Home permanently, and says so in both the review and the receipt.
+func TestAssistantProgramHomeRemovalDeletesWhenTrashUnsupported(t *testing.T) {
+	store, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := assistantProject(t, store, "Permanent")
+	programs := NewAssistantProgramStore(store)
+	station, _, err := programs.EnsureProjectStation(project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	station, _ = store.Get(station.ID)
+	review, err := programs.ReviewHomeRemoval(station.ID, station.GetAssistantProgramState().StateRevision)
+	if err != nil || len(review.Impact) != 3 {
+		t.Fatalf("Home removal review = %+v, %v", review, err)
+	}
+	if strings.Contains(review.Impact[0], "Trash") {
+		t.Fatalf("review impact promised a Trash the store does not have: %q", review.Impact[0])
+	}
+	receipt, err := programs.CommitHomeRemoval(station.ID, review.Token)
+	if err != nil || receipt.Trashed {
+		t.Fatalf("Home removal receipt = %+v, %v", receipt, err)
+	}
+	if _, err := store.Get(station.ID); err == nil {
+		t.Fatal("permanently removed Home remained in the store")
+	}
+}
+
+func TestAssistantProgramRestoreRemovedHomeReturnsAnEmptyHome(t *testing.T) {
+	store := NewInMemoryStore()
+	project := assistantProject(t, store, "Once linked")
+	programs := NewAssistantProgramStore(store)
+	station, _, err := programs.EnsureProjectStation(project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	station, _ = store.Get(station.ID)
+	key := station.GetAssistantProgramState().Key
+	roles := len(station.GetAssistantProgramState().HomeBindings.Bindings)
+	review, err := programs.ReviewHomeRemoval(station.ID, station.GetAssistantProgramState().StateRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := programs.CommitHomeRemoval(station.ID, review.Token); err != nil {
+		t.Fatal(err)
+	}
+
+	// While the Home sits in the Trash the key is free: a new Home for the
+	// same program can be created instead of resolving to the trashed one.
+	if _, err := programs.FindStation(key); !errors.Is(err, ErrAssistantStationNotFound) {
+		t.Fatalf("FindStation while trashed = %v, want not found", err)
+	}
+	// Restoring the state is refused while the record is still trashed; the
+	// workspace has to come back out of the Trash first.
+	if restored, err := programs.RestoreRemovedHome(station.ID); err != nil || restored {
+		t.Fatalf("RestoreRemovedHome while trashed = %v, %v", restored, err)
+	}
+
+	if err := store.Update(station.ID, func(current *Workspace) error {
+		current.Status = StatusActive
+		delete(current.SharedData, TrashSharedDataKey)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := programs.RestoreRemovedHome(station.ID)
+	if err != nil || !restored {
+		t.Fatalf("RestoreRemovedHome = %v, %v", restored, err)
+	}
+	home, err := programs.FindStation(key)
+	if err != nil || home == nil || home.ID != station.ID {
+		t.Fatalf("restored Home lookup = %+v, %v", home, err)
+	}
+	state := home.GetAssistantProgramState()
+	if state == nil || len(state.LinkedProjectIDs) != 0 || len(state.HomeBindings.Bindings) != roles || len(state.Topology.ReviewReceipts) != 0 {
+		t.Fatalf("restored Home state = %+v", state)
+	}
+	if removedAssistantProgramState(home) != nil {
+		t.Fatal("restore left the stash behind")
+	}
+	// The former project stayed standalone; nothing re-linked it.
+	retained, _ := store.Get(project.ID)
+	if retained.GetAssistantProjectLink() != nil || retained.ParentID != "" {
+		t.Fatalf("restore re-linked the retained project: %+v", retained)
+	}
+	// A second restore is a no-op.
+	if again, err := programs.RestoreRemovedHome(station.ID); err != nil || again {
+		t.Fatalf("second RestoreRemovedHome = %v, %v", again, err)
+	}
+}
+
+// If a new Home took the program key while the old one was in the Trash, the
+// restore keeps the workspace as a plain group rather than creating two Homes
+// that every station lookup would then find ambiguous.
+func TestAssistantProgramRestoreRemovedHomeYieldsToANewerHome(t *testing.T) {
+	store := NewInMemoryStore()
+	project := assistantProject(t, store, "Replaced")
+	programs := NewAssistantProgramStore(store)
+	station, _, err := programs.EnsureProjectStation(project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	station, _ = store.Get(station.ID)
+	review, err := programs.ReviewHomeRemoval(station.ID, station.GetAssistantProgramState().StateRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := programs.CommitHomeRemoval(station.ID, review.Token); err != nil {
+		t.Fatal(err)
+	}
+	replacement, created, err := programs.EnsureProjectStation(project.ID)
+	if err != nil || !created || replacement.ID == station.ID {
+		t.Fatalf("replacement Home = %+v, created=%v, %v", replacement, created, err)
+	}
+
+	// The replacement took the old Home's canonical slug as well as its key, so
+	// the old record comes back under a fresh slug (the restore API refuses a
+	// slug collision outright; this is the path past that check).
+	if err := store.Update(station.ID, func(current *Workspace) error {
+		current.Status = StatusActive
+		current.FolderSlug = current.FolderSlug + "-restored"
+		delete(current.SharedData, TrashSharedDataKey)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := programs.RestoreRemovedHome(station.ID)
+	if err != nil || restored {
+		t.Fatalf("RestoreRemovedHome with a newer Home = %v, %v", restored, err)
+	}
+	old, _ := store.Get(station.ID)
+	if old.GetAssistantProgramState() != nil || removedAssistantProgramState(old) != nil {
+		t.Fatalf("yielded Home should be a plain group with no stash: %+v", old)
+	}
+	if home, err := programs.FindStation(replacement.GetAssistantProgramState().Key); err != nil || home.ID != replacement.ID {
+		t.Fatalf("newer Home lookup = %+v, %v", home, err)
 	}
 }
 

@@ -463,10 +463,14 @@ function reviewRequired({
 
 const json = data => ({ ok: true, status: 200, json: async () => data });
 
+// The server normally moves a removed Home to the Trash (`trashes` in the
+// review, `trashed` in the receipt); a platform with no trash deletes it.
 function homeResponses({
   linked = 2,
   roles = 1,
-  impact = ['Projects stay.', 'Folders stay.']
+  impact = ['Projects stay.', 'Folders stay.'],
+  trashes = true,
+  trashed = true
 } = {}) {
   return {
     'GET /api/workspaces/home/assistant-program': json({
@@ -479,10 +483,12 @@ function homeResponses({
       token: 'tok-1',
       linked_project_count: linked,
       home_role_count: roles,
-      impact
+      impact,
+      trashes
     }),
     'POST /api/workspaces/home/assistant-program/remove-home/commit': json({
-      station_workspace_id: 'home'
+      station_workspace_id: 'home',
+      trashed
     })
   };
 }
@@ -504,16 +510,57 @@ test('a protected group is reviewed and removed inside the same dialog', async (
   const [shown] = h.stepsOf('review');
   assert.equal(shown.heading, 'Remove "Music Home"?');
   assert.match(shown.summary, /2 linked projects will be kept as standalone workspaces/);
-  assert.match(shown.summary, /permanently rather than moved to the Trash/);
+  assert.match(
+    shown.summary,
+    /moves to the Trash and can be restored with Undo, without its projects/
+  );
   assert.deepEqual(shown.impact, ['Projects stay.', 'Folders stay.']);
   assert.equal(shown.confirmLabel, 'Remove Home');
 
   assert.equal(h.stepsOf('notice').length, 0, 'no detour through another page');
   assert.ok(h.announced.includes('Music Home removed.'));
-  assert.deepEqual(h.trashed, [], 'a Home removal is not a Trash entry');
+  assert.deepEqual(
+    h.trashed,
+    [{ id: 'home', name: 'Music Home' }],
+    'a trashed Home is an undo entry, restored through the same endpoint as any workspace'
+  );
   assert.equal(h.changedCount(), 1);
   assert.equal(h.stepsOf('close').length, 1);
   assert.equal(h.calls.filter(c => c.method === 'DELETE').length, 1, 'the Home is gone, no retry');
+});
+
+test('a Home the server cannot trash is removed permanently and leaves no undo entry', async () => {
+  const h = ctxFor({
+    rows: HOME_ROWS,
+    answers: [{ mode: 'group_only' }, true],
+    responses: {
+      'DELETE /api/workspaces/home': reviewRequired(),
+      ...homeResponses({ trashes: false, trashed: false })
+    }
+  });
+
+  assert.equal(await deleteWorkspace('home', h.ctx), true);
+  const [shown] = h.stepsOf('review');
+  assert.match(shown.summary, /removed permanently rather than moved to the Trash/);
+  assert.doesNotMatch(shown.summary, /Undo/);
+  assert.deepEqual(h.trashed, [], 'nothing to undo when the store deleted outright');
+  assert.ok(h.announced.includes('Music Home removed.'));
+});
+
+test('the receipt, not the review, decides whether Undo is offered', async () => {
+  // The review promised the Trash but the commit reports a hard delete (say
+  // the folder store went away in between): no false undo entry.
+  const h = ctxFor({
+    rows: HOME_ROWS,
+    answers: [{ mode: 'group_only' }, true],
+    responses: {
+      'DELETE /api/workspaces/home': reviewRequired(),
+      ...homeResponses({ trashes: true, trashed: false })
+    }
+  });
+
+  assert.equal(await deleteWorkspace('home', h.ctx), true);
+  assert.deepEqual(h.trashed, []);
 });
 
 test('an empty Home reads like a plain delete', async () => {
@@ -528,7 +575,7 @@ test('an empty Home reads like a plain delete', async () => {
 
   assert.equal(await deleteWorkspace('home', h.ctx), true);
   const [shown] = h.stepsOf('review');
-  assert.match(shown.summary, /no linked projects, so removing it deletes only the group\./);
+  assert.match(shown.summary, /no linked projects, so removing it affects only the group\./);
   assert.deepEqual(shown.impact, [], 'nothing to preserve, so no preservation notes');
 });
 
@@ -542,7 +589,7 @@ test('an empty Home with roles says the roles go with it', async () => {
     }
   });
   await deleteWorkspace('home', h.ctx);
-  assert.match(h.stepsOf('review')[0].summary, /deletes only the group and its 2 Home roles/);
+  assert.match(h.stepsOf('review')[0].summary, /affects only the group and its 2 Home roles/);
 });
 
 test('declining the Home review removes nothing', async () => {

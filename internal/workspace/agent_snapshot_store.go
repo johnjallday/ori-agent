@@ -59,6 +59,25 @@ func (s *AgentSnapshotStore) MoveWorkspaceFolder(id, newParentID string) ([]Move
 	return mover.MoveWorkspaceFolder(id, newParentID)
 }
 
+// TrashSupported forwards the optional soft-delete capability, so a reviewed
+// Home removal running through this decorator can still ask whether the Trash
+// is available before promising an undo.
+func (s *AgentSnapshotStore) TrashSupported() bool {
+	trasher, ok := s.Store.(WorkspaceTrasher)
+	return ok && trasher.TrashSupported()
+}
+
+// Trash forwards the optional soft-delete through the decorator. Without this
+// the wrapped SyncStore's Trash would be invisible and a Home removal would
+// fall back to a permanent Delete.
+func (s *AgentSnapshotStore) Trash(id string) error {
+	trasher, ok := s.Store.(WorkspaceTrasher)
+	if !ok {
+		return ErrTrashUnsupported
+	}
+	return trasher.Trash(id)
+}
+
 // ResolveSlug preserves the optional canonical-slug resolver through this
 // decorator. No ID fallback is permitted when the wrapped store lacks it.
 func (s *AgentSnapshotStore) DeleteReviewedGroupRequirementOperation(id, operationDigest, operationStatus string) error {

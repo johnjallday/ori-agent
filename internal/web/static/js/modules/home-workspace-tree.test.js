@@ -22,8 +22,21 @@ import {
   renderMoveDialogHTML,
   resolveTreeKey,
   renderTagFilterBarHTML,
-  filterTreeByTags
+  filterTreeByTags,
+  treeCanUndo
 } from './home-workspace-tree.js';
+
+test('Undo is enabled exactly when the cockpit has a trashed item to restore', () => {
+  // The cockpit only ever maintains undoStack; before this read it, the button
+  // stayed disabled for every delete because nothing set canUndo.
+  assert.equal(treeCanUndo({ undoStack: [] }), false);
+  assert.equal(treeCanUndo({ undoStack: [{ id: 'home', name: 'Music Home' }] }), true);
+  assert.equal(treeCanUndo({}), false);
+  assert.equal(treeCanUndo(null), false);
+  // An explicit flag still wins, in either direction.
+  assert.equal(treeCanUndo({ canUndo: false, undoStack: [{ id: 'x', name: 'X' }] }), false);
+  assert.equal(treeCanUndo({ canUndo: true, undoStack: [] }), true);
+});
 
 // A three-level hierarchy: Platform > [API, Web, Infra > DB], plus Standalone.
 function tree() {

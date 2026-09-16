@@ -1,11 +1,36 @@
 package workspace
 
 import (
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/platform"
 )
+
+// TrashSharedDataKey is the SharedData key under which trash metadata
+// ({original_path, trashed_path, deleted_at}) is stored while a workspace is
+// trashed, so its folder can be moved back on restore. The generic workspace
+// delete in sessionhttp writes the same key.
+const TrashSharedDataKey = "_trash"
+
+// ErrTrashUnsupported reports that a store cannot move a workspace to the
+// system Trash. A caller that needs the workspace gone falls back to Delete.
+var ErrTrashUnsupported = errors.New("workspace trash is not supported by this store")
+
+// WorkspaceTrasher is implemented by stores that can soft-delete a workspace:
+// its folder moves to the system Trash and its record stays, marked trashed,
+// so a later restore is high fidelity. Stores that only know how to Delete do
+// not implement it, and callers that need a removal either way fall back.
+type WorkspaceTrasher interface {
+	// TrashSupported reports whether Trash can succeed here at all.
+	TrashSupported() bool
+	// Trash soft-deletes the workspace, returning ErrTrashUnsupported when the
+	// platform or store layout cannot.
+	Trash(id string) error
+}
 
 // SyncStore wraps a primary Store and writes through to a FileStore
 // so that workspace.json on disk stays in sync with the primary store.
@@ -25,6 +50,68 @@ func NewSyncStore(primary Store, fileSync *FileStore) *SyncStore {
 // FileStore returns the underlying FileStore used for disk sync.
 func (s *SyncStore) FileStore() *FileStore {
 	return s.fileSync
+}
+
+// TrashSupported reports whether Trash can move a workspace folder to the
+// system Trash: there has to be a folder store, and the platform has to have a
+// trash to move it to.
+func (s *SyncStore) TrashSupported() bool {
+	return s != nil && s.primary != nil && s.fileSync != nil && platform.TrashSupported()
+}
+
+// Trash soft-deletes a workspace the same way the workspace API's delete does:
+// the folder moves to the system Trash and the primary record is kept, marked
+// trashed, with the paths a restore needs stashed under TrashSharedDataKey.
+// The same protection rules as Delete apply, so a live Assistant Home or a
+// required group cannot be trashed by accident.
+//
+// It returns ErrTrashUnsupported when there is no folder store or the platform
+// has no trash, so callers can fall back to a permanent Delete.
+func (s *SyncStore) Trash(id string) error {
+	if !s.TrashSupported() {
+		return ErrTrashUnsupported
+	}
+	if protected, checkErr := storeContainsProtectedAssistantProgram(s.primary, id); checkErr != nil {
+		return checkErr
+	} else if protected {
+		return ErrAssistantProgramProtected
+	}
+	if protected, checkErr := storeContainsRequiredGroupRequirement(s.fileSync, id); checkErr != nil {
+		return checkErr
+	} else if protected {
+		return ErrGroupRequirementProtected
+	}
+	ws, err := s.primary.Get(id)
+	if err != nil {
+		return err
+	}
+	if ws == nil {
+		return fmt.Errorf("workspace %s not found", id)
+	}
+	if ws.Status == StatusTrashed {
+		return fmt.Errorf("workspace %s is already in the trash", id)
+	}
+
+	originalPath, trashedPath, err := s.fileSync.Trash(id)
+	if err != nil {
+		return err
+	}
+	ws.SetSharedData(TrashSharedDataKey, map[string]any{
+		"original_path": originalPath,
+		"trashed_path":  trashedPath,
+		"deleted_at":    time.Now().UTC().Format(time.RFC3339),
+	})
+	ws.Status = StatusTrashed
+	// Save skips the folder mirror for a trashed workspace, so this only
+	// touches the primary record; the folder is already in the Trash.
+	if err := s.Save(ws); err != nil {
+		// Roll the folder back out of the Trash so the workspace isn't stranded.
+		if _, restoreErr := s.fileSync.RestoreFromTrash(originalPath, trashedPath); restoreErr != nil {
+			return fmt.Errorf("failed to record trashed workspace: %w (folder rollback failed: %v)", err, restoreErr)
+		}
+		return err
+	}
+	return nil
 }
 
 // GetFolderPath exposes the canonical disk folder when SyncStore is used by a

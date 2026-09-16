@@ -56,8 +56,10 @@ const workspaceSharedDataPrimaryDirectoryIDKey = projecttemplates.PrimaryDirecto
 
 // workspaceTrashSharedDataKey is the SharedData key under which trash metadata
 // ({original_path, trashed_path, deleted_at}) is stored while a workspace is
-// trashed, so its folder can be moved back on restore.
-const workspaceTrashSharedDataKey = "_trash"
+// trashed, so its folder can be moved back on restore. Shared with the
+// workspace package, whose SyncStore.Trash writes the same record for a
+// reviewed Home removal.
+const workspaceTrashSharedDataKey = agentworkspace.TrashSharedDataKey
 
 // HandleWorkspaces routes requests to /api/workspaces (also supports legacy /api/folders).
 func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {

@@ -280,9 +280,14 @@ async function resolveRemovalReview(ctx, session, row, error) {
   const linked = Math.max(0, Number(impact.linked_project_count) || 0);
   const roles = Math.max(0, Number(impact.home_role_count) || 0);
 
+  // The server says whether the commit will move the Home to the Trash (the
+  // normal case) or delete it outright (a platform with no trash). The dialog
+  // only promises an Undo when it will actually work.
+  const trashes = Boolean(impact.trashes);
+
   // The summary carries the two facts the impact list does not lead with: what
-  // happens to linked projects (kept, never deleted) and that a Home removal
-  // is permanent rather than a trip to the Trash.
+  // happens to linked projects (kept, never deleted) and whether the Home
+  // itself is recoverable.
   const sentences = [];
   sentences.push(
     isSelf
@@ -292,17 +297,22 @@ async function resolveRemovalReview(ctx, session, row, error) {
   if (linked === 0) {
     sentences.push(
       roles > 0
-        ? `It has no linked projects, so removing it deletes only the group and its ${roles} Home role${roles === 1 ? '' : 's'}.`
-        : 'It has no linked projects, so removing it deletes only the group.'
+        ? `It has no linked projects, so removing it affects only the group and its ${roles} Home role${roles === 1 ? '' : 's'}.`
+        : 'It has no linked projects, so removing it affects only the group.'
     );
   } else {
     sentences.push(
       `Its ${linked} linked project${linked === 1 ? '' : 's'} will be kept as standalone workspace${linked === 1 ? '' : 's'}.`
     );
   }
-  sentences.push('The Home is removed permanently rather than moved to the Trash.');
+  sentences.push(
+    trashes
+      ? 'The Home moves to the Trash and can be restored with Undo, without its projects.'
+      : 'The Home is removed permanently rather than moved to the Trash.'
+  );
   if (!isSelf) sentences.push(`Deleting "${row.name}" then continues.`);
 
+  let receipt = null;
   const removed = await session.review({
     heading: isSelf ? `Remove "${homeName}"?` : `Remove the Assistant Home in "${row.name}"?`,
     summary: sentences.join(' '),
@@ -311,13 +321,22 @@ async function resolveRemovalReview(ctx, session, row, error) {
     impact: linked > 0 ? impact.impact : [],
     confirmLabel: 'Remove Home',
     progress: 'Removing Home…',
-    confirm: () =>
-      requestJSON(ctx, assistantProgramURL(review.stationId, '/remove-home/commit'), {
-        method: 'POST',
-        body: { token: impact.token }
-      })
+    confirm: async () => {
+      receipt = await requestJSON(
+        ctx,
+        assistantProgramURL(review.stationId, '/remove-home/commit'),
+        {
+          method: 'POST',
+          body: { token: impact.token }
+        }
+      );
+    }
   });
   if (!removed) return false;
+  // A trashed Home is an undo entry like any other trashed workspace: the
+  // restore endpoint puts it back as a Home. The receipt, not the review, is
+  // authoritative, because only the commit knows what the store actually did.
+  if (receipt && receipt.trashed) trashed(ctx, review.stationId, homeName);
   announce(ctx, `${homeName} removed.`);
   return true;
 }

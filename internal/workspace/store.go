@@ -2430,6 +2430,45 @@ func (s *InMemoryStore) Delete(id string) error {
 	return nil
 }
 
+// TrashSupported reports that the in-memory store can soft-delete: there is no
+// folder to move, so trashing is always just a status flip.
+func (s *InMemoryStore) TrashSupported() bool { return s != nil }
+
+// Trash soft-deletes a workspace the way SyncStore.Trash does on a real
+// install: the record stays, marked trashed, and stops reserving its slug.
+// Same protection rules as Delete. It exists so the lifecycle paths that trash
+// (a reviewed Home removal, for one) can be exercised without a disk or a
+// system Trash.
+func (s *InMemoryStore) Trash(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	ws, ok := s.workspaces[id]
+	if !ok || ws == nil {
+		return fmt.Errorf("workspace %s not found", id)
+	}
+	if ws.Status == StatusTrashed {
+		return fmt.Errorf("workspace %s is already in the trash", id)
+	}
+	if protectedAssistantProgramSubtree(s.workspaces, id) {
+		return ErrAssistantProgramProtected
+	}
+	if requiredGroupRequirementSubtree(s.workspaces, id) {
+		return ErrGroupRequirementProtected
+	}
+
+	ws.SetSharedData(TrashSharedDataKey, map[string]any{
+		"deleted_at": time.Now().UTC().Format(time.RFC3339),
+	})
+	ws.Status = StatusTrashed
+	for slug, workspaceID := range s.slugToID {
+		if workspaceID == id {
+			delete(s.slugToID, slug)
+		}
+	}
+	return nil
+}
+
 func protectedAssistantProgramSubtree(workspaces map[string]*Workspace, rootID string) bool {
 	pending := map[string]bool{rootID: true}
 	for changed := true; changed; {

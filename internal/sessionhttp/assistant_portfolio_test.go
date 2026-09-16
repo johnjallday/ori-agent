@@ -132,8 +132,12 @@ func TestAssistantProgramHTTPReviewedHomeRemovalRetainsProject(t *testing.T) {
 	if commitRecorder.Code != http.StatusOK {
 		t.Fatalf("Home removal commit = %d: %s", commitRecorder.Code, commitRecorder.Body.String())
 	}
-	if _, err := store.Get(station.ID); err == nil {
-		t.Fatal("removed Home remained")
+	if !strings.Contains(commitRecorder.Body.String(), `"trashed":true`) {
+		t.Fatalf("Home removal receipt should report the Trash: %s", commitRecorder.Body.String())
+	}
+	trashed, err := store.Get(station.ID)
+	if err != nil || trashed.Status != workspace.StatusTrashed || trashed.GetAssistantProgramState() != nil {
+		t.Fatalf("removed Home should be trashed with its live state cleared: %#v, %v", trashed, err)
 	}
 	retained, err := store.Get(project.ID)
 	if err != nil || retained.GetAssistantProjectLink() != nil {
