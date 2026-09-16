@@ -5213,6 +5213,9 @@ test('Add existing renders the members panel’s own picker into the zone', () =
 test('the member count in the zone head follows the members panel', () => {
   const empty = detachmentCommandView('group', []);
   assert.match(empty.renderOperationsMap(), /ws-cmd-map-zone-count">0</);
+  // With nothing in the group, the two actions are the point of the zone.
+  assert.match(empty.renderOperationsMap(), /ws-cmd-map-detachment is-empty/);
+  assert.doesNotMatch(detachmentCommandView('group').renderOperationsMap(), /is-empty/);
   const many = detachmentCommandView('group', [{ id: 'm1' }, { id: 'm2' }, { id: 'm3' }]);
   assert.match(many.renderOperationsMap(), /ws-cmd-map-zone-count">3</);
 });

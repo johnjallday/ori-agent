@@ -9691,6 +9691,30 @@ test('a scoped drop inside the group saves one position and never reparents', as
   assert.ok(patches[0].body.operations[0].positions.m1, 'the moved member was saved');
 });
 
+test('an empty group still draws its district, at the minimum frame, and says what it is for', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness();
+  const group = { id: 'g', kind: 'group', name: 'Studio', folder_slug: 'studio' };
+  map.mount(container, { ...scopedMountState(), workspaces: [group] });
+
+  assert.match(container.innerHTML, /ws-map-district[^"]*" role="group"/, 'the frame is drawn');
+  assert.match(
+    container.innerHTML,
+    /No members yet\. Build a workspace here or add an existing one\./
+  );
+  assert.doesNotMatch(container.innerHTML, /ws-map-tile[^-]/, 'no member tiles to draw');
+  // The minimum frame, from the shared geometry rather than a copied number.
+  const layout = map.computeWorldLayout([group], { scope: { groupId: 'g', nested: false } });
+  const district = layout.districts.find(d => d.id === 'g');
+  assert.equal(district.width, map.districtGeometry.minWidth);
+  assert.equal(district.height, map.districtGeometry.minHeight);
+
+  // Home never gets the group-page copy.
+  map.unmount(container);
+  map.mount(container, { workspaces: [group], hideChrome: true, noAutoSelect: true });
+  assert.doesNotMatch(container.innerHTML, /No members yet/);
+});
+
 test('scoped empty-ground Build holds the coordinate and hands the creator to the host', async () => {
   const { map, harness } = await mountedScopedDrag();
   const builds = [];

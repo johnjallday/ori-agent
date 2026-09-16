@@ -10534,7 +10534,9 @@ export class WorkspaceCommandView {
     const ws = (this.page && this.page.workspace) || {};
     const count = this.detachmentMemberCount();
     return (
-      '<section class="ws-cmd-map-detachment" data-map-zone="detachment" role="region" ' +
+      '<section class="ws-cmd-map-detachment' +
+      (count ? '' : ' is-empty') +
+      '" data-map-zone="detachment" role="region" ' +
       'aria-label="Detachment map">' +
       '<header class="ws-cmd-map-zone-head">' +
       '<div><span>Detachment</span><strong>' +

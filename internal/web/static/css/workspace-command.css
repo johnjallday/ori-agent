@@ -660,6 +660,10 @@
 .ws-cmd-map-detachment .ws-cmd-map-zone-action {
   white-space: nowrap;
 }
+/* With no members the two actions are the point of the zone (FR-27). */
+.ws-cmd-map-detachment.is-empty .ws-cmd-map-zone-action {
+  border-color: var(--ws-group-accent-line, var(--ws-line-bright));
+}
 .ws-cmd-detachment-picker {
   margin-bottom: 10px;
 }

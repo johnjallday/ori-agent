@@ -2533,6 +2533,11 @@
       escapeHtml('Actions for ' + name) +
       '"><span aria-hidden="true">⋯</span></button>' +
       '</div>' +
+      // A group page with no members yet says so inside its own frame, and the
+      // zone header carries the two ways to fix it (group-map-build FR-27).
+      (scopeGroupId && d.memberCount === 0
+        ? '<p class="ws-map-district-empty">No members yet. Build a workspace here or add an existing one.</p>'
+        : '') +
       // Explanatory text, not a colour: it names what the frame has ended up
       // around and what the user can do about it (FR-88, FR-163).
       (conflict
