@@ -65,17 +65,17 @@ Compatible older plugin-backed workspaces can be attached only through an explic
 
 ## Reviewed release and recovery
 
-Ori’s reviewed registry now enables the published macOS arm64 `v0.6.0` release:
+Ori’s reviewed registry now enables the published macOS arm64 `v0.6.1` release:
 
-- Immutable source commit: `03af9fda3e6b9d8cc3c0496c5e9ef6df99e870b9` (the annotated `v0.6.0` tag’s resolved commit).
-- Published asset: `reaper-plugin_v0.6.0_darwin_arm64`, **8,780,098 bytes**.
-- SHA-256: `4def4fec14ecf083b0358c686c608514d4b9afff99dd810f1184213312770119`.
-- Release: https://github.com/johnjallday/reaper-plugin/releases/tag/v0.6.0 (published September 15, 2026).
-- Source CI: https://github.com/johnjallday/reaper-plugin/actions/runs/35020185810.
-- Release workflow: https://github.com/johnjallday/reaper-plugin/actions/runs/35020185797.
-- Manifest identity at that commit: blueprint `reaper-song` version 7, assistant program `music-producer-assistant` schema 2, setup quest `reaper_setup` version 2 with four steps, required host features `assistant_program_v1`, `specialist_setup_journey_v1`, `setup_quests_v2` and `template_group_requirements_v1`.
+- Immutable source commit: `e11ca2942279af02a9a035039b18b146ff9fc89d` (the annotated `v0.6.1` tag’s resolved commit).
+- Published asset: `reaper-plugin_v0.6.1_darwin_arm64`, **8,780,098 bytes**.
+- SHA-256: `88c7dfd5ebf6a855ae41994a080c2339f392514f68ff47366463b5a84c5eb8c8`.
+- Release: https://github.com/johnjallday/reaper-plugin/releases/tag/v0.6.1 (published September 16, 2026).
+- Source CI: https://github.com/johnjallday/reaper-plugin/actions/runs/35142041208.
+- Release workflow: https://github.com/johnjallday/reaper-plugin/actions/runs/35142041273.
+- Manifest identity at that commit: blueprint `reaper-song` version 7, assistant program `music-producer-assistant` schema 2, setup quest `reaper_setup` version 2 with four steps, required host features `assistant_program_v1`, `specialist_setup_journey_v1`, `setup_quests_v2` and `template_group_requirements_v1`. The blueprint roles no longer declare the retired agent `type` key; nothing else in the manifest identity changed from 0.6.0.
 
-For host enablement, the actual published asset and checksum were downloaded and compared against the manifest at the tag’s resolved commit. Size and digest matched; the executable reported `0.6.0`. The previous `v0.5.0` pin was replaced, not merely enabled. A repeatable GitHub-backed check exercises both fresh reviewed install → separate enable and ordinary official-URL install → reviewed same-version replacement, without a development override:
+For host enablement, the actual published asset and checksum were downloaded and compared against the manifest at the tag’s resolved commit. Size and digest matched; the executable reported `0.6.1`. The previous `v0.6.0` pin was replaced, not merely enabled. A repeatable GitHub-backed check exercises both fresh reviewed install → separate enable and ordinary official-URL install → reviewed same-version replacement, without a development override:
 
 ```bash
 ORI_TEST_REVIEWED_INTEGRATION_RELEASE=1 go test ./internal/setupjourney \
@@ -88,7 +88,9 @@ Older Ori builds may still report an identity mismatch or an unavailable reviewe
 
 ### Pin history and moving the pin
 
-Plugin **0.6.0** is the first release that declares its setup quest under `setup_quests_v2`: `reaper_setup` version 2 with four steps and blueprint version 7. This Ori host no longer supports `setup_quests_v1`. Installed v0.5.1 and v0.5.2 plugins require it, so they fail closed: their manifests are refused until the plugin is updated. The previous pin, `v0.5.0` at commit `1f494db5a39d8c13f6149943b28e6a506d19631a` (SHA-256 `2bbf6b77418119cb21e827a407c8d5886e3effdb593ec0ad274e20d7d69c2ca9`), declared no quest, so its install quest offered only **Open Plugins**.
+Plugin **0.6.0** is the first release that declares its setup quest under `setup_quests_v2`: `reaper_setup` version 2 with four steps and blueprint version 7. This Ori host no longer supports `setup_quests_v1`. Installed v0.5.1 and v0.5.2 plugins require it, so they fail closed: their manifests are refused until the plugin is updated. The pin before that, `v0.5.0` at commit `1f494db5a39d8c13f6149943b28e6a506d19631a` (SHA-256 `2bbf6b77418119cb21e827a407c8d5886e3effdb593ec0ad274e20d7d69c2ca9`), declared no quest, so its install quest offered only **Open Plugins**.
+
+Plugin **0.6.1** only drops the retired agent `type` key from the blueprint roles (reaper-plugin#9, following ori-agent#490). Its blueprint, quest and host requirements are unchanged, so moving the pin needed only a new version, commit and artifact digest. The previous pin was `v0.6.0` at commit `03af9fda3e6b9d8cc3c0496c5e9ef6df99e870b9` (SHA-256 `4def4fec14ecf083b0358c686c608514d4b9afff99dd810f1184213312770119`). An installation of 0.6.0 no longer completes the install step: because it is older than the pin, it is offered a reviewed replacement with the pinned 0.6.1, and nothing changes until the user confirms it.
 
 A stale pin has one visible symptom worth recognising: the gate never accepts an installation **newer** than the pin and never offers a downgrade, so once a newer release is installed from the official URL the install step reports “Ori could not verify this installation against the reviewed source, format, and version” with only **Manage integration** available. The fix is to move the pin in Ori, not to reinstall the plugin.
 
