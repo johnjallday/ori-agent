@@ -1126,6 +1126,195 @@
   text-align: center;
   pointer-events: none;
 }
+/* With agents standing on the ground, the note marks the group's empty lot in
+   world space instead of sitting on top of them. */
+.ws-map-scoped-empty.is-lot {
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  max-width: none;
+  padding: 18px;
+  transform: none;
+  border: 1.5px dashed var(--ws-line-bright, rgba(154, 163, 173, 0.45));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--ws-panel, #16181d) 72%, transparent);
+  color: var(--ws-ink-dim, #9aa3ad);
+}
+
+/* ---------------------------------------------------------------------------
+   Agents on a group's own map (group-map-build PRD §10)
+
+   Units share a building's footprint for placement and overlap, so they sit
+   in the same 150px column a tile does. The Commander is the command post: a
+   larger, keeper-framed plate with its crest. Every state has a shape or text
+   as well as a colour (FR-120).
+   --------------------------------------------------------------------------- */
+.ws-map-unit {
+  position: absolute;
+  z-index: 5;
+  width: 150px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ws-ink, #d6d9de);
+  font: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+  cursor: pointer;
+  touch-action: none;
+  transform: translateY(0);
+  transition: transform 0.16s ease;
+}
+.ws-map-unit:hover {
+  transform: translateY(-3px);
+}
+.ws-map-canvas.is-drag-enabled .ws-map-unit {
+  cursor: grab;
+}
+.ws-map-unit-plate {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 76px;
+  height: 76px;
+  margin-top: 18px;
+  border: 1px solid var(--ws-line, #262931);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--ws-panel, #16181d) 90%, transparent);
+  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.32);
+}
+.ws-map-unit.is-commander .ws-map-unit-plate {
+  width: 98px;
+  height: 98px;
+  margin-top: 6px;
+  border: 2px solid var(--ws-keeper, #e8b54b);
+  border-radius: 20px;
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--ws-keeper, #e8b54b) 16%, transparent),
+    0 12px 22px rgba(0, 0, 0, 0.36);
+}
+.ws-map-unit-crest {
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  z-index: 1;
+  transform: translateX(-50%);
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--ws-keeper, #e8b54b);
+  color: #1b1405;
+  font-size: 11px;
+  line-height: 16px;
+}
+.ws-map-unit-portrait {
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.ws-map-unit-caption {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 3px 8px 4px;
+  border: 1px solid var(--ws-line, #262931);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ws-panel, #16181d) 92%, transparent);
+}
+.ws-map-unit-name {
+  max-width: 100%;
+  color: var(--ws-ink, #d6d9de);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-map-unit-role {
+  max-width: 100%;
+  color: var(--ws-ink-dim, #9aa3ad);
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-map-unit.is-commander .ws-map-unit-role {
+  color: var(--ws-keeper, #e8b54b);
+}
+.ws-map-unit-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ws-ink-dim, #9aa3ad);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+}
+.ws-map-unit.tone-waiting .ws-map-led,
+.ws-map-unit.tone-needs-input .ws-map-led {
+  background: var(--ws-waiting, #e8b54b);
+  box-shadow: 0 0 7px var(--ws-waiting, #e8b54b);
+}
+.ws-map-unit.tone-alert .ws-map-led {
+  background: var(--ws-alert, #e2654d);
+  box-shadow: 0 0 7px var(--ws-alert, #e2654d);
+}
+.ws-map-unit.is-selected .ws-map-unit-plate {
+  outline: 2px solid var(--ws-faction, #46d39a);
+  outline-offset: 4px;
+  box-shadow: 0 0 22px rgba(70, 211, 154, 0.35);
+}
+.ws-map-unit:focus-visible {
+  outline: none;
+}
+.ws-map-unit:focus-visible .ws-map-unit-plate {
+  outline: 2px solid var(--ws-faction, #46d39a);
+  outline-offset: 4px;
+}
+.ws-map-unit.is-dragging {
+  z-index: 9;
+  cursor: grabbing;
+  transform: translateY(-5px);
+  outline: 2px dashed var(--ws-faction, #46d39a);
+  outline-offset: 4px;
+  transition: none;
+}
+.ws-map-unit.is-unsaved {
+  outline: 2px dotted var(--ws-danger, #d9534f);
+  outline-offset: 4px;
+}
+.ws-map-unit.is-blocked {
+  outline: 3px solid var(--ws-danger, #d9534f);
+  outline-offset: 4px;
+  opacity: 0.5;
+}
+.ws-map-unit.is-dragging.is-blocked {
+  cursor: not-allowed;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ws-map-unit {
+    animation: ws-map-rise 0.4s ease both;
+    animation-delay: calc(var(--i, 0) * 28ms);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ws-map-unit,
+  .ws-map-unit:hover,
+  .ws-map-unit.is-dragging {
+    transition: none;
+    transform: none;
+  }
+}
 
 /* ---------------------------------------------------------------------------
    District resize overlay (#346 FR-52 – FR-57, FR-81)

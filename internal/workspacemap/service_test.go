@@ -70,6 +70,50 @@ func TestServiceRejectsReservedHQSite(t *testing.T) {
 	}
 }
 
+func TestServiceAuthorizesAgentAnchorsThroughTheirWorkspace(t *testing.T) {
+	service, lookup := newTestService(t, map[string]*workspace.Workspace{
+		"grp-1": {ID: "grp-1", Kind: "group", OwnerUserID: "local"},
+		"grp-2": {ID: "grp-2", Kind: "group", OwnerUserID: "alice"},
+	})
+	seedServiceWorkspace(t, service, "grp-1", "grp-2")
+
+	// An agent on a group's own map is placed in the same layout as buildings.
+	result, err := service.Apply(context.Background(), "local", Patch{Operations: []Operation{
+		SetPositions(map[string]Point{"agent:grp-1:studio%20manager": {X: 40, Y: 60}}),
+	}})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if got := result.Positions["agent:grp-1:studio%20manager"]; got != (Point{X: 40, Y: 60}) {
+		t.Fatalf("stored agent anchor = %+v, want {40 60}", got)
+	}
+	if len(lookup.gets) != 1 || lookup.gets[0] != "grp-1" {
+		t.Fatalf("lookups = %v, want only the owning workspace", lookup.gets)
+	}
+
+	cases := []struct {
+		name string
+		id   string
+		want error
+	}{
+		{"another user's workspace", "agent:grp-2:ops", ErrNodeNotOwned},
+		{"missing workspace", "agent:grp-ghost:ops", ErrNodeNotFound},
+		{"no key", "agent:grp-1:", ErrInvalidNodeID},
+		{"no workspace", "agent::ops", ErrInvalidNodeID},
+		{"no separator", "agent:grp-1", ErrInvalidNodeID},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := service.Apply(context.Background(), "local", Patch{Operations: []Operation{
+				SetPositions(map[string]Point{tc.id: {X: 0, Y: 0}}),
+			}})
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("Apply(%q) error = %v, want %v", tc.id, err, tc.want)
+			}
+		})
+	}
+}
+
 func TestServiceTreatsEmptyOwnerAsLocalUser(t *testing.T) {
 	service, _ := newTestService(t, map[string]*workspace.Workspace{
 		"ws-legacy": {ID: "ws-legacy"},

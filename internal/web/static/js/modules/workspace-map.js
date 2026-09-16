@@ -455,6 +455,9 @@
   // the canvas. Framing (open, Fit, Reset view) centres content in what is
   // left. Home passes none, so its framing is exactly the unset case.
   var frameInsets = { top: 0, left: 0 };
+  // The group's own agents, drawn on the ground beside its members (PRD §10).
+  // Only a scoped mount carries any; Home draws none.
+  var scopeUnits = [];
 
   function normalizeFrameInsets(raw) {
     var read = function (value) {
@@ -462,6 +465,119 @@
       return isFinite(n) && n > 0 ? n : 0;
     };
     return { top: read(raw && raw.top), left: read(raw && raw.left) };
+  }
+
+  // An agent anchor is "agent:<workspace id>:<agent key>" — the server
+  // authorizes it through the workspace (internal/workspacemap, AgentNodeID).
+  var AGENT_NODE_PREFIX = 'agent:';
+  var MAX_NODE_ID_LENGTH = 256;
+
+  function isAgentNodeId(id) {
+    return typeof id === 'string' && id.indexOf(AGENT_NODE_PREFIX) === 0;
+  }
+
+  /**
+   * The host's agent list, reduced to what a unit draws.
+   *
+   * `portraitHTML` is markup the host rendered and escaped itself (the same
+   * portrait its own roster draws); every other field is plain text escaped
+   * here. Units without a valid anchor id are dropped, and the first of a
+   * duplicated id wins, so one agent can never be drawn twice.
+   */
+  function normalizeScopeUnits(raw) {
+    var seen = Object.create(null);
+    return (Array.isArray(raw) ? raw : []).reduce(function (units, unit) {
+      var id = unit && typeof unit.id === 'string' ? unit.id : '';
+      if (!isAgentNodeId(id) || id.length > MAX_NODE_ID_LENGTH || seen[id]) return units;
+      seen[id] = true;
+      units.push({
+        id: id,
+        selectKey: String(unit.selectKey || ''),
+        name: String(unit.name || 'Agent'),
+        role: String(unit.role || ''),
+        status: String(unit.status || 'Idle'),
+        tone: String(unit.tone || 'idle'),
+        working: !!unit.working,
+        commander: !!unit.commander,
+        selected: !!unit.selected,
+        portraitHTML: typeof unit.portraitHTML === 'string' ? unit.portraitHTML : ''
+      });
+      return units;
+    }, []);
+  }
+
+  /**
+   * Where each agent stands on a group's own map.
+   *
+   * A saved anchor wins unless a building now stands on it — buildings are the
+   * group's structure, so a unit gives way rather than hiding one. Everything
+   * else stands in a column one cell and a step to the left of the members,
+   * Commander first, specialists beneath it and wrapping further left, so the
+   * command post reads as the head of the formation. Pure: nothing here is
+   * saved, and the same inputs always stand the units in the same places.
+   *
+   * @param {Array} units normalized units
+   * @param {{nodes: Array, hiddenNodes: Array, frame: object, positions: object}} input
+   */
+  function placeScopedUnits(units, input) {
+    var list = Array.isArray(units) ? units : [];
+    if (!list.length) return [];
+    var opts = input || {};
+    var occupied = (opts.nodes || []).concat(opts.hiddenNodes || []).map(function (node) {
+      return { x: node.x, y: node.y };
+    });
+    var positions = opts.positions || {};
+    var frame = opts.frame || { x: 0, y: 0, width: CELL_W, height: CELL_H };
+    function free(point) {
+      return !occupied.some(function (other) {
+        return footprintsOverlap(point, other);
+      });
+    }
+
+    var placed = Object.create(null);
+    list.forEach(function (unit) {
+      var point = safePoint(positions[unit.id]);
+      if (!point || !free(point)) return;
+      placed[unit.id] = { x: point.x, y: point.y, saved: true };
+      occupied.push(point);
+    });
+
+    var ordered = list.filter(function (unit) {
+      return unit.commander;
+    });
+    ordered = ordered.concat(
+      list.filter(function (unit) {
+        return !unit.commander;
+      })
+    );
+    var rows = Math.max(2, Math.round(frame.height / CELL_H));
+    var originX = frame.x + DISTRICT_PAD_X - CELL_W - SNAP_STEP;
+    var originY = frame.y + DISTRICT_PAD_Y;
+    var slot = 0;
+    ordered.forEach(function (unit) {
+      if (placed[unit.id]) return;
+      // Bounded: each unit can be passed over at most once per other anchor.
+      for (var guard = 0; guard < occupied.length + list.length + 1; guard++, slot++) {
+        var point = {
+          x: originX - Math.floor(slot / rows) * CELL_W,
+          y: originY + (slot % rows) * CELL_H
+        };
+        if (!free(point)) continue;
+        placed[unit.id] = { x: point.x, y: point.y, saved: false };
+        occupied.push(point);
+        slot++;
+        return;
+      }
+    });
+
+    return list
+      .filter(function (unit) {
+        return !!placed[unit.id];
+      })
+      .map(function (unit) {
+        var spot = placed[unit.id];
+        return { id: unit.id, kind: 'unit', unit: unit, x: spot.x, y: spot.y, saved: spot.saved };
+      });
   }
   /**
    * The group plus every workspace beneath it, at any depth.
@@ -1291,9 +1407,27 @@
     //    world bounds, pushing Fit all out toward a site nothing is drawn in.
     var hqSite = opts.hqSite ? placer.next() : null;
 
-    var bounds = worldBounds(nodes, districts, hqSite);
+    // 7. A group's own map stands its agents beside the members. They take no
+    //    cell from the fallback scan: Home never draws them, so they must not
+    //    change where anything Home draws is placed.
+    var units = [];
+    if (scope && opts.units && opts.units.length) {
+      var scopedDistrict = null;
+      districts.forEach(function (district) {
+        if (district.id === scope.groupId) scopedDistrict = district;
+      });
+      units = placeScopedUnits(opts.units, {
+        nodes: nodes,
+        hiddenNodes: hiddenNodes,
+        frame: scopedDistrict ? scopedDistrict.expandedFrame || scopedDistrict : null,
+        positions: savedInput
+      });
+    }
+
+    var bounds = worldBounds(nodes.concat(units), districts, hqSite);
     return {
       nodes: nodes,
+      units: units,
       // Kept for the movement path, which has to translate hidden descendants
       // atomically with the collapsed district they belong to (FR-113).
       hiddenNodes: hiddenNodes,
@@ -1869,12 +2003,20 @@
     });
     if (!found)
       return (layout && layout.bounds) || { minX: 0, minY: 0, maxX: CELL_W, maxY: CELL_H };
-    return {
+    var bounds = {
       minX: found.x,
       minY: found.y,
       maxX: found.x + found.width,
       maxY: found.y + found.height
     };
+    // The agents stand on the same ground, so the opening view includes them.
+    ((layout && layout.units) || []).forEach(function (unit) {
+      bounds.minX = Math.min(bounds.minX, unit.x);
+      bounds.minY = Math.min(bounds.minY, unit.y);
+      bounds.maxX = Math.max(bounds.maxX, unit.x + CELL_W);
+      bounds.maxY = Math.max(bounds.maxY, unit.y + CELL_H);
+    });
+    return bounds;
   }
 
   /**
@@ -2324,6 +2466,69 @@
     );
   }
 
+  /**
+   * One agent standing on a group's own map.
+   *
+   * A button, so it is focusable and activates like a building; the host
+   * decides what activating it means (its Unit Sheet). The Commander is the
+   * command post — a building-sized plate — and specialists are smaller units.
+   * State is carried by text as well as colour: the role and status are
+   * spelled out, and the Commander has its crest (FR-120).
+   */
+  function unitHTML(record, index) {
+    var unit = record.unit;
+    var tone = String(unit.tone || 'idle')
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, '');
+    var portrait =
+      unit.portraitHTML || avatarHTML(unit.name, unit.commander ? 'is-keeper' : 'ws-map-unit-face');
+    return (
+      '<button type="button" class="ws-map-unit' +
+      (unit.commander ? ' is-commander' : '') +
+      (unit.selected ? ' is-selected' : '') +
+      ' tone-' +
+      tone +
+      '" data-unit-id="' +
+      escapeHtml(unit.id) +
+      '" aria-pressed="' +
+      (unit.selected ? 'true' : 'false') +
+      '" style="left:' +
+      (Number(record.x) || 0) +
+      'px;top:' +
+      (Number(record.y) || 0) +
+      'px;--i:' +
+      (index || 0) +
+      '" aria-label="' +
+      escapeHtml(
+        unit.name +
+          ', ' +
+          (unit.role ? unit.role + ', ' : '') +
+          unit.status +
+          '. Activate to open the Unit Sheet'
+      ) +
+      '">' +
+      '<span class="ws-map-unit-plate" aria-hidden="true">' +
+      (unit.commander ? '<span class="ws-map-unit-crest">★</span>' : '') +
+      '<span class="ws-map-unit-portrait">' +
+      portrait +
+      '</span>' +
+      '</span>' +
+      // One caption card, so the text reads on any floor in either theme.
+      '<span class="ws-map-unit-caption" aria-hidden="true">' +
+      '<span class="ws-map-unit-name">' +
+      escapeHtml(unit.name) +
+      '</span>' +
+      (unit.role ? '<span class="ws-map-unit-role">' + escapeHtml(unit.role) + '</span>' : '') +
+      '<span class="ws-map-unit-status"><span class="ws-map-led' +
+      (unit.working ? ' is-working' : '') +
+      '"></span>' +
+      escapeHtml(unit.status) +
+      '</span>' +
+      '</span>' +
+      '</button>'
+    );
+  }
+
   function hqSiteHTML(cell, selectedId, index, view) {
     var isSelected = selectedId === HQ_SITE_ID;
     var left = Number(cell && cell.left) || 0;
@@ -2549,7 +2754,8 @@
       positions: layoutState.positions,
       viewport: opts.viewport,
       hqSite: site.show,
-      scope: scopeGroupId ? { groupId: scopeGroupId, nested: scopeNested } : null
+      scope: scopeGroupId ? { groupId: scopeGroupId, nested: scopeNested } : null,
+      units: scopeGroupId ? scopeUnits : null
     });
     // Nodes carry their raw world coordinates into the DOM; the world layer's
     // camera transform is the only thing standing between world space and the
@@ -2593,6 +2799,31 @@
     if (layout.hqSite) {
       parts.push(hqSiteHTML(toLayer(layout.hqSite), selectedId, layout.nodes.length, site));
     }
+    var vacantLot = null;
+    if (scopeGroupId && !layout.nodes.length && layout.units.length) {
+      layout.districts.forEach(function (district) {
+        if (district.id === scopeGroupId) vacantLot = district.expandedFrame || district;
+      });
+    }
+    if (vacantLot) {
+      // With agents standing on the ground, a screen-centred note would sit on
+      // top of them. The note marks the group's empty lot instead, beside its
+      // Commander, where the first building will go.
+      parts.push(
+        '<p class="ws-map-scoped-empty is-lot" role="status" style="left:' +
+          vacantLot.x +
+          'px;top:' +
+          vacantLot.y +
+          'px;width:' +
+          vacantLot.width +
+          'px;height:' +
+          vacantLot.height +
+          'px">No members yet. Build a workspace here or add an existing one.</p>'
+      );
+    }
+    layout.units.forEach(function (record, index) {
+      parts.push(unitHTML(record, layout.nodes.length + index));
+    });
     // No ordinary create pad is drawn among the sites (#367). Creating a
     // workspace belongs to the chrome around the map — the topbar's ⊕ New
     // Workspace, and Home's workspace-area header — not to a building-shaped
@@ -2621,7 +2852,7 @@
         // A group with no members yet says so in screen space, where the copy
         // stays readable at any zoom; the host's toolbar carries Build and Add
         // existing (group-map-build FR-27).
-        (scopeGroupId && !layout.nodes.length
+        (scopeGroupId && !layout.nodes.length && !vacantLot
           ? '<p class="ws-map-scoped-empty" role="status">No members yet. Build a workspace here or add an existing one.</p>'
           : '') +
         placementControlsHTML() +
@@ -2779,6 +3010,9 @@
       '+scroll, the + / − buttons, or the + / − keys.</li>' +
       '<li><b>Move</b> — turn Move on, then drag a building or district. Buildings can reposition, join another expanded district, or leave their group on open ground; membership changes ask for confirmation. A district moves with all its workspaces and never changes membership.</li>' +
       '<li><b>Keyboard move</b> — with Move on, select a building or district and use an arrow key to begin; press Enter to save or Escape to cancel.</li>' +
+      (scopeGroupId
+        ? "<li><b>Agents</b> — the group's Commander and specialists stand on the ground with its workspaces. Select one to open its Unit Sheet; with Move on, drag it like a building.</li>"
+        : '') +
       '<li><b>Build</b> — right-click empty ground where it should go and choose Build.</li>' +
       '<li><b>Snap</b> — on by default. Hold ' +
       (isApplePlatform() ? 'Option' : 'Alt') +
@@ -4184,6 +4418,7 @@
     }
     if (spec.type === 'hq') return scoped ? [] : hqMenuItems(spec.view || hqSiteView(hqStatus));
     if (spec.type === 'canvas') return canvasMenuItems(scoped);
+    if (spec.type === 'unit') return [{ label: 'Open Unit Sheet', action: 'open-unit' }];
     return [];
   }
 
@@ -4199,6 +4434,7 @@
       return 'Actions for ' + ((spec.ws && spec.ws.name) || 'group') + ' group';
     }
     if (spec.type === 'hq') return 'Personal HQ actions';
+    if (spec.type === 'unit') return 'Actions for ' + ((spec.unit && spec.unit.name) || 'agent');
     return 'Map actions';
   }
 
@@ -4501,6 +4737,9 @@
         if (options && typeof options.onOpen === 'function') options.onOpen(id);
         else openWorkspace(id);
         break;
+      case 'open-unit':
+        if (context.unit) openUnit(container, context.unit, options);
+        break;
       case 'open-backlog':
         announce(container, 'Opening the Backlog for ' + name);
         openWorkspace(id, { panel: 'backlog' });
@@ -4634,6 +4873,11 @@
     if (!node || typeof node.closest !== 'function') return null;
     var hq = node.closest('[data-hq-site]');
     if (hq) return { type: 'hq', view: hqSiteView(hqStatus), element: hq };
+    var unitEl = node.closest('.ws-map-unit[data-unit-id]');
+    if (unitEl) {
+      var unit = renderedUnit(unitEl.getAttribute('data-unit-id'));
+      return unit ? { type: 'unit', id: unit.id, unit: unit.unit, element: unitEl } : null;
+    }
     var tile = node.closest('.ws-map-tile[data-ws-id]');
     if (tile) {
       var tileId = tile.getAttribute('data-ws-id');
@@ -4720,7 +4964,11 @@
       context: {
         id: target.id || '',
         type: target.type,
-        name: (target.ws && target.ws.name) || (target.type === 'hq' ? 'Personal HQ' : 'workspace'),
+        name:
+          (target.ws && target.ws.name) ||
+          (target.unit && target.unit.name) ||
+          (target.type === 'hq' ? 'Personal HQ' : 'workspace'),
+        unit: target.unit || null,
         // Canvas and district Build share the same camera/snap placement rule.
         world:
           target.type === 'canvas' || target.type === 'district'
@@ -5294,12 +5542,17 @@
       // Move mode merges pointer and keyboard placement behind one safe-default
       // control. The first arrow lazily starts a keyboard transaction for the
       // current selection; without Move mode, arrows keep panning the camera.
-      if (
-        !moveState &&
-        moveModeEnabled &&
-        /^Arrow(?:Left|Right|Up|Down)$/.test(event.key) &&
-        selectedNodeAnchor()
-      ) {
+      var arrowMove =
+        !moveState && moveModeEnabled && /^Arrow(?:Left|Right|Up|Down)$/.test(event.key);
+      // An agent is never the map's selection, so the unit that has focus is
+      // the one an arrow moves.
+      var focusedUnit =
+        arrowMove && event.target && typeof event.target.closest === 'function'
+          ? event.target.closest('.ws-map-unit[data-unit-id]')
+          : null;
+      if (focusedUnit) {
+        startUnitKeyboardMove(container, focusedUnit);
+      } else if (arrowMove && selectedNodeAnchor()) {
         startKeyboardMove(container);
       }
       if (handleMoveKey(container, event)) {
@@ -6098,6 +6351,10 @@
     // nothing any more — it is not what was drawn (#346 FR-17, FR-46).
     var district = renderedDistrict(id);
     if (district) return { x: district.x, y: district.y };
+    // A unit is where it is drawn: a saved anchor a building has since taken
+    // is not where the unit stands.
+    var unit = renderedUnit(id);
+    if (unit) return { x: unit.x, y: unit.y };
     var saved = layoutState.positions[id];
     if (saved) return { x: saved.x, y: saved.y };
     if (!lastWorldLayout) return null;
@@ -6139,7 +6396,20 @@
     (lastWorldLayout.nodes || []).forEach(pin);
     (lastWorldLayout.hiddenNodes || []).forEach(pin);
     (lastWorldLayout.districts || []).forEach(pin);
+    // A unit's automatic spot follows the members, so it is pinned for the
+    // same reason: moving one building must not walk the agents.
+    (lastWorldLayout.units || []).forEach(pin);
     return positions;
+  }
+
+  // renderedUnit returns the agent unit currently drawn for an anchor id.
+  function renderedUnit(id) {
+    if (!isAgentNodeId(id) || !lastWorldLayout) return null;
+    var found = null;
+    (lastWorldLayout.units || []).forEach(function (unit) {
+      if (unit.id === id) found = unit;
+    });
+    return found;
   }
 
   function withAutomaticLayoutPins(overrides) {
@@ -6159,11 +6429,18 @@
       occupied.push(anchor);
     }
     Object.keys(layoutState.positions).forEach(function (nodeId) {
+      // Agent anchors belong to one group's own map. Home never draws them, so
+      // they occupy nothing there; on the group map the drawn units below
+      // claim where the agents actually stand.
+      if (isAgentNodeId(nodeId)) return;
       claim(nodeId, layoutState.positions[nodeId]);
     });
     if (lastWorldLayout) {
       lastWorldLayout.nodes.forEach(function (node) {
         claim(node.id, node);
+      });
+      (lastWorldLayout.units || []).forEach(function (unit) {
+        claim(unit.id, unit);
       });
       // Collapsing a district hides its member tiles, not their real map
       // footprints. A reviewed candidate must not be allowed to occupy a
@@ -6469,6 +6746,11 @@
     return { operations: operations, conflict: null };
   }
 
+  // What a move announcement calls the thing that moved.
+  function movedNoun(id) {
+    return isAgentNodeId(id) ? 'agent' : 'workspace';
+  }
+
   function commitMove(container, id, el, point, previous, intent) {
     var plan = memberMoveOperations(id, point, intent);
     if (!plan.operations) {
@@ -6508,7 +6790,9 @@
         if (el && el.focus) el.focus();
         announce(
           container,
-          'That move could not be saved. The workspace is back at ' +
+          'That move could not be saved. The ' +
+            movedNoun(id) +
+            ' is back at ' +
             formatCoordinate(previous) +
             '. Use Retry position to try again.'
         );
@@ -6905,9 +7189,14 @@
   }
 
   function bindTileDrag(container, workspaces) {
-    var tiles = container.querySelectorAll('.ws-map-tile[data-ws-id]');
+    // A group's agents move by exactly the building rules: same threshold,
+    // snapping, overlap refusal, nearest-free resolution, and one request.
+    var tiles = container.querySelectorAll('.ws-map-tile[data-ws-id], .ws-map-unit[data-unit-id]');
     Array.prototype.forEach.call(tiles, function (el) {
       if (!el || typeof el.addEventListener !== 'function') return;
+      var nodeIdOf = function () {
+        return el.getAttribute('data-ws-id') || el.getAttribute('data-unit-id') || '';
+      };
 
       el.addEventListener('pointerdown', function (event) {
         if (layoutState.status !== 'ready' || !moveModeEnabled) return;
@@ -6922,7 +7211,7 @@
         if (event.target && event.target.closest && event.target.closest('[data-harvest-pile]')) {
           return;
         }
-        var id = el.getAttribute('data-ws-id');
+        var id = nodeIdOf();
         var origin = committedAnchor(id);
         if (!id || !origin) return;
         dragState = {
@@ -7024,7 +7313,10 @@
         suppressClickFor = state.id;
         if (cancelled) {
           placeElement(el, state.origin);
-          announce(container, 'Move cancelled. The workspace is back where it was.');
+          announce(
+            container,
+            'Move cancelled. The ' + movedNoun(state.id) + ' is back where it was.'
+          );
           return;
         }
         var target = resolveDropAnchor(state.id, state.candidate);
@@ -7056,7 +7348,7 @@
       el.addEventListener(
         'click',
         function (event) {
-          if (suppressClickFor !== el.getAttribute('data-ws-id')) return;
+          if (!suppressClickFor || suppressClickFor !== nodeIdOf()) return;
           suppressClickFor = null;
           if (event.preventDefault) event.preventDefault();
           if (event.stopPropagation) event.stopPropagation();
@@ -7624,6 +7916,26 @@
     );
   }
 
+  function startUnitKeyboardMove(container, el) {
+    if (layoutState.status !== 'ready') {
+      announce(container, 'Positions cannot be saved right now, so moving is unavailable');
+      return;
+    }
+    var id = el.getAttribute('data-unit-id');
+    var anchor = committedAnchor(id);
+    if (!id || !anchor) return;
+    moveState = { id: id, el: el, origin: anchor, candidate: anchor };
+    var banner = container.querySelector('[data-map-build-banner]');
+    if (banner) banner.hidden = false;
+    setDragReadout(container, anchor, KEYBOARD_MOVE_INSTRUCTION);
+    announce(
+      container,
+      'Moving this agent from ' +
+        formatCoordinate(anchor) +
+        '. Arrow keys move, Enter saves, Escape cancels.'
+    );
+  }
+
   function endKeyboardMove(container, commit) {
     if (!moveState) return;
     var state = moveState;
@@ -7661,7 +7973,7 @@
 
     if (!commit) {
       placeElement(state.el, state.origin);
-      announce(container, 'Move cancelled. The workspace is back where it was.');
+      announce(container, 'Move cancelled. The ' + movedNoun(state.id) + ' is back where it was.');
       return;
     }
     var target = resolveDropAnchor(state.id, state.candidate);
@@ -8625,6 +8937,31 @@
     }
   }
 
+  // Activating a unit belongs to the host: it knows the agent and owns the
+  // sheet that shows it. The map only reports which one.
+  function openUnit(container, unit, options) {
+    if (!unit || !options || typeof options.onSelectUnit !== 'function') return;
+    announce(container, 'Opening the Unit Sheet for ' + unit.name);
+    options.onSelectUnit({
+      id: unit.id,
+      selectKey: unit.selectKey,
+      name: unit.name
+    });
+  }
+
+  function bindUnits(container, options) {
+    var els = container.querySelectorAll('.ws-map-unit[data-unit-id]');
+    Array.prototype.forEach.call(els, function (el) {
+      if (!el || typeof el.addEventListener !== 'function') return;
+      // Bound after bindTileDrag, whose capture-phase listener swallows the
+      // click a finished drag synthesizes.
+      el.addEventListener('click', function () {
+        var record = renderedUnit(el.getAttribute('data-unit-id'));
+        if (record) openUnit(container, record.unit, options);
+      });
+    });
+  }
+
   function bindHQSite(container, options) {
     var site = container.querySelector('[data-hq-site]');
     if (!site) return;
@@ -8660,6 +8997,7 @@
     scopeGroupId = String((state && state.scopeGroupId) || '').trim();
     scopeNested = !!scopeGroupId && isNestedGroup(allWorkspaces, scopeGroupId);
     frameInsets = normalizeFrameInsets(state && state.frameInsets);
+    scopeUnits = scopeGroupId ? normalizeScopeUnits(state && state.units) : [];
     var workspaces = scopeGroupId
       ? scopeWorkspacesToGroup(allWorkspaces, scopeGroupId)
       : allWorkspaces;
@@ -8754,6 +9092,7 @@
     bindMoveControl(container);
     bindSnapControl(container);
     bindTileDrag(container, workspaces);
+    bindUnits(container, state);
     bindDistrictDrag(container);
     bindResizeHandles(container);
     bindResetLayout(container);
@@ -8765,7 +9104,13 @@
     // Focus returns to the record it was on before a committed move or a
     // refresh re-rendered the map (FR-117).
     if (pendingFocusId) {
-      var refocus = container.querySelector('.ws-map-tile[data-ws-id="' + pendingFocusId + '"]');
+      var refocus = container.querySelector(
+        (isAgentNodeId(pendingFocusId)
+          ? '.ws-map-unit[data-unit-id="'
+          : '.ws-map-tile[data-ws-id="') +
+          pendingFocusId +
+          '"]'
+      );
       pendingFocusId = '';
       if (refocus && refocus.focus) refocus.focus();
     }
@@ -8817,6 +9162,7 @@
       cameraReady = false;
       scopeGroupId = '';
       scopeNested = false;
+      scopeUnits = [];
     }
     if (abandonedPlacement) {
       var back =
@@ -8938,6 +9284,62 @@
     scopedGroupPresentation: scopedGroupPresentation,
     scopedFrameBounds: scopedFrameBounds,
     normalizeFrameInsets: normalizeFrameInsets,
+    normalizeScopeUnits: normalizeScopeUnits,
+    placeScopedUnits: placeScopedUnits,
+    /**
+     * Refresh what the group's agents show — status, tone, selection, portrait —
+     * without a re-mount, which would rebuild the ground under a user mid-look.
+     * Returns false when the set of agents itself changed; the host re-mounts
+     * then, because a new agent needs a place to stand.
+     */
+    updateUnits: function (container, units) {
+      if (!container || !scopeGroupId || !lastMount || lastMount.container !== container) {
+        return false;
+      }
+      var next = normalizeScopeUnits(units);
+      var sameSet =
+        next.length === scopeUnits.length &&
+        next.every(function (unit, index) {
+          return unit.id === scopeUnits[index].id && unit.commander === scopeUnits[index].commander;
+        });
+      if (!sameSet) return false;
+      scopeUnits = next;
+      if (lastMount.state) lastMount.state = Object.assign({}, lastMount.state, { units: units });
+      var byId = Object.create(null);
+      next.forEach(function (unit) {
+        byId[unit.id] = unit;
+      });
+      if (!lastWorldLayout) return true;
+      (lastWorldLayout.units || []).forEach(function (record) {
+        if (byId[record.id]) record.unit = byId[record.id];
+        if (
+          typeof document === 'undefined' ||
+          typeof document.createElement !== 'function' ||
+          typeof container.querySelector !== 'function'
+        ) {
+          return;
+        }
+        var el = container.querySelector('.ws-map-unit[data-unit-id="' + record.id + '"]');
+        if (!el) return;
+        var holder = document.createElement('div');
+        holder.innerHTML = unitHTML(record, 0);
+        var fresh = holder.firstChild;
+        if (!fresh) return;
+        // Keep the element — its listeners, focus, pointer capture, and any move
+        // preview — and take the fresh one's content and state.
+        var transient = ['is-dragging', 'is-blocked', 'is-unsaved'].filter(function (name) {
+          return el.classList.contains(name);
+        });
+        el.className = fresh.className;
+        transient.forEach(function (name) {
+          el.classList.add(name);
+        });
+        el.setAttribute('aria-pressed', fresh.getAttribute('aria-pressed'));
+        el.setAttribute('aria-label', fresh.getAttribute('aria-label'));
+        el.innerHTML = fresh.innerHTML;
+      });
+      return true;
+    },
     // The coordinate engine: saved anchors, deterministic fallback placement,
     // district effective frames, content bounds, and world sizing, all pure so
     // they can be asserted without a browser (FR-123).

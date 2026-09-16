@@ -107,6 +107,34 @@ const (
 // be persisted as if it were a workspace ID (FR-30).
 const ReservedHQSiteID = "__personal_hq_site__"
 
+// AgentNodePrefix marks an anchor that belongs to an agent drawn on a group's
+// own map rather than to a workspace. The full identifier is
+// "agent:<workspace id>:<agent key>": the owning workspace is what ownership is
+// checked against, and the key only has to be stable for the client that
+// draws it. Agent anchors live in the same layout as buildings so they share
+// its revisions, conflict handling, and Reset layout.
+const AgentNodePrefix = "agent:"
+
+// AgentNodeID builds the anchor identifier for one agent of a workspace.
+func AgentNodeID(workspaceID, agentKey string) string {
+	return AgentNodePrefix + workspaceID + ":" + agentKey
+}
+
+// ParseAgentNodeID splits an agent anchor identifier into its owning workspace
+// and agent key, and reports whether id is an agent anchor at all. A malformed
+// agent identifier (no workspace or no key) reports true with empty parts, so
+// callers refuse it instead of treating it as a workspace ID.
+func ParseAgentNodeID(id string) (workspaceID, agentKey string, isAgent bool) {
+	if !strings.HasPrefix(id, AgentNodePrefix) {
+		return "", "", false
+	}
+	workspaceID, agentKey, ok := strings.Cut(strings.TrimPrefix(id, AgentNodePrefix), ":")
+	if !ok || strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(agentKey) == "" {
+		return "", "", true
+	}
+	return workspaceID, agentKey, true
+}
+
 // Errors returned for input this package refuses to persist. Callers map these
 // to bounded 4xx responses rather than letting malformed geometry reach the
 // stored record (FR-100).

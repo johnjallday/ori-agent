@@ -86,10 +86,11 @@ test('a group page draws its own district, and its coordinates are Home’s', as
   const zone = await openGroupMap(page, group.folder_slug);
 
   // FR-1/FR-3 (PRD §10): one map — the shared Map scoped to this group, with
-  // the agents and the Detachment toolbar riding on it.
+  // its agents standing on the ground and the Detachment toolbar riding on it.
   await expect(zone).toHaveAttribute('aria-label', 'Group map');
   await expect(page.locator('.ws-cmd-opmap')).toHaveCount(1);
-  await expect(zone.locator('.ws-cmd-map-command-post')).toBeVisible();
+  await expect(zone.locator('.ws-map-unit.is-commander')).toBeVisible();
+  await expect(zone.locator('.ws-cmd-map-command-post')).toHaveCount(0);
   const toolbar = zone.locator('[data-map-zone="detachment"]');
   await expect(toolbar).toHaveAttribute('role', 'toolbar');
   await expect(toolbar.locator('.ws-cmd-map-zone-count')).toHaveText('2');
@@ -128,6 +129,74 @@ test('a group page draws its own district, and its coordinates are Home’s', as
     top: parseFloat((el as HTMLElement).style.top)
   }));
   expect(onHome).toEqual(onGroupPage);
+});
+
+test('a group’s Commander stands on its map, opens its Unit Sheet, and keeps where it is moved', async ({
+  page
+}) => {
+  await skipOnboarding(page);
+  const tag = String(Date.now()).slice(-5);
+  const group = await createGroup(page, `Unit Group ${tag}`);
+  await createMember(page, `Post ${tag}`, group.id);
+
+  const zone = await openGroupMap(page, group.folder_slug);
+  const commander = zone.locator('.ws-map-unit.is-commander');
+  await commander.waitFor({ timeout: 20000 });
+  const unitId = await commander.getAttribute('data-unit-id');
+  expect(unitId).toMatch(new RegExp(`^agent:${group.id}:`));
+
+  // Activating the unit opens the same Unit Sheet the roster card did.
+  await commander.click();
+  await expect(page.locator('.ws-cmd-map-window')).toContainText('Unit Sheet');
+  await page.evaluate(() => {
+    const close = Array.from(document.querySelectorAll('.ws-cmd-map-window button')).find(
+      button => button.textContent?.trim() === '×'
+    ) as HTMLButtonElement | undefined;
+    close?.click();
+  });
+  await expect(page.locator('.ws-cmd-map-window')).toHaveCount(0);
+
+  // With Move on it drags like a building, and the anchor is saved in the
+  // one shared layout under its agent id.
+  await page.evaluate(() => {
+    const move = document.querySelector(
+      '.ws-cmd-detachment-host [data-map-drag]'
+    ) as HTMLButtonElement | null;
+    if (move && move.getAttribute('aria-pressed') !== 'true') move.click();
+  });
+  const before = await commander.evaluate(el => (el as HTMLElement).style.left);
+  const box = await commander.boundingBox();
+  expect(box).not.toBeNull();
+  const start = { x: box!.x + box!.width / 2, y: box!.y + box!.height / 3 };
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  for (let step = 1; step <= 8; step += 1) {
+    await page.mouse.move(start.x - step * 12, start.y + step * 6);
+  }
+  await page.mouse.up();
+  await expect
+    .poll(async () => {
+      const layout = await (await page.request.get('/api/workspace-map/layout')).json();
+      return layout.layout.positions[unitId!] || null;
+    })
+    .not.toBeNull();
+  const saved = (await (await page.request.get('/api/workspace-map/layout')).json()).layout
+    .positions[unitId!];
+
+  await page.reload();
+  const again = zone.locator(`.ws-map-unit[data-unit-id="${unitId}"]`);
+  await again.waitFor({ timeout: 20000 });
+  const after = await again.evaluate(el => ({
+    x: parseFloat((el as HTMLElement).style.left),
+    y: parseFloat((el as HTMLElement).style.top)
+  }));
+  expect(after).toEqual(saved);
+  expect(`${after.x}px`).not.toBe(before);
+
+  // Home never draws a group's agents.
+  await page.goto('/');
+  await page.locator('.ws-map-tile').first().waitFor({ timeout: 20000 });
+  await expect(page.locator('.ws-map-unit')).toHaveCount(0);
 });
 
 test('Build from a group page opens the shared wizard with the parent locked', async ({ page }) => {
@@ -244,14 +313,20 @@ for (const viewport of [
             quest: box(document.querySelector('.ws-cmd-map-quest-fab')),
             belt: box(root && root.querySelector('.ws-cmd-map-belt')),
             toolbar: box(root && root.querySelector('.ws-cmd-map-group-bar')),
-            agents: box(root && root.querySelector('.ws-cmd-map-command-post')),
             controls: box(root && root.querySelector('.ws-map-control-dock'))
           },
           // Page-wide floating widgets pinned to the viewport's corner.
           floating: box(document.querySelector('button[aria-label^="Open Ori Help"]')),
+          // Buildings and the agents standing beside them: everything the
+          // district opens framed on.
           tiles: Array.from(
-            (root && root.querySelectorAll('.ws-cmd-detachment-host .ws-map-tile')) || []
-          ).map(box)
+            (root &&
+              root.querySelectorAll(
+                '.ws-cmd-detachment-host .ws-map-tile, .ws-cmd-detachment-host .ws-map-unit'
+              )) ||
+              []
+          ).map(box),
+          units: (root && root.querySelectorAll('.ws-cmd-detachment-host .ws-map-unit').length) || 0
         };
       });
     let snapshot = await measure();
@@ -260,7 +335,8 @@ for (const viewport of [
         snapshot = await measure();
         return (
           Object.values(snapshot.overlays).every(Boolean) &&
-          snapshot.tiles.length === 2 &&
+          snapshot.units >= 1 &&
+          snapshot.tiles.length === 2 + snapshot.units &&
           snapshot.tiles.every(Boolean)
         );
       })
@@ -289,12 +365,18 @@ for (const viewport of [
       ).toBe(false);
     }
 
-    // The district opens framed in the space the overlays leave clear.
-    for (const box of snapshot.tiles) {
+    // The district opens framed in the space the overlays leave clear, and no
+    // agent stands on a building.
+    snapshot.tiles.forEach((box, index) => {
       for (const name of names) {
-        expect(boxesOverlap(box, overlays[name]), `a building sits under ${name}`).toBe(false);
+        expect(boxesOverlap(box, overlays[name]), `a building or agent sits under ${name}`).toBe(
+          false
+        );
       }
-    }
+      for (const other of snapshot.tiles.slice(index + 1)) {
+        expect(boxesOverlap(box, other), 'two things stand on one spot').toBe(false);
+      }
+    });
 
     // One map wide, never wider than the page.
     const overflow = await page.evaluate(

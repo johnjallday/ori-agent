@@ -715,6 +715,23 @@
   background: color-mix(in srgb, var(--ws-panel) 92%, transparent);
 }
 
+/* An agent standing on the group map wears its roster portrait, sized to the
+   unit's plate. */
+.ws-map-unit .ws-cmd-character.is-roster,
+.ws-map-unit .ws-cmd-character.is-roster.ws-map-av {
+  --aa-size: 58px;
+  width: 58px;
+  height: 58px;
+  flex-basis: 58px;
+}
+.ws-map-unit.is-commander .ws-cmd-character.is-roster,
+.ws-map-unit.is-commander .ws-cmd-character.is-roster.ws-map-av {
+  --aa-size: 76px;
+  width: 76px;
+  height: 76px;
+  flex-basis: 76px;
+}
+
 /* The Detachment toolbar, between New Quest and the tool belt. */
 .ws-cmd-map-group-bar {
   position: absolute;

@@ -5109,9 +5109,22 @@ test('group template status keeps group, coordinator, and integration as separat
 
 // ---------- Detachment map zone (group-map-build FR-1 – FR-6) ----------
 
-function detachmentCommandView(kind = 'group', members = [{ id: 'm1', name: 'Mixing' }]) {
+function detachmentCommandView(
+  kind = 'group',
+  members = [{ id: 'm1', name: 'Mixing' }],
+  { agents = [], entry = '' } = {}
+) {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   const group = { id: 'g', name: 'Studio', kind: 'group', children: members };
+  const agentGroups = () =>
+    agents.map(name => ({
+      key: name.toLowerCase(),
+      name,
+      isWorkspaceAgent: true,
+      instanceCount: 1,
+      roles: ['Agent'],
+      tasks: []
+    }));
   Object.assign(commandView, {
     viewMode: 'map',
     selectedAgentKey: '',
@@ -5126,7 +5139,12 @@ function detachmentCommandView(kind = 'group', members = [{ id: 'm1', name: 'Mix
       workspaceId: 'g',
       workspace: { id: 'g', name: 'Studio', kind, mcp_bindings: [], skill_bindings: [] },
       tasks: [],
-      buildAgentGroups: () => [],
+      buildAgentGroups: agentGroups,
+      isWorkspaceEntryAgent: name => name === entry,
+      getAgentRosterStatus: name =>
+        name === entry
+          ? { key: 'working', label: 'Working', detail: 'Task in progress' }
+          : { key: 'idle', label: 'Idle', detail: 'No active tasks' },
       membersPanel: { group, tree: [group, { id: 'other', name: 'Office', kind: 'group' }] }
     }
   });
@@ -5169,6 +5187,61 @@ test('a group’s Map mode is one combined surface: the map slot, agents over it
     /class="ws-cmd-opmap" role="region" aria-label="Workspace operations map"/
   );
   assert.match(plainHTML, /<section class="ws-cmd-map-world" data-map-zone="agents"/);
+});
+
+test('a group’s agents stand on the map; only a state needing action docks a card', () => {
+  const staffed = detachmentCommandView('group', undefined, {
+    agents: ['Boss', 'Scout'],
+    entry: 'Boss'
+  });
+  const html = staffed.renderOperationsMap();
+  assert.doesNotMatch(
+    html,
+    /ws-cmd-map-command-post/,
+    'no docked column once there is a Commander'
+  );
+  assert.doesNotMatch(html, /data-cmd-map-select-agent/, 'the agents are units on the map instead');
+  assert.match(html, /<section class="ws-cmd-map-world is-overlay" data-map-zone="agents"/);
+
+  const units = staffed.detachmentUnits();
+  assert.deepEqual(
+    units.map(unit => [unit.id, unit.selectKey, unit.commander, unit.working]),
+    [
+      ['agent:g:boss', 'Boss', true, true],
+      ['agent:g:scout', 'Scout', false, false]
+    ]
+  );
+  assert.match(units[0].role, /Commander/);
+  assert.equal(units[0].status, 'Working');
+  assert.equal(units[1].role, 'Agent');
+  assert.match(units[0].portraitHTML, /ws-cmd-character is-roster/);
+  assert.equal(units.filter(unit => unit.selected).length, 1, 'the selected agent is marked');
+
+  const leaderless = detachmentCommandView('group', undefined, { agents: ['Scout'] });
+  const repair = leaderless.renderOperationsMap();
+  assert.match(
+    repair,
+    /<div class="ws-cmd-map-command-post"><div class="ws-cmd-map-command-repair">/
+  );
+  assert.doesNotMatch(
+    repair,
+    /ws-cmd-map-agent-field/,
+    'specialists stand on the map, not the card'
+  );
+  assert.equal(leaderless.detachmentUnits().length, 1);
+
+  const empty = detachmentCommandView('group', undefined, { agents: [] }).renderOperationsMap();
+  assert.match(empty, /ws-cmd-map-command-post"><div class="ws-cmd-map-empty is-agent-empty">/);
+});
+
+test('an agent name too long for an anchor id falls back to a stable hashed key', () => {
+  const longName = 'Agent ' + 'with a very long name '.repeat(20);
+  const view = detachmentCommandView('group', undefined, { agents: [longName], entry: longName });
+  const [unit] = view.detachmentUnits();
+  assert.ok(unit.id.length <= 256, 'fits the server’s node id limit');
+  assert.match(unit.id, /^agent:g:h[0-9a-f]{8}$/);
+  assert.equal(view.detachmentUnits()[0].id, unit.id, 'stable across renders');
+  assert.equal(unit.selectKey, encodeURIComponent(longName));
 });
 
 test('the toolbar offers Build and Add existing, enabled even when the layout is read-only', () => {
@@ -5402,6 +5475,77 @@ test('the scoped map re-mounts only when membership changes, and unmounts off Ma
     commandView.container = { querySelector: () => null };
     commandView.syncDetachmentMap();
     assert.equal(unmounts.length, 2, 'leaving Map mode unmounts the map');
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('agents reach the map as units; a status change patches them, a roster change re-mounts', () => {
+  const agents = ['Boss', 'Scout'];
+  const commandView = detachmentCommandView('group', undefined, { agents, entry: 'Boss' });
+  const mounts = [];
+  const updates = [];
+  let updateResult = true;
+  const host = { className: '', parentNode: null, addEventListener() {} };
+  const slot = {
+    appendChild: node => {
+      node.parentNode = slot;
+    }
+  };
+  commandView.container = {
+    querySelector: sel => (sel.includes('data-cmd-detachment-slot') ? slot : null)
+  };
+  commandView.detachmentMapEl = host;
+  const selected = [];
+  commandView.selectAgent = (key, options) => selected.push({ key, options });
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    OriWorkspaceMap: {
+      mount: (el, state) => mounts.push(state),
+      unmount() {},
+      updateUnits: (el, units) => {
+        updates.push(units);
+        return updateResult;
+      },
+      scopeWorkspacesToGroup: (rows, id) =>
+        rows.filter(row => row.id === id || row.parent_id === id)
+    }
+  };
+  try {
+    commandView.syncDetachmentMap();
+    assert.equal(mounts.length, 1);
+    assert.deepEqual(
+      mounts[0].units.map(unit => unit.id),
+      ['agent:g:boss', 'agent:g:scout']
+    );
+
+    // Clicking a unit opens that agent's Unit Sheet.
+    mounts[0].onSelectUnit({ id: 'agent:g:scout', selectKey: 'Scout', name: 'Scout' });
+    assert.equal(commandView.activeMapWindow, 'inspector');
+    assert.deepEqual(selected, [{ key: 'Scout', options: { focus: false } }]);
+
+    commandView.syncDetachmentMap();
+    assert.equal(updates.length, 0, 'nothing changed: no patch, no mount');
+
+    // A status change is patched in place.
+    commandView.page.getAgentRosterStatus = () => ({ key: 'working', label: 'Working' });
+    commandView.syncDetachmentMap();
+    assert.equal(mounts.length, 1, 'no re-mount for a status change');
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0][1].status, 'Working');
+
+    // If the map cannot patch (it saw a different roster), the view re-mounts.
+    updateResult = false;
+    commandView.page.getAgentRosterStatus = () => ({ key: 'waiting', label: 'Queued' });
+    commandView.syncDetachmentMap();
+    assert.equal(mounts.length, 2);
+
+    // A hired agent is structure: straight to a re-mount.
+    agents.push('Scribe');
+    commandView.syncDetachmentMap();
+    assert.equal(mounts.length, 3);
+    assert.equal(mounts[2].units.length, 3);
+    assert.equal(updates.length, 2, 'no patch attempt when the roster itself changed');
   } finally {
     globalThis.window = originalWindow;
   }

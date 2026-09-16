@@ -106,6 +106,60 @@ func TestApplySetPositionsRoundTrips(t *testing.T) {
 	}
 }
 
+// TestAgentAnchorsShareTheLayout proves an agent anchor round-trips beside the
+// buildings under its own identifier, moves the same revision, and is part of
+// the arrangement Reset layout clears and Undo reset restores.
+func TestAgentAnchorsShareTheLayout(t *testing.T) {
+	store, db := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, db, "grp-a", "ws-a")
+	agentID := AgentNodeID("grp-a", "studio%20manager")
+
+	result, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+		SetPositions(map[string]Point{"ws-a": {X: 10, Y: 10}, agentID: {X: -190, Y: 10}}),
+	}})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if result.Revision != 1 || result.Positions[agentID] != (Point{X: -190, Y: 10}) {
+		t.Fatalf("result = rev %d positions %v, want rev 1 with the agent anchor", result.Revision, result.Positions)
+	}
+
+	layout, err := store.Load(ctx, "local")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := map[string]Point{"ws-a": {X: 10, Y: 10}, agentID: {X: -190, Y: 10}}
+	if !reflect.DeepEqual(layout.Positions, want) {
+		t.Fatalf("reloaded positions = %v, want %v", layout.Positions, want)
+	}
+
+	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{Reset()}}); err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+	if layout, err = store.Load(ctx, "local"); err != nil || len(layout.Positions) != 0 {
+		t.Fatalf("positions after reset = %v (err %v), want none", layout.Positions, err)
+	}
+
+	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{RestorePositions(want)}}); err != nil {
+		t.Fatalf("RestorePositions: %v", err)
+	}
+	if layout, err = store.Load(ctx, "local"); err != nil || !reflect.DeepEqual(layout.Positions, want) {
+		t.Fatalf("positions after undo reset = %v (err %v), want %v", layout.Positions, err, want)
+	}
+
+	// A permanently deleted group takes its agents' anchors with it.
+	if _, err := db.ExecContext(ctx, `DELETE FROM workspaces WHERE id = 'grp-a'`); err != nil {
+		t.Fatalf("delete group: %v", err)
+	}
+	if layout, err = store.Load(ctx, "local"); err != nil {
+		t.Fatalf("Load after delete: %v", err)
+	}
+	if _, ok := layout.Positions[agentID]; ok {
+		t.Fatalf("agent anchor survived its workspace: %v", layout.Positions)
+	}
+}
+
 func TestApplyMergesAgainstLatestRecord(t *testing.T) {
 	store, db := newTestStore(t)
 	ctx := context.Background()
