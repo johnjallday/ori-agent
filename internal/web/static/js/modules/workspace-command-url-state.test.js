@@ -419,6 +419,132 @@ test('opening the Backlog drawer while the Tasks drawer is open closes the Tasks
   });
 });
 
+const homeRoster = (state = 'empty') => ({
+  workspace_id: 'ws-1',
+  group_workspace_id: 'ws-1',
+  roles: [
+    {
+      role_id: 'portfolio_manager',
+      label: 'Music Portfolio Manager',
+      scope: 'home',
+      required: true,
+      primary: true,
+      state,
+      agent: state === 'filled' ? { name: 'Portfolio Manager' } : undefined
+    },
+    { role_id: 'producer', label: 'Producer', scope: 'project', state: 'empty', read_only: true }
+  ]
+});
+
+function withRoleRoster(win) {
+  win.WorkspaceRoleRoster = {
+    rowsFrom: roster =>
+      roster.roles.map(role => ({
+        roleId: role.role_id,
+        label: role.label,
+        scope: role.scope,
+        state: role.state === 'filled' && role.agent ? 'filled' : 'empty',
+        readOnly: Boolean(role.read_only),
+        needsClear: false,
+        proposed: role.proposed || null
+      }))
+  };
+}
+
+test('a role link opens that empty role once after the roster loads, then leaves the URL', () => {
+  withHarness('?mode=map&role=portfolio_manager', ({ harness }) => {
+    let stale = 0;
+    harness.win.Toast = { info: () => (stale += 1) };
+    withRoleRoster(harness.win);
+    const view = new WorkspaceCommandView(makePage());
+    assert.equal(stale, 0, 'the role key is never reported as out of date before its roster loads');
+    const opened = [];
+    view.openRoleCreateModal = (roleId, row) => opened.push([roleId, row.label]);
+
+    assert.equal(view.applyBootRole(), false, 'waits for the roster');
+    view.roleRoster = homeRoster();
+    assert.equal(view.applyBootRole(), true);
+    assert.deepEqual(opened, [['portfolio_manager', 'Music Portfolio Manager']]);
+    assert.equal(harness.win.location.search.includes('role='), false);
+    assert.equal(view.applyBootRole(), false, 'never twice');
+    assert.equal(opened.length, 1);
+  });
+});
+
+test('a role link to a filled, read-only, or unknown role opens nothing but is still removed', () => {
+  for (const [search, roster] of [
+    ['?role=portfolio_manager', homeRoster('filled')],
+    ['?role=producer', homeRoster()],
+    ['?role=deleted_role', homeRoster()]
+  ]) {
+    withHarness(search, ({ harness }) => {
+      withRoleRoster(harness.win);
+      const view = new WorkspaceCommandView(makePage());
+      let opened = 0;
+      view.openRoleCreateModal = () => (opened += 1);
+      view.roleRoster = roster;
+      assert.equal(view.applyBootRole(), false, search);
+      assert.equal(opened, 0, search);
+      assert.equal(harness.win.location.search.includes('role='), false, search);
+    });
+  }
+});
+
+test('only a program Home role without a proposal uses its template instructions', () => {
+  withHarness('', () => {
+    const view = new WorkspaceCommandView(makePage());
+    view.roleRoster = homeRoster();
+    assert.equal(view.roleUsesTemplateInstructions({ scope: 'home', proposed: null }), true);
+    assert.equal(
+      view.roleUsesTemplateInstructions({ scope: 'home', proposed: { system_prompt: 'x' } }),
+      false
+    );
+    assert.equal(view.roleUsesTemplateInstructions({ scope: 'project', proposed: null }), false);
+    view.roleRoster = { ...homeRoster(), group_workspace_id: 'another-home' };
+    assert.equal(
+      view.roleUsesTemplateInstructions({ scope: 'home', proposed: null }),
+      false,
+      'a project linked to a group is not the Home'
+    );
+  });
+});
+
+test('a Create form without a prompt sends no system_prompt; one with a prompt still does', async () => {
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  const originalBootstrap = globalThis.bootstrap;
+  globalThis.window = { location: { search: '', pathname: '/workspaces/ws-1' } };
+  globalThis.document = { getElementById: () => null, addEventListener() {} };
+  globalThis.bootstrap = { Modal: { getOrCreateInstance: () => ({ hide() {} }) } };
+  try {
+    const view = new WorkspaceCommandView(makePage());
+    const bodies = [];
+    view.fillRole = async (_roleId, body) => {
+      bodies.push(body);
+      return { ok: true };
+    };
+    view.roleCreateRoleId = 'portfolio_manager';
+    view.roleCreateForm = {
+      extract: () => ({ valid: true, values: { name: 'PM', model: '', provider: '' } })
+    };
+    await view.submitRoleCreateModal();
+    view.roleCreateRoleId = 'lead';
+    view.roleCreateForm = {
+      extract: () => ({
+        valid: true,
+        values: { name: 'Lead', model: '', provider: '', systemPrompt: 'Lead well.' }
+      })
+    };
+    await view.submitRoleCreateModal();
+    assert.equal('system_prompt' in bodies[0], false);
+    assert.equal(bodies[1].system_prompt, 'Lead well.');
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.document = originalDocument;
+    globalThis.bootstrap = originalBootstrap;
+  }
+});
+
 test('opening the drawer syncs the URL; closing it removes panel/task from the URL', () => {
   withHarness('', ({ harness }) => {
     const view = new WorkspaceCommandView(makePage());

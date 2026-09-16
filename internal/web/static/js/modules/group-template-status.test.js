@@ -7,6 +7,7 @@ import {
   GROUP_TEMPLATE_LANDING_KEY,
   groupTemplateIntegrationFact,
   groupTemplateProviderLabel,
+  groupTemplateRolePromptNote,
   groupTemplateTeamFact
 } from './group-template-status.js';
 
@@ -100,6 +101,17 @@ test('an unreadable status resolves to null rather than an empty group', async (
   } finally {
     globalThis.fetch = original;
   }
+});
+
+test('a program Home role prompt note names the template source', () => {
+  assert.equal(
+    groupTemplateRolePromptNote(status({})),
+    'Instructions for this role come from Plugin: fixture 1.0.0 and are applied by Ori.'
+  );
+  assert.equal(
+    groupTemplateRolePromptNote(null),
+    'Instructions for this role come from its template and are applied by Ori.'
+  );
 });
 
 function memoryStorage(entries = {}) {

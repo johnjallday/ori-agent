@@ -13,8 +13,15 @@ import {
 } from './workspace-url-state.js';
 
 test('parseWorkspaceURLState reads all canonical params (FR80)', () => {
-  const s = parseWorkspaceURLState('?mode=map&panel=tasks&task=t1&agent=writer&run=t1');
-  assert.deepEqual(s, { mode: 'map', panel: 'tasks', task: 't1', agent: 'writer', run: 't1' });
+  const s = parseWorkspaceURLState('?mode=map&panel=tasks&task=t1&agent=writer&run=t1&role=lead');
+  assert.deepEqual(s, {
+    mode: 'map',
+    panel: 'tasks',
+    task: 't1',
+    agent: 'writer',
+    run: 't1',
+    role: 'lead'
+  });
 });
 
 test('parseWorkspaceURLState rejects an unknown mode value rather than reusing the retired view param (FR81)', () => {
@@ -32,14 +39,16 @@ test('parseWorkspaceURLState handles an empty/missing query string', () => {
     panel: '',
     task: '',
     agent: '',
-    run: ''
+    run: '',
+    role: ''
   });
   assert.deepEqual(parseWorkspaceURLState(undefined), {
     mode: null,
     panel: '',
     task: '',
     agent: '',
-    run: ''
+    run: '',
+    role: ''
   });
 });
 
@@ -52,8 +61,13 @@ test('serializeWorkspaceURLState omits empty fields and round-trips', () => {
     panel: 'tasks',
     task: 't1',
     agent: '',
-    run: ''
+    run: '',
+    role: ''
   });
+  assert.equal(
+    serializeWorkspaceURLState({ mode: MODE.MAP, role: 'portfolio_manager' }),
+    'mode=map&role=portfolio_manager'
+  );
 });
 
 test('serializeWorkspaceURLState drops an invalid mode rather than emitting it', () => {
@@ -67,8 +81,30 @@ test('sanitizeWorkspaceURLState keeps only values present in the loaded context 
     { mode: MODE.MAP, panel: 'tasks', task: 't1', agent: 'writer', run: 't9' },
     context
   );
-  assert.deepEqual(state, { mode: MODE.MAP, panel: 'tasks', task: 't1', agent: 'writer', run: '' });
+  assert.deepEqual(state, {
+    mode: MODE.MAP,
+    panel: 'tasks',
+    task: 't1',
+    agent: 'writer',
+    run: '',
+    role: ''
+  });
   assert.deepEqual(dropped, ['run']);
+});
+
+test('sanitizeWorkspaceURLState keeps a role only when the loaded roster has it', () => {
+  const context = { validRoleIds: ['portfolio_manager'] };
+  assert.equal(
+    sanitizeWorkspaceURLState({ role: 'portfolio_manager' }, context).state.role,
+    'portfolio_manager'
+  );
+  const stale = sanitizeWorkspaceURLState({ role: 'deleted_role' }, context);
+  assert.equal(stale.state.role, '');
+  assert.deepEqual(stale.dropped, ['role']);
+  const unloaded = sanitizeWorkspaceURLState({ role: 'portfolio_manager' }, {});
+  assert.equal(unloaded.state.role, '', 'no roster, no role');
+  assert.equal(statesEqual({ role: 'a' }, { role: 'b' }), false);
+  assert.equal(statesEqual({ role: '' }, {}), true);
 });
 
 test('sanitizeWorkspaceURLState drops a stale task and a stale agent independently', () => {

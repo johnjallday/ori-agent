@@ -27,6 +27,7 @@ import {
   fetchGroupTemplateStatus,
   groupTemplateIntegrationFact,
   groupTemplateProviderLabel,
+  groupTemplateRolePromptNote,
   groupTemplateTeamFact
 } from './group-template-status.js';
 import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
@@ -401,13 +402,14 @@ export class WorkspaceCommandView {
     if (!workspaceId) return Promise.resolve(null);
     const token = (this.groupTemplateStatusToken || 0) + 1;
     this.groupTemplateStatusToken = token;
-    return fetchGroupTemplateStatus(workspaceId).then(status => {
+    this.groupTemplateStatusPending = fetchGroupTemplateStatus(workspaceId).then(status => {
       if (this.groupTemplateStatusToken !== token || this.workspaceId() !== workspaceId)
         return null;
       this.groupTemplateStatus = status;
       if (this.active) this.render();
       return this.groupTemplateStatus;
     });
+    return this.groupTemplateStatusPending;
   }
 
   groupTemplateStatusHTML() {
@@ -504,6 +506,9 @@ export class WorkspaceCommandView {
     void this.loadRoleRoster(true).then(() => {
       if (this.active) this.mountRoleRoster();
       this.showGroupTemplateLanding();
+      // The role form names the template its instructions come from, so it
+      // opens once the group's template status has been read (or failed).
+      void Promise.resolve(this.groupTemplateStatusPending).then(() => this.applyBootRole());
     });
     // Providers seed the Create modal's model choices. Loaded once, and a
     // failure just leaves the picker on "Use Ori default" rather than blocking.
@@ -542,6 +547,67 @@ export class WorkspaceCommandView {
       toast.call(window.Toast, notice.message, { title: notice.title, duration: 9000 });
     }
     return notice;
+  }
+
+  // `?role=<id>` asks for one empty role's setup form, once — the group creator
+  // lands here this way when a role still needs someone. A role that is already
+  // filled, read-only, or unknown opens nothing. The parameter is removed from
+  // the address bar either way, so a reload or a shared link never reopens it.
+  applyBootRole() {
+    if (this._bootRoleApplied) return false;
+    const requested = String((this._urlBootState && this._urlBootState.role) || '').trim();
+    if (!requested) return false;
+    const roster = this.roleRoster;
+    if (!roster) return false;
+    this._bootRoleApplied = true;
+    this.stripRoleURLParam();
+    const component = typeof window === 'undefined' ? null : window.WorkspaceRoleRoster;
+    const rows = component ? component.rowsFrom(roster) : [];
+    const { state } = sanitizeWorkspaceURLState(
+      { role: requested },
+      { validRoleIds: rows.map(row => row.roleId) }
+    );
+    const row = rows.find(item => item.roleId === state.role);
+    if (!row || row.state === 'filled' || row.readOnly || row.needsClear) return false;
+    this.container?.querySelector('[data-cmd-role-roster]')?.scrollIntoView?.({ block: 'nearest' });
+    this.openRoleCreateModal(row.roleId, row);
+    const landing = this.groupTemplateLanding;
+    if (landing && landing.error && landing.roleId === row.roleId) {
+      const error = document.getElementById('agentCreateDraftError');
+      if (error) {
+        error.textContent = landing.error;
+        error.hidden = false;
+      }
+    }
+    return true;
+  }
+
+  stripRoleURLParam() {
+    if (typeof window === 'undefined' || !window.history || !window.location) return;
+    const params = new URLSearchParams(String(window.location.search || '').replace(/^\?/, ''));
+    if (!params.has('role')) return;
+    params.delete('role');
+    const query = params.toString();
+    window.history.replaceState(
+      window.history.state,
+      '',
+      window.location.pathname + (query ? '?' + query : '') + (window.location.hash || '')
+    );
+  }
+
+  // A program Home's roles carry no `proposed` setup: their instructions come
+  // from the template and are applied server-side, never shown or accepted
+  // here. Its Create form therefore has no prompt box.
+  roleUsesTemplateInstructions(row) {
+    const roster = this.roleRoster || {};
+    const home = String(roster.group_workspace_id || '');
+    return Boolean(
+      row &&
+      row.scope === 'home' &&
+      !row.proposed &&
+      home &&
+      home === String(roster.workspace_id || '')
+    );
   }
 
   // Installed capabilities drive Map stations, so the catalog has to be loaded
@@ -754,7 +820,9 @@ export class WorkspaceCommandView {
     const MAX_BOOT_ATTEMPTS = 20;
     if (dataLooksUnready && this._bootApplyAttempts < MAX_BOOT_ATTEMPTS) return;
 
-    const { state, dropped } = sanitizeWorkspaceURLState(boot, context);
+    // `role` is validated against the role roster, which loads separately;
+    // applyBootRole owns it, so it is neither applied nor reported stale here.
+    const { state, dropped } = sanitizeWorkspaceURLState({ ...boot, role: '' }, context);
     this._urlStateApplied = true;
 
     if (dropped.length && typeof window !== 'undefined' && window.Toast) {
@@ -4054,10 +4122,16 @@ export class WorkspaceCommandView {
     // instructions this agent would actually get. An empty prompt box hid a
     // 250-character prompt the server was about to apply anyway.
     const proposed = row.proposed || {};
+    // A program Home role has no proposal to show: its prompt is applied by
+    // Ori from the template, so the form says so instead of offering an empty
+    // box whose contents the server would ignore.
+    const templateInstructions = this.roleUsesTemplateInstructions(row);
     this.roleCreateForm = formApi.mount(host, {
       idPrefix: 'agent',
       profile: formApi.PROFILE_TEMPLATE,
       providers: Array.isArray(this.roleRosterProviders) ? this.roleRosterProviders : [],
+      omitFields: templateInstructions ? ['systemPrompt'] : [],
+      note: templateInstructions ? groupTemplateRolePromptNote(this.groupTemplateStatus) : '',
       values: {
         name: row.label,
         model: proposed.model || '',
@@ -4112,15 +4186,19 @@ export class WorkspaceCommandView {
     }
     const values = result.values;
     const error = document.getElementById('agentCreateDraftError');
-    const outcome = await this.fillRole(roleId, {
+    const body = {
       mode: 'create',
       name: String(values.name || '').trim(),
       provider: values.provider || '',
-      model: values.model || '',
-      // Sent so an edit actually reaches the created agent. It used to be
-      // collected by the form and dropped on the way out.
-      system_prompt: values.systemPrompt || ''
-    });
+      model: values.model || ''
+    };
+    // Sent so an edit actually reaches the created agent. It used to be
+    // collected by the form and dropped on the way out. A form mounted
+    // without a prompt (a program Home role) sends none at all.
+    if (Object.prototype.hasOwnProperty.call(values, 'systemPrompt')) {
+      body.system_prompt = values.systemPrompt || '';
+    }
+    const outcome = await this.fillRole(roleId, body);
     if (outcome && outcome.error) {
       // The server owns name collisions; surface its message on the form
       // rather than closing on a failure.

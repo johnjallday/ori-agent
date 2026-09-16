@@ -15,7 +15,9 @@
  * audit, execution monitoring is TASK-ID-KEYED (there is no separate run-ID
  * surfaced to the frontend yet), so `run` is treated as a task ID naming
  * which tracked run the tray should show — documented here rather than
- * invented silently.
+ * invented silently. `role` asks the page to open one empty role's setup form
+ * once (the group creator lands on a group this way); it is consumed, never
+ * kept as view state.
  */
 
 // `dashboard` names a user-authored dashboard view, which exists only for
@@ -47,7 +49,8 @@ export function parseWorkspaceURLState(search) {
     panel: params.get('panel') || '',
     task: params.get('task') || '',
     agent: params.get('agent') || '',
-    run: params.get('run') || ''
+    run: params.get('run') || '',
+    role: params.get('role') || ''
   };
 }
 
@@ -60,6 +63,7 @@ export function serializeWorkspaceURLState(state) {
   if (s.task) params.set('task', s.task);
   if (s.agent) params.set('agent', s.agent);
   if (s.run) params.set('run', s.run);
+  if (s.role) params.set('role', s.role);
   return params.toString();
 }
 
@@ -69,7 +73,7 @@ export function serializeWorkspaceURLState(state) {
  * `context` supplies the authoritative sets to validate against.
  *
  * @param {object} state
- * @param {{validTaskIds?: Iterable<string>, validAgentKeys?: Iterable<string>, validRunTaskIds?: Iterable<string>, validBacklogIds?: Iterable<string>}} context
+ * @param {{validTaskIds?: Iterable<string>, validAgentKeys?: Iterable<string>, validRunTaskIds?: Iterable<string>, validBacklogIds?: Iterable<string>, validRoleIds?: Iterable<string>}} context
  * @returns {{state: object, dropped: string[]}} the sanitized state and which fields were dropped (for a concise notice).
  */
 export function sanitizeWorkspaceURLState(state, context = {}) {
@@ -77,9 +81,10 @@ export function sanitizeWorkspaceURLState(state, context = {}) {
   const validAgentKeys = new Set(context.validAgentKeys || []);
   const validRunTaskIds = new Set(context.validRunTaskIds || validTaskIds);
   const validBacklogIds = new Set(context.validBacklogIds || []);
+  const validRoleIds = new Set(context.validRoleIds || []);
   const s = state || {};
   const dropped = [];
-  const out = { mode: s.mode || null, panel: '', task: '', agent: '', run: '' };
+  const out = { mode: s.mode || null, panel: '', task: '', agent: '', run: '', role: '' };
 
   if (s.panel && VALID_PANELS.has(s.panel)) out.panel = s.panel;
   else if (s.panel && !CONSOLE_PANELS.has(s.panel)) dropped.push('panel');
@@ -97,6 +102,12 @@ export function sanitizeWorkspaceURLState(state, context = {}) {
   if (s.run && validRunTaskIds.has(s.run)) out.run = s.run;
   else if (s.run) dropped.push('run');
 
+  // `role` names one role in the loaded roster whose setup form should open
+  // (the group creator's landing link). It is a one-shot request, not view
+  // state: the page opens it at most once and removes it from the URL.
+  if (s.role && validRoleIds.has(s.role)) out.role = s.role;
+  else if (s.role) dropped.push('role');
+
   // panel=tasks without a valid task is still a meaningful "drawer open" state
   // (FR82 requires panel+task together only to restore the PREVIEW, not to
   // gate opening the drawer itself).
@@ -112,7 +123,8 @@ export function statesEqual(a, b) {
     (x.panel || '') === (y.panel || '') &&
     (x.task || '') === (y.task || '') &&
     (x.agent || '') === (y.agent || '') &&
-    (x.run || '') === (y.run || '')
+    (x.run || '') === (y.run || '') &&
+    (x.role || '') === (y.role || '')
   );
 }
 

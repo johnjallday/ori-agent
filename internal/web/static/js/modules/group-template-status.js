@@ -27,6 +27,14 @@ export function groupTemplateProviderLabel(status) {
   return provider?.kind === 'user_template' ? 'Your template' : '';
 }
 
+// Shown in place of a program Home role's prompt box: that role's instructions
+// come from its template and are applied server-side, never edited here. The
+// group creator (group-template-creator.js promptNote) uses the same words.
+export function groupTemplateRolePromptNote(status) {
+  const provider = groupTemplateProviderLabel(status);
+  return `Instructions for this role come from ${provider || 'its template'} and are applied by Ori.`;
+}
+
 export function groupTemplateTeamFact(status) {
   const team = status?.team || {};
   const required = team.required_home_roles || {};
