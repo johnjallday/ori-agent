@@ -574,8 +574,22 @@ func (h *Handler) restoreWorkspace(w http.ResponseWriter, r *http.Request, id st
 		}
 	}
 
-	logger.Info("Workspace restored from trash", logger.Fields{"id": id})
-	orihttp.WriteJSON(w, map[string]any{"success": true, "id": id})
+	// A Home that went to the Trash through a reviewed removal carries its
+	// program state as a stash, because the live state had to be cleared before
+	// the store would trash it. Put it back so Undo returns a Home, not a group
+	// that merely used to be one. The Home comes back empty: its former
+	// projects stayed standalone and reconnect through the reviewed flow.
+	homeRestored := false
+	if h.workspaceTaskStore != nil {
+		restored, err := agentworkspace.NewAssistantProgramStore(h.workspaceTaskStore).RestoreRemovedHome(id)
+		if err != nil {
+			logger.Warn("Failed to restore Assistant Home state after trash restore", logger.Fields{"id": id, "error": err})
+		}
+		homeRestored = restored
+	}
+
+	logger.Info("Workspace restored from trash", logger.Fields{"id": id, "home_restored": homeRestored})
+	orihttp.WriteJSON(w, map[string]any{"success": true, "id": id, "home_restored": homeRestored})
 }
 
 // workspaceTrashPaths extracts the original and trashed folder locations stashed

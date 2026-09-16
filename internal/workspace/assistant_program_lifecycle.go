@@ -3,6 +3,7 @@ package workspace
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -100,13 +101,26 @@ type AssistantHomeRemovalReview struct {
 	HomeRoleCount      int       `json:"home_role_count"`
 	HasSampleLibrary   bool      `json:"has_sample_library"`
 	Impact             []string  `json:"impact"`
+	// Trashes tells the reviewer whether the commit will move the Home to the
+	// Trash (undoable) or delete it, so the dialog can promise the right thing.
+	Trashes bool `json:"trashes"`
 }
 
 type AssistantHomeRemovalReceipt struct {
 	StationWorkspaceID string    `json:"station_workspace_id"`
 	RetainedProjects   int       `json:"retained_projects"`
 	RecordedAt         time.Time `json:"recorded_at"`
+	// Trashed reports that the Home went to the Trash rather than being
+	// deleted, so POST /api/workspaces/{id}/restore can bring it back.
+	Trashed bool `json:"trashed"`
 }
+
+// RemovedAssistantProgramStateKey is the SharedData key that keeps a removed
+// Home's program state while the Home sits in the Trash. CommitHomeRemoval
+// has to clear the live state before the store will trash the workspace (a
+// live Home is protected from deletion), and RestoreRemovedHome reads the
+// stash back so an undone removal returns a Home, not a plain group.
+const RemovedAssistantProgramStateKey = "_removed_assistant_program_state"
 
 type assistantRetainedLink struct {
 	projectID string
@@ -470,8 +484,13 @@ func (service *AssistantProgramStore) ReviewHomeRemoval(stationID string, expect
 	}); err != nil {
 		return nil, ErrAssistantTopologyConflict
 	}
+	trashes := service.homeRemovalTrashes()
+	removal := "The Home, its Home-scoped roles, portfolio rollup, and optional add-on state will be removed."
+	if trashes {
+		removal = "The Home moves to the Trash. Undo brings it back as an empty Home with its Home-scoped roles; its portfolio rollup and optional add-on state are not restored."
+	}
 	impact := []string{
-		"The Home, its Home-scoped roles, portfolio rollup, and optional add-on state will be removed.",
+		removal,
 		"Every linked project, project-scoped team, task, file, and confirmed copied asset will be preserved as a standalone workspace.",
 		"External project and sample folders will not be moved, changed, or deleted.",
 	}
@@ -485,7 +504,7 @@ func (service *AssistantProgramStore) ReviewHomeRemoval(stationID string, expect
 		Token: receipt.Token, ExpiresAt: receipt.ExpiresAt, StationWorkspaceID: station.ID,
 		StateRevision: state.StateRevision, LinkedProjectCount: len(state.LinkedProjectIDs),
 		HomeRoleCount: len(state.HomeBindings.Bindings), HasSampleLibrary: station.HasInstalledCapability(CapabilitySampleLibrary),
-		Impact: impact,
+		Impact: impact, Trashes: trashes,
 	}, nil
 }
 
@@ -544,18 +563,144 @@ func (service *AssistantProgramStore) CommitHomeRemoval(stationID, token string)
 			return nil, moveErr
 		}
 	}
+	// The live state has to go before the store will remove the workspace (a
+	// live Home is protected from Delete and Trash alike). Keep a copy under
+	// SharedData so a restore from the Trash can put the Home back as a Home;
+	// the copy owns no projects, because the retained projects just became
+	// standalone and stay that way until a reviewed reconnect.
+	stash := CloneAssistantProgramState(state)
+	stash.LinkedProjectIDs = nil
+	stash.Topology.ReviewReceipts = nil
 	station.AssistantProgramState = nil
+	station.SetSharedData(RemovedAssistantProgramStateKey, removedAssistantProgramStateValue(stash))
 	if err := service.store.Save(station); err != nil {
 		service.restoreRemovedHomeProjects(station.ID, retained)
 		return nil, err
 	}
-	if err := service.store.Delete(station.ID); err != nil {
+	trashed, err := service.removeHomeStation(station.ID)
+	if err != nil {
 		station.SetAssistantProgramState(state)
+		delete(station.SharedData, RemovedAssistantProgramStateKey)
 		_ = service.store.Save(station)
 		service.restoreRemovedHomeProjects(station.ID, retained)
 		return nil, err
 	}
-	return &AssistantHomeRemovalReceipt{StationWorkspaceID: station.ID, RetainedProjects: len(retained), RecordedAt: now}, nil
+	return &AssistantHomeRemovalReceipt{StationWorkspaceID: station.ID, RetainedProjects: len(retained), RecordedAt: now, Trashed: trashed}, nil
+}
+
+// homeRemovalTrashes reports whether CommitHomeRemoval will move the Home to
+// the Trash (restorable) rather than delete it, so the review can say which.
+func (service *AssistantProgramStore) homeRemovalTrashes() bool {
+	if service == nil {
+		return false
+	}
+	trasher, ok := service.store.(WorkspaceTrasher)
+	return ok && trasher.TrashSupported()
+}
+
+// removeHomeStation takes a Home whose program state was already cleared out
+// of the store: to the Trash when the store can, otherwise by deleting it. It
+// reports whether the Home was trashed, i.e. whether a restore can undo this.
+func (service *AssistantProgramStore) removeHomeStation(stationID string) (bool, error) {
+	if trasher, ok := service.store.(WorkspaceTrasher); ok {
+		err := trasher.Trash(stationID)
+		if err == nil {
+			return true, nil
+		}
+		if !errors.Is(err, ErrTrashUnsupported) {
+			return false, err
+		}
+	}
+	return false, service.store.Delete(stationID)
+}
+
+// RestoreRemovedHome puts a Home's program state back after the Home returned
+// from the Trash. CommitHomeRemoval stashed the state with no linked projects,
+// so the Home comes back empty; the projects it used to own stay standalone
+// and can be reconnected through the reviewed reconnect flow.
+//
+// It reports whether the Home was restored as a Home. A workspace without a
+// stash is left alone. When another Home already answers to the same program
+// key, the stash is dropped and the workspace stays a plain group: two Homes
+// for one key would make every station lookup ambiguous.
+func (service *AssistantProgramStore) RestoreRemovedHome(stationID string) (bool, error) {
+	assistantTopologyMu.Lock()
+	defer assistantTopologyMu.Unlock()
+	if service == nil || service.store == nil {
+		return false, ErrAssistantTopologyInvalid
+	}
+	station, err := service.store.Get(strings.TrimSpace(stationID))
+	if err != nil || station == nil {
+		return false, ErrAssistantStationNotFound
+	}
+	stash := removedAssistantProgramState(station)
+	if stash == nil || station.Status == StatusTrashed || station.Status == StatusMissing {
+		return false, nil
+	}
+	restored := station.GetAssistantProgramState() == nil
+	if restored {
+		existing, findErr := service.FindStation(stash.Key)
+		switch {
+		case findErr == nil && existing != nil && existing.ID != station.ID:
+			restored = false
+		case errors.Is(findErr, ErrAssistantStationAmbiguous):
+			restored = false
+		case findErr != nil && !errors.Is(findErr, ErrAssistantStationNotFound):
+			return false, findErr
+		}
+	}
+	if err := service.store.Update(station.ID, func(current *Workspace) error {
+		if restored {
+			stash.LinkedProjectIDs = nil
+			stash.Topology.ReviewReceipts = nil
+			stash.StateRevision++
+			current.SetAssistantProgramState(stash)
+		}
+		delete(current.SharedData, RemovedAssistantProgramStateKey)
+		return nil
+	}); err != nil {
+		return false, err
+	}
+	return restored, nil
+}
+
+// removedAssistantProgramStateValue shapes a stashed state the way it comes
+// back from SQLite or workspace.json (a plain JSON object), so the in-memory
+// stash and a reloaded one read identically.
+func removedAssistantProgramStateValue(state *AssistantProgramState) any {
+	raw, err := json.Marshal(state)
+	if err != nil {
+		return nil
+	}
+	var value map[string]any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil
+	}
+	return value
+}
+
+// removedAssistantProgramState decodes the stash CommitHomeRemoval left on a
+// trashed Home, or nil when there is none or it does not name a program key.
+func removedAssistantProgramState(ws *Workspace) *AssistantProgramState {
+	if ws == nil {
+		return nil
+	}
+	value, ok := ws.GetSharedData(RemovedAssistantProgramStateKey)
+	if !ok || value == nil {
+		return nil
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var state AssistantProgramState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return nil
+	}
+	if !state.Key.Valid() {
+		return nil
+	}
+	return &state
 }
 
 func (service *AssistantProgramStore) restoreRemovedHomeProjects(_ string, retained []assistantRetainedLink) {

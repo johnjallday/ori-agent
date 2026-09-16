@@ -125,8 +125,10 @@ export class AssistantProgramPage {
       method: 'POST',
       body: JSON.stringify({ token })
     });
-    // The commit deletes the current Home, so its former workspace route now
-    // correctly returns 404. Return to the workspace map instead.
+    // The commit moves the current Home to the Trash (or deletes it where the
+    // platform has none), so its former workspace route no longer resolves.
+    // Return to the workspace map instead; from there the Home cockpit's
+    // delete dialog is the surface that offers Undo for a trashed Home.
     this.navigateImpl('/');
   }
 

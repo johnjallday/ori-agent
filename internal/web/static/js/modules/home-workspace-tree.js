@@ -507,6 +507,20 @@ export function mountTree(container, state, callbacks) {
   return { rows, tabbableId };
 }
 
+/**
+ * Whether the toolbar's Undo has anything to restore.
+ *
+ * The cockpit records every trashed delete on `state.undoStack` (FR52). The
+ * button used to read a `canUndo` flag nothing ever set, so it stayed disabled
+ * for every delete; the stack is the real source. An explicit `canUndo` still
+ * wins so a host can force the state either way.
+ */
+export function treeCanUndo(state) {
+  if (!state) return false;
+  if (typeof state.canUndo === 'boolean') return state.canUndo;
+  return Array.isArray(state.undoStack) && state.undoStack.length > 0;
+}
+
 function renderToolbarHTML(state) {
   const root = state.workspaceRoot || {};
   const rootLabel =
@@ -540,7 +554,7 @@ function renderToolbarHTML(state) {
     '<button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-bs-toggle="modal" data-bs-target="#addFolderModal" data-workspace-import-mode="true" data-workspace-entry-point="home_cockpit_tree_import">Import Folder</button>' +
     '<button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-tree-rescan>Rescan</button>' +
     '<a class="modern-btn modern-btn-secondary modern-btn-sm" href="/settings">Manage directory</a>' +
-    `<button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-tree-undo ${state.canUndo ? '' : 'disabled'}>Undo</button>` +
+    `<button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-tree-undo ${treeCanUndo(state) ? '' : 'disabled'}>Undo</button>` +
     '</div>' +
     '</div>'
   );
