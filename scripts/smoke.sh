@@ -2069,8 +2069,40 @@ print(any(t.get("id") == "downloads-janitor" for t in d.get("templates", [])))')
   echo "PASS janitor upgrade verify"
 }
 
+# smoke_integration covers the reviewed integration floor
+# (tasks/prd-reviewed-integration-latest-release.md): wait for the server, skip
+# onboarding, optionally install one plugin source, then print the install
+# quest's integration projection and the cached plugin update snapshot. It
+# asserts nothing about versions, because the latest release moves; read the
+# printed fields against the manual test guide.
+smoke_integration() {
+  local source="${3:-}"
+  local waited=0
+  until curl -sf -o /dev/null "$BASE_URL/"; do
+    ((waited++ < 180)) || fail "server at $BASE_URL did not answer"
+    sleep 1
+  done
+  curl -sf -X POST "$BASE_URL/api/onboarding/skip" >/dev/null || fail "could not skip onboarding"
+  if [[ -n "$source" ]]; then
+    curl -sf -X POST "$BASE_URL/api/plugins/install" -H 'Content-Type: application/json' \
+      -d "$(python3 -c 'import json,sys; print(json.dumps({"source": sys.argv[1], "confirm": True}))' "$source")" |
+      python3 -c 'import json,sys; p=json.load(sys.stdin).get("plugin",{}); print("installed", p.get("name"), p.get("version"), p.get("source"))' ||
+      fail "install of $source failed"
+  fi
+  curl -sf "$BASE_URL/api/host-setup-quests/install_ori_reaper" | python3 -c '
+import json, sys
+journey = json.load(sys.stdin)["setup_journey"]
+step = journey["steps"][0]
+integration = step.get("integration") or {}
+fields = ["expected_version", "minimum_version", "release_checked", "installed_version", "verified", "replacement_required", "enabled"]
+print("install step", step.get("status"), step.get("reason_code") or "-", {k: integration.get(k) for k in fields})
+print("actions", [a["id"] for a in step.get("actions", [])])' || fail "could not read the install quest"
+  echo "updates $(curl -sf "$BASE_URL/api/plugins/updates")"
+}
+
 case "${1:-}" in
 serve) serve_isolated "${2:-8931}" "${3:-default}" ;;
+integration) smoke_integration "$@" ;;
 starter) smoke_starter "$@" ;;
 agent-type-api) smoke_agent_type_api ;;
 agent-type-strip) smoke_agent_type_strip "$@" ;;
@@ -2099,6 +2131,7 @@ janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
 *)
   echo "usage:" >&2
   echo "  $0 serve [port] [sandbox-name]           # run an ISOLATED demo server (Ctrl-C to stop)" >&2
+  echo "  $0 integration <base-url> [source]       # reviewed integration floor: install a source, print the install step and updates" >&2
   echo "  $0 starter <base-url> <stage> [flags]    # starter missions: wait for the server, run a demo stage" >&2
   echo "  $0 agent-type-api <base-url>             # retired agent type: API accepts and never echoes it" >&2
   echo "  $0 agent-type-strip [port]               # retired agent type: boot strips it from a seeded sandbox" >&2
