@@ -103,6 +103,10 @@ type Automation struct {
 	done     chan struct{}
 	stopping bool
 	scanWG   sync.WaitGroup
+
+	// activityPublisher tells the map an unattended scan started and how it
+	// ended (tasks/prd-task-run-show.md FR10).
+	activityPublisher ActivityPublisher
 }
 
 // NewAutomation builds the automation service.
@@ -362,7 +366,28 @@ func (a *Automation) runOnce(workspaceID string, source ScanSource) {
 		return
 	}
 
+	// Only a scan that actually runs is an activity; the set-up and pause
+	// checks above end quietly. Nothing is published between start and finish.
+	activity := Activity{WorkspaceID: workspaceID, ActivityID: a.scanActivityID(workspaceID), Source: source}
+	started := activity
+	started.Phase = ActivityStarted
+	a.publishActivity(started)
+
 	batch, created, err := a.scan(workspaceID, source)
+	finished := activity
+	finished.Phase = ActivityFinished
+	switch {
+	case err != nil:
+		finished.Outcome = "failed"
+	case created:
+		finished.Outcome = "succeeded"
+		finished.BatchID = batch.ID
+		finished.Count = batch.Summary.Proposed
+	default:
+		finished.Outcome = "succeeded"
+	}
+	a.publishActivity(finished)
+
 	if err != nil {
 		// "scan_source" rather than "source": this is what triggered the scan
 		// (watcher, daily catch-up, manual), never a file. The redaction guard

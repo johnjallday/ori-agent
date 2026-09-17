@@ -157,6 +157,14 @@ func TestServerBuilder_Build_Integration(t *testing.T) {
 	if !builder.MapActivityParcelsWired() {
 		t.Error("result parcels not wired into the map activity tracker")
 	}
+	// The Daily Brief (Phase 22.6) and the janitor's automation are built long
+	// after the bus; each must be bound where it is created, not at Phase 19.
+	if !builder.DailyBriefActivityWired() {
+		t.Error("Daily Brief generations are not published as map activities")
+	}
+	if !builder.FileJanitorActivityWired() {
+		t.Error("File Janitor scans are not published as map activities")
+	}
 	// Without the dev flag the real model-backed runner must be in place.
 	if builder.scriptedTaskHandler != nil {
 		t.Error("scripted task handler installed without ORI_DEV_SCRIPTED_TASK_RUNS=1")

@@ -61,6 +61,8 @@ func SubscribedEventTypes() []workspace.EventType {
 		workspace.EventDelegationStarted,
 		workspace.EventTaskDeleted,
 		workspace.EventWorkspaceUpdated,
+		workspace.EventActivityStarted,
+		workspace.EventActivityFinished,
 	}
 }
 
@@ -240,6 +242,9 @@ func (t *Tracker) HandleEvent(ev workspace.Event) {
 	case workspace.EventTaskHeartbeat:
 		t.heartbeat(ev)
 		return
+	case workspace.EventActivityStarted, workspace.EventActivityFinished:
+		t.handleBackgroundActivity(ev)
+		return
 	}
 
 	phase, ok := taskPhaseFor(ev.Type)
@@ -294,7 +299,7 @@ func (t *Tracker) HandleEvent(ev workspace.Event) {
 			return
 		}
 		if act == nil {
-			act = t.addRunning(id, workspaceID, taskID, at)
+			act = t.addRunning(KindTask, id, workspaceID, taskID, at)
 		}
 		act.Blocked = false
 		act.Step = nil
@@ -309,18 +314,18 @@ func (t *Tracker) HandleEvent(ev workspace.Event) {
 				// building that is not already working.
 				return
 			}
-			act = t.addRunning(id, workspaceID, taskID, at)
+			act = t.addRunning(KindTask, id, workspaceID, taskID, at)
 		}
 		act.Step = step
 		message.Step = cloneStep(step)
 	case PhaseBlocked:
 		if act == nil {
-			act = t.addRunning(id, workspaceID, taskID, at)
+			act = t.addRunning(KindTask, id, workspaceID, taskID, at)
 		}
 		act.Blocked = true
 	case PhaseResumed:
 		if act == nil {
-			act = t.addRunning(id, workspaceID, taskID, at)
+			act = t.addRunning(KindTask, id, workspaceID, taskID, at)
 		}
 		act.Blocked = false
 	case PhaseFinished:
@@ -348,9 +353,9 @@ func (t *Tracker) HandleEvent(ev workspace.Event) {
 	t.broadcastLocked(StreamMessage{Name: "activity", Payload: message})
 }
 
-func (t *Tracker) addRunning(id, workspaceID, taskID string, at time.Time) *RunningActivity {
+func (t *Tracker) addRunning(kind Kind, id, workspaceID, taskID string, at time.Time) *RunningActivity {
 	act := &RunningActivity{
-		Kind:        KindTask,
+		Kind:        kind,
 		ActivityID:  id,
 		WorkspaceID: workspaceID,
 		TaskID:      taskID,

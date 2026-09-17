@@ -73,7 +73,8 @@ type ParcelStore interface {
 	// Open marks a parcel opened the first time and returns it every time.
 	Open(ctx context.Context, id string, now time.Time) (Parcel, error)
 	// OpenByRef opens every unopened parcel for one thing — a task, a brief, a
-	// janitor scan — and returns the ones it opened.
+	// janitor scan — and returns the ones it opened. An empty refID opens every
+	// brief or janitor parcel in the workspace; for a task it opens nothing.
 	OpenByRef(ctx context.Context, kind Kind, workspaceID, refID string, now time.Time) ([]Parcel, error)
 	DeleteForWorkspace(ctx context.Context, workspaceID string) (int64, error)
 	DeleteForTask(ctx context.Context, workspaceID, taskID string) (int64, error)
@@ -190,19 +191,28 @@ func (s *SQLiteParcelStore) OpenByRef(ctx context.Context, kind Kind, workspaceI
 	}
 	workspaceID = strings.TrimSpace(workspaceID)
 	refID = strings.TrimSpace(refID)
-	if kind == "" || workspaceID == "" || refID == "" {
+	if kind == "" || workspaceID == "" {
+		return nil, nil
+	}
+	// The Daily Brief view and the File Janitor console each show everything
+	// that is waiting, so seeing them opens every parcel of that kind in the
+	// workspace. A task result is always one task's.
+	where := `kind = ? AND workspace_id = ? AND opened_at IS NULL`
+	args := []any{string(kind), workspaceID}
+	if refID != "" {
+		where += ` AND ref_id = ?`
+		args = append(args, refID)
+	} else if kind == KindTask {
 		return nil, nil
 	}
 	parcels, err := s.scanMany(ctx, `SELECT `+parcelColumns+` FROM result_parcels
-		WHERE kind = ? AND workspace_id = ? AND ref_id = ? AND opened_at IS NULL
-		ORDER BY produced_at, id`, string(kind), workspaceID, refID)
+		WHERE `+where+` ORDER BY produced_at, id`, args...)
 	if err != nil || len(parcels) == 0 {
 		return nil, err
 	}
 	stamp := formatTime(now)
-	if _, err := s.db.ExecContext(ctx, `UPDATE result_parcels SET opened_at = ?
-		WHERE kind = ? AND workspace_id = ? AND ref_id = ? AND opened_at IS NULL`,
-		stamp, string(kind), workspaceID, refID); err != nil {
+	if _, err := s.db.ExecContext(ctx, `UPDATE result_parcels SET opened_at = ? WHERE `+where,
+		append([]any{stamp}, args...)...); err != nil {
 		return nil, fmt.Errorf("open parcels by reference: %w", err)
 	}
 	opened := now.UTC()

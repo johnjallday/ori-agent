@@ -5581,6 +5581,28 @@ test('the page forwards its realtime events to the Operations map, not to a grou
   assert.deepEqual(group.layerCalls, [], "a group's scoped map follows the shared feed instead");
 });
 
+test('a card from this map opens a task result, the janitor review, or Home for a brief', () => {
+  const { commandView } = showCommandView();
+  const shown = [];
+  commandView.page.showTaskResult = id => shown.push(id);
+  const originalWindow = globalThis.window;
+  const opened = [];
+  globalThis.window = {
+    location: { href: '/workspaces/lab' },
+    FileJanitorConsole: { open: options => opened.push(options) }
+  };
+  try {
+    commandView.followMapParcel({ kind: 'task', ref_id: 't1' });
+    commandView.followMapParcel({ kind: 'file_janitor', ref_id: 'batch-1' });
+    assert.deepEqual(shown, ['t1']);
+    assert.deepEqual(opened, [{ tab: 'review' }]);
+    commandView.followMapParcel({ kind: 'daily_brief', ref_id: 'rev-1' });
+    assert.equal(globalThis.window.location.href, '/');
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
 test('each render repaints the working units, and parcels load once per workspace', () => {
   const { commandView, layerCalls } = showCommandView();
   commandView.paintMapActivity();

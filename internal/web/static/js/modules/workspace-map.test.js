@@ -11128,6 +11128,25 @@ test('parcels: the popover says Deliveries, marks what needs a look, and opens t
 
   h.cardsOpened[0].onPrimary({ parcel: { kind: 'task', workspace_id: 'ws-1', ref_id: 't9' } });
   assert.equal(h.window.location.href, '/workspaces/alpha?task=t9&result=1');
+
+  // A janitor scan opens its review; a brief opens the assistant's Today panel,
+  // or the HQ's page when there is no panel on this page.
+  h.cardsOpened[0].onPrimary({ parcel: { kind: 'file_janitor', workspace_id: 'ws-1' } });
+  assert.equal(h.window.location.href, '/workspaces/alpha?panel=file-janitor');
+  const opened = [];
+  h.window.PersonalAssistantPanel = {
+    open: (trigger, options) => opened.push(options) > 0
+  };
+  h.window.location.href = '';
+  h.cardsOpened[0].onPrimary({ parcel: { kind: 'daily_brief', workspace_id: 'ws-1' } });
+  assert.deepEqual(
+    opened.map(options => options.view),
+    ['today']
+  );
+  assert.equal(h.window.location.href, '', 'no navigation when the panel opened');
+  h.window.PersonalAssistantPanel = { open: () => false };
+  h.cardsOpened[0].onPrimary({ parcel: { kind: 'daily_brief', workspace_id: 'ws-1' } });
+  assert.equal(h.window.location.href, '/workspaces/alpha');
 });
 
 test('parcels: with only Farm runs the popover keeps its old title and hint', async () => {

@@ -46,6 +46,19 @@ test('it asks the server to open the parcels for one reference', async () => {
   }
 });
 
+test('the brief and the janitor console open everything of their kind', async () => {
+  const net = respondWith(200, { opened: 3 });
+  try {
+    assert.equal(await openParcelByRef({ kind: 'file_janitor', workspaceId: 'ws-1' }), 3);
+    assert.deepEqual(JSON.parse(net.calls[0].init.body), {
+      kind: 'file_janitor',
+      workspace_id: 'ws-1'
+    });
+  } finally {
+    net.restore();
+  }
+});
+
 test('an incomplete reference makes no request', async () => {
   const net = respondWith(200, { opened: 1 });
   try {

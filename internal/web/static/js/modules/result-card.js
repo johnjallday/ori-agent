@@ -32,7 +32,8 @@
   /** "took 1m 42s", "took 42s", "took 1h 5m"; '' when unknown. */
   function formatDuration(seconds) {
     var total = Number(seconds);
-    if (!isFinite(total) || total < 0) return '';
+    // A folder scan can finish inside a second; "took 0s" says nothing useful.
+    if (!isFinite(total) || total < 1) return '';
     total = Math.round(total);
     var hours = Math.floor(total / 3600);
     var minutes = Math.floor((total % 3600) / 60);
@@ -71,7 +72,12 @@
     return parcel.outcome === 'failed' || parcel.outcome === 'timeout';
   }
 
+  // The primary action says where it goes. A brief opens the brief and a scan
+  // opens its review, whether or not it worked out.
   function primaryLabel(parcel) {
+    var kind = parcel && parcel.kind;
+    if (kind === 'daily_brief') return 'Open brief';
+    if (kind === 'file_janitor') return 'Review files';
     return isFailure(parcel) ? 'Open task' : 'Open full result';
   }
 

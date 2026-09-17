@@ -56,6 +56,7 @@ test('formatDuration reads like a person would say it', () => {
   assert.equal(card.formatDuration(3900), 'took 1h 5m');
   assert.equal(card.formatDuration(undefined), '');
   assert.equal(card.formatDuration(-3), '');
+  assert.equal(card.formatDuration(0), '', 'a sub-second run shows no duration');
 });
 
 test('a finished run shows its title, outcome, duration, summary and rewards', () => {
@@ -92,6 +93,23 @@ test('a failed run shows its reason, says Needs a look, and offers the task', ()
   assert.match(html, /The import file is missing\./);
   assert.match(html, /data-result-primary>Open task</);
   assert.doesNotMatch(html, /data-result-rewards/);
+});
+
+test('a brief and a janitor scan name where their primary action goes', () => {
+  const { card } = load();
+  assert.equal(card.primaryLabel({ kind: 'daily_brief', outcome: 'succeeded' }), 'Open brief');
+  assert.equal(card.primaryLabel({ kind: 'daily_brief', outcome: 'failed' }), 'Open brief');
+  assert.equal(card.primaryLabel({ kind: 'file_janitor', outcome: 'succeeded' }), 'Review files');
+  const html = card.cardHTML(
+    payload({
+      parcel: { ...payload().parcel, kind: 'file_janitor', title: 'File Janitor', agent_name: '' },
+      duration_seconds: 4,
+      summary: '4 files are ready to review.',
+      rewards: undefined
+    })
+  );
+  assert.match(html, /4 files are ready to review\./);
+  assert.match(html, /data-result-primary>Review files</);
 });
 
 test('rewards that were zero or unknown are left out, and so is an empty block', () => {

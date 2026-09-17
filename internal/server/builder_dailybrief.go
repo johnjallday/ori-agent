@@ -183,6 +183,11 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	}
 	briefService := dailybrief.NewService(store, synthesizer)
 	briefService.SetAdmissionGate(b.resetWork)
+	if b.eventBus != nil {
+		// The map shows a brief being prepared (task-run-show FR9). Bound here,
+		// where the service exists, before its scheduler can start a run.
+		briefService.SetActivityPublisher(briefActivityPublisher{bus: b.eventBus})
+	}
 
 	// Action Center notification: fires only for a successful/partial
 	// scheduled revision when the user opted in (PRD FR63/FR65). The

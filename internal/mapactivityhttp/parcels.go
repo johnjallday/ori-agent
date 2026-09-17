@@ -106,8 +106,14 @@ func (h *Handler) OpenParcelsByRef(w http.ResponseWriter, r *http.Request) {
 		_ = orihttp.RespondBadRequest(w, "kind must be task, daily_brief, or file_janitor")
 		return
 	}
-	if strings.TrimSpace(req.WorkspaceID) == "" || strings.TrimSpace(req.RefID) == "" {
-		_ = orihttp.RespondBadRequest(w, "workspace_id and ref_id are required")
+	if strings.TrimSpace(req.WorkspaceID) == "" {
+		_ = orihttp.RespondBadRequest(w, "workspace_id is required")
+		return
+	}
+	// The Daily Brief and the File Janitor console show everything that is
+	// waiting, so they may leave ref_id out; a task result is always one task's.
+	if kind == mapactivity.KindTask && strings.TrimSpace(req.RefID) == "" {
+		_ = orihttp.RespondBadRequest(w, "ref_id is required for a task")
 		return
 	}
 	opened, err := h.tracker.OpenParcelsByRef(r.Context(), kind, req.WorkspaceID, req.RefID)

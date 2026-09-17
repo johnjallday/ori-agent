@@ -148,6 +148,31 @@ func TestOpenParcelsByRef(t *testing.T) {
 	if bad := post(mux, "/api/workspace-map/parcels/open-by-ref", `{"kind":"chat","workspace_id":"ws-1","ref_id":"x"}`); bad.Code != http.StatusBadRequest {
 		t.Fatalf("unknown kind status = %d, want 400", bad.Code)
 	}
+	if bad := post(mux, "/api/workspace-map/parcels/open-by-ref", `{"kind":"task","workspace_id":"ws-1"}`); bad.Code != http.StatusBadRequest {
+		t.Fatalf("a task without its reference = %d, want 400", bad.Code)
+	}
+	// The console shows every waiting batch, so it opens them all.
+	if all := post(mux, "/api/workspace-map/parcels/open-by-ref", `{"kind":"file_janitor","workspace_id":"ws-1"}`); all.Code != http.StatusOK {
+		t.Fatalf("janitor open without a reference = %d %s, want 200", all.Code, all.Body.String())
+	}
+}
+
+func TestBriefAndJanitorCardsCarryTheirFixedSentence(t *testing.T) {
+	mux, tracker := newParcelMux(t)
+	scan := workspace.NewActivityEvent(workspace.EventActivityFinished, "ws-1", "file_janitor", "ws-1:1", map[string]any{
+		"outcome": "succeeded", "count": 3, "ref_id": "batch-1",
+	})
+	tracker.HandleEvent(scan)
+	parcels := tracker.Snapshot().Parcels
+	if len(parcels) != 1 {
+		t.Fatalf("parcels = %+v", parcels)
+	}
+	recorder := post(mux, "/api/workspace-map/parcels/"+parcels[0].ID+"/open", `{}`)
+	body := recorder.Body.String()
+	if recorder.Code != http.StatusOK || !strings.Contains(body, `"summary":"3 files are ready to review."`) ||
+		!strings.Contains(body, `"kind":"file_janitor"`) || strings.Contains(body, `"rewards"`) {
+		t.Fatalf("card = %d %s", recorder.Code, body)
+	}
 }
 
 func TestParcelRoutesAre404WhenTheFlagIsOff(t *testing.T) {

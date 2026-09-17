@@ -720,18 +720,7 @@ export class WorkspaceCommandView {
         workspaceId: () => this.workspaceId(),
         workspaceName: () =>
           String((this.page && this.page.workspace && this.page.workspace.name) || ''),
-        onOpenResult: payload => {
-          const parcel = payload && payload.parcel;
-          const page = this.page || {};
-          if (
-            parcel &&
-            parcel.kind === 'task' &&
-            parcel.ref_id &&
-            typeof page.showTaskResult === 'function'
-          ) {
-            page.showTaskResult(parcel.ref_id);
-          }
-        }
+        onOpenResult: payload => this.followMapParcel(payload && payload.parcel)
       });
       if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
         // Parcels are placed from measured unit positions.
@@ -739,6 +728,25 @@ export class WorkspaceCommandView {
       }
     }
     return this.mapActivity;
+  }
+
+  // Where a result card's primary action goes from this page: the task's
+  // result, this workspace's File Janitor review, or Home for the Daily Brief,
+  // which lives in the assistant's Today panel there.
+  followMapParcel(parcel) {
+    if (!parcel) return;
+    const page = this.page || {};
+    if (parcel.kind === 'task' && parcel.ref_id && typeof page.showTaskResult === 'function') {
+      page.showTaskResult(parcel.ref_id);
+      return;
+    }
+    if (typeof window === 'undefined') return;
+    if (parcel.kind === 'file_janitor') {
+      const janitor = window.FileJanitorConsole;
+      if (janitor && typeof janitor.open === 'function') janitor.open({ tab: 'review' });
+      return;
+    }
+    if (parcel.kind === 'daily_brief') window.location.href = '/';
   }
 
   /** The page forwards every realtime event it receives (FR30: no second stream). */

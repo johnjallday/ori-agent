@@ -9,6 +9,7 @@
 // are genuinely undefined there, so the DOM-wiring IIFE below simply no-ops.
 
 import { loadOnboardingStatus, onboardingGateDecision } from './onboarding-gate.js';
+import { openParcelByRef } from './parcel-open.js';
 
 // parseContent safely decodes a Revision's ContentJSON. Returns {} (never
 // throws) on missing/invalid JSON so a corrupt revision degrades to an
@@ -304,6 +305,25 @@ export function renderContent(content) {
   let hqWorkspaceId = null;
   let polling = false;
 
+  // Seeing the brief opens the map's Daily Brief parcels (task-run-show FR40).
+  // This section is rendered while its drawer is still closed, so "seen" waits
+  // until it is actually on screen, and happens once per revision.
+  let renderedRevisionId = '';
+  let seenRevisionId = '';
+  let briefOnScreen = false;
+  function markBriefSeen() {
+    if (!briefOnScreen || !hqWorkspaceId || !renderedRevisionId) return;
+    if (renderedRevisionId === seenRevisionId) return;
+    seenRevisionId = renderedRevisionId;
+    void openParcelByRef({ kind: 'daily_brief', workspaceId: hqWorkspaceId });
+  }
+  if (typeof IntersectionObserver === 'function') {
+    new IntersectionObserver(entries => {
+      briefOnScreen = entries.some(entry => entry.isIntersecting);
+      markBriefSeen();
+    }).observe(section);
+  }
+
   async function fetchJSON(url, options) {
     const res = await fetch(
       url,
@@ -362,6 +382,8 @@ export function renderContent(content) {
     if (metaEl) metaEl.textContent = formatMeta(revision, config, relativeTimeFn);
     renderBanner(computeBanner(revision, latestClaim));
     if (bodyEl) bodyEl.innerHTML = renderContent(parseContent(revision));
+    renderedRevisionId = String(revision.id || '');
+    markBriefSeen();
   }
 
   async function pollUntilSettled() {

@@ -126,6 +126,30 @@ func TestParcelStore_OpenByRefOpensOnlyThatReference(t *testing.T) {
 	}
 }
 
+func TestParcelStore_SeeingTheBriefOrConsoleOpensEverythingOfThatKind(t *testing.T) {
+	store := newTestParcelStore(t)
+	ctx := context.Background()
+	scan := func(workspaceID, batch string) Parcel {
+		return Parcel{WorkspaceID: workspaceID, Kind: KindFileJanitor, RefID: batch, RunKey: batch,
+			Title: "File Janitor", Summary: "2 files are ready to review.", Outcome: OutcomeSucceeded, ProducedAt: parcelClock}
+	}
+	_, _, _ = store.Create(ctx, scan("ws-1", "batch-1"))
+	_, _, _ = store.Create(ctx, scan("ws-1", "batch-2"))
+	_, _, _ = store.Create(ctx, scan("ws-2", "batch-3"))
+	_, _, _ = store.Create(ctx, taskParcel("ws-1", "task-1", "run-1"))
+
+	opened, err := store.OpenByRef(ctx, KindFileJanitor, "ws-1", "", parcelClock)
+	if err != nil || len(opened) != 2 {
+		t.Fatalf("OpenByRef(no ref) = %d, %v; want both of ws-1's scans", len(opened), err)
+	}
+	if list, _ := store.ListUnopened(ctx); len(list) != 2 {
+		t.Fatalf("unopened = %+v; want the other workspace's scan and the task", list)
+	}
+	if none, err := store.OpenByRef(ctx, KindTask, "ws-1", "", parcelClock); err != nil || len(none) != 0 {
+		t.Fatalf("a task needs its reference: %d, %v", len(none), err)
+	}
+}
+
 func TestParcelStore_DeletesAndSweep(t *testing.T) {
 	store := newTestParcelStore(t)
 	ctx := context.Background()

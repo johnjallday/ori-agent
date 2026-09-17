@@ -65,6 +65,10 @@ type Service struct {
 	// without this package depending on internal/workspace's opportunity
 	// store.
 	onRevisionReady func(cfg Config, rev *Revision)
+
+	// activityPublisher tells the map a generation started and how it ended
+	// (tasks/prd-task-run-show.md FR9). Set before the scheduler starts.
+	activityPublisher ActivityPublisher
 }
 
 // NewService constructs a Daily Brief service.
@@ -246,6 +250,27 @@ func (s *Service) runGeneration(ctx context.Context, cfg Config, claim *Generati
 		logger.Warn("dailybrief: failed to mark generation running", logger.Fields{"claim_id": claim.ID, "error": err})
 	}
 
+	// The map hears that a brief is being prepared, and then — on every way
+	// out of this function — how it ended. Nothing in between (FR12).
+	activity := Activity{
+		WorkspaceID: cfg.WorkspaceID,
+		ActivityID:  claim.ID,
+		Trigger:     claim.Trigger,
+		LocalDate:   claim.LocalDate,
+	}
+	started := activity
+	started.Phase = ActivityStarted
+	s.publishActivity(started)
+	finalStatus := GenerationFailed
+	revisionID := ""
+	defer func() {
+		finished := activity
+		finished.Phase = ActivityFinished
+		finished.Outcome = activityOutcome(finalStatus)
+		finished.RevisionID = revisionID
+		s.publishActivity(finished)
+	}()
+
 	if s.generator == nil {
 		failMsg := "no brief generator configured"
 		_ = s.store.UpdateGenerationStatus(ctx, claim.ID, GenerationFailed, "", failMsg)
@@ -283,6 +308,8 @@ func (s *Service) runGeneration(ctx context.Context, cfg Config, claim *Generati
 		_ = s.store.UpdateGenerationStatus(ctx, claim.ID, GenerationFailed, "", err.Error())
 		return nil, fmt.Errorf("failed to persist daily brief revision: %w", err)
 	}
+	finalStatus = rev.Status
+	revisionID = rev.ID
 
 	if rev.Status == GenerationSucceeded || rev.Status == GenerationPartial {
 		// Preserve the last successful brief on failure: current is only

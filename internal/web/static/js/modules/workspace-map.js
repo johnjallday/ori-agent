@@ -6269,6 +6269,22 @@
   }
 
   /** Open one parcel into the result card (FR44, FR47). */
+  // Where a card's primary action goes (FR44): a task's result, the Daily Brief
+  // in the assistant's Today panel, or the File Janitor's review.
+  function followParcel(parcel) {
+    if (!parcel || !parcel.workspace_id) return;
+    if (parcel.kind === 'task' && parcel.ref_id) {
+      openWorkspace(parcel.workspace_id, { taskResultId: parcel.ref_id });
+    } else if (parcel.kind === 'daily_brief') {
+      var panel = window.PersonalAssistantPanel;
+      var shown =
+        panel && typeof panel.open === 'function' ? panel.open(null, { view: 'today' }) : false;
+      if (!shown) openWorkspace(parcel.workspace_id);
+    } else if (parcel.kind === 'file_janitor') {
+      openWorkspace(parcel.workspace_id, { panel: 'file-janitor' });
+    }
+  }
+
   function openParcelCard(container, parcel, origin) {
     var cards = window.OriResultCard;
     if (!cards || typeof cards.open !== 'function' || !parcel || !parcel.id) return false;
@@ -6283,10 +6299,7 @@
       workspaceName: ws ? ws.name : '',
       avatarHTML: activityAvatarHTML,
       onPrimary: function (payload) {
-        var opened = payload && payload.parcel;
-        if (opened && opened.kind === 'task' && opened.ref_id) {
-          openWorkspace(opened.workspace_id, { taskResultId: opened.ref_id });
-        }
+        followParcel(payload && payload.parcel);
       },
       onError: function () {
         announce(container, 'That result could not be opened. It is still in its workspace.');

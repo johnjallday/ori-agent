@@ -17,17 +17,23 @@
 /**
  * Open every waiting parcel for one task, brief, or janitor scan.
  *
- * @param {{kind: string, workspaceId: string, refId: string}} target
+ * The Daily Brief and the File Janitor console show everything that is
+ * waiting, so they leave `refId` out and open every parcel of their kind in the
+ * workspace. A task result always names its task.
+ *
+ * @param {{kind: string, workspaceId: string, refId?: string}} target
  * @returns {Promise<number|null>} how many parcels were opened, or null when
  *   there was nothing to ask about or the call did not succeed.
  */
 export async function openParcelByRef({ kind, workspaceId, refId } = {}) {
   const payload = {
     kind: String(kind || '').trim(),
-    workspace_id: String(workspaceId || '').trim(),
-    ref_id: String(refId || '').trim()
+    workspace_id: String(workspaceId || '').trim()
   };
-  if (!payload.kind || !payload.workspace_id || !payload.ref_id) return null;
+  const ref = String(refId || '').trim();
+  if (ref) payload.ref_id = ref;
+  if (!payload.kind || !payload.workspace_id) return null;
+  if (payload.kind === 'task' && !ref) return null;
 
   try {
     const response = await fetch('/api/workspace-map/parcels/open-by-ref', {
