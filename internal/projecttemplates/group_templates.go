@@ -67,6 +67,11 @@ type GroupTemplateRole struct {
 	Description string `json:"description,omitempty"`
 	Required    bool   `json:"required"`
 	Primary     bool   `json:"primary"`
+	// DefaultName is the agent name the creator proposes for this role: the
+	// declaration's default primary name for the primary role, otherwise the
+	// label. It is display text only; prompts, skills, and type stay
+	// server-side.
+	DefaultName string `json:"default_name"`
 }
 
 type GroupTemplate struct {
@@ -226,9 +231,13 @@ func projectGroupTemplate(groupKey string, sources []groupTemplateSource) GroupT
 	for _, role := range program.Roles {
 		switch role.Scope {
 		case workspace.AssistantRoleScopeHome:
+			defaultName := role.Label
+			if primaryName := strings.TrimSpace(program.DefaultPrimaryName); role.Primary && primaryName != "" {
+				defaultName = primaryName
+			}
 			entry.HomeRoles = append(entry.HomeRoles, GroupTemplateRole{
 				RoleID: role.ID, Label: role.Label, Description: role.Description,
-				Required: role.Required, Primary: role.Primary,
+				Required: role.Required, Primary: role.Primary, DefaultName: defaultName,
 			})
 		case workspace.AssistantRoleScopeProject:
 			entry.ProjectRoles = append(entry.ProjectRoles, role.Label)

@@ -102,7 +102,7 @@ test('the installed source is the exact published 0.5.2 and offers Music Product
   ]);
 });
 
-test('Tree → Create Group → Blueprint builds one unstaffed Music Production group', async ({
+test('Tree → Create Group → Blueprint builds one Music Production group, its coordinator left for the group page', async ({
   page,
   request
 }) => {
@@ -118,7 +118,7 @@ test('Tree → Create Group → Blueprint builds one unstaffed Music Production 
     hasText: 'Music Production Home'
   });
   await expect(music).toContainText('Plugin: reaper-plugin 0.5.2');
-  await expect(music).toContainText('Set up after: Music Portfolio Manager (required)');
+  await expect(music).toContainText('Group roles: Music Portfolio Manager (required)');
   await expect(music).toContainText('Stays project-local: Producer, Mix Engineer, Songwriter');
   await evidence(page, '01-create-group-blueprint-step');
 
@@ -130,16 +130,37 @@ test('Tree → Create Group → Blueprint builds one unstaffed Music Production 
   );
   await expect(creator.locator('#folderNameInput')).toHaveValue('Music Production Home');
   await creator.locator('#folderNameInput').fill(GROUP_NAME);
+  await creator.getByRole('button', { name: 'Continue →' }).click();
+
+  // Team proposes the declared coordinator; this run leaves it for the group
+  // page so that path stays covered.
+  await expect(creator.locator('#wizardStep3Title')).toHaveText('Staff the group');
+  const coordinatorRow = creator.locator('.ws-role-row[data-role-id="portfolio_manager"]');
+  await expect(coordinatorRow).toHaveAttribute('data-state', 'filled');
+  await expect(coordinatorRow).toContainText('Portfolio Manager');
+  await evidence(page, '02-create-group-team');
+  await coordinatorRow.getByRole('button', { name: 'Clear Music Portfolio Manager' }).click();
   await creator.getByRole('button', { name: 'Review →' }).click();
   const summary = creator.locator('#workspaceReviewSummary');
   await expect(summary).toContainText(TEMPLATE_META);
-  await expect(summary).toContainText('Required, set up after: Music Portfolio Manager');
+  await expect(summary).toContainText('Music Portfolio Manager · Not staffed');
+  await expect(summary).toContainText(
+    'This group will have no Music Portfolio Manager until you set one up.'
+  );
   await expect(creator.locator('[data-group-template-review-status]')).toContainText(
     'Only this group will be created'
   );
   await evidence(page, '02-create-group-review');
   await creator.getByRole('button', { name: `Create group “${GROUP_NAME}” only` }).click();
   await expect(creator).toBeHidden();
+  // The group page opens with the empty coordinator's setup; this run
+  // dismisses it and sets the role up from the page's own control next.
+  await page.waitForURL(url => /^\/workspaces\/[^/]+$/.test(url.pathname));
+  const agentModal = page.locator('#addAgentModal');
+  await expect(agentModal).toBeVisible();
+  await expect(agentModal.locator('[data-agent-create-field="systemPrompt"]')).toHaveCount(0);
+  await agentModal.getByRole('button', { name: 'Cancel' }).click();
+  await expect(agentModal).toBeHidden();
 
   const after = await folders(request);
   const created = after.filter(folder => !beforeFolders.some(item => item.id === folder.id));
@@ -168,6 +189,9 @@ test('the group page sets up its Music Portfolio Manager', async ({ page, reques
   await strip.getByRole('button', { name: 'Set up Music Portfolio Manager' }).click();
   await expect(page.locator('#addAgentModal')).toBeVisible();
   await expect(page.locator('[data-agent-create-field="name"]')).toBeFocused();
+  await expect(page.locator('#addAgentModal [data-agent-create-note]')).toContainText(
+    'Plugin: reaper-plugin 0.5.2'
+  );
   await page.locator('[data-agent-create-field="name"]').fill(COORDINATOR);
   await page.locator('#createAgentBtn').click();
   await expect(page.locator('#addAgentModal')).toBeHidden();
@@ -285,11 +309,19 @@ test('Create Group reuses the renamed Music Production group unchanged', async (
     hasText: 'Music Production Home'
   });
   await expect(music).toContainText('Group exists');
-  await expect(music).toContainText(`Reuses the existing group “${renamed}” unchanged.`);
+  await expect(music).toContainText(`Reuses the existing group “${renamed}” unchanged;`);
   await music.locator('input').check();
   await creator.getByRole('button', { name: 'Continue →' }).click();
   await expect(creator.locator('#folderNameInput')).toHaveValue(renamed);
   await expect(creator.locator('#folderNameInput')).toHaveJSProperty('readOnly', true);
+  await creator.getByRole('button', { name: 'Continue →' }).click();
+  // Its coordinator is already filled, so Team only shows the holder.
+  await expect(creator.locator('.ws-role-row[data-role-id="portfolio_manager"]')).toContainText(
+    COORDINATOR
+  );
+  await expect(creator.locator('.ws-role-row[data-role-id="portfolio_manager"]')).toContainText(
+    'Already filled'
+  );
   await creator.getByRole('button', { name: 'Review →' }).click();
   await expect(creator.locator('#createFolderBtn')).toHaveText(`Use existing group “${renamed}”`);
   await evidence(page, '07-reuse-renamed');

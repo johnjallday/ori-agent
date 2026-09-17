@@ -126,7 +126,12 @@
         review: null,
         pending: null,
         error: '',
-        loadToken: 0
+        loadToken: 0,
+        // Staged Home role fills per managed entry: entry id → Map(role id →
+        // { mode, name, provider, model }). Nothing here is sent until the
+        // Home-only commit has succeeded.
+        fills: {},
+        seeded: {}
       };
     }
     return context.groupTemplates;
@@ -221,6 +226,318 @@
     );
   }
 
+  // The group creator's step list when a managed template is selected: it
+  // stages Home role fills on a Team step of its own. Every other creator
+  // (General, guided setup, selected members) keeps the list sessions.js
+  // derives, so this returns null for them.
+  function wizardSteps(manager) {
+    return managedActive(manager) ? [1, 2, 3, 4] : null;
+  }
+
+  // ---- Home role staffing ---------------------------------------------------
+  //
+  // The review/commit endpoint creates exactly one Home and refuses every team
+  // field. Staffing is therefore a separate, immediate follow-on: the wizard
+  // stages fills here and, only after a successful commit, sends one
+  // PUT /api/workspaces/{home}/roles/{role} per staged role. A program Home's
+  // prompt is applied server-side, so no fill ever carries one.
+
+  const FILL_CREATE = 'create';
+  const FILL_ASSIGN = 'assign';
+
+  function homeRoles(entry) {
+    return (Array.isArray(entry?.home_roles) ? entry.home_roles : []).filter(role =>
+      String(role?.role_id || '').trim()
+    );
+  }
+
+  function roleDefaultName(role) {
+    return String(role?.default_name || role?.label || '').trim();
+  }
+
+  function resetFills(context) {
+    const state = context?.groupTemplates;
+    if (!state) return;
+    state.fills = {};
+    state.seeded = {};
+  }
+
+  function fillsFor(context, entry) {
+    const state = stateFor(context);
+    if (!state || !entry) return new Map();
+    if (!state.fills[entry.id]) state.fills[entry.id] = new Map();
+    return state.fills[entry.id];
+  }
+
+  function normalizeFill(fill) {
+    const mode = fill?.mode === FILL_ASSIGN ? FILL_ASSIGN : FILL_CREATE;
+    return {
+      mode,
+      name: String(fill?.name || '').trim(),
+      provider: mode === FILL_CREATE ? String(fill?.provider || '').trim() : '',
+      model: mode === FILL_CREATE ? String(fill?.model || '').trim() : ''
+    };
+  }
+
+  // Every required Home role starts as Create under its default name; optional
+  // roles start empty. When a saved agent already has that name, the role starts
+  // as Assign instead — a Create under a taken name is refused by the server, so
+  // the wizard never proposes one. Seeding waits for the saved agents to load
+  // (or fail) and runs once per template selection, so a role the user cleared
+  // stays cleared.
+  function seedFills(manager) {
+    const context = manager?.workspaceCreatorContext;
+    const state = stateFor(context);
+    const entry = selectedManaged(context);
+    if (!state || !entry || !managedActive(manager) || state.seeded[entry.id]) return false;
+    const saved = manager.groupTemplateSavedAgentsState?.();
+    if (saved === 'idle' || saved === 'loading') return false;
+    const fills = fillsFor(context, entry);
+    for (const role of homeRoles(entry)) {
+      if (!role.required || fills.has(role.role_id) || !roleEditable(entry, role)) continue;
+      const name = roleDefaultName(role);
+      if (!name) continue;
+      const attachable = manager.findAttachableSavedAgent?.(name);
+      fills.set(
+        role.role_id,
+        attachable
+          ? normalizeFill({ mode: FILL_ASSIGN, name: String(attachable.name || name) })
+          : normalizeFill({ mode: FILL_CREATE, name })
+      );
+    }
+    state.seeded[entry.id] = true;
+    return true;
+  }
+
+  // What the catalog verified about one required role on an existing Home. It
+  // reports required roles only, and only when it could read the Home's roster.
+  function reportedRole(entry, roleId) {
+    const roles = entry?.required_home_roles?.roles;
+    return (Array.isArray(roles) ? roles : []).find(role => role?.role_id === roleId) || null;
+  }
+
+  function reuseVerified(entry) {
+    return entry?.required_home_roles?.verification === 'verified';
+  }
+
+  // Whether the wizard may stage a fill for this role. A new Home's roles are
+  // all staffable. An existing Home is reused unchanged except for required
+  // roles the catalog verified as empty: a filled role keeps its holder, an
+  // optional role's state is not reported here, and an unverified roster
+  // stages nothing at all.
+  function roleEditable(entry, role) {
+    if (!isReusable(entry)) return true;
+    if (!reuseVerified(entry)) return false;
+    const reported = reportedRole(entry, role?.role_id);
+    return Boolean(reported) && reported.state !== 'filled';
+  }
+
+  // Mirrors group-template-status.js groupTemplateTeamFact ("Could not be
+  // verified"); this classic script cannot import that module.
+  const UNVERIFIED_ROLE_REASON =
+    'Could not be verified. Nothing is staffed here; set this role up from the group page.';
+
+  function roleReadOnlyReason(entry, role) {
+    if (roleEditable(entry, role)) return '';
+    if (!reuseVerified(entry)) return UNVERIFIED_ROLE_REASON;
+    if (reportedRole(entry, role?.role_id)?.state === 'filled') return 'Already filled';
+    return 'Optional roles on an existing group are set up from the group page.';
+  }
+
+  // Another staged role already uses this agent name. One agent fills at most
+  // one role, and two Creates under one name would collide on the server.
+  function fillNameProblem(manager, roleId, name) {
+    const key = String(name || '')
+      .trim()
+      .toLowerCase();
+    if (!key) return '';
+    const context = manager?.workspaceCreatorContext;
+    const entry = selectedManaged(context);
+    if (!entry) return '';
+    for (const role of homeRoles(entry)) {
+      const fill = fillsFor(context, entry).get(role.role_id);
+      if (role.role_id !== roleId && fill && fill.name.toLowerCase() === key) {
+        return `${role.label || role.role_id} is already staffed by “${fill.name}”. Choose another name.`;
+      }
+    }
+    return '';
+  }
+
+  // Shown in place of the Create form's prompt box for a program Home role.
+  function promptNote(entry) {
+    const provider = providerLabel(entry) || 'this template';
+    return `Instructions for this role come from ${provider} and are applied by Ori.`;
+  }
+
+  function emptyRequiredWarnings(manager, entry) {
+    const fills = fillsFor(manager?.workspaceCreatorContext, entry);
+    return homeRoles(entry)
+      .filter(role => role.required && !fills.has(role.role_id) && roleEditable(entry, role))
+      .map(
+        role =>
+          `This group will have no ${String(role.label || role.role_id)} until you set one up.`
+      );
+  }
+
+  function setFill(manager, roleId, fill) {
+    const context = manager?.workspaceCreatorContext;
+    const entry = selectedManaged(context);
+    const role = homeRoles(entry).find(item => item.role_id === roleId);
+    const next = normalizeFill(fill);
+    if (!role || !next.name || context?.groupTemplates?.pending) return false;
+    if (!roleEditable(entry, role) || fillNameProblem(manager, roleId, next.name)) return false;
+    fillsFor(context, entry).set(roleId, next);
+    return true;
+  }
+
+  function clearFill(manager, roleId) {
+    const context = manager?.workspaceCreatorContext;
+    const entry = selectedManaged(context);
+    if (!entry || context?.groupTemplates?.pending) return false;
+    return fillsFor(context, entry).delete(roleId);
+  }
+
+  function stagedFill(manager, roleId) {
+    const context = manager?.workspaceCreatorContext;
+    const entry = selectedManaged(context);
+    return entry ? fillsFor(context, entry).get(roleId) || null : null;
+  }
+
+  // The fills that will be sent, in declaration order.
+  function staffingPlan(manager) {
+    const context = manager?.workspaceCreatorContext;
+    const entry = selectedManaged(context);
+    if (!entry || !managedActive(manager)) return [];
+    const fills = fillsFor(context, entry);
+    return homeRoles(entry)
+      .filter(role => fills.has(role.role_id) && roleEditable(entry, role))
+      .map(role => ({
+        roleId: role.role_id,
+        label: String(role.label || role.role_id),
+        required: Boolean(role.required),
+        fill: { ...fills.get(role.role_id) }
+      }));
+  }
+
+  // The roster projection WorkspaceRoleRoster draws. Program Home roles carry
+  // no `proposed` block: their setup is never disclosed to the browser.
+  function teamRoster(manager) {
+    const context = manager?.workspaceCreatorContext;
+    const entry = selectedManaged(context);
+    const fills = entry ? fillsFor(context, entry) : new Map();
+    const roles = homeRoles(entry).map(role => {
+      const readOnlyReason = roleReadOnlyReason(entry, role);
+      // An existing holder is shown as it is; the wizard never replaces it.
+      const holder =
+        readOnlyReason && reportedRole(entry, role.role_id)?.state === 'filled'
+          ? reportedRole(entry, role.role_id).agent || null
+          : null;
+      const fill = readOnlyReason ? null : fills.get(role.role_id);
+      // An empty row already says Missing or Optional in its tag; a filled
+      // row's tag names its agent, so the marker moves into the description.
+      const marker = fill || holder ? (role.required ? 'Required' : 'Optional') : '';
+      const row = {
+        role_id: role.role_id,
+        label: String(role.label || role.role_id),
+        description: [marker, String(role.description || '')].filter(Boolean).join(' · '),
+        scope: 'home',
+        required: Boolean(role.required),
+        primary: Boolean(role.primary),
+        state: fill || holder ? 'filled' : 'empty',
+        agent: holder || (fill ? { name: fill.name } : null),
+        source: holder ? 'group' : fill?.mode === FILL_ASSIGN ? 'assigned' : 'created'
+      };
+      if (readOnlyReason) {
+        row.read_only = true;
+        row.read_only_reason = readOnlyReason;
+      }
+      return row;
+    });
+    const filled = roles.filter(role => role.state === 'filled').length;
+    return {
+      roles,
+      total_count: roles.length,
+      filled_count: filled,
+      empty_count: roles.length - filled
+    };
+  }
+
+  function outcomeLine(label, fill) {
+    if (!fill) return `${label} · Not staffed`;
+    return fill.mode === FILL_ASSIGN
+      ? `${label} · Assign “${fill.name}”`
+      : `${label} · Create “${fill.name}”`;
+  }
+
+  function staffCountLabel(count) {
+    return `${count} role${count === 1 ? '' : 's'}`;
+  }
+
+  const TEAM_TITLE = 'Staff the group';
+  const TEAM_DESCRIPTION =
+    'The blueprint proposes these group roles. Required ones are prefilled; you can rename, assign a saved agent, or leave a role empty.';
+
+  // Draws the Team step for a managed template. The ordinary team layout's
+  // pieces that describe a workspace roster are emptied here; the ordinary
+  // path re-renders them whenever it is the active creator again.
+  function renderTeam(manager) {
+    if (!managedActive(manager) || manager.wizardStep !== 3) return;
+    seedFills(manager);
+    const entry = selectedManaged(manager.workspaceCreatorContext);
+    const title = document.getElementById('wizardStep3Title');
+    const description = document.getElementById('wizardStep3Description');
+    const heading = document.getElementById('workspaceTeamHeading');
+    const summary = document.getElementById('workspaceTeamSummary');
+    const eyebrow = document.getElementById('workspaceTeamEyebrow');
+    if (title) title.textContent = TEAM_TITLE;
+    if (description) description.textContent = TEAM_DESCRIPTION;
+    if (eyebrow) eyebrow.textContent = 'Resulting group team';
+    if (heading) heading.textContent = `Group roles · ${String(entry?.name || 'Group template')}`;
+    if (summary) {
+      const saved = manager.groupTemplateSavedAgentsState?.();
+      const staffable = homeRoles(entry).some(role => roleEditable(entry, role));
+      summary.textContent = !staffable
+        ? 'Nothing to staff here: this group’s roles are already filled or are set up from the group page.'
+        : saved === 'idle' || saved === 'loading'
+          ? 'Checking your saved agents before proposing names…'
+          : isReusable(entry)
+            ? 'The group is reused unchanged. Only its empty required roles can be staffed here, right after you confirm on Review.'
+            : 'Nothing is created or staffed until you confirm on Review. Each role is filled right after the group exists.';
+    }
+    for (const id of ['workspaceAssistantProgramCreate', 'workspaceBlankAgentlessChoice']) {
+      const node = document.getElementById(id);
+      if (node) node.hidden = true;
+    }
+    for (const id of [
+      'workspaceTeamIssues',
+      'workspaceTeamBatchActions',
+      'workspaceTeamRoster',
+      'workspaceTeamModelNote'
+    ]) {
+      document.getElementById(id)?.replaceChildren();
+    }
+    const layout = document.getElementById('workspaceTeamLayout');
+    const picker = document.getElementById('existingAgentRosterPanel');
+    const assigning = Boolean(manager.groupTemplateRoleAssigning);
+    layout?.classList?.remove?.('is-assistant-program');
+    // The saved-agent picker only appears beside the roster while a role is
+    // being assigned; otherwise the roster takes the whole step.
+    layout?.classList?.toggle?.('is-roster-only', !assigning);
+    if (picker) picker.hidden = !assigning;
+    const container = document.getElementById('workspaceRoleRoster');
+    const component = window.WorkspaceRoleRoster;
+    if (!container || !component) return;
+    container.hidden = false;
+    component.render(container, teamRoster(manager), {
+      title: 'Group roles',
+      agentHref: null,
+      onRequestCreate: (roleId, row) => manager.openGroupTemplateRoleSetup?.(roleId, row),
+      onEdit: (roleId, row, opener) => manager.openGroupTemplateRoleSetup?.(roleId, row, opener),
+      onAssign: (roleId, row) => manager.openGroupTemplateRoleAssign?.(roleId, row),
+      onClear: (roleId, row) => manager.clearGroupTemplateRole?.(roleId, row)
+    });
+  }
+
   function currentName() {
     return String(document.getElementById('folderNameInput')?.value || '').trim();
   }
@@ -272,6 +589,8 @@
     state.selectedId = next.id;
     state.review = null;
     state.error = '';
+    // A staffing plan belongs to the template it was made for.
+    resetFills(context);
     if (input) {
       if (isReusable(next)) input.value = String(next.home?.name || '');
       else if (state.names[next.id] !== undefined) input.value = state.names[next.id];
@@ -295,12 +614,31 @@
     return node;
   }
 
-  function appendSummary(body, entry, existingName) {
+  // The chooser's own creator stages Home role fills, so its card says so;
+  // guided setup's fixed card keeps the Home-only wording of its own flow.
+  function staffingSummary(entry, existingName) {
+    const required = roleLabels(entry, true);
+    return {
+      creates: existingName
+        ? `Reuses the existing group “${existingName}” unchanged; you choose who fills its empty roles.`
+        : 'Creates one group and fills the roles you choose — no project, schedule, or tool access.',
+      roles: roleSummary(entry).map(line =>
+        required.length && line.startsWith('Set up after: ')
+          ? `Group roles: ${required.join(', ')} (required)`
+          : line
+      )
+    };
+  }
+
+  function appendSummary(body, entry, existingName, { staffing = false } = {}) {
     const provider = providerLabel(entry);
     if (provider) body.append(el('small', 'workspace-group-template-provider', provider));
     if (entry.description) body.append(el('small', '', String(entry.description)));
-    body.append(el('small', 'workspace-group-template-creates', createsCopy(existingName)));
-    for (const line of roleSummary(entry)) body.append(el('small', '', line));
+    const summary = staffing
+      ? staffingSummary(entry, existingName)
+      : { creates: createsCopy(existingName), roles: roleSummary(entry) };
+    body.append(el('small', 'workspace-group-template-creates', summary.creates));
+    for (const line of summary.roles) body.append(el('small', '', line));
   }
 
   // Guided setup shows its one template as a read-only card: no radio, no
@@ -397,7 +735,9 @@
       }
       body.append(head);
       if (managed) {
-        appendSummary(body, entry, isReusable(entry) ? String(entry.home?.name || '') : '');
+        appendSummary(body, entry, isReusable(entry) ? String(entry.home?.name || '') : '', {
+          staffing: true
+        });
         const note = unavailableNote(entry);
         if (note) body.append(el('small', 'workspace-group-template-note', note));
       } else {
@@ -462,7 +802,13 @@
       input.readOnly = Boolean(entry && isReusable(entry));
       input.setAttribute('aria-readonly', String(input.readOnly));
     }
-    if (!active) return;
+    if (!active) {
+      // Hand the shared Team layout back to the ordinary roster unchanged.
+      const eyebrow = document.getElementById('workspaceTeamEyebrow');
+      if (eyebrow?.dataset?.defaultText) eyebrow.textContent = eyebrow.dataset.defaultText;
+      document.getElementById('workspaceTeamLayout')?.classList?.remove?.('is-roster-only');
+      return;
+    }
     if (description) description.hidden = true;
     if (parentCard) parentCard.hidden = true;
     if (notice) {
@@ -471,14 +817,14 @@
         el(
           'strong',
           '',
-          isReusable(entry) ? 'This group already exists.' : 'Only the group is created.'
+          isReusable(entry) ? 'This group already exists.' : 'Only the group is created here.'
         ),
         el(
           'span',
           '',
           isReusable(entry)
-            ? 'It will be reused unchanged: no rename, no new agents, and no project.'
-            : 'Its coordinator is set up separately afterward. Projects, teams, and tool access are never created here.'
+            ? 'It will be reused unchanged: no rename and no project. Next, choose who fills its empty roles.'
+            : 'Next, choose who fills its roles. Projects, project teams, and tool access are never created here.'
         )
       );
     }
@@ -487,8 +833,19 @@
         ? 'Review the existing group this template uses.'
         : 'Name the group this template creates. You can rename it later.';
     }
+    const step3Name = document.querySelector?.('[data-workspace-creator-step-name="3"]');
+    if (step3Name) step3Name.textContent = 'Team';
+    if (manager.wizardStep >= 3) seedFills(manager);
+    renderTeam(manager);
+    const staffed = staffingPlan(manager).length;
     if (step4Title) {
-      step4Title.textContent = isReusable(entry) ? 'Reuse this group' : 'Create this group only';
+      step4Title.textContent = isReusable(entry)
+        ? staffed
+          ? 'Reuse and staff this group'
+          : 'Reuse this group'
+        : staffed
+          ? 'Create and staff this group'
+          : 'Create this group only';
     }
     if (step4Description) {
       step4Description.textContent = 'Nothing is created or changed until you confirm below.';
@@ -519,8 +876,19 @@
     const name = currentName();
     const review =
       state.review && state.review.key === reviewKey(entry, name) ? state.review : null;
+    const plan = staffingPlan(manager);
+    const staffed = plan.length;
     let status = 'Preparing a review… nothing has been created.';
-    if (review?.status === 'ready') status = review.data?.summary || '';
+    if (review?.status === 'ready') {
+      // The server reviews the group alone ("nothing else is created"); the
+      // role fills are separate requests, so say where they come in.
+      status = [
+        review.data?.summary || '',
+        staffed ? 'The roles listed below are then staffed one at a time.' : ''
+      ]
+        .filter(Boolean)
+        .join(' ');
+    }
     if (review?.status === 'error') status = review.error;
     if (state.pending?.uncertain) {
       status =
@@ -528,6 +896,13 @@
     }
     const reuse = review?.status === 'ready' ? Boolean(review.data?.reuse) : isReusable(entry);
     const groupName = reuse ? review?.data?.home_name || entry.home?.name || name : name;
+    const outcome = reuse
+      ? staffed
+        ? `This existing group will be reused unchanged and ${joinLabels(plan.map(item => item.label))} will be staffed.`
+        : 'The existing group is reused unchanged'
+      : staffed
+        ? `One group is created, then ${staffCountLabel(staffed)} staffed`
+        : 'One group is created, initially unstaffed';
     return `
       <div class="workspace-review-card">
         <div class="workspace-review-card-main">
@@ -542,7 +917,7 @@
       <div class="workspace-review-card">
         <div class="workspace-review-card-main">
           <span class="workspace-review-card-label">What will happen</span>
-          <strong>${reuse ? 'The existing group is reused unchanged' : 'One group is created, initially unstaffed'}</strong>
+          <strong>${escape(manager, outcome)}</strong>
           <span class="workspace-review-card-note ${review?.status === 'error' ? 'is-error' : ''}" data-group-template-review-status role="status" aria-live="polite">${escape(manager, status)}</span>
         </div>
       </div>
@@ -551,6 +926,9 @@
 
   function rolesCardHTML(manager, entry) {
     if (!entry) return '';
+    if (managedActive(manager) && selectedManaged(manager.workspaceCreatorContext) === entry) {
+      return staffingCardHTML(manager, entry);
+    }
     const required = roleLabels(entry, true);
     const optional = roleLabels(entry, false);
     const projectRoles = projectRoleLabels(entry);
@@ -563,6 +941,35 @@
           ${optional.length ? `<span class="workspace-review-card-meta">${escape(manager, `Optional: ${optional.join(', ')}`)}</span>` : ''}
           ${projectRoles.length ? `<span class="workspace-review-card-note">${escape(manager, `Stays project-local: ${projectRoles.join(', ')}. Each project keeps its own team.`)}</span>` : ''}
         </div>
+      </div>`;
+  }
+
+  // The creator's own receipt: one outcome line per Home role, in declaration
+  // order, so the consequence of confirming is explicit before anything exists.
+  function staffingCardHTML(manager, entry) {
+    const roles = homeRoles(entry);
+    const projectRoles = projectRoleLabels(entry);
+    if (!roles.length && !projectRoles.length) return '';
+    const fills = fillsFor(manager.workspaceCreatorContext, entry);
+    const lines = roles.map(role => {
+      const label = String(role.label || role.role_id);
+      if (roleEditable(entry, role)) return outcomeLine(label, fills.get(role.role_id));
+      const holder = reportedRole(entry, role.role_id);
+      return holder?.state === 'filled'
+        ? `${label} · Already filled by “${String(holder.agent?.name || 'its holder')}”`
+        : `${label} · Not staffed here`;
+    });
+    const warnings = emptyRequiredWarnings(manager, entry);
+    return `
+      <div class="workspace-review-card" data-group-template-staffing>
+        <div class="workspace-review-card-main">
+          <span class="workspace-review-card-label">Group roles</span>
+          ${lines.map(line => `<span class="workspace-review-card-meta" data-group-template-role-outcome>${escape(manager, line)}</span>`).join('')}
+          ${warnings.map(line => `<span class="workspace-review-card-note is-warning" data-group-template-role-warning role="note">${escape(manager, line)}</span>`).join('')}
+          ${roles.length ? `<span class="workspace-review-card-note">${escape(manager, 'Roles are filled one at a time right after the group exists. A role that cannot be filled never undoes the group.')}</span>` : ''}
+          ${projectRoles.length ? `<span class="workspace-review-card-note">${escape(manager, `Stays project-local: ${projectRoles.join(', ')}. Each project keeps its own team.`)}</span>` : ''}
+        </div>
+        ${roles.length ? '<div class="workspace-review-card-actions"><button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="3">Edit team</button></div>' : ''}
       </div>`;
   }
 
@@ -618,33 +1025,174 @@
     if (state?.pending?.uncertain) return 'Retry confirmed change';
     const reuse = state?.review?.status === 'ready' ? state.review.data?.reuse : isReusable(entry);
     const name = reuse ? state?.review?.data?.home_name || entry.home?.name : currentName();
-    return reuse ? `Use existing group “${name}”` : `Create group “${name || 'Untitled'}” only`;
+    const staffed = (state?.pending?.staffing || staffingPlan(manager)).length;
+    if (reuse) {
+      return staffed
+        ? `Use existing group “${name}” and staff ${staffCountLabel(staffed)}`
+        : `Use existing group “${name}”`;
+    }
+    return staffed
+      ? `Create group and staff ${staffCountLabel(staffed)}`
+      : `Create group “${name || 'Untitled'}” only`;
   }
 
-  function showFollowUp(manager, result, folder, requestedName) {
-    const name = String(result.home_name || 'Group');
-    const nameNote =
-      String(requestedName || '').trim() && String(requestedName).trim() !== name
-        ? ' The name you entered was not applied.'
-        : '';
-    const message = result.created_by_this_operation
-      ? `${name} is ready. No project or team was created. Set up its coordinator next.`
-      : `${name} already existed and was reused unchanged.${nameNote}`;
+  // Fallback when the group's folder cannot be resolved for navigation: the
+  // same landing words, as a toast on the page the user is already on.
+  function showFollowUp(manager, result, folder, notice) {
     const slug = String(folder?.folder_slug || '').trim();
-    const options = {
-      title: result.created_by_this_operation ? 'Group created' : 'Existing group reused',
-      duration: 9000
-    };
+    const options = { title: notice.title, duration: 9000 };
     if (slug) {
       options.action = {
         label: 'Open group',
         onClick: () => {
-          window.location.href = `/workspaces/${encodeURIComponent(slug)}`;
+          window.location.href = landingURL(slug, notice.roleId);
         }
       };
     }
-    if (window.Toast?.success) window.Toast.success(message, options);
-    else manager.showToast?.(message, 'success');
+    const toast = window.Toast?.[notice.tone];
+    if (typeof toast === 'function') toast.call(window.Toast, notice.message, options);
+    else manager.showToast?.(notice.message, notice.tone);
+  }
+
+  function roleURL(homeId, roleId) {
+    return `/api/workspaces/${encodeURIComponent(homeId)}/roles/${encodeURIComponent(roleId)}`;
+  }
+
+  // One role, one request. A 409 saying the role is already filled means an
+  // earlier attempt landed and its response was lost, so it counts as staffed.
+  async function fillRole(homeId, item) {
+    const fill = normalizeFill(item.fill);
+    try {
+      const response = await fetch(roleURL(homeId, item.roleId), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          mode: fill.mode,
+          name: fill.name,
+          provider: fill.provider,
+          model: fill.model
+        })
+      });
+      const body = await response.json().catch(() => ({}));
+      if (response.ok) return { ok: true };
+      const message = String(body?.message || body?.error || '').trim();
+      if (response.status === 409 && /already fills this role/i.test(message)) {
+        return { ok: true, alreadyFilled: true };
+      }
+      return {
+        ok: false,
+        error: message || `${item.label} could not be staffed (${response.status}).`
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: `${item.label} could not be staffed: ${error?.message || 'the request did not return'}.`
+      };
+    }
+  }
+
+  // Fills run in declaration order after the commit. A failure never stops the
+  // remaining roles and never undoes the group or an earlier fill.
+  async function fillRoles(homeId, staffing) {
+    const outcomes = [];
+    for (const item of staffing) {
+      outcomes.push({ roleId: item.roleId, label: item.label, ...(await fillRole(homeId, item)) });
+    }
+    return outcomes;
+  }
+
+  function joinLabels(labels) {
+    if (labels.length <= 1) return labels.join('');
+    return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+  }
+
+  function reportedFilled(entry, roleId) {
+    const roles = entry?.required_home_roles?.roles;
+    return (Array.isArray(roles) ? roles : []).some(
+      role => role?.role_id === roleId && role?.state === 'filled'
+    );
+  }
+
+  // The role the group page should open: the first fill that failed, otherwise
+  // the first required Home role nobody was staged to fill.
+  function landingRole(entry, staffing, outcomes) {
+    const failed = outcomes.find(outcome => !outcome.ok);
+    if (failed) return failed.roleId;
+    const staged = new Set(staffing.map(item => item.roleId));
+    const empty = homeRoles(entry).find(
+      role => role.required && !staged.has(role.role_id) && !reportedFilled(entry, role.role_id)
+    );
+    return empty ? empty.role_id : '';
+  }
+
+  // The words the user reads once the group exists, on the group page or in the
+  // fallback toast: which group, which roles were staffed, and what did not.
+  function landingNotice(result, entry, staffing, outcomes, requestedName = '') {
+    const name = String(result?.home_name || 'Group');
+    const created = Boolean(result?.created_by_this_operation);
+    const nameNote =
+      !created && String(requestedName || '').trim() && String(requestedName).trim() !== name
+        ? ' The name you entered was not applied.'
+        : '';
+    const lead = created ? `${name} is ready.` : `${name} reused.${nameNote}`;
+    const staffed = outcomes.filter(outcome => outcome.ok).map(outcome => outcome.label);
+    const failed = outcomes.filter(outcome => !outcome.ok);
+    const staged = new Set(staffing.map(item => item.roleId));
+    const unstaffed = homeRoles(entry)
+      .filter(
+        role => role.required && !staged.has(role.role_id) && !reportedFilled(entry, role.role_id)
+      )
+      .map(role => String(role.label || role.role_id));
+    const parts = [lead];
+    if (staffed.length) parts.push(`${joinLabels(staffed)} staffed.`);
+    if (failed.length) {
+      parts.push(
+        `${joinLabels(failed.map(outcome => outcome.label))} ${failed.length === 1 ? 'was' : 'were'} not staffed: ${failed[0].error}`
+      );
+    }
+    if (unstaffed.length) {
+      parts.push(
+        `${joinLabels(unstaffed)} ${unstaffed.length === 1 ? 'is' : 'are'} not staffed yet.`
+      );
+    }
+    return {
+      tone: failed.length ? 'warning' : 'success',
+      title: created ? 'Group created' : 'Existing group reused',
+      message: parts.join(' '),
+      roleId: landingRole(entry, staffing, outcomes),
+      error: failed.length ? String(failed[0].error || '') : ''
+    };
+  }
+
+  // Read once by the group page (group-template-status.js
+  // consumeGroupTemplateLanding). Keep the key identical to
+  // GROUP_TEMPLATE_LANDING_KEY there.
+  const LANDING_KEY = 'ori:group-template-landing';
+
+  function storeLandingNotice(workspaceId, notice) {
+    try {
+      window.sessionStorage.setItem(
+        LANDING_KEY,
+        JSON.stringify({
+          workspace_id: String(workspaceId || ''),
+          created_at: Date.now(),
+          tone: notice.tone,
+          title: notice.title,
+          message: notice.message,
+          role_id: notice.roleId,
+          error: notice.error
+        })
+      );
+      return true;
+    } catch (_error) {
+      // Storage can be unavailable; the group page still shows its own status.
+      return false;
+    }
+  }
+
+  function landingURL(slug, roleId) {
+    const path = `/workspaces/${encodeURIComponent(slug)}`;
+    return roleId ? `${path}?role=${encodeURIComponent(roleId)}` : path;
   }
 
   async function submit(manager) {
@@ -666,6 +1214,9 @@
       }
       state.pending = {
         request: commitRequest(entry, name, state.review.data.review_token, crypto.randomUUID()),
+        // The staffing plan is part of what the user confirmed; a retry of a
+        // lost commit sends exactly these fills afterward.
+        staffing: staffingPlan(manager),
         uncertain: false
       };
     }
@@ -739,15 +1290,28 @@
           );
         }
       }
+      const staffing = Array.isArray(pending.staffing) ? pending.staffing : [];
+      if (createBtn && staffing.length) createBtn.textContent = 'Staffing roles…';
+      const outcomes = await fillRoles(result.home_workspace_id, staffing);
       await manager.refreshWorkspaceSurfacesAfterOrdinaryGroupCreate?.();
       const folder = (manager.folders || []).find(
         item => String(item?.id) === String(result.home_workspace_id)
       );
       state.pending = null;
+      const notice = landingNotice(result, entry, staffing, outcomes, pending.request.name);
       const modalElement = document.getElementById('addFolderModal');
       if (modalElement) bootstrap.Modal.getInstance(modalElement)?.hide();
       manager.resetAddWorkspaceModalForm?.();
-      showFollowUp(manager, result, folder, pending.request.name);
+      const slug = String(folder?.folder_slug || '').trim();
+      if (slug) {
+        // The group page is where its roles are managed, so the user lands
+        // there instead of reading about it in a toast; the page shows the
+        // same words once it has loaded.
+        storeLandingNotice(result.home_workspace_id, notice);
+        window.location.href = landingURL(slug, notice.roleId);
+        return true;
+      }
+      showFollowUp(manager, result, folder, notice);
       return true;
     } catch (error) {
       if (manager.workspaceCreatorContext === context) {
@@ -784,6 +1348,19 @@
     roleSummary,
     rolesCardHTML,
     managedActive,
+    wizardSteps,
+    seedFills,
+    setFill,
+    clearFill,
+    stagedFill,
+    staffingPlan,
+    fillNameProblem,
+    promptNote,
+    teamRoster,
+    renderTeam,
+    fillRoles,
+    landingNotice,
+    landingURL,
     load,
     select,
     render,

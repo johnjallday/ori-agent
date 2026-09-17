@@ -483,6 +483,10 @@ const sessionManager = {
       // While the picker is scoped to a role, choosing an agent FILLS that role
       // rather than attaching it as an extra team member — the user opened it
       // from that row and expects to land back there.
+      if (this.groupTemplateRoleAssigning && this.usesManagedGroupTemplate()) {
+        this.assignGroupTemplateRole(this.groupTemplateRoleAssigning, name);
+        return;
+      }
       if (this.workspaceRoleAssigning) {
         this.assignWorkspaceRole(this.workspaceRoleAssigning, name);
         return;
@@ -525,6 +529,7 @@ const sessionManager = {
       if (
         mode !== 'workspace-draft' &&
         mode !== 'workspace-role-draft' &&
+        mode !== 'workspace-group-role-draft' &&
         mode !== 'workspace-group-role-live'
       )
         return;
@@ -532,6 +537,10 @@ const sessionManager = {
       event.stopImmediatePropagation();
       if (mode === 'workspace-role-draft') {
         this.saveWorkspaceRoleSetup();
+        return;
+      }
+      if (mode === 'workspace-group-role-draft') {
+        this.saveGroupTemplateRoleSetup();
         return;
       }
       if (mode === 'workspace-group-role-live') {
@@ -575,6 +584,8 @@ const sessionManager = {
         this.finishWorkspaceAgentSetupModal();
       } else if (addAgentDraftModal.dataset.agentCreateMode === 'workspace-role-draft') {
         this.finishWorkspaceRoleSetupModal();
+      } else if (addAgentDraftModal.dataset.agentCreateMode === 'workspace-group-role-draft') {
+        this.finishGroupTemplateRoleSetupModal();
       } else if (addAgentDraftModal.dataset.agentCreateMode === 'workspace-group-role-live') {
         this.finishWorkspaceGroupRoleSetupModal();
       }
@@ -4249,6 +4260,7 @@ const sessionManager = {
     // Forget what was last announced so a reopened wizard announces its primary
     // afresh rather than staying silent because the name happens to repeat.
     this.announcedPrimaryName = '';
+    this.groupTemplateRoleAssigning = '';
     this.existingAgentRosterRequestId += 1;
     this.existingAgentRosterLoading = false;
     this.existingAgentRosterLoaded = false;
@@ -4262,6 +4274,9 @@ const sessionManager = {
   resetTemplateAgentReview() {
     this.templateAgentPlan = null;
     this.templateAgentPlanError = '';
+    // A Group Template picker scoped to one role belongs to the template it
+    // was opened for.
+    this.groupTemplateRoleAssigning = '';
     const draft = this.ensureWorkspaceTeamDraft();
     if (draft) window.CreateWorkspaceTeamDraft.clearPlan(draft);
     this.templateAgentPlanRequestId += 1;
@@ -5450,7 +5465,10 @@ const sessionManager = {
       if (requestId === this.existingAgentRosterRequestId && draft === this.teamDraft) {
         this.existingAgentRosterLoading = false;
         this.renderExistingAgentRoster();
-        this.refreshWorkspaceReview();
+        // A managed template seeds its Team step from this roster, which
+        // changes the steps' chrome (receipt, button label) too.
+        if (this.usesManagedGroupTemplate()) this.refreshWizardChrome();
+        else this.refreshWorkspaceReview();
       }
     }
   },
@@ -5487,15 +5505,20 @@ const sessionManager = {
     // rather than leaving a blank panel (FR27).
     const role = this.workspaceRoleAssigning ? this.workspaceRoleForAssign() : null;
     if (!this.existingAgentRoster.length) {
-      status.textContent = role
-        ? 'You have no saved agents yet. Create one for this role instead.'
-        : 'No matching saved agents.';
+      status.textContent =
+        role || (this.groupTemplateRoleAssigning && this.usesManagedGroupTemplate())
+          ? 'You have no saved agents yet. Create one for this role instead.'
+          : 'No matching saved agents.';
       list.innerHTML = '';
       return;
     }
     status.textContent = matches.length
       ? `${matches.length} saved agent${matches.length === 1 ? '' : 's'}`
       : 'No matching saved agents.';
+    if (this.groupTemplateRoleAssigning && this.usesManagedGroupTemplate()) {
+      list.innerHTML = matches.map(agent => this.renderGroupTemplateAgentCard(agent)).join('');
+      return;
+    }
 
     // No drag affordance: with the drop zone gone there is nothing to drop onto,
     // and a draggable card would advertise an interaction that does nothing. Add
@@ -6618,6 +6641,326 @@ const sessionManager = {
     if (title) title.textContent = `Assign an agent to ${row?.label || 'this role'}`;
     panel?.scrollIntoView({ block: 'nearest' });
     document.getElementById('existingAgentRosterSearch')?.focus();
+  },
+
+  // ---- Group Template Team step --------------------------------------------
+  //
+  // A managed Group Template stages its Home role fills in
+  // GroupTemplateCreator. This controller owns only the Create modal and the
+  // saved-agent picker those fills are edited through. Nothing here persists:
+  // the fills are sent only after the Home-only commit succeeds, and a program
+  // Home role never collects a prompt (its instructions are applied by Ori).
+
+  groupTemplateRoleAssigning: '',
+  groupTemplateRoleSetup: null,
+  groupTemplateRoleSetupForm: null,
+
+  groupTemplateSavedAgentsState() {
+    const draft = this.ensureWorkspaceTeamDraft();
+    return String(draft?.savedRoster?.status || 'idle');
+  },
+
+  findAttachableSavedAgent(name) {
+    const api = window.CreateWorkspaceTeamDraft;
+    const saved = api?.findSavedAgent?.(this.ensureWorkspaceTeamDraft(), name);
+    return saved && api.isAttachableSavedAgent?.(saved) ? saved : null;
+  },
+
+  groupTemplateRoleLabel(roleId) {
+    const entry = window.GroupTemplateCreator?.selectedManaged?.(this.workspaceCreatorContext);
+    const role = (entry?.home_roles || []).find(item => item.role_id === roleId);
+    return String(role?.label || roleId || 'this role');
+  },
+
+  openGroupTemplateRoleSetup(roleId, _row, opener) {
+    const creator = window.GroupTemplateCreator;
+    const formApi = window.AgentCreateForm;
+    const entry = creator?.selectedManaged?.(this.workspaceCreatorContext);
+    const role = (entry?.home_roles || []).find(item => item.role_id === roleId);
+    const workspaceModalElement = document.getElementById('addFolderModal');
+    const agentModalElement = document.getElementById('addAgentModal');
+    const host = document.getElementById('agentCreateFormHost');
+    if (!creator || !formApi || !role || !workspaceModalElement || !agentModalElement || !host) {
+      return false;
+    }
+    const label = String(role.label || roleId);
+    const staged = creator.stagedFill(this, roleId);
+    const create = staged?.mode === 'create' ? staged : null;
+    this.groupTemplateRoleAssigning = '';
+    this.groupTemplateRoleSetup = {
+      roleId,
+      label,
+      opener: opener || document.activeElement,
+      completed: ''
+    };
+
+    agentModalElement.dataset.agentCreateMode = 'workspace-group-role-draft';
+    agentModalElement.classList.add('is-workspace-agent-draft');
+    const title = document.getElementById('addAgentModalTitleText');
+    if (title) title.textContent = `Set up ${label}`;
+    const context = document.getElementById('agentCreateDraftContext');
+    const contextTitle = document.getElementById('agentCreateDraftContextTitle');
+    const contextText = document.getElementById('agentCreateDraftContextText');
+    if (context) context.hidden = false;
+    if (contextTitle) {
+      contextTitle.textContent = `${label} · ${role.primary ? 'Group coordinator' : 'Group role'}`;
+    }
+    const portrait = document.getElementById('agentCreateDraftPortrait');
+    if (portrait) portrait.innerHTML = '';
+    if (contextText) {
+      contextText.textContent = `${role.description ? `${role.description} ` : ''}Nothing is created until you confirm the group on Review; this agent then fills the role right away.`;
+    }
+    const summary = document.getElementById('agentCreateDraftSummary');
+    if (summary) {
+      const groupName = String(document.getElementById('folderNameInput')?.value || '').trim();
+      summary.innerHTML = [
+        ['Role', label],
+        ['Group', groupName || entry.name || 'This group'],
+        ['Scope', 'Group only'],
+        ['Instructions', creator.providerLabel(entry) || 'This template']
+      ]
+        .map(
+          ([term, value]) =>
+            `<div><dt>${this.escapeHtml(term)}</dt><dd>${this.escapeHtml(value)}</dd></div>`
+        )
+        .join('');
+    }
+    const error = document.getElementById('agentCreateDraftError');
+    if (error) {
+      error.hidden = true;
+      error.textContent = '';
+    }
+
+    this.groupTemplateRoleSetupForm = formApi.mount(host, {
+      idPrefix: 'agent',
+      profile: formApi.PROFILE_TEMPLATE,
+      providers: Array.isArray(this.editAgentProvidersData) ? this.editAgentProvidersData : [],
+      omitFields: ['systemPrompt'],
+      note: creator.promptNote(entry),
+      values: {
+        name: create?.name || String(role.default_name || label),
+        provider: create?.provider || '',
+        model: create?.model || ''
+      }
+    });
+
+    const createButton = document.getElementById('createAgentBtn');
+    if (createButton) {
+      if (!createButton.dataset.workspaceDraftOriginalHtml) {
+        createButton.dataset.workspaceDraftOriginalHtml = createButton.innerHTML;
+      }
+      createButton.textContent = 'Use for this role';
+      createButton.disabled = false;
+    }
+
+    const showAgentModal = () => {
+      agentModalElement.addEventListener(
+        'shown.bs.modal',
+        () => {
+          // A submit during the opening transition could not close the modal;
+          // finish that close now that Bootstrap will accept it.
+          if (this.groupTemplateRoleSetup?.completed) {
+            this.closeGroupTemplateRoleSetup();
+            return;
+          }
+          this.groupTemplateRoleSetupForm?.focus('name');
+        },
+        { once: true }
+      );
+      bootstrap.Modal.getOrCreateInstance(agentModalElement).show();
+    };
+    workspaceModalElement.dataset.suspendedForAgentSetup = 'workspace-group-role-draft';
+    if (workspaceModalElement.classList.contains('show')) {
+      this.suspendWorkspaceModalForAgentSetup(workspaceModalElement, showAgentModal);
+    } else {
+      showAgentModal();
+    }
+    return true;
+  },
+
+  // Saving only stages the fill. A name a saved agent already has is refused
+  // here, with both recoveries named, because the server would refuse that
+  // Create only after the group already exists.
+  saveGroupTemplateRoleSetup() {
+    const operation = this.groupTemplateRoleSetup;
+    const creator = window.GroupTemplateCreator;
+    const form = this.groupTemplateRoleSetupForm;
+    const api = window.CreateWorkspaceTeamDraft;
+    if (!operation || !creator || !form || operation.completed) return false;
+    const result = form.extract();
+    if (!result.valid) {
+      form.focus(Object.keys(result.errors)[0] || 'name');
+      return false;
+    }
+    const name = String(result.values.name || '').trim();
+    const error = document.getElementById('agentCreateDraftError');
+    const refuse = message => {
+      if (error) {
+        error.textContent = message;
+        error.hidden = false;
+      }
+      form.focus('name');
+      return false;
+    };
+    const existing = api?.findSavedAgent?.(this.ensureWorkspaceTeamDraft(), name);
+    if (existing) {
+      return refuse(
+        `You already have a saved agent named “${existing.name}”. Rename this one, or cancel and use Assign… to attach the agent you have.`
+      );
+    }
+    const duplicate = creator.fillNameProblem(this, operation.roleId, name);
+    if (duplicate) return refuse(duplicate);
+    if (
+      !creator.setFill(this, operation.roleId, {
+        mode: 'create',
+        name,
+        provider: result.values.provider,
+        model: result.values.model
+      })
+    ) {
+      return refuse('This role can no longer be changed. Close this form and review the team.');
+    }
+    operation.completed = name;
+    this.closeGroupTemplateRoleSetup();
+    return true;
+  },
+
+  closeGroupTemplateRoleSetup() {
+    const modal = document.getElementById('addAgentModal');
+    if (modal?.classList.contains('show')) {
+      bootstrap.Modal.getOrCreateInstance(modal).hide();
+      return;
+    }
+    this.finishGroupTemplateRoleSetupModal();
+  },
+
+  finishGroupTemplateRoleSetupModal() {
+    const modal = document.getElementById('addAgentModal');
+    if (modal?.dataset.agentCreateMode !== 'workspace-group-role-draft') return;
+    const operation = this.groupTemplateRoleSetup;
+    modal.classList.remove('is-workspace-agent-draft');
+    delete modal.dataset.agentCreateMode;
+    const title = document.getElementById('addAgentModalTitleText');
+    if (title) title.textContent = 'Create New Agent';
+    const context = document.getElementById('agentCreateDraftContext');
+    if (context) context.hidden = true;
+    const error = document.getElementById('agentCreateDraftError');
+    if (error) {
+      error.hidden = true;
+      error.textContent = '';
+    }
+    const createButton = document.getElementById('createAgentBtn');
+    if (createButton?.dataset.workspaceDraftOriginalHtml) {
+      createButton.innerHTML = createButton.dataset.workspaceDraftOriginalHtml;
+      delete createButton.dataset.workspaceDraftOriginalHtml;
+      createButton.disabled = false;
+    }
+    window.resetStandaloneAgentCreateForm?.();
+    this.groupTemplateRoleSetup = null;
+    this.groupTemplateRoleSetupForm = null;
+
+    const workspaceModal = document.getElementById('addFolderModal');
+    if (workspaceModal) delete workspaceModal.dataset.suspendedForAgentSetup;
+    this.refreshWizardChrome();
+    const afterResume = () => {
+      if (operation?.completed) {
+        this.announceWorkspaceTeamChange(
+          `${operation.completed} will be created for ${operation.label}.`
+        );
+      }
+      this.focusWorkspaceRoleRow(operation?.roleId) || operation?.opener?.focus?.();
+    };
+    if (workspaceModal) {
+      workspaceModal.dataset.resumingFromAgentSetup = 'true';
+      workspaceModal.addEventListener('shown.bs.modal', afterResume, { once: true });
+      bootstrap.Modal.getOrCreateInstance(workspaceModal).show();
+    } else {
+      afterResume();
+    }
+  },
+
+  // Assign scopes the Team step's inline saved-agent picker to one role — the
+  // same panel the ordinary Team step uses, never a nested dialog.
+  openGroupTemplateRoleAssign(roleId, row) {
+    this.groupTemplateRoleAssigning = roleId;
+    this.refreshWizardChrome();
+    this.renderExistingAgentRoster();
+    const title = document.getElementById('existingAgentRosterTitle');
+    if (title) title.textContent = `Assign an agent to ${row?.label || 'this role'}`;
+    const panel = document.getElementById('existingAgentRosterPanel');
+    panel?.scrollIntoView({ block: 'nearest' });
+    document.getElementById('existingAgentRosterSearch')?.focus();
+  },
+
+  assignGroupTemplateRole(roleId, name) {
+    const creator = window.GroupTemplateCreator;
+    const saved = this.findAttachableSavedAgent(name);
+    const label = this.groupTemplateRoleLabel(roleId);
+    if (!creator || !saved) {
+      this.showToast(`${name || 'That agent'} cannot be assigned to ${label}.`, 'warning');
+      return false;
+    }
+    const problem = creator.fillNameProblem(this, roleId, saved.name);
+    if (problem || !creator.setFill(this, roleId, { mode: 'assign', name: saved.name })) {
+      this.showToast(problem || `${saved.name} cannot be assigned to ${label}.`, 'warning');
+      return false;
+    }
+    this.groupTemplateRoleAssigning = '';
+    const title = document.getElementById('existingAgentRosterTitle');
+    if (title) title.textContent = 'Add a saved agent';
+    this.refreshWizardChrome();
+    this.announceWorkspaceTeamChange(`${saved.name} will be assigned to ${label}.`);
+    this.focusWorkspaceRoleRow(roleId);
+    return true;
+  },
+
+  clearGroupTemplateRole(roleId) {
+    const creator = window.GroupTemplateCreator;
+    if (!creator?.clearFill(this, roleId)) return false;
+    if (this.groupTemplateRoleAssigning === roleId) this.groupTemplateRoleAssigning = '';
+    this.refreshWizardChrome();
+    this.announceWorkspaceTeamChange(`Nobody will fill ${this.groupTemplateRoleLabel(roleId)}.`);
+    this.focusWorkspaceRoleRow(roleId);
+    return true;
+  },
+
+  // One picker card for the Group Template Team step. Which role an agent
+  // already fills comes from the staged fills, not the workspace team draft.
+  renderGroupTemplateAgentCard(agent) {
+    const creator = window.GroupTemplateCreator;
+    const roleId = this.groupTemplateRoleAssigning;
+    const name = String(agent?.name || '').trim();
+    const key = name.toLowerCase();
+    const attachable = this.isExistingAgentAttachable(agent);
+    const held = (creator?.staffingPlan?.(this) || []).find(
+      item => String(item.fill?.name || '').toLowerCase() === key
+    );
+    const fillsTarget = Boolean(held && held.roleId === roleId);
+    const target = this.groupTemplateRoleLabel(roleId);
+    const reason = held
+      ? `${fillsTarget ? 'Assigned to' : 'Already filling'} ${held.label}`
+      : attachable
+        ? ''
+        : 'Built-in CLI agents cannot be attached';
+    const label = fillsTarget
+      ? 'Assigned'
+      : held
+        ? 'In use'
+        : attachable
+          ? 'Assign'
+          : 'Unavailable';
+    const accessibleName = reason ? `${label} — ${name}: ${reason}` : `Assign ${name} to ${target}`;
+    const workspaceCount = Number(agent?.workspace_count) || 0;
+    return `
+      <article class="workspace-existing-agent-card" role="listitem" data-existing-agent-name="${this.escapeHtml(name)}">
+        ${this.renderAgentAvatar(this.existingAgentIdentity(name, agent), 'workspace-agent-avatar')}
+        <div class="workspace-existing-agent-card-copy">
+          <strong>${this.escapeHtml(name)}</strong>
+          <span>${this.escapeHtml(agent?.model || 'Uses saved agent model')} · ${workspaceCount === 1 ? '1 workspace' : `${workspaceCount} workspaces`}</span>
+          ${reason ? `<small>${this.escapeHtml(reason)}</small>` : ''}
+        </div>
+        <button type="button" class="modern-btn modern-btn-secondary" data-existing-agent-add="${this.escapeHtml(name)}" ${held || !attachable ? 'disabled' : ''} aria-label="${this.escapeHtml(accessibleName)}">${label}</button>
+      </article>`;
   },
 
   // One announcement per change, in words, naming the role it acted on —
@@ -8257,6 +8600,9 @@ const sessionManager = {
     // Template). Selected-member grouping and guided setup have no choice to
     // make there, so they keep starting at Details.
     const blueprint = window.GroupTemplateCreator?.hasBlueprintStep?.(this) ? [1] : [];
+    // A managed Group Template stages its Home role fills on its own Team step.
+    const managedSteps = window.GroupTemplateCreator?.wizardSteps?.(this);
+    if (managedSteps) return managedSteps;
     if (this.usesGroupRosterCreator()) return [...blueprint, 2, 3, 4];
     return this.isGroupCreator() ? [...blueprint, 2, 4] : [1, 2, 3, 4];
   },
@@ -8587,6 +8933,18 @@ const sessionManager = {
       }
     }
     if (onFinalStep && this.isWorkspaceCreator()) this.renderReviewReadiness();
+    // A managed template proposes names only after it knows which saved agents
+    // exist (a taken name is assigned, never re-created). Loading once per
+    // draft: a failed load stays failed rather than retrying on every render.
+    if (
+      !importMode &&
+      step === 3 &&
+      this.usesManagedGroupTemplate() &&
+      this.groupTemplateSavedAgentsState() === 'idle' &&
+      !this.existingAgentRosterLoading
+    ) {
+      void this.loadExistingAgentRoster();
+    }
     // The step-2 recap names a Workspace blueprint; Groups and Import have none.
     const recap = document.getElementById('wizardStep2Recap');
     if (recap) recap.hidden = importMode || this.isGroupCreator();

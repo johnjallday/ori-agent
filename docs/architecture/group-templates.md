@@ -21,9 +21,9 @@ new host feature flag.
 | | Workspace (project) template | Group Template |
 | --- | --- | --- |
 | Chosen in | Create Workspace → Blueprint | Create Group → Blueprint |
-| Creates | a project workspace, its team, optional project files | exactly one group (program Home), initially unstaffed |
+| Creates | a project workspace, its team, optional project files | exactly one group (program Home); the wizard then staffs the Home roles the user chose |
 | Source | library, plugin blueprint, source-linked variant | derived from an eligible project blueprint; never edited |
-| Team | reviewed project roster | none at creation; group roles are staffed afterward |
+| Team | reviewed project roster | none in the commit; the wizard staffs chosen Home roles immediately afterward through `PUT /api/workspaces/{id}/roles/{roleID}` |
 
 A source blueprint's `agents[]` roster and `assistant_program.roles[]` may still
 carry a `type` key from before the agent type was retired. The key is accepted
@@ -31,9 +31,11 @@ and ignored.
 
 **General** is the ordinary group. It keeps its reviewed Group Manager roster
 (Blueprint → Details → Group Roster → Review) and never joins a program. A
-managed template goes Blueprint → Details → Review and creates no agent.
-Selected-member grouping and guided setup have no choice to make, so they start
-at Details.
+managed template goes Blueprint → Details → Team → Review. Its commit creates no
+agent; the Team step's choices are applied afterward (see
+[Staffing after the commit](#staffing-after-the-commit)). Selected-member
+grouping and guided setup have no choice to make, so they start at Details and
+have no Team step.
 
 ## Eligibility and catalog
 
@@ -61,6 +63,9 @@ entries. Each managed entry reports:
   allowed actions.
 - The existing Home's ID and current name, when present.
 - Verified required Home-role progress.
+- `home_roles[]`: each Home role's ID, label, description, required and primary
+  flags, and `default_name` — the declaration's `default_primary_name` for the
+  primary role, otherwise the label. No prompt, skills or agent type are listed.
 
 ## Identity
 
@@ -97,7 +102,7 @@ carries another surface's token.
 | Create Group → Group template | `POST /api/workspaces/group-templates/{review,commit}` | typed by the user (1–120 bytes, no path/protocol/control characters) | yes, on first creation |
 | Project blueprint destination card | `POST /api/workspaces/group-requirement/home/{review,commit}` | declared `default_home_name` | no |
 | Guided setup quest | setup-journey `review_create_group` / `create_group` | typed by the user | no |
-| Group coordinator | `PUT /api/workspaces/{id}/roles/{roleID}` (group-owned) | — | — |
+| Group coordinator | `PUT /api/workspaces/{id}/roles/{roleID}` (group-owned; called by the group page and by the Create Group wizard after a Group Template commit) | — | — |
 | Project | `POST /api/workspaces` with its own group placement review | — | — |
 
 The Group Template review and commit bodies are decoded strictly (4 KiB, no
@@ -126,6 +131,25 @@ A Home created by a reviewed Home operation is recorded as owned by this data
 directory (`workspace_allowlist.json`), like any other local creation. Its
 staffed roles therefore survive a restart.
 
+### Staffing after the commit
+
+The Create Group wizard's **Team** step stages fills for the template's Home
+roles: every required role starts as Create under its `default_name` (or as
+Assign when a saved agent already has that name), and optional roles start
+empty. Only after the commit above succeeds and reports a Home workspace ID does
+the wizard send one `PUT /api/workspaces/{home}/roles/{roleID}` per staged role,
+in declaration order, with `mode`, `name`, `provider` and `model` — never a
+prompt, which the role endpoint applies from the Home's own declaration. The
+commit request, its digest and its receipts are unchanged; staffing is not part
+of that confirmation. A failed fill never undoes the group or an earlier fill, a
+`409` saying the role is already filled counts as staffed, and no fill is sent
+when the commit fails. When reusing an existing Home, only required roles the
+catalog verified as empty can be staffed; filled roles keep their holder.
+
+The wizard then opens the group page. It passes `?role=<roleID>` for the first
+role that failed or was left empty, which opens that role's setup form once, and
+leaves a one-time notice (sessionStorage) that the page shows as a toast.
+
 ## Presentation
 
 - **Create Group** opens on a **Blueprint** step ("Choose a group blueprint")
@@ -134,7 +158,10 @@ staffed roles therefore survive a restart.
   "what this creates" line, required and optional Home roles, and project-local
   roles. Unavailable entries are disabled with a reason. Choosing an entry stays
   on the step, so arrow keys can browse; **Continue** moves to Details, which
-  shows the chosen blueprint with an Edit link.
+  shows the chosen blueprint with an Edit link. A managed template then shows
+  **Team** ("Staff the group"), drawn with the shared role roster, and a Review
+  receipt with one outcome per Home role ("Create", "Assign" or "Not staffed")
+  and a warning for each empty required role. Create stays enabled either way.
 - **Guided setup** has no Blueprint step. It shows its template as a fixed,
   read-only card on Details with the same wording, and its own review/commit
   actions.
@@ -151,8 +178,11 @@ staffed roles therefore survive a restart.
     agents.
   - **Integration:** `available`, `unavailable` (with a reason) or `unknown`.
   
-  "Set up <role>" opens the existing group-owned role form. Ordinary groups
-  report General.
+  "Set up <role>" opens the existing group-owned role form. For a program Home
+  role that form has no prompt box: it says the instructions come from the
+  template and are applied by Ori, and sends no `system_prompt`. A
+  `?role=<roleID>` link opens an empty role's form once and is then removed from
+  the URL. Ordinary groups report General.
 - **Lists and Map.** `GET /api/workspaces` includes a bounded `group_template`
   summary (`kind`, `name`, `provider_kind`, `plugin_id`) for Homes only. The Map
   district header shows the template type. Type is never inferred from names,

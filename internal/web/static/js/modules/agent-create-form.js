@@ -60,6 +60,42 @@
     return [...PROFILE_FIELDS[normalizeProfile(profile)]];
   }
 
+  // A caller may omit a field its contract never accepts — a program Home
+  // role's instructions are applied server-side, so that caller mounts the
+  // form without a prompt box. Only the prompt is omissible: name, model, and
+  // provider are what every create needs.
+  const OMISSIBLE_FIELDS = ['systemPrompt'];
+
+  function normalizeOmitted(fields) {
+    return (Array.isArray(fields) ? fields : []).filter(name => OMISSIBLE_FIELDS.includes(name));
+  }
+
+  function mountedFields(profile, omitFields) {
+    const omitted = normalizeOmitted(omitFields);
+    return profileFields(profile).filter(name => !omitted.includes(name));
+  }
+
+  // Removes each omitted field's whole section from a mount and, when given,
+  // puts one read-only note in the prompt's place. A removed field cannot be
+  // typed into, so nothing a caller cannot send is ever collected.
+  function omitSections(root, omitFields, note) {
+    const omitted = normalizeOmitted(omitFields);
+    for (const name of omitted) {
+      const section = root.querySelector(`[data-agent-create-section="${name}"]`);
+      if (!section) continue;
+      if (name === 'systemPrompt' && normalizedText(note)) {
+        const replacement = document.createElement('p');
+        replacement.className = 'form-helper agent-create-form-note';
+        replacement.setAttribute('data-agent-create-note', name);
+        replacement.textContent = normalizedText(note);
+        section.replaceWith(replacement);
+      } else {
+        section.remove();
+      }
+    }
+    return omitted;
+  }
+
   function normalizeProviders(providers) {
     return (Array.isArray(providers) ? providers : [])
       .map(provider => ({
@@ -271,7 +307,7 @@
     const profile = normalizeProfile(requestedProfile || controller?.profile);
     const raw = readValues(host);
     const values = {};
-    profileFields(profile).forEach(name => {
+    mountedFields(profile, controller?.omitFields).forEach(name => {
       if (name === 'name') values[name] = normalizedText(raw[name]);
       else if (name === 'systemPrompt') values[name] = normalizedText(raw[name]);
       else values[name] = raw[name];
@@ -306,12 +342,14 @@
     const formRoot = fragment.querySelector('[data-agent-create-root]');
     if (!formRoot) throw new Error('The shared agent-create-form template is malformed.');
     setProfile(formRoot, profile);
+    const omitFields = omitSections(formRoot, config.omitFields, config.note);
     host.replaceChildren(fragment);
 
     const controller = {
       host,
       idPrefix: prefix,
       profile,
+      omitFields,
       providers: normalizeProviders(config.providers),
       get(name) {
         return field(host, name);
@@ -354,6 +392,8 @@
     normalizeProviders,
     modelChoices,
     profileFields,
+    mountedFields,
+    omitSections,
     scopedId,
     supportsCodexReasoning,
     getController(host) {

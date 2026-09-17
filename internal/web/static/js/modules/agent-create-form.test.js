@@ -151,6 +151,58 @@ test('standalone extraction validates the prompt cap and reports field errors', 
   assert.equal(host.errors.get('systemPrompt').textContent, result.errors.systemPrompt);
 });
 
+test('a mount can omit the prompt: its section becomes a note and extraction never returns it', () => {
+  assert.deepEqual(Form.mountedFields('template', ['systemPrompt', 'name']), [
+    'name',
+    'model',
+    'provider'
+  ]);
+
+  const replaced = [];
+  const removed = [];
+  const section = name => ({
+    replaceWith(node) {
+      replaced.push([name, node]);
+    },
+    remove() {
+      removed.push(name);
+    }
+  });
+  const root = {
+    querySelector(selector) {
+      const match = selector.match(/data-agent-create-section="(.+)"/);
+      return match ? section(match[1]) : null;
+    }
+  };
+  const previousDocument = globalThis.document;
+  globalThis.document = {
+    createElement: tag => ({
+      tag,
+      attributes: {},
+      setAttribute(name, value) {
+        this.attributes[name] = value;
+      }
+    })
+  };
+  try {
+    const note = 'Instructions for this role come from Plugin: x 1.0 and are applied by Ori.';
+    assert.deepEqual(Form.omitSections(root, ['systemPrompt', 'name'], `  ${note}  `), [
+      'systemPrompt'
+    ]);
+    assert.equal(replaced.length, 1, 'only the prompt is omissible');
+    assert.equal(replaced[0][1].textContent, note);
+    assert.equal(replaced[0][1].attributes['data-agent-create-note'], 'systemPrompt');
+    assert.deepEqual(Form.omitSections(root, ['systemPrompt']), ['systemPrompt']);
+    assert.deepEqual(removed, ['systemPrompt'], 'without a note the section is simply removed');
+  } finally {
+    globalThis.document = previousDocument;
+  }
+
+  const host = fakeHost({ name: 'Studio Manager', model: 'm', provider: 'p', systemPrompt: 'x' });
+  const result = Form.extract({ host, profile: 'template', omitFields: ['systemPrompt'] });
+  assert.deepEqual(result.values, { name: 'Studio Manager', model: 'm', provider: 'p' });
+});
+
 test('Codex reasoning detection accepts provider or model identity', () => {
   assert.equal(Form.supportsCodexReasoning('codex', 'gpt-5'), true);
   assert.equal(Form.supportsCodexReasoning('openai', 'gpt-5-codex'), true);

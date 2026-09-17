@@ -41,6 +41,7 @@
     specialist: 'SPECIALIST',
     create: 'Create',
     assign: 'Assign…',
+    edit: 'Edit',
     clear: 'Clear',
     needsClear: 'Needs clear',
     scopeProject: 'this workspace only',
@@ -284,6 +285,20 @@
         editor.setAttribute('aria-label', 'Open ' + row.agent.name + ' in Agents');
         actions.append(editor);
       }
+      // A host that stages fills (nothing exists yet) can reopen a new agent's
+      // Create form with the staged values. An assigned agent keeps its own
+      // definition, so it has nothing here to edit.
+      if (typeof options.onEdit === 'function' && row.source !== SOURCE_ASSIGNED) {
+        var edit = actionButton(
+          COPY.edit,
+          'Edit ' + row.agent.name + ' for ' + row.label,
+          'btn btn-sm btn-outline-secondary'
+        );
+        edit.addEventListener('click', function () {
+          options.onEdit(row.roleId, row, edit);
+        });
+        actions.append(edit);
+      }
       var clear = actionButton(
         COPY.clear,
         'Clear ' + row.label,
@@ -384,6 +399,8 @@
       onRequestCreate: given.onRequestCreate || noop,
       onAssign: given.onAssign || noop,
       onClear: given.onClear || noop,
+      // Optional: only a host that stages fills offers Edit on a filled row.
+      onEdit: typeof given.onEdit === 'function' ? given.onEdit : null,
       // A project host may offer a separately confirmed Home-owned subflow for
       // a missing required group role. The role stays read-only to the project;
       // this callback changes authority and target before any mutation.
