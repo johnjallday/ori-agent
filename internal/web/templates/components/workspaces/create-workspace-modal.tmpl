@@ -271,11 +271,18 @@
                 <select id="folderParentSelect" class="modern-input w-100 mb-2" aria-label="Select parent group" aria-describedby="folderParentHelp">
                   <option value="">No group</option>
                 </select>
-                <div id="folderParentHelp" class="workspace-setup-help" style="margin-top: -6px; margin-bottom: 10px;">
-                  Optional. Choose an organizational group for this workspace. This does not grant program membership.
+                <!-- Visibility, value, disabled state, and caption are decided
+                     only by sessions.js syncWorkspaceDestinationControl. -->
+                <div id="folderParentHelp" class="workspace-setup-help" style="margin-top: -6px;">
+                  Optional. Put this workspace inside a group to keep related work together.
                 </div>
-                <div class="folder-color-picker">
-                  <label style="font-size: 12px; color: var(--text-secondary);">Color <span style="opacity: 0.8;">(optional)</span></label>
+              </section>
+
+              <!-- Color stands apart from the destination control, so a
+                   blueprint that fixes the placement still offers it. -->
+              <section id="workspaceCreatorColorCard" class="workspace-setup-card mb-2">
+                <div class="folder-color-picker" role="group" aria-labelledby="folderColorLabel">
+                  <span id="folderColorLabel" style="font-size: 12px; color: var(--text-secondary);">Color <span style="opacity: 0.8;">(optional)</span></span>
                   <div id="folderColorOptions" class="folder-color-options mt-1">
                     <button type="button" class="folder-color-btn active" data-color="" title="Default" aria-label="Default color"></button>
                     <button type="button" class="folder-color-btn" data-color="#ef4444" title="Red" aria-label="Red color" style="background: #ef4444;"></button>

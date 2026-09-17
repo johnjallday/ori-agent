@@ -98,6 +98,36 @@ test('a Required plugin source is read-only and Customize creates an editable so
   expect(createBody).toMatchObject({ name: 'Reaper Standalone', group_requirement: required });
 });
 
+test('Create Workspace Details states a required destination once and keeps Color', async ({
+  page
+}) => {
+  await routeCommon(page, () => [source]);
+  await page.goto('/');
+  await page.evaluate(() => {
+    // @ts-expect-error sessionManager is a page global.
+    window.sessionManager.showAddWorkspaceModal();
+  });
+  const creator = page.locator('#addFolderModal');
+  await expect(creator).toBeVisible();
+  await creator.locator(`#templatePicker [data-template-id="${source.id}"]`).click();
+
+  // The Project destination card is the only statement of where a required
+  // group puts the workspace — never a second "Create in · No group".
+  const expectOneDestination = async () => {
+    await expect(creator.locator('#wizardStep2')).toBeVisible();
+    await expect(creator.locator('#workspaceGroupDestinationCard')).toBeVisible();
+    await expect(creator.locator('#workspaceCreatorDestinationCard')).toBeHidden();
+    await expect(creator.locator('#folderColorOptions')).toBeVisible();
+  };
+  await creator.locator('#wizardNextBtn').click();
+  await expectOneDestination();
+
+  await creator.locator('#wizardBackBtn').click();
+  await expect(creator.locator('#wizardStep1')).toBeVisible();
+  await creator.locator('#wizardNextBtn').click();
+  await expectOneDestination();
+});
+
 test('mobile preview states standalone consequences without creating a workspace or Home', async ({
   page
 }) => {
