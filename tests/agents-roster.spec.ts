@@ -641,6 +641,12 @@ test.describe('Agents gallery', () => {
       }
     });
     await request.post(`${baseUrl}/api/agents`, { data: { name: bare, type: 'general' } });
+    // The server fills in a default model, so a bare agent does not need
+    // attention on its own. An errored one does, and that is what makes the
+    // pill below something this test actually exercises rather than skips.
+    await request.post(`${baseUrl}/api/agents/${encodeURIComponent(bare)}/status`, {
+      data: { status: 'error' }
+    });
 
     try {
       await openAgents(page);
@@ -656,15 +662,17 @@ test.describe('Agents gallery', () => {
           String(a.status).toLowerCase() !== 'disabled' &&
           (String(a.status).toLowerCase() === 'error' || !String(a.model || '').trim())
       ).length;
-      await expect(page.locator('.roster-stat--total .roster-stat__value')).toHaveText(
-        String(agents.length)
-      );
+      // The header states only what needs the reader: a bucket with nothing in
+      // it gets no pill, and "total" and "ready" are never pills on their own.
+      // The errored agent above means "needs attention" is never empty here.
+      expect(needs).toBeGreaterThan(0);
       await expect(page.locator('.roster-stat--needs .roster-stat__value')).toHaveText(
         String(needs)
       );
-      await expect(page.locator('.roster-stat--ready .roster-stat__value')).toHaveText(
-        String(agents.length - needs - disabled)
-      );
+      await expect(page.locator('.roster-stat--total')).toHaveCount(0);
+      await expect(page.locator('.roster-stat--ready')).toHaveCount(0);
+      await expect(page.locator('.roster-stat--disabled')).toHaveCount(disabled > 0 ? 1 : 0);
+      await expect(page.locator('#rosterCount')).toContainText(String(agents.length));
 
       // A card states exactly four facts: who, role, where, ready? (FR-1).
       const target = card(page, rich);
@@ -2435,6 +2443,221 @@ test.describe('Agents selection and bulk management', () => {
       await expect(page.locator('#bulkResultSummary')).toBeVisible();
     } finally {
       for (const n of names) {
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
+      }
+    }
+  });
+});
+
+// A quieter first screen, faces for agents that have none, and a next step for
+// agents that have never worked.
+test.describe('Agents first screen, faces, and blank slates', () => {
+  async function openAgents(page, query = '') {
+    await page.addInitScript(() => {
+      window.localStorage.setItem('ori-theme', 'dark');
+      // A fresh profile gets the first-visit hint, which re-anchors itself onto
+      // the first card as the roster re-renders. These tests are about the
+      // page a returning viewer sees, so the hint is marked as already seen.
+      window.localStorage.setItem('ori.roster.selectionCoachmarkSeen', '1');
+    });
+    await page.route('**/api/onboarding/status', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true })
+      })
+    );
+    await page.goto(`${baseUrl}/agents${query}`, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#rosterList')).toBeVisible();
+    await expect(page.locator('.roster-card').first()).toBeVisible();
+  }
+
+  const card = (page, name: string) => page.locator(`.roster-card[data-name="${name}"]`);
+  const opacity = locator => locator.evaluate(el => getComputedStyle(el).opacity);
+
+  test('the toolbar holds one row at desktop width', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openAgents(page);
+    const tops = await page
+      .locator('.collection-toolbar > *')
+      .evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().top)));
+    // Filters used to wrap onto a row of its own with the Inspector open.
+    expect(new Set(tops).size).toBe(1);
+  });
+
+  test('a card checkbox appears when it is wanted and stays for selection mode', async ({
+    page,
+    request
+  }) => {
+    const prefix = `PWCheck${Date.now()}`;
+    const names = [`${prefix} One`, `${prefix} Two`];
+    for (const n of names) {
+      await request.post(`${baseUrl}/api/agents`, { data: { name: n, model: 'gpt-4o-mini' } });
+    }
+
+    try {
+      await openAgents(page);
+      await page.locator('#rosterSearch').fill(prefix);
+      await expect(page.locator('.roster-card')).toHaveCount(2);
+      // Park the pointer away from the cards so nothing is hovered by accident.
+      await page.mouse.move(2, 2);
+
+      const first = card(page, names[0]).locator('.roster-card__checkwrap');
+      const second = card(page, names[1]).locator('.roster-card__checkwrap');
+      await expect.poll(() => opacity(first)).toBe('0');
+
+      // Under the pointer, and for a keyboard user who tabs onto it.
+      await card(page, names[0]).hover();
+      await expect.poll(() => opacity(first)).toBe('1');
+      await page.mouse.move(2, 2);
+      await card(page, names[1]).locator('.roster-card__check').focus();
+      await expect.poll(() => opacity(second)).toBe('1');
+
+      // Checking one puts the page in selection mode: every card shows its box.
+      await card(page, names[1]).locator('.roster-card__check').check();
+      await page.mouse.move(2, 2);
+      await expect.poll(() => opacity(first)).toBe('1');
+
+      // List view keeps its checkbox column regardless.
+      await page.locator('#rosterClearSelection').click();
+      await page.locator('#viewList').click();
+      await page.mouse.move(2, 2);
+      await expect.poll(() => opacity(first)).toBe('1');
+    } finally {
+      for (const n of names) {
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
+      }
+    }
+  });
+
+  test('Give faces previews, changes only checked agents, and remembers Not now', async ({
+    page,
+    request
+  }) => {
+    const prefix = `PWFaces${Date.now()}`;
+    const keep = `${prefix} Keep`;
+    const change = `${prefix} Change`;
+    // Created through the API with no appearance: exactly how a template or a
+    // setup journey leaves an agent, and the case this offer exists for.
+    await request.post(`${baseUrl}/api/agents`, {
+      data: { name: keep, role: 'analyzer', model: 'gpt-4o-mini' }
+    });
+    await request.post(`${baseUrl}/api/agents`, {
+      data: { name: change, role: 'researcher', model: 'gpt-4o-mini' }
+    });
+    const mode = async (name: string) =>
+      (await (await request.get(`${baseUrl}/api/agents/${encodeURIComponent(name)}/detail`)).json())
+        .appearance?.mode;
+
+    try {
+      await openAgents(page);
+      await expect(page.locator('#rosterFaces')).toBeVisible();
+      await page.locator('#rosterFacesGive').click();
+      const dialog = page.locator('#facesDialog');
+      await expect(dialog).toBeVisible();
+
+      // Every faceless agent is listed and checked. This test shares its server
+      // with other specs, so it unchecks everything that is not its own and
+      // then declines one of its own two.
+      await dialog.locator('.faces-row__check').evaluateAll((boxes: HTMLInputElement[], own) => {
+        boxes.forEach(box => {
+          if (box.dataset.faceName === own) return;
+          box.checked = false;
+          box.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+      }, change);
+      await expect(page.locator('#facesConfirm')).toHaveText('Give 1 agent a face');
+      await page.locator('#facesConfirm').click();
+      await expect(dialog).toBeHidden();
+
+      await expect.poll(() => mode(change)).toBe('character');
+      expect(await mode(keep)).toBe('generated');
+      await expect(card(page, change).locator('.agent-avatar')).not.toHaveClass(
+        /agent-avatar--generated/
+      );
+
+      // Declined agents are still offered; "Not now" is what ends the asking,
+      // and it is remembered across a reload.
+      await expect(page.locator('#rosterFaces')).toBeVisible();
+      await page.locator('#rosterFacesDismiss').click();
+      await expect(page.locator('#rosterFaces')).toBeHidden();
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await expect(page.locator('.roster-card').first()).toBeVisible();
+      await expect(page.locator('#rosterFaces')).toBeHidden();
+    } finally {
+      for (const n of [keep, change]) {
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
+      }
+    }
+  });
+
+  test('a new agent with no description reads its role, and is pointed at its first step', async ({
+    page,
+    request
+  }) => {
+    const prefix = `PWBlank${Date.now()}`;
+    const library = `${prefix} Library`;
+    const placed = `${prefix} Placed`;
+    await request.post(`${baseUrl}/api/agents`, {
+      data: { name: library, catalog_role: 'researcher' }
+    });
+    await request.post(`${baseUrl}/api/agents`, {
+      data: { name: placed, catalog_role: 'analyzer' }
+    });
+    let wsId = '';
+    let slug = '';
+    const ws = await request.post(`${baseUrl}/api/workspaces`, {
+      data: { name: `${prefix} Home`, entry_agent_name: placed }
+    });
+    if (ws.ok()) {
+      const j = await ws.json();
+      wsId = j?.folder?.id || j?.id || '';
+      slug = j?.folder?.folder_slug || j?.folder_slug || '';
+    }
+    expect(wsId).toBeTruthy();
+
+    try {
+      await openAgents(page, `?agent=${encodeURIComponent(library)}`);
+      await expect(page.locator('#stageName')).toHaveText(library);
+      // The role's own summary stands in for the missing description, marked as
+      // the role's so it is not mistaken for something the user wrote.
+      await expect(page.locator('#stagePurpose')).toHaveClass(/is-role/);
+      await expect(page.locator('#stagePurpose')).toContainText('Gathers information');
+      await expect(page.locator('#stagePurpose')).not.toContainText('No description yet');
+
+      const next = page.locator('#stageNextStep');
+      await expect(next).toContainText('is not in a workspace yet');
+      await expect(next.locator('a')).toHaveAttribute(
+        'href',
+        `/agents/${encodeURIComponent(library)}?tab=workspaces`
+      );
+
+      await card(page, placed).locator('.roster-card__open').click();
+      await expect(page.locator('#stageName')).toHaveText(placed);
+      await expect(next).toContainText('has not done any work yet');
+      if (slug) {
+        await expect(next.locator('a')).toHaveAttribute(
+          'href',
+          `/workspaces/${slug}?agent=${encodeURIComponent(placed.toLowerCase())}`
+        );
+      }
+
+      // A built-in is not placed in workspaces, so it is offered no next step.
+      await card(page, 'Claude Code').locator('.roster-card__open').click();
+      await expect(page.locator('#stageName')).toHaveText('Claude Code');
+      await expect(next).toBeHidden();
+    } finally {
+      if (wsId)
+        await request
+          .delete(`${baseUrl}/api/workspaces/${encodeURIComponent(wsId)}`)
+          .catch(() => undefined);
+      for (const n of [library, placed]) {
         await request
           .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
           .catch(() => undefined);

@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/specialist"
 )
 
@@ -36,6 +38,55 @@ func TestPreconditionFillsIntegrationReceiptsBeforeStepReaders(t *testing.T) {
 	root, err := store.GetRun(ctx, projection.RunID)
 	if err != nil || root.IntegrationPluginID != "reaper-plugin" || root.IntegrationVersion != "0.6.0" {
 		t.Fatalf("root receipts were not persisted: %+v err=%v", root, err)
+	}
+}
+
+// A verified install above the reviewed floor, from an exact official commit
+// other than the fallback, satisfies the precondition and hands its own
+// version to every step reader without resolving the latest release.
+func TestPreconditionAcceptsAVerifiedInstallAboveTheFloor(t *testing.T) {
+	ctx := context.Background()
+	entry, descriptor, _, _ := readyIntegrationFixture(t)
+	source := entry.SourceRepository + "#sha=" + strings.Repeat("f", 40)
+	release, report := releaseDescriptor(descriptor, "0.6.2", source)
+	manager := &fakeReviewedIntegrationManager{
+		installed:  []plugin.InstalledPlugin{installedFromFixture(release, source, entry.SourceFormat, true, 2)},
+		descriptor: release, report: report,
+	}
+	releases := &stubReleases{resolution: latestRelease(entry, "0.7.0", "e")}
+	adapter := newReviewedIntegrationAdapter(manager, integrationResolver(entry), "darwin/arm64")
+	adapter.releases = releases
+
+	reads := defaultCanonicalReads()
+	scopes := make(map[specialist.SetupStepKind][]ReadScope)
+	readers := make(map[specialist.SetupStepKind]CanonicalReader, len(actionDefinitionsByKind))
+	for kind := range actionDefinitionsByKind {
+		readers[kind] = CanonicalReaderFunc(func(_ context.Context, scope ReadScope) (CanonicalStepRead, error) {
+			scopes[kind] = append(scopes[kind], scope)
+			return reads[kind], nil
+		})
+	}
+	readers[specialist.SetupStepIntegrationInstall] = adapter
+	registry, err := NewReaderRegistry(readers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, store := openTestStore(t)
+	service := aliasService(t, store, &relationshipStub{state: acceptedRelationship()}, registry)
+
+	projection, err := service.Read(ctx, "local", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projection.Precondition != nil || projection.Receipts.IntegrationVersion != "0.6.2" {
+		t.Fatalf("install above the floor did not satisfy the precondition: receipts=%+v precondition=%+v", projection.Receipts, projection.Precondition)
+	}
+	project := scopes[specialist.SetupStepProjectConnect]
+	if len(project) == 0 || project[0].IntegrationVersion != "0.6.2" {
+		t.Fatalf("project reader did not see the installed version: %+v", project)
+	}
+	if releases.callCount() != 0 {
+		t.Fatalf("a verified precondition resolved the latest release %d times", releases.callCount())
 	}
 }
 

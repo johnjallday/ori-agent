@@ -12,6 +12,7 @@
 #   wt away arm|disarm|status|tick # Control unattended queued dispatches
 #   wt pr [name]            # Push branch and open a PR against dev
 #   wt done [name] [--keep-issue-open] [--herdr-override] # Finish all attached Issues, archive, and clean up
+#   wt done                 # ...or, without a name, pick worktrees to finish from a list (q to quit)
 #   wt rm [name]            # Remove worktree and its branch
 #   wt ls                   # List worktrees
 #   wt status               # Feature-first overview of every feature in the repo
@@ -361,12 +362,13 @@ function wt_render_row {
   [[ "$behind" != "0" && "$behind" != "?" ]] && behind_color="$WT_C_RED"
 
   local label_color
+  # Prefix patterns so a qualified label such as "merged, dirty" keeps its color.
   case "$label" in
-    merged)        label_color="$WT_C_GREEN" ;;
-    active)        label_color="$WT_C_YELLOW" ;;
-    "(base)")      label_color="$WT_C_CYAN" ;;
-    "[detached]")  label_color="$WT_C_RED" ;;
-    *)             label_color="$WT_C_DIM" ;;
+    merged*)        label_color="$WT_C_GREEN" ;;
+    active*)        label_color="$WT_C_YELLOW" ;;
+    "(base)")       label_color="$WT_C_CYAN" ;;
+    "[detached]"*)  label_color="$WT_C_RED" ;;
+    *)              label_color="$WT_C_DIM" ;;
   esac
 
   print -r -- "${idx_prefix}${name_pad}  ${WT_C_CYAN}${branch_pad}${WT_C_RESET}  ${ahead_color}${ahead_pad}${WT_C_RESET} ${behind_color}${behind_pad}${WT_C_RESET}  ${label_color}${label}${WT_C_RESET}"
@@ -1413,6 +1415,114 @@ function wt_done_close_secondary_issues {
   done
 }
 
+# Re-query merged PRs even if this shell already loaded them. wt_load_merged_set
+# caches once per shell, which is fine for navigation but stale input for
+# deciding which worktree to delete.
+function wt_reload_merged_set {
+  typeset -gA WT_MERGED_SET
+  WT_MERGED_SET=()
+  typeset -g WT_MERGED_LOADED=""
+  wt_load_merged_set
+}
+
+# Bare `wt done`: list every removable feature worktree, finish the one picked
+# through the named `wt done <name>` path (so every guard, prompt, and Issue rule
+# still applies), then list what is left until the user quits. Flags given to
+# the bare command apply to every pick; a pick may add its own, e.g.
+# `2 --keep-issue-open`.
+function wt_done_repl {
+  local -a default_flags pick_paths pick_branches words info
+  default_flags=("$@")
+  local dev_path line choice pick_path branch ahead behind label idx_prefix i
+
+  wt_color_init
+  # Captured before anything is removed: git cannot resolve the dev worktree
+  # from a directory an earlier pick just deleted.
+  dev_path="$(wt_get_dev_worktree)"
+  wt_reload_merged_set
+
+  while true; do
+    wt_load_worktrees
+    pick_paths=()
+    pick_branches=()
+    for (( i = 1; i <= ${#WT_PATHS[@]}; i++ )); do
+      wt_is_protected_worktree "${WT_PATHS[$i]}" && continue
+      pick_paths+=("${WT_PATHS[$i]}")
+      pick_branches+=("${WT_BRANCHES[$i]}")
+    done
+    if (( ${#pick_paths[@]} == 0 )); then
+      echo "No feature worktrees left to finish."
+      return 0
+    fi
+
+    wt_compute_widths pick_paths pick_branches
+    echo
+    echo "Finish an implementation (merged = its PR merged into ${WT_C_CYAN}$BASE_BRANCH${WT_C_RESET}):"
+    wt_render_header "      "
+    for (( i = 1; i <= ${#pick_paths[@]}; i++ )); do
+      branch="${pick_branches[$i]}"
+      ahead="0"; behind="0"; label="[detached]"
+      if [[ -n "$branch" ]]; then
+        info=("${(@s/ /)$(wt_branch_status "$branch")}")
+        ahead="${info[1]}"; behind="${info[2]}"
+        # wt_branch_status also calls a branch with no commits "merged", since
+        # it is an ancestor of dev. Here the label is a delete signal, so only
+        # a merged PR earns it.
+        if [[ -n "${WT_MERGED_SET[$branch]:-}" ]]; then
+          label="merged"
+        elif [[ "$ahead" == "0" ]]; then
+          label="empty"
+        else
+          label="active"
+        fi
+      fi
+      # Same check wt done makes before removal. Without it, a fresh branch
+      # with uncommitted in-progress work would read as merely "empty".
+      if [[ -n "$(git -C "${pick_paths[$i]}" status --porcelain 2>/dev/null)" ]]; then
+        label="$label, dirty"
+      fi
+      printf -v idx_prefix "  ${WT_C_BOLD}%2d)${WT_C_RESET} " "$i"
+      wt_render_row "$idx_prefix" "${pick_paths[$i]:t}" "$branch" "$ahead" "$behind" "$label"
+    done
+    if ! command -v gh >/dev/null 2>&1; then
+      echo "${WT_C_DIM}gh not found, so merged PRs are unknown; wt done still asks before removing unmerged work.${WT_C_RESET}"
+    fi
+    echo "${WT_C_DIM}Number or name runs wt done on it (flags allowed: 1 --keep-issue-open)  ·  r refresh  ·  q quit${WT_C_RESET}"
+
+    if ! read -r "line?${WT_C_BOLD}done${WT_C_RESET}> "; then
+      echo
+      return 0
+    fi
+    words=(${(z)line})
+    choice="${words[1]:-}"
+    case "$choice" in
+      ""|q|quit|exit) return 0 ;;
+      r|refresh) wt_reload_merged_set; continue ;;
+    esac
+
+    pick_path=""
+    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#pick_paths[@]} )); then
+      pick_path="${pick_paths[$choice]}"
+    else
+      for (( i = 1; i <= ${#pick_paths[@]}; i++ )); do
+        [[ "${pick_paths[$i]:t}" == "$choice" ]] && pick_path="${pick_paths[$i]}"
+      done
+    fi
+    if [[ -z "$pick_path" ]]; then
+      echo "Not in the list: $choice"
+      continue
+    fi
+
+    # Finishing the worktree this shell is standing in would leave it in a
+    # deleted directory, where git refuses to run. :A resolves symlinks such as
+    # macOS /var -> /private/var so both sides compare as real paths.
+    if [[ -n "$dev_path" && ( "${PWD:A}" == "${pick_path:A}" || "${PWD:A}" == "${pick_path:A}"/* ) ]]; then
+      cd "$dev_path" && echo "Moved to $dev_path before removing ${pick_path:t}."
+    fi
+    wt_dispatch done "${pick_path:t}" "${default_flags[@]}" "${(@)words[2,-1]}"
+  done
+}
+
 function wt_away {
   local repo_root dispatcher
   repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
@@ -1785,16 +1895,19 @@ function wt_dispatch {
     # Post-merge completion: close an explicitly attached Issue, archive the
     # completed task list back to dev, remove the worktree + local/remote branch,
     # then rebase dev onto origin/dev. Run only after the PR is squash-merged.
+    # Without a name it opens wt_done_repl to choose the worktree instead.
     local name="" target_path branch merged_num="" herdr_override=0 keep_issue_open=0 done_arg
     local issue_snapshot="" issue_snapshot_present=0 issue_number="" merged_lookup_failed=0 attached_number
-    local -a issue_numbers
+    local -a issue_numbers done_flags
     for done_arg in "${@:2}"; do
       case "$done_arg" in
         --herdr-override)
           herdr_override=1
+          done_flags+=("$done_arg")
           ;;
         --keep-issue-open)
           keep_issue_open=1
+          done_flags+=("$done_arg")
           ;;
         --*)
           echo "Unknown wt done option: $done_arg"
@@ -1811,14 +1924,12 @@ function wt_dispatch {
       esac
     done
     if [[ -z "$name" ]]; then
-      target_path="$(git rev-parse --show-toplevel 2>/dev/null)"
-      name="${target_path:t}"
-      branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
-    else
-      target_path="$(wt_resolve_worktree_path "$name")"
-      branch="$(wt_resolve_worktree_branch "$name")"
-      [[ -z "$branch" ]] && branch="feature/$name"
+      wt_done_repl "${done_flags[@]}"
+      return $?
     fi
+    target_path="$(wt_resolve_worktree_path "$name")"
+    branch="$(wt_resolve_worktree_branch "$name")"
+    [[ -z "$branch" ]] && branch="feature/$name"
 
     if wt_is_protected_worktree "$target_path"; then
       echo "Refusing to clean up protected worktree: ${target_path:t}"
@@ -2162,6 +2273,8 @@ function wt_dispatch {
     echo "                     Close an explicitly attached Issue after merge, archive tasks,"
     echo "                     then perform guarded remove/rebase cleanup. --keep-issue-open"
     echo "                     skips the GitHub mutation for an intentional exception."
+    echo "                     Without a name, lists feature worktrees (merged PRs marked)"
+    echo "                     and finishes each one you pick until you quit."
     echo "                     Closes the feature's Herdr tab only; the workspace and its"
     echo "                     sibling tabs survive. Features created before tab-scoped"
     echo "                     cleanup have their workspace left open for you to close."

@@ -37,6 +37,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/gateway"
 	"github.com/johnjallday/ori-agent/internal/githubhttp"
 	"github.com/johnjallday/ori-agent/internal/grouprequirements"
+	"github.com/johnjallday/ori-agent/internal/integrationrelease"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/location"
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
@@ -334,10 +335,13 @@ type ServerBuilder struct {
 	personalAssignment       *personalassistant.AssignmentService
 	personalAssistantHandler *personalassistanthttp.Handler
 	setupJourneyStore        *setupjourney.SQLiteStore
-	setupJourneyService      *setupjourney.Service
-	setupJourneyHandler      *setupjourneyhttp.Handler
-	sampleLibraryService     *samplelibrary.Service
-	sampleLibraryHandler     *samplelibraryhttp.Handler
+	// integrationReleases resolves the latest reviewed integration release for
+	// both the guided setup and the Plugins page update check.
+	integrationReleases  *integrationrelease.Resolver
+	setupJourneyService  *setupjourney.Service
+	setupJourneyHandler  *setupjourneyhttp.Handler
+	sampleLibraryService *samplelibrary.Service
+	sampleLibraryHandler *samplelibraryhttp.Handler
 
 	// personalAssistantToday is kept so progression can observe the first
 	// Daily Brief the user is shown (starter missions Mission 04).

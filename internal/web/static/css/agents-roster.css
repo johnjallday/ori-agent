@@ -169,13 +169,14 @@ body.agents-roster-page {
   gap: 8px;
 }
 
+/* A pill, not a tile: it only appears when its bucket holds something to act
+   on, so it reads as a sentence ("2 need attention") rather than a dashboard. */
 .roster-stat {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  min-width: 84px;
-  padding: 7px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 14px;
   border: 1px solid var(--card-line);
   border-radius: 10px;
   background: var(--card-soft);
@@ -204,15 +205,15 @@ body.agents-roster-page {
 }
 
 .roster-stat__value {
-  font-size: 18px;
+  font-size: 15px;
   font-weight: 700;
-  line-height: 1.1;
+  line-height: 1;
   color: var(--text-primary, #111827);
 }
 
 .roster-stat__label {
-  font-size: 11px;
-  color: var(--card-muted);
+  font-size: 13px;
+  color: var(--text-primary, #111827);
   white-space: nowrap;
 }
 
@@ -254,8 +255,12 @@ body.agents-roster-page {
   min-width: 0;
 }
 
+/* The search field is the one elastic item, so it gives up width before the row
+   wraps. At a 220px basis the toolbar overflowed a ~1000px pane by a few pixels
+   and pushed Filters onto a second row of its own; 140px keeps the row whole
+   with the Inspector open, and the field still grows to fill whatever is left. */
 .collection-search {
-  flex: 1 1 220px;
+  flex: 1 1 140px;
   min-width: 0;
   margin: 0;
 }
@@ -382,7 +387,7 @@ body.agents-roster-page {
 
 .view-sort select {
   height: 38px;
-  max-width: 170px;
+  max-width: 150px;
   min-width: 0;
   padding: 0 8px;
   border: 1px solid var(--card-line);
@@ -1162,6 +1167,30 @@ body.agents-roster-page {
   cursor: pointer;
 }
 
+/* Thirteen always-on checkboxes made a collection read as an admin table. In
+   the Gallery a card's checkbox now shows when it is wanted: under the pointer,
+   on keyboard focus, once checked, in selection mode, or while the first-visit
+   hint is pointing at it. It is faded rather than removed, so it keeps its tab
+   stop and its hit target, and a keyboard user meets it exactly as before.
+
+   Gated on (hover: hover) because a touch screen has no hover to reveal it
+   with; there it simply stays visible. List view keeps its checkbox column —
+   an empty leading column would look like a rendering fault. */
+@media (hover: hover) {
+  .roster-collection:not(.is-list) .roster-card__checkwrap {
+    opacity: 0;
+    transition: opacity var(--cozy-motion-fast, 120ms) ease;
+  }
+
+  .roster-collection:not(.is-list) .roster-card:hover .roster-card__checkwrap,
+  .roster-collection:not(.is-list) .roster-card:focus-within .roster-card__checkwrap,
+  .roster-collection:not(.is-list) .roster-card.is-checked .roster-card__checkwrap,
+  .roster-collection.is-selecting .roster-card__checkwrap,
+  .roster-collection.is-teaching-select .roster-card__checkwrap {
+    opacity: 1;
+  }
+}
+
 .roster-card__check {
   width: 16px;
   height: 16px;
@@ -1903,6 +1932,111 @@ body.agents-roster-page {
   margin-top: 18px;
 }
 
+/* ---- Give faces ------------------------------------------------------------- */
+
+/* The offer sits in the meta row beside the count, as a sentence with its two
+   answers. It is text-sized on purpose: it is a suggestion the page makes once,
+   not a banner that owns a row of the first screen. */
+.collection-meta__faces {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin: 0;
+  min-width: 0;
+  color: var(--text-primary, #111827);
+  font-size: 13px;
+}
+
+.collection-meta__faces[hidden] {
+  display: none;
+}
+
+.faces-dialog {
+  max-width: 520px;
+}
+
+.faces-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.faces-row__label {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 7px 8px;
+  border-radius: var(--cozy-radius, 8px);
+  cursor: pointer;
+}
+
+.faces-row__label:hover {
+  background: var(--card-soft);
+}
+
+/* common.css sizes every checkbox 44x44; the attribute selector is what wins
+   the specificity fight, the same way the card checkbox does. */
+.faces-row__check[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  accent-color: var(--primary-color, #4f46e5);
+  cursor: pointer;
+}
+
+.faces-row__check:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 2px;
+}
+
+.faces-row__swap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.faces-row__arrow {
+  color: var(--card-muted);
+  font-size: 14px;
+}
+
+/* An unchecked row keeps its proposal visible but quiet, so what is being
+   declined can still be seen. Dimmed by colour, not opacity: opacity would take
+   the name's contrast down with it. */
+.faces-row__label:has(.faces-row__check:not(:checked)) .faces-row__arrow,
+.faces-row__label:has(.faces-row__check:not(:checked)) .faces-row__swap > :last-child {
+  filter: grayscale(1);
+}
+
+.faces-row__copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.faces-row__copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.faces-row__copy span {
+  color: var(--card-muted);
+  font-size: 12px;
+}
+
 .btn-danger {
   border: 1px solid #b91c1c;
   background: #b91c1c; /* white text meets WCAG AA (contrast > 5:1) */
@@ -2372,6 +2506,50 @@ body.inspector-sheet-open {
 .stage__purpose.is-missing {
   color: var(--card-muted);
   font-style: italic;
+}
+
+/* The role's own summary, standing in where the agent has no description. It is
+   real information, so it is not italic like the "missing" placeholder — but it
+   is quieter than a description the user wrote, because it is not theirs. */
+.stage__purpose.is-role {
+  color: var(--card-muted);
+}
+
+/* One sentence and one link, for an agent that has never done anything. A
+   left rule in the role accent rather than a filled banner: it should read as
+   the agent's own next line, not as an alert. */
+.stage__nextstep {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin: 0;
+  padding: 9px 12px;
+  border-left: 3px solid var(--role-accent, var(--roster-accent, #4f46e5));
+  border-radius: 0 var(--cozy-radius, 8px) var(--cozy-radius, 8px) 0;
+  background: var(--card-soft);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.stage__nextstep[hidden] {
+  display: none;
+}
+
+.stage__nextstep-copy {
+  margin: 0;
+  color: var(--text-primary, #111827);
+}
+
+.stage__nextstep-link {
+  color: var(--roster-accent, #4f46e5);
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.stage__nextstep-link:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 2px;
 }
 
 .stage__vitals {

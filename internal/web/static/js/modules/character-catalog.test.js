@@ -262,3 +262,82 @@ test('an empty payload leaves the catalog usable and empty', () => {
   assert.equal(cat.guide(), null);
   assert.equal(cat.get('research-archivist'), null);
 });
+
+/* ---- recommendation ----------------------------------------------------------- */
+
+// The rule the picker, the create forms, and the roster's "give faces" action
+// all share. `roles` has to survive ingest for it to work outside a fixture: it
+// used to be dropped, so role matching passed its unit tests and never ran.
+const castPayload = {
+  catalog_version: '1.0.0',
+  reserved_guide_id: 'ori-guide',
+  characters: [
+    { id: 'research-archivist', roles: ['researcher', 'validator'] },
+    { id: 'project-coordinator', roles: ['orchestrator'] },
+    { id: 'team-caretaker', roles: ['orchestrator'] },
+    { id: 'product-builder', roles: ['specialist'] }
+  ]
+};
+
+test('roles survive ingest, trimmed, and default to an empty list', () => {
+  const cat = load();
+  cat._ingest({
+    characters: [{ id: 'a', roles: [' researcher ', '', null, 'validator'] }, { id: 'b' }]
+  });
+  assert.deepEqual([...cat.get('a').roles], ['researcher', 'validator']);
+  assert.deepEqual([...cat.get('b').roles], []);
+});
+
+test('recommend prefers a role match among equally unused characters', () => {
+  const cat = ready(castPayload);
+  assert.equal(cat.recommend([], 'orchestrator'), 'project-coordinator');
+  assert.equal(cat.recommend([], 'specialist'), 'product-builder');
+  assert.equal(cat.recommend([], ''), 'research-archivist');
+  assert.equal(cat.recommend(null, 'not-a-role'), 'research-archivist');
+});
+
+test('recommend puts unused ahead of a role match', () => {
+  const cat = ready(castPayload);
+  // Both Commander characters are worn, so an unused face wins over a fitting
+  // duplicate: a repeated identity is what a user notices.
+  const rec = cat.recommend(['project-coordinator', 'team-caretaker'], 'orchestrator');
+  assert.equal(rec, 'research-archivist');
+});
+
+test('recommend keeps spreading out once every character is worn', () => {
+  const cat = ready(castPayload);
+  // A roster larger than the catalog: each face is worn once, the first
+  // Commander face twice. The next Commander gets the OTHER Commander face
+  // rather than a third copy of the first.
+  const worn = [
+    'research-archivist',
+    'project-coordinator',
+    'team-caretaker',
+    'product-builder',
+    'project-coordinator'
+  ];
+  assert.equal(cat.recommend(worn, 'orchestrator'), 'team-caretaker');
+});
+
+test('recommend walks a whole roster without piling onto one face', () => {
+  const cat = ready(castPayload);
+  const taken = [];
+  for (let i = 0; i < 8; i++) taken.push(cat.recommend(taken, 'orchestrator'));
+  const counts = {};
+  taken.forEach(id => (counts[id] = (counts[id] || 0) + 1));
+  assert.deepEqual(Object.values(counts).sort(), [2, 2, 2, 2]);
+});
+
+test('recommend returns nothing before the catalog has loaded', () => {
+  const cat = load();
+  assert.equal(cat.recommend([], 'orchestrator'), '');
+});
+
+test('recommend accepts an explicit list instead of the loaded catalog', () => {
+  const cat = load();
+  const list = [
+    { id: 'x', roles: [] },
+    { id: 'y', roles: ['analyzer'] }
+  ];
+  assert.equal(cat.recommend([], 'analyzer', list), 'y');
+});

@@ -24,7 +24,10 @@ func TestReviewedCandidateHostContract(t *testing.T) {
 	if err := prepareTrustedBlueprints(&descriptor); err != nil {
 		t.Fatalf("resolve reviewed candidate blueprints: %v", err)
 	}
-	if descriptor.Name != "reaper-plugin" || descriptor.Version != "0.6.1" ||
+	// The version is a floor, not a pin. This package cannot import the
+	// registry, so TestReviewedCandidateMeetsTheFloor in
+	// internal/reviewedintegration checks it against the reviewed minimum.
+	if descriptor.Name != "reaper-plugin" || descriptor.Version == "" ||
 		descriptor.WorkspaceSurfaces == nil ||
 		!slices.Contains(descriptor.WorkspaceSurfaces.RequiresHostFeatures, HostFeatureSpecialistSetupJourneyV1) ||
 		!slices.Contains(descriptor.WorkspaceSurfaces.RequiresHostFeatures, HostFeatureSetupQuestsV2) {

@@ -142,13 +142,26 @@ function makeDom() {
   };
 }
 
+// The recommendation rule lives in character-catalog.js and the picker
+// delegates to it, so these tests run the REAL rule rather than a copy of it —
+// a fake `recommend` here would pass while the two files drifted apart.
+const catalogSource = readFileSync(new URL('./character-catalog.js', import.meta.url), 'utf8');
+
+function realRecommend() {
+  const sandbox = { window: {} };
+  vm.createContext(sandbox);
+  vm.runInContext(catalogSource, sandbox);
+  return sandbox.window.CharacterCatalog.recommend;
+}
+
 function load({ catalog = CATALOG } = {}) {
   const dom = makeDom();
   const sandbox = {
     window: {
       CharacterCatalog: {
         working: () => catalog.slice(),
-        get: id => catalog.find(c => c.id === id) || null
+        get: id => catalog.find(c => c.id === id) || null,
+        recommend: realRecommend()
       }
     },
     document: dom.document,

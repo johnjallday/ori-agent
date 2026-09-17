@@ -70,11 +70,11 @@
   // using yet, so a fresh roster spreads out instead of everyone landing on the
   // first card.
   //
-  // Two deterministic preferences, in order: unused beats used, and
-  // role-matching beats not. Both come from data already on the client — the
-  // roster's assigned IDs and the catalog's own `roles` hint — so the same
-  // inputs always produce the same suggestion and nothing is fetched to compute
-  // it.
+  // The rule itself lives in CharacterCatalog.recommend, because the picker is
+  // no longer the only surface that needs it: a create form pre-stages the same
+  // suggestion, and the roster offers it to agents that have no face yet. One
+  // rule in one place is what keeps those three from disagreeing about which
+  // character suits whom.
   //
   // This only changes what is offered FIRST. Every character stays selectable
   // for every agent, and a character with no declared roles is never excluded —
@@ -82,28 +82,9 @@
   function recommendedId(taken, list, role) {
     var characters = list || state.characters;
     if (!characters.length) return '';
-
-    var used = {};
-    (taken || []).forEach(function (id) {
-      if (id) used[String(id)] = true;
-    });
-    var wanted = role ? String(role) : '';
-
-    var best = null;
-    var bestScore = -1;
-    for (var i = 0; i < characters.length; i++) {
-      var ch = characters[i];
-      var roles = ch.roles || [];
-      var matches = wanted && roles.indexOf(wanted) !== -1;
-      // Unused is worth more than a role match: a duplicate identity is the
-      // thing a user notices, a slightly-off affinity is not.
-      var score = (used[ch.id] ? 0 : 2) + (matches ? 1 : 0);
-      if (score > bestScore) {
-        bestScore = score;
-        best = ch;
-      }
-    }
-    return best ? best.id : characters[0].id;
+    var catalog = typeof window !== 'undefined' ? window.CharacterCatalog : null;
+    if (!catalog || typeof catalog.recommend !== 'function') return characters[0].id;
+    return catalog.recommend(taken, role, characters) || characters[0].id;
   }
 
   /* ---- rendering --------------------------------------------------------------- */

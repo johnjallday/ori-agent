@@ -48,6 +48,7 @@ Usage:
   ./scripts/devops.sh backlog
   ./scripts/devops.sh proposals
   ./scripts/devops.sh status
+  ./scripts/devops.sh done
   ./scripts/devops.sh release
   ./scripts/devops.sh agent-defaults [options] [--yes]
   ./scripts/devops.sh explore
@@ -74,6 +75,10 @@ chosen (`approved`).
 with its authoritative task progress, Git/PR state, live agent, and attention
 findings. It renders the same read-only feature overview as `wt status
 --implementations`, so the Issue picker and worktree workflow cannot disagree.
+
+`done` (picker key `d`) finishes implementations. It opens bare `wt done`,
+which lists every checked-out feature worktree with merged PRs marked, runs the
+full guarded `wt done <name>` on each one you pick, and repeats until you quit.
 
 `release` answers "what have I not shipped yet": the latest GitHub Release's
 tag and publish time, plus how many PRs have merged into `dev` strictly after
@@ -141,7 +146,7 @@ print_menu() {
   printf '\n%s\n' \
     "[1/a] All  [2/d] Needs my decision  [3/b] Backlog  [4/f] Proposals  [5/y] Ready" \
     "[v #] View  [n title] Capture  [c # choices] Decide  [ok #] Approve  [g] Agent defaults  [q] Quit" \
-    "[e] Explore next work"
+    "[e] Explore next work  [done] Finish implementations"
 }
 
 # Labels arrive from `gh` as a ", "-joined string. Split on commas and trim so a
@@ -1292,6 +1297,10 @@ run_one_shot() {
       [[ $# -eq 0 ]] || return 2
       list_status
       ;;
+    done|finish)
+      [[ $# -eq 0 ]] || return 2
+      finish_implementations
+      ;;
     release)
       [[ $# -eq 0 ]] || return 2
       release_report
@@ -1628,7 +1637,7 @@ render_picker() {
   printf '\n\n'
   style '2' 'Ongoing implementations'
   printf '  '
-  style '2' '[w] full details'
+  style '2' '[w] full details  [d] finish (wt done)'
   printf '\n'
   if [[ -n "$implementation_summary" ]]; then
     printf '%s\n' "$implementation_summary"
@@ -1842,6 +1851,8 @@ Picker keys
   e             Explore next work: eight prompts, context, preview, display or
                 fresh read/search-only Claude/Pi advisor (all views, even empty)
   w             Show the full checked-out feature implementation overview
+  d             Finish implementations: pick feature worktrees from a list and
+                run wt done on each (all of its guards apply) until you quit
   g             Read or change persistent primary and role agent defaults
                 (local config only; no GitHub or Herdr call)
   r             Refresh implementations, release status, and GitHub Issues
@@ -2590,6 +2601,22 @@ start_issue_implementation() {
   launch_implementation "$feature" "$implementation_mode" "$implementation_model"
 }
 
+# Finishing belongs to wt end to end: bare `wt done` lists the checked-out
+# feature worktrees, runs the full guarded cleanup on each pick, and loops until
+# quit. The child gets no picker-derived text, so nothing chosen here can become
+# a worktree name or a flag.
+finish_implementations() {
+  if ! command -v zsh >/dev/null 2>&1; then
+    printf 'Finishing implementations requires zsh to run scripts/wt.sh.\n' >&2
+    return 1
+  fi
+  if [[ ! -f "$script_dir/wt.sh" ]]; then
+    printf 'Finish entrypoint not found: %s\n' "$script_dir/wt.sh" >&2
+    return 1
+  fi
+  zsh -c 'source "$1" && wt done' devops-done "$script_dir/wt.sh"
+}
+
 edited_issue_body=""
 edit_issue_body() {
   local editor="${VISUAL:-${EDITOR:-}}" file status
@@ -2851,6 +2878,16 @@ run_picker() {
         with_normal_terminal implementation_report
         load_implementation_summary
         ;;
+      d)
+        # Global like n and e: works from any view, even an empty list. wt done
+        # can close attached Issues on GitHub, so refresh the whole index
+        # afterwards rather than only the implementation summary.
+        with_normal_terminal finish_implementations
+        if load_picker_index; then
+          prune_bundle_marks
+        fi
+        apply_picker_filter "${picker_filters[$filter_index]}"
+        ;;
       '?')
         with_normal_terminal print_picker_help
         ;;
@@ -3015,6 +3052,13 @@ while true; do
         continue
       fi
       explore_menu
+      ;;
+    done|finish)
+      if [[ -n "$argument" || -n "$extra" ]]; then
+        printf '%s\n' "done takes no arguments; pick worktrees from its list" >&2
+        continue
+      fi
+      finish_implementations
       ;;
     h|help|'?')
       print_usage
