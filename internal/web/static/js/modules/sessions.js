@@ -9612,13 +9612,11 @@ const sessionManager = {
       profile.entryNamedAfterWorkspace ? '' : template?.name || '',
       'autofillName'
     );
-    // A built-in blueprint's description is a fair starting point for the
-    // workspace. Plugin and user blueprints, and any blueprint whose project
-    // file is named after the workspace, start empty so repeated creates are
-    // not all described alike (FR 13). Typed text is never replaced.
+    // Every blueprint offers its description as a starting point (FR 13).
+    // Switching replaces or clears only a previous autofill; typed text stays.
     this.prefillTemplateValue(
       document.getElementById('folderDescriptionInput'),
-      profile.prefillsDescription ? String(template?.description || '') : '',
+      profile.blank ? '' : String(template?.description || ''),
       'autofillDescription'
     );
     this.syncWorkspaceDescriptionHelp();
@@ -9637,21 +9635,17 @@ const sessionManager = {
   //   a setup wizard, or a setup quest), so a folder override cannot join it.
   // - entryNamedAfterWorkspace: its project file is named after the workspace
   //   (`project_entry.relative_path` contains `{{name}}`).
-  // - prefillsDescription: a built-in (stock) blueprint without such a file,
-  //   whose catalog description is offered as the workspace description.
   blueprintDetailsProfile(template) {
     const blank = !template || Boolean(template.blank) || !template.id;
     const projectEntryPath = blank
       ? ''
       : String(template.project_entry?.relative_path || '').trim();
-    const entryNamedAfterWorkspace = projectEntryPath.includes('{{name}}');
     return {
       blank,
       bringsOwnSetup:
         !blank && Boolean(template.plugin_owner || template.setup_wizard || template.setup_quest),
       hasAssistantProgram: !blank && Boolean(template.assistant_program),
-      entryNamedAfterWorkspace,
-      prefillsDescription: !blank && template.builtin === true && !entryNamedAfterWorkspace,
+      entryNamedAfterWorkspace: projectEntryPath.includes('{{name}}'),
       projectEntryPath
     };
   },
