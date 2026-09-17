@@ -1,6 +1,7 @@
 package projecttemplates
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -153,17 +154,78 @@ func PreviewInstantiation(template Template, projectName string) ([]string, erro
 // skipped, the root template.json is excluded, and any failure removes the
 // partially created project folder.
 func Instantiate(templatePath, workspaceFolder, projectName string) (string, error) {
-	result, err := instantiateTemplate(templatePath, workspaceFolder, projectName, nil)
+	result, err := instantiateTemplate(templatePath, workspaceFolder, projectName, nil, nil)
 	return result.ProjectPath, err
 }
 
 // InstantiateTemplate copies a normalized Template and resolves its optional
 // project entry with the exact same token values used for scaffold filenames.
+// A blueprint that declares inputs is scaffolded with its declared defaults.
 func InstantiateTemplate(tpl Template, workspaceFolder, projectName string) (InstantiationResult, error) {
-	return instantiateTemplate(tpl.Path, workspaceFolder, projectName, tpl.ProjectEntry)
+	return InstantiateTemplateWithInputs(tpl, workspaceFolder, projectName, nil)
 }
 
-func instantiateTemplate(templatePath, workspaceFolder, projectName string, entry *ProjectEntry) (InstantiationResult, error) {
+// InstantiateTemplateWithInputs is InstantiateTemplate plus the values the user
+// chose for the blueprint's declared inputs, still in the raw shape the caller
+// received them. They are validated here against the declaration — the same
+// check the create endpoint already ran — so an unchecked value can never
+// reach a file, and a caller that supplies nothing gets the declared defaults.
+func InstantiateTemplateWithInputs(tpl Template, workspaceFolder, projectName string, provided map[string]json.RawMessage) (InstantiationResult, error) {
+	substitution, err := planInputSubstitution(tpl, provided)
+	if err != nil {
+		return InstantiationResult{}, err
+	}
+	return instantiateTemplate(tpl.Path, workspaceFolder, projectName, tpl.ProjectEntry, substitution)
+}
+
+// inputSubstitution is the resolved, bounded rewrite plan: exactly which source
+// files may be rewritten, and exactly what each declared token becomes. Nothing
+// outside this plan is ever anything but a byte copy.
+type inputSubstitution struct {
+	files  map[string]struct{}
+	values map[string]string
+}
+
+func planInputSubstitution(tpl Template, provided map[string]json.RawMessage) (*inputSubstitution, error) {
+	if tpl.HasInvalidInputs() {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidInputs, tpl.InputsError)
+	}
+	if tpl.Inputs == nil {
+		if len(provided) > 0 {
+			return nil, fmt.Errorf("%w: this blueprint does not ask for any inputs", ErrInputValue)
+		}
+		return nil, nil
+	}
+	values, err := ResolveInputValues(tpl.Inputs, provided)
+	if err != nil {
+		return nil, err
+	}
+	files := make(map[string]struct{}, len(tpl.Inputs.ApplyTo))
+	for _, relative := range tpl.Inputs.ApplyTo {
+		files[relative] = struct{}{}
+	}
+	return &inputSubstitution{files: files, values: values}, nil
+}
+
+func (substitution *inputSubstitution) appliesTo(relPath string) bool {
+	if substitution == nil {
+		return false
+	}
+	_, ok := substitution.files[relPath]
+	return ok
+}
+
+// apply replaces each declared token with its resolved value. Order does not
+// matter: the tokens are distinct and no resolved value can contain one,
+// because numbers are digits and option values are plain portable text.
+func (substitution *inputSubstitution) apply(content string) string {
+	for id, value := range substitution.values {
+		content = strings.ReplaceAll(content, inputTokenPrefix+id+"}}", value)
+	}
+	return content
+}
+
+func instantiateTemplate(templatePath, workspaceFolder, projectName string, entry *ProjectEntry, substitution *inputSubstitution) (InstantiationResult, error) {
 	slug, err := SanitizeProjectName(projectName)
 	if err != nil {
 		return InstantiationResult{}, err
@@ -189,7 +251,7 @@ func instantiateTemplate(templatePath, workspaceFolder, projectName string, entr
 		return InstantiationResult{}, fmt.Errorf("failed to inspect project folder %q: %w", destRoot, err)
 	}
 
-	if err := copyTemplateTree(templatePath, destRoot, values, srcInfo.Mode().Perm()); err != nil {
+	if err := copyTemplateTree(templatePath, destRoot, values, srcInfo.Mode().Perm(), substitution); err != nil {
 		// Best-effort cleanup so a failed instantiation leaves no partial
 		// project folder behind (and the caller never persists ProjectPath).
 		_ = os.RemoveAll(destRoot)
@@ -209,7 +271,7 @@ func instantiateTemplate(templatePath, workspaceFolder, projectName string, entr
 }
 
 // copyTemplateTree walks the template and materializes it under destRoot.
-func copyTemplateTree(templatePath, destRoot string, values templateTokenValues, rootPerm fs.FileMode) error {
+func copyTemplateTree(templatePath, destRoot string, values templateTokenValues, rootPerm fs.FileMode, substitution *inputSubstitution) error {
 	if err := os.MkdirAll(destRoot, normalizeDirPerm(rootPerm)); err != nil {
 		return fmt.Errorf("failed to create project folder: %w", err)
 	}
@@ -218,8 +280,12 @@ func copyTemplateTree(templatePath, destRoot string, values templateTokenValues,
 	// same destination (e.g. "{{name}}.txt" next to a literal "my-song.txt"),
 	// which must fail rather than silently overwrite.
 	produced := map[string]struct{}{}
+	// Track the declared apply_to files actually seen. A blueprint that lists a
+	// file the scaffold no longer has must fail rather than create a project
+	// whose values were quietly never written.
+	substituted := map[string]struct{}{}
 
-	return fs.WalkDir(os.DirFS(templatePath), ".", func(relPath string, d fs.DirEntry, err error) error {
+	if err := fs.WalkDir(os.DirFS(templatePath), ".", func(relPath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return fmt.Errorf("failed to read template entry %q: %w", relPath, err)
 		}
@@ -268,8 +334,22 @@ func copyTemplateTree(templatePath, destRoot string, values templateTokenValues,
 			}
 			return nil
 		}
+		if substitution.appliesTo(relPath) {
+			substituted[relPath] = struct{}{}
+			return copyFileWithInputs(filepath.Join(templatePath, relPath), destPath, info.Mode().Perm(), substitution)
+		}
 		return copyFile(filepath.Join(templatePath, relPath), destPath, info.Mode().Perm())
-	})
+	}); err != nil {
+		return err
+	}
+	if substitution != nil {
+		for relPath := range substitution.files {
+			if _, seen := substituted[relPath]; !seen {
+				return fmt.Errorf("%w: apply_to path %q is no longer part of the scaffold", ErrInvalidInputs, relPath)
+			}
+		}
+	}
+	return nil
 }
 
 // substituteRelPath applies token substitution to every segment of a
@@ -285,6 +365,11 @@ func substituteRelPathWithValues(relPath string, values templateTokenValues) (st
 		substituted := values.substitute(segment)
 		if strings.Contains(substituted, "{{fields.") {
 			return "", fmt.Errorf("template entry %q references an unknown field token", relPath)
+		}
+		// Names resolve before any chosen value is known and go straight into
+		// filesystem paths, so they stay limited to {{name}} and {{date}}.
+		if strings.Contains(substituted, inputTokenPrefix) {
+			return "", fmt.Errorf("template entry %q uses an input token in its name", relPath)
 		}
 		if substituted == "" || substituted == "." || substituted == ".." ||
 			strings.ContainsAny(substituted, `/\`) {
@@ -324,6 +409,41 @@ func copyFile(src, dst string, perm fs.FileMode) error {
 	if _, err := io.Copy(out, in); err != nil {
 		_ = out.Close()
 		return fmt.Errorf("failed to copy template file %q: %w", src, err)
+	}
+	return out.Close()
+}
+
+// copyFileWithInputs writes the one kind of file that is not a byte copy: a
+// file the blueprint listed in apply_to. The size and text checks that ran at
+// load run again here, because the scaffold could have changed since, and the
+// result is refused if any token survived — a project carrying the author's
+// raw tokens is worse than a failed instantiation.
+func copyFileWithInputs(src, dst string, perm fs.FileMode, substitution *inputSubstitution) error {
+	info, err := os.Lstat(src)
+	if err != nil || !info.Mode().IsRegular() {
+		return fmt.Errorf("failed to read template file %q", src)
+	}
+	if info.Size() > maxInputApplyToFileBytes {
+		return fmt.Errorf("template file %q is larger than the substitution limit", src)
+	}
+	data, err := os.ReadFile(src) // #nosec G304 -- src is a template entry path validated by the caller's traversal/collision guards
+	if err != nil {
+		return fmt.Errorf("failed to open template file %q: %w", src, err)
+	}
+	if isBinary(data) {
+		return fmt.Errorf("template file %q is not a text file", src)
+	}
+	content := substitution.apply(string(data))
+	if strings.Contains(content, inputTokenPrefix) {
+		return fmt.Errorf("template file %q still contains an unresolved input token", src)
+	}
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, (perm|0o600)&fs.ModePerm) // #nosec G304 -- dst is constructed under destRoot with traversal/collision guards applied by the caller
+	if err != nil {
+		return fmt.Errorf("failed to create project file %q: %w", dst, err)
+	}
+	if _, err := io.WriteString(out, content); err != nil {
+		_ = out.Close()
+		return fmt.Errorf("failed to write project file %q: %w", dst, err)
 	}
 	return out.Close()
 }

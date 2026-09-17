@@ -316,6 +316,12 @@ type Template struct {
 	// Invalid declarations remain nil and block trusted plugin creation.
 	ProjectConnection      *ProjectConnectionDeclaration `json:"project_connection,omitempty"`
 	ProjectConnectionError string                        `json:"project_connection_error,omitempty"`
+	// Inputs is the optional set of typed values this blueprint asks for at
+	// creation time and writes into the scaffold files it declared. Like the
+	// other declarations it is inert data, and an unusable one yields nil plus
+	// InputsError rather than a scaffold that still carries the author's tokens.
+	Inputs      *InputsDeclaration `json:"inputs,omitempty"`
+	InputsError string             `json:"inputs_error,omitempty"`
 	// Builtin marks a template shipped with the app: read-only in the authoring
 	// UI and grouped as a built-in in the create-modal picker.
 	Builtin bool `json:"builtin"`
@@ -528,17 +534,21 @@ func (t Template) HasAgents() bool {
 // warning detection and strip-on-save — never interpreted, so the file-copy
 // engine stays domain-blind.
 type manifest struct {
-	revision               string
-	Name                   string                  `json:"name"`
-	Description            string                  `json:"description"`
-	Tags                   []string                `json:"tags,omitempty"`
-	Icon                   string                  `json:"icon,omitempty"`
-	Tagline                string                  `json:"tagline,omitempty"`
-	Addons                 []string                `json:"addons,omitempty"`
-	BehaviorProfile        string                  `json:"behavior_profile,omitempty"`
-	StarterTasks           []StarterTask           `json:"starter_tasks,omitempty"`
-	ProjectEntry           json.RawMessage         `json:"project_entry,omitempty"`
-	ProjectConnection      json.RawMessage         `json:"project_connection,omitempty"`
+	revision          string
+	Name              string          `json:"name"`
+	Description       string          `json:"description"`
+	Tags              []string        `json:"tags,omitempty"`
+	Icon              string          `json:"icon,omitempty"`
+	Tagline           string          `json:"tagline,omitempty"`
+	Addons            []string        `json:"addons,omitempty"`
+	BehaviorProfile   string          `json:"behavior_profile,omitempty"`
+	StarterTasks      []StarterTask   `json:"starter_tasks,omitempty"`
+	ProjectEntry      json.RawMessage `json:"project_entry,omitempty"`
+	ProjectConnection json.RawMessage `json:"project_connection,omitempty"`
+	// Inputs is held raw for the same fail-closed isolation as the wizard: one
+	// malformed field must fail only the inputs block, not erase the
+	// blueprint's identity, files, tasks, and agents along with it.
+	Inputs                 json.RawMessage         `json:"inputs,omitempty"`
 	Builtin                bool                    `json:"builtin,omitempty"`
 	Retired                bool                    `json:"retired,omitempty"`
 	BuiltinVersion         int                     `json:"builtin_version,omitempty"`
@@ -627,6 +637,12 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 		t.ProjectConnection = nil
 		t.ProjectConnectionError = projectConnectionErr.Error()
 	}
+	inputs, inputsErr := normalizeInputs(m.Inputs, t.Path)
+	t.Inputs = inputs
+	if inputsErr != nil {
+		t.Inputs = nil
+		t.InputsError = inputsErr.Error()
+	}
 	if m.Tools != nil {
 		t.Tools = normalizeToolDefaults(*m.Tools)
 	}
@@ -711,6 +727,9 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 	}
 	if projectConnectionErr != nil {
 		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json project_connection is unusable and blocks workspace creation: %v", projectConnectionErr))
+	}
+	if inputsErr != nil {
+		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json inputs is unusable and blocks workspace creation: %v", inputsErr))
 	}
 	if runtimeRequirementsErr != nil {
 		t.RuntimeRequirementsError = runtimeRequirementsErr.Error()
