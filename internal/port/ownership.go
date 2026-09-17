@@ -41,6 +41,7 @@ func IsPortAvailable(port int) bool {
 func lookupOutput(name string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), ownerLookupTimeout)
 	defer cancel()
+	// #nosec G204 -- callers pass fixed binaries (lsof, ps, netstat, tasklist) and integer-derived arguments.
 	cmd := exec.CommandContext(ctx, name, args...)
 	// A descendant still holding stdout must not extend the deadline.
 	cmd.WaitDelay = time.Second
