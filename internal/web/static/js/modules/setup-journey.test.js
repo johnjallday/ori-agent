@@ -8,9 +8,11 @@ globalThis.window ||= { addEventListener() {}, location: { search: '' } };
 
 const {
   PLUGINS_PAGE_URL,
+  RELEASE_UNCHECKED_NOTE,
   START_OVER_EXPLANATION,
   WORKSPACE_LAUNCH_DESCRIPTION,
   integrationHandoffNavigation,
+  integrationReleaseCheckNote,
   integrationReviewPresentation,
   setupJourneyActionLabel,
   setupJourneyPreconditionView,
@@ -124,6 +126,37 @@ test('before install the receipt shows only what will be installed', () => {
   ]);
 });
 
+test('an unchecked latest release is explained only where a release is offered', () => {
+  const offer = (id, integration) => ({
+    integration: { plugin_id: 'reaper-plugin', expected_version: '0.6.1', ...integration },
+    actions: [{ id }, { id: 'manage_integration' }]
+  });
+  assert.equal(
+    integrationReleaseCheckNote(offer('review_install', { release_checked: false })),
+    RELEASE_UNCHECKED_NOTE
+  );
+  assert.equal(
+    RELEASE_UNCHECKED_NOTE,
+    'The latest release could not be checked. Ori will install the minimum reviewed version.'
+  );
+  assert.equal(
+    integrationReleaseCheckNote(offer('review_update', { release_checked: false })),
+    RELEASE_UNCHECKED_NOTE
+  );
+  // Hidden when the release was checked, or when an older server omits the field.
+  assert.equal(integrationReleaseCheckNote(offer('review_install', { release_checked: true })), '');
+  assert.equal(integrationReleaseCheckNote(offer('review_install', {})), '');
+  // A verified step offers no release, so it never mentions one.
+  assert.equal(
+    integrationReleaseCheckNote(
+      offer('review_enable', { release_checked: false, verified: true, installed_version: '0.6.1' })
+    ),
+    ''
+  );
+  assert.equal(integrationReleaseCheckNote({ actions: [{ id: 'review_install' }] }), '');
+  assert.equal(integrationReleaseCheckNote(null), '');
+});
+
 test('integration reviews are named by their outcome', () => {
   const integration = {
     plugin_id: 'reaper-plugin',
@@ -183,8 +216,17 @@ test('integration reviews are named by their outcome', () => {
   });
   assert.deepEqual(
     split.summary.map(([label]) => label),
-    ['Publisher', 'Source', 'Reviewed version', 'Enabled after this action']
+    ['Publisher', 'Source', 'Release version', 'Enabled after this action']
   );
+  // The minimum reviewed version appears beside the release it bounds.
+  const withMinimum = integrationReviewRows({
+    commit_action: 'update',
+    integration: { ...integration, expected_version: '0.6.2', minimum_version: '0.6.1' }
+  });
+  assert.deepEqual(withMinimum.summary.slice(1, 3), [
+    ['Release version', '0.6.2'],
+    ['Minimum reviewed version', '0.6.1']
+  ]);
   assert.deepEqual(
     split.details.map(([label]) => label),
     ['Integration', 'Platform', 'Required host features', 'Skills', 'Artifacts']

@@ -21,17 +21,19 @@ func TestBuiltInRegistryMatchesSpecialistConstraintsAndPublishedRelease(t *testi
 		entry.ExpectedBlueprintID != specialistEntry.SuggestedTemplateID {
 		t.Fatalf("registry/specialist identity drift: %#v / %#v", entry, specialistEntry)
 	}
-	if entry.ExpectedVersion != "0.6.1" || entry.ExpectedBlueprintVersion != 7 ||
+	// The floor moves only when a release needs a new host feature, blueprint
+	// minimum, program schema or protocol. A change here is a review decision.
+	if entry.MinimumVersion != "0.6.1" || entry.MinimumBlueprintVersion != 7 ||
 		entry.ExpectedProgramSchema != 2 || entry.ExpectedProtocol != plugin.SurfaceProtocolVersion {
-		t.Fatalf("reviewed candidate versions drifted: %#v", entry)
+		t.Fatalf("reviewed floor versions drifted: %#v", entry)
 	}
-	if entry.SourceCommit != "e11ca2942279af02a9a035039b18b146ff9fc89d" {
-		t.Fatalf("reviewed candidate commit drifted: %q", entry.SourceCommit)
+	if entry.FallbackCommit != "e11ca2942279af02a9a035039b18b146ff9fc89d" {
+		t.Fatalf("reviewed fallback commit drifted: %q", entry.FallbackCommit)
 	}
-	if !entry.ReleaseReady || entry.Source() != entry.SourceRepository+"#sha="+entry.SourceCommit {
-		t.Fatalf("published release missing immutable install source: ready=%v source=%q", entry.ReleaseReady, entry.Source())
+	if !entry.ReleaseReady || entry.FallbackSource() != entry.SourceRepository+"#sha="+entry.FallbackCommit {
+		t.Fatalf("published release missing immutable fallback source: ready=%v source=%q", entry.ReleaseReady, entry.FallbackSource())
 	}
-	// The pin must require exactly what the v0.6.1 manifest declares: a
+	// The floor must require exactly what the v0.6.1 manifest declares: a
 	// narrower list would accept a plugin this host cannot honor, a wider one
 	// would refuse the published release.
 	expectedFeatures := []string{
@@ -111,6 +113,67 @@ func TestRegistryNormalizationRejectsUnsafeDisplayCopy(t *testing.T) {
 	}
 }
 
+func TestCompareVersionsOrdersBySemanticPrecedence(t *testing.T) {
+	cases := []struct {
+		left, right string
+		order       int
+		ok          bool
+	}{
+		{"0.6.1", "0.6.1", 0, true},
+		{"0.6.2", "0.6.1", 1, true},
+		{"0.10.0", "0.9.9", 1, true},
+		{"1.0.0", "0.99.99", 1, true},
+		{"0.6.0", "0.6.1", -1, true},
+		{"0.7.0-rc.1", "0.7.0", -1, true},
+		{"0.7.0-rc.2", "0.7.0-rc.10", -1, true},
+		{"0.7.0-alpha", "0.7.0-beta", -1, true},
+		{"0.7.0-1", "0.7.0-alpha", -1, true},
+		{"0.7.0-rc", "0.7.0-rc.1", -1, true},
+		{"0.6.1+build.5", "0.6.1", 0, true},
+		{"unknown", "0.6.1", 0, false},
+		{"0.6.1", "", 0, false},
+		{"v0.6.1", "0.6.1", 0, false},
+	}
+	for _, item := range cases {
+		order, ok := CompareVersions(item.left, item.right)
+		if order != item.order || ok != item.ok {
+			t.Errorf("CompareVersions(%q, %q) = %d, %v; want %d, %v", item.left, item.right, order, ok, item.order, item.ok)
+		}
+	}
+	if AtLeast("unknown", "0.6.1") || !AtLeast("0.6.1", "0.6.1") || !AtLeast("0.6.2", "0.6.1") || AtLeast("0.6.0", "0.6.1") {
+		t.Fatal("AtLeast must accept only parseable versions at or above the floor")
+	}
+	if !StableVersion("0.6.1") || !StableVersion("0.6.1+build") || StableVersion("0.7.0-rc.1") || StableVersion("0.7") {
+		t.Fatal("StableVersion must reject prerelease suffixes and malformed versions")
+	}
+}
+
+func TestForPluginAndPinnedSourceIdentifyOnlyExactOfficialCommits(t *testing.T) {
+	entry, ok := ForPlugin(" Reaper-Plugin ")
+	if !ok || entry.Key != "ori_reaper" {
+		t.Fatalf("ForPlugin = %#v, %v", entry, ok)
+	}
+	if _, ok := ForPlugin("other-plugin"); ok {
+		t.Fatal("an unreviewed plugin resolved to an entry")
+	}
+	commit := strings.Repeat("a", 40)
+	for source, want := range map[string]bool{
+		entry.PinnedSource(commit):                                 true,
+		entry.FallbackSource():                                     true,
+		entry.SourceRepository:                                     false,
+		entry.SourceRepository + ".git":                            false,
+		entry.SourceRepository + "#ref=v0.6.1":                     false,
+		entry.SourceRepository + "#sha=" + strings.ToUpper(commit): false,
+		entry.SourceRepository + "#sha=" + commit[:39]:             false,
+		entry.SourceRepository + "-fork#sha=" + commit:             false,
+		"https://github.com/attacker/reaper-plugin#sha=" + commit:  false,
+	} {
+		if got := entry.IsPinnedSource(source); got != want {
+			t.Errorf("IsPinnedSource(%q) = %v, want %v", source, got, want)
+		}
+	}
+}
+
 func TestRegistryReturnsIndependentCopies(t *testing.T) {
 	first, _ := Get("ori_reaper")
 	first.RequiredHostFeatures[0] = "changed"
@@ -125,10 +188,12 @@ func TestRegistryNormalizationRejectsMutableOrConfusedSources(t *testing.T) {
 	base, _ := Get("ori_reaper")
 	cases := map[string]func(*Entry){
 		"ready without pin": func(entry *Entry) {
-			entry.SourceCommit = ""
+			entry.FallbackCommit = ""
 			entry.ReleaseReady = true
 		},
-		"malformed pin":       func(entry *Entry) { entry.SourceCommit = strings.Repeat("z", 40) },
+		"malformed pin":       func(entry *Entry) { entry.FallbackCommit = strings.Repeat("z", 40) },
+		"malformed minimum":   func(entry *Entry) { entry.MinimumVersion = "latest" },
+		"no blueprint floor":  func(entry *Entry) { entry.MinimumBlueprintVersion = 0 },
 		"mutable non-github":  func(entry *Entry) { entry.SourceRepository = "https://example.invalid/plugin" },
 		"wrong source format": func(entry *Entry) { entry.SourceFormat = plugin.FormatCodex },
 		"duplicate capability": func(entry *Entry) {

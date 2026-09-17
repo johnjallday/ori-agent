@@ -337,6 +337,30 @@ func (m *Manager) UpdatePreview(name string) (TrustReport, bool, error) {
 	return preview.trustReport, preview.componentsChanged, nil
 }
 
+// PreviewReplacement resolves an explicit replacement source for an installed
+// plugin and returns its trust report plus whether the registered component set
+// would change. It is the preview counterpart of UpdateFromSource and installs
+// nothing.
+func (m *Manager) PreviewReplacement(name, source string, prefer SourceFormat) (TrustReport, bool, error) {
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
+	existing, ok, err := m.store.Get(name)
+	if err != nil {
+		return TrustReport{}, false, err
+	}
+	if !ok {
+		return TrustReport{}, false, fmt.Errorf("plugin: %q not installed", name)
+	}
+	candidate, report, err := m.inspect(source, prefer)
+	if err != nil {
+		return TrustReport{}, false, err
+	}
+	if candidate.Name != existing.Name {
+		return TrustReport{}, false, fmt.Errorf("plugin: reviewed replacement identity mismatch")
+	}
+	return report, componentsChanged(existing, candidate), nil
+}
+
 // resolveUpdatePreview performs the canonical one-pass source resolution used
 // by both the manual trust preview and proactive availability checks. Keeping
 // the resolved version beside the disclosure and footprint comparison prevents

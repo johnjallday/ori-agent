@@ -428,6 +428,105 @@ test('a create flow stages the file locally rather than uploading it', () => {
   assert.equal(editor.appearance().mode, 'uploaded');
 });
 
+/* ---- a suggested face for a new agent --------------------------------------- */
+
+// A catalog that can recommend, and that lets a test decide when it "loads".
+function recommendingCatalog(byRole) {
+  const listeners = [];
+  const names = { sable: 'Field Scout', moss: 'Moss Keeper' };
+  return {
+    calls: [],
+    get: id =>
+      names[id] ? { id, name: names[id], assets: { portrait: '/p.webp' }, palette: {} } : null,
+    recommend(taken, role) {
+      this.calls.push({ taken: [...(taken || [])], role });
+      return byRole[role] || byRole.default || '';
+    },
+    onChange: fn => listeners.push(fn),
+    load() {},
+    land: () => listeners.forEach(fn => fn())
+  };
+}
+
+test('a create form that opts in starts on the recommended character', () => {
+  const win = load();
+  win.CharacterCatalog = recommendingCatalog({ researcher: 'sable' });
+  const { editor } = mount(win, {
+    mode: 'create',
+    suggestCharacter: true,
+    agent: { name: 'Atlas', source: 'user', role: 'researcher' },
+    takenCharacterIds: () => ['moss']
+  });
+
+  const request = editor.createRequest();
+  assert.equal(request.mode, 'character');
+  assert.equal(request.character.catalog_id, 'sable');
+  // The recommendation saw which faces are already worn.
+  assert.deepEqual(win.CharacterCatalog.calls[0], { taken: ['moss'], role: 'researcher' });
+});
+
+test('without the opt-in a create form still starts generated', () => {
+  const win = load();
+  win.CharacterCatalog = recommendingCatalog({ default: 'sable' });
+  const { editor } = mount(win, { mode: 'create' });
+  // Omitting appearance means Generated, in the form as in the API (FR-4).
+  assert.equal(editor.createRequest().mode, 'generated');
+  assert.equal(editor.createRequest().character, undefined);
+});
+
+test('an existing agent is never handed a suggestion', () => {
+  const win = load();
+  win.CharacterCatalog = recommendingCatalog({ default: 'sable' });
+  const adapter = recordingAdapter(appearance('generated'));
+  const { editor } = mount(win, { suggestCharacter: true, adapter });
+  // Edit mode: what the agent has is what the user chose, even if that is the
+  // generated portrait. Nothing is staged and nothing is saved.
+  assert.equal(editor.appearance().mode, 'generated');
+  assert.equal(adapter.calls.length, 0);
+});
+
+test('the suggestion waits for the catalog and then follows the role', () => {
+  const win = load();
+  const catalog = recommendingCatalog({});
+  win.CharacterCatalog = catalog;
+  const { editor } = mount(win, {
+    mode: 'create',
+    suggestCharacter: true,
+    agent: { name: 'Atlas', source: 'user', role: 'researcher' }
+  });
+  // Nothing to recommend yet, so the form honestly shows the generated portrait.
+  assert.equal(editor.appearance().mode, 'generated');
+
+  catalog.recommend = (taken, role) => (role === 'analyzer' ? 'moss' : 'sable');
+  catalog.land();
+  assert.equal(editor.appearance().character.catalog_id, 'sable');
+
+  editor.setAgentRole('analyzer');
+  assert.equal(editor.appearance().character.catalog_id, 'moss');
+  assert.equal(editor.appearance().mode, 'character');
+});
+
+test('a suggestion never overwrites a choice the user made', () => {
+  const win = load();
+  win.CharacterCatalog = recommendingCatalog({ researcher: 'sable', analyzer: 'moss' });
+  const { host, editor } = mount(win, {
+    mode: 'create',
+    suggestCharacter: true,
+    agent: { name: 'Atlas', source: 'user', role: 'researcher' }
+  });
+  assert.equal(editor.appearance().mode, 'character');
+
+  // The user prefers the monogram. That is a decision, not an absence of one.
+  const radio = host.radio('generated');
+  radio.checked = true;
+  radio.fire('change');
+  assert.equal(editor.appearance().mode, 'generated');
+
+  editor.setAgentRole('analyzer');
+  assert.equal(editor.appearance().mode, 'generated');
+  assert.equal(editor.createRequest().mode, 'generated');
+});
+
 test('an oversize file is refused before any request', () => {
   const win = load();
   const adapter = recordingAdapter(appearance('generated'));

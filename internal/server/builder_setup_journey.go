@@ -4,11 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/hostquests"
+	"github.com/johnjallday/ori-agent/internal/integrationrelease"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/pathselection"
 	"github.com/johnjallday/ori-agent/internal/plugin"
@@ -36,6 +40,38 @@ func (b *ServerBuilder) allowlistLocallyCreatedWorkspace(workspaceID string) {
 	}
 	if err := b.workspaceAllowlist.Add(workspaceID); err != nil {
 		logger.Warn("Failed to allowlist created workspace", logger.Fields{"id": workspaceID, "error": err.Error()})
+	}
+}
+
+// integrationReleasesAPIEnv names a development-only releases API override used
+// to demo and test the fallback path. The tag-to-commit step always reads the
+// reviewed repository itself, so an override can only choose among official
+// tags at or above the floor.
+const integrationReleasesAPIEnv = "ORI_INTEGRATION_RELEASES_API"
+
+// newIntegrationReleaseResolver builds the one latest-release resolver.
+func newIntegrationReleaseResolver(override string) *integrationrelease.Resolver {
+	return integrationrelease.New(integrationReleasesAPIBase(override), &http.Client{Timeout: 30 * time.Second}, nil, nil)
+}
+
+// integrationReleasesAPIBase accepts the override only as a plain-http URL on
+// this machine's loopback interface; anything else keeps the production API.
+func integrationReleasesAPIBase(override string) string {
+	override = strings.TrimSpace(override)
+	if override == "" {
+		return integrationrelease.DefaultAPIBase
+	}
+	parsed, err := url.Parse(override)
+	if err != nil || parsed.Scheme != "http" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		logger.Warn("Ignoring integration releases API override that is not a loopback http URL", logger.Fields{})
+		return integrationrelease.DefaultAPIBase
+	}
+	switch parsed.Hostname() {
+	case "127.0.0.1", "::1", "localhost":
+		return strings.TrimSuffix(parsed.String(), "/")
+	default:
+		logger.Warn("Ignoring integration releases API override that is not a loopback http URL", logger.Fields{})
+		return integrationrelease.DefaultAPIBase
 	}
 }
 
@@ -104,8 +140,10 @@ func (b *ServerBuilder) initializeSetupJourney() {
 		})
 	}
 	if b.pluginHandler != nil {
+		b.integrationReleases = newIntegrationReleaseResolver(os.Getenv(integrationReleasesAPIEnv))
+		b.installReviewedIntegrationUpdates()
 		integrationAdapter = setupjourney.NewReviewedIntegrationAdapterForDevelopment(
-			b.pluginHandler.Manager(), os.Getenv("ORI_REVIEWED_INTEGRATION_DEV_SOURCE"),
+			b.pluginHandler.Manager(), b.integrationReleases, os.Getenv("ORI_REVIEWED_INTEGRATION_DEV_SOURCE"),
 		)
 		readers[specialist.SetupStepIntegrationInstall] = integrationAdapter
 		if connectionStore, ok := b.workspaceStore.(interface {

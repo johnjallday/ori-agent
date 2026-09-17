@@ -688,7 +688,8 @@ lists every open Issue before prompting for another view.
 In a terminal, the colorful picker shows the shared checked-out-feature
 implementation table and the number of PRs merged into `dev` since the latest
 Release directly above the Issue views; `w` opens the full implementation
-report and `r` refreshes both dashboard sections with the Issue data. It accepts `↑/↓` or `j/k` to select an Issue, `←/→` or `h/l`
+report, `d` opens the `wt done` chooser described under Guarded cleanup, and
+`r` refreshes both dashboard sections with the Issue data. It accepts `↑/↓` or `j/k` to select an Issue, `←/→` or `h/l`
 for those five list views, and `1`–`5` in the same order as the line REPL.
 `Enter` opens an Issue with an action bar where `c` decides, `s` starts Claude/Pi
 planning, `i` starts implementation from a completed local plan, `r` refreshes
@@ -1133,7 +1134,19 @@ Issue closure, or Git worktree removal:
 ~~~bash
 wt done 292-coordinate-based-map
 wt done 292-coordinate-based-map --keep-issue-open # intentional exception
+wt done                                            # choose from a list instead
 ~~~
+
+Without a name, `wt done` is a chooser rather than a guess from the current
+directory. It lists every non-protected worktree, labeled `merged` only when a
+PR from its branch merged into `dev` (read fresh, never from the shell's cache),
+otherwise `active` or `empty`, plus `dirty` for uncommitted changes. Typing a
+number or name runs exactly `wt done <name>`, so the guard and every prompt
+below still apply; the list then reappears until `q`, Enter, or EOF. Flags on the
+bare command apply to every pick, and a pick can add its own
+(`2 --keep-issue-open`). Finishing the worktree the shell is standing in moves
+the shell to the dev worktree first. `./scripts/devops.sh done` and the picker's
+`d` key open the same chooser.
 
 After the guard passes, Issue-backed cleanup verifies the fixed generated
 header in `tasks/issue-<feature>.md`, the matching number-first identity, and a

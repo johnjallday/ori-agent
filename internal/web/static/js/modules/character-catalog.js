@@ -66,6 +66,15 @@
       silhouette: String(raw.silhouette || '').trim(),
       prop: String(raw.signature_prop || '').trim(),
       idleBehavior: String(raw.idle_behavior || '').trim(),
+      // The roles a character reads well beside. This is only an ordering hint
+      // for recommend(); it never restricts who may wear the character. It was
+      // dropped here until now, so role matching worked in the picker's unit
+      // tests (which pass a fixture in) and never in the running app.
+      roles: (Array.isArray(raw.roles) ? raw.roles : [])
+        .map(function (role) {
+          return String(role || '').trim();
+        })
+        .filter(Boolean),
       // Nothing tone-shaped is read here, because the catalog no longer serves
       // it: a character changes how an agent looks and nothing else (FR-22).
       palette: {
@@ -172,6 +181,43 @@
     }
   }
 
+  // recommend names the character to offer an agent first.
+  //
+  // Three deterministic preferences, in order: the character fewest agents
+  // already wear, then one whose `roles` hint includes this agent's role, then
+  // catalog order. "Fewest" rather than "unused" so that a roster larger than
+  // the catalog keeps spreading out instead of handing every later Commander
+  // the same face; with nothing taken twice the two rules agree.
+  //
+  // `taken` may repeat an id — each repeat is one more agent wearing it. This
+  // only decides what is offered FIRST: every character stays selectable for
+  // every agent, and one with no declared roles is never excluded (FR-65).
+  function recommend(taken, role, list) {
+    var characters = list || state.working;
+    if (!characters || !characters.length) return '';
+
+    var uses = Object.create(null);
+    (taken || []).forEach(function (id) {
+      if (id) uses[String(id)] = (uses[String(id)] || 0) + 1;
+    });
+    var wanted = role ? String(role) : '';
+
+    var best = null;
+    var bestUses = Infinity;
+    var bestMatches = false;
+    for (var i = 0; i < characters.length; i++) {
+      var ch = characters[i];
+      var count = uses[ch.id] || 0;
+      var matches = !!wanted && (ch.roles || []).indexOf(wanted) !== -1;
+      if (count < bestUses || (count === bestUses && matches && !bestMatches)) {
+        best = ch;
+        bestUses = count;
+        bestMatches = matches;
+      }
+    }
+    return best ? best.id : '';
+  }
+
   function onChange(fn) {
     if (typeof fn !== 'function') return function () {};
     listeners.push(fn);
@@ -187,6 +233,7 @@
     isReserved: isReserved,
     assetFor: assetFor,
     prefersReducedMotion: prefersReducedMotion,
+    recommend: recommend,
     onChange: onChange,
     working: function () {
       return state.working.slice();

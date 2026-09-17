@@ -596,12 +596,35 @@ function mountCreateAppearanceEditor() {
   const nameInput = document.getElementById('agentName');
   const roleSelect = document.getElementById('agentRole');
 
+  // Which characters other agents already wear, so the suggested face is one
+  // nobody has yet. This page has no roster of its own, so it asks once; until
+  // the answer lands the suggestion is simply made without it.
+  let takenCharacterIds = [];
+
   createAppearanceEditor = window.AgentAppearanceEditor.create({
     host,
     idPrefix: 'createAppearance',
     mode: 'create',
-    agent: { name: nameInput?.value || '', source: 'user', role: roleSelect?.value || '' }
+    agent: { name: nameInput?.value || '', source: 'user', role: roleSelect?.value || '' },
+    takenCharacterIds: () => takenCharacterIds,
+    // Start with a face suited to the role rather than a monogram. A suggestion
+    // in the form, visible and changeable before anything is created.
+    suggestCharacter: true
   });
+
+  fetch('/api/agents')
+    .then(response => (response.ok ? response.json() : null))
+    .then(data => {
+      takenCharacterIds = ((data && data.agents) || [])
+        .map(entry => entry?.appearance?.character?.catalog_id || '')
+        .filter(Boolean);
+      // Re-offers the suggestion with the full picture. A no-op once the user
+      // has made an appearance choice of their own.
+      createAppearanceEditor?.setAgentRole(roleSelect?.value || '');
+    })
+    .catch(() => {
+      /* the suggestion already on screen stands; reuse was always allowed */
+    });
 
   // The generated portrait is seeded from the name, so the preview follows the
   // field. Only the preview repaints — rebuilding the editor on each keystroke

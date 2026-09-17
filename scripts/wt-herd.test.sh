@@ -1653,11 +1653,12 @@ if [[ "$(rg -c 'bash "\$script_dir/herdr-devflow\.sh" "\$@"' "$devops_entrypoint
   print -r -- "scripts/devops.sh does not constrain its helper boundary to implementation reads and agent-defaults" >&2
   exit 1
 fi
-# The picker has exactly three bash-to-zsh bridges: `s` delegates one-Issue
-# planning, `b` delegates bundle planning, and `i` delegates implementation.
+# The picker has exactly four bash-to-zsh bridges: `s` delegates one-Issue
+# planning, `b` delegates bundle planning, `i` delegates implementation, and `d`
+# delegates finishing to bare `wt done`, which passes no values at all.
 # All source this checkout's wt entrypoint and pass validated values as separate
-# arguments. wt remains the
-# owner of confirmation, files, worktree creation, and Herdr/Pi handoff.
+# arguments. wt remains the owner of confirmation, files, worktree creation and
+# removal, and Herdr/Pi handoff.
 devops_code="$(rg -v '^\s*#' "$devops_entrypoint")"
 if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" || exit; typeset -a plan_args; plan_args=(--issue \"\$2\" --kind \"\$3\"); [[ -n \"\$4\" ]] && plan_args+=(--model \"\$4\"); [[ -n \"\$5\" ]] && plan_args+=(--thinking \"\$5\"); [[ \"\$6\" == 1 ]] && plan_args+=(--yes); wt plan \"\${plan_args[@]}\"'"; then
   print -r -- "scripts/devops.sh does not launch wt plan through the constrained zsh bridge" >&2
@@ -1671,8 +1672,12 @@ if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" && if [[ \"\$3\
   print -r -- "scripts/devops.sh does not launch wt start through the constrained zsh bridge" >&2
   exit 1
 fi
-if [[ "$(print -r -- "$devops_code" | rg -c '^\s*zsh -c ' || true)" != "3" ]]; then
-  print -r -- "scripts/devops.sh must contain only the three constrained wt plan/bundle/start zsh bridges" >&2
+if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" && wt done' devops-done \"\$script_dir/wt.sh\""; then
+  print -r -- "scripts/devops.sh does not launch wt done through the constrained zsh bridge" >&2
+  exit 1
+fi
+if [[ "$(print -r -- "$devops_code" | rg -c '^\s*zsh -c ' || true)" != "4" ]]; then
+  print -r -- "scripts/devops.sh must contain only the four constrained wt plan/bundle/start/done zsh bridges" >&2
   exit 1
 fi
 if print -r -- "$devops_code" | rg -q '\beval\b|\$\(\s*wt\s|^\s*(source\s+.*wt\.sh|wt\s+(plan|start))'; then

@@ -197,6 +197,15 @@
             <div class="collection-scroll">
               <div class="collection-meta">
                 <p class="collection-meta__count" id="rosterCount" aria-live="polite">Loading agents…</p>
+                <!-- Offered only while some editable agent still wears the
+                     default monogram. Nothing changes until the dialog below is
+                     confirmed, and "Not now" is remembered for the agents it
+                     was shown for, so it does not nag. -->
+                <p class="collection-meta__faces" id="rosterFaces" hidden>
+                  <span id="rosterFacesCopy"></span>
+                  <button type="button" class="roster-linkbtn" id="rosterFacesGive">Give them faces</button>
+                  <button type="button" class="roster-linkbtn" id="rosterFacesDismiss">Not now</button>
+                </p>
                 <div class="collection-meta__actions">
                   <button type="button" id="rosterSelectAll" class="roster-linkbtn">Select visible</button>
                   <button type="button" id="rosterClearSelection" class="roster-linkbtn" hidden>Clear selection</button>
@@ -293,6 +302,13 @@
                   <!-- role emblem/name, level, stage, XP bar, slot usage injected -->
                 </div>
 
+                <!-- Shown only for an agent that has never done anything: one
+                     sentence and the one step that would change that. It sits
+                     outside the header so the header keeps its three actions
+                     (FR-43), and it disappears for good once the agent has work
+                     behind it. -->
+                <div class="stage__nextstep" id="stageNextStep" hidden></div>
+
                 <nav class="stage__tabs" role="tablist" aria-label="Agent detail sections">
                   <button class="stage__tab is-active" role="tab" id="tab-overview" aria-controls="panel-overview" aria-selected="true" data-tab="overview" type="button">Overview</button>
                   <button class="stage__tab" role="tab" id="tab-prompt" aria-controls="panel-prompt" aria-selected="false" data-tab="prompt" type="button" tabindex="-1">Prompt</button>
@@ -380,6 +396,23 @@
           <div class="bulk-dialog__actions">
             <button type="button" class="btn-ghost" id="bulkTagsCancel">Cancel</button>
             <button type="button" class="btn-primary" id="bulkTagsConfirm">Apply</button>
+          </div>
+        </dialog>
+
+        <!-- Give faces. A preview, not a switch: each row shows the character an
+             agent would get, every row can be unchecked, and nothing is written
+             until the primary button is pressed. -->
+        <dialog class="bulk-dialog faces-dialog" id="facesDialog" aria-labelledby="facesTitle">
+          <h2 class="bulk-dialog__title" id="facesTitle">Give agents a face</h2>
+          <p class="bulk-dialog__lead">
+            Each agent gets a character that suits its role. Only the portrait changes — name, role,
+            model, tools, and permissions stay exactly as they are, in every workspace the agent
+            belongs to. You can change any face later from the agent's page.
+          </p>
+          <div class="bulk-dialog__body" id="facesBody"></div>
+          <div class="bulk-dialog__actions">
+            <button type="button" class="btn-ghost" id="facesCancel">Cancel</button>
+            <button type="button" class="btn-primary" id="facesConfirm">Give faces</button>
           </div>
         </dialog>
       </div>

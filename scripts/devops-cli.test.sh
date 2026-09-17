@@ -1486,6 +1486,7 @@ case "$3" in
     ;;
   devops-bundle-plan) printf 'Bundle planner launched\n' ;;
   devops-start) printf 'Implementation start launched for %s with %s%s\n' "$5" "$6" "${7:+ ($7)}" ;;
+  devops-done) printf 'Finish chooser launched\n' ;;
 esac
 SH
 chmod +x "$fake_bin/zsh"
@@ -1755,6 +1756,15 @@ check "an unsupported implementation mode is rejected" \
 check "an unsupported implementation mode launches no child" \
   "$(wc -c < "$wt_calls" | tr -d ' ')" "0"
 
+# Finishing hands the whole chooser to bare `wt done`. The child receives only
+# the wt entrypoint: no worktree name, flag, or other picker-derived word.
+finish_bridge='source "$1" && wt done'
+: > "$wt_calls"
+finish_implementations > /dev/null
+check "finish uses the exact zsh argument vector" \
+  "$(<"$wt_calls")" \
+  $'CALL\t-c\t'"$finish_bridge"$'\tdevops-done\t'"$repo_root"$'/scripts/wt.sh'
+
 # Exercise the real bundle launcher after the pure unit section replaced it
 # with a recorder. Every Issue is a separate zsh positional argument; the fixed
 # child builds a quoted array rather than flattening or evaluating them.
@@ -1830,6 +1840,26 @@ grep -Fq "demo     Implementing" "$fixture_root/status-output"
 grep -Fq "Snapshot: complete" "$fixture_root/status-output"
 assert_no_github "status shell (the overview helper owns remote reads)"
 
+# `done` launches the wt done chooser once and reads nothing itself; wt owns the
+# merged-PR lookup and every cleanup guard. The line REPL reaches the same bridge.
+: > "$gh_calls"
+: > "$wt_calls"
+"$script" done > "$fixture_root/done-output"
+assert_output_has "done one-shot" "$fixture_root/done-output" "Finish chooser launched"
+check "done one-shot launches exactly one wt child" "$(count_wt_calls)" "1"
+assert_no_github "done one-shot"
+: > "$wt_calls"
+if "$script" done extra > "$fixture_root/done-extra-output" 2>&1; then
+  printf 'done accepted an extra argument\n' >&2
+  exit 1
+fi
+check "a rejected done argument launches no child" "$(count_wt_calls)" "0"
+: > "$wt_calls"
+printf 'done\nq\n' | "$script" > "$fixture_root/done-repl-output"
+assert_output_has "done line REPL" "$fixture_root/done-repl-output" "Finish chooser launched"
+assert_output_has "line REPL menu" "$fixture_root/done-repl-output" "[done] Finish implementations"
+check "done line REPL launches exactly one wt child" "$(count_wt_calls)" "1"
+
 # `release` reads the latest stable Release, then compares its frozen tag with
 # dev. The second read is paginated; publication time does not define membership.
 : > "$gh_calls"
@@ -1867,7 +1897,7 @@ check "picker release summary uses the exact merged-PR count" \
   "$picker_release_summary" "2 PRs merged into dev since v0.0.106."
 check "picker release summary retains the numeric count" "$picker_release_count" "2"
 render_picker 0 0 0 > "$fixture_root/picker-release-output"
-grep -Fq "Ongoing implementations  [w] full details" \
+grep -Fq "Ongoing implementations  [w] full details  [d] finish (wt done)" \
   "$fixture_root/picker-release-output"
 grep -Fq "demo     Implementing" "$fixture_root/picker-release-output"
 grep -Fq "Release  2 PRs merged into dev since v0.0.106." \
@@ -2924,6 +2954,21 @@ fi
 w_branch="$(awk '/^      w\)$/{inside=1} inside{print} inside && /^        ;;$/{exit}' "$script")"
 if [[ -z "$w_branch" ]] || grep -Eq 'load_picker_index|issue_labels_of|\bgh\b' <<< "$w_branch"; then
   printf 'the w key is missing or re-queries the Issue index: %s\n' "$w_branch" >&2
+  exit 1
+fi
+
+# d finishes implementations from any view: no selected row is required. wt done
+# may close attached Issues, so the branch refreshes the whole index afterwards.
+if ! grep -Fq 'with_normal_terminal finish_implementations' "$script" || \
+   ! grep -Fq 'Finish implementations: pick feature worktrees' "$script"; then
+  printf 'the picker d key is not wired or documented\n' >&2
+  exit 1
+fi
+d_branch="$(awk '/^      d\)$/{inside=1} inside{print} inside && /^        ;;$/{exit}' "$script")"
+if [[ -z "$d_branch" ]] || \
+   grep -Eq '\$count|issue_numbers\[\$selected_index\]' <<< "$d_branch" || \
+   [[ "$(grep -c 'load_picker_index' <<< "$d_branch" || true)" -ne 1 ]]; then
+  printf 'the d key requires a selected row or does not refresh the index once: %s\n' "$d_branch" >&2
   exit 1
 fi
 

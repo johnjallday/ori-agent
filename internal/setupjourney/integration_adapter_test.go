@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/integrationrelease"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
@@ -82,20 +84,20 @@ func installedFromFixture(descriptor plugin.PluginDescriptor, source string, for
 func readyIntegrationFixture(t *testing.T) (reviewedintegration.Entry, plugin.PluginDescriptor, plugin.TrustReport, ReadScope) {
 	t.Helper()
 	entry := reviewedintegration.Entry{
-		Key: "ori_reaper", PluginID: "reaper-plugin", ExpectedVersion: "0.5.0",
+		Key: "ori_reaper", PluginID: "reaper-plugin", MinimumVersion: "0.5.0",
 		SourceRepository: "https://github.com/example/reaper-plugin",
-		SourceCommit:     strings.Repeat("a", 40), SourceFormat: plugin.FormatClaude,
+		FallbackCommit:   strings.Repeat("a", 40), SourceFormat: plugin.FormatClaude,
 		PublisherLabel: "Ori", SourceLabel: "example/reaper-plugin",
-		ExpectedBlueprintID: "reaper-song", ExpectedBlueprintVersion: 4,
+		ExpectedBlueprintID: "reaper-song", MinimumBlueprintVersion: 4,
 		ExpectedProgramID: "music-producer-assistant", ExpectedProgramSchema: 2,
 		RequiredHostFeatures: []string{plugin.HostFeatureAssistantProgramV1, plugin.HostFeatureSpecialistSetupJourneyV1},
 		ExpectedProtocol:     1, SupportedPlatforms: []string{"darwin/arm64"}, ReleaseReady: true,
 	}
 	descriptor := plugin.PluginDescriptor{
-		Name: entry.PluginID, Version: entry.ExpectedVersion, SourceLocation: entry.Source(),
+		Name: entry.PluginID, Version: entry.MinimumVersion, SourceLocation: entry.FallbackSource(),
 		SourceFormat: plugin.FormatClaude, InstallDir: t.TempDir(),
 		WorkspaceSurfaces: &plugin.SurfaceContribution{
-			Name: entry.PluginID, Version: entry.ExpectedVersion,
+			Name: entry.PluginID, Version: entry.MinimumVersion,
 			Protocol:             plugin.ProtocolRange{Min: 1, Max: 1},
 			RequiresHostFeatures: append([]string(nil), entry.RequiredHostFeatures...),
 			Services: []plugin.ContributedService{{
@@ -107,7 +109,7 @@ func readyIntegrationFixture(t *testing.T) (reviewedintegration.Entry, plugin.Pl
 			}},
 		},
 		ResolvedBlueprints: []plugin.ResolvedBlueprint{{
-			ID: entry.ExpectedBlueprintID, Version: entry.ExpectedBlueprintVersion,
+			ID: entry.ExpectedBlueprintID, Version: entry.MinimumBlueprintVersion,
 			Template: projecttemplates.Template{AssistantProgram: &workspace.AssistantProgramDeclaration{
 				ID: entry.ExpectedProgramID, SchemaVersion: entry.ExpectedProgramSchema,
 			}},
@@ -124,6 +126,212 @@ func readyIntegrationFixture(t *testing.T) (reviewedintegration.Entry, plugin.Pl
 func integrationResolver(entry reviewedintegration.Entry) IntegrationEntryResolver {
 	return func(key string) (reviewedintegration.Entry, bool) {
 		return entry.Clone(), key == entry.Key
+	}
+}
+
+// stubReleases is a controllable latest-release resolver that counts lookups.
+type stubReleases struct {
+	mu         sync.Mutex
+	resolution integrationrelease.Resolution
+	calls      int
+}
+
+func (stub *stubReleases) Resolve(_ context.Context, _ reviewedintegration.Entry) integrationrelease.Resolution {
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	stub.calls++
+	return stub.resolution
+}
+
+func (stub *stubReleases) set(resolution integrationrelease.Resolution) {
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	stub.resolution = resolution
+}
+
+func (stub *stubReleases) callCount() int {
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	return stub.calls
+}
+
+// latestRelease is a checked resolution of one official release.
+func latestRelease(entry reviewedintegration.Entry, version, commitChar string) integrationrelease.Resolution {
+	commit := strings.Repeat(commitChar, 40)
+	return integrationrelease.Resolution{
+		Version: version, Tag: "v" + version, Commit: commit, Source: entry.PinnedSource(commit),
+		CheckedAt: time.Now().UTC(),
+	}
+}
+
+// releaseDescriptor re-labels the fixture descriptor as another release, so
+// the fake manager inspects and installs that release.
+func releaseDescriptor(descriptor plugin.PluginDescriptor, version, source string) (plugin.PluginDescriptor, plugin.TrustReport) {
+	release := descriptor
+	contribution := *descriptor.WorkspaceSurfaces
+	contribution.Version = version
+	release.WorkspaceSurfaces = &contribution
+	release.Version = version
+	release.SourceLocation = source
+	release.ResolvedBlueprints = append([]plugin.ResolvedBlueprint(nil), descriptor.ResolvedBlueprints...)
+	return release, plugin.BuildTrustReport(release)
+}
+
+func TestReviewedIntegrationFreshInstallTargetsTheLatestRelease(t *testing.T) {
+	entry, descriptor, _, scope := readyIntegrationFixture(t)
+	target := latestRelease(entry, "0.6.0", "e")
+	latest, latestReport := releaseDescriptor(descriptor, target.Version, target.Source)
+	manager := &fakeReviewedIntegrationManager{descriptor: latest, report: latestReport}
+	releases := &stubReleases{resolution: target}
+	adapter := newReviewedIntegrationAdapter(manager, integrationResolver(entry), "darwin/arm64")
+	adapter.releases = releases
+
+	read, err := adapter.Read(context.Background(), scope)
+	if err != nil || read.BlockedReason != "" || !containsAction(read.AvailableActions, ActionReviewInstall) {
+		t.Fatalf("latest release was not offered: %#v err=%v", read, err)
+	}
+	integration := read.Integration
+	if integration.ExpectedVersion != "0.6.0" || integration.MinimumVersion != "0.5.0" || !integration.ReleaseChecked ||
+		len(manager.inspectSources) != 1 || manager.inspectSources[0] != target.Source {
+		t.Fatalf("install offer did not target the latest release: %#v inspected=%v", integration, manager.inspectSources)
+	}
+	encoded, _ := json.Marshal(integration)
+	if strings.Contains(string(encoded), target.Commit) || !strings.Contains(string(encoded), `"minimum_version":"0.5.0"`) ||
+		!strings.Contains(string(encoded), `"release_checked":true`) {
+		t.Fatalf("projection JSON = %s", encoded)
+	}
+	prepared, err := adapter.PrepareCommit(context.Background(), scope, ActionInstall, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adapter.Commit(context.Background(), scope, ActionInstall, json.RawMessage(`{}`), prepared); err != nil {
+		t.Fatal(err)
+	}
+	if len(manager.installed) != 1 || manager.installed[0].Source != target.Source || manager.installed[0].Version != "0.6.0" {
+		t.Fatalf("install did not record the latest release's exact commit: %#v", manager.installed)
+	}
+	after, err := adapter.Read(context.Background(), scope)
+	if err != nil || !after.Integration.Verified || after.Integration.ExpectedVersion != "0.6.0" ||
+		!containsAction(after.AvailableActions, ActionReviewEnable) || !adapter.ConsequenceObserved(ActionInstall, after) {
+		t.Fatalf("installed latest release was not verified: %#v err=%v", after, err)
+	}
+}
+
+func TestReviewedIntegrationFallbackInstallsTheFloorAndSaysSo(t *testing.T) {
+	entry, descriptor, report, scope := readyIntegrationFixture(t)
+	manager := &fakeReviewedIntegrationManager{descriptor: descriptor, report: report}
+	adapter := newReviewedIntegrationAdapter(manager, integrationResolver(entry), "darwin/arm64")
+	adapter.releases = &stubReleases{resolution: integrationrelease.Floor(entry)}
+
+	read, err := adapter.Read(context.Background(), scope)
+	if err != nil || !containsAction(read.AvailableActions, ActionReviewInstall) ||
+		read.Integration.ExpectedVersion != entry.MinimumVersion || read.Integration.ReleaseChecked {
+		t.Fatalf("fallback install was not the floor with release_checked=false: %#v err=%v", read.Integration, err)
+	}
+	prepared, err := adapter.PrepareCommit(context.Background(), scope, ActionInstall, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adapter.Commit(context.Background(), scope, ActionInstall, json.RawMessage(`{}`), prepared); err != nil ||
+		manager.installed[0].Source != entry.FallbackSource() {
+		t.Fatalf("fallback install source = %#v err=%v", manager.installed, err)
+	}
+}
+
+func TestReviewedIntegrationRejectsResolverTargetsOutsideTheReviewedRepositoryOrFloor(t *testing.T) {
+	entry, descriptor, report, scope := readyIntegrationFixture(t)
+	for name, target := range map[string]integrationrelease.Resolution{
+		"below the floor":  latestRelease(entry, "0.4.9", "e"),
+		"other repository": {Version: "0.6.0", Commit: strings.Repeat("e", 40), Source: "https://github.com/attacker/reaper-plugin#sha=" + strings.Repeat("e", 40)},
+		"mutable source":   {Version: "0.6.0", Source: entry.SourceRepository + ".git"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			manager := &fakeReviewedIntegrationManager{descriptor: descriptor, report: report}
+			adapter := newReviewedIntegrationAdapter(manager, integrationResolver(entry), "darwin/arm64")
+			adapter.releases = &stubReleases{resolution: target}
+			read, err := adapter.Read(context.Background(), scope)
+			if err != nil || read.BlockedReason != ReasonOwnerUnavailable || manager.inspections != 0 || len(read.AvailableActions) != 0 {
+				t.Fatalf("untrusted resolver target was inspected or offered: %#v err=%v", read, err)
+			}
+		})
+	}
+}
+
+func TestReviewedIntegrationBlueprintVersionIsAFloor(t *testing.T) {
+	entry, descriptor, _, scope := readyIntegrationFixture(t)
+	for version, want := range map[int]ReasonCode{
+		entry.MinimumBlueprintVersion + 1: "",
+		entry.MinimumBlueprintVersion - 1: ReasonIntegrationUnsupported,
+	} {
+		release, _ := releaseDescriptor(descriptor, entry.MinimumVersion, entry.FallbackSource())
+		release.ResolvedBlueprints[0].Version = version
+		manager := &fakeReviewedIntegrationManager{descriptor: release, report: plugin.BuildTrustReport(release)}
+		read, err := newReviewedIntegrationAdapter(manager, integrationResolver(entry), "darwin/arm64").Read(context.Background(), scope)
+		if err != nil || read.BlockedReason != want {
+			t.Fatalf("blueprint version %d: reason = %q, want %q (err=%v)", version, read.BlockedReason, want, err)
+		}
+	}
+}
+
+func TestReviewedIntegrationReviewGoesStaleWhenTheLatestReleaseChanges(t *testing.T) {
+	entry, descriptor, _, _ := readyIntegrationFixture(t)
+	target := latestRelease(entry, "0.6.0", "e")
+	latest, latestReport := releaseDescriptor(descriptor, target.Version, target.Source)
+	manager := &fakeReviewedIntegrationManager{descriptor: latest, report: latestReport}
+	releases := &stubReleases{resolution: target}
+	adapter := newReviewedIntegrationAdapter(manager, integrationResolver(entry), "darwin/arm64")
+	adapter.releases = releases
+	service := integrationServiceForReplacementTest(t, adapter)
+	ctx := context.Background()
+	journey, err := service.Read(ctx, "local", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := service.Mutate(ctx, "local", journey.RunID, ActionReviewInstall, ActionMutation{
+		IfRevision: journey.StateRevision, IdempotencyKey: "review-latest", Input: json.RawMessage(`{}`),
+	})
+	if err != nil || review.Review == nil || review.Review.Integration.ExpectedVersion != "0.6.0" {
+		t.Fatalf("latest release review: %#v err=%v", review, err)
+	}
+	newer := latestRelease(entry, "0.6.1", "f")
+	releases.set(newer)
+	manager.descriptor, manager.report = releaseDescriptor(descriptor, newer.Version, newer.Source)
+	_, err = service.Mutate(ctx, "local", journey.RunID, ActionInstall, ActionMutation{
+		IfRevision: journey.StateRevision, IdempotencyKey: "commit-latest",
+		ReviewToken: review.Review.Token, Input: json.RawMessage(`{}`),
+	})
+	var failure *Failure
+	if !errors.As(err, &failure) || failure.ReasonCode != ReasonReviewStale || manager.installCalls != 0 {
+		t.Fatalf("review of a superseded release was committed: failure=%#v err=%v installs=%d", failure, err, manager.installCalls)
+	}
+}
+
+func TestReviewedIntegrationCommitInstallsTheReviewedSourceNotAFreshResolution(t *testing.T) {
+	entry, descriptor, _, scope := readyIntegrationFixture(t)
+	target := latestRelease(entry, "0.6.0", "e")
+	latest, latestReport := releaseDescriptor(descriptor, target.Version, target.Source)
+	manager := &fakeReviewedIntegrationManager{descriptor: latest, report: latestReport}
+	releases := &stubReleases{resolution: target}
+	adapter := newReviewedIntegrationAdapter(manager, integrationResolver(entry), "darwin/arm64")
+	adapter.releases = releases
+	prepared, err := adapter.PrepareCommit(context.Background(), scope, ActionInstall, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	releases.set(latestRelease(entry, "0.6.1", "f"))
+	calls := releases.callCount()
+	if _, err := adapter.Commit(context.Background(), scope, ActionInstall, json.RawMessage(`{}`), prepared); err != nil {
+		t.Fatal(err)
+	}
+	if manager.installed[0].Source != target.Source || releases.callCount() != calls {
+		t.Fatalf("commit re-resolved instead of installing the reviewed source: %#v resolves=%d", manager.installed, releases.callCount()-calls)
+	}
+	// Material without a reviewed source (for example forged or from another
+	// read) is refused rather than guessed.
+	prepared.Integration.reviewedSource = ""
+	manager.installed = nil
+	if _, err := adapter.Commit(context.Background(), scope, ActionInstall, json.RawMessage(`{}`), prepared); !errors.Is(err, ErrConflict) || manager.installCalls != 1 {
+		t.Fatalf("commit without a reviewed source = %v installs=%d", err, manager.installCalls)
 	}
 }
 
@@ -164,6 +372,11 @@ func TestReviewedIntegrationReadAbsentSurfacesExactReview(t *testing.T) {
 		read.Integration.ExpectedVersion != "0.5.0" || read.Integration.StateRevision == "" {
 		t.Fatalf("missing reviewed disclosure: %#v", read.Integration)
 	}
+	// Without a latest-release resolver the adapter installs the floor and
+	// reports that no release was checked.
+	if read.Integration.MinimumVersion != "0.5.0" || read.Integration.ReleaseChecked {
+		t.Fatalf("floor target not disclosed: %#v", read.Integration)
+	}
 	// The reviewed repository is disclosed so a person can inspect it.
 	if read.Integration.SourceURL != "https://github.com/example/reaper-plugin" {
 		t.Fatalf("source URL = %q", read.Integration.SourceURL)
@@ -192,7 +405,7 @@ func TestIntegrationSourceURLAcceptsOnlyPlainHTTPSLinks(t *testing.T) {
 func TestReviewedIntegrationReadInstalledSeparatesEnablement(t *testing.T) {
 	entry, descriptor, report, scope := readyIntegrationFixture(t)
 	installed := plugin.InstalledPlugin{
-		Name: entry.PluginID, Version: entry.ExpectedVersion, Source: entry.Source(),
+		Name: entry.PluginID, Version: entry.MinimumVersion, Source: entry.FallbackSource(),
 		Format: entry.SourceFormat, WorkspaceSurfaces: descriptor.WorkspaceSurfaces,
 		ResolvedBlueprints: descriptor.ResolvedBlueprints, ComponentFingerprint: "trusted",
 		Generation: 7, Enabled: false, InstalledAt: time.Now().UTC(),
@@ -252,8 +465,8 @@ func TestReviewedIntegrationUpdateReviewIsNonMutatingAndCommitUsesPinnedReplacem
 		t.Fatalf("update review changed before commit: %#v err=%v", prepared, err)
 	}
 	result, err := adapter.Commit(context.Background(), scope, ActionUpdate, json.RawMessage(`{}`), prepared)
-	if err != nil || result.IntegrationVersion != entry.ExpectedVersion ||
-		manager.installed[0].Source != entry.Source() || !manager.installed[0].Enabled {
+	if err != nil || result.IntegrationVersion != entry.MinimumVersion ||
+		manager.installed[0].Source != entry.FallbackSource() || !manager.installed[0].Enabled {
 		t.Fatalf("pinned update did not preserve enablement: %#v err=%v plugins=%#v", result, err, manager.installed)
 	}
 }
@@ -283,7 +496,7 @@ func TestReviewedIntegrationReadFailsClosedForIdentityAndContributionMismatch(t 
 	})
 	t.Run("a different local development copy has specific guidance", func(t *testing.T) {
 		manager := &fakeReviewedIntegrationManager{installed: []plugin.InstalledPlugin{{
-			Name: entry.PluginID, Version: entry.ExpectedVersion,
+			Name: entry.PluginID, Version: entry.MinimumVersion,
 			Source: t.TempDir(), Format: entry.SourceFormat, Generation: 1,
 		}}}
 		adapter := newReviewedIntegrationAdapter(manager, integrationResolver(entry), "darwin/arm64")
@@ -298,7 +511,7 @@ func TestReviewedIntegrationReadFailsClosedForIdentityAndContributionMismatch(t 
 	})
 	t.Run("same name wrong source", func(t *testing.T) {
 		manager := &fakeReviewedIntegrationManager{installed: []plugin.InstalledPlugin{{
-			Name: entry.PluginID, Version: entry.ExpectedVersion,
+			Name: entry.PluginID, Version: entry.MinimumVersion,
 			Source: "https://github.com/attacker/reaper-plugin#sha=" + strings.Repeat("d", 40),
 			Format: entry.SourceFormat, Generation: 1,
 		}}}
@@ -342,7 +555,7 @@ func TestReviewedIntegrationUnsupportedPlatformDoesNotInspectOrInstall(t *testin
 func TestReviewedIntegrationPendingReleaseNeverResolvesMutableSource(t *testing.T) {
 	entry, descriptor, report, scope := readyIntegrationFixture(t)
 	entry.ReleaseReady = false
-	entry.SourceCommit = ""
+	entry.FallbackCommit = ""
 	manager := &fakeReviewedIntegrationManager{descriptor: descriptor, report: report}
 	read, err := newReviewedIntegrationAdapter(manager, integrationResolver(entry), "darwin/arm64").Read(context.Background(), scope)
 	if err != nil || read.BlockedReason != ReasonIntegrationReleaseNotReady || manager.inspections != 0 ||
@@ -423,7 +636,7 @@ func TestReviewedIntegrationReviewInstallEnableAndReplayThroughService(t *testin
 
 func TestReviewedIntegrationCommitRejectsStaleOwnerReviewWithoutClaim(t *testing.T) {
 	entry, descriptor, report, _ := readyIntegrationFixture(t)
-	installed := installedFromFixture(descriptor, entry.Source(), entry.SourceFormat, false, 3)
+	installed := installedFromFixture(descriptor, entry.FallbackSource(), entry.SourceFormat, false, 3)
 	manager := &fakeReviewedIntegrationManager{installed: []plugin.InstalledPlugin{installed}, descriptor: descriptor, report: report}
 	adapter := newReviewedIntegrationAdapter(manager, integrationResolver(entry), "darwin/arm64")
 	readers := make(map[specialist.SetupStepKind]CanonicalReader, len(actionDefinitionsByKind))

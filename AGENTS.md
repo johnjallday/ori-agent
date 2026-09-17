@@ -201,7 +201,10 @@ the same branch/worktree. The richer dashboard and `devops.sh status` render
 the same read-only normalized snapshot as `wt status --implementations`, using
 the active worktree's task list as authoritative and joining Git, GitHub PR,
 and Herdr agent state. Press `w` for the full implementation report; `r`
-refreshes it with Issues and release status.
+refreshes it with Issues and release status. Press `d` (or run
+`./scripts/devops.sh done`) to finish implementations: it opens bare `wt done`,
+which lists the feature worktrees with merged PRs and dirty checkouts marked,
+runs the full guarded `wt done <name>` on each pick, and repeats until `q`.
 
 Work selected from an Issue uses the Issue number at the front of its identity:
 
