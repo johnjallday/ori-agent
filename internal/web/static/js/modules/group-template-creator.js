@@ -795,7 +795,6 @@
     const entry = active ? selectedManaged(manager.workspaceCreatorContext) : null;
     const input = document.getElementById('folderNameInput');
     const description = document.getElementById('workspaceDetailsDescriptionCard');
-    const parentCard = document.getElementById('workspaceCreatorDestinationCard');
     const notice = document.getElementById('workspaceGroupDetailsNotice');
     const step2Description = document.getElementById('wizardStep2Description');
     const step4Title = document.getElementById('wizardStep4Title');
@@ -811,8 +810,9 @@
       document.getElementById('workspaceTeamLayout')?.classList?.remove?.('is-roster-only');
       return;
     }
+    // The generic destination and Color are hidden by sessions.js, which owns
+    // that control for every creator mode.
     if (description) description.hidden = true;
-    if (parentCard) parentCard.hidden = true;
     if (notice) {
       notice.hidden = false;
       notice.replaceChildren(

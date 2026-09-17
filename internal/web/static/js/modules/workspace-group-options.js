@@ -9,7 +9,7 @@
  * Exposes window.WorkspaceGroupOptions:
  *   - collectWorkspaceGroupOptions(nodes)       → [{ id, name, depth }]
  *   - renderWorkspaceParentOptions(groups)      → <option> markup string
- *   - setWorkspaceParentSelectState(select, n)  → toggles disabled + help text
+ *   - workspaceParentSelectState(n)             → { disabled, help } for the owner to apply
  *
  * @module workspace-group-options
  */
@@ -49,26 +49,25 @@
     return options.join('');
   }
 
-  function setWorkspaceParentSelectState(select, groupCount) {
-    if (!select) return;
-
+  // Returns values instead of writing them: sessions.js owns the control and
+  // combines this with the blueprint's placement, so nothing here can override
+  // that decision. `help` is the caption to show instead of the owner's own, or
+  // '' when there are groups to choose from.
+  function workspaceParentSelectState(groupCount) {
     const hasGroups = groupCount > 0;
     // A native <select> exposes its disabled state to assistive tech
-    // automatically, so toggling `disabled` is enough (no redundant
-    // aria-disabled attribute).
-    select.disabled = !hasGroups;
-
-    const help = document.getElementById('folderParentHelp');
-    if (help) {
-      help.textContent = hasGroups
-        ? 'Optional. Choose a group for this workspace.'
-        : 'No groups yet. Select workspaces in the launcher and click Group to create one.';
-    }
+    // automatically, so `disabled` is enough (no redundant aria-disabled).
+    return {
+      disabled: !hasGroups,
+      help: hasGroups
+        ? ''
+        : 'No groups yet. Select workspaces in the launcher and click Group to create one.'
+    };
   }
 
   window.WorkspaceGroupOptions = {
     collectWorkspaceGroupOptions,
     renderWorkspaceParentOptions,
-    setWorkspaceParentSelectState
+    workspaceParentSelectState
   };
 })();

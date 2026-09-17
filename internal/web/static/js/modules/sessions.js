@@ -377,6 +377,9 @@ const sessionManager = {
     for (const fieldID of ['folderDescriptionInput', 'folderSystemsInput', 'folderContextInput']) {
       document.getElementById(fieldID)?.addEventListener('input', () => {
         this.invalidateGroupRequirementReview();
+        // The context fields live inside Advanced, so its collapsed summary
+        // says when either holds something.
+        if (fieldID !== 'folderDescriptionInput') this.updateBehaviorHint();
       });
     }
     workspaceNameInput?.addEventListener('keydown', event => {
@@ -406,31 +409,11 @@ const sessionManager = {
       this.updateBehaviorHint();
     });
 
-    // Unified Template picker selection (dispatched by ProjectTemplateCard):
-    // prefill name/description (never clobbering typed input) and apply the
-    // template's Agent-behavior default.
+    // Unified Template picker selection (dispatched by ProjectTemplateCard).
     document
       .getElementById('addFolderModal')
       ?.addEventListener('workspace-template-selected', event => {
-        const template = event?.detail?.template || null;
-        this.closeWorkspaceAgentSetup({ restoreFocus: false, silent: true });
-        this.workspaceTemplate = template;
-        this.resetGroupRequirementDraft(template);
-        this.prefillTemplateValue(
-          document.getElementById('folderNameInput'),
-          template?.name || '',
-          'autofillName'
-        );
-        this.prefillTemplateValue(
-          document.getElementById('folderDescriptionInput'),
-          template?.description || '',
-          'autofillDescription'
-        );
-        this.updateWorkspaceNameHint();
-        this.applyTemplateBehavior(template);
-        this.updateWizardRecap(template);
-        void this.refreshTemplateAgentPlan();
-        this.refreshWorkspaceReview();
+        this.handleWorkspaceTemplateSelected(event?.detail?.template || null);
       });
 
     document.getElementById('workspaceBlankAgentlessToggle')?.addEventListener('change', event => {
@@ -622,7 +605,10 @@ const sessionManager = {
       .getElementById('workspaceGroupHomeCancel')
       ?.addEventListener('click', () => this.cancelRequiredGroupHomeReview());
 
-    document.getElementById('projectTemplatePathInput')?.addEventListener('input', () => {
+    document.getElementById('projectTemplatePathInput')?.addEventListener('input', event => {
+      // Remembered so choosing a self-configuring blueprint can say it removed
+      // the path; the picker clears the input silently before selecting.
+      this.templateFolderOverridePath = String(event?.currentTarget?.value || '');
       this.scheduleTemplateAgentPlanRefresh();
     });
 
@@ -4000,10 +3986,6 @@ const sessionManager = {
       const groups = groupOptions.collectWorkspaceGroupOptions(this.folders || []);
       parentSelect.innerHTML = groupOptions.renderWorkspaceParentOptions(groups);
       parentSelect.value = '';
-      groupOptions.setWorkspaceParentSelectState(parentSelect, groups.length);
-      // A group page's Build owns the destination; the reset must not offer it
-      // back as a choice (group-map-build FR-15).
-      this.applyLockedParentSelection();
     }
     document
       .querySelectorAll('#addFolderModal .folder-color-btn')
@@ -4037,6 +4019,10 @@ const sessionManager = {
     // where the picker module has not loaded yet.
     this.workspaceTemplate = null;
     this.groupRequirementDraft = null;
+    // Decided only after the previous open's placement draft is gone, so a
+    // stale fixed placement cannot hide or clear the fresh control. A group
+    // page's Build still preselects its locked group (group-map-build FR-15).
+    this.syncWorkspaceDestinationControl();
     window.ProjectTemplateCard?.reset?.();
     this.resetTemplateAgentReview();
     this.resetExistingAgentTeam();
@@ -4335,7 +4321,7 @@ const sessionManager = {
     const requirement = template?.group_requirement || null;
     if (!requirement) {
       this.groupRequirementDraft = null;
-      this.syncGroupRequirementParentControl();
+      this.syncWorkspaceDestinationControl();
       return;
     }
     const policy = String(requirement.policy || '');
@@ -4344,7 +4330,7 @@ const sessionManager = {
     // only when every behavior-bearing identity is unchanged; a real template,
     // variant, source, or policy revision still clears it immediately.
     if (this.groupRequirementDraft?.templateKey === templateKey) {
-      this.syncGroupRequirementParentControl();
+      this.syncWorkspaceDestinationControl();
       return;
     }
     const composition = policy === 'none' ? 'standalone' : policy === 'required' ? 'grouped' : '';
@@ -4357,7 +4343,7 @@ const sessionManager = {
           review: null,
           preparedHome: null
         };
-    this.syncGroupRequirementParentControl();
+    this.syncWorkspaceDestinationControl();
   },
 
   invalidateGroupRequirementReview() {
@@ -4384,7 +4370,7 @@ const sessionManager = {
       this.groupRequirementDraft.review = null;
       this.groupRequirementDraft.preparedHome = null;
     }
-    this.syncGroupRequirementParentControl();
+    this.syncWorkspaceDestinationControl();
     // Team and placement are one reviewed composition. A standalone choice
     // replaces scoped program roles with project-local agents, so no stale team
     // draft or agent receipt may survive this change.
@@ -4437,47 +4423,99 @@ const sessionManager = {
     return options.find(option => String(option.value) === String(id)) || null;
   },
 
-  // Preselect and freeze the destination, and say which group it is. The help
-  // slot setWorkspaceParentSelectState owns is reused rather than adding a
-  // second caption element (PRD §6).
-  applyLockedParentSelection() {
-    const parentId = this.lockedParentId();
+  // What the generic "Create in" control (#workspaceCreatorDestinationCard,
+  // #folderParentSelect, #folderParentHelp) shows right now. A pure decision,
+  // so every path that reaches Details — Next, Back, an Edit link from Review,
+  // a Workspace ↔ Group switch, a re-selected blueprint, or a readiness
+  // recheck — gets the same answer. `value`, `disabled`, and `help` are null
+  // when this decision leaves the current value alone.
+  //
+  // Inputs, in precedence order:
+  // - the guided setup journey (setup-workspace-creator.js) mounts its own
+  //   placement control and writes the reviewed Home into the select; its
+  //   submit refuses any other parent, so the generic control is hidden and
+  //   its value is never touched here;
+  // - import mode, guided group setup, and a managed Group Template have no
+  //   generic destination;
+  // - a locked parent (a group page's Build) preselects and freezes its group
+  //   (group-map-build FR-14 – FR-16);
+  // - the blueprint's placement draft (`policy` + `composition`): a fixed
+  //   placement is stated by the Project destination card alone;
+  // - the number of groups the select offers, and whether the selected
+  //   blueprint declares an assistant program (help copy).
+  workspaceDestinationControlState() {
+    if (window.SetupWorkspaceCreator?.isActive?.()) {
+      return { hidden: true, value: null, disabled: null, help: null };
+    }
+    const context = this.workspaceCreatorContext;
+    const kind = this.creatorKind();
+    const importMode = Boolean(this.importModeEnabled || context?.mode === 'import');
+    const guidedCreator = context?.mode === 'guided' && Boolean(context?.guided);
+    const noGenericDestination = importMode || guidedCreator || this.usesManagedGroupTemplate();
     const select = document.getElementById('folderParentSelect');
-    if (!select || !parentId) return;
-    if (!this.parentSelectOption(parentId)) {
-      const option = document.createElement('option');
-      option.value = parentId;
-      option.textContent = this.workspaceCreatorContext?.parentName || 'This group';
-      select.appendChild(option);
-    }
-    select.value = parentId;
-    select.disabled = true;
-    const help = document.getElementById('folderParentHelp');
-    if (help) {
+    const lockedParent = this.lockedParentId();
+    if (lockedParent) {
       const name = this.lockedParentName();
-      help.textContent = name ? `Building into ${name}` : 'Building into this group';
+      return {
+        hidden: noGenericDestination,
+        value: lockedParent,
+        disabled: true,
+        help: name ? `Building into ${name}` : 'Building into this group'
+      };
     }
+
+    const draft = kind === 'workspace' ? this.groupRequirementDraft : null;
+    const fixedPlacement = Boolean(
+      draft &&
+      (draft.composition === 'grouped' || (draft.policy === 'recommended' && !draft.composition))
+    );
+    const groupCount = Math.max(0, Number(select?.options?.length || 0) - 1);
+    const availability = window.WorkspaceGroupOptions?.workspaceParentSelectState?.(groupCount) || {
+      disabled: groupCount === 0,
+      help: ''
+    };
+    let help;
+    if (kind === 'group') {
+      help =
+        'Optional. Nest this group inside another group. This does not grant Assistant Program membership.';
+    } else if (availability.help) {
+      help = availability.help;
+    } else if (this.blueprintDetailsProfile(this.workspaceTemplate).hasAssistantProgram) {
+      help =
+        'Optional. Choose an organizational group for this workspace. This does not grant program membership.';
+    } else {
+      help = 'Optional. Put this workspace inside a group to keep related work together.';
+    }
+    return {
+      hidden: noGenericDestination || fixedPlacement,
+      value: fixedPlacement ? '' : null,
+      disabled: fixedPlacement || availability.disabled,
+      help
+    };
   },
 
-  syncGroupRequirementParentControl() {
-    const parent = document.getElementById('folderParentSelect');
-    const field = document.getElementById('workspaceCreatorDestinationCard');
-    if (!parent) return;
-    // A locked destination answers this question already: keep the control
-    // showing the group rather than clearing it back to "No group".
-    if (this.lockedParentId()) {
-      this.applyLockedParentSelection();
-      if (field) field.hidden = false;
-      return;
+  // The one writer of the generic destination control. Callers never set its
+  // visibility, value, disabled state, or caption themselves.
+  syncWorkspaceDestinationControl() {
+    const card = document.getElementById('workspaceCreatorDestinationCard');
+    const select = document.getElementById('folderParentSelect');
+    const help = document.getElementById('folderParentHelp');
+    const state = this.workspaceDestinationControlState();
+    if (card) card.hidden = state.hidden;
+    if (select) {
+      const lockedParent = this.lockedParentId();
+      // The page that opened the creator knows its group even before the
+      // cached folder list lists it as an option.
+      if (lockedParent && !this.parentSelectOption(lockedParent)) {
+        const option = document.createElement('option');
+        option.value = lockedParent;
+        option.textContent = this.workspaceCreatorContext?.parentName || 'This group';
+        select.appendChild(option);
+      }
+      if (state.value !== null) select.value = state.value;
+      if (state.disabled !== null) select.disabled = state.disabled;
     }
-    const draft = this.groupRequirementDraft;
-    const grouped = draft?.composition === 'grouped';
-    const awaitingRequiredChoice = draft?.policy === 'recommended' && !draft.composition;
-    const fixedPlacement = grouped || awaitingRequiredChoice;
-    if (field) field.hidden = fixedPlacement;
-    if (fixedPlacement) parent.value = '';
-    if (window.SetupWorkspaceCreator?.isActive()) return;
-    parent.disabled = fixedPlacement || parent.options.length <= 1;
+    if (help && state.help !== null) help.textContent = state.help;
   },
 
   groupRequirementBlocked() {
@@ -7414,6 +7452,12 @@ const sessionManager = {
         input.checked = input.value === draft.composition;
       });
     }
+    const groupedCopy = document.getElementById('workspaceGroupCompositionGroupedCopy');
+    if (groupedCopy) {
+      // Names the group the choice would join, never a guess.
+      const groupName = String(home?.name || home?.proposed_name || '').trim();
+      groupedCopy.textContent = `Create inside ${groupName || 'the blueprint’s group'}, alongside its other projects.`;
+    }
 
     const homeOperation = draft.homeOperation || null;
     const showHomeReview = ['awaiting_confirmation', 'committing', 'unknown'].includes(
@@ -7571,7 +7615,7 @@ const sessionManager = {
     this.stageGuidedBlueprintRoles();
     const groupRoster = this.usesGroupRosterCreator();
     document.getElementById('workspaceReviewIssues')?.removeAttribute('hidden');
-    this.syncGroupRequirementParentControl();
+    this.syncWorkspaceDestinationControl();
     const heading = document.getElementById('workspaceTeamHeading');
     const teamSummary = document.getElementById('workspaceTeamSummary');
     const selectedTemplate = groupRoster
@@ -7852,12 +7896,21 @@ const sessionManager = {
     const templateMeta = groupTemplate
       ? `<small>${this.escapeHtml(window.GroupTemplateCreator.templateMeta(groupTemplate))}</small>`
       : '';
+    // The same group state the Details destination card shows, so Review can
+    // never call a proposed group existing (FR 7).
+    const groupState = draft.preparedHome
+      ? 'Prepared group · already persisted'
+      : projection.home?.exists === true
+        ? 'Existing verified group · reused'
+        : projection.home?.exists === false
+          ? 'Proposed group · not created yet'
+          : 'Group not verified yet';
     const hierarchy = !draft.composition
       ? '<strong>Choose grouped or standalone placement in Details</strong>'
       : grouped
         ? `<div class="workspace-review-hierarchy">
             <div class="workspace-review-hierarchy-node is-group">
-              <span>${draft.preparedHome ? 'Prepared group · already persisted' : 'Existing verified group · reused'}</span>
+              <span>${groupState}</span>
               <strong>${this.escapeHtml(homeName)}</strong>
               ${templateMeta}
               ${coordinatorLines.join('')}
@@ -8055,8 +8108,10 @@ const sessionManager = {
   workspaceReviewDetailChoices() {
     const choices = [];
 
+    // A hidden generic control means the destination is stated by the
+    // Resulting hierarchy card instead; Review says it once (FR 7).
     const parentSelect = document.getElementById('folderParentSelect');
-    if (parentSelect && parentSelect.value) {
+    if (parentSelect && parentSelect.value && !this.workspaceDestinationControlState().hidden) {
       const label = parentSelect.options[parentSelect.selectedIndex]?.textContent?.trim();
       if (label) choices.push(`Group: ${label}`);
     }
@@ -8536,6 +8591,13 @@ const sessionManager = {
       parts.push('Color set');
     }
 
+    // Covers typed context and the seeded open (dashboard.js), which fills
+    // these fields while Advanced is collapsed (FR 11).
+    const hasContext = ['folderSystemsInput', 'folderContextInput'].some(id =>
+      String(document.getElementById(id)?.value || '').trim()
+    );
+    if (hasContext) parts.push('Context added');
+
     const tagCount = window.WorkspaceTagsCard?.getPayloadFields?.().tags?.length || 0;
     if (tagCount > 0) parts.push(`${tagCount} tag${tagCount === 1 ? '' : 's'}`);
 
@@ -8724,13 +8786,11 @@ const sessionManager = {
     const nameLabel = document.getElementById('folderNameLabel');
     const nameInput = document.getElementById('folderNameInput');
     const descriptionLabel = document.getElementById('folderDescriptionLabel');
-    const descriptionHelp = document.getElementById('folderDescriptionHelp');
     const descriptionInput = document.getElementById('folderDescriptionInput');
     const bootstrapFields = document.getElementById('workspaceBootstrapFields');
-    const destinationCard = document.getElementById('workspaceCreatorDestinationCard');
+    const colorCard = document.getElementById('workspaceCreatorColorCard');
     const parentLabel = document.getElementById('folderParentLabel');
     const parentSelect = document.getElementById('folderParentSelect');
-    const parentHelp = document.getElementById('folderParentHelp');
     const advanced = document.getElementById('folderAdvancedDisclosure');
     const projectOpen = document.getElementById('projectTemplateOpenAfterCreate');
     const groupDestination = document.getElementById('workspaceGroupDestinationCard');
@@ -8810,18 +8870,20 @@ const sessionManager = {
         ? 'Group description <span style="opacity: 0.8; font-weight: 400;">(optional)</span>'
         : 'Workspace Description <span style="opacity: 0.8; font-weight: 400;">(optional)</span>';
     }
-    if (descriptionHelp) {
-      descriptionHelp.textContent = ordinaryGroup
-        ? 'Describe the work this group will organize. It does not create a project or team.'
-        : 'Describe what this workspace is for so Ori can review the setup and recommend the right agents, MCPs, and skills.';
-    }
+    this.syncWorkspaceDescriptionHelp();
     if (descriptionInput) {
       descriptionInput.placeholder = ordinaryGroup
         ? 'What related workspaces this group organizes'
         : 'What this workspace is for and what Ori should help with';
     }
     if (bootstrapFields) bootstrapFields.hidden = ordinaryGroup;
-    if (destinationCard) destinationCard.hidden = importMode || guidedCreator;
+    // Color used to sit inside the destination card, so it vanished whenever a
+    // blueprint fixed the placement. It stands on its own now and is hidden only
+    // where no color is sent: import, guided group setup, and a managed Group
+    // Template (its reviewed Home operation carries no color).
+    if (colorCard) {
+      colorCard.hidden = importMode || guidedCreator || this.usesManagedGroupTemplate();
+    }
     if (parentLabel) {
       parentLabel.innerHTML = ordinaryGroup
         ? 'Parent group <span style="opacity: 0.8; font-weight: 400;">(optional)</span>'
@@ -8837,18 +8899,13 @@ const sessionManager = {
       if (parentSelect.options?.[0])
         parentSelect.options[0].textContent = ordinaryGroup ? 'Top level' : 'No group';
     }
-    if (parentHelp) {
-      parentHelp.textContent = ordinaryGroup
-        ? 'Optional. Nest this group inside another group. This does not grant Assistant Program membership.'
-        : 'Optional. Choose an organizational group for this workspace. This does not grant program membership.';
-    }
-    // A locked destination is not optional, so it keeps its own caption here
-    // too — this runs on every step change (group-map-build FR-15).
-    this.applyLockedParentSelection();
     if (advanced) advanced.hidden = ordinaryGroup;
     if (projectOpen && ordinaryGroup) projectOpen.hidden = true;
     if (groupDestination && ordinaryGroup) groupDestination.hidden = true;
     window.GroupTemplateCreator?.syncPresentation?.(this);
+    // Visibility, value, disabled state, and caption have one owner, and this
+    // runs on every step change (blueprint-aware Details FR 1–2).
+    this.syncWorkspaceDestinationControl();
   },
 
   // Renders the wizard chrome for the current mode + step. Import remains a
@@ -9459,8 +9516,39 @@ const sessionManager = {
       hint.hidden = true;
       return;
     }
-    hint.textContent = `Folder: ${this.slugifyWorkspaceName(name)}`;
+    const slug = this.slugifyWorkspaceName(name);
+    const parts = [`Folder: ${slug}`];
+    // The server names a {{name}} project file with the same slug
+    // (projecttemplates.SanitizeProjectName → workspace.Slugify; shared vectors
+    // keep the two in step). A {{date}} file depends on the server's clock, so
+    // it is not previewed (FR 15).
+    const profile = this.isWorkspaceCreator()
+      ? this.blueprintDetailsProfile(this.workspaceTemplate)
+      : null;
+    if (profile?.entryNamedAfterWorkspace && !profile.projectEntryPath.includes('{{date}}')) {
+      parts.push(`Project file: ${profile.projectEntryPath.replaceAll('{{name}}', slug)}`);
+    }
+    hint.textContent = parts.join(' · ');
     hint.hidden = false;
+  },
+
+  // Description help follows the selected blueprint, so it updates on every
+  // selection, not only on a step change (FR 14).
+  syncWorkspaceDescriptionHelp() {
+    const help = document.getElementById('folderDescriptionHelp');
+    if (!help) return;
+    const importMode = Boolean(
+      this.importModeEnabled || this.workspaceCreatorContext?.mode === 'import'
+    );
+    if (this.creatorKind() === 'group' && !importMode) {
+      help.textContent =
+        'Describe the work this group will organize. It does not create a project or team.';
+    } else if (!importMode && !this.blueprintDetailsProfile(this.workspaceTemplate).blank) {
+      help.textContent = 'Optional. What this workspace is for.';
+    } else {
+      help.textContent =
+        'Describe what this workspace is for so Ori can review the setup and recommend the right agents, MCPs, and skills.';
+    }
   },
 
   // Returns an actionable message when the workspace identity cannot produce a
@@ -9505,6 +9593,87 @@ const sessionManager = {
     const hint = document.getElementById('workspaceNameHint');
     document.getElementById('folderNameInput')?.classList.remove('is-invalid');
     hint?.classList.remove('is-error');
+  },
+
+  // A blueprint was chosen (or re-emitted by a readiness recheck): apply what
+  // it answers to Details without ever clobbering what the user typed, and
+  // apply its Agent-behavior default.
+  handleWorkspaceTemplateSelected(template) {
+    this.closeWorkspaceAgentSetup({ restoreFocus: false, silent: true });
+    this.workspaceTemplate = template;
+    this.resetGroupRequirementDraft(template);
+    this.syncTemplateFolderOverride(template);
+    const profile = this.blueprintDetailsProfile(template);
+    // A project file named after the workspace would otherwise be named after
+    // the blueprint, and a second create would collide on its slug (FR 15). An
+    // empty value clears only a previous autofill, never typed text.
+    this.prefillTemplateValue(
+      document.getElementById('folderNameInput'),
+      profile.entryNamedAfterWorkspace ? '' : template?.name || '',
+      'autofillName'
+    );
+    // Every blueprint offers its description as a starting point (FR 13).
+    // Switching replaces or clears only a previous autofill; typed text stays.
+    this.prefillTemplateValue(
+      document.getElementById('folderDescriptionInput'),
+      profile.blank ? '' : String(template?.description || ''),
+      'autofillDescription'
+    );
+    this.syncWorkspaceDescriptionHelp();
+    this.updateWorkspaceNameHint();
+    this.applyTemplateBehavior(template);
+    this.updateWizardRecap(template);
+    void this.refreshTemplateAgentPlan();
+    this.refreshWorkspaceReview();
+  },
+
+  // One derived description of the selected blueprint, read by every
+  // blueprint-aware Details rule so none re-derives it from the projection
+  // (blueprint-aware Details FR 9). Plain flags only; Blank is `null`.
+  //
+  // - bringsOwnSetup: the blueprint sets up its own project (a plugin owner,
+  //   a setup wizard, or a setup quest), so a folder override cannot join it.
+  // - entryNamedAfterWorkspace: its project file is named after the workspace
+  //   (`project_entry.relative_path` contains `{{name}}`).
+  blueprintDetailsProfile(template) {
+    const blank = !template || Boolean(template.blank) || !template.id;
+    const projectEntryPath = blank
+      ? ''
+      : String(template.project_entry?.relative_path || '').trim();
+    return {
+      blank,
+      bringsOwnSetup:
+        !blank && Boolean(template.plugin_owner || template.setup_wizard || template.setup_quest),
+      hasAssistantProgram: !blank && Boolean(template.assistant_program),
+      entryNamedAfterWorkspace: projectEntryPath.includes('{{name}}'),
+      projectEntryPath
+    };
+  },
+
+  // "Use any folder as a template" cannot be combined with a blueprint that
+  // sets up its own project (FR 11a). The picker already empties the path when
+  // any library blueprint is chosen; for these blueprints the control is also
+  // hidden, and a path the user had entered is announced as removed. Blank and
+  // other blueprints keep the control exactly as before.
+  syncTemplateFolderOverride(template) {
+    const field = document.getElementById('projectTemplatePathField');
+    const input = document.getElementById('projectTemplatePathInput');
+    const { bringsOwnSetup } = this.blueprintDetailsProfile(template);
+    const hadOverride = Boolean(String(this.templateFolderOverridePath || '').trim());
+    if (field) field.hidden = bringsOwnSetup;
+    if (bringsOwnSetup && input?.value) {
+      input.value = '';
+      this.scheduleTemplateAgentPlanRefresh();
+    }
+    if (bringsOwnSetup && hadOverride) {
+      const live = document.getElementById('workspaceDetailsLiveRegion');
+      if (live) {
+        live.textContent = '';
+        live.textContent =
+          'Removed the template folder override. This blueprint sets up its own project.';
+      }
+    }
+    this.templateFolderOverridePath = String(input?.value || '');
   },
 
   // Sets the step-2 recap line from the selected

@@ -63,32 +63,22 @@ test('renderWorkspaceParentOptions escapes names and indents nested groups', () 
   assert.match(html, /<option value="group-2">-- Nested &amp; Saved<\/option>/);
 });
 
-test('setWorkspaceParentSelectState toggles disabled without aria-disabled', () => {
-  const helpAttrs = {};
-  const helpEl = {
-    set textContent(value) {
-      helpAttrs.text = value;
-    }
-  };
+test('workspaceParentSelectState returns values without touching the control', () => {
+  const lookups = [];
   const helpers = loadGroupOptions({
-    getElementById: id => (id === 'folderParentHelp' ? helpEl : null)
+    getElementById: id => {
+      lookups.push(id);
+      return null;
+    }
   });
 
-  const attrs = {};
-  const select = {
-    disabled: false,
-    setAttribute: (name, value) => {
-      attrs[name] = value;
-    }
-  };
+  const empty = helpers.workspaceParentSelectState(0);
+  assert.equal(empty.disabled, true);
+  assert.match(empty.help, /No groups yet/);
+  assert.equal('aria-disabled' in empty, false);
 
-  helpers.setWorkspaceParentSelectState(select, 0);
-  assert.equal(select.disabled, true);
-  assert.equal(attrs['aria-disabled'], undefined);
-  assert.match(helpAttrs.text, /No groups yet/);
-
-  helpers.setWorkspaceParentSelectState(select, 2);
-  assert.equal(select.disabled, false);
-  assert.equal(attrs['aria-disabled'], undefined);
-  assert.match(helpAttrs.text, /Choose a group/);
+  const available = helpers.workspaceParentSelectState(2);
+  assert.equal(available.disabled, false);
+  assert.equal(available.help, '');
+  assert.deepEqual(lookups, [], 'the owner in sessions.js applies the result');
 });
