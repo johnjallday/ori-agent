@@ -449,6 +449,16 @@ class EntryPointTests(unittest.TestCase):
         self.assertNotIn("continue-on-error", smoke)
         self.assertNotIn("--snapshot", smoke)
         self.assertIn("gh release download", smoke)
+        # Draft releases are invisible to read-only tokens. Only the fetch job may
+        # hold contents: write; the jobs that run the installers stay read-only.
+        self.assertIn("permissions:\n      contents: write", release.split("  smoke:", 1)[1].split("\n  publish:", 1)[0])
+        grant = "permissions:\n      contents: write"
+        self.assertEqual(smoke.count(grant), 1)
+        self.assertEqual(smoke.count("gh release download"), 1)
+        fetch, platforms = smoke.split("\n  test-macos:", 1)
+        self.assertIn(grant, fetch)
+        self.assertNotIn("github.token", platforms)
+        self.assertEqual(platforms.count("actions/download-artifact"), 4)
         self.assertIn("macos-15-intel", smoke)
         self.assertIn("macos-15", smoke)
         self.assertIn("head_branch", (ROOT / "scripts/release-candidate.py").read_text())

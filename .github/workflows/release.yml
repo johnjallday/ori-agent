@@ -245,8 +245,10 @@ jobs:
     uses: ./.github/workflows/smoke-tests.yml
     with:
       release_tag: ${{ github.ref_name }}
+    # Draft releases are visible only with push access. smoke-tests.yml grants
+    # write to its download-only fetch job; installer jobs stay read-only.
     permissions:
-      contents: read
+      contents: write
 
   publish:
     name: Publish verified release
