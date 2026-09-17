@@ -219,8 +219,9 @@ automatically.
   listed.
 - **Positive guided REAPER acceptance was blocked at the time.** The reviewed
   integration pin was 0.5.0, which declares no group requirement. The pin has
-  since moved to the published 0.6.0 release (blueprint v7, which declares one)
-  and then to 0.6.1, which keeps that blueprint.
+  since moved to the published 0.6.0 release (blueprint v7, which declares one),
+  then to 0.6.1, which keeps that blueprint, and is now a reviewed floor: the
+  latest stable release at or above 0.6.1 with blueprint v7 or later.
   A guided quest for any other source is still refused by the
   reviewed-integration gate, which is unchanged.
 - **Destination card uses the declared name.** Its receipt has no name input.

@@ -173,22 +173,26 @@ The preparation gate is removed. There is no preparation screen, no
 exists, the existing **Team and extras** view and the workspace open action
 work as before.
 
-## REAPER release and the reviewed pin
+## REAPER release and the reviewed floor
 
 REAPER **0.6.0** is the first release that declares its quest under
 `setup_quests_v2`: `reaper_setup` version 2 with four steps, group-only launch
 copy and blueprint version 7. Installed v0.5.1 and v0.5.2 plugins require the
 retired `setup_quests_v1`, so this host refuses their manifests until they
-update. The earlier pinned v0.5.0 declared no quest: it installed, and its
-install quest offered only **Open Plugins**.
+update. The earlier v0.5.0 declared no quest: it installed, and its install
+quest offered only **Open Plugins**.
 
-The reviewed pin now points at the published v0.6.1 release, which keeps 0.6.0's
-quest and blueprint and only drops the retired role `type` key, so the install
-quest hands off into the plugin's four-step quest once the plugin is installed,
-enabled and verified. An existing installation from the official unpinned Git
-URL is offered **Review verified replacement** first; nothing rewrites an
-installed plugin without that confirmation. The pin's verification evidence and
-the procedure for moving it again live in
+The reviewed registry entry is a floor, not an exact pin: minimum version
+0.6.1 with blueprint version 7 or later. The install quest installs the latest
+stable release at or above that floor, recorded against its exact commit, and
+falls back to the floor's commit when the latest release cannot be checked. It
+hands off into the plugin's four-step quest once the plugin is installed,
+enabled and verified. Any installation from an exact official commit at or
+above the floor is verified; an installation from the official unpinned Git URL
+is offered **Review verified replacement** first, and nothing rewrites an
+installed plugin without that confirmation. A newer release shows as an update
+on the Plugins page, never inside the completed quest. How the release is
+chosen, the verification evidence and when the floor moves live in
 [REAPER integration](reaper-integration.md). A local demo can still use
 `scripts/reaper-demo.sh` with a development source.
 
