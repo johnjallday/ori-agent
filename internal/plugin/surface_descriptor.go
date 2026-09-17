@@ -50,6 +50,12 @@ const (
 	// a manifest requiring it fails like any unknown feature.
 	HostFeatureSetupQuestsV2               = "setup_quests_v2"
 	HostFeatureTemplateGroupRequirementsV1 = "template_group_requirements_v1"
+	// HostFeatureBlueprintInputsV1 is the typed `inputs` declaration a blueprint
+	// uses to ask for values at creation time. A host that does not advertise it
+	// decodes such a manifest strictly and rejects the whole blueprint, so a
+	// plugin release that uses inputs declares this feature and is refused
+	// before install rather than landing as an unusable blueprint.
+	HostFeatureBlueprintInputsV1 = "blueprint_inputs_v1"
 )
 
 // ContributionError is safe to project during local plugin validation. It
@@ -304,6 +310,7 @@ func (c *SurfaceContribution) Validate() error {
 		HostFeatureSpecialistSetupJourneyV1,
 		HostFeatureSetupQuestsV2,
 		HostFeatureTemplateGroupRequirementsV1,
+		HostFeatureBlueprintInputsV1,
 	})
 }
 

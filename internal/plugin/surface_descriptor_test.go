@@ -97,6 +97,38 @@ func TestSurfaceContributionNewHostRequirementFailsClosedOnOlderHost(t *testing.
 	}
 }
 
+// A blueprint's typed `inputs` block is decoded strictly, so a host that does
+// not understand it rejects the whole blueprint. blueprint_inputs_v1 is what
+// stops such a release reaching that host at all: it must be refused before
+// install on a feature list without it, and accepted on one with it.
+func TestBlueprintInputsFeatureFailsClosedOnAHostWithoutIt(t *testing.T) {
+	contribution, err := ParseSurfaceContribution(canonicalSurfaceFixture(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contribution.RequiresHostFeatures = []string{
+		HostFeatureAssistantProgramV1,
+		HostFeatureBlueprintInputsV1,
+	}
+
+	withoutInputs := []string{
+		HostFeatureAssistantProgramV1,
+		HostFeatureSpecialistSetupJourneyV1,
+		HostFeatureSetupQuestsV2,
+		HostFeatureTemplateGroupRequirementsV1,
+	}
+	if err := contribution.ValidateForHost(1, withoutInputs); !ContributionErrorIs(err, CodeHostFeatureUnsupported) {
+		t.Fatalf("a host without blueprint_inputs_v1 accepted a release that needs it: %v", err)
+	}
+	if err := contribution.ValidateForHost(1, append(withoutInputs, HostFeatureBlueprintInputsV1)); err != nil {
+		t.Fatalf("a host with blueprint_inputs_v1 rejected the release: %v", err)
+	}
+	// This build advertises it, so the default host contract accepts it too.
+	if err := contribution.Validate(); err != nil {
+		t.Fatalf("this host rejected blueprint_inputs_v1: %v", err)
+	}
+}
+
 // FR 9: setup_quests_v2 fails closed on a host that knows only v1, and a
 // manifest still requiring setup_quests_v1 fails closed on this host.
 func TestSetupQuestFeatureVersionsFailClosedAcrossHosts(t *testing.T) {

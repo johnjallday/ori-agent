@@ -352,6 +352,13 @@ func buildWorkspaceSnapshotPromptForToolCapability(
 		}
 	}
 
+	// The values the workspace was created with are part of what its agents
+	// need to know about the project: they are already in the project file, so
+	// an agent that does not see them here would offer to set them again.
+	if created := buildBlueprintInputsSnapshotLine(ws); created != "" {
+		lines = append(lines, fmt.Sprintf("- Created with: %s", created))
+	}
+
 	lines = append(lines,
 		fmt.Sprintf("- Status: %q", sanitizeWorkspaceSnapshotText(string(ws.Status), workspaceSnapshotTextLimit)),
 		fmt.Sprintf("- Updated at: %q", formatWorkspaceSnapshotTime(ws.UpdatedAt)),
@@ -645,6 +652,15 @@ func workspaceBootstrapSnapshotField(ws *workspace.Workspace, key string) string
 		return ""
 	}
 	return workspaceBootstrapFieldText(bootstrap, key)
+}
+
+// buildBlueprintInputsSnapshotLine renders the values chosen at creation as
+// "Label: display" pairs, e.g. `Tempo: 96 BPM, Time signature: 3/4`.
+func buildBlueprintInputsSnapshotLine(ws *workspace.Workspace) string {
+	if ws == nil || len(ws.SharedData) == 0 {
+		return ""
+	}
+	return sanitizeWorkspaceSnapshotText(workspace.BlueprintInputsSummary(ws.SharedData), workspaceSnapshotPreviewLimit)
 }
 
 func buildWorkspaceAgentSummary(ws *workspace.Workspace) workspaceAgentSummary {

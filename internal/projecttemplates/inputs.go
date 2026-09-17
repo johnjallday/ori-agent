@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // The inputs declaration lets a blueprint ask the user for a handful of typed
@@ -554,6 +556,119 @@ func inputOptionsContain(options []InputOption, value string) bool {
 		}
 	}
 	return false
+}
+
+// BlueprintInputsSharedDataKey is where a workspace records the values it was
+// created with. Declared in internal/workspace alongside the other shared-data
+// keys and aliased here, so the prompt builders that read it and this package,
+// which writes it, cannot drift apart.
+const BlueprintInputsSharedDataKey = workspace.BlueprintInputsSharedDataKey
+
+// StoredBlueprintInputs is the recorded shape. Values is the machine-readable
+// map; Fields carries the declaration's labels and units so the workspace can
+// show what was chosen without re-resolving the blueprint, which may have been
+// uninstalled or changed since.
+type StoredBlueprintInputs struct {
+	SchemaVersion int                         `json:"schema_version"`
+	Title         string                      `json:"title,omitempty"`
+	Values        map[string]string           `json:"values"`
+	Fields        []StoredBlueprintInputValue `json:"fields,omitempty"`
+}
+
+// StoredBlueprintInputValue is one recorded value with the display text that
+// went with it.
+type StoredBlueprintInputValue struct {
+	ID      string `json:"id"`
+	Label   string `json:"label"`
+	Value   string `json:"value"`
+	Unit    string `json:"unit,omitempty"`
+	Display string `json:"display"`
+}
+
+// BuildStoredBlueprintInputs pairs resolved values with the declaration that
+// produced them. Values not named by the declaration are dropped: the record
+// describes what the blueprint asked for, not whatever a caller happened to
+// carry.
+func BuildStoredBlueprintInputs(declaration *InputsDeclaration, values map[string]string) *StoredBlueprintInputs {
+	if declaration == nil || len(values) == 0 {
+		return nil
+	}
+	stored := &StoredBlueprintInputs{
+		SchemaVersion: declaration.SchemaVersion,
+		Title:         declaration.Title,
+		Values:        make(map[string]string, len(values)),
+	}
+	for _, field := range declaration.Fields {
+		value, ok := values[field.ID]
+		if !ok {
+			continue
+		}
+		stored.Values[field.ID] = value
+		stored.Fields = append(stored.Fields, StoredBlueprintInputValue{
+			ID: field.ID, Label: field.Label, Value: value, Unit: field.Unit,
+			Display: field.displayText(value),
+		})
+	}
+	if len(stored.Values) == 0 {
+		return nil
+	}
+	return stored
+}
+
+// displayText is what a person reads: a number with its unit, or the option's
+// own label rather than the text that went into the file.
+func (field InputField) displayText(value string) string {
+	switch field.Type {
+	case InputFieldNumber:
+		if field.Unit != "" {
+			return value + " " + field.Unit
+		}
+		return value
+	case InputFieldSelect:
+		for _, option := range field.Options {
+			if option.Value == value {
+				return option.Label
+			}
+		}
+	}
+	return value
+}
+
+// SetBlueprintInputs records the values on a workspace's shared data. An empty
+// record removes the key rather than storing an empty object.
+func SetBlueprintInputs(sharedData map[string]any, declaration *InputsDeclaration, values map[string]string) {
+	if sharedData == nil {
+		return
+	}
+	stored := BuildStoredBlueprintInputs(declaration, values)
+	if stored == nil {
+		delete(sharedData, BlueprintInputsSharedDataKey)
+		return
+	}
+	sharedData[BlueprintInputsSharedDataKey] = stored
+}
+
+// GetBlueprintInputs reads a recorded set back. Shared data round-trips through
+// JSON on its way to and from disk, so the stored value arrives either as the
+// struct that was written or as the decoded map — both are accepted, and
+// anything else is reported rather than guessed at.
+func GetBlueprintInputs(sharedData map[string]any) (*StoredBlueprintInputs, error) {
+	raw, ok := sharedData[BlueprintInputsSharedDataKey]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	if stored, ok := raw.(*StoredBlueprintInputs); ok {
+		return stored, nil
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%w: stored %s could not be read", ErrInvalidInputs, BlueprintInputsSharedDataKey)
+	}
+	var stored StoredBlueprintInputs
+	if err := json.Unmarshal(encoded, &stored); err != nil || stored.Values == nil {
+		return nil, fmt.Errorf("%w: stored %s is not a recorded input set", ErrInvalidInputs, BlueprintInputsSharedDataKey)
+	}
+	return &stored, nil
 }
 
 // CloneInputs deep-copies a declaration so callers that project or adapt a

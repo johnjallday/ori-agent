@@ -240,7 +240,35 @@ func (h *Handler) handleTemplateAgentCreate(w http.ResponseWriter, r *http.Reque
 // copy it removes the project folder again so the workspace never ends up
 // with an orphaned project or a dangling ProjectPath. Entry-file verification
 // is deliberately non-fatal and is returned in InstantiationResult.
-func (h *Handler) instantiateWorkspaceProject(ctx context.Context, ws *session.Workspace, folderWS *agentworkspace.Workspace, templateID, templatePath, projectName string, resolved ...projecttemplates.Template) (projecttemplates.InstantiationResult, error) {
+// instantiateProjectOptions carries what a caller already established about the
+// project it is scaffolding: the template it resolved, and the validated values
+// for that template's declared inputs.
+type instantiateProjectOptions struct {
+	resolved *projecttemplates.Template
+	inputs   *createWorkspaceInputs
+}
+
+type instantiateProjectOption func(*instantiateProjectOptions)
+
+// instantiateWithTemplate reuses a template the caller already resolved rather
+// than resolving it a second time.
+func instantiateWithTemplate(template projecttemplates.Template) instantiateProjectOption {
+	return func(options *instantiateProjectOptions) { options.resolved = &template }
+}
+
+// instantiateWithInputs supplies the values the user chose for the blueprint's
+// declared inputs. Absent, the blueprint's own defaults are used.
+func instantiateWithInputs(inputs *createWorkspaceInputs) instantiateProjectOption {
+	return func(options *instantiateProjectOptions) { options.inputs = inputs }
+}
+
+func (h *Handler) instantiateWorkspaceProject(ctx context.Context, ws *session.Workspace, folderWS *agentworkspace.Workspace, templateID, templatePath, projectName string, opts ...instantiateProjectOption) (projecttemplates.InstantiationResult, error) {
+	var options instantiateProjectOptions
+	for _, apply := range opts {
+		if apply != nil {
+			apply(&options)
+		}
+	}
 	if err := projecttemplates.ValidateTarget(ws.IsGroup(), ws.ProjectPath); err != nil {
 		return projecttemplates.InstantiationResult{}, err
 	}
@@ -254,8 +282,8 @@ func (h *Handler) instantiateWorkspaceProject(ctx context.Context, ws *session.W
 	}
 
 	var tpl projecttemplates.Template
-	if len(resolved) > 0 {
-		tpl = resolved[0]
+	if options.resolved != nil {
+		tpl = *options.resolved
 	} else {
 		tpl, err = h.resolveProjectTemplate(templateID, templatePath)
 		if err != nil {
@@ -268,7 +296,11 @@ func (h *Handler) instantiateWorkspaceProject(ctx context.Context, ws *session.W
 	}
 	displayProjectName := strings.TrimSpace(projectName)
 
-	result, err := projecttemplates.InstantiateTemplate(tpl, folderPath, projectName)
+	var providedInputs map[string]json.RawMessage
+	if options.inputs != nil {
+		providedInputs = options.inputs.provided
+	}
+	result, err := projecttemplates.InstantiateTemplateWithInputs(tpl, folderPath, projectName, providedInputs)
 	if err != nil {
 		return projecttemplates.InstantiationResult{}, err
 	}
@@ -292,6 +324,12 @@ func (h *Handler) instantiateWorkspaceProject(ctx context.Context, ws *session.W
 		result.ProjectEntryPath = ""
 		result.ProjectWarning = appendProjectWarning(result.ProjectWarning, fmt.Sprintf("project entry metadata could not be persisted: %v", err))
 	}
+	// Recorded in the same write as project_path: the values are only true of
+	// a project that exists, and the write that creates one must carry both.
+	if folderWS.SharedData == nil {
+		folderWS.SharedData = make(map[string]any)
+	}
+	recordCreateWorkspaceInputs(folderWS.SharedData, options.inputs)
 	folderWS.UpdatedAt = now
 	if err := h.workspaceStore.Save(folderWS); err != nil {
 		// #nosec G703 -- relPath is the validated in-root result returned by InstantiateTemplate.
@@ -310,6 +348,7 @@ func (h *Handler) instantiateWorkspaceProject(ctx context.Context, ws *session.W
 		ws.SharedData[workspaceSharedDataProjectDirectoryIDKey] = projectDirID
 	}
 	_ = projecttemplates.SetProjectEntryPath(ws.SharedData, result.ProjectEntryPath)
+	recordCreateWorkspaceInputs(ws.SharedData, options.inputs)
 	if refsJSON, err := json.Marshal(folderWS.DirectoryReferences); err == nil {
 		ws.DirectoryReferencesJSON = refsJSON
 	} else {
@@ -470,7 +509,7 @@ func (h *Handler) handleWorkspaceProject(w http.ResponseWriter, r *http.Request,
 		}
 	}
 
-	result, err := h.instantiateWorkspaceProject(r.Context(), workspace, folderWS, req.TemplateID, req.TemplatePath, req.ProjectName, template)
+	result, err := h.instantiateWorkspaceProject(r.Context(), workspace, folderWS, req.TemplateID, req.TemplatePath, req.ProjectName, instantiateWithTemplate(template))
 	if err != nil {
 		if groupPlan != nil {
 			_ = h.groupRequirements.Mark(r.Context(), groupPlan.claim.Operation, grouprequirements.OperationReconcileRequired)
