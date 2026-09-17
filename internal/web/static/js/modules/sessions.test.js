@@ -3020,6 +3020,171 @@ test('a self-configuring blueprint hides and clears the folder override, once an
   assert.equal(elements.projectTemplatePathInput.value, '');
 });
 
+// ---------------------------------------------------------------------------
+// Name, description, and copy (blueprint-aware Details FR 13–16, §6.2).
+// ---------------------------------------------------------------------------
+
+function nameAndDescriptionManager() {
+  const input = value => ({ value, dataset: {}, classList: { contains: () => false } });
+  const elements = {
+    folderNameInput: input(''),
+    folderDescriptionInput: input(''),
+    folderDescriptionHelp: { textContent: '' },
+    workspaceNameHint: { textContent: '', hidden: true, classList: { contains: () => false } }
+  };
+  const manager = loadSessionManager(undefined, creatorWindowHelpers(), {
+    getElementById: id => elements[id] || null,
+    querySelectorAll: () => []
+  });
+  manager.closeWorkspaceAgentSetup = () => {};
+  manager.applyTemplateBehavior = () => {};
+  manager.updateWizardRecap = () => {};
+  manager.refreshTemplateAgentPlan = async () => {};
+  manager.refreshWorkspaceReview = () => {};
+  manager.beginWorkspaceCreatorContext({ entryPoint: 'workspace_hub_create' });
+  return { manager, elements };
+}
+
+const catalogTemplate = {
+  id: 'research-project',
+  name: 'Research Project',
+  description: 'Synthesis docs, sources, weekly reading.'
+};
+
+test('choosing a blueprint never copies its description into the workspace (FR 13)', () => {
+  const { manager, elements } = nameAndDescriptionManager();
+  const description = elements.folderDescriptionInput;
+
+  manager.handleWorkspaceTemplateSelected(catalogTemplate);
+  assert.equal(description.value, '');
+
+  // A value an earlier build autofilled is cleared on the next selection.
+  description.value = catalogTemplate.description;
+  description.dataset.autofillDescription = catalogTemplate.description;
+  manager.handleWorkspaceTemplateSelected(selfConfiguringTemplate);
+  assert.equal(description.value, '');
+
+  // Typed text survives any number of blueprint switches.
+  description.value = 'Album two, side B';
+  manager.handleWorkspaceTemplateSelected(catalogTemplate);
+  manager.handleWorkspaceTemplateSelected(null);
+  assert.equal(description.value, 'Album two, side B');
+});
+
+test('description help follows every blueprint selection (FR 14)', () => {
+  const { manager, elements } = nameAndDescriptionManager();
+  const help = elements.folderDescriptionHelp;
+  manager.handleWorkspaceTemplateSelected(catalogTemplate);
+  assert.equal(help.textContent, 'Optional. What this workspace is for.');
+  manager.handleWorkspaceTemplateSelected({ blank: true });
+  assert.match(help.textContent, /^Describe what this workspace is for so Ori can review/);
+  manager.handleWorkspaceTemplateSelected(selfConfiguringTemplate);
+  assert.equal(help.textContent, 'Optional. What this workspace is for.');
+});
+
+test('a project file named after the workspace is not named after the blueprint (FR 15)', () => {
+  const { manager, elements } = nameAndDescriptionManager();
+  const name = elements.folderNameInput;
+  const hint = elements.workspaceNameHint;
+
+  // Other blueprints keep today's prefill and folder-only hint.
+  manager.handleWorkspaceTemplateSelected(catalogTemplate);
+  assert.equal(name.value, 'Research Project');
+  assert.equal(hint.textContent, 'Folder: research-project');
+
+  // A {{name}} entry clears that autofill instead of prefilling "Song".
+  manager.handleWorkspaceTemplateSelected(selfConfiguringTemplate);
+  assert.equal(name.value, '');
+  assert.equal(hint.hidden, true);
+
+  name.value = 'Night Drive';
+  manager.updateWorkspaceNameHint();
+  assert.equal(hint.textContent, 'Folder: night-drive · Project file: night-drive.proj');
+
+  // Typed names are never replaced by a later blueprint's name.
+  manager.handleWorkspaceTemplateSelected(catalogTemplate);
+  assert.equal(name.value, 'Night Drive');
+  assert.equal(hint.textContent, 'Folder: night-drive');
+
+  // A {{date}} entry depends on the server's clock, so only the folder shows.
+  manager.handleWorkspaceTemplateSelected({
+    id: 'journal',
+    name: 'Journal',
+    project_entry: { relative_path: '{{name}}-{{date}}.md' }
+  });
+  assert.equal(hint.textContent, 'Folder: night-drive');
+});
+
+test('the name hint slugs exactly like the server (shared vectors with workspace.Slugify)', () => {
+  const vectors = JSON.parse(
+    readFileSync(
+      new URL('../../../../workspace/testdata/slugify_vectors.json', import.meta.url),
+      'utf8'
+    )
+  ).vectors;
+  assert.ok(vectors.length > 0);
+  const manager = loadSessionManager();
+  for (const vector of vectors) {
+    assert.equal(
+      manager.slugifyWorkspaceName(vector.input),
+      vector.slug,
+      `slug for ${JSON.stringify(vector.input)}`
+    );
+  }
+});
+
+test('an empty description is never sent as a goal (FR 16)', async () => {
+  const nothing = await runDetailsCreate({ description: '', systems: '', context: '' });
+  assert.equal(nothing.description, '');
+  assert.equal('workspace_bootstrap' in nothing, false);
+
+  const contextOnly = await runDetailsCreate({
+    description: '  ',
+    context: 'Stems are in ~/Audio'
+  });
+  assert.equal(contextOnly.description, '');
+  assert.equal(contextOnly.workspace_bootstrap.goal, '');
+  assert.equal(contextOnly.workspace_bootstrap.context, 'Stems are in ~/Audio');
+
+  const described = await runDetailsCreate({ description: 'A second album' });
+  assert.equal(described.workspace_bootstrap.goal, 'A second album');
+});
+
+test('the Grouped choice names the group the workspace would join (§6.2)', () => {
+  const copy = { textContent: '' };
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    {
+      getElementById: id =>
+        id === 'workspaceGroupDestinationCard'
+          ? { hidden: true }
+          : id === 'workspaceGroupCompositionGroupedCopy'
+            ? copy
+            : null
+    }
+  );
+  manager.workspaceGroupDestinationTemplate = () => null;
+  const render = home => {
+    manager.groupRequirementDraft = {
+      policy: 'recommended',
+      composition: '',
+      projection: { state: 'choice_required', home }
+    };
+    manager.renderWorkspaceGroupDestinationCard();
+    return copy.textContent;
+  };
+  assert.equal(
+    render({ exists: true, name: 'Studio Home' }),
+    'Create inside Studio Home, alongside its other projects.'
+  );
+  assert.equal(
+    render({ exists: false, proposed_name: 'Music Production Home' }),
+    'Create inside Music Production Home, alongside its other projects.'
+  );
+  assert.equal(render(null), 'Create inside the blueprint’s group, alongside its other projects.');
+});
+
 test('a successful create announces the hierarchy change for pages that stay put', () => {
   const events = [];
   const { manager } = lockedParentManager();

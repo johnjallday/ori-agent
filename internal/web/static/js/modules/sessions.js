@@ -409,32 +409,11 @@ const sessionManager = {
       this.updateBehaviorHint();
     });
 
-    // Unified Template picker selection (dispatched by ProjectTemplateCard):
-    // prefill name/description (never clobbering typed input) and apply the
-    // template's Agent-behavior default.
+    // Unified Template picker selection (dispatched by ProjectTemplateCard).
     document
       .getElementById('addFolderModal')
       ?.addEventListener('workspace-template-selected', event => {
-        const template = event?.detail?.template || null;
-        this.closeWorkspaceAgentSetup({ restoreFocus: false, silent: true });
-        this.workspaceTemplate = template;
-        this.resetGroupRequirementDraft(template);
-        this.syncTemplateFolderOverride(template);
-        this.prefillTemplateValue(
-          document.getElementById('folderNameInput'),
-          template?.name || '',
-          'autofillName'
-        );
-        this.prefillTemplateValue(
-          document.getElementById('folderDescriptionInput'),
-          template?.description || '',
-          'autofillDescription'
-        );
-        this.updateWorkspaceNameHint();
-        this.applyTemplateBehavior(template);
-        this.updateWizardRecap(template);
-        void this.refreshTemplateAgentPlan();
-        this.refreshWorkspaceReview();
+        this.handleWorkspaceTemplateSelected(event?.detail?.template || null);
       });
 
     document.getElementById('workspaceBlankAgentlessToggle')?.addEventListener('change', event => {
@@ -7473,6 +7452,12 @@ const sessionManager = {
         input.checked = input.value === draft.composition;
       });
     }
+    const groupedCopy = document.getElementById('workspaceGroupCompositionGroupedCopy');
+    if (groupedCopy) {
+      // Names the group the choice would join, never a guess.
+      const groupName = String(home?.name || home?.proposed_name || '').trim();
+      groupedCopy.textContent = `Create inside ${groupName || 'the blueprint’s group'}, alongside its other projects.`;
+    }
 
     const homeOperation = draft.homeOperation || null;
     const showHomeReview = ['awaiting_confirmation', 'committing', 'unknown'].includes(
@@ -8801,7 +8786,6 @@ const sessionManager = {
     const nameLabel = document.getElementById('folderNameLabel');
     const nameInput = document.getElementById('folderNameInput');
     const descriptionLabel = document.getElementById('folderDescriptionLabel');
-    const descriptionHelp = document.getElementById('folderDescriptionHelp');
     const descriptionInput = document.getElementById('folderDescriptionInput');
     const bootstrapFields = document.getElementById('workspaceBootstrapFields');
     const colorCard = document.getElementById('workspaceCreatorColorCard');
@@ -8886,11 +8870,7 @@ const sessionManager = {
         ? 'Group description <span style="opacity: 0.8; font-weight: 400;">(optional)</span>'
         : 'Workspace Description <span style="opacity: 0.8; font-weight: 400;">(optional)</span>';
     }
-    if (descriptionHelp) {
-      descriptionHelp.textContent = ordinaryGroup
-        ? 'Describe the work this group will organize. It does not create a project or team.'
-        : 'Describe what this workspace is for so Ori can review the setup and recommend the right agents, MCPs, and skills.';
-    }
+    this.syncWorkspaceDescriptionHelp();
     if (descriptionInput) {
       descriptionInput.placeholder = ordinaryGroup
         ? 'What related workspaces this group organizes'
@@ -9536,8 +9516,39 @@ const sessionManager = {
       hint.hidden = true;
       return;
     }
-    hint.textContent = `Folder: ${this.slugifyWorkspaceName(name)}`;
+    const slug = this.slugifyWorkspaceName(name);
+    const parts = [`Folder: ${slug}`];
+    // The server names a {{name}} project file with the same slug
+    // (projecttemplates.SanitizeProjectName → workspace.Slugify; shared vectors
+    // keep the two in step). A {{date}} file depends on the server's clock, so
+    // it is not previewed (FR 15).
+    const profile = this.isWorkspaceCreator()
+      ? this.blueprintDetailsProfile(this.workspaceTemplate)
+      : null;
+    if (profile?.entryNamedAfterWorkspace && !profile.projectEntryPath.includes('{{date}}')) {
+      parts.push(`Project file: ${profile.projectEntryPath.replaceAll('{{name}}', slug)}`);
+    }
+    hint.textContent = parts.join(' · ');
     hint.hidden = false;
+  },
+
+  // Description help follows the selected blueprint, so it updates on every
+  // selection, not only on a step change (FR 14).
+  syncWorkspaceDescriptionHelp() {
+    const help = document.getElementById('folderDescriptionHelp');
+    if (!help) return;
+    const importMode = Boolean(
+      this.importModeEnabled || this.workspaceCreatorContext?.mode === 'import'
+    );
+    if (this.creatorKind() === 'group' && !importMode) {
+      help.textContent =
+        'Describe the work this group will organize. It does not create a project or team.';
+    } else if (!importMode && !this.blueprintDetailsProfile(this.workspaceTemplate).blank) {
+      help.textContent = 'Optional. What this workspace is for.';
+    } else {
+      help.textContent =
+        'Describe what this workspace is for so Ori can review the setup and recommend the right agents, MCPs, and skills.';
+    }
   },
 
   // Returns an actionable message when the workspace identity cannot produce a
@@ -9582,6 +9593,38 @@ const sessionManager = {
     const hint = document.getElementById('workspaceNameHint');
     document.getElementById('folderNameInput')?.classList.remove('is-invalid');
     hint?.classList.remove('is-error');
+  },
+
+  // A blueprint was chosen (or re-emitted by a readiness recheck): apply what
+  // it answers to Details without ever clobbering what the user typed, and
+  // apply its Agent-behavior default.
+  handleWorkspaceTemplateSelected(template) {
+    this.closeWorkspaceAgentSetup({ restoreFocus: false, silent: true });
+    this.workspaceTemplate = template;
+    this.resetGroupRequirementDraft(template);
+    this.syncTemplateFolderOverride(template);
+    const profile = this.blueprintDetailsProfile(template);
+    // A project file named after the workspace would otherwise be named after
+    // the blueprint, and a second create would collide on its slug (FR 15). An
+    // empty value clears only a previous autofill, never typed text.
+    this.prefillTemplateValue(
+      document.getElementById('folderNameInput'),
+      profile.entryNamedAfterWorkspace ? '' : template?.name || '',
+      'autofillName'
+    );
+    // Description starts empty for every blueprint: its catalog copy is not
+    // what this workspace is for (FR 13). A previous autofill is still cleared.
+    this.prefillTemplateValue(
+      document.getElementById('folderDescriptionInput'),
+      '',
+      'autofillDescription'
+    );
+    this.syncWorkspaceDescriptionHelp();
+    this.updateWorkspaceNameHint();
+    this.applyTemplateBehavior(template);
+    this.updateWizardRecap(template);
+    void this.refreshTemplateAgentPlan();
+    this.refreshWorkspaceReview();
   },
 
   // One derived description of the selected blueprint, read by every
