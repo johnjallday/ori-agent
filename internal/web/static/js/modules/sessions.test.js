@@ -2842,30 +2842,44 @@ test('blueprintDetailsProfile derives plain flags from what a blueprint declares
     bringsOwnSetup: false,
     hasAssistantProgram: false,
     entryNamedAfterWorkspace: false,
+    prefillsDescription: false,
     projectEntryPath: ''
   };
   assert.deepEqual(profile(null), blank);
-  assert.deepEqual(profile({ blank: true, name: 'Blank' }), blank);
+  assert.deepEqual(profile({ blank: true, builtin: true, name: 'Blank' }), blank);
 
   assert.deepEqual(profile(selfConfiguringTemplate), {
     blank: false,
     bringsOwnSetup: true,
     hasAssistantProgram: true,
     entryNamedAfterWorkspace: true,
+    prefillsDescription: false,
     projectEntryPath: '{{name}}.proj'
   });
   assert.equal(profile({ id: 'wizard', setup_wizard: { id: 'w' } }).bringsOwnSetup, true);
   assert.equal(profile({ id: 'quest', setup_quest: { id: 'q' } }).bringsOwnSetup, true);
-  assert.deepEqual(profile({ id: 'writing', project_entry: { relative_path: 'outline.md' } }), {
-    blank: false,
-    bringsOwnSetup: false,
-    hasAssistantProgram: false,
-    entryNamedAfterWorkspace: false,
-    projectEntryPath: 'outline.md'
-  });
+  assert.deepEqual(
+    profile({ id: 'writing', builtin: true, project_entry: { relative_path: 'outline.md' } }),
+    {
+      blank: false,
+      bringsOwnSetup: false,
+      hasAssistantProgram: false,
+      entryNamedAfterWorkspace: false,
+      prefillsDescription: true,
+      projectEntryPath: 'outline.md'
+    }
+  );
   assert.equal(
     profile({ id: 'dated', project_entry: { relative_path: 'notes-{{date}}.md' } })
       .entryNamedAfterWorkspace,
+    false
+  );
+  // Only stock blueprints offer their description; a stock blueprint whose
+  // project file is named after the workspace does not.
+  assert.equal(profile({ id: 'user-made' }).prefillsDescription, false);
+  assert.equal(
+    profile({ id: 'stock-song', builtin: true, project_entry: { relative_path: '{{name}}.proj' } })
+      .prefillsDescription,
     false
   );
 });
@@ -3048,25 +3062,37 @@ function nameAndDescriptionManager() {
 const catalogTemplate = {
   id: 'research-project',
   name: 'Research Project',
+  builtin: true,
   description: 'Synthesis docs, sources, weekly reading.'
 };
 
-test('choosing a blueprint never copies its description into the workspace (FR 13)', () => {
+test('only a stock blueprint prefills its description into the workspace (FR 13)', () => {
   const { manager, elements } = nameAndDescriptionManager();
   const description = elements.folderDescriptionInput;
 
   manager.handleWorkspaceTemplateSelected(catalogTemplate);
-  assert.equal(description.value, '');
+  assert.equal(description.value, catalogTemplate.description, 'stock blueprint');
 
-  // A value an earlier build autofilled is cleared on the next selection.
-  description.value = catalogTemplate.description;
-  description.dataset.autofillDescription = catalogTemplate.description;
+  // Switching to a plugin blueprint clears that autofill rather than keeping
+  // another blueprint's text.
   manager.handleWorkspaceTemplateSelected(selfConfiguringTemplate);
-  assert.equal(description.value, '');
+  assert.equal(description.value, '', 'plugin blueprint');
+
+  manager.handleWorkspaceTemplateSelected({
+    id: 'my-template',
+    name: 'My Template',
+    description: 'A template I made.'
+  });
+  assert.equal(description.value, '', 'user blueprint');
+
+  manager.handleWorkspaceTemplateSelected(catalogTemplate);
+  manager.handleWorkspaceTemplateSelected(null);
+  assert.equal(description.value, '', 'Blank clears the autofill');
 
   // Typed text survives any number of blueprint switches.
   description.value = 'Album two, side B';
   manager.handleWorkspaceTemplateSelected(catalogTemplate);
+  manager.handleWorkspaceTemplateSelected(selfConfiguringTemplate);
   manager.handleWorkspaceTemplateSelected(null);
   assert.equal(description.value, 'Album two, side B');
 });
