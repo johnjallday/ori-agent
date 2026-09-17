@@ -15,7 +15,7 @@
 
   const PROFILE_FIELDS = {
     [PROFILE_STANDALONE]: ['name', 'model', 'provider', 'reasoningEffort', 'systemPrompt'],
-    [PROFILE_TEMPLATE]: ['name', 'model', 'provider', 'systemPrompt']
+    [PROFILE_TEMPLATE]: ['name', 'model', 'provider', 'reasoningEffort', 'systemPrompt']
   };
 
   function text(value) {
@@ -40,10 +40,15 @@
     return `${safePrefix(prefix)}${text(suffix)}`;
   }
 
-  function supportsCodexReasoning(providerName, modelName) {
-    const provider = normalizedText(providerName).toLowerCase();
-    const model = normalizedText(modelName).toLowerCase();
-    return provider === 'codex' || model.includes('codex');
+  // Which models take a reasoning level is decided once, in
+  // reasoning-effort.js. Without it the field stays hidden rather than guessing.
+  function reasoningApi() {
+    return (typeof window !== 'undefined' && window.OriReasoningEffort) || null;
+  }
+
+  function supportsReasoning(providerName, modelName) {
+    const api = reasoningApi();
+    return Boolean(api && api.supports(providerName, modelName));
   }
 
   function validateName(value) {
@@ -183,23 +188,14 @@
     root.setAttribute('data-agent-create-profile', normalized);
     const prompt = field(root, 'systemPrompt');
     const promptHelp = root.querySelector('[data-agent-create-id="SystemPromptHelp"]');
-    const reasoning = field(root, 'reasoningEffort');
     if (normalized === PROFILE_TEMPLATE) {
       if (prompt) prompt.removeAttribute('maxlength');
       if (promptHelp) {
         promptHelp.textContent =
           'Blueprint instructions are staged with this workspace. Existing prompts are not truncated.';
       }
-      if (reasoning) {
-        reasoning.disabled = true;
-        reasoning.setAttribute('aria-readonly', 'true');
-      }
-    } else {
-      if (prompt) prompt.setAttribute('maxlength', '4000');
-      if (reasoning) {
-        reasoning.disabled = false;
-        reasoning.removeAttribute('aria-readonly');
-      }
+    } else if (prompt) {
+      prompt.setAttribute('maxlength', '4000');
     }
   }
 
@@ -251,25 +247,24 @@
     updateReasoning(controller);
   }
 
-  function ensureReasoningOption(select, value) {
-    if (!select || !value || Array.from(select.options).some(option => option.value === value))
-      return;
-    const option = document.createElement('option');
-    option.value = value;
-    option.textContent = value;
-    select.appendChild(option);
-  }
-
+  // Shows the reasoning level only for a model that takes one, offering exactly
+  // that provider's levels. The last level chosen (by the caller or the user)
+  // is kept as a preference, so browsing through a model that has no "max"
+  // does not lose it when a model that has one is picked again.
   function updateReasoning(controller) {
     const model = field(controller.host, 'model');
     const reasoning = field(controller.host, 'reasoningEffort');
     const section = controller.host.querySelector('[data-agent-create-section="reasoningEffort"]');
     if (!model || !reasoning || !section) return;
-    const show =
-      supportsCodexReasoning(selectedProvider(model), model.value) ||
-      (controller.profile === PROFILE_TEMPLATE && Boolean(normalizedText(reasoning.value)));
+    const provider = selectedProvider(model);
+    const show = supportsReasoning(provider, model.value);
     section.classList.toggle('d-none', !show);
-    if (controller.profile === PROFILE_STANDALONE) reasoning.disabled = !show;
+    reasoning.disabled = !show;
+    if (!show) return;
+    const api = reasoningApi();
+    api.syncSelect(reasoning, provider, model.value, controller.reasoningPreference);
+    const help = controller.host.querySelector('[data-agent-create-id="ReasoningHelp"]');
+    if (help) help.textContent = api.helpText(provider, model.value);
   }
 
   function setValues(controller, values) {
@@ -279,15 +274,10 @@
       const element = field(controller.host, name);
       if (element) element.value = text(input[name]);
     }
-    populateModels(controller, controller.providers, input);
-    const reasoning = field(controller.host, 'reasoningEffort');
-    if (reasoning && Object.prototype.hasOwnProperty.call(input, 'reasoningEffort')) {
-      ensureReasoningOption(reasoning, text(input.reasoningEffort));
-      reasoning.value = text(input.reasoningEffort);
-    } else if (reasoning && controller.profile === PROFILE_STANDALONE && !reasoning.value) {
-      reasoning.value = 'medium';
+    if (Object.prototype.hasOwnProperty.call(input, 'reasoningEffort')) {
+      controller.reasoningPreference = normalizedText(input.reasoningEffort);
     }
-    updateReasoning(controller);
+    populateModels(controller, controller.providers, input);
   }
 
   function readValues(host) {
@@ -310,7 +300,11 @@
     mountedFields(profile, controller?.omitFields).forEach(name => {
       if (name === 'name') values[name] = normalizedText(raw[name]);
       else if (name === 'systemPrompt') values[name] = normalizedText(raw[name]);
-      else values[name] = raw[name];
+      else if (name === 'reasoningEffort') {
+        // Only a level the selected model accepts; '' for every other model.
+        const api = reasoningApi();
+        values[name] = api ? api.normalize(raw.provider, raw.model, raw.reasoningEffort) : '';
+      } else values[name] = raw[name];
     });
     const errors = { name: validateName(raw.name) };
     if (profile === PROFILE_STANDALONE && raw.systemPrompt.length > 4000) {
@@ -351,6 +345,7 @@
       profile,
       omitFields,
       providers: normalizeProviders(config.providers),
+      reasoningPreference: '',
       get(name) {
         return field(host, name);
       },
@@ -376,6 +371,9 @@
     controllers.set(host, controller);
 
     field(host, 'model')?.addEventListener('change', () => updateReasoning(controller));
+    field(host, 'reasoningEffort')?.addEventListener('change', event => {
+      controller.reasoningPreference = normalizedText(event.target?.value);
+    });
     field(host, 'name')?.addEventListener('input', () => setFieldError(host, 'name', ''));
 
     setValues(controller, config.values || {});
@@ -395,7 +393,7 @@
     mountedFields,
     omitSections,
     scopedId,
-    supportsCodexReasoning,
+    supportsReasoning,
     getController(host) {
       return controllers.get(host) || null;
     }

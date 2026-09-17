@@ -10,6 +10,11 @@ const template = readFileSync(
 );
 
 globalThis.window = globalThis.window || {};
+// The form reads which models take a reasoning level from the shared module,
+// loaded before it as in head.tmpl.
+vm.runInThisContext(readFileSync(new URL('./reasoning-effort.js', import.meta.url), 'utf8'), {
+  filename: 'reasoning-effort.js'
+});
 vm.runInThisContext(source, { filename: 'agent-create-form.js' });
 const Form = globalThis.window.AgentCreateForm;
 
@@ -81,7 +86,13 @@ test('profiles expose only fields backed by their contracts', () => {
     'reasoningEffort',
     'systemPrompt'
   ]);
-  assert.deepEqual(Form.profileFields('template'), ['name', 'model', 'provider', 'systemPrompt']);
+  assert.deepEqual(Form.profileFields('template'), [
+    'name',
+    'model',
+    'provider',
+    'reasoningEffort',
+    'systemPrompt'
+  ]);
 });
 
 test('name validation matches the Go create and override contract', () => {
@@ -116,7 +127,7 @@ test('unknown current model is preserved as an explicit choice', () => {
   assert.equal(unknown[0].current, true);
 });
 
-test('template extraction omits read-only reasoning and preserves long prompts', () => {
+test('template extraction preserves long prompts and drops a level the model cannot take', () => {
   const longPrompt = `  ${'x'.repeat(4100)}  `;
   const host = fakeHost({
     name: '  Blueprint Agent  ',
@@ -131,9 +142,40 @@ test('template extraction omits read-only reasoning and preserves long prompts',
     name: 'Blueprint Agent',
     model: 'private-model',
     provider: 'custom',
+    reasoningEffort: '',
     systemPrompt: 'x'.repeat(4100)
   });
-  assert.equal('reasoningEffort' in result.values, false);
+});
+
+test('both profiles return a reasoning level only for Codex and Claude Code', () => {
+  for (const profile of ['template', 'standalone']) {
+    const extract = values => Form.extract(fakeHost({ name: 'Agent', ...values }), profile).values;
+    assert.equal(
+      extract({ provider: 'codex', model: 'gpt-5.6-sol', reasoningEffort: 'xhigh' })
+        .reasoningEffort,
+      'xhigh',
+      profile
+    );
+    assert.equal(
+      extract({ provider: 'claude_code', model: 'opus', reasoningEffort: 'max' }).reasoningEffort,
+      'max',
+      profile
+    );
+    assert.equal(
+      extract({ provider: 'codex', model: 'gpt-5.6-sol', reasoningEffort: 'max' }).reasoningEffort,
+      '',
+      `${profile}: Codex has no max`
+    );
+    assert.equal(
+      extract({ provider: 'claude', model: 'claude-opus-5', reasoningEffort: 'high' })
+        .reasoningEffort,
+      '',
+      `${profile}: API providers take none`
+    );
+  }
+  assert.equal(Form.supportsReasoning('claude_code', 'sonnet'), true);
+  assert.equal(Form.supportsReasoning('openai', 'gpt-5-codex'), true);
+  assert.equal(Form.supportsReasoning('claude', 'claude-opus-5'), false);
 });
 
 test('standalone extraction validates the prompt cap and reports field errors', () => {
@@ -155,7 +197,8 @@ test('a mount can omit the prompt: its section becomes a note and extraction nev
   assert.deepEqual(Form.mountedFields('template', ['systemPrompt', 'name']), [
     'name',
     'model',
-    'provider'
+    'provider',
+    'reasoningEffort'
   ]);
 
   const replaced = [];
@@ -200,11 +243,10 @@ test('a mount can omit the prompt: its section becomes a note and extraction nev
 
   const host = fakeHost({ name: 'Studio Manager', model: 'm', provider: 'p', systemPrompt: 'x' });
   const result = Form.extract({ host, profile: 'template', omitFields: ['systemPrompt'] });
-  assert.deepEqual(result.values, { name: 'Studio Manager', model: 'm', provider: 'p' });
-});
-
-test('Codex reasoning detection accepts provider or model identity', () => {
-  assert.equal(Form.supportsCodexReasoning('codex', 'gpt-5'), true);
-  assert.equal(Form.supportsCodexReasoning('openai', 'gpt-5-codex'), true);
-  assert.equal(Form.supportsCodexReasoning('anthropic', 'claude-opus'), false);
+  assert.deepEqual(result.values, {
+    name: 'Studio Manager',
+    model: 'm',
+    provider: 'p',
+    reasoningEffort: ''
+  });
 });

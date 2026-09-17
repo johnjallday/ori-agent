@@ -10,6 +10,10 @@ const source = readFileSync(new URL('./create-workspace-team-draft.js', import.m
 // and a cross-realm load makes every structural assertion fail spuriously.
 function loadDraftModule() {
   globalThis.window = globalThis.window || {};
+  // Loaded first, as in head.tmpl: it decides a model's default reasoning level.
+  vm.runInThisContext(readFileSync(new URL('./reasoning-effort.js', import.meta.url), 'utf8'), {
+    filename: 'reasoning-effort.js'
+  });
   vm.runInThisContext(source, { filename: 'create-workspace-team-draft.js' });
   return globalThis.window.CreateWorkspaceTeamDraft;
 }
@@ -214,6 +218,87 @@ test('filling a role by Create and another by Assign counts both and staffs exac
   const engineer = view.roleRoster.roles.find(role => role.role_id === 'engineer');
   assert.equal(engineer.agent.role, 'specialist');
   assert.equal(engineer.source, 'assigned');
+});
+
+test('a role filled by Create carries its reasoning level; Assign never does', () => {
+  const draft = Draft.createDraft();
+  Draft.setPlanReady(
+    draft,
+    'template:studio',
+    planResponse([], { assistant_program: assistantProgramPlan() })
+  );
+  Draft.setSavedRosterReady(draft, [{ name: 'My Mixer', role: 'specialist' }]);
+  Draft.setRoleFill(draft, 'producer', {
+    mode: 'create',
+    name: 'June',
+    provider: 'claude_code',
+    model: 'opus',
+    reasoningEffort: 'max'
+  });
+  Draft.setRoleFill(draft, 'engineer', {
+    mode: 'assign',
+    name: 'My Mixer',
+    reasoningEffort: 'high'
+  });
+  assert.deepEqual(Draft.derive(draft).payload.role_staffing, [
+    {
+      role_id: 'producer',
+      mode: 'create',
+      name: 'June',
+      provider: 'claude_code',
+      model: 'opus',
+      reasoning_effort: 'max'
+    },
+    { role_id: 'engineer', mode: 'assign', name: 'My Mixer' }
+  ]);
+});
+
+test('a changed reasoning level is an override; showing the model default is not', () => {
+  const managerPlan = model =>
+    readyDraft(
+      [planAgent('Group Manager', { entry_point: true, action: 'create', ...model })],
+      'group-roster',
+      { template_id: 'group-roster' }
+    );
+
+  // A Codex model with no declared level shows Medium; saving it changes nothing.
+  const codex = managerPlan({ model: 'gpt-5.6-sol', provider: 'codex' });
+  Draft.saveSetup(codex, 0, {
+    name: 'Group Manager',
+    model: 'gpt-5.6-sol',
+    provider: 'codex',
+    reasoningEffort: 'medium'
+  });
+  assert.equal(Draft.toCreatePayload(codex).template_agent_overrides, undefined);
+  Draft.saveSetup(codex, 0, {
+    name: 'Group Manager',
+    model: 'gpt-5.6-sol',
+    provider: 'codex',
+    reasoningEffort: 'xhigh'
+  });
+  assert.deepEqual(Draft.toCreatePayload(codex).template_agent_overrides, [
+    { index: 0, reasoning_effort: 'xhigh' }
+  ]);
+  assert.equal(Draft.derive(codex).roster[0].reasoningEffort, 'xhigh');
+
+  // Claude Code's default is no level at all.
+  const claude = managerPlan({ model: 'opus', provider: 'claude_code' });
+  Draft.saveSetup(claude, 0, {
+    name: 'Group Manager',
+    model: 'opus',
+    provider: 'claude_code',
+    reasoningEffort: ''
+  });
+  assert.equal(Draft.toCreatePayload(claude).template_agent_overrides, undefined);
+  Draft.saveSetup(claude, 0, {
+    name: 'Group Manager',
+    model: 'opus',
+    provider: 'claude_code',
+    reasoningEffort: 'max'
+  });
+  assert.deepEqual(Draft.toCreatePayload(claude).template_agent_overrides, [
+    { index: 0, reasoning_effort: 'max' }
+  ]);
 });
 
 test('clearing a role returns it to empty and drops it from the request', () => {

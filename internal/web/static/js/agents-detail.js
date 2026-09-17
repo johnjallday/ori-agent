@@ -12,14 +12,25 @@ let globalMCPStats = {};
 let profileSelectedTags = [];
 let profileAvatarImage = null;
 
-function supportsCodexReasoning(providerName, modelName) {
-  const provider = String(providerName || '')
-    .trim()
-    .toLowerCase();
-  const model = String(modelName || '')
-    .trim()
-    .toLowerCase();
-  return provider === 'codex' || model.includes('codex');
+// Which models take a reasoning level (Codex, Claude Code) is decided once, in
+// modules/reasoning-effort.js.
+function supportsReasoning(providerName, modelName) {
+  return Boolean(window.OriReasoningEffort?.supports(providerName, modelName));
+}
+
+// The level last chosen in the editor, kept across model changes so browsing a
+// model without "max" does not lose it.
+let editReasoningPreference = '';
+
+function reasoningLabel(providerName, modelName, effort) {
+  const api = window.OriReasoningEffort;
+  const level = api?.normalize(providerName, modelName, effort) || '';
+  const fallback = api?.defaultFor(providerName, modelName) || '';
+  const shown = level || fallback;
+  if (!shown) return 'Claude Code default';
+  return (
+    api?.options(providerName, modelName).find(option => option.value === shown)?.label || shown
+  );
 }
 
 function formatAgentRoleLabel(roleValue) {
@@ -41,12 +52,17 @@ function updateEditReasoningVisibility() {
     providerFilter?.value ||
     currentAgent?.provider ||
     '';
-  const show = supportsCodexReasoning(provider, modelSelect.value);
+  const show = supportsReasoning(provider, modelSelect.value);
 
   field.style.display = show ? '' : 'none';
   select.disabled = !show;
-  if (show && !select.value) {
-    select.value = 'medium';
+  if (show) {
+    window.OriReasoningEffort.syncSelect(
+      select,
+      provider,
+      modelSelect.value,
+      editReasoningPreference
+    );
   }
 }
 
@@ -561,6 +577,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.requestAnimationFrame(updateEditReasoningVisibility);
   });
   document.getElementById('editModel')?.addEventListener('change', updateEditReasoningVisibility);
+  document.getElementById('editReasoningEffort')?.addEventListener('change', event => {
+    editReasoningPreference = event.target.value || '';
+  });
   setupProfileEditor();
 
   const expertToggle = document.getElementById('expertModeToggle');
@@ -713,9 +732,11 @@ function renderAgentDetails() {
   const reasoningRow = document.getElementById('agentReasoningRow');
   const reasoningEl = document.getElementById('agentReasoningEffort');
   const reasoningEffort = currentAgent.reasoning_effort || '';
-  const showReasoning = supportsCodexReasoning(provider, currentAgent.model);
+  const showReasoning = supportsReasoning(provider, currentAgent.model);
   if (reasoningRow) reasoningRow.style.display = showReasoning ? '' : 'none';
-  if (reasoningEl) reasoningEl.textContent = reasoningEffort || 'Medium';
+  if (reasoningEl && showReasoning) {
+    reasoningEl.textContent = reasoningLabel(provider, currentAgent.model, reasoningEffort);
+  }
 
   const tempEl = document.getElementById('agentTemperature');
   if (tempEl) tempEl.textContent = currentAgent.temperature ?? 'Not set';
@@ -1193,10 +1214,9 @@ function populateConfigForm() {
   const tempInput = document.getElementById('editTemperature');
   const maxTokensInput = document.getElementById('editMaxTokens');
   const roleSelect = document.getElementById('editRole');
-  const reasoningSelect = document.getElementById('editReasoningEffort');
 
   if (roleSelect) roleSelect.value = currentAgent.role || 'general';
-  if (reasoningSelect) reasoningSelect.value = currentAgent.reasoning_effort || 'medium';
+  editReasoningPreference = currentAgent.reasoning_effort || '';
   if (tempInput) tempInput.value = currentAgent.temperature ?? '';
   if (maxTokensInput) maxTokensInput.value = currentAgent.max_output_tokens || '';
 
@@ -1227,7 +1247,7 @@ async function saveConfigChanges() {
   const tempRaw = document.getElementById('editTemperature')?.value;
   const maxTokensRaw = document.getElementById('editMaxTokens')?.value;
   const role = document.getElementById('editRole')?.value || 'general';
-  const reasoningEffort = document.getElementById('editReasoningEffort')?.value || 'medium';
+  const reasoningEffort = document.getElementById('editReasoningEffort')?.value || '';
 
   if (!model) {
     setConfigStatus('Model is required to save configuration.', 'error');
@@ -1256,8 +1276,13 @@ async function saveConfigChanges() {
   if (provider) {
     payload.llm_provider = provider;
   }
-  if (supportsCodexReasoning(provider, model)) {
-    payload.reasoning_effort = reasoningEffort;
+  if (supportsReasoning(provider, model)) {
+    // An empty level clears a saved one (Claude Code's default sends no flag).
+    payload.reasoning_effort = window.OriReasoningEffort.normalize(
+      provider,
+      model,
+      reasoningEffort
+    );
   }
 
   try {

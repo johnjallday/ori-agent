@@ -4198,6 +4198,8 @@ export class WorkspaceCommandView {
     if (Object.prototype.hasOwnProperty.call(values, 'systemPrompt')) {
       body.system_prompt = values.systemPrompt || '';
     }
+    // Present only for a model that takes a level (Codex, Claude Code).
+    if (values.reasoningEffort) body.reasoning_effort = values.reasoningEffort;
     const outcome = await this.fillRole(roleId, body);
     if (outcome && outcome.error) {
       // The server owns name collisions; surface its message on the form

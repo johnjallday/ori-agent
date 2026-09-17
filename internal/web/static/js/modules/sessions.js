@@ -6100,6 +6100,7 @@ const sessionManager = {
         model: result.values.model || '',
         system_prompt: result.values.systemPrompt || ''
       };
+      if (result.values.reasoningEffort) body.reasoning_effort = result.values.reasoningEffort;
     }
 
     operation.phase = 'committing';
@@ -6442,7 +6443,8 @@ const sessionManager = {
         name,
         provider: values.provider,
         model: values.model,
-        systemPrompt: values.systemPrompt
+        systemPrompt: values.systemPrompt,
+        reasoningEffort: values.reasoningEffort
       })
     ) {
       return;

@@ -35,6 +35,10 @@
        team is the exact failure this component exists to prevent. It reads
        AgentAvatar for a filled role's identity, so it must load after it. -->
   <script defer src="/js/modules/workspace-role-roster.js"></script>
+  <!-- Which models take a reasoning level (Codex, Claude Code) and which levels.
+       Every agent form reads it — the shared Create form, the agent page
+       editor, and the legacy create page — so it loads before all of them. -->
+  <script defer src="/js/modules/reasoning-effort.js"></script>
   <script defer src="/js/modules/update-checker.js"></script>
   <script defer src="/js/modules/vault-modal.js"></script>
   <script defer src="/js/modules/keyboard-navigation.js"></script>

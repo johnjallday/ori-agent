@@ -85,16 +85,6 @@ function isWorkspaceGeneratedMCPServer(server) {
   return /^ws:[^:]+:mcp:/i.test(name);
 }
 
-function supportsCodexReasoning(providerName, modelName) {
-  const provider = String(providerName || '')
-    .trim()
-    .toLowerCase();
-  const model = String(modelName || '')
-    .trim()
-    .toLowerCase();
-  return provider === 'codex' || model.includes('codex');
-}
-
 function normalizeProviderName(value) {
   return String(value || '')
     .trim()
@@ -180,20 +170,35 @@ function selectModelOption(modelSelect, providerName, modelName) {
   return false;
 }
 
-function updateAgentReasoningVisibility() {
+// Shows the reasoning level only for a model that takes one (Codex, Claude
+// Code), with that provider's levels. `preferred` seeds a level explicitly (a
+// flow's seed or a reset); without it the current choice is kept when the
+// newly selected model accepts it.
+function updateAgentReasoningVisibility(preferred) {
   const field = document.getElementById('agentReasoningField');
   const select = document.getElementById('agentReasoning');
   const modelSelect = document.getElementById('agentModel');
+  const reasoning = window.OriReasoningEffort;
   if (!field || !select || !modelSelect) return;
 
   const selectedOption = modelSelect.selectedOptions?.[0];
   const provider = selectedOption?.getAttribute('data-provider') || '';
-  const show = supportsCodexReasoning(provider, modelSelect.value);
+  const show = Boolean(reasoning && reasoning.supports(provider, modelSelect.value));
 
   field.classList.toggle('d-none', !show);
   select.disabled = !show;
-  if (show && !select.value) {
-    select.value = 'medium';
+  if (!show) return;
+  reasoning.syncSelect(
+    select,
+    provider,
+    modelSelect.value,
+    preferred === undefined ? select.value : preferred
+  );
+  const help = document.getElementById('agentReasoningHelp');
+  if (help) help.textContent = reasoning.helpText(provider, modelSelect.value);
+  if (preferred !== undefined) {
+    // The shared form remembers the choice across model changes.
+    select.dispatchEvent(new Event('change'));
   }
 }
 
@@ -333,10 +338,6 @@ function showAddAgentModal(options = {}) {
     populateModelSelect(agentModelInput);
   }
   setAgentModelRecommendationMessage('');
-  const agentReasoningInput = document.getElementById('agentReasoning');
-  if (agentReasoningInput) {
-    agentReasoningInput.value = 'medium';
-  }
   if (agentTemperatureInput) {
     agentTemperatureInput.value = '1.0';
     if (temperatureValueSpan) {
@@ -350,7 +351,8 @@ function showAddAgentModal(options = {}) {
   resetAgentCreationCapabilitySelections();
   setAgentCreationCapabilityLoadingState();
   updateAgentCreationCapabilityCopy();
-  updateAgentReasoningVisibility();
+  // A fresh form starts at the selected model's default level.
+  updateAgentReasoningVisibility('');
 
   modal.show();
   void loadAgentCreationCapabilityCatalog();
@@ -426,9 +428,7 @@ async function applyPendingAgentCreationFlowToModal() {
 
   if (options.seedModel && agentModelInput) {
     selectModelOption(agentModelInput, options.seedProvider, options.seedModel);
-    if (agentReasoningInput && supportsCodexReasoning(options.seedProvider, options.seedModel)) {
-      agentReasoningInput.value = options.seedReasoningEffort || 'medium';
-    }
+    if (agentReasoningInput) updateAgentReasoningVisibility(options.seedReasoningEffort || '');
   } else if (
     options.seedRole === 'orchestrator' &&
     agentModelInput &&
@@ -440,9 +440,7 @@ async function applyPendingAgentCreationFlowToModal() {
     // right default for an orchestrator, matching the backend auto-config
     // override in validateAndSanitizeConfig.
     selectModelOption(agentModelInput, systemPref.provider, systemPref.model);
-    if (agentReasoningInput && supportsCodexReasoning(systemPref.provider, systemPref.model)) {
-      agentReasoningInput.value = systemPref.reasoning_effort || 'medium';
-    }
+    if (agentReasoningInput) updateAgentReasoningVisibility(systemPref.reasoning_effort || '');
   }
 
   if (options.seedSystemPrompt) {
@@ -1334,10 +1332,8 @@ async function createNewAgent() {
       if (formValues.provider) {
         requestBody.llm_provider = formValues.provider;
       }
-      if (
-        supportsCodexReasoning(formValues.provider, formValues.model) &&
-        formValues.reasoningEffort
-      ) {
+      // The form returns a level only for a model that takes one.
+      if (formValues.reasoningEffort) {
         requestBody.reasoning_effort = formValues.reasoningEffort;
       }
     }
@@ -1395,16 +1391,13 @@ async function createNewAgent() {
     if (agentTemperatureInput) {
       agentTemperatureInput.value = '1.0';
     }
-    if (agentReasoningInput) {
-      agentReasoningInput.value = 'medium';
-    }
     if (agentAllowWebSearchInput) {
       agentAllowWebSearchInput.checked = true;
     }
     resetBaseAutoConfigState();
     resetAgentCreationCapabilitySelections();
     clearPendingAgentCreationFlow();
-    updateAgentReasoningVisibility();
+    if (agentReasoningInput) updateAgentReasoningVisibility('');
 
     // Show success message
     agentsLog.info('Agent created successfully', {

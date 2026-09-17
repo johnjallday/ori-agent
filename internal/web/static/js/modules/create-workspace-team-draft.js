@@ -44,8 +44,17 @@
     model: 'model',
     provider: 'provider',
     systemPrompt: 'system_prompt',
-    role: 'role'
+    role: 'role',
+    reasoningEffort: 'reasoning_effort'
   };
+
+  // The level a model uses when none is chosen: Codex's medium, otherwise none.
+  // Read from reasoning-effort.js when loaded; the fallback keeps this module
+  // usable on its own (its unit tests), where no default applies.
+  function reasoningDefault(provider, model) {
+    const api = typeof window !== 'undefined' ? window.OriReasoningEffort : null;
+    return api ? api.defaultFor(provider, model) : '';
+  }
 
   function has(object, key) {
     return Boolean(object) && Object.prototype.hasOwnProperty.call(object, key);
@@ -302,7 +311,9 @@
       model: text(fill.model),
       // Carried so an edit made in the Create form reaches the created agent.
       // Empty means "use what the blueprint proposes".
-      systemPrompt: text(fill.systemPrompt)
+      systemPrompt: text(fill.systemPrompt),
+      // The Create form's reasoning level; empty means the model's default.
+      reasoningEffort: text(fill.reasoningEffort)
     };
   }
 
@@ -750,11 +761,18 @@
       if (!has(fields, field)) return;
       const value = text(fields[field]);
       const original = text(planAgent[field]);
-      const sameName =
+      let same =
         field === 'name' && planAgent.action === 'reuse'
           ? agentKey(value) === agentKey(original)
           : value === original;
-      if (!sameName) next[field] = value;
+      // A form showing the model's default level for a plan that named none
+      // (a Codex model without a declared level shows Medium) is not an edit.
+      if (!same && field === 'reasoningEffort' && !original) {
+        const provider = has(fields, 'provider') ? fields.provider : planAgent.provider;
+        const model = has(fields, 'model') ? fields.model : planAgent.model;
+        same = value === reasoningDefault(text(provider), text(model));
+      }
+      if (!same) next[field] = value;
     });
     if (Object.keys(next).length > 0) {
       draft.overrides.set(index, next);
@@ -1070,7 +1088,9 @@
         : modelSourceLabel(definition.modelSource),
       inheritsModel: text(model) === '',
       role: definition.role,
-      reasoningEffort: definition.reasoningEffort,
+      reasoningEffort: has(override, 'reasoningEffort')
+        ? override.reasoningEffort
+        : definition.reasoningEffort,
       systemPrompt: has(override, 'systemPrompt') ? override.systemPrompt : definition.systemPrompt,
       appearance: definition.appearance,
       tools: definition.tools,
@@ -1639,6 +1659,7 @@
             // Sent only when the user actually edited it; absent means the
             // server applies what the blueprint declared.
             if (fill.systemPrompt) item.system_prompt = fill.systemPrompt;
+            if (fill.reasoningEffort) item.reasoning_effort = fill.reasoningEffort;
           }
           return item;
         });
