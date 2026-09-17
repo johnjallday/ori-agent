@@ -270,7 +270,31 @@ test.describe('creating an agent with a character', () => {
     await expect(page.locator('#stageCharacter')).toContainText('Insight Researcher');
   });
 
-  test('Skip for now is a first-class path', async ({ page }) => {
+  test('an untouched create form gives the new agent a suggested face', async ({ page }) => {
+    await skipOnboarding(page);
+    await page.goto('/agents', { waitUntil: 'domcontentloaded' });
+
+    const name = unique('PWFace');
+    await page.locator('#newAgentBtn').click();
+    await page.locator('#cr-name').fill(name);
+    await page.locator('#cr-role').selectOption('researcher');
+
+    // The form opens on a character suited to the role and says it chose it,
+    // so the suggestion is never mistaken for the user's own pick.
+    await expect(page.locator('#cr-appearance-mode-character')).toBeChecked();
+    await expect(page.locator('#cr-appearance-root')).toContainText('Suggested for this role');
+
+    await page.locator('#createSubmit').click();
+    await expect(page.locator('#stageName')).toHaveText(name);
+    await expect(page.locator('#stageCharacter')).toContainText('Character art:');
+    await expect(page.locator(`.roster-card[data-name="${name}"] .agent-avatar`)).not.toHaveClass(
+      /agent-avatar--generated/
+    );
+  });
+
+  test('the generated portrait is one click away and the suggestion respects it', async ({
+    page
+  }) => {
     await skipOnboarding(page);
     await page.goto('/agents', { waitUntil: 'domcontentloaded' });
 
@@ -278,8 +302,11 @@ test.describe('creating an agent with a character', () => {
     await page.locator('#newAgentBtn').click();
     await page.locator('#cr-name').fill(name);
 
-    // Skipping is not a separate path any more — it is simply not touching the
-    // Appearance section, which starts on Generated (FR-4).
+    // Generated is a choice, not the absence of one (FR-5). Making it is a
+    // decision, and a later role change must not talk the form back out of it.
+    await expect(page.locator('#cr-appearance-mode-character')).toBeChecked();
+    await page.locator('#cr-appearance-mode-generated').check();
+    await page.locator('#cr-role').selectOption('analyzer');
     await expect(page.locator('#cr-appearance-mode-generated')).toBeChecked();
 
     await page.locator('#createSubmit').click();

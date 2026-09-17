@@ -186,6 +186,15 @@
       coachmarkCopy: document.getElementById('rosterCoachmarkCopy'),
       coachmarkNext: document.getElementById('rosterCoachmarkNext'),
       coachmarkDismiss: document.getElementById('rosterCoachmarkDismiss'),
+      faces: document.getElementById('rosterFaces'),
+      facesCopy: document.getElementById('rosterFacesCopy'),
+      facesGive: document.getElementById('rosterFacesGive'),
+      facesDismiss: document.getElementById('rosterFacesDismiss'),
+      facesDialog: document.getElementById('facesDialog'),
+      facesBody: document.getElementById('facesBody'),
+      facesCancel: document.getElementById('facesCancel'),
+      facesConfirm: document.getElementById('facesConfirm'),
+      nextStep: document.getElementById('stageNextStep'),
       emptyMsg: document.getElementById('rosterEmptyMsg'),
       emptyClearFilters: document.getElementById('rosterEmptyClearFilters'),
       emptyCreate: document.getElementById('rosterEmptyCreate')
@@ -366,6 +375,16 @@
       e.preventDefault();
       closeBulkTags();
     });
+    els.facesGive.addEventListener('click', openFaces);
+    els.facesDismiss.addEventListener('click', dismissFacesPrompt);
+    els.facesCancel.addEventListener('click', closeFaces);
+    els.facesConfirm.addEventListener('click', runFaces);
+    els.facesBody.addEventListener('change', reflectFacesConfirm);
+    els.facesDialog.addEventListener('cancel', function (e) {
+      e.preventDefault();
+      closeFaces();
+    });
+
     els.bulkFavorite.addEventListener('click', function () {
       runBulkFavorite(true);
     });
@@ -1158,6 +1177,7 @@
     var shown = state.filtered.length;
 
     renderStatusTiles();
+    renderFacesPrompt();
     reflectViewToggle();
     reflectGroupControl();
 
@@ -1427,6 +1447,10 @@
     coachmarkStep = index;
     els.coachmarkCopy.textContent = step.copy;
     els.coachmark.hidden = false;
+    // The second step points at a checkbox, and checkboxes are otherwise hidden
+    // until a card is hovered. A hint cannot point at something invisible.
+    if (els.list)
+      els.list.classList.toggle('is-teaching-select', step.key === 'select_agent_check');
     els.coachmarkNext.hidden = index >= COACHMARK_STEPS.length - 1;
     // awaitTarget, because cards mount after the list request settles and this
     // can run in the same tick as the render. The guide's own machinery handles
@@ -1441,6 +1465,7 @@
   function dismissCoachmark() {
     coachmarkStep = COACHMARK_STEPS.length;
     if (els.coachmark) els.coachmark.hidden = true;
+    if (els.list) els.list.classList.remove('is-teaching-select');
     if (window.OriGuide && typeof window.OriGuide.clearControlMark === 'function') {
       window.OriGuide.clearControlMark();
     }
@@ -1495,21 +1520,26 @@
       }
     });
     var ready = total - needs - disabled;
-    els.stats.hidden = false;
-    // Reading order matches the collection question the header asks: how many
-    // agents do I have, how many are ready, how many need me (PRD FR5).
-    // Disabled is a real bucket the health rule already produces, so it is kept
-    // rather than folded into another count.
-    els.stats.innerHTML =
-      statTile('total', 'Agents', total) +
-      statTile('ready', 'Ready', ready) +
-      statTile('needs', 'Needs attention', needs) +
-      statTile('disabled', 'Disabled', disabled);
+    // Only what needs the reader is stated. "13 agents, 13 ready, 0, 0" was four
+    // tiles of nothing to act on, and the count already sits above the cards. A
+    // bucket earns a pill when it holds a problem, or when it is the active
+    // filter — a filter restored from the URL has to stay visible so it can be
+    // switched off from where it was switched on.
+    var pills = '';
+    if (needs > 0 || state.filters.health.has('needs')) {
+      pills += statTile('needs', needs === 1 ? 'needs attention' : 'need attention', needs);
+    }
+    if (disabled > 0 || state.filters.health.has('disabled')) {
+      pills += statTile('disabled', 'disabled', disabled);
+    }
+    if (state.filters.health.has('ready')) pills += statTile('ready', 'ready', ready);
+    els.stats.hidden = pills === '';
+    els.stats.innerHTML = pills;
   }
 
-  // Each tile is a toggle filter button (PRD FR72). "Total" clears the health
-  // filter; the others toggle their health bucket. Selection is reflected with
-  // aria-pressed + an is-selected class (not color alone).
+  // Each pill is a toggle filter button (PRD FR72) over its health bucket.
+  // Selection is reflected with aria-pressed + an is-selected class (not color
+  // alone).
   function statTile(kind, label, value) {
     var zero = value === 0 ? ' roster-stat--zero' : '';
     var health = kind === 'total' ? 'total' : kind;
@@ -1920,8 +1950,8 @@
     renderCharacterLabel(listItem);
     var heroVm = viewFor(listItem);
     els.favorite.hidden = !heroVm.favorite;
-    els.purpose.textContent = heroVm.hasDescription ? heroVm.description : 'No description yet.';
-    els.purpose.classList.toggle('is-missing', !heroVm.hasDescription);
+    renderHeroPurpose(heroVm);
+    renderNextStep(name, listItem);
     reflectFavoriteAction(heroVm);
     // Deep-link to the full agent detail page (/agents/{name}). The server routes
     // this to the rich editor for catalog agents and to the dedicated read-only
@@ -1953,6 +1983,97 @@
         renderWorkspaces(name, listItem, null);
         console.error('[roster] detail failed', err);
       });
+  }
+
+  // The hero's purpose line. An agent's own description when it has one;
+  // otherwise what its ROLE does, from the role catalog, which says more about a
+  // Commander than "No description yet." ever did. The two are kept apart — a
+  // different style, and "Role:" for a screen reader — so a catalog sentence is
+  // never mistaken for something the user wrote about this agent.
+  function renderHeroPurpose(vm) {
+    var tagline = String((vm.roleEntry && vm.roleEntry.tagline) || '').trim();
+    els.purpose.classList.toggle('is-missing', !vm.hasDescription && !tagline);
+    els.purpose.classList.toggle('is-role', !vm.hasDescription && !!tagline);
+    if (vm.hasDescription) {
+      els.purpose.textContent = vm.description;
+      els.purpose.removeAttribute('title');
+      return;
+    }
+    if (!tagline) {
+      els.purpose.textContent = 'No description yet.';
+      els.purpose.removeAttribute('title');
+      return;
+    }
+    els.purpose.innerHTML = '<span class="visually-hidden">Role: </span>' + esc(tagline);
+    els.purpose.title = 'What this role does. A description of your own replaces it.';
+  }
+
+  // The system assistant is reached from Home, not by being placed in a
+  // workspace, and it wears Ori's own reserved identity — so neither "add it to
+  // a workspace" nor "give it a character" is advice that applies to it.
+  function isSystemAssistant(agent) {
+    var name = String((agent && agent.name) || '')
+      .trim()
+      .toLowerCase();
+    return name === 'ask ori' || name === 'workspace manager' || name === 'ori';
+  }
+
+  // An agent that has never done anything gets one sentence and the one step
+  // that would change that. "Never" is read from what the server counts — a
+  // message or any experience — not from last_active, which is stamped at
+  // creation and so is never empty.
+  //
+  // Built-ins and the system assistant are skipped: they are not placed in
+  // workspaces, so there is no honest next step to offer from here.
+  function renderNextStep(name, listItem) {
+    if (!els.nextStep) return;
+    var stats = (listItem && listItem.statistics) || {};
+    var evo = (listItem && listItem.evolution) || {};
+    var used =
+      Number(stats.message_count || 0) > 0 ||
+      Number(evo.experience || 0) > 0 ||
+      Number(evo.level || 0) > 0;
+    if (used || isPermanent(listItem) || isSystemAssistant(listItem)) {
+      els.nextStep.hidden = true;
+      els.nextStep.innerHTML = '';
+      return;
+    }
+
+    var members = Array.isArray(listItem.workspaces) ? listItem.workspaces : [];
+    // A workspace without a folder_slug has no page to link to (see
+    // readonlyWsRow), so it cannot be where the first task is given.
+    var home = members.filter(function (ws) {
+      return ws && ws.folder_slug;
+    })[0];
+
+    var copy;
+    var href;
+    var label;
+    if (home) {
+      copy = esc(name) + ' has not done any work yet.';
+      // ?agent= is the workspace page's own key for "open on this agent", and
+      // it is the lower-cased name (workspace-detail.js normalizeAgentName).
+      // That view is where Give Task lives.
+      href =
+        '/workspaces/' +
+        encodeURIComponent(home.folder_slug) +
+        '?agent=' +
+        encodeURIComponent(String(name).trim().toLowerCase());
+      label = 'Give a first task in ' + esc(home.name || 'its workspace') + ' ↗';
+    } else {
+      copy = esc(name) + ' is not in a workspace yet, so there is nowhere to give it work.';
+      href = detailHref(name, 'workspaces');
+      label = 'Add to a workspace ↗';
+    }
+    els.nextStep.innerHTML =
+      '<p class="stage__nextstep-copy">' +
+      copy +
+      '</p><a class="stage__nextstep-link" href="' +
+      esc(href) +
+      '">' +
+      label +
+      '</a>';
+    els.nextStep.hidden = false;
   }
 
   // Stage-panel progression block (PRD FR18): role emblem + name, level,
@@ -2397,7 +2518,11 @@
       idPrefix: 'cr-appearance',
       mode: 'create',
       agent: { name: val('cr-name'), source: 'user', role: val('cr-role') },
-      takenCharacterIds: takenCharacterIds
+      takenCharacterIds: takenCharacterIds,
+      // A new agent starts with a face suited to its role instead of a
+      // monogram. It is a suggestion in the form, shown and changeable before
+      // anything is created — not a change to what the API does by default.
+      suggestCharacter: true
     });
 
     // The generated portrait is seeded from the agent's name, so the preview
@@ -3388,6 +3513,9 @@
   function updateBulkBar() {
     var total = state.checked.size;
     if (els.clearSelection) els.clearSelection.hidden = total === 0;
+    // Once anything is checked the page is in selection mode, and every card
+    // shows its checkbox again rather than only the one under the pointer.
+    if (els.list) els.list.classList.toggle('is-selecting', total > 0);
     if (!els.bulkBar) return;
     if (total === 0) {
       els.bulkBar.hidden = true;
@@ -3949,6 +4077,245 @@
     var msg = (summary.succeeded || 0) + ' updated';
     if (summary.skipped) msg += ', ' + summary.skipped + ' skipped';
     announce(msg + '.');
+  }
+
+  /* ---- give faces ------------------------------------------------------------ */
+
+  // Agents created by a template, a setup journey, or the API arrive without an
+  // appearance choice and wear the generated monogram. This offers them the same
+  // role-matched character a create form now suggests — as an offer. Appearance
+  // stays the user's: nothing is written until the dialog is confirmed, every
+  // row can be unchecked, and "Not now" is remembered.
+
+  var FACES_DISMISSED_KEY = 'ori.roster.facesDismissed';
+
+  // "No face yet" means the default monogram with no sign it was chosen. A
+  // saved colour, character, or upload says the user has been to the editor and
+  // decided — and Generated is a real choice (FR-5), so those are left alone
+  // even though they render a monogram too. Built-ins have no editable
+  // definition, and the system assistant is Ori — whose identity is reserved,
+  // not picked from the working cast — so neither is ever offered one.
+  function isFaceless(agent) {
+    if (!agent || isPermanent(agent) || isSystemAssistant(agent)) return false;
+    var appearance = normalizeAppearance(agent.appearance);
+    if (appearance.mode !== window.AgentAvatar.MODES.GENERATED) return false;
+    return !appearance.generated.color && !appearance.character && !appearance.uploaded;
+  }
+
+  function facelessAgents() {
+    return state.agents.filter(isFaceless).sort(function (a, b) {
+      return String(a.name).localeCompare(String(b.name));
+    });
+  }
+
+  function loadFacesDismissed() {
+    try {
+      var parsed = JSON.parse(window.localStorage.getItem(FACES_DISMISSED_KEY) || '[]');
+      return new Set(Array.isArray(parsed) ? parsed : []);
+    } catch (err) {
+      return new Set();
+    }
+  }
+
+  // The offer returns only for agents it has not been declined for, so adding a
+  // workspace from a blueprint next week brings it back for those new agents
+  // without re-asking about the ones already answered.
+  function renderFacesPrompt() {
+    if (!els.faces) return;
+    var catalog = window.CharacterCatalog;
+    var ready =
+      !!catalog && typeof catalog.recommend === 'function' && catalog.working().length > 0;
+    var faceless = ready ? facelessAgents() : [];
+    var dismissed = loadFacesDismissed();
+    var unanswered = faceless.filter(function (agent) {
+      return !dismissed.has(agent.name);
+    });
+    if (unanswered.length === 0) {
+      els.faces.hidden = true;
+      return;
+    }
+    var one = faceless.length === 1;
+    els.facesCopy.textContent = one
+      ? '1 agent has no face yet.'
+      : faceless.length + ' agents have no face yet.';
+    els.facesGive.textContent = one ? 'Give it a face' : 'Give them faces';
+    els.faces.hidden = false;
+  }
+
+  function dismissFacesPrompt() {
+    var dismissed = loadFacesDismissed();
+    facelessAgents().forEach(function (agent) {
+      dismissed.add(agent.name);
+    });
+    try {
+      window.localStorage.setItem(FACES_DISMISSED_KEY, JSON.stringify([...dismissed]));
+    } catch (err) {
+      /* nothing to remember it with; it is dismissed for this visit */
+    }
+    els.faces.hidden = true;
+    if (els.selectAll) els.selectAll.focus();
+  }
+
+  // Who would get which character. Each proposal is added to the "taken" list
+  // before the next is made, which is what spreads a roster across the catalog
+  // instead of handing every Commander the same face.
+  function facePlan() {
+    var catalog = window.CharacterCatalog;
+    var taken = takenCharacterIds();
+    var plan = [];
+    facelessAgents().forEach(function (agent) {
+      var id = catalog.recommend(taken, agent.role || '');
+      var character = id ? catalog.get(id) : null;
+      if (!character) return;
+      taken.push(id);
+      plan.push({ agent: agent, character: character });
+    });
+    return plan;
+  }
+
+  function faceRowHTML(entry) {
+    var agent = entry.agent;
+    var character = entry.character;
+    var input = avatarInput(agent);
+    var before = window.AgentAvatar.markup(input, { className: 'faces-row__portrait', size: 40 });
+    var proposed = Object.assign({}, input, {
+      appearance: {
+        mode: window.AgentAvatar.MODES.CHARACTER,
+        generated: {},
+        character: { catalog_id: character.id, catalog_version: 0 }
+      },
+      character: character
+    });
+    var after = window.AgentAvatar.markup(proposed, { className: 'faces-row__portrait', size: 40 });
+    return (
+      '<li class="faces-row"><label class="faces-row__label">' +
+      '<input type="checkbox" class="faces-row__check" checked data-face-name="' +
+      esc(agent.name) +
+      '" data-face-character="' +
+      esc(character.id) +
+      '">' +
+      '<span class="faces-row__swap" aria-hidden="true">' +
+      before +
+      '<span class="faces-row__arrow">→</span>' +
+      after +
+      '</span>' +
+      '<span class="faces-row__copy"><strong>' +
+      esc(agent.name) +
+      '</strong><span>' +
+      esc(viewFor(agent).roleLabel) +
+      ' · ' +
+      esc(character.name) +
+      '</span></span>' +
+      '</label></li>'
+    );
+  }
+
+  function openFaces() {
+    var plan = facePlan();
+    if (plan.length === 0) return;
+    els.facesBody.innerHTML = '<ul class="faces-list">' + plan.map(faceRowHTML).join('') + '</ul>';
+    reflectFacesConfirm();
+    if (typeof els.facesDialog.showModal === 'function') els.facesDialog.showModal();
+    else els.facesDialog.setAttribute('open', '');
+  }
+
+  function checkedFaceRows() {
+    return Array.prototype.slice.call(els.facesBody.querySelectorAll('.faces-row__check:checked'));
+  }
+
+  function reflectFacesConfirm() {
+    var n = checkedFaceRows().length;
+    els.facesConfirm.disabled = n === 0;
+    els.facesConfirm.textContent =
+      n === 0 ? 'Give faces' : n === 1 ? 'Give 1 agent a face' : 'Give ' + n + ' agents a face';
+  }
+
+  function closeFaces() {
+    if (els.facesDialog.open && typeof els.facesDialog.close === 'function')
+      els.facesDialog.close();
+    else els.facesDialog.removeAttribute('open');
+    var back = els.faces && !els.faces.hidden ? els.facesGive : els.selectAll;
+    if (back) back.focus();
+  }
+
+  // One PATCH per agent, in sequence. The count is small, the appearance
+  // endpoint is per-agent, and running them one at a time means a failure names
+  // exactly which agent it was rather than sinking the batch.
+  //
+  // confirm_shared_edit is sent because an appearance change applies wherever
+  // the agent appears, and the server asks for that to be acknowledged; the
+  // dialog's lead paragraph is where the user was told.
+  function runFaces() {
+    var btn = els.facesConfirm;
+    if (btn.disabled || btn.dataset.busy === '1') return;
+    var jobs = checkedFaceRows().map(function (input) {
+      return { name: input.dataset.faceName, characterId: input.dataset.faceCharacter };
+    });
+    if (jobs.length === 0) return;
+    btn.dataset.busy = '1';
+    btn.disabled = true;
+    btn.textContent = 'Giving faces…';
+
+    var results = [];
+    var chain = Promise.resolve();
+    jobs.forEach(function (job) {
+      chain = chain.then(function () {
+        return fetch('/api/agents/' + encodeURIComponent(job.name), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            appearance: { mode: 'character', character: { catalog_id: job.characterId } },
+            confirm_shared_edit: true
+          })
+        })
+          .then(function (r) {
+            if (r.ok) return { name: job.name, status: 'succeeded' };
+            return r
+              .json()
+              .catch(function () {
+                return {};
+              })
+              .then(function (d) {
+                return {
+                  name: job.name,
+                  status: 'failed',
+                  message: (d && d.message) || 'Could not be changed (' + r.status + ').'
+                };
+              });
+          })
+          .catch(function () {
+            return { name: job.name, status: 'failed', message: 'Network error.' };
+          })
+          .then(function (result) {
+            results.push(result);
+          });
+      });
+    });
+
+    chain.then(function () {
+      btn.dataset.busy = '';
+      closeFaces();
+      var succeeded = results.filter(function (r) {
+        return r.status === 'succeeded';
+      }).length;
+      // The persistent result surface only when something went wrong; a clean
+      // run is visible on every card and needs only the spoken confirmation.
+      if (succeeded < results.length) {
+        renderBulkMetadataResult({
+          summary: {
+            requested: results.length,
+            succeeded: succeeded,
+            failed: results.length - succeeded
+          },
+          results: results
+        });
+      } else {
+        announce(
+          succeeded === 1 ? '1 agent has a face now.' : succeeded + ' agents have faces now.'
+        );
+      }
+      loadAgents();
+    });
   }
 
   function onSearch() {

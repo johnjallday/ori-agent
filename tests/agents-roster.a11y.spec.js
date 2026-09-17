@@ -43,7 +43,16 @@ for (const theme of ['light', 'dark']) {
         waitUntil: 'domcontentloaded'
       });
       await expect(page.locator('#stageName')).toHaveText(name);
-      await expect(page.locator('#overviewFacts .stage-form')).toBeVisible();
+      // The Inspector is a reader now, so its Overview is a fact list rather
+      // than a form. This waited on the old form's class, timed out, and so had
+      // stopped reaching any of the axe passes below.
+      await expect(page.locator('#overviewFacts .stage-facts')).toBeVisible();
+
+      // A freshly created agent has no face and no history, which puts the
+      // "no face yet" offer and the Inspector's next-step line on screen for
+      // the scans that follow.
+      await expect(page.locator('#rosterFaces')).toBeVisible();
+      await expect(page.locator('#stageNextStep')).toBeVisible();
 
       // Exercise the bulk surfaces so axe covers checked cards, the revealed
       // action bar, and the filter controls, not just the resting roster.
@@ -95,6 +104,16 @@ for (const theme of ['light', 'dark']) {
       );
       await page.locator('#bulkDeleteCancel').click();
       await expect(page.locator('#bulkDeleteDialog')).toBeHidden();
+
+      // The Give faces preview: a checkbox per agent beside two portraits,
+      // which is the shape where a label or a contrast pairing goes missing.
+      await page.locator('#rosterFacesGive').click();
+      await expect(page.locator('#facesDialog')).toBeVisible();
+      const facesResults = await runAxe(page, '#facesDialog');
+      expect(facesResults.violations, JSON.stringify(facesResults.violations, null, 2)).toEqual([]);
+      await page.keyboard.press('Escape');
+      await expect(page.locator('#facesDialog')).toBeHidden();
+      await expect(page.locator('#rosterFacesGive')).toBeFocused();
 
       // The five discovery selects moved behind the Filters panel, so the
       // resting-roster scan above no longer reaches them: scan the panel too,
