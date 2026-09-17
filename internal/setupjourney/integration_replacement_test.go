@@ -12,12 +12,14 @@ import (
 	"github.com/johnjallday/ori-agent/internal/specialist"
 )
 
+// An official mutable URL is never verified, even at the target version; an
+// exact official commit at or above the floor is (see
+// TestReviewedIntegrationExactCommitAtOrAboveFloorIsVerifiedWithoutResolving).
 func TestReviewedIntegrationOfficialSourcesRequireReviewedReplacement(t *testing.T) {
 	entry, descriptor, report, scope := readyIntegrationFixture(t)
 	for _, source := range []string{
 		entry.SourceRepository,
 		entry.SourceRepository + ".git",
-		entry.SourceRepository + "#sha=" + strings.Repeat("b", 40),
 	} {
 		for _, enabled := range []bool{false, true} {
 			t.Run(source+"/enabled="+boolString(enabled), func(t *testing.T) {
@@ -39,7 +41,7 @@ func TestReviewedIntegrationOfficialSourcesRequireReviewedReplacement(t *testing
 					t.Fatalf("review changed installation or omitted disclosure: %#v err=%v", review, err)
 				}
 				for _, inspected := range manager.inspectSources {
-					if inspected != entry.Source() {
+					if inspected != entry.FallbackSource() {
 						t.Fatalf("inspected mutable installed source instead of host pin: %q", inspected)
 					}
 				}
@@ -48,7 +50,7 @@ func TestReviewedIntegrationOfficialSourcesRequireReviewedReplacement(t *testing
 				}
 				after, err := adapter.Read(context.Background(), scope)
 				if err != nil || after.Complete != enabled || !after.Integration.Verified || after.Integration.ReplacementRequired ||
-					manager.installed[0].Source != entry.Source() || manager.installed[0].Enabled != enabled || manager.updateCalls != 1 {
+					manager.installed[0].Source != entry.FallbackSource() || manager.installed[0].Enabled != enabled || manager.updateCalls != 1 {
 					t.Fatalf("replacement did not preserve enablement and verify exact pin: %#v err=%v", after, err)
 				}
 				if !enabled && !containsAction(after.AvailableActions, ActionReviewEnable) {
@@ -72,16 +74,18 @@ func TestReviewedIntegrationReplacementRefusesUntrustedSourcesAndDowngrades(t *t
 		name, source, version string
 		format                plugin.SourceFormat
 	}{
-		{"lookalike repository", entry.SourceRepository + "-other.git", entry.ExpectedVersion, entry.SourceFormat},
-		{"other publisher", "https://github.com/attacker/reaper-plugin.git", entry.ExpectedVersion, entry.SourceFormat},
-		{"URL credentials", "https://github.com@attacker.invalid/example/reaper-plugin.git", entry.ExpectedVersion, entry.SourceFormat},
-		{"mutable ref", entry.SourceRepository + "#ref=main", entry.ExpectedVersion, entry.SourceFormat},
-		{"query", entry.SourceRepository + "?sha=" + strings.Repeat("a", 40), entry.ExpectedVersion, entry.SourceFormat},
-		{"subdirectory", entry.SourceRepository + "/nested", entry.ExpectedVersion, entry.SourceFormat},
-		{"wrong format", entry.SourceRepository + ".git", entry.ExpectedVersion, plugin.FormatCodex},
-		{"newer unpinned", entry.SourceRepository + ".git", "0.6.0", entry.SourceFormat},
+		{"lookalike repository", entry.SourceRepository + "-other.git", entry.MinimumVersion, entry.SourceFormat},
+		{"other publisher", "https://github.com/attacker/reaper-plugin.git", entry.MinimumVersion, entry.SourceFormat},
+		{"URL credentials", "https://github.com@attacker.invalid/example/reaper-plugin.git", entry.MinimumVersion, entry.SourceFormat},
+		{"mutable ref", entry.SourceRepository + "#ref=main", entry.MinimumVersion, entry.SourceFormat},
+		{"query", entry.SourceRepository + "?sha=" + strings.Repeat("a", 40), entry.MinimumVersion, entry.SourceFormat},
+		{"subdirectory", entry.SourceRepository + "/nested", entry.MinimumVersion, entry.SourceFormat},
+		{"wrong format", entry.SourceRepository + ".git", entry.MinimumVersion, plugin.FormatCodex},
+		{"unpinned newer than the target", entry.SourceRepository + ".git", "0.6.0", entry.SourceFormat},
 		{"unknown version", entry.SourceRepository + ".git", "unknown", entry.SourceFormat},
-		{"newer pin", entry.SourceRepository + "#sha=" + strings.Repeat("b", 40), "0.6.0", entry.SourceFormat},
+		{"pin with unknown version", entry.SourceRepository + "#sha=" + strings.Repeat("b", 40), "unknown", entry.SourceFormat},
+		{"uppercase pin", entry.SourceRepository + "#sha=" + strings.Repeat("B", 40), entry.MinimumVersion, entry.SourceFormat},
+		{"short pin", entry.SourceRepository + "#sha=" + strings.Repeat("b", 39), entry.MinimumVersion, entry.SourceFormat},
 	}
 	for _, item := range cases {
 		t.Run(item.name, func(t *testing.T) {

@@ -7,12 +7,18 @@ import (
 	"unicode"
 
 	"github.com/johnjallday/ori-agent/internal/plugin"
+	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 )
 
 // IntegrationProjection is the bounded reviewed identity plus the complete
 // plugin.Manager trust report. It is response-only and is never serialized to
 // setup journey persistence. SourceURL is the registry's reviewed repository,
 // so a person can inspect the source before installing; it is https-only.
+//
+// ExpectedVersion is the version this step installs, replaces with, or has
+// verified; MinimumVersion is the reviewed floor. ReleaseChecked is false only
+// when the step targets the floor because the latest release could not be
+// checked.
 type IntegrationProjection struct {
 	Key                  string              `json:"key"`
 	PluginID             string              `json:"plugin_id"`
@@ -20,6 +26,8 @@ type IntegrationProjection struct {
 	SourceLabel          string              `json:"source_label"`
 	SourceURL            string              `json:"source_url,omitempty"`
 	ExpectedVersion      string              `json:"expected_version"`
+	MinimumVersion       string              `json:"minimum_version,omitempty"`
+	ReleaseChecked       bool                `json:"release_checked"`
 	InstalledVersion     string              `json:"installed_version,omitempty"`
 	Enabled              bool                `json:"enabled"`
 	ReleaseReady         bool                `json:"release_ready"`
@@ -33,6 +41,10 @@ type IntegrationProjection struct {
 	SupportedPlatforms   []string            `json:"supported_platforms"`
 	StateRevision        string              `json:"state_revision"`
 	Trust                *plugin.TrustReport `json:"trust,omitempty"`
+
+	// reviewedSource is the exact source an install or replacement offer was
+	// inspected from. It is never serialized; Commit installs only this source.
+	reviewedSource string
 }
 
 func validIntegrationProjection(value *IntegrationProjection) bool {
@@ -41,7 +53,7 @@ func validIntegrationProjection(value *IntegrationProjection) bool {
 	}
 	if !validateStableID(value.Key) || !validateStableID(value.PluginID) ||
 		!validateStableID(value.ExpectedBlueprintID) || !validateStableID(value.ExpectedProgramID) ||
-		!validateCanonicalRef(value.ExpectedVersion, false) ||
+		!validateCanonicalRef(value.ExpectedVersion, false) || !validateCanonicalRef(value.MinimumVersion, true) ||
 		!validateCanonicalRef(value.InstalledVersion, true) || value.ExpectedProtocol <= 0 ||
 		len(value.RequiredHostFeatures) == 0 || len(value.RequiredHostFeatures) > 8 ||
 		len(value.SupportedPlatforms) == 0 || len(value.SupportedPlatforms) > 8 ||
@@ -51,6 +63,10 @@ func validIntegrationProjection(value *IntegrationProjection) bool {
 	}
 	if value.Verified && (!value.ReleaseReady || value.DevelopmentCopy || value.ReplacementRequired ||
 		value.InstalledVersion != value.ExpectedVersion) {
+		return false
+	}
+	// Every version a step acts on is at or above the reviewed floor.
+	if value.MinimumVersion != "" && !reviewedintegration.AtLeast(value.ExpectedVersion, value.MinimumVersion) {
 		return false
 	}
 	for _, feature := range value.RequiredHostFeatures {

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/integrationrelease"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 )
@@ -26,36 +27,86 @@ type ReviewedIntegrationManager interface {
 
 type IntegrationEntryResolver func(string) (reviewedintegration.Entry, bool)
 
+// IntegrationReleaseResolver chooses the release a reviewed integration is
+// installed or replaced with. It never fails: when the latest release cannot be
+// resolved it reports the entry's floor with Fallback set.
+type IntegrationReleaseResolver interface {
+	Resolve(context.Context, reviewedintegration.Entry) integrationrelease.Resolution
+}
+
+// floorReleases always targets the compiled floor. It is the release resolver
+// of an adapter constructed without one.
+type floorReleases struct{}
+
+func (floorReleases) Resolve(_ context.Context, entry reviewedintegration.Entry) integrationrelease.Resolution {
+	return integrationrelease.Floor(entry)
+}
+
 // ReviewedIntegrationAdapter is the only setup adapter for integration_install.
 // Its registry resolver is host-owned and declarations can select only a key.
 type ReviewedIntegrationAdapter struct {
 	manager           ReviewedIntegrationManager
 	resolve           IntegrationEntryResolver
+	releases          IntegrationReleaseResolver
 	platform          string
 	developmentSource string
 }
 
-func NewReviewedIntegrationAdapter(manager ReviewedIntegrationManager) *ReviewedIntegrationAdapter {
-	return newReviewedIntegrationAdapter(manager, reviewedintegration.Get, runtime.GOOS+"/"+runtime.GOARCH)
+// NewReviewedIntegrationAdapter builds the adapter over the built-in registry.
+// releases chooses the release to install; nil targets each entry's floor.
+func NewReviewedIntegrationAdapter(manager ReviewedIntegrationManager, releases IntegrationReleaseResolver) *ReviewedIntegrationAdapter {
+	adapter := newReviewedIntegrationAdapter(manager, reviewedintegration.Get, runtime.GOOS+"/"+runtime.GOARCH)
+	if releases != nil {
+		adapter.releases = releases
+	}
+	return adapter
 }
 
 // NewReviewedIntegrationAdapterForDevelopment permits one process-configured
 // local source to satisfy the install prerequisite after the same identity and
 // contribution validation as a release. It never makes the copy release-ready
 // and never exposes or persists the configured path in journey state.
-func NewReviewedIntegrationAdapterForDevelopment(manager ReviewedIntegrationManager, source string) *ReviewedIntegrationAdapter {
-	adapter := NewReviewedIntegrationAdapter(manager)
+func NewReviewedIntegrationAdapterForDevelopment(manager ReviewedIntegrationManager, releases IntegrationReleaseResolver, source string) *ReviewedIntegrationAdapter {
+	adapter := NewReviewedIntegrationAdapter(manager, releases)
 	adapter.developmentSource = normalizedLocalDevelopmentSource(source)
 	return adapter
 }
 
 func newReviewedIntegrationAdapter(manager ReviewedIntegrationManager, resolve IntegrationEntryResolver, platform string) *ReviewedIntegrationAdapter {
-	return &ReviewedIntegrationAdapter{manager: manager, resolve: resolve, platform: platform}
+	return &ReviewedIntegrationAdapter{manager: manager, resolve: resolve, releases: floorReleases{}, platform: platform}
+}
+
+// installedIntegrationSource classifies an installed plugin's recorded source
+// against one registry entry. Only an official exact commit can be verified.
+type installedIntegrationSource int
+
+const (
+	installedSourceUnrecognized installedIntegrationSource = iota
+	installedSourceDevelopment
+	installedSourceLocal
+	installedSourceOfficialPinned
+	installedSourceOfficialMutable
+)
+
+func (adapter *ReviewedIntegrationAdapter) classifyInstalledSource(entry reviewedintegration.Entry, source string) installedIntegrationSource {
+	switch {
+	case adapter.acceptsDevelopmentSource(source):
+		return installedSourceDevelopment
+	case localIntegrationSource(source):
+		return installedSourceLocal
+	case acceptedPinnedSource(entry, source):
+		return installedSourceOfficialPinned
+	case source == entry.SourceRepository || source == entry.SourceRepository+".git":
+		// The official repository's legacy unpinned URLs permit a review of the
+		// host-selected replacement; they never prove the installed bytes.
+		return installedSourceOfficialMutable
+	default:
+		return installedSourceUnrecognized
+	}
 }
 
 func (adapter *ReviewedIntegrationAdapter) Read(ctx context.Context, scope ReadScope) (CanonicalStepRead, error) {
-	_ = ctx
-	if adapter == nil || adapter.manager == nil || adapter.resolve == nil {
+	if adapter == nil || adapter.manager == nil || adapter.resolve == nil || adapter.releases == nil {
 		return CanonicalStepRead{BlockedReason: ReasonOwnerUnavailable}, nil
 	}
 	entry, ok := adapter.resolve(scope.IntegrationKey)
@@ -64,134 +115,140 @@ func (adapter *ReviewedIntegrationAdapter) Read(ctx context.Context, scope ReadS
 	}
 	projection := integrationProjection(entry)
 	if !contains(entry.SupportedPlatforms, adapter.platform) {
-		projection.StateRevision = integrationStateDigest(entry, nil, nil)
+		projection.StateRevision = integrationStateDigest(entry, nil, nil, nil)
 		return CanonicalStepRead{BlockedReason: ReasonIntegrationUnsupported, Integration: projection}, nil
 	}
 	installed, err := adapter.manager.List()
 	if err != nil {
-		projection.StateRevision = integrationStateDigest(entry, nil, nil)
+		projection.StateRevision = integrationStateDigest(entry, nil, nil, nil)
 		return CanonicalStepRead{BlockedReason: ReasonOwnerUnavailable, Integration: projection}, nil
 	}
-	var current *plugin.InstalledPlugin
-	for index := range installed {
-		if installed[index].Name == entry.PluginID {
-			copy := installed[index]
-			current = &copy
-			break
+	current := findInstalledIntegration(installed, entry.PluginID)
+	manage := func(reason ReasonCode) CanonicalStepRead {
+		projection.StateRevision = integrationStateDigest(entry, nil, current, nil)
+		return CanonicalStepRead{
+			BlockedReason: reason, AvailableActions: []ActionID{ActionManageIntegration},
+			Integration: projection, Result: integrationResult(current),
 		}
 	}
+	source := installedSourceUnrecognized
 	if current != nil {
 		projection.InstalledVersion = current.Version
 		projection.Enabled = current.Enabled
-		if adapter.acceptsDevelopmentSource(current.Source) {
+		source = adapter.classifyInstalledSource(entry, current.Source)
+		switch source {
+		case installedSourceDevelopment:
 			projection.DevelopmentCopy = true
-			projection.StateRevision = integrationStateDigest(entry, current, nil)
-			if reason := validateDevelopmentIntegration(entry, *current, adapter.platform); reason != "" {
-				return CanonicalStepRead{
-					BlockedReason: reason, AvailableActions: []ActionID{ActionManageIntegration},
-					Integration: projection, Result: integrationResult(current),
-				}, nil
+			if reason := validateInstalledRelease(entry, *current, adapter.platform); reason != "" {
+				return manage(reason), nil
 			}
 			if !current.Enabled {
-				return CanonicalStepRead{
-					BlockedReason: ReasonIntegrationDisabled, AvailableActions: []ActionID{ActionManageIntegration},
-					Integration: projection, Result: integrationResult(current),
-				}, nil
+				return manage(ReasonIntegrationDisabled), nil
 			}
+			projection.StateRevision = integrationStateDigest(entry, nil, current, nil)
 			return CanonicalStepRead{
 				Complete: true, AvailableActions: []ActionID{ActionManageIntegration},
 				Integration: projection, Result: integrationResult(current),
 			}, nil
+		case installedSourceLocal:
+			return manage(ReasonIntegrationLocalUnverified), nil
+		case installedSourceUnrecognized:
+			return manage(ReasonIntegrationIdentityMismatch), nil
 		}
-		if localIntegrationSource(current.Source) {
-			projection.StateRevision = integrationStateDigest(entry, current, nil)
-			return CanonicalStepRead{
-				BlockedReason:    ReasonIntegrationLocalUnverified,
-				AvailableActions: []ActionID{ActionManageIntegration}, Integration: projection,
-				Result: integrationResult(current),
-			}, nil
-		}
-		if !reviewableIntegrationSource(entry, current.Source) || current.Format != entry.SourceFormat {
-			projection.StateRevision = integrationStateDigest(entry, current, nil)
-			return CanonicalStepRead{
-				BlockedReason:    ReasonIntegrationIdentityMismatch,
-				AvailableActions: []ActionID{ActionManageIntegration}, Integration: projection,
-				Result: integrationResult(current),
-			}, nil
+		if current.Format != entry.SourceFormat {
+			return manage(ReasonIntegrationIdentityMismatch), nil
 		}
 	}
-	if !entry.ReleaseReady || entry.Source() == "" {
-		projection.StateRevision = integrationStateDigest(entry, current, nil)
-		return CanonicalStepRead{
-			BlockedReason: ReasonIntegrationReleaseNotReady, Integration: projection,
-			AvailableActions: []ActionID{ActionManageIntegration}, Result: integrationResult(current),
-		}, nil
+	if !entry.ReleaseReady || entry.FallbackSource() == "" {
+		return manage(ReasonIntegrationReleaseNotReady), nil
 	}
 	if current == nil {
-		descriptor, report, inspectErr := adapter.manager.Inspect(entry.Source(), entry.SourceFormat)
-		if inspectErr != nil {
-			projection.StateRevision = integrationStateDigest(entry, nil, nil)
-			return CanonicalStepRead{BlockedReason: ReasonOwnerUnavailable, Integration: projection}, nil
-		}
-		if reason := validateReviewedDescriptor(entry, descriptor, report, adapter.platform); reason != "" {
-			projection.StateRevision = integrationStateDigest(entry, nil, &report)
-			projection.Trust = cloneTrustReport(&report)
-			return CanonicalStepRead{BlockedReason: reason, Integration: projection}, nil
-		}
-		projection.Trust = cloneTrustReport(&report)
-		projection.StateRevision = integrationStateDigest(entry, nil, &report)
-		return CanonicalStepRead{AvailableActions: []ActionID{ActionReviewInstall}, Integration: projection}, nil
+		return adapter.offerRelease(ctx, entry, projection, nil), nil
 	}
-
-	if current.Version != entry.ExpectedVersion || current.Source != entry.Source() {
-		// An official mutable source (or an older pin at the same version) is
-		// eligible for replacement, never acceptance. Do not downgrade a newer
-		// or unrecognized version under an update confirmation.
-		if current.Version != entry.ExpectedVersion && compareVersions(current.Version, entry.ExpectedVersion) >= 0 {
-			projection.StateRevision = integrationStateDigest(entry, current, nil)
+	if source == installedSourceOfficialPinned && reviewedintegration.AtLeast(current.Version, entry.MinimumVersion) {
+		// An exact official commit at or above the floor is verified against its
+		// own version. The latest release is not consulted: a verified step needs
+		// no network, never offers a downgrade, and stays silent about updates.
+		if reason := validateInstalledRelease(entry, *current, adapter.platform); reason != "" {
+			return manage(reason), nil
+		}
+		projection.ExpectedVersion = current.Version
+		projection.Verified = true
+		projection.StateRevision = integrationStateDigest(entry, nil, current, nil)
+		if !current.Enabled {
 			return CanonicalStepRead{
-				BlockedReason:    ReasonIntegrationIdentityMismatch,
-				AvailableActions: []ActionID{ActionManageIntegration}, Integration: projection,
-				Result: integrationResult(current),
+				AvailableActions: []ActionID{ActionReviewEnable, ActionManageIntegration},
+				Integration:      projection, Result: integrationResult(current),
 			}, nil
 		}
-		descriptor, report, inspectErr := adapter.manager.Inspect(entry.Source(), entry.SourceFormat)
-		if inspectErr != nil {
-			projection.StateRevision = integrationStateDigest(entry, current, nil)
-			return CanonicalStepRead{BlockedReason: ReasonOwnerUnavailable, Integration: projection, Result: integrationResult(current)}, nil
-		}
-		if reason := validateReviewedDescriptor(entry, descriptor, report, adapter.platform); reason != "" {
-			projection.StateRevision = integrationStateDigest(entry, current, &report)
-			projection.Trust = cloneTrustReport(&report)
-			return CanonicalStepRead{BlockedReason: reason, Integration: projection, Result: integrationResult(current)}, nil
-		}
-		projection.Trust = cloneTrustReport(&report)
-		projection.ReplacementRequired = true
-		projection.StateRevision = integrationStateDigest(entry, current, &report)
 		return CanonicalStepRead{
-			AvailableActions: []ActionID{ActionReviewUpdate, ActionManageIntegration},
-			Integration:      projection, Result: integrationResult(current),
-		}, nil
-	}
-	if reason := validateInstalledIntegration(entry, *current, adapter.platform); reason != "" {
-		projection.StateRevision = integrationStateDigest(entry, current, nil)
-		return CanonicalStepRead{
-			BlockedReason: reason, AvailableActions: []ActionID{ActionManageIntegration},
+			Complete: true, AvailableActions: []ActionID{ActionManageIntegration},
 			Integration: projection, Result: integrationResult(current),
 		}, nil
 	}
-	projection.StateRevision = integrationStateDigest(entry, current, nil)
-	projection.Verified = true
-	if !current.Enabled {
-		return CanonicalStepRead{
-			AvailableActions: []ActionID{ActionReviewEnable, ActionManageIntegration},
-			Integration:      projection, Result: integrationResult(current),
-		}, nil
+	// An older exact commit, or the official mutable URL at any version, is
+	// eligible for replacement by the reviewed release, never acceptance. An
+	// unrecognized version is never compared as if it were the floor.
+	if _, comparable := reviewedintegration.CompareVersions(current.Version, entry.MinimumVersion); !comparable {
+		return manage(ReasonIntegrationIdentityMismatch), nil
 	}
+	return adapter.offerRelease(ctx, entry, projection, current), nil
+}
+
+// offerRelease inspects the resolved release and offers its reviewed install,
+// or its reviewed replacement of current. The state digest binds the offer to
+// that release, so a review goes stale if the latest release changes before
+// commit.
+func (adapter *ReviewedIntegrationAdapter) offerRelease(ctx context.Context, entry reviewedintegration.Entry, projection *IntegrationProjection, current *plugin.InstalledPlugin) CanonicalStepRead {
+	result := integrationResult(current)
+	target := adapter.releases.Resolve(ctx, entry)
+	if !acceptedPinnedSource(entry, target.Source) || !reviewedintegration.AtLeast(target.Version, entry.MinimumVersion) {
+		// A resolver must name an exact official commit at or above the floor.
+		projection.StateRevision = integrationStateDigest(entry, nil, current, nil)
+		return CanonicalStepRead{BlockedReason: ReasonOwnerUnavailable, Integration: projection, Result: result}
+	}
+	projection.ExpectedVersion = target.Version
+	projection.ReleaseChecked = !target.Fallback
+	if current != nil {
+		if order, _ := reviewedintegration.CompareVersions(current.Version, target.Version); order > 0 {
+			// Never offer a downgrade. A newer unpinned install cannot be verified
+			// either, so it needs managing until the latest release catches up.
+			projection.StateRevision = integrationStateDigest(entry, &target, current, nil)
+			return CanonicalStepRead{
+				BlockedReason:    ReasonIntegrationIdentityMismatch,
+				AvailableActions: []ActionID{ActionManageIntegration}, Integration: projection, Result: result,
+			}
+		}
+	}
+	descriptor, report, inspectErr := adapter.manager.Inspect(target.Source, entry.SourceFormat)
+	if inspectErr != nil {
+		projection.StateRevision = integrationStateDigest(entry, &target, current, nil)
+		return CanonicalStepRead{BlockedReason: ReasonOwnerUnavailable, Integration: projection, Result: result}
+	}
+	projection.Trust = cloneTrustReport(&report)
+	projection.StateRevision = integrationStateDigest(entry, &target, current, &report)
+	if reason := validateReviewedDescriptor(entry, target.Version, target.Source, descriptor, report, adapter.platform); reason != "" {
+		return CanonicalStepRead{BlockedReason: reason, Integration: projection, Result: result}
+	}
+	projection.reviewedSource = target.Source
+	if current == nil {
+		return CanonicalStepRead{AvailableActions: []ActionID{ActionReviewInstall}, Integration: projection}
+	}
+	projection.ReplacementRequired = true
 	return CanonicalStepRead{
-		Complete: true, AvailableActions: []ActionID{ActionManageIntegration},
-		Integration: projection, Result: integrationResult(current),
-	}, nil
+		AvailableActions: []ActionID{ActionReviewUpdate, ActionManageIntegration},
+		Integration:      projection, Result: result,
+	}
+}
+
+func findInstalledIntegration(installed []plugin.InstalledPlugin, pluginID string) *plugin.InstalledPlugin {
+	for index := range installed {
+		if installed[index].Name == pluginID {
+			copy := installed[index]
+			return &copy
+		}
+	}
+	return nil
 }
 
 func (adapter *ReviewedIntegrationAdapter) InputDigest(actionID ActionID, input json.RawMessage) (string, error) {
@@ -229,17 +286,13 @@ func (adapter *ReviewedIntegrationAdapter) reviewMaterial(ctx context.Context, s
 		return ActionReviewMaterial{}, ErrConflict
 	}
 	// Enabling is separate from install, but its review still discloses the
-	// complete exact candidate trust material.
+	// complete trust material of the exact release that is installed.
 	if state.Integration.Trust == nil {
-		entry, ok := adapter.resolve(scope.IntegrationKey)
-		if !ok || entry.Source() == "" {
+		report, ok := adapter.installedReleaseTrust(scope, state.Integration)
+		if !ok {
 			return ActionReviewMaterial{}, ErrConflict
 		}
-		descriptor, report, inspectErr := adapter.manager.Inspect(entry.Source(), entry.SourceFormat)
-		if inspectErr != nil || validateReviewedDescriptor(entry, descriptor, report, adapter.platform) != "" {
-			return ActionReviewMaterial{}, ErrConflict
-		}
-		state.Integration.Trust = cloneTrustReport(&report)
+		state.Integration.Trust = &report
 	}
 	type disclosure struct {
 		CommitAction ActionID               `json:"commit_action"`
@@ -256,6 +309,29 @@ func (adapter *ReviewedIntegrationAdapter) reviewMaterial(ctx context.Context, s
 	}, nil
 }
 
+// installedReleaseTrust inspects the installed plugin's own recorded exact
+// commit, never the latest or fallback release, and validates it against the
+// installed version the read verified.
+func (adapter *ReviewedIntegrationAdapter) installedReleaseTrust(scope ReadScope, verified *IntegrationProjection) (plugin.TrustReport, bool) {
+	entry, ok := adapter.resolve(scope.IntegrationKey)
+	if !ok || entry.FallbackSource() == "" {
+		return plugin.TrustReport{}, false
+	}
+	installed, err := adapter.manager.List()
+	if err != nil {
+		return plugin.TrustReport{}, false
+	}
+	current := findInstalledIntegration(installed, entry.PluginID)
+	if current == nil || !acceptedPinnedSource(entry, current.Source) || current.Version != verified.InstalledVersion {
+		return plugin.TrustReport{}, false
+	}
+	descriptor, report, inspectErr := adapter.manager.Inspect(current.Source, entry.SourceFormat)
+	if inspectErr != nil || validateReviewedDescriptor(entry, current.Version, current.Source, descriptor, report, adapter.platform) != "" {
+		return plugin.TrustReport{}, false
+	}
+	return report, true
+}
+
 func (adapter *ReviewedIntegrationAdapter) Commit(ctx context.Context, scope ReadScope, actionID ActionID, input json.RawMessage, reviewed ActionReviewMaterial) (CanonicalResult, error) {
 	_ = ctx
 	inputDigest, inputErr := emptyIntegrationInputDigest(input)
@@ -264,22 +340,31 @@ func (adapter *ReviewedIntegrationAdapter) Commit(ctx context.Context, scope Rea
 		return CanonicalResult{}, ErrInvalid
 	}
 	entry, ok := adapter.resolve(scope.IntegrationKey)
-	if !ok || !entryMatchesScope(entry, scope) || entry.Source() == "" {
+	if !ok || !entryMatchesScope(entry, scope) || entry.FallbackSource() == "" {
 		return CanonicalResult{}, ErrConflict
 	}
 	confirm := func(report plugin.TrustReport) bool {
 		return reviewed.Integration.Trust != nil &&
 			trustReportDigest(report) == trustReportDigest(*reviewed.Integration.Trust)
 	}
+	// Install and replacement use exactly the release the reviewed material was
+	// inspected from, never a fresh resolution.
+	source := reviewed.Integration.reviewedSource
 	var installed plugin.InstalledPlugin
 	var err error
 	switch actionID {
 	case ActionInstall:
-		installed, err = adapter.manager.Install(entry.Source(), entry.SourceFormat, confirm)
+		if !acceptedPinnedSource(entry, source) {
+			return CanonicalResult{}, ErrConflict
+		}
+		installed, err = adapter.manager.Install(source, entry.SourceFormat, confirm)
 	case ActionEnable:
 		err = adapter.manager.SetEnabled(entry.PluginID, true)
 	case ActionUpdate:
-		installed, err = adapter.manager.UpdateFromSource(entry.PluginID, entry.Source(), entry.SourceFormat, confirm)
+		if !acceptedPinnedSource(entry, source) {
+			return CanonicalResult{}, ErrConflict
+		}
+		installed, err = adapter.manager.UpdateFromSource(entry.PluginID, source, entry.SourceFormat, confirm)
 	default:
 		return CanonicalResult{}, ErrInvalid
 	}
@@ -291,11 +376,8 @@ func (adapter *ReviewedIntegrationAdapter) Commit(ctx context.Context, scope Rea
 		if listErr != nil {
 			return CanonicalResult{}, listErr
 		}
-		for index := range plugins {
-			if plugins[index].Name == entry.PluginID {
-				installed = plugins[index]
-				break
-			}
+		if current := findInstalledIntegration(plugins, entry.PluginID); current != nil {
+			installed = *current
 		}
 	}
 	if installed.Name != entry.PluginID {
@@ -319,7 +401,7 @@ func (adapter *ReviewedIntegrationAdapter) ConsequenceObserved(actionID ActionID
 
 func acceptedPinnedSourceForProjection(projection *IntegrationProjection) bool {
 	// A reviewable same-version replacement is unblocked but not verified.
-	// Only the installed exact-source match can settle a successful receipt;
+	// Only an installed exact official commit can settle a successful receipt;
 	// release availability alone is not proof that replacement happened.
 	return projection != nil && projection.ReleaseReady && projection.Verified
 }
@@ -361,12 +443,15 @@ func integrationReviewForCommit(action ActionID) (ActionID, bool) {
 	}
 }
 
+// integrationProjection starts from the floor. Reads that offer an install or
+// replacement, or verify an installation, replace ExpectedVersion with the
+// release they act on.
 func integrationProjection(entry reviewedintegration.Entry) *IntegrationProjection {
 	return &IntegrationProjection{
 		Key: entry.Key, PluginID: entry.PluginID, Publisher: entry.PublisherLabel,
 		SourceLabel: entry.SourceLabel, SourceURL: entry.SourceRepository,
-		ExpectedVersion: entry.ExpectedVersion,
-		ReleaseReady:    entry.ReleaseReady, ExpectedBlueprintID: entry.ExpectedBlueprintID,
+		ExpectedVersion: entry.MinimumVersion, MinimumVersion: entry.MinimumVersion, ReleaseChecked: true,
+		ReleaseReady: entry.ReleaseReady, ExpectedBlueprintID: entry.ExpectedBlueprintID,
 		ExpectedProgramID:    entry.ExpectedProgramID,
 		RequiredHostFeatures: append([]string(nil), entry.RequiredHostFeatures...),
 		ExpectedProtocol:     entry.ExpectedProtocol,
@@ -412,36 +497,22 @@ func (adapter *ReviewedIntegrationAdapter) acceptsDevelopmentSource(source strin
 	return normalizedLocalDevelopmentSource(source) == adapter.developmentSource
 }
 
-// reviewableIntegrationSource permits only the exact official repository's
-// legacy unpinned URLs in addition to its pins. This permits a review of the
-// host-selected replacement; it never proves the installed bytes are trusted.
-func reviewableIntegrationSource(entry reviewedintegration.Entry, source string) bool {
-	return source == entry.SourceRepository || source == entry.SourceRepository+".git" ||
-		acceptedPinnedSource(entry, source)
-}
-
 func acceptedPinnedSource(entry reviewedintegration.Entry, source string) bool {
 	source = strings.TrimSpace(source)
 	prefix := entry.SourceRepository + "#sha="
-	if !strings.HasPrefix(source, prefix) || len(source) != len(prefix)+40 {
-		return false
-	}
-	for _, char := range source[len(prefix):] {
-		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
-			return false
-		}
-	}
-	return true
+	return strings.HasPrefix(source, prefix) && reviewedintegration.ValidCommit(source[len(prefix):])
 }
 
-func validateReviewedDescriptor(entry reviewedintegration.Entry, descriptor plugin.PluginDescriptor, report plugin.TrustReport, platform string) ReasonCode {
-	if descriptor.Name != entry.PluginID || descriptor.Version != entry.ExpectedVersion ||
-		descriptor.SourceLocation != entry.Source() || descriptor.SourceFormat != entry.SourceFormat ||
+// validateReviewedDescriptor checks an inspected release against the entry and
+// the exact version and source it was inspected as.
+func validateReviewedDescriptor(entry reviewedintegration.Entry, version, source string, descriptor plugin.PluginDescriptor, report plugin.TrustReport, platform string) ReasonCode {
+	if descriptor.Name != entry.PluginID || descriptor.Version != version ||
+		descriptor.SourceLocation != source || descriptor.SourceFormat != entry.SourceFormat ||
 		report.Name != entry.PluginID || report.Format != entry.SourceFormat ||
 		trustReportDigest(report) != trustReportDigest(plugin.BuildTrustReport(descriptor)) {
 		return ReasonIntegrationIdentityMismatch
 	}
-	if reason := validateContribution(entry, descriptor.WorkspaceSurfaces, descriptor.ResolvedBlueprints, platform); reason != "" {
+	if reason := validateContribution(entry, version, descriptor.WorkspaceSurfaces, descriptor.ResolvedBlueprints, platform); reason != "" {
 		return reason
 	}
 	if len(report.Unsupported) != 0 {
@@ -450,24 +521,23 @@ func validateReviewedDescriptor(entry reviewedintegration.Entry, descriptor plug
 	return ""
 }
 
-func validateInstalledIntegration(entry reviewedintegration.Entry, installed plugin.InstalledPlugin, platform string) ReasonCode {
-	if installed.Source != entry.Source() {
-		return ReasonIntegrationIdentityMismatch
-	}
-	return validateDevelopmentIntegration(entry, installed, platform)
-}
-
-func validateDevelopmentIntegration(entry reviewedintegration.Entry, installed plugin.InstalledPlugin, platform string) ReasonCode {
-	if installed.Name != entry.PluginID || installed.Version != entry.ExpectedVersion ||
+// validateInstalledRelease checks an installed record against the floor and
+// its own version. Callers classify the recorded source first.
+func validateInstalledRelease(entry reviewedintegration.Entry, installed plugin.InstalledPlugin, platform string) ReasonCode {
+	if installed.Name != entry.PluginID || !reviewedintegration.AtLeast(installed.Version, entry.MinimumVersion) ||
 		installed.Format != entry.SourceFormat || strings.TrimSpace(installed.ComponentFingerprint) == "" ||
 		installed.Generation == 0 || installed.Generation > math.MaxInt64 {
 		return ReasonIntegrationIdentityMismatch
 	}
-	return validateContribution(entry, installed.WorkspaceSurfaces, installed.ResolvedBlueprints, platform)
+	return validateContribution(entry, installed.Version, installed.WorkspaceSurfaces, installed.ResolvedBlueprints, platform)
 }
 
-func validateContribution(entry reviewedintegration.Entry, contribution *plugin.SurfaceContribution, blueprints []plugin.ResolvedBlueprint, platform string) ReasonCode {
-	if contribution == nil || contribution.Name != entry.PluginID || contribution.Version != entry.ExpectedVersion ||
+// validateContribution checks a release's surface contribution. The plugin
+// version is exact for the release being checked; the blueprint version is a
+// floor; program, protocol, host features and platform describe what this host
+// can run.
+func validateContribution(entry reviewedintegration.Entry, version string, contribution *plugin.SurfaceContribution, blueprints []plugin.ResolvedBlueprint, platform string) ReasonCode {
+	if contribution == nil || contribution.Name != entry.PluginID || contribution.Version != version ||
 		contribution.Protocol.Min > entry.ExpectedProtocol ||
 		(contribution.Protocol.Max != 0 && contribution.Protocol.Max < entry.ExpectedProtocol) ||
 		!containsAll(contribution.RequiresHostFeatures, entry.RequiredHostFeatures) {
@@ -479,7 +549,7 @@ func validateContribution(entry reviewedintegration.Entry, contribution *plugin.
 		if blueprint.ID != entry.ExpectedBlueprintID {
 			continue
 		}
-		if blueprintFound || blueprint.Version != entry.ExpectedBlueprintVersion ||
+		if blueprintFound || blueprint.Version < entry.MinimumBlueprintVersion ||
 			blueprint.Template.AssistantProgram == nil ||
 			blueprint.Template.AssistantProgram.ID != entry.ExpectedProgramID ||
 			blueprint.Template.AssistantProgram.SchemaVersion != entry.ExpectedProgramSchema {
@@ -592,12 +662,19 @@ func trustReportDigest(report plugin.TrustReport) string {
 	return Digest(encoded)
 }
 
-func integrationStateDigest(entry reviewedintegration.Entry, installed *plugin.InstalledPlugin, report *plugin.TrustReport) string {
+// integrationStateDigest binds a review to the state it disclosed. target is
+// set only for reads that offer an install or replacement, so a review of one
+// release goes stale if the latest release changes before commit. A verified
+// read never depends on the latest release, so a background refresh cannot
+// stale its enable review or churn a completed step.
+func integrationStateDigest(entry reviewedintegration.Entry, target *integrationrelease.Resolution, installed *plugin.InstalledPlugin, report *plugin.TrustReport) string {
 	type state struct {
 		RegistryRevision int
 		EntryKey         string
-		ExpectedVersion  string
-		SourceCommit     string
+		MinimumVersion   string
+		FallbackCommit   string
+		TargetVersion    string
+		TargetCommit     string
 		InstalledVersion string
 		InstalledSource  string
 		Fingerprint      string
@@ -606,7 +683,11 @@ func integrationStateDigest(entry reviewedintegration.Entry, installed *plugin.I
 		Trust            *plugin.TrustReport
 	}
 	value := state{RegistryRevision: reviewedintegration.RegistryRevision, EntryKey: entry.Key,
-		ExpectedVersion: entry.ExpectedVersion, SourceCommit: entry.SourceCommit, Trust: report}
+		MinimumVersion: entry.MinimumVersion, FallbackCommit: entry.FallbackCommit, Trust: report}
+	if target != nil {
+		value.TargetVersion = target.Version
+		value.TargetCommit = target.Commit
+	}
 	if installed != nil {
 		value.InstalledVersion = installed.Version
 		value.InstalledSource = installed.Source
@@ -616,39 +697,6 @@ func integrationStateDigest(entry reviewedintegration.Entry, installed *plugin.I
 	}
 	encoded, _ := json.Marshal(value)
 	return Digest(encoded)
-}
-
-func compareVersions(left, right string) int {
-	parse := func(value string) ([3]int, bool) {
-		var parsed [3]int
-		parts := strings.SplitN(strings.SplitN(value, "-", 2)[0], "+", 2)
-		segments := strings.Split(parts[0], ".")
-		if len(segments) != 3 {
-			return parsed, false
-		}
-		for index, segment := range segments {
-			number, err := strconv.Atoi(segment)
-			if err != nil || number < 0 {
-				return parsed, false
-			}
-			parsed[index] = number
-		}
-		return parsed, true
-	}
-	leftParts, leftOK := parse(left)
-	rightParts, rightOK := parse(right)
-	if !leftOK || !rightOK {
-		return 0
-	}
-	for index := range leftParts {
-		if leftParts[index] < rightParts[index] {
-			return -1
-		}
-		if leftParts[index] > rightParts[index] {
-			return 1
-		}
-	}
-	return 0
 }
 
 var _ CanonicalReader = (*ReviewedIntegrationAdapter)(nil)

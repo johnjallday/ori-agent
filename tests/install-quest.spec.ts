@@ -33,6 +33,8 @@ function installQuest(ready: boolean): Journey {
         integration: {
           plugin_id: 'reaper-plugin',
           expected_version: '0.6.0',
+          minimum_version: '0.5.2',
+          release_checked: true,
           installed_version: ready ? '0.6.0' : '',
           enabled: ready,
           verified: ready,
@@ -289,6 +291,7 @@ for (const width of [1280, 390]) {
     await expect(receipt).toContainText('Version to install: 0.6.0');
     await expect(receipt).not.toContainText('Enabled');
     await expect(receipt).not.toContainText('Verification');
+    await expect(receipt).not.toContainText('could not be checked');
     const install = dialog
       .locator('#specialistSetupJourneyActions')
       .getByRole('button', { name: 'Install plugin', exact: true });
@@ -312,6 +315,8 @@ for (const width of [1280, 390]) {
     );
     await expect(sourceLink).toHaveAttribute('target', '_blank');
     await expect(sourceLink).toHaveAttribute('rel', 'noopener noreferrer');
+    await expect(review).toContainText('Release version: 0.6.0');
+    await expect(review).toContainText('Minimum reviewed version: 0.5.2');
     await expect(review).toContainText('Enabled after this action: No');
     // Technical rows stay collapsed so the buttons are in view without scrolling.
     const technical = review.locator('details.setup-journey__technical');
@@ -335,6 +340,28 @@ for (const width of [1280, 390]) {
     await page.screenshot({ path: testInfo.outputPath(`install-quest-${width}.png`) });
   });
 }
+
+test('when the latest release cannot be checked the install step says it installs the minimum', async ({
+  page
+}, testInfo) => {
+  const install = installQuest(false);
+  install.steps[0].integration = {
+    ...install.steps[0].integration,
+    expected_version: '0.5.2',
+    release_checked: false
+  };
+  const server = newServer({ install });
+  await mockSetup(page, server);
+  await page.goto('/?setup=quest&source=host&quest=install_ori_reaper');
+  const receipt = page.locator('#specialistSetupJourneyModal #specialistSetupJourneyReceipt');
+  await expect(receipt).toContainText('Version to install: 0.5.2');
+  await expect(receipt).toContainText(
+    'The latest release could not be checked. Ori will install the minimum reviewed version.'
+  );
+  // The note is informational: the same review action is offered.
+  await expect(page.getByRole('button', { name: 'Install plugin', exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('install-quest-release-unchecked.png') });
+});
 
 test('an installed integration hands off into the two-screen plugin quest in place', async ({
   page

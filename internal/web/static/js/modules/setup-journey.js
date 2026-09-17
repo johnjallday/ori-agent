@@ -186,6 +186,20 @@ export function setupJourneyReceiptRows(journey, step) {
   return rows.filter(row => row[1]);
 }
 
+export const RELEASE_UNCHECKED_NOTE =
+  'The latest release could not be checked. Ori will install the minimum reviewed version.';
+
+// integrationReleaseCheckNote explains an install or replacement offer that
+// targets the minimum reviewed version because the latest release could not be
+// checked. It is informational only; the step's actions are unchanged.
+export function integrationReleaseCheckNote(step) {
+  if (step?.integration?.release_checked !== false) return '';
+  const offersRelease = (step.actions || []).some(
+    action => action?.id === 'review_install' || action?.id === 'review_update'
+  );
+  return offersRelease ? RELEASE_UNCHECKED_NOTE : '';
+}
+
 export function newJourneyIdempotencyKey() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   return `journey-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -488,6 +502,10 @@ function render() {
   const modelNote = summaryModelNote(step);
   if (modelNote) elements.receipt.appendChild(makeText('p', '', modelNote));
   appendRows(elements.receipt, setupJourneyReceiptRows(journey, step));
+  const releaseNote = integrationReleaseCheckNote(step);
+  if (releaseNote) {
+    elements.receipt.appendChild(makeText('p', 'setup-journey__scope-note', releaseNote));
+  }
   renderDraft(step);
   renderActions(step);
   renderStartOver(journey);
@@ -1597,7 +1615,8 @@ export function integrationReviewRows(review) {
     ...(integration.installed_version
       ? [['Installed version', integration.installed_version]]
       : []),
-    ['Reviewed version', integration.expected_version],
+    ['Release version', integration.expected_version],
+    ['Minimum reviewed version', integration.minimum_version],
     [
       'Enabled after this action',
       review.commit_action === 'enable' ? 'Yes' : integration.enabled ? 'Already enabled' : 'No'

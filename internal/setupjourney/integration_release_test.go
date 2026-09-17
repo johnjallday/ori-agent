@@ -24,7 +24,7 @@ func TestReviewedIntegrationPublishedRelease(t *testing.T) {
 		t.Skip("published reviewed release supports darwin/arm64 only")
 	}
 	entry, ok := reviewedintegration.Get("ori_reaper")
-	if !ok || !entry.ReleaseReady || entry.Source() == "" {
+	if !ok || !entry.ReleaseReady || entry.FallbackSource() == "" {
 		t.Fatal("reviewed release is not enabled")
 	}
 	for _, legacy := range []bool{false, true} {
@@ -39,14 +39,14 @@ func TestReviewedIntegrationPublishedRelease(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if installed.Version != entry.ExpectedVersion {
+				if installed.Version != entry.MinimumVersion {
 					t.Fatalf("official default branch moved to %q; review this external fixture before rerunning", installed.Version)
 				}
 				if err := manager.SetEnabled(entry.PluginID, true); err != nil {
 					t.Fatal(err)
 				}
 			}
-			service := integrationServiceForReplacementTest(t, NewReviewedIntegrationAdapter(manager))
+			service := integrationServiceForReplacementTest(t, NewReviewedIntegrationAdapter(manager, nil))
 			ctx := context.Background()
 			journey, err := service.Read(ctx, "local", "")
 			if err != nil {
@@ -83,7 +83,7 @@ func TestReviewedIntegrationPublishedRelease(t *testing.T) {
 				t.Fatalf("published install did not unlock setup: %#v", journey.Steps[0])
 			}
 			installed, err := manager.List()
-			if err != nil || len(installed) != 1 || installed[0].Source != entry.Source() || !installed[0].Enabled {
+			if err != nil || len(installed) != 1 || installed[0].Source != entry.FallbackSource() || !installed[0].Enabled {
 				t.Fatalf("published install identity/enablement: %#v err=%v", installed, err)
 			}
 			artifacts := installed[0].ResolvedArtifacts
