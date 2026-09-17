@@ -12,7 +12,7 @@ type Settings struct {
 	APIKey          string  `json:"api_key,omitempty"`           // OpenAI API key (optional, falls back to env var)
 	SystemPrompt    string  `json:"system_prompt,omitempty"`     // Custom system prompt for the agent
 	Provider        string  `json:"provider,omitempty"`          // LLM provider backing the model (e.g., openai, anthropic)
-	ReasoningEffort string  `json:"reasoning_effort,omitempty"`  // Optional reasoning depth for providers that support it (currently Codex)
+	ReasoningEffort string  `json:"reasoning_effort,omitempty"`  // Optional reasoning depth for providers that support it (Codex, Claude Code); see ReasoningEffortLevels
 	MaxOutputTokens int     `json:"max_output_tokens,omitempty"` // Optional max tokens for responses
 	AllowWebSearch  *bool   `json:"allow_web_search,omitempty"`  // Nil defaults to true for backward compatibility
 	// AllowNativeMCPTools opts a CLI-provider agent (Claude Code / Codex) into
@@ -46,36 +46,79 @@ func (s Settings) IsWebSearchAllowed() bool {
 	return *s.AllowWebSearch
 }
 
-// NormalizeReasoningEffort normalizes supported reasoning effort values.
-// Returns an empty string when the input is unset or invalid.
+// Reasoning effort is configurable only for the CLI providers whose runtime
+// accepts it: Codex (`model_reasoning_effort`) and Claude Code (`--effort`).
+// Every other provider ignores the setting. The browser mirrors this table in
+// internal/web/static/js/modules/reasoning-effort.js; keep the two in step.
+var (
+	codexReasoningEffortLevels      = []string{"low", "medium", "high", "xhigh"}
+	claudeCodeReasoningEffortLevels = []string{"low", "medium", "high", "xhigh", "max"}
+)
+
+// NormalizeReasoningEffort normalizes a reasoning effort word from the shared
+// vocabulary (low, medium, high, xhigh, max). Returns an empty string when the
+// input is unset or not a known level. Whether a provider accepts the level is
+// decided by NormalizeReasoningEffortFor.
 func NormalizeReasoningEffort(effort string) string {
-	switch strings.ToLower(strings.TrimSpace(effort)) {
-	case "low":
-		return "low"
-	case "medium":
-		return "medium"
-	case "high":
-		return "high"
-	case "xhigh":
-		return "xhigh"
+	switch normalized := strings.ToLower(strings.TrimSpace(effort)); normalized {
+	case "low", "medium", "high", "xhigh", "max":
+		return normalized
 	default:
 		return ""
 	}
 }
 
-// EffectiveReasoningEffort returns the reasoning effort that should be used for
-// the configured provider/model. Codex defaults to medium when unset.
-func (s Settings) EffectiveReasoningEffort(providerName string) string {
-	normalizedProvider := strings.ToLower(strings.TrimSpace(providerName))
-	normalizedModel := strings.ToLower(strings.TrimSpace(s.Model))
-	if normalizedProvider != "codex" && !strings.Contains(normalizedModel, "codex") {
+// ReasoningEffortLevels returns the reasoning effort levels a provider/model
+// accepts, in ascending order, or nil when reasoning effort is not configurable
+// for it. A model named for Codex counts as Codex under any provider label.
+func ReasoningEffortLevels(providerName, modelName string) []string {
+	provider := strings.ToLower(strings.TrimSpace(providerName))
+	model := strings.ToLower(strings.TrimSpace(modelName))
+	switch {
+	case provider == "codex" || strings.Contains(model, "codex"):
+		return append([]string(nil), codexReasoningEffortLevels...)
+	case provider == "claude_code":
+		return append([]string(nil), claudeCodeReasoningEffortLevels...)
+	default:
+		return nil
+	}
+}
+
+// SupportsReasoningEffort reports whether a provider/model accepts a reasoning
+// effort setting at all.
+func SupportsReasoningEffort(providerName, modelName string) bool {
+	return len(ReasoningEffortLevels(providerName, modelName)) > 0
+}
+
+// NormalizeReasoningEffortFor returns effort normalized when the provider/model
+// accepts that level, and an empty string otherwise.
+func NormalizeReasoningEffortFor(providerName, modelName, effort string) string {
+	normalized := NormalizeReasoningEffort(effort)
+	if normalized == "" {
 		return ""
 	}
+	for _, level := range ReasoningEffortLevels(providerName, modelName) {
+		if level == normalized {
+			return normalized
+		}
+	}
+	return ""
+}
 
-	if normalized := NormalizeReasoningEffort(s.ReasoningEffort); normalized != "" {
+// EffectiveReasoningEffort returns the reasoning effort that should be used for
+// the configured provider/model. Codex defaults to medium when unset. Claude
+// Code has no default here: an unset effort sends no flag, so the CLI's own
+// default (or the user's Claude Code settings) applies.
+func (s Settings) EffectiveReasoningEffort(providerName string) string {
+	if normalized := NormalizeReasoningEffortFor(providerName, s.Model, s.ReasoningEffort); normalized != "" {
 		return normalized
 	}
-	return "medium"
+	provider := strings.ToLower(strings.TrimSpace(providerName))
+	model := strings.ToLower(strings.TrimSpace(s.Model))
+	if provider == "codex" || strings.Contains(model, "codex") {
+		return "medium"
+	}
+	return ""
 }
 
 // OnboardingState tracks user's onboarding progress

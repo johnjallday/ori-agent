@@ -320,6 +320,60 @@ func TestApplyTemplateAgentOverrides_UpdatesEditableFieldsAndPreservesTools(t *t
 	}
 }
 
+func TestTemplateAgentReasoningEffort_OverrideAppliesOnlyWhereAccepted(t *testing.T) {
+	idx := 0
+	effort := " Max "
+	tpl := rosterTemplate(projecttemplates.AgentSpec{Name: "Lead", Model: "opus", Provider: "claude_code"})
+	next, err := applyTemplateAgentOverrides(tpl, []templateAgentOverride{{Index: &idx, ReasoningEffort: &effort}})
+	if err != nil {
+		t.Fatalf("apply overrides: %v", err)
+	}
+	if next.Agents[0].ReasoningEffort != "max" {
+		t.Fatalf("override reasoning effort = %q, want max", next.Agents[0].ReasoningEffort)
+	}
+	unknown := "extreme"
+	if _, err := applyTemplateAgentOverrides(tpl, []templateAgentOverride{{Index: &idx, ReasoningEffort: &unknown}}); err == nil {
+		t.Fatal("expected an unknown reasoning effort to be refused")
+	}
+
+	h := &Handler{}
+	for _, tc := range []struct {
+		spec projecttemplates.AgentSpec
+		want string
+	}{
+		{projecttemplates.AgentSpec{Model: "opus", Provider: "claude_code", ReasoningEffort: "max"}, "max"},
+		{projecttemplates.AgentSpec{Model: "gpt-5.6-sol", Provider: "codex", ReasoningEffort: "high"}, "high"},
+		{projecttemplates.AgentSpec{Model: "gpt-5.6-sol", Provider: "codex", ReasoningEffort: "max"}, ""},
+		{projecttemplates.AgentSpec{Model: "claude-opus-5", Provider: "claude", ReasoningEffort: "high"}, ""},
+	} {
+		if _, _, got, _ := h.templateAgentModelDefaults(tc.spec); got != tc.want {
+			t.Errorf("templateAgentModelDefaults(%s/%s, %q) effort = %q, want %q",
+				tc.spec.Provider, tc.spec.Model, tc.spec.ReasoningEffort, got, tc.want)
+		}
+	}
+}
+
+func TestNormalizeRoleStaffing_ReasoningEffort(t *testing.T) {
+	staffing, err := normalizeRoleStaffing([]roleStaffingInput{{
+		RoleID: "lead", Name: "Lead", Provider: "claude_code", Model: "opus", ReasoningEffort: " XHIGH ",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := staffing["lead"].ReasoningEffort; got != "xhigh" {
+		t.Fatalf("reasoning_effort = %q, want xhigh", got)
+	}
+	if got := roleStaffedSpec(projecttemplates.AgentSpec{Name: "Lead"}, staffing["lead"]).ReasoningEffort; got != "xhigh" {
+		t.Fatalf("role-staffed spec reasoning_effort = %q, want xhigh", got)
+	}
+	if _, err := normalizeRoleStaffing([]roleStaffingInput{{RoleID: "lead", Name: "Lead", ReasoningEffort: "extreme"}}); err == nil {
+		t.Fatal("expected an unknown reasoning effort to be refused")
+	}
+	if _, err := normalizeRoleStaffing([]roleStaffingInput{{RoleID: "lead", Name: "Lead", Mode: "assign", ReasoningEffort: "high"}}); err == nil {
+		t.Fatal("expected assign to refuse a reasoning effort it cannot apply")
+	}
+}
+
 func TestApplyTemplateAgentOverrides_RejectsDuplicateNames(t *testing.T) {
 	name := "Writer"
 	idx := 0

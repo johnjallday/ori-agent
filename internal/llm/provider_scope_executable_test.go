@@ -57,7 +57,7 @@ func TestProviderRuntimeScopeExecutableBoundary(t *testing.T) {
 				if prepErr != nil {
 					t.Fatalf("prepare Claude scope: %v", prepErr)
 				}
-				if _, runErr := p.runClaudeExec(ctx, "haiku", prompt, nil, nat); runErr != nil {
+				if _, runErr := p.runClaudeExec(ctx, "haiku", "", prompt, nil, nat); runErr != nil {
 					t.Fatalf("run Claude scope probe: %v", runErr)
 				}
 			}

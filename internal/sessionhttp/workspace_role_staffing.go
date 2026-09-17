@@ -115,6 +115,7 @@ func roleStaffedSpec(spec projecttemplates.AgentSpec, requested roleStaffingInpu
 	if requested.SystemPrompt != "" {
 		spec.SystemPrompt = requested.SystemPrompt
 	}
+	spec.ReasoningEffort = requested.ReasoningEffort
 	return spec
 }
 
@@ -242,7 +243,7 @@ func (h *Handler) staffAssistantRoles(ctx context.Context, workspaceID string, i
 	for _, item := range staffing {
 		fills = append(fills, RoleStaffingFill{
 			RoleID: item.RoleID, Mode: item.Mode, Name: item.Name,
-			Provider: item.Provider, Model: item.Model,
+			Provider: item.Provider, Model: item.Model, ReasoningEffort: item.ReasoningEffort,
 		})
 	}
 	// Deterministic order so a failure is reproducible and the created agents

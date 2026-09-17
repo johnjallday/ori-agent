@@ -108,6 +108,9 @@ type staffingRoleInput struct {
 	Mode     string `json:"mode,omitempty"`
 	Provider string `json:"provider,omitempty"`
 	Model    string `json:"model,omitempty"`
+	// ReasoningEffort is omitted when empty so a request without it hashes
+	// exactly as one taken before the field existed (see Mode above).
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 // binds reports whether this role attaches an existing agent rather than
@@ -302,9 +305,11 @@ func (a *AssistantStaffingAdapter) commitReviewedRoles(scope ReadScope, owner *s
 				return CanonicalResult{}, ErrBoundAgentMissing
 			}
 		} else {
+			// The store keeps the effort only when this provider/model accepts it.
 			if err := a.profiles.CreateAgent(requested.Name, &store.CreateAgentConfig{
 				Role: types.AgentRole(role.Role), Model: requested.Model,
 				LLMProvider: requested.Provider, SystemPrompt: role.SystemPrompt,
+				ReasoningEffort: requested.ReasoningEffort,
 			}); err != nil {
 				rollback()
 				return CanonicalResult{}, ErrConflict
@@ -481,11 +486,12 @@ func (a *AssistantStaffingAdapter) StaffFromReviewedWorkspaceSetup(ctx context.C
 // RoleFill is one role the user chose to fill on the Create Workspace step.
 // Mode is StaffingModeCreate or StaffingModeBind.
 type RoleFill struct {
-	RoleID   string
-	Mode     string
-	Name     string
-	Provider string
-	Model    string
+	RoleID          string
+	Mode            string
+	Name            string
+	Provider        string
+	Model           string
+	ReasoningEffort string
 }
 
 // StaffRoleOnWorkspace fills one role owned by the exact workspace in the
@@ -523,7 +529,7 @@ func (a *AssistantStaffingAdapter) StaffRoleOnWorkspace(_ context.Context, works
 	}
 	wireInput := staffingInput{Roles: []staffingRoleInput{{
 		RoleID: requested.RoleID, Mode: requested.Mode, Name: requested.Name,
-		Provider: requested.Provider, Model: requested.Model,
+		Provider: requested.Provider, Model: requested.Model, ReasoningEffort: requested.ReasoningEffort,
 	}}}
 	raw, err := json.Marshal(wireInput)
 	if err != nil {
@@ -637,10 +643,10 @@ func (a *AssistantStaffingAdapter) StaffRolesFromReviewedWorkspaceSetup(ctx cont
 				if scopeByRole[fill.RoleID] != target || optionalByRole[fill.RoleID] != optional {
 					continue
 				}
-				role := staffingRoleInput{RoleID: fill.RoleID, Name: fill.Name, Provider: fill.Provider, Model: fill.Model}
+				role := staffingRoleInput{RoleID: fill.RoleID, Name: fill.Name, Provider: fill.Provider, Model: fill.Model, ReasoningEffort: fill.ReasoningEffort}
 				if fill.Mode == StaffingModeBind {
 					role.Mode = StaffingModeBind
-					role.Provider, role.Model = "", ""
+					role.Provider, role.Model, role.ReasoningEffort = "", "", ""
 				}
 				input.Roles = append(input.Roles, role)
 			}
@@ -1063,6 +1069,11 @@ func decodeStaffingInput(raw json.RawMessage) (staffingInput, error) {
 		role.Mode = strings.ToLower(strings.TrimSpace(role.Mode))
 		role.Provider = strings.ToLower(strings.TrimSpace(role.Provider))
 		role.Model = strings.TrimSpace(role.Model)
+		requestedEffort := strings.TrimSpace(role.ReasoningEffort)
+		role.ReasoningEffort = types.NormalizeReasoningEffort(requestedEffort)
+		if requestedEffort != "" && role.ReasoningEffort == "" {
+			return staffingInput{}, ErrInvalid
+		}
 		if role.Mode == StaffingModeCreate {
 			role.Mode = ""
 		}
@@ -1072,7 +1083,7 @@ func decodeStaffingInput(raw json.RawMessage) (staffingInput, error) {
 		// Binding attaches an existing definition as it stands. Its provider and
 		// model are the user's, set on /agents; accepting them here would look
 		// like this request could change them, and it cannot.
-		if role.binds() && (role.Provider != "" || role.Model != "") {
+		if role.binds() && (role.Provider != "" || role.Model != "" || role.ReasoningEffort != "") {
 			return staffingInput{}, ErrInvalid
 		}
 		if role.RoleID == "" || role.Name == "" || len(role.RoleID) > 80 || len(role.Name) > 80 || len(role.Provider) > 120 || len(role.Model) > 240 || strings.ContainsAny(role.Name, "\r\n\x00") {

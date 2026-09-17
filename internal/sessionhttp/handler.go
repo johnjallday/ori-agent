@@ -226,11 +226,12 @@ func (h *Handler) SetAssistantReviewedStaffer(staff func(context.Context, string
 // RoleStaffingFill is one role the user chose to fill, as handed to the
 // assistant role staffer. Mode is "create" or "assign".
 type RoleStaffingFill struct {
-	RoleID   string
-	Mode     string
-	Name     string
-	Provider string
-	Model    string
+	RoleID          string
+	Mode            string
+	Name            string
+	Provider        string
+	Model           string
+	ReasoningEffort string
 }
 
 // SetAssistantRoleStaffer supplies the reviewed project-role batch callback

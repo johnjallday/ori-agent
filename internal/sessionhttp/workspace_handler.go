@@ -20,6 +20,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/types"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 	"github.com/johnjallday/ori-agent/internal/workspacesettings"
@@ -329,6 +330,9 @@ type roleStaffingInput struct {
 	// Prompt field from being decorative — it used to be collected and
 	// silently dropped.
 	SystemPrompt string `json:"system_prompt,omitempty"`
+	// ReasoningEffort is the Create form's reasoning level. It is kept only
+	// when the created agent's provider/model accepts it (Codex, Claude Code).
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 const (
@@ -350,6 +354,11 @@ func normalizeRoleStaffing(items []roleStaffingInput) (map[string]roleStaffingIn
 		item.Provider = strings.ToLower(strings.TrimSpace(item.Provider))
 		item.Model = strings.TrimSpace(item.Model)
 		item.SystemPrompt = strings.TrimSpace(item.SystemPrompt)
+		requestedEffort := strings.TrimSpace(item.ReasoningEffort)
+		item.ReasoningEffort = types.NormalizeReasoningEffort(requestedEffort)
+		if requestedEffort != "" && item.ReasoningEffort == "" {
+			return nil, fmt.Errorf("reasoning_effort for %q must be one of [low medium high xhigh max]", item.RoleID)
+		}
 		if item.Mode == "" {
 			item.Mode = roleStaffingModeCreate
 		}
@@ -362,7 +371,7 @@ func normalizeRoleStaffing(items []roleStaffingInput) (map[string]roleStaffingIn
 		// An assigned agent keeps its own definition entirely — accepting any of
 		// these would imply this request could rewrite an agent the user owns.
 		if item.Mode == roleStaffingModeAssign &&
-			(item.Provider != "" || item.Model != "" || item.SystemPrompt != "") {
+			(item.Provider != "" || item.Model != "" || item.SystemPrompt != "" || item.ReasoningEffort != "") {
 			return nil, fmt.Errorf("assigning %q cannot change its setup; edit it on the Agents page", item.Name)
 		}
 		if _, duplicate := out[item.RoleID]; duplicate {

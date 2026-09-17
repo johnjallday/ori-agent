@@ -249,6 +249,61 @@ func TestCreateAgent_WithInvalidReasoningEffort(t *testing.T) {
 	assertStatus(t, rr, http.StatusBadRequest)
 }
 
+func TestAgentReasoningEffort_ClaudeCodeAcceptsMaxAndCodexDoesNot(t *testing.T) {
+	ts := setupTestServer(t)
+	defer ts.cleanup()
+
+	rr := ts.doRequest(t, http.MethodPost, "/api/agents", map[string]any{
+		"name":             "claude-effort-agent",
+		"llm_provider":     "claude_code",
+		"model":            "opus",
+		"reasoning_effort": "max",
+	})
+	assertStatus(t, rr, http.StatusOK)
+	ag, ok := ts.store.GetAgent("claude-effort-agent")
+	if !ok || ag == nil || ag.Settings.ReasoningEffort != "max" {
+		t.Fatalf("expected stored reasoning_effort max for Claude Code, got %#v", ag)
+	}
+	rr = ts.doRequest(t, http.MethodGet, "/api/agents/claude-effort-agent/detail", nil)
+	assertStatus(t, rr, http.StatusOK)
+	var detail map[string]any
+	decodeResponse(t, rr, &detail)
+	if got := detail["reasoning_effort"]; got != "max" {
+		t.Fatalf("expected reasoning_effort max in detail response, got %#v", got)
+	}
+
+	// Codex has no "max" level.
+	rr = ts.doRequest(t, http.MethodPost, "/api/agents", map[string]any{
+		"name":             "codex-max-agent",
+		"llm_provider":     "codex",
+		"model":            "gpt-5.4",
+		"reasoning_effort": "max",
+	})
+	assertStatus(t, rr, http.StatusBadRequest)
+
+	// An API provider keeps ignoring the setting, as before.
+	rr = ts.doRequest(t, http.MethodPost, "/api/agents", map[string]any{
+		"name":             "api-effort-agent",
+		"llm_provider":     "claude",
+		"model":            "claude-opus-5",
+		"reasoning_effort": "high",
+	})
+	assertStatus(t, rr, http.StatusOK)
+	if api, ok := ts.store.GetAgent("api-effort-agent"); !ok || api.Settings.ReasoningEffort != "" {
+		t.Fatalf("expected no reasoning effort for an API provider, got %#v", api)
+	}
+
+	// Moving the Claude Code agent to Codex drops the level Codex cannot use.
+	rr = ts.doRequest(t, http.MethodPatch, "/api/agents?name=claude-effort-agent", map[string]any{
+		"llm_provider": "codex",
+		"model":        "gpt-5.4",
+	})
+	assertStatus(t, rr, http.StatusOK)
+	if moved, ok := ts.store.GetAgent("claude-effort-agent"); !ok || moved.Settings.ReasoningEffort != "" {
+		t.Fatalf("expected the Claude-only level to be dropped on a move to Codex, got %#v", moved)
+	}
+}
+
 // Test 7.1: Complete agent lifecycle (create → list → detail → update → delete)
 func TestCompleteAgentLifecycle(t *testing.T) {
 	ts := setupTestServer(t)

@@ -55,7 +55,7 @@ func TestInstalledCLIsExposeCharacterizedNarrowFilesystemMechanisms(t *testing.T
 // must add a distinct capability scope rather than bless this broad posture.
 func TestClaudeRuntimeGrantMustNotRelyOnBypassPermissions(t *testing.T) {
 	nat := &claudeNativeMCP{WorkspaceDir: "/workspace", AdditionalWritableRoots: []string{"/runner"}, Scoped: true}
-	args, err := buildClaudeArgs("haiku", "scope test", nil, nat)
+	args, err := buildClaudeArgs("haiku", "", "scope test", nil, nat)
 	if err != nil {
 		t.Fatal(err)
 	}
