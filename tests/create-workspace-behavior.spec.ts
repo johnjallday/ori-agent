@@ -524,6 +524,13 @@ test('checked project-open option posts exactly once after create and before nav
 
   await cardByLabel(page, 'Auto Project').click();
   await advanceToWorkspaceDetails(page);
+  // A {{name}} project file is never named after the blueprint, so the name
+  // starts empty and the user names the workspace.
+  await expect(page.locator('#folderNameInput')).toHaveValue('');
+  await page.locator('#folderNameInput').fill('Created Open');
+  await expect(page.locator('#workspaceNameHint')).toHaveText(
+    'Folder: created-open · Project file: created-open.rpp'
+  );
   // Assert the launch choice on the step that owns it, then continue to Review,
   // which is the only step with the final create action (FR11).
   await expect(page.locator('#projectTemplateOpenAfterCreateToggle')).toBeChecked();
@@ -559,6 +566,7 @@ test('unchecked project-open option creates and navigates without an open reques
 
   await cardByLabel(page, 'Manual Project').click();
   await advanceToWorkspaceDetails(page);
+  await page.locator('#folderNameInput').fill('Created Closed');
   await expect(page.locator('#projectTemplateOpenAfterCreateToggle')).not.toBeChecked();
   await advanceToReview(page);
   await page.locator('#createFolderBtn').click();
@@ -593,6 +601,7 @@ test('project-open failure still navigates and shows a one-time retry notice', a
 
   await cardByLabel(page, 'Auto Project').click();
   await advanceToWorkspaceDetails(page);
+  await page.locator('#folderNameInput').fill('Created Failure');
   await advanceToReview(page);
   await page.locator('#createFolderBtn').click();
   await page.waitForURL('**/workspaces/created-failure');

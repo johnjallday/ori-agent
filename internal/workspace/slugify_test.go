@@ -1,9 +1,37 @@
 package workspace
 
 import (
+	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 )
+
+// TestSlugifySharedVectors keeps the browser's slugifyWorkspaceName in step
+// with Slugify: sessions.test.js reads the same file.
+func TestSlugifySharedVectors(t *testing.T) {
+	raw, err := os.ReadFile("testdata/slugify_vectors.json")
+	if err != nil {
+		t.Fatalf("read shared vectors: %v", err)
+	}
+	var file struct {
+		Vectors []struct {
+			Input string `json:"input"`
+			Slug  string `json:"slug"`
+		} `json:"vectors"`
+	}
+	if err := json.Unmarshal(raw, &file); err != nil {
+		t.Fatalf("decode shared vectors: %v", err)
+	}
+	if len(file.Vectors) == 0 {
+		t.Fatal("shared vectors are empty")
+	}
+	for _, vector := range file.Vectors {
+		if got := Slugify(vector.Input); got != vector.Slug {
+			t.Errorf("Slugify(%q) = %q, want %q", vector.Input, got, vector.Slug)
+		}
+	}
+}
 
 func TestSlugify(t *testing.T) {
 	tests := []struct {

@@ -186,11 +186,11 @@
                   <legend>Choose this project's structure</legend>
                   <label>
                     <input type="radio" name="workspace-group-composition-details" value="grouped">
-                    <span><strong>Grouped</strong><small>Use the exact program Home and its separately owned coordinator.</small></span>
+                    <span><strong>Grouped</strong><small id="workspaceGroupCompositionGroupedCopy">Create inside the blueprint’s group, alongside its other projects.</small></span>
                   </label>
                   <label>
                     <input type="radio" name="workspace-group-composition-details" value="standalone">
-                    <span><strong>Standalone</strong><small>Create only this workspace with the blueprint's Home-free project team.</small></span>
+                    <span><strong>Standalone</strong><small>Create this workspace on its own, with its own team.</small></span>
                   </label>
                 </fieldset>
                 <div id="workspaceGroupHomeReview" class="workspace-group-home-review" hidden>
@@ -255,15 +255,7 @@
                   </div>
                 </div>
 
-                <textarea id="folderDescriptionInput" class="modern-input w-100 mb-2" placeholder="What this workspace is for and what Ori should help with" rows="3" style="resize: vertical;"></textarea>
-
-                <div id="workspaceBootstrapFields">
-                  <label for="folderSystemsInput" style="font-size: 12px; color: var(--text-secondary);">Apps and systems <span style="opacity: 0.8;">(optional)</span></label>
-                  <input type="text" id="folderSystemsInput" class="modern-input w-100 mb-2" placeholder="Keynote, Finder, Google Drive">
-
-                  <label for="folderContextInput" style="font-size: 12px; color: var(--text-secondary);">Key files or context <span style="opacity: 0.8;">(optional)</span></label>
-                  <textarea id="folderContextInput" class="modern-input w-100" placeholder="Folder paths, source docs, launch notes, brand references" rows="2" style="resize: vertical;"></textarea>
-                </div>
+                <textarea id="folderDescriptionInput" class="modern-input w-100" placeholder="What this workspace is for and what Ori should help with" rows="3" style="resize: vertical;"></textarea>
               </div>
 
               <section id="workspaceCreatorDestinationCard" class="workspace-setup-card mb-2">
@@ -271,11 +263,18 @@
                 <select id="folderParentSelect" class="modern-input w-100 mb-2" aria-label="Select parent group" aria-describedby="folderParentHelp">
                   <option value="">No group</option>
                 </select>
-                <div id="folderParentHelp" class="workspace-setup-help" style="margin-top: -6px; margin-bottom: 10px;">
-                  Optional. Choose an organizational group for this workspace. This does not grant program membership.
+                <!-- Visibility, value, disabled state, and caption are decided
+                     only by sessions.js syncWorkspaceDestinationControl. -->
+                <div id="folderParentHelp" class="workspace-setup-help" style="margin-top: -6px;">
+                  Optional. Put this workspace inside a group to keep related work together.
                 </div>
-                <div class="folder-color-picker">
-                  <label style="font-size: 12px; color: var(--text-secondary);">Color <span style="opacity: 0.8;">(optional)</span></label>
+              </section>
+
+              <!-- Color stands apart from the destination control, so a
+                   blueprint that fixes the placement still offers it. -->
+              <section id="workspaceCreatorColorCard" class="workspace-setup-card mb-2">
+                <div class="folder-color-picker" role="group" aria-labelledby="folderColorLabel">
+                  <span id="folderColorLabel" style="font-size: 12px; color: var(--text-secondary);">Color <span style="opacity: 0.8;">(optional)</span></span>
                   <div id="folderColorOptions" class="folder-color-options mt-1">
                     <button type="button" class="folder-color-btn active" data-color="" title="Default" aria-label="Default color"></button>
                     <button type="button" class="folder-color-btn" data-color="#ef4444" title="Red" aria-label="Red color" style="background: #ef4444;"></button>
@@ -295,6 +294,17 @@
                   <span id="folderBehaviorHint" class="workspace-advanced-summary-hint" aria-live="polite">Agent behavior: General</span>
                 </summary>
                 <div class="workspace-advanced-body">
+                  <!-- Agent context: sent as workspace_bootstrap.systems/.context
+                       and read by the chat and task prompt builders, for every
+                       blueprint. -->
+                  <div id="workspaceBootstrapFields">
+                    <label for="folderSystemsInput" style="font-size: 12px; color: var(--text-secondary);">Apps and systems <span style="opacity: 0.8;">(optional)</span></label>
+                    <input type="text" id="folderSystemsInput" class="modern-input w-100 mb-2" placeholder="Apps, services, or tools this work uses">
+
+                    <label for="folderContextInput" style="font-size: 12px; color: var(--text-secondary);">Key files or context <span style="opacity: 0.8;">(optional)</span></label>
+                    <textarea id="folderContextInput" class="modern-input w-100 mb-2" placeholder="Folders, documents, or references your agents should know about" rows="2" style="resize: vertical;"></textarea>
+                  </div>
+
                   <label for="folderPresetSelect" style="font-size: 12px; color: var(--text-secondary);">Agent behavior</label>
                   <select id="folderPresetSelect" class="modern-input w-100 mb-2" aria-label="Agent behavior">
                     <option value="general" selected>General</option>
@@ -305,15 +315,21 @@
                     Controls how agents in this workspace plan and act — planning depth, whether they write a PRD / task list, and when they ask before destructive actions. Set automatically from your Template; change it anytime.
                   </div>
 
-                  <label for="projectTemplatePathInput" style="font-size: 12px; color: var(--text-secondary);">Use any folder as a template</label>
-                  <div class="d-flex flex-column flex-sm-row gap-2 mb-1">
-                    <input type="text" id="projectTemplatePathInput" class="modern-input w-100" placeholder="/absolute/path/to/template-folder" autocomplete="off">
-                    <button type="button" id="projectTemplateBrowseBtn" class="modern-btn modern-btn-secondary" style="white-space: nowrap; min-width: 130px;" aria-label="Browse for a template folder">
-                      Choose folder…
-                    </button>
-                  </div>
-                  <div style="margin-top: -2px; margin-bottom: 10px; font-size: 12px; color: var(--text-secondary);">
-                    Scaffolds the chosen folder's files into the workspace as its project. Overrides the template selection above.
+                  <!-- Hidden for a blueprint that sets up its own project (plugin
+                       owner, setup wizard, or setup quest): the two cannot be
+                       combined. Visibility is decided by sessions.js
+                       syncTemplateFolderOverride. -->
+                  <div id="projectTemplatePathField">
+                    <label for="projectTemplatePathInput" style="font-size: 12px; color: var(--text-secondary);">Use any folder as a template</label>
+                    <div class="d-flex flex-column flex-sm-row gap-2 mb-1">
+                      <input type="text" id="projectTemplatePathInput" class="modern-input w-100" placeholder="/absolute/path/to/template-folder" autocomplete="off">
+                      <button type="button" id="projectTemplateBrowseBtn" class="modern-btn modern-btn-secondary" style="white-space: nowrap; min-width: 130px;" aria-label="Browse for a template folder">
+                        Choose folder…
+                      </button>
+                    </div>
+                    <div style="margin-top: -2px; margin-bottom: 10px; font-size: 12px; color: var(--text-secondary);">
+                      Scaffolds the chosen folder's files into the workspace as its project. Overrides the template selection above.
+                    </div>
                   </div>
 
                   <label style="font-size: 12px; color: var(--text-secondary);">Tags <span style="opacity: 0.8;">(optional)</span></label>
@@ -509,6 +525,12 @@
                 <p id="workspaceSetupPreviewNote" class="workspace-setup-preview-note"></p>
               </section>
             </section>
+
+            <!-- Announces a Details field the chosen blueprint changed on the
+                 user's behalf (a removed folder override). Outside every step
+                 section: a live region inside a hidden step is never read,
+                 and the change happens while the user is choosing on step 1. -->
+            <div id="workspaceDetailsLiveRegion" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
           </div>
         </div>
       </div>

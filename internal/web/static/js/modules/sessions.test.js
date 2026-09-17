@@ -1404,7 +1404,7 @@ test('a confirmed Map placement latches the returned id and saves its exact coor
 
 test('an unchanged readiness recheck preserves group receipts while a template revision clears them', () => {
   const manager = loadSessionManager();
-  manager.syncGroupRequirementParentControl = () => {};
+  manager.syncWorkspaceDestinationControl = () => {};
   const template = {
     id: 'plugin:reaper-plugin:reaper-song',
     revision: 'a'.repeat(64),
@@ -2404,8 +2404,7 @@ function lockedParentManager({ groups = [{ id: 'g-1', name: 'Studio Group', dept
     {
       WorkspaceGroupOptions: {
         collectWorkspaceGroupOptions: () => groups,
-        renderWorkspaceParentOptions: () => '',
-        setWorkspaceParentSelectState: () => {}
+        renderWorkspaceParentOptions: () => ''
       },
       CSS: { escape: value => value }
     },
@@ -2419,7 +2418,7 @@ function lockedParentManager({ groups = [{ id: 'g-1', name: 'Studio Group', dept
 }
 
 test('a locked parent preselects, disables, and captions the destination control', () => {
-  const { manager, parentSelect, parentHelp } = lockedParentManager();
+  const { manager, parentSelect, parentHelp, elements } = lockedParentManager();
   manager.beginWorkspaceCreatorContext({
     parentId: 'g-1',
     parentName: 'Studio Group',
@@ -2428,20 +2427,21 @@ test('a locked parent preselects, disables, and captions the destination control
   });
 
   assert.equal(manager.lockedParentId(), 'g-1');
-  manager.applyLockedParentSelection();
+  manager.syncWorkspaceDestinationControl();
   assert.equal(parentSelect.value, 'g-1');
   assert.equal(parentSelect.disabled, true);
   assert.equal(parentHelp.textContent, 'Building into Studio Group');
+  assert.equal(elements.workspaceCreatorDestinationCard.hidden, false);
 });
 
-test('an unlocked creator leaves the destination control alone', () => {
+test('an unlocked creator keeps the destination control a free choice', () => {
   const { manager, parentSelect, parentHelp } = lockedParentManager();
   manager.beginWorkspaceCreatorContext({ entryPoint: 'home_cockpit_create' });
   assert.equal(manager.lockedParentId(), '');
-  manager.applyLockedParentSelection();
+  manager.syncWorkspaceDestinationControl();
   assert.equal(parentSelect.value, '');
   assert.equal(parentSelect.disabled, false);
-  assert.equal(parentHelp.textContent, '');
+  assert.doesNotMatch(parentHelp.textContent, /Building into/);
 });
 
 test('parentLocked without a parent id is not a lock', () => {
@@ -2460,7 +2460,7 @@ test('a locked parent answers the grouped-or-standalone question', () => {
 
   // And the control keeps showing the group rather than being cleared and
   // hidden the way an unanswered placement question does.
-  manager.syncGroupRequirementParentControl();
+  manager.syncWorkspaceDestinationControl();
   assert.equal(parentSelect.value, 'g-1');
   assert.equal(parentSelect.disabled, true);
   assert.equal(elements.workspaceCreatorDestinationCard.hidden, false);
@@ -2482,6 +2482,723 @@ test('the locked parent wins over the select and over a pending map build', () =
   assert.equal(resolve('', ''), 'g-1', 'blank form');
   assert.equal(resolve('g-other', ''), 'g-1', 'a stale select value');
   assert.equal(resolve('', 'g-district'), 'g-1', 'a pending district build');
+});
+
+// ---------------------------------------------------------------------------
+// Details destination: the generic "Create in" control has one owner, so a
+// blueprint's fixed placement is never contradicted by a second "No group"
+// statement on any navigation path (blueprint-aware Details FR 1–8).
+// ---------------------------------------------------------------------------
+
+class DestinationElement {
+  constructor(props = {}) {
+    this.hidden = false;
+    this.disabled = false;
+    this.value = '';
+    this.textContent = '';
+    this.innerHTML = '';
+    this.placeholder = '';
+    this.dataset = {};
+    this.attributes = {};
+    Object.assign(this, props);
+  }
+  setAttribute(name, value) {
+    this.attributes[name] = String(value);
+  }
+  removeAttribute(name) {
+    delete this.attributes[name];
+  }
+  querySelectorAll() {
+    return [];
+  }
+  querySelector() {
+    return null;
+  }
+  focus() {}
+}
+
+// The real page-local helpers the owner reads, loaded the way the page loads
+// them (window globals), so these tests cannot drift from their contracts.
+function creatorWindowHelpers() {
+  const window = {};
+  for (const file of ['./workspace-creator-state.js', './workspace-group-options.js']) {
+    vm.runInNewContext(readFileSync(new URL(file, import.meta.url), 'utf8'), {
+      window,
+      console,
+      escapeHtml: value => String(value ?? '')
+    });
+  }
+  return {
+    WorkspaceCreatorState: window.WorkspaceCreatorState,
+    WorkspaceGroupOptions: window.WorkspaceGroupOptions
+  };
+}
+
+function detailsDestinationManager({ groups = [], windowOverrides = {} } = {}) {
+  const options = [{ value: '', textContent: 'No group' }];
+  groups.forEach(group => options.push({ value: group.id, textContent: group.name }));
+  const elements = {
+    workspaceCreatorDestinationCard: new DestinationElement(),
+    workspaceCreatorColorCard: new DestinationElement(),
+    folderParentSelect: new DestinationElement({
+      options,
+      selectedIndex: 0,
+      appendChild: option => options.push(option)
+    }),
+    folderParentHelp: new DestinationElement(),
+    folderNameInput: new DestinationElement({ value: 'Night Drive' })
+  };
+  const manager = loadSessionManager(
+    async () => ({ ok: true, json: async () => ({}) }),
+    { ...creatorWindowHelpers(), ...windowOverrides },
+    {
+      getElementById: id => elements[id] || null,
+      querySelectorAll: () => [],
+      createElement: () => ({ value: '', textContent: '' })
+    }
+  );
+  manager.folders = groups.map(group => ({ ...group, kind: 'group' }));
+  // Plan loading is network work; placement visibility never waits on it.
+  manager.refreshTemplateAgentPlan = async () => {};
+  manager.beginWorkspaceCreatorContext({ entryPoint: 'workspace_hub_create' });
+  return { manager, elements };
+}
+
+// What the workspace-template-selected listener does with a blueprint.
+function selectBlueprint(manager, template) {
+  manager.workspaceTemplate = template;
+  manager.resetGroupRequirementDraft(template);
+}
+
+const requiredGroupTemplate = {
+  id: 'plugin:owner-plugin:grouped-blueprint',
+  revision: 'r1',
+  group_requirement: { policy: 'required' }
+};
+
+const recommendedGroupTemplate = {
+  id: 'plugin:owner-plugin:flexible-blueprint',
+  revision: 'r1',
+  group_requirement: { policy: 'recommended' }
+};
+
+test('a required group keeps the generic destination control hidden on Details (FR 17)', () => {
+  const { manager, elements } = detailsDestinationManager();
+  manager.resetGroupRequirementDraft(requiredGroupTemplate);
+  manager.wizardStep = 2;
+  manager.refreshWizardChrome();
+  assert.equal(elements.workspaceCreatorDestinationCard.hidden, true);
+});
+
+test('a fixed placement hides the generic destination control (FR 3)', () => {
+  const groups = [{ id: 'g-1', name: 'Studio Group', depth: 0 }];
+  const details = template => {
+    const context = detailsDestinationManager({ groups });
+    context.elements.folderParentSelect.value = 'g-1';
+    selectBlueprint(context.manager, template);
+    context.manager.wizardStep = 2;
+    context.manager.refreshWizardChrome();
+    return context;
+  };
+
+  const required = details(requiredGroupTemplate);
+  assert.equal(required.elements.workspaceCreatorDestinationCard.hidden, true, 'required');
+  assert.equal(required.elements.folderParentSelect.value, '', 'no stale organizational parent');
+
+  const unanswered = details(recommendedGroupTemplate);
+  assert.equal(
+    unanswered.elements.workspaceCreatorDestinationCard.hidden,
+    true,
+    'recommended, not answered yet'
+  );
+
+  const grouped = details(recommendedGroupTemplate);
+  grouped.manager.setGroupRequirementComposition('grouped');
+  assert.equal(
+    grouped.elements.workspaceCreatorDestinationCard.hidden,
+    true,
+    'recommended + grouped'
+  );
+  assert.equal(grouped.elements.folderParentSelect.disabled, true);
+});
+
+test('standalone placement and blueprints without a requirement keep the control (FR 4)', () => {
+  const groups = [{ id: 'g-1', name: 'Studio Group', depth: 0 }];
+
+  const standalone = detailsDestinationManager({ groups });
+  selectBlueprint(standalone.manager, recommendedGroupTemplate);
+  standalone.manager.wizardStep = 2;
+  standalone.manager.setGroupRequirementComposition('standalone');
+  assert.equal(standalone.elements.workspaceCreatorDestinationCard.hidden, false, 'standalone');
+  assert.equal(standalone.elements.folderParentSelect.disabled, false);
+
+  const none = detailsDestinationManager({ groups });
+  selectBlueprint(none.manager, {
+    ...requiredGroupTemplate,
+    group_requirement: { policy: 'none' }
+  });
+  none.manager.wizardStep = 2;
+  none.manager.refreshWizardChrome();
+  assert.equal(none.elements.workspaceCreatorDestinationCard.hidden, false, 'policy none');
+
+  const blank = detailsDestinationManager();
+  selectBlueprint(blank.manager, null);
+  blank.manager.wizardStep = 2;
+  blank.manager.refreshWizardChrome();
+  assert.equal(blank.elements.workspaceCreatorDestinationCard.hidden, false, 'Blank');
+  assert.equal(blank.elements.folderParentSelect.value, '');
+  assert.equal(blank.elements.folderParentSelect.disabled, true, 'nothing to choose yet');
+  assert.match(blank.elements.folderParentHelp.textContent, /^No groups yet\./);
+});
+
+test('a locked parent stays visible, disabled, and captioned even for a required group (FR 5)', () => {
+  const groups = [{ id: 'g-1', name: 'Studio Group', depth: 0 }];
+  const { manager, elements } = detailsDestinationManager({ groups });
+  manager.beginWorkspaceCreatorContext({
+    parentId: 'g-1',
+    parentName: 'Studio Group',
+    parentLocked: true,
+    entryPoint: 'group_detail_build'
+  });
+  selectBlueprint(manager, requiredGroupTemplate);
+  manager.wizardStep = 2;
+  manager.refreshWizardChrome();
+  assert.equal(elements.workspaceCreatorDestinationCard.hidden, false);
+  assert.equal(elements.folderParentSelect.value, 'g-1');
+  assert.equal(elements.folderParentSelect.disabled, true);
+  assert.equal(elements.folderParentHelp.textContent, 'Building into Studio Group');
+});
+
+test('Color stays available when the destination control is hidden (FR 6)', () => {
+  const { manager, elements } = detailsDestinationManager();
+  selectBlueprint(manager, requiredGroupTemplate);
+  manager.wizardStep = 2;
+  manager.refreshWizardChrome();
+  assert.equal(elements.workspaceCreatorDestinationCard.hidden, true);
+  assert.equal(elements.workspaceCreatorColorCard.hidden, false);
+
+  // Import still has no Color, exactly as before the move.
+  manager.importModeEnabled = true;
+  manager.refreshWizardChrome();
+  assert.equal(elements.workspaceCreatorColorCard.hidden, true);
+});
+
+test('every navigation path gives Details the same destination answer (FR 2)', () => {
+  const groups = [{ id: 'g-1', name: 'Studio Group', depth: 0 }];
+  const { manager, elements } = detailsDestinationManager({ groups });
+  const card = elements.workspaceCreatorDestinationCard;
+  // Rendering Team and Review is not what this test is about.
+  manager.teamView = () => null;
+  manager.refreshWorkspaceReview = function () {
+    this.syncWorkspaceDestinationControl();
+  };
+
+  selectBlueprint(manager, requiredGroupTemplate);
+  manager.goToWizardStep(2);
+  assert.equal(manager.wizardStep, 2);
+  assert.equal(card.hidden, true, 'first Continue');
+
+  manager.goToWizardStep(3);
+  assert.equal(manager.wizardStep, 3);
+  assert.equal(card.hidden, true, 'Team');
+
+  manager.goToWizardStep(2);
+  assert.equal(card.hidden, true, 'Back to Details');
+
+  assert.equal(manager.switchWorkspaceCreatorKind('group'), true);
+  assert.equal(card.hidden, false, 'an ordinary Group chooses its own parent');
+  assert.match(elements.folderParentHelp.textContent, /Nest this group/);
+
+  assert.equal(manager.switchWorkspaceCreatorKind('workspace'), true);
+  manager.goToWizardStep(2);
+  assert.equal(manager.wizardStep, 2);
+  assert.equal(card.hidden, true, 'Workspace → Group → Workspace');
+
+  // A readiness recheck emits the same blueprint again.
+  selectBlueprint(manager, { ...requiredGroupTemplate });
+  manager.refreshWizardChrome();
+  assert.equal(card.hidden, true, 'readiness recheck');
+  assert.equal(elements.folderParentSelect.value, '');
+});
+
+test('destination help names program membership only for an assistant program (FR 8)', () => {
+  const groups = [{ id: 'g-1', name: 'Studio Group', depth: 0 }];
+  const plain = detailsDestinationManager({ groups });
+  selectBlueprint(plain.manager, { id: 'research-project' });
+  plain.manager.wizardStep = 2;
+  plain.manager.refreshWizardChrome();
+  assert.equal(
+    plain.elements.folderParentHelp.textContent,
+    'Optional. Put this workspace inside a group to keep related work together.'
+  );
+
+  const program = detailsDestinationManager({ groups });
+  selectBlueprint(program.manager, {
+    id: 'plugin:owner-plugin:program-blueprint',
+    assistant_program: { id: 'owner-program' }
+  });
+  program.manager.wizardStep = 2;
+  program.manager.refreshWizardChrome();
+  assert.equal(
+    program.elements.folderParentHelp.textContent,
+    'Optional. Choose an organizational group for this workspace. This does not grant program membership.'
+  );
+});
+
+test('Review states a fixed destination once, with the same group state Details shows (FR 7)', () => {
+  const groups = [{ id: 'g-1', name: 'Studio Group', depth: 0 }];
+  const { manager, elements } = detailsDestinationManager({ groups });
+  const template = {
+    ...requiredGroupTemplate,
+    group_requirement: { policy: 'required', default_home_name: 'Studio Home' }
+  };
+  selectBlueprint(manager, template);
+  manager.syncWorkspaceDestinationControl();
+
+  manager.groupRequirementDraft.projection = {
+    home: { exists: false, proposed_name: 'Studio Home' }
+  };
+  const proposed = manager.renderWorkspaceGroupRequirementReceipt(template);
+  assert.match(proposed, /Proposed group · not created yet/);
+  assert.doesNotMatch(proposed, /Existing verified group/);
+
+  manager.groupRequirementDraft.projection = {
+    home: { exists: true, workspace_id: 'home-1', name: 'Studio Home' }
+  };
+  assert.match(
+    manager.renderWorkspaceGroupRequirementReceipt(template),
+    /Existing verified group · reused/
+  );
+
+  // The Details choices never add a second "Group:" line for a hidden control.
+  elements.folderParentSelect.value = 'g-1';
+  elements.folderParentSelect.selectedIndex = 1;
+  assert.equal(
+    manager.workspaceReviewDetailChoices().some(choice => choice.startsWith('Group:')),
+    false
+  );
+
+  const free = detailsDestinationManager({ groups });
+  selectBlueprint(free.manager, null);
+  free.manager.syncWorkspaceDestinationControl();
+  free.elements.folderParentSelect.value = 'g-1';
+  free.elements.folderParentSelect.selectedIndex = 1;
+  assert.deepEqual(JSON.parse(JSON.stringify(free.manager.workspaceReviewDetailChoices())), [
+    'Group: Studio Group'
+  ]);
+});
+
+test('guided setup keeps its reviewed group while the generic control stays hidden', () => {
+  const groups = [{ id: 'home-1', name: 'Studio Home', depth: 0 }];
+  const { manager, elements } = detailsDestinationManager({
+    groups,
+    windowOverrides: { SetupWorkspaceCreator: { isActive: () => true } }
+  });
+  manager.teamView = () => null;
+  manager.refreshWorkspaceReview = function () {
+    this.syncWorkspaceDestinationControl();
+  };
+  // setup-workspace-creator.js writes the reviewed Home into the select and
+  // mounts its own placement control; its submit refuses any other parent_id.
+  // Before this owner, moving to Team cleared the value and the create failed.
+  elements.folderParentSelect.value = 'home-1';
+  elements.folderParentSelect.disabled = true;
+  selectBlueprint(manager, requiredGroupTemplate);
+  manager.goToWizardStep(2);
+  manager.goToWizardStep(3);
+  assert.equal(manager.wizardStep, 3);
+  assert.equal(elements.workspaceCreatorDestinationCard.hidden, true);
+  assert.equal(elements.folderParentSelect.value, 'home-1');
+  assert.equal(elements.folderParentSelect.disabled, true, 'setup owns the disabled state too');
+
+  // A standalone setup placement is stated by setup's own control as well.
+  selectBlueprint(manager, recommendedGroupTemplate);
+  manager.setGroupRequirementComposition('standalone');
+  elements.folderParentSelect.value = '';
+  manager.goToWizardStep(2);
+  assert.equal(elements.workspaceCreatorDestinationCard.hidden, true);
+  assert.equal(elements.folderParentSelect.value, '');
+  assert.deepEqual(JSON.parse(JSON.stringify(manager.workspaceReviewDetailChoices())), []);
+});
+
+// ---------------------------------------------------------------------------
+// Fields the blueprint already answers (blueprint-aware Details FR 9–11a).
+// ---------------------------------------------------------------------------
+
+const selfConfiguringTemplate = {
+  id: 'plugin:owner-plugin:song',
+  name: 'Song',
+  description: 'A blueprint that sets up its own project.',
+  plugin_owner: { plugin_id: 'owner-plugin', blueprint_id: 'song' },
+  assistant_program: { id: 'owner-program' },
+  project_entry: { relative_path: '{{name}}.proj' }
+};
+
+test('blueprintDetailsProfile derives plain flags from what a blueprint declares (FR 9)', () => {
+  const manager = loadSessionManager();
+  const profile = template => JSON.parse(JSON.stringify(manager.blueprintDetailsProfile(template)));
+  const blank = {
+    blank: true,
+    bringsOwnSetup: false,
+    hasAssistantProgram: false,
+    entryNamedAfterWorkspace: false,
+    projectEntryPath: ''
+  };
+  assert.deepEqual(profile(null), blank);
+  assert.deepEqual(profile({ blank: true, name: 'Blank' }), blank);
+
+  assert.deepEqual(profile(selfConfiguringTemplate), {
+    blank: false,
+    bringsOwnSetup: true,
+    hasAssistantProgram: true,
+    entryNamedAfterWorkspace: true,
+    projectEntryPath: '{{name}}.proj'
+  });
+  assert.equal(profile({ id: 'wizard', setup_wizard: { id: 'w' } }).bringsOwnSetup, true);
+  assert.equal(profile({ id: 'quest', setup_quest: { id: 'q' } }).bringsOwnSetup, true);
+  assert.deepEqual(profile({ id: 'writing', project_entry: { relative_path: 'outline.md' } }), {
+    blank: false,
+    bringsOwnSetup: false,
+    hasAssistantProgram: false,
+    entryNamedAfterWorkspace: false,
+    projectEntryPath: 'outline.md'
+  });
+  assert.equal(
+    profile({ id: 'dated', project_entry: { relative_path: 'notes-{{date}}.md' } })
+      .entryNamedAfterWorkspace,
+    false
+  );
+});
+
+async function runDetailsCreate({
+  name = 'Night Drive',
+  description = '',
+  systems = '',
+  context = ''
+}) {
+  const requests = [];
+  const elements = new Map([
+    ['folderNameInput', { value: name, focus() {}, classList: { add() {}, remove() {} } }],
+    ['folderDescriptionInput', { value: description }],
+    ['folderSystemsInput', { value: systems }],
+    ['folderContextInput', { value: context }],
+    ['folderParentSelect', { value: '' }],
+    ['addFolderModal', { dataset: {} }],
+    ['createFolderBtn', { textContent: 'Create workspace', disabled: false }],
+    ['folderImportToggle', { checked: false }]
+  ]);
+  const window = {
+    location: { href: '' },
+    ProjectTemplateCard: {
+      recheckSelection: async () => ({ state: 'ready' }),
+      getPayloadFields: () => ({ template_id: 'research-project' }),
+      getSelectedTemplate: () => ({ id: 'research-project' }),
+      shouldOpenAfterCreate: () => false,
+      reset() {}
+    },
+    OriTagInput: { clearTagPoolCache() {} }
+  };
+  vm.runInNewContext(
+    source,
+    {
+      window,
+      document: {
+        addEventListener() {},
+        getElementById: id => elements.get(id) || null,
+        querySelector: selector =>
+          selector === '#addFolderModal .folder-color-btn.active'
+            ? { dataset: { color: '' } }
+            : null
+      },
+      bootstrap: { Modal: { getInstance: () => ({ hide() {} }) } },
+      fetch: async (url, options) => {
+        requests.push({ url, body: JSON.parse(options.body) });
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({ folder: { id: 'ws-1', folder_slug: 'night-drive' } })
+        };
+      },
+      console,
+      crypto: { randomUUID: () => 'details-request' }
+    },
+    { filename: 'sessions.js' }
+  );
+  const manager = window.sessionManager;
+  manager.teamView = () => ({
+    canContinueFromTeam: true,
+    payload: { team_intent: { version: 1, mode: 'staffed' }, role_staffing: [] }
+  });
+  manager.clearWorkspaceCreateError = () => {};
+  manager.showToast = () => {};
+  manager.resetAddWorkspaceModalForm = () => {};
+  await manager.createFolder();
+  const create = requests.find(request => request.url === '/api/workspaces');
+  return create?.body || null;
+}
+
+test('context typed into Advanced still reaches workspace_bootstrap (FR 10)', async () => {
+  const body = await runDetailsCreate({
+    systems: 'Mixer, Sample library',
+    context: '~/Music/References'
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(body.workspace_bootstrap)), {
+    goal: '',
+    systems: 'Mixer, Sample library',
+    context: '~/Music/References'
+  });
+});
+
+test('the collapsed Advanced summary says when agent context was added (FR 11)', () => {
+  const elements = {
+    folderBehaviorHint: { textContent: '' },
+    folderPresetSelect: { value: 'general' },
+    folderSystemsInput: { value: '' },
+    folderContextInput: { value: '' }
+  };
+  const manager = loadSessionManager(undefined, {}, { getElementById: id => elements[id] || null });
+  manager.updateBehaviorHint();
+  assert.equal(elements.folderBehaviorHint.textContent, 'Agent behavior: General');
+
+  // Also how a seeded open (context filled while Advanced is collapsed) reads.
+  elements.folderContextInput.value = 'Brief in ~/Docs';
+  manager.updateBehaviorHint();
+  assert.equal(elements.folderBehaviorHint.textContent, 'Agent behavior: General · Context added');
+
+  elements.folderContextInput.value = '   ';
+  elements.folderSystemsInput.value = 'Mixer';
+  manager.updateBehaviorHint();
+  assert.match(elements.folderBehaviorHint.textContent, /Context added$/);
+});
+
+test('a self-configuring blueprint hides and clears the folder override, once announced (FR 11a)', () => {
+  const elements = {
+    projectTemplatePathField: { hidden: false },
+    projectTemplatePathInput: { value: '' },
+    workspaceDetailsLiveRegion: { textContent: '' }
+  };
+  const manager = loadSessionManager(undefined, {}, { getElementById: id => elements[id] || null });
+  let planRefreshes = 0;
+  manager.scheduleTemplateAgentPlanRefresh = () => {
+    planRefreshes += 1;
+  };
+
+  // Blank with a typed path: the override stays, exactly as before.
+  elements.projectTemplatePathInput.value = '/Users/me/template-folder';
+  manager.templateFolderOverridePath = elements.projectTemplatePathInput.value;
+  manager.syncTemplateFolderOverride(null);
+  assert.equal(elements.projectTemplatePathField.hidden, false);
+  assert.equal(elements.projectTemplatePathInput.value, '/Users/me/template-folder');
+  assert.equal(elements.workspaceDetailsLiveRegion.textContent, '');
+
+  // Choosing a blueprint that sets up its own project removes it and says so.
+  manager.syncTemplateFolderOverride(selfConfiguringTemplate);
+  assert.equal(elements.projectTemplatePathField.hidden, true);
+  assert.equal(elements.projectTemplatePathInput.value, '');
+  assert.equal(planRefreshes, 1, 'the plan no longer describes the removed folder');
+  assert.equal(
+    elements.workspaceDetailsLiveRegion.textContent,
+    'Removed the template folder override. This blueprint sets up its own project.'
+  );
+
+  // A readiness recheck re-emitting the same blueprint announces nothing new.
+  elements.workspaceDetailsLiveRegion.textContent = '';
+  manager.syncTemplateFolderOverride({ ...selfConfiguringTemplate });
+  assert.equal(elements.workspaceDetailsLiveRegion.textContent, '');
+
+  // The picker empties the path itself before a library blueprint is emitted;
+  // the remembered path is what makes the removal announceable.
+  manager.syncTemplateFolderOverride(null);
+  manager.templateFolderOverridePath = '/Users/me/other-folder';
+  elements.projectTemplatePathInput.value = '';
+  manager.syncTemplateFolderOverride(selfConfiguringTemplate);
+  assert.match(elements.workspaceDetailsLiveRegion.textContent, /Removed the template folder/);
+
+  // Back to Blank or an ordinary blueprint: the control returns, empty.
+  manager.syncTemplateFolderOverride({ id: 'research-project' });
+  assert.equal(elements.projectTemplatePathField.hidden, false);
+  assert.equal(elements.projectTemplatePathInput.value, '');
+});
+
+// ---------------------------------------------------------------------------
+// Name, description, and copy (blueprint-aware Details FR 13–16, §6.2).
+// ---------------------------------------------------------------------------
+
+function nameAndDescriptionManager() {
+  const input = value => ({ value, dataset: {}, classList: { contains: () => false } });
+  const elements = {
+    folderNameInput: input(''),
+    folderDescriptionInput: input(''),
+    folderDescriptionHelp: { textContent: '' },
+    workspaceNameHint: { textContent: '', hidden: true, classList: { contains: () => false } }
+  };
+  const manager = loadSessionManager(undefined, creatorWindowHelpers(), {
+    getElementById: id => elements[id] || null,
+    querySelectorAll: () => []
+  });
+  manager.closeWorkspaceAgentSetup = () => {};
+  manager.applyTemplateBehavior = () => {};
+  manager.updateWizardRecap = () => {};
+  manager.refreshTemplateAgentPlan = async () => {};
+  manager.refreshWorkspaceReview = () => {};
+  manager.beginWorkspaceCreatorContext({ entryPoint: 'workspace_hub_create' });
+  return { manager, elements };
+}
+
+const catalogTemplate = {
+  id: 'research-project',
+  name: 'Research Project',
+  builtin: true,
+  description: 'Synthesis docs, sources, weekly reading.'
+};
+
+test('every blueprint prefills its description, and switching replaces only the autofill (FR 13)', () => {
+  const { manager, elements } = nameAndDescriptionManager();
+  const description = elements.folderDescriptionInput;
+
+  manager.handleWorkspaceTemplateSelected(catalogTemplate);
+  assert.equal(description.value, catalogTemplate.description, 'stock blueprint');
+
+  // A plugin blueprint — including one whose project file is named after the
+  // workspace — replaces the previous autofill with its own description.
+  manager.handleWorkspaceTemplateSelected(selfConfiguringTemplate);
+  assert.equal(description.value, selfConfiguringTemplate.description, 'plugin blueprint');
+
+  const userTemplate = {
+    id: 'my-template',
+    name: 'My Template',
+    description: 'A template I made.'
+  };
+  manager.handleWorkspaceTemplateSelected(userTemplate);
+  assert.equal(description.value, userTemplate.description, 'user blueprint');
+
+  manager.handleWorkspaceTemplateSelected({ id: 'no-copy', name: 'No Copy' });
+  assert.equal(description.value, '', 'a blueprint without a description clears the autofill');
+
+  manager.handleWorkspaceTemplateSelected(catalogTemplate);
+  manager.handleWorkspaceTemplateSelected(null);
+  assert.equal(description.value, '', 'Blank clears the autofill');
+
+  // Typed text survives any number of blueprint switches.
+  description.value = 'Album two, side B';
+  manager.handleWorkspaceTemplateSelected(catalogTemplate);
+  manager.handleWorkspaceTemplateSelected(selfConfiguringTemplate);
+  manager.handleWorkspaceTemplateSelected(null);
+  assert.equal(description.value, 'Album two, side B');
+});
+
+test('description help follows every blueprint selection (FR 14)', () => {
+  const { manager, elements } = nameAndDescriptionManager();
+  const help = elements.folderDescriptionHelp;
+  manager.handleWorkspaceTemplateSelected(catalogTemplate);
+  assert.equal(help.textContent, 'Optional. What this workspace is for.');
+  manager.handleWorkspaceTemplateSelected({ blank: true });
+  assert.match(help.textContent, /^Describe what this workspace is for so Ori can review/);
+  manager.handleWorkspaceTemplateSelected(selfConfiguringTemplate);
+  assert.equal(help.textContent, 'Optional. What this workspace is for.');
+});
+
+test('a project file named after the workspace is not named after the blueprint (FR 15)', () => {
+  const { manager, elements } = nameAndDescriptionManager();
+  const name = elements.folderNameInput;
+  const hint = elements.workspaceNameHint;
+
+  // Other blueprints keep today's prefill and folder-only hint.
+  manager.handleWorkspaceTemplateSelected(catalogTemplate);
+  assert.equal(name.value, 'Research Project');
+  assert.equal(hint.textContent, 'Folder: research-project');
+
+  // A {{name}} entry clears that autofill instead of prefilling "Song".
+  manager.handleWorkspaceTemplateSelected(selfConfiguringTemplate);
+  assert.equal(name.value, '');
+  assert.equal(hint.hidden, true);
+
+  name.value = 'Night Drive';
+  manager.updateWorkspaceNameHint();
+  assert.equal(hint.textContent, 'Folder: night-drive · Project file: night-drive.proj');
+
+  // Typed names are never replaced by a later blueprint's name.
+  manager.handleWorkspaceTemplateSelected(catalogTemplate);
+  assert.equal(name.value, 'Night Drive');
+  assert.equal(hint.textContent, 'Folder: night-drive');
+
+  // A {{date}} entry depends on the server's clock, so only the folder shows.
+  manager.handleWorkspaceTemplateSelected({
+    id: 'journal',
+    name: 'Journal',
+    project_entry: { relative_path: '{{name}}-{{date}}.md' }
+  });
+  assert.equal(hint.textContent, 'Folder: night-drive');
+});
+
+test('the name hint slugs exactly like the server (shared vectors with workspace.Slugify)', () => {
+  const vectors = JSON.parse(
+    readFileSync(
+      new URL('../../../../workspace/testdata/slugify_vectors.json', import.meta.url),
+      'utf8'
+    )
+  ).vectors;
+  assert.ok(vectors.length > 0);
+  const manager = loadSessionManager();
+  for (const vector of vectors) {
+    assert.equal(
+      manager.slugifyWorkspaceName(vector.input),
+      vector.slug,
+      `slug for ${JSON.stringify(vector.input)}`
+    );
+  }
+});
+
+test('an empty description is never sent as a goal (FR 16)', async () => {
+  const nothing = await runDetailsCreate({ description: '', systems: '', context: '' });
+  assert.equal(nothing.description, '');
+  assert.equal('workspace_bootstrap' in nothing, false);
+
+  const contextOnly = await runDetailsCreate({
+    description: '  ',
+    context: 'Stems are in ~/Audio'
+  });
+  assert.equal(contextOnly.description, '');
+  assert.equal(contextOnly.workspace_bootstrap.goal, '');
+  assert.equal(contextOnly.workspace_bootstrap.context, 'Stems are in ~/Audio');
+
+  const described = await runDetailsCreate({ description: 'A second album' });
+  assert.equal(described.workspace_bootstrap.goal, 'A second album');
+});
+
+test('the Grouped choice names the group the workspace would join (§6.2)', () => {
+  const copy = { textContent: '' };
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    {
+      getElementById: id =>
+        id === 'workspaceGroupDestinationCard'
+          ? { hidden: true }
+          : id === 'workspaceGroupCompositionGroupedCopy'
+            ? copy
+            : null
+    }
+  );
+  manager.workspaceGroupDestinationTemplate = () => null;
+  const render = home => {
+    manager.groupRequirementDraft = {
+      policy: 'recommended',
+      composition: '',
+      projection: { state: 'choice_required', home }
+    };
+    manager.renderWorkspaceGroupDestinationCard();
+    return copy.textContent;
+  };
+  assert.equal(
+    render({ exists: true, name: 'Studio Home' }),
+    'Create inside Studio Home, alongside its other projects.'
+  );
+  assert.equal(
+    render({ exists: false, proposed_name: 'Music Production Home' }),
+    'Create inside Music Production Home, alongside its other projects.'
+  );
+  assert.equal(render(null), 'Create inside the blueprint’s group, alongside its other projects.');
 });
 
 test('a successful create announces the hierarchy change for pages that stay put', () => {
