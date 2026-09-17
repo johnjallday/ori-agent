@@ -1,19 +1,30 @@
 package pluginhttp
 
 import (
+	"context"
 	"net/http"
 	"path/filepath"
+	"sync"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 )
 
+// ReviewedReplacement maps an installed plugin to the exact source a
+// host-reviewed update replaces it with. ok is false for plugins the host does
+// not review, or when it has nothing newer; those keep following their recorded
+// source.
+type ReviewedReplacement func(ctx context.Context, installed plugin.InstalledPlugin) (source string, format plugin.SourceFormat, ok bool)
+
 // Handler serves plugin operations and owns the plugin Manager wired to Ori's
 // live MCP config/registry and skills directory.
 type Handler struct {
 	mgr     *plugin.Manager
 	updates *plugin.UpdateChecker
+
+	replacementMu       sync.RWMutex
+	reviewedReplacement ReviewedReplacement
 }
 
 // NewHandler builds the plugin manager over Ori's MCP config manager + runtime
@@ -44,6 +55,37 @@ func (h *Handler) Manager() *plugin.Manager { return h.mgr }
 // UpdateChecker returns the process-local checker owned by this handler. Server
 // lifecycle code starts and stops it; direct handler construction stays idle.
 func (h *Handler) UpdateChecker() *plugin.UpdateChecker { return h.updates }
+
+// SetReviewedReplacement installs the hook UpdateHandler consults before
+// following a plugin's recorded source. A nil hook restores recorded-source
+// updates only.
+func (h *Handler) SetReviewedReplacement(hook ReviewedReplacement) {
+	h.replacementMu.Lock()
+	defer h.replacementMu.Unlock()
+	h.reviewedReplacement = hook
+}
+
+// replacementFor reports the reviewed replacement source for one installed
+// plugin, if the host supplies one.
+func (h *Handler) replacementFor(ctx context.Context, name string) (string, plugin.SourceFormat, bool, error) {
+	h.replacementMu.RLock()
+	hook := h.reviewedReplacement
+	h.replacementMu.RUnlock()
+	if hook == nil {
+		return "", "", false, nil
+	}
+	installed, err := h.mgr.List()
+	if err != nil {
+		return "", "", false, err
+	}
+	for _, candidate := range installed {
+		if candidate.Name == name {
+			source, format, ok := hook(ctx, candidate)
+			return source, format, ok && source != "", nil
+		}
+	}
+	return "", "", false, nil
+}
 
 // UpdateStatusHandler returns only the cached availability snapshot. It never
 // resolves plugin sources or performs Git/filesystem I/O.
@@ -239,9 +281,10 @@ func (h *Handler) MarketplaceInstallHandler(w http.ResponseWriter, r *http.Reque
 	orihttp.WriteJSON(w, map[string]any{"installed": true, "plugin": installed})
 }
 
-// UpdateHandler updates a plugin from its recorded source at
-// POST /api/plugins/{name}/update. confirm=false returns the trust disclosure
-// plus whether the registered component set changed; confirm=true updates.
+// UpdateHandler updates a plugin at POST /api/plugins/{name}/update, from the
+// host's reviewed replacement source when one is offered and otherwise from its
+// recorded source. confirm=false returns the trust disclosure plus whether the
+// registered component set changed; confirm=true updates.
 func (h *Handler) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		orihttp.MethodNotAllowed(w)
@@ -258,8 +301,19 @@ func (h *Handler) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
+	source, format, reviewed, err := h.replacementFor(r.Context(), name)
+	if err != nil {
+		orihttp.InternalError(w, err.Error())
+		return
+	}
 	if !req.Confirm {
-		report, changed, err := h.mgr.UpdatePreview(name)
+		var report plugin.TrustReport
+		var changed bool
+		if reviewed {
+			report, changed, err = h.mgr.PreviewReplacement(name, source, format)
+		} else {
+			report, changed, err = h.mgr.UpdatePreview(name)
+		}
 		if err != nil {
 			orihttp.BadRequest(w, err.Error())
 			return
@@ -267,7 +321,13 @@ func (h *Handler) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 		orihttp.WriteJSON(w, map[string]any{"updated": false, "changed": changed, "trust": report})
 		return
 	}
-	updated, err := h.mgr.Update(name, func(plugin.TrustReport) bool { return true })
+	confirm := func(plugin.TrustReport) bool { return true }
+	var updated plugin.InstalledPlugin
+	if reviewed {
+		updated, err = h.mgr.UpdateFromSource(name, source, format, confirm)
+	} else {
+		updated, err = h.mgr.Update(name, confirm)
+	}
 	if err != nil {
 		orihttp.InternalError(w, err.Error())
 		return

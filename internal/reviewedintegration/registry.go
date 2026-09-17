@@ -74,6 +74,13 @@ func (entry Entry) PinnedSource(commit string) string {
 	return entry.SourceRepository + "#sha=" + commit
 }
 
+// IsPinnedSource reports whether source is an exact commit of the reviewed
+// repository: <repository>#sha=<40 lowercase hex>.
+func (entry Entry) IsPinnedSource(source string) bool {
+	commit, found := strings.CutPrefix(strings.TrimSpace(source), entry.SourceRepository+"#sha=")
+	return found && entry.SourceRepository != "" && ValidCommit(commit)
+}
+
 // InstallQuestPrefix prefixes an integration key to form the ID of the install
 // quest Ori generates for it.
 const InstallQuestPrefix = "install_"
@@ -93,6 +100,17 @@ func Get(key string) (Entry, bool) {
 	key = strings.ToLower(strings.TrimSpace(key))
 	for _, entry := range builtInEntries {
 		if entry.Key == key {
+			return entry.Clone(), true
+		}
+	}
+	return Entry{}, false
+}
+
+// ForPlugin returns the entry that reviews one plugin ID.
+func ForPlugin(pluginID string) (Entry, bool) {
+	pluginID = strings.ToLower(strings.TrimSpace(pluginID))
+	for _, entry := range builtInEntries {
+		if entry.PluginID == pluginID {
 			return entry.Clone(), true
 		}
 	}

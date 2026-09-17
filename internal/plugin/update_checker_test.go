@@ -146,6 +146,51 @@ func TestUpdateCheckerPublishesSortedResultsAndIsolatesFailures(t *testing.T) {
 	}
 }
 
+func TestUpdateCheckerAvailabilityOverrideAnswersBeforeTheRecordedSource(t *testing.T) {
+	source := newFakeUpdateCheckSource("reviewed", "ordinary")
+	source.mu.Lock()
+	source.installed[0].Version = "0.6.0"
+	source.mu.Unlock()
+	checker := NewUpdateChecker(source)
+	var overrideErr error
+	var seen []InstalledPlugin
+	checker.SetAvailabilityOverride(func(installed InstalledPlugin) (UpdateAvailability, bool, error) {
+		seen = append(seen, installed)
+		if installed.Name != "reviewed" {
+			return UpdateAvailability{}, false, nil
+		}
+		if overrideErr != nil {
+			return UpdateAvailability{}, true, overrideErr
+		}
+		// The override's own name is ignored; the checked plugin's name wins.
+		return UpdateAvailability{Name: "spoofed", InstalledVersion: installed.Version, AvailableVersion: "0.6.1", Available: true}, true, nil
+	})
+	checker.checkCycle()
+
+	snapshot := checker.Snapshot()
+	if len(snapshot.Updates) != 2 || snapshot.Updates[1] != (UpdateAvailability{Name: "reviewed", InstalledVersion: "0.6.0", AvailableVersion: "0.6.1", Available: true}) {
+		t.Fatalf("override result = %+v", snapshot.Updates)
+	}
+	if source.callCount("reviewed") != 0 || source.callCount("ordinary") != 1 || len(seen) != 2 {
+		t.Fatalf("override did not replace only its plugin's source check: reviewed=%d ordinary=%d seen=%d",
+			source.callCount("reviewed"), source.callCount("ordinary"), len(seen))
+	}
+
+	// An override failure keeps the last result, like a source failure.
+	overrideErr = errors.New("release lookup failed")
+	checker.checkCycle()
+	if updates := checker.Snapshot().Updates; len(updates) != 2 || !updates[1].Available || updates[1].AvailableVersion != "0.6.1" {
+		t.Fatalf("override failure dropped the last result: %+v", updates)
+	}
+
+	// Removing the override restores recorded-source checks.
+	checker.SetAvailabilityOverride(nil)
+	checker.checkCycle()
+	if source.callCount("reviewed") != 1 {
+		t.Fatalf("nil override did not fall back to the recorded source: %d", source.callCount("reviewed"))
+	}
+}
+
 func TestUpdateCheckerListFailureKeepsSnapshot(t *testing.T) {
 	source := newFakeUpdateCheckSource("demo")
 	checker := NewUpdateChecker(source)

@@ -1,6 +1,7 @@
 package pluginhttp
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -304,6 +305,105 @@ func TestDeclinedFailedAndEnableMutationsKeepCachedUpdate(t *testing.T) {
 
 	if snapshot := cachedUpdates(t, h); len(snapshot.Updates) != 1 || !snapshot.Updates[0].Available {
 		t.Fatalf("non-successful mutation cleared cached update: %+v", snapshot)
+	}
+}
+
+// postUpdate previews or applies an update of the fixture bundle's plugin.
+func postUpdate(t *testing.T, h *Handler, confirm bool) *httptest.ResponseRecorder {
+	t.Helper()
+	body := `{"confirm":` + map[bool]string{true: "true", false: "false"}[confirm] + `}`
+	req := httptest.NewRequest(http.MethodPost, "/api/plugins/reaper/update", strings.NewReader(body))
+	req.SetPathValue("name", "reaper")
+	rr := httptest.NewRecorder()
+	h.UpdateHandler(rr, req)
+	return rr
+}
+
+func installedPlugin(t *testing.T, h *Handler, name string) plugin.InstalledPlugin {
+	t.Helper()
+	list, err := h.Manager().List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, installed := range list {
+		if installed.Name == name {
+			return installed
+		}
+	}
+	t.Fatalf("%s is not installed", name)
+	return plugin.InstalledPlugin{}
+}
+
+func TestUpdateHandlerUsesTheReviewedReplacementSource(t *testing.T) {
+	h := testHandler(t)
+	recorded := claudeBundle(t)
+	if rr := postInstall(t, h, recorded, true); rr.Code != http.StatusOK {
+		t.Fatalf("install: %d %s", rr.Code, rr.Body.String())
+	}
+	primeAvailableUpdate(t, h, recorded)
+	// The recorded source moved to 0.2.0; the reviewed replacement is 0.3.0 with
+	// a different command, so the disclosure proves which source was read.
+	replacement := claudeBundle(t)
+	mustWrite(t, filepath.Join(replacement, ".claude-plugin", "plugin.json"), `{"name":"reaper","version":"0.3.0"}`)
+	mustWrite(t, filepath.Join(replacement, ".mcp.json"), `{"ori-reaper":{"command":"/usr/bin/false"}}`)
+	var hookCalls []plugin.InstalledPlugin
+	h.SetReviewedReplacement(func(_ context.Context, installed plugin.InstalledPlugin) (string, plugin.SourceFormat, bool) {
+		hookCalls = append(hookCalls, installed)
+		return replacement, plugin.FormatClaude, installed.Name == "reaper"
+	})
+
+	preview := postUpdate(t, h, false)
+	if preview.Code != http.StatusOK || !strings.Contains(preview.Body.String(), "/usr/bin/false") ||
+		!strings.Contains(preview.Body.String(), `"changed":true`) {
+		t.Fatalf("reviewed preview did not disclose the replacement source: %d %s", preview.Code, preview.Body.String())
+	}
+	if len(hookCalls) != 1 || hookCalls[0].Source != recorded {
+		t.Fatalf("hook did not receive the installed record: %+v", hookCalls)
+	}
+	if installed := installedPlugin(t, h, "reaper"); installed.Version != "0.1.0" || installed.Source != recorded {
+		t.Fatalf("preview changed the installation: %+v", installed)
+	}
+
+	applied := postUpdate(t, h, true)
+	if applied.Code != http.StatusOK {
+		t.Fatalf("reviewed update: %d %s", applied.Code, applied.Body.String())
+	}
+	if installed := installedPlugin(t, h, "reaper"); installed.Version != "0.3.0" || installed.Source != replacement {
+		t.Fatalf("reviewed update did not record the replacement source: %+v", installed)
+	}
+	if snapshot := cachedUpdates(t, h); len(snapshot.Updates) != 0 {
+		t.Fatalf("reviewed update kept the cached update badge: %+v", snapshot)
+	}
+}
+
+func TestUpdateHandlerFollowsTheRecordedSourceWithoutAReviewedReplacement(t *testing.T) {
+	for name, hook := range map[string]ReviewedReplacement{
+		"nil hook": nil,
+		"hook declines": func(context.Context, plugin.InstalledPlugin) (string, plugin.SourceFormat, bool) {
+			return "", "", false
+		},
+		"hook for another plugin": func(_ context.Context, installed plugin.InstalledPlugin) (string, plugin.SourceFormat, bool) {
+			return "/does/not/exist", plugin.FormatClaude, installed.Name == "other"
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := testHandler(t)
+			recorded := claudeBundle(t)
+			if rr := postInstall(t, h, recorded, true); rr.Code != http.StatusOK {
+				t.Fatalf("install: %d %s", rr.Code, rr.Body.String())
+			}
+			h.SetReviewedReplacement(hook)
+			mustWrite(t, filepath.Join(recorded, ".claude-plugin", "plugin.json"), `{"name":"reaper","version":"0.2.0"}`)
+			if rr := postUpdate(t, h, false); rr.Code != http.StatusOK || strings.Contains(rr.Body.String(), `"changed":true`) {
+				t.Fatalf("recorded-source preview: %d %s", rr.Code, rr.Body.String())
+			}
+			if rr := postUpdate(t, h, true); rr.Code != http.StatusOK {
+				t.Fatalf("recorded-source update: %d %s", rr.Code, rr.Body.String())
+			}
+			if installed := installedPlugin(t, h, "reaper"); installed.Version != "0.2.0" || installed.Source != recorded {
+				t.Fatalf("update left the recorded source: %+v", installed)
+			}
+		})
 	}
 }
 

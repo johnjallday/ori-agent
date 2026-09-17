@@ -27,6 +27,13 @@ type UpdateSnapshot struct {
 	LastSuccessfulCheckAt *time.Time           `json:"last_successful_check_at,omitempty"`
 }
 
+// AvailabilityOverride answers one installed plugin's update availability
+// instead of its recorded source. ok false falls through to the recorded-source
+// check; an error retains the last result, like a source failure. Host wiring
+// installs it so this package needs no knowledge of the host's reviewed
+// integrations.
+type AvailabilityOverride func(InstalledPlugin) (result UpdateAvailability, ok bool, err error)
+
 // UpdateChecker periodically refreshes a process-local snapshot of plugin
 // update availability. Source failures are isolated per plugin and retain the
 // last successful result until a later cycle succeeds.
@@ -34,6 +41,9 @@ type UpdateChecker struct {
 	admissionGate *resetstate.WorkGate
 	source        updateCheckerSource
 	now           func() time.Time
+
+	overrideMu sync.RWMutex
+	override   AvailabilityOverride
 
 	schedulerMu sync.Mutex
 	stop        chan struct{}
@@ -59,6 +69,34 @@ func NewUpdateChecker(source updateCheckerSource) *UpdateChecker {
 
 // SetAdmissionGate configures reset admission before Start or Invalidate.
 func (c *UpdateChecker) SetAdmissionGate(gate *resetstate.WorkGate) { c.admissionGate = gate }
+
+// SetAvailabilityOverride installs the hook consulted before each plugin's
+// recorded-source check. A nil override restores recorded-source checks only.
+func (c *UpdateChecker) SetAvailabilityOverride(override AvailabilityOverride) {
+	if c == nil {
+		return
+	}
+	c.overrideMu.Lock()
+	defer c.overrideMu.Unlock()
+	c.override = override
+}
+
+func (c *UpdateChecker) checkOne(candidate InstalledPlugin) (UpdateAvailability, error) {
+	c.overrideMu.RLock()
+	override := c.override
+	c.overrideMu.RUnlock()
+	if override != nil {
+		result, ok, err := override(candidate)
+		if err != nil {
+			return UpdateAvailability{}, err
+		}
+		if ok {
+			result.Name = candidate.Name
+			return result, nil
+		}
+	}
+	return c.source.CheckUpdate(candidate.Name)
+}
 
 // Start begins the checker once, running an immediate pass before waiting for
 // each interval. Non-positive intervals select the daily production default.
@@ -202,7 +240,7 @@ func (c *UpdateChecker) checkCycle() {
 		epoch := c.epochs[name]
 		c.snapshotMu.RUnlock()
 
-		result, checkErr := c.source.CheckUpdate(name)
+		result, checkErr := c.checkOne(candidate)
 		if checkErr != nil {
 			// Deliberately omit the raw source error: Git URLs may contain
 			// credentials and local source errors may disclose private paths.

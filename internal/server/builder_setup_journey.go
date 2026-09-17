@@ -141,6 +141,7 @@ func (b *ServerBuilder) initializeSetupJourney() {
 	}
 	if b.pluginHandler != nil {
 		b.integrationReleases = newIntegrationReleaseResolver(os.Getenv(integrationReleasesAPIEnv))
+		b.installReviewedIntegrationUpdates()
 		integrationAdapter = setupjourney.NewReviewedIntegrationAdapterForDevelopment(
 			b.pluginHandler.Manager(), b.integrationReleases, os.Getenv("ORI_REVIEWED_INTEGRATION_DEV_SOURCE"),
 		)

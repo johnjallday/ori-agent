@@ -498,9 +498,7 @@ func (adapter *ReviewedIntegrationAdapter) acceptsDevelopmentSource(source strin
 }
 
 func acceptedPinnedSource(entry reviewedintegration.Entry, source string) bool {
-	source = strings.TrimSpace(source)
-	prefix := entry.SourceRepository + "#sha="
-	return strings.HasPrefix(source, prefix) && reviewedintegration.ValidCommit(source[len(prefix):])
+	return entry.IsPinnedSource(source)
 }
 
 // validateReviewedDescriptor checks an inspected release against the entry and

@@ -148,6 +148,32 @@ func TestCompareVersionsOrdersBySemanticPrecedence(t *testing.T) {
 	}
 }
 
+func TestForPluginAndPinnedSourceIdentifyOnlyExactOfficialCommits(t *testing.T) {
+	entry, ok := ForPlugin(" Reaper-Plugin ")
+	if !ok || entry.Key != "ori_reaper" {
+		t.Fatalf("ForPlugin = %#v, %v", entry, ok)
+	}
+	if _, ok := ForPlugin("other-plugin"); ok {
+		t.Fatal("an unreviewed plugin resolved to an entry")
+	}
+	commit := strings.Repeat("a", 40)
+	for source, want := range map[string]bool{
+		entry.PinnedSource(commit):                                 true,
+		entry.FallbackSource():                                     true,
+		entry.SourceRepository:                                     false,
+		entry.SourceRepository + ".git":                            false,
+		entry.SourceRepository + "#ref=v0.6.1":                     false,
+		entry.SourceRepository + "#sha=" + strings.ToUpper(commit): false,
+		entry.SourceRepository + "#sha=" + commit[:39]:             false,
+		entry.SourceRepository + "-fork#sha=" + commit:             false,
+		"https://github.com/attacker/reaper-plugin#sha=" + commit:  false,
+	} {
+		if got := entry.IsPinnedSource(source); got != want {
+			t.Errorf("IsPinnedSource(%q) = %v, want %v", source, got, want)
+		}
+	}
+}
+
 func TestRegistryReturnsIndependentCopies(t *testing.T) {
 	first, _ := Get("ori_reaper")
 	first.RequiredHostFeatures[0] = "changed"
