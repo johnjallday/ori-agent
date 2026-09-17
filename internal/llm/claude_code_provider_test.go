@@ -8,7 +8,7 @@ import (
 )
 
 func TestBuildClaudeArgs_TextOnlyUnchanged(t *testing.T) {
-	args, err := buildClaudeArgs("opus", "hi", nil, nil)
+	args, err := buildClaudeArgs("opus", "", "hi", nil, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -23,11 +23,41 @@ func TestBuildClaudeArgs_TextOnlyUnchanged(t *testing.T) {
 	if args[len(args)-1] != "hi" {
 		t.Errorf("prompt must be last arg, got %q", args[len(args)-1])
 	}
+	if strings.Contains(joined, "--effort") {
+		t.Errorf("an unset effort must send no --effort flag: %q", joined)
+	}
+}
+
+func TestBuildClaudeArgs_EffortOnlyForAcceptedLevels(t *testing.T) {
+	for _, tc := range []struct{ effort, want string }{
+		{"max", "max"},
+		{" High ", "high"},
+		{"xhigh", "xhigh"},
+		{"extreme", ""},
+		{"", ""},
+	} {
+		args, err := buildClaudeArgs("opus", tc.effort, "hi", nil, nil)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		got := ""
+		for i := range args {
+			if args[i] == "--effort" && i+1 < len(args) {
+				got = args[i+1]
+			}
+		}
+		if got != tc.want {
+			t.Errorf("effort %q: --effort = %q, want %q (args %q)", tc.effort, got, tc.want, args)
+		}
+		if args[len(args)-1] != "hi" {
+			t.Errorf("effort %q: prompt must stay the last arg, got %q", tc.effort, args[len(args)-1])
+		}
+	}
 }
 
 func TestBuildClaudeArgs_NativeMCP(t *testing.T) {
 	nat := &claudeNativeMCP{ConfigPath: "/cfg/ws.mcp.json", WorkspaceDir: "/ws/files"}
-	args, err := buildClaudeArgs("sonnet", "do it", map[string]any{"type": "object"}, nat)
+	args, err := buildClaudeArgs("sonnet", "", "do it", map[string]any{"type": "object"}, nat)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -59,7 +89,7 @@ func TestBuildClaudeArgs_RuntimeCapabilityScope(t *testing.T) {
 		NetworkPosture:          CLINetworkCapabilityLocal,
 		Scoped:                  true,
 	}
-	args, err := buildClaudeArgs("haiku", "do it", nil, nat)
+	args, err := buildClaudeArgs("haiku", "", "do it", nil, nat)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +144,7 @@ func TestPrepareClaudeRuntimeScopeCanonicalizesRootsWithoutMCPConfig(t *testing.
 // NO --mcp-config.
 func TestBuildClaudeArgs_SkillOnlyNoConfig(t *testing.T) {
 	nat := &claudeNativeMCP{WorkspaceDir: "/ws/files"} // no ConfigPath
-	args, err := buildClaudeArgs("sonnet", "do it", nil, nat)
+	args, err := buildClaudeArgs("sonnet", "", "do it", nil, nat)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}

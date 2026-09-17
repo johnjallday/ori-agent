@@ -72,7 +72,7 @@ func (p *ClaudeCodeProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRe
 	if err != nil {
 		return nil, err
 	}
-	content, err := p.runClaudeExec(ctx, req.Model, prompt, nil, nat)
+	content, err := p.runClaudeExec(ctx, req.Model, req.ReasoningEffort, prompt, nil, nat)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +95,7 @@ func (p *ClaudeCodeProvider) ChatWithStructuredOutput(ctx context.Context, req S
 	if err != nil {
 		return nil, err
 	}
-	content, err := p.runClaudeExec(ctx, req.Model, prompt, req.Schema, nat)
+	content, err := p.runClaudeExec(ctx, req.Model, req.ReasoningEffort, prompt, req.Schema, nat)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +194,9 @@ type claudeCLIResponse struct {
 // buildClaudeArgs assembles the claude CLI args. A non-nil nat selects the
 // native-MCP run (full toolset + --mcp-config, auto-approved, workspace-confined);
 // nil keeps the text-only behavior (--tools "" --permission-mode dontAsk).
-func buildClaudeArgs(model, prompt string, schema any, nat *claudeNativeMCP) ([]string, error) {
+// reasoningEffort adds --effort only for a level Claude Code accepts; an unset
+// or unknown level sends no flag, so the CLI's own default applies.
+func buildClaudeArgs(model, reasoningEffort, prompt string, schema any, nat *claudeNativeMCP) ([]string, error) {
 	args := []string{
 		"--print",
 		"--output-format",
@@ -248,6 +250,9 @@ func buildClaudeArgs(model, prompt string, schema any, nat *claudeNativeMCP) ([]
 	if model != "" {
 		args = append(args, "--model", model)
 	}
+	if effort := normalizeClaudeCodeReasoningEffort(reasoningEffort); effort != "" {
+		args = append(args, "--effort", effort)
+	}
 	if schema != nil {
 		payload, err := json.Marshal(schema)
 		if err != nil {
@@ -259,8 +264,20 @@ func buildClaudeArgs(model, prompt string, schema any, nat *claudeNativeMCP) ([]
 	return args, nil
 }
 
-func (p *ClaudeCodeProvider) runClaudeExec(ctx context.Context, model, prompt string, schema any, nat *claudeNativeMCP) (string, error) {
-	args, err := buildClaudeArgs(model, prompt, schema, nat)
+// normalizeClaudeCodeReasoningEffort returns a level `claude --effort` accepts,
+// or "" for an unset or unknown one. Unlike Codex there is no default: without
+// the flag Claude Code applies its own. Mirrors types.ReasoningEffortLevels.
+func normalizeClaudeCodeReasoningEffort(effort string) string {
+	switch normalized := strings.ToLower(strings.TrimSpace(effort)); normalized {
+	case "low", "medium", "high", "xhigh", "max":
+		return normalized
+	default:
+		return ""
+	}
+}
+
+func (p *ClaudeCodeProvider) runClaudeExec(ctx context.Context, model, reasoningEffort, prompt string, schema any, nat *claudeNativeMCP) (string, error) {
+	args, err := buildClaudeArgs(model, reasoningEffort, prompt, schema, nat)
 	if err != nil {
 		return "", err
 	}

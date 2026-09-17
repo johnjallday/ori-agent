@@ -5,15 +5,14 @@ let selectedTags = [];
 let availableProviders = []; // Cache for available providers and models from API
 const createValidatedFields = ['createAutoConfigDescription', 'agentName', 'agentRole', 'llmModel'];
 
-function supportsCodexReasoning(providerName, modelName) {
-  const provider = String(providerName || '')
-    .trim()
-    .toLowerCase();
-  const model = String(modelName || '')
-    .trim()
-    .toLowerCase();
-  return provider === 'codex' || model.includes('codex');
+// Which models take a reasoning level (Codex, Claude Code) is decided once, in
+// modules/reasoning-effort.js.
+function supportsReasoning(providerName, modelName) {
+  return Boolean(window.OriReasoningEffort?.supports(providerName, modelName));
 }
+
+// The level last chosen, kept across model changes.
+let createReasoningPreference = '';
 
 function ensureCreateReasoningField() {
   if (document.getElementById('llmReasoningField')) {
@@ -32,16 +31,14 @@ function ensureCreateReasoningField() {
   field.hidden = true;
   field.innerHTML = `
     <label class="form-label" for="llmReasoning">Reasoning Level</label>
-    <select id="llmReasoning" class="form-select" name="llm_reasoning_effort">
-      <option value="medium" selected>Medium (Recommended)</option>
-      <option value="high">High</option>
-      <option value="low">Low</option>
-      <option value="xhigh">Extra High</option>
-    </select>
-    <div class="form-help">Codex only. Higher levels improve difficult reasoning at the cost of speed.</div>
+    <select id="llmReasoning" class="form-select" name="llm_reasoning_effort"></select>
+    <div class="form-help" id="llmReasoningHelp"></div>
   `;
 
   modelRow.insertAdjacentElement('afterend', field);
+  field.querySelector('#llmReasoning')?.addEventListener('change', event => {
+    createReasoningPreference = event.target.value || '';
+  });
 }
 
 function updateCreateReasoningVisibility() {
@@ -54,13 +51,15 @@ function updateCreateReasoningVisibility() {
 
   const selectedOption = modelSelect.selectedOptions?.[0];
   const provider = selectedOption ? selectedOption.getAttribute('data-provider') : '';
-  const show = supportsCodexReasoning(provider, modelSelect.value);
+  const show = supportsReasoning(provider, modelSelect.value);
 
   field.hidden = !show;
   select.disabled = !show;
-  if (show && !select.value) {
-    select.value = 'medium';
-  }
+  if (!show) return;
+  const reasoning = window.OriReasoningEffort;
+  reasoning.syncSelect(select, provider, modelSelect.value, createReasoningPreference);
+  const help = document.getElementById('llmReasoningHelp');
+  if (help) help.textContent = reasoning.helpText(provider, modelSelect.value);
 }
 
 // Initialize page
@@ -516,8 +515,13 @@ async function createAgent() {
   if (provider) {
     requestData.llm_provider = provider;
   }
-  if (supportsCodexReasoning(provider, model) && reasoningSelect?.value) {
-    requestData.reasoning_effort = reasoningSelect.value;
+  const reasoningEffort = window.OriReasoningEffort?.normalize(
+    provider,
+    model,
+    reasoningSelect?.value
+  );
+  if (supportsReasoning(provider, model) && reasoningEffort) {
+    requestData.reasoning_effort = reasoningEffort;
   }
 
   // Add optional fields

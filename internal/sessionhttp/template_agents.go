@@ -125,12 +125,13 @@ type templateAgentRecommendedSetup struct {
 }
 
 type templateAgentOverride struct {
-	Index        *int    `json:"index"`
-	Name         *string `json:"name,omitempty"`
-	Role         *string `json:"role,omitempty"`
-	Model        *string `json:"model,omitempty"`
-	Provider     *string `json:"provider,omitempty"`
-	SystemPrompt *string `json:"system_prompt,omitempty"`
+	Index           *int    `json:"index"`
+	Name            *string `json:"name,omitempty"`
+	Role            *string `json:"role,omitempty"`
+	Model           *string `json:"model,omitempty"`
+	Provider        *string `json:"provider,omitempty"`
+	SystemPrompt    *string `json:"system_prompt,omitempty"`
+	ReasoningEffort *string `json:"reasoning_effort,omitempty"`
 }
 
 type templateAgentOverrideValidationError struct {
@@ -268,6 +269,16 @@ func applyTemplateAgentOverrides(tpl projecttemplates.Template, overrides []temp
 			if err := projecttemplates.ValidateAgentPrompts([]projecttemplates.AgentSpec{spec}); err != nil {
 				return tpl, &templateAgentOverrideValidationError{Index: idx, Field: "system_prompt", Cause: err}
 			}
+		}
+		if override.ReasoningEffort != nil {
+			effort := strings.TrimSpace(*override.ReasoningEffort)
+			if effort != "" && types.NormalizeReasoningEffort(effort) == "" {
+				return tpl, &templateAgentOverrideValidationError{
+					Index: idx, Field: "reasoning_effort",
+					Cause: fmt.Errorf("reasoning_effort %q must be one of [low medium high xhigh max]", effort),
+				}
+			}
+			spec.ReasoningEffort = types.NormalizeReasoningEffort(effort)
 		}
 		next.Agents[idx] = spec
 	}
@@ -467,12 +478,16 @@ func (h *Handler) rollbackSeededAgents(seed seedAgentsResult) []string {
 	return cleanupErrors
 }
 
+// templateAgentModelDefaults resolves the model an agent is created with and
+// its reasoning effort. A level chosen in the Create form wins when the
+// resolved provider/model accepts it; otherwise a Codex system model carries
+// the system reasoning setting, as before.
 func (h *Handler) templateAgentModelDefaults(spec projecttemplates.AgentSpec) (model, provider, reasoningEffort, source string) {
 	model = strings.TrimSpace(spec.Model)
 	provider = strings.TrimSpace(spec.Provider)
 	if model != "" || h == nil || h.systemModelReader == nil {
 		if model != "" {
-			return model, provider, "", "template"
+			return model, provider, types.NormalizeReasoningEffortFor(provider, model, spec.ReasoningEffort), "template"
 		}
 		return "", "", "", "agent_default"
 	}
@@ -483,7 +498,9 @@ func (h *Handler) templateAgentModelDefaults(spec projecttemplates.AgentSpec) (m
 	if provider == "" || model == "" {
 		return "", "", "", "agent_default"
 	}
-	if strings.EqualFold(provider, "codex") {
+	if chosen := types.NormalizeReasoningEffortFor(provider, model, spec.ReasoningEffort); chosen != "" {
+		reasoningEffort = chosen
+	} else if strings.EqualFold(provider, "codex") {
 		reasoningEffort = h.systemModelReader.GetSystemReasoningEffort()
 	}
 	return model, provider, reasoningEffort, "system"

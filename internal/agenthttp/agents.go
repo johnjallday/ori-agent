@@ -602,9 +602,11 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		allow := *req.AllowWebSearch
 		agent.Settings.AllowWebSearch = &allow
 	}
-	if !agentSupportsReasoningEffort(agent.Settings.Provider, agent.Settings.Model) {
-		agent.Settings.ReasoningEffort = ""
-	}
+	// A provider or model change can leave a stored level the new pair does not
+	// accept (for example "max" moving from Claude Code to Codex); drop it
+	// rather than keep a setting the runtime would ignore or reject.
+	agent.Settings.ReasoningEffort = types.NormalizeReasoningEffortFor(
+		agent.Settings.Provider, agent.Settings.Model, agent.Settings.ReasoningEffort)
 
 	// Update metadata fields if provided (partial update)
 	if req.Description != nil {
@@ -869,6 +871,10 @@ func (h *Handler) performAgentDeletion(ctx context.Context, name string) error {
 	return nil
 }
 
+// normalizeAgentReasoningEffort validates a requested reasoning effort against
+// the agent's provider/model. An unknown word is refused; a known level for a
+// provider that has no reasoning setting is dropped, as before; a level that
+// provider does not accept (Codex has no "max") is refused with its levels.
 func normalizeAgentReasoningEffort(providerName, modelName, reasoningEffort string) (string, error) {
 	if strings.TrimSpace(reasoningEffort) == "" {
 		return "", nil
@@ -876,21 +882,17 @@ func normalizeAgentReasoningEffort(providerName, modelName, reasoningEffort stri
 
 	normalized := types.NormalizeReasoningEffort(reasoningEffort)
 	if normalized == "" {
-		return "", fmt.Errorf("invalid reasoning_effort %q: must be one of [low medium high xhigh]", reasoningEffort)
+		return "", fmt.Errorf("invalid reasoning_effort %q: must be one of [low medium high xhigh max]", reasoningEffort)
 	}
 
-	if !agentSupportsReasoningEffort(providerName, modelName) {
+	levels := types.ReasoningEffortLevels(providerName, modelName)
+	if len(levels) == 0 {
 		return "", nil
 	}
-
-	return normalized, nil
-}
-
-func agentSupportsReasoningEffort(providerName, modelName string) bool {
-	if strings.EqualFold(strings.TrimSpace(providerName), "codex") {
-		return true
+	if types.NormalizeReasoningEffortFor(providerName, modelName, normalized) == "" {
+		return "", fmt.Errorf("reasoning_effort %q is not available for this model: must be one of %v", reasoningEffort, levels)
 	}
-	return strings.Contains(strings.ToLower(strings.TrimSpace(modelName)), "codex")
+	return normalized, nil
 }
 
 // cliAgentDisplayName returns a human-friendly name for a CLI backend.

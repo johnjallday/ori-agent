@@ -134,9 +134,10 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 		if role == "" {
 			role = types.RoleGeneral
 		}
-		if defaultSettings.EffectiveReasoningEffort(defaultSettings.Provider) == "" {
-			defaultSettings.ReasoningEffort = ""
-		}
+		// Keep only a level this provider/model accepts (Codex has no "max";
+		// API providers take none).
+		defaultSettings.ReasoningEffort = types.NormalizeReasoningEffortFor(
+			defaultSettings.Provider, defaultSettings.Model, defaultSettings.ReasoningEffort)
 
 		newAgent := &agent.Agent{
 			Role:         role,

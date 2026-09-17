@@ -1398,12 +1398,18 @@ func (m *Manager) SetSystemModel(provider, model string) error {
 }
 
 // GetSystemReasoningEffort returns the configured reasoning effort for system tasks.
-// Defaults to "medium" when unset or invalid.
+// Defaults to "medium" when unset or invalid. The setting is Codex's: a system
+// model on any other provider gets no effort, so a provider that honors one
+// (Claude Code) is never handed Codex's default by system tasks.
 func (m *Manager) GetSystemReasoningEffort() string {
 	m.mu.RLock()
 	effort := strings.TrimSpace(strings.ToLower(m.settings.SystemReasoningEffort))
+	provider := strings.TrimSpace(m.settings.SystemProvider)
 	m.mu.RUnlock()
 
+	if provider != "" && !strings.EqualFold(provider, "codex") {
+		return ""
+	}
 	switch effort {
 	case "low", "medium", "high", "xhigh":
 		return effort

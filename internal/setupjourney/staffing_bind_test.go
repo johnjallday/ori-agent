@@ -3,6 +3,7 @@ package setupjourney
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	agentstore "github.com/johnjallday/ori-agent/internal/store"
@@ -190,5 +191,30 @@ func TestDecodeStaffingInput_ModeIsBackwardCompatible(t *testing.T) {
 	}
 	if _, err := decodeStaffingInput([]byte(`{"roles":[{"role_id":"a","name":"A","mode":"bind","model":"gpt-4o"}]}`)); err == nil {
 		t.Fatal("bind accepted a model it cannot apply")
+	}
+}
+
+func TestDecodeStaffingInput_ReasoningEffort(t *testing.T) {
+	withEffort, err := decodeStaffingInput([]byte(`{"roles":[{"role_id":"a","name":"A","provider":"claude_code","model":"opus","reasoning_effort":" MAX "}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := withEffort.Roles[0].ReasoningEffort; got != "max" {
+		t.Fatalf("reasoning_effort = %q, want max", got)
+	}
+	// A request without the field encodes exactly as before it existed, so an
+	// older review receipt still matches its commit.
+	omitted, err := decodeStaffingInput([]byte(`{"roles":[{"role_id":"a","name":"A"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if encoded := string(mustJSON(t, omitted)); strings.Contains(encoded, "reasoning_effort") {
+		t.Fatalf("an absent reasoning_effort changed the encoding: %s", encoded)
+	}
+	if _, err := decodeStaffingInput([]byte(`{"roles":[{"role_id":"a","name":"A","reasoning_effort":"extreme"}]}`)); err == nil {
+		t.Fatal("an unknown reasoning_effort was accepted")
+	}
+	if _, err := decodeStaffingInput([]byte(`{"roles":[{"role_id":"a","name":"A","mode":"bind","reasoning_effort":"high"}]}`)); err == nil {
+		t.Fatal("bind accepted a reasoning_effort it cannot apply")
 	}
 }

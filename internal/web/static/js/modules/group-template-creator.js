@@ -275,7 +275,9 @@
       mode,
       name: String(fill?.name || '').trim(),
       provider: mode === FILL_CREATE ? String(fill?.provider || '').trim() : '',
-      model: mode === FILL_CREATE ? String(fill?.model || '').trim() : ''
+      model: mode === FILL_CREATE ? String(fill?.model || '').trim() : '',
+      // The Create form's reasoning level; empty means the model's default.
+      reasoningEffort: mode === FILL_CREATE ? String(fill?.reasoningEffort || '').trim() : ''
     };
   }
 
@@ -1070,7 +1072,9 @@
           mode: fill.mode,
           name: fill.name,
           provider: fill.provider,
-          model: fill.model
+          model: fill.model,
+          // Present only for a level the Create form offered (Codex, Claude Code).
+          ...(fill.reasoningEffort ? { reasoning_effort: fill.reasoningEffort } : {})
         })
       });
       const body = await response.json().catch(() => ({}));

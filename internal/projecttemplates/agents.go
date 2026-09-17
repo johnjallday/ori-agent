@@ -49,6 +49,10 @@ type AgentSpec struct {
 	Provider     string                 `json:"provider,omitempty"`
 	Appearance   *types.AgentAppearance `json:"appearance,omitempty"`
 	Tools        ToolDefaults           `json:"tools"`
+	// ReasoningEffort is a creation-time choice from the Create forms (a
+	// template agent override or a role fill), never part of the authorable
+	// blueprint: it is not decoded, encoded, or digested.
+	ReasoningEffort string `json:"-"`
 }
 
 // normalizeAgentSpecs cleans a raw roster: it trims string fields, drops entries

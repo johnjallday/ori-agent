@@ -372,6 +372,27 @@ func TestSystemReasoningEffort_PersistenceAndClearWithSystemModel(t *testing.T) 
 	}
 }
 
+func TestSystemReasoningEffort_NonCodexSystemModelGetsNone(t *testing.T) {
+	manager := NewManager(filepath.Join(t.TempDir(), "settings.json"))
+	if err := manager.Load(); err != nil {
+		t.Fatalf("Failed to load manager: %v", err)
+	}
+	// Claude Code honors an effort, so system tasks must not hand it Codex's
+	// default when no one chose one for Claude.
+	if err := manager.SetSystemModel("claude_code", "opus"); err != nil {
+		t.Fatalf("SetSystemModel() error = %v", err)
+	}
+	if got := manager.GetSystemReasoningEffort(); got != "" {
+		t.Fatalf("GetSystemReasoningEffort() with a Claude Code system model = %q, want empty", got)
+	}
+	if err := manager.SetSystemModel("codex", "gpt-5.3-codex"); err != nil {
+		t.Fatalf("SetSystemModel() error = %v", err)
+	}
+	if got := manager.GetSystemReasoningEffort(); got != "medium" {
+		t.Fatalf("GetSystemReasoningEffort() with a Codex system model = %q, want medium", got)
+	}
+}
+
 func TestManagerSecretStoreSanitizesSavedSettings(t *testing.T) {
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "settings.json")
