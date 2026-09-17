@@ -9994,7 +9994,7 @@ const sessionManager = {
     this.updateWorkspaceNameHint();
   },
 
-  // A project file's name without its extension: "Bridge Sketch.rpp" →
+  // A project file's name without its extension: "Bridge Sketch.proj" →
   // "Bridge Sketch".
   existingProjectBaseName(entryName) {
     return String(entryName || '')
