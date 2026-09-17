@@ -377,6 +377,9 @@ const sessionManager = {
     for (const fieldID of ['folderDescriptionInput', 'folderSystemsInput', 'folderContextInput']) {
       document.getElementById(fieldID)?.addEventListener('input', () => {
         this.invalidateGroupRequirementReview();
+        // The context fields live inside Advanced, so its collapsed summary
+        // says when either holds something.
+        if (fieldID !== 'folderDescriptionInput') this.updateBehaviorHint();
       });
     }
     workspaceNameInput?.addEventListener('keydown', event => {
@@ -416,6 +419,7 @@ const sessionManager = {
         this.closeWorkspaceAgentSetup({ restoreFocus: false, silent: true });
         this.workspaceTemplate = template;
         this.resetGroupRequirementDraft(template);
+        this.syncTemplateFolderOverride(template);
         this.prefillTemplateValue(
           document.getElementById('folderNameInput'),
           template?.name || '',
@@ -622,7 +626,10 @@ const sessionManager = {
       .getElementById('workspaceGroupHomeCancel')
       ?.addEventListener('click', () => this.cancelRequiredGroupHomeReview());
 
-    document.getElementById('projectTemplatePathInput')?.addEventListener('input', () => {
+    document.getElementById('projectTemplatePathInput')?.addEventListener('input', event => {
+      // Remembered so choosing a self-configuring blueprint can say it removed
+      // the path; the picker clears the input silently before selecting.
+      this.templateFolderOverridePath = String(event?.currentTarget?.value || '');
       this.scheduleTemplateAgentPlanRefresh();
     });
 
@@ -4494,7 +4501,7 @@ const sessionManager = {
         'Optional. Nest this group inside another group. This does not grant Assistant Program membership.';
     } else if (availability.help) {
       help = availability.help;
-    } else if (this.workspaceTemplate?.assistant_program) {
+    } else if (this.blueprintDetailsProfile(this.workspaceTemplate).hasAssistantProgram) {
       help =
         'Optional. Choose an organizational group for this workspace. This does not grant program membership.';
     } else {
@@ -8599,6 +8606,13 @@ const sessionManager = {
       parts.push('Color set');
     }
 
+    // Covers typed context and the seeded open (dashboard.js), which fills
+    // these fields while Advanced is collapsed (FR 11).
+    const hasContext = ['folderSystemsInput', 'folderContextInput'].some(id =>
+      String(document.getElementById(id)?.value || '').trim()
+    );
+    if (hasContext) parts.push('Context added');
+
     const tagCount = window.WorkspaceTagsCard?.getPayloadFields?.().tags?.length || 0;
     if (tagCount > 0) parts.push(`${tagCount} tag${tagCount === 1 ? '' : 's'}`);
 
@@ -9568,6 +9582,55 @@ const sessionManager = {
     const hint = document.getElementById('workspaceNameHint');
     document.getElementById('folderNameInput')?.classList.remove('is-invalid');
     hint?.classList.remove('is-error');
+  },
+
+  // One derived description of the selected blueprint, read by every
+  // blueprint-aware Details rule so none re-derives it from the projection
+  // (blueprint-aware Details FR 9). Plain flags only; Blank is `null`.
+  //
+  // - bringsOwnSetup: the blueprint sets up its own project (a plugin owner,
+  //   a setup wizard, or a setup quest), so a folder override cannot join it.
+  // - entryNamedAfterWorkspace: its project file is named after the workspace
+  //   (`project_entry.relative_path` contains `{{name}}`).
+  blueprintDetailsProfile(template) {
+    const blank = !template || Boolean(template.blank) || !template.id;
+    const projectEntryPath = blank
+      ? ''
+      : String(template.project_entry?.relative_path || '').trim();
+    return {
+      blank,
+      bringsOwnSetup:
+        !blank && Boolean(template.plugin_owner || template.setup_wizard || template.setup_quest),
+      hasAssistantProgram: !blank && Boolean(template.assistant_program),
+      entryNamedAfterWorkspace: projectEntryPath.includes('{{name}}'),
+      projectEntryPath
+    };
+  },
+
+  // "Use any folder as a template" cannot be combined with a blueprint that
+  // sets up its own project (FR 11a). The picker already empties the path when
+  // any library blueprint is chosen; for these blueprints the control is also
+  // hidden, and a path the user had entered is announced as removed. Blank and
+  // other blueprints keep the control exactly as before.
+  syncTemplateFolderOverride(template) {
+    const field = document.getElementById('projectTemplatePathField');
+    const input = document.getElementById('projectTemplatePathInput');
+    const { bringsOwnSetup } = this.blueprintDetailsProfile(template);
+    const hadOverride = Boolean(String(this.templateFolderOverridePath || '').trim());
+    if (field) field.hidden = bringsOwnSetup;
+    if (bringsOwnSetup && input?.value) {
+      input.value = '';
+      this.scheduleTemplateAgentPlanRefresh();
+    }
+    if (bringsOwnSetup && hadOverride) {
+      const live = document.getElementById('workspaceDetailsLiveRegion');
+      if (live) {
+        live.textContent = '';
+        live.textContent =
+          'Removed the template folder override. This blueprint sets up its own project.';
+      }
+    }
+    this.templateFolderOverridePath = String(input?.value || '');
   },
 
   // Sets the step-2 recap line from the selected

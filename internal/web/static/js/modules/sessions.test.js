@@ -2821,6 +2821,205 @@ test('guided setup keeps its reviewed group while the generic control stays hidd
   assert.deepEqual(JSON.parse(JSON.stringify(manager.workspaceReviewDetailChoices())), []);
 });
 
+// ---------------------------------------------------------------------------
+// Fields the blueprint already answers (blueprint-aware Details FR 9–11a).
+// ---------------------------------------------------------------------------
+
+const selfConfiguringTemplate = {
+  id: 'plugin:owner-plugin:song',
+  name: 'Song',
+  description: 'A blueprint that sets up its own project.',
+  plugin_owner: { plugin_id: 'owner-plugin', blueprint_id: 'song' },
+  assistant_program: { id: 'owner-program' },
+  project_entry: { relative_path: '{{name}}.proj' }
+};
+
+test('blueprintDetailsProfile derives plain flags from what a blueprint declares (FR 9)', () => {
+  const manager = loadSessionManager();
+  const profile = template => JSON.parse(JSON.stringify(manager.blueprintDetailsProfile(template)));
+  const blank = {
+    blank: true,
+    bringsOwnSetup: false,
+    hasAssistantProgram: false,
+    entryNamedAfterWorkspace: false,
+    projectEntryPath: ''
+  };
+  assert.deepEqual(profile(null), blank);
+  assert.deepEqual(profile({ blank: true, name: 'Blank' }), blank);
+
+  assert.deepEqual(profile(selfConfiguringTemplate), {
+    blank: false,
+    bringsOwnSetup: true,
+    hasAssistantProgram: true,
+    entryNamedAfterWorkspace: true,
+    projectEntryPath: '{{name}}.proj'
+  });
+  assert.equal(profile({ id: 'wizard', setup_wizard: { id: 'w' } }).bringsOwnSetup, true);
+  assert.equal(profile({ id: 'quest', setup_quest: { id: 'q' } }).bringsOwnSetup, true);
+  assert.deepEqual(profile({ id: 'writing', project_entry: { relative_path: 'outline.md' } }), {
+    blank: false,
+    bringsOwnSetup: false,
+    hasAssistantProgram: false,
+    entryNamedAfterWorkspace: false,
+    projectEntryPath: 'outline.md'
+  });
+  assert.equal(
+    profile({ id: 'dated', project_entry: { relative_path: 'notes-{{date}}.md' } })
+      .entryNamedAfterWorkspace,
+    false
+  );
+});
+
+async function runDetailsCreate({
+  name = 'Night Drive',
+  description = '',
+  systems = '',
+  context = ''
+}) {
+  const requests = [];
+  const elements = new Map([
+    ['folderNameInput', { value: name, focus() {}, classList: { add() {}, remove() {} } }],
+    ['folderDescriptionInput', { value: description }],
+    ['folderSystemsInput', { value: systems }],
+    ['folderContextInput', { value: context }],
+    ['folderParentSelect', { value: '' }],
+    ['addFolderModal', { dataset: {} }],
+    ['createFolderBtn', { textContent: 'Create workspace', disabled: false }],
+    ['folderImportToggle', { checked: false }]
+  ]);
+  const window = {
+    location: { href: '' },
+    ProjectTemplateCard: {
+      recheckSelection: async () => ({ state: 'ready' }),
+      getPayloadFields: () => ({ template_id: 'research-project' }),
+      getSelectedTemplate: () => ({ id: 'research-project' }),
+      shouldOpenAfterCreate: () => false,
+      reset() {}
+    },
+    OriTagInput: { clearTagPoolCache() {} }
+  };
+  vm.runInNewContext(
+    source,
+    {
+      window,
+      document: {
+        addEventListener() {},
+        getElementById: id => elements.get(id) || null,
+        querySelector: selector =>
+          selector === '#addFolderModal .folder-color-btn.active'
+            ? { dataset: { color: '' } }
+            : null
+      },
+      bootstrap: { Modal: { getInstance: () => ({ hide() {} }) } },
+      fetch: async (url, options) => {
+        requests.push({ url, body: JSON.parse(options.body) });
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({ folder: { id: 'ws-1', folder_slug: 'night-drive' } })
+        };
+      },
+      console,
+      crypto: { randomUUID: () => 'details-request' }
+    },
+    { filename: 'sessions.js' }
+  );
+  const manager = window.sessionManager;
+  manager.teamView = () => ({
+    canContinueFromTeam: true,
+    payload: { team_intent: { version: 1, mode: 'staffed' }, role_staffing: [] }
+  });
+  manager.clearWorkspaceCreateError = () => {};
+  manager.showToast = () => {};
+  manager.resetAddWorkspaceModalForm = () => {};
+  await manager.createFolder();
+  const create = requests.find(request => request.url === '/api/workspaces');
+  return create?.body || null;
+}
+
+test('context typed into Advanced still reaches workspace_bootstrap (FR 10)', async () => {
+  const body = await runDetailsCreate({
+    systems: 'Mixer, Sample library',
+    context: '~/Music/References'
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(body.workspace_bootstrap)), {
+    goal: '',
+    systems: 'Mixer, Sample library',
+    context: '~/Music/References'
+  });
+});
+
+test('the collapsed Advanced summary says when agent context was added (FR 11)', () => {
+  const elements = {
+    folderBehaviorHint: { textContent: '' },
+    folderPresetSelect: { value: 'general' },
+    folderSystemsInput: { value: '' },
+    folderContextInput: { value: '' }
+  };
+  const manager = loadSessionManager(undefined, {}, { getElementById: id => elements[id] || null });
+  manager.updateBehaviorHint();
+  assert.equal(elements.folderBehaviorHint.textContent, 'Agent behavior: General');
+
+  // Also how a seeded open (context filled while Advanced is collapsed) reads.
+  elements.folderContextInput.value = 'Brief in ~/Docs';
+  manager.updateBehaviorHint();
+  assert.equal(elements.folderBehaviorHint.textContent, 'Agent behavior: General · Context added');
+
+  elements.folderContextInput.value = '   ';
+  elements.folderSystemsInput.value = 'Mixer';
+  manager.updateBehaviorHint();
+  assert.match(elements.folderBehaviorHint.textContent, /Context added$/);
+});
+
+test('a self-configuring blueprint hides and clears the folder override, once announced (FR 11a)', () => {
+  const elements = {
+    projectTemplatePathField: { hidden: false },
+    projectTemplatePathInput: { value: '' },
+    workspaceDetailsLiveRegion: { textContent: '' }
+  };
+  const manager = loadSessionManager(undefined, {}, { getElementById: id => elements[id] || null });
+  let planRefreshes = 0;
+  manager.scheduleTemplateAgentPlanRefresh = () => {
+    planRefreshes += 1;
+  };
+
+  // Blank with a typed path: the override stays, exactly as before.
+  elements.projectTemplatePathInput.value = '/Users/me/template-folder';
+  manager.templateFolderOverridePath = elements.projectTemplatePathInput.value;
+  manager.syncTemplateFolderOverride(null);
+  assert.equal(elements.projectTemplatePathField.hidden, false);
+  assert.equal(elements.projectTemplatePathInput.value, '/Users/me/template-folder');
+  assert.equal(elements.workspaceDetailsLiveRegion.textContent, '');
+
+  // Choosing a blueprint that sets up its own project removes it and says so.
+  manager.syncTemplateFolderOverride(selfConfiguringTemplate);
+  assert.equal(elements.projectTemplatePathField.hidden, true);
+  assert.equal(elements.projectTemplatePathInput.value, '');
+  assert.equal(planRefreshes, 1, 'the plan no longer describes the removed folder');
+  assert.equal(
+    elements.workspaceDetailsLiveRegion.textContent,
+    'Removed the template folder override. This blueprint sets up its own project.'
+  );
+
+  // A readiness recheck re-emitting the same blueprint announces nothing new.
+  elements.workspaceDetailsLiveRegion.textContent = '';
+  manager.syncTemplateFolderOverride({ ...selfConfiguringTemplate });
+  assert.equal(elements.workspaceDetailsLiveRegion.textContent, '');
+
+  // The picker empties the path itself before a library blueprint is emitted;
+  // the remembered path is what makes the removal announceable.
+  manager.syncTemplateFolderOverride(null);
+  manager.templateFolderOverridePath = '/Users/me/other-folder';
+  elements.projectTemplatePathInput.value = '';
+  manager.syncTemplateFolderOverride(selfConfiguringTemplate);
+  assert.match(elements.workspaceDetailsLiveRegion.textContent, /Removed the template folder/);
+
+  // Back to Blank or an ordinary blueprint: the control returns, empty.
+  manager.syncTemplateFolderOverride({ id: 'research-project' });
+  assert.equal(elements.projectTemplatePathField.hidden, false);
+  assert.equal(elements.projectTemplatePathInput.value, '');
+});
+
 test('a successful create announces the hierarchy change for pages that stay put', () => {
   const events = [];
   const { manager } = lockedParentManager();
