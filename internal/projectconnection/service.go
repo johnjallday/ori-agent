@@ -212,7 +212,7 @@ func (s *Service) Preview(_ context.Context, scope Scope, request Request) (Prev
 		if scanErr != nil {
 			return Preview{}, ErrUnavailable
 		}
-		if s.ownedByAnotherProject(scope.RunID, scan.Root) {
+		if owner, ownerErr := FindFolderOwner(s.store, scan.Root, connectionChildID(scope.RunID)); ownerErr != nil || owner != nil {
 			return Preview{}, ErrChanged
 		}
 		entry, chooseErr := SelectProjectEntry(request.EntryName, scan.Candidates)
@@ -555,37 +555,6 @@ func (s *Service) rollbackNewState(runID string, home *workspace.Workspace, home
 			}
 		}
 	}
-}
-
-func (s *Service) ownedByAnotherProject(runID, selectedRoot string) bool {
-	selectedInfo, err := os.Stat(selectedRoot)
-	if err != nil {
-		return true
-	}
-	ids, err := s.store.List()
-	if err != nil {
-		return true
-	}
-	expectedChildID := connectionChildID(runID)
-	for _, id := range ids {
-		candidate, getErr := s.store.Get(id)
-		if getErr != nil || candidate == nil || candidate.ID == expectedChildID {
-			continue
-		}
-		locator, locatorErr := workspace.GetProjectEntryLocator(candidate.SharedData)
-		if locatorErr != nil || locator == nil || locator.Kind != workspace.ProjectEntryDirectoryReference {
-			continue
-		}
-		reference, referenceErr := candidate.GetDirectoryReference(locator.DirectoryReferenceID)
-		if referenceErr != nil || reference == nil {
-			continue
-		}
-		info, statErr := os.Stat(reference.Path)
-		if statErr == nil && os.SameFile(selectedInfo, info) {
-			return true
-		}
-	}
-	return false
 }
 
 func (s *Service) ensureStarterTasks(scope Scope, mode projecttemplates.ProjectConnectionMode, childID string) error {

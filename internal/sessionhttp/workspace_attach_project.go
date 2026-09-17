@@ -43,6 +43,8 @@ type createWorkspaceAttachPlan struct {
 type createWorkspaceAttachError struct {
 	status  int
 	message string
+	// duplicate names the workspace that already owns the folder.
+	duplicate *projectconnection.FolderOwner
 }
 
 func (e *createWorkspaceAttachError) Error() string { return e.message }
@@ -59,6 +61,10 @@ var (
 	errAttachWorkspaceFolderUnavailable = &createWorkspaceAttachError{
 		status:  http.StatusInternalServerError,
 		message: "The workspace folder could not be created, so the existing project was not attached.",
+	}
+	errAttachUnavailable = &createWorkspaceAttachError{
+		status:  http.StatusServiceUnavailable,
+		message: "Ori cannot check existing project folders right now. Try again.",
 	}
 )
 
@@ -87,33 +93,147 @@ func (h *Handler) planCreateWorkspaceAttach(req createWorkspaceRequest, kind ses
 	case strings.TrimSpace(req.ProjectName) != "":
 		return nil, attachBadRequest("project_name cannot be combined with an existing project; the project file comes from the chosen folder.")
 	}
-	if h.pathSelections == nil {
-		return nil, &createWorkspaceAttachError{status: http.StatusServiceUnavailable, message: "Choosing an existing project folder is unavailable right now."}
+	review, reviewErr := h.reviewExistingProject(template, connection.SelectionToken, connection.EntryName)
+	switch {
+	case reviewErr != nil:
+		return nil, reviewErr
+	case review.owner != nil:
+		return nil, attachDuplicate(review.owner)
+	case review.entry == "":
+		return nil, attachBadRequest("The chosen folder has several project files. Choose which one to use.")
 	}
-	token := strings.TrimSpace(connection.SelectionToken)
+	return &createWorkspaceAttachPlan{
+		declaration: template.ProjectConnection.AttachExisting, root: review.scan.Root, entry: review.entry, digest: review.scan.Digest,
+	}, nil
+}
+
+// existingProjectReview is one inert read of a chosen folder for a blueprint.
+type existingProjectReview struct {
+	scan projectconnection.ExistingProjectScan
+	// entry is the chosen project file, or "" while several candidates wait
+	// for the user's choice.
+	entry string
+	// owner is the workspace the folder already belongs to, if any.
+	owner *projectconnection.FolderOwner
+}
+
+// reviewExistingProject resolves a picker token and reads the folder behind it
+// for template: its project files, the chosen one, and whether a workspace
+// already owns the folder. It creates and changes nothing. The review endpoint
+// and create validation both use it, so they can never disagree.
+func (h *Handler) reviewExistingProject(template projecttemplates.Template, selectionToken, entryName string) (existingProjectReview, *createWorkspaceAttachError) {
+	if template.ProjectConnection == nil || !template.ProjectConnection.Supports(projecttemplates.ProjectConnectionExistingProject) ||
+		template.ProjectConnection.AttachExisting == nil {
+		return existingProjectReview{}, attachBadRequest("This blueprint does not support using an existing project.")
+	}
+	owners := h.attachFolderOwnerStore()
+	if h.pathSelections == nil || owners == nil {
+		return existingProjectReview{}, errAttachUnavailable
+	}
+	token := strings.TrimSpace(selectionToken)
 	if token == "" {
-		return nil, attachBadRequest("Choose the project folder before creating the workspace.")
+		return existingProjectReview{}, attachBadRequest("Choose the project folder before creating the workspace.")
 	}
 	selected, err := h.pathSelections.Resolve(token)
 	if err != nil {
-		return nil, attachBadRequest("The chosen project folder is no longer available to Ori. Choose the project folder again.")
+		return existingProjectReview{}, attachBadRequest("The chosen project folder is no longer available to Ori. Choose the project folder again.")
 	}
 	declaration := template.ProjectConnection.AttachExisting
 	scan, err := projectconnection.ScanExistingProject(selected, declaration)
 	switch {
 	case errors.Is(err, projectconnection.ErrNoProjectEntry):
-		return nil, attachBadRequest("No project file ending in " + joinEntryExtensions(declaration.EntryExtensions) + " was found in the chosen folder.")
+		return existingProjectReview{}, attachBadRequest("No project file ending in " + joinEntryExtensions(declaration.EntryExtensions) + " was found in the chosen folder.")
 	case err != nil:
-		return nil, attachBadRequest("The chosen project folder cannot be read. Choose another project folder.")
+		return existingProjectReview{}, attachBadRequest("The chosen project folder cannot be read. Choose another project folder.")
 	}
-	entry, err := projectconnection.SelectProjectEntry(strings.TrimSpace(connection.EntryName), scan.Candidates)
-	switch {
-	case err != nil:
-		return nil, attachBadRequest("The chosen project file is not in the chosen folder. Choose the project file again.")
-	case entry == "":
-		return nil, attachBadRequest("The chosen folder has several project files. Choose which one to use.")
+	entry, err := projectconnection.SelectProjectEntry(strings.TrimSpace(entryName), scan.Candidates)
+	if err != nil {
+		return existingProjectReview{}, attachBadRequest("The chosen project file is not in the chosen folder. Choose the project file again.")
 	}
-	return &createWorkspaceAttachPlan{declaration: declaration, root: scan.Root, entry: entry, digest: scan.Digest}, nil
+	owner, err := projectconnection.FindFolderOwner(owners, scan.Root, "")
+	if err != nil {
+		return existingProjectReview{}, errAttachUnavailable
+	}
+	return existingProjectReview{scan: scan, entry: entry, owner: owner}, nil
+}
+
+// attachFolderOwnerStore is every workspace (the session-backed store other
+// create steps write through) plus where each one's folder is.
+func (h *Handler) attachFolderOwnerStore() projectconnection.FolderOwnerStore {
+	if h == nil || h.workspaceTaskStore == nil || h.workspaceStore == nil {
+		return nil
+	}
+	return attachOwnerStore{Store: h.workspaceTaskStore, folders: h.workspaceStore}
+}
+
+type attachOwnerStore struct {
+	agentworkspace.Store
+	folders *agentworkspace.FileStore
+}
+
+func (s attachOwnerStore) GetFolderPath(id string) (string, error) {
+	return s.folders.GetFolderPath(id)
+}
+
+// attachDuplicate refuses a folder that already belongs to a workspace. There
+// is deliberately no way to attach it anyway.
+func attachDuplicate(owner *projectconnection.FolderOwner) *createWorkspaceAttachError {
+	name := strings.TrimSpace(owner.Name)
+	if name == "" {
+		name = "Another workspace"
+	} else {
+		name = "“" + name + "”"
+	}
+	return &createWorkspaceAttachError{
+		status:    http.StatusConflict,
+		message:   name + " already uses this folder. Open that workspace, or choose a different project folder.",
+		duplicate: owner,
+	}
+}
+
+// reviewProjectConnectionRequest is the body of
+// POST /api/workspaces/project-connection/review.
+type reviewProjectConnectionRequest struct {
+	TemplateID     string `json:"template_id"`
+	SelectionToken string `json:"selection_token"`
+	EntryName      string `json:"entry_name,omitempty"`
+}
+
+// ReviewProjectConnection serves POST /api/workspaces/project-connection/review:
+// an inert read of the folder behind a picker token for a blueprint. It lists
+// the folder's project files, selects the only one (or the requested one), and
+// reports a workspace that already owns the folder. It never creates anything.
+func (h *Handler) ReviewProjectConnection(w http.ResponseWriter, r *http.Request) {
+	var request reviewProjectConnectionRequest
+	if !orihttp.ParseJSONBody(w, r, &request) {
+		return
+	}
+	if strings.TrimSpace(request.TemplateID) == "" {
+		respondCreateWorkspaceAttachError(w, attachBadRequest("Choose a blueprint that supports existing projects before reviewing a folder."))
+		return
+	}
+	template, err := h.resolveProjectTemplate(request.TemplateID, "")
+	if err != nil {
+		respondCreateWorkspaceAttachError(w, attachBadRequest("The selected blueprint is unavailable, so an existing project cannot be reviewed."))
+		return
+	}
+	review, reviewErr := h.reviewExistingProject(template, request.SelectionToken, request.EntryName)
+	if reviewErr != nil {
+		respondCreateWorkspaceAttachError(w, reviewErr)
+		return
+	}
+	response := map[string]any{
+		"selected_folder":  review.scan.Root,
+		"entry_name":       review.entry,
+		"entry_candidates": review.scan.Candidates,
+		"entry_extensions": template.ProjectConnection.AttachExisting.EntryExtensions,
+		"duplicate":        nil,
+	}
+	if review.owner != nil {
+		response["duplicate"] = review.owner
+		response["duplicate_message"] = attachDuplicate(review.owner).message
+	}
+	_ = orihttp.RespondSuccess(w, response)
 }
 
 // joinEntryExtensions renders declared extensions for a message: ".a",
@@ -137,12 +257,24 @@ func joinEntryExtensions(extensions []string) string {
 // workspace.json and the session row must record it; a failure is fatal to
 // the create, unlike best-effort template scaffolding.
 func (h *Handler) recordCreateWorkspaceAttachedProject(ctx context.Context, ws *session.Workspace, folderWS *agentworkspace.Workspace, plan *createWorkspaceAttachPlan) error {
-	if h.workspaceStore == nil || ws == nil || folderWS == nil {
+	owners := h.attachFolderOwnerStore()
+	if h.workspaceStore == nil || owners == nil || ws == nil || folderWS == nil {
 		return errAttachWorkspaceFolderUnavailable
 	}
+	// From the final ownership check to the session write, no other attach (in
+	// another tab or the guided journey) can claim the same folder.
+	unlock := projectconnection.LockAttachCommit()
+	defer unlock()
 	scan, err := projectconnection.ScanExistingProject(plan.root, plan.declaration)
 	if err != nil || scan.Root != plan.root || scan.Digest != plan.digest || !slices.Contains(scan.Candidates, plan.entry) {
 		return errAttachFolderChanged
+	}
+	owner, err := projectconnection.FindFolderOwner(owners, scan.Root, ws.ID)
+	switch {
+	case err != nil:
+		return errAttachUnavailable
+	case owner != nil:
+		return attachDuplicate(owner)
 	}
 	if err := projectconnection.RecordAttachedProject(folderWS, ws.Name, scan.Root, plan.entry, uuid.NewString()); err != nil {
 		logger.Warn("Existing project could not be recorded", logger.Fields{"id": ws.ID, "error": err})
@@ -199,8 +331,12 @@ func respondCreateWorkspaceAttachError(w http.ResponseWriter, err error) {
 	if !errors.As(err, &attachErr) {
 		attachErr = errAttachWorkspaceFolderUnavailable
 	}
-	_ = orihttp.RespondJSON(w, attachErr.status, map[string]any{
+	body := map[string]any{
 		"error":    attachErr.message,
 		"conflict": map[string]any{"type": "project_connection"},
-	})
+	}
+	if attachErr.duplicate != nil {
+		body["duplicate"] = attachErr.duplicate
+	}
+	_ = orihttp.RespondJSON(w, attachErr.status, body)
 }

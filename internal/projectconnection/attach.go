@@ -110,6 +110,87 @@ func SelectProjectEntry(requested string, candidates []string) (string, error) {
 	return "", ErrEntryNotFound
 }
 
+// FolderOwner names the workspace a folder already belongs to.
+type FolderOwner struct {
+	WorkspaceID string `json:"workspace_id"`
+	Name        string `json:"name"`
+	Slug        string `json:"slug,omitempty"`
+}
+
+// FolderOwnerStore is what FindFolderOwner reads: every workspace, and where
+// each one's own folder is.
+type FolderOwnerStore interface {
+	List() ([]string, error)
+	Get(string) (*workspace.Workspace, error)
+	GetFolderPath(string) (string, error)
+}
+
+// folderImportKey is the shared_data record Import Folder writes on a
+// workspace it adopted from an existing folder.
+const folderImportKey = "folder_import"
+
+// FindFolderOwner reports the workspace, other than ignoreWorkspaceID, that
+// selected already belongs to: a folder attached as a workspace's project
+// (through the guided journey or the create modal), or a workspace's own
+// folder, which is what Import Folder adopts. It returns nil when no workspace
+// owns it, and an error when ownership cannot be verified, which callers must
+// treat as a refusal rather than as "free".
+func FindFolderOwner(store FolderOwnerStore, selected, ignoreWorkspaceID string) (*FolderOwner, error) {
+	if store == nil {
+		return nil, ErrUnavailable
+	}
+	selectedInfo, err := os.Stat(selected)
+	if err != nil {
+		return nil, ErrFolderUnavailable
+	}
+	ids, err := store.List()
+	if err != nil {
+		return nil, ErrUnavailable
+	}
+	sameFolder := func(path string) bool {
+		if strings.TrimSpace(path) == "" {
+			return false
+		}
+		info, statErr := os.Stat(path) // #nosec G304 -- a path Ori itself recorded for a workspace; only compared, never read
+		return statErr == nil && os.SameFile(selectedInfo, info)
+	}
+	for _, id := range ids {
+		if id == ignoreWorkspaceID {
+			continue
+		}
+		candidate, getErr := store.Get(id)
+		if getErr != nil || candidate == nil || candidate.ID == ignoreWorkspaceID {
+			continue
+		}
+		owner := &FolderOwner{WorkspaceID: candidate.ID, Name: candidate.Name, Slug: candidate.FolderSlug}
+		if locator, locatorErr := workspace.GetProjectEntryLocator(candidate.SharedData); locatorErr == nil &&
+			locator != nil && locator.Kind == workspace.ProjectEntryDirectoryReference {
+			if reference, referenceErr := candidate.GetDirectoryReference(locator.DirectoryReferenceID); referenceErr == nil &&
+				reference != nil && sameFolder(reference.Path) {
+				return owner, nil
+			}
+		}
+		if imported, ok := candidate.SharedData[folderImportKey].(map[string]any); ok {
+			if path, _ := imported["path"].(string); sameFolder(path) {
+				return owner, nil
+			}
+		}
+		if folder, folderErr := store.GetFolderPath(candidate.ID); folderErr == nil && sameFolder(folder) {
+			return owner, nil
+		}
+	}
+	return nil, nil
+}
+
+// LockAttachCommit serializes every attach that records a folder, from its
+// final ownership check to its durable write, across the guided journey and
+// the create modal. Without it two requests could both find a folder free and
+// both attach it.
+func LockAttachCommit() (unlock func()) {
+	connectionCommitMu.Lock()
+	return connectionCommitMu.Unlock
+}
+
 // RecordAttachedProject references root in place on ws and points the typed
 // project-entry locator at entry inside it. Nothing in root is created,
 // copied, moved, or modified. ws.ID must already be final: the reference is

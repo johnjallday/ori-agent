@@ -467,6 +467,301 @@ func workspaceFolders(t *testing.T, root string) []string {
 	return folders
 }
 
+func postProjectConnectionReview(t *testing.T, handler *Handler, payload map[string]any) (int, map[string]any) {
+	t.Helper()
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/workspaces/project-connection/review", bytes.NewReader(encoded))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ReviewProjectConnection(response, request)
+	var body map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode review response %d: %v: %s", response.Code, err, response.Body.String())
+	}
+	return response.Code, body
+}
+
+func stringList(value any) []string {
+	items, _ := value.([]any)
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		out = append(out, item.(string))
+	}
+	return out
+}
+
+func TestReviewProjectConnectionReadsTheFolderAndCreatesNothing(t *testing.T) {
+	fixture := newAttachFixture(t, attachTemplate(projecttemplates.GroupPolicyNone))
+	unsupported := newAttachFixture(t, policyTemplate(projecttemplates.GroupPolicyNone))
+	single := existingProjectFolder(t, map[string]string{"Night Drive.demo": "project", "notes.txt": "notes"})
+	several := existingProjectFolder(t, map[string]string{"Take Two.demo": "two", "Take One.demo": "one"})
+	empty := existingProjectFolder(t, map[string]string{"notes.txt": "no project here"})
+	before := map[string]map[string]string{
+		single: folderChecksum(t, single), several: folderChecksum(t, several), empty: folderChecksum(t, empty),
+	}
+	issue := func(folder string) string {
+		token, err := fixture.selections.Issue(folder)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return token
+	}
+	review := func(extra map[string]any) (int, map[string]any) {
+		payload := map[string]any{"template_id": fixture.template.ID}
+		for key, value := range extra {
+			payload[key] = value
+		}
+		return postProjectConnectionReview(t, fixture.handler, payload)
+	}
+
+	code, body := review(map[string]any{"selection_token": issue(single)})
+	if code != http.StatusOK || body["entry_name"] != "Night Drive.demo" || body["duplicate"] != nil {
+		t.Fatalf("one project file: status=%d body=%v", code, body)
+	}
+	if !reflect.DeepEqual(stringList(body["entry_candidates"]), []string{"Night Drive.demo"}) ||
+		!reflect.DeepEqual(stringList(body["entry_extensions"]), []string{".demo"}) {
+		t.Fatalf("one project file lists = %v", body)
+	}
+	if folder, _ := body["selected_folder"].(string); folder == "" {
+		t.Fatalf("selected_folder missing: %v", body)
+	}
+
+	severalToken := issue(several)
+	code, body = review(map[string]any{"selection_token": severalToken})
+	if code != http.StatusOK || body["entry_name"] != "" ||
+		!reflect.DeepEqual(stringList(body["entry_candidates"]), []string{"Take One.demo", "Take Two.demo"}) {
+		t.Fatalf("several project files: status=%d body=%v", code, body)
+	}
+	code, body = review(map[string]any{"selection_token": severalToken, "entry_name": "Take Two.demo"})
+	if code != http.StatusOK || body["entry_name"] != "Take Two.demo" {
+		t.Fatalf("chosen project file: status=%d body=%v", code, body)
+	}
+
+	for name, tc := range map[string]struct {
+		handler *Handler
+		payload map[string]any
+		want    string
+	}{
+		"requested file not in folder": {fixture.handler, map[string]any{
+			"template_id": fixture.template.ID, "selection_token": severalToken, "entry_name": "Take Three.demo",
+		}, "not in the chosen folder"},
+		"no project file": {fixture.handler, map[string]any{
+			"template_id": fixture.template.ID, "selection_token": issue(empty),
+		}, "ending in .demo"},
+		"expired token": {fixture.handler, map[string]any{
+			"template_id": fixture.template.ID, "selection_token": "not-a-picker-token",
+		}, "Choose the project folder again"},
+		"missing blueprint": {fixture.handler, map[string]any{"selection_token": issue(single)}, "Choose a blueprint"},
+		"blueprint without existing projects": {unsupported.handler, map[string]any{
+			"template_id": unsupported.template.ID, "selection_token": issue(single),
+		}, "does not support"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tc.handler.SetTrustedPathSelectionResolver(fixture.selections)
+			code, body := postProjectConnectionReview(t, tc.handler, tc.payload)
+			message, _ := body["error"].(string)
+			if code != http.StatusBadRequest || !strings.Contains(message, tc.want) {
+				t.Fatalf("status=%d body=%v, want 400 mentioning %q", code, body, tc.want)
+			}
+		})
+	}
+
+	for _, handlerFixture := range []attachFixture{fixture, unsupported} {
+		if ids, _ := handlerFixture.store.List(); len(ids) != 0 {
+			t.Fatalf("review created workspaces: %v", ids)
+		}
+		if folders := workspaceFolders(t, handlerFixture.root); len(folders) != 0 {
+			t.Fatalf("review created workspace folders: %v", folders)
+		}
+	}
+	for folder, checksum := range before {
+		if after := folderChecksum(t, folder); !reflect.DeepEqual(after, checksum) {
+			t.Fatalf("review changed %s", folder)
+		}
+	}
+}
+
+func TestReviewProjectConnectionReportsEveryKindOfOwner(t *testing.T) {
+	fixture := newAttachFixture(t, attachTemplate(projecttemplates.GroupPolicyNone))
+	reviewDuplicate := func(folder string) map[string]any {
+		t.Helper()
+		token, err := fixture.selections.Issue(folder)
+		if err != nil {
+			t.Fatal(err)
+		}
+		code, body := postProjectConnectionReview(t, fixture.handler, map[string]any{
+			"template_id": fixture.template.ID, "selection_token": token,
+		})
+		if code != http.StatusOK {
+			t.Fatalf("review status=%d body=%v", code, body)
+		}
+		duplicate, _ := body["duplicate"].(map[string]any)
+		if duplicate == nil || body["duplicate_message"] == nil {
+			t.Fatalf("no duplicate reported for %s: %v", folder, body)
+		}
+		return duplicate
+	}
+
+	// Attached from this modal.
+	modalFolder := existingProjectFolder(t, map[string]string{"Night Drive.demo": "project"})
+	token, err := fixture.selections.Issue(modalFolder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, body := reviewAndCreate(t, fixture.handler, attachPayload(fixture.template.ID, token), "owner-modal")
+	if code != http.StatusCreated {
+		t.Fatalf("modal attach status=%d body=%v", code, body)
+	}
+	modalID := body["folder"].(map[string]any)["id"].(string)
+	if duplicate := reviewDuplicate(modalFolder); duplicate["workspace_id"] != modalID || duplicate["name"] != "Night Drive" {
+		t.Fatalf("modal owner = %v", duplicate)
+	}
+
+	// Attached by the guided journey, into the same store.
+	journeyFolder := existingProjectFolder(t, map[string]string{"Journey Song.demo": "project"})
+	journeyTemplate := attachTemplate(projecttemplates.GroupPolicyNone)
+	journeyTemplate.GroupRequirement = nil
+	journeyTemplate.AssistantProgram = journeyAssistantProgram()
+	journeySelections := pathselection.NewStore()
+	service := projectconnection.NewService(fixture.store.(interface {
+		agentworkspace.Store
+		GetFolderPath(string) (string, error)
+	}), journeySelections)
+	journeyToken, err := journeySelections.Issue(journeyFolder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := projectconnection.Scope{OwnerUserID: "local", RunID: "owner-journey", Template: journeyTemplate}
+	request := projectconnection.Request{
+		ModeID: projecttemplates.ProjectConnectionExistingProject, SelectionToken: journeyToken, WorkspaceName: "Journey Song",
+	}
+	preview, err := service.Preview(context.Background(), scope, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Commit(context.Background(), scope, request, preview.InputDigest, preview.OwnerDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if duplicate := reviewDuplicate(journeyFolder); duplicate["workspace_id"] != result.ProjectWorkspaceID {
+		t.Fatalf("journey owner = %v, want %s", duplicate, result.ProjectWorkspaceID)
+	}
+
+	// Adopted with Import Folder.
+	importFolder := existingProjectFolder(t, map[string]string{"Imported Song.demo": "project"})
+	encoded, err := json.Marshal(map[string]any{"path": importFolder, "name": "Imported Song"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	importRequest := httptest.NewRequest(http.MethodPost, "/api/workspaces/import", bytes.NewReader(encoded))
+	importRequest.Header.Set("Content-Type", "application/json")
+	importResponse := httptest.NewRecorder()
+	fixture.handler.HandleWorkspaces(importResponse, importRequest)
+	if importResponse.Code != http.StatusCreated {
+		t.Fatalf("import status=%d body=%s", importResponse.Code, importResponse.Body.String())
+	}
+	if duplicate := reviewDuplicate(importFolder); duplicate["name"] != "Imported Song" {
+		t.Fatalf("import owner = %v", duplicate)
+	}
+}
+
+func TestCreateWorkspaceRefusesAFolderClaimedAfterItsReview(t *testing.T) {
+	fixture := newAttachFixture(t, attachTemplate(projecttemplates.GroupPolicyNone))
+	external := existingProjectFolder(t, map[string]string{"Night Drive.demo": "project"})
+	before := folderChecksum(t, external)
+	firstToken, err := fixture.selections.Issue(external)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondToken, err := fixture.selections.Issue(external)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Both tabs review the free folder.
+	reviewed := func(token, key string) map[string]any {
+		payload := attachPayload(fixture.template.ID, token)
+		review := map[string]any{"group_requirement_review": true}
+		for field, value := range payload {
+			review[field] = value
+		}
+		code, body := postPolicyWorkspace(t, fixture.handler, review)
+		if code != http.StatusOK {
+			t.Fatalf("review status=%d body=%v", code, body)
+		}
+		payload["group_review_token"] = body["group_requirement_review"].(map[string]any)["review_token"]
+		payload["idempotency_key"] = key
+		return payload
+	}
+	first := reviewed(firstToken, "claim-first")
+	second := reviewed(secondToken, "claim-second")
+
+	code, body := postPolicyWorkspace(t, fixture.handler, first)
+	if code != http.StatusCreated {
+		t.Fatalf("first create status=%d body=%v", code, body)
+	}
+	firstID := body["folder"].(map[string]any)["id"].(string)
+
+	code, body = postPolicyWorkspace(t, fixture.handler, second)
+	duplicate, _ := body["duplicate"].(map[string]any)
+	if code != http.StatusConflict || duplicate == nil || duplicate["workspace_id"] != firstID {
+		t.Fatalf("second create status=%d body=%v", code, body)
+	}
+	if ids, _ := fixture.store.List(); len(ids) != 1 || ids[0] != firstID {
+		t.Fatalf("refused create left workspaces: %v", ids)
+	}
+	if folders := workspaceFolders(t, fixture.root); len(folders) != 1 {
+		t.Fatalf("refused create left workspace folders: %v", folders)
+	}
+	if after := folderChecksum(t, external); !reflect.DeepEqual(after, before) {
+		t.Fatalf("user's folder changed")
+	}
+}
+
+func TestCreateWorkspaceRechecksOwnershipImmediatelyBeforeRecording(t *testing.T) {
+	fixture := newAttachFixture(t, attachTemplate(projecttemplates.GroupPolicyNone))
+	external := existingProjectFolder(t, map[string]string{"Night Drive.demo": "project"})
+	token, err := fixture.selections.Issue(external)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := attachPayload(fixture.template.ID, token)
+	review := map[string]any{"group_requirement_review": true}
+	for field, value := range payload {
+		review[field] = value
+	}
+	code, body := postPolicyWorkspace(t, fixture.handler, review)
+	if code != http.StatusOK {
+		t.Fatalf("review status=%d body=%v", code, body)
+	}
+	payload["group_review_token"] = body["group_requirement_review"].(map[string]any)["review_token"]
+	payload["idempotency_key"] = "recheck"
+
+	// Another owner appears after validation, while this create is running.
+	var claimant *agentworkspace.Workspace
+	fixture.handler.SetWorkspaceRootResolver(func() string {
+		if claimant == nil {
+			claimant = agentworkspace.NewWorkspace(agentworkspace.CreateWorkspaceParams{Name: "Imported Elsewhere"})
+			claimant.SharedData = map[string]any{"folder_import": map[string]any{"enabled": true, "path": external}}
+			if err := fixture.store.Save(claimant); err != nil {
+				t.Error(err)
+			}
+		}
+		return ""
+	})
+	code, body = postPolicyWorkspace(t, fixture.handler, payload)
+	duplicate, _ := body["duplicate"].(map[string]any)
+	if code != http.StatusConflict || duplicate == nil || duplicate["workspace_id"] != claimant.ID {
+		t.Fatalf("status=%d body=%v", code, body)
+	}
+	if ids, _ := fixture.store.List(); len(ids) != 1 || ids[0] != claimant.ID {
+		t.Fatalf("refused create left workspaces: %v", ids)
+	}
+}
+
 func mustGetWorkspace(t *testing.T, store agentworkspace.Store, id string) *agentworkspace.Workspace {
 	t.Helper()
 	ws, err := store.Get(id)

@@ -350,6 +350,24 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
   font-size: 11px;
   overflow-wrap: anywhere;
 }
+.workspace-create-modal .workspace-existing-project-entry {
+  margin-top: 10px;
+}
+.workspace-create-modal .workspace-existing-project-entry label {
+  display: block;
+  margin-bottom: 6px;
+}
+.workspace-create-modal .workspace-existing-project-duplicate {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--wc-alert, #e5675b) 55%, var(--wc-line));
+  background: color-mix(in srgb, var(--wc-alert, #e5675b) 8%, transparent);
+}
+.workspace-create-modal .workspace-existing-project-duplicate p {
+  margin: 0 0 8px;
+  color: var(--wc-ink);
+  font-size: 12px;
+}
 @media (max-width: 575.98px) {
   .workspace-create-modal .workspace-project-choice-options {
     grid-template-columns: 1fr;

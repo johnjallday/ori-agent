@@ -2142,6 +2142,7 @@ print(json.dumps({
 #   music/Two Takes/Take One.rpp, Take Two.rpp several project files
 #   music/No Project/notes.txt                 no project file
 #   music/Bridge Sketch/Bridge Sketch.rpp      name prefill
+#   music/Imported Song/Imported Song.rpp      adopt with Import Folder first
 smoke_reaper_demo_folders() {
   local sandbox="${2:-}"
   [[ -n "$sandbox" && -d "$sandbox" ]] || fail "usage: $0 reaper-demo-folders <demo-sandbox-dir>"
@@ -2152,16 +2153,17 @@ smoke_reaper_demo_folders() {
   local scaffold
   scaffold=$(find "$sandbox/plugins" -path '*blueprints/reaper-song/project/*.rpp' 2>/dev/null | head -1 || true)
   local music="$sandbox/music"
-  mkdir -p "$music/Night Drive" "$music/Two Takes" "$music/No Project" "$music/Bridge Sketch"
+  mkdir -p "$music/Night Drive" "$music/Two Takes" "$music/No Project" "$music/Bridge Sketch" "$music/Imported Song"
   local target
-  for target in "Night Drive/Night Drive.rpp" "Two Takes/Take One.rpp" "Two Takes/Take Two.rpp" "Bridge Sketch/Bridge Sketch.rpp"; do
+  for target in "Night Drive/Night Drive.rpp" "Two Takes/Take One.rpp" "Two Takes/Take Two.rpp" "Bridge Sketch/Bridge Sketch.rpp" "Imported Song/Imported Song.rpp"; do
+    [[ -e "$music/$target" ]] && continue
     if [[ -n "$scaffold" ]]; then
       cp "$scaffold" "$music/$target"
     else
       printf '<REAPER_PROJECT 0.1 "7.0"\n  TEMPO 120 4 4\n>\n' >"$music/$target"
     fi
   done
-  printf 'mix notes\n' >"$music/No Project/notes.txt"
+  [[ -e "$music/No Project/notes.txt" ]] || printf 'mix notes\n' >"$music/No Project/notes.txt"
   echo "ok   demo project folders under $music"
   find "$music" -type f | sort
 }
@@ -2194,6 +2196,9 @@ on run argv
     delay 0.8
     keystroke "g" using {command down, shift down}
     delay 1.2
+    -- Go to Folder remembers the last path; replace it rather than append.
+    keystroke "a" using {command down}
+    delay 0.3
     keystroke target
     delay 0.8
     key code 36
@@ -2210,6 +2215,23 @@ APPLESCRIPT
   )
   [[ "$result" == "chosen" ]] || fail "folder dialog was not answered ($result)"
   echo "ok   chose $target in the native folder dialog"
+}
+
+# smoke_import_folder adopts <path> as a workspace through Import Folder, the
+# way the modal's Import mode does, and prints the new workspace id.
+smoke_import_folder() {
+  local target="${3:-}"
+  [[ -n "$target" && -d "$target" ]] || fail "usage: $0 import-folder <base-url> <folder>"
+  local body
+  body=$(python3 -c 'import json, sys; print(json.dumps({"path": sys.argv[1], "entry_point": "smoke"}))' "$target")
+  curl -s -X POST "$BASE_URL/api/workspaces/import" -H 'Content-Type: application/json' \
+    -H "Origin: $BASE_URL" -d "$body" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+f = d.get("folder") or {}
+if not f.get("id"):
+    sys.exit("FAIL: import refused: " + json.dumps(d))
+print("ok   imported", f.get("name"), f.get("id"))'
 }
 
 # smoke_folder_checksum prints one sha256 per file (sorted), so a before/after
@@ -2252,6 +2274,7 @@ reaper-blueprint) smoke_reaper_blueprint ;;
 reaper-demo-folders) smoke_reaper_demo_folders "$@" ;;
 folder-checksum) smoke_folder_checksum "$@" ;;
 pick-folder) smoke_pick_folder "$@" ;;
+import-folder) smoke_import_folder "$@" ;;
 blueprint-details) smoke_blueprint_details "$@" ;;
 starter) smoke_starter "$@" ;;
 agent-type-api) smoke_agent_type_api ;;
