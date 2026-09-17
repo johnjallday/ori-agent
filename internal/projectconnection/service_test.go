@@ -172,6 +172,44 @@ func TestAttachExistingRevalidatesSelectionAndRequiresExactCandidate(t *testing.
 	}
 }
 
+func TestAttachExistingRefusesAFolderImportFolderAlreadyAdopted(t *testing.T) {
+	service, store, selections := connectionService(t)
+	external := t.TempDir()
+	if err := os.WriteFile(filepath.Join(external, "Existing Song.rpp"), []byte("original"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	imported := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Imported Songs"})
+	imported.SharedData = map[string]any{"folder_import": map[string]any{"enabled": true, "path": external}}
+	if err := store.Save(imported); err != nil {
+		t.Fatal(err)
+	}
+	token, _ := selections.Issue(external)
+	scope := Scope{OwnerUserID: "owner-1", RunID: "run-imported", Template: connectionTemplate(t)}
+	request := Request{ModeID: projecttemplates.ProjectConnectionExistingProject, SelectionToken: token, WorkspaceName: "Existing Song"}
+	if _, err := service.Preview(context.Background(), scope, request); !errors.Is(err, ErrChanged) {
+		t.Fatalf("imported folder preview error = %v", err)
+	}
+
+	owner, err := FindFolderOwner(store, external, "")
+	if err != nil || owner == nil || owner.WorkspaceID != imported.ID || owner.Name != "Imported Songs" {
+		t.Fatalf("owner = %#v err=%v", owner, err)
+	}
+	// A workspace's own folder is also taken, whatever it is called.
+	folder, err := store.GetFolderPath(imported.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner, err := FindFolderOwner(store, folder, ""); err != nil || owner == nil || owner.WorkspaceID != imported.ID {
+		t.Fatalf("own-folder owner = %#v err=%v", owner, err)
+	}
+	if owner, err := FindFolderOwner(store, external, imported.ID); err != nil || owner != nil {
+		t.Fatalf("the ignored workspace still owns it: %#v err=%v", owner, err)
+	}
+	if _, err := FindFolderOwner(store, filepath.Join(external, "missing"), ""); !errors.Is(err, ErrFolderUnavailable) {
+		t.Fatalf("missing folder error = %v", err)
+	}
+}
+
 func TestAttachExistingRejectsSymlinkCandidateAndUntrustedToken(t *testing.T) {
 	service, _, _ := connectionService(t)
 	external := t.TempDir()

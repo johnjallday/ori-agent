@@ -769,6 +769,8 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		// subtree does not interpret "group-requirement" as a workspace ID.
 		mux.HandleFunc("POST /api/workspaces/group-requirement/home/review", s.Handlers.Session.ReviewGroupRequirementHome)
 		mux.HandleFunc("POST /api/workspaces/group-requirement/home/commit", s.Handlers.Session.CommitGroupRequirementHome)
+		// Inert read of an existing project folder chosen with the native picker.
+		mux.HandleFunc("POST /api/workspaces/project-connection/review", s.Handlers.Session.ReviewProjectConnection)
 		// Group Templates are a read-only projection; never a project template.
 		mux.HandleFunc("GET /api/workspaces/group-templates", s.Handlers.Session.ListGroupTemplates)
 		mux.HandleFunc("POST /api/workspaces/group-templates/review", s.Handlers.Session.ReviewGroupTemplateHome)

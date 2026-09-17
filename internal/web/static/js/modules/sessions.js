@@ -403,6 +403,20 @@ const sessionManager = {
       if (choice?.checked) window.GroupTemplateCreator?.select(this, choice.value);
     });
 
+    document.getElementById('workspaceProjectChoice')?.addEventListener('change', event => {
+      const choice = event.target.closest('[name="workspace-project-mode"]');
+      if (choice?.checked) this.setExistingProjectMode(choice.value);
+    });
+    document
+      .getElementById('workspaceExistingProjectChooseBtn')
+      ?.addEventListener('click', () => this.chooseExistingProjectFolder());
+    document
+      .getElementById('workspaceExistingProjectEntrySelect')
+      ?.addEventListener('change', event => this.setExistingProjectEntry(event.target.value));
+    document
+      .getElementById('workspaceExistingProjectOpenExisting')
+      ?.addEventListener('click', () => this.openExistingProjectOwner());
+
     document.getElementById('folderPresetSelect')?.addEventListener('change', () => {
       this.behaviorOverridden = true;
       this.invalidateGroupRequirementReview();
@@ -4019,6 +4033,7 @@ const sessionManager = {
     // where the picker module has not loaded yet.
     this.workspaceTemplate = null;
     this.groupRequirementDraft = null;
+    this.resetExistingProjectChoice();
     // Decided only after the previous open's placement draft is gone, so a
     // stale fixed placement cannot hide or clear the fresh control. A group
     // page's Build still preselects its locked group (group-map-build FR-15).
@@ -7852,9 +7867,59 @@ const sessionManager = {
     return (
       identity +
       details +
+      this.renderExistingProjectReceipt(selectedTemplate) +
       this.renderWorkspaceGroupRequirementReceipt(selectedTemplate) +
       this.renderWorkspaceReceiptTeam(view)
     );
+  },
+
+  // Review's statement of an attached project: the folder, its project file,
+  // where the workspace goes, and that Ori leaves the files alone (FR 26).
+  renderExistingProjectReceipt(template) {
+    if (!this.usesExistingProject()) return '';
+    const choice = this.existingProjectChoice;
+    const entry = String(choice.review?.entryName || choice.entryName || '').trim();
+    const lines = [
+      `Folder: ${choice.folderDisplay || 'not chosen yet'}`,
+      `Project file: ${entry || 'not chosen yet'}`,
+      `Destination: ${this.existingProjectDestinationLabel(template)}`
+    ];
+    return `
+      <div class="workspace-review-card" data-existing-project-receipt>
+        <div class="workspace-review-card-main">
+          <span class="workspace-review-card-label">Existing project</span>
+          ${lines.map(line => `<span class="workspace-review-card-meta">${this.escapeHtml(line)}</span>`).join('')}
+          <span class="workspace-review-card-note">Ori will not move or change these files.</span>
+        </div>
+        <div class="workspace-review-card-actions">
+          <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="2">Edit</button>
+        </div>
+      </div>`;
+  },
+
+  // Where the workspace will be created, in the same terms Details uses.
+  existingProjectDestinationLabel(template) {
+    const draft = this.groupRequirementDraft;
+    if (template?.group_requirement && draft) {
+      if (draft.composition === 'grouped') {
+        const projection = draft.projection || this.templateAgentPlan?.group_requirement || {};
+        return String(
+          projection.home?.name ||
+            projection.home?.proposed_name ||
+            template.group_requirement.default_home_name ||
+            'the blueprint’s group'
+        );
+      }
+      if (draft.composition === 'standalone') return 'Standalone, not in a group';
+      return 'Choose grouped or standalone placement in Details';
+    }
+    const locked = this.lockedParentId?.();
+    const parent = document.getElementById('folderParentSelect');
+    if ((locked || parent?.value) && parent?.options) {
+      const label = parent.options[parent.selectedIndex]?.textContent?.trim();
+      if (label) return label;
+    }
+    return 'Top level';
   },
 
   renderWorkspaceGroupRequirementReceipt(template) {
@@ -8906,6 +8971,7 @@ const sessionManager = {
     // Visibility, value, disabled state, and caption have one owner, and this
     // runs on every step change (blueprint-aware Details FR 1–2).
     this.syncWorkspaceDestinationControl();
+    this.syncExistingProjectChoice();
   },
 
   // Renders the wizard chrome for the current mode + step. Import remains a
@@ -9454,7 +9520,12 @@ const sessionManager = {
         body: JSON.stringify({ ...payload, group_requirement_review: true })
       });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok || body.error) throw new Error(body.error || 'Placement review failed.');
+      if (!response.ok || body.error) {
+        const failure = new Error(body.error || 'Placement review failed.');
+        // The review validates an attached project too; its fix is on Details.
+        if (body.conflict?.type === 'project_connection') failure.projectConnection = body;
+        throw failure;
+      }
       return body.group_requirement_review || {};
     };
 
@@ -9525,7 +9596,12 @@ const sessionManager = {
     const profile = this.isWorkspaceCreator()
       ? this.blueprintDetailsProfile(this.workspaceTemplate)
       : null;
-    if (profile?.entryNamedAfterWorkspace && !profile.projectEntryPath.includes('{{date}}')) {
+    // An existing project keeps its own file name, so only the folder previews.
+    if (
+      profile?.entryNamedAfterWorkspace &&
+      !profile.projectEntryPath.includes('{{date}}') &&
+      !this.usesExistingProject()
+    ) {
       parts.push(`Project file: ${profile.projectEntryPath.replaceAll('{{name}}', slug)}`);
     }
     hint.textContent = parts.join(' · ');
@@ -9600,16 +9676,29 @@ const sessionManager = {
   // apply its Agent-behavior default.
   handleWorkspaceTemplateSelected(template) {
     this.closeWorkspaceAgentSetup({ restoreFocus: false, silent: true });
+    // A different blueprint starts from a new project again; a readiness
+    // recheck re-emitting the same blueprint keeps the chosen folder.
+    const blueprintChanged =
+      String(this.workspaceTemplate?.id || '') !== String(template?.id || '') ||
+      !this.existingProjectChoice;
     this.workspaceTemplate = template;
+    if (blueprintChanged) this.resetExistingProjectChoice();
+    else this.syncExistingProjectChoice();
     this.resetGroupRequirementDraft(template);
     this.syncTemplateFolderOverride(template);
     const profile = this.blueprintDetailsProfile(template);
+    // A kept existing project still names the workspace after its file (FR 23);
+    // without this a recheck would clear that autofill like a blueprint name.
+    const keptProjectName =
+      !blueprintChanged && this.usesExistingProject()
+        ? this.existingProjectBaseName(this.existingProjectChoice.review?.entryName)
+        : '';
     // A project file named after the workspace would otherwise be named after
     // the blueprint, and a second create would collide on its slug (FR 15). An
     // empty value clears only a previous autofill, never typed text.
     this.prefillTemplateValue(
       document.getElementById('folderNameInput'),
-      profile.entryNamedAfterWorkspace ? '' : template?.name || '',
+      keptProjectName || (profile.entryNamedAfterWorkspace ? '' : template?.name || ''),
       'autofillName'
     );
     // Every blueprint offers its description as a starting point (FR 13).
@@ -9635,19 +9724,422 @@ const sessionManager = {
   //   a setup wizard, or a setup quest), so a folder override cannot join it.
   // - entryNamedAfterWorkspace: its project file is named after the workspace
   //   (`project_entry.relative_path` contains `{{name}}`).
+  // - supportsExistingProject: it can attach a project folder the user already
+  //   has (`project_connection.supported_modes` lists `existing_project`).
   blueprintDetailsProfile(template) {
     const blank = !template || Boolean(template.blank) || !template.id;
     const projectEntryPath = blank
       ? ''
       : String(template.project_entry?.relative_path || '').trim();
+    const connectionModes = blank ? [] : template.project_connection?.supported_modes;
     return {
       blank,
       bringsOwnSetup:
         !blank && Boolean(template.plugin_owner || template.setup_wizard || template.setup_quest),
       hasAssistantProgram: !blank && Boolean(template.assistant_program),
       entryNamedAfterWorkspace: projectEntryPath.includes('{{name}}'),
-      projectEntryPath
+      projectEntryPath,
+      supportsExistingProject:
+        Array.isArray(connectionModes) && connectionModes.includes('existing_project')
     };
+  },
+
+  // ----- Existing project (attach a folder instead of scaffolding) -----
+
+  // The Details choice between scaffolding a new project and attaching one the
+  // user already has. Only the picker's opaque token and the path it displayed
+  // are kept; the server resolves the token and never trusts a browser path.
+  resetExistingProjectChoice() {
+    this.existingProjectChoice = {
+      mode: 'new_project',
+      selectionToken: '',
+      folderDisplay: '',
+      entryName: '',
+      // The server's inert read of the chosen folder: null before a folder, or
+      // { state: 'checking' | 'ready' | 'choose' | 'error' | 'duplicate', ... }.
+      review: null,
+      reviewGeneration: 0,
+      // Bumped on every reset, so a picker still open for an earlier blueprint
+      // or modal session cannot fill in this one.
+      generation: (this.existingProjectChoice?.generation || 0) + 1
+    };
+    this.clearExistingProjectError();
+    this.syncExistingProjectChoice();
+  },
+
+  // True when Details offers the choice: a Workspace (not import, a Group, or
+  // the guided journey's own project step) from a blueprint that declares it.
+  existingProjectChoiceAvailable() {
+    return (
+      this.isWorkspaceCreator() &&
+      !window.SetupWorkspaceCreator?.isActive?.() &&
+      this.blueprintDetailsProfile(this.workspaceTemplate).supportsExistingProject
+    );
+  },
+
+  usesExistingProject() {
+    return (
+      this.existingProjectChoiceAvailable() &&
+      this.existingProjectChoice?.mode === 'existing_project'
+    );
+  },
+
+  syncExistingProjectChoice() {
+    const fieldset = document.getElementById('workspaceProjectChoice');
+    if (!fieldset) return;
+    const available = this.existingProjectChoiceAvailable();
+    const existing = available && this.existingProjectChoice?.mode === 'existing_project';
+    fieldset.hidden = !available;
+    const newRadio = document.getElementById('workspaceProjectModeNew');
+    const existingRadio = document.getElementById('workspaceProjectModeExisting');
+    if (newRadio) newRadio.checked = !existing;
+    if (existingRadio) existingRadio.checked = existing;
+    const fields = document.getElementById('workspaceExistingProjectFields');
+    if (fields) fields.hidden = !existing;
+    const folder = document.getElementById('workspaceExistingProjectFolder');
+    if (folder) {
+      folder.textContent = existing ? this.existingProjectChoice.folderDisplay || '' : '';
+    }
+    this.renderExistingProjectReview(existing ? this.existingProjectChoice.review : null);
+  },
+
+  // Shows what the server found in the chosen folder: a status line, the
+  // project-file choice when there are several, or the block naming the
+  // workspace that already owns the folder. Errors use the inline error slot.
+  renderExistingProjectReview(review) {
+    const status = document.getElementById('workspaceExistingProjectStatus');
+    const entryField = document.getElementById('workspaceExistingProjectEntryField');
+    const select = document.getElementById('workspaceExistingProjectEntrySelect');
+    const duplicate = document.getElementById('workspaceExistingProjectDuplicate');
+    const duplicateText = document.getElementById('workspaceExistingProjectDuplicateText');
+    const candidates = Array.isArray(review?.candidates) ? review.candidates : [];
+
+    let statusText = '';
+    if (review?.state === 'checking') statusText = 'Checking the project folder…';
+    else if (review?.state === 'ready' && candidates.length <= 1) {
+      statusText = `Project file: ${review.entryName}`;
+    }
+    if (status) {
+      status.textContent = statusText;
+      status.hidden = !statusText;
+    }
+
+    const choosing =
+      candidates.length > 1 && (review?.state === 'choose' || review?.state === 'ready');
+    if (entryField) entryField.hidden = !choosing;
+    if (select && choosing) {
+      const options = [{ value: '', label: 'Choose a project file…' }].concat(
+        candidates.map(name => ({ value: name, label: name }))
+      );
+      const signature = options.map(option => option.value).join(' ');
+      if (select.dataset?.signature !== signature && typeof document.createElement === 'function') {
+        select.replaceChildren(
+          ...options.map(option => {
+            const element = document.createElement('option');
+            element.value = option.value;
+            element.textContent = option.label;
+            return element;
+          })
+        );
+        if (select.dataset) select.dataset.signature = signature;
+      }
+      select.value = review.entryName || '';
+    }
+
+    const isDuplicate = review?.state === 'duplicate';
+    if (duplicate) duplicate.hidden = !isDuplicate;
+    if (duplicateText) duplicateText.textContent = isDuplicate ? review.message : '';
+    if (review?.state === 'error') this.setExistingProjectError(review.message);
+  },
+
+  // Announces a review outcome once through the Details live region, which sits
+  // outside the wizard steps so it is heard.
+  announceExistingProjectReview(message) {
+    const live = document.getElementById('workspaceDetailsLiveRegion');
+    if (!live || !message) return;
+    live.textContent = '';
+    live.textContent = message;
+  },
+
+  // Asks the server what the chosen folder holds for the selected blueprint.
+  // Only the latest request for the current folder and blueprint may render:
+  // an answer for an earlier choice is dropped.
+  async reviewExistingProjectFolder() {
+    const choice = this.existingProjectChoice;
+    const templateID = String(this.workspaceTemplate?.id || '').trim();
+    if (!choice?.selectionToken || !templateID) return;
+    const generation = choice.generation;
+    const reviewGeneration = (choice.reviewGeneration || 0) + 1;
+    choice.reviewGeneration = reviewGeneration;
+    const previous = choice.review;
+    choice.review = {
+      state: 'checking',
+      candidates: previous?.candidates || [],
+      entryName: choice.entryName
+    };
+    this.clearExistingProjectError();
+    this.syncExistingProjectChoice();
+    const stale = () =>
+      this.existingProjectChoice !== choice ||
+      choice.generation !== generation ||
+      choice.reviewGeneration !== reviewGeneration;
+
+    let response;
+    let body = {};
+    try {
+      const request = { template_id: templateID, selection_token: choice.selectionToken };
+      if (choice.entryName) request.entry_name = choice.entryName;
+      response = await fetch('/api/workspaces/project-connection/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request)
+      });
+      body = await response.json().catch(() => ({}));
+    } catch (error) {
+      if (stale()) return;
+      choice.review = {
+        state: 'error',
+        message: 'Ori could not check the project folder. Try again.'
+      };
+      this.syncExistingProjectChoice();
+      return;
+    }
+    if (stale()) return;
+
+    if (!response.ok) {
+      choice.review = {
+        state: 'error',
+        message: String(body.error || 'Ori could not check the project folder.').trim()
+      };
+      this.syncExistingProjectChoice();
+      this.announceExistingProjectReview(choice.review.message);
+      return;
+    }
+    const candidates = Array.isArray(body.entry_candidates) ? body.entry_candidates : [];
+    const review = {
+      candidates,
+      entryName: String(body.entry_name || ''),
+      extensions: Array.isArray(body.entry_extensions) ? body.entry_extensions : [],
+      selectedFolder: String(body.selected_folder || '')
+    };
+    if (body.duplicate?.workspace_id) {
+      Object.assign(review, {
+        state: 'duplicate',
+        duplicate: { ...body.duplicate },
+        message: String(body.duplicate_message || 'Another workspace already uses this folder.')
+      });
+    } else if (review.entryName) {
+      review.state = 'ready';
+      // Create names the reviewed file exactly, so a file added to the folder
+      // afterwards cannot change which project is attached.
+      choice.entryName = review.entryName;
+    } else {
+      review.state = 'choose';
+    }
+    choice.review = review;
+    this.syncExistingProjectChoice();
+    if (review.state === 'ready') this.prefillNameFromExistingProject(review.entryName);
+    if (review.state === 'duplicate') this.announceExistingProjectReview(review.message);
+    else if (review.state === 'choose') {
+      this.announceExistingProjectReview(
+        `This folder has ${candidates.length} project files. Choose which one to use.`
+      );
+    }
+  },
+
+  setExistingProjectEntry(entryName) {
+    const choice = this.existingProjectChoice;
+    if (!choice) return;
+    const next = String(entryName || '');
+    if (choice.entryName === next && choice.review?.state !== 'error') return;
+    choice.entryName = next;
+    this.invalidateGroupRequirementReview();
+    if (!next) {
+      choice.review = { ...(choice.review || {}), state: 'choose', entryName: '' };
+      this.syncExistingProjectChoice();
+      return;
+    }
+    void this.reviewExistingProjectFolder();
+  },
+
+  // Closes the creator and opens the workspace that already owns the folder.
+  openExistingProjectOwner() {
+    const owner = this.existingProjectChoice?.review?.duplicate;
+    const target = String(owner?.slug || owner?.workspace_id || '').trim();
+    if (!target) return;
+    const modalElement = document.getElementById('addFolderModal');
+    const modals = typeof bootstrap === 'undefined' ? window.bootstrap : bootstrap;
+    modals?.Modal?.getInstance?.(modalElement)?.hide?.();
+    this.resetAddWorkspaceModalForm?.();
+    window.location.href = `/workspaces/${encodeURIComponent(target)}`;
+  },
+
+  setExistingProjectMode(mode) {
+    if (!this.existingProjectChoice) this.resetExistingProjectChoice();
+    const next = mode === 'existing_project' ? 'existing_project' : 'new_project';
+    if (this.existingProjectChoice.mode === next) return;
+    this.existingProjectChoice.mode = next;
+    // Opening a project the user already has is rarely wanted right after
+    // attaching it, so existing mode starts unchecked; a new project returns to
+    // the blueprint's default. Either way the user can still change it (FR 29).
+    const openToggle = document.getElementById('projectTemplateOpenAfterCreateToggle');
+    if (openToggle) {
+      openToggle.checked =
+        next === 'new_project' &&
+        Boolean(this.workspaceTemplate?.project_entry?.open_after_create_default);
+    }
+    this.clearExistingProjectError();
+    this.invalidateGroupRequirementReview();
+    this.syncExistingProjectChoice();
+    this.updateWorkspaceNameHint();
+  },
+
+  // A project file's name without its extension: "Bridge Sketch.proj" →
+  // "Bridge Sketch".
+  existingProjectBaseName(entryName) {
+    return String(entryName || '')
+      .replace(/\.[^./\\]+$/, '')
+      .trim();
+  },
+
+  // Names the workspace after the chosen project file (without its extension)
+  // while the name is empty or still an autofill; a typed name is kept (FR 23).
+  prefillNameFromExistingProject(entryName) {
+    const base = this.existingProjectBaseName(entryName);
+    const input = document.getElementById('folderNameInput');
+    if (!base || !input) return;
+    const before = input.value;
+    this.prefillTemplateValue(input, base, 'autofillName');
+    if (input.value === before) return;
+    this.invalidateGroupRequirementReview();
+    this.clearWorkspaceNameError();
+    this.updateWorkspaceNameHint();
+    this.refreshWorkspaceCreateCta();
+  },
+
+  async chooseExistingProjectFolder() {
+    if (!this.existingProjectChoice) this.resetExistingProjectChoice();
+    const choice = this.existingProjectChoice;
+    const generation = choice.generation;
+    const button = document.getElementById('workspaceExistingProjectChooseBtn');
+    if (button) button.disabled = true;
+    this.clearExistingProjectError();
+    try {
+      const response = await fetch('/api/folder-picker/select-path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 'Choose the project folder' })
+      });
+      const result = await response.json().catch(() => ({}));
+      // The blueprint or modal changed while the native dialog was open.
+      if (this.existingProjectChoice?.generation !== generation) return;
+      if (!response.ok || !result.success) {
+        this.setExistingProjectError(result.error || 'The folder picker could not be opened.');
+        return;
+      }
+      if (!result.selected) return;
+      if (!result.selection_token) {
+        this.setExistingProjectError('Ori could not confirm that folder. Choose it again.');
+        return;
+      }
+      choice.selectionToken = String(result.selection_token);
+      choice.folderDisplay = String(result.path || '');
+      choice.entryName = '';
+      choice.review = null;
+      this.clearExistingProjectError();
+      this.invalidateGroupRequirementReview();
+      this.syncExistingProjectChoice();
+      await this.reviewExistingProjectFolder();
+    } catch (error) {
+      if (this.existingProjectChoice?.generation !== generation) return;
+      this.setExistingProjectError('The folder picker could not be opened.');
+    } finally {
+      if (button) button.disabled = false;
+    }
+  },
+
+  // An actionable message when Details cannot continue in existing mode, or ''.
+  existingProjectProblem() {
+    if (!this.usesExistingProject()) return '';
+    const choice = this.existingProjectChoice;
+    if (!choice.selectionToken) return 'Choose the project folder to use an existing project.';
+    const review = choice.review;
+    switch (review?.state) {
+      case 'ready':
+        return '';
+      case 'checking':
+        return 'Wait while Ori checks the project folder.';
+      case 'choose':
+        return 'Choose which project file to use.';
+      case 'error':
+      case 'duplicate':
+        return review.message;
+      default:
+        return 'Ori has not checked the project folder yet. Choose the project folder again.';
+    }
+  },
+
+  // The server refused an attach at create (or its placement review): return
+  // to Details with the same block or message the folder review would show.
+  showExistingProjectRefusal(body) {
+    const choice = this.existingProjectChoice;
+    const message = String(body?.error || 'Choose the project folder again.').trim();
+    if (choice) {
+      choice.review = body?.duplicate?.workspace_id
+        ? {
+            ...(choice.review || {}),
+            state: 'duplicate',
+            duplicate: { ...body.duplicate },
+            message
+          }
+        : { ...(choice.review || {}), state: 'error', message };
+    }
+    this.goToWizardStep(2);
+    this.syncExistingProjectChoice();
+    this.announceExistingProjectReview(message);
+    this.signalExistingProjectProblem(message);
+  },
+
+  // Refuses leaving Details (or creating) in existing mode: the message goes
+  // where the fix is, and focus moves to the control that fixes it.
+  signalExistingProjectProblem(problem) {
+    const review = this.existingProjectChoice?.review;
+    if (review?.state === 'duplicate') {
+      document.getElementById('workspaceExistingProjectOpenExisting')?.focus();
+      return;
+    }
+    if (review?.state === 'choose') {
+      this.setExistingProjectError(problem);
+      document.getElementById('workspaceExistingProjectEntrySelect')?.focus();
+      return;
+    }
+    this.setExistingProjectError(problem);
+    document.getElementById('workspaceExistingProjectChooseBtn')?.focus();
+  },
+
+  // The create request's project_connection, or null when a new project is
+  // scaffolded. Never carries a path.
+  existingProjectPayload() {
+    if (!this.usesExistingProject() || !this.existingProjectChoice.selectionToken) return null;
+    const payload = {
+      mode_id: 'existing_project',
+      selection_token: this.existingProjectChoice.selectionToken
+    };
+    if (this.existingProjectChoice.entryName) {
+      payload.entry_name = this.existingProjectChoice.entryName;
+    }
+    return payload;
+  },
+
+  setExistingProjectError(message) {
+    const error = document.getElementById('workspaceExistingProjectError');
+    if (!error) return;
+    error.textContent = message;
+    error.hidden = !message;
+  },
+
+  clearExistingProjectError() {
+    this.setExistingProjectError('');
   },
 
   // "Use any folder as a template" cannot be combined with a blueprint that
@@ -9727,6 +10219,15 @@ const sessionManager = {
         this.refreshWizardChrome();
         this.setWorkspaceNameError(problem);
         document.getElementById('folderNameInput')?.focus();
+        return;
+      }
+      // An existing project needs its folder before Team or Review can
+      // describe a workspace that could be created.
+      const projectProblem = this.existingProjectProblem();
+      if (projectProblem) {
+        this.wizardStep = 2;
+        this.refreshWizardChrome();
+        this.signalExistingProjectProblem(projectProblem);
         return;
       }
     }
@@ -9967,6 +10468,13 @@ const sessionManager = {
       nameInput?.focus();
       return;
     }
+    const existingProjectProblem =
+      !importEnabled && !ordinaryGroup ? this.existingProjectProblem() : '';
+    if (existingProjectProblem) {
+      this.goToWizardStep(2);
+      this.signalExistingProjectProblem(existingProjectProblem);
+      return;
+    }
     const guided =
       this.workspaceCreatorContext?.mode === 'guided' ? this.workspaceCreatorContext.guided : null;
     if (guided?.submit) {
@@ -10094,6 +10602,10 @@ const sessionManager = {
           // defaults to the workspace name server-side.
           const templateFields = window.ProjectTemplateCard.getPayloadFields();
           Object.assign(payload, templateFields);
+          // An existing project replaces the scaffold: the server attaches the
+          // folder behind the picker's token instead of creating project files.
+          const projectConnection = this.existingProjectPayload();
+          if (projectConnection) payload.project_connection = projectConnection;
           // Blank blueprint (no template_id/path, no ad-hoc folder override):
           // tell the backend to seed the synthetic single-agent roster.
           if (
@@ -10366,6 +10878,14 @@ const sessionManager = {
             `${failureName || 'Agent'} creation failed. Nothing was created; setup was preserved for retry.`
           );
           document.getElementById(`team-agent-retry-${failureIndex}`)?.focus();
+          return;
+        }
+
+        if (!importEnabled && result.conflict?.type === 'project_connection') {
+          // The folder, its project file, or the token is the problem, so the
+          // fix is on Details, next to the folder choice. Nothing was created.
+          if (this.groupRequirementDraft) this.groupRequirementDraft.review = null;
+          this.showExistingProjectRefusal(result);
           return;
         }
 
@@ -10779,6 +11299,10 @@ const sessionManager = {
         }
       }
     } catch (error) {
+      if (error?.projectConnection) {
+        this.showExistingProjectRefusal(error.projectConnection);
+        return;
+      }
       console.error('Failed to create folder:', error);
       const message =
         error && error.message
