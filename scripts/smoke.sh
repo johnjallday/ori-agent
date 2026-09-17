@@ -2069,8 +2069,60 @@ print(any(t.get("id") == "downloads-janitor" for t in d.get("templates", [])))')
   echo "PASS janitor upgrade verify"
 }
 
+# ---------------------------------------------------------------------------
+# Task-run show (tasks/prd-task-run-show.md). Start the server with
+#   ORI_DEV_SCRIPTED_TASK_RUNS=1 ./scripts/demo-server.sh 8931
+# so every run plays the scripted event sequence instead of calling a model.
+# ---------------------------------------------------------------------------
+
+# smoke_show_seed completes onboarding FIRST (workspaces seeded before it vanish
+# on restart), then creates three workspaces that each have a Commander.
+smoke_show_seed() {
+  curl -s -o /dev/null -w "%{http_code} onboarding complete\n" \
+    -X POST "$BASE_URL/api/onboarding/complete" -H 'Content-Type: application/json' -d '{}'
+  seed_agent "Theo" "researcher" false '[]' "Looks things up"
+  seed_agent "Ada" "synthesizer" false '[]' "Writes things down"
+  seed_agent "Mira" "orchestrator" false '[]' "Keeps launches moving"
+  local research launch notes
+  research="$(seed_workspace "Research Lab" "Theo")"
+  launch="$(seed_workspace "Product Launch" "Mira")"
+  notes="$(seed_workspace "Field Notes" "Ada")"
+  echo "research=$research"
+  echo "launch=$launch"
+  echo "notes=$notes"
+}
+
+# smoke_show_run creates a task (no assignee: the entry agent is the default)
+# and starts it, the same two calls the New Quest composer makes. Put [fail]
+# in the description to play the failure script.
+smoke_show_run() {
+  local workspace_id="${3:-}" description="${4:-Look into the launch checklist}" body task_id
+  [[ -n "$workspace_id" ]] || fail "usage: showrun <base-url> <workspace-id> [description]"
+  body=$(python3 -c 'import json, sys
+print(json.dumps({"workspace_id": sys.argv[1], "description": sys.argv[2], "priority": 2}))' \
+    "$workspace_id" "$description")
+  task_id="$(curl -s -X POST "$BASE_URL/api/orchestration/tasks" \
+    -H 'Content-Type: application/json' -d "$body" \
+    | python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d.get("task",{}).get("id",""))')"
+  [[ -n "$task_id" ]] || fail "task was not created"
+  curl -s -o /dev/null -w "%{http_code} start $task_id\n" \
+    -X POST "$BASE_URL/api/orchestration/tasks/execute" \
+    -H 'Content-Type: application/json' -d "{\"task_id\":\"$task_id\"}"
+  echo "task_id=$task_id"
+}
+
+# smoke_show_stream prints the activity stream for a few seconds, so a run's
+# events and the absence of arguments/results can be read directly.
+smoke_show_stream() {
+  local seconds="${3:-15}"
+  curl -s -N --max-time "$seconds" "$BASE_URL/api/workspace-map/activity/stream" || true
+}
+
 case "${1:-}" in
 serve) serve_isolated "${2:-8931}" "${3:-default}" ;;
+showseed) smoke_show_seed ;;
+showrun) smoke_show_run "$@" ;;
+showstream) smoke_show_stream "$@" ;;
 starter) smoke_starter "$@" ;;
 agent-type-api) smoke_agent_type_api ;;
 agent-type-strip) smoke_agent_type_strip "$@" ;;
@@ -2099,6 +2151,9 @@ janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
 *)
   echo "usage:" >&2
   echo "  $0 serve [port] [sandbox-name]           # run an ISOLATED demo server (Ctrl-C to stop)" >&2
+  echo "  $0 showseed <base-url>                   # task-run show: onboarding + 3 workspaces with Commanders" >&2
+  echo "  $0 showrun <base-url> <ws> [description] # task-run show: create and start a task ([fail] fails it)" >&2
+  echo "  $0 showstream <base-url> [seconds]       # task-run show: print the activity stream" >&2
   echo "  $0 starter <base-url> <stage> [flags]    # starter missions: wait for the server, run a demo stage" >&2
   echo "  $0 agent-type-api <base-url>             # retired agent type: API accepts and never echoes it" >&2
   echo "  $0 agent-type-strip [port]               # retired agent type: boot strips it from a seeded sandbox" >&2

@@ -10140,3 +10140,669 @@ test('on Home an agent anchor occupies nothing: a building can be dropped on it'
   assert.equal(patches.length, 1);
   assert.doesNotMatch(live.textContent, /taken/);
 });
+
+// ---------------------------------------------------------------------------
+// The task-run show: live activity on the map (tasks/prd-task-run-show.md §4.3)
+// ---------------------------------------------------------------------------
+
+const bubbleLinesSource = readFileSync(
+  new URL('./activity-bubble-lines.js', import.meta.url),
+  'utf8'
+);
+
+// A small element model, just rich enough for the activity layer: it builds
+// its overlay with createElement/appendChild and patches text and classes, so
+// assertions read the real structure it produced rather than a string.
+class ActivityNode {
+  constructor(tag = 'span', { className = '', attrs = {}, text } = {}) {
+    this.tagName = tag;
+    this.className = className;
+    this.attrs = { ...attrs };
+    this.children = [];
+    this.parentNode = null;
+    this.innerHTML = '';
+    this._text = text === undefined ? null : text;
+    this.listeners = {};
+  }
+  get classList() {
+    const node = this;
+    const list = () => node.className.split(/\s+/).filter(Boolean);
+    return {
+      contains: c => list().includes(c),
+      add: c => {
+        if (!list().includes(c)) node.className = [...list(), c].join(' ');
+      },
+      remove: c => {
+        node.className = list()
+          .filter(x => x !== c)
+          .join(' ');
+      },
+      toggle: (c, on) => (on ? node.classList.add(c) : node.classList.remove(c))
+    };
+  }
+  get lastChild() {
+    return this.children.length ? this.children[this.children.length - 1] : null;
+  }
+  get textContent() {
+    if (this._text !== null) return this._text;
+    return this.children.map(child => child.textContent).join('');
+  }
+  set textContent(value) {
+    this._text = String(value);
+    this.children = [];
+  }
+  setAttribute(name, value) {
+    this.attrs[name] = String(value);
+  }
+  getAttribute(name) {
+    return name in this.attrs ? this.attrs[name] : null;
+  }
+  hasAttribute(name) {
+    return name in this.attrs;
+  }
+  appendChild(child) {
+    child.parentNode = this;
+    this.children.push(child);
+    return child;
+  }
+  removeChild(child) {
+    this.children = this.children.filter(entry => entry !== child);
+    child.parentNode = null;
+    return child;
+  }
+  replaceChild(fresh, old) {
+    const index = this.children.indexOf(old);
+    fresh.parentNode = this;
+    this.children[index] = fresh;
+    old.parentNode = null;
+    return old;
+  }
+  addEventListener(type, fn) {
+    (this.listeners[type] = this.listeners[type] || []).push(fn);
+  }
+  matches(selector) {
+    const cls = selector.match(/^\.([\w-]+)/);
+    if (cls && !this.classList.contains(cls[1])) return false;
+    const attr = selector.match(/\[([\w-]+)(?:="([^"]*)")?\]/);
+    if (attr) {
+      if (!this.hasAttribute(attr[1])) return false;
+      if (attr[2] !== undefined && this.getAttribute(attr[1]) !== attr[2]) return false;
+    }
+    return !!(cls || attr);
+  }
+  querySelector(selector) {
+    for (const child of this.children) {
+      if (child.matches(selector)) return child;
+      const deeper = child.querySelector(selector);
+      if (deeper) return deeper;
+    }
+    return null;
+  }
+  closest(selector) {
+    let node = this;
+    while (node) {
+      if (node.matches && node.matches(selector)) return node;
+      node = node.parentNode;
+    }
+    return null;
+  }
+}
+
+function activityTile(id) {
+  const tile = new ActivityNode('button', {
+    className: 'ws-map-tile',
+    attrs: { 'data-ws-id': id }
+  });
+  const flag = tile.appendChild(new ActivityNode('span', { className: 'ws-map-tile-flag' }));
+  flag.appendChild(new ActivityNode('span', { className: 'ws-map-led' }));
+  flag.appendChild(new ActivityNode('#text', { text: 'Idle' }));
+  return tile;
+}
+
+function makeFakeActivityFeed() {
+  const listeners = [];
+  let released = 0;
+  return {
+    subscribe(listener) {
+      listeners.push(listener);
+      return () => {
+        released += 1;
+        listeners.splice(listeners.indexOf(listener), 1);
+      };
+    },
+    released: () => released,
+    subscribers: () => listeners.length,
+    connect: () => listeners.slice().forEach(l => l.onConnection(true)),
+    disconnect: () => listeners.slice().forEach(l => l.onConnection(false)),
+    change: (id, view) => listeners.slice().forEach(l => l.onChange(id, view))
+  };
+}
+
+const runningActivity = (overrides = {}) => ({
+  activity_id: 'task:ws-1:t1',
+  kind: 'task',
+  workspace_id: 'ws-1',
+  agent_name: 'Theo',
+  task_id: 't1',
+  blocked: false,
+  step: null,
+  at: '2026-09-16T10:00:00Z',
+  ...overrides
+});
+
+function activityView(workspaceId, running, lastEvent = null) {
+  return {
+    workspaceId,
+    running,
+    count: running.length,
+    latest: running[0] || null,
+    blocked: running.some(a => a.blocked),
+    parcels: [],
+    lastEvent
+  };
+}
+
+// Mount the cockpit map over the camera harness, with the activity layer's
+// collaborators faked: the shared feed, the timers, and the clock.
+async function activityHarness({
+  workspaces = [
+    { id: 'ws-1', name: 'Alpha', folder_slug: 'alpha' },
+    { id: 'ws-2', name: 'Beta', folder_slug: 'beta' }
+  ],
+  layout = {
+    schema_version: 1,
+    positions: { 'ws-1': { x: 100, y: 100 }, 'ws-2': { x: 400, y: 100 } }
+  },
+  tiles = ['ws-1', 'ws-2'],
+  districts = [],
+  units = [],
+  state = {}
+} = {}) {
+  const feed = makeFakeActivityFeed();
+  let now = 1000000;
+  const timers = [];
+  const window = {
+    addEventListener() {},
+    removeEventListener() {},
+    innerWidth: 1000,
+    innerHeight: 600,
+    location: { href: '', search: '' },
+    OriMapActivityFeed: feed
+  };
+  const document = {
+    getElementById: () => null,
+    addEventListener() {},
+    removeEventListener() {},
+    createElement: tag => new ActivityNode(tag)
+  };
+  const sandbox = {
+    window,
+    document,
+    setTimeout: (fn, delay) => {
+      const timer = { fn, at: now + delay, done: false };
+      timers.push(timer);
+      return timer;
+    },
+    clearTimeout: timer => {
+      if (timer) timer.done = true;
+    },
+    fetch: () => jsonResponse(layout),
+    URLSearchParams,
+    console: { error() {}, warn() {}, log() {} }
+  };
+  vm.runInNewContext(bubbleLinesSource, sandbox, { filename: 'activity-bubble-lines.js' });
+  vm.runInNewContext(source, sandbox, { filename: 'workspace-map.js' });
+  const map = window.OriWorkspaceMap;
+  map._setActivityClockForTest(() => now);
+
+  const harness = createCameraHarness({ tiles, districts, units });
+  const activityTiles = Object.fromEntries(tiles.map(id => [id, activityTile(id)]));
+  const activityDistricts = Object.fromEntries(
+    districts.map(id => [
+      id,
+      new ActivityNode('div', { className: 'ws-map-district', attrs: { 'data-group-id': id } })
+    ])
+  );
+  const activityUnits = Object.fromEntries(
+    units.map(id => [
+      id,
+      new ActivityNode('button', { className: 'ws-map-unit', attrs: { 'data-unit-id': id } })
+    ])
+  );
+  const baseQuery = harness.container.querySelector;
+  harness.container.querySelector = sel => {
+    const tile = sel.match(/^\.ws-map-tile\[data-ws-id="([^"]+)"\]$/);
+    if (tile) return activityTiles[tile[1]] || null;
+    const district = sel.match(/^\.ws-map-district\[data-group-id="([^"]+)"\]$/);
+    if (district) return activityDistricts[district[1]] || null;
+    const unit = sel.match(/^\.ws-map-unit\[data-unit-id="([^"]+)"\]$/);
+    if (unit) return activityUnits[unit[1]] || null;
+    return baseQuery(sel);
+  };
+
+  const mountState = {
+    workspaces,
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true,
+    ...state
+  };
+  map.mount(harness.container, mountState);
+  await flush();
+
+  return {
+    map,
+    harness,
+    feed,
+    window,
+    tile: id => activityTiles[id],
+    district: id => activityDistricts[id],
+    unit: id => activityUnits[id],
+    live: () => harness.control('[data-map-live]').textContent,
+    remount: () => map.mount(harness.container, mountState),
+    advance(ms) {
+      now += ms;
+      timers
+        .filter(timer => !timer.done && timer.at <= now)
+        .sort((a, b) => a.at - b.at)
+        .forEach(timer => {
+          timer.done = true;
+          timer.fn();
+        });
+    }
+  };
+}
+
+const overlayOf = node => node.querySelector('[data-map-activity]');
+const bubbleLine = node => {
+  const line = node.querySelector('.ws-map-activity-line');
+  return line ? line.textContent : null;
+};
+const flagText = tile => tile.querySelector('.ws-map-tile-flag').lastChild.textContent;
+const ledWorking = tile => tile.querySelector('.ws-map-led').classList.contains('is-working');
+
+test('activity: a started run lights the tile, and its finish darkens it and says Done', async () => {
+  const h = await activityHarness();
+  assert.equal(h.feed.subscribers(), 1, 'the map subscribed to the shared feed on mount');
+  h.feed.connect();
+  const tile = h.tile('ws-1');
+  assert.equal(overlayOf(tile), null, 'an idle tile carries no activity markup');
+
+  const started = {
+    phase: 'started',
+    kind: 'task',
+    agent_name: 'Theo',
+    task_id: 't1',
+    workspace_id: 'ws-1'
+  };
+  h.feed.change('ws-1', activityView('ws-1', [runningActivity()], started));
+  assert.ok(overlayOf(tile), 'lit');
+  assert.ok(overlayOf(tile).classList.contains('is-lit'));
+  assert.equal(overlayOf(tile).getAttribute('aria-hidden'), 'true');
+  assert.equal(bubbleLine(tile), 'On it.');
+  assert.equal(flagText(tile), 'Working');
+  assert.equal(ledWorking(tile), true);
+  assert.match(tile.getAttribute('aria-label'), /Alpha, 0 agents · 0 tasks, Working, Theo/);
+  assert.equal(overlayOf(h.tile('ws-2')), null, 'the neighbour stays dark');
+
+  h.advance(3000);
+  const finished = { ...started, phase: 'finished', outcome: 'succeeded' };
+  h.feed.change('ws-1', activityView('ws-1', [], finished));
+  assert.equal(overlayOf(tile).classList.contains('is-lit'), false, 'the lamp goes off at once');
+  assert.equal(bubbleLine(tile), 'Done.');
+  assert.equal(flagText(tile), 'Idle');
+
+  h.advance(2000);
+  assert.equal(overlayOf(tile), null, 'the bubble leaves and the tile is back to idle markup');
+  assert.equal(tile.classList.contains('has-activity'), false);
+});
+
+test('activity: a line stays 2.5s and only the latest waiting line is shown next', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  const tile = h.tile('ws-1');
+  const event = extra => ({
+    kind: 'task',
+    agent_name: 'Theo',
+    task_id: 't1',
+    workspace_id: 'ws-1',
+    ...extra
+  });
+
+  h.feed.change('ws-1', activityView('ws-1', [runningActivity()], event({ phase: 'started' })));
+  h.advance(500);
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [runningActivity()], event({ phase: 'step', step: { type: 'thinking' } }))
+  );
+  h.advance(500);
+  h.feed.change(
+    'ws-1',
+    activityView(
+      'ws-1',
+      [runningActivity()],
+      event({ phase: 'step', step: { type: 'tool_call', tool_name: 'web_search' } })
+    )
+  );
+  assert.equal(bubbleLine(tile), 'On it.', 'still inside the first line’s dwell');
+
+  h.advance(1499);
+  assert.equal(bubbleLine(tile), 'On it.');
+  h.advance(1);
+  assert.equal(bubbleLine(tile), 'Looking it up…', 'latest wins; Thinking was never queued');
+});
+
+test('activity: the bubble hides below the zoom threshold; the lamp does not', async () => {
+  const h = await activityHarness({
+    layout: {
+      schema_version: 1,
+      positions: { 'ws-1': { x: 100, y: 100 }, 'ws-2': { x: 400, y: 100 } },
+      viewport: { center_x: 300, center_y: 200, zoom: 0.5 }
+    }
+  });
+  assert.equal(h.harness.classes.has('is-activity-far'), true);
+  assert.equal(h.harness.styleProps['--ws-map-zoom'], '0.5');
+  assert.ok(h.map.activity.timings.bubbleMinZoom === 0.6);
+
+  const near = await activityHarness({
+    layout: {
+      schema_version: 1,
+      positions: { 'ws-1': { x: 100, y: 100 }, 'ws-2': { x: 400, y: 100 } },
+      viewport: { center_x: 300, center_y: 200, zoom: 0.8 }
+    }
+  });
+  assert.equal(near.harness.classes.has('is-activity-far'), false);
+  assert.match(
+    mapCSS,
+    /\.ws-map-canvas\.is-activity-far \.ws-map-activity-bubble\s*\{[^}]*display:\s*none/
+  );
+});
+
+test('activity: the text flag follows the feed while connected and falls back to the listing without it', async () => {
+  const h = await activityHarness({
+    workspaces: [
+      { id: 'ws-1', name: 'Alpha', folder_slug: 'alpha', active: true },
+      { id: 'ws-2', name: 'Beta', folder_slug: 'beta' }
+    ]
+  });
+  const tile = h.tile('ws-1');
+  // Before any feed: nothing is patched, the listing's own render stands.
+  assert.equal(flagText(tile), 'Idle', 'the fake tile starts at its stub text');
+
+  h.feed.connect();
+  assert.equal(flagText(tile), 'Idle', 'connected and nothing running: the feed says Idle');
+  assert.match(tile.getAttribute('aria-label'), /, Idle\./);
+
+  h.feed.disconnect();
+  assert.equal(flagText(tile), 'Working', 'no feed: the listing’s active flag is used again');
+  assert.equal(ledWorking(tile), true);
+  assert.equal(overlayOf(tile), null, 'and nothing is lit');
+  assert.equal(h.map.activity.isConnected(), false);
+});
+
+test('activity: a dropped feed puts out a lit building at once', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  h.feed.change('ws-1', activityView('ws-1', [runningActivity()], null));
+  assert.ok(overlayOf(h.tile('ws-1')));
+  assert.equal(
+    bubbleLine(h.tile('ws-1')),
+    'On it.',
+    'a snapshot shows the running step straight away'
+  );
+
+  h.feed.disconnect();
+  assert.equal(overlayOf(h.tile('ws-1')), null);
+});
+
+test('activity: a workspace inside a collapsed district lights that district', async () => {
+  const workspaces = [
+    { id: 'grp', kind: 'group', name: 'Studio', folder_slug: 'studio' },
+    { id: 'ws-1', name: 'Mixing', parent_id: 'grp', folder_slug: 'mixing' },
+    { id: 'ws-2', name: 'Loose', folder_slug: 'loose' }
+  ];
+  const h = await activityHarness({
+    workspaces,
+    layout: {
+      schema_version: 1,
+      positions: { 'ws-1': { x: 100, y: 100 }, 'ws-2': { x: 800, y: 100 } },
+      groups: { grp: { collapsed: true } }
+    },
+    districts: ['grp']
+  });
+  assert.deepEqual(
+    { ...h.map.activity.targetFor('ws-1') },
+    { key: 'group:grp', kind: 'district', id: 'grp' }
+  );
+
+  h.feed.connect();
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [runningActivity()], {
+      phase: 'started',
+      kind: 'task',
+      agent_name: 'Theo',
+      task_id: 't1',
+      workspace_id: 'ws-1'
+    })
+  );
+  const district = h.district('grp');
+  assert.ok(overlayOf(district), 'the collapsed district stands in for its hidden member');
+  assert.ok(overlayOf(district).classList.contains('is-lit'));
+  assert.equal(district.querySelector('.ws-map-activity-flag').textContent, 'Working');
+  assert.equal(h.live(), 'Mixing started working', 'the announcement still names the workspace');
+});
+
+test('activity: several runs in one workspace show the newest step and a +N chip', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  const running = [
+    runningActivity({
+      activity_id: 'task:ws-1:b',
+      task_id: 'b',
+      agent_name: 'Ada',
+      at: '2026-09-16T10:00:05Z'
+    }),
+    runningActivity({ activity_id: 'task:ws-1:a', task_id: 'a', at: '2026-09-16T10:00:01Z' })
+  ];
+  h.feed.change('ws-1', activityView('ws-1', running, null));
+  const tile = h.tile('ws-1');
+  assert.equal(tile.querySelector('.ws-map-activity-more').textContent, '+1');
+  assert.match(tile.getAttribute('aria-label'), /Working, Ada and 1 more/);
+});
+
+test('activity: patching in place never re-renders the map, so an open menu stays open', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+
+  const { event } = rightClick(tileTarget('ws-1'));
+  h.harness.fire('contextmenu', event);
+  assert.equal(h.harness.menu.isOpen(), true);
+
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [runningActivity()], {
+      phase: 'started',
+      kind: 'task',
+      agent_name: 'Theo',
+      task_id: 't1',
+      workspace_id: 'ws-1'
+    })
+  );
+  // Every mount closes an open menu first, so a menu that is still open is
+  // proof the update patched the tile rather than re-rendering the map.
+  assert.equal(h.harness.menu.isOpen(), true, 'the menu survives the activity update');
+  assert.ok(overlayOf(h.tile('ws-1')));
+});
+
+test('activity: a re-mount paints running work back onto the rebuilt tiles', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  h.feed.change('ws-1', activityView('ws-1', [runningActivity()], null));
+  const tile = h.tile('ws-1');
+  // A real re-mount rebuilds the tile from the listing, without the overlay.
+  tile.children = tile.children.filter(child => !child.hasAttribute('data-map-activity'));
+  h.remount();
+  assert.ok(overlayOf(tile), 'lit again after the redraw');
+  assert.equal(h.feed.subscribers(), 1, 'a re-mount does not subscribe twice');
+});
+
+test('activity: announcements are polite and at most one per workspace per 10s', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  const event = extra => ({
+    kind: 'task',
+    agent_name: 'Theo',
+    task_id: 't1',
+    workspace_id: 'ws-1',
+    ...extra
+  });
+
+  h.feed.change('ws-1', activityView('ws-1', [runningActivity()], event({ phase: 'started' })));
+  assert.equal(h.live(), 'Alpha started working');
+
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [runningActivity()], event({ phase: 'step', step: { type: 'thinking' } }))
+  );
+  assert.equal(h.live(), 'Alpha started working', 'steps are never announced');
+
+  h.advance(4000);
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [runningActivity({ blocked: true })], event({ phase: 'blocked' }))
+  );
+  assert.equal(h.live(), 'Alpha started working', 'throttled inside ten seconds');
+
+  h.feed.change(
+    'ws-2',
+    activityView(
+      'ws-2',
+      [runningActivity({ workspace_id: 'ws-2', activity_id: 'task:ws-2:t9' })],
+      event({ phase: 'started', workspace_id: 'ws-2' })
+    )
+  );
+  assert.equal(h.live(), 'Beta started working', 'the throttle is per workspace');
+
+  h.advance(6000);
+  h.feed.change('ws-1', activityView('ws-1', [], event({ phase: 'finished', outcome: 'failed' })));
+  assert.equal(h.live(), 'A run in Alpha did not finish');
+});
+
+test('activity: a blocked bubble is clay, stays up, and opens the task', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [runningActivity({ blocked: true })], {
+      phase: 'blocked',
+      kind: 'task',
+      agent_name: 'Theo',
+      task_id: 't1',
+      workspace_id: 'ws-1'
+    })
+  );
+  const tile = h.tile('ws-1');
+  const bubble = tile.querySelector('[data-activity-bubble]');
+  assert.equal(bubbleLine(tile), 'I need your input.');
+  assert.ok(bubble.classList.contains('is-blocked'));
+  assert.equal(bubble.getAttribute('data-activity-open-task'), 't1');
+  h.advance(60000);
+  assert.equal(bubbleLine(tile), 'I need your input.', 'it stays until resumed or finished');
+
+  // Clicking it goes to the page where that task asks its question, and never
+  // selects the building underneath.
+  let stopped = false;
+  h.harness.tile('ws-1').fire('click', {
+    target: bubble.querySelector('.ws-map-activity-line'),
+    preventDefault() {},
+    stopPropagation() {
+      stopped = true;
+    }
+  });
+  assert.equal(h.window.location.href, '/workspaces/alpha?blocked_task=t1');
+  assert.equal(stopped, true);
+  assert.equal(h.map.getSelectedId(), '');
+});
+
+test('activity: a run that went silent leaves without claiming a result', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  const event = extra => ({
+    kind: 'task',
+    agent_name: 'Theo',
+    task_id: 't1',
+    workspace_id: 'ws-1',
+    ...extra
+  });
+  h.feed.change('ws-1', activityView('ws-1', [runningActivity()], event({ phase: 'started' })));
+  h.feed.change('ws-1', activityView('ws-1', [], event({ phase: 'finished', outcome: '' })));
+  assert.equal(overlayOf(h.tile('ws-1')), null);
+});
+
+test('activity: unmount releases the shared feed', async () => {
+  const h = await activityHarness();
+  h.map.unmount(h.harness.container);
+  assert.equal(h.feed.released(), 1);
+  assert.equal(h.feed.subscribers(), 0);
+});
+
+test('activity: a group map lights the unit of the agent doing the work', async () => {
+  const h = await activityHarness({
+    workspaces: SCOPED_WORLD,
+    layout: { schema_version: 1, positions: {} },
+    tiles: ['m1', 'deep'],
+    units: ['agent:g:boss', 'agent:g:scout'],
+    state: {
+      scopeGroupId: 'g',
+      units: [
+        { id: 'agent:g:boss', name: 'Boss', commander: true, status: 'Idle' },
+        { id: 'agent:g:scout', name: 'Scout', status: 'Idle' }
+      ]
+    }
+  });
+  h.feed.connect();
+  // The group's own workspace has no building on its own map; its Commander
+  // is what shows the work.
+  h.feed.change(
+    'g',
+    activityView(
+      'g',
+      [runningActivity({ workspace_id: 'g', agent_name: 'Boss', activity_id: 'task:g:t1' })],
+      {
+        phase: 'started',
+        kind: 'task',
+        agent_name: 'Boss',
+        task_id: 't1',
+        workspace_id: 'g'
+      }
+    )
+  );
+  assert.ok(overlayOf(h.unit('agent:g:boss')), 'the Commander is lit');
+  assert.equal(bubbleLine(h.unit('agent:g:boss')), 'On it.');
+  assert.equal(overlayOf(h.unit('agent:g:scout')), null, 'the other agent is not');
+
+  // Work outside the group never shows on the group's map.
+  h.feed.change(
+    'loose',
+    activityView(
+      'loose',
+      [
+        runningActivity({
+          workspace_id: 'loose',
+          agent_name: 'Scout',
+          activity_id: 'task:loose:t2'
+        })
+      ],
+      {
+        phase: 'started',
+        kind: 'task',
+        agent_name: 'Scout',
+        task_id: 't2',
+        workspace_id: 'loose'
+      }
+    )
+  );
+  assert.equal(overlayOf(h.unit('agent:g:scout')), null);
+  assert.notEqual(h.live(), 'Loose started working');
+});

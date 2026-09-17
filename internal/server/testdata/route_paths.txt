@@ -236,6 +236,8 @@
 /api/workflows
 /api/workflows/x
 /api/workflows/x/check-agents
+/api/workspace-map/activity
+/api/workspace-map/activity/stream
 /api/workspace-map/layout
 /api/workspaces
 /api/workspaces/import

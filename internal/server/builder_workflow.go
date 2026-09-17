@@ -473,8 +473,32 @@ func (b *ServerBuilder) initializeEventSystem() {
 	}
 }
 
+// directTaskRunner is what actually runs a task's work: the model-backed LLM
+// task handler, or — only when the dev-only ORI_DEV_SCRIPTED_TASK_RUNS=1 is set
+// — the scripted handler that publishes a fixed sequence of real task events
+// and calls no model (tasks/prd-task-run-show.md §7). Every caller that would
+// hand b.taskHandler to an execution path goes through here, so the manual RUN
+// endpoint, the executor and the run bridge all play the same script.
+func (b *ServerBuilder) directTaskRunner() workspace.TaskHandler {
+	if b.scriptedTaskHandler != nil {
+		return b.scriptedTaskHandler
+	}
+	return b.taskHandler
+}
+
+// installScriptedTaskHandler swaps in the scripted handler when the dev flag is
+// set, and says so loudly: a server in this mode never calls a model.
+func (b *ServerBuilder) installScriptedTaskHandler() {
+	if !workspace.ScriptedTaskRunsEnabled() {
+		return
+	}
+	b.scriptedTaskHandler = workspace.NewScriptedTaskHandler(b.eventBus)
+	logger.Warn("⚠️  DEVELOPMENT ONLY: "+workspace.ScriptedTaskRunsEnv+"=1 — every task run plays a fixed script and calls NO model. Never set this outside a demo.", logger.Fields{})
+}
+
 // initializeTaskExecution creates task handler, executor, step executor, and scheduler.
 func (b *ServerBuilder) initializeTaskExecution() {
+	b.installScriptedTaskHandler()
 	b.taskHandler = workspace.NewLLMTaskHandler(b.st, b.llmFactory, b.workspaceStore)
 	b.taskHandler.SetEventBus(b.eventBus)
 	b.taskHandler.SetMCPRegistry(b.mcpRegistry)
@@ -531,9 +555,10 @@ func (b *ServerBuilder) initializeTaskExecution() {
 		b.taskHandler.SetRuntimeTaskToolFactory(fn)
 	}
 
-	taskExecutionHandler := workspace.TaskHandler(b.taskHandler)
+	taskRunner := b.directTaskRunner()
+	taskExecutionHandler := taskRunner
 	if b.workspaceRunExecutors != nil && b.workspaceRunStore != nil && b.workspaceRunService != nil {
-		oriExecutor := workspacerun.NewOriAgentExecutor(b.taskHandler)
+		oriExecutor := workspacerun.NewOriAgentExecutor(taskRunner)
 		if b.workspaceFileStore != nil {
 			// Snapshot workspace memory before/after each run to record what it learned.
 			oriExecutor.SetWorkspaceFolderResolver(b.workspaceFileStore)
@@ -618,7 +643,7 @@ func (b *ServerBuilder) initializeOrchestration() error {
 	}
 
 	b.orchestrationTaskHandler = b.taskHandler
-	taskHandler := workspace.TaskHandler(b.taskHandler)
+	taskHandler := b.directTaskRunner()
 	if b.runBackedTaskHandler != nil {
 		taskHandler = b.runBackedTaskHandler
 	}
@@ -708,8 +733,8 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() {
 		loopExecutor = b.runBackedTaskHandler
 		b.workspaceOrchestrator.SetTaskHandler(b.runBackedTaskHandler)
 	} else if b.taskHandler != nil {
-		loopExecutor = b.taskHandler
-		b.workspaceOrchestrator.SetTaskHandler(b.taskHandler)
+		loopExecutor = b.directTaskRunner()
+		b.workspaceOrchestrator.SetTaskHandler(loopExecutor)
 	}
 	// Adaptive delegation loop (opt-in via ORI_DELEGATION_LOOP). Off by default so
 	// task-failure behavior is unchanged unless explicitly enabled.

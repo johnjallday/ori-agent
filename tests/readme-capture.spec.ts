@@ -186,13 +186,24 @@ async function installFixtureRoutes(page: Page) {
 
       constructor(url: string | URL, options?: EventSourceInit) {
         const resolved = new URL(String(url), window.location.origin);
-        if (resolved.pathname !== '/api/orchestration/workflow/stream') {
+        // Long-lived streams the captured pages open. The map's activity feed
+        // (task-run show) receives one empty snapshot — nothing running, no
+        // parcels — which is exactly an idle city, and then stays quiet.
+        const fakedStreams: Record<string, string> = {
+          '/api/orchestration/workflow/stream': '',
+          '/api/workspace-map/activity/stream': JSON.stringify({ running: [], parcels: [] })
+        };
+        if (!(resolved.pathname in fakedStreams)) {
           return new NativeEventSource(url, options) as unknown as ReadmeCaptureEventSource;
         }
         super();
         this.url = resolved.toString();
         this.withCredentials = options?.withCredentials || false;
-        queueMicrotask(() => this.dispatchEvent(new Event('open')));
+        const snapshot = fakedStreams[resolved.pathname];
+        queueMicrotask(() => {
+          this.dispatchEvent(new Event('open'));
+          if (snapshot) this.dispatchEvent(new MessageEvent('snapshot', { data: snapshot }));
+        });
       }
 
       close() {
@@ -865,6 +876,22 @@ async function installFixtureRoutes(page: Page) {
     }
     if (url.pathname === '/api/orchestration/workspace/activate') {
       await json(route, { activated: true });
+      return;
+    }
+    // The task-run show's activity feed, in its idle state. The in-page
+    // EventSource above normally answers the stream without a request; these
+    // cover the snapshot endpoint and any stream request that still reaches
+    // the network.
+    if (url.pathname === '/api/workspace-map/activity') {
+      await json(route, { running: [], parcels: [] });
+      return;
+    }
+    if (url.pathname === '/api/workspace-map/activity/stream') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: 'event: snapshot\ndata: {"running":[],"parcels":[]}\n\n'
+      });
       return;
     }
     if (url.pathname === '/api/orchestration/workflow/stream') {

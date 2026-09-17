@@ -2127,6 +2127,7 @@
       canvas.style.setProperty('--ws-map-grid-x', (translateX % grid) + 'px');
       canvas.style.setProperty('--ws-map-grid-y', (translateY % grid) + 'px');
     }
+    applyActivityZoom(canvas);
     updateCameraControls(container);
     // The resize overlay is screen-space, so the camera moving under it is
     // exactly when it has to be re-placed (#346 FR-55).
@@ -2345,13 +2346,80 @@
     );
   }
 
+  function tileMeta(ws) {
+    var agents = Number(ws.agent_count || 0);
+    var openTasks = Number(ws.open_task_count || 0);
+    return (
+      agents +
+      (agents === 1 ? ' agent' : ' agents') +
+      ' · ' +
+      openTasks +
+      (openTasks === 1 ? ' task' : ' tasks')
+    );
+  }
+
+  /**
+   * A tile's accessible name.
+   *
+   * `activity` is the live feed's view of the tile, or null when the feed is
+   * not connected. With no feed the status comes from the listing's `active`
+   * flag exactly as it always has; with one, it follows the feed and names who
+   * is working, so what a screen reader hears always matches the glow and the
+   * text flag (task-run-show FR16, FR58).
+   */
+  function tileAccessibleName(ws, isSel, activity) {
+    var working = activity ? !!activity.working : !!ws.active;
+    var statusText = working ? 'Working' : 'Idle';
+    var agentsWorking = activity && activity.working && activity.agents ? activity.agents : [];
+    if (agentsWorking.length) {
+      statusText +=
+        ', ' +
+        agentsWorking[0] +
+        (agentsWorking.length > 1 ? ' and ' + (agentsWorking.length - 1) + ' more' : '');
+    }
+    var hasKeeper = String(ws.entry_agent_name || '').trim() !== '';
+    var isHQ = !!hqWorkspaceId && ws.id === hqWorkspaceId;
+    // The action hint must describe the semantics actually bound (see
+    // bindTiles). In select-only mode (the Home cockpit, PRD FR35/FR36/FR125)
+    // a pointer click and Space never open — only Enter or the rail's explicit
+    // Open Workspace action do. The legacy launcher keeps its select-then-open
+    // behavior until /workspaces redirects to Home.
+    var actionHint = selectOnlyMode
+      ? isSel
+        ? '. Selected — press Enter to open'
+        : '. Activate to select, Enter to open'
+      : isSel
+        ? '. Selected — activate to open'
+        : '. Activate to select, double-click to open';
+    // The economy's pile, spoken. The pile is not focusable on its own (see
+    // economyBadgesHTML), so the tile's label is the only place a keyboard user
+    // learns it is there and how to open it.
+    var economyView = economyTileView(ws.id);
+    var economyLabel =
+      economyView.pending > 0
+        ? ', ' +
+          economyView.pending +
+          (economyView.pending === 1 ? ' run to harvest' : ' runs to harvest') +
+          ', press H to see them'
+        : '';
+    return (
+      (ws.name || 'Workspace') +
+      ', ' +
+      tileMeta(ws) +
+      ', ' +
+      statusText +
+      (hasKeeper ? ', entry agent ' + ws.entry_agent_name : '') +
+      (isHQ ? ', Personal HQ' : '') +
+      economyLabel +
+      actionHint
+    );
+  }
+
   function tileHTML(tile, selectedId, index) {
     var ws = tile.ws || {};
     var pal = paletteFor(ws.id);
     var active = !!ws.active;
     var statusText = active ? 'Working' : 'Idle';
-    var agents = Number(ws.agent_count || 0);
-    var openTasks = Number(ws.open_task_count || 0);
     var mode = opsModeLabel(ws.ops_mode);
     var hasKeeper = String(ws.entry_agent_name || '').trim() !== '';
     var isHQ = !!hqWorkspaceId && ws.id === hqWorkspaceId;
@@ -2375,35 +2443,7 @@
     // sits in the world; nothing here reads the container (FR-2).
     var left = Number(tile.left) || 0;
     var top = Number(tile.top) || 0;
-    var meta =
-      agents +
-      (agents === 1 ? ' agent' : ' agents') +
-      ' · ' +
-      openTasks +
-      (openTasks === 1 ? ' task' : ' tasks');
-    // The action hint must describe the semantics actually bound (see
-    // bindTiles). In select-only mode (the Home cockpit, PRD FR35/FR36/FR125)
-    // a pointer click and Space never open — only Enter or the rail's explicit
-    // Open Workspace action do. The legacy launcher keeps its select-then-open
-    // behavior until /workspaces redirects to Home.
-    var actionHint = selectOnlyMode
-      ? isSel
-        ? '. Selected — press Enter to open'
-        : '. Activate to select, Enter to open'
-      : isSel
-        ? '. Selected — activate to open'
-        : '. Activate to select, double-click to open';
-    // The economy's two badges, and the spoken version of the pile. The pile is
-    // not focusable on its own (see economyBadgesHTML), so the tile's label is
-    // the only place a keyboard user learns it is there and how to open it.
-    var economyView = economyTileView(ws.id);
-    var economyLabel =
-      economyView.pending > 0
-        ? ', ' +
-          economyView.pending +
-          (economyView.pending === 1 ? ' run to harvest' : ' runs to harvest') +
-          ', press H to see them'
-        : '';
+    var meta = tileMeta(ws);
 
     return (
       '<button type="button" class="ws-map-tile' +
@@ -2425,15 +2465,7 @@
       (index || 0) +
       '" ' +
       'aria-label="' +
-      escapeHtml(ws.name || 'Workspace') +
-      ', ' +
-      meta +
-      ', ' +
-      statusText +
-      (hasKeeper ? ', entry agent ' + escapeHtml(ws.entry_agent_name) : '') +
-      (isHQ ? ', Personal HQ' : '') +
-      economyLabel +
-      actionHint +
+      escapeHtml(tileAccessibleName(ws, isSel, null)) +
       '">' +
       '<span class="ws-map-tile-check" data-ws-check role="checkbox" tabindex="-1" ' +
       'aria-checked="' +
@@ -3746,6 +3778,11 @@
     // second editor: a cadence is priced and changed in exactly one place.
     if (opts && opts.taskScheduleId) {
       query = '?task=' + encodeURIComponent(opts.taskScheduleId) + '&schedule=1';
+    }
+    // ?blocked_task=<id> opens the page where a task that is waiting on the
+    // user asks its question (task-run-show FR27).
+    if (opts && opts.blockedTaskId) {
+      query = '?blocked_task=' + encodeURIComponent(opts.blockedTaskId);
     }
     window.location.href = '/workspaces/' + encodeURIComponent(slug) + query;
   }
@@ -5107,6 +5144,16 @@
         // outright: clicking it must open the pile, never select the workspace
         // underneath it (city-economy FR37).
         var onPile = e.target && e.target.closest && e.target.closest('[data-harvest-pile]');
+        // A blocked agent's bubble is the other control a tile can carry: it
+        // opens the task that is waiting on the user (task-run-show FR27).
+        var onBlocked =
+          e.target && e.target.closest && e.target.closest('[data-activity-open-task]');
+        if (isTile && onBlocked) {
+          e.preventDefault();
+          e.stopPropagation();
+          openActivityTask(onBlocked);
+          return;
+        }
         if (isTile && onPile) {
           e.preventDefault();
           e.stopPropagation();
@@ -5197,6 +5244,567 @@
     if (!container || typeof container.querySelector !== 'function') return;
     var region = container.querySelector('[data-map-live]');
     if (region) region.textContent = message;
+  }
+
+  // ---------- live activity: the task-run show (tasks/prd-task-run-show.md §4.3) ----------
+  //
+  // This replaces the old rule written above structSVG, that a building never
+  // changes with activity. The honesty that rule protected is kept a different
+  // way: a building is lit ONLY while the shared activity feed — a live stream
+  // of real server events — says something is running in it (FR15). With no
+  // feed nothing is lit and the text flag falls back to the listing (FR16).
+  //
+  // Everything here patches the affected tile in place, the way
+  // ensureSetupStatus patches one overview row in, and never re-renders the map:
+  // a re-render would drop hover, drag, and an open menu (FR21). Nothing here
+  // moves the camera (FR22). The markup it adds is removed again when the
+  // building goes quiet, so an idle map is exactly the map it was before.
+
+  // A bubble line stays at least this long; lines that arrive meanwhile are not
+  // queued — only the latest one is shown next (FR18).
+  var ACTIVITY_DWELL_MS = 2500;
+  // How long "Done." or "This one didn't work out." stays before the bubble
+  // leaves (FR28).
+  var ACTIVITY_FINISH_MS = 2000;
+  // Below this zoom only the lamp shows; the bubble would be unreadable (FR19).
+  var ACTIVITY_BUBBLE_MIN_ZOOM = 0.6;
+  // At most one announcement per workspace in this window (FR57).
+  var ACTIVITY_ANNOUNCE_GAP_MS = 10000;
+
+  var activityRelease = null;
+  var activityConnected = false;
+  // The feed's latest view of each workspace that has something running.
+  var activityViews = Object.create(null);
+  // Per drawn target (a tile, a collapsed district, or a group map's unit): the
+  // line its bubble is showing and the dwell bookkeeping behind it.
+  var activityBubbles = Object.create(null);
+  var activityAnnouncedAt = Object.create(null);
+  var activityClock = function () {
+    return Date.now();
+  };
+
+  function activityFeed() {
+    var feed = window.OriMapActivityFeed;
+    return feed && typeof feed.subscribe === 'function' ? feed : null;
+  }
+
+  function activityLineFor(event) {
+    var lines = window.OriActivityBubbleLines;
+    return lines && typeof lines.lineFor === 'function' ? lines.lineFor(event) : '';
+  }
+
+  function activityContainer() {
+    return (lastMount && lastMount.container) || null;
+  }
+
+  function activityWorkspaces() {
+    var all = (lastMount && lastMount.state && lastMount.state.workspaces) || [];
+    return scopeGroupId ? scopeWorkspacesToGroup(all, scopeGroupId) : all;
+  }
+
+  function activityTime(value) {
+    var at = Date.parse(String(value || ''));
+    return isFinite(at) ? at : 0;
+  }
+
+  function isSafeSelectorValue(value) {
+    return typeof value === 'string' && value !== '' && !/["\\\n]/.test(value);
+  }
+
+  function connectActivityFeed() {
+    if (activityRelease) return;
+    var feed = activityFeed();
+    if (!feed) return;
+    activityRelease = feed.subscribe({
+      onChange: handleActivityChange,
+      onConnection: handleActivityConnection
+    });
+  }
+
+  function clearActivityBubble(key) {
+    var state = activityBubbles[key];
+    if (!state) return;
+    if (state.dwellTimer) clearTimeout(state.dwellTimer);
+    if (state.leaveTimer) clearTimeout(state.leaveTimer);
+    delete activityBubbles[key];
+  }
+
+  function disconnectActivityFeed() {
+    var release = activityRelease;
+    activityRelease = null;
+    Object.keys(activityBubbles).forEach(clearActivityBubble);
+    activityViews = Object.create(null);
+    activityAnnouncedAt = Object.create(null);
+    activityConnected = false;
+    if (release) release();
+  }
+
+  /**
+   * Which drawn thing shows a workspace's activity: its own tile; or, when it
+   * sits inside a collapsed district, that district (FR20); or, for a group,
+   * its district. Null when nothing on this map stands for it.
+   */
+  function activityTargetFor(workspaceId) {
+    if (!lastWorldLayout) return null;
+    var id = String(workspaceId || '');
+    var i;
+    var nodes = lastWorldLayout.nodes || [];
+    for (i = 0; i < nodes.length; i++) {
+      if (nodes[i].id === id) return { key: 'ws:' + id, kind: 'tile', id: id };
+    }
+    var hidden = lastWorldLayout.hiddenNodes || [];
+    for (i = 0; i < hidden.length; i++) {
+      if (hidden[i].id === id) {
+        return hidden[i].groupId
+          ? { key: 'group:' + hidden[i].groupId, kind: 'district', id: hidden[i].groupId }
+          : null;
+      }
+    }
+    var workspaces = activityWorkspaces();
+    var cursor = findWs(workspaces, id);
+    for (var guard = 0; cursor && guard < 64; guard++) {
+      if (scopeGroupId && cursor.id === scopeGroupId) return null;
+      if (renderedDistrict(cursor.id)) {
+        return { key: 'group:' + cursor.id, kind: 'district', id: cursor.id };
+      }
+      cursor = cursor.parent_id ? findWs(workspaces, cursor.parent_id) : null;
+    }
+    return null;
+  }
+
+  // On a group's own map its agents stand on the ground, so an activity also
+  // lights the unit whose agent is doing the work (FR23).
+  function activityUnitTargetsFor(agentName) {
+    if (!scopeGroupId || !lastWorldLayout || !agentName) return [];
+    return (lastWorldLayout.units || [])
+      .filter(function (record) {
+        return record.unit && record.unit.name === agentName;
+      })
+      .map(function (record) {
+        return { key: 'unit:' + record.id, kind: 'unit', id: record.id, agent: agentName };
+      });
+  }
+
+  function activityInScope(workspaceId) {
+    return !!findWs(activityWorkspaces(), workspaceId);
+  }
+
+  /** Everything the feed says is running under one target, newest first. */
+  function aggregateActivity(target) {
+    var agg = { count: 0, latest: null, blocked: false, agents: [] };
+    if (!activityConnected || !target) return agg;
+    Object.keys(activityViews).forEach(function (workspaceId) {
+      var view = activityViews[workspaceId];
+      if (!view || !view.running || !view.running.length) return;
+      var running = view.running;
+      if (target.kind === 'unit') {
+        if (!activityInScope(workspaceId)) return;
+        running = running.filter(function (activity) {
+          return activity.agent_name === target.agent;
+        });
+      } else {
+        var own = activityTargetFor(workspaceId);
+        if (!own || own.key !== target.key) return;
+      }
+      running.forEach(function (activity) {
+        agg.count += 1;
+        if (!agg.latest || activityTime(activity.at) > activityTime(agg.latest.at)) {
+          agg.latest = activity;
+        }
+        if (activity.blocked) agg.blocked = true;
+        if (activity.agent_name && agg.agents.indexOf(activity.agent_name) === -1) {
+          agg.agents.push(activity.agent_name);
+        }
+      });
+    });
+    return agg;
+  }
+
+  function bubbleStateFor(key) {
+    if (!activityBubbles[key]) {
+      activityBubbles[key] = {
+        line: '',
+        agent: '',
+        blocked: false,
+        finishing: false,
+        taskId: '',
+        workspaceId: '',
+        shownAt: 0,
+        pending: null,
+        dwellTimer: null,
+        leaveTimer: null
+      };
+    }
+    return activityBubbles[key];
+  }
+
+  function showBubbleLine(target, next) {
+    var state = bubbleStateFor(target.key);
+    if (state.leaveTimer) {
+      clearTimeout(state.leaveTimer);
+      state.leaveTimer = null;
+    }
+    state.line = next.line;
+    state.agent = next.agent || '';
+    state.blocked = !!next.blocked;
+    state.finishing = !!next.finishing;
+    state.taskId = next.taskId || '';
+    state.workspaceId = next.workspaceId || '';
+    state.shownAt = activityClock();
+    if (!state.finishing) return;
+    state.leaveTimer = setTimeout(function () {
+      state.leaveTimer = null;
+      if (activityBubbles[target.key] !== state || state.pending) return;
+      if (aggregateActivity(target).count > 0) {
+        state.finishing = false;
+        state.line = '';
+        syncBubbleToActivity(target);
+      } else {
+        clearActivityBubble(target.key);
+      }
+      paintActivityTarget(activityContainer(), target);
+    }, ACTIVITY_FINISH_MS);
+  }
+
+  // Latest wins: a line offered during another line's dwell replaces whatever
+  // was waiting, and shows when the dwell ends (FR18).
+  function offerBubbleLine(target, next) {
+    var state = bubbleStateFor(target.key);
+    var wait = state.line ? state.shownAt + ACTIVITY_DWELL_MS - activityClock() : 0;
+    if (wait <= 0) {
+      state.pending = null;
+      showBubbleLine(target, next);
+      return;
+    }
+    state.pending = next;
+    if (state.dwellTimer) return;
+    state.dwellTimer = setTimeout(function () {
+      state.dwellTimer = null;
+      var pending = state.pending;
+      state.pending = null;
+      if (!pending || activityBubbles[target.key] !== state) return;
+      showBubbleLine(target, pending);
+      paintActivityTarget(activityContainer(), target);
+    }, wait);
+  }
+
+  function lineForRunning(activity) {
+    if (!activity) return '';
+    if (activity.blocked) return activityLineFor({ kind: activity.kind, phase: 'blocked' });
+    var stepLine = activity.step
+      ? activityLineFor({ kind: activity.kind, phase: 'step', step: activity.step })
+      : '';
+    return stepLine || activityLineFor({ kind: activity.kind, phase: 'started' });
+  }
+
+  // A view that came from a snapshot or a reconnect says how things ARE, not
+  // what just happened: the bubble shows the newest running step straight away,
+  // or leaves when nothing runs here any more.
+  function syncBubbleToActivity(target) {
+    var agg = aggregateActivity(target);
+    var state = activityBubbles[target.key];
+    if (!agg.count) {
+      if (state && state.finishing && activityConnected) return;
+      clearActivityBubble(target.key);
+      return;
+    }
+    if (state && state.line && !state.finishing) return;
+    var line = lineForRunning(agg.latest);
+    if (!line) return;
+    showBubbleLine(target, {
+      line: line,
+      agent: agg.latest.agent_name,
+      blocked: agg.latest.blocked,
+      taskId: agg.latest.task_id,
+      workspaceId: agg.latest.workspace_id
+    });
+  }
+
+  function offerActivityEvent(target, event) {
+    var line = activityLineFor(event);
+    var next = {
+      line: line,
+      agent: event.agent_name || '',
+      blocked: event.phase === 'blocked',
+      taskId: event.task_id || '',
+      workspaceId: event.workspace_id || '',
+      finishing: false
+    };
+    if (event.phase === 'finished' && !aggregateActivity(target).count) {
+      if (!line) {
+        // A run that went silent, was cancelled, or was deleted: the building
+        // goes dark without claiming any result (FR6).
+        clearActivityBubble(target.key);
+        return;
+      }
+      next.finishing = true;
+      offerBubbleLine(target, next);
+      return;
+    }
+    if (!line) {
+      // Nothing new to say (a tool call that worked); keep the current line,
+      // or pick one up if this target had none yet.
+      var state = activityBubbles[target.key];
+      if (!state || !state.line || state.finishing) syncBubbleToActivity(target);
+      return;
+    }
+    offerBubbleLine(target, next);
+  }
+
+  function activityWorkspaceName(workspaceId) {
+    var ws = findWs(activityWorkspaces(), workspaceId);
+    return ws ? String(ws.name || 'Workspace') : '';
+  }
+
+  // Polite and sparse: starts, needs-input, and runs that did not finish, at
+  // most once per workspace per ten seconds. Steps are never announced (FR57).
+  function announceActivity(container, workspaceId, event) {
+    var name = activityWorkspaceName(workspaceId);
+    if (!name || !event) return;
+    var message = '';
+    if (event.phase === 'started') message = name + ' started working';
+    else if (event.phase === 'blocked') message = name + ' needs your input';
+    else if (
+      event.phase === 'finished' &&
+      (event.outcome === 'failed' || event.outcome === 'timeout')
+    ) {
+      message = 'A run in ' + name + ' did not finish';
+    }
+    if (!message) return;
+    var now = activityClock();
+    var last = activityAnnouncedAt[workspaceId];
+    if (typeof last === 'number' && now - last < ACTIVITY_ANNOUNCE_GAP_MS) return;
+    activityAnnouncedAt[workspaceId] = now;
+    announce(container, message);
+  }
+
+  function handleActivityConnection(connected) {
+    activityConnected = !!connected;
+    if (!activityConnected) {
+      // A dropped feed lights nothing (FR15, FR65).
+      Object.keys(activityBubbles).forEach(clearActivityBubble);
+    }
+    paintAllActivity(activityContainer(), true);
+  }
+
+  function handleActivityChange(workspaceId, view) {
+    var id = String(workspaceId || '');
+    if (!id) return;
+    if (view && view.running && view.running.length) activityViews[id] = view;
+    else delete activityViews[id];
+    var container = activityContainer();
+    if (!container || !lastWorldLayout) return;
+    var event = (view && view.lastEvent) || null;
+    var targets = [];
+    var own = activityTargetFor(id);
+    if (own) targets.push(own);
+    if (activityInScope(id)) {
+      var agent = event ? event.agent_name : '';
+      if (event) {
+        targets = targets.concat(activityUnitTargetsFor(agent));
+      } else {
+        (lastWorldLayout.units || []).forEach(function (record) {
+          if (scopeGroupId && record.unit) {
+            targets.push({
+              key: 'unit:' + record.id,
+              kind: 'unit',
+              id: record.id,
+              agent: record.unit.name
+            });
+          }
+        });
+      }
+    }
+    if (event && activityInScope(id)) announceActivity(container, id, event);
+    targets.forEach(function (target) {
+      if (event) offerActivityEvent(target, event);
+      else syncBubbleToActivity(target);
+      paintActivityTarget(container, target);
+    });
+  }
+
+  function activityElement(container, target) {
+    if (!container || typeof container.querySelector !== 'function') return null;
+    if (!isSafeSelectorValue(target.id)) return null;
+    if (target.kind === 'tile') {
+      return container.querySelector('.ws-map-tile[data-ws-id="' + target.id + '"]');
+    }
+    if (target.kind === 'district') {
+      return container.querySelector('.ws-map-district[data-group-id="' + target.id + '"]');
+    }
+    return container.querySelector('.ws-map-unit[data-unit-id="' + target.id + '"]');
+  }
+
+  function activityAvatarHTML(name) {
+    var avatars = window.AgentAvatar;
+    if (avatars && typeof avatars.markup === 'function') {
+      return avatars.markup({ name: name }, { size: 'sm', className: 'ws-map-activity-avatar' });
+    }
+    return avatarHTML(name, 'ws-map-activity-avatar');
+  }
+
+  function canBuildElements() {
+    return (
+      typeof document !== 'undefined' && document && typeof document.createElement === 'function'
+    );
+  }
+
+  function activitySpan(className) {
+    var span = document.createElement('span');
+    span.className = className;
+    return span;
+  }
+
+  function patchActivityBubble(overlay, state, agg) {
+    var bubble = overlay.querySelector('[data-activity-bubble]');
+    if (!state || !state.line) {
+      if (bubble && bubble.parentNode) bubble.parentNode.removeChild(bubble);
+      return;
+    }
+    var signature = [
+      state.line,
+      state.agent,
+      state.blocked ? 'blocked' : '',
+      state.finishing ? 'finishing' : '',
+      agg.count,
+      state.taskId
+    ].join('|');
+    if (bubble && bubble.getAttribute('data-activity-bubble') === signature) return;
+    var fresh = activitySpan(
+      'ws-map-activity-bubble cozy-frame' +
+        (state.blocked ? ' is-blocked' : '') +
+        (state.finishing ? ' is-finishing' : '')
+    );
+    fresh.setAttribute('data-activity-bubble', signature);
+    if (state.blocked && state.taskId && state.workspaceId) {
+      // The one bubble that is also a way in: it opens the task that is waiting
+      // on the user (FR27). The tile's click handler routes it.
+      fresh.setAttribute('data-activity-open-task', state.taskId);
+      fresh.setAttribute('data-activity-workspace', state.workspaceId);
+      fresh.setAttribute('title', 'Open this task');
+    }
+    if (state.agent) {
+      var face = activitySpan('ws-map-activity-face');
+      face.innerHTML = activityAvatarHTML(state.agent);
+      fresh.appendChild(face);
+    }
+    var line = activitySpan('ws-map-activity-line');
+    line.textContent = state.line;
+    fresh.appendChild(line);
+    if (agg.count > 1) {
+      var more = activitySpan('ws-map-activity-more');
+      more.textContent = '+' + (agg.count - 1);
+      fresh.appendChild(more);
+    }
+    if (bubble && bubble.parentNode) bubble.parentNode.replaceChild(fresh, bubble);
+    else overlay.appendChild(fresh);
+  }
+
+  function patchTileStatus(el, workspaceId, agg, force) {
+    if (!activityConnected && !force) return;
+    var ws = findWs(activityWorkspaces(), workspaceId);
+    if (!ws || typeof el.querySelector !== 'function') return;
+    var activity = activityConnected ? { working: agg.count > 0, agents: agg.agents } : null;
+    var working = activity ? activity.working : !!ws.active;
+    var flag = el.querySelector('.ws-map-tile-flag');
+    var led =
+      flag && typeof flag.querySelector === 'function' ? flag.querySelector('.ws-map-led') : null;
+    var statusText = working ? 'Working' : 'Idle';
+    if (flag && led && led.classList && flag.lastChild) {
+      led.classList.toggle('is-working', working);
+      if (flag.lastChild !== led && flag.lastChild.textContent !== statusText) {
+        flag.lastChild.textContent = statusText;
+      }
+    }
+    var label = tileAccessibleName(ws, !!selectedId && ws.id === selectedId, activity);
+    if (el.getAttribute('aria-label') !== label) el.setAttribute('aria-label', label);
+  }
+
+  function paintActivityTarget(container, target, force) {
+    if (!container || !target) return;
+    var el = activityElement(container, target);
+    if (!el || typeof el.querySelector !== 'function') return;
+    var agg = aggregateActivity(target);
+    var state = activityBubbles[target.key] || null;
+    var lit = agg.count > 0;
+    var overlay = el.querySelector('[data-map-activity]');
+    if (!lit && !(state && state.line)) {
+      if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      if (overlay && el.classList) el.classList.remove('has-activity');
+    } else if (canBuildElements()) {
+      if (!overlay) {
+        overlay = activitySpan('ws-map-activity');
+        overlay.setAttribute('data-map-activity', '');
+        // Decorative for assistive technology: the tile's own accessible name
+        // carries the same facts (FR58).
+        overlay.setAttribute('aria-hidden', 'true');
+        overlay.appendChild(activitySpan('ws-map-activity-glow'));
+        overlay.appendChild(activitySpan('ws-map-activity-lamp'));
+        if (target.kind === 'district') {
+          // A collapsed district has no text flag of its own, and the glow must
+          // never be the only signal (FR16, FR60).
+          var flag = activitySpan('ws-map-activity-flag');
+          flag.textContent = 'Working';
+          overlay.appendChild(flag);
+        }
+        el.appendChild(overlay);
+      }
+      if (el.classList) el.classList.add('has-activity');
+      if (overlay.classList) overlay.classList.toggle('is-lit', lit);
+      patchActivityBubble(overlay, state, agg);
+    }
+    if (target.kind === 'tile') patchTileStatus(el, target.id, agg, force);
+  }
+
+  /**
+   * Repaint every drawn target from the feed's current state. Runs after each
+   * mount (which rebuilt the tiles from the listing) and on every connection
+   * change. `force` restores the listing's text flags after a disconnect.
+   */
+  function paintAllActivity(container, force) {
+    if (!container || typeof container.querySelectorAll !== 'function' || !lastWorldLayout) return;
+    if (!activityConnected && !force) return;
+    var painted = Object.create(null);
+    function paint(target) {
+      if (!target || painted[target.key]) return;
+      painted[target.key] = true;
+      syncBubbleToActivity(target);
+      paintActivityTarget(container, target, force);
+    }
+    (lastWorldLayout.nodes || []).forEach(function (node) {
+      paint({ key: 'ws:' + node.id, kind: 'tile', id: node.id });
+    });
+    (lastWorldLayout.districts || []).forEach(function (district) {
+      if (scopeGroupId && district.id === scopeGroupId) return;
+      paint({ key: 'group:' + district.id, kind: 'district', id: district.id });
+    });
+    if (scopeGroupId) {
+      (lastWorldLayout.units || []).forEach(function (record) {
+        if (!record.unit) return;
+        paint({ key: 'unit:' + record.id, kind: 'unit', id: record.id, agent: record.unit.name });
+      });
+    }
+  }
+
+  // The canvas tells CSS the zoom, so the bubble can keep a readable size and
+  // hide below the threshold without the map re-rendering (FR19).
+  function applyActivityZoom(canvas) {
+    if (!canvas) return;
+    if (canvas.classList && typeof canvas.classList.toggle === 'function') {
+      canvas.classList.toggle('is-activity-far', camera.zoom < ACTIVITY_BUBBLE_MIN_ZOOM);
+    }
+    if (canvas.style && typeof canvas.style.setProperty === 'function') {
+      canvas.style.setProperty('--ws-map-zoom', String(camera.zoom));
+    }
+  }
+
+  // A blocked bubble opens the task that is waiting on the user (FR27).
+  function openActivityTask(bubble) {
+    var taskId = bubble.getAttribute('data-activity-open-task') || '';
+    var workspaceId = bubble.getAttribute('data-activity-workspace') || '';
+    if (!taskId || !workspaceId) return false;
+    openWorkspace(workspaceId, { blockedTaskId: taskId });
+    return true;
   }
 
   function updateMoveControl(container) {
@@ -8954,7 +9562,10 @@
       if (!el || typeof el.addEventListener !== 'function') return;
       // Bound after bindTileDrag, whose capture-phase listener swallows the
       // click a finished drag synthesizes.
-      el.addEventListener('click', function () {
+      el.addEventListener('click', function (event) {
+        var target = event && event.target;
+        var onBlocked = target && target.closest && target.closest('[data-activity-open-task]');
+        if (onBlocked && openActivityTask(onBlocked)) return;
         var record = renderedUnit(el.getAttribute('data-unit-id'));
         if (record) openUnit(container, record.unit, options);
       });
@@ -9135,6 +9746,11 @@
     // has to be translated to keep the camera centred, which is all
     // watchResize re-applies.
     watchResize(container);
+    // The live activity feed: one shared connection for the page, opened on
+    // the first mount (task-run-show FR13). The tiles were just rebuilt from the
+    // listing, so whatever is running is painted back onto them in place.
+    connectActivityFeed();
+    paintAllActivity(container);
   }
 
   /** Tear down the map view (called when switching away). */
@@ -9150,6 +9766,8 @@
     settleDropConfirm('decline', { restoreFocus: false, skipRedraw: true });
     cancelPointerTranslations(container);
     endKeyboardMove(container, false);
+    // Releasing the last subscriber closes the page's activity stream.
+    disconnectActivityFeed();
     container.innerHTML = '';
     // Clearing lastMount is what makes a layout response still in flight a
     // no-op when it lands: settleLayout has nothing to repaint.
@@ -9272,6 +9890,32 @@
       badgesHTML: economyBadgesHTML
     },
     computeLayout: computeMapLayout,
+    // The task-run show's live activity layer. The map subscribes to
+    // window.OriMapActivityFeed itself on mount; these are the pieces tests and
+    // hosts can read without a browser.
+    activity: {
+      tileAccessibleName: tileAccessibleName,
+      targetFor: activityTargetFor,
+      isConnected: function () {
+        return activityConnected;
+      },
+      timings: {
+        dwellMs: ACTIVITY_DWELL_MS,
+        finishMs: ACTIVITY_FINISH_MS,
+        bubbleMinZoom: ACTIVITY_BUBBLE_MIN_ZOOM,
+        announceGapMs: ACTIVITY_ANNOUNCE_GAP_MS
+      }
+    },
+    // Test-only seam: the activity layer's clock, so dwell and the
+    // announcement throttle can be driven without waiting.
+    _setActivityClockForTest: function (clock) {
+      activityClock =
+        typeof clock === 'function'
+          ? clock
+          : function () {
+              return Date.now();
+            };
+    },
     // Scoped mode's pure halves (group page Detachment map): which records a
     // group's map draws, whether a group is nested, how its district presents,
     // what the opening camera frames, and which drops it keeps.
@@ -9336,6 +9980,16 @@
         el.setAttribute('aria-pressed', fresh.getAttribute('aria-pressed'));
         el.setAttribute('aria-label', fresh.getAttribute('aria-label'));
         el.innerHTML = fresh.innerHTML;
+        // The fresh content has no activity overlay; put a working agent's
+        // lamp and bubble back (task-run-show FR23).
+        if (record.unit) {
+          paintActivityTarget(container, {
+            key: 'unit:' + record.id,
+            kind: 'unit',
+            id: record.id,
+            agent: record.unit.name
+          });
+        }
       });
       return true;
     },
