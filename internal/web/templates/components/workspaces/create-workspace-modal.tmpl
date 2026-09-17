@@ -264,6 +264,15 @@
                 </div>
               </fieldset>
 
+              <!-- Values the selected blueprint asks for and writes into the
+                   project it creates. Every label, bound, unit, and option comes
+                   from the blueprint's own declaration, so nothing domain-
+                   specific is spelled here: sessions.js builds the fields. -->
+              <section id="workspaceBlueprintInputs" class="workspace-setup-card mb-2" hidden aria-labelledby="workspaceBlueprintInputsTitle">
+                <span id="workspaceBlueprintInputsTitle" class="workspace-setup-title"></span>
+                <div id="workspaceBlueprintInputsFields" class="workspace-blueprint-inputs"></div>
+              </section>
+
               <!-- Setup cards are mounted here while editing and relocated to the
                    final review step by sessions.js. -->
               <div id="wizardStep2ReviewMount"></div>

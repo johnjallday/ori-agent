@@ -55,6 +55,10 @@ const sessionManager = {
   // Populated when the modal opens (defaults to the first/Blank template).
   workspaceTemplate: null,
   groupRequirementDraft: null,
+  // The values chosen for the selected blueprint's declared inputs. The DOM is
+  // never read back at submit time, so a field hidden by a later choice cannot
+  // be sent (see resetBlueprintInputsDraft).
+  blueprintInputsDraft: null,
   templateAgentPlan: null,
   templateAgentPlanError: '',
   templateAgentPlanRequestId: 0,
@@ -416,6 +420,17 @@ const sessionManager = {
     document
       .getElementById('workspaceExistingProjectOpenExisting')
       ?.addEventListener('click', () => this.openExistingProjectOwner());
+
+    // One delegated pair of listeners: the fields themselves are built from
+    // whichever blueprint is selected, so they come and go.
+    for (const eventName of ['input', 'change']) {
+      document
+        .getElementById('workspaceBlueprintInputsFields')
+        ?.addEventListener(eventName, event => {
+          const id = event.target?.closest?.('[data-input-id]')?.dataset?.inputId;
+          if (id) this.setBlueprintInputValue(id, event.target.value);
+        });
+    }
 
     document.getElementById('folderPresetSelect')?.addEventListener('change', () => {
       this.behaviorOverridden = true;
@@ -4034,6 +4049,7 @@ const sessionManager = {
     this.workspaceTemplate = null;
     this.groupRequirementDraft = null;
     this.resetExistingProjectChoice();
+    this.resetBlueprintInputsDraft(null);
     // Decided only after the previous open's placement draft is gone, so a
     // stale fixed placement cannot hide or clear the fresh control. A group
     // page's Build still preselects its locked group (group-map-build FR-15).
@@ -7867,6 +7883,7 @@ const sessionManager = {
     return (
       identity +
       details +
+      this.renderBlueprintInputsReceipt() +
       this.renderExistingProjectReceipt(selectedTemplate) +
       this.renderWorkspaceGroupRequirementReceipt(selectedTemplate) +
       this.renderWorkspaceReceiptTeam(view)
@@ -9682,6 +9699,10 @@ const sessionManager = {
       String(this.workspaceTemplate?.id || '') !== String(template?.id || '') ||
       !this.existingProjectChoice;
     this.workspaceTemplate = template;
+    // A different blueprint asks different questions, so the answers start
+    // again from its own defaults rather than carrying the last one's over.
+    // Done before the project choice, whose sync renders the card.
+    if (blueprintChanged || !this.blueprintInputsDraft) this.resetBlueprintInputsDraft(template);
     if (blueprintChanged) this.resetExistingProjectChoice();
     else this.syncExistingProjectChoice();
     this.resetGroupRequirementDraft(template);
@@ -9726,12 +9747,18 @@ const sessionManager = {
   //   (`project_entry.relative_path` contains `{{name}}`).
   // - supportsExistingProject: it can attach a project folder the user already
   //   has (`project_connection.supported_modes` lists `existing_project`).
+  // - inputs: the values it asks for at creation and writes into the project it
+  //   creates, or null. A blueprint whose declaration the server could not
+  //   understand reports `inputs_error` and no declaration, so it asks for
+  //   nothing here rather than showing a card it cannot honor.
   blueprintDetailsProfile(template) {
     const blank = !template || Boolean(template.blank) || !template.id;
     const projectEntryPath = blank
       ? ''
       : String(template.project_entry?.relative_path || '').trim();
     const connectionModes = blank ? [] : template.project_connection?.supported_modes;
+    const declaredInputs = blank || template.inputs_error ? null : template.inputs;
+    const inputFields = Array.isArray(declaredInputs?.fields) ? declaredInputs.fields : [];
     return {
       blank,
       bringsOwnSetup:
@@ -9740,7 +9767,9 @@ const sessionManager = {
       entryNamedAfterWorkspace: projectEntryPath.includes('{{name}}'),
       projectEntryPath,
       supportsExistingProject:
-        Array.isArray(connectionModes) && connectionModes.includes('existing_project')
+        Array.isArray(connectionModes) && connectionModes.includes('existing_project'),
+      inputs: inputFields.length ? declaredInputs : null,
+      inputsUnavailable: !blank && Boolean(template?.inputs_error)
     };
   },
 
@@ -9801,6 +9830,9 @@ const sessionManager = {
       folder.textContent = existing ? this.existingProjectChoice.folderDisplay || '' : '';
     }
     this.renderExistingProjectReview(existing ? this.existingProjectChoice.review : null);
+    // The card belongs to a new project only; choosing an existing one hides it
+    // and stops it being sent (requirement 38).
+    this.renderBlueprintInputs();
   },
 
   // Shows what the server found in the chosen folder: a status line, the
@@ -10142,6 +10174,294 @@ const sessionManager = {
     this.setExistingProjectError('');
   },
 
+  // ----- Blueprint inputs (values written into the project it creates) -----
+
+  // The values the user chose, in one draft object. The DOM is never read back
+  // at submit time: a field hidden by a later choice, or replaced while the
+  // blueprint changed, would otherwise still be sent.
+  resetBlueprintInputsDraft(template) {
+    const { inputs } = this.blueprintDetailsProfile(template);
+    const values = {};
+    for (const field of inputs?.fields || []) {
+      const id = String(field?.id || '');
+      if (id) values[id] = this.blueprintInputDefaultText(field);
+    }
+    this.blueprintInputsDraft = {
+      declaration: inputs,
+      values,
+      errors: {},
+      // Bumped on every reset, so fields rendered for an earlier blueprint
+      // cannot write into this one.
+      generation: (this.blueprintInputsDraft?.generation || 0) + 1
+    };
+    this.renderBlueprintInputs();
+  },
+
+  // A declared default as the text the field shows. Numbers arrive as JSON
+  // numbers and selects as strings, which is the shape the manifest declared.
+  blueprintInputDefaultText(field) {
+    const value = field?.default;
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    return typeof value === 'string' ? value : '';
+  },
+
+  // True when Details asks for these values: a Workspace (not import, not a
+  // Group) from a blueprint that declares them, scaffolding a new project.
+  // Requirement 38 — an existing project keeps its own file, so nothing is
+  // asked and nothing is sent.
+  blueprintInputsAvailable() {
+    if (!this.isWorkspaceCreator() || this.importModeEnabled) return false;
+    if (this.workspaceCreatorContext?.mode === 'import') return false;
+    if (this.usesExistingProject()) return false;
+    return Boolean(this.blueprintDetailsProfile(this.workspaceTemplate).inputs);
+  },
+
+  // Builds the card from the declaration. Number fields carry their unit and a
+  // range hint; select fields carry their declared options. Both are prefilled
+  // from the draft, which starts at the declared defaults.
+  renderBlueprintInputs() {
+    const card = document.getElementById('workspaceBlueprintInputs');
+    const title = document.getElementById('workspaceBlueprintInputsTitle');
+    const fields = document.getElementById('workspaceBlueprintInputsFields');
+    if (!card || !fields) return;
+    // The draft is the only source the card is built from, so a render that
+    // arrives before it exists (the project choice syncs during selection)
+    // shows nothing rather than a half-built card.
+    const draft = this.blueprintInputsDraft;
+    const declaration = draft?.declaration;
+    const available = Boolean(declaration) && this.blueprintInputsAvailable();
+    card.hidden = !available;
+    if (!available) {
+      fields.replaceChildren();
+      if (title) title.textContent = '';
+      if (fields.dataset) fields.dataset.signature = '';
+      return;
+    }
+    if (title) title.textContent = String(declaration.title || 'Settings');
+
+    // Rebuild only when the blueprint's questions changed; otherwise the
+    // user's caret would jump on every keystroke.
+    const signature = `${draft.generation}:${(declaration.fields || [])
+      .map(field => String(field?.id || ''))
+      .join(' ')}`;
+    if (fields.dataset?.signature !== signature) {
+      if (typeof document.createElement !== 'function') return;
+      fields.replaceChildren(
+        ...(declaration.fields || []).map(field => this.buildBlueprintInputField(field))
+      );
+      if (fields.dataset) fields.dataset.signature = signature;
+    }
+    for (const field of declaration.fields || []) {
+      const id = String(field?.id || '');
+      const control = document.getElementById(this.blueprintInputControlID(id));
+      if (control && control.value !== draft.values[id]) control.value = draft.values[id] ?? '';
+      this.renderBlueprintInputError(id, draft.errors[id] || '');
+    }
+  },
+
+  blueprintInputControlID(id) {
+    return `workspaceBlueprintInput-${id}`;
+  },
+
+  buildBlueprintInputField(field) {
+    const id = String(field?.id || '');
+    const controlID = this.blueprintInputControlID(id);
+    const errorID = `${controlID}-error`;
+    const hintID = `${controlID}-hint`;
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'workspace-blueprint-input';
+    wrapper.dataset.inputId = id;
+
+    const label = document.createElement('label');
+    label.setAttribute('for', controlID);
+    label.className = 'workspace-setup-help';
+    label.textContent = String(field?.label || id);
+    wrapper.appendChild(label);
+
+    const row = document.createElement('div');
+    row.className = 'workspace-blueprint-input-row';
+    let control;
+    let hintText = '';
+    if (field?.type === 'select') {
+      control = document.createElement('select');
+      for (const option of Array.isArray(field.options) ? field.options : []) {
+        const element = document.createElement('option');
+        element.value = String(option?.value ?? '');
+        element.textContent = String(option?.label || option?.value || '');
+        control.appendChild(element);
+      }
+    } else {
+      control = document.createElement('input');
+      control.type = 'number';
+      if (Number.isFinite(field?.min)) control.min = String(field.min);
+      if (Number.isFinite(field?.max)) control.max = String(field.max);
+      if (Number.isFinite(field?.step)) control.step = String(field.step);
+      if (Number.isFinite(field?.min) && Number.isFinite(field?.max)) {
+        hintText = `${field.min}–${field.max}`;
+      }
+    }
+    control.id = controlID;
+    control.className = 'modern-input';
+    control.setAttribute('aria-describedby', `${hintID} ${errorID}`);
+    row.appendChild(control);
+
+    const unit = String(field?.unit || '').trim();
+    if (unit) {
+      const unitEl = document.createElement('span');
+      unitEl.className = 'workspace-blueprint-input-unit';
+      unitEl.textContent = unit;
+      row.appendChild(unitEl);
+    }
+    wrapper.appendChild(row);
+
+    const hint = document.createElement('div');
+    hint.id = hintID;
+    hint.className = 'workspace-setup-help';
+    hint.textContent = hintText;
+    hint.hidden = !hintText;
+    wrapper.appendChild(hint);
+
+    const error = document.createElement('div');
+    error.id = errorID;
+    error.className = 'workspace-create-name-hint is-error';
+    error.hidden = true;
+    wrapper.appendChild(error);
+    return wrapper;
+  },
+
+  // One field changed: keep the draft, re-check it, and treat it like editing
+  // the name — any placement review already obtained no longer describes this
+  // workspace (requirement 45).
+  setBlueprintInputValue(id, value) {
+    const draft = this.blueprintInputsDraft;
+    if (!draft?.values || !(id in draft.values)) return;
+    draft.values[id] = String(value ?? '');
+    draft.errors[id] = this.blueprintInputProblem(id);
+    this.renderBlueprintInputError(id, draft.errors[id]);
+    this.invalidateGroupRequirementReview();
+    this.refreshWorkspaceReview();
+  },
+
+  renderBlueprintInputError(id, message) {
+    const control = document.getElementById(this.blueprintInputControlID(id));
+    const error = document.getElementById(`${this.blueprintInputControlID(id)}-error`);
+    if (control) control.classList.toggle('is-invalid', Boolean(message));
+    if (!error) return;
+    error.textContent = message || '';
+    error.hidden = !message;
+  },
+
+  // An actionable message for one value, or '' when it is allowed. The server
+  // re-checks everything; this exists so the user hears about it where the fix
+  // is rather than after pressing Create.
+  blueprintInputProblem(id) {
+    const draft = this.blueprintInputsDraft;
+    const field = (draft?.declaration?.fields || []).find(item => String(item?.id || '') === id);
+    if (!field) return '';
+    const raw = String(draft.values[id] ?? '').trim();
+    const label = String(field.label || id);
+    if (field.type === 'select') {
+      const options = Array.isArray(field.options) ? field.options : [];
+      return options.some(option => String(option?.value ?? '') === raw)
+        ? ''
+        : `Choose a ${label.toLowerCase()}.`;
+    }
+    if (raw === '') return `${label} is required.`;
+    const value = Number(raw);
+    if (!Number.isFinite(value)) return `${label} must be a number.`;
+    if (
+      Number.isFinite(field.min) &&
+      Number.isFinite(field.max) &&
+      (value < field.min || value > field.max)
+    ) {
+      return `${label} must be between ${field.min} and ${field.max}.`;
+    }
+    if (Number.isFinite(field.step) && field.step > 0 && Number.isFinite(field.min)) {
+      const steps = (value - field.min) / field.step;
+      if (Math.abs(steps - Math.round(steps)) > 1e-9) {
+        return `${label} must change in steps of ${field.step}.`;
+      }
+    }
+    return '';
+  },
+
+  // The first problem across the card, for the Details gate. Every field is
+  // checked so each one shows its own error, not just the first.
+  blueprintInputsProblem() {
+    if (!this.blueprintInputsAvailable()) return '';
+    const draft = this.blueprintInputsDraft;
+    let first = '';
+    let firstID = '';
+    for (const field of draft?.declaration?.fields || []) {
+      const id = String(field?.id || '');
+      const problem = this.blueprintInputProblem(id);
+      draft.errors[id] = problem;
+      this.renderBlueprintInputError(id, problem);
+      if (problem && !first) {
+        first = problem;
+        firstID = id;
+      }
+    }
+    return first ? { message: first, fieldID: firstID } : '';
+  },
+
+  // Refuses leaving Details: the message is already on the field, so this moves
+  // focus there and announces it once through the Details live region, which
+  // sits outside the wizard steps so it is heard.
+  signalBlueprintInputsProblem(problem) {
+    if (!problem) return;
+    this.announceExistingProjectReview(problem.message);
+    document.getElementById(this.blueprintInputControlID(problem.fieldID))?.focus();
+  },
+
+  // The create request's blueprint_inputs, or null. Numbers are sent as
+  // numbers and options as their declared value, which is what the server's
+  // one validator accepts.
+  blueprintInputsPayload() {
+    if (!this.blueprintInputsAvailable()) return null;
+    const draft = this.blueprintInputsDraft;
+    const payload = {};
+    for (const field of draft?.declaration?.fields || []) {
+      const id = String(field?.id || '');
+      const raw = String(draft.values[id] ?? '').trim();
+      if (!id || raw === '') continue;
+      payload[id] = field.type === 'select' ? raw : Number(raw);
+    }
+    return Object.keys(payload).length ? payload : null;
+  },
+
+  // Review's statement of the values the project will be created with (FR 44).
+  renderBlueprintInputsReceipt() {
+    if (!this.blueprintInputsAvailable()) return '';
+    const draft = this.blueprintInputsDraft;
+    const declaration = draft?.declaration;
+    const lines = (declaration?.fields || [])
+      .map(field => {
+        const id = String(field?.id || '');
+        const raw = String(draft.values[id] ?? '').trim();
+        if (!raw) return '';
+        const unit = String(field?.unit || '').trim();
+        const option = (Array.isArray(field.options) ? field.options : []).find(
+          item => String(item?.value ?? '') === raw
+        );
+        const shown = option ? String(option.label || option.value) : unit ? `${raw} ${unit}` : raw;
+        return `${String(field?.label || id)}: ${shown}`;
+      })
+      .filter(Boolean);
+    if (!lines.length) return '';
+    return `
+      <div class="workspace-review-card" data-blueprint-inputs-receipt>
+        <div class="workspace-review-card-main">
+          <span class="workspace-review-card-label">${this.escapeHtml(String(declaration.title || 'Settings'))}</span>
+          ${lines.map(line => `<span class="workspace-review-card-meta">${this.escapeHtml(line)}</span>`).join('')}
+        </div>
+        <div class="workspace-review-card-actions">
+          <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="2">Edit</button>
+        </div>
+      </div>`;
+  },
+
   // "Use any folder as a template" cannot be combined with a blueprint that
   // sets up its own project (FR 11a). The picker already empties the path when
   // any library blueprint is chosen; for these blueprints the control is also
@@ -10228,6 +10548,15 @@ const sessionManager = {
         this.wizardStep = 2;
         this.refreshWizardChrome();
         this.signalExistingProjectProblem(projectProblem);
+        return;
+      }
+      // A value the blueprint would write into the project must be one it
+      // accepts, the same way an empty name blocks (requirement 43).
+      const inputsProblem = this.blueprintInputsProblem();
+      if (inputsProblem) {
+        this.wizardStep = 2;
+        this.refreshWizardChrome();
+        this.signalBlueprintInputsProblem(inputsProblem);
         return;
       }
     }
@@ -10475,6 +10804,12 @@ const sessionManager = {
       this.signalExistingProjectProblem(existingProjectProblem);
       return;
     }
+    const inputsProblem = !importEnabled && !ordinaryGroup ? this.blueprintInputsProblem() : '';
+    if (inputsProblem) {
+      this.goToWizardStep(2);
+      this.signalBlueprintInputsProblem(inputsProblem);
+      return;
+    }
     const guided =
       this.workspaceCreatorContext?.mode === 'guided' ? this.workspaceCreatorContext.guided : null;
     if (guided?.submit) {
@@ -10606,6 +10941,10 @@ const sessionManager = {
           // folder behind the picker's token instead of creating project files.
           const projectConnection = this.existingProjectPayload();
           if (projectConnection) payload.project_connection = projectConnection;
+          // Only ever sent for a new project: the card is hidden for an
+          // existing one, and blueprintInputsPayload returns nothing then.
+          const blueprintInputs = this.blueprintInputsPayload();
+          if (blueprintInputs) payload.blueprint_inputs = blueprintInputs;
           // Blank blueprint (no template_id/path, no ad-hoc folder override):
           // tell the backend to seed the synthetic single-agent roster.
           if (
