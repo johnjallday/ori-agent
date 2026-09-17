@@ -236,6 +236,19 @@ func (h *Handler) ReviewProjectConnection(w http.ResponseWriter, r *http.Request
 	_ = orihttp.RespondSuccess(w, response)
 }
 
+// starterTasksForAttachedProject is the blueprint's starter tasks allowed for
+// an existing project, using the same connection_modes filter the guided
+// journey applies. A declaration that cannot be read seeds nothing rather than
+// tasks written for a new project.
+func starterTasksForAttachedProject(template projecttemplates.Template) []projecttemplates.StarterTask {
+	starters, err := projecttemplates.StarterTasksForConnection(template, projecttemplates.ProjectConnectionExistingProject)
+	if err != nil {
+		logger.Warn("Existing-project starter tasks are unavailable", logger.Fields{"template": template.ID, "error": err})
+		return nil
+	}
+	return starters
+}
+
 // joinEntryExtensions renders declared extensions for a message: ".a",
 // ".a or .b", ".a, .b, or .c".
 func joinEntryExtensions(extensions []string) string {

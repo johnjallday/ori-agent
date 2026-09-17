@@ -9687,12 +9687,18 @@ const sessionManager = {
     this.resetGroupRequirementDraft(template);
     this.syncTemplateFolderOverride(template);
     const profile = this.blueprintDetailsProfile(template);
+    // A kept existing project still names the workspace after its file (FR 23);
+    // without this a recheck would clear that autofill like a blueprint name.
+    const keptProjectName =
+      !blueprintChanged && this.usesExistingProject()
+        ? this.existingProjectBaseName(this.existingProjectChoice.review?.entryName)
+        : '';
     // A project file named after the workspace would otherwise be named after
     // the blueprint, and a second create would collide on its slug (FR 15). An
     // empty value clears only a previous autofill, never typed text.
     this.prefillTemplateValue(
       document.getElementById('folderNameInput'),
-      profile.entryNamedAfterWorkspace ? '' : template?.name || '',
+      keptProjectName || (profile.entryNamedAfterWorkspace ? '' : template?.name || ''),
       'autofillName'
     );
     // Every blueprint offers its description as a starting point (FR 13).
@@ -9932,6 +9938,7 @@ const sessionManager = {
     }
     choice.review = review;
     this.syncExistingProjectChoice();
+    if (review.state === 'ready') this.prefillNameFromExistingProject(review.entryName);
     if (review.state === 'duplicate') this.announceExistingProjectReview(review.message);
     else if (review.state === 'choose') {
       this.announceExistingProjectReview(
@@ -9972,10 +9979,42 @@ const sessionManager = {
     const next = mode === 'existing_project' ? 'existing_project' : 'new_project';
     if (this.existingProjectChoice.mode === next) return;
     this.existingProjectChoice.mode = next;
+    // Opening a project the user already has is rarely wanted right after
+    // attaching it, so existing mode starts unchecked; a new project returns to
+    // the blueprint's default. Either way the user can still change it (FR 29).
+    const openToggle = document.getElementById('projectTemplateOpenAfterCreateToggle');
+    if (openToggle) {
+      openToggle.checked =
+        next === 'new_project' &&
+        Boolean(this.workspaceTemplate?.project_entry?.open_after_create_default);
+    }
     this.clearExistingProjectError();
     this.invalidateGroupRequirementReview();
     this.syncExistingProjectChoice();
     this.updateWorkspaceNameHint();
+  },
+
+  // A project file's name without its extension: "Bridge Sketch.rpp" →
+  // "Bridge Sketch".
+  existingProjectBaseName(entryName) {
+    return String(entryName || '')
+      .replace(/\.[^./\\]+$/, '')
+      .trim();
+  },
+
+  // Names the workspace after the chosen project file (without its extension)
+  // while the name is empty or still an autofill; a typed name is kept (FR 23).
+  prefillNameFromExistingProject(entryName) {
+    const base = this.existingProjectBaseName(entryName);
+    const input = document.getElementById('folderNameInput');
+    if (!base || !input) return;
+    const before = input.value;
+    this.prefillTemplateValue(input, base, 'autofillName');
+    if (input.value === before) return;
+    this.invalidateGroupRequirementReview();
+    this.clearWorkspaceNameError();
+    this.updateWorkspaceNameHint();
+    this.refreshWorkspaceCreateCta();
   },
 
   async chooseExistingProjectFolder() {

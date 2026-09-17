@@ -773,7 +773,14 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	// exist. Best-effort: a failure logs and never fails creation.
 	seededStarterTasks := 0
 	if templateResolved && kind != session.WorkspaceKindGroup {
-		seededStarterTasks = h.seedTemplateStarterTasksLogged(ws.ID, resolvedTemplate)
+		starterTemplate := resolvedTemplate
+		if attachPlan != nil {
+			// An attached project gets only the tasks its blueprint allows for
+			// existing projects; a task about the scaffolded file would ask the
+			// user about a file Ori never created.
+			starterTemplate.StarterTasks = starterTasksForAttachedProject(resolvedTemplate)
+		}
+		seededStarterTasks = h.seedTemplateStarterTasksLogged(ws.ID, starterTemplate)
 	}
 
 	// Must run after starter-task seeding above — see

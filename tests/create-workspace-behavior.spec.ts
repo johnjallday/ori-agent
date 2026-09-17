@@ -2590,12 +2590,18 @@ type ExistingProjectReview = {
 
 async function routeExistingProjectBlueprint(
   page: Page,
-  review: (entryName: string) => ExistingProjectReview
+  review: (entryName: string) => ExistingProjectReview,
+  { openAfterCreateDefault = false } = {}
 ) {
   const requests = {
     reviews: [] as Record<string, unknown>[],
-    creates: [] as Record<string, unknown>[]
+    creates: [] as Record<string, unknown>[],
+    opens: [] as string[]
   };
+  await page.route('**/api/workspaces/attached-song/project/open', async route => {
+    requests.opens.push(route.request().method());
+    await route.fulfill({ json: { message: 'Project open request accepted' } });
+  });
   await page.route('**/api/project-templates', async route => {
     await route.fulfill({
       json: {
@@ -2610,7 +2616,10 @@ async function routeExistingProjectBlueprint(
             description: 'Start or attach a song project.',
             builtin: true,
             behavior_profile: 'general',
-            project_entry: { relative_path: '{{name}}.proj', open_after_create_default: false },
+            project_entry: {
+              relative_path: '{{name}}.proj',
+              open_after_create_default: openAfterCreateDefault
+            },
             project_connection: {
               schema_version: 1,
               supported_modes: ['existing_project', 'new_project'],
@@ -2742,4 +2751,40 @@ test('a folder another workspace owns is blocked, and Open existing goes there',
   await page.getByRole('button', { name: 'Open existing' }).click();
   await page.waitForURL('**/workspaces/night-drive');
   expect(requests.creates).toHaveLength(0);
+});
+
+test('an existing project names the workspace and starts with project opening off', async ({
+  page
+}) => {
+  const requests = await routeExistingProjectBlueprint(
+    page,
+    () => ({ entry_name: 'Bridge Sketch.proj', entry_candidates: ['Bridge Sketch.proj'] }),
+    { openAfterCreateDefault: true }
+  );
+  await openCreateModal(page);
+  await stubWorkspaceReview(page);
+
+  await cardByLabel(page, 'Song Project').click();
+  await advanceToWorkspaceDetails(page);
+  const openToggle = page.locator('#projectTemplateOpenAfterCreateToggle');
+  await expect(openToggle).toBeChecked();
+  await page.getByLabel('Use an existing project').check();
+  await expect(openToggle).not.toBeChecked();
+
+  await expect(page.locator('#folderNameInput')).toHaveValue('');
+  await page.getByRole('button', { name: 'Choose project folder' }).click();
+  await expect(page.locator('#folderNameInput')).toHaveValue('Bridge Sketch');
+  await expect(page.locator('#workspaceNameHint')).toHaveText('Folder: bridge-sketch');
+  await expect(page.locator('#workspaceExistingProjectStatus')).toHaveText(
+    'Project file: Bridge Sketch.proj'
+  );
+
+  // Still the user's choice: turned on, the attached project opens after create.
+  await openToggle.check();
+  await advanceToReview(page);
+  await page.locator('#createFolderBtn').click();
+  await page.waitForURL('**/workspaces/two-takes');
+  expect(requests.creates).toHaveLength(1);
+  expect(requests.creates[0].name).toBe('Bridge Sketch');
+  expect(requests.opens).toEqual(['POST']);
 });

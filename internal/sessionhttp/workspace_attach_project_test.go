@@ -5,18 +5,22 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/pathselection"
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	agentstore "github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -188,6 +192,302 @@ func TestCreateWorkspaceAttachesExistingProjectInPlace(t *testing.T) {
 	// Nothing from the scaffold was copied into the workspace folder either.
 	if _, err := os.Stat(filepath.Join(folderRoot, "Night Drive")); !os.IsNotExist(err) {
 		t.Fatalf("attach scaffolded a project folder: %v", err)
+	}
+	// Standalone composition creates no Home (FR 27).
+	if ids, _ := fixture.store.List(); len(ids) != 1 || project.ParentID != "" || project.GetAssistantProjectLink() != nil {
+		t.Fatalf("standalone attach gained a Home: ids=%v parent=%q", ids, project.ParentID)
+	}
+}
+
+func starterTaskTemplate(policy projecttemplates.GroupPolicy) projecttemplates.Template {
+	template := attachTemplate(policy)
+	template.StarterTasks = []projecttemplates.StarterTask{
+		{Description: "Plan the arrangement"},
+		{Description: "Adjust the new project's defaults", ConnectionModes: []projecttemplates.ProjectConnectionMode{projecttemplates.ProjectConnectionNewProject}},
+		{Description: "Survey the existing project", ConnectionModes: []projecttemplates.ProjectConnectionMode{projecttemplates.ProjectConnectionExistingProject}},
+	}
+	return template
+}
+
+func workspaceTaskDescriptions(ws *agentworkspace.Workspace) []string {
+	descriptions := make([]string, 0, len(ws.Tasks))
+	for _, task := range ws.Tasks {
+		descriptions = append(descriptions, task.Description)
+	}
+	slices.Sort(descriptions)
+	return descriptions
+}
+
+func TestCreateWorkspaceSeedsOnlyTheStarterTasksAnAttachedProjectAllows(t *testing.T) {
+	fixture := newAttachFixture(t, starterTaskTemplate(projecttemplates.GroupPolicyNone))
+	external := existingProjectFolder(t, map[string]string{"Night Drive.demo": "project"})
+	token, err := fixture.selections.Issue(external)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, body := reviewAndCreate(t, fixture.handler, attachPayload(fixture.template.ID, token), "starter-attach")
+	if code != http.StatusCreated {
+		t.Fatalf("attach status=%d body=%v", code, body)
+	}
+	attached := mustGetWorkspace(t, fixture.store, body["folder"].(map[string]any)["id"].(string))
+	if got, want := workspaceTaskDescriptions(attached), []string{"Plan the arrangement", "Survey the existing project"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("attached starter tasks = %v, want %v", got, want)
+	}
+
+	// A new project keeps today's behavior: every declared starter task.
+	scaffold := map[string]any{
+		"name": "Fresh Song", "template_id": fixture.template.ID, "group_composition": "standalone", "parent_id": "",
+	}
+	code, body = reviewAndCreate(t, fixture.handler, scaffold, "starter-new")
+	if code != http.StatusCreated {
+		t.Fatalf("new project status=%d body=%v", code, body)
+	}
+	created := mustGetWorkspace(t, fixture.store, body["folder"].(map[string]any)["id"].(string))
+	if got := workspaceTaskDescriptions(created); len(got) != 3 {
+		t.Fatalf("new-project starter tasks = %v, want all three", got)
+	}
+}
+
+type recordingDesktopOpener struct{ opened []string }
+
+func (o *recordingDesktopOpener) OpenFolder(string) error          { return nil }
+func (o *recordingDesktopOpener) RevealInFileManager(string) error { return nil }
+func (o *recordingDesktopOpener) OpenFile(path string) error {
+	o.opened = append(o.opened, path)
+	return nil
+}
+
+func TestAttachedProjectOpensThroughProjectOpen(t *testing.T) {
+	fixture := newAttachFixture(t, attachTemplate(projecttemplates.GroupPolicyNone))
+	external := existingProjectFolder(t, map[string]string{"Night Drive.demo": "project"})
+	token, err := fixture.selections.Issue(external)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, body := reviewAndCreate(t, fixture.handler, attachPayload(fixture.template.ID, token), "open-attach")
+	if code != http.StatusCreated {
+		t.Fatalf("attach status=%d body=%v", code, body)
+	}
+	id := body["folder"].(map[string]any)["id"].(string)
+
+	opener := &recordingDesktopOpener{}
+	workspaceHandler := agentworkspace.NewHTTPHandler(fixture.store, nil, nil)
+	workspaceHandler.SetFolderStore(fixture.handler.workspaceStore)
+	workspaceHandler.SetDesktopOpener(opener)
+	request := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+id+"/project/open", nil)
+	request.SetPathValue("workspaceID", id)
+	request.RemoteAddr = "127.0.0.1:50000"
+	response := httptest.NewRecorder()
+	workspaceHandler.OpenWorkspaceProject(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("project open status=%d body=%s", response.Code, response.Body.String())
+	}
+	if len(opener.opened) != 1 || opener.opened[0] != filepath.Join(external, "Night Drive.demo") {
+		t.Fatalf("opened %v, want the attached project file", opener.opened)
+	}
+	if strings.Contains(response.Body.String(), external) {
+		t.Fatalf("project open exposed the absolute folder: %s", response.Body.String())
+	}
+}
+
+func TestCreateWorkspaceAttachWorksForABlueprintWithNoGroupOrProgram(t *testing.T) {
+	template := attachTemplate(projecttemplates.GroupPolicyNone)
+	template.GroupRequirement = nil
+	template.AssistantProgram = nil
+	fixture := newAttachFixture(t, template)
+	external := existingProjectFolder(t, map[string]string{"Night Drive.demo": "project"})
+	token, err := fixture.selections.Issue(external)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// No group requirement means no placement review: one plain create.
+	code, body := postPolicyWorkspace(t, fixture.handler, map[string]any{
+		"name": "Night Drive", "template_id": fixture.template.ID,
+		"project_connection": map[string]any{"mode_id": "existing_project", "selection_token": token},
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("status=%d body=%v", code, body)
+	}
+	project := mustGetWorkspace(t, fixture.store, body["folder"].(map[string]any)["id"].(string))
+	if _, reference := attachedReference(t, project); reference.Path != external {
+		t.Fatalf("attached reference = %#v", reference)
+	}
+	if ids, _ := fixture.store.List(); len(ids) != 1 || project.ParentID != "" || project.GetAssistantProjectLink() != nil {
+		t.Fatalf("standalone blueprint attach created a Home: %v", ids)
+	}
+
+	// The guided journey's service refuses this blueprint outright, which is
+	// why the modal never goes through it (FR 31a).
+	service := projectconnection.NewService(fixture.store.(interface {
+		agentworkspace.Store
+		GetFolderPath(string) (string, error)
+	}), fixture.selections)
+	other := existingProjectFolder(t, map[string]string{"Other.demo": "project"})
+	otherToken, err := fixture.selections.Issue(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.Preview(context.Background(), projectconnection.Scope{OwnerUserID: "local", RunID: "run", Template: fixture.template},
+		projectconnection.Request{ModeID: projecttemplates.ProjectConnectionExistingProject, SelectionToken: otherToken, WorkspaceName: "Other"})
+	if !errors.Is(err, projectconnection.ErrUnavailable) {
+		t.Fatalf("journey preview error = %v, want ErrUnavailable", err)
+	}
+}
+
+func TestAttachedProjectJoinsTheRequiredGroupExactlyLikeANewProject(t *testing.T) {
+	fixture := newAttachFixture(t, attachTemplate(projecttemplates.GroupPolicyRequired))
+	homeID := preparePolicyHome(t, fixture.handler)
+	createGrouped := func(payload map[string]any, key string) *agentworkspace.Workspace {
+		t.Helper()
+		payload["group_composition"] = "grouped"
+		code, body := reviewAndCreate(t, fixture.handler, payload, key)
+		if code != http.StatusCreated {
+			t.Fatalf("%s status=%d body=%v", key, code, body)
+		}
+		return mustGetWorkspace(t, fixture.store, body["folder"].(map[string]any)["id"].(string))
+	}
+	scaffolded := createGrouped(map[string]any{"name": "Fresh Song", "template_id": fixture.template.ID, "parent_id": ""}, "grouped-new")
+	token, err := fixture.selections.Issue(existingProjectFolder(t, map[string]string{"Night Drive.demo": "project"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	attached := createGrouped(attachPayload(fixture.template.ID, token), "grouped-attach")
+
+	for label, project := range map[string]*agentworkspace.Workspace{"new": scaffolded, "attached": attached} {
+		link := project.GetAssistantProjectLink()
+		if project.ParentID != homeID || link == nil || link.StationWorkspaceID != homeID {
+			t.Fatalf("%s project placement = parent %q link %#v", label, project.ParentID, link)
+		}
+		provenance := canonicalWorkspace(t, fixture.store, project.ID).GetTemplateProvenance()
+		if provenance == nil || provenance.GroupRequirement == nil || provenance.GroupRequirement.SelectedComposition != "grouped" {
+			t.Fatalf("%s provenance = %#v", label, provenance)
+		}
+	}
+	home := mustGetWorkspace(t, fixture.store, homeID)
+	if state := home.GetAssistantProgramState(); state == nil ||
+		!slices.Contains(state.LinkedProjectIDs, scaffolded.ID) || !slices.Contains(state.LinkedProjectIDs, attached.ID) {
+		t.Fatalf("Home links = %#v", home.GetAssistantProgramState())
+	}
+}
+
+// changeFolderDuringCreate makes the next create find the folder changed at
+// the last moment before recording, the point every later failure also hits.
+func changeFolderDuringCreate(t *testing.T, handler *Handler, folder string) {
+	t.Helper()
+	handler.SetWorkspaceRootResolver(func() string {
+		if err := os.WriteFile(filepath.Join(folder, "Late Arrival.demo"), []byte("new"), 0o600); err != nil {
+			t.Error(err)
+		}
+		return ""
+	})
+}
+
+func TestFailedAttachRemovesTheAgentsItSeeded(t *testing.T) {
+	template := attachTemplate(projecttemplates.GroupPolicyNone)
+	template.Agents = []projecttemplates.AgentSpec{{Name: "Session Producer", Role: "orchestrator"}, {Name: "Session Engineer"}}
+	fixture := newAttachFixture(t, template)
+	agents, err := agentstore.NewFileStore(filepath.Join(t.TempDir(), "agents.json"), types.Settings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.handler.SetAgentStore(agents)
+	external := existingProjectFolder(t, map[string]string{"Night Drive.demo": "project"})
+	before := folderChecksum(t, external)
+	token, err := fixture.selections.Issue(external)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := attachPayload(fixture.template.ID, token)
+	review := map[string]any{"group_requirement_review": true}
+	for field, value := range payload {
+		review[field] = value
+	}
+	code, body := postPolicyWorkspace(t, fixture.handler, review)
+	if code != http.StatusOK {
+		t.Fatalf("review status=%d body=%v", code, body)
+	}
+	payload["group_review_token"] = body["group_requirement_review"].(map[string]any)["review_token"]
+	payload["idempotency_key"] = "agents-rollback"
+
+	changeFolderDuringCreate(t, fixture.handler, external)
+	code, body = postPolicyWorkspace(t, fixture.handler, payload)
+	if code != http.StatusConflict {
+		t.Fatalf("status=%d body=%v", code, body)
+	}
+	for _, name := range []string{"Session Producer", "Session Engineer"} {
+		if _, exists := agents.GetAgent(name); exists {
+			t.Fatalf("seeded agent %q survived the failed attach", name)
+		}
+	}
+	if ids, _ := fixture.store.List(); len(ids) != 0 {
+		t.Fatalf("failed attach left workspaces: %v", ids)
+	}
+	if folders := workspaceFolders(t, fixture.root); len(folders) != 0 {
+		t.Fatalf("failed attach left workspace folders: %v", folders)
+	}
+	delete(before, "Late Arrival.demo")
+	after := folderChecksum(t, external)
+	delete(after, "Late Arrival.demo")
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("the user's own files changed")
+	}
+}
+
+func TestFailedAttachLeavesNoHomeBehind(t *testing.T) {
+	// A program blueprint without a group requirement links its Home only after
+	// the project is recorded, so a failed attach never reaches it.
+	legacy := attachTemplate(projecttemplates.GroupPolicyNone)
+	legacy.GroupRequirement = nil
+	legacy.AssistantProgram = journeyAssistantProgram()
+	fixture := newAttachFixture(t, legacy)
+	external := existingProjectFolder(t, map[string]string{"Night Drive.demo": "project"})
+	token, err := fixture.selections.Issue(external)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changeFolderDuringCreate(t, fixture.handler, external)
+	code, body := postPolicyWorkspace(t, fixture.handler, map[string]any{
+		"name": "Night Drive", "template_id": fixture.template.ID,
+		"project_connection": map[string]any{"mode_id": "existing_project", "selection_token": token},
+	})
+	if code != http.StatusConflict {
+		t.Fatalf("legacy program status=%d body=%v", code, body)
+	}
+	if ids, _ := fixture.store.List(); len(ids) != 0 {
+		t.Fatalf("failed attach left a workspace or Home: %v", ids)
+	}
+
+	// A required group's Home is prepared by its own confirmed action, never by
+	// the create; a failed attach leaves it exactly as it was, with no project.
+	required := newAttachFixture(t, attachTemplate(projecttemplates.GroupPolicyRequired))
+	homeID := preparePolicyHome(t, required.handler)
+	folder := existingProjectFolder(t, map[string]string{"Night Drive.demo": "project"})
+	requiredToken, err := required.selections.Issue(folder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := attachPayload(required.template.ID, requiredToken)
+	payload["group_composition"] = "grouped"
+	review := map[string]any{"group_requirement_review": true}
+	for field, value := range payload {
+		review[field] = value
+	}
+	code, body = postPolicyWorkspace(t, required.handler, review)
+	if code != http.StatusOK {
+		t.Fatalf("grouped review status=%d body=%v", code, body)
+	}
+	payload["group_review_token"] = body["group_requirement_review"].(map[string]any)["review_token"]
+	payload["idempotency_key"] = "grouped-rollback"
+	changeFolderDuringCreate(t, required.handler, folder)
+	code, body = postPolicyWorkspace(t, required.handler, payload)
+	if code != http.StatusConflict {
+		t.Fatalf("grouped status=%d body=%v", code, body)
+	}
+	if ids, _ := required.store.List(); len(ids) != 1 || ids[0] != homeID {
+		t.Fatalf("failed grouped attach left %v, want only the prepared Home", ids)
+	}
+	if state := mustGetWorkspace(t, required.store, homeID).GetAssistantProgramState(); state == nil || len(state.LinkedProjectIDs) != 0 {
+		t.Fatalf("prepared Home gained a project link: %#v", state)
 	}
 }
 

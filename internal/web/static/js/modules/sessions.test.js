@@ -3685,6 +3685,95 @@ test('Review states the folder, project file, destination, and that files stay u
   );
 });
 
+test('the chosen project file names an unnamed workspace, never a typed one (FR 23)', async () => {
+  const pick = (token, folder) => ({
+    success: true,
+    selected: true,
+    path: `/p/${folder}`,
+    selection_token: token
+  });
+  const { manager, elements } = existingProjectManager({
+    pickerResults: [
+      pick('one', 'Bridge Sketch'),
+      pick('two', 'Night Drive'),
+      pick('three', 'Other')
+    ],
+    reviewResults: [
+      folderReview(['Bridge Sketch.proj']),
+      folderReview(['Night Drive.v2.proj']),
+      folderReview(['Other.proj'])
+    ]
+  });
+  const name = elements.folderNameInput;
+  manager.handleWorkspaceTemplateSelected(existingProjectTemplate);
+  assert.equal(name.value, '', 'a project file named after the workspace leaves the name empty');
+  manager.setExistingProjectMode('existing_project');
+
+  await manager.chooseExistingProjectFolder();
+  assert.equal(name.value, 'Bridge Sketch');
+  assert.equal(elements.workspaceNameHint.textContent, 'Folder: bridge-sketch');
+
+  // Another folder replaces only that autofill, dropping just the extension.
+  await manager.chooseExistingProjectFolder();
+  assert.equal(name.value, 'Night Drive.v2');
+
+  name.value = 'My Own Name';
+  await manager.chooseExistingProjectFolder();
+  assert.equal(name.value, 'My Own Name', 'typed names are never replaced');
+});
+
+test('a readiness recheck keeps the name an existing project gave the workspace', async () => {
+  const { manager, elements } = existingProjectManager({
+    pickerResults: [
+      { success: true, selected: true, path: '/p/Bridge Sketch', selection_token: 'bridge' }
+    ],
+    reviewResults: [folderReview(['Bridge Sketch.proj'])]
+  });
+  const name = elements.folderNameInput;
+  manager.handleWorkspaceTemplateSelected(existingProjectTemplate);
+  manager.setExistingProjectMode('existing_project');
+  await manager.chooseExistingProjectFolder();
+  assert.equal(name.value, 'Bridge Sketch');
+
+  // The same blueprint emitted again (e.g. after a Team conflict) used to
+  // clear this autofill as if it were a blueprint-derived name.
+  manager.handleWorkspaceTemplateSelected({ ...existingProjectTemplate });
+  assert.equal(name.value, 'Bridge Sketch');
+
+  // A different blueprint starts over, so the project-file name goes too.
+  manager.handleWorkspaceTemplateSelected({ ...existingProjectTemplate, id: 'another-song' });
+  assert.equal(name.value, '');
+});
+
+test('Open project after creation starts off for an existing project (FR 29)', () => {
+  const { manager, elements } = existingProjectManager();
+  const toggle = { checked: true };
+  elements.projectTemplateOpenAfterCreateToggle = toggle;
+  const launching = {
+    ...existingProjectTemplate,
+    project_entry: { relative_path: '{{name}}.proj', open_after_create_default: true }
+  };
+  manager.handleWorkspaceTemplateSelected(launching);
+
+  manager.setExistingProjectMode('existing_project');
+  assert.equal(toggle.checked, false, 'existing project');
+  toggle.checked = true; // still the user's choice
+  assert.equal(manager.existingProjectChoice.mode, 'existing_project');
+
+  manager.setExistingProjectMode('new_project');
+  assert.equal(toggle.checked, true, 'a new project returns to the blueprint default');
+
+  manager.handleWorkspaceTemplateSelected({
+    ...existingProjectTemplate,
+    id: 'quiet-song',
+    project_entry: { relative_path: '{{name}}.proj', open_after_create_default: false }
+  });
+  toggle.checked = false;
+  manager.setExistingProjectMode('existing_project');
+  manager.setExistingProjectMode('new_project');
+  assert.equal(toggle.checked, false, 'a blueprint that does not open stays off');
+});
+
 test('a duplicate refused at create returns to Details with the same block', () => {
   const { manager, elements } = existingProjectManager();
   manager.handleWorkspaceTemplateSelected(existingProjectTemplate);
