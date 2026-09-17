@@ -23,6 +23,7 @@ http://localhost:8765/api
 - [Tags API](#tags-api)
 - [Workspace Groups](#workspace-groups)
 - [Scheduler Nodes API](#scheduler-nodes-api)
+- [Workspace Map Activity API](#workspace-map-activity-api)
 - [Custom Workflows API](#custom-workflows-api)
 - [Examples](#examples)
 
@@ -1292,6 +1293,171 @@ Scheduler nodes emit Server-Sent Events (SSE) for real-time updates:
     "timestamp": "2025-12-04T09:00:00Z"
   }
 }
+```
+
+## Workspace Map Activity API
+
+The maps show work while it happens and deliver each finished result as a
+**parcel** that waits until it is opened. Work is a task run, a Daily Brief
+generation, or an unattended File Janitor scan.
+
+The feed carries names, ids, phases, outcomes and counts only. It never carries
+tool arguments, tool results, task descriptions, brief content, file names or
+error text.
+
+**Feature flags**
+
+| Variable | Default | Effect |
+|---|---|---|
+| `ORI_MAP_SHOW_ENABLED` | on | `0`, `false`, `no`, `off` or `disabled` turns the feature off: every endpoint below answers 404, no parcels are made, and the maps look as they did before. |
+| `ORI_DEV_SCRIPTED_TASK_RUNS` | off | **Development only.** `1` makes every task run play a fixed script of real events (thinking, two tool calls, thinking, done) instead of calling a model. `[fail]` in a task's description makes it fail after its first tool call. Never set it outside a demo. |
+
+### Get Activity Snapshot
+
+**Endpoint:** `GET /api/workspace-map/activity`
+
+What is running now, and every unopened parcel.
+
+**Response:**
+```json
+{
+  "running": [
+    {
+      "kind": "task",
+      "activity_id": "task:ws-1:t-1",
+      "workspace_id": "ws-1",
+      "agent_name": "Theo",
+      "task_id": "t-1",
+      "started_at": "2026-09-17T10:00:00Z",
+      "blocked": false,
+      "step": { "type": "tool_call", "tool_name": "web_search" },
+      "at": "2026-09-17T10:00:04Z"
+    }
+  ],
+  "parcels": [
+    {
+      "id": "p-1",
+      "workspace_id": "ws-1",
+      "kind": "task",
+      "title": "Compare the launch notes",
+      "agent_name": "Theo",
+      "outcome": "succeeded",
+      "produced_at": "2026-09-17T09:58:00Z"
+    }
+  ]
+}
+```
+
+### Activity Stream
+
+**Endpoint:** `GET /api/workspace-map/activity/stream` (Server-Sent Events)
+
+The first event is always a `snapshot` with the same body as the snapshot
+endpoint. After that the stream sends `activity` and `parcel` events, and a
+comment line every 15 seconds to keep the connection open. A client that falls
+behind may miss events; reconnecting sends a fresh snapshot.
+
+**`activity` event**
+```json
+{
+  "kind": "task",
+  "phase": "finished",
+  "activity_id": "task:ws-1:t-1",
+  "workspace_id": "ws-1",
+  "agent_name": "Theo",
+  "task_id": "t-1",
+  "outcome": "succeeded",
+  "parcel_id": "p-1",
+  "at": "2026-09-17T10:00:12Z"
+}
+```
+
+| Field | Values |
+|---|---|
+| `kind` | `task`, `daily_brief`, `file_janitor` |
+| `phase` | `started`, `step`, `blocked`, `resumed`, `finished` |
+| `step.type` | `thinking`, `tool_call`, `tool_result` (with `ok`), `delegation` — task steps only |
+| `outcome` | `succeeded`, `partial`, `failed`, `timeout`; empty when a run stopped without finishing (cancelled, deleted, or silent for 10 minutes) |
+| `count` | File Janitor finishes only: new files waiting for review |
+| `parcel_id` | Set when the finish produced a parcel |
+
+Daily Brief and File Janitor activities send only `started` and `finished`.
+
+**`parcel` event** — a parcel row (as in the snapshot). With `"opened": true` the
+parcel is no longer waiting: it was opened, swept after 14 days, or deleted with
+its task or workspace.
+
+**Which finishes produce a parcel**
+
+- A task run that completed, failed or timed out — except a Farm run while the
+  City Economy is on (that is its Harvest) and a ticket accepted by hand.
+- A Daily Brief generated **by the schedule**. A brief the user opened or
+  refreshed gets none.
+- A File Janitor scan that found **at least one** new file to review.
+
+### Open a Parcel
+
+**Endpoint:** `POST /api/workspace-map/parcels/{id}/open`
+
+Marks the parcel opened (the first call only) and returns the result card. Safe
+to call more than once. 404 when the parcel does not exist.
+
+**Response:**
+```json
+{
+  "parcel": {
+    "id": "p-1",
+    "workspace_id": "ws-1",
+    "kind": "task",
+    "ref_id": "t-1",
+    "title": "Compare the launch notes",
+    "agent_name": "Theo",
+    "outcome": "succeeded",
+    "started_at": "2026-09-17T09:56:18Z",
+    "produced_at": "2026-09-17T09:58:00Z",
+    "opened_at": "2026-09-17T10:02:00Z"
+  },
+  "duration_seconds": 102,
+  "summary": "Two dates disagree.",
+  "rewards": {
+    "xp": {
+      "awarded": 50,
+      "level_before": 1,
+      "level_after": 2,
+      "progress_before": 0.8,
+      "progress_after": 0.3,
+      "stage_before": "spark",
+      "stage_after": "infant"
+    },
+    "craft": 5
+  }
+}
+```
+
+`summary` is present for a successful run and `failure_reason` for a failed one.
+Brief and janitor parcels carry a fixed sentence as their summary ("Your brief
+for Tuesday is ready.", "3 files are ready to review."). `rewards` and each of
+its fields are left out when nothing was awarded.
+
+### Open Parcels by Reference
+
+**Endpoint:** `POST /api/workspace-map/parcels/open-by-ref`
+
+Called by any other place a result is seen, so its parcel stops waiting.
+
+**Request Body:**
+```json
+{ "kind": "task", "workspace_id": "ws-1", "ref_id": "t-1" }
+```
+
+`kind` is `task`, `daily_brief` or `file_janitor`. `ref_id` is required for a
+task. The Daily Brief and the File Janitor console show everything that is
+waiting, so they leave `ref_id` out and open every parcel of their kind in the
+workspace.
+
+**Response:**
+```json
+{ "opened": 1 }
 ```
 
 ## Custom Workflows API

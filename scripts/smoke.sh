@@ -2133,6 +2133,50 @@ smoke_show_stream() {
   curl -s -N --max-time "$seconds" "$BASE_URL/api/workspace-map/activity/stream" || true
 }
 
+# smoke_show_wait blocks until the demo server answers, so a rebuild-and-restart
+# can be followed by one command instead of a hand-written polling loop.
+smoke_show_wait() {
+  local waited=0
+  until curl -sf -o /dev/null "$BASE_URL/"; do
+    ((waited++ < 300)) || fail "server at $BASE_URL did not answer within 300s"
+    sleep 1
+  done
+  echo "ok   $BASE_URL is answering"
+}
+
+# smoke_show_janitor installs File Janitor on a workspace and grants it a
+# folder (created if missing), so its watcher scans become map activities.
+smoke_show_janitor() {
+  local workspace_id="${3:-}" folder="${4:-}"
+  [[ -n "$workspace_id" && -n "$folder" ]] || fail "usage: showjanitor <base-url> <workspace-id> <folder>"
+  mkdir -p "$folder"
+  folder="$(canonical_dir "$folder")"
+  expect_status 200 POST "$BASE_URL/api/workspaces/$workspace_id/capabilities/file-janitor/install" '{"source":"in-place"}'
+  expect_status 200 POST "$BASE_URL/api/workspaces/$workspace_id/file-janitor/setup" \
+    "$(FOLDER="$folder" python3 -c 'import json,os; print(json.dumps({"path": os.environ["FOLDER"]}))')"
+  echo "ok   File Janitor watches $folder"
+}
+
+# smoke_show_drop moves settled files into a watched folder. The scanner only
+# proposes files that look finished, and the watcher wakes on rename, so each
+# file is written elsewhere, backdated six hours, then moved in. The scan runs
+# after the watcher's five-minute settle window.
+smoke_show_drop() {
+  local folder="${3:-}"
+  shift 3 || true
+  [[ -n "$folder" && $# -gt 0 ]] || fail "usage: showdrop <base-url> <folder> <file-name>..."
+  local staging stamp name
+  staging="$(dirname "$folder")/.showdrop-staging"
+  mkdir -p "$staging"
+  stamp=$(date -v-6H +%Y%m%d%H%M 2>/dev/null || date -d '-6 hours' +%Y%m%d%H%M)
+  for name in "$@"; do
+    printf 'demo file %s\n' "$name" >"$staging/$name"
+    touch -t "$stamp" "$staging/$name"
+    mv "$staging/$name" "$folder/$name"
+    echo "ok   dropped $name"
+  done
+}
+
 # smoke_integration covers the reviewed integration floor
 # (tasks/prd-reviewed-integration-latest-release.md): wait for the server, skip
 # onboarding, optionally install one plugin source, then print the install
@@ -2232,6 +2276,9 @@ showseed) smoke_show_seed ;;
 showrun) smoke_show_run "$@" ;;
 showmarkfailed) smoke_show_markfailed "$@" ;;
 showstream) smoke_show_stream "$@" ;;
+showwait) smoke_show_wait ;;
+showjanitor) smoke_show_janitor "$@" ;;
+showdrop) smoke_show_drop "$@" ;;
 integration) smoke_integration "$@" ;;
 reaper-blueprint) smoke_reaper_blueprint ;;
 blueprint-details) smoke_blueprint_details "$@" ;;
@@ -2267,6 +2314,9 @@ janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
   echo "  $0 showrun <base-url> <ws> [description] # task-run show: create and start a task ([fail] fails it)" >&2
   echo "  $0 showmarkfailed <base-url> <task-id>    # task-run show: answer a blocked task with mark failed" >&2
   echo "  $0 showstream <base-url> [seconds]       # task-run show: print the activity stream" >&2
+  echo "  $0 showwait <base-url>                   # task-run show: wait until the demo server answers" >&2
+  echo "  $0 showjanitor <base-url> <ws> <folder>  # task-run show: install File Janitor and grant a folder" >&2
+  echo "  $0 showdrop <base-url> <folder> <name>... # task-run show: move settled files in (scan runs ~5 min later)" >&2
   echo "  $0 integration <base-url> [source]       # reviewed integration floor: install a source, print the install step and updates" >&2
   echo "  $0 starter <base-url> <stage> [flags]    # starter missions: wait for the server, run a demo stage" >&2
   echo "  $0 reaper-blueprint <base-url>           # onboard + install/enable the reviewed REAPER blueprint" >&2

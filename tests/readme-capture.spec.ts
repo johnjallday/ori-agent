@@ -894,6 +894,11 @@ async function installFixtureRoutes(page: Page) {
       });
       return;
     }
+    // Seeing the Daily Brief marks its parcels opened; there are none here.
+    if (url.pathname === '/api/workspace-map/parcels/open-by-ref') {
+      await json(route, { opened: 0 });
+      return;
+    }
     if (url.pathname === '/api/orchestration/workflow/stream') {
       await route.fulfill({
         status: 200,
