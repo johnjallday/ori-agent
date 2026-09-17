@@ -3,6 +3,7 @@ package port
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"net"
 	"os/exec"
@@ -23,6 +24,11 @@ var oriProcessNames = map[string]struct{}{
 	"ori-menubar": {},
 }
 
+// ownerLookupTimeout bounds each external process lookup. On Windows these
+// start PowerShell, which can take tens of seconds on a cold machine; a lookup
+// that runs out of time is treated like one that found nothing.
+var ownerLookupTimeout = 10 * time.Second
+
 func IsPortAvailable(port int) bool {
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
@@ -30,6 +36,23 @@ func IsPortAvailable(port int) bool {
 	}
 	_ = listener.Close()
 	return true
+}
+
+// BindProvesFree reports whether a successful IsPortAvailable bind proves that
+// no other process listens on the port, so the slower owner lookup can be
+// skipped. Windows refuses a wildcard bind beside another process's loopback
+// listener. macOS allows it, so a stale server there is only found by lookup.
+func BindProvesFree() bool {
+	return runtime.GOOS == "windows"
+}
+
+func lookupOutput(name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), ownerLookupTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
+	// A descendant still holding stdout must not extend the deadline.
+	cmd.WaitDelay = time.Second
+	return cmd.Output()
 }
 
 func FindPortProcesses(port int) ([]ProcessInfo, error) {
@@ -52,8 +75,7 @@ func ResolveProcessName(pid int) (string, error) {
 
 	switch runtime.GOOS {
 	case "darwin", "linux":
-		cmd := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=")
-		output, err := cmd.Output()
+		output, err := lookupOutput("ps", "-p", strconv.Itoa(pid), "-o", "comm=")
 		if err != nil {
 			return "", err
 		}
@@ -65,8 +87,7 @@ func ResolveProcessName(pid int) (string, error) {
 
 	case "windows":
 		psCmd := fmt.Sprintf(`(Get-Process -Id %d -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ProcessName)`, pid)
-		cmd := exec.Command("powershell", "-NoProfile", "-Command", psCmd)
-		output, err := cmd.Output()
+		output, err := lookupOutput("powershell", "-NoProfile", "-Command", psCmd)
 		if err != nil {
 			return "", err
 		}
@@ -145,8 +166,7 @@ func findPortPIDs(port int) []int {
 
 	switch runtime.GOOS {
 	case "darwin", "linux":
-		cmd := exec.Command("lsof", "-ti", fmt.Sprintf("tcp:%d", port), "-sTCP:LISTEN")
-		output, err := cmd.Output()
+		output, err := lookupOutput("lsof", "-ti", fmt.Sprintf("tcp:%d", port), "-sTCP:LISTEN")
 		if err != nil {
 			return nil
 		}
@@ -154,8 +174,7 @@ func findPortPIDs(port int) []int {
 
 	case "windows":
 		psCmd := fmt.Sprintf(`Get-NetTCPConnection -LocalPort %d -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess`, port)
-		cmd := exec.Command("powershell", "-NoProfile", "-Command", psCmd)
-		output, err := cmd.Output()
+		output, err := lookupOutput("powershell", "-NoProfile", "-Command", psCmd)
 		if err != nil {
 			return nil
 		}

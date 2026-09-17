@@ -395,6 +395,11 @@ func openBrowser(url string) error {
 // ensurePortAvailable stops prior ori processes when safe and prompts before
 // terminating non-ori processes that occupy the port.
 func ensurePortAvailable(port int) error {
+	// Where a free bind is proof, skip the owner lookup: on Windows it starts
+	// PowerShell, which stalled installed startups past a 45s health deadline.
+	if portutil.BindProvesFree() && portutil.IsPortAvailable(port) {
+		return nil
+	}
 	processes, err := portutil.FindPortProcesses(port)
 	if err != nil {
 		logger.Debug("Failed to inspect port owners", logger.Fields{"port": port, "error": err.Error()})
