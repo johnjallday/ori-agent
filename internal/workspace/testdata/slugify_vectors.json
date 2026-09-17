@@ -1,0 +1,32 @@
+{
+  "description": "Shared by internal/workspace/slugify_test.go (Slugify) and internal/web/static/js/modules/sessions.test.js (slugifyWorkspaceName). The Create Workspace name hint previews the folder and a {{name}} project file with the browser copy, so both must slug every name identically.",
+  "vectors": [
+    { "input": "Night Drive", "slug": "night-drive" },
+    { "input": "My Project", "slug": "my-project" },
+    { "input": "Hello, World! @#$%", "slug": "hello-world" },
+    { "input": "café résumé", "slug": "cafe-resume" },
+    { "input": "café", "slug": "cafe" },
+    { "input": "  hello world  ", "slug": "hello-world" },
+    { "input": "", "slug": "untitled" },
+    { "input": "   ", "slug": "untitled" },
+    { "input": "!@#$%^&*()", "slug": "untitled" },
+    { "input": "my---project", "slug": "my-project" },
+    { "input": "-my-project-", "slug": "my-project" },
+    { "input": "my project 🚀", "slug": "my-project" },
+    { "input": "my.project_name", "slug": "my-project-name" },
+    { "input": "my\tproject\nname", "slug": "my-project-name" },
+    { "input": "über straße", "slug": "uber-stra-e" },
+    { "input": "İstanbul Session", "slug": "istanbul-session" },
+    { "input": "Kelvin", "slug": "kelvin" },
+    { "input": "Æther", "slug": "ther" },
+    { "input": "Song №5", "slug": "song-5" },
+    {
+      "input": "this-is-a-very-long-workspace-name-that-should-be-truncated-at-sixty-four-characters-exactly",
+      "slug": "this-is-a-very-long-workspace-name-that-should-be-truncated-at-s"
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa b",
+      "slug": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ]
+}

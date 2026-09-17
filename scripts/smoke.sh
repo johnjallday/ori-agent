@@ -9,11 +9,15 @@
 # analyzer, so it prompts no matter how many rules exist. A script is one
 # stable token. Put the shell in here, not in the tool call.
 #
-# This worktree's feature: Starter missions (tasks/prd-starter-missions.md):
-# starter, which waits for the server and runs a stage of
-# scripts/demo-starter-missions.mjs.
+# This worktree's feature: Blueprint-aware Create Workspace, Slice A
+# (tasks/prd-blueprint-aware-create-workspace.md): reaper-blueprint prepares a
+# fresh sandbox with the reviewed REAPER blueprint; blueprint-details prints
+# what a create stored.
 # Earlier features' checks are kept, because the point of one stable name is
-# that it accumulates: Retire the Agent Type field
+# that it accumulates: Reviewed integration floor
+# (tasks/prd-reviewed-integration-latest-release.md): integration,
+# Starter missions (tasks/prd-starter-missions.md),
+# Retire the Agent Type field
 # (tasks/prd-retire-agent-type.md), City Economy (tasks/prd-city-economy.md), Agents Page
 # UX (tasks/prd-agents-page-ux.md), Workspace
 # Planning Workflow (tasks/prd-workspace-planning-policy.md) and the
@@ -2100,9 +2104,73 @@ print("actions", [a["id"] for a in step.get("actions", [])])' || fail "could not
   echo "updates $(curl -sf "$BASE_URL/api/plugins/updates")"
 }
 
+# smoke_reaper_blueprint prepares a fresh demo sandbox for the blueprint-aware
+# Create Workspace checks (tasks/prd-blueprint-aware-create-workspace.md):
+# completes onboarding FIRST (a plugin installed before it vanishes on
+# restart), installs the reviewed reaper-plugin fallback commit that
+# internal/reviewedintegration/entries.go records, enables it, and asserts the
+# Reaper Song blueprint is listed with its required group.
+smoke_reaper_blueprint() {
+  local root commit ready=""
+  root="$(cd "$(dirname "$0")/.." && pwd -P)"
+  commit=$(grep -o 'FallbackCommit: *"[0-9a-f]*"' "$root/internal/reviewedintegration/entries.go" |
+    head -1 | grep -o '[0-9a-f]\{40\}')
+  [[ -n "$commit" ]] || fail "no reviewed reaper-plugin FallbackCommit in entries.go"
+  for _ in $(seq 1 60); do
+    if curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/onboarding/status" | grep -q 200; then
+      ready=1
+      break
+    fi
+    sleep 2
+  done
+  [[ -n "$ready" ]] || fail "no server answered at $BASE_URL within 120s"
+  expect_status 200 POST "$BASE_URL/api/onboarding/complete" '{}'
+  local installed
+  installed=$(curl -s -X POST "$BASE_URL/api/plugins/install" \
+    -H 'Content-Type: application/json' -H "Origin: $BASE_URL" \
+    -d "{\"source\":\"https://github.com/johnjallday/reaper-plugin#sha=$commit\",\"confirm\":true}" |
+    json_field installed)
+  [[ "$installed" == "True" ]] || fail "reaper-plugin@$commit did not install"
+  echo "ok   installed reaper-plugin@${commit:0:12}"
+  local enabled
+  enabled=$(curl -s -X POST "$BASE_URL/api/plugins/reaper-plugin/enable" \
+    -H 'Content-Type: application/json' -H "Origin: $BASE_URL" -d '{}' | json_field enabled)
+  [[ "$enabled" == "True" ]] || fail "reaper-plugin did not enable"
+  echo "ok   enabled reaper-plugin"
+  local policy
+  policy=$(curl -s "$BASE_URL/api/project-templates" | python3 -c '
+import sys, json
+for t in json.load(sys.stdin).get("templates", []):
+    if t.get("id") == "plugin:reaper-plugin:reaper-song":
+        print((t.get("group_requirement") or {}).get("policy", ""))
+        break')
+  [[ "$policy" == "required" ]] || fail "Reaper Song is not listed with a required group (got '$policy')"
+  echo "ok   Reaper Song blueprint listed (group_requirement.policy=required)"
+  echo "PASS reaper blueprint ready at $BASE_URL"
+}
+
+# smoke_blueprint_details prints what a Create Workspace request stored for one
+# workspace: its parent group, description, and workspace_bootstrap.
+smoke_blueprint_details() {
+  local ws="${3:-}"
+  [[ -n "$ws" ]] || fail "usage: $0 blueprint-details <base-url> <workspace-id>"
+  curl -s "$BASE_URL/api/workspaces/$ws" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+w = d.get("workspace", d)
+print(json.dumps({
+    "name": w.get("name"),
+    "parent_id": w.get("parent_id"),
+    "description": w.get("description"),
+    "workspace_bootstrap": (w.get("shared_data") or {}).get("workspace_bootstrap"),
+}, indent=2))'
+}
+
 case "${1:-}" in
 serve) serve_isolated "${2:-8931}" "${3:-default}" ;;
 integration) smoke_integration "$@" ;;
+reaper-blueprint) smoke_reaper_blueprint ;;
+blueprint-details) smoke_blueprint_details "$@" ;;
 starter) smoke_starter "$@" ;;
 agent-type-api) smoke_agent_type_api ;;
 agent-type-strip) smoke_agent_type_strip "$@" ;;
@@ -2133,6 +2201,8 @@ janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
   echo "  $0 serve [port] [sandbox-name]           # run an ISOLATED demo server (Ctrl-C to stop)" >&2
   echo "  $0 integration <base-url> [source]       # reviewed integration floor: install a source, print the install step and updates" >&2
   echo "  $0 starter <base-url> <stage> [flags]    # starter missions: wait for the server, run a demo stage" >&2
+  echo "  $0 reaper-blueprint <base-url>           # onboard + install/enable the reviewed REAPER blueprint" >&2
+  echo "  $0 blueprint-details <base-url> <ws-id>  # parent, description, workspace_bootstrap of a workspace" >&2
   echo "  $0 agent-type-api <base-url>             # retired agent type: API accepts and never echoes it" >&2
   echo "  $0 agent-type-strip [port]               # retired agent type: boot strips it from a seeded sandbox" >&2
   echo "  $0 agentseed <base-url> [sandbox-name]   # fill a sandbox with a demo agent roster" >&2
