@@ -14,7 +14,9 @@
 # fresh sandbox with the reviewed REAPER blueprint; blueprint-details prints
 # what a create stored.
 # Earlier features' checks are kept, because the point of one stable name is
-# that it accumulates: Starter missions (tasks/prd-starter-missions.md),
+# that it accumulates: Reviewed integration floor
+# (tasks/prd-reviewed-integration-latest-release.md): integration,
+# Starter missions (tasks/prd-starter-missions.md),
 # Retire the Agent Type field
 # (tasks/prd-retire-agent-type.md), City Economy (tasks/prd-city-economy.md), Agents Page
 # UX (tasks/prd-agents-page-ux.md), Workspace
@@ -2071,18 +2073,49 @@ print(any(t.get("id") == "downloads-janitor" for t in d.get("templates", [])))')
   echo "PASS janitor upgrade verify"
 }
 
+# smoke_integration covers the reviewed integration floor
+# (tasks/prd-reviewed-integration-latest-release.md): wait for the server, skip
+# onboarding, optionally install one plugin source, then print the install
+# quest's integration projection and the cached plugin update snapshot. It
+# asserts nothing about versions, because the latest release moves; read the
+# printed fields against the manual test guide.
+smoke_integration() {
+  local source="${3:-}"
+  local waited=0
+  until curl -sf -o /dev/null "$BASE_URL/"; do
+    ((waited++ < 180)) || fail "server at $BASE_URL did not answer"
+    sleep 1
+  done
+  curl -sf -X POST "$BASE_URL/api/onboarding/skip" >/dev/null || fail "could not skip onboarding"
+  if [[ -n "$source" ]]; then
+    curl -sf -X POST "$BASE_URL/api/plugins/install" -H 'Content-Type: application/json' \
+      -d "$(python3 -c 'import json,sys; print(json.dumps({"source": sys.argv[1], "confirm": True}))' "$source")" |
+      python3 -c 'import json,sys; p=json.load(sys.stdin).get("plugin",{}); print("installed", p.get("name"), p.get("version"), p.get("source"))' ||
+      fail "install of $source failed"
+  fi
+  curl -sf "$BASE_URL/api/host-setup-quests/install_ori_reaper" | python3 -c '
+import json, sys
+journey = json.load(sys.stdin)["setup_journey"]
+step = journey["steps"][0]
+integration = step.get("integration") or {}
+fields = ["expected_version", "minimum_version", "release_checked", "installed_version", "verified", "replacement_required", "enabled"]
+print("install step", step.get("status"), step.get("reason_code") or "-", {k: integration.get(k) for k in fields})
+print("actions", [a["id"] for a in step.get("actions", [])])' || fail "could not read the install quest"
+  echo "updates $(curl -sf "$BASE_URL/api/plugins/updates")"
+}
+
 # smoke_reaper_blueprint prepares a fresh demo sandbox for the blueprint-aware
 # Create Workspace checks (tasks/prd-blueprint-aware-create-workspace.md):
 # completes onboarding FIRST (a plugin installed before it vanishes on
-# restart), installs the reviewed reaper-plugin commit that
-# internal/reviewedintegration/entries.go pins, enables it, and asserts the
+# restart), installs the reviewed reaper-plugin fallback commit that
+# internal/reviewedintegration/entries.go records, enables it, and asserts the
 # Reaper Song blueprint is listed with its required group.
 smoke_reaper_blueprint() {
   local root commit ready=""
   root="$(cd "$(dirname "$0")/.." && pwd -P)"
-  commit=$(grep -o 'SourceCommit: *"[0-9a-f]*"' "$root/internal/reviewedintegration/entries.go" |
+  commit=$(grep -o 'FallbackCommit: *"[0-9a-f]*"' "$root/internal/reviewedintegration/entries.go" |
     head -1 | grep -o '[0-9a-f]\{40\}')
-  [[ -n "$commit" ]] || fail "no reviewed reaper-plugin SourceCommit in entries.go"
+  [[ -n "$commit" ]] || fail "no reviewed reaper-plugin FallbackCommit in entries.go"
   for _ in $(seq 1 60); do
     if curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/onboarding/status" | grep -q 200; then
       ready=1
@@ -2135,6 +2168,7 @@ print(json.dumps({
 
 case "${1:-}" in
 serve) serve_isolated "${2:-8931}" "${3:-default}" ;;
+integration) smoke_integration "$@" ;;
 reaper-blueprint) smoke_reaper_blueprint ;;
 blueprint-details) smoke_blueprint_details "$@" ;;
 starter) smoke_starter "$@" ;;
@@ -2165,6 +2199,7 @@ janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
 *)
   echo "usage:" >&2
   echo "  $0 serve [port] [sandbox-name]           # run an ISOLATED demo server (Ctrl-C to stop)" >&2
+  echo "  $0 integration <base-url> [source]       # reviewed integration floor: install a source, print the install step and updates" >&2
   echo "  $0 starter <base-url> <stage> [flags]    # starter missions: wait for the server, run a demo stage" >&2
   echo "  $0 reaper-blueprint <base-url>           # onboard + install/enable the reviewed REAPER blueprint" >&2
   echo "  $0 blueprint-details <base-url> <ws-id>  # parent, description, workspace_bootstrap of a workspace" >&2

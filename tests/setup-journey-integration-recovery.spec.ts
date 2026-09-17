@@ -27,6 +27,8 @@ function installQuestJourney() {
           plugin_id: 'reaper-plugin',
           installed_version: '0.5.0',
           expected_version: '0.5.0',
+          minimum_version: '0.5.0',
+          release_checked: true,
           enabled: true,
           verified: false,
           release_ready: true,
@@ -148,7 +150,8 @@ for (const width of [1280, 390]) {
     const review = dialog.locator('#specialistSetupJourneyReview');
     await expect(review).toContainText('even if the version number is unchanged');
     await expect(review).toContainText('Installed version: 0.5.0');
-    await expect(review).toContainText('Reviewed version: 0.5.0');
+    await expect(review).toContainText('Release version: 0.5.0');
+    await expect(review).toContainText('Minimum reviewed version: 0.5.0');
     // The artifact fingerprint is part of the collapsed technical details.
     const technical = review.locator('details.setup-journey__technical');
     await expect(technical).not.toHaveAttribute('open', '');

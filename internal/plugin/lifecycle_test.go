@@ -224,6 +224,41 @@ func TestBuildTrustReport(t *testing.T) {
 	}
 }
 
+func TestPreviewReplacementDisclosesTheReplacementSourceWithoutInstalling(t *testing.T) {
+	root := makeClaudeBundle(t)
+	m := NewManager(&fakeRegistrar{}, &fakeSkills{}, t.TempDir(), "")
+	installed, err := m.Install(root, "", func(TrustReport) bool { return true })
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+
+	replacement := makeClaudeBundle(t)
+	writeFile(t, filepath.Join(replacement, ".claude-plugin", "plugin.json"), `{"name":"reaper","version":"0.2.0"}`)
+	report, changed, err := m.PreviewReplacement(installed.Name, replacement, FormatClaude)
+	if err != nil || report.Name != installed.Name || changed {
+		t.Fatalf("version-only replacement preview = (%+v, %v) err=%v", report, changed, err)
+	}
+
+	writeFile(t, filepath.Join(replacement, ".mcp.json"), `{"ori-other":{"command":"/usr/bin/false"}}`)
+	report, changed, err = m.PreviewReplacement(installed.Name, replacement, FormatClaude)
+	if err != nil || !changed || !strings.Contains(strings.Join(report.MCPCommands, " "), "/usr/bin/false") {
+		t.Fatalf("component-changing replacement preview = (%+v, %v) err=%v", report, changed, err)
+	}
+	after, _ := m.List()
+	if len(after) != 1 || after[0].Source != installed.Source || after[0].Version != "0.1.0" || after[0].Generation != installed.Generation {
+		t.Fatalf("preview changed the installed plugin: %+v", after)
+	}
+
+	other := makeClaudeBundle(t)
+	writeFile(t, filepath.Join(other, ".claude-plugin", "plugin.json"), `{"name":"other","version":"0.2.0"}`)
+	if _, _, err := m.PreviewReplacement(installed.Name, other, FormatClaude); err == nil {
+		t.Fatal("a replacement with another plugin identity was previewed")
+	}
+	if _, _, err := m.PreviewReplacement("missing", replacement, FormatClaude); err == nil {
+		t.Fatal("a replacement for an uninstalled plugin was previewed")
+	}
+}
+
 func TestResolveUpdatePreviewReturnsVersionTrustAndComponentChange(t *testing.T) {
 	root := makeClaudeBundle(t)
 	m := NewManager(&fakeRegistrar{}, &fakeSkills{}, t.TempDir(), "")

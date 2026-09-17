@@ -8,7 +8,7 @@ Setup happens in two quests. Opening either one does not install software, conne
 
 **1. Install Ori REAPER Plugin.** Before the plugin is installed, open it from **Plugins → Available integrations → Guided Setup**, from the accepted music-production assistant's setup card, or with `/?setup=quest&source=host&quest=install_ori_reaper`. It has two steps:
 
-1. **Install Ori REAPER Plugin** — or continue with a verified installed integration. Choose **Install plugin**, check the review, then choose **Install**: Ori downloads the reviewed release, checks its fingerprint, and installs it switched off. Then choose **Enable plugin** and **Enable**. Installed, enabled, and verified are separate states. An existing installation from the official unpinned Git URL offers **Review verified replacement**, including when its version already matches the pin. Review the disclosure, then choose **Replace with reviewed version**. This uses the pinned release, preserves the enabled state, and does not delete workspaces or project files; runtime access may need review again. Cancel changes nothing. **Check Again** refreshes status without installing or replacing anything.
+1. **Install Ori REAPER Plugin** — or continue with a verified installed integration. Choose **Install plugin**, check the review, then choose **Install**: Ori downloads the latest reviewed release, checks its fingerprint, and installs it switched off. The review shows the **Release version** and the **Minimum reviewed version**. Then choose **Enable plugin** and **Enable**. Installed, enabled, and verified are separate states. An existing installation from the official unpinned Git URL, or from an exact commit older than the minimum, offers **Review verified replacement**, including when its version already matches the latest release. Review the disclosure, then choose **Replace with reviewed version**. This installs the latest release’s exact commit, preserves the enabled state, and does not delete workspaces or project files; runtime access may need review again. Cancel changes nothing. **Check Again** refreshes status without installing or replacing anything.
 2. **REAPER plugin ready** — shows the installed version, with **Continue: Set up REAPER** as the primary action and **Open Plugins**. Continue opens the plugin's quest in the same window.
 
 **2. Set up REAPER.** The installed plugin's own quest. Open it from Continue, **Plugins → Guided Setup**, the Reaper Song template's **Open Guided Setup** in the workspace picker or on **Templates**, or the assistant's setup card once the plugin is installed. All entries resume the same saved quest without requiring an accepted Personal Assistant offer. It has two screens:
@@ -63,44 +63,96 @@ Disabling or removing the integration pauses plugin-backed execution and marks s
 
 Compatible older plugin-backed workspaces can be attached only through an explicit migration review. Legacy shared rosters remain readable until reviewed; ambiguous or built-in topology is never silently renamed, cloned, moved, or reassigned. Linked projects must be explicitly disconnected before organizational reparenting. Removing Music Production Home uses a dedicated impact review and preserves child projects and external files by default.
 
-## Reviewed release and recovery
+## Reviewed floor and latest release
 
-Ori’s reviewed registry now enables the published macOS arm64 `v0.6.1` release:
+Ori’s reviewed registry entry for this integration is a **floor**, not a pin. A person reviewed the `johnjallday/reaper-plugin` repository and its minimum release; every later stable release from that repository is accepted once Ori’s automatic identity, host-feature, blueprint, program, platform and artifact checks pass. The entry in `internal/reviewedintegration/entries.go` holds:
 
-- Immutable source commit: `e11ca2942279af02a9a035039b18b146ff9fc89d` (the annotated `v0.6.1` tag’s resolved commit).
-- Published asset: `reaper-plugin_v0.6.1_darwin_arm64`, **8,780,098 bytes**.
-- SHA-256: `88c7dfd5ebf6a855ae41994a080c2339f392514f68ff47366463b5a84c5eb8c8`.
-- Release: https://github.com/johnjallday/reaper-plugin/releases/tag/v0.6.1 (published September 16, 2026).
-- Source CI: https://github.com/johnjallday/reaper-plugin/actions/runs/35142041208.
-- Release workflow: https://github.com/johnjallday/reaper-plugin/actions/runs/35142041273.
-- Manifest identity at that commit: blueprint `reaper-song` version 7, assistant program `music-producer-assistant` schema 2, setup quest `reaper_setup` version 2 with four steps, required host features `assistant_program_v1`, `specialist_setup_journey_v1`, `setup_quests_v2` and `template_group_requirements_v1`. The blueprint roles no longer declare the retired agent `type` key; nothing else in the manifest identity changed from 0.6.0.
+- Minimum reviewed version `0.6.1`.
+- Fallback commit `e11ca2942279af02a9a035039b18b146ff9fc89d` (the annotated `v0.6.1` tag’s resolved commit), installed when the latest release cannot be checked.
+- Blueprint `reaper-song` at version 7 **or later**.
+- Assistant program `music-producer-assistant` schema 2 and surface protocol 1, both **exact**: they describe what this Ori build can run, not one release.
+- Required host features `assistant_program_v1`, `specialist_setup_journey_v1`, `setup_quests_v2` and `template_group_requirements_v1`. A release may require more, as long as this Ori build has them.
+- Platform `darwin/arm64`.
 
-For host enablement, the actual published asset and checksum were downloaded and compared against the manifest at the tag’s resolved commit. Size and digest matched; the executable reported `0.6.1`. The previous `v0.6.0` pin was replaced, not merely enabled. A repeatable GitHub-backed check exercises both fresh reviewed install → separate enable and ordinary official-URL install → reviewed same-version replacement, without a development override:
+### How the latest release is chosen
+
+When the install step is read, Ori resolves the latest stable release at or above the floor:
+
+1. It lists the repository’s GitHub releases (`GET https://api.github.com/repos/johnjallday/reaper-plugin/releases?per_page=30`), sending `GITHUB_TOKEN` or `GH_TOKEN` as a bearer token when one is set. Drafts, prereleases, tags that are not versions after removing a leading `v`, versions with a prerelease suffix such as `-rc.1`, and versions below the floor are skipped. The highest remaining version wins.
+2. It resolves that tag to a commit with `git ls-remote --tags` against the reviewed repository, using the peeled commit of an annotated tag.
+3. The install step installs `https://github.com/johnjallday/reaper-plugin#sha=<commit>`. The downloaded artifact’s size and SHA-256 are still verified against the manifest at that commit, exactly as before.
+
+The result is cached in the Ori process for one hour, and the daily plugin update check refreshes it. While the releases API is failing, Ori retries at most every five minutes. One lookup has a ten-second budget. The review is bound to the release it shows: if the latest release changes between review and confirmation, the confirmation is refused as stale and must be reviewed again.
+
+### Which installations the guided setup accepts
+
+| Installed from                                           | Version                                 | Guided setup                                                                                                                                                                                     |
+| -------------------------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| An exact official commit (`…#sha=<40 hex>`)              | At or above the floor                   | **Verified** against its own version, with no network lookup. The step stays complete when a newer release appears; that update shows only on the Plugins page and in Home’s **Updates** flyout. |
+| An exact official commit                                 | Below the floor                         | **Review verified replacement** with the latest release.                                                                                                                                         |
+| The official unpinned URL (`…/reaper-plugin` or `….git`) | Any, up to the latest release           | **Review verified replacement** with the latest release, even at the same version number.                                                                                                        |
+| The official unpinned URL                                | Newer than the latest release Ori knows | Blocked with **Manage integration**. Ori never offers a downgrade.                                                                                                                               |
+| The configured local development copy                    | At or above the floor                   | Accepted and labelled **Local development copy — not release-verified**.                                                                                                                         |
+| Anything else                                            | Any                                     | Blocked with **Manage integration**.                                                                                                                                                             |
+
+A replacement or install is never applied from a status read or a review alone. Older Ori builds, from before the floor, still pin one exact release and report an identity mismatch for a newer installation; update Ori rather than reinstalling the plugin.
+
+### Updates on the Plugins page
+
+For an installation from an exact official commit, the plugin update check reports the latest release as an update when it is newer than the installed version. **Update** on the Plugins page discloses the new release’s trust report and replaces the plugin from that release’s exact commit, keeping its enabled state. Every other plugin keeps following its recorded source.
+
+### When the latest release cannot be checked
+
+If the releases API is unreachable or rate-limited, Ori uses the last release it resolved in this process, or else the floor’s fallback commit. When the step then offers an install or replacement it adds: “The latest release could not be checked. Ori will install the minimum reviewed version.” The actions are unchanged. Installing still downloads the release asset from GitHub, so a fully offline machine cannot install. Restarting Ori clears the cache.
+
+For demos and end-to-end tests, `ORI_INTEGRATION_RELEASES_API` overrides the releases API. It is accepted only as a plain `http` URL on `127.0.0.1`, `::1` or `localhost`; anything else is ignored with a warning. The tag-to-commit step always reads the real repository, so an override can only choose among official tags at or above the floor. To see the fallback note:
 
 ```bash
-ORI_TEST_REVIEWED_INTEGRATION_RELEASE=1 go test ./internal/setupjourney \
-  -run '^TestReviewedIntegrationPublishedRelease$' -count=1 -v
+ORI_INTEGRATION_RELEASES_API=http://127.0.0.1:9 ./scripts/demo-server.sh 8931
 ```
 
-This opt-in check uses temporary plugin stores and inert component registrars. It downloads and verifies release bytes but does not launch a plugin service, open or control REAPER, or touch user workspaces. The ordinary-URL fixture intentionally fails for review if the external default branch changes versions. Release/install verification is not a live-project verification claim.
+### When the floor moves
 
-Older Ori builds may still report an identity mismatch or an unavailable reviewed release even after the plugin is installed. Update Ori first: reinstalling the same unpinned plugin does not enable the host’s release gate. The recovery action accepts only the exact official repository URLs and its previously accepted pins; unrelated/local sources, incompatible formats/platforms, and newer or unrecognized versions do not bypass verification. A replacement is never applied from a status read or review alone.
+A plugin release that keeps its blueprint version, program schema, protocol and required host features needs **no change to Ori**. Move the floor only when a release needs something this Ori build must change for, such as a new required host feature, a new program schema or protocol, or a blueprint version Ori now depends on:
 
-### Pin history and moving the pin
-
-Plugin **0.6.0** is the first release that declares its setup quest under `setup_quests_v2`: `reaper_setup` version 2 with four steps and blueprint version 7. This Ori host no longer supports `setup_quests_v1`. Installed v0.5.1 and v0.5.2 plugins require it, so they fail closed: their manifests are refused until the plugin is updated. The pin before that, `v0.5.0` at commit `1f494db5a39d8c13f6149943b28e6a506d19631a` (SHA-256 `2bbf6b77418119cb21e827a407c8d5886e3effdb593ec0ad274e20d7d69c2ca9`), declared no quest, so its install quest offered only **Open Plugins**.
-
-Plugin **0.6.1** only drops the retired agent `type` key from the blueprint roles (reaper-plugin#9, following ori-agent#490). Its blueprint, quest and host requirements are unchanged, so moving the pin needed only a new version, commit and artifact digest. The previous pin was `v0.6.0` at commit `03af9fda3e6b9d8cc3c0496c5e9ef6df99e870b9` (SHA-256 `4def4fec14ecf083b0358c686c608514d4b9afff99dd810f1184213312770119`). An installation of 0.6.0 no longer completes the install step: because it is older than the pin, it is offered a reviewed replacement with the pinned 0.6.1, and nothing changes until the user confirms it.
-
-A stale pin has one visible symptom worth recognising: the gate never accepts an installation **newer** than the pin and never offers a downgrade, so once a newer release is installed from the official URL the install step reports “Ori could not verify this installation against the reviewed source, format, and version” with only **Manage integration** available. The fix is to move the pin in Ori, not to reinstall the plugin.
-
-Move the pin only through this procedure:
-
-1. Confirm the new tag and release exist on `johnjallday/reaper-plugin`, and record the tag's resolved commit.
+1. Confirm the new tag and release exist on `johnjallday/reaper-plugin`, and record the tag’s resolved commit.
 2. Download the published `darwin_arm64` asset and its checksum. Compare size and SHA-256 against the manifest at that commit, and confirm the executable reports the new version.
-3. In `internal/reviewedintegration/entries.go`, set `ExpectedVersion`, `SourceCommit`, `ExpectedBlueprintVersion` and `RequiredHostFeatures` from that manifest. Update the registry test, the artifact digest in the published-release check, and this section's evidence list.
-4. Run the opt-in published-release check above against the new pin.
+3. In `internal/reviewedintegration/entries.go`, set `MinimumVersion`, `FallbackCommit`, `MinimumBlueprintVersion` and `RequiredHostFeatures` (and `ExpectedProgramSchema` or `ExpectedProtocol` if they changed) from that manifest. Update the registry test, the fallback artifact digest in the published-release check, and the evidence below.
+4. Run the checks below.
 
-The locally built candidate is not release evidence. A squash merge upstream changes its commit identity, so always pin the published tag's commit.
+The locally built candidate is not release evidence. A squash merge upstream changes its commit identity, so the fallback commit is always the published tag’s commit.
+
+### Verification evidence for the fallback release
+
+- Release: https://github.com/johnjallday/reaper-plugin/releases/tag/v0.6.1 (published September 16, 2026).
+- Commit: `e11ca2942279af02a9a035039b18b146ff9fc89d`.
+- Published asset: `reaper-plugin_v0.6.1_darwin_arm64`, **8,780,098 bytes**, SHA-256 `88c7dfd5ebf6a855ae41994a080c2339f392514f68ff47366463b5a84c5eb8c8`.
+- Source CI: https://github.com/johnjallday/reaper-plugin/actions/runs/35142041208.
+- Release workflow: https://github.com/johnjallday/reaper-plugin/actions/runs/35142041273.
+- Manifest identity at that commit: blueprint `reaper-song` version 7, assistant program `music-producer-assistant` schema 2, setup quest `reaper_setup` version 2 with four steps, and the four required host features listed above.
+
+The published asset and checksum were downloaded and compared against the manifest at the tag’s resolved commit. Size and digest matched; the executable reported `0.6.1`.
+
+### Rerun the checks
+
+```bash
+# Fresh install → separate enable, and official-URL install → reviewed
+# replacement, once with the fallback forced and once with the live resolver.
+ORI_TEST_REVIEWED_INTEGRATION_RELEASE=1 go test ./internal/setupjourney \
+  -run '^TestReviewedIntegrationPublishedRelease$' -count=1 -v
+
+# A candidate checkout or exact-commit source meets the host contract and the floor.
+ORI_REVIEWED_PLUGIN_CANDIDATE='https://github.com/johnjallday/reaper-plugin#sha=<commit>' \
+  go test ./internal/plugin ./internal/reviewedintegration \
+  -run 'TestReviewedCandidateHostContract|TestReviewedCandidateMeetsTheFloor' -count=1 -v
+```
+
+The fallback run points the resolver at an unreachable loopback API and checks the fallback asset’s exact size and digest above. The live run resolves the latest release and checks that the installed record carries that release’s commit and that the artifact’s SHA-256 equals the digest its own manifest declares. Both use temporary plugin stores and inert component registrars: they download and verify release bytes but do not launch a plugin service, open or control REAPER, or touch user workspaces. The official-URL fixture fails for review if the external default branch is ahead of the latest release. Unauthenticated GitHub API calls are limited to 60 an hour, so export `GITHUB_TOKEN` for repeated runs. Release/install verification is not a live-project verification claim.
+
+### Release history
+
+- **0.5.0** (commit `1f494db5a39d8c13f6149943b28e6a506d19631a`, SHA-256 `2bbf6b77418119cb21e827a407c8d5886e3effdb593ec0ad274e20d7d69c2ca9`) declared no setup quest, so its install quest offered only **Open Plugins**. v0.5.1 and v0.5.2 require the retired `setup_quests_v1`, so this host refuses their manifests until the plugin is updated.
+- **0.6.0** (commit `03af9fda3e6b9d8cc3c0496c5e9ef6df99e870b9`, SHA-256 `4def4fec14ecf083b0358c686c608514d4b9afff99dd810f1184213312770119`) is the first release that declares `reaper_setup` version 2 under `setup_quests_v2`, with blueprint version 7. It is below the floor, so an exact-commit installation is offered a reviewed replacement with the latest release.
+- **0.6.1** only drops the retired agent `type` key from the blueprint roles (reaper-plugin#9, following ori-agent#490). It is the current floor. Before the floor, Ori pinned each release exactly and needed a pull request (#494, #502) for every plugin release.
 
 Local plugin development remains separate. `scripts/reaper-demo.sh` stages an isolated copy and uses an explicit process-local source override; it labels the copy **not release-verified**. Installing a local directory or setting an arbitrary override is not a production recovery path.
