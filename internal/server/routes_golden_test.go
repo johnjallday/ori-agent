@@ -44,6 +44,10 @@ var probeExcludedPrefixes = []string{
 	"/api/location/current",     // real geolocation prompt
 	"/api/folder-picker",        // native folder-picker GUI
 	"/api/launch-folder-picker", // native folder-picker GUI
+	// Live GitHub Releases API call that ignores the request context and allows
+	// 30s, so a slow api.github.com outlasts the 10s backstop (observed TIMEOUT
+	// on dev CI, which held the release gate).
+	"/api/updates/check",
 	// Installed-tool / registry-network detection: the response shape or status
 	// varies by whether external CLIs or the skills registry's network deps are
 	// present, so it differs between a developer box and CI. (Confirmed by
