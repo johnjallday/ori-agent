@@ -3,6 +3,8 @@ package port
 import (
 	"bufio"
 	"bytes"
+	"context"
+	"encoding/csv"
 	"fmt"
 	"net"
 	"os/exec"
@@ -23,6 +25,10 @@ var oriProcessNames = map[string]struct{}{
 	"ori-menubar": {},
 }
 
+// ownerLookupTimeout bounds each external process lookup; a lookup that runs
+// out of time is treated like one that found nothing.
+var ownerLookupTimeout = 10 * time.Second
+
 func IsPortAvailable(port int) bool {
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
@@ -30,6 +36,16 @@ func IsPortAvailable(port int) bool {
 	}
 	_ = listener.Close()
 	return true
+}
+
+func lookupOutput(name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), ownerLookupTimeout)
+	defer cancel()
+	// #nosec G204 -- callers pass fixed binaries (lsof, ps, netstat, tasklist) and integer-derived arguments.
+	cmd := exec.CommandContext(ctx, name, args...)
+	// A descendant still holding stdout must not extend the deadline.
+	cmd.WaitDelay = time.Second
+	return cmd.Output()
 }
 
 func FindPortProcesses(port int) ([]ProcessInfo, error) {
@@ -52,8 +68,7 @@ func ResolveProcessName(pid int) (string, error) {
 
 	switch runtime.GOOS {
 	case "darwin", "linux":
-		cmd := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=")
-		output, err := cmd.Output()
+		output, err := lookupOutput("ps", "-p", strconv.Itoa(pid), "-o", "comm=")
 		if err != nil {
 			return "", err
 		}
@@ -64,13 +79,11 @@ func ResolveProcessName(pid int) (string, error) {
 		return name, nil
 
 	case "windows":
-		psCmd := fmt.Sprintf(`(Get-Process -Id %d -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ProcessName)`, pid)
-		cmd := exec.Command("powershell", "-NoProfile", "-Command", psCmd)
-		output, err := cmd.Output()
+		output, err := lookupOutput("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/FO", "CSV", "/NH")
 		if err != nil {
 			return "", err
 		}
-		name := strings.TrimSpace(string(output))
+		name := parseTasklistName(output)
 		if name == "" {
 			return "", fmt.Errorf("empty process name")
 		}
@@ -145,21 +158,23 @@ func findPortPIDs(port int) []int {
 
 	switch runtime.GOOS {
 	case "darwin", "linux":
-		cmd := exec.Command("lsof", "-ti", fmt.Sprintf("tcp:%d", port), "-sTCP:LISTEN")
-		output, err := cmd.Output()
+		output, err := lookupOutput("lsof", "-ti", fmt.Sprintf("tcp:%d", port), "-sTCP:LISTEN")
 		if err != nil {
 			return nil
 		}
 		parsePIDs(output, pidSet)
 
 	case "windows":
-		psCmd := fmt.Sprintf(`Get-NetTCPConnection -LocalPort %d -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess`, port)
-		cmd := exec.Command("powershell", "-NoProfile", "-Command", psCmd)
-		output, err := cmd.Output()
+		// netstat and tasklist are plain executables. PowerShell's
+		// Get-NetTCPConnection loads modules into the user profile first, which
+		// stalled installed startups past a 45s health deadline.
+		output, err := lookupOutput("netstat", "-ano")
 		if err != nil {
 			return nil
 		}
-		parsePIDs(output, pidSet)
+		for _, pid := range parseNetstatListeners(output, port) {
+			pidSet[pid] = struct{}{}
+		}
 	default:
 		return nil
 	}
@@ -179,6 +194,45 @@ func parsePIDs(output []byte, pidSet map[int]struct{}) {
 			pidSet[pid] = struct{}{}
 		}
 	}
+}
+
+// parseNetstatListeners returns the PIDs of TCP sockets listening on port in
+// `netstat -ano` output. The state column is localized and may span words, so
+// a listener is recognized by its unbound foreign address, and the PID is the
+// last field.
+func parseNetstatListeners(output []byte, port int) []int {
+	suffix := ":" + strconv.Itoa(port)
+	var pids []int
+	scanner := bufio.NewScanner(bytes.NewReader(output))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 4 || !strings.EqualFold(fields[0], "TCP") {
+			continue
+		}
+		if !strings.HasSuffix(fields[1], suffix) || (fields[2] != "0.0.0.0:0" && fields[2] != "[::]:0") {
+			continue
+		}
+		if pid, err := strconv.Atoi(fields[len(fields)-1]); err == nil && pid > 0 {
+			pids = append(pids, pid)
+		}
+	}
+	return pids
+}
+
+// parseTasklistName returns the image name from `tasklist /FO CSV /NH` output,
+// or "" when no process matched (tasklist then prints a localized notice).
+func parseTasklistName(output []byte) string {
+	for _, line := range strings.Split(string(output), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, `"`) {
+			continue
+		}
+		record, err := csv.NewReader(strings.NewReader(line)).Read()
+		if err == nil && len(record) > 0 {
+			return strings.TrimSpace(record[0])
+		}
+	}
+	return ""
 }
 
 func terminateProcess(pid int) error {

@@ -279,6 +279,26 @@ class LifecycleTests(GitFixture):
         self.assertEqual(self.outputs()["prerelease"], "false")
         self.assertEqual(self.outputs()["previous_tag"], "v1.2.3")
 
+    def test_build_survives_checkout_rewriting_tags_as_lightweight(self):
+        # actions/checkout on a tag push re-fetches `+<sha>:refs/tags/<tag>`,
+        # replacing the annotated tag with a lightweight one. Verification must
+        # restore the remote tag, including the stable promotion receipt.
+        def as_actions_checkout(tag):
+            sha = rc.Repository().tags[tag]
+            rc.git("fetch", "--quiet", "--no-tags", "origin", f"+{sha}:refs/tags/{tag}")
+            self.assertEqual(rc.git("cat-file", "-t", f"refs/tags/{tag}"), "commit")
+            rc.git("checkout", "--quiet", "--detach", sha)
+
+        sha = self.prepare()
+        self.releases[self.tag]["isDraft"] = True
+        as_actions_checkout(self.tag)
+        rc.verify_build(rc.Repository(), self.tag)
+        self.releases[self.tag]["isDraft"] = False
+        rc.promote(rc.Repository(), self.tag, sha)
+        as_actions_checkout("v1.2.4")
+        rc.verify_build(rc.Repository(), "v1.2.4")
+        self.assertEqual(rc.git("cat-file", "-t", "refs/tags/v1.2.4"), "tag")
+
     def test_direct_stable_tag_without_receipt_is_rejected(self):
         sha = self.prepare()
         rc.git("tag", "v1.2.4", sha)
@@ -429,6 +449,16 @@ class EntryPointTests(unittest.TestCase):
         self.assertNotIn("continue-on-error", smoke)
         self.assertNotIn("--snapshot", smoke)
         self.assertIn("gh release download", smoke)
+        # Draft releases are invisible to read-only tokens. Only the fetch job may
+        # hold contents: write; the jobs that run the installers stay read-only.
+        self.assertIn("permissions:\n      contents: write", release.split("  smoke:", 1)[1].split("\n  publish:", 1)[0])
+        grant = "permissions:\n      contents: write"
+        self.assertEqual(smoke.count(grant), 1)
+        self.assertEqual(smoke.count("gh release download"), 1)
+        fetch, platforms = smoke.split("\n  test-macos:", 1)
+        self.assertIn(grant, fetch)
+        self.assertNotIn("github.token", platforms)
+        self.assertEqual(platforms.count("actions/download-artifact"), 4)
         self.assertIn("macos-15-intel", smoke)
         self.assertIn("macos-15", smoke)
         self.assertIn("head_branch", (ROOT / "scripts/release-candidate.py").read_text())
