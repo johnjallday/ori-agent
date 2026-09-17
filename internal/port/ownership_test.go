@@ -40,7 +40,7 @@ func TestHelperHoldLoopbackListener(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = listener.Close() }()
-	os.Stdout.WriteString("PORT " + strconv.Itoa(listener.Addr().(*net.TCPAddr).Port) + "\n")
+	_, _ = os.Stdout.WriteString("PORT " + strconv.Itoa(listener.Addr().(*net.TCPAddr).Port) + "\n")
 	_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
 }
 
