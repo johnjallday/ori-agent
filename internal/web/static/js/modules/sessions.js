@@ -6742,7 +6742,8 @@ const sessionManager = {
       values: {
         name: create?.name || String(role.default_name || label),
         provider: create?.provider || '',
-        model: create?.model || ''
+        model: create?.model || '',
+        reasoningEffort: create?.reasoningEffort || ''
       }
     });
 
@@ -6817,7 +6818,8 @@ const sessionManager = {
         mode: 'create',
         name,
         provider: result.values.provider,
-        model: result.values.model
+        model: result.values.model,
+        reasoningEffort: result.values.reasoningEffort
       })
     ) {
       return refuse('This role can no longer be changed. Close this form and review the team.');

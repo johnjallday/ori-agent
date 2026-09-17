@@ -521,7 +521,8 @@ test('required Home roles seed as Create under their default name; optional role
     mode: 'create',
     name: 'Portfolio Manager',
     provider: '',
-    model: ''
+    model: '',
+    reasoningEffort: ''
   });
   assert.equal(api.stagedFill(creator, 'curator'), null);
 
@@ -623,6 +624,37 @@ async function confirmStaffing(
   await api.ensureReview(creator);
   return api.submit(creator);
 }
+
+test('a staged reasoning level rides the Create fill; Assign never carries one', async () => {
+  const env = environment({ fetch: staffingFetch() });
+  const creator = staffingCreator(env.api);
+  env.api.setFill(creator, 'coordinator', {
+    mode: 'create',
+    name: 'Portfolio Manager',
+    provider: 'claude_code',
+    model: 'opus',
+    reasoningEffort: 'max'
+  });
+  env.api.setFill(creator, 'curator', {
+    mode: 'assign',
+    name: 'Librarian',
+    reasoningEffort: 'high'
+  });
+  assert.equal(await confirmStaffing(env.api, env.element, creator), true);
+  assert.deepEqual(JSON.parse(env.calls[2].options.body), {
+    mode: 'create',
+    name: 'Portfolio Manager',
+    provider: 'claude_code',
+    model: 'opus',
+    reasoning_effort: 'max'
+  });
+  assert.deepEqual(JSON.parse(env.calls[3].options.body), {
+    mode: 'assign',
+    name: 'Librarian',
+    provider: '',
+    model: ''
+  });
+});
 
 test('fills are sent one role at a time, only after the commit, and never carry a prompt', async () => {
   const env = environment({ fetch: staffingFetch() });
@@ -772,7 +804,8 @@ test('seeding waits for saved agents and assigns a saved agent that already has 
     mode: 'assign',
     name: 'Portfolio Manager',
     provider: '',
-    model: ''
+    model: '',
+    reasoningEffort: ''
   });
 
   // No saved agent with that name (or the saved list failed): Create.
