@@ -71,8 +71,10 @@ def check_hold():
 class Repository:
     def __init__(self):
         # Fetch failures are errors, never permission to use stale local refs.
+        # Tags are forced: actions/checkout on a tag push rewrites the pushed
+        # annotated tag as a lightweight one, and local tags must match origin.
         git("fetch", "--quiet", "--prune", "origin",
-            "+refs/heads/*:refs/remotes/origin/*", "refs/tags/*:refs/tags/*")
+            "+refs/heads/*:refs/remotes/origin/*", "+refs/tags/*:refs/tags/*")
         # Only remote tags count; local-only tags cannot authorize a release.
         self.tags = {}
         peeled = {}
