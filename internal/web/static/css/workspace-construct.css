@@ -368,6 +368,17 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
   color: var(--wc-ink);
   font-size: 12px;
 }
+@media (max-width: 768px) {
+  /* The whole option is the touch target, so the radio keeps its own size
+     instead of the global 44px control minimum. */
+  .workspace-create-modal .workspace-project-choice-options label {
+    min-height: 44px;
+  }
+  .workspace-create-modal .workspace-project-choice-options input[type="radio"] {
+    min-height: 0;
+    min-width: 0;
+  }
+}
 @media (max-width: 575.98px) {
   .workspace-create-modal .workspace-project-choice-options {
     grid-template-columns: 1fr;
