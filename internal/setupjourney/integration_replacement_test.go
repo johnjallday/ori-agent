@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/integrationrelease"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/specialist"
@@ -58,6 +59,201 @@ func TestReviewedIntegrationOfficialSourcesRequireReviewedReplacement(t *testing
 				}
 			})
 		}
+	}
+}
+
+func TestReviewedIntegrationOlderExactCommitIsReplacedByTheLatestRelease(t *testing.T) {
+	entry, descriptor, _, scope := readyIntegrationFixture(t)
+	olderSource := entry.SourceRepository + "#sha=" + strings.Repeat("c", 40)
+	older := installedFromFixture(descriptor, olderSource, entry.SourceFormat, true, 1)
+	older.Version = "0.4.1"
+	target := latestRelease(entry, "0.6.0", "e")
+	latest, latestReport := releaseDescriptor(descriptor, target.Version, target.Source)
+	manager := &fakeReviewedIntegrationManager{installed: []plugin.InstalledPlugin{older}, descriptor: latest, report: latestReport}
+	adapter := newReviewedIntegrationAdapter(manager, integrationResolver(entry), "darwin/arm64")
+	adapter.releases = &stubReleases{resolution: target}
+
+	read, err := adapter.Read(context.Background(), scope)
+	if err != nil || read.BlockedReason != "" || !containsAction(read.AvailableActions, ActionReviewUpdate) ||
+		!read.Integration.ReplacementRequired || read.Integration.ExpectedVersion != "0.6.0" ||
+		read.Integration.InstalledVersion != "0.4.1" || manager.inspectSources[0] != target.Source {
+		t.Fatalf("older exact commit was not offered the latest release: %#v err=%v", read.Integration, err)
+	}
+	prepared, err := adapter.PrepareCommit(context.Background(), scope, ActionUpdate, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adapter.Commit(context.Background(), scope, ActionUpdate, json.RawMessage(`{}`), prepared); err != nil {
+		t.Fatal(err)
+	}
+	after, err := adapter.Read(context.Background(), scope)
+	if err != nil || !after.Complete || !after.Integration.Verified || after.Integration.ExpectedVersion != "0.6.0" ||
+		manager.installed[0].Source != target.Source || !adapter.ConsequenceObserved(ActionUpdate, after) {
+		t.Fatalf("replacement did not verify at the latest release: %#v err=%v plugins=%#v", after.Integration, err, manager.installed)
+	}
+}
+
+func TestReviewedIntegrationExactCommitAtOrAboveFloorIsVerifiedWithoutResolving(t *testing.T) {
+	entry, descriptor, _, scope := readyIntegrationFixture(t)
+	for name, version := range map[string]string{
+		"at the floor from another commit":      entry.MinimumVersion,
+		"newer than the floor":                  "0.6.0",
+		"newer than a stale or fallback latest": "0.7.2",
+	} {
+		t.Run(name, func(t *testing.T) {
+			source := entry.SourceRepository + "#sha=" + strings.Repeat("f", 40)
+			release, report := releaseDescriptor(descriptor, version, source)
+			installed := installedFromFixture(release, source, entry.SourceFormat, true, 3)
+			manager := &fakeReviewedIntegrationManager{installed: []plugin.InstalledPlugin{installed}, descriptor: release, report: report}
+			releases := &stubReleases{resolution: latestRelease(entry, "0.6.0", "e")}
+			adapter := newReviewedIntegrationAdapter(manager, integrationResolver(entry), "darwin/arm64")
+			adapter.releases = releases
+
+			read, err := adapter.Read(context.Background(), scope)
+			if err != nil || !read.Complete || read.BlockedReason != "" || !read.Integration.Verified ||
+				read.Integration.ReplacementRequired || read.Integration.ExpectedVersion != version ||
+				containsAction(read.AvailableActions, ActionReviewUpdate) {
+				t.Fatalf("exact commit %s was not verified as installed: %#v err=%v", version, read.Integration, err)
+			}
+			// Verified reads need no network and never mention another release.
+			if releases.callCount() != 0 || manager.inspections != 0 || read.Integration.Trust != nil {
+				t.Fatalf("verified read resolved or inspected: resolves=%d inspections=%d", releases.callCount(), manager.inspections)
+			}
+			if !validIntegrationProjection(read.Integration) {
+				t.Fatalf("verified projection is invalid: %#v", read.Integration)
+			}
+			// A newer latest release does not change a completed step.
+			before := read.Integration.StateRevision
+			releases.set(latestRelease(entry, "0.9.0", "d"))
+			again, _ := adapter.Read(context.Background(), scope)
+			if again.Integration.StateRevision != before || !again.Complete {
+				t.Fatal("a newer release churned a verified step")
+			}
+		})
+	}
+}
+
+func TestReviewedIntegrationNewerExactCommitWithoutAValidContributionStaysBlocked(t *testing.T) {
+	entry, descriptor, _, scope := readyIntegrationFixture(t)
+	source := entry.SourceRepository + "#sha=" + strings.Repeat("f", 40)
+	release, report := releaseDescriptor(descriptor, "0.6.0", source)
+	installed := installedFromFixture(release, source, entry.SourceFormat, true, 3)
+	installed.WorkspaceSurfaces = nil
+	manager := &fakeReviewedIntegrationManager{installed: []plugin.InstalledPlugin{installed}, descriptor: release, report: report}
+	adapter := newReviewedIntegrationAdapter(manager, integrationResolver(entry), "darwin/arm64")
+	read, err := adapter.Read(context.Background(), scope)
+	if err != nil || read.Complete || read.BlockedReason != ReasonIntegrationUnsupported || read.Integration.Verified {
+		t.Fatalf("newer exact commit without a valid contribution was verified: %#v err=%v", read, err)
+	}
+}
+
+func TestReviewedIntegrationMutableURLAtTheLatestVersionIsStillReplaced(t *testing.T) {
+	entry, descriptor, _, scope := readyIntegrationFixture(t)
+	target := latestRelease(entry, "0.6.0", "e")
+	latest, latestReport := releaseDescriptor(descriptor, target.Version, target.Source)
+	installed := installedFromFixture(latest, entry.SourceRepository+".git", entry.SourceFormat, true, 1)
+	manager := &fakeReviewedIntegrationManager{installed: []plugin.InstalledPlugin{installed}, descriptor: latest, report: latestReport}
+	adapter := newReviewedIntegrationAdapter(manager, integrationResolver(entry), "darwin/arm64")
+	adapter.releases = &stubReleases{resolution: target}
+	read, err := adapter.Read(context.Background(), scope)
+	if err != nil || read.Complete || read.Integration.Verified || !read.Integration.ReplacementRequired ||
+		read.Integration.ExpectedVersion != "0.6.0" || !containsAction(read.AvailableActions, ActionReviewUpdate) {
+		t.Fatalf("mutable URL at the latest version was accepted: %#v err=%v", read.Integration, err)
+	}
+}
+
+func TestReviewedIntegrationNeverOffersADowngrade(t *testing.T) {
+	entry, descriptor, report, scope := readyIntegrationFixture(t)
+	// The resolver fell back to the floor, below an unpinned install.
+	installed := installedFromFixture(descriptor, entry.SourceRepository+".git", entry.SourceFormat, true, 1)
+	installed.Version = "0.6.0"
+	manager := &fakeReviewedIntegrationManager{installed: []plugin.InstalledPlugin{installed}, descriptor: descriptor, report: report}
+	adapter := newReviewedIntegrationAdapter(manager, integrationResolver(entry), "darwin/arm64")
+	adapter.releases = &stubReleases{resolution: integrationrelease.Floor(entry)}
+	read, err := adapter.Read(context.Background(), scope)
+	if err != nil || read.BlockedReason != ReasonIntegrationIdentityMismatch ||
+		containsAction(read.AvailableActions, ActionReviewUpdate) || manager.inspections != 0 {
+		t.Fatalf("a replacement below the installed version was offered: %#v err=%v", read, err)
+	}
+}
+
+func TestReviewedIntegrationDevelopmentCopyAboveTheFloorIsAccepted(t *testing.T) {
+	entry, descriptor, _, scope := readyIntegrationFixture(t)
+	source := t.TempDir()
+	release, _ := releaseDescriptor(descriptor, "0.6.0", source)
+	for version, complete := range map[string]bool{"0.6.0": true, "0.4.9": false} {
+		installed := installedFromFixture(release, source, entry.SourceFormat, true, 1)
+		installed.Version = version
+		installed.WorkspaceSurfaces = &plugin.SurfaceContribution{}
+		*installed.WorkspaceSurfaces = *release.WorkspaceSurfaces
+		installed.WorkspaceSurfaces.Version = version
+		manager := &fakeReviewedIntegrationManager{installed: []plugin.InstalledPlugin{installed}}
+		releases := &stubReleases{}
+		adapter := newReviewedIntegrationAdapter(manager, integrationResolver(entry), "darwin/arm64")
+		adapter.releases = releases
+		adapter.developmentSource = normalizedLocalDevelopmentSource(source)
+		read, err := adapter.Read(context.Background(), scope)
+		if err != nil || read.Complete != complete || !read.Integration.DevelopmentCopy || read.Integration.Verified ||
+			releases.callCount() != 0 {
+			t.Fatalf("development copy %s: %#v err=%v", version, read, err)
+		}
+		if !complete && read.BlockedReason != ReasonIntegrationIdentityMismatch {
+			t.Fatalf("development copy below the floor: reason = %q", read.BlockedReason)
+		}
+	}
+}
+
+func TestReviewedIntegrationEnableReviewDisclosesTheInstalledRelease(t *testing.T) {
+	entry, descriptor, _, _ := readyIntegrationFixture(t)
+	installedSource := entry.SourceRepository + "#sha=" + strings.Repeat("f", 40)
+	release, report := releaseDescriptor(descriptor, "0.6.0", installedSource)
+	installed := installedFromFixture(release, installedSource, entry.SourceFormat, false, 4)
+	manager := &fakeReviewedIntegrationManager{installed: []plugin.InstalledPlugin{installed}, descriptor: release, report: report}
+	releases := &stubReleases{resolution: latestRelease(entry, "0.7.0", "e")}
+	adapter := newReviewedIntegrationAdapter(manager, integrationResolver(entry), "darwin/arm64")
+	adapter.releases = releases
+	service := integrationServiceForReplacementTest(t, adapter)
+	ctx := context.Background()
+	journey, err := service.Read(ctx, "local", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := service.Mutate(ctx, "local", journey.RunID, ActionReviewEnable, ActionMutation{
+		IfRevision: journey.StateRevision, IdempotencyKey: "review-enable-installed", Input: json.RawMessage(`{}`),
+	})
+	if err != nil || review.Review == nil || review.Review.Integration.Trust == nil ||
+		review.Review.Integration.ExpectedVersion != "0.6.0" {
+		t.Fatalf("enable review: %#v err=%v", review, err)
+	}
+	for _, inspected := range manager.inspectSources {
+		if inspected != installedSource {
+			t.Fatalf("enable review inspected %q instead of the installed commit", inspected)
+		}
+	}
+	// A background release refresh between review and commit leaves the
+	// verified enable review valid.
+	releases.set(latestRelease(entry, "0.8.0", "d"))
+	result, err := service.Mutate(ctx, "local", journey.RunID, ActionEnable, ActionMutation{
+		IfRevision: journey.StateRevision, IdempotencyKey: "commit-enable-installed",
+		ReviewToken: review.Review.Token, Input: json.RawMessage(`{}`),
+	})
+	if err != nil || !manager.installed[0].Enabled || result.Journey.Steps[0].Status != StepComplete ||
+		manager.installed[0].Source != installedSource || releases.callCount() != 0 {
+		t.Fatalf("enable after a release refresh: %#v err=%v resolves=%d", result, err, releases.callCount())
+	}
+}
+
+func TestReviewedIntegrationEnableReviewRefusesAnInstalledCommitThatFailsInspection(t *testing.T) {
+	entry, descriptor, _, scope := readyIntegrationFixture(t)
+	installedSource := entry.SourceRepository + "#sha=" + strings.Repeat("f", 40)
+	release, _ := releaseDescriptor(descriptor, "0.6.0", installedSource)
+	installed := installedFromFixture(release, installedSource, entry.SourceFormat, false, 4)
+	// The installed commit's manifest now declares a different version.
+	inspected, inspectedReport := releaseDescriptor(descriptor, "0.6.1", installedSource)
+	manager := &fakeReviewedIntegrationManager{installed: []plugin.InstalledPlugin{installed}, descriptor: inspected, report: inspectedReport}
+	adapter := newReviewedIntegrationAdapter(manager, integrationResolver(entry), "darwin/arm64")
+	if _, err := adapter.Review(context.Background(), scope, ActionReviewEnable, json.RawMessage(`{}`)); !errors.Is(err, ErrConflict) {
+		t.Fatalf("enable review disclosed mismatched trust: err=%v", err)
 	}
 }
 
