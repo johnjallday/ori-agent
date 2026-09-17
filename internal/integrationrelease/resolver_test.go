@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -358,6 +359,97 @@ func TestResolveSendsTokenOnlyWhenSetAndOnlyOverHTTPS(t *testing.T) {
 	}
 	if got := resolve(plain); got.Fallback || authorization.Load() != "" {
 		t.Fatalf("token was sent over plain http: %#v auth=%q", got, authorization.Load())
+	}
+}
+
+// Candidates exists so a caller can walk down from the newest release when it
+// cannot load one, so the order, the floor at the end, and the cap are the
+// contract — not just the first entry.
+func TestCandidatesAreOrderedNewestFirstAndEndAtTheFloor(t *testing.T) {
+	fake := newReleasesServer(t, `[
+		{"tag_name":"v0.6.2","draft":false,"prerelease":false},
+		{"tag_name":"0.7.0","draft":false,"prerelease":false},
+		{"tag_name":"v0.6.1","draft":false,"prerelease":false},
+		{"tag_name":"v0.5.9","draft":false,"prerelease":false},
+		{"tag_name":"v0.8.0","draft":false,"prerelease":true}
+	]`)
+	clock := &fakeClock{now: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
+	entry := testEntry()
+	got := newTestResolver(fake, staticTags(annotatedAndLightweightTags, nil), clock).Candidates(context.Background(), entry)
+
+	want := []Resolution{
+		{Version: "0.7.0", Tag: "0.7.0", Commit: commit070, Source: entry.PinnedSource(commit070), CheckedAt: clock.Now()},
+		{Version: "0.6.2", Tag: "v0.6.2", Commit: commit062, Source: entry.PinnedSource(commit062), CheckedAt: clock.Now()},
+		Floor(entry),
+	}
+	if len(got) != len(want) {
+		t.Fatalf("candidates = %#v, want %#v", got, want)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("candidate %d = %#v, want %#v", index, got[index], want[index])
+		}
+	}
+	// v0.6.1 is the floor's own version: offering it twice would spend an
+	// inspection to learn the same thing.
+	if got[len(got)-1].Version != entry.MinimumVersion || !got[len(got)-1].Fallback {
+		t.Fatalf("the list does not end at the floor: %#v", got)
+	}
+}
+
+func TestCandidatesNeverExceedTheCap(t *testing.T) {
+	var releases, tags strings.Builder
+	releases.WriteString("[")
+	tags.WriteString(floorCommitLine + "\trefs/tags/v0.6.1\n")
+	for index := 0; index < 12; index++ {
+		version := "0.7." + strconv.Itoa(index)
+		if index > 0 {
+			releases.WriteString(",")
+		}
+		releases.WriteString(`{"tag_name":"v` + version + `","draft":false,"prerelease":false}`)
+		tags.WriteString(strings.Repeat(string(rune('a'+index%6)), 40) + "\trefs/tags/v" + version + "\n")
+	}
+	releases.WriteString("]")
+
+	fake := newReleasesServer(t, releases.String())
+	got := newTestResolver(fake, staticTags(tags.String(), nil), &fakeClock{now: time.Now()}).
+		Candidates(context.Background(), testEntry())
+	if len(got) != MaxCandidates {
+		t.Fatalf("candidates = %d, want the cap of %d", len(got), MaxCandidates)
+	}
+	if !got[len(got)-1].Fallback {
+		t.Fatalf("the capped list does not end at the floor: %#v", got)
+	}
+	if got[0].Version != "0.7.11" {
+		t.Fatalf("the capped list dropped the newest release: %#v", got[0])
+	}
+}
+
+// A failed lookup answers with the floor alone, exactly as Resolve does.
+func TestCandidatesFallBackToTheFloorAlone(t *testing.T) {
+	fake := newReleasesServer(t, `{"not":"a list"}`)
+	got := newTestResolver(fake, staticTags(annotatedAndLightweightTags, nil), &fakeClock{now: time.Now()}).
+		Candidates(context.Background(), testEntry())
+	if len(got) != 1 || got[0] != Floor(testEntry()) {
+		t.Fatalf("candidates = %#v, want the floor alone", got)
+	}
+}
+
+// One lookup serves both entry points, so a caller that reads the list pays no
+// more network than one that wants only the newest.
+func TestCandidatesAndResolveShareOneLookup(t *testing.T) {
+	fake := newReleasesServer(t, `[{"tag_name":"0.7.0","draft":false,"prerelease":false},{"tag_name":"v0.6.2","draft":false,"prerelease":false}]`)
+	var tagCalls atomic.Int32
+	clock := &fakeClock{now: time.Now()}
+	resolver := newTestResolver(fake, staticTags(annotatedAndLightweightTags, &tagCalls), clock)
+
+	candidates := resolver.Candidates(context.Background(), testEntry())
+	newest := resolver.Resolve(context.Background(), testEntry())
+	if fake.calls.Load() != 1 || tagCalls.Load() != 1 {
+		t.Fatalf("two entry points made %d api and %d tag calls", fake.calls.Load(), tagCalls.Load())
+	}
+	if newest != candidates[0] {
+		t.Fatalf("Resolve = %#v, want the newest candidate %#v", newest, candidates[0])
 	}
 }
 

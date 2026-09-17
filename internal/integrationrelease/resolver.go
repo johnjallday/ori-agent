@@ -1,7 +1,10 @@
 // Package integrationrelease resolves the release a reviewed integration
-// installs: the latest stable GitHub release of the reviewed repository at or
-// above the registry floor. A failed lookup never blocks setup; it returns the
-// last known release, then the floor's compiled fallback commit.
+// installs: the stable GitHub releases of the reviewed repository at or above
+// the registry floor, newest first. Resolve answers with the newest of them;
+// Candidates hands over the ordered list, for a caller that must check whether
+// this build can actually load a release before settling on it. A failed lookup
+// never blocks setup; it yields the last known releases, then the floor's
+// compiled fallback commit.
 package integrationrelease
 
 import (
@@ -14,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,6 +37,10 @@ const (
 	FailureRetryInterval = 5 * time.Minute
 	// LookupBudget bounds one resolution, both network steps together.
 	LookupBudget = 10 * time.Second
+	// MaxCandidates bounds how many releases one read may be offered, the floor
+	// included. A caller that walks the list inspecting each one would otherwise
+	// turn a single repository with a long release history into many fetches.
+	MaxCandidates = 5
 
 	releasesPerPage     = 30
 	maxReleasesResponse = 4 << 20
@@ -71,8 +79,11 @@ type Resolver struct {
 type cachedResolution struct {
 	// lookup serializes network lookups for one entry; callers that arrive
 	// during a lookup wait for its result instead of starting another.
-	lookup    sync.Mutex
-	last      *Resolution
+	lookup sync.Mutex
+	// last is the ordered candidate list from the newest successful lookup,
+	// newest release first, every entry at or above the floor. Empty means no
+	// lookup has succeeded and the floor is all there is.
+	last      []Resolution
 	nextCheck time.Time
 }
 
@@ -119,39 +130,82 @@ func Floor(entry reviewedintegration.Entry) Resolution {
 // for the entry, or the floor when there is none.
 func (r *Resolver) Resolve(ctx context.Context, entry reviewedintegration.Entry) Resolution {
 	floor := Floor(entry)
-	if r == nil || floor.Source == "" {
+	resolved := r.resolved(ctx, entry, floor)
+	if len(resolved) == 0 {
 		return floor
+	}
+	return resolved[0]
+}
+
+// Candidates returns the releases a caller may try, newest first. Every entry
+// is at or above the entry's floor, and the list always ends with the floor
+// itself, so a caller that rejects everything newer still has the one release
+// this build was reviewed against.
+//
+// It exists because "the newest release" and "the newest release this build can
+// load" are not the same thing. A release may require a host feature, protocol,
+// platform, or blueprint version this build does not have; the caller is the
+// one that can tell, so the resolver hands it the ordered list rather than a
+// single answer it would have to refuse.
+//
+// The list never exceeds MaxCandidates, and it is never empty: a pending entry
+// yields its (sourceless) floor, which the caller refuses as it always has.
+func (r *Resolver) Candidates(ctx context.Context, entry reviewedintegration.Entry) []Resolution {
+	floor := Floor(entry)
+	resolved := r.resolved(ctx, entry, floor)
+	candidates := make([]Resolution, 0, MaxCandidates)
+	for _, candidate := range resolved {
+		if len(candidates)+1 >= MaxCandidates {
+			break
+		}
+		if candidate.Source == floor.Source {
+			// The floor is already the last entry; inspecting it twice would
+			// spend a fetch to learn the same thing.
+			continue
+		}
+		candidates = append(candidates, candidate)
+	}
+	return append(candidates, floor)
+}
+
+// resolved returns the cached or freshly looked-up candidate list, newest
+// first. An empty result means the floor is all there is.
+func (r *Resolver) resolved(ctx context.Context, entry reviewedintegration.Entry, floor Resolution) []Resolution {
+	if r == nil || floor.Source == "" {
+		return nil
 	}
 	owner, repository, ok := githubRepository(entry.SourceRepository)
 	if !ok {
-		return floor
+		return nil
 	}
 	cached := r.cacheFor(entry)
 	cached.lookup.Lock()
 	defer cached.lookup.Unlock()
 	now := r.now()
 	if now.Before(cached.nextCheck) {
-		return cached.current(floor)
+		return cached.last
 	}
 	lookupCtx, cancel := context.WithTimeout(ctx, r.budget)
 	defer cancel()
-	resolution, err := r.lookup(lookupCtx, entry, owner, repository)
+	resolutions, err := r.lookup(lookupCtx, entry, owner, repository)
 	if err != nil {
 		if ctx.Err() != nil {
 			// The caller gave up; that says nothing about the release source.
-			return cached.current(floor)
+			return cached.last
 		}
 		// The raw error is never logged: request URLs may carry credentials.
 		logger.Warn("Integration release lookup failed; using the last known release or the reviewed minimum", logger.Fields{
 			"integration": entry.Key, "stage": lookupStage(err),
 		})
 		cached.nextCheck = now.Add(FailureRetryInterval)
-		return cached.current(floor)
+		return cached.last
 	}
-	resolution.CheckedAt = now
-	cached.last = &resolution
+	for index := range resolutions {
+		resolutions[index].CheckedAt = now
+	}
+	cached.last = resolutions
 	cached.nextCheck = now.Add(CacheTTL)
-	return resolution
+	return resolutions
 }
 
 func (r *Resolver) cacheFor(entry reviewedintegration.Entry) *cachedResolution {
@@ -166,13 +220,6 @@ func (r *Resolver) cacheFor(entry reviewedintegration.Entry) *cachedResolution {
 		r.entries[key] = cached
 	}
 	return cached
-}
-
-func (cached *cachedResolution) current(floor Resolution) Resolution {
-	if cached.last != nil {
-		return *cached.last
-	}
-	return floor
 }
 
 type stageError struct{ stage string }
@@ -193,26 +240,43 @@ type githubRelease struct {
 	Prerelease bool   `json:"prerelease"`
 }
 
-func (r *Resolver) lookup(ctx context.Context, entry reviewedintegration.Entry, owner, repository string) (Resolution, error) {
+func (r *Resolver) lookup(ctx context.Context, entry reviewedintegration.Entry, owner, repository string) ([]Resolution, error) {
 	releases, err := r.releases(ctx, owner, repository)
 	if err != nil {
-		return Resolution{}, err
+		return nil, err
 	}
-	version, tag, ok := latestStableRelease(releases, entry.MinimumVersion)
-	if !ok {
-		return Resolution{}, stageError{"no_candidate"}
+	ordered := stableReleasesAtOrAboveFloor(releases, entry.MinimumVersion)
+	if len(ordered) == 0 {
+		return nil, stageError{"no_candidate"}
 	}
-	// The commit always comes from the reviewed repository itself, so a
-	// development API override can only choose among official tags.
+	// The commits always come from the reviewed repository itself, so a
+	// development API override can only choose among official tags. One listing
+	// covers every candidate.
 	output, err := r.listTags(ctx, entry.SourceRepository)
 	if err != nil {
-		return Resolution{}, stageError{"tag_lookup"}
+		return nil, stageError{"tag_lookup"}
 	}
-	commit, ok := commitForTag(output, tag)
-	if !ok {
-		return Resolution{}, stageError{"tag_commit"}
+	resolutions := make([]Resolution, 0, MaxCandidates)
+	for _, candidate := range ordered {
+		commit, ok := commitForTag(output, candidate.tag)
+		if !ok {
+			if len(resolutions) == 0 {
+				// The newest release names a tag this repository does not have,
+				// which says the two sources disagree. Reporting that as a
+				// lookup failure keeps the last known release rather than
+				// quietly answering with an older one.
+				return nil, stageError{"tag_commit"}
+			}
+			continue
+		}
+		resolutions = append(resolutions, Resolution{
+			Version: candidate.version, Tag: candidate.tag, Commit: commit, Source: entry.PinnedSource(commit),
+		})
+		if len(resolutions) == MaxCandidates {
+			break
+		}
 	}
-	return Resolution{Version: version, Tag: tag, Commit: commit, Source: entry.PinnedSource(commit)}, nil
+	return resolutions, nil
 }
 
 func (r *Resolver) releases(ctx context.Context, owner, repository string) ([]githubRelease, error) {
@@ -244,26 +308,40 @@ func (r *Resolver) releases(ctx context.Context, owner, repository string) ([]gi
 	return releases, nil
 }
 
-// latestStableRelease picks the highest stable release at or above the floor.
+// releaseCandidate is one stable release of the reviewed repository, before its
+// commit is known.
+type releaseCandidate struct {
+	version string
+	tag     string
+}
+
+// stableReleasesAtOrAboveFloor orders the installable releases highest first.
 // Drafts, prereleases (by flag or by a semantic-version prerelease suffix) and
-// tags that are not registry versions after removing a leading "v" are skipped.
-func latestStableRelease(releases []githubRelease, minimum string) (version, tag string, ok bool) {
+// tags that are not registry versions after removing a leading "v" are skipped,
+// as are duplicate versions: two tags for one version would otherwise offer the
+// same release twice.
+func stableReleasesAtOrAboveFloor(releases []githubRelease, minimum string) []releaseCandidate {
+	candidates := make([]releaseCandidate, 0, len(releases))
+	seen := make(map[string]struct{}, len(releases))
 	for _, release := range releases {
 		if release.Draft || release.Prerelease {
 			continue
 		}
-		candidate := strings.TrimPrefix(release.TagName, "v")
-		if !reviewedintegration.StableVersion(candidate) || !reviewedintegration.AtLeast(candidate, minimum) {
+		version := strings.TrimPrefix(release.TagName, "v")
+		if !reviewedintegration.StableVersion(version) || !reviewedintegration.AtLeast(version, minimum) {
 			continue
 		}
-		if ok {
-			if order, _ := reviewedintegration.CompareVersions(candidate, version); order <= 0 {
-				continue
-			}
+		if _, duplicate := seen[version]; duplicate {
+			continue
 		}
-		version, tag, ok = candidate, release.TagName, true
+		seen[version] = struct{}{}
+		candidates = append(candidates, releaseCandidate{version: version, tag: release.TagName})
 	}
-	return version, tag, ok
+	sort.SliceStable(candidates, func(i, j int) bool {
+		order, _ := reviewedintegration.CompareVersions(candidates[i].version, candidates[j].version)
+		return order > 0
+	})
+	return candidates
 }
 
 // commitForTag reads one tag's commit from ls-remote output. An annotated tag's

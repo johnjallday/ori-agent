@@ -109,17 +109,21 @@ const (
 	ReasonIntegrationIdentityMismatch ReasonCode = "integration_identity_mismatch"
 	ReasonIntegrationUnsupported      ReasonCode = "integration_unsupported"
 	ReasonIntegrationReleaseNotReady  ReasonCode = "integration_release_unavailable"
-	ReasonBlueprintUnavailable        ReasonCode = "blueprint_unavailable"
-	ReasonAssistantProgramMismatch    ReasonCode = "assistant_program_mismatch"
-	ReasonProjectSelectionRequired    ReasonCode = "project_selection_required"
-	ReasonProjectScopeInvalid         ReasonCode = "project_scope_invalid"
-	ReasonProjectAlreadyConnected     ReasonCode = "project_already_connected"
-	ReasonProjectUnavailable          ReasonCode = "project_unavailable"
-	ReasonRuntimeSetupRequired        ReasonCode = "runtime_setup_required"
-	ReasonRuntimeNeedsAttention       ReasonCode = "runtime_needs_attention"
-	ReasonHomeUnavailable             ReasonCode = "home_unavailable"
-	ReasonStaffingRequired            ReasonCode = "staffing_required"
-	ReasonStaffingNeedsAttention      ReasonCode = "staffing_needs_attention"
+	// ReasonIntegrationNewerReleaseUnsupported is a note, not a block: the
+	// offer stands, but for an older release because this build cannot load the
+	// newest one. It names why the version on offer is behind the repository's.
+	ReasonIntegrationNewerReleaseUnsupported ReasonCode = "integration_newer_release_unsupported"
+	ReasonBlueprintUnavailable               ReasonCode = "blueprint_unavailable"
+	ReasonAssistantProgramMismatch           ReasonCode = "assistant_program_mismatch"
+	ReasonProjectSelectionRequired           ReasonCode = "project_selection_required"
+	ReasonProjectScopeInvalid                ReasonCode = "project_scope_invalid"
+	ReasonProjectAlreadyConnected            ReasonCode = "project_already_connected"
+	ReasonProjectUnavailable                 ReasonCode = "project_unavailable"
+	ReasonRuntimeSetupRequired               ReasonCode = "runtime_setup_required"
+	ReasonRuntimeNeedsAttention              ReasonCode = "runtime_needs_attention"
+	ReasonHomeUnavailable                    ReasonCode = "home_unavailable"
+	ReasonStaffingRequired                   ReasonCode = "staffing_required"
+	ReasonStaffingNeedsAttention             ReasonCode = "staffing_needs_attention"
 
 	// Account-link shape reasons. Each maps from one mailbox readiness verdict
 	// that blocks progress; unfinished first-time setup (connect Google, enable
@@ -141,7 +145,8 @@ var validReasonCodes = map[ReasonCode]struct{}{
 	ReasonOperationFailed: {}, ReasonIntegrationNotInstalled: {}, ReasonIntegrationDisabled: {},
 	ReasonIntegrationUpdateRequired: {}, ReasonIntegrationLocalUnverified: {},
 	ReasonIntegrationIdentityMismatch: {}, ReasonIntegrationUnsupported: {}, ReasonIntegrationReleaseNotReady: {},
-	ReasonBlueprintUnavailable: {}, ReasonAssistantProgramMismatch: {},
+	ReasonIntegrationNewerReleaseUnsupported: {},
+	ReasonBlueprintUnavailable:               {}, ReasonAssistantProgramMismatch: {},
 	ReasonProjectSelectionRequired: {}, ReasonProjectScopeInvalid: {}, ReasonProjectAlreadyConnected: {},
 	ReasonProjectUnavailable: {}, ReasonRuntimeSetupRequired: {}, ReasonRuntimeNeedsAttention: {},
 	ReasonHomeUnavailable: {}, ReasonStaffingRequired: {}, ReasonStaffingNeedsAttention: {},

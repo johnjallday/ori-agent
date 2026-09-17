@@ -41,6 +41,12 @@ type IntegrationProjection struct {
 	SupportedPlatforms   []string            `json:"supported_platforms"`
 	StateRevision        string              `json:"state_revision"`
 	Trust                *plugin.TrustReport `json:"trust,omitempty"`
+	// ReleaseNote and NewestUnsupportedVersion explain an offer that is behind
+	// the repository's newest release. Without them a user comparing the offered
+	// version against the release page would see Ori proposing an old one and
+	// have no way to tell that it is the newest this build can load.
+	ReleaseNote              ReasonCode `json:"release_note,omitempty"`
+	NewestUnsupportedVersion string     `json:"newest_unsupported_version,omitempty"`
 
 	// reviewedSource is the exact source an install or replacement offer was
 	// inspected from. It is never serialized; Commit installs only this source.
@@ -68,6 +74,18 @@ func validIntegrationProjection(value *IntegrationProjection) bool {
 	// Every version a step acts on is at or above the reviewed floor.
 	if value.MinimumVersion != "" && !reviewedintegration.AtLeast(value.ExpectedVersion, value.MinimumVersion) {
 		return false
+	}
+	// The note and the version it names travel together, and it only ever
+	// explains an offer that is genuinely behind what the repository published.
+	if !validateCanonicalRef(value.NewestUnsupportedVersion, true) ||
+		(value.ReleaseNote != "") != (value.NewestUnsupportedVersion != "") ||
+		(value.ReleaseNote != "" && value.ReleaseNote != ReasonIntegrationNewerReleaseUnsupported) {
+		return false
+	}
+	if value.NewestUnsupportedVersion != "" {
+		if order, comparable := reviewedintegration.CompareVersions(value.NewestUnsupportedVersion, value.ExpectedVersion); !comparable || order <= 0 {
+			return false
+		}
 	}
 	for _, feature := range value.RequiredHostFeatures {
 		if !validateStableID(feature) {
