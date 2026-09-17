@@ -153,6 +153,28 @@ func TestServerBuilder_Build_Integration(t *testing.T) {
 	if builder.taskCapabilityGate == nil {
 		t.Error("composite task capability gate not wired")
 	}
+	// The map activity tracker reads the event bus built in Phase 19. Wired
+	// before it, the tracker would hold a nil bus and every map would stay
+	// dark while every unit test that builds a tracker by hand still passed.
+	if !builder.MapActivityWired() || server.Handlers.MapActivity == nil || server.Workflow.MapActivityTracker == nil {
+		t.Error("map activity tracker/handler not wired over the event bus")
+	}
+	// Parcels need the database, which exists by the same phase.
+	if !builder.MapActivityParcelsWired() {
+		t.Error("result parcels not wired into the map activity tracker")
+	}
+	// The Daily Brief (Phase 22.6) and the janitor's automation are built long
+	// after the bus; each must be bound where it is created, not at Phase 19.
+	if !builder.DailyBriefActivityWired() {
+		t.Error("Daily Brief generations are not published as map activities")
+	}
+	if !builder.FileJanitorActivityWired() {
+		t.Error("File Janitor scans are not published as map activities")
+	}
+	// Without the dev flag the real model-backed runner must be in place.
+	if builder.scriptedTaskHandler != nil {
+		t.Error("scripted task handler installed without ORI_DEV_SCRIPTED_TASK_RUNS=1")
+	}
 	// The reset handler must be confined to the same resolved data directory
 	// every other store uses, not the process working directory. A cwd
 	// value here would mean a reset previewed/executed from a different

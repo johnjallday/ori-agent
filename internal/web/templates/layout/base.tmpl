@@ -250,8 +250,17 @@
     Deferred classic scripts execute before non-async module scripts, so the
     ordering below satisfies that requirement.
   -->
+  <!-- The task-run show's shared activity feed and bubble lines. Classic
+       deferred scripts, loaded BEFORE workspace-map.js, which reads both. -->
+  <script defer src="/js/modules/map-activity-feed.js"></script>
+  <script defer src="/js/modules/activity-bubble-lines.js"></script>
+  <script defer src="/js/modules/stage-up-toast.js"></script>
+  <script defer src="/js/modules/result-card.js"></script>
   <script defer src="/js/modules/workspace-map.js"></script>
   <script defer src="/js/modules/plugin-update-notifications.js"></script>
+  <!-- Give a task from the map: the page-independent create and start calls,
+       registered as window.OriQuickTask for the classic workspace-map.js. -->
+  <script type="module" src="/js/modules/quick-task.js"></script>
   <script type="module" src="/js/modules/home-workspace-cockpit.js"></script>
   <script type="module" src="/js/modules/home-plugin-updates.js"></script>
   <script type="module" src="/js/modules/home-daily-brief.js"></script>

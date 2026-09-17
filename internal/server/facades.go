@@ -27,6 +27,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/location"
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
+	"github.com/johnjallday/ori-agent/internal/mapactivity"
+	"github.com/johnjallday/ori-agent/internal/mapactivityhttp"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
 	"github.com/johnjallday/ori-agent/internal/memoryhttp"
@@ -118,6 +120,9 @@ type WorkflowSystemFacade struct {
 	// DailyBriefScheduler polls for due scheduled Daily Brief generations.
 	// Assigned post-construction by the builder (not a constructor arg).
 	DailyBriefScheduler *dailybrief.Scheduler
+	// MapActivityTracker feeds the maps' activity stream from the bus.
+	// Assigned post-construction by the builder (not a constructor arg).
+	MapActivityTracker *mapactivity.Tracker
 }
 
 // IntegrationSystemFacade manages external integrations (MCP, updates)
@@ -220,6 +225,10 @@ type HandlerFacade struct {
 	// price of a cadence change. Like WorkspaceMap it belongs to the user rather
 	// than to any one workspace, and it can change no task — it only prices one.
 	Economy *economyhttp.Handler
+	// MapActivity serves the task-run show's live activity feed: what is
+	// running in every workspace right now, and the parcels waiting to be
+	// opened. Like Economy it belongs to the user, not to one workspace.
+	MapActivity *mapactivityhttp.Handler
 }
 
 // NewCoreSystemFacade creates a new core system facade
@@ -328,6 +337,9 @@ func (w *WorkflowSystemFacade) Start() {
 	if w.DailyBriefScheduler != nil {
 		w.DailyBriefScheduler.Start()
 	}
+	if w.MapActivityTracker != nil {
+		w.MapActivityTracker.Start()
+	}
 }
 
 // Shutdown gracefully shuts down all workflow system background services
@@ -349,6 +361,12 @@ func (w *WorkflowSystemFacade) Shutdown() {
 	}
 	if w.NotificationService != nil {
 		w.NotificationService.Shutdown()
+	}
+	// Before the bus: stopping the tracker unsubscribes it and closes every
+	// open activity stream, so the HTTP server's graceful shutdown is not held
+	// open by browsers that are still watching the map.
+	if w.MapActivityTracker != nil {
+		w.MapActivityTracker.Stop()
 	}
 	if w.EventBus != nil {
 		w.EventBus.Shutdown()

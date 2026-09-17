@@ -43,6 +43,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/macwake"
+	"github.com/johnjallday/ori-agent/internal/mapactivity"
+	"github.com/johnjallday/ori-agent/internal/mapactivityhttp"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcp/mcpregistry"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
@@ -441,6 +443,17 @@ type ServerBuilder struct {
 	economyStore   *economy.SQLiteStore
 	economyService *economy.Service
 	economyHandler *economyhttp.Handler
+
+	// Map activity (task-run show): the tracker turns bus events into the
+	// Home map's live activity feed, and its handler serves the snapshot and
+	// the stream. Both stay nil when the database or the bus is missing; the
+	// handler then answers 404 like the flag-off state.
+	mapActivityTracker *mapactivity.Tracker
+	mapActivityHandler *mapactivityhttp.Handler
+
+	// scriptedTaskHandler replaces the model-backed task runner when the
+	// dev-only ORI_DEV_SCRIPTED_TASK_RUNS=1 is set. Nil otherwise.
+	scriptedTaskHandler *workspace.ScriptedTaskHandler
 }
 
 // NewServerBuilder creates a new ServerBuilder instance with an empty Server.
@@ -553,6 +566,7 @@ func (b *ServerBuilder) Build() (*Server, error) {
 		return nil, fmt.Errorf("workspace store phase failed: %w", err)
 	}
 	b.initializeEventSystem()                           // Phase 19
+	b.wireMapActivity()                                 // Phase 19.1 — the map's live activity feed needs the bus
 	b.initializeTaskExecution()                         // Phase 20
 	if err := b.initializeOrchestration(); err != nil { // Phase 21
 		return nil, fmt.Errorf("orchestration phase failed: %w", err)
@@ -626,6 +640,7 @@ func (b *ServerBuilder) createDomainFacades() {
 	// mission-bridge init; stopped on Shutdown).
 	b.server.Workflow.TriggerService = b.triggerService
 	b.server.Workflow.DailyBriefScheduler = b.dailyBriefScheduler
+	b.server.Workflow.MapActivityTracker = b.mapActivityTracker
 	b.server.fileJanitorAutomation = b.fileJanitorAutomation
 
 	// Integration System Facade
@@ -687,6 +702,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		DailyBrief:            b.dailyBriefHandler,
 		Characters:            b.characterHandler,
 		Economy:               b.economyHandler,
+		MapActivity:           b.mapActivityHandler,
 		OriGuide:              b.oriGuideHandler,
 		FileJanitor:           b.fileJanitorHandler,
 		WorkspaceCapabilities: b.workspaceCapabilityHandler,

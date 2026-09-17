@@ -101,6 +101,11 @@ type Store interface {
 	// HasEntry reports whether a specific reference has already been recorded.
 	HasEntry(ctx context.Context, resource, refKind, refID string) (bool, error)
 
+	// EntryAmount returns the signed amount recorded for one reference, and
+	// whether there is one. The task-run show reads a run's Craft this way
+	// when its result card opens (task-run-show FR39).
+	EntryAmount(ctx context.Context, resource, refKind, refID string) (int64, bool, error)
+
 	// HasReason reports whether any entry carries a reason. The one-time
 	// backfill guards on this (FR32).
 	HasReason(ctx context.Context, reason string) (bool, error)
@@ -263,6 +268,24 @@ func (s *SQLiteStore) HasEntry(ctx context.Context, resource, refKind, refID str
 		return false, fmt.Errorf("look up economy ledger entry: %w", err)
 	}
 	return exists == 1, nil
+}
+
+// EntryAmount returns the signed delta recorded for this exact reference.
+func (s *SQLiteStore) EntryAmount(ctx context.Context, resource, refKind, refID string) (int64, bool, error) {
+	if s == nil || s.db == nil {
+		return 0, false, ErrStoreUnavailable
+	}
+	var delta int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT delta FROM economy_ledger WHERE resource = ? AND ref_kind = ? AND ref_id = ?
+	`, strings.TrimSpace(resource), strings.TrimSpace(refKind), strings.TrimSpace(refID)).Scan(&delta)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("look up economy ledger amount: %w", err)
+	}
+	return delta, true, nil
 }
 
 // HasReason reports whether any entry carries this reason.

@@ -27,6 +27,18 @@ func EconomyEnabled() bool {
 	return parseBoolDefaultTrue(os.Getenv(envEconomyEnabled))
 }
 
+const envMapShowEnabled = "ORI_MAP_SHOW_ENABLED"
+
+// MapShowEnabled reports whether the task-run show should be active: the live
+// map activity feed, lit buildings and speech bubbles, result parcels and their
+// card. Defaults to true unless explicitly disabled (task-run-show FR64).
+//
+// With it off the activity and parcel endpoints answer 404, no parcels are
+// created, and both maps behave exactly as they did before the feature.
+func MapShowEnabled() bool {
+	return parseBoolDefaultTrue(os.Getenv(envMapShowEnabled))
+}
+
 func parseBoolDefaultTrue(raw string) bool {
 	switch strings.TrimSpace(strings.ToLower(raw)) {
 	case "", "1", "true", "yes", "on", "enabled":

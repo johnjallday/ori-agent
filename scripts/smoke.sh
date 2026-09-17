@@ -2074,6 +2074,110 @@ print(any(t.get("id") == "downloads-janitor" for t in d.get("templates", [])))')
   echo "PASS janitor upgrade verify"
 }
 
+# ---------------------------------------------------------------------------
+# Task-run show (tasks/prd-task-run-show.md). Start the server with
+#   ORI_DEV_SCRIPTED_TASK_RUNS=1 ./scripts/demo-server.sh 8931
+# so every run plays the scripted event sequence instead of calling a model.
+# ---------------------------------------------------------------------------
+
+# smoke_show_seed completes onboarding FIRST (workspaces seeded before it vanish
+# on restart), then creates three workspaces that each have a Commander.
+smoke_show_seed() {
+  curl -s -o /dev/null -w "%{http_code} onboarding complete\n" \
+    -X POST "$BASE_URL/api/onboarding/complete" -H 'Content-Type: application/json' -d '{}'
+  seed_agent "Theo" "researcher" false '[]' "Looks things up"
+  seed_agent "Ada" "synthesizer" false '[]' "Writes things down"
+  seed_agent "Mira" "orchestrator" false '[]' "Keeps launches moving"
+  local research launch notes
+  research="$(seed_workspace "Research Lab" "Theo")"
+  launch="$(seed_workspace "Product Launch" "Mira")"
+  notes="$(seed_workspace "Field Notes" "Ada")"
+  echo "research=$research"
+  echo "launch=$launch"
+  echo "notes=$notes"
+}
+
+# smoke_show_run creates a task (no assignee: the entry agent is the default)
+# and starts it, the same two calls the New Quest composer makes. Put [fail]
+# in the description to play the failure script.
+smoke_show_run() {
+  local workspace_id="${3:-}" description="${4:-Look into the launch checklist}" body task_id
+  [[ -n "$workspace_id" ]] || fail "usage: showrun <base-url> <workspace-id> [description]"
+  body=$(python3 -c 'import json, sys
+print(json.dumps({"workspace_id": sys.argv[1], "description": sys.argv[2], "priority": 2}))' \
+    "$workspace_id" "$description")
+  task_id="$(curl -s -X POST "$BASE_URL/api/orchestration/tasks" \
+    -H 'Content-Type: application/json' -d "$body" \
+    | python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d.get("task",{}).get("id",""))')"
+  [[ -n "$task_id" ]] || fail "task was not created"
+  curl -s -o /dev/null -w "%{http_code} start $task_id\n" \
+    -X POST "$BASE_URL/api/orchestration/tasks/execute" \
+    -H 'Content-Type: application/json' -d "{\"task_id\":\"$task_id\"}"
+  echo "task_id=$task_id"
+}
+
+# smoke_show_markfailed answers a blocked task with "mark failed", the way a user
+# does on the task's decision page. A manual run that errors is BLOCKED, not
+# failed, so this is how a "Needs a look" parcel appears for one.
+smoke_show_markfailed() {
+  local task_id="${3:-}"
+  [[ -n "$task_id" ]] || fail "usage: showmarkfailed <base-url> <task-id>"
+  curl -s -o /dev/null -w "%{http_code} mark failed $task_id\n" \
+    -X POST "$BASE_URL/api/orchestration/tasks/$task_id/assist" \
+    -H 'Content-Type: application/json' -d '{"action":"mark_failed"}'
+}
+
+# smoke_show_stream prints the activity stream for a few seconds, so a run's
+# events and the absence of arguments/results can be read directly.
+smoke_show_stream() {
+  local seconds="${3:-15}"
+  curl -s -N --max-time "$seconds" "$BASE_URL/api/workspace-map/activity/stream" || true
+}
+
+# smoke_show_wait blocks until the demo server answers, so a rebuild-and-restart
+# can be followed by one command instead of a hand-written polling loop.
+smoke_show_wait() {
+  local waited=0
+  until curl -sf -o /dev/null "$BASE_URL/"; do
+    ((waited++ < 300)) || fail "server at $BASE_URL did not answer within 300s"
+    sleep 1
+  done
+  echo "ok   $BASE_URL is answering"
+}
+
+# smoke_show_janitor installs File Janitor on a workspace and grants it a
+# folder (created if missing), so its watcher scans become map activities.
+smoke_show_janitor() {
+  local workspace_id="${3:-}" folder="${4:-}"
+  [[ -n "$workspace_id" && -n "$folder" ]] || fail "usage: showjanitor <base-url> <workspace-id> <folder>"
+  mkdir -p "$folder"
+  folder="$(canonical_dir "$folder")"
+  expect_status 200 POST "$BASE_URL/api/workspaces/$workspace_id/capabilities/file-janitor/install" '{"source":"in-place"}'
+  expect_status 200 POST "$BASE_URL/api/workspaces/$workspace_id/file-janitor/setup" \
+    "$(FOLDER="$folder" python3 -c 'import json,os; print(json.dumps({"path": os.environ["FOLDER"]}))')"
+  echo "ok   File Janitor watches $folder"
+}
+
+# smoke_show_drop moves settled files into a watched folder. The scanner only
+# proposes files that look finished, and the watcher wakes on rename, so each
+# file is written elsewhere, backdated six hours, then moved in. The scan runs
+# after the watcher's five-minute settle window.
+smoke_show_drop() {
+  local folder="${3:-}"
+  shift 3 || true
+  [[ -n "$folder" && $# -gt 0 ]] || fail "usage: showdrop <base-url> <folder> <file-name>..."
+  local staging stamp name
+  staging="$(dirname "$folder")/.showdrop-staging"
+  mkdir -p "$staging"
+  stamp=$(date -v-6H +%Y%m%d%H%M 2>/dev/null || date -d '-6 hours' +%Y%m%d%H%M)
+  for name in "$@"; do
+    printf 'demo file %s\n' "$name" >"$staging/$name"
+    touch -t "$stamp" "$staging/$name"
+    mv "$staging/$name" "$folder/$name"
+    echo "ok   dropped $name"
+  done
+}
+
 # smoke_integration covers the reviewed integration floor
 # (tasks/prd-reviewed-integration-latest-release.md): wait for the server, skip
 # onboarding, optionally install one plugin source, then print the install
@@ -2302,6 +2406,13 @@ print(json.dumps({
 
 case "${1:-}" in
 serve) serve_isolated "${2:-8931}" "${3:-default}" ;;
+showseed) smoke_show_seed ;;
+showrun) smoke_show_run "$@" ;;
+showmarkfailed) smoke_show_markfailed "$@" ;;
+showstream) smoke_show_stream "$@" ;;
+showwait) smoke_show_wait ;;
+showjanitor) smoke_show_janitor "$@" ;;
+showdrop) smoke_show_drop "$@" ;;
 attach-details) smoke_attach_details "$@" ;;
 integration) smoke_integration "$@" ;;
 reaper-blueprint) smoke_reaper_blueprint ;;
@@ -2338,6 +2449,13 @@ janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
 *)
   echo "usage:" >&2
   echo "  $0 serve [port] [sandbox-name]           # run an ISOLATED demo server (Ctrl-C to stop)" >&2
+  echo "  $0 showseed <base-url>                   # task-run show: onboarding + 3 workspaces with Commanders" >&2
+  echo "  $0 showrun <base-url> <ws> [description] # task-run show: create and start a task ([fail] fails it)" >&2
+  echo "  $0 showmarkfailed <base-url> <task-id>    # task-run show: answer a blocked task with mark failed" >&2
+  echo "  $0 showstream <base-url> [seconds]       # task-run show: print the activity stream" >&2
+  echo "  $0 showwait <base-url>                   # task-run show: wait until the demo server answers" >&2
+  echo "  $0 showjanitor <base-url> <ws> <folder>  # task-run show: install File Janitor and grant a folder" >&2
+  echo "  $0 showdrop <base-url> <folder> <name>... # task-run show: move settled files in (scan runs ~5 min later)" >&2
   echo "  $0 integration <base-url> [source]       # reviewed integration floor: install a source, print the install step and updates" >&2
   echo "  $0 starter <base-url> <stage> [flags]    # starter missions: wait for the server, run a demo stage" >&2
   echo "  $0 reaper-blueprint <base-url>           # onboard + install/enable the reviewed REAPER blueprint" >&2

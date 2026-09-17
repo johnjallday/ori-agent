@@ -115,6 +115,11 @@ func (b *ServerBuilder) wireFileJanitorAutomation() {
 	}
 	automation := filejanitor.NewAutomation(b.fileJanitorService, janitorTriggerStore{service: b.triggerService})
 	automation.SetAdmissionGate(b.resetWork)
+	if b.eventBus != nil {
+		// The map shows an unattended scan sorting the folder (task-run-show
+		// FR10). Bound before Start below, which runs a pass immediately.
+		automation.SetActivityPublisher(janitorActivityPublisher{bus: b.eventBus})
+	}
 	b.fileJanitorAutomation = automation
 	b.fileJanitorService.SetAutomationStatus(automation)
 	b.triggerService.RegisterDomainScanHandler(filejanitor.LegacyDomainKey, automation)

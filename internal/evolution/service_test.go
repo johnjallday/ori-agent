@@ -220,7 +220,7 @@ func TestService_AwardTaskXP_WorthMoreThanMessage(t *testing.T) {
 	logSink := &fakeActivityLogger{}
 	svc.SetActivityLogger(logSink)
 
-	if err := svc.AwardTaskXP("alpha"); err != nil {
+	if _, err := svc.AwardTaskXP("alpha"); err != nil {
 		t.Fatalf("AwardTaskXP() failed: %v", err)
 	}
 
@@ -245,12 +245,12 @@ func TestService_AwardTaskXP_NoMessageDuplicateSuppression(t *testing.T) {
 	now := time.Date(2026, 2, 7, 12, 0, 0, 0, time.UTC)
 	svc.now = func() time.Time { return now }
 
-	if err := svc.AwardTaskXP("alpha"); err != nil {
+	if _, err := svc.AwardTaskXP("alpha"); err != nil {
 		t.Fatalf("first task award failed: %v", err)
 	}
 	// Back-to-back task completions (empty "message") must not be suppressed
 	// the way identical chat messages are.
-	if err := svc.AwardTaskXP("alpha"); err != nil {
+	if _, err := svc.AwardTaskXP("alpha"); err != nil {
 		t.Fatalf("second task award failed: %v", err)
 	}
 
@@ -272,7 +272,7 @@ func TestService_AwardTaskXP_RespectsHourlyCapAcrossChatAndTask(t *testing.T) {
 	if err := svc.AwardMessageXP("alpha", 0, "hello"); err != nil {
 		t.Fatalf("message award failed: %v", err)
 	}
-	if err := svc.AwardTaskXP("alpha"); err != nil {
+	if _, err := svc.AwardTaskXP("alpha"); err != nil {
 		t.Fatalf("task award failed: %v", err)
 	}
 
@@ -282,7 +282,7 @@ func TestService_AwardTaskXP_RespectsHourlyCapAcrossChatAndTask(t *testing.T) {
 			agentStore.agents["alpha"].Evolution.Experience)
 	}
 
-	if err := svc.AwardTaskXP("alpha"); err != nil {
+	if _, err := svc.AwardTaskXP("alpha"); err != nil {
 		t.Fatalf("third award failed: %v", err)
 	}
 	if agentStore.agents["alpha"].Evolution.Experience != 60 {
@@ -291,9 +291,72 @@ func TestService_AwardTaskXP_RespectsHourlyCapAcrossChatAndTask(t *testing.T) {
 	}
 }
 
+func TestService_AwardTaskXP_ReportsWhatItPaid(t *testing.T) {
+	svc, agentStore, _ := newTestService(&Config{BaseMessageXP: 10, XPPerLevel: 100, MaxXPPerHour: 1000})
+	agentStore.agents["alpha"].InitializeEvolution()
+	agentStore.agents["alpha"].Evolution.EnsureDefaults()
+	agentStore.agents["alpha"].Evolution.Experience = 30
+
+	award, err := svc.AwardTaskXP("alpha")
+	if err != nil {
+		t.Fatalf("AwardTaskXP() failed: %v", err)
+	}
+	want := TaskXPAward{
+		Amount:         50,
+		LevelBefore:    0,
+		LevelAfter:     0,
+		ProgressBefore: 0.3,
+		ProgressAfter:  0.8,
+		StageBefore:    types.AgentStageSpark,
+		StageAfter:     types.AgentStageSpark,
+	}
+	if award != want {
+		t.Fatalf("award = %+v, want %+v", award, want)
+	}
+}
+
+func TestService_AwardTaskXP_ReportsALevelAndStageChange(t *testing.T) {
+	svc, agentStore, _ := newTestService(&Config{BaseMessageXP: 10, XPPerLevel: 100, MaxXPPerHour: 1000})
+	agentStore.agents["alpha"].InitializeEvolution()
+	agentStore.agents["alpha"].Evolution.EnsureDefaults()
+	agentStore.agents["alpha"].Evolution.Experience = 180 // level 1, spark
+	agentStore.agents["alpha"].Evolution.Level = 1
+
+	award, err := svc.AwardTaskXP("alpha")
+	if err != nil {
+		t.Fatalf("AwardTaskXP() failed: %v", err)
+	}
+	if award.LevelBefore != 1 || award.LevelAfter != 2 {
+		t.Errorf("levels = %d -> %d, want 1 -> 2", award.LevelBefore, award.LevelAfter)
+	}
+	if award.StageBefore != types.AgentStageSpark || award.StageAfter != types.AgentStageInfant {
+		t.Errorf("stages = %s -> %s, want spark -> infant", award.StageBefore, award.StageAfter)
+	}
+	if award.ProgressBefore != 0.8 || award.ProgressAfter != 0.3 {
+		t.Errorf("progress = %v -> %v, want 0.8 -> 0.3", award.ProgressBefore, award.ProgressAfter)
+	}
+}
+
+func TestService_AwardTaskXP_CappedReportsZero(t *testing.T) {
+	svc, _, _ := newTestService(&Config{BaseMessageXP: 10, MaxXPPerHour: 50})
+	now := time.Date(2026, 2, 7, 13, 0, 0, 0, time.UTC)
+	svc.now = func() time.Time { return now }
+
+	if award, err := svc.AwardTaskXP("alpha"); err != nil || award.Amount != 50 {
+		t.Fatalf("first award = %+v, %v; want 50", award, err)
+	}
+	award, err := svc.AwardTaskXP("alpha")
+	if err != nil {
+		t.Fatalf("capped award failed: %v", err)
+	}
+	if award != (TaskXPAward{}) {
+		t.Fatalf("capped award = %+v, want nothing reported", award)
+	}
+}
+
 func TestService_AwardTaskXP_NilServiceIsSafeNoOp(t *testing.T) {
 	var svc *Service
-	if err := svc.AwardTaskXP("alpha"); err != nil {
+	if _, err := svc.AwardTaskXP("alpha"); err != nil {
 		t.Fatalf("expected nil service AwardTaskXP to be a safe no-op, got error: %v", err)
 	}
 }

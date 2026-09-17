@@ -22,6 +22,8 @@ import { WorkspaceFileModalManager } from './workspace-detail-file-modal.js';
 import { WorkspaceMembersPanel } from './workspace-detail-members.js';
 import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
 import { bankHarvest, taskResultDeepLink, taskScheduleDeepLink } from './economy-harvest.js';
+import { openParcelByRef } from './parcel-open.js';
+import { taskCreateBody } from './quick-task.js';
 
 /**
  * Format a date for display
@@ -321,6 +323,13 @@ export class WorkspaceDetailPage {
    * Initialize the workspace detail page
    */
   async init() {
+    // One-shot arrival links (?task=…&result=1, ?task=…&schedule=1) are read
+    // from the URL the page was OPENED with. The Command view rewrites the
+    // address bar to its own view state while this method is still loading
+    // tasks, so by the time the links are checked below the live URL may no
+    // longer carry them — which silently dropped the harvest popover's link and
+    // a result card's "Open full result".
+    this.arrivalSearch = typeof window !== 'undefined' ? window.location.search : '';
     this.cacheElements();
     this.ensureScrollablePanelAccessibility();
     this.refreshHomeAssistantQuickPrompts();
@@ -5620,7 +5629,7 @@ export class WorkspaceDetailPage {
    * state the page keeps re-applying.
    */
   checkTaskResultDeepLink() {
-    const taskId = taskResultDeepLink(window.location.search);
+    const taskId = taskResultDeepLink(this.arrivalSearch ?? window.location.search);
     if (!taskId) return false;
 
     const url = new URL(window.location.href);
@@ -5643,7 +5652,7 @@ export class WorkspaceDetailPage {
    * cadence is priced, validated, and saved in exactly one place.
    */
   async checkTaskScheduleDeepLink() {
-    const taskId = taskScheduleDeepLink(window.location.search);
+    const taskId = taskScheduleDeepLink(this.arrivalSearch ?? window.location.search);
     if (!taskId) return false;
 
     const url = new URL(window.location.href);
@@ -7500,6 +7509,10 @@ export class WorkspaceDetailPage {
     // Fire-and-forget: the user opened this to read it, and a ledger problem is
     // never a reason to interrupt that. A task that is not a Farm banks nothing.
     void bankHarvest({ workspaceId: this.workspaceId, taskId: task.id });
+    // Reading the result here also opens its waiting parcel on the map, so the
+    // building stops offering something the user has already seen (task-run-show
+    // FR40). Fire-and-forget for the same reason as the harvest.
+    void openParcelByRef({ kind: 'task', workspaceId: this.workspaceId, refId: task.id });
 
     const openResultModal = () => {
       if (!this.elements.taskResultModal || !window.bootstrap) return;
@@ -16177,6 +16190,8 @@ export class WorkspaceDetailPage {
    */
   handleRealtimeEvent(event) {
     this.handleTaskExecutionRealtimeEvent(event);
+    // The Operations map shows its units working from this same stream.
+    window.workspaceCommand?.handleActivityEvent?.(event);
 
     switch (event.type) {
       case 'task_created':
@@ -16476,29 +16491,14 @@ export class WorkspaceDetailPage {
       const response = await fetch('/api/orchestration/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workspace_id: this.workspaceId,
-          description: normalizedName, // Task API uses description as the main field
-          details: normalizedDescription,
-          status: 'pending',
-          to: String(options.assignee || '').trim() || undefined,
-          assigned_node_id: String(options.assignedNodeId || '').trim() || undefined,
-          input_task_ids: Array.isArray(options.inputTaskIDs)
-            ? options.inputTaskIDs.filter(Boolean)
-            : undefined,
-          parent_task_id: String(options.parentTaskID || '').trim() || undefined,
-          subtask_index: Number.isFinite(Number(options.subtaskIndex))
-            ? Number(options.subtaskIndex)
-            : undefined,
-          // Runtime capabilities this task needs in order to do its work.
-          // The executing agent is granted matching runtime tools only when
-          // the task declares them (workspace.RuntimeTaskToolFactory), so a
-          // task created without this runs with no runtime access at all.
-          required_capabilities:
-            Array.isArray(options.requiredCapabilities) && options.requiredCapabilities.length
-              ? options.requiredCapabilities
-              : undefined
-        })
+        // The same request the Home map's "Give a task…" composer sends
+        // (quick-task.js), so the two can never drift apart (task-run-show FR50).
+        body: JSON.stringify(
+          taskCreateBody(this.workspaceId, normalizedName, {
+            ...options,
+            details: normalizedDescription
+          })
+        )
       });
 
       if (!response.ok) throw new Error('Failed to create task');

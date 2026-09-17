@@ -2707,7 +2707,31 @@
     // A console opened from the Map may be showing status read minutes ago.
     void refresh();
     notifySubscribers();
+    openJanitorParcels(id);
     return true;
+  }
+
+  // The console shows every batch waiting for review, so opening it means the
+  // map's File Janitor parcels have been seen (task-run-show FR40). parcel-open.js
+  // is a module that can run after this deferred script, so a console opened by
+  // a deep link while the page is still loading waits for the page to finish.
+  function openJanitorParcels(id) {
+    if (typeof window === 'undefined') return;
+    const run = () => {
+      const parcels = window.OriParcels;
+      if (parcels && typeof parcels.openParcelByRef === 'function') {
+        void parcels.openParcelByRef({ kind: 'file_janitor', workspaceId: id });
+      }
+    };
+    if (
+      window.OriParcels ||
+      typeof document === 'undefined' ||
+      document.readyState === 'complete'
+    ) {
+      run();
+      return;
+    }
+    window.addEventListener('load', run, { once: true });
   }
 
   function close(options = {}) {

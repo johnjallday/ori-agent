@@ -3012,3 +3012,598 @@
     width: 72px;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Live activity: the task-run show (tasks/prd-task-run-show.md FR14, FR17–FR19,
+   FR27, FR53–FR56).
+
+   Lamplight in a quiet town, not an arcade. A working building gets a warm lamp
+   and a soft ground glow, and its agent says one line in a small bubble. None
+   of this markup exists on an idle building — workspace-map.js adds it while
+   the live feed says something runs there and removes it again — so an idle
+   map renders exactly as it did before. Only transform and opacity move, every
+   timing comes from the cozy tokens, and the one looping animation stops under
+   reduced motion by its own rule, because zeroed tokens do not stop a loop.
+   --------------------------------------------------------------------------- */
+
+/* The bubble has to paint over the neighbour's meta line, never under it. A
+   drag keeps its own, higher stacking. */
+.ws-map-tile.has-activity:not(.is-dragging),
+.ws-map-unit.has-activity:not(.is-dragging) {
+  z-index: 7;
+}
+
+.ws-map-district.has-activity {
+  z-index: 6;
+}
+
+.ws-map-activity {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.ws-map-activity-glow,
+.ws-map-activity-lamp {
+  position: absolute;
+  left: 50%;
+  opacity: 0;
+  transition: opacity var(--cozy-motion-slow) var(--cozy-ease);
+}
+
+.ws-map-activity.is-lit .ws-map-activity-glow,
+.ws-map-activity.is-lit .ws-map-activity-lamp {
+  opacity: 1;
+}
+
+/* The ground glow sits where the selection ellipse does, under the building. */
+.ws-map-activity-glow {
+  top: 58px;
+  width: 132px;
+  height: 58px;
+  border-radius: 50%;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--cozy-amber) 42%, transparent),
+    transparent
+  );
+  transform: translate(-50%, -50%);
+}
+
+/* The lamp: a small warm light beside the door. */
+.ws-map-activity-lamp {
+  top: 34px;
+  width: 9px;
+  height: 9px;
+  margin-left: 30px;
+  border-radius: 50%;
+  background: var(--cozy-amber);
+  box-shadow: 0 0 10px 3px color-mix(in srgb, var(--cozy-amber) 60%, transparent);
+}
+
+.ws-map-activity.is-lit .ws-map-activity-lamp {
+  animation: ws-map-activity-lamp 3.6s ease-in-out infinite;
+}
+
+@keyframes ws-map-activity-lamp {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.72;
+    transform: scale(0.9);
+  }
+}
+
+/* A group map's agent: the glow sits under its plate. */
+.ws-map-unit .ws-map-activity-glow {
+  top: 64px;
+  width: 116px;
+}
+
+.ws-map-unit .ws-map-activity-lamp {
+  top: 16px;
+  margin-left: 36px;
+}
+
+/* A collapsed district stands in for the buildings it hides. It has no text
+   flag of its own, so the overlay brings one: the glow is never the only
+   signal (FR16, FR60). */
+.ws-map-district .ws-map-activity-glow {
+  top: 60%;
+}
+
+.ws-map-district .ws-map-activity-lamp {
+  top: 46px;
+}
+
+.ws-map-activity-flag {
+  position: absolute;
+  top: 40px;
+  right: 10px;
+  padding: 0 6px;
+  border: var(--cozy-border) solid var(--cozy-amber);
+  border-radius: 999px;
+  background: var(--cozy-paper-raised);
+  color: var(--cozy-ink);
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  letter-spacing: 1px;
+  line-height: 15px;
+  text-transform: uppercase;
+}
+
+/* The speech bubble. It sits above the tile's status flag and keeps a readable
+   size at any zoom by undoing the world layer's scale; below the zoom threshold
+   it is hidden instead (FR19). */
+.ws-map-activity-bubble {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  z-index: 8;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 32ch;
+  padding: 2px 9px 2px 3px;
+  color: var(--cozy-ink);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: left;
+  white-space: nowrap;
+  transform: translateX(-50%) scale(calc(1 / var(--ws-map-zoom, 1)));
+  transform-origin: 50% 100%;
+  animation: ws-map-activity-bubble-in var(--cozy-motion-slow) var(--cozy-ease) both;
+}
+
+.ws-map-unit .ws-map-activity-bubble {
+  bottom: calc(100% - 6px);
+}
+
+/* A refresh rebuilds buildings and bubbles the user is already looking at.
+   They stay still instead of rising or popping in again every few seconds
+   while a run keeps refreshing Home (workspace-map.js marks them). */
+.ws-map-tile.is-settled,
+.ws-map-unit.is-settled,
+.ws-map-activity-bubble.is-settled {
+  animation: none;
+}
+
+.ws-map-activity-bubble::after {
+  content: "";
+  position: absolute;
+  bottom: -5px;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border-right: var(--cozy-border) solid var(--cozy-line);
+  border-bottom: var(--cozy-border) solid var(--cozy-line);
+  background: inherit;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+@keyframes ws-map-activity-bubble-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.ws-map-canvas.is-activity-far .ws-map-activity-bubble {
+  display: none;
+}
+
+.ws-map-activity-face {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  overflow: hidden;
+  border-radius: 50%;
+}
+
+.ws-map-activity-face .agent-avatar {
+  --aa-size: 20px;
+  border-radius: 50%;
+}
+
+.ws-map-activity-face .agent-avatar__initials {
+  font-size: 8px;
+}
+
+.ws-map-activity-line {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ws-map-activity-more {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--cozy-paper-deep);
+  color: var(--cozy-ink-dim);
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  line-height: 14px;
+}
+
+/* Needs input: clay, and the one bubble that is a way in — it opens the task
+   (FR27). The words say it too; the colour is never the only signal. */
+.ws-map-activity-bubble.is-blocked {
+  border-color: var(--cozy-clay);
+  box-shadow:
+    0 0 0 1px var(--cozy-clay),
+    var(--cozy-shadow-sm);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.ws-map-activity-bubble.is-blocked::after {
+  border-color: var(--cozy-clay);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-map-activity-glow,
+  .ws-map-activity-lamp {
+    transition: none;
+  }
+
+  .ws-map-activity.is-lit .ws-map-activity-lamp,
+  .ws-map-activity-bubble {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Parcels: the pile, Deliveries rows, and the result card (task-run-show
+   FR43–FR47). The pile is the existing harvest pile, rewritten only while a
+   finished run is waiting in it.
+   --------------------------------------------------------------------------- */
+
+/* A collapsed district's pile sits beside its header, where the district's
+   own buildings would have carried theirs. */
+.ws-map-district-pile {
+  top: 44px;
+  left: 10px;
+}
+
+/* One gentle bounce when a live result lands. Snapshot parcels are simply
+   there (FR46), and reduced motion gets no bounce (FR56). */
+.ws-map-tile-harvest.is-landing {
+  animation: ws-map-parcel-land var(--cozy-motion-slow) var(--cozy-ease) 2 alternate;
+}
+
+@keyframes ws-map-parcel-land {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-6px);
+  }
+}
+
+.ws-map-parcel__when {
+  flex: 0 0 auto;
+  color: var(--ws-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9px;
+}
+
+/* Needs a look: clay, and said in words (FR60). */
+.ws-map-parcel.is-attention .ws-map-parcel__details {
+  color: var(--cozy-clay);
+}
+
+.ws-map-parcel.is-attention .ws-map-harvest__btn {
+  border-color: var(--cozy-clay);
+}
+
+/* The result card's host is placed over the map's viewport by
+   workspace-map.js. It passes pointer events through until a card is in it,
+   and sits below Bootstrap modals and the Ori guide. */
+.ws-map-card-host {
+  position: fixed;
+  z-index: 1030;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.ori-result-card {
+  width: min(380px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 16px 18px 14px;
+  color: var(--cozy-ink);
+  font-size: 13px;
+  line-height: 1.45;
+  pointer-events: auto;
+  animation: ori-result-card-in var(--cozy-motion-slow) var(--cozy-ease) both;
+}
+
+@keyframes ori-result-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+.ori-result-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--cozy-ink-dim);
+  font-size: 11px;
+}
+
+.ori-result-card__workspace {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ori-result-card__agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ori-result-card__face {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  overflow: hidden;
+  border-radius: 50%;
+}
+
+.ori-result-card__face .agent-avatar {
+  --aa-size: 24px;
+  border-radius: 50%;
+}
+
+.ori-result-card__face .agent-avatar__initials {
+  font-size: 9px;
+}
+
+.ori-result-card__title {
+  margin: 8px 0 4px;
+  color: var(--cozy-ink);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.ori-result-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  color: var(--cozy-ink-dim);
+  font-size: 11px;
+}
+
+.ori-result-card__chip {
+  padding: 1px 8px;
+  border: var(--cozy-border) solid var(--cozy-moss);
+  border-radius: 999px;
+  color: var(--cozy-moss);
+  font-weight: 700;
+}
+
+.ori-result-card__chip.is-attention {
+  border-color: var(--cozy-clay);
+  color: var(--cozy-clay);
+}
+
+.ori-result-card__stage {
+  margin: 0 0 10px;
+  padding: 6px 10px;
+  border-radius: var(--cozy-radius);
+  background: color-mix(in srgb, var(--cozy-amber) 18%, transparent);
+  color: var(--cozy-ink);
+  font-weight: 700;
+}
+
+.ori-result-card__summary,
+.ori-result-card__reason {
+  margin: 0 0 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ori-result-card__reason {
+  padding-left: 10px;
+  border-left: var(--cozy-border-strong) solid var(--cozy-clay);
+}
+
+.ori-result-card__rewards {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: var(--cozy-radius);
+  background: var(--cozy-paper-deep);
+}
+
+.ori-result-card__reward {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ori-result-card__reward-value {
+  min-width: 72px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.ori-result-card__reward.is-xp .ori-result-card__reward-value {
+  color: var(--cozy-moss);
+}
+
+.ori-result-card__reward.is-craft .ori-result-card__reward-value {
+  color: var(--cozy-amber-strong);
+}
+
+.ori-result-card__bar {
+  flex: 1 1 120px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--cozy-paper-sunk);
+}
+
+.ori-result-card__bar-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--cozy-moss-bright);
+  transform-origin: left center;
+  transition: transform var(--cozy-motion-slow) var(--cozy-ease);
+}
+
+.ori-result-card__bar-fill.is-instant {
+  transition: none;
+}
+
+.ori-result-card__level {
+  color: var(--cozy-ink-dim);
+  font-size: 11px;
+}
+
+.ori-result-card__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.ori-result-card__primary,
+.ori-result-card__close {
+  padding: 5px 12px;
+  border: var(--cozy-border) solid var(--cozy-line-strong);
+  border-radius: var(--cozy-radius);
+  background: transparent;
+  color: var(--cozy-ink);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ori-result-card__primary {
+  border-color: var(--cozy-moss);
+  background: var(--cozy-moss);
+  color: var(--cozy-paper-raised);
+}
+
+.ori-result-card.is-attention .ori-result-card__primary {
+  border-color: var(--cozy-clay);
+  background: var(--cozy-clay);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-map-tile-harvest.is-landing,
+  .ori-result-card {
+    animation: none;
+  }
+
+  .ori-result-card__bar-fill {
+    transition: none;
+  }
+}
+
+/* ---------- give a task from the map (task-run-show §4.8) ---------- */
+
+/* Why a disabled menu item is disabled, on the item itself. */
+.ws-map-menu-hint {
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+/* The composer is placed at the building by workspace-map.js, the same way a
+   context menu is. It sits below Bootstrap modals and the Ori guide. */
+.ws-map-composer {
+  position: fixed;
+  z-index: 1035;
+  display: grid;
+  gap: 8px;
+  width: min(340px, calc(100vw - 32px));
+  padding: 12px 14px;
+  box-sizing: border-box;
+  color: var(--cozy-ink);
+  font-size: 13px;
+}
+
+.ws-map-composer__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.ws-map-composer__label {
+  color: var(--cozy-ink-dim);
+  font-size: 12px;
+}
+
+.ws-map-composer__input {
+  width: 100%;
+  min-height: 72px;
+  padding: 6px 8px;
+  box-sizing: border-box;
+  border: var(--cozy-border) solid var(--cozy-line-strong);
+  border-radius: var(--cozy-radius);
+  background: var(--cozy-paper);
+  color: var(--cozy-ink);
+  font: inherit;
+  resize: vertical;
+}
+
+.ws-map-composer__error {
+  margin: 0;
+  color: var(--cozy-clay);
+  font-size: 12px;
+}
+
+.ws-map-composer__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.ws-map-composer__btn {
+  padding: 5px 12px;
+  border: var(--cozy-border) solid var(--cozy-line-strong);
+  border-radius: var(--cozy-radius);
+  background: transparent;
+  color: var(--cozy-ink);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ws-map-composer__btn.is-primary {
+  border-color: var(--cozy-moss);
+  background: var(--cozy-moss);
+  color: var(--cozy-paper-raised);
+}
+
+.ws-map-composer__btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

@@ -3369,9 +3369,11 @@ function createCameraHarness({
       const attrs = { 'data-menu-action': action, tabindex: '-1' };
       if (disabled) attrs['aria-disabled'] = 'true';
       const own = {};
+      const hint = label.match(/<span class="ws-map-menu-hint">([\s\S]*?)<\/span>/);
       const item = {
         action,
-        label: label.trim(),
+        label: label.replace(/<span[\s\S]*<\/span>/, '').trim(),
+        hint: hint ? hint[1] : '',
         attrs,
         focused: false,
         getAttribute: name => (name in attrs ? attrs[name] : null),
@@ -8312,7 +8314,7 @@ test('a workspace tile offers open, backlog, selection, and a danger delete', ()
   // The map builds its arrays inside the vm sandbox, so they need copying into
   // this realm before a strict deepEqual (see `ids` above).
   const actions = Array.from(items.filter(item => !item.divider).map(item => item.action));
-  assert.deepEqual(actions, ['open', 'open-backlog', 'toggle-selection', 'delete']);
+  assert.deepEqual(actions, ['open', 'open-backlog', 'give-task', 'toggle-selection', 'delete']);
   const del = items[items.length - 1];
   assert.equal(del.variant, 'danger', 'delete is the danger item');
   assert.equal(del.label, 'Delete workspace');
@@ -8356,6 +8358,7 @@ test('right-clicking a tile opens the menu and suppresses the browser menu', asy
   assert.deepEqual(harness.menu.labels(), [
     'Open workspace',
     'Open → Backlog',
+    'Give a task…',
     'Add to selection',
     'Delete workspace'
   ]);
@@ -8679,13 +8682,14 @@ test('a group district offers Open, Build, the layout actions, and a danger Dele
   const actions = Array.from(items.filter(item => !item.divider).map(item => item.action));
   assert.deepEqual(actions, [
     'open',
+    'give-task',
     'build',
     'collapse-group',
     'resize-group',
     'fit-group',
     'delete'
   ]);
-  assert.equal(items[1].label, 'Build');
+  assert.equal(items[2].label, 'Build');
   assert.equal(items[0].label, 'Open group');
   assert.equal(items[items.length - 1].label, 'Delete group');
   assert.equal(items[items.length - 1].variant, 'danger');
@@ -8870,7 +8874,11 @@ test('a read-only map disables exactly the mutating items, and nothing else', ()
 test('a ready map disables nothing that a read-only one would', () => {
   const map = loadOriWorkspaceMap();
   map._setLayoutForTest({ positions: {} }, 'ready');
-  const items = map.contextMenuItemsFor({ type: 'tile', id: 'ws-1', ws: { id: 'ws-1' } });
+  const items = map.contextMenuItemsFor({
+    type: 'tile',
+    id: 'ws-1',
+    ws: { id: 'ws-1', entry_agent_name: 'Theo' }
+  });
   assert.ok(items.every(item => !item.disabled));
 });
 
@@ -9014,6 +9022,7 @@ test('the legacy launcher mode behaves exactly like the cockpit', async () => {
   assert.deepEqual(harness.menu.labels(), [
     'Open workspace',
     'Open → Backlog',
+    'Give a task…',
     'Add to selection',
     'Delete workspace'
   ]);
@@ -10139,4 +10148,1490 @@ test('on Home an agent anchor occupies nothing: a building can be dropped on it'
   await flushDeep();
   assert.equal(patches.length, 1);
   assert.doesNotMatch(live.textContent, /taken/);
+});
+
+// ---------------------------------------------------------------------------
+// The task-run show: live activity on the map (tasks/prd-task-run-show.md §4.3)
+// ---------------------------------------------------------------------------
+
+const bubbleLinesSource = readFileSync(
+  new URL('./activity-bubble-lines.js', import.meta.url),
+  'utf8'
+);
+
+// A small element model, just rich enough for the activity layer: it builds
+// its overlay with createElement/appendChild and patches text and classes, so
+// assertions read the real structure it produced rather than a string.
+class ActivityNode {
+  constructor(tag = 'span', { className = '', attrs = {}, text } = {}) {
+    this.tagName = tag;
+    this.className = className;
+    this.attrs = { ...attrs };
+    this.children = [];
+    this.parentNode = null;
+    this.innerHTML = '';
+    this._text = text === undefined ? null : text;
+    this.listeners = {};
+  }
+  get classList() {
+    const node = this;
+    const list = () => node.className.split(/\s+/).filter(Boolean);
+    return {
+      contains: c => list().includes(c),
+      add: c => {
+        if (!list().includes(c)) node.className = [...list(), c].join(' ');
+      },
+      remove: c => {
+        node.className = list()
+          .filter(x => x !== c)
+          .join(' ');
+      },
+      toggle: (c, on) => (on ? node.classList.add(c) : node.classList.remove(c))
+    };
+  }
+  get lastChild() {
+    return this.children.length ? this.children[this.children.length - 1] : null;
+  }
+  get textContent() {
+    if (this._text !== null) return this._text;
+    return this.children.map(child => child.textContent).join('');
+  }
+  set textContent(value) {
+    this._text = String(value);
+    this.children = [];
+  }
+  setAttribute(name, value) {
+    this.attrs[name] = String(value);
+  }
+  getAttribute(name) {
+    return name in this.attrs ? this.attrs[name] : null;
+  }
+  hasAttribute(name) {
+    return name in this.attrs;
+  }
+  removeAttribute(name) {
+    delete this.attrs[name];
+  }
+  appendChild(child) {
+    child.parentNode = this;
+    this.children.push(child);
+    return child;
+  }
+  removeChild(child) {
+    this.children = this.children.filter(entry => entry !== child);
+    child.parentNode = null;
+    return child;
+  }
+  replaceChild(fresh, old) {
+    const index = this.children.indexOf(old);
+    fresh.parentNode = this;
+    this.children[index] = fresh;
+    old.parentNode = null;
+    return old;
+  }
+  addEventListener(type, fn) {
+    (this.listeners[type] = this.listeners[type] || []).push(fn);
+  }
+  matches(selector) {
+    const cls = selector.match(/^\.([\w-]+)/);
+    if (cls && !this.classList.contains(cls[1])) return false;
+    const attr = selector.match(/\[([\w-]+)(?:="([^"]*)")?\]/);
+    if (attr) {
+      if (!this.hasAttribute(attr[1])) return false;
+      if (attr[2] !== undefined && this.getAttribute(attr[1]) !== attr[2]) return false;
+    }
+    return !!(cls || attr);
+  }
+  querySelector(selector) {
+    for (const child of this.children) {
+      if (child.matches(selector)) return child;
+      const deeper = child.querySelector(selector);
+      if (deeper) return deeper;
+    }
+    return null;
+  }
+  closest(selector) {
+    let node = this;
+    while (node) {
+      if (node.matches && node.matches(selector)) return node;
+      node = node.parentNode;
+    }
+    return null;
+  }
+}
+
+function activityTile(id) {
+  const tile = new ActivityNode('button', {
+    className: 'ws-map-tile',
+    attrs: { 'data-ws-id': id }
+  });
+  const flag = tile.appendChild(new ActivityNode('span', { className: 'ws-map-tile-flag' }));
+  flag.appendChild(new ActivityNode('span', { className: 'ws-map-led' }));
+  flag.appendChild(new ActivityNode('#text', { text: 'Idle' }));
+  return tile;
+}
+
+// The harvest popover's host, parsed back into just what the popover code
+// reads: its title, its rows, and the buttons it binds.
+function makeHarvestHost() {
+  let html = '';
+  let popover = null;
+  const button = (attrs, text) => {
+    const own = {};
+    return {
+      attrs,
+      text,
+      focused: false,
+      getAttribute: name => (name in attrs ? attrs[name] : null),
+      addEventListener: (type, fn) => (own[type] = fn),
+      focus() {
+        this.focused = true;
+      },
+      click: () => own.click && own.click({ preventDefault() {} })
+    };
+  };
+  const parse = value => {
+    const parcels = [...value.matchAll(/data-parcel-open data-parcel-id="([^"]*)">([^<]*)</g)].map(
+      m => button({ 'data-parcel-id': m[1] }, m[2])
+    );
+    const farms = [...value.matchAll(/data-harvest-open data-task-id="([^"]*)"/g)].map(m =>
+      button({ 'data-task-id': m[1] }, 'Open result')
+    );
+    return {
+      title: (value.match(/ws-map-harvest__title">([^<]*)</) || [])[1] || '',
+      hint: /ws-map-harvest__hint/.test(value),
+      attention: (value.match(/ws-map-parcel is-attention/g) || []).length,
+      parcels,
+      farms,
+      style: {},
+      addEventListener() {},
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 0, height: 0 }),
+      querySelectorAll: sel =>
+        sel.includes('data-parcel-open') ? parcels : sel.includes('data-harvest-open') ? farms : [],
+      querySelector: () => farms[0] || parcels[0] || null
+    };
+  };
+  return {
+    popover: () => popover,
+    html: () => html,
+    get innerHTML() {
+      return html;
+    },
+    set innerHTML(value) {
+      html = value;
+      popover = value ? parse(value) : null;
+    },
+    querySelector: sel => (sel.includes('data-ws-map-harvest') ? popover : null)
+  };
+}
+
+function makeFakeActivityFeed() {
+  const listeners = [];
+  let released = 0;
+  return {
+    subscribe(listener) {
+      listeners.push(listener);
+      return () => {
+        released += 1;
+        listeners.splice(listeners.indexOf(listener), 1);
+      };
+    },
+    released: () => released,
+    subscribers: () => listeners.length,
+    connect: () => listeners.slice().forEach(l => l.onConnection(true)),
+    disconnect: () => listeners.slice().forEach(l => l.onConnection(false)),
+    change: (id, view) => listeners.slice().forEach(l => l.onChange(id, view))
+  };
+}
+
+const runningActivity = (overrides = {}) => ({
+  activity_id: 'task:ws-1:t1',
+  kind: 'task',
+  workspace_id: 'ws-1',
+  agent_name: 'Theo',
+  task_id: 't1',
+  blocked: false,
+  step: null,
+  at: '2026-09-16T10:00:00Z',
+  ...overrides
+});
+
+function activityView(workspaceId, running, lastEvent = null, parcels = []) {
+  return {
+    workspaceId,
+    running,
+    count: running.length,
+    latest: running[0] || null,
+    blocked: running.some(a => a.blocked),
+    parcels,
+    lastEvent
+  };
+}
+
+// Mount the cockpit map over the camera harness, with the activity layer's
+// collaborators faked: the shared feed, the timers, and the clock.
+async function activityHarness({
+  workspaces = [
+    { id: 'ws-1', name: 'Alpha', folder_slug: 'alpha' },
+    { id: 'ws-2', name: 'Beta', folder_slug: 'beta' }
+  ],
+  layout = {
+    schema_version: 1,
+    positions: { 'ws-1': { x: 100, y: 100 }, 'ws-2': { x: 400, y: 100 } }
+  },
+  tiles = ['ws-1', 'ws-2'],
+  districts = [],
+  units = [],
+  state = {},
+  pileTiles = {}
+} = {}) {
+  const feed = makeFakeActivityFeed();
+  const cardsOpened = [];
+  let now = 1000000;
+  const timers = [];
+  const window = {
+    addEventListener() {},
+    removeEventListener() {},
+    innerWidth: 1000,
+    innerHeight: 600,
+    location: { href: '', search: '' },
+    OriMapActivityFeed: feed,
+    OriResultCard: {
+      open: options => {
+        cardsOpened.push(options);
+        return Promise.resolve(null);
+      },
+      close() {}
+    }
+  };
+  const document = {
+    getElementById: () => null,
+    addEventListener() {},
+    removeEventListener() {},
+    createElement: tag => new ActivityNode(tag),
+    body: new ActivityNode('body')
+  };
+  const sandbox = {
+    window,
+    document,
+    setTimeout: (fn, delay) => {
+      const timer = { fn, at: now + delay, done: false };
+      timers.push(timer);
+      return timer;
+    },
+    clearTimeout: timer => {
+      if (timer) timer.done = true;
+    },
+    fetch: () => jsonResponse(layout),
+    URLSearchParams,
+    console: { error() {}, warn() {}, log() {} }
+  };
+  vm.runInNewContext(bubbleLinesSource, sandbox, { filename: 'activity-bubble-lines.js' });
+  vm.runInNewContext(source, sandbox, { filename: 'workspace-map.js' });
+  const map = window.OriWorkspaceMap;
+  map._setActivityClockForTest(() => now);
+
+  const harness = createCameraHarness({ tiles, districts, units });
+  const activityTiles = Object.fromEntries(tiles.map(id => [id, activityTile(id)]));
+  const activityDistricts = Object.fromEntries(
+    districts.map(id => [
+      id,
+      new ActivityNode('div', { className: 'ws-map-district', attrs: { 'data-group-id': id } })
+    ])
+  );
+  const activityUnits = Object.fromEntries(
+    units.map(id => [
+      id,
+      new ActivityNode('button', { className: 'ws-map-unit', attrs: { 'data-unit-id': id } })
+    ])
+  );
+  Object.entries(pileTiles).forEach(([id, pending]) => {
+    const pile = new ActivityNode('span', {
+      className: 'ws-map-tile-harvest',
+      attrs: { 'data-harvest-pile': '', 'aria-label': pending + ' runs to harvest' },
+      text: '+' + pending
+    });
+    activityTiles[id].appendChild(pile);
+  });
+  const harvestHost = makeHarvestHost();
+  const baseQuery = harness.container.querySelector;
+  harness.container.querySelector = sel => {
+    if (sel === '[data-ws-map-harvest-host]') return harvestHost;
+    const tile = sel.match(/^\.ws-map-tile\[data-ws-id="([^"]+)"\]$/);
+    if (tile) return activityTiles[tile[1]] || null;
+    const district = sel.match(/^\.ws-map-district\[data-group-id="([^"]+)"\]$/);
+    if (district) return activityDistricts[district[1]] || null;
+    const unit = sel.match(/^\.ws-map-unit\[data-unit-id="([^"]+)"\]$/);
+    if (unit) return activityUnits[unit[1]] || null;
+    return baseQuery(sel);
+  };
+
+  const mountState = {
+    workspaces,
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true,
+    ...state
+  };
+  map.mount(harness.container, mountState);
+  await flush();
+
+  return {
+    map,
+    harness,
+    feed,
+    window,
+    cardsOpened,
+    harvestHost,
+    tile: id => activityTiles[id],
+    district: id => activityDistricts[id],
+    unit: id => activityUnits[id],
+    live: () => harness.control('[data-map-live]').textContent,
+    remount: () => map.mount(harness.container, mountState),
+    advance(ms) {
+      now += ms;
+      timers
+        .filter(timer => !timer.done && timer.at <= now)
+        .sort((a, b) => a.at - b.at)
+        .forEach(timer => {
+          timer.done = true;
+          timer.fn();
+        });
+    }
+  };
+}
+
+const overlayOf = node => node.querySelector('[data-map-activity]');
+const bubbleLine = node => {
+  const line = node.querySelector('.ws-map-activity-line');
+  return line ? line.textContent : null;
+};
+const flagText = tile => tile.querySelector('.ws-map-tile-flag').lastChild.textContent;
+const ledWorking = tile => tile.querySelector('.ws-map-led').classList.contains('is-working');
+
+test('activity: a started run lights the tile, and its finish darkens it and says Done', async () => {
+  const h = await activityHarness();
+  assert.equal(h.feed.subscribers(), 1, 'the map subscribed to the shared feed on mount');
+  h.feed.connect();
+  const tile = h.tile('ws-1');
+  assert.equal(overlayOf(tile), null, 'an idle tile carries no activity markup');
+
+  const started = {
+    phase: 'started',
+    kind: 'task',
+    agent_name: 'Theo',
+    task_id: 't1',
+    workspace_id: 'ws-1'
+  };
+  h.feed.change('ws-1', activityView('ws-1', [runningActivity()], started));
+  assert.ok(overlayOf(tile), 'lit');
+  assert.ok(overlayOf(tile).classList.contains('is-lit'));
+  assert.equal(overlayOf(tile).getAttribute('aria-hidden'), 'true');
+  assert.equal(bubbleLine(tile), 'On it.');
+  assert.equal(flagText(tile), 'Working');
+  assert.equal(ledWorking(tile), true);
+  assert.match(tile.getAttribute('aria-label'), /Alpha, 0 agents · 0 tasks, Working, Theo/);
+  assert.equal(overlayOf(h.tile('ws-2')), null, 'the neighbour stays dark');
+
+  h.advance(3000);
+  const finished = { ...started, phase: 'finished', outcome: 'succeeded' };
+  h.feed.change('ws-1', activityView('ws-1', [], finished));
+  assert.equal(overlayOf(tile).classList.contains('is-lit'), false, 'the lamp goes off at once');
+  assert.equal(bubbleLine(tile), 'Done.');
+  assert.equal(flagText(tile), 'Idle');
+
+  h.advance(2000);
+  assert.equal(overlayOf(tile), null, 'the bubble leaves and the tile is back to idle markup');
+  assert.equal(tile.classList.contains('has-activity'), false);
+});
+
+test('activity: a line stays 2.5s and only the latest waiting line is shown next', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  const tile = h.tile('ws-1');
+  const event = extra => ({
+    kind: 'task',
+    agent_name: 'Theo',
+    task_id: 't1',
+    workspace_id: 'ws-1',
+    ...extra
+  });
+
+  h.feed.change('ws-1', activityView('ws-1', [runningActivity()], event({ phase: 'started' })));
+  h.advance(500);
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [runningActivity()], event({ phase: 'step', step: { type: 'thinking' } }))
+  );
+  h.advance(500);
+  h.feed.change(
+    'ws-1',
+    activityView(
+      'ws-1',
+      [runningActivity()],
+      event({ phase: 'step', step: { type: 'tool_call', tool_name: 'web_search' } })
+    )
+  );
+  assert.equal(bubbleLine(tile), 'On it.', 'still inside the first line’s dwell');
+
+  h.advance(1499);
+  assert.equal(bubbleLine(tile), 'On it.');
+  h.advance(1);
+  assert.equal(bubbleLine(tile), 'Looking it up…', 'latest wins; Thinking was never queued');
+});
+
+test('activity: the bubble hides below the zoom threshold; the lamp does not', async () => {
+  const h = await activityHarness({
+    layout: {
+      schema_version: 1,
+      positions: { 'ws-1': { x: 100, y: 100 }, 'ws-2': { x: 400, y: 100 } },
+      viewport: { center_x: 300, center_y: 200, zoom: 0.5 }
+    }
+  });
+  assert.equal(h.harness.classes.has('is-activity-far'), true);
+  assert.equal(h.harness.styleProps['--ws-map-zoom'], '0.5');
+  assert.ok(h.map.activity.timings.bubbleMinZoom === 0.6);
+
+  const near = await activityHarness({
+    layout: {
+      schema_version: 1,
+      positions: { 'ws-1': { x: 100, y: 100 }, 'ws-2': { x: 400, y: 100 } },
+      viewport: { center_x: 300, center_y: 200, zoom: 0.8 }
+    }
+  });
+  assert.equal(near.harness.classes.has('is-activity-far'), false);
+  assert.match(
+    mapCSS,
+    /\.ws-map-canvas\.is-activity-far \.ws-map-activity-bubble\s*\{[^}]*display:\s*none/
+  );
+});
+
+test('activity: the text flag follows the feed while connected and falls back to the listing without it', async () => {
+  const h = await activityHarness({
+    workspaces: [
+      { id: 'ws-1', name: 'Alpha', folder_slug: 'alpha', active: true },
+      { id: 'ws-2', name: 'Beta', folder_slug: 'beta' }
+    ]
+  });
+  const tile = h.tile('ws-1');
+  // Before any feed: nothing is patched, the listing's own render stands.
+  assert.equal(flagText(tile), 'Idle', 'the fake tile starts at its stub text');
+
+  h.feed.connect();
+  assert.equal(flagText(tile), 'Idle', 'connected and nothing running: the feed says Idle');
+  assert.match(tile.getAttribute('aria-label'), /, Idle\./);
+
+  h.feed.disconnect();
+  assert.equal(flagText(tile), 'Working', 'no feed: the listing’s active flag is used again');
+  assert.equal(ledWorking(tile), true);
+  assert.equal(overlayOf(tile), null, 'and nothing is lit');
+  assert.equal(h.map.activity.isConnected(), false);
+});
+
+test('activity: a dropped feed puts out a lit building at once', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  h.feed.change('ws-1', activityView('ws-1', [runningActivity()], null));
+  assert.ok(overlayOf(h.tile('ws-1')));
+  assert.equal(
+    bubbleLine(h.tile('ws-1')),
+    'On it.',
+    'a snapshot shows the running step straight away'
+  );
+
+  h.feed.disconnect();
+  assert.equal(overlayOf(h.tile('ws-1')), null);
+});
+
+test('activity: a workspace inside a collapsed district lights that district', async () => {
+  const workspaces = [
+    { id: 'grp', kind: 'group', name: 'Studio', folder_slug: 'studio' },
+    { id: 'ws-1', name: 'Mixing', parent_id: 'grp', folder_slug: 'mixing' },
+    { id: 'ws-2', name: 'Loose', folder_slug: 'loose' }
+  ];
+  const h = await activityHarness({
+    workspaces,
+    layout: {
+      schema_version: 1,
+      positions: { 'ws-1': { x: 100, y: 100 }, 'ws-2': { x: 800, y: 100 } },
+      groups: { grp: { collapsed: true } }
+    },
+    districts: ['grp']
+  });
+  assert.deepEqual(
+    { ...h.map.activity.targetFor('ws-1') },
+    { key: 'group:grp', kind: 'district', id: 'grp' }
+  );
+
+  h.feed.connect();
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [runningActivity()], {
+      phase: 'started',
+      kind: 'task',
+      agent_name: 'Theo',
+      task_id: 't1',
+      workspace_id: 'ws-1'
+    })
+  );
+  const district = h.district('grp');
+  assert.ok(overlayOf(district), 'the collapsed district stands in for its hidden member');
+  assert.ok(overlayOf(district).classList.contains('is-lit'));
+  assert.equal(district.querySelector('.ws-map-activity-flag').textContent, 'Working');
+  assert.equal(h.live(), 'Mixing started working', 'the announcement still names the workspace');
+});
+
+test('activity: several runs in one workspace show the newest step and a +N chip', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  const running = [
+    runningActivity({
+      activity_id: 'task:ws-1:b',
+      task_id: 'b',
+      agent_name: 'Ada',
+      at: '2026-09-16T10:00:05Z'
+    }),
+    runningActivity({ activity_id: 'task:ws-1:a', task_id: 'a', at: '2026-09-16T10:00:01Z' })
+  ];
+  h.feed.change('ws-1', activityView('ws-1', running, null));
+  const tile = h.tile('ws-1');
+  assert.equal(tile.querySelector('.ws-map-activity-more').textContent, '+1');
+  assert.match(tile.getAttribute('aria-label'), /Working, Ada and 1 more/);
+});
+
+test('activity: patching in place never re-renders the map, so an open menu stays open', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+
+  const { event } = rightClick(tileTarget('ws-1'));
+  h.harness.fire('contextmenu', event);
+  assert.equal(h.harness.menu.isOpen(), true);
+
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [runningActivity()], {
+      phase: 'started',
+      kind: 'task',
+      agent_name: 'Theo',
+      task_id: 't1',
+      workspace_id: 'ws-1'
+    })
+  );
+  // Every mount closes an open menu first, so a menu that is still open is
+  // proof the update patched the tile rather than re-rendering the map.
+  assert.equal(h.harness.menu.isOpen(), true, 'the menu survives the activity update');
+  assert.ok(overlayOf(h.tile('ws-1')));
+});
+
+test('activity: a re-mount paints running work back onto the rebuilt tiles', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  h.feed.change('ws-1', activityView('ws-1', [runningActivity()], null));
+  const tile = h.tile('ws-1');
+  // A real re-mount rebuilds the tile from the listing, without the overlay.
+  tile.children = tile.children.filter(child => !child.hasAttribute('data-map-activity'));
+  h.remount();
+  assert.ok(overlayOf(tile), 'lit again after the redraw');
+  assert.equal(h.feed.subscribers(), 1, 'a re-mount does not subscribe twice');
+});
+
+test('activity: a redraw brings back a bubble the user is reading without popping it in again', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  const started = { phase: 'started', kind: 'task', agent_name: 'Theo', task_id: 't1' };
+  h.feed.change('ws-1', activityView('ws-1', [runningActivity()], started));
+  const tile = h.tile('ws-1');
+  const bubble = () => tile.querySelector('[data-activity-bubble]');
+  assert.equal(bubble().classList.contains('is-settled'), false, 'a new line animates in');
+
+  tile.children = tile.children.filter(child => !child.hasAttribute('data-map-activity'));
+  h.remount();
+  assert.equal(bubbleLine(tile), 'On it.');
+  assert.equal(bubble().classList.contains('is-settled'), true, 'the same line comes back still');
+
+  h.advance(3000);
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [runningActivity()], {
+      ...started,
+      phase: 'step',
+      step: { type: 'thinking' }
+    })
+  );
+  assert.equal(bubble().classList.contains('is-settled'), false, 'a new line still animates');
+});
+
+test('a refresh keeps buildings already on screen still, and only a new one rises in', async () => {
+  const env = menuEnvironment();
+  const map = loadMapForMenu(env);
+  const harness = createCameraHarness({ tiles: ['ws-1', 'ws-2'] });
+  const tiles = harness.container.querySelectorAll('.ws-map-tile');
+  const settled = () => tiles.filter(t => t.classList.contains('is-settled')).map(t => t.id);
+  // The map looks at what is on screen before rebuilding and again after. A
+  // real rebuild makes fresh elements, so the look before also clears the
+  // stubs' marks.
+  let onScreen = [];
+  let looks = 0;
+  const query = harness.container.querySelectorAll;
+  harness.container.querySelectorAll = sel => {
+    if (sel !== '.ws-map-tile, .ws-map-unit') return query(sel);
+    looks += 1;
+    if (looks % 2 === 0) return tiles;
+    tiles.forEach(t => t.classList.remove('is-settled'));
+    return onScreen;
+  };
+  const workspaces = [
+    { id: 'ws-1', name: 'Alpha' },
+    { id: 'ws-2', name: 'Beta' }
+  ];
+  const mount = () =>
+    map.mount(harness.container, { workspaces, hideChrome: true, selectOnly: true });
+
+  mount();
+  assert.deepEqual(settled(), [], 'the first paint rises in');
+
+  onScreen = tiles;
+  mount();
+  assert.deepEqual(settled(), ['ws-1', 'ws-2'], 'a refresh does not replay the entrance');
+
+  onScreen = [tiles[0]];
+  mount();
+  assert.deepEqual(settled(), ['ws-1'], 'a building that just appeared still rises in');
+  await flush();
+});
+
+test('activity: announcements are polite and at most one per workspace per 10s', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  const event = extra => ({
+    kind: 'task',
+    agent_name: 'Theo',
+    task_id: 't1',
+    workspace_id: 'ws-1',
+    ...extra
+  });
+
+  h.feed.change('ws-1', activityView('ws-1', [runningActivity()], event({ phase: 'started' })));
+  assert.equal(h.live(), 'Alpha started working');
+
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [runningActivity()], event({ phase: 'step', step: { type: 'thinking' } }))
+  );
+  assert.equal(h.live(), 'Alpha started working', 'steps are never announced');
+
+  h.advance(4000);
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [runningActivity({ blocked: true })], event({ phase: 'blocked' }))
+  );
+  assert.equal(h.live(), 'Alpha started working', 'throttled inside ten seconds');
+
+  h.feed.change(
+    'ws-2',
+    activityView(
+      'ws-2',
+      [runningActivity({ workspace_id: 'ws-2', activity_id: 'task:ws-2:t9' })],
+      event({ phase: 'started', workspace_id: 'ws-2' })
+    )
+  );
+  assert.equal(h.live(), 'Beta started working', 'the throttle is per workspace');
+
+  h.advance(6000);
+  h.feed.change('ws-1', activityView('ws-1', [], event({ phase: 'finished', outcome: 'failed' })));
+  assert.equal(h.live(), 'A run in Alpha did not finish');
+});
+
+test('activity: a blocked bubble is clay, stays up, and opens the task', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [runningActivity({ blocked: true })], {
+      phase: 'blocked',
+      kind: 'task',
+      agent_name: 'Theo',
+      task_id: 't1',
+      workspace_id: 'ws-1'
+    })
+  );
+  const tile = h.tile('ws-1');
+  const bubble = tile.querySelector('[data-activity-bubble]');
+  assert.equal(bubbleLine(tile), 'I need your input.');
+  assert.ok(bubble.classList.contains('is-blocked'));
+  assert.equal(bubble.getAttribute('data-activity-open-task'), 't1');
+  h.advance(60000);
+  assert.equal(bubbleLine(tile), 'I need your input.', 'it stays until resumed or finished');
+
+  // Clicking it goes to the page where that task asks its question, and never
+  // selects the building underneath.
+  let stopped = false;
+  h.harness.tile('ws-1').fire('click', {
+    target: bubble.querySelector('.ws-map-activity-line'),
+    preventDefault() {},
+    stopPropagation() {
+      stopped = true;
+    }
+  });
+  assert.equal(h.window.location.href, '/workspaces/alpha?blocked_task=t1');
+  assert.equal(stopped, true);
+  assert.equal(h.map.getSelectedId(), '');
+});
+
+test('activity: a run that went silent leaves without claiming a result', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  const event = extra => ({
+    kind: 'task',
+    agent_name: 'Theo',
+    task_id: 't1',
+    workspace_id: 'ws-1',
+    ...extra
+  });
+  h.feed.change('ws-1', activityView('ws-1', [runningActivity()], event({ phase: 'started' })));
+  h.feed.change('ws-1', activityView('ws-1', [], event({ phase: 'finished', outcome: '' })));
+  assert.equal(overlayOf(h.tile('ws-1')), null);
+});
+
+test('activity: unmount releases the shared feed', async () => {
+  const h = await activityHarness();
+  h.map.unmount(h.harness.container);
+  assert.equal(h.feed.released(), 1);
+  assert.equal(h.feed.subscribers(), 0);
+});
+
+test('activity: a group map lights the unit of the agent doing the work', async () => {
+  const h = await activityHarness({
+    workspaces: SCOPED_WORLD,
+    layout: { schema_version: 1, positions: {} },
+    tiles: ['m1', 'deep'],
+    units: ['agent:g:boss', 'agent:g:scout'],
+    state: {
+      scopeGroupId: 'g',
+      units: [
+        { id: 'agent:g:boss', name: 'Boss', commander: true, status: 'Idle' },
+        { id: 'agent:g:scout', name: 'Scout', status: 'Idle' }
+      ]
+    }
+  });
+  h.feed.connect();
+  // The group's own workspace has no building on its own map; its Commander
+  // is what shows the work.
+  h.feed.change(
+    'g',
+    activityView(
+      'g',
+      [runningActivity({ workspace_id: 'g', agent_name: 'Boss', activity_id: 'task:g:t1' })],
+      {
+        phase: 'started',
+        kind: 'task',
+        agent_name: 'Boss',
+        task_id: 't1',
+        workspace_id: 'g'
+      }
+    )
+  );
+  assert.ok(overlayOf(h.unit('agent:g:boss')), 'the Commander is lit');
+  assert.equal(bubbleLine(h.unit('agent:g:boss')), 'On it.');
+  assert.equal(overlayOf(h.unit('agent:g:scout')), null, 'the other agent is not');
+
+  // Work outside the group never shows on the group's map.
+  h.feed.change(
+    'loose',
+    activityView(
+      'loose',
+      [
+        runningActivity({
+          workspace_id: 'loose',
+          agent_name: 'Scout',
+          activity_id: 'task:loose:t2'
+        })
+      ],
+      {
+        phase: 'started',
+        kind: 'task',
+        agent_name: 'Scout',
+        task_id: 't2',
+        workspace_id: 'loose'
+      }
+    )
+  );
+  assert.equal(overlayOf(h.unit('agent:g:scout')), null);
+  assert.notEqual(h.live(), 'Loose started working');
+});
+
+const parcelRow = (overrides = {}) => ({
+  id: 'p1',
+  workspace_id: 'ws-1',
+  kind: 'task',
+  title: 'Compare launch notes',
+  agent_name: 'Theo',
+  outcome: 'succeeded',
+  produced_at: '2026-09-16T10:00:00Z',
+  ...overrides
+});
+
+const pileOf = node => node.querySelector('[data-harvest-pile]');
+
+test('parcels: a waiting result puts a pile on its building, drawn still from a snapshot', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  h.feed.change('ws-1', activityView('ws-1', [], null, [parcelRow()]));
+
+  const pile = pileOf(h.tile('ws-1'));
+  assert.ok(pile, 'a pile appears');
+  assert.equal(pile.textContent, '+1');
+  assert.equal(pile.getAttribute('aria-label'), '1 result waiting');
+  assert.equal(pile.classList.contains('is-landing'), false, 'snapshot parcels do not bounce');
+  assert.match(h.tile('ws-1').getAttribute('aria-label'), /1 result waiting, press H to see them/);
+  assert.equal(pileOf(h.tile('ws-2')), null);
+});
+
+test('parcels: a live result lands with one bounce and an announcement', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [], { phase: 'parcel', parcel: parcelRow() }, [parcelRow()])
+  );
+
+  const pile = pileOf(h.tile('ws-1'));
+  assert.ok(pile.classList.contains('is-landing'));
+  assert.equal(h.live(), 'Result ready in Alpha');
+  h.advance(1200);
+  assert.equal(pile.classList.contains('is-landing'), false);
+});
+
+test('parcels: a result waits for its run to finish saying Done before it lands', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  const event = extra => ({
+    kind: 'task',
+    agent_name: 'Theo',
+    task_id: 't1',
+    workspace_id: 'ws-1',
+    ...extra
+  });
+  h.feed.change('ws-1', activityView('ws-1', [runningActivity()], event({ phase: 'started' })));
+  h.advance(9000);
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [], event({ phase: 'finished', outcome: 'succeeded' }))
+  );
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [], { phase: 'parcel', parcel: parcelRow() }, [parcelRow()])
+  );
+
+  assert.equal(bubbleLine(h.tile('ws-1')), 'Done.');
+  assert.equal(pileOf(h.tile('ws-1')), null, 'not yet');
+  h.advance(2000);
+  assert.ok(pileOf(h.tile('ws-1')), 'landed as the bubble left');
+  assert.equal(h.live(), 'Result ready in Alpha');
+});
+
+test('parcels: a result behind a Done. still waiting out a dwell lands after Done. leaves', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  const event = extra => ({
+    kind: 'task',
+    agent_name: 'Theo',
+    task_id: 't1',
+    workspace_id: 'ws-1',
+    ...extra
+  });
+  h.feed.change('ws-1', activityView('ws-1', [runningActivity()], event({ phase: 'started' })));
+  h.advance(9000);
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [runningActivity()], event({ phase: 'step', step: { type: 'thinking' } }))
+  );
+  h.advance(1000);
+  // Finish and parcel arrive one second into "Thinking it through…".
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [], event({ phase: 'finished', outcome: 'succeeded' }))
+  );
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [], { phase: 'parcel', parcel: parcelRow() }, [parcelRow()])
+  );
+  assert.equal(bubbleLine(h.tile('ws-1')), 'Thinking it through…');
+  assert.equal(pileOf(h.tile('ws-1')), null);
+
+  h.advance(1500);
+  assert.equal(bubbleLine(h.tile('ws-1')), 'Done.');
+  assert.equal(pileOf(h.tile('ws-1')), null, 'Done. is showing; the parcel is not in yet');
+  h.advance(2000);
+  assert.ok(pileOf(h.tile('ws-1')), 'landed as Done. left');
+  assert.equal(overlayOf(h.tile('ws-1')), null);
+});
+
+test('parcels: one pile counts Farm runs and results together, capped at 9+', async () => {
+  const h = await activityHarness({
+    pileTiles: { 'ws-1': 3 },
+    state: { economy: { farms: [], pendingByWorkspace: { 'ws-1': 3 } } }
+  });
+  h.feed.connect();
+  const pile = pileOf(h.tile('ws-1'));
+  assert.equal(pile.textContent, '+3', 'no parcels: the economy pile is untouched');
+  assert.equal(pile.hasAttribute('data-pile-parcels'), false);
+
+  h.feed.change('ws-1', activityView('ws-1', [], null, [parcelRow(), parcelRow({ id: 'p2' })]));
+  assert.equal(pile.textContent, '+5');
+  assert.equal(pile.getAttribute('aria-label'), '3 runs to harvest, 2 results waiting');
+
+  const many = Array.from({ length: 8 }, (_, i) => parcelRow({ id: 'm' + i }));
+  h.feed.change('ws-1', activityView('ws-1', [], null, many));
+  assert.equal(pile.textContent, '9+');
+
+  // Opening them all gives the Farm pile back exactly as it was.
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [], { phase: 'parcel_opened', parcel: parcelRow() }, [])
+  );
+  assert.equal(pile.textContent, '+3');
+  assert.equal(pile.getAttribute('aria-label'), '3 runs to harvest');
+  assert.equal(pile.hasAttribute('data-pile-parcels'), false);
+});
+
+test('parcels: the popover says Deliveries, marks what needs a look, and opens the card', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [], null, [
+      parcelRow(),
+      parcelRow({ id: 'p2', outcome: 'failed', title: 'Import the venue list' })
+    ])
+  );
+
+  h.harness.tile('ws-1').fire('keydown', { key: 'h', preventDefault() {} });
+  const popover = h.harvestHost.popover();
+  assert.ok(popover, 'H opens the pile');
+  assert.equal(popover.title, 'Deliveries');
+  assert.equal(popover.hint, false, 'the harvest hint is for Farm rows only');
+  assert.equal(popover.attention, 1);
+  assert.match(h.harvestHost.html(), /Theo · Needs a look/);
+  assert.equal(popover.parcels.length, 2);
+
+  popover.parcels.find(b => b.getAttribute('data-parcel-id') === 'p2').click();
+  assert.equal(h.harvestHost.popover(), null, 'the popover closes');
+  assert.equal(h.cardsOpened.length, 1);
+  assert.equal(h.cardsOpened[0].parcelId, 'p2');
+  assert.equal(h.cardsOpened[0].workspaceName, 'Alpha');
+  assert.equal(
+    h.cardsOpened[0].origin,
+    h.harness.tile('ws-1'),
+    'Esc will return focus to the tile'
+  );
+
+  h.cardsOpened[0].onPrimary({ parcel: { kind: 'task', workspace_id: 'ws-1', ref_id: 't9' } });
+  assert.equal(h.window.location.href, '/workspaces/alpha?task=t9&result=1');
+
+  // A janitor scan opens its review; a brief opens the assistant's Today panel,
+  // or the HQ's page when there is no panel on this page.
+  h.cardsOpened[0].onPrimary({ parcel: { kind: 'file_janitor', workspace_id: 'ws-1' } });
+  assert.equal(h.window.location.href, '/workspaces/alpha?panel=file-janitor');
+  const opened = [];
+  h.window.PersonalAssistantPanel = {
+    open: (trigger, options) => opened.push(options) > 0
+  };
+  h.window.location.href = '';
+  h.cardsOpened[0].onPrimary({ parcel: { kind: 'daily_brief', workspace_id: 'ws-1' } });
+  assert.deepEqual(
+    opened.map(options => options.view),
+    ['today']
+  );
+  assert.equal(h.window.location.href, '', 'no navigation when the panel opened');
+  h.window.PersonalAssistantPanel = { open: () => false };
+  h.cardsOpened[0].onPrimary({ parcel: { kind: 'daily_brief', workspace_id: 'ws-1' } });
+  assert.equal(h.window.location.href, '/workspaces/alpha');
+});
+
+test('parcels: with only Farm runs the popover keeps its old title and hint', async () => {
+  const h = await activityHarness({
+    pileTiles: { 'ws-1': 2 },
+    state: {
+      economy: {
+        farms: [{ workspace_id: 'ws-1', task_id: 'farm-1', name: 'Digest', pending_harvest: 2 }],
+        pendingByWorkspace: { 'ws-1': 2 }
+      }
+    }
+  });
+  h.feed.connect();
+  h.harness.tile('ws-1').fire('keydown', { key: 'h', preventDefault() {} });
+  const popover = h.harvestHost.popover();
+  assert.equal(popover.title, 'Ready to harvest');
+  assert.equal(popover.hint, true);
+  assert.equal(popover.parcels.length, 0);
+});
+
+test('parcels: a collapsed district holds its hidden buildings’ pile', async () => {
+  const workspaces = [
+    { id: 'grp', kind: 'group', name: 'Studio', folder_slug: 'studio' },
+    { id: 'ws-1', name: 'Mixing', parent_id: 'grp', folder_slug: 'mixing' },
+    { id: 'ws-2', name: 'Loose', folder_slug: 'loose' }
+  ];
+  const h = await activityHarness({
+    workspaces,
+    layout: {
+      schema_version: 1,
+      positions: { 'ws-1': { x: 100, y: 100 }, 'ws-2': { x: 800, y: 100 } },
+      groups: { grp: { collapsed: true } }
+    },
+    districts: ['grp']
+  });
+  h.feed.connect();
+  h.feed.change('ws-1', activityView('ws-1', [], null, [parcelRow()]));
+
+  const pile = pileOf(h.district('grp'));
+  assert.ok(pile, 'the district carries the pile');
+  assert.ok(pile.classList.contains('ws-map-district-pile'));
+  assert.equal(pile.textContent, '+1');
+});
+
+test('parcels: a dropped feed keeps the pile it last knew', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  h.feed.change('ws-1', activityView('ws-1', [], null, [parcelRow()]));
+  h.feed.disconnect();
+  assert.equal(pileOf(h.tile('ws-1')).textContent, '+1');
+});
+
+// --- give a task from the Home map (task-run-show §4.8) ----------------------
+
+const giveTaskItem = items => items.find(item => item.action === 'give-task') || null;
+
+test('give a task: offered on a Home building and a group, never on a group page', () => {
+  const map = loadOriWorkspaceMap();
+  map._setLayoutForTest({ positions: {} }, 'ready');
+  const staffed = { id: 'ws-1', name: 'Lab', entry_agent_name: 'Theo' };
+
+  const tile = giveTaskItem(map.contextMenuItemsFor({ type: 'tile', id: 'ws-1', ws: staffed }));
+  assert.equal(tile.label, 'Give a task…');
+  assert.ok(!tile.disabled, 'a building with a Commander can take a task');
+
+  const group = giveTaskItem(
+    map.contextMenuItemsFor({
+      type: 'district',
+      id: 'grp',
+      ws: { id: 'grp', kind: 'group', entry_agent_name: 'Ada' }
+    })
+  );
+  assert.ok(group && !group.disabled, 'a group building offers it too');
+
+  const scoped = map.contextMenuItemsFor({ type: 'tile', id: 'ws-1', ws: staffed, scoped: true });
+  assert.equal(giveTaskItem(scoped), null, 'a group page keeps its own New Quest composer');
+});
+
+test('give a task: disabled with a reason when there is no Commander or the map is read-only', () => {
+  const map = loadOriWorkspaceMap();
+  map._setLayoutForTest({ positions: {} }, 'ready');
+  const unstaffed = giveTaskItem(
+    map.contextMenuItemsFor({ type: 'tile', id: 'ws-1', ws: { id: 'ws-1', entry_agent_name: ' ' } })
+  );
+  assert.equal(unstaffed.disabled, true);
+  assert.equal(unstaffed.hint, 'Needs a Commander');
+
+  map._setLayoutForTest({ positions: {} }, 'unavailable');
+  const readOnly = giveTaskItem(
+    map.contextMenuItemsFor({
+      type: 'tile',
+      id: 'ws-1',
+      ws: { id: 'ws-1', entry_agent_name: 'Theo' }
+    })
+  );
+  assert.equal(readOnly.disabled, true);
+  assert.equal(readOnly.hint, 'The map is read-only right now');
+
+  const html = map.contextMenuHTML([unstaffed]);
+  assert.match(html, /aria-disabled="true"/);
+  assert.match(html, /<span class="ws-map-menu-hint">Needs a Commander<\/span>/);
+});
+
+// The composer renders into a host on document.body. This host reads back the
+// few things the composer's markup carries, the way the menu host does.
+function composerDocument(env) {
+  const doc = env.document;
+  doc.activeElement = null;
+  const decode = value =>
+    String(value)
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&amp;/g, '&');
+  const control = name => {
+    const own = {};
+    const el = {
+      name,
+      disabled: false,
+      value: '',
+      text: '',
+      style: {},
+      addEventListener: (type, fn) => (own[type] = own[type] || []).push(fn),
+      removeEventListener: (type, fn) => {
+        own[type] = (own[type] || []).filter(entry => entry !== fn);
+      },
+      listenerCount: type => (own[type] || []).length,
+      fire: (type, event = {}) =>
+        (own[type] || []).slice().forEach(fn => fn({ preventDefault() {}, ...event })),
+      focus() {
+        doc.activeElement = el;
+      }
+    };
+    return el;
+  };
+  const parse = html => {
+    const input = control('input');
+    input.disabled = /data-composer-input[^>]*disabled/.test(html);
+    input.value = decode((html.match(/data-composer-input[^>]*>([\s\S]*?)<\/textarea>/) || [])[1]);
+    const start = control('start');
+    start.disabled = /data-composer-start disabled/.test(html);
+    start.text = decode((html.match(/data-composer-start[^>]*>([^<]*)</) || [])[1]);
+    const create = control('create');
+    create.disabled = /data-composer-create disabled/.test(html);
+    const cancel = control('cancel');
+    const composer = control('composer');
+    composer.title = decode((html.match(/id="wsMapComposerTitle">([^<]*)</) || [])[1]);
+    composer.error = decode((html.match(/role="alert">([^<]*)</) || [])[1] || '');
+    composer.getBoundingClientRect = () => ({ left: 0, top: 0, width: 0, height: 0 });
+    composer.querySelector = sel =>
+      sel.includes('data-composer-input')
+        ? input
+        : sel.includes('data-composer-start')
+          ? start
+          : sel.includes('data-composer-create')
+            ? create
+            : sel.includes('data-composer-cancel')
+              ? cancel
+              : null;
+    composer.querySelectorAll = () => [input, start, create, cancel];
+    return { composer, input, start, create, cancel };
+  };
+  let host = null;
+  doc.body = {
+    children: [],
+    appendChild(child) {
+      this.children.push(child);
+      child.isConnected = true;
+      return child;
+    }
+  };
+  doc.createElement = () => {
+    let html = '';
+    let parts = null;
+    host = {
+      className: '',
+      attrs: {},
+      setAttribute(name, value) {
+        this.attrs[name] = String(value);
+      },
+      get innerHTML() {
+        return html;
+      },
+      set innerHTML(value) {
+        html = value;
+        parts = value ? parse(value) : null;
+      },
+      parts: () => parts,
+      querySelector: sel =>
+        !parts
+          ? null
+          : sel.includes('data-ws-map-composer')
+            ? parts.composer
+            : parts.composer.querySelector(sel)
+    };
+    return host;
+  };
+  return {
+    open: () => !!(host && host.parts()),
+    parts: () => (host ? host.parts() : null)
+  };
+}
+
+async function giveTaskHarness({ workspaces } = {}) {
+  const env = menuEnvironment();
+  const composer = composerDocument(env);
+  const feed = makeFakeActivityFeed();
+  const toasts = [];
+  const calls = [];
+  const quick = {
+    createResult: () => ({ id: 't-new', to: 'Theo' }),
+    startResult: () => true,
+    async createTask(workspaceId, description) {
+      calls.push(['create', workspaceId, description]);
+      return quick.createResult();
+    },
+    async startTask(taskId) {
+      calls.push(['start', taskId]);
+      return quick.startResult();
+    }
+  };
+  env.window.OriMapActivityFeed = feed;
+  env.window.OriQuickTask = quick;
+  env.window.Toast = {
+    info: (message, options) => toasts.push({ kind: 'info', message, options }),
+    success: (message, options) => toasts.push({ kind: 'success', message, options })
+  };
+  let now = 0;
+  const timers = [];
+  vm.runInNewContext(
+    source,
+    {
+      window: env.window,
+      document: env.document,
+      setTimeout: (fn, delay) => {
+        const timer = { fn, at: now + (delay || 0), done: false };
+        timers.push(timer);
+        return timer;
+      },
+      clearTimeout: timer => {
+        if (timer) timer.done = true;
+      },
+      CustomEvent: TestCustomEvent,
+      URLSearchParams,
+      fetch: () =>
+        jsonResponse({
+          schema_version: 1,
+          revision: 1,
+          positions: { 'ws-1': { x: 100, y: 100 }, 'ws-2': { x: 400, y: 100 } }
+        }),
+      console: { error() {}, warn() {}, log() {} }
+    },
+    { filename: 'workspace-map.js' }
+  );
+  const map = env.window.OriWorkspaceMap;
+  const harness = createCameraHarness({ tiles: ['ws-1', 'ws-2'] });
+  map.mount(harness.container, {
+    workspaces: workspaces || [
+      { id: 'ws-1', folder_slug: 'lab', name: 'Research Lab', entry_agent_name: 'Theo' },
+      { id: 'ws-2', folder_slug: 'beta', name: 'Beta' }
+    ],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true
+  });
+  await flush();
+  return {
+    map,
+    env,
+    harness,
+    composer,
+    feed,
+    quick,
+    calls,
+    toasts,
+    live: () => harness.container.querySelector('[data-map-live]').textContent,
+    advance(ms) {
+      now += ms;
+      timers
+        .filter(timer => !timer.done && timer.at <= now)
+        .sort((a, b) => a.at - b.at)
+        .forEach(timer => {
+          timer.done = true;
+          timer.fn();
+        });
+    }
+  };
+}
+
+function giveTaskFromMenu(h, id = 'ws-1') {
+  const origin = {
+    getAttribute: () => id,
+    focused: 0,
+    focus() {
+      this.focused += 1;
+    }
+  };
+  h.harness.fire(
+    'contextmenu',
+    rightClick(sel => (sel.includes('data-ws-id') && !sel.includes('data-hq-site') ? origin : null))
+      .event
+  );
+  h.harness.menu.item('give-task').fire('click');
+  return origin;
+}
+
+test('give a task: the menu opens a composer at the building with its input focused', async () => {
+  const h = await giveTaskHarness();
+  giveTaskFromMenu(h);
+  assert.equal(h.harness.menu.isOpen(), false, 'the menu made way for the composer');
+  assert.ok(h.composer.open());
+  const parts = h.composer.parts();
+  assert.equal(parts.composer.title, 'Give Research Lab a task');
+  assert.equal(h.env.document.activeElement, parts.input, 'typing can start at once');
+  assert.equal(parts.start.text, 'Create & Start');
+  assert.equal(h.live(), 'Give Research Lab a task');
+});
+
+test('give a task: a disabled item opens nothing', async () => {
+  const h = await giveTaskHarness();
+  giveTaskFromMenu(h, 'ws-2');
+  assert.equal(h.composer.open(), false);
+  assert.ok(h.harness.menu.isOpen(), 'a disabled item does not even close the menu');
+});
+
+test('give a task: Create & Start creates, starts, closes, and never lights the building itself', async () => {
+  const h = await giveTaskHarness();
+  const origin = giveTaskFromMenu(h);
+  const focusBefore = origin.focused;
+  h.composer.parts().input.value = '  Compare the launch notes ';
+  h.composer.parts().start.fire('click');
+  assert.equal(h.composer.parts().start.disabled, true, 'no second submit while sending');
+  assert.equal(h.composer.parts().start.text, 'Working…');
+  await flushDeep();
+
+  assert.deepEqual(
+    h.calls.map(call => Array.from(call)),
+    [
+      ['create', 'ws-1', 'Compare the launch notes'],
+      ['start', 't-new']
+    ]
+  );
+  assert.equal(h.composer.open(), false, 'the composer closed');
+  assert.equal(origin.focused, focusBefore + 1, 'focus went back to the building');
+  assert.match(h.live(), /Task created in Research Lab\. It will light up when it starts\./);
+  assert.equal(h.toasts.length, 0, 'nothing claims it started');
+});
+
+test('give a task: a real started event within five seconds ends the watch quietly', async () => {
+  const h = await giveTaskHarness();
+  giveTaskFromMenu(h);
+  h.composer.parts().input.value = 'Compare the launch notes';
+  h.composer.parts().start.fire('click');
+  await flushDeep();
+
+  h.advance(3000);
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [runningActivity({ task_id: 't-new' })], {
+      phase: 'started',
+      kind: 'task',
+      task_id: 't-new',
+      workspace_id: 'ws-1',
+      agent_name: 'Theo'
+    })
+  );
+  h.advance(5000);
+  assert.equal(h.toasts.length, 0);
+});
+
+test('give a task: no started event within five seconds says so, with a link to the task', async () => {
+  const h = await giveTaskHarness();
+  giveTaskFromMenu(h);
+  h.composer.parts().input.value = 'Compare the launch notes';
+  h.composer.parts().start.fire('click');
+  await flushDeep();
+
+  // Another task's event is not this task starting.
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [runningActivity({ task_id: 'other' })], {
+      phase: 'started',
+      kind: 'task',
+      task_id: 'other',
+      workspace_id: 'ws-1'
+    })
+  );
+  h.advance(4999);
+  assert.equal(h.toasts.length, 0, 'not before five seconds');
+  h.advance(1);
+  assert.equal(h.toasts.length, 1);
+  const toast = h.toasts[0];
+  assert.equal(toast.kind, 'info');
+  assert.equal(toast.message, 'Task created. It has not started yet.');
+  assert.equal(toast.options.action.label, 'Open task');
+  assert.ok(toast.options.duration >= 10000, 'it stays long enough to reach the link');
+  toast.options.action.onClick();
+  assert.equal(h.env.window.location.href, '/workspaces/lab?panel=tasks&task=t-new');
+});
+
+test('give a task: Create only creates, and leaving the map drops a pending watch', async () => {
+  const h = await giveTaskHarness();
+  giveTaskFromMenu(h);
+  h.composer.parts().input.value = 'Draft the agenda';
+  h.composer.parts().create.fire('click');
+  await flushDeep();
+  assert.deepEqual(
+    h.calls.map(call => Array.from(call)),
+    [['create', 'ws-1', 'Draft the agenda']]
+  );
+  assert.equal(h.composer.open(), false);
+  assert.equal(h.toasts[0].kind, 'success');
+  assert.equal(h.toasts[0].message, 'Task created for Theo');
+  h.advance(10000);
+  assert.equal(h.toasts.length, 1, 'a task that was never started is not watched');
+
+  giveTaskFromMenu(h);
+  h.composer.parts().input.value = 'Compare the launch notes';
+  h.composer.parts().start.fire('click');
+  await flushDeep();
+  h.map.unmount(h.harness.container);
+  h.advance(10000);
+  assert.equal(h.toasts.length, 1, 'without its stream the map cannot know, so it says nothing');
+});
+
+test('give a task: an empty task and a refused create keep the composer open with the reason', async () => {
+  const h = await giveTaskHarness();
+  giveTaskFromMenu(h);
+  h.composer.parts().input.value = '   ';
+  h.composer.parts().start.fire('click');
+  await flushDeep();
+  assert.equal(h.calls.length, 0, 'the server is not asked');
+  assert.equal(h.composer.parts().composer.error, 'Describe the task first.');
+
+  h.quick.createResult = () => {
+    throw new Error('Not enough Craft.');
+  };
+  h.composer.parts().input.value = 'Build a Farm';
+  h.composer.parts().start.fire('click');
+  await flushDeep();
+  const parts = h.composer.parts();
+  assert.equal(parts.composer.error, 'Not enough Craft.');
+  assert.equal(parts.input.value, 'Build a Farm', 'what the user typed survives');
+  assert.equal(parts.start.disabled, false, 'and they can try again');
+  assert.equal(h.calls.filter(call => call[0] === 'start').length, 0);
+});
+
+test('give a task: a start the server refuses says the task exists and does not offer it twice', async () => {
+  const h = await giveTaskHarness();
+  giveTaskFromMenu(h);
+  h.quick.startResult = () => {
+    throw new Error('Task is already in progress');
+  };
+  h.composer.parts().input.value = 'Compare the launch notes';
+  h.composer.parts().start.fire('click');
+  await flushDeep();
+  const parts = h.composer.parts();
+  assert.equal(
+    parts.composer.error,
+    'The task was created but did not start: Task is already in progress'
+  );
+  assert.equal(parts.input.value, '', 'the draft is cleared so it is not created again');
+  h.advance(10000);
+  assert.equal(h.toasts.length, 0, 'a start that failed is not also reported as not started');
+});
+
+test('give a task: Esc closes and returns focus, and Tab stays inside the composer', async () => {
+  const h = await giveTaskHarness();
+  const origin = giveTaskFromMenu(h);
+  const parts = h.composer.parts();
+  const doc = h.env.document;
+
+  doc.activeElement = parts.cancel;
+  let prevented = false;
+  parts.composer.fire('keydown', { key: 'Tab', preventDefault: () => (prevented = true) });
+  assert.equal(doc.activeElement, parts.input, 'Tab from the last control wraps to the first');
+  assert.ok(prevented);
+
+  parts.composer.fire('keydown', { key: 'Tab', shiftKey: true });
+  assert.equal(doc.activeElement, parts.cancel, 'Shift+Tab from the first wraps to the last');
+
+  const before = origin.focused;
+  parts.composer.fire('keydown', { key: 'Escape' });
+  assert.equal(h.composer.open(), false);
+  assert.equal(origin.focused, before + 1);
+  assert.equal(parts.composer.listenerCount('keydown'), 0, 'its listeners went with it');
 });

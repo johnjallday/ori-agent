@@ -69,6 +69,12 @@ const (
 	EventDelegationFailed    EventType = "delegation.failed"
 	EventDelegationCapHit    EventType = "delegation.cap_hit"
 
+	// Background activity events (tasks/prd-task-run-show.md FR8). Work that is
+	// not a task — a Daily Brief generation, a File Janitor watcher scan — says
+	// when it starts and when it finishes, and nothing in between.
+	EventActivityStarted  EventType = "activity.started"
+	EventActivityFinished EventType = "activity.finished"
+
 	// Scheduled task events
 	EventScheduledTaskTriggered EventType = "scheduled_task.triggered" // Scheduled task executed successfully
 	EventScheduledTaskFailed    EventType = "scheduled_task.failed"    // Scheduled task execution failed
@@ -409,6 +415,25 @@ func NewTaskEvent(eventType EventType, workspaceID, taskID, agentName string, da
 		Type:        eventType,
 		WorkspaceID: workspaceID,
 		Source:      "task-executor",
+		Data:        data,
+		Metadata:    make(map[string]string),
+	}
+}
+
+// NewActivityEvent creates a background activity event. kind names what is
+// running (daily_brief, file_janitor) and activityID is one run of it, the same
+// on its started and finished events.
+func NewActivityEvent(eventType EventType, workspaceID, kind, activityID string, data map[string]any) Event {
+	if data == nil {
+		data = make(map[string]any)
+	}
+	data["kind"] = kind
+	data["activity_id"] = activityID
+
+	return Event{
+		Type:        eventType,
+		WorkspaceID: workspaceID,
+		Source:      kind,
 		Data:        data,
 		Metadata:    make(map[string]string),
 	}

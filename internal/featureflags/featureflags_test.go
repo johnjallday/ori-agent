@@ -40,6 +40,37 @@ func TestEconomyEnabledDefaultsOnAndRespectsTheEnvironment(t *testing.T) {
 	}
 }
 
+func TestMapShowEnabledDefaultsOnAndRespectsTheEnvironment(t *testing.T) {
+	tests := []struct {
+		name  string
+		unset bool
+		raw   string
+		want  bool
+	}{
+		{name: "unset defaults enabled", unset: true, want: true},
+		{name: "false disables", raw: "false", want: false},
+		{name: "off disables", raw: "off", want: false},
+		{name: "zero disables", raw: "0", want: false},
+		{name: "true enables", raw: "true", want: true},
+		{name: "unknown defaults enabled", raw: "maybe", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(envMapShowEnabled, tt.raw)
+			if tt.unset {
+				if err := os.Unsetenv(envMapShowEnabled); err != nil {
+					t.Fatalf("unset %s: %v", envMapShowEnabled, err)
+				}
+			}
+			if got := MapShowEnabled(); got != tt.want {
+				t.Fatalf("MapShowEnabled() with %s=%q (unset=%v) = %v, want %v",
+					envMapShowEnabled, tt.raw, tt.unset, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseBoolDefaultTrue(t *testing.T) {
 	tests := []struct {
 		name string

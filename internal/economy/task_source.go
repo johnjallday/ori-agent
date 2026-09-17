@@ -112,25 +112,26 @@ func farmTaskFrom(workspaceID string, task *workspace.Task) FarmTask {
 	return FarmTask{
 		WorkspaceID:     workspaceID,
 		TaskID:          task.ID,
-		Name:            taskDisplayName(task),
+		Name:            TaskDisplayName(task),
 		Schedule:        task.Schedule,
 		ScheduleEnabled: task.ScheduleEnabled,
-		LastSummary:     lastExecutionSummary(task),
+		LastSummary:     LastExecutionSummary(task),
 	}
 }
 
-// taskDisplayName prefers the schedule's own name, which is what the user typed
+// TaskDisplayName prefers the schedule's own name, which is what the user typed
 // when they set the cadence up, and falls back to the task description.
-func taskDisplayName(task *workspace.Task) string {
+func TaskDisplayName(task *workspace.Task) string {
 	if name := strings.TrimSpace(task.ScheduleName); name != "" {
 		return name
 	}
 	return strings.TrimSpace(task.Description)
 }
 
-// lastExecutionSummary is the most recent run's summary, or empty when the task
-// has never run.
-func lastExecutionSummary(task *workspace.Task) string {
+// LastExecutionSummary is the most recent run's summary, or empty when the task
+// has never run. Exported so a task-run show parcel summarizes a run exactly as
+// the harvest popover does.
+func LastExecutionSummary(task *workspace.Task) string {
 	if len(task.ExecutionHistory) == 0 {
 		return ""
 	}

@@ -12,7 +12,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 60
+const schemaVersion = 61
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -187,6 +187,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration059GroupRequirementReceipts(ctx)
 	case 60:
 		return db.migration060WorkspaceMapAgentPositions(ctx)
+	case 61:
+		return db.migration061ResultParcels(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -3120,6 +3122,60 @@ func (db *DB) migration059GroupRequirementReceipts(ctx context.Context) error {
 	for _, statement := range statements {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("failed to create group requirement receipt schema: %w", err)
+		}
+	}
+	return nil
+}
+
+// migration061ResultParcels adds the task-run show's parcels: one row per
+// finished run the user has not looked at yet (tasks/prd-task-run-show.md
+// FR34). A row lives until it is opened, so a result waits across reloads,
+// browsers, and restarts.
+//
+// UNIQUE(kind, ref_id, run_key) is what makes creation idempotent: a replayed
+// completion event resolves to the parcel that already exists.
+//
+// The XP columns hold what the run's award actually paid, captured when the run
+// finished. Craft is deliberately absent — it is credited by the economy's own
+// subscriber and looked up from the ledger when the parcel is opened (FR39).
+//
+// workspace_id is NOT a foreign key. The workspace index clears and refills the
+// workspaces table on every rebuild, so a cascading key would erase every
+// parcel at boot. Deleted workspaces are cleaned by the parcel store instead,
+// the same way the economy's tables are.
+func (db *DB) migration061ResultParcels(ctx context.Context) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS result_parcels (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			kind TEXT NOT NULL,
+			ref_id TEXT NOT NULL,
+			run_key TEXT NOT NULL DEFAULT '',
+			agent_name TEXT NOT NULL DEFAULT '',
+			title TEXT NOT NULL DEFAULT '',
+			summary TEXT NOT NULL DEFAULT '',
+			outcome TEXT NOT NULL,
+			failure_reason TEXT NOT NULL DEFAULT '',
+			started_at TEXT,
+			produced_at TEXT NOT NULL,
+			opened_at TEXT,
+			xp_awarded INTEGER NOT NULL DEFAULT 0,
+			level_before INTEGER NOT NULL DEFAULT 0,
+			level_after INTEGER NOT NULL DEFAULT 0,
+			progress_before REAL NOT NULL DEFAULT 0,
+			progress_after REAL NOT NULL DEFAULT 0,
+			stage_before TEXT NOT NULL DEFAULT '',
+			stage_after TEXT NOT NULL DEFAULT '',
+			UNIQUE(kind, ref_id, run_key)
+		)`,
+		// The map asks one question on every load: which parcels are unopened,
+		// by workspace.
+		`CREATE INDEX IF NOT EXISTS idx_result_parcels_unopened
+			ON result_parcels(opened_at, workspace_id)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("failed to create result parcel schema: %w", err)
 		}
 	}
 	return nil

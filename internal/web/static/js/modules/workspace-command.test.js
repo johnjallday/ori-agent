@@ -5550,3 +5550,110 @@ test('agents reach the map as units; a status change patches them, a roster chan
     globalThis.window = originalWindow;
   }
 });
+
+// --- the task-run show on the Operations map (task-run-show §4.5) ------------
+
+function showCommandView(kind = '') {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  const layerCalls = [];
+  Object.assign(commandView, {
+    active: true,
+    viewMode: 'map',
+    container: null,
+    page: { workspaceId: 'ws-1', workspace: { id: 'ws-1', name: 'Lab', kind } },
+    mapActivity: {
+      handleRealtimeEvent: event => layerCalls.push(['event', event.type]) && true,
+      paint: () => layerCalls.push(['paint']),
+      loadParcels: () => layerCalls.push(['load']),
+      openParcel: id => layerCalls.push(['open', id])
+    }
+  });
+  return { commandView, layerCalls };
+}
+
+test('the page forwards its realtime events to the Operations map, not to a group map', () => {
+  const own = showCommandView();
+  assert.equal(own.commandView.handleActivityEvent({ type: 'task.started' }), true);
+  assert.deepEqual(own.layerCalls, [['event', 'task.started']]);
+
+  const group = showCommandView('group');
+  assert.equal(group.commandView.handleActivityEvent({ type: 'task.started' }), false);
+  assert.deepEqual(group.layerCalls, [], "a group's scoped map follows the shared feed instead");
+});
+
+test('a card from this map opens a task result, the janitor review, or Home for a brief', () => {
+  const { commandView } = showCommandView();
+  const shown = [];
+  commandView.page.showTaskResult = id => shown.push(id);
+  const originalWindow = globalThis.window;
+  const opened = [];
+  globalThis.window = {
+    location: { href: '/workspaces/lab' },
+    FileJanitorConsole: { open: options => opened.push(options) }
+  };
+  try {
+    commandView.followMapParcel({ kind: 'task', ref_id: 't1' });
+    commandView.followMapParcel({ kind: 'file_janitor', ref_id: 'batch-1' });
+    assert.deepEqual(shown, ['t1']);
+    assert.deepEqual(opened, [{ tab: 'review' }]);
+    commandView.followMapParcel({ kind: 'daily_brief', ref_id: 'rev-1' });
+    assert.equal(globalThis.window.location.href, '/');
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('each render repaints the working units, and parcels load once per workspace', () => {
+  const { commandView, layerCalls } = showCommandView();
+  commandView.paintMapActivity();
+  commandView.paintMapActivity();
+  assert.deepEqual(layerCalls, [['paint'], ['load'], ['paint']]);
+
+  commandView.page = { workspaceId: 'ws-2', workspace: { id: 'ws-2' } };
+  commandView.paintMapActivity();
+  assert.deepEqual(layerCalls.slice(3), [['paint'], ['load']]);
+});
+
+test('the layer only paints onto a workspace map that is on screen', () => {
+  const { commandView } = showCommandView();
+  commandView.mapActivity = null;
+  const opmap = { id: 'opmap' };
+  commandView.container = {
+    querySelector: selector => (selector === '.ws-cmd-opmap' ? opmap : null)
+  };
+  const layer = commandView.mapActivityLayer();
+  assert.equal(layer.rootFn(), opmap);
+  commandView.viewMode = 'details';
+  assert.equal(layer.rootFn(), null, 'Details mode has no map to paint');
+  commandView.viewMode = 'map';
+  commandView.page.workspace.kind = 'group';
+  assert.equal(layer.rootFn(), null);
+});
+
+test('a parcel opens the result card, and a blocked bubble opens its question before the unit sheet', () => {
+  const mapRoot = makeListenerRoot();
+  const { commandView, layerCalls } = showCommandView();
+  const calls = [];
+  Object.assign(commandView, {
+    container: {
+      querySelector: selector => (selector === '.ws-cmd-map-shell' ? mapRoot : null)
+    },
+    syncDetachmentMap() {},
+    bindStationDrag() {},
+    handleLoadoutClick: () => false,
+    selectAgent: name => calls.push(['select-agent', name])
+  });
+  commandView.page.openTaskAssistModal = id => calls.push(['assist', id]);
+  commandView.bindOperationsMap();
+
+  mapRoot.listener({ target: makeAttributeClickTarget({ 'data-cmd-map-parcel': 'p1' }) });
+  assert.deepEqual(layerCalls, [['open', 'p1']]);
+
+  mapRoot.listener({
+    target: makeAttributeClickTarget({
+      'data-cmd-activity-open-task': 't9',
+      'data-cmd-map-select-agent': 'Theo'
+    })
+  });
+  assert.deepEqual(calls, [['assist', 't9']], 'the question, not the unit sheet');
+});

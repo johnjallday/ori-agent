@@ -1271,6 +1271,12 @@ func registerWorkspaceMapRoutes(mux *http.ServeMux, s *Server) {
 	// Workspace Map Layout Endpoints (current user)
 	// =============================================================================
 	s.Handlers.WorkspaceMap.Register(mux)
+
+	// The task-run show's live activity feed: one snapshot and one stream for
+	// every workspace, so Home holds a single connection however many are
+	// working (task-run-show FR2, FR3). The handler answers 404 itself when
+	// ORI_MAP_SHOW_ENABLED is off, so the flag is read per request.
+	s.Handlers.MapActivity.Register(mux)
 }
 
 // registerAgentMapRoutes registers the current user's agent-map layout

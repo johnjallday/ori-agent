@@ -140,6 +140,17 @@ func (s *Service) Available() bool {
 	return s != nil && s.store != nil
 }
 
+// RunCraft reports the Craft one hand-run task run was paid, looked up by the
+// same reference recordCompletedTask credits it under. The bool is false when
+// that run earned no Craft — a Farm run, or one the ledger has not recorded yet.
+// The task-run show reads it when a result card opens (task-run-show FR39).
+func (s *Service) RunCraft(ctx context.Context, taskID, runKey string) (int64, bool, error) {
+	if !s.Available() {
+		return 0, false, ErrStoreUnavailable
+	}
+	return s.store.EntryAmount(ctx, ResourceCraft, RefKindTask, taskID+"@"+runKey)
+}
+
 // CreativeMode reports whether every cost is currently waived (FR24).
 func (s *Service) CreativeMode() bool {
 	if s == nil || s.settings == nil {
@@ -272,7 +283,7 @@ func (s *Service) recordCompletedTask(ctx context.Context, ev workspace.Event) {
 		return
 	}
 	now := s.clock()
-	runKey := s.runKey(ev, now)
+	runKey := RunKey(ev, now)
 
 	if !eventBool(ev, "scheduled") {
 		if _, err := s.store.Credit(ctx, Entry{
@@ -299,10 +310,14 @@ func (s *Service) recordCompletedTask(ctx context.Context, ev workspace.Event) {
 	}
 }
 
-// runKey identifies one run. The run's own id is preferred; a completion with no
+// RunKey identifies one run. The run's own id is preferred; a completion with no
 // run record falls back to its timestamp, which is unique enough for a run that
 // by definition happened once (FR10).
-func (s *Service) runKey(ev workspace.Event, now time.Time) string {
+//
+// Exported so the task-run show keys a run's parcel exactly the way this
+// package keys its Craft and Harvest, and the two can never drift apart
+// (task-run-show FR35, FR39).
+func RunKey(ev workspace.Event, now time.Time) string {
 	if runID := eventString(ev, "run_id"); runID != "" {
 		return runID
 	}
