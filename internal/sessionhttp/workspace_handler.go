@@ -290,6 +290,9 @@ type createWorkspaceRequest struct {
 	CreateRequiredHome     bool   `json:"create_required_home,omitempty"`
 	GroupReviewToken       string `json:"group_review_token,omitempty"`
 	IdempotencyKey         string `json:"idempotency_key,omitempty"`
+	// ProjectConnection attaches a project folder the user already has, chosen
+	// with the native folder picker, instead of scaffolding a new project.
+	ProjectConnection *createWorkspaceProjectConnection `json:"project_connection,omitempty"`
 }
 
 func (req *createWorkspaceRequest) UnmarshalJSON(data []byte) error {
@@ -544,6 +547,14 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// An attached project is validated here, before any Home claim, agent,
+	// workspace, or folder exists, so a refusal leaves nothing behind.
+	attachPlan, attachErr := h.planCreateWorkspaceAttach(req, kind, resolvedTemplate, templateResolved)
+	if attachErr != nil {
+		respondCreateWorkspaceAttachError(w, attachErr)
+		return
+	}
+
 	// A versioned wizard request must prove its reviewed team before any group
 	// claim or creation side effect. Blank joins the same synthetic template
 	// machinery only on this strict path; legacy Blank behavior remains below.
@@ -711,8 +722,14 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		template:     resolvedTemplate,
 		resolved:     templateResolved,
 		resolveErr:   templateResolveErr,
+		attach:       attachPlan,
 	}, seed)
 	if responded {
+		return
+	}
+	if prov.attachErr != nil {
+		h.rollbackFailedAttachCreate(r.Context(), ws.ID, seed)
+		respondCreateWorkspaceAttachError(w, prov.attachErr)
 		return
 	}
 
@@ -1160,6 +1177,9 @@ type createTemplateContext struct {
 	template     projecttemplates.Template
 	resolved     bool
 	resolveErr   error
+	// attach, when set, references an existing project folder instead of
+	// scaffolding one.
+	attach *createWorkspaceAttachPlan
 }
 
 // createProvisionOutcome carries folder-provisioning results back to
@@ -1167,6 +1187,9 @@ type createTemplateContext struct {
 type createProvisionOutcome struct {
 	projectWarning    string
 	agentToolWarnings []string
+	// attachErr is set when a requested existing project was not attached.
+	// Unlike projectWarning it is fatal: the caller rolls the create back.
+	attachErr error
 }
 
 // provisionCreateWorkspaceFolder creates the on-disk workspace folder,
@@ -1183,6 +1206,10 @@ func (h *Handler) provisionCreateWorkspaceFolder(ctx context.Context, w http.Res
 		// usable folder. applyCreateWorkspaceTemplate overwrites this with a
 		// specific message or clears it on success.
 		out.projectWarning = "workspace was created, but the project template was not applied: workspace folder unavailable"
+	}
+	if tc.attach != nil {
+		// Every path below that does not record the attach leaves this set.
+		out.attachErr = errAttachWorkspaceFolderUnavailable
 	}
 	if h.workspaceStore == nil {
 		return out, false
@@ -1269,7 +1296,7 @@ func (h *Handler) provisionCreateWorkspaceFolder(ctx context.Context, w http.Res
 	logger.Info("Workspace folder created on disk", logger.Fields{"id": ws.ID, "path": folderPath})
 
 	if tc.wantsProject {
-		out.projectWarning = h.applyCreateWorkspaceTemplate(ctx, req, ws, folderWS, tc)
+		out.projectWarning, out.attachErr = h.applyCreateWorkspaceTemplate(ctx, req, ws, folderWS, tc)
 	}
 	return out, false
 }
@@ -1303,10 +1330,16 @@ func (h *Handler) installTemplateDashboard(workspaceID, folderPath string, tc cr
 // freshly-provisioned (non-group) workspace folder: direct skeleton
 // instantiation plus the template's default tool bindings. A legacy
 // `onboarding` block in the manifest is ignored (the intake engine was
-// replaced by setup starter tasks). Never fatal — a failure is reported via
-// the returned warning.
-func (h *Handler) applyCreateWorkspaceTemplate(ctx context.Context, req createWorkspaceRequest, ws *session.Workspace, folderWS *agentworkspace.Workspace, tc createTemplateContext) (projectWarning string) {
+// replaced by setup starter tasks). Scaffolding is never fatal — a failure is
+// reported via the returned warning. An attached existing project replaces
+// scaffolding and is the exception: its failure is returned as attachErr.
+func (h *Handler) applyCreateWorkspaceTemplate(ctx context.Context, req createWorkspaceRequest, ws *session.Workspace, folderWS *agentworkspace.Workspace, tc createTemplateContext) (projectWarning string, attachErr error) {
 	switch {
+	case tc.attach != nil:
+		// The user's folder is referenced in place; nothing is copied into it.
+		if err := h.recordCreateWorkspaceAttachedProject(ctx, ws, folderWS, tc.attach); err != nil {
+			return "", err
+		}
 	case tc.resolved && !tc.template.HasSkeleton:
 		// Metadata-only template (no files): there is no project to
 		// scaffold by design. Its behavior/tools/starter-tasks still
@@ -1348,7 +1381,7 @@ func (h *Handler) applyCreateWorkspaceTemplate(ctx context.Context, req createWo
 		}
 	}
 
-	return projectWarning
+	return projectWarning, nil
 }
 
 // persistCreateWorkspaceTemplateProvenance records the template a workspace
@@ -2278,6 +2311,9 @@ type createWorkspaceImportRequest struct {
 	EntryPoint         string                     `json:"entry_point,omitempty"`
 	EntryAgentName     string                     `json:"entry_agent_name,omitempty"`
 	WorkspaceBootstrap *workspaceBootstrapRequest `json:"workspace_bootstrap,omitempty"`
+	// ProjectConnection is decoded only so it can be refused: Import Folder
+	// adopts a whole folder and never attaches a blueprint's project file.
+	ProjectConnection json.RawMessage `json:"project_connection,omitempty"`
 }
 
 type workspaceImportDuplicate struct {

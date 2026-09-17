@@ -14,6 +14,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
+	"github.com/johnjallday/ori-agent/internal/projectconnection"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -76,6 +77,11 @@ type Handler struct {
 	// orchestration task handler); used by the template-setup first-open
 	// auto-start after the consumed marker is stamped.
 	templateSetupStarter func(workspaceID, taskID string) error
+
+	// pathSelections resolves the opaque token Ori's native folder picker
+	// issued. A create request may attach an existing project only through
+	// it; a browser-supplied path is never accepted.
+	pathSelections projectconnection.SelectionResolver
 
 	// planningPolicy resolves a workspace's effective planning policy and what
 	// its folder can actually enforce. Injected by the server; nil in a build
@@ -197,6 +203,22 @@ func (h *Handler) SetTemplatesRootResolver(fn func() string) {
 // blueprint catalog. Minimal/test handlers retain the legacy library resolver.
 func (h *Handler) SetProjectTemplateResolver(fn func(templateID, templatePath string) (projecttemplates.Template, error)) {
 	h.projectTemplateResolver = fn
+}
+
+// SetTrustedPathSelectionResolver injects the store behind the native folder
+// picker's selection tokens. Without it, attaching an existing project is
+// unavailable rather than falling back to a raw path.
+func (h *Handler) SetTrustedPathSelectionResolver(resolver projectconnection.SelectionResolver) {
+	h.pathSelections = resolver
+}
+
+// TrustedPathSelectionResolver returns the injected picker-token resolver, so
+// build wiring tests can prove it is the same store the picker issues from.
+func (h *Handler) TrustedPathSelectionResolver() projectconnection.SelectionResolver {
+	if h == nil {
+		return nil
+	}
+	return h.pathSelections
 }
 
 // SetGroupRequirementService wires the host-owned placement evaluator and the

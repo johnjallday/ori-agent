@@ -736,6 +736,12 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() {
 		b.pathSelectionStore = pathselection.NewStore()
 	}
 	b.workspaceHandler.SetTrustedPathSelectionIssuer(b.pathSelectionStore)
+	// The create modal attaches an existing project with the token this same
+	// picker issued, so both must share one store. Later phases (the guided
+	// journey, sample libraries) reuse it rather than creating their own.
+	if b.sessionHandler != nil {
+		b.sessionHandler.SetTrustedPathSelectionResolver(b.pathSelectionStore)
+	}
 	if b.workspaceFileStore != nil {
 		b.workspaceHandler.SetFolderStore(b.workspaceFileStore)
 	}

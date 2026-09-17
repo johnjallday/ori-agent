@@ -231,6 +231,30 @@
                 <div id="workspaceNameHint" class="workspace-create-name-hint" aria-live="polite"></div>
               </div>
 
+              <!-- Shown only for a blueprint that declares existing projects.
+                   The browser keeps the picker's selection token, never a path
+                   it could send as authority. -->
+              <fieldset id="workspaceProjectChoice" class="workspace-project-choice mb-3" hidden>
+                <legend class="workspace-create-section-title">Project</legend>
+                <div class="workspace-project-choice-options">
+                  <label>
+                    <input type="radio" name="workspace-project-mode" id="workspaceProjectModeNew" value="new_project" checked>
+                    <span>Start a new project</span>
+                  </label>
+                  <label>
+                    <input type="radio" name="workspace-project-mode" id="workspaceProjectModeExisting" value="existing_project">
+                    <span>Use an existing project</span>
+                  </label>
+                </div>
+                <div id="workspaceExistingProjectFields" class="workspace-existing-project" hidden>
+                  <div class="workspace-existing-project-row">
+                    <button type="button" id="workspaceExistingProjectChooseBtn" class="modern-btn modern-btn-secondary" aria-describedby="workspaceExistingProjectFolder workspaceExistingProjectError">Choose project folder</button>
+                    <span id="workspaceExistingProjectFolder" class="workspace-existing-project-folder"></span>
+                  </div>
+                  <div id="workspaceExistingProjectError" class="workspace-create-name-hint is-error" hidden></div>
+                </div>
+              </fieldset>
+
               <!-- Setup cards are mounted here while editing and relocated to the
                    final review step by sessions.js. -->
               <div id="wizardStep2ReviewMount"></div>

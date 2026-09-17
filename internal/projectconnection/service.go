@@ -11,7 +11,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -209,23 +208,23 @@ func (s *Service) Preview(_ context.Context, scope Scope, request Request) (Prev
 		if resolveErr != nil {
 			return Preview{}, ErrUnavailable
 		}
-		root, candidates, scanDigest, scanErr := scanExistingProject(selectedRoot, scope.Template.ProjectConnection.AttachExisting)
+		scan, scanErr := ScanExistingProject(selectedRoot, scope.Template.ProjectConnection.AttachExisting)
 		if scanErr != nil {
-			return Preview{}, scanErr
+			return Preview{}, ErrUnavailable
 		}
-		if s.ownedByAnotherProject(scope.RunID, root) {
+		if s.ownedByAnotherProject(scope.RunID, scan.Root) {
 			return Preview{}, ErrChanged
 		}
-		entry, chooseErr := selectEntry(request.EntryName, candidates)
+		entry, chooseErr := SelectProjectEntry(request.EntryName, scan.Candidates)
 		if chooseErr != nil {
-			return Preview{}, chooseErr
+			return Preview{}, ErrInvalid
 		}
-		preview.selectedRoot = root
+		preview.selectedRoot = scan.Root
 		preview.selectedEntry = entry
-		preview.Projection.SelectedFolder = root
+		preview.Projection.SelectedFolder = scan.Root
 		preview.Projection.EntryName = entry
-		preview.Projection.EntryCandidates = append([]string(nil), candidates...)
-		preview.OwnerDigest = digestStrings(templateIdentity(scope.Template), groupOwnerDigest, scanDigest, entry)
+		preview.Projection.EntryCandidates = append([]string(nil), scan.Candidates...)
+		preview.OwnerDigest = digestStrings(templateIdentity(scope.Template), groupOwnerDigest, scan.Digest, entry)
 	case projecttemplates.ProjectConnectionNewProject:
 		if strings.TrimSpace(request.SelectionToken) != "" || request.EntryName != "" || !validDisplayName(request.ProjectName) || !scope.Template.HasSkeleton {
 			return Preview{}, ErrInvalid
@@ -501,16 +500,8 @@ func (s *Service) ensureChild(scope Scope, request Request, preview Preview, hom
 	child.SharedData = map[string]any{connectionRunKey: scope.RunID}
 	child.SetTemplateProvenance(templateProvenance(scope.Template, s.now(), groupSnapshot))
 	if request.ModeID == projecttemplates.ProjectConnectionExistingProject {
-		referenceID := connectionReferenceID(scope.RunID)
-		if err := child.AddDirectoryReference(workspace.DirectoryReference{ID: referenceID, Name: request.WorkspaceName, Path: preview.selectedRoot}); err != nil {
-			return nil, ErrUnavailable
-		}
-		if err := workspace.SetProjectEntryLocator(child.SharedData, workspace.ProjectEntryLocator{
-			SchemaVersion: workspace.ProjectEntryLocatorSchemaVersion,
-			Kind:          workspace.ProjectEntryDirectoryReference, DirectoryReferenceID: referenceID,
-			RelativePath: preview.selectedEntry,
-		}); err != nil {
-			return nil, ErrInvalid
+		if err := RecordAttachedProject(child, request.WorkspaceName, preview.selectedRoot, preview.selectedEntry, connectionReferenceID(scope.RunID)); err != nil {
+			return nil, err
 		}
 	}
 	if err := s.store.Save(child); err != nil {
@@ -648,70 +639,6 @@ func validCreatedProjectEntries(files []string, authoritative string, declaratio
 		}
 	}
 	return len(matches) == 1 && matches[0] == authoritative
-}
-
-func scanExistingProject(selected string, declaration *projecttemplates.AttachExistingDeclaration) (string, []string, string, error) {
-	if declaration == nil || len(declaration.EntryExtensions) == 0 {
-		return "", nil, "", ErrUnavailable
-	}
-	root, err := filepath.Abs(filepath.Clean(strings.TrimSpace(selected)))
-	if err != nil || !filepath.IsAbs(root) {
-		return "", nil, "", ErrUnavailable
-	}
-	info, err := os.Lstat(root) // #nosec G304 -- root came only from Ori's trusted native picker token
-	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return "", nil, "", ErrUnavailable
-	}
-	entries, err := os.ReadDir(root) // #nosec G304 -- exact no-follow picker root checked above
-	if err != nil {
-		return "", nil, "", ErrUnavailable
-	}
-	allowed := make(map[string]struct{}, len(declaration.EntryExtensions))
-	for _, extension := range declaration.EntryExtensions {
-		allowed[strings.ToLower(extension)] = struct{}{}
-	}
-	candidates := make([]string, 0)
-	facts := []string{root, info.ModTime().UTC().Format(time.RFC3339Nano)}
-	for _, entry := range entries {
-		if len(candidates) >= maxEntryCandidates {
-			return "", nil, "", ErrUnavailable
-		}
-		if _, ok := allowed[strings.ToLower(filepath.Ext(entry.Name()))]; !ok {
-			continue
-		}
-		entryInfo, statErr := os.Lstat(filepath.Join(root, entry.Name())) // #nosec G304 -- one direct child of the checked root
-		if statErr != nil || entryInfo.Mode()&os.ModeSymlink != 0 || !entryInfo.Mode().IsRegular() {
-			continue
-		}
-		candidates = append(candidates, entry.Name())
-		facts = append(facts, entry.Name(), entryInfo.Mode().String(), entryInfo.ModTime().UTC().Format(time.RFC3339Nano), strconv.FormatInt(entryInfo.Size(), 10))
-	}
-	sort.Strings(candidates)
-	if len(candidates) == 0 {
-		return "", nil, "", ErrUnavailable
-	}
-	return root, candidates, digestStrings(facts...), nil
-}
-
-func selectEntry(requested string, candidates []string) (string, error) {
-	if requested == "" {
-		if len(candidates) == 1 {
-			return candidates[0], nil
-		}
-		// A review may return the bounded exact candidates before consent is
-		// issued for one. The client repeats the review with one exact name;
-		// commit still rejects an empty selection.
-		return "", nil
-	}
-	if filepath.Base(requested) != requested || strings.ContainsAny(requested, `/\\`) {
-		return "", ErrInvalid
-	}
-	for _, candidate := range candidates {
-		if candidate == requested {
-			return candidate, nil
-		}
-	}
-	return "", ErrInvalid
 }
 
 func validDisplayName(value string) bool {

@@ -301,6 +301,60 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
 .workspace-create-modal .workspace-create-name-hint.is-error {
   color: var(--wc-alert, #e5675b);
 }
+
+/* ---------- project choice (new or existing project) ---------- */
+.workspace-create-modal .workspace-project-choice {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.workspace-create-modal .workspace-project-choice legend {
+  display: block;
+  margin-bottom: 6px;
+  float: none;
+  width: auto;
+}
+.workspace-create-modal .workspace-project-choice-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.workspace-create-modal .workspace-project-choice-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 9px;
+  border: 1px solid var(--wc-line);
+  color: var(--wc-ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+.workspace-create-modal .workspace-project-choice-options label:has(input:checked) {
+  border-color: var(--wc-faction);
+  background: color-mix(in srgb, var(--wc-faction) 8%, transparent);
+}
+.workspace-create-modal .workspace-existing-project {
+  margin-top: 10px;
+}
+.workspace-create-modal .workspace-existing-project-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.workspace-create-modal .workspace-existing-project-folder {
+  min-width: 0;
+  color: var(--wc-ink-dim, var(--wc-ink-faint));
+  font-family: var(--wc-font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 575.98px) {
+  .workspace-create-modal .workspace-project-choice-options {
+    grid-template-columns: 1fr;
+  }
+}
 .workspace-create-modal .modern-input.is-invalid {
   border-color: var(--wc-alert, #e5675b);
 }
