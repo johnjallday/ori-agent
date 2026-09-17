@@ -122,7 +122,11 @@
       readOnly: !!opts.readOnly,
       status: 'idle',
       message: '',
-      messageKind: 'info'
+      messageKind: 'info',
+      // True once the user has made any appearance decision of their own. A
+      // suggested character is only ever staged, or re-staged on a role change,
+      // while this is still false: the suggestion must never overwrite a choice.
+      touched: false
     };
     if (!modeAllowed(state.confirmed.mode)) state.confirmed.mode = MODES.GENERATED;
     if (!modeAllowed(state.staged.mode)) state.staged.mode = MODES.GENERATED;
@@ -484,6 +488,34 @@
       commit({ character: null });
     }
 
+    // A create form that opts in starts with a face rather than a monogram: the
+    // character the catalog recommends for this role, staged exactly as if the
+    // user had picked it and labelled as a suggestion so it is never mistaken
+    // for something they chose.
+    //
+    // This is a default in the FORM, not in the API. A create request that says
+    // nothing about appearance still gets the generated portrait (FR-4); the
+    // suggestion travels in the request like any other staged choice, and one
+    // click on "Generated" takes it away again.
+    //
+    // It reports whether it changed anything, so callers only repaint when
+    // there is something new to show.
+    function suggestCharacter() {
+      if (!opts.suggestCharacter || state.mode !== 'create' || state.readOnly) return false;
+      if (state.touched || !modeAllowed(MODES.CHARACTER)) return false;
+      var catalog = window.CharacterCatalog;
+      if (!catalog || typeof catalog.recommend !== 'function') return false;
+      var taken = typeof opts.takenCharacterIds === 'function' ? opts.takenCharacterIds() : [];
+      var id = catalog.recommend(taken, agent.role || '');
+      if (!id) return false;
+      if (hasCharacter(state.staged) && state.staged.character.catalog_id === id) return false;
+      state.staged.character = { catalog_id: id, catalog_version: 0 };
+      state.staged.mode = MODES.CHARACTER;
+      state.message = 'Suggested for this role. Pick another, or switch to Generated.';
+      state.messageKind = 'info';
+      return true;
+    }
+
     function stageUpload(file) {
       if (!file) return;
       if (file.size > MAX_UPLOAD_BYTES) {
@@ -498,6 +530,7 @@
       // A successful upload activates Upload in the same operation, so the
       // staged state says so immediately and the preview matches (FR-36).
       state.staged.mode = MODES.UPLOADED;
+      state.touched = true;
 
       if (state.mode === 'create') {
         // Nowhere to put the bytes until the agent exists. The host collects the
@@ -517,6 +550,7 @@
       state.pendingFile = null;
       delete state.staged.uploaded;
       if (wasActive) state.staged.mode = MODES.GENERATED;
+      state.touched = true;
 
       if (state.mode === 'create') {
         render();
@@ -540,8 +574,15 @@
     /* ---- persistence -------------------------------------------------------- */
 
     // commit sends one appearance patch, or stages it in a create flow.
+    //
+    // Every deliberate choice — a source, a colour, a character, clearing one —
+    // arrives here, which makes it the one place to record that the user has
+    // decided. From then on a suggestion has nothing left to say.
     function commit(patch) {
+      state.touched = true;
       if (state.mode === 'create') {
+        // A choice replaces the "Suggested…" note rather than sitting under it.
+        state.message = '';
         render();
         notify();
         return;
@@ -647,6 +688,15 @@
       },
       setAgentRole: function (value) {
         agent.role = String(value || '');
+        // A different role may suit a different face — but only while the face
+        // is still the editor's suggestion and not the user's own pick. The
+        // role select lives outside this host, so a full render here cannot
+        // take focus away from it.
+        if (suggestCharacter()) {
+          render();
+          notify();
+          return;
+        }
         renderPreview();
       },
       appearance: function () {
@@ -683,14 +733,27 @@
     if (window.CharacterCatalog) {
       if (typeof window.CharacterCatalog.onChange === 'function') {
         window.CharacterCatalog.onChange(function () {
-          // Only the preview needs repainting; re-rendering the whole editor
-          // would drop focus if the catalog lands mid-interaction.
+          // A suggestion can only be made once the catalog is here. It changes
+          // which source is active, so it needs the full render; by
+          // construction it only happens before the user has touched anything,
+          // so there is no interaction for that render to interrupt.
+          if (suggestCharacter()) {
+            render();
+            notify();
+            return;
+          }
+          // Otherwise only the preview needs repainting; re-rendering the whole
+          // editor would drop focus if the catalog lands mid-interaction.
           renderPreview();
         });
       }
       if (typeof window.CharacterCatalog.load === 'function') window.CharacterCatalog.load();
     }
 
+    // The catalog is usually loaded already by the time a second create form
+    // opens, in which case no change event is coming and the suggestion has to
+    // be made here.
+    suggestCharacter();
     render();
     return api;
   }
