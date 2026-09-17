@@ -3791,6 +3791,11 @@
     if (opts && opts.blockedTaskId) {
       query = '?blocked_task=' + encodeURIComponent(opts.blockedTaskId);
     }
+    // ?panel=tasks&task=<id> opens the task drawer on that task — where a task
+    // created from the map but not yet started can be looked at (FR52).
+    if (opts && opts.taskId) {
+      query = '?panel=tasks&task=' + encodeURIComponent(opts.taskId);
+    }
     window.location.href = '/workspaces/' + encodeURIComponent(slug) + query;
   }
 
@@ -4059,6 +4064,7 @@
           (item.title ? ' title="' + escapeHtml(item.title) + '"' : '') +
           '>' +
           escapeHtml(item.label) +
+          (item.hint ? '<span class="ws-map-menu-hint">' + escapeHtml(item.hint) + '</span>' : '') +
           '</button>'
         );
       })
@@ -4365,6 +4371,9 @@
       { label: 'Open workspace', action: 'open' },
       { label: 'Open → Backlog', action: 'open-backlog' }
     ];
+    // Giving a task is a Home map action (FR48); a group page already has its
+    // own New Quest composer one click away.
+    if (!scoped) items.push(giveTaskMenuItem(ws));
     if (setupPresentation(setupStatusCache[id])) {
       items.push({ label: 'Open → Setup', action: 'open-setup' });
     }
@@ -4427,6 +4436,7 @@
     if (scoped) return [];
     var items = [
       { label: 'Open group', action: 'open' },
+      giveTaskMenuItem(ws),
       { label: 'Build', action: 'build', disabled: readOnly },
       menuDivider()
     ];
@@ -4862,6 +4872,9 @@
         announce(container, 'Opening the Backlog for ' + name);
         openWorkspace(id, { panel: 'backlog' });
         break;
+      case 'give-task':
+        openTaskComposer(container, context);
+        break;
       // District layout actions (#346 FR-146). They run the same controller the
       // direct handles and the Home rail run, so all three surfaces validate,
       // persist, announce, and fail identically (FR-156).
@@ -5082,6 +5095,8 @@
       context: {
         id: target.id || '',
         type: target.type,
+        element: target.element || null,
+        ws: target.ws || null,
         name:
           (target.ws && target.ws.name) ||
           (target.unit && target.unit.name) ||
@@ -5696,9 +5711,17 @@
     var hasParcels = !!(view && view.parcels && view.parcels.length);
     if (hasRunning || hasParcels) activityViews[id] = view;
     else delete activityViews[id];
+    var event = (view && view.lastEvent) || null;
+    // Any sign of life from a task given on the map ends its start watch, even
+    // when the map itself is not on screen to show it.
+    if (event && event.task_id) clearTaskStartWatch(event.task_id);
+    if (hasRunning) {
+      view.running.forEach(function (run) {
+        if (run && run.task_id) clearTaskStartWatch(run.task_id);
+      });
+    }
     var container = activityContainer();
     if (!container || !lastWorldLayout) return;
-    var event = (view && view.lastEvent) || null;
     if (event && (event.phase === 'parcel' || event.phase === 'parcel_opened')) {
       handleParcelEvent(container, id, event);
       return;
@@ -5946,6 +5969,305 @@
     if (cards && typeof cards.close === 'function') cards.close({ restoreFocus: false });
   }
 
+  // ---------- give a task from the map (task-run-show §4.8) ----------
+
+  // A task created with no assignee goes to the workspace's Commander, so a
+  // building without one cannot take a task from here (FR51).
+  function giveTaskMenuItem(ws) {
+    var item = { label: 'Give a task…', action: 'give-task' };
+    if (!String((ws && ws.entry_agent_name) || '').trim()) {
+      item.disabled = true;
+      item.hint = 'Needs a Commander';
+    } else if (isMapReadOnly()) {
+      item.disabled = true;
+      item.hint = 'The map is read-only right now';
+    }
+    return item;
+  }
+
+  // If a started task has not said so within this long, the user is told it
+  // was created but has not started — never shown a building that is not lit
+  // (FR52).
+  var TASK_START_GRACE_MS = 5000;
+  var composerState = null;
+  var composerHost = null;
+  var taskStartWatches = Object.create(null);
+
+  function composerHTML(state) {
+    var sending = !!state.sending;
+    var disabled = sending ? ' disabled' : '';
+    return (
+      '<section class="ws-map-composer cozy-frame cozy-frame--lifted" data-ws-map-composer role="dialog" aria-modal="false" aria-labelledby="wsMapComposerTitle">' +
+      '<p class="ws-map-composer__title" id="wsMapComposerTitle">Give ' +
+      escapeHtml(state.name) +
+      ' a task</p>' +
+      '<label class="ws-map-composer__label" for="wsMapComposerInput">What should ' +
+      escapeHtml(state.commander) +
+      ' do?</label>' +
+      '<textarea class="ws-map-composer__input cozy-focusable" id="wsMapComposerInput" data-composer-input rows="3"' +
+      disabled +
+      '>' +
+      escapeHtml(state.draft) +
+      '</textarea>' +
+      (state.error
+        ? '<p class="ws-map-composer__error" role="alert">' + escapeHtml(state.error) + '</p>'
+        : '') +
+      '<div class="ws-map-composer__actions">' +
+      '<button type="button" class="ws-map-composer__btn is-primary cozy-focusable" data-composer-start' +
+      disabled +
+      '>' +
+      (sending ? 'Working…' : 'Create &amp; Start') +
+      '</button>' +
+      '<button type="button" class="ws-map-composer__btn cozy-focusable" data-composer-create' +
+      disabled +
+      '>Create</button>' +
+      '<button type="button" class="ws-map-composer__btn cozy-focusable" data-composer-cancel>Cancel</button>' +
+      '</div>' +
+      '</section>'
+    );
+  }
+
+  function ensureComposerHost() {
+    if (!canBuildElements() || !document.body) return null;
+    if (!composerHost || composerHost.isConnected === false) {
+      composerHost = document.createElement('div');
+      composerHost.className = 'ws-map-composer-host';
+      composerHost.setAttribute('data-ws-map-composer-host', '');
+      document.body.appendChild(composerHost);
+    }
+    return composerHost;
+  }
+
+  function composerFocusables(composer) {
+    return Array.prototype.slice
+      .call(composer.querySelectorAll('textarea, button'))
+      .filter(function (el) {
+        return !el.disabled;
+      });
+  }
+
+  // The origin element may have been replaced by a map refresh while the
+  // composer was open; focus goes back to whatever now stands for the building.
+  function composerOrigin(state) {
+    if (state.origin && state.origin.isConnected !== false) return state.origin;
+    var container = activityContainer();
+    if (container && isSafeSelectorValue(state.workspaceId)) {
+      var fresh =
+        container.querySelector('.ws-map-tile[data-ws-id="' + state.workspaceId + '"]') ||
+        container.querySelector('.ws-map-district-tag[data-ws-id="' + state.workspaceId + '"]');
+      if (fresh) return fresh;
+    }
+    return state.origin;
+  }
+
+  function closeTaskComposer(options) {
+    var state = composerState;
+    if (!state) return;
+    composerState = null;
+    state.teardown.forEach(function (off) {
+      off();
+    });
+    if (state.host) state.host.innerHTML = '';
+    var restore = !(options && options.restoreFocus === false);
+    var origin = restore ? composerOrigin(state) : null;
+    if (origin && typeof origin.focus === 'function') origin.focus();
+  }
+
+  function renderTaskComposer() {
+    // Callers read what was typed into state.draft before re-rendering; the
+    // markup is rebuilt from state alone.
+    var state = composerState;
+    if (!state) return;
+    state.teardown.forEach(function (off) {
+      off();
+    });
+    state.teardown = [];
+    state.host.innerHTML = composerHTML(state);
+    var composer = state.host.querySelector('[data-ws-map-composer]');
+    if (!composer) return;
+    placeMenu(composer, state.at);
+
+    function on(target, type, handler) {
+      if (!target || typeof target.addEventListener !== 'function') return;
+      target.addEventListener(type, handler);
+      state.teardown.push(function () {
+        if (typeof target.removeEventListener === 'function') {
+          target.removeEventListener(type, handler);
+        }
+      });
+    }
+    on(composer, 'keydown', function (event) {
+      if (!event) return;
+      if (event.key === 'Escape') {
+        if (event.preventDefault) event.preventDefault();
+        closeTaskComposer();
+        return;
+      }
+      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+        if (event.preventDefault) event.preventDefault();
+        void submitTaskComposer(true);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      // Focus stays inside the composer until it is closed (FR49).
+      var items = composerFocusables(composer);
+      if (!items.length) return;
+      var first = items[0];
+      var last = items[items.length - 1];
+      var active = typeof document !== 'undefined' ? document.activeElement : null;
+      if (event.shiftKey && active === first) {
+        if (event.preventDefault) event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        if (event.preventDefault) event.preventDefault();
+        first.focus();
+      }
+    });
+    on(composer.querySelector('[data-composer-start]'), 'click', function () {
+      void submitTaskComposer(true);
+    });
+    on(composer.querySelector('[data-composer-create]'), 'click', function () {
+      void submitTaskComposer(false);
+    });
+    on(composer.querySelector('[data-composer-cancel]'), 'click', function () {
+      closeTaskComposer();
+    });
+    var focusTarget = state.sending
+      ? composer.querySelector('[data-composer-cancel]')
+      : composer.querySelector('[data-composer-input]');
+    if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus();
+  }
+
+  /**
+   * A small composer anchored to the building: one text area, Create & Start,
+   * Create, and Cancel (FR49). It lives outside the map's markup, so a map
+   * refresh never throws away what the user is typing.
+   */
+  function openTaskComposer(container, context) {
+    var ws = context.ws || findWs(activityWorkspaces(), context.id);
+    var host = ensureComposerHost();
+    if (!ws || !host) return false;
+    closeTaskComposer({ restoreFocus: false });
+    var origin = context.element || null;
+    composerState = {
+      host: host,
+      workspaceId: ws.id,
+      name: ws.name || 'this workspace',
+      commander: String(ws.entry_agent_name || '').trim() || 'the Commander',
+      origin: origin,
+      at: anchorForElement(origin),
+      draft: '',
+      error: '',
+      sending: false,
+      teardown: []
+    };
+    renderTaskComposer();
+    announce(container, 'Give ' + composerState.name + ' a task');
+    return true;
+  }
+
+  function taskToast(kind, message, options) {
+    var toast = window.Toast;
+    if (toast && typeof toast[kind] === 'function') toast[kind](message, options || {});
+  }
+
+  function watchTaskStart(workspaceId, name, task) {
+    var taskId = String((task && task.id) || '');
+    if (!taskId) return;
+    if (taskStartWatches[taskId]) clearTimeout(taskStartWatches[taskId]);
+    taskStartWatches[taskId] = setTimeout(function () {
+      delete taskStartWatches[taskId];
+      taskToast('info', 'Task created. It has not started yet.', {
+        title: name,
+        // Long enough to reach the link; the default is gone in five seconds.
+        duration: 10000,
+        action: {
+          label: 'Open task',
+          onClick: function () {
+            openWorkspace(workspaceId, { taskId: taskId });
+          }
+        }
+      });
+    }, TASK_START_GRACE_MS);
+  }
+
+  function clearTaskStartWatch(taskId) {
+    var id = String(taskId || '');
+    if (!id || !taskStartWatches[id]) return;
+    clearTimeout(taskStartWatches[id]);
+    delete taskStartWatches[id];
+  }
+
+  function clearAllTaskStartWatches() {
+    Object.keys(taskStartWatches).forEach(clearTaskStartWatch);
+  }
+
+  async function submitTaskComposer(start) {
+    var state = composerState;
+    if (!state || state.sending) return;
+    var input = state.host.querySelector('[data-composer-input]');
+    if (input && typeof input.value === 'string') state.draft = input.value;
+    var description = String(state.draft || '').trim();
+    if (!description) {
+      state.error = 'Describe the task first.';
+      renderTaskComposer();
+      return;
+    }
+    var quick = window.OriQuickTask;
+    if (!quick || typeof quick.createTask !== 'function') {
+      state.error = 'Tasks cannot be created from here right now. Open the workspace instead.';
+      renderTaskComposer();
+      return;
+    }
+    state.sending = true;
+    state.error = '';
+    renderTaskComposer();
+
+    var task = null;
+    try {
+      task = await quick.createTask(state.workspaceId, description);
+    } catch (error) {
+      if (composerState !== state) return;
+      state.sending = false;
+      state.error = (error && error.message) || 'Could not create the task.';
+      renderTaskComposer();
+      return;
+    }
+
+    var container = activityContainer();
+    if (start) {
+      // Watch before starting: a started event can arrive before the start
+      // request itself returns.
+      watchTaskStart(state.workspaceId, state.name, task);
+      try {
+        await quick.startTask(task.id);
+      } catch (error) {
+        clearTaskStartWatch(task.id);
+        if (composerState !== state) return;
+        // The task exists; only the start failed. Say exactly that, keep the
+        // composer, and do not offer to create it a second time.
+        state.sending = false;
+        state.draft = '';
+        state.error =
+          'The task was created but did not start: ' +
+          ((error && error.message) || 'the server refused it.');
+        renderTaskComposer();
+        return;
+      }
+    }
+    if (composerState === state) closeTaskComposer();
+    // The building lights only when its real started event arrives (FR52).
+    announce(
+      container,
+      start
+        ? 'Task created in ' + state.name + '. It will light up when it starts.'
+        : 'Task created in ' + state.name + '.'
+    );
+    if (!start) {
+      taskToast('success', 'Task created for ' + state.commander, { title: state.name });
+    }
+  }
+
   /** Open one parcel into the result card (FR44, FR47). */
   function openParcelCard(container, parcel, origin) {
     var cards = window.OriResultCard;
@@ -6020,10 +6342,15 @@
       state.taskId
     ].join('|');
     if (bubble && bubble.getAttribute('data-activity-bubble') === signature) return;
+    // A map refresh rebuilt the overlay around a line the user is already
+    // reading; it comes back still rather than popping in again.
+    var settled = !bubble && state.paintedSignature === signature;
+    state.paintedSignature = signature;
     var fresh = activitySpan(
       'ws-map-activity-bubble cozy-frame' +
         (state.blocked ? ' is-blocked' : '') +
-        (state.finishing ? ' is-finishing' : '')
+        (state.finishing ? ' is-finishing' : '') +
+        (settled ? ' is-settled' : '')
     );
     fresh.setAttribute('data-activity-bubble', signature);
     if (state.blocked && state.taskId && state.workspaceId) {
@@ -9938,6 +10265,37 @@
    * @param {HTMLElement} container - the #launcherMap element.
    * @param {object} [state] - { workspaces: [...enriched summaries], selectedId }.
    */
+  // Home rebuilds the map on every task event of the selected workspace, which
+  // during a run is every few seconds. A building that was already on screen
+  // must not rise in again each time — only one that just appeared does.
+  function buildingKey(el) {
+    if (!el || typeof el.getAttribute !== 'function') return '';
+    if (el.hasAttribute && el.hasAttribute('data-hq-site')) return 'hq';
+    var unit = el.getAttribute('data-unit-id');
+    if (unit) return 'unit:' + unit;
+    var ws = el.getAttribute('data-ws-id');
+    return ws ? 'ws:' + ws : '';
+  }
+
+  var BUILDING_SELECTOR = '.ws-map-tile, .ws-map-unit';
+
+  function renderedBuildingKeys(container) {
+    var keys = Object.create(null);
+    if (!container || typeof container.querySelectorAll !== 'function') return keys;
+    Array.prototype.forEach.call(container.querySelectorAll(BUILDING_SELECTOR), function (el) {
+      var key = buildingKey(el);
+      if (key) keys[key] = true;
+    });
+    return keys;
+  }
+
+  function settleRenderedBuildings(container, onScreen) {
+    if (!container || typeof container.querySelectorAll !== 'function') return;
+    Array.prototype.forEach.call(container.querySelectorAll(BUILDING_SELECTOR), function (el) {
+      if (onScreen[buildingKey(el)] && el.classList) el.classList.add('is-settled');
+    });
+  }
+
   function mount(container, state) {
     if (!container) return;
     // Start the layout load before anything is drawn so the first settled paint
@@ -10029,6 +10387,7 @@
     closeHarvestPopover({ restoreFocus: false });
     settleDropConfirm('decline', { restoreFocus: false, skipRedraw: true });
     cancelPointerTranslations(container);
+    var onScreen = renderedBuildingKeys(container);
     lastMount = { container: container, state: state };
 
     container.innerHTML = shellHTML(
@@ -10038,6 +10397,7 @@
       viewport,
       state
     );
+    settleRenderedBuildings(container, onScreen);
     bindCreate(container);
     bindCockpitEmptyActions(container);
     bindTiles(container, workspaces, state);
@@ -10122,6 +10482,10 @@
     // Releasing the last subscriber closes the page's activity stream.
     disconnectActivityFeed();
     closeParcelCard();
+    closeTaskComposer({ restoreFocus: false });
+    // Without the stream the map can no longer see a task start, so a watch
+    // left running would warn about tasks that are in fact working.
+    clearAllTaskStartWatches();
     container.innerHTML = '';
     // Clearing lastMount is what makes a layout response still in flight a
     // no-op when it lands: settleLayout has nothing to repaint.
@@ -10257,7 +10621,8 @@
         dwellMs: ACTIVITY_DWELL_MS,
         finishMs: ACTIVITY_FINISH_MS,
         bubbleMinZoom: ACTIVITY_BUBBLE_MIN_ZOOM,
-        announceGapMs: ACTIVITY_ANNOUNCE_GAP_MS
+        announceGapMs: ACTIVITY_ANNOUNCE_GAP_MS,
+        taskStartGraceMs: TASK_START_GRACE_MS
       }
     },
     // Test-only seam: the activity layer's clock, so dwell and the
@@ -10324,9 +10689,11 @@
         if (!fresh) return;
         // Keep the element — its listeners, focus, pointer capture, and any move
         // preview — and take the fresh one's content and state.
-        var transient = ['is-dragging', 'is-blocked', 'is-unsaved'].filter(function (name) {
-          return el.classList.contains(name);
-        });
+        var transient = ['is-dragging', 'is-blocked', 'is-unsaved', 'is-settled'].filter(
+          function (name) {
+            return el.classList.contains(name);
+          }
+        );
         el.className = fresh.className;
         transient.forEach(function (name) {
           el.classList.add(name);

@@ -23,6 +23,7 @@ import { WorkspaceMembersPanel } from './workspace-detail-members.js';
 import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
 import { bankHarvest, taskResultDeepLink, taskScheduleDeepLink } from './economy-harvest.js';
 import { openParcelByRef } from './parcel-open.js';
+import { taskCreateBody } from './quick-task.js';
 
 /**
  * Format a date for display
@@ -16488,29 +16489,14 @@ export class WorkspaceDetailPage {
       const response = await fetch('/api/orchestration/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workspace_id: this.workspaceId,
-          description: normalizedName, // Task API uses description as the main field
-          details: normalizedDescription,
-          status: 'pending',
-          to: String(options.assignee || '').trim() || undefined,
-          assigned_node_id: String(options.assignedNodeId || '').trim() || undefined,
-          input_task_ids: Array.isArray(options.inputTaskIDs)
-            ? options.inputTaskIDs.filter(Boolean)
-            : undefined,
-          parent_task_id: String(options.parentTaskID || '').trim() || undefined,
-          subtask_index: Number.isFinite(Number(options.subtaskIndex))
-            ? Number(options.subtaskIndex)
-            : undefined,
-          // Runtime capabilities this task needs in order to do its work.
-          // The executing agent is granted matching runtime tools only when
-          // the task declares them (workspace.RuntimeTaskToolFactory), so a
-          // task created without this runs with no runtime access at all.
-          required_capabilities:
-            Array.isArray(options.requiredCapabilities) && options.requiredCapabilities.length
-              ? options.requiredCapabilities
-              : undefined
-        })
+        // The same request the Home map's "Give a task…" composer sends
+        // (quick-task.js), so the two can never drift apart (task-run-show FR50).
+        body: JSON.stringify(
+          taskCreateBody(this.workspaceId, normalizedName, {
+            ...options,
+            details: normalizedDescription
+          })
+        )
       });
 
       if (!response.ok) throw new Error('Failed to create task');

@@ -3164,6 +3164,15 @@
   bottom: calc(100% - 6px);
 }
 
+/* A refresh rebuilds buildings and bubbles the user is already looking at.
+   They stay still instead of rising or popping in again every few seconds
+   while a run keeps refreshing Home (workspace-map.js marks them). */
+.ws-map-tile.is-settled,
+.ws-map-unit.is-settled,
+.ws-map-activity-bubble.is-settled {
+  animation: none;
+}
+
 .ws-map-activity-bubble::after {
   content: "";
   position: absolute;
@@ -3513,4 +3522,88 @@
   .ori-result-card__bar-fill {
     transition: none;
   }
+}
+
+/* ---------- give a task from the map (task-run-show §4.8) ---------- */
+
+/* Why a disabled menu item is disabled, on the item itself. */
+.ws-map-menu-hint {
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+/* The composer is placed at the building by workspace-map.js, the same way a
+   context menu is. It sits below Bootstrap modals and the Ori guide. */
+.ws-map-composer {
+  position: fixed;
+  z-index: 1035;
+  display: grid;
+  gap: 8px;
+  width: min(340px, calc(100vw - 32px));
+  padding: 12px 14px;
+  box-sizing: border-box;
+  color: var(--cozy-ink);
+  font-size: 13px;
+}
+
+.ws-map-composer__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.ws-map-composer__label {
+  color: var(--cozy-ink-dim);
+  font-size: 12px;
+}
+
+.ws-map-composer__input {
+  width: 100%;
+  min-height: 72px;
+  padding: 6px 8px;
+  box-sizing: border-box;
+  border: var(--cozy-border) solid var(--cozy-line-strong);
+  border-radius: var(--cozy-radius);
+  background: var(--cozy-paper);
+  color: var(--cozy-ink);
+  font: inherit;
+  resize: vertical;
+}
+
+.ws-map-composer__error {
+  margin: 0;
+  color: var(--cozy-clay);
+  font-size: 12px;
+}
+
+.ws-map-composer__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.ws-map-composer__btn {
+  padding: 5px 12px;
+  border: var(--cozy-border) solid var(--cozy-line-strong);
+  border-radius: var(--cozy-radius);
+  background: transparent;
+  color: var(--cozy-ink);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ws-map-composer__btn.is-primary {
+  border-color: var(--cozy-moss);
+  background: var(--cozy-moss);
+  color: var(--cozy-paper-raised);
+}
+
+.ws-map-composer__btn:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
