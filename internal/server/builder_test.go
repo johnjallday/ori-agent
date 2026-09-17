@@ -132,6 +132,12 @@ func TestServerBuilder_Build_Integration(t *testing.T) {
 	if server.Handlers.Session == nil || !server.Handlers.Session.PersonalHQDesignatorWired() {
 		t.Error("Personal HQ designator not wired onto the session handler")
 	}
+	// Attaching an existing project from the create modal resolves a token the
+	// native folder picker issued. A separate store would reject every token.
+	if builder.pathSelectionStore == nil || server.Handlers.Session == nil ||
+		server.Handlers.Session.TrustedPathSelectionResolver() != builder.pathSelectionStore {
+		t.Error("session handler does not share the folder picker's selection store")
+	}
 	// The shared Setup Wizard is wired in the same phase and for the same
 	// reason: its state lives in the workspace's canonical folder record. An
 	// unwired wizard makes every blueprint's setup unreachable.

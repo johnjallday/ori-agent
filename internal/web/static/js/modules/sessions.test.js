@@ -2842,7 +2842,8 @@ test('blueprintDetailsProfile derives plain flags from what a blueprint declares
     bringsOwnSetup: false,
     hasAssistantProgram: false,
     entryNamedAfterWorkspace: false,
-    projectEntryPath: ''
+    projectEntryPath: '',
+    supportsExistingProject: false
   };
   assert.deepEqual(profile(null), blank);
   assert.deepEqual(profile({ blank: true, name: 'Blank' }), blank);
@@ -2852,7 +2853,8 @@ test('blueprintDetailsProfile derives plain flags from what a blueprint declares
     bringsOwnSetup: true,
     hasAssistantProgram: true,
     entryNamedAfterWorkspace: true,
-    projectEntryPath: '{{name}}.proj'
+    projectEntryPath: '{{name}}.proj',
+    supportsExistingProject: false
   });
   assert.equal(profile({ id: 'wizard', setup_wizard: { id: 'w' } }).bringsOwnSetup, true);
   assert.equal(profile({ id: 'quest', setup_quest: { id: 'q' } }).bringsOwnSetup, true);
@@ -2861,7 +2863,8 @@ test('blueprintDetailsProfile derives plain flags from what a blueprint declares
     bringsOwnSetup: false,
     hasAssistantProgram: false,
     entryNamedAfterWorkspace: false,
-    projectEntryPath: 'outline.md'
+    projectEntryPath: 'outline.md',
+    supportsExistingProject: false
   });
   assert.equal(
     profile({ id: 'dated', project_entry: { relative_path: 'notes-{{date}}.md' } })
@@ -2874,7 +2877,8 @@ async function runDetailsCreate({
   name = 'Night Drive',
   description = '',
   systems = '',
-  context = ''
+  context = '',
+  configure = null
 }) {
   const requests = [];
   const elements = new Map([
@@ -2932,6 +2936,7 @@ async function runDetailsCreate({
   manager.clearWorkspaceCreateError = () => {};
   manager.showToast = () => {};
   manager.resetAddWorkspaceModalForm = () => {};
+  configure?.(manager);
   await manager.createFolder();
   const create = requests.find(request => request.url === '/api/workspaces');
   return create?.body || null;
@@ -3164,6 +3169,636 @@ test('an empty description is never sent as a goal (FR 16)', async () => {
 
   const described = await runDetailsCreate({ description: 'A second album' });
   assert.equal(described.workspace_bootstrap.goal, 'A second album');
+});
+
+// ---------------------------------------------------------------------------
+// Attach an existing project (Create Workspace Slice B, FR 20–21).
+// ---------------------------------------------------------------------------
+
+const existingProjectTemplate = {
+  id: 'plugin:owner-plugin:song',
+  name: 'Song',
+  description: 'A blueprint that can start or attach a project.',
+  plugin_owner: { plugin_id: 'owner-plugin', blueprint_id: 'song' },
+  project_entry: { relative_path: '{{name}}.proj' },
+  project_connection: {
+    schema_version: 1,
+    supported_modes: ['existing_project', 'new_project'],
+    attach_existing: { entry_extensions: ['.proj'] }
+  }
+};
+
+// A review answer for a folder with the given project files.
+const folderReview = (candidates, extra = {}) => ({
+  status: 200,
+  body: {
+    selected_folder: '/Users/me/Music/Night Drive',
+    entry_name: candidates.length === 1 ? candidates[0] : '',
+    entry_candidates: candidates,
+    entry_extensions: ['.proj'],
+    duplicate: null,
+    ...extra
+  }
+});
+
+function existingProjectManager({
+  pickerResults = [],
+  reviewResults = [],
+  windowOverrides = {}
+} = {}) {
+  const input = value => ({
+    value,
+    dataset: {},
+    classList: { contains: () => false, add() {}, remove() {} },
+    focus() {}
+  });
+  const focused = [];
+  const focusable = extra => ({ ...extra, focus: () => focused.push(extra.id) });
+  const elements = {
+    folderNameInput: input(''),
+    folderDescriptionInput: input(''),
+    folderDescriptionHelp: { textContent: '' },
+    workspaceNameHint: {
+      textContent: '',
+      hidden: true,
+      classList: { contains: () => false, add() {}, remove() {} }
+    },
+    workspaceProjectChoice: { hidden: true },
+    workspaceProjectModeNew: { checked: true },
+    workspaceProjectModeExisting: { checked: false },
+    workspaceExistingProjectFields: { hidden: true },
+    workspaceExistingProjectFolder: { textContent: '' },
+    workspaceExistingProjectError: { textContent: '', hidden: true },
+    workspaceExistingProjectChooseBtn: focusable({
+      id: 'workspaceExistingProjectChooseBtn',
+      disabled: false
+    }),
+    workspaceExistingProjectStatus: { textContent: '', hidden: true },
+    workspaceExistingProjectEntryField: { hidden: true },
+    workspaceExistingProjectEntrySelect: focusable({
+      id: 'workspaceExistingProjectEntrySelect',
+      value: '',
+      dataset: {},
+      options: [],
+      replaceChildren(...children) {
+        this.options = children;
+      }
+    }),
+    workspaceExistingProjectDuplicate: { hidden: true },
+    workspaceExistingProjectDuplicateText: { textContent: '' },
+    workspaceExistingProjectOpenExisting: focusable({ id: 'workspaceExistingProjectOpenExisting' }),
+    workspaceDetailsLiveRegion: { textContent: '' },
+    addFolderModal: { dataset: {} }
+  };
+  const pickerCalls = [];
+  const reviewCalls = [];
+  const pendingPicks = [...pickerResults];
+  const pendingReviews = [...reviewResults];
+  const fetchImpl = async (url, options) => {
+    const body = options?.body ? JSON.parse(options.body) : null;
+    if (url === '/api/workspaces/project-connection/review') {
+      reviewCalls.push(body);
+      const next = pendingReviews.shift();
+      const result = (typeof next === 'function' ? await next() : next) || folderReview([]);
+      return { ok: result.status < 400, status: result.status, json: async () => result.body };
+    }
+    pickerCalls.push({ url, body });
+    const next = pendingPicks.shift();
+    const result = typeof next === 'function' ? await next() : next;
+    return { ok: true, json: async () => result };
+  };
+  const manager = loadSessionManager(
+    fetchImpl,
+    { ...creatorWindowHelpers(), location: { href: '' }, ...windowOverrides },
+    {
+      getElementById: id => elements[id] || null,
+      querySelectorAll: () => [],
+      createElement: () => ({ value: '', textContent: '' })
+    }
+  );
+  manager.closeWorkspaceAgentSetup = () => {};
+  manager.applyTemplateBehavior = () => {};
+  manager.updateWizardRecap = () => {};
+  manager.refreshTemplateAgentPlan = async () => {};
+  manager.refreshWorkspaceReview = () => {};
+  manager.beginWorkspaceCreatorContext({ entryPoint: 'workspace_hub_create' });
+  return { manager, elements, pickerCalls, reviewCalls, focused };
+}
+
+test('blueprintDetailsProfile reads existing-project support from the declaration', () => {
+  const manager = loadSessionManager();
+  const supports = template => manager.blueprintDetailsProfile(template).supportsExistingProject;
+  assert.equal(supports(existingProjectTemplate), true);
+  assert.equal(
+    supports({
+      ...existingProjectTemplate,
+      project_connection: { supported_modes: ['new_project'] }
+    }),
+    false
+  );
+  assert.equal(supports({ id: 'research-project' }), false);
+  assert.equal(
+    supports({ blank: true, project_connection: { supported_modes: ['existing_project'] } }),
+    false
+  );
+  assert.equal(supports(null), false);
+});
+
+test('Details offers a Project choice only for a blueprint that declares existing projects (FR 20)', () => {
+  const { manager, elements } = existingProjectManager();
+  const choice = elements.workspaceProjectChoice;
+
+  manager.handleWorkspaceTemplateSelected(catalogTemplate);
+  assert.equal(choice.hidden, true, 'a blueprint without the declaration');
+
+  manager.handleWorkspaceTemplateSelected(existingProjectTemplate);
+  assert.equal(choice.hidden, false);
+  assert.equal(
+    elements.workspaceProjectModeNew.checked,
+    true,
+    'Start a new project is the default'
+  );
+  assert.equal(elements.workspaceProjectModeExisting.checked, false);
+  assert.equal(elements.workspaceExistingProjectFields.hidden, true);
+
+  manager.handleWorkspaceTemplateSelected(null);
+  assert.equal(choice.hidden, true, 'Blank');
+
+  // The guided journey mounts its own project step; the modal's stays out.
+  const guided = existingProjectManager({
+    windowOverrides: { SetupWorkspaceCreator: { isActive: () => true } }
+  });
+  guided.manager.handleWorkspaceTemplateSelected(existingProjectTemplate);
+  assert.equal(guided.elements.workspaceProjectChoice.hidden, true, 'guided setup');
+});
+
+test('an existing project keeps only the picker token and its display path (FR 21)', async () => {
+  const { manager, elements, pickerCalls, reviewCalls } = existingProjectManager({
+    pickerResults: [
+      {
+        success: true,
+        selected: true,
+        path: '/Users/me/Music/Night Drive',
+        selection_token: 'picker-token-1'
+      }
+    ],
+    reviewResults: [folderReview(['Night Drive.proj'])]
+  });
+  manager.handleWorkspaceTemplateSelected(existingProjectTemplate);
+  elements.folderNameInput.value = 'Night Drive';
+
+  manager.setExistingProjectMode('existing_project');
+  assert.equal(elements.workspaceExistingProjectFields.hidden, false);
+  assert.equal(elements.workspaceProjectModeExisting.checked, true);
+  assert.equal(manager.existingProjectPayload(), null, 'nothing to send before a folder');
+  manager.updateWorkspaceNameHint();
+  assert.equal(
+    elements.workspaceNameHint.textContent,
+    'Folder: night-drive',
+    'an existing project keeps its own file name, so it is not previewed'
+  );
+
+  await manager.chooseExistingProjectFolder();
+  assert.equal(pickerCalls[0].url, '/api/folder-picker/select-path');
+  assert.equal(elements.workspaceExistingProjectFolder.textContent, '/Users/me/Music/Night Drive');
+  // The review carries the token and the blueprint, never the displayed path.
+  assert.deepEqual(JSON.parse(JSON.stringify(reviewCalls)), [
+    { template_id: existingProjectTemplate.id, selection_token: 'picker-token-1' }
+  ]);
+  assert.equal(
+    elements.workspaceExistingProjectStatus.textContent,
+    'Project file: Night Drive.proj'
+  );
+  const payload = manager.existingProjectPayload();
+  assert.deepEqual(JSON.parse(JSON.stringify(payload)), {
+    mode_id: 'existing_project',
+    selection_token: 'picker-token-1',
+    entry_name: 'Night Drive.proj'
+  });
+  assert.doesNotMatch(JSON.stringify(payload), /Music/, 'the path is never request authority');
+
+  // Back to a new project: the name hint previews the scaffolded file again.
+  manager.setExistingProjectMode('new_project');
+  manager.updateWorkspaceNameHint();
+  assert.equal(
+    elements.workspaceNameHint.textContent,
+    'Folder: night-drive · Project file: night-drive.proj'
+  );
+  assert.equal(manager.existingProjectPayload(), null);
+});
+
+test('a blueprint change resets the Project choice; a readiness recheck keeps it', async () => {
+  const { manager, elements } = existingProjectManager({
+    pickerResults: [{ success: true, selected: true, path: '/p/One', selection_token: 'token-one' }]
+  });
+  manager.handleWorkspaceTemplateSelected(existingProjectTemplate);
+  manager.setExistingProjectMode('existing_project');
+  await manager.chooseExistingProjectFolder();
+
+  manager.handleWorkspaceTemplateSelected({ ...existingProjectTemplate });
+  assert.equal(manager.existingProjectPayload()?.selection_token, 'token-one', 'same blueprint');
+
+  manager.handleWorkspaceTemplateSelected(catalogTemplate);
+  manager.handleWorkspaceTemplateSelected(existingProjectTemplate);
+  assert.equal(elements.workspaceProjectModeNew.checked, true);
+  assert.equal(elements.workspaceExistingProjectFields.hidden, true);
+  manager.setExistingProjectMode('existing_project');
+  assert.equal(manager.existingProjectPayload(), null, 'the earlier token is gone');
+  assert.equal(elements.workspaceExistingProjectFolder.textContent, '');
+});
+
+test('a folder picked for an earlier blueprint never fills in the current one', async () => {
+  let resolvePicker;
+  const { manager, elements } = existingProjectManager({
+    pickerResults: [
+      () =>
+        new Promise(resolve => {
+          resolvePicker = resolve;
+        })
+    ]
+  });
+  manager.handleWorkspaceTemplateSelected(existingProjectTemplate);
+  manager.setExistingProjectMode('existing_project');
+  const picking = manager.chooseExistingProjectFolder();
+  await new Promise(resolve => setImmediate(resolve));
+
+  manager.handleWorkspaceTemplateSelected(catalogTemplate);
+  manager.handleWorkspaceTemplateSelected(existingProjectTemplate);
+  manager.setExistingProjectMode('existing_project');
+  resolvePicker({ success: true, selected: true, path: '/p/Stale', selection_token: 'stale' });
+  await picking;
+
+  assert.equal(manager.existingProjectPayload(), null);
+  assert.equal(elements.workspaceExistingProjectFolder.textContent, '');
+});
+
+test('Details cannot be left in existing mode until a folder is chosen', () => {
+  const { manager, elements } = existingProjectManager();
+  manager.handleWorkspaceTemplateSelected(existingProjectTemplate);
+  elements.folderNameInput.value = 'Night Drive';
+  manager.wizardStep = 2;
+  manager.setExistingProjectMode('existing_project');
+
+  manager.goToWizardStep(3);
+  assert.equal(manager.wizardStep, 2);
+  assert.equal(elements.workspaceExistingProjectError.hidden, false);
+  assert.equal(
+    elements.workspaceExistingProjectError.textContent,
+    'Choose the project folder to use an existing project.'
+  );
+
+  // A new project has nothing to choose.
+  manager.setExistingProjectMode('new_project');
+  assert.equal(elements.workspaceExistingProjectError.hidden, true);
+  assert.equal(manager.existingProjectProblem(), '');
+});
+
+test('the create request carries project_connection only for an existing project', async () => {
+  const attach = manager => {
+    manager.workspaceTemplate = existingProjectTemplate;
+    manager.existingProjectChoice = {
+      mode: 'existing_project',
+      selectionToken: 'picker-token-1',
+      folderDisplay: '/Users/me/Music/Night Drive',
+      entryName: 'Night Drive.proj',
+      review: { state: 'ready', entryName: 'Night Drive.proj', candidates: ['Night Drive.proj'] },
+      generation: 1
+    };
+  };
+  const existing = await runDetailsCreate({ configure: attach });
+  assert.deepEqual(JSON.parse(JSON.stringify(existing.project_connection)), {
+    mode_id: 'existing_project',
+    selection_token: 'picker-token-1',
+    entry_name: 'Night Drive.proj'
+  });
+  assert.equal('project_name' in existing, false);
+  assert.doesNotMatch(JSON.stringify(existing), /Users\/me\/Music/);
+
+  const scaffold = await runDetailsCreate({
+    configure: manager => {
+      attach(manager);
+      manager.existingProjectChoice.mode = 'new_project';
+    }
+  });
+  assert.equal('project_connection' in scaffold, false);
+  assert.equal('project_name' in scaffold, false);
+
+  const noFolder = await runDetailsCreate({
+    configure: manager => {
+      attach(manager);
+      manager.existingProjectChoice.selectionToken = '';
+      manager.goToWizardStep = () => {};
+    }
+  });
+  assert.equal(noFolder, null, 'nothing is posted before a folder is chosen');
+
+  for (const state of ['checking', 'choose', 'error', 'duplicate']) {
+    const blocked = await runDetailsCreate({
+      configure: manager => {
+        attach(manager);
+        manager.existingProjectChoice.review = { state, message: 'Not yet.' };
+        manager.goToWizardStep = () => {};
+      }
+    });
+    assert.equal(blocked, null, `nothing is posted while the review is ${state}`);
+  }
+});
+
+test('several project files show a Project file choice that re-reviews the pick (FR 22)', async () => {
+  const { manager, elements, reviewCalls, focused } = existingProjectManager({
+    pickerResults: [
+      { success: true, selected: true, path: '/p/Two Takes', selection_token: 't-2' }
+    ],
+    reviewResults: [
+      folderReview(['Take One.proj', 'Take Two.proj']),
+      folderReview(['Take One.proj', 'Take Two.proj'], { entry_name: 'Take Two.proj' })
+    ]
+  });
+  manager.handleWorkspaceTemplateSelected(existingProjectTemplate);
+  elements.folderNameInput.value = 'Two Takes';
+  manager.wizardStep = 2;
+  manager.setExistingProjectMode('existing_project');
+  await manager.chooseExistingProjectFolder();
+
+  const select = elements.workspaceExistingProjectEntrySelect;
+  assert.equal(elements.workspaceExistingProjectEntryField.hidden, false);
+  assert.deepEqual(
+    select.options.map(option => option.value),
+    ['', 'Take One.proj', 'Take Two.proj']
+  );
+  assert.equal(select.value, '');
+  assert.match(elements.workspaceDetailsLiveRegion.textContent, /2 project files/);
+
+  // Continue is refused until one is chosen, and focus goes to the choice.
+  manager.goToWizardStep(3);
+  assert.equal(manager.wizardStep, 2);
+  assert.equal(
+    elements.workspaceExistingProjectError.textContent,
+    'Choose which project file to use.'
+  );
+  assert.equal(focused.at(-1), 'workspaceExistingProjectEntrySelect');
+
+  manager.setExistingProjectEntry('Take Two.proj');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(reviewCalls.at(-1).entry_name, 'Take Two.proj');
+  assert.equal(select.value, 'Take Two.proj');
+  assert.equal(manager.existingProjectProblem(), '');
+  assert.equal(manager.existingProjectPayload().entry_name, 'Take Two.proj');
+});
+
+test('a folder with no project file names the expected extension and cannot continue', async () => {
+  const { manager, elements } = existingProjectManager({
+    pickerResults: [{ success: true, selected: true, path: '/p/Empty', selection_token: 't-0' }],
+    reviewResults: [
+      {
+        status: 400,
+        body: { error: 'No project file ending in .proj was found in the chosen folder.' }
+      }
+    ]
+  });
+  manager.handleWorkspaceTemplateSelected(existingProjectTemplate);
+  elements.folderNameInput.value = 'Empty';
+  manager.wizardStep = 2;
+  manager.setExistingProjectMode('existing_project');
+  await manager.chooseExistingProjectFolder();
+
+  assert.equal(elements.workspaceExistingProjectError.hidden, false);
+  assert.match(elements.workspaceExistingProjectError.textContent, /ending in \.proj/);
+  manager.goToWizardStep(3);
+  assert.equal(manager.wizardStep, 2);
+  assert.equal(manager.existingProjectPayload().selection_token, 't-0');
+  assert.match(manager.existingProjectProblem(), /ending in \.proj/);
+});
+
+test('a folder another workspace owns is blocked with Open existing (FR 24)', async () => {
+  const hidden = [];
+  const location = { href: '' };
+  const { manager, elements, focused } = existingProjectManager({
+    pickerResults: [
+      { success: true, selected: true, path: '/p/Night Drive', selection_token: 't-d' }
+    ],
+    reviewResults: [
+      folderReview(['Night Drive.proj'], {
+        duplicate: { workspace_id: 'ws-night', name: 'Night Drive', slug: 'night-drive' },
+        duplicate_message:
+          '“Night Drive” already uses this folder. Open that workspace, or choose a different project folder.'
+      })
+    ],
+    windowOverrides: {
+      location,
+      bootstrap: { Modal: { getInstance: () => ({ hide: () => hidden.push(true) }) } }
+    }
+  });
+  manager.handleWorkspaceTemplateSelected(existingProjectTemplate);
+  elements.folderNameInput.value = 'Night Drive Again';
+  manager.wizardStep = 2;
+  manager.setExistingProjectMode('existing_project');
+  await manager.chooseExistingProjectFolder();
+
+  assert.equal(elements.workspaceExistingProjectDuplicate.hidden, false);
+  assert.match(
+    elements.workspaceExistingProjectDuplicateText.textContent,
+    /“Night Drive” already uses/
+  );
+  assert.match(elements.workspaceDetailsLiveRegion.textContent, /already uses this folder/);
+
+  manager.goToWizardStep(3);
+  assert.equal(manager.wizardStep, 2, 'there is no attach anyway');
+  assert.equal(focused.at(-1), 'workspaceExistingProjectOpenExisting');
+
+  let reset = 0;
+  manager.resetAddWorkspaceModalForm = () => {
+    reset += 1;
+  };
+  manager.openExistingProjectOwner();
+  assert.equal(hidden.length, 1, 'the creator closes');
+  assert.equal(reset, 1);
+  assert.equal(location.href, '/workspaces/night-drive', 'and the owning workspace opens');
+});
+
+test('an answer for an earlier folder is ignored', async () => {
+  let releaseFirst;
+  const { manager, elements } = existingProjectManager({
+    pickerResults: [
+      { success: true, selected: true, path: '/p/First', selection_token: 'first' },
+      { success: true, selected: true, path: '/p/Second', selection_token: 'second' }
+    ],
+    reviewResults: [
+      () =>
+        new Promise(resolve => {
+          releaseFirst = () =>
+            resolve(
+              folderReview(['First.proj'], {
+                duplicate: { workspace_id: 'ws-first', name: 'First' },
+                duplicate_message: 'First owns it.'
+              })
+            );
+        }),
+      folderReview(['Second.proj'])
+    ]
+  });
+  manager.handleWorkspaceTemplateSelected(existingProjectTemplate);
+  manager.setExistingProjectMode('existing_project');
+  const first = manager.chooseExistingProjectFolder();
+  await new Promise(resolve => setImmediate(resolve));
+  await manager.chooseExistingProjectFolder();
+  releaseFirst();
+  await first;
+
+  assert.equal(manager.existingProjectChoice.review.state, 'ready');
+  assert.equal(manager.existingProjectPayload().entry_name, 'Second.proj');
+  assert.equal(elements.workspaceExistingProjectDuplicate.hidden, true);
+});
+
+test('Review states the folder, project file, destination, and that files stay unchanged (FR 26)', () => {
+  const { manager } = existingProjectManager();
+  manager.handleWorkspaceTemplateSelected(existingProjectTemplate);
+  assert.equal(manager.renderExistingProjectReceipt(existingProjectTemplate), '', 'new project');
+
+  manager.existingProjectChoice = {
+    ...manager.existingProjectChoice,
+    mode: 'existing_project',
+    selectionToken: 'token',
+    folderDisplay: '/Users/me/Music/Night Drive',
+    entryName: 'Night Drive.proj',
+    review: { state: 'ready', entryName: 'Night Drive.proj', candidates: ['Night Drive.proj'] }
+  };
+  const grouped = {
+    ...existingProjectTemplate,
+    group_requirement: { policy: 'required', default_home_name: 'Studio Home' }
+  };
+  manager.workspaceTemplate = grouped;
+  manager.groupRequirementDraft = {
+    composition: 'grouped',
+    projection: { home: { exists: true, name: 'Studio Home' } }
+  };
+  const receipt = manager.renderExistingProjectReceipt(grouped);
+  assert.match(receipt, /Folder: \/Users\/me\/Music\/Night Drive/);
+  assert.match(receipt, /Project file: Night Drive\.proj/);
+  assert.match(receipt, /Destination: Studio Home/);
+  assert.match(receipt, /Ori will not move or change these files\./);
+
+  manager.groupRequirementDraft = { composition: 'standalone', projection: {} };
+  assert.match(
+    manager.renderExistingProjectReceipt(grouped),
+    /Destination: Standalone, not in a group/
+  );
+});
+
+test('the chosen project file names an unnamed workspace, never a typed one (FR 23)', async () => {
+  const pick = (token, folder) => ({
+    success: true,
+    selected: true,
+    path: `/p/${folder}`,
+    selection_token: token
+  });
+  const { manager, elements } = existingProjectManager({
+    pickerResults: [
+      pick('one', 'Bridge Sketch'),
+      pick('two', 'Night Drive'),
+      pick('three', 'Other')
+    ],
+    reviewResults: [
+      folderReview(['Bridge Sketch.proj']),
+      folderReview(['Night Drive.v2.proj']),
+      folderReview(['Other.proj'])
+    ]
+  });
+  const name = elements.folderNameInput;
+  manager.handleWorkspaceTemplateSelected(existingProjectTemplate);
+  assert.equal(name.value, '', 'a project file named after the workspace leaves the name empty');
+  manager.setExistingProjectMode('existing_project');
+
+  await manager.chooseExistingProjectFolder();
+  assert.equal(name.value, 'Bridge Sketch');
+  assert.equal(elements.workspaceNameHint.textContent, 'Folder: bridge-sketch');
+
+  // Another folder replaces only that autofill, dropping just the extension.
+  await manager.chooseExistingProjectFolder();
+  assert.equal(name.value, 'Night Drive.v2');
+
+  name.value = 'My Own Name';
+  await manager.chooseExistingProjectFolder();
+  assert.equal(name.value, 'My Own Name', 'typed names are never replaced');
+});
+
+test('a readiness recheck keeps the name an existing project gave the workspace', async () => {
+  const { manager, elements } = existingProjectManager({
+    pickerResults: [
+      { success: true, selected: true, path: '/p/Bridge Sketch', selection_token: 'bridge' }
+    ],
+    reviewResults: [folderReview(['Bridge Sketch.proj'])]
+  });
+  const name = elements.folderNameInput;
+  manager.handleWorkspaceTemplateSelected(existingProjectTemplate);
+  manager.setExistingProjectMode('existing_project');
+  await manager.chooseExistingProjectFolder();
+  assert.equal(name.value, 'Bridge Sketch');
+
+  // The same blueprint emitted again (e.g. after a Team conflict) used to
+  // clear this autofill as if it were a blueprint-derived name.
+  manager.handleWorkspaceTemplateSelected({ ...existingProjectTemplate });
+  assert.equal(name.value, 'Bridge Sketch');
+
+  // A different blueprint starts over, so the project-file name goes too.
+  manager.handleWorkspaceTemplateSelected({ ...existingProjectTemplate, id: 'another-song' });
+  assert.equal(name.value, '');
+});
+
+test('Open project after creation starts off for an existing project (FR 29)', () => {
+  const { manager, elements } = existingProjectManager();
+  const toggle = { checked: true };
+  elements.projectTemplateOpenAfterCreateToggle = toggle;
+  const launching = {
+    ...existingProjectTemplate,
+    project_entry: { relative_path: '{{name}}.proj', open_after_create_default: true }
+  };
+  manager.handleWorkspaceTemplateSelected(launching);
+
+  manager.setExistingProjectMode('existing_project');
+  assert.equal(toggle.checked, false, 'existing project');
+  toggle.checked = true; // still the user's choice
+  assert.equal(manager.existingProjectChoice.mode, 'existing_project');
+
+  manager.setExistingProjectMode('new_project');
+  assert.equal(toggle.checked, true, 'a new project returns to the blueprint default');
+
+  manager.handleWorkspaceTemplateSelected({
+    ...existingProjectTemplate,
+    id: 'quiet-song',
+    project_entry: { relative_path: '{{name}}.proj', open_after_create_default: false }
+  });
+  toggle.checked = false;
+  manager.setExistingProjectMode('existing_project');
+  manager.setExistingProjectMode('new_project');
+  assert.equal(toggle.checked, false, 'a blueprint that does not open stays off');
+});
+
+test('a duplicate refused at create returns to Details with the same block', () => {
+  const { manager, elements } = existingProjectManager();
+  manager.handleWorkspaceTemplateSelected(existingProjectTemplate);
+  manager.existingProjectChoice = {
+    ...manager.existingProjectChoice,
+    mode: 'existing_project',
+    selectionToken: 'token',
+    folderDisplay: '/p/Night Drive',
+    entryName: 'Night Drive.proj',
+    review: { state: 'ready', entryName: 'Night Drive.proj', candidates: ['Night Drive.proj'] }
+  };
+  manager.wizardStep = 4;
+  manager.showExistingProjectRefusal({
+    error:
+      '“Night Drive” already uses this folder. Open that workspace, or choose a different project folder.',
+    conflict: { type: 'project_connection' },
+    duplicate: { workspace_id: 'ws-night', name: 'Night Drive', slug: 'night-drive' }
+  });
+  assert.equal(manager.wizardStep, 2);
+  assert.equal(elements.workspaceExistingProjectDuplicate.hidden, false);
+  assert.match(
+    elements.workspaceExistingProjectDuplicateText.textContent,
+    /already uses this folder/
+  );
+  assert.equal(manager.existingProjectChoice.review.duplicate.slug, 'night-drive');
 });
 
 test('the Grouped choice names the group the workspace would join (§6.2)', () => {

@@ -245,6 +245,7 @@
 /api/workspaces/import
 /api/workspaces/import/check
 /api/workspaces/import/duplicate-action
+/api/workspaces/project-connection/review
 /api/workspaces/rescan
 /api/workspaces/sync
 /api/workspaces/sync-status

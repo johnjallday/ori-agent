@@ -9,10 +9,11 @@
 # analyzer, so it prompts no matter how many rules exist. A script is one
 # stable token. Put the shell in here, not in the tool call.
 #
-# This worktree's feature: Blueprint-aware Create Workspace, Slice A
+# This worktree's feature: Blueprint-aware Create Workspace, Slices A and B
 # (tasks/prd-blueprint-aware-create-workspace.md): reaper-blueprint prepares a
 # fresh sandbox with the reviewed REAPER blueprint; blueprint-details prints
-# what a create stored.
+# what a create stored. Slice B (attach an existing project) adds
+# reaper-demo-folders, pick-folder, folder-checksum, and attach-details.
 # Earlier features' checks are kept, because the point of one stable name is
 # that it accumulates: Reviewed integration floor
 # (tasks/prd-reviewed-integration-latest-release.md): integration,
@@ -2270,6 +2271,139 @@ print(json.dumps({
 }, indent=2))'
 }
 
+# smoke_reaper_demo_folders writes the existing-project folders the Slice B
+# demos attach (create-workspace-attach-existing-project), under a demo sandbox
+# only. Each project file is a copy of the installed Reaper Song scaffold, or a
+# minimal stand-in when the plugin is not installed yet.
+#   music/Night Drive/Night Drive.rpp          one project file
+#   music/Two Takes/Take One.rpp, Take Two.rpp several project files
+#   music/No Project/notes.txt                 no project file
+#   music/Bridge Sketch/Bridge Sketch.rpp      name prefill
+#   music/Imported Song/Imported Song.rpp      adopt with Import Folder first
+smoke_reaper_demo_folders() {
+  local sandbox="${2:-}"
+  [[ -n "$sandbox" && -d "$sandbox" ]] || fail "usage: $0 reaper-demo-folders <demo-sandbox-dir>"
+  case "$sandbox" in
+  *ori-demo.* | *smoke-*) ;;
+  *) fail "refusing to write demo folders outside a demo sandbox (ori-demo.* or smoke-*): $sandbox" ;;
+  esac
+  local scaffold
+  scaffold=$(find "$sandbox/plugins" -path '*blueprints/reaper-song/project/*.rpp' 2>/dev/null | head -1 || true)
+  local music="$sandbox/music"
+  mkdir -p "$music/Night Drive" "$music/Two Takes" "$music/No Project" "$music/Bridge Sketch" "$music/Imported Song"
+  local target
+  for target in "Night Drive/Night Drive.rpp" "Two Takes/Take One.rpp" "Two Takes/Take Two.rpp" "Bridge Sketch/Bridge Sketch.rpp" "Imported Song/Imported Song.rpp"; do
+    [[ -e "$music/$target" ]] && continue
+    if [[ -n "$scaffold" ]]; then
+      cp "$scaffold" "$music/$target"
+    else
+      printf '<REAPER_PROJECT 0.1 "7.0"\n  TEMPO 120 4 4\n>\n' >"$music/$target"
+    fi
+  done
+  [[ -e "$music/No Project/notes.txt" ]] || printf 'mix notes\n' >"$music/No Project/notes.txt"
+  echo "ok   demo project folders under $music"
+  find "$music" -type f | sort
+}
+
+# smoke_pick_folder answers an open native folder dialog (macOS) with <path>:
+# it waits for the ori-folder-picker sheet, opens Go to Folder (Cmd-Shift-G),
+# types the path, and confirms twice. Browser automation cannot click a native
+# dialog, and the server must never gain a picker bypass, so demos drive the
+# real dialog. Click "Choose project folder" first, then run this.
+smoke_pick_folder() {
+  local target="${2:-}"
+  [[ -n "$target" && -d "$target" ]] || fail "usage: $0 pick-folder <existing-folder>"
+  local result
+  result=$(osascript - "$target" <<'APPLESCRIPT'
+on run argv
+  set target to item 1 of argv
+  tell application "System Events"
+    set found to false
+    repeat 60 times
+      try
+        if (count of sheets of window 1 of process "ori-folder-picker") > 0 then
+          set found to true
+          exit repeat
+        end if
+      end try
+      delay 0.5
+    end repeat
+    if not found then return "no-dialog"
+    set frontmost of process "ori-folder-picker" to true
+    delay 0.8
+    keystroke "g" using {command down, shift down}
+    delay 1.2
+    -- Go to Folder remembers the last path; replace it rather than append.
+    keystroke "a" using {command down}
+    delay 0.3
+    keystroke target
+    delay 0.8
+    key code 36
+    delay 1.5
+    key code 36
+    delay 1.5
+    try
+      if (count of sheets of window 1 of process "ori-folder-picker") > 0 then return "still-open"
+    end try
+    return "chosen"
+  end tell
+end run
+APPLESCRIPT
+  )
+  [[ "$result" == "chosen" ]] || fail "folder dialog was not answered ($result)"
+  echo "ok   chose $target in the native folder dialog"
+}
+
+# smoke_import_folder adopts <path> as a workspace through Import Folder, the
+# way the modal's Import mode does, and prints the new workspace id.
+smoke_import_folder() {
+  local target="${3:-}"
+  [[ -n "$target" && -d "$target" ]] || fail "usage: $0 import-folder <base-url> <folder>"
+  local body
+  body=$(python3 -c 'import json, sys; print(json.dumps({"path": sys.argv[1], "entry_point": "smoke"}))' "$target")
+  curl -s -X POST "$BASE_URL/api/workspaces/import" -H 'Content-Type: application/json' \
+    -H "Origin: $BASE_URL" -d "$body" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+f = d.get("folder") or {}
+if not f.get("id"):
+    sys.exit("FAIL: import refused: " + json.dumps(d))
+print("ok   imported", f.get("name"), f.get("id"))'
+}
+
+# smoke_folder_checksum prints one sha256 per file (sorted), so a before/after
+# diff shows any created, removed, renamed, or modified file.
+smoke_folder_checksum() {
+  local dir="${2:-}"
+  [[ -n "$dir" && -d "$dir" ]] || fail "usage: $0 folder-checksum <dir>"
+  (cd "$dir" && find . -type f -print0 | sort -z | xargs -0 shasum -a 256)
+}
+
+# smoke_attach_details prints what an existing-project create stored for one
+# workspace: its parent, typed project-entry locator, the directory reference
+# that locator names, and its starter tasks.
+smoke_attach_details() {
+  local ws="${3:-}"
+  [[ -n "$ws" ]] || fail "usage: $0 attach-details <base-url> <workspace-id>"
+  curl -s "$BASE_URL/api/workspaces/$ws" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+w = d.get("workspace", d)
+shared = w.get("shared_data") or {}
+locator = shared.get("project_entry") or {}
+refs = w.get("directory_references") or []
+named = [r for r in refs if r.get("id") == locator.get("directory_reference_id")]
+tasks = w.get("tasks") or []
+print(json.dumps({
+    "name": w.get("name"),
+    "parent_id": w.get("parent_id"),
+    "project_path": w.get("project_path"),
+    "project_entry": locator,
+    "attached_folder": named[0].get("path") if named else None,
+    "starter_tasks": [t.get("description") for t in tasks],
+}, indent=2))'
+}
+
 case "${1:-}" in
 serve) serve_isolated "${2:-8931}" "${3:-default}" ;;
 showseed) smoke_show_seed ;;
@@ -2279,8 +2413,13 @@ showstream) smoke_show_stream "$@" ;;
 showwait) smoke_show_wait ;;
 showjanitor) smoke_show_janitor "$@" ;;
 showdrop) smoke_show_drop "$@" ;;
+attach-details) smoke_attach_details "$@" ;;
 integration) smoke_integration "$@" ;;
 reaper-blueprint) smoke_reaper_blueprint ;;
+reaper-demo-folders) smoke_reaper_demo_folders "$@" ;;
+folder-checksum) smoke_folder_checksum "$@" ;;
+pick-folder) smoke_pick_folder "$@" ;;
+import-folder) smoke_import_folder "$@" ;;
 blueprint-details) smoke_blueprint_details "$@" ;;
 starter) smoke_starter "$@" ;;
 agent-type-api) smoke_agent_type_api ;;

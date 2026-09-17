@@ -1,6 +1,7 @@
 package sessionhttp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -72,6 +73,10 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 
 	var req createWorkspaceImportRequest
 	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	if trimmed := bytes.TrimSpace(req.ProjectConnection); len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null")) {
+		_ = orihttp.RespondBadRequest(w, "project_connection is not available for Import Folder; create from a blueprint to use an existing project")
 		return
 	}
 
