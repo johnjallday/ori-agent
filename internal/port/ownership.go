@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/csv"
 	"fmt"
 	"net"
 	"os/exec"
@@ -24,9 +25,8 @@ var oriProcessNames = map[string]struct{}{
 	"ori-menubar": {},
 }
 
-// ownerLookupTimeout bounds each external process lookup. On Windows these
-// start PowerShell, which can take tens of seconds on a cold machine; a lookup
-// that runs out of time is treated like one that found nothing.
+// ownerLookupTimeout bounds each external process lookup; a lookup that runs
+// out of time is treated like one that found nothing.
 var ownerLookupTimeout = 10 * time.Second
 
 func IsPortAvailable(port int) bool {
@@ -36,14 +36,6 @@ func IsPortAvailable(port int) bool {
 	}
 	_ = listener.Close()
 	return true
-}
-
-// BindProvesFree reports whether a successful IsPortAvailable bind proves that
-// no other process listens on the port, so the slower owner lookup can be
-// skipped. Windows refuses a wildcard bind beside another process's loopback
-// listener. macOS allows it, so a stale server there is only found by lookup.
-func BindProvesFree() bool {
-	return runtime.GOOS == "windows"
 }
 
 func lookupOutput(name string, args ...string) ([]byte, error) {
@@ -86,12 +78,11 @@ func ResolveProcessName(pid int) (string, error) {
 		return name, nil
 
 	case "windows":
-		psCmd := fmt.Sprintf(`(Get-Process -Id %d -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ProcessName)`, pid)
-		output, err := lookupOutput("powershell", "-NoProfile", "-Command", psCmd)
+		output, err := lookupOutput("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/FO", "CSV", "/NH")
 		if err != nil {
 			return "", err
 		}
-		name := strings.TrimSpace(string(output))
+		name := parseTasklistName(output)
 		if name == "" {
 			return "", fmt.Errorf("empty process name")
 		}
@@ -173,12 +164,16 @@ func findPortPIDs(port int) []int {
 		parsePIDs(output, pidSet)
 
 	case "windows":
-		psCmd := fmt.Sprintf(`Get-NetTCPConnection -LocalPort %d -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess`, port)
-		output, err := lookupOutput("powershell", "-NoProfile", "-Command", psCmd)
+		// netstat and tasklist are plain executables. PowerShell's
+		// Get-NetTCPConnection loads modules into the user profile first, which
+		// stalled installed startups past a 45s health deadline.
+		output, err := lookupOutput("netstat", "-ano")
 		if err != nil {
 			return nil
 		}
-		parsePIDs(output, pidSet)
+		for _, pid := range parseNetstatListeners(output, port) {
+			pidSet[pid] = struct{}{}
+		}
 	default:
 		return nil
 	}
@@ -198,6 +193,45 @@ func parsePIDs(output []byte, pidSet map[int]struct{}) {
 			pidSet[pid] = struct{}{}
 		}
 	}
+}
+
+// parseNetstatListeners returns the PIDs of TCP sockets listening on port in
+// `netstat -ano` output. The state column is localized and may span words, so
+// a listener is recognized by its unbound foreign address, and the PID is the
+// last field.
+func parseNetstatListeners(output []byte, port int) []int {
+	suffix := ":" + strconv.Itoa(port)
+	var pids []int
+	scanner := bufio.NewScanner(bytes.NewReader(output))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 4 || !strings.EqualFold(fields[0], "TCP") {
+			continue
+		}
+		if !strings.HasSuffix(fields[1], suffix) || (fields[2] != "0.0.0.0:0" && fields[2] != "[::]:0") {
+			continue
+		}
+		if pid, err := strconv.Atoi(fields[len(fields)-1]); err == nil && pid > 0 {
+			pids = append(pids, pid)
+		}
+	}
+	return pids
+}
+
+// parseTasklistName returns the image name from `tasklist /FO CSV /NH` output,
+// or "" when no process matched (tasklist then prints a localized notice).
+func parseTasklistName(output []byte) string {
+	for _, line := range strings.Split(string(output), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, `"`) {
+			continue
+		}
+		record, err := csv.NewReader(strings.NewReader(line)).Read()
+		if err == nil && len(record) > 0 {
+			return strings.TrimSpace(record[0])
+		}
+	}
+	return ""
 }
 
 func terminateProcess(pid int) error {
