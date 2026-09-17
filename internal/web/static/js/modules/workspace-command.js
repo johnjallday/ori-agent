@@ -32,6 +32,7 @@ import {
 } from './group-template-status.js';
 import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
 import { flattenWorkspaceTree, buildMapMetadata } from './workspace-map-snapshot.js';
+import { OperationsMapActivity } from './operations-map-activity.js';
 import {
   parseWorkspaceURLState,
   sanitizeWorkspaceURLState,
@@ -702,6 +703,58 @@ export class WorkspaceCommandView {
         detail: { mode }
       })
     );
+  }
+
+  // ---------- the task-run show on the Operations map (task-run-show §4.5) ----------
+
+  // A group's map is the scoped Workspace Map, which already shows its units
+  // working from the shared activity feed; this layer is for a workspace's own
+  // units.
+  mapActivityLayer() {
+    if (!this.mapActivity) {
+      this.mapActivity = new OperationsMapActivity({
+        root: () =>
+          this.active && this.viewMode === 'map' && this.container && !this.isGroupWorkspace()
+            ? this.container.querySelector('.ws-cmd-opmap')
+            : null,
+        workspaceId: () => this.workspaceId(),
+        workspaceName: () =>
+          String((this.page && this.page.workspace && this.page.workspace.name) || ''),
+        onOpenResult: payload => {
+          const parcel = payload && payload.parcel;
+          const page = this.page || {};
+          if (
+            parcel &&
+            parcel.kind === 'task' &&
+            parcel.ref_id &&
+            typeof page.showTaskResult === 'function'
+          ) {
+            page.showTaskResult(parcel.ref_id);
+          }
+        }
+      });
+      if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+        // Parcels are placed from measured unit positions.
+        window.addEventListener('resize', () => this.mapActivity.paint());
+      }
+    }
+    return this.mapActivity;
+  }
+
+  /** The page forwards every realtime event it receives (FR30: no second stream). */
+  handleActivityEvent(event) {
+    if (this.isGroupWorkspace()) return false;
+    return this.mapActivityLayer().handleRealtimeEvent(event);
+  }
+
+  paintMapActivity() {
+    if (this.isGroupWorkspace()) return;
+    const layer = this.mapActivityLayer();
+    layer.paint();
+    if (this.mapActivityLoadedFor !== this.workspaceId()) {
+      this.mapActivityLoadedFor = this.workspaceId();
+      void layer.loadParcels();
+    }
   }
 
   /** Re-render if active — called by the page after its data loads/refreshes. */
@@ -1825,6 +1878,7 @@ export class WorkspaceCommandView {
     this.bindMissionPanel();
     if (this.viewMode === 'map') {
       this.bindOperationsMap();
+      this.paintMapActivity();
     } else {
       // Leaving Map mode takes the map's listeners and timers with it (FR-6).
       this.unmountDetachmentMap();
@@ -9769,6 +9823,17 @@ export class WorkspaceCommandView {
           this.mapInventorySection = 'notes';
         }
         this.render();
+        return;
+      }
+      const parcelBtn = event.target.closest('[data-cmd-map-parcel]');
+      if (parcelBtn) {
+        void this.mapActivityLayer().openParcel(parcelBtn.getAttribute('data-cmd-map-parcel'));
+        return;
+      }
+      // Checked before the unit's own click: the bubble sits inside the unit.
+      const blockedBubble = event.target.closest('[data-cmd-activity-open-task]');
+      if (blockedBubble && page && typeof page.openTaskAssistModal === 'function') {
+        page.openTaskAssistModal(blockedBubble.getAttribute('data-cmd-activity-open-task'));
         return;
       }
       const selectBtn = event.target.closest('[data-cmd-map-select-agent]');

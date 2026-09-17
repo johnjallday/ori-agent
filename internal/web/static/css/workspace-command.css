@@ -7817,3 +7817,147 @@ button.ws-cmd-rpg-class-card:focus-visible {
   color: var(--ws-ink-dim);
   font-size: 13px;
 }
+
+/* ---------- the task-run show on the Operations map (task-run-show §4.5) ----------
+   operations-map-activity.js patches these onto the rendered map. Bubbles and
+   parcels sit in the map world rather than inside a unit card, because the card
+   clips everything inside it. Only transform and opacity animate (FR55). */
+
+/* A unit at work steps forward along its path (FR29). The same 10px the script
+   uses to place the bubble above it. */
+.ws-cmd-map-agent.is-activity-working,
+.ws-cmd-map-agent.is-activity-working.is-selected {
+  transform: translateY(-10px);
+}
+
+.ws-cmd-map-agent.is-activity-working .ws-cmd-map-agent-path {
+  opacity: 0.8;
+}
+
+.ws-cmd-map-activity-bubble {
+  position: absolute;
+  z-index: 4;
+  max-width: 220px;
+  overflow: hidden;
+  padding: 2px 10px;
+  border: var(--cozy-border) solid var(--cozy-line);
+  border-radius: var(--cozy-radius);
+  background: var(--cozy-paper-raised);
+  box-shadow: var(--cozy-shadow-sm);
+  color: var(--cozy-ink);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translate(-50%, calc(-100% - 6px));
+  animation: ws-cmd-map-bubble-in var(--cozy-motion-slow) var(--cozy-ease) both;
+}
+
+@keyframes ws-cmd-map-bubble-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-100% - 2px));
+  }
+}
+
+/* The question that needs an answer: clay, and the one bubble that is a link
+   (FR27). The words say it too. */
+.ws-cmd-map-activity-bubble.is-blocked {
+  border-color: var(--cozy-clay);
+  color: var(--cozy-ink);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.ws-cmd-map-activity-bubble.is-finishing {
+  border-color: var(--cozy-moss);
+}
+
+.ws-cmd-map-activity-bubble.is-settled {
+  animation: none;
+}
+
+/* A tool touched what this window shows: one soft ring, once (FR31). */
+.ws-cmd-map-belt-btn::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border: 2px solid var(--cozy-amber);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ws-cmd-map-belt-btn.is-activity-pulse::before {
+  animation: ws-cmd-map-belt-pulse 1.1s var(--cozy-ease) 1;
+}
+
+@keyframes ws-cmd-map-belt-pulse {
+  30% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.12);
+  }
+}
+
+/* A finished run waiting at its unit's feet (FR32). */
+.ws-cmd-map-parcel {
+  position: absolute;
+  z-index: 5;
+  min-width: 30px;
+  height: 22px;
+  padding: 0 8px;
+  border: var(--cozy-border) solid var(--cozy-amber-strong);
+  border-radius: 999px;
+  background: var(--cozy-amber);
+  box-shadow: var(--cozy-shadow-sm);
+  color: #1b1408;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+}
+
+.ws-cmd-map-parcel.is-attention {
+  border-color: var(--cozy-clay);
+  background: var(--cozy-clay);
+  color: #fff;
+}
+
+/* The dark theme's clay is lighter: white on it is 3.2:1, dark ink is 5.8:1. */
+[data-bs-theme="dark"] .ws-cmd-map-parcel.is-attention {
+  color: #1b1408;
+}
+
+.ws-cmd-map-parcel:focus-visible {
+  outline: var(--cozy-focus) solid var(--cozy-amber);
+  outline-offset: var(--cozy-focus-offset);
+}
+
+.ws-cmd-map-parcel.is-landing {
+  animation: ws-cmd-map-parcel-land var(--cozy-motion-slow) var(--cozy-ease) 2 alternate;
+}
+
+@keyframes ws-cmd-map-parcel-land {
+  to {
+    transform: translate(-50%, calc(-50% - 6px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-cmd-map-agent.is-activity-working {
+    transition: none;
+  }
+
+  .ws-cmd-map-activity-bubble,
+  .ws-cmd-map-belt-btn.is-activity-pulse::before,
+  .ws-cmd-map-parcel.is-landing {
+    animation: none;
+  }
+}

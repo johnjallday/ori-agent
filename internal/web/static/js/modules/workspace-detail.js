@@ -16190,6 +16190,8 @@ export class WorkspaceDetailPage {
    */
   handleRealtimeEvent(event) {
     this.handleTaskExecutionRealtimeEvent(event);
+    // The Operations map shows its units working from this same stream.
+    window.workspaceCommand?.handleActivityEvent?.(event);
 
     switch (event.type) {
       case 'task_created':
