@@ -153,6 +153,10 @@ func TestServerBuilder_Build_Integration(t *testing.T) {
 	if !builder.MapActivityWired() || server.Handlers.MapActivity == nil || server.Workflow.MapActivityTracker == nil {
 		t.Error("map activity tracker/handler not wired over the event bus")
 	}
+	// Parcels need the database, which exists by the same phase.
+	if !builder.MapActivityParcelsWired() {
+		t.Error("result parcels not wired into the map activity tracker")
+	}
 	// Without the dev flag the real model-backed runner must be in place.
 	if builder.scriptedTaskHandler != nil {
 		t.Error("scripted task handler installed without ORI_DEV_SCRIPTED_TASK_RUNS=1")

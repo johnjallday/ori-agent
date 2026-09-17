@@ -2111,6 +2111,17 @@ print(json.dumps({"workspace_id": sys.argv[1], "description": sys.argv[2], "prio
   echo "task_id=$task_id"
 }
 
+# smoke_show_markfailed answers a blocked task with "mark failed", the way a user
+# does on the task's decision page. A manual run that errors is BLOCKED, not
+# failed, so this is how a "Needs a look" parcel appears for one.
+smoke_show_markfailed() {
+  local task_id="${3:-}"
+  [[ -n "$task_id" ]] || fail "usage: showmarkfailed <base-url> <task-id>"
+  curl -s -o /dev/null -w "%{http_code} mark failed $task_id\n" \
+    -X POST "$BASE_URL/api/orchestration/tasks/$task_id/assist" \
+    -H 'Content-Type: application/json' -d '{"action":"mark_failed"}'
+}
+
 # smoke_show_stream prints the activity stream for a few seconds, so a run's
 # events and the absence of arguments/results can be read directly.
 smoke_show_stream() {
@@ -2122,6 +2133,7 @@ case "${1:-}" in
 serve) serve_isolated "${2:-8931}" "${3:-default}" ;;
 showseed) smoke_show_seed ;;
 showrun) smoke_show_run "$@" ;;
+showmarkfailed) smoke_show_markfailed "$@" ;;
 showstream) smoke_show_stream "$@" ;;
 starter) smoke_starter "$@" ;;
 agent-type-api) smoke_agent_type_api ;;
@@ -2153,6 +2165,7 @@ janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
   echo "  $0 serve [port] [sandbox-name]           # run an ISOLATED demo server (Ctrl-C to stop)" >&2
   echo "  $0 showseed <base-url>                   # task-run show: onboarding + 3 workspaces with Commanders" >&2
   echo "  $0 showrun <base-url> <ws> [description] # task-run show: create and start a task ([fail] fails it)" >&2
+  echo "  $0 showmarkfailed <base-url> <task-id>    # task-run show: answer a blocked task with mark failed" >&2
   echo "  $0 showstream <base-url> [seconds]       # task-run show: print the activity stream" >&2
   echo "  $0 starter <base-url> <stage> [flags]    # starter missions: wait for the server, run a demo stage" >&2
   echo "  $0 agent-type-api <base-url>             # retired agent type: API accepts and never echoes it" >&2

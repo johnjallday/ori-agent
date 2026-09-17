@@ -51,7 +51,32 @@ type TaskExecutor struct {
 // on the evolution package. A nil TaskXPAwarder (feature disabled/unwired)
 // is handled by simply never calling SetEvolutionAwarder.
 type TaskXPAwarder interface {
-	AwardTaskXP(agentName string) error
+	AwardTaskXP(agentName string) (TaskXPAward, error)
+}
+
+// TaskXPAward is what one completed run's XP award actually paid. The executor
+// puts it on the task.completed event, so a result card can show real numbers
+// without recomputing any evolution rule (task-run-show FR38). Amount is 0 when
+// the hourly cap left nothing to give.
+type TaskXPAward struct {
+	Amount         int64
+	LevelBefore    int
+	LevelAfter     int
+	ProgressBefore float64
+	ProgressAfter  float64
+	StageBefore    string
+	StageAfter     string
+}
+
+// eventData is the award as task.completed data fields.
+func (a TaskXPAward) eventData(data map[string]any) {
+	data["xp_awarded"] = a.Amount
+	data["level_before"] = a.LevelBefore
+	data["level_after"] = a.LevelAfter
+	data["progress_before"] = a.ProgressBefore
+	data["progress_after"] = a.ProgressAfter
+	data["stage_before"] = a.StageBefore
+	data["stage_after"] = a.StageAfter
 }
 
 // SetProviderResolver wires provider-profile resolution for scheduling (WS6).
@@ -701,9 +726,16 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task, profile TaskProvid
 			// Award evolution XP to the executing agent for the completed task
 			// (PRD FR15-16). Best-effort: a nil awarder (feature disabled) or an
 			// award error never blocks task completion.
+			var xpAward *TaskXPAward
 			if te.evolutionAwarder != nil && task.To != "" {
-				if awardErr := te.evolutionAwarder.AwardTaskXP(task.To); awardErr != nil {
+				award, awardErr := te.evolutionAwarder.AwardTaskXP(task.To)
+				if awardErr != nil {
 					logger.Error("Failed to award task XP", logger.Fields{"agent": task.To, "task_id": task.ID, "error": awardErr})
+				}
+				// Reported whenever the agent was actually paid, even if a later
+				// step of the award failed: what the card shows is what was given.
+				if award.Amount > 0 || awardErr == nil {
+					xpAward = &award
 				}
 			}
 
@@ -733,12 +765,16 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task, profile TaskProvid
 				// duplicate delivery of one run cannot be counted twice; when the
 				// handler produced no run record, subscribers fall back to the
 				// completion time.
-				te.eventBus.Publish(NewTaskEvent(EventTaskCompleted, workspaceID, task.ID, task.To, map[string]any{
+				completed := map[string]any{
 					"description": task.Description,
 					"result":      result,
 					"scheduled":   task.ScheduleEnabled && IsRecurringSchedule(task.Schedule),
 					"run_id":      strings.TrimSpace(taskRun.RunID),
-				}))
+				}
+				if xpAward != nil {
+					xpAward.eventData(completed)
+				}
+				te.eventBus.Publish(NewTaskEvent(EventTaskCompleted, workspaceID, task.ID, task.To, completed))
 			}
 		}
 

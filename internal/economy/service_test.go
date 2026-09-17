@@ -667,3 +667,41 @@ func TestNilServiceDoesNothing(t *testing.T) {
 		t.Fatal("a nil service returned an overview")
 	}
 }
+
+// RunKey is the one rule parcels and the economy share, so a hand-run task's
+// Craft can be found again from its parcel (task-run-show FR35, FR39).
+func TestRunKeyPrefersTheRunIDAndFallsBackToTheTimestamp(t *testing.T) {
+	now := time.Date(2026, time.September, 16, 12, 0, 0, 0, time.UTC)
+	if got := RunKey(taskCompleted("run-7", false), now); got != "run-7" {
+		t.Fatalf("RunKey with a run id = %q, want run-7", got)
+	}
+	if got := RunKey(taskCompleted("", false), now); got != "2026-09-09T10:00:00Z" {
+		t.Fatalf("RunKey without a run id = %q, want the event timestamp", got)
+	}
+	untimed := taskCompleted("", false)
+	untimed.Timestamp = time.Time{}
+	if got := RunKey(untimed, now); got != "2026-09-16T12:00:00Z" {
+		t.Fatalf("RunKey with no timestamp = %q, want now", got)
+	}
+}
+
+func TestRunCraftFindsWhatAHandRunTaskWasPaid(t *testing.T) {
+	service, _, _ := newService(t)
+	ctx := context.Background()
+
+	service.HandleEvent(taskCompleted("run-1", false))
+	amount, found, err := service.RunCraft(ctx, "task-1", "run-1")
+	if err != nil || !found || amount != CraftPerManualTask {
+		t.Fatalf("RunCraft = %d, %v, %v; want %d found", amount, found, err, CraftPerManualTask)
+	}
+
+	service.HandleEvent(taskCompleted("farm-run", true))
+	if amount, found, err := service.RunCraft(ctx, "task-1", "farm-run"); err != nil || found || amount != 0 {
+		t.Fatalf("RunCraft for a Farm run = %d, %v, %v; want nothing", amount, found, err)
+	}
+
+	var unwired *Service
+	if _, _, err := unwired.RunCraft(ctx, "task-1", "run-1"); err == nil {
+		t.Fatal("an unwired economy answered RunCraft")
+	}
+}

@@ -157,12 +157,28 @@ func (s *Service) AwardMessageXP(agentName string, tokenCount int, userMessage s
 		tokenCount = 0
 	}
 	xp := s.cfg.BaseMessageXP + int64(tokenCount/s.cfg.TokensPerXP)
-	return s.awardXP(agentName, xp, userMessage, true, false, false)
+	_, err := s.awardXP(agentName, xp, userMessage, true, false, false)
+	return err
 }
 
 // AwardFeedXP grants XP for a validated feed action.
 func (s *Service) AwardFeedXP(agentName string, source string) error {
-	return s.awardXP(agentName, s.cfg.FeedXP, source, false, true, false)
+	_, err := s.awardXP(agentName, s.cfg.FeedXP, source, false, true, false)
+	return err
+}
+
+// TaskXPAward is what one AwardTaskXP call actually paid (task-run-show FR38).
+// Amount is 0 when the hourly cap left nothing to give; the before and after
+// fields are then zero too, because nothing changed. Progress is the fraction
+// of the current level already earned, from 0 up to (not including) 1.
+type TaskXPAward struct {
+	Amount         int64
+	LevelBefore    int
+	LevelAfter     int
+	ProgressBefore float64
+	ProgressAfter  float64
+	StageBefore    types.AgentStage
+	StageAfter     types.AgentStage
 }
 
 // AwardTaskXP grants XP for a completed workspace task run — worth more than
@@ -171,13 +187,22 @@ func (s *Service) AwardFeedXP(agentName string, source string) error {
 // duplicate-message check: distinct task completions are never "the same
 // message" repeated. The hourly cap still applies. A nil receiver (evolution
 // disabled) is a safe no-op, matching how workspace.TaskExecutor calls this
-// through an optional interface.
-func (s *Service) AwardTaskXP(agentName string) error {
+// through an optional interface. The returned award says what was actually
+// paid, so a result card can show it without recomputing any rule.
+func (s *Service) AwardTaskXP(agentName string) (TaskXPAward, error) {
 	if s == nil {
-		return nil
+		return TaskXPAward{}, nil
 	}
 	xp := s.cfg.BaseMessageXP * taskXPMultiplier
 	return s.awardXP(agentName, xp, "", false, false, true)
+}
+
+// levelProgress is how far into its current level an experience total is.
+func levelProgress(experience, xpPerLevel int64) float64 {
+	if xpPerLevel <= 0 || experience <= 0 {
+		return 0
+	}
+	return float64(experience%xpPerLevel) / float64(xpPerLevel)
 }
 
 // EvaluateStageTransitions returns the expected stage for a given level.
@@ -307,18 +332,18 @@ func (s *Service) GetSuggestions(agentName string) ([]Suggestion, error) {
 	return suggestions, nil
 }
 
-func (s *Service) awardXP(agentName string, requestedXP int64, userMessage string, enableDuplicateCheck bool, incrementFeedCount bool, logTaskEvent bool) error {
+func (s *Service) awardXP(agentName string, requestedXP int64, userMessage string, enableDuplicateCheck bool, incrementFeedCount bool, logTaskEvent bool) (TaskXPAward, error) {
 	if s == nil {
-		return fmt.Errorf("evolution service is nil")
+		return TaskXPAward{}, fmt.Errorf("evolution service is nil")
 	}
 	if agentName == "" {
-		return fmt.Errorf("agent name is required")
+		return TaskXPAward{}, fmt.Errorf("agent name is required")
 	}
 	if s.agentStore == nil {
-		return fmt.Errorf("agent store is not configured")
+		return TaskXPAward{}, fmt.Errorf("agent store is not configured")
 	}
 	if requestedXP <= 0 {
-		return nil
+		return TaskXPAward{}, nil
 	}
 
 	now := s.now()
@@ -327,7 +352,7 @@ func (s *Service) awardXP(agentName string, requestedXP int64, userMessage strin
 	s.mu.Lock()
 	if enableDuplicateCheck && s.isDuplicateMessageLocked(agentName, userMessage, now) {
 		s.mu.Unlock()
-		return nil
+		return TaskXPAward{}, nil
 	}
 	if enableDuplicateCheck {
 		s.recordIntentLocked(agentName, userMessage)
@@ -336,7 +361,7 @@ func (s *Service) awardXP(agentName string, requestedXP int64, userMessage strin
 	s.mu.Unlock()
 
 	if awardXP <= 0 {
-		return nil
+		return TaskXPAward{}, nil
 	}
 
 	var previousLevel int
@@ -344,6 +369,7 @@ func (s *Service) awardXP(agentName string, requestedXP int64, userMessage strin
 	var newLevel int
 	var newStage types.AgentStage
 	var feedCount int64
+	var previousProgress, newProgress float64
 
 	// Atomic update for agent evolution.
 	err := s.agentStore.UpdateAgent(agentName, func(ag *agent.Agent) error {
@@ -352,8 +378,10 @@ func (s *Service) awardXP(agentName string, requestedXP int64, userMessage strin
 
 		previousLevel = ag.Evolution.Level
 		previousStage = ag.Evolution.Stage
+		previousProgress = levelProgress(ag.Evolution.Experience, s.cfg.XPPerLevel)
 
 		ag.Evolution.Experience += awardXP
+		newProgress = levelProgress(ag.Evolution.Experience, s.cfg.XPPerLevel)
 		ag.Evolution.Level = levelForExperience(ag.Evolution.Experience, s.cfg.XPPerLevel)
 		ag.Evolution.Stage = stageForLevel(ag.Evolution.Level)
 
@@ -371,7 +399,19 @@ func (s *Service) awardXP(agentName string, requestedXP int64, userMessage strin
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("persisting agent evolution: %w", err)
+		return TaskXPAward{}, fmt.Errorf("persisting agent evolution: %w", err)
+	}
+
+	// The agent has been paid; report it even if the assistant roll-up below
+	// fails, so a caller never under-reports what the agent received.
+	award := TaskXPAward{
+		Amount:         awardXP,
+		LevelBefore:    previousLevel,
+		LevelAfter:     newLevel,
+		ProgressBefore: previousProgress,
+		ProgressAfter:  newProgress,
+		StageBefore:    previousStage,
+		StageAfter:     newStage,
 	}
 
 	if s.assistantProgressStore != nil {
@@ -382,7 +422,7 @@ func (s *Service) awardXP(agentName string, requestedXP int64, userMessage strin
 		assistantProgress.Rank = rankForLevel(assistantProgress.Level)
 		assistantProgress.UpdatedAt = now
 		if err := s.assistantProgressStore.SetAssistantProgress(&assistantProgress); err != nil {
-			return fmt.Errorf("persisting assistant progress: %w", err)
+			return award, fmt.Errorf("persisting assistant progress: %w", err)
 		}
 	}
 
@@ -411,7 +451,7 @@ func (s *Service) awardXP(agentName string, requestedXP int64, userMessage strin
 		})
 	}
 
-	return nil
+	return award, nil
 }
 
 func (s *Service) logActivity(agentName string, eventType types.ActivityEventType, details map[string]any) {

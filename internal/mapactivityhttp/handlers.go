@@ -27,6 +27,7 @@ const defaultKeepalive = 15 * time.Second
 type Handler struct {
 	tracker   *mapactivity.Tracker
 	keepalive time.Duration
+	craft     CraftLookup
 }
 
 // NewHandler builds the handler. A nil tracker is valid and answers 404.
@@ -46,6 +47,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	}
 	mux.HandleFunc("GET /api/workspace-map/activity", h.GetActivity)
 	mux.HandleFunc("GET /api/workspace-map/activity/stream", h.StreamActivity)
+	mux.HandleFunc("POST /api/workspace-map/parcels/open-by-ref", h.OpenParcelsByRef)
+	mux.HandleFunc("POST /api/workspace-map/parcels/{id}/open", h.OpenParcel)
 }
 
 func (h *Handler) available(w http.ResponseWriter) bool {

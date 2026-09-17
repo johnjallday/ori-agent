@@ -590,7 +590,7 @@ func (b *ServerBuilder) initializeTaskExecution() {
 	// and passing a nil pointer through the TaskXPAwarder interface would leave
 	// a non-nil interface with a nil value, defeating the executor's nil check.
 	if b.evolutionService != nil {
-		b.taskExecutor.SetEvolutionAwarder(b.evolutionService)
+		b.taskExecutor.SetEvolutionAwarder(taskXPAwarder{service: b.evolutionService})
 	}
 
 	b.stepExecutor = workspace.NewStepExecutor(b.workspaceStore, taskExecutionHandler, workspace.StepExecutorConfig{

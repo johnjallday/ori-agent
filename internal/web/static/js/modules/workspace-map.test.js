@@ -10200,6 +10200,9 @@ class ActivityNode {
   hasAttribute(name) {
     return name in this.attrs;
   }
+  removeAttribute(name) {
+    delete this.attrs[name];
+  }
   appendChild(child) {
     child.parentNode = this;
     this.children.push(child);
@@ -10259,6 +10262,60 @@ function activityTile(id) {
   return tile;
 }
 
+// The harvest popover's host, parsed back into just what the popover code
+// reads: its title, its rows, and the buttons it binds.
+function makeHarvestHost() {
+  let html = '';
+  let popover = null;
+  const button = (attrs, text) => {
+    const own = {};
+    return {
+      attrs,
+      text,
+      focused: false,
+      getAttribute: name => (name in attrs ? attrs[name] : null),
+      addEventListener: (type, fn) => (own[type] = fn),
+      focus() {
+        this.focused = true;
+      },
+      click: () => own.click && own.click({ preventDefault() {} })
+    };
+  };
+  const parse = value => {
+    const parcels = [...value.matchAll(/data-parcel-open data-parcel-id="([^"]*)">([^<]*)</g)].map(
+      m => button({ 'data-parcel-id': m[1] }, m[2])
+    );
+    const farms = [...value.matchAll(/data-harvest-open data-task-id="([^"]*)"/g)].map(m =>
+      button({ 'data-task-id': m[1] }, 'Open result')
+    );
+    return {
+      title: (value.match(/ws-map-harvest__title">([^<]*)</) || [])[1] || '',
+      hint: /ws-map-harvest__hint/.test(value),
+      attention: (value.match(/ws-map-parcel is-attention/g) || []).length,
+      parcels,
+      farms,
+      style: {},
+      addEventListener() {},
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 0, height: 0 }),
+      querySelectorAll: sel =>
+        sel.includes('data-parcel-open') ? parcels : sel.includes('data-harvest-open') ? farms : [],
+      querySelector: () => farms[0] || parcels[0] || null
+    };
+  };
+  return {
+    popover: () => popover,
+    html: () => html,
+    get innerHTML() {
+      return html;
+    },
+    set innerHTML(value) {
+      html = value;
+      popover = value ? parse(value) : null;
+    },
+    querySelector: sel => (sel.includes('data-ws-map-harvest') ? popover : null)
+  };
+}
+
 function makeFakeActivityFeed() {
   const listeners = [];
   let released = 0;
@@ -10290,14 +10347,14 @@ const runningActivity = (overrides = {}) => ({
   ...overrides
 });
 
-function activityView(workspaceId, running, lastEvent = null) {
+function activityView(workspaceId, running, lastEvent = null, parcels = []) {
   return {
     workspaceId,
     running,
     count: running.length,
     latest: running[0] || null,
     blocked: running.some(a => a.blocked),
-    parcels: [],
+    parcels,
     lastEvent
   };
 }
@@ -10316,9 +10373,11 @@ async function activityHarness({
   tiles = ['ws-1', 'ws-2'],
   districts = [],
   units = [],
-  state = {}
+  state = {},
+  pileTiles = {}
 } = {}) {
   const feed = makeFakeActivityFeed();
+  const cardsOpened = [];
   let now = 1000000;
   const timers = [];
   const window = {
@@ -10327,13 +10386,21 @@ async function activityHarness({
     innerWidth: 1000,
     innerHeight: 600,
     location: { href: '', search: '' },
-    OriMapActivityFeed: feed
+    OriMapActivityFeed: feed,
+    OriResultCard: {
+      open: options => {
+        cardsOpened.push(options);
+        return Promise.resolve(null);
+      },
+      close() {}
+    }
   };
   const document = {
     getElementById: () => null,
     addEventListener() {},
     removeEventListener() {},
-    createElement: tag => new ActivityNode(tag)
+    createElement: tag => new ActivityNode(tag),
+    body: new ActivityNode('body')
   };
   const sandbox = {
     window,
@@ -10369,8 +10436,18 @@ async function activityHarness({
       new ActivityNode('button', { className: 'ws-map-unit', attrs: { 'data-unit-id': id } })
     ])
   );
+  Object.entries(pileTiles).forEach(([id, pending]) => {
+    const pile = new ActivityNode('span', {
+      className: 'ws-map-tile-harvest',
+      attrs: { 'data-harvest-pile': '', 'aria-label': pending + ' runs to harvest' },
+      text: '+' + pending
+    });
+    activityTiles[id].appendChild(pile);
+  });
+  const harvestHost = makeHarvestHost();
   const baseQuery = harness.container.querySelector;
   harness.container.querySelector = sel => {
+    if (sel === '[data-ws-map-harvest-host]') return harvestHost;
     const tile = sel.match(/^\.ws-map-tile\[data-ws-id="([^"]+)"\]$/);
     if (tile) return activityTiles[tile[1]] || null;
     const district = sel.match(/^\.ws-map-district\[data-group-id="([^"]+)"\]$/);
@@ -10395,6 +10472,8 @@ async function activityHarness({
     harness,
     feed,
     window,
+    cardsOpened,
+    harvestHost,
     tile: id => activityTiles[id],
     district: id => activityDistricts[id],
     unit: id => activityUnits[id],
@@ -10805,4 +10884,224 @@ test('activity: a group map lights the unit of the agent doing the work', async 
   );
   assert.equal(overlayOf(h.unit('agent:g:scout')), null);
   assert.notEqual(h.live(), 'Loose started working');
+});
+
+const parcelRow = (overrides = {}) => ({
+  id: 'p1',
+  workspace_id: 'ws-1',
+  kind: 'task',
+  title: 'Compare launch notes',
+  agent_name: 'Theo',
+  outcome: 'succeeded',
+  produced_at: '2026-09-16T10:00:00Z',
+  ...overrides
+});
+
+const pileOf = node => node.querySelector('[data-harvest-pile]');
+
+test('parcels: a waiting result puts a pile on its building, drawn still from a snapshot', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  h.feed.change('ws-1', activityView('ws-1', [], null, [parcelRow()]));
+
+  const pile = pileOf(h.tile('ws-1'));
+  assert.ok(pile, 'a pile appears');
+  assert.equal(pile.textContent, '+1');
+  assert.equal(pile.getAttribute('aria-label'), '1 result waiting');
+  assert.equal(pile.classList.contains('is-landing'), false, 'snapshot parcels do not bounce');
+  assert.match(h.tile('ws-1').getAttribute('aria-label'), /1 result waiting, press H to see them/);
+  assert.equal(pileOf(h.tile('ws-2')), null);
+});
+
+test('parcels: a live result lands with one bounce and an announcement', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [], { phase: 'parcel', parcel: parcelRow() }, [parcelRow()])
+  );
+
+  const pile = pileOf(h.tile('ws-1'));
+  assert.ok(pile.classList.contains('is-landing'));
+  assert.equal(h.live(), 'Result ready in Alpha');
+  h.advance(1200);
+  assert.equal(pile.classList.contains('is-landing'), false);
+});
+
+test('parcels: a result waits for its run to finish saying Done before it lands', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  const event = extra => ({
+    kind: 'task',
+    agent_name: 'Theo',
+    task_id: 't1',
+    workspace_id: 'ws-1',
+    ...extra
+  });
+  h.feed.change('ws-1', activityView('ws-1', [runningActivity()], event({ phase: 'started' })));
+  h.advance(9000);
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [], event({ phase: 'finished', outcome: 'succeeded' }))
+  );
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [], { phase: 'parcel', parcel: parcelRow() }, [parcelRow()])
+  );
+
+  assert.equal(bubbleLine(h.tile('ws-1')), 'Done.');
+  assert.equal(pileOf(h.tile('ws-1')), null, 'not yet');
+  h.advance(2000);
+  assert.ok(pileOf(h.tile('ws-1')), 'landed as the bubble left');
+  assert.equal(h.live(), 'Result ready in Alpha');
+});
+
+test('parcels: a result behind a Done. still waiting out a dwell lands after Done. leaves', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  const event = extra => ({
+    kind: 'task',
+    agent_name: 'Theo',
+    task_id: 't1',
+    workspace_id: 'ws-1',
+    ...extra
+  });
+  h.feed.change('ws-1', activityView('ws-1', [runningActivity()], event({ phase: 'started' })));
+  h.advance(9000);
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [runningActivity()], event({ phase: 'step', step: { type: 'thinking' } }))
+  );
+  h.advance(1000);
+  // Finish and parcel arrive one second into "Thinking it through…".
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [], event({ phase: 'finished', outcome: 'succeeded' }))
+  );
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [], { phase: 'parcel', parcel: parcelRow() }, [parcelRow()])
+  );
+  assert.equal(bubbleLine(h.tile('ws-1')), 'Thinking it through…');
+  assert.equal(pileOf(h.tile('ws-1')), null);
+
+  h.advance(1500);
+  assert.equal(bubbleLine(h.tile('ws-1')), 'Done.');
+  assert.equal(pileOf(h.tile('ws-1')), null, 'Done. is showing; the parcel is not in yet');
+  h.advance(2000);
+  assert.ok(pileOf(h.tile('ws-1')), 'landed as Done. left');
+  assert.equal(overlayOf(h.tile('ws-1')), null);
+});
+
+test('parcels: one pile counts Farm runs and results together, capped at 9+', async () => {
+  const h = await activityHarness({
+    pileTiles: { 'ws-1': 3 },
+    state: { economy: { farms: [], pendingByWorkspace: { 'ws-1': 3 } } }
+  });
+  h.feed.connect();
+  const pile = pileOf(h.tile('ws-1'));
+  assert.equal(pile.textContent, '+3', 'no parcels: the economy pile is untouched');
+  assert.equal(pile.hasAttribute('data-pile-parcels'), false);
+
+  h.feed.change('ws-1', activityView('ws-1', [], null, [parcelRow(), parcelRow({ id: 'p2' })]));
+  assert.equal(pile.textContent, '+5');
+  assert.equal(pile.getAttribute('aria-label'), '3 runs to harvest, 2 results waiting');
+
+  const many = Array.from({ length: 8 }, (_, i) => parcelRow({ id: 'm' + i }));
+  h.feed.change('ws-1', activityView('ws-1', [], null, many));
+  assert.equal(pile.textContent, '9+');
+
+  // Opening them all gives the Farm pile back exactly as it was.
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [], { phase: 'parcel_opened', parcel: parcelRow() }, [])
+  );
+  assert.equal(pile.textContent, '+3');
+  assert.equal(pile.getAttribute('aria-label'), '3 runs to harvest');
+  assert.equal(pile.hasAttribute('data-pile-parcels'), false);
+});
+
+test('parcels: the popover says Deliveries, marks what needs a look, and opens the card', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [], null, [
+      parcelRow(),
+      parcelRow({ id: 'p2', outcome: 'failed', title: 'Import the venue list' })
+    ])
+  );
+
+  h.harness.tile('ws-1').fire('keydown', { key: 'h', preventDefault() {} });
+  const popover = h.harvestHost.popover();
+  assert.ok(popover, 'H opens the pile');
+  assert.equal(popover.title, 'Deliveries');
+  assert.equal(popover.hint, false, 'the harvest hint is for Farm rows only');
+  assert.equal(popover.attention, 1);
+  assert.match(h.harvestHost.html(), /Theo · Needs a look/);
+  assert.equal(popover.parcels.length, 2);
+
+  popover.parcels.find(b => b.getAttribute('data-parcel-id') === 'p2').click();
+  assert.equal(h.harvestHost.popover(), null, 'the popover closes');
+  assert.equal(h.cardsOpened.length, 1);
+  assert.equal(h.cardsOpened[0].parcelId, 'p2');
+  assert.equal(h.cardsOpened[0].workspaceName, 'Alpha');
+  assert.equal(
+    h.cardsOpened[0].origin,
+    h.harness.tile('ws-1'),
+    'Esc will return focus to the tile'
+  );
+
+  h.cardsOpened[0].onPrimary({ parcel: { kind: 'task', workspace_id: 'ws-1', ref_id: 't9' } });
+  assert.equal(h.window.location.href, '/workspaces/alpha?task=t9&result=1');
+});
+
+test('parcels: with only Farm runs the popover keeps its old title and hint', async () => {
+  const h = await activityHarness({
+    pileTiles: { 'ws-1': 2 },
+    state: {
+      economy: {
+        farms: [{ workspace_id: 'ws-1', task_id: 'farm-1', name: 'Digest', pending_harvest: 2 }],
+        pendingByWorkspace: { 'ws-1': 2 }
+      }
+    }
+  });
+  h.feed.connect();
+  h.harness.tile('ws-1').fire('keydown', { key: 'h', preventDefault() {} });
+  const popover = h.harvestHost.popover();
+  assert.equal(popover.title, 'Ready to harvest');
+  assert.equal(popover.hint, true);
+  assert.equal(popover.parcels.length, 0);
+});
+
+test('parcels: a collapsed district holds its hidden buildings’ pile', async () => {
+  const workspaces = [
+    { id: 'grp', kind: 'group', name: 'Studio', folder_slug: 'studio' },
+    { id: 'ws-1', name: 'Mixing', parent_id: 'grp', folder_slug: 'mixing' },
+    { id: 'ws-2', name: 'Loose', folder_slug: 'loose' }
+  ];
+  const h = await activityHarness({
+    workspaces,
+    layout: {
+      schema_version: 1,
+      positions: { 'ws-1': { x: 100, y: 100 }, 'ws-2': { x: 800, y: 100 } },
+      groups: { grp: { collapsed: true } }
+    },
+    districts: ['grp']
+  });
+  h.feed.connect();
+  h.feed.change('ws-1', activityView('ws-1', [], null, [parcelRow()]));
+
+  const pile = pileOf(h.district('grp'));
+  assert.ok(pile, 'the district carries the pile');
+  assert.ok(pile.classList.contains('ws-map-district-pile'));
+  assert.equal(pile.textContent, '+1');
+});
+
+test('parcels: a dropped feed keeps the pile it last knew', async () => {
+  const h = await activityHarness();
+  h.feed.connect();
+  h.feed.change('ws-1', activityView('ws-1', [], null, [parcelRow()]));
+  h.feed.disconnect();
+  assert.equal(pileOf(h.tile('ws-1')).textContent, '+1');
 });

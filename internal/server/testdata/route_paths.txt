@@ -239,6 +239,8 @@
 /api/workspace-map/activity
 /api/workspace-map/activity/stream
 /api/workspace-map/layout
+/api/workspace-map/parcels/open-by-ref
+/api/workspace-map/parcels/x/open
 /api/workspaces
 /api/workspaces/import
 /api/workspaces/import/check

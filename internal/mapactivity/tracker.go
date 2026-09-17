@@ -101,6 +101,11 @@ type Tracker struct {
 	staleAfter    time.Duration
 	sweepInterval time.Duration
 
+	// parcels turns finished runs into waiting results. Set once, before
+	// Start, by SetParcels; the zero value creates no parcels.
+	parcels             ParcelOptions
+	parcelSweepInterval time.Duration
+
 	mu       sync.Mutex
 	running  map[string]*RunningActivity
 	finished map[string]time.Time
@@ -121,13 +126,14 @@ type subscriber struct {
 // then only sees events handed to HandleEvent directly.
 func NewTracker(bus EventSource, opts ...Option) *Tracker {
 	t := &Tracker{
-		bus:           bus,
-		now:           time.Now,
-		staleAfter:    DefaultStaleAfter,
-		sweepInterval: defaultSweepInterval,
-		running:       make(map[string]*RunningActivity),
-		finished:      make(map[string]time.Time),
-		subs:          make(map[uint64]*subscriber),
+		bus:                 bus,
+		now:                 time.Now,
+		staleAfter:          DefaultStaleAfter,
+		sweepInterval:       defaultSweepInterval,
+		parcelSweepInterval: defaultParcelSweepInterval,
+		running:             make(map[string]*RunningActivity),
+		finished:            make(map[string]time.Time),
+		subs:                make(map[uint64]*subscriber),
 	}
 	for _, opt := range opts {
 		opt(t)
@@ -171,6 +177,14 @@ func (t *Tracker) Start() {
 			}
 		}
 	}()
+
+	if t.parcels.Store != nil {
+		t.wg.Add(1)
+		go func() {
+			defer t.wg.Done()
+			t.runParcelSweeps(stopCh)
+		}()
+	}
 }
 
 // Stop unsubscribes from the bus, stops the sweep, and closes every stream
@@ -211,6 +225,7 @@ func (t *Tracker) HandleEvent(ev workspace.Event) {
 	switch ev.Type {
 	case workspace.EventTaskDeleted:
 		t.endTask(ev, OutcomeNone)
+		t.deleteTaskParcels(ev)
 		return
 	case workspace.EventWorkspaceUpdated:
 		// A cancelled manual run publishes no task.failed, only this status
@@ -239,6 +254,15 @@ func (t *Tracker) HandleEvent(ev workspace.Event) {
 	id := TaskActivityID(workspaceID, taskID)
 	at := t.eventTime(ev)
 	agent := stringField(ev.Data, "agent")
+
+	// A finished run's parcel is written before the lock is taken, so a database
+	// write never holds up the stream. Creation is idempotent, so a replayed
+	// event that is then dropped below costs nothing.
+	var parcelID string
+	var newParcel *ParcelSummary
+	if phase == PhaseFinished {
+		parcelID, newParcel = t.createTaskParcel(ev, workspaceID, taskID, agent, at)
+	}
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -307,7 +331,11 @@ func (t *Tracker) HandleEvent(ev workspace.Event) {
 		t.finished[id] = at
 		message.Outcome = taskOutcomeFor(ev.Type)
 		message.AgentName = agent
+		message.ParcelID = parcelID
 		t.broadcastLocked(StreamMessage{Name: "activity", Payload: message})
+		if newParcel != nil {
+			t.broadcastLocked(StreamMessage{Name: "parcel", Payload: ParcelEvent{ParcelSummary: *newParcel}})
+		}
 		return
 	}
 
@@ -433,7 +461,7 @@ func (t *Tracker) snapshotLocked() Snapshot {
 		}
 		return running[i].ActivityID < running[j].ActivityID
 	})
-	return Snapshot{Running: running, Parcels: []ParcelSummary{}}
+	return Snapshot{Running: running, Parcels: t.unopenedParcelRows()}
 }
 
 // Subscribe registers a stream subscriber. The returned channel is buffered;

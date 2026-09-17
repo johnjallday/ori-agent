@@ -424,13 +424,14 @@ type fakeXPAwarder struct {
 	mu     sync.Mutex
 	awards []string // agent names, in call order
 	err    error
+	award  TaskXPAward
 }
 
-func (a *fakeXPAwarder) AwardTaskXP(agentName string) error {
+func (a *fakeXPAwarder) AwardTaskXP(agentName string) (TaskXPAward, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.awards = append(a.awards, agentName)
-	return a.err
+	return a.award, a.err
 }
 
 func (a *fakeXPAwarder) callCount() int {
@@ -513,6 +514,66 @@ func TestExecuteTask_AwardsXPOnCompletion(t *testing.T) {
 	}
 	if awards[0] != "agent-a" {
 		t.Errorf("AwardTaskXP called for agent %q, want agent-a", awards[0])
+	}
+}
+
+// completedEvent runs one assigned task through the executor with a bus and
+// returns the task.completed event it published.
+func completedEvent(t *testing.T, awarder TaskXPAwarder) Event {
+	t.Helper()
+	store := newExecutorTestStore(t)
+	ws := newWorkspaceWithTasks(t, []Task{
+		{ID: "t1", To: "agent-a", Status: TaskStatusAssigned},
+	})
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	te := NewTaskExecutor(store, &fakeTaskHandler{}, ExecutorConfig{PollInterval: time.Hour, MaxConcurrent: 1})
+	t.Cleanup(te.Stop)
+	bus := NewEventBus(10, 10)
+	te.SetEventBus(bus)
+	if awarder != nil {
+		te.SetEvolutionAwarder(awarder)
+	}
+	events := make(chan Event, 1)
+	bus.SubscribeToEventType(EventTaskCompleted, func(ev Event) { events <- ev })
+
+	te.checkAndExecuteTasks()
+	select {
+	case ev := <-events:
+		return ev
+	case <-time.After(3 * time.Second):
+		t.Fatal("no task.completed event")
+	}
+	return Event{}
+}
+
+// TestExecuteTask_CompletedEventCarriesTheXPReport verifies the completion event
+// reports what the award actually paid (task-run-show FR38).
+func TestExecuteTask_CompletedEventCarriesTheXPReport(t *testing.T) {
+	ev := completedEvent(t, &fakeXPAwarder{award: TaskXPAward{
+		Amount: 50, LevelBefore: 1, LevelAfter: 2,
+		ProgressBefore: 0.8, ProgressAfter: 0.3,
+		StageBefore: "spark", StageAfter: "infant",
+	}})
+	want := map[string]any{
+		"xp_awarded": int64(50), "level_before": 1, "level_after": 2,
+		"progress_before": 0.8, "progress_after": 0.3,
+		"stage_before": "spark", "stage_after": "infant",
+	}
+	for key, value := range want {
+		if ev.Data[key] != value {
+			t.Errorf("task.completed %s = %#v, want %#v", key, ev.Data[key], value)
+		}
+	}
+}
+
+// TestExecuteTask_CompletedEventWithoutAwarderHasNoXPFields verifies an unwired
+// awarder reports nothing rather than a fabricated zero.
+func TestExecuteTask_CompletedEventWithoutAwarderHasNoXPFields(t *testing.T) {
+	ev := completedEvent(t, nil)
+	if _, present := ev.Data["xp_awarded"]; present {
+		t.Fatalf("task.completed carries xp_awarded without an awarder: %+v", ev.Data)
 	}
 }
 

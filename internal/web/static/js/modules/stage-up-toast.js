@@ -90,5 +90,14 @@
       });
   }
 
-  window.StageUpToast = { check: check, checkByFetch: checkByFetch };
+  // markShown records that another surface already told the user about this
+  // stage — the task-run show's result card shows its own stage-up banner —
+  // so a later check does not toast the same change a second time
+  // (task-run-show FR44).
+  function markShown(agentName, stage) {
+    if (!agentName || !stage) return;
+    setCachedStage(agentName, stage);
+  }
+
+  window.StageUpToast = { check: check, checkByFetch: checkByFetch, markShown: markShown };
 })();

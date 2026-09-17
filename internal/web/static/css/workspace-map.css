@@ -3249,3 +3249,268 @@
     animation: none;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Parcels: the pile, Deliveries rows, and the result card (task-run-show
+   FR43–FR47). The pile is the existing harvest pile, rewritten only while a
+   finished run is waiting in it.
+   --------------------------------------------------------------------------- */
+
+/* A collapsed district's pile sits beside its header, where the district's
+   own buildings would have carried theirs. */
+.ws-map-district-pile {
+  top: 44px;
+  left: 10px;
+}
+
+/* One gentle bounce when a live result lands. Snapshot parcels are simply
+   there (FR46), and reduced motion gets no bounce (FR56). */
+.ws-map-tile-harvest.is-landing {
+  animation: ws-map-parcel-land var(--cozy-motion-slow) var(--cozy-ease) 2 alternate;
+}
+
+@keyframes ws-map-parcel-land {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-6px);
+  }
+}
+
+.ws-map-parcel__when {
+  flex: 0 0 auto;
+  color: var(--ws-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9px;
+}
+
+/* Needs a look: clay, and said in words (FR60). */
+.ws-map-parcel.is-attention .ws-map-parcel__details {
+  color: var(--cozy-clay);
+}
+
+.ws-map-parcel.is-attention .ws-map-harvest__btn {
+  border-color: var(--cozy-clay);
+}
+
+/* The result card's host is placed over the map's viewport by
+   workspace-map.js. It passes pointer events through until a card is in it,
+   and sits below Bootstrap modals and the Ori guide. */
+.ws-map-card-host {
+  position: fixed;
+  z-index: 1030;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.ori-result-card {
+  width: min(380px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 16px 18px 14px;
+  color: var(--cozy-ink);
+  font-size: 13px;
+  line-height: 1.45;
+  pointer-events: auto;
+  animation: ori-result-card-in var(--cozy-motion-slow) var(--cozy-ease) both;
+}
+
+@keyframes ori-result-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+.ori-result-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--cozy-ink-dim);
+  font-size: 11px;
+}
+
+.ori-result-card__workspace {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ori-result-card__agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ori-result-card__face {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  overflow: hidden;
+  border-radius: 50%;
+}
+
+.ori-result-card__face .agent-avatar {
+  --aa-size: 24px;
+  border-radius: 50%;
+}
+
+.ori-result-card__face .agent-avatar__initials {
+  font-size: 9px;
+}
+
+.ori-result-card__title {
+  margin: 8px 0 4px;
+  color: var(--cozy-ink);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.ori-result-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  color: var(--cozy-ink-dim);
+  font-size: 11px;
+}
+
+.ori-result-card__chip {
+  padding: 1px 8px;
+  border: var(--cozy-border) solid var(--cozy-moss);
+  border-radius: 999px;
+  color: var(--cozy-moss);
+  font-weight: 700;
+}
+
+.ori-result-card__chip.is-attention {
+  border-color: var(--cozy-clay);
+  color: var(--cozy-clay);
+}
+
+.ori-result-card__stage {
+  margin: 0 0 10px;
+  padding: 6px 10px;
+  border-radius: var(--cozy-radius);
+  background: color-mix(in srgb, var(--cozy-amber) 18%, transparent);
+  color: var(--cozy-ink);
+  font-weight: 700;
+}
+
+.ori-result-card__summary,
+.ori-result-card__reason {
+  margin: 0 0 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ori-result-card__reason {
+  padding-left: 10px;
+  border-left: var(--cozy-border-strong) solid var(--cozy-clay);
+}
+
+.ori-result-card__rewards {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: var(--cozy-radius);
+  background: var(--cozy-paper-deep);
+}
+
+.ori-result-card__reward {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ori-result-card__reward-value {
+  min-width: 72px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.ori-result-card__reward.is-xp .ori-result-card__reward-value {
+  color: var(--cozy-moss);
+}
+
+.ori-result-card__reward.is-craft .ori-result-card__reward-value {
+  color: var(--cozy-amber-strong);
+}
+
+.ori-result-card__bar {
+  flex: 1 1 120px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--cozy-paper-sunk);
+}
+
+.ori-result-card__bar-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--cozy-moss-bright);
+  transform-origin: left center;
+  transition: transform var(--cozy-motion-slow) var(--cozy-ease);
+}
+
+.ori-result-card__bar-fill.is-instant {
+  transition: none;
+}
+
+.ori-result-card__level {
+  color: var(--cozy-ink-dim);
+  font-size: 11px;
+}
+
+.ori-result-card__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.ori-result-card__primary,
+.ori-result-card__close {
+  padding: 5px 12px;
+  border: var(--cozy-border) solid var(--cozy-line-strong);
+  border-radius: var(--cozy-radius);
+  background: transparent;
+  color: var(--cozy-ink);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ori-result-card__primary {
+  border-color: var(--cozy-moss);
+  background: var(--cozy-moss);
+  color: var(--cozy-paper-raised);
+}
+
+.ori-result-card.is-attention .ori-result-card__primary {
+  border-color: var(--cozy-clay);
+  background: var(--cozy-clay);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-map-tile-harvest.is-landing,
+  .ori-result-card {
+    animation: none;
+  }
+
+  .ori-result-card__bar-fill {
+    transition: none;
+  }
+}

@@ -2395,13 +2395,20 @@
     // economyBadgesHTML), so the tile's label is the only place a keyboard user
     // learns it is there and how to open it.
     var economyView = economyTileView(ws.id);
-    var economyLabel =
-      economyView.pending > 0
-        ? ', ' +
-          economyView.pending +
-          (economyView.pending === 1 ? ' run to harvest' : ' runs to harvest') +
-          ', press H to see them'
-        : '';
+    // Results waiting in the same pile (task-run-show FR43, FR58).
+    var results = activity && activity.parcels ? activity.parcels : 0;
+    var pileParts = [];
+    if (economyView.pending > 0) {
+      pileParts.push(
+        economyView.pending + (economyView.pending === 1 ? ' run to harvest' : ' runs to harvest')
+      );
+    }
+    if (results > 0) {
+      pileParts.push(results + (results === 1 ? ' result waiting' : ' results waiting'));
+    }
+    var economyLabel = pileParts.length
+      ? ', ' + pileParts.join(', ') + ', press H to see them'
+      : '';
     return (
       (ws.name || 'Workspace') +
       ', ' +
@@ -4128,17 +4135,71 @@
     );
   }
 
-  function harvestPopoverHTML(workspaceName, farms) {
+  function relativeTimeLabel(value) {
+    var formatter = window.RelativeTime;
+    if (formatter && typeof formatter.formatRelativeTime === 'function') {
+      return formatter.formatRelativeTime(value);
+    }
+    return '';
+  }
+
+  /**
+   * One finished run waiting in the pile (task-run-show FR43). A run that did not
+   * work out says "Needs a look" in words, not only in clay (FR60).
+   */
+  function parcelRowHTML(parcel) {
+    var failed = parcel.outcome === 'failed' || parcel.outcome === 'timeout';
+    var when = relativeTimeLabel(parcel.produced_at);
+    var agent = String(parcel.agent_name || '').trim();
+    var details = [];
+    if (agent) details.push(agent);
+    if (failed) details.push('Needs a look');
+    return (
+      '<li class="ws-map-harvest__row ws-map-parcel' +
+      (failed ? ' is-attention' : '') +
+      '">' +
+      '<div class="ws-map-harvest__head">' +
+      '<span class="ws-map-harvest__name">' +
+      escapeHtml(parcel.title || 'Result') +
+      '</span>' +
+      (when ? '<span class="ws-map-parcel__when">' + escapeHtml(when) + '</span>' : '') +
+      '</div>' +
+      (details.length
+        ? '<p class="ws-map-harvest__tier ws-map-parcel__details">' +
+          escapeHtml(details.join(' · ')) +
+          '</p>'
+        : '') +
+      '<div class="ws-map-harvest__actions">' +
+      '<button type="button" class="ws-map-harvest__btn" data-parcel-open data-parcel-id="' +
+      escapeHtml(parcel.id) +
+      '">Open</button>' +
+      '</div>' +
+      '</li>'
+    );
+  }
+
+  // One popover for the one pile. It keeps its old title while only Farm runs
+  // are waiting, and becomes Deliveries once a finished run is too (FR43).
+  function harvestPopoverHTML(workspaceName, farms, parcels) {
+    var deliveries = parcels && parcels.length > 0;
+    var title = deliveries ? 'Deliveries' : 'Ready to harvest';
     return (
       '<div class="ori-context-menu ws-map-harvest" data-ws-map-harvest role="dialog" ' +
-      'aria-label="Ready to harvest in ' +
+      'aria-label="' +
+      title +
+      ' in ' +
       escapeHtml(workspaceName || 'this workspace') +
       '">' +
-      '<p class="ws-map-harvest__title">Ready to harvest</p>' +
+      '<p class="ws-map-harvest__title">' +
+      title +
+      '</p>' +
       '<ul class="ws-map-harvest__list">' +
       farms.map(harvestRowHTML).join('') +
+      (deliveries ? parcels.map(parcelRowHTML).join('') : '') +
       '</ul>' +
-      '<p class="ws-map-harvest__hint">Opening a result banks that Farm’s runs.</p>' +
+      (farms.length
+        ? '<p class="ws-map-harvest__hint">Opening a result banks that Farm’s runs.</p>'
+        : '') +
       '</div>'
     );
   }
@@ -4182,15 +4243,20 @@
     if (!container || typeof container.querySelector !== 'function') return false;
     var host = container.querySelector('[data-ws-map-harvest-host]');
     if (!host) return false;
-    var view = economyTileView(workspaceId);
-    var farms = view.farms.filter(function (farm) {
-      return Number((farm && farm.pending_harvest) || 0) > 0;
+    // A collapsed district's pile holds everything its hidden buildings are
+    // waiting on (task-run-show FR20), so its popover lists all of it.
+    var farms = [];
+    pileMembers(workspaceId).forEach(function (memberId) {
+      economyTileView(memberId).farms.forEach(function (farm) {
+        if (Number((farm && farm.pending_harvest) || 0) > 0) farms.push(farm);
+      });
     });
-    if (!farms.length) return false;
+    var parcels = pileParcels(workspaceId);
+    if (!farms.length && !parcels.length) return false;
 
     var workspaces = (lastMount && lastMount.state && lastMount.state.workspaces) || [];
     var ws = findWs(workspaces, workspaceId);
-    host.innerHTML = harvestPopoverHTML((ws && ws.name) || '', farms);
+    host.innerHTML = harvestPopoverHTML((ws && ws.name) || '', farms, parcels);
     var popover = host.querySelector('[data-ws-map-harvest]');
     if (!popover) {
       host.innerHTML = '';
@@ -4222,7 +4288,7 @@
           closeHarvestPopover({ restoreFocus: false });
           if (!taskID) return;
           announce(container, 'Opening the result so it can be harvested');
-          openWorkspace(workspaceId, { taskResultId: taskID });
+          openWorkspace(farmWorkspace(farms, taskID, workspaceId), { taskResultId: taskID });
         });
       });
 
@@ -4235,7 +4301,23 @@
           closeHarvestPopover({ restoreFocus: false });
           if (!taskID) return;
           announce(container, 'Opening the schedule so its cadence can be changed');
-          openWorkspace(workspaceId, { taskScheduleId: taskID });
+          openWorkspace(farmWorkspace(farms, taskID, workspaceId), { taskScheduleId: taskID });
+        });
+      });
+
+    Array.prototype.slice
+      .call(popover.querySelectorAll('[data-parcel-open]'))
+      .forEach(function (btn) {
+        btn.addEventListener('click', function (event) {
+          if (event && event.preventDefault) event.preventDefault();
+          var parcelId = btn.getAttribute('data-parcel-id') || '';
+          var origin = harvestState ? harvestState.origin : null;
+          closeHarvestPopover({ restoreFocus: false });
+          var parcel = null;
+          parcels.forEach(function (candidate) {
+            if (candidate.id === parcelId) parcel = candidate;
+          });
+          if (parcel) openParcelCard(container, parcel, origin);
         });
       });
 
@@ -4269,7 +4351,7 @@
       });
     }
 
-    var first = popover.querySelector('[data-harvest-open]');
+    var first = popover.querySelector('[data-harvest-open], [data-parcel-open]');
     if (first && typeof first.focus === 'function') first.focus();
     return true;
   }
@@ -5199,6 +5281,25 @@
           e.preventDefault();
         });
       }
+      if (!isTile) {
+        // A collapsed district's pile holds its hidden buildings' results, and
+        // H reaches it from the district's own control (task-run-show FR59).
+        el.addEventListener('keydown', function (e) {
+          if (!e || (e.key !== 'h' && e.key !== 'H')) return;
+          if (e.metaKey || e.ctrlKey || e.altKey) return;
+          var groupId = el.getAttribute('data-ws-id');
+          if (
+            !openHarvestPopover(container, groupId, {
+              origin: el,
+              event: e,
+              at: anchorForElement(el)
+            })
+          ) {
+            return;
+          }
+          e.preventDefault();
+        });
+      }
       if (selectOnly) {
         // A <button> fires click on BOTH Enter (keydown) and Space (keyup), so
         // the click handler above already gives Space its select-only meaning.
@@ -5563,6 +5664,7 @@
     if (!name || !event) return;
     var message = '';
     if (event.phase === 'started') message = name + ' started working';
+    else if (event.phase === 'parcel') message = 'Result ready in ' + name;
     else if (event.phase === 'blocked') message = name + ' needs your input';
     else if (
       event.phase === 'finished' &&
@@ -5590,11 +5692,17 @@
   function handleActivityChange(workspaceId, view) {
     var id = String(workspaceId || '');
     if (!id) return;
-    if (view && view.running && view.running.length) activityViews[id] = view;
+    var hasRunning = !!(view && view.running && view.running.length);
+    var hasParcels = !!(view && view.parcels && view.parcels.length);
+    if (hasRunning || hasParcels) activityViews[id] = view;
     else delete activityViews[id];
     var container = activityContainer();
     if (!container || !lastWorldLayout) return;
     var event = (view && view.lastEvent) || null;
+    if (event && (event.phase === 'parcel' || event.phase === 'parcel_opened')) {
+      handleParcelEvent(container, id, event);
+      return;
+    }
     var targets = [];
     var own = activityTargetFor(id);
     if (own) targets.push(own);
@@ -5621,6 +5729,248 @@
       else syncBubbleToActivity(target);
       paintActivityTarget(container, target);
     });
+  }
+
+  // ---------- parcels: the pile, landing, and the result card (task-run-show §4.7) ----------
+
+  // Parcels that arrived while their building was still saying "Done." They
+  // land when the bubble leaves, so the order on screen is the run finishing,
+  // then its result arriving (FR28, FR46).
+  var parcelsLanding = Object.create(null);
+  var cardHost = null;
+  var PARCEL_LANDING_MS = 1200;
+
+  // Which drawn pile a workspace's parcels belong to, by the same rule the
+  // lamp uses: its own tile, or the collapsed district hiding it (FR20).
+  function pileTargetFor(targetId) {
+    var id = String(targetId || '');
+    if (!lastWorldLayout || !id) return null;
+    var visible = (lastWorldLayout.nodes || []).some(function (node) {
+      return node.id === id;
+    });
+    if (visible) return { key: 'ws:' + id, kind: 'tile', id: id };
+    if (renderedDistrict(id)) return { key: 'group:' + id, kind: 'district', id: id };
+    return null;
+  }
+
+  // The workspaces whose Farm runs share a pile: the tile's own, or every
+  // building a collapsed district is hiding.
+  function pileMembers(targetId) {
+    var id = String(targetId || '');
+    var members = [id];
+    if (lastWorldLayout && renderedDistrict(id)) {
+      (lastWorldLayout.hiddenNodes || []).forEach(function (node) {
+        if (node.groupId === id) members.push(node.id);
+      });
+    }
+    return members;
+  }
+
+  function pileParcels(targetId) {
+    var pile = pileTargetFor(targetId);
+    if (!pile) return [];
+    var parcels = [];
+    Object.keys(activityViews).forEach(function (workspaceId) {
+      var view = activityViews[workspaceId];
+      if (!view || !view.parcels || !view.parcels.length) return;
+      var target = activityTargetFor(workspaceId);
+      if (!target || target.key !== pile.key) return;
+      view.parcels.forEach(function (parcel) {
+        if (!parcelsLanding[parcel.id]) parcels.push(parcel);
+      });
+    });
+    parcels.sort(function (a, b) {
+      return activityTime(b.produced_at) - activityTime(a.produced_at);
+    });
+    return parcels;
+  }
+
+  function farmWorkspace(farms, taskId, fallback) {
+    for (var i = 0; i < farms.length; i++) {
+      if (farms[i] && farms[i].task_id === taskId && farms[i].workspace_id) {
+        return farms[i].workspace_id;
+      }
+    }
+    return fallback;
+  }
+
+  function pileText(count) {
+    return count > 9 ? '9+' : '+' + count;
+  }
+
+  /**
+   * One pile per building: pending Farm runs plus unopened parcels (FR43). The
+   * pile economyBadgesHTML drew is reused and only rewritten while parcels are
+   * in it, so a building with no parcels keeps exactly the pile it had.
+   */
+  function paintParcelPile(container, target, options) {
+    if (!target || target.kind === 'unit') return;
+    var el = activityElement(container, target);
+    if (!el || typeof el.querySelector !== 'function') return;
+    var parcels = pileParcels(target.id);
+    var pending = 0;
+    pileMembers(target.id).forEach(function (memberId) {
+      pending += economyTileView(memberId).pending;
+    });
+    var pile = el.querySelector('[data-harvest-pile]');
+    var patched = !!(pile && pile.hasAttribute && pile.hasAttribute('data-pile-parcels'));
+
+    if (!parcels.length) {
+      if (!patched) return;
+      if (target.kind === 'tile' && pending > 0) {
+        pile.removeAttribute('data-pile-parcels');
+        pile.textContent = '+' + pending;
+        pile.setAttribute(
+          'aria-label',
+          pending + (pending === 1 ? ' run to harvest' : ' runs to harvest')
+        );
+        pile.setAttribute('title', 'Ready to harvest — click to see which Farms');
+      } else if (pile.parentNode) {
+        pile.parentNode.removeChild(pile);
+      }
+      return;
+    }
+
+    if (!pile) {
+      if (!canBuildElements()) return;
+      pile = activitySpan(
+        'ws-map-tile-harvest' + (target.kind === 'district' ? ' ws-map-district-pile' : '')
+      );
+      pile.setAttribute('data-harvest-pile', '');
+      pile.setAttribute('role', 'button');
+      pile.setAttribute('tabindex', '-1');
+      if (target.kind === 'district') {
+        // A district is not a button, so its pile claims its own click.
+        pile.addEventListener('click', function (event) {
+          if (event && event.preventDefault) event.preventDefault();
+          if (event && event.stopPropagation) event.stopPropagation();
+          var tag = el.querySelector('.ws-map-district-tag');
+          openHarvestPopover(container, target.id, {
+            origin: tag || null,
+            event: event,
+            at: anchorForElement(pile)
+          });
+        });
+      }
+      el.appendChild(pile);
+    }
+    var parts = [];
+    if (pending > 0) parts.push(pending + (pending === 1 ? ' run to harvest' : ' runs to harvest'));
+    parts.push(parcels.length + (parcels.length === 1 ? ' result waiting' : ' results waiting'));
+    pile.setAttribute('data-pile-parcels', String(parcels.length));
+    pile.textContent = pileText(pending + parcels.length);
+    pile.setAttribute('aria-label', parts.join(', '));
+    pile.setAttribute('title', 'Deliveries — click to see them');
+    if (options && options.landing && pile.classList) {
+      pile.classList.remove('is-landing');
+      pile.classList.add('is-landing');
+      setTimeout(function () {
+        if (pile.classList) pile.classList.remove('is-landing');
+      }, PARCEL_LANDING_MS);
+    }
+  }
+
+  function landParcel(container, workspaceId, target, parcel) {
+    delete parcelsLanding[parcel.id];
+    paintParcelPile(container, target, { landing: true });
+    if (target.kind === 'tile') {
+      paintActivityTarget(container, target);
+    }
+    announceActivity(container, workspaceId, { phase: 'parcel' });
+  }
+
+  function handleParcelEvent(container, workspaceId, event) {
+    var target = activityTargetFor(workspaceId);
+    var parcel = event.parcel || {};
+    if (!target) return;
+    if (event.phase === 'parcel_opened') {
+      delete parcelsLanding[parcel.id];
+      paintParcelPile(container, target);
+      if (target.kind === 'tile') paintActivityTarget(container, target);
+      return;
+    }
+    var bubble = activityBubbles[target.key];
+    var finishingShown = !!(bubble && bubble.finishing && bubble.line);
+    var finishingQueued = !!(bubble && bubble.pending && bubble.pending.finishing);
+    if (finishingShown || finishingQueued) {
+      // "Done." is on screen or still waiting out the previous line's dwell.
+      // Either way the parcel lands when that bubble leaves, and at the latest
+      // once both waits have passed.
+      parcelsLanding[parcel.id] = true;
+      var remainingDwell = finishingQueued
+        ? Math.max(0, bubble.shownAt + ACTIVITY_DWELL_MS - activityClock())
+        : 0;
+      var remainingFinish = finishingShown
+        ? Math.max(0, bubble.shownAt + ACTIVITY_FINISH_MS - activityClock())
+        : ACTIVITY_FINISH_MS;
+      setTimeout(function () {
+        if (!parcelsLanding[parcel.id]) return;
+        var liveContainer = activityContainer();
+        if (!liveContainer) {
+          delete parcelsLanding[parcel.id];
+          return;
+        }
+        landParcel(liveContainer, workspaceId, activityTargetFor(workspaceId) || target, parcel);
+      }, remainingDwell + remainingFinish);
+      return;
+    }
+    landParcel(container, workspaceId, target, parcel);
+  }
+
+  // The card lives outside the map's markup, placed over the map viewport, so a
+  // re-mount of the map (a workspace refresh) never closes it under the user.
+  function ensureCardHost(container) {
+    if (!canBuildElements() || !document.body) return null;
+    if (!cardHost || cardHost.isConnected === false) {
+      cardHost = document.createElement('div');
+      cardHost.className = 'ws-map-card-host';
+      cardHost.setAttribute('data-ws-map-card-host', '');
+      document.body.appendChild(cardHost);
+    }
+    var canvas = container.querySelector('.ws-map-canvas');
+    var rect =
+      canvas && typeof canvas.getBoundingClientRect === 'function'
+        ? canvas.getBoundingClientRect()
+        : null;
+    if (rect && cardHost.style) {
+      cardHost.style.left = rect.left + 'px';
+      cardHost.style.top = rect.top + 'px';
+      cardHost.style.width = rect.width + 'px';
+      cardHost.style.height = rect.height + 'px';
+    }
+    return cardHost;
+  }
+
+  function closeParcelCard() {
+    var cards = window.OriResultCard;
+    if (cards && typeof cards.close === 'function') cards.close({ restoreFocus: false });
+  }
+
+  /** Open one parcel into the result card (FR44, FR47). */
+  function openParcelCard(container, parcel, origin) {
+    var cards = window.OriResultCard;
+    if (!cards || typeof cards.open !== 'function' || !parcel || !parcel.id) return false;
+    var host = ensureCardHost(container);
+    if (!host) return false;
+    var workspaces = (lastMount && lastMount.state && lastMount.state.workspaces) || [];
+    var ws = findWs(workspaces, parcel.workspace_id);
+    cards.open({
+      host: host,
+      parcelId: parcel.id,
+      origin: origin,
+      workspaceName: ws ? ws.name : '',
+      avatarHTML: activityAvatarHTML,
+      onPrimary: function (payload) {
+        var opened = payload && payload.parcel;
+        if (opened && opened.kind === 'task' && opened.ref_id) {
+          openWorkspace(opened.workspace_id, { taskResultId: opened.ref_id });
+        }
+      },
+      onError: function () {
+        announce(container, 'That result could not be opened. It is still in its workspace.');
+      }
+    });
+    return true;
   }
 
   function activityElement(container, target) {
@@ -5704,7 +6054,9 @@
     if (!activityConnected && !force) return;
     var ws = findWs(activityWorkspaces(), workspaceId);
     if (!ws || typeof el.querySelector !== 'function') return;
-    var activity = activityConnected ? { working: agg.count > 0, agents: agg.agents } : null;
+    var activity = activityConnected
+      ? { working: agg.count > 0, agents: agg.agents, parcels: pileParcels(workspaceId).length }
+      : null;
     var working = activity ? activity.working : !!ws.active;
     var flag = el.querySelector('.ws-map-tile-flag');
     var led =
@@ -5754,6 +6106,7 @@
       patchActivityBubble(overlay, state, agg);
     }
     if (target.kind === 'tile') patchTileStatus(el, target.id, agg, force);
+    paintParcelPile(container, target);
   }
 
   /**
@@ -9768,6 +10121,7 @@
     endKeyboardMove(container, false);
     // Releasing the last subscriber closes the page's activity stream.
     disconnectActivityFeed();
+    closeParcelCard();
     container.innerHTML = '';
     // Clearing lastMount is what makes a layout response still in flight a
     // no-op when it lands: settleLayout has nothing to repaint.
