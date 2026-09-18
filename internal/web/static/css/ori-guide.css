@@ -888,6 +888,22 @@
   text-transform: uppercase;
 }
 
+/* The mission just finished, when a briefing hands over from it. */
+.ori-spotlight__done {
+  width: fit-content;
+  margin: 14px auto 0;
+  padding: 3px 12px;
+  border: 1px solid var(--ori-line);
+  border-radius: 999px;
+  background: var(--ori-paper);
+  color: var(--ori-accent-text);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .ori-spotlight__greeting {
   margin: 16px 0 18px;
   font-family: var(--font-display, Georgia, serif);

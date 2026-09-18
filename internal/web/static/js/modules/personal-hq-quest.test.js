@@ -25,8 +25,24 @@ function eligibleResponses({
   };
 }
 
-function load({ search = '', responses = eligibleResponses(), guideOverrides = {} } = {}) {
-  const calls = { fetches: [], setView: [], presented: [], cleared: 0, opened: 0 };
+function load({
+  search = '',
+  responses = eligibleResponses(),
+  guideOverrides = {},
+  // Ori's blocking layer (ori-spotlight.js), and whether it finds and fits
+  // what it is asked to show.
+  layer = false,
+  layerFits = true
+} = {}) {
+  const calls = {
+    fetches: [],
+    setView: [],
+    presented: [],
+    cleared: 0,
+    opened: 0,
+    layer: [],
+    layerClosed: 0
+  };
   const dispatched = [];
   const listeners = { window: {}, document: {} };
 
@@ -97,6 +113,22 @@ function load({ search = '', responses = eligibleResponses(), guideOverrides = {
       return true;
     }
   };
+  if (layer) {
+    const show = kind => opts => {
+      calls.layer.push({ kind, ...opts });
+      return Promise.resolve(layerFits);
+    };
+    sandbox.window.OriSpotlight = {
+      showBriefing: opts => {
+        calls.layer.push({ kind: 'briefing', ...opts });
+      },
+      showSpotlight: show('spotlight'),
+      showCallout: show('callout'),
+      close: () => {
+        calls.layerClosed += 1;
+      }
+    };
+  }
   sandbox.globalThis = sandbox;
   sandbox.fetch = sandbox.fetch.bind(sandbox);
   vm.createContext(sandbox);
@@ -468,4 +500,181 @@ test('the walkthrough is inert when the guide is not on the page', async () => {
   const bare = load({ search: '?quest=build-hq', guideOverrides: { presentQuestStep: undefined } });
   await settle();
   assert.equal(bare.calls.presented.length, 0);
+});
+
+/* ---- Ori's layer ------------------------------------------------------------ */
+
+const MISSION_BOARD = {
+  missions: [
+    { order: 1, action_url: '/?quest=meet-assistant', status: 'completed' },
+    {
+      order: 2,
+      action_url: '/?quest=build-hq',
+      status: 'available',
+      title: 'Build My HQ',
+      why: 'Give your assistant a home base.',
+      reward_craft: 5
+    }
+  ]
+};
+const withBoard = () => ({ ...eligibleResponses(), '/api/progression': MISSION_BOARD });
+const layerSteps = calls => calls.layer.map(entry => `${entry.kind}:${entry.index || ''}`);
+
+test('straight from the hire: Ori’s Mission 02 briefing, in the centre, before step 1', async () => {
+  const loaded = load({ search: '?quest=build-hq', layer: true, responses: withBoard() });
+  loaded.sandbox.window.sessionStorage = sessionWith({ 'ori:assistant-just-hired': '1' });
+  await settle();
+  await settle();
+
+  assert.deepEqual(layerSteps(loaded.calls), ['briefing:']);
+  const briefing = loaded.calls.layer[0];
+  assert.equal(briefing.done, '✓ Mission 01 complete');
+  assert.equal(briefing.greeting, 'That’s your assistant. Now let’s give them a home.');
+  assert.equal(briefing.kicker, 'Starter · Mission 02');
+  assert.equal(briefing.reward, '+5 Craft');
+  assert.equal(briefing.title, 'Build My HQ');
+  assert.equal(briefing.why, 'Give your assistant a home base.');
+  assert.deepEqual([...briefing.steps], ['Select the site', 'Open Build My HQ', 'Confirm']);
+  assert.equal(briefing.startLabel, 'Start mission');
+  assert.equal(briefing.laterLabel, 'Do this later');
+  // Nothing in Ori's panel, and the panel stays shut.
+  assert.equal(loaded.calls.opened, 0);
+  assert.deepEqual(loaded.calls.presented, []);
+  assert.deepEqual(
+    loaded.calls.setView.map(call => call.view),
+    ['map']
+  );
+
+  briefing.onStart();
+  const site = loaded.calls.layer.at(-1);
+  assert.equal(site.kind, 'spotlight');
+  assert.equal(site.index, 1);
+  assert.equal(site.total, 3);
+  assert.equal(site.coachmark, 'personal_hq_site');
+  assert.equal(site.title, 'Select the Personal HQ site');
+  assert.equal(site.body, 'The dashed site on the Map is saved for Atlas’s home base.');
+});
+
+test('the briefing still reads well without the mission board', async () => {
+  const loaded = load({ search: '?quest=build-hq', layer: true });
+  loaded.sandbox.window.sessionStorage = sessionWith({ 'ori:assistant-just-hired': '1' });
+  await settle();
+  await settle();
+  const briefing = loaded.calls.layer[0];
+  assert.equal(briefing.done, '');
+  assert.equal(briefing.reward, '');
+  assert.equal(briefing.title, 'Build My HQ');
+  assert.equal(briefing.why, 'Give Atlas a home base on the Map.');
+});
+
+test('from the mission card: step 1 at once, lit on the Map', async () => {
+  const loaded = load({ search: '?quest=build-hq', layer: true, responses: withBoard() });
+  loaded.sandbox.window.sessionStorage = sessionWith({});
+  await settle();
+  assert.deepEqual(layerSteps(loaded.calls), ['spotlight:1']);
+  assert.equal(loaded.calls.layer[0].laterLabel, 'Do this later');
+});
+
+test('the dialogs’ steps are Ori’s callout beside them; the form is never marked', async () => {
+  const loaded = load({ search: '?quest=build-hq', layer: true });
+  await settle();
+  loaded.fireWindow('ori:hq-site-selected', { dialogOpened: true });
+  const build = loaded.calls.layer.at(-1);
+  assert.equal(build.kind, 'callout');
+  assert.equal(build.index, 2);
+  assert.equal(build.coachmark, 'personal_hq_build');
+  assert.equal(build.anchor, '#cockpitContextModal .modal-dialog');
+  assert.equal(build.title, 'Open Build My HQ');
+  // The dialog has its own Do this later: not a second one beside it.
+  assert.equal(build.laterLabel, '');
+
+  loaded.fireWindow('ori:hq-quest-signal', { stage: 'build-form-opened' });
+  const confirm = loaded.calls.layer.at(-1);
+  assert.equal(confirm.kind, 'callout');
+  assert.equal(confirm.index, 3);
+  assert.equal(confirm.coachmark, undefined, 'the form was marked');
+  assert.equal(confirm.target, '#hqBuildModal .modal-dialog');
+  assert.equal(confirm.focus, false);
+  // The form's own Cancel is the way out.
+  assert.equal(confirm.laterLabel, '');
+  assert.equal(confirm.title, 'Review and confirm');
+  assert.deepEqual(layerSteps(loaded.calls), ['spotlight:1', 'callout:2', 'callout:3']);
+  assert.deepEqual(loaded.calls.presented, []);
+});
+
+test('a Map remount does not show the same step again', async () => {
+  const loaded = load({ search: '?quest=build-hq', layer: true });
+  await settle();
+  loaded.fireWindow('ori:hq-quest-signal', { stage: 'hq-status-changed', valid: false });
+  loaded.fireWindow('ori:workspaces-changed');
+  assert.deepEqual(layerSteps(loaded.calls), ['spotlight:1']);
+});
+
+test('Do this later in Ori’s layer is the same one recorded deferral', async () => {
+  for (const handOver of [true, false]) {
+    const loaded = load({ search: '?quest=build-hq', layer: true, responses: withBoard() });
+    loaded.sandbox.window.sessionStorage = sessionWith(
+      handOver ? { 'ori:assistant-just-hired': '1' } : {}
+    );
+    await settle();
+    await settle();
+    loaded.calls.layer[0].onLater();
+    const skips = loaded.dispatched.filter(
+      event => event.type === 'ori:personal-hq-action' && event.detail.action === 'skip'
+    );
+    assert.equal(skips.length, 1, handOver ? 'from the briefing' : 'from step 1');
+    assert.equal(loaded.quest.isActive(), false);
+  }
+});
+
+test('the dialog’s own Do this later ends the walkthrough, with one deferral', async () => {
+  for (const layer of [true, false]) {
+    const loaded = load({ search: '?quest=build-hq', layer });
+    await settle();
+    loaded.fireWindow('ori:hq-site-selected', { dialogOpened: true });
+    // What the Map's own button dispatches.
+    loaded.sandbox.window.dispatchEvent({
+      type: 'ori:personal-hq-action',
+      detail: { action: 'skip' }
+    });
+    assert.equal(loaded.quest.isActive(), false, layer ? 'layer' : 'panel');
+    const skips = loaded.dispatched.filter(event => event.type === 'ori:personal-hq-action');
+    assert.equal(skips.length, 1, 'the walkthrough recorded a second deferral');
+  }
+});
+
+test('Build and Import from the dialog do not end the walkthrough', async () => {
+  const loaded = load({ search: '?quest=build-hq', layer: true });
+  await settle();
+  for (const action of ['build', 'import']) {
+    loaded.fireWindow('ori:personal-hq-action', { action });
+  }
+  assert.equal(loaded.quest.isActive(), true);
+});
+
+test('no room beside a dialog: the rest of the walkthrough is in Ori’s panel', async () => {
+  const loaded = load({ search: '?quest=build-hq', layer: true, layerFits: false });
+  await settle();
+  await settle();
+  assert.deepEqual(layerSteps(loaded.calls), ['spotlight:1']);
+  assert.equal(loaded.calls.opened, 1);
+  assert.deepEqual(
+    loaded.calls.presented.map(step => step.index),
+    [1]
+  );
+  loaded.fireWindow('ori:hq-site-selected', { dialogOpened: true });
+  assert.deepEqual(
+    loaded.calls.presented.map(step => step.index),
+    [1, 2]
+  );
+});
+
+test('stop and a finished setup close Ori’s layer, briefing included', async () => {
+  const loaded = load({ search: '?quest=build-hq', layer: true, responses: withBoard() });
+  loaded.sandbox.window.sessionStorage = sessionWith({ 'ori:assistant-just-hired': '1' });
+  await settle();
+  await settle();
+  loaded.fireWindow('ori:hq-quest-signal', { stage: 'setup-succeeded' });
+  assert.equal(loaded.calls.layerClosed, 1);
+  assert.equal(loaded.quest.isActive(), false);
 });

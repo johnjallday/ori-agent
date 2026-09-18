@@ -41,7 +41,7 @@ Brief generation, workspace memory, and user-profile services remain canonical.
 | Onboarding guide name | `onboarding.Manager` and `onboarding.js` | `app_state.json` defaults the app guide name to `Ori`; PAF never treats this presentation field as the hired assistant's stable identity. |
 | Personal HQ setup | `personalhq.SetupCoordinator` through `sessionhttp.Handler.CreateFromTemplate` | Creates `personal-ops`, seeds global profiles plus stable workspace agent instances, designates the HQ, and stores provisional brief input. Partial failures return the created workspace ID. Unchanged for legacy/non-PAF builds. |
 | Post-hire HQ setup | `personalassistant.HQSetupCoordinator` over the same canonical services | The PAF-owned consequence of the guided Map quest. Reuses the already-hired global profile as entry agent, designates HQ, saves Daily Brief, and activates the relationship. Versioned and idempotent; partial failures stay resumable. |
-| Ori HQ quest walkthrough | `personal-hq-quest.js` over `ori-guide.js` presentation and the Home cockpit view seam | Deterministic, model-free, focus-only. Observational: removing it leaves the Map and build flow fully functional. |
+| Ori HQ quest walkthrough | `personal-hq-quest.js` over `ori-spotlight.js` (briefing, spotlight, callout; `ori-guide.js` presentation as the fallback) and the Home cockpit view seam | Deterministic, model-free, focus-only. Observational: removing it leaves the Map and build flow fully functional. |
 | Personal HQ identity | session/workspace agent-instance model | `Workspace.EntryAgent` selects the entry profile by name today; `AgentInstance.ID` is the stable workspace attachment that PAF binds. |
 | Daily Brief | `dailybrief.Service`, HTTP handler, scheduler, and Home renderer | Durable user/HQ-scoped config and revisions. First-open/scheduled claims enforce existing deduplication. |
 | Tickets | `workspace.TicketService` | Target-workspace-owned canonical project work; confirmation remains in the caller before creation/execution. |
@@ -210,8 +210,8 @@ a repair goes to the Agents page; on a hired install it does nothing. A provable
 orphan identity (`relationship_recovery`) opens the same panel's reconnect view
 with one Reconnect button; `relationship_recovery_blocked` shows the status and
 no button; a partial hire shows one Finish setup button that replays the same
-request. A successful hire goes straight to `/?quest=build-hq`, whose first step
-opens with the hand-over line.
+request. A successful hire goes straight to `/?quest=build-hq`, which opens with
+Ori's Mission 02 briefing and the hand-over line.
 
 One final, confirmed hire then:
 
@@ -328,22 +328,37 @@ the Map, the site context dialog, and the HQ build flow fully functional.
 
 ### Steps
 
-1. `/?quest=build-hq` opens Map view and highlights the existing reserved
-   Personal HQ site. It does **not** preselect it — selecting the highlighted
-   landmark is the first user interaction.
-2. A real user selection opens the existing context dialog; Ori then clears the
-   old mark and highlights **Build My HQ**.
+The walkthrough is shown in Ori's own layer (`ori-spotlight.js`), as Mission 01
+is. Straight from the hire (the `ori:assistant-just-hired` flag), it opens with
+Ori's Mission 02 briefing in the centre of a dimmed, inert Home: "✓ Mission 01
+complete", the hand-over line, the mission card (title, why and reward from
+`GET /api/progression`, with fixed fallbacks), its three steps, and **Start
+mission** or **Do this later**. From the mission card, `/?quest=build-hq` starts
+at step 1 directly. Without the layer, or with no room beside a dialog (a phone
+width), the steps are shown in Ori's docked panel, as before.
+
+1. `/?quest=build-hq` opens Map view and dims it around the existing reserved
+   Personal HQ site (a spotlight: only the site can be clicked). It does **not**
+   preselect it — selecting the highlighted landmark is the first user
+   interaction.
+2. A real user selection opens the existing context dialog, which dims the page
+   itself. Ori's callout stands beside it, level with **Build My HQ**, which Ori
+   marks. The dialog's own Do this later and close are the ways out.
 3. A real user activation opens the existing HQ form, which owns all editing and
-   confirmation. Ori only explains that nothing is created until confirmation.
+   confirmation. Ori's callout stands beside it, marks nothing in it, and offers
+   no way out beside the form's own Cancel. It only explains that nothing is
+   created until confirmation.
 
 ### Defer and resume
 
-**Do this later** is always allowed. It explicitly invokes the existing optional
-HQ quest's skip path, clears coachmarks and quest query state, and leaves **Build
-My HQ / Resume quest** prominent on Home. Closing Ori alone pauses presentation;
-it does not skip or complete the server-side quest. Abandoning the walkthrough,
-reloading, or disabling JavaScript leaves a resumable server-owned state, never
-an assumed completion.
+**Do this later** is always allowed: on the briefing, on step 1's callout, and in
+the site's dialog. Each explicitly invokes the existing optional HQ quest's skip
+path, once, ends the walkthrough, clears coachmarks and quest query state, and
+leaves **Build My HQ / Resume quest** prominent on Home. Escape on the briefing or
+the step 1 spotlight is Do this later. Closing a dialog (or, in the panel
+fallback, Ori's panel) only pauses presentation; it does not skip or complete the
+server-side quest. Abandoning the walkthrough, reloading, or disabling
+JavaScript leaves a resumable server-owned state, never an assumed completion.
 
 Build My HQ is never marked complete by hiring, profile creation, opening the
 quest, selecting the site, or opening the modal. Only a completed designation

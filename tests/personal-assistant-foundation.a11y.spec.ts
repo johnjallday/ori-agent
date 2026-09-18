@@ -564,23 +564,31 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await page.goto('/?quest=build-hq');
     await expect(page.locator('#onboardingModal')).toBeHidden();
 
-    // Fixed Ori/app-guide identity: this is the deterministic guide, not the
-    // hired assistant, and it says so.
-    await expect(page.locator('#oriGuidePanel')).toBeVisible();
-    await expect(page.locator('#oriGuideTitle')).toHaveText('Ori');
-    await expect(page.locator('#oriGuideRole')).toBeVisible();
-    await expect(page.locator('#oriGuideRole')).toHaveText('App Guide');
+    // The walkthrough runs in Ori's layer: a spotlight on the site, then Ori's
+    // callout beside each dialog. Fixed Ori identity: this is the deterministic
+    // guide, not the hired assistant, and it says so.
+    const layer = page.locator('#oriSpotlight');
+    const callout = layer.locator('.ori-spotlight__callout');
+    await expect(layer).toHaveAttribute('data-mode', 'spotlight');
+    await expect(callout).toHaveAttribute('role', 'dialog');
+    await expect(callout).toHaveAttribute('aria-labelledby', 'oriSpotlightTitle');
+    await expect(callout.locator('.ori-spotlight__callout-name')).toHaveText('Ori');
+    await expect(callout.locator('.ori-spotlight__callout-step')).toHaveText('Step 1 of 3');
+    await expect(page.locator('#oriGuidePanel')).toBeHidden();
 
-    // Live-region restraint: the reply is a single polite status region, not an
+    // Live-region restraint: one polite status region reads each step, not an
     // assertive one that would interrupt the user for routine step copy.
-    await expect(page.locator('#oriGuideReply')).toHaveAttribute('role', 'status');
-    await expect(page.locator('#oriGuideReply')).toHaveAttribute('aria-live', 'polite');
+    const live = layer.locator('[aria-live]');
+    await expect(live).toHaveCount(1);
+    await expect(live).toHaveAttribute('role', 'status');
+    await expect(live).toHaveAttribute('aria-live', 'polite');
 
     // Step 1: focus lands on the reserved site without a click.
     const hqSite = page.locator('[data-hq-site]');
     await expect(hqSite).toBeVisible();
     await expect(hqSite).toBeFocused();
-    await expect(page.locator('#oriGuideReply')).toContainText('Atlas is hired');
+    await expect(live).toContainText('Select the Personal HQ site');
+    await expect(live).toContainText('Atlas’s home base');
 
     // The pointer is decoration over the coachmark: hidden from assistive tech,
     // not focusable, and unable to swallow the click it points at. The outline
@@ -592,11 +600,14 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     // Under reduced motion it stays as a static "here" marker, without movement.
     expect(await hand.evaluate(el => getComputedStyle(el).animationName)).toBe('none');
 
-    // Keyboard-only from here: Enter selects the site.
+    // Keyboard-only from here: Enter selects the site. The site's dialog dims
+    // the page itself, so Ori's callout stands beside it without a second dim.
     await page.keyboard.press('Enter');
     const buildAction = page.locator('[data-hq-action="build"]');
     await expect(buildAction).toBeVisible();
-    await expect(page.locator('#oriGuideReply')).toContainText('open Build My HQ');
+    await expect(layer).toHaveAttribute('data-mode', 'callout');
+    await expect(callout.locator('.ori-spotlight__callout-title')).toHaveText('Open Build My HQ');
+    await expect(buildAction).toHaveClass(/is-ori-coachmark/);
 
     // Keyboard-only: Tab to the Build action (or activate it directly if
     // already focused by the coachmark) and press Enter/Space to open the form.
@@ -606,9 +617,12 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await page.keyboard.press('Enter');
 
     await expect(page.locator('#hqBuildModal')).toBeVisible();
-    await expect(page.locator('#oriGuideReply')).toContainText(
-      'Nothing is created until you confirm'
-    );
+    await expect(callout.locator('.ori-spotlight__callout-title')).toHaveText('Review and confirm');
+    await expect(callout).toContainText('Nothing is created until you confirm');
+    // The form is the user's: Ori marks nothing in it and offers no second way
+    // out beside its own Cancel.
+    await expect(page.locator('#hqBuildModal .is-ori-coachmark')).toHaveCount(0);
+    await expect(callout.locator('button')).toHaveCount(0);
 
     // Keyboard-only completion of the form itself.
     await page.locator('#hqBuildName').focus();

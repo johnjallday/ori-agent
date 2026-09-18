@@ -6,6 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  besideWidth,
   holeFor,
   placeBeside,
   placeCallout,
@@ -91,6 +92,21 @@ test('beside a form: the right side when the left is full, and none on a phone',
     placeBeside(sheet, field, { width: 400, height: 900 }, { width: 340, height: 150 }),
     null
   );
+});
+
+test('beside a centred dialog the callout narrows before it gives up', () => {
+  // 1280px, Bootstrap's 500px dialog: 390px each side, room for the full callout.
+  assert.equal(besideWidth({ left: 390, top: 200, width: 500, height: 400 }, view), 340);
+  // A 1100px laptop: 300px each side, a narrower callout.
+  const laptop = { width: 1100, height: 800 };
+  assert.equal(besideWidth({ left: 300, top: 200, width: 500, height: 400 }, laptop), 266);
+  // A phone sheet: none.
+  assert.equal(
+    besideWidth({ left: 8, top: 8, width: 374, height: 800 }, { width: 390, height: 844 }),
+    0
+  );
+  // The wider side wins.
+  assert.equal(besideWidth({ left: 858, top: 0, width: 380, height: 900 }, view), 340);
 });
 
 test('beside a form: a field near the bottom keeps the callout on screen', () => {

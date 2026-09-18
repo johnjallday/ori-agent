@@ -123,6 +123,18 @@ export function placeBeside(anchor, target, viewport, size, { gap = 18, gutter =
   return { left: Math.round(left), top: Math.round(top), side, arrow: Math.round(arrow) };
 }
 
+/*
+ * besideWidth is how wide a callout beside a region can be: its usual 340px, or
+ * down to 260px when that is all the room the wider side leaves (a centred
+ * dialog on a laptop). 0 means no room at all.
+ */
+export function besideWidth(anchor, viewport, { gap = 18, gutter = 16 } = {}) {
+  const left = anchor.left - gap - gutter;
+  const right = viewport.width - (anchor.left + anchor.width) - gap - gutter;
+  const room = Math.floor(Math.max(left, right));
+  return room >= 260 ? Math.min(340, room) : 0;
+}
+
 /* ---- DOM ------------------------------------------------------------------- */
 
 const ROOT_ID = 'oriSpotlight';
@@ -173,7 +185,18 @@ function viewport() {
   };
 }
 
-function resolveTarget(key) {
+function visible(node) {
+  return !!node && doc().contains(node) && node.getClientRects().length > 0;
+}
+
+// A step names its control by coachmark key (Ori marks it), or by a plain
+// selector for a region Ori only stands beside and never marks: a form that
+// owns its own focus, for instance. Either way, only a visible element counts.
+function resolveTarget(key, selector) {
+  if (!key) {
+    const node = selector ? doc().querySelector(selector) : null;
+    return visible(node) ? node : null;
+  }
   const registry = win().OriGuideCoachmarks;
   if (!registry || typeof registry.resolve !== 'function') return null;
   return registry.resolve(key, win().location.pathname || '/', doc());
@@ -204,7 +227,9 @@ function ensureRoot() {
   // A click on the dimmed page is a click on nothing. Say so, gently: the
   // callout nudges toward the control that is the way on.
   scrim.addEventListener('click', () => nudge());
+  // One polite status region reads each step, never an assertive one.
   const live = el('p', 'visually-hidden');
+  live.setAttribute('role', 'status');
   live.setAttribute('aria-live', 'polite');
   root.append(scrim, live);
   doc().body.appendChild(root);
@@ -220,6 +245,11 @@ function ensureRoot() {
     restoreInert: null,
     onLater: null,
     key: '',
+    selector: '',
+    // Whether the step moves focus to its control, and when the frame loop
+    // last put a dropped mark back.
+    focus: false,
+    remarkedAt: 0,
     target: null,
     anchor: '',
     size: null,
@@ -301,6 +331,8 @@ export function isOpen() {
  * showBriefing puts Ori in the centre with one mission.
  *
  *   guideName, greeting   who is speaking, and what they say first
+ *   done                   optional line above the greeting: the mission just
+ *                          finished, when this briefing hands over from it
  *   kicker, title, why     the mission card
  *   steps                  the clicks ahead, as short labels
  *   reward, unlocks        what finishing it gives (either may be empty)
@@ -369,7 +401,9 @@ export function showBriefing(opts = {}) {
   notNow.dataset.oriSpotlight = 'later';
   actions.append(start, notNow);
 
-  card.append(who, greeting, mission, actions);
+  card.append(who);
+  if (opts.done) card.append(el('p', 'ori-spotlight__done', opts.done));
+  card.append(greeting, mission, actions);
   if (opts.note) card.append(el('p', 'ori-spotlight__note', opts.note));
 
   start.addEventListener('click', () => {
@@ -389,11 +423,13 @@ export function showBriefing(opts = {}) {
  * showSpotlight dims the page around one registered control and puts Ori's
  * callout beside it.
  *
- *   coachmark      the control's key in OriGuideCoachmarks
+ *   coachmark      the control's key in OriGuideCoachmarks (or, for a callout,
+ *                  `target`: a selector for a region Ori stands beside and
+ *                  never marks)
  *   index, total   "Step n of total"
  *   title, body    what to press, and why
  *   note           optional reassurance line
- *   laterLabel     the way out ("Not now")
+ *   laterLabel     the way out ("Not now"); '' for none
  *   onLater        called when the user leaves
  *   focus          false to mark without moving focus
  *
@@ -422,7 +458,7 @@ function waitAndPresent(opts, mode) {
   return new Promise(resolve => {
     let frames = 0;
     const attempt = () => {
-      const target = key ? resolveTarget(key) : null;
+      const target = key || opts.target ? resolveTarget(key, opts.target) : null;
       if (target && (mode !== 'callout' || roomBeside(target, opts.anchor))) {
         present(target, key, opts, mode);
         resolve(true);
@@ -447,12 +483,11 @@ function anchorFor(target, anchor) {
 // Whether a callout of the usual width fits beside the region. A phone-width
 // sheet that fills the screen has no beside.
 function roomBeside(target, anchor) {
-  const size = { width: Math.min(340, viewport().width - 32), height: 160 };
-  return !!placeBeside(
-    anchorFor(target, anchor).getBoundingClientRect(),
-    target.getBoundingClientRect(),
-    viewport(),
-    size
+  const region = anchorFor(target, anchor).getBoundingClientRect();
+  const width = besideWidth(region, viewport());
+  return (
+    width > 0 &&
+    !!placeBeside(region, target.getBoundingClientRect(), viewport(), { width, height: 160 })
   );
 }
 
@@ -464,6 +499,8 @@ function present(target, key, opts, mode) {
   layer.root.dataset.mode = mode;
   layer.onLater = opts.onLater || null;
   layer.key = key;
+  layer.selector = key ? '' : opts.target || '';
+  layer.focus = opts.focus !== false;
   layer.target = target;
   layer.anchor = opts.anchor || '';
   // A callout leaves the page alone; a spotlight dims it around the control.
@@ -489,11 +526,15 @@ function present(target, key, opts, mode) {
     el('span', 'ori-spotlight__callout-step', `Step ${opts.index} of ${opts.total}`)
   );
   head.append(meta);
-  const notNow = el('button', 'ori-spotlight__callout-later', opts.laterLabel || 'Not now');
-  notNow.type = 'button';
-  notNow.dataset.oriSpotlight = 'later';
-  notNow.addEventListener('click', () => later());
-  head.append(notNow);
+  // laterLabel: '' offers no way out here, for a step whose own form already
+  // has one (its Cancel).
+  if (opts.laterLabel !== '') {
+    const notNow = el('button', 'ori-spotlight__callout-later', opts.laterLabel || 'Not now');
+    notNow.type = 'button';
+    notNow.dataset.oriSpotlight = 'later';
+    notNow.addEventListener('click', () => later());
+    head.append(notNow);
+  }
 
   const title = el('h2', 'ori-spotlight__callout-title', opts.title || '');
   title.id = 'oriSpotlightTitle';
@@ -542,8 +583,14 @@ function present(target, key, opts, mode) {
     .join(' ')
     .trim();
 
-  win().OriGuide?.markControl?.(key, { awaitTarget: true, focus: opts.focus !== false });
-  if (opts.focus !== false && !win().OriGuide?.markControl) target.focus?.();
+  // Only a registered control is marked (and, unless told otherwise, focused).
+  // A region named by selector is stood beside, never touched.
+  if (key) {
+    win().OriGuide?.markControl?.(key, { awaitTarget: true, focus: opts.focus !== false });
+    if (opts.focus !== false && !win().OriGuide?.markControl) target.focus?.();
+  } else {
+    win().OriGuide?.clearControlMark?.();
+  }
 
   stopTracking();
   layer.lastClip = '';
@@ -558,11 +605,31 @@ function present(target, key, opts, mode) {
 function track() {
   if (!current || (current.mode !== 'spotlight' && current.mode !== 'callout')) return;
   let target = current.target;
-  if (!target || !doc().contains(target)) {
-    target = resolveTarget(current.key);
+  // Re-rendered away, or hidden (a dialog closed under it): look again. A
+  // callout whose control is gone steps aside until it is back.
+  if (!visible(target)) {
+    target = resolveTarget(current.key, current.selector);
     current.target = target;
   }
   const callout = current.callout;
+  if (callout && !target) callout.hidden = true;
+  // A page that removes the control and adds it back a frame later leaves
+  // Ori's coachmark with nothing to re-anchor to in between, and it drops the
+  // mark. The control is back, so the mark goes back on it. Focus goes with it
+  // only when the removal took focus and nothing else has it since.
+  const now = Date.now();
+  if (
+    target &&
+    current.key &&
+    !target.classList.contains('is-ori-coachmark') &&
+    now - current.remarkedAt > 250 &&
+    resolveTarget(current.key) === target
+  ) {
+    current.remarkedAt = now;
+    const active = doc().activeElement;
+    const focusLost = current.focus && (!active || active === doc().body);
+    win().OriGuide?.markControl?.(current.key, { focus: focusLost });
+  }
   if (target) {
     const rect = target.getBoundingClientRect();
     const view = viewport();
@@ -583,7 +650,12 @@ function track() {
       if (size) place = placeCallout(hole, view, size);
     } else if (size) {
       const anchor = anchorFor(target, current.anchor).getBoundingClientRect();
-      place = placeBeside(anchor, rect, view, size);
+      // Narrower beside a centred dialog on a laptop, rather than not at all.
+      const width = besideWidth(anchor, view);
+      if (width > 0 && callout.style.width !== `${width}px`) {
+        callout.style.width = `${width}px`;
+      }
+      place = width > 0 ? placeBeside(anchor, rect, view, { width, height: size.height }) : null;
     }
     if (callout) {
       // No room beside the form any more (a window made narrow): step aside

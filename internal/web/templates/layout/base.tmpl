@@ -284,6 +284,10 @@
     It is purely additive — removing this one line leaves the Map and Build My HQ
     fully functional.
   -->
+  <!-- Ori's blocking layer (window.OriSpotlight): the briefings, spotlights and
+       callouts Build My HQ and Mission 01 walk through. Before them: modules
+       run in document order. -->
+  <script type="module" src="/js/modules/ori-spotlight.js"></script>
   <script type="module" src="/js/modules/personal-hq-quest.js"></script>
   <!-- Mission 03's walkthrough. Inert without ?quest=tidy-downloads: no request
        on a plain page load. -->

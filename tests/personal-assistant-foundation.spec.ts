@@ -516,12 +516,22 @@ test.describe('Personal Assistant Foundation first value', () => {
     expect(relationshipState).toBe('needs_hq');
     expect(hqSetupCalls).toBe(0);
 
-    // Step 1: Ori hands over and highlights the reserved site. The quest
-    // clears ?quest= from the URL once it starts (so Back/reload can't restart
-    // it), so the durable evidence is the quest's own presentation.
-    await expect(page.locator('#oriGuidePanel')).toBeVisible();
-    await expect(reply).toContainText('That’s your assistant. Now let’s give them a home.');
-    await expect(reply).toContainText('Step 1 of 3');
+    // Ori hands over in a Mission 02 briefing, in the centre. The quest clears
+    // ?quest= from the URL once it starts (so Back/reload can't restart it), so
+    // the durable evidence is the quest's own presentation.
+    const hqBriefing = layer.locator('.ori-spotlight__briefing');
+    await expect(hqBriefing).toBeVisible();
+    await expect(hqBriefing.locator('.ori-spotlight__greeting')).toHaveText(
+      'That’s your assistant. Now let’s give them a home.'
+    );
+    await expect(hqBriefing.locator('.ori-spotlight__kicker')).toHaveText('Starter · Mission 02');
+    await expect(hqBriefing.locator('.ori-spotlight__step')).toHaveCount(3);
+    await expect(page.locator('#oriGuidePanel')).toBeHidden();
+    await hqBriefing.locator('[data-ori-spotlight="start"]').press('Enter');
+
+    // Step 1: the Map dimmed around the reserved site.
+    await expect(layer).toHaveAttribute('data-mode', 'spotlight');
+    await expect(callout.locator('.ori-spotlight__callout-step')).toHaveText('Step 1 of 3');
     const hqSite = page.locator('[data-hq-site]');
     await expect(hqSite).toBeVisible();
     // The Map re-mounts the site a few frames after Ori focuses it; focus must
@@ -534,7 +544,10 @@ test.describe('Personal Assistant Foundation first value', () => {
     // The user selects the site with the keyboard — never the walkthrough.
     await hqSite.press('Enter');
 
-    // Step 2: the context dialog is open; Ori highlights Build My HQ.
+    // Step 2: the context dialog is open; Ori highlights Build My HQ. On a
+    // phone the dialog fills the width, with no room beside it for Ori's
+    // callout, so the rest of the walkthrough is in Ori's panel.
+    await expect(layer).toHaveCount(0);
     const buildAction = page.locator('[data-hq-action="build"]');
     await expect(buildAction).toBeVisible();
     await expect(page.locator('#oriGuideReply')).toContainText('open Build My HQ');
