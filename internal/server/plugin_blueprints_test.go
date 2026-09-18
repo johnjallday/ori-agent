@@ -10,6 +10,36 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
+// Creation's host-feature check and the one install validates against must be
+// the same list. When they were two lists, adding a feature made a plugin that
+// requires it install cleanly and then vanish from the blueprint picker at
+// creation, with nothing to explain why.
+func TestCreationAcceptsEveryHostFeatureInstallDoes(t *testing.T) {
+	for _, feature := range plugin.HostFeatures() {
+		if !pluginHostFeaturesAvailable([]string{feature}) {
+			t.Errorf("install advertises %q but creation refuses it", feature)
+		}
+	}
+	if !pluginHostFeaturesAvailable(plugin.HostFeatures()) {
+		t.Error("creation refuses the complete advertised feature set")
+	}
+	if pluginHostFeaturesAvailable([]string{"a_feature_this_build_does_not_have"}) {
+		t.Error("creation accepted an unknown host feature")
+	}
+	if pluginHostFeaturesAvailable([]string{plugin.HostFeatureSetupQuestsV2, plugin.HostFeatureSetupQuestsV2}) {
+		t.Error("creation accepted a duplicated host feature")
+	}
+	// The reviewed REAPER integration is the concrete case: it requires the
+	// newest feature, so a drifted list would hide its blueprint at creation.
+	if !pluginHostFeaturesAvailable([]string{
+		plugin.HostFeatureAssistantProgramV1, plugin.HostFeatureSpecialistSetupJourneyV1,
+		plugin.HostFeatureSetupQuestsV2, plugin.HostFeatureTemplateGroupRequirementsV1,
+		plugin.HostFeatureBlueprintInputsV1,
+	}) {
+		t.Error("creation refuses a plugin that declares inputs, so its blueprints would be inactive")
+	}
+}
+
 func TestPluginBlueprintSupersedesMatchingBuiltinOnlyWhileActive(t *testing.T) {
 	owner := &workspace.PluginTemplateOwner{PluginID: "owner", BlueprintID: "song", BlueprintVersion: 1}
 	existing := []projecttemplates.Template{
