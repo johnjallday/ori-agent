@@ -722,6 +722,8 @@ function renderAgentDetails() {
   const descEl = document.getElementById('agentDescription');
   if (descEl) descEl.textContent = description;
 
+  renderAgentOrigin();
+
   const modelEl = document.getElementById('agentModel');
   if (modelEl) modelEl.textContent = currentAgent.model || 'Not set';
 
@@ -855,6 +857,67 @@ function renderCurrentAgentAvatar() {
   avatar.style.overflow = 'hidden';
 }
 
+// A workspace's own agent (read from that workspace's copy) is edited in the
+// workspace, so the page hides its editing controls and offers "Add to my
+// agents" instead. One of the user's own agents names the workspaces that hold
+// a customised copy of it.
+const WORKSPACE_EDIT_CONTROLS = [
+  'editProfileButton',
+  'deleteButton',
+  'editConfigBtn',
+  'editPromptBtn'
+];
+
+function isWorkspaceOwnedAgent() {
+  return Boolean(window.AgentOrigin && window.AgentOrigin.isWorkspaceOwned(currentAgent));
+}
+
+function renderAgentOrigin() {
+  const origin = window.AgentOrigin;
+  const owned = isWorkspaceOwnedAgent();
+  const note = document.getElementById('agentOriginNote');
+  if (note) {
+    const text = !origin
+      ? ''
+      : owned
+        ? `${origin.workspaceMarker(currentAgent)}. Edit it in that workspace, or add it to your agents.`
+        : origin.customisedInLabel(currentAgent);
+    note.textContent = text;
+    note.hidden = !text;
+  }
+  const addButton = document.getElementById('addToMyAgentsButton');
+  if (addButton) addButton.hidden = !owned;
+  WORKSPACE_EDIT_CONTROLS.forEach(id => {
+    const control = document.getElementById(id);
+    if (control) control.hidden = owned;
+  });
+}
+
+async function addToMyAgents() {
+  if (!isWorkspaceOwnedAgent()) return;
+  const button = document.getElementById('addToMyAgentsButton');
+  if (button) button.disabled = true;
+  try {
+    const response = await fetch('/api/agents/add-from-workspace', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        workspace_id: currentAgent.origin.workspace_id,
+        name: currentAgent.name || agentName
+      })
+    });
+    if (!response.ok) {
+      throw new Error(await readResponseError(response, 'This agent could not be added.'));
+    }
+    showToast(`${currentAgent.name || agentName} is now one of your agents.`, 'success');
+    await refreshAgentDetails();
+  } catch (error) {
+    showToast(error.message || 'This agent could not be added.', 'error');
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 function getAvatarURL(filename) {
   return `/avatars/${encodeURIComponent(String(filename || ''))}`;
 }
@@ -868,6 +931,7 @@ function setupProfileEditor() {
 
   editButton?.addEventListener('click', openProfileEditor);
   saveButton?.addEventListener('click', saveProfileChanges);
+  document.getElementById('addToMyAgentsButton')?.addEventListener('click', addToMyAgents);
   tagsContainer?.addEventListener('click', () => tagsInput?.focus());
   tagsInput?.addEventListener('keydown', event => {
     const value = tagsInput.value.trim();

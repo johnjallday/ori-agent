@@ -271,6 +271,8 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 		// row (FR-49/FR-104).
 		Appearance       map[string]any `json:"appearance"`
 		PresentationRole string         `json:"presentation_role,omitempty"`
+		// Origin: see AgentListItem.Origin.
+		Origin *store.AgentOrigin `json:"origin,omitempty"`
 	}
 	annotate := func(info AgentInfo) AgentInfo {
 		if m, ok := memberships[strings.ToLower(strings.TrimSpace(info.Name))]; ok {
@@ -296,6 +298,7 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 				Status:     agent.Status,
 				Evolution:  cloneAgentEvolution(agent),
 				Appearance: appearanceForAgent(agent),
+				Origin:     originFor(h.State, name),
 			}))
 		} else {
 			// Fallback for agents that couldn't be loaded
@@ -484,6 +487,12 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	agent, ok := h.State.GetAgent(agentName)
 	if !ok || agent == nil {
 		orihttp.NotFound(w, "Agent not found")
+		return
+	}
+	// Refused before anything below mutates the record: an agent only a
+	// workspace holds is that workspace's copy, edited there.
+	if owned := workspaceOwnedAgent(h.State, agentName); owned != nil {
+		WriteAgentStoreError(w, "Failed to update agent", owned)
 		return
 	}
 
@@ -844,6 +853,10 @@ func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) {
 	// Deletion lifecycle (store delete, session purge, activity log) is shared
 	// with the bulk endpoint so the two paths cannot drift (PRD FR52).
 	if err := h.performAgentDeletion(r.Context(), name); err != nil {
+		if errors.Is(err, store.ErrWorkspaceOwnedAgent) || errors.Is(err, store.ErrAgentRootUnavailable) {
+			WriteAgentStoreError(w, "Failed to delete agent", err)
+			return
+		}
 		orihttp.BadRequest(w, err.Error())
 		return
 	}

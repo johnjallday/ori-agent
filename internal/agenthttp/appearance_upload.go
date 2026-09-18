@@ -303,6 +303,10 @@ func (h *AppearanceUploadHandler) remove(w http.ResponseWriter, r *http.Request,
 // warning. The tokens arrive as form fields because multipart has no JSON body:
 // `expected_version` and `confirm_shared_edit` (FR-16/FR-42).
 func (h *AppearanceUploadHandler) checkMutationGuards(w http.ResponseWriter, r *http.Request, ag *agent.Agent, agentName string) bool {
+	if owned := workspaceOwnedAgent(h.State, agentName); owned != nil {
+		WriteAgentStoreError(w, "Failed to update agent", owned)
+		return false
+	}
 	if expected := strings.TrimSpace(r.FormValue("expected_version")); expected != "" {
 		current := agentConfigVersion(ag)
 		if expected != current {

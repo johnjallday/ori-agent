@@ -140,6 +140,80 @@ Delete an existing agent and all its configuration.
 }
 ```
 
+### Where agents live, and the roster list
+
+The user's agents are stored in the Workspace Directory at
+`<root>/Agents/<Name>/` (`agent_settings.json` plus sidecar files); the
+built-in assistant stays in the app data dir. Runtime state (status,
+statistics, evolution) is kept in `<data dir>/agent_state/`. Agents that only
+a trusted workspace holds (its own copy under `<workspace>/agents/`) are read
+in place and appear in the roster too.
+
+**Endpoint:** `GET /api/agents/dashboard/list` (also `GET /api/agents` and
+`GET /api/agents/{name}/detail` for the `origin` object)
+
+Each stored agent carries an `origin` object. `source` on the entry itself is
+unchanged (`user` or `cli`) because it also seeds the generated appearance.
+
+```json
+{
+  "agents": [
+    {
+      "name": "Scout",
+      "source": "user",
+      "origin": {
+        "source": "roster",
+        "customised_in": [{ "id": "ws-1", "name": "Studio" }]
+      }
+    },
+    {
+      "name": "Stranger",
+      "source": "user",
+      "origin": { "source": "workspace", "workspace_id": "ws-1", "workspace_name": "Studio" }
+    }
+  ],
+  "agent_root": {
+    "path": "/Users/me/Ori Workspaces/Agents",
+    "available": true,
+    "migration": { "status": "done", "skipped": [] }
+  }
+}
+```
+
+- `origin.source`: `system` (the built-in assistant), `roster` (the user's
+  own agent), or `workspace` (only a trusted workspace holds it).
+- `origin.customised_in`: workspaces holding their own copy of a `system` or
+  `roster` agent.
+- `agent_root.available` is false with `reason` `missing` when the Workspace
+  Directory cannot be found, or `occupied_by_workspace` when a workspace named
+  "Agents" holds that folder. `agent_root.migration.status` is one of `done`,
+  `blocked_by_workspace`, `not_writable`, `backup_failed`, `incomplete`,
+  `root_missing`.
+
+**Errors on writes to an agent:**
+- `409` `{"code": "agent_changed_on_disk"}` — the definition file was edited
+  outside Ori; Ori reloaded it. Review it and try again.
+- `409` `{"code": "workspace_owned_agent", "workspace_id", "workspace_name"}` —
+  only a workspace holds this agent; edit it there, or add it to your agents.
+- `503` `{"code": "agent_root_unavailable"}` — the Workspace Directory was not
+  found.
+
+### Add a Workspace's Agent to Your Agents
+
+Copy an agent that only a trusted workspace holds into the user's own agents
+(`<root>/Agents/<Name>/`). Nothing does this automatically.
+
+**Endpoint:** `POST /api/agents/add-from-workspace`
+
+**Request Body:**
+```json
+{ "workspace_id": "ws-1", "name": "Stranger" }
+```
+
+**Responses:** `201` `{"success": true, "name": "Stranger", "origin": {...}}`;
+`404` when that workspace holds no such agent; `409` `{"code": "agent_exists"}`
+when one of your agents already has the name.
+
 ## Home Assistant Routing API
 
 ### Route Home Assistant Task

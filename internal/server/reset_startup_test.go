@@ -61,7 +61,7 @@ func TestResetLifecycleAgentPolicyPreventsLegacyProfileReadoption(t *testing.T) 
 	}
 }
 
-func TestResetLifecycleLocalAllowlistBackfillRestoresRetainedAgentSnapshot(t *testing.T) {
+func TestResetLifecycleLocalAllowlistBackfillShowsRetainedAgentCopy(t *testing.T) {
 	f := resetfixture.NewSeeded(t)
 	p := f.Paths()
 	folders, err := workspace.NewFileStore(p.Workspaces)
@@ -78,17 +78,17 @@ func TestResetLifecycleLocalAllowlistBackfillRestoresRetainedAgentSnapshot(t *te
 	ws.AgentInstances = []workspace.AgentInstance{{ID: "fixture-instance", Name: resetfixture.AgentName}}
 	requireResetNoError(t, folders.Save(ws))
 	requireResetNoError(t, folders.SaveWorkspaceAgent(ws.ID, resetfixture.AgentName, agent))
-	empty, err := store.NewFileStore(filepath.Join(p.DataDir, "empty", "agents.json"), types.Settings{})
-	requireResetNoError(t, err)
 	allowlist := workspace.NewAllowlist(filepath.Join(p.DataDir, workspace.DefaultAllowlistFilename))
-	workspace.RestoreAllowlistedWorkspaceAgents(folders, empty, allowlist)
-	if len(empty.ListAgents()) != 0 {
-		t.Fatal("empty allowlist unexpectedly restored snapshots")
+	// The roster reads trusted workspaces' agent copies in place; the allowlist
+	// decides which workspaces are trusted.
+	source := workspace.NewTrustedWorkspaceAgentSource(folders, allowlist)
+	if entries := source.WorkspaceAgents(); len(entries) != 0 {
+		t.Fatalf("an empty allowlist showed workspace agents: %+v", entries)
 	}
 	workspace.BackfillLocalWorkspacesIntoAllowlist(folders, allowlist)
-	workspace.RestoreAllowlistedWorkspaceAgents(folders, empty, allowlist)
-	if _, found := empty.GetAgent(resetfixture.AgentName); !found {
-		t.Fatal("expected physical workspace backfill to re-enable snapshot hydration")
+	entries := source.WorkspaceAgents()
+	if len(entries) != 1 || entries[0].AgentName != resetfixture.AgentName {
+		t.Fatalf("expected the physical workspace backfill to show its agent copy, got %+v", entries)
 	}
 }
 

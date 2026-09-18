@@ -23,6 +23,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
 	"github.com/johnjallday/ori-agent/internal/pathselection"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/trigger"
 	"github.com/johnjallday/ori-agent/internal/triggerhttp"
@@ -331,31 +332,29 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 
 		// Treat the local workspace tree (~/Ori Workspaces) as owned by this data
 		// directory: backfill every workspace physically present there into the
-		// allowlist so agents from workspaces created locally are restored (and
-		// not wiped) on startup. Foreign workspaces that are not in the local
-		// folder tree stay gated, preserving cross-worktree isolation. Runs before
-		// the wipe/restore below.
+		// allowlist so its agents show in the roster. Foreign workspaces that are
+		// not in the local folder tree stay gated, preserving cross-worktree
+		// isolation.
 		if agentRehydrationApproved {
 			if fileStore != nil && startupMaintenanceApproved {
 				workspace.BackfillLocalWorkspacesIntoAllowlist(fileStore, allowlist)
 			}
-
-			// First wipe agents whose only source is a non-allowlisted workspace
-			// snapshot — keeps cross-worktree contamination from lingering after
-			// the user revokes (or never granted) an import.
-			if fileStore != nil && startupMaintenanceApproved {
-				workspace.WipeNonAllowlistedAgentSnapshots(fileStore, b.st, allowlist)
-			}
-			workspace.WipeNonAllowlistedAgentSnapshots(ws, b.st, allowlist)
-
-			// Restore only allowlisted workspaces' agent snapshots.
-			if fileStore != nil && startupMaintenanceApproved {
-				workspace.RestoreAllowlistedWorkspaceAgents(fileStore, b.st, allowlist)
-			}
-			workspace.RestoreAllowlistedWorkspaceAgents(ws, b.st, allowlist)
 			workspace.SnapshotAllWorkspaces(ws, b.st)
 			if fileStore != nil && startupMaintenanceApproved {
 				workspace.SnapshotAllWorkspaces(fileStore, b.st)
+			}
+
+			// Nothing is copied into the agent store any more: the roster reads
+			// each trusted workspace's own agent copies where they are. The
+			// allowlist is now a "do not show" gate instead of a "do not
+			// restore" one. Connected after the snapshots above, so those never
+			// copy one workspace's agent into another.
+			if composite, ok := b.st.(*store.CompositeStore); ok {
+				source := ws
+				if fileStore != nil {
+					source = fileStore
+				}
+				composite.SetWorkspaceAgentSource(workspace.NewTrustedWorkspaceAgentSource(source, allowlist))
 			}
 		}
 		ws = workspace.NewAgentSnapshotStore(ws, b.st)

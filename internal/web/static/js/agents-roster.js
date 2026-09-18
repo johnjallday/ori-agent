@@ -598,13 +598,18 @@
     var level = evo.level || 0;
     var stage = evo.stage || 'spark';
 
+    var workspaceOwned = isWorkspaceOwned(a);
     var vm = {
       name: (a && a.name) || '',
       source: agentSourceKind(a),
       builtIn: builtIn,
+      // An agent only a workspace holds is that workspace's own copy: it is
+      // edited there, so here it is read-only and cannot be selected.
+      workspaceOwned: workspaceOwned,
+      originMarker: window.AgentOrigin ? window.AgentOrigin.workspaceMarker(a) : '',
       // Built-in CLI definitions and the system assistant have no editable
       // definition here; the server rejects mutation and deletion alike.
-      editable: !builtIn,
+      editable: !builtIn && !workspaceOwned,
       health: agentHealth(a),
       // healthText is what the card's status chip prints, so the chip, the
       // summary tiles, and the quick filters all state the same three buckets.
@@ -847,6 +852,10 @@
 
   function agentSourceKind(a) {
     return String((a && a.source) || 'user').toLowerCase() === 'cli' ? 'cli' : 'user';
+  }
+
+  function isWorkspaceOwned(a) {
+    return !!(window.AgentOrigin && window.AgentOrigin.isWorkspaceOwned(a));
   }
 
   function filtersActive() {
@@ -1634,6 +1643,7 @@
     li.className =
       'roster-card' +
       (vm.builtIn ? ' is-permanent' : '') +
+      (vm.workspaceOwned ? ' is-workspace-owned' : '') +
       (vm.health === 'needs' ? ' is-attention' : '') +
       (vm.health === 'disabled' ? ' is-disabled' : '');
     li.dataset.name = vm.name;
@@ -1654,7 +1664,9 @@
     // corner without adding a row to a ~120px card; the button's aria-label
     // already states everything it shows, so it announces nothing twice.
     li.innerHTML =
-      '<label class="roster-card__checkwrap">' +
+      '<label class="roster-card__checkwrap"' +
+      (vm.workspaceOwned ? ' hidden' : '') +
+      '>' +
       '<span class="visually-hidden">Select ' +
       esc(vm.name) +
       '</span>' +
@@ -1691,6 +1703,7 @@
   function cardSpokenLabel(vm) {
     var parts = [vm.name];
     if (vm.builtIn) parts.push('built-in');
+    if (vm.originMarker) parts.push(vm.originMarker);
     if (vm.favorite) parts.push('favorite');
     parts.push(vm.roleLabel);
     if (!vm.builtIn) parts.push(vm.progressLabel);
@@ -1739,6 +1752,9 @@
     var classBits = [esc(vm.roleLabel)];
     if (!vm.builtIn) classBits.push(esc(vm.levelLabel));
     var roleLine = '<span class="agent-card__class">' + classBits.join(' · ') + badge + '</span>';
+    var originLine = vm.originMarker
+      ? '<span class="agent-card__origin">' + esc(vm.originMarker) + '</span>'
+      : '';
 
     return (
       portraitHTML(vm) +
@@ -1749,6 +1765,7 @@
       esc(vm.name) +
       '</span>' +
       roleLine +
+      originLine +
       '</span>' +
       '<span class="agent-card__rolecell">' +
       roleLine +
@@ -2277,8 +2294,9 @@
   function isEditable(detail) {
     // CLI / built-in agents come back without a version token and reject PATCH.
     // Kept because it still decides what the DETAIL PAGE can offer and whether
-    // a delete action is shown, not what this panel renders.
-    return !!(detail && detail.version);
+    // a delete action is shown, not what this panel renders. An agent only a
+    // workspace holds is edited in that workspace, so it is not editable here.
+    return !!(detail && detail.version) && !isWorkspaceOwned(detail);
   }
 
   function renderOverview(name, detail) {
@@ -3511,15 +3529,19 @@
       { label: 'Open', action: 'open' },
       { label: 'Open full page', action: 'open-full' },
       menuDivider(),
-      { label: vm.favorite ? 'Unfavorite' : 'Favorite', action: 'favorite' },
-      { label: 'Set role…', action: 'set-role', disabled: vm.builtIn },
-      { label: 'Assign to workspace…', action: 'assign' },
+      {
+        label: vm.favorite ? 'Unfavorite' : 'Favorite',
+        action: 'favorite',
+        disabled: vm.workspaceOwned
+      },
+      { label: 'Set role…', action: 'set-role', disabled: !vm.editable },
+      { label: 'Assign to workspace…', action: 'assign', disabled: vm.workspaceOwned },
       menuDivider(),
       {
         label: 'Delete',
         action: 'delete',
         variant: 'danger',
-        disabled: vm.builtIn
+        disabled: !vm.editable
       }
     ];
   }
@@ -3899,7 +3921,8 @@
   // a control labelled "Select visible".
   function selectAllVisible() {
     state.rendered.forEach(function (a) {
-      state.checked.add(a.name);
+      // A workspace's own agent has no checkbox, so it is never selected.
+      if (!isWorkspaceOwned(a)) state.checked.add(a.name);
     });
     reflectCheckedInDom();
     updateBulkBar();
@@ -3929,7 +3952,7 @@
     var hi = Math.max(anchor, i);
     for (var k = lo; k <= hi; k++) {
       var a = state.rendered[k];
-      if (a) state.checked.add(a.name);
+      if (a && !isWorkspaceOwned(a)) state.checked.add(a.name);
     }
     state.rangeAnchor = i;
     reflectCheckedInDom();
@@ -3990,6 +4013,12 @@
   // (PRD FR40); this only drives the preview grouping and the eligible count.
   function deleteEligibility(agent) {
     if (!agent) return { eligible: false, reason: 'Agent not found.' };
+    if (isWorkspaceOwned(agent)) {
+      return {
+        eligible: false,
+        reason: 'Belongs to ' + (window.AgentOrigin.workspaceName(agent) || 'a workspace') + '.'
+      };
+    }
     if (isPermanent(agent)) {
       var role = String(agent.role || '').toLowerCase();
       var source = String(agent.source || '').toLowerCase();
@@ -4548,6 +4577,8 @@
   // not picked from the working cast — so neither is ever offered one.
   function isFaceless(agent) {
     if (!agent || isPermanent(agent) || isSystemAssistant(agent)) return false;
+    // A workspace's own agent is edited in that workspace, not from here.
+    if (isWorkspaceOwned(agent)) return false;
     var appearance = normalizeAppearance(agent.appearance);
     if (appearance.mode !== window.AgentAvatar.MODES.GENERATED) return false;
     return !appearance.generated.color && !appearance.character && !appearance.uploaded;

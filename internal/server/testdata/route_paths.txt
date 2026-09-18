@@ -1,5 +1,6 @@
 /api/activity/recent
 /api/agents
+/api/agents/add-from-workspace
 /api/agents/auto-config
 /api/agents/auto-config/availability
 /api/agents/bulk

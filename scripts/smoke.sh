@@ -2505,6 +2505,48 @@ PY
   echo "ok   seeded Scout, Sleeper (paused), Quill and the assistant into $sandbox/agents"
 }
 
+# smoke_confirm_root prepares a fresh demo sandbox whose Workspace Directory
+# (the HOME-derived "Ori Workspaces") is already confirmed, so the demo can
+# create workspaces without walking onboarding. Run before the first start.
+smoke_confirm_root() {
+  local sandbox="${2:-}"
+  [[ -n "$sandbox" ]] || fail "usage: $0 confirm-root <sandbox>"
+  [[ ! -e "$sandbox/settings.json" ]] || fail "$sandbox already has settings; use a fresh sandbox"
+  mkdir -p "$sandbox/Ori Workspaces"
+  printf '{\n  "workspace_root_confirmed": true\n}\n' >"$sandbox/settings.json"
+  echo "ok   $sandbox/Ori Workspaces is the confirmed Workspace Directory"
+}
+
+# smoke_drop_foreign_workspace copies a workspace this install has never seen
+# into a Workspace Directory, the way a zip or a sync tool would: a
+# workspace.json referencing "Cartographer" and that workspace's own copy of
+# the agent. Press "Rescan from disk" afterwards.
+smoke_drop_foreign_workspace() {
+  local root="${2:-}"
+  [[ -n "$root" && -d "$root" ]] || fail "usage: $0 drop-foreign-workspace <workspace-root>"
+  local folder="$root/field-notes"
+  [[ ! -e "$folder" ]] || fail "$folder already exists"
+  mkdir -p "$folder/agents/cartographer" "$folder/files" "$folder/notes"
+  python3 - "$folder" <<'PY'
+import json, os, sys
+folder = sys.argv[1]
+workspace = {
+    "id": "ws-foreign-field-notes", "name": "Field Notes", "folder_slug": "field-notes",
+    "status": "active", "shared_data": {"entry_agent_name": "Cartographer"},
+    "agent_instances": [{"id": "cartographer-1", "name": "Cartographer", "instance_number": 1,
+                         "node_id": "cartographer-node-1", "entry_point": True}],
+    "messages": [], "tasks": [],
+}
+agent = {"role": "researcher", "Settings": {"model": "gpt-4o-mini",
+         "system_prompt": "You map places and keep field notes."}}
+with open(os.path.join(folder, "workspace.json"), "w") as f:
+    json.dump(workspace, f, indent=2)
+with open(os.path.join(folder, "agents", "cartographer", "config.json"), "w") as f:
+    json.dump(agent, f, indent=2)
+PY
+  echo "ok   dropped Field Notes (agent Cartographer) into $root"
+}
+
 # smoke_root_unmounted points a stopped demo sandbox's workspace root at a
 # folder that cannot be created, the way an unplugged drive behaves: the root's
 # parent is read-only, so neither Ori nor the workspace store can make it.
@@ -2542,6 +2584,8 @@ serve) serve_isolated "${2:-8931}" "${3:-default}" ;;
 agent-files) smoke_agent_files "$@" ;;
 agent-chat) smoke_agent_chat "$@" ;;
 seed-legacy-agents) smoke_seed_legacy_agents "$@" ;;
+confirm-root) smoke_confirm_root "$@" ;;
+drop-foreign-workspace) smoke_drop_foreign_workspace "$@" ;;
 root-unmounted) smoke_root_unmounted "$@" ;;
 showseed) smoke_show_seed ;;
 showrun) smoke_show_run "$@" ;;
@@ -2591,6 +2635,8 @@ janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
   echo "  $0 agent-chat <base-url> <agent> [text]  # agents in the root: send one chat turn to an agent" >&2
   echo "  $0 seed-legacy-agents <sandbox>          # agents in the root: pre-upgrade install (agents in the data dir)" >&2
   echo "  $0 root-unmounted <sandbox>              # agents in the root: point a stopped sandbox at an unreachable root" >&2
+  echo "  $0 confirm-root <sandbox>                # agents in the root: fresh sandbox with a confirmed Workspace Directory" >&2
+  echo "  $0 drop-foreign-workspace <root>         # agents in the root: copy in a never-seen workspace with its own agent" >&2
   echo "  $0 showseed <base-url>                   # task-run show: onboarding + 3 workspaces with Commanders" >&2
   echo "  $0 showrun <base-url> <ws> [description] # task-run show: create and start a task ([fail] fails it)" >&2
   echo "  $0 showmarkfailed <base-url> <task-id>    # task-run show: answer a blocked task with mark failed" >&2

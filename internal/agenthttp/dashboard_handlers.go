@@ -113,6 +113,10 @@ type AgentListItem struct {
 	// cannot disagree about what an agent looks like (FR-49/FR-80).
 	Appearance       map[string]any `json:"appearance"`
 	PresentationRole string         `json:"presentation_role,omitempty"`
+	// Origin says where the entry comes from: the built-in assistant, the
+	// user's own agents, or a workspace's copy read in place. Kept apart from
+	// Source, which also seeds the generated appearance.
+	Origin *store.AgentOrigin `json:"origin,omitempty"`
 }
 
 // AgentDetailResponse represents detailed agent information
@@ -144,6 +148,18 @@ type AgentDetailResponse struct {
 	ClaudeSync any `json:"claude_sync,omitempty"`
 	// CodexSync carries read-only ~/.codex state for the Codex CLI agent.
 	CodexSync any `json:"codex_sync,omitempty"`
+	// Origin: see AgentListItem.Origin.
+	Origin *store.AgentOrigin `json:"origin,omitempty"`
+}
+
+// originFor returns an agent's origin for a response, or nil when the store
+// does not track one.
+func originFor(st store.Store, name string) *store.AgentOrigin {
+	origin, ok := agentOrigin(st, name)
+	if !ok {
+		return nil
+	}
+	return &origin
 }
 
 // ListAgentsWithStats handles GET /api/agents/dashboard/list
@@ -211,6 +227,7 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 			AllowWebSearch: ag.Settings.IsWebSearchAllowed(),
 			Model:          ag.Settings.Model,
 			Appearance:     appearanceForAgent(ag),
+			Origin:         originFor(h.State, name),
 		}
 
 		// Annotate workspace membership so the UI can group definitions by the
@@ -390,6 +407,7 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 		AllowWebSearch:  ag.Settings.IsWebSearchAllowed(),
 		Version:         agentConfigVersion(ag),
 		Appearance:      appearanceForAgent(ag),
+		Origin:          originFor(h.State, agentName),
 	}
 	memberships := workspace.AgentWorkspaceMemberships(h.workspaceStore)
 	response.PresentationRole = h.support.classify(r.Context(), agentName, memberships[strings.ToLower(agentName)].Workspaces)
@@ -566,6 +584,11 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 		}
 		orihttp.NotFound(w, "Agent not found")
 		// Store old status for logging
+		return
+	}
+
+	if owned := workspaceOwnedAgent(h.State, agentName); owned != nil {
+		WriteAgentStoreError(w, "Failed to update agent status", owned)
 		return
 	}
 

@@ -56,6 +56,10 @@ type CompositeStore struct {
 	// then keep living where they already are.
 	legacyWrites bool
 	migration    *RootMigrationReport
+
+	// workspaces is the read-only view of trusted workspaces' own agent
+	// copies. They are read where they are; nothing is mirrored into a store.
+	workspaces workspaceAgentsCache
 }
 
 // NewCompositeStore routes between system, the data-dir store, and the agents
@@ -204,14 +208,13 @@ func (c *CompositeStore) writeTarget(name string) (memberStore, error) {
 	return c.targetForNew(name)
 }
 
-// ListAgents is the union of the system and root agents, each name once.
+// ListAgents is the union of the system agents, the root agents, and the
+// agents only a trusted workspace holds, each name once. A workspace copy of a
+// system or root agent is that agent's customisation, not a second entry.
 func (c *CompositeStore) ListAgents() []string {
-	c.mu.RLock()
-	root := c.root
-	c.mu.RUnlock()
-	names := c.system.ListAgents()
-	if root != nil {
-		names = append(names, root.ListAgents()...)
+	names := c.memberNames()
+	for _, entries := range c.workspaceAgentView().byName {
+		names = append(names, entries[0].AgentName)
 	}
 	return uniqueNamesFold(names)
 }
@@ -233,22 +236,39 @@ func uniqueNamesFold(names []string) []string {
 	return out
 }
 
+// GetAgent resolves the system agent, then the root agent, then an agent only
+// a trusted workspace holds (from the workspace with the lowest ID).
 func (c *CompositeStore) GetAgent(name string) (*agent.Agent, bool) {
 	if owner := c.owner(name); owner != nil {
 		return owner.GetAgent(name)
 	}
+	if entry, ok := c.workspaceOnly(name); ok {
+		return entry.Agent, true
+	}
 	return nil, false
 }
 
+// CreateAgent creates one of the user's agents. A name only a workspace holds
+// is free to use: the new agent then owns it, and the workspace's copy becomes
+// that agent's customisation.
 func (c *CompositeStore) CreateAgent(name string, cfg *CreateAgentConfig) error {
 	target, err := c.writeTarget(name)
 	if err != nil {
 		return err
 	}
-	return target.CreateAgent(name, cfg)
+	if err := target.CreateAgent(name, cfg); err != nil {
+		return err
+	}
+	c.InvalidateWorkspaceAgents()
+	return nil
 }
 
 func (c *CompositeStore) SetAgent(name string, ag *agent.Agent) error {
+	if c.owner(name) == nil {
+		if err := c.workspaceOwnedError(name); err != nil {
+			return err
+		}
+	}
 	target, err := c.writeTarget(name)
 	if err != nil {
 		return err
@@ -259,6 +279,9 @@ func (c *CompositeStore) SetAgent(name string, ag *agent.Agent) error {
 func (c *CompositeStore) UpdateAgent(name string, updateFn func(*agent.Agent) error) error {
 	owner := c.owner(name)
 	if owner == nil {
+		if err := c.workspaceOwnedError(name); err != nil {
+			return err
+		}
 		// The agent may have been added on disk since the store loaded; the
 		// root store reloads a definition it has not seen before.
 		c.mu.RLock()
@@ -280,7 +303,7 @@ func (c *CompositeStore) UpdateAgent(name string, updateFn func(*agent.Agent) er
 func (c *CompositeStore) DeleteAgent(name string) error {
 	owner := c.owner(name)
 	if owner == nil {
-		return nil
+		return c.workspaceOwnedError(name)
 	}
 	if owner != c.system {
 		if _, err := c.rootForWrite(); err != nil {
@@ -294,6 +317,9 @@ func (c *CompositeStore) DeleteAgent(name string) error {
 func (c *CompositeStore) RenameAgent(oldName, newName string) error {
 	owner := c.owner(oldName)
 	if owner == nil {
+		if err := c.workspaceOwnedError(oldName); err != nil {
+			return err
+		}
 		return fmt.Errorf("agent %q not found", oldName)
 	}
 	if other := c.owner(newName); other != nil && other != owner {

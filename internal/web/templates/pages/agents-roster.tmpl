@@ -444,6 +444,9 @@
        window.OriAgentMap before agents-roster.js runs. -->
   <script defer src="/js/modules/agent-map.js"></script>
   <script defer src="/js/modules/stage-up-toast.js"></script>
+  <!-- Where each entry comes from (window.AgentOrigin): a workspace-only agent
+       is read-only here. Deferred, so it installs before agents-roster.js. -->
+  <script defer src="/js/modules/agent-origin.js"></script>
   <!-- Mission 01: the hire preset's requests and views (window.OriAssistantHire).
        agents-roster.js reads the seam at use time, never at load. -->
   <script type="module" src="/js/modules/personal-assistant-hire.js"></script>

@@ -398,6 +398,8 @@ func (h *Handler) handleWorkspaceRescan(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	h.refreshWorkspaceAgentsAfterRescan()
+
 	logger.Info("Workspaces rescanned from disk", logger.Fields{
 		"imported":   stats.Imported,
 		"reparented": stats.Reparented,
@@ -412,6 +414,19 @@ func (h *Handler) handleWorkspaceRescan(w http.ResponseWriter, r *http.Request) 
 		"restored":   stats.Restored,
 		"warnings":   warnings,
 	})
+}
+
+// refreshWorkspaceAgentsAfterRescan applies the startup rule to an explicit
+// rescan: every workspace physically in this data dir's Workspace Directory is
+// trusted, so its own agents show in the roster. The roster then re-reads the
+// workspaces' agent copies instead of waiting for its cache to expire.
+func (h *Handler) refreshWorkspaceAgentsAfterRescan() {
+	if h.workspaceAllowlist != nil && h.workspaceStore != nil {
+		agentworkspace.BackfillLocalWorkspacesIntoAllowlist(h.workspaceStore, h.workspaceAllowlist)
+	}
+	if invalidator, ok := h.agentStore.(interface{ InvalidateWorkspaceAgents() }); ok {
+		invalidator.InvalidateWorkspaceAgents()
+	}
 }
 
 // reconcileWorkspacesFromDisk reloads the folder store from disk and updates the

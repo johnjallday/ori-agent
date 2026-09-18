@@ -204,6 +204,11 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	// "bulk" (PRD FR46).
 	mux.HandleFunc("/api/agents/bulk", agentHandler.HandleBulk)
 
+	// "Add to my agents": copy an agent that only a trusted workspace holds into
+	// the user's agents. Exact path, like /bulk, so it is never read as an agent
+	// named "add-from-workspace".
+	mux.HandleFunc("/api/agents/add-from-workspace", agentHandler.HandleAddFromWorkspace)
+
 	mux.HandleFunc("/api/agents/", func(w http.ResponseWriter, r *http.Request) {
 		// Route evolution API requests first
 		if s.Handlers.Evolution != nil && strings.HasSuffix(r.URL.Path, "/evolution/path") && r.Method == http.MethodPost {

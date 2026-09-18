@@ -1434,6 +1434,24 @@ body.agents-roster-page {
   white-space: nowrap;
 }
 
+/* "From workspace: <name>" — an agent only a workspace holds, read from that
+   workspace's own copy. One clipped line, like the role line above it. */
+.agent-card__origin {
+  display: block;
+  min-width: 0;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--card-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A workspace's own agent is not selectable here: its checkbox is hidden. */
+.roster-card__checkwrap[hidden] {
+  display: none;
+}
+
 /* The role has a second, hidden home so List view can lift it into its own
    column without a second card renderer. Exactly one of the two is displayed;
    see the List rules below. */
