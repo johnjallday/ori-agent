@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/config"
 )
 
 // workspaceAgentDir returns <workspace>/agents/<slug> for a given agent name.
@@ -59,7 +60,7 @@ func readWorkspaceAgent(workspaceFolder, agentName string) (*agent.Agent, bool, 
 // settings such as toolbox, designation, and assignment, and an appearance
 // migration is never a licence to rewrite those (FR-95).
 func migrateSnapshotAppearance(workspaceFolder, agentName string, ag *agent.Agent) {
-	result := ag.MigrateAppearance(agent.DefaultAppearanceEnvironment(agent.AppearanceUploadDir))
+	result := ag.MigrateAppearance(agent.DefaultAppearanceEnvironment(config.DefaultAgentAvatarsDir()))
 	if len(result.Reasons) == 0 {
 		return
 	}

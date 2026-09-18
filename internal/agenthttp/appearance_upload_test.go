@@ -66,6 +66,9 @@ func uploadRequest(t *testing.T, agentName string, body []byte, fields map[strin
 func isolateAvatarDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
+	// The shared avatar folder is anchored to the data dir, so the data dir is
+	// the temp directory too.
+	t.Setenv("ORI_DATA_DIR", dir)
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)

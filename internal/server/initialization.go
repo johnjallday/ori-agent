@@ -9,6 +9,7 @@ import (
 
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/authdiscovery"
@@ -317,7 +318,24 @@ func createAgentStore(agentStorePath string, defaultConf types.Settings, configM
 		return nil, err
 	}
 	composite.SetMigrationReport(report)
+	if report != nil {
+		adoptLegacyAvatars(composite)
+	}
 	return composite, nil
+}
+
+// adoptLegacyAvatars moves the root agents' uploaded images out of the shared
+// data-dir folder and into their own folders. It runs at every start, after
+// the agent migration, and does nothing once every image has moved.
+func adoptLegacyAvatars(composite *store.CompositeStore) {
+	adopted, err := composite.AdoptLegacyAvatars(config.DefaultAgentAvatarsDir())
+	if len(adopted) > 0 {
+		sort.Strings(adopted)
+		logger.Info("Agent images moved into their agent folders", logger.Fields{"agents": strings.Join(adopted, ", ")})
+	}
+	if err != nil {
+		logger.Warn("Some agent images could not be moved into their agent folders; they are still shown from the shared folder", logger.Fields{"error": err.Error()})
+	}
 }
 
 // logRootMigration records what the startup migration did.

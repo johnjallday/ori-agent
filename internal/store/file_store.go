@@ -1093,7 +1093,11 @@ func (s *fileStore) normalizeLoadedAgent(name string, ag *agent.Agent) {
 	// migrated value is only in memory at this point; it reaches disk through the
 	// normal atomic save, so a crash mid-startup leaves the original file intact
 	// (FR-75).
-	result := ag.MigrateAppearance(agent.DefaultAppearanceEnvironment(agent.AppearanceUploadDir))
+	// An image is in the agent's own folder (the user's agents in the
+	// Workspace Directory) or the shared data-dir folder (everyone else, and
+	// images an older build wrote).
+	result := ag.MigrateAppearance(agent.DefaultAppearanceEnvironment(
+		filepath.Join(s.agentsDir(), name), config.DefaultAgentAvatarsDir()))
 	if len(result.Reasons) > 0 {
 		agent.RecordAppearanceMigrationNote(agent.AppearanceMigrationNote{
 			Agent:   name,

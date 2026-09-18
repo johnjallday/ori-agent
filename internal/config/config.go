@@ -284,6 +284,17 @@ func RootAgentsDir(root string) string {
 	return filepath.Join(root, AgentsFolderName)
 }
 
+// AgentAvatarsDirName is the shared data-dir folder of uploaded agent images.
+const AgentAvatarsDirName = "agent_avatars"
+
+// DefaultAgentAvatarsDir returns the shared folder of uploaded agent images:
+// the built-in assistant's, and every agent's when AGENT_STORE_PATH is set.
+// The user's agents in the Workspace Directory keep their image in their own
+// folder instead. Anchored to the data dir, never the working directory.
+func DefaultAgentAvatarsDir() string {
+	return filepath.Join(DefaultDataDir(), AgentAvatarsDirName)
+}
+
 // AgentStateDirName is the data-dir folder holding agents' runtime state.
 const AgentStateDirName = "agent_state"
 

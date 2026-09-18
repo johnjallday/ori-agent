@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/cliagent"
 	"github.com/johnjallday/ori-agent/internal/featureflags"
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
@@ -23,6 +24,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/setupjourney"
+	"github.com/johnjallday/ori-agent/internal/store"
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspaceplan"
@@ -1001,9 +1003,11 @@ func (s *Server) serveAgentFiles(w http.ResponseWriter, r *http.Request) {
 	orihttp.WriteBytes(w, content)
 }
 
-// serveAvatarFiles serves agent avatar images from the agent_avatars directory
+// serveAvatarFiles serves an uploaded agent image. The filename leads to the
+// agent whose appearance names it, and that agent's folder is read; the shared
+// data-dir folder is the fallback. A missing file is a 404, and the page then
+// shows the generated appearance without the agent being rewritten.
 func (s *Server) serveAvatarFiles(w http.ResponseWriter, r *http.Request) {
-	// Extract the filename from the path
 	filename := strings.TrimPrefix(r.URL.Path, "/avatars/")
 	if filename == "" || filename == r.URL.Path {
 		http.NotFound(w, r)
@@ -1017,30 +1021,14 @@ func (s *Server) serveAvatarFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build the full path
-	avatarPath := filepath.Join("agent_avatars", filename)
-
-	// Verify the file exists and is within the avatar directory
-	absPath, err := filepath.Abs(avatarPath)
-	if err != nil {
-		http.NotFound(w, r)
-		return
+	// Only image files are ever served: an agent's folder also holds its
+	// definition, which a hand-edited appearance must not be able to name.
+	var agents store.Store
+	if s.Storage != nil {
+		agents = s.Storage.AgentStore
 	}
-
-	avatarsDir, err := filepath.Abs("agent_avatars")
-	if err != nil {
-		orihttp.InternalError(w, "Internal server error")
-		return
-	}
-
-	if !strings.HasPrefix(absPath, avatarsDir+string(filepath.Separator)) {
-		orihttp.BadRequest(w, "Invalid path")
-		return
-	}
-
-	// Read the file
-	content, err := os.ReadFile(avatarPath)
-	if err != nil {
+	content, ok := agenthttp.ReadAvatarFile(agents, filename)
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}

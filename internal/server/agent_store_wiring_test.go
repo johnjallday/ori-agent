@@ -9,10 +9,10 @@ import (
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
-// seedLegacyAgent writes an agent in the pre-root layout: <data dir>/agents/<name>/.
-func seedLegacyAgent(t *testing.T, dataDir, name string) {
+// seedLegacyScout writes Scout in the pre-root layout: <data dir>/agents/Scout/.
+func seedLegacyScout(t *testing.T, dataDir string) {
 	t.Helper()
-	dir := filepath.Join(dataDir, "agents", name)
+	dir := filepath.Join(dataDir, "agents", "Scout")
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -40,7 +40,7 @@ func agentStoreEnv(t *testing.T) (dataDir, root string) {
 
 func TestAgentStoreMovesLegacyAgentsIntoAConfirmedRoot(t *testing.T) {
 	dataDir, root := agentStoreEnv(t)
-	seedLegacyAgent(t, dataDir, "Scout")
+	seedLegacyScout(t, dataDir)
 
 	st, err := createAgentStore(filepath.Join(dataDir, "agents.json"), types.Settings{}, nil, false)
 	if err != nil {
@@ -60,9 +60,43 @@ func TestAgentStoreMovesLegacyAgentsIntoAConfirmedRoot(t *testing.T) {
 	}
 }
 
+// The image move is independent of the agent migration's marker: an image an
+// older build left in the shared folder moves in on the next start.
+func TestStartupMovesAnAgentsOlderImageIntoItsFolder(t *testing.T) {
+	dataDir, root := agentStoreEnv(t)
+	seedLegacyScout(t, dataDir)
+	st, err := createAgentStore(filepath.Join(dataDir, "agents.json"), types.Settings{}, nil, false)
+	if err != nil {
+		t.Fatalf("createAgentStore: %v", err)
+	}
+	ag, _ := st.GetAgent("Scout")
+	ag.EnsureAppearance()
+	ag.Appearance.SetUpload("Scout.png")
+	if err := st.SetAgent("Scout", ag); err != nil {
+		t.Fatalf("SetAgent: %v", err)
+	}
+	shared := filepath.Join(dataDir, "agent_avatars")
+	if err := os.MkdirAll(shared, 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(shared, "Scout.png"), []byte("png"), 0o600); err != nil {
+		t.Fatalf("write image: %v", err)
+	}
+
+	if _, err := createAgentStore(filepath.Join(dataDir, "agents.json"), types.Settings{}, nil, false); err != nil {
+		t.Fatalf("second createAgentStore: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "Agents", "Scout", "Scout.png")); err != nil {
+		t.Fatalf("the image did not move into Scout's folder: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(shared, "Scout.png")); !os.IsNotExist(err) {
+		t.Error("the shared copy is still there")
+	}
+}
+
 func TestAgentStorePathKeepsTheSingleLegacyStore(t *testing.T) {
 	dataDir, root := agentStoreEnv(t)
-	seedLegacyAgent(t, dataDir, "Scout")
+	seedLegacyScout(t, dataDir)
 	index := filepath.Join(dataDir, "agents.json")
 	t.Setenv("AGENT_STORE_PATH", index)
 
@@ -83,7 +117,7 @@ func TestAgentStorePathKeepsTheSingleLegacyStore(t *testing.T) {
 
 func TestPendingAgentResetSuppressesTheMigration(t *testing.T) {
 	dataDir, root := agentStoreEnv(t)
-	seedLegacyAgent(t, dataDir, "Scout")
+	seedLegacyScout(t, dataDir)
 
 	if _, err := createAgentStore(filepath.Join(dataDir, "agents.json"), types.Settings{}, nil, true); err != nil {
 		t.Fatalf("createAgentStore: %v", err)
