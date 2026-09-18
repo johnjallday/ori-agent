@@ -73,7 +73,7 @@ Both accept `--yes` for non-interactive runs, `--no-herdr` to skip the agent han
 **Why a worktree and not just a branch:** `ori-agent-dev` is shared — other sessions commit in it, and a `git switch` there is visible to every one of them, and can disturb a running server or build mid-flight. Separate worktrees let several changes be in flight at once without any of them touching each other's checkout.
 
 ## Planning Artifact Location
-For the PRD and task-list workflows below, create planning artifacts in this dev worktree's `tasks/` directory (that is, `ori-agent-dev/tasks/`), creating it if necessary. `/tasks/` is not an absolute filesystem path. Finish both planning artifacts there before running `wt start`; it copies them to the isolated feature worktree. Because `tasks/` is gitignored, verify planning artifacts by reading the files directly (and, if needed, use `git status --ignored`) rather than relying on `git diff`.
+For the PRD and task-list workflows below, create planning artifacts in this dev worktree's `tasks/` directory (that is, `ori-agent-dev/tasks/`), creating it if necessary. `/tasks/` is not an absolute filesystem path. Finish both planning artifacts there before running `wt start`; it copies them to the isolated feature worktree. `wt done` copies them back labelled as finished — `prd-foo (done #518).md`, or `(done)` when no merged PR was confirmed — and every `wt`/devops reader skips those names. Because `tasks/` is gitignored, verify planning artifacts by reading the files directly (and, if needed, use `git status --ignored`) rather than relying on `git diff`.
 
 ## Feature Naming: Issue Number First
 

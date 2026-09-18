@@ -701,9 +701,9 @@ rg -q "pr list --head feature/bridge --base dev --state merged" "$fixture_root/g
 # Herdr safety is still consulted, and it ran before anything was removed.
 [[ "$(<"$fixture_root/cleanup-calls")" == "$target_root 0" ]]
 # The completed task list is archived back to dev, which is the record of what
-# was done.
-[[ -f "$dev_root/tasks/tasks-bridge.md" ]]
-rg -q "completed bridge tasks" "$dev_root/tasks/tasks-bridge.md"
+# was done, labelled with the merged PR so it cannot overwrite a live plan.
+[[ -f "$dev_root/tasks/tasks-bridge (done #42).md" ]]
+rg -q "completed bridge tasks" "$dev_root/tasks/tasks-bridge (done #42).md"
 # The worktree and its local branch are removed, exactly and by name.
 rg -q "worktree remove $target_root --force" "$fixture_root/git-calls"
 rg -q "branch -D feature/bridge" "$fixture_root/git-calls"

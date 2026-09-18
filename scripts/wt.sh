@@ -1322,6 +1322,35 @@ function wt_pr_bundle_body {
   done
 }
 
+# Copy a finished worktree's tasks/ into dev's tasks/ with every name labelled,
+# so a finished plan never overwrites a live one and never looks startable:
+# prd-foo.md -> "prd-foo (done #518).md", or "prd-foo (done).md" when no merged
+# PR was confirmed. Every prd-*/tasks-* reader skips names containing " (done".
+# Re-running overwrites the same labelled copies, so an aborted wt done is safe
+# to retry. Returns non-zero on any failed copy.
+function wt_done_archive_tasks {
+  local src_dir="$1" dest_dir="$2" merged_num="$3" label=" (done)" entry name
+  setopt local_options bareglobqual
+  [[ "$merged_num" =~ '^[0-9]+$' ]] && label=" (done #$merged_num)"
+  mkdir -p "$dest_dir" || return 1
+  for entry in "$src_dir"/*(N); do
+    name="${entry:t}"
+    if [[ "$name" != *" (done"* ]]; then
+      if [[ ! -d "$entry" && "$name" == ?*.* ]]; then
+        name="${name%.*}$label.${name##*.}"
+      else
+        name="$name$label"
+      fi
+    fi
+    if [[ -d "$entry" && ! -L "$entry" ]]; then
+      mkdir -p "$dest_dir/$name" && cp -R "$entry/." "$dest_dir/$name/" || return 1
+    else
+      cp -R "$entry" "$dest_dir/$name" || return 1
+    fi
+    echo "  tasks/$name"
+  done
+}
+
 # Idempotently close one Issue with the standard delivery attribution. OPEN
 # closes; CLOSED is left unchanged; any other state is not guessed about.
 # Failure is always fatal while the worktree still exists, making the
@@ -1572,14 +1601,16 @@ function wt_dispatch {
 
     # Candidate features are the union of prd-*.md and tasks-*.md stems, so a
     # task-list-only feature is listed exactly once alongside PRD-driven ones
-    # (FR-26).
+    # (FR-26). Plans wt done archived carry a " (done" label and are history.
     local -a candidate_features
     local f feat
     for f in "$tasks_dir"/prd-*.md(N); do
+      [[ "${f:t}" == *" (done"* ]] && continue
       feat="${f:t}"; feat="${feat#prd-}"; feat="${feat%.md}"
       candidate_features+=("$feat")
     done
     for f in "$tasks_dir"/tasks-*.md(N); do
+      [[ "${f:t}" == *" (done"* ]] && continue
       feat="${f:t}"; feat="${feat#tasks-}"; feat="${feat%.md}"
       if (( ! ${candidate_features[(Ie)$feat]} )); then
         candidate_features+=("$feat")
@@ -1995,11 +2026,14 @@ function wt_dispatch {
       return 1
     fi
 
-    # Archive tasks/ (with ticked checkboxes) back into the dev worktree.
+    # Archive tasks/ (with ticked checkboxes) back into the dev worktree. It is
+    # gitignored, so this copy is the only record once the worktree is removed.
     if [[ -d "$target_path/tasks" ]]; then
       echo "Archiving tasks/ back into $dev_path/tasks/ ..."
-      mkdir -p "$dev_path/tasks"
-      cp -R "$target_path/tasks/." "$dev_path/tasks/"
+      if ! wt_done_archive_tasks "$target_path/tasks" "$dev_path/tasks" "$merged_num"; then
+        echo "Could not archive tasks/ into $dev_path/tasks/; worktree preserved."
+        return 1
+      fi
     fi
 
     # Warn on any uncommitted tracked changes before a forced removal.
@@ -2270,9 +2304,10 @@ function wt_dispatch {
     echo "  wt away arm|disarm|status|tick - Control unattended queued dispatches"
     echo "  wt pr [name]     - Push branch and open a PR against $BASE_BRANCH"
     echo "  wt done [name] [--keep-issue-open] [--herdr-override]"
-    echo "                     Close an explicitly attached Issue after merge, archive tasks,"
-    echo "                     then perform guarded remove/rebase cleanup. --keep-issue-open"
-    echo "                     skips the GitHub mutation for an intentional exception."
+    echo "                     Close an explicitly attached Issue after merge, archive tasks"
+    echo "                     into dev as \"<name> (done #PR).md\", then perform guarded"
+    echo "                     remove/rebase cleanup. --keep-issue-open skips the GitHub"
+    echo "                     mutation for an intentional exception."
     echo "                     Without a name, lists feature worktrees (merged PRs marked)"
     echo "                     and finishes each one you pick until you quit."
     echo "                     Closes the feature's Herdr tab only; the workspace and its"

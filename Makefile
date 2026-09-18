@@ -207,6 +207,7 @@ test-herdr-devflow-cross: ## Cross-compile the local Herdr helper for supported 
 test-herdr-devflow: test-herdr-devflow-cross ## Run focused Ori-to-Herdr bridge tests
 	$(TEST_RUNNER) $(GOTEST) ./tools/herdr-devflow/...
 	@$(TEST_RUNNER) bash scripts/herdr-devflow.test.sh
+	@$(TEST_RUNNER) zsh scripts/wt-done-archive.test.sh
 	@$(TEST_RUNNER) zsh scripts/wt-herd.test.sh
 	@$(TEST_RUNNER) zsh scripts/wt-config.test.sh
 	@$(TEST_RUNNER) zsh scripts/wt-done-repl.test.sh
