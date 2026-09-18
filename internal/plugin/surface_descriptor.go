@@ -50,7 +50,52 @@ const (
 	// a manifest requiring it fails like any unknown feature.
 	HostFeatureSetupQuestsV2               = "setup_quests_v2"
 	HostFeatureTemplateGroupRequirementsV1 = "template_group_requirements_v1"
+	// HostFeatureBlueprintInputsV1 is the typed `inputs` declaration a blueprint
+	// uses to ask for values at creation time. A host that does not advertise it
+	// decodes such a manifest strictly and rejects the whole blueprint, so a
+	// plugin release that uses inputs declares this feature and is refused
+	// before install rather than landing as an unusable blueprint.
+	HostFeatureBlueprintInputsV1 = "blueprint_inputs_v1"
 )
+
+// hostFeatures is what this build advertises. It is the one list: a second copy
+// somewhere else drifts the moment a feature is added, and a plugin requiring
+// the missing one then installs cleanly while its blueprints stay quietly
+// inactive. Callers that need to answer "can this host run that contribution?"
+// use HostFeatures or ValidateForHost rather than writing the set out again.
+var hostFeatures = []string{
+	HostFeatureAssistantProgramV1,
+	HostFeatureSpecialistSetupJourneyV1,
+	HostFeatureSetupQuestsV2,
+	HostFeatureTemplateGroupRequirementsV1,
+	HostFeatureBlueprintInputsV1,
+}
+
+// HostFeatures returns the features this build advertises, newest last.
+func HostFeatures() []string {
+	return append([]string(nil), hostFeatures...)
+}
+
+// HostSupportsFeatures reports whether this build advertises every required
+// feature, rejecting a duplicate the way ValidateForHost does.
+func HostSupportsFeatures(required []string) bool {
+	available := make(map[string]struct{}, len(hostFeatures))
+	for _, feature := range hostFeatures {
+		available[feature] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(required))
+	for _, feature := range required {
+		feature = strings.TrimSpace(feature)
+		if _, ok := available[feature]; !ok {
+			return false
+		}
+		if _, duplicate := seen[feature]; duplicate {
+			return false
+		}
+		seen[feature] = struct{}{}
+	}
+	return true
+}
 
 // ContributionError is safe to project during local plugin validation. It
 // identifies the rejected component/field without including filesystem paths,
@@ -299,12 +344,7 @@ func ParseSurfaceContribution(data []byte) (*SurfaceContribution, error) {
 }
 
 func (c *SurfaceContribution) Validate() error {
-	return c.ValidateForHost(SurfaceProtocolVersion, []string{
-		HostFeatureAssistantProgramV1,
-		HostFeatureSpecialistSetupJourneyV1,
-		HostFeatureSetupQuestsV2,
-		HostFeatureTemplateGroupRequirementsV1,
-	})
+	return c.ValidateForHost(SurfaceProtocolVersion, hostFeatures)
 }
 
 // ValidateForHost applies the same strict contribution validation against an

@@ -500,25 +500,13 @@ func pluginBlueprintsActive(candidate plugin.InstalledPlugin) bool {
 	return protocol.Min <= plugin.SurfaceProtocolVersion && maximum >= plugin.SurfaceProtocolVersion
 }
 
+// pluginHostFeaturesAvailable asks the plugin package what this build
+// advertises rather than restating it. A second copy of the list drifts the
+// moment a feature is added: the plugin installs cleanly, because install
+// validates against the real list, and then its blueprints are quietly missing
+// from creation because this check still has the old one.
 func pluginHostFeaturesAvailable(required []string) bool {
-	available := map[string]struct{}{
-		plugin.HostFeatureAssistantProgramV1:          {},
-		plugin.HostFeatureSpecialistSetupJourneyV1:    {},
-		plugin.HostFeatureSetupQuestsV2:               {},
-		plugin.HostFeatureTemplateGroupRequirementsV1: {},
-	}
-	seen := make(map[string]struct{}, len(required))
-	for _, feature := range required {
-		feature = strings.TrimSpace(feature)
-		if _, ok := available[feature]; !ok {
-			return false
-		}
-		if _, duplicate := seen[feature]; duplicate {
-			return false
-		}
-		seen[feature] = struct{}{}
-	}
-	return true
+	return plugin.HostSupportsFeatures(required)
 }
 
 func pluginArtifactsAvailable(artifacts []plugin.ResolvedArtifact) bool {

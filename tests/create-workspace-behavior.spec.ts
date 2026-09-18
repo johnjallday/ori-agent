@@ -2788,3 +2788,125 @@ test('an existing project names the workspace and starts with project opening of
   expect(requests.creates[0].name).toBe('Bridge Sketch');
   expect(requests.opens).toEqual(['POST']);
 });
+
+// ----- Blueprint-declared inputs -----
+
+// A blueprint that asks for two typed values and writes them into the project
+// it creates. Generic on purpose: everything the card shows comes from here.
+async function routeBlueprintInputsTemplate(page: Page) {
+  await page.route('**/api/project-templates', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        templates_root: '/tmp/templates',
+        templates: [
+          {
+            id: 'research-project',
+            name: 'Research Project',
+            builtin: true,
+            behavior_profile: 'research'
+          },
+          { id: 'travels', name: 'Travels', builtin: true, behavior_profile: 'general' },
+          {
+            id: 'content-production',
+            name: 'Content Production',
+            builtin: true,
+            behavior_profile: 'general'
+          },
+          {
+            id: 'session-project',
+            name: 'Session Project',
+            description: 'A blueprint that asks for values before it creates the project.',
+            builtin: true,
+            behavior_profile: 'general',
+            project_entry: { relative_path: '{{name}}.proj' },
+            inputs: {
+              schema_version: 1,
+              title: 'Session settings',
+              apply_to: ['{{name}}.proj'],
+              fields: [
+                {
+                  id: 'tempo',
+                  label: 'Tempo',
+                  type: 'number',
+                  min: 40,
+                  max: 240,
+                  step: 1,
+                  default: 120,
+                  unit: 'BPM'
+                },
+                {
+                  id: 'time_signature',
+                  label: 'Time signature',
+                  type: 'select',
+                  default: '4 4',
+                  options: [
+                    { value: '4 4', label: '4/4' },
+                    { value: '3 4', label: '3/4' },
+                    { value: '6 8', label: '6/8' }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      })
+    });
+  });
+  await page.route('**/api/workspaces/template-agent-plan**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ revision: 'empty-plan', has_agents: false, agents: [], warnings: [] })
+    });
+  });
+}
+
+test('Details asks for a blueprint’s declared inputs, refuses a value it does not allow, and Review states them', async ({
+  page
+}) => {
+  await routeBlueprintInputsTemplate(page);
+  await openCreateModal(page);
+  await stubWorkspaceReview(page);
+
+  // A blueprint that asks nothing shows no card.
+  await cardByLabel(page, 'Research Project').click();
+  await advanceToWorkspaceDetails(page);
+  await expect(page.locator('#workspaceBlueprintInputs')).toBeHidden();
+
+  await page.locator('#wizardBackBtn').click();
+  await expect(page.locator('#wizardStep1')).toBeVisible();
+  await cardByLabel(page, 'Session Project').click();
+  await advanceToWorkspaceDetails(page);
+
+  const card = page.locator('#workspaceBlueprintInputs');
+  await expect(card).toBeVisible();
+  await expect(page.locator('#workspaceBlueprintInputsTitle')).toHaveText('Session settings');
+  const tempo = page.locator('#workspaceBlueprintInput-tempo');
+  const signature = page.locator('#workspaceBlueprintInput-time_signature');
+  await expect(tempo).toHaveValue('120');
+  await expect(signature).toHaveValue('4 4');
+  await expect(page.locator('#workspaceBlueprintInput-tempo-hint')).toHaveText('40–240');
+
+  await page.locator('#folderNameInput').fill('Night Drive');
+
+  // Out of range blocks Continue, the same way an empty name does.
+  await tempo.fill('900');
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#wizardStep2')).toBeVisible();
+  await expect(page.locator('#workspaceBlueprintInput-tempo-error')).toHaveText(
+    'Tempo must be between 40 and 240.'
+  );
+
+  await tempo.fill('96');
+  await signature.selectOption('3 4');
+  await expect(page.locator('#workspaceBlueprintInput-tempo-error')).toBeHidden();
+
+  await advanceToReview(page);
+  const receipt = page.locator('[data-blueprint-inputs-receipt]');
+  await expect(receipt).toContainText('Session settings');
+  await expect(receipt).toContainText('Tempo: 96 BPM');
+  await expect(receipt).toContainText('Time signature: 3/4');
+  await expect(receipt.getByRole('button', { name: 'Edit' })).toBeVisible();
+});

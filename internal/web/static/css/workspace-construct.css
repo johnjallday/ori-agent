@@ -388,6 +388,43 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
   border-color: var(--wc-alert, #e5675b);
 }
 
+/* ---------- blueprint-declared inputs ---------- */
+/* Two questions sit side by side on a wide modal and stack on a phone. The
+   fields themselves are built from the blueprint's declaration, so nothing
+   here assumes how many there are or what they mean. */
+.workspace-create-modal .workspace-blueprint-inputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 12px;
+  margin-top: 8px;
+}
+.workspace-create-modal .workspace-blueprint-input {
+  min-width: 0;
+}
+.workspace-create-modal .workspace-blueprint-input > label {
+  display: block;
+  margin-bottom: 4px;
+}
+.workspace-create-modal .workspace-blueprint-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.workspace-create-modal .workspace-blueprint-input-row .modern-input {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.workspace-create-modal .workspace-blueprint-input-unit {
+  flex: 0 0 auto;
+  color: var(--wc-ink-dim, var(--wc-ink-faint));
+  font-size: 11px;
+}
+@media (max-width: 575.98px) {
+  .workspace-create-modal .workspace-blueprint-inputs {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ---------- creator kind + wizard stepper ---------- */
 .workspace-create-modal .workspace-creator-kind-choice {
   margin: 0 0 16px;

@@ -39,7 +39,9 @@ func TestReviewedCandidateHostContract(t *testing.T) {
 	blueprint := descriptor.ResolvedBlueprints[0]
 	connection := blueprint.Template.ProjectConnection
 	program := blueprint.Template.AssistantProgram
-	if blueprint.ID != "reaper-song" || blueprint.Version != 7 || connection == nil ||
+	// A floor, like the plugin version: the reviewed blueprint may move forward,
+	// and v8 is where it began asking for typed inputs.
+	if blueprint.ID != "reaper-song" || blueprint.Version < 8 || connection == nil ||
 		!slices.Equal(connection.SupportedModes, []projecttemplates.ProjectConnectionMode{
 			projecttemplates.ProjectConnectionExistingProject,
 			projecttemplates.ProjectConnectionNewProject,
@@ -53,6 +55,24 @@ func TestReviewedCandidateHostContract(t *testing.T) {
 		program.Roles[4].CapabilityID != "sample-library" {
 		t.Fatalf("candidate scoped assistant program = %#v", program)
 	}
+	// The candidate's typed inputs must survive the real loader. An unusable
+	// declaration would leave Inputs nil and InputsError set, which is exactly
+	// the outcome LoadPluginBlueprint turns into an unavailable blueprint — the
+	// failure this contract exists to catch before a release is offered.
+	inputs := blueprint.Template.Inputs
+	if blueprint.Template.InputsError != "" || inputs == nil || len(inputs.Fields) != 2 ||
+		inputs.Fields[0].ID != "tempo" || inputs.Fields[0].Type != projecttemplates.InputFieldNumber ||
+		inputs.Fields[1].ID != "time_signature" || inputs.Fields[1].Type != projecttemplates.InputFieldSelect {
+		t.Fatalf("candidate inputs = %#v err=%q", inputs, blueprint.Template.InputsError)
+	}
+	if !slices.Contains(descriptor.WorkspaceSurfaces.RequiresHostFeatures, HostFeatureBlueprintInputsV1) {
+		t.Fatal("a candidate that declares inputs must require blueprint_inputs_v1, or an older host would reject its whole blueprint")
+	}
+	values, err := projecttemplates.ResolveInputValues(inputs, nil)
+	if err != nil || values["tempo"] != "120" || values["time_signature"] != "4 4" {
+		t.Fatalf("candidate declared defaults = %v err=%v", values, err)
+	}
+
 	report := BuildTrustReport(descriptor)
 	if len(report.Artifacts) != 1 || report.Artifacts[0].SHA256 == "" ||
 		report.Artifacts[0].Size <= 0 || len(report.Services) == 0 {

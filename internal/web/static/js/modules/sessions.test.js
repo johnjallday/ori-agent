@@ -2843,7 +2843,9 @@ test('blueprintDetailsProfile derives plain flags from what a blueprint declares
     hasAssistantProgram: false,
     entryNamedAfterWorkspace: false,
     projectEntryPath: '',
-    supportsExistingProject: false
+    supportsExistingProject: false,
+    inputs: null,
+    inputsUnavailable: false
   };
   assert.deepEqual(profile(null), blank);
   assert.deepEqual(profile({ blank: true, name: 'Blank' }), blank);
@@ -2854,7 +2856,9 @@ test('blueprintDetailsProfile derives plain flags from what a blueprint declares
     hasAssistantProgram: true,
     entryNamedAfterWorkspace: true,
     projectEntryPath: '{{name}}.proj',
-    supportsExistingProject: false
+    supportsExistingProject: false,
+    inputs: null,
+    inputsUnavailable: false
   });
   assert.equal(profile({ id: 'wizard', setup_wizard: { id: 'w' } }).bringsOwnSetup, true);
   assert.equal(profile({ id: 'quest', setup_quest: { id: 'q' } }).bringsOwnSetup, true);
@@ -2864,7 +2868,9 @@ test('blueprintDetailsProfile derives plain flags from what a blueprint declares
     hasAssistantProgram: false,
     entryNamedAfterWorkspace: false,
     projectEntryPath: 'outline.md',
-    supportsExistingProject: false
+    supportsExistingProject: false,
+    inputs: null,
+    inputsUnavailable: false
   });
   assert.equal(
     profile({ id: 'dated', project_entry: { relative_path: 'notes-{{date}}.md' } })
@@ -3888,4 +3894,381 @@ test('session bootstrap consumes the shared initial workspace tree', async () =>
 
   assert.equal(directCalls, 0);
   assert.equal(manager.folders[0].id, 'shared-bootstrap');
+});
+
+// ----- Blueprint-declared inputs (slice C) -----
+
+// A blueprint that asks for two values and writes them into the project it
+// creates. Generic on purpose: Ori knows only what the declaration says.
+const inputsTemplate = {
+  id: 'plugin:owner:song',
+  name: 'Song',
+  plugin_owner: { plugin_id: 'owner-plugin', blueprint_id: 'song' },
+  project_entry: { relative_path: '{{name}}.proj' },
+  project_connection: {
+    schema_version: 1,
+    supported_modes: ['existing_project', 'new_project'],
+    attach_existing: { entry_extensions: ['.proj'] }
+  },
+  inputs: {
+    schema_version: 1,
+    title: 'Session settings',
+    apply_to: ['{{name}}.proj'],
+    fields: [
+      {
+        id: 'tempo',
+        label: 'Tempo',
+        type: 'number',
+        min: 40,
+        max: 240,
+        step: 1,
+        default: 120,
+        unit: 'BPM'
+      },
+      {
+        id: 'time_signature',
+        label: 'Time signature',
+        type: 'select',
+        default: '4 4',
+        options: [
+          { value: '4 4', label: '4/4' },
+          { value: '3 4', label: '3/4' },
+          { value: '6 8', label: '6/8' }
+        ]
+      }
+    ]
+  }
+};
+
+// A minimal element good enough for the card sessions.js builds. Assigning an
+// id registers the node, so document.getElementById finds a field the renderer
+// just created — the same way a real document would.
+function inputsElementFactory(registry, focused) {
+  return function create(tag) {
+    const node = {
+      tagName: tag,
+      children: [],
+      dataset: {},
+      attributes: {},
+      value: '',
+      textContent: '',
+      hidden: false,
+      className: '',
+      classList: {
+        classes: new Set(),
+        add(name) {
+          this.classes.add(name);
+        },
+        remove(name) {
+          this.classes.delete(name);
+        },
+        contains(name) {
+          return this.classes.has(name);
+        },
+        toggle(name, on) {
+          if (on) this.classes.add(name);
+          else this.classes.delete(name);
+        }
+      },
+      appendChild(child) {
+        node.children.push(child);
+        return child;
+      },
+      replaceChildren(...children) {
+        node.children = children;
+      },
+      setAttribute(name, value) {
+        node.attributes[name] = String(value);
+      },
+      getAttribute(name) {
+        return node.attributes[name] ?? null;
+      },
+      focus() {
+        focused.push(node.id);
+      }
+    };
+    Object.defineProperty(node, 'id', {
+      get: () => node.storedID || '',
+      set(value) {
+        node.storedID = value;
+        registry[value] = node;
+      }
+    });
+    return node;
+  };
+}
+
+function blueprintInputsManager({ windowOverrides = {} } = {}) {
+  const focused = [];
+  const input = value => ({
+    value,
+    dataset: {},
+    classList: { contains: () => false, add() {}, remove() {} },
+    focus() {}
+  });
+  const elements = {
+    folderNameInput: input('Night Drive'),
+    folderDescriptionInput: input(''),
+    folderDescriptionHelp: { textContent: '' },
+    workspaceNameHint: {
+      textContent: '',
+      hidden: true,
+      classList: { contains: () => false, add() {}, remove() {} }
+    },
+    workspaceProjectChoice: { hidden: true },
+    workspaceProjectModeNew: { checked: true },
+    workspaceProjectModeExisting: { checked: false },
+    workspaceExistingProjectFields: { hidden: true },
+    workspaceExistingProjectFolder: { textContent: '' },
+    workspaceExistingProjectError: { textContent: '', hidden: true },
+    workspaceExistingProjectStatus: { textContent: '', hidden: true },
+    workspaceExistingProjectEntryField: { hidden: true },
+    workspaceExistingProjectEntrySelect: { value: '', dataset: {}, replaceChildren() {} },
+    workspaceExistingProjectDuplicate: { hidden: true },
+    workspaceExistingProjectDuplicateText: { textContent: '' },
+    workspaceDetailsLiveRegion: { textContent: '' },
+    workspaceBlueprintInputs: { hidden: true },
+    workspaceBlueprintInputsTitle: { textContent: '' },
+    workspaceBlueprintInputsFields: {
+      dataset: {},
+      children: [],
+      replaceChildren(...children) {
+        this.children = children;
+      }
+    },
+    addFolderModal: { dataset: {} }
+  };
+  const manager = loadSessionManager(
+    undefined,
+    { ...creatorWindowHelpers(), location: { href: '' }, ...windowOverrides },
+    {
+      getElementById: id => elements[id] || null,
+      querySelectorAll: () => [],
+      createElement: inputsElementFactory(elements, focused)
+    }
+  );
+  manager.closeWorkspaceAgentSetup = () => {};
+  manager.applyTemplateBehavior = () => {};
+  manager.updateWizardRecap = () => {};
+  manager.refreshTemplateAgentPlan = async () => {};
+  manager.refreshWorkspaceReview = () => {};
+  manager.beginWorkspaceCreatorContext({ entryPoint: 'workspace_hub_create' });
+  return { manager, elements, focused };
+}
+
+const inputControl = (elements, id) => elements[`workspaceBlueprintInput-${id}`];
+const inputError = (elements, id) => elements[`workspaceBlueprintInput-${id}-error`];
+// The manager runs in its own VM realm, so its plain objects are not
+// reference-equal to this realm's Object.prototype. Compare the data.
+const plain = value => (value === null ? null : JSON.parse(JSON.stringify(value)));
+
+test('blueprintDetailsProfile exposes a blueprint inputs declaration (FR 34)', () => {
+  const manager = loadSessionManager();
+  const profile = template => manager.blueprintDetailsProfile(template);
+
+  assert.equal(profile(inputsTemplate).inputs.title, 'Session settings');
+  assert.equal(profile(inputsTemplate).inputsUnavailable, false);
+  assert.equal(profile({ id: 'research-project' }).inputs, null);
+  assert.equal(profile({ ...inputsTemplate, blank: true }).inputs, null);
+  assert.equal(profile(null).inputs, null);
+
+  // A declaration the server could not understand offers nothing at all.
+  const broken = profile({ ...inputsTemplate, inputs_error: 'invalid inputs declaration' });
+  assert.equal(broken.inputs, null);
+  assert.equal(broken.inputsUnavailable, true);
+
+  // An empty field list is not a card either.
+  assert.equal(profile({ ...inputsTemplate, inputs: { title: 'T', fields: [] } }).inputs, null);
+});
+
+test('Details asks for a blueprint’s declared inputs, prefilled (FR 42)', () => {
+  const { manager, elements } = blueprintInputsManager();
+
+  manager.handleWorkspaceTemplateSelected({ id: 'research-project', name: 'Research' });
+  assert.equal(elements.workspaceBlueprintInputs.hidden, true, 'a blueprint that asks nothing');
+
+  manager.handleWorkspaceTemplateSelected(inputsTemplate);
+  assert.equal(elements.workspaceBlueprintInputs.hidden, false);
+  assert.equal(elements.workspaceBlueprintInputsTitle.textContent, 'Session settings');
+
+  const tempo = inputControl(elements, 'tempo');
+  assert.equal(tempo.tagName, 'input');
+  assert.equal(tempo.type, 'number');
+  assert.equal(tempo.value, '120', 'the declared default is prefilled');
+  assert.equal(tempo.min, '40');
+  assert.equal(tempo.max, '240');
+  assert.equal(tempo.step, '1');
+  assert.equal(elements['workspaceBlueprintInput-tempo-hint'].textContent, '40–240');
+
+  const signature = inputControl(elements, 'time_signature');
+  assert.equal(signature.tagName, 'select');
+  assert.equal(signature.value, '4 4');
+  assert.deepEqual(plain(signature.children.map(option => [option.value, option.textContent])), [
+    ['4 4', '4/4'],
+    ['3 4', '3/4'],
+    ['6 8', '6/8']
+  ]);
+
+  // Switching blueprints starts again from the new one's declaration.
+  manager.handleWorkspaceTemplateSelected(null);
+  assert.equal(elements.workspaceBlueprintInputs.hidden, true, 'Blank');
+  assert.deepEqual(plain(manager.blueprintInputsDraft.values), {});
+});
+
+test('a blueprint whose declaration is unusable shows no card and sends nothing', () => {
+  const { manager, elements } = blueprintInputsManager();
+  manager.handleWorkspaceTemplateSelected({
+    ...inputsTemplate,
+    inputs_error: 'invalid inputs declaration: number field "tempo" needs min, max, and step'
+  });
+  assert.equal(elements.workspaceBlueprintInputs.hidden, true);
+  assert.equal(manager.blueprintInputsPayload(), null);
+  assert.equal(manager.blueprintInputsProblem(), '');
+});
+
+test('the chosen values live in one draft, never read back out of the DOM (FR 43)', () => {
+  const { manager, elements } = blueprintInputsManager();
+  manager.handleWorkspaceTemplateSelected(inputsTemplate);
+
+  manager.setBlueprintInputValue('tempo', '96');
+  manager.setBlueprintInputValue('time_signature', '3 4');
+  assert.deepEqual(plain(manager.blueprintInputsDraft.values), {
+    tempo: '96',
+    time_signature: '3 4'
+  });
+  assert.deepEqual(plain(manager.blueprintInputsPayload()), { tempo: 96, time_signature: '3 4' });
+
+  // A control the user never touched cannot smuggle a value past the draft.
+  inputControl(elements, 'tempo').value = '900';
+  assert.deepEqual(plain(manager.blueprintInputsPayload()), { tempo: 96, time_signature: '3 4' });
+});
+
+test('an out-of-range value blocks leaving Details and says so on the field (FR 43)', () => {
+  const { manager, elements, focused } = blueprintInputsManager();
+  manager.handleWorkspaceTemplateSelected(inputsTemplate);
+  manager.wizardStep = 2;
+
+  manager.setBlueprintInputValue('tempo', '900');
+  assert.equal(inputError(elements, 'tempo').hidden, false);
+  assert.equal(
+    inputError(elements, 'tempo').textContent,
+    'Tempo must be between 40 and 240.',
+    'the message names the field and its range'
+  );
+
+  manager.goToWizardStep(3);
+  assert.equal(manager.wizardStep, 2, 'Details keeps the step');
+  assert.equal(
+    elements.workspaceDetailsLiveRegion.textContent,
+    'Tempo must be between 40 and 240.',
+    'announced once through the region outside the wizard steps'
+  );
+  assert.equal(focused.at(-1), 'workspaceBlueprintInput-tempo');
+
+  // Off-step and empty are refused too, and a good value clears the block.
+  manager.setBlueprintInputValue('tempo', '96.5');
+  assert.equal(inputError(elements, 'tempo').textContent, 'Tempo must change in steps of 1.');
+  manager.setBlueprintInputValue('tempo', '');
+  assert.equal(inputError(elements, 'tempo').textContent, 'Tempo is required.');
+  manager.setBlueprintInputValue('tempo', '96');
+  assert.equal(inputError(elements, 'tempo').hidden, true);
+  assert.equal(manager.blueprintInputsProblem(), '');
+});
+
+test('the card is hidden and nothing is sent for an existing project (FR 38)', () => {
+  const { manager, elements } = blueprintInputsManager();
+  manager.handleWorkspaceTemplateSelected(inputsTemplate);
+  manager.setBlueprintInputValue('tempo', '96');
+  assert.equal(elements.workspaceBlueprintInputs.hidden, false);
+
+  manager.setExistingProjectMode('existing_project');
+  assert.equal(elements.workspaceBlueprintInputs.hidden, true);
+  assert.equal(manager.blueprintInputsPayload(), null);
+  assert.equal(manager.blueprintInputsProblem(), '', 'a hidden card cannot block Details');
+
+  manager.setExistingProjectMode('new_project');
+  assert.equal(elements.workspaceBlueprintInputs.hidden, false);
+  assert.deepEqual(plain(manager.blueprintInputsPayload()), { tempo: 96, time_signature: '4 4' });
+});
+
+test('a group and an import never ask for blueprint inputs (FR 38)', () => {
+  const group = blueprintInputsManager();
+  group.manager.handleWorkspaceTemplateSelected(inputsTemplate);
+  group.manager.switchWorkspaceCreatorKind('group');
+  assert.equal(group.manager.blueprintInputsAvailable(), false);
+  assert.equal(group.manager.blueprintInputsPayload(), null);
+
+  const importing = blueprintInputsManager();
+  importing.manager.handleWorkspaceTemplateSelected(inputsTemplate);
+  importing.manager.importModeEnabled = true;
+  importing.manager.renderBlueprintInputs();
+  assert.equal(importing.elements.workspaceBlueprintInputs.hidden, true);
+  assert.equal(importing.manager.blueprintInputsPayload(), null);
+});
+
+test('Review lists each input with an Edit link back to Details (FR 44)', () => {
+  const { manager } = blueprintInputsManager();
+  manager.handleWorkspaceTemplateSelected(inputsTemplate);
+  manager.setBlueprintInputValue('tempo', '96');
+  manager.setBlueprintInputValue('time_signature', '3 4');
+
+  const receipt = manager.renderBlueprintInputsReceipt();
+  assert.match(receipt, /Session settings/);
+  assert.match(receipt, /Tempo: 96 BPM/, 'the number carries its declared unit');
+  assert.match(receipt, /Time signature: 3\/4/, 'the option shows its own label');
+  assert.match(receipt, /data-wizard-edit-step="2"/);
+
+  manager.setExistingProjectMode('existing_project');
+  assert.equal(
+    manager.renderBlueprintInputsReceipt(),
+    '',
+    'nothing to state for an existing project'
+  );
+});
+
+test('changing an input invalidates a placement review already obtained (FR 45)', () => {
+  const { manager } = blueprintInputsManager();
+  manager.handleWorkspaceTemplateSelected(inputsTemplate);
+  let invalidated = 0;
+  manager.invalidateGroupRequirementReview = () => {
+    invalidated += 1;
+  };
+  manager.setBlueprintInputValue('tempo', '96');
+  assert.equal(
+    invalidated,
+    1,
+    'like editing the name, the receipt no longer describes this create'
+  );
+});
+
+test('the create request carries blueprint_inputs only for a new project', async () => {
+  const withInputs = manager => {
+    manager.workspaceTemplate = inputsTemplate;
+    manager.resetBlueprintInputsDraft(inputsTemplate);
+    manager.blueprintInputsDraft.values.tempo = '96';
+    manager.blueprintInputsDraft.values.time_signature = '3 4';
+  };
+  const created = await runDetailsCreate({ configure: withInputs });
+  assert.deepEqual(JSON.parse(JSON.stringify(created.blueprint_inputs)), {
+    tempo: 96,
+    time_signature: '3 4'
+  });
+
+  const attached = await runDetailsCreate({
+    configure: manager => {
+      withInputs(manager);
+      manager.existingProjectChoice = {
+        mode: 'existing_project',
+        selectionToken: 'picker-token-1',
+        folderDisplay: '/Users/me/Music/Night Drive',
+        entryName: 'Night Drive.proj',
+        review: { state: 'ready', entryName: 'Night Drive.proj', candidates: ['Night Drive.proj'] },
+        generation: 1
+      };
+    }
+  });
+  assert.equal('blueprint_inputs' in attached, false);
+
+  const plain = await runDetailsCreate({});
+  assert.equal('blueprint_inputs' in plain, false, 'a blueprint that asks nothing sends nothing');
 });

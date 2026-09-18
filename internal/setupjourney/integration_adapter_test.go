@@ -29,6 +29,16 @@ type fakeReviewedIntegrationManager struct {
 	updateErr       error
 	installCalls    int
 	confirmAccepted bool
+	// perSource answers differently per release, which a walk over several
+	// candidates needs; sources not listed fall back to the single fixture.
+	perSource map[string]fakeInspection
+}
+
+// fakeInspection is one release's inspection result.
+type fakeInspection struct {
+	descriptor plugin.PluginDescriptor
+	report     plugin.TrustReport
+	err        error
 }
 
 func (manager *fakeReviewedIntegrationManager) List() ([]plugin.InstalledPlugin, error) {
@@ -37,6 +47,9 @@ func (manager *fakeReviewedIntegrationManager) List() ([]plugin.InstalledPlugin,
 func (manager *fakeReviewedIntegrationManager) Inspect(source string, _ plugin.SourceFormat) (plugin.PluginDescriptor, plugin.TrustReport, error) {
 	manager.inspections++
 	manager.inspectSources = append(manager.inspectSources, source)
+	if inspection, ok := manager.perSource[source]; ok {
+		return inspection.descriptor, inspection.report, inspection.err
+	}
 	return manager.descriptor, manager.report, manager.inspectErr
 }
 func (manager *fakeReviewedIntegrationManager) Install(source string, format plugin.SourceFormat, confirm plugin.ConfirmFunc) (plugin.InstalledPlugin, error) {
@@ -129,10 +142,13 @@ func integrationResolver(entry reviewedintegration.Entry) IntegrationEntryResolv
 	}
 }
 
-// stubReleases is a controllable latest-release resolver that counts lookups.
+// stubReleases is a controllable release resolver that counts lookups. Given
+// only `resolution` it behaves as a single-answer resolver; `candidates` makes
+// it hand over an ordered list the way the real resolver does.
 type stubReleases struct {
 	mu         sync.Mutex
 	resolution integrationrelease.Resolution
+	candidates []integrationrelease.Resolution
 	calls      int
 }
 
@@ -140,13 +156,27 @@ func (stub *stubReleases) Resolve(_ context.Context, _ reviewedintegration.Entry
 	stub.mu.Lock()
 	defer stub.mu.Unlock()
 	stub.calls++
+	if len(stub.candidates) > 0 {
+		return stub.candidates[0]
+	}
 	return stub.resolution
+}
+
+func (stub *stubReleases) Candidates(_ context.Context, _ reviewedintegration.Entry) []integrationrelease.Resolution {
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	stub.calls++
+	if len(stub.candidates) > 0 {
+		return append([]integrationrelease.Resolution(nil), stub.candidates...)
+	}
+	return []integrationrelease.Resolution{stub.resolution}
 }
 
 func (stub *stubReleases) set(resolution integrationrelease.Resolution) {
 	stub.mu.Lock()
 	defer stub.mu.Unlock()
 	stub.resolution = resolution
+	stub.candidates = nil
 }
 
 func (stub *stubReleases) callCount() int {

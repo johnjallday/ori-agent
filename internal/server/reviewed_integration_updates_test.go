@@ -20,6 +20,10 @@ func (releases *fixedReleases) Resolve(context.Context, reviewedintegration.Entr
 	return releases.resolution
 }
 
+func (releases *fixedReleases) Candidates(ctx context.Context, entry reviewedintegration.Entry) []integrationrelease.Resolution {
+	return []integrationrelease.Resolution{releases.Resolve(ctx, entry)}
+}
+
 func reviewedUpdatesFixture(target string) (reviewedIntegrationUpdates, *fixedReleases, reviewedintegration.Entry) {
 	entry, ok := reviewedintegration.Get("ori_reaper")
 	if !ok {

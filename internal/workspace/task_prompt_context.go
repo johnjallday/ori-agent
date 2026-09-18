@@ -309,6 +309,12 @@ func (h *LLMTaskHandler) buildTaskWorkspaceSnapshot(ctx context.Context, task Ta
 			lines = append(lines, fmt.Sprintf("- %s: %q", field.label, value))
 		}
 	}
+	// The values the workspace was created with are already in the project
+	// file, so a task run that could not see them would propose setting them
+	// again as if nobody had been asked.
+	if created := sanitizeTaskPromptText(BlueprintInputsSummary(ws.SharedData), taskPromptPreviewLimit); created != "" {
+		lines = append(lines, fmt.Sprintf("- Workspace Created With: %s", created))
+	}
 	if referenceURL := strings.TrimSpace(task.ReferenceURL); referenceURL != "" {
 		lines = append(lines, fmt.Sprintf("- Task Reference URL: %q", sanitizeTaskPromptText(referenceURL, taskPromptPathLimit)))
 	}

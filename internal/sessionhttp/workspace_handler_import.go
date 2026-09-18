@@ -79,6 +79,10 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 		_ = orihttp.RespondBadRequest(w, "project_connection is not available for Import Folder; create from a blueprint to use an existing project")
 		return
 	}
+	if trimmed := bytes.TrimSpace(req.BlueprintInputs); len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null")) && !bytes.Equal(trimmed, []byte("{}")) {
+		_ = orihttp.RespondBadRequest(w, "blueprint inputs are not available for Import Folder; the imported folder is adopted as it is")
+		return
+	}
 
 	if strings.TrimSpace(req.Path) == "" {
 		_ = orihttp.RespondBadRequest(w, "path is required")

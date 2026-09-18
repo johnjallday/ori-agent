@@ -293,6 +293,11 @@ type createWorkspaceRequest struct {
 	// ProjectConnection attaches a project folder the user already has, chosen
 	// with the native folder picker, instead of scaffolding a new project.
 	ProjectConnection *createWorkspaceProjectConnection `json:"project_connection,omitempty"`
+	// BlueprintInputs carries the values the user chose for the blueprint's
+	// declared inputs, keyed by field id. Values stay raw so the one validator
+	// in projecttemplates decides what each field type accepts — this layer
+	// never interprets a number or an option value itself.
+	BlueprintInputs map[string]json.RawMessage `json:"blueprint_inputs,omitempty"`
 }
 
 func (req *createWorkspaceRequest) UnmarshalJSON(data []byte) error {
@@ -555,6 +560,15 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The client's values are never trusted: they are re-validated against the
+	// blueprint's own declaration here, before anything is created, so a
+	// refusal leaves nothing behind.
+	blueprintInputs, blueprintInputsErr := resolveCreateWorkspaceInputs(req, kind, resolvedTemplate, templateResolved)
+	if blueprintInputsErr != nil {
+		_ = orihttp.RespondBadRequest(w, blueprintInputsErr.Error())
+		return
+	}
+
 	// A versioned wizard request must prove its reviewed team before any group
 	// claim or creation side effect. Blank joins the same synthetic template
 	// machinery only on this strict path; legacy Blank behavior remains below.
@@ -723,6 +737,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		resolved:     templateResolved,
 		resolveErr:   templateResolveErr,
 		attach:       attachPlan,
+		inputs:       blueprintInputs,
 	}, seed)
 	if responded {
 		return
@@ -1187,6 +1202,9 @@ type createTemplateContext struct {
 	// attach, when set, references an existing project folder instead of
 	// scaffolding one.
 	attach *createWorkspaceAttachPlan
+	// inputs, when set, are the validated values for the blueprint's declared
+	// inputs: written into the scaffold and recorded on the workspace.
+	inputs *createWorkspaceInputs
 }
 
 // createProvisionOutcome carries folder-provisioning results back to
@@ -1355,7 +1373,7 @@ func (h *Handler) applyCreateWorkspaceTemplate(ctx context.Context, req createWo
 	default:
 		// Non-fatal by design: a failed instantiation must not fail
 		// workspace creation. The warning is surfaced to the user.
-		result, err := h.instantiateWorkspaceProject(ctx, ws, folderWS, req.TemplateID, req.TemplatePath, req.ProjectName)
+		result, err := h.instantiateWorkspaceProject(ctx, ws, folderWS, req.TemplateID, req.TemplatePath, req.ProjectName, instantiateWithInputs(tc.inputs))
 		if err != nil {
 			if tc.resolveErr != nil {
 				err = tc.resolveErr
@@ -2321,6 +2339,9 @@ type createWorkspaceImportRequest struct {
 	// ProjectConnection is decoded only so it can be refused: Import Folder
 	// adopts a whole folder and never attaches a blueprint's project file.
 	ProjectConnection json.RawMessage `json:"project_connection,omitempty"`
+	// BlueprintInputs is decoded for the same reason: Import Folder scaffolds
+	// nothing, so there is no file for a blueprint's values to be written into.
+	BlueprintInputs json.RawMessage `json:"blueprint_inputs,omitempty"`
 }
 
 type workspaceImportDuplicate struct {
