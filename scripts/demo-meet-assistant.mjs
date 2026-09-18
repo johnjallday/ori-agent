@@ -16,6 +16,10 @@
  *   panel-closed  Ori's panel is closed at step 1; the form alone hires, and
  *                 Mission 01 completes.
  *   narrow        The same with the form alone at a 400px viewport.
+ *   home          The whole path with no model: the modal, Home before the hire
+ *                 (Ori's prompt on the Agents nav entry, Mission 01 on the card,
+ *                 02-05 locked, a quiet Today), Take me there, the five steps,
+ *                 the hire, the hand-over, then Build My HQ to the end.
  *   modal         The real first-run modal: Welcome, then Model with "Continue
  *                 without a model", closes on Home with no hire. An old /?hire=1
  *                 link lands on Mission 01, and Ask Ori offers "Meet your
@@ -367,8 +371,113 @@ async function stageModal() {
   await page.close();
 }
 
+async function finishModalWithoutModel(page) {
+  await page.goto(`${baseUrl}/`);
+  await page.locator('#onboardingModal.show').waitFor({ timeout: 15000 });
+  await page.locator('#onboardingUserName').fill('Sam');
+  await page.locator('#welcomeNextBtn').click();
+  await page.locator('#continueWithoutModelBtn').waitFor({ state: 'visible' });
+  await page.locator('#continueWithoutModelBtn').click();
+  await page.waitForURL(url => url.pathname === '/', { timeout: 15000 });
+}
+
+async function stageHome() {
+  const page = await newPage();
+  await finishModalWithoutModel(page);
+
+  // Home before the hire: Ori's prompt, pointing at the Agents nav entry.
+  await page
+    .waitForFunction(
+      () => /works from the Agents page/.test(document.querySelector('#oriGuideReply')?.textContent || ''),
+      null,
+      { timeout: 10000 }
+    )
+    .catch(() => {});
+  const prompt = await guideStep(page);
+  check(/^Your assistant works from the Agents page\./.test(prompt.answer), `Home prompt: "${prompt.answer}"`);
+  check(prompt.marked.includes('#navAgentsLink'), `the Agents nav entry is marked (${prompt.marked.join(',')})`);
+  check((await page.locator('[data-ori-quest-choice="go"]').count()) === 1, 'Take me there is offered');
+  const banner = (await page.locator('#personalAssistantTodayBanner').textContent()).trim();
+  check(banner === 'Meet your assistant to start Today.', `Today is quiet: "${banner}"`);
+  check(
+    (await page.locator('#personalAssistantTodayBanner a').getAttribute('href')) ===
+      '/agents?quest=meet-assistant',
+    "Today's one link is Mission 01"
+  );
+  await shot(page, 'home-1-prompt');
+
+  // The mission board: Mission 01 on the card, 02-05 locked beneath it.
+  await page.locator('#cockpitQuestsToggle').click();
+  await page.locator('[data-role="first-mission"]').waitFor({ state: 'visible', timeout: 8000 });
+  const card = (await page.locator('[data-role="first-mission-title"]').textContent()).trim();
+  const kicker = (await page.locator('[data-role="first-mission-kicker"]').textContent()).trim();
+  check(card === 'Meet your assistant' && kicker === 'Mission 01', `card: ${kicker} · ${card}`);
+  const locked = page.locator('.quest-item-locked');
+  check((await locked.count()) === 4, `missions 02-05 are locked (${await locked.count()})`);
+  check(
+    (await locked.filter({ hasText: 'Meet your assistant first' }).count()) === 4,
+    'each locked row says why'
+  );
+  check(
+    (await locked.locator('a, button').count()) === 0,
+    'no locked row offers Start, Skip or Resume'
+  );
+  await shot(page, 'home-2-missions');
+  await page.keyboard.press('Escape');
+
+  // Take me there, then the five steps on the Agents page.
+  await page.locator('[data-ori-quest-choice="go"]').click();
+  await page.waitForURL(url => url.pathname === '/agents', { timeout: 15000 });
+  await expectStep(page, 1, '#newAgentBtn', 'New Agent');
+  await page.locator('#newAgentBtn').click();
+  await expectStep(page, 2, '#cr-name', 'name');
+  await page.locator('#cr-name').fill('Atlas');
+  await page.locator('#cr-name').press('Tab');
+  await expectStep(page, 3, '#cr-appearance-host', 'face');
+  await page.locator('[data-ori-quest-choice="keep-face"]').click();
+  await expectStep(page, 4, '#cr-focus-group', 'focus');
+  await page.locator('[data-ori-quest-choice="done-choosing"]').click();
+  await expectStep(page, 5, '#createSubmit', 'hire');
+  await shot(page, 'home-3-hire-step');
+  await hireAndLand(page);
+
+  // The hand-over, and Build My HQ running.
+  await page
+    .waitForFunction(
+      () => /That’s your assistant/.test(document.querySelector('#oriGuideReply')?.textContent || ''),
+      null,
+      { timeout: 10000 }
+    )
+    .catch(() => {});
+  const handOver = await guideStep(page);
+  check(/^That’s your assistant\./.test(handOver.answer), `hand-over: "${handOver.answer}"`);
+  check(handOver.step === 'Step 1 of 3', `Build My HQ is running (${handOver.step})`);
+  await shot(page, 'home-4-handover');
+
+  // Build My HQ to the end: the site, the Build action, the form, confirm.
+  await page.locator('[data-hq-site]').click();
+  await page.locator('[data-hq-action="build"]').click();
+  const buildModal = page.locator('#hqBuildModal');
+  await buildModal.waitFor({ state: 'visible', timeout: 10000 });
+  await shot(page, 'home-5-build-form');
+  await page.locator('#hqBuildSubmitBtn').click();
+  // Poll from here: waitForFunction takes an async predicate's promise as
+  // truthy and returns at once.
+  for (let tries = 0; tries < 30 && (await relationshipState(page)) !== 'active'; tries += 1) {
+    await page.waitForTimeout(1000);
+  }
+  check((await relationshipState(page)) === 'active', 'Build My HQ finished: the assistant is active');
+  const { body } = await api(page, '/api/progression');
+  const hq = (body?.missions || []).find(mission => mission.order === 2) || {};
+  check(hq.status === 'completed', `Mission 02 (Build My HQ) is ${hq.status}`);
+  await page.waitForTimeout(1500);
+  await shot(page, 'home-6-hq-built');
+  await page.close();
+}
+
 try {
   if (stage === 'preset') await stagePreset();
+  else if (stage === 'home') await stageHome();
   else if (stage === 'modal') await stageModal();
   else if (stage === 'walkthrough') await stageWalkthrough();
   else if (stage === 'panel-closed') {

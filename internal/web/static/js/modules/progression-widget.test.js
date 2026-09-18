@@ -11,6 +11,7 @@ import {
   firstMissionView,
   tierQuestRows,
   questRowState,
+  renderQuestRow,
   diffAnnouncements
 } from './progression-widget.js';
 
@@ -417,6 +418,103 @@ test('questRowState: a locked-tier quest renders like any other unresolved quest
   const state = questRowState(quest({ status: 'locked-tier', action_url: '/x' }));
   assert.equal(state.resolved, false);
   assert.equal(state.showLink, true);
+});
+
+// Missions 02-05 wait on Mission 01 (meet-your-assistant FR7). The server says
+// so; the row shows it and offers nothing to press.
+test('questRowState: a server-locked mission shows its lock and reason, and no action', () => {
+  const state = questRowState(
+    quest({
+      status: 'available',
+      optional: true,
+      action_url: '/?quest=build-hq',
+      locked: true,
+      locked_reason: 'Meet your assistant first'
+    })
+  );
+  assert.equal(state.locked, true);
+  assert.equal(state.lockedReason, 'Meet your assistant first');
+  assert.equal(state.mark, '🔒');
+  assert.equal(state.showLink, false);
+  assert.equal(state.showSkip, false);
+  assert.equal(state.showResume, false);
+});
+
+test('questRowState: a resolved mission is never shown locked', () => {
+  for (const status of ['completed', 'skipped']) {
+    const state = questRowState(
+      quest({ status, optional: true, action_url: '/x', locked: true, locked_reason: 'Wait' })
+    );
+    assert.equal(state.locked, false, status);
+    assert.equal(state.lockedReason, '');
+  }
+});
+
+// A minimal document: enough of createElement for renderQuestRow.
+function stubDocument() {
+  const make = tag => ({
+    tag,
+    className: '',
+    textContent: '',
+    attributes: {},
+    children: [],
+    listeners: {},
+    setAttribute(k, v) {
+      this.attributes[k] = v;
+    },
+    addEventListener(type, fn) {
+      this.listeners[type] = fn;
+    },
+    append(...nodes) {
+      this.children.push(...nodes);
+    }
+  });
+  return { createElement: make };
+}
+
+test('renderQuestRow: a locked row reads as locked, with no link, reward, Skip, or Resume', () => {
+  const li = renderQuestRow(
+    quest({
+      title: 'Build My HQ',
+      status: 'available',
+      optional: true,
+      action_url: '/?quest=build-hq',
+      reward_craft: 5,
+      locked: true,
+      locked_reason: 'Meet your assistant first'
+    }),
+    { doc: stubDocument() }
+  );
+  assert.match(li.className, /quest-item-locked/);
+  const [mark, title, reason, ...rest] = li.children;
+  assert.equal(mark.textContent, '🔒');
+  assert.equal(title.tag, 'span', 'a locked title must not be a link');
+  assert.equal(title.textContent, 'Build My HQ');
+  assert.equal(reason.className, 'quest-status quest-status-locked');
+  assert.equal(reason.textContent, 'Meet your assistant first');
+  assert.deepEqual(rest, [], 'a locked row offered something to press');
+});
+
+test('renderQuestRow: an open optional row keeps its link, reward, and Skip', () => {
+  const skipped = [];
+  const li = renderQuestRow(
+    quest({
+      id: 'q-open',
+      title: 'Tidy your Downloads',
+      status: 'available',
+      optional: true,
+      action_url: '/?quest=tidy-downloads',
+      reward_craft: 5
+    }),
+    { doc: stubDocument(), onSkip: id => skipped.push(id) }
+  );
+  const [, title, reward, skip] = li.children;
+  assert.equal(title.tag, 'a');
+  assert.equal(title.href, '/?quest=tidy-downloads');
+  assert.equal(reward.textContent, '+5 Craft');
+  assert.equal(skip.textContent, 'Skip');
+  skip.listeners.click();
+  assert.deepEqual(skipped, ['q-open']);
 });
 
 test('diffAnnouncements is silent on the very first load (knownCompleted === null)', () => {
