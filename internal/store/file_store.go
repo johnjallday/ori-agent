@@ -30,6 +30,15 @@ type fileStore struct {
 	// changed it, and the store must not silently overwrite that edit.
 	definitionHashes map[string][sha256.Size]byte
 
+	// knownDefinitions holds, per agent, the serialized definition as this store
+	// last read or wrote it. A write whose definition still equals it changed
+	// only runtime state, so the definition file is left alone.
+	knownDefinitions map[string][]byte
+
+	// state keeps status, statistics, and evolution out of the definition file.
+	// Nil means "derive it from the agents folder" (see stateStore).
+	state *RuntimeStateStore
+
 	// legacyWorkspaceManagerAgents holds the names of agents whose on-disk
 	// record still carries the retired "type": "workspace-manager" value.
 	// agent.Agent no longer has a Type field, so this is captured by a second,
@@ -84,6 +93,18 @@ func NewFileStore(path string, defaultSettings types.Settings) (Store, error) {
 	}
 
 	return fs, nil
+}
+
+// stateStore returns where this store keeps runtime state. Unless one was
+// given, it is <parent>/agent_state/<root key>, where <parent> holds the agents
+// folder: for the data-dir store that is <data dir>/agent_state.
+func (s *fileStore) stateStore() *RuntimeStateStore {
+	if s.state == nil {
+		parent := filepath.Dir(s.agentsDir())
+		// "agent_state" matches config.AgentStateDirName.
+		s.state = NewRuntimeStateStore(filepath.Join(parent, "agent_state"), parent)
+	}
+	return s.state
 }
 
 // PersistencePaths reports the same paths used by this owner's writers.
@@ -269,6 +290,10 @@ func (s *fileStore) DeleteAgent(name string) error {
 	// Remove agent from memory
 	delete(s.agents, name)
 	delete(s.definitionHashes, name)
+	delete(s.knownDefinitions, name)
+	if err := s.stateStore().Delete(name); err != nil {
+		logger.Verbosef("Warning: failed to remove runtime state for %s: %v", name, err)
+	}
 
 	// Delete the agent folder from filesystem
 	agentFolder := filepath.Join(s.agentsDir(), name)
@@ -362,8 +387,15 @@ func (s *fileStore) RenameAgent(oldName, newName string) error {
 		delete(s.definitionHashes, oldName)
 		s.definitionHashes[newName] = hash
 	}
+	if definition, known := s.knownDefinitions[oldName]; known {
+		delete(s.knownDefinitions, oldName)
+		s.knownDefinitions[newName] = definition
+	}
+	if err := s.stateStore().Rename(oldName, newName); err != nil {
+		return fmt.Errorf("move runtime state: %w", err)
+	}
 
-	if err := s.persistAgentUnlocked(newName); err != nil {
+	if err := s.writeAgentUnlocked(newName); err != nil {
 		return err
 	}
 	if err := s.writeIndexUnlocked(); err != nil {
@@ -383,6 +415,7 @@ func (s *fileStore) ClearAgents() error {
 	defer s.mu.Unlock()
 	s.agents = make(map[string]*agent.Agent)
 	s.definitionHashes = nil
+	s.knownDefinitions = nil
 	return s.writeIndexUnlocked()
 }
 
@@ -393,12 +426,16 @@ func (s *fileStore) GetAgent(name string) (*agent.Agent, bool) {
 	return ag, ok
 }
 
-// SetAgent replaces an agent's record and writes its definition.
+// SetAgent replaces an agent's record and writes what changed: its runtime
+// state always, its definition only when the definition changed.
 //
-// It refuses, with ErrAgentChangedOnDisk, when the definition file was changed
-// outside Ori since this store last read or wrote it: ag was built from the old
-// content, so writing it would silently discard that edit. The store reloads
-// the agent from disk first, so a retry starts from what is really there.
+// When the definition file was changed outside Ori since this store last read
+// or wrote it, ag was built from the old content. If ag's definition is that
+// old content unchanged, the caller only updated runtime state (a chat turn
+// counting statistics, say): the edit on disk is reloaded and only the state
+// is written. Otherwise writing ag would silently discard the edit, so SetAgent
+// reloads the agent and refuses with ErrAgentChangedOnDisk; a retry then
+// starts from what is really there.
 func (s *fileStore) SetAgent(name string, ag *agent.Agent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -407,22 +444,32 @@ func (s *fileStore) SetAgent(name string, ag *agent.Agent) error {
 		return err
 	}
 	if changed {
+		stateOnly, err := s.definitionUnchangedUnlocked(name, ag)
+		if err != nil {
+			return err
+		}
+		state := runtimeStateOf(ag)
 		if err := s.reloadAgentUnlocked(name); err != nil {
 			return err
 		}
-		return fmt.Errorf("%w: %s", ErrAgentChangedOnDisk, name)
+		current, exists := s.agents[name]
+		if !stateOnly || !exists {
+			return fmt.Errorf("%w: %s", ErrAgentChangedOnDisk, name)
+		}
+		applyRuntimeState(current, state)
+		return s.persistStateUnlocked(name)
 	}
 	s.agents[name] = ag
 	if err := s.initializeNewAgentSkillsStateUnlocked(name); err != nil {
 		return fmt.Errorf("initialize skill defaults: %w", err)
 	}
-	if err := s.persistAgentUnlocked(name); err != nil {
+	if err := s.writeAgentUnlocked(name); err != nil {
 		return err
 	}
 	return s.writeIndexUnlocked()
 }
 
-// UpdateAgent applies updateFn to an agent and writes its definition.
+// UpdateAgent applies updateFn to an agent and writes what changed.
 //
 // Unlike SetAgent it can merge with an outside edit: when the file changed on
 // disk, the agent is reloaded and updateFn runs on the reloaded record, so both
@@ -450,7 +497,7 @@ func (s *fileStore) UpdateAgent(name string, updateFn func(*agent.Agent) error) 
 		return err
 	}
 
-	if err := s.persistAgentUnlocked(name); err != nil {
+	if err := s.writeAgentUnlocked(name); err != nil {
 		return err
 	}
 	return s.writeIndexUnlocked()
@@ -467,7 +514,9 @@ func (s *fileStore) Save() error {
 // definitionFileName is the per-agent definition file inside an agent folder.
 const definitionFileName = "agent_settings.json"
 
-// persistedDefinition is what an agent's definition file holds.
+// persistedDefinition is what an agent's definition file holds: only what the
+// user authored. Status, statistics, and evolution are runtime state and live
+// in the RuntimeStateStore, so using an agent never rewrites this file.
 //
 // This is an explicit projection, not a marshal of agent.Agent, so a new
 // first-class field is invisible on disk until it is listed here. Appearance
@@ -476,11 +525,11 @@ type persistedDefinition struct {
 	Role         types.AgentRole        `json:"role,omitempty"`
 	Capabilities []string               `json:"capabilities,omitempty"`
 	Settings     types.Settings         `json:"Settings"`
-	Status       types.AgentStatus      `json:"status,omitempty"`
-	Statistics   *types.AgentStatistics `json:"statistics,omitempty"`
 	Metadata     *types.AgentMetadata   `json:"metadata,omitempty"`
 	Appearance   *types.AgentAppearance `json:"appearance,omitempty"`
-	Evolution    *types.AgentEvolution  `json:"evolution,omitempty"`
+	// Paused travels with the agent. In memory it is Status == disabled, which
+	// every runtime check already refuses.
+	Paused bool `json:"paused,omitempty"`
 }
 
 // encodeDefinition serializes an agent in the stable on-disk form: two-space
@@ -493,16 +542,75 @@ func encodeDefinition(ag *agent.Agent) ([]byte, error) {
 		Role:         ag.Role,
 		Capabilities: ag.Capabilities,
 		Settings:     ag.Settings,
-		Status:       ag.Status,
-		Statistics:   ag.Statistics,
 		Metadata:     ag.Metadata,
 		Appearance:   ag.Appearance,
-		Evolution:    ag.Evolution,
+		Paused:       ag.Status == types.AgentStatusDisabled,
 	}, "", "  ")
 	if err != nil {
 		return nil, err
 	}
 	return append(data, '\n'), nil
+}
+
+// runtimeStateOf is the part of an agent that is runtime state, not definition.
+func runtimeStateOf(ag *agent.Agent) RuntimeState {
+	state := RuntimeState{Status: ag.Status, Statistics: ag.Statistics, Evolution: ag.Evolution}
+	if state.Status == types.AgentStatusDisabled {
+		state.Status = ""
+	}
+	return state
+}
+
+// applyRuntimeState puts saved runtime state on an agent. A paused agent stays
+// paused: that is a definition fact the state cannot override.
+func applyRuntimeState(ag *agent.Agent, state RuntimeState) {
+	if state.Statistics != nil {
+		ag.Statistics = state.Statistics
+	}
+	if state.Evolution != nil {
+		ag.Evolution = state.Evolution
+	}
+	if ag.Status == types.AgentStatusDisabled {
+		return
+	}
+	if state.Status != "" {
+		ag.Status = state.Status
+	} else if ag.Status == "" {
+		ag.Status = types.AgentStatusIdle
+	}
+}
+
+// pausedShim reads only the "paused" key of a definition file.
+type pausedShim struct {
+	Paused bool `json:"paused"`
+}
+
+// decodeAgentUnlocked builds an agent from its definition file plus its saved
+// runtime state. A legacy file that still carries status, statistics, or
+// evolution supplies them as the initial state until a state file exists; it
+// is rewritten in the new shape by the next save. Assumes the lock is held.
+func (s *fileStore) decodeAgentUnlocked(name string, data []byte) (*agent.Agent, error) {
+	var ag agent.Agent
+	if err := json.Unmarshal(data, &ag); err != nil {
+		return nil, err
+	}
+	var shim pausedShim
+	_ = json.Unmarshal(data, &shim)
+	if shim.Paused {
+		ag.Status = types.AgentStatusDisabled
+	}
+	state, ok, err := s.stateStore().Load(name)
+	if err != nil {
+		logger.Warn("Agent runtime state could not be read; starting it fresh", logger.Fields{
+			"agent": name,
+			"error": err.Error(),
+		})
+	} else if ok {
+		applyRuntimeState(&ag, state)
+	}
+	s.recordLegacyTypeUnlocked(name, detectLegacyType(data))
+	s.normalizeLoadedAgent(name, &ag)
+	return &ag, nil
 }
 
 func (s *fileStore) definitionPath(name string) string {
@@ -539,12 +647,47 @@ func (s *fileStore) saveUnlocked() error {
 	return s.writeIndexUnlocked()
 }
 
-// persistAgentUnlocked writes one agent's definition file if, and only if, its
-// serialized content differs from what is on disk. Assumes the lock is held.
+// writeAgentUnlocked writes what an operation changed: the runtime state
+// always, the definition file only when the definition itself changed. A
+// statistics update therefore leaves agent_settings.json byte-identical, even
+// when the user formatted it differently. Assumes the lock is held.
+func (s *fileStore) writeAgentUnlocked(name string) error {
+	unchanged, err := s.definitionUnchangedUnlocked(name, s.agents[name])
+	if err != nil {
+		return err
+	}
+	if unchanged {
+		return s.persistStateUnlocked(name)
+	}
+	return s.persistAgentUnlocked(name)
+}
+
+// definitionUnchangedUnlocked reports whether ag's definition is exactly the
+// one this store last read or wrote for name.
+func (s *fileStore) definitionUnchangedUnlocked(name string, ag *agent.Agent) (bool, error) {
+	known, ok := s.knownDefinitions[name]
+	if !ok || ag == nil {
+		return false, nil
+	}
+	data, err := encodeDefinition(ag)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(data, known), nil
+}
+
+// persistAgentUnlocked writes one agent's runtime state and definition file,
+// each if, and only if, its serialized content differs from what is on disk.
+// A definition file in an older shape is rewritten in the current one here.
+// The state goes first, so stripping legacy state keys never loses them.
+// Assumes the lock is held.
 func (s *fileStore) persistAgentUnlocked(name string) error {
 	ag, ok := s.agents[name]
 	if !ok || ag == nil {
 		return nil
+	}
+	if err := s.persistStateUnlocked(name); err != nil {
+		return err
 	}
 	data, err := encodeDefinition(ag)
 	if err != nil {
@@ -560,7 +703,17 @@ func (s *fileStore) persistAgentUnlocked(name string) error {
 		return err
 	}
 	s.rememberDefinitionUnlocked(name, data)
+	s.rememberKnownDefinitionUnlocked(name, data)
 	return nil
+}
+
+// persistStateUnlocked writes one agent's runtime state if it changed.
+func (s *fileStore) persistStateUnlocked(name string) error {
+	ag, ok := s.agents[name]
+	if !ok || ag == nil {
+		return nil
+	}
+	return s.stateStore().Save(name, runtimeStateOf(ag))
 }
 
 // writeIndexUnlocked keeps the minimal index file for compatibility with older
@@ -572,11 +725,31 @@ func (s *fileStore) writeIndexUnlocked() error {
 	return writeFileIfChanged(s.path, []byte("{}\n"))
 }
 
+// rememberDefinitionUnlocked records the bytes of an agent's definition file
+// as this store last read or wrote them.
 func (s *fileStore) rememberDefinitionUnlocked(name string, data []byte) {
 	if s.definitionHashes == nil {
 		s.definitionHashes = make(map[string][sha256.Size]byte)
 	}
 	s.definitionHashes[name] = sha256.Sum256(data)
+}
+
+// rememberKnownDefinitionUnlocked records an agent's serialized definition as
+// it was last synchronized with disk.
+func (s *fileStore) rememberKnownDefinitionUnlocked(name string, data []byte) {
+	if s.knownDefinitions == nil {
+		s.knownDefinitions = make(map[string][]byte)
+	}
+	s.knownDefinitions[name] = data
+}
+
+// rememberLoadedUnlocked records a freshly loaded agent: the file bytes for
+// on-disk change detection, and its serialized definition as the known one.
+func (s *fileStore) rememberLoadedUnlocked(name string, fileData []byte, ag *agent.Agent) {
+	s.rememberDefinitionUnlocked(name, fileData)
+	if encoded, err := encodeDefinition(ag); err == nil {
+		s.rememberKnownDefinitionUnlocked(name, encoded)
+	}
 }
 
 // definitionChangedOnDiskUnlocked reports whether an agent's definition file no
@@ -602,20 +775,19 @@ func (s *fileStore) reloadAgentUnlocked(name string) error {
 	if errors.Is(err, os.ErrNotExist) {
 		delete(s.agents, name)
 		delete(s.definitionHashes, name)
+		delete(s.knownDefinitions, name)
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	var ag agent.Agent
-	if err := json.Unmarshal(data, &ag); err != nil {
+	ag, err := s.decodeAgentUnlocked(name, data)
+	if err != nil {
 		return fmt.Errorf("read agent %q: %w", name, err)
 	}
-	s.recordLegacyTypeUnlocked(name, detectLegacyType(data))
-	s.normalizeLoadedAgent(name, &ag)
-	s.agents[name] = &ag
+	s.agents[name] = ag
 	s.stripLegacyAgentTypeUnlocked()
-	s.rememberDefinitionUnlocked(name, data)
+	s.rememberLoadedUnlocked(name, data, ag)
 	return nil
 }
 
@@ -722,41 +894,42 @@ func (s *fileStore) load() error {
 					agentName := entry.Name()
 					settingsPath := filepath.Join(agentsDir, agentName, definitionFileName)
 
-					var ag agent.Agent
+					var ag *agent.Agent
 
 					// Load full agent settings so nested persistence remains forward-compatible.
 					if settingsData, err := os.ReadFile(settingsPath); err == nil { // #nosec G304 -- a directory entry under the store's own agents folder
-						s.rememberDefinitionUnlocked(agentName, settingsData)
-						if err := json.Unmarshal(settingsData, &ag); err == nil {
+						if decoded, err := s.decodeAgentUnlocked(agentName, settingsData); err == nil {
 							logger.Verbosef("✅ Loaded agent '%s' from %s", agentName, settingsPath)
-							s.recordLegacyTypeUnlocked(agentName, detectLegacyType(settingsData))
+							ag = decoded
+							s.rememberLoadedUnlocked(agentName, settingsData, ag)
 						} else {
+							s.rememberDefinitionUnlocked(agentName, settingsData)
 							logger.Verbosef("❌ Failed to unmarshal agent_settings.json for '%s': %v", agentName, err)
 						}
 					} else {
 						logger.Verbosef("⚠️ Could not read agent_settings.json for '%s': %v", agentName, err)
 					}
 
-					s.normalizeLoadedAgent(agentName, &ag)
-					s.agents[agentName] = &ag
+					if ag == nil {
+						ag = &agent.Agent{}
+						s.normalizeLoadedAgent(agentName, ag)
+					}
+					s.agents[agentName] = ag
 				} else if filepath.Ext(entry.Name()) == ".json" {
 					// Legacy flat structure: agents/agent.json
 					agentName := entry.Name()[:len(entry.Name())-5] // remove .json
 					agentPath := filepath.Join(agentsDir, entry.Name())
 
-					agentData, err := os.ReadFile(agentPath)
+					agentData, err := os.ReadFile(agentPath) // #nosec G304 -- a directory entry under the store's own agents folder
 					if err != nil {
 						continue
 					}
 
-					var ag agent.Agent
-					if err := json.Unmarshal(agentData, &ag); err != nil {
+					ag, err := s.decodeAgentUnlocked(agentName, agentData)
+					if err != nil {
 						continue
 					}
-					s.recordLegacyTypeUnlocked(agentName, detectLegacyType(agentData))
-
-					s.normalizeLoadedAgent(agentName, &ag)
-					s.agents[agentName] = &ag
+					s.agents[agentName] = ag
 				}
 			}
 		}

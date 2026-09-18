@@ -81,11 +81,10 @@ func editOnDisk(t *testing.T, path string, edit func(doc map[string]any)) {
 	}
 }
 
-func setPrompt(prompt string) func(doc map[string]any) {
-	return func(doc map[string]any) {
-		settings, _ := doc["Settings"].(map[string]any)
-		settings["system_prompt"] = prompt
-	}
+// setEditedPrompt is the outside edit these tests make: a new system prompt.
+func setEditedPrompt(doc map[string]any) {
+	settings, _ := doc["Settings"].(map[string]any)
+	settings["system_prompt"] = "edited in a text editor"
 }
 
 func TestSaveLeavesAnUnchangedDefinitionFileAlone(t *testing.T) {
@@ -211,7 +210,7 @@ func TestUpdateAgentAfterAnEditOnDiskKeepsBothChanges(t *testing.T) {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	path := definitionPath(dir, "Scout")
-	editOnDisk(t, path, setPrompt("edited in a text editor"))
+	editOnDisk(t, path, setEditedPrompt)
 
 	if err := fs.UpdateAgent("Scout", func(ag *agent.Agent) error {
 		ag.Settings.Temperature = 0.25
@@ -241,7 +240,7 @@ func TestSetAgentAfterAnEditOnDiskRefusesAndReloads(t *testing.T) {
 	}
 	stale, _ := fs.GetAgent("Scout")
 	path := definitionPath(dir, "Scout")
-	editOnDisk(t, path, setPrompt("edited in a text editor"))
+	editOnDisk(t, path, setEditedPrompt)
 	onDisk, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read: %v", err)
@@ -330,7 +329,7 @@ func TestSaveKeepsAnEditOnDisk(t *testing.T) {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	path := definitionPath(dir, "Scout")
-	editOnDisk(t, path, setPrompt("edited in a text editor"))
+	editOnDisk(t, path, setEditedPrompt)
 	backdate(t, path)
 
 	if err := fs.Save(); err != nil {

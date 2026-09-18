@@ -2446,8 +2446,39 @@ print(json.dumps({
 }, indent=2))'
 }
 
+# smoke_agent_files prints, for one agent in a demo sandbox, the modification
+# time and a short sha256 of its definition file and of its runtime state file,
+# so a before/after pair shows exactly which of the two a step rewrote. The
+# definition is looked for in the data dir, the confirmed workspace root, and
+# the staging root.
+smoke_agent_files() {
+  local sandbox="${2:-}" name="${3:-}" path found=0
+  [[ -n "$sandbox" && -d "$sandbox" && -n "$name" ]] || fail "usage: $0 agent-files <sandbox> <agent-name>"
+  for path in "$sandbox/agents/$name/agent_settings.json" \
+    "$sandbox/Ori Workspaces/Agents/$name/agent_settings.json" \
+    "$sandbox/workspace-staging/Agents/$name/agent_settings.json" \
+    "$sandbox"/agent_state/*/"$name.json"; do
+    [[ -f "$path" ]] || continue
+    found=1
+    printf '%s  %s  %s\n' "$(stat -f %m "$path")" "$(shasum -a 256 "$path" | cut -c1-16)" "${path#"$sandbox"/}"
+  done
+  [[ "$found" == 1 ]] || fail "no files for agent $name under $sandbox"
+}
+
+# smoke_agent_chat sends one chat message to a named agent and prints the start
+# of the reply, so a demo can drive a real chat turn without the browser.
+smoke_agent_chat() {
+  local name="${3:-}" question="${4:-Reply with exactly five words.}" body
+  [[ -n "$name" ]] || fail "usage: $0 agent-chat <base-url> <agent-name> [question]"
+  body=$(python3 -c 'import json, sys; print(json.dumps({"question": sys.argv[2], "agent_name": sys.argv[1]}))' "$name" "$question")
+  curl -s -X POST "$BASE_URL/api/chat" -H 'Content-Type: application/json' -d "$body" | head -c 400
+  echo
+}
+
 case "${1:-}" in
 serve) serve_isolated "${2:-8931}" "${3:-default}" ;;
+agent-files) smoke_agent_files "$@" ;;
+agent-chat) smoke_agent_chat "$@" ;;
 showseed) smoke_show_seed ;;
 showrun) smoke_show_run "$@" ;;
 showmarkfailed) smoke_show_markfailed "$@" ;;
@@ -2492,6 +2523,8 @@ janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
 *)
   echo "usage:" >&2
   echo "  $0 serve [port] [sandbox-name]           # run an ISOLATED demo server (Ctrl-C to stop)" >&2
+  echo "  $0 agent-files <sandbox> <agent>         # agents in the root: mtime + sha of definition and state files" >&2
+  echo "  $0 agent-chat <base-url> <agent> [text]  # agents in the root: send one chat turn to an agent" >&2
   echo "  $0 showseed <base-url>                   # task-run show: onboarding + 3 workspaces with Commanders" >&2
   echo "  $0 showrun <base-url> <ws> [description] # task-run show: create and start a task ([fail] fails it)" >&2
   echo "  $0 showmarkfailed <base-url> <task-id>    # task-run show: answer a blocked task with mark failed" >&2

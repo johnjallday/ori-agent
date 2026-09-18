@@ -274,6 +274,16 @@ func DefaultAgentStorePath() string {
 	return filepath.Join(DefaultDataDir(), "agents.json")
 }
 
+// AgentStateDirName is the data-dir folder holding agents' runtime state.
+const AgentStateDirName = "agent_state"
+
+// DefaultAgentStateDir returns where agents' runtime state (status,
+// statistics, evolution) lives. It stays in the data dir so that a synced or
+// version-controlled agents folder carries only what the user authored.
+func DefaultAgentStateDir() string {
+	return filepath.Join(DefaultDataDir(), AgentStateDirName)
+}
+
 // DefaultWorkspaceRoot returns the fallback directory used for new workspace folders.
 func DefaultWorkspaceRoot() string {
 	home, err := os.UserHomeDir()
