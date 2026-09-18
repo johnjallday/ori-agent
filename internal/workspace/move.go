@@ -115,6 +115,9 @@ func (s *FileStore) MoveWorkspaceFolder(id, newParentID string) ([]MovedWorkspac
 	if filepath.Clean(destFolderPath) == filepath.Clean(oldFolderPath) {
 		return nil, nil
 	}
+	if s.isReservedTopLevelPathLocked(destFolderPath) {
+		return nil, ErrReservedWorkspaceSlug
+	}
 
 	// Slug uniqueness: never overwrite an existing folder in the destination.
 	if existsOnDisk, err := pathExists(destFolderPath); err != nil {

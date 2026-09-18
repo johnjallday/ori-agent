@@ -497,6 +497,13 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		handleWorkspaceParentError(w, err)
 		return
 	}
+	// Refused before anything is created: the SQLite record is written first
+	// and a folder failure is otherwise treated as non-fatal.
+	if strings.TrimSpace(req.ParentID) == "" && h.isWorkspaceRootLocation(req.Location) &&
+		agentworkspace.IsReservedTopLevelSlug(firstNonEmptyString(req.FolderSlug, req.Name)) {
+		_ = orihttp.RespondBadRequest(w, agentworkspace.ReservedWorkspaceSlugMessage)
+		return
+	}
 
 	wantsProject := strings.TrimSpace(req.TemplateID) != "" || strings.TrimSpace(req.TemplatePath) != ""
 	if strings.TrimSpace(req.TemplateID) != "" && strings.TrimSpace(req.TemplatePath) != "" {
@@ -1273,6 +1280,14 @@ func (h *Handler) provisionCreateWorkspaceFolder(ctx context.Context, w http.Res
 	}
 
 	if folderErr != nil {
+		if errors.Is(folderErr, agentworkspace.ErrReservedWorkspaceSlug) {
+			if delErr := h.store.DeleteWorkspace(ctx, ws.ID); delErr != nil {
+				logger.Error("Failed to rollback workspace after reserved folder name", logger.Fields{"id": ws.ID, "error": delErr})
+			}
+			h.rollbackSeededAgents(seed)
+			_ = orihttp.RespondBadRequest(w, agentworkspace.ReservedWorkspaceSlugMessage)
+			return out, true
+		}
 		var slugConflict *agentworkspace.FolderSlugConflictError
 		if errors.As(folderErr, &slugConflict) {
 			if delErr := h.store.DeleteWorkspace(ctx, ws.ID); delErr != nil {
@@ -1526,6 +1541,28 @@ func newTemplateProvenance(tmpl projecttemplates.Template, snapshot *agentworksp
 		}
 	}
 	return provenance
+}
+
+// isWorkspaceRootLocation reports whether a create's location puts the new
+// folder directly in the workspace root: no location, or the root itself.
+func (h *Handler) isWorkspaceRootLocation(location string) bool {
+	location = strings.TrimSpace(location)
+	if location == "" {
+		return true
+	}
+	if h.workspaceRootResolver != nil && workspacePathsEqual(location, h.workspaceRootResolver()) {
+		return true
+	}
+	return h.workspaceStore != nil && workspacePathsEqual(location, h.workspaceStore.BasePath())
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func workspacePathsEqual(a, b string) bool {
@@ -2182,6 +2219,9 @@ func (h *Handler) renameWorkspace(ctx context.Context, ws *session.Workspace, na
 	if targetSlug == "" {
 		targetSlug = agentworkspace.Slugify(name)
 	}
+	if strings.TrimSpace(ws.ParentID) == "" && targetSlug != oldFolderSlug && agentworkspace.IsReservedTopLevelSlug(targetSlug) {
+		return agentworkspace.ErrReservedWorkspaceSlug
+	}
 
 	ws.Name = name
 	ws.FolderSlug = targetSlug
@@ -2264,6 +2304,8 @@ func (h *Handler) writeWorkspaceRenameError(w http.ResponseWriter, ctx context.C
 		return
 	}
 	switch {
+	case errors.Is(err, agentworkspace.ErrReservedWorkspaceSlug):
+		_ = orihttp.RespondBadRequest(w, agentworkspace.ReservedWorkspaceSlugMessage)
 	case errors.Is(err, errWorkspaceRenameRollback):
 		_ = orihttp.RespondInternalError(w, "Failed to rollback workspace rename")
 	case errors.Is(err, errWorkspaceRenameFolder):

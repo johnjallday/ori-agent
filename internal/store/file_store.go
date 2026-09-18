@@ -14,15 +14,27 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 type fileStore struct {
-	mu              sync.Mutex
+	mu sync.Mutex
+	// path is the index file (agents.json). Empty for a store that keeps no
+	// index: the folder listing alone says which agents exist.
 	path            string
 	agents          map[string]*agent.Agent
 	defaultSettings types.Settings
+
+	// dir is the folder holding one folder per agent. Empty means derive it
+	// from path (see agentsDir), which is how the data-dir store is built.
+	dir string
+
+	// definitionRequired skips a folder with no agent_settings.json instead of
+	// loading it as an empty agent. A user-visible agents folder can hold
+	// folders that are not agents, and Ori must not write definitions into them.
+	definitionRequired bool
 
 	// definitionHashes holds, per agent, the SHA-256 of its definition file as
 	// this store last read or wrote it. A write first re-hashes the file on disk:
@@ -71,9 +83,30 @@ func NewFileStore(path string, defaultSettings types.Settings) (Store, error) {
 		agents:          make(map[string]*agent.Agent),
 		defaultSettings: defaultSettings,
 	}
+	fs.open()
+	return fs, nil
+}
+
+// newDirStore opens a store kept directly in agentsDir, with runtime state in
+// state and no index file: the folder listing is the only record of which
+// agents exist. This is the shape of <workspace root>/Agents.
+func newDirStore(agentsDir string, state *RuntimeStateStore, defaultSettings types.Settings) *fileStore {
+	fs := &fileStore{
+		dir:                agentsDir,
+		agents:             make(map[string]*agent.Agent),
+		defaultSettings:    defaultSettings,
+		state:              state,
+		definitionRequired: true,
+	}
+	fs.open()
+	return fs
+}
+
+// open loads the store and runs the startup normalization.
+func (fs *fileStore) open() {
 	// try load (non-fatal if file doesn't exist yet)
 	if err := fs.load(); err != nil && !os.IsNotExist(err) {
-		logger.Verbosef("Warning: failed to load store from %s: %v", path, err)
+		logger.Verbosef("Warning: failed to load store from %s: %v", fs.agentsDir(), err)
 	}
 
 	fs.mu.Lock()
@@ -91,8 +124,6 @@ func NewFileStore(path string, defaultSettings types.Settings) (Store, error) {
 	if err := fs.saveUnlocked(); err != nil {
 		logger.Verbosef("Warning: failed to save store during initialization: %v", err)
 	}
-
-	return fs, nil
 }
 
 // stateStore returns where this store keeps runtime state. Unless one was
@@ -101,8 +132,7 @@ func NewFileStore(path string, defaultSettings types.Settings) (Store, error) {
 func (s *fileStore) stateStore() *RuntimeStateStore {
 	if s.state == nil {
 		parent := filepath.Dir(s.agentsDir())
-		// "agent_state" matches config.AgentStateDirName.
-		s.state = NewRuntimeStateStore(filepath.Join(parent, "agent_state"), parent)
+		s.state = NewRuntimeStateStore(filepath.Join(parent, config.AgentStateDirName), parent)
 	}
 	return s.state
 }
@@ -219,6 +249,9 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 // the answer) or at a plain index file beside it. Both shapes are in the wild,
 // so every caller has to resolve the same way.
 func (s *fileStore) agentsDir() string {
+	if s.dir != "" {
+		return s.dir
+	}
 	if strings.Contains(s.path, "/agents/") || strings.Contains(s.path, "\\agents\\") {
 		agentsDirIndex := strings.LastIndex(s.path, "/agents/")
 		if agentsDirIndex == -1 {
@@ -719,6 +752,9 @@ func (s *fileStore) persistStateUnlocked(name string) error {
 // writeIndexUnlocked keeps the minimal index file for compatibility with older
 // tooling. Like the definitions, it is only written when it differs.
 func (s *fileStore) writeIndexUnlocked() error {
+	if s.path == "" {
+		return nil
+	}
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o750); err != nil {
 		return err
 	}
@@ -834,9 +870,13 @@ func (s *fileStore) load() error {
 	// is the source of truth. A missing index must therefore NOT abort loading —
 	// otherwise agents present on disk (e.g. freshly adopted from a legacy
 	// location) would be ignored until a later save recreated the index.
-	b, readErr := os.ReadFile(s.path)
-	if readErr != nil && !os.IsNotExist(readErr) {
-		return readErr
+	var b []byte
+	readErr := os.ErrNotExist
+	if s.path != "" {
+		b, readErr = os.ReadFile(s.path)
+		if readErr != nil && !os.IsNotExist(readErr) {
+			return readErr
+		}
 	}
 
 	s.mu.Lock()
@@ -889,10 +929,20 @@ func (s *fileStore) load() error {
 		entries, err := os.ReadDir(agentsDir)
 		if err == nil {
 			for _, entry := range entries {
+				// Agent names cannot start with a dot, so a dot-folder is tooling
+				// (.git, a sync tool's cache, an interrupted migration), never an agent.
+				if strings.HasPrefix(entry.Name(), ".") {
+					continue
+				}
 				if entry.IsDir() {
 					// New nested structure: agents/{name}/agent_settings.json contains everything
 					agentName := entry.Name()
 					settingsPath := filepath.Join(agentsDir, agentName, definitionFileName)
+					if s.definitionRequired {
+						if _, err := os.Stat(settingsPath); errors.Is(err, os.ErrNotExist) {
+							continue
+						}
+					}
 
 					var ag *agent.Agent
 

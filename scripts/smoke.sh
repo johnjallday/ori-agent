@@ -2465,6 +2465,68 @@ smoke_agent_files() {
   [[ "$found" == 1 ]] || fail "no files for agent $name under $sandbox"
 }
 
+# smoke_seed_legacy_agents prepares a demo sandbox (used as both HOME and
+# ORI_DATA_DIR, the wt demo layout) the way an existing user's install looks
+# before agents moved into the workspace root: three agents in the data dir's
+# agents/ folder, a built-in assistant, and a settings.json whose workspace
+# root (the HOME-derived "Ori Workspaces") is already confirmed. Run it before
+# the first start of that sandbox.
+smoke_seed_legacy_agents() {
+  local sandbox="${2:-}"
+  [[ -n "$sandbox" ]] || fail "usage: $0 seed-legacy-agents <sandbox>"
+  [[ ! -e "$sandbox/agents" ]] || fail "$sandbox already has agents; seed a fresh sandbox"
+  mkdir -p "$sandbox/Ori Workspaces"
+  python3 - "$sandbox" <<'PY'
+import json, os, sys
+sandbox = sys.argv[1]
+
+def write(rel, doc):
+    path = os.path.join(sandbox, rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write(doc if isinstance(doc, str) else json.dumps(doc, indent=2))
+
+write("settings.json", {"workspace_root_confirmed": True})
+write("agents.json", {})
+write("agents/Ask Ori/agent_settings.json", {
+    "role": "orchestrator", "Settings": {"model": "gpt-5-nano"},
+    "metadata": {"tags": ["system", "ori:system-assistant"]}})
+write("agents/Scout/agent_settings.json", {
+    "role": "researcher", "Settings": {"model": "gpt-4o-mini", "system_prompt": "You scout ahead."},
+    "status": "active", "statistics": {"message_count": 12, "token_usage": 3400}})
+write("agents/Scout/mcp_servers.json", {"enabled_servers": ["filesystem"]})
+write("agents/Scout/skills_state.json", {"skills": {"*": {"enabled": False, "trusted": False}}})
+write("agents/Sleeper/agent_settings.json", {
+    "role": "general", "Settings": {"model": "gpt-4o-mini", "system_prompt": "Paused for now."},
+    "status": "disabled"})
+write("agents/Quill/agent_settings.json", {
+    "role": "general", "Settings": {"model": "gpt-4o-mini", "system_prompt": "You write."}})
+PY
+  echo "ok   seeded Scout, Sleeper (paused), Quill and the assistant into $sandbox/agents"
+}
+
+# smoke_root_unmounted points a stopped demo sandbox's workspace root at a
+# folder that cannot be created, the way an unplugged drive behaves: the root's
+# parent is read-only, so neither Ori nor the workspace store can make it.
+smoke_root_unmounted() {
+  local sandbox="${2:-}"
+  [[ -n "$sandbox" && -f "$sandbox/settings.json" ]] || fail "usage: $0 root-unmounted <sandbox>"
+  local volume="$sandbox/unmounted-volume"
+  mkdir -p "$volume"
+  chmod 555 "$volume"
+  python3 - "$sandbox/settings.json" "$volume/Ori Workspaces" <<'PY'
+import json, sys
+path, root = sys.argv[1], sys.argv[2]
+with open(path) as f:
+    settings = json.load(f)
+settings["workspace_root"] = root
+settings["workspace_root_confirmed"] = True
+with open(path, "w") as f:
+    json.dump(settings, f, indent=2)
+PY
+  echo "ok   workspace root is now $volume/Ori Workspaces (parent is read-only)"
+}
+
 # smoke_agent_chat sends one chat message to a named agent and prints the start
 # of the reply, so a demo can drive a real chat turn without the browser.
 smoke_agent_chat() {
@@ -2479,6 +2541,8 @@ case "${1:-}" in
 serve) serve_isolated "${2:-8931}" "${3:-default}" ;;
 agent-files) smoke_agent_files "$@" ;;
 agent-chat) smoke_agent_chat "$@" ;;
+seed-legacy-agents) smoke_seed_legacy_agents "$@" ;;
+root-unmounted) smoke_root_unmounted "$@" ;;
 showseed) smoke_show_seed ;;
 showrun) smoke_show_run "$@" ;;
 showmarkfailed) smoke_show_markfailed "$@" ;;
@@ -2525,6 +2589,8 @@ janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
   echo "  $0 serve [port] [sandbox-name]           # run an ISOLATED demo server (Ctrl-C to stop)" >&2
   echo "  $0 agent-files <sandbox> <agent>         # agents in the root: mtime + sha of definition and state files" >&2
   echo "  $0 agent-chat <base-url> <agent> [text]  # agents in the root: send one chat turn to an agent" >&2
+  echo "  $0 seed-legacy-agents <sandbox>          # agents in the root: pre-upgrade install (agents in the data dir)" >&2
+  echo "  $0 root-unmounted <sandbox>              # agents in the root: point a stopped sandbox at an unreachable root" >&2
   echo "  $0 showseed <base-url>                   # task-run show: onboarding + 3 workspaces with Commanders" >&2
   echo "  $0 showrun <base-url> <ws> [description] # task-run show: create and start a task ([fail] fails it)" >&2
   echo "  $0 showmarkfailed <base-url> <task-id>    # task-run show: answer a blocked task with mark failed" >&2

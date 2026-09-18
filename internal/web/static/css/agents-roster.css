@@ -683,6 +683,16 @@ body.agents-roster-page {
   color: #fca5a5;
 }
 
+/* The agents-folder banner reuses the error state, compact, above the list. */
+.roster-root-banner {
+  padding: 12px 16px;
+  margin-bottom: 12px;
+}
+
+.roster-root-banner[hidden] {
+  display: none;
+}
+
 /* ---- Gallery grid --------------------------------------------------------- */
 
 /* The collection host. Ungrouped it holds one .agent-grid; grouped it holds a

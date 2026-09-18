@@ -491,6 +491,7 @@
         // ring is drawn without a request per agent (FR-75). Absent means no
         // ring, which is the same outcome as an agent with no progression.
         state.xpPerLevel = Number((data && data.xp_per_level) || 0);
+        renderAgentRootBanner(data && data.agent_root);
         state.agents = agents;
         state.byName = {};
         agents.forEach(function (a) {
@@ -517,6 +518,33 @@
         setCollectionState('error');
         console.error('[roster] load failed', err);
       });
+  }
+
+  // The user's agents live in the Workspace Directory's Agents folder. When
+  // Ori cannot use it, say so above the collection: the list then holds only
+  // the built-in assistant (and any agents still in the old location).
+  function agentRootMessage(root) {
+    if (!root) return '';
+    if (!root.available && root.reason === 'missing') {
+      return 'Your Workspace Directory was not found, so your agents are unavailable.';
+    }
+    var migration = root.migration && root.migration.status;
+    if (root.reason === 'occupied_by_workspace' || migration === 'blocked_by_workspace') {
+      return (
+        'A workspace named "Agents" is using the folder where your agents belong, ' +
+        'so they stay in their old location for now. Rename that workspace, then restart Ori.'
+      );
+    }
+    return '';
+  }
+
+  function renderAgentRootBanner(root) {
+    var banner = document.getElementById('rosterRootBanner');
+    var msg = document.getElementById('rosterRootBannerMsg');
+    if (!banner || !msg) return;
+    var text = agentRootMessage(root);
+    msg.textContent = text;
+    banner.hidden = !text;
   }
 
   // Loading / load-error / ready are distinct real states (PRD FR8). `error`
@@ -3142,6 +3170,7 @@
         // ring is drawn without a request per agent (FR-75). Absent means no
         // ring, which is the same outcome as an agent with no progression.
         state.xpPerLevel = Number((data && data.xp_per_level) || 0);
+        renderAgentRootBanner(data && data.agent_root);
         state.agents = agents;
         state.byName = {};
         agents.forEach(function (a) {

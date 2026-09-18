@@ -131,6 +131,11 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 		handleWorkspaceParentError(w, err)
 		return
 	}
+	if strings.TrimSpace(req.ParentID) == "" && !workspaceImportHasConfig(normalizedPath) &&
+		agentworkspace.IsReservedTopLevelSlug(firstNonEmptyString(req.FolderSlug, workspaceName)) {
+		_ = orihttp.RespondBadRequest(w, agentworkspace.ReservedWorkspaceSlugMessage)
+		return
+	}
 
 	if h.workspaceStore != nil && workspaceImportHasConfig(normalizedPath) {
 		workspace, warning, err := h.restoreImportedWorkspace(r.Context(), normalizedPath, req)
@@ -144,6 +149,10 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 				"entry_point": req.EntryPoint,
 				"reason":      "workspace_restore_failed",
 			})
+			if errors.Is(err, agentworkspace.ErrReservedWorkspaceSlug) {
+				_ = orihttp.RespondBadRequest(w, agentworkspace.ReservedWorkspaceSlugMessage)
+				return
+			}
 			var slugConflict *agentworkspace.FolderSlugConflictError
 			if errors.As(err, &slugConflict) {
 				writeWorkspaceCreateSlugConflict(w, workspaceName, h.globalWorkspaceSlugConflict(r.Context(), slugConflict.Slug, "", slugConflict.ParentDir))

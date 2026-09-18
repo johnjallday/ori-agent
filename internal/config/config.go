@@ -274,6 +274,16 @@ func DefaultAgentStorePath() string {
 	return filepath.Join(DefaultDataDir(), "agents.json")
 }
 
+// AgentsFolderName is the folder inside the workspace root that holds the
+// user's agents, one folder per agent. The same name is reserved as a
+// top-level workspace slug so a workspace can never occupy it.
+const AgentsFolderName = "Agents"
+
+// RootAgentsDir returns <root>/Agents for a workspace root.
+func RootAgentsDir(root string) string {
+	return filepath.Join(root, AgentsFolderName)
+}
+
 // AgentStateDirName is the data-dir folder holding agents' runtime state.
 const AgentStateDirName = "agent_state"
 

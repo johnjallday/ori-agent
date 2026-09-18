@@ -14,6 +14,11 @@ import (
 // caller can show the user what is actually there and let them try again.
 var ErrAgentChangedOnDisk = errors.New("agent definition changed on disk")
 
+// ErrAgentRootUnavailable reports a write to the workspace root's agents
+// folder while that root is missing or unreadable (an unmounted drive, say).
+// Ori never creates the root to satisfy the write.
+var ErrAgentRootUnavailable = errors.New("your Workspace Directory was not found, so your agents are unavailable")
+
 // AgentChangedOnDiskMessage is the user-facing explanation for
 // ErrAgentChangedOnDisk. HTTP handlers answer it with 409 Conflict.
 const AgentChangedOnDiskMessage = "This agent was changed on disk. Ori reloaded it. Review it and try again."

@@ -2,6 +2,7 @@ package agenthttp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -411,6 +412,10 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 	logger.Debug("Creating agent", logger.Fields{"agent": req.Name})
 	if err := h.State.CreateAgent(req.Name, config); err != nil {
 		logger.Error("CreateAgent error", logger.Fields{"error": err})
+		if errors.Is(err, store.ErrAgentRootUnavailable) {
+			WriteAgentStoreError(w, "Failed to create agent", err)
+			return
+		}
 		orihttp.BadRequest(w, err.Error())
 		return
 	}

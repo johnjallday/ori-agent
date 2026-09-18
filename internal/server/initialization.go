@@ -272,6 +272,77 @@ func resolveAllowlistPath() string {
 	return filepath.Join(config.DefaultDataDir(), workspace.DefaultAllowlistFilename)
 }
 
+// createAgentStore builds the agent store for this data dir.
+//
+// With AGENT_STORE_PATH set it is the single store at that path, exactly as
+// before agents moved into the workspace root. Otherwise it is a composite:
+// the built-in assistant in the data dir, the user's agents in
+// <workspace root>/Agents. Before either is opened, agents still in the data
+// dir move into a root this data dir has confirmed.
+//
+// suppressLegacyAdoption means a reset of agents is pending: nothing may be
+// adopted or migrated, or the reset would be undone.
+func createAgentStore(agentStorePath string, defaultConf types.Settings, configManager *config.Manager, suppressLegacyAdoption bool) (store.Store, error) {
+	if strings.TrimSpace(os.Getenv("AGENT_STORE_PATH")) != "" {
+		return createFileStoreWithPolicy(agentStorePath, defaultConf, suppressLegacyAdoption)
+	}
+	if !suppressLegacyAdoption {
+		if err := migrateLegacyAgentStore(agentStorePath); err != nil {
+			logger.Verbosef("Warning: legacy agent store migration failed: %v", err)
+		}
+	}
+
+	dataDir := filepath.Dir(agentStorePath)
+	root := resolveWorkspaceRoot(configManager)
+	if root == config.UnconfirmedWorkspaceRoot() {
+		// The staging root is app-owned, so it may be created; a user's root
+		// never is (an unmounted drive must stay visibly missing).
+		if err := os.MkdirAll(root, 0o750); err != nil {
+			logger.Warn("Could not create the workspace staging folder", logger.Fields{"error": err.Error()})
+		}
+	}
+
+	var report *store.RootMigrationReport
+	if !suppressLegacyAdoption && shouldRunWorkspaceStartupMaintenance(configManager) {
+		report = store.RootMigration{DataDir: dataDir, Root: root}.Run()
+		logRootMigration(report)
+	}
+
+	system, err := store.NewFileStore(agentStorePath, defaultConf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create file store: %w", err)
+	}
+	composite, err := store.NewCompositeStore(system, root, filepath.Join(dataDir, config.AgentStateDirName), defaultConf)
+	if err != nil {
+		return nil, err
+	}
+	composite.SetMigrationReport(report)
+	return composite, nil
+}
+
+// logRootMigration records what the startup migration did.
+func logRootMigration(report *store.RootMigrationReport) {
+	if report == nil {
+		return
+	}
+	fields := logger.Fields{"status": report.Status, "root": report.Root}
+	switch report.Status {
+	case store.MigrationNotNeeded:
+		return
+	case store.MigrationDone:
+		if len(report.Migrated) == 0 && report.Backup == "" {
+			return // finished on an earlier start
+		}
+		fields["migrated"] = strings.Join(report.Migrated, ", ")
+		fields["skipped"] = strings.Join(report.Skipped, ", ")
+		fields["backup"] = report.Backup
+		logger.Info("Agents moved into the workspace root", fields)
+	default:
+		fields["error"] = report.Error
+		logger.Warn("Agents could not be moved into the workspace root; they stay in the data dir for now", fields)
+	}
+}
+
 // createFileStore creates a new file-based storage system for agents.
 func createFileStore(agentStorePath string, defaultConf types.Settings) (store.Store, error) {
 	return createFileStoreWithPolicy(agentStorePath, defaultConf, false)

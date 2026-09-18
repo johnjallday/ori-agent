@@ -277,6 +277,11 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 	if h.xpPerLevel != nil {
 		response["xp_per_level"] = h.xpPerLevel()
 	}
+	// Where the user's agents live and whether Ori can reach them, carried on
+	// the list the page already loads rather than a request of its own.
+	if reporter, ok := h.State.(interface{ RootStatus() store.AgentRootStatus }); ok {
+		response["agent_root"] = reporter.RootStatus()
+	}
 	orihttp.WriteJSON(w, response)
 }
 

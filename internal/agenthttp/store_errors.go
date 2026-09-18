@@ -12,6 +12,9 @@ import (
 const (
 	agentChangedOnDiskCode    = "agent_changed_on_disk"
 	agentChangedOnDiskMessage = store.AgentChangedOnDiskMessage
+
+	agentRootUnavailableCode    = "agent_root_unavailable"
+	agentRootUnavailableMessage = "Your Workspace Directory was not found, so your agents are unavailable."
 )
 
 // WriteAgentStoreError answers a failed agent-store write.
@@ -29,6 +32,19 @@ func WriteAgentStoreError(w http.ResponseWriter, fallback string, err error) {
 			"message": agentChangedOnDiskMessage,
 		}); respErr != nil {
 			logger.Error("Failed to write agent conflict response", logger.Fields{"error": respErr})
+		}
+		return
+	}
+	if errors.Is(err, store.ErrAgentRootUnavailable) {
+		// The folder may come back (a drive plugged in again), so this is a
+		// temporary condition rather than a bad request.
+		if respErr := orihttp.RespondJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"success": false,
+			"code":    agentRootUnavailableCode,
+			"error":   agentRootUnavailableMessage,
+			"message": agentRootUnavailableMessage,
+		}); respErr != nil {
+			logger.Error("Failed to write agent root response", logger.Fields{"error": respErr})
 		}
 		return
 	}

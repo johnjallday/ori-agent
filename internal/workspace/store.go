@@ -99,7 +99,10 @@ func (s *FileStore) Update(wsID string, fn func(*Workspace) error) error {
 var (
 	ErrWorkspaceFolderSlugConflict = errors.New("workspace folder slug conflict")
 	ErrWorkspaceSlugNotFound       = errors.New("workspace slug not found")
-	ErrWorkspaceSlugMigration      = errors.New("workspace slug migration failed")
+	// ErrReservedWorkspaceSlug rejects a top-level workspace folder named
+	// "agents" (any case): <root>/Agents holds the user's agents.
+	ErrReservedWorkspaceSlug  = errors.New(`"Agents" is reserved for your agents folder`)
+	ErrWorkspaceSlugMigration = errors.New("workspace slug migration failed")
 )
 
 // FolderSlugConflictError indicates that the requested workspace folder slug is
@@ -238,6 +241,12 @@ func (s *FileStore) Save(ws *Workspace) error {
 	}
 
 	// Check for folder name conflict (only for new workspaces or path changes).
+	// A workspace already living at <root>/agents keeps working; only a new
+	// one, or a move into that folder, is refused.
+	pathChanged := exists && filepath.Clean(existingFolderPath) != filepath.Clean(folderPath)
+	if (!exists || pathChanged) && s.isReservedTopLevelPathLocked(folderPath) {
+		return ErrReservedWorkspaceSlug
+	}
 	if !exists {
 		// New workspace — check if folder already exists
 		if existsOnDisk, err := pathExists(folderPath); err != nil {
@@ -336,6 +345,9 @@ func (s *FileStore) SaveAt(ws *Workspace, location string) error {
 	}
 
 	folderPath := filepath.Join(location, ws.FolderSlug)
+	if s.isReservedTopLevelPathLocked(folderPath) {
+		return ErrReservedWorkspaceSlug
+	}
 
 	if workspaceReservesSlug(ws) {
 		if conflict := s.globalSlugConflictLocked(ws.FolderSlug, ws.ID, location); conflict != nil {
@@ -436,7 +448,13 @@ func (s *FileStore) RebindExistingFolder(ws *Workspace, folderPath string) error
 	}
 
 	configPath := filepath.Join(normalizedPath, WorkspaceConfigFile)
-	if data, readErr := os.ReadFile(configPath); readErr == nil {
+	data, readErr := os.ReadFile(configPath)
+	// Binding a folder that is not yet a workspace would write workspace.json
+	// into the agents folder. A workspace that already lives there stays bound.
+	if readErr != nil && s.isReservedTopLevelPathLocked(normalizedPath) {
+		return ErrReservedWorkspaceSlug
+	}
+	if readErr == nil {
 		diskWorkspace, parseErr := FromJSON(data)
 		if parseErr != nil {
 			return fmt.Errorf("failed to read existing workspace file: %w", parseErr)
@@ -467,7 +485,7 @@ func (s *FileStore) RebindExistingFolder(ws *Workspace, folderPath string) error
 		return fmt.Errorf("failed to create workspace notes folder: %w", err)
 	}
 
-	data, err := merged.ToJSON()
+	data, err = merged.ToJSON()
 	if err != nil {
 		return fmt.Errorf("failed to serialize workspace: %w", err)
 	}
@@ -789,6 +807,39 @@ func (s *FileStore) cacheMeta(ws *Workspace) {
 
 func workspaceReservesSlug(ws *Workspace) bool {
 	return ws != nil && ws.Status != StatusTrashed && ws.Status != StatusMissing
+}
+
+// reservedTopLevelSlug is the workspace-root folder that holds the user's
+// agents (config.AgentsFolderName, slugified).
+const reservedTopLevelSlug = "agents"
+
+// ReservedWorkspaceSlugMessage is what the user is told when
+// ErrReservedWorkspaceSlug refuses a name.
+const ReservedWorkspaceSlugMessage = `"Agents" is reserved for your agents folder. Choose another name.`
+
+// IsReservedTopLevelSlug reports whether a name or slug would take the
+// workspace root's agents folder if used at the top level.
+func IsReservedTopLevelSlug(nameOrSlug string) bool {
+	return strings.TrimSpace(nameOrSlug) != "" && Slugify(nameOrSlug) == reservedTopLevelSlug
+}
+
+// isReservedTopLevelPathLocked reports whether folderPath is the agents folder
+// of this store's root. The name is compared case-insensitively because macOS
+// file systems are. Only the top level is reserved: a group may hold a
+// workspace called "Agents". Callers must hold s.mu.
+func (s *FileStore) isReservedTopLevelPathLocked(folderPath string) bool {
+	if !strings.EqualFold(filepath.Base(folderPath), reservedTopLevelSlug) {
+		return false
+	}
+	parent, err := filepath.Abs(filepath.Dir(folderPath))
+	if err != nil {
+		return false
+	}
+	base, err := filepath.Abs(s.basePath)
+	if err != nil {
+		return false
+	}
+	return filepath.Clean(parent) == filepath.Clean(base)
 }
 
 // removeSlugMappingLocked removes every slug entry owned by id. Callers must
@@ -1146,6 +1197,9 @@ func (s *FileStore) RenameWithSlug(id, newName, requestedSlug string) ([]MovedWo
 
 	// Check if new folder name already exists
 	newFolderPath := filepath.Join(parentDir, newSlug)
+	if s.isReservedTopLevelPathLocked(newFolderPath) {
+		return nil, ErrReservedWorkspaceSlug
+	}
 	if _, err := os.Stat(newFolderPath); err == nil {
 		return nil, &FolderSlugConflictError{
 			Slug:          newSlug,
@@ -1290,7 +1344,12 @@ func (s *FileStore) Import(folderPath string) (*Workspace, string, error) {
 	if !isInPlace {
 		// Copy into workspaces root
 		targetPath = filepath.Join(s.basePath, ws.FolderSlug)
+	}
+	if s.isReservedTopLevelPathLocked(targetPath) {
+		return nil, "", ErrReservedWorkspaceSlug
+	}
 
+	if !isInPlace {
 		// Check for conflict
 		if _, err := os.Stat(targetPath); err == nil {
 			return nil, "", fmt.Errorf("a workspace folder named %q already exists, choose a different name", ws.FolderSlug)

@@ -194,6 +194,14 @@
               </div>
             </div>
 
+            <!-- Where the user's agents live cannot be used: the Workspace
+                 Directory is missing (an unmounted drive), or a workspace named
+                 "Agents" occupies the agents folder. Filled from agent_root on
+                 the list response; no request of its own. -->
+            <div class="collection-state collection-state--error roster-root-banner" id="rosterRootBanner" role="alert" hidden>
+              <p class="collection-state__msg" id="rosterRootBannerMsg"></p>
+            </div>
+
             <div class="collection-scroll">
               <div class="collection-meta">
                 <p class="collection-meta__count" id="rosterCount" aria-live="polite">Loading agents…</p>
