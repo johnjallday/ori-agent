@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { mockHiredAssistant } from './helpers/hired-assistant';
 
 // Happy-path regression for the game-inspired Agents page (roster + stage).
 // Assumes a running server; create/cleanup a throwaway agent via the API so the
@@ -11,6 +12,9 @@ const baseUrl = process.env.PLAYWRIGHT_BASE_URL || process.env.BASE_URL || 'http
 // these specs for a reason that has nothing to do with the Agents surface.
 test.beforeEach(async ({ page }) => {
   await installLocalCdn(page);
+  // These specs cover the ordinary roster and create form, which is what a
+  // user with a hired assistant sees (see helpers/hired-assistant.ts).
+  await mockHiredAssistant(page);
 });
 
 // The role/workspace/source/assignment/tag selects live inside the Filters

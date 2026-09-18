@@ -92,6 +92,10 @@ func (b *ServerBuilder) initializeProgression() {
 // starter missions. Never change it: a new key re-runs the pass.
 const starterMissionsReconcileKey = "starter-missions-v1"
 
+// meetAssistantReconcileKey names the one-time grandfathering pass for Meet
+// your assistant. Never change it: a new key re-runs the pass.
+const meetAssistantReconcileKey = "meet-assistant-v1"
+
 // completeProgressionWiring installs the progression hooks whose owners are
 // built in initializeDailyBrief, then runs the one-time backfill and the
 // startup reconcile. Call it after that phase. Safe when progression was not
@@ -102,11 +106,19 @@ func (b *ServerBuilder) completeProgressionWiring() {
 		return
 	}
 
-	// Connect one source (Mission 03) completes from ANY branch (PRD FR14).
+	// Meet your assistant (Mission 01) completes from the durable hire, never
+	// from a browser claim: the request that made the hire durable, or a repair
+	// that reconnected a hired assistant. Bound here, not in
+	// initializeProgression, because the handler does not exist until 22.6.
+	//
+	// Connect one source (Mission 04) completes from ANY branch (PRD FR14).
 	//
 	// Plan: a first-assignment apply has its own atomic durability boundary.
 	// Progression observes only the successful result.
 	if b.personalAssistantHandler != nil {
+		b.personalAssistantHandler.SetOnHired(func() {
+			engine.Complete(progression.MeetAssistantQuestID)
+		})
 		b.personalAssistantHandler.SetOnFirstAssignmentCompleted(func() {
 			engine.Complete(progression.ConnectSourceQuestID)
 		})
@@ -125,7 +137,7 @@ func (b *ServerBuilder) completeProgressionWiring() {
 		})
 	}
 
-	// Read your first Daily Brief (Mission 04): Today served with a brief.
+	// Read your first Daily Brief (Mission 05): Today served with a brief.
 	if b.personalAssistantToday != nil {
 		b.personalAssistantToday.SetOnBriefSeen(func(string) {
 			engine.Complete(progression.FirstBriefQuestID)
@@ -145,10 +157,26 @@ func (b *ServerBuilder) completeProgressionWiring() {
 	} else if marked > 0 {
 		logger.Info("Starter missions grandfathered", logger.Fields{"quests": marked})
 	}
+	// Installs that hired their assistant before Meet your assistant existed
+	// see it complete, silently and without Craft (PRD FR34).
+	if marked, err := engine.ReconcileOnce(meetAssistantReconcileKey, scanner, progression.MeetAssistantQuestID); err != nil {
+		logger.Warn("Meet your assistant reconcile failed", logger.Fields{"error": err})
+	} else if marked > 0 {
+		logger.Info("Meet your assistant grandfathered", logger.Fields{"quests": marked})
+	}
 
 	// One-time backfill so established installs are grandfathered silently.
 	if err := engine.Backfill(scanner); err != nil {
 		logger.Warn("Onboarding progression backfill failed", logger.Fields{"error": err})
+	}
+	// Meet your assistant gates every other mission, so it must never stay open
+	// while an assistant is hired: after a quest reset, or if the process died
+	// between the hire's commit and its hook. The hire cannot be repeated, so
+	// nothing else could ever complete it. The passes above ran first, so an
+	// upgraded install is already marked here and is not paid; the economy
+	// pays a quest at most once besides.
+	if b.assistantHired() {
+		engine.Complete(progression.MeetAssistantQuestID)
 	}
 	// Reconcile installs whose one-time progression backfill predates this quest.
 	// Complete is idempotent, and the widget suppresses announcements on its first
@@ -197,19 +225,22 @@ func (b *ServerBuilder) scanProgression() progression.Snapshot {
 		}
 	}
 
-	// Mission 02: a File Janitor workspace whose setup already reached ready.
+	// Mission 01: the assistant is already hired.
+	snap.AssistantHired = b.assistantHired()
+
+	// Mission 03: a File Janitor workspace whose setup already reached ready.
 	if _, ready, ok := findJanitorWorkspace(b.starterWorkspaces()); ok {
 		snap.FileJanitorReady = ready
 	}
 
-	// Mission 03: any source already connected, on any branch.
+	// Mission 04: any source already connected, on any branch.
 	snap.EmailOpsReady = b.emailSetupEverReady()
 	snap.CalendarReady, snap.ProjectWorkspaces = scanStarterWorkspaces(b.starterWorkspaces(), hqWorkspaceID)
 	if b.progressionEngine != nil {
 		snap.LegacyFirstDayCompleted = b.progressionEngine.HasCompleted(progression.PersonalAssistantFirstDayQuestID)
 	}
 
-	// Mission 04: HQ already has a Daily Brief revision.
+	// Mission 05: HQ already has a Daily Brief revision.
 	if b.dailyBriefService != nil {
 		snap.HasBriefRevision = briefRevisionExists(b.dailyBriefService, hqWorkspaceID)
 	}
@@ -230,4 +261,19 @@ func (b *ServerBuilder) scanProgression() progression.Snapshot {
 	}
 
 	return snap
+}
+
+// assistantHired reports whether the local user's relationship owns a hired
+// assistant profile (awaiting_hq, provisioning_hq, active, or paused).
+//
+// It reads the persisted relationship rather than the read projection: an
+// active assistant whose HQ link fails validation projects as repair_needed,
+// but it was still hired, and Meet your assistant must not reopen and lock
+// every other mission because of it.
+func (b *ServerBuilder) assistantHired() bool {
+	if b.personalAssistantStore == nil {
+		return false
+	}
+	state, err := b.personalAssistantStore.GetState(context.Background(), userprofile.LocalUserID)
+	return err == nil && state != nil && state.Status.HasOwnedProfile()
 }

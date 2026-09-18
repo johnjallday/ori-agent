@@ -148,22 +148,100 @@ export function questRowState(quest) {
   const done = quest.status === 'completed';
   const skipped = quest.status === 'skipped';
   const resolved = done || skipped;
+  // The server decides locking (a mission waiting on Mission 01); the widget
+  // only shows it. A locked row is a promise of what comes next, not a
+  // destination, so it offers no link, Skip, or Resume.
+  const locked = !resolved && quest.locked === true;
   return {
     done,
     skipped,
     resolved,
-    mark: done ? '✓' : skipped ? '⏭' : '○',
+    locked,
+    lockedReason: locked ? String(quest.locked_reason || '').trim() : '',
+    mark: done ? '✓' : skipped ? '⏭' : locked ? '🔒' : '○',
     // A quest renders as a clickable link only while unresolved and it has
     // a destination; a resolved quest (done or skipped) never does — the
     // skipped case gets its own separate "Resume" affordance instead.
-    showLink: !resolved && !!quest.action_url,
+    showLink: !resolved && !locked && !!quest.action_url,
     // Skipped quests keep a Resume affordance so they stay reachable
     // without being a blocking interruption (never shown once truly done).
     showResume: skipped && !!quest.action_url,
     // The Skip control appears only for an optional quest that has not yet
-    // resolved either way.
-    showSkip: !resolved && !!quest.optional
+    // resolved either way, and is not waiting on another.
+    showSkip: !resolved && !locked && !!quest.optional
   };
+}
+
+// renderQuestRow builds one checklist row from questRowState. options.doc is
+// the document to build in (a test passes a stub); options.onSkip(questID,
+// button) is called when an optional quest's Skip is pressed.
+export function renderQuestRow(q, { doc = document, onSkip = () => {} } = {}) {
+  const state = questRowState(q);
+  const li = doc.createElement('li');
+  li.className =
+    'quest-item' +
+    (state.done ? ' quest-item-done' : '') +
+    (state.skipped ? ' quest-item-skipped' : '') +
+    (state.locked ? ' quest-item-locked' : '');
+
+  const mark = doc.createElement('span');
+  mark.className = 'quest-mark';
+  mark.textContent = state.mark; // Distinct glyph per state, not color alone.
+  mark.setAttribute('aria-hidden', 'true');
+
+  const title = doc.createElement(state.showLink ? 'a' : 'span');
+  if (state.showLink) {
+    title.href = q.action_url;
+    title.title = q.action_label || q.title;
+  }
+  title.className = 'quest-title';
+  title.textContent = q.title;
+
+  li.append(mark, title);
+
+  // What this quest pays (city-economy Group 7). Shown on quests that are
+  // still open — once one is done the reward is already in the balance, and
+  // a lingering "+5 Craft" would read as something still owed.
+  const reward = Number(q.reward_craft || 0);
+  if (state.locked) {
+    // The reason stands where the actions would, so the row says why it
+    // cannot be started rather than just looking disabled.
+    const reason = doc.createElement('span');
+    reason.className = 'quest-status quest-status-locked';
+    reason.textContent = state.lockedReason || 'Locked';
+    li.append(reason);
+  } else if (reward > 0 && !state.done && !state.skipped) {
+    const badge = doc.createElement('span');
+    badge.className = 'quest-reward';
+    badge.textContent = `+${reward} Craft`;
+    badge.title = 'Finishing this earns Craft, which builds Farms';
+    li.append(badge);
+  }
+
+  if (state.skipped) {
+    const label = doc.createElement('span');
+    label.className = 'quest-status quest-status-skipped';
+    label.textContent = 'Skipped';
+    li.append(label);
+  }
+  if (state.showResume) {
+    const resume = doc.createElement('a');
+    resume.className = 'quest-resume';
+    resume.href = q.action_url;
+    resume.textContent = q.action_label || 'Resume';
+    li.append(resume);
+  }
+  if (state.showSkip) {
+    const skipBtn = doc.createElement('button');
+    skipBtn.type = 'button';
+    skipBtn.className = 'quest-skip';
+    skipBtn.textContent = 'Skip';
+    skipBtn.setAttribute('aria-label', `Skip: ${q.title}`);
+    skipBtn.addEventListener('click', () => onSkip(q.id, skipBtn));
+    li.append(skipBtn);
+  }
+
+  return li;
 }
 
 // diffAnnouncements is the pure diff between the previously known state and
@@ -294,67 +372,6 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     }
   }
 
-  function renderQuestRow(q) {
-    const state = questRowState(q);
-    const li = document.createElement('li');
-    li.className =
-      'quest-item' +
-      (state.done ? ' quest-item-done' : '') +
-      (state.skipped ? ' quest-item-skipped' : '');
-
-    const mark = document.createElement('span');
-    mark.className = 'quest-mark';
-    mark.textContent = state.mark; // Distinct glyph per state, not color alone.
-    mark.setAttribute('aria-hidden', 'true');
-
-    const title = document.createElement(state.showLink ? 'a' : 'span');
-    if (state.showLink) {
-      title.href = q.action_url;
-      title.title = q.action_label || q.title;
-    }
-    title.className = 'quest-title';
-    title.textContent = q.title;
-
-    li.append(mark, title);
-
-    // What this quest pays (city-economy Group 7). Shown on quests that are
-    // still open — once one is done the reward is already in the balance, and
-    // a lingering "+5 Craft" would read as something still owed.
-    const reward = Number(q.reward_craft || 0);
-    if (reward > 0 && !state.done && !state.skipped) {
-      const badge = document.createElement('span');
-      badge.className = 'quest-reward';
-      badge.textContent = `+${reward} Craft`;
-      badge.title = 'Finishing this earns Craft, which builds Farms';
-      li.append(badge);
-    }
-
-    if (state.skipped) {
-      const label = document.createElement('span');
-      label.className = 'quest-status quest-status-skipped';
-      label.textContent = 'Skipped';
-      li.append(label);
-    }
-    if (state.showResume) {
-      const resume = document.createElement('a');
-      resume.className = 'quest-resume';
-      resume.href = q.action_url;
-      resume.textContent = q.action_label || 'Resume';
-      li.append(resume);
-    }
-    if (state.showSkip) {
-      const skipBtn = document.createElement('button');
-      skipBtn.type = 'button';
-      skipBtn.className = 'quest-skip';
-      skipBtn.textContent = 'Skip';
-      skipBtn.setAttribute('aria-label', `Skip: ${q.title}`);
-      skipBtn.addEventListener('click', () => skipQuest(q.id, skipBtn));
-      li.append(skipBtn);
-    }
-
-    return li;
-  }
-
   // Other Quests-flyout cards need to know what the featured mission offers, so
   // a setup with its own resume card (Email Ops) does not show two Resumes for
   // one destination. The latest view is kept on window for a card that loads
@@ -471,7 +488,7 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     const list = el('quests');
     list.innerHTML = '';
     tierQuestRows(current, shownMission.visible ? shownMission.questID : '').forEach(q =>
-      list.appendChild(renderQuestRow(q))
+      list.appendChild(renderQuestRow(q, { onSkip: skipQuest }))
     );
 
     // The card already states why its mission matters; never say it twice.

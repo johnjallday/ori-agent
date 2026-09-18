@@ -2125,6 +2125,17 @@ h3,
   color: var(--text-secondary);
 }
 
+/* A mission waiting on Mission 01: muted, with its reason where the actions
+   would be. */
+.quest-item-locked .quest-mark {
+  font-size: 0.8rem;
+  opacity: 0.75;
+}
+
+.quest-item-locked .quest-title {
+  color: var(--text-secondary);
+}
+
 .quest-status {
   margin-left: auto;
   font-size: 0.78rem;

@@ -12,9 +12,11 @@ test.describe('Personal Assistant Foundation first value', () => {
     let onboardingComplete = false;
     // needs_hq is the state between hire and a built Personal HQ: hiring no
     // longer creates HQ in the same transaction (guided-hq-map-quest).
-    let relationshipState = 'not_hired';
+    let relationshipState = 'needs_hire';
     let hqValid = false;
     let hqSetupCalls = 0;
+    let hireCalls = 0;
+    let hireBody: any = null;
     let firstAssignmentCompleted = false;
     let firstQuestDeferred = false;
     let hqQuestDeferred = false;
@@ -89,12 +91,12 @@ test.describe('Personal Assistant Foundation first value', () => {
       route.fulfill({ status: 200, contentType: 'application/json', body: '{"templates":[]}' })
     );
     // A real hire creates the identity immediately, so assistant_id/display_name
-    // are populated from the moment relationshipState leaves not_hired — only
+    // are populated from the moment relationshipState leaves needs_hire — only
     // the HQ fields wait for a confirmed Build My HQ.
-    const hired = () => relationshipState !== 'not_hired';
+    const hired = () => relationshipState !== 'needs_hire';
     const active = () => relationshipState === 'active';
     const nextAction = () =>
-      relationshipState === 'not_hired'
+      relationshipState === 'needs_hire'
         ? 'hire'
         : relationshipState === 'needs_hq'
           ? 'build_hq'
@@ -127,6 +129,8 @@ test.describe('Personal Assistant Foundation first value', () => {
       })
     );
     await page.route('**/api/personal-assistant/hire', async route => {
+      hireCalls += 1;
+      hireBody = route.request().postDataJSON();
       relationshipVersion += 1;
       relationshipState = 'needs_hq';
       await route.fulfill({
@@ -200,14 +204,28 @@ test.describe('Personal Assistant Foundation first value', () => {
       });
     });
     await page.route('**/api/progression', route => {
-      // The starter missions, as the server resolves them. Mission 02 is
+      // The starter missions, as the server resolves them. Mission 01 is the
+      // hire; the server locks the rest until it is done. Mission 03 is
       // already done here so this journey stays about the plan branch of
-      // Mission 03, which is what a plan-focused hire gets.
+      // Mission 04, which is what a plan-focused hire gets.
+      const lock = hired() ? {} : { locked: true, locked_reason: 'Meet your assistant first' };
       const missions = [
+        {
+          id: 'pa-meet-assistant',
+          tier: 1,
+          order: 1,
+          featured: true,
+          title: 'Meet your assistant',
+          why: 'Your assistant is the one agent that owns your ongoing work. Make them yours.',
+          status: hired() ? 'completed' : 'available',
+          action_url: '/?quest=meet-assistant',
+          action_label: 'Start',
+          optional: false
+        },
         {
           id: 't2-build-hq',
           tier: 1,
-          order: 1,
+          order: 2,
           featured: true,
           title: 'Build My HQ',
           why: 'Give your assistant a home base.',
@@ -216,24 +234,26 @@ test.describe('Personal Assistant Foundation first value', () => {
           status: active() ? 'completed' : hqQuestDeferred ? 'skipped' : 'available',
           action_url: '/?quest=build-hq',
           action_label: 'Build My HQ',
-          optional: true
+          optional: true,
+          ...lock
         },
         {
           id: 'pa-tidy-downloads',
           tier: 1,
-          order: 2,
+          order: 3,
           featured: true,
           title: 'Tidy your Downloads',
           why: 'Let Ori sort one folder for you.',
           status: active() ? 'completed' : 'available',
           action_url: '/?quest=tidy-downloads',
           action_label: 'Start',
-          optional: true
+          optional: true,
+          ...lock
         },
         {
           id: 'pa-connect-source',
           tier: 1,
-          order: 3,
+          order: 4,
           featured: true,
           title: 'Plan my first day',
           why: 'Prepare a useful Daily Brief.',
@@ -244,19 +264,21 @@ test.describe('Personal Assistant Foundation first value', () => {
               : 'available',
           action_url: '/?quest=plan-first-day',
           action_label: 'Start',
-          optional: true
+          optional: true,
+          ...lock
         },
         {
           id: 'pa-first-brief',
           tier: 1,
-          order: 4,
+          order: 5,
           featured: true,
           title: 'Read your first Daily Brief',
           why: 'Ori pulls your priorities into one morning brief.',
           status: 'available',
           action_url: '/',
           action_label: 'Open Today',
-          optional: true
+          optional: true,
+          ...lock
         }
       ];
       return route.fulfill({
@@ -265,7 +287,7 @@ test.describe('Personal Assistant Foundation first value', () => {
         body: JSON.stringify({
           current_tier: 1,
           total_tiers: 6,
-          total_count: 18,
+          total_count: 19,
           completed_count: missions.filter(m => m.status === 'completed').length,
           resolved_count: missions.filter(m => m.status !== 'available').length,
           all_complete: false,
@@ -412,53 +434,120 @@ test.describe('Personal Assistant Foundation first value', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/');
     await expect(page.locator('#onboardingModal')).toBeVisible();
+    // Onboarding is Welcome and Model. The hire is not in the modal.
+    await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 1 of 2');
+    await expect(page.locator('#pafHireBtn')).toHaveCount(0);
     await page.locator('#onboardingUserName').fill('Jordan');
     await page.locator('#welcomeNextBtn').click();
+    await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 2 of 2');
     await page.locator('#continueWithoutModelBtn').click();
+    await expect(page.locator('#onboardingModal')).toBeHidden();
+    await expect.poll(() => onboardingComplete).toBe(true);
+    expect(hireCalls).toBe(0);
 
-    await expect(page.locator('#onboardingPersonalAssistantHire')).toBeVisible();
-    await expect(page.locator('#pafHireStepLabel')).toBeFocused();
-    await expect(page.locator('#pafHireStepLabel')).toContainText('Hire step 1 of 3');
+    // The modal hands over to Ori's Mission 01 briefing, in the middle of a
+    // dimmed Home.
+    const layer = page.locator('#oriSpotlight');
+    const briefing = layer.locator('.ori-spotlight__briefing');
+    await expect(briefing).toBeVisible();
+    await expect(briefing.locator('.ori-spotlight__greeting')).toContainText(
+      'let’s meet your assistant'
+    );
+    await expect(briefing.locator('.ori-spotlight__step')).toHaveCount(6);
+    await expect(briefing.locator('[data-ori-spotlight="start"]')).toBeFocused();
+    await expect(page.locator('#oriGuidePanel')).toBeHidden();
+    await briefing.locator('[data-ori-spotlight="start"]').click();
+
+    // Step 1: the page is dimmed around the Agents nav entry, which the user
+    // presses themselves. The navbar wraps on a phone, so Agents is in reach.
+    const callout = layer.locator('.ori-spotlight__callout');
+    await expect(layer).toHaveAttribute('data-mode', 'spotlight');
+    await expect(callout.locator('.ori-spotlight__callout-step')).toHaveText('Step 1 of 6');
+    await expect(callout.locator('.ori-spotlight__callout-title')).toHaveText('Click Agents');
+    await expect(page.locator('#navAgentsLink')).toHaveClass(/is-ori-coachmark/);
+    await page.locator('#navAgentsLink').click();
+    await page.waitForURL(url => url.pathname === '/agents');
+
+    // Step 2: the same spotlight, on New Agent.
+    await expect(layer).toHaveAttribute('data-mode', 'spotlight');
+    await expect(callout.locator('.ori-spotlight__callout-step')).toHaveText('Step 2 of 6');
+    await expect(page.locator('#newAgentBtn')).toHaveClass(/is-ori-coachmark/);
+    await page.locator('#newAgentBtn').click();
+
+    // The form's steps on a phone: the Inspector is a full-screen sheet with no
+    // room beside it for Ori's callout, so the walkthrough carries on in Ori's
+    // panel (under the sheet), and the form alone moves it on, one step per
+    // signal.
+    const reply = page.locator('#oriGuideReply');
+    const step = reply.locator('.ori-guide__quest-step');
+    await expect(step).toHaveText('Step 3 of 6');
+    await expect(layer).toHaveCount(0);
+    await expect(page.locator('#cr-name')).toBeFocused();
+    await expect(page.locator('#cr-name')).toHaveClass(/is-ori-coachmark/);
+    for (const absent of ['#cr-role', '#cr-model', '#cr-description']) {
+      await expect(page.locator(absent)).toHaveCount(0);
+    }
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth > document.documentElement.clientWidth
       )
     ).toBe(false);
-    await page.locator('#pafAssistantName').fill('Atlas');
-    await page.locator('#pafHireNextBtn').click();
-    await expect(page.locator('#pafHireStepLabel')).toBeFocused();
-    await expect(page.locator('#pafHireStepLabel')).toContainText('Hire step 2 of 3');
-    await page.locator('#pafHireNextBtn').click();
-    await expect(page.locator('#pafHireStepLabel')).toContainText('Hire step 3 of 3');
-    await page.locator('#pafHireBackBtn').click();
-    await page.locator('#pafHireBackBtn').click();
-    await expect(page.locator('#pafAssistantName')).toHaveValue('Atlas');
-    await page.locator('#pafHireNextBtn').click();
-    await page.locator('#pafHireNextBtn').click();
-    await page.locator('#pafHireConfirm').check();
-    await page.locator('#pafHireBtn').click();
+    await page.locator('#cr-name').fill('Atlas');
+    await page.locator('#cr-name').press('Tab');
+    await expect(step).toHaveText('Step 4 of 6');
+    await expect(page.locator('#cr-appearance-host')).toHaveClass(/is-ori-coachmark/);
+    await page.locator('#cr-focus-group input[value="prepare_for_meetings"]').check();
+    await expect(step).toHaveText('Step 5 of 6');
+    await expect(page.locator('#cr-focus-group')).toHaveClass(/is-ori-coachmark/);
+    await page.locator('#cr-mandate').fill('Keep the week realistic.');
+    await page.locator('#cr-mandate').press('Tab');
+    await expect(step).toHaveText('Step 6 of 6');
+    await expect(page.locator('#createSubmit')).toHaveClass(/is-ori-coachmark/);
+    expect(hireCalls).toBe(0);
+    await page.locator('#createSubmit').click();
 
-    // A confirmed hire hands off to Ori's guided HQ quest, never straight to an
-    // active Home — hiring created no HQ. The quest itself clears ?quest= from
-    // the URL bar once it starts (so Back/reload can't restart it), so the
-    // durable evidence is the quest's own presentation, not the transient URL.
-    await expect(page.locator('#onboardingModal')).toBeHidden();
+    // One hire, with what the preset collected, then straight to Build My HQ.
+    await page.waitForURL(url => url.pathname === '/');
+    expect(hireCalls).toBe(1);
+    expect(hireBody.display_name).toBe('Atlas');
+    expect(hireBody.mandate).toBe('Keep the week realistic.');
+    expect(hireBody.focus_areas).toContain('prepare_for_meetings');
+    expect(hireBody.request_id).toBeTruthy();
+    expect(relationshipState).toBe('needs_hq');
     expect(hqSetupCalls).toBe(0);
 
-    // Step 1: Ori explains and highlights the reserved site. Approved framing
-    // names the hired assistant; nothing is created by opening the quest.
-    await expect(page.locator('#oriGuidePanel')).toBeVisible();
-    await expect(page.locator('#oriGuideReply')).toContainText('Atlas is hired');
-    await expect(page.locator('#oriGuideReply')).toContainText('Step 1 of 3');
+    // Ori hands over in a Mission 02 briefing, in the centre. The quest clears
+    // ?quest= from the URL once it starts (so Back/reload can't restart it), so
+    // the durable evidence is the quest's own presentation.
+    const hqBriefing = layer.locator('.ori-spotlight__briefing');
+    await expect(hqBriefing).toBeVisible();
+    await expect(hqBriefing.locator('.ori-spotlight__greeting')).toHaveText(
+      'That’s your assistant. Now let’s give them a home.'
+    );
+    await expect(hqBriefing.locator('.ori-spotlight__kicker')).toHaveText('Starter · Mission 02');
+    await expect(hqBriefing.locator('.ori-spotlight__step')).toHaveCount(3);
+    await expect(page.locator('#oriGuidePanel')).toBeHidden();
+    await hqBriefing.locator('[data-ori-spotlight="start"]').press('Enter');
+
+    // Step 1: the Map dimmed around the reserved site.
+    await expect(layer).toHaveAttribute('data-mode', 'spotlight');
+    await expect(callout.locator('.ori-spotlight__callout-step')).toHaveText('Step 1 of 3');
     const hqSite = page.locator('[data-hq-site]');
     await expect(hqSite).toBeVisible();
+    // The Map re-mounts the site a few frames after Ori focuses it; focus must
+    // survive that, or a keyboard user is left on <body>.
+    await expect(hqSite).toBeFocused();
+    await page.waitForTimeout(500);
     await expect(hqSite).toBeFocused();
     expect(relationshipState).toBe('needs_hq');
 
     // The user selects the site with the keyboard — never the walkthrough.
     await hqSite.press('Enter');
 
-    // Step 2: the context dialog is open; Ori highlights Build My HQ.
+    // Step 2: the context dialog is open; Ori highlights Build My HQ. On a
+    // phone the dialog fills the width, with no room beside it for Ori's
+    // callout, so the rest of the walkthrough is in Ori's panel.
+    await expect(layer).toHaveCount(0);
     const buildAction = page.locator('[data-hq-action="build"]');
     await expect(buildAction).toBeVisible();
     await expect(page.locator('#oriGuideReply')).toContainText('open Build My HQ');
@@ -485,7 +574,7 @@ test.describe('Personal Assistant Foundation first value', () => {
     await expect(page.locator('#cockpitQuestsToggle')).toBeVisible();
     await page.locator('#cockpitQuestsToggle').click();
     await expect(page.locator('[data-role="first-mission-title"]')).toHaveText('Plan my first day');
-    await expect(page.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 03');
+    await expect(page.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 04');
     await page.locator('[data-role="first-mission-action"]').click();
 
     await expect(page.locator('#onboardingPersonalAssistantAssignment')).toBeVisible();
@@ -500,8 +589,8 @@ test.describe('Personal Assistant Foundation first value', () => {
     await expect(page.locator('#onboardingModal')).toBeHidden();
     await page.locator('#cockpitQuestsToggle').click();
     // A deferred mission never blocks the next one: the card moves on to
-    // Mission 04, and the deferred plan stays resumable from the list beneath.
-    await expect(page.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 04');
+    // Mission 05, and the deferred plan stays resumable from the list beneath.
+    await expect(page.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 05');
     await expect(page.locator('[data-role="first-mission-status"]')).toHaveText('Ready');
     const deferredRow = page
       .locator('[data-role="quests"] .quest-item')

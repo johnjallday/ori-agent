@@ -1,4 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
+import { mockHiredAssistant } from './helpers/hired-assistant';
 
 /**
  * Ori Guide — end-to-end behaviour and safety boundary
@@ -63,6 +64,10 @@ function guideEntryPoint(page: Page) {
 
 async function gotoPage(page: Page, route: string) {
   await skipOnboarding(page);
+  // Before the assistant is hired, Home and /agents open Ori on Mission 01 by
+  // themselves (tests/personal-assistant-foundation.spec.ts covers that).
+  // These cases are about the guide a user opens, so they run hired.
+  await mockHiredAssistant(page);
   await page.goto(route, { waitUntil: 'domcontentloaded' });
   await expect(guideEntryPoint(page)).toBeVisible();
 }

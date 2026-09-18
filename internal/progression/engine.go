@@ -486,6 +486,9 @@ func (e *Engine) statusLocked(mission MissionContext) Status {
 		if q.Resolve != nil {
 			applyPresentation(&qv, q.Resolve(mission), resolved)
 		}
+		if !resolved {
+			qv.Locked, qv.LockedReason = e.lockLocked(q)
+		}
 		if e.rewards != nil {
 			if amount, ok := e.rewards(q.ID); ok {
 				qv.RewardCraft = amount
@@ -515,7 +518,7 @@ func (e *Engine) statusLocked(mission MissionContext) Status {
 		}
 		tv.Quests = append(tv.Quests, qv)
 
-		if next == nil && status == StatusAvailable {
+		if next == nil && status == StatusAvailable && !qv.Locked {
 			nq := qv
 			next = &nq
 		}
@@ -542,6 +545,24 @@ func (e *Engine) statusLocked(mission MissionContext) Status {
 		NextQuest:      next,
 		Missions:       missions,
 	}
+}
+
+// lockLocked reports whether q waits on its LockedUntil quest and, if so, the
+// reason to show: that quest's title followed by "first". A LockedUntil that
+// names no quest in this graph never locks, so a typo cannot hide a mission
+// forever. Caller must hold the lock.
+func (e *Engine) lockLocked(q Quest) (bool, string) {
+	if q.LockedUntil == "" {
+		return false, ""
+	}
+	gate, ok := e.questByID(q.LockedUntil)
+	if !ok {
+		return false, ""
+	}
+	if _, done := e.state.CompletedQuests[gate.ID]; done {
+		return false, ""
+	}
+	return true, gate.Title + " first"
 }
 
 // applyPresentation overlays a mission's resolved copy onto its view. Empty

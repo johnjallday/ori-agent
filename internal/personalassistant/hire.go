@@ -58,6 +58,12 @@ type HireRequest struct {
 type HireResult struct {
 	State   *State
 	Resumed bool
+	// NewlyHired is true when this call made the hire durable: it moved the
+	// relationship into a hired status. A retry that finishes a partial hire
+	// is Resumed and NewlyHired; a replay of a hire that was already durable
+	// is Resumed only. Observers that must act once per hire key on this, not
+	// on !Resumed, which a first hire can also report.
+	NewlyHired bool
 	// BriefConfig is populated only when replaying a relationship that already
 	// has a Personal HQ. A fresh hire creates no Daily Brief configuration.
 	BriefConfig *dailybrief.Config
@@ -246,7 +252,7 @@ func (c *HireCoordinator) hireProfile(ctx context.Context, state *State, normali
 	recordEvent(EventHireCompleted, EventData{
 		AssistantID: updated.AssistantID, State: string(updated.Status),
 	})
-	return &HireResult{State: updated.Clone(), Resumed: resumed}, nil
+	return &HireResult{State: updated.Clone(), Resumed: resumed, NewlyHired: true}, nil
 }
 
 // resumeLegacyAutoHQ finishes an operation persisted before hiring and HQ
@@ -334,7 +340,7 @@ func (c *HireCoordinator) resumeLegacyAutoHQ(ctx context.Context, userID string,
 	}
 	state = updated
 	recordEvent(EventHireCompleted, EventData{AssistantID: state.AssistantID, WorkspaceID: state.HQWorkspaceID, State: string(state.Status)})
-	return &HireResult{State: state.Clone(), BriefConfig: cloneBriefConfig(config), Resumed: resumed}, nil
+	return &HireResult{State: state.Clone(), BriefConfig: cloneBriefConfig(config), Resumed: resumed, NewlyHired: true}, nil
 }
 
 func (c *HireCoordinator) claimOperation(ctx context.Context, userID string, ifVersion int64, request normalizedHireRequest) (*State, bool, normalizedHireRequest, error) {

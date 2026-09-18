@@ -250,7 +250,9 @@ test('PAF Help-only handoff names the assistant and only prefills without submit
   assert.equal(submits, 0);
 });
 
-test('PAF Help-only handoff refuses a missing hired assistant without routing', () => {
+// With no assistant hired, the work has nowhere to go: Ask Ori offers Mission
+// 01 instead, a plain navigation, and nothing is submitted (PRD FR9).
+test('PAF Help-only handoff with no hired assistant points at Mission 01 without routing', () => {
   const { guide, sandbox } = load();
   let submits = 0;
   sandbox.window.OriAskRouting = {
@@ -260,9 +262,30 @@ test('PAF Help-only handoff refuses a missing hired assistant without routing', 
   };
   guide.setHelpOnly({ available: false, assistantName: 'Personal assistant' });
   const action = guide._validateAction({ type: 'handoff', handoff_text: 'do work' });
-  assert.equal(action.label, 'Hire your personal assistant');
-  assert.equal(guide._handoff(action.handoffText), false);
+  assert.equal(action.type, 'navigate');
+  assert.equal(action.label, 'Meet your assistant');
+  assert.equal(action.href, '/?quest=meet-assistant');
+  // A direct handoff still refuses rather than sending work nowhere.
+  assert.equal(guide._handoff('do work'), false);
   assert.equal(submits, 0);
+});
+
+// On the Agents page, "click Agents" would send the user away and back again:
+// the offer starts at the step that page carries.
+test('PAF Help-only handoff on the Agents page stays on the Agents page', () => {
+  for (const route of ['/agents', '/agents/create']) {
+    const { guide } = load({ route });
+    guide.setHelpOnly({ available: false, assistantName: 'Personal assistant' });
+    const action = guide._validateAction({ type: 'handoff', handoff_text: 'do work' });
+    assert.equal(action.href, '/agents?quest=meet-assistant', route);
+  }
+  // A path that only starts with the same letters is not the Agents page.
+  const { guide } = load({ route: '/agentsmap' });
+  guide.setHelpOnly({ available: false, assistantName: 'Personal assistant' });
+  assert.equal(
+    guide._validateAction({ type: 'handoff', handoff_text: 'do work' }).href,
+    '/?quest=meet-assistant'
+  );
 });
 
 test('PAF Help-only handoff for a hired assistant with no HQ routes to the guided quest, not another hire', () => {
@@ -302,8 +325,8 @@ test('needsHQ never changes the ready-for-work handoff, and clears on the next r
   // A subsequent read that omits needsHQ must not leave a stale flag behind.
   guide.setHelpOnly({ available: false, assistantName: 'Personal assistant' });
   const stale = guide._validateAction({ type: 'handoff', handoff_text: 'plan today' });
-  assert.equal(stale.type, 'handoff');
-  assert.equal(stale.label, 'Hire your personal assistant');
+  assert.equal(stale.type, 'navigate');
+  assert.equal(stale.label, 'Meet your assistant');
 });
 
 test('a navigate action requires a safe same-origin path', () => {
@@ -417,6 +440,38 @@ test('a fixed quest step presents host copy with no network call and no model', 
   // Focus-only: the site is marked and focused, never activated.
   assert.ok(site.classList.contains('is-ori-coachmark'));
   assert.equal(site.focused, true);
+});
+
+// A step the form itself advanced to must not pull the user out of the form:
+// their next keystroke would land on the marked control, and a Space on a
+// marked button presses it.
+test('a quest step with focus:false marks without moving focus', () => {
+  const hire = makeElement('createSubmit');
+  let scrolled = false;
+  hire.scrollIntoView = () => {
+    scrolled = true;
+  };
+  const { guide } = questGuide({ route: '/agents', selectors: { '#createSubmit': hire } });
+
+  const result = guide.presentQuestStep({
+    quest: 'meet-assistant',
+    answer: 'Hire them.',
+    coachmark: 'assistant_hire',
+    focus: false
+  });
+
+  assert.equal(result.coachmarkResolved, true);
+  assert.ok(hire.classList.contains('is-ori-coachmark'), 'the control is still marked');
+  assert.equal(hire.focused, false, 'focus moved into the marked control');
+  assert.equal(scrolled, true, 'the marked control is still brought into view');
+
+  // The default is unchanged: an ordinary step focuses its control.
+  guide.presentQuestStep({
+    quest: 'meet-assistant',
+    answer: 'Hire them.',
+    coachmark: 'assistant_hire'
+  });
+  assert.equal(hire.focused, true);
 });
 
 test('a fixed quest step renders a user-controlled name as text, never markup', () => {
@@ -677,6 +732,87 @@ test('the mark re-anchors when the page re-renders the control under it', () => 
   assert.equal(stale.classList.contains('is-ori-coachmark'), false, 'the ghost is unmarked');
   assert.ok(fresh.classList.contains('is-ori-coachmark'), 'the live control is marked instead');
   assert.equal(pointer().style.left, '750px', 'and the pointer followed it (700 + 100/2)');
+  // Nothing had focus on the old node, so none is invented for the new one.
+  assert.equal(fresh.focused, false);
+});
+
+// The Map re-mounts the site a few frames after Ori focuses it. Removing the
+// focused node drops focus to <body>; a keyboard user must not lose their place.
+test('focus follows the mark when the re-render took it', () => {
+  const stale = makeElement('hq-site-old');
+  const fresh = makeElement('hq-site-new');
+  const ctx = questGuide({ selectors: { '[data-hq-site]': stale } });
+  const { guide, registerSelector, runFrame, sandbox } = ctx;
+  const doc = sandbox.document;
+
+  guide.presentQuestStep({
+    quest: 'build-hq',
+    answer: 'Select the highlighted site.',
+    coachmark: 'personal_hq_site'
+  });
+  assert.ok(stale.focused, 'the step focused the site');
+  doc.activeElement = stale;
+  runFrame();
+
+  stale._detached = true;
+  doc.activeElement = doc.body;
+  registerSelector('[data-hq-site]', fresh);
+  runFrame();
+
+  assert.ok(fresh.classList.contains('is-ori-coachmark'));
+  assert.ok(fresh.focused, 'focus moved to the live control');
+});
+
+test('a re-render never takes focus from a control the user moved to', () => {
+  const stale = makeElement('hq-site-old');
+  const fresh = makeElement('hq-site-new');
+  const elsewhere = makeElement('search');
+  const ctx = questGuide({ selectors: { '[data-hq-site]': stale } });
+  const { guide, registerSelector, runFrame, sandbox } = ctx;
+  const doc = sandbox.document;
+
+  guide.presentQuestStep({
+    quest: 'build-hq',
+    answer: 'Select the highlighted site.',
+    coachmark: 'personal_hq_site'
+  });
+  doc.activeElement = stale;
+  runFrame();
+
+  // The user tabs away, and only then does the Map re-mount.
+  doc.activeElement = elsewhere;
+  runFrame();
+  stale._detached = true;
+  registerSelector('[data-hq-site]', fresh);
+  runFrame();
+
+  assert.ok(fresh.classList.contains('is-ori-coachmark'), 'the mark still follows');
+  assert.equal(fresh.focused, false, 'focus stays where the user put it');
+});
+
+test('a re-render in the same frame as the user moving on leaves focus with the user', () => {
+  const stale = makeElement('hq-site-old');
+  const fresh = makeElement('hq-site-new');
+  const elsewhere = makeElement('search');
+  const ctx = questGuide({ selectors: { '[data-hq-site]': stale } });
+  const { guide, registerSelector, runFrame, sandbox } = ctx;
+  const doc = sandbox.document;
+
+  guide.presentQuestStep({
+    quest: 'build-hq',
+    answer: 'Select the highlighted site.',
+    coachmark: 'personal_hq_site'
+  });
+  doc.activeElement = stale;
+  runFrame();
+
+  // The site had focus at the last frame, but the user is somewhere else now.
+  doc.activeElement = elsewhere;
+  stale._detached = true;
+  registerSelector('[data-hq-site]', fresh);
+  runFrame();
+
+  assert.equal(fresh.focused, false);
 });
 
 test('a marked control that is removed for good drops the mark and the pointer', () => {
@@ -871,7 +1007,13 @@ test('local coachmark keys are not server-addressable', () => {
   const owners = {
     select_agent: '/agents',
     select_agent_check: '/agents',
-    create_workspace_submit: '/'
+    create_workspace_submit: '/',
+    // Mission 01: Home's prompt, then the Agents page walkthrough.
+    nav_agents: '/',
+    assistant_name: '/agents',
+    assistant_face: '/agents',
+    assistant_focus: '/agents',
+    assistant_hire: '/agents'
   };
   assert.deepEqual(local.sort(), Object.keys(owners).sort());
   for (const key of local) {
@@ -1563,6 +1705,27 @@ test('reopening does not re-greet over a reply the user came back to read', asyn
 
   assert.equal(asks, afterAsk, 'reopening must not fire another request');
   assert.match(els.oriGuideReply.innerHTML, /kept/);
+});
+
+// A walkthrough step is fixed content too. A user who closed the panel
+// mid-walkthrough and reopens it from the launcher must find the step, not a
+// greeting that arrived afterwards and replaced it.
+test('reopening over a walkthrough step does not greet over it', () => {
+  const els = guideEls();
+  const ctx = load({ route: '/', elements: els });
+  let asks = 0;
+  ctx.sandbox.fetch = () => {
+    asks += 1;
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ answer: 'greeting' }) });
+  };
+
+  ctx.guide.open(null, { skipGreeting: true });
+  ctx.guide.presentQuestStep({ quest: 'meet-assistant', answer: 'Press New Agent.' });
+  ctx.guide.close();
+  ctx.guide.open(els.oriGuideLauncher);
+
+  assert.equal(asks, 0, 'reopening greeted over the walkthrough step');
+  assert.match(els.oriGuideReply.innerHTML, /Press New Agent/);
 });
 
 /* ---- acceptance matrix (FR16-FR39) ---------------------------------------------- */

@@ -769,3 +769,500 @@
     animation: none;
   }
 }
+
+/* ---- spotlight and briefing (ori-spotlight.js) ------------------------------------- */
+
+/*
+ * Ori's blocking layer for a first-run step with one right click. The root is
+ * only a positioning box and lets every click through; the dimmed scrim takes
+ * them, except inside the hole its clip-path cuts over the spotlit control. It
+ * sits above modals (10100) and below Ori's pointing hand (10200).
+ */
+.ori-spotlight {
+  --ori-paper: #f6ead6;
+  --ori-paper-deep: #e8d6b4;
+  --ori-ink: #3b2a12;
+  --ori-muted: #6f5a3a;
+  --ori-accent: #bd7c24;
+  /* Amber text on the card, and the amber fill that carries white text. One
+     colour here; the dark theme splits them, because amber text there must be
+     lighter while a white-on-amber fill must stay dark (both AA). */
+  --ori-accent-text: #8a5a15;
+  --ori-accent-fill: #8a5a15;
+  --ori-line: #d8c19b;
+  --ori-surface: #fffaf1;
+  --ori-spotlight-dim: rgb(24 18 10 / 58%);
+
+  position: fixed;
+  inset: 0;
+  z-index: 10150;
+  font-family: var(--font-body, inherit);
+  font-size: 14px;
+  color: var(--ori-ink);
+  pointer-events: none;
+}
+
+.ori-spotlight__scrim,
+.ori-spotlight__briefing,
+.ori-spotlight__callout {
+  pointer-events: auto;
+}
+
+.ori-spotlight__scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--ori-spotlight-dim);
+  backdrop-filter: blur(2px);
+  animation: ori-spotlight-fade 180ms ease-out;
+}
+
+.ori-spotlight.is-opening .ori-spotlight__scrim {
+  transition: clip-path 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes ori-spotlight-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.ori-spotlight__portrait {
+  flex: none;
+  border-radius: 50%;
+  background: var(--ori-paper);
+  border: 1px solid var(--ori-line);
+}
+
+/* -- briefing: Ori in the centre, one mission -- */
+
+.ori-spotlight__briefing {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(500px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 28px 28px 22px;
+  border: 1px solid var(--ori-line);
+  border-radius: 20px;
+  background: var(--ori-surface);
+  box-shadow: 0 28px 70px rgb(0 0 0 / 38%);
+  transform: translate(-50%, -50%);
+  animation: ori-spotlight-rise 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes ori-spotlight-rise {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 14px));
+  }
+}
+
+.ori-spotlight__who {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.ori-spotlight__who .ori-spotlight__portrait {
+  padding: 6px;
+  box-shadow: 0 0 0 6px rgb(189 124 36 / 14%);
+}
+
+.ori-spotlight__name {
+  margin: 0;
+  font-family: var(--font-display, Georgia, serif);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.ori-spotlight__role {
+  margin: 2px 0 0;
+  color: var(--ori-accent-text);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* The mission just finished, when a briefing hands over from it. */
+.ori-spotlight__done {
+  width: fit-content;
+  margin: 14px auto 0;
+  padding: 3px 12px;
+  border: 1px solid var(--ori-line);
+  border-radius: 999px;
+  background: var(--ori-paper);
+  color: var(--ori-accent-text);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ori-spotlight__greeting {
+  margin: 16px 0 18px;
+  font-family: var(--font-display, Georgia, serif);
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.3;
+  text-align: center;
+}
+
+.ori-spotlight__mission {
+  padding: 16px 18px;
+  border: 1px solid var(--ori-line);
+  border-left: 3px solid var(--ori-accent);
+  border-radius: 12px;
+  background: var(--ori-paper);
+}
+
+.ori-spotlight__mission-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ori-spotlight__kicker,
+.ori-spotlight__reward,
+.ori-spotlight__step-n,
+.ori-spotlight__callout-step {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ori-spotlight__kicker {
+  color: var(--ori-accent-text);
+  font-weight: 700;
+}
+
+.ori-spotlight__reward {
+  padding: 2px 8px;
+  border: 1px solid var(--ori-line);
+  border-radius: 999px;
+  color: var(--ori-muted);
+}
+
+.ori-spotlight__mission-title {
+  margin: 8px 0 4px;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.ori-spotlight__why {
+  margin: 0;
+  color: var(--ori-muted);
+  line-height: 1.45;
+}
+
+.ori-spotlight__steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ori-spotlight__step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 5px;
+  border: 1px solid var(--ori-line);
+  border-radius: 999px;
+  background: var(--ori-surface);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ori-spotlight__step-n {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--ori-accent-fill);
+  color: #fff;
+  font-size: 10px;
+  letter-spacing: 0;
+}
+
+.ori-spotlight__unlocks {
+  margin: 12px 0 0;
+  color: var(--ori-muted);
+  font-size: 12px;
+}
+
+.ori-spotlight__actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.ori-spotlight__start {
+  padding: 11px 22px;
+  border: 1px solid var(--ori-accent-fill);
+  border-radius: 999px;
+  background: var(--ori-accent-fill);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ori-spotlight__start:hover {
+  filter: brightness(1.08);
+}
+
+.ori-spotlight__later,
+.ori-spotlight__callout-later {
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ori-muted);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ori-spotlight__later:hover,
+.ori-spotlight__callout-later:hover {
+  background: var(--ori-paper);
+  color: var(--ori-ink);
+}
+
+.ori-spotlight__start:focus-visible,
+.ori-spotlight__later:focus-visible,
+.ori-spotlight__callout-later:focus-visible {
+  outline: 3px solid var(--ori-accent);
+  outline-offset: 2px;
+}
+
+.ori-spotlight__note {
+  margin: 12px 0 0;
+  color: var(--ori-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* -- spotlight: Ori's callout beside the hole -- */
+
+.ori-spotlight__callout {
+  --ori-spotlight-arrow: 50%;
+
+  position: absolute;
+  width: min(340px, calc(100vw - 32px));
+  padding: 14px 16px 16px;
+  border: 1px solid var(--ori-line);
+  border-radius: 16px;
+  background: var(--ori-surface);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 34%);
+  animation: ori-spotlight-fade 200ms ease-out;
+}
+
+.ori-spotlight__callout.is-from-briefing {
+  animation: ori-spotlight-fade 260ms ease-out 180ms both;
+}
+
+.ori-spotlight__callout-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ori-spotlight__callout-meta {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ori-spotlight__callout-name {
+  font-family: var(--font-display, Georgia, serif);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.ori-spotlight__callout-step {
+  color: var(--ori-accent-text);
+  font-weight: 700;
+}
+
+.ori-spotlight__callout-later {
+  align-self: flex-start;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.ori-spotlight__callout-title {
+  margin: 12px 0 4px;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.ori-spotlight__callout-body {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.ori-spotlight__callout-note {
+  margin: 10px 0 0;
+  padding-top: 10px;
+  border-top: 1px dashed var(--ori-line);
+  color: var(--ori-muted);
+  font-size: 12px;
+}
+
+/* The notch that aims the callout at the control. */
+.ori-spotlight__arrow {
+  position: absolute;
+  left: var(--ori-spotlight-arrow);
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--ori-line);
+  background: var(--ori-surface);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.ori-spotlight__callout[data-side="below"] .ori-spotlight__arrow {
+  top: -8px;
+  border-right: 0;
+  border-bottom: 0;
+}
+
+.ori-spotlight__callout[data-side="above"] .ori-spotlight__arrow {
+  bottom: -8px;
+  border-top: 0;
+  border-left: 0;
+}
+
+/* Beside a form: the notch is on the side facing it, level with the field. */
+.ori-spotlight__callout[data-side="left"] .ori-spotlight__arrow,
+.ori-spotlight__callout[data-side="right"] .ori-spotlight__arrow {
+  top: var(--ori-spotlight-arrow);
+  left: auto;
+  transform: translateY(-50%) rotate(45deg);
+}
+
+.ori-spotlight__callout[data-side="left"] .ori-spotlight__arrow {
+  right: -8px;
+  border-bottom: 0;
+  border-left: 0;
+}
+
+.ori-spotlight__callout[data-side="right"] .ori-spotlight__arrow {
+  left: -8px;
+  border-top: 0;
+  border-right: 0;
+}
+
+.ori-spotlight__callout.is-continuing {
+  animation: none;
+}
+
+.ori-spotlight__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.ori-spotlight__choice {
+  padding: 7px 14px;
+  border: 1px solid var(--ori-accent);
+  border-radius: 999px;
+  background: var(--ori-paper);
+  color: var(--ori-ink);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ori-spotlight__choice:hover {
+  background: var(--ori-paper-deep);
+}
+
+.ori-spotlight__choice:focus-visible {
+  outline: 3px solid var(--ori-accent);
+  outline-offset: 2px;
+}
+
+/* A click on the dimmed page: a small shake toward "press the lit control". */
+.ori-spotlight__callout.is-nudged,
+.ori-spotlight__briefing.is-nudged {
+  animation: ori-spotlight-nudge 360ms ease-in-out;
+}
+
+.ori-spotlight__briefing.is-nudged {
+  animation-name: ori-spotlight-nudge-centred;
+}
+
+@keyframes ori-spotlight-nudge {
+  25% {
+    translate: -6px 0;
+  }
+
+  75% {
+    translate: 6px 0;
+  }
+}
+
+@keyframes ori-spotlight-nudge-centred {
+  25% {
+    transform: translate(calc(-50% - 6px), -50%);
+  }
+
+  75% {
+    transform: translate(calc(-50% + 6px), -50%);
+  }
+}
+
+[data-bs-theme="dark"] .ori-spotlight {
+  --ori-paper: #2f2820;
+  --ori-paper-deep: #3b3227;
+  --ori-ink: #f2e7d5;
+  --ori-muted: #c9b89c;
+  --ori-accent: #d99a44;
+  --ori-accent-text: #e0a85a;
+  --ori-line: #574a38;
+  --ori-surface: #241f19;
+  --ori-spotlight-dim: rgb(0 0 0 / 64%);
+}
+
+@media (max-width: 560px) {
+  .ori-spotlight__briefing {
+    padding: 22px 18px 18px;
+  }
+
+  .ori-spotlight__greeting {
+    font-size: 19px;
+  }
+
+  .ori-spotlight__actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ori-spotlight__scrim,
+  .ori-spotlight__briefing,
+  .ori-spotlight__callout,
+  .ori-spotlight__callout.is-from-briefing {
+    animation: none;
+  }
+
+  .ori-spotlight.is-opening .ori-spotlight__scrim {
+    transition: none;
+  }
+}

@@ -335,9 +335,7 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await expect(page.locator('#personalAssistantSend')).toBeDisabled();
   });
 
-  test('no-model onboarding exposes named, associated hire and preview controls', async ({
-    page
-  }) => {
+  test('no-model onboarding exposes named controls and no hire', async ({ page }) => {
     await page.route('**/api/onboarding/status', route =>
       route.fulfill({
         status: 200,
@@ -364,9 +362,89 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await page.goto('/');
     await expect(page.locator('#onboardingModal')).toBeVisible();
     await expect(page.getByLabel('Your name')).toBeVisible();
-    await expect(page.locator('#pafAssistantName')).toHaveAttribute('maxlength', '100');
-    await expect(page.locator('#pafHireConfirm')).toHaveAttribute('type', 'checkbox');
+    // The Welcome field names Ori the guide, not the assistant hired later.
+    await expect(page.getByLabel('What should Ori be called?')).toHaveValue('Ori');
+    // The hire is not in the modal any more: it happens on the Agents page.
+    await expect(page.locator('#pafAssistantName')).toHaveCount(0);
+    await expect(page.locator('#pafHireConfirm')).toHaveCount(0);
     await expect(page.locator('#pafAssignmentStatus')).toHaveAttribute('aria-live', 'polite');
+  });
+
+  // Mission 01's preset in the Agents page's New Agent panel: every control is
+  // labelled, focus starts in the name, Hire is the one confirmation and says
+  // when it is busy, and a failure is announced where focus lands.
+  test('the hire preset is labelled, announces busy, and focuses its error', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    let hireCalls = 0;
+    const requestIDs: string[] = [];
+    await mockCompletedOnboarding(page);
+    await page.route(/\/api\/personal-assistant$/, route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: '{"personal_assistant":{"state":"needs_hire","state_version":1,"availability":{"model":{"status":"not_configured","available":false}}}}'
+      })
+    );
+    await page.route('**/api/personal-assistant/hire', async route => {
+      hireCalls += 1;
+      requestIDs.push(route.request().postDataJSON().request_id);
+      await new Promise(resolve => setTimeout(resolve, 400));
+      if (hireCalls === 1) {
+        await route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 'hire_conflict',
+            error:
+              'This hire conflicts with the current assistant relationship. Refresh and try again.'
+          })
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({ personal_assistant: { state: 'needs_hq', display_name: 'Atlas' } })
+      });
+    });
+
+    await page.goto('/agents');
+    await page.locator('#newAgentBtn').click();
+    const name = page.getByLabel('Name', { exact: true });
+    await expect(name).toBeFocused();
+    await expect(name).toHaveAttribute('maxlength', '100');
+    await expect(name).toHaveAttribute('required', '');
+    await expect(page.getByRole('group', { name: 'What should they help with?' })).toBeVisible();
+    await expect(page.getByLabel('Plan my day')).toBeChecked();
+    const mandate = page.getByLabel('What would make them useful this week? (optional)');
+    await expect(mandate).toHaveAttribute('maxlength', '1000');
+    // No confirmation checkbox: the boundary line sits above the one button.
+    await expect(page.locator('#createBody')).toContainText(
+      'Hiring creates your assistant. It does not create a workspace'
+    );
+    const hire = page.getByRole('button', { name: 'Hire assistant' });
+    await expect(hire).toBeEnabled();
+
+    await name.fill('');
+    await expect(hire).toBeDisabled();
+    await name.fill('Atlas');
+    await expect(hire).toBeEnabled();
+
+    await hire.click();
+    await expect(page.locator('#createSubmit')).toHaveAttribute('aria-busy', 'true');
+    await expect(page.locator('#createSubmit')).toBeDisabled();
+    const alert = page.getByRole('alert').filter({ hasText: 'conflicts' });
+    await expect(alert).toBeVisible();
+    await expect(alert).toBeFocused();
+    await expect(page.locator('#createSubmit')).not.toHaveAttribute('aria-busy', 'true');
+    await expect(page.locator('#createSubmit')).toBeEnabled();
+
+    await page.locator('#createSubmit').click();
+    await page.waitForURL(url => url.pathname === '/');
+    expect(hireCalls).toBe(2);
+    // The retry replays the same request, so it can never hire a second assistant.
+    expect(requestIDs[0]).toBeTruthy();
+    expect(requestIDs[1]).toBe(requestIDs[0]);
   });
 
   // Reduced motion is the ambient condition for this whole describe block
@@ -486,23 +564,31 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await page.goto('/?quest=build-hq');
     await expect(page.locator('#onboardingModal')).toBeHidden();
 
-    // Fixed Ori/app-guide identity: this is the deterministic guide, not the
-    // hired assistant, and it says so.
-    await expect(page.locator('#oriGuidePanel')).toBeVisible();
-    await expect(page.locator('#oriGuideTitle')).toHaveText('Ori');
-    await expect(page.locator('#oriGuideRole')).toBeVisible();
-    await expect(page.locator('#oriGuideRole')).toHaveText('App Guide');
+    // The walkthrough runs in Ori's layer: a spotlight on the site, then Ori's
+    // callout beside each dialog. Fixed Ori identity: this is the deterministic
+    // guide, not the hired assistant, and it says so.
+    const layer = page.locator('#oriSpotlight');
+    const callout = layer.locator('.ori-spotlight__callout');
+    await expect(layer).toHaveAttribute('data-mode', 'spotlight');
+    await expect(callout).toHaveAttribute('role', 'dialog');
+    await expect(callout).toHaveAttribute('aria-labelledby', 'oriSpotlightTitle');
+    await expect(callout.locator('.ori-spotlight__callout-name')).toHaveText('Ori');
+    await expect(callout.locator('.ori-spotlight__callout-step')).toHaveText('Step 1 of 3');
+    await expect(page.locator('#oriGuidePanel')).toBeHidden();
 
-    // Live-region restraint: the reply is a single polite status region, not an
+    // Live-region restraint: one polite status region reads each step, not an
     // assertive one that would interrupt the user for routine step copy.
-    await expect(page.locator('#oriGuideReply')).toHaveAttribute('role', 'status');
-    await expect(page.locator('#oriGuideReply')).toHaveAttribute('aria-live', 'polite');
+    const live = layer.locator('[aria-live]');
+    await expect(live).toHaveCount(1);
+    await expect(live).toHaveAttribute('role', 'status');
+    await expect(live).toHaveAttribute('aria-live', 'polite');
 
     // Step 1: focus lands on the reserved site without a click.
     const hqSite = page.locator('[data-hq-site]');
     await expect(hqSite).toBeVisible();
     await expect(hqSite).toBeFocused();
-    await expect(page.locator('#oriGuideReply')).toContainText('Atlas is hired');
+    await expect(live).toContainText('Select the Personal HQ site');
+    await expect(live).toContainText('Atlas’s home base');
 
     // The pointer is decoration over the coachmark: hidden from assistive tech,
     // not focusable, and unable to swallow the click it points at. The outline
@@ -514,11 +600,14 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     // Under reduced motion it stays as a static "here" marker, without movement.
     expect(await hand.evaluate(el => getComputedStyle(el).animationName)).toBe('none');
 
-    // Keyboard-only from here: Enter selects the site.
+    // Keyboard-only from here: Enter selects the site. The site's dialog dims
+    // the page itself, so Ori's callout stands beside it without a second dim.
     await page.keyboard.press('Enter');
     const buildAction = page.locator('[data-hq-action="build"]');
     await expect(buildAction).toBeVisible();
-    await expect(page.locator('#oriGuideReply')).toContainText('open Build My HQ');
+    await expect(layer).toHaveAttribute('data-mode', 'callout');
+    await expect(callout.locator('.ori-spotlight__callout-title')).toHaveText('Open Build My HQ');
+    await expect(buildAction).toHaveClass(/is-ori-coachmark/);
 
     // Keyboard-only: Tab to the Build action (or activate it directly if
     // already focused by the coachmark) and press Enter/Space to open the form.
@@ -528,9 +617,12 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await page.keyboard.press('Enter');
 
     await expect(page.locator('#hqBuildModal')).toBeVisible();
-    await expect(page.locator('#oriGuideReply')).toContainText(
-      'Nothing is created until you confirm'
-    );
+    await expect(callout.locator('.ori-spotlight__callout-title')).toHaveText('Review and confirm');
+    await expect(callout).toContainText('Nothing is created until you confirm');
+    // The form is the user's: Ori marks nothing in it and offers no second way
+    // out beside its own Cancel.
+    await expect(page.locator('#hqBuildModal .is-ori-coachmark')).toHaveCount(0);
+    await expect(callout.locator('button')).toHaveCount(0);
 
     // Keyboard-only completion of the form itself.
     await page.locator('#hqBuildName').focus();

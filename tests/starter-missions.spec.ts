@@ -15,12 +15,14 @@ import { join } from 'node:path';
  * than passing on stale state.
  *
  * What only a browser proves, and so what is here:
- *   - The Quests card follows the server's missions, and Mission 02's Start
+ *   - The Quests card follows the server's missions, and Mission 03's Start
  *     opens the creator with File Janitor preselected and Ori's mark on Create.
- *   - The File Janitor setup wizard reaching ready completes Mission 02 on the
- *     server, and Home then shows Mission 03 with Mission 02 checked.
+ *   - The File Janitor setup wizard reaching ready completes Mission 03 on the
+ *     server, and Home then shows Mission 04 with Mission 03 checked.
  *   - A real approved move appears on Today as "Filed 1 file into …".
- *   - The first-day plan completes Mission 03.
+ *   - The first-day plan completes Mission 04.
+ * Mission 01 (Meet your assistant) is the hire, made here through the API;
+ * tests/personal-assistant-foundation.spec.ts drives it in the browser.
  *
  * The one thing mocked is the operating system's folder dialog: its endpoint
  * answers with a throwaway fixture path, and every request after it is real.
@@ -92,7 +94,9 @@ async function expectNoHorizontalScroll(page: Page) {
 let janitorSlug = '';
 let janitorRoot = '';
 
-test('a fresh hire with HQ sees Mission 02 on the card', async ({ page, request }) => {
+// Mission 01 (Meet your assistant) completes from the hire itself and Mission
+// 02 from Build My HQ, so the card opens on Mission 03.
+test('a fresh hire with HQ sees Mission 03 on the card', async ({ page, request }) => {
   const errors = watchErrors(page);
   await request.post('/api/onboarding/skip');
 
@@ -124,16 +128,18 @@ test('a fresh hire with HQ sees Mission 02 on the card', async ({ page, request 
   expect(hq.ok(), await hq.text()).toBeTruthy();
 
   const card = await openQuests(page);
-  await expect(card.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 02');
+  await expect(card.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 03');
   await expect(card.locator('[data-role="first-mission-title"]')).toHaveText('Tidy your Downloads');
   await expect(card.locator('[data-role="first-mission-status"]')).toHaveText('Ready');
   await expect(card.locator('[data-role="first-mission-action"]')).toHaveAttribute(
     'href',
     '/?quest=tidy-downloads'
   );
-  // The card's mission is the only Starter mission not repeated beneath it.
+  // The card's mission is the only Starter mission not repeated beneath it:
+  // four of the five, Meet your assistant and Build My HQ among them, done.
   const rows = page.locator('[data-role="quests"] .quest-item');
-  await expect(rows).toHaveCount(3);
+  await expect(rows).toHaveCount(4);
+  await expect(page.locator('[data-role="quests"] .quest-item-locked')).toHaveCount(0);
   await expect(rows.filter({ hasText: 'Tidy your Downloads' })).toHaveCount(0);
 
   await page.setViewportSize({ width: 400, height: 860 });
@@ -142,7 +148,7 @@ test('a fresh hire with HQ sees Mission 02 on the card', async ({ page, request 
   expect(errors).toEqual([]);
 });
 
-test('Mission 02: Start guides to Create, and File Janitor setup completes it', async ({
+test('Mission 03: Start guides to Create, and File Janitor setup completes it', async ({
   page,
   request
 }) => {
@@ -218,7 +224,7 @@ test('Mission 02: Start guides to Create, and File Janitor setup completes it', 
     .toBe('completed');
 
   const home = await openQuests(page);
-  await expect(home.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 03');
+  await expect(home.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 04');
   await expect(
     page.locator('[data-role="quests"] .quest-item.quest-item-done').filter({
       hasText: 'Tidy your Downloads'
@@ -228,7 +234,7 @@ test('Mission 02: Start guides to Create, and File Janitor setup completes it', 
 });
 
 test('an approved move appears on Today and links to History', async ({ page }) => {
-  test.skip(!janitorSlug || !janitorRoot, 'needs the File Janitor workspace from Mission 02');
+  test.skip(!janitorSlug || !janitorRoot, 'needs the File Janitor workspace from Mission 03');
   const errors = watchErrors(page);
 
   await page.goto(`/workspaces/${encodeURIComponent(janitorSlug)}`);
@@ -275,10 +281,10 @@ test('an approved move appears on Today and links to History', async ({ page }) 
   expect(errors).toEqual([]);
 });
 
-test('Mission 03, plan branch: the first-day plan completes it', async ({ page, request }) => {
+test('Mission 04, plan branch: the first-day plan completes it', async ({ page, request }) => {
   test.skip(
     (await missionStatus(request, 'pa-tidy-downloads')) !== 'completed',
-    'needs Mission 02 completed by the earlier test'
+    'needs Mission 03 completed by the earlier test'
   );
   const errors = watchErrors(page);
 
@@ -308,6 +314,6 @@ test('Mission 03, plan branch: the first-day plan completes it', async ({ page, 
     .poll(() => missionStatus(request, 'pa-connect-source'), { timeout: 15000 })
     .toBe('completed');
   const after = await openQuests(page);
-  await expect(after.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 04');
+  await expect(after.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 05');
   expect(errors).toEqual([]);
 });

@@ -305,6 +305,11 @@ func TestHireCoordinator_ReplayReturnsSameProfileWithoutDuplicates(t *testing.T)
 		first.State.GlobalAgentProfileName != second.State.GlobalAgentProfileName || !second.Resumed {
 		t.Fatalf("first=%#v second=%#v", first.State, second.State)
 	}
+	// Only the request that made the hire durable reports it; observers that
+	// act once per hire (Meet your assistant) key on this.
+	if !first.NewlyHired || second.NewlyHired {
+		t.Fatalf("NewlyHired first=%t replay=%t, want true then false", first.NewlyHired, second.NewlyHired)
+	}
 	if fixture.profiles.calls != 1 {
 		t.Fatalf("replay re-entered profile creation %d times", fixture.profiles.calls)
 	}
@@ -422,6 +427,11 @@ func TestHireCoordinator_ProfileCreationFailureStaysRetryable(t *testing.T) {
 	}
 	if result.State.Status != StatusAwaitingHQ || result.State.AssistantID != persisted.AssistantID {
 		t.Fatalf("retry produced a different identity: %#v", result.State)
+	}
+	// The retry resumed the claimed operation AND made the hire durable, so it
+	// is the one that must report the hire.
+	if !result.Resumed || !result.NewlyHired {
+		t.Fatalf("retry Resumed=%t NewlyHired=%t, want both", result.Resumed, result.NewlyHired)
 	}
 	fixture.assertNoHQSideEffects(t)
 }

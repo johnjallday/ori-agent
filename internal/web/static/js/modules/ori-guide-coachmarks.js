@@ -119,6 +119,41 @@
       selector: '#createFolderBtn',
       label: 'Create Workspace',
       local: true
+    },
+    // Mission 01, "Meet your assistant" (meet-assistant-quest.js). All local:
+    // no server topic names them. Home's prompt points at the Agents nav entry;
+    // on the Agents page the walkthrough marks each control of the New Agent
+    // panel's assistant preset in turn. The preset's controls exist only while
+    // it is open, which resolve() handles: an absent target yields no mark.
+    nav_agents: {
+      routes: ['/'],
+      selector: '#navAgentsLink',
+      label: 'Agents',
+      local: true
+    },
+    assistant_name: {
+      routes: ['/agents'],
+      selector: '#cr-name',
+      label: "your assistant's name",
+      local: true
+    },
+    assistant_face: {
+      routes: ['/agents'],
+      selector: '#cr-appearance-host',
+      label: "your assistant's face",
+      local: true
+    },
+    assistant_focus: {
+      routes: ['/agents'],
+      selector: '#cr-focus-group',
+      label: 'what your assistant helps with',
+      local: true
+    },
+    assistant_hire: {
+      routes: ['/agents'],
+      selector: '#createSubmit',
+      label: 'Hire assistant',
+      local: true
     }
     // Deliberately absent:
     //

@@ -76,6 +76,8 @@
     // The key the current mark came from, so the mark can re-anchor onto a
     // fresh node when the page re-renders the control under it.
     coachmarkKey: '',
+    // Whether the marked control had focus, so a re-render can carry it over.
+    coachmarkHeldFocus: false,
     actions: [],
     // The active deterministic walkthrough step, if any: { quest, choices }.
     // Presentation only — the server owns whether the quest is done or deferred.
@@ -179,6 +181,21 @@
       // hire or silently submitting the work nowhere.
       if (state.helpOnly && !state.assistantAvailable && state.needsHQ) {
         return { type: 'navigate', label: 'Build Personal HQ', href: '/?quest=build-hq' };
+      }
+      // No assistant to send it to yet: the way forward is Mission 01, which
+      // walks the user to the Agents page and hires one there (or repairs
+      // one). Already on the Agents page, it skips the step that points there.
+      // The routes are MEET_ASSISTANT_QUEST_ROUTE and MEET_ASSISTANT_AGENTS_ROUTE
+      // in personal-assistant-hire.js; this classic script cannot import them,
+      // and a test pins them together.
+      if (state.helpOnly && !state.assistantAvailable) {
+        return {
+          type: 'navigate',
+          label: 'Meet your assistant',
+          href: /^\/agents(\/|$)/.test(currentRoute())
+            ? '/agents?quest=meet-assistant'
+            : '/?quest=meet-assistant'
+        };
       }
       return {
         type: type,
@@ -898,6 +915,7 @@
       state.coachmarkRoute = '';
       state.coachmarkKey = '';
     }
+    state.coachmarkHeldFocus = false;
   }
 
   // A mark made on one route must not survive onto another. Pages here change
@@ -936,7 +954,12 @@
   function reanchorCoachmark() {
     var el = state.coachmarkEl;
     if (!el) return false;
-    if (typeof document.contains !== 'function' || document.contains(el)) return true;
+    if (typeof document.contains !== 'function' || document.contains(el)) {
+      // Remembered every frame, because once the node is swapped out it is too
+      // late to ask whether it had focus.
+      state.coachmarkHeldFocus = document.activeElement === el;
+      return true;
+    }
 
     var registry = window.OriGuideCoachmarks;
     var fresh =
@@ -950,10 +973,26 @@
     el.classList.remove('is-ori-coachmark');
     fresh.classList.add('is-ori-coachmark');
     state.coachmarkEl = fresh;
+    // Removing the focused node drops focus to <body>, so a keyboard user Ori
+    // had placed on the control would lose their place. Focus moves with the
+    // mark only when nothing else has it: it never leaves a control the user
+    // moved to.
+    var active = document.activeElement;
+    if (
+      state.coachmarkHeldFocus &&
+      (!active || active === document.body) &&
+      typeof fresh.focus === 'function'
+    ) {
+      fresh.focus({ preventScroll: true });
+    }
     return true;
   }
 
-  function markCoachmark(key, el) {
+  // opts.focus === false marks and points without moving focus. A walkthrough
+  // passes it for a step the form itself advanced to, while the user is still
+  // working in that form: moving focus there would carry their next keystroke
+  // somewhere else, and a Space landing on a marked button presses it.
+  function markCoachmark(key, el, opts) {
     state.coachmarkKey = key;
     el.classList.add('is-ori-coachmark');
     state.coachmarkEl = el;
@@ -963,7 +1002,9 @@
     state.coachmarkRoute = currentRoute();
     applyPointer(el);
     emit('coachmark', { key: key, resolved: true });
-    if (typeof el.focus === 'function') el.focus({ preventScroll: false });
+    var moveFocus = !(opts && opts.focus === false);
+    if (moveFocus && typeof el.focus === 'function') el.focus({ preventScroll: false });
+    state.coachmarkHeldFocus = document.activeElement === el;
     if (typeof el.scrollIntoView === 'function') {
       el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
@@ -989,7 +1030,7 @@
     var el = registry && registry.resolve(key, currentRoute(), document);
 
     if (el) {
-      markCoachmark(key, el);
+      markCoachmark(key, el, opts);
       return true;
     }
 
@@ -1014,7 +1055,7 @@
       }
       var found = registry && registry.resolve(key, currentRoute(), document);
       if (found) {
-        markCoachmark(key, found);
+        markCoachmark(key, found, opts);
         return;
       }
       tries += 1;
@@ -1157,7 +1198,15 @@
     // question nobody asked. A caller about to present its own fixed content
     // (the guided HQ quest) opts out via skipGreeting — the async greeting
     // fetch would otherwise land after and silently overwrite that content.
-    if (!state.activity.length && !state.pending && !(options && options.skipGreeting)) {
+    // A walkthrough step already on the panel is the same fixed content: the
+    // user reopening a panel they closed mid-walkthrough must find the step,
+    // not a greeting that replaced it.
+    if (
+      !state.activity.length &&
+      !state.pending &&
+      !state.quest &&
+      !(options && options.skipGreeting)
+    ) {
       // Silent: this is the panel greeting itself, not a question the user asked.
       ask('', { silent: true });
     }
@@ -1297,7 +1346,12 @@
     if (step.coachmark) {
       // awaitTarget: a step is presented in the same tick as the dialog whose
       // control it names, so the control may be one frame away from existing.
-      coachmarkResolved = applyCoachmark(String(step.coachmark), { awaitTarget: true });
+      // step.focus === false keeps focus where the user is working (see
+      // markCoachmark).
+      coachmarkResolved = applyCoachmark(String(step.coachmark), {
+        awaitTarget: true,
+        focus: step.focus !== false
+      });
     } else {
       clearCoachmark();
     }

@@ -1,4 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
+import { mockHiredAssistant } from './helpers/hired-assistant';
 
 /**
  * Curated character selection on the Agents page
@@ -13,6 +14,12 @@ import { test, expect, Page } from '@playwright/test';
  * cancelling genuinely changes nothing, and that switching identity modes never
  * costs the user their uploaded avatar.
  */
+
+// Creating agents with the ordinary New Agent form is what a user with a hired
+// assistant does (see helpers/hired-assistant.ts).
+test.beforeEach(async ({ page }) => {
+  await mockHiredAssistant(page);
+});
 
 async function skipOnboarding(page: Page) {
   await page.route('**/api/onboarding/status', route =>

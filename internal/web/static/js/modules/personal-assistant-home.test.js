@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
+  needsHireBanner,
   personalAssistantLauncherCue,
   personalAssistantTodayView,
   safeTodayRoute,
@@ -42,6 +44,22 @@ test('Today distinguishes a hired assistant with no HQ from needs_hire and does 
   assert.equal(view.paused, false);
   assert.equal(view.partial, false);
   assert.equal(view.displayName, 'Atlas');
+});
+
+// Before the hire, Today is quiet: one sentence, one link, to Mission 01
+// (meet-your-assistant FR8). No other call to action competes with it.
+test('before the hire Today says only "Meet your assistant to start Today."', () => {
+  const banner = needsHireBanner();
+  assert.equal(`${banner.linkText}${banner.trail}`, 'Meet your assistant to start Today.');
+  // The walkthrough from its first step, which points at the Agents nav entry.
+  assert.equal(banner.href, '/?quest=meet-assistant');
+  assert.deepEqual(Object.keys(banner).sort(), ['href', 'linkText', 'trail']);
+});
+
+test('Home never links to the retired /?hire=1', () => {
+  const source = readFileSync(new URL('./personal-assistant-home.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /hire=1/);
+  assert.doesNotMatch(source, /Hire your personal assistant/);
 });
 
 test('launcher cues are textual, bounded, and derived only from canonical states', () => {

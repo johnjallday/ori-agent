@@ -74,8 +74,8 @@ func TestGetStatus_IncludesResolvedMissions(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(raw.Missions) != 4 {
-		t.Fatalf("missions = %d, want 4 (body=%s)", len(raw.Missions), rec.Body.String())
+	if len(raw.Missions) != 5 {
+		t.Fatalf("missions = %d, want 5 (body=%s)", len(raw.Missions), rec.Body.String())
 	}
 	for i, mission := range raw.Missions {
 		if order, _ := mission["order"].(float64); int(order) != i+1 {
@@ -84,9 +84,21 @@ func TestGetStatus_IncludesResolvedMissions(t *testing.T) {
 		if featured, _ := mission["featured"].(bool); !featured {
 			t.Fatalf("missions[%d].featured = %v", i, mission["featured"])
 		}
+		// Before the hire, every mission after the first carries the server's
+		// lock; the widget never decides it (PRD FR7, FR31).
+		locked, _ := mission["locked"].(bool)
+		if locked != (i > 0) {
+			t.Fatalf("missions[%d].locked = %v", i, mission["locked"])
+		}
+		if i > 0 && mission["locked_reason"] != "Meet your assistant first" {
+			t.Fatalf("missions[%d].locked_reason = %v", i, mission["locked_reason"])
+		}
 	}
-	if raw.Missions[1]["id"] != progression.TidyDownloadsQuestID {
-		t.Fatalf("missions[1] = %v", raw.Missions[1]["id"])
+	if raw.Missions[0]["id"] != progression.MeetAssistantQuestID || raw.Missions[2]["id"] != progression.TidyDownloadsQuestID {
+		t.Fatalf("missions[0], [2] = %v, %v", raw.Missions[0]["id"], raw.Missions[2]["id"])
+	}
+	if _, present := raw.Missions[0]["locked_reason"]; present {
+		t.Fatalf("an unlocked mission sent a lock reason: %v", raw.Missions[0])
 	}
 
 	// A graph without featured quests still sends an empty list, never null.

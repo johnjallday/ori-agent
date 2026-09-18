@@ -101,6 +101,12 @@
   // agent is a creation flow, not a field editor, so it keeps its inputs.
   var createTagsInput = null;
 
+  // The personal-assistant relationship, read once on load (Mission 01, PRD
+  // FR19) and again after a hire or repair attempt. `state` stays null until
+  // the read answers, and when it cannot be read; either way New Agent opens
+  // the ordinary form.
+  var assistant = { state: null, known: false, pending: null };
+
   document.addEventListener('DOMContentLoaded', init);
 
   function init() {
@@ -212,6 +218,20 @@
     // — it just stops re-running on every subsequent loadAgents() (e.g. the
     // Retry button), which was clobbering in-progress edits on each retry.
     applyUrlToState();
+
+    // Mission 01's links (Home's card and repair banners, Ori's hand-off) land
+    // here with ?quest=meet-assistant. Read now: the roster's own URL sync
+    // rewrites the query once the collection loads, and drops it.
+    var arrivedForMission =
+      new URLSearchParams(window.location.search).get('quest') === 'meet-assistant';
+    loadAssistantState().then(function () {
+      // A repair or a partial hire has nothing to walk through: the arrival
+      // opens its one-button view directly, where the link promised it.
+      var mode = assistantPresetView().mode;
+      if (arrivedForMission && (mode === 'reconnect' || mode === 'blocked' || mode === 'resume')) {
+        renderCreate('assistant');
+      }
+    });
 
     // Character art is an enhancement layered onto an already-rendered
     // collection, never a precondition for it: the fetch is fired without being
@@ -1435,6 +1455,15 @@
     if (state.view === 'map') return;
     if (!state.filtered.length) return;
     if (coachmarkStep >= 0) return;
+    // The page has one pointer, and Mission 01's walkthrough owns it until the
+    // assistant is hired: a hint about selecting agents would pull it off the
+    // New Agent panel mid-hire. The hint is not marked seen, so it waits for a
+    // later visit.
+    if (!assistant.known && assistant.pending) {
+      assistant.pending.then(maybeShowCoachmark);
+      return;
+    }
+    if (assistantCreateMode() === 'assistant') return;
     showCoachmarkStep(0);
   }
 
@@ -2457,7 +2486,30 @@
 
   /* ---- create agent -------------------------------------------------------- */
 
+  // New Agent opens the personal-assistant preset while there is no assistant to
+  // keep (Mission 01), and the ordinary form otherwise. A press that lands
+  // before the one relationship read answers waits for it briefly, so it still
+  // opens the right form; a read that fails or never answers opens the ordinary
+  // one.
   function openCreate() {
+    if (assistant.known || !assistant.pending) {
+      renderCreate(assistantCreateMode());
+      return;
+    }
+    var opened = false;
+    var open = function () {
+      if (opened) return;
+      opened = true;
+      renderCreate(assistantCreateMode());
+    };
+    assistant.pending.then(open);
+    setTimeout(open, 1500);
+  }
+
+  // renderCreate shows the create panel in 'assistant' (the preset, or its
+  // reconnect / resume / blocked view) or 'standard' mode, then announces it so
+  // Ori's walkthrough can re-anchor on the freshly rendered controls.
+  function renderCreate(mode) {
     state.creating = true;
     els.stage.hidden = true;
     els.placeholder.hidden = true;
@@ -2465,6 +2517,16 @@
     // The create panel lives in the Inspector, so creating has to open it —
     // otherwise the New Agent button appears to do nothing (PRD FR4/FR65).
     openInspector(els.newAgentBtn);
+    if (mode === 'assistant') {
+      renderAssistantCreate();
+    } else {
+      mode = 'standard';
+      renderStandardCreate();
+    }
+    window.dispatchEvent(new CustomEvent('ori:agent-create-opened', { detail: { mode: mode } }));
+  }
+
+  function renderStandardCreate() {
     els.createBody.innerHTML =
       '<form class="stage-form" id="createForm" novalidate>' +
       field('Name', textInput('cr-name', '', 'Unique agent name'), 'cr-name') +
@@ -2486,7 +2548,19 @@
       '<span class="save-status is-muted"></span>' +
       '<button type="button" class="btn-ghost" id="createCancel2">Cancel</button>' +
       '<button type="button" class="btn-primary" id="createSubmit">Create agent</button>' +
-      '</div>';
+      '</div>' +
+      // While the assistant is still unhired, the way back to Mission 01 stays
+      // one click away. Creating a plain agent changes nothing about it.
+      (assistantPresetView().mode === 'form'
+        ? '<p class="create-panel__switch"><button type="button" class="roster-linkbtn" id="cr-assistant-form">' +
+          'Hire your personal assistant instead</button></p>'
+        : '');
+    var backToAssistant = document.getElementById('cr-assistant-form');
+    if (backToAssistant) {
+      backToAssistant.addEventListener('click', function () {
+        renderCreate('assistant');
+      });
+    }
     createTagsInput = null;
     var tagHost = document.getElementById('cr-tags-host');
     if (window.OriTagInput && tagHost) {
@@ -2509,21 +2583,27 @@
   // agent exists (FR-46).
   var createAppearanceEditor = null;
 
-  function mountCreateAppearanceEditor() {
+  // options.role fixes the role instead of following the Role select (the
+  // assistant preset has none; its assistant is always an orchestrator), and
+  // options.allowedModes narrows the sources offered.
+  function mountCreateAppearanceEditor(options) {
+    var opts = options || {};
     var host = document.getElementById('cr-appearance-host');
     if (!host || !window.AgentAppearanceEditor) return;
     if (createAppearanceEditor && createAppearanceEditor.destroy) createAppearanceEditor.destroy();
-    createAppearanceEditor = window.AgentAppearanceEditor.create({
+    var config = {
       host: host,
       idPrefix: 'cr-appearance',
       mode: 'create',
-      agent: { name: val('cr-name'), source: 'user', role: val('cr-role') },
+      agent: { name: val('cr-name'), source: 'user', role: opts.role || val('cr-role') },
       takenCharacterIds: takenCharacterIds,
       // A new agent starts with a face suited to its role instead of a
       // monogram. It is a suggestion in the form, shown and changeable before
       // anything is created — not a change to what the API does by default.
       suggestCharacter: true
-    });
+    };
+    if (opts.allowedModes) config.allowedModes = opts.allowedModes;
+    createAppearanceEditor = window.AgentAppearanceEditor.create(config);
 
     // The generated portrait is seeded from the agent's name, so the preview
     // has to follow the name field. Only the preview is re-rendered, never the
@@ -2566,6 +2646,348 @@
     } else {
       els.placeholder.hidden = false;
     }
+  }
+
+  /* ---- personal assistant preset (Mission 01) ------------------------------ */
+
+  // The shared hire module (personal-assistant-hire.js) publishes this seam. It
+  // is read at use time, never at load, so script order cannot leave it unset.
+  function hireApi() {
+    return window.OriAssistantHire || null;
+  }
+
+  function loadAssistantState() {
+    assistant.pending = fetch('/api/personal-assistant', {
+      headers: { Accept: 'application/json' }
+    })
+      .then(function (r) {
+        return r.ok ? r.json() : null;
+      })
+      .then(function (data) {
+        assistant.state = (data && data.personal_assistant) || null;
+      })
+      .catch(function () {
+        assistant.state = null;
+      })
+      .then(function () {
+        assistant.known = true;
+        return assistant.state;
+      });
+    return assistant.pending;
+  }
+
+  function assistantPresetView() {
+    var api = hireApi();
+    if (!api || !assistant.state) return { mode: 'standard' };
+    return api.presetView(assistant.state);
+  }
+
+  function assistantCreateMode() {
+    return assistantPresetView().mode === 'standard' ? 'standard' : 'assistant';
+  }
+
+  function browserStorage(kind) {
+    try {
+      return window[kind] || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function assistantSaveBar(buttonLabel) {
+    return (
+      '<div class="save-bar" id="savebar-create">' +
+      '<span class="save-status is-muted"></span>' +
+      '<button type="button" class="btn-ghost" id="createCancel2">Cancel</button>' +
+      (buttonLabel
+        ? '<button type="button" class="btn-primary" id="createSubmit">' +
+          esc(buttonLabel) +
+          '</button>'
+        : '') +
+      '</div>'
+    );
+  }
+
+  // renderAssistantCreate fills the create panel for Mission 01: the hire
+  // preset, or — for a relationship that already has an assistant to keep — the
+  // one-button reconnect / resume view, or the blocked status with no button.
+  function renderAssistantCreate() {
+    var api = hireApi();
+    var view = assistantPresetView();
+    if (!api || view.mode === 'standard') {
+      renderStandardCreate();
+      return;
+    }
+    if (view.mode !== 'form') {
+      renderAssistantRepair(view);
+      return;
+    }
+
+    var current = assistant.state || {};
+    var chosen = Array.isArray(current.focus_areas) && current.focus_areas.length;
+    var selected = new Set(chosen ? current.focus_areas : []);
+    var focusBoxes = api.FOCUS_AREAS.map(function (option) {
+      var on = chosen ? selected.has(option.value) : option.selected;
+      return (
+        '<label class="check"><input type="checkbox" name="cr-focus" value="' +
+        esc(option.value) +
+        '"' +
+        (on ? ' checked' : '') +
+        '> ' +
+        esc(option.label) +
+        '</label>'
+      );
+    }).join('');
+    var name = String(current.display_name || '').trim() || api.DEFAULT_ASSISTANT_NAME;
+
+    els.createBody.innerHTML =
+      '<form class="stage-form create-preset" id="createForm" novalidate>' +
+      '<div class="create-preset__intro">' +
+      '<h3 class="create-preset__title">' +
+      esc(view.title) +
+      '</h3>' +
+      '<p class="create-preset__lead">' +
+      esc(view.message) +
+      '</p>' +
+      '</div>' +
+      field(
+        'Name',
+        '<input id="cr-name" type="text" value="' +
+          esc(name) +
+          '" maxlength="' +
+          api.ASSISTANT_NAME_MAX_LENGTH +
+          '" required autocomplete="off" spellcheck="false">',
+        'cr-name'
+      ) +
+      // The same Appearance editor as the ordinary form, with a face already
+      // suggested for an orchestrator. No upload: the hire takes one request.
+      '<div class="field field--appearance"><div class="field__control" id="cr-appearance-host"></div></div>' +
+      '<fieldset class="field create-preset__focus" id="cr-focus-group">' +
+      '<legend class="field__label">What should they help with?</legend>' +
+      '<div class="field__control create-preset__focus-grid">' +
+      focusBoxes +
+      '</div></fieldset>' +
+      field(
+        'What would make them useful this week? (optional)',
+        '<textarea id="cr-mandate" rows="2" maxlength="' +
+          api.ASSISTANT_MANDATE_MAX_LENGTH +
+          '" placeholder="' +
+          esc(api.MANDATE_PLACEHOLDER) +
+          '">' +
+          esc(current.mandate || '') +
+          '</textarea>',
+        'cr-mandate'
+      ) +
+      '<p class="create-preset__boundary">' +
+      esc(api.HIRE_BOUNDARY_COPY) +
+      '</p>' +
+      '<div class="create-preset__error" id="createError" role="alert" tabindex="-1" hidden></div>' +
+      '</form>' +
+      assistantSaveBar(view.buttonLabel) +
+      '<p class="create-panel__switch"><button type="button" class="roster-linkbtn" id="cr-standard-form">' +
+      'Create a different kind of agent instead</button></p>';
+
+    createTagsInput = null;
+    mountCreateAppearanceEditor({ role: 'orchestrator', allowedModes: ['generated', 'character'] });
+
+    var nameInput = document.getElementById('cr-name');
+    var submit = document.getElementById('createSubmit');
+    // Hire is enabled whenever there is a name (PRD FR23); pressing it is the
+    // one confirmation the hire needs.
+    var syncSubmit = function () {
+      if (submit.getAttribute('aria-busy') !== 'true') submit.disabled = !nameInput.value.trim();
+    };
+    nameInput.addEventListener('input', syncSubmit);
+    syncSubmit();
+    submit.addEventListener('click', submitAssistantHire);
+    document.getElementById('createCancel2').addEventListener('click', closeCreate);
+    document.getElementById('cr-standard-form').addEventListener('click', function () {
+      renderCreate('standard');
+    });
+    nameInput.focus();
+  }
+
+  function renderAssistantRepair(view) {
+    els.createBody.innerHTML =
+      '<div class="create-preset create-preset--repair" id="cr-repair">' +
+      '<h3 class="create-preset__title">' +
+      esc(view.title) +
+      '</h3>' +
+      '<p class="create-preset__lead">' +
+      esc(view.message) +
+      '</p>' +
+      (view.detail ? '<p class="create-preset__boundary">' + esc(view.detail) + '</p>' : '') +
+      '<div class="create-preset__error" id="createError" role="alert" tabindex="-1" hidden></div>' +
+      '</div>' +
+      assistantSaveBar(view.buttonLabel);
+    createTagsInput = null;
+    document.getElementById('createCancel2').addEventListener('click', closeCreate);
+    var submit = document.getElementById('createSubmit');
+    if (submit) {
+      submit.addEventListener(
+        'click',
+        view.mode === 'reconnect' ? submitAssistantRepair : submitAssistantResume
+      );
+      submit.focus();
+    }
+  }
+
+  function showCreateError(message) {
+    var alert = document.getElementById('createError');
+    if (!alert) return;
+    alert.textContent = message || '';
+    alert.hidden = !message;
+    if (message) alert.focus();
+  }
+
+  function setAssistantBusy(busy, busyLabel) {
+    var submit = document.getElementById('createSubmit');
+    if (!submit) return;
+    if (busy) {
+      submit.dataset.label = submit.textContent;
+      submit.textContent = busyLabel;
+      submit.disabled = true;
+      submit.setAttribute('aria-busy', 'true');
+      return;
+    }
+    submit.removeAttribute('aria-busy');
+    submit.textContent = submit.dataset.label || submit.textContent;
+    var nameInput = document.getElementById('cr-name');
+    submit.disabled = !!nameInput && !nameInput.value.trim();
+  }
+
+  // A hire the server confirmed hands straight over to Build My HQ (PRD FR36),
+  // and tells that walkthrough to open with the hand-over line (FR37).
+  function finishAssistantHire(needsHQ) {
+    var api = hireApi();
+    api.clearHireRequestId(browserStorage('localStorage'));
+    var session = browserStorage('sessionStorage');
+    try {
+      if (session) session.setItem(api.JUST_HIRED_FLAG, '1');
+    } catch (_) {
+      // The walkthrough simply opens without the hand-over line.
+    }
+    window.location.href = needsHQ ? api.HQ_QUEST_ROUTE : '/';
+  }
+
+  // A failed attempt re-reads the relationship: another tab, or the attempt
+  // itself, may have hired the assistant after all, and then there is nothing
+  // left to do here but continue. Otherwise the view the new state calls for is
+  // rendered, keeping the message on screen.
+  function recoverAfterFailedAttempt(message) {
+    var api = hireApi();
+    loadAssistantState().then(function (current) {
+      if (current && api.personalAssistantNeedsHQ(current)) {
+        window.location.href = api.HQ_QUEST_ROUTE;
+        return;
+      }
+      var mode = assistantPresetView().mode;
+      if (mode !== 'form' && mode !== 'standard' && !document.getElementById('cr-repair')) {
+        renderCreate('assistant');
+        showCreateError(message);
+      }
+    });
+  }
+
+  function submitAssistantHire() {
+    var api = hireApi();
+    if (!api) return;
+    var name = val('cr-name').trim();
+    if (!name) {
+      showCreateError('Give your assistant a name.');
+      return;
+    }
+    var focusAreas = Array.prototype.map.call(
+      document.querySelectorAll('#cr-focus-group input[type="checkbox"]:checked'),
+      function (input) {
+        return input.value;
+      }
+    );
+    var mandate = val('cr-mandate').trim();
+    if (!focusAreas.length && !mandate) {
+      showCreateError('Tick at least one thing they should help with, or describe it below.');
+      return;
+    }
+    var current = assistant.state || {};
+    var payload = api.buildPersonalAssistantHirePayload({
+      requestId: api.getOrCreateHireRequestId(
+        browserStorage('localStorage'),
+        current.hire_request_id
+      ),
+      ifVersion: current.state_version || 0,
+      displayName: name,
+      appearance: createAppearanceEditor ? createAppearanceEditor.createRequest() : null,
+      mandate: mandate,
+      focusAreas: focusAreas
+    });
+    showCreateError('');
+    setAssistantBusy(true, 'Hiring your assistant…');
+    api.submitHire({ payload: payload }).then(function (result) {
+      if (result.ok) {
+        finishAssistantHire(result.needsHQ);
+        return;
+      }
+      setAssistantBusy(false);
+      showCreateError(result.error);
+      recoverAfterFailedAttempt(result.error);
+    });
+  }
+
+  // A partial hire replays the same request. The server finishes it from what
+  // it stored, so nothing here can change what was hired. The body still has
+  // to pass validation first, and a repair projection hides the working
+  // agreement, so the default focus stands in for it.
+  function submitAssistantResume() {
+    var api = hireApi();
+    if (!api) return;
+    var current = assistant.state || {};
+    var focusAreas =
+      Array.isArray(current.focus_areas) && current.focus_areas.length
+        ? current.focus_areas
+        : api.FOCUS_AREAS.filter(function (option) {
+            return option.selected;
+          }).map(function (option) {
+            return option.value;
+          });
+    var payload = api.buildPersonalAssistantHirePayload({
+      requestId: api.getOrCreateHireRequestId(
+        browserStorage('localStorage'),
+        current.hire_request_id
+      ),
+      ifVersion: current.state_version || 0,
+      displayName: current.display_name || api.DEFAULT_ASSISTANT_NAME,
+      appearance: current.appearance || null,
+      mandate: current.mandate || '',
+      focusAreas: focusAreas
+    });
+    showCreateError('');
+    setAssistantBusy(true, 'Finishing setup…');
+    api.submitHire({ payload: payload }).then(function (result) {
+      if (result.ok) {
+        finishAssistantHire(result.needsHQ);
+        return;
+      }
+      setAssistantBusy(false);
+      showCreateError(result.error);
+    });
+  }
+
+  function submitAssistantRepair() {
+    var api = hireApi();
+    if (!api) return;
+    showCreateError('');
+    setAssistantBusy(true, 'Reconnecting…');
+    api
+      .submitRepair({ stateVersion: (assistant.state && assistant.state.state_version) || 0 })
+      .then(function (result) {
+        if (result.ok) {
+          window.location.href = result.needsHQ ? api.HQ_QUEST_ROUTE : '/';
+          return;
+        }
+        setAssistantBusy(false);
+        showCreateError(result.error);
+        loadAssistantState();
+      });
   }
 
   function submitCreate() {

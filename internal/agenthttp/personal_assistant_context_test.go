@@ -256,6 +256,35 @@ func TestRoute_NeedsHQStopsAtBuildHQNotHire(t *testing.T) {
 	}
 }
 
+// With no assistant hired yet, and with a hire or repair to resume, Ask
+// routes to Mission 01's start, which walks the user to the Agents page: the
+// one place the assistant is hired, resumed, or reconnected. Nothing produces
+// the retired /?hire=1.
+func TestPersonalAssistantSetupGuidance_RoutesToMissionOne(t *testing.T) {
+	cases := []struct {
+		state string
+		label string
+	}{
+		{"needs_hire", "Meet your assistant"},
+		{"hiring", "Resume personal assistant setup"},
+		{"repair_needed", "Resume personal assistant setup"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.state, func(t *testing.T) {
+			guidance := personalAssistantSetupGuidance(&PersonalAssistantWorkContext{State: tc.state})
+			if guidance.Href != "/?quest=meet-assistant" || guidance.ActionType != HomeActionNavigate {
+				t.Fatalf("%s guidance = %+v, want a navigate to Mission 01", tc.state, guidance)
+			}
+			if guidance.Label != tc.label {
+				t.Fatalf("%s label = %q, want %q", tc.state, guidance.Label, tc.label)
+			}
+		})
+	}
+	if guidance := personalAssistantSetupGuidance(nil); guidance.Href != "/?quest=meet-assistant" {
+		t.Fatalf("no context guidance = %+v", guidance)
+	}
+}
+
 // TestAsk_NeedsHQNamesTheRealGapAndRoutesToTheGuidedQuest pins the same
 // distinction on the Ask surface: no "Hire your personal assistant" for an
 // identity that already exists, and no prompt/model/tool path runs.

@@ -1,3 +1,8 @@
+import {
+  MEET_ASSISTANT_AGENTS_ROUTE,
+  MEET_ASSISTANT_QUEST_ROUTE
+} from './personal-assistant-hire.js';
+
 const TODAY_ENDPOINT = '/api/personal-assistant/today';
 
 export function personalAssistantTodayView(today) {
@@ -17,6 +22,25 @@ export function personalAssistantTodayView(today) {
     modelUnavailable: state === 'model_unavailable',
     displayName: String(today?.display_name || '').trim() || 'your assistant'
   };
+}
+
+// needsHireBanner is everything Today says before the assistant is hired (PRD
+// FR8): one sentence, and its only link is Mission 01. Today has nothing else
+// to offer until there is an assistant to prepare it.
+export function needsHireBanner() {
+  return {
+    linkText: 'Meet your assistant',
+    href: MEET_ASSISTANT_QUEST_ROUTE,
+    trail: ' to start Today.'
+  };
+}
+
+function renderNeedsHireBanner(els) {
+  const banner = needsHireBanner();
+  const link = document.createElement('a');
+  link.href = banner.href;
+  link.textContent = banner.linkText;
+  els.banner.replaceChildren(link, banner.trail);
 }
 
 export function todaySectionRows(section) {
@@ -568,7 +592,7 @@ function renderToday(today) {
     link.textContent = 'Build Personal HQ';
     els.banner.append(link);
   } else if (view.needsHire) {
-    els.banner.textContent = 'Hire your personal assistant to start Today.';
+    renderNeedsHireBanner(els);
   } else if (view.unavailable) {
     els.banner.textContent = 'Personal assistant status is unavailable. No all-clear is implied.';
   } else if (view.paused) {
@@ -631,7 +655,10 @@ function renderRelationship(personalAssistant, view) {
         : 'Resume your personal assistant setup';
     els.banner.replaceChildren();
     const link = document.createElement('a');
-    link.href = '/?hire=1';
+    // Repair happens where the hire happens: the Agents page opens its
+    // reconnect, resume, or blocked view on arrival (PRD FR28). There is
+    // nothing to walk through first, so the link goes straight there.
+    link.href = MEET_ASSISTANT_AGENTS_ROUTE;
     link.textContent = recoverable
       ? 'Review and reconnect'
       : blocked
@@ -659,11 +686,8 @@ function renderRelationship(personalAssistant, view) {
     return;
   }
   if (!view.available) {
-    els.banner.replaceChildren();
-    const link = document.createElement('a');
-    link.href = '/?hire=1';
-    link.textContent = 'Hire your personal assistant';
-    els.banner.append('Choose one named assistant before sending personal work. ', link);
+    // Not hired yet (needs_hire, or a hire in flight).
+    renderNeedsHireBanner(els);
     return;
   }
   els.banner.textContent = 'Loading the latest canonical Today records…';

@@ -69,9 +69,11 @@ const CraftPerStarterQuest int64 = 5
 // Tier 5 asks them to set up a schedule. Tier 3 and beyond pay nothing: by then
 // the user is earning normally and does not need the help.
 //
-// The starter missions (tasks/prd-starter-missions.md) added the three `pa-`
-// missions and retired "Create your first workspace", which Mission 02 now
-// does. Its Craft moved to Tidy your Downloads rather than vanishing.
+// The starter missions (tasks/prd-starter-missions.md) added three `pa-`
+// missions and retired "Create your first workspace", which Tidy your
+// Downloads now does. Its Craft moved there rather than vanishing. Meet your
+// assistant (tasks/prd-meet-your-assistant-mission.md) pays too: the hire is
+// the first reward, so it is where a new user learns Craft comes from.
 //
 // Ids are the durable identifiers from internal/progression/quests.go. A quest
 // this map does not name simply pays nothing, so a renamed or retired quest
@@ -82,6 +84,7 @@ var starterQuests = map[string]int64{
 	"t2-create-note":    CraftPerStarterQuest,
 	"t2-run-task":       CraftPerStarterQuest,
 	"t2-build-hq":       CraftPerStarterQuest,
+	"pa-meet-assistant": CraftPerStarterQuest,
 	"pa-tidy-downloads": CraftPerStarterQuest,
 	"pa-connect-source": CraftPerStarterQuest,
 	"pa-first-brief":    CraftPerStarterQuest,
