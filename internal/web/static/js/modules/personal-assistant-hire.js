@@ -15,10 +15,17 @@
 // The route Ori's deterministic Personal HQ walkthrough activates on.
 export const HQ_QUEST_ROUTE = '/?quest=build-hq';
 
-// Mission 01's action URL. Every entry to the hire resolves here: the Home
-// mission card, Ori's Home prompt, Today's banner, Ask Ori's hand-off, the
-// repair banners, and the retired /?hire=1 link.
-export const MEET_ASSISTANT_QUEST_ROUTE = '/agents?quest=meet-assistant';
+// Mission 01's action URL: the walkthrough from its first step, on Home, where
+// Ori points at the Agents nav entry for the user to click. Every entry that
+// starts the hire resolves here: the Home mission card, Today's banner, Ask
+// Ori's hand-off, and the retired /?hire=1 link.
+export const MEET_ASSISTANT_QUEST_ROUTE = '/?quest=meet-assistant';
+
+// The Agents page leg of the same walkthrough, for an entry that is already on
+// its way there: the first step's "Take me there", the repair banners (a
+// reconnect or resume view opens straight away on arrival), and the pointer on
+// /agents/create.
+export const MEET_ASSISTANT_AGENTS_ROUTE = '/agents?quest=meet-assistant';
 
 // Set in sessionStorage the moment a hire succeeds, read (and cleared) by the
 // Build My HQ walkthrough so its first step can say the hand-over line.
@@ -305,6 +312,7 @@ if (typeof window !== 'undefined') {
   window.OriAssistantHire = Object.freeze({
     HQ_QUEST_ROUTE,
     MEET_ASSISTANT_QUEST_ROUTE,
+    MEET_ASSISTANT_AGENTS_ROUTE,
     JUST_HIRED_FLAG,
     DEFAULT_ASSISTANT_NAME,
     ASSISTANT_NAME_MAX_LENGTH,

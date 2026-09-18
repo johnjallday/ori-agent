@@ -4,8 +4,10 @@
  *
  * The user hires their personal assistant by creating it themselves, in the
  * Agents page's own New Agent panel, which opens in a personal-assistant preset
- * while no assistant is hired (agents-roster.js). This controller points at
- * each control in turn: New Agent, the name, the face, the focus, Hire.
+ * while no assistant is hired (agents-roster.js). The walkthrough's first step
+ * is on Home, pointing at the Agents nav entry (meet-assistant-home-prompt.js);
+ * this controller carries on from there, pointing at each control in turn: New
+ * Agent, the name, the face, the focus, Hire.
  *
  * What it is:
  *   - Deterministic. Every string here is host copy written in this file. No
@@ -30,12 +32,14 @@
   var QUEST_ID = 'meet-assistant';
   var QUEST_PARAM = 'meet-assistant';
 
-  var STEP_NEW_AGENT = 1;
-  var STEP_NAME = 2;
-  var STEP_FACE = 3;
-  var STEP_FOCUS = 4;
-  var STEP_HIRE = 5;
-  var TOTAL_STEPS = 5;
+  // Step 1 is on Home (meet-assistant-home-prompt.js): Ori points at the Agents
+  // nav entry and the user clicks it. This page carries on from Step 2.
+  var STEP_NEW_AGENT = 2;
+  var STEP_NAME = 3;
+  var STEP_FACE = 4;
+  var STEP_FOCUS = 5;
+  var STEP_HIRE = 6;
+  var TOTAL_STEPS = 6;
 
   var CHOICE_KEEP_NAME = 'keep-name';
   var CHOICE_KEEP_FACE = 'keep-face';

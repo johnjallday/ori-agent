@@ -39,9 +39,12 @@ const (
 	FirstBriefQuestID = "pa-first-brief"
 )
 
-// MeetAssistantActionURL starts Ori's deterministic Mission 01 walkthrough on
-// the Agents page, where the New Agent panel opens in the assistant preset.
-const MeetAssistantActionURL = "/agents?quest=meet-assistant"
+// MeetAssistantActionURL starts Ori's deterministic Mission 01 walkthrough from
+// its first step, on Home: Ori points at the Agents nav entry and the user
+// clicks it, then the Agents page walks them through the New Agent panel's
+// assistant preset. Starting where the user is, rather than jumping to the
+// Agents page, is what shows them every click.
+const MeetAssistantActionURL = "/?quest=meet-assistant"
 
 // TidyDownloadsActionURL starts Ori's deterministic Mission 03 walkthrough.
 const TidyDownloadsActionURL = "/?quest=tidy-downloads"

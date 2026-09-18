@@ -382,7 +382,7 @@ test('an old /?hire=1 link goes to Mission 01 on the Agents page', async () => {
     manager.populateTimezoneSelect = () => {};
     await manager.init();
 
-    assert.deepEqual(dom.replacements, ['/agents?quest=meet-assistant']);
+    assert.deepEqual(dom.replacements, ['/?quest=meet-assistant']);
     assert.deepEqual(dom.navigations, []);
   } finally {
     globalThis.fetch = priorFetch;

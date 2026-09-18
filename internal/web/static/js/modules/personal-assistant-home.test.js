@@ -51,7 +51,8 @@ test('Today distinguishes a hired assistant with no HQ from needs_hire and does 
 test('before the hire Today says only "Meet your assistant to start Today."', () => {
   const banner = needsHireBanner();
   assert.equal(`${banner.linkText}${banner.trail}`, 'Meet your assistant to start Today.');
-  assert.equal(banner.href, '/agents?quest=meet-assistant');
+  // The walkthrough from its first step, which points at the Agents nav entry.
+  assert.equal(banner.href, '/?quest=meet-assistant');
   assert.deepEqual(Object.keys(banner).sort(), ['href', 'linkText', 'trail']);
 });
 

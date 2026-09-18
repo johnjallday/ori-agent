@@ -7,6 +7,7 @@ import {
   HIRE_REQUEST_STORAGE_KEY,
   HQ_QUEST_ROUTE,
   JUST_HIRED_FLAG,
+  MEET_ASSISTANT_AGENTS_ROUTE,
   MEET_ASSISTANT_QUEST_ROUTE,
   buildPersonalAssistantHirePayload,
   clearHireRequestId,
@@ -125,8 +126,11 @@ test('the routes and flags are the ones the rest of the app links to', () => {
   // A focus parameter would preselect the landmark. The quest highlights it and
   // waits for a real user selection instead.
   assert.equal(HQ_QUEST_ROUTE, '/?quest=build-hq');
-  // Mission 01's action URL, the same string the server's quest carries.
-  assert.equal(MEET_ASSISTANT_QUEST_ROUTE, '/agents?quest=meet-assistant');
+  // Mission 01's action URL, the same string the server's quest carries: the
+  // walkthrough from its first step, on Home.
+  assert.equal(MEET_ASSISTANT_QUEST_ROUTE, '/?quest=meet-assistant');
+  // Its Agents page leg, for entries already on their way there.
+  assert.equal(MEET_ASSISTANT_AGENTS_ROUTE, '/agents?quest=meet-assistant');
   assert.equal(JUST_HIRED_FLAG, 'ori:assistant-just-hired');
   // The retired wizard's key, so a hire started there resumes here.
   assert.equal(HIRE_REQUEST_STORAGE_KEY, 'ori.personalAssistantHireRequestId');
@@ -134,13 +138,12 @@ test('the routes and flags are the ones the rest of the app links to', () => {
 
 // Classic scripts that cannot import the constant name the route literally.
 // Pinned here so a change to the constant cannot leave one of them behind.
-test('every classic script names the same Mission 01 route', () => {
+test('every classic script names the same Mission 01 routes', () => {
   for (const file of ['./ori-guide.js']) {
     const source = readFileSync(new URL(file, import.meta.url), 'utf8');
-    assert.ok(
-      source.includes(`'${MEET_ASSISTANT_QUEST_ROUTE}'`),
-      `${file} does not name ${MEET_ASSISTANT_QUEST_ROUTE}`
-    );
+    for (const route of [MEET_ASSISTANT_QUEST_ROUTE, MEET_ASSISTANT_AGENTS_ROUTE]) {
+      assert.ok(source.includes(`'${route}'`), `${file} does not name ${route}`);
+    }
   }
 });
 

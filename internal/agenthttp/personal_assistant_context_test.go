@@ -257,8 +257,9 @@ func TestRoute_NeedsHQStopsAtBuildHQNotHire(t *testing.T) {
 }
 
 // With no assistant hired yet, and with a hire or repair to resume, Ask
-// routes to Mission 01 on the Agents page: the one place the assistant is
-// hired, resumed, or reconnected. Nothing produces the retired /?hire=1.
+// routes to Mission 01's start, which walks the user to the Agents page: the
+// one place the assistant is hired, resumed, or reconnected. Nothing produces
+// the retired /?hire=1.
 func TestPersonalAssistantSetupGuidance_RoutesToMissionOne(t *testing.T) {
 	cases := []struct {
 		state string
@@ -271,7 +272,7 @@ func TestPersonalAssistantSetupGuidance_RoutesToMissionOne(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.state, func(t *testing.T) {
 			guidance := personalAssistantSetupGuidance(&PersonalAssistantWorkContext{State: tc.state})
-			if guidance.Href != "/agents?quest=meet-assistant" || guidance.ActionType != HomeActionNavigate {
+			if guidance.Href != "/?quest=meet-assistant" || guidance.ActionType != HomeActionNavigate {
 				t.Fatalf("%s guidance = %+v, want a navigate to Mission 01", tc.state, guidance)
 			}
 			if guidance.Label != tc.label {
@@ -279,7 +280,7 @@ func TestPersonalAssistantSetupGuidance_RoutesToMissionOne(t *testing.T) {
 			}
 		})
 	}
-	if guidance := personalAssistantSetupGuidance(nil); guidance.Href != "/agents?quest=meet-assistant" {
+	if guidance := personalAssistantSetupGuidance(nil); guidance.Href != "/?quest=meet-assistant" {
 		t.Fatalf("no context guidance = %+v", guidance)
 	}
 }

@@ -1,4 +1,7 @@
-import { MEET_ASSISTANT_QUEST_ROUTE } from './personal-assistant-hire.js';
+import {
+  MEET_ASSISTANT_AGENTS_ROUTE,
+  MEET_ASSISTANT_QUEST_ROUTE
+} from './personal-assistant-hire.js';
 
 const TODAY_ENDPOINT = '/api/personal-assistant/today';
 
@@ -653,8 +656,9 @@ function renderRelationship(personalAssistant, view) {
     els.banner.replaceChildren();
     const link = document.createElement('a');
     // Repair happens where the hire happens: the Agents page opens its
-    // reconnect, resume, or blocked view on arrival (PRD FR28).
-    link.href = MEET_ASSISTANT_QUEST_ROUTE;
+    // reconnect, resume, or blocked view on arrival (PRD FR28). There is
+    // nothing to walk through first, so the link goes straight there.
+    link.href = MEET_ASSISTANT_AGENTS_ROUTE;
     link.textContent = recoverable
       ? 'Review and reconnect'
       : blocked

@@ -264,10 +264,28 @@ test('PAF Help-only handoff with no hired assistant points at Mission 01 without
   const action = guide._validateAction({ type: 'handoff', handoff_text: 'do work' });
   assert.equal(action.type, 'navigate');
   assert.equal(action.label, 'Meet your assistant');
-  assert.equal(action.href, '/agents?quest=meet-assistant');
+  assert.equal(action.href, '/?quest=meet-assistant');
   // A direct handoff still refuses rather than sending work nowhere.
   assert.equal(guide._handoff('do work'), false);
   assert.equal(submits, 0);
+});
+
+// On the Agents page, "click Agents" would send the user away and back again:
+// the offer starts at the step that page carries.
+test('PAF Help-only handoff on the Agents page stays on the Agents page', () => {
+  for (const route of ['/agents', '/agents/create']) {
+    const { guide } = load({ route });
+    guide.setHelpOnly({ available: false, assistantName: 'Personal assistant' });
+    const action = guide._validateAction({ type: 'handoff', handoff_text: 'do work' });
+    assert.equal(action.href, '/agents?quest=meet-assistant', route);
+  }
+  // A path that only starts with the same letters is not the Agents page.
+  const { guide } = load({ route: '/agentsmap' });
+  guide.setHelpOnly({ available: false, assistantName: 'Personal assistant' });
+  assert.equal(
+    guide._validateAction({ type: 'handoff', handoff_text: 'do work' }).href,
+    '/?quest=meet-assistant'
+  );
 });
 
 test('PAF Help-only handoff for a hired assistant with no HQ routes to the guided quest, not another hire', () => {
@@ -714,6 +732,87 @@ test('the mark re-anchors when the page re-renders the control under it', () => 
   assert.equal(stale.classList.contains('is-ori-coachmark'), false, 'the ghost is unmarked');
   assert.ok(fresh.classList.contains('is-ori-coachmark'), 'the live control is marked instead');
   assert.equal(pointer().style.left, '750px', 'and the pointer followed it (700 + 100/2)');
+  // Nothing had focus on the old node, so none is invented for the new one.
+  assert.equal(fresh.focused, false);
+});
+
+// The Map re-mounts the site a few frames after Ori focuses it. Removing the
+// focused node drops focus to <body>; a keyboard user must not lose their place.
+test('focus follows the mark when the re-render took it', () => {
+  const stale = makeElement('hq-site-old');
+  const fresh = makeElement('hq-site-new');
+  const ctx = questGuide({ selectors: { '[data-hq-site]': stale } });
+  const { guide, registerSelector, runFrame, sandbox } = ctx;
+  const doc = sandbox.document;
+
+  guide.presentQuestStep({
+    quest: 'build-hq',
+    answer: 'Select the highlighted site.',
+    coachmark: 'personal_hq_site'
+  });
+  assert.ok(stale.focused, 'the step focused the site');
+  doc.activeElement = stale;
+  runFrame();
+
+  stale._detached = true;
+  doc.activeElement = doc.body;
+  registerSelector('[data-hq-site]', fresh);
+  runFrame();
+
+  assert.ok(fresh.classList.contains('is-ori-coachmark'));
+  assert.ok(fresh.focused, 'focus moved to the live control');
+});
+
+test('a re-render never takes focus from a control the user moved to', () => {
+  const stale = makeElement('hq-site-old');
+  const fresh = makeElement('hq-site-new');
+  const elsewhere = makeElement('search');
+  const ctx = questGuide({ selectors: { '[data-hq-site]': stale } });
+  const { guide, registerSelector, runFrame, sandbox } = ctx;
+  const doc = sandbox.document;
+
+  guide.presentQuestStep({
+    quest: 'build-hq',
+    answer: 'Select the highlighted site.',
+    coachmark: 'personal_hq_site'
+  });
+  doc.activeElement = stale;
+  runFrame();
+
+  // The user tabs away, and only then does the Map re-mount.
+  doc.activeElement = elsewhere;
+  runFrame();
+  stale._detached = true;
+  registerSelector('[data-hq-site]', fresh);
+  runFrame();
+
+  assert.ok(fresh.classList.contains('is-ori-coachmark'), 'the mark still follows');
+  assert.equal(fresh.focused, false, 'focus stays where the user put it');
+});
+
+test('a re-render in the same frame as the user moving on leaves focus with the user', () => {
+  const stale = makeElement('hq-site-old');
+  const fresh = makeElement('hq-site-new');
+  const elsewhere = makeElement('search');
+  const ctx = questGuide({ selectors: { '[data-hq-site]': stale } });
+  const { guide, registerSelector, runFrame, sandbox } = ctx;
+  const doc = sandbox.document;
+
+  guide.presentQuestStep({
+    quest: 'build-hq',
+    answer: 'Select the highlighted site.',
+    coachmark: 'personal_hq_site'
+  });
+  doc.activeElement = stale;
+  runFrame();
+
+  // The site had focus at the last frame, but the user is somewhere else now.
+  doc.activeElement = elsewhere;
+  stale._detached = true;
+  registerSelector('[data-hq-site]', fresh);
+  runFrame();
+
+  assert.equal(fresh.focused, false);
 });
 
 test('a marked control that is removed for good drops the mark and the pointer', () => {

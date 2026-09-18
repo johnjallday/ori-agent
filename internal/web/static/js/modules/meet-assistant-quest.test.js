@@ -145,10 +145,11 @@ test('the walkthrough starts on the Agents page while the assistant is unhired',
     const { quest, calls } = load({ relationship });
     await settle();
     assert.equal(quest.isActive(), true, relationship);
-    assert.deepEqual(steps(calls), [1]);
+    // Step 1 is on Home; this page starts at Step 2 of 6.
+    assert.deepEqual(steps(calls), [2]);
     const first = calls.presented[0];
     assert.equal(first.quest, 'meet-assistant');
-    assert.equal(first.total, 5);
+    assert.equal(first.total, 6);
     assert.equal(first.coachmark, 'new_agent');
     assert.match(first.answer, /^Press New Agent\./);
     // skipGreeting: the guide's own greeting would land after and replace the step.
@@ -190,7 +191,7 @@ test('the walkthrough never asks /api/ori-guide or any model', async () => {
 test('a New Agent press that beat the start begins at the name step', async () => {
   const { calls } = load({ presetOpen: true });
   await settle();
-  assert.deepEqual(steps(calls), [2]);
+  assert.deepEqual(steps(calls), [3]);
   // It is not a user action on the guide, so focus stays where the roster put it.
   assert.equal(calls.presented[0].focus, false);
 });
@@ -201,26 +202,26 @@ test('each form signal advances exactly one step, in order, to Hire', async () =
   const loaded = load();
   await settle();
   loaded.openPanel();
-  assert.deepEqual(steps(loaded.calls), [1, 2]);
+  assert.deepEqual(steps(loaded.calls), [2, 3]);
   assert.equal(loaded.calls.presented.at(-1).coachmark, 'assistant_name');
 
   loaded.change('cr-name', 'Atlas');
-  assert.deepEqual(steps(loaded.calls), [1, 2, 3]);
+  assert.deepEqual(steps(loaded.calls), [2, 3, 4]);
   assert.equal(loaded.calls.presented.at(-1).coachmark, 'assistant_face');
 
   loaded.change('focus');
-  assert.deepEqual(steps(loaded.calls), [1, 2, 3, 4]);
+  assert.deepEqual(steps(loaded.calls), [2, 3, 4, 5]);
   assert.equal(loaded.calls.presented.at(-1).coachmark, 'assistant_focus');
 
   loaded.change('cr-mandate', 'Keep it light.');
-  assert.deepEqual(steps(loaded.calls), [1, 2, 3, 4, 5]);
+  assert.deepEqual(steps(loaded.calls), [2, 3, 4, 5, 6]);
   const hire = loaded.calls.presented.at(-1);
   assert.equal(hire.coachmark, 'assistant_hire');
   assert.match(hire.answer, /no workspace, no permissions, no accounts/);
 
   // Nothing moves past Hire.
   loaded.change('focus');
-  assert.deepEqual(steps(loaded.calls), [1, 2, 3, 4, 5]);
+  assert.deepEqual(steps(loaded.calls), [2, 3, 4, 5, 6]);
 });
 
 test('a step the form advanced to never takes focus out of the form', async () => {
@@ -250,7 +251,7 @@ test('the choices advance one step each and focus the control they name', async 
   loaded.choose('keep-name');
   loaded.choose('keep-face');
   loaded.choose('done-choosing');
-  assert.deepEqual(steps(loaded.calls), [1, 2, 3, 4, 5]);
+  assert.deepEqual(steps(loaded.calls), [2, 3, 4, 5, 6]);
   assert.equal(loaded.calls.presented.at(-1).focus, true, 'Done choosing hands focus to Hire');
   assert.equal(loaded.calls.presented.at(-1).choices.length, 0);
 });
@@ -262,7 +263,7 @@ test('a stale signal never moves the walkthrough backwards or sideways', async (
   loaded.change('focus');
   loaded.change('focus');
   loaded.change('focus');
-  assert.equal(loaded.quest._state.step, 5);
+  assert.equal(loaded.quest._state.step, 6);
 
   const before = loaded.calls.presented.length;
   loaded.change('cr-name', 'Renamed');
@@ -271,7 +272,7 @@ test('a stale signal never moves the walkthrough backwards or sideways', async (
   loaded.choose('done-choosing');
   loaded.choose('keep-name', 'build-hq');
   assert.equal(loaded.calls.presented.length, before);
-  assert.equal(loaded.quest._state.step, 5);
+  assert.equal(loaded.quest._state.step, 6);
 });
 
 test('an empty name or mandate is not progress', async () => {
@@ -280,7 +281,7 @@ test('an empty name or mandate is not progress', async () => {
   loaded.openPanel();
   loaded.change('cr-name', '   ');
   loaded.change('cr-mandate', '  ');
-  assert.equal(loaded.quest._state.step, 2);
+  assert.equal(loaded.quest._state.step, 3);
 });
 
 test('a re-render re-anchors the current step instead of restarting it', async () => {
@@ -289,7 +290,7 @@ test('a re-render re-anchors the current step instead of restarting it', async (
   loaded.openPanel();
   loaded.change('cr-name', 'Atlas');
   loaded.openPanel();
-  assert.deepEqual(steps(loaded.calls), [1, 2, 3, 3]);
+  assert.deepEqual(steps(loaded.calls), [2, 3, 4, 4]);
   assert.equal(loaded.calls.presented.at(-1).focus, false);
 });
 
@@ -307,12 +308,12 @@ test('choosing the ordinary form stops pointing without skipping, and coming bac
   // The ordinary form has a name field too; editing it is not Mission 01 progress.
   loaded.change('cr-name', 'Scout');
   loaded.change('focus');
-  assert.equal(loaded.quest._state.step, 3);
+  assert.equal(loaded.quest._state.step, 4);
 
   const before = loaded.calls.presented.length;
   loaded.openPanel('assistant');
   assert.equal(loaded.calls.presented.length, before + 1);
-  assert.equal(loaded.calls.presented.at(-1).index, 3);
+  assert.equal(loaded.calls.presented.at(-1).index, 4);
 });
 
 test('with Ori’s panel closed the form alone still advances, and reopening resumes there', async () => {
@@ -325,10 +326,10 @@ test('with Ori’s panel closed the form alone still advances, and reopening res
   loaded.change('cr-name', 'Atlas');
   loaded.change('focus');
   assert.equal(loaded.calls.presented.length, before, 'a closed panel was presented to');
-  assert.equal(loaded.quest._state.step, 4);
+  assert.equal(loaded.quest._state.step, 5);
 
   loaded.openGuide();
-  assert.equal(loaded.calls.presented.at(-1).index, 4);
+  assert.equal(loaded.calls.presented.at(-1).index, 5);
   assert.equal(loaded.calls.presented.at(-1).focus, false);
 });
 

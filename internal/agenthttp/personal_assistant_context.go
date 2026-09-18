@@ -86,8 +86,9 @@ func personalAssistantSetupGuidance(c *PersonalAssistantWorkContext) PersonalAss
 			ActionType: HomeActionNavigate, Label: label, Href: "/?quest=build-hq",
 		}
 	}
-	// Hiring, resuming a hire, and repairing all happen in one place: Mission 01
-	// on the Agents page, which opens the right view for the state.
+	// Hiring, resuming a hire, and repairing all happen in one place: Mission
+	// 01, which walks the user to the Agents page and opens the right view for
+	// the state there.
 	label := "Meet your assistant"
 	if c != nil && (c.State == "hiring" || c.State == "repair_needed") {
 		label = "Resume personal assistant setup"

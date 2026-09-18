@@ -272,7 +272,7 @@
       const data = await response.json();
       const hire = window.OriAssistantHire;
       if (!hire || hire.presetView(data?.personal_assistant).mode !== 'form') return;
-      link.href = hire.MEET_ASSISTANT_QUEST_ROUTE;
+      link.href = hire.MEET_ASSISTANT_AGENTS_ROUTE;
       pointer.hidden = false;
     } catch (_) {
       // Leave the line hidden.

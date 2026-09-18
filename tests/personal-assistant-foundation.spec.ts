@@ -218,7 +218,7 @@ test.describe('Personal Assistant Foundation first value', () => {
           title: 'Meet your assistant',
           why: 'Your assistant is the one agent that owns your ongoing work. Make them yours.',
           status: hired() ? 'completed' : 'available',
-          action_url: '/agents?quest=meet-assistant',
+          action_url: '/?quest=meet-assistant',
           action_label: 'Start',
           optional: false
         },
@@ -445,20 +445,21 @@ test.describe('Personal Assistant Foundation first value', () => {
     await expect.poll(() => onboardingComplete).toBe(true);
     expect(hireCalls).toBe(0);
 
-    // Home before the hire: Ori points at the Agents page, and Take me there
-    // goes to Mission 01.
+    // Home before the hire: Mission 01's first step. Ori points at the Agents
+    // page; on a phone the navbar is collapsed, so Take me there is the way on.
     const reply = page.locator('#oriGuideReply');
+    const step = reply.locator('.ori-guide__quest-step');
     await expect(reply).toContainText('Your assistant works from the Agents page');
+    await expect(step).toHaveText('Step 1 of 6');
     await page.locator('[data-ori-quest-choice="go"]').click();
     await page.waitForURL(url => url.pathname === '/agents');
 
     // Mission 01 on a phone: the Inspector sheet covers Ori's panel, so the
     // form alone moves the walkthrough on, one step per signal.
-    const step = reply.locator('.ori-guide__quest-step');
-    await expect(step).toHaveText('Step 1 of 5');
+    await expect(step).toHaveText('Step 2 of 6');
     await expect(page.locator('#newAgentBtn')).toHaveClass(/is-ori-coachmark/);
     await page.locator('#newAgentBtn').click();
-    await expect(step).toHaveText('Step 2 of 5');
+    await expect(step).toHaveText('Step 3 of 6');
     await expect(page.locator('#cr-name')).toBeFocused();
     await expect(page.locator('#cr-name')).toHaveClass(/is-ori-coachmark/);
     for (const absent of ['#cr-role', '#cr-model', '#cr-description']) {
@@ -471,14 +472,14 @@ test.describe('Personal Assistant Foundation first value', () => {
     ).toBe(false);
     await page.locator('#cr-name').fill('Atlas');
     await page.locator('#cr-name').press('Tab');
-    await expect(step).toHaveText('Step 3 of 5');
+    await expect(step).toHaveText('Step 4 of 6');
     await expect(page.locator('#cr-appearance-host')).toHaveClass(/is-ori-coachmark/);
     await page.locator('#cr-focus-group input[value="prepare_for_meetings"]').check();
-    await expect(step).toHaveText('Step 4 of 5');
+    await expect(step).toHaveText('Step 5 of 6');
     await expect(page.locator('#cr-focus-group')).toHaveClass(/is-ori-coachmark/);
     await page.locator('#cr-mandate').fill('Keep the week realistic.');
     await page.locator('#cr-mandate').press('Tab');
-    await expect(step).toHaveText('Step 5 of 5');
+    await expect(step).toHaveText('Step 6 of 6');
     await expect(page.locator('#createSubmit')).toHaveClass(/is-ori-coachmark/);
     expect(hireCalls).toBe(0);
     await page.locator('#createSubmit').click();
@@ -501,6 +502,10 @@ test.describe('Personal Assistant Foundation first value', () => {
     await expect(reply).toContainText('Step 1 of 3');
     const hqSite = page.locator('[data-hq-site]');
     await expect(hqSite).toBeVisible();
+    // The Map re-mounts the site a few frames after Ori focuses it; focus must
+    // survive that, or a keyboard user is left on <body>.
+    await expect(hqSite).toBeFocused();
+    await page.waitForTimeout(500);
     await expect(hqSite).toBeFocused();
     expect(relationshipState).toBe('needs_hq');
 

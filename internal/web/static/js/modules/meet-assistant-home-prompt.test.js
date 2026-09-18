@@ -1,9 +1,15 @@
-// Tests for meet-assistant-home-prompt.js — Ori's nudge on Home before the hire.
+// Tests for meet-assistant-home-prompt.js — Mission 01's first step, on Home.
 //   node --test internal/web/static/js/modules/meet-assistant-home-prompt.test.js
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CHOICE_GO, PROMPT_QUEST, shouldPrompt, start } from './meet-assistant-home-prompt.js';
+import {
+  CHOICE_GO,
+  PROMPT_QUEST,
+  TOTAL_STEPS,
+  decide,
+  start
+} from './meet-assistant-home-prompt.js';
 
 function server({
   needsOnboarding = false,
@@ -17,7 +23,7 @@ function server({
     '/api/personal-assistant': { personal_assistant: { state: relationship } },
     '/api/progression': {
       missions: [
-        { order: 1, status: missionStatus, action_url: '/agents?quest=meet-assistant' },
+        { order: 1, status: missionStatus, action_url: '/?quest=meet-assistant' },
         { order: 2, status: 'available', action_url: '/?quest=build-hq', locked: true }
       ]
     }
@@ -58,67 +64,94 @@ function fakeDocument() {
   };
 }
 
-test('Home before the hire prompts, from server state alone', async () => {
+test('Home before the hire shows the first step, from server state alone', async () => {
   for (const relationship of ['needs_hire', 'hiring']) {
     const { fetchImpl, requests } = server({ relationship });
-    assert.equal(await shouldPrompt({ fetchImpl, location: home() }), true, relationship);
+    const plain = await decide({ fetchImpl, location: home() });
+    assert.equal(plain.action, 'present', relationship);
+    assert.equal(plain.requested, false);
     assert.equal(
       requests.some(url => url.includes('/api/ori-guide')),
       false,
-      'the prompt asked the guide endpoint'
+      'the step asked the guide endpoint'
     );
   }
 });
 
-test('no prompt once the assistant is hired, or while it needs a repair', async () => {
-  for (const relationship of ['needs_hq', 'provisioning_hq', 'active', 'paused', 'repair_needed']) {
+// Mission 01's Start, Today's banner and Ask Ori all link here, so the user is
+// shown the first click instead of being moved past it.
+test('?quest=meet-assistant asks for the first step and is reported for tidying', async () => {
+  const { fetchImpl } = server();
+  assert.deepEqual(await decide({ fetchImpl, location: home('?quest=meet-assistant') }), {
+    action: 'present',
+    requested: true
+  });
+});
+
+test('no step once the assistant is hired', async () => {
+  for (const relationship of ['needs_hq', 'provisioning_hq', 'active', 'paused']) {
     const { fetchImpl } = server({ relationship });
-    assert.equal(await shouldPrompt({ fetchImpl, location: home() }), false, relationship);
+    const plain = await decide({ fetchImpl, location: home() });
+    const asked = await decide({ fetchImpl, location: home('?quest=meet-assistant') });
+    assert.equal(plain.action, 'none', relationship);
+    assert.deepEqual(asked, { action: 'none', requested: true }, relationship);
   }
 });
 
-test('no prompt when Mission 01 is already complete', async () => {
-  const { fetchImpl } = server({ missionStatus: 'completed' });
-  assert.equal(await shouldPrompt({ fetchImpl, location: home() }), false);
-});
-
-test('an unreadable mission board still prompts on an unhired relationship', async () => {
-  const { fetchImpl } = server({ progressionFails: true });
-  assert.equal(await shouldPrompt({ fetchImpl, location: home() }), true);
-});
-
-test('no prompt while onboarding owns the screen, off Home, or under another walkthrough', async () => {
+// A repair has nothing to walk through: the Agents page opens its one-button
+// view on arrival. A plain visit stays quiet; Home's own banner offers it.
+test('a repair asked for from Home goes straight to the Agents page', async () => {
+  const { fetchImpl } = server({ relationship: 'repair_needed' });
   assert.equal(
-    await shouldPrompt({
-      fetchImpl: server({ needsOnboarding: true }).fetchImpl,
-      location: home()
-    }),
-    false
+    (await decide({ fetchImpl, location: home('?quest=meet-assistant') })).action,
+    'agents'
+  );
+  assert.equal((await decide({ fetchImpl, location: home() })).action, 'none');
+});
+
+test('no step when Mission 01 is already complete', async () => {
+  const { fetchImpl } = server({ missionStatus: 'completed' });
+  assert.equal((await decide({ fetchImpl, location: home() })).action, 'none');
+});
+
+test('an unreadable mission board still shows the step on an unhired relationship', async () => {
+  const { fetchImpl } = server({ progressionFails: true });
+  assert.equal((await decide({ fetchImpl, location: home() })).action, 'present');
+});
+
+test('no step while onboarding owns the screen, off Home, or under another intent', async () => {
+  assert.equal(
+    (
+      await decide({
+        fetchImpl: server({ needsOnboarding: true }).fetchImpl,
+        location: home()
+      })
+    ).action,
+    'none'
   );
   const quiet = server();
   assert.equal(
-    await shouldPrompt({
-      fetchImpl: quiet.fetchImpl,
-      location: { pathname: '/agents', search: '' }
-    }),
-    false
+    (
+      await decide({
+        fetchImpl: quiet.fetchImpl,
+        location: { pathname: '/agents', search: '' }
+      })
+    ).action,
+    'none'
   );
   for (const intent of ['?quest=build-hq', '?focus=personal-hq', '?create=1', '?setup=quest']) {
-    assert.equal(
-      await shouldPrompt({ fetchImpl: quiet.fetchImpl, location: home(intent) }),
-      false,
-      intent
-    );
+    const outcome = await decide({ fetchImpl: quiet.fetchImpl, location: home(intent) });
+    assert.deepEqual(outcome, { action: 'none', requested: false }, intent);
   }
   assert.deepEqual(quiet.requests, [], 'an ineligible page still made requests');
-  // A plain Home visit with harmless state in the URL still prompts.
+  // A plain Home visit with harmless state in the URL still gets the step.
   assert.equal(
-    await shouldPrompt({ fetchImpl: server().fetchImpl, location: home('?view=map') }),
-    true
+    (await decide({ fetchImpl: server().fetchImpl, location: home('?view=map') })).action,
+    'present'
   );
 });
 
-test('the prompt presents once, points at the Agents nav entry, and offers Take me there', () => {
+test('the first step points at the Agents nav entry for the user to click', () => {
   const { guide, calls } = fakeGuide();
   const doc = fakeDocument();
   assert.equal(start({ guide, doc, navigate: () => {} }), true);
@@ -126,18 +159,24 @@ test('the prompt presents once, points at the Agents nav entry, and offers Take 
   assert.equal(calls.presented.length, 1);
   const step = calls.presented[0];
   assert.equal(step.quest, PROMPT_QUEST);
-  assert.equal(step.answer, 'Your assistant works from the Agents page. Let’s go meet them.');
+  assert.equal(step.index, 1);
+  assert.equal(step.total, TOTAL_STEPS);
+  assert.equal(TOTAL_STEPS, 6);
+  assert.equal(
+    step.answer,
+    'Your assistant works from the Agents page. Click Agents to go meet them.'
+  );
   assert.equal(step.coachmark, 'nav_agents');
   assert.deepEqual(
     step.choices.map(choice => [choice.id, choice.label]),
     [[CHOICE_GO, 'Take me there']]
   );
-  // skipGreeting: the greeting would otherwise land later and replace the prompt.
+  // skipGreeting: the greeting would otherwise land later and replace the step.
   assert.equal(calls.opened.length, 1);
   assert.equal(calls.opened[0].skipGreeting, true);
 });
 
-test('Take me there navigates to Mission 01; other choices do nothing', () => {
+test('Take me there goes to the Agents page leg; other choices do nothing', () => {
   const { guide } = fakeGuide();
   const doc = fakeDocument();
   const visits = [];

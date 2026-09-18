@@ -181,10 +181,18 @@ never acts on one. The Daily Brief rhythm is **not** collected here: it has no
 canonical workspace to be written against until HQ exists, so it moves to the
 Map's HQ build form.
 
-Every entry to the hire resolves to `/agents?quest=meet-assistant`
+The walkthrough has six steps. Step 1 is on Home: Ori marks the Agents nav entry
+and the user clicks it (`meet-assistant-home-prompt.js`). Steps 2 to 6 are on
+the Agents page: New Agent, the name, the face, the focus, Hire. Every entry to
+Mission 01 starts at step 1, `/?quest=meet-assistant`
 (`MEET_ASSISTANT_QUEST_ROUTE`, `progression.MeetAssistantActionURL`): Home's
-mission card and prompt, Today's `needs_hire` banner, Ask Ori's hand-off, the
-repair banners, and the retired `/?hire=1`, which redirects there. A provable
+mission card, Today's `needs_hire` banner, Ask Ori's hand-off, and the retired
+`/?hire=1`, which redirects there. Entries that are already about the Agents page
+go straight to step 2, `/agents?quest=meet-assistant`
+(`MEET_ASSISTANT_AGENTS_ROUTE`): the prompt's Take me there, `/agents/create`'s
+pointer, and the repair banners. A plain `/agents` visit before the hire also
+continues at step 2. `/?quest=meet-assistant` on an install that needs a repair
+goes to the Agents page; on a hired install it does nothing. A provable
 orphan identity (`relationship_recovery`) opens the same panel's reconnect view
 with one Reconnect button; `relationship_recovery_blocked` shows the status and
 no button; a partial hire shows one Finish setup button that replays the same
@@ -371,7 +379,7 @@ Mission 04.
 
 | Order | ID | Card | Completes when |
 | --- | --- | --- | --- |
-| 01 | `pa-meet-assistant` | Meet your assistant, `/agents?quest=meet-assistant` | the request that makes a hire durable (`HireResult.NewlyHired`), or a repair that leaves the relationship hired; never a replay |
+| 01 | `pa-meet-assistant` | Meet your assistant, `/?quest=meet-assistant` | the request that makes a hire durable (`HireResult.NewlyHired`), or a repair that leaves the relationship hired; never a replay |
 | 02 | `t2-build-hq` | Build My HQ, `/?quest=build-hq` | a Personal HQ designation |
 | 03 | `pa-tidy-downloads` | Tidy your Downloads, `/?quest=tidy-downloads`, or "In progress · Finish setup" on an unfinished File Janitor workspace | a `file-janitor` (or retired `downloads-janitor`) workspace's setup wizard first reaches ready |
 | 04 | `pa-connect-source` | resolved from the hire's focus areas (below) | any branch's signal, not only the one offered |
@@ -387,9 +395,11 @@ evidence after the backfill (for example after a quest reset). The economy pays
 at most once per quest.
 
 Before the hire, Home is quiet: the card shows Mission 01, Today says only "Meet
-your assistant to start Today.", and on a plain Home visit Ori's panel opens once
-with "Your assistant works from the Agents page. Let's go meet them.", a mark on
-the Agents nav entry, and a Take me there choice (`meet-assistant-home-prompt.js`).
+your assistant to start Today.", and on a Home visit (or the card's Start) Ori's
+panel opens at "Step 1 of 6" with "Your assistant works from the Agents page.
+Click Agents to go meet them.", a mark on the Agents nav entry, and a Take me
+there choice for a navbar too narrow to show the entry
+(`meet-assistant-home-prompt.js`).
 
 Mission 04 branches, in priority order when several focus areas match:
 
