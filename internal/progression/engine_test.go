@@ -56,8 +56,9 @@ func TestPersonalAssistantQuests_PlanFirstDayIsABranchNotAQuest(t *testing.T) {
 	if connect == nil || connect.Tier != 1 || !connect.Optional || connect.ActionURL != PlanFirstDayActionURL {
 		t.Fatalf("unexpected Connect one source mission: %+v", connect)
 	}
-	// Four missions added, first day and create-workspace dropped.
-	if paf.Status().TotalCount != legacy.Status().TotalCount+2 {
+	// Four missions added (Meet your assistant and the three `pa-` starter
+	// missions), create-workspace dropped. First day was never built in.
+	if paf.Status().TotalCount != legacy.Status().TotalCount+3 {
 		t.Fatalf("PAF total = %d, legacy total = %d", paf.Status().TotalCount, legacy.Status().TotalCount)
 	}
 }

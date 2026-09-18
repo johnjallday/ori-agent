@@ -113,6 +113,38 @@ func TestRepairFailsClosedForMissingOrContradictoryEvidence(t *testing.T) {
 	}
 }
 
+// A repair that reconnects a hired assistant completes Meet your assistant the
+// same way a hire does. A failed repair, or one that leaves no hired
+// relationship, does not.
+func TestRepairOnHiredFiresOnlyWhenTheRelationshipIsHired(t *testing.T) {
+	cases := []struct {
+		name  string
+		state *personalassistant.State
+		err   error
+		fires int
+	}{
+		{"reconnected before HQ", &personalassistant.State{Status: personalassistant.StatusAwaitingHQ}, nil, 1},
+		{"reconnected with HQ", &personalassistant.State{Status: personalassistant.StatusPaused}, nil, 1},
+		{"still needs repair", &personalassistant.State{Status: personalassistant.StatusRepairNeeded}, nil, 0},
+		{"blocked", nil, personalassistant.ErrRepairNeeded, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fires := 0
+			handler := NewHandler(recoveryStateReaderStub{projection: &personalassistant.Projection{
+				State: personalassistant.APIStateNeedsHQ,
+			}}, fakeUserProvider{userID: "local"})
+			handler.SetRecoveryService(&recoveryServiceStub{state: tc.state, err: tc.err})
+			handler.SetOnHired(func() { fires++ })
+			req := httptest.NewRequest(http.MethodPost, "/api/personal-assistant/repair", strings.NewReader(`{"if_version":0}`))
+			handler.Repair(httptest.NewRecorder(), req)
+			if fires != tc.fires {
+				t.Fatalf("onHired fired %d times, want %d", fires, tc.fires)
+			}
+		})
+	}
+}
+
 func TestRepairReportsPostWriteProjectionFailureWithoutSecondMutation(t *testing.T) {
 	recovery := &recoveryServiceStub{state: &personalassistant.State{AssistantID: "assistant-a"}}
 	handler := NewHandler(recoveryStateReaderStub{err: errors.New("read failed")}, fakeUserProvider{userID: "local"})

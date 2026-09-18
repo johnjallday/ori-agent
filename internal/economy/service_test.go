@@ -613,8 +613,12 @@ func TestStarterQuestsCoverAFirstFarm(t *testing.T) {
 // were added (Tidy your Downloads, Connect one source, Read your first Daily
 // Brief) and "Create your first workspace" was retired, eight quests at 5 Craft.
 // A first Farm still costs 25, so a new user reaches it a little earlier.
+//
+// tasks/prd-meet-your-assistant-mission.md moved it to 45: hiring the assistant
+// became Mission 01 and pays like every other starter mission (PRD §9.3), so
+// the first reward a new user sees teaches where Craft comes from.
 func TestStarterQuestTotalIsPinned(t *testing.T) {
-	const want int64 = 40
+	const want int64 = 45
 	if got := StarterQuestTotal(); got != want {
 		t.Fatalf("starter quests pay %d in total, pinned at %d; if this change is "+
 			"deliberate, update the pin and say why here", got, want)

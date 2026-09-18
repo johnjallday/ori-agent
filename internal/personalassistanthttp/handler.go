@@ -90,6 +90,7 @@ type Handler struct {
 	specialistOffers           SpecialistOfferService
 	provider                   userprofile.UserProvider
 	onFirstAssignmentCompleted func()
+	onHired                    func()
 }
 
 // NewHandler constructs a personal-assistant HTTP handler.
@@ -134,6 +135,17 @@ func (h *Handler) SetAssignmentService(assignments AssignmentPreviewService) {
 func (h *Handler) SetOnFirstAssignmentCompleted(fn func()) {
 	if h != nil {
 		h.onFirstAssignmentCompleted = fn
+	}
+}
+
+// SetOnHired connects a durable hire to the progression presentation (Meet
+// your assistant) without making progression part of the hire transaction. It
+// is called once for the request that made the hire durable, never for a
+// replay of a hire that already was, and once for a repair that leaves the
+// relationship hired.
+func (h *Handler) SetOnHired(fn func()) {
+	if h != nil {
+		h.onHired = fn
 	}
 }
 
@@ -299,6 +311,9 @@ func (h *Handler) Hire(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if result.NewlyHired && h.onHired != nil {
+		h.onHired()
+	}
 	response := responseFromResult(result)
 	if result.Resumed {
 		orihttp.Success(w, map[string]any{"personal_assistant": response})
@@ -337,7 +352,8 @@ func (h *Handler) Repair(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, err := h.recovery.Repair(r.Context(), userID, *body.IfVersion); err != nil {
+	repaired, err := h.recovery.Repair(r.Context(), userID, *body.IfVersion)
+	if err != nil {
 		switch {
 		case errors.Is(err, personalassistant.ErrValidation):
 			writeRecoveryError(w, http.StatusBadRequest, "invalid_recovery_request",
@@ -355,6 +371,9 @@ func (h *Handler) Repair(w http.ResponseWriter, r *http.Request) {
 			orihttp.ServiceUnavailable(w, "personal assistant recovery is temporarily unavailable")
 		}
 		return
+	}
+	if repaired != nil && repaired.Status.HasOwnedProfile() && h.onHired != nil {
+		h.onHired()
 	}
 	projection, err := h.service.Get(r.Context(), userID)
 	if err != nil {

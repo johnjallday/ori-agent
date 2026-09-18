@@ -1,6 +1,7 @@
 package progression
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -59,7 +60,8 @@ func TestPersonalAssistantGraph_Shape(t *testing.T) {
 	graph := PersonalAssistantGraph()
 
 	wantTiers := map[string]int{
-		BuildHQQuestID: 1, TidyDownloadsQuestID: 1, ConnectSourceQuestID: 1, FirstBriefQuestID: 1,
+		MeetAssistantQuestID: 1,
+		BuildHQQuestID:       1, TidyDownloadsQuestID: 1, ConnectSourceQuestID: 1, FirstBriefQuestID: 1,
 		"t1-first-message": 2, "t1-personalize": 2, "t2-create-note": 2, "t2-run-task": 2,
 		"t3-second-agent": 3, "t3-delegate": 3, "t3-agent-task-done": 3,
 		"t4-enable-skill": 4, "t4-connect-mcp": 4, "t4-tool-task": 4,
@@ -89,31 +91,41 @@ func TestPersonalAssistantGraph_Shape(t *testing.T) {
 		}
 	}
 
-	// The four starter missions, in order, all featured and all optional so no
-	// mission ever locks the Daily loop tier.
+	// The five starter missions, in order, all featured. Meet your assistant is
+	// the one required mission and gates the other four; those stay optional so
+	// no mission after the hire ever locks the Daily loop tier.
 	wantMissions := []struct {
 		id, title, url, label string
+		optional              bool
+		lockedUntil           string
 	}{
-		{BuildHQQuestID, "Build My HQ", GuidedBuildHQActionURL, "Build My HQ"},
-		{TidyDownloadsQuestID, "Tidy your Downloads", TidyDownloadsActionURL, "Start"},
-		{ConnectSourceQuestID, "Plan my first day", PlanFirstDayActionURL, "Start"},
-		{FirstBriefQuestID, "Read your first Daily Brief", "/", "Open Today"},
+		{MeetAssistantQuestID, "Meet your assistant", MeetAssistantActionURL, "Start", false, ""},
+		{BuildHQQuestID, "Build My HQ", GuidedBuildHQActionURL, "Build My HQ", true, MeetAssistantQuestID},
+		{TidyDownloadsQuestID, "Tidy your Downloads", TidyDownloadsActionURL, "Start", true, MeetAssistantQuestID},
+		{ConnectSourceQuestID, "Plan my first day", PlanFirstDayActionURL, "Start", true, MeetAssistantQuestID},
+		{FirstBriefQuestID, "Read your first Daily Brief", "/", "Open Today", true, MeetAssistantQuestID},
 	}
 	for i, want := range wantMissions {
 		q := graph.Quests[i]
-		if q.ID != want.id || q.Order != i+1 || !q.Featured || !q.Optional {
+		if q.ID != want.id || q.Order != i+1 || !q.Featured || q.Optional != want.optional {
 			t.Fatalf("mission %d = %s order %d featured %t optional %t", i+1, q.ID, q.Order, q.Featured, q.Optional)
 		}
 		if q.Title != want.title || q.ActionURL != want.url || q.ActionLabel != want.label {
 			t.Fatalf("mission %s copy = %q %q %q", q.ID, q.Title, q.ActionURL, q.ActionLabel)
 		}
+		if q.LockedUntil != want.lockedUntil {
+			t.Fatalf("mission %s locked until %q, want %q", q.ID, q.LockedUntil, want.lockedUntil)
+		}
 		if strings.TrimSpace(q.Why) == "" {
 			t.Fatalf("mission %s has no why line", q.ID)
 		}
 	}
+	if why := graph.Quests[0].Why; why != "Your assistant is the one agent that owns your ongoing work. Make them yours." {
+		t.Fatalf("Meet your assistant why = %q", why)
+	}
 	for _, q := range graph.Quests[len(wantMissions):] {
-		if q.Featured || q.Order != 0 {
-			t.Fatalf("non-mission quest %s is featured (order %d)", q.ID, q.Order)
+		if q.Featured || q.Order != 0 || q.LockedUntil != "" {
+			t.Fatalf("non-mission quest %s is featured (order %d) or locked (%q)", q.ID, q.Order, q.LockedUntil)
 		}
 	}
 
@@ -144,7 +156,7 @@ func TestStatus_UsesTheGraphsTierNames(t *testing.T) {
 
 	// A hired user who built HQ and resolved every mission sits in Daily loop,
 	// never back in a first-contact tier.
-	for _, id := range []string{BuildHQQuestID, TidyDownloadsQuestID, ConnectSourceQuestID} {
+	for _, id := range []string{MeetAssistantQuestID, BuildHQQuestID, TidyDownloadsQuestID, ConnectSourceQuestID} {
 		e.Complete(id)
 	}
 	if err := e.Skip(FirstBriefQuestID); err != nil {
@@ -356,7 +368,7 @@ func TestReconcileOnce_GrandfathersNewQuestsSilentlyOnce(t *testing.T) {
 		t.Fatalf("second pass marked %d err=%v", marked, err)
 	}
 	if scans != 1 || completed(e, ConnectSourceQuestID) {
-		t.Fatalf("second pass scanned (%d scans) or completed Mission 03", scans)
+		t.Fatalf("second pass scanned (%d scans) or completed Mission 04", scans)
 	}
 
 	// It survives a restart and a reset.
@@ -388,7 +400,7 @@ func TestReconcileOnce_FreshInstallDefersToBackfill(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !completed(e, TidyDownloadsQuestID) || scans != 1 {
-		t.Fatalf("Backfill did not grandfather Mission 02 (scans=%d)", scans)
+		t.Fatalf("Backfill did not grandfather Mission 03 (scans=%d)", scans)
 	}
 }
 
@@ -401,7 +413,7 @@ func TestResolveFirstBrief_AsksForAModelOnlyWhenNoneIsConfigured(t *testing.T) {
 		t.Fatalf("without a model = %+v", got)
 	}
 
-	// Through the engine: the hint follows the why line while Mission 04 is
+	// Through the engine: the hint follows the why line while Mission 05 is
 	// open, and disappears once it is done, where the advice no longer applies.
 	e := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()),
 		WithMissionContext(func() MissionContext { return MissionContext{} }))
@@ -411,15 +423,15 @@ func TestResolveFirstBrief_AsksForAModelOnlyWhenNoneIsConfigured(t *testing.T) {
 				return m
 			}
 		}
-		t.Fatal("Mission 04 missing")
+		t.Fatal("Mission 05 missing")
 		return QuestView{}
 	}
 	if why := brief().Why; why != firstBriefWhy+" Add a model in Settings to generate one." {
-		t.Fatalf("open Mission 04 why = %q", why)
+		t.Fatalf("open Mission 05 why = %q", why)
 	}
 	e.Complete(FirstBriefQuestID)
 	if why := brief().Why; why != firstBriefWhy {
-		t.Fatalf("completed Mission 04 still advises: %q", why)
+		t.Fatalf("completed Mission 05 still advises: %q", why)
 	}
 }
 
@@ -592,12 +604,13 @@ func TestPersonalAssistantGraph_BackfillEvidence(t *testing.T) {
 		want []string
 	}{
 		{"fresh", Snapshot{}, nil},
+		{"assistant hired", Snapshot{AssistantHired: true}, []string{MeetAssistantQuestID}},
 		{"janitor ready", Snapshot{FileJanitorReady: true}, []string{TidyDownloadsQuestID}},
 		{"first assignment", Snapshot{FirstAssignmentCompleted: true}, []string{ConnectSourceQuestID}},
 		{"legacy first day", Snapshot{LegacyFirstDayCompleted: true}, []string{ConnectSourceQuestID}},
 		{"brief revision", Snapshot{HasBriefRevision: true}, []string{FirstBriefQuestID}},
 	}
-	missions := []string{TidyDownloadsQuestID, ConnectSourceQuestID, FirstBriefQuestID}
+	missions := []string{MeetAssistantQuestID, TidyDownloadsQuestID, ConnectSourceQuestID, FirstBriefQuestID}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			e := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()))
@@ -614,5 +627,130 @@ func TestPersonalAssistantGraph_BackfillEvidence(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// missionLocks renders each featured mission as "id:locked:reason" in Order.
+func missionLocks(e *Engine) []string {
+	var got []string
+	for _, m := range e.Status().Missions {
+		got = append(got, fmt.Sprintf("%s:%t:%s", m.ID, m.Locked, m.LockedReason))
+	}
+	return got
+}
+
+func TestPersonalAssistantGraph_LaterMissionsLockUntilTheHire(t *testing.T) {
+	e := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()))
+
+	st := e.Status()
+	if len(st.Missions) != 5 || st.Missions[0].ID != MeetAssistantQuestID {
+		t.Fatalf("missions = %v, want five with Meet your assistant first", missionLocks(e))
+	}
+	wantLocked := []string{
+		MeetAssistantQuestID + ":false:",
+		BuildHQQuestID + ":true:Meet your assistant first",
+		TidyDownloadsQuestID + ":true:Meet your assistant first",
+		ConnectSourceQuestID + ":true:Meet your assistant first",
+		FirstBriefQuestID + ":true:Meet your assistant first",
+	}
+	if got := missionLocks(e); strings.Join(got, " ") != strings.Join(wantLocked, " ") {
+		t.Fatalf("before the hire = %v, want %v", got, wantLocked)
+	}
+	// The tier list carries the same lock the card reads.
+	if view := questView(e, TidyDownloadsQuestID); view == nil || !view.Locked {
+		t.Fatalf("tier view not locked: %+v", view)
+	}
+	// The next quest is the one the user can act on, never a locked one.
+	if st.NextQuest == nil || st.NextQuest.ID != MeetAssistantQuestID || st.NextQuest.Locked {
+		t.Fatalf("next quest = %+v, want Meet your assistant", st.NextQuest)
+	}
+
+	if !e.Complete(MeetAssistantQuestID) {
+		t.Fatal("Complete(Meet your assistant) was not newly recorded")
+	}
+	for _, m := range e.Status().Missions {
+		if m.Locked || m.LockedReason != "" {
+			t.Fatalf("mission %s still locked after the hire: %+v", m.ID, m)
+		}
+	}
+	if next := e.Status().NextQuest; next == nil || next.ID != BuildHQQuestID {
+		t.Fatalf("next quest after the hire = %+v, want Build My HQ", next)
+	}
+}
+
+// Locking is presentation only (FR31): work done early still counts, and a
+// resolved mission is never shown as locked.
+func TestPersonalAssistantGraph_LockedMissionsStillComplete(t *testing.T) {
+	fires := []string{}
+	e := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()),
+		WithOnComplete(func(q Quest) { fires = append(fires, q.ID) }))
+
+	if !e.Complete(BuildHQQuestID) {
+		t.Fatal("a locked quest refused a direct Complete")
+	}
+	e.HandleEvent(ws.Event{Type: ws.EventWorkspaceCreated, Data: map[string]any{"template_id": "", "kind": "workspace"}})
+	if !completed(e, BuildHQQuestID) || !completed(e, ConnectSourceQuestID) {
+		t.Fatalf("locked quests did not record completion: %v", missionLocks(e))
+	}
+	if strings.Join(fires, ",") != BuildHQQuestID+","+ConnectSourceQuestID {
+		t.Fatalf("live completions fired %v", fires)
+	}
+	if err := e.Skip(FirstBriefQuestID); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range e.Status().Missions {
+		resolved := m.Status == StatusCompleted || m.Status == StatusSkipped
+		if resolved && m.Locked {
+			t.Fatalf("resolved mission %s is shown locked", m.ID)
+		}
+	}
+	if view := questView(e, TidyDownloadsQuestID); view == nil || !view.Locked {
+		t.Fatalf("the still-open mission lost its lock: %+v", view)
+	}
+
+	// Backfill runs for locked quests too.
+	b := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()))
+	if err := b.Backfill(ScannerFunc(func() Snapshot { return Snapshot{FileJanitorReady: true} })); err != nil {
+		t.Fatal(err)
+	}
+	if !completed(b, TidyDownloadsQuestID) {
+		t.Fatal("backfill skipped a locked quest")
+	}
+}
+
+// The one required mission keeps the Starter tier current even when every
+// optional mission is resolved, and it cannot be skipped around.
+func TestMeetAssistant_IsRequiredAndHoldsTheStarterTier(t *testing.T) {
+	e := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()))
+	if err := e.Skip(MeetAssistantQuestID); !errors.Is(err, ErrQuestNotOptional) {
+		t.Fatalf("Skip(Meet your assistant) = %v, want ErrQuestNotOptional", err)
+	}
+	for _, id := range []string{BuildHQQuestID, TidyDownloadsQuestID, ConnectSourceQuestID, FirstBriefQuestID} {
+		if err := e.Skip(id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := e.Status().CurrentTier; got != 1 {
+		t.Fatalf("current tier = %d, want 1 until the assistant is hired", got)
+	}
+	e.Complete(MeetAssistantQuestID)
+	if got := e.Status().CurrentTier; got != 2 {
+		t.Fatalf("current tier after the hire = %d, want 2", got)
+	}
+}
+
+func TestLockedUntil_UnknownGateNeverLocks(t *testing.T) {
+	graph := Graph{
+		Quests: []Quest{
+			{ID: "a", Tier: 1, Title: "A", Featured: true, Order: 1},
+			{ID: "b", Tier: 1, Title: "B", Featured: true, Order: 2, LockedUntil: "missing"},
+			{ID: "c", Tier: 1, Title: "C", Featured: true, Order: 3, LockedUntil: "a"},
+		},
+		TierNames: map[int]string{1: "One"}, TotalTiers: 1,
+	}
+	e := New(&fakeStore{}, WithGraph(graph))
+	want := "a:false: b:false: c:true:A first"
+	if got := strings.Join(missionLocks(e), " "); got != want {
+		t.Fatalf("locks = %s, want %s", got, want)
 	}
 }

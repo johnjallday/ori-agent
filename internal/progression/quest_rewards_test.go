@@ -110,8 +110,10 @@ func TestRewardedQuestsCanCompleteLive(t *testing.T) {
 func completedByDirectCall(questID string) bool {
 	switch questID {
 	case "t1-personalize", "t2-build-hq",
-		// Starter missions complete from server hooks: the File Janitor wizard
-		// reaching ready, a source connecting, and Today serving a brief.
+		// Starter missions complete from server hooks: the hire (or its
+		// repair), the File Janitor wizard reaching ready, a source connecting,
+		// and Today serving a brief.
+		progression.MeetAssistantQuestID,
 		progression.TidyDownloadsQuestID, progression.ConnectSourceQuestID,
 		progression.FirstBriefQuestID:
 		return true
@@ -127,6 +129,7 @@ func rewardedQuestIDs() []string {
 	candidates := []string{
 		"t1-first-message", "t1-personalize",
 		"t2-create-workspace", "t2-create-note", "t2-run-task", "t2-build-hq",
+		progression.MeetAssistantQuestID,
 		progression.TidyDownloadsQuestID, progression.ConnectSourceQuestID,
 		progression.FirstBriefQuestID,
 		"t3-second-agent", "t3-delegate", "t4-enable-skill",

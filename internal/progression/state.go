@@ -42,6 +42,11 @@ type Snapshot struct {
 
 	// The starter missions' grandfathering evidence.
 
+	// AssistantHired is true when the personal-assistant relationship owns a
+	// hired profile (Meet your assistant): relationship status awaiting_hq
+	// (projected to clients as needs_hq), provisioning_hq, active, or paused.
+	// not_hired, hiring, and repair_needed never count.
+	AssistantHired bool
 	// FileJanitorReady is true when a File Janitor workspace's setup wizard has
 	// reached ready (Tidy your Downloads).
 	FileJanitorReady bool
@@ -117,6 +122,11 @@ type QuestView struct {
 	// InProgress is true when an unresolved mission has been started but not
 	// finished, so the card can say "In progress" instead of "Ready".
 	InProgress bool `json:"in_progress,omitempty"`
+	// Locked is true when an unresolved quest waits on its LockedUntil quest.
+	// The widget renders it with LockedReason and no action; it never decides
+	// locking itself. Unrelated to StatusLocked, which is about tiers.
+	Locked       bool   `json:"locked,omitempty"`
+	LockedReason string `json:"locked_reason,omitempty"`
 }
 
 // TierView groups a tier's quests for the API.

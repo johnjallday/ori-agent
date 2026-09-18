@@ -1386,6 +1386,39 @@ smoke_starter() {
   node "$root/scripts/demo-starter-missions.mjs" "$BASE_URL" "$out" "$stage" "${@:4}"
 }
 
+# smoke_meet_assistant drives Mission 01 ("Meet your assistant") through the API.
+#   onboard  close onboarding without a hire (what the modal's Model step does)
+#   status   print the relationship state and the five missions with their locks
+#   hire     hire the assistant, model-free, exactly as the Agents page preset does
+smoke_meet_assistant() {
+  local stage="${3:-status}"
+  case "$stage" in
+  onboard)
+    curl -s -o /dev/null -w "%{http_code} onboarding complete\n" \
+      -X POST "$BASE_URL/api/onboarding/complete" -H 'Content-Type: application/json' -d '{}'
+    ;;
+  status)
+    printf 'personal_assistant.state = %s\n' \
+      "$(curl -s "$BASE_URL/api/personal-assistant" | json_field 'personal_assistant.state')"
+    curl -s "$BASE_URL/api/progression" | python3 -c 'import json, sys
+status = json.load(sys.stdin)
+print(json.dumps([{key: mission.get(key) for key in
+    ("order", "id", "status", "locked", "locked_reason", "action_url", "reward_craft")}
+    for mission in status.get("missions", [])], indent=2))'
+    ;;
+  hire)
+    local name="${4:-Atlas}" body
+    body=$(python3 -c 'import json, sys, uuid
+print(json.dumps({"request_id": "smoke-" + uuid.uuid4().hex, "if_version": 0,
+    "display_name": sys.argv[1], "appearance": {"mode": "generated", "generated": {}},
+    "mandate": "", "focus_areas": ["plan_my_day", "keep_projects_moving"]}))' "$name")
+    curl -s -w "\n%{http_code} hire\n" -X POST "$BASE_URL/api/personal-assistant/hire" \
+      -H 'Content-Type: application/json' -d "$body"
+    ;;
+  *) fail "usage: $0 meetassistant <base-url> <onboard|status|hire [name]>" ;;
+  esac
+}
+
 # smoke_specialist checks the server side of the detected-app offer. The
 # browser paths are covered by tests/domain-specialist-onboarding.spec.ts.
 smoke_specialist() {
@@ -2422,6 +2455,7 @@ pick-folder) smoke_pick_folder "$@" ;;
 import-folder) smoke_import_folder "$@" ;;
 blueprint-details) smoke_blueprint_details "$@" ;;
 starter) smoke_starter "$@" ;;
+meetassistant) smoke_meet_assistant "$@" ;;
 agent-type-api) smoke_agent_type_api ;;
 agent-type-strip) smoke_agent_type_strip "$@" ;;
 economyseed) smoke_economy_seed ;;
@@ -2458,6 +2492,7 @@ janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
   echo "  $0 showdrop <base-url> <folder> <name>... # task-run show: move settled files in (scan runs ~5 min later)" >&2
   echo "  $0 integration <base-url> [source]       # reviewed integration floor: install a source, print the install step and updates" >&2
   echo "  $0 starter <base-url> <stage> [flags]    # starter missions: wait for the server, run a demo stage" >&2
+  echo "  $0 meetassistant <base-url> <stage>      # Mission 01: onboard | status | hire [name]" >&2
   echo "  $0 reaper-blueprint <base-url>           # onboard + install/enable the reviewed REAPER blueprint" >&2
   echo "  $0 blueprint-details <base-url> <ws-id>  # parent, description, workspace_bootstrap of a workspace" >&2
   echo "  $0 agent-type-api <base-url>             # retired agent type: API accepts and never echoes it" >&2

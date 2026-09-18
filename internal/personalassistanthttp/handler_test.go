@@ -309,6 +309,52 @@ func TestHandlerHire_FreshHireReturnsNeedsHQWithoutHQOrBriefClaims(t *testing.T)
 	}
 }
 
+// Meet your assistant completes from the server's own hire result (PRD FR32):
+// once for the request that made the hire durable, never for a replay.
+func TestHandlerHire_OnHiredFiresOnlyForTheRequestThatHired(t *testing.T) {
+	hiredState := func() *personalassistant.State {
+		return &personalassistant.State{
+			Status: personalassistant.StatusAwaitingHQ, AssistantID: "assistant-1",
+			DisplayName: "Atlas", GlobalAgentProfileName: "Atlas", StateVersion: 2,
+		}
+	}
+	cases := []struct {
+		name   string
+		result *personalassistant.HireResult
+		err    error
+		fires  int
+	}{
+		{"first hire", &personalassistant.HireResult{State: hiredState(), NewlyHired: true}, nil, 1},
+		{"retry that finished a partial hire", &personalassistant.HireResult{State: hiredState(), Resumed: true, NewlyHired: true}, nil, 1},
+		{"replay of a durable hire", &personalassistant.HireResult{State: hiredState(), Resumed: true}, nil, 0},
+		{"failed hire", nil, personalassistant.ErrConflict, 0},
+		{"partial hire", nil, &personalassistant.PartialHireError{Step: personalassistant.RepairProfileCreation, State: hiredState(), Err: errors.New("boom")}, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fires := 0
+			handler := NewHandler(&fakeStateReader{}, fakeUserProvider{userID: "user-a"})
+			handler.SetHireService(&fakeHireService{result: tc.result, err: tc.err})
+			handler.SetOnHired(func() { fires++ })
+			body := `{"request_id":"request-1","if_version":0,"display_name":"Atlas"}`
+			handler.Hire(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/personal-assistant/hire", strings.NewReader(body)))
+			if fires != tc.fires {
+				t.Fatalf("onHired fired %d times, want %d", fires, tc.fires)
+			}
+		})
+	}
+
+	// Unset, a hire still succeeds.
+	handler := NewHandler(&fakeStateReader{}, fakeUserProvider{userID: "user-a"})
+	handler.SetHireService(&fakeHireService{result: &personalassistant.HireResult{State: hiredState(), NewlyHired: true}})
+	recorder := httptest.NewRecorder()
+	handler.Hire(recorder, httptest.NewRequest(http.MethodPost, "/api/personal-assistant/hire",
+		strings.NewReader(`{"request_id":"request-1","if_version":0,"display_name":"Atlas"}`)))
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("hire without a hook = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestHandlerHire_AcceptsButIgnoresStaleRhythmFields(t *testing.T) {
 	hirer := &fakeHireService{result: &personalassistant.HireResult{
 		State: &personalassistant.State{

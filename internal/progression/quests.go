@@ -25,21 +25,29 @@ const PersonalAssistantFirstDayQuestID = "t1-plan-first-day"
 
 // The starter missions' persisted IDs. Never change them once shipped.
 const (
-	// TidyDownloadsQuestID is Mission 02: a File Janitor workspace whose setup
+	// MeetAssistantQuestID is Mission 01: the personal assistant hired from the
+	// Agents page. It completes from the durable hire, never from a browser
+	// claim, and every later mission is locked until it does.
+	MeetAssistantQuestID = "pa-meet-assistant"
+	// TidyDownloadsQuestID is Mission 03: a File Janitor workspace whose setup
 	// wizard reached ready.
 	TidyDownloadsQuestID = "pa-tidy-downloads"
-	// ConnectSourceQuestID is Mission 03: one source connected, chosen from the
+	// ConnectSourceQuestID is Mission 04: one source connected, chosen from the
 	// hire's focus areas.
 	ConnectSourceQuestID = "pa-connect-source"
-	// FirstBriefQuestID is Mission 04: Today served with a Daily Brief.
+	// FirstBriefQuestID is Mission 05: Today served with a Daily Brief.
 	FirstBriefQuestID = "pa-first-brief"
 )
 
-// TidyDownloadsActionURL starts Ori's deterministic Mission 02 walkthrough.
+// MeetAssistantActionURL starts Ori's deterministic Mission 01 walkthrough on
+// the Agents page, where the New Agent panel opens in the assistant preset.
+const MeetAssistantActionURL = "/agents?quest=meet-assistant"
+
+// TidyDownloadsActionURL starts Ori's deterministic Mission 03 walkthrough.
 const TidyDownloadsActionURL = "/?quest=tidy-downloads"
 
 // PlanFirstDayActionURL opens the existing first-assignment flow, the plan
-// branch of Mission 03.
+// branch of Mission 04.
 const PlanFirstDayActionURL = "/?quest=plan-first-day"
 
 // MissionContext is the per-user state a featured mission resolves its card
@@ -129,6 +137,12 @@ type Quest struct {
 	// carry Order 0.
 	Featured bool
 	Order    int
+	// LockedUntil names the quest that must be completed before this one is
+	// offered. Until then the status view marks it Locked, with the reason
+	// "<that quest's title> first". Locking is presentation only: Match,
+	// Complete, and Backfill still run, so a user who somehow does the work
+	// early still gets credit.
+	LockedUntil string
 	// Resolve, when set, fills the card's title, why, and action from per-user
 	// state at status time. See MissionContext.
 	Resolve func(MissionContext) MissionPresentation
@@ -182,8 +196,8 @@ func onWorkspaceAction(action string) func(ws.Event) bool {
 }
 
 // BuildHQQuestID is the optional Personal HQ objective. In the personal-assistant
-// cohort it is the first featured mission: hiring creates the assistant but not
-// its home base, so building HQ is what the user does next.
+// cohort it is Mission 02: hiring creates the assistant but not its home base,
+// so building HQ is what the user does next.
 const BuildHQQuestID = "t2-build-hq"
 
 // GuidedBuildHQActionURL opens Ori's deterministic Personal HQ walkthrough.
@@ -199,15 +213,17 @@ func PersonalAssistantQuests() []Quest { return PersonalAssistantGraph().Quests 
 
 // PersonalAssistantGraph returns the personal-assistant cohort's graph.
 //
-// Tier 1, "Starter", is the four featured missions, each ending with Ori
-// visibly doing something: Build My HQ, Tidy your Downloads, Connect one
-// source, Read your first Daily Brief. Tier 2, "Daily loop", holds the ordinary
-// first-contact and base quests, so nothing a hired user already did reads as
-// still open. Tiers 3-6 are the built-in ones.
+// Tier 1, "Starter", is the five featured missions: Meet your assistant, then
+// four that each end with Ori visibly doing something: Build My HQ, Tidy your
+// Downloads, Connect one source, Read your first Daily Brief. Meet your
+// assistant is the only required one, and the other four stay locked until it
+// is done, because each of them works through the hired assistant. Tier 2,
+// "Daily loop", holds the ordinary first-contact and base quests, so nothing a
+// hired user already did reads as still open. Tiers 3-6 are the built-in ones.
 //
 // Two built-in quests are dropped from this graph only. Plan my first day is
 // now one branch of Connect one source, and Create your first workspace is
-// what Mission 02 does. Their persisted completions stay harmlessly in place.
+// what Mission 03 does. Their persisted completions stay harmlessly in place.
 // BuiltinGraph is unchanged for any non-cohort caller.
 func PersonalAssistantGraph() Graph {
 	builtin := map[string]Quest{}
@@ -225,12 +241,24 @@ func PersonalAssistantGraph() Graph {
 	buildHQ := retier(BuildHQQuestID, 1)
 	buildHQ.ActionURL = GuidedBuildHQActionURL
 	buildHQ.Why = "Give your assistant a home base — where it prepares your daily brief, tracks follow-ups, and helps you resume work."
-	buildHQ.Featured, buildHQ.Order = true, 1
+	buildHQ.Featured, buildHQ.Order = true, 2
+	buildHQ.LockedUntil = MeetAssistantQuestID
 
 	quests := []Quest{
+		{
+			ID: MeetAssistantQuestID, Tier: 1, Featured: true, Order: 1, Optional: false,
+			Title:       "Meet your assistant",
+			Why:         "Your assistant is the one agent that owns your ongoing work. Make them yours.",
+			ActionURL:   MeetAssistantActionURL,
+			ActionLabel: "Start",
+			// Live, the hire handler completes it once per durable hire or repair.
+			// Here, any relationship that owns a hired profile grandfathers it.
+			Satisfied: func(s Snapshot) bool { return s.AssistantHired },
+		},
 		buildHQ,
 		{
-			ID: TidyDownloadsQuestID, Tier: 1, Featured: true, Order: 2, Optional: true,
+			ID: TidyDownloadsQuestID, Tier: 1, Featured: true, Order: 3, Optional: true,
+			LockedUntil: MeetAssistantQuestID,
 			Title:       "Tidy your Downloads",
 			Why:         "Let Ori sort one folder for you. It proposes, you approve, every move is undoable, and nothing leaves your machine.",
 			ActionURL:   TidyDownloadsActionURL,
@@ -239,7 +267,8 @@ func PersonalAssistantGraph() Graph {
 			Resolve:     resolveTidyDownloads,
 		},
 		{
-			ID: ConnectSourceQuestID, Tier: 1, Featured: true, Order: 3, Optional: true,
+			ID: ConnectSourceQuestID, Tier: 1, Featured: true, Order: 4, Optional: true,
+			LockedUntil: MeetAssistantQuestID,
 			// The static copy is the plan branch, the fallback for every focus.
 			Title:       "Plan my first day",
 			Why:         "Give your assistant today's priorities and commitments so it can prepare a useful Daily Brief.",
@@ -256,7 +285,8 @@ func PersonalAssistantGraph() Graph {
 			Resolve: resolveConnectSource,
 		},
 		{
-			ID: FirstBriefQuestID, Tier: 1, Featured: true, Order: 4, Optional: true,
+			ID: FirstBriefQuestID, Tier: 1, Featured: true, Order: 5, Optional: true,
+			LockedUntil: MeetAssistantQuestID,
 			Title:       "Read your first Daily Brief",
 			Why:         firstBriefWhy,
 			ActionURL:   "/",
@@ -281,7 +311,7 @@ func PersonalAssistantGraph() Graph {
 	return Graph{Quests: quests, TierNames: names, TotalTiers: TotalTiers}
 }
 
-// resolveTidyDownloads points Mission 02 at the right place for where the user
+// resolveTidyDownloads points Mission 03 at the right place for where the user
 // is (PRD FR9). With no File Janitor workspace the card starts the guided
 // walkthrough. With one whose setup is unfinished it sends the user back to
 // that workspace, where the wizard reopens. Once the wizard is ready the quest
@@ -298,7 +328,7 @@ func resolveTidyDownloads(ctx MissionContext) MissionPresentation {
 	}
 }
 
-// firstBriefWhy is Mission 04's static why line.
+// firstBriefWhy is Mission 05's static why line.
 const firstBriefWhy = "Ori pulls your priorities, follow-ups, and anything you connected into one morning brief."
 
 // resolveFirstBrief tells a user with no model that one is needed before a
@@ -311,10 +341,10 @@ func resolveFirstBrief(ctx MissionContext) MissionPresentation {
 	return MissionPresentation{Hint: "Add a model in Settings to generate one."}
 }
 
-// ConnectSourceBranch is the destination Mission 03 offers a user.
+// ConnectSourceBranch is the destination Mission 04 offers a user.
 type ConnectSourceBranch string
 
-// The Mission 03 branches, in priority order.
+// The Mission 04 branches, in priority order.
 const (
 	BranchEmail    ConnectSourceBranch = "email"
 	BranchCalendar ConnectSourceBranch = "calendar"
@@ -328,7 +358,7 @@ const CalendarOpsCreateURL = "/?create=1&blueprint=calendar-ops"
 // ProjectWorkspaceCreateURL opens the unified creator on its blueprint step.
 const ProjectWorkspaceCreateURL = "/?create=1"
 
-// ChooseConnectSourceBranch picks Mission 03's destination from the focus
+// ChooseConnectSourceBranch picks Mission 04's destination from the focus
 // areas chosen at hire (PRD FR13). When several match, the source the user
 // asked for help with and that brings the most outside signal wins: email,
 // then calendar, then a project workspace. Everything else, including
@@ -353,7 +383,7 @@ func ChooseConnectSourceBranch(focus []string) ConnectSourceBranch {
 	}
 }
 
-// resolveConnectSource presents Mission 03 as the branch the hire's focus
+// resolveConnectSource presents Mission 04 as the branch the hire's focus
 // chose. The plan branch is the quest's static copy, so it changes nothing.
 func resolveConnectSource(ctx MissionContext) MissionPresentation {
 	switch ChooseConnectSourceBranch(ctx.FocusAreas) {
@@ -394,7 +424,7 @@ func resolveConnectSource(ctx MissionContext) MissionPresentation {
 }
 
 // starterTemplateIDs are the blueprints that are not a "project workspace" for
-// Mission 03: Personal HQ and the other starter destinations.
+// Mission 04: Personal HQ and the other starter destinations.
 var starterTemplateIDs = map[string]bool{
 	"personal-ops":      true,
 	"file-janitor":      true,
@@ -404,7 +434,7 @@ var starterTemplateIDs = map[string]bool{
 }
 
 // IsProjectWorkspaceCreated reports whether a workspace.created event is the
-// project branch of Mission 03: a workspace (not a group) from the unified
+// project branch of Mission 04: a workspace (not a group) from the unified
 // creator whose blueprint is blank or not a starter one. An event without a
 // template_id key came from another producer and never counts.
 func IsProjectWorkspaceCreated(ev ws.Event) bool {
@@ -476,7 +506,7 @@ func BuiltinQuests() []Quest {
 			Why:       "Give Ori a home base — a place to prepare your daily brief, track follow-ups, and help you resume work.",
 			Optional:  true,
 			Satisfied: func(s Snapshot) bool { return s.HasPersonalHQ },
-			// Mission 01 is featured from the Home progression panel even before
+			// Build My HQ is featured from the Home progression panel even before
 			// Tier 2 unlocks. Route to the Map's unbuilt HQ landmark so setup stays
 			// grounded in the user's actual workspace landscape.
 			ActionURL:   "/?focus=personal-hq",
