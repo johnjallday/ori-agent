@@ -232,14 +232,11 @@ func (m *Manager) DeleteSkill(agentName, skillName string) error {
 }
 
 func (m *Manager) agentSkillDir(agentName, skillName string) (string, error) {
-	if agentName == "" {
-		return "", fmt.Errorf("agent name is required")
-	}
-	agentsDir, err := resolveAgentsDir(m.agentStorePath)
+	dir, err := m.agentDir(agentName)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(agentsDir, agentName, "skills", skillName), nil
+	return filepath.Join(dir, "skills", skillName), nil
 }
 
 // AgentSkillDir returns the expected absolute directory for an agent-scoped skill.

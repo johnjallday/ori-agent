@@ -117,6 +117,10 @@ type AgentListItem struct {
 	// user's own agents, or a workspace's copy read in place. Kept apart from
 	// Source, which also seeds the generated appearance.
 	Origin *store.AgentOrigin `json:"origin,omitempty"`
+	// State is "unreadable" for an agent whose definition file is not valid
+	// JSON; File names that file so the user can fix it. Ori never touches it.
+	State string `json:"state,omitempty"`
+	File  string `json:"file,omitempty"`
 }
 
 // AgentDetailResponse represents detailed agent information
@@ -246,6 +250,23 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 		}
 
 		agents = append(agents, item)
+	}
+
+	// Agents whose definition file could not be read are listed too, so the
+	// page can say which file needs fixing instead of silently dropping them.
+	if lister, ok := h.State.(interface {
+		UnreadableAgents() []store.UnreadableAgent
+	}); ok && statusFilter == "" && !favoriteOnly && tagFilter == "" {
+		for _, broken := range lister.UnreadableAgents() {
+			agents = append(agents, AgentListItem{
+				Name:       broken.Name,
+				Source:     "user",
+				Status:     types.AgentStatusError,
+				Appearance: appearanceForAgent(nil),
+				State:      "unreadable",
+				File:       broken.File,
+			})
+		}
 	}
 
 	// Append auto-detected CLI agents

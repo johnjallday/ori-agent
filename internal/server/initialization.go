@@ -308,7 +308,7 @@ func createAgentStore(agentStorePath string, defaultConf types.Settings, configM
 		logRootMigration(report)
 	}
 
-	system, err := store.NewFileStore(agentStorePath, defaultConf)
+	system, err := store.NewSystemFileStore(agentStorePath, defaultConf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create file store: %w", err)
 	}

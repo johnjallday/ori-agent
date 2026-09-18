@@ -14,6 +14,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -114,6 +115,8 @@ type Handler struct {
 	// time. Nil is a safe no-op (no starter skills applied).
 	skillsManager *skills.Manager
 	support       personalAssistantSupportClassifier
+	// desktopOpener opens an agent's folder in Finder ("Show in Finder").
+	desktopOpener platform.DesktopOpener
 }
 
 func New(state store.Store) *Handler {
@@ -853,7 +856,7 @@ func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) {
 	// Deletion lifecycle (store delete, session purge, activity log) is shared
 	// with the bulk endpoint so the two paths cannot drift (PRD FR52).
 	if err := h.performAgentDeletion(r.Context(), name); err != nil {
-		if errors.Is(err, store.ErrWorkspaceOwnedAgent) || errors.Is(err, store.ErrAgentRootUnavailable) {
+		if errors.Is(err, store.ErrWorkspaceOwnedAgent) || errors.Is(err, store.ErrAgentRootUnavailable) || errors.Is(err, store.ErrAgentUnreadable) {
 			WriteAgentStoreError(w, "Failed to delete agent", err)
 			return
 		}

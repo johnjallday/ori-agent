@@ -887,6 +887,9 @@ function renderAgentOrigin() {
   }
   const addButton = document.getElementById('addToMyAgentsButton');
   if (addButton) addButton.hidden = !owned;
+  // One of the user's own agents has a folder in the Workspace Directory.
+  const finderButton = document.getElementById('showInFinderButton');
+  if (finderButton) finderButton.hidden = currentAgent?.origin?.source !== 'roster';
   WORKSPACE_EDIT_CONTROLS.forEach(id => {
     const control = document.getElementById(id);
     if (control) control.hidden = owned;
@@ -918,6 +921,22 @@ async function addToMyAgents() {
   }
 }
 
+async function showAgentInFinder() {
+  const name = currentAgent?.name || agentName;
+  try {
+    const response = await fetch(`/api/agents/${encodeURIComponent(name)}/reveal`, {
+      method: 'POST'
+    });
+    if (!response.ok) {
+      throw new Error(
+        await readResponseError(response, "This agent's folder could not be opened.")
+      );
+    }
+  } catch (error) {
+    showToast(error.message || "This agent's folder could not be opened.", 'error');
+  }
+}
+
 function getAvatarURL(filename) {
   return `/avatars/${encodeURIComponent(String(filename || ''))}`;
 }
@@ -932,6 +951,7 @@ function setupProfileEditor() {
   editButton?.addEventListener('click', openProfileEditor);
   saveButton?.addEventListener('click', saveProfileChanges);
   document.getElementById('addToMyAgentsButton')?.addEventListener('click', addToMyAgents);
+  document.getElementById('showInFinderButton')?.addEventListener('click', showAgentInFinder);
   tagsContainer?.addEventListener('click', () => tagsInput?.focus());
   tagsInput?.addEventListener('keydown', event => {
     const value = tagsInput.value.trim();

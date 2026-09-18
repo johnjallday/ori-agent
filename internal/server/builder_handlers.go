@@ -596,6 +596,11 @@ func (b *ServerBuilder) initializeHandlers() {
 	// Enforce stage-based active-skill slot caps (PRD section C). Reads the
 	// agent's stage + expert flag through the store on each check, no caching.
 	b.skillsManager.SetLoadoutResolver(newLoadoutResolverAdapter(b.st))
+	// Per-agent skill state lives in the agent's own folder, which for the
+	// user's agents is in the Workspace Directory, not beside agents.json.
+	if composite, ok := b.st.(*store.CompositeStore); ok {
+		b.skillsManager.SetAgentFolderResolver(composite.AgentFolder)
+	}
 	b.skillsHandler = skillshttp.New(b.skillsManager, b.st, b.llmFactory, b.configManager)
 	b.chatHandler.SetSkillsManager(b.skillsManager)
 
@@ -685,11 +690,22 @@ func (b *ServerBuilder) wireWorkspaceRootUpdater() {
 		return
 	}
 	sessionHandler := b.sessionHandler
+	// First confirmation only: what was created before a Workspace Directory
+	// was chosen moves from the staging folder into it, before the root is
+	// applied below.
+	b.settingsHandler.SetStagedContentMover(func(staging, root string) []string {
+		return sessionHandler.MoveStagedContent(context.Background(), staging, root)
+	})
 	b.settingsHandler.SetWorkspaceRootUpdater(func(root string) (settingshttp.WorkspaceRootRefresh, error) {
 		ctx := context.Background()
 		refresh, err := sessionHandler.ApplyWorkspaceRoot(ctx, root)
 		if err != nil {
 			return settingshttp.WorkspaceRootRefresh{}, err
+		}
+		// The roster follows the root in the same operation: the agents of
+		// the new root, the built-in assistant unchanged, nothing moved.
+		if composite, ok := b.st.(*store.CompositeStore); ok {
+			composite.SetRoot(root)
 		}
 		if err := b.reconcileWorkspaceDesignations(ctx); err != nil {
 			logger.Warn("Live workspace designation reconciliation failed", logger.Fields{"error": err.Error()})

@@ -1447,6 +1447,22 @@ body.agents-roster-page {
   white-space: nowrap;
 }
 
+/* An agent whose definition file could not be read: the file is named in the
+   origin line, in the error colour, and the card reads as unavailable. */
+.roster-card.is-unreadable {
+  border-style: dashed;
+}
+
+.roster-card.is-unreadable .agent-card__origin {
+  color: #b91c1c;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+[data-bs-theme="dark"] .roster-card.is-unreadable .agent-card__origin {
+  color: #fca5a5;
+}
+
 /* A workspace's own agent is not selectable here: its checkbox is hidden. */
 .roster-card__checkwrap[hidden] {
   display: none;

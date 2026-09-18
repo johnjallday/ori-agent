@@ -416,6 +416,28 @@ func (h *Handler) handleWorkspaceRescan(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// MoveStagedContent moves the agents and workspaces a new user created before
+// choosing a Workspace Directory out of the staging folder into root, then
+// rebases the moved workspaces' folder references in the session store, the
+// way a workspace move does. It runs on the first confirmation only, before
+// ApplyWorkspaceRoot, so the reconcile finds the workspaces at their new
+// paths. It returns what stayed behind, as warnings for the settings response.
+func (h *Handler) MoveStagedContent(ctx context.Context, staging, root string) []string {
+	result := agentworkspace.MoveStagedContent(staging, root)
+	if len(result.Moved) > 0 && h.store != nil {
+		// nil self: every moved workspace is loaded, rebased, and saved.
+		h.applyMoveReferenceUpdates(ctx, nil, result.Moved)
+	}
+	if result.AgentsMoved || len(result.Moved) > 0 {
+		logger.Info("Moved staged agents and workspaces into the confirmed Workspace Directory", logger.Fields{
+			"agents_moved": result.AgentsMoved,
+			"workspaces":   len(result.Moved),
+			"root":         root,
+		})
+	}
+	return result.Warnings
+}
+
 // refreshWorkspaceAgentsAfterRescan applies the startup rule to an explicit
 // rescan: every workspace physically in this data dir's Workspace Directory is
 // trusted, so its own agents show in the roster. The roster then re-reads the
@@ -424,7 +446,11 @@ func (h *Handler) refreshWorkspaceAgentsAfterRescan() {
 	if h.workspaceAllowlist != nil && h.workspaceStore != nil {
 		agentworkspace.BackfillLocalWorkspacesIntoAllowlist(h.workspaceStore, h.workspaceAllowlist)
 	}
-	if invalidator, ok := h.agentStore.(interface{ InvalidateWorkspaceAgents() }); ok {
+	// The user's own agents are re-read from <root>/Agents too, so an agent
+	// edited in a text editor shows its new definition.
+	if reloader, ok := h.agentStore.(interface{ ReloadRoot() }); ok {
+		reloader.ReloadRoot()
+	} else if invalidator, ok := h.agentStore.(interface{ InvalidateWorkspaceAgents() }); ok {
 		invalidator.InvalidateWorkspaceAgents()
 	}
 }

@@ -80,6 +80,32 @@ func NewCompositeStore(system Store, root, stateRoot string, defaults types.Sett
 	return c, nil
 }
 
+// SetRoot points the store at another Workspace Directory. The roster switches
+// to that root's agents at once, with no restart; nothing is moved or copied
+// between roots, and the built-in assistant stays. A startup migration's
+// outcome described the old root, so it no longer applies.
+func (c *CompositeStore) SetRoot(root string) {
+	c.mu.Lock()
+	c.rootPath = root
+	c.root = nil
+	c.legacyWrites = false
+	c.migration = nil
+	c.openRootLocked()
+	c.mu.Unlock()
+	c.InvalidateWorkspaceAgents()
+}
+
+// ReloadRoot re-reads the root's agents from disk, so an edit made outside Ori
+// (a text editor, a sync tool) shows without a restart. "Rescan from disk"
+// calls it; there is no file watcher.
+func (c *CompositeStore) ReloadRoot() {
+	c.mu.Lock()
+	c.root = nil
+	c.openRootLocked()
+	c.mu.Unlock()
+	c.InvalidateWorkspaceAgents()
+}
+
 // SetMigrationReport records the outcome of the startup migration. A migration
 // that could not move the agents keeps new agents in the legacy location for
 // this session.
@@ -208,6 +234,65 @@ func (c *CompositeStore) writeTarget(name string) (memberStore, error) {
 	return c.targetForNew(name)
 }
 
+// AgentFolder locates an agent's own folder, where its skill state and
+// per-agent skills live: the data dir for the built-in assistant (and agents
+// not yet migrated), <root>/Agents/<Name> for the user's agents. An agent only
+// a workspace holds has no folder of its own: ("", true). A name the store does
+// not hold at all reports handled=false.
+func (c *CompositeStore) AgentFolder(name string) (dir string, handled bool) {
+	if owner := c.owner(name); owner != nil {
+		if fs, ok := owner.(*fileStore); ok {
+			return filepath.Join(fs.agentsDir(), name), true
+		}
+		return "", false
+	}
+	if _, ok := c.workspaceOnly(name); ok {
+		return "", true
+	}
+	return "", false
+}
+
+// RootAgentFolder returns <root>/Agents/<Name> for one of the user's agents in
+// the Workspace Directory, and false for any other name (the built-in
+// assistant, an agent still in the data dir, a workspace's own agent).
+func (c *CompositeStore) RootAgentFolder(name string) (string, bool) {
+	c.mu.RLock()
+	root := c.root
+	c.mu.RUnlock()
+	if root == nil || c.owner(name) != memberStore(root) {
+		return "", false
+	}
+	return filepath.Join(root.agentsDir(), name), true
+}
+
+// UnreadableAgents lists agents in the data dir or the root whose definition
+// file could not be read. They are not in ListAgents: the Agents page shows
+// them as "could not be read", naming the file.
+func (c *CompositeStore) UnreadableAgents() []UnreadableAgent {
+	type unreadableLister interface{ UnreadableAgents() []UnreadableAgent }
+	var out []UnreadableAgent
+	if lister, ok := c.system.(unreadableLister); ok {
+		out = append(out, lister.UnreadableAgents()...)
+	}
+	c.mu.RLock()
+	root := c.root
+	c.mu.RUnlock()
+	if root != nil {
+		out = append(out, root.UnreadableAgents()...)
+	}
+	return out
+}
+
+// unreadableError refuses a write naming an unreadable agent, or nil.
+func (c *CompositeStore) unreadableError(name string) error {
+	for _, entry := range c.UnreadableAgents() {
+		if entry.Name == name {
+			return &UnreadableAgentError{UnreadableAgent: entry}
+		}
+	}
+	return nil
+}
+
 // ListAgents is the union of the system agents, the root agents, and the
 // agents only a trusted workspace holds, each name once. A workspace copy of a
 // system or root agent is that agent's customisation, not a second entry.
@@ -265,6 +350,9 @@ func (c *CompositeStore) CreateAgent(name string, cfg *CreateAgentConfig) error 
 
 func (c *CompositeStore) SetAgent(name string, ag *agent.Agent) error {
 	if c.owner(name) == nil {
+		if err := c.unreadableError(name); err != nil {
+			return err
+		}
 		if err := c.workspaceOwnedError(name); err != nil {
 			return err
 		}
@@ -279,6 +367,9 @@ func (c *CompositeStore) SetAgent(name string, ag *agent.Agent) error {
 func (c *CompositeStore) UpdateAgent(name string, updateFn func(*agent.Agent) error) error {
 	owner := c.owner(name)
 	if owner == nil {
+		if err := c.unreadableError(name); err != nil {
+			return err
+		}
 		if err := c.workspaceOwnedError(name); err != nil {
 			return err
 		}
@@ -303,6 +394,9 @@ func (c *CompositeStore) UpdateAgent(name string, updateFn func(*agent.Agent) er
 func (c *CompositeStore) DeleteAgent(name string) error {
 	owner := c.owner(name)
 	if owner == nil {
+		if err := c.unreadableError(name); err != nil {
+			return err
+		}
 		return c.workspaceOwnedError(name)
 	}
 	if owner != c.system {

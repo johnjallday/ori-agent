@@ -100,6 +100,40 @@ func TestBulkSkipsAWorkspaceOnlyAgentPerItem(t *testing.T) {
 	}
 }
 
+func TestAnUnreadableAgentIsListedWithItsFileAndCannotBeEdited(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Agents", "Broken")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	file := filepath.Join(dir, "agent_settings.json")
+	if err := os.WriteFile(file, []byte(`{"Settings":`), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	c := compositeForRoot(t, root)
+
+	rr := httptest.NewRecorder()
+	NewDashboardHandler(c).ListAgentsWithStats(rr, httptest.NewRequest(http.MethodGet, "/api/agents/dashboard/list", nil))
+	var body struct {
+		Agents []AgentListItem `json:"agents"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Agents) != 1 || body.Agents[0].State != "unreadable" || body.Agents[0].File != file {
+		t.Fatalf("list = %+v, want Broken as unreadable naming %s", body.Agents, file)
+	}
+
+	rr = httptest.NewRecorder()
+	New(c).ServeHTTP(rr, httptest.NewRequest(http.MethodDelete, "/api/agents?name=Broken", nil))
+	if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "could not be read") {
+		t.Fatalf("delete: %d %s, want 409 naming the file", rr.Code, rr.Body.String())
+	}
+	if _, err := os.Stat(file); err != nil {
+		t.Errorf("the unreadable file was removed: %v", err)
+	}
+}
+
 func TestCreatingAnAgentOnTheAgentsPageWritesARootAgent(t *testing.T) {
 	root := t.TempDir()
 	c := compositeForRoot(t, root)

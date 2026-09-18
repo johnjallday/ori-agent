@@ -10,6 +10,7 @@
 /api/agents/x
 /api/agents/x/appearance/upload
 /api/agents/x/avatar
+/api/agents/x/reveal
 /api/api-key
 /api/chat
 /api/chat/send

@@ -18,6 +18,7 @@ const (
 	agentRootUnavailableMessage = "Your Workspace Directory was not found, so your agents are unavailable."
 
 	workspaceOwnedAgentCode = "workspace_owned_agent"
+	agentUnreadableCode     = "agent_unreadable"
 )
 
 // agentOriginReader is the composite store's view of where an agent comes from.
@@ -64,6 +65,20 @@ func WriteAgentStoreError(w http.ResponseWriter, fallback string, err error) {
 			"message": agentChangedOnDiskMessage,
 		}); respErr != nil {
 			logger.Error("Failed to write agent conflict response", logger.Fields{"error": respErr})
+		}
+		return
+	}
+	var unreadable *store.UnreadableAgentError
+	if errors.As(err, &unreadable) {
+		message := fmt.Sprintf("This agent's file could not be read: %s. Fix it in a text editor, then rescan from disk.", unreadable.File)
+		if respErr := orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"success": false,
+			"code":    agentUnreadableCode,
+			"error":   message,
+			"message": message,
+			"file":    unreadable.File,
+		}); respErr != nil {
+			logger.Error("Failed to write unreadable agent response", logger.Fields{"error": respErr})
 		}
 		return
 	}

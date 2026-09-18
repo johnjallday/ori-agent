@@ -36,6 +36,11 @@ type fileStore struct {
 	// folders that are not agents, and Ori must not write definitions into them.
 	definitionRequired bool
 
+	// unreadable holds agents whose definition file is not valid JSON. They
+	// are kept out of agents entirely, so nothing can overwrite the file, and
+	// every write naming them is refused until the file is fixed.
+	unreadable map[string]UnreadableAgent
+
 	// definitionHashes holds, per agent, the SHA-256 of its definition file as
 	// this store last read or wrote it. A write first re-hashes the file on disk:
 	// a mismatch means something outside Ori (a text editor, a sync tool, git)
@@ -82,6 +87,21 @@ func NewFileStore(path string, defaultSettings types.Settings) (Store, error) {
 		path:            path,
 		agents:          make(map[string]*agent.Agent),
 		defaultSettings: defaultSettings,
+	}
+	fs.open()
+	return fs, nil
+}
+
+// NewSystemFileStore opens the data-dir store the composite store uses for the
+// built-in assistant. Unlike NewFileStore it ignores a folder that holds no
+// agent_settings.json: a stray skill-state folder must not become an empty
+// agent that shadows a real one elsewhere.
+func NewSystemFileStore(path string, defaultSettings types.Settings) (Store, error) {
+	fs := &fileStore{
+		path:               path,
+		agents:             make(map[string]*agent.Agent),
+		defaultSettings:    defaultSettings,
+		definitionRequired: true,
 	}
 	fs.open()
 	return fs, nil
@@ -159,6 +179,9 @@ func (s *fileStore) ListAgents() (names []string) {
 func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.unreadableErrorUnlocked(name); err != nil {
+		return err
+	}
 	if _, exists := s.agents[name]; !exists {
 		// A definition that appeared on disk since the store loaded is an
 		// existing agent, not a name free to be overwritten with defaults.
@@ -319,6 +342,11 @@ func (s *fileStore) initializeMissingAgentSkillsStateUnlocked() error {
 func (s *fileStore) DeleteAgent(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Never remove the folder of an agent whose file could not be read: the
+	// user fixes that file, Ori does not throw it away.
+	if err := s.unreadableErrorUnlocked(name); err != nil {
+		return err
+	}
 
 	// Remove agent from memory
 	delete(s.agents, name)
@@ -356,6 +384,11 @@ func (s *fileStore) RenameAgent(oldName, newName string) error {
 	newName = strings.TrimSpace(newName)
 	if oldName == "" || newName == "" {
 		return fmt.Errorf("both the current and new agent name are required")
+	}
+	for _, name := range []string{oldName, newName} {
+		if err := s.unreadableErrorUnlocked(name); err != nil {
+			return err
+		}
 	}
 
 	// The folder moves as it is on disk, so the record that follows it must be
@@ -472,6 +505,9 @@ func (s *fileStore) GetAgent(name string) (*agent.Agent, bool) {
 func (s *fileStore) SetAgent(name string, ag *agent.Agent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.unreadableErrorUnlocked(name); err != nil {
+		return err
+	}
 	changed, err := s.definitionChangedOnDiskUnlocked(name)
 	if err != nil {
 		return err
@@ -510,6 +546,9 @@ func (s *fileStore) SetAgent(name string, ag *agent.Agent) error {
 func (s *fileStore) UpdateAgent(name string, updateFn func(*agent.Agent) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.unreadableErrorUnlocked(name); err != nil {
+		return err
+	}
 
 	changed, err := s.definitionChangedOnDiskUnlocked(name)
 	if err != nil {
@@ -761,6 +800,40 @@ func (s *fileStore) writeIndexUnlocked() error {
 	return writeFileIfChanged(s.path, []byte("{}\n"))
 }
 
+// markUnreadableUnlocked sets an agent aside because its definition file could
+// not be decoded. Assumes the lock is held.
+func (s *fileStore) markUnreadableUnlocked(name, path string, err error) {
+	if s.unreadable == nil {
+		s.unreadable = make(map[string]UnreadableAgent)
+	}
+	s.unreadable[name] = UnreadableAgent{Name: name, File: path, Error: err.Error()}
+	logger.Warn("Agent definition could not be read; it is left untouched", logger.Fields{
+		"agent": name,
+		"file":  path,
+		"error": err.Error(),
+	})
+}
+
+// unreadableErrorUnlocked refuses a write naming an unreadable agent, or nil.
+func (s *fileStore) unreadableErrorUnlocked(name string) error {
+	if entry, ok := s.unreadable[name]; ok {
+		return &UnreadableAgentError{UnreadableAgent: entry}
+	}
+	return nil
+}
+
+// UnreadableAgents lists the agents whose definition file could not be read.
+func (s *fileStore) UnreadableAgents() []UnreadableAgent {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]UnreadableAgent, 0, len(s.unreadable))
+	for _, entry := range s.unreadable {
+		out = append(out, entry)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
 // rememberDefinitionUnlocked records the bytes of an agent's definition file
 // as this store last read or wrote them.
 func (s *fileStore) rememberDefinitionUnlocked(name string, data []byte) {
@@ -819,8 +892,11 @@ func (s *fileStore) reloadAgentUnlocked(name string) error {
 	}
 	ag, err := s.decodeAgentUnlocked(name, data)
 	if err != nil {
-		return fmt.Errorf("read agent %q: %w", name, err)
+		delete(s.agents, name)
+		s.markUnreadableUnlocked(name, s.definitionPath(name), err)
+		return s.unreadableErrorUnlocked(name)
 	}
+	delete(s.unreadable, name)
 	s.agents[name] = ag
 	s.stripLegacyAgentTypeUnlocked()
 	s.rememberLoadedUnlocked(name, data, ag)
@@ -953,8 +1029,10 @@ func (s *fileStore) load() error {
 							ag = decoded
 							s.rememberLoadedUnlocked(agentName, settingsData, ag)
 						} else {
-							s.rememberDefinitionUnlocked(agentName, settingsData)
-							logger.Verbosef("❌ Failed to unmarshal agent_settings.json for '%s': %v", agentName, err)
+							// Not loaded as an empty agent: that would be written back
+							// over the user's file on the next save.
+							s.markUnreadableUnlocked(agentName, settingsPath, err)
+							continue
 						}
 					} else {
 						logger.Verbosef("⚠️ Could not read agent_settings.json for '%s': %v", agentName, err)

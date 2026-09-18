@@ -152,6 +152,7 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	agentHandler.SetCLIAgentRegistry(s.Handlers.CLIAgentRegistry)
 	agentHandler.SetWorkspaceStore(s.Storage.WorkspaceStore)
 	agentHandler.SetPersonalAssistantSupport(s.Storage.PersonalAssistant, s.Storage.UserProvider)
+	agentHandler.SetDesktopOpener(s.resolvedDesktopOpener())
 	if s.Storage.SessionStore != nil {
 		agentHandler.SetSessionPurger(s.Storage.SessionStore)
 	}
@@ -247,6 +248,12 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 		// proxying (FR-60/FR-62).
 		if agenthttp.IsAppearanceUploadPath(r.URL.Path) {
 			appearanceUploadHandler.ServeHTTP(w, r)
+			return
+		}
+		// Show in Finder: open one of the user's agent folders in the
+		// Workspace Directory. The folder is resolved from the store by name.
+		if agenthttp.IsAgentRevealPath(r.URL.Path) {
+			agentHandler.HandleReveal(w, r)
 			return
 		}
 		// Agent-centric workspace assignment: PUT /api/agents/{name}/workspaces

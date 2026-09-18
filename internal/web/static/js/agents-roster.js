@@ -599,6 +599,7 @@
     var stage = evo.stage || 'spark';
 
     var workspaceOwned = isWorkspaceOwned(a);
+    var unreadable = isUnreadable(a);
     var vm = {
       name: (a && a.name) || '',
       source: agentSourceKind(a),
@@ -606,10 +607,17 @@
       // An agent only a workspace holds is that workspace's own copy: it is
       // edited there, so here it is read-only and cannot be selected.
       workspaceOwned: workspaceOwned,
-      originMarker: window.AgentOrigin ? window.AgentOrigin.workspaceMarker(a) : '',
+      // An agent whose definition file is not valid JSON. Ori never touches
+      // that file; the card names it so the user can fix it.
+      unreadable: unreadable,
+      originMarker: unreadable
+        ? 'Could not be read: ' + ((a && a.file) || 'its definition file')
+        : window.AgentOrigin
+          ? window.AgentOrigin.workspaceMarker(a)
+          : '',
       // Built-in CLI definitions and the system assistant have no editable
       // definition here; the server rejects mutation and deletion alike.
-      editable: !builtIn && !workspaceOwned,
+      editable: !builtIn && !workspaceOwned && !unreadable,
       health: agentHealth(a),
       // healthText is what the card's status chip prints, so the chip, the
       // summary tiles, and the quick filters all state the same three buckets.
@@ -856,6 +864,15 @@
 
   function isWorkspaceOwned(a) {
     return !!(window.AgentOrigin && window.AgentOrigin.isWorkspaceOwned(a));
+  }
+
+  function isUnreadable(a) {
+    return String((a && a.state) || '') === 'unreadable';
+  }
+
+  // Selection drives bulk edits, so only agents editable here can be selected.
+  function isSelectable(a) {
+    return !isWorkspaceOwned(a) && !isUnreadable(a);
   }
 
   function filtersActive() {
@@ -1644,6 +1661,7 @@
       'roster-card' +
       (vm.builtIn ? ' is-permanent' : '') +
       (vm.workspaceOwned ? ' is-workspace-owned' : '') +
+      (vm.unreadable ? ' is-unreadable' : '') +
       (vm.health === 'needs' ? ' is-attention' : '') +
       (vm.health === 'disabled' ? ' is-disabled' : '');
     li.dataset.name = vm.name;
@@ -1665,7 +1683,7 @@
     // already states everything it shows, so it announces nothing twice.
     li.innerHTML =
       '<label class="roster-card__checkwrap"' +
-      (vm.workspaceOwned ? ' hidden' : '') +
+      (vm.editable || vm.builtIn ? '' : ' hidden') +
       '>' +
       '<span class="visually-hidden">Select ' +
       esc(vm.name) +
@@ -3532,10 +3550,14 @@
       {
         label: vm.favorite ? 'Unfavorite' : 'Favorite',
         action: 'favorite',
-        disabled: vm.workspaceOwned
+        disabled: vm.workspaceOwned || vm.unreadable
       },
       { label: 'Set role…', action: 'set-role', disabled: !vm.editable },
-      { label: 'Assign to workspace…', action: 'assign', disabled: vm.workspaceOwned },
+      {
+        label: 'Assign to workspace…',
+        action: 'assign',
+        disabled: vm.workspaceOwned || vm.unreadable
+      },
       menuDivider(),
       {
         label: 'Delete',
@@ -3922,7 +3944,7 @@
   function selectAllVisible() {
     state.rendered.forEach(function (a) {
       // A workspace's own agent has no checkbox, so it is never selected.
-      if (!isWorkspaceOwned(a)) state.checked.add(a.name);
+      if (isSelectable(a)) state.checked.add(a.name);
     });
     reflectCheckedInDom();
     updateBulkBar();
@@ -3952,7 +3974,7 @@
     var hi = Math.max(anchor, i);
     for (var k = lo; k <= hi; k++) {
       var a = state.rendered[k];
-      if (a && !isWorkspaceOwned(a)) state.checked.add(a.name);
+      if (a && isSelectable(a)) state.checked.add(a.name);
     }
     state.rangeAnchor = i;
     reflectCheckedInDom();
@@ -4013,6 +4035,9 @@
   // (PRD FR40); this only drives the preview grouping and the eligible count.
   function deleteEligibility(agent) {
     if (!agent) return { eligible: false, reason: 'Agent not found.' };
+    if (isUnreadable(agent)) {
+      return { eligible: false, reason: 'Its file could not be read; fix it outside Ori.' };
+    }
     if (isWorkspaceOwned(agent)) {
       return {
         eligible: false,
