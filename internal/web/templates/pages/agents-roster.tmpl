@@ -436,6 +436,9 @@
        window.OriAgentMap before agents-roster.js runs. -->
   <script defer src="/js/modules/agent-map.js"></script>
   <script defer src="/js/modules/stage-up-toast.js"></script>
+  <!-- Mission 01: the hire preset's requests and views (window.OriAssistantHire).
+       agents-roster.js reads the seam at use time, never at load. -->
+  <script type="module" src="/js/modules/personal-assistant-hire.js"></script>
   <!-- agent-avatar.js, character-catalog.js, agent-appearance.js, and
        character-picker.js all load from head.tmpl, which every page shares;
        deferred order still puts them before this controller. Re-declaring one

@@ -1,6 +1,27 @@
 // Onboarding module - Simplified 3-phase conversational onboarding with Ori character
 
 import { loadOnboardingStatus } from './onboarding-gate.js';
+import {
+  GENERIC_FOCUS_AREAS,
+  HQ_QUEST_ROUTE,
+  buildPersonalAssistantHirePayload,
+  personalAssistantCanOpenHireFlow,
+  personalAssistantNeedsHQ,
+  personalAssistantRecoveryView,
+  personalAssistantResumeMessage
+} from './personal-assistant-hire.js';
+
+// The hire helpers moved to personal-assistant-hire.js, the one hire path.
+// Re-exported so existing importers keep working.
+export {
+  GENERIC_FOCUS_AREAS,
+  HQ_QUEST_ROUTE,
+  buildPersonalAssistantHirePayload,
+  personalAssistantCanOpenHireFlow,
+  personalAssistantNeedsHQ,
+  personalAssistantRecoveryView,
+  personalAssistantResumeMessage
+};
 
 const FALLBACK_TIMEZONES = [
   'UTC',
@@ -50,96 +71,13 @@ const FALLBACK_TIMEZONES = [
   'Pacific/Honolulu'
 ];
 
-export function personalAssistantResumeMessage(state = {}) {
-  const name = String(state.display_name || '').trim();
-  const hasAssistant = Boolean(state.assistant_id || name);
-  const hasHQ = Boolean(state.hq_workspace_id);
-  if (hasAssistant && hasHQ) {
-    return `${name || 'Your assistant'} and Personal HQ are already saved. Retry to finish the remaining setup step.`;
-  }
-  if (hasHQ) return 'Personal HQ is already saved. Retry to finish the remaining setup step.';
-  if (hasAssistant) {
-    return `${name || 'Your assistant'} is already saved. Retry to finish the remaining setup step.`;
-  }
-  return 'This hire is already in progress. Retry to finish the remaining setup step.';
-}
-
-// buildPersonalAssistantHirePayload builds the hire request body.
-//
-// It carries no Daily Brief rhythm: hiring creates the assistant profile and the
-// relationship only. The schedule belongs to the Map's Build My HQ form, where
-// it can be written against a real workspace ID.
-export function buildPersonalAssistantHirePayload({
-  requestId,
-  ifVersion = 0,
-  displayName = 'Assistant',
-  appearance = null,
-  mandate = '',
-  focusAreas = []
-} = {}) {
-  return {
-    request_id: String(requestId || '').trim(),
-    if_version: Number(ifVersion) || 0,
-    display_name: String(displayName || '').trim(),
-    appearance: appearance || { mode: 'generated', generated: {} },
-    mandate: String(mandate || '').trim(),
-    focus_areas: Array.from(new Set((focusAreas || []).map(value => String(value).trim()))).filter(
-      Boolean
-    )
-  };
-}
-
-// The route Ori's deterministic Personal HQ walkthrough activates on.
-export const HQ_QUEST_ROUTE = '/?quest=build-hq';
-
-// personalAssistantNeedsHQ reports whether a relationship is hired but has no
-// Personal HQ yet, in either the idle or the resumable-setup stage.
-export function personalAssistantNeedsHQ(state = {}) {
-  return ['needs_hq', 'provisioning_hq'].includes(String(state?.state || '').trim());
-}
-
-export function personalAssistantRecoveryView(state = {}) {
-  const relationshipState = String(state?.state || '').trim();
-  const repairStep = String(state?.repair_step || '').trim();
-  const repair =
-    relationshipState === 'repair_needed' && repairStep.startsWith('relationship_recovery');
-  return {
-    repair,
-    available: repair && repairStep === 'relationship_recovery',
-    blocked: repair && repairStep === 'relationship_recovery_blocked'
-  };
-}
-
-export function personalAssistantCanOpenHireFlow(state = {}) {
-  return [
-    'needs_hire',
-    'hiring',
-    'needs_hq',
-    'provisioning_hq',
-    'active',
-    'repair_needed'
-  ].includes(String(state?.state || '').trim());
-}
-
 // --- Domain specialist wording -----------------------------------------
 //
 // The generic constants below are today's shipped wording, kept here so the
 // specialist path can be swapped in and out without the generic path ever
 // depending on a mapping being present. A user with no accepted specialist
-// renders from these and sees no behavioural difference.
-
-export const GENERIC_FOCUS_AREAS = Object.freeze([
-  { value: 'plan_my_day', label: 'Plan my day', selected: true },
-  {
-    value: 'track_commitments_and_follow_ups',
-    label: 'Track commitments and follow-ups',
-    selected: true
-  },
-  { value: 'prepare_for_meetings', label: 'Prepare for meetings', selected: false },
-  { value: 'keep_projects_moving', label: 'Keep projects moving', selected: true },
-  { value: 'help_with_email', label: 'Help with email', selected: false },
-  { value: 'something_else', label: 'Something else', selected: false }
-]);
+// renders from these and sees no behavioural difference. The generic focus
+// areas live with the hire, in personal-assistant-hire.js.
 
 export const GENERIC_ASSIGNMENT_LABELS = Object.freeze([
   { type: 'priority', label: 'Priority', placeholder: 'What is it?', add_label: 'Add priority' },

@@ -256,9 +256,33 @@
     }
   }
 
+  // While the personal assistant is unhired, point at Mission 01: it is hired
+  // from the Agents page's New Agent panel, not from this page (PRD FR40). The
+  // page stays usable for a plain agent either way, so any failure just leaves
+  // the line hidden.
+  async function showAssistantPointer() {
+    const pointer = byId('assistantPointer');
+    const link = byId('assistantPointerLink');
+    if (!pointer || !link) return;
+    try {
+      const response = await fetch('/api/personal-assistant', {
+        headers: { Accept: 'application/json' }
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      const hire = window.OriAssistantHire;
+      if (!hire || hire.presetView(data?.personal_assistant).mode !== 'form') return;
+      link.href = hire.MEET_ASSISTANT_QUEST_ROUTE;
+      pointer.hidden = false;
+    } catch (_) {
+      // Leave the line hidden.
+    }
+  }
+
   document.addEventListener('DOMContentLoaded', function () {
     initTabs();
     loadCatalog();
+    showAssistantPointer();
     const createBtn = byId('catalogCreateBtn');
     if (createBtn) createBtn.addEventListener('click', createFromCatalog);
   });

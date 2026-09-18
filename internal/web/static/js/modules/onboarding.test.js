@@ -62,96 +62,14 @@ test('workspaceRootSetupView treats an operator WORKSPACE_DIR as confirmed', () 
   assert.equal(view.confirmed, true);
 });
 
-test('personalAssistantResumeMessage names durable assistant and HQ without claiming total failure', () => {
-  assert.equal(
-    personalAssistantResumeMessage({
-      display_name: 'Atlas',
-      assistant_id: 'assistant-1',
-      hq_workspace_id: 'hq-1'
-    }),
-    'Atlas and Personal HQ are already saved. Retry to finish the remaining setup step.'
-  );
-  assert.match(personalAssistantResumeMessage({ hq_workspace_id: 'hq-1' }), /already saved/);
-});
-
-test('buildPersonalAssistantHirePayload normalizes one bounded confirmed hire', () => {
-  const payload = buildPersonalAssistantHirePayload({
-    requestId: ' request-1 ',
-    ifVersion: 3,
-    displayName: ' Assistant ',
-    appearance: { mode: 'generated', generated: { color: '#225588' } },
-    mandate: ' Keep today realistic. ',
-    focusAreas: ['plan_my_day', 'plan_my_day', 'keep_projects_moving']
-  });
-
-  assert.deepEqual(payload, {
-    request_id: 'request-1',
-    if_version: 3,
-    display_name: 'Assistant',
-    appearance: { mode: 'generated', generated: { color: '#225588' } },
-    mandate: 'Keep today realistic.',
-    focus_areas: ['plan_my_day', 'keep_projects_moving']
-  });
-});
-
-test('buildPersonalAssistantHirePayload carries no Daily Brief rhythm', () => {
-  // The rhythm moved to the Map's Build My HQ form, where a real workspace ID
-  // exists to write it against. Hiring must not collect or promise it.
-  const payload = buildPersonalAssistantHirePayload({
-    requestId: 'request-1',
-    displayName: 'Atlas',
-    focusAreas: ['plan_my_day'],
-    timezone: 'America/New_York',
-    scheduleDays: ['mon'],
-    scheduleTime: '08:00',
-    notifyOnReady: true
-  });
-
-  for (const key of ['timezone', 'schedule_days', 'schedule_time', 'notify_on_ready']) {
-    assert.equal(key in payload, false, `hire payload still carries ${key}`);
-  }
-});
-
-test('personalAssistantNeedsHQ recognizes the hired-but-unbuilt stages only', () => {
-  assert.equal(personalAssistantNeedsHQ({ state: 'needs_hq' }), true);
-  assert.equal(personalAssistantNeedsHQ({ state: 'provisioning_hq' }), true);
-  for (const state of ['needs_hire', 'hiring', 'active', 'paused', 'repair_needed', '']) {
-    assert.equal(personalAssistantNeedsHQ({ state }), false, `${state} misread as pre-HQ`);
-  }
-  assert.equal(personalAssistantNeedsHQ(), false);
-});
-
-test('personalAssistantCanOpenHireFlow never reopens creation for a paused relationship', () => {
-  assert.equal(personalAssistantCanOpenHireFlow({ state: 'paused' }), false);
-  assert.equal(personalAssistantCanOpenHireFlow({ state: 'repair_needed' }), true);
-  assert.equal(personalAssistantCanOpenHireFlow({ state: 'needs_hire' }), true);
-});
-
-test('personalAssistantRecoveryView distinguishes reconnectable and blocked orphan evidence', () => {
-  assert.deepEqual(
-    personalAssistantRecoveryView({
-      state: 'repair_needed',
-      repair_step: 'relationship_recovery'
-    }),
-    { repair: true, available: true, blocked: false }
-  );
-  assert.deepEqual(
-    personalAssistantRecoveryView({
-      state: 'repair_needed',
-      repair_step: 'relationship_recovery_blocked'
-    }),
-    { repair: true, available: false, blocked: true }
-  );
-  assert.deepEqual(personalAssistantRecoveryView({ state: 'needs_hire' }), {
-    repair: false,
-    available: false,
-    blocked: false
-  });
-});
-
-test('the guided HQ quest route lets the user select the site themselves', () => {
-  // A focus parameter would preselect the landmark. The quest highlights it and
-  // waits for a real user selection instead.
+// The hire helpers' own cases live in personal-assistant-hire.test.js. This
+// pins only that onboarding.js still re-exports them for existing importers.
+test('onboarding re-exports the moved hire helpers', () => {
+  assert.equal(typeof buildPersonalAssistantHirePayload, 'function');
+  assert.equal(typeof personalAssistantCanOpenHireFlow, 'function');
+  assert.equal(typeof personalAssistantNeedsHQ, 'function');
+  assert.equal(typeof personalAssistantRecoveryView, 'function');
+  assert.equal(typeof personalAssistantResumeMessage, 'function');
   assert.equal(HQ_QUEST_ROUTE, '/?quest=build-hq');
 });
 
