@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/johnjallday/ori-agent/internal/progression"
 	"github.com/johnjallday/ori-agent/internal/sensitive"
 )
 
@@ -85,14 +86,16 @@ func personalAssistantSetupGuidance(c *PersonalAssistantWorkContext) PersonalAss
 			ActionType: HomeActionNavigate, Label: label, Href: "/?quest=build-hq",
 		}
 	}
-	label := "Hire your personal assistant"
+	// Hiring, resuming a hire, and repairing all happen in one place: Mission 01
+	// on the Agents page, which opens the right view for the state.
+	label := "Meet your assistant"
 	if c != nil && (c.State == "hiring" || c.State == "repair_needed") {
 		label = "Resume personal assistant setup"
 	}
 	return PersonalAssistantSetupGuidance{
 		Response: "Finish personal assistant setup before sending work. Nothing has been routed or changed.",
 		ActionID: "nav-personal-assistant-setup", ActionType: HomeActionNavigate,
-		Label: label, Href: "/?hire=1",
+		Label: label, Href: progression.MeetAssistantActionURL,
 	}
 }
 

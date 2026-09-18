@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   GENERIC_FOCUS_AREAS,
   HIRE_BOUNDARY_COPY,
@@ -129,6 +130,18 @@ test('the routes and flags are the ones the rest of the app links to', () => {
   assert.equal(JUST_HIRED_FLAG, 'ori:assistant-just-hired');
   // The retired wizard's key, so a hire started there resumes here.
   assert.equal(HIRE_REQUEST_STORAGE_KEY, 'ori.personalAssistantHireRequestId');
+});
+
+// Classic scripts that cannot import the constant name the route literally.
+// Pinned here so a change to the constant cannot leave one of them behind.
+test('every classic script names the same Mission 01 route', () => {
+  for (const file of ['./ori-guide.js']) {
+    const source = readFileSync(new URL(file, import.meta.url), 'utf8');
+    assert.ok(
+      source.includes(`'${MEET_ASSISTANT_QUEST_ROUTE}'`),
+      `${file} does not name ${MEET_ASSISTANT_QUEST_ROUTE}`
+    );
+  }
 });
 
 test('the hire offers the six focus areas with the wizard’s values and defaults', () => {

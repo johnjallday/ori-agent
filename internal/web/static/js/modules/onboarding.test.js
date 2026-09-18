@@ -3,24 +3,21 @@ import assert from 'node:assert/strict';
 import {
   GENERIC_ASSIGNMENT_LABELS,
   GENERIC_ASSIGNMENT_STEPS,
-  GENERIC_FOCUS_AREAS,
   OnboardingManager,
   assignmentLabelsFor,
   assignmentStepsFor,
   buildFirstAssignmentApplyPayload,
   buildFirstAssignmentPreviewPayload,
-  buildPersonalAssistantHirePayload,
   canSubmitFirstAssignment,
   firstAssignmentResultView,
   firstAssignmentResumeView,
-  HQ_QUEST_ROUTE,
   normalizeFirstAssignmentRows,
-  personalAssistantCanOpenHireFlow,
-  personalAssistantNeedsHQ,
-  personalAssistantRecoveryView,
-  personalAssistantResumeMessage,
   workspaceRootSetupView
 } from './onboarding.js';
+import {
+  GENERIC_FOCUS_AREAS,
+  buildPersonalAssistantHirePayload
+} from './personal-assistant-hire.js';
 import { resetOnboardingGateForTests } from './onboarding-gate.js';
 
 test('workspaceRootSetupView presents the default path as an unconfirmed suggestion', () => {
@@ -60,17 +57,6 @@ test('workspaceRootSetupView treats an operator WORKSPACE_DIR as confirmed', () 
 
   assert.equal(view.path, '/srv/ori-workspaces');
   assert.equal(view.confirmed, true);
-});
-
-// The hire helpers' own cases live in personal-assistant-hire.test.js. This
-// pins only that onboarding.js still re-exports them for existing importers.
-test('onboarding re-exports the moved hire helpers', () => {
-  assert.equal(typeof buildPersonalAssistantHirePayload, 'function');
-  assert.equal(typeof personalAssistantCanOpenHireFlow, 'function');
-  assert.equal(typeof personalAssistantNeedsHQ, 'function');
-  assert.equal(typeof personalAssistantRecoveryView, 'function');
-  assert.equal(typeof personalAssistantResumeMessage, 'function');
-  assert.equal(HQ_QUEST_ROUTE, '/?quest=build-hq');
 });
 
 test('first assignment row normalization keeps explicit categories and honest empty input', () => {
@@ -233,9 +219,9 @@ test('Do this later on the first-day plan defers Mission 03, Connect one source'
   }
 });
 
-// stubHireDom gives the OnboardingManager just enough DOM to run the hire and
-// onboarding-completion paths without a browser.
-function stubHireDom() {
+// stubModalDom gives the OnboardingManager just enough DOM to run the modal's
+// phase changes and its completion path without a browser.
+function stubModalDom({ search = '' } = {}) {
   const elements = new Map();
   const make = () => ({
     textContent: '',
@@ -243,18 +229,39 @@ function stubHireDom() {
     disabled: false,
     checked: false,
     value: '',
-    classList: { toggle() {}, add() {}, remove() {} },
+    style: {},
+    parentElement: { setAttribute() {} },
+    classList: {
+      _set: new Set(),
+      toggle() {},
+      add(c) {
+        this._set.add(c);
+      },
+      remove(c) {
+        this._set.delete(c);
+      },
+      contains(c) {
+        return this._set.has(c);
+      }
+    },
     setAttribute() {},
     removeAttribute() {},
     focus() {}
   });
-  for (const id of ['pafHireBtn', 'pafHireStatus', 'pafHireError']) {
+  for (const id of [
+    'onboardingStepLabel',
+    'onboardingProgressBar',
+    'onboardingModelError',
+    'onboarding-phase-0',
+    'onboarding-phase-1',
+    'onboarding-phase-2'
+  ]) {
     elements.set(id, make());
   }
   const priorDocument = globalThis.document;
   const priorWindow = globalThis.window;
   const navigations = [];
-  let reloads = 0;
+  const replacements = [];
   globalThis.document = {
     getElementById: id => elements.get(id) || null,
     querySelectorAll: () => [],
@@ -262,15 +269,15 @@ function stubHireDom() {
   };
   globalThis.window = {
     location: {
-      search: '',
+      search,
       set href(value) {
         navigations.push(value);
       },
       get href() {
         return navigations.at(-1) || '';
       },
-      reload() {
-        reloads += 1;
+      replace(value) {
+        replacements.push(value);
       }
     },
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} }
@@ -278,7 +285,7 @@ function stubHireDom() {
   return {
     elements,
     navigations,
-    reloadCount: () => reloads,
+    replacements,
     restore() {
       globalThis.document = priorDocument;
       globalThis.window = priorWindow;
@@ -286,185 +293,100 @@ function stubHireDom() {
   };
 }
 
-test('a durable needs_hq relationship closes onboarding instead of hiring again', async () => {
-  const dom = stubHireDom();
-  let hirePosts = 0;
-  let completePosts = 0;
-  const priorFetch = globalThis.fetch;
-  globalThis.fetch = async url => {
-    if (String(url).includes('/api/personal-assistant/hire')) hirePosts += 1;
-    if (String(url).includes('/api/onboarding/complete')) completePosts += 1;
-    return { ok: true, json: async () => ({}) };
-  };
-  try {
-    const manager = new OnboardingManager();
-    manager.personalAssistantState = { state: 'needs_hq', display_name: 'Atlas' };
-    manager.completeStep = async () => {};
-    await manager.hireAssistant();
-
-    assert.equal(hirePosts, 0, 'a second hire was posted for a durable relationship');
-    assert.equal(completePosts, 1);
-    assert.equal(dom.navigations.at(-1), HQ_QUEST_ROUTE);
-  } finally {
-    globalThis.fetch = priorFetch;
-    dom.restore();
-  }
-});
-
-test('Replay Setup closes an active relationship without hiring or routing to a new HQ', async () => {
-  const dom = stubHireDom();
-  let hirePosts = 0;
-  let completePosts = 0;
-  const priorFetch = globalThis.fetch;
-  globalThis.fetch = async url => {
-    if (String(url).includes('/api/personal-assistant/hire')) hirePosts += 1;
-    if (String(url).includes('/api/onboarding/complete')) completePosts += 1;
-    return { ok: true, json: async () => ({}) };
-  };
-  try {
-    const manager = new OnboardingManager();
-    manager.personalAssistantState = {
-      state: 'active',
-      display_name: 'Atlas',
-      assistant_id: 'assistant-1',
-      hq_workspace_id: 'hq-1'
+// Onboarding is two phases now. Leaving Model closes it: no hire is ever sent
+// from the modal, and the browser goes Home, where Mission 01 waits (PRD FR2).
+test('leaving the Model phase completes onboarding and goes Home without a hire', async () => {
+  for (const skipModel of [true, false]) {
+    const dom = stubModalDom();
+    const requests = [];
+    const priorFetch = globalThis.fetch;
+    globalThis.fetch = async url => {
+      requests.push(String(url));
+      return { ok: true, json: async () => ({}) };
     };
-    manager.completeStep = async () => {};
-    await manager.hireAssistant();
+    try {
+      const manager = new OnboardingManager();
+      let hidden = 0;
+      manager.modalInstance = { hide: () => (hidden += 1) };
+      manager.saveSystemModel = async () => true;
+      await manager.advanceFromModel({ skipModel });
 
-    assert.equal(hirePosts, 0, 'setup replay posted a duplicate hire');
-    assert.equal(completePosts, 1);
-    assert.equal(dom.navigations.at(-1), '/');
-    assert.match(dom.elements.get('pafHireStatus').textContent, /existing assistant.*kept/i);
+      assert.deepEqual(requests, ['/api/onboarding/step', '/api/onboarding/complete']);
+      assert.equal(
+        requests.some(url => url.includes('/api/personal-assistant')),
+        false,
+        'the modal sent a hire request'
+      );
+      assert.equal(hidden, 1);
+      assert.deepEqual(dom.navigations, ['/']);
+      assert.equal(manager.modelConfigured, !skipModel);
+    } finally {
+      globalThis.fetch = priorFetch;
+      dom.restore();
+    }
+  }
+});
+
+test('a failed completion keeps the modal open on Model and says so', async () => {
+  const dom = stubModalDom();
+  const priorFetch = globalThis.fetch;
+  globalThis.fetch = async url => ({
+    ok: !String(url).includes('/api/onboarding/complete'),
+    status: String(url).includes('/api/onboarding/complete') ? 500 : 200,
+    json: async () => ({})
+  });
+  try {
+    const manager = new OnboardingManager();
+    let hidden = 0;
+    manager.modalInstance = { hide: () => (hidden += 1) };
+    await manager.advanceFromModel({ skipModel: true });
+
+    assert.equal(hidden, 0);
+    assert.deepEqual(dom.navigations, []);
+    assert.match(dom.elements.get('onboardingModelError').textContent, /could not finish/i);
   } finally {
     globalThis.fetch = priorFetch;
     dom.restore();
   }
 });
 
-test('relationship recovery posts no client-selected identity and never starts a hire', async () => {
-  const dom = stubHireDom();
-  let repairBody = null;
-  let hirePosts = 0;
-  const priorFetch = globalThis.fetch;
-  globalThis.fetch = async (url, options = {}) => {
-    const target = String(url);
-    if (target.includes('/api/personal-assistant/hire')) hirePosts += 1;
-    if (target.includes('/api/personal-assistant/repair')) {
-      repairBody = JSON.parse(options.body);
-      return {
-        ok: true,
-        json: async () => ({
-          personal_assistant: {
-            state: 'paused',
-            state_version: 1,
-            display_name: 'Assistant',
-            assistant_id: 'assistant-a'
-          }
-        })
-      };
-    }
-    return { ok: true, json: async () => ({}) };
-  };
+test('the progress shell counts two onboarding phases', () => {
+  const dom = stubModalDom();
   try {
     const manager = new OnboardingManager();
-    manager.personalAssistantState = {
-      state: 'repair_needed',
-      repair_step: 'relationship_recovery',
-      state_version: 0,
-      display_name: 'Assistant',
-      assistant_id: 'assistant-a',
-      hq_workspace_id: 'hq-a'
-    };
-    manager.modalInstance = { hide() {} };
-    await manager.hireAssistant();
-
-    assert.equal(hirePosts, 0);
-    assert.deepEqual(repairBody, { if_version: 0 });
-    assert.equal('assistant_id' in repairBody, false);
-    assert.equal('hq_workspace_id' in repairBody, false);
-    assert.deepEqual(dom.navigations, ['/']);
-    assert.equal(dom.reloadCount(), 0);
+    manager.updateProgress(0);
+    assert.equal(dom.elements.get('onboardingStepLabel').textContent, 'Step 1 of 2');
+    assert.equal(dom.elements.get('onboardingProgressBar').style.width, '50%');
+    manager.updateProgress(1);
+    assert.equal(dom.elements.get('onboardingStepLabel').textContent, 'Step 2 of 2');
+    assert.equal(dom.elements.get('onboardingProgressBar').style.width, '100%');
   } finally {
-    globalThis.fetch = priorFetch;
     dom.restore();
   }
 });
 
-test('blocked relationship recovery cannot fall through to hire', async () => {
-  const dom = stubHireDom();
-  let calls = 0;
+// /?hire=1 opened the retired wizard. Old links land where the hire happens now.
+test('an old /?hire=1 link goes to Mission 01 on the Agents page', async () => {
+  const dom = stubModalDom({ search: '?hire=1' });
   const priorFetch = globalThis.fetch;
-  globalThis.fetch = async () => {
-    calls += 1;
-    return { ok: true, json: async () => ({}) };
-  };
+  const priorBootstrap = globalThis.bootstrap;
+  globalThis.bootstrap = { Modal: function Modal() {} };
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({}) });
   try {
     const manager = new OnboardingManager();
-    manager.personalAssistantState = {
-      state: 'repair_needed',
-      repair_step: 'relationship_recovery_blocked'
-    };
-    await manager.hireAssistant();
-    assert.equal(calls, 0);
-    assert.match(dom.elements.get('pafHireError').textContent, /cannot safely reconnect/i);
+    manager.modal = { addEventListener() {} };
+    dom.elements.set('onboardingModal', manager.modal);
+    manager.setupEventListeners = () => {};
+    manager.checkOnboardingStatus = async () => ({ needs_onboarding: false });
+    manager.loadPersonalAssistantState = async () => ({ state: 'needs_hire' });
+    manager.populateTimezoneSelect = () => {};
+    await manager.init();
+
+    assert.deepEqual(dom.replacements, ['/agents?quest=meet-assistant']);
+    assert.deepEqual(dom.navigations, []);
   } finally {
     globalThis.fetch = priorFetch;
-    dom.restore();
-  }
-});
-
-test('onboarding completion failure after hire offers Continue to HQ quest', async () => {
-  const dom = stubHireDom();
-  let hirePosts = 0;
-  let statePolls = 0;
-  const priorFetch = globalThis.fetch;
-  globalThis.fetch = async url => {
-    const target = String(url);
-    if (target.includes('/api/personal-assistant/hire')) {
-      hirePosts += 1;
-      return {
-        ok: true,
-        json: async () => ({
-          personal_assistant: {
-            state: 'needs_hq',
-            display_name: 'Atlas',
-            assistant_id: 'assistant-1',
-            state_version: 2
-          }
-        })
-      };
-    }
-    if (target.includes('/api/onboarding/complete')) {
-      return { ok: false, json: async () => ({}) };
-    }
-    if (target.includes('/api/personal-assistant')) {
-      statePolls += 1;
-      return {
-        ok: true,
-        json: async () => ({
-          personal_assistant: { state: 'needs_hq', display_name: 'Atlas', state_version: 2 }
-        })
-      };
-    }
-    return { ok: true, json: async () => ({}) };
-  };
-  try {
-    const manager = new OnboardingManager();
-    manager.personalAssistantState = { state: 'needs_hire', state_version: 0 };
-    manager.completeStep = async () => {};
-    manager.personalAssistantHirePayload = () => ({ request_id: 'request-1' });
-    await manager.hireAssistant();
-
-    assert.equal(hirePosts, 1, 'the hire should be posted exactly once');
-    assert.ok(statePolls >= 1, 'authoritative state should be reloaded before recovery');
-    // The recovery action continues the quest; it never re-runs the hire.
-    assert.equal(dom.elements.get('pafHireBtn').textContent, 'Continue to HQ quest');
-    assert.equal(dom.elements.get('pafHireBtn').disabled, false);
-    assert.match(dom.elements.get('pafHireError').textContent, /not hire a second assistant/i);
-    assert.equal(dom.navigations.length, 0, 'a failed completion must not navigate away');
-  } finally {
-    globalThis.fetch = priorFetch;
+    globalThis.bootstrap = priorBootstrap;
     dom.restore();
   }
 });

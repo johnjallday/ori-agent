@@ -1,27 +1,9 @@
-// Onboarding module - Simplified 3-phase conversational onboarding with Ori character
+// Onboarding module - two-phase conversational onboarding (Welcome, Model) with Ori character
 
 import { loadOnboardingStatus } from './onboarding-gate.js';
-import {
-  GENERIC_FOCUS_AREAS,
-  HQ_QUEST_ROUTE,
-  buildPersonalAssistantHirePayload,
-  personalAssistantCanOpenHireFlow,
-  personalAssistantNeedsHQ,
-  personalAssistantRecoveryView,
-  personalAssistantResumeMessage
-} from './personal-assistant-hire.js';
-
-// The hire helpers moved to personal-assistant-hire.js, the one hire path.
-// Re-exported so existing importers keep working.
-export {
-  GENERIC_FOCUS_AREAS,
-  HQ_QUEST_ROUTE,
-  buildPersonalAssistantHirePayload,
-  personalAssistantCanOpenHireFlow,
-  personalAssistantNeedsHQ,
-  personalAssistantRecoveryView,
-  personalAssistantResumeMessage
-};
+// The hire lives in personal-assistant-hire.js, the one hire path (Mission 01
+// on the Agents page). This modal only redirects old links to it.
+import { MEET_ASSISTANT_QUEST_ROUTE } from './personal-assistant-hire.js';
 
 const FALLBACK_TIMEZONES = [
   'UTC',
@@ -253,7 +235,12 @@ export function workspaceRootSetupView(state) {
 export class OnboardingManager {
   constructor() {
     this.currentPhase = 0;
+    // The modal's panels: Welcome, Model, and the first-assignment quest, which
+    // Home opens on its own and which is not an onboarding step.
     this.totalPhases = 3;
+    // What the progress shell counts: onboarding itself is Welcome and Model.
+    // The assistant is hired afterwards, on the Agents page (Mission 01).
+    this.onboardingSteps = 2;
     this.modal = null;
     this.modalInstance = null;
     this.availableProviders = [];
@@ -262,9 +249,6 @@ export class OnboardingManager {
     this.timezone = '';
     this.workspaceRootState = null;
     this.personalAssistantState = null;
-    this.personalAssistantAppearanceEditor = null;
-    this.hireRequestId = '';
-    this.hireStep = 0;
     this.modelConfigured = null;
     this.assignmentPreview = null;
     this.assignmentStep = 0;
@@ -302,13 +286,15 @@ export class OnboardingManager {
     this.timezone = status.timezone || this.detectTimezone();
     await this.loadPersonalAssistantState();
     this.populateTimezoneSelect();
+    // /?hire=1 opened the retired in-modal hire wizard. Old links still work:
+    // they go where the hire happens now (PRD FR29). Nothing produces it any
+    // more.
     const requestedHire = new URLSearchParams(window.location.search).get('hire') === '1';
-    const canOpenHireFlow = personalAssistantCanOpenHireFlow(this.personalAssistantState);
     if (status.needs_onboarding) {
       await this.loadWorkspaceRoot();
       setTimeout(() => this.showOnboarding(), 500);
-    } else if (requestedHire && canOpenHireFlow) {
-      setTimeout(() => this.showPersonalAssistantFlow(), 100);
+    } else if (requestedHire) {
+      window.location.replace(MEET_ASSISTANT_QUEST_ROUTE);
     } else if (this.shouldOpenFirstAssignmentQuest()) {
       setTimeout(() => this.showFirstAssignmentQuest(), 100);
     }
@@ -334,27 +320,6 @@ export class OnboardingManager {
     if (modelBackBtn) {
       modelBackBtn.addEventListener('click', () => this.showPhase(0));
     }
-
-    document
-      .getElementById('pafHireBackBtn')
-      ?.addEventListener('click', () => this.backPersonalAssistantHire());
-    document
-      .getElementById('pafHireNextBtn')
-      ?.addEventListener('click', () => this.advancePersonalAssistantHire());
-    document.getElementById('pafHireBtn')?.addEventListener('click', () => this.hireAssistant());
-    document
-      .getElementById('pafHireConfirm')
-      ?.addEventListener('change', () => this.updateHireButtonState());
-    document.getElementById('pafAssistantName')?.addEventListener('input', event => {
-      this.personalAssistantAppearanceEditor?.setAgentName(event.target.value);
-      this.updateHireButtonState();
-    });
-    document
-      .getElementById('pafAssistantMandate')
-      ?.addEventListener('input', () => this.updateHireButtonState());
-    document
-      .querySelectorAll('[name="pafFocus"]')
-      .forEach(input => input.addEventListener('change', () => this.updateHireButtonState()));
 
     document.querySelectorAll('[data-paf-add-row]').forEach(button => {
       button.addEventListener('click', () => this.addAssignmentRow(button.dataset.pafAddRow));
@@ -503,7 +468,6 @@ export class OnboardingManager {
       if (!response.ok) throw new Error(`Personal assistant request failed (${response.status})`);
       const payload = await response.json();
       this.personalAssistantState = payload?.personal_assistant || null;
-      this.hireRequestId = String(this.personalAssistantState?.hire_request_id || '').trim();
       const modelStatus = this.personalAssistantState?.availability?.model?.status;
       if (modelStatus) this.modelConfigured = modelStatus === 'available';
       return this.personalAssistantState;
@@ -1086,7 +1050,11 @@ export class OnboardingManager {
     return labels.find(label => label.type === type) || null;
   }
 
-  // --- Personal Assistant hire -------------------------------------------
+  // --- Personal Assistant ------------------------------------------------
+  //
+  // The hire is not here. Mission 01 hires the assistant on the Agents page
+  // (personal-assistant-hire.js); this modal only hosts the first-assignment
+  // quest the Home mission opens.
 
   shouldOpenFirstAssignmentQuest() {
     const requested = new URLSearchParams(window.location.search).get('quest');
@@ -1095,439 +1063,6 @@ export class OnboardingManager {
     return (
       ['active', 'paused'].includes(state.state) && state.first_assignment_status !== 'completed'
     );
-  }
-
-  showHireStep(index, { focus = true } = {}) {
-    const recovery = personalAssistantRecoveryView(this.personalAssistantState);
-    this.hireStep = recovery.repair ? 2 : Math.max(0, Math.min(2, Number(index) || 0));
-    document.querySelectorAll('[data-paf-hire-step]').forEach(panel => {
-      panel.classList.toggle('d-none', Number(panel.dataset.pafHireStep) !== this.hireStep);
-    });
-    const labels = ['Meet your assistant', 'Choose the focus', 'Confirm the hire'];
-    const label = document.getElementById('pafHireStepLabel');
-    if (label) {
-      label.textContent = recovery.repair
-        ? 'Repair step 1 of 1 · Reconnect your assistant'
-        : `Hire step ${this.hireStep + 1} of 3 · ${labels[this.hireStep]}`;
-    }
-    const bar = document.getElementById('pafHireStepBar');
-    const track = bar?.parentElement;
-    if (bar) bar.style.width = recovery.repair ? '100%' : `${((this.hireStep + 1) / 3) * 100}%`;
-    if (track) {
-      track.setAttribute('aria-valuemin', '1');
-      track.setAttribute('aria-valuemax', recovery.repair ? '1' : '3');
-      track.setAttribute('aria-valuenow', recovery.repair ? '1' : String(this.hireStep + 1));
-    }
-
-    const back = document.getElementById('pafHireBackBtn');
-    if (back) back.textContent = recovery.repair ? 'Cancel' : 'Back';
-    document.getElementById('pafHireNextBtn')?.classList.toggle('d-none', this.hireStep === 2);
-    document.getElementById('pafHireBtn')?.classList.toggle('d-none', this.hireStep !== 2);
-    this.updateHireButtonState();
-
-    if (focus) label?.focus();
-  }
-
-  hireStepIsValid(step = this.hireStep) {
-    const recovery = personalAssistantRecoveryView(this.personalAssistantState);
-    const confirmed = document.getElementById('pafHireConfirm')?.checked === true;
-    if (recovery.blocked) return false;
-    if (recovery.available) return step < 2 || confirmed;
-    const name = document.getElementById('pafAssistantName')?.value?.trim() || '';
-    const mandate = document.getElementById('pafAssistantMandate')?.value?.trim() || '';
-    const focusCount = document.querySelectorAll('[name="pafFocus"]:checked').length;
-    if (step === 0) return !!name;
-    if (step === 1) return !!mandate || focusCount > 0;
-    // The explicit confirmation remains the sole gate on the hire consequence.
-    return confirmed;
-  }
-
-  advancePersonalAssistantHire() {
-    if (!this.hireStepIsValid() || this.hireStep >= 2) return;
-    this.showHireStep(this.hireStep + 1);
-  }
-
-  backPersonalAssistantHire() {
-    if (personalAssistantRecoveryView(this.personalAssistantState).repair) {
-      this.modalInstance?.hide();
-      return;
-    }
-    if (this.hireStep > 0) {
-      this.showHireStep(this.hireStep - 1);
-      return;
-    }
-    document.getElementById('onboardingProgressShell')?.classList.remove('d-none');
-    this.showPhase(1);
-  }
-
-  showPersonalAssistantHire() {
-    document.getElementById('onboardingPersonalAssistantAssignment')?.classList.add('d-none');
-    document.getElementById('onboardingPersonalAssistantHire')?.classList.remove('d-none');
-    if (this.personalAssistantState?.state === 'active') this.hireStep = 2;
-    document.getElementById('welcomeAssistantReveal')?.classList.add('d-none');
-    document.getElementById('onboardingProgressShell')?.classList.add('d-none');
-    this.assignmentQuestMode = false;
-
-    const state = this.personalAssistantState || {};
-    const recovery = personalAssistantRecoveryView(state);
-    const nameInput = document.getElementById('pafAssistantName');
-    if (nameInput && state.display_name) nameInput.value = state.display_name;
-    const mandate = document.getElementById('pafAssistantMandate');
-    if (mandate && state.mandate) mandate.value = state.mandate;
-    if (Array.isArray(state.focus_areas) && state.focus_areas.length) {
-      const selected = new Set(state.focus_areas);
-      document.querySelectorAll('[name="pafFocus"]').forEach(input => {
-        input.checked = selected.has(input.value);
-      });
-    }
-    const host = document.getElementById('pafAssistantAppearance');
-    if (host && window.AgentAppearanceEditor && !this.personalAssistantAppearanceEditor) {
-      this.personalAssistantAppearanceEditor = window.AgentAppearanceEditor.create({
-        host,
-        idPrefix: 'pafAssistantAppearance',
-        mode: 'create',
-        allowedModes: ['generated', 'character'],
-        appearance: state.appearance || { mode: 'generated', generated: {} },
-        agent: {
-          name: nameInput?.value || 'Assistant',
-          source: 'user',
-          role: 'orchestrator'
-        },
-        onChange: () => this.updateHireButtonState()
-      });
-    }
-
-    const speech = document.getElementById('pafHireSpeech');
-    const title = document.getElementById('pafHireConfirmTitle');
-    const confirmCopy = document.getElementById('pafHireConfirmCopy');
-    const confirmLabel = document.getElementById('pafHireConfirmLabel');
-    const confirmation = document.getElementById('pafHireConfirm');
-    const modelNote = document.getElementById('pafHireModelNote');
-    const status = document.getElementById('pafHireStatus');
-    const button = document.getElementById('pafHireBtn');
-
-    if (speech)
-      speech.textContent =
-        'I’m Ori, your guide to the app. Now choose the personal assistant who will own your ongoing work.';
-    if (title) title.textContent = 'Confirm the hire';
-    if (confirmCopy)
-      confirmCopy.textContent =
-        'Hiring creates your assistant. It does not create a workspace, change any permission, or connect an account. Personal HQ — your assistant’s home base, where the Daily Brief rhythm is set — is the next step, and nothing is created there until you confirm it.';
-    if (confirmLabel)
-      confirmLabel.textContent =
-        'Create one assistant and save this working agreement. Next, Ori will help you build Personal HQ on the Map.';
-    if (confirmation) confirmation.disabled = false;
-    if (modelNote) {
-      if (this.modelConfigured === false) {
-        modelNote.innerHTML =
-          'No model is configured. Hiring, building Personal HQ, and structured planning still work. <a href="/settings#system-model">Choose a model in Settings</a> when you want conversational answers.';
-      } else {
-        modelNote.textContent =
-          'You can change the model later without changing this assistant relationship.';
-      }
-    }
-
-    if (recovery.repair) {
-      this.hireStep = 2;
-      const recoveredHQ = !!String(state.hq_workspace_id || '').trim();
-      if (speech)
-        speech.textContent = recovery.available
-          ? recoveredHQ
-            ? `I found ${state.display_name || 'your assistant'} and Personal HQ. Their stable IDs agree, so Ori can reconnect the missing relationship.`
-            : `I found the existing profile for ${state.display_name || 'your assistant'}. Its durable ownership marker is valid, so Ori can reconnect it before you build Personal HQ.`
-          : 'Ori found Personal Assistant records that do not agree. Nothing can be reconnected automatically.';
-      if (title)
-        title.textContent = recovery.available
-          ? 'Reconnect your assistant'
-          : 'Automatic repair unavailable';
-      if (confirmCopy)
-        confirmCopy.textContent = recovery.available
-          ? 'This restores only the missing relationship record. It does not create an agent or workspace, change permissions, connect an account, or recover a lost working agreement.'
-          : 'Ori will not guess from names or choose between conflicting identities. No records have been changed.';
-      if (confirmLabel)
-        confirmLabel.textContent = recovery.available
-          ? recoveredHQ
-            ? 'Reconnect this validated assistant and Personal HQ. Keep proactive routines paused until I explicitly resume them.'
-            : 'Reconnect this validated assistant profile. Next, Ori will help me build Personal HQ on the Map.'
-          : 'The existing records must be reviewed before they can be reconnected.';
-      if (confirmation) {
-        confirmation.checked = false;
-        confirmation.disabled = recovery.blocked;
-      }
-      if (modelNote)
-        modelNote.textContent = recovery.available
-          ? 'Your previous working agreement could not be recovered. You can review it after reconnection.'
-          : 'Create and hire actions remain disabled to avoid duplicating your assistant.';
-      if (status)
-        status.textContent = recovery.available
-          ? 'Ready to reconnect the existing identity. No duplicate will be created.'
-          : 'Recovery is blocked because the durable identity evidence is incomplete or contradictory.';
-      if (button)
-        button.textContent = recovery.available ? 'Reconnect Assistant' : 'Repair unavailable';
-      this.showHireStep(this.hireStep);
-      return;
-    }
-
-    const hired = personalAssistantNeedsHQ(state);
-    if (status) {
-      status.textContent =
-        state.state === 'repair_needed' || state.state === 'hiring'
-          ? personalAssistantResumeMessage(state)
-          : hired
-            ? `${state.display_name || 'Your assistant'} is hired. Continue to give them a home base.`
-            : state.state === 'active'
-              ? `${state.display_name || 'Your assistant'} is hired. Continue to finish onboarding.`
-              : '';
-    }
-    if (button && ['repair_needed', 'hiring', 'active'].includes(state.state)) {
-      button.textContent = state.state === 'active' ? 'Finish onboarding' : 'Finish setup';
-      if (confirmation) confirmation.checked = true;
-      this.hireStep = 2;
-    }
-    if (button && hired) {
-      // The hire is durable. The only thing left is to close onboarding and hand
-      // the user to Ori's HQ quest — never to post a second hire.
-      button.textContent = 'Continue to HQ quest';
-      if (confirmation) confirmation.checked = true;
-      this.hireStep = 2;
-    }
-    this.showHireStep(this.hireStep);
-  }
-
-  updateHireButtonState() {
-    const hire = document.getElementById('pafHireBtn');
-    const next = document.getElementById('pafHireNextBtn');
-    if (next) next.disabled = !this.hireStepIsValid(this.hireStep);
-    if (hire) {
-      hire.disabled =
-        !this.hireStepIsValid(0) || !this.hireStepIsValid(1) || !this.hireStepIsValid(2);
-    }
-  }
-
-  getHireRequestId() {
-    if (this.hireRequestId) return this.hireRequestId;
-    const storageKey = 'ori.personalAssistantHireRequestId';
-    try {
-      this.hireRequestId = String(window.localStorage.getItem(storageKey) || '').trim();
-    } catch (_) {
-      this.hireRequestId = '';
-    }
-    if (!this.hireRequestId) {
-      this.hireRequestId =
-        globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
-          ? globalThis.crypto.randomUUID()
-          : `hire-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-      try {
-        window.localStorage.setItem(storageKey, this.hireRequestId);
-      } catch (_) {
-        // The durable server operation remains authoritative when storage is unavailable.
-      }
-    }
-    return this.hireRequestId;
-  }
-
-  personalAssistantHirePayload() {
-    const focusAreas = Array.from(
-      document.querySelectorAll('[name="pafFocus"]:checked'),
-      input => input.value
-    );
-    return buildPersonalAssistantHirePayload({
-      requestId: this.getHireRequestId(),
-      ifVersion: this.personalAssistantState?.state_version || 0,
-      displayName: document.getElementById('pafAssistantName')?.value || 'Assistant',
-      appearance: this.personalAssistantAppearanceEditor?.createRequest(),
-      mandate: document.getElementById('pafAssistantMandate')?.value || '',
-      focusAreas
-    });
-  }
-
-  showHireError(message) {
-    const error = document.getElementById('pafHireError');
-    if (!error) return;
-    error.textContent = message || '';
-    error.classList.toggle('d-none', !message);
-  }
-
-  async hireAssistant() {
-    const recovery = personalAssistantRecoveryView(this.personalAssistantState);
-    if (recovery.available) {
-      await this.repairPersonalAssistantRelationship();
-      return;
-    }
-    if (recovery.blocked) {
-      this.showHireError(
-        'Ori cannot safely reconnect records that do not share one stable identity. Nothing was changed.'
-      );
-      return;
-    }
-
-    const button = document.getElementById('pafHireBtn');
-    const originalLabel = button?.textContent || 'Hire Assistant';
-    // A durable relationship already exists: replay may finish setup, but it
-    // must never post a second hire or reuse a stale browser hire request.
-    if (
-      this.personalAssistantState?.state === 'active' ||
-      personalAssistantNeedsHQ(this.personalAssistantState)
-    ) {
-      try {
-        await this.completePersonalAssistantOnboarding();
-      } catch (error) {
-        console.error('Error completing onboarding after hire:', error);
-        this.showHireError(error.message || 'Could not close onboarding. Retry safely.');
-      }
-      return;
-    }
-    if (button) {
-      button.disabled = true;
-      button.textContent = 'Hiring your assistant…';
-      button.setAttribute('aria-busy', 'true');
-    }
-    const status = document.getElementById('pafHireStatus');
-    if (status) status.textContent = 'Hiring one assistant. Keep this window open.';
-    this.showHireError('');
-    try {
-      const response = await fetch('/api/personal-assistant/hire', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify(this.personalAssistantHirePayload())
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        if (payload.durable_result) {
-          this.personalAssistantState = {
-            ...this.personalAssistantState,
-            ...payload.durable_result,
-            state: 'repair_needed',
-            repair_step: payload.repair_step
-          };
-          const status = document.getElementById('pafHireStatus');
-          if (status)
-            status.textContent = personalAssistantResumeMessage(this.personalAssistantState);
-          if (button) button.textContent = 'Finish setup';
-        }
-        if (response.status === 409) await this.loadPersonalAssistantState();
-        throw new Error(payload.error || 'Could not finish hiring. Retry this same request.');
-      }
-
-      this.personalAssistantState = payload.personal_assistant || this.personalAssistantState;
-      const assistantName = this.personalAssistantState?.display_name || 'Your assistant';
-      if (status) {
-        if (this.modelConfigured === false) {
-          status.innerHTML =
-            '<strong>Hired — choose a model to chat.</strong> Building Personal HQ and structured planning work now. <a href="/settings#system-model">Choose a model in Settings</a> later.';
-          await new Promise(resolve => setTimeout(resolve, 350));
-        } else {
-          status.textContent = `${assistantName} is hired. Next, let’s give them a home base.`;
-        }
-      }
-      this.assignmentStateVersion = Number(this.personalAssistantState?.state_version) || 0;
-      // Only clear the browser's request ID once the server has returned the
-      // durable relationship; otherwise a retry could not replay this same hire.
-      try {
-        window.localStorage.removeItem('ori.personalAssistantHireRequestId');
-      } catch (_) {
-        // Storage cleanup is not part of the durable hire transaction.
-      }
-      this.hireRequestId = '';
-      await this.completePersonalAssistantOnboarding();
-    } catch (error) {
-      console.error('Error hiring personal assistant:', error);
-      this.showHireError(error.message || 'Could not finish hiring. Retry this same request.');
-      if (button) {
-        button.disabled = false;
-        button.removeAttribute('aria-busy');
-        if (button.textContent === 'Hiring your assistant…') button.textContent = originalLabel;
-      }
-    }
-  }
-
-  async repairPersonalAssistantRelationship() {
-    const button = document.getElementById('pafHireBtn');
-    const status = document.getElementById('pafHireStatus');
-    const originalLabel = button?.textContent || 'Reconnect Assistant';
-    if (button) {
-      button.disabled = true;
-      button.textContent = 'Reconnecting…';
-      button.setAttribute('aria-busy', 'true');
-    }
-    if (status) status.textContent = 'Rechecking stable identity and Personal HQ links…';
-    this.showHireError('');
-    try {
-      const response = await fetch('/api/personal-assistant/repair', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({
-          if_version: Number(this.personalAssistantState?.state_version) || 0
-        })
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        if (response.status === 409) await this.loadPersonalAssistantState().catch(() => {});
-        throw new Error(
-          payload.error ||
-            'Ori could not prove that these records belong to one assistant. Nothing was changed.'
-        );
-      }
-      this.personalAssistantState = payload.personal_assistant || this.personalAssistantState;
-      if (status) {
-        const assistantName = this.personalAssistantState?.display_name || 'Your assistant';
-        status.textContent = personalAssistantNeedsHQ(this.personalAssistantState)
-          ? `${assistantName} is reconnected. Next, build Personal HQ.`
-          : `${assistantName} is reconnected and proactive routines remain paused.`;
-      }
-      this.modalInstance?.hide();
-      // Drop ?hire=1 while navigating so a recovered paused relationship can
-      // never reopen the creation wizard on the next page load.
-      window.location.href = '/';
-    } catch (error) {
-      console.error('Error repairing personal assistant:', error);
-      this.showHireError(
-        error.message || 'Could not reconnect the assistant. Nothing was changed.'
-      );
-      if (button) {
-        button.disabled = false;
-        button.textContent = originalLabel;
-        button.removeAttribute('aria-busy');
-      }
-    }
-  }
-
-  // completePersonalAssistantOnboarding closes ordinary onboarding and hands the
-  // user to Ori's HQ quest. The hire is already durable at this point, so a
-  // failure here offers Continue to HQ quest rather than another hire.
-  async completePersonalAssistantOnboarding() {
-    const status = document.getElementById('pafHireStatus');
-    try {
-      await this.completeStep('step-done');
-      const response = await fetch('/api/onboarding/complete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      if (!response.ok) throw new Error('onboarding completion failed');
-    } catch (_) {
-      // Reload authoritative server state before offering the recovery action,
-      // so the button reflects what actually got saved.
-      await this.loadPersonalAssistantState().catch(() => {});
-      const button = document.getElementById('pafHireBtn');
-      if (button) {
-        button.disabled = false;
-        button.removeAttribute('aria-busy');
-        button.textContent = 'Continue to HQ quest';
-      }
-      throw new Error(
-        'Your assistant is hired, but onboarding could not be closed. Continue to the HQ quest — this will not hire a second assistant.'
-      );
-    }
-    if (status) {
-      status.textContent =
-        this.personalAssistantState?.state === 'active'
-          ? 'Setup replay complete. Your existing assistant and Personal HQ were kept.'
-          : 'Assistant hired. Ori will help you build their home base.';
-    }
-    this.modalInstance?.hide();
-    window.location.href = personalAssistantNeedsHQ(this.personalAssistantState)
-      ? HQ_QUEST_ROUTE
-      : '/';
   }
 
   // --- First assignment quest -------------------------------------------
@@ -1548,7 +1083,6 @@ export class OnboardingManager {
   }
 
   async showFirstAssignment() {
-    document.getElementById('onboardingPersonalAssistantHire')?.classList.add('d-none');
     document.getElementById('onboardingPersonalAssistantAssignment')?.classList.remove('d-none');
     document.getElementById('pafAssignmentPreview')?.classList.add('d-none');
     document.getElementById('pafAssignmentResult')?.classList.add('d-none');
@@ -2057,13 +1591,6 @@ export class OnboardingManager {
 
   // --- Phase navigation ---
 
-  showPersonalAssistantFlow() {
-    if (!this.modalInstance) return;
-    this.showPhase(2);
-    this.showPersonalAssistantHire();
-    this.modalInstance.show();
-  }
-
   showOnboarding() {
     if (!this.modalInstance) return;
 
@@ -2161,10 +1688,10 @@ export class OnboardingManager {
     const label = document.getElementById('onboardingStepLabel');
     const progress = document.getElementById('onboardingProgressBar');
     const track = progress?.parentElement;
-    const current = Math.min(this.totalPhases, Math.max(1, index + 1));
-    const pct = `${(current / this.totalPhases) * 100}%`;
+    const current = Math.min(this.onboardingSteps, Math.max(1, index + 1));
+    const pct = `${(current / this.onboardingSteps) * 100}%`;
 
-    if (label) label.textContent = `Step ${current} of ${this.totalPhases}`;
+    if (label) label.textContent = `Step ${current} of ${this.onboardingSteps}`;
     if (progress) progress.style.width = pct;
     if (track) track.setAttribute('aria-valuenow', String(current));
   }
@@ -2218,8 +1745,21 @@ export class OnboardingManager {
     this.modelConfigured = !skipModel;
     await this.completeStep('step-model');
 
-    this.showPhase(2);
-    this.showPersonalAssistantHire();
+    // Onboarding ends here. No hire is ever sent from this modal: Home offers
+    // Mission 01, which hires the assistant on the Agents page (PRD FR2).
+    try {
+      const response = await fetch('/api/onboarding/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (!response.ok) throw new Error(`onboarding completion failed (${response.status})`);
+    } catch (error) {
+      console.error('Error completing onboarding:', error);
+      this.showModelError('Ori could not finish setting up. Try again.');
+      return;
+    }
+    this.modalInstance?.hide();
+    window.location.href = '/';
   }
 
   async skipOnboarding() {

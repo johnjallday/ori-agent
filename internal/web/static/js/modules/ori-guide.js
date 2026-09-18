@@ -180,6 +180,17 @@
       if (state.helpOnly && !state.assistantAvailable && state.needsHQ) {
         return { type: 'navigate', label: 'Build Personal HQ', href: '/?quest=build-hq' };
       }
+      // No assistant to send it to yet: the way forward is Mission 01, which
+      // hires one on the Agents page (and repairs one there too). The route is
+      // MEET_ASSISTANT_QUEST_ROUTE in personal-assistant-hire.js; this classic
+      // script cannot import it, and a test pins the two together.
+      if (state.helpOnly && !state.assistantAvailable) {
+        return {
+          type: 'navigate',
+          label: 'Meet your assistant',
+          href: '/agents?quest=meet-assistant'
+        };
+      }
       return {
         type: type,
         label: state.helpOnly

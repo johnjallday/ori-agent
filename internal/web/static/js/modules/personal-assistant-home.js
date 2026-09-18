@@ -1,3 +1,5 @@
+import { MEET_ASSISTANT_QUEST_ROUTE } from './personal-assistant-hire.js';
+
 const TODAY_ENDPOINT = '/api/personal-assistant/today';
 
 export function personalAssistantTodayView(today) {
@@ -631,7 +633,9 @@ function renderRelationship(personalAssistant, view) {
         : 'Resume your personal assistant setup';
     els.banner.replaceChildren();
     const link = document.createElement('a');
-    link.href = '/?hire=1';
+    // Repair happens where the hire happens: the Agents page opens its
+    // reconnect, resume, or blocked view on arrival (PRD FR28).
+    link.href = MEET_ASSISTANT_QUEST_ROUTE;
     link.textContent = recoverable
       ? 'Review and reconnect'
       : blocked
@@ -661,7 +665,7 @@ function renderRelationship(personalAssistant, view) {
   if (!view.available) {
     els.banner.replaceChildren();
     const link = document.createElement('a');
-    link.href = '/?hire=1';
+    link.href = MEET_ASSISTANT_QUEST_ROUTE;
     link.textContent = 'Hire your personal assistant';
     els.banner.append('Choose one named assistant before sending personal work. ', link);
     return;

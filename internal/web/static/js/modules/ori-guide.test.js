@@ -250,7 +250,9 @@ test('PAF Help-only handoff names the assistant and only prefills without submit
   assert.equal(submits, 0);
 });
 
-test('PAF Help-only handoff refuses a missing hired assistant without routing', () => {
+// With no assistant hired, the work has nowhere to go: Ask Ori offers Mission
+// 01 instead, a plain navigation, and nothing is submitted (PRD FR9).
+test('PAF Help-only handoff with no hired assistant points at Mission 01 without routing', () => {
   const { guide, sandbox } = load();
   let submits = 0;
   sandbox.window.OriAskRouting = {
@@ -260,8 +262,11 @@ test('PAF Help-only handoff refuses a missing hired assistant without routing', 
   };
   guide.setHelpOnly({ available: false, assistantName: 'Personal assistant' });
   const action = guide._validateAction({ type: 'handoff', handoff_text: 'do work' });
-  assert.equal(action.label, 'Hire your personal assistant');
-  assert.equal(guide._handoff(action.handoffText), false);
+  assert.equal(action.type, 'navigate');
+  assert.equal(action.label, 'Meet your assistant');
+  assert.equal(action.href, '/agents?quest=meet-assistant');
+  // A direct handoff still refuses rather than sending work nowhere.
+  assert.equal(guide._handoff('do work'), false);
   assert.equal(submits, 0);
 });
 
@@ -302,8 +307,8 @@ test('needsHQ never changes the ready-for-work handoff, and clears on the next r
   // A subsequent read that omits needsHQ must not leave a stale flag behind.
   guide.setHelpOnly({ available: false, assistantName: 'Personal assistant' });
   const stale = guide._validateAction({ type: 'handoff', handoff_text: 'plan today' });
-  assert.equal(stale.type, 'handoff');
-  assert.equal(stale.label, 'Hire your personal assistant');
+  assert.equal(stale.type, 'navigate');
+  assert.equal(stale.label, 'Meet your assistant');
 });
 
 test('a navigate action requires a safe same-origin path', () => {

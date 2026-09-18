@@ -818,11 +818,6 @@
     }
   }
 
-  .paf-hire-card {
-    display: grid;
-    gap: 1rem;
-  }
-
   .paf-step-indicator {
     display: grid;
     gap: 0.4rem;
@@ -846,43 +841,15 @@
     transition: width 160ms ease;
   }
 
-  [data-paf-hire-step],
   [data-paf-assignment-step] {
     min-width: 0;
   }
 
-  .paf-hire-summary {
-    padding: 1rem;
-    border: 1px solid var(--border-color);
-    border-radius: 12px;
-    background: color-mix(in srgb, var(--bg-secondary) 82%, transparent);
-  }
-
-  .paf-hire-role {
-    color: var(--text-secondary);
-    font-size: 0.82rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .paf-hire-abilities {
-    margin: 0.75rem 0;
-    padding-left: 1.25rem;
-  }
-
-  .paf-hire-boundary,
-  .paf-hire-model-note,
-  .paf-hire-status {
+  /* The first-assignment quest's boundary and confirmation. Named for the
+     retired hire wizard they were first written for. */
+  .paf-hire-boundary {
     color: var(--text-secondary);
     font-size: 0.84rem;
-  }
-
-  .paf-hire-focus-grid,
-  .paf-hire-days {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem 1rem;
   }
 
   .paf-hire-confirm {
@@ -950,11 +917,11 @@
       <div class="modal-body" style="color: var(--text-primary); padding: 2rem;">
         <div id="onboardingProgressShell" class="onboarding-progress-shell">
           <div class="d-flex align-items-center justify-content-between mb-2">
-            <span id="onboardingStepLabel" class="onboarding-step-label">Step 1 of 3</span>
+            <span id="onboardingStepLabel" class="onboarding-step-label">Step 1 of 2</span>
             <button type="button" class="onboarding-secondary-action" id="skipOnboardingLink">Set Up Later</button>
           </div>
-          <div class="progress onboarding-progress-track" role="progressbar" aria-label="Onboarding progress" aria-valuemin="1" aria-valuemax="3" aria-valuenow="1">
-            <div id="onboardingProgressBar" class="progress-bar" style="width: 33.3333%;"></div>
+          <div class="progress onboarding-progress-track" role="progressbar" aria-label="Onboarding progress" aria-valuemin="1" aria-valuemax="2" aria-valuenow="1">
+            <div id="onboardingProgressBar" class="progress-bar" style="width: 50%;"></div>
           </div>
         </div>
 
@@ -1030,7 +997,7 @@
             </select>
           </div>
           <div class="mb-3 ori-hatch-reveal" id="welcomeAssistantReveal">
-            <label for="onboardingAssistantName" class="form-label" style="font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);">Assistant name</label>
+            <label for="onboardingAssistantName" class="form-label" style="font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);">What should Ori be called?</label>
             <input type="text" class="form-control" id="onboardingAssistantName" name="assistant_name" autocomplete="off" spellcheck="false" placeholder="Ori…" value="Ori" style="font-size: 1rem; padding: 10px 14px;">
           </div>
 
@@ -1166,90 +1133,10 @@
           </div>
         </div>
 
-        <!-- Phase 2: hire the personal assistant and optionally plan the first day. -->
+        <!-- Phase 2: the first-assignment quest (Plan my first day), opened from
+             Home. It is not part of onboarding: the modal's onboarding ends after
+             Model, and the assistant is hired on the Agents page (Mission 01). -->
         <div class="onboarding-phase d-none" id="onboarding-phase-2">
-          <div id="onboardingPersonalAssistantHire" class="d-none">
-            <div class="d-flex align-items-start mb-3">
-              <div class="ori-avatar" aria-hidden="true">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-                  <path d="M 724 410 L 714 405 L 686 404 L 663 397 L 651 386 L 632 352 L 618 339 L 600 329 L 582 324 L 561 324 L 542 329 L 518 344 L 503 362 L 493 386 L 491 412 L 494 428 L 503 448 L 541 493 L 554 520 L 526 508 L 501 503 L 464 504 L 414 514 L 383 513 L 349 498 L 330 480 L 321 467 L 308 498 L 303 523 L 304 562 L 316 601 L 338 635 L 362 658 L 386 674 L 432 693 L 467 700 L 527 701 L 570 695 L 607 683 L 638 665 L 659 645 L 675 619 L 682 591 L 680 562 L 674 544 L 658 518 L 626 486 L 621 474 L 623 459 L 626 453 L 638 444 L 672 442 L 702 434 L 723 418 Z" fill="white"/>
-                </svg>
-              </div>
-              <div class="ori-speech" id="pafHireSpeech">I’m Ori, your guide to the app. Now choose the personal assistant who will own your ongoing work.</div>
-            </div>
-
-            <div class="paf-hire-card">
-              <div class="paf-step-indicator" aria-live="polite">
-                <span id="pafHireStepLabel" tabindex="-1">Hire step 1 of 3 · Meet your assistant</span>
-                <div class="paf-step-track" role="progressbar" aria-label="Assistant hire progress" aria-valuemin="1" aria-valuemax="3" aria-valuenow="1">
-                  <span id="pafHireStepBar" style="width: 33.3333%;"></span>
-                </div>
-              </div>
-
-              <div data-paf-hire-step="0" tabindex="-1">
-              <section class="paf-hire-summary" aria-labelledby="pafHireTitle">
-                <span class="paf-hire-role">Personal Assistant</span>
-                <h3 id="pafHireTitle" class="h5 mt-1">Hire your personal assistant</h3>
-                <div class="mb-3">
-                  <label for="pafAssistantName" class="form-label">Name</label>
-                  <input id="pafAssistantName" class="form-control" maxlength="100" value="Assistant" autocomplete="off" spellcheck="false">
-                </div>
-                <ul class="paf-hire-abilities">
-                  <li>Plan the day around your priorities.</li>
-                  <li>Track commitments and follow-ups.</li>
-                  <li>Route specialist work and report back.</li>
-                </ul>
-                <p class="paf-hire-boundary mb-0">Your assistant uses Ori’s existing tools, permissions, and confirmation gates. Hiring does not connect accounts, broaden filesystem access, or authorize sensitive actions.</p>
-              </section>
-
-              <div id="pafAssistantAppearance" aria-label="Choose assistant appearance"></div>
-              </div>
-
-              <div data-paf-hire-step="1" class="d-none" tabindex="-1">
-              <!-- The hire asks about work in general. The domain offer is
-                   deliberately not here: it is made on Home once the assistant
-                   exists, so hiring stays one decision. -->
-              <fieldset>
-                <legend class="h6">What should your assistant help with?</legend>
-                <div class="paf-hire-focus-grid">
-                  <label><input type="checkbox" name="pafFocus" value="plan_my_day" checked> Plan my day</label>
-                  <label><input type="checkbox" name="pafFocus" value="track_commitments_and_follow_ups" checked> Track commitments and follow-ups</label>
-                  <label><input type="checkbox" name="pafFocus" value="prepare_for_meetings"> Prepare for meetings</label>
-                  <label><input type="checkbox" name="pafFocus" value="keep_projects_moving" checked> Keep projects moving</label>
-                  <label><input type="checkbox" name="pafFocus" value="help_with_email"> Help with email</label>
-                  <label><input type="checkbox" name="pafFocus" value="something_else"> Something else</label>
-                </div>
-              </fieldset>
-
-              <div>
-                <label for="pafAssistantMandate" class="form-label">What would make me useful this week? <span class="text-muted">(optional)</span></label>
-                <textarea id="pafAssistantMandate" class="form-control" maxlength="1000" rows="2" placeholder="For example: Keep the week realistic and surface anything I may drop."></textarea>
-              </div>
-              </div>
-
-              <div data-paf-hire-step="2" class="d-none" tabindex="-1">
-              <section aria-labelledby="pafHireConfirmTitle">
-                <h3 id="pafHireConfirmTitle" class="h6">Confirm the hire</h3>
-                <p class="paf-hire-boundary" id="pafHireConfirmCopy">Hiring creates your assistant. It does not create a workspace, change any permission, or connect an account. Personal HQ — your assistant’s home base, where the Daily Brief rhythm is set — is the next step, and nothing is created there until you confirm it.</p>
-              </section>
-
-              <label class="paf-hire-confirm">
-                <input id="pafHireConfirm" type="checkbox">
-                <span id="pafHireConfirmLabel">Create one assistant and save this working agreement. Next, Ori will help you build Personal HQ on the Map.</span>
-              </label>
-              <p id="pafHireModelNote" class="paf-hire-model-note mb-0" aria-live="polite"></p>
-              </div>
-
-              <div id="pafHireError" class="alert alert-danger d-none mb-0" role="alert"></div>
-              <p id="pafHireStatus" class="paf-hire-status mb-0" aria-live="polite"></p>
-              <div class="onboarding-actions">
-                <button type="button" class="btn btn-outline-secondary" id="pafHireBackBtn">Back</button>
-                <button type="button" class="btn btn-primary onboarding-next-btn" id="pafHireNextBtn">Continue</button>
-                <button type="button" class="btn btn-primary onboarding-next-btn d-none" id="pafHireBtn" disabled>Hire Assistant</button>
-              </div>
-            </div>
-          </div>
-
           <div id="onboardingPersonalAssistantAssignment" class="d-none">
             <div class="d-flex align-items-start mb-3">
               <div class="ori-avatar" aria-hidden="true">

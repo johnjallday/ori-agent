@@ -16,6 +16,10 @@
  *   panel-closed  Ori's panel is closed at step 1; the form alone hires, and
  *                 Mission 01 completes.
  *   narrow        The same with the form alone at a 400px viewport.
+ *   modal         The real first-run modal: Welcome, then Model with "Continue
+ *                 without a model", closes on Home with no hire. An old /?hire=1
+ *                 link lands on Mission 01, and Ask Ori offers "Meet your
+ *                 assistant" for a work request.
  *
  * Every stage prints what it observed and any console errors or failed
  * requests, so a quietly broken page does not pass as a clean demo.
@@ -291,8 +295,81 @@ async function stageFormAlone({ viewport, closePanel, prefix }) {
   await page.close();
 }
 
+async function stageModal() {
+  const page = await newPage();
+  const hireRequests = [];
+  page.on('request', request => {
+    if (request.url().includes('/api/personal-assistant/hire')) hireRequests.push(request.url());
+  });
+  await page.goto(`${baseUrl}/`);
+  await page.locator('#onboardingModal.show').waitFor({ timeout: 15000 });
+  const label = await page.locator('#onboardingStepLabel').textContent();
+  check(label.trim() === 'Step 1 of 2', `the modal counts two phases ("${label.trim()}")`);
+  check(
+    (await page.locator('label[for="onboardingAssistantName"]').textContent()).trim() ===
+      'What should Ori be called?',
+    'the guide-name field is labelled for Ori'
+  );
+  check((await page.locator('#pafHireBtn').count()) === 0, 'the modal has no hire controls');
+  await page.locator('#onboardingUserName').fill('Sam');
+  await shot(page, 'modal-welcome');
+  await page.locator('#welcomeNextBtn').click();
+  await page.locator('#continueWithoutModelBtn').waitFor({ state: 'visible' });
+  check(
+    (await page.locator('#onboardingStepLabel').textContent()).trim() === 'Step 2 of 2',
+    'Model is the last phase'
+  );
+  await shot(page, 'modal-model');
+  await page.locator('#continueWithoutModelBtn').click();
+  await page.waitForURL(url => url.pathname === '/' && !url.search.includes('hire'), {
+    timeout: 15000
+  });
+  await page.locator('#onboardingModal.show').waitFor({ state: 'detached', timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(2000);
+  check(!(await page.locator('#onboardingModal.show').isVisible()), 'the modal closed on Home');
+  const onboarding = await api(page, '/api/onboarding/status');
+  check(onboarding.body?.needs_onboarding === false, 'onboarding is complete without a hire');
+  check((await relationshipState(page)) === 'needs_hire', 'no assistant was hired');
+  check(hireRequests.length === 0, `the modal sent no hire request (${hireRequests.length})`);
+  await shot(page, 'modal-closed-home');
+
+  await page.goto(`${baseUrl}/?hire=1`);
+  await page.waitForURL(url => url.pathname === '/agents', { timeout: 15000 });
+  await expectStep(page, 1, '#newAgentBtn', 'New Agent');
+  check(true, `/?hire=1 landed on ${new URL(page.url()).pathname}${new URL(page.url()).search}`);
+  await shot(page, 'old-hire-link');
+
+  // Ask Ori for work while there is no assistant to send it to.
+  await page.goto(`${baseUrl}/agents`);
+  await page.locator('#oriGuideInput').waitFor({ state: 'visible', timeout: 8000 }).catch(() => {});
+  if (!(await page.locator('#oriGuideInput').isVisible())) {
+    await page.locator('#oriGuideLauncher').click();
+  }
+  // A work verb first: the guide treats "draft …" as work, not a question.
+  await page.locator('#oriGuideInput').fill('Draft the follow-up emails for today');
+  await page.locator('#oriGuideInput').press('Enter');
+  const offer = page.locator('#oriGuideReply [data-ori-action="navigate"]', {
+    hasText: 'Meet your assistant'
+  });
+  await offer.waitFor({ timeout: 15000 }).catch(() => {});
+  const offered = await offer.count();
+  check(offered === 1, 'Ask Ori offers "Meet your assistant" for work');
+  if (offered) {
+    check(
+      (await offer.getAttribute('href')) === '/agents?quest=meet-assistant',
+      'the offer links to Mission 01'
+    );
+  } else {
+    console.log(`     reply was: ${(await page.locator('#oriGuideReply').textContent()).trim().slice(0, 200)}`);
+  }
+  await shot(page, 'ask-ori-offer');
+  check(hireRequests.length === 0, 'nothing in this stage hired an assistant');
+  await page.close();
+}
+
 try {
   if (stage === 'preset') await stagePreset();
+  else if (stage === 'modal') await stageModal();
   else if (stage === 'walkthrough') await stageWalkthrough();
   else if (stage === 'panel-closed') {
     await stageFormAlone({ viewport: width, closePanel: true, prefix: 'panel-closed' });
