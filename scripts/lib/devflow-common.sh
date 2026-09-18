@@ -198,11 +198,18 @@ flight_ref_of() {
   printf '%s' ""
 }
 
+# `wt done` archives a finished worktree's plans into dev's tasks/ as
+# "tasks-foo (done #518).md". Those are history, never a live plan.
+is_archived_plan() {
+  [[ "${1##*/}" == *" (done"* ]]
+}
+
 index_attached_plan_flights() {
   local file slug state ref member
   [[ -n "$tasks_dir" ]] || return 0
   for file in "$tasks_dir"/tasks-*.md; do
     [[ -f "$file" ]] || continue
+    is_archived_plan "$file" && continue
     slug="${file##*/}"
     slug="${slug#tasks-}"
     slug="${slug%.md}"

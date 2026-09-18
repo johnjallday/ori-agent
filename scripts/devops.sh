@@ -253,6 +253,7 @@ resolve_implementation_feature() {
   if [[ -n "$tasks_dir" ]]; then
     for file in "$tasks_dir"/tasks-*.md; do
       [[ -f "$file" ]] || continue
+      is_archived_plan "$file" && continue
       slug="${file##*/}"
       slug="${slug#tasks-}"
       slug="${slug%.md}"
@@ -321,6 +322,7 @@ task_progress_of_issue() {
   [[ -n "$tasks_dir" ]] || { printf '%s' ""; return 0; }
   for file in "$tasks_dir"/tasks-*.md; do
     [[ -f "$file" ]] || continue
+    is_archived_plan "$file" && continue
     slug="${file##*/}"
     slug="${slug#tasks-}"
     slug="${slug%.md}"
