@@ -181,18 +181,32 @@ never acts on one. The Daily Brief rhythm is **not** collected here: it has no
 canonical workspace to be written against until HQ exists, so it moves to the
 Map's HQ build form.
 
-The walkthrough has six steps. Step 1 is on Home: Ori marks the Agents nav entry
-and the user clicks it (`meet-assistant-home-prompt.js`). Steps 2 to 6 are on
-the Agents page: New Agent, the name, the face, the focus, Hire. Every entry to
-Mission 01 starts at step 1, `/?quest=meet-assistant`
-(`MEET_ASSISTANT_QUEST_ROUTE`, `progression.MeetAssistantActionURL`): Home's
-mission card, Today's `needs_hire` banner, Ask Ori's hand-off, and the retired
-`/?hire=1`, which redirects there. Entries that are already about the Agents page
-go straight to step 2, `/agents?quest=meet-assistant`
-(`MEET_ASSISTANT_AGENTS_ROUTE`): the prompt's Take me there, `/agents/create`'s
-pointer, and the repair banners. A plain `/agents` visit before the hire also
-continues at step 2. `/?quest=meet-assistant` on an install that needs a repair
-goes to the Agents page; on a hired install it does nothing. A provable
+The walkthrough has six steps and is shown in Ori's own layer
+(`ori-spotlight.js`). A single-click step is a spotlight: the page is dimmed and
+blocked except for a hole cut over the one control, and Ori's callout says what
+to press. Step 1 is on Home, on the Agents nav entry
+(`meet-assistant-home-prompt.js`). Step 2 is New Agent on the Agents page. Steps
+3 to 6 (the name, the face, the focus, Hire) are Ori's callout beside the form,
+pointing at each field, with nothing dimmed. The user presses and types
+everything; Not now (or Escape on a spotlight) always leaves, and nothing is
+skipped.
+
+First-run onboarding hands over to `/?quest=meet-assistant&briefing=1`
+(`MEET_ASSISTANT_BRIEFING_ROUTE`): Ori in the centre of a dimmed, inert Home
+with the Mission 01 card, its six steps, its reward and what it unlocks, and
+Start mission or Not now. Start mission opens step 1. Every other entry starts
+at step 1 directly, `/?quest=meet-assistant` (`MEET_ASSISTANT_QUEST_ROUTE`,
+`progression.MeetAssistantActionURL`): Home's mission card, Today's `needs_hire`
+banner, Ask Ori's hand-off, and the retired `/?hire=1`, which redirects there.
+Pressing Agents from step 1 sets `ori:meet-assistant-guided` in
+sessionStorage, so the Agents page carries on in the same layer. Entries already
+about the Agents page start at step 2, `/agents?quest=meet-assistant`
+(`MEET_ASSISTANT_AGENTS_ROUTE`): `/agents/create`'s pointer, the repair banners,
+and Ask Ori's hand-off on `/agents`. A plain `/agents` visit before the hire
+also continues at step 2, in Ori's docked panel, and so does any step when there
+is no room beside the form (a phone-width sheet). A plain Home visit shows
+nothing and makes no request. `/?quest=meet-assistant` on an install that needs
+a repair goes to the Agents page; on a hired install it does nothing. A provable
 orphan identity (`relationship_recovery`) opens the same panel's reconnect view
 with one Reconnect button; `relationship_recovery_blocked` shows the status and
 no button; a partial hire shows one Finish setup button that replays the same
@@ -394,12 +408,12 @@ other mission and a hire cannot be repeated, startup also completes it from that
 evidence after the backfill (for example after a quest reset). The economy pays
 at most once per quest.
 
-Before the hire, Home is quiet: the card shows Mission 01, Today says only "Meet
-your assistant to start Today.", and on a Home visit (or the card's Start) Ori's
-panel opens at "Step 1 of 6" with "Your assistant works from the Agents page.
-Click Agents to go meet them.", a mark on the Agents nav entry, and a Take me
-there choice for a navbar too narrow to show the entry
-(`meet-assistant-home-prompt.js`).
+Before the hire, Home is quiet: the card shows Mission 01, and Today says only
+"Meet your assistant to start Today." Ori's briefing appears once, when
+onboarding hands over; after that, the card's Start (or Today's link) dims Home
+around the Agents nav entry at "Step 1 of 6 · Click Agents"
+(`meet-assistant-home-prompt.js`). The navbar wraps rather than collapses, so
+the Agents entry can be lit at every width.
 
 Mission 04 branches, in priority order when several focus areas match:
 

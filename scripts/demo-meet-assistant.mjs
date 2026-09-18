@@ -4,26 +4,29 @@
  * real endpoints throughout; the only shortcut is closing first-run onboarding
  * through the API where a stage is not about the modal.
  *
- *   node scripts/demo-meet-assistant.mjs <baseUrl> <outDir> <stage> [--width=1280]
+ *   node scripts/demo-meet-assistant.mjs <baseUrl> <outDir> <stage> [--width=1280] [--theme=dark]
  *
  * Stages (each needs a FRESH sandbox: a hire cannot be undone):
  *   preset        New Agent opens the assistant preset while unhired; Hire lands
  *                 on /?quest=build-hq with the relationship needs_hq; afterwards
  *                 New Agent opens the ordinary form again.
- *   walkthrough   /agents?quest=meet-assistant: each of Ori's Agents-page steps
- *                 (2-6 of 6) marks the right control; the hire hands over to
- *                 Build My HQ with the hand-over line and the HQ site marked.
- *   panel-closed  Ori's panel is closed at step 2; the form alone hires, and
+ *   walkthrough   /agents?quest=meet-assistant: New Agent lit on a dimmed page
+ *                 (step 2), then Ori's callout beside the form for steps 3-6;
+ *                 the hire hands over to Build My HQ with the hand-over line
+ *                 and the HQ site marked.
+ *   panel-closed  Not now on the step 2 spotlight; the form alone hires, and
  *                 Mission 01 completes.
- *   narrow        The same with the form alone at a 400px viewport.
- *   home          The whole path with no model: the modal, Home before the hire
- *                 (step 1 on the Agents nav entry, Mission 01 on the card, 02-05
- *                 locked, a quiet Today), the card's Start, a real click on the
- *                 Agents nav entry, steps 2-6, the hire, the hand-over, then
- *                 Build My HQ to the end.
+ *   narrow        The form alone at a 400px viewport.
+ *   home          The whole path with no model: the modal hands over to Ori's
+ *                 briefing, Start mission lights Agents (step 1), Escape leaves,
+ *                 Home before the hire (Mission 01 on the card, 02-05 locked, a
+ *                 quiet Today), the card's Start, a real click on Agents,
+ *                 steps 2-6, the hire, the hand-over, then Build My HQ to the
+ *                 end.
  *   modal         The real first-run modal: Welcome, then Model with "Continue
- *                 without a model", closes on Home with no hire. An old /?hire=1
- *                 link lands on step 1 on Home, and Ask Ori offers "Meet your
+ *                 without a model", then Ori's briefing with no hire. Not now
+ *                 leaves Home quiet, and so does a plain visit. An old /?hire=1
+ *                 link lands on step 1, and Ask Ori offers "Meet your
  *                 assistant" for a work request.
  *
  * Every stage prints what it observed and any console errors or failed
@@ -47,6 +50,7 @@ const flag = name => {
 const out = resolve(outDir);
 mkdirSync(out, { recursive: true });
 const width = Number(flag('width')) || 1280;
+const theme = flag('theme');
 
 const browser = await chromium.launch();
 const problems = [];
@@ -69,6 +73,10 @@ function check(ok, message) {
 
 async function newPage(viewportWidth = width) {
   const page = await browser.newPage({ viewport: { width: viewportWidth, height: 900 } });
+  // --theme=dark: the app's own saved-theme key, set before any page script.
+  if (theme) {
+    await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+  }
   page.on('console', m => {
     if (m.type() === 'error') problems.push(`console: ${m.text()}`);
   });
@@ -254,6 +262,83 @@ async function expectStep(page, index, markedId, label) {
   return seen;
 }
 
+// Ori's blocking layer: which mode it is in, what its callout says, and what
+// is lit.
+async function spotlightState(page) {
+  return page.evaluate(() => {
+    const root = document.getElementById('oriSpotlight');
+    return {
+      mode: root?.dataset.mode || '',
+      step: root?.querySelector('.ori-spotlight__callout-step')?.textContent || '',
+      title: root?.querySelector('.ori-spotlight__callout-title')?.textContent || '',
+      body: root?.querySelector('.ori-spotlight__callout-body')?.textContent || '',
+      marked: Array.from(document.querySelectorAll('.is-ori-coachmark')).map(el => '#' + el.id),
+      focused: document.activeElement?.id ? '#' + document.activeElement.id : '',
+      guideOpen: !document.getElementById('oriGuidePanel')?.hidden
+    };
+  });
+}
+
+async function expectLayer(page, mode, index, markedId, title) {
+  await page
+    .waitForFunction(
+      ([m, n, total, id]) =>
+        document.getElementById('oriSpotlight')?.dataset.mode === m &&
+        (document.querySelector('.ori-spotlight__callout-step')?.textContent || '') ===
+          `Step ${n} of ${total}` &&
+        !!document.querySelector(`${id}.is-ori-coachmark`),
+      [mode, index, TOTAL_STEPS, markedId],
+      { timeout: 8000 }
+    )
+    .catch(() => {});
+  const seen = await spotlightState(page);
+  check(
+    seen.mode === mode &&
+      seen.step === `Step ${index} of ${TOTAL_STEPS}` &&
+      seen.title === title &&
+      seen.marked.includes(markedId),
+    `${mode} step ${index} "${title}" marks ${markedId} — saw ${seen.mode || 'no layer'} "${seen.step}" "${seen.title}", marked ${seen.marked.join(',') || 'nothing'}`
+  );
+  // Let the hole finish opening before a screenshot.
+  await page.waitForTimeout(500);
+  return seen;
+}
+
+// The page dimmed around one control.
+const expectSpotlight = (page, index, markedId, title) =>
+  expectLayer(page, 'spotlight', index, markedId, title);
+
+// Ori's callout beside the form, nothing dimmed, and never Ori's docked panel.
+async function expectCallout(page, index, markedId, title) {
+  const seen = await expectLayer(page, 'callout', index, markedId, title);
+  check(!seen.guideOpen, `step ${index}: Ori's docked panel stays closed`);
+  const placed = await page.evaluate(() => {
+    const callout = document.querySelector('.ori-spotlight__callout');
+    const form = document.getElementById('createPanel');
+    if (!callout || !form) return 'missing';
+    const a = callout.getBoundingClientRect();
+    const b = form.getBoundingClientRect();
+    return a.right <= b.left || a.left >= b.right ? 'beside' : 'overlapping';
+  });
+  check(placed === 'beside', `step ${index}: the callout sits beside the form (${placed})`);
+  return seen;
+}
+
+// A click on the dimmed page outside the hole reaches nothing.
+async function expectBlocked(page, x, y) {
+  const before = page.url();
+  const hit = await page.evaluate(
+    ([px, py]) => document.elementFromPoint(px, py)?.className || '',
+    [x, y]
+  );
+  await page.mouse.click(x, y);
+  await page.waitForTimeout(300);
+  check(
+    String(hit).includes('ori-spotlight__scrim') && page.url() === before,
+    `a click on the dimmed page hits the scrim and goes nowhere (${hit})`
+  );
+}
+
 async function hireAndLand(page) {
   await page.locator('#createSubmit').click();
   await page.waitForURL(url => url.pathname === '/' && url.search.includes('quest=build-hq'), {
@@ -271,29 +356,34 @@ async function stageWalkthrough() {
   const page = await newPage();
   await closeOnboarding(page);
   await page.goto(`${baseUrl}/agents?quest=meet-assistant`);
-  await expectStep(page, 2, '#newAgentBtn', 'New Agent');
+  // Asked for by the link: New Agent is the one lit control.
+  const lit = await expectSpotlight(page, 2, '#newAgentBtn', 'Press New Agent');
+  check(!lit.guideOpen, "Ori's panel stays closed while the spotlight is up");
   check(!new URL(page.url()).search.includes('quest='), 'the quest param was stripped');
   check(
     (await page.locator('#rosterCoachmark').isHidden()) !== false,
     "the roster's own card hint stays out of the way"
   );
+  await expectBlocked(page, 200, 600);
   await shot(page, 'walkthrough-2-new-agent');
 
+  // Pressing it opens the form, and Ori's callout moves beside it: nothing is
+  // dimmed while the user works in the form.
   await page.locator('#newAgentBtn').click();
-  await expectStep(page, 3, '#cr-name', 'name');
+  await expectCallout(page, 3, '#cr-name', 'Give them a name');
   await shot(page, 'walkthrough-3-name');
 
-  await page.locator('[data-ori-quest-choice="keep-name"]').click();
-  await expectStep(page, 4, '#cr-appearance-host', 'face');
+  await page.locator('[data-ori-spotlight-choice="keep-name"]').click();
+  await expectCallout(page, 4, '#cr-appearance-host', 'Pick a face');
   await shot(page, 'walkthrough-4-face');
 
-  await page.locator('[data-ori-quest-choice="keep-face"]').click();
-  await expectStep(page, 5, '#cr-focus-group', 'focus');
+  await page.locator('[data-ori-spotlight-choice="keep-face"]').click();
+  await expectCallout(page, 5, '#cr-focus-group', 'Choose their focus');
   await shot(page, 'walkthrough-5-focus');
 
   // Ticking a box is the form's own signal; it must not move focus to Hire.
   await page.locator('#cr-focus-group input[value="prepare_for_meetings"]').check();
-  const hire = await expectStep(page, 6, '#createSubmit', 'hire');
+  const hire = await expectCallout(page, 6, '#createSubmit', 'Hire them');
   check(hire.focused !== '#createSubmit', `focus stayed in the form (${hire.focused || 'body'})`);
   await shot(page, 'walkthrough-6-hire');
 
@@ -324,9 +414,12 @@ async function stageFormAlone({ viewport, closePanel, prefix }) {
   await closeOnboarding(page);
   await page.goto(`${baseUrl}/agents?quest=meet-assistant`);
   if (closePanel) {
-    await expectStep(page, 2, '#newAgentBtn', 'New Agent');
-    await page.locator('#oriGuideClose').click();
-    check(await page.locator('#oriGuidePanel').isHidden(), "Ori's panel is closed");
+    // Not now on the spotlight: the page is the user's again, and the form
+    // alone still hires.
+    await expectSpotlight(page, 2, '#newAgentBtn', 'Press New Agent');
+    await page.locator('[data-ori-spotlight="later"]').click();
+    check((await page.locator('#oriSpotlight').count()) === 0, 'Not now closed the spotlight');
+    check(await page.locator('#oriGuidePanel').isHidden(), "Ori's panel stays closed");
   }
   await page.locator('#newAgentBtn').click();
   await page.locator('#cr-name').waitFor();
@@ -371,22 +464,44 @@ async function stageModal() {
     .locator('#onboardingModal.show')
     .waitFor({ state: 'detached', timeout: 5000 })
     .catch(() => {});
-  await page.waitForTimeout(2000);
   check(!(await page.locator('#onboardingModal.show').isVisible()), 'the modal closed on Home');
   const onboarding = await api(page, '/api/onboarding/status');
   check(onboarding.body?.needs_onboarding === false, 'onboarding is complete without a hire');
   check((await relationshipState(page)) === 'needs_hire', 'no assistant was hired');
   check(hireRequests.length === 0, `the modal sent no hire request (${hireRequests.length})`);
-  await shot(page, 'modal-closed-home');
+
+  // The modal hands over to Ori's briefing, in the centre, over a quiet page.
+  await checkBriefing(page);
+  await shot(page, 'modal-briefing');
+
+  // Not now: the page is the user's. Nothing is hired or skipped.
+  await page.locator('[data-ori-spotlight="later"]').click();
+  check((await page.locator('#oriSpotlight').count()) === 0, 'Not now closed the briefing');
+  check((await relationshipState(page)) === 'needs_hire', 'still no assistant');
+  check((await missionOne(page)).status === 'available', 'Mission 01 is still open');
+
+  // A plain Home visit afterwards stays quiet: the mission waits on its card.
+  await page.goto(`${baseUrl}/`);
+  await page.waitForTimeout(2000);
+  const quiet = await spotlightState(page);
+  check(!quiet.mode && !quiet.guideOpen, 'a plain Home visit shows no layer and no panel');
+  await shot(page, 'home-quiet');
 
   // An old /?hire=1 link starts Mission 01 from its first step, on Home.
   await page.goto(`${baseUrl}/?hire=1`);
   await page.waitForURL(url => url.pathname === '/' && !url.search.includes('hire'), {
     timeout: 15000
   });
-  await expectStep(page, 1, '#navAgentsLink', 'Agents nav');
+  await expectSpotlight(page, 1, '#navAgentsLink', 'Click Agents');
   check(true, `/?hire=1 landed on ${new URL(page.url()).pathname}${new URL(page.url()).search}`);
   await shot(page, 'old-hire-link');
+  // Escape always leaves.
+  await page.keyboard.press('Escape');
+  check((await page.locator('#oriSpotlight').count()) === 0, 'Escape closed the spotlight');
+  check(
+    (await page.locator('.is-ori-coachmark').count()) === 0,
+    'and took the mark off the Agents entry'
+  );
 
   // Ask Ori for work while there is no assistant to send it to.
   await page.goto(`${baseUrl}/agents`);
@@ -421,6 +536,59 @@ async function stageModal() {
   await page.close();
 }
 
+// Ori's briefing right after onboarding: the centre of the screen, one mission,
+// and a page behind it that cannot be reached.
+async function checkBriefing(page) {
+  const briefing = page.locator('.ori-spotlight__briefing');
+  await briefing.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
+  check(await briefing.isVisible(), 'Ori’s briefing is up');
+  // Let it finish rising into place.
+  await page.waitForTimeout(400);
+  const seen = await page.evaluate(() => {
+    const card = document.querySelector('.ori-spotlight__briefing');
+    const rect = card?.getBoundingClientRect();
+    const text = sel => card?.querySelector(sel)?.textContent || '';
+    return {
+      url: location.pathname + location.search,
+      greeting: text('.ori-spotlight__greeting'),
+      kicker: text('.ori-spotlight__kicker'),
+      title: text('.ori-spotlight__mission-title'),
+      steps: Array.from(card?.querySelectorAll('.ori-spotlight__step') || []).map(
+        li => li.lastChild.textContent
+      ),
+      unlocks: text('.ori-spotlight__unlocks'),
+      focused: document.activeElement?.dataset?.oriSpotlight || '',
+      centred:
+        !!rect &&
+        Math.abs(rect.left + rect.width / 2 - innerWidth / 2) < 2 &&
+        Math.abs(rect.top + rect.height / 2 - innerHeight / 2) < 2,
+      navInert: !!document.getElementById('navAgentsLink')?.closest('[inert]'),
+      guideOpen: !document.getElementById('oriGuidePanel')?.hidden
+    };
+  });
+  check(seen.url === '/', `the URL was tidied (${seen.url})`);
+  check(
+    seen.greeting === 'Hi Sam. Before anything else, let’s meet your assistant.',
+    `greeting: "${seen.greeting}"`
+  );
+  check(
+    seen.kicker === 'Starter · Mission 01' && seen.title === 'Meet your assistant',
+    `mission: ${seen.kicker} · ${seen.title}`
+  );
+  check(
+    seen.steps.join('|') === 'Open Agents|New Agent|Name|Face|Focus|Hire',
+    `six steps: ${seen.steps.join(', ')}`
+  );
+  check(
+    /^Unlocks Build My HQ and 3 more missions\.$/.test(seen.unlocks),
+    `unlocks: "${seen.unlocks}"`
+  );
+  check(seen.focused === 'start', `focus starts on Start mission (${seen.focused || 'none'})`);
+  check(seen.centred, 'the briefing is in the centre of the screen');
+  check(seen.navInert, 'the page behind the briefing is inert');
+  check(!seen.guideOpen, "Ori's docked panel stays closed");
+}
+
 async function finishModalWithoutModel(page) {
   await page.goto(`${baseUrl}/`);
   await page.locator('#onboardingModal.show').waitFor({ timeout: 15000 });
@@ -435,16 +603,26 @@ async function stageHome() {
   const page = await newPage();
   await finishModalWithoutModel(page);
 
-  // Home before the hire: Mission 01's first step, on the Agents nav entry.
-  const prompt = await expectStep(page, 1, '#navAgentsLink', 'Agents nav');
+  // Onboarding hands over to Ori's briefing: the centre of the screen, one
+  // mission.
+  await checkBriefing(page);
+  await shot(page, 'home-1-briefing');
+
+  // Start mission: the briefing opens into the first step, the page dimmed
+  // around the Agents nav entry, which is the only thing a click reaches.
+  await page.locator('[data-ori-spotlight="start"]').click();
+  const first = await expectSpotlight(page, 1, '#navAgentsLink', 'Click Agents');
   check(
-    prompt.answer === 'Your assistant works from the Agents page. Click Agents to go meet them.',
-    `Home prompt: "${prompt.answer}"`
+    first.body === 'Your assistant works from the Agents page.',
+    `step 1 says why: "${first.body}"`
   );
-  check(
-    (await page.locator('[data-ori-quest-choice="go"]').count()) === 1,
-    'Take me there is offered'
-  );
+  check(first.focused === '#navAgentsLink', `focus is on Agents (${first.focused || 'none'})`);
+  await expectBlocked(page, 640, 600);
+  await shot(page, 'home-2-step-1');
+  // Escape leaves; the mission card's Start comes back to the same step.
+  await page.keyboard.press('Escape');
+  check((await page.locator('#oriSpotlight').count()) === 0, 'Escape closed the spotlight');
+
   const banner = (await page.locator('#personalAssistantTodayBanner').textContent()).trim();
   check(banner === 'Meet your assistant to start Today.', `Today is quiet: "${banner}"`);
   check(
@@ -452,7 +630,6 @@ async function stageHome() {
       '/?quest=meet-assistant',
     "Today's one link is Mission 01"
   );
-  await shot(page, 'home-1-prompt');
 
   // The mission board: Mission 01 on the card, 02-05 locked beneath it.
   await page.locator('#cockpitQuestsToggle').click();
@@ -475,30 +652,36 @@ async function stageHome() {
     (await start.getAttribute('href')) === '/?quest=meet-assistant',
     `the card's Start begins the walkthrough (${await start.getAttribute('href')})`
   );
-  await shot(page, 'home-2-missions');
+  await shot(page, 'home-3-missions');
 
-  // Start on the card: Ori walks every click, beginning with the nav entry.
+  // Start on the card goes straight to the first step: no second briefing.
   // The user clicks the Agents link themselves; nothing is clicked for them.
   await start.click();
   await page.waitForURL(url => url.pathname === '/' && !url.search.includes('quest='), {
     timeout: 15000
   });
-  await expectStep(page, 1, '#navAgentsLink', 'Agents nav');
-  await shot(page, 'home-3-start-step-1');
+  await expectSpotlight(page, 1, '#navAgentsLink', 'Click Agents');
+  check((await page.locator('.ori-spotlight__briefing').count()) === 0, 'no briefing this time');
   await page.locator('#navAgentsLink').click();
   await page.waitForURL(url => url.pathname === '/agents', { timeout: 15000 });
-  await expectStep(page, 2, '#newAgentBtn', 'New Agent');
+  // The same spotlight carries on: New Agent is the one lit control.
+  const second = await expectSpotlight(page, 2, '#newAgentBtn', 'Press New Agent');
+  check(!second.guideOpen, "Ori's docked panel stays closed");
   await shot(page, 'home-4-step-2-new-agent');
+  // The form opens, and Ori's callout moves beside it, pointing at each field.
   await page.locator('#newAgentBtn').click();
-  await expectStep(page, 3, '#cr-name', 'name');
+  await expectCallout(page, 3, '#cr-name', 'Give them a name');
+  await shot(page, 'home-5-step-3-name');
   await page.locator('#cr-name').fill('Atlas');
   await page.locator('#cr-name').press('Tab');
-  await expectStep(page, 4, '#cr-appearance-host', 'face');
-  await page.locator('[data-ori-quest-choice="keep-face"]').click();
-  await expectStep(page, 5, '#cr-focus-group', 'focus');
-  await page.locator('[data-ori-quest-choice="done-choosing"]').click();
-  await expectStep(page, 6, '#createSubmit', 'hire');
-  await shot(page, 'home-5-step-6-hire');
+  await expectCallout(page, 4, '#cr-appearance-host', 'Pick a face');
+  await shot(page, 'home-6-step-4-face');
+  await page.locator('[data-ori-spotlight-choice="keep-face"]').click();
+  await expectCallout(page, 5, '#cr-focus-group', 'Choose their focus');
+  await shot(page, 'home-7-step-5-focus');
+  await page.locator('[data-ori-spotlight-choice="done-choosing"]').click();
+  await expectCallout(page, 6, '#createSubmit', 'Hire them');
+  await shot(page, 'home-8-step-6-hire');
   await hireAndLand(page);
 
   // The hand-over, and Build My HQ running.
@@ -513,14 +696,14 @@ async function stageHome() {
   const handOver = await guideStep(page);
   check(/^That’s your assistant\./.test(handOver.answer), `hand-over: "${handOver.answer}"`);
   check(handOver.step === 'Step 1 of 3', `Build My HQ is running (${handOver.step})`);
-  await shot(page, 'home-6-handover');
+  await shot(page, 'home-9-handover');
 
   // Build My HQ to the end: the site, the Build action, the form, confirm.
   await page.locator('[data-hq-site]').click();
   await page.locator('[data-hq-action="build"]').click();
   const buildModal = page.locator('#hqBuildModal');
   await buildModal.waitFor({ state: 'visible', timeout: 10000 });
-  await shot(page, 'home-7-build-form');
+  await shot(page, 'home-10-build-form');
   await page.locator('#hqBuildSubmitBtn').click();
   // Poll from here: waitForFunction takes an async predicate's promise as
   // truthy and returns at once.
@@ -535,7 +718,7 @@ async function stageHome() {
   const hq = (body?.missions || []).find(mission => mission.order === 2) || {};
   check(hq.status === 'completed', `Mission 02 (Build My HQ) is ${hq.status}`);
   await page.waitForTimeout(1500);
-  await shot(page, 'home-8-hq-built');
+  await shot(page, 'home-11-hq-built');
   await page.close();
 }
 

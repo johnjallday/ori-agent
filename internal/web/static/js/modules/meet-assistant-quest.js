@@ -9,6 +9,14 @@
  * this controller carries on from there, pointing at each control in turn: New
  * Agent, the name, the face, the focus, Hire.
  *
+ * Two presentations. When the user arrived through the mission (the Home step,
+ * or ?quest=meet-assistant), Ori's own layer carries it (ori-spotlight.js): New
+ * Agent is the one lit control on a dimmed page, as Agents was on Home, and
+ * then Ori's callout sits beside the form, pointing at each field, without
+ * dimming anything, because there the user works in several fields at once. A
+ * plain visit to the Agents page, and a screen too narrow to fit the callout
+ * beside the form, use Ori's docked panel instead.
+ *
  * What it is:
  *   - Deterministic. Every string here is host copy written in this file. No
  *     request reaches /api/ori-guide, no model is consulted, and the whole
@@ -45,6 +53,11 @@
   var CHOICE_KEEP_FACE = 'keep-face';
   var CHOICE_DONE_CHOOSING = 'done-choosing';
 
+  // Set by the Home step when the user presses the Agents nav entry
+  // (MEET_ASSISTANT_GUIDED_FLAG in personal-assistant-hire.js; this script
+  // cannot import it, and a test pins the two together).
+  var GUIDED_FLAG = 'ori:meet-assistant-guided';
+
   var state = {
     active: false,
     step: 0,
@@ -54,6 +67,10 @@
     // The user chose the ordinary form instead. The mission stays open; the
     // presentation waits until the preset comes back.
     detoured: false,
+    // The steps are presented in Ori's layer rather than in Ori's panel.
+    spotlight: false,
+    // The step Ori's layer is showing, or 0.
+    layerStep: 0,
     bound: false
   };
 
@@ -70,8 +87,27 @@
   // soon as its collection loads, and that drops the parameter.
   var requestedAtLoad = questRequestedInURL();
 
+  // Read and cleared once: the flag is for this arrival only.
+  function takeGuidedFlag() {
+    try {
+      var storage = typeof window !== 'undefined' ? window.sessionStorage : null;
+      if (!storage) return false;
+      var value = storage.getItem(GUIDED_FLAG);
+      if (value !== null) storage.removeItem(GUIDED_FLAG);
+      return value === '1';
+    } catch (_) {
+      return false;
+    }
+  }
+  var guidedAtLoad = takeGuidedFlag();
+
   function guide() {
     return typeof window !== 'undefined' ? window.OriGuide : null;
+  }
+
+  function spotlightLayer() {
+    var layer = typeof window !== 'undefined' ? window.OriSpotlight : null;
+    return layer && typeof layer.showSpotlight === 'function' ? layer : null;
   }
 
   // Drops ?quest= from the URL without adding a history entry, so a reload or a
@@ -140,6 +176,31 @@
     };
   }
 
+  // The same steps, split into the callout's title and line (ori-spotlight.js).
+  function calloutCopy(step) {
+    if (step === STEP_NEW_AGENT) {
+      return {
+        title: 'Press New Agent',
+        body: 'Your assistant starts as an agent like any other.',
+        note: 'Nothing is created until you press Hire.'
+      };
+    }
+    if (step === STEP_NAME) return { title: 'Give them a name', body: 'You can change it later.' };
+    if (step === STEP_FACE) {
+      return { title: 'Pick a face', body: 'One is already suggested. Keep it, or pick another.' };
+    }
+    if (step === STEP_FOCUS) {
+      return {
+        title: 'Choose their focus',
+        body: 'What should they help with this week? Tick what fits.'
+      };
+    }
+    return {
+      title: 'Hire them',
+      body: 'This creates one assistant and nothing else: no workspace, no permissions, no accounts.'
+    };
+  }
+
   function coachmarkFor(step) {
     if (step === STEP_NEW_AGENT) return 'new_agent';
     if (step === STEP_NAME) return 'assistant_name';
@@ -160,11 +221,84 @@
 
   /* ---- presentation -------------------------------------------------------- */
 
+  function openPanel() {
+    var g = guide();
+    if (g && typeof g.open === 'function' && typeof g.isOpen === 'function' && !g.isOpen()) {
+      try {
+        // skipGreeting: the step renders immediately after. Without it,
+        // open()'s own async greeting lands after and overwrites the step.
+        g.open(null, { skipGreeting: true });
+      } catch (_) {
+        /* the step still renders into the panel body */
+      }
+    }
+  }
+
+  function closeLayer() {
+    if (!state.layerStep) return;
+    state.layerStep = 0;
+    var layer = spotlightLayer();
+    if (layer && typeof layer.close === 'function') layer.close();
+  }
+
+  // Not now on Ori's callout: the same as closing Ori's panel. The form keeps
+  // working and the walkthrough keeps count; opening Ori resumes in the panel.
+  function onLayerLater() {
+    state.layerStep = 0;
+    state.spotlight = false;
+    state.paused = true;
+  }
+
+  // The steps of a mission the user arrived through: New Agent lit on a dimmed
+  // page, then Ori's callout beside the form, pointing at each field.
+  function presentInLayer(step, focus) {
+    var layer = spotlightLayer();
+    if (!layer) return false;
+    // Already up: the layer follows the control through re-renders itself.
+    if (state.layerStep === step) return true;
+    state.layerStep = step;
+    var copy = calloutCopy(step);
+    var opts = {
+      coachmark: coachmarkFor(step),
+      index: step,
+      total: TOTAL_STEPS,
+      title: copy.title,
+      body: copy.body,
+      note: copy.note || '',
+      laterLabel: 'Not now',
+      onLater: onLayerLater,
+      focus: focus !== false
+    };
+    var shown;
+    if (step === STEP_NEW_AGENT) {
+      shown = layer.showSpotlight(opts);
+    } else {
+      opts.anchor = '#createPanel';
+      opts.choices = choicesFor(step);
+      opts.onChoice = function (id) {
+        onQuestChoice({ detail: { quest: QUEST_ID, choice: id } });
+      };
+      shown = layer.showCallout(opts);
+    }
+    shown.then(function (ok) {
+      if (ok || !state.active || state.layerStep !== step) return;
+      // Nothing to point at, or no room beside the form (a phone-width sheet):
+      // say it in Ori's panel instead, for the rest of the mission.
+      state.layerStep = 0;
+      state.spotlight = false;
+      layer.close();
+      openPanel();
+      present(step, focus);
+    });
+    return true;
+  }
+
   // present shows a step. focus: false keeps focus where the user is working:
   // a step the form itself advanced to must not pull them out of the form.
   function present(step, focus) {
     state.step = step;
     if (state.paused || state.detoured) return false;
+    if (state.spotlight && presentInLayer(step, focus)) return true;
     var g = guide();
     if (!g || typeof g.presentQuestStep !== 'function') return false;
     var copy = stepCopy(step);
@@ -213,19 +347,13 @@
     state.step = 0;
     state.paused = false;
     state.detoured = false;
+    // Arrived through the mission: the one-click step stays a spotlight.
+    state.spotlight = (requestedAtLoad || guidedAtLoad) && !!spotlightLayer();
 
-    var g = guide();
-    if (g && typeof g.open === 'function' && typeof g.isOpen === 'function' && !g.isOpen()) {
-      try {
-        // skipGreeting: the step below renders immediately after. Without it,
-        // open()'s own async greeting lands after and overwrites the step.
-        g.open(null, { skipGreeting: true });
-      } catch (_) {
-        /* the step still renders into the panel body */
-      }
-    }
     // A New Agent press that beat this start already opened the preset.
-    if (presetOpen()) present(STEP_NAME, false);
+    var first = presetOpen() ? STEP_NAME : STEP_NEW_AGENT;
+    if (!state.spotlight) openPanel();
+    if (first === STEP_NAME) present(STEP_NAME, false);
     else present(STEP_NEW_AGENT);
     clearQuestParam();
     return true;
@@ -238,6 +366,8 @@
     state.step = 0;
     state.paused = false;
     state.detoured = false;
+    closeLayer();
+    state.spotlight = false;
     var g = guide();
     if (g && typeof g.clearQuestStep === 'function') g.clearQuestStep();
   }
@@ -251,6 +381,7 @@
       // "Create a different kind of agent instead": stop pointing at a form
       // that is not on screen, without skipping or completing anything.
       state.detoured = true;
+      closeLayer();
       var g = guide();
       if (g && typeof g.clearQuestStep === 'function') g.clearQuestStep();
       return;
@@ -368,6 +499,7 @@
     _choicesFor: choicesFor,
     _init: init,
     QUEST_ID: QUEST_ID,
+    GUIDED_FLAG: GUIDED_FLAG,
     STEP_NEW_AGENT: STEP_NEW_AGENT,
     STEP_NAME: STEP_NAME,
     STEP_FACE: STEP_FACE,

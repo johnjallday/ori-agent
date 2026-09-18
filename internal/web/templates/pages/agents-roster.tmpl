@@ -439,6 +439,10 @@
   <!-- Mission 01: the hire preset's requests and views (window.OriAssistantHire).
        agents-roster.js reads the seam at use time, never at load. -->
   <script type="module" src="/js/modules/personal-assistant-hire.js"></script>
+  <!-- Mission 01: Ori's blocking layer (window.OriSpotlight), which lights New
+       Agent when the user arrives through the mission. Before the walkthrough:
+       modules run in document order. -->
+  <script type="module" src="/js/modules/ori-spotlight.js"></script>
   <!-- Mission 01: Ori's walkthrough of the preset. Loaded here, not in base.tmpl:
        this page assembles its own script list. -->
   <script type="module" src="/js/modules/meet-assistant-quest.js"></script>

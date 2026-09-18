@@ -445,21 +445,43 @@ test.describe('Personal Assistant Foundation first value', () => {
     await expect.poll(() => onboardingComplete).toBe(true);
     expect(hireCalls).toBe(0);
 
-    // Home before the hire: Mission 01's first step. Ori points at the Agents
-    // page; on a phone the navbar is collapsed, so Take me there is the way on.
-    const reply = page.locator('#oriGuideReply');
-    const step = reply.locator('.ori-guide__quest-step');
-    await expect(reply).toContainText('Your assistant works from the Agents page');
-    await expect(step).toHaveText('Step 1 of 6');
-    await page.locator('[data-ori-quest-choice="go"]').click();
+    // The modal hands over to Ori's Mission 01 briefing, in the middle of a
+    // dimmed Home.
+    const layer = page.locator('#oriSpotlight');
+    const briefing = layer.locator('.ori-spotlight__briefing');
+    await expect(briefing).toBeVisible();
+    await expect(briefing.locator('.ori-spotlight__greeting')).toContainText(
+      'let’s meet your assistant'
+    );
+    await expect(briefing.locator('.ori-spotlight__step')).toHaveCount(6);
+    await expect(briefing.locator('[data-ori-spotlight="start"]')).toBeFocused();
+    await expect(page.locator('#oriGuidePanel')).toBeHidden();
+    await briefing.locator('[data-ori-spotlight="start"]').click();
+
+    // Step 1: the page is dimmed around the Agents nav entry, which the user
+    // presses themselves. The navbar wraps on a phone, so Agents is in reach.
+    const callout = layer.locator('.ori-spotlight__callout');
+    await expect(layer).toHaveAttribute('data-mode', 'spotlight');
+    await expect(callout.locator('.ori-spotlight__callout-step')).toHaveText('Step 1 of 6');
+    await expect(callout.locator('.ori-spotlight__callout-title')).toHaveText('Click Agents');
+    await expect(page.locator('#navAgentsLink')).toHaveClass(/is-ori-coachmark/);
+    await page.locator('#navAgentsLink').click();
     await page.waitForURL(url => url.pathname === '/agents');
 
-    // Mission 01 on a phone: the Inspector sheet covers Ori's panel, so the
-    // form alone moves the walkthrough on, one step per signal.
-    await expect(step).toHaveText('Step 2 of 6');
+    // Step 2: the same spotlight, on New Agent.
+    await expect(layer).toHaveAttribute('data-mode', 'spotlight');
+    await expect(callout.locator('.ori-spotlight__callout-step')).toHaveText('Step 2 of 6');
     await expect(page.locator('#newAgentBtn')).toHaveClass(/is-ori-coachmark/);
     await page.locator('#newAgentBtn').click();
+
+    // The form's steps on a phone: the Inspector is a full-screen sheet with no
+    // room beside it for Ori's callout, so the walkthrough carries on in Ori's
+    // panel (under the sheet), and the form alone moves it on, one step per
+    // signal.
+    const reply = page.locator('#oriGuideReply');
+    const step = reply.locator('.ori-guide__quest-step');
     await expect(step).toHaveText('Step 3 of 6');
+    await expect(layer).toHaveCount(0);
     await expect(page.locator('#cr-name')).toBeFocused();
     await expect(page.locator('#cr-name')).toHaveClass(/is-ori-coachmark/);
     for (const absent of ['#cr-role', '#cr-model', '#cr-description']) {

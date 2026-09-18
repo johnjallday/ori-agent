@@ -294,8 +294,9 @@ function stubModalDom({ search = '' } = {}) {
 }
 
 // Onboarding is two phases now. Leaving Model closes it: no hire is ever sent
-// from the modal, and the browser goes Home, where Mission 01 waits (PRD FR2).
-test('leaving the Model phase completes onboarding and goes Home without a hire', async () => {
+// from the modal, and the browser goes Home to Ori's Mission 01 briefing (PRD
+// FR2).
+test('leaving the Model phase completes onboarding and hands over to the Mission 01 briefing', async () => {
   for (const skipModel of [true, false]) {
     const dom = stubModalDom();
     const requests = [];
@@ -318,7 +319,7 @@ test('leaving the Model phase completes onboarding and goes Home without a hire'
         'the modal sent a hire request'
       );
       assert.equal(hidden, 1);
-      assert.deepEqual(dom.navigations, ['/']);
+      assert.deepEqual(dom.navigations, ['/?quest=meet-assistant&briefing=1']);
       assert.equal(manager.modelConfigured, !skipModel);
     } finally {
       globalThis.fetch = priorFetch;
@@ -366,7 +367,7 @@ test('the progress shell counts two onboarding phases', () => {
 });
 
 // /?hire=1 opened the retired wizard. Old links land where the hire happens now.
-test('an old /?hire=1 link goes to Mission 01 on the Agents page', async () => {
+test('an old /?hire=1 link goes to Mission 01’s first step', async () => {
   const dom = stubModalDom({ search: '?hire=1' });
   const priorFetch = globalThis.fetch;
   const priorBootstrap = globalThis.bootstrap;

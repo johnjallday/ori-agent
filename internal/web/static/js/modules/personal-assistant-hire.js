@@ -16,16 +16,24 @@
 export const HQ_QUEST_ROUTE = '/?quest=build-hq';
 
 // Mission 01's action URL: the walkthrough from its first step, on Home, where
-// Ori points at the Agents nav entry for the user to click. Every entry that
-// starts the hire resolves here: the Home mission card, Today's banner, Ask
-// Ori's hand-off, and the retired /?hire=1 link.
+// Ori dims the page around the Agents nav entry for the user to click. Every
+// entry that starts the hire resolves here: the Home mission card, Today's
+// banner, Ask Ori's hand-off, and the retired /?hire=1 link.
 export const MEET_ASSISTANT_QUEST_ROUTE = '/?quest=meet-assistant';
 
+// Where first-run onboarding hands over: Ori's mission briefing in the centre
+// of Home, whose Start opens the same first step.
+export const MEET_ASSISTANT_BRIEFING_ROUTE = '/?quest=meet-assistant&briefing=1';
+
 // The Agents page leg of the same walkthrough, for an entry that is already on
-// its way there: the first step's "Take me there", the repair banners (a
-// reconnect or resume view opens straight away on arrival), and the pointer on
-// /agents/create.
+// its way there: the repair banners (a reconnect or resume view opens straight
+// away on arrival), the pointer on /agents/create, and Ask Ori on /agents.
 export const MEET_ASSISTANT_AGENTS_ROUTE = '/agents?quest=meet-assistant';
+
+// Set in sessionStorage when the user presses the Agents nav entry from the
+// first step, read (and cleared) by the Agents page so its first step keeps the
+// same spotlight rather than switching to Ori's panel mid-mission.
+export const MEET_ASSISTANT_GUIDED_FLAG = 'ori:meet-assistant-guided';
 
 // Set in sessionStorage the moment a hire succeeds, read (and cleared) by the
 // Build My HQ walkthrough so its first step can say the hand-over line.
@@ -312,7 +320,9 @@ if (typeof window !== 'undefined') {
   window.OriAssistantHire = Object.freeze({
     HQ_QUEST_ROUTE,
     MEET_ASSISTANT_QUEST_ROUTE,
+    MEET_ASSISTANT_BRIEFING_ROUTE,
     MEET_ASSISTANT_AGENTS_ROUTE,
+    MEET_ASSISTANT_GUIDED_FLAG,
     JUST_HIRED_FLAG,
     DEFAULT_ASSISTANT_NAME,
     ASSISTANT_NAME_MAX_LENGTH,

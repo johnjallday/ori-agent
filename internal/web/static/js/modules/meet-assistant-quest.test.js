@@ -12,9 +12,24 @@ function load({
   search = '',
   relationship = 'needs_hire',
   presetOpen = false,
-  guideOpen = false
+  guideOpen = false,
+  // Ori's blocking layer (ori-spotlight.js), and whether it finds and fits
+  // what it is asked to show.
+  layer = false,
+  layerFits = true,
+  // sessionStorage, for the flag the Home step leaves.
+  session = {}
 } = {}) {
-  const calls = { fetches: [], presented: [], cleared: 0, opened: 0, replaced: [] };
+  const calls = {
+    fetches: [],
+    presented: [],
+    cleared: 0,
+    opened: 0,
+    replaced: [],
+    layer: [],
+    layerClosed: 0
+  };
+  const store = { ...session };
   const listeners = { window: {}, document: {} };
 
   const guide = {
@@ -78,11 +93,30 @@ function load({
       }
     },
     OriGuide: guide,
+    sessionStorage: {
+      getItem: key => (Object.prototype.hasOwnProperty.call(store, key) ? store[key] : null),
+      removeItem: key => {
+        delete store[key];
+      }
+    },
     addEventListener: (type, fn) => {
       listeners.window[type] = listeners.window[type] || [];
       listeners.window[type].push(fn);
     }
   };
+  if (layer) {
+    const show = kind => opts => {
+      calls.layer.push({ kind, ...opts });
+      return Promise.resolve(layerFits);
+    };
+    sandbox.window.OriSpotlight = {
+      showSpotlight: show('spotlight'),
+      showCallout: show('callout'),
+      close: () => {
+        calls.layerClosed += 1;
+      }
+    };
+  }
   sandbox.document = {
     readyState: 'complete',
     getElementById: id => (elements[id] ? elements[id]() : null),
@@ -103,6 +137,7 @@ function load({
     quest: sandbox.window.OriMeetAssistantQuest,
     calls,
     page,
+    store,
     // The roster announces every create-panel render.
     openPanel(mode = 'assistant') {
       page.panelHidden = false;
@@ -350,4 +385,131 @@ test('the walkthrough is inert when the guide is not on the page', async () => {
   bare.calls.presented.length = 0;
   // A page without the guide: nothing may throw.
   assert.doesNotThrow(() => bare.openPanel());
+});
+
+/* ---- Ori's layer, for a user who arrived through the mission --------------- */
+
+const GUIDED = { 'ori:meet-assistant-guided': '1' };
+const layerSteps = calls => calls.layer.map(entry => `${entry.kind}:${entry.index}`);
+
+test('arriving from the Home step lights New Agent, with Ori’s panel left closed', async () => {
+  for (const arrival of [{ session: GUIDED }, { search: '?quest=meet-assistant' }]) {
+    const loaded = load({ layer: true, ...arrival });
+    await settle();
+    assert.deepEqual(layerSteps(loaded.calls), ['spotlight:2']);
+    const lit = loaded.calls.layer[0];
+    assert.equal(lit.coachmark, 'new_agent');
+    assert.equal(lit.total, 6);
+    assert.equal(lit.title, 'Press New Agent');
+    assert.equal(lit.body, 'Your assistant starts as an agent like any other.');
+    assert.equal(lit.note, 'Nothing is created until you press Hire.');
+    assert.equal(loaded.calls.opened, 0, 'Ori’s panel was opened');
+    assert.deepEqual(loaded.calls.presented, []);
+  }
+});
+
+test('the Home step’s flag is for one arrival only', async () => {
+  const loaded = load({ layer: true, session: GUIDED });
+  await settle();
+  assert.equal(loaded.store['ori:meet-assistant-guided'], undefined);
+});
+
+test('a plain visit to the Agents page starts in Ori’s panel', async () => {
+  const loaded = load({ layer: true });
+  await settle();
+  assert.deepEqual(loaded.calls.layer, []);
+  assert.equal(loaded.calls.opened, 1);
+  assert.deepEqual(steps(loaded.calls), [2]);
+});
+
+test('the form’s steps are Ori’s callout beside the form, never the panel', async () => {
+  const loaded = load({ layer: true, session: GUIDED });
+  await settle();
+  loaded.openPanel();
+  let step = loaded.calls.layer.at(-1);
+  assert.equal(step.kind, 'callout');
+  assert.equal(step.index, 3);
+  assert.equal(step.anchor, '#createPanel');
+  assert.equal(step.title, 'Give them a name');
+  // Spread: the arrays come from the vm's realm.
+  assert.deepEqual([...step.choices.map(choice => choice.id)], ['keep-name']);
+
+  // A choice made in the callout moves on, and focuses the control it names.
+  step.onChoice('keep-name');
+  step = loaded.calls.layer.at(-1);
+  assert.equal(step.index, 4);
+  assert.equal(step.title, 'Pick a face');
+  assert.equal(step.focus, true);
+
+  // The form's own signal moves on too, without taking focus out of the form.
+  loaded.change('focus');
+  step = loaded.calls.layer.at(-1);
+  assert.equal(step.index, 5);
+  assert.equal(step.focus, false);
+  loaded.choose('done-choosing');
+  step = loaded.calls.layer.at(-1);
+  assert.equal(step.index, 6);
+  assert.equal(step.title, 'Hire them');
+  assert.equal(step.choices.length, 0);
+
+  assert.deepEqual(layerSteps(loaded.calls), [
+    'spotlight:2',
+    'callout:3',
+    'callout:4',
+    'callout:5',
+    'callout:6'
+  ]);
+  assert.equal(loaded.calls.opened, 0);
+  assert.deepEqual(loaded.calls.presented, []);
+});
+
+test('a re-render of the form does not show the same callout again', async () => {
+  const loaded = load({ layer: true, session: GUIDED });
+  await settle();
+  loaded.openPanel();
+  loaded.openPanel();
+  assert.deepEqual(layerSteps(loaded.calls), ['spotlight:2', 'callout:3']);
+});
+
+test('Not now pauses Ori; the form keeps count, and opening Ori resumes in the panel', async () => {
+  const loaded = load({ layer: true, session: GUIDED });
+  await settle();
+  loaded.openPanel();
+  loaded.calls.layer.at(-1).onLater();
+  loaded.change('cr-name', 'Atlas');
+  assert.deepEqual(layerSteps(loaded.calls), ['spotlight:2', 'callout:3']);
+  assert.equal(loaded.quest._state.step, 4);
+
+  loaded.openGuide();
+  assert.equal(loaded.calls.presented.at(-1).index, 4);
+  assert.equal(loaded.calls.layer.length, 2, 'the layer came back after Not now');
+});
+
+test('no room beside the form: the step moves to Ori’s panel for the rest of the mission', async () => {
+  const loaded = load({ layer: true, layerFits: false, session: GUIDED });
+  await settle();
+  await settle();
+  // Nothing to light either: New Agent went to the panel.
+  assert.deepEqual(steps(loaded.calls), [2]);
+  assert.equal(loaded.calls.opened, 1);
+  loaded.openPanel();
+  assert.deepEqual(steps(loaded.calls), [2, 3]);
+  assert.deepEqual(layerSteps(loaded.calls), ['spotlight:2'], 'the layer was asked again');
+});
+
+test('the ordinary form closes Ori’s layer, and coming back brings the callout back', async () => {
+  const loaded = load({ layer: true, session: GUIDED });
+  await settle();
+  loaded.openPanel();
+  loaded.openPanel('standard');
+  assert.equal(loaded.calls.layerClosed, 1);
+  loaded.openPanel();
+  assert.deepEqual(layerSteps(loaded.calls), ['spotlight:2', 'callout:3', 'callout:3']);
+});
+
+test('stop closes Ori’s layer', async () => {
+  const loaded = load({ layer: true, session: GUIDED });
+  await settle();
+  loaded.quest.stop();
+  assert.equal(loaded.calls.layerClosed, 1);
 });

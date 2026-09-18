@@ -3,7 +3,10 @@
 import { loadOnboardingStatus } from './onboarding-gate.js';
 // The hire lives in personal-assistant-hire.js, the one hire path (Mission 01
 // on the Agents page). This modal only redirects old links to it.
-import { MEET_ASSISTANT_QUEST_ROUTE } from './personal-assistant-hire.js';
+import {
+  MEET_ASSISTANT_BRIEFING_ROUTE,
+  MEET_ASSISTANT_QUEST_ROUTE
+} from './personal-assistant-hire.js';
 
 const FALLBACK_TIMEZONES = [
   'UTC',
@@ -1745,8 +1748,9 @@ export class OnboardingManager {
     this.modelConfigured = !skipModel;
     await this.completeStep('step-model');
 
-    // Onboarding ends here. No hire is ever sent from this modal: Home offers
-    // Mission 01, which hires the assistant on the Agents page (PRD FR2).
+    // Onboarding ends here. No hire is ever sent from this modal: it hands over
+    // to Ori's Mission 01 briefing on Home, which hires the assistant on the
+    // Agents page (PRD FR2).
     try {
       const response = await fetch('/api/onboarding/complete', {
         method: 'POST',
@@ -1759,7 +1763,7 @@ export class OnboardingManager {
       return;
     }
     this.modalInstance?.hide();
-    window.location.href = '/';
+    window.location.href = MEET_ASSISTANT_BRIEFING_ROUTE;
   }
 
   async skipOnboarding() {

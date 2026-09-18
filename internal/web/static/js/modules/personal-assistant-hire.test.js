@@ -8,6 +8,8 @@ import {
   HQ_QUEST_ROUTE,
   JUST_HIRED_FLAG,
   MEET_ASSISTANT_AGENTS_ROUTE,
+  MEET_ASSISTANT_BRIEFING_ROUTE,
+  MEET_ASSISTANT_GUIDED_FLAG,
   MEET_ASSISTANT_QUEST_ROUTE,
   buildPersonalAssistantHirePayload,
   clearHireRequestId,
@@ -129,8 +131,11 @@ test('the routes and flags are the ones the rest of the app links to', () => {
   // Mission 01's action URL, the same string the server's quest carries: the
   // walkthrough from its first step, on Home.
   assert.equal(MEET_ASSISTANT_QUEST_ROUTE, '/?quest=meet-assistant');
+  // Where onboarding hands over: Ori's briefing, then that same first step.
+  assert.equal(MEET_ASSISTANT_BRIEFING_ROUTE, '/?quest=meet-assistant&briefing=1');
   // Its Agents page leg, for entries already on their way there.
   assert.equal(MEET_ASSISTANT_AGENTS_ROUTE, '/agents?quest=meet-assistant');
+  assert.equal(MEET_ASSISTANT_GUIDED_FLAG, 'ori:meet-assistant-guided');
   assert.equal(JUST_HIRED_FLAG, 'ori:assistant-just-hired');
   // The retired wizard's key, so a hire started there resumes here.
   assert.equal(HIRE_REQUEST_STORAGE_KEY, 'ori.personalAssistantHireRequestId');
@@ -145,6 +150,9 @@ test('every classic script names the same Mission 01 routes', () => {
       assert.ok(source.includes(`'${route}'`), `${file} does not name ${route}`);
     }
   }
+  // The Agents page walkthrough reads the flag the Home step sets.
+  const quest = readFileSync(new URL('./meet-assistant-quest.js', import.meta.url), 'utf8');
+  assert.ok(quest.includes(`'${MEET_ASSISTANT_GUIDED_FLAG}'`));
 });
 
 test('the hire offers the six focus areas with the wizard’s values and defaults', () => {
