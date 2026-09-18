@@ -16,6 +16,9 @@ var (
 	ErrOperationNotFound    = errors.New("reset operation is unknown; absence is not evidence of completion")
 	ErrAdmissionUncertain   = errors.New("reset admission is interrupted or uncertain; preserve recovery metadata and fully relaunch")
 	ErrActiveWork           = errors.New("active or unowned work prevents reset; finish that work and review again")
+	// ErrAgentsFolderUnconfirmed rejects a reset that removes the agents
+	// folder without the second confirmation naming that folder.
+	ErrAgentsFolderUnconfirmed = errors.New("this reset removes the agents in your Workspace Directory; confirm that folder too, then reset again")
 )
 
 // Lifecycle is supplied by runtime construction, never by HTTP. TryFence must
@@ -43,7 +46,7 @@ func NewCoordinator(lease *resetstate.Lease, planner *Planner, lifecycle Lifecyc
 }
 
 func ValidateExecuteRequest(req ExecuteRequest) error {
-	if req.Confirmation != "RESET" || !validID(req.PreviewID) || !validID(req.RequestID) {
+	if req.Confirmation != "RESET" || !validID(req.PreviewID) || !validID(req.RequestID) || len(req.ConfirmAgentsFolder) > 4096 {
 		return ErrInvalidRequest
 	}
 	return nil
@@ -97,6 +100,12 @@ func (c *Coordinator) Stage(ctx context.Context, req ExecuteRequest) (Operation,
 		}
 		if plan.Installation != c.lease.Path() {
 			return ErrScopeChanged
+		}
+		// The second confirmation must name the folder that was reviewed, so a
+		// stale or generic "yes" cannot remove a different Workspace
+		// Directory's agents.
+		if folder := plan.Evidence.AgentsFolder; folder != "" && req.ConfirmAgentsFolder != folder {
+			return ErrAgentsFolderUnconfirmed
 		}
 		j := newJournal(plan, req.RequestID, c.lease.Identity(), c.now().UTC())
 		// Include room for a bounded failure result before freezing the runtime.

@@ -67,7 +67,7 @@ func TestRecoverBeforeStoresAppliesSelectedCategoriesAndVerifiesSameOperation(t 
 		t.Fatalf("preview blockers: %+v", preview.Blockers)
 	}
 	op, err := coordinator.Stage(t.Context(), ExecuteRequest{
-		PreviewID: preview.ID, RequestID: "recovery-request", Confirmation: "RESET",
+		PreviewID: preview.ID, RequestID: "recovery-request", Confirmation: "RESET", ConfirmAgentsFolder: confirmedAgentsFolder(preview),
 	})
 	if err != nil || op.State != StateAwaitingRestart {
 		t.Fatalf("Stage = %+v, %v", op, err)
@@ -374,7 +374,7 @@ func TestStartFreshAppliesEveryEnumeratedOwnerAndPreservesProtectedBytes(t *test
 	lifecycle.drain = func(context.Context) error {
 		return errors.Join(owners.Workspaces.Close(), owners.Database.Close())
 	}
-	operation, err := coordinator.Stage(t.Context(), ExecuteRequest{PreviewID: preview.ID, RequestID: "fresh-fixture", Confirmation: "RESET"})
+	operation, err := coordinator.Stage(t.Context(), ExecuteRequest{PreviewID: preview.ID, RequestID: "fresh-fixture", Confirmation: "RESET", ConfirmAgentsFolder: confirmedAgentsFolder(preview)})
 	mustPreview(t, err)
 	if operation.State != StateAwaitingRestart {
 		t.Fatalf("staged Start Fresh = %+v", operation)

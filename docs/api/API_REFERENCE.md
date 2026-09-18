@@ -189,14 +189,39 @@ unchanged (`user` or `cli`) because it also seeds the generated appearance.
   "Agents" holds that folder. `agent_root.migration.status` is one of `done`,
   `blocked_by_workspace`, `not_writable`, `backup_failed`, `incomplete`,
   `root_missing`.
+- An agent whose `agent_settings.json` is not valid JSON is still listed, with
+  `"state": "unreadable"` and `"file": "<path>"`, so it can be fixed by hand.
+  Ori never loads, overwrites, or deletes it.
 
 **Errors on writes to an agent:**
 - `409` `{"code": "agent_changed_on_disk"}` — the definition file was edited
   outside Ori; Ori reloaded it. Review it and try again.
+- `409` `{"code": "agent_unreadable", "file"}` — the definition file is not
+  valid JSON; fix or remove that file.
 - `409` `{"code": "workspace_owned_agent", "workspace_id", "workspace_name"}` —
   only a workspace holds this agent; edit it there, or add it to your agents.
 - `503` `{"code": "agent_root_unavailable"}` — the Workspace Directory was not
   found.
+
+### Show an Agent's Folder
+
+Opens `<root>/Agents/<Name>/` in Finder (macOS only). The folder comes from the
+agent store by name; no path is taken from the request.
+
+**Endpoint:** `POST /api/agents/{name}/reveal`
+
+**Responses:** `200` `{"success": true, "path": "/Users/me/Ori Workspaces/Agents/Scout"}`;
+`404` for an agent with no folder in the Workspace Directory (the built-in
+assistant, a workspace-only agent); `501` on other platforms.
+
+### Agent Images
+
+`POST|DELETE /api/agents/{name}/appearance/upload` stores an uploaded image in
+the agent's own folder (`<root>/Agents/<Name>/<Name>.png`) for the user's
+agents, or in `<data dir>/agent_avatars/` for the built-in assistant.
+`GET /avatars/{filename}` finds the agent whose appearance names that file and
+serves it from that agent's folder; only image files are served, and a missing
+file is a `404` (the page then shows the generated appearance).
 
 ### Add a Workspace's Agent to Your Agents
 
@@ -459,6 +484,34 @@ Set or update the OpenAI API key.
   "message": "API key updated successfully"
 }
 ```
+
+### Reset: Confirming the Agents Folder
+
+A reset is reviewed first (`GET /api/reset/preview?intent=...&category=...`)
+and then confirmed (`POST /api/reset` with `preview_id`, `request_id`, and
+`"confirmation": "RESET"`). When the reviewed scope removes the user's agents
+from their Workspace Directory (the `agents` category, or Start Fresh), the
+preview carries:
+
+```json
+"agents_folder": {
+  "path": "/Users/me/Ori Workspaces/Agents",
+  "notice": "This folder is in your Workspace Directory, ... Other files there are kept.",
+  "confirmation_required": true
+}
+```
+
+and the confirmation must repeat that path:
+
+```json
+{ "preview_id": "...", "request_id": "...", "confirmation": "RESET",
+  "confirm_agents_folder": "/Users/me/Ori Workspaces/Agents" }
+```
+
+Without it, or with any other path, the reset is refused before anything is
+admitted: `409` `{"code": "agents_folder_confirmation_required"}`. The reset
+removes each agent folder (one holding `agent_settings.json`) and all runtime
+state in `<data dir>/agent_state/`; every other file in `Agents/` is kept.
 
 ## Vault API
 

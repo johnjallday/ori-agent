@@ -9,7 +9,12 @@
 # analyzer, so it prompts no matter how many rules exist. A script is one
 # stable token. Put the shell in here, not in the tool call.
 #
-# This worktree's feature: Blueprint-aware Create Workspace, Slices A and B
+# This worktree's feature: Agents in the Workspace Root
+# (tasks/prd-agents-in-workspace-root.md): confirm-root, seed-legacy-agents,
+# root-unmounted, drop-foreign-workspace, agent-files, agent-chat, and
+# agents-root-verify (the success metrics: two starts and a chat leave Agents/
+# unchanged under git).
+# Before it, Blueprint-aware Create Workspace, Slices A and B
 # (tasks/prd-blueprint-aware-create-workspace.md): reaper-blueprint prepares a
 # fresh sandbox with the reviewed REAPER blueprint; blueprint-details prints
 # what a create stored. Slice B (attach an existing project) adds
@@ -2492,7 +2497,7 @@ write("agents/Ask Ori/agent_settings.json", {
     "role": "orchestrator", "Settings": {"model": "gpt-5-nano"},
     "metadata": {"tags": ["system", "ori:system-assistant"]}})
 write("agents/Scout/agent_settings.json", {
-    "role": "researcher", "Settings": {"model": "gpt-4o-mini", "system_prompt": "You scout ahead."},
+    "role": "researcher", "Settings": {"model": "gpt-4o-mini", "provider": "openai", "system_prompt": "You scout ahead."},
     "status": "active", "statistics": {"message_count": 12, "token_usage": 3400}})
 write("agents/Scout/mcp_servers.json", {"enabled_servers": ["filesystem"]})
 write("agents/Scout/skills_state.json", {"skills": {"*": {"enabled": False, "trusted": False}}})
@@ -2579,6 +2584,69 @@ smoke_agent_chat() {
   echo
 }
 
+# smoke_agents_root_verify checks the agents-in-the-root success metrics on a
+# STOPPED demo sandbox whose Workspace Directory already holds the agent (run
+# seed-legacy-agents and start the sandbox once, or create the agent in the
+# UI). It puts the root under git, then starts and stops the demo server twice
+# with one chat in between. Ordinary use must leave Agents/ byte-identical,
+# move runtime state instead, and never log the retired snapshot wipe/restore.
+smoke_agents_root_verify() {
+  local sandbox="${2:-}" port="${3:-8931}" agent="${4:-Scout}"
+  local root="$sandbox/Ori Workspaces" log="$sandbox/agents-root-verify.log" run server starts
+  [[ -n "$sandbox" && -f "$root/Agents/$agent/agent_settings.json" ]] ||
+    fail "usage: $0 agents-root-verify <sandbox> [port] [agent]   (needs <sandbox>/Ori Workspaces/Agents/<agent>/)"
+  ! lsof -ti ":$port" >/dev/null 2>&1 || fail "port $port is in use; stop that server first"
+
+  # A repeat run reuses the repository, starting from a clean Agents/.
+  if [[ ! -e "$root/.git" ]]; then
+    git -C "$root" init -q
+  fi
+  git -C "$root" add Agents
+  git -C "$root" -c user.name=smoke -c user.email=smoke@example.invalid commit -qm "Agents before two starts and a chat" --allow-empty
+  local state_before state_after
+  state_before=$(agent_state_digest "$sandbox")
+  : >"$log"
+  for run in 1 2; do
+    ./scripts/demo-server.sh "$port" "$sandbox" >>"$log" 2>&1 &
+    server=$!
+    for _ in $(seq 1 180); do
+      [[ $(grep -c "Server initialized successfully" "$log" || true) -ge "$run" ]] && break
+      kill -0 "$server" 2>/dev/null || fail "the demo server exited during start $run; see $log"
+      sleep 1
+    done
+    [[ $(grep -c "Server initialized successfully" "$log" || true) -ge "$run" ]] || fail "start $run did not finish; see $log"
+    if [[ "$run" == 1 ]]; then
+      echo "chat $agent:"
+      # A plain question: a "reply to ..." prompt is routed to messaging
+      # capabilities and never reaches the model.
+      BASE_URL="http://localhost:$port" smoke_agent_chat - - "$agent" "What is two plus two? Answer in one word."
+    fi
+    ./scripts/stop-demo-server.sh "$port"
+    wait "$server" 2>/dev/null || true
+  done
+  state_after=$(agent_state_digest "$sandbox")
+  starts=$(grep -c "Server initialized successfully" "$log" || true)
+
+  local changes
+  changes=$(git -C "$root" status --porcelain Agents/)
+  [[ -z "$changes" ]] || fail "Agents/ changed after two starts and a chat:"$'\n'"$changes"
+  echo "ok   Agents/ is unchanged after $starts starts and a chat (git status --porcelain is empty)"
+  [[ "$state_before" != "$state_after" ]] || fail "the runtime state in $sandbox/agent_state did not change; did the chat reach a model?"
+  echo "ok   runtime state changed in $sandbox/agent_state instead"
+  ! grep -Eq "snapshots (restored|wiped)" "$log" || fail "the log still reports a snapshot wipe or restore; see $log"
+  echo "ok   no snapshot wipe or restore in the log ($log)"
+}
+
+# agent_state_digest fingerprints every runtime state file under a sandbox.
+agent_state_digest() {
+  local dir="$1/agent_state"
+  [[ -d "$dir" ]] || {
+    echo none
+    return
+  }
+  (cd "$dir" && find . -type f -name '*.json' -print0 | sort -z | xargs -0 shasum -a 256 | shasum -a 256)
+}
+
 case "${1:-}" in
 serve) serve_isolated "${2:-8931}" "${3:-default}" ;;
 agent-files) smoke_agent_files "$@" ;;
@@ -2587,6 +2655,7 @@ seed-legacy-agents) smoke_seed_legacy_agents "$@" ;;
 confirm-root) smoke_confirm_root "$@" ;;
 drop-foreign-workspace) smoke_drop_foreign_workspace "$@" ;;
 root-unmounted) smoke_root_unmounted "$@" ;;
+agents-root-verify) smoke_agents_root_verify "$@" ;;
 showseed) smoke_show_seed ;;
 showrun) smoke_show_run "$@" ;;
 showmarkfailed) smoke_show_markfailed "$@" ;;
@@ -2635,6 +2704,7 @@ janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
   echo "  $0 agent-chat <base-url> <agent> [text]  # agents in the root: send one chat turn to an agent" >&2
   echo "  $0 seed-legacy-agents <sandbox>          # agents in the root: pre-upgrade install (agents in the data dir)" >&2
   echo "  $0 root-unmounted <sandbox>              # agents in the root: point a stopped sandbox at an unreachable root" >&2
+  echo "  $0 agents-root-verify <sandbox> [port] [agent] # agents in the root: 2 starts + a chat leave Agents/ unchanged" >&2
   echo "  $0 confirm-root <sandbox>                # agents in the root: fresh sandbox with a confirmed Workspace Directory" >&2
   echo "  $0 drop-foreign-workspace <root>         # agents in the root: copy in a never-seen workspace with its own agent" >&2
   echo "  $0 showseed <base-url>                   # task-run show: onboarding + 3 workspaces with Commanders" >&2

@@ -1,7 +1,7 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
@@ -191,6 +191,20 @@ test.describe.serial('Settings reset on an owned installation', () => {
     const packageDirectory = dirname(vaultPath);
     const beforeWorkspace = digest(workspaceSentinel);
 
+    // The user's agents are folders in the Workspace Directory (the staging
+    // root until one is confirmed). Start Fresh removes each agent's folder and
+    // keeps every other file there.
+    const createAgent = await request.post(origin + '/api/agents', {
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      data: { name: 'Reset Scout', system_prompt: 'You scout ahead.' }
+    });
+    expect(createAgent.ok()).toBeTruthy();
+    const agentsFolder = join(dataDir, 'workspace-staging', 'Agents');
+    const agentDefinition = join(agentsFolder, 'Reset Scout', 'agent_settings.json');
+    expect(existsSync(agentDefinition)).toBe(true);
+    const agentsNote = join(agentsFolder, 'README.txt');
+    writeFileSync(agentsNote, 'kept next to my agents\n', { mode: 0o600 });
+
     await page.addInitScript(() => {
       localStorage.setItem('ori-theme', 'dark');
       localStorage.setItem('ori_chat_session_stale', 'stale');
@@ -246,6 +260,14 @@ test.describe.serial('Settings reset on an owned installation', () => {
     await expect(page.locator('#confirmResetBtn')).toBeDisabled();
     await page.locator('#resetConfirmInput').fill('RESET');
     await expect(page.locator('#confirmResetBtn')).toContainText('Start Fresh after full relaunch');
+    // Start Fresh removes the agents from the Workspace Directory, which the
+    // user can see and may sync, so RESET alone is not enough: the agents
+    // folder is named and needs its own confirmation.
+    await expect(page.locator('#resetAgentsFolderConfirm')).toBeVisible();
+    await expect(page.locator('#resetAgentsFolderPath')).toContainText('/Agents');
+    await expect(page.locator('#confirmResetBtn')).toBeDisabled();
+    await page.locator('#resetAgentsFolderCheck').check();
+    await expect(page.locator('#confirmResetBtn')).toBeEnabled();
     // Sampled immediately before the destructive step. Ordinary browsing can
     // touch a managed vault package's own metadata, so an earlier baseline would
     // measure normal app activity rather than what reset preserved. The reset
@@ -278,6 +300,8 @@ test.describe.serial('Settings reset on an owned installation', () => {
     );
     expect(digest(workspaceSentinel)).toBe(beforeWorkspace);
     expect(digest(vaultPath)).toBe(beforeVault);
+    expect(existsSync(join(agentsFolder, 'Reset Scout'))).toBe(false);
+    expect(readFileSync(agentsNote, 'utf8')).toBe('kept next to my agents\n');
 
     const vaultsAfterReset = await request.get(origin + '/api/vault/vaults');
     expect((await vaultsAfterReset.json()).count).toBe(0);

@@ -182,7 +182,7 @@ func inspectPlugins(ctx context.Context, owners Owners, id CategoryID, installat
 		return nil
 	}
 	evidence.SkillsRootPresent = present
-	digest, err := digestProtectedPath(ctx, paths.MarketplacesPath())
+	digest, err := digestProtectedPath(ctx, paths.MarketplacesPath(), "")
 	if err != nil {
 		block("plugin_marketplaces_unreadable", id, "Marketplace registrations cannot be hashed before reset, so their preservation could not be proven.",
 			"Restore read access to the plugin marketplace registrations and review reset again.")
@@ -490,7 +490,7 @@ func removePluginItems(ctx context.Context, result *CategoryResult, evidence *pl
 // registrations under its own broader policy after this exact pass completes.
 func pluginPreservationVerified(ctx context.Context, evidence *pluginEvidence, paths plugin.ResetPaths, marketplaces bool) bool {
 	if marketplaces {
-		digest, err := digestProtectedPath(ctx, paths.MarketplacesPath())
+		digest, err := digestProtectedPath(ctx, paths.MarketplacesPath(), "")
 		if err != nil || digest != evidence.MarketplacesDigest {
 			return false
 		}

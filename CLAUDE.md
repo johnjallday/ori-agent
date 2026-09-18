@@ -143,7 +143,11 @@ Each domain has dedicated handler modules in `internal/*http/`:
 - See `internal/llm/README.md` for detailed usage patterns
 
 **4. Agent Isolation & Workspaces**
-- Agent list in `agents.json`; per-agent settings in `agents/<agent-name>/agent_settings.json` (workspace-scoped agents use `config.json` inside the workspace folder)
+- **The user's agents live in the Workspace Directory**: `<root>/Agents/<Name>/agent_settings.json`, one folder per agent, next to the workspaces. The folder also holds the agent's uploaded image, `skills/`, `skills_state.json`, and `mcp_servers.json`, so copying or syncing the root carries the agents with it. There is no index file there.
+- `agent_settings.json` holds only the **definition** (role, capabilities, settings, metadata, appearance, paused). Runtime state — status, statistics, evolution — goes to `<data dir>/agent_state/<root key>/<Name>.json`, so ordinary use never rewrites a synced file. Writes are per agent, change-only, and atomic; an edit made on disk since Ori loaded the agent is a 409 (`agent_changed_on_disk`), never silently overwritten.
+- The data dir keeps a **system store** (`agents.json` + `agents/<Name>/`) for the built-in assistant. `store.CompositeStore` presents both as one `store.Store`, plus a read-only view of trusted workspaces' own agent copies (`<workspace>/agents/<slug>/`); editing one of those is a 409 (`workspace_owned_agent`) until it is added to your agents.
+- A one-time startup migration moves older data-dir agents into `<root>/Agents/` (backup in `<data dir>/recovery/agents-to-root-<UTC>/`, marker `agents_migrated_to_root.json`). `AGENT_STORE_PATH` keeps the old single data-dir store and skips all of this.
+- The top-level workspace slug `agents` is reserved, so no workspace can occupy `<root>/Agents`.
 - **Workspace System** (`internal/workspace/`): Multi-agent collaboration
   - Workspace-scoped MCP bindings and skill bindings
   - Workspace-scoped tools for notes, tasks, sessions, files
@@ -189,9 +193,11 @@ Tool Execution → Result → UI Rendering
 
 ### Configuration Files
 - `settings.json` - Global settings, API keys, LLM provider config
-- `agents.json` - Agent configurations
 - `app_state.json` - Onboarding and application state
-- `agents/<agent-name>/agent_settings.json` - Per-agent settings
+- `<root>/Agents/<Name>/agent_settings.json` - Each of the user's agents (definition only), in the Workspace Directory
+- `<data dir>/agent_state/<root key>/<Name>.json` - Each agent's runtime state (status, statistics, evolution)
+- `<data dir>/agents.json` + `<data dir>/agents/<Name>/` - The system store: the built-in assistant (and every agent when `AGENT_STORE_PATH` is set)
+- `<data dir>/agent_avatars/` - Uploaded images of agents outside the Workspace Directory; a root agent's image is in its own folder
 
 ### Build Outputs
 - `bin/ori-agent` - Server binary
@@ -258,7 +264,7 @@ The `Server` struct in `internal/server/server.go` holds all dependencies:
 
 ### Smoke Testing (manual verification against a running server)
 
-**Always isolate smoke servers from real app data.** `DefaultWorkspaceRoot()` resolves to `$HOME/Ori Workspaces` and does NOT respect `ORI_DATA_DIR` (which only scopes the database, vaults, and templates). A smoke server started without isolation will write workspaces into the user's real tree.
+**Always isolate smoke servers from real app data.** `DefaultWorkspaceRoot()` resolves to `$HOME/Ori Workspaces` and does NOT respect `ORI_DATA_DIR` (which only scopes the database, vaults, and templates). A smoke server started without isolation will write workspaces into the user's real tree — **and agents too**: the user's agents live in `<workspace root>/Agents/`, so a smoke server without a `HOME` override reads, edits, migrates into, and (on an Agents reset) deletes the real `~/Ori Workspaces/Agents/` folder.
 
 **Prefer `wt demo [port]`** (from `scripts/wt.sh`, default port 8931). It builds the current worktree and launches the isolated recipe for you — sandboxed temp `HOME`/`ORI_DATA_DIR`, started from *inside* the sandbox so the plugin store is isolated too. Use it for the per-group **Demo:** checkpoint (see the manual-test protocol): drive every new user-visible surface in a real browser before its PR opens.
 
@@ -267,7 +273,7 @@ By hand, when you need a second sandbox or a non-default port:
 ```bash
 SMOKE_DIR="$TMPDIR/smoke-$$"
 mkdir -p "$SMOKE_DIR"
-# HOME override redirects "Ori Workspaces"; ORI_DATA_DIR redirects DB/vaults/templates
+# HOME override redirects "Ori Workspaces" (and its Agents/); ORI_DATA_DIR redirects DB/vaults/templates/agent_state
 HOME="$SMOKE_DIR" ORI_DATA_DIR="$SMOKE_DIR" PORT=8931 ./bin/ori-agent
 ```
 

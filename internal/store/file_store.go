@@ -166,6 +166,14 @@ func (s *fileStore) PersistencePaths() (index, profiles, projection string) {
 	return s.path, s.agentsDir(), s.path
 }
 
+// ResetLocations reports what an agents reset removes for this store alone.
+func (s *fileStore) ResetLocations() ResetLocations {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	index, profiles, projection := s.PersistencePaths()
+	return ResetLocations{Index: index, Profiles: profiles, Projection: projection, State: filepath.Dir(s.stateStore().Dir())}
+}
+
 func (s *fileStore) ListAgents() (names []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -158,10 +158,14 @@ func TestFixtureSeedsRealStoresAndReopensSameInstallation(t *testing.T) {
 	if !mgr.IsOnboardingComplete() || user != "Fixture User" || assistant != resetfixture.AgentName {
 		t.Fatal("identity/setup seed did not survive reopening")
 	}
-	agents, err := store.NewFileStore(filepath.Join(p.DataDir, "agents.json"), types.Settings{})
-	check(t, err)
-	if names := agents.ListAgents(); len(names) != 1 || names[0] != resetfixture.AgentName {
+	if names := f.OpenAgents(t).ListAgents(); len(names) != 1 || names[0] != resetfixture.AgentName {
 		t.Fatal("agent seed did not survive reopening")
+	}
+	if _, err := os.Stat(filepath.Join(p.Workspaces, "Agents", resetfixture.AgentName, "agent_settings.json")); err != nil {
+		t.Fatal("the seeded agent is not in the workspace root's Agents folder:", err)
+	}
+	if legacy, err := store.NewFileStore(filepath.Join(p.DataDir, "agents.json"), types.Settings{}); err != nil || len(legacy.ListAgents()) != 0 {
+		t.Fatal("the seeded agent also landed in the data dir")
 	}
 	folders, err := workspace.NewFileStore(p.Workspaces)
 	check(t, err)

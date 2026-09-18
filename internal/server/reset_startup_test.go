@@ -67,9 +67,7 @@ func TestResetLifecycleLocalAllowlistBackfillShowsRetainedAgentCopy(t *testing.T
 	folders, err := workspace.NewFileStore(p.Workspaces)
 	requireResetNoError(t, err)
 	t.Cleanup(func() { requireResetNoError(t, folders.Close()) })
-	agents, err := store.NewFileStore(filepath.Join(p.DataDir, "agents.json"), types.Settings{})
-	requireResetNoError(t, err)
-	agent, found := agents.GetAgent(resetfixture.AgentName)
+	agent, found := f.OpenAgents(t).GetAgent(resetfixture.AgentName)
 	if !found {
 		t.Fatal("seeded agent missing")
 	}

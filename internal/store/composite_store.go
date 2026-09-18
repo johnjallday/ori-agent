@@ -449,6 +449,20 @@ func (c *CompositeStore) Save() error {
 	return err
 }
 
+// ResetLocations reports everything an agents reset removes: the system
+// store's own files, the runtime state folder, and the current root's Agents
+// folder, which reset reviews separately because it is visible to the user.
+func (c *CompositeStore) ResetLocations() ResetLocations {
+	locations := ResetLocations{State: c.stateRoot}
+	locations.Index, locations.Profiles, locations.Projection = c.PersistencePaths()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if strings.TrimSpace(c.rootPath) != "" {
+		locations.RootAgents = config.RootAgentsDir(c.rootPath)
+	}
+	return locations
+}
+
 // PersistencePaths reports the system store's paths, which reset still
 // treats as the agent store.
 func (c *CompositeStore) PersistencePaths() (index, profiles, projection string) {

@@ -135,6 +135,22 @@ func validateJournal(j *journal) error {
 	case pluginEvidenceRequired(selected):
 		return ErrJournalInvalid
 	}
+	// The agents folder likewise keeps its own boundary: only with Agents
+	// selected, and only as the Agents folder directly inside a retained
+	// workspace root. Its absence is always valid — nothing is removed there.
+	if evidence.AgentsFolder != "" {
+		if !slices.Contains(selected, CategoryAgents) || len(evidence.AgentsFolder) > 4096 ||
+			!agentsFolderWithinRetainedRoot(evidence.AgentsFolder, evidence.ProtectedPaths) ||
+			containsPath(evidence.AgentsFolder, root) || evidence.AgentsFolder == root ||
+			containsPath(filepath.Join(root, resetstate.Directory), evidence.AgentsFolder) {
+			return ErrJournalInvalid
+		}
+		if v.AgentsFolder == nil || v.AgentsFolder.Path != evidence.AgentsFolder {
+			return ErrJournalInvalid
+		}
+	} else if v.AgentsFolder != nil {
+		return ErrJournalInvalid
+	}
 	wantKinds := make(map[string]CategoryID)
 	allPending, allComplete, hasUnresolved := true, true, false
 	for i, id := range selected {
@@ -189,6 +205,9 @@ func validateJournal(j *journal) error {
 		for _, kind := range targetKinds(id) {
 			wantKinds[kind] = id
 		}
+		for _, kind := range optionalTargetKinds(id) {
+			wantKinds[kind] = id
+		}
 	}
 	switch op.State {
 	case StatePreparing:
@@ -223,9 +242,6 @@ func validateJournal(j *journal) error {
 	default:
 		return ErrJournalInvalid
 	}
-	if len(p.Targets) != len(wantKinds) {
-		return ErrJournalInvalid
-	}
 	for _, target := range p.Targets {
 		if id, ok := wantKinds[target.Kind]; !ok || id != target.Category {
 			return ErrJournalInvalid
@@ -240,6 +256,22 @@ func validateJournal(j *journal) error {
 				return ErrJournalInvalid
 			}
 		}
+	}
+	// Every required kind appeared exactly once; an optional one may be absent.
+	for kind, id := range wantKinds {
+		if !slices.Contains(optionalTargetKinds(id), kind) {
+			return ErrJournalInvalid
+		}
+	}
+	return nil
+}
+
+// optionalTargetKinds are target kinds a category may carry. A receipt written
+// before the kind existed simply lacks it, and lacking it only ever means less
+// is removed.
+func optionalTargetKinds(id CategoryID) []string {
+	if id == CategoryAgents {
+		return []string{"agent_state"}
 	}
 	return nil
 }

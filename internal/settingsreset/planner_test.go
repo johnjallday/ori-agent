@@ -32,8 +32,7 @@ func previewFixture(t *testing.T) (*resetfixture.Fixture, *Owners, *Planner) {
 	t.Chdir(paths.DataDir) // supported host activation; tests can deliberately split it again
 	cfg := config.NewManagerWithSecretStore(filepath.Join(paths.DataDir, "settings.json"), f.Secrets())
 	mustPreview(t, cfg.Load())
-	agents, err := store.NewFileStore(filepath.Join(paths.DataDir, "agents.json"), types.Settings{})
-	mustPreview(t, err)
+	agents := f.OpenAgents(t)
 	db, err := database.Open(t.Context(), &database.Config{Path: filepath.Join(paths.DataDir, "sessions.db"), WALMode: true})
 	mustPreview(t, err)
 	t.Cleanup(func() { mustPreview(t, db.Close()) })

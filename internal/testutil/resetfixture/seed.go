@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
@@ -43,9 +44,15 @@ func NewSeeded(t testing.TB) *Fixture {
 	must(t, onboardingMgr.SetNames("Fixture User", AgentName))
 	must(t, onboardingMgr.CompleteOnboarding())
 
-	agents, err := store.NewFileStore(filepath.Join(p.DataDir, "agents.json"), types.Settings{Model: "fixture-model"})
-	must(t, err)
+	// The default layout: the data dir keeps only the system store, and the
+	// user's agent lives in <workspace root>/Agents/<Name>/ with its runtime
+	// state in <data dir>/agent_state/.
+	agents := f.OpenAgents(t)
 	must(t, agents.CreateAgent(AgentName, nil))
+	must(t, agents.UpdateAgent(AgentName, func(ag *agent.Agent) error {
+		ag.Status = types.AgentStatusActive
+		return nil
+	}))
 
 	folders, err := workspace.NewFileStore(p.Workspaces)
 	must(t, err)
@@ -71,4 +78,17 @@ func NewSeeded(t testing.TB) *Fixture {
 	}))
 	must(t, f.WriteFile("data/session_files/fixture-upload.txt", []byte("Synthetic upload\n")))
 	return f
+}
+
+// OpenAgents opens the agent store the way the server does: the data-dir
+// system store together with the workspace root's Agents folder.
+func (f *Fixture) OpenAgents(t testing.TB) *store.CompositeStore {
+	t.Helper()
+	p := f.Paths()
+	defaults := types.Settings{Model: "fixture-model"}
+	system, err := store.NewSystemFileStore(filepath.Join(p.DataDir, "agents.json"), defaults)
+	must(t, err)
+	agents, err := store.NewCompositeStore(system, p.Workspaces, filepath.Join(p.DataDir, config.AgentStateDirName), defaults)
+	must(t, err)
+	return agents
 }
