@@ -52,7 +52,7 @@ Brief generation, workspace memory, and user-profile services remain canonical.
 
 | State | Meaning | Required copy | Allowed next actions |
 |---|---|---|---|
-| `needs_hire` | No durable relationship | “Hire your assistant”; name defaults to editable **Assistant** | Preview/confirm hire |
+| `needs_hire` | No durable relationship | Mission 01, “Meet your assistant”: the Agents page's New Agent preset; name defaults to editable **Assistant** | Hire from the preset (Hire assistant is the confirmation) |
 | `hiring` | A confirmed hire is finalizing the assistant profile and relationship | “Finishing your assistant setup” | Retry/resume the same request; inspect bounded failure |
 | `needs_hq` | A real assistant profile and relationship exist; no Personal HQ has been built | Chosen name plus “Let’s give <name> a home base” | Start/resume the Ori HQ Map quest (`build_hq`); defer it |
 | `provisioning_hq` | A confirmed HQ setup is partially applied and resumable | “Finishing your Personal HQ” | Resume the same HQ request (`resume_hq_setup`); inspect bounded failure |
@@ -163,12 +163,33 @@ The setup sequence is:
 hire profile -> needs_hq -> Ori Map quest -> confirmed HQ setup -> active
 ```
 
-Fresh onboarding collects the assistant's name/appearance and focus/mandate
-across three focused client-side steps — Meet, Focus, Confirm — before the
-hiring consequence. Back/Next preserves the in-memory draft and sends no hire
-request. The name must be non-empty, bounded, plain text, and secret-safe. The
-Daily Brief rhythm is **not** collected here: it has no canonical workspace to
-be written against until HQ exists, so it moves to the Map's HQ build form.
+The hire is Mission 01, **Meet your assistant**
+(`tasks/prd-meet-your-assistant-mission.md`), not part of first-run onboarding:
+the onboarding modal ends after Welcome and Model and never sends a hire. While
+the relationship is `needs_hire` or `hiring`, the Agents page's own **New
+Agent** panel opens in a personal-assistant preset
+(`personal-assistant-hire.js`, rendered by `agents-roster.js`): the name
+(default **Assistant**), a suggested orchestrator face, the six focus areas, an
+optional mandate, and the boundary line directly above one **Hire assistant**
+button. Pressing it is the one explicit confirmation; there is no separate
+checkbox. Nothing is sent before it. The name must be non-empty, bounded, plain
+text, and secret-safe. The request ID is created once per attempt and kept in
+`localStorage` (`ori.personalAssistantHireRequestId`), and a relationship's own
+`hire_request_id` wins over it, so a retry replays the same request. Ori's
+deterministic walkthrough (`meet-assistant-quest.js`) points at each control and
+never acts on one. The Daily Brief rhythm is **not** collected here: it has no
+canonical workspace to be written against until HQ exists, so it moves to the
+Map's HQ build form.
+
+Every entry to the hire resolves to `/agents?quest=meet-assistant`
+(`MEET_ASSISTANT_QUEST_ROUTE`, `progression.MeetAssistantActionURL`): Home's
+mission card and prompt, Today's `needs_hire` banner, Ask Ori's hand-off, the
+repair banners, and the retired `/?hire=1`, which redirects there. A provable
+orphan identity (`relationship_recovery`) opens the same panel's reconnect view
+with one Reconnect button; `relationship_recovery_blocked` shows the status and
+no button; a partial hire shows one Finish setup button that replays the same
+request. A successful hire goes straight to `/?quest=build-hq`, whose first step
+opens with the hand-over line.
 
 One final, confirmed hire then:
 
@@ -180,8 +201,8 @@ One final, confirmed hire then:
    assistant ID and hire request ID, so a retry can tell its own profile from an
    unrelated name collision;
 3. persists the relationship, working agreement, and `HiredAt`; and
-4. transitions to `needs_hq` and completes ordinary onboarding only after the
-   relationship can be read back.
+4. transitions to `needs_hq`. Ordinary onboarding was already complete: it ends
+   after Model, before any hire.
 
 The hire creates **no** workspace, no Personal HQ designation, no Journal or
 other support profile, no workspace membership, no Daily Brief configuration,
@@ -333,22 +354,44 @@ is maintained.
 
 ## Starter missions
 
-Source: `tasks/prd-starter-missions.md`. The personal-assistant graph
+Source: `tasks/prd-starter-missions.md` and
+`tasks/prd-meet-your-assistant-mission.md`. The personal-assistant graph
 (`progression.PersonalAssistantGraph`) opens with a Tier 1 named **Starter**:
-four featured, optional missions, each ending with Ori visibly doing something.
-Tier 2, **Daily loop**, holds first contact, personalize, first note, and first
-task. Tiers 3 to 6 are the built-in ones. `t1-plan-first-day` and
-`t2-create-workspace` are not in this graph; their persisted completions stay in
-place, and a `t1-plan-first-day` completion counts as evidence for Mission 03.
+five featured missions. Mission 01 hires the assistant and is the only required
+one. Missions 02 to 05 are optional, each ends with Ori visibly doing something,
+and each carries `LockedUntil: pa-meet-assistant`: until Mission 01 is complete
+the status view marks them `locked`, with `locked_reason` "Meet your assistant
+first", and the widget renders them with a lock and no Start, Skip, or Resume.
+Locking is presentation only: `Match`, `Complete`, and backfill still run for a
+locked quest. Tier 2, **Daily loop**, holds first contact, personalize, first
+note, and first task. Tiers 3 to 6 are the built-in ones. `t1-plan-first-day`
+and `t2-create-workspace` are not in this graph; their persisted completions
+stay in place, and a `t1-plan-first-day` completion counts as evidence for
+Mission 04.
 
 | Order | ID | Card | Completes when |
 | --- | --- | --- | --- |
-| 01 | `t2-build-hq` | Build My HQ, `/?quest=build-hq` | a Personal HQ designation |
-| 02 | `pa-tidy-downloads` | Tidy your Downloads, `/?quest=tidy-downloads`, or "In progress · Finish setup" on an unfinished File Janitor workspace | a `file-janitor` (or retired `downloads-janitor`) workspace's setup wizard first reaches ready |
-| 03 | `pa-connect-source` | resolved from the hire's focus areas (below) | any branch's signal, not only the one offered |
-| 04 | `pa-first-brief` | Read your first Daily Brief, `/`; while open and with no model configured, adds "Add a model in Settings to generate one." | Today is first served with a Daily Brief revision for an active or paused relationship |
+| 01 | `pa-meet-assistant` | Meet your assistant, `/agents?quest=meet-assistant` | the request that makes a hire durable (`HireResult.NewlyHired`), or a repair that leaves the relationship hired; never a replay |
+| 02 | `t2-build-hq` | Build My HQ, `/?quest=build-hq` | a Personal HQ designation |
+| 03 | `pa-tidy-downloads` | Tidy your Downloads, `/?quest=tidy-downloads`, or "In progress · Finish setup" on an unfinished File Janitor workspace | a `file-janitor` (or retired `downloads-janitor`) workspace's setup wizard first reaches ready |
+| 04 | `pa-connect-source` | resolved from the hire's focus areas (below) | any branch's signal, not only the one offered |
+| 05 | `pa-first-brief` | Read your first Daily Brief, `/`; while open and with no model configured, adds "Add a model in Settings to generate one." | Today is first served with a Daily Brief revision for an active or paused relationship |
 
-Mission 03 branches, in priority order when several focus areas match:
+Mission 01's completion is `personalassistanthttp.Handler.SetOnHired`, bound in
+`completeProgressionWiring`. Its evidence (`Snapshot.AssistantHired`) is the
+persisted relationship status owning a hired profile (`awaiting_hq`,
+`provisioning_hq`, `active`, `paused`), not the read projection, so an active
+assistant with a broken HQ link is still hired. Because Mission 01 gates every
+other mission and a hire cannot be repeated, startup also completes it from that
+evidence after the backfill (for example after a quest reset). The economy pays
+at most once per quest.
+
+Before the hire, Home is quiet: the card shows Mission 01, Today says only "Meet
+your assistant to start Today.", and on a plain Home visit Ori's panel opens once
+with "Your assistant works from the Agents page. Let's go meet them.", a mark on
+the Agents nav entry, and a Take me there choice (`meet-assistant-home-prompt.js`).
+
+Mission 04 branches, in priority order when several focus areas match:
 
 | Branch | Focus area | Card | Completion signal |
 | --- | --- | --- | --- |
@@ -364,7 +407,7 @@ How the card works:
   `MissionContext`. The widget shows the first mission that is neither
   completed nor skipped and lists the others beneath it. It holds no quest IDs.
 - Every completion is observed on the server. The browser never claims one.
-- Mission 02's walkthrough (`tidy-downloads-quest.js`) opens the unified creator
+- Mission 03's walkthrough (`tidy-downloads-quest.js`) opens the unified creator
   with File Janitor preselected and marks Create
   (`create_workspace_submit`) once the creator reaches its last step. It offers
   no panel choice, because Ori's panel sits beneath the creator's backdrop. The
@@ -378,7 +421,9 @@ File Janitor, a connected source, a project workspace, a completed first
 assignment or legacy first day, an existing brief). An install whose backfill
 predates the starter missions gets one silent pass, recorded under the
 `starter-missions-v1` key in `ProgressionState.Reconciled`. It pays no Craft
-and survives a reset, so a reset stays a blank slate.
+and survives a reset, so a reset stays a blank slate. Mission 01 has its own
+pass, `meet-assistant-v1`, with the same rules: an install that hired before the
+mission existed sees it complete, with no toast and no Craft.
 
 Today's Results section also gains one `janitor_result` line per File Janitor
 workspace with applied, not-undone actions in the last 24 hours ("Filed N files

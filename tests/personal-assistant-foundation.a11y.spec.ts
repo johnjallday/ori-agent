@@ -335,9 +335,7 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await expect(page.locator('#personalAssistantSend')).toBeDisabled();
   });
 
-  test('no-model onboarding exposes named, associated hire and preview controls', async ({
-    page
-  }) => {
+  test('no-model onboarding exposes named controls and no hire', async ({ page }) => {
     await page.route('**/api/onboarding/status', route =>
       route.fulfill({
         status: 200,
@@ -364,9 +362,89 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await page.goto('/');
     await expect(page.locator('#onboardingModal')).toBeVisible();
     await expect(page.getByLabel('Your name')).toBeVisible();
-    await expect(page.locator('#pafAssistantName')).toHaveAttribute('maxlength', '100');
-    await expect(page.locator('#pafHireConfirm')).toHaveAttribute('type', 'checkbox');
+    // The Welcome field names Ori the guide, not the assistant hired later.
+    await expect(page.getByLabel('What should Ori be called?')).toHaveValue('Ori');
+    // The hire is not in the modal any more: it happens on the Agents page.
+    await expect(page.locator('#pafAssistantName')).toHaveCount(0);
+    await expect(page.locator('#pafHireConfirm')).toHaveCount(0);
     await expect(page.locator('#pafAssignmentStatus')).toHaveAttribute('aria-live', 'polite');
+  });
+
+  // Mission 01's preset in the Agents page's New Agent panel: every control is
+  // labelled, focus starts in the name, Hire is the one confirmation and says
+  // when it is busy, and a failure is announced where focus lands.
+  test('the hire preset is labelled, announces busy, and focuses its error', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    let hireCalls = 0;
+    const requestIDs: string[] = [];
+    await mockCompletedOnboarding(page);
+    await page.route(/\/api\/personal-assistant$/, route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: '{"personal_assistant":{"state":"needs_hire","state_version":1,"availability":{"model":{"status":"not_configured","available":false}}}}'
+      })
+    );
+    await page.route('**/api/personal-assistant/hire', async route => {
+      hireCalls += 1;
+      requestIDs.push(route.request().postDataJSON().request_id);
+      await new Promise(resolve => setTimeout(resolve, 400));
+      if (hireCalls === 1) {
+        await route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 'hire_conflict',
+            error:
+              'This hire conflicts with the current assistant relationship. Refresh and try again.'
+          })
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({ personal_assistant: { state: 'needs_hq', display_name: 'Atlas' } })
+      });
+    });
+
+    await page.goto('/agents');
+    await page.locator('#newAgentBtn').click();
+    const name = page.getByLabel('Name', { exact: true });
+    await expect(name).toBeFocused();
+    await expect(name).toHaveAttribute('maxlength', '100');
+    await expect(name).toHaveAttribute('required', '');
+    await expect(page.getByRole('group', { name: 'What should they help with?' })).toBeVisible();
+    await expect(page.getByLabel('Plan my day')).toBeChecked();
+    const mandate = page.getByLabel('What would make them useful this week? (optional)');
+    await expect(mandate).toHaveAttribute('maxlength', '1000');
+    // No confirmation checkbox: the boundary line sits above the one button.
+    await expect(page.locator('#createBody')).toContainText(
+      'Hiring creates your assistant. It does not create a workspace'
+    );
+    const hire = page.getByRole('button', { name: 'Hire assistant' });
+    await expect(hire).toBeEnabled();
+
+    await name.fill('');
+    await expect(hire).toBeDisabled();
+    await name.fill('Atlas');
+    await expect(hire).toBeEnabled();
+
+    await hire.click();
+    await expect(page.locator('#createSubmit')).toHaveAttribute('aria-busy', 'true');
+    await expect(page.locator('#createSubmit')).toBeDisabled();
+    const alert = page.getByRole('alert').filter({ hasText: 'conflicts' });
+    await expect(alert).toBeVisible();
+    await expect(alert).toBeFocused();
+    await expect(page.locator('#createSubmit')).not.toHaveAttribute('aria-busy', 'true');
+    await expect(page.locator('#createSubmit')).toBeEnabled();
+
+    await page.locator('#createSubmit').click();
+    await page.waitForURL(url => url.pathname === '/');
+    expect(hireCalls).toBe(2);
+    // The retry replays the same request, so it can never hire a second assistant.
+    expect(requestIDs[0]).toBeTruthy();
+    expect(requestIDs[1]).toBe(requestIDs[0]);
   });
 
   // Reduced motion is the ambient condition for this whole describe block

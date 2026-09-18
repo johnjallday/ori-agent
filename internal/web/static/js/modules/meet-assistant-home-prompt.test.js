@@ -103,11 +103,19 @@ test('no prompt while onboarding owns the screen, off Home, or under another wal
     }),
     false
   );
-  assert.equal(
-    await shouldPrompt({ fetchImpl: quiet.fetchImpl, location: home('?quest=build-hq') }),
-    false
-  );
+  for (const intent of ['?quest=build-hq', '?focus=personal-hq', '?create=1', '?setup=quest']) {
+    assert.equal(
+      await shouldPrompt({ fetchImpl: quiet.fetchImpl, location: home(intent) }),
+      false,
+      intent
+    );
+  }
   assert.deepEqual(quiet.requests, [], 'an ineligible page still made requests');
+  // A plain Home visit with harmless state in the URL still prompts.
+  assert.equal(
+    await shouldPrompt({ fetchImpl: server().fetchImpl, location: home('?view=map') }),
+    true
+  );
 });
 
 test('the prompt presents once, points at the Agents nav entry, and offers Take me there', () => {

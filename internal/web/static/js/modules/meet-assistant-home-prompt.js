@@ -31,18 +31,24 @@ async function fetchJSON(fetchImpl, url) {
   return res.json();
 }
 
+// A Home visit that arrived with one of these already has somewhere to be: a
+// walkthrough, a Map focus, the workspace creator, a setup journey. The nudge
+// is for a plain visit, and never competes with an intent.
+const HOME_INTENT_PARAMS = ['quest', 'focus', 'create', 'setup'];
+
 /*
  * shouldPrompt answers one question from the server's own state: is this a
  * Home visit where Mission 01 is the next thing to do? Onboarding must be
  * finished (its modal owns the screen until then), the relationship must be
- * unhired, and Mission 01 must still be open. Another walkthrough asked for in
- * the URL wins. Any read that fails means no prompt.
+ * unhired, and Mission 01 must still be open. An intent in the URL wins. Any
+ * read that fails means no prompt.
  */
 export async function shouldPrompt({ fetchImpl = globalThis.fetch, location } = {}) {
   const loc = location || globalThis.window?.location;
   if (!loc || loc.pathname !== '/') return false;
   try {
-    if (new URLSearchParams(loc.search || '').has('quest')) return false;
+    const params = new URLSearchParams(loc.search || '');
+    if (HOME_INTENT_PARAMS.some(name => params.has(name))) return false;
   } catch (_) {
     return false;
   }

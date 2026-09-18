@@ -184,9 +184,13 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     await expect(page).toHaveURL(/\/$/);
     await expect(page.locator('#homeHQResume')).toHaveCount(0);
     await expect(page.locator('#homeDailyBrief')).toBeHidden();
-    // Deferring Build My HQ never blocks the next starter mission: the card
-    // moves on to Mission 02, and Build My HQ stays resumable beneath it.
-    await expect(page.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 02');
+    // Deferring Build My HQ never blocks the missions: this profile has no
+    // assistant hired, so the card stays on Mission 01 (Meet your assistant),
+    // and Build My HQ stays resumable beneath it.
+    await expect(page.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 01');
+    await expect(page.locator('[data-role="first-mission-title"]')).toHaveText(
+      'Meet your assistant'
+    );
     await expect(page.locator('[data-role="first-mission-status"]')).toHaveText('Ready');
     await expect(
       page.locator('[data-role="quests"] .quest-item').filter({ hasText: 'Build My HQ' })

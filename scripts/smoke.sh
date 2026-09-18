@@ -1387,12 +1387,21 @@ smoke_starter() {
 }
 
 # smoke_meet_assistant drives Mission 01 ("Meet your assistant") through the API.
-#   onboard  close onboarding without a hire (what the modal's Model step does)
-#   status   print the relationship state and the five missions with their locks
-#   hire     hire the assistant, model-free, exactly as the Agents page preset does
+#   onboard       close onboarding without a hire (what the modal's Model step does)
+#   status        print the relationship state and the five missions with their locks
+#   hire          hire the assistant, model-free, exactly as the Agents page preset does
+#   demo <stage>  run a browser stage of scripts/demo-meet-assistant.mjs (preset,
+#                 walkthrough, panel-closed, narrow, modal, home); screenshots go to
+#                 $TMPDIR/meet-assistant-demo/<stage>. Each stage needs a fresh sandbox.
 smoke_meet_assistant() {
   local stage="${3:-status}"
   case "$stage" in
+  demo)
+    local demo_stage="${4:-home}" root
+    root="$(cd "$(dirname "$0")/.." && pwd -P)"
+    node "$root/scripts/demo-meet-assistant.mjs" "$BASE_URL" \
+      "${TMPDIR:-/tmp}/meet-assistant-demo/$demo_stage" "$demo_stage" "${@:5}"
+    ;;
   onboard)
     curl -s -o /dev/null -w "%{http_code} onboarding complete\n" \
       -X POST "$BASE_URL/api/onboarding/complete" -H 'Content-Type: application/json' -d '{}'
@@ -1415,7 +1424,7 @@ print(json.dumps({"request_id": "smoke-" + uuid.uuid4().hex, "if_version": 0,
     curl -s -w "\n%{http_code} hire\n" -X POST "$BASE_URL/api/personal-assistant/hire" \
       -H 'Content-Type: application/json' -d "$body"
     ;;
-  *) fail "usage: $0 meetassistant <base-url> <onboard|status|hire [name]>" ;;
+  *) fail "usage: $0 meetassistant <base-url> <onboard|status|hire [name]|demo <stage>>" ;;
   esac
 }
 
@@ -2492,7 +2501,7 @@ janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
   echo "  $0 showdrop <base-url> <folder> <name>... # task-run show: move settled files in (scan runs ~5 min later)" >&2
   echo "  $0 integration <base-url> [source]       # reviewed integration floor: install a source, print the install step and updates" >&2
   echo "  $0 starter <base-url> <stage> [flags]    # starter missions: wait for the server, run a demo stage" >&2
-  echo "  $0 meetassistant <base-url> <stage>      # Mission 01: onboard | status | hire [name]" >&2
+  echo "  $0 meetassistant <base-url> <stage>      # Mission 01: onboard | status | hire [name] | demo <stage>" >&2
   echo "  $0 reaper-blueprint <base-url>           # onboard + install/enable the reviewed REAPER blueprint" >&2
   echo "  $0 blueprint-details <base-url> <ws-id>  # parent, description, workspace_bootstrap of a workspace" >&2
   echo "  $0 agent-type-api <base-url>             # retired agent type: API accepts and never echoes it" >&2

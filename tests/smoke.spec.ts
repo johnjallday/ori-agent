@@ -183,6 +183,40 @@ test.describe('Onboarding', () => {
     });
   }
 
+  // watchOnboardingEnd answers /api/onboarding/complete without touching the
+  // server, flips the status the reloaded Home reads, and records any hire
+  // request, of which there must be none.
+  async function watchOnboardingEnd(page) {
+    const finished = { completed: false, hires: [] as string[] };
+    page.on('request', request => {
+      if (request.url().includes('/api/personal-assistant/hire'))
+        finished.hires.push(request.url());
+    });
+    await page.route('**/api/onboarding/complete', async route => {
+      finished.completed = true;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: '{"success":true}'
+      });
+    });
+    await page.route('**/api/onboarding/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          needs_onboarding: !finished.completed,
+          completed: finished.completed,
+          current_step: 0,
+          steps_completed: [],
+          user_name: '',
+          assistant_name: 'Ori'
+        })
+      });
+    });
+    return finished;
+  }
+
   test('collects identity and explicit workspace-directory consent on the first step', async ({
     page
   }) => {
@@ -190,7 +224,7 @@ test.describe('Onboarding', () => {
     await page.goto('/');
 
     await expect(page.locator('#onboardingModal')).toBeVisible();
-    await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 1 of 3');
+    await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 1 of 2');
     await expect(page.locator('#onboardingWorkspaceRootInput')).toHaveValue(
       '/tmp/ori-test-workspaces'
     );
@@ -238,7 +272,7 @@ test.describe('Onboarding', () => {
     await page.locator('#onboardingUserName').fill('Jamie');
     await page.locator('#welcomeNextBtn').click();
 
-    await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 2 of 3');
+    await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 2 of 2');
     await expect(page.locator('#onboardingSystemProvider')).toHaveValue('ollama');
     await expect(page.locator('#onboardingSystemModel')).toHaveValue('llama-balanced');
     await expect(page.locator('#modelNextBtn')).toBeEnabled();
@@ -262,6 +296,8 @@ test.describe('Onboarding', () => {
       });
     });
 
+    const finished = await watchOnboardingEnd(page);
+
     await page.goto('/');
     await page.locator('#welcomeNextBtn').click();
 
@@ -269,14 +305,16 @@ test.describe('Onboarding', () => {
     await expect(page.locator('#modelNextBtn')).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Set Up Later' })).toBeVisible();
     await page.getByRole('button', { name: 'Continue without a model' }).click();
-    await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 3 of 3');
-    await expect(page.locator('#onboardingPersonalAssistantHire')).toBeVisible();
-    await expect(page.locator('#onboardingPersonalAssistantHire')).toContainText(
-      'Hire your personal assistant'
-    );
+    // Onboarding is Welcome and Model. Leaving Model closes it on Home; the
+    // assistant is hired afterwards, on the Agents page (Mission 01).
+    await expect(page.locator('#onboardingModal')).toBeHidden();
+    await expect.poll(() => finished.completed).toBe(true);
+    expect(finished.hires).toEqual([]);
   });
 
-  test('moves from model setup to the domain-neutral personal assistant hire', async ({ page }) => {
+  test('a saved model ends onboarding with no hire and nothing domain-specific', async ({
+    page
+  }) => {
     await installBaseOnboardingRoutes(page);
     await page.route('**/api/providers', async route => {
       await route.fulfill({
@@ -329,16 +367,17 @@ test.describe('Onboarding', () => {
       });
     });
 
+    const finished = await watchOnboardingEnd(page);
+
     await page.goto('/');
     await page.locator('#welcomeNextBtn').click();
     await expect(page.locator('#modelNextBtn')).toBeEnabled();
+    await expect(page.locator('#onboardingModal')).not.toContainText(/REAPER|music|producer/i);
     await page.locator('#modelNextBtn').click();
 
-    await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 3 of 3');
-    const hireModal = page.locator('#onboardingPersonalAssistantHire');
-    await expect(hireModal).toBeVisible();
-    await expect(hireModal).toContainText('Hire your personal assistant');
-    await expect(hireModal).not.toContainText(/REAPER|music|producer/i);
+    await expect(page.locator('#onboardingModal')).toBeHidden();
+    await expect.poll(() => finished.completed).toBe(true);
+    expect(finished.hires).toEqual([]);
   });
 });
 

@@ -4,14 +4,16 @@ import { join } from 'node:path';
 
 // The domain-specialist offer, made on Home after the hire.
 //
-// Hiring stays one decision: the wizard asks about work in general and never
-// mentions a domain. Once the assistant exists, Home offers help with the
-// domain a detected app suggests. These cases cover the offer, both answers,
-// the manual route, and every way detection can fail.
+// Hiring stays one decision: the hire (Mission 01, on the Agents page) asks
+// about work in general and never mentions a domain. Once the assistant
+// exists, Home offers help with the domain a detected app suggests. These
+// cases cover the offer, both answers, the manual route, and every way
+// detection can fail.
 
 // One server, one relationship. `POST /api/onboarding/reset` reopens the
-// wizard but deliberately does not delete the durable hire, so the cases run
-// in order and the ones that need a hire come after it.
+// onboarding modal but deliberately does not delete the durable hire, so the
+// cases run in order, on a fresh sandbox, and the ones that need a hire come
+// after it.
 test.describe.configure({ mode: 'serial' });
 
 const SHOTS = process.env.ORI_REAPER_DEMO_EVIDENCE_DIR || 'test-results/domain-specialist';
@@ -134,7 +136,10 @@ async function buildHQ(page: Page) {
   expect(res.ok(), await res.text()).toBeTruthy();
 }
 
-test('the hire wizard never mentions a domain', async ({ page }) => {
+// The hire is Mission 01, made in the Agents page's New Agent panel. It needs
+// a FRESH sandbox: a hire cannot be undone, and this case makes the one this
+// serial suite runs on.
+test('the hire never mentions a domain', async ({ page }) => {
   await page.request.post('/api/onboarding/reset');
   await stubDetection(page, musicOffer);
 
@@ -143,13 +148,15 @@ test('the hire wizard never mentions a domain', async ({ page }) => {
   await page.locator('#onboardingUserName').fill('Jordan');
   await page.locator('#welcomeNextBtn').click();
   await page.locator('#continueWithoutModelBtn').click();
-  await page.locator('#pafAssistantName').fill('Atlas');
-  await page.locator('#pafHireNextBtn').click();
-  await expect(page.locator('#pafHireStepLabel')).toContainText('Hire step 2 of 3');
+  await expect(page.locator('#onboardingModal')).toBeHidden();
 
-  // Hiring is one decision. The focus step is the shipped generic six and
+  await page.goto('/agents?quest=meet-assistant');
+  await page.locator('#newAgentBtn').click();
+  await page.locator('#cr-focus-group').waitFor();
+
+  // Hiring is one decision. The focus group is the shipped generic six and
   // nothing else.
-  const labels = await page.locator('.paf-hire-focus-grid label').allInnerTexts();
+  const labels = await page.locator('#cr-focus-group label').allInnerTexts();
   expect(labels.map(label => label.trim())).toEqual([
     'Plan my day',
     'Track commitments and follow-ups',
@@ -158,15 +165,17 @@ test('the hire wizard never mentions a domain', async ({ page }) => {
     'Help with email',
     'Something else'
   ]);
-  await expect(page.locator('#onboardingModal')).not.toContainText(/REAPER|music projects/i);
+  await expect(page.locator('#createBody')).not.toContainText(/REAPER|music projects/i);
   await page.screenshot({ path: `${SHOTS}/01-hire-has-no-offer.png`, fullPage: true });
 
   // Finish this one serial hire so the suite never leaves a partial durable
   // identity for the next case to misread as a second assistant.
-  await page.locator('#pafHireNextBtn').click();
-  await page.locator('#pafHireConfirm').check();
-  await page.locator('#pafHireBtn').click();
-  await expect(page.locator('#onboardingModal')).toBeHidden();
+  await page.locator('#cr-name').fill('Atlas');
+  await page.locator('#createSubmit').click();
+  await page.waitForURL(url => url.pathname === '/');
+  const relationship = await page.request.get('/api/personal-assistant');
+  const paf = (await relationship.json()).personal_assistant;
+  expect(paf.state).toBe('needs_hq');
 });
 
 test('Home offers help with the detected domain once setup is finished', async ({ page }) => {
