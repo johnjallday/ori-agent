@@ -180,9 +180,10 @@ func TestFixtureSeedsRealStoresAndReopensSameInstallation(t *testing.T) {
 			t.Fatal("history seed did not survive same-path reopen")
 		}
 	}
-	// CWD writes are observable, but not in the repository or real installation.
-	if _, err := os.Stat(filepath.Join(p.WorkDir, "agents.json")); err != nil {
-		t.Fatal("expected real agent store's CWD projection:", err)
+	// The agent store used to project agents.json into the working directory for
+	// the retired plugin system. It must not write there any more.
+	if _, err := os.Stat(filepath.Join(p.WorkDir, "agents.json")); !os.IsNotExist(err) {
+		t.Fatal("the agent store wrote a projection into the working directory:", err)
 	}
 }
 

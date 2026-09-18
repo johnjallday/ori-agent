@@ -1,10 +1,14 @@
 package store
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +23,12 @@ type fileStore struct {
 	path            string
 	agents          map[string]*agent.Agent
 	defaultSettings types.Settings
+
+	// definitionHashes holds, per agent, the SHA-256 of its definition file as
+	// this store last read or wrote it. A write first re-hashes the file on disk:
+	// a mismatch means something outside Ori (a text editor, a sync tool, git)
+	// changed it, and the store must not silently overwrite that edit.
+	definitionHashes map[string][sha256.Size]byte
 
 	// legacyWorkspaceManagerAgents holds the names of agents whose on-disk
 	// record still carries the retired "type": "workspace-manager" value.
@@ -67,22 +77,22 @@ func NewFileStore(path string, defaultSettings types.Settings) (Store, error) {
 		logger.Verbosef("Warning: failed to initialize missing agent skills state: %v", err)
 	}
 
+	// Only agents whose normalized form differs from what is on disk are
+	// written, so an unchanged folder keeps its modification times.
 	if err := fs.saveUnlocked(); err != nil {
 		logger.Verbosef("Warning: failed to save store during initialization: %v", err)
-	}
-
-	// Write agents.json for plugins on startup
-	if err := fs.writeAgentsJSON(); err != nil {
-		logger.Verbosef("Warning: failed to write agents.json during initialization: %v", err)
 	}
 
 	return fs, nil
 }
 
-// PersistencePaths reports the same paths used by this owner's writers. The
-// plugin projection intentionally retains its current-CWD semantics.
+// PersistencePaths reports the same paths used by this owner's writers.
+//
+// The third path used to be a copy of the index written into the process
+// working directory for the retired plugin system. Nothing reads it any more,
+// so it now names the index itself; reset removes each path once.
 func (s *fileStore) PersistencePaths() (index, profiles, projection string) {
-	return s.path, s.agentsDir(), "agents.json"
+	return s.path, s.agentsDir(), s.path
 }
 
 func (s *fileStore) ListAgents() (names []string) {
@@ -98,6 +108,19 @@ func (s *fileStore) ListAgents() (names []string) {
 func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, exists := s.agents[name]; !exists {
+		// A definition that appeared on disk since the store loaded is an
+		// existing agent, not a name free to be overwritten with defaults.
+		changed, err := s.definitionChangedOnDiskUnlocked(name)
+		if err != nil {
+			return err
+		}
+		if changed {
+			if err := s.reloadAgentUnlocked(name); err != nil {
+				return err
+			}
+		}
+	}
 	created := false
 	if _, exists := s.agents[name]; !exists {
 		defaultSettings := s.defaultSettings
@@ -161,9 +184,12 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 		if err := s.initializeNewAgentSkillsStateUnlocked(name); err != nil {
 			return fmt.Errorf("initialize skill defaults: %w", err)
 		}
+		if err := s.persistAgentUnlocked(name); err != nil {
+			return err
+		}
 	}
 
-	return s.saveUnlocked()
+	return s.writeIndexUnlocked()
 }
 
 // agentsDir resolves the directory that holds one folder per agent.
@@ -242,6 +268,7 @@ func (s *fileStore) DeleteAgent(name string) error {
 
 	// Remove agent from memory
 	delete(s.agents, name)
+	delete(s.definitionHashes, name)
 
 	// Delete the agent folder from filesystem
 	agentFolder := filepath.Join(s.agentsDir(), name)
@@ -250,7 +277,7 @@ func (s *fileStore) DeleteAgent(name string) error {
 		logger.Verbosef("Warning: failed to remove agent folder %s: %v", agentFolder, err)
 	}
 
-	return s.saveUnlocked()
+	return s.writeIndexUnlocked()
 }
 
 // RenameAgent moves an agent record and its entire on-disk folder to a new name.
@@ -271,6 +298,18 @@ func (s *fileStore) RenameAgent(oldName, newName string) error {
 	newName = strings.TrimSpace(newName)
 	if oldName == "" || newName == "" {
 		return fmt.Errorf("both the current and new agent name are required")
+	}
+
+	// The folder moves as it is on disk, so the record that follows it must be
+	// the one on disk too; otherwise the save below would undo an outside edit.
+	changed, err := s.definitionChangedOnDiskUnlocked(oldName)
+	if err != nil {
+		return err
+	}
+	if changed {
+		if err := s.reloadAgentUnlocked(oldName); err != nil {
+			return err
+		}
 	}
 
 	record, exists := s.agents[oldName]
@@ -319,8 +358,15 @@ func (s *fileStore) RenameAgent(oldName, newName string) error {
 
 	s.agents[newName] = record
 	delete(s.agents, oldName)
+	if hash, known := s.definitionHashes[oldName]; known {
+		delete(s.definitionHashes, oldName)
+		s.definitionHashes[newName] = hash
+	}
 
-	if err := s.saveUnlocked(); err != nil {
+	if err := s.persistAgentUnlocked(newName); err != nil {
+		return err
+	}
+	if err := s.writeIndexUnlocked(); err != nil {
 		return err
 	}
 
@@ -336,7 +382,8 @@ func (s *fileStore) ClearAgents() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.agents = make(map[string]*agent.Agent)
-	return s.saveUnlocked()
+	s.definitionHashes = nil
+	return s.writeIndexUnlocked()
 }
 
 func (s *fileStore) GetAgent(name string) (*agent.Agent, bool) {
@@ -346,19 +393,53 @@ func (s *fileStore) GetAgent(name string) (*agent.Agent, bool) {
 	return ag, ok
 }
 
+// SetAgent replaces an agent's record and writes its definition.
+//
+// It refuses, with ErrAgentChangedOnDisk, when the definition file was changed
+// outside Ori since this store last read or wrote it: ag was built from the old
+// content, so writing it would silently discard that edit. The store reloads
+// the agent from disk first, so a retry starts from what is really there.
 func (s *fileStore) SetAgent(name string, ag *agent.Agent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	changed, err := s.definitionChangedOnDiskUnlocked(name)
+	if err != nil {
+		return err
+	}
+	if changed {
+		if err := s.reloadAgentUnlocked(name); err != nil {
+			return err
+		}
+		return fmt.Errorf("%w: %s", ErrAgentChangedOnDisk, name)
+	}
 	s.agents[name] = ag
 	if err := s.initializeNewAgentSkillsStateUnlocked(name); err != nil {
 		return fmt.Errorf("initialize skill defaults: %w", err)
 	}
-	return s.saveUnlocked()
+	if err := s.persistAgentUnlocked(name); err != nil {
+		return err
+	}
+	return s.writeIndexUnlocked()
 }
 
+// UpdateAgent applies updateFn to an agent and writes its definition.
+//
+// Unlike SetAgent it can merge with an outside edit: when the file changed on
+// disk, the agent is reloaded and updateFn runs on the reloaded record, so both
+// the edit and the update survive.
 func (s *fileStore) UpdateAgent(name string, updateFn func(*agent.Agent) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	changed, err := s.definitionChangedOnDiskUnlocked(name)
+	if err != nil {
+		return err
+	}
+	if changed {
+		if err := s.reloadAgentUnlocked(name); err != nil {
+			return err
+		}
+	}
 
 	ag, ok := s.agents[name]
 	if !ok || ag == nil {
@@ -369,7 +450,10 @@ func (s *fileStore) UpdateAgent(name string, updateFn func(*agent.Agent) error) 
 		return err
 	}
 
-	return s.saveUnlocked()
+	if err := s.persistAgentUnlocked(name); err != nil {
+		return err
+	}
+	return s.writeIndexUnlocked()
 }
 
 func (s *fileStore) Save() error {
@@ -378,97 +462,199 @@ func (s *fileStore) Save() error {
 	return s.saveUnlocked()
 }
 
-// writeAgentsJSON writes agents.json in the current working directory for plugins
-func (s *fileStore) writeAgentsJSON() error {
-	data, err := json.MarshalIndent(map[string]any{}, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile("agents.json", data, 0o644)
-}
-
 // ---------- persistence helpers (no Messages persisted) ----------
 
+// definitionFileName is the per-agent definition file inside an agent folder.
+const definitionFileName = "agent_settings.json"
+
+// persistedDefinition is what an agent's definition file holds.
+//
+// This is an explicit projection, not a marshal of agent.Agent, so a new
+// first-class field is invisible on disk until it is listed here. Appearance
+// is listed for exactly that reason (FR-1/FR-68).
+type persistedDefinition struct {
+	Role         types.AgentRole        `json:"role,omitempty"`
+	Capabilities []string               `json:"capabilities,omitempty"`
+	Settings     types.Settings         `json:"Settings"`
+	Status       types.AgentStatus      `json:"status,omitempty"`
+	Statistics   *types.AgentStatistics `json:"statistics,omitempty"`
+	Metadata     *types.AgentMetadata   `json:"metadata,omitempty"`
+	Appearance   *types.AgentAppearance `json:"appearance,omitempty"`
+	Evolution    *types.AgentEvolution  `json:"evolution,omitempty"`
+}
+
+// encodeDefinition serializes an agent in the stable on-disk form: two-space
+// indent, struct-order keys (maps sort their keys), one trailing newline.
+func encodeDefinition(ag *agent.Agent) ([]byte, error) {
+	// Canonicalize immediately before serializing, so a record written by any
+	// code path — not just the migrating load path — is canonical on disk.
+	ag.EnsureAppearance()
+	data, err := json.MarshalIndent(persistedDefinition{
+		Role:         ag.Role,
+		Capabilities: ag.Capabilities,
+		Settings:     ag.Settings,
+		Status:       ag.Status,
+		Statistics:   ag.Statistics,
+		Metadata:     ag.Metadata,
+		Appearance:   ag.Appearance,
+		Evolution:    ag.Evolution,
+	}, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(data, '\n'), nil
+}
+
+func (s *fileStore) definitionPath(name string) string {
+	return filepath.Join(s.agentsDir(), name, definitionFileName)
+}
+
+// saveUnlocked writes every agent, each only if its content changed. An agent
+// whose file was changed outside Ori is reloaded instead: the disk wins.
 func (s *fileStore) saveUnlocked() error {
-	// Ensure base directory exists
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
-		return err
+	names := make([]string, 0, len(s.agents))
+	for name := range s.agents {
+		names = append(names, name)
 	}
+	sort.Strings(names)
 
-	// Create agents directory - handle case where path already includes agents/
-	agentsDir := s.agentsDir()
-	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
-		return err
-	}
-
-	// Save individual agent files in nested structure.
-	//
-	// This is an explicit projection, not a marshal of agent.Agent, so a new
-	// first-class field is invisible on disk until it is listed here. Appearance
-	// is listed for exactly that reason (FR-1/FR-68).
-	type persistSettings struct {
-		Role         types.AgentRole        `json:"role,omitempty"`
-		Capabilities []string               `json:"capabilities,omitempty"`
-		Settings     types.Settings         `json:"Settings"`
-		Status       types.AgentStatus      `json:"status,omitempty"`
-		Statistics   *types.AgentStatistics `json:"statistics,omitempty"`
-		Metadata     *types.AgentMetadata   `json:"metadata,omitempty"`
-		Appearance   *types.AgentAppearance `json:"appearance,omitempty"`
-		Evolution    *types.AgentEvolution  `json:"evolution,omitempty"`
-	}
-
-	for agentName, agent := range s.agents {
-		// Create agent-specific directory
-		agentSpecificDir := filepath.Join(agentsDir, agentName)
-		if err := os.MkdirAll(agentSpecificDir, 0o755); err != nil {
-			return err
-		}
-
-		// Only save agent_settings.json with everything (Role + Settings)
-		// Don't create config.json unless necessary
-		// Canonicalize immediately before serializing, so a record written by any
-		// code path — not just the migrating load path — is canonical on disk.
-		agent.EnsureAppearance()
-
-		agentSettings := persistSettings{
-			Role:         agent.Role,
-			Capabilities: agent.Capabilities,
-			Settings:     agent.Settings,
-			Status:       agent.Status,
-			Statistics:   agent.Statistics,
-			Metadata:     agent.Metadata,
-			Appearance:   agent.Appearance,
-			Evolution:    agent.Evolution,
-		}
-
-		settingsData, err := json.MarshalIndent(agentSettings, "", "  ")
+	for _, name := range names {
+		changed, err := s.definitionChangedOnDiskUnlocked(name)
 		if err != nil {
 			return err
 		}
-
-		settingsPath := filepath.Join(agentSpecificDir, "agent_settings.json")
-		tmpSettingsPath := settingsPath + ".tmp"
-		if err := os.WriteFile(tmpSettingsPath, settingsData, 0644); err != nil {
-			return err
+		if changed {
+			if err := s.reloadAgentUnlocked(name); err != nil {
+				logger.Warn("Agent definition changed on disk and could not be reloaded", logger.Fields{
+					"agent": name,
+					"error": err.Error(),
+				})
+			}
+			continue
 		}
-		if err := os.Rename(tmpSettingsPath, settingsPath); err != nil {
+		if err := s.persistAgentUnlocked(name); err != nil {
 			return err
 		}
 	}
+	return s.writeIndexUnlocked()
+}
 
-	// Save a minimal index file for compatibility with older tooling.
-	data, err := json.MarshalIndent(map[string]any{}, "", "  ")
+// persistAgentUnlocked writes one agent's definition file if, and only if, its
+// serialized content differs from what is on disk. Assumes the lock is held.
+func (s *fileStore) persistAgentUnlocked(name string) error {
+	ag, ok := s.agents[name]
+	if !ok || ag == nil {
+		return nil
+	}
+	data, err := encodeDefinition(ag)
 	if err != nil {
 		return err
 	}
-
-	// Use atomic write: write to .tmp then rename
-	tmpPath := s.path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+	path := s.definitionPath(name)
+	// 0o750: an agent folder holds the agent's prompt and per-agent skill
+	// state, which no other user on the machine needs to read.
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
-	return os.Rename(tmpPath, s.path)
+	if err := writeFileIfChanged(path, data); err != nil {
+		return err
+	}
+	s.rememberDefinitionUnlocked(name, data)
+	return nil
+}
+
+// writeIndexUnlocked keeps the minimal index file for compatibility with older
+// tooling. Like the definitions, it is only written when it differs.
+func (s *fileStore) writeIndexUnlocked() error {
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o750); err != nil {
+		return err
+	}
+	return writeFileIfChanged(s.path, []byte("{}\n"))
+}
+
+func (s *fileStore) rememberDefinitionUnlocked(name string, data []byte) {
+	if s.definitionHashes == nil {
+		s.definitionHashes = make(map[string][sha256.Size]byte)
+	}
+	s.definitionHashes[name] = sha256.Sum256(data)
+}
+
+// definitionChangedOnDiskUnlocked reports whether an agent's definition file no
+// longer matches what this store last read or wrote: edited, created, or
+// deleted by something other than this store. Assumes the lock is held.
+func (s *fileStore) definitionChangedOnDiskUnlocked(name string) (bool, error) {
+	known, haveKnown := s.definitionHashes[name]
+	data, err := os.ReadFile(s.definitionPath(name))
+	if errors.Is(err, os.ErrNotExist) {
+		// Gone since we last saw it, or never written: only the former counts.
+		return haveKnown, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return !haveKnown || sha256.Sum256(data) != known, nil
+}
+
+// reloadAgentUnlocked replaces one agent's in-memory record with what is on
+// disk, and forgets the agent when its file is gone. Assumes the lock is held.
+func (s *fileStore) reloadAgentUnlocked(name string) error {
+	data, err := os.ReadFile(s.definitionPath(name))
+	if errors.Is(err, os.ErrNotExist) {
+		delete(s.agents, name)
+		delete(s.definitionHashes, name)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var ag agent.Agent
+	if err := json.Unmarshal(data, &ag); err != nil {
+		return fmt.Errorf("read agent %q: %w", name, err)
+	}
+	s.recordLegacyTypeUnlocked(name, detectLegacyType(data))
+	s.normalizeLoadedAgent(name, &ag)
+	s.agents[name] = &ag
+	s.stripLegacyAgentTypeUnlocked()
+	s.rememberDefinitionUnlocked(name, data)
+	return nil
+}
+
+// writeFileIfChanged writes data to path atomically, unless the file already
+// holds exactly those bytes. Skipping the identical write is what keeps an
+// unchanged file's modification time, so git and sync tools see no change.
+func writeFileIfChanged(path string, data []byte) error {
+	current, err := os.ReadFile(path) // #nosec G304 -- path is built by the owning store, never taken from a request
+	if err == nil && bytes.Equal(current, data) {
+		return nil
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return writeFileAtomic(path, data)
+}
+
+// writeFileAtomic writes to a temporary file in the target's own folder and
+// renames it over the target, so a reader or a crash never sees a partial file.
+func writeFileAtomic(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return nil
 }
 
 func (s *fileStore) load() error {
@@ -534,12 +720,13 @@ func (s *fileStore) load() error {
 				if entry.IsDir() {
 					// New nested structure: agents/{name}/agent_settings.json contains everything
 					agentName := entry.Name()
-					settingsPath := filepath.Join(agentsDir, agentName, "agent_settings.json")
+					settingsPath := filepath.Join(agentsDir, agentName, definitionFileName)
 
 					var ag agent.Agent
 
 					// Load full agent settings so nested persistence remains forward-compatible.
-					if settingsData, err := os.ReadFile(settingsPath); err == nil {
+					if settingsData, err := os.ReadFile(settingsPath); err == nil { // #nosec G304 -- a directory entry under the store's own agents folder
+						s.rememberDefinitionUnlocked(agentName, settingsData)
 						if err := json.Unmarshal(settingsData, &ag); err == nil {
 							logger.Verbosef("✅ Loaded agent '%s' from %s", agentName, settingsPath)
 							s.recordLegacyTypeUnlocked(agentName, detectLegacyType(settingsData))

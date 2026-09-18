@@ -156,7 +156,7 @@ func (h *Handler) SettingsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		ag.Settings = s
 		if err := h.store.SetAgent(agentName, ag); err != nil {
-			orihttp.InternalError(w, err.Error())
+			agenthttp.WriteAgentStoreError(w, "Failed to save agent settings", err)
 			return
 		}
 		w.WriteHeader(http.StatusOK)

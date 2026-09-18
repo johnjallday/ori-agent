@@ -1,11 +1,22 @@
 package store
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
+
+// ErrAgentChangedOnDisk reports that an agent's definition file was edited
+// outside Ori after the store last read or wrote it. SetAgent refuses to
+// overwrite such a file; the store reloads the agent from disk instead, so the
+// caller can show the user what is actually there and let them try again.
+var ErrAgentChangedOnDisk = errors.New("agent definition changed on disk")
+
+// AgentChangedOnDiskMessage is the user-facing explanation for
+// ErrAgentChangedOnDisk. HTTP handlers answer it with 409 Conflict.
+const AgentChangedOnDiskMessage = "This agent was changed on disk. Ori reloaded it. Review it and try again."
 
 // CreateAgentConfig holds optional configuration for creating a new agent
 type CreateAgentConfig struct {

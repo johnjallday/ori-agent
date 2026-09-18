@@ -325,16 +325,19 @@ func independentlyResolvedTargets(root string) (map[string]string, error) {
 	return map[string]string{
 		// Selected installed-plugin reset edits within these owner scopes; the
 		// personal skills root is resolved separately and never appears here.
-		"plugin_registry_records":       pluginPaths.RegistryPath(),
-		"plugin_mcp_entries":            pluginPaths.MCPRegistry,
-		"plugin_surface_state":          pluginPaths.StateRoot(),
-		"plugin_managed_artifacts":      pluginPaths.ArtifactsRoot(),
-		"plugin_managed_clones":         pluginPaths.CloneDir,
-		"plugin_preview_state":          pluginPaths.PreviewRoot(),
-		"settings_fields":               settingsPath,
-		"agent_index":                   cleanIndex,
-		"agent_profiles":                agentProfiles,
-		"agent_projection":              filepath.Join(root, "agents.json"),
+		"plugin_registry_records":  pluginPaths.RegistryPath(),
+		"plugin_mcp_entries":       pluginPaths.MCPRegistry,
+		"plugin_surface_state":     pluginPaths.StateRoot(),
+		"plugin_managed_artifacts": pluginPaths.ArtifactsRoot(),
+		"plugin_managed_clones":    pluginPaths.CloneDir,
+		"plugin_preview_state":     pluginPaths.PreviewRoot(),
+		"settings_fields":          settingsPath,
+		"agent_index":              cleanIndex,
+		"agent_profiles":           agentProfiles,
+		// The retired plugin projection now aliases the index (see
+		// fileStore.PersistencePaths); journals written before that named
+		// root/agents.json, which is the same file for the default store.
+		"agent_projection":              cleanIndex,
 		"workspace_registration_fields": filepath.Join(root, "settings.json"),
 		"workspace_permissions":         filepath.Join(root, workspace.DefaultAllowlistFilename),
 		"database_records":              filepath.Join(root, "sessions.db"),

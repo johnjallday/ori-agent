@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -205,14 +206,9 @@ func TestRenameAgentRejectsUnknownSourceAndEmptyNames(t *testing.T) {
 func TestRenameAgentSucceedsWhenTheSourceFolderIsMissing(t *testing.T) {
 	fs, agentsDir := renameStore(t)
 
-	if err := fs.CreateAgent("Workspace Manager", &CreateAgentConfig{
-		SystemPrompt: "no folder",
-	}); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	if err := os.RemoveAll(filepath.Join(agentsDir, "Workspace Manager")); err != nil {
-		t.Fatalf("remove source folder: %v", err)
-	}
+	// Seed the record in memory only. Deleting the folder of a saved agent is
+	// not the same state: the store treats that as a deletion made outside Ori.
+	fs.agents["Workspace Manager"] = &agent.Agent{Settings: types.Settings{SystemPrompt: "no folder"}}
 
 	if err := fs.RenameAgent("Workspace Manager", "Ask Ori"); err != nil {
 		t.Fatalf("RenameAgent: %v", err)

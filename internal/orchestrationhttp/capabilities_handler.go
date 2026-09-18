@@ -1,6 +1,7 @@
 package orchestrationhttp
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -76,6 +77,10 @@ func (ch *CapabilitiesHandler) AgentCapabilitiesHandler(w http.ResponseWriter, r
 		}
 
 		if err := ch.agentStore.SetAgent(agentName, agent); err != nil {
+			if errors.Is(err, store.ErrAgentChangedOnDisk) {
+				orihttp.Conflict(w, store.AgentChangedOnDiskMessage)
+				return
+			}
 			logger.Error("Error updating agent capabilities", logger.Fields{"error": err})
 			orihttp.InternalError(w, err.Error())
 			return

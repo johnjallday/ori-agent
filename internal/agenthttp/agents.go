@@ -688,9 +688,24 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if err := h.State.SetAgent(*req.Name, agent); err != nil {
+		// Save the edit under the current name first. That write is where the
+		// store notices a definition changed on disk; renaming a stale copy
+		// would carry it to the new name and delete the edited file.
+		if err := h.State.SetAgent(agentName, agent); err != nil {
+			logger.Error("Failed to save agent before rename", logger.Fields{"agent": agentName, "error": err})
+			WriteAgentStoreError(w, "Failed to update agent", err)
+			return
+		}
+		if renamer, ok := h.State.(store.AgentRenamer); ok {
+			// Moving the folder keeps every sidecar file (skills, MCP state).
+			if err := renamer.RenameAgent(agentName, *req.Name); err != nil {
+				logger.Error("Failed to rename agent", logger.Fields{"from": agentName, "to": *req.Name, "error": err})
+				WriteAgentStoreError(w, "Failed to update agent", err)
+				return
+			}
+		} else if err := h.State.SetAgent(*req.Name, agent); err != nil {
 			logger.Error("Failed to save renamed agent", logger.Fields{"agent": *req.Name, "error": err})
-			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update agent", err)
+			WriteAgentStoreError(w, "Failed to update agent", err)
 			return
 		}
 		// Carry the saved Agent Map coordinate BEFORE the old record is deleted
@@ -707,14 +722,16 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 					logger.Fields{"from": agentName, "to": *req.Name, "err": err})
 			}
 		}
-		if err := h.State.DeleteAgent(agentName); err != nil {
-			logger.Error("Failed to delete old agent record after rename", logger.Fields{"name": agentName, "err": err})
+		if _, stillThere := h.State.GetAgent(agentName); stillThere {
+			if err := h.State.DeleteAgent(agentName); err != nil {
+				logger.Error("Failed to delete old agent record after rename", logger.Fields{"name": agentName, "err": err})
+			}
 		}
 		newName = *req.Name
 	} else {
 		if err := h.State.SetAgent(agentName, agent); err != nil {
 			logger.Error("Failed to update agent metadata", logger.Fields{"agent": agentName, "error": err})
-			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update agent", err)
+			WriteAgentStoreError(w, "Failed to update agent", err)
 			return
 		}
 	}

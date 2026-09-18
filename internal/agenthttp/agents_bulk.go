@@ -2,6 +2,7 @@ package agenthttp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -63,7 +65,8 @@ const (
 	reasonAttachedAgent     = "attached_agent"  // attached to >=1 workspace
 	reasonAgentNotFound     = "agent_not_found" // no such user agent
 	reasonSharedEditNeedsOK = "shared_edit_requires_confirmation"
-	reasonInternalError     = "internal_error" // unexpected server failure
+	reasonChangedOnDisk     = agentChangedOnDiskCode // edited outside Ori; reloaded
+	reasonInternalError     = "internal_error"       // unexpected server failure
 )
 
 // bulkRequest is the POST /api/agents/bulk body (PRD FR46).
@@ -269,6 +272,9 @@ func (h *Handler) persistMetadataMutation(name string, ag *agent.Agent, fields [
 		ag.Statistics.UpdatedAt = time.Now()
 	}
 	if err := h.State.SetAgent(name, ag); err != nil {
+		if errors.Is(err, store.ErrAgentChangedOnDisk) {
+			return bulkResult{Name: name, Status: bulkStatusSkipped, ReasonCode: reasonChangedOnDisk, Message: agentChangedOnDiskMessage}, false
+		}
 		logger.Error("bulk metadata save failed", logger.Fields{"agent": name, "err": err})
 		return bulkResult{Name: name, Status: bulkStatusFailed, ReasonCode: reasonInternalError, Message: "Failed to update agent."}, false
 	}

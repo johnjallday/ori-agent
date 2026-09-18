@@ -234,7 +234,7 @@ func (h *AppearanceUploadHandler) upload(w http.ResponseWriter, r *http.Request,
 			_ = root.Remove(filename)
 		}
 		logger.Error("Failed to save agent appearance", logger.Fields{"error": err, "agent": agentName})
-		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update agent", err)
+		WriteAgentStoreError(w, "Failed to update agent", err)
 		return
 	}
 
@@ -277,7 +277,7 @@ func (h *AppearanceUploadHandler) remove(w http.ResponseWriter, r *http.Request,
 	if err := h.State.SetAgent(agentName, ag); err != nil {
 		ag.Appearance = restore
 		logger.Error("Failed to save agent appearance", logger.Fields{"error": err, "agent": agentName})
-		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update agent", err)
+		WriteAgentStoreError(w, "Failed to update agent", err)
 		return
 	}
 

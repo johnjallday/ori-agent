@@ -462,7 +462,7 @@ func inspectCategory(ctx context.Context, owners Owners, id CategoryID, category
 			index, profiles, projection := paths.PersistencePaths()
 			target("agent_index", index, "Remove the owned agent index, not unrelated files beside it.")
 			target("agent_profiles", profiles, "Remove only owned agent profiles/skills/state; preserve unknown files and external links.")
-			target("agent_projection", projection, "Remove the owner's compatibility projection.")
+			target("agent_projection", projection, "Remove the owner's compatibility projection (now the index itself).")
 			count := int64(len(owners.Agents.ListAgents()))
 			category.Facts = append(category.Facts, CountFact{Name: "active agent profiles", Count: &count})
 		}

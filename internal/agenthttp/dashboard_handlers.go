@@ -576,7 +576,7 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 
 	// Save agent
 	if err := h.State.SetAgent(agentName, agent); err != nil {
-		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update agent status", err)
+		WriteAgentStoreError(w, "Failed to update agent status", err)
 		return
 	}
 
