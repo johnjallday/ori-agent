@@ -34,10 +34,18 @@
   var STEP_CONFIRM = 3;
   var TOTAL_STEPS = 3;
 
+  // Set by the Agents page the moment Mission 01's hire succeeds (JUST_HIRED_FLAG
+  // in personal-assistant-hire.js, which this page does not load). Read once and
+  // cleared, so only the walkthrough the hire handed over to opens with it.
+  var HAND_OVER_FLAG = 'ori:assistant-just-hired';
+  var HAND_OVER_LINE = 'That’s your assistant. Now let’s give them a home.';
+
   var state = {
     active: false,
     step: 0,
     assistantName: '',
+    // True when this walkthrough was entered straight from the hire.
+    handOver: false,
     // Set once the walkthrough has forced Map view for this visit, so a Map
     // remount does not keep yanking the view back under the user.
     forcedMapView: false,
@@ -127,8 +135,16 @@
     return name || 'Your assistant';
   }
 
-  function stepCopy(step, name) {
+  function stepCopy(step, name, handOver) {
     var who = subject(name);
+    if (step === STEP_SELECT_SITE && handOver) {
+      // Entered straight from the hire: Ori hands over in one line instead of
+      // announcing a hire the user just made.
+      return {
+        answer: HAND_OVER_LINE + ' On the Map, select the highlighted Personal HQ site.',
+        note: 'Nothing is created by looking. You choose what happens next.'
+      };
+    }
     if (step === STEP_SELECT_SITE) {
       return {
         answer:
@@ -173,7 +189,7 @@
     var g = guide();
     if (!g || typeof g.presentQuestStep !== 'function') return false;
     state.step = step;
-    var copy = stepCopy(step, state.assistantName);
+    var copy = stepCopy(step, state.assistantName, state.handOver);
     var result = g.presentQuestStep({
       quest: QUEST_ID,
       index: step,
@@ -214,6 +230,20 @@
     }
   }
 
+  // takeHandOver reads and clears the flag the hire left. Unreadable storage is
+  // simply no hand-over: the walkthrough reads as it always has.
+  function takeHandOver() {
+    try {
+      var storage = window.sessionStorage;
+      if (!storage) return false;
+      var value = storage.getItem(HAND_OVER_FLAG);
+      if (value !== null) storage.removeItem(HAND_OVER_FLAG);
+      return value === '1';
+    } catch (_) {
+      return false;
+    }
+  }
+
   async function start(options) {
     var context = options && options.context ? options.context : await eligible();
     if (!context) return false;
@@ -221,6 +251,9 @@
     state.active = true;
     state.step = 0;
     state.assistantName = context.assistantName;
+    // Held for the whole visit, so a Map remount that re-presents step 1 does
+    // not change what Ori just said.
+    state.handOver = takeHandOver();
     forceMapView();
 
     var g = guide();
@@ -247,6 +280,7 @@
   function stop() {
     state.active = false;
     state.step = 0;
+    state.handOver = false;
     state.forcedMapView = false;
     var g = guide();
     if (g && typeof g.clearQuestStep === 'function') g.clearQuestStep();

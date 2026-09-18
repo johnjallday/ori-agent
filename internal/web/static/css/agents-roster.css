@@ -3084,6 +3084,20 @@ body.inspector-sheet-open {
 .create-panel__switch {
   margin: 12px 0 0;
 }
+
+/* Ori sits at the bottom-right corner, which is exactly where the Inspector's
+   save bar lands: with the guide open, Hire was visible but under it, and
+   unclickable. While a create panel is open beside the collection, the guide
+   docks at the collection's corner instead. Mission 01 walks through this
+   panel with the guide open the whole way. In sheet mode the Inspector covers
+   the page above the guide, so nothing needs moving there. */
+@media (min-width: 1101px) {
+  body:has(#createPanel:not([hidden])) .ori-guide {
+    right: auto;
+    left: 20px;
+    align-items: flex-start;
+  }
+}
 .create-panel__switch .roster-linkbtn {
   padding: 0;
 }

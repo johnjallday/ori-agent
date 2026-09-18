@@ -419,6 +419,38 @@ test('a fixed quest step presents host copy with no network call and no model', 
   assert.equal(site.focused, true);
 });
 
+// A step the form itself advanced to must not pull the user out of the form:
+// their next keystroke would land on the marked control, and a Space on a
+// marked button presses it.
+test('a quest step with focus:false marks without moving focus', () => {
+  const hire = makeElement('createSubmit');
+  let scrolled = false;
+  hire.scrollIntoView = () => {
+    scrolled = true;
+  };
+  const { guide } = questGuide({ route: '/agents', selectors: { '#createSubmit': hire } });
+
+  const result = guide.presentQuestStep({
+    quest: 'meet-assistant',
+    answer: 'Hire them.',
+    coachmark: 'assistant_hire',
+    focus: false
+  });
+
+  assert.equal(result.coachmarkResolved, true);
+  assert.ok(hire.classList.contains('is-ori-coachmark'), 'the control is still marked');
+  assert.equal(hire.focused, false, 'focus moved into the marked control');
+  assert.equal(scrolled, true, 'the marked control is still brought into view');
+
+  // The default is unchanged: an ordinary step focuses its control.
+  guide.presentQuestStep({
+    quest: 'meet-assistant',
+    answer: 'Hire them.',
+    coachmark: 'assistant_hire'
+  });
+  assert.equal(hire.focused, true);
+});
+
 test('a fixed quest step renders a user-controlled name as text, never markup', () => {
   const { guide, reply } = questGuide();
   guide.presentQuestStep({
@@ -871,7 +903,13 @@ test('local coachmark keys are not server-addressable', () => {
   const owners = {
     select_agent: '/agents',
     select_agent_check: '/agents',
-    create_workspace_submit: '/'
+    create_workspace_submit: '/',
+    // Mission 01: Home's prompt, then the Agents page walkthrough.
+    nav_agents: '/',
+    assistant_name: '/agents',
+    assistant_face: '/agents',
+    assistant_focus: '/agents',
+    assistant_hire: '/agents'
   };
   assert.deepEqual(local.sort(), Object.keys(owners).sort());
   for (const key of local) {
@@ -1563,6 +1601,27 @@ test('reopening does not re-greet over a reply the user came back to read', asyn
 
   assert.equal(asks, afterAsk, 'reopening must not fire another request');
   assert.match(els.oriGuideReply.innerHTML, /kept/);
+});
+
+// A walkthrough step is fixed content too. A user who closed the panel
+// mid-walkthrough and reopens it from the launcher must find the step, not a
+// greeting that arrived afterwards and replaced it.
+test('reopening over a walkthrough step does not greet over it', () => {
+  const els = guideEls();
+  const ctx = load({ route: '/', elements: els });
+  let asks = 0;
+  ctx.sandbox.fetch = () => {
+    asks += 1;
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ answer: 'greeting' }) });
+  };
+
+  ctx.guide.open(null, { skipGreeting: true });
+  ctx.guide.presentQuestStep({ quest: 'meet-assistant', answer: 'Press New Agent.' });
+  ctx.guide.close();
+  ctx.guide.open(els.oriGuideLauncher);
+
+  assert.equal(asks, 0, 'reopening greeted over the walkthrough step');
+  assert.match(els.oriGuideReply.innerHTML, /Press New Agent/);
 });
 
 /* ---- acceptance matrix (FR16-FR39) ---------------------------------------------- */

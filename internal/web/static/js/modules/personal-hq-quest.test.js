@@ -413,6 +413,53 @@ test('the walkthrough works with no model configured', async () => {
   assert.equal(calls.presented.length, 1);
 });
 
+/* ---- hand-over from Mission 01 (meet-your-assistant FR37) ----------------- */
+
+function sessionWith(entries) {
+  const values = new Map(Object.entries(entries));
+  return {
+    values,
+    getItem: key => (values.has(key) ? values.get(key) : null),
+    setItem: (key, value) => values.set(key, String(value)),
+    removeItem: key => values.delete(key)
+  };
+}
+
+test('entered straight from the hire, step 1 opens with the hand-over line, once', async () => {
+  const loaded = load({ search: '?quest=build-hq' });
+  // Set before the eligibility requests settle, as the hire's page did.
+  const session = sessionWith({ 'ori:assistant-just-hired': '1' });
+  loaded.sandbox.window.sessionStorage = session;
+  await settle();
+
+  const first = loaded.calls.presented[0];
+  assert.equal(first.index, 1);
+  assert.equal(
+    first.answer,
+    'That’s your assistant. Now let’s give them a home. On the Map, select the highlighted Personal HQ site.'
+  );
+  assert.equal(session.values.has('ori:assistant-just-hired'), false, 'the flag was not cleared');
+
+  // A Map remount re-presents step 1: what Ori said does not change under the user.
+  loaded.fireWindow('ori:hq-quest-signal', { stage: 'hq-status-changed', valid: false });
+  assert.equal(loaded.calls.presented.at(-1).answer, first.answer);
+
+  // A later entry in the same session reads exactly as it always has.
+  loaded.quest.stop();
+  await loaded.quest.resume();
+  assert.match(loaded.calls.presented.at(-1).answer, /^Atlas is hired\./);
+});
+
+test('every other entry to Build My HQ reads exactly as today', async () => {
+  const loaded = load({ search: '?quest=build-hq' });
+  loaded.sandbox.window.sessionStorage = sessionWith({});
+  await settle();
+  assert.equal(
+    loaded.calls.presented[0].answer,
+    'Atlas is hired. Let’s give Atlas a home base. On the Map, select the highlighted Personal HQ site.'
+  );
+});
+
 test('the walkthrough is inert when the guide is not on the page', async () => {
   const { quest } = load({ search: '?quest=build-hq' });
   await settle();

@@ -953,7 +953,11 @@
     return true;
   }
 
-  function markCoachmark(key, el) {
+  // opts.focus === false marks and points without moving focus. A walkthrough
+  // passes it for a step the form itself advanced to, while the user is still
+  // working in that form: moving focus there would carry their next keystroke
+  // somewhere else, and a Space landing on a marked button presses it.
+  function markCoachmark(key, el, opts) {
     state.coachmarkKey = key;
     el.classList.add('is-ori-coachmark');
     state.coachmarkEl = el;
@@ -963,7 +967,8 @@
     state.coachmarkRoute = currentRoute();
     applyPointer(el);
     emit('coachmark', { key: key, resolved: true });
-    if (typeof el.focus === 'function') el.focus({ preventScroll: false });
+    var moveFocus = !(opts && opts.focus === false);
+    if (moveFocus && typeof el.focus === 'function') el.focus({ preventScroll: false });
     if (typeof el.scrollIntoView === 'function') {
       el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
@@ -989,7 +994,7 @@
     var el = registry && registry.resolve(key, currentRoute(), document);
 
     if (el) {
-      markCoachmark(key, el);
+      markCoachmark(key, el, opts);
       return true;
     }
 
@@ -1014,7 +1019,7 @@
       }
       var found = registry && registry.resolve(key, currentRoute(), document);
       if (found) {
-        markCoachmark(key, found);
+        markCoachmark(key, found, opts);
         return;
       }
       tries += 1;
@@ -1157,7 +1162,15 @@
     // question nobody asked. A caller about to present its own fixed content
     // (the guided HQ quest) opts out via skipGreeting — the async greeting
     // fetch would otherwise land after and silently overwrite that content.
-    if (!state.activity.length && !state.pending && !(options && options.skipGreeting)) {
+    // A walkthrough step already on the panel is the same fixed content: the
+    // user reopening a panel they closed mid-walkthrough must find the step,
+    // not a greeting that replaced it.
+    if (
+      !state.activity.length &&
+      !state.pending &&
+      !state.quest &&
+      !(options && options.skipGreeting)
+    ) {
       // Silent: this is the panel greeting itself, not a question the user asked.
       ask('', { silent: true });
     }
@@ -1297,7 +1310,12 @@
     if (step.coachmark) {
       // awaitTarget: a step is presented in the same tick as the dialog whose
       // control it names, so the control may be one frame away from existing.
-      coachmarkResolved = applyCoachmark(String(step.coachmark), { awaitTarget: true });
+      // step.focus === false keeps focus where the user is working (see
+      // markCoachmark).
+      coachmarkResolved = applyCoachmark(String(step.coachmark), {
+        awaitTarget: true,
+        focus: step.focus !== false
+      });
     } else {
       clearCoachmark();
     }

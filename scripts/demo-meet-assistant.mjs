@@ -7,9 +7,15 @@
  *   node scripts/demo-meet-assistant.mjs <baseUrl> <outDir> <stage> [--width=1280]
  *
  * Stages (each needs a FRESH sandbox: a hire cannot be undone):
- *   preset   New Agent opens the assistant preset while unhired; Hire lands on
- *            /?quest=build-hq with the relationship needs_hq; afterwards New
- *            Agent opens the ordinary form again.
+ *   preset        New Agent opens the assistant preset while unhired; Hire lands
+ *                 on /?quest=build-hq with the relationship needs_hq; afterwards
+ *                 New Agent opens the ordinary form again.
+ *   walkthrough   /agents?quest=meet-assistant: each of Ori's five steps marks the
+ *                 right control; the hire hands over to Build My HQ with the
+ *                 hand-over line and the HQ site marked.
+ *   panel-closed  Ori's panel is closed at step 1; the form alone hires, and
+ *                 Mission 01 completes.
+ *   narrow        The same with the form alone at a 400px viewport.
  *
  * Every stage prints what it observed and any console errors or failed
  * requests, so a quietly broken page does not pass as a clean demo.
@@ -168,9 +174,131 @@ async function stagePreset() {
   await page.close();
 }
 
+async function missionOne(page) {
+  const { body } = await api(page, '/api/progression');
+  return (body?.missions || []).find(mission => mission.order === 1) || {};
+}
+
+// The step Ori's panel shows, and which control carries the mark.
+async function guideStep(page) {
+  return page.evaluate(() => ({
+    step: document.querySelector('#oriGuideReply .ori-guide__quest-step')?.textContent || '',
+    answer: document.querySelector('#oriGuideReply .ori-guide__answer')?.textContent || '',
+    marked: Array.from(document.querySelectorAll('.is-ori-coachmark')).map(el => '#' + el.id),
+    focused: !document.activeElement
+      ? ''
+      : document.activeElement.id
+        ? '#' + document.activeElement.id
+        : `${document.activeElement.tagName.toLowerCase()}[${document.activeElement.getAttribute('value') || ''}]`
+  }));
+}
+
+async function expectStep(page, index, markedId, label) {
+  await page
+    .waitForFunction(
+      ([n, id]) =>
+        (document.querySelector('#oriGuideReply .ori-guide__quest-step')?.textContent || '') ===
+          `Step ${n} of 5` && !!document.querySelector(`${id}.is-ori-coachmark`),
+      [index, markedId],
+      { timeout: 5000 }
+    )
+    .catch(() => {});
+  const seen = await guideStep(page);
+  check(
+    seen.step === `Step ${index} of 5` && seen.marked.includes(markedId),
+    `step ${index} (${label}) marks ${markedId} — saw "${seen.step}", marked ${seen.marked.join(',') || 'nothing'}`
+  );
+  return seen;
+}
+
+async function hireAndLand(page) {
+  await page.locator('#createSubmit').click();
+  await page.waitForURL(url => url.pathname === '/' && url.search.includes('quest=build-hq'), {
+    timeout: 20000
+  });
+  check((await relationshipState(page)) === 'needs_hq', 'the hire is durable (needs_hq)');
+  const mission = await missionOne(page);
+  check(
+    mission.id === 'pa-meet-assistant' && mission.status === 'completed',
+    `Mission 01 is ${mission.status || 'missing'}`
+  );
+}
+
+async function stageWalkthrough() {
+  const page = await newPage();
+  await closeOnboarding(page);
+  await page.goto(`${baseUrl}/agents?quest=meet-assistant`);
+  await expectStep(page, 1, '#newAgentBtn', 'New Agent');
+  check(!new URL(page.url()).search.includes('quest='), 'the quest param was stripped');
+  check(
+    (await page.locator('#rosterCoachmark').isHidden()) !== false,
+    "the roster's own card hint stays out of the way"
+  );
+  await shot(page, 'walkthrough-1-new-agent');
+
+  await page.locator('#newAgentBtn').click();
+  await expectStep(page, 2, '#cr-name', 'name');
+  await shot(page, 'walkthrough-2-name');
+
+  await page.locator('[data-ori-quest-choice="keep-name"]').click();
+  await expectStep(page, 3, '#cr-appearance-host', 'face');
+  await shot(page, 'walkthrough-3-face');
+
+  await page.locator('[data-ori-quest-choice="keep-face"]').click();
+  await expectStep(page, 4, '#cr-focus-group', 'focus');
+  await shot(page, 'walkthrough-4-focus');
+
+  // Ticking a box is the form's own signal; it must not move focus to Hire.
+  await page.locator('#cr-focus-group input[value="prepare_for_meetings"]').check();
+  const five = await expectStep(page, 5, '#createSubmit', 'hire');
+  check(five.focused !== '#createSubmit', `focus stayed in the form (${five.focused || 'body'})`);
+  await shot(page, 'walkthrough-5-hire');
+
+  await hireAndLand(page);
+  await page
+    .waitForFunction(
+      () => /That’s your assistant/.test(document.querySelector('#oriGuideReply')?.textContent || ''),
+      null,
+      { timeout: 8000 }
+    )
+    .catch(() => {});
+  const handOver = await guideStep(page);
+  check(/^That’s your assistant\. Now let’s give them a home\./.test(handOver.answer), `hand-over line: "${handOver.answer}"`);
+  check(
+    await page.evaluate(() => !!document.querySelector('[data-hq-site].is-ori-coachmark')),
+    'the reserved HQ site is marked'
+  );
+  await shot(page, 'walkthrough-handover-home');
+  await page.close();
+}
+
+async function stageFormAlone({ viewport, closePanel, prefix }) {
+  const page = await newPage(viewport);
+  await closeOnboarding(page);
+  await page.goto(`${baseUrl}/agents?quest=meet-assistant`);
+  if (closePanel) {
+    await expectStep(page, 1, '#newAgentBtn', 'New Agent');
+    await page.locator('#oriGuideClose').click();
+    check(await page.locator('#oriGuidePanel').isHidden(), "Ori's panel is closed");
+  }
+  await page.locator('#newAgentBtn').click();
+  await page.locator('#cr-name').waitFor();
+  await page.locator('#cr-name').fill('Juniper');
+  await page.locator('#cr-focus-group input[value="help_with_email"]').check();
+  await shot(page, `${prefix}-preset`);
+  await hireAndLand(page);
+  await shot(page, `${prefix}-home`);
+  await page.close();
+}
+
 try {
   if (stage === 'preset') await stagePreset();
-  else throw new Error(`unknown stage ${stage}`);
+  else if (stage === 'walkthrough') await stageWalkthrough();
+  else if (stage === 'panel-closed') {
+    await stageFormAlone({ viewport: width, closePanel: true, prefix: 'panel-closed' });
+  } else if (stage === 'narrow') {
+    await stageFormAlone({ viewport: 400, closePanel: false, prefix: 'narrow' });
+  } else throw new Error(`unknown stage ${stage}`);
 } catch (error) {
   console.log(`FAIL ${error.message}`);
   exitCode = 1;

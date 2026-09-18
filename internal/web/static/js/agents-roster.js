@@ -1455,6 +1455,15 @@
     if (state.view === 'map') return;
     if (!state.filtered.length) return;
     if (coachmarkStep >= 0) return;
+    // The page has one pointer, and Mission 01's walkthrough owns it until the
+    // assistant is hired: a hint about selecting agents would pull it off the
+    // New Agent panel mid-hire. The hint is not marked seen, so it waits for a
+    // later visit.
+    if (!assistant.known && assistant.pending) {
+      assistant.pending.then(maybeShowCoachmark);
+      return;
+    }
+    if (assistantCreateMode() === 'assistant') return;
     showCoachmarkStep(0);
   }
 
