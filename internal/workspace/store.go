@@ -952,11 +952,57 @@ func (s *FileStore) DeleteReviewedGroupRequirementOperation(id, operationDigest,
 	return nil
 }
 
+// reviewedGroupRequirementRemovalOwned verifies the narrow bypass used after a
+// user reviewed deletion. It authorizes only the exact Required contract at the
+// subtree root; another Required descendant or any live/reciprocal Assistant
+// Program state still fails closed.
+func reviewedGroupRequirementRemovalOwned(workspaces map[string]*Workspace, rootID, operationDigest string) bool {
+	candidate := workspaces[rootID]
+	if candidate == nil || strings.TrimSpace(operationDigest) == "" ||
+		candidate.GetAssistantProjectLink() != nil || candidate.GetAssistantProgramState() != nil ||
+		reviewedRollbackHasReciprocalMembership(workspaces, candidate) {
+		return false
+	}
+	provenance := candidate.GetTemplateProvenance()
+	if provenance == nil || provenance.GroupRequirement == nil ||
+		!provenance.GroupRequirement.StructurallyValid() ||
+		!strings.EqualFold(strings.TrimSpace(provenance.GroupRequirement.Policy), "required") ||
+		provenance.GroupRequirement.OperationDigest != strings.TrimSpace(operationDigest) {
+		return false
+	}
+	pending := map[string]bool{rootID: true}
+	for changed := true; changed; {
+		changed = false
+		for id, workspace := range workspaces {
+			if workspace != nil && pending[workspace.ParentID] && !pending[id] {
+				pending[id] = true
+				changed = true
+			}
+		}
+	}
+	for id := range pending {
+		if id != rootID && HasRequiredGroupRequirement(workspaces[id]) {
+			return false
+		}
+	}
+	return true
+}
+
 // Delete removes a workspace from storage by deleting the entire folder.
 // This also removes all sub-workspaces (cascading delete).
 // Safety: only deletes folders that are inside the workspace root.
 // Folders outside the root (e.g., imported project directories) are unregistered but not deleted.
 func (s *FileStore) Delete(id string) error {
+	return s.deleteWorkspaceFolder(id, "")
+}
+
+// DeleteReviewedGroupRequirement removes a detached Required project only when
+// its immutable creation-operation digest matches a consumed lifecycle review.
+func (s *FileStore) DeleteReviewedGroupRequirement(id, operationDigest string) error {
+	return s.deleteWorkspaceFolder(id, operationDigest)
+}
+
+func (s *FileStore) deleteWorkspaceFolder(id, reviewedOperationDigest string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -967,7 +1013,8 @@ func (s *FileStore) Delete(id string) error {
 	if protectedAssistantProgramSubtree(s.cache, id) {
 		return ErrAssistantProgramProtected
 	}
-	if requiredGroupRequirementSubtree(s.cache, id) {
+	if requiredGroupRequirementSubtree(s.cache, id) &&
+		!reviewedGroupRequirementRemovalOwned(s.cache, id, reviewedOperationDigest) {
 		return ErrGroupRequirementProtected
 	}
 
@@ -976,7 +1023,16 @@ func (s *FileStore) Delete(id string) error {
 	// Safety check: only delete folders inside the workspace root.
 	// Never delete imported/external folders (e.g., user project directories).
 	if s.isInsideRoot(folderPath) {
-		if err := os.RemoveAll(folderPath); err != nil {
+		relativeFolder, err := filepath.Rel(s.basePath, folderPath)
+		if err != nil {
+			return fmt.Errorf("resolve workspace folder for deletion: %w", err)
+		}
+		root, err := os.OpenRoot(s.basePath)
+		if err != nil {
+			return fmt.Errorf("open workspace root for deletion: %w", err)
+		}
+		defer func() { _ = root.Close() }()
+		if err := root.RemoveAll(relativeFolder); err != nil {
 			return fmt.Errorf("failed to delete workspace folder: %w", err)
 		}
 	} else {
@@ -998,6 +1054,16 @@ func (s *FileStore) Delete(id string) error {
 // deleted (the same safety rule as Delete): they are only unregistered, and
 // trashedPath is returned empty.
 func (s *FileStore) Trash(id string) (originalPath string, trashedPath string, err error) {
+	return s.trashWorkspaceFolder(id, "")
+}
+
+// TrashReviewedGroupRequirement moves a detached Required project to Trash
+// only after the host consumed a review bound to this exact contract digest.
+func (s *FileStore) TrashReviewedGroupRequirement(id, operationDigest string) (originalPath string, trashedPath string, err error) {
+	return s.trashWorkspaceFolder(id, operationDigest)
+}
+
+func (s *FileStore) trashWorkspaceFolder(id, reviewedOperationDigest string) (originalPath string, trashedPath string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1008,7 +1074,8 @@ func (s *FileStore) Trash(id string) (originalPath string, trashedPath string, e
 	if protectedAssistantProgramSubtree(s.cache, id) {
 		return "", "", ErrAssistantProgramProtected
 	}
-	if requiredGroupRequirementSubtree(s.cache, id) {
+	if requiredGroupRequirementSubtree(s.cache, id) &&
+		!reviewedGroupRequirementRemovalOwned(s.cache, id, reviewedOperationDigest) {
 		return "", "", ErrGroupRequirementProtected
 	}
 

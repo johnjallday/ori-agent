@@ -134,6 +134,11 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 				h.handleTemplateSetupStart(w, r, id)
 				return
 			}
+		case "group-requirement":
+			if len(parts) == 3 && parts[2] == "delete/review" {
+				h.ReviewRequiredGroupRequirementDeletion(w, r, id)
+				return
+			}
 		}
 	}
 
@@ -1889,6 +1894,7 @@ func (h *Handler) deleteWorkspace(w http.ResponseWriter, r *http.Request, id str
 	}
 
 	deleteSessions := r.URL.Query().Get("delete_sessions") == "true"
+	var requiredDeletionClaim *grouprequirements.DeletionClaim
 	if h.workspaceStore != nil {
 		if canonical, canonicalErr := h.workspaceStore.Get(id); canonicalErr == nil && canonical != nil {
 			if canonical.GetAssistantProgramState() != nil || canonical.GetAssistantProjectLink() != nil {
@@ -1901,12 +1907,28 @@ func (h *Handler) deleteWorkspace(w http.ResponseWriter, r *http.Request, id str
 				return
 			}
 			if agentworkspace.HasRequiredGroupRequirement(canonical) {
-				status := agentworkspace.EvaluateGroupRequirementLifecycle(canonical, h.workspaceStore.Get)
-				_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
-					"error":             "This Required template contract needs an explicit lifecycle review before deletion.",
-					"group_requirement": status,
-				})
-				return
+				input, inputErr := h.requiredGroupRequirementDeletionInput(ctx, id, deleteSessions)
+				if inputErr != nil {
+					respondRequiredGroupRequirementDeletionError(w, inputErr)
+					return
+				}
+				token := strings.TrimSpace(r.Header.Get(groupRequirementDeletionReviewHeader))
+				if token == "" {
+					status := agentworkspace.EvaluateGroupRequirementLifecycle(canonical, h.workspaceStore.Get)
+					_ = orihttp.RespondAPIError(w, http.StatusConflict,
+						orihttp.NewAPIError(groupRequirementDeletionReviewRequired,
+							"This Required template contract needs an explicit lifecycle review before deletion.").
+							WithDetails(map[string]any{
+								"workspace_id": id, "delete_sessions": deleteSessions, "group_requirement": status,
+							}))
+					return
+				}
+				claim, claimErr := h.groupRequirements.ClaimDeletion(ctx, input, token)
+				if claimErr != nil {
+					respondRequiredGroupRequirementDeletionError(w, claimErr)
+					return
+				}
+				requiredDeletionClaim = &claim
 			}
 		}
 	}
@@ -1925,8 +1947,14 @@ func (h *Handler) deleteWorkspace(w http.ResponseWriter, r *http.Request, id str
 	// support fall through to a permanent delete below.
 	if ws.Kind != session.WorkspaceKindGroup && !deleteSessions && h.workspaceStore != nil && platform.TrashSupported() {
 		if _, ferr := h.workspaceStore.Get(id); ferr == nil {
-			if err := h.trashWorkspace(ctx, ws); err != nil {
-				logger.Error("Failed to move workspace to trash", logger.Fields{"id": id, "error": err})
+			var trashErr error
+			if requiredDeletionClaim != nil {
+				trashErr = h.trashReviewedRequiredWorkspace(ctx, ws, requiredDeletionClaim.ContractOperationDigest)
+			} else {
+				trashErr = h.trashWorkspace(ctx, ws)
+			}
+			if trashErr != nil {
+				logger.Error("Failed to move workspace to trash", logger.Fields{"id": id, "error": trashErr})
 				_ = orihttp.RespondInternalError(w, "Failed to move workspace to trash")
 				return
 			}
@@ -1968,8 +1996,14 @@ func (h *Handler) deleteWorkspace(w http.ResponseWriter, r *http.Request, id str
 
 	// Also delete from folder-based store if available
 	if h.workspaceStore != nil && ws.Kind != session.WorkspaceKindGroup {
-		if err := h.workspaceStore.Delete(id); err != nil {
-			logger.Warn("Failed to delete workspace folder", logger.Fields{"id": id, "error": err})
+		var folderDeleteErr error
+		if requiredDeletionClaim != nil {
+			folderDeleteErr = h.workspaceStore.DeleteReviewedGroupRequirement(id, requiredDeletionClaim.ContractOperationDigest)
+		} else {
+			folderDeleteErr = h.workspaceStore.Delete(id)
+		}
+		if folderDeleteErr != nil {
+			logger.Warn("Failed to delete workspace folder", logger.Fields{"id": id, "error": folderDeleteErr})
 			// Non-fatal: SQLite deletion succeeded
 		}
 	}

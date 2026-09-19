@@ -146,6 +146,40 @@ func TestRequiredGroupLifecycleRenameDisconnectAndOrdinaryGuards(t *testing.T) {
 	}
 }
 
+func TestReviewedRequiredDeletionBypassIsBoundToExactContract(t *testing.T) {
+	store, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	project := NewWorkspace(CreateWorkspaceParams{Name: "Detached Required"})
+	project.ID = "reviewed-required-delete"
+	project.OwnerUserID = "owner-1"
+	key := AssistantProgramKey{OwnerUserID: "owner-1", PluginID: "neutral", ProgramID: "neutral-program"}.Normalize()
+	project.SetTemplateProvenance(&TemplateProvenance{
+		TemplateID: "plugin:neutral:project",
+		GroupRequirement: lifecycleSnapshot(
+			"required", GroupRequirementCompositionGrouped, &key, "removed-home", project.ID,
+		),
+	})
+	if err := store.Save(project); err != nil {
+		t.Fatal(err)
+	}
+	operationDigest := project.GetTemplateProvenance().GroupRequirement.OperationDigest
+	if err := store.Delete(project.ID); !errors.Is(err, ErrGroupRequirementProtected) {
+		t.Fatalf("ordinary delete = %v, want protection", err)
+	}
+	if err := store.DeleteReviewedGroupRequirement(project.ID, strings.Repeat("b", 64)); !errors.Is(err, ErrGroupRequirementProtected) {
+		t.Fatalf("wrong reviewed digest = %v, want protection", err)
+	}
+	if err := store.DeleteReviewedGroupRequirement(project.ID, operationDigest); err != nil {
+		t.Fatalf("exact reviewed deletion: %v", err)
+	}
+	if _, err := store.Get(project.ID); err == nil {
+		t.Fatal("exact reviewed deletion left the workspace registered")
+	}
+}
+
 func TestReviewedHomeRemovalPreservesRequiredProjectAndExternalPath(t *testing.T) {
 	store, err := NewFileStore(t.TempDir())
 	if err != nil {
