@@ -86,11 +86,31 @@ for (const theme of ['light', 'dark']) {
       await expect(html).toHaveAttribute('data-bs-theme', expectedTheme);
     };
     const expectMapTheme = async expectedTheme => {
+      const expectedNameColor =
+        expectedTheme === 'light' ? 'rgb(10, 10, 10)' : 'rgb(238, 240, 243)';
+      const expectedQuestColor =
+        expectedTheme === 'light' ? 'rgb(255, 255, 255)' : 'rgb(214, 217, 222)';
+      await expect(operationsMap.locator('.ws-cmd-map-agent-copy strong').first()).toHaveCSS(
+        'color',
+        expectedNameColor
+      );
+      await expect(page.locator('.ws-cmd-map-quest-fab')).toHaveCSS('color', expectedQuestColor);
       const style = await operationsMap.evaluate(element => {
+        const read = selector => getComputedStyle(element.parentElement.querySelector(selector));
         const computed = getComputedStyle(element);
+        const agent = read('.ws-cmd-map-agent');
+        const agentName = read('.ws-cmd-map-agent-copy strong');
+        const agentStatus = read('.ws-cmd-map-agent-status');
+        const beltButton = read('.ws-cmd-map-belt-btn');
+        const questButton = read('.ws-cmd-map-quest-fab');
         return {
           backgroundImage: computed.backgroundImage,
-          backgroundSize: computed.backgroundSize
+          backgroundSize: computed.backgroundSize,
+          agentBackgroundImage: agent.backgroundImage,
+          agentNameColor: agentName.color,
+          agentStatusBackground: agentStatus.backgroundColor,
+          beltButtonColor: beltButton.color,
+          questButtonColor: questButton.color
         };
       });
       const endpoint = expectedTheme === 'light' ? 'rgb(223, 228, 232) 78%' : 'rgb(12, 13, 17) 78%';
@@ -99,7 +119,20 @@ for (const theme of ['light', 'dark']) {
       expect(style.backgroundImage.match(/(?:radial|linear)-gradient\(/g)).toHaveLength(5);
       expect(style.backgroundSize).toBe('auto, auto, 42px 42px, 42px 42px, auto');
       if (expectedTheme === 'light') {
+        expect(style.backgroundImage).toContain('rgb(251, 252, 253)');
         expect(style.backgroundImage).not.toContain('rgb(12, 13, 17) 78%');
+        expect(style.agentBackgroundImage).toContain('rgba(255, 255, 255, 0.98)');
+        expect(style.agentBackgroundImage).not.toContain('rgba(0, 0, 0, 0.16)');
+        expect(style.agentNameColor).toBe(expectedNameColor);
+        expect(style.agentStatusBackground).toBe('rgba(255, 255, 255, 0.88)');
+        expect(style.beltButtonColor).toBe('rgb(197, 203, 210)');
+        expect(style.questButtonColor).toBe(expectedQuestColor);
+      } else {
+        expect(style.agentBackgroundImage).toContain('rgba(0, 0, 0, 0.16)');
+        expect(style.agentNameColor).toBe(expectedNameColor);
+        expect(style.agentStatusBackground).toBe('rgba(0, 0, 0, 0.24)');
+        expect(style.beltButtonColor).toBe('rgb(139, 144, 154)');
+        expect(style.questButtonColor).toBe(expectedQuestColor);
       }
       return style;
     };
