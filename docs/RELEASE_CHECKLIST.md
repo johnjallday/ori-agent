@@ -172,7 +172,14 @@ A moved branch or a newer candidate invalidates promotion of an older RC.
 ./scripts/release.sh promote vX.Y.Z-rc.2
 # Compatibility spelling:
 ./scripts/create-release.sh vX.Y.Z-rc.2
+# From the DevOps dashboard (picker key P), defaulting to the active candidate:
+./scripts/devops.sh promote [vX.Y.Z-rc.2]
 ```
+
+`devops.sh promote` runs this workflow's own `check-promotion` locally first,
+so a stale, superseded or not-yet-green candidate is refused before anything is
+dispatched, then asks you to type the exact tag. It never approves the
+`release` environment.
 
 Alternatively: **Actions → Promote Release → Run workflow**, select `main`,
 enter the exact RC tag and attest that its test report was completed and

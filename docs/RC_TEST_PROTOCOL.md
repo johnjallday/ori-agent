@@ -71,6 +71,14 @@ That can verify web behavior but does **not** count as installer or native-app
 coverage. The existing `smoke-installed.py` does a brief isolated health/version
 probe and exits; it is not a persistent manual test session.
 
+On macOS, `./scripts/devops.sh test-rc` (picker key `t`) does the download and
+this server-only launch for the active candidate. It fetches the DMG and the
+blank card into `~/Downloads/ori-rc/<tag>` (override with `ORI_RC_DIR`),
+verifies the DMG against GitHub's SHA-256 digest (`checksums.txt` does not list
+DMGs), then offers to run the DMG's own server with HOME, ORI_DATA_DIR and the
+working directory inside that folder, on an unused port, after confirming the
+exact embedded version. Its profile is kept between launches for restart checks.
+
 ## 2. Prepare two test profiles
 
 ### Fresh profile
