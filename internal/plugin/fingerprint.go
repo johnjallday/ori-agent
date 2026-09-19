@@ -13,9 +13,14 @@ type trustedBlueprintFingerprint struct {
 	Skeleton string `json:"skeleton"`
 }
 
+type trustedSkillFingerprint struct {
+	Name   string `json:"name"`
+	Digest string `json:"digest"`
+}
+
 type trustedFingerprintInput struct {
 	MCPServers        []MCPServerSpec               `json:"mcp_servers,omitempty"`
-	Skills            []string                      `json:"skills,omitempty"`
+	Skills            []trustedSkillFingerprint     `json:"skills,omitempty"`
 	WorkspaceSurfaces *SurfaceContribution          `json:"workspace_surfaces,omitempty"`
 	Blueprints        []trustedBlueprintFingerprint `json:"blueprints,omitempty"`
 	AssetDigest       string                        `json:"asset_digest,omitempty"`
@@ -31,7 +36,14 @@ func trustedComponentFingerprint(descriptor PluginDescriptor) string {
 		AssetDigest:       descriptor.TrustedAssetDigest,
 	}
 	for _, skill := range descriptor.Skills {
-		input.Skills = append(input.Skills, skill.Name)
+		digest, err := SkillTreeDigest(skill.Path)
+		if err != nil {
+			// Registration will reject the same unsafe or unreadable tree. Keep
+			// the fingerprint deterministically invalid in case a caller compares
+			// the descriptor before registration reaches that check.
+			digest = "unavailable"
+		}
+		input.Skills = append(input.Skills, trustedSkillFingerprint{Name: skill.Name, Digest: digest})
 	}
 	for _, blueprint := range descriptor.ResolvedBlueprints {
 		input.Blueprints = append(input.Blueprints, trustedBlueprintFingerprint{
@@ -39,7 +51,7 @@ func trustedComponentFingerprint(descriptor PluginDescriptor) string {
 		})
 	}
 	sort.Slice(input.MCPServers, func(i, j int) bool { return input.MCPServers[i].Name < input.MCPServers[j].Name })
-	sort.Strings(input.Skills)
+	sort.Slice(input.Skills, func(i, j int) bool { return input.Skills[i].Name < input.Skills[j].Name })
 	sort.Slice(input.Blueprints, func(i, j int) bool { return input.Blueprints[i].ID < input.Blueprints[j].ID })
 	data, err := json.Marshal(input)
 	if err != nil {

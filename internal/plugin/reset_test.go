@@ -414,6 +414,44 @@ func TestInspectResetBlocksUnexpectedSkillDestinations(t *testing.T) {
 	}
 }
 
+func TestInspectResetBlocksEditedReceiptOwnedSkill(t *testing.T) {
+	h := newResetHarness(t)
+	record := h.seedManaged()
+	skillDir := filepath.Join(h.paths.SkillsRoot, record.Skills[0])
+	digest, err := SkillTreeDigest(skillDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSkillOwnershipReceipt(skillDir, NewSkillOwnershipReceipt(record.Name, record.Skills[0], digest)); err != nil {
+		t.Fatal(err)
+	}
+	h.write(filepath.Join(skillDir, "SKILL.md"), "# user edit after install\n")
+	h.writeRegistry(record)
+
+	inventory, problems := InspectReset(h.paths)
+	if len(inventory.Items) != 0 || !slices.Contains(problemCodes(problems), ResetProblemSkillUnexpected) {
+		t.Fatalf("edited owned skill inventory/problems = %+v / %+v", inventory, problems)
+	}
+	if contents, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md")); err != nil || string(contents) != "# user edit after install\n" {
+		t.Fatalf("inspection changed edited skill: %q, %v", contents, err)
+	}
+}
+
+func TestInspectResetBlocksMissingReceiptForNewManagedSkill(t *testing.T) {
+	h := newResetHarness(t)
+	record := h.seedManaged()
+	record.SkillOwnershipSchema = SkillOwnershipSchemaVersion
+	h.writeRegistry(record)
+
+	inventory, problems := InspectReset(h.paths)
+	if len(inventory.Items) != 0 || !slices.Contains(problemCodes(problems), ResetProblemSkillUnexpected) {
+		t.Fatalf("missing owned receipt inventory/problems = %+v / %+v", inventory, problems)
+	}
+	if _, err := os.Stat(filepath.Join(h.paths.SkillsRoot, record.Skills[0], "SKILL.md")); err != nil {
+		t.Fatalf("inspection changed receipt-less skill: %v", err)
+	}
+}
+
 func TestInspectResetBlocksUnreadableRegistries(t *testing.T) {
 	t.Run("corrupt json", func(t *testing.T) {
 		h := newResetHarness(t)
