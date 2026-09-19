@@ -520,6 +520,19 @@ func (t Template) HasInvalidAssistantProject() bool {
 	return strings.TrimSpace(t.AssistantProjectError) != ""
 }
 
+// AssistantProgramTarget identifies the Home program expected by either a
+// legacy combined declaration or a split project-owned declaration. Callers
+// still decide whether the referenced provider is installed and available.
+func (t Template) AssistantProgramTarget() (string, int, bool) {
+	if t.AssistantProgram != nil && !t.HasInvalidAssistantProgram() && t.AssistantProject == nil {
+		return t.AssistantProgram.ID, t.AssistantProgram.SchemaVersion, true
+	}
+	if t.AssistantProject != nil && !t.HasInvalidAssistantProject() && t.AssistantProgram == nil {
+		return t.AssistantProject.Home.ProgramID, t.AssistantProject.Home.HomeSchemaVersion, true
+	}
+	return "", 0, false
+}
+
 func (t Template) HasGroupRequirement() bool { return t.GroupRequirement != nil }
 
 func (t Template) HasInvalidGroupRequirement() bool {

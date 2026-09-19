@@ -495,8 +495,9 @@ func (r installedProjectTemplateResolver) ResolveProjectTemplate(ctx context.Con
 			return projecttemplates.Template{}, errors.New("project template owner is unavailable")
 		}
 		template, err := r.userTemplates.FindUserSetupQuestTemplate(ctx, scope.UserTemplateID)
-		if err != nil || template.UserSetupQuest == nil || template.AssistantProgram == nil ||
-			template.ID != scope.ExpectedBlueprintID || template.AssistantProgram.ID != scope.ExpectedAssistantProgramID {
+		programID, _, programOK := template.AssistantProgramTarget()
+		if err != nil || template.UserSetupQuest == nil || !programOK ||
+			template.ID != scope.ExpectedBlueprintID || programID != scope.ExpectedAssistantProgramID {
 			return projecttemplates.Template{}, errors.New("project template owner is unavailable")
 		}
 		return template, nil
@@ -516,8 +517,9 @@ func (r installedProjectTemplateResolver) ResolveProjectTemplate(ctx context.Con
 		}
 		for _, resolved := range candidate.ResolvedBlueprints {
 			template := resolved.Template
+			programID, _, programOK := template.AssistantProgramTarget()
 			if template.PluginOwner == nil || template.PluginOwner.BlueprintID != scope.ExpectedBlueprintID ||
-				template.AssistantProgram == nil || template.AssistantProgram.ID != scope.ExpectedAssistantProgramID {
+				!programOK || programID != scope.ExpectedAssistantProgramID {
 				continue
 			}
 			if found != nil {

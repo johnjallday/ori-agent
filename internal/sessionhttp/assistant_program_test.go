@@ -374,6 +374,36 @@ func TestAssistantProgramOrdinaryWorkspaceIsUnavailable(t *testing.T) {
 	}
 }
 
+func TestAssistantProgramPluginTemplateWithoutProgramDoesNotOfferActivation(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+	store := workspace.NewInMemoryStore()
+	handler.SetWorkspaceTaskStore(store)
+	standalone := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Standalone Song"})
+	standalone.SetTemplateProvenance(&workspace.TemplateProvenance{
+		TemplateID:  "user:standalone-reaper-song",
+		PluginOwner: &workspace.PluginTemplateOwner{PluginID: "reaper-plugin", BlueprintID: "reaper-song", BlueprintVersion: 9},
+	})
+	if err := store.Save(standalone); err != nil {
+		t.Fatal(err)
+	}
+	handler.SetProjectTemplateResolver(func(_, _ string) (projecttemplates.Template, error) {
+		return projecttemplates.Template{
+			ID:          "user:standalone-reaper-song",
+			PluginOwner: &workspace.PluginTemplateOwner{PluginID: "reaper-plugin", BlueprintID: "reaper-song", BlueprintVersion: 9},
+		}, nil
+	})
+
+	recorder := httptest.NewRecorder()
+	handler.GetAssistantProgram(recorder, assistantProgramRequest(http.MethodGet, "/assistant", standalone.ID, ""))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if summary := decodeAssistantSummary(t, recorder); summary.Available || summary.ActivationNeeded || summary.ProjectID != standalone.ID {
+		t.Fatalf("standalone summary = %+v", summary)
+	}
+}
+
 func TestAssistantProgramLegacyActivationIsExplicit(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()

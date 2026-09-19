@@ -346,9 +346,11 @@ func (h *Handler) GetAssistantProgram(w http.ResponseWriter, r *http.Request) {
 	workspaceID := strings.TrimSpace(r.PathValue("workspaceID"))
 	station, project, err := h.assistantProgramStation(workspaceID)
 	if errors.Is(err, workspace.ErrAssistantProgramUnavailable) && project != nil {
-		provenance := project.GetTemplateProvenance()
-		activationNeeded := provenance != nil && provenance.PluginOwner != nil
-		_ = orihttp.RespondSuccess(w, assistantProgramSummary{Available: false, ActivationNeeded: activationNeeded, ProjectID: project.ID})
+		_ = orihttp.RespondSuccess(w, assistantProgramSummary{
+			Available:        false,
+			ActivationNeeded: h.assistantProgramActivationAvailable(project),
+			ProjectID:        project.ID,
+		})
 		return
 	}
 	if err != nil {
@@ -361,6 +363,19 @@ func (h *Handler) GetAssistantProgram(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = orihttp.RespondSuccess(w, summary)
+}
+
+func (h *Handler) assistantProgramActivationAvailable(project *workspace.Workspace) bool {
+	if h == nil || project == nil || h.projectTemplateResolver == nil {
+		return false
+	}
+	provenance := project.GetTemplateProvenance()
+	if provenance == nil || provenance.PluginOwner == nil {
+		return false
+	}
+	template, err := h.projectTemplateResolver(provenance.TemplateID, "")
+	return err == nil && template.AssistantProgram != nil && template.PluginOwner != nil &&
+		strings.EqualFold(template.PluginOwner.PluginID, provenance.PluginOwner.PluginID)
 }
 
 func (h *Handler) ActivateAssistantProgram(w http.ResponseWriter, r *http.Request) {

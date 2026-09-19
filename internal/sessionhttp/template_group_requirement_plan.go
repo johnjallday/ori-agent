@@ -104,6 +104,8 @@ func templateAssistantProgramKey(ownerUserID string, template projecttemplates.T
 		OwnerUserID: strings.TrimSpace(ownerUserID), ProgramID: program.ID,
 	}
 	switch {
+	case template.AssistantProject != nil && template.ResolvedAssistantHome != nil:
+		key.PluginID = template.AssistantProject.Home.ProviderPluginID
 	case template.ProgramHomeOwner != nil:
 		key.PluginID = template.ProgramHomeOwner.PluginID
 	case template.PluginOwner != nil:
@@ -165,9 +167,13 @@ func (h *Handler) buildTemplateGroupRequirementPlan(
 	composition string,
 	ownerUserID string,
 	ownerErr error,
+	effectiveTemplate *projecttemplates.Template,
 ) *templateGroupRequirementPlan {
 	if template.GroupRequirement == nil {
 		return nil
+	}
+	if effectiveTemplate != nil {
+		*effectiveTemplate = template
 	}
 	plan := &templateGroupRequirementPlan{
 		Version: templateGroupRequirementPlanVersion, SourceRevision: templateGroupSourceRevision(template),
@@ -199,7 +205,10 @@ func (h *Handler) buildTemplateGroupRequirementPlan(
 		OwnerUserID: strings.TrimSpace(ownerUserID), OperationKind: grouprequirements.OperationCreateWorkspace,
 		Template: template, Composition: strings.TrimSpace(composition),
 	})
-	effectiveTemplate := evaluation.EffectiveTemplate
+	effective := evaluation.EffectiveTemplate
+	if effectiveTemplate != nil && strings.TrimSpace(effective.ID) != "" {
+		*effectiveTemplate = effective
+	}
 	if evaluation.ProgramKey != nil && template.GroupRequirement.Policy != projecttemplates.GroupPolicyNone {
 		plan.GroupTemplateID = projecttemplates.GroupTemplateIDForKey(evaluation.ProgramKey.Normalize())
 	}
@@ -217,11 +226,11 @@ func (h *Handler) buildTemplateGroupRequirementPlan(
 		return plan
 	case grouprequirements.StateHomeCreationReviewRequired:
 		plan.Home = &templateGroupRequirementHomePlan{Exists: false, ProposedName: evaluation.HomeName}
-		plan.RequiredHomeRoles = absentRequiredHomeRoles(effectiveTemplate)
+		plan.RequiredHomeRoles = absentRequiredHomeRoles(effective)
 		return plan
 	case grouprequirements.StateHomeRequired:
 		plan.Home = &templateGroupRequirementHomePlan{Exists: false}
-		plan.RequiredHomeRoles = absentRequiredHomeRoles(effectiveTemplate)
+		plan.RequiredHomeRoles = absentRequiredHomeRoles(effective)
 		return plan
 	case grouprequirements.StateReadyGrouped:
 		// Continue below only when Evaluate resolved one exact existing Home.
@@ -250,7 +259,7 @@ func (h *Handler) buildTemplateGroupRequirementPlan(
 	plan.Home = &templateGroupRequirementHomePlan{
 		Exists: true, WorkspaceID: home.ID, Name: home.Name, FolderSlug: home.FolderSlug,
 	}
-	plan.RequiredHomeRoles = h.verifiedRequiredHomeRoles(effectiveTemplate, evaluation.ProgramKey, home)
+	plan.RequiredHomeRoles = h.verifiedRequiredHomeRoles(effective, evaluation.ProgramKey, home)
 	if plan.RequiredHomeRoles.Verification == templateGroupRoleVerificationVerified &&
 		plan.RequiredHomeRoles.Missing != nil && *plan.RequiredHomeRoles.Missing > 0 {
 		plan.Actions = append(plan.Actions, grouprequirements.ActionOpenGroupRoles)

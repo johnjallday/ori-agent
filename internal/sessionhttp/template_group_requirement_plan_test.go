@@ -88,6 +88,25 @@ func requirePlanCounts(t *testing.T, progress templateGroupRequirementRequiredRo
 	}
 }
 
+func TestTemplateAssistantProgramKeyUsesResolvedSplitHomeProvider(t *testing.T) {
+	template := projecttemplates.Template{
+		PluginOwner: &agentworkspace.PluginTemplateOwner{PluginID: "project-provider"},
+		AssistantProject: &projecttemplates.AssistantProjectDeclaration{
+			SchemaVersion: 1,
+			Version:       1,
+			ID:            "project-team",
+			Home: projecttemplates.AssistantProjectHomeReference{
+				ProviderPluginID: "home-provider", ProgramID: "program-home", HomeSchemaVersion: 1,
+			},
+		},
+		ResolvedAssistantHome: &agentworkspace.AssistantProgramDeclaration{ID: "program-home"},
+	}
+	key, ok := templateAssistantProgramKey("local", template)
+	if !ok || key.PluginID != "home-provider" || key.ProgramID != "program-home" {
+		t.Fatalf("split key = %+v, ok=%v", key, ok)
+	}
+}
+
 func TestTemplateGroupRequirementPlan_OmittedForLegacyTemplate(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
