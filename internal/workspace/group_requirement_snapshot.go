@@ -24,23 +24,25 @@ type GroupRequirementRoleSource struct {
 // It records stable identities and digests only; it contains no path, URL,
 // command, credential, permission, prompt, or executable plugin behavior.
 type GroupRequirementSnapshot struct {
-	SchemaVersion       int                          `json:"schema_version"`
-	Policy              string                       `json:"policy"`
-	SelectedComposition string                       `json:"selected_composition"`
-	TemplateID          string                       `json:"template_id"`
-	TemplateRevision    string                       `json:"template_revision"`
-	DefinitionDigest    string                       `json:"definition_digest"`
-	VariantID           string                       `json:"variant_id,omitempty"`
-	VariantRevision     string                       `json:"variant_revision,omitempty"`
-	SourcePlugin        *PluginTemplateOwner         `json:"source_plugin,omitempty"`
-	SourceDigest        string                       `json:"source_digest,omitempty"`
-	StandaloneRoles     []GroupRequirementRoleSource `json:"standalone_roles,omitempty"`
-	ProgramKey          *AssistantProgramKey         `json:"program_key,omitempty"`
-	HomeWorkspaceID     string                       `json:"home_workspace_id,omitempty"`
-	ProjectLinkID       string                       `json:"project_link_id,omitempty"`
-	ReviewDigest        string                       `json:"review_digest"`
-	OperationDigest     string                       `json:"operation_digest"`
-	AppliedAt           time.Time                    `json:"applied_at"`
+	SchemaVersion       int                            `json:"schema_version"`
+	Policy              string                         `json:"policy"`
+	SelectedComposition string                         `json:"selected_composition"`
+	TemplateID          string                         `json:"template_id"`
+	TemplateRevision    string                         `json:"template_revision"`
+	DefinitionDigest    string                         `json:"definition_digest"`
+	VariantID           string                         `json:"variant_id,omitempty"`
+	VariantRevision     string                         `json:"variant_revision,omitempty"`
+	SourcePlugin        *PluginTemplateOwner           `json:"source_plugin,omitempty"`
+	SourceDigest        string                         `json:"source_digest,omitempty"`
+	HomeProvider        *AssistantProgramHomeOwner     `json:"home_provider,omitempty"`
+	ProjectProvider     *AssistantProjectProviderOwner `json:"project_provider,omitempty"`
+	StandaloneRoles     []GroupRequirementRoleSource   `json:"standalone_roles,omitempty"`
+	ProgramKey          *AssistantProgramKey           `json:"program_key,omitempty"`
+	HomeWorkspaceID     string                         `json:"home_workspace_id,omitempty"`
+	ProjectLinkID       string                         `json:"project_link_id,omitempty"`
+	ReviewDigest        string                         `json:"review_digest"`
+	OperationDigest     string                         `json:"operation_digest"`
+	AppliedAt           time.Time                      `json:"applied_at"`
 }
 
 func CloneGroupRequirementSnapshot(source *GroupRequirementSnapshot) *GroupRequirementSnapshot {
@@ -52,6 +54,14 @@ func CloneGroupRequirementSnapshot(source *GroupRequirementSnapshot) *GroupRequi
 	if source.SourcePlugin != nil {
 		owner := source.SourcePlugin.Clone()
 		clone.SourcePlugin = &owner
+	}
+	if source.HomeProvider != nil {
+		owner := source.HomeProvider.Clone()
+		clone.HomeProvider = &owner
+	}
+	if source.ProjectProvider != nil {
+		owner := source.ProjectProvider.Clone()
+		clone.ProjectProvider = &owner
 	}
 	if source.ProgramKey != nil {
 		key := source.ProgramKey.Normalize()
@@ -78,19 +88,32 @@ func (snapshot *GroupRequirementSnapshot) StructurallyValid() bool {
 	if snapshot.SourceDigest != "" && !validSHA256(snapshot.SourceDigest) {
 		return false
 	}
+	if (snapshot.HomeProvider != nil && !snapshot.HomeProvider.Valid()) || (snapshot.ProjectProvider != nil && !snapshot.ProjectProvider.Valid()) ||
+		(snapshot.HomeProvider != nil && snapshot.ProjectProvider == nil) {
+		return false
+	}
 	switch snapshot.Policy {
 	case "none":
-		return snapshot.SelectedComposition == GroupRequirementCompositionStandalone &&
+		return snapshot.SelectedComposition == GroupRequirementCompositionStandalone && snapshot.HomeProvider == nil &&
 			snapshot.ProgramKey == nil && snapshot.HomeWorkspaceID == "" && snapshot.ProjectLinkID == ""
 	case "recommended":
 		if snapshot.SelectedComposition == GroupRequirementCompositionStandalone {
-			return snapshot.ProgramKey == nil && snapshot.HomeWorkspaceID == "" && snapshot.ProjectLinkID == ""
+			return snapshot.HomeProvider == nil && snapshot.ProgramKey == nil && snapshot.HomeWorkspaceID == "" && snapshot.ProjectLinkID == ""
 		}
 		fallthrough
 	case "required":
-		return snapshot.SelectedComposition == GroupRequirementCompositionGrouped &&
+		if snapshot.SelectedComposition == GroupRequirementCompositionGrouped && (snapshot.HomeProvider == nil) != (snapshot.ProjectProvider == nil) {
+			return false
+		}
+		valid := snapshot.SelectedComposition == GroupRequirementCompositionGrouped &&
 			snapshot.ProgramKey != nil && snapshot.ProgramKey.Valid() &&
 			strings.TrimSpace(snapshot.HomeWorkspaceID) != "" && strings.TrimSpace(snapshot.ProjectLinkID) != ""
+		if !valid || snapshot.HomeProvider == nil {
+			return valid
+		}
+		key := snapshot.ProgramKey.Normalize()
+		return key.PluginID == strings.ToLower(strings.TrimSpace(snapshot.HomeProvider.PluginID)) &&
+			key.ProgramID == strings.ToLower(strings.TrimSpace(snapshot.HomeProvider.ProgramID))
 	default:
 		return false
 	}

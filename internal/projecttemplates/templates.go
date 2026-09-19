@@ -332,6 +332,10 @@ type Template struct {
 	// PluginOwner identifies an enabled trusted installed-plugin blueprint.
 	// It is inert provenance and is nil for built-in/user templates.
 	PluginOwner *workspace.PluginTemplateOwner `json:"plugin_owner,omitempty"`
+	// ProgramHomeOwner identifies a plugin-level independent Home contribution.
+	// It is mutually exclusive with PluginOwner and carries no project blueprint
+	// or skeleton authority.
+	ProgramHomeOwner *workspace.AssistantProgramHomeOwner `json:"program_home_owner,omitempty"`
 	// BuiltinVersion is the shipped revision of a built-in's manifest. When the
 	// embedded version exceeds the on-disk copy, EnsureLibrary refreshes the
 	// built-in's template.json so metadata changes (rosters, tags, …) reach
@@ -413,6 +417,13 @@ type Template struct {
 	// so trusted plugin blueprint creation fails closed.
 	AssistantProgram      *workspace.AssistantProgramDeclaration `json:"assistant_program,omitempty"`
 	AssistantProgramError string                                 `json:"assistant_program_error,omitempty"`
+	// AssistantProject is the split project-owned team and exact external Home
+	// reference. It is mutually exclusive with the combined AssistantProgram.
+	AssistantProject      *AssistantProjectDeclaration `json:"assistant_project,omitempty"`
+	AssistantProjectError string                       `json:"assistant_project_error,omitempty"`
+	// ResolvedAssistantHome is host-derived for one reviewed split creation and
+	// is never decoded from or serialized as blueprint authority.
+	ResolvedAssistantHome *workspace.AssistantProgramDeclaration `json:"-"`
 	// GroupRequirement controls standalone versus exact Assistant Program Home
 	// placement. StandaloneComposition is the trusted fixed transformation a
 	// program-bearing source provides for a Home-free variant.
@@ -494,9 +505,19 @@ func (t Template) HasAssistantProgram() bool {
 	return t.AssistantProgram != nil
 }
 
+// HasAssistantProject reports a split project-owned team contribution. It is
+// separate from HasAssistantProgram because it grants no Home authority.
+func (t Template) HasAssistantProject() bool {
+	return t.AssistantProject != nil
+}
+
 // HasInvalidAssistantProgram reports a declared block that failed closed.
 func (t Template) HasInvalidAssistantProgram() bool {
 	return strings.TrimSpace(t.AssistantProgramError) != ""
+}
+
+func (t Template) HasInvalidAssistantProject() bool {
+	return strings.TrimSpace(t.AssistantProjectError) != ""
 }
 
 func (t Template) HasGroupRequirement() bool { return t.GroupRequirement != nil }
@@ -573,6 +594,7 @@ type manifest struct {
 	// inside the versioned block are rejected even though ordinary top-level
 	// template metadata remains forward-compatible.
 	AssistantProgram      json.RawMessage `json:"assistant_program,omitempty"`
+	AssistantProject      json.RawMessage `json:"assistant_project,omitempty"`
 	GroupRequirement      json.RawMessage `json:"group_requirement,omitempty"`
 	StandaloneComposition json.RawMessage `json:"standalone_composition,omitempty"`
 	TemplateVariant       json.RawMessage `json:"template_variant,omitempty"`
@@ -669,12 +691,21 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 	t.SetupWizard = setupWizard
 	t.SetupQuestID = strings.TrimSpace(m.SetupQuestID)
 	assistantProgram, assistantProgramErr := normalizeAssistantProgram(m.AssistantProgram)
+	assistantProject, assistantProjectErr := normalizeAssistantProject(m.AssistantProject)
+	if assistantProgram != nil && assistantProject != nil {
+		assistantProjectErr = fmt.Errorf("%w: assistant_program and assistant_project are mutually exclusive", ErrInvalidAssistantProgram)
+		assistantProgramErr = assistantProjectErr
+	}
 	t.AssistantProgram = assistantProgram
+	t.AssistantProject = assistantProject
 	if assistantProgramErr != nil {
 		t.AssistantProgramError = assistantProgramErr.Error()
 	}
+	if assistantProjectErr != nil {
+		t.AssistantProjectError = assistantProjectErr.Error()
+	}
 	standaloneComposition, standaloneCompositionErr := normalizeStandaloneComposition(
-		m.StandaloneComposition, assistantProgram, projectConnection, t.Agents, runtimeRequirements,
+		m.StandaloneComposition, assistantProgram, assistantProject, projectConnection, t.Agents, runtimeRequirements,
 	)
 	t.StandaloneComposition = standaloneComposition
 	if standaloneCompositionErr != nil {
@@ -682,7 +713,7 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 	}
 	groupRequirement, groupRequirementErr := normalizeGroupRequirement(m.GroupRequirement)
 	if groupRequirementErr == nil {
-		groupRequirementErr = validateGroupComposition(groupRequirement, standaloneComposition, assistantProgram)
+		groupRequirementErr = validateGroupComposition(groupRequirement, standaloneComposition, assistantProgram, assistantProject)
 	}
 	t.GroupRequirement = groupRequirement
 	if groupRequirementErr != nil {
@@ -718,7 +749,7 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 		t.UserSetupQuestRevision = digestUserQuestBytes(append([]byte("user_setup_quest:invalid:v1:"), bytes.TrimSpace(m.UserSetupQuest)...))
 	}
 	if t.TemplateVariant == nil && t.TemplateVariantError == "" {
-		t.Warnings = append(manifestWarnings(m, t.Agents, t.AssistantProgram != nil), capabilityWarnings...)
+		t.Warnings = append(manifestWarnings(m, t.Agents, t.AssistantProgram != nil || t.AssistantProject != nil), capabilityWarnings...)
 	} else {
 		t.Warnings = append(t.Warnings, capabilityWarnings...)
 	}
@@ -741,6 +772,9 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 	}
 	if assistantProgramErr != nil {
 		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json assistant_program is unusable and blocks workspace creation: %v", assistantProgramErr))
+	}
+	if assistantProjectErr != nil {
+		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json assistant_project is unusable and blocks workspace creation: %v", assistantProjectErr))
 	}
 	if standaloneCompositionErr != nil {
 		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json standalone_composition is unusable and blocks standalone creation: %v", standaloneCompositionErr))

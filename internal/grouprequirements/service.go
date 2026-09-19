@@ -87,19 +87,31 @@ type Input struct {
 	GroupTemplateRevision string
 }
 
+type IndependentHomeResolution struct {
+	Key          workspace.AssistantProgramKey
+	Declaration  *workspace.AssistantProgramDeclaration
+	Owner        *workspace.AssistantProgramHomeOwner
+	ProjectOwner *workspace.AssistantProjectProviderOwner
+}
+
+type IndependentHomeResolver func(ownerUserID string, template projecttemplates.Template, requireHome bool) (IndependentHomeResolution, error)
+
 type Evaluation struct {
-	State               State                          `json:"state"`
-	Policy              projecttemplates.GroupPolicy   `json:"policy,omitempty"`
-	SelectedComposition string                         `json:"selected_composition,omitempty"`
-	HomeWorkspaceID     string                         `json:"home_workspace_id,omitempty"`
-	HomeName            string                         `json:"home_name,omitempty"`
-	HomeWillBeCreated   bool                           `json:"home_will_be_created,omitempty"`
-	Summary             string                         `json:"summary"`
-	Detail              string                         `json:"detail,omitempty"`
-	Actions             []Action                       `json:"actions,omitempty"`
-	EffectiveTemplate   projecttemplates.Template      `json:"-"`
-	ProgramKey          *workspace.AssistantProgramKey `json:"-"`
-	DefinitionDigest    string                         `json:"-"`
+	State               State                                    `json:"state"`
+	Policy              projecttemplates.GroupPolicy             `json:"policy,omitempty"`
+	SelectedComposition string                                   `json:"selected_composition,omitempty"`
+	HomeWorkspaceID     string                                   `json:"home_workspace_id,omitempty"`
+	HomeName            string                                   `json:"home_name,omitempty"`
+	HomeWillBeCreated   bool                                     `json:"home_will_be_created,omitempty"`
+	Summary             string                                   `json:"summary"`
+	Detail              string                                   `json:"detail,omitempty"`
+	Actions             []Action                                 `json:"actions,omitempty"`
+	EffectiveTemplate   projecttemplates.Template                `json:"-"`
+	ProgramKey          *workspace.AssistantProgramKey           `json:"-"`
+	DefinitionDigest    string                                   `json:"-"`
+	HomeDeclaration     *workspace.AssistantProgramDeclaration   `json:"-"`
+	HomeOwner           *workspace.AssistantProgramHomeOwner     `json:"-"`
+	ProjectOwner        *workspace.AssistantProjectProviderOwner `json:"-"`
 }
 
 type Review struct {
@@ -121,29 +133,31 @@ const (
 )
 
 type Receipt struct {
-	Token             string                         `json:"token"`
-	OwnerUserID       string                         `json:"owner_user_id"`
-	OperationKind     OperationKind                  `json:"operation_kind"`
-	InputDigest       string                         `json:"input_digest"`
-	TemplateID        string                         `json:"template_id"`
-	TemplateRevision  string                         `json:"template_revision,omitempty"`
-	VariantID         string                         `json:"variant_id,omitempty"`
-	VariantRevision   string                         `json:"variant_revision,omitempty"`
-	DefinitionDigest  string                         `json:"definition_digest"`
-	Policy            projecttemplates.GroupPolicy   `json:"policy"`
-	Composition       string                         `json:"composition"`
-	ProgramKey        *workspace.AssistantProgramKey `json:"program_key,omitempty"`
-	HomeWorkspaceID   string                         `json:"home_workspace_id,omitempty"`
-	CreateHome        bool                           `json:"create_home,omitempty"`
-	DefaultHomeName   string                         `json:"default_home_name,omitempty"`
-	RequestedParentID string                         `json:"requested_parent_id,omitempty"`
-	TargetWorkspaceID string                         `json:"target_workspace_id,omitempty"`
-	GroupTemplateID   string                         `json:"group_template_id,omitempty"`
-	GroupTemplateRev  string                         `json:"group_template_revision,omitempty"`
-	ReviewDigest      string                         `json:"review_digest"`
-	CreatedAt         time.Time                      `json:"created_at"`
-	ExpiresAt         time.Time                      `json:"expires_at"`
-	ConsumedAt        *time.Time                     `json:"consumed_at,omitempty"`
+	Token             string                                   `json:"token"`
+	OwnerUserID       string                                   `json:"owner_user_id"`
+	OperationKind     OperationKind                            `json:"operation_kind"`
+	InputDigest       string                                   `json:"input_digest"`
+	TemplateID        string                                   `json:"template_id"`
+	TemplateRevision  string                                   `json:"template_revision,omitempty"`
+	VariantID         string                                   `json:"variant_id,omitempty"`
+	VariantRevision   string                                   `json:"variant_revision,omitempty"`
+	DefinitionDigest  string                                   `json:"definition_digest"`
+	Policy            projecttemplates.GroupPolicy             `json:"policy"`
+	Composition       string                                   `json:"composition"`
+	ProgramKey        *workspace.AssistantProgramKey           `json:"program_key,omitempty"`
+	HomeWorkspaceID   string                                   `json:"home_workspace_id,omitempty"`
+	CreateHome        bool                                     `json:"create_home,omitempty"`
+	DefaultHomeName   string                                   `json:"default_home_name,omitempty"`
+	RequestedParentID string                                   `json:"requested_parent_id,omitempty"`
+	TargetWorkspaceID string                                   `json:"target_workspace_id,omitempty"`
+	GroupTemplateID   string                                   `json:"group_template_id,omitempty"`
+	GroupTemplateRev  string                                   `json:"group_template_revision,omitempty"`
+	HomeProvider      *workspace.AssistantProgramHomeOwner     `json:"home_provider,omitempty"`
+	ProjectProvider   *workspace.AssistantProjectProviderOwner `json:"project_provider,omitempty"`
+	ReviewDigest      string                                   `json:"review_digest"`
+	CreatedAt         time.Time                                `json:"created_at"`
+	ExpiresAt         time.Time                                `json:"expires_at"`
+	ConsumedAt        *time.Time                               `json:"consumed_at,omitempty"`
 }
 
 type Operation struct {
@@ -178,14 +192,21 @@ var (
 )
 
 type Service struct {
-	workspaces workspace.Store
-	receipts   ReceiptStore
-	now        func() time.Time
-	mu         sync.Mutex
+	workspaces              workspace.Store
+	receipts                ReceiptStore
+	independentHomeResolver IndependentHomeResolver
+	now                     func() time.Time
+	mu                      sync.Mutex
 }
 
 func NewService(workspaces workspace.Store, receipts ReceiptStore) *Service {
 	return &Service{workspaces: workspaces, receipts: receipts, now: func() time.Time { return time.Now().UTC() }}
+}
+
+func (s *Service) SetIndependentHomeResolver(resolver IndependentHomeResolver) {
+	if s != nil {
+		s.independentHomeResolver = resolver
+	}
 }
 
 func (s *Service) Evaluate(input Input) Evaluation {
@@ -218,6 +239,9 @@ func (s *Service) Evaluate(input Input) Evaluation {
 		if targetWorkspace != nil && targetWorkspace.GetAssistantProjectLink() != nil {
 			return unavailable(StateContractInvalid, "A linked workspace needs the reviewed disconnect or reconnect flow.", ActionOpenGuidedSetup)
 		}
+		if !s.bindStandaloneProjectEvidence(strings.TrimSpace(input.OwnerUserID), template, &evaluation) {
+			return unavailable(StateSourceUnavailable, "The project provider cannot be verified.", ActionManagePlugins, ActionRetry)
+		}
 		evaluation.State = StateReadyStandalone
 		evaluation.SelectedComposition = CompositionStandalone
 		evaluation.Summary = "The project will be created as an ordinary standalone workspace."
@@ -234,6 +258,9 @@ func (s *Service) Evaluate(input Input) Evaluation {
 			}
 			if targetWorkspace != nil && targetWorkspace.GetAssistantProjectLink() != nil {
 				return unavailable(StateContractInvalid, "A linked workspace needs the reviewed disconnect or reconnect flow.", ActionOpenGuidedSetup)
+			}
+			if !s.bindStandaloneProjectEvidence(strings.TrimSpace(input.OwnerUserID), template, &evaluation) {
+				return unavailable(StateSourceUnavailable, "The project provider cannot be verified.", ActionManagePlugins, ActionRetry)
 			}
 			evaluation.State = StateReadyStandalone
 			evaluation.SelectedComposition = CompositionStandalone
@@ -253,12 +280,43 @@ func (s *Service) Evaluate(input Input) Evaluation {
 		return unavailable(StateContractInvalid, "This template's group policy is unsupported.", ActionCustomize, ActionChangeTemplate)
 	}
 
-	key, err := programKey(input.OwnerUserID, template)
-	if err != nil {
-		return unavailable(StateSourceUnavailable, "The exact group owner cannot be verified.", ActionManagePlugins, ActionChangeTemplate)
+	var key workspace.AssistantProgramKey
+	var homeDeclaration *workspace.AssistantProgramDeclaration
+	if template.AssistantProject != nil {
+		if s.independentHomeResolver == nil {
+			return unavailable(StateSourceUnavailable, "The independent Home provider cannot be verified.", ActionManagePlugins, ActionRetry)
+		}
+		resolved, resolveErr := s.independentHomeResolver(strings.TrimSpace(input.OwnerUserID), template, true)
+		if resolveErr != nil || resolved.Declaration == nil || resolved.Owner == nil || !resolved.Owner.Valid() || resolved.ProjectOwner == nil || !resolved.ProjectOwner.Valid() {
+			return unavailable(StateSourceUnavailable, "The independent Home provider is missing, incompatible, or not authorized for this project.", ActionManagePlugins, ActionRetry)
+		}
+		key = resolved.Key.Normalize()
+		homeDeclaration = workspace.CloneAssistantProgramDeclaration(resolved.Declaration)
+		owner := resolved.Owner.Clone()
+		projectOwner := resolved.ProjectOwner.Clone()
+		evaluation.HomeOwner = &owner
+		evaluation.ProjectOwner = &projectOwner
+		evaluation.DefinitionDigest = resolvedDefinitionDigest(template, &owner, &projectOwner)
+	} else {
+		var keyErr error
+		key, keyErr = programKey(input.OwnerUserID, template)
+		if keyErr != nil {
+			return unavailable(StateSourceUnavailable, "The exact group owner cannot be verified.", ActionManagePlugins, ActionChangeTemplate)
+		}
+		homeDeclaration = template.AssistantProgram
+		if template.ProgramHomeOwner != nil {
+			owner := template.ProgramHomeOwner.Clone()
+			evaluation.HomeOwner = &owner
+			evaluation.DefinitionDigest = resolvedDefinitionDigest(template, &owner, nil)
+		}
+	}
+	if !key.Valid() || homeDeclaration == nil || key.ProgramID != strings.ToLower(strings.TrimSpace(homeDeclaration.ID)) {
+		return unavailable(StateSourceUnavailable, "The exact group owner cannot be verified.", ActionManagePlugins, ActionRetry)
 	}
 	evaluation.SelectedComposition = CompositionGrouped
 	evaluation.ProgramKey = &key
+	evaluation.HomeDeclaration = homeDeclaration
+	evaluation.EffectiveTemplate.ResolvedAssistantHome = workspace.CloneAssistantProgramDeclaration(homeDeclaration)
 	if targetWorkspace != nil {
 		if link := targetWorkspace.GetAssistantProjectLink(); link != nil && link.Key.Normalize() != key {
 			return unavailable(StateTargetAmbiguous, "The workspace is linked to a different canonical group.", ActionOpenGuidedSetup)
@@ -267,7 +325,7 @@ func (s *Service) Evaluate(input Input) Evaluation {
 	programs := workspace.NewAssistantProgramStore(s.workspaces)
 	home, findErr := programs.FindStation(key)
 	if findErr == nil && home != nil {
-		if !compatibleHome(home, key, template.AssistantProgram) {
+		if !compatibleHome(home, key, homeDeclaration, evaluation.HomeOwner) {
 			return unavailable(StateTargetAmbiguous, "The canonical group state conflicts with this template.", ActionOpenGuidedSetup, ActionRetry)
 		}
 		if requested := strings.TrimSpace(input.RequestedParentID); requested != "" && requested != home.ID {
@@ -286,7 +344,10 @@ func (s *Service) Evaluate(input Input) Evaluation {
 		return unavailable(StateContractInvalid, "An arbitrary parent cannot satisfy this template's group requirement.", ActionRetry)
 	}
 	if requirement.MissingHome == projecttemplates.MissingHomeExistingOnly {
-		return unavailable(StateHomeRequired, "The required canonical group does not exist.", ActionOpenGuidedSetup, ActionChangeTemplate)
+		evaluation.State = StateHomeRequired
+		evaluation.Summary = "The required canonical group does not exist."
+		evaluation.Actions = []Action{ActionOpenGuidedSetup, ActionChangeTemplate}
+		return evaluation
 	}
 	if requirement.MissingHome != projecttemplates.MissingHomeOfferCreate {
 		return unavailable(StateContractInvalid, "This template's missing-group behavior is unsupported.", ActionCustomize, ActionChangeTemplate)
@@ -295,10 +356,12 @@ func (s *Service) Evaluate(input Input) Evaluation {
 	// this refusal in the owner—not only in the browser—ensures direct HTTP,
 	// chat, and orchestration callers cannot collapse the two confirmations.
 	if input.OperationKind != OperationPrepareHome || !input.CreateHome {
-		return Evaluation{State: StateHomeCreationReviewRequired, Policy: requirement.Policy, SelectedComposition: CompositionGrouped,
-			HomeName: requirement.DefaultHomeName, HomeWillBeCreated: true,
-			Summary: "Create the canonical group before creating the project workspace.", Actions: []Action{ActionReviewCreateHome, ActionOpenGuidedSetup},
-			EffectiveTemplate: template, ProgramKey: &key, DefinitionDigest: evaluation.DefinitionDigest}
+		evaluation.State = StateHomeCreationReviewRequired
+		evaluation.HomeName = requirement.DefaultHomeName
+		evaluation.HomeWillBeCreated = true
+		evaluation.Summary = "Create the canonical group before creating the project workspace."
+		evaluation.Actions = []Action{ActionReviewCreateHome, ActionOpenGuidedSetup}
+		return evaluation
 	}
 	evaluation.State = StateReadyGrouped
 	evaluation.HomeName = requirement.DefaultHomeName
@@ -311,6 +374,23 @@ func (s *Service) Evaluate(input Input) Evaluation {
 	evaluation.HomeWillBeCreated = true
 	evaluation.Summary = "Only the canonical group will be created by this action."
 	return evaluation
+}
+
+func (s *Service) bindStandaloneProjectEvidence(ownerUserID string, template projecttemplates.Template, evaluation *Evaluation) bool {
+	if template.AssistantProject == nil {
+		return true
+	}
+	if s == nil || s.independentHomeResolver == nil || evaluation == nil {
+		return false
+	}
+	resolved, err := s.independentHomeResolver(ownerUserID, template, false)
+	if err != nil || resolved.ProjectOwner == nil || !resolved.ProjectOwner.Valid() {
+		return false
+	}
+	owner := resolved.ProjectOwner.Clone()
+	evaluation.ProjectOwner = &owner
+	evaluation.DefinitionDigest = resolvedDefinitionDigest(template, nil, &owner)
+	return true
 }
 
 func (s *Service) Review(ctx context.Context, input Input) (Review, error) {
@@ -332,6 +412,7 @@ func (s *Service) Review(ctx context.Context, input Input) (Review, error) {
 		HomeWorkspaceID: evaluation.HomeWorkspaceID, CreateHome: evaluation.HomeWillBeCreated, DefaultHomeName: evaluation.HomeName,
 		RequestedParentID: strings.TrimSpace(input.RequestedParentID), TargetWorkspaceID: strings.TrimSpace(input.TargetWorkspaceID),
 		GroupTemplateID: strings.TrimSpace(input.GroupTemplateID), GroupTemplateRev: strings.TrimSpace(input.GroupTemplateRevision),
+		HomeProvider: evaluation.HomeOwner, ProjectProvider: evaluation.ProjectOwner,
 		CreatedAt: now, ExpiresAt: now.Add(ReviewTTL),
 	}
 	if (receipt.GroupTemplateID != "" || receipt.GroupTemplateRev != "") &&
@@ -432,9 +513,11 @@ func (s *Service) Claim(ctx context.Context, input Input, token, idempotencyKey 
 			var ensureErr error
 			programs := workspace.NewAssistantProgramStore(s.workspaces)
 			if receipt.GroupTemplateID != "" {
-				home, homeCreated, ensureErr = programs.EnsureNamedStationWithProvenance(key, input.Template.AssistantProgram, receipt.DefaultHomeName, groupTemplateProvenance(receipt, key, input.Template))
+				home, homeCreated, ensureErr = programs.EnsureNamedStationWithProvenance(key, current.HomeDeclaration, receipt.DefaultHomeName, groupTemplateProvenance(receipt, key, current.EffectiveTemplate, current.HomeOwner))
+			} else if current.HomeOwner != nil {
+				home, homeCreated, ensureErr = programs.EnsureNamedIndependentStation(key, current.HomeDeclaration, receipt.DefaultHomeName, *current.HomeOwner)
 			} else {
-				home, homeCreated, ensureErr = programs.EnsureNamedStation(key, input.Template.AssistantProgram, receipt.DefaultHomeName)
+				home, homeCreated, ensureErr = programs.EnsureNamedStation(key, current.HomeDeclaration, receipt.DefaultHomeName)
 			}
 			if ensureErr != nil || home == nil {
 				return Claim{}, ErrUnavailable
@@ -493,7 +576,8 @@ func (s *Service) CommitReviewed(input Input, childWorkspaceID, reviewDigest, op
 		InputDigest: input.InputDigest, TemplateID: input.Template.ID, TemplateRevision: input.Template.Revision,
 		DefinitionDigest: evaluation.DefinitionDigest, Policy: evaluation.Policy, Composition: evaluation.SelectedComposition,
 		HomeWorkspaceID: evaluation.HomeWorkspaceID, CreateHome: evaluation.HomeWillBeCreated,
-		DefaultHomeName: evaluation.HomeName, ReviewDigest: reviewDigest,
+		DefaultHomeName: evaluation.HomeName, HomeProvider: evaluation.HomeOwner,
+		ProjectProvider: evaluation.ProjectOwner, ReviewDigest: reviewDigest,
 	}
 	if input.Template.TemplateVariant != nil {
 		receipt.VariantID = input.Template.TemplateVariant.VariantID
@@ -538,7 +622,8 @@ func receiptMatches(receipt Receipt, input Input, current Evaluation) error {
 	}
 	if receipt.TemplateID != template.ID || receipt.TemplateRevision != template.Revision ||
 		receipt.DefinitionDigest != current.DefinitionDigest || receipt.Policy != current.Policy ||
-		receipt.Composition != current.SelectedComposition {
+		receipt.Composition != current.SelectedComposition || !sameHomeProvider(receipt.HomeProvider, current.HomeOwner) ||
+		!sameProjectProvider(receipt.ProjectProvider, current.ProjectOwner) {
 		return ErrReviewStale
 	}
 	variantID := ""
@@ -564,12 +649,34 @@ func receiptMatches(receipt Receipt, input Input, current Evaluation) error {
 	return nil
 }
 
+func sameHomeProvider(left, right *workspace.AssistantProgramHomeOwner) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
+}
+
+func sameProjectProvider(left, right *workspace.AssistantProjectProviderOwner) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
+}
+
 func snapshotFor(receipt Receipt, operation Operation, template projecttemplates.Template) *workspace.GroupRequirementSnapshot {
 	snapshot := &workspace.GroupRequirementSnapshot{
 		SchemaVersion: workspace.GroupRequirementSnapshotSchemaVersion, Policy: string(receipt.Policy),
 		SelectedComposition: receipt.Composition, TemplateID: receipt.TemplateID, TemplateRevision: receipt.TemplateRevision,
 		DefinitionDigest: receipt.DefinitionDigest, VariantID: receipt.VariantID, VariantRevision: receipt.VariantRevision,
 		ReviewDigest: receipt.ReviewDigest, OperationDigest: operation.OperationDigest, AppliedAt: operation.AppliedAt,
+	}
+	if receipt.HomeProvider != nil {
+		owner := receipt.HomeProvider.Clone()
+		snapshot.HomeProvider = &owner
+	}
+	if receipt.ProjectProvider != nil {
+		owner := receipt.ProjectProvider.Clone()
+		snapshot.ProjectProvider = &owner
 	}
 	if template.TemplateVariant != nil {
 		owner := workspace.PluginTemplateOwner{
@@ -595,19 +702,31 @@ func snapshotFor(receipt Receipt, operation Operation, template projecttemplates
 
 // groupTemplateProvenance derives inert creation provenance only from the
 // consumed-once receipt, the server-resolved key, and the trusted template.
-func groupTemplateProvenance(receipt Receipt, key workspace.AssistantProgramKey, template projecttemplates.Template) *workspace.AssistantGroupTemplateProvenance {
+func groupTemplateProvenance(receipt Receipt, key workspace.AssistantProgramKey, template projecttemplates.Template, homeOwner *workspace.AssistantProgramHomeOwner) *workspace.AssistantGroupTemplateProvenance {
+	homeDeclaration := template.AssistantProgram
+	if homeDeclaration == nil {
+		homeDeclaration = template.ResolvedAssistantHome
+	}
 	provenance := &workspace.AssistantGroupTemplateProvenance{
 		SchemaVersion:   workspace.AssistantGroupTemplateProvenanceSchemaVersion,
 		GroupTemplateID: receipt.GroupTemplateID, GroupTemplateRevision: receipt.GroupTemplateRev,
 		SourceKind: string(projecttemplates.GroupTemplateSourceUserTemplate), TemplateID: receipt.TemplateID,
 		TemplateRevision: receipt.TemplateRevision, VariantID: receipt.VariantID, VariantRevision: receipt.VariantRevision,
-		HomeDigest: projecttemplates.GroupTemplateHomeDigest(template.AssistantProgram), ReviewDigest: receipt.ReviewDigest,
+		HomeDigest: projecttemplates.GroupTemplateHomeDigest(homeDeclaration), ReviewDigest: receipt.ReviewDigest,
 	}
 	if key.Normalize().PluginID == "" {
 		return provenance
 	}
 	provenance.SourceKind = string(projecttemplates.GroupTemplateSourcePlugin)
+	if homeOwner != nil {
+		owner := homeOwner.Clone()
+		provenance.ProgramHomeOwner = &owner
+		return provenance
+	}
 	switch {
+	case template.ProgramHomeOwner != nil:
+		owner := template.ProgramHomeOwner.Clone()
+		provenance.ProgramHomeOwner = &owner
 	case template.PluginOwner != nil:
 		owner := template.PluginOwner.Clone()
 		provenance.PluginOwner = &owner
@@ -627,6 +746,8 @@ func programKey(ownerUserID string, template projecttemplates.Template) (workspa
 	}
 	key := workspace.AssistantProgramKey{OwnerUserID: strings.TrimSpace(ownerUserID), ProgramID: template.AssistantProgram.ID}
 	switch {
+	case template.ProgramHomeOwner != nil:
+		key.PluginID = template.ProgramHomeOwner.PluginID
 	case template.PluginOwner != nil:
 		key.PluginID = template.PluginOwner.PluginID
 	case template.TemplateVariant != nil:
@@ -644,18 +765,19 @@ func programKey(ownerUserID string, template projecttemplates.Template) (workspa
 	return key, nil
 }
 
-func compatibleHome(home *workspace.Workspace, key workspace.AssistantProgramKey, declaration *workspace.AssistantProgramDeclaration) bool {
+func compatibleHome(home *workspace.Workspace, key workspace.AssistantProgramKey, declaration *workspace.AssistantProgramDeclaration, owner *workspace.AssistantProgramHomeOwner) bool {
 	if home == nil || home.Kind != "group" || home.Status == workspace.StatusTrashed || home.Status == workspace.StatusMissing || declaration == nil {
 		return false
 	}
 	state := home.GetAssistantProgramState()
 	return state != nil && state.SchemaVersion == workspace.AssistantProgramStateSchemaVersion &&
 		state.Key.Normalize() == key.Normalize() && state.Declaration != nil &&
-		state.Declaration.SchemaVersion == declaration.SchemaVersion && state.Declaration.ID == declaration.ID
+		state.Declaration.SchemaVersion == declaration.SchemaVersion && state.Declaration.ID == declaration.ID &&
+		sameHomeProvider(state.HomeProvider, owner)
 }
 
 func standaloneTemplate(template projecttemplates.Template) (projecttemplates.Template, error) {
-	if template.AssistantProgram == nil {
+	if template.AssistantProgram == nil && template.AssistantProject == nil {
 		result := template
 		result.SetupQuestID = ""
 		result.UserSetupQuest = nil
@@ -671,6 +793,14 @@ func unavailable(state State, summary string, actions ...Action) Evaluation {
 		actions = actions[:4]
 	}
 	return Evaluation{State: state, Summary: summary, Actions: actions}
+}
+
+func resolvedDefinitionDigest(template projecttemplates.Template, homeOwner *workspace.AssistantProgramHomeOwner, projectOwner *workspace.AssistantProjectProviderOwner) string {
+	return digestJSON(struct {
+		ProjectDefinition string                                   `json:"project_definition"`
+		HomeOwner         *workspace.AssistantProgramHomeOwner     `json:"home_owner,omitempty"`
+		ProjectOwner      *workspace.AssistantProjectProviderOwner `json:"project_owner,omitempty"`
+	}{ProjectDefinition: definitionDigest(template), HomeOwner: homeOwner, ProjectOwner: projectOwner})
 }
 
 func definitionDigest(template projecttemplates.Template) string {

@@ -214,6 +214,47 @@ func TestBlueprintCatalogSnapshotCarriesExplicitActiveState(t *testing.T) {
 	}
 }
 
+func TestBlueprintCatalogProjectsIndependentProgramHomeWithoutProjectBlueprint(t *testing.T) {
+	home := projecttemplates.AssistantProgramHome{
+		SchemaVersion: 1, Version: 1, ID: "music-producer-assistant",
+		StationName: "Music Production Home", DefaultPrimaryName: "Portfolio Manager", HireTitle: "Staff this Home",
+		Roles:      []projecttemplates.AssistantProgramHomeRole{{ID: "portfolio_manager", Label: "Portfolio Manager", Required: true, Primary: true, SystemPrompt: "Coordinate bounded work."}},
+		Stages:     []workspace.AssistantProgramStageSpec{{ID: "foundation", Label: "Foundation", AcceptedCompletionThreshold: 0}},
+		Reflection: workspace.AssistantReflectionConfig{MinimumProjects: 3, CadenceHours: 168, MaxProjects: 8, MaxEventsPerProject: 8, MaxCandidates: 8, MaxEvidence: 8, Rubric: "Use approved evidence."},
+	}
+	if err := projecttemplates.NormalizeAssistantProgramHome(&home); err != nil {
+		t.Fatal(err)
+	}
+	installed := plugin.InstalledPlugin{
+		Name: "music-project-management", Version: "0.1.0", Generation: 1, Enabled: true,
+		ComponentFingerprint: strings.Repeat("a", 64),
+		WorkspaceSurfaces: &plugin.SurfaceContribution{
+			Protocol:              plugin.ProtocolRange{Min: 1, Max: 1},
+			RequiresHostFeatures:  []string{plugin.HostFeatureIndependentProgramHomesV1},
+			AssistantProgramHomes: []projecttemplates.AssistantProgramHome{home},
+		},
+	}
+	snapshot, err := buildBlueprintCatalogSnapshot(t.TempDir(), nil, staticInstalledPlugins{installed: []plugin.InstalledPlugin{installed}}, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := "plugin-home:music-project-management:music-producer-assistant"
+	var found *blueprintCatalogEntry
+	for index := range snapshot.Entries {
+		if snapshot.Entries[index].ID == id {
+			found = &snapshot.Entries[index]
+			break
+		}
+	}
+	if found == nil || !snapshot.Active[id] || found.ProgramHomeOwner == nil || found.PluginOwner != nil || found.HasSkeleton {
+		t.Fatalf("independent Home catalog entry = %+v, active=%v", found, snapshot.Active)
+	}
+	projected := projecttemplates.ProjectGroupTemplates([]projecttemplates.GroupTemplateCandidate{{Template: found.Template, Usable: true}})
+	if len(projected) != 2 || projected[1].Provider == nil || projected[1].Provider.PluginID != installed.Name {
+		t.Fatalf("Group Template projection = %+v", projected)
+	}
+}
+
 var errTestPluginListUnavailable = errors.New("plugin store unavailable")
 
 // TestBlueprintCatalogSnapshotOmitsRetiredBuiltinBehindInertCandidate exercises

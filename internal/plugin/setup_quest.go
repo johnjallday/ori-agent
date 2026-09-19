@@ -65,9 +65,14 @@ func validateQuestBlueprints(c *SurfaceContribution, blueprints []ResolvedBluepr
 			continue
 		}
 		quest, ok := quests[id]
-		program := blueprint.Template.AssistantProgram
-		if !ok || quest.ExpectedBlueprintID != blueprint.ID || program == nil ||
-			program.ID != quest.ExpectedAssistantProgramID || blueprint.Template.ProjectConnection == nil {
+		programID := ""
+		if program := blueprint.Template.AssistantProgram; program != nil {
+			programID = program.ID
+		} else if project := blueprint.Template.AssistantProject; project != nil {
+			programID = project.Home.ProgramID
+		}
+		if !ok || quest.ExpectedBlueprintID != blueprint.ID || programID == "" ||
+			programID != quest.ExpectedAssistantProgramID || blueprint.Template.ProjectConnection == nil {
 			return fmt.Errorf("plugin blueprint setup quest reference is unavailable")
 		}
 		used[id] = true

@@ -71,7 +71,8 @@ type GroupTemplateRole struct {
 	// declaration's default primary name for the primary role, otherwise the
 	// label. It is display text only; prompts, skills, and type stay
 	// server-side.
-	DefaultName string `json:"default_name"`
+	DefaultName string   `json:"default_name"`
+	Skills      []string `json:"skills,omitempty"`
 }
 
 type GroupTemplate struct {
@@ -168,6 +169,13 @@ func eligibleGroupTemplateSource(candidate GroupTemplateCandidate) (groupTemplat
 	programID := normalizeAssistantProgramID(program.ID)
 	source := groupTemplateSource{candidate: candidate}
 	switch {
+	case template.ProgramHomeOwner != nil:
+		pluginID := strings.ToLower(strings.TrimSpace(template.ProgramHomeOwner.PluginID))
+		if pluginID == "" || !template.ProgramHomeOwner.Valid() || template.ProgramHomeOwner.ProgramID != programID {
+			return groupTemplateSource{}, false
+		}
+		source.kind, source.rank = GroupTemplateSourcePlugin, 0
+		source.groupKey = groupTemplateKey(source.kind, pluginID, programID)
 	case template.PluginOwner != nil:
 		pluginID := strings.ToLower(strings.TrimSpace(template.PluginOwner.PluginID))
 		if pluginID == "" {
@@ -238,6 +246,7 @@ func projectGroupTemplate(groupKey string, sources []groupTemplateSource) GroupT
 			entry.HomeRoles = append(entry.HomeRoles, GroupTemplateRole{
 				RoleID: role.ID, Label: role.Label, Description: role.Description,
 				Required: role.Required, Primary: role.Primary, DefaultName: defaultName,
+				Skills: append([]string(nil), role.Skills...),
 			})
 		case workspace.AssistantRoleScopeProject:
 			entry.ProjectRoles = append(entry.ProjectRoles, role.Label)
@@ -329,16 +338,17 @@ func GroupTemplateHomeDigest(program *workspace.AssistantProgramDeclaration) str
 
 func groupTemplateRevision(homeDigest string, template Template) string {
 	revision := struct {
-		HomeDigest             string                         `json:"home_digest"`
-		TemplateID             string                         `json:"template_id"`
-		TemplateRevision       string                         `json:"template_revision,omitempty"`
-		VariantRevision        string                         `json:"variant_revision,omitempty"`
-		VariantSource          *TemplateVariantSource         `json:"variant_source,omitempty"`
-		PluginOwner            *workspace.PluginTemplateOwner `json:"plugin_owner,omitempty"`
-		UserSetupQuestRevision string                         `json:"user_setup_quest_revision,omitempty"`
+		HomeDigest             string                               `json:"home_digest"`
+		TemplateID             string                               `json:"template_id"`
+		TemplateRevision       string                               `json:"template_revision,omitempty"`
+		VariantRevision        string                               `json:"variant_revision,omitempty"`
+		VariantSource          *TemplateVariantSource               `json:"variant_source,omitempty"`
+		PluginOwner            *workspace.PluginTemplateOwner       `json:"plugin_owner,omitempty"`
+		ProgramHomeOwner       *workspace.AssistantProgramHomeOwner `json:"program_home_owner,omitempty"`
+		UserSetupQuestRevision string                               `json:"user_setup_quest_revision,omitempty"`
 	}{
 		HomeDigest: homeDigest, TemplateID: template.ID, TemplateRevision: template.Revision,
-		VariantRevision: template.VariantRevision, PluginOwner: template.PluginOwner,
+		VariantRevision: template.VariantRevision, PluginOwner: template.PluginOwner, ProgramHomeOwner: template.ProgramHomeOwner,
 		UserSetupQuestRevision: template.UserSetupQuestRevision,
 	}
 	if template.TemplateVariant != nil {
@@ -351,6 +361,8 @@ func groupTemplateRevision(homeDigest string, template Template) string {
 func groupTemplateProvider(source groupTemplateSource) *GroupTemplateProvider {
 	template := source.candidate.Template
 	switch {
+	case template.ProgramHomeOwner != nil:
+		return &GroupTemplateProvider{Kind: GroupTemplateSourcePlugin, PluginID: template.ProgramHomeOwner.PluginID, PluginVersion: template.ProgramHomeOwner.PluginVersion}
 	case template.PluginOwner != nil:
 		return &GroupTemplateProvider{Kind: GroupTemplateSourcePlugin, PluginID: template.PluginOwner.PluginID, PluginVersion: template.PluginOwner.PluginVersion}
 	case template.TemplateVariant != nil:

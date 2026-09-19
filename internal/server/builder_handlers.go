@@ -633,6 +633,55 @@ func (b *ServerBuilder) initializeHandlers() {
 		pluginsDir := filepath.Join(config.DefaultDataDir(), "plugins")
 		b.pluginHandler = pluginhttp.NewHandler(b.mcpConfigManager, b.mcpRegistry, personalSkillsDir, pluginsDir)
 		b.pluginHandler.UpdateChecker().SetAdmissionGate(b.resetWork)
+		b.skillsManager.SetPersonalSkillAvailability(func(agentName string, skill skills.Skill) (bool, bool) {
+			directory := filepath.Dir(skill.Path)
+			info, statErr := os.Lstat(directory)
+			if statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+				return true, false
+			}
+			receipt, managed, receiptErr := plugin.ReadSkillOwnershipReceipt(directory)
+			if receiptErr != nil {
+				return true, false
+			}
+			installed, listErr := b.pluginHandler.Manager().List()
+			if listErr != nil {
+				return true, false
+			}
+			if !managed {
+				directoryName := filepath.Base(directory)
+				for _, candidate := range installed {
+					for _, candidateSkill := range candidate.Skills {
+						if candidateSkill != directoryName {
+							continue
+						}
+						if candidate.SkillOwnershipSchema >= plugin.SkillOwnershipSchemaVersion {
+							return true, false
+						}
+						return true, candidate.Enabled
+					}
+				}
+				return false, true
+			}
+			if plugin.VerifySkillOwnership(directory, receipt.PluginName, receipt.SkillName) != nil {
+				return true, false
+			}
+			providerAvailable := false
+			for _, candidate := range installed {
+				if !candidate.Enabled || !strings.EqualFold(candidate.Name, receipt.PluginName) {
+					continue
+				}
+				for _, candidateSkill := range candidate.Skills {
+					if candidateSkill == receipt.SkillName {
+						providerAvailable = true
+						break
+					}
+				}
+			}
+			if !providerAvailable || !independentSkillProviderAvailableForAgent(b.workspaceStore, installed, agentName, receipt.PluginName) {
+				return true, false
+			}
+			return true, true
+		})
 	}
 
 	// Let workspaces created from a template bind its declared default tools
@@ -645,6 +694,58 @@ func (b *ServerBuilder) initializeHandlers() {
 		b.sessionHandler.SetTemplateToolApplier(makeTemplateToolApplier(b))
 		b.sessionHandler.SetAgentToolApplier(makeAgentToolApplier(b))
 	}
+}
+
+// independentSkillProviderAvailableForAgent binds managed personal-skill
+// runtime resolution back to any split-provider workspace that owns the agent.
+// A reviewed plugin update changes generation/fingerprint evidence, so an
+// existing role cannot silently start executing the replacement instructions.
+func independentSkillProviderAvailableForAgent(store workspace.Store, installed []plugin.InstalledPlugin, agentName, pluginName string) bool {
+	if store == nil || strings.TrimSpace(agentName) == "" {
+		return true
+	}
+	targets, err := store.ListActive()
+	if err != nil {
+		return false
+	}
+	for _, target := range targets {
+		if target == nil {
+			continue
+		}
+		ownsAgent := false
+		for _, instance := range target.GetAgentInstances() {
+			if strings.EqualFold(strings.TrimSpace(instance.Name), strings.TrimSpace(agentName)) {
+				ownsAgent = true
+				break
+			}
+		}
+		if !ownsAgent {
+			continue
+		}
+		if state := target.GetAssistantProgramState(); state != nil {
+			owner := state.HomeProvider
+			if owner == nil && state.GroupTemplate != nil {
+				owner = state.GroupTemplate.ProgramHomeOwner
+			}
+			if owner != nil && strings.EqualFold(owner.PluginID, pluginName) &&
+				!plugin.IndependentHomeProviderEvidenceAvailable(installed, owner) {
+				return false
+			}
+		}
+		if link := target.GetAssistantProjectLink(); link != nil && link.ProjectProvider != nil &&
+			strings.EqualFold(link.ProjectProvider.PluginID, pluginName) &&
+			!plugin.IndependentProjectProviderEvidenceAvailable(installed, link.ProjectProvider) {
+			return false
+		}
+		if provenance := target.GetTemplateProvenance(); provenance != nil && provenance.GroupRequirement != nil {
+			owner := provenance.GroupRequirement.ProjectProvider
+			if owner != nil && strings.EqualFold(owner.PluginID, pluginName) &&
+				!plugin.IndependentProjectProviderEvidenceAvailable(installed, owner) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // reconcileWorkspaceDesignations applies the same Personal HQ reconciliation

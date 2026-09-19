@@ -23,7 +23,14 @@
       "maxItems": 8,
       "uniqueItems": true,
       "items": {
-        "enum": ["assistant_program_v1", "specialist_setup_journey_v1", "setup_quests_v2"]
+        "enum": [
+          "assistant_program_v1",
+          "specialist_setup_journey_v1",
+          "setup_quests_v2",
+          "template_group_requirements_v1",
+          "blueprint_inputs_v1",
+          "independent_program_homes_v1"
+        ]
       }
     },
     "setup_quests": {
@@ -45,6 +52,11 @@
       "type": "array",
       "maxItems": 16,
       "items": { "$ref": "#/$defs/blueprint" }
+    },
+    "assistant_program_homes": {
+      "type": "array",
+      "maxItems": 8,
+      "items": { "$ref": "#/$defs/assistantProgramHome" }
     }
   },
   "$defs": {
@@ -330,6 +342,106 @@
           "type": "array",
           "maxItems": 16,
           "items": { "$ref": "#/$defs/id" }
+        }
+      }
+    },
+    "assistantProgramHomeRole": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "required", "system_prompt"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "label": { "$ref": "#/$defs/text120" },
+        "description": { "type": "string", "maxLength": 1000 },
+        "required": { "type": "boolean" },
+        "capability_id": { "$ref": "#/$defs/id" },
+        "primary": { "type": "boolean" },
+        "role": { "$ref": "#/$defs/id" },
+        "type": { "$ref": "#/$defs/id" },
+        "system_prompt": { "type": "string", "minLength": 1, "maxLength": 8192 },
+        "skills": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/id" }
+        }
+      }
+    },
+    "assistantProgramStage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "accepted_completion_threshold"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "label": { "$ref": "#/$defs/text120" },
+        "description": { "type": "string", "maxLength": 1000 },
+        "accepted_completion_threshold": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "assistantReflection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum_projects", "cadence_hours", "max_projects", "max_events_per_project", "max_candidates", "max_evidence", "rubric"],
+      "properties": {
+        "minimum_projects": { "type": "integer", "minimum": 3, "maximum": 32 },
+        "cadence_hours": { "type": "integer", "minimum": 24, "maximum": 744 },
+        "max_projects": { "type": "integer", "minimum": 3, "maximum": 32 },
+        "max_events_per_project": { "type": "integer", "minimum": 1, "maximum": 128 },
+        "max_candidates": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "max_evidence": { "type": "integer", "minimum": 3, "maximum": 16 },
+        "rubric": { "type": "string", "minLength": 1, "maxLength": 8192 }
+      }
+    },
+    "allowedProjectAttachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider_plugin_id", "blueprint_id", "project_team_id", "project_team_schema_version", "min_project_team_version", "max_project_team_version"],
+      "properties": {
+        "provider_plugin_id": { "$ref": "#/$defs/id" },
+        "blueprint_id": { "$ref": "#/$defs/id" },
+        "project_team_id": { "$ref": "#/$defs/id" },
+        "project_team_schema_version": { "const": 1 },
+        "min_project_team_version": { "type": "integer", "minimum": 1 },
+        "max_project_team_version": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "assistantProgramHome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "version", "id", "station_name", "default_primary_name", "hire_title", "roles", "stages", "reflection"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "version": { "type": "integer", "minimum": 1 },
+        "id": { "$ref": "#/$defs/id" },
+        "station_name": { "$ref": "#/$defs/text120" },
+        "station_description": { "type": "string", "maxLength": 1000 },
+        "default_primary_name": { "$ref": "#/$defs/text120" },
+        "hire_title": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "hire_description": { "type": "string", "maxLength": 1000 },
+        "disabled_message": { "type": "string", "maxLength": 1000 },
+        "suggestion_required_capabilities": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/id" }
+        },
+        "roles": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/assistantProgramHomeRole" }
+        },
+        "stages": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/assistantProgramStage" }
+        },
+        "reflection": { "$ref": "#/$defs/assistantReflection" },
+        "allowed_project_attachments": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/allowedProjectAttachment" }
         }
       }
     },

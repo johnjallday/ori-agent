@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 )
 
 const (
@@ -55,7 +57,8 @@ const (
 	// decodes such a manifest strictly and rejects the whole blueprint, so a
 	// plugin release that uses inputs declares this feature and is refused
 	// before install rather than landing as an unusable blueprint.
-	HostFeatureBlueprintInputsV1 = "blueprint_inputs_v1"
+	HostFeatureBlueprintInputsV1         = "blueprint_inputs_v1"
+	HostFeatureIndependentProgramHomesV1 = "independent_program_homes_v1"
 )
 
 // hostFeatures is what this build advertises. It is the one list: a second copy
@@ -69,6 +72,7 @@ var hostFeatures = []string{
 	HostFeatureSetupQuestsV2,
 	HostFeatureTemplateGroupRequirementsV1,
 	HostFeatureBlueprintInputsV1,
+	HostFeatureIndependentProgramHomesV1,
 }
 
 // HostFeatures returns the features this build advertises, newest last.
@@ -151,15 +155,16 @@ func ValidateContributionIdentity(contribution *SurfaceContribution, identities 
 }
 
 type SurfaceContribution struct {
-	SchemaVersion        int                     `json:"schema_version"`
-	Name                 string                  `json:"name"`
-	Version              string                  `json:"version"`
-	Protocol             ProtocolRange           `json:"protocol"`
-	RequiresHostFeatures []string                `json:"requires_host_features,omitempty"`
-	Capabilities         []ContributedCapability `json:"capabilities,omitempty"`
-	Services             []ContributedService    `json:"services,omitempty"`
-	Blueprints           []ContributedBlueprint  `json:"blueprints,omitempty"`
-	SetupQuests          []SetupQuest            `json:"setup_quests,omitempty"`
+	SchemaVersion         int                                     `json:"schema_version"`
+	Name                  string                                  `json:"name"`
+	Version               string                                  `json:"version"`
+	Protocol              ProtocolRange                           `json:"protocol"`
+	RequiresHostFeatures  []string                                `json:"requires_host_features,omitempty"`
+	Capabilities          []ContributedCapability                 `json:"capabilities,omitempty"`
+	Services              []ContributedService                    `json:"services,omitempty"`
+	Blueprints            []ContributedBlueprint                  `json:"blueprints,omitempty"`
+	AssistantProgramHomes []projecttemplates.AssistantProgramHome `json:"assistant_program_homes,omitempty"`
+	SetupQuests           []SetupQuest                            `json:"setup_quests,omitempty"`
 }
 
 type ContributedCapability struct {
@@ -300,9 +305,10 @@ type ContributedBlueprint struct {
 // PublicContribution is the executable-free projection suitable for list and
 // preview APIs after trust details have been reported separately.
 type PublicContribution struct {
-	Protocol     ProtocolRange      `json:"protocol"`
-	Capabilities []PublicCapability `json:"capabilities,omitempty"`
-	Blueprints   []PublicBlueprint  `json:"blueprints,omitempty"`
+	Protocol              ProtocolRange                `json:"protocol"`
+	Capabilities          []PublicCapability           `json:"capabilities,omitempty"`
+	Blueprints            []PublicBlueprint            `json:"blueprints,omitempty"`
+	AssistantProgramHomes []PublicAssistantProgramHome `json:"assistant_program_homes,omitempty"`
 }
 
 type PublicCapability struct {
@@ -325,6 +331,12 @@ type PublicSurface struct {
 type PublicBlueprint struct {
 	ID      string `json:"id"`
 	Version int    `json:"version"`
+}
+
+type PublicAssistantProgramHome struct {
+	ID          string `json:"id"`
+	Version     int    `json:"version"`
+	StationName string `json:"station_name"`
 }
 
 func ParseSurfaceContribution(data []byte) (*SurfaceContribution, error) {
@@ -392,11 +404,19 @@ func (c *SurfaceContribution) ValidateForHost(protocolVersion int, hostFeatures 
 		}
 		seenHostFeatures[feature] = struct{}{}
 	}
-	if len(c.Capabilities) == 0 && len(c.Services) == 0 && len(c.Blueprints) == 0 {
+	if len(c.Capabilities) == 0 && len(c.Services) == 0 && len(c.Blueprints) == 0 && len(c.AssistantProgramHomes) == 0 {
 		return contributionError(CodeContributionInvalid, "manifest", "components", "at least one contribution is required", nil)
 	}
-	if len(c.Capabilities) > 16 || len(c.Services) > 8 || len(c.Blueprints) > 16 {
+	if len(c.Capabilities) > 16 || len(c.Services) > 8 || len(c.Blueprints) > 16 || len(c.AssistantProgramHomes) > projecttemplates.AssistantProgramHomeMaxEntries {
 		return contributionError(CodeContributionInvalid, "manifest", "components", "component count exceeds v1 limits", nil)
+	}
+	if len(c.AssistantProgramHomes) > 0 {
+		if err := canonicalID("manifest", "name", c.Name); err != nil {
+			return err
+		}
+		if _, declared := seenHostFeatures[HostFeatureIndependentProgramHomesV1]; !declared {
+			return contributionError(CodeHostFeatureUnsupported, "manifest", "requires_host_features", "assistant_program_homes requires independent_program_homes_v1", nil)
+		}
 	}
 	if err := validateSetupQuests(c); err != nil {
 		return contributionError(CodeContributionInvalid, "manifest", "setup_quests", "setup quest declarations are invalid", err)
@@ -418,6 +438,9 @@ func (c SurfaceContribution) Public() PublicContribution {
 	}
 	for _, blueprint := range c.Blueprints {
 		out.Blueprints = append(out.Blueprints, PublicBlueprint{ID: blueprint.ID, Version: blueprint.Version})
+	}
+	for _, home := range c.AssistantProgramHomes {
+		out.AssistantProgramHomes = append(out.AssistantProgramHomes, PublicAssistantProgramHome{ID: home.ID, Version: home.Version, StationName: home.StationName})
 	}
 	return out
 }
@@ -453,6 +476,18 @@ func validateContributionComponents(c *SurfaceContribution) error {
 		if err := validateCapabilityContribution(capability, services); err != nil {
 			return err
 		}
+	}
+
+	homes := make(map[string]struct{}, len(c.AssistantProgramHomes))
+	for index := range c.AssistantProgramHomes {
+		home := &c.AssistantProgramHomes[index]
+		if err := projecttemplates.NormalizeAssistantProgramHome(home); err != nil {
+			return contributionError(CodeContributionInvalid, "assistant_program_home:"+home.ID, "declaration", "Assistant Program Home declaration is invalid", err)
+		}
+		if _, duplicate := homes[home.ID]; duplicate {
+			return contributionError(CodeComponentDuplicate, "assistant_program_home:"+home.ID, "id", "Assistant Program Home id is duplicated", nil)
+		}
+		homes[home.ID] = struct{}{}
 	}
 
 	blueprints := make(map[string]struct{}, len(c.Blueprints))

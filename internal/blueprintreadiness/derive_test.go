@@ -399,6 +399,53 @@ func TestDeriveNeverTrustsTemplateSuppliedPluginMetadata(t *testing.T) {
 	}
 }
 
+func TestIndependentHomeReadinessRequiresHomeProviderFirstAndReciprocalAuthorization(t *testing.T) {
+	projectPlugin := withBlueprint(installedPlugin("reaper", true), "song")
+	projectPlugin.Skills = []string{"reaper-project"}
+	projectPlugin.WorkspaceSurfaces.RequiresHostFeatures = []string{plugin.HostFeatureIndependentProgramHomesV1}
+	template := pluginOwnedTemplate("reaper", "song")
+	template.AssistantProject = &projecttemplates.AssistantProjectDeclaration{
+		SchemaVersion: 1, Version: 3, ID: "reaper_team",
+		Home:  projecttemplates.AssistantProjectHomeReference{ProviderPluginID: "music", ProgramID: "music_home", HomeSchemaVersion: 1, MinHomeVersion: 2, MaxHomeVersion: 2},
+		Roles: []projecttemplates.AssistantProjectRole{{ID: "engineer", Label: "Engineer", Required: true, Primary: true, SystemPrompt: "Operate this project.", Skills: []string{"reaper-project"}}},
+	}
+
+	missing := Derive(template, Sources{Installed: []plugin.InstalledPlugin{projectPlugin}})
+	if missing.State != StateActionRequired || missing.Reason != ReasonPluginInstallRequired || missing.Dependency == nil || missing.Dependency.PluginName != "music" {
+		t.Fatalf("missing Home readiness = %#v", missing)
+	}
+	template.GroupRequirement = &projecttemplates.GroupRequirement{Policy: projecttemplates.GroupPolicyRecommended}
+	template.StandaloneComposition = &projecttemplates.StandaloneComposition{SchemaVersion: projecttemplates.SplitStandaloneCompositionSchemaVersion}
+	standalone := Derive(template, Sources{Installed: []plugin.InstalledPlugin{projectPlugin}})
+	if standalone.State != StateReady || standalone.Dependency == nil || standalone.Dependency.PluginName != "music" {
+		t.Fatalf("Home-free standalone readiness = %#v", standalone)
+	}
+	template.GroupRequirement = nil
+	template.StandaloneComposition = nil
+
+	homePlugin := installedPlugin("music", true)
+	homePlugin.Skills = []string{"music-project-management"}
+	homePlugin.WorkspaceSurfaces.RequiresHostFeatures = []string{plugin.HostFeatureIndependentProgramHomesV1}
+	homePlugin.WorkspaceSurfaces.AssistantProgramHomes = []projecttemplates.AssistantProgramHome{{
+		SchemaVersion: 1, Version: 2, ID: "music_home",
+		Roles: []projecttemplates.AssistantProgramHomeRole{{ID: "producer", Skills: []string{"music-project-management"}}},
+		AllowedProjectAttachments: []projecttemplates.AssistantProgramAllowedProjectAttachment{{
+			ProviderPluginID: "reaper", BlueprintID: "song", ProjectTeamID: "reaper_team", ProjectTeamSchemaVersion: 1,
+			MinProjectTeamVersion: 3, MaxProjectTeamVersion: 3,
+		}},
+	}}
+	ready := Derive(template, Sources{Installed: []plugin.InstalledPlugin{projectPlugin, homePlugin}})
+	if ready.State != StateReady {
+		t.Fatalf("ready split providers = %#v", ready)
+	}
+
+	homePlugin.WorkspaceSurfaces.AssistantProgramHomes[0].AllowedProjectAttachments = nil
+	oneSided := Derive(template, Sources{Installed: []plugin.InstalledPlugin{projectPlugin, homePlugin}})
+	if oneSided.State != StateActionRequired || oneSided.Reason != ReasonPluginUpdateRequired {
+		t.Fatalf("one-sided authorization readiness = %#v", oneSided)
+	}
+}
+
 // TestDeriveAlwaysReturnsANormalizedProjection guards the promise callers rely
 // on: whatever Derive returns is safe to serialize as-is.
 func TestDeriveAlwaysReturnsANormalizedProjection(t *testing.T) {
