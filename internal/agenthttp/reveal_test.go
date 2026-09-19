@@ -20,6 +20,20 @@ func (o *recordingOpener) OpenFolder(path string) error {
 func (o *recordingOpener) OpenFile(string) error            { return nil }
 func (o *recordingOpener) RevealInFileManager(string) error { return nil }
 
+// An unknown agent is a 404 everywhere; the macOS-only limit applies only to
+// a folder that exists. The golden route table records this, so the answer
+// must not depend on the platform the tests run on.
+func TestShowInFinderAnswersTheSameForAnUnknownAgentOnEveryPlatform(t *testing.T) {
+	opener := &recordingOpener{}
+	h := New(compositeForRoot(t, t.TempDir()))
+	h.SetDesktopOpener(opener)
+	rr := httptest.NewRecorder()
+	h.HandleReveal(rr, httptest.NewRequest(http.MethodPost, "/api/agents/Nobody/reveal", nil))
+	if rr.Code != http.StatusNotFound || len(opener.opened) != 0 {
+		t.Fatalf("reveal an unknown agent = %d (opened %v), want 404 and nothing opened", rr.Code, opener.opened)
+	}
+}
+
 func TestShowInFinderOpensTheAgentsFolderInTheRoot(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("Show in Finder is macOS only")

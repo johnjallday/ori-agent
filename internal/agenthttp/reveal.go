@@ -37,10 +37,6 @@ func (h *Handler) HandleReveal(w http.ResponseWriter, r *http.Request) {
 		orihttp.MethodNotAllowed(w)
 		return
 	}
-	if runtime.GOOS != "darwin" {
-		orihttp.NotImplemented(w, "Show in Finder is available on macOS only.")
-		return
-	}
 	raw := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/agents/"), "/reveal")
 	name, err := url.PathUnescape(raw)
 	if err != nil || strings.TrimSpace(name) == "" || strings.Contains(name, "/") {
@@ -55,6 +51,12 @@ func (h *Handler) HandleReveal(w http.ResponseWriter, r *http.Request) {
 	folder, ok := locator.RootAgentFolder(name)
 	if !ok {
 		orihttp.NotFound(w, "This agent has no folder in your Workspace Directory.")
+		return
+	}
+	// Checked after the lookup, so an unknown agent is a 404 on every
+	// platform and only a real folder meets the platform limit.
+	if runtime.GOOS != "darwin" {
+		orihttp.NotImplemented(w, "Show in Finder is available on macOS only.")
 		return
 	}
 	opener := h.desktopOpener
