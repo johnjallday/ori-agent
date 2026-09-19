@@ -76,9 +76,125 @@ for (const theme of ['light', 'dark']) {
     });
     await expect(openProject).toBeVisible();
     await expect(openProject).toHaveAttribute('aria-busy', 'false');
-    await page.getByRole('button', { name: 'Map' }).click();
+    await page.getByRole('button', { name: 'Map', exact: true }).click();
     await expect(openProject).toBeVisible();
-    await page.getByRole('button', { name: 'Details' }).click();
+
+    const operationsMap = page.getByRole('region', { name: 'Workspace operations map' });
+    const html = page.locator('html');
+    const toggleTheme = async expectedTheme => {
+      await page.locator('#darkModeToggle').click();
+      await expect(html).toHaveAttribute('data-bs-theme', expectedTheme);
+    };
+    const expectMapTheme = async expectedTheme => {
+      const expectedNameColor =
+        expectedTheme === 'light' ? 'rgb(10, 10, 10)' : 'rgb(238, 240, 243)';
+      const expectedQuestColor =
+        expectedTheme === 'light' ? 'rgb(255, 255, 255)' : 'rgb(214, 217, 222)';
+      await expect(operationsMap.locator('.ws-cmd-map-agent-copy strong').first()).toHaveCSS(
+        'color',
+        expectedNameColor
+      );
+      await expect(page.locator('.ws-cmd-map-quest-fab')).toHaveCSS('color', expectedQuestColor);
+      const style = await operationsMap.evaluate(element => {
+        const read = selector => getComputedStyle(element.parentElement.querySelector(selector));
+        const computed = getComputedStyle(element);
+        const agent = read('.ws-cmd-map-agent');
+        const agentName = read('.ws-cmd-map-agent-copy strong');
+        const agentStatus = read('.ws-cmd-map-agent-status');
+        const belt = read('.ws-cmd-map-belt');
+        const beltButton = read('.ws-cmd-map-belt-btn');
+        const questButton = read('.ws-cmd-map-quest-fab');
+        const viewSwitch = getComputedStyle(document.querySelector('.ws-cmd-view-switch'));
+        const inactiveView = getComputedStyle(
+          document.querySelector('[data-cmd-view-mode="details"]')
+        );
+        return {
+          backgroundImage: computed.backgroundImage,
+          backgroundSize: computed.backgroundSize,
+          agentBackgroundImage: agent.backgroundImage,
+          agentNameColor: agentName.color,
+          agentStatusBackground: agentStatus.backgroundColor,
+          beltBackgroundImage: belt.backgroundImage,
+          beltButtonColor: beltButton.color,
+          questButtonColor: questButton.color,
+          viewSwitchBackground: viewSwitch.backgroundColor,
+          inactiveViewColor: inactiveView.color
+        };
+      });
+      const endpoint = expectedTheme === 'light' ? 'rgb(223, 228, 232) 78%' : 'rgb(12, 13, 17) 78%';
+
+      expect(style.backgroundImage).toContain(endpoint);
+      expect(style.backgroundImage.match(/(?:radial|linear)-gradient\(/g)).toHaveLength(5);
+      expect(style.backgroundSize).toBe('auto, auto, 42px 42px, 42px 42px, auto');
+      if (expectedTheme === 'light') {
+        expect(style.backgroundImage).toContain('rgb(251, 252, 253)');
+        expect(style.backgroundImage).not.toContain('rgb(12, 13, 17) 78%');
+        expect(style.agentBackgroundImage).toContain('rgba(255, 255, 255, 0.98)');
+        expect(style.agentBackgroundImage).not.toContain('rgba(0, 0, 0, 0.16)');
+        expect(style.agentNameColor).toBe(expectedNameColor);
+        expect(style.agentStatusBackground).toBe('rgba(255, 255, 255, 0.88)');
+        expect(style.beltBackgroundImage).toContain('rgba(255, 255, 255, 0.97)');
+        expect(style.beltButtonColor).toBe('rgb(92, 92, 94)');
+        expect(style.questButtonColor).toBe(expectedQuestColor);
+        expect(style.viewSwitchBackground).toBe('rgba(255, 255, 255, 0.92)');
+        expect(style.inactiveViewColor).toBe('rgb(31, 33, 40)');
+      } else {
+        expect(style.agentBackgroundImage).toContain('rgba(0, 0, 0, 0.16)');
+        expect(style.agentNameColor).toBe(expectedNameColor);
+        expect(style.agentStatusBackground).toBe('rgba(0, 0, 0, 0.24)');
+        expect(style.beltBackgroundImage).toContain('rgba(17, 22, 29, 0.9)');
+        expect(style.beltButtonColor).toBe('rgb(139, 144, 154)');
+        expect(style.questButtonColor).toBe(expectedQuestColor);
+        expect(style.viewSwitchBackground).toBe('rgba(0, 0, 0, 0.2)');
+        expect(style.inactiveViewColor).toBe('rgb(125, 131, 142)');
+      }
+      return style;
+    };
+
+    await expect(operationsMap).toBeVisible();
+    const mapGeometry = await operationsMap.evaluate(element => {
+      const rects = selector =>
+        [...element.querySelectorAll(selector)].map(node => {
+          const rect = node.getBoundingClientRect();
+          return {
+            label: node.getAttribute('aria-label') || node.textContent.trim(),
+            left: rect.left,
+            right: rect.right,
+            top: rect.top,
+            bottom: rect.bottom
+          };
+        });
+      return {
+        agents: rects('.ws-cmd-map-agent'),
+        stations: rects('.ws-cmd-map-hq-station')
+      };
+    });
+    for (const agent of mapGeometry.agents) {
+      for (const station of mapGeometry.stations) {
+        const overlaps =
+          agent.left < station.right &&
+          agent.right > station.left &&
+          agent.top < station.bottom &&
+          agent.bottom > station.top;
+        expect(overlaps, `${agent.label} overlaps ${station.label}`).toBeFalsy();
+      }
+    }
+    await expect(html).toHaveAttribute('data-bs-theme', theme);
+    const startingStyle = await expectMapTheme(theme);
+
+    // Exercise the application's real switch path. The dark-starting case first
+    // moves to light, then both cases cover the light -> dark -> light round trip.
+    if (theme === 'dark') await toggleTheme('light');
+    const lightBefore = await expectMapTheme('light');
+    await toggleTheme('dark');
+    await expectMapTheme('dark');
+    await toggleTheme('light');
+    expect(await expectMapTheme('light')).toEqual(lightBefore);
+
+    // Leave the existing Details-mode accessibility assertions in their original theme.
+    if (theme === 'dark') await toggleTheme('dark');
+    expect(await expectMapTheme(theme)).toEqual(startingStyle);
+    await page.getByRole('button', { name: 'Details', exact: true }).click();
     await expect(openProject).toBeVisible();
     await page.locator('#workspaceCommandView').evaluate(async root => {
       const finiteAnimations = root

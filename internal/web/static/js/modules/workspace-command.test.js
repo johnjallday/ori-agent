@@ -2325,6 +2325,107 @@ test('command view mode preference defaults to details and persists map globally
   }
 });
 
+test('Operations Map keeps its dark base and uses crisp light surfaces', () => {
+  const css = readFileSync(new URL('../../css/workspace-command.css', import.meta.url), 'utf8');
+  const baseRule = css.match(/(?:^|\n)\.ws-cmd-opmap\s*\{([\s\S]*?)\n\}/);
+  const lightRule = css.match(/\[data-bs-theme="light"\] \.ws-cmd-opmap\s*\{([\s\S]*?)\n\}/);
+  const lightAgentRule = css.match(
+    /\[data-bs-theme="light"\] \.ws-cmd-opmap \.ws-cmd-map-agent\s*\{([\s\S]*?)\n\}/
+  );
+  const lightHQRule = css.match(
+    /\[data-bs-theme="light"\] \.ws-cmd-opmap \.ws-cmd-map-hq-station\s*\{([\s\S]*?)\n\}/
+  );
+  const lightBeltRule = css.match(/\[data-bs-theme="light"\] \.ws-cmd-map-belt\s*\{([\s\S]*?)\n\}/);
+  const agentFieldRule = css.match(/(?:^|\n)\.ws-cmd-map-agent-field\s*\{([\s\S]*?)\n\}/);
+  const lightViewSwitchRule = css.match(
+    /\[data-bs-theme="light"\] \.ws-cmd-view-switch\s*\{([\s\S]*?)\n\}/
+  );
+
+  assert.ok(baseRule, 'the base Operations Map rule must remain present');
+  assert.ok(lightRule, 'light mode must override the Operations Map directly');
+  assert.ok(lightAgentRule, 'light mode must give agent cards a dedicated surface');
+  assert.ok(lightHQRule, 'light mode must give HQ stations a dedicated surface');
+  assert.ok(lightBeltRule, 'light mode must give the tool belt a dedicated surface');
+  assert.ok(agentFieldRule, 'the Operations Map must define its specialist field');
+  assert.ok(
+    lightViewSwitchRule,
+    'light mode must give the workspace destinations a dedicated surface'
+  );
+  assert.match(
+    baseRule[1],
+    /linear-gradient\(180deg, var\(--ws-panel\), #0c0d11 78%\)/,
+    'dark mode keeps its original near-black endpoint'
+  );
+  assert.match(
+    baseRule[1],
+    /background-size:\s*auto,\s*auto,\s*42px 42px,\s*42px 42px,\s*auto;/s,
+    'the five background layers keep their sizing contract'
+  );
+  assert.match(lightRule[1], /background-image:/);
+  assert.equal(
+    (lightRule[1].match(/(?:radial|linear)-gradient\(/g) || []).length,
+    5,
+    'light mode keeps all five background layers'
+  );
+  assert.match(
+    lightRule[1],
+    /linear-gradient\(180deg, var\(--ws-panel-2\), var\(--ws-panel-deep\) 78%\)/,
+    'light mode runs from the raised panel to the existing deep-panel token'
+  );
+  assert.doesNotMatch(
+    lightRule[1],
+    /(^|\n)\s*background:/,
+    'background-image must not reset the inherited background sizes'
+  );
+  assert.doesNotMatch(lightAgentRule[1], /rgba\(0, 0, 0/, 'agent cards avoid dark scrims');
+  assert.doesNotMatch(lightHQRule[1], /rgba\(0, 0, 0/, 'HQ stations avoid dark scrims');
+  assert.match(
+    agentFieldRule[1],
+    /grid-template-columns: repeat\(auto-fit, minmax\(142px, 176px\)\);/,
+    'specialist cards stay bounded and clear of the default HQ station lane'
+  );
+  assert.match(
+    css,
+    /@media \(max-width: 767px\)[\s\S]*?\.ws-cmd-map-agent-field\s*\{[\s\S]*?grid-template-columns: repeat\(auto-fit, minmax\(132px, 176px\)\);/,
+    'specialist cards remain bounded at the narrow breakpoint'
+  );
+  assert.match(
+    lightViewSwitchRule[1],
+    /background: rgba\(255, 255, 255, 0\.92\);/,
+    'the light workspace destinations use a clean raised surface'
+  );
+  assert.match(
+    css,
+    /\[data-bs-theme="light"\] \.ws-cmd-view-btn\s*\{\s*color: var\(--ws-ink\);/,
+    'inactive light workspace destinations use dark ink'
+  );
+  assert.match(
+    css,
+    /\[data-bs-theme="light"\] \.ws-cmd-opmap \.ws-cmd-map-agent-copy strong\s*\{\s*color: var\(--ws-ink-heading\);/,
+    'agent names use dark heading ink on the light cards'
+  );
+  assert.match(
+    css,
+    /\[data-bs-theme="light"\] \.ws-cmd-map-quest-composer\s*\{[\s\S]*?--ws-ink-dim: #c5cbd2;/,
+    'the dark quest composer restores readable local ink in light mode'
+  );
+  assert.match(
+    lightBeltRule[1],
+    /linear-gradient\(180deg, rgba\(255, 255, 255, 0\.97\), rgba\(236, 239, 242, 0\.97\)\)/,
+    'the light tool belt uses a neutral raised surface'
+  );
+  assert.match(
+    css,
+    /\[data-bs-theme="light"\] \.ws-cmd-map-belt-btn::after\s*\{[\s\S]*?color: #f3f5f7;/,
+    'the dark tooltips keep readable local ink'
+  );
+  assert.match(
+    css,
+    /\[data-bs-theme="light"\] \.ws-cmd-map-quest-fab\s*\{[\s\S]*?color: var\(--ws-on-accent\);/,
+    'the primary map action uses on-accent text'
+  );
+});
+
 test('Operations Map agent status prioritizes attention states before working', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   const agent = {
