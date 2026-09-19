@@ -641,10 +641,16 @@ func validateContribution(entry reviewedintegration.Entry, version string, contr
 		if blueprint.ID != entry.ExpectedBlueprintID {
 			continue
 		}
+		programID, programSchema := "", 0
+		if blueprint.Template.AssistantProgram != nil {
+			programID = blueprint.Template.AssistantProgram.ID
+			programSchema = blueprint.Template.AssistantProgram.SchemaVersion
+		} else if blueprint.Template.AssistantProject != nil {
+			programID = blueprint.Template.AssistantProject.Home.ProgramID
+			programSchema = blueprint.Template.AssistantProject.Home.HomeSchemaVersion
+		}
 		if blueprintFound || blueprint.Version < entry.MinimumBlueprintVersion ||
-			blueprint.Template.AssistantProgram == nil ||
-			blueprint.Template.AssistantProgram.ID != entry.ExpectedProgramID ||
-			blueprint.Template.AssistantProgram.SchemaVersion != entry.ExpectedProgramSchema {
+			programID != entry.ExpectedProgramID || programSchema != entry.ExpectedProgramSchema {
 			return ReasonIntegrationUnsupported
 		}
 		blueprintFound = true

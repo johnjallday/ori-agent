@@ -181,6 +181,16 @@ func (b *ServerBuilder) initializeSetupJourney() {
 			b.workspaceStore, b.st, serverStaffingToolGrants{builder: b},
 			b.systemModel, b.validateModel,
 		)
+		if b.pluginHandler != nil {
+			staffingAdapter.SetIndependentProviderAvailability(func(home *workspace.AssistantProgramHomeOwner, project *workspace.AssistantProjectProviderOwner) (bool, bool) {
+				installed, listErr := b.pluginHandler.Manager().List()
+				if listErr != nil {
+					return false, false
+				}
+				return plugin.IndependentHomeProviderEvidenceAvailable(installed, home),
+					plugin.IndependentProjectProviderEvidenceAvailable(installed, project)
+			})
+		}
 		readers[specialist.SetupStepAssistantProgramStaffing] = staffingAdapter
 		if b.sessionHandler != nil {
 			b.sessionHandler.SetAssistantReviewedStaffer(staffingAdapter.StaffFromReviewedWorkspaceSetup)
@@ -375,6 +385,14 @@ func (g serverStaffingToolGrants) Available(skillName string) bool {
 		return false
 	}
 	_, found, err := g.builder.skillsManager.ResolveSkillByName(strings.TrimSpace(skillName))
+	return err == nil && found
+}
+
+func (g serverStaffingToolGrants) AvailablePersonal(skillName string) bool {
+	if g.builder == nil || g.builder.skillsManager == nil {
+		return false
+	}
+	_, found, err := g.builder.skillsManager.ResolvePersonalSkillByName(strings.TrimSpace(skillName))
 	return err == nil && found
 }
 

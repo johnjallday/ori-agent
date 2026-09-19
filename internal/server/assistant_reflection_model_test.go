@@ -33,6 +33,23 @@ func (provider *constrainedChatProvider) Capabilities() llm.ProviderCapabilities
 func (provider *constrainedChatProvider) ValidateConfig(llm.ProviderConfig) error { return nil }
 func (provider *constrainedChatProvider) DefaultModels() []string                 { return []string{"local-model"} }
 
+func TestAssistantReflectionTriggerRejectsUnavailableHomeProviderBeforeRun(t *testing.T) {
+	checked := ""
+	trigger := assistantReflectionTrigger{
+		service: &workspace.AssistantReflectionService{},
+		available: func(stationID string) bool {
+			checked = stationID
+			return false
+		},
+	}
+	if err := trigger.TriggerAssistantReflection(context.Background(), "home-1"); !errors.Is(err, workspace.ErrAssistantReflectionUnavailable) {
+		t.Fatalf("unavailable scheduled reflection error = %v", err)
+	}
+	if checked != "home-1" {
+		t.Fatalf("availability checked %q", checked)
+	}
+}
+
 func TestAssistantReflectionModelUsesConstrainedChatForLocalProvider(t *testing.T) {
 	provider := &constrainedChatProvider{supports: true}
 	model := newLLMAssistantReflectionModel(func(context.Context) (llm.Provider, string, error) {

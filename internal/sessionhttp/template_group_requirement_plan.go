@@ -73,16 +73,17 @@ func templateGroupSourceRevision(template projecttemplates.Template) string {
 	}
 	definitionDigest := projecttemplates.TemplateDefinitionDigest(template, skeletonDigest)
 	digest, err := grouprequirements.DigestInput(struct {
-		TemplateID       string                            `json:"template_id"`
-		TemplateRevision string                            `json:"template_revision,omitempty"`
-		DefinitionDigest string                            `json:"definition_digest"`
-		PluginOwner      *workspace.PluginTemplateOwner    `json:"plugin_owner,omitempty"`
-		TemplateVariant  *projecttemplates.TemplateVariant `json:"template_variant,omitempty"`
-		VariantRevision  string                            `json:"variant_revision,omitempty"`
-		UserSetupQuest   *projecttemplates.UserSetupQuest  `json:"user_setup_quest,omitempty"`
+		TemplateID       string                               `json:"template_id"`
+		TemplateRevision string                               `json:"template_revision,omitempty"`
+		DefinitionDigest string                               `json:"definition_digest"`
+		PluginOwner      *workspace.PluginTemplateOwner       `json:"plugin_owner,omitempty"`
+		ProgramHomeOwner *workspace.AssistantProgramHomeOwner `json:"program_home_owner,omitempty"`
+		TemplateVariant  *projecttemplates.TemplateVariant    `json:"template_variant,omitempty"`
+		VariantRevision  string                               `json:"variant_revision,omitempty"`
+		UserSetupQuest   *projecttemplates.UserSetupQuest     `json:"user_setup_quest,omitempty"`
 	}{
 		TemplateID: template.ID, TemplateRevision: template.Revision, DefinitionDigest: definitionDigest,
-		PluginOwner: template.PluginOwner, TemplateVariant: template.TemplateVariant,
+		PluginOwner: template.PluginOwner, ProgramHomeOwner: template.ProgramHomeOwner, TemplateVariant: template.TemplateVariant,
 		VariantRevision: template.VariantRevision, UserSetupQuest: template.UserSetupQuest,
 	})
 	if err != nil {
@@ -92,13 +93,19 @@ func templateGroupSourceRevision(template projecttemplates.Template) string {
 }
 
 func templateAssistantProgramKey(ownerUserID string, template projecttemplates.Template) (workspace.AssistantProgramKey, bool) {
-	if template.AssistantProgram == nil || strings.TrimSpace(ownerUserID) == "" {
+	program := template.AssistantProgram
+	if program == nil {
+		program = template.ResolvedAssistantHome
+	}
+	if program == nil || strings.TrimSpace(ownerUserID) == "" {
 		return workspace.AssistantProgramKey{}, false
 	}
 	key := workspace.AssistantProgramKey{
-		OwnerUserID: strings.TrimSpace(ownerUserID), ProgramID: template.AssistantProgram.ID,
+		OwnerUserID: strings.TrimSpace(ownerUserID), ProgramID: program.ID,
 	}
 	switch {
+	case template.ProgramHomeOwner != nil:
+		key.PluginID = template.ProgramHomeOwner.PluginID
 	case template.PluginOwner != nil:
 		key.PluginID = template.PluginOwner.PluginID
 	case template.TemplateVariant != nil:
@@ -114,11 +121,15 @@ func templateAssistantProgramKey(ownerUserID string, template projecttemplates.T
 }
 
 func requiredHomeRoleSpecs(template projecttemplates.Template) []workspace.AssistantProgramRoleSpec {
-	if template.AssistantProgram == nil {
+	program := template.AssistantProgram
+	if program == nil {
+		program = template.ResolvedAssistantHome
+	}
+	if program == nil {
 		return nil
 	}
-	roles := make([]workspace.AssistantProgramRoleSpec, 0, len(template.AssistantProgram.Roles))
-	for _, role := range template.AssistantProgram.Roles {
+	roles := make([]workspace.AssistantProgramRoleSpec, 0, len(program.Roles))
+	for _, role := range program.Roles {
 		if role.Scope == workspace.AssistantRoleScopeHome && role.Required {
 			roles = append(roles, role)
 		}
@@ -188,6 +199,10 @@ func (h *Handler) buildTemplateGroupRequirementPlan(
 		OwnerUserID: strings.TrimSpace(ownerUserID), OperationKind: grouprequirements.OperationCreateWorkspace,
 		Template: template, Composition: strings.TrimSpace(composition),
 	})
+	effectiveTemplate := evaluation.EffectiveTemplate
+	if evaluation.ProgramKey != nil && template.GroupRequirement.Policy != projecttemplates.GroupPolicyNone {
+		plan.GroupTemplateID = projecttemplates.GroupTemplateIDForKey(evaluation.ProgramKey.Normalize())
+	}
 	plan.State = evaluation.State
 	plan.Policy = evaluation.Policy
 	plan.SelectedComposition = evaluation.SelectedComposition
@@ -202,11 +217,11 @@ func (h *Handler) buildTemplateGroupRequirementPlan(
 		return plan
 	case grouprequirements.StateHomeCreationReviewRequired:
 		plan.Home = &templateGroupRequirementHomePlan{Exists: false, ProposedName: evaluation.HomeName}
-		plan.RequiredHomeRoles = absentRequiredHomeRoles(template)
+		plan.RequiredHomeRoles = absentRequiredHomeRoles(effectiveTemplate)
 		return plan
 	case grouprequirements.StateHomeRequired:
 		plan.Home = &templateGroupRequirementHomePlan{Exists: false}
-		plan.RequiredHomeRoles = absentRequiredHomeRoles(template)
+		plan.RequiredHomeRoles = absentRequiredHomeRoles(effectiveTemplate)
 		return plan
 	case grouprequirements.StateReadyGrouped:
 		// Continue below only when Evaluate resolved one exact existing Home.
@@ -235,7 +250,7 @@ func (h *Handler) buildTemplateGroupRequirementPlan(
 	plan.Home = &templateGroupRequirementHomePlan{
 		Exists: true, WorkspaceID: home.ID, Name: home.Name, FolderSlug: home.FolderSlug,
 	}
-	plan.RequiredHomeRoles = h.verifiedRequiredHomeRoles(template, evaluation.ProgramKey, home)
+	plan.RequiredHomeRoles = h.verifiedRequiredHomeRoles(effectiveTemplate, evaluation.ProgramKey, home)
 	if plan.RequiredHomeRoles.Verification == templateGroupRoleVerificationVerified &&
 		plan.RequiredHomeRoles.Missing != nil && *plan.RequiredHomeRoles.Missing > 0 {
 		plan.Actions = append(plan.Actions, grouprequirements.ActionOpenGroupRoles)

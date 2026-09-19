@@ -450,6 +450,33 @@ which repeats the canonical folder-backed runtime grant check before each
 operation and does not expose arbitrary localhost shell access or the private
 plugin service wholesale.
 
+## Independent Assistant Program Homes
+
+A contribution that requires `independent_program_homes_v1` may declare a
+plugin-level, Home-only Assistant Program. A separate plugin blueprint may declare
+its project-only team and an exact Home provider/program/version range. Grouped
+creation is allowed only when the Home declaration reciprocally authorizes that
+exact project provider, blueprint and project-team version. Ori binds review and
+creation provenance to both installed generations, component fingerprints and
+declaration digests. Matching display names never establish ownership or membership.
+
+Home creation, role staffing, project creation, connection and grants remain
+separate reviewed consequences. Catalog and availability reads do not install a
+companion, create or adopt a Home, staff an agent, revive a grant, or rewrite
+persisted availability state. A declared
+schema-2 standalone composition remains Home-free and uses only the project-owned
+roles; a missing Home provider may block grouped creation without blocking that
+explicit standalone path.
+
+Provider availability is scoped. Disabling the project provider does not disable
+independent Home management, and disabling the Home provider does not erase
+project-local data or file-only behavior. Existing combined Assistant Program
+schema-1/2 records keep their original provider identity. Ori does not transfer or
+migrate them into an independent same-named Home.
+
+See [Independent Assistant Program Homes](architecture/independent-program-homes.md)
+for the full schema, lifecycle and release-order contract.
+
 ## Binary delivery
 
 Ori runs whatever command a plugin's `.mcp.json` specifies; it does **not** build the
@@ -460,5 +487,30 @@ the server is marked **"unavailable — binary missing"** until you provide the 
 ## Component ownership & uninstall
 
 Plugin-registered MCP servers and skills are **owned by the plugin** (managed via
-install/uninstall, not edited directly). Uninstall removes every component the plugin
-registered, recorded at install time, leaving no orphans.
+install/update/uninstall, not edited directly). A managed personal-skill copy carries
+an ownership receipt and tree digest. Install refuses an independent, foreign or
+same-name destination; update, replacement and uninstall refuse a copy that was
+edited after installation. They never overwrite or delete that content. Repository
+or `.agents` precedence that would shadow a packaged role skill is reported as a
+source conflict instead of silently running the other copy.
+
+Installing a skill does not enable it for an agent. Role staffing is a separate
+reviewed action, and split plugin-owned roles require the unshadowed managed personal
+copy. Disabling the owning plugin hides that managed source from runtime resolution
+without deleting its files or changing the agent's recorded preference. Uninstall
+removes only a still-matching receipt-owned copy and the components recorded at
+install time.
+
+Before install, update, or replacement, Ori fingerprints the reviewed skill
+source and verifies that fingerprint again after registration; a source that changes
+mid-copy is rolled back rather than recorded as different installed evidence. Before
+update or replacement, Ori also snapshots the exact verified installed skill bytes.
+A failed registration, partial component removal, surface replacement, or registry
+write restores only components actually removed and uses that immutable snapshot
+rather than a mutable source checkout. Removal atomically quarantines a
+copy and verifies it again before deletion, so a path swap cannot turn a verified
+plugin directory into deletion of an independent one. If safe restoration cannot
+complete, Ori fails closed and retains the rollback copy identified by the error.
+Pre-receipt installed records are not silently adopted: normal update/uninstall
+refuses an unreceipted destination, while Start Fresh retains its older conservative
+registry-based handling for schema-zero records.

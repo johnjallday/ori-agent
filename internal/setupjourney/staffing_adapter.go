@@ -67,20 +67,36 @@ type StaffingToolGrants interface {
 	Revoke(agentName, skillName string) error
 }
 
+// PersonalStaffingToolGrants is the stricter source check used only by split
+// plugin-owned roles. Ordinary and user-template programs retain the existing
+// workspace/repository/personal resolution behavior.
+type PersonalStaffingToolGrants interface {
+	AvailablePersonal(skillName string) bool
+}
+
 type StaffingModelDefaults func() (provider, model string)
 type StaffingModelValidator func(provider, model string) error
 
 type AssistantStaffingAdapter struct {
-	workspaces workspace.Store
-	profiles   store.Store
-	grants     StaffingToolGrants
-	defaults   StaffingModelDefaults
-	validate   StaffingModelValidator
-	mu         sync.Mutex
+	workspaces        workspace.Store
+	profiles          store.Store
+	grants            StaffingToolGrants
+	defaults          StaffingModelDefaults
+	validate          StaffingModelValidator
+	providerAvailable func(*workspace.AssistantProgramHomeOwner, *workspace.AssistantProjectProviderOwner) (bool, bool)
+	mu                sync.Mutex
 }
 
 func NewAssistantStaffingAdapter(workspaces workspace.Store, profiles store.Store, grants StaffingToolGrants, defaults StaffingModelDefaults, validate StaffingModelValidator) *AssistantStaffingAdapter {
 	return &AssistantStaffingAdapter{workspaces: workspaces, profiles: profiles, grants: grants, defaults: defaults, validate: validate}
+}
+
+// SetIndependentProviderAvailability injects a read-only installed-provider
+// freshness check. A nil callback preserves combined and user-template behavior.
+func (a *AssistantStaffingAdapter) SetIndependentProviderAvailability(check func(*workspace.AssistantProgramHomeOwner, *workspace.AssistantProjectProviderOwner) (bool, bool)) {
+	if a != nil {
+		a.providerAvailable = check
+	}
 }
 
 // Staffing modes. A role is a slot; these are the two ways to fill one
@@ -122,9 +138,11 @@ type staffingInput struct {
 }
 
 type staffingOwner struct {
-	station     *workspace.Workspace
-	project     *workspace.Workspace
-	declaration *workspace.AssistantProgramDeclaration
+	station                  *workspace.Workspace
+	project                  *workspace.Workspace
+	declaration              *workspace.AssistantProgramDeclaration
+	homeProviderAvailable    bool
+	projectProviderAvailable bool
 }
 
 func (a *AssistantStaffingAdapter) Read(_ context.Context, scope ReadScope) (CanonicalStepRead, error) {
@@ -133,7 +151,7 @@ func (a *AssistantStaffingAdapter) Read(_ context.Context, scope ReadScope) (Can
 		return CanonicalStepRead{BlockedReason: staffingReason(err)}, nil
 	}
 	state := owner.station.GetAssistantProgramState()
-	if !state.PluginAvailable {
+	if !state.PluginAvailable && state.HomeProvider == nil {
 		return CanonicalStepRead{BlockedReason: ReasonIntegrationDisabled}, nil
 	}
 	projection, malformed := a.currentProjection(scope, owner)
@@ -447,7 +465,7 @@ func (a *AssistantStaffingAdapter) StaffFromReviewedWorkspaceSetup(ctx context.C
 			continue
 		}
 		input := staffingInput{}
-		for _, role := range state.Declaration.Roles {
+		for _, role := range owner.declaration.Roles {
 			if role.Scope != target || !role.Required {
 				continue
 			}
@@ -574,7 +592,14 @@ func (a *AssistantStaffingAdapter) workspaceRoleOwner(targetID string) (*staffin
 		if state.SchemaVersion < workspace.AssistantProgramStateSchemaVersion || state.Declaration == nil {
 			return nil, "", ErrConflict
 		}
-		return &staffingOwner{station: target, declaration: state.Declaration}, workspace.AssistantRoleScopeHome, nil
+		homeAvailable := true
+		if a.providerAvailable != nil && state.HomeProvider != nil {
+			homeAvailable, _ = a.providerAvailable(state.HomeProvider, nil)
+		}
+		return &staffingOwner{
+			station: target, declaration: workspace.CloneAssistantProgramDeclaration(state.Declaration),
+			homeProviderAvailable: homeAvailable, projectProviderAvailable: true,
+		}, workspace.AssistantRoleScopeHome, nil
 	}
 	link := target.GetAssistantProjectLink()
 	if link == nil || link.SchemaVersion < workspace.AssistantProjectLinkSchemaVersion {
@@ -588,7 +613,14 @@ func (a *AssistantStaffingAdapter) workspaceRoleOwner(targetID string) (*staffin
 	if state == nil || state.SchemaVersion < workspace.AssistantProgramStateSchemaVersion || state.Declaration == nil || link.Key.Normalize() != state.Key.Normalize() {
 		return nil, "", ErrConflict
 	}
-	return &staffingOwner{station: station, project: target, declaration: state.Declaration}, workspace.AssistantRoleScopeProject, nil
+	owner, err := a.owner(ReadScope{
+		OwnerUserID: state.Key.OwnerUserID, ExpectedAssistantProgramID: state.Key.ProgramID,
+		HomeWorkspaceID: station.ID, ProjectWorkspaceID: target.ID,
+	})
+	if err != nil {
+		return nil, "", ErrConflict
+	}
+	return owner, workspace.AssistantRoleScopeProject, nil
 }
 
 // StaffRolesFromReviewedWorkspaceSetup commits EXACTLY the roles the user
@@ -619,9 +651,13 @@ func (a *AssistantStaffingAdapter) StaffRolesFromReviewedWorkspaceSetup(ctx cont
 	if state == nil || state.Declaration == nil {
 		return ErrConflict
 	}
-	scopeByRole := make(map[string]workspace.AssistantRoleScope, len(state.Declaration.Roles))
-	optionalByRole := make(map[string]bool, len(state.Declaration.Roles))
-	for _, role := range state.Declaration.Roles {
+	roles := append([]workspace.AssistantProgramRoleSpec(nil), state.Declaration.Roles...)
+	if len(link.ProjectRoles) > 0 {
+		roles = append(roles, link.ProjectRoles...)
+	}
+	scopeByRole := make(map[string]workspace.AssistantRoleScope, len(roles))
+	optionalByRole := make(map[string]bool, len(roles))
+	for _, role := range roles {
 		scope := role.Scope
 		if scope == "" {
 			scope = workspace.AssistantRoleScopeProject
@@ -832,7 +868,64 @@ func (a *AssistantStaffingAdapter) owner(scope ReadScope) (*staffingOwner, error
 	if link == nil || link.SchemaVersion < workspace.AssistantProjectLinkSchemaVersion || link.StationWorkspaceID != station.ID || link.Key.Normalize() != state.Key.Normalize() {
 		return nil, workspace.ErrAssistantProgramVersionConflict
 	}
-	return &staffingOwner{station: station, project: project, declaration: state.Declaration}, nil
+	homeProviderAvailable, projectProviderAvailable := true, true
+	if a.providerAvailable != nil && (state.HomeProvider != nil || link.ProjectProvider != nil) {
+		homeProviderAvailable, projectProviderAvailable = a.providerAvailable(state.HomeProvider, link.ProjectProvider)
+	}
+	declaration := workspace.CloneAssistantProgramDeclaration(state.Declaration)
+	if len(link.ProjectRoles) > 0 {
+		seen := make(map[string]struct{}, len(declaration.Roles)+len(link.ProjectRoles))
+		for _, role := range declaration.Roles {
+			seen[role.ID] = struct{}{}
+		}
+		for _, role := range link.ProjectRoles {
+			if role.Scope != workspace.AssistantRoleScopeProject {
+				return nil, workspace.ErrAssistantProgramVersionConflict
+			}
+			if _, duplicate := seen[role.ID]; duplicate {
+				return nil, workspace.ErrAssistantProgramVersionConflict
+			}
+			seen[role.ID] = struct{}{}
+			declaration.Roles = append(declaration.Roles, role)
+		}
+	}
+	return &staffingOwner{
+		station: station, project: project, declaration: declaration,
+		homeProviderAvailable: homeProviderAvailable, projectProviderAvailable: projectProviderAvailable,
+	}, nil
+}
+
+func roleTarget(owner *staffingOwner, targetScope workspace.AssistantRoleScope) *workspace.Workspace {
+	if owner == nil {
+		return nil
+	}
+	if targetScope == workspace.AssistantRoleScopeHome {
+		return owner.station
+	}
+	return owner.project
+}
+
+func splitRoleRequiresPersonalSource(target *workspace.Workspace, targetScope workspace.AssistantRoleScope) bool {
+	if target == nil {
+		return false
+	}
+	if targetScope == workspace.AssistantRoleScopeHome {
+		state := target.GetAssistantProgramState()
+		return state != nil && state.HomeProvider != nil
+	}
+	link := target.GetAssistantProjectLink()
+	return link != nil && link.ProjectProvider != nil
+}
+
+func (a *AssistantStaffingAdapter) staffingSkillAvailable(skill string, requirePersonal bool) bool {
+	if a == nil || a.grants == nil {
+		return false
+	}
+	if !requirePersonal {
+		return a.grants.Available(skill)
+	}
+	personal, ok := a.grants.(PersonalStaffingToolGrants)
+	return ok && personal.AvailablePersonal(skill)
 }
 
 func (a *AssistantStaffingAdapter) currentProjection(scope ReadScope, owner *staffingOwner) (*StaffingProjection, bool) {
@@ -850,7 +943,7 @@ func (a *AssistantStaffingAdapter) currentScopeProjection(owner *staffingOwner, 
 		if state == nil {
 			return StaffingScopeProjection{}, true
 		}
-		return a.scopeProjection(owner.station, owner.declaration, targetScope, state.HomeBindings, "")
+		return a.scopeProjection(owner.station, owner.declaration, targetScope, state.HomeBindings, "", owner.homeProviderAvailable)
 	}
 	if targetScope != workspace.AssistantRoleScopeProject || owner.project == nil {
 		return StaffingScopeProjection{}, true
@@ -859,19 +952,19 @@ func (a *AssistantStaffingAdapter) currentScopeProjection(owner *staffingOwner, 
 	if link == nil {
 		return StaffingScopeProjection{}, true
 	}
-	return a.scopeProjection(owner.project, owner.declaration, targetScope, link.ProjectBindings, selectedModeID)
+	return a.scopeProjection(owner.project, owner.declaration, targetScope, link.ProjectBindings, selectedModeID, owner.projectProviderAvailable)
 }
 
-func (a *AssistantStaffingAdapter) scopeProjection(target *workspace.Workspace, declaration *workspace.AssistantProgramDeclaration, roleScope workspace.AssistantRoleScope, set workspace.AssistantRoleBindingSet, modeID string) (StaffingScopeProjection, bool) {
+func (a *AssistantStaffingAdapter) scopeProjection(target *workspace.Workspace, declaration *workspace.AssistantProgramDeclaration, roleScope workspace.AssistantRoleScope, set workspace.AssistantRoleBindingSet, modeID string, providerAvailable bool) (StaffingScopeProjection, bool) {
 	projection := StaffingScopeProjection{
 		Scope: roleScope, WorkspaceID: target.ID, WorkspaceLabel: target.Name,
-		BindingRevision: set.StateRevision, RuntimeReady: true, ModelsReady: true,
-		ToolGrantsReady: true, SelectedModeID: modeID,
+		BindingRevision: set.StateRevision, RuntimeReady: providerAvailable, ModelsReady: true,
+		ToolGrantsReady: providerAvailable, SelectedModeID: modeID,
 	}
 	if roleScope == workspace.AssistantRoleScopeHome {
 		projection.AuthorityBoundary = "Home roles receive no linked-child folders, MCP bindings, runtime grants, project entries, prompts, memories, task history, or live state."
 	} else {
-		projection.RuntimeReady = strings.TrimSpace(modeID) != ""
+		projection.RuntimeReady = providerAvailable && strings.TrimSpace(modeID) != ""
 		projection.AuthorityBoundary = "Project roles are bound only to this exact linked child and receive no Home or sibling state."
 	}
 	bindings := make(map[string]workspace.AssistantRoleBinding, len(set.Bindings))
@@ -892,6 +985,12 @@ func (a *AssistantStaffingAdapter) scopeProjection(target *workspace.Workspace, 
 			continue
 		}
 		item := StaffingRoleProjection{RoleID: role.ID, Label: role.Label, Responsibility: role.Description, Required: role.Required, Primary: role.Primary, ToolGrants: append([]string(nil), role.Skills...)}
+		requirePersonal := splitRoleRequiresPersonalSource(target, roleScope)
+		for _, skill := range role.Skills {
+			if !a.staffingSkillAvailable(skill, requirePersonal) {
+				projection.ToolGrantsReady = false
+			}
+		}
 		if binding, found := bindings[role.ID]; found {
 			instance, instanceFound := instances[binding.AgentInstanceID]
 			profile, snapshotFound, snapshotErr := a.workspaces.GetWorkspaceAgent(target.ID, binding.AgentName)
@@ -925,7 +1024,11 @@ func (a *AssistantStaffingAdapter) reviewProjection(scope ReadScope, owner *staf
 		return nil, ErrConflict
 	}
 	target.ModelsReady = true
-	target.ToolGrantsReady = true
+	if targetScope == workspace.AssistantRoleScopeHome {
+		target.ToolGrantsReady = owner.homeProviderAvailable
+	} else {
+		target.ToolGrantsReady = owner.projectProviderAvailable
+	}
 	missing := make(map[string]workspace.AssistantProgramRoleSpec)
 	for _, role := range owner.declaration.Roles {
 		if role.Scope != targetScope || (targetScope == workspace.AssistantRoleScopeHome && role.Required == optional) {
@@ -1023,8 +1126,9 @@ func (a *AssistantStaffingAdapter) reviewProjection(scope ReadScope, owner *staf
 		if !chatAvailable && role.Required {
 			target.ModelsReady = false
 		}
+		requirePersonal := splitRoleRequiresPersonalSource(roleTarget(owner, targetScope), targetScope)
 		for _, skill := range role.Skills {
-			if a.grants == nil || !a.grants.Available(skill) {
+			if !a.staffingSkillAvailable(skill, requirePersonal) {
 				target.ToolGrantsReady = false
 			}
 		}
@@ -1151,6 +1255,9 @@ func profileNameExists(profiles store.Store, name string) bool {
 }
 
 func workspaceNameExists(target *workspace.Workspace, name string) bool {
+	if target == nil {
+		return false
+	}
 	for _, existing := range target.GetAgentInstances() {
 		if strings.EqualFold(strings.TrimSpace(existing.Name), name) {
 			return true

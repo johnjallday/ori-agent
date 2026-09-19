@@ -170,8 +170,13 @@ func installedIntegrationQuests(entry reviewedintegration.Entry, installed []plu
 		seen[d.ID] = true
 		found := false
 		for _, b := range current.ResolvedBlueprints {
-			if b.ID == d.ExpectedBlueprintID && b.Template.SetupQuestID == d.ID &&
-				b.Template.AssistantProgram != nil && b.Template.AssistantProgram.ID == d.ExpectedAssistantProgramID {
+			programID := ""
+			if b.Template.AssistantProgram != nil {
+				programID = b.Template.AssistantProgram.ID
+			} else if b.Template.AssistantProject != nil {
+				programID = b.Template.AssistantProject.Home.ProgramID
+			}
+			if b.ID == d.ExpectedBlueprintID && b.Template.SetupQuestID == d.ID && programID == d.ExpectedAssistantProgramID {
 				found = true
 			}
 		}

@@ -136,6 +136,29 @@ function manager(api, mode = 'ordinary') {
   };
 }
 
+test('managed role summary discloses packaged skill source and separate enablement', () => {
+  const { api } = environment();
+  const entry = managed({
+    home_roles: [
+      {
+        role_id: 'coordinator',
+        label: 'Portfolio Coordinator',
+        required: true,
+        skills: ['music-project-management']
+      }
+    ]
+  });
+  const summary = asData(api.roleSummary(entry));
+  assert.ok(
+    summary.some(
+      line =>
+        line.includes('music-project-management') &&
+        line.includes('source Plugin: fixture 1.0.0') &&
+        line.includes('enabled on a new agent only')
+    )
+  );
+});
+
 test('review and commit requests carry only the server-accepted selection fields', () => {
   const { api } = environment();
   const entry = managed();

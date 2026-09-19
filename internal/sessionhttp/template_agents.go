@@ -523,8 +523,19 @@ func (h *Handler) buildTemplateAgentPlanForOwner(tpl projecttemplates.Template, 
 		plan.SystemModel = strings.TrimSpace(model)
 		plan.SystemModelConfigured = plan.SystemProvider != "" && plan.SystemModel != ""
 	}
-	if tpl.HasAssistantProgram() {
-		declaration := tpl.AssistantProgram
+	declaration := tpl.AssistantProgram
+	if tpl.AssistantProject != nil {
+		if tpl.ResolvedAssistantHome != nil {
+			declaration = workspace.CloneAssistantProgramDeclaration(tpl.ResolvedAssistantHome)
+		} else {
+			declaration = &workspace.AssistantProgramDeclaration{
+				SchemaVersion: tpl.AssistantProject.Home.HomeSchemaVersion,
+				ID:            tpl.AssistantProject.Home.ProgramID,
+			}
+		}
+		declaration.Roles = append(declaration.Roles, tpl.AssistantProject.ProgramRoles()...)
+	}
+	if declaration != nil {
 		assistantPlan := &templateAssistantProgramPlan{
 			ID:                 declaration.ID,
 			StationName:        declaration.StationName,

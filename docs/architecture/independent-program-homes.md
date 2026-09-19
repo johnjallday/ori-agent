@@ -91,8 +91,11 @@ A connected project retains two independent provenances:
   ID, and stable Assistant Project Link ID.
 
 A link is valid only while its persisted evidence remains internally consistent.
-Provider availability may later make actions unavailable, but it does not erase
-that evidence or stored user data.
+Here, installed generation means the content generation: it advances when the
+trusted component fingerprint changes, including a packaged skill tree digest,
+but remains stable across explicit disable/enable runtime epochs. Runtime epochs still invalidate live surface
+sessions independently. Provider availability may later make actions
+unavailable, but it does not erase that evidence or stored user data.
 
 ## 3. Contribution contract
 
@@ -427,11 +430,17 @@ personal directory. The safe bounded policy for this feature is:
    installed same-name skill, a directory owned by another plugin, a symlink, or
    an edited former plugin copy.
 2. A successful copy is published atomically with a receipt containing canonical
-   plugin/skill identities and a digest of the copied tree. The receipt is data,
-   not a precedence override.
+   plugin/skill identities and a digest of the copied tree. The reviewed source
+   fingerprint is checked again after registration; a concurrent source change
+   rolls the new components back instead of recording mismatched evidence. The
+   receipt is data, not a precedence override.
 3. Reinstall/update/removal first verifies the receipt and current tree digest.
    An edited copy is left in place and the operation refuses with recovery
-   guidance. Rollback removes only a just-published, still-matching owned copy.
+   guidance. Update snapshots the exact verified installed bytes before removal;
+   rollback restores only components actually removed and never re-reads mutable
+   source bytes as the old generation. Removal atomically quarantines and
+   re-verifies a destination before deletion. Rollback removes only a
+   just-published, still-matching owned copy.
 4. Removal deletes no per-agent skill state and never enables or disables a skill
    on an agent. Reinstall therefore cannot silently activate it.
 5. The runtime manager must resolve the packaged personal copy for a declared
@@ -440,9 +449,11 @@ personal directory. The safe bounded policy for this feature is:
    source. General skill resolution precedence remains backward compatible.
 6. The installed-plugin registry remains the restart inventory of claimed names;
    the destination receipt proves file ownership. Start Fresh may remove only a
-   receipt-verified plugin copy. Existing conservative reset refusal for duplicate
-   claims and unexpected destinations remains in force and is tightened, not
-   broadened, by receipts.
+   receipt-verified plugin copy for records written with the receipt schema.
+   Schema-zero records retain the older conservative reset path, but ordinary
+   update/uninstall never adopts an unreceipted destination. Existing reset
+   refusal for duplicate claims and unexpected destinations remains in force and
+   is tightened, not broadened, by receipts.
 
 This policy does not introduce a dependency resolver, mutate portable source,
 or co-own a directory. A user resolves a collision explicitly by renaming,

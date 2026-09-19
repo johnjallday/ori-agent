@@ -1,5 +1,18 @@
 import { workspaceRootURL } from './workspace-routes.js';
 
+export function assistantProviderUnavailableMessage(program = {}, declaration = {}) {
+  if (program.home_provider_available === false && program.project_provider_available !== false) {
+    return 'The Home provider is unavailable. Home coordination is read-only; project-local data and provider behavior remain separate.';
+  }
+  if (program.project_provider_available === false && program.home_provider_available !== false) {
+    return 'The project provider is unavailable. Project integration actions are paused; the independent Home remains available.';
+  }
+  return (
+    declaration.disabled_message ||
+    'The contribution is unavailable. Existing assistant data remains readable.'
+  );
+}
+
 function text(value) {
   return String(value == null ? '' : value);
 }
@@ -272,8 +285,7 @@ export class AssistantProgramPage {
     if (disabled) disabled.hidden = program.plugin_available !== false;
     setText(
       'assistantProgramDisabledText',
-      declaration.disabled_message ||
-        'The contribution is unavailable. Existing assistant data remains readable.'
+      assistantProviderUnavailableMessage(program, declaration)
     );
 
     const scopedProgram = Number(declaration.schema_version || 1) >= 2;

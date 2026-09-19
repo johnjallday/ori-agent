@@ -23,13 +23,33 @@ import (
 // Builder fields are read at apply time, so wiring order is moot.
 func makeAgentToolApplier(b *ServerBuilder) func(string, string, projecttemplates.ToolDefaults) ([]string, []string) {
 	return func(workspaceID, agentName string, tools projecttemplates.ToolDefaults) (applied, missing []string) {
+		requirePersonalSkillSource := false
+		if b.workspaceStore != nil {
+			if target, err := b.workspaceStore.Get(workspaceID); err == nil && target != nil {
+				state := target.GetAssistantProgramState()
+				requirePersonalSkillSource = state != nil && (state.HomeProvider != nil || state.GroupTemplate != nil && state.GroupTemplate.ProgramHomeOwner != nil)
+				if link := target.GetAssistantProjectLink(); link != nil && link.ProjectProvider != nil {
+					requirePersonalSkillSource = true
+				}
+				if provenance := target.GetTemplateProvenance(); provenance != nil && provenance.GroupRequirement != nil && provenance.GroupRequirement.ProjectProvider != nil {
+					requirePersonalSkillSource = true
+				}
+			}
+		}
 		if mgr := b.skillsManager; mgr != nil {
 			for _, s := range tools.Skills {
 				name := strings.TrimSpace(s)
 				if name == "" {
 					continue
 				}
-				if _, ok, err := mgr.ResolveSkillByName(name); err != nil || !ok {
+				var ok bool
+				var err error
+				if requirePersonalSkillSource {
+					_, ok, err = mgr.ResolvePersonalSkillByName(name)
+				} else {
+					_, ok, err = mgr.ResolveSkillByName(name)
+				}
+				if err != nil || !ok {
 					missing = append(missing, "skill:"+name)
 					continue
 				}

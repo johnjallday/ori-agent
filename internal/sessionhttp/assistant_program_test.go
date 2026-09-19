@@ -2,6 +2,7 @@ package sessionhttp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -69,6 +70,91 @@ func decodeAssistantSummary(t *testing.T, recorder *httptest.ResponseRecorder) a
 		t.Fatalf("decode summary: %v; body=%s", err, recorder.Body.String())
 	}
 	return summary
+}
+
+func TestAssistantProgramSummaryIncludesSplitProjectOwnedRoles(t *testing.T) {
+	handler, store, project, station := assistantProgramHandlerFixture(t)
+	if err := store.Update(station.ID, func(home *workspace.Workspace) error {
+		state := home.GetAssistantProgramState()
+		state.SchemaVersion = workspace.AssistantProgramStateSchemaVersion
+		state.Declaration.SchemaVersion = workspace.AssistantProgramSchemaVersion
+		state.Declaration.Roles = []workspace.AssistantProgramRoleSpec{{ID: "producer", Label: "Producer", Scope: workspace.AssistantRoleScopeHome, Required: true, Primary: true}}
+		home.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(project.ID, func(current *workspace.Workspace) error {
+		link := current.GetAssistantProjectLink()
+		link.ProjectRoles = []workspace.AssistantProgramRoleSpec{{ID: "engineer", Label: "Engineer", Scope: workspace.AssistantRoleScopeProject, Required: true, Primary: true}}
+		current.SetAssistantProjectLink(link)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	station, _ = store.Get(station.ID)
+	project, _ = store.Get(project.ID)
+	summary, err := handler.buildAssistantProgramSummary(station, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summary.Declaration.Roles) != 2 || summary.Declaration.Roles[0].ID != "producer" || summary.Declaration.Roles[1].ID != "engineer" ||
+		len(summary.RoleProfiles) != 1 || summary.RoleProfiles[0].RoleID != "engineer" {
+		t.Fatalf("split assistant summary = %#v", summary)
+	}
+}
+
+func TestAssistantProgramIndependentAvailabilityReadDoesNotMutateHome(t *testing.T) {
+	handler, store, project, station := assistantProgramHandlerFixture(t)
+	var revision int64
+	if err := store.Update(station.ID, func(home *workspace.Workspace) error {
+		state := home.GetAssistantProgramState()
+		state.HomeProvider = &workspace.AssistantProgramHomeOwner{PluginID: "music", PluginGeneration: 7}
+		state.PluginAvailable = true
+		revision = state.StateRevision
+		home.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	handler.SetInstalledPluginLister(assistantInstalledPluginLister{})
+	station, _ = store.Get(station.ID)
+	summary, err := handler.buildAssistantProgramSummary(station, project)
+	if err != nil || summary.HomeProviderAvailable || summary.PluginAvailable {
+		t.Fatalf("independent availability summary = %#v err %v", summary, err)
+	}
+	stored, _ := store.Get(station.ID)
+	state := stored.GetAssistantProgramState()
+	if !state.PluginAvailable || state.StateRevision != revision {
+		t.Fatalf("availability read mutated Home state = %#v", state)
+	}
+}
+
+func TestAssistantProgramSplitProjectStaffingIsNotGloballyBlockedByHomeProvider(t *testing.T) {
+	handler, store, project, station := assistantProgramHandlerFixture(t)
+	if err := store.Update(station.ID, func(home *workspace.Workspace) error {
+		state := home.GetAssistantProgramState()
+		state.SchemaVersion = workspace.AssistantProgramStateSchemaVersion
+		state.HomeProvider = &workspace.AssistantProgramHomeOwner{PluginID: "music", PluginGeneration: 7}
+		state.PluginAvailable = false
+		home.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	handler.SetInstalledPluginLister(assistantInstalledPluginLister{})
+	called := false
+	handler.SetAssistantReviewedStaffer(func(_ context.Context, projectID, name, _, _ string) error {
+		called = projectID == project.ID && name == "Engineer"
+		return nil
+	})
+	station, _ = store.Get(station.ID)
+	body := `{"name":"Engineer","version":` + strconv.FormatInt(station.GetAssistantProgramState().StateRevision, 10) + `}`
+	recorder := httptest.NewRecorder()
+	handler.HireAssistantProgram(recorder, assistantProgramRequest(http.MethodPost, "/hire", project.ID, body))
+	if recorder.Code != http.StatusOK || !called {
+		t.Fatalf("split project staffing status=%d called=%t body=%s", recorder.Code, called, recorder.Body.String())
+	}
 }
 
 func TestAssistantProgramGetAndHireMaterializeStableSharedRoster(t *testing.T) {
@@ -262,8 +348,8 @@ func TestAssistantProgramDisabledContributionIsReadableButReadOnly(t *testing.T)
 		t.Fatalf("mutation status=%d body=%s", mutation.Code, mutation.Body.String())
 	}
 	stored, _ := store.Get(station.ID)
-	if stored.GetAssistantProgramState().PluginAvailable {
-		t.Fatal("plugin availability did not fail closed")
+	if !stored.GetAssistantProgramState().PluginAvailable {
+		t.Fatal("availability reads or a refused mutation rewrote stored program state")
 	}
 }
 

@@ -19,11 +19,12 @@ type llmAssistantReflectionModel struct {
 }
 
 type assistantReflectionTrigger struct {
-	service *workspace.AssistantReflectionService
+	service   *workspace.AssistantReflectionService
+	available func(string) bool
 }
 
 func (trigger assistantReflectionTrigger) TriggerAssistantReflection(ctx context.Context, stationID string) error {
-	if trigger.service == nil {
+	if trigger.service == nil || trigger.available != nil && !trigger.available(stationID) {
 		return workspace.ErrAssistantReflectionUnavailable
 	}
 	_, err := trigger.service.Run(ctx, stationID)

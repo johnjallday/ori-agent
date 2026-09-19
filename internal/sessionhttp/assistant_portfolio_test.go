@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/plugin"
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -90,6 +92,96 @@ func TestAssistantPortfolioHTTPReviewCommitAndHandoff(t *testing.T) {
 	handler.GetAssistantPortfolio(listRecorder, assistantProgramRequest(http.MethodGet, "/portfolio", project.ID, ""))
 	if listRecorder.Code != http.StatusOK || !strings.Contains(listRecorder.Body.String(), `"project_workspace_id":"`+project.ID+`"`) || !strings.Contains(listRecorder.Body.String(), `"status":"active"`) {
 		t.Fatalf("portfolio list = %d: %s", listRecorder.Code, listRecorder.Body.String())
+	}
+}
+
+func TestAssistantPortfolioKeepsHomeEditsAvailableButBlocksHandoffWithoutProjectProvider(t *testing.T) {
+	handler, store, station, project := assistantPortfolioHTTPFixture(t)
+	home := projecttemplates.AssistantProgramHome{
+		SchemaVersion: 1, Version: 2, ID: "music_home", StationName: "Music Home", DefaultPrimaryName: "Producer", HireTitle: "Staff producer",
+		Roles:      []projecttemplates.AssistantProgramHomeRole{{ID: "producer", Label: "Producer", Required: true, Primary: true, SystemPrompt: "Coordinate."}},
+		Stages:     []workspace.AssistantProgramStageSpec{{ID: "foundation", Label: "Foundation"}},
+		Reflection: workspace.AssistantReflectionConfig{MinimumProjects: 3, CadenceHours: 24, MaxProjects: 3, MaxEventsPerProject: 1, MaxCandidates: 1, MaxEvidence: 3, Rubric: "Review."},
+		AllowedProjectAttachments: []projecttemplates.AssistantProgramAllowedProjectAttachment{{
+			ProviderPluginID: "reaper", BlueprintID: "song", ProjectTeamID: "reaper_team", ProjectTeamSchemaVersion: 1, MinProjectTeamVersion: 3, MaxProjectTeamVersion: 3,
+		}},
+	}
+	projectTeam := &projecttemplates.AssistantProjectDeclaration{
+		SchemaVersion: 1, Version: 3, ID: "reaper_team",
+		Home:  projecttemplates.AssistantProjectHomeReference{ProviderPluginID: "music", ProgramID: "music_home", HomeSchemaVersion: 1, MinHomeVersion: 2, MaxHomeVersion: 2},
+		Roles: []projecttemplates.AssistantProjectRole{{ID: "engineer", Label: "Engineer", Required: true, Primary: true, SystemPrompt: "Work in the project."}},
+	}
+	homeOwner := &workspace.AssistantProgramHomeOwner{
+		PluginID: "music", PluginVersion: "2.0.0", ProgramID: home.ID, HomeSchemaVersion: home.SchemaVersion, HomeVersion: home.Version,
+		DeclarationDigest: projecttemplates.AssistantProgramHomeDigest(home), PluginGeneration: 11, ComponentFingerprint: strings.Repeat("a", 64),
+	}
+	projectOwner := &workspace.AssistantProjectProviderOwner{
+		PluginID: "reaper", PluginVersion: "4.0.0", BlueprintID: "song", BlueprintVersion: 7,
+		ProjectTeamID: projectTeam.ID, ProjectTeamSchema: projectTeam.SchemaVersion, ProjectTeamVersion: projectTeam.Version,
+		ProjectTeamDigest: projecttemplates.AssistantProjectDigest(projectTeam), PluginGeneration: 19, ComponentFingerprint: strings.Repeat("b", 64),
+	}
+	key := workspace.AssistantProgramKey{OwnerUserID: "local", PluginID: "music", ProgramID: home.ID}
+	if err := store.Update(station.ID, func(current *workspace.Workspace) error {
+		state := current.GetAssistantProgramState()
+		state.Key = key
+		state.Declaration = home.AssistantProgram()
+		state.HomeProvider = homeOwner
+		current.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(project.ID, func(current *workspace.Workspace) error {
+		link := current.GetAssistantProjectLink()
+		link.Key = key
+		link.ProjectRoles = projectTeam.ProgramRoles()
+		link.ProjectProvider = projectOwner
+		current.SetAssistantProjectLink(link)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	feature := []string{plugin.HostFeatureIndependentProgramHomesV1}
+	installed := []plugin.InstalledPlugin{
+		{Name: "music", Version: "2.0.0", Enabled: true, Generation: 11, ComponentFingerprint: strings.Repeat("a", 64), WorkspaceSurfaces: &plugin.SurfaceContribution{Protocol: plugin.ProtocolRange{Min: plugin.SurfaceProtocolVersion, Max: plugin.SurfaceProtocolVersion}, RequiresHostFeatures: feature, AssistantProgramHomes: []projecttemplates.AssistantProgramHome{home}}},
+		{Name: "reaper", Version: "4.0.0", Enabled: false, Generation: 19, ComponentFingerprint: strings.Repeat("b", 64), WorkspaceSurfaces: &plugin.SurfaceContribution{Protocol: plugin.ProtocolRange{Min: plugin.SurfaceProtocolVersion, Max: plugin.SurfaceProtocolVersion}, RequiresHostFeatures: feature}, ResolvedBlueprints: []plugin.ResolvedBlueprint{{ID: "song", Version: 7, Template: projecttemplates.Template{AssistantProject: projectTeam}}}},
+	}
+	handler.SetInstalledPluginLister(assistantInstalledPluginLister{installed: installed})
+	storedProject, _ := store.Get(project.ID)
+	linkID := storedProject.GetAssistantProjectLink().ID
+	portfolio := httptest.NewRecorder()
+	handler.ReviewAssistantPortfolio(portfolio, assistantProgramRequest(http.MethodPost, "/portfolio/review", station.ID, `{"link_id":"`+linkID+`","if_revision":0,"fields":{"status":"active","archive_review_state":"not_ready"}}`))
+	if portfolio.Code != http.StatusOK {
+		t.Fatalf("Home portfolio edit was blocked by project provider: %d %s", portfolio.Code, portfolio.Body.String())
+	}
+	handoff := httptest.NewRecorder()
+	handler.ReviewAssistantHandoff(handoff, assistantProgramRequest(http.MethodPost, "/handoff/review", station.ID, `{"link_id":"`+linkID+`","title":"Prepare","state":"backlog"}`))
+	if handoff.Code != http.StatusConflict || !strings.Contains(handoff.Body.String(), "project provider") {
+		t.Fatalf("unavailable project provider handoff = %d %s", handoff.Code, handoff.Body.String())
+	}
+
+	// Provider evidence is checked again at commit, not trusted from the review.
+	installed[1].Enabled = true
+	handler.SetInstalledPluginLister(assistantInstalledPluginLister{installed: installed})
+	reviewRecorder := httptest.NewRecorder()
+	handler.ReviewAssistantHandoff(reviewRecorder, assistantProgramRequest(http.MethodPost, "/handoff/review", station.ID, `{"link_id":"`+linkID+`","title":"Race-safe prepare","state":"backlog"}`))
+	if reviewRecorder.Code != http.StatusOK {
+		t.Fatalf("available provider handoff review = %d %s", reviewRecorder.Code, reviewRecorder.Body.String())
+	}
+	var review workspace.AssistantPortfolioHandoffReview
+	if err := json.Unmarshal(reviewRecorder.Body.Bytes(), &review); err != nil || review.Token == "" {
+		t.Fatalf("handoff review = %#v, %v", review, err)
+	}
+	installed[1].Enabled = false
+	handler.SetInstalledPluginLister(assistantInstalledPluginLister{installed: installed})
+	commitRecorder := httptest.NewRecorder()
+	handler.CommitAssistantHandoff(commitRecorder, assistantProgramRequest(http.MethodPost, "/handoff/commit", station.ID, `{"review_token":"`+review.Token+`","idempotency_key":"disabled-after-review","title":"Race-safe prepare","state":"backlog"}`))
+	if commitRecorder.Code != http.StatusConflict || !strings.Contains(commitRecorder.Body.String(), "project provider") {
+		t.Fatalf("provider removal between review and commit = %d %s", commitRecorder.Code, commitRecorder.Body.String())
+	}
+	tickets, err := workspace.NewTicketService(store).List(workspace.TicketQuery{WorkspaceID: project.ID})
+	if err != nil || len(tickets) != 0 {
+		t.Fatalf("stale handoff created child Tickets: %#v, %v", tickets, err)
 	}
 }
 

@@ -6,8 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/blueprintreadiness"
+	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -145,6 +148,111 @@ func TestGroupTemplateHome_CreatesNamedHomeThenReplaysAndReusesHonestly(t *testi
 	}
 	if ids, _ := store.List(); len(ids) != 1 {
 		t.Fatalf("create/replay/reuse produced workspaces %v", ids)
+	}
+}
+
+func TestGroupTemplateHome_IndependentProviderCreatesExactHomeWithoutProject(t *testing.T) {
+	home := projecttemplates.AssistantProgramHome{
+		SchemaVersion: 1, Version: 1, ID: "music-producer-assistant",
+		StationName: "Music Production Home", DefaultPrimaryName: "Portfolio Manager", HireTitle: "Staff this Home",
+		Roles:      []projecttemplates.AssistantProgramHomeRole{{ID: "portfolio_manager", Label: "Portfolio Manager", Required: true, Primary: true, SystemPrompt: "Coordinate reviewed Home work.", Skills: []string{"music-project-management"}}},
+		Stages:     []agentworkspace.AssistantProgramStageSpec{{ID: "foundation", Label: "Foundation", AcceptedCompletionThreshold: 0}},
+		Reflection: agentworkspace.AssistantReflectionConfig{MinimumProjects: 3, CadenceHours: 168, MaxProjects: 8, MaxEventsPerProject: 8, MaxCandidates: 8, MaxEvidence: 8, Rubric: "Use approved evidence."},
+	}
+	if err := projecttemplates.NormalizeAssistantProgramHome(&home); err != nil {
+		t.Fatal(err)
+	}
+	owner := agentworkspace.AssistantProgramHomeOwner{
+		PluginID: "music-project-management", PluginVersion: "0.1.0", ProgramID: home.ID,
+		HomeSchemaVersion: 1, HomeVersion: 1, DeclarationDigest: projecttemplates.AssistantProgramHomeDigest(home),
+		PluginGeneration: 4, ComponentFingerprint: strings.Repeat("a", 64),
+	}
+	template := projecttemplates.AssistantProgramHomeTemplate(home, owner)
+	handler, store, cleanup := newPolicyHandler(t, &template)
+	defer cleanup()
+	template.Path, template.HasSkeleton, template.ProjectEntry = "", false, nil
+	handler.SetInstalledPluginLister(assistantInstalledPluginLister{installed: []plugin.InstalledPlugin{{
+		Name: owner.PluginID, Version: owner.PluginVersion, Enabled: true, Generation: owner.PluginGeneration,
+		Skills: []string{"music-project-management"}, ComponentFingerprint: owner.ComponentFingerprint,
+		WorkspaceSurfaces: &plugin.SurfaceContribution{
+			SchemaVersion: 1, Name: owner.PluginID, Version: owner.PluginVersion,
+			Protocol: plugin.ProtocolRange{Min: 1, Max: 1}, RequiresHostFeatures: []string{plugin.HostFeatureIndependentProgramHomesV1},
+			AssistantProgramHomes: []projecttemplates.AssistantProgramHome{home},
+		},
+	}}})
+	installPlanAgentStore(t, handler)
+	handler.SetGroupTemplateCatalog(func(string) ([]GroupTemplateCatalogEntry, bool, error) {
+		return []GroupTemplateCatalogEntry{{Template: template, Readiness: blueprintreadiness.Ready(blueprintreadiness.OwnershipPlugin), Active: true}}, false, nil
+	})
+	legacyKey := agentworkspace.AssistantProgramKey{OwnerUserID: "local", PluginID: "reaper", ProgramID: home.ID}
+	legacy, legacyCreated, err := agentworkspace.NewAssistantProgramStore(store).EnsureNamedStation(legacyKey, home.AssistantProgram(), home.StationName)
+	if err != nil || !legacyCreated {
+		t.Fatalf("legacy same-name Home = %#v, %t, %v", legacy, legacyCreated, err)
+	}
+	legacyPersisted, err := store.Get(legacy.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyBefore, err := legacyPersisted.ToJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	managed := getGroupTemplates(t, handler).GroupTemplates[1]
+	if managed.Availability.State == groupTemplateAvailabilityReusable || managed.Home.WorkspaceID == legacy.ID {
+		t.Fatalf("legacy same-name Home was offered for independent reuse: %+v %+v", managed.Availability, managed.Home)
+	}
+	selection := map[string]any{"group_template_id": managed.ID, "revision": managed.Revision, "name": "Renamed Music Home"}
+	code, body := postGroupTemplateHome(t, handler, false, groupTemplateHomeBody(t, selection))
+	review, _ := body["group_template_review"].(map[string]any)
+	if code != http.StatusOK || review == nil {
+		t.Fatalf("review = %d %v", code, body)
+	}
+	selection["group_review_token"] = review["review_token"]
+	selection["idempotency_key"] = "independent-home"
+	code, body = postGroupTemplateHome(t, handler, true, groupTemplateHomeBody(t, selection))
+	result, _ := body["group_template"].(map[string]any)
+	if code != http.StatusOK || result["home_created"] != true {
+		t.Fatalf("commit = %d %v", code, body)
+	}
+	workspaceID, _ := result["home_workspace_id"].(string)
+	code, body = postGroupTemplateHome(t, handler, true, groupTemplateHomeBody(t, selection))
+	replay, _ := body["group_template"].(map[string]any)
+	if code != http.StatusOK || replay["idempotent_replay"] != true || replay["home_workspace_id"] != workspaceID {
+		t.Fatalf("independent Home replay = %d %v", code, body)
+	}
+	created, err := store.Get(workspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := created.GetAssistantProgramState()
+	if created.Name != "Renamed Music Home" || created.Kind != "group" || created.ParentID != "" || len(created.GetAgentInstances()) != 0 || state == nil || len(state.LinkedProjectIDs) != 0 {
+		t.Fatalf("created independent Home = %+v state=%+v", created, state)
+	}
+	if state.Key.PluginID != owner.PluginID || state.Key.ProgramID != owner.ProgramID || state.GroupTemplate == nil || state.GroupTemplate.ProgramHomeOwner == nil || state.GroupTemplate.PluginOwner != nil {
+		t.Fatalf("independent Home provenance = %+v / %+v", state.Key, state.GroupTemplate)
+	}
+	legacyAfter, err := store.Get(legacy.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyBytes, err := legacyAfter.ToJSON()
+	if err != nil || !bytes.Equal(legacyBefore, legacyBytes) {
+		t.Fatalf("independent setup rewrote the legacy same-name Home: equal=%t err=%v", bytes.Equal(legacyBefore, legacyBytes), err)
+	}
+	if ids, err := store.List(); err != nil || len(ids) != 2 {
+		t.Fatalf("same-name setup workspace ids = %v, %v", ids, err)
+	}
+	changed := plugin.InstalledPlugin{
+		Name: owner.PluginID, Version: owner.PluginVersion, Enabled: true, Generation: owner.PluginGeneration + 1,
+		ComponentFingerprint: strings.Repeat("b", 64), WorkspaceSurfaces: &plugin.SurfaceContribution{AssistantProgramHomes: []projecttemplates.AssistantProgramHome{home}},
+	}
+	handler.SetInstalledPluginLister(assistantInstalledPluginLister{installed: []plugin.InstalledPlugin{changed}})
+	if handler.assistantHomeProviderAvailable(created) {
+		t.Fatal("changed provider generation left independent Home writable")
+	}
+	preserved, err := store.Get(workspaceID)
+	if err != nil || !preserved.GetAssistantProgramState().PluginAvailable || preserved.Name != "Renamed Music Home" || preserved.GetAssistantProgramState().GroupTemplate.ProgramHomeOwner.DeclarationDigest != owner.DeclarationDigest {
+		t.Fatalf("provider change damaged stored Home: %+v, %v", preserved, err)
 	}
 }
 

@@ -640,7 +640,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 		var rawReviewTemplate, effectiveReviewTemplate projecttemplates.Template
 		switch {
-		case templateResolved && !rawResolvedTemplate.HasAssistantProgram():
+		case templateResolved && !hasManagedAssistantTeam(rawResolvedTemplate):
 			rawReviewTemplate = rawResolvedTemplate
 			effectiveReviewTemplate = resolvedTemplate
 		case req.Blank && kind != session.WorkspaceKindGroup:
@@ -820,7 +820,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			prov.projectWarning += "; " + capabilityWarning
 		}
 	}
-	if templateResolved && resolvedTemplate.HasAssistantProgram() && h.workspaceTaskStore != nil {
+	if templateResolved && hasManagedAssistantTeam(resolvedTemplate) && h.workspaceTaskStore != nil {
 		if groupPlan != nil && groupPlan.claim.Snapshot.SelectedComposition == grouprequirements.CompositionGrouped {
 			// The mandatory path already established and observed this exact link
 			// before tasks/tools/capabilities. It is never downgraded to a warning.
@@ -1009,7 +1009,7 @@ func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *ses
 	// An assistant-program blueprint staffs after creation instead: its station
 	// link does not exist until the workspace is persisted.
 	if req.RoleStaffing != nil {
-		if templateResolved && !tmpl.HasAssistantProgram() && tmpl.HasAgents() {
+		if templateResolved && !hasManagedAssistantTeam(tmpl) && tmpl.HasAgents() {
 			staffing, err := normalizeRoleStaffing(req.RoleStaffing)
 			if err != nil {
 				_ = orihttp.RespondBadRequest(w, err.Error())
@@ -1066,7 +1066,7 @@ func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *ses
 
 	if usesExistingAgentRoster {
 		switch {
-		case templateResolved && createTemplateAgentsEnabled(req) && !tmpl.HasAssistantProgram():
+		case templateResolved && createTemplateAgentsEnabled(req) && !hasManagedAssistantTeam(tmpl):
 			if tmpl.HasAgents() {
 				seed = h.seedTemplateAgents(ws, tmpl)
 			}
@@ -1111,7 +1111,7 @@ func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *ses
 			setWorkspaceEntryAgent(ws, entryAgentName)
 			seed.EntrySet = true
 		}
-	case templateResolved && createTemplateAgentsEnabled(req) && !tmpl.HasAssistantProgram():
+	case templateResolved && createTemplateAgentsEnabled(req) && !hasManagedAssistantTeam(tmpl):
 		// The template declares an agent roster: seed it (first = entry agent,
 		// rest = specialists). Every template-created workspace must end up with
 		// an entry agent to own its seeded starter tasks, so a roster-less
@@ -1448,7 +1448,7 @@ func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl pro
 	// Built-ins always record provenance. A user template records it too when it
 	// declares a setup/runtime/program/group contract: without provenance those
 	// reviewed requirements would silently disappear after creation.
-	if !tmpl.Builtin && tmpl.PluginOwner == nil && !tmpl.HasSetupWizard() && !tmpl.HasRuntimeRequirements() && !tmpl.HasAssistantProgram() && snapshot == nil {
+	if !tmpl.Builtin && tmpl.PluginOwner == nil && !tmpl.HasSetupWizard() && !tmpl.HasRuntimeRequirements() && !hasManagedAssistantTeam(tmpl) && snapshot == nil {
 		return ""
 	}
 	prov := newTemplateProvenance(tmpl, snapshot)
@@ -1513,8 +1513,18 @@ func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl pro
 	return ""
 }
 
+func hasManagedAssistantTeam(tmpl projecttemplates.Template) bool {
+	return tmpl.HasAssistantProgram() || tmpl.HasAssistantProject()
+}
+
 func newTemplateProvenance(tmpl projecttemplates.Template, snapshot *agentworkspace.GroupRequirementSnapshot) *agentworkspace.TemplateProvenance {
 	version := tmpl.BuiltinVersion
+	assistantProgram := tmpl.AssistantProgram
+	var projectRoles []agentworkspace.AssistantProgramRoleSpec
+	if tmpl.AssistantProject != nil {
+		assistantProgram = tmpl.ResolvedAssistantHome
+		projectRoles = tmpl.AssistantProject.ProgramRoles()
+	}
 	if tmpl.PluginOwner != nil {
 		version = tmpl.PluginOwner.BlueprintVersion
 	} else if snapshot != nil && snapshot.SourcePlugin != nil {
@@ -1530,7 +1540,7 @@ func newTemplateProvenance(tmpl projecttemplates.Template, snapshot *agentworksp
 		CapabilityRequirements: tmpl.CapabilityRequirements,
 		Plugins:                tmpl.Tools.Plugins, PluginSources: tmpl.Tools.PluginSources,
 		RuntimeRequirements: tmpl.RuntimeRequirements, SetupWizard: tmpl.SetupWizard,
-		AssistantProgram: tmpl.AssistantProgram, GroupRequirement: snapshot,
+		AssistantProgram: assistantProgram, AssistantProjectRoles: projectRoles, GroupRequirement: snapshot,
 	}
 	if tmpl.UserSetupQuest != nil && tmpl.UserSetupQuest.Declaration != nil {
 		provenance.UserTemplateOwner = &agentworkspace.UserTemplateOwner{
