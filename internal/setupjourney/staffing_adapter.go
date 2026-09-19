@@ -72,6 +72,7 @@ type StaffingToolGrants interface {
 // workspace/repository/personal resolution behavior.
 type PersonalStaffingToolGrants interface {
 	AvailablePersonal(skillName string) bool
+	GrantPersonal(agentName, skillName string) error
 }
 
 type StaffingModelDefaults func() (provider, model string)
@@ -348,8 +349,22 @@ func (a *AssistantStaffingAdapter) commitReviewedRoles(scope ReadScope, owner *s
 		// already applies to reuse-on-name-match, and the reason rollback can
 		// revoke without guessing what the user had granted themselves.
 		if !requested.binds() {
+			requirePersonal := splitRoleRequiresPersonalSource(target, targetScope)
 			for _, skill := range role.Skills {
-				if a.grants == nil || a.grants.Grant(requested.Name, skill) != nil {
+				var grantErr error
+				if requirePersonal {
+					personal, ok := a.grants.(PersonalStaffingToolGrants)
+					if !ok {
+						grantErr = ErrConflict
+					} else {
+						grantErr = personal.GrantPersonal(requested.Name, skill)
+					}
+				} else if a.grants == nil {
+					grantErr = ErrConflict
+				} else {
+					grantErr = a.grants.Grant(requested.Name, skill)
+				}
+				if grantErr != nil {
 					rollback()
 					return CanonicalResult{}, ErrConflict
 				}

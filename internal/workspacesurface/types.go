@@ -284,7 +284,14 @@ func validateRegistration(reg Registration) error {
 		return err
 	}
 	if len(reg.Capabilities) == 0 {
-		return fmt.Errorf("workspace surface registration: at least one capability is required")
+		// A validated plugin contribution may be content-only (for example, an
+		// independent Assistant Program Home). Keep its owner generation in the
+		// lifecycle registry even though it publishes no Workspace Surface. That
+		// gives disable/update/uninstall the same exact unregister boundary without
+		// inventing a fake capability or weakening user-authored surface validation.
+		if reg.Owner.Kind != OwnerPlugin {
+			return fmt.Errorf("workspace surface registration: at least one capability is required")
+		}
 	}
 
 	capabilities := make(map[string]Capability, len(reg.Capabilities))
