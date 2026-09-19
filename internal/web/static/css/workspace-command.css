@@ -5645,6 +5645,15 @@ button.ws-cmd-rpg-class-card:focus-visible {
   --ws-glow: 0 0 0 1px rgba(255, 255, 255, 0.7), 0 20px 42px -26px rgba(10, 10, 10, 0.34);
 }
 
+[data-bs-theme="light"] .ws-cmd-opmap {
+  background-image:
+    radial-gradient(circle at 28% 28%, rgba(78, 149, 224, 0.14), transparent 28%),
+    radial-gradient(circle at 72% 74%, rgba(232, 181, 75, 0.1), transparent 26%),
+    linear-gradient(rgba(70, 211, 154, 0.026) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(70, 211, 154, 0.024) 1px, transparent 1px),
+    linear-gradient(180deg, var(--ws-panel), var(--ws-panel-deep) 78%);
+}
+
 /* The Operations Map Unit Sheet intentionally remains a dark tactical surface
    in light app chrome. Restore its dark-surface ink/accent tokens locally so
    details, prompts, schemas, switches, and focus rings keep readable contrast. */
