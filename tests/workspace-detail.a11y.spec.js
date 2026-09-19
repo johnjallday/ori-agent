@@ -101,6 +101,7 @@ for (const theme of ['light', 'dark']) {
         const agent = read('.ws-cmd-map-agent');
         const agentName = read('.ws-cmd-map-agent-copy strong');
         const agentStatus = read('.ws-cmd-map-agent-status');
+        const belt = read('.ws-cmd-map-belt');
         const beltButton = read('.ws-cmd-map-belt-btn');
         const questButton = read('.ws-cmd-map-quest-fab');
         return {
@@ -109,6 +110,7 @@ for (const theme of ['light', 'dark']) {
           agentBackgroundImage: agent.backgroundImage,
           agentNameColor: agentName.color,
           agentStatusBackground: agentStatus.backgroundColor,
+          beltBackgroundImage: belt.backgroundImage,
           beltButtonColor: beltButton.color,
           questButtonColor: questButton.color
         };
@@ -125,12 +127,14 @@ for (const theme of ['light', 'dark']) {
         expect(style.agentBackgroundImage).not.toContain('rgba(0, 0, 0, 0.16)');
         expect(style.agentNameColor).toBe(expectedNameColor);
         expect(style.agentStatusBackground).toBe('rgba(255, 255, 255, 0.88)');
-        expect(style.beltButtonColor).toBe('rgb(197, 203, 210)');
+        expect(style.beltBackgroundImage).toContain('rgba(255, 255, 255, 0.97)');
+        expect(style.beltButtonColor).toBe('rgb(92, 92, 94)');
         expect(style.questButtonColor).toBe(expectedQuestColor);
       } else {
         expect(style.agentBackgroundImage).toContain('rgba(0, 0, 0, 0.16)');
         expect(style.agentNameColor).toBe(expectedNameColor);
         expect(style.agentStatusBackground).toBe('rgba(0, 0, 0, 0.24)');
+        expect(style.beltBackgroundImage).toContain('rgba(17, 22, 29, 0.9)');
         expect(style.beltButtonColor).toBe('rgb(139, 144, 154)');
         expect(style.questButtonColor).toBe(expectedQuestColor);
       }

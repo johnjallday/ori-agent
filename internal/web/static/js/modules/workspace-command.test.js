@@ -2335,11 +2335,13 @@ test('Operations Map keeps its dark base and uses crisp light surfaces', () => {
   const lightHQRule = css.match(
     /\[data-bs-theme="light"\] \.ws-cmd-opmap \.ws-cmd-map-hq-station\s*\{([\s\S]*?)\n\}/
   );
+  const lightBeltRule = css.match(/\[data-bs-theme="light"\] \.ws-cmd-map-belt\s*\{([\s\S]*?)\n\}/);
 
   assert.ok(baseRule, 'the base Operations Map rule must remain present');
   assert.ok(lightRule, 'light mode must override the Operations Map directly');
   assert.ok(lightAgentRule, 'light mode must give agent cards a dedicated surface');
   assert.ok(lightHQRule, 'light mode must give HQ stations a dedicated surface');
+  assert.ok(lightBeltRule, 'light mode must give the tool belt a dedicated surface');
   assert.match(
     baseRule[1],
     /linear-gradient\(180deg, var\(--ws-panel\), #0c0d11 78%\)/,
@@ -2375,8 +2377,18 @@ test('Operations Map keeps its dark base and uses crisp light surfaces', () => {
   );
   assert.match(
     css,
-    /\[data-bs-theme="light"\] \.ws-cmd-map-belt,\s*\[data-bs-theme="light"\] \.ws-cmd-map-quest-composer\s*\{[\s\S]*?--ws-ink-dim: #c5cbd2;/,
-    'dark map controls restore readable local ink in light mode'
+    /\[data-bs-theme="light"\] \.ws-cmd-map-quest-composer\s*\{[\s\S]*?--ws-ink-dim: #c5cbd2;/,
+    'the dark quest composer restores readable local ink in light mode'
+  );
+  assert.match(
+    lightBeltRule[1],
+    /linear-gradient\(180deg, rgba\(255, 255, 255, 0\.97\), rgba\(236, 239, 242, 0\.97\)\)/,
+    'the light tool belt uses a neutral raised surface'
+  );
+  assert.match(
+    css,
+    /\[data-bs-theme="light"\] \.ws-cmd-map-belt-btn::after\s*\{[\s\S]*?color: #f3f5f7;/,
+    'the dark tooltips keep readable local ink'
   );
   assert.match(
     css,
