@@ -448,7 +448,7 @@ func (s *FileStore) RebindExistingFolder(ws *Workspace, folderPath string) error
 	}
 
 	configPath := filepath.Join(normalizedPath, WorkspaceConfigFile)
-	data, readErr := os.ReadFile(configPath)
+	data, readErr := os.ReadFile(configPath) // #nosec G304 -- the fixed workspace.json inside the folder being bound, already checked to be a directory
 	// Binding a folder that is not yet a workspace would write workspace.json
 	// into the agents folder. A workspace that already lives there stays bound.
 	if readErr != nil && s.isReservedTopLevelPathLocked(normalizedPath) {

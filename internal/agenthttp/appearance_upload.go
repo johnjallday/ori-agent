@@ -181,6 +181,10 @@ func (h *AppearanceUploadHandler) upload(w http.ResponseWriter, r *http.Request,
 	avatarDir := avatarDirFor(h.State, agentName)
 	// 0o750, not 0o755: nothing outside this process needs to read the
 	// directory, and the static route serves its contents anyway.
+	// #nosec G703 -- avatarDir is resolved by the agent store for an agent it
+	// already holds (GetAgent succeeded above), or is the data-dir avatar
+	// folder; the request never names a path, and every write below is
+	// confined to this folder by os.Root.
 	if err := os.MkdirAll(avatarDir, 0o750); err != nil {
 		logger.Error("Failed to create avatar directory", logger.Fields{"error": err})
 		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to create avatar directory", err)
