@@ -2325,6 +2325,41 @@ test('command view mode preference defaults to details and persists map globally
   }
 });
 
+test('Operations Map keeps its dark base and uses panel tokens for the light floor', () => {
+  const css = readFileSync(new URL('../../css/workspace-command.css', import.meta.url), 'utf8');
+  const baseRule = css.match(/(?:^|\n)\.ws-cmd-opmap\s*\{([\s\S]*?)\n\}/);
+  const lightRule = css.match(/\[data-bs-theme="light"\] \.ws-cmd-opmap\s*\{([\s\S]*?)\n\}/);
+
+  assert.ok(baseRule, 'the base Operations Map rule must remain present');
+  assert.ok(lightRule, 'light mode must override the Operations Map directly');
+  assert.match(
+    baseRule[1],
+    /linear-gradient\(180deg, var\(--ws-panel\), #0c0d11 78%\)/,
+    'dark mode keeps its original near-black endpoint'
+  );
+  assert.match(
+    baseRule[1],
+    /background-size:\s*auto,\s*auto,\s*42px 42px,\s*42px 42px,\s*auto;/s,
+    'the five background layers keep their sizing contract'
+  );
+  assert.match(lightRule[1], /background-image:/);
+  assert.equal(
+    (lightRule[1].match(/(?:radial|linear)-gradient\(/g) || []).length,
+    5,
+    'light mode keeps all five background layers'
+  );
+  assert.match(
+    lightRule[1],
+    /linear-gradient\(180deg, var\(--ws-panel\), var\(--ws-panel-deep\) 78%\)/,
+    'light mode ends on the existing deep-panel token'
+  );
+  assert.doesNotMatch(
+    lightRule[1],
+    /(^|\n)\s*background:/,
+    'background-image must not reset the inherited background sizes'
+  );
+});
+
 test('Operations Map agent status prioritizes attention states before working', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   const agent = {

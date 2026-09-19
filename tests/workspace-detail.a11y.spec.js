@@ -76,9 +76,51 @@ for (const theme of ['light', 'dark']) {
     });
     await expect(openProject).toBeVisible();
     await expect(openProject).toHaveAttribute('aria-busy', 'false');
-    await page.getByRole('button', { name: 'Map' }).click();
+    await page.getByRole('button', { name: 'Map', exact: true }).click();
     await expect(openProject).toBeVisible();
-    await page.getByRole('button', { name: 'Details' }).click();
+
+    const operationsMap = page.getByRole('region', { name: 'Workspace operations map' });
+    const html = page.locator('html');
+    const toggleTheme = async expectedTheme => {
+      await page.locator('#darkModeToggle').click();
+      await expect(html).toHaveAttribute('data-bs-theme', expectedTheme);
+    };
+    const expectMapTheme = async expectedTheme => {
+      const style = await operationsMap.evaluate(element => {
+        const computed = getComputedStyle(element);
+        return {
+          backgroundImage: computed.backgroundImage,
+          backgroundSize: computed.backgroundSize
+        };
+      });
+      const endpoint = expectedTheme === 'light' ? 'rgb(223, 228, 232) 78%' : 'rgb(12, 13, 17) 78%';
+
+      expect(style.backgroundImage).toContain(endpoint);
+      expect(style.backgroundImage.match(/(?:radial|linear)-gradient\(/g)).toHaveLength(5);
+      expect(style.backgroundSize).toBe('auto, auto, 42px 42px, 42px 42px, auto');
+      if (expectedTheme === 'light') {
+        expect(style.backgroundImage).not.toContain('rgb(12, 13, 17) 78%');
+      }
+      return style;
+    };
+
+    await expect(operationsMap).toBeVisible();
+    await expect(html).toHaveAttribute('data-bs-theme', theme);
+    const startingStyle = await expectMapTheme(theme);
+
+    // Exercise the application's real switch path. The dark-starting case first
+    // moves to light, then both cases cover the light -> dark -> light round trip.
+    if (theme === 'dark') await toggleTheme('light');
+    const lightBefore = await expectMapTheme('light');
+    await toggleTheme('dark');
+    await expectMapTheme('dark');
+    await toggleTheme('light');
+    expect(await expectMapTheme('light')).toEqual(lightBefore);
+
+    // Leave the existing Details-mode accessibility assertions in their original theme.
+    if (theme === 'dark') await toggleTheme('dark');
+    expect(await expectMapTheme(theme)).toEqual(startingStyle);
+    await page.getByRole('button', { name: 'Details', exact: true }).click();
     await expect(openProject).toBeVisible();
     await page.locator('#workspaceCommandView').evaluate(async root => {
       const finiteAnimations = root
