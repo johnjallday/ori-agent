@@ -56,6 +56,9 @@ func (s *MemoryStore) ConsumeReceipt(_ context.Context, token string, at time.Ti
 	if !ok {
 		return ErrNotFound
 	}
+	if receipt.ConsumedAt != nil {
+		return ErrReviewStale
+	}
 	receipt.ConsumedAt = &at
 	s.receipts[token] = receipt
 	return nil
@@ -143,7 +146,9 @@ func (s *SQLiteStore) GetReceipt(ctx context.Context, token string) (Receipt, er
 }
 
 func (s *SQLiteStore) ConsumeReceipt(ctx context.Context, token string, at time.Time) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE group_requirement_reviews SET consumed_at = ? WHERE token = ?`, at.Format(time.RFC3339Nano), token)
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE group_requirement_reviews SET consumed_at = ?
+		WHERE token = ? AND consumed_at IS NULL`, at.Format(time.RFC3339Nano), token)
 	if err != nil {
 		return err
 	}
@@ -152,7 +157,14 @@ func (s *SQLiteStore) ConsumeReceipt(ctx context.Context, token string, at time.
 		return err
 	}
 	if rows != 1 {
-		return ErrNotFound
+		var exists int
+		if err := s.db.QueryRowContext(ctx, `SELECT 1 FROM group_requirement_reviews WHERE token = ?`, token).Scan(&exists); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		return ErrReviewStale
 	}
 	return nil
 }

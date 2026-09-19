@@ -2,9 +2,11 @@ package grouprequirements
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
@@ -286,6 +288,86 @@ func TestConcurrentHomePreparationClaimsConvergeWithoutProjectConsequences(t *te
 	ids, _ := store.List()
 	if len(ids) != 1 || ids[0] != claims[0].Operation.HomeWorkspaceID {
 		t.Fatalf("concurrent claims created duplicate Homes: %v", ids)
+	}
+}
+
+func TestRequiredDeletionReviewIsExactAndConsumedOnce(t *testing.T) {
+	ctx := context.Background()
+	store := workspace.NewInMemoryStore()
+	project := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Detached Required"})
+	project.ID = "detached-required"
+	project.OwnerUserID = "owner-1"
+	key := workspace.AssistantProgramKey{OwnerUserID: "owner-1", PluginID: "neutral", ProgramID: "neutral-program"}.Normalize()
+	digest := strings.Repeat("a", 64)
+	now := time.Date(2026, time.September, 19, 9, 0, 0, 0, time.UTC)
+	project.SetTemplateProvenance(&workspace.TemplateProvenance{
+		TemplateID: "plugin:neutral:project",
+		GroupRequirement: &workspace.GroupRequirementSnapshot{
+			SchemaVersion: workspace.GroupRequirementSnapshotSchemaVersion, Policy: "required",
+			SelectedComposition: workspace.GroupRequirementCompositionGrouped,
+			TemplateID:          "plugin:neutral:project", TemplateRevision: digest, DefinitionDigest: digest,
+			ProgramKey: &key, HomeWorkspaceID: "removed-home",
+			ProjectLinkID: workspace.AssistantProjectLinkID("removed-home", project.ID),
+			ReviewDigest:  digest, OperationDigest: digest, AppliedAt: now,
+		},
+	})
+	if err := store.Save(project); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(store, NewMemoryStore())
+	service.now = func() time.Time { return now }
+	input := DeletionInput{
+		OwnerUserID: "owner-1", WorkspaceID: project.ID, DeleteSessions: true,
+	}
+	review, err := service.ReviewDeletion(ctx, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if review.Token == "" || review.WorkspaceID != project.ID || review.Trashes || len(review.Impact) != 4 {
+		t.Fatalf("review = %#v", review)
+	}
+	if _, err := service.ClaimDeletion(ctx, DeletionInput{
+		OwnerUserID: "owner-1", WorkspaceID: project.ID, TrashWorkspace: true,
+	}, review.Token); !errors.Is(err, ErrReviewStale) {
+		t.Fatalf("changed deletion mode claim = %v, want stale", err)
+	}
+	claim, err := service.ClaimDeletion(ctx, input, review.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claim.WorkspaceID != project.ID || claim.ContractOperationDigest != digest || !claim.DeleteSessions || claim.TrashWorkspace {
+		t.Fatalf("claim = %#v", claim)
+	}
+	if _, err := service.ClaimDeletion(ctx, input, review.Token); !errors.Is(err, ErrReviewStale) {
+		t.Fatalf("reused deletion review = %v, want stale", err)
+	}
+	unchanged, err := store.Get(project.ID)
+	if err != nil || unchanged.GetTemplateProvenance().GroupRequirement.OperationDigest != digest {
+		t.Fatalf("review mutated project: %#v, %v", unchanged, err)
+	}
+
+	changedReview, err := service.ReviewDeletion(ctx, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changedProvenance := unchanged.GetTemplateProvenance()
+	changedProvenance.GroupRequirement.HomeWorkspaceID = "different-removed-home"
+	changedProvenance.GroupRequirement.ProjectLinkID = workspace.AssistantProjectLinkID("different-removed-home", project.ID)
+	unchanged.SetTemplateProvenance(changedProvenance)
+	if err := store.Save(unchanged); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ClaimDeletion(ctx, input, changedReview.Token); !errors.Is(err, ErrReviewStale) {
+		t.Fatalf("changed contract claim = %v, want stale", err)
+	}
+
+	expiringReview, err := service.ReviewDeletion(ctx, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(ReviewTTL)
+	if _, err := service.ClaimDeletion(ctx, input, expiringReview.Token); !errors.Is(err, ErrReviewStale) {
+		t.Fatalf("expired deletion review = %v, want stale", err)
 	}
 }
 

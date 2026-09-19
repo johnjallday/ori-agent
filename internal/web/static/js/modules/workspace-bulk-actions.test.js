@@ -25,7 +25,8 @@ function recorder(responses = {}) {
     calls.push({
       url,
       method: init.method || 'GET',
-      body: init.body ? JSON.parse(init.body) : null
+      body: init.body ? JSON.parse(init.body) : null,
+      headers: init.headers || {}
     });
     const key = `${init.method || 'GET'} ${String(url).split('?')[0]}`;
     const reply = responses[key] || responses.default;
@@ -426,6 +427,93 @@ test('a non-JSON failure body is passed through verbatim', async () => {
 
   await deleteWorkspace('w3', h.ctx);
   assert.equal(h.toasted[0].message, 'upstream unavailable');
+});
+
+// ---------------------------------------------------------------------------
+// Required template contract deletion review
+// ---------------------------------------------------------------------------
+
+function groupRequirementReviewRequired() {
+  return {
+    ok: false,
+    status: 409,
+    text: async () =>
+      JSON.stringify({
+        code: 'group_requirement_review_required',
+        message: 'This Required template contract needs an explicit lifecycle review.',
+        details: { workspace_id: 'song', delete_sessions: false }
+      })
+  };
+}
+
+test('a detached Required project is reviewed and deleted inside the same dialog', async () => {
+  let deleteAttempts = 0;
+  const rows = [{ id: 'song', name: 'Reaper Song', kind: 'workspace' }];
+  const h = ctxFor({
+    rows,
+    answers: [{ mode: '' }, true],
+    responses: {
+      'DELETE /api/workspaces/song': (_url, init) => {
+        deleteAttempts += 1;
+        if (deleteAttempts === 1) return groupRequirementReviewRequired();
+        assert.equal(init.headers['X-Ori-Group-Requirement-Review'], 'review-token');
+        return { ok: true, status: 200, json: async () => ({ trashed: true }) };
+      },
+      'POST /api/workspaces/song/group-requirement/delete/review': {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          group_requirement_review: {
+            review_token: 'review-token',
+            summary: 'Review deletion of “Reaper Song” and its Required contract.',
+            impact: ['The workspace moves to Trash.', 'The Home is not recreated.'],
+            trashes: true
+          }
+        })
+      }
+    }
+  });
+
+  assert.equal(await deleteWorkspace('song', h.ctx), true);
+  assert.equal(deleteAttempts, 2);
+  assert.deepEqual(h.calls.find(call => call.method === 'POST').body, {
+    delete_sessions: false
+  });
+  const [shown] = h.stepsOf('review');
+  assert.equal(shown.heading, 'Delete “Reaper Song” after contract review?');
+  assert.equal(shown.confirmLabel, 'Move to Trash');
+  assert.deepEqual(shown.impact, ['The workspace moves to Trash.', 'The Home is not recreated.']);
+  assert.deepEqual(h.trashed, [{ id: 'song', name: 'Reaper Song' }]);
+  assert.ok(h.announced.includes('Reaper Song deleted.'));
+  assert.equal(h.changedCount(), 1);
+  assert.equal(h.stepsOf('close').length, 1);
+});
+
+test('declining the Required contract review leaves the project untouched', async () => {
+  const h = ctxFor({
+    rows: [{ id: 'song', name: 'Reaper Song', kind: 'workspace' }],
+    answers: [{ mode: '' }, false],
+    responses: {
+      'DELETE /api/workspaces/song': groupRequirementReviewRequired(),
+      'POST /api/workspaces/song/group-requirement/delete/review': {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          group_requirement_review: {
+            review_token: 'review-token',
+            summary: 'Review deletion.',
+            impact: [],
+            trashes: true
+          }
+        })
+      }
+    }
+  });
+
+  assert.equal(await deleteWorkspace('song', h.ctx), false);
+  assert.equal(h.calls.filter(call => call.method === 'DELETE').length, 1);
+  assert.equal(h.changedCount(), 0);
+  assert.deepEqual(h.trashed, []);
 });
 
 // ---------------------------------------------------------------------------

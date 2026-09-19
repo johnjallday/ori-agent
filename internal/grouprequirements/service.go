@@ -62,10 +62,11 @@ const (
 	// OperationPrepareHome is the separately confirmed prerequisite for grouped
 	// project creation. It may create or reuse only the canonical Home; it never
 	// reserves, creates, moves, or links a project workspace.
-	OperationPrepareHome     OperationKind = "prepare_home"
-	OperationCreateWorkspace OperationKind = "create_workspace"
-	OperationCreateProject   OperationKind = "create_project"
-	OperationConnectProject  OperationKind = "connect_project"
+	OperationPrepareHome             OperationKind = "prepare_home"
+	OperationCreateWorkspace         OperationKind = "create_workspace"
+	OperationCreateProject           OperationKind = "create_project"
+	OperationConnectProject          OperationKind = "connect_project"
+	OperationDeleteRequiredWorkspace OperationKind = "delete_required_workspace"
 )
 
 type Input struct {
@@ -121,29 +122,33 @@ const (
 )
 
 type Receipt struct {
-	Token             string                         `json:"token"`
-	OwnerUserID       string                         `json:"owner_user_id"`
-	OperationKind     OperationKind                  `json:"operation_kind"`
-	InputDigest       string                         `json:"input_digest"`
-	TemplateID        string                         `json:"template_id"`
-	TemplateRevision  string                         `json:"template_revision,omitempty"`
-	VariantID         string                         `json:"variant_id,omitempty"`
-	VariantRevision   string                         `json:"variant_revision,omitempty"`
-	DefinitionDigest  string                         `json:"definition_digest"`
-	Policy            projecttemplates.GroupPolicy   `json:"policy"`
-	Composition       string                         `json:"composition"`
-	ProgramKey        *workspace.AssistantProgramKey `json:"program_key,omitempty"`
-	HomeWorkspaceID   string                         `json:"home_workspace_id,omitempty"`
-	CreateHome        bool                           `json:"create_home,omitempty"`
-	DefaultHomeName   string                         `json:"default_home_name,omitempty"`
-	RequestedParentID string                         `json:"requested_parent_id,omitempty"`
-	TargetWorkspaceID string                         `json:"target_workspace_id,omitempty"`
-	GroupTemplateID   string                         `json:"group_template_id,omitempty"`
-	GroupTemplateRev  string                         `json:"group_template_revision,omitempty"`
-	ReviewDigest      string                         `json:"review_digest"`
-	CreatedAt         time.Time                      `json:"created_at"`
-	ExpiresAt         time.Time                      `json:"expires_at"`
-	ConsumedAt        *time.Time                     `json:"consumed_at,omitempty"`
+	Token                   string                         `json:"token"`
+	OwnerUserID             string                         `json:"owner_user_id"`
+	OperationKind           OperationKind                  `json:"operation_kind"`
+	InputDigest             string                         `json:"input_digest"`
+	TemplateID              string                         `json:"template_id"`
+	TemplateRevision        string                         `json:"template_revision,omitempty"`
+	VariantID               string                         `json:"variant_id,omitempty"`
+	VariantRevision         string                         `json:"variant_revision,omitempty"`
+	DefinitionDigest        string                         `json:"definition_digest"`
+	Policy                  projecttemplates.GroupPolicy   `json:"policy"`
+	Composition             string                         `json:"composition"`
+	ProgramKey              *workspace.AssistantProgramKey `json:"program_key,omitempty"`
+	HomeWorkspaceID         string                         `json:"home_workspace_id,omitempty"`
+	CreateHome              bool                           `json:"create_home,omitempty"`
+	DefaultHomeName         string                         `json:"default_home_name,omitempty"`
+	RequestedParentID       string                         `json:"requested_parent_id,omitempty"`
+	TargetWorkspaceID       string                         `json:"target_workspace_id,omitempty"`
+	GroupTemplateID         string                         `json:"group_template_id,omitempty"`
+	GroupTemplateRev        string                         `json:"group_template_revision,omitempty"`
+	DeleteSessions          bool                           `json:"delete_sessions,omitempty"`
+	TrashWorkspace          bool                           `json:"trash_workspace,omitempty"`
+	ContractOperationDigest string                         `json:"contract_operation_digest,omitempty"`
+	ContractSnapshotDigest  string                         `json:"contract_snapshot_digest,omitempty"`
+	ReviewDigest            string                         `json:"review_digest"`
+	CreatedAt               time.Time                      `json:"created_at"`
+	ExpiresAt               time.Time                      `json:"expires_at"`
+	ConsumedAt              *time.Time                     `json:"consumed_at,omitempty"`
 }
 
 type Operation struct {
@@ -170,11 +175,13 @@ type ReceiptStore interface {
 }
 
 var (
-	ErrReviewRequired    = errors.New("group requirement review is required")
-	ErrReviewStale       = errors.New("group requirement review is stale")
-	ErrOperationConflict = errors.New("group requirement operation conflicts with an earlier request")
-	ErrUnavailable       = errors.New("group requirement owner is unavailable")
-	ErrNotFound          = errors.New("group requirement receipt was not found")
+	ErrReviewRequired       = errors.New("group requirement review is required")
+	ErrReviewStale          = errors.New("group requirement review is stale")
+	ErrOperationConflict    = errors.New("group requirement operation conflicts with an earlier request")
+	ErrLifecycleConflict    = errors.New("group requirement lifecycle state conflicts with this operation")
+	ErrLifecycleNotRequired = errors.New("workspace has no Required group requirement to review")
+	ErrUnavailable          = errors.New("group requirement owner is unavailable")
+	ErrNotFound             = errors.New("group requirement receipt was not found")
 )
 
 type Service struct {
@@ -359,6 +366,201 @@ type Claim struct {
 	Snapshot          *workspace.GroupRequirementSnapshot
 	HomeCreated       bool
 	Replayed          bool
+}
+
+// DeletionInput binds a lifecycle review to the exact workspace and deletion
+// consequence the user saw. TrashWorkspace is decided by the host from its
+// current platform/store support; it is never supplied by a browser as policy.
+type DeletionInput struct {
+	OwnerUserID    string
+	WorkspaceID    string
+	DeleteSessions bool
+	TrashWorkspace bool
+}
+
+// DeletionReview is an inert, expiring authorization preview. The original
+// Required creation contract remains intact so restoring a trashed workspace
+// cannot silently turn it into an ordinary workspace.
+type DeletionReview struct {
+	Token          string    `json:"review_token"`
+	ExpiresAt      time.Time `json:"expires_at"`
+	WorkspaceID    string    `json:"workspace_id"`
+	State          string    `json:"state"`
+	Summary        string    `json:"summary"`
+	Impact         []string  `json:"impact"`
+	DeleteSessions bool      `json:"delete_sessions"`
+	Trashes        bool      `json:"trashes"`
+}
+
+// DeletionClaim is the narrow proof the folder store accepts for one reviewed
+// Required-contract removal. It carries the immutable creation-operation digest
+// rather than a browser-provided bypass flag.
+type DeletionClaim struct {
+	WorkspaceID             string
+	ContractOperationDigest string
+	DeleteSessions          bool
+	TrashWorkspace          bool
+}
+
+// ReviewDeletion issues a durable, expiring receipt only after canonical state
+// proves the Required project is already detached from all live Assistant
+// Program topology. It changes no workspace, project, Home, task, or file.
+func (s *Service) ReviewDeletion(ctx context.Context, input DeletionInput) (DeletionReview, error) {
+	candidate, snapshot, err := s.requiredDeletionCandidate(input)
+	if err != nil {
+		return DeletionReview{}, err
+	}
+	inputDigest, err := deletionInputDigest(input)
+	if err != nil {
+		return DeletionReview{}, ErrReviewRequired
+	}
+	contractSnapshotDigest, err := DigestInput(snapshot)
+	if err != nil {
+		return DeletionReview{}, ErrReviewRequired
+	}
+	now := s.now()
+	receipt := Receipt{
+		Token: uuid.NewString(), OwnerUserID: strings.TrimSpace(input.OwnerUserID),
+		OperationKind: OperationDeleteRequiredWorkspace, InputDigest: inputDigest,
+		TemplateID: snapshot.TemplateID, TemplateRevision: snapshot.TemplateRevision,
+		DefinitionDigest: snapshot.DefinitionDigest, Policy: projecttemplates.GroupPolicyRequired,
+		Composition: CompositionGrouped, TargetWorkspaceID: candidate.ID,
+		DeleteSessions: input.DeleteSessions, TrashWorkspace: input.TrashWorkspace,
+		ContractOperationDigest: snapshot.OperationDigest, ContractSnapshotDigest: contractSnapshotDigest,
+		CreatedAt: now, ExpiresAt: now.Add(ReviewTTL),
+	}
+	receipt.ReviewDigest = receiptDigest(receipt)
+	if err := s.receipts.SaveReceipt(ctx, receipt); err != nil {
+		return DeletionReview{}, ErrUnavailable
+	}
+	summary := fmt.Sprintf("Review deletion of %q and its recorded Required template contract.", candidate.Name)
+	consequence := "The workspace will be removed using Ori's permanent deletion path."
+	if input.TrashWorkspace {
+		consequence = "The workspace will move to the system Trash and can be restored with its Required contract still recorded."
+	}
+	impact := []string{
+		consequence,
+		"The recorded Assistant Program Home will not be created, removed, or reconnected by this deletion.",
+		"External project folders remain protected by Ori's existing workspace deletion boundary.",
+	}
+	if input.DeleteSessions {
+		impact = append(impact, "Sessions belonging to this workspace will also be deleted.")
+	}
+	return DeletionReview{
+		Token: receipt.Token, ExpiresAt: receipt.ExpiresAt, WorkspaceID: candidate.ID,
+		State: "deletion_review_ready", Summary: summary, Impact: impact,
+		DeleteSessions: input.DeleteSessions, Trashes: input.TrashWorkspace,
+	}, nil
+}
+
+// ClaimDeletion consumes one exact review after re-reading canonical state. A
+// failed delete requires a fresh review; a consumed token can never become a
+// reusable generic deletion capability.
+func (s *Service) ClaimDeletion(ctx context.Context, input DeletionInput, token string) (DeletionClaim, error) {
+	if s == nil || s.workspaces == nil || s.receipts == nil {
+		return DeletionClaim{}, ErrUnavailable
+	}
+	token = strings.TrimSpace(token)
+	if token == "" || len(token) > 160 {
+		return DeletionClaim{}, ErrReviewRequired
+	}
+	inputDigest, err := deletionInputDigest(input)
+	if err != nil {
+		return DeletionClaim{}, ErrReviewRequired
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	receipt, err := s.receipts.GetReceipt(ctx, token)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return DeletionClaim{}, ErrReviewRequired
+		}
+		return DeletionClaim{}, ErrUnavailable
+	}
+	if receipt.OwnerUserID != strings.TrimSpace(input.OwnerUserID) ||
+		receipt.OperationKind != OperationDeleteRequiredWorkspace || receipt.InputDigest != inputDigest ||
+		receipt.TargetWorkspaceID != strings.TrimSpace(input.WorkspaceID) ||
+		receipt.DeleteSessions != input.DeleteSessions || receipt.TrashWorkspace != input.TrashWorkspace {
+		return DeletionClaim{}, ErrReviewStale
+	}
+	if receipt.ConsumedAt != nil || !s.now().Before(receipt.ExpiresAt) {
+		return DeletionClaim{}, ErrReviewStale
+	}
+	_, snapshot, err := s.requiredDeletionCandidate(input)
+	if err != nil {
+		return DeletionClaim{}, ErrReviewStale
+	}
+	contractSnapshotDigest, digestErr := DigestInput(snapshot)
+	if digestErr != nil || contractSnapshotDigest != receipt.ContractSnapshotDigest ||
+		snapshot.TemplateID != receipt.TemplateID || snapshot.TemplateRevision != receipt.TemplateRevision ||
+		snapshot.DefinitionDigest != receipt.DefinitionDigest || snapshot.OperationDigest != receipt.ContractOperationDigest {
+		return DeletionClaim{}, ErrReviewStale
+	}
+	if err := s.receipts.ConsumeReceipt(ctx, receipt.Token, s.now()); err != nil {
+		if errors.Is(err, ErrReviewStale) || errors.Is(err, ErrNotFound) {
+			return DeletionClaim{}, ErrReviewStale
+		}
+		return DeletionClaim{}, ErrUnavailable
+	}
+	return DeletionClaim{
+		WorkspaceID: receipt.TargetWorkspaceID, ContractOperationDigest: receipt.ContractOperationDigest,
+		DeleteSessions: receipt.DeleteSessions, TrashWorkspace: receipt.TrashWorkspace,
+	}, nil
+}
+
+func (s *Service) requiredDeletionCandidate(input DeletionInput) (*workspace.Workspace, *workspace.GroupRequirementSnapshot, error) {
+	if s == nil || s.workspaces == nil || s.receipts == nil || strings.TrimSpace(input.OwnerUserID) == "" || strings.TrimSpace(input.WorkspaceID) == "" {
+		return nil, nil, ErrUnavailable
+	}
+	candidate, err := canonicalGroupRequirementWorkspace(s.workspaces, strings.TrimSpace(input.WorkspaceID))
+	if err != nil || candidate == nil || candidate.OwnerUserID != strings.TrimSpace(input.OwnerUserID) ||
+		candidate.Status == workspace.StatusTrashed || candidate.Status == workspace.StatusMissing {
+		return nil, nil, ErrUnavailable
+	}
+	provenance := candidate.GetTemplateProvenance()
+	if provenance == nil || provenance.GroupRequirement == nil ||
+		!strings.EqualFold(strings.TrimSpace(provenance.GroupRequirement.Policy), "required") {
+		return nil, nil, ErrLifecycleNotRequired
+	}
+	snapshot := provenance.GroupRequirement
+	if !snapshot.StructurallyValid() {
+		return nil, nil, ErrLifecycleConflict
+	}
+	if candidate.GetAssistantProjectLink() != nil || candidate.GetAssistantProgramState() != nil {
+		return nil, nil, ErrLifecycleConflict
+	}
+	if home, homeErr := s.workspaces.Get(snapshot.HomeWorkspaceID); homeErr == nil && home != nil {
+		if state := home.GetAssistantProgramState(); state != nil {
+			for _, projectID := range state.LinkedProjectIDs {
+				if projectID == candidate.ID {
+					return nil, nil, ErrLifecycleConflict
+				}
+			}
+		}
+	}
+	return candidate, snapshot, nil
+}
+
+func canonicalGroupRequirementWorkspace(store workspace.Store, id string) (*workspace.Workspace, error) {
+	if reader, ok := store.(interface {
+		GetFolderWorkspace(string) (*workspace.Workspace, error)
+	}); ok {
+		return reader.GetFolderWorkspace(id)
+	}
+	return store.Get(id)
+}
+
+func deletionInputDigest(input DeletionInput) (string, error) {
+	return DigestInput(struct {
+		OwnerUserID    string `json:"owner_user_id"`
+		WorkspaceID    string `json:"workspace_id"`
+		DeleteSessions bool   `json:"delete_sessions"`
+		TrashWorkspace bool   `json:"trash_workspace"`
+	}{
+		OwnerUserID: strings.TrimSpace(input.OwnerUserID), WorkspaceID: strings.TrimSpace(input.WorkspaceID),
+		DeleteSessions: input.DeleteSessions, TrashWorkspace: input.TrashWorkspace,
+	})
 }
 
 func (s *Service) Claim(ctx context.Context, input Input, token, idempotencyKey string) (Claim, error) {

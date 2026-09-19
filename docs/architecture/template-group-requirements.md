@@ -380,11 +380,13 @@ deleted to manufacture a clean start.
 
 A live-linked grouped project uses reviewed disconnect/removal flows. A
 Required disconnect preserves the snapshot and reports the requirement
-unfulfilled until reviewed reconnect or separately reviewed
-standalone/recreation. None and standalone Recommended projects follow ordinary
-organization rules and never gain membership merely by moving under a Home.
-Home removal retains existing impact review and never recursively grants or
-deletes child data.
+unfulfilled until reviewed reconnect, reviewed workspace deletion, or separately
+reviewed standalone/recreation. Deletion review is bound to the exact workspace,
+contract operation digest, session-deletion choice, and Trash/permanent mode; it
+never recreates a Home or erases the snapshot before deletion. None and
+standalone Recommended projects follow ordinary organization rules and never
+gain membership merely by moving under a Home. Home removal retains existing
+impact review and never recursively grants or deletes child data.
 
 Source disable/remove pauses only source-dependent execution. It does not
 remove or relocate snapshots, links, workspaces, tasks, project files, Homes,
@@ -448,7 +450,7 @@ observed.
 | Setup quest/journey new/existing project | Existing project-connection owner plus the same group review; exact external file remains unchanged. |
 | Chat list/create project tools | Unified catalog/resolver; use supported owner or return bounded guided-create action. |
 | Capability/runtime/surface/plugin routes | Unrelated unless the concrete feature genuinely depends on live reciprocal membership; grouping grants nothing. |
-| Direct move/trash/delete and Home removal | Snapshot/link-driven protected lifecycle; existing depth/cycle/slug/path guards remain. |
+| Direct move/trash/delete and Home removal | Snapshot/link-driven protected lifecycle; detached Required deletion uses `POST /api/workspaces/{id}/group-requirement/delete/review` and an exact consumed review header on the ordinary `DELETE`; existing depth/cycle/slug/path guards remain. |
 | Personal Assistant hire / Personal HQ | Unrelated; profile hire never creates HQ. |
 
 Structural manifest/source failures belong to template/plugin readiness.
