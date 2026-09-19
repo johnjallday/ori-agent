@@ -1434,6 +1434,67 @@ case "$1 $2" in
     fi
     printf 'v0.0.106\t2026-08-15T10:00:00Z\thttps://github.com/johnjallday/ori-agent/releases/tag/v0.0.106\n'
     ;;
+  "release list")
+    if [ -n "${GH_RC_FAIL:-}" ]; then
+      printf 'simulated release list failure\n' >&2
+      exit 1
+    fi
+    # Newest first, like gh. RCs of shipped versions and older stables must
+    # never become the candidate; GH_RC_ORDER lists rc.9 AFTER rc.10 and an
+    # older two-digit stable after a three-digit one to prove numeric order.
+    if [ -n "${GH_RC_DRAFT:-}" ]; then
+      printf 'v0.0.107-rc.2\ttrue\ttrue\n'
+    fi
+    if [ -n "${GH_RC_ORDER:-}" ]; then
+      printf 'v0.0.107-rc.10\tfalse\ttrue\n'
+      printf 'v0.0.107-rc.9\tfalse\ttrue\n'
+    fi
+    if [ -z "${GH_RC_NONE:-}" ]; then
+      printf 'v0.0.107-rc.1\tfalse\ttrue\n'
+    fi
+    printf 'v0.0.106\tfalse\tfalse\n'
+    printf 'v0.0.106-rc.2\tfalse\ttrue\n'
+    printf 'v0.0.99\tfalse\tfalse\n'
+    ;;
+  "api repos/{owner}/{repo}/releases/tags/"*)
+    tag="${2##*/}"
+    if [ -n "${GH_RC_UNPUBLISHED:-}" ]; then
+      printf 'gh: Not Found (HTTP 404)\n' >&2
+      exit 1
+    fi
+    prerelease=true
+    if [ -n "${GH_RC_NOT_PRERELEASE:-}" ]; then
+      prerelease=false
+    fi
+    printf '%s\thttps://github.com/johnjallday/ori-agent/releases/tag/%s\n' "$prerelease" "$tag"
+    printf 'checksums.txt\tsha256:0000\n'
+    printf 'OriAgent-%s-arm64.dmg\tsha256:%s\n' "${tag#v}" "${GH_DMG_DIGEST:-}"
+    printf 'rc-test-report-%s.md\tsha256:1111\n' "$tag"
+    ;;
+  "release download")
+    tag="$3"
+    dir=""
+    previous=""
+    for argument in "$@"; do
+      if [ "$previous" = "--dir" ]; then
+        dir="$argument"
+      fi
+      previous="$argument"
+    done
+    previous=""
+    for argument in "$@"; do
+      if [ "$previous" = "--pattern" ] && [ ! -e "$dir/$argument" ]; then
+        case "$argument" in
+          *.dmg) printf 'fake dmg for %s\n' "$tag" > "$dir/$argument" ;;
+          *) printf '# RC card %s\n' "$tag" > "$dir/$argument" ;;
+        esac
+      fi
+      previous="$argument"
+    done
+    ;;
+  "repo view")
+    printf 'https://github.com/johnjallday/ori-agent'
+    ;;
   "api --paginate")
     case "${3:-}" in
       'repos/{owner}/{repo}/compare/v0.0.106...dev?per_page=100') ;;
@@ -1877,8 +1938,28 @@ grep -Fq $'CALL\trelease\tview\t--json\ttagName,publishedAt,url\t--template' \
   "$gh_calls"
 grep -Fq $'CALL\tapi\t--paginate\trepos/{owner}/{repo}/compare/v0.0.106...dev?per_page=100\t--jq' \
   "$gh_calls"
-check "release makes exactly two calls" "$(count_gh_calls)" "2"
+# The third read is one release listing that names the active candidate.
+assert_output_has "release" "$fixture_root/release-output" \
+  "Candidate: v0.0.107-rc.1 is published for testing."
+assert_output_has "release" "$fixture_root/release-output" \
+  "Test it: ./scripts/devops.sh test-rc   Promote it: ./scripts/devops.sh promote"
+check "release makes exactly three calls" "$(count_gh_calls)" "3"
 assert_no_github_write "release"
+
+: > "$gh_calls"
+GH_RC_NONE=1 "$script" release > "$fixture_root/release-no-rc-output"
+assert_output_has "release without a candidate" "$fixture_root/release-no-rc-output" \
+  "Candidate: No release candidate in testing."
+assert_output_lacks "release without a candidate" "$fixture_root/release-no-rc-output" "Promote it"
+
+# A failed candidate read is a failure, not a silent "no candidate".
+status=0
+GH_RC_FAIL=1 "$script" release > "$fixture_root/release-rc-fail-output" \
+  2> "$fixture_root/release-rc-fail-error" || status=$?
+check "a failed candidate read exits non-zero" "$status" "1"
+assert_output_has "a failed candidate read" "$fixture_root/release-rc-fail-error" \
+  "simulated release list failure"
+assert_output_lacks "a failed candidate read" "$fixture_root/release-rc-fail-output" "Candidate:"
 
 # Zero matching PRs is reported explicitly, not as a blank line.
 : > "$gh_calls"
@@ -1920,7 +2001,35 @@ check "failed picker release refresh stops after one read" "$(count_gh_calls)" "
 GH_RELEASE_NONE=1 load_picker_index
 check "release failure does not mark the Issue index failed" "$picker_error" ""
 check "release failure still loads Issues" "${#all_issue_numbers[@]}" "2"
-check "release failure plus Issue load makes two reads" "$(count_gh_calls)" "2"
+check "release failure does not hide the candidate" "$picker_rc_state" "prerelease"
+check "release failure plus candidate and Issue loads make three reads" "$(count_gh_calls)" "3"
+
+# The candidate line is its own concurrent read with its own failure banner.
+: > "$gh_calls"
+load_picker_rc_status
+check "picker candidate state" "$picker_rc_state" "prerelease"
+render_picker 0 0 0 > "$fixture_root/picker-rc-output"
+assert_output_has "picker candidate banner" "$fixture_root/picker-rc-output" \
+  "Candidate  v0.0.107-rc.1 is published for testing.  [t] test  [P] promote"
+check "picker candidate refresh makes one read" "$(count_gh_calls)" "1"
+
+GH_RC_DRAFT=1 load_picker_rc_status
+render_picker 0 0 0 > "$fixture_root/picker-rc-draft-output"
+assert_output_has "picker draft candidate" "$fixture_root/picker-rc-draft-output" \
+  "Candidate  v0.0.107-rc.2 is still a draft (building, or its Release run failed)."
+assert_output_lacks "picker draft candidate" "$fixture_root/picker-rc-draft-output" "[P] promote"
+
+GH_RC_NONE=1 load_picker_rc_status
+check "picker no-candidate state" "$picker_rc_state" "none"
+render_picker 0 0 0 > "$fixture_root/picker-rc-none-output"
+assert_output_has "picker without a candidate" "$fixture_root/picker-rc-none-output" \
+  "Candidate  No release candidate in testing."
+
+GH_RC_FAIL=1 load_picker_rc_status
+check "picker candidate failure clears stale state" "$picker_rc_summary" ""
+render_picker 0 0 0 > "$fixture_root/picker-rc-fail-output"
+assert_output_has "picker candidate failure" "$fixture_root/picker-rc-fail-output" \
+  "Candidate  Candidate status unavailable — press r to retry."
 
 # Extra arguments are rejected before any GitHub call, like every other
 # one-shot command; covered exhaustively (exit 2, no GitHub contact) by
@@ -1961,6 +2070,157 @@ if grep -Fq "PR(s) merged" "$fixture_root/release-pr-fail-output"; then
     "$(cat "$fixture_root/release-pr-fail-output")" >&2
   exit 1
 fi
+
+# ---------------------------------------------------------------------------
+# Release candidates: selection, the test kit, and promotion dispatch.
+# ---------------------------------------------------------------------------
+: > "$gh_calls"
+load_rc_status
+check "the candidate is the newest RC above the latest stable" "$rc_tag" "v0.0.107-rc.1"
+check "a published candidate is a prerelease" "$rc_state" "prerelease"
+check "the latest stable comes from the same listing" "$rc_stable" "v0.0.106"
+check "candidate status is one read" "$(count_gh_calls)" "1"
+GH_RC_ORDER=1 load_rc_status
+check "candidate numbers compare numerically, not as text" "$rc_tag" "v0.0.107-rc.10"
+check "stable versions compare numerically, not as text" "$rc_stable" "v0.0.106"
+GH_RC_DRAFT=1 load_rc_status
+check "a newer draft RC supersedes the published one" "$rc_tag" "v0.0.107-rc.2"
+check "a draft candidate is reported as a draft" "$rc_state" "draft"
+GH_RC_NONE=1 load_rc_status
+check "RCs of shipped versions are history, not candidates" "$rc_tag" ""
+
+# test-rc: macOS gets the DMG verified against GitHub's own digest, plus the
+# blank card. The launch prompt is terminal-only and never reached here.
+rc_platform() { printf 'Darwin:arm64'; }
+rc_stdin_is_terminal() { return 1; }
+rc_kit_root="$fixture_root/rc-kits"
+rc_kit="$rc_kit_root/v0.0.107-rc.1"
+rc_dmg="OriAgent-0.0.107-rc.1-arm64.dmg"
+export GH_DMG_DIGEST="$(printf 'fake dmg for v0.0.107-rc.1\n' | shasum -a 256 | awk '{print $1}')"
+: > "$gh_calls"
+ORI_RC_DIR="$rc_kit_root" test_rc_action > "$fixture_root/test-rc-output"
+check "test-rc downloads the DMG into the kit" "$(<"$rc_kit/$rc_dmg")" "fake dmg for v0.0.107-rc.1"
+check "test-rc downloads the blank test card" \
+  "$(<"$rc_kit/rc-test-report-v0.0.107-rc.1.md")" "# RC card v0.0.107-rc.1"
+assert_call $'CALL\trelease\tdownload\tv0.0.107-rc.1\t--dir\t'"$rc_kit"$'\t--skip-existing\t--pattern\trc-test-report-v0.0.107-rc.1.md\t--pattern\t'"$rc_dmg"
+assert_output_has "test-rc" "$fixture_root/test-rc-output" "SHA-256    $GH_DMG_DIGEST (matches GitHub)"
+assert_output_has "test-rc" "$fixture_root/test-rc-output" \
+  "Release    https://github.com/johnjallday/ori-agent/releases/tag/v0.0.107-rc.1"
+assert_output_has "test-rc" "$fixture_root/test-rc-output" \
+  "After an APPROVE decision: ./scripts/devops.sh promote v0.0.107-rc.1"
+assert_output_lacks "test-rc without a terminal" "$fixture_root/test-rc-output" "Launch this DMG"
+check "test-rc lists, reads the release, and downloads" "$(count_gh_calls)" "3"
+assert_no_github_write "test-rc"
+
+# A card already in the kit is never replaced by a re-run.
+printf 'my notes\n' > "$rc_kit/rc-test-report-v0.0.107-rc.1.md"
+ORI_RC_DIR="$rc_kit_root" test_rc_action > /dev/null
+check "test-rc keeps a card already in the kit" \
+  "$(<"$rc_kit/rc-test-report-v0.0.107-rc.1.md")" "my notes"
+
+printf 'tampered\n' > "$rc_kit/$rc_dmg"
+status=0
+ORI_RC_DIR="$rc_kit_root" test_rc_action > /dev/null 2> "$fixture_root/test-rc-mismatch" || status=$?
+check "a digest mismatch fails test-rc" "$status" "1"
+assert_output_has "a digest mismatch" "$fixture_root/test-rc-mismatch" "SHA-256 mismatch for $rc_dmg"
+
+rc_platform() { printf 'Linux:x86_64'; }
+ORI_RC_DIR="$fixture_root/rc-linux" test_rc_action > "$fixture_root/test-rc-linux-output"
+check "other platforms fetch only the card" \
+  "$(ls "$fixture_root/rc-linux/v0.0.107-rc.1")" "rc-test-report-v0.0.107-rc.1.md"
+assert_output_has "test-rc on another platform" "$fixture_root/test-rc-linux-output" \
+  "download yours from the release page"
+rc_platform() { printf 'Darwin:arm64'; }
+
+for refusal in draft none unpublished not-prerelease; do
+  : > "$gh_calls"
+  status=0
+  case "$refusal" in
+    draft) GH_RC_DRAFT=1 ORI_RC_DIR="$fixture_root/rc-refused" test_rc_action \
+      > /dev/null 2> "$fixture_root/test-rc-refusal" || status=$? ;;
+    none) GH_RC_NONE=1 ORI_RC_DIR="$fixture_root/rc-refused" test_rc_action \
+      > /dev/null 2> "$fixture_root/test-rc-refusal" || status=$? ;;
+    unpublished) GH_RC_UNPUBLISHED=1 ORI_RC_DIR="$fixture_root/rc-refused" test_rc_action v0.0.108-rc.1 \
+      > /dev/null 2> "$fixture_root/test-rc-refusal" || status=$? ;;
+    not-prerelease) GH_RC_NOT_PRERELEASE=1 ORI_RC_DIR="$fixture_root/rc-refused" test_rc_action \
+      > /dev/null 2> "$fixture_root/test-rc-refusal" || status=$? ;;
+  esac
+  check "test-rc refuses a $refusal candidate" "$status" "1"
+  assert_output_lacks "test-rc refusing a $refusal candidate" "$gh_calls" $'release\tdownload'
+done
+GH_RC_DRAFT=1 test_rc_action > /dev/null 2> "$fixture_root/test-rc-refusal" || true
+assert_output_has "a draft candidate" "$fixture_root/test-rc-refusal" "v0.0.107-rc.2 is still a draft"
+GH_RC_NONE=1 test_rc_action > /dev/null 2> "$fixture_root/test-rc-refusal" || true
+assert_output_has "no candidate" "$fixture_root/test-rc-refusal" \
+  "No release candidate is in testing (latest stable: v0.0.106)."
+
+# promote: the local check and the dispatch are the two seams. Nothing below
+# runs release-candidate.py (it fetches) or release.sh (it dispatches).
+promote_calls="$fixture_root/promote-calls"
+release_candidate_check() {
+  printf 'CHECK\t%s\n' "$1" >> "$promote_calls"
+  if [[ -n "${RC_CHECK_REFUSE:-}" ]]; then
+    printf 'REFUSED — %s has been superseded by a newer RC\n' "$1"
+    return 1
+  fi
+  printf 'Approve **%s** → **v0.0.107**\n' "$1"
+}
+release_dispatch_promote() {
+  printf 'DISPATCH\t%s\n' "$1" >> "$promote_calls"
+}
+
+rc_stdin_is_terminal() { return 0; }
+: > "$promote_calls"
+printf 'v0.0.107-rc.1\n' | promote_rc_action > "$fixture_root/promote-output"
+check "typing the exact tag checks then dispatches it" \
+  "$(<"$promote_calls")" $'CHECK\tv0.0.107-rc.1\nDISPATCH\tv0.0.107-rc.1'
+assert_output_has "promote" "$fixture_root/promote-output" \
+  "Next: GitHub checks v0.0.107-rc.1 again"
+assert_output_has "promote" "$fixture_root/promote-output" \
+  "https://github.com/johnjallday/ori-agent/actions/workflows/promote-release.yml"
+
+: > "$promote_calls"
+printf 'yes\n' | promote_rc_action > "$fixture_root/promote-cancel-output"
+check "anything but the exact tag cancels after the check" "$(<"$promote_calls")" $'CHECK\tv0.0.107-rc.1'
+assert_output_has "a cancelled promotion" "$fixture_root/promote-cancel-output" \
+  "Cancelled; nothing was dispatched."
+
+: > "$promote_calls"
+status=0
+printf '' | promote_rc_action > /dev/null || status=$?
+check "end of input cancels without dispatching" "$(<"$promote_calls")" $'CHECK\tv0.0.107-rc.1'
+check "end of input is not success" "$status" "1"
+
+: > "$promote_calls"
+status=0
+RC_CHECK_REFUSE=1 promote_rc_action --yes > "$fixture_root/promote-refused-output" \
+  2> "$fixture_root/promote-refused-error" || status=$?
+check "a refused check stops promotion" "$status" "1"
+check "a refused check never dispatches" "$(<"$promote_calls")" $'CHECK\tv0.0.107-rc.1'
+assert_output_has "a refused check" "$fixture_root/promote-refused-output" "REFUSED —"
+assert_output_has "a refused check" "$fixture_root/promote-refused-error" "Nothing was dispatched."
+
+: > "$promote_calls"
+status=0
+GH_RC_DRAFT=1 promote_rc_action --yes > /dev/null 2>&1 || status=$?
+check "a draft candidate is refused before the check" "$status" "1"
+check "a draft candidate is never checked or dispatched" "$(<"$promote_calls")" ""
+
+rc_stdin_is_terminal() { return 1; }
+: > "$promote_calls"
+: > "$gh_calls"
+status=0
+promote_rc_action > /dev/null 2> "$fixture_root/promote-no-tty" || status=$?
+check "promotion without a terminal needs --yes" "$status" "2"
+assert_output_has "promotion without a terminal" "$fixture_root/promote-no-tty" "pass --yes to confirm"
+check "promotion without a terminal contacts nothing" "$(<"$promote_calls")$(count_gh_calls)" "0"
+
+: > "$promote_calls"
+: > "$gh_calls"
+promote_rc_action v0.0.107-rc.1 --yes > /dev/null
+check "--yes dispatches an explicit tag without prompting" \
+  "$(<"$promote_calls")" $'CHECK\tv0.0.107-rc.1\nDISPATCH\tv0.0.107-rc.1'
+assert_output_lacks "an explicit tag" "$gh_calls" $'release\tlist'
 
 # Viewing remains read-only.
 : > "$gh_calls"
@@ -2676,7 +2936,7 @@ if grep -Eq -- '--add-label[[:space:]]*$|labels' "$gh_calls"; then
 fi
 
 # Invalid invocations fail before contacting GitHub.
-for invalid in "view" "view nope" "view 0" "view 334 extra" "all extra" "ready extra" "unknown" "decide" "decide 334" "decide nope text" "decide 334 1A --rationale" "answer" "answer 334" "approve" "approve nope" "approve 334 extra" "new" "new --yes" "new title --body" "new title --body-file" "new title --body-file /missing" "new title --body text --body-file /missing" "status extra" "release extra"; do
+for invalid in "view" "view nope" "view 0" "view 334 extra" "all extra" "ready extra" "unknown" "decide" "decide 334" "decide nope text" "decide 334 1A --rationale" "answer" "answer 334" "approve" "approve nope" "approve 334 extra" "new" "new --yes" "new title --body" "new title --body-file" "new title --body-file /missing" "new title --body text --body-file /missing" "status extra" "release extra" "test-rc nope" "test-rc v0.0.107" "test-rc --yes" "test-rc v0.0.107-rc.1 extra" "promote nope" "promote v0.0.107" "promote --force" "promote v0.0.107-rc.1 extra"; do
   : > "$gh_calls"
   status=0
   # Intentional word splitting turns each fixture into an argument vector.
@@ -2690,6 +2950,24 @@ for invalid in "view" "view nope" "view 0" "view 334 extra" "all extra" "ready e
     exit 1
   fi
 done
+
+# Promotion needs a terminal or --yes. stdin is pinned so a run of this suite
+# from a real terminal can never reach the live promotion check.
+: > "$gh_calls"
+status=0
+"$script" promote v0.0.107-rc.1 < /dev/null > /dev/null \
+  2> "$fixture_root/promote-oneshot-no-tty" || status=$?
+check "one-shot promotion without a terminal exits 2" "$status" "2"
+assert_output_has "one-shot promotion without a terminal" \
+  "$fixture_root/promote-oneshot-no-tty" "pass --yes to confirm"
+assert_no_github "one-shot promotion without a terminal"
+
+: > "$gh_calls"
+printf 'promote\nq\n' | "$script" > "$fixture_root/repl-promote-output" \
+  2> "$fixture_root/repl-promote-error"
+assert_output_has "REPL promotion" "$fixture_root/repl-promote-error" "pass --yes to confirm"
+assert_output_lacks "REPL promotion" "$gh_calls" $'release\tlist'
+assert_output_has "REPL menu" "$fixture_root/repl-promote-output" "[t] Test RC  [promote] Promote RC"
 
 # The REPL can move between every view, inspect an Issue, and refresh the
 # current filter without changing labels or any other GitHub state.

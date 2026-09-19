@@ -28,6 +28,7 @@ fi
 source "$script_dir/lib/devflow-common.sh"
 source "$script_dir/lib/devops-explore.sh"
 source "$script_dir/lib/devops-explore-launch.sh"
+source "$script_dir/lib/devops-release-candidate.sh"
 
 require_gh() {
   if command -v gh >/dev/null 2>&1; then
@@ -50,6 +51,8 @@ Usage:
   ./scripts/devops.sh status
   ./scripts/devops.sh done
   ./scripts/devops.sh release
+  ./scripts/devops.sh test-rc [vX.Y.Z-rc.N]
+  ./scripts/devops.sh promote [vX.Y.Z-rc.N] [--yes]
   ./scripts/devops.sh agent-defaults [options] [--yes]
   ./scripts/devops.sh explore
   ./scripts/devops.sh explore <preset> [--context <text>] --print
@@ -86,7 +89,24 @@ that instant (an exact-timestamp comparison, so a PR merged earlier the same
 day as the release is correctly excluded). The keyboard picker shows the same
 count at the top and updates it on `r`. Both are read-only; the one-shot command
 preserves a failed release or PR read as a non-zero exit with `gh`'s own error
-instead of reporting a misleading zero count.
+instead of reporting a misleading zero count. Both also name the active release
+candidate: the newest vX.Y.Z-rc.N for a version with no stable release yet, and
+whether it is published for testing or still a draft.
+
+`test-rc` (picker key `t`) prepares a candidate for docs/RC_TEST_PROTOCOL.md.
+It downloads this Mac's DMG and the blank test card into ~/Downloads/ori-rc/<tag>
+(override with ORI_RC_DIR), verifies the DMG against GitHub's SHA-256 digest, and
+on a terminal offers to launch the DMG's own server with HOME, data directory
+and working directory inside the kit, on an unused port. That launch is web
+evidence only, not installer or native-app coverage. Other platforms get the
+card and the release link.
+
+`promote` (picker key `P`) requests stable publication of the tested candidate.
+It runs the Promote Release workflow's own read-only check
+(release-candidate.py check-promotion), asks you to type the exact tag, then
+dispatches the workflow through release.sh. GitHub checks again and waits for
+the `release` environment reviewer on github.com; devops never approves that.
+Without a tag, both use the active candidate.
 
 In the picker, Enter opens an Issue with its own action bar; press `c` there to
 answer its open questions, or use the list's `c` shortcut to open directly at
@@ -146,7 +166,7 @@ print_menu() {
   printf '\n%s\n' \
     "[1/a] All  [2/d] Needs my decision  [3/b] Backlog  [4/f] Proposals  [5/y] Ready" \
     "[v #] View  [n title] Capture  [c # choices] Decide  [ok #] Approve  [g] Agent defaults  [q] Quit" \
-    "[e] Explore next work  [done] Finish implementations"
+    "[e] Explore next work  [done] Finish implementations  [t] Test RC  [promote] Promote RC"
 }
 
 # Labels arrive from `gh` as a ", "-joined string. Split on commas and trim so a
@@ -540,6 +560,12 @@ release_report() {
     printf 'No PRs merged into dev since %s.\n' "$release_tag"
   else
     printf '%s PR(s) merged into dev since %s.\n' "$release_merged_count" "$release_tag"
+  fi
+
+  load_rc_status || return $?
+  printf '\nCandidate: %s\n' "$(rc_status_summary)"
+  if [[ "$rc_state" == prerelease ]]; then
+    printf 'Test it: ./scripts/devops.sh test-rc   Promote it: ./scripts/devops.sh promote\n'
   fi
 }
 
@@ -1307,6 +1333,12 @@ run_one_shot() {
       [[ $# -eq 0 ]] || return 2
       release_report
       ;;
+    test-rc)
+      test_rc_action "$@"
+      ;;
+    promote)
+      promote_rc_action "$@"
+      ;;
     agent-defaults)
       agent_defaults_action "$@"
       ;;
@@ -1420,6 +1452,9 @@ picker_error=""
 picker_release_summary=""
 picker_release_error=""
 picker_release_count=0
+picker_rc_summary=""
+picker_rc_state=""
+picker_rc_error=""
 picker_action_notice=""
 
 bundle_labels_are_eligible() {
@@ -1522,6 +1557,19 @@ load_picker_release_status() {
   esac
 }
 
+load_picker_rc_status() {
+  picker_rc_summary=""
+  picker_rc_state=""
+  picker_rc_error=""
+
+  if ! load_rc_status 2>/dev/null; then
+    picker_rc_error="Candidate status unavailable — press r to retry."
+    return 0
+  fi
+  picker_rc_state="${rc_state:-none}"
+  picker_rc_summary="$(rc_status_summary)"
+}
+
 picker_load_dir=""
 cleanup_picker_load_dir() {
   if [[ -n "$picker_load_dir" && -d "$picker_load_dir" ]]; then
@@ -1530,14 +1578,17 @@ cleanup_picker_load_dir() {
       "$picker_load_dir/implementation-error" \
       "$picker_load_dir/release-summary" \
       "$picker_load_dir/release-error" \
-      "$picker_load_dir/release-count"
+      "$picker_load_dir/release-count" \
+      "$picker_load_dir/rc-summary" \
+      "$picker_load_dir/rc-state" \
+      "$picker_load_dir/rc-error"
     rmdir -- "$picker_load_dir" 2>/dev/null || true
   fi
   picker_load_dir=""
 }
 
 load_picker_index() {
-  local output number title labels updated issue_status=0 implementation_pid release_pid
+  local output number title labels updated issue_status=0 implementation_pid release_pid rc_pid
   local -a args
 
   all_issue_numbers=()
@@ -1575,18 +1626,30 @@ load_picker_index() {
   ) &
   release_pid=$!
 
+  (
+    load_picker_rc_status
+    printf '%s' "$picker_rc_summary" > "$picker_load_dir/rc-summary"
+    printf '%s' "$picker_rc_state" > "$picker_load_dir/rc-state"
+    printf '%s' "$picker_rc_error" > "$picker_load_dir/rc-error"
+  ) &
+  rc_pid=$!
+
   args=(issue list --state open --limit "$issue_limit")
   args+=(--json number,title,labels,updatedAt --template '{{range .}}{{printf "%v\t%s\t" .number .title}}{{range $i,$label := .labels}}{{if $i}}, {{end}}{{.name}}{{end}}{{printf "\t%s\n" .updatedAt}}{{end}}')
 
   output="$(gh "${args[@]}")" || issue_status=$?
   wait "$implementation_pid" || true
   wait "$release_pid" || true
+  wait "$rc_pid" || true
 
   implementation_summary="$(<"$picker_load_dir/implementation")"
   implementation_summary_error="$(<"$picker_load_dir/implementation-error")"
   picker_release_summary="$(<"$picker_load_dir/release-summary")"
   picker_release_error="$(<"$picker_load_dir/release-error")"
   picker_release_count="$(<"$picker_load_dir/release-count")"
+  picker_rc_summary="$(<"$picker_load_dir/rc-summary")"
+  picker_rc_state="$(<"$picker_load_dir/rc-state")"
+  picker_rc_error="$(<"$picker_load_dir/rc-error")"
   cleanup_picker_load_dir
 
   if [[ "$issue_status" -ne 0 ]]; then
@@ -1659,6 +1722,23 @@ render_picker() {
     fi
   else
     style '1;31' "${picker_release_error:-Release status loading...}"
+  fi
+  printf '\n'
+  style '2' 'Candidate'
+  printf '  '
+  if [[ -n "$picker_rc_error" ]]; then
+    style '1;31' "$picker_rc_error"
+  else
+    case "$picker_rc_state" in
+      prerelease)
+        style '1;33' "$picker_rc_summary"
+        printf '  '
+        style '2' '[t] test  [P] promote'
+        ;;
+      draft) style '1;31' "$picker_rc_summary" ;;
+      none) style '2' "$picker_rc_summary" ;;
+      *) style '2' 'Candidate status loading...' ;;
+    esac
   fi
   printf '\n\n'
   for index in "${!picker_filters[@]}"; do
@@ -1857,6 +1937,10 @@ Picker keys
                 run wt done on each (all of its guards apply) until you quit
   g             Read or change persistent primary and role agent defaults
                 (local config only; no GitHub or Herdr call)
+  t             Test the release candidate: download its DMG and test card,
+                verify the digest, optionally launch it in an isolated profile
+  P             Promote the tested release candidate: run the promotion check,
+                type the exact tag, dispatch (GitHub approval still required)
   r             Refresh implementations, release status, and GitHub Issues
   ?             Show this help
   q             Quit
@@ -2847,6 +2931,15 @@ run_picker() {
         # contact GitHub after this action.
         with_normal_terminal agent_defaults_action
         ;;
+      t)
+        # Global like e: the candidate is not tied to a selected Issue.
+        with_normal_terminal test_rc_action
+        ;;
+      P)
+        # A dispatch changes nothing visible here until GitHub's approval and
+        # stable publication finish, so there is nothing to refresh.
+        with_normal_terminal promote_rc_action
+        ;;
       ' ')
         if [[ "$count" -gt 0 ]]; then
           bundle_mark_toggle "${picker_filters[$filter_index]}" \
@@ -3061,6 +3154,12 @@ while true; do
         continue
       fi
       finish_implementations
+      ;;
+    t|test-rc)
+      test_rc_action ${argument:+"$argument"} ${extra:+"$extra"}
+      ;;
+    promote)
+      promote_rc_action ${argument:+"$argument"} ${extra:+"$extra"}
       ;;
     h|help|'?')
       print_usage

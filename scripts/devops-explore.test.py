@@ -36,7 +36,8 @@ class ExploreTests(unittest.TestCase):
         scripts = self.repo / "scripts"
         (scripts / "lib").mkdir(parents=True)
         shutil.copy(ROOT / "scripts/devops.sh", scripts)
-        for name in ("devflow-common.sh", "devops-explore.sh", "devops-explore-launch.sh", "devops-explore-evidence.py"):
+        for name in ("devflow-common.sh", "devops-explore.sh", "devops-explore-launch.sh",
+                     "devops-explore-evidence.py", "devops-release-candidate.sh"):
             shutil.copy(ROOT / "scripts/lib" / name, scripts / "lib")
         shutil.copytree(ROOT / "scripts/devops-prompts", scripts / "devops-prompts")
         self.script = scripts / "devops.sh"
