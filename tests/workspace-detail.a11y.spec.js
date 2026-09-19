@@ -104,6 +104,10 @@ for (const theme of ['light', 'dark']) {
         const belt = read('.ws-cmd-map-belt');
         const beltButton = read('.ws-cmd-map-belt-btn');
         const questButton = read('.ws-cmd-map-quest-fab');
+        const viewSwitch = getComputedStyle(document.querySelector('.ws-cmd-view-switch'));
+        const inactiveView = getComputedStyle(
+          document.querySelector('[data-cmd-view-mode="details"]')
+        );
         return {
           backgroundImage: computed.backgroundImage,
           backgroundSize: computed.backgroundSize,
@@ -112,7 +116,9 @@ for (const theme of ['light', 'dark']) {
           agentStatusBackground: agentStatus.backgroundColor,
           beltBackgroundImage: belt.backgroundImage,
           beltButtonColor: beltButton.color,
-          questButtonColor: questButton.color
+          questButtonColor: questButton.color,
+          viewSwitchBackground: viewSwitch.backgroundColor,
+          inactiveViewColor: inactiveView.color
         };
       });
       const endpoint = expectedTheme === 'light' ? 'rgb(223, 228, 232) 78%' : 'rgb(12, 13, 17) 78%';
@@ -130,6 +136,8 @@ for (const theme of ['light', 'dark']) {
         expect(style.beltBackgroundImage).toContain('rgba(255, 255, 255, 0.97)');
         expect(style.beltButtonColor).toBe('rgb(92, 92, 94)');
         expect(style.questButtonColor).toBe(expectedQuestColor);
+        expect(style.viewSwitchBackground).toBe('rgba(255, 255, 255, 0.92)');
+        expect(style.inactiveViewColor).toBe('rgb(31, 33, 40)');
       } else {
         expect(style.agentBackgroundImage).toContain('rgba(0, 0, 0, 0.16)');
         expect(style.agentNameColor).toBe(expectedNameColor);
@@ -137,11 +145,40 @@ for (const theme of ['light', 'dark']) {
         expect(style.beltBackgroundImage).toContain('rgba(17, 22, 29, 0.9)');
         expect(style.beltButtonColor).toBe('rgb(139, 144, 154)');
         expect(style.questButtonColor).toBe(expectedQuestColor);
+        expect(style.viewSwitchBackground).toBe('rgba(0, 0, 0, 0.2)');
+        expect(style.inactiveViewColor).toBe('rgb(125, 131, 142)');
       }
       return style;
     };
 
     await expect(operationsMap).toBeVisible();
+    const mapGeometry = await operationsMap.evaluate(element => {
+      const rects = selector =>
+        [...element.querySelectorAll(selector)].map(node => {
+          const rect = node.getBoundingClientRect();
+          return {
+            label: node.getAttribute('aria-label') || node.textContent.trim(),
+            left: rect.left,
+            right: rect.right,
+            top: rect.top,
+            bottom: rect.bottom
+          };
+        });
+      return {
+        agents: rects('.ws-cmd-map-agent'),
+        stations: rects('.ws-cmd-map-hq-station')
+      };
+    });
+    for (const agent of mapGeometry.agents) {
+      for (const station of mapGeometry.stations) {
+        const overlaps =
+          agent.left < station.right &&
+          agent.right > station.left &&
+          agent.top < station.bottom &&
+          agent.bottom > station.top;
+        expect(overlaps, `${agent.label} overlaps ${station.label}`).toBeFalsy();
+      }
+    }
     await expect(html).toHaveAttribute('data-bs-theme', theme);
     const startingStyle = await expectMapTheme(theme);
 

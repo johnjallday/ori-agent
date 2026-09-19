@@ -2336,12 +2336,21 @@ test('Operations Map keeps its dark base and uses crisp light surfaces', () => {
     /\[data-bs-theme="light"\] \.ws-cmd-opmap \.ws-cmd-map-hq-station\s*\{([\s\S]*?)\n\}/
   );
   const lightBeltRule = css.match(/\[data-bs-theme="light"\] \.ws-cmd-map-belt\s*\{([\s\S]*?)\n\}/);
+  const agentFieldRule = css.match(/(?:^|\n)\.ws-cmd-map-agent-field\s*\{([\s\S]*?)\n\}/);
+  const lightViewSwitchRule = css.match(
+    /\[data-bs-theme="light"\] \.ws-cmd-view-switch\s*\{([\s\S]*?)\n\}/
+  );
 
   assert.ok(baseRule, 'the base Operations Map rule must remain present');
   assert.ok(lightRule, 'light mode must override the Operations Map directly');
   assert.ok(lightAgentRule, 'light mode must give agent cards a dedicated surface');
   assert.ok(lightHQRule, 'light mode must give HQ stations a dedicated surface');
   assert.ok(lightBeltRule, 'light mode must give the tool belt a dedicated surface');
+  assert.ok(agentFieldRule, 'the Operations Map must define its specialist field');
+  assert.ok(
+    lightViewSwitchRule,
+    'light mode must give the workspace destinations a dedicated surface'
+  );
   assert.match(
     baseRule[1],
     /linear-gradient\(180deg, var\(--ws-panel\), #0c0d11 78%\)/,
@@ -2370,6 +2379,26 @@ test('Operations Map keeps its dark base and uses crisp light surfaces', () => {
   );
   assert.doesNotMatch(lightAgentRule[1], /rgba\(0, 0, 0/, 'agent cards avoid dark scrims');
   assert.doesNotMatch(lightHQRule[1], /rgba\(0, 0, 0/, 'HQ stations avoid dark scrims');
+  assert.match(
+    agentFieldRule[1],
+    /grid-template-columns: repeat\(auto-fit, minmax\(142px, 176px\)\);/,
+    'specialist cards stay bounded and clear of the default HQ station lane'
+  );
+  assert.match(
+    css,
+    /@media \(max-width: 767px\)[\s\S]*?\.ws-cmd-map-agent-field\s*\{[\s\S]*?grid-template-columns: repeat\(auto-fit, minmax\(132px, 176px\)\);/,
+    'specialist cards remain bounded at the narrow breakpoint'
+  );
+  assert.match(
+    lightViewSwitchRule[1],
+    /background: rgba\(255, 255, 255, 0\.92\);/,
+    'the light workspace destinations use a clean raised surface'
+  );
+  assert.match(
+    css,
+    /\[data-bs-theme="light"\] \.ws-cmd-view-btn\s*\{\s*color: var\(--ws-ink\);/,
+    'inactive light workspace destinations use dark ink'
+  );
   assert.match(
     css,
     /\[data-bs-theme="light"\] \.ws-cmd-opmap \.ws-cmd-map-agent-copy strong\s*\{\s*color: var\(--ws-ink-heading\);/,
