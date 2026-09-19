@@ -409,7 +409,21 @@ func (h *Handler) cleanupEntryAgent(name, workspaceID string) {
 // SQLite record trashed, stashing the paths needed to restore it. The record and
 // its sessions are preserved so a restore is high fidelity.
 func (h *Handler) trashWorkspace(ctx context.Context, ws *session.Workspace) error {
-	originalPath, trashedPath, err := h.workspaceStore.Trash(ws.ID)
+	return h.trashWorkspaceWithGroupReview(ctx, ws, "")
+}
+
+func (h *Handler) trashReviewedRequiredWorkspace(ctx context.Context, ws *session.Workspace, operationDigest string) error {
+	return h.trashWorkspaceWithGroupReview(ctx, ws, operationDigest)
+}
+
+func (h *Handler) trashWorkspaceWithGroupReview(ctx context.Context, ws *session.Workspace, operationDigest string) error {
+	var originalPath, trashedPath string
+	var err error
+	if strings.TrimSpace(operationDigest) == "" {
+		originalPath, trashedPath, err = h.workspaceStore.Trash(ws.ID)
+	} else {
+		originalPath, trashedPath, err = h.workspaceStore.TrashReviewedGroupRequirement(ws.ID, operationDigest)
+	}
 	if err != nil {
 		return err
 	}

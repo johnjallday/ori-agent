@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/grouprequirements"
@@ -384,6 +385,81 @@ func TestCreateWorkspaceRequiredReviewCommitAndReuse(t *testing.T) {
 	}).GetFolderWorkspace(projectID)
 	if status := agentworkspace.EvaluateGroupRequirementLifecycle(reconnected, store.Get); status == nil || status.State != agentworkspace.GroupRequirementStatusReadyGrouped {
 		t.Fatalf("reconnect status = %#v", status)
+	}
+}
+
+func TestRequiredContractDeletionReviewUnblocksExactPermanentDelete(t *testing.T) {
+	template := policyTemplate(projecttemplates.GroupPolicyRequired)
+	handler, store, cleanup := newPolicyHandler(t, &template)
+	defer cleanup()
+
+	project := agentworkspace.NewWorkspace(agentworkspace.CreateWorkspaceParams{Name: "Detached Required"})
+	project.ID = "detached-required-delete"
+	project.OwnerUserID = "local"
+	key := agentworkspace.AssistantProgramKey{OwnerUserID: "local", PluginID: "neutral", ProgramID: "neutral-program"}.Normalize()
+	digest := strings.Repeat("d", 64)
+	project.SetTemplateProvenance(&agentworkspace.TemplateProvenance{
+		TemplateID: template.ID,
+		GroupRequirement: &agentworkspace.GroupRequirementSnapshot{
+			SchemaVersion: agentworkspace.GroupRequirementSnapshotSchemaVersion, Policy: "required",
+			SelectedComposition: agentworkspace.GroupRequirementCompositionGrouped,
+			TemplateID:          template.ID, TemplateRevision: digest, DefinitionDigest: digest,
+			ProgramKey: &key, HomeWorkspaceID: "removed-home",
+			ProjectLinkID: agentworkspace.AssistantProjectLinkID("removed-home", project.ID),
+			ReviewDigest:  digest, OperationDigest: digest, AppliedAt: time.Now().UTC(),
+		},
+	})
+	if err := store.Save(project); err != nil {
+		t.Fatal(err)
+	}
+
+	deleteURL := "/api/workspaces/" + project.ID + "?confirm=true&delete_sessions=true"
+	blocked := httptest.NewRecorder()
+	handler.HandleWorkspaces(blocked, httptest.NewRequest(http.MethodDelete, deleteURL, nil))
+	if blocked.Code != http.StatusConflict || !strings.Contains(blocked.Body.String(), groupRequirementDeletionReviewRequired) {
+		t.Fatalf("unreviewed delete status=%d body=%s", blocked.Code, blocked.Body.String())
+	}
+
+	reviewRequest := httptest.NewRequest(http.MethodPost,
+		"/api/workspaces/"+project.ID+"/group-requirement/delete/review",
+		strings.NewReader(`{"delete_sessions":true}`))
+	reviewRequest.Header.Set("Content-Type", "application/json")
+	reviewResponse := httptest.NewRecorder()
+	handler.HandleWorkspaces(reviewResponse, reviewRequest)
+	if reviewResponse.Code != http.StatusOK {
+		t.Fatalf("review status=%d body=%s", reviewResponse.Code, reviewResponse.Body.String())
+	}
+	var reviewBody map[string]any
+	if err := json.Unmarshal(reviewResponse.Body.Bytes(), &reviewBody); err != nil {
+		t.Fatal(err)
+	}
+	review := reviewBody["group_requirement_review"].(map[string]any)
+	token, _ := review["review_token"].(string)
+	if token == "" || review["trashes"] != false {
+		t.Fatalf("review = %#v", review)
+	}
+
+	changedModeRequest := httptest.NewRequest(http.MethodDelete,
+		"/api/workspaces/"+project.ID+"?confirm=true", nil)
+	changedModeRequest.Header.Set(groupRequirementDeletionReviewHeader, token)
+	changedModeResponse := httptest.NewRecorder()
+	handler.HandleWorkspaces(changedModeResponse, changedModeRequest)
+	if changedModeResponse.Code != http.StatusConflict {
+		t.Fatalf("changed mode status=%d body=%s", changedModeResponse.Code, changedModeResponse.Body.String())
+	}
+
+	confirmedRequest := httptest.NewRequest(http.MethodDelete, deleteURL, nil)
+	confirmedRequest.Header.Set(groupRequirementDeletionReviewHeader, token)
+	confirmedResponse := httptest.NewRecorder()
+	handler.HandleWorkspaces(confirmedResponse, confirmedRequest)
+	if confirmedResponse.Code != http.StatusNoContent {
+		t.Fatalf("confirmed delete status=%d body=%s", confirmedResponse.Code, confirmedResponse.Body.String())
+	}
+	if _, err := store.Get(project.ID); err == nil {
+		t.Fatal("reviewed Required project survived primary deletion")
+	}
+	if _, err := handler.workspaceStore.Get(project.ID); err == nil {
+		t.Fatal("reviewed Required project survived folder deletion")
 	}
 }
 

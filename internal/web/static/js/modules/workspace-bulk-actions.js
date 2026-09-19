@@ -25,6 +25,8 @@ import { workspacePageURL } from './workspace-routes.js';
 import { openDeleteDialog } from './workspace-delete-dialog.js';
 
 const REVIEW_REQUIRED = 'assistant_program_review_required';
+const GROUP_REQUIREMENT_REVIEW_REQUIRED = 'group_requirement_review_required';
+const GROUP_REQUIREMENT_REVIEW_HEADER = 'X-Ori-Group-Requirement-Review';
 const REVIEW_HOME_REMOVAL = 'Review Home removal';
 // A group can hold more than one protected Home. Each reviewed removal is a
 // separate consent, so the retry loop is bounded rather than open-ended.
@@ -160,6 +162,13 @@ async function requestError(response, fallback) {
       stationId: str(details.station_workspace_id),
       action: str(details.review_action),
       homeSlug: str(details.review_home_slug)
+    };
+  }
+  if (response.status === 409 && payload?.code === GROUP_REQUIREMENT_REVIEW_REQUIRED) {
+    const details = payload.details || {};
+    error.groupRequirementReview = {
+      workspaceId: typeof details.workspace_id === 'string' ? details.workspace_id.trim() : '',
+      deleteSessions: details.delete_sessions === true
     };
   }
   return error;
@@ -352,6 +361,57 @@ async function resolveRemovalReview(ctx, session, row, error) {
  * the row itself, the removal IS the delete. When it was nested inside the
  * row, the original delete is retried with the same mode the user chose.
  */
+async function resolveGroupRequirementDeletionReview(ctx, session, row, error, mode) {
+  const requested = error.groupRequirementReview || {};
+  if (!requested.workspaceId || requested.workspaceId !== row.id) {
+    await session.notice({ message: error.message });
+    return false;
+  }
+
+  session.busy('Reviewing the Required template contract…');
+  let payload;
+  try {
+    payload = await requestJSON(
+      ctx,
+      `/api/workspaces/${encodeURIComponent(row.id)}/group-requirement/delete/review`,
+      { method: 'POST', body: { delete_sessions: requested.deleteSessions } }
+    );
+  } catch (reviewError) {
+    await session.notice({
+      message: reviewError.message || 'The Required template contract could not be reviewed.'
+    });
+    return false;
+  }
+  const review = payload?.group_requirement_review || {};
+  const token = String(review.review_token || '').trim();
+  if (!token) {
+    await session.notice({ message: 'The Required template contract review was incomplete.' });
+    return false;
+  }
+
+  let result = {};
+  const removed = await session.review({
+    heading: `Delete “${row.name}” after contract review?`,
+    summary:
+      review.summary ||
+      'This workspace is detached from its required group. Review deletion before continuing.',
+    impact: Array.isArray(review.impact) ? review.impact : [],
+    confirmLabel: review.trashes ? 'Move to Trash' : 'Delete workspace',
+    progress: review.trashes ? 'Moving to Trash…' : 'Deleting workspace…',
+    confirm: async () => {
+      const response = await ctxFetch(ctx)(deleteURL(row.id, mode), {
+        method: 'DELETE',
+        headers: { Accept: 'application/json', [GROUP_REQUIREMENT_REVIEW_HEADER]: token }
+      });
+      if (!response.ok) throw await requestError(response, 'Reviewed deletion failed');
+      if (response.status !== 204) result = await response.json().catch(() => ({}));
+    }
+  });
+  if (!removed) return false;
+  if (result?.trashed) trashed(ctx, row.id, row.name);
+  return true;
+}
+
 async function performDelete(ctx, session, row, mode, round = 0) {
   session.busy('Deleting…');
   let error;
@@ -384,6 +444,14 @@ async function performDelete(ctx, session, row, mode, round = 0) {
       return true;
     }
     return performDelete(ctx, session, row, mode, round + 1);
+  }
+  if (error && error.groupRequirementReview) {
+    const removed = await resolveGroupRequirementDeletionReview(ctx, session, row, error, mode);
+    session.close();
+    if (!removed) return false;
+    announce(ctx, `${row.name} deleted.`);
+    await changed(ctx);
+    return true;
   }
 
   session.close();
@@ -431,6 +499,7 @@ export async function deleteWorkspaces(ids, ctx) {
   let deleted = 0;
   const failures = [];
   const reviews = [];
+  const groupRequirementReviews = [];
   for (const id of selected) {
     const row = findRow(ctx, id);
     if (!row) continue;
@@ -442,6 +511,7 @@ export async function deleteWorkspaces(ids, ctx) {
         const error = await requestError(res, 'Failed to delete');
         failures.push(`${row.name}: ${error.message}`);
         if (error.review) reviews.push({ row, error });
+        if (error.groupRequirementReview) groupRequirementReviews.push({ row, error });
         continue;
       }
       if (res.status !== 204) {
@@ -475,6 +545,22 @@ export async function deleteWorkspaces(ids, ctx) {
     session.close();
     if (removed) {
       if (first.error.review.stationId === first.row.id) deleted += 1;
+      await changed(ctx);
+    }
+    return deleted;
+  }
+  if (stations.length === 0 && groupRequirementReviews.length === 1) {
+    const [first] = groupRequirementReviews;
+    const removed = await resolveGroupRequirementDeletionReview(
+      ctx,
+      session,
+      first.row,
+      first.error,
+      ''
+    );
+    session.close();
+    if (removed) {
+      deleted += 1;
       await changed(ctx);
     }
     return deleted;

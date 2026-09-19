@@ -9,8 +9,14 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
+	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
+)
+
+const (
+	groupRequirementDeletionReviewRequired = "group_requirement_review_required"
+	groupRequirementDeletionReviewHeader   = "X-Ori-Group-Requirement-Review"
 )
 
 type createWorkspaceGroupPlan struct {
@@ -483,6 +489,62 @@ func (h *Handler) CommitGroupRequirementHome(w http.ResponseWriter, r *http.Requ
 			"home_created": claim.HomeCreated, "idempotent_replay": claim.Replayed,
 		},
 	})
+}
+
+type requiredGroupRequirementDeletionReviewRequest struct {
+	DeleteSessions bool `json:"delete_sessions"`
+}
+
+func (h *Handler) requiredGroupRequirementDeletionInput(ctx context.Context, workspaceID string, deleteSessions bool) (grouprequirements.DeletionInput, error) {
+	if h == nil || h.groupRequirements == nil || h.currentUserID == nil || h.workspaceStore == nil {
+		return grouprequirements.DeletionInput{}, grouprequirements.ErrUnavailable
+	}
+	ownerUserID, err := h.currentUserID(ctx)
+	if err != nil || strings.TrimSpace(ownerUserID) == "" {
+		return grouprequirements.DeletionInput{}, grouprequirements.ErrUnavailable
+	}
+	return grouprequirements.DeletionInput{
+		OwnerUserID: strings.TrimSpace(ownerUserID), WorkspaceID: strings.TrimSpace(workspaceID),
+		DeleteSessions: deleteSessions,
+		TrashWorkspace: !deleteSessions && platform.TrashSupported(),
+	}, nil
+}
+
+// ReviewRequiredGroupRequirementDeletion returns an inert receipt for deleting
+// one detached Required project. The normal DELETE remains the only owner of
+// session, folder, agent, and Trash consequences.
+func (h *Handler) ReviewRequiredGroupRequirementDeletion(w http.ResponseWriter, r *http.Request, workspaceID string) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var request requiredGroupRequirementDeletionReviewRequest
+	if !orihttp.ParseJSONBody(w, r, &request) {
+		return
+	}
+	input, err := h.requiredGroupRequirementDeletionInput(r.Context(), workspaceID, request.DeleteSessions)
+	if err != nil {
+		respondRequiredGroupRequirementDeletionError(w, err)
+		return
+	}
+	review, err := h.groupRequirements.ReviewDeletion(r.Context(), input)
+	if err != nil {
+		respondRequiredGroupRequirementDeletionError(w, err)
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"group_requirement_review": review})
+}
+
+func respondRequiredGroupRequirementDeletionError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, grouprequirements.ErrLifecycleNotRequired):
+		_ = orihttp.RespondConflict(w, "This workspace has no Required template contract to review.")
+	case errors.Is(err, grouprequirements.ErrLifecycleConflict):
+		_ = orihttp.RespondConflict(w, "Assistant Program membership changed. Review disconnect or Home removal before deleting this workspace.")
+	case errors.Is(err, grouprequirements.ErrReviewRequired), errors.Is(err, grouprequirements.ErrReviewStale):
+		_ = orihttp.RespondConflict(w, "The deletion review changed or expired. Review the Required template contract again.")
+	default:
+		respondGroupRequirementUnavailable(w)
+	}
 }
 
 func respondGroupRequirementUnavailable(w http.ResponseWriter) {

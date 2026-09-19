@@ -1184,6 +1184,17 @@ DELETE /api/workspaces/:id?confirm=true&delete_mode=contents
 
 Both modes hard-block with `409 Conflict` while any workspace in the group has active task work.
 
+**Deleting a detached Required-template workspace** adds one lifecycle review without creating a separate deletion owner:
+
+```http
+POST   /api/workspaces/{id}/group-requirement/delete/review
+       {"delete_sessions":false}
+DELETE /api/workspaces/{id}?confirm=true
+       X-Ori-Group-Requirement-Review: <review_token>
+```
+
+An unreviewed `DELETE` returns `409` with code `group_requirement_review_required`. The review is inert and expires after 15 minutes. It succeeds only when the canonical Required contract is structurally valid and the project has no live child link, Home reciprocal membership, or Assistant Home state. The returned impact names whether the exact request will use Trash or permanent deletion. The repeated `DELETE` consumes a token bound to the owner, workspace ID, complete contract snapshot, immutable contract operation digest, `delete_sessions` choice, and Trash/permanent mode. Changing any of those facts requires a new review. Ordinary Assistant disconnect/Home-removal review still runs first, and the existing external-folder deletion boundary remains unchanged.
+
 ## Workspace Memory API
 
 Each workspace keeps a curated `MEMORY.md` of durable operational knowledge (facts, decisions, dead ends, watch-state) at the root of its folder. The file on disk is canonical — there is no database copy. Memory is injected into every mission run and workspace chat (capped at ~2,000 tokens) and can be written by agents via the `memory_write` / `memory_forget` tools under every autonomy policy, including Watch.
