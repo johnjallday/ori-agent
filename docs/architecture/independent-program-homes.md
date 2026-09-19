@@ -528,7 +528,39 @@ project-team/reference and schema-2 placement/standalone blocks while preserving
 blueprint inputs, skeleton, connection, modes, capabilities, technical skills and
 project quest behavior. Both briefs require the feature gate and strict versions.
 
-The two companion worktrees and owners remain unavailable as recorded in the
-implementation checklist. Consequently companion edits, real-candidate demos and
-publication evidence are blocked, but fixture-backed Ori host implementation may
-proceed from this closed contract.
+## 11. Local candidate evidence and delivery status
+
+The companion worktrees were later separately authorized and produced clean,
+unpublished candidates:
+
+- Music Project Management 0.1.0: commit
+  `8f4abd0b283fefe23653a2cf81deb800123c4bde`, tree
+  `5745acc5d3f319c20b5055ac1a244c9646ecc93e`.
+- REAPER Plugin 0.8.0 / Reaper Song v9: commit
+  `68488b4d62978f22bfdff26c3554cebb6b4cf396`, tree
+  `f03299c92dbecef5c305efb5af03023a86e766bc`.
+
+Exact committed-tree acceptance passed for Music-only, Music-first, REAPER-first,
+and REAPER-only standalone state. Combined runs created two linked projects under
+one Music-owned Home/manager, confirmed separate persisted provider evidence, and
+created one reviewed non-running child Ticket. Lifecycle runs disabled, removed,
+and reinstalled each provider and then restarted Ori against the same sandbox;
+identities, links, rosters, Ticket, typed inputs, and `.rpp` bytes remained without
+duplication. Standalone retained no Home or Assistant Program link across restart.
+
+This is local compatibility evidence only. No candidate branch was pushed, no PR,
+tag, release, registry/floor change, production install, model-backed execution,
+or live REAPER action occurred. Publication remains blocked on the release order in
+section 9 and separate human authorization.
+
+### Source-delivery and production follow-up matrix
+
+| Source | Exact local candidate | Target after human approval | Compatibility identity | Current gate |
+| --- | --- | --- | --- | --- |
+| Ori | `feature/music-project-management-home`, through `432d688c` plus the final acceptance/docs slice | `dev` | adds `independent_program_homes_v1`; Home/project contribution schema 1; preserves combined Assistant Program schema 1/2 | final diff review and human `wt pr` approval; no rollout implied |
+| Music Project Management | `8f4abd0b283fefe23653a2cf81deb800123c4bde` | public repository `main` | package 0.1.0; Home schema/version 1; embedded Assistant Program schema 2; one canonical managed skill | separate push/PR authorization after compatible Ori is available |
+| REAPER Plugin | `68488b4d62978f22bfdff26c3554cebb6b4cf396` | repository `main` | plugin/service 0.8.0; blueprint 9; project team schema/version 1; setup quest 3; `independent_program_homes_v1` | separate push/PR authorization after Ori and Music package availability |
+| Reviewed integration registry/floor | unchanged published 0.6.1 floor | later Ori follow-up, if required | must use a published REAPER tag/commit and verified release artifact, never a local candidate or squash precursor | blocked on published compatible release evidence and separate approval |
+
+A non-empty model was not configured in local acceptance. Live REAPER, Web Remote,
+runner, DAW, publication, and production-state checks remain explicitly NOT RUN.

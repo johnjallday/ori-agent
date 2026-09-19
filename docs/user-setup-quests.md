@@ -34,7 +34,9 @@ Ori checks that the template has:
 
 - a valid project connection with at least one usable existing- or new-project path;
 - a real skeleton and matching project entry when the new-project path needs them;
-- a current Assistant Program with separate Home and exact-project roles;
+- either a current combined Assistant Program with separate scopes, or one valid
+  split project declaration that names an exact Assistant Program Home target and
+  owns the project roles;
 - a File-only runtime mode; and
 - a post-workspace Setup Wizard with a required runtime-mode step.
 

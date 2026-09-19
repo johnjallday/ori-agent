@@ -117,10 +117,12 @@ In `.ori-plugin/plugin.json`:
 - `workspace_launch` is required and contains exactly `group_title` and
   `group_name`. The former runtime title and instructions are unknown fields.
 - Each quest names one blueprint contributed by this same plugin and the
-  expected assistant-program ID. That blueprint's manifest must explicitly set
-  `"setup_quest": "<quest-id>"`, contain the matching assistant program, and
-  declare project connection support. Foreign, missing or orphaned references
-  reject resolution.
+  expected Assistant Program Home ID. That blueprint's manifest must explicitly
+  set `"setup_quest": "<quest-id>"`, declare project connection support, and
+  contain either the matching legacy combined Assistant Program or one valid
+  `assistant_project` reference to that Home program. A split reference does not
+  install or create its Home provider during catalog/eligibility reads. Foreign,
+  missing, ambiguous, or orphaned references reject resolution.
 
 The declarative schemas are
 [`setup-quest-v2.schema.json`](../internal/plugin/schema/setup-quest-v2.schema.json)

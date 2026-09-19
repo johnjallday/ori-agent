@@ -281,34 +281,39 @@ cd "$repo_root"
 printf 'Building Ori server...\n'
 go build -o bin/ori-agent ./cmd/server
 
-(
-	cd "$sandbox"
-	# This process-local path authorizes only the exact staged demo copy to
-	# satisfy the journey prerequisite. It does not publish or release-verify it.
-	exec env HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" \
-		ORI_REVIEWED_INTEGRATION_DEV_SOURCE="$bundled_plugin" \
-		"$repo_root/bin/ori-agent"
-) >"$server_log" 2>&1 &
-server_pid=$!
+start_server() {
+	(
+		cd "$sandbox"
+		# This process-local path authorizes only the exact staged demo copy to
+		# satisfy the journey prerequisite. It does not publish or release-verify it.
+		exec env HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" \
+			ORI_REVIEWED_INTEGRATION_DEV_SOURCE="$bundled_plugin" \
+			"$repo_root/bin/ori-agent"
+	) >>"$server_log" 2>&1 &
+	server_pid=$!
 
-ready=0
-for _ in {1..120}; do
-	if curl -fsS -o /dev/null --max-time 1 "$base_url/health" 2>/dev/null; then
-		ready=1
-		break
-	fi
-	if ! kill -0 "$server_pid" 2>/dev/null; then
-		printf 'Ori exited before becoming ready. Log:\n' >&2
+	local ready=0
+	for _ in {1..120}; do
+		if curl -fsS -o /dev/null --max-time 1 "$base_url/health" 2>/dev/null; then
+			ready=1
+			break
+		fi
+		if ! kill -0 "$server_pid" 2>/dev/null; then
+			printf 'Ori exited before becoming ready. Log:\n' >&2
+			tail -n 80 "$server_log" >&2 || true
+			exit 1
+		fi
+		sleep 0.5
+	done
+	if ((ready == 0)); then
+		printf 'Ori did not become ready. Log:\n' >&2
 		tail -n 80 "$server_log" >&2 || true
 		exit 1
 	fi
-	sleep 0.5
-done
-if ((ready == 0)); then
-	printf 'Ori did not become ready. Log:\n' >&2
-	tail -n 80 "$server_log" >&2 || true
-	exit 1
-fi
+}
+
+: >"$server_log"
+start_server
 
 install_candidate() {
 	local plugin_id="$1"
@@ -412,7 +417,7 @@ if [[ "$mode" == "test" ]]; then
 			ORI_MUSIC_REAPER_FINAL_SNAPSHOT="$final_snapshot" \
 			ORI_MUSIC_REAPER_EVIDENCE_DIR="$sandbox/evidence/screenshots" \
 			ORI_MUSIC_REAPER_SANDBOX="$sandbox" \
-			npx playwright test tests/music-reaper-candidates.spec.ts \
+			npx playwright test tests/music-project-management-home.spec.ts \
 			--project=chromium --workers=1 ${playwright_args[@]+"${playwright_args[@]}"}
 	else
 		printf 'Running coordinated REAPER browser tests...\n'
@@ -426,6 +431,27 @@ if [[ "$mode" == "test" ]]; then
 			--project=chromium --workers=1 ${playwright_args[@]+"${playwright_args[@]}"}
 	fi
 	test_status=$?
+	if ((test_status == 0)) && [[ -n "$install_order" ]]; then
+		printf 'Restarting Ori against the same isolated candidate state...\n'
+		kill "$server_pid"
+		wait "$server_pid" 2>/dev/null || true
+		server_pid=""
+		printf '\n--- controlled acceptance restart ---\n' >>"$server_log"
+		start_server
+		env PLAYWRIGHT_BASE_URL="$base_url" \
+			ORI_MUSIC_REAPER_ACCEPTANCE=1 \
+			ORI_MUSIC_REAPER_RESTART_CHECK=1 \
+			ORI_MUSIC_REAPER_INSTALL_ORDER="$install_order" \
+			ORI_REAPER_PLUGIN_PATH="$bundled_plugin" \
+			ORI_REAPER_PLUGIN_REVISION="$reaper_revision" \
+			ORI_MUSIC_PLUGIN_PATH="$bundled_music" \
+			ORI_MUSIC_PLUGIN_REVISION="$music_revision" \
+			ORI_MUSIC_REAPER_EVIDENCE_DIR="$sandbox/evidence/screenshots" \
+			ORI_MUSIC_REAPER_SANDBOX="$sandbox" \
+			npx playwright test tests/music-project-management-home.spec.ts \
+			--project=chromium --workers=1 --grep 'restart preserves exact candidate identities'
+		test_status=$?
+	fi
 	set -e
 	exit "$test_status"
 fi

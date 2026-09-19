@@ -7,6 +7,7 @@ import path from 'node:path';
 // both candidate exports, HOME, ORI_DATA_DIR, skills, projects, and screenshots
 // stay inside one disposable sandbox. No test opens or controls REAPER.
 const ENABLED = process.env.ORI_MUSIC_REAPER_ACCEPTANCE === '1';
+const RESTART_CHECK = process.env.ORI_MUSIC_REAPER_RESTART_CHECK === '1';
 const ORDER = process.env.ORI_MUSIC_REAPER_INSTALL_ORDER || '';
 const SHOTS = process.env.ORI_MUSIC_REAPER_EVIDENCE_DIR || 'test-results/music-reaper';
 const REAPER_PATH = process.env.ORI_REAPER_PLUGIN_PATH || '';
@@ -54,6 +55,20 @@ async function json(response: Awaited<ReturnType<APIRequestContext['get']>>) {
   const text = await response.text();
   expect(response.ok(), text).toBeTruthy();
   return JSON.parse(text);
+}
+
+async function installCandidate(
+  request: APIRequestContext,
+  source: string,
+  format = ''
+): Promise<void> {
+  const data: Record<string, unknown> = { source, confirm: true };
+  if (format) data.format = format;
+  await json(await request.post('/api/plugins/install', { data }));
+}
+
+async function enableCandidate(request: APIRequestContext, pluginID: string): Promise<void> {
+  await json(await request.post(`/api/plugins/${pluginID}/enable`));
 }
 
 function snapshot(path: string): Snapshot {
@@ -507,6 +522,271 @@ test('a reviewed Home handoff creates one inert child-owned Ticket', async ({ re
   expect((homeTickets.tickets || []).some((item: { id: string }) => item.id === ticket.id)).toBe(
     false
   );
+});
+
+test('provider removal and exact reinstall preserve independent data and authority', async ({
+  page,
+  request
+}) => {
+  test.skip(ORDER === 'reaper-only', 'combined-provider lifecycle acceptance only');
+  expect(homeID).toBeTruthy();
+  expect(projectIDs).toHaveLength(2);
+
+  const beforeWorkspaces = await workspaces(request);
+  const homeSummary = beforeWorkspaces.find(workspace => workspace.id === homeID)!;
+  const persistedHomeBefore = persistedWorkspace(homeID).data;
+  const persistedProjectsBefore = projectIDs.map(id => persistedWorkspace(id));
+  const linksBefore = persistedProjectsBefore.map(project =>
+    JSON.stringify(project.data.assistant_project_link)
+  );
+  const projectFilesBefore = persistedProjectsBefore.map(project =>
+    readFileSync(persistedProjectFile(project.file, project.data), 'utf8')
+  );
+  const ticketsBefore = await json(await request.get(`/api/workspaces/${projectIDs[0]}/tickets`));
+  const portfolio = await json(
+    await request.get(`/api/workspaces/${homeID}/assistant-program/portfolio`)
+  );
+  const firstLink = portfolio.projects.find(
+    (entry: { project_workspace_id: string }) => entry.project_workspace_id === projectIDs[0]
+  );
+  expect(firstLink).toBeTruthy();
+
+  await json(await request.post('/api/plugins/reaper-plugin/disable'));
+  let homeAssistant = await json(await request.get(`/api/workspaces/${homeID}/assistant-program`));
+  expect(homeAssistant).toMatchObject({ home_provider_available: true });
+  let projectAssistant = await json(
+    await request.get(`/api/workspaces/${projectIDs[0]}/assistant-program`)
+  );
+  expect(projectAssistant).toMatchObject({
+    home_provider_available: true,
+    project_provider_available: false
+  });
+  const blockedWithoutProject = await request.post(
+    `/api/workspaces/${homeID}/assistant-program/handoffs/review`,
+    {
+      data: {
+        link_id: firstLink.link_id,
+        title: `Blocked without project provider ${RUN}`,
+        state: 'backlog'
+      }
+    }
+  );
+  expect(blockedWithoutProject.status(), await blockedWithoutProject.text()).toBe(409);
+  await page.goto(`/workspaces/${encodeURIComponent(homeSummary.folder_slug)}`);
+  await page.waitForTimeout(500);
+  await evidence(page, '06-reaper-disabled-home-preserved');
+
+  const removeReaper = await request.delete('/api/plugins/reaper-plugin');
+  expect(removeReaper.ok(), await removeReaper.text()).toBeTruthy();
+  expect(
+    pluginList(await json(await request.get('/api/plugins'))).map(plugin => plugin.name)
+  ).toEqual(['music-project-management']);
+  expect((await workspaces(request)).map(workspace => workspace.id).sort()).toEqual(
+    beforeWorkspaces.map(workspace => workspace.id).sort()
+  );
+  projectAssistant = await json(
+    await request.get(`/api/workspaces/${projectIDs[0]}/assistant-program`)
+  );
+  expect(projectAssistant).toMatchObject({
+    home_provider_available: true,
+    project_provider_available: false
+  });
+
+  await installCandidate(request, REAPER_PATH);
+  await enableCandidate(request, 'reaper-plugin');
+  projectAssistant = await json(
+    await request.get(`/api/workspaces/${projectIDs[0]}/assistant-program`)
+  );
+  expect(projectAssistant).toMatchObject({
+    home_provider_available: true,
+    project_provider_available: true
+  });
+
+  await json(await request.post('/api/plugins/music-project-management/disable'));
+  homeAssistant = await json(await request.get(`/api/workspaces/${homeID}/assistant-program`));
+  expect(homeAssistant).toMatchObject({ home_provider_available: false });
+  projectAssistant = await json(
+    await request.get(`/api/workspaces/${projectIDs[0]}/assistant-program`)
+  );
+  expect(projectAssistant).toMatchObject({
+    home_provider_available: false,
+    project_provider_available: true
+  });
+  const blockedWithoutHome = await request.post(
+    `/api/workspaces/${homeID}/assistant-program/handoffs/review`,
+    {
+      data: {
+        link_id: firstLink.link_id,
+        title: `Blocked without Home provider ${RUN}`,
+        state: 'backlog'
+      }
+    }
+  );
+  expect(blockedWithoutHome.status(), await blockedWithoutHome.text()).toBe(409);
+  await page.reload();
+  await page.waitForTimeout(500);
+  await evidence(page, '07-music-disabled-projects-preserved');
+
+  const removeMusic = await request.delete('/api/plugins/music-project-management');
+  expect(removeMusic.ok(), await removeMusic.text()).toBeTruthy();
+  expect(
+    pluginList(await json(await request.get('/api/plugins'))).map(plugin => plugin.name)
+  ).toEqual(['reaper-plugin']);
+  expect((await workspaces(request)).map(workspace => workspace.id).sort()).toEqual(
+    beforeWorkspaces.map(workspace => workspace.id).sort()
+  );
+  homeAssistant = await json(await request.get(`/api/workspaces/${homeID}/assistant-program`));
+  expect(homeAssistant).toMatchObject({ home_provider_available: false });
+  projectAssistant = await json(
+    await request.get(`/api/workspaces/${projectIDs[0]}/assistant-program`)
+  );
+  expect(projectAssistant).toMatchObject({
+    home_provider_available: false,
+    project_provider_available: true
+  });
+
+  await installCandidate(request, MUSIC_PATH, 'claude');
+  await enableCandidate(request, 'music-project-management');
+  homeAssistant = await json(await request.get(`/api/workspaces/${homeID}/assistant-program`));
+  expect(homeAssistant).toMatchObject({
+    home_provider_available: true,
+    project_provider_available: true,
+    primary_name: MANAGER_NAME
+  });
+  expect(homeAssistant.projects.map((project: { id: string }) => project.id).sort()).toEqual(
+    [...projectIDs].sort()
+  );
+  expect(homeAssistant.roster).toHaveLength(1);
+
+  const afterWorkspaces = await workspaces(request);
+  expect(afterWorkspaces.map(workspace => workspace.id).sort()).toEqual(
+    beforeWorkspaces.map(workspace => workspace.id).sort()
+  );
+  const persistedHomeAfter = persistedWorkspace(homeID).data;
+  expect(persistedHomeAfter.assistant_program_state.key).toEqual(
+    persistedHomeBefore.assistant_program_state.key
+  );
+  expect(persistedHomeAfter.assistant_program_state.linked_project_ids.sort()).toEqual(
+    [...projectIDs].sort()
+  );
+  expect(persistedHomeAfter.agent_instances).toHaveLength(1);
+  for (const [index, id] of projectIDs.entries()) {
+    const persisted = persistedWorkspace(id);
+    expect(JSON.stringify(persisted.data.assistant_project_link)).toBe(linksBefore[index]);
+    expect(readFileSync(persistedProjectFile(persisted.file, persisted.data), 'utf8')).toBe(
+      projectFilesBefore[index]
+    );
+  }
+  const ticketsAfter = await json(await request.get(`/api/workspaces/${projectIDs[0]}/tickets`));
+  expect((ticketsAfter.tickets || []).map((ticket: { id: string }) => ticket.id).sort()).toEqual(
+    (ticketsBefore.tickets || []).map((ticket: { id: string }) => ticket.id).sort()
+  );
+  await page.reload();
+  await page.waitForTimeout(500);
+  await evidence(page, '08-exact-reinstall-restored-availability');
+});
+
+test('restart preserves exact candidate identities, links, roles, and files', async ({
+  page,
+  request
+}) => {
+  test.skip(!RESTART_CHECK, 'run by scripts/reaper-demo.sh after its controlled restart');
+  const plugins = pluginList(await json(await request.get('/api/plugins')));
+  expect(plugins.every(plugin => plugin.enabled)).toBe(true);
+  const all = await workspaces(request);
+
+  if (ORDER === 'reaper-only') {
+    expect(plugins.map(plugin => plugin.name)).toEqual(['reaper-plugin']);
+    expect(all).toHaveLength(1);
+    const persisted = persistedWorkspace(all[0].id);
+    expect(persisted.data.assistant_program_state).toBeUndefined();
+    expect(persisted.data.assistant_project_link).toBeUndefined();
+    expect(readFileSync(persistedProjectFile(persisted.file, persisted.data), 'utf8')).toContain(
+      'TEMPO 127 4 4'
+    );
+    const assistant = await json(
+      await request.get(`/api/workspaces/${all[0].id}/assistant-program`)
+    );
+    expect(assistant).toMatchObject({ available: false, project_id: all[0].id });
+    await page.goto(`/workspaces/${encodeURIComponent(all[0].folder_slug)}`);
+    await page.waitForTimeout(500);
+    await evidence(page, 'restart-standalone-preserved');
+    return;
+  }
+
+  expect(plugins.map(plugin => plugin.name).sort()).toEqual([
+    'music-project-management',
+    'reaper-plugin'
+  ]);
+  const home = all.find(workspace => workspace.kind === 'group');
+  expect(home).toBeTruthy();
+  const projects = all.filter(workspace => workspace.parent_id === home!.id);
+  expect(projects).toHaveLength(2);
+  const persistedHome = persistedWorkspace(home!.id).data;
+  expect(persistedHome.agent_instances).toHaveLength(1);
+  expect(persistedHome.agent_instances[0]).toMatchObject({
+    name: MANAGER_NAME,
+    role_id: 'portfolio_manager'
+  });
+  expect(persistedHome.assistant_program_state.key).toMatchObject({
+    owner_user_id: 'local',
+    plugin_id: 'music-project-management',
+    program_id: 'music-producer-assistant'
+  });
+  expect(persistedHome.assistant_program_state.linked_project_ids.sort()).toEqual(
+    projects.map(project => project.id).sort()
+  );
+  const homeAssistant = await json(
+    await request.get(`/api/workspaces/${home!.id}/assistant-program`)
+  );
+  expect(homeAssistant).toMatchObject({
+    available: true,
+    hired: true,
+    home_provider_available: true,
+    primary_name: MANAGER_NAME
+  });
+  expect(homeAssistant.projects).toHaveLength(2);
+  expect(homeAssistant.roster).toHaveLength(1);
+
+  let handoffTickets = 0;
+  for (const project of projects) {
+    const persisted = persistedWorkspace(project.id);
+    expect(persisted.data.assistant_project_link).toMatchObject({
+      station_workspace_id: home!.id,
+      home_provider: {
+        plugin_id: 'music-project-management',
+        plugin_version: '0.1.0',
+        program_id: 'music-producer-assistant'
+      },
+      project_provider: {
+        plugin_id: 'reaper-plugin',
+        plugin_version: '0.8.0',
+        blueprint_id: 'reaper-song',
+        blueprint_version: 9,
+        project_team_id: 'reaper-song-team'
+      }
+    });
+    expect(persisted.data.agent_instances).toHaveLength(3);
+    expect(readFileSync(persistedProjectFile(persisted.file, persisted.data), 'utf8')).toMatch(
+      /TEMPO (118|119) 4 4/
+    );
+    const assistant = await json(
+      await request.get(`/api/workspaces/${project.id}/assistant-program`)
+    );
+    expect(assistant).toMatchObject({
+      home_provider_available: true,
+      project_provider_available: true,
+      roster_scope: 'project'
+    });
+    const tickets = await json(await request.get(`/api/workspaces/${project.id}/tickets`));
+    handoffTickets += (tickets.tickets || []).filter(
+      (ticket: { source: string }) => ticket.source === 'assistant'
+    ).length;
+  }
+  expect(handoffTickets).toBe(1);
+  await page.goto(`/workspaces/${encodeURIComponent(home!.folder_slug)}`);
+  await page.waitForTimeout(500);
+  await evidence(page, 'restart-combined-state-preserved');
 });
 
 test('REAPER alone creates only an explicit Home-free standalone variant', async ({

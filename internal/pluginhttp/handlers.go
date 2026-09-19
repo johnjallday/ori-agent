@@ -2,6 +2,7 @@ package pluginhttp
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"path/filepath"
 	"sync"
@@ -55,6 +56,17 @@ func (h *Handler) Manager() *plugin.Manager { return h.mgr }
 // UpdateChecker returns the process-local checker owned by this handler. Server
 // lifecycle code starts and stops it; direct handler construction stays idle.
 func (h *Handler) UpdateChecker() *plugin.UpdateChecker { return h.updates }
+
+func respondPluginMutationError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, plugin.ErrSkillDestinationConflict):
+		orihttp.Conflict(w, "A plugin skill destination is independently owned; preserve or move it before trying again")
+	case errors.Is(err, plugin.ErrSkillOwnershipChanged):
+		orihttp.Conflict(w, "A plugin-owned skill changed after installation; preserve or restore it before changing the plugin")
+	default:
+		orihttp.InternalError(w, err.Error())
+	}
+}
 
 // SetReviewedReplacement installs the hook UpdateHandler consults before
 // following a plugin's recorded source. A nil hook restores recorded-source
@@ -145,7 +157,7 @@ func (h *Handler) InstallHandler(w http.ResponseWriter, r *http.Request) {
 
 	installed, err := h.mgr.Install(req.Source, prefer, func(plugin.TrustReport) bool { return true })
 	if err != nil {
-		orihttp.InternalError(w, err.Error())
+		respondPluginMutationError(w, err)
 		return
 	}
 	h.updates.Invalidate(installed.Name)
@@ -164,7 +176,7 @@ func (h *Handler) UninstallHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.mgr.Uninstall(name); err != nil {
-		orihttp.InternalError(w, err.Error())
+		respondPluginMutationError(w, err)
 		return
 	}
 	h.updates.Invalidate(name)
@@ -274,7 +286,7 @@ func (h *Handler) MarketplaceInstallHandler(w http.ResponseWriter, r *http.Reque
 	}
 	installed, err := h.mgr.InstallFromMarketplace(req.Marketplace, req.Plugin, prefer, func(plugin.TrustReport) bool { return true })
 	if err != nil {
-		orihttp.InternalError(w, err.Error())
+		respondPluginMutationError(w, err)
 		return
 	}
 	h.updates.Invalidate(installed.Name)
@@ -329,7 +341,7 @@ func (h *Handler) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 		updated, err = h.mgr.Update(name, confirm)
 	}
 	if err != nil {
-		orihttp.InternalError(w, err.Error())
+		respondPluginMutationError(w, err)
 		return
 	}
 	h.updates.Invalidate(name)
