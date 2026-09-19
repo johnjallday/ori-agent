@@ -64,10 +64,25 @@ func TestRemoveAppearanceUploadRefusesAnythingButAPlainFilename(t *testing.T) {
 	}
 
 	for _, name := range []string{"../precious.txt", "..", ".", "", "   ", "sub/dir.png"} {
-		removeAppearanceUpload(name)
+		removeAppearanceUpload(nil, "anyone", name)
 	}
 	if _, err := os.Stat(outside); err != nil {
 		t.Fatalf("a traversal reached outside the avatar directory: %v", err)
+	}
+}
+
+// A root agent's image shares a folder with its definition, so a hand-edited
+// appearance naming that file must not be able to delete it.
+func TestRemovingAnImageNeverDeletesTheAgentsDefinition(t *testing.T) {
+	isolateAvatarDir(t)
+	root := t.TempDir()
+	c := compositeForRoot(t, root)
+	if err := c.CreateAgent("Scout", nil); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+	removeAppearanceUpload(c, "Scout", "agent_settings.json")
+	if _, err := os.Stat(filepath.Join(root, "Agents", "Scout", "agent_settings.json")); err != nil {
+		t.Fatalf("the agent's definition was deleted: %v", err)
 	}
 }
 

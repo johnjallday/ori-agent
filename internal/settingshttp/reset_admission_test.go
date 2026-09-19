@@ -83,7 +83,7 @@ func admissionHTTPFixture(t *testing.T) (*resetfixture.Fixture, *resetfixture.HT
 		t.Fatal(err)
 	}
 	setup := onboarding.NewManager(filepath.Join(p.DataDir, "app_state.json"))
-	owners := settingsreset.Owners{DataDir: p.DataDir, Config: cfg, Setup: setup, Database: db, Workspaces: folders,
+	owners := settingsreset.Owners{DataDir: p.DataDir, Config: cfg, Setup: setup, Database: db, Workspaces: folders, Agents: f.OpenAgents(t),
 		Vaults:         vault.NewStore(db, vault.StoreOptions{VaultFilesBaseDir: p.DataDir, ManagedVaultRoot: p.Vaults}),
 		CheckLifecycle: func(context.Context) []settingsreset.Blocker { return nil }}
 	planner := settingsreset.NewPlanner(func() settingsreset.Owners { return owners })
@@ -188,6 +188,13 @@ func TestResetExecuteStrictProtectionAndLegacyRefusal(t *testing.T) {
 		{`{"settings":true,"confirmation":"RESET"} {}`, 400, "invalid_request"},
 		{`{"settings":true,"confirmation":"RESET","path":"/outside"}`, 400, "invalid_request"},
 		{`{"preview_id":"` + strings.Repeat("x", 1024) + `","request_id":"r","confirmation":"RESET"}`, 400, "invalid_request"},
+		// The agents-folder confirmation is a plain, bounded string that only a
+		// reviewed request may carry.
+		{`{"preview_id":"known","request_id":"request","confirmation":"RESET","confirm_agents_folder":"/Ori Workspaces/Agents"}`, 503, "lifecycle_unavailable"},
+		{`{"preview_id":"p","request_id":"r","confirmation":"RESET","confirm_agents_folder":""}`, 400, "invalid_request"},
+		{`{"preview_id":"p","request_id":"r","confirmation":"RESET","confirm_agents_folder":true}`, 400, "invalid_request"},
+		{`{"settings":true,"confirmation":"RESET","confirm_agents_folder":"/Ori Workspaces/Agents"}`, 400, "invalid_request"},
+		{`{"preview_id":"p","request_id":"r","confirmation":"RESET","confirm_agents_folder":"` + strings.Repeat("x", 4097) + `"}`, 400, "invalid_request"},
 	} {
 		r := httptest.NewRequest(http.MethodPost, "/api/reset", strings.NewReader(test.body))
 		r.Header.Set("Content-Type", "application/json")

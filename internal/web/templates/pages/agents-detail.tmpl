@@ -489,8 +489,18 @@
                 <div class="d-flex align-items-start gap-2">
                   <p id="agentDescription" class="agent-description-large flex-grow-1" style="color: var(--text-secondary); margin: 0;">Loading description...</p>
                 </div>
+                <!-- Where this agent comes from: "Customised in: …" for one of your
+                     agents, "From workspace: …" for a workspace's own agent. -->
+                <p id="agentOriginNote" class="agent-description-large text-secondary mt-2 mb-0" hidden></p>
               </div>
               <div class="d-flex gap-2">
+                <button id="addToMyAgentsButton" class="modern-btn modern-btn-primary" type="button" hidden>
+                  Add to my agents
+                </button>
+                <button id="showInFinderButton" class="modern-btn modern-btn-secondary" type="button" hidden
+                        title="Open this agent's folder in your Workspace Directory">
+                  Show in Finder
+                </button>
                 <button id="editProfileButton" class="modern-btn modern-btn-primary" type="button">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" aria-hidden="true">
                     <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
@@ -915,6 +925,7 @@
   <script defer src="/js/modules/toast.js"></script>
   <script defer src="/js/modules/resizer.js"></script>
   <script defer src="/js/modules/sidebar.js"></script>
+  <script defer src="/js/modules/agent-origin.js"></script>
   <script defer src="/js/agents-detail.js"></script>
   {{template "theme-init.tmpl" .}}
 </body>

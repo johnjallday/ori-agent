@@ -39,6 +39,7 @@ type Handler struct {
 	utilitySettingsReloader func()
 	vaultRootUpdater        func(string) error
 	workspaceRootUpdater    func(string) (WorkspaceRootRefresh, error)
+	stagedContentMover      func(staging, root string) []string
 	macWakeService          macWakeService
 }
 
@@ -86,6 +87,14 @@ func (h *Handler) SetVaultRootUpdater(fn func(string) error) {
 // folder store) the save still persists and simply reports no refresh.
 func (h *Handler) SetWorkspaceRootUpdater(fn func(string) (WorkspaceRootRefresh, error)) {
 	h.workspaceRootUpdater = fn
+}
+
+// SetStagedContentMover wires the first-confirmation move: the agents and
+// workspaces created before any Workspace Directory was chosen, which live in
+// the app's staging folder until then, move into the directory the user
+// confirms. It returns warnings for what stayed behind.
+func (h *Handler) SetStagedContentMover(fn func(staging, root string) []string) {
+	h.stagedContentMover = fn
 }
 
 // SetMacWakeService wires the macOS wake scheduling service used by settings.
@@ -156,7 +165,7 @@ func (h *Handler) SettingsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		ag.Settings = s
 		if err := h.store.SetAgent(agentName, ag); err != nil {
-			orihttp.InternalError(w, err.Error())
+			agenthttp.WriteAgentStoreError(w, "Failed to save agent settings", err)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -327,6 +336,10 @@ func (h *Handler) WorkspaceRootSettingsHandler(w http.ResponseWriter, r *http.Re
 			return
 		}
 
+		// Recorded before the save below confirms it: only the first
+		// confirmation moves what was created in the staging folder.
+		firstConfirmation := !h.configManager.IsWorkspaceRootConfirmed() && strings.TrimSpace(os.Getenv("WORKSPACE_DIR")) == ""
+
 		if err := h.configManager.SetWorkspaceRoot(configured); err != nil {
 			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid workspace directory", err)
 			return
@@ -342,6 +355,12 @@ func (h *Handler) WorkspaceRootSettingsHandler(w http.ResponseWriter, r *http.Re
 		// setting persists but the live workspace store keeps serving the root
 		// the process booted with, which is exactly the restart-required bug.
 		refresh := WorkspaceRootRefresh{Warnings: []string{}}
+		// The move goes first, so applying the root below finds the moved
+		// workspaces at their new paths. Later changes move nothing.
+		var moveWarnings []string
+		if firstConfirmation && h.stagedContentMover != nil {
+			moveWarnings = h.stagedContentMover(config.UnconfirmedWorkspaceRoot(), effectiveRoot)
+		}
 		if h.workspaceRootUpdater != nil {
 			applied, err := h.workspaceRootUpdater(effectiveRoot)
 			if err != nil {
@@ -355,6 +374,9 @@ func (h *Handler) WorkspaceRootSettingsHandler(w http.ResponseWriter, r *http.Re
 			if refresh.Warnings == nil {
 				refresh.Warnings = []string{}
 			}
+		}
+		if len(moveWarnings) > 0 {
+			refresh.Warnings = append(moveWarnings, refresh.Warnings...)
 		}
 
 		orihttp.WriteJSON(w, map[string]any{

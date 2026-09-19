@@ -113,6 +113,14 @@ type AgentListItem struct {
 	// cannot disagree about what an agent looks like (FR-49/FR-80).
 	Appearance       map[string]any `json:"appearance"`
 	PresentationRole string         `json:"presentation_role,omitempty"`
+	// Origin says where the entry comes from: the built-in assistant, the
+	// user's own agents, or a workspace's copy read in place. Kept apart from
+	// Source, which also seeds the generated appearance.
+	Origin *store.AgentOrigin `json:"origin,omitempty"`
+	// State is "unreadable" for an agent whose definition file is not valid
+	// JSON; File names that file so the user can fix it. Ori never touches it.
+	State string `json:"state,omitempty"`
+	File  string `json:"file,omitempty"`
 }
 
 // AgentDetailResponse represents detailed agent information
@@ -144,6 +152,18 @@ type AgentDetailResponse struct {
 	ClaudeSync any `json:"claude_sync,omitempty"`
 	// CodexSync carries read-only ~/.codex state for the Codex CLI agent.
 	CodexSync any `json:"codex_sync,omitempty"`
+	// Origin: see AgentListItem.Origin.
+	Origin *store.AgentOrigin `json:"origin,omitempty"`
+}
+
+// originFor returns an agent's origin for a response, or nil when the store
+// does not track one.
+func originFor(st store.Store, name string) *store.AgentOrigin {
+	origin, ok := agentOrigin(st, name)
+	if !ok {
+		return nil
+	}
+	return &origin
 }
 
 // ListAgentsWithStats handles GET /api/agents/dashboard/list
@@ -211,6 +231,7 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 			AllowWebSearch: ag.Settings.IsWebSearchAllowed(),
 			Model:          ag.Settings.Model,
 			Appearance:     appearanceForAgent(ag),
+			Origin:         originFor(h.State, name),
 		}
 
 		// Annotate workspace membership so the UI can group definitions by the
@@ -229,6 +250,23 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 		}
 
 		agents = append(agents, item)
+	}
+
+	// Agents whose definition file could not be read are listed too, so the
+	// page can say which file needs fixing instead of silently dropping them.
+	if lister, ok := h.State.(interface {
+		UnreadableAgents() []store.UnreadableAgent
+	}); ok && statusFilter == "" && !favoriteOnly && tagFilter == "" {
+		for _, broken := range lister.UnreadableAgents() {
+			agents = append(agents, AgentListItem{
+				Name:       broken.Name,
+				Source:     "user",
+				Status:     types.AgentStatusError,
+				Appearance: appearanceForAgent(nil),
+				State:      "unreadable",
+				File:       broken.File,
+			})
+		}
 	}
 
 	// Append auto-detected CLI agents
@@ -276,6 +314,11 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 	// threshold per agent would turn a single list request into N+1.
 	if h.xpPerLevel != nil {
 		response["xp_per_level"] = h.xpPerLevel()
+	}
+	// Where the user's agents live and whether Ori can reach them, carried on
+	// the list the page already loads rather than a request of its own.
+	if reporter, ok := h.State.(interface{ RootStatus() store.AgentRootStatus }); ok {
+		response["agent_root"] = reporter.RootStatus()
 	}
 	orihttp.WriteJSON(w, response)
 }
@@ -385,6 +428,7 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 		AllowWebSearch:  ag.Settings.IsWebSearchAllowed(),
 		Version:         agentConfigVersion(ag),
 		Appearance:      appearanceForAgent(ag),
+		Origin:          originFor(h.State, agentName),
 	}
 	memberships := workspace.AgentWorkspaceMemberships(h.workspaceStore)
 	response.PresentationRole = h.support.classify(r.Context(), agentName, memberships[strings.ToLower(agentName)].Workspaces)
@@ -564,6 +608,11 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if owned := workspaceOwnedAgent(h.State, agentName); owned != nil {
+		WriteAgentStoreError(w, "Failed to update agent status", owned)
+		return
+	}
+
 	oldStatus := string(agent.Status)
 
 	// Update status
@@ -576,7 +625,7 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 
 	// Save agent
 	if err := h.State.SetAgent(agentName, agent); err != nil {
-		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update agent status", err)
+		WriteAgentStoreError(w, "Failed to update agent status", err)
 		return
 	}
 

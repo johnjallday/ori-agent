@@ -9,6 +9,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/evolution"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
+	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -105,6 +106,10 @@ func (h *Handler) GetAgentEvolution(w http.ResponseWriter, r *http.Request) {
 	ag.InitializeEvolution()
 	if needsSave {
 		if err := h.agentStore.SetAgent(agentName, ag); err != nil {
+			if errors.Is(err, store.ErrAgentChangedOnDisk) {
+				orihttp.Conflict(w, store.AgentChangedOnDiskMessage)
+				return
+			}
 			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "failed to persist evolution defaults", err)
 			return
 		}

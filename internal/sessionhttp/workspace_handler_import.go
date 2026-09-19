@@ -131,6 +131,11 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 		handleWorkspaceParentError(w, err)
 		return
 	}
+	if strings.TrimSpace(req.ParentID) == "" && !workspaceImportHasConfig(normalizedPath) &&
+		agentworkspace.IsReservedTopLevelSlug(firstNonEmptyString(req.FolderSlug, workspaceName)) {
+		_ = orihttp.RespondBadRequest(w, agentworkspace.ReservedWorkspaceSlugMessage)
+		return
+	}
 
 	if h.workspaceStore != nil && workspaceImportHasConfig(normalizedPath) {
 		workspace, warning, err := h.restoreImportedWorkspace(r.Context(), normalizedPath, req)
@@ -144,6 +149,10 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 				"entry_point": req.EntryPoint,
 				"reason":      "workspace_restore_failed",
 			})
+			if errors.Is(err, agentworkspace.ErrReservedWorkspaceSlug) {
+				_ = orihttp.RespondBadRequest(w, agentworkspace.ReservedWorkspaceSlugMessage)
+				return
+			}
 			var slugConflict *agentworkspace.FolderSlugConflictError
 			if errors.As(err, &slugConflict) {
 				writeWorkspaceCreateSlugConflict(w, workspaceName, h.globalWorkspaceSlugConflict(r.Context(), slugConflict.Slug, "", slugConflict.ParentDir))
@@ -473,30 +482,10 @@ func (h *Handler) restoreImportedWorkspace(ctx context.Context, folderPath strin
 		return nil, "", err
 	}
 
-	// Restore any workspace-local agent snapshots into the global agent store
-	// so the imported workspace's entry agent (and any other referenced agents)
-	// resolve cleanly even if the importing instance had never seen them before.
-	if h.agentStore != nil {
-		for _, importItem := range importTree {
-			item := importItem.Workspace
-			if registered, restoreErr := agentworkspace.RestoreWorkspaceAgents(h.workspaceStore, item, h.agentStore); restoreErr != nil {
-				logger.Warn("Restore workspace agents during import failed", logger.Fields{
-					"workspace_id": item.ID,
-					"error":        restoreErr.Error(),
-				})
-			} else if len(registered) > 0 {
-				logger.Info("Imported workspace registered agents into global store", logger.Fields{
-					"workspace_id": item.ID,
-					"agents":       registered,
-				})
-			}
-		}
-	}
-
-	// Record each imported workspace in the per-data-dir allowlist so its agent
-	// snapshots will be re-hydrated on subsequent server starts. Without this,
-	// the workspaces would appear once on import and vanish from /agents after
-	// the next restart.
+	// Trust each imported workspace on this machine. That is what makes its own
+	// agent copies show in the roster, read where they are: importing no longer
+	// copies them into the user's agents. The roster's cached view of workspace
+	// agents is refreshed so they resolve at once, not after its next refresh.
 	if h.workspaceAllowlist != nil {
 		for _, importItem := range importTree {
 			item := importItem.Workspace
@@ -507,6 +496,9 @@ func (h *Handler) restoreImportedWorkspace(ctx context.Context, folderPath strin
 				})
 			}
 		}
+	}
+	if invalidator, ok := h.agentStore.(interface{ InvalidateWorkspaceAgents() }); ok {
+		invalidator.InvalidateWorkspaceAgents()
 	}
 
 	adapter := session.NewWorkspaceStoreAdapter(h.store)

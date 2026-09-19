@@ -4,7 +4,10 @@
 # isolated demo server.
 #
 # Usage:
-#   ./scripts/e2e-fresh.sh [--port PORT] [--tail N] spec [spec ...] [-- playwright args]
+#   ./scripts/e2e-fresh.sh [--port PORT] [--tail N] [--rev REV] spec [spec ...] [-- playwright args]
+#
+# --rev REV serves a build of another commit (for example origin/dev) instead
+# of the working tree, so the same specs give the baseline to compare with.
 #
 # Many specs change durable state a later spec would trip over (a hire cannot
 # be undone, onboarding is completed once), so comparing a branch with its
@@ -29,12 +32,17 @@ set -euo pipefail
 
 port=8947
 tail_lines=40
+rev=""
 specs=()
 pw_args=()
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--port)
 		port="${2:-}"
+		shift 2
+		;;
+	--rev)
+		rev="${2:-}"
 		shift 2
 		;;
 	--tail)
@@ -58,7 +66,7 @@ done
 	exit 2
 }
 [[ ${#specs[@]} -gt 0 ]] || {
-	echo "usage: $0 [--port PORT] [--tail N] spec [spec ...] [-- playwright args]" >&2
+	echo "usage: $0 [--port PORT] [--tail N] [--rev REV] spec [spec ...] [-- playwright args]" >&2
 	exit 2
 }
 
@@ -72,8 +80,26 @@ fi
 
 tmp_root="${TMPDIR:-/tmp}"
 tmp_root="${tmp_root%/}"
-go build -o bin/ori-agent ./cmd/server
-binary="$repo_root/bin/ori-agent"
+if [[ -n "$rev" ]]; then
+	# The same cached build scripts/demo-server.sh --rev uses; the specs still
+	# come from the working tree, so a branch's specs run against its baseline.
+	sha="$(git rev-parse --verify --quiet "${rev}^{commit}" || true)"
+	[[ -n "$sha" ]] || {
+		echo "unknown commit: $rev" >&2
+		exit 2
+	}
+	build_root="$tmp_root/ori-rev-${sha:0:12}"
+	binary="$build_root/ori-agent"
+	if [[ ! -x "$binary" ]]; then
+		mkdir -p "$build_root/src"
+		git archive "$sha" | tar -x -C "$build_root/src"
+		(cd "$build_root/src" && go build -o "$binary" ./cmd/server)
+	fi
+	echo "server: rev ${sha:0:12}"
+else
+	go build -o bin/ori-agent ./cmd/server
+	binary="$repo_root/bin/ori-agent"
+fi
 
 server_pid=""
 stop_server() {

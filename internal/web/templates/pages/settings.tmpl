@@ -1833,7 +1833,7 @@
                 <input class="form-check-input reset-category-checkbox" type="checkbox" id="resetAgents">
                 <label class="form-check-label" for="resetAgents" style="color: var(--text-primary);">
                   <strong>Agents</strong>
-                  <small class="d-block" style="color: var(--text-secondary);">Delete all agents and their configurations</small>
+                  <small class="d-block" style="color: var(--text-secondary);">Delete all agents and their configurations, including their folders in your Workspace Directory</small>
                 </label>
               </div>
               <div class="form-check mb-2">
@@ -1925,6 +1925,20 @@
                they run past the dialog at phone width and the reviewer cannot
                read what is about to be deleted. -->
           <ul id="resetItemsList" class="mb-3" style="color: var(--text-primary); overflow-wrap: anywhere;"></ul>
+          <!-- Second confirmation, shown only when the reset removes the agents
+               from the Workspace Directory: that folder is visible to the user
+               and may be synced to other machines. -->
+          <div id="resetAgentsFolderConfirm" class="alert alert-warning mb-3" hidden>
+            <p class="mb-1"><strong>Your agents folder</strong></p>
+            <p class="mb-2"><code id="resetAgentsFolderPath" style="overflow-wrap: anywhere;"></code></p>
+            <p id="resetAgentsFolderNotice" class="mb-2"></p>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="resetAgentsFolderCheck" disabled>
+              <label class="form-check-label" for="resetAgentsFolderCheck">
+                I understand this removes my agents from this folder, including on other machines it syncs to.
+              </label>
+            </div>
+          </div>
           <label for="resetConfirmInput" id="resetConfirmInstructions" class="mb-2" style="color: var(--text-secondary);">
             To confirm, type <strong>RESET</strong> in the box below:
           </label>

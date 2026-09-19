@@ -138,9 +138,14 @@ function harness({
       'openReplaySetupBtn',
       'resetGettingStartedBtn',
       'resetGettingStartedStatus',
-      'openGettingStartedBtn'
+      'openGettingStartedBtn',
+      'resetAgentsFolderConfirm',
+      'resetAgentsFolderPath',
+      'resetAgentsFolderNotice',
+      'resetAgentsFolderCheck'
     ].map(id => [id, element()])
   );
+  elements.resetAgentsFolderConfirm.hidden = true;
   elements.confirmResetBtn.disabled = true;
   elements.openReplaySetupBtn.hidden = true;
   elements.openGettingStartedBtn.hidden = true;
@@ -419,6 +424,88 @@ test('submission contains only preview, request identity, and exact confirmation
     request_id: 'request-1',
     confirmation: 'RESET'
   });
+});
+
+const agentsPreview = {
+  ...preview,
+  selected: ['agents'],
+  categories: [
+    {
+      id: 'agents',
+      label: 'Agents',
+      description: 'Remove agents.',
+      facts: [{ name: 'agent folders in your Workspace Directory', count: 2 }],
+      removed: [{ display_path: '/Users/me/Ori Workspaces/Agents', reason: 'Remove each agent.' }],
+      retained: []
+    }
+  ],
+  agents_folder: {
+    path: '/Users/me/Ori Workspaces/Agents',
+    notice: 'This folder is in your Workspace Directory and may be synced to your other machines.',
+    confirmation_required: true
+  }
+};
+
+test('an agents reset shows its folder and needs the second confirmation before it can be sent', async () => {
+  const h = harness({ previewResult: agentsPreview });
+  await h.review(['resetAgents']);
+  const { resetAgentsFolderConfirm, resetAgentsFolderPath, resetAgentsFolderNotice } = h.elements;
+  assert.equal(resetAgentsFolderConfirm.hidden, false);
+  assert.equal(resetAgentsFolderPath.textContent, '/Users/me/Ori Workspaces/Agents');
+  assert.match(resetAgentsFolderNotice.textContent, /synced to your other machines/);
+
+  // Typing RESET alone is not enough.
+  assert.equal(h.elements.confirmResetBtn.disabled, true);
+  await h.elements.confirmResetBtn.emit('click');
+  assert.equal(h.calls.filter(call => call.url === '/api/reset').length, 0);
+
+  h.elements.resetAgentsFolderCheck.checked = true;
+  await h.elements.resetAgentsFolderCheck.emit('change');
+  assert.equal(h.elements.confirmResetBtn.disabled, false);
+  await h.elements.confirmResetBtn.click();
+  const post = h.calls.find(call => call.url === '/api/reset');
+  assert.deepEqual(JSON.parse(post.options.body), {
+    preview_id: 'preview-1',
+    request_id: 'request-1',
+    confirmation: 'RESET',
+    confirm_agents_folder: '/Users/me/Ori Workspaces/Agents'
+  });
+});
+
+test('closing an agents review clears the second confirmation', async () => {
+  const h = harness({ previewResult: agentsPreview });
+  await h.review(['resetAgents']);
+  h.elements.resetAgentsFolderCheck.checked = true;
+  await h.elements.resetAgentsFolderCheck.emit('change');
+  await h.elements.resetConfirmModal.emit('hidden.bs.modal');
+  assert.equal(h.elements.resetAgentsFolderCheck.checked, false);
+  assert.equal(h.elements.resetAgentsFolderConfirm.hidden, true);
+});
+
+test('a reset without agents never shows the agents folder', async () => {
+  const h = harness();
+  await h.review();
+  assert.equal(h.elements.resetAgentsFolderConfirm.hidden, true);
+  assert.equal(h.elements.confirmResetBtn.disabled, false);
+});
+
+test('a refused agents confirmation returns to review instead of locking the page', async () => {
+  const h = harness({
+    previewResult: agentsPreview,
+    executeResult: {
+      httpStatus: 409,
+      body: {
+        code: 'agents_folder_confirmation_required',
+        message: 'Confirm that folder too, then reset again.'
+      }
+    }
+  });
+  await h.review(['resetAgents']);
+  h.elements.resetAgentsFolderCheck.checked = true;
+  await h.elements.resetAgentsFolderCheck.emit('change');
+  await h.elements.confirmResetBtn.click();
+  assert.match(h.resultText(), /Confirm that folder too/);
+  assert.equal(h.elements.resetAppBtn.disabled, false);
 });
 
 test('canceling review does not submit and restores focus and selection controls', async () => {

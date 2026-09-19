@@ -119,8 +119,10 @@ func (f *Fixture) isolateProcess(t testing.TB) {
 		"PATH":              filepath.Join(f.paths.Root, "bin"),
 		"TMPDIR":            filepath.Join(f.paths.Root, "tmp"),
 		"TMP":               filepath.Join(f.paths.Root, "tmp"), "TEMP": filepath.Join(f.paths.Root, "tmp"),
-		"ORI_DATA_DIR":                    f.paths.DataDir,
-		"AGENT_STORE_PATH":                filepath.Join(f.paths.DataDir, "agents.json"),
+		"ORI_DATA_DIR": f.paths.DataDir,
+		// Unset, so the default layout is exercised: the system store in the
+		// data dir and the user's agents in <workspace root>/Agents.
+		"AGENT_STORE_PATH":                "",
 		"ORI_TEMPLATES_DIR":               f.paths.Templates,
 		"WORKFLOW_TEMPLATES_DIR":          filepath.Join(f.paths.Root, "workflow-templates"),
 		"ORI_DISABLE_EXTERNAL_MCP_IMPORT": "true", "NO_BROWSER": "1",

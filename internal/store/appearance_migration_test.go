@@ -9,6 +9,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/charactercatalog"
+	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -397,21 +398,18 @@ func TestAFailedWriteLeavesTheOriginalRecordIntact(t *testing.T) {
 	}
 }
 
-// seedUpload writes a placeholder image into the avatar directory the store
-// resolves against, and removes it afterwards. The directory is relative to the
-// process working directory, which is the package directory under `go test`.
+// seedUpload writes a placeholder image into the shared avatar folder the store
+// resolves against, inside a temporary data dir.
 func seedUpload(t *testing.T, name string) string {
 	t.Helper()
-	if err := os.MkdirAll(agent.AppearanceUploadDir, 0o755); err != nil {
+	t.Setenv("ORI_DATA_DIR", t.TempDir())
+	dir := config.DefaultAgentAvatarsDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("create upload dir: %v", err)
 	}
-	path := filepath.Join(agent.AppearanceUploadDir, name)
+	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, []byte("not-really-an-image"), 0o644); err != nil {
 		t.Fatalf("seed upload: %v", err)
 	}
-	t.Cleanup(func() {
-		_ = os.Remove(path)
-		_ = os.Remove(agent.AppearanceUploadDir)
-	})
 	return path
 }

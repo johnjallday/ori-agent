@@ -125,7 +125,7 @@ func refreshProtectedDigests(ctx context.Context, evidence *resolvedEvidence) er
 	}
 	updated := make([]protectedDigest, len(evidence.ProtectedPaths))
 	for i, path := range evidence.ProtectedPaths {
-		digest, err := digestProtectedPath(ctx, path)
+		digest, err := digestProtectedPath(ctx, path, evidence.AgentsFolder)
 		if err != nil {
 			return err
 		}
@@ -135,7 +135,10 @@ func refreshProtectedDigests(ctx context.Context, evidence *resolvedEvidence) er
 	return nil
 }
 
-func digestProtectedPath(ctx context.Context, root string) (string, error) {
+// digestProtectedPath hashes root, leaving out the subtree at skip (the
+// reviewed agents folder, which the reset removes from inside a retained
+// workspace root). An empty skip hashes everything.
+func digestProtectedPath(ctx context.Context, root, skip string) (string, error) {
 	hash := sha256.New()
 	info, err := os.Lstat(root)
 	if os.IsNotExist(err) {
@@ -196,6 +199,12 @@ func digestProtectedPath(ctx context.Context, root string) (string, error) {
 		return hex.EncodeToString(hash.Sum(nil)), nil
 	}
 	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if skip != "" && path == skip && path != root {
+			if entry != nil && entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if walkErr != nil {
 			return walkErr
 		}

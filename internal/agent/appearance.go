@@ -21,10 +21,10 @@ import (
 // global store has already migrated (PRD FR-69, risk 7.6 "snapshot
 // reintroduction").
 
-// AppearanceUploadDir is the directory holding uploaded avatar images, relative
-// to the process working directory. The internal directory name is deliberately
-// unchanged: renaming user files to match new product vocabulary would be churn
-// with a data-loss risk and no user benefit (FR-65).
+// AppearanceUploadDir is the name of the shared folder of uploaded avatar
+// images, inside the data dir (config.DefaultAgentAvatarsDir). The name is
+// deliberately unchanged: renaming user files to match new product vocabulary
+// would be churn with a data-loss risk and no user benefit (FR-65).
 const AppearanceUploadDir = "agent_avatars"
 
 // EnsureAppearance guarantees the agent has a non-nil, structurally canonical
@@ -65,15 +65,16 @@ func (a *Agent) MigrateAppearance(env types.AppearanceEnvironment) types.Appeara
 }
 
 // DefaultAppearanceEnvironment returns the environment migration uses in the
-// running application: the real embedded catalog and the real upload directory.
+// running application: the real embedded catalog and the real upload folders,
+// checked in order (an agent's own folder, then the shared one).
 //
 // A catalog that fails to load yields a nil CharacterVersion callback, which
 // migration reads as "cannot tell" and therefore trusts the record — see
 // types.AppearanceEnvironment. That is deliberate: a transient catalog problem
 // must not permanently rewrite every agent's saved character choice.
-func DefaultAppearanceEnvironment(uploadDir string) types.AppearanceEnvironment {
+func DefaultAppearanceEnvironment(uploadDirs ...string) types.AppearanceEnvironment {
 	env := types.AppearanceEnvironment{
-		UploadExists: uploadExistsIn(uploadDir),
+		UploadExists: uploadExistsIn(uploadDirs),
 	}
 	if cat, err := charactercatalog.Load(); err == nil && cat != nil {
 		env.CharacterVersion = func(catalogID string) (int, bool) {
@@ -148,19 +149,38 @@ func ResetAppearanceMigrationNotes() {
 	appearanceNotes = map[string]AppearanceMigrationNote{}
 }
 
-// uploadExistsIn builds an existence check confined to dir.
+// uploadExistsIn builds an existence check confined to dirs.
 //
 // A stored filename that is not a plain filename is reported missing rather than
 // resolved: the upload endpoint only ever writes server-generated basenames, so
 // anything with a separator in it came from somewhere it should not have, and
 // following it would be a traversal (FR-64).
-func uploadExistsIn(dir string) func(string) bool {
+func uploadExistsIn(dirs []string) func(string) bool {
 	return func(filename string) bool {
 		name := strings.TrimSpace(filename)
 		if name == "" || name != filepath.Base(name) || name == "." || name == ".." {
 			return false
 		}
-		info, err := os.Stat(filepath.Join(dir, name))
-		return err == nil && !info.IsDir()
+		for _, dir := range dirs {
+			if info, err := os.Stat(filepath.Join(dir, name)); err == nil && !info.IsDir() {
+				return true
+			}
+		}
+		return false
 	}
+}
+
+// IsAppearanceUploadFilename reports whether name can be an uploaded image: a
+// plain, visible basename with an image extension. It guards every read, move,
+// and delete of an image, because an agent's folder also holds its definition
+// and a hand-edited appearance must never be able to name that.
+func IsAppearanceUploadFilename(name string) bool {
+	if name == "" || name != strings.TrimSpace(name) || name != filepath.Base(name) || strings.HasPrefix(name, ".") {
+		return false
+	}
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
+		return true
+	}
+	return false
 }

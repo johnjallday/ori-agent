@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -45,12 +46,49 @@ type LoadoutResolver interface {
 	ResolveAgentLoadout(agentName string) (loadout AgentLoadout, ok bool)
 }
 
+// AgentFolderResolver locates an agent's own folder, which holds its
+// skills_state.json and per-agent skills/. It reports handled=false for a name
+// it does not own (the legacy data-dir path is used then), and handled=true
+// with an empty dir for an agent that has no folder of its own (an agent only
+// a workspace holds), which has no per-agent skill state to read or write.
+type AgentFolderResolver func(agentName string) (dir string, handled bool)
+
+// ErrNoAgentFolder refuses per-agent skill state for an agent without a folder.
+var ErrNoAgentFolder = errors.New("agent has no folder of its own")
+
 type Manager struct {
 	agentStorePath    string
 	personalSkillsDir string
 	externalAgents    *externalagents.Cache
 	configManager     *config.Manager
 	loadoutResolver   LoadoutResolver
+	agentFolder       AgentFolderResolver
+}
+
+// SetAgentFolderResolver makes per-agent skill state follow the agent: the
+// user's agents live in the Workspace Directory, not beside AgentStorePath.
+func (m *Manager) SetAgentFolderResolver(resolver AgentFolderResolver) {
+	m.agentFolder = resolver
+}
+
+// agentDir returns the folder holding one agent's skill state and skills.
+func (m *Manager) agentDir(agentName string) (string, error) {
+	if agentName == "" {
+		return "", fmt.Errorf("agent name is required")
+	}
+	if m.agentFolder != nil {
+		if dir, handled := m.agentFolder(agentName); handled {
+			if dir == "" {
+				return "", ErrNoAgentFolder
+			}
+			return dir, nil
+		}
+	}
+	agentsDir, err := resolveAgentsDir(m.agentStorePath)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(agentsDir, agentName), nil
 }
 
 func NewManager(cfg ManagerConfig) *Manager {
@@ -315,12 +353,15 @@ func (m *Manager) loadAgentSkills(agentName string, includePrompt bool) ([]Skill
 		return []Skill{}, nil
 	}
 
-	agentsDir, err := resolveAgentsDir(m.agentStorePath)
+	dir, err := m.agentDir(agentName)
+	if errors.Is(err, ErrNoAgentFolder) {
+		return []Skill{}, nil
+	}
 	if err != nil {
 		return nil, err
 	}
 
-	skillsDir := filepath.Join(agentsDir, agentName, "skills")
+	skillsDir := filepath.Join(dir, "skills")
 	return m.loadSkillsFromDir(skillsDir, SourceAgent, includePrompt, true, false)
 }
 
@@ -475,6 +516,10 @@ func (m *Manager) applySkillState(agentName string, skills []Skill) error {
 	}
 
 	registry, _, err := m.getSkillRegistry(agentName)
+	if errors.Is(err, ErrNoAgentFolder) {
+		// No per-agent state to apply: every skill keeps the opt-in default.
+		registry, err = SkillRegistry{Skills: map[string]SkillState{}}, nil
+	}
 	if err != nil {
 		return err
 	}

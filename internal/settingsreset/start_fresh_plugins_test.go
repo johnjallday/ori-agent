@@ -148,7 +148,7 @@ func TestLegacyStartFreshReceiptRecoversUnderOriginalSemantics(t *testing.T) {
 		return errors.Join(owners.Workspaces.Close(), owners.Database.Close())
 	}
 	operation, err := c.Stage(t.Context(), ExecuteRequest{
-		PreviewID: preview.ID, RequestID: "legacy-fresh", Confirmation: "RESET",
+		PreviewID: preview.ID, RequestID: "legacy-fresh", Confirmation: "RESET", ConfirmAgentsFolder: confirmedAgentsFolder(preview),
 	})
 	mustPreview(t, err)
 	if operation.State != StateAwaitingRestart {

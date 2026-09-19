@@ -23,17 +23,6 @@ type SkillRegistry struct {
 	Skills map[string]SkillState `json:"skills"`
 }
 
-func skillStatePath(agentStorePath, agentName string) (string, error) {
-	if agentName == "" {
-		return "", fmt.Errorf("agent name is required")
-	}
-	agentsDir, err := resolveAgentsDir(agentStorePath)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(agentsDir, agentName, skillStateFileName), nil
-}
-
 func loadSkillRegistry(path string) (SkillRegistry, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -74,10 +63,11 @@ func normalizeSkillKey(name string) string {
 }
 
 func (m *Manager) getSkillRegistry(agentName string) (SkillRegistry, string, error) {
-	path, err := skillStatePath(m.agentStorePath, agentName)
+	dir, err := m.agentDir(agentName)
 	if err != nil {
 		return SkillRegistry{}, "", err
 	}
+	path := filepath.Join(dir, skillStateFileName)
 	registry, err := loadSkillRegistry(path)
 	if err != nil {
 		return SkillRegistry{}, "", err

@@ -103,7 +103,22 @@ type Preview struct {
 	ExpiresAt        time.Time         `json:"expires_at"`
 	Restart          RestartInfo       `json:"restart"`
 	RetryOperationID string            `json:"retry_operation_id,omitempty"`
+	// AgentsFolder is present when the reset removes the user's agents from
+	// their Workspace Directory. That folder is visible to the user and may be
+	// synced to other machines, so it needs its own confirmation.
+	AgentsFolder *AgentsFolderReview `json:"agents_folder,omitempty"`
 }
+
+// AgentsFolderReview describes <root>/Agents in a reset preview. Executing the
+// reset requires ExecuteRequest.ConfirmAgentsFolder to repeat Path exactly.
+type AgentsFolderReview struct {
+	Path                 string `json:"path"`
+	Notice               string `json:"notice"`
+	ConfirmationRequired bool   `json:"confirmation_required"`
+}
+
+// AgentsFolderNotice is the warning shown with the agents folder in a preview.
+const AgentsFolderNotice = "This folder is in your Workspace Directory, where you can see it, and it may be synced to your other machines. Resetting removes each agent's folder from it — on every machine it syncs to. Other files there are kept."
 
 // ExecuteRequest references a server-held, reviewed plan. Neither categories,
 // intent nor filesystem targets can be broadened at execution time. HTTP must
@@ -112,6 +127,9 @@ type ExecuteRequest struct {
 	PreviewID    string `json:"preview_id"`
 	RequestID    string `json:"request_id"`
 	Confirmation string `json:"confirmation"`
+	// ConfirmAgentsFolder is the second confirmation a reset that removes the
+	// agents folder needs: the reviewed Preview.AgentsFolder.Path, repeated.
+	ConfirmAgentsFolder string `json:"confirm_agents_folder,omitempty"`
 }
 
 type OperationState string

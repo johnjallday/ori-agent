@@ -16,6 +16,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/session"
+	agentstore "github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -848,6 +850,22 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 	defer func() { _ = fileStore.Close() }()
 	handler.SetWorkspaceStore(fileStore)
 
+	// The production roster: the user's agents in <root>/Agents, plus the
+	// trusted workspaces' own agent copies read in place.
+	dataDir := t.TempDir()
+	allowlist := agentworkspace.NewAllowlist(filepath.Join(dataDir, agentworkspace.DefaultAllowlistFilename))
+	handler.SetWorkspaceAllowlist(allowlist)
+	system, err := agentstore.NewFileStore(filepath.Join(dataDir, "agents.json"), types.Settings{})
+	if err != nil {
+		t.Fatalf("system agent store: %v", err)
+	}
+	roster, err := agentstore.NewCompositeStore(system, storeDir, filepath.Join(dataDir, "agent_state"), types.Settings{})
+	if err != nil {
+		t.Fatalf("composite agent store: %v", err)
+	}
+	roster.SetWorkspaceAgentSource(agentworkspace.NewTrustedWorkspaceAgentSource(fileStore, allowlist))
+	handler.SetAgentStore(roster)
+
 	exportRoot := filepath.Join(t.TempDir(), "spain-export")
 	childDir := filepath.Join(exportRoot, agentworkspace.SubWorkspacesDir, "madrid")
 	if err := os.MkdirAll(childDir, 0755); err != nil {
@@ -1007,8 +1025,16 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 	if _, ok := restoredRoot.SharedData["folder_import"]; ok {
 		t.Fatalf("expected restored workspace to avoid folder_import metadata, got %#v", restoredRoot.SharedData["folder_import"])
 	}
+	// The imported workspace's own agent resolves at once, read where it is:
+	// nothing is copied into the user's agents.
 	if got, ok := handler.agentStore.GetAgent("Trip Manager"); !ok || got == nil || got.Settings.Model != "imported-trip-model" {
-		t.Fatalf("expected Trip Manager snapshot restored into agent store, ok=%v agent=%#v", ok, got)
+		t.Fatalf("expected the imported Trip Manager to resolve, ok=%v agent=%#v", ok, got)
+	}
+	if origin, _ := roster.AgentOrigin("Trip Manager"); origin.Source != agentstore.SourceWorkspace || origin.WorkspaceID != rootWorkspace.ID {
+		t.Fatalf("expected Trip Manager to belong to the imported workspace, got %+v", origin)
+	}
+	if _, err := os.Stat(filepath.Join(storeDir, "Agents", "Trip Manager")); !os.IsNotExist(err) {
+		t.Fatalf("import copied the workspace's agent into the user's agents (err=%v)", err)
 	}
 	rootFolderPath, err := fileStore.GetFolderPath(rootWorkspace.ID)
 	if err != nil {
@@ -1056,7 +1082,7 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 		t.Fatalf("expected restored child entry agent Madrid Planner, got %q", got)
 	}
 	if got, ok := handler.agentStore.GetAgent("Madrid Planner"); !ok || got == nil || got.Settings.Model != "imported-madrid-model" {
-		t.Fatalf("expected Madrid Planner snapshot restored into agent store, ok=%v agent=%#v", ok, got)
+		t.Fatalf("expected the imported Madrid Planner to resolve, ok=%v agent=%#v", ok, got)
 	}
 	childFolderPath, err := fileStore.GetFolderPath(childWorkspace.ID)
 	if err != nil {

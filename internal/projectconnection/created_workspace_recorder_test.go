@@ -145,10 +145,10 @@ func TestFailedCommitRecordsNothing(t *testing.T) {
 
 // The bug this recorder exists for: a Home created by guided setup and then
 // staffed kept its coordinator only until the next restart, because the
-// startup wipe removes agents that belong solely to workspaces the data
-// directory has no record of. Recording the Home keeps the agent; the control
-// run without a recorder shows the agent is wiped.
-func TestGuidedHomeCoordinatorSurvivesTheStartupAgentWipe(t *testing.T) {
+// roster shows agents that belong solely to a workspace only when this data
+// directory trusts that workspace. Recording the Home trusts it, so its
+// coordinator stays visible; the control run without a recorder does not.
+func TestGuidedHomeCoordinatorStaysVisibleWhenTheHomeIsRecorded(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		record   bool
@@ -193,10 +193,16 @@ func TestGuidedHomeCoordinatorSurvivesTheStartupAgentWipe(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			workspace.WipeNonAllowlistedAgentSnapshots(store, agents, allowlist)
-
-			if _, kept := agents.GetAgent("Studio Coordinator"); kept != tc.wantKept {
-				t.Fatalf("coordinator kept = %v, want %v", kept, tc.wantKept)
+			// The roster shows a workspace's agent copies only while the
+			// workspace is trusted, which is what recording the Home does.
+			shown := false
+			for _, entry := range workspace.NewTrustedWorkspaceAgentSource(store, allowlist).WorkspaceAgents() {
+				if entry.WorkspaceID == home.HomeID && entry.AgentName == "Studio Coordinator" {
+					shown = true
+				}
+			}
+			if shown != tc.wantKept {
+				t.Fatalf("coordinator shown = %v, want %v", shown, tc.wantKept)
 			}
 		})
 	}

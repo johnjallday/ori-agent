@@ -222,8 +222,15 @@ func validateRecoveryScope(ctx context.Context, lease *resetstate.Lease, j *jour
 		}
 		actual[target.Kind] = resolved
 	}
-	if len(actual) != len(expectedKinds(j.Plan.Preview.Selected)) {
-		return nil, nil, noPlugins, ErrJournalInvalid
+	for kind := range expectedKinds(j.Plan.Preview.Selected) {
+		if _, ok := actual[kind]; !ok {
+			return nil, nil, noPlugins, ErrJournalInvalid
+		}
+	}
+	if folder := j.Plan.Evidence.AgentsFolder; folder != "" {
+		if !slices.Contains(independentAgentsFolders(root), folder) {
+			return nil, nil, noPlugins, ErrScopeChanged
+		}
 	}
 	resolvedDatabase, err := resolvePath(expected["database_records"])
 	if err != nil || resolvedDatabase != j.Plan.Evidence.DatabasePath {
@@ -284,6 +291,33 @@ func validatePluginRecoveryScope(root string, j *journal, options RecoveryOption
 	return paths, nil
 }
 
+// independentAgentsFolders re-derives, without the journal, where the user's
+// agents folder can be: the Agents folder of the configured Workspace
+// Directory, of the default one (WORKSPACE_DIR or ~/Ori Workspaces), and of
+// the staging root used before one is confirmed. More than one candidate is
+// accepted because resetting Settings with App records clears the configured
+// root, and a resumed operation must still recognise the folder it reviewed.
+// AGENT_STORE_PATH keeps every agent in the data dir, so it has none.
+func independentAgentsFolders(root string) []string {
+	if strings.TrimSpace(os.Getenv("AGENT_STORE_PATH")) != "" {
+		return nil
+	}
+	roots := []string{config.ResolveWorkspaceRoot(""), filepath.Join(root, "workspace-staging")}
+	settings := config.NewManager(filepath.Join(root, "settings.json"))
+	if err := settings.Load(); err == nil {
+		if configured := settings.GetWorkspaceRoot(); configured != "" {
+			roots = append(roots, configured)
+		}
+	}
+	var folders []string
+	for _, candidate := range roots {
+		if resolved, err := resolvePath(config.RootAgentsDir(candidate)); err == nil {
+			folders = append(folders, resolved)
+		}
+	}
+	return folders
+}
+
 func independentlyResolvedTargets(root string) (map[string]string, error) {
 	agentIndex := filepath.Join(root, "agents.json")
 	if configured := strings.TrimSpace(os.Getenv("AGENT_STORE_PATH")); configured != "" {
@@ -325,16 +359,20 @@ func independentlyResolvedTargets(root string) (map[string]string, error) {
 	return map[string]string{
 		// Selected installed-plugin reset edits within these owner scopes; the
 		// personal skills root is resolved separately and never appears here.
-		"plugin_registry_records":       pluginPaths.RegistryPath(),
-		"plugin_mcp_entries":            pluginPaths.MCPRegistry,
-		"plugin_surface_state":          pluginPaths.StateRoot(),
-		"plugin_managed_artifacts":      pluginPaths.ArtifactsRoot(),
-		"plugin_managed_clones":         pluginPaths.CloneDir,
-		"plugin_preview_state":          pluginPaths.PreviewRoot(),
-		"settings_fields":               settingsPath,
-		"agent_index":                   cleanIndex,
-		"agent_profiles":                agentProfiles,
-		"agent_projection":              filepath.Join(root, "agents.json"),
+		"plugin_registry_records":  pluginPaths.RegistryPath(),
+		"plugin_mcp_entries":       pluginPaths.MCPRegistry,
+		"plugin_surface_state":     pluginPaths.StateRoot(),
+		"plugin_managed_artifacts": pluginPaths.ArtifactsRoot(),
+		"plugin_managed_clones":    pluginPaths.CloneDir,
+		"plugin_preview_state":     pluginPaths.PreviewRoot(),
+		"settings_fields":          settingsPath,
+		"agent_index":              cleanIndex,
+		"agent_profiles":           agentProfiles,
+		// The retired plugin projection now aliases the index (see
+		// fileStore.PersistencePaths); journals written before that named
+		// root/agents.json, which is the same file for the default store.
+		"agent_projection":              cleanIndex,
+		"agent_state":                   filepath.Join(filepath.Dir(agentProfiles), config.AgentStateDirName),
 		"workspace_registration_fields": filepath.Join(root, "settings.json"),
 		"workspace_permissions":         filepath.Join(root, workspace.DefaultAllowlistFilename),
 		"database_records":              filepath.Join(root, "sessions.db"),
@@ -405,6 +443,18 @@ func applyRecoveryCategory(ctx context.Context, result CategoryResult, selected 
 	case CategoryAgents:
 		if _, err := store.ResetAgentPersistence(targets["agent_index"], targets["agent_profiles"], targets["agent_projection"]); err != nil {
 			return result
+		}
+		// Both are optional: a receipt from before runtime state or the agents
+		// folder existed names neither.
+		if state := targets["agent_state"]; state != "" {
+			if _, err := store.ResetAgentState(state); err != nil {
+				return result
+			}
+		}
+		if folder := evidence.AgentsFolder; folder != "" {
+			if _, err := store.ResetRootAgents(folder); err != nil {
+				return result
+			}
 		}
 		completeResultCheck(&result, "old_profiles_absent")
 		policy, err := ReadStartupPolicy(lease)
@@ -573,7 +623,7 @@ func protectedDigestsUnchanged(ctx context.Context, evidence resolvedEvidence) b
 		if err != nil || resolved != fingerprint.Path {
 			return false
 		}
-		digest, err := digestProtectedPath(ctx, fingerprint.Path)
+		digest, err := digestProtectedPath(ctx, fingerprint.Path, evidence.AgentsFolder)
 		if err != nil || digest != fingerprint.Digest {
 			return false
 		}

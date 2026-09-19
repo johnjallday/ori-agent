@@ -101,6 +101,13 @@ type resolvedEvidence struct {
 	// installed plugin, so receipts written before plugin reset existed keep
 	// their canonical bytes and their original recovery semantics.
 	Plugins *pluginEvidence `json:"plugins,omitempty"`
+	// AgentsFolder is <root>/Agents when the reviewed scope removes the user's
+	// agents from their Workspace Directory. Like Plugins it carries its own
+	// narrow boundary instead of relaxing the generic target rules: it must be
+	// the Agents folder directly inside a retained workspace root, and the
+	// retained digests skip exactly this folder. Omitted otherwise, so older
+	// receipts keep their bytes.
+	AgentsFolder string `json:"agents_folder,omitempty"`
 }
 
 type resolvedPlan struct {
@@ -297,9 +304,13 @@ func (p *Planner) inspect(ctx context.Context, intent Intent, selected []Categor
 	}
 	slices.Sort(protected)
 	protected = slices.Compact(protected)
+	agentsFolder := ""
+	if slices.Contains(selected, CategoryAgents) {
+		agentsFolder = reviewAgentsFolder(owners.Agents, protected, block)
+	}
 	protectedDigests := make([]protectedDigest, 0, len(protected))
 	for _, path := range protected {
-		digest, err := digestProtectedPath(ctx, path)
+		digest, err := digestProtectedPath(ctx, path, agentsFolder)
 		if err != nil {
 			block("retained_path_unreadable", selected[0], "Retained workspace or vault contents cannot be hashed before reset.", "Restore read access or reduce the retained tree below the bounded inspection limit, then review again.")
 		}
@@ -351,6 +362,11 @@ func (p *Planner) inspect(ctx context.Context, intent Intent, selected []Categor
 		default:
 			inspectCategory(ctx, owners, id, &category, report, target, block)
 		}
+		if id == CategoryAgents && agentsFolder != "" {
+			category.Removed = append(category.Removed, Location{DisplayPath: agentsFolder, Reason: "Remove each agent's folder (definition, image, skills and tool settings) from your Workspace Directory; keep every other file there."})
+			category.Facts = append(category.Facts, countAgentFolders(agentsFolder))
+			view.AgentsFolder = &AgentsFolderReview{Path: agentsFolder, Notice: AgentsFolderNotice, ConfirmationRequired: true}
+		}
 		view.Categories = append(view.Categories, category)
 	}
 	if slices.Contains(selected, CategoryAppRecords) && os.Getenv("WORKSPACE_DIR") != "" {
@@ -375,7 +391,10 @@ func (p *Planner) inspect(ctx context.Context, intent Intent, selected []Categor
 		// bound here, so installing, updating, or removing any plugin after the
 		// review invalidates the confirmation.
 		Plugins *pluginEvidence
-	}{SchemaVersion, intent, selected, root, plan.Targets, protectedDigests, report.SchemaDigest, report.Version, databasePath, rootConfirmed, view.Blockers, plugins}
+		// A different Workspace Directory means a different agents folder, and
+		// the second confirmation named the reviewed one.
+		AgentsFolder string
+	}{SchemaVersion, intent, selected, root, plan.Targets, protectedDigests, report.SchemaDigest, report.Version, databasePath, rootConfirmed, view.Blockers, plugins, agentsFolder}
 	data, err := json.Marshal(binding)
 	if err != nil {
 		return resolvedPlan{}, err
@@ -391,6 +410,7 @@ func (p *Planner) inspect(ctx context.Context, intent Intent, selected []Categor
 		DatabaseSchemaVersion:  report.Version,
 		WorkspaceRootConfirmed: rootConfirmed,
 		Plugins:                plugins,
+		AgentsFolder:           agentsFolder,
 	}
 	digest := sha256.Sum256(data)
 	view.ScopeDigest = hex.EncodeToString(digest[:])
@@ -462,7 +482,12 @@ func inspectCategory(ctx context.Context, owners Owners, id CategoryID, category
 			index, profiles, projection := paths.PersistencePaths()
 			target("agent_index", index, "Remove the owned agent index, not unrelated files beside it.")
 			target("agent_profiles", profiles, "Remove only owned agent profiles/skills/state; preserve unknown files and external links.")
-			target("agent_projection", projection, "Remove the owner's compatibility projection.")
+			target("agent_projection", projection, "Remove the owner's compatibility projection (now the index itself).")
+			if locations, ok := owners.Agents.(interface{ ResetLocations() store.ResetLocations }); ok {
+				if state := locations.ResetLocations().State; state != "" {
+					target("agent_state", state, "Remove every agent's runtime state (status, counts, recent activity); preserve unknown files.")
+				}
+			}
 			count := int64(len(owners.Agents.ListAgents()))
 			category.Facts = append(category.Facts, CountFact{Name: "active agent profiles", Count: &count})
 		}
@@ -570,9 +595,65 @@ func countFreshTarget(ctx context.Context, path string) *int64 {
 	return &count
 }
 
+// reviewAgentsFolder resolves the root's Agents folder for an agents reset,
+// or returns "" when agents live only in the data dir. The folder must sit
+// directly inside a retained workspace root and hold no retained path itself;
+// anything else is a blocker rather than a guess.
+func reviewAgentsFolder(agents store.Store, protected []string, block func(code string, category CategoryID, message, recovery string)) string {
+	locations, ok := agents.(interface{ ResetLocations() store.ResetLocations })
+	if !ok || strings.TrimSpace(locations.ResetLocations().RootAgents) == "" {
+		return ""
+	}
+	resolved, err := resolvePath(locations.ResetLocations().RootAgents)
+	if err != nil || !agentsFolderWithinRetainedRoot(resolved, protected) {
+		block("agents_folder_unverified", CategoryAgents, "The agents folder is not directly inside the retained Workspace Directory.", "Point the Workspace Directory at the folder that holds Agents, or restore access to it, then review again. No agents folder will be guessed.")
+		return ""
+	}
+	return resolved
+}
+
+// agentsFolderWithinRetainedRoot is the one exception to "no reset target
+// overlaps retained files": folder is named Agents, sits directly inside a
+// retained path, and contains no retained path of its own.
+func agentsFolderWithinRetainedRoot(folder string, protected []string) bool {
+	if !filepath.IsAbs(folder) || filepath.Clean(folder) != folder || filepath.Base(folder) != config.AgentsFolderName {
+		return false
+	}
+	parentRetained := false
+	for _, kept := range protected {
+		if kept == folder || containsPath(folder, kept) {
+			return false
+		}
+		if kept == filepath.Dir(folder) {
+			parentRetained = true
+		}
+	}
+	return parentRetained
+}
+
+// countAgentFolders counts the agent folders an agents reset would remove.
+func countAgentFolders(folder string) CountFact {
+	fact := CountFact{Name: "agent folders in your Workspace Directory", UnavailableReason: "Agents folder unreadable; not a zero count."}
+	entries, err := os.ReadDir(folder)
+	if err != nil && !os.IsNotExist(err) {
+		return fact
+	}
+	var count int64
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if info, err := os.Lstat(filepath.Join(folder, entry.Name(), "agent_settings.json")); err == nil && info.Mode().IsRegular() {
+			count++
+		}
+	}
+	fact.Count, fact.UnavailableReason = &count, ""
+	return fact
+}
+
 func directoryTarget(kind string) bool {
 	return slices.Contains([]string{
-		"agent_profiles", "owned_uploads", "plugin_clones", "plugin_state", "plugin_artifacts", "plugin_preview",
+		"agent_profiles", "agent_state", "owned_uploads", "plugin_clones", "plugin_state", "plugin_artifacts", "plugin_preview",
 		"plugin_surface_state", "plugin_managed_artifacts", "plugin_managed_clones", "plugin_preview_state",
 		"project_templates", "post_reset_project_templates", "workflow_templates", "usage_records", "activity_logs", "cli_event_logs", "cli_mcp_configs",
 	}, kind)

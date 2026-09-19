@@ -687,6 +687,20 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     return body.trim() || 'Failed to save workspace directory';
   }
 
+  // The user's agents live in the Workspace Directory's Agents folder, so
+  // changing an already-confirmed directory changes the agents list too. Say
+  // so first. The very first confirmation is different: it moves what was
+  // made before a directory was chosen, and needs no warning.
+  function confirmWorkspaceRootChange(nextRoot) {
+    const current = workspaceRootState;
+    if (!current?.confirmed) return true;
+    if (String(current.workspace_root || '') === String(nextRoot || '')) return true;
+    return window.confirm(
+      'Change the Workspace Directory?\n\n' +
+        'Your agents list will switch to the agents in the new folder. Nothing is moved.'
+    );
+  }
+
   async function saveWorkspaceRoot(workspaceRoot) {
     const response = await fetch('/api/settings/workspace-root', {
       method: 'POST',
@@ -734,6 +748,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   });
 
   saveBtn?.addEventListener('click', async function () {
+    if (!confirmWorkspaceRootChange(input.value.trim())) return;
     setButtonLoading(saveBtn, true, 'Saving...');
     try {
       const saved = await saveWorkspaceRoot(input.value.trim());
@@ -751,6 +766,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     if (!workspaceRootState?.workspace_root) {
       return;
     }
+    if (!confirmWorkspaceRootChange('')) return;
 
     setButtonLoading(resetBtn, true, 'Clearing...');
     try {

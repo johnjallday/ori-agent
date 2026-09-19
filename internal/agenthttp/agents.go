@@ -2,6 +2,7 @@ package agenthttp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -13,6 +14,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -113,6 +115,8 @@ type Handler struct {
 	// time. Nil is a safe no-op (no starter skills applied).
 	skillsManager *skills.Manager
 	support       personalAssistantSupportClassifier
+	// desktopOpener opens an agent's folder in Finder ("Show in Finder").
+	desktopOpener platform.DesktopOpener
 }
 
 func New(state store.Store) *Handler {
@@ -270,6 +274,8 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 		// row (FR-49/FR-104).
 		Appearance       map[string]any `json:"appearance"`
 		PresentationRole string         `json:"presentation_role,omitempty"`
+		// Origin: see AgentListItem.Origin.
+		Origin *store.AgentOrigin `json:"origin,omitempty"`
 	}
 	annotate := func(info AgentInfo) AgentInfo {
 		if m, ok := memberships[strings.ToLower(strings.TrimSpace(info.Name))]; ok {
@@ -295,6 +301,7 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 				Status:     agent.Status,
 				Evolution:  cloneAgentEvolution(agent),
 				Appearance: appearanceForAgent(agent),
+				Origin:     originFor(h.State, name),
 			}))
 		} else {
 			// Fallback for agents that couldn't be loaded
@@ -411,6 +418,10 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 	logger.Debug("Creating agent", logger.Fields{"agent": req.Name})
 	if err := h.State.CreateAgent(req.Name, config); err != nil {
 		logger.Error("CreateAgent error", logger.Fields{"error": err})
+		if errors.Is(err, store.ErrAgentRootUnavailable) {
+			WriteAgentStoreError(w, "Failed to create agent", err)
+			return
+		}
 		orihttp.BadRequest(w, err.Error())
 		return
 	}
@@ -479,6 +490,12 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	agent, ok := h.State.GetAgent(agentName)
 	if !ok || agent == nil {
 		orihttp.NotFound(w, "Agent not found")
+		return
+	}
+	// Refused before anything below mutates the record: an agent only a
+	// workspace holds is that workspace's copy, edited there.
+	if owned := workspaceOwnedAgent(h.State, agentName); owned != nil {
+		WriteAgentStoreError(w, "Failed to update agent", owned)
 		return
 	}
 
@@ -688,9 +705,24 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if err := h.State.SetAgent(*req.Name, agent); err != nil {
+		// Save the edit under the current name first. That write is where the
+		// store notices a definition changed on disk; renaming a stale copy
+		// would carry it to the new name and delete the edited file.
+		if err := h.State.SetAgent(agentName, agent); err != nil {
+			logger.Error("Failed to save agent before rename", logger.Fields{"agent": agentName, "error": err})
+			WriteAgentStoreError(w, "Failed to update agent", err)
+			return
+		}
+		if renamer, ok := h.State.(store.AgentRenamer); ok {
+			// Moving the folder keeps every sidecar file (skills, MCP state).
+			if err := renamer.RenameAgent(agentName, *req.Name); err != nil {
+				logger.Error("Failed to rename agent", logger.Fields{"from": agentName, "to": *req.Name, "error": err})
+				WriteAgentStoreError(w, "Failed to update agent", err)
+				return
+			}
+		} else if err := h.State.SetAgent(*req.Name, agent); err != nil {
 			logger.Error("Failed to save renamed agent", logger.Fields{"agent": *req.Name, "error": err})
-			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update agent", err)
+			WriteAgentStoreError(w, "Failed to update agent", err)
 			return
 		}
 		// Carry the saved Agent Map coordinate BEFORE the old record is deleted
@@ -707,14 +739,16 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 					logger.Fields{"from": agentName, "to": *req.Name, "err": err})
 			}
 		}
-		if err := h.State.DeleteAgent(agentName); err != nil {
-			logger.Error("Failed to delete old agent record after rename", logger.Fields{"name": agentName, "err": err})
+		if _, stillThere := h.State.GetAgent(agentName); stillThere {
+			if err := h.State.DeleteAgent(agentName); err != nil {
+				logger.Error("Failed to delete old agent record after rename", logger.Fields{"name": agentName, "err": err})
+			}
 		}
 		newName = *req.Name
 	} else {
 		if err := h.State.SetAgent(agentName, agent); err != nil {
 			logger.Error("Failed to update agent metadata", logger.Fields{"agent": agentName, "error": err})
-			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update agent", err)
+			WriteAgentStoreError(w, "Failed to update agent", err)
 			return
 		}
 	}
@@ -822,6 +856,10 @@ func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) {
 	// Deletion lifecycle (store delete, session purge, activity log) is shared
 	// with the bulk endpoint so the two paths cannot drift (PRD FR52).
 	if err := h.performAgentDeletion(r.Context(), name); err != nil {
+		if errors.Is(err, store.ErrWorkspaceOwnedAgent) || errors.Is(err, store.ErrAgentRootUnavailable) || errors.Is(err, store.ErrAgentUnreadable) {
+			WriteAgentStoreError(w, "Failed to delete agent", err)
+			return
+		}
 		orihttp.BadRequest(w, err.Error())
 		return
 	}

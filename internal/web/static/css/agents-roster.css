@@ -683,6 +683,16 @@ body.agents-roster-page {
   color: #fca5a5;
 }
 
+/* The agents-folder banner reuses the error state, compact, above the list. */
+.roster-root-banner {
+  padding: 12px 16px;
+  margin-bottom: 12px;
+}
+
+.roster-root-banner[hidden] {
+  display: none;
+}
+
 /* ---- Gallery grid --------------------------------------------------------- */
 
 /* The collection host. Ungrouped it holds one .agent-grid; grouped it holds a
@@ -1422,6 +1432,40 @@ body.agents-roster-page {
   text-overflow: ellipsis;
   text-transform: uppercase;
   white-space: nowrap;
+}
+
+/* "From workspace: <name>" — an agent only a workspace holds, read from that
+   workspace's own copy. One clipped line, like the role line above it. */
+.agent-card__origin {
+  display: block;
+  min-width: 0;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--card-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* An agent whose definition file could not be read: the file is named in the
+   origin line, in the error colour, and the card reads as unavailable. */
+.roster-card.is-unreadable {
+  border-style: dashed;
+}
+
+.roster-card.is-unreadable .agent-card__origin {
+  color: #b91c1c;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+[data-bs-theme="dark"] .roster-card.is-unreadable .agent-card__origin {
+  color: #fca5a5;
+}
+
+/* A workspace's own agent is not selectable here: its checkbox is hidden. */
+.roster-card__checkwrap[hidden] {
+  display: none;
 }
 
 /* The role has a second, hidden home so List view can lift it into its own

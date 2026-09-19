@@ -1,11 +1,51 @@
 package store
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
+
+// ErrAgentChangedOnDisk reports that an agent's definition file was edited
+// outside Ori after the store last read or wrote it. SetAgent refuses to
+// overwrite such a file; the store reloads the agent from disk instead, so the
+// caller can show the user what is actually there and let them try again.
+var ErrAgentChangedOnDisk = errors.New("agent definition changed on disk")
+
+// ErrAgentRootUnavailable reports a write to the workspace root's agents
+// folder while that root is missing or unreadable (an unmounted drive, say).
+// Ori never creates the root to satisfy the write.
+var ErrAgentRootUnavailable = errors.New("your Workspace Directory was not found, so your agents are unavailable")
+
+// ErrAgentUnreadable refuses any write to an agent whose definition file is not
+// valid JSON. Ori never overwrites or deletes such a file: the user fixes it
+// in a text editor and rescans.
+var ErrAgentUnreadable = errors.New("agent definition could not be read")
+
+// UnreadableAgent is an agent folder whose definition file could not be read.
+type UnreadableAgent struct {
+	Name  string `json:"name"`
+	File  string `json:"file"`
+	Error string `json:"error"`
+}
+
+// UnreadableAgentError is ErrAgentUnreadable naming the file.
+type UnreadableAgentError struct {
+	UnreadableAgent
+}
+
+func (e *UnreadableAgentError) Error() string {
+	return fmt.Sprintf("agent %q could not be read from %s", e.Name, e.File)
+}
+
+func (e *UnreadableAgentError) Unwrap() error { return ErrAgentUnreadable }
+
+// AgentChangedOnDiskMessage is the user-facing explanation for
+// ErrAgentChangedOnDisk. HTTP handlers answer it with 409 Conflict.
+const AgentChangedOnDiskMessage = "This agent was changed on disk. Ori reloaded it. Review it and try again."
 
 // CreateAgentConfig holds optional configuration for creating a new agent
 type CreateAgentConfig struct {

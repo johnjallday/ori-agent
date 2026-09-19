@@ -722,6 +722,8 @@ function renderAgentDetails() {
   const descEl = document.getElementById('agentDescription');
   if (descEl) descEl.textContent = description;
 
+  renderAgentOrigin();
+
   const modelEl = document.getElementById('agentModel');
   if (modelEl) modelEl.textContent = currentAgent.model || 'Not set';
 
@@ -855,6 +857,86 @@ function renderCurrentAgentAvatar() {
   avatar.style.overflow = 'hidden';
 }
 
+// A workspace's own agent (read from that workspace's copy) is edited in the
+// workspace, so the page hides its editing controls and offers "Add to my
+// agents" instead. One of the user's own agents names the workspaces that hold
+// a customised copy of it.
+const WORKSPACE_EDIT_CONTROLS = [
+  'editProfileButton',
+  'deleteButton',
+  'editConfigBtn',
+  'editPromptBtn'
+];
+
+function isWorkspaceOwnedAgent() {
+  return Boolean(window.AgentOrigin && window.AgentOrigin.isWorkspaceOwned(currentAgent));
+}
+
+function renderAgentOrigin() {
+  const origin = window.AgentOrigin;
+  const owned = isWorkspaceOwnedAgent();
+  const note = document.getElementById('agentOriginNote');
+  if (note) {
+    const text = !origin
+      ? ''
+      : owned
+        ? `${origin.workspaceMarker(currentAgent)}. Edit it in that workspace, or add it to your agents.`
+        : origin.customisedInLabel(currentAgent);
+    note.textContent = text;
+    note.hidden = !text;
+  }
+  const addButton = document.getElementById('addToMyAgentsButton');
+  if (addButton) addButton.hidden = !owned;
+  // One of the user's own agents has a folder in the Workspace Directory.
+  const finderButton = document.getElementById('showInFinderButton');
+  if (finderButton) finderButton.hidden = currentAgent?.origin?.source !== 'roster';
+  WORKSPACE_EDIT_CONTROLS.forEach(id => {
+    const control = document.getElementById(id);
+    if (control) control.hidden = owned;
+  });
+}
+
+async function addToMyAgents() {
+  if (!isWorkspaceOwnedAgent()) return;
+  const button = document.getElementById('addToMyAgentsButton');
+  if (button) button.disabled = true;
+  try {
+    const response = await fetch('/api/agents/add-from-workspace', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        workspace_id: currentAgent.origin.workspace_id,
+        name: currentAgent.name || agentName
+      })
+    });
+    if (!response.ok) {
+      throw new Error(await readResponseError(response, 'This agent could not be added.'));
+    }
+    showToast(`${currentAgent.name || agentName} is now one of your agents.`, 'success');
+    await refreshAgentDetails();
+  } catch (error) {
+    showToast(error.message || 'This agent could not be added.', 'error');
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function showAgentInFinder() {
+  const name = currentAgent?.name || agentName;
+  try {
+    const response = await fetch(`/api/agents/${encodeURIComponent(name)}/reveal`, {
+      method: 'POST'
+    });
+    if (!response.ok) {
+      throw new Error(
+        await readResponseError(response, "This agent's folder could not be opened.")
+      );
+    }
+  } catch (error) {
+    showToast(error.message || "This agent's folder could not be opened.", 'error');
+  }
+}
+
 function getAvatarURL(filename) {
   return `/avatars/${encodeURIComponent(String(filename || ''))}`;
 }
@@ -868,6 +950,8 @@ function setupProfileEditor() {
 
   editButton?.addEventListener('click', openProfileEditor);
   saveButton?.addEventListener('click', saveProfileChanges);
+  document.getElementById('addToMyAgentsButton')?.addEventListener('click', addToMyAgents);
+  document.getElementById('showInFinderButton')?.addEventListener('click', showAgentInFinder);
   tagsContainer?.addEventListener('click', () => tagsInput?.focus());
   tagsInput?.addEventListener('keydown', event => {
     const value = tagsInput.value.trim();
@@ -903,6 +987,9 @@ function mountProfileAppearanceEditor() {
     fetch(url, init).then(async response => {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
+        if (data.code === AGENT_CHANGED_ON_DISK) {
+          await refreshAgentDetails();
+        }
         throw new Error(data.message || data.error || 'That change could not be saved.');
       }
       // Adopt the server's canonical object, then repaint the hero so the page
@@ -1056,9 +1143,14 @@ async function saveProfileChanges() {
     setProfileSavingState(true);
     setProfileStatus('Saving profile...');
 
-    const { response, cancelled } = await saveAgentPatch(agentName, payload);
+    const { response, cancelled, reloaded } = await saveAgentPatch(agentName, payload);
     if (cancelled) {
       setProfileStatus('Change cancelled — shared agent not modified.');
+      return;
+    }
+    if (reloaded) {
+      populateProfileForm();
+      setProfileStatus(await readResponseError(response, 'Failed to save profile'), 'error');
       return;
     }
 
@@ -1097,12 +1189,28 @@ async function saveProfileChanges() {
   }
 }
 
+// A 409 with this code means the agent's definition file was edited outside Ori
+// (a text editor, a sync tool). The server has already reloaded it, so the page
+// refetches the agent and shows what is on disk instead of the user's stale copy.
+const AGENT_CHANGED_ON_DISK = 'agent_changed_on_disk';
+
+async function isAgentChangedOnDisk(response) {
+  if (response.status !== 409) return false;
+  const info = await response
+    .clone()
+    .json()
+    .catch(() => ({}));
+  return info?.code === AGENT_CHANGED_ON_DISK;
+}
+
 // saveAgentPatch PATCHes an agent definition and transparently handles the
 // shared-edit confirmation gate (PRD FR9). On a 409 asking for confirmation it
 // shows a blast-radius warning naming every affected workspace and, if the user
 // confirms, retries with confirm_shared_edit=true. Rename/delete blocks (also
 // 409, different error codes) fall through as a normal non-ok response for the
-// caller's error handling. Returns { response, cancelled }.
+// caller's error handling. A 409 for an edit made on disk refetches the agent
+// first and reports reloaded: true, so the caller can repopulate its form.
+// Returns { response, cancelled, reloaded }.
 async function saveAgentPatch(name, payload) {
   const doPatch = body =>
     fetch(`/api/agents/${encodeURIComponent(name)}`, {
@@ -1128,12 +1236,16 @@ async function saveAgentPatch(name, payload) {
           `This change affects all of them:${list}\n\nApply the change everywhere?`
       );
       if (!proceed) {
-        return { response, cancelled: true };
+        return { response, cancelled: true, reloaded: false };
       }
       response = await doPatch({ ...payload, confirm_shared_edit: true });
     }
   }
-  return { response, cancelled: false };
+  if (await isAgentChangedOnDisk(response)) {
+    await refreshAgentDetails();
+    return { response, cancelled: false, reloaded: true };
+  }
+  return { response, cancelled: false, reloaded: false };
 }
 
 function setProfileSavingState(isSaving) {
@@ -1289,9 +1401,14 @@ async function saveConfigChanges() {
     setConfigSavingState(true);
     setConfigStatus('Saving changes...');
 
-    const { response, cancelled } = await saveAgentPatch(agentName, payload);
+    const { response, cancelled, reloaded } = await saveAgentPatch(agentName, payload);
     if (cancelled) {
       setConfigStatus('Change cancelled — shared agent not modified.');
+      return;
+    }
+    if (reloaded) {
+      populateConfigForm();
+      setConfigStatus(await readResponseError(response, 'Failed to save changes'), 'error');
       return;
     }
 
@@ -1390,11 +1507,16 @@ async function savePromptChanges() {
     setPromptSavingState(true);
     setPromptStatus('Saving system prompt...');
 
-    const { response, cancelled } = await saveAgentPatch(agentName, {
+    const { response, cancelled, reloaded } = await saveAgentPatch(agentName, {
       system_prompt: systemPrompt
     });
     if (cancelled) {
       setPromptStatus('Change cancelled — shared agent not modified.');
+      return;
+    }
+    if (reloaded) {
+      populatePromptForm();
+      setPromptStatus(await readResponseError(response, 'Failed to save system prompt'), 'error');
       return;
     }
 
@@ -2066,6 +2188,9 @@ async function setAgentExpertMode(enabled) {
       const data = await response.json().catch(() => ({}));
       if (typeof showToast === 'function') {
         showToast(data?.error || 'Failed to update expert mode', 'error');
+      }
+      if (data?.code === AGENT_CHANGED_ON_DISK) {
+        await refreshAgentDetails();
       }
       return false;
     }

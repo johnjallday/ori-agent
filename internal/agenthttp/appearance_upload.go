@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
@@ -177,9 +176,16 @@ func (h *AppearanceUploadHandler) upload(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	// One of the user's agents keeps its image in its own folder, so the image
+	// travels with it; others use the shared data-dir folder.
+	avatarDir := avatarDirFor(h.State, agentName)
 	// 0o750, not 0o755: nothing outside this process needs to read the
 	// directory, and the static route serves its contents anyway.
-	if err := os.MkdirAll(AvatarDir, 0o750); err != nil {
+	// #nosec G703 -- avatarDir is resolved by the agent store for an agent it
+	// already holds (GetAgent succeeded above), or is the data-dir avatar
+	// folder; the request never names a path, and every write below is
+	// confined to this folder by os.Root.
+	if err := os.MkdirAll(avatarDir, 0o750); err != nil {
 		logger.Error("Failed to create avatar directory", logger.Fields{"error": err})
 		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to create avatar directory", err)
 		return
@@ -189,7 +195,7 @@ func (h *AppearanceUploadHandler) upload(w http.ResponseWriter, r *http.Request,
 	// directory. The filenames here are already server-generated, so this is
 	// belt and braces — but it makes the confinement enforced by the runtime
 	// rather than asserted by the code that builds the names (FR-64).
-	root, err := os.OpenRoot(AvatarDir)
+	root, err := os.OpenRoot(avatarDir)
 	if err != nil {
 		logger.Error("Failed to open avatar directory", logger.Fields{"error": err})
 		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save image", err)
@@ -200,7 +206,7 @@ func (h *AppearanceUploadHandler) upload(w http.ResponseWriter, r *http.Request,
 	// The filename is derived entirely from the agent name and the sniffed
 	// type. The client's original path is never consulted, so there is nothing
 	// to traverse with (FR-64).
-	filename := appearanceUploadFilename(agentName, ext)
+	filename := uploadFilenameFor(h.State, agentName, ext)
 	previous := ag.Appearance.UploadedImage()
 
 	// Stream to a temporary file first, then rename into place. The previous
@@ -234,7 +240,7 @@ func (h *AppearanceUploadHandler) upload(w http.ResponseWriter, r *http.Request,
 			_ = root.Remove(filename)
 		}
 		logger.Error("Failed to save agent appearance", logger.Fields{"error": err, "agent": agentName})
-		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update agent", err)
+		WriteAgentStoreError(w, "Failed to update agent", err)
 		return
 	}
 
@@ -242,7 +248,7 @@ func (h *AppearanceUploadHandler) upload(w http.ResponseWriter, r *http.Request,
 	// replacement landed at a different filename, so the previous one is still
 	// on disk and unreferenced.
 	if previous != "" && previous != filename {
-		removeAppearanceUpload(previous)
+		removeAppearanceUpload(h.State, agentName, previous)
 	}
 
 	logger.Info("Appearance image uploaded", logger.Fields{"agent": agentName, "filename": filename})
@@ -277,14 +283,14 @@ func (h *AppearanceUploadHandler) remove(w http.ResponseWriter, r *http.Request,
 	if err := h.State.SetAgent(agentName, ag); err != nil {
 		ag.Appearance = restore
 		logger.Error("Failed to save agent appearance", logger.Fields{"error": err, "agent": agentName})
-		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update agent", err)
+		WriteAgentStoreError(w, "Failed to update agent", err)
 		return
 	}
 
 	// The file goes only after the record no longer references it, so a crash
 	// between the two leaves an orphaned file rather than a broken reference.
 	if previous != "" {
-		removeAppearanceUpload(previous)
+		removeAppearanceUpload(h.State, agentName, previous)
 	}
 
 	logger.Info("Appearance image removed", logger.Fields{"agent": agentName})
@@ -303,6 +309,10 @@ func (h *AppearanceUploadHandler) remove(w http.ResponseWriter, r *http.Request,
 // warning. The tokens arrive as form fields because multipart has no JSON body:
 // `expected_version` and `confirm_shared_edit` (FR-16/FR-42).
 func (h *AppearanceUploadHandler) checkMutationGuards(w http.ResponseWriter, r *http.Request, ag *agent.Agent, agentName string) bool {
+	if owned := workspaceOwnedAgent(h.State, agentName); owned != nil {
+		WriteAgentStoreError(w, "Failed to update agent", owned)
+		return false
+	}
 	if expected := strings.TrimSpace(r.FormValue("expected_version")); expected != "" {
 		current := agentConfigVersion(ag)
 		if expected != current {
@@ -356,24 +366,30 @@ func appearanceUploadFilename(agentName, ext string) string {
 	return safe + ext
 }
 
-// removeAppearanceUpload deletes one stored image.
+// removeAppearanceUpload deletes one agent's stored image, from its own folder
+// or, for an image an older build wrote, the shared folder.
 //
-// Two independent guards: the name must be a plain basename, and the delete
-// goes through an os.Root confined to the avatar directory. The first rejects a
-// stored value that could only have been hand-edited; the second means even a
-// mistake there cannot escape the directory, because the runtime enforces it.
-func removeAppearanceUpload(filename string) {
+// Two independent guards. The name must be a plain basename with an image
+// extension, which rejects a stored value that could only have been
+// hand-edited — an agent folder also holds agent_settings.json. And the delete
+// goes through an os.Root confined to the folder, so even a mistake in the
+// first cannot escape it, because the runtime enforces it.
+func removeAppearanceUpload(st store.Store, agentName, filename string) {
 	name := strings.TrimSpace(filename)
-	if name == "" || name != filepath.Base(name) || name == "." || name == ".." {
+	if !agent.IsAppearanceUploadFilename(name) {
 		return
 	}
-	root, err := os.OpenRoot(AvatarDir)
-	if err != nil {
-		return
-	}
-	defer func() { _ = root.Close() }()
-	if err := root.Remove(name); err == nil {
-		logger.Debug("Removed appearance image", logger.Fields{"filename": name})
+	for _, dir := range avatarDirsForAgent(st, agentName) {
+		root, err := os.OpenRoot(dir)
+		if err != nil {
+			continue
+		}
+		err = root.Remove(name)
+		_ = root.Close()
+		if err == nil {
+			logger.Debug("Removed appearance image", logger.Fields{"filename": name})
+			return
+		}
 	}
 }
 

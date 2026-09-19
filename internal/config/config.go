@@ -274,6 +274,37 @@ func DefaultAgentStorePath() string {
 	return filepath.Join(DefaultDataDir(), "agents.json")
 }
 
+// AgentsFolderName is the folder inside the workspace root that holds the
+// user's agents, one folder per agent. The same name is reserved as a
+// top-level workspace slug so a workspace can never occupy it.
+const AgentsFolderName = "Agents"
+
+// RootAgentsDir returns <root>/Agents for a workspace root.
+func RootAgentsDir(root string) string {
+	return filepath.Join(root, AgentsFolderName)
+}
+
+// AgentAvatarsDirName is the shared data-dir folder of uploaded agent images.
+const AgentAvatarsDirName = "agent_avatars"
+
+// DefaultAgentAvatarsDir returns the shared folder of uploaded agent images:
+// the built-in assistant's, and every agent's when AGENT_STORE_PATH is set.
+// The user's agents in the Workspace Directory keep their image in their own
+// folder instead. Anchored to the data dir, never the working directory.
+func DefaultAgentAvatarsDir() string {
+	return filepath.Join(DefaultDataDir(), AgentAvatarsDirName)
+}
+
+// AgentStateDirName is the data-dir folder holding agents' runtime state.
+const AgentStateDirName = "agent_state"
+
+// DefaultAgentStateDir returns where agents' runtime state (status,
+// statistics, evolution) lives. It stays in the data dir so that a synced or
+// version-controlled agents folder carries only what the user authored.
+func DefaultAgentStateDir() string {
+	return filepath.Join(DefaultDataDir(), AgentStateDirName)
+}
+
 // DefaultWorkspaceRoot returns the fallback directory used for new workspace folders.
 func DefaultWorkspaceRoot() string {
 	home, err := os.UserHomeDir()

@@ -77,7 +77,7 @@ func (b *ServerBuilder) initializeStorage() error {
 	agentStorePath := resolveAgentStorePath()
 	b.agentStorePath = agentStorePath
 
-	st, err := createFileStoreWithPolicy(agentStorePath, defaultConf, b.resetPolicy.SuppressAgentRehydration)
+	st, err := createAgentStore(agentStorePath, defaultConf, b.configManager, b.resetPolicy.SuppressAgentRehydration)
 	if err != nil {
 		return err
 	}

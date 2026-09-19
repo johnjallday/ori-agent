@@ -2,6 +2,7 @@ package agenthttp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -63,7 +65,9 @@ const (
 	reasonAttachedAgent     = "attached_agent"  // attached to >=1 workspace
 	reasonAgentNotFound     = "agent_not_found" // no such user agent
 	reasonSharedEditNeedsOK = "shared_edit_requires_confirmation"
-	reasonInternalError     = "internal_error" // unexpected server failure
+	reasonChangedOnDisk     = agentChangedOnDiskCode  // edited outside Ori; reloaded
+	reasonWorkspaceOwned    = workspaceOwnedAgentCode // only a workspace holds it
+	reasonInternalError     = "internal_error"        // unexpected server failure
 )
 
 // bulkRequest is the POST /api/agents/bulk body (PRD FR46).
@@ -269,6 +273,9 @@ func (h *Handler) persistMetadataMutation(name string, ag *agent.Agent, fields [
 		ag.Statistics.UpdatedAt = time.Now()
 	}
 	if err := h.State.SetAgent(name, ag); err != nil {
+		if errors.Is(err, store.ErrAgentChangedOnDisk) {
+			return bulkResult{Name: name, Status: bulkStatusSkipped, ReasonCode: reasonChangedOnDisk, Message: agentChangedOnDiskMessage}, false
+		}
 		logger.Error("bulk metadata save failed", logger.Fields{"agent": name, "err": err})
 		return bulkResult{Name: name, Status: bulkStatusFailed, ReasonCode: reasonInternalError, Message: "Failed to update agent."}, false
 	}
@@ -294,6 +301,9 @@ func (h *Handler) checkAgentDeletable(ctx context.Context, name string) (reasonC
 	if _, ok := h.State.GetAgent(name); !ok {
 		return reasonAgentNotFound, "Agent not found."
 	}
+	if owned := workspaceOwnedAgent(h.State, name); owned != nil {
+		return reasonWorkspaceOwned, workspaceOwnedMessage(owned)
+	}
 	// A hired assistant with no Personal HQ yet is attached to nothing, so the
 	// membership check below cannot protect it. Bulk delete must not be the way
 	// around the single-agent guard.
@@ -317,6 +327,11 @@ func (h *Handler) metadataMutationTarget(name string, touchesSharedDefinition, c
 	ag, ok := h.State.GetAgent(name)
 	if !ok || ag == nil {
 		return nil, reasonAgentNotFound, "Agent not found."
+	}
+	// Checked before the caller mutates ag: a workspace-only agent is read from
+	// the workspace's copy and is edited there, not here.
+	if owned := workspaceOwnedAgent(h.State, name); owned != nil {
+		return nil, reasonWorkspaceOwned, workspaceOwnedMessage(owned)
 	}
 	if touchesSharedDefinition && !isSystemAssistantAgent(name) {
 		if m := workspace.WorkspaceMembershipFor(h.workspaceStore, name); m.Count > 1 && !confirmed {

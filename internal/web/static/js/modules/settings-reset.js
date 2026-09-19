@@ -125,9 +125,25 @@
   const results = byId('resetOperationResults');
   const openStartFreshSetup = byId('openStartFreshSetupBtn');
   const dismissButtons = [byId('resetCancelBtn'), byId('resetCloseBtn')];
+  // A reset that removes the agents from the Workspace Directory needs a second
+  // confirmation naming that folder: the user can see it and may sync it to
+  // other machines. The server refuses the reset without it.
+  const agentsFolderBlock = byId('resetAgentsFolderConfirm');
+  const agentsFolderPath = byId('resetAgentsFolderPath');
+  const agentsFolderNotice = byId('resetAgentsFolderNotice');
+  const agentsFolderCheck = byId('resetAgentsFolderCheck');
   let phase = 'idle';
   let reviewed = null;
   let reviewFocus = reviewButton;
+
+  function agentsFolderUnconfirmed() {
+    return Boolean(reviewed?.agents_folder?.confirmation_required) && !agentsFolderCheck?.checked;
+  }
+
+  function clearAgentsFolder() {
+    if (agentsFolderCheck) agentsFolderCheck.checked = false;
+    if (agentsFolderBlock) agentsFolderBlock.hidden = true;
+  }
 
   function selectedCategories() {
     return Object.values(choices)
@@ -150,12 +166,16 @@
     reviewButton.disabled = locked || selectedCategories().length === 0;
     if (startFreshButton) startFreshButton.disabled = locked;
     if (input) input.disabled = phase !== 'review' || Boolean(reviewed?.blockers?.length);
+    if (agentsFolderCheck) {
+      agentsFolderCheck.disabled = phase !== 'review' || Boolean(reviewed?.blockers?.length);
+    }
     if (confirmButton) {
       confirmButton.disabled =
         phase !== 'review' ||
         input?.value !== 'RESET' ||
         !reviewed ||
-        Boolean(reviewed.blockers?.length);
+        Boolean(reviewed.blockers?.length) ||
+        agentsFolderUnconfirmed();
       confirmButton.textContent =
         phase === 'submitting'
           ? 'Submitting reset…'
@@ -252,6 +272,11 @@
           ? 'Warning: Start Fresh permanently removes every reviewed Ori-owned category below. Retained folders and vault packages stay detached.'
           : 'Warning: You are about to permanently delete the reviewed data below.';
     }
+    const folder = preview.agents_folder;
+    clearAgentsFolder();
+    if (agentsFolderBlock) agentsFolderBlock.hidden = !folder;
+    if (agentsFolderPath) agentsFolderPath.textContent = folder?.path || '';
+    if (agentsFolderNotice) agentsFolderNotice.textContent = folder?.notice || '';
     if (preview.blockers?.length) {
       showError(
         'Reset is blocked. Resolve every blocker and review again; no data has been deleted.'
@@ -456,6 +481,7 @@
       reviewed = null;
       phase = 'idle';
       if (input) input.value = '';
+      clearAgentsFolder();
       showError('Selection changed. Close this dialog and review the scope again.');
     }
     updateControls();
@@ -527,6 +553,9 @@
     showError('');
     updateControls();
   });
+  agentsFolderCheck?.addEventListener('change', () => {
+    if (phase === 'review') updateControls();
+  });
   input?.addEventListener('keydown', event => {
     if (event.key !== 'Enter') return;
     event.preventDefault();
@@ -534,7 +563,13 @@
   });
 
   confirmButton?.addEventListener('click', async () => {
-    if (phase !== 'review' || !reviewed || reviewed.blockers?.length || input?.value !== 'RESET')
+    if (
+      phase !== 'review' ||
+      !reviewed ||
+      reviewed.blockers?.length ||
+      input?.value !== 'RESET' ||
+      agentsFolderUnconfirmed()
+    )
       return;
     const acceptedPreview = reviewed;
     const resetRequestID = requestID();
@@ -555,12 +590,20 @@
         body: JSON.stringify({
           preview_id: acceptedPreview.id,
           request_id: resetRequestID,
-          confirmation: 'RESET'
+          confirmation: 'RESET',
+          // The reviewed folder, repeated: the server checks it is the same one.
+          ...(acceptedPreview.agents_folder
+            ? { confirm_agents_folder: acceptedPreview.agents_folder.path }
+            : {})
         })
       });
       const payload = await readJSON(response);
       if (payload?.operation) renderOperation(payload.operation);
-      else {
+      else if (payload?.code === 'agents_folder_confirmation_required') {
+        // Refused before anything was admitted, so the reset can be reviewed again.
+        phase = 'idle';
+        showResult(responseMessage(payload, 'Confirm the agents folder, then reset again.'));
+      } else {
         phase = 'unknown';
         showResult(
           responseMessage(
@@ -593,6 +636,7 @@
     phase = 'idle';
     reviewed = null;
     if (input) input.value = '';
+    clearAgentsFolder();
     showError('');
     updateControls();
     reviewFocus?.focus();

@@ -68,7 +68,7 @@ func coordinatorRequest(t *testing.T, c *Coordinator, categories ...CategoryID) 
 	if len(v.Blockers) != 0 {
 		t.Fatalf("unexpected fixture blockers: %+v", v.Blockers)
 	}
-	return v, ExecuteRequest{PreviewID: v.ID, RequestID: "owned-request", Confirmation: "RESET"}
+	return v, ExecuteRequest{PreviewID: v.ID, RequestID: "owned-request", Confirmation: "RESET", ConfirmAgentsFolder: confirmedAgentsFolder(v)}
 }
 
 func TestCoordinatorStagesOnceWithoutDeletingSelectedData(t *testing.T) {
@@ -116,7 +116,7 @@ func TestCoordinatorStagesOnceWithoutDeletingSelectedData(t *testing.T) {
 	if !reflect.DeepEqual(op, again) || !bytes.Equal(receipt, stored) || life.fences != 1 || life.drains != 1 {
 		t.Fatal("replay admitted new work")
 	}
-	for _, changed := range []ExecuteRequest{{v.ID, "other-request", "RESET"}, {"other-preview", req.RequestID, "RESET"}} {
+	for _, changed := range []ExecuteRequest{{PreviewID: v.ID, RequestID: "other-request", Confirmation: "RESET"}, {PreviewID: "other-preview", RequestID: req.RequestID, Confirmation: "RESET"}} {
 		if _, err := c.Stage(t.Context(), changed); !errors.Is(err, ErrOperationConflict) {
 			t.Fatal("reused an admitted identity:", err)
 		}

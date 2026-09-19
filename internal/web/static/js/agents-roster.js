@@ -491,6 +491,7 @@
         // ring is drawn without a request per agent (FR-75). Absent means no
         // ring, which is the same outcome as an agent with no progression.
         state.xpPerLevel = Number((data && data.xp_per_level) || 0);
+        renderAgentRootBanner(data && data.agent_root);
         state.agents = agents;
         state.byName = {};
         agents.forEach(function (a) {
@@ -517,6 +518,33 @@
         setCollectionState('error');
         console.error('[roster] load failed', err);
       });
+  }
+
+  // The user's agents live in the Workspace Directory's Agents folder. When
+  // Ori cannot use it, say so above the collection: the list then holds only
+  // the built-in assistant (and any agents still in the old location).
+  function agentRootMessage(root) {
+    if (!root) return '';
+    if (!root.available && root.reason === 'missing') {
+      return 'Your Workspace Directory was not found, so your agents are unavailable.';
+    }
+    var migration = root.migration && root.migration.status;
+    if (root.reason === 'occupied_by_workspace' || migration === 'blocked_by_workspace') {
+      return (
+        'A workspace named "Agents" is using the folder where your agents belong, ' +
+        'so they stay in their old location for now. Rename that workspace, then restart Ori.'
+      );
+    }
+    return '';
+  }
+
+  function renderAgentRootBanner(root) {
+    var banner = document.getElementById('rosterRootBanner');
+    var msg = document.getElementById('rosterRootBannerMsg');
+    if (!banner || !msg) return;
+    var text = agentRootMessage(root);
+    msg.textContent = text;
+    banner.hidden = !text;
   }
 
   // Loading / load-error / ready are distinct real states (PRD FR8). `error`
@@ -570,13 +598,26 @@
     var level = evo.level || 0;
     var stage = evo.stage || 'spark';
 
+    var workspaceOwned = isWorkspaceOwned(a);
+    var unreadable = isUnreadable(a);
     var vm = {
       name: (a && a.name) || '',
       source: agentSourceKind(a),
       builtIn: builtIn,
+      // An agent only a workspace holds is that workspace's own copy: it is
+      // edited there, so here it is read-only and cannot be selected.
+      workspaceOwned: workspaceOwned,
+      // An agent whose definition file is not valid JSON. Ori never touches
+      // that file; the card names it so the user can fix it.
+      unreadable: unreadable,
+      originMarker: unreadable
+        ? 'Could not be read: ' + ((a && a.file) || 'its definition file')
+        : window.AgentOrigin
+          ? window.AgentOrigin.workspaceMarker(a)
+          : '',
       // Built-in CLI definitions and the system assistant have no editable
       // definition here; the server rejects mutation and deletion alike.
-      editable: !builtIn,
+      editable: !builtIn && !workspaceOwned && !unreadable,
       health: agentHealth(a),
       // healthText is what the card's status chip prints, so the chip, the
       // summary tiles, and the quick filters all state the same three buckets.
@@ -819,6 +860,19 @@
 
   function agentSourceKind(a) {
     return String((a && a.source) || 'user').toLowerCase() === 'cli' ? 'cli' : 'user';
+  }
+
+  function isWorkspaceOwned(a) {
+    return !!(window.AgentOrigin && window.AgentOrigin.isWorkspaceOwned(a));
+  }
+
+  function isUnreadable(a) {
+    return String((a && a.state) || '') === 'unreadable';
+  }
+
+  // Selection drives bulk edits, so only agents editable here can be selected.
+  function isSelectable(a) {
+    return !isWorkspaceOwned(a) && !isUnreadable(a);
   }
 
   function filtersActive() {
@@ -1606,6 +1660,8 @@
     li.className =
       'roster-card' +
       (vm.builtIn ? ' is-permanent' : '') +
+      (vm.workspaceOwned ? ' is-workspace-owned' : '') +
+      (vm.unreadable ? ' is-unreadable' : '') +
       (vm.health === 'needs' ? ' is-attention' : '') +
       (vm.health === 'disabled' ? ' is-disabled' : '');
     li.dataset.name = vm.name;
@@ -1626,7 +1682,9 @@
     // corner without adding a row to a ~120px card; the button's aria-label
     // already states everything it shows, so it announces nothing twice.
     li.innerHTML =
-      '<label class="roster-card__checkwrap">' +
+      '<label class="roster-card__checkwrap"' +
+      (vm.editable || vm.builtIn ? '' : ' hidden') +
+      '>' +
       '<span class="visually-hidden">Select ' +
       esc(vm.name) +
       '</span>' +
@@ -1663,6 +1721,7 @@
   function cardSpokenLabel(vm) {
     var parts = [vm.name];
     if (vm.builtIn) parts.push('built-in');
+    if (vm.originMarker) parts.push(vm.originMarker);
     if (vm.favorite) parts.push('favorite');
     parts.push(vm.roleLabel);
     if (!vm.builtIn) parts.push(vm.progressLabel);
@@ -1711,6 +1770,9 @@
     var classBits = [esc(vm.roleLabel)];
     if (!vm.builtIn) classBits.push(esc(vm.levelLabel));
     var roleLine = '<span class="agent-card__class">' + classBits.join(' · ') + badge + '</span>';
+    var originLine = vm.originMarker
+      ? '<span class="agent-card__origin">' + esc(vm.originMarker) + '</span>'
+      : '';
 
     return (
       portraitHTML(vm) +
@@ -1721,6 +1783,7 @@
       esc(vm.name) +
       '</span>' +
       roleLine +
+      originLine +
       '</span>' +
       '<span class="agent-card__rolecell">' +
       roleLine +
@@ -2249,8 +2312,9 @@
   function isEditable(detail) {
     // CLI / built-in agents come back without a version token and reject PATCH.
     // Kept because it still decides what the DETAIL PAGE can offer and whether
-    // a delete action is shown, not what this panel renders.
-    return !!(detail && detail.version);
+    // a delete action is shown, not what this panel renders. An agent only a
+    // workspace holds is edited in that workspace, so it is not editable here.
+    return !!(detail && detail.version) && !isWorkspaceOwned(detail);
   }
 
   function renderOverview(name, detail) {
@@ -3142,6 +3206,7 @@
         // ring is drawn without a request per agent (FR-75). Absent means no
         // ring, which is the same outcome as an agent with no progression.
         state.xpPerLevel = Number((data && data.xp_per_level) || 0);
+        renderAgentRootBanner(data && data.agent_root);
         state.agents = agents;
         state.byName = {};
         agents.forEach(function (a) {
@@ -3482,15 +3547,23 @@
       { label: 'Open', action: 'open' },
       { label: 'Open full page', action: 'open-full' },
       menuDivider(),
-      { label: vm.favorite ? 'Unfavorite' : 'Favorite', action: 'favorite' },
-      { label: 'Set role…', action: 'set-role', disabled: vm.builtIn },
-      { label: 'Assign to workspace…', action: 'assign' },
+      {
+        label: vm.favorite ? 'Unfavorite' : 'Favorite',
+        action: 'favorite',
+        disabled: vm.workspaceOwned || vm.unreadable
+      },
+      { label: 'Set role…', action: 'set-role', disabled: !vm.editable },
+      {
+        label: 'Assign to workspace…',
+        action: 'assign',
+        disabled: vm.workspaceOwned || vm.unreadable
+      },
       menuDivider(),
       {
         label: 'Delete',
         action: 'delete',
         variant: 'danger',
-        disabled: vm.builtIn
+        disabled: !vm.editable
       }
     ];
   }
@@ -3870,7 +3943,8 @@
   // a control labelled "Select visible".
   function selectAllVisible() {
     state.rendered.forEach(function (a) {
-      state.checked.add(a.name);
+      // A workspace's own agent has no checkbox, so it is never selected.
+      if (isSelectable(a)) state.checked.add(a.name);
     });
     reflectCheckedInDom();
     updateBulkBar();
@@ -3900,7 +3974,7 @@
     var hi = Math.max(anchor, i);
     for (var k = lo; k <= hi; k++) {
       var a = state.rendered[k];
-      if (a) state.checked.add(a.name);
+      if (a && isSelectable(a)) state.checked.add(a.name);
     }
     state.rangeAnchor = i;
     reflectCheckedInDom();
@@ -3961,6 +4035,15 @@
   // (PRD FR40); this only drives the preview grouping and the eligible count.
   function deleteEligibility(agent) {
     if (!agent) return { eligible: false, reason: 'Agent not found.' };
+    if (isUnreadable(agent)) {
+      return { eligible: false, reason: 'Its file could not be read; fix it outside Ori.' };
+    }
+    if (isWorkspaceOwned(agent)) {
+      return {
+        eligible: false,
+        reason: 'Belongs to ' + (window.AgentOrigin.workspaceName(agent) || 'a workspace') + '.'
+      };
+    }
     if (isPermanent(agent)) {
       var role = String(agent.role || '').toLowerCase();
       var source = String(agent.source || '').toLowerCase();
@@ -4519,6 +4602,8 @@
   // not picked from the working cast — so neither is ever offered one.
   function isFaceless(agent) {
     if (!agent || isPermanent(agent) || isSystemAssistant(agent)) return false;
+    // A workspace's own agent is edited in that workspace, not from here.
+    if (isWorkspaceOwned(agent)) return false;
     var appearance = normalizeAppearance(agent.appearance);
     if (appearance.mode !== window.AgentAvatar.MODES.GENERATED) return false;
     return !appearance.generated.color && !appearance.character && !appearance.uploaded;
