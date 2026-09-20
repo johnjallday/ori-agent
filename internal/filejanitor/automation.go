@@ -8,7 +8,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/resetstate"
 	workspace "github.com/johnjallday/ori-agent/internal/workspace"
-	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 )
 
 // Automation is the unattended half of the Janitor: a folder watcher and a
@@ -202,20 +201,11 @@ func (a *Automation) EnsureWatcher(workspaceID string) error {
 // watchRecipe returns the template's requested watch settings, or an empty
 // recipe when the workspace has none.
 func (a *Automation) watchRecipe(workspaceID string) workspace.WatchRecipe {
-	ws, err := a.service.readWorkspace(workspaceID)
-	if err != nil || ws == nil {
+	if a == nil || a.service == nil {
 		return workspace.WatchRecipe{}
 	}
-	// Look the recipe up under every key File Janitor answers to. A workspace
-	// created from a blueprint declaring the canonical `file-janitor-root`
-	// would otherwise find nothing here and silently fall back to defaults,
-	// discarding the watch settings its blueprint actually asked for.
-	recipe, ok := ws.TemplateAutomationRecipeFor(DirectoryRequirementKey)
-	if !ok {
-		setup := workspacecapability.FileJanitorDefinition().Setup
-		recipe, ok = ws.TemplateAutomationRecipeFor(setup.DirectoryRequirementKey)
-	}
-	if !ok || recipe.Watch == nil {
+	recipe := a.service.automationRecipe(workspaceID)
+	if recipe.Watch == nil {
 		return workspace.WatchRecipe{}
 	}
 	return *recipe.Watch
@@ -522,6 +512,19 @@ func (a *Automation) dueForCatchUp(workspaceID string, now time.Time) bool {
 	}
 	a.lastCatchUp[workspaceID] = today
 	return true
+}
+
+// WatcherRecord returns the stable trigger identity and enabled state without
+// exposing its path.
+func (a *Automation) WatcherRecord(workspaceID string) (string, bool, error) {
+	if a == nil || a.triggers == nil {
+		return "", false, nil
+	}
+	existing, err := a.findWatcher(workspaceID)
+	if err != nil || existing == nil {
+		return "", false, err
+	}
+	return existing.ID, existing.Enabled, nil
 }
 
 // WatcherRegistered reports whether an enabled watcher exists for the

@@ -1075,6 +1075,14 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET /api/personal-assistant/first-assignment", s.Handlers.PersonalAssistant.GetFirstAssignment)
 		mux.HandleFunc("POST /api/personal-assistant/first-assignment/preview", s.Handlers.PersonalAssistant.PreviewFirstAssignment)
 		mux.HandleFunc("POST /api/personal-assistant/first-assignment/apply", s.Handlers.PersonalAssistant.ApplyFirstAssignment)
+		const fileJanitorSetup = "/api/personal-assistant/setup/file-janitor"
+		mux.HandleFunc("GET "+fileJanitorSetup, s.Handlers.PersonalAssistant.GetAssistantSetup)
+		mux.HandleFunc("POST "+fileJanitorSetup+"/accept", s.Handlers.PersonalAssistant.AcceptAssistantSetup)
+		mux.HandleFunc("POST "+fileJanitorSetup+"/defer", s.Handlers.PersonalAssistant.DeferAssistantSetupRecommendation)
+		mux.HandleFunc("POST "+fileJanitorSetup+"/runs/{runID}/folder-intent", s.Handlers.PersonalAssistant.BeginAssistantSetupFolderIntent)
+		mux.HandleFunc("POST "+fileJanitorSetup+"/runs/{runID}/prepare-review", s.Handlers.PersonalAssistant.PrepareAssistantSetupReview)
+		mux.HandleFunc("POST "+fileJanitorSetup+"/runs/{runID}/defer", s.Handlers.PersonalAssistant.DeferAssistantSetupRun)
+		mux.HandleFunc("POST "+fileJanitorSetup+"/runs/{runID}/resume", s.Handlers.PersonalAssistant.ResumeAssistantSetupRun)
 	}
 }
 

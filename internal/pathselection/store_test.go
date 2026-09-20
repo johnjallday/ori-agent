@@ -28,3 +28,25 @@ func TestStoreIssuesOpaqueExpiringSelection(t *testing.T) {
 		t.Fatalf("expired resolve error = %v", err)
 	}
 }
+
+func TestStoreBindsScopedSelectionsAndCannotUpgradeUnscopedTokens(t *testing.T) {
+	store := NewStore()
+	selected := filepath.Join(t.TempDir(), "Private Project")
+	scoped, err := store.IssueFor(selected, "workspace-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := store.ResolveFor(scoped, "workspace-1"); err != nil || got != selected {
+		t.Fatalf("scoped resolve = %q, %v", got, err)
+	}
+	if _, err := store.ResolveFor(scoped, "workspace-2"); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("cross-workspace resolve error = %v", err)
+	}
+	unscoped, err := store.Issue(selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ResolveFor(unscoped, "workspace-1"); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("unscoped upgrade error = %v", err)
+	}
+}

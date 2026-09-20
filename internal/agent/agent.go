@@ -5,6 +5,17 @@ import (
 	"github.com/openai/openai-go/v3"
 )
 
+// AssistantSetupProvenance is a bounded immutable marker attached only to a
+// root agent definition created by one reviewed assistant-setup operation. It
+// contains no prompt, path, credential, or display-name identity.
+type AssistantSetupProvenance struct {
+	ID           string `json:"id"`
+	RunID        string `json:"run_id"`
+	OperationID  string `json:"operation_id"`
+	ReviewDigest string `json:"review_digest"`
+	ConfigDigest string `json:"config_digest"`
+}
+
 // Agent represents a configured AI agent with its settings and state
 type Agent struct {
 	Role         types.AgentRole                          `json:"role"`         // Agent role for orchestration (orchestrator, researcher, analyzer, etc.)
@@ -43,6 +54,10 @@ type Agent struct {
 	// that predates the field; migration fills it from the agent's globally
 	// enabled skills so direct-chat behavior is unchanged (FR-28).
 	DefaultToolbox *types.AgentDefaultToolbox `json:"default_toolbox,omitempty"`
+
+	// AssistantSetup is creation provenance, not mutable configuration or an
+	// authorization source. Reused agents never receive this marker.
+	AssistantSetup *AssistantSetupProvenance `json:"assistant_setup,omitempty"`
 }
 
 // InitializeDefaultToolbox safely initializes the Default Toolbox if nil.

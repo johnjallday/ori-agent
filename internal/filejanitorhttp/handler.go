@@ -11,8 +11,10 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/assistantsetup"
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -32,15 +34,41 @@ type Automation interface {
 }
 
 // Handler serves the File Janitor endpoints.
+type PathSelectionResolver interface {
+	Resolve(token string) (string, error)
+}
+
+type AssistantSetupCoordinator interface {
+	CommitFolderGrant(
+		ctx context.Context,
+		ownerUserID, workspaceID, token string,
+		commit func(assistantsetup.FolderGrantAuthorization) (assistantsetup.FolderGrantResult, error),
+	) (*assistantsetup.Projection, error)
+}
+
 type Handler struct {
-	service    *filejanitor.Service
-	lookup     WorkspaceLookup
-	provider   userprofile.UserProvider
-	automation Automation
+	service        *filejanitor.Service
+	lookup         WorkspaceLookup
+	provider       userprofile.UserProvider
+	automation     Automation
+	pathSelections PathSelectionResolver
+	assistantSetup AssistantSetupCoordinator
 }
 
 // SetAutomation wires the watcher lifecycle so setup and pause/resume take
 // effect immediately.
+func (h *Handler) SetPathSelectionResolver(resolver PathSelectionResolver) {
+	if h != nil {
+		h.pathSelections = resolver
+	}
+}
+
+func (h *Handler) SetAssistantSetupCoordinator(coordinator AssistantSetupCoordinator) {
+	if h != nil {
+		h.assistantSetup = coordinator
+	}
+}
+
 func (h *Handler) SetAutomation(automation Automation) {
 	if h != nil {
 		h.automation = automation
@@ -128,36 +156,102 @@ func (h *Handler) ConfirmSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Path               string `json:"path"`
-		DailyScanLocalTime string `json:"daily_scan_local_time"`
-		Timezone           string `json:"timezone"`
+		Path                string `json:"path"`
+		SelectionToken      string `json:"selection_token"`
+		AssistantSetupToken string `json:"assistant_setup_token"`
+		DailyScanLocalTime  string `json:"daily_scan_local_time"`
+		Timezone            string `json:"timezone"`
 		// Paused is optional and tri-state: omitted keeps the workspace's
-		// current setting. The Setup Wizard sends true so approving a folder
-		// grants access without also starting the watcher and daily scan the
-		// user has not been shown yet.
+		// current setting. Assisted setup requires true, preserving the separate
+		// monitoring decision.
 		Paused *bool `json:"paused,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
-	status, err := h.service.ConfirmSetup(filejanitor.SetupRequest{
-		WorkspaceID:        workspaceID,
-		Path:               req.Path,
-		DailyScanLocalTime: req.DailyScanLocalTime,
-		Timezone:           req.Timezone,
-		Paused:             req.Paused,
-	})
-	if err != nil {
-		h.respondError(w, err, "Failed to set up File Janitor")
+	assisted := strings.TrimSpace(req.SelectionToken) != "" || strings.TrimSpace(req.AssistantSetupToken) != ""
+	if !assisted {
+		status, err := h.service.ConfirmSetup(filejanitor.SetupRequest{
+			WorkspaceID: workspaceID, Path: req.Path,
+			DailyScanLocalTime: req.DailyScanLocalTime, Timezone: req.Timezone, Paused: req.Paused,
+		})
+		if err != nil {
+			h.respondError(w, err, "Failed to set up File Janitor")
+			return
+		}
+		status = h.syncAutomationAndRefresh(workspaceID, status)
+		_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "status": status})
 		return
 	}
-	// Confirmed setup is what turns the automation on for the first time, and
-	// readiness is re-read afterwards: the status computed before the watcher
-	// was installed would report a watcher failure that setup had in fact just
-	// fixed, which is the difference between "it worked" and "something is
-	// wrong" on the user's first ever screen.
+	if strings.TrimSpace(req.Path) != "" || strings.TrimSpace(req.SelectionToken) == "" ||
+		strings.TrimSpace(req.AssistantSetupToken) == "" || req.Paused == nil || !*req.Paused ||
+		strings.TrimSpace(req.DailyScanLocalTime) != "" || strings.TrimSpace(req.Timezone) != "" ||
+		len(req.SelectionToken) > 256 || len(req.AssistantSetupToken) > 256 {
+		_ = orihttp.RespondBadRequest(w, "assisted folder setup requires only selection_token, assistant_setup_token, and paused:true")
+		return
+	}
+	if h.pathSelections == nil || h.assistantSetup == nil {
+		_ = orihttp.RespondAPIError(w, http.StatusServiceUnavailable, orihttp.NewAPIError("assistant_setup_unavailable", "Assistant folder setup is temporarily unavailable."))
+		return
+	}
+	scopedResolver, ok := h.pathSelections.(interface {
+		ResolveFor(token, scope string) (string, error)
+	})
+	if !ok {
+		_ = orihttp.RespondAPIError(w, http.StatusServiceUnavailable, orihttp.NewAPIError("assistant_setup_unavailable", "Scoped folder selection is temporarily unavailable."))
+		return
+	}
+	selectedPath, err := scopedResolver.ResolveFor(req.SelectionToken, workspaceID)
+	if err != nil {
+		_ = orihttp.RespondAPIError(w, http.StatusConflict, orihttp.NewAPIError("folder_selection_expired", "The folder selection expired. Choose the folder again."))
+		return
+	}
+	owner, err := h.currentOwner(r.Context())
+	if err != nil {
+		_ = orihttp.RespondAPIError(w, http.StatusServiceUnavailable, orihttp.NewAPIError("assistant_setup_unavailable", "Assistant folder setup is temporarily unavailable."))
+		return
+	}
+	var status filejanitor.Status
+	projection, err := h.assistantSetup.CommitFolderGrant(
+		r.Context(), owner, workspaceID, req.AssistantSetupToken,
+		func(authorization assistantsetup.FolderGrantAuthorization) (assistantsetup.FolderGrantResult, error) {
+			var grantErr error
+			status, grantErr = h.service.ConfirmSetup(filejanitor.SetupRequest{
+				WorkspaceID: workspaceID, Path: selectedPath, Paused: req.Paused,
+				Operation: &filejanitor.FolderGrantOperation{RunID: authorization.RunID, OperationID: authorization.OperationID},
+			})
+			if grantErr != nil {
+				safeCode := "folder_grant_failed"
+				var setupError *filejanitor.SetupError
+				if errors.As(grantErr, &setupError) && strings.TrimSpace(setupError.Code) != "" {
+					safeCode = setupError.Code
+				}
+				return assistantsetup.FolderGrantResult{}, &assistantsetup.FolderGrantCommitError{SafeCode: safeCode, Err: grantErr}
+			}
+			return assistantsetup.FolderGrantResult{
+				RootGenerationID:   status.Settings.RootID,
+				DirectoryReference: status.Settings.DirectoryReferenceID,
+			}, nil
+		},
+	)
+	if err != nil {
+		var setupError *filejanitor.SetupError
+		if errors.As(err, &setupError) {
+			if setupError.Code == filejanitor.CodeFolderConflict && setupError.ConflictWorkspaceID != "" {
+				h.respondAssistedFolderConflict(w, setupError, owner)
+				return
+			}
+			h.respondError(w, err, "Failed to set up File Janitor")
+			return
+		}
+		h.respondAssistantSetupError(w, err)
+		return
+	}
 	status = h.syncAutomationAndRefresh(workspaceID, status)
-	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "status": status})
+	// The assisted response returns stable permission identity and readiness, not
+	// the raw path resolved from the native picker token.
+	status.Settings.RootPath = ""
+	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "status": status, "setup": projection})
 }
 
 // SetPaused handles POST /api/workspaces/{workspaceID}/downloads-janitor/pause.
@@ -217,23 +311,68 @@ func (h *Handler) resolveWorkspace(w http.ResponseWriter, r *http.Request) (stri
 	return workspaceID, true
 }
 
+// currentOwner resolves the authenticated local owner once for assisted
+// operation binding.
+func (h *Handler) currentOwner(ctx context.Context) (string, error) {
+	if h == nil || h.provider == nil {
+		return "", errors.New("current user provider is unavailable")
+	}
+	userID, err := h.provider.CurrentUserID(ctx)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(userID) == "" {
+		userID = userprofile.LocalUserID
+	}
+	return strings.TrimSpace(userID), nil
+}
+
 // ownedByCurrentUser reports whether the workspace belongs to the requesting
-// user. A workspace with no recorded owner is the local single user's, matching
-// how the rest of Ori treats unowned workspaces.
+// user. A workspace with no recorded owner is the local single user's.
 func (h *Handler) ownedByCurrentUser(ctx context.Context, ws *workspace.Workspace) bool {
 	owner := strings.TrimSpace(ws.OwnerUserID)
 	if owner == "" {
 		owner = userprofile.LocalUserID
 	}
-	userID, err := h.provider.CurrentUserID(ctx)
+	userID, err := h.currentOwner(ctx)
 	if err != nil {
 		logger.Warn("Failed to resolve current user for File Janitor", logger.Fields{"error": err})
 		return false
 	}
-	if strings.TrimSpace(userID) == "" {
-		userID = userprofile.LocalUserID
-	}
 	return strings.EqualFold(owner, userID)
+}
+
+func (h *Handler) respondAssistantSetupError(w http.ResponseWriter, err error) {
+	status := http.StatusConflict
+	code := "stale_run"
+	message := "Assistant setup changed. Review the current step and try again."
+	switch {
+	case errors.Is(err, assistantsetup.ErrNotFound):
+		status, code, message = http.StatusNotFound, "not_found", "This assistant setup is not available."
+	case errors.Is(err, assistantsetup.ErrInvalidAction):
+		code, message = "invalid_action", "Folder permission is not available at the current setup step."
+	case errors.Is(err, assistantsetup.ErrFolderConflict):
+		code, message = "folder_conflict", "Another folder permission is already in progress."
+	case errors.Is(err, assistantsetup.ErrPrivacyReview):
+		code, message = "privacy_review_required", "Review the workspace privacy settings before continuing."
+	case errors.Is(err, assistantsetup.ErrUnavailable):
+		status, code, message = http.StatusServiceUnavailable, "assistant_setup_unavailable", "Assistant folder setup is temporarily unavailable."
+	}
+	_ = orihttp.RespondAPIError(w, status, orihttp.NewAPIError(code, message))
+}
+
+func (h *Handler) respondAssistedFolderConflict(w http.ResponseWriter, setupError *filejanitor.SetupError, ownerUserID string) {
+	details := map[string]any{"repair": setupError.Repair}
+	if h != nil && h.lookup != nil {
+		if conflicting, err := h.lookup.Get(setupError.ConflictWorkspaceID); err == nil && conflicting != nil &&
+			(conflicting.OwnerUserID == ownerUserID || (conflicting.OwnerUserID == "" && ownerUserID == userprofile.LocalUserID)) &&
+			strings.TrimSpace(conflicting.FolderSlug) != "" {
+			details["conflict_route"] = "/workspaces/" + url.PathEscape(conflicting.FolderSlug) + "?panel=file-janitor"
+		}
+	}
+	_ = orihttp.RespondAPIError(w, http.StatusConflict, &orihttp.APIError{
+		Code: setupError.Code, Message: setupError.Message, Details: details,
+	})
 }
 
 // respondError maps a domain error onto a stable HTTP response. Setup failures
@@ -248,12 +387,12 @@ func (h *Handler) respondError(w http.ResponseWriter, err error, fallback string
 			status = http.StatusForbidden
 		case filejanitor.CodeWorkspaceMissing:
 			status = http.StatusNotFound
-		case filejanitor.CodeFolderConflict:
+		case filejanitor.CodeFolderConflict, filejanitor.CodeFolderChanged, filejanitor.CodePrivacyReviewRequired:
 			status = http.StatusConflict
 		case filejanitor.CodePersistenceFailed, filejanitor.CodeBindingFailed:
 			status = http.StatusInternalServerError
 		}
-		logger.Warn("File Janitor setup failed", logger.Fields{"code": setupError.Code, "error": setupError.Error()})
+		logger.Warn("File Janitor setup failed", logger.Fields{"code": setupError.Code})
 		details := map[string]any{"repair": setupError.Repair}
 		// A folder conflict names the owning workspace so the UI can offer a
 		// route to it rather than leaving the user to find it (FR-49). Only the

@@ -25,7 +25,12 @@ import (
 // SettingsSchemaVersion is the on-disk revision of a workspace's Janitor
 // settings. Persisted state that predates a field loads with that field's zero
 // value and is treated as unconfigured rather than as an error.
-const SettingsSchemaVersion = 1
+const SettingsSchemaVersion = 2
+
+const (
+	ScanOutcomeBatch      = "batch"
+	ScanOutcomeNoEligible = "no_eligible"
+)
 
 // DefaultFilingRootName is the single directory, directly inside the configured
 // root, that every approved move files into: <root>/Filed/<category>.
@@ -91,6 +96,47 @@ var ErrInvalidSettings = errors.New("invalid file janitor settings")
 //
 // The on-disk copy is authoritative. In-memory callers must treat a returned
 // value as a snapshot, not a handle.
+// PendingFolderGrant is durable intent written before File Janitor creates
+// Filed or changes workspace access. RootPath is allowed here because this
+// record is the canonical File Janitor domain; the cross-domain coordinator
+// stores only RootID and other opaque references.
+type PendingFolderGrant struct {
+	RunID       string    `json:"run_id"`
+	OperationID string    `json:"operation_id"`
+	RootPath    string    `json:"root_path,omitempty"`
+	RootID      string    `json:"root_id"`
+	StartedAt   time.Time `json:"started_at"`
+}
+
+type FolderGrantReceipt struct {
+	RunID              string    `json:"run_id"`
+	OperationID        string    `json:"operation_id"`
+	RootID             string    `json:"root_id"`
+	DirectoryReference string    `json:"directory_reference_id"`
+	CompletedAt        time.Time `json:"completed_at"`
+}
+
+type AssistedAutomationState string
+
+const (
+	AssistedAutomationApprovalPaused AssistedAutomationState = "approval_paused"
+	AssistedAutomationActive         AssistedAutomationState = "active"
+	AssistedAutomationFailedPaused   AssistedAutomationState = "failed_paused"
+)
+
+// AssistedAutomationReceipt proves that a monitoring state transition belongs
+// to one exact assistant-setup operation. It contains no path. Manual settings
+// actions clear it, so a retry cannot mistake a user's later pause or edit for
+// coordinator-owned rollback state.
+type AssistedAutomationReceipt struct {
+	RunID             string                  `json:"run_id"`
+	OperationID       string                  `json:"operation_id"`
+	ReviewRevision    string                  `json:"review_revision"`
+	AuthorityRevision string                  `json:"authority_revision"`
+	State             AssistedAutomationState `json:"state"`
+	UpdatedAt         time.Time               `json:"updated_at"`
+}
+
 type JanitorSettings struct {
 	// SchemaVersion is the revision this record was written with.
 	SchemaVersion int `json:"schema_version"`
@@ -150,6 +196,11 @@ type JanitorSettings struct {
 	// SetupCompletedAt is when the user confirmed a folder. Zero means setup has
 	// not completed, which is what makes SetupRequired the default state.
 	SetupCompletedAt time.Time `json:"setup_completed_at,omitempty"`
+	// PendingFolderGrant and LastFolderGrant make an assisted grant
+	// repeat-safe across a lost response without giving the coordinator a path.
+	PendingFolderGrant     *PendingFolderGrant        `json:"pending_folder_grant,omitempty"`
+	LastFolderGrant        *FolderGrantReceipt        `json:"last_folder_grant,omitempty"`
+	LastAssistedAutomation *AssistedAutomationReceipt `json:"last_assisted_automation,omitempty"`
 	// UpdatedAt is the last time these settings changed.
 	UpdatedAt time.Time `json:"updated_at,omitempty"`
 }
@@ -236,6 +287,43 @@ func (s JanitorSettings) Normalize() JanitorSettings {
 	out.ContentMode = NormalizeContentMode(out.ContentMode)
 	out.ContentProvider = strings.TrimSpace(out.ContentProvider)
 	out.ContentConsentProvider = strings.TrimSpace(out.ContentConsentProvider)
+	if out.PendingFolderGrant != nil {
+		pending := *out.PendingFolderGrant
+		pending.RunID = strings.TrimSpace(pending.RunID)
+		pending.OperationID = strings.TrimSpace(pending.OperationID)
+		pending.RootPath = filepath.Clean(strings.TrimSpace(pending.RootPath))
+		pending.RootID = strings.TrimSpace(pending.RootID)
+		if pending.RunID == "" || pending.OperationID == "" || !filepath.IsAbs(pending.RootPath) || pending.RootID == "" {
+			out.PendingFolderGrant = nil
+		} else {
+			out.PendingFolderGrant = &pending
+		}
+	}
+	if out.LastFolderGrant != nil {
+		receipt := *out.LastFolderGrant
+		receipt.RunID = strings.TrimSpace(receipt.RunID)
+		receipt.OperationID = strings.TrimSpace(receipt.OperationID)
+		receipt.RootID = strings.TrimSpace(receipt.RootID)
+		receipt.DirectoryReference = strings.TrimSpace(receipt.DirectoryReference)
+		if receipt.RunID == "" || receipt.OperationID == "" || receipt.RootID == "" || receipt.DirectoryReference == "" || receipt.CompletedAt.IsZero() {
+			out.LastFolderGrant = nil
+		} else {
+			out.LastFolderGrant = &receipt
+		}
+	}
+	if out.LastAssistedAutomation != nil {
+		receipt := *out.LastAssistedAutomation
+		receipt.RunID = strings.TrimSpace(receipt.RunID)
+		receipt.OperationID = strings.TrimSpace(receipt.OperationID)
+		receipt.ReviewRevision = strings.TrimSpace(receipt.ReviewRevision)
+		receipt.AuthorityRevision = strings.TrimSpace(receipt.AuthorityRevision)
+		validState := receipt.State == AssistedAutomationApprovalPaused || receipt.State == AssistedAutomationActive || receipt.State == AssistedAutomationFailedPaused
+		if receipt.RunID == "" || receipt.OperationID == "" || receipt.ReviewRevision == "" || receipt.AuthorityRevision == "" || !validState || receipt.UpdatedAt.IsZero() {
+			out.LastAssistedAutomation = nil
+		} else {
+			out.LastAssistedAutomation = &receipt
+		}
+	}
 	if !out.ContentMode.ReadsFileContent() {
 		out.ContentProvider = ""
 	}
@@ -271,6 +359,25 @@ func (s JanitorSettings) Validate() error {
 	}
 	if s.RootPath != "" && !filepath.IsAbs(s.RootPath) {
 		return fmt.Errorf("%w: root path %q must be absolute", ErrInvalidSettings, s.RootPath)
+	}
+	if pending := s.PendingFolderGrant; pending != nil {
+		if strings.TrimSpace(pending.RunID) == "" || strings.TrimSpace(pending.OperationID) == "" ||
+			strings.TrimSpace(pending.RootID) == "" || !filepath.IsAbs(strings.TrimSpace(pending.RootPath)) || pending.StartedAt.IsZero() {
+			return fmt.Errorf("%w: pending folder grant is incomplete", ErrInvalidSettings)
+		}
+	}
+	if receipt := s.LastFolderGrant; receipt != nil {
+		if strings.TrimSpace(receipt.RunID) == "" || strings.TrimSpace(receipt.OperationID) == "" ||
+			strings.TrimSpace(receipt.RootID) == "" || strings.TrimSpace(receipt.DirectoryReference) == "" || receipt.CompletedAt.IsZero() {
+			return fmt.Errorf("%w: folder grant receipt is incomplete", ErrInvalidSettings)
+		}
+	}
+	if receipt := s.LastAssistedAutomation; receipt != nil {
+		validState := receipt.State == AssistedAutomationApprovalPaused || receipt.State == AssistedAutomationActive || receipt.State == AssistedAutomationFailedPaused
+		if strings.TrimSpace(receipt.RunID) == "" || strings.TrimSpace(receipt.OperationID) == "" ||
+			strings.TrimSpace(receipt.ReviewRevision) == "" || strings.TrimSpace(receipt.AuthorityRevision) == "" || !validState || receipt.UpdatedAt.IsZero() {
+			return fmt.Errorf("%w: assisted automation receipt is incomplete", ErrInvalidSettings)
+		}
 	}
 	return nil
 }

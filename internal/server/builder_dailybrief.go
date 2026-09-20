@@ -291,6 +291,9 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	b.personalAssistantHandler.SetSpecialistOfferService(
 		personalassistant.NewSpecialistOfferService(b.personalAssistantStore),
 	)
+	// The capability-specific setup coordinator reuses this exact relationship
+	// reader and the already-wired workspace/session/File Janitor authorities.
+	b.wireAssistantSetup()
 	todayService := personalassistant.NewTodayService(
 		b.personalAssistantService, briefService, b.workspaceStore, b.followUpService,
 	)

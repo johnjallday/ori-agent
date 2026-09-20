@@ -125,6 +125,7 @@ func (s *Service) markRootConflict(workspaceID, conflictsWith string) bool {
 		// Pause unattended work only. Pending review, history, and the folder
 		// grant itself are all left exactly as they were.
 		settings.Paused = true
+		settings.LastAssistedAutomation = nil
 		changed = true
 		return nil
 	}); err != nil {

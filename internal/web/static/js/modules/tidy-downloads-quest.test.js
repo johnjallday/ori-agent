@@ -36,7 +36,8 @@ function load({
   search = '',
   responses = eligibleResponses(),
   guideOverrides = {},
-  withCreator = true
+  withCreator = true,
+  assistantSetup = null
 } = {}) {
   const calls = {
     fetches: [],
@@ -46,6 +47,7 @@ function load({
     opened: 0,
     creatorOpens: [],
     creatorHides: 0,
+    assistantSetupStarts: 0,
     replaced: []
   };
   const dispatched = [];
@@ -110,6 +112,14 @@ function load({
     },
     OriGuide: guide,
     OriHomeCockpit: { setView() {} },
+    AssistantLedSetup: assistantSetup
+      ? {
+          startFromMission: async () => {
+            calls.assistantSetupStarts += 1;
+            return assistantSetup.result !== false;
+          }
+        }
+      : undefined,
     sessionManager: withCreator
       ? {
           showAddWorkspaceModal: options => calls.creatorOpens.push(options),
@@ -176,6 +186,19 @@ test('the walkthrough is inert without its quest route: no request at all', asyn
   assert.deepEqual(calls.presented, []);
   assert.deepEqual(calls.fetches, [], 'a plain Home load must add no request');
   assert.deepEqual(calls.creatorOpens, []);
+});
+
+test('the mission uses the reviewed assistant setup when its shared card is available', async () => {
+  const { quest, calls } = load({
+    search: '?quest=tidy-downloads',
+    assistantSetup: { result: true }
+  });
+  await settle();
+  assert.equal(quest.isActive(), false, 'the legacy creator walkthrough does not take ownership');
+  assert.equal(calls.assistantSetupStarts, 1);
+  assert.deepEqual(calls.creatorOpens, []);
+  assert.deepEqual(calls.fetches, [], 'the legacy eligibility endpoints are not read');
+  assert.deepEqual(calls.replaced, ['/'], '?quest= is removed before the card handles entry');
 });
 
 test('the walkthrough opens the creator with File Janitor and presents step 1 of 2', async () => {

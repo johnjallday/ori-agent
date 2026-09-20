@@ -41,10 +41,12 @@ const (
 	ScanSourceWatcher ScanSource = "watcher"
 	// ScanSourceDaily is the daily catch-up run.
 	ScanSourceDaily ScanSource = "daily"
+	// ScanSourceAssistantSetup is the one explicitly approved first-review scan.
+	ScanSourceAssistantSetup ScanSource = "assistant_setup"
 )
 
 // ValidScanSources lists every recognized scan source.
-var ValidScanSources = []ScanSource{ScanSourceManual, ScanSourceTest, ScanSourceWatcher, ScanSourceDaily}
+var ValidScanSources = []ScanSource{ScanSourceManual, ScanSourceTest, ScanSourceWatcher, ScanSourceDaily, ScanSourceAssistantSetup}
 
 // Category is one of version 1's fixed filing categories. The full registry and
 // destination derivation live in categories.go; the type is declared here

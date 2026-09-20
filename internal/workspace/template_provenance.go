@@ -31,6 +31,14 @@ type UserTemplateOwner struct {
 
 func (o UserTemplateOwner) Clone() UserTemplateOwner { return o }
 
+// AssistantSetupCreation records the reviewed coordinator operation that
+// created this workspace. It is portable inert identity evidence only.
+type AssistantSetupCreation struct {
+	RunID        string `json:"run_id"`
+	OperationID  string `json:"operation_id"`
+	ReviewDigest string `json:"review_digest"`
+}
+
 // TemplateProvenance records the template a workspace was created from in
 // portable workspace metadata. Runtime providers identify origin from this
 // rather than scanning user-editable names, tasks, or project filenames. It
@@ -92,6 +100,9 @@ type TemplateProvenance struct {
 	// presence as a structurally valid schema-v1 snapshot is the clean-start
 	// boundary; legacy records are never inferred or backfilled into one.
 	GroupRequirement *GroupRequirementSnapshot `json:"group_requirement,omitempty"`
+	// AssistantSetup is present only when the server-only reviewed creator seam
+	// supplied the operation descriptor. Ordinary browser creation cannot set it.
+	AssistantSetup *AssistantSetupCreation `json:"assistant_setup,omitempty"`
 }
 
 // cloneCapabilityRequirements returns a defensive copy, including each
@@ -147,6 +158,10 @@ func cloneTemplateProvenanceInto(dst *TemplateProvenance, src *TemplateProvenanc
 		dst.AssistantProjectRoles[index].Skills = append([]string(nil), src.AssistantProjectRoles[index].Skills...)
 	}
 	dst.GroupRequirement = CloneGroupRequirementSnapshot(src.GroupRequirement)
+	if src.AssistantSetup != nil {
+		creation := *src.AssistantSetup
+		dst.AssistantSetup = &creation
+	}
 }
 
 // RuntimeRequirementsSnapshot returns a defensive copy of the runtime contract

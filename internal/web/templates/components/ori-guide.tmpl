@@ -149,6 +149,9 @@
         <button type="submit" id="personalAssistantSend" class="personal-assistant-panel__send">Send</button>
       </form>
       <p id="personalAssistantPanelStatus" class="personal-assistant-panel__status" role="status" aria-live="polite"></p>
+      {{if ne .CurrentPage "index"}}
+      {{template "assistant-led-setup.tmpl" .}}
+      {{end}}
       <div id="personalAssistantActivityMount" class="personal-assistant-panel__activity"></div>
     </div>
   </section>

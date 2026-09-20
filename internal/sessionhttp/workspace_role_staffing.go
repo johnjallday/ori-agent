@@ -24,6 +24,7 @@ import (
 // assigned agent is one the user already had, and deleting it to unwind a
 // failed create is the single unrecoverable failure this path could cause.
 func (h *Handler) seedRoleStaffedAgents(
+	ctx context.Context,
 	ws *session.Workspace,
 	tpl projecttemplates.Template,
 	staffing map[string]roleStaffingInput,
@@ -76,6 +77,9 @@ func (h *Handler) seedRoleStaffedAgents(
 				return result, fmt.Errorf("you already have an agent named %q; rename this one or assign the agent you have", requested.Name)
 			}
 			config, _ := h.templateAgentCreateConfig(roleStaffedSpec(spec, requested))
+			if provenance := assistantSetupAgentProvenance(ctx, requested.Name); provenance != nil {
+				config.AssistantSetup = provenance
+			}
 			if err := h.agentStore.CreateAgent(requested.Name, config); err != nil {
 				return result, fmt.Errorf("agent %q could not be created: %w", requested.Name, err)
 			}

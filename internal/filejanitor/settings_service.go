@@ -39,6 +39,7 @@ type SettingsUpdate struct {
 // the user consented to something they never saw (FR-55).
 func (s *Service) UpdateSettings(workspaceID string, update SettingsUpdate) (Status, error) {
 	_, err := s.store.UpdateSettings(workspaceID, func(settings *JanitorSettings) error {
+		settings.LastAssistedAutomation = nil
 		if update.DailyScanLocalTime != nil {
 			normalized, err := workspace.NormalizeLocalTimeOfDay(*update.DailyScanLocalTime)
 			if err != nil {
@@ -111,6 +112,7 @@ func (s *Service) GrantContentConsent(workspaceID, provider string) (Status, err
 		}
 		settings.ContentConsentProvider = provider
 		settings.ContentConsentAt = s.clock()
+		settings.LastAssistedAutomation = nil
 		return nil
 	})
 	if err != nil {

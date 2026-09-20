@@ -58,6 +58,9 @@ type CreateAgentConfig struct {
 	MaxOutputTokens int                    // Optional max tokens for responses
 	AllowWebSearch  *bool                  // Optional web utility permission (nil defaults to allowed)
 	Appearance      *types.AgentAppearance // Optional validated visual identity
+	// AssistantSetup is written atomically with a newly created root profile.
+	// Callers must leave it nil for an existing/reused profile.
+	AssistantSetup *agent.AssistantSetupProvenance
 }
 
 type Store interface {

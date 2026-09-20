@@ -56,7 +56,7 @@ func pluginBlueprintCreationFixture(t *testing.T, attachErr error) (*Handler, *w
 
 func TestPluginBlueprintCreationSnapshotsProvenanceAndCapabilityAtomically(t *testing.T) {
 	handler, store, template, workspaceID := pluginBlueprintCreationFixture(t, nil)
-	if warning := handler.persistCreateWorkspaceTemplateProvenance(workspaceID, template, true); warning != "" {
+	if warning := handler.persistCreateWorkspaceTemplateProvenance(workspaceID, template, true, nil); warning != "" {
 		t.Fatalf("warning = %q", warning)
 	}
 	stored, err := store.Get(workspaceID)
@@ -75,7 +75,7 @@ func TestPluginBlueprintCreationSnapshotsProvenanceAndCapabilityAtomically(t *te
 
 func TestPluginBlueprintCreationReportsRecoverableAttachmentFailure(t *testing.T) {
 	handler, store, template, workspaceID := pluginBlueprintCreationFixture(t, errors.New("binding store unavailable"))
-	warning := handler.persistCreateWorkspaceTemplateProvenance(workspaceID, template, true)
+	warning := handler.persistCreateWorkspaceTemplateProvenance(workspaceID, template, true, nil)
 	if warning == "" {
 		t.Fatal("component failure was reported as normal ready creation")
 	}

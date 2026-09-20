@@ -19,7 +19,7 @@ import (
 const scanStateFileName = "scan-state.json"
 
 // ScanStateSchemaVersion is the on-disk revision of the scan record.
-const ScanStateSchemaVersion = 1
+const ScanStateSchemaVersion = 2
 
 // Retention bounds. Operational metadata accumulates on every scan, so it is
 // capped rather than kept forever — but pruning never discards work the user
@@ -36,6 +36,8 @@ const (
 	// MaxRetainedActions caps the journal. History is what the user undoes
 	// from, so the bound is generous and the newest entries win.
 	MaxRetainedActions = 1000
+	// MaxRetainedScanOperations bounds setup-specific scan acknowledgments.
+	MaxRetainedScanOperations = 50
 	// ObservationTTL bounds how long an unmatched settling observation is kept.
 	// A file that stopped appearing does not need its observation retained.
 	ObservationTTL = 7 * 24 * time.Hour
@@ -87,6 +89,19 @@ type SkippedFingerprint struct {
 	SkippedAt time.Time `json:"skipped_at"`
 }
 
+// ScanOperationReceipt proves one caller-owned scan completed, including the
+// useful zero-candidate outcome that deliberately creates no batch.
+type ScanOperationReceipt struct {
+	OperationID     string      `json:"operation_id"`
+	RootID          string      `json:"root_id"`
+	PrivacyMode     ContentMode `json:"privacy_mode"`
+	Outcome         string      `json:"outcome"`
+	BatchID         string      `json:"batch_id,omitempty"`
+	EligibleCount   int         `json:"eligible_count"`
+	IneligibleCount int         `json:"ineligible_count"`
+	CompletedAt     time.Time   `json:"completed_at"`
+}
+
 // ScanState is everything one workspace's scans have produced.
 type ScanState struct {
 	SchemaVersion int    `json:"schema_version"`
@@ -106,8 +121,11 @@ type ScanState struct {
 	// without the state change it paid for, and vice versa.
 	Approvals []ApprovalRecord `json:"approvals,omitempty"`
 	// Actions is the durable journal of every attempted mutation.
-	Actions   []FileAction `json:"actions,omitempty"`
-	UpdatedAt time.Time    `json:"updated_at,omitempty"`
+	Actions []FileAction `json:"actions,omitempty"`
+	// ScanOperations are bounded operation-specific acknowledgments written in
+	// the same atomic record as their batch/candidates/settling observations.
+	ScanOperations []ScanOperationReceipt `json:"scan_operations,omitempty"`
+	UpdatedAt      time.Time              `json:"updated_at,omitempty"`
 }
 
 // Candidate returns the candidate with the given ID.
@@ -121,6 +139,16 @@ func (s ScanState) Candidate(id string) (JanitorCandidate, bool) {
 }
 
 // Action returns the journal entry with the given ID.
+func (s ScanState) ScanOperation(id string) (ScanOperationReceipt, bool) {
+	id = strings.TrimSpace(id)
+	for _, receipt := range s.ScanOperations {
+		if receipt.OperationID == id {
+			return receipt, true
+		}
+	}
+	return ScanOperationReceipt{}, false
+}
+
 func (s ScanState) Action(id string) (FileAction, bool) {
 	for _, action := range s.Actions {
 		if action.ID == id {
@@ -339,6 +367,26 @@ func validateScanState(state ScanState) error {
 		}
 		known[candidate.ID] = struct{}{}
 	}
+	batchIDs := make(map[string]struct{}, len(state.Batches))
+	for _, batch := range state.Batches {
+		batchIDs[batch.ID] = struct{}{}
+	}
+	seenOperations := make(map[string]struct{}, len(state.ScanOperations))
+	for _, receipt := range state.ScanOperations {
+		_, knownBatch := batchIDs[receipt.BatchID]
+		if strings.TrimSpace(receipt.OperationID) == "" || strings.TrimSpace(receipt.RootID) == "" ||
+			receipt.PrivacyMode != ContentModeMetadataOnly || receipt.CompletedAt.IsZero() ||
+			receipt.EligibleCount < 0 || receipt.IneligibleCount < 0 ||
+			(receipt.Outcome != ScanOutcomeBatch && receipt.Outcome != ScanOutcomeNoEligible) ||
+			(receipt.Outcome == ScanOutcomeBatch && (strings.TrimSpace(receipt.BatchID) == "" || !knownBatch)) ||
+			(receipt.Outcome == ScanOutcomeNoEligible && (receipt.BatchID != "" || receipt.EligibleCount != 0)) {
+			return fmt.Errorf("%w: invalid scan operation receipt", ErrInvalidCandidate)
+		}
+		if _, duplicate := seenOperations[receipt.OperationID]; duplicate {
+			return fmt.Errorf("%w: duplicate scan operation %s", ErrInvalidCandidate, receipt.OperationID)
+		}
+		seenOperations[receipt.OperationID] = struct{}{}
+	}
 	for _, batch := range state.Batches {
 		if strings.TrimSpace(batch.ID) == "" {
 			return fmt.Errorf("%w: batch id is required", ErrInvalidCandidate)
@@ -419,6 +467,27 @@ func pruneScanState(state ScanState, now time.Time) ScanState {
 	state.Observations = observations
 
 	state.Approvals = pruneApprovals(state.Approvals, now)
+
+	retainedBatches := make(map[string]struct{}, len(state.Batches))
+	for _, batch := range state.Batches {
+		retainedBatches[batch.ID] = struct{}{}
+	}
+	operations := make([]ScanOperationReceipt, 0, len(state.ScanOperations))
+	for _, receipt := range state.ScanOperations {
+		if receipt.Outcome == ScanOutcomeBatch {
+			if _, retained := retainedBatches[receipt.BatchID]; !retained {
+				continue
+			}
+		}
+		operations = append(operations, receipt)
+	}
+	sort.SliceStable(operations, func(i, j int) bool {
+		return operations[i].CompletedAt.Before(operations[j].CompletedAt)
+	})
+	if len(operations) > MaxRetainedScanOperations {
+		operations = operations[len(operations)-MaxRetainedScanOperations:]
+	}
+	state.ScanOperations = operations
 
 	// Actions are the accountability record: they are capped, never aged out,
 	// and the newest are kept.

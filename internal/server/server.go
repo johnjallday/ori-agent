@@ -14,6 +14,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/agenthttp"
+	"github.com/johnjallday/ori-agent/internal/assistantsetup"
 	"github.com/johnjallday/ori-agent/internal/cliagent"
 	"github.com/johnjallday/ori-agent/internal/featureflags"
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
@@ -54,6 +55,7 @@ type Server struct {
 	// closing process keeps dispatching work.
 	workspacePlanAuto        *workspaceplan.AutoRunner
 	fileJanitorAutomation    *filejanitor.Automation
+	assistantSetupRetries    *assistantsetup.RetryRunner
 	workspaceSurfaceServices *workspacesurface.ServiceManager
 	workspaceFileStore       *workspace.FileStore
 	projectTemplateCatalog   projecttemplates.RuntimeCatalog
@@ -189,6 +191,9 @@ func (s *Server) shutdownBackground(ctx context.Context) error {
 		// Automatic plans dispatch through the task machinery, so stop them first.
 		if s.workspacePlanAuto != nil {
 			s.workspacePlanAuto.Stop()
+		}
+		if s.assistantSetupRetries != nil {
+			s.assistantSetupRetries.Close()
 		}
 		if s.fileJanitorAutomation != nil {
 			s.fileJanitorAutomation.Stop()

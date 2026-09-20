@@ -165,7 +165,13 @@ func (h *HTTPHandler) SelectFolderPath(w http.ResponseWriter, r *http.Request) {
 
 	selectionToken := ""
 	if selected && h.pathSelectionIssuer != nil {
-		selectionToken, err = h.pathSelectionIssuer.Issue(selectedPath)
+		if scoped, ok := h.pathSelectionIssuer.(interface {
+			IssueFor(path, scope string) (string, error)
+		}); ok && strings.TrimSpace(req.WorkspaceID) != "" {
+			selectionToken, err = scoped.IssueFor(selectedPath, req.WorkspaceID)
+		} else {
+			selectionToken, err = h.pathSelectionIssuer.Issue(selectedPath)
+		}
 		if err != nil {
 			logger.Error("Failed to issue trusted folder selection", logger.Fields{"error": err})
 			w.Header().Set("Content-Type", "application/json")

@@ -19,6 +19,8 @@
   </header>
   <div id="personalAssistantTodayBanner" class="personal-assistant-today__banner" role="status" aria-live="polite"></div>
 
+  {{template "assistant-led-setup.tmpl" .}}
+
   <!-- The Daily Brief has one final, drawer-owned mount. Its existing module
        still owns loading, generation, refresh, history, and degraded states. -->
   <section id="homeDailyBrief" class="home-daily-brief" data-state="loading"
