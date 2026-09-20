@@ -14,15 +14,27 @@ import (
 )
 
 type staffingGrantStub struct {
-	available map[string]bool
-	granted   map[string]map[string]bool
+	available          map[string]bool
+	personal           map[string]bool
+	granted            map[string]map[string]bool
+	grantCalls         []string
+	personalGrantCalls []string
 	// grantErr fails Grant for the named agent, so a test can make a commit
 	// fail at its last step with everything before it already applied.
 	grantErr map[string]error
 }
 
-func (s *staffingGrantStub) Available(name string) bool { return s.available[name] }
+func (s *staffingGrantStub) Available(name string) bool         { return s.available[name] }
+func (s *staffingGrantStub) AvailablePersonal(name string) bool { return s.personal[name] }
 func (s *staffingGrantStub) Grant(agentName, skillName string) error {
+	s.grantCalls = append(s.grantCalls, agentName+"\x00"+skillName)
+	return s.recordGrant(agentName, skillName)
+}
+func (s *staffingGrantStub) GrantPersonal(agentName, skillName string) error {
+	s.personalGrantCalls = append(s.personalGrantCalls, agentName+"\x00"+skillName)
+	return s.recordGrant(agentName, skillName)
+}
+func (s *staffingGrantStub) recordGrant(agentName, skillName string) error {
 	if err := s.grantErr[agentName]; err != nil {
 		return err
 	}
@@ -84,6 +96,204 @@ func staffingFixture(t *testing.T) (*AssistantStaffingAdapter, workspace.Store, 
 		HomeWorkspaceID: station.ID, ProjectWorkspaceID: project.ID, SelectedModeID: "file_only",
 	}
 	return adapter, workspaces, scope, grants
+}
+
+func TestAssistantStaffingAdapter_SplitProviderRequiresUnshadowedPersonalSkill(t *testing.T) {
+	adapter, workspaces, scope, grants := staffingFixture(t)
+	if err := workspaces.Update(scope.ProjectWorkspaceID, func(project *workspace.Workspace) error {
+		link := project.GetAssistantProjectLink()
+		link.ProjectProvider = &workspace.AssistantProjectProviderOwner{PluginID: "provider"}
+		project.SetAssistantProjectLink(link)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	read, err := adapter.Read(context.Background(), scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(read.Staffing.Scopes) != 2 || read.Staffing.Scopes[1].ToolGrantsReady {
+		t.Fatalf("shadowable project skill was treated as ready: %#v", read.Staffing)
+	}
+	grants.personal = map[string]bool{"project-skill": true}
+	read, err = adapter.Read(context.Background(), scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !read.Staffing.Scopes[1].ToolGrantsReady {
+		t.Fatalf("packaged personal project skill was unavailable: %#v", read.Staffing)
+	}
+}
+
+func TestAssistantStaffingAdapter_ProviderAvailabilityIsScopedByOwner(t *testing.T) {
+	adapter, workspaces, scope, grants := staffingFixture(t)
+	grants.personal = map[string]bool{"project-skill": true}
+	if err := workspaces.Update(scope.ProjectWorkspaceID, func(project *workspace.Workspace) error {
+		link := project.GetAssistantProjectLink()
+		link.ProjectProvider = &workspace.AssistantProjectProviderOwner{PluginID: "provider"}
+		project.SetAssistantProjectLink(link)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := workspaces.Update(scope.HomeWorkspaceID, func(home *workspace.Workspace) error {
+		state := home.GetAssistantProgramState()
+		state.PluginAvailable = false
+		state.HomeProvider = &workspace.AssistantProgramHomeOwner{PluginID: "home-provider"}
+		home.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	adapter.SetIndependentProviderAvailability(func(*workspace.AssistantProgramHomeOwner, *workspace.AssistantProjectProviderOwner) (bool, bool) {
+		return false, true
+	})
+	read, err := adapter.Read(context.Background(), scope)
+	if err != nil || read.BlockedReason != "" {
+		t.Fatalf("scoped provider read = %#v, %v", read, err)
+	}
+	if read.Staffing.Scopes[0].ToolGrantsReady || !read.Staffing.Scopes[1].ToolGrantsReady {
+		t.Fatalf("provider scopes were collapsed: %#v", read.Staffing)
+	}
+}
+
+func TestAssistantStaffingAdapter_ProjectProviderChangeBetweenReviewAndCommitIsNonMutating(t *testing.T) {
+	adapter, workspaces, scope, grants := staffingFixture(t)
+	grants.personal = map[string]bool{"project-skill": true}
+	if err := workspaces.Update(scope.ProjectWorkspaceID, func(project *workspace.Workspace) error {
+		link := project.GetAssistantProjectLink()
+		link.ProjectProvider = &workspace.AssistantProjectProviderOwner{PluginID: "project-provider"}
+		project.SetAssistantProjectLink(link)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	projectAvailable := true
+	adapter.SetIndependentProviderAvailability(func(*workspace.AssistantProgramHomeOwner, *workspace.AssistantProjectProviderOwner) (bool, bool) {
+		return true, projectAvailable
+	})
+	raw := json.RawMessage(`{"roles":[{"role_id":"project_lead","name":"Race Lead","provider":"openai","model":"gpt-4o-mini"},{"role_id":"project_reviewer","name":"Race Reviewer","provider":"openai","model":"gpt-4o-mini"}]}`)
+	reviewed, err := adapter.Review(context.Background(), scope, ActionReviewProjectStaffing, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectAvailable = false
+	if _, err := adapter.Commit(context.Background(), scope, ActionAddProjectStaffing, raw, reviewed); err != ErrConflict {
+		t.Fatalf("commit after project provider change error = %v", err)
+	}
+	project, err := workspaces.Get(scope.ProjectWorkspaceID)
+	if err != nil || len(project.GetAgentInstances()) != 0 || len(project.GetAssistantProjectLink().ProjectBindings.Bindings) != 0 {
+		t.Fatalf("stale staffing commit changed the project: %#v, %v", project, err)
+	}
+	if _, found := adapter.profiles.GetAgent("Race Lead"); found || len(grants.granted) != 0 {
+		t.Fatalf("stale staffing commit created a profile or grant: found=%t grants=%#v", found, grants.granted)
+	}
+}
+
+func TestAssistantStaffingAdapter_UnavailableProjectProviderBlocksSkilllessRole(t *testing.T) {
+	adapter, workspaces, scope, _ := staffingFixture(t)
+	if err := workspaces.Update(scope.ProjectWorkspaceID, func(project *workspace.Workspace) error {
+		link := project.GetAssistantProjectLink()
+		link.ProjectProvider = &workspace.AssistantProjectProviderOwner{PluginID: "project-provider"}
+		project.SetAssistantProjectLink(link)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	adapter.SetIndependentProviderAvailability(func(*workspace.AssistantProgramHomeOwner, *workspace.AssistantProjectProviderOwner) (bool, bool) {
+		return true, false
+	})
+	raw := json.RawMessage(`{"roles":[{"role_id":"project_reviewer","name":"Unavailable Reviewer","provider":"openai","model":"gpt-4o-mini"}]}`)
+	if _, err := adapter.Review(context.Background(), scope, ActionReviewProjectStaffing, raw); err != ErrConflict {
+		t.Fatalf("skillless role review with unavailable provider error = %v", err)
+	}
+	project, _ := workspaces.Get(scope.ProjectWorkspaceID)
+	if len(project.GetAgentInstances()) != 0 {
+		t.Fatalf("unavailable provider review changed project instances: %#v", project.GetAgentInstances())
+	}
+}
+
+func TestAssistantStaffingAdapter_IndependentHomeRoleGrantsExactPersonalSkill(t *testing.T) {
+	adapter, workspaces, scope, grants := staffingFixture(t)
+	grants.personal = map[string]bool{"home-skill": true}
+	if err := workspaces.Update(scope.HomeWorkspaceID, func(home *workspace.Workspace) error {
+		state := home.GetAssistantProgramState()
+		state.HomeProvider = &workspace.AssistantProgramHomeOwner{PluginID: "home-provider"}
+		for index := range state.Declaration.Roles {
+			if state.Declaration.Roles[index].ID == "home_guide" {
+				state.Declaration.Roles[index].Skills = []string{"home-skill"}
+			}
+		}
+		home.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	adapter.SetIndependentProviderAvailability(func(*workspace.AssistantProgramHomeOwner, *workspace.AssistantProjectProviderOwner) (bool, bool) {
+		return true, true
+	})
+	if err := adapter.StaffRoleOnWorkspace(context.Background(), scope.HomeWorkspaceID, []RoleFill{{
+		RoleID: "home_guide", Name: "Personal Home Guide", Provider: "openai", Model: "gpt-4o-mini",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	station, _ := workspaces.Get(scope.HomeWorkspaceID)
+	if len(station.GetAgentInstances()) != 1 || len(station.GetAssistantProgramState().HomeBindings.Bindings) != 1 {
+		t.Fatalf("independent Home role was not staffed: instances=%#v bindings=%#v", station.GetAgentInstances(), station.GetAssistantProgramState().HomeBindings)
+	}
+	if len(grants.grantCalls) != 0 || len(grants.personalGrantCalls) != 1 || grants.personalGrantCalls[0] != "Personal Home Guide\x00home-skill" {
+		t.Fatalf("grant calls: general=%#v personal=%#v", grants.grantCalls, grants.personalGrantCalls)
+	}
+}
+
+func TestAssistantStaffingAdapter_WorkspaceRoleUsesLinkOwnedProjectRoles(t *testing.T) {
+	adapter, workspaces, scope, grants := staffingFixture(t)
+	grants.personal = map[string]bool{"project-skill": true}
+	station, _ := workspaces.Get(scope.HomeWorkspaceID)
+	state := station.GetAssistantProgramState()
+	projectRoles := make([]workspace.AssistantProgramRoleSpec, 0, 2)
+	homeRoles := make([]workspace.AssistantProgramRoleSpec, 0, 2)
+	for _, role := range state.Declaration.Roles {
+		if role.Scope == workspace.AssistantRoleScopeProject {
+			projectRoles = append(projectRoles, role)
+		} else {
+			homeRoles = append(homeRoles, role)
+		}
+	}
+	if err := workspaces.Update(scope.HomeWorkspaceID, func(home *workspace.Workspace) error {
+		current := home.GetAssistantProgramState()
+		current.Declaration.Roles = homeRoles
+		current.HomeProvider = &workspace.AssistantProgramHomeOwner{PluginID: "home-provider"}
+		home.SetAssistantProgramState(current)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := workspaces.Update(scope.ProjectWorkspaceID, func(project *workspace.Workspace) error {
+		link := project.GetAssistantProjectLink()
+		link.ProjectRoles = projectRoles
+		link.ProjectProvider = &workspace.AssistantProjectProviderOwner{PluginID: "project-provider"}
+		project.SetAssistantProjectLink(link)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	adapter.SetIndependentProviderAvailability(func(*workspace.AssistantProgramHomeOwner, *workspace.AssistantProjectProviderOwner) (bool, bool) {
+		return true, true
+	})
+	if err := adapter.StaffRoleOnWorkspace(context.Background(), scope.ProjectWorkspaceID, []RoleFill{{
+		RoleID: "project_reviewer", Name: "Link Reviewer", Provider: "openai", Model: "gpt-4o-mini",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	project, _ := workspaces.Get(scope.ProjectWorkspaceID)
+	link := project.GetAssistantProjectLink()
+	if len(link.ProjectBindings.Bindings) != 1 || link.ProjectBindings.Bindings[0].RoleID != "project_reviewer" || len(project.GetAgentInstances()) != 1 {
+		t.Fatalf("link-owned project role staffing = link %#v instances %#v", link, project.GetAgentInstances())
+	}
+	if len(grants.grantCalls) != 0 {
+		t.Fatalf("split project role used general skill grants: %#v", grants.grantCalls)
+	}
 }
 
 func TestAssistantStaffingAdapter_ReviewedWorkspaceSetupCreatesOnlyRequiredScopedRoles(t *testing.T) {

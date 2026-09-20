@@ -10,19 +10,20 @@ import (
 // the user before install (PRD req #15). Install proceeds only on explicit
 // confirmation; declining makes no changes.
 type TrustReport struct {
-	Name                string
-	Format              SourceFormat
-	MCPCommands         []string // "<namespaced server> → <resolved command>"
-	Skills              []string
-	SurfaceCapabilities []string
-	Surfaces            []SurfaceDisclosure
-	Services            []ServiceDisclosure
-	Operations          []OperationDisclosure
-	Artifacts           []ArtifactDisclosure
-	SymbolicScopes      []string
-	Blueprints          []string
-	Unsupported         []UnsupportedComponent
-	Warnings            []string // e.g. binary-missing
+	Name                  string
+	Format                SourceFormat
+	MCPCommands           []string // "<namespaced server> → <resolved command>"
+	Skills                []string
+	SurfaceCapabilities   []string
+	Surfaces              []SurfaceDisclosure
+	Services              []ServiceDisclosure
+	Operations            []OperationDisclosure
+	Artifacts             []ArtifactDisclosure
+	SymbolicScopes        []string
+	Blueprints            []string
+	AssistantProgramHomes []string
+	Unsupported           []UnsupportedComponent
+	Warnings              []string // e.g. binary-missing
 }
 
 type SurfaceDisclosure struct {
@@ -120,6 +121,9 @@ func BuildTrustReport(d PluginDescriptor) TrustReport {
 		for _, blueprint := range contribution.Blueprints {
 			r.Blueprints = append(r.Blueprints, blueprint.ID)
 		}
+		for _, home := range contribution.AssistantProgramHomes {
+			r.AssistantProgramHomes = append(r.AssistantProgramHomes, home.ID+" — "+home.StationName)
+		}
 		r.SymbolicScopes = uniqueSorted(r.SymbolicScopes)
 	}
 	return r
@@ -185,6 +189,9 @@ func (r TrustReport) String() string {
 	}
 	if len(r.Blueprints) > 0 {
 		fmt.Fprintf(&b, "  Workspace blueprints: %s\n", strings.Join(r.Blueprints, ", "))
+	}
+	if len(r.AssistantProgramHomes) > 0 {
+		fmt.Fprintf(&b, "  Independent Assistant Program Homes: %s\n", strings.Join(r.AssistantProgramHomes, ", "))
 	}
 	if len(r.Unsupported) > 0 {
 		b.WriteString("  Skipped (not yet supported):\n")

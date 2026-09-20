@@ -1,20 +1,23 @@
 # Group Templates v1
 
-Status: implemented host feature (domain-neutral). Demonstrated with the
-published REAPER plugin 0.5.2 in a disposable server. Positive guided REAPER
-acceptance is not demonstrated; see [Limitations](#limitations).
+Status: implemented host feature (domain-neutral). Combined declarations remain
+supported unchanged. Independently contributed Homes are locally accepted with the
+unpublished Music Project Management 0.1.0 and REAPER 0.8.0 candidates described in
+[Limitations](#limitations).
 
 ## Purpose
 
 **Create Group** offers Group Templates alongside the ordinary General group. A
-Group Template creates, or reuses, the one Assistant Program Home that a trusted
-project blueprint declares. For example, a music plugin can offer a
-"Music Production Home" that its song projects then join.
+Group Template creates, or reuses, one exact Assistant Program Home. The Home may
+come from a legacy combined project blueprint or directly from a trusted plugin's
+`assistant_program_homes` declaration. A separate project plugin can then attach
+its project-local team through `assistant_project`.
 
-Group Templates are a host-side projection over declarations the host already
-trusts ([Template Group Requirements](template-group-requirements.md)). They are
-not a second template format. Nothing is authored for them, and no plugin needs a
-new host feature flag.
+Group Templates are host-side projections over declarations the host already
+trusts ([Template Group Requirements](template-group-requirements.md)); users do
+not author a second Group Template format. The independent contribution forms
+require `independent_program_homes_v1`. Existing combined forms retain their prior
+feature requirements and meaning.
 
 ## Group Templates versus Workspace templates
 
@@ -22,7 +25,7 @@ new host feature flag.
 | --- | --- | --- |
 | Chosen in | Create Workspace → Blueprint | Create Group → Blueprint |
 | Creates | a project workspace, its team, optional project files | exactly one group (program Home); the wizard then staffs the Home roles the user chose |
-| Source | library, plugin blueprint, source-linked variant | derived from an eligible project blueprint; never edited |
+| Source | library, plugin blueprint, source-linked variant | projected from an eligible combined blueprint or a plugin-level independent Home declaration; never edited |
 | Team | reviewed project roster | none in the commit; the wizard staffs chosen Home roles immediately afterward through `PUT /api/workspaces/{id}/roles/{roleID}` |
 
 A source blueprint's `agents[]` roster and `assistant_program.roles[]` may still
@@ -39,20 +42,22 @@ have no Team step.
 
 ## Eligibility and catalog
 
-A blueprint contributes a managed entry only when all of these hold:
+A managed entry is contributed by either:
 
-- Its Assistant Program uses schema 2.
-- Its `group_requirement` policy is `required` or `recommended`.
-- It has a trusted owner key: a plugin, a ready source-linked variant of a
-  plugin blueprint, or a user template with a setup-quest attachment.
+- a combined blueprint with Assistant Program schema 2, a `required` or
+  `recommended` `group_requirement`, and a trusted plugin, ready source-linked
+  variant, or user-quest owner; or
+- a trusted plugin-level `assistant_program_homes` item with Home schema 1,
+  Home version 1, an embedded Assistant Program schema-2 Home declaration, and
+  `independent_program_homes_v1`.
 
-Library copies without an owner, legacy declarations without
+Library copies without an owner, combined declarations without
 `group_requirement` (for example reviewed REAPER 0.5.0 and 0.5.1), and policy
-`none` are not listed.
+`none` are not listed. Independent Home declarations need no project blueprint.
 
-Entries are deduplicated by the source-scoped key (plugin or attachment plus
-program ID). A blueprint and its variants share one entry. Two sources that
-declare different Home content for the same key produce a `conflict` entry and
+Entries are deduplicated by the exact source-scoped key (plugin or attachment plus
+program ID). A combined blueprint and its variants share one entry. Two sources
+that disagree about Home content for the same key produce a `conflict` entry and
 nothing can be created from it.
 
 `GET /api/workspaces/group-templates` returns General first, then managed
@@ -195,8 +200,9 @@ All source-supplied text is rendered as text.
 | Change | Group | Coordinator | Integration | Group Template entry |
 | --- | --- | --- | --- | --- |
 | Rename (`POST /api/workspaces/{id}/rename`) | same ID, new name | unchanged | unchanged | `reusable` with the new name |
-| Plugin disabled | readable | unchanged; staffing still allowed (uses the Home's own snapshot) | `unavailable` / `plugin_enable_required` | `unavailable` |
-| Plugin uninstalled | readable | unchanged | `unavailable` / `plugin_install_required` | not listed |
+| Home provider disabled | readable | existing binding unchanged; new Home-role staffing refused | `unavailable` / `plugin_enable_required` | `unavailable` |
+| Home provider uninstalled | readable | existing binding unchanged; managed skill unavailable | `unavailable` / `plugin_install_required` | not listed |
+| Project provider disabled/uninstalled | readable | Home binding and Home management unchanged | Home `available`; affected project actions unavailable | Home entry unchanged |
 | Plugin re-enabled or reinstalled with the same Home digest | readable | unchanged | `available` | `reusable` |
 | Sources disagree | readable | unchanged | `unavailable` / `home_declaration_conflict` | `conflict` |
 | Legacy schema-1 Home | readable | `migration_required` | `unavailable` / `home_incompatible` | `incompatible` |
@@ -206,26 +212,19 @@ automatically.
 
 ## Limitations
 
-- **Exact REAPER evidence is limited to 0.5.2 in a disposable server.** The
-  published release (`#sha=9fde099d…`, blueprint `reaper-song` v6, artifact
-  sha256 `999dda37…`, 8,780,098 bytes) lists **Music Production Home**:
-  - Music Portfolio Manager required, Sample Library Manager optional.
-  - Producer, Mix Engineer and Songwriter project-local.
-
-  `tests/reaper-group-templates.spec.ts` (opt-in,
-  `ORI_REAPER_052_ACCEPTANCE=1`) covers creating the group, setting up its
-  coordinator, adding two songs and reusing the renamed group. No live REAPER
-  was involved. REAPER 0.5.0 and 0.5.1 declare no group requirement and are not
-  listed.
-- **Positive guided REAPER acceptance was blocked at the time.** The reviewed
-  integration pin was 0.5.0, which declares no group requirement. The pin has
-  since moved to the published 0.6.0 release (blueprint v7, which declares one),
-  then to 0.6.1, which keeps that blueprint, and is now a reviewed floor: the
-  latest stable release at or above 0.6.1 with blueprint v7 or later.
-  A guided quest for any other source is still refused by the
-  reviewed-integration gate, which is unchanged.
-- **Destination card uses the declared name.** Its receipt has no name input.
-  Rename the group afterwards, or create it from Group Templates.
-- **Guided Home creation is not recorded as locally owned.** It does not add the
-  Home to the data directory's allowlist. With an unconfirmed workspace root,
-  its staffed roles can still be dropped on restart.
+- The published reviewed REAPER floor remains 0.6.1 and still uses the combined
+  declaration. The independent local candidates are Music Project Management
+  `8f4abd0b283fefe23653a2cf81deb800123c4bde` (0.1.0) and REAPER
+  `68488b4d62978f22bfdff26c3554cebb6b4cf396` (0.8.0, blueprint v9). They are
+  unpublished compatibility evidence, not releases or registry inputs.
+- Disposable Chromium acceptance covers music-only, Music-first, REAPER-first,
+  REAPER-only standalone, two linked projects, one reviewed inert handoff,
+  provider removal/reinstall, and a controlled restart. It does not configure a
+  model, open REAPER, or verify live DAW control.
+- There is no ownership migration. Existing combined Homes remain under their
+  recorded keys and are not adopted by name, rewritten, relinked, or converted.
+- The destination card uses the declared name; its receipt has no name input.
+  Rename the Home afterwards, or create it from Group Templates.
+- Delivery order is a compatible Ori release, then Music Project Management,
+  then a compatible REAPER release. The reviewed floor changes only after
+  separately authorized publication verification.

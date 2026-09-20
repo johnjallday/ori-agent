@@ -218,10 +218,13 @@ func (h *Handler) validateWorkspaceTeamReadiness(
 			}
 		}
 	}
-	plan := h.buildTemplateAgentPlanForOwner(tpl, ownerUserID)
-	plan.GroupRequirement = h.buildTemplateGroupRequirementPlan(
-		groupSourceTemplate, req.GroupComposition, ownerUserID, ownerErr,
+	effectiveTemplate := tpl
+	groupPlan := h.buildTemplateGroupRequirementPlan(
+		groupSourceTemplate, req.GroupComposition, ownerUserID, ownerErr, &effectiveTemplate,
 	)
+	tpl = effectiveTemplate
+	plan := h.buildTemplateAgentPlanForOwner(tpl, ownerUserID)
+	plan.GroupRequirement = groupPlan
 	plan = finalizeTemplateAgentPlan(plan)
 	roles := workspaceTeamRoles(tpl, plan)
 	if len(roles) > 0 && strings.TrimSpace(req.EntryAgentName) != "" {

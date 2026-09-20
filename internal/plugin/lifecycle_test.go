@@ -35,6 +35,23 @@ func commitGitAll(t *testing.T, repo, message string) {
 	}
 }
 
+func TestVerifySkillOwnershipRejectsSymlinkedReceipt(t *testing.T) {
+	directory := t.TempDir()
+	writeFile(t, filepath.Join(directory, "SKILL.md"), "---\nname: managed\n---\n")
+	digest, err := SkillTreeDigest(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "receipt.json")
+	writeFile(t, target, `{"schema_version":1,"plugin_name":"owner","skill_name":"managed","tree_digest":"`+digest+`"}`)
+	if err := os.Symlink(target, filepath.Join(directory, SkillOwnershipFileName)); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifySkillOwnership(directory, "owner", "managed"); !errors.Is(err, ErrSkillDestinationConflict) {
+		t.Fatalf("symlinked receipt verification error = %v", err)
+	}
+}
+
 func TestFreshPersistencePathsContainOnlyManagedPluginState(t *testing.T) {
 	root := t.TempDir()
 	pluginsDir := filepath.Join(root, "plugins")
@@ -130,7 +147,7 @@ func TestManagerSetEnabledReplacesContributionGenerationBeforeCommit(t *testing.
 	if err != nil || !ok {
 		t.Fatalf("Get() ok=%v err=%v", ok, err)
 	}
-	if !got.Enabled || got.Generation != 5 {
+	if !got.Enabled || got.Generation != 5 || got.ContentGeneration != 4 || got.EvidenceGeneration() != 4 {
 		t.Fatalf("enabled plugin = %+v", got)
 	}
 	if len(lifecycle.events) != 1 || lifecycle.events[0] != "replace:surface-tools" {
@@ -138,6 +155,34 @@ func TestManagerSetEnabledReplacesContributionGenerationBeforeCommit(t *testing.
 	}
 	if lifecycle.previous.Generation != 4 || lifecycle.next.Generation != 5 || !lifecycle.next.Enabled {
 		t.Fatalf("replacement = %+v -> %+v", lifecycle.previous, lifecycle.next)
+	}
+}
+
+type sourceMutatingSkills struct {
+	fakeSkills
+	path string
+}
+
+func (installer *sourceMutatingSkills) InstallSkill(pluginName, name, source string) error {
+	if err := installer.fakeSkills.InstallSkill(pluginName, name, source); err != nil {
+		return err
+	}
+	return os.WriteFile(installer.path, []byte("---\nname: changed\n---\n"), 0o600)
+}
+
+func TestManagerInstallRejectsSkillSourceMutationDuringRegistration(t *testing.T) {
+	root := makeClaudeBundle(t)
+	skillPath := filepath.Join(root, "skills", "reaper-session-setup", "SKILL.md")
+	installer := &sourceMutatingSkills{path: skillPath}
+	manager := NewManager(&fakeRegistrar{}, installer, t.TempDir(), "")
+	if _, err := manager.Install(root, "", func(TrustReport) bool { return true }); !errors.Is(err, ErrSkillOwnershipChanged) {
+		t.Fatalf("install mutation error = %v", err)
+	}
+	if installed, err := manager.List(); err != nil || len(installed) != 0 {
+		t.Fatalf("mutated install was recorded: %#v, %v", installed, err)
+	}
+	if len(installer.removed) != 1 || installer.removed[0] != "reaper-session-setup" {
+		t.Fatalf("mutated install rollback = %#v", installer.removed)
 	}
 }
 
@@ -157,6 +202,9 @@ func TestManagerInstallAndUninstall(t *testing.T) {
 	}
 	if p.Enabled {
 		t.Error("installed plugin should start disabled")
+	}
+	if p.SkillOwnershipSchema != SkillOwnershipSchemaVersion {
+		t.Fatalf("installed skill ownership schema = %d", p.SkillOwnershipSchema)
 	}
 	if _, ok := reg.added["reaper/ori-reaper"]; !ok {
 		t.Errorf("server not registered: %v", reg.added)
@@ -178,6 +226,39 @@ func TestManagerInstallAndUninstall(t *testing.T) {
 	}
 	if len(lifecycle.events) != 1 || lifecycle.events[0] != "delete-state:reaper" {
 		t.Fatalf("uninstall lifecycle events = %v", lifecycle.events)
+	}
+}
+
+type refusingSkillVerifier struct {
+	*fakeSkills
+	err error
+}
+
+func (skills *refusingSkillVerifier) VerifySkill(_, _ string) error { return skills.err }
+
+func TestManagerUninstallRefusesChangedSkillBeforeOtherComponents(t *testing.T) {
+	root := makeClaudeBundle(t)
+	registrar := &fakeRegistrar{}
+	skills := &refusingSkillVerifier{fakeSkills: &fakeSkills{}}
+	manager := NewManager(registrar, skills, t.TempDir(), "")
+	installed, err := manager.Install(root, "", func(TrustReport) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	lifecycle := &recordingContributionLifecycle{}
+	manager.SetSurfaceLifecycle(lifecycle)
+	skills.err = ErrSkillOwnershipChanged
+	if err := manager.Uninstall(installed.Name); !errors.Is(err, ErrSkillOwnershipChanged) {
+		t.Fatalf("uninstall error = %v", err)
+	}
+	if _, ok := registrar.added["reaper/ori-reaper"]; !ok {
+		t.Fatal("ownership refusal removed the MCP server")
+	}
+	if _, ok, err := manager.store.Get(installed.Name); err != nil || !ok {
+		t.Fatalf("ownership refusal removed the installed record: ok=%v err=%v", ok, err)
+	}
+	if len(lifecycle.events) != 0 {
+		t.Fatalf("ownership refusal changed surfaces: %v", lifecycle.events)
 	}
 }
 
@@ -586,12 +667,89 @@ func TestManagerUpdateFromReviewedSourceRestoresOldRegistrationOnFailure(t *test
 	}
 }
 
+type partialRemoveSkills struct {
+	installed map[string]bool
+	failOn    string
+}
+
+func (skills *partialRemoveSkills) InstallSkill(_, name, _ string) error {
+	if skills.installed == nil {
+		skills.installed = make(map[string]bool)
+	}
+	if skills.installed[name] {
+		return errors.New("skill already installed")
+	}
+	skills.installed[name] = true
+	return nil
+}
+
+func (skills *partialRemoveSkills) RemoveSkill(_, name string) error {
+	if name == skills.failOn {
+		return errors.New("injected removal failure")
+	}
+	delete(skills.installed, name)
+	return nil
+}
+
+func TestManagerUpdateRestoresOnlyComponentsRemovedBeforeFailure(t *testing.T) {
+	root := makeClaudeBundle(t)
+	writeFile(t, filepath.Join(root, "skills", "z-last", "SKILL.md"), "---\nname: z-last\n---\n")
+	registrar := &fakeRegistrar{}
+	skills := &partialRemoveSkills{}
+	manager := NewManager(registrar, skills, t.TempDir(), "")
+	installed, err := manager.Install(root, "", func(TrustReport) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	skills.failOn = "z-last"
+	if _, err := manager.Update(installed.Name, func(TrustReport) bool { return true }); err == nil {
+		t.Fatal("partial removal failure was accepted")
+	}
+	if !skills.installed["reaper-session-setup"] || !skills.installed["z-last"] || len(skills.installed) != 2 {
+		t.Fatalf("failed update did not restore exactly the old skills: %#v", skills.installed)
+	}
+	if _, ok := registrar.added["reaper/ori-reaper"]; !ok {
+		t.Fatal("failed update did not restore the removed MCP server")
+	}
+	persisted, ok, err := manager.store.Get(installed.Name)
+	if err != nil || !ok || persisted.Generation != installed.Generation {
+		t.Fatalf("failed update changed the durable generation: %#v, %t, %v", persisted, ok, err)
+	}
+}
+
+func TestManagerUpdateRestoresRecordedComponentsAfterRegistrationFailure(t *testing.T) {
+	root := makeClaudeBundle(t)
+	registrar := &fakeRegistrar{}
+	skills := &fakeSkills{}
+	manager := NewManager(registrar, skills, t.TempDir(), "")
+	installed, err := manager.Install(root, "", func(TrustReport) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, "skills", "fails", "SKILL.md"), "---\nname: fails\n---\n")
+	skills.failOn = "fails"
+	if _, err := manager.Update(installed.Name, func(TrustReport) bool { return true }); err == nil {
+		t.Fatal("update registration failure was accepted")
+	}
+	persisted, ok, err := manager.store.Get(installed.Name)
+	if err != nil || !ok || persisted.Generation != installed.Generation || persisted.Version != installed.Version {
+		t.Fatalf("failed update changed stored generation: %#v ok=%t err=%v", persisted, ok, err)
+	}
+	if _, ok := registrar.added["reaper/ori-reaper"]; !ok {
+		t.Fatal("failed update did not restore the recorded MCP server")
+	}
+	if len(skills.installed) == 0 || skills.installed[len(skills.installed)-1] != "reaper-session-setup" {
+		t.Fatalf("failed update did not restore the recorded skill: %v", skills.installed)
+	}
+}
+
 func TestManagerUpdate(t *testing.T) {
 	root := makeClaudeBundle(t)
 	reg := &fakeRegistrar{}
 	sk := &fakeSkills{}
 	m := NewManager(reg, sk, t.TempDir(), "")
-	if _, err := m.Install(root, "", func(TrustReport) bool { return true }); err != nil {
+	installed, err := m.Install(root, "", func(TrustReport) bool { return true })
+	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -599,20 +757,42 @@ func TestManagerUpdate(t *testing.T) {
 	if _, changed, err := m.UpdatePreview("reaper"); err != nil || changed {
 		t.Errorf("no-op update preview: changed=%v err=%v", changed, err)
 	}
-	if _, err := m.Update("reaper", func(TrustReport) bool { return true }); err != nil {
+	unchanged, err := m.Update("reaper", func(TrustReport) bool { return true })
+	if err != nil {
 		t.Fatalf("update (no change): %v", err)
+	}
+	if unchanged.ContentGeneration != installed.ContentGeneration || unchanged.Generation <= installed.Generation {
+		t.Fatalf("no-change update generations = content %d runtime %d", unchanged.ContentGeneration, unchanged.Generation)
 	}
 	if _, ok := reg.added["reaper/ori-reaper"]; !ok {
 		t.Error("server missing after no-op update")
 	}
 
-	// Add a skill to the bundle; update detects the change and records it.
+	// Changing packaged skill bytes is a trusted content change even when the
+	// component name stays stable.
+	writeFile(t, filepath.Join(root, "skills", "reaper-session-setup", "SKILL.md"), "---\nname: x\n---\nupdated instructions\n")
+	if _, changed, err := m.UpdatePreview("reaper"); err != nil || !changed {
+		t.Fatalf("expected changed=true after changing skill bytes: changed=%v err=%v", changed, err)
+	}
+	contentChanged, err := m.Update("reaper", func(TrustReport) bool { return true })
+	if err != nil {
+		t.Fatalf("update (skill content changed): %v", err)
+	}
+	if contentChanged.ContentGeneration <= unchanged.ContentGeneration {
+		t.Fatalf("skill content update did not advance content generation: %+v", contentChanged)
+	}
+
+	// Add a skill to the bundle; update detects the changed component set too.
 	writeFile(t, filepath.Join(root, "skills", "extra", "SKILL.md"), "---\nname: extra\n---\n")
 	if _, changed, err := m.UpdatePreview("reaper"); err != nil || !changed {
 		t.Fatalf("expected changed=true after adding a skill: changed=%v err=%v", changed, err)
 	}
-	if _, err := m.Update("reaper", func(TrustReport) bool { return true }); err != nil {
+	changedPlugin, err := m.Update("reaper", func(TrustReport) bool { return true })
+	if err != nil {
 		t.Fatalf("update (changed): %v", err)
+	}
+	if changedPlugin.ContentGeneration <= contentChanged.ContentGeneration {
+		t.Fatalf("changed update did not advance content generation: %+v", changedPlugin)
 	}
 	list, _ := m.List()
 	if len(list) != 1 || len(list[0].Skills) != 2 {

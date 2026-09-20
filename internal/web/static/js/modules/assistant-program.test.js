@@ -1,7 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { AssistantProgramPage } from './assistant-program.js';
+import { AssistantProgramPage, assistantProviderUnavailableMessage } from './assistant-program.js';
+
+test('split provider availability names only the affected owner', () => {
+  assert.match(
+    assistantProviderUnavailableMessage({
+      home_provider_available: false,
+      project_provider_available: true
+    }),
+    /Home provider.*project-local/s
+  );
+  assert.match(
+    assistantProviderUnavailableMessage({
+      home_provider_available: true,
+      project_provider_available: false
+    }),
+    /project provider.*Home remains available/s
+  );
+  assert.equal(
+    assistantProviderUnavailableMessage({}, { disabled_message: 'Provider unavailable.' }),
+    'Provider unavailable.'
+  );
+});
 
 test('assistant page keeps UUID APIs separate from slug navigation', async () => {
   const requests = [];

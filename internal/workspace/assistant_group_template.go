@@ -17,18 +17,19 @@ var ErrAssistantGroupTemplateProvenanceInvalid = errors.New("assistant group tem
 // display name, and never a project template contract that could drive setup,
 // runtime requirements, capability reconciliation, or grants.
 type AssistantGroupTemplateProvenance struct {
-	SchemaVersion         int                  `json:"schema_version"`
-	GroupTemplateID       string               `json:"group_template_id"`
-	GroupTemplateRevision string               `json:"group_template_revision"`
-	SourceKind            string               `json:"source_kind"`
-	TemplateID            string               `json:"template_id"`
-	TemplateRevision      string               `json:"template_revision,omitempty"`
-	VariantID             string               `json:"variant_id,omitempty"`
-	VariantRevision       string               `json:"variant_revision,omitempty"`
-	PluginOwner           *PluginTemplateOwner `json:"plugin_owner,omitempty"`
-	HomeDigest            string               `json:"home_digest"`
-	ReviewDigest          string               `json:"review_digest"`
-	CreatedAt             time.Time            `json:"created_at"`
+	SchemaVersion         int                        `json:"schema_version"`
+	GroupTemplateID       string                     `json:"group_template_id"`
+	GroupTemplateRevision string                     `json:"group_template_revision"`
+	SourceKind            string                     `json:"source_kind"`
+	TemplateID            string                     `json:"template_id"`
+	TemplateRevision      string                     `json:"template_revision,omitempty"`
+	VariantID             string                     `json:"variant_id,omitempty"`
+	VariantRevision       string                     `json:"variant_revision,omitempty"`
+	PluginOwner           *PluginTemplateOwner       `json:"plugin_owner,omitempty"`
+	ProgramHomeOwner      *AssistantProgramHomeOwner `json:"program_home_owner,omitempty"`
+	HomeDigest            string                     `json:"home_digest"`
+	ReviewDigest          string                     `json:"review_digest"`
+	CreatedAt             time.Time                  `json:"created_at"`
 }
 
 func CloneAssistantGroupTemplateProvenance(source *AssistantGroupTemplateProvenance) *AssistantGroupTemplateProvenance {
@@ -39,6 +40,10 @@ func CloneAssistantGroupTemplateProvenance(source *AssistantGroupTemplateProvena
 	if source.PluginOwner != nil {
 		owner := source.PluginOwner.Clone()
 		clone.PluginOwner = &owner
+	}
+	if source.ProgramHomeOwner != nil {
+		owner := source.ProgramHomeOwner.Clone()
+		clone.ProgramHomeOwner = &owner
 	}
 	return &clone
 }
@@ -65,13 +70,21 @@ func (provenance *AssistantGroupTemplateProvenance) Validate(key AssistantProgra
 	key = key.Normalize()
 	switch provenance.SourceKind {
 	case "plugin":
-		owner := provenance.PluginOwner
-		if key.PluginID == "" || owner == nil || strings.ToLower(strings.TrimSpace(owner.PluginID)) != key.PluginID ||
-			len(owner.PluginVersion) > 64 || len(owner.BlueprintID) > 128 {
+		blueprintOwner := provenance.PluginOwner
+		homeOwner := provenance.ProgramHomeOwner
+		if key.PluginID == "" || (blueprintOwner == nil) == (homeOwner == nil) {
+			return ErrAssistantGroupTemplateProvenanceInvalid
+		}
+		if blueprintOwner != nil && (strings.ToLower(strings.TrimSpace(blueprintOwner.PluginID)) != key.PluginID ||
+			len(blueprintOwner.PluginVersion) > 64 || len(blueprintOwner.BlueprintID) > 128) {
+			return ErrAssistantGroupTemplateProvenanceInvalid
+		}
+		if homeOwner != nil && (!homeOwner.Valid() || strings.ToLower(strings.TrimSpace(homeOwner.PluginID)) != key.PluginID ||
+			strings.ToLower(strings.TrimSpace(homeOwner.ProgramID)) != key.ProgramID) {
 			return ErrAssistantGroupTemplateProvenanceInvalid
 		}
 	case "user_template":
-		if key.TemplateID == "" || provenance.PluginOwner != nil || strings.ToLower(strings.TrimSpace(provenance.TemplateID)) != key.TemplateID {
+		if key.TemplateID == "" || provenance.PluginOwner != nil || provenance.ProgramHomeOwner != nil || strings.ToLower(strings.TrimSpace(provenance.TemplateID)) != key.TemplateID {
 			return ErrAssistantGroupTemplateProvenanceInvalid
 		}
 	default:
@@ -110,5 +123,5 @@ func (service *AssistantProgramStore) EnsureNamedStationWithProvenance(
 	}
 	assistantProgramProvisionMu.Lock()
 	defer assistantProgramProvisionMu.Unlock()
-	return service.ensureStationWithOptionsLocked(key, declaration, strings.TrimSpace(name), record)
+	return service.ensureStationWithOptionsLocked(key, declaration, strings.TrimSpace(name), record, record.ProgramHomeOwner)
 }

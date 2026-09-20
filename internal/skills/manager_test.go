@@ -182,6 +182,90 @@ func TestListSkills_PersonalSkillDuplicateDoesNotOverrideLocal(t *testing.T) {
 	}
 }
 
+func TestPersonalSkillAvailabilityHidesManagedSourceWithoutAffectingIndependentSkills(t *testing.T) {
+	tmpDir := t.TempDir()
+	personalSkillsDir := filepath.Join(tmpDir, "personal-skills")
+	writeTestSkill(t, filepath.Join(personalSkillsDir, "managed"), "managed", "Managed", "Managed prompt")
+	writeTestSkill(t, filepath.Join(personalSkillsDir, "independent"), "independent", "Independent", "Independent prompt")
+	manager := NewManager(ManagerConfig{AgentStorePath: filepath.Join(tmpDir, "agents.json"), PersonalSkillsDir: personalSkillsDir})
+	manager.SetPersonalSkillAvailability(func(_ string, skill Skill) (bool, bool) {
+		if skill.Name == "managed" {
+			return true, false
+		}
+		return false, true
+	})
+	if _, found, err := manager.ResolvePersonalSkillByName("managed"); err != nil || found {
+		t.Fatalf("managed disabled personal skill = found %t, err %v", found, err)
+	}
+	if _, found, err := manager.ResolveSkillByName("managed"); err != nil || found {
+		t.Fatalf("managed disabled runtime skill = found %t, err %v", found, err)
+	}
+	if _, found, err := manager.ResolvePersonalSkillByName("independent"); err != nil || !found {
+		t.Fatalf("independent skill = found %t, err %v", found, err)
+	}
+	skills, err := manager.ListSkills("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, skill := range skills {
+		if skill.Name == "managed" {
+			t.Fatal("disabled managed skill remained in the runtime catalog")
+		}
+	}
+	writeTestSkill(t, filepath.Join(tmpDir, "agents", "skills", "managed"), "managed", "Shadow", "Shadow prompt")
+	if _, err := manager.ListSkills(""); !errors.Is(err, ErrSkillSourceConflict) {
+		t.Fatalf("managed runtime shadow error = %v", err)
+	}
+	if _, found, err := manager.ResolveSkillByName("managed"); !errors.Is(err, ErrSkillSourceConflict) || found {
+		t.Fatalf("managed direct runtime shadow = found %t, err %v", found, err)
+	}
+}
+
+func TestResolvePersonalSkillByNameRefusesRepositoryShadow(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentStorePath := filepath.Join(tmpDir, "agents.json")
+	if err := os.WriteFile(agentStorePath, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	personalSkillsDir := filepath.Join(tmpDir, "personal-skills")
+	writeTestSkill(t, filepath.Join(personalSkillsDir, "managed-skill"), "managed-skill", "Packaged", "Packaged prompt")
+	manager := NewManager(ManagerConfig{AgentStorePath: agentStorePath, PersonalSkillsDir: personalSkillsDir})
+	if skill, found, err := manager.ResolvePersonalSkillByName("managed-skill"); err != nil || !found || skill.Source != SourcePersonal {
+		t.Fatalf("personal resolution = %+v, %v, %v", skill, found, err)
+	}
+	writeTestSkill(t, filepath.Join(tmpDir, "agents", "skills", "managed-skill"), "managed-skill", "Repository", "Repository prompt")
+	if _, found, err := manager.ResolvePersonalSkillByName("managed-skill"); !errors.Is(err, ErrSkillSourceConflict) || found {
+		t.Fatalf("shadowed personal resolution = %v, %v", found, err)
+	}
+}
+
+func TestPersonalSkillResolutionDeduplicatesSameCompatibilityPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentStorePath := filepath.Join(tmpDir, "agents.json")
+	if err := os.WriteFile(agentStorePath, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	personalSkillsDir := filepath.Join(tmpDir, ".agents", "skills")
+	writeTestSkill(t, filepath.Join(personalSkillsDir, "managed-skill"), "managed-skill", "Packaged", "Packaged prompt")
+	manager := NewManager(ManagerConfig{AgentStorePath: agentStorePath, PersonalSkillsDir: personalSkillsDir})
+	manager.SetPersonalSkillAvailability(func(_ string, skill Skill) (bool, bool) {
+		return skill.Name == "managed-skill", true
+	})
+
+	personal, found, err := manager.ResolvePersonalSkillByName("managed-skill")
+	if err != nil || !found || personal.Source != SourcePersonal {
+		t.Fatalf("personal resolution = %+v, %t, %v", personal, found, err)
+	}
+	runtimeSkill, found, err := manager.ResolveSkillByName("managed-skill")
+	if err != nil || !found || runtimeSkill.Source != SourcePersonal {
+		t.Fatalf("runtime resolution = %+v, %t, %v", runtimeSkill, found, err)
+	}
+	listed, err := manager.ListSkills("")
+	if err != nil || len(listed) != 1 || listed[0].Source != SourcePersonal {
+		t.Fatalf("listed skills = %+v, %v", listed, err)
+	}
+}
+
 func TestListSkills_DefaultDisabledWithoutRegistry(t *testing.T) {
 	tmpDir := t.TempDir()
 	agentStorePath := filepath.Join(tmpDir, "agents.json")

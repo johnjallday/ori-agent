@@ -73,7 +73,8 @@ func EvaluateGroupRequirementLifecycle(project *Workspace, lookup func(string) (
 	link := project.GetAssistantProjectLink()
 	if lookup == nil || snapshot.ProgramKey == nil || project.ParentID != snapshot.HomeWorkspaceID || link == nil ||
 		link.ID != snapshot.ProjectLinkID || link.StationWorkspaceID != snapshot.HomeWorkspaceID ||
-		link.Key.Normalize() != snapshot.ProgramKey.Normalize() {
+		link.Key.Normalize() != snapshot.ProgramKey.Normalize() || !sameAssistantHomeOwner(link.HomeProvider, snapshot.HomeProvider) ||
+		!sameAssistantProjectOwner(link.ProjectProvider, snapshot.ProjectProvider) {
 		return unfulfilledGroupRequirementStatus(status)
 	}
 	home, err := lookup(snapshot.HomeWorkspaceID)
@@ -81,12 +82,27 @@ func EvaluateGroupRequirementLifecycle(project *Workspace, lookup func(string) (
 		return unfulfilledGroupRequirementStatus(status)
 	}
 	homeState := home.GetAssistantProgramState()
-	if homeState == nil || homeState.Key.Normalize() != snapshot.ProgramKey.Normalize() || !containsAssistantProjectID(homeState.LinkedProjectIDs, project.ID) {
+	if homeState == nil || homeState.Key.Normalize() != snapshot.ProgramKey.Normalize() ||
+		!sameAssistantHomeOwner(homeState.HomeProvider, snapshot.HomeProvider) || !containsAssistantProjectID(homeState.LinkedProjectIDs, project.ID) {
 		return unfulfilledGroupRequirementStatus(status)
 	}
 	status.State = GroupRequirementStatusReadyGrouped
 	status.Summary = "This project is connected to its recorded Assistant Program Home."
 	return status
+}
+
+func sameAssistantHomeOwner(left, right *AssistantProgramHomeOwner) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
+}
+
+func sameAssistantProjectOwner(left, right *AssistantProjectProviderOwner) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
 
 func unfulfilledGroupRequirementStatus(status *GroupRequirementLifecycleStatus) *GroupRequirementLifecycleStatus {

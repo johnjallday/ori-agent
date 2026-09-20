@@ -49,6 +49,17 @@
       .filter(Boolean);
   }
 
+  function packagedSkillLabels(entry) {
+    const names = new Set();
+    for (const role of Array.isArray(entry?.home_roles) ? entry.home_roles : []) {
+      for (const skill of Array.isArray(role?.skills) ? role.skills : []) {
+        const name = String(skill || '').trim();
+        if (name) names.add(name);
+      }
+    }
+    return [...names].sort();
+  }
+
   function providerLabel(entry) {
     const provider = entry?.provider;
     if (!provider) return '';
@@ -200,9 +211,14 @@
     const required = roleLabels(entry, true);
     const optional = roleLabels(entry, false);
     const projectRoles = projectRoleLabels(entry);
+    const skills = packagedSkillLabels(entry);
+    const provider = providerLabel(entry);
     return [
       required.length ? `Set up after: ${required.join(', ')} (required)` : '',
       optional.length ? `Optional: ${optional.join(', ')}` : '',
+      skills.length
+        ? `Packaged skills: ${skills.join(', ')}${provider ? ` · source ${provider}` : ''}. Installed with the plugin; enabled on a new agent only when you confirm its role setup.`
+        : '',
       projectRoles.length ? `Stays project-local: ${projectRoles.join(', ')}` : ''
     ].filter(Boolean);
   }
@@ -623,7 +639,7 @@
     return {
       creates: existingName
         ? `Reuses the existing group “${existingName}” unchanged; you choose who fills its empty roles.`
-        : 'Creates one group and fills the roles you choose — no project, schedule, or tool access.',
+        : 'Creates one group and fills the roles you choose — no project, schedule, root, MCP, runtime, or project access. Listed packaged skills are enabled only on each newly created role agent.',
       roles: roleSummary(entry).map(line =>
         required.length && line.startsWith('Set up after: ')
           ? `Group roles: ${required.join(', ')} (required)`

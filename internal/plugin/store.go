@@ -21,13 +21,25 @@ type InstalledPlugin struct {
 	InstallDir           string               `json:"install_dir"`
 	MCPServers           []string             `json:"mcp_servers,omitempty"` // namespaced names
 	Skills               []string             `json:"skills,omitempty"`
+	SkillOwnershipSchema int                  `json:"skill_ownership_schema,omitempty"`
 	WorkspaceSurfaces    *SurfaceContribution `json:"workspace_surfaces,omitempty"`
 	ResolvedArtifacts    []ResolvedArtifact   `json:"resolved_artifacts,omitempty"`
 	ResolvedBlueprints   []ResolvedBlueprint  `json:"resolved_blueprints,omitempty"`
 	ComponentFingerprint string               `json:"component_fingerprint,omitempty"`
 	Generation           uint64               `json:"generation,omitempty"`
+	ContentGeneration    uint64               `json:"content_generation,omitempty"`
 	Enabled              bool                 `json:"enabled"`
 	InstalledAt          time.Time            `json:"installed_at"`
+}
+
+// EvidenceGeneration is stable across enable/disable runtime epochs and changes
+// only when installed content is replaced. Older records fall back to their
+// original generation value.
+func (plugin InstalledPlugin) EvidenceGeneration() uint64 {
+	if plugin.ContentGeneration > 0 {
+		return plugin.ContentGeneration
+	}
+	return plugin.Generation
 }
 
 // Store is the JSON-backed installed-plugins registry. Components owned by a

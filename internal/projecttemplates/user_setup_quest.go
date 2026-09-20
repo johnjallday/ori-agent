@@ -247,7 +247,8 @@ func normalizeUserSetupQuest(raw json.RawMessage, template Template) (*UserSetup
 	if quest.Declaration.ExpectedBlueprintID != template.ID {
 		return nil, fmt.Errorf("%w: expected_blueprint_id must match this template", ErrInvalidUserSetupQuest)
 	}
-	if template.AssistantProgram == nil || quest.Declaration.ExpectedAssistantProgramID != template.AssistantProgram.ID {
+	programID, _, ok := template.AssistantProgramTarget()
+	if !ok || quest.Declaration.ExpectedAssistantProgramID != programID {
 		return nil, fmt.Errorf("%w: expected_assistant_program_id must match this template", ErrInvalidUserSetupQuest)
 	}
 	eligibility := EvaluateUserSetupQuestEligibility(template)
@@ -277,8 +278,14 @@ func EvaluateUserSetupQuestEligibility(template Template) UserSetupQuestEligibil
 	} else if !hasConstructibleUserQuestMode(template) {
 		add("constructible_project_required", "The connection needs an attach extension or a real skeleton and matching project entry file.")
 	}
-	if template.AssistantProgram == nil || template.HasInvalidAssistantProgram() || template.AssistantProgram.SchemaVersion != workspace.AssistantProgramSchemaVersion {
-		add("assistant_program_required", "Add a valid current Assistant Program with required Home and project roles.")
+	_, _, programOK := template.AssistantProgramTarget()
+	combinedProgramOK := template.AssistantProgram != nil &&
+		template.AssistantProgram.SchemaVersion == workspace.AssistantProgramSchemaVersion
+	splitProgramOK := template.AssistantProject != nil &&
+		template.AssistantProject.SchemaVersion == AssistantProjectSchemaVersion &&
+		template.AssistantProject.Home.HomeSchemaVersion == AssistantProgramHomeSchemaVersion
+	if !programOK || (!combinedProgramOK && !splitProgramOK) {
+		add("assistant_program_required", "Add a valid current Assistant Program Home target and project roles.")
 	}
 	fileOnly := false
 	if template.RuntimeRequirements != nil && !template.HasInvalidRuntimeRequirements() {
@@ -369,10 +376,14 @@ func NewUserSetupQuest(template Template, current *UserSetupQuest, draft UserSet
 		}
 		steps[index] = specialist.SetupJourneyStep{ID: stepIDs[index], Kind: kind, Title: draft.Steps[index].Title, Description: draft.Steps[index].Description}
 	}
+	programID, _, ok := template.AssistantProgramTarget()
+	if !ok {
+		return nil, fmt.Errorf("%w: template prerequisites are incomplete", ErrInvalidUserSetupQuest)
+	}
 	declaration, err := specialist.NormalizeSetupJourney(specialist.SetupJourney{
 		SchemaVersion: specialist.SetupJourneySchemaVersion, Version: 1, ID: questID,
 		Title: draft.Title, Description: draft.Description, IntegrationKey: draft.IntegrationKey,
-		ExpectedBlueprintID: template.ID, ExpectedAssistantProgramID: template.AssistantProgram.ID,
+		ExpectedBlueprintID: template.ID, ExpectedAssistantProgramID: programID,
 		Steps: steps, WorkspaceLaunch: cloneUserQuestLaunch(draft.WorkspaceLaunch),
 	})
 	if err == nil && declaration.Shape() != specialist.SetupJourneyShapeProjectSetup {
@@ -410,7 +421,8 @@ func UserSetupQuestExecutionDigest(template Template) string {
 		TemplateID             string                                 `json:"template_id"`
 		AttachmentID           string                                 `json:"attachment_id"`
 		SkeletonDigest         string                                 `json:"skeleton_digest"`
-		AssistantProgram       *workspace.AssistantProgramDeclaration `json:"assistant_program"`
+		AssistantProgram       *workspace.AssistantProgramDeclaration `json:"assistant_program,omitempty"`
+		AssistantProject       *AssistantProjectDeclaration           `json:"assistant_project,omitempty"`
 		ProjectEntry           *ProjectEntry                          `json:"project_entry"`
 		ProjectConnection      *ProjectConnectionDeclaration          `json:"project_connection"`
 		RuntimeRequirements    *RuntimeRequirementsContract           `json:"runtime_requirements"`
@@ -431,7 +443,8 @@ func UserSetupQuestExecutionDigest(template Template) string {
 		attachmentID = template.UserSetupQuest.AttachmentID
 	}
 	encoded, err := json.Marshal(executionReferences{
-		TemplateID: template.ID, AttachmentID: attachmentID, SkeletonDigest: userQuestSkeletonDigest(template), AssistantProgram: template.AssistantProgram,
+		TemplateID: template.ID, AttachmentID: attachmentID, SkeletonDigest: userQuestSkeletonDigest(template),
+		AssistantProgram: template.AssistantProgram, AssistantProject: template.AssistantProject,
 		ProjectEntry: template.ProjectEntry, ProjectConnection: template.ProjectConnection,
 		RuntimeRequirements: template.RuntimeRequirements, SetupWizard: template.SetupWizard,
 		StarterTasks: template.StarterTasks, DirectoryRequirements: template.DirectoryRequirements,

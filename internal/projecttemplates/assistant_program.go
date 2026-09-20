@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -38,6 +39,13 @@ func normalizeAssistantProgram(raw json.RawMessage) (*workspace.AssistantProgram
 }
 
 func normalizeAndValidateAssistantProgram(declaration *workspace.AssistantProgramDeclaration) error {
+	return normalizeAndValidateAssistantProgramScopes(declaration, []workspace.AssistantRoleScope{
+		workspace.AssistantRoleScopeHome,
+		workspace.AssistantRoleScopeProject,
+	})
+}
+
+func normalizeAndValidateAssistantProgramScopes(declaration *workspace.AssistantProgramDeclaration, expectedScopes []workspace.AssistantRoleScope) error {
 	if declaration == nil {
 		return fmt.Errorf("%w: declaration is required", ErrInvalidAssistantProgram)
 	}
@@ -142,7 +150,24 @@ func normalizeAndValidateAssistantProgram(declaration *workspace.AssistantProgra
 			return fmt.Errorf("%w: exactly one role must be primary", ErrInvalidAssistantProgram)
 		}
 	} else {
-		for _, scope := range []workspace.AssistantRoleScope{workspace.AssistantRoleScopeHome, workspace.AssistantRoleScopeProject} {
+		expected := make(map[workspace.AssistantRoleScope]struct{}, len(expectedScopes))
+		for _, scope := range expectedScopes {
+			if scope != workspace.AssistantRoleScopeHome && scope != workspace.AssistantRoleScopeProject {
+				return fmt.Errorf("%w: invalid expected role scope %q", ErrInvalidAssistantProgram, scope)
+			}
+			expected[scope] = struct{}{}
+		}
+		if len(expected) == 0 {
+			return fmt.Errorf("%w: at least one role scope is required", ErrInvalidAssistantProgram)
+		}
+		for scope, count := range rolesByScope {
+			if count > 0 {
+				if _, allowed := expected[scope]; !allowed {
+					return fmt.Errorf("%w: scope %q is not owned by this declaration", ErrInvalidAssistantProgram, scope)
+				}
+			}
+		}
+		for scope := range expected {
 			if rolesByScope[scope] == 0 || requiredByScope[scope] == 0 || primaryByScope[scope] != 1 {
 				return fmt.Errorf("%w: scope %q requires roles, one required role, and one primary", ErrInvalidAssistantProgram, scope)
 			}
@@ -210,6 +235,9 @@ func boundedAssistantText(field, value string, limit int, required bool) (string
 	value = strings.TrimSpace(value)
 	if required && value == "" {
 		return "", fmt.Errorf("%w: %s is required", ErrInvalidAssistantProgram, field)
+	}
+	if !utf8.ValidString(value) {
+		return "", fmt.Errorf("%w: %s is not valid UTF-8", ErrInvalidAssistantProgram, field)
 	}
 	if len(value) > limit {
 		return "", fmt.Errorf("%w: %s exceeds %d bytes", ErrInvalidAssistantProgram, field, limit)

@@ -61,7 +61,11 @@ func (service *AssistantProgramStore) SetProjectRoleBindings(projectID string, e
 		if currentLink.ProjectBindings.StateRevision != expectedRevision {
 			return ErrAssistantBindingVersionConflict
 		}
-		if err := validateAssistantRoleBindings(current, state.Declaration, AssistantRoleScopeProject, bindings); err != nil {
+		declaration := state.Declaration
+		if len(currentLink.ProjectRoles) > 0 {
+			declaration = &AssistantProgramDeclaration{Roles: currentLink.ProjectRoles}
+		}
+		if err := validateAssistantRoleBindings(current, declaration, AssistantRoleScopeProject, bindings); err != nil {
 			return err
 		}
 		currentLink.ProjectBindings = AssistantRoleBindingSet{

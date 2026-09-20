@@ -53,8 +53,17 @@ type LoadoutResolver interface {
 // a workspace holds), which has no per-agent skill state to read or write.
 type AgentFolderResolver func(agentName string) (dir string, handled bool)
 
+// PersonalSkillAvailability identifies managed personal skills and whether
+// their exact owning package is currently available. Managed names are also
+// reserved against higher-precedence sources so runtime resolution cannot
+// silently switch to unrelated instructions after staffing.
+type PersonalSkillAvailability func(agentName string, skill Skill) (managed bool, available bool)
+
 // ErrNoAgentFolder refuses per-agent skill state for an agent without a folder.
-var ErrNoAgentFolder = errors.New("agent has no folder of its own")
+var (
+	ErrNoAgentFolder       = errors.New("agent has no folder of its own")
+	ErrSkillSourceConflict = errors.New("a higher-precedence skill shadows the personal skill")
+)
 
 type Manager struct {
 	agentStorePath    string
@@ -63,12 +72,17 @@ type Manager struct {
 	configManager     *config.Manager
 	loadoutResolver   LoadoutResolver
 	agentFolder       AgentFolderResolver
+	personalAvailable PersonalSkillAvailability
 }
 
 // SetAgentFolderResolver makes per-agent skill state follow the agent: the
 // user's agents live in the Workspace Directory, not beside AgentStorePath.
 func (m *Manager) SetAgentFolderResolver(resolver AgentFolderResolver) {
 	m.agentFolder = resolver
+}
+
+func (m *Manager) SetPersonalSkillAvailability(check PersonalSkillAvailability) {
+	m.personalAvailable = check
 }
 
 // agentDir returns the folder holding one agent's skill state and skills.
@@ -159,21 +173,49 @@ func (m *Manager) ResolveSkillByName(skillName string) (*Skill, bool, error) {
 		return nil, false, nil
 	}
 
-	sources := []func(bool) ([]Skill, error){
-		m.loadRepoSkills,
-		m.loadCompatSkills,
-		m.loadPersonalSkills,
+	personalSkills, err := m.loadPersonalSkills(true)
+	if err != nil {
+		return nil, false, err
 	}
-	for _, loadFn := range sources {
-		skills, err := loadFn(true)
-		if err != nil {
-			return nil, false, err
+	var personal *Skill
+	managed, available := false, true
+	for index := range personalSkills {
+		if strings.ToLower(strings.TrimSpace(personalSkills[index].Name)) != target {
+			continue
+		}
+		candidate := personalSkills[index]
+		personal = &candidate
+		if m.personalAvailable != nil {
+			managed, available = m.personalAvailable("", candidate)
+		}
+		break
+	}
+
+	for _, loadFn := range []func(bool) ([]Skill, error){m.loadRepoSkills, m.loadCompatSkills} {
+		skills, loadErr := loadFn(true)
+		if loadErr != nil {
+			return nil, false, loadErr
 		}
 		for _, skill := range skills {
-			if strings.ToLower(strings.TrimSpace(skill.Name)) == target {
-				return &skill, true, nil
+			if strings.ToLower(strings.TrimSpace(skill.Name)) != target {
+				continue
 			}
+			// Configured compatibility and personal roots can resolve to the same
+			// physical tree. One physical file is not a higher-precedence shadow.
+			if personal != nil && sameSkillFile(skill.Path, personal.Path) {
+				continue
+			}
+			if managed {
+				return nil, false, ErrSkillSourceConflict
+			}
+			return &skill, true, nil
 		}
+	}
+	if personal != nil {
+		if managed && !available {
+			return nil, false, nil
+		}
+		return personal, true, nil
 	}
 
 	if m.externalAgents != nil && m.configManager != nil {
@@ -214,6 +256,69 @@ func (m *Manager) ResolveSkillByName(skillName string) (*Skill, bool, error) {
 	return nil, false, nil
 }
 
+// ResolvePersonalSkillByName resolves only an unshadowed personal-directory
+// skill. Plugin-owned role setup uses this path so a repository or .agents copy
+// with the same name cannot silently replace the reviewed packaged source.
+func (m *Manager) ResolvePersonalSkillByName(skillName string) (*Skill, bool, error) {
+	target := strings.ToLower(strings.TrimSpace(skillName))
+	if target == "" {
+		return nil, false, nil
+	}
+	personalSkills, err := m.loadPersonalSkills(true)
+	if err != nil {
+		return nil, false, err
+	}
+	var personal *Skill
+	for index := range personalSkills {
+		if strings.ToLower(strings.TrimSpace(personalSkills[index].Name)) == target {
+			candidate := personalSkills[index]
+			personal = &candidate
+			break
+		}
+	}
+	for _, load := range []func(bool) ([]Skill, error){m.loadRepoSkills, m.loadCompatSkills} {
+		entries, loadErr := load(false)
+		if loadErr != nil {
+			return nil, false, loadErr
+		}
+		for _, candidate := range entries {
+			if strings.ToLower(strings.TrimSpace(candidate.Name)) != target {
+				continue
+			}
+			if personal != nil && sameSkillFile(candidate.Path, personal.Path) {
+				continue
+			}
+			return nil, false, ErrSkillSourceConflict
+		}
+	}
+	if personal != nil {
+		if m.personalAvailable != nil {
+			_, available := m.personalAvailable("", *personal)
+			if !available {
+				return nil, false, nil
+			}
+		}
+		return personal, true, nil
+	}
+	return nil, false, nil
+}
+
+func sameSkillFile(left, right string) bool {
+	left = strings.TrimSpace(left)
+	right = strings.TrimSpace(right)
+	if left == "" || right == "" {
+		return false
+	}
+	leftInfo, leftErr := os.Stat(left)
+	rightInfo, rightErr := os.Stat(right)
+	if leftErr == nil && rightErr == nil {
+		return os.SameFile(leftInfo, rightInfo)
+	}
+	leftAbsolute, leftAbsErr := filepath.Abs(left)
+	rightAbsolute, rightAbsErr := filepath.Abs(right)
+	return leftAbsErr == nil && rightAbsErr == nil && filepath.Clean(leftAbsolute) == filepath.Clean(rightAbsolute)
+}
+
 // ResolveSkillsByNames resolves multiple skills by name, returning found skills
 // and a list of names that could not be resolved.
 func (m *Manager) ResolveSkillsByNames(skillNames []string) ([]Skill, []string, error) {
@@ -251,6 +356,20 @@ func (m *Manager) listSkills(agentName string, includePrompt bool) ([]Skill, err
 		return nil, err
 	}
 
+	type personalStatus struct {
+		managed   bool
+		available bool
+		path      string
+	}
+	personalStatuses := make(map[string]personalStatus, len(personalSkills))
+	for _, skill := range personalSkills {
+		status := personalStatus{available: true, path: skill.Path}
+		if m.personalAvailable != nil {
+			status.managed, status.available = m.personalAvailable(agentName, skill)
+		}
+		personalStatuses[strings.ToLower(skill.Name)] = status
+	}
+
 	skillMap := make(map[string]Skill)
 	conflictMap := make(map[string]*SkillConflict)
 
@@ -260,6 +379,13 @@ func (m *Manager) listSkills(agentName string, includePrompt bool) ([]Skill, err
 			key := strings.ToLower(skill.Name)
 			if key == "" {
 				continue
+			}
+			status, hasPersonal := personalStatuses[key]
+			if hasPersonal && sameSkillFile(skill.Path, status.path) {
+				continue
+			}
+			if status.managed {
+				return nil, ErrSkillSourceConflict
 			}
 			if existing, exists := skillMap[key]; exists {
 				conflict := conflictMap[key]
@@ -289,7 +415,7 @@ func (m *Manager) listSkills(agentName string, includePrompt bool) ([]Skill, err
 
 	for _, skill := range personalSkills {
 		key := strings.ToLower(skill.Name)
-		if key == "" {
+		if key == "" || !personalStatuses[key].available {
 			continue
 		}
 		if _, exists := skillMap[key]; exists {

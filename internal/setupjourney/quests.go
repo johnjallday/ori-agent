@@ -170,8 +170,8 @@ func installedIntegrationQuests(entry reviewedintegration.Entry, installed []plu
 		seen[d.ID] = true
 		found := false
 		for _, b := range current.ResolvedBlueprints {
-			if b.ID == d.ExpectedBlueprintID && b.Template.SetupQuestID == d.ID &&
-				b.Template.AssistantProgram != nil && b.Template.AssistantProgram.ID == d.ExpectedAssistantProgramID {
+			programID, _, programOK := b.Template.AssistantProgramTarget()
+			if b.ID == d.ExpectedBlueprintID && b.Template.SetupQuestID == d.ID && programOK && programID == d.ExpectedAssistantProgramID {
 				found = true
 			}
 		}
@@ -337,8 +337,9 @@ func validUserTemplateQuest(template projecttemplates.Template) bool {
 		return false
 	}
 	declaration := template.UserSetupQuest.Declaration
-	if declaration.OwnerPluginID != "" || declaration.ExpectedBlueprintID != template.ID || template.AssistantProgram == nil ||
-		declaration.ExpectedAssistantProgramID != template.AssistantProgram.ID {
+	programID, _, programOK := template.AssistantProgramTarget()
+	if declaration.OwnerPluginID != "" || declaration.ExpectedBlueprintID != template.ID || !programOK ||
+		declaration.ExpectedAssistantProgramID != programID {
 		return false
 	}
 	_, reviewed := reviewedintegration.Get(declaration.IntegrationKey)

@@ -132,10 +132,12 @@ func (h *Handler) handleTemplateAgentPlan(w http.ResponseWriter, r *http.Request
 			}
 		}
 	}
-	plan := h.buildTemplateAgentPlanForOwner(tpl, ownerUserID)
-	plan.GroupRequirement = h.buildTemplateGroupRequirementPlan(
-		sourceTemplate, req.GroupComposition, ownerUserID, ownerErr,
+	effectiveTemplate := tpl
+	groupPlan := h.buildTemplateGroupRequirementPlan(
+		sourceTemplate, req.GroupComposition, ownerUserID, ownerErr, &effectiveTemplate,
 	)
+	plan := h.buildTemplateAgentPlanForOwner(effectiveTemplate, ownerUserID)
+	plan.GroupRequirement = groupPlan
 	_ = orihttp.RespondSuccess(w, finalizeTemplateAgentPlan(plan))
 }
 

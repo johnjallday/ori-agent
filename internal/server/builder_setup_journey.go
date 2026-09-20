@@ -181,6 +181,16 @@ func (b *ServerBuilder) initializeSetupJourney() {
 			b.workspaceStore, b.st, serverStaffingToolGrants{builder: b},
 			b.systemModel, b.validateModel,
 		)
+		if b.pluginHandler != nil {
+			staffingAdapter.SetIndependentProviderAvailability(func(home *workspace.AssistantProgramHomeOwner, project *workspace.AssistantProjectProviderOwner) (bool, bool) {
+				installed, listErr := b.pluginHandler.Manager().List()
+				if listErr != nil {
+					return false, false
+				}
+				return plugin.IndependentHomeProviderEvidenceAvailable(installed, home),
+					plugin.IndependentProjectProviderEvidenceAvailable(installed, project)
+			})
+		}
 		readers[specialist.SetupStepAssistantProgramStaffing] = staffingAdapter
 		if b.sessionHandler != nil {
 			b.sessionHandler.SetAssistantReviewedStaffer(staffingAdapter.StaffFromReviewedWorkspaceSetup)
@@ -378,9 +388,38 @@ func (g serverStaffingToolGrants) Available(skillName string) bool {
 	return err == nil && found
 }
 
+func (g serverStaffingToolGrants) AvailablePersonal(skillName string) bool {
+	if g.builder == nil || g.builder.skillsManager == nil {
+		return false
+	}
+	_, found, err := g.builder.skillsManager.ResolvePersonalSkillByName(strings.TrimSpace(skillName))
+	return err == nil && found
+}
+
 func (g serverStaffingToolGrants) Grant(agentName, skillName string) error {
-	if !g.Available(skillName) {
+	if g.builder == nil || g.builder.skillsManager == nil {
 		return fmt.Errorf("staffing tool grant is unavailable")
+	}
+	_, found, err := g.builder.skillsManager.ResolveSkillByName(strings.TrimSpace(skillName))
+	if err != nil {
+		return fmt.Errorf("resolve staffing skill: %w", err)
+	}
+	if !found {
+		return fmt.Errorf("staffing tool grant is unavailable")
+	}
+	return g.builder.skillsManager.SetSkillEnabled(agentName, skillName, true)
+}
+
+func (g serverStaffingToolGrants) GrantPersonal(agentName, skillName string) error {
+	if g.builder == nil || g.builder.skillsManager == nil {
+		return fmt.Errorf("personal staffing tool grant is unavailable")
+	}
+	_, found, err := g.builder.skillsManager.ResolvePersonalSkillByName(strings.TrimSpace(skillName))
+	if err != nil {
+		return fmt.Errorf("resolve personal staffing skill: %w", err)
+	}
+	if !found {
+		return fmt.Errorf("personal staffing tool grant is unavailable")
 	}
 	return g.builder.skillsManager.SetSkillEnabled(agentName, skillName, true)
 }
@@ -456,8 +495,9 @@ func (r installedProjectTemplateResolver) ResolveProjectTemplate(ctx context.Con
 			return projecttemplates.Template{}, errors.New("project template owner is unavailable")
 		}
 		template, err := r.userTemplates.FindUserSetupQuestTemplate(ctx, scope.UserTemplateID)
-		if err != nil || template.UserSetupQuest == nil || template.AssistantProgram == nil ||
-			template.ID != scope.ExpectedBlueprintID || template.AssistantProgram.ID != scope.ExpectedAssistantProgramID {
+		programID, _, programOK := template.AssistantProgramTarget()
+		if err != nil || template.UserSetupQuest == nil || !programOK ||
+			template.ID != scope.ExpectedBlueprintID || programID != scope.ExpectedAssistantProgramID {
 			return projecttemplates.Template{}, errors.New("project template owner is unavailable")
 		}
 		return template, nil
@@ -477,8 +517,9 @@ func (r installedProjectTemplateResolver) ResolveProjectTemplate(ctx context.Con
 		}
 		for _, resolved := range candidate.ResolvedBlueprints {
 			template := resolved.Template
+			programID, _, programOK := template.AssistantProgramTarget()
 			if template.PluginOwner == nil || template.PluginOwner.BlueprintID != scope.ExpectedBlueprintID ||
-				template.AssistantProgram == nil || template.AssistantProgram.ID != scope.ExpectedAssistantProgramID {
+				!programOK || programID != scope.ExpectedAssistantProgramID {
 				continue
 			}
 			if found != nil {

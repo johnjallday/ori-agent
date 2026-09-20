@@ -249,6 +249,16 @@ func TestQuestBlueprintReferencesStayWithinTheirOwnerAndProgram(t *testing.T) {
 	if err := validateQuestBlueprints(c, makeBlueprint()); err != nil {
 		t.Fatal(err)
 	}
+	split := makeBlueprint()
+	split[0].Template.AssistantProgram = nil
+	split[0].Template.AssistantProject = &projecttemplates.AssistantProjectDeclaration{
+		SchemaVersion: projecttemplates.AssistantProjectSchemaVersion, Version: 1, ID: "project-team",
+		Home:  projecttemplates.AssistantProjectHomeReference{ProviderPluginID: "home-owner", ProgramID: q.ExpectedAssistantProgramID, HomeSchemaVersion: 1, MinHomeVersion: 1, MaxHomeVersion: 1},
+		Roles: []projecttemplates.AssistantProjectRole{{ID: "operator", Label: "Operator", Required: true, Primary: true, SystemPrompt: "Operate this project."}},
+	}
+	if err := validateQuestBlueprints(c, split); err != nil {
+		t.Fatalf("split project quest reference: %v", err)
+	}
 	cases := map[string]func([]ResolvedBlueprint){
 		"foreign quest":          func(b []ResolvedBlueprint) { b[0].Template.SetupQuestID = "other" },
 		"missing reference":      func(b []ResolvedBlueprint) { b[0].Template.SetupQuestID = "" },

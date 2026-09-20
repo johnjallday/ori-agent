@@ -22,6 +22,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
 	"github.com/johnjallday/ori-agent/internal/pathselection"
+	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
@@ -609,7 +610,31 @@ func (b *ServerBuilder) initializeTaskExecution() {
 			workspace.NewAssistantLearningStore(b.workspaceFileStore),
 			b.assistantReflectionModel,
 		)
-		b.taskScheduler.SetAssistantReflectionTrigger(assistantReflectionTrigger{service: reflectionService})
+		b.taskScheduler.SetAssistantReflectionTrigger(assistantReflectionTrigger{
+			service: reflectionService,
+			available: func(stationID string) bool {
+				station, err := b.workspaceStore.Get(stationID)
+				if err != nil || station == nil {
+					return false
+				}
+				state := station.GetAssistantProgramState()
+				if state == nil {
+					return false
+				}
+				owner := state.HomeProvider
+				if owner == nil && state.GroupTemplate != nil {
+					owner = state.GroupTemplate.ProgramHomeOwner
+				}
+				if owner == nil {
+					return state.PluginAvailable
+				}
+				if b.pluginHandler == nil {
+					return false
+				}
+				installed, listErr := b.pluginHandler.Manager().List()
+				return listErr == nil && plugin.IndependentHomeProviderEvidenceAvailable(installed, owner)
+			},
+		})
 	}
 }
 

@@ -14,10 +14,12 @@ import (
 )
 
 const (
-	GroupRequirementSchemaVersion      = 1
-	StandaloneCompositionSchemaVersion = 1
-	maxGroupRequirementBytes           = 4 << 10
-	maxStandaloneCompositionBytes      = 64 << 10
+	GroupRequirementSchemaVersion           = 1
+	SplitGroupRequirementSchemaVersion      = 2
+	StandaloneCompositionSchemaVersion      = 1
+	SplitStandaloneCompositionSchemaVersion = 2
+	maxGroupRequirementBytes                = 4 << 10
+	maxStandaloneCompositionBytes           = 64 << 10
 )
 
 var (
@@ -47,6 +49,7 @@ type GroupRequirement struct {
 	SchemaVersion      int               `json:"schema_version"`
 	Policy             GroupPolicy       `json:"policy"`
 	AssistantProgramID string            `json:"assistant_program_id,omitempty"`
+	AssistantProjectID string            `json:"assistant_project_id,omitempty"`
 	MissingHome        MissingHomePolicy `json:"missing_home,omitempty"`
 	DefaultHomeName    string            `json:"default_home_name,omitempty"`
 }
@@ -100,19 +103,33 @@ func normalizeGroupRequirement(raw json.RawMessage) (*GroupRequirement, error) {
 	if err := decodeStrictDeclaration(trimmed, &requirement); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidGroupRequirement, err)
 	}
-	if requirement.SchemaVersion != GroupRequirementSchemaVersion {
-		return nil, fmt.Errorf("%w: schema_version must be %d", ErrInvalidGroupRequirement, GroupRequirementSchemaVersion)
+	if requirement.SchemaVersion != GroupRequirementSchemaVersion && requirement.SchemaVersion != SplitGroupRequirementSchemaVersion {
+		return nil, fmt.Errorf("%w: unsupported schema_version %d", ErrInvalidGroupRequirement, requirement.SchemaVersion)
 	}
 	requirement.AssistantProgramID = normalizeAssistantProgramID(requirement.AssistantProgramID)
+	requirement.AssistantProjectID = normalizeAssistantProgramID(requirement.AssistantProjectID)
 	requirement.DefaultHomeName = strings.TrimSpace(requirement.DefaultHomeName)
 	switch requirement.Policy {
 	case GroupPolicyNone:
-		if requirement.AssistantProgramID != "" || requirement.MissingHome != "" || requirement.DefaultHomeName != "" {
+		if requirement.MissingHome != "" || requirement.DefaultHomeName != "" || requirement.AssistantProgramID != "" {
 			return nil, fmt.Errorf("%w: policy none cannot declare a Home target", ErrInvalidGroupRequirement)
 		}
+		if requirement.SchemaVersion == GroupRequirementSchemaVersion && requirement.AssistantProjectID != "" {
+			return nil, fmt.Errorf("%w: schema 1 policy none cannot declare a project team", ErrInvalidGroupRequirement)
+		}
+		if requirement.SchemaVersion == SplitGroupRequirementSchemaVersion && !assistantProgramIDPattern.MatchString(requirement.AssistantProjectID) {
+			return nil, fmt.Errorf("%w: schema 2 requires assistant_project_id", ErrInvalidGroupRequirement)
+		}
 	case GroupPolicyRecommended, GroupPolicyRequired:
-		if !assistantProgramIDPattern.MatchString(requirement.AssistantProgramID) {
-			return nil, fmt.Errorf("%w: assistant_program_id must be a lowercase stable identifier", ErrInvalidGroupRequirement)
+		switch requirement.SchemaVersion {
+		case GroupRequirementSchemaVersion:
+			if !assistantProgramIDPattern.MatchString(requirement.AssistantProgramID) || requirement.AssistantProjectID != "" {
+				return nil, fmt.Errorf("%w: schema 1 requires only assistant_program_id", ErrInvalidGroupRequirement)
+			}
+		case SplitGroupRequirementSchemaVersion:
+			if !assistantProgramIDPattern.MatchString(requirement.AssistantProjectID) || requirement.AssistantProgramID != "" {
+				return nil, fmt.Errorf("%w: schema 2 requires only assistant_project_id", ErrInvalidGroupRequirement)
+			}
 		}
 		switch requirement.MissingHome {
 		case MissingHomeOfferCreate:
@@ -154,7 +171,7 @@ func validateHomeDisplayName(value string) error {
 	return nil
 }
 
-func normalizeStandaloneComposition(raw json.RawMessage, program *workspace.AssistantProgramDeclaration, projectConnection *ProjectConnectionDeclaration, agents []AgentSpec, runtime *RuntimeRequirementsContract) (*StandaloneComposition, error) {
+func normalizeStandaloneComposition(raw json.RawMessage, program *workspace.AssistantProgramDeclaration, project *AssistantProjectDeclaration, projectConnection *ProjectConnectionDeclaration, agents []AgentSpec, runtime *RuntimeRequirementsContract) (*StandaloneComposition, error) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		return nil, nil
@@ -166,11 +183,14 @@ func normalizeStandaloneComposition(raw json.RawMessage, program *workspace.Assi
 	if err := decodeStrictDeclaration(trimmed, &composition); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidStandaloneComposition, err)
 	}
-	if composition.SchemaVersion != StandaloneCompositionSchemaVersion {
-		return nil, fmt.Errorf("%w: schema_version must be %d", ErrInvalidStandaloneComposition, StandaloneCompositionSchemaVersion)
+	if composition.SchemaVersion != StandaloneCompositionSchemaVersion && composition.SchemaVersion != SplitStandaloneCompositionSchemaVersion {
+		return nil, fmt.Errorf("%w: unsupported schema_version %d", ErrInvalidStandaloneComposition, composition.SchemaVersion)
 	}
-	if program == nil || program.SchemaVersion != workspace.AssistantProgramSchemaVersion {
-		return nil, fmt.Errorf("%w: Assistant Program schema v2 is required", ErrInvalidStandaloneComposition)
+	if composition.SchemaVersion == StandaloneCompositionSchemaVersion && (program == nil || project != nil || program.SchemaVersion != workspace.AssistantProgramSchemaVersion) {
+		return nil, fmt.Errorf("%w: schema 1 requires combined Assistant Program schema v2", ErrInvalidStandaloneComposition)
+	}
+	if composition.SchemaVersion == SplitStandaloneCompositionSchemaVersion && (project == nil || program != nil) {
+		return nil, fmt.Errorf("%w: schema 2 requires one split assistant_project", ErrInvalidStandaloneComposition)
 	}
 	if projectConnection == nil || len(projectConnection.SupportedModes) == 0 {
 		return nil, fmt.Errorf("%w: a project connection is required", ErrInvalidStandaloneComposition)
@@ -202,8 +222,14 @@ func normalizeStandaloneComposition(raw json.RawMessage, program *workspace.Assi
 		declared[role.RoleID] = *role
 	}
 
-	normalized := StandaloneComposition{SchemaVersion: StandaloneCompositionSchemaVersion}
-	for _, role := range program.Roles {
+	normalized := StandaloneComposition{SchemaVersion: composition.SchemaVersion}
+	var projectRoles []workspace.AssistantProgramRoleSpec
+	if project != nil {
+		projectRoles = project.ProgramRoles()
+	} else {
+		projectRoles = program.Roles
+	}
+	for _, role := range projectRoles {
 		if role.Scope != workspace.AssistantRoleScopeProject {
 			if _, invalid := declared[role.ID]; invalid {
 				return nil, fmt.Errorf("%w: Home role %q cannot be adapted", ErrInvalidStandaloneComposition, role.ID)
@@ -244,16 +270,21 @@ func decodeStrictDeclaration(raw []byte, target any) error {
 	return nil
 }
 
-func validateGroupComposition(requirement *GroupRequirement, composition *StandaloneComposition, program *workspace.AssistantProgramDeclaration) error {
+func validateGroupComposition(requirement *GroupRequirement, composition *StandaloneComposition, program *workspace.AssistantProgramDeclaration, project *AssistantProjectDeclaration) error {
 	if requirement == nil {
 		return nil
 	}
-	if requirement.IsGrouped() {
-		if program == nil || requirement.AssistantProgramID != normalizeAssistantProgramID(program.ID) {
+	switch requirement.SchemaVersion {
+	case GroupRequirementSchemaVersion:
+		if project != nil || (requirement.IsGrouped() && (program == nil || requirement.AssistantProgramID != normalizeAssistantProgramID(program.ID))) {
 			return fmt.Errorf("%w: assistant_program_id does not match a valid Assistant Program", ErrInvalidGroupRequirement)
 		}
+	case SplitGroupRequirementSchemaVersion:
+		if program != nil || project == nil || requirement.AssistantProjectID != normalizeAssistantProgramID(project.ID) {
+			return fmt.Errorf("%w: assistant_project_id does not match a valid project team", ErrInvalidGroupRequirement)
+		}
 	}
-	if (requirement.Policy == GroupPolicyNone || requirement.Policy == GroupPolicyRecommended) && program != nil && composition == nil {
+	if (requirement.Policy == GroupPolicyNone || requirement.Policy == GroupPolicyRecommended) && (program != nil || project != nil) && composition == nil {
 		return fmt.Errorf("%w: policy %s requires a valid standalone composition", ErrInvalidGroupRequirement, requirement.Policy)
 	}
 	return nil
@@ -266,7 +297,7 @@ func StandaloneTemplate(source Template) (Template, error) {
 	if source.GroupRequirement == nil || (source.GroupRequirement.Policy != GroupPolicyNone && source.GroupRequirement.Policy != GroupPolicyRecommended) {
 		return Template{}, fmt.Errorf("%w: template policy does not allow standalone composition", ErrInvalidGroupRequirement)
 	}
-	if source.AssistantProgram == nil {
+	if source.AssistantProgram == nil && source.AssistantProject == nil {
 		result := cloneTemplate(source)
 		result.SetupQuestID = ""
 		result.UserSetupQuest = nil
@@ -284,7 +315,13 @@ func StandaloneTemplate(source Template) (Template, error) {
 		roles[role.RoleID] = role
 	}
 	result.Agents = nil
-	for _, role := range source.AssistantProgram.Roles {
+	var projectRoles []workspace.AssistantProgramRoleSpec
+	if source.AssistantProject != nil {
+		projectRoles = source.AssistantProject.ProgramRoles()
+	} else {
+		projectRoles = source.AssistantProgram.Roles
+	}
+	for _, role := range projectRoles {
 		if role.Scope != workspace.AssistantRoleScopeProject {
 			continue
 		}
@@ -296,6 +333,14 @@ func StandaloneTemplate(source Template) (Template, error) {
 	}
 	result.AssistantProgram = nil
 	result.AssistantProgramError = ""
+	result.AssistantProject = nil
+	result.AssistantProjectError = ""
+	if source.GroupRequirement.SchemaVersion == SplitGroupRequirementSchemaVersion {
+		result.GroupRequirement = nil
+		result.GroupRequirementError = ""
+		result.StandaloneComposition = nil
+		result.StandaloneCompositionError = ""
+	}
 	result.SetupQuestID = ""
 	result.UserSetupQuest = nil
 	result.UserSetupQuestError = ""
@@ -331,7 +376,7 @@ func PreviewGroupRequirement(source Template, raw json.RawMessage) (GroupRequire
 	}
 	candidate := cloneTemplate(source)
 	candidate.GroupRequirement = requirement
-	if err := validateGroupComposition(requirement, candidate.StandaloneComposition, candidate.AssistantProgram); err != nil {
+	if err := validateGroupComposition(requirement, candidate.StandaloneComposition, candidate.AssistantProgram, candidate.AssistantProject); err != nil {
 		return GroupRequirementPreview{}, err
 	}
 	preview := GroupRequirementPreview{Label: "Preview — no workspace or Home created", Policy: requirement.Policy}
@@ -362,11 +407,15 @@ func PreviewGroupRequirement(source Template, raw json.RawMessage) (GroupRequire
 }
 
 func compositionProjection(template Template, standalone bool) CompositionProjection {
-	projection := CompositionProjection{Composition: "grouped", PreWorkspaceSetup: template.SetupQuestID != "" || template.UserSetupQuest != nil, AssistantProgram: template.AssistantProgram != nil}
+	projection := CompositionProjection{Composition: "grouped", PreWorkspaceSetup: template.SetupQuestID != "" || template.UserSetupQuest != nil, AssistantProgram: template.AssistantProgram != nil || template.AssistantProject != nil}
 	if standalone {
 		projection.Composition = "standalone"
 	}
-	if template.AssistantProgram != nil {
+	if template.AssistantProject != nil {
+		for _, role := range template.AssistantProject.Roles {
+			projection.ProjectRoles = append(projection.ProjectRoles, role.Label)
+		}
+	} else if template.AssistantProgram != nil {
 		for _, role := range template.AssistantProgram.Roles {
 			if role.Scope == workspace.AssistantRoleScopeProject {
 				projection.ProjectRoles = append(projection.ProjectRoles, role.Label)
@@ -411,12 +460,18 @@ func cloneTemplate(source Template) Template {
 	clone.RuntimeRequirements = workspace.CloneRuntimeRequirementsContract(source.RuntimeRequirements)
 	clone.SetupWizard = workspace.CloneSetupWizard(source.SetupWizard)
 	clone.AssistantProgram = workspace.CloneAssistantProgramDeclaration(source.AssistantProgram)
+	clone.AssistantProject = CloneAssistantProjectDeclaration(source.AssistantProject)
+	clone.ResolvedAssistantHome = workspace.CloneAssistantProgramDeclaration(source.ResolvedAssistantHome)
 	clone.GroupRequirement = CloneGroupRequirement(source.GroupRequirement)
 	clone.StandaloneComposition = CloneStandaloneComposition(source.StandaloneComposition)
 	clone.TemplateVariant = CloneTemplateVariant(source.TemplateVariant)
 	if source.PluginOwner != nil {
 		owner := source.PluginOwner.Clone()
 		clone.PluginOwner = &owner
+	}
+	if source.ProgramHomeOwner != nil {
+		owner := source.ProgramHomeOwner.Clone()
+		clone.ProgramHomeOwner = &owner
 	}
 	return clone
 }

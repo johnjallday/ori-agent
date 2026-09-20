@@ -5,6 +5,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // Sources is the authoritative input set a projection may be derived from.
@@ -66,6 +67,9 @@ func (s Sources) lookup(name string) (plugin.InstalledPlugin, bool) {
 func Derive(template projecttemplates.Template, sources Sources) Readiness {
 	ownership := DeriveOwnership(template)
 
+	if template.ProgramHomeOwner != nil {
+		return deriveProgramHomeOwned(template, sources).Normalize()
+	}
 	if template.PluginOwner != nil {
 		return derivePluginOwned(template, sources).Normalize()
 	}
@@ -89,6 +93,14 @@ func Derive(template projecttemplates.Template, sources Sources) Readiness {
 		return variantSourceReadiness(template).Normalize()
 	}
 
+	if template.AssistantProject != nil && template.TemplateVariant != nil {
+		if projectPlugin, present := sources.lookup(template.TemplateVariant.Source.PluginID); present {
+			if independent := independentHomeReadiness(template, projectPlugin, sources); independent != nil {
+				return independentHomeOutcome(template, *independent).Normalize()
+			}
+		}
+	}
+
 	if reference, ok := unsatisfiedHostReference(template, sources.Catalog); ok {
 		return Readiness{
 			State: StateUnavailable, Ownership: ownership, Reason: ReasonRuntimeProviderUnavailable,
@@ -106,6 +118,8 @@ func Derive(template projecttemplates.Template, sources Sources) Readiness {
 // must never be told to fix it.
 func DeriveOwnership(template projecttemplates.Template) Ownership {
 	switch {
+	case template.ProgramHomeOwner != nil:
+		return OwnershipPlugin
 	case template.PluginOwner != nil:
 		return OwnershipPlugin
 	case template.Builtin:
@@ -113,6 +127,52 @@ func DeriveOwnership(template projecttemplates.Template) Ownership {
 	default:
 		return OwnershipUser
 	}
+}
+
+func deriveProgramHomeOwned(template projecttemplates.Template, sources Sources) Readiness {
+	owner := template.ProgramHomeOwner
+	if owner == nil || !owner.Valid() || template.AssistantProgram == nil {
+		return manifestInvalidReadiness(OwnershipPlugin, "independent Home provider evidence is invalid")
+	}
+	dependency := &Dependency{PluginName: owner.PluginID, PluginVersion: owner.PluginVersion}
+	if sources.DependencyStateUnavailable {
+		return dependencyStateUnknownReadiness(OwnershipPlugin, dependency)
+	}
+	installed, present := sources.lookup(owner.PluginID)
+	if !present {
+		return Readiness{State: StateUnavailable, Ownership: OwnershipPlugin, Reason: ReasonDependencyStateUnknown,
+			Summary: "This Home provider is no longer installed.", Dependency: dependency, Actions: []Action{ActionRetry, ActionChangeBlueprint}}
+	}
+	dependency.Installed = true
+	dependency.Enabled = installed.Enabled
+	dependency.PluginVersion = installed.Version
+	if reason, ok := pluginHardBlocker(installed); ok {
+		return hardBlockerReadiness(reason, dependency, installed.Generation)
+	}
+	matches := 0
+	if installed.WorkspaceSurfaces != nil {
+		for _, home := range installed.WorkspaceSurfaces.AssistantProgramHomes {
+			if home.ID == owner.ProgramID && home.SchemaVersion == owner.HomeSchemaVersion && home.Version == owner.HomeVersion &&
+				projecttemplates.AssistantProgramHomeDigest(home) == owner.DeclarationDigest {
+				matches++
+			}
+		}
+	}
+	if matches != 1 || installed.EvidenceGeneration() != owner.PluginGeneration || installed.ComponentFingerprint != owner.ComponentFingerprint ||
+		!hasHostFeature(installed, plugin.HostFeatureIndependentProgramHomesV1) || !rolesPackaged(installed.Skills, template.AssistantProgram.Roles) {
+		return Readiness{State: StateActionRequired, Ownership: OwnershipPlugin, Reason: ReasonPluginUpdateRequired,
+			Summary: "This Home declaration changed and must be reviewed again.", Dependency: dependency,
+			Actions: []Action{ActionReviewPluginUpdate, ActionManagePlugins}, Generation: installed.Generation}
+	}
+	if !installed.Enabled {
+		return Readiness{State: StateActionRequired, Ownership: OwnershipPlugin, Reason: ReasonPluginEnableRequired,
+			Summary: "This Home provider is installed but disabled.", Dependency: dependency,
+			Actions: []Action{ActionEnablePlugin, ActionManagePlugins}, Generation: installed.Generation}
+	}
+	ready := Ready(OwnershipPlugin)
+	ready.Dependency = dependency
+	ready.Generation = installed.Generation
+	return ready
 }
 
 // derivePluginOwned projects a blueprint contributed by an installed plugin.
@@ -171,11 +231,140 @@ func derivePluginOwned(template projecttemplates.Template, sources Sources) Read
 			Generation: installed.Generation,
 		}
 	}
+	if template.AssistantProject != nil {
+		if independent := independentHomeReadiness(template, installed, sources); independent != nil {
+			return independentHomeOutcome(template, *independent)
+		}
+	}
 
 	ready := Ready(OwnershipPlugin)
 	ready.Dependency = dependency
 	ready.Generation = installed.Generation
 	return ready
+}
+
+func independentHomeOutcome(template projecttemplates.Template, blocked Readiness) Readiness {
+	if template.StandaloneComposition == nil || template.GroupRequirement == nil || template.GroupRequirement.Policy == projecttemplates.GroupPolicyRequired {
+		return blocked
+	}
+	return Readiness{
+		State: StateReady, Ownership: OwnershipPlugin,
+		Summary: "Standalone creation is available; grouped creation still needs the independent Home provider.",
+		Detail:  blocked.Summary, Dependency: blocked.Dependency, Generation: blocked.Generation,
+	}
+}
+
+// independentHomeReadiness verifies the second provider of a split project
+// without installing, enabling, creating, or adopting anything. nil means the
+// exact reciprocal declaration is currently available.
+func independentHomeReadiness(template projecttemplates.Template, projectPlugin plugin.InstalledPlugin, sources Sources) *Readiness {
+	project := template.AssistantProject
+	if project == nil {
+		return nil
+	}
+	dependency := &Dependency{PluginName: project.Home.ProviderPluginID}
+	homePlugin, present := sources.lookup(project.Home.ProviderPluginID)
+	if !present {
+		result := Readiness{State: StateActionRequired, Ownership: OwnershipPlugin, Reason: ReasonPluginInstallRequired,
+			Summary:    "Install the Home provider before using this project blueprint.",
+			Detail:     "The project plugin does not own or install its independent Assistant Program Home.",
+			Dependency: dependency, Actions: []Action{ActionManagePlugins, ActionChangeBlueprint}}
+		return &result
+	}
+	dependency.Installed = true
+	dependency.Enabled = homePlugin.Enabled
+	dependency.PluginVersion = strings.TrimSpace(homePlugin.Version)
+	if reason, blocked := pluginHardBlocker(homePlugin); blocked {
+		result := hardBlockerReadiness(reason, dependency, homePlugin.Generation)
+		return &result
+	}
+	if !homePlugin.Enabled {
+		result := Readiness{State: StateActionRequired, Ownership: OwnershipPlugin, Reason: ReasonPluginEnableRequired,
+			Summary:    "This project needs its independent Home provider enabled.",
+			Detail:     "Enable the Home provider first; this read does not change either plugin.",
+			Dependency: dependency, Actions: []Action{ActionEnablePlugin, ActionManagePlugins}, Generation: homePlugin.Generation}
+		return &result
+	}
+	if !hasHostFeature(projectPlugin, plugin.HostFeatureIndependentProgramHomesV1) || !hasHostFeature(homePlugin, plugin.HostFeatureIndependentProgramHomesV1) ||
+		!rolesPackaged(projectPlugin.Skills, project.ProgramRoles()) {
+		result := Readiness{State: StateActionRequired, Ownership: OwnershipPlugin, Reason: ReasonPluginUpdateRequired,
+			Summary:    "The project and Home providers do not expose a compatible independent-team contract.",
+			Dependency: dependency, Actions: []Action{ActionReviewPluginUpdate, ActionManagePlugins}, Generation: homePlugin.Generation}
+		return &result
+	}
+	blueprintID := ""
+	if template.PluginOwner != nil {
+		blueprintID = template.PluginOwner.BlueprintID
+	} else if template.TemplateVariant != nil {
+		blueprintID = template.TemplateVariant.Source.BlueprintID
+	}
+	matches := 0
+	for _, home := range homePlugin.WorkspaceSurfaces.AssistantProgramHomes {
+		if home.ID != project.Home.ProgramID || home.SchemaVersion != project.Home.HomeSchemaVersion ||
+			home.Version < project.Home.MinHomeVersion || home.Version > project.Home.MaxHomeVersion ||
+			!rolesPackaged(homePlugin.Skills, home.AssistantProgram().Roles) || independentRoleCollision(home.AssistantProgram().Roles, project.ProgramRoles()) {
+			continue
+		}
+		attachments := 0
+		for _, allowed := range home.AllowedProjectAttachments {
+			if allowed.ProviderPluginID == projectPlugin.Name && allowed.BlueprintID == blueprintID &&
+				allowed.ProjectTeamID == project.ID && allowed.ProjectTeamSchemaVersion == project.SchemaVersion &&
+				project.Version >= allowed.MinProjectTeamVersion && project.Version <= allowed.MaxProjectTeamVersion {
+				attachments++
+			}
+		}
+		if attachments == 1 {
+			matches++
+		}
+	}
+	if matches != 1 {
+		result := Readiness{State: StateActionRequired, Ownership: OwnershipPlugin, Reason: ReasonPluginUpdateRequired,
+			Summary:    "The installed Home provider does not authorize this exact project team.",
+			Detail:     "Update or change providers; Ori will not infer authorization from matching names.",
+			Dependency: dependency, Actions: []Action{ActionReviewPluginUpdate, ActionManagePlugins}, Generation: homePlugin.Generation}
+		return &result
+	}
+	return nil
+}
+
+func hasHostFeature(installed plugin.InstalledPlugin, feature string) bool {
+	if installed.WorkspaceSurfaces == nil {
+		return false
+	}
+	for _, candidate := range installed.WorkspaceSurfaces.RequiresHostFeatures {
+		if candidate == feature {
+			return true
+		}
+	}
+	return false
+}
+
+func rolesPackaged(skills []string, roles []workspace.AssistantProgramRoleSpec) bool {
+	packaged := make(map[string]struct{}, len(skills))
+	for _, skill := range skills {
+		packaged[strings.ToLower(strings.TrimSpace(skill))] = struct{}{}
+	}
+	for _, role := range roles {
+		for _, skill := range role.Skills {
+			if _, found := packaged[strings.ToLower(strings.TrimSpace(skill))]; !found {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func independentRoleCollision(home, project []workspace.AssistantProgramRoleSpec) bool {
+	seen := make(map[string]struct{}, len(home))
+	for _, role := range home {
+		seen[role.ID] = struct{}{}
+	}
+	for _, role := range project {
+		if _, exists := seen[role.ID]; exists {
+			return true
+		}
+	}
+	return false
 }
 
 // deriveDeclaredPluginDependencies resolves the plugin names a built-in or

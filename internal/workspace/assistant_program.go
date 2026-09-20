@@ -137,13 +137,16 @@ func (key AssistantProgramKey) Valid() bool {
 // AssistantProjectLink is stored on a compatible project. Membership is never
 // inferred from mutable names, slugs, tags, or files.
 type AssistantProjectLink struct {
-	ID                 string              `json:"id,omitempty"`
-	SchemaVersion      int                 `json:"schema_version"`
-	StationWorkspaceID string              `json:"station_workspace_id"`
-	Key                AssistantProgramKey `json:"key"`
-	DeclarationVersion int                 `json:"declaration_version"`
-	LinkedAt           time.Time           `json:"linked_at"`
-	StateRevision      int64               `json:"state_revision"`
+	ID                 string                         `json:"id,omitempty"`
+	SchemaVersion      int                            `json:"schema_version"`
+	StationWorkspaceID string                         `json:"station_workspace_id"`
+	Key                AssistantProgramKey            `json:"key"`
+	DeclarationVersion int                            `json:"declaration_version"`
+	LinkedAt           time.Time                      `json:"linked_at"`
+	StateRevision      int64                          `json:"state_revision"`
+	HomeProvider       *AssistantProgramHomeOwner     `json:"home_provider,omitempty"`
+	ProjectProvider    *AssistantProjectProviderOwner `json:"project_provider,omitempty"`
+	ProjectRoles       []AssistantProgramRoleSpec     `json:"project_roles,omitempty"`
 	// ProjectBindings belongs only to this exact linked child. Its revision is
 	// independent from the link and Home binding revisions so staffing one
 	// project cannot replace another project's identities.
@@ -291,6 +294,9 @@ type AssistantProgramState struct {
 	// GroupTemplate is inert creation provenance written only in the first
 	// Save of a Home created through a reviewed Group Template selection.
 	GroupTemplate *AssistantGroupTemplateProvenance `json:"group_template,omitempty"`
+	// HomeProvider is immutable fresh-setup provenance for an independently
+	// contributed Home. Combined legacy/current declarations leave it nil.
+	HomeProvider *AssistantProgramHomeOwner `json:"home_provider,omitempty"`
 	// Hired through Roster are schema-v1 shared-roster compatibility fields.
 	// Schema-v2 staffing writes scoped binding sets and never projects this
 	// legacy roster into newly linked children.
@@ -322,6 +328,10 @@ func CloneAssistantProgramState(source *AssistantProgramState) *AssistantProgram
 	clone.Topology = CloneAssistantTopologyState(source.Topology)
 	clone.Migration = CloneAssistantMigrationState(source.Migration)
 	clone.GroupTemplate = CloneAssistantGroupTemplateProvenance(source.GroupTemplate)
+	if source.HomeProvider != nil {
+		owner := source.HomeProvider.Clone()
+		clone.HomeProvider = &owner
+	}
 	clone.Roster = append([]AssistantRoleBinding(nil), source.Roster...)
 	clone.CompletionReceipts = append([]AssistantCompletionReceipt(nil), source.CompletionReceipts...)
 	if source.StageEnteredAt != nil {
@@ -415,6 +425,19 @@ func CloneAssistantProjectLink(source *AssistantProjectLink) *AssistantProjectLi
 		return nil
 	}
 	clone := *source
+	if source.HomeProvider != nil {
+		owner := source.HomeProvider.Clone()
+		clone.HomeProvider = &owner
+	}
+	if source.ProjectProvider != nil {
+		owner := source.ProjectProvider.Clone()
+		clone.ProjectProvider = &owner
+	}
+	clone.ProjectRoles = make([]AssistantProgramRoleSpec, len(source.ProjectRoles))
+	for index := range source.ProjectRoles {
+		clone.ProjectRoles[index] = source.ProjectRoles[index]
+		clone.ProjectRoles[index].Skills = append([]string(nil), source.ProjectRoles[index].Skills...)
+	}
 	clone.ProjectBindings = CloneAssistantRoleBindingSet(source.ProjectBindings)
 	return &clone
 }

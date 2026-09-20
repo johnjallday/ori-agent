@@ -176,6 +176,144 @@ func TestRecommendedStandaloneCreatesNoHomeAndDropsHomeBehavior(t *testing.T) {
 	}
 }
 
+func TestSplitProvidersAreBoundIntoReviewAndStaleEitherProvider(t *testing.T) {
+	store, err := workspace.NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(store, NewMemoryStore())
+	project := &projecttemplates.AssistantProjectDeclaration{
+		SchemaVersion: 1, Version: 3, ID: "reaper_team",
+		Home:  projecttemplates.AssistantProjectHomeReference{ProviderPluginID: "music", ProgramID: "music_home", HomeSchemaVersion: 1, MinHomeVersion: 2, MaxHomeVersion: 2},
+		Roles: []projecttemplates.AssistantProjectRole{{ID: "engineer", Label: "Engineer", Required: true, Primary: true, SystemPrompt: "Work in this project."}},
+	}
+	template := projecttemplates.Template{
+		ID: "plugin:reaper:song", Revision: strings.Repeat("c", 64), AssistantProject: project,
+		PluginOwner: &workspace.PluginTemplateOwner{PluginID: "reaper", PluginVersion: "4.0.0", BlueprintID: "song", BlueprintVersion: 7},
+		GroupRequirement: &projecttemplates.GroupRequirement{
+			SchemaVersion: projecttemplates.GroupRequirementSchemaVersion, Policy: projecttemplates.GroupPolicyRequired,
+			MissingHome: projecttemplates.MissingHomeOfferCreate, DefaultHomeName: "Music Home",
+		},
+	}
+	homeGeneration, projectGeneration := uint64(11), uint64(19)
+	service.SetIndependentHomeResolver(func(owner string, got projecttemplates.Template, requireHome bool) (IndependentHomeResolution, error) {
+		projectOwner := &workspace.AssistantProjectProviderOwner{
+			PluginID: "reaper", PluginVersion: "4.0.0", BlueprintID: "song", BlueprintVersion: 7,
+			ProjectTeamID: "reaper_team", ProjectTeamSchema: 1, ProjectTeamVersion: 3,
+			ProjectTeamDigest: strings.Repeat("d", 64), PluginGeneration: projectGeneration, ComponentFingerprint: strings.Repeat("e", 64),
+		}
+		if !requireHome {
+			return IndependentHomeResolution{ProjectOwner: projectOwner}, nil
+		}
+		homeOwner := &workspace.AssistantProgramHomeOwner{
+			PluginID: "music", PluginVersion: "2.0.0", ProgramID: "music_home", HomeSchemaVersion: 1, HomeVersion: 2,
+			DeclarationDigest: strings.Repeat("f", 64), PluginGeneration: homeGeneration, ComponentFingerprint: strings.Repeat("a", 64),
+		}
+		declaration := &workspace.AssistantProgramDeclaration{
+			SchemaVersion: workspace.AssistantProgramSchemaVersion, ID: "music_home", StationName: "Music Home",
+			Roles: []workspace.AssistantProgramRoleSpec{{ID: "producer", Label: "Producer", Scope: workspace.AssistantRoleScopeHome, Required: true, Primary: true, SystemPrompt: "Coordinate projects."}},
+		}
+		return IndependentHomeResolution{
+			Key:         workspace.AssistantProgramKey{OwnerUserID: owner, PluginID: "music", ProgramID: "music_home"},
+			Declaration: declaration, Owner: homeOwner, ProjectOwner: projectOwner,
+		}, nil
+	})
+
+	missingHome := service.Evaluate(testInput(t, template, CompositionGrouped, false))
+	if missingHome.State != StateHomeCreationReviewRequired || missingHome.ProgramKey == nil || missingHome.HomeOwner == nil ||
+		missingHome.ProjectOwner == nil || missingHome.EffectiveTemplate.ResolvedAssistantHome == nil ||
+		len(missingHome.EffectiveTemplate.ResolvedAssistantHome.Roles) != 1 || missingHome.EffectiveTemplate.ResolvedAssistantHome.Roles[0].ID != "producer" {
+		t.Fatalf("missing split Home disclosure = %#v", missingHome)
+	}
+
+	homeInput := testHomeInput(t, template)
+	homeKey := workspace.AssistantProgramKey{OwnerUserID: "owner-1", PluginID: "music", ProgramID: "music_home"}
+	homeInput.GroupTemplateID = projecttemplates.GroupTemplateIDForKey(homeKey)
+	homeInput.GroupTemplateRevision = strings.Repeat("9", 64)
+	homeReview, err := service.Review(context.Background(), homeInput)
+	if err != nil || homeReview.State != StateReadyGrouped {
+		t.Fatalf("Home review = %#v, %v", homeReview, err)
+	}
+	homeClaim, err := service.Claim(context.Background(), homeInput, homeReview.Token, "split-home")
+	if err != nil || !homeClaim.HomeCreated {
+		t.Fatalf("Home claim = %#v, %v", homeClaim, err)
+	}
+	createdHome, err := store.Get(homeClaim.Operation.HomeWorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	createdState := createdHome.GetAssistantProgramState()
+	if createdState == nil || createdState.GroupTemplate == nil || createdState.GroupTemplate.ProgramHomeOwner == nil || createdState.GroupTemplate.HomeDigest == "" {
+		t.Fatalf("split Group Template provenance = %#v", createdState)
+	}
+
+	projectInput := testInput(t, template, CompositionGrouped, false)
+	_, committedHomeID, committedSnapshot, err := service.CommitReviewed(
+		projectInput, "reviewed-child", strings.Repeat("7", 64), strings.Repeat("8", 64),
+	)
+	if err != nil || committedHomeID != createdHome.ID || committedSnapshot == nil ||
+		committedSnapshot.HomeProvider == nil || committedSnapshot.ProjectProvider == nil {
+		t.Fatalf("reviewed split commit = home %q snapshot %#v err %v", committedHomeID, committedSnapshot, err)
+	}
+	projectReview, err := service.Review(context.Background(), projectInput)
+	if err != nil || projectReview.Token == "" {
+		t.Fatalf("project review = %#v, %v", projectReview, err)
+	}
+	homeGeneration++
+	if got := service.Evaluate(projectInput); got.State != StateTargetAmbiguous {
+		t.Fatalf("changed Home provider existing-Home state = %q, want %q", got.State, StateTargetAmbiguous)
+	}
+	if _, err := service.Claim(context.Background(), projectInput, projectReview.Token, "split-home-provider-stale"); err != ErrReviewStale {
+		t.Fatalf("Home provider generation change error = %v", err)
+	}
+	homeGeneration--
+	projectReview, err = service.Review(context.Background(), projectInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectGeneration++
+	if _, err := service.Claim(context.Background(), projectInput, projectReview.Token, "split-project-stale"); err != ErrReviewStale {
+		t.Fatalf("project provider generation change error = %v", err)
+	}
+	projectGeneration--
+	projectReview, err = service.Review(context.Background(), projectInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim, err := service.Claim(context.Background(), projectInput, projectReview.Token, "split-project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claim.Snapshot.HomeProvider == nil || claim.Snapshot.ProjectProvider == nil ||
+		claim.Snapshot.HomeProvider.PluginGeneration != homeGeneration || claim.Snapshot.ProjectProvider.PluginGeneration != projectGeneration {
+		t.Fatalf("split snapshot = %#v", claim.Snapshot)
+	}
+
+	standaloneTemplate := template
+	standaloneTemplate.GroupRequirement = &projecttemplates.GroupRequirement{
+		SchemaVersion: projecttemplates.SplitGroupRequirementSchemaVersion, Policy: projecttemplates.GroupPolicyRecommended,
+		AssistantProjectID: project.ID, MissingHome: projecttemplates.MissingHomeOfferCreate, DefaultHomeName: "Music Home",
+	}
+	standaloneTemplate.StandaloneComposition = &projecttemplates.StandaloneComposition{
+		SchemaVersion: projecttemplates.SplitStandaloneCompositionSchemaVersion,
+		ProjectRoles:  []projecttemplates.StandaloneRole{{RoleID: "engineer", SystemPrompt: "Work only in this standalone project."}},
+	}
+	standaloneInput := testInput(t, standaloneTemplate, CompositionStandalone, false)
+	standaloneReview, err := service.Review(context.Background(), standaloneInput)
+	if err != nil || standaloneReview.Token == "" || standaloneReview.HomeOwner != nil || standaloneReview.ProjectOwner == nil {
+		t.Fatalf("standalone split review = %#v, %v", standaloneReview, err)
+	}
+	if standaloneReview.EffectiveTemplate.AssistantProject != nil || standaloneReview.EffectiveTemplate.GroupRequirement != nil ||
+		len(standaloneReview.EffectiveTemplate.Agents) != 1 || standaloneReview.EffectiveTemplate.Agents[0].Name != "Engineer" {
+		t.Fatalf("standalone split transformation retained grouped authority: %#v", standaloneReview.EffectiveTemplate)
+	}
+	projectGeneration++
+	if _, err := service.Claim(context.Background(), standaloneInput, standaloneReview.Token, "standalone-project-stale"); err != ErrReviewStale {
+		t.Fatalf("standalone provider generation change error = %v", err)
+	}
+	projectGeneration--
+}
+
 func TestExactIdentityIgnoresSameNamedOrdinaryAndRejectsWrongParent(t *testing.T) {
 	store, err := workspace.NewFileStore(t.TempDir())
 	if err != nil {

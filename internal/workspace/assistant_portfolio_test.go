@@ -118,6 +118,36 @@ func TestAssistantPortfolioHandoff_CreatesOneIdempotentChildOwnedTicket(t *testi
 	}
 }
 
+func TestAssistantPortfolioHandoff_UsesSplitProjectOwnedPrimaryRole(t *testing.T) {
+	store, station, first, _ := portfolioFixture(t)
+	if err := store.Update(station.ID, func(home *Workspace) error {
+		state := home.GetAssistantProgramState()
+		state.Declaration.Roles = []AssistantProgramRoleSpec{{ID: "producer", Label: "Producer", Scope: AssistantRoleScopeHome, Required: true, Primary: true}}
+		home.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(first.ID, func(project *Workspace) error {
+		link := project.GetAssistantProjectLink()
+		link.ProjectRoles = []AssistantProgramRoleSpec{{ID: "engineer", Label: "Engineer", Scope: AssistantRoleScopeProject, Required: true, Primary: true}}
+		link.ProjectBindings = AssistantRoleBindingSet{StateRevision: 1, Bindings: []AssistantRoleBinding{{RoleID: "engineer", AgentName: "Project Engineer"}}}
+		project.SetAssistantProjectLink(link)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	project, _ := store.Get(first.ID)
+	link := project.GetAssistantProjectLink()
+	review, err := NewAssistantPortfolioService(store).ReviewHandoff(station.ID, link.ID, AssistantPortfolioHandoffInput{Title: "Prepare mix", State: TicketStateReady})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if review.Handoff.SuggestedAssignee != "Project Engineer" {
+		t.Fatalf("split project assignee = %#v", review.Handoff)
+	}
+}
+
 func TestAssistantPortfolioHandoff_RejectsChangedExactLinkBeforeCreatingTicket(t *testing.T) {
 	store, station, first, _ := portfolioFixture(t)
 	service := NewAssistantPortfolioService(store)

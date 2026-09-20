@@ -85,6 +85,9 @@ type TemplateProvenance struct {
 	// AssistantProgram snapshots the normalized inert declaration. Existing
 	// workspaces keep this copy when a plugin changes or is removed.
 	AssistantProgram *AssistantProgramDeclaration `json:"assistant_program,omitempty"`
+	// AssistantProjectRoles snapshots only the split project-owned roster. Home
+	// roles remain solely in AssistantProgram on the target Home.
+	AssistantProjectRoles []AssistantProgramRoleSpec `json:"assistant_project_roles,omitempty"`
 	// GroupRequirement is the reviewed creation-time placement contract. Its
 	// presence as a structurally valid schema-v1 snapshot is the clean-start
 	// boundary; legacy records are never inferred or backfilled into one.
@@ -138,6 +141,11 @@ func cloneTemplateProvenanceInto(dst *TemplateProvenance, src *TemplateProvenanc
 	dst.RuntimeRequirements = CloneRuntimeRequirementsContract(src.RuntimeRequirements)
 	dst.SetupWizard = CloneSetupWizard(src.SetupWizard)
 	dst.AssistantProgram = CloneAssistantProgramDeclaration(src.AssistantProgram)
+	dst.AssistantProjectRoles = make([]AssistantProgramRoleSpec, len(src.AssistantProjectRoles))
+	for index := range src.AssistantProjectRoles {
+		dst.AssistantProjectRoles[index] = src.AssistantProjectRoles[index]
+		dst.AssistantProjectRoles[index].Skills = append([]string(nil), src.AssistantProjectRoles[index].Skills...)
+	}
 	dst.GroupRequirement = CloneGroupRequirementSnapshot(src.GroupRequirement)
 }
 

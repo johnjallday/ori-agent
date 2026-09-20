@@ -53,6 +53,24 @@ func TestSurfaceLifecycleRegistersEnabledContributionAtomically(t *testing.T) {
 	}
 }
 
+func TestSurfaceLifecycleRegistersContentOnlyPluginOwnerForExactCleanup(t *testing.T) {
+	registry := workspacesurface.NewRegistry()
+	lifecycle := NewSurfaceLifecycle(registry, nil)
+	installed := InstalledPlugin{
+		Name: "music-project-management", Version: "0.1.0", Generation: 4, Enabled: true,
+		WorkspaceSurfaces: &SurfaceContribution{Protocol: ProtocolRange{Min: 1, Max: 1}},
+	}
+	if err := lifecycle.RegisterInstalled(installed); err != nil {
+		t.Fatalf("register content-only contribution: %v", err)
+	}
+	if surfaces := registry.SurfacesForOwner(workspacesurface.OwnerPlugin, installed.Name); len(surfaces) != 0 {
+		t.Fatalf("content-only contribution invented surfaces: %+v", surfaces)
+	}
+	if err := lifecycle.Unregister(installed.Name, installed.Generation); err != nil {
+		t.Fatalf("unregister content-only contribution: %v", err)
+	}
+}
+
 func TestSurfaceLifecycleRegistersPluginCapabilitiesOnlyWhileEnabled(t *testing.T) {
 	surfaces := workspacesurface.NewRegistry()
 	capabilities, err := workspacecapability.NewBuiltinRegistry()

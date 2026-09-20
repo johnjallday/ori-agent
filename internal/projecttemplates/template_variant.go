@@ -162,6 +162,7 @@ func TemplateVariantRevision(variant *TemplateVariant) string {
 func TemplateDefinitionDigest(template Template, skeletonDigest string) string {
 	type definition struct {
 		Owner                  *workspace.PluginTemplateOwner         `json:"owner"`
+		ProgramHomeOwner       *workspace.AssistantProgramHomeOwner   `json:"program_home_owner,omitempty"`
 		SkeletonDigest         string                                 `json:"skeleton_digest"`
 		BehaviorProfile        string                                 `json:"behavior_profile"`
 		StarterTasks           []StarterTask                          `json:"starter_tasks,omitempty"`
@@ -177,18 +178,20 @@ func TemplateDefinitionDigest(template Template, skeletonDigest string) string {
 		SetupWizard            *workspace.SetupWizard                 `json:"setup_wizard,omitempty"`
 		SetupQuestID           string                                 `json:"setup_quest,omitempty"`
 		AssistantProgram       *workspace.AssistantProgramDeclaration `json:"assistant_program,omitempty"`
+		AssistantProject       *AssistantProjectDeclaration           `json:"assistant_project,omitempty"`
 		GroupRequirement       *GroupRequirement                      `json:"group_requirement,omitempty"`
 		StandaloneComposition  *StandaloneComposition                 `json:"standalone_composition,omitempty"`
 	}
 	value := definition{
-		Owner: template.PluginOwner, SkeletonDigest: strings.ToLower(strings.TrimSpace(skeletonDigest)),
+		Owner: template.PluginOwner, ProgramHomeOwner: template.ProgramHomeOwner,
+		SkeletonDigest:  strings.ToLower(strings.TrimSpace(skeletonDigest)),
 		BehaviorProfile: template.BehaviorProfile,
 		StarterTasks:    template.StarterTasks, ProjectEntry: template.ProjectEntry, ProjectConnection: template.ProjectConnection,
 		Tools: template.Tools, Agents: template.Agents, Capabilities: template.Capabilities,
 		CapabilityRequirements: template.CapabilityRequirements, DirectoryRequirements: template.DirectoryRequirements,
 		AutomationRecipes: template.AutomationRecipes, RuntimeRequirements: template.RuntimeRequirements,
 		SetupWizard: template.SetupWizard, SetupQuestID: template.SetupQuestID, AssistantProgram: template.AssistantProgram,
-		GroupRequirement: template.GroupRequirement, StandaloneComposition: template.StandaloneComposition,
+		AssistantProject: template.AssistantProject, GroupRequirement: template.GroupRequirement, StandaloneComposition: template.StandaloneComposition,
 	}
 	encoded, _ := json.Marshal(value)
 	digest := sha256.Sum256(encoded)
@@ -236,7 +239,7 @@ func ResolveTemplateVariant(overlay Template, source VariantSource, ownerUserID 
 	effective.UserSetupQuestRevision = ""
 	effective.GroupRequirement = CloneGroupRequirement(variant.Overrides.GroupRequirement)
 	effective.GroupRequirementError = ""
-	if err := validateGroupComposition(effective.GroupRequirement, effective.StandaloneComposition, effective.AssistantProgram); err != nil {
+	if err := validateGroupComposition(effective.GroupRequirement, effective.StandaloneComposition, effective.AssistantProgram, effective.AssistantProject); err != nil {
 		return Template{}, err
 	}
 	return effective, nil

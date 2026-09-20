@@ -2,6 +2,19 @@
 
 Ori’s REAPER integration is an optional local contribution for organizing and assisting with REAPER projects. It is not an audio plug-in, VST, effect, or instrument, and it is not installed into REAPER’s FX path.
 
+## Independent Music Production Home (unreleased source contract)
+
+The new source contract separates two optional providers:
+
+- **Music Project Management** owns Music Production Home, its Portfolio Manager and optional Sample Library Manager declarations, Home stages/reflection bounds, and the canonical `music-project-management` skill. It is content-only: no REAPER dependency, project blueprint, Workspace Surface, MCP server, or runtime process.
+- **REAPER Plugin** owns the Reaper Song blueprint, Producer/Mix Engineer/Songwriter project team, `.rpp` scaffold and typed inputs, project setup, REAPER skills/capabilities, and optional live-control service. It references the Home by exact provider/program identity rather than owning or bundling it.
+
+Both independent contribution forms require `independent_program_homes_v1`. Either package can be installed first. REAPER-first grouped creation reports the missing Music provider and does not fetch it or create a fallback Home; Music-first can create and staff the Home before any REAPER project exists. An explicitly customized standalone Reaper Song remains Home-free and needs only its three project roles.
+
+This contract has been accepted only with unpublished local candidates: Music Project Management 0.1.0 at `8f4abd0b283fefe23653a2cf81deb800123c4bde` and REAPER 0.8.0 / blueprint v9 at `68488b4d62978f22bfdff26c3554cebb6b4cf396`. It does not change the published reviewed floor below. Delivery order is compatible Ori host, Music package, then compatible REAPER release.
+
+See [Independent Assistant Program Homes](architecture/independent-program-homes.md) for the exact declaration, reciprocal authorization, provenance, availability, and no-migration contract.
+
 ## Start and resume setup
 
 Setup happens in two quests. Opening either one does not install software, connect a folder, create a workspace or agent, open REAPER, or enable live control. See [Plugin-owned setup quests](plugin-setup-quests.md) for the declaration and rollout contract.
@@ -39,10 +52,11 @@ A blocked or later-regressed live check affects only live operation. Existing pr
 
 ## Home and project roles
 
-The music group is the canonical **Music Production Home**, not an extra wrapper. Its chosen display name does not change ownership. It groups exact linked projects without inheriting their folders or runtime grants.
+The music group is the canonical **Music Production Home**, not an extra wrapper. Its chosen display name does not change ownership. New independent Homes are identified by owner, Music provider, and program ID—not by the REAPER provider, parentage, or display name. They group exact linked projects without inheriting their folders or runtime grants.
 
-- The Home-scoped **Music Portfolio Manager** can report reviewed project status, maintain Home-owned portfolio fields, and prepare a confirmed handoff to one exact linked project.
-- Each project has its own Producer, Mix Engineer, and Songwriter bindings. Their prompts, model choices, memory, task history, grants, and live state are not shared with sibling projects.
+- Music Project Management owns the Home-scoped **Music Portfolio Manager**, which can report reviewed project status, maintain Home-owned portfolio fields, and prepare a confirmed handoff to one exact linked project.
+- REAPER owns each project's Producer, Mix Engineer, and Songwriter bindings. Their prompts, model choices, memory, task history, grants, and live state are not shared with the Home or sibling projects.
+- The Home and project declarations carry separate immutable provider versions, generations, fingerprints, and digests on each exact link. Both providers must be available for a handoff; Home-only edits and project-only staffing retain their narrower provider gates.
 - No configured model is required for deterministic setup and catalog operations. Chat or execution is labelled unavailable until a compatible model resolves.
 
 Connecting another project creates an independent resumable child setup. It reuses the same compatible integration and Home, while requiring explicit project connection, mode, and project-team review for the new child.
@@ -57,20 +71,22 @@ Projects can search the active Home catalog without receiving the source-folder 
 
 Revoking a sample folder stops future catalog use and removes its active entries without deleting source files or confirmed project copies. Removing the add-on follows the same preservation rule.
 
-## Lifecycle and migration
+## Independent lifecycle and no migration
 
-Disabling or removing the integration pauses plugin-backed execution and marks setup as needing attention. It does not delete Home, linked projects, agents, tasks, external folders, portfolio data, sample metadata, or confirmed copies.
+Disabling or removing REAPER pauses REAPER-owned operations and project-provider actions while preserving the independent Home, manager, linked project records, project teams, tasks, and files. Disabling or removing Music Project Management makes Home coordination and its managed skill unavailable while preserving REAPER project-local and file-only state. Reads do not reinstall either provider or rewrite persisted availability. Reinstalling the same exact providers restores availability without creating another Home, manager, project, link, handoff, grant, or schedule.
 
-Compatible older plugin-backed workspaces can be attached only through an explicit migration review. Legacy shared rosters remain readable until reviewed; ambiguous or built-in topology is never silently renamed, cloned, moved, or reassigned. Linked projects must be explicitly disconnected before organizational reparenting. Removing Music Production Home uses a dedicated impact review and preserves child projects and external files by default.
+The independent contract is fresh-setup only. Existing combined schema-1/2 Homes and links remain readable under their recorded REAPER-owned identity. A same-name legacy Home is not adopted, transferred, copied, relinked, rewritten, or deleted. The older explicit migration path for compatible combined workspaces remains separate and does not convert ownership to Music Project Management.
+
+Linked projects must be explicitly disconnected before organizational reparenting. Removing Music Production Home uses a dedicated impact review and preserves child projects and external files by default.
 
 ## Reviewed floor and latest release
 
-Ori’s reviewed registry entry for this integration is a **floor**, not a pin. A person reviewed the `johnjallday/reaper-plugin` repository and its minimum release; every later stable release from that repository is accepted once Ori’s automatic identity, host-feature, blueprint, program, platform and artifact checks pass. The entry in `internal/reviewedintegration/entries.go` holds:
+Ori’s currently published reviewed registry entry for this integration is a **floor**, not a pin. It describes the older combined release contract and is intentionally unchanged by unpublished independent-Home candidates. A person reviewed the `johnjallday/reaper-plugin` repository and its minimum release; every later stable release from that repository is accepted once Ori’s automatic identity, host-feature, blueprint, program, platform and artifact checks pass. The entry in `internal/reviewedintegration/entries.go` holds:
 
 - Minimum reviewed version `0.6.1`.
 - Fallback commit `e11ca2942279af02a9a035039b18b146ff9fc89d` (the annotated `v0.6.1` tag’s resolved commit), installed when the latest release cannot be checked.
 - Blueprint `reaper-song` at version 7 **or later**.
-- Assistant program `music-producer-assistant` schema 2 and surface protocol 1, both **exact**: they describe what this Ori build can run, not one release.
+- Combined Assistant Program `music-producer-assistant` schema 2 and surface protocol 1, both **exact**: they describe what the currently reviewed release line can run, not the unpublished split candidate.
 - Required host features `assistant_program_v1`, `specialist_setup_journey_v1`, `setup_quests_v2` and `template_group_requirements_v1`. A release may require more, as long as this Ori build has them.
 - Platform `darwin/arm64`.
 
@@ -113,7 +129,7 @@ ORI_INTEGRATION_RELEASES_API=http://127.0.0.1:9 ./scripts/demo-server.sh 8931
 
 ### When the floor moves
 
-A plugin release that keeps its blueprint version, program schema, protocol and required host features needs **no change to Ori**. Move the floor only when a release needs something this Ori build must change for, such as a new required host feature, a new program schema or protocol, or a blueprint version Ori now depends on:
+A plugin release that keeps its blueprint version, program schema, protocol and required host features needs **no change to Ori**. The split 0.8.0 candidate does change those assumptions, so it cannot ship under the current floor. Move the floor only after the compatible host and Music package are available and the REAPER release has separately verified publication evidence:
 
 1. Confirm the new tag and release exist on `johnjallday/reaper-plugin`, and record the tag’s resolved commit.
 2. Download the published `darwin_arm64` asset and its checksum. Compare size and SHA-256 against the manifest at that commit, and confirm the executable reports the new version.

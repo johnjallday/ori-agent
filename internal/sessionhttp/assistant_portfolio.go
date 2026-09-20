@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
+	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -60,12 +61,16 @@ func (h *Handler) ReviewAssistantPortfolio(w http.ResponseWriter, r *http.Reques
 		_ = orihttp.RespondNotFound(w, "Assistant Program Home not found")
 		return
 	}
-	review, err := workspace.NewAssistantPortfolioService(h.workspaceTaskStore).Review(station.ID, strings.TrimSpace(request.LinkID), request.IfRevision, request.Fields)
-	if err != nil {
-		respondAssistantPortfolioError(w, err)
+	if station, ok := h.requireAssistantWritable(w, station); !ok {
 		return
+	} else {
+		review, reviewErr := workspace.NewAssistantPortfolioService(h.workspaceTaskStore).Review(station.ID, strings.TrimSpace(request.LinkID), request.IfRevision, request.Fields)
+		if reviewErr != nil {
+			respondAssistantPortfolioError(w, reviewErr)
+			return
+		}
+		_ = orihttp.RespondSuccess(w, review)
 	}
-	_ = orihttp.RespondSuccess(w, review)
 }
 
 func (h *Handler) CommitAssistantPortfolio(w http.ResponseWriter, r *http.Request) {
@@ -78,12 +83,16 @@ func (h *Handler) CommitAssistantPortfolio(w http.ResponseWriter, r *http.Reques
 		_ = orihttp.RespondNotFound(w, "Assistant Program Home not found")
 		return
 	}
-	receipt, err := workspace.NewAssistantPortfolioService(h.workspaceTaskStore).Commit(station.ID, request.ReviewToken, request.IdempotencyKey, request.Fields)
-	if err != nil {
-		respondAssistantPortfolioError(w, err)
+	if station, ok := h.requireAssistantWritable(w, station); !ok {
 		return
+	} else {
+		receipt, commitErr := workspace.NewAssistantPortfolioService(h.workspaceTaskStore).Commit(station.ID, request.ReviewToken, request.IdempotencyKey, request.Fields)
+		if commitErr != nil {
+			respondAssistantPortfolioError(w, commitErr)
+			return
+		}
+		_ = orihttp.RespondSuccess(w, receipt)
 	}
-	_ = orihttp.RespondSuccess(w, receipt)
 }
 
 func (h *Handler) ReviewAssistantHandoff(w http.ResponseWriter, r *http.Request) {
@@ -94,6 +103,9 @@ func (h *Handler) ReviewAssistantHandoff(w http.ResponseWriter, r *http.Request)
 	station, _, err := h.assistantProgramStation(strings.TrimSpace(r.PathValue("workspaceID")))
 	if err != nil {
 		_ = orihttp.RespondNotFound(w, "Assistant Program Home not found")
+		return
+	}
+	if !h.requireAssistantHandoffWritable(w, station, strings.TrimSpace(request.LinkID)) {
 		return
 	}
 	review, err := workspace.NewAssistantPortfolioService(h.workspaceTaskStore).ReviewHandoff(station.ID, strings.TrimSpace(request.LinkID), workspace.AssistantPortfolioHandoffInput{
@@ -116,6 +128,18 @@ func (h *Handler) CommitAssistantHandoff(w http.ResponseWriter, r *http.Request)
 		_ = orihttp.RespondNotFound(w, "Assistant Program Home not found")
 		return
 	}
+	linkID := ""
+	if state := station.GetAssistantProgramState(); state != nil {
+		for _, review := range state.Portfolio.HandoffReviewReceipts {
+			if review.Token == request.ReviewToken {
+				linkID = review.LinkID
+				break
+			}
+		}
+	}
+	if !h.requireAssistantHandoffWritable(w, station, linkID) {
+		return
+	}
 	receipt, err := workspace.NewAssistantPortfolioService(h.workspaceTaskStore).CommitHandoff(station.ID, request.ReviewToken, request.IdempotencyKey, workspace.AssistantPortfolioHandoffInput{
 		Title: request.Title, Description: request.Description, State: request.State,
 	})
@@ -124,6 +148,47 @@ func (h *Handler) CommitAssistantHandoff(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	_ = orihttp.RespondSuccess(w, receipt)
+}
+
+func (h *Handler) requireAssistantHandoffWritable(w http.ResponseWriter, station *workspace.Workspace, linkID string) bool {
+	var ok bool
+	if station, ok = h.requireAssistantWritable(w, station); !ok {
+		return false
+	}
+	state := station.GetAssistantProgramState()
+	if state == nil {
+		return false
+	}
+	homeOwner := state.HomeProvider
+	if homeOwner == nil && state.GroupTemplate != nil {
+		homeOwner = state.GroupTemplate.ProgramHomeOwner
+	}
+	if homeOwner == nil || strings.TrimSpace(linkID) == "" {
+		return true
+	}
+	if h.installedPluginLister == nil {
+		_ = orihttp.RespondConflict(w, "The project provider cannot be verified; existing data remains available")
+		return false
+	}
+	projects, err := workspace.NewAssistantProgramStore(h.workspaceTaskStore).LinkedProjects(station.ID)
+	if err != nil {
+		_ = orihttp.RespondConflict(w, "The selected project link changed; review it again")
+		return false
+	}
+	var projectOwner *workspace.AssistantProjectProviderOwner
+	for _, project := range projects {
+		link := project.GetAssistantProjectLink()
+		if link != nil && link.ID == linkID {
+			projectOwner = link.ProjectProvider
+			break
+		}
+	}
+	installed, err := h.installedPluginLister.List()
+	if err != nil || !plugin.IndependentProviderEvidenceAvailable(installed, homeOwner, projectOwner) {
+		_ = orihttp.RespondConflict(w, "The project provider is unavailable; Home portfolio data remains available")
+		return false
+	}
+	return true
 }
 
 func respondAssistantPortfolioError(w http.ResponseWriter, err error) {

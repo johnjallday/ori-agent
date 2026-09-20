@@ -40,7 +40,7 @@ func (b *ServerBuilder) wireProjectTemplateResolver() {
 				if err != nil {
 					return projecttemplates.Template{}, err
 				}
-				for _, template := range activePluginBlueprintTemplates(installed) {
+				for _, template := range append(activePluginBlueprintTemplates(installed), activePluginProgramHomeTemplates(installed)...) {
 					if template.ID == id {
 						return template, nil
 					}
@@ -116,7 +116,7 @@ func (b *ServerBuilder) wireProjectTemplateResolver() {
 						return nil, err
 					}
 				}
-				result := activePluginBlueprintTemplates(installed)
+				result := append(activePluginBlueprintTemplates(installed), activePluginProgramHomeTemplates(installed)...)
 				library, err := projecttemplates.ListLibraryWithCatalog(resolveTemplatesRoot(b.configManager), templateRuntimeCatalog{
 					capabilities: b.workspaceCapabilityRegistry, runtimes: b.runtimeCapabilityRegistry,
 				})
@@ -147,6 +147,16 @@ func (b *ServerBuilder) wireProjectTemplateResolver() {
 		return
 	}
 	b.groupRequirements = grouprequirements.NewService(b.workspaceStore, receipts)
+	b.groupRequirements.SetIndependentHomeResolver(func(ownerUserID string, template projecttemplates.Template, requireHome bool) (grouprequirements.IndependentHomeResolution, error) {
+		if b.pluginHandler == nil {
+			return grouprequirements.IndependentHomeResolution{}, errIndependentProgramHomeUnavailable
+		}
+		installed, listErr := b.pluginHandler.Manager().List()
+		if listErr != nil {
+			return grouprequirements.IndependentHomeResolution{}, listErr
+		}
+		return resolveIndependentProgramHome(installed, ownerUserID, template, requireHome)
+	})
 	b.sessionHandler.SetGroupRequirementService(b.groupRequirements, b.userProvider.CurrentUserID)
 }
 
@@ -257,7 +267,7 @@ func buildBlueprintCatalogSnapshot(root string, catalog projecttemplates.Runtime
 			sources.DependencyStateUnavailable = true
 		} else {
 			sources.Installed = installed
-			candidates = candidatePluginBlueprintTemplates(installed)
+			candidates = append(candidatePluginBlueprintTemplates(installed), candidatePluginProgramHomeTemplates(installed)...)
 		}
 	}
 
@@ -459,6 +469,53 @@ func findVariantSource(pin projecttemplates.TemplateVariantSource, installed []p
 		return projecttemplates.VariantSource{}, projecttemplates.VariantSourceChanged
 	}
 	return variantSource, projecttemplates.VariantSourceReady
+}
+
+func candidatePluginProgramHomeTemplates(installed []plugin.InstalledPlugin) []pluginBlueprintCandidate {
+	var candidates []pluginBlueprintCandidate
+	for _, entry := range installed {
+		if entry.WorkspaceSurfaces == nil {
+			continue
+		}
+		for _, home := range entry.WorkspaceSurfaces.AssistantProgramHomes {
+			owner := workspace.AssistantProgramHomeOwner{
+				PluginID: entry.Name, PluginVersion: entry.Version, ProgramID: home.ID,
+				HomeSchemaVersion: home.SchemaVersion, HomeVersion: home.Version,
+				DeclarationDigest: projecttemplates.AssistantProgramHomeDigest(home),
+				PluginGeneration:  entry.EvidenceGeneration(), ComponentFingerprint: entry.ComponentFingerprint,
+			}
+			active := owner.Valid() && pluginBlueprintsActive(entry) &&
+				requiresFeature(entry.WorkspaceSurfaces, plugin.HostFeatureIndependentProgramHomesV1) && assistantProgramHomeSkillsPackaged(entry, home)
+			template := projecttemplates.AssistantProgramHomeTemplate(home, owner)
+			candidates = append(candidates, pluginBlueprintCandidate{Template: template, Active: active})
+		}
+	}
+	return candidates
+}
+
+func assistantProgramHomeSkillsPackaged(installed plugin.InstalledPlugin, home projecttemplates.AssistantProgramHome) bool {
+	packaged := make(map[string]struct{}, len(installed.Skills))
+	for _, skill := range installed.Skills {
+		packaged[strings.ToLower(strings.TrimSpace(skill))] = struct{}{}
+	}
+	for _, role := range home.Roles {
+		for _, skill := range role.Skills {
+			if _, ok := packaged[strings.ToLower(strings.TrimSpace(skill))]; !ok {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func activePluginProgramHomeTemplates(installed []plugin.InstalledPlugin) []projecttemplates.Template {
+	var templates []projecttemplates.Template
+	for _, candidate := range candidatePluginProgramHomeTemplates(installed) {
+		if candidate.Active {
+			templates = append(templates, candidate.Template)
+		}
+	}
+	return templates
 }
 
 func activePluginBlueprintTemplates(installed []plugin.InstalledPlugin) []projecttemplates.Template {

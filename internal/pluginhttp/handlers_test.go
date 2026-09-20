@@ -31,6 +31,11 @@ type stubSkills struct{}
 func (stubSkills) InstallSkill(_, _, _ string) error { return nil }
 func (stubSkills) RemoveSkill(_, _ string) error     { return nil }
 
+type failingSkills struct{ installErr error }
+
+func (s failingSkills) InstallSkill(_, _, _ string) error { return s.installErr }
+func (failingSkills) RemoveSkill(_, _ string) error       { return nil }
+
 func testHandler(t *testing.T) *Handler {
 	t.Helper()
 	mgr := plugin.NewManager(&stubReg{}, stubSkills{}, t.TempDir(), "")
@@ -96,6 +101,38 @@ func TestInstallConfirmThenList(t *testing.T) {
 	}
 	if !strings.Contains(listBody(t, h), "reaper") {
 		t.Errorf("expected reaper in list, got %s", listBody(t, h))
+	}
+}
+
+func TestInstallSkillOwnershipConflictIsActionable(t *testing.T) {
+	mgr := plugin.NewManager(&stubReg{}, failingSkills{installErr: plugin.ErrSkillDestinationConflict}, t.TempDir(), "")
+	h := newHandlerWithManager(mgr)
+	rr := postInstall(t, h, claudeBundle(t), true)
+	if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "independently owned") {
+		t.Fatalf("install conflict status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(listBody(t, h), "reaper") {
+		t.Fatalf("failed install recorded a plugin: %s", listBody(t, h))
+	}
+}
+
+func TestPluginSkillMutationConflictsStayUserResolvable(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		message string
+	}{
+		{name: "destination", err: plugin.ErrSkillDestinationConflict, message: "independently owned"},
+		{name: "edited", err: plugin.ErrSkillOwnershipChanged, message: "changed after installation"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			respondPluginMutationError(rr, tt.err)
+			if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), tt.message) {
+				t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+			}
+		})
 	}
 }
 

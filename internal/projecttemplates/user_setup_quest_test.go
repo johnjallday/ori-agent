@@ -427,6 +427,45 @@ func TestUserSetupQuestEligibilityReportsEachMissingOwner(t *testing.T) {
 	}
 }
 
+func TestUserSetupQuestAcceptsSplitProjectHomeTarget(t *testing.T) {
+	_, template := userQuestTemplateFixture(t)
+	template.AssistantProgram = nil
+	template.AssistantProject = &AssistantProjectDeclaration{
+		SchemaVersion: AssistantProjectSchemaVersion,
+		Version:       1,
+		ID:            "reaper-song-team",
+		Home: AssistantProjectHomeReference{
+			ProviderPluginID:  "music-project-management",
+			ProgramID:         "music-producer-assistant",
+			HomeSchemaVersion: AssistantProgramHomeSchemaVersion,
+			MinHomeVersion:    1,
+			MaxHomeVersion:    1,
+		},
+		Roles: []AssistantProjectRole{{
+			ID: "producer", Label: "Producer", Required: true, Primary: true,
+			SystemPrompt: "Coordinate only this project.",
+		}},
+	}
+	eligibility := EvaluateUserSetupQuestEligibility(template)
+	if !eligibility.Eligible {
+		t.Fatalf("split eligibility = %+v", eligibility)
+	}
+	quest, err := NewUserSetupQuest(template, nil, DefaultUserSetupQuestDraft())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if quest.Declaration.ExpectedAssistantProgramID != "music-producer-assistant" {
+		t.Fatalf("program target = %q", quest.Declaration.ExpectedAssistantProgramID)
+	}
+	before := UserSetupQuestExecutionDigest(template)
+	changed := template
+	changed.AssistantProject = CloneAssistantProjectDeclaration(template.AssistantProject)
+	changed.AssistantProject.Roles[0].SystemPrompt = "Changed project authority."
+	if after := UserSetupQuestExecutionDigest(changed); after == before {
+		t.Fatal("split project declaration did not participate in the execution digest")
+	}
+}
+
 func TestUserSetupQuestDuplicateAndImportRemapAllStableIdentities(t *testing.T) {
 	library, template := userQuestTemplateFixture(t)
 	draft := DefaultUserSetupQuestDraft()

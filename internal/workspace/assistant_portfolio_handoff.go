@@ -192,7 +192,11 @@ func (service *AssistantPortfolioService) handoffProjection(project *Workspace, 
 		AuthorityBoundary: "Creates one child-owned Ticket only; the Home receives no child tools or project access.",
 	}
 	var primaryRoleID string
-	for _, role := range state.Declaration.Roles {
+	projectRoles := state.Declaration.Roles
+	if len(link.ProjectRoles) > 0 {
+		projectRoles = link.ProjectRoles
+	}
+	for _, role := range projectRoles {
 		if role.Scope == AssistantRoleScopeProject && role.Primary {
 			primaryRoleID = role.ID
 			break

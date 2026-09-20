@@ -11,6 +11,7 @@ import (
 	"time"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
+	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -60,33 +61,35 @@ type assistantMigrationCommitRequest struct {
 }
 
 type assistantProgramSummary struct {
-	Available        bool                                            `json:"available"`
-	ActivationNeeded bool                                            `json:"activation_needed,omitempty"`
-	MigrationNeeded  bool                                            `json:"migration_needed,omitempty"`
-	StationID        string                                          `json:"station_id,omitempty"`
-	ProjectID        string                                          `json:"project_id,omitempty"`
-	IsStation        bool                                            `json:"is_station,omitempty"`
-	Hired            bool                                            `json:"hired,omitempty"`
-	PluginAvailable  bool                                            `json:"plugin_available"`
-	StateRevision    int64                                           `json:"state_revision,omitempty"`
-	PrimaryName      string                                          `json:"primary_name,omitempty"`
-	Provider         string                                          `json:"provider,omitempty"`
-	Model            string                                          `json:"model,omitempty"`
-	StageID          string                                          `json:"stage_id,omitempty"`
-	StageLabel       string                                          `json:"stage_label,omitempty"`
-	Level            int                                             `json:"level,omitempty"`
-	AcceptedTasks    int                                             `json:"accepted_tasks,omitempty"`
-	NextThreshold    int                                             `json:"next_threshold,omitempty"`
-	Remaining        int                                             `json:"remaining,omitempty"`
-	PromotionPending bool                                            `json:"promotion_pending,omitempty"`
-	Declaration      *workspace.AssistantProgramDeclaration          `json:"declaration,omitempty"`
-	Roster           []workspace.AssistantRoleBinding                `json:"roster,omitempty"`
-	RosterScope      workspace.AssistantRoleScope                    `json:"roster_scope,omitempty"`
-	BindingRevision  int64                                           `json:"binding_revision,omitempty"`
-	LegacyRoster     []workspace.AssistantRoleBinding                `json:"legacy_roster,omitempty"`
-	Portfolio        []workspace.AssistantPortfolioProjectProjection `json:"portfolio,omitempty"`
-	RoleProfiles     []assistantProgramRoleProfile                   `json:"role_profiles,omitempty"`
-	Projects         []assistantProgramProject                       `json:"projects,omitempty"`
+	Available                bool                                            `json:"available"`
+	ActivationNeeded         bool                                            `json:"activation_needed,omitempty"`
+	MigrationNeeded          bool                                            `json:"migration_needed,omitempty"`
+	StationID                string                                          `json:"station_id,omitempty"`
+	ProjectID                string                                          `json:"project_id,omitempty"`
+	IsStation                bool                                            `json:"is_station,omitempty"`
+	Hired                    bool                                            `json:"hired,omitempty"`
+	PluginAvailable          bool                                            `json:"plugin_available"`
+	HomeProviderAvailable    bool                                            `json:"home_provider_available"`
+	ProjectProviderAvailable bool                                            `json:"project_provider_available"`
+	StateRevision            int64                                           `json:"state_revision,omitempty"`
+	PrimaryName              string                                          `json:"primary_name,omitempty"`
+	Provider                 string                                          `json:"provider,omitempty"`
+	Model                    string                                          `json:"model,omitempty"`
+	StageID                  string                                          `json:"stage_id,omitempty"`
+	StageLabel               string                                          `json:"stage_label,omitempty"`
+	Level                    int                                             `json:"level,omitempty"`
+	AcceptedTasks            int                                             `json:"accepted_tasks,omitempty"`
+	NextThreshold            int                                             `json:"next_threshold,omitempty"`
+	Remaining                int                                             `json:"remaining,omitempty"`
+	PromotionPending         bool                                            `json:"promotion_pending,omitempty"`
+	Declaration              *workspace.AssistantProgramDeclaration          `json:"declaration,omitempty"`
+	Roster                   []workspace.AssistantRoleBinding                `json:"roster,omitempty"`
+	RosterScope              workspace.AssistantRoleScope                    `json:"roster_scope,omitempty"`
+	BindingRevision          int64                                           `json:"binding_revision,omitempty"`
+	LegacyRoster             []workspace.AssistantRoleBinding                `json:"legacy_roster,omitempty"`
+	Portfolio                []workspace.AssistantPortfolioProjectProjection `json:"portfolio,omitempty"`
+	RoleProfiles             []assistantProgramRoleProfile                   `json:"role_profiles,omitempty"`
+	Projects                 []assistantProgramProject                       `json:"projects,omitempty"`
 }
 
 type assistantProgramRoleProfile struct {
@@ -166,37 +169,40 @@ func (h *Handler) requiredGroupRequirementWorkspace(workspaceID string) (*worksp
 	return nil, false
 }
 
-func (h *Handler) syncAssistantPluginAvailability(station *workspace.Workspace) *workspace.Workspace {
-	if h == nil || h.installedPluginLister == nil || h.workspaceTaskStore == nil || station == nil {
-		return station
+func (h *Handler) assistantHomeProviderAvailable(station *workspace.Workspace) bool {
+	if h == nil || station == nil {
+		return false
 	}
 	state := station.GetAssistantProgramState()
 	if state == nil {
-		return station
+		return false
+	}
+	if h.installedPluginLister == nil {
+		return state.PluginAvailable
 	}
 	installed, err := h.installedPluginLister.List()
-	available := false
 	if err != nil {
-		installed = nil
+		return false
+	}
+	owner := state.HomeProvider
+	if owner == nil && state.GroupTemplate != nil {
+		owner = state.GroupTemplate.ProgramHomeOwner
+	}
+	if owner != nil {
+		return plugin.IndependentHomeProviderEvidenceAvailable(installed, owner)
 	}
 	for _, candidate := range installed {
 		if candidate.Enabled && strings.EqualFold(strings.TrimSpace(candidate.Name), state.Key.PluginID) {
-			available = true
-			break
+			return true
 		}
 	}
-	if available != state.PluginAvailable {
-		if err := workspace.NewAssistantProgramStore(h.workspaceTaskStore).SetPluginAvailable(station.ID, available); err == nil {
-			station, _ = h.workspaceTaskStore.Get(station.ID)
-		}
-	}
-	return station
+	return false
 }
 
 func (h *Handler) requireAssistantWritable(w http.ResponseWriter, station *workspace.Workspace) (*workspace.Workspace, bool) {
-	station = h.syncAssistantPluginAvailability(station)
 	state := station.GetAssistantProgramState()
-	if state == nil || !state.PluginAvailable {
+	available := state != nil && h.assistantHomeProviderAvailable(station)
+	if state == nil || !available {
 		_ = orihttp.RespondConflict(w, "The assistant contribution is disabled; existing data is read-only")
 		return station, false
 	}
@@ -204,18 +210,37 @@ func (h *Handler) requireAssistantWritable(w http.ResponseWriter, station *works
 }
 
 func (h *Handler) buildAssistantProgramSummary(station, project *workspace.Workspace) (assistantProgramSummary, error) {
-	station = h.syncAssistantPluginAvailability(station)
 	state := station.GetAssistantProgramState()
 	if state == nil || state.Declaration == nil {
 		return assistantProgramSummary{}, workspace.ErrAssistantStationNotFound
 	}
+	homeProviderAvailable := h.assistantHomeProviderAvailable(station)
 	summary := assistantProgramSummary{
 		Available: true, StationID: station.ID, IsStation: project == nil,
 		MigrationNeeded: state.SchemaVersion == workspace.AssistantProgramLegacyStateSchemaVersion,
-		Hired:           state.Hired, PluginAvailable: state.PluginAvailable, StateRevision: state.StateRevision,
+		Hired:           state.Hired, PluginAvailable: homeProviderAvailable,
+		HomeProviderAvailable: homeProviderAvailable, ProjectProviderAvailable: homeProviderAvailable, StateRevision: state.StateRevision,
 		PrimaryName: state.PrimaryName, Provider: state.Provider, Model: state.Model,
 		StageID: state.StageID, Level: state.Level, AcceptedTasks: state.AcceptedCompletions,
 		Declaration: workspace.CloneAssistantProgramDeclaration(state.Declaration),
+	}
+	if project != nil {
+		if link := project.GetAssistantProjectLink(); link != nil && len(link.ProjectRoles) > 0 {
+			summary.Declaration.Roles = append(summary.Declaration.Roles, link.ProjectRoles...)
+		}
+	}
+	if project != nil && state.HomeProvider != nil && h.installedPluginLister != nil {
+		if link := project.GetAssistantProjectLink(); link != nil && link.ProjectProvider != nil {
+			installed, listErr := h.installedPluginLister.List()
+			if listErr != nil {
+				summary.HomeProviderAvailable = false
+				summary.ProjectProviderAvailable = false
+			} else {
+				summary.HomeProviderAvailable = plugin.IndependentHomeProviderEvidenceAvailable(installed, state.HomeProvider)
+				summary.ProjectProviderAvailable = plugin.IndependentProjectProviderEvidenceAvailable(installed, link.ProjectProvider)
+			}
+			summary.PluginAvailable = summary.HomeProviderAvailable && summary.ProjectProviderAvailable
+		}
 	}
 	if len(state.Roster) > 0 {
 		summary.LegacyRoster = append([]workspace.AssistantRoleBinding(nil), state.Roster...)
@@ -245,11 +270,17 @@ func (h *Handler) buildAssistantProgramSummary(station, project *workspace.Works
 				bindings = link.ProjectBindings.Bindings
 			}
 		}
+		roles := state.Declaration.Roles
+		if project != nil {
+			if link := project.GetAssistantProjectLink(); link != nil && len(link.ProjectRoles) > 0 {
+				roles = link.ProjectRoles
+			}
+		}
 		profilesByRole := make(map[string]workspace.AssistantRoleBinding, len(bindings))
 		for _, binding := range bindings {
 			profilesByRole[binding.RoleID] = binding
 		}
-		for _, role := range state.Declaration.Roles {
+		for _, role := range roles {
 			if role.Scope != scope {
 				continue
 			}
@@ -315,9 +346,11 @@ func (h *Handler) GetAssistantProgram(w http.ResponseWriter, r *http.Request) {
 	workspaceID := strings.TrimSpace(r.PathValue("workspaceID"))
 	station, project, err := h.assistantProgramStation(workspaceID)
 	if errors.Is(err, workspace.ErrAssistantProgramUnavailable) && project != nil {
-		provenance := project.GetTemplateProvenance()
-		activationNeeded := provenance != nil && provenance.PluginOwner != nil
-		_ = orihttp.RespondSuccess(w, assistantProgramSummary{Available: false, ActivationNeeded: activationNeeded, ProjectID: project.ID})
+		_ = orihttp.RespondSuccess(w, assistantProgramSummary{
+			Available:        false,
+			ActivationNeeded: h.assistantProgramActivationAvailable(project),
+			ProjectID:        project.ID,
+		})
 		return
 	}
 	if err != nil {
@@ -330,6 +363,19 @@ func (h *Handler) GetAssistantProgram(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = orihttp.RespondSuccess(w, summary)
+}
+
+func (h *Handler) assistantProgramActivationAvailable(project *workspace.Workspace) bool {
+	if h == nil || project == nil || h.projectTemplateResolver == nil {
+		return false
+	}
+	provenance := project.GetTemplateProvenance()
+	if provenance == nil || provenance.PluginOwner == nil {
+		return false
+	}
+	template, err := h.projectTemplateResolver(provenance.TemplateID, "")
+	return err == nil && template.AssistantProgram != nil && template.PluginOwner != nil &&
+		strings.EqualFold(template.PluginOwner.PluginID, provenance.PluginOwner.PluginID)
 }
 
 func (h *Handler) ActivateAssistantProgram(w http.ResponseWriter, r *http.Request) {
@@ -516,9 +562,12 @@ func (h *Handler) HireAssistantProgram(w http.ResponseWriter, r *http.Request) {
 		_ = orihttp.RespondNotFound(w, "Assistant program not found")
 		return
 	}
-	station = h.syncAssistantPluginAvailability(station)
 	state := station.GetAssistantProgramState()
-	if !state.PluginAvailable {
+	// A split project's reviewed staffer gates the requested scope against its
+	// own provider. Do not let an unavailable Home provider globally disable a
+	// still-current project provider. Combined legacy/current programs have no
+	// independent Home owner and retain their existing single-provider gate.
+	if state.HomeProvider == nil && !h.assistantHomeProviderAvailable(station) {
 		_ = orihttp.RespondConflict(w, "The assistant contribution is disabled; existing data remains available")
 		return
 	}
@@ -706,7 +755,10 @@ func (h *Handler) RunAssistantReflection(w http.ResponseWriter, r *http.Request)
 		_ = orihttp.RespondNotFound(w, "Assistant program not found")
 		return
 	}
-	station = h.syncAssistantPluginAvailability(station)
+	var writable bool
+	if station, writable = h.requireAssistantWritable(w, station); !writable {
+		return
+	}
 	learningStore, ok := h.assistantLearningStore()
 	if !ok || h.assistantReflectionModel == nil {
 		_ = orihttp.RespondServiceUnavailable(w, "Assistant reflection is unavailable")
@@ -750,7 +802,10 @@ func (h *Handler) GenerateAssistantSuggestions(w http.ResponseWriter, r *http.Re
 		_ = orihttp.RespondNotFound(w, "Assistant program not found")
 		return
 	}
-	station = h.syncAssistantPluginAvailability(station)
+	var writable bool
+	if station, writable = h.requireAssistantWritable(w, station); !writable {
+		return
+	}
 	projectID := strings.TrimSpace(request.ProjectID)
 	if currentProject != nil {
 		projectID = currentProject.ID

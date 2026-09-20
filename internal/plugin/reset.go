@@ -152,14 +152,15 @@ func (p ResetPaths) validate() error {
 // summary fields are safe to render; the path fields are private evidence used
 // only by this package's apply and verify operations.
 type ResetItem struct {
-	Name       string   `json:"name"`
-	Version    string   `json:"version,omitempty"`
-	Enabled    bool     `json:"enabled"`
-	Generation uint64   `json:"generation,omitempty"`
-	MCPServers []string `json:"mcp_servers,omitempty"`
-	Skills     []string `json:"skills,omitempty"`
-	Surfaces   bool     `json:"surfaces"`
-	Artifacts  int      `json:"artifacts,omitempty"`
+	Name                 string   `json:"name"`
+	Version              string   `json:"version,omitempty"`
+	Enabled              bool     `json:"enabled"`
+	Generation           uint64   `json:"generation,omitempty"`
+	MCPServers           []string `json:"mcp_servers,omitempty"`
+	Skills               []string `json:"skills,omitempty"`
+	SkillOwnershipSchema int      `json:"skill_ownership_schema,omitempty"`
+	Surfaces             bool     `json:"surfaces"`
+	Artifacts            int      `json:"artifacts,omitempty"`
 	// Managed reports whether Ori created and owns the install root. A linked
 	// source lives outside the managed clone directory and is never removed.
 	Managed     bool   `json:"managed"`
@@ -228,7 +229,11 @@ func InspectReset(paths ResetPaths) (ResetInventory, []ResetProblem) {
 		item := ResetItem{
 			Name: record.Name, Version: boundedResetText(record.Version), Enabled: record.Enabled,
 			Generation: record.Generation, Surfaces: record.WorkspaceSurfaces != nil,
-			Artifacts: len(record.ResolvedArtifacts),
+			Artifacts: len(record.ResolvedArtifacts), SkillOwnershipSchema: record.SkillOwnershipSchema,
+		}
+		if record.SkillOwnershipSchema < 0 || record.SkillOwnershipSchema > SkillOwnershipSchemaVersion {
+			add(ResetProblemComponentUnsafe, "an installed record uses an unsupported skill ownership schema")
+			continue
 		}
 		if len(record.MCPServers) > maxResetComponentItems || len(record.Skills) > maxResetComponentItems {
 			add(ResetProblemInventoryTooLarge, "an installed record declares more components than one reviewed reset supports")
@@ -269,8 +274,8 @@ func InspectReset(paths ResetPaths) (ResetInventory, []ResetProblem) {
 				safe = false
 				continue
 			}
-			if err := checkResetSkillDestination(paths.SkillsRoot, skill); err != nil {
-				add(ResetProblemSkillUnexpected, "a recorded personal skill destination is a link or an unexpected file type")
+			if err := checkResetSkillOwnership(paths.SkillsRoot, record.Name, skill, record.SkillOwnershipSchema); err != nil {
+				add(ResetProblemSkillUnexpected, "a recorded personal skill destination is unowned, changed, linked, or an unexpected file type")
 				safe = false
 				continue
 			}
@@ -357,11 +362,14 @@ func validateResetItem(paths ResetPaths, item ResetItem) error {
 	if !validResetSegment(item.Name) {
 		return fmt.Errorf("plugin: reset item name is unsafe")
 	}
+	if item.SkillOwnershipSchema < 0 || item.SkillOwnershipSchema > SkillOwnershipSchemaVersion {
+		return fmt.Errorf("plugin: reset skill ownership schema is unsupported")
+	}
 	for _, skill := range item.Skills {
 		if !validResetSegment(skill) {
 			return fmt.Errorf("plugin: reset skill name is unsafe")
 		}
-		if err := checkResetSkillDestination(paths.SkillsRoot, skill); err != nil {
+		if err := checkResetSkillOwnership(paths.SkillsRoot, item.Name, skill, item.SkillOwnershipSchema); err != nil {
 			return err
 		}
 	}
@@ -550,6 +558,30 @@ func removeResetTree(root, path string) error {
 // directory at the recorded destination. A symlink, regular file, or special
 // file there means the shared personal skills root no longer matches what the
 // install recorded, and removing it could affect something Ori does not own.
+func checkResetSkillOwnership(root, pluginName, skill string, ownershipSchema int) error {
+	if err := checkResetSkillDestination(root, skill); err != nil {
+		return err
+	}
+	destination := filepath.Join(root, skill)
+	if _, err := os.Lstat(destination); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if _, err := os.Lstat(filepath.Join(destination, SkillOwnershipFileName)); errors.Is(err, os.ErrNotExist) {
+		// Only records explicitly predating ownership receipts retain their
+		// conservative registry-based cleanup behavior. A missing marker from a
+		// new managed copy is an ownership loss and must fail closed.
+		if ownershipSchema == 0 {
+			return nil
+		}
+		return ErrSkillDestinationConflict
+	} else if err != nil {
+		return err
+	}
+	return VerifySkillOwnership(destination, pluginName, skill)
+}
+
 func checkResetSkillDestination(root, skill string) error {
 	if !validResetSegment(skill) {
 		return fmt.Errorf("plugin: reset skill name is unsafe")

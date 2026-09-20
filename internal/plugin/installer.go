@@ -23,6 +23,58 @@ type SkillInstaller interface {
 	RemoveSkill(pluginName, skillName string) error
 }
 
+// SkillOwnershipVerifier is implemented by installers that can prove a shared
+// destination is still the exact plugin-owned copy before a lifecycle operation
+// mutates any other component.
+type SkillOwnershipVerifier interface {
+	VerifySkill(pluginName, skillName string) error
+}
+
+// SkillRollbackSnapshot holds immutable copies of the currently installed
+// skill bytes while an update replaces shared personal-skill destinations.
+// Restore is intentionally scoped to destinations actually removed before a
+// failure; Discard releases the private staging area after commit or rollback.
+type SkillRollbackSnapshot interface {
+	Restore(skillNames []string) error
+	Discard() error
+}
+
+// SkillRollbackSnapshotter is implemented by installers that publish skills to
+// shared mutable storage. The lifecycle manager uses it to restore the exact
+// receipt-owned bytes rather than re-reading a source checkout that an update
+// may already have changed.
+type SkillRollbackSnapshotter interface {
+	PrepareSkillRollback(pluginName string, skillNames []string) (SkillRollbackSnapshot, error)
+}
+
+func verifyOwnedSkills(installer SkillInstaller, pluginName string, skills []string) error {
+	verifier, ok := installer.(SkillOwnershipVerifier)
+	if !ok {
+		return nil
+	}
+	for _, skill := range skills {
+		if err := verifier.VerifySkill(pluginName, skill); err != nil {
+			return fmt.Errorf("plugin %q: verify skill %q ownership: %w", pluginName, skill, err)
+		}
+	}
+	return nil
+}
+
+func prepareSkillRollback(installer SkillInstaller, pluginName string, skills []string) (SkillRollbackSnapshot, error) {
+	if len(skills) == 0 {
+		return nil, nil
+	}
+	snapshotter, ok := installer.(SkillRollbackSnapshotter)
+	if !ok {
+		return nil, nil
+	}
+	snapshot, err := snapshotter.PrepareSkillRollback(pluginName, skills)
+	if err != nil {
+		return nil, fmt.Errorf("plugin %q: preserve installed skills for rollback: %w", pluginName, err)
+	}
+	return snapshot, nil
+}
+
 // RegisterResult reports what an install registered, plus non-fatal warnings.
 type RegisterResult struct {
 	MCPServers     []string               // namespaced server names registered
