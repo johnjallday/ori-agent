@@ -12,7 +12,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 61
+const schemaVersion = 62
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -189,9 +189,100 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration060WorkspaceMapAgentPositions(ctx)
 	case 61:
 		return db.migration061ResultParcels(ctx)
+	case 62:
+		return db.migration062AssistantSetup(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
+}
+
+// migration062AssistantSetup adds the bounded cross-domain coordinator state
+// for assistant-led File Janitor setup. The tables intentionally contain no
+// paths, filenames, prompts, credentials, or arbitrary JSON.
+func (db *DB) migration062AssistantSetup(ctx context.Context) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS assistant_setup_runs (
+			id TEXT PRIMARY KEY,
+			owner_user_id TEXT NOT NULL,
+			assistant_id TEXT NOT NULL,
+			capability_id TEXT NOT NULL,
+			status TEXT NOT NULL,
+			current_step TEXT NOT NULL,
+			revision INTEGER NOT NULL,
+			proposal_revision TEXT NOT NULL,
+			blueprint_id TEXT NOT NULL DEFAULT '',
+			blueprint_version INTEGER NOT NULL DEFAULT 0,
+			blueprint_digest TEXT NOT NULL DEFAULT '',
+			team_plan_revision TEXT NOT NULL DEFAULT '',
+			team_role_id TEXT NOT NULL DEFAULT '',
+			team_role_name TEXT NOT NULL DEFAULT '',
+			team_role_action TEXT NOT NULL DEFAULT '',
+			team_provider TEXT NOT NULL DEFAULT '',
+			team_model TEXT NOT NULL DEFAULT '',
+			team_model_configured INTEGER NOT NULL DEFAULT 0,
+			team_config_digest TEXT NOT NULL DEFAULT '',
+			team_warning TEXT NOT NULL DEFAULT '',
+			target_mode TEXT NOT NULL,
+			target_workspace_id TEXT NOT NULL,
+			last_error_code TEXT,
+			failed_step TEXT,
+			deferred_at DATETIME,
+			retry_after DATETIME,
+			reconcile_after DATETIME,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_assistant_setup_one_active
+			ON assistant_setup_runs(owner_user_id, capability_id)
+			WHERE status IN ('active','deferred','reconcile_required')`,
+		`CREATE INDEX IF NOT EXISTS idx_assistant_setup_runs_target
+			ON assistant_setup_runs(owner_user_id, target_workspace_id)`,
+		`CREATE TABLE IF NOT EXISTS assistant_setup_operations (
+			id TEXT PRIMARY KEY,
+			run_id TEXT NOT NULL,
+			owner_user_id TEXT NOT NULL,
+			kind TEXT NOT NULL,
+			status TEXT NOT NULL,
+			attempt_count INTEGER NOT NULL DEFAULT 0,
+			idempotency_digest TEXT NOT NULL,
+			review_digest TEXT NOT NULL,
+			expected_run_revision INTEGER NOT NULL,
+			workspace_id TEXT NOT NULL DEFAULT '',
+			profile_provenance_id TEXT NOT NULL DEFAULT '',
+			safe_outcome_code TEXT NOT NULL DEFAULT '',
+			safe_error_code TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			started_at DATETIME,
+			completed_at DATETIME,
+			updated_at DATETIME NOT NULL,
+			UNIQUE(run_id, kind),
+			FOREIGN KEY(run_id) REFERENCES assistant_setup_runs(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_assistant_setup_operations_owner
+			ON assistant_setup_operations(owner_user_id, run_id)`,
+		`CREATE TABLE IF NOT EXISTS assistant_setup_resources (
+			operation_id TEXT NOT NULL,
+			run_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL DEFAULT '',
+			resource_kind TEXT NOT NULL,
+			resource_id TEXT NOT NULL,
+			ownership TEXT NOT NULL,
+			store_origin TEXT NOT NULL DEFAULT '',
+			version_digest TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			PRIMARY KEY(operation_id, resource_kind, resource_id),
+			FOREIGN KEY(operation_id) REFERENCES assistant_setup_operations(id) ON DELETE CASCADE,
+			FOREIGN KEY(run_id) REFERENCES assistant_setup_runs(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_assistant_setup_resources_run
+			ON assistant_setup_resources(run_id, resource_kind)`,
+	}
+	for _, statement := range statements {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("failed to create assistant setup schema: %w", err)
+		}
+	}
+	return nil
 }
 
 // migration001Baseline creates the current database schema from scratch.

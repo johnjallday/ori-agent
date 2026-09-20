@@ -210,6 +210,16 @@
   }
 
   async function start() {
+    // The Personal Assistant card is now the canonical recommendation and run
+    // surface. It performs a read-only proposal first and retains the manual
+    // creator only as an explicit action inside that proposal. Keep the legacy
+    // walkthrough as a bounded fallback for builds where the shared card is not
+    // present at all; never fall back after the coordinator handled the entry.
+    var assistantSetup = typeof window !== 'undefined' ? window.AssistantLedSetup : null;
+    if (assistantSetup && typeof assistantSetup.startFromMission === 'function') {
+      clearQuestParam();
+      return !!(await assistantSetup.startFromMission());
+    }
     if (!(await eligible())) return false;
     var host = creator();
     if (!host || typeof host.showAddWorkspaceModal !== 'function') return false;

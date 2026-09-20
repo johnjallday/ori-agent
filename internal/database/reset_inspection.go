@@ -31,6 +31,7 @@ func ResetRecordTables() []string {
 		"setup_journey_run", "setup_journey_operation_receipt",
 		"setup_journey_declaration_migration_receipt", "setup_journey_review_receipt",
 		"setup_user_template_binding", "setup_user_template_root_claim",
+		"assistant_setup_runs", "assistant_setup_operations", "assistant_setup_resources",
 		"sample_library_state", "sample_library_root", "sample_library_entry",
 		"sample_library_content_fact", "sample_library_annotation", "sample_library_collection",
 		"sample_library_collection_member", "sample_library_child_copy",

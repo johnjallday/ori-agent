@@ -11,6 +11,7 @@ import (
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/agentmap"
 	"github.com/johnjallday/ori-agent/internal/agentmaphttp"
+	"github.com/johnjallday/ori-agent/internal/assistantsetup"
 	"github.com/johnjallday/ori-agent/internal/calendarhttp"
 	"github.com/johnjallday/ori-agent/internal/characterhttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
@@ -334,6 +335,8 @@ type ServerBuilder struct {
 	personalAssistantMemory  *personalassistant.MemoryService
 	personalAssignment       *personalassistant.AssignmentService
 	personalAssistantHandler *personalassistanthttp.Handler
+	assistantSetupStore      *assistantsetup.SQLiteStore
+	assistantSetupService    *assistantsetup.Service
 	setupJourneyStore        *setupjourney.SQLiteStore
 	// integrationReleases resolves the latest reviewed integration release for
 	// both the guided setup and the Plugins page update check.

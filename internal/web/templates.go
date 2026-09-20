@@ -76,6 +76,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/components/workspace-hub.tmpl",
 		"templates/components/ask-ori-activity.tmpl",
 		"templates/components/personal-assistant-today.tmpl",
+		"templates/components/assistant-led-setup.tmpl",
 		"templates/components/dashboard.tmpl",
 		"templates/components/session-modals.tmpl",
 		"templates/components/search-palette.tmpl",

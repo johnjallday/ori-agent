@@ -1,0 +1,30 @@
+{{define "assistant-led-setup.tmpl"}}
+<section id="assistantLedSetup" class="assistant-led-setup" data-view-state="loading"
+         aria-labelledby="assistantLedSetupTitle" hidden>
+  <header class="assistant-led-setup__header">
+    <div>
+      <span class="assistant-led-setup__eyebrow">Set up with your assistant</span>
+      <h3 id="assistantLedSetupTitle" class="assistant-led-setup__title" tabindex="-1">File Janitor</h3>
+    </div>
+    <span id="assistantLedSetupState" class="assistant-led-setup__state"></span>
+  </header>
+  <p id="assistantLedSetupIdentity" class="assistant-led-setup__identity"></p>
+  <p id="assistantLedSetupStatus" class="assistant-led-setup__status" role="status" aria-live="polite"></p>
+  <div id="assistantLedSetupChoices" class="assistant-led-setup__choices" hidden></div>
+  <div id="assistantLedSetupPlan" class="assistant-led-setup__plan" hidden>
+    <p id="assistantLedSetupTarget" class="assistant-led-setup__target"></p>
+    <ul id="assistantLedSetupTeam" class="assistant-led-setup__team" aria-label="Reviewed File Janitor team"></ul>
+    <details id="assistantLedSetupDetails" class="assistant-led-setup__details">
+      <summary>What this setup will do</summary>
+      <ul>
+        <li id="assistantLedSetupMetadata"></li>
+        <li id="assistantLedSetupFolder"></li>
+        <li id="assistantLedSetupMonitoring"></li>
+        <li id="assistantLedSetupReview"></li>
+      </ul>
+    </details>
+  </div>
+  <p id="assistantLedSetupError" class="assistant-led-setup__error" role="alert" hidden></p>
+  <div id="assistantLedSetupActions" class="assistant-led-setup__actions"></div>
+</section>
+{{end}}

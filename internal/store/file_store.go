@@ -254,6 +254,10 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 			newAgent.Appearance = config.Appearance.Clone()
 			newAgent.Appearance.Normalize()
 		}
+		if config != nil && config.AssistantSetup != nil {
+			provenance := *config.AssistantSetup
+			newAgent.AssistantSetup = &provenance
+		}
 		// Initialize statistics for the new agent
 		newAgent.InitializeStatistics()
 		// Initialize evolution defaults for the new agent
@@ -602,11 +606,12 @@ const definitionFileName = "agent_settings.json"
 // first-class field is invisible on disk until it is listed here. Appearance
 // is listed for exactly that reason (FR-1/FR-68).
 type persistedDefinition struct {
-	Role         types.AgentRole        `json:"role,omitempty"`
-	Capabilities []string               `json:"capabilities,omitempty"`
-	Settings     types.Settings         `json:"Settings"`
-	Metadata     *types.AgentMetadata   `json:"metadata,omitempty"`
-	Appearance   *types.AgentAppearance `json:"appearance,omitempty"`
+	Role           types.AgentRole                 `json:"role,omitempty"`
+	Capabilities   []string                        `json:"capabilities,omitempty"`
+	Settings       types.Settings                  `json:"Settings"`
+	Metadata       *types.AgentMetadata            `json:"metadata,omitempty"`
+	Appearance     *types.AgentAppearance          `json:"appearance,omitempty"`
+	AssistantSetup *agent.AssistantSetupProvenance `json:"assistant_setup,omitempty"`
 	// Paused travels with the agent. In memory it is Status == disabled, which
 	// every runtime check already refuses.
 	Paused bool `json:"paused,omitempty"`
@@ -619,12 +624,13 @@ func encodeDefinition(ag *agent.Agent) ([]byte, error) {
 	// code path — not just the migrating load path — is canonical on disk.
 	ag.EnsureAppearance()
 	data, err := json.MarshalIndent(persistedDefinition{
-		Role:         ag.Role,
-		Capabilities: ag.Capabilities,
-		Settings:     ag.Settings,
-		Metadata:     ag.Metadata,
-		Appearance:   ag.Appearance,
-		Paused:       ag.Status == types.AgentStatusDisabled,
+		Role:           ag.Role,
+		Capabilities:   ag.Capabilities,
+		Settings:       ag.Settings,
+		Metadata:       ag.Metadata,
+		Appearance:     ag.Appearance,
+		AssistantSetup: ag.AssistantSetup,
+		Paused:         ag.Status == types.AgentStatusDisabled,
 	}, "", "  ")
 	if err != nil {
 		return nil, err

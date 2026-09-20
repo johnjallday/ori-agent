@@ -1,0 +1,183 @@
+.assistant-led-setup {
+  margin: 0.85rem 0;
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, var(--border-color, #64748b) 58%, transparent);
+  border-radius: 16px;
+  background:
+    radial-gradient(
+      circle at 100% 0,
+      color-mix(in srgb, #8b5cf6 13%, transparent),
+      transparent 44%
+    ),
+    color-mix(in srgb, var(--card-bg, #fff) 94%, #8b5cf6 6%);
+  color: var(--text-primary, #172033);
+}
+
+.assistant-led-setup__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.assistant-led-setup__eyebrow {
+  display: block;
+  margin-bottom: 0.2rem;
+  color: var(--text-secondary, #5b6475);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.assistant-led-setup__title {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.25;
+}
+
+.assistant-led-setup__title:focus-visible {
+  outline: 3px solid color-mix(in srgb, #7c3aed 55%, transparent);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+.assistant-led-setup__state {
+  flex: 0 0 auto;
+  padding: 0.25rem 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, #8b5cf6 14%, transparent);
+  color: var(--text-primary, #172033);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.assistant-led-setup__identity,
+.assistant-led-setup__status,
+.assistant-led-setup__target,
+.assistant-led-setup__error {
+  margin: 0.6rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.assistant-led-setup__identity {
+  color: var(--text-secondary, #5b6475);
+  font-size: 0.84rem;
+}
+
+.assistant-led-setup__status {
+  line-height: 1.45;
+}
+
+.assistant-led-setup__plan {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid color-mix(in srgb, var(--border-color, #64748b) 38%, transparent);
+}
+
+.assistant-led-setup__team,
+.assistant-led-setup__details ul {
+  margin: 0.55rem 0 0;
+  padding-left: 1.15rem;
+}
+
+.assistant-led-setup__team li,
+.assistant-led-setup__details li {
+  margin: 0.35rem 0;
+}
+
+.assistant-led-setup__details {
+  margin-top: 0.7rem;
+}
+
+.assistant-led-setup__details summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.assistant-led-setup__choices {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.75rem;
+}
+
+.assistant-led-setup__choice {
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--border-color, #64748b) 60%, transparent);
+  border-radius: 10px;
+  background: var(--card-bg, #fff);
+  color: inherit;
+  text-align: left;
+}
+
+.assistant-led-setup__choice:hover,
+.assistant-led-setup__choice:focus-visible {
+  border-color: #7c3aed;
+}
+
+.assistant-led-setup__error {
+  color: var(--danger-color, #b42318);
+  font-weight: 600;
+}
+
+.assistant-led-setup__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+}
+
+.assistant-led-setup__actions button,
+.assistant-led-setup__actions a {
+  min-height: 2.5rem;
+}
+
+.assistant-led-setup__actions .assistant-led-setup__primary {
+  padding: 0.55rem 0.8rem;
+  border: 0;
+  border-radius: 9px;
+  background: #6d28d9;
+  color: #fff;
+  font-weight: 700;
+}
+
+.assistant-led-setup__actions .assistant-led-setup__secondary {
+  padding: 0.55rem 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--border-color, #64748b) 65%, transparent);
+  border-radius: 9px;
+  background: transparent;
+  color: inherit;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.assistant-led-setup button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+@media (max-width: 420px) {
+  .assistant-led-setup {
+    padding: 0.85rem;
+    border-radius: 12px;
+  }
+
+  .assistant-led-setup__actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .assistant-led-setup__actions button,
+  .assistant-led-setup__actions a {
+    width: 100%;
+    text-align: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .assistant-led-setup * {
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+}

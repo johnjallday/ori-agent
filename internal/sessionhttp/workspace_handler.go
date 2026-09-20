@@ -707,6 +707,12 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ws := buildCreateWorkspace(req, kind, requestedTags, resolvedTemplate, templateResolved)
+	if assistantSetup, ok := assistantSetupCreationFromContext(r.Context()); ok {
+		// This server-only descriptor preallocates identity before any profile or
+		// workspace write. No browser JSON field can select these values.
+		ws.ID = assistantSetup.WorkspaceID
+		ws.OwnerUserID = assistantSetup.OwnerUserID
+	}
 	if groupPlan != nil {
 		ws.ID = groupPlan.claim.Operation.ChildWorkspaceID
 		ws.OwnerUserID = groupPlan.claim.Operation.OwnerUserID
@@ -717,7 +723,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	seed, ok := h.selectCreateWorkspaceEntryAgent(w, ws, req, kind, resolvedTemplate, templateResolved, strictTemplate, strictFreshTemplate)
+	seed, ok := h.selectCreateWorkspaceEntryAgent(r.Context(), w, ws, req, kind, resolvedTemplate, templateResolved, strictTemplate, strictFreshTemplate)
 	if !ok {
 		return
 	}
@@ -818,7 +824,13 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	if groupPlan != nil {
 		groupSnapshot = groupPlan.claim.Snapshot
 	}
-	if capabilityWarning := h.persistCreateWorkspaceTemplateProvenance(ws.ID, resolvedTemplate, templateResolved, groupSnapshot); capabilityWarning != "" {
+	var assistantSetupCreation *agentworkspace.AssistantSetupCreation
+	if descriptor, ok := assistantSetupCreationFromContext(r.Context()); ok {
+		assistantSetupCreation = &agentworkspace.AssistantSetupCreation{
+			RunID: descriptor.RunID, OperationID: descriptor.OperationID, ReviewDigest: descriptor.ReviewDigest,
+		}
+	}
+	if capabilityWarning := h.persistCreateWorkspaceTemplateProvenance(ws.ID, resolvedTemplate, templateResolved, assistantSetupCreation, groupSnapshot); capabilityWarning != "" {
 		if prov.projectWarning == "" {
 			prov.projectWarning = capabilityWarning
 		} else {
@@ -1001,7 +1013,7 @@ func buildCreateWorkspace(req createWorkspaceRequest, kind session.WorkspaceKind
 // explicit primary. This keeps creation atomic and never requires best-effort
 // post-create attachment requests.
 // Returns ok=false when an error response has already been written.
-func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *session.Workspace, req createWorkspaceRequest, kind session.WorkspaceKind, tmpl projecttemplates.Template, templateResolved bool, strictTemplate, strictFreshTemplate *projecttemplates.Template) (seedAgentsResult, bool) {
+func (h *Handler) selectCreateWorkspaceEntryAgent(ctx context.Context, w http.ResponseWriter, ws *session.Workspace, req createWorkspaceRequest, kind session.WorkspaceKind, tmpl projecttemplates.Template, templateResolved bool, strictTemplate, strictFreshTemplate *projecttemplates.Template) (seedAgentsResult, bool) {
 	var seed seedAgentsResult
 	usesExistingAgentRoster := req.ExistingAgentNames != nil
 
@@ -1020,7 +1032,7 @@ func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *ses
 				_ = orihttp.RespondBadRequest(w, err.Error())
 				return seed, false
 			}
-			seed, err = h.seedRoleStaffedAgents(ws, tmpl, staffing)
+			seed, err = h.seedRoleStaffedAgents(ctx, ws, tmpl, staffing)
 			if err != nil {
 				cleanupErrors := h.respondRoleStaffingError(seed, err)
 				response := map[string]any{
@@ -1442,7 +1454,7 @@ func (h *Handler) applyCreateWorkspaceTemplate(ctx context.Context, req createWo
 // later Update on the same workspace id — starter-task seeding runs right
 // after template application — would clobber a provenance write made here
 // earlier. Doing it last avoids that.
-func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl projecttemplates.Template, resolved bool, snapshots ...*agentworkspace.GroupRequirementSnapshot) string {
+func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl projecttemplates.Template, resolved bool, assistantSetup *agentworkspace.AssistantSetupCreation, snapshots ...*agentworkspace.GroupRequirementSnapshot) string {
 	if !resolved || strings.TrimSpace(tmpl.ID) == "" || h.workspaceTaskStore == nil {
 		return ""
 	}
@@ -1457,6 +1469,10 @@ func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl pro
 		return ""
 	}
 	prov := newTemplateProvenance(tmpl, snapshot)
+	if assistantSetup != nil {
+		creation := *assistantSetup
+		prov.AssistantSetup = &creation
+	}
 	// Provenance and the blueprint's declared capability installs are written in
 	// ONE update, so a workspace can never end up recorded as coming from the
 	// File Janitor blueprint while lacking the capability that blueprint exists

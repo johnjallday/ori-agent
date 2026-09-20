@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/assistantsetup"
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
@@ -76,6 +77,17 @@ type SpecialistOfferService interface {
 	Answer(ctx context.Context, userID string, request personalassistant.SpecialistOfferRequest) (*personalassistant.State, error)
 }
 
+// AssistantSetupService is the owner-scoped File Janitor setup coordinator.
+// Owner identity is supplied separately by this HTTP handler and never appears
+// in a request body.
+type AssistantSetupService interface {
+	Get(ctx context.Context, ownerUserID, selectedWorkspaceID string) (*assistantsetup.Projection, error)
+	Accept(ctx context.Context, ownerUserID, proposalRevision, selectedWorkspaceID string) (*assistantsetup.Projection, bool, error)
+	DeferRecommendation(ctx context.Context, ownerUserID, proposalRevision string) (*assistantsetup.Projection, error)
+	DeferRun(ctx context.Context, ownerUserID, runID string, ifVersion int64) (*assistantsetup.Projection, error)
+	ResumeRun(ctx context.Context, ownerUserID, runID string, ifVersion int64) (*assistantsetup.Projection, error)
+}
+
 // Handler serves /api/personal-assistant.
 type Handler struct {
 	service                    StateReader
@@ -88,6 +100,7 @@ type Handler struct {
 	renamer                    RenameService
 	capabilities               CapabilityReader
 	specialistOffers           SpecialistOfferService
+	assistantSetup             AssistantSetupService
 	provider                   userprofile.UserProvider
 	onFirstAssignmentCompleted func()
 	onHired                    func()
@@ -177,6 +190,12 @@ func (h *Handler) SetCapabilityService(service CapabilityReader) {
 func (h *Handler) SetSpecialistOfferService(service SpecialistOfferService) {
 	if h != nil {
 		h.specialistOffers = service
+	}
+}
+
+func (h *Handler) SetAssistantSetupService(service AssistantSetupService) {
+	if h != nil {
+		h.assistantSetup = service
 	}
 }
 

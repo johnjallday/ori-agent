@@ -13,6 +13,28 @@ import (
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
+func TestAssistantSetupProvenanceSurvivesStoreReopen(t *testing.T) {
+	dir := t.TempDir()
+	fs := writesStore(t, dir)
+	provenance := &agent.AssistantSetupProvenance{
+		ID: "profile-provenance-1", RunID: "run-1", OperationID: "operation-1",
+		ReviewDigest: "review-1", ConfigDigest: "config-1",
+	}
+	if err := fs.CreateAgent("File Curator", &CreateAgentConfig{AssistantSetup: provenance}); err != nil {
+		t.Fatal(err)
+	}
+	provenance.ID = "mutated-caller"
+
+	reopened := writesStore(t, dir)
+	loaded, found := reopened.GetAgent("File Curator")
+	if !found || loaded == nil || loaded.AssistantSetup == nil {
+		t.Fatalf("reopened provenance = %+v found=%v", loaded, found)
+	}
+	if loaded.AssistantSetup.ID != "profile-provenance-1" || loaded.AssistantSetup.OperationID != "operation-1" {
+		t.Fatalf("reopened provenance = %+v", loaded.AssistantSetup)
+	}
+}
+
 // These tests pin the write discipline that makes agent folders safe to keep
 // under git or a sync tool: a save touches only the agent it names, only when
 // its bytes change, atomically, and never over an edit made outside Ori.
