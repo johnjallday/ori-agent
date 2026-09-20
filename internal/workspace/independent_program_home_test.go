@@ -12,13 +12,13 @@ import (
 
 func splitProviderOwners() (AssistantProgramHomeOwner, AssistantProjectProviderOwner) {
 	return AssistantProgramHomeOwner{
-		PluginID: "music", PluginVersion: "2.0.0", ProgramID: "music_home", HomeSchemaVersion: 1, HomeVersion: 2,
-		DeclarationDigest: strings.Repeat("a", 64), PluginGeneration: 11, ComponentFingerprint: strings.Repeat("b", 64),
-	}, AssistantProjectProviderOwner{
-		PluginID: "reaper", PluginVersion: "4.0.0", BlueprintID: "song", BlueprintVersion: 7,
-		ProjectTeamID: "reaper_team", ProjectTeamSchema: 1, ProjectTeamVersion: 3,
-		ProjectTeamDigest: strings.Repeat("c", 64), PluginGeneration: 19, ComponentFingerprint: strings.Repeat("d", 64),
-	}
+			PluginID: "music", PluginVersion: "2.0.0", ProgramID: "music_home", HomeSchemaVersion: 1, HomeVersion: 2,
+			DeclarationDigest: strings.Repeat("a", 64), PluginGeneration: 11, ComponentFingerprint: strings.Repeat("b", 64),
+		}, AssistantProjectProviderOwner{
+			PluginID: "reaper", PluginVersion: "4.0.0", BlueprintID: "song", BlueprintVersion: 7,
+			ProjectTeamID: "reaper_team", ProjectTeamSchema: 1, ProjectTeamVersion: 3,
+			ProjectTeamDigest: strings.Repeat("c", 64), PluginGeneration: 19, ComponentFingerprint: strings.Repeat("d", 64),
+		}
 }
 
 func splitHomeDeclaration() *AssistantProgramDeclaration {
