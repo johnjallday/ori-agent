@@ -308,6 +308,30 @@ async function installFixtureRoutes(page: Page) {
       });
       return;
     }
+    // Assistant-led File Janitor setup is globally mounted for eligible
+    // relationships. This fictional README user already dismissed that
+    // recommendation, so the real controller keeps its card hidden while the
+    // Home and Map scenes remain exhaustive and deterministic.
+    if (url.pathname === '/api/personal-assistant/setup/file-janitor') {
+      await json(route, {
+        setup: {
+          schema_version: 1,
+          capability_id: 'file-janitor',
+          view_state: 'recommendation_deferred',
+          stale: false,
+          status_message: 'File Janitor setup is saved for later.',
+          relationship: {
+            assistant_id: 'assistant-readme',
+            display_name: 'Mira',
+            state: 'active',
+            eligible: true,
+            proactive: true
+          },
+          actions: []
+        }
+      });
+      return;
+    }
     if (url.pathname === '/api/personal-assistant/today') {
       await json(route, {
         today: {
