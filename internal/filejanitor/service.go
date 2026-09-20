@@ -82,7 +82,9 @@ const (
 	// CodeFolderConflict reports a folder already managed by another
 	// workspace's File Janitor, including one that merely contains or sits
 	// inside it (FR-49).
-	CodeFolderConflict = "folder_conflict"
+	CodeFolderConflict        = "folder_conflict"
+	CodeFolderChanged         = "folder_changed"
+	CodePrivacyReviewRequired = "privacy_review_required"
 )
 
 // Repair actions the UI can offer for a failing component.
@@ -261,6 +263,7 @@ func (s *Service) ApproveAutomation(workspaceID string) (Status, error) {
 			settings.AutomationApprovedAt = s.clock()
 		}
 		settings.Paused = false
+		settings.LastAssistedAutomation = nil
 		return nil
 	}); err != nil {
 		return Status{}, err
@@ -274,6 +277,7 @@ func (s *Service) ApproveAutomation(workspaceID string) (Status, error) {
 func (s *Service) SetPaused(workspaceID string, paused bool) (Status, error) {
 	if _, err := s.store.UpdateSettings(workspaceID, func(settings *JanitorSettings) error {
 		settings.Paused = paused
+		settings.LastAssistedAutomation = nil
 		return nil
 	}); err != nil {
 		return Status{}, err
@@ -418,6 +422,14 @@ type SetupRequest struct {
 	// they do. Without this, choosing a folder would silently switch on
 	// automation the user had not been shown yet.
 	Paused *bool
+	// Operation is supplied only by the owner-scoped assistant setup bridge.
+	// Manual File Janitor setup leaves it nil and retains its existing path API.
+	Operation *FolderGrantOperation
+}
+
+type FolderGrantOperation struct {
+	RunID       string
+	OperationID string
 }
 
 // ConfirmSetup validates a confirmed folder selection and configures the
@@ -435,76 +447,143 @@ func (s *Service) ConfirmSetup(req SetupRequest) (Status, error) {
 		return Status{}, setupErr(CodeWorkspaceMissing, "This workspace is unavailable.", "", nil)
 	}
 
-	current, err := s.store.LoadSettings(workspaceID)
-	if err != nil {
-		return Status{}, err
-	}
-
 	root, err := resolveSetupRoot(req.Path)
 	if err != nil {
 		return Status{}, err
 	}
 
-	// Hold the claim lock across the conflict check AND the write that acts on
-	// its answer. Checking without it would let two concurrent setups each find
-	// the folder unclaimed and both take it.
+	// Hold the claim lock across conflict detection, the durable pending marker,
+	// the filesystem/workspace consequences, and the final receipt.
 	s.claimMu.Lock()
 	defer s.claimMu.Unlock()
 
-	// Refuse a folder another workspace already manages, before anything is
-	// created or granted (FR-49). Checked against the canonical root, so an
-	// alternate spelling or a symlink cannot slip past it.
-	if err := s.ensureRootAvailable(workspaceID, root); err != nil {
+	current, err := s.store.LoadSettings(workspaceID)
+	if err != nil {
 		return Status{}, err
 	}
+	operation := req.Operation
+	if operation != nil {
+		operation.RunID = strings.TrimSpace(operation.RunID)
+		operation.OperationID = strings.TrimSpace(operation.OperationID)
+		if operation.RunID == "" || operation.OperationID == "" {
+			return Status{}, setupErr(CodeFolderChanged, "This folder permission request is no longer current. Choose the folder again.", RepairChooseFolder, nil)
+		}
+		if current.LastFolderGrant != nil && current.LastFolderGrant.OperationID == operation.OperationID {
+			if current.LastFolderGrant.RunID != operation.RunID || current.RootID != current.LastFolderGrant.RootID || filepath.Clean(current.RootPath) != filepath.Clean(root) {
+				return Status{}, setupErr(CodeFolderChanged, "The folder changed after this permission was granted. Review the current folder before continuing.", RepairChooseFolder, nil)
+			}
+			return s.Status(workspaceID)
+		}
+		if current.ContentMode != ContentModeMetadataOnly {
+			return Status{}, setupErr(CodePrivacyReviewRequired, "This workspace is not in metadata-only mode. Review its privacy settings before assisted setup continues.", RepairRetry, nil)
+		}
+		if current.IsSetUp() && filepath.Clean(current.RootPath) != filepath.Clean(root) {
+			return Status{}, setupErr(CodeFolderChanged, "This workspace already uses a different folder. Review it manually before changing access.", RepairChooseFolder, nil)
+		}
+		if current.PendingFolderGrant != nil {
+			pending := current.PendingFolderGrant
+			if pending.RunID != operation.RunID || pending.OperationID != operation.OperationID {
+				return Status{}, setupErr(CodeFolderConflict, "Another folder permission is already being completed for this workspace.", RepairRetry, nil)
+			}
+			if filepath.Clean(pending.RootPath) != filepath.Clean(root) {
+				return Status{}, setupErr(CodeFolderChanged, "A different folder was selected for this permission. Choose the folder again.", RepairChooseFolder, nil)
+			}
+		}
+	} else if current.PendingFolderGrant != nil {
+		return Status{}, setupErr(CodeFolderConflict, "Assistant setup is completing a folder permission. Finish or pause it before changing the folder manually.", RepairRetry, nil)
+	}
 
-	next := current
-	next.WorkspaceID = workspaceID
-	// Issue a fresh folder generation whenever the managed folder changes, so
-	// journal entries written against the old folder stay identifiable as such
-	// and can never be undone into the new one (FR-57). Re-confirming the SAME
-	// folder keeps the existing id, so history stays continuous.
-	if next.RootID == "" || filepath.Clean(next.RootPath) != filepath.Clean(root) {
-		next.RootID = uuid.New().String()
-	}
-	next.RootPath = root
-	if next.FilingRootName == "" {
-		next.FilingRootName = DefaultFilingRootName
-	}
+	// Validate non-path settings before recording an assisted pending marker.
+	dailyTime := current.DailyScanLocalTime
 	if t := strings.TrimSpace(req.DailyScanLocalTime); t != "" {
 		normalized, timeErr := workspace.NormalizeLocalTimeOfDay(t)
 		if timeErr != nil {
 			return Status{}, setupErr(CodeInvalidPath, "The daily scan time must be a 24-hour time such as 09:00.", RepairRetry, timeErr)
 		}
-		next.DailyScanLocalTime = normalized
+		dailyTime = normalized
 	}
+	timezone := current.Timezone
 	if tz := strings.TrimSpace(req.Timezone); tz != "" {
 		if _, tzErr := time.LoadLocation(tz); tzErr != nil {
 			return Status{}, setupErr(CodeInvalidPath, "That timezone is not recognized.", RepairRetry, tzErr)
 		}
-		next.Timezone = tz
-	}
-	if req.Paused != nil {
-		next.Paused = *req.Paused
+		timezone = tz
 	}
 
-	// Create the destination folder now so the user sees "Filed" appear as part
-	// of the setup they approved, rather than at the first move. Repeat-safe.
-	if err := ensureFilingRoot(next.FilingRootPath()); err != nil {
+	if err := s.ensureRootAvailable(workspaceID, root); err != nil {
 		return Status{}, err
 	}
+	rootID := current.RootID
+	rootChanged := rootID == "" || filepath.Clean(current.RootPath) != filepath.Clean(root)
+	if operation != nil && current.PendingFolderGrant != nil {
+		rootID = current.PendingFolderGrant.RootID
+	} else if rootChanged {
+		rootID = uuid.New().String()
+	}
+	if operation != nil && current.PendingFolderGrant == nil {
+		pending := &PendingFolderGrant{
+			RunID: operation.RunID, OperationID: operation.OperationID,
+			RootPath: root, RootID: rootID, StartedAt: s.clock(),
+		}
+		if _, err := s.store.UpdateSettings(workspaceID, func(settings *JanitorSettings) error {
+			if settings.PendingFolderGrant != nil {
+				return setupErr(CodeFolderConflict, "Another folder permission is already being completed for this workspace.", RepairRetry, nil)
+			}
+			settings.PendingFolderGrant = pending
+			settings.LastAssistedAutomation = nil
+			return nil
+		}); err != nil {
+			return Status{}, setupErr(CodePersistenceFailed, "Ori could not save the pending folder permission.", RepairRetry, err)
+		}
+	}
 
+	filingRootName := current.FilingRootName
+	if !isSafeDirectoryName(filingRootName) {
+		filingRootName = DefaultFilingRootName
+	}
+	// These are the first external consequences of an assisted grant. Its
+	// operation/root marker is durable before either one can happen.
+	if err := ensureFilingRoot(filepath.Join(root, filingRootName)); err != nil {
+		return Status{}, err
+	}
 	referenceID, err := s.ensureWorkspaceAccess(workspaceID, root)
 	if err != nil {
 		return Status{}, err
 	}
-	next.DirectoryReferenceID = referenceID
-	if next.SetupCompletedAt.IsZero() {
-		next.SetupCompletedAt = s.clock()
-	}
 
+	completedAt := s.clock()
 	if _, err := s.store.UpdateSettings(workspaceID, func(settings *JanitorSettings) error {
-		*settings = next
+		if operation != nil {
+			pending := settings.PendingFolderGrant
+			if pending == nil || pending.RunID != operation.RunID || pending.OperationID != operation.OperationID ||
+				pending.RootID != rootID || filepath.Clean(pending.RootPath) != filepath.Clean(root) {
+				return setupErr(CodeFolderChanged, "The pending folder permission changed. Review it before continuing.", RepairChooseFolder, nil)
+			}
+		}
+		settings.WorkspaceID = workspaceID
+		settings.RootID = rootID
+		settings.RootPath = root
+		settings.FilingRootName = filingRootName
+		settings.DirectoryReferenceID = referenceID
+		settings.DailyScanLocalTime = dailyTime
+		settings.Timezone = timezone
+		settings.LastAssistedAutomation = nil
+		if req.Paused != nil {
+			settings.Paused = *req.Paused
+		}
+		if rootChanged {
+			settings.AutomationApprovedAt = time.Time{}
+		}
+		if settings.SetupCompletedAt.IsZero() {
+			settings.SetupCompletedAt = completedAt
+		}
+		if operation != nil {
+			settings.LastFolderGrant = &FolderGrantReceipt{
+				RunID: operation.RunID, OperationID: operation.OperationID,
+				RootID: rootID, DirectoryReference: referenceID, CompletedAt: completedAt,
+			}
+			settings.PendingFolderGrant = nil
+		}
 		return nil
 	}); err != nil {
 		if errors.Is(err, ErrInvalidSettings) {
@@ -513,9 +592,6 @@ func (s *Service) ConfirmSetup(req SetupRequest) (Status, error) {
 		return Status{}, setupErr(CodePersistenceFailed, "Ori could not save this workspace's File Janitor settings.", RepairRetry, err)
 	}
 
-	// Return through Status so the response carries everything a status
-	// response does — privacy disclosure included. Building a Status literal
-	// here is how the setup reply ended up with no privacy state at all.
 	return s.Status(workspaceID)
 }
 

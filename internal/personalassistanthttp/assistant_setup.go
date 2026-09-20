@@ -23,6 +23,11 @@ type assistantSetupRunRequest struct {
 	IfVersion int64 `json:"if_version"`
 }
 
+type assistantSetupPrepareReviewRequest struct {
+	IfVersion      int64  `json:"if_version"`
+	ReviewRevision string `json:"review_revision"`
+}
+
 // GetAssistantSetup handles the read-only File Janitor recommendation/status.
 func (h *Handler) GetAssistantSetup(w http.ResponseWriter, r *http.Request) {
 	if !orihttp.RequireMethod(w, r, http.MethodGet) {
@@ -102,6 +107,59 @@ func (h *Handler) DeferAssistantSetupRecommendation(w http.ResponseWriter, r *ht
 	_ = orihttp.RespondJSON(w, http.StatusOK, map[string]any{"setup": projection})
 }
 
+func (h *Handler) BeginAssistantSetupFolderIntent(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h == nil || h.assistantSetup == nil || h.provider == nil {
+		writeAssistantSetupError(w, http.StatusServiceUnavailable, "assistant_setup_unavailable", "Assistant setup is temporarily unavailable.", false, nil)
+		return
+	}
+	runID := strings.TrimSpace(r.PathValue("runID"))
+	var request assistantSetupRunRequest
+	if decodeBoundedRequest(w, r, &request) != nil || len(runID) > 128 || runID == "" || request.IfVersion < 1 {
+		writeAssistantSetupError(w, http.StatusBadRequest, "invalid_request", "Check the saved setup version and try again.", false, nil)
+		return
+	}
+	owner, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	projection, token, err := h.assistantSetup.BeginFolderIntent(r.Context(), owner, runID, request.IfVersion)
+	if err != nil {
+		writeAssistantSetupServiceError(w, err, projection)
+		return
+	}
+	_ = orihttp.RespondJSON(w, http.StatusOK, map[string]any{"setup": projection, "assistant_setup_token": token})
+}
+
+func (h *Handler) PrepareAssistantSetupReview(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h == nil || h.assistantSetup == nil || h.provider == nil {
+		writeAssistantSetupError(w, http.StatusServiceUnavailable, "assistant_setup_unavailable", "Assistant setup is temporarily unavailable.", false, nil)
+		return
+	}
+	runID := strings.TrimSpace(r.PathValue("runID"))
+	var request assistantSetupPrepareReviewRequest
+	if decodeBoundedRequest(w, r, &request) != nil || len(runID) > 128 || runID == "" ||
+		request.IfVersion < 1 || !validAssistantSetupOpaque(request.ReviewRevision) {
+		writeAssistantSetupError(w, http.StatusBadRequest, "invalid_request", "Check the monitoring review and try again.", false, nil)
+		return
+	}
+	owner, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	projection, err := h.assistantSetup.PrepareReview(r.Context(), owner, runID, request.IfVersion, request.ReviewRevision)
+	if err != nil {
+		writeAssistantSetupServiceError(w, err, projection)
+		return
+	}
+	_ = orihttp.RespondJSON(w, http.StatusOK, map[string]any{"setup": projection})
+}
+
 func (h *Handler) DeferAssistantSetupRun(w http.ResponseWriter, r *http.Request) {
 	h.mutateAssistantSetupRun(w, r, false)
 }
@@ -160,7 +218,7 @@ func validAssistantSetupOpaque(value string) bool {
 		return false
 	}
 	for _, char := range value {
-		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f')) {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
 			return false
 		}
 	}
@@ -190,8 +248,14 @@ func writeAssistantSetupServiceError(w http.ResponseWriter, err error, projectio
 		writeAssistantSetupError(w, http.StatusConflict, "unsupported_target", "This File Janitor workspace needs manual review.", false, projection)
 	case errors.Is(err, assistantsetup.ErrStaleProposal):
 		writeAssistantSetupError(w, http.StatusConflict, "stale_proposal", "The setup plan changed. Review it again before continuing.", false, projection)
+	case errors.Is(err, assistantsetup.ErrInvalidAction):
+		writeAssistantSetupError(w, http.StatusConflict, "invalid_action", "That setup action is not available at the current step.", false, projection)
 	case errors.Is(err, assistantsetup.ErrStaleRun), errors.Is(err, assistantsetup.ErrConflict):
 		writeAssistantSetupError(w, http.StatusConflict, "stale_run", "Setup changed in another window. Review the current state.", false, projection)
+	case errors.Is(err, assistantsetup.ErrPrivacyReview):
+		writeAssistantSetupError(w, http.StatusConflict, "privacy_review_required", "Review File Janitor privacy settings before continuing.", false, projection)
+	case errors.Is(err, assistantsetup.ErrFolderChanged), errors.Is(err, assistantsetup.ErrFolderConflict):
+		writeAssistantSetupError(w, http.StatusConflict, "folder_changed", "The File Janitor folder changed. Review it before continuing.", false, projection)
 	case errors.Is(err, assistantsetup.ErrTeamConflict), errors.Is(err, assistantsetup.ErrAgentRootUnavailable):
 		writeAssistantSetupError(w, http.StatusConflict, "team_conflict", "The reviewed File Curator setup is no longer available.", false, projection)
 	case errors.Is(err, assistantsetup.ErrReconcileRequired):

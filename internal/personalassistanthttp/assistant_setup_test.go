@@ -12,12 +12,13 @@ import (
 )
 
 type fakeAssistantSetupService struct {
-	projection                                                    *assistantsetup.Projection
-	err                                                           error
-	created                                                       bool
-	getCalls, acceptCalls, deferCalls, deferRunCalls, resumeCalls int
-	owner, revision, target, runID                                string
-	ifVersion                                                     int64
+	projection                                                                  *assistantsetup.Projection
+	err                                                                         error
+	created                                                                     bool
+	getCalls, acceptCalls, deferCalls, deferRunCalls, resumeCalls, prepareCalls int
+	owner, revision, target, runID                                              string
+	ifVersion                                                                   int64
+	folderToken                                                                 string
 }
 
 func (f *fakeAssistantSetupService) Get(_ context.Context, owner, target string) (*assistantsetup.Projection, error) {
@@ -38,6 +39,15 @@ func (f *fakeAssistantSetupService) DeferRecommendation(_ context.Context, owner
 func (f *fakeAssistantSetupService) DeferRun(_ context.Context, owner, runID string, version int64) (*assistantsetup.Projection, error) {
 	f.deferRunCalls++
 	f.owner, f.runID, f.ifVersion = owner, runID, version
+	return f.projection, f.err
+}
+func (f *fakeAssistantSetupService) BeginFolderIntent(_ context.Context, owner, runID string, version int64) (*assistantsetup.Projection, string, error) {
+	f.owner, f.runID, f.ifVersion = owner, runID, version
+	return f.projection, f.folderToken, f.err
+}
+func (f *fakeAssistantSetupService) PrepareReview(_ context.Context, owner, runID string, version int64, revision string) (*assistantsetup.Projection, error) {
+	f.prepareCalls++
+	f.owner, f.runID, f.ifVersion, f.revision = owner, runID, version, revision
 	return f.projection, f.err
 }
 func (f *fakeAssistantSetupService) ResumeRun(_ context.Context, owner, runID string, version int64) (*assistantsetup.Projection, error) {
@@ -144,5 +154,28 @@ func TestAssistantSetupRunMutationsRequireOwnedPathAndVersion(t *testing.T) {
 	handler.ResumeAssistantSetupRun(recorder, req)
 	if recorder.Code != http.StatusBadRequest || service.resumeCalls != 0 {
 		t.Fatalf("status=%d resume_calls=%d", recorder.Code, service.resumeCalls)
+	}
+}
+
+func TestPrepareAssistantSetupReviewRequiresClosedReviewedRevision(t *testing.T) {
+	service := &fakeAssistantSetupService{projection: &assistantsetup.Projection{ViewState: "no_new_files"}}
+	handler := assistantSetupHTTPHandler(service)
+	revision := strings.Repeat("b", 64)
+	req := httptest.NewRequest(http.MethodPost, "/prepare-review", strings.NewReader(`{"if_version":3,"review_revision":"`+revision+`"}`))
+	req.SetPathValue("runID", "run-1")
+	recorder := httptest.NewRecorder()
+	handler.PrepareAssistantSetupReview(recorder, req)
+	if recorder.Code != http.StatusOK || service.prepareCalls != 1 || service.owner != "owner-1" ||
+		service.runID != "run-1" || service.ifVersion != 3 || service.revision != revision {
+		t.Fatalf("status=%d service=%+v body=%s", recorder.Code, service, recorder.Body.String())
+	}
+
+	service.prepareCalls = 0
+	req = httptest.NewRequest(http.MethodPost, "/prepare-review", strings.NewReader(`{"if_version":3,"review_revision":"`+revision+`","path":"/private"}`))
+	req.SetPathValue("runID", "run-1")
+	recorder = httptest.NewRecorder()
+	handler.PrepareAssistantSetupReview(recorder, req)
+	if recorder.Code != http.StatusBadRequest || service.prepareCalls != 0 {
+		t.Fatalf("raw path accepted: status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }

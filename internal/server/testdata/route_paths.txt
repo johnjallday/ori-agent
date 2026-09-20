@@ -112,6 +112,8 @@
 /api/personal-assistant/setup/file-janitor/accept
 /api/personal-assistant/setup/file-janitor/defer
 /api/personal-assistant/setup/file-janitor/runs/00000000-0000-0000-0000-000000000001/defer
+/api/personal-assistant/setup/file-janitor/runs/00000000-0000-0000-0000-000000000001/folder-intent
+/api/personal-assistant/setup/file-janitor/runs/00000000-0000-0000-0000-000000000001/prepare-review
 /api/personal-assistant/setup/file-janitor/runs/00000000-0000-0000-0000-000000000001/resume
 /api/personal-assistant/setup-journey
 /api/personal-assistant/setup-journey/children

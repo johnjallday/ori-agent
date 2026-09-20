@@ -131,47 +131,92 @@ func (s *Service) TestScan(workspaceID string) (ScanReport, error) {
 // noise in history and, later, a notification about nothing (FR-105). The
 // returned bool reports whether a batch was created.
 func (s *Service) ScanNow(workspaceID string, source ScanSource) (JanitorBatch, bool, error) {
+	batch, created, _, err := s.scanNow(workspaceID, source, nil)
+	return batch, created, err
+}
+
+var ErrScanOperationConflict = fmt.Errorf("scan operation no longer matches File Janitor state")
+
+type ScanOperationRequest struct {
+	OperationID string
+	RootID      string
+	PrivacyMode ContentMode
+}
+
+// ScanNowOperation runs or replays one operation-specific metadata scan. Its
+// receipt is persisted in the same atomic scan-state write as the batch,
+// candidates, settling observations, or successful no-eligible outcome.
+func (s *Service) ScanNowOperation(workspaceID string, source ScanSource, request ScanOperationRequest) (ScanOperationReceipt, error) {
+	request.OperationID = strings.TrimSpace(request.OperationID)
+	request.RootID = strings.TrimSpace(request.RootID)
+	if request.OperationID == "" || request.RootID == "" || request.PrivacyMode != ContentModeMetadataOnly {
+		return ScanOperationReceipt{}, ErrScanOperationConflict
+	}
+	_, _, receipt, err := s.scanNow(workspaceID, source, &request)
+	return receipt, err
+}
+
+func (s *Service) scanNow(workspaceID string, source ScanSource, operation *ScanOperationRequest) (JanitorBatch, bool, ScanOperationReceipt, error) {
 	if source == ScanSourceTest {
-		return JanitorBatch{}, false, fmt.Errorf("%w: use TestScan for a test scan", ErrInvalidSettings)
+		return JanitorBatch{}, false, ScanOperationReceipt{}, fmt.Errorf("%w: use TestScan for a test scan", ErrInvalidSettings)
 	}
 	settings, err := s.requireConfigured(workspaceID)
 	if err != nil {
-		return JanitorBatch{}, false, err
+		return JanitorBatch{}, false, ScanOperationReceipt{}, err
 	}
 
 	scanner := s.scannerFor()
-	// Observing and scanning happen inside one state update so a file cannot be
-	// observed by this run and then judged against a state another run wrote in
-	// between.
 	var created JanitorBatch
 	var persisted bool
+	var receipt ScanOperationReceipt
 	_, err = s.store.UpdateScanState(workspaceID, func(state *ScanState) error {
-		// Judge first, then record. The scan must see the state this run
-		// started with: recording a sighting first would make every file
-		// "tracked as of now", which would disqualify a pre-existing backlog
-		// from the never-observed-and-already-old path in settled().
+		if operation != nil {
+			if existing, found := state.ScanOperation(operation.OperationID); found {
+				if existing.RootID != operation.RootID || existing.PrivacyMode != operation.PrivacyMode {
+					return ErrScanOperationConflict
+				}
+				receipt = existing
+				if existing.BatchID != "" {
+					created, persisted = state.Batch(existing.BatchID)
+				}
+				return nil
+			}
+			// Settings and scan state use the same workspace lock. Re-read now,
+			// after acquiring it, so a privacy/root change cannot race between
+			// the initial configured check and filesystem enumeration.
+			fresh, freshErr := s.store.LoadSettings(workspaceID)
+			if freshErr != nil {
+				return freshErr
+			}
+			if fresh.RootID != operation.RootID || fresh.ContentMode != operation.PrivacyMode ||
+				fresh.ContentMode != ContentModeMetadataOnly {
+				return ErrScanOperationConflict
+			}
+			settings = fresh
+		}
+
 		result, scanErr := scanner.Scan(settings, *state, source)
 		if scanErr != nil {
 			return scanErr
 		}
-		// Now record what is on disk, so this run contributes the evidence the
-		// next run reads for anything that was still changing.
 		if err := scanner.ObserveForSettling(settings, state); err != nil {
 			return err
 		}
 		if len(result.Eligible) == 0 {
-			// Still worth remembering what was passed over — but there is
-			// nothing for the user to review, so no batch is created.
+			if operation != nil {
+				receipt = ScanOperationReceipt{
+					OperationID: operation.OperationID, RootID: operation.RootID,
+					PrivacyMode: operation.PrivacyMode, Outcome: ScanOutcomeNoEligible,
+					IneligibleCount: len(result.Ineligible), CompletedAt: result.ScannedAt,
+				}
+				state.ScanOperations = append(state.ScanOperations, receipt)
+			}
 			return nil
 		}
 
 		batch := JanitorBatch{
-			ID:          "batch-" + uuid.New().String(),
-			WorkspaceID: workspaceID,
-			Source:      source,
-			StartedAt:   result.ScannedAt,
-			CompletedAt: result.ScannedAt,
-			Ineligible:  result.Ineligible,
+			ID: "batch-" + uuid.New().String(), WorkspaceID: workspaceID, Source: source,
+			StartedAt: result.ScannedAt, CompletedAt: result.ScannedAt, Ineligible: result.Ineligible,
 		}
 		candidates := make([]JanitorCandidate, 0, len(result.Eligible))
 		for _, candidate := range result.Eligible {
@@ -182,22 +227,34 @@ func (s *Service) ScanNow(workspaceID string, source ScanSource) (JanitorBatch, 
 			candidates = append(candidates, candidate)
 			batch.CandidateIDs = append(batch.CandidateIDs, candidate.ID)
 		}
-		// Deterministic classification for every candidate, then a model only
-		// for what it could not place — and only when the user enabled one.
-		// Classification proposes; it never decides.
 		candidates = s.classifyBatch(context.Background(), settings, candidates)
 		batch = SummarizeBatch(batch, candidates)
-
 		state.Candidates = append(state.Candidates, candidates...)
 		state.Batches = append(state.Batches, batch)
-		created = batch
-		persisted = true
+		created, persisted = batch, true
+		if operation != nil {
+			receipt = ScanOperationReceipt{
+				OperationID: operation.OperationID, RootID: operation.RootID,
+				PrivacyMode: operation.PrivacyMode, Outcome: ScanOutcomeBatch, BatchID: batch.ID,
+				EligibleCount: len(candidates), IneligibleCount: len(result.Ineligible), CompletedAt: result.ScannedAt,
+			}
+			state.ScanOperations = append(state.ScanOperations, receipt)
+		}
 		return nil
 	})
 	if err != nil {
-		return JanitorBatch{}, false, err
+		return JanitorBatch{}, false, ScanOperationReceipt{}, err
 	}
-	return created, persisted, nil
+	return created, persisted, receipt, nil
+}
+
+func (s *Service) ScanOperationReceipt(workspaceID, operationID string) (ScanOperationReceipt, bool, error) {
+	state, err := s.store.LoadScanState(workspaceID)
+	if err != nil {
+		return ScanOperationReceipt{}, false, err
+	}
+	receipt, found := state.ScanOperation(operationID)
+	return receipt, found, nil
 }
 
 // ListBatches returns the workspace's batches, newest first.

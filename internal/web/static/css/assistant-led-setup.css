@@ -76,18 +76,32 @@
 }
 
 .assistant-led-setup__team,
-.assistant-led-setup__details ul {
+.assistant-led-setup__details ul,
+.assistant-led-setup__monitoring ul {
   margin: 0.55rem 0 0;
   padding-left: 1.15rem;
 }
 
 .assistant-led-setup__team li,
-.assistant-led-setup__details li {
+.assistant-led-setup__details li,
+.assistant-led-setup__monitoring li {
   margin: 0.35rem 0;
 }
 
-.assistant-led-setup__details {
+.assistant-led-setup__details,
+.assistant-led-setup__monitoring {
   margin-top: 0.7rem;
+}
+
+.assistant-led-setup__monitoring {
+  padding: 0.75rem;
+  border-radius: 10px;
+  background: color-mix(in srgb, #8b5cf6 8%, transparent);
+}
+
+.assistant-led-setup__monitoring h4 {
+  margin: 0;
+  font-size: 0.9rem;
 }
 
 .assistant-led-setup__details summary {

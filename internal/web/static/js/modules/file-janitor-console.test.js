@@ -3317,6 +3317,29 @@ test('a failed batch read is unavailable, not an empty folder, and keeps stale d
   assert.ok(host.all(node => node.tagName === 'BUTTON' && node.textContent === 'Retry')[0]);
 });
 
+test('an assistant first-review link loads its exact immutable batch', async () => {
+  const doc = setup();
+  renderReview(doc);
+  let requested = '';
+  globalThis.fetch = async url => {
+    requested = String(url);
+    return {
+      ok: true,
+      json: async () => ({
+        batch: batchFixture(),
+        candidates: candidatesFixture(),
+        total: 2,
+        filtered_total: 2,
+        counts: { all: 2, needs_review: 0, pending: 2, skipped: 0 }
+      })
+    };
+  };
+  panel._setLinkedBatchForTest('batch-1');
+  await panel._reloadBatch();
+  assert.match(requested, /\/batches\/batch-1\?/);
+  panel._setLinkedBatchForTest('');
+});
+
 test('a 500-file batch renders one page of rows, not five hundred', async () => {
   const doc = setup();
   renderReview(doc);

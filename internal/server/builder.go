@@ -4,6 +4,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -337,6 +338,7 @@ type ServerBuilder struct {
 	personalAssistantHandler *personalassistanthttp.Handler
 	assistantSetupStore      *assistantsetup.SQLiteStore
 	assistantSetupService    *assistantsetup.Service
+	assistantSetupRetries    *assistantsetup.RetryRunner
 	setupJourneyStore        *setupjourney.SQLiteStore
 	// integrationReleases resolves the latest reviewed integration release for
 	// both the guided setup and the Plugins page update check.
@@ -587,6 +589,9 @@ func (b *ServerBuilder) Build() (*Server, error) {
 
 	b.createDomainFacades() // Phase 25
 	b.initializeResetCoordinator()
+	if b.assistantSetupRetries != nil {
+		b.assistantSetupRetries.Start(context.Background())
+	}
 
 	// Log success
 	if !verbose {
@@ -645,6 +650,7 @@ func (b *ServerBuilder) createDomainFacades() {
 	b.server.Workflow.DailyBriefScheduler = b.dailyBriefScheduler
 	b.server.Workflow.MapActivityTracker = b.mapActivityTracker
 	b.server.fileJanitorAutomation = b.fileJanitorAutomation
+	b.server.assistantSetupRetries = b.assistantSetupRetries
 
 	// Integration System Facade
 	b.server.Integration = NewIntegrationSystemFacade(

@@ -45,9 +45,18 @@ test('mutation requests carry only closed revisions and server-selected target',
     url: '/api/personal-assistant/setup/file-janitor/runs/run-1/defer',
     body: { if_version: 4 }
   });
+  assert.deepEqual(assistantSetupRequest('manual_takeover', projection), {
+    url: '/api/personal-assistant/setup/file-janitor/runs/run-1/defer',
+    body: { if_version: 4 }
+  });
   assert.deepEqual(assistantSetupRequest('resume', projection), {
     url: '/api/personal-assistant/setup/file-janitor/runs/run-1/resume',
     body: { if_version: 4 }
+  });
+  projection.monitoring_review = { revision: 'monitoring-review' };
+  assert.deepEqual(assistantSetupRequest('prepare_review', projection), {
+    url: '/api/personal-assistant/setup/file-janitor/runs/run-1/prepare-review',
+    body: { if_version: 4, review_revision: 'monitoring-review' }
   });
   assert.equal(assistantSetupRequest('choose_folder', projection), null);
 });
@@ -63,4 +72,7 @@ test('server routes are limited to workspace destinations', () => {
   );
   assert.equal(safeAssistantSetupRoute('https://example.com'), '');
   assert.equal(safeAssistantSetupRoute('javascript:alert(1)'), '');
+  assert.equal(safeAssistantSetupRoute('/workspaces/%2e%2e/settings'), '');
+  assert.equal(safeAssistantSetupRoute('/workspaces/one#outside'), '');
+  assert.equal(safeAssistantSetupRoute('/workspaces\\outside'), '');
 });

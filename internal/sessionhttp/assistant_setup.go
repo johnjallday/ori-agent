@@ -95,16 +95,16 @@ func (h *Handler) ReviewFileJanitorCreation(_ context.Context) (ReviewedTemplate
 		return ReviewedTemplateCreationPlan{}, fmt.Errorf("resolve File Janitor blueprint: %w", err)
 	}
 	if !tpl.Builtin || tpl.ID != "file-janitor" || tpl.BuiltinVersion < 1 || len(tpl.Agents) != 1 {
-		return ReviewedTemplateCreationPlan{}, errors.New("File Janitor blueprint is unavailable or unsupported")
+		return ReviewedTemplateCreationPlan{}, errors.New("file janitor blueprint is unavailable or unsupported")
 	}
 	plan := h.buildTemplateAgentPlan(tpl)
 	if plan.Revision == "" || len(plan.Agents) != 1 {
-		return ReviewedTemplateCreationPlan{}, errors.New("File Janitor team plan is unavailable")
+		return ReviewedTemplateCreationPlan{}, errors.New("file janitor team plan is unavailable")
 	}
 	roleIDs := projecttemplates.AgentRoleIDs(tpl.Agents)
 	item := plan.Agents[0]
 	if item.Action != "create" && item.Action != "reuse" {
-		return ReviewedTemplateCreationPlan{}, errors.New("File Janitor team plan has an unsupported action")
+		return ReviewedTemplateCreationPlan{}, errors.New("file janitor team plan has an unsupported action")
 	}
 	if item.Action == "create" {
 		if statusReader, ok := h.agentStore.(interface{ RootStatus() store.AgentRootStatus }); ok && !statusReader.RootStatus().Available {
@@ -176,7 +176,7 @@ func (h *Handler) CreateReviewedFileJanitor(ctx context.Context, request Reviewe
 		return ReviewedTemplateCreationResult{}, err
 	}
 	if !reviewedTemplatePlansEqual(fresh, request.Plan) {
-		return ReviewedTemplateCreationResult{}, errors.New("File Janitor team plan changed")
+		return ReviewedTemplateCreationResult{}, errors.New("file janitor team plan changed")
 	}
 	role := fresh.Roles[0]
 	mode := roleStaffingModeCreate

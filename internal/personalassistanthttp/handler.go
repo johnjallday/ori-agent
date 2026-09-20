@@ -86,6 +86,8 @@ type AssistantSetupService interface {
 	DeferRecommendation(ctx context.Context, ownerUserID, proposalRevision string) (*assistantsetup.Projection, error)
 	DeferRun(ctx context.Context, ownerUserID, runID string, ifVersion int64) (*assistantsetup.Projection, error)
 	ResumeRun(ctx context.Context, ownerUserID, runID string, ifVersion int64) (*assistantsetup.Projection, error)
+	BeginFolderIntent(ctx context.Context, ownerUserID, runID string, ifVersion int64) (*assistantsetup.Projection, string, error)
+	PrepareReview(ctx context.Context, ownerUserID, runID string, ifVersion int64, reviewRevision string) (*assistantsetup.Projection, error)
 }
 
 // Handler serves /api/personal-assistant.

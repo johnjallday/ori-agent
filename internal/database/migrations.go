@@ -234,7 +234,7 @@ func (db *DB) migration062AssistantSetup(ctx context.Context) error {
 		)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_assistant_setup_one_active
 			ON assistant_setup_runs(owner_user_id, capability_id)
-			WHERE status IN ('active','deferred','reconcile_required')`,
+			WHERE status IN ('active','deferred','reconcile_required','first_result')`,
 		`CREATE INDEX IF NOT EXISTS idx_assistant_setup_runs_target
 			ON assistant_setup_runs(owner_user_id, target_workspace_id)`,
 		`CREATE TABLE IF NOT EXISTS assistant_setup_operations (

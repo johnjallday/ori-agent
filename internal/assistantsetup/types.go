@@ -30,6 +30,10 @@ var (
 	ErrReconcileRequired    = errors.New("assistant setup: reconciliation required")
 	ErrNoLongerAvailable    = errors.New("assistant setup: no longer available")
 	ErrAgentRootUnavailable = errors.New("assistant setup: agent root unavailable")
+	ErrInvalidAction        = errors.New("assistant setup: invalid action")
+	ErrFolderConflict       = errors.New("assistant setup: folder conflict")
+	ErrFolderChanged        = errors.New("assistant setup: folder changed")
+	ErrPrivacyReview        = errors.New("assistant setup: privacy review required")
 )
 
 type TargetMode string
@@ -46,8 +50,8 @@ const (
 	RunActive            RunStatus = "active"
 	RunDeferred          RunStatus = "deferred"
 	RunFirstResult       RunStatus = "first_result"
-	RunReconcileRequired RunStatus = "reconcile_required"
 	RunInvalidated       RunStatus = "invalidated"
+	RunReconcileRequired RunStatus = "reconcile_required"
 )
 
 type Step string
@@ -125,11 +129,16 @@ type TeamPlan struct {
 }
 
 type Target struct {
-	WorkspaceID string `json:"workspace_id"`
-	Name        string `json:"name"`
-	Route       string `json:"route"`
-	Supported   bool   `json:"supported"`
-	Reason      string `json:"reason,omitempty"`
+	WorkspaceID        string `json:"workspace_id"`
+	Name               string `json:"name"`
+	Route              string `json:"route"`
+	Supported          bool   `json:"supported"`
+	Reason             string `json:"reason,omitempty"`
+	Readiness          string `json:"readiness,omitempty"`
+	Paused             bool   `json:"paused,omitempty"`
+	PrivacyMode        string `json:"privacy_mode,omitempty"`
+	MonitoringApproved bool   `json:"monitoring_approved,omitempty"`
+	MonitoringActive   bool   `json:"monitoring_active,omitempty"`
 }
 
 type Relationship struct {
@@ -225,18 +234,65 @@ type Action struct {
 	Route   string `json:"route,omitempty"`
 }
 
+// Health is a path-free projection of the canonical File Janitor state.
+type Health struct {
+	Fresh              bool   `json:"fresh"`
+	Readiness          string `json:"readiness"`
+	Paused             bool   `json:"paused"`
+	MonitoringApproved bool   `json:"monitoring_approved"`
+	MonitoringActive   bool   `json:"monitoring_active"`
+	PrivacyMode        string `json:"privacy_mode"`
+	RootGenerationID   string `json:"root_generation_id,omitempty"`
+	DirectoryReference string `json:"directory_reference_id,omitempty"`
+}
+
+type MonitoringReview struct {
+	Revision               string   `json:"revision"`
+	AuthorityRevision      string   `json:"-"`
+	RetryRunID             string   `json:"-"`
+	RetryOperationID       string   `json:"-"`
+	RetryReviewRevision    string   `json:"-"`
+	RetryAuthorityRevision string   `json:"-"`
+	RetryState             string   `json:"-"`
+	RootGenerationID       string   `json:"root_generation_id"`
+	SettingsRevision       string   `json:"settings_revision"`
+	PrivacyMode            string   `json:"privacy_mode"`
+	WatchEvents            []string `json:"watch_events"`
+	DebounceSeconds        int      `json:"debounce_seconds"`
+	SettlingSeconds        int      `json:"settling_seconds"`
+	DailyScanLocalTime     string   `json:"daily_scan_local_time"`
+	Timezone               string   `json:"timezone"`
+	ExcludesFiled          bool     `json:"excludes_filed"`
+	NothingMoves           bool     `json:"nothing_moves"`
+	WasPaused              bool     `json:"was_paused"`
+	WasApproved            bool     `json:"was_approved"`
+	WasMonitoringActive    bool     `json:"was_monitoring_active"`
+}
+
+type FirstResult struct {
+	Outcome         string    `json:"outcome"`
+	BatchID         string    `json:"batch_id,omitempty"`
+	EligibleCount   int       `json:"eligible_count"`
+	IneligibleCount int       `json:"ineligible_count"`
+	CompletedAt     time.Time `json:"completed_at"`
+	ReviewRoute     string    `json:"review_route,omitempty"`
+}
+
 type Projection struct {
-	SchemaVersion int          `json:"schema_version"`
-	CapabilityID  string       `json:"capability_id"`
-	ViewState     string       `json:"view_state"`
-	Stale         bool         `json:"stale"`
-	StatusMessage string       `json:"status_message"`
-	Relationship  Relationship `json:"relationship"`
-	Proposal      *Proposal    `json:"proposal,omitempty"`
-	Run           *Run         `json:"run,omitempty"`
-	Operations    []Operation  `json:"operations,omitempty"`
-	Target        *Target      `json:"target,omitempty"`
-	Actions       []Action     `json:"actions"`
+	SchemaVersion int               `json:"schema_version"`
+	CapabilityID  string            `json:"capability_id"`
+	ViewState     string            `json:"view_state"`
+	Stale         bool              `json:"stale"`
+	StatusMessage string            `json:"status_message"`
+	Relationship  Relationship      `json:"relationship"`
+	Proposal      *Proposal         `json:"proposal,omitempty"`
+	Run           *Run              `json:"run,omitempty"`
+	Operations    []Operation       `json:"operations,omitempty"`
+	Target        *Target           `json:"target,omitempty"`
+	Health        *Health           `json:"health,omitempty"`
+	Monitoring    *MonitoringReview `json:"monitoring_review,omitempty"`
+	FirstResult   *FirstResult      `json:"first_result,omitempty"`
+	Actions       []Action          `json:"actions"`
 }
 
 type Acceptance struct {
@@ -253,6 +309,100 @@ type Acceptance struct {
 	WorkspaceOperationID string
 	ProfileProvenanceID  string
 	ReviewDigest         string
+}
+
+type FileJanitorFacts struct {
+	FolderReady        bool
+	Readiness          string
+	Paused             bool
+	MonitoringApproved bool
+	MonitoringActive   bool
+	PrivacyMode        string
+	RootGenerationID   string
+	DirectoryReference string
+	FirstOutcome       string
+	FirstBatchID       string
+	FirstEligible      int
+	FirstIneligible    int
+	FirstCompletedAt   time.Time
+}
+
+type MonitoringFacts struct {
+	RootGenerationID       string
+	SettingsRevision       string
+	AuthorityRevision      string
+	RetryRunID             string
+	RetryOperationID       string
+	RetryReviewRevision    string
+	RetryAuthorityRevision string
+	RetryState             string
+	PrivacyMode            string
+	WatchEvents            []string
+	DebounceSeconds        int
+	SettlingSeconds        int
+	DailyScanLocalTime     string
+	Timezone               string
+	ExcludesFiled          bool
+	WasPaused              bool
+	WasApproved            bool
+	WasMonitoringActive    bool
+}
+
+type PrepareReviewRequest struct {
+	OwnerUserID         string
+	RunID               string
+	WorkspaceID         string
+	RunRevision         int64
+	MonitoringOperation string
+	ScanOperation       string
+	Review              MonitoringReview
+}
+
+type PrepareReviewResult struct {
+	Facts                FileJanitorFacts
+	WatcherID            string
+	ScheduleID           string
+	MonitoringApplied    bool
+	MonitoringRetryBound bool
+	ScanAttempted        bool
+	ScanOutcome          string
+	BatchID              string
+	EligibleCount        int
+	IneligibleCount      int
+	CompletedAt          time.Time
+}
+
+type FolderGrantAuthorization struct {
+	OwnerUserID string
+	RunID       string
+	OperationID string
+	WorkspaceID string
+	RunRevision int64
+}
+
+type FolderGrantCommitError struct {
+	SafeCode string
+	Err      error
+}
+
+func (e *FolderGrantCommitError) Error() string {
+	if e == nil || e.Err == nil {
+		return "assistant setup: folder grant failed"
+	}
+	return e.Err.Error()
+}
+
+func (e *FolderGrantCommitError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+type FolderGrantResult struct {
+	RootGenerationID   string
+	DirectoryReference string
+	Adopted            bool
 }
 
 type WorkspaceResult struct {

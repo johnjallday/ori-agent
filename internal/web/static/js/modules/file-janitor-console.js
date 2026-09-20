@@ -34,6 +34,16 @@
   let lastStatus = null;
   let lastBatch = null;
   let lastCandidates = [];
+  // Assistant-led setup may link to the exact first-review batch. Keep that
+  // immutable identity until the user explicitly starts another scan.
+  let linkedBatchID = (() => {
+    try {
+      const value = new URLSearchParams(window.location.search || '').get('batch_id') || '';
+      return /^[A-Za-z0-9_-]{1,128}$/.test(value) ? value : '';
+    } catch (_) {
+      return '';
+    }
+  })();
   let categories = [];
   // Selected candidate IDs. Selection starts empty on every render and is
   // never pre-filled: opening the review surface must not be able to cause a
@@ -3310,6 +3320,7 @@
         const apiError = result.error || result;
         throw new Error((apiError && apiError.message) || 'The scan could not run.');
       }
+      linkedBatchID = '';
       await loadBatch();
       if (!result.created) {
         if (!lastBatch) {
@@ -3448,7 +3459,10 @@
         '&offset=' +
         pageOffset +
         (filter ? '&filter=' + encodeURIComponent(filter) : '');
-      const response = await fetch(apiBase(id) + '/batches/latest' + query);
+      const batchPath = linkedBatchID
+        ? '/batches/' + encodeURIComponent(linkedBatchID)
+        : '/batches/latest';
+      const response = await fetch(apiBase(id) + batchPath + query);
       if (!response.ok) throw new Error('batch failed');
       const body = await response.json();
       lastBatch = body.batch || null;
@@ -3875,6 +3889,9 @@
     _selected: () => Array.from(selected),
     _setFilter: next => selectFilter(next),
     _reloadBatch: () => loadBatch(),
+    _setLinkedBatchForTest: batchID => {
+      linkedBatchID = /^[A-Za-z0-9_-]{1,128}$/.test(String(batchID || '')) ? String(batchID) : '';
+    },
     // Clears the remembered workspace so a test can exercise a cold load, the
     // state a real page visit starts from.
     _forgetWorkspace: () => {

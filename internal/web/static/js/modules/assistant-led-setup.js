@@ -6,10 +6,12 @@ const SAFE_ACTIONS = new Set([
   'defer_recommendation',
   'choose_target',
   'choose_folder',
+  'prepare_review',
   'finish_later',
   'resume',
   'retry',
   'manual',
+  'manual_takeover',
   'open_workspace',
   'review_batch',
   'pause_monitoring',
@@ -22,6 +24,13 @@ export function assistantSetupEligible(state, { explicit = false } = {}) {
   return explicit ? EXPLICIT_STATES.has(normalized) : PROACTIVE_STATES.has(normalized);
 }
 
+function durationLabel(seconds) {
+  const value = Number(seconds) || 0;
+  if (value < 60) return `${value} seconds`;
+  const minutes = Math.round(value / 60);
+  return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+}
+
 export function assistantSetupModelLabel(role) {
   const action = role?.action === 'reuse' ? 'Reuse' : 'Create';
   const name = String(role?.name || 'File Curator');
@@ -32,13 +41,24 @@ export function assistantSetupModelLabel(role) {
 export function safeAssistantSetupRoute(route) {
   const value = String(route || '').trim();
   if (
-    value.startsWith('/workspaces/') ||
-    value.startsWith('/workspaces?') ||
-    value === '/workspaces'
-  ) {
-    return value;
+    !value.startsWith('/') ||
+    value.includes('\\') ||
+    Array.from(value).some(character => character.codePointAt(0) < 32)
+  )
+    return '';
+  try {
+    const parsed = new URL(value, 'http://ori.local');
+    if (
+      parsed.origin !== 'http://ori.local' ||
+      parsed.hash ||
+      (parsed.pathname !== '/workspaces' && !parsed.pathname.startsWith('/workspaces/'))
+    ) {
+      return '';
+    }
+    return `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return '';
   }
-  return '';
 }
 
 export function assistantSetupRequest(action, projection) {
@@ -58,6 +78,7 @@ export function assistantSetupRequest(action, projection) {
     case 'defer_recommendation':
       return { url: `${API_ROOT}/defer`, body: { proposal_revision: proposal?.revision || '' } };
     case 'finish_later':
+    case 'manual_takeover':
       return {
         url: `${API_ROOT}/runs/${encodeURIComponent(run?.id || '')}/defer`,
         body: { if_version: run?.revision || 0 }
@@ -66,6 +87,14 @@ export function assistantSetupRequest(action, projection) {
       return {
         url: `${API_ROOT}/runs/${encodeURIComponent(run?.id || '')}/resume`,
         body: { if_version: run?.revision || 0 }
+      };
+    case 'prepare_review':
+      return {
+        url: `${API_ROOT}/runs/${encodeURIComponent(run?.id || '')}/prepare-review`,
+        body: {
+          if_version: run?.revision || 0,
+          review_revision: projection?.monitoring_review?.revision || ''
+        }
       };
     default:
       return null;
@@ -83,10 +112,17 @@ function responsePayload(response) {
     .catch(() => ({}))
     .then(payload => {
       if (!response.ok) {
-        const error = new Error(
-          String(payload?.error || `Setup request failed (${response.status})`)
-        );
-        error.code = String(payload?.code || 'assistant_setup_unavailable');
+        const message =
+          typeof payload?.error === 'string'
+            ? payload.error
+            : payload?.message ||
+              payload?.error?.message ||
+              `Setup request failed (${response.status})`;
+        const error = new Error(String(message));
+        error.code = String(payload?.code || payload?.error?.code || 'assistant_setup_unavailable');
+        const details = payload?.details || payload?.error?.details || {};
+        error.repair = String(details.repair || '');
+        error.repairRoute = safeAssistantSetupRoute(details.conflict_route);
         error.setup = unwrapSetup(payload);
         throw error;
       }
@@ -110,15 +146,29 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
     details: doc.getElementById('assistantLedSetupDetails'),
     metadata: doc.getElementById('assistantLedSetupMetadata'),
     folder: doc.getElementById('assistantLedSetupFolder'),
-    monitoring: doc.getElementById('assistantLedSetupMonitoring'),
+    monitoringDisclosure: doc.getElementById('assistantLedSetupMonitoringDisclosure'),
     review: doc.getElementById('assistantLedSetupReview'),
+    monitoring: doc.getElementById('assistantLedSetupMonitoring'),
+    watch: doc.getElementById('assistantLedSetupWatch'),
+    settling: doc.getElementById('assistantLedSetupSettling'),
+    schedule: doc.getElementById('assistantLedSetupSchedule'),
+    privacy: doc.getElementById('assistantLedSetupPrivacy'),
+    health: doc.getElementById('assistantLedSetupHealth'),
+    result: doc.getElementById('assistantLedSetupResult'),
     error: doc.getElementById('assistantLedSetupError'),
     actions: doc.getElementById('assistantLedSetupActions')
   };
   const state = { projection: null, pending: false, explicit: false, relationshipState: '' };
 
-  function setError(message) {
+  function setError(message, repairRoute = '') {
     els.error.textContent = String(message || '');
+    const route = safeAssistantSetupRoute(repairRoute);
+    if (els.error.textContent && route) {
+      const link = doc.createElement('a');
+      link.href = route;
+      link.textContent = 'Open the workspace already using this folder';
+      els.error.append(' ', link);
+    }
     els.error.hidden = !els.error.textContent;
   }
 
@@ -127,7 +177,14 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
     const route = safeAssistantSetupRoute(action?.route);
     if (
       route &&
-      ['manual', 'open_workspace', 'review_batch', 'manage_access', 'history'].includes(action.id)
+      [
+        'manual',
+        'open_workspace',
+        'review_batch',
+        'pause_monitoring',
+        'manage_access',
+        'history'
+      ].includes(action.id)
     ) {
       const link = doc.createElement('a');
       link.className = 'assistant-led-setup__secondary';
@@ -146,9 +203,8 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
       action.id === 'accept' ? 'assistant-led-setup__primary' : 'assistant-led-setup__secondary';
     button.textContent = String(action?.label || action.id);
     button.dataset.setupAction = action.id;
-    button.disabled = action?.enabled !== true || state.pending || action.id === 'choose_folder';
+    button.disabled = action?.enabled !== true || state.pending;
     if (action.id === 'choose_folder') {
-      button.title = 'Folder permission is the next step.';
       button.setAttribute('aria-describedby', 'assistantLedSetupStatus');
     }
     if (action?.reason) button.title = String(action.reason);
@@ -214,7 +270,7 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
       els.details.hidden = false;
       els.metadata.textContent = String(proposal.metadata_disclosure || '');
       els.folder.textContent = String(proposal.folder_disclosure || '');
-      els.monitoring.textContent = String(proposal.monitoring_disclosure || '');
+      els.monitoringDisclosure.textContent = String(proposal.monitoring_disclosure || '');
       els.review.textContent = String(proposal.file_review_disclosure || '');
     } else if (run) {
       const targetName = projection.target?.name || 'File Janitor';
@@ -226,6 +282,38 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
         els.team.append(item);
       }
       els.details.hidden = true;
+    }
+
+    const monitoring = projection.monitoring_review || null;
+    els.monitoring.hidden = !monitoring;
+    if (monitoring) {
+      els.watch.textContent = `Watches ${monitoring.watch_events.join(' and ')} events; waits ${durationLabel(monitoring.debounce_seconds)} to group activity.`;
+      els.settling.textContent = `Files must remain settled for ${durationLabel(monitoring.settling_seconds)} before they can be proposed.`;
+      els.schedule.textContent = `Daily catch-up: ${monitoring.daily_scan_local_time} (${monitoring.timezone}).`;
+      els.privacy.textContent = `${String(monitoring.privacy_mode).replaceAll('_', ' ')}; no file content is read or sent to a model.`;
+    }
+    const health = projection.health || null;
+    els.health.hidden = !health;
+    if (health) {
+      const monitoringState = health.monitoring_active
+        ? 'Monitoring active'
+        : health.paused
+          ? 'Monitoring paused'
+          : 'Monitoring needs attention';
+      els.health.textContent = `${monitoringState} · ${String(health.privacy_mode || 'privacy unknown').replaceAll('_', ' ')}`;
+    }
+    const firstResult = projection.first_result || null;
+    els.result.hidden = !firstResult;
+    if (firstResult) {
+      const completed = new Date(firstResult.completed_at || '');
+      const completedLabel = Number.isNaN(completed.getTime())
+        ? ''
+        : ` Completed ${completed.toLocaleString()}.`;
+      els.result.textContent =
+        (firstResult.outcome === 'batch'
+          ? `${firstResult.eligible_count} proposal${firstResult.eligible_count === 1 ? '' : 's'} ready; ${firstResult.ineligible_count} item${firstResult.ineligible_count === 1 ? '' : 's'} excluded or still settling.`
+          : `No new eligible files; ${firstResult.ineligible_count} item${firstResult.ineligible_count === 1 ? '' : 's'} excluded or still settling.`) +
+        completedLabel;
     }
 
     els.actions.replaceChildren();
@@ -277,8 +365,75 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
     }
   }
 
+  async function chooseFolder() {
+    if (state.pending || !state.projection?.run) return false;
+    const run = state.projection.run;
+    const workspaceID = run.target_workspace_id;
+    const trigger = doc.activeElement;
+    state.pending = true;
+    setError('');
+    render(state.projection, { announce: false });
+    try {
+      const intentResponse = await fetchImpl(
+        `${API_ROOT}/runs/${encodeURIComponent(run.id)}/folder-intent`,
+        {
+          method: 'POST',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ if_version: run.revision })
+        }
+      );
+      const intent = await responsePayload(intentResponse);
+      const setupToken = String(intent.assistant_setup_token || '');
+      if (!setupToken) throw new Error('Folder permission could not be prepared.');
+      const pickerResponse = await fetchImpl('/api/folder-picker/select-path', {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: workspaceID,
+          title: 'Choose the folder File Janitor may tidy'
+        })
+      });
+      const picked = await responsePayload(pickerResponse);
+      if (!picked.success) throw new Error(picked.error || 'The folder picker is unavailable.');
+      if (trigger?.isConnected) trigger.focus();
+      if (!picked.selected) {
+        state.projection = unwrapSetup(intent) || state.projection;
+        return false;
+      }
+      const selectionToken = String(picked.selection_token || '');
+      if (!selectionToken) throw new Error('The trusted folder selection is unavailable.');
+      const grantResponse = await fetchImpl(
+        `/api/workspaces/${encodeURIComponent(workspaceID)}/file-janitor/setup`,
+        {
+          method: 'POST',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            selection_token: selectionToken,
+            assistant_setup_token: setupToken,
+            paused: true
+          })
+        }
+      );
+      const granted = await responsePayload(grantResponse);
+      render(unwrapSetup(granted));
+      return true;
+    } catch (error) {
+      if (error.setup) render(error.setup, { announce: false });
+      setError(
+        error.message || 'Folder permission could not be completed. Nothing else was changed.',
+        error.repairRoute
+      );
+      if (trigger?.isConnected) trigger.focus();
+      return false;
+    } finally {
+      state.pending = false;
+      render(state.projection, { announce: false });
+    }
+  }
+
   async function act(actionID) {
     if (state.pending) return false;
+    if (actionID === 'choose_folder') return chooseFolder();
     const request = assistantSetupRequest(actionID, state.projection);
     if (!request) return false;
     state.pending = true;
@@ -295,6 +450,10 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
       render(unwrapSetup(payload));
       if (!previousHadRun && state.projection?.run) {
         win.dispatchEvent?.(new win.CustomEvent('ori:workspaces-changed'));
+      }
+      if (actionID === 'manual_takeover') {
+        const route = safeAssistantSetupRoute(state.projection?.target?.route);
+        if (route && typeof win.location?.assign === 'function') win.location.assign(route);
       }
       return true;
     } catch (error) {

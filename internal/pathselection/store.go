@@ -19,6 +19,7 @@ var ErrUnavailable = errors.New("trusted path selection is unavailable")
 
 type record struct {
 	path      string
+	scope     string
 	expiresAt time.Time
 }
 
@@ -36,6 +37,16 @@ func NewStore() *Store {
 // Issue is called only with a path returned by Ori's native picker. The path is
 // retained in process memory and never embedded in the opaque token.
 func (s *Store) Issue(path string) (string, error) {
+	return s.issue(path, "")
+}
+
+// IssueFor binds a native selection to one server-known consumer scope, such
+// as a workspace ID. Existing unscoped consumers keep using Issue.
+func (s *Store) IssueFor(path, scope string) (string, error) {
+	return s.issue(path, strings.TrimSpace(scope))
+}
+
+func (s *Store) issue(path, scope string) (string, error) {
 	if s == nil {
 		return "", ErrUnavailable
 	}
@@ -56,7 +67,7 @@ func (s *Store) Issue(path string) (string, error) {
 			delete(s.records, key)
 		}
 	}
-	s.records[token] = record{path: path, expiresAt: now.Add(s.ttl)}
+	s.records[token] = record{path: path, scope: scope, expiresAt: now.Add(s.ttl)}
 	return token, nil
 }
 
@@ -64,6 +75,16 @@ func (s *Store) Issue(path string) (string, error) {
 // deliberately reusable across review and commit; the durable journey review
 // receipt provides single-use commit consent.
 func (s *Store) Resolve(token string) (string, error) {
+	return s.resolve(token, "", false)
+}
+
+// ResolveFor requires the scope recorded by IssueFor. An unscoped token cannot
+// be upgraded into a workspace-scoped folder grant.
+func (s *Store) ResolveFor(token, scope string) (string, error) {
+	return s.resolve(token, strings.TrimSpace(scope), true)
+}
+
+func (s *Store) resolve(token, scope string, requireScope bool) (string, error) {
 	if s == nil {
 		return "", ErrUnavailable
 	}
@@ -73,6 +94,9 @@ func (s *Store) Resolve(token string) (string, error) {
 	candidate, ok := s.records[token]
 	if !ok || !candidate.expiresAt.After(s.now()) {
 		delete(s.records, token)
+		return "", ErrUnavailable
+	}
+	if requireScope && (scope == "" || candidate.scope != scope) {
 		return "", ErrUnavailable
 	}
 	return candidate.path, nil

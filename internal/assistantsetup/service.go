@@ -17,7 +17,7 @@ import (
 const (
 	metadataDisclosure   = "File Janitor classifies files from names, types, sizes, and dates only. It does not read file contents or send them to a model."
 	folderDisclosure     = "You will choose one folder next. Granting it allows Ori to list immediate-child metadata and create or reuse Filed inside that folder; it does not start monitoring."
-	monitoringDisclosure = "Monitoring is a separate decision. If approved, Ori watches create and rename events after a five-minute settling delay and runs a daily catch-up at 09:00 local time."
+	monitoringDisclosure = "Monitoring is a separate decision. If approved, Ori groups create and rename activity for five minutes, proposes only settled files, and runs a daily catch-up at 09:00 local time."
 	fileReviewDisclosure = "Setup only prepares proposals. Every move or send-to-Trash still requires your separate approval in File Janitor review."
 )
 
@@ -45,6 +45,12 @@ type WorkspacePreparer interface {
 	PrepareFileJanitor(ctx context.Context, request PrepareRequest) (WorkspaceResult, error)
 }
 
+type FileJanitorProgressor interface {
+	Facts(ctx context.Context, ownerUserID, runID, workspaceID string) (FileJanitorFacts, error)
+	ReviewMonitoring(ctx context.Context, ownerUserID, workspaceID string) (MonitoringFacts, error)
+	PrepareFirstReview(ctx context.Context, request PrepareReviewRequest) (PrepareReviewResult, error)
+}
+
 type RecommendationService interface {
 	FileJanitorRecommendationDeferred(ctx context.Context, ownerUserID string) (bool, error)
 	DeferFileJanitorRecommendation(ctx context.Context, ownerUserID string) error
@@ -57,16 +63,24 @@ type Service struct {
 	plans           PlanSource
 	preparer        WorkspacePreparer
 	recommendations RecommendationService
+	progressor      FileJanitorProgressor
+	folderIntents   *folderIntentStore
 	gate            *resetstate.WorkGate
 }
 
 func NewService(store Store, relationships RelationshipReader, resolver CandidateResolver, plans PlanSource, preparer WorkspacePreparer) *Service {
-	return &Service{store: store, relationships: relationships, resolver: resolver, plans: plans, preparer: preparer}
+	return &Service{store: store, relationships: relationships, resolver: resolver, plans: plans, preparer: preparer, folderIntents: newFolderIntentStore()}
 }
 
 func (s *Service) SetAdmissionGate(gate *resetstate.WorkGate) {
 	if s != nil {
 		s.gate = gate
+	}
+}
+
+func (s *Service) SetProgressor(progressor FileJanitorProgressor) {
+	if s != nil {
+		s.progressor = progressor
 	}
 }
 
@@ -77,8 +91,16 @@ func (s *Service) SetRecommendationService(recommendations RecommendationService
 }
 
 func (s *Service) Get(ctx context.Context, ownerUserID, selectedWorkspaceID string) (*Projection, error) {
+	if s == nil || s.store == nil {
+		return nil, ErrUnavailable
+	}
+	active, activeErr := s.store.FindActiveRun(ctx, ownerUserID, CapabilityID)
 	relationship, err := s.relationship(ctx, ownerUserID)
 	if err != nil {
+		if activeErr == nil && active.Status != RunInvalidated &&
+			(errors.Is(err, ErrAssistantNotReady) || errors.Is(err, ErrAssistantRepair)) {
+			_, _ = s.store.InvalidateRun(ctx, ownerUserID, active.ID, active.Revision, "assistant_identity_no_longer_available")
+		}
 		return nil, err
 	}
 	projection := &Projection{
@@ -87,11 +109,19 @@ func (s *Service) Get(ctx context.Context, ownerUserID, selectedWorkspaceID stri
 		Relationship:  relationship,
 		Actions:       []Action{},
 	}
-	if s.store == nil {
-		return nil, ErrUnavailable
-	}
-	active, activeErr := s.store.FindActiveRun(ctx, ownerUserID, CapabilityID)
 	if activeErr == nil {
+		if active.Status != RunInvalidated && active.CurrentStep != StepWorkspace && s.resolver != nil {
+			target, targetErr := s.resolver.ResolveOne(ctx, ownerUserID, active.TargetWorkspaceID)
+			if errors.Is(targetErr, ErrNotFound) || (targetErr == nil && target != nil && !target.Supported) {
+				invalidated, invalidateErr := s.store.InvalidateRun(ctx, ownerUserID, active.ID, active.Revision, "target_no_longer_available")
+				if invalidateErr != nil {
+					return nil, invalidateErr
+				}
+				active = invalidated
+			} else if targetErr != nil {
+				return nil, ErrUnavailable
+			}
+		}
 		return s.projectRun(ctx, projection, active)
 	}
 	if !errors.Is(activeErr, ErrNotFound) {
@@ -103,6 +133,52 @@ func (s *Service) Get(ctx context.Context, ownerUserID, selectedWorkspaceID stri
 	targets, err := s.resolver.Resolve(ctx, ownerUserID)
 	if err != nil {
 		return nil, ErrUnavailable
+	}
+	for i := range targets {
+		if !targets[i].Supported || s.progressor == nil {
+			continue
+		}
+		facts, factsErr := s.progressor.Facts(ctx, ownerUserID, "", targets[i].WorkspaceID)
+		if factsErr != nil {
+			targets[i].Supported = false
+			targets[i].Reason = "status_unavailable"
+			continue
+		}
+		targets[i].Readiness = facts.Readiness
+		targets[i].Paused = facts.Paused
+		targets[i].PrivacyMode = facts.PrivacyMode
+		targets[i].MonitoringApproved = facts.MonitoringApproved
+		targets[i].MonitoringActive = facts.MonitoringActive
+		if facts.PrivacyMode != "" && facts.PrivacyMode != "metadata_only" {
+			targets[i].Supported = false
+			targets[i].Reason = "privacy_customized"
+		}
+	}
+	var readyTarget *Target
+	for i := range targets {
+		if targets[i].Supported && targets[i].Readiness == "ready" && targets[i].MonitoringApproved &&
+			(len(targets) == 1 || targets[i].WorkspaceID == strings.TrimSpace(selectedWorkspaceID)) {
+			candidate := targets[i]
+			readyTarget = &candidate
+			break
+		}
+	}
+	if readyTarget != nil {
+		target := *readyTarget
+		projection.Target = &target
+		projection.ViewState = "current_status"
+		if target.Paused {
+			projection.StatusMessage = "This File Janitor workspace is set up and paused. Opening it will not resume monitoring or start a scan."
+		} else {
+			projection.StatusMessage = "This File Janitor workspace is already set up. Opening it will not reprovision it or start a scan."
+		}
+		projection.Health = &Health{
+			Fresh: true, Readiness: target.Readiness, Paused: target.Paused,
+			MonitoringApproved: target.MonitoringApproved, MonitoringActive: target.MonitoringActive,
+			PrivacyMode: target.PrivacyMode,
+		}
+		projection.Actions = []Action{{ID: "open_workspace", Label: "Open current status", Enabled: target.Route != "", Route: target.Route}}
+		return projection, nil
 	}
 	proposal, err := s.buildProposal(ctx, ownerUserID, relationship, targets, selectedWorkspaceID)
 	if err != nil {
@@ -232,6 +308,10 @@ func (s *Service) buildProposal(ctx context.Context, ownerUserID string, relatio
 		proposal.Mode = TargetAdopt
 		proposal.SelectedWorkspaceID = targets[0].WorkspaceID
 		proposal.Targets = []Target{targets[0]}
+		if targets[0].Reason == "privacy_customized" {
+			proposal.MetadataDisclosure = "This workspace has a customized privacy mode. Your assistant will not inspect or reset it; review the existing File Janitor settings manually."
+			proposal.MonitoringDisclosure = "Existing monitoring and schedule settings are preserved until you review them in the workspace."
+		}
 	default:
 		if selectedWorkspaceID == "" {
 			proposal.Mode = TargetChoose
@@ -437,6 +517,17 @@ func (s *Service) prepareClaim(ctx context.Context, run *Run, plan TeamPlan, tar
 	if err != nil {
 		return nil, err
 	}
+	if updated.TargetMode == TargetAdopt && s.progressor != nil {
+		facts, factsErr := s.progressor.Facts(ctx, updated.OwnerUserID, updated.ID, updated.TargetWorkspaceID)
+		if factsErr == nil && facts.FolderReady && strings.TrimSpace(facts.RootGenerationID) != "" && strings.TrimSpace(facts.DirectoryReference) != "" {
+			updated, err = s.store.AdoptCurrentFolder(ctx, updated.OwnerUserID, updated.ID, updated.Revision, FolderGrantResult{
+				RootGenerationID: facts.RootGenerationID, DirectoryReference: facts.DirectoryReference, Adopted: true,
+			})
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 	base, err := s.baseProjection(ctx, run.OwnerUserID)
 	if err != nil {
 		return nil, err
@@ -478,13 +569,7 @@ func (s *Service) DeferRun(ctx context.Context, ownerUserID, runID string, ifVer
 	if err != nil {
 		return nil, err
 	}
-	projection, err := s.projectRun(ctx, base, run)
-	if err == nil {
-		projection.ViewState = "saved_for_later"
-		projection.StatusMessage = "Setup is saved for later. Existing access or monitoring was not changed."
-		projection.Actions = []Action{{ID: "resume", Label: "Resume setup", Enabled: true}, {ID: "manual", Label: "Set up manually", Enabled: projection.Target != nil, Route: targetRoute(projection.Target)}}
-	}
-	return projection, err
+	return s.projectRun(ctx, base, run)
 }
 
 func (s *Service) ResumeRun(ctx context.Context, ownerUserID, runID string, ifVersion int64) (*Projection, error) {
@@ -518,26 +603,231 @@ func (s *Service) projectRun(ctx context.Context, projection *Projection, run *R
 	}
 	projection.Run = run
 	projection.Operations = operations
+	if run.Status == RunInvalidated {
+		projection.ViewState = "no_longer_available"
+		projection.StatusMessage = "This setup stopped because its selected workspace or capability is no longer available. Ori will not recreate it or restore access."
+		projection.Actions = []Action{{ID: "manual", Label: "Review workspaces", Enabled: true, Route: "/workspaces"}}
+		return projection, nil
+	}
 	if s.resolver != nil {
-		if target, targetErr := s.resolver.ResolveOne(ctx, run.OwnerUserID, run.TargetWorkspaceID); targetErr == nil {
+		target, targetErr := s.resolver.ResolveOne(ctx, run.OwnerUserID, run.TargetWorkspaceID)
+		if targetErr == nil && target.Supported {
 			projection.Target = target
+		} else if targetErr != nil && !errors.Is(targetErr, ErrNotFound) {
+			return nil, ErrUnavailable
 		}
+	}
+	var facts FileJanitorFacts
+	needsFacts := run.CurrentStep == StepMonitoring || run.CurrentStep == StepInitialScan || run.CurrentStep == StepResult || run.Status == RunFirstResult
+	if needsFacts || (run.Status == RunActive && run.CurrentStep == StepFolder && s.progressor != nil) {
+		if s.progressor == nil {
+			return nil, ErrUnavailable
+		}
+		var factsErr error
+		facts, factsErr = s.progressor.Facts(ctx, run.OwnerUserID, run.ID, run.TargetWorkspaceID)
+		if factsErr != nil {
+			return nil, factsErr
+		}
+		projection.Health = &Health{
+			Fresh: true, Readiness: facts.Readiness, Paused: facts.Paused,
+			MonitoringApproved: facts.MonitoringApproved, MonitoringActive: facts.MonitoringActive,
+			PrivacyMode: facts.PrivacyMode, RootGenerationID: facts.RootGenerationID,
+			DirectoryReference: facts.DirectoryReference,
+		}
+		if run.Status == RunActive && run.CurrentStep == StepMonitoring && facts.MonitoringActive &&
+			(facts.FirstOutcome == "batch" || facts.FirstOutcome == "no_eligible") && !facts.FirstCompletedAt.IsZero() {
+			var monitoringOperation, scanOperation *Operation
+			for operationIndex := range operations {
+				operation := &operations[operationIndex]
+				switch operation.Kind {
+				case OperationMonitoring:
+					monitoringOperation = operation
+				case OperationInitialScan:
+					scanOperation = operation
+				}
+			}
+			if monitoringOperation != nil && scanOperation != nil && monitoringOperation.ReviewDigest == scanOperation.ReviewDigest {
+				reconciled, reconcileErr := s.store.CompletePrepareReview(ctx, PrepareReviewRequest{
+					OwnerUserID: run.OwnerUserID, RunID: run.ID, WorkspaceID: run.TargetWorkspaceID,
+					RunRevision: run.Revision, MonitoringOperation: monitoringOperation.ID, ScanOperation: scanOperation.ID,
+					Review: MonitoringReview{Revision: monitoringOperation.ReviewDigest, RootGenerationID: facts.RootGenerationID, PrivacyMode: facts.PrivacyMode},
+				}, PrepareReviewResult{
+					Facts: facts, MonitoringApplied: true, ScanAttempted: true, ScanOutcome: facts.FirstOutcome,
+					BatchID: facts.FirstBatchID, EligibleCount: facts.FirstEligible, IneligibleCount: facts.FirstIneligible,
+					CompletedAt: facts.FirstCompletedAt,
+				})
+				if reconcileErr != nil {
+					return nil, reconcileErr
+				}
+				run = reconciled
+				projection.Run = reconciled
+				operations, err = s.store.ListOperations(ctx, run.OwnerUserID, run.ID)
+				if err != nil {
+					return nil, ErrUnavailable
+				}
+				projection.Operations = operations
+			}
+		}
+		if run.Status == RunActive && run.CurrentStep == StepFolder && facts.FolderReady &&
+			strings.TrimSpace(facts.RootGenerationID) != "" && strings.TrimSpace(facts.DirectoryReference) != "" {
+			adopted, completeErr := s.store.AdoptCurrentFolder(ctx, run.OwnerUserID, run.ID, run.Revision, FolderGrantResult{
+				RootGenerationID: facts.RootGenerationID, DirectoryReference: facts.DirectoryReference, Adopted: true,
+			})
+			if completeErr != nil {
+				return nil, completeErr
+			}
+			run = adopted
+			projection.Run = adopted
+			operations, err = s.store.ListOperations(ctx, run.OwnerUserID, run.ID)
+			if err != nil {
+				return nil, ErrUnavailable
+			}
+			projection.Operations = operations
+		}
+		if run.Status == RunActive && run.CurrentStep == StepMonitoring && facts.FolderReady &&
+			strings.TrimSpace(facts.RootGenerationID) != "" && strings.TrimSpace(facts.DirectoryReference) != "" {
+			reconciled, changed, reconcileErr := s.store.ReconcileAdoptedFolder(ctx, run.OwnerUserID, run.ID, run.Revision, FolderGrantResult{
+				RootGenerationID: facts.RootGenerationID, DirectoryReference: facts.DirectoryReference, Adopted: true,
+			})
+			if reconcileErr != nil {
+				return nil, reconcileErr
+			}
+			if changed {
+				run = reconciled
+				projection.Run = reconciled
+				operations, err = s.store.ListOperations(ctx, run.OwnerUserID, run.ID)
+				if err != nil {
+					return nil, ErrUnavailable
+				}
+				projection.Operations = operations
+			}
+		}
+	}
+	if run.Status == RunDeferred {
+		projection.ViewState = "saved_for_later"
+		projection.StatusMessage = "Setup is saved for later. Existing access or monitoring was not changed."
+		projection.Actions = []Action{{ID: "resume", Label: "Resume setup", Enabled: true}, {ID: "manual", Label: "Continue manually", Enabled: projection.Target != nil, Route: targetRoute(projection.Target)}}
+		if facts.MonitoringActive {
+			projection.StatusMessage += " Monitoring is still active; pause it separately in File Janitor if you want it stopped."
+			projection.Actions = append(projection.Actions, Action{ID: "pause_monitoring", Label: "Pause monitoring", Enabled: projection.Target != nil, Route: targetTabRoute(projection.Target, "settings")})
+		}
+		return projection, nil
 	}
 	switch {
 	case run.Status == RunReconcileRequired:
 		projection.ViewState = "needs_attention"
 		projection.StatusMessage = "Ori saved the setup claim but cannot prove the workspace result. Review it before retrying."
 		projection.Actions = []Action{{ID: "manual", Label: "Review manually", Enabled: projection.Target != nil, Route: targetRoute(projection.Target)}}
+	case run.Status == RunFirstResult || run.CurrentStep == StepResult:
+		if (facts.FirstOutcome != "batch" && facts.FirstOutcome != "no_eligible") || facts.FirstCompletedAt.IsZero() ||
+			(facts.FirstOutcome == "batch" && strings.TrimSpace(facts.FirstBatchID) == "") {
+			projection.ViewState = "needs_attention"
+			projection.StatusMessage = "Ori cannot verify the saved first-scan result. Open File Janitor to review its current state."
+			projection.Actions = []Action{{ID: "manual", Label: "Review File Janitor", Enabled: projection.Target != nil, Route: targetRoute(projection.Target)}}
+			break
+		}
+		projection.FirstResult = &FirstResult{
+			Outcome: facts.FirstOutcome, BatchID: facts.FirstBatchID,
+			EligibleCount: facts.FirstEligible, IneligibleCount: facts.FirstIneligible,
+			CompletedAt: facts.FirstCompletedAt,
+		}
+		if facts.FirstOutcome == "batch" {
+			projection.ViewState = "first_review_ready"
+			projection.StatusMessage = "Your first metadata-only filing proposals are ready to review. Nothing has moved."
+			projection.FirstResult.ReviewRoute = reviewBatchRoute(projection.Target, facts.FirstBatchID)
+			projection.Actions = []Action{{ID: "review_batch", Label: "Review proposed filing", Enabled: projection.Target != nil, Route: projection.FirstResult.ReviewRoute}, {ID: "open_workspace", Label: "Open workspace", Enabled: projection.Target != nil, Route: targetRoute(projection.Target)}}
+		} else {
+			projection.ViewState = "no_new_files"
+			projection.StatusMessage = "The first metadata-only scan completed. There are no new eligible files to review, and nothing moved."
+			projection.Actions = []Action{{ID: "open_workspace", Label: "Open workspace", Enabled: projection.Target != nil, Route: targetRoute(projection.Target)}}
+		}
+		projection.Actions = append(projection.Actions,
+			Action{ID: "manage_access", Label: "Manage access", Enabled: projection.Target != nil, Route: targetTabRoute(projection.Target, "settings")},
+			Action{ID: "history", Label: "History", Enabled: projection.Target != nil, Route: targetTabRoute(projection.Target, "history")},
+		)
+		if facts.Paused {
+			projection.StatusMessage += " Monitoring is currently paused."
+		} else if !facts.MonitoringActive {
+			projection.StatusMessage += " Monitoring needs attention."
+		} else {
+			projection.Actions = append(projection.Actions, Action{ID: "pause_monitoring", Label: "Pause monitoring", Enabled: projection.Target != nil, Route: targetTabRoute(projection.Target, "settings")})
+		}
 	case run.CurrentStep == StepFolder:
 		projection.ViewState = "needs_permission"
 		projection.StatusMessage = "Workspace prepared. Choose the folder to tidy when you are ready."
-		projection.Actions = []Action{{ID: "choose_folder", Label: "Choose folder", Enabled: true}, {ID: "finish_later", Label: "Finish later", Enabled: true}, {ID: "manual", Label: "Set up manually", Enabled: projection.Target != nil, Route: targetRoute(projection.Target)}}
+		projection.Actions = []Action{{ID: "choose_folder", Label: "Choose folder", Enabled: true}, {ID: "finish_later", Label: "Finish later", Enabled: true}, {ID: "manual_takeover", Label: "Continue manually", Enabled: projection.Target != nil}}
+	case run.CurrentStep == StepMonitoring:
+		if !facts.FolderReady || strings.TrimSpace(facts.RootGenerationID) == "" || strings.TrimSpace(facts.DirectoryReference) == "" {
+			projection.ViewState = "needs_attention"
+			projection.StatusMessage = "File Janitor folder access needs attention. Review or relink it manually; Ori will not restore access on its own."
+			projection.Actions = []Action{{ID: "manual_takeover", Label: "Manage access manually", Enabled: projection.Target != nil}}
+			break
+		}
+		review, reviewErr := s.monitoringReview(ctx, run.OwnerUserID, run)
+		if reviewErr != nil {
+			return nil, reviewErr
+		}
+		projection.Monitoring = review
+		if review.PrivacyMode != "metadata_only" {
+			projection.ViewState = "manual_required"
+			projection.StatusMessage = "This workspace uses a custom privacy mode. Review it manually before assisted monitoring starts."
+			projection.Actions = []Action{{ID: "manual_takeover", Label: "Review settings manually", Enabled: projection.Target != nil}}
+			break
+		}
+		projection.ViewState = "needs_decision"
+		projection.StatusMessage = "Folder access is saved and monitoring is still off. Review the watcher, settling delay, and daily scan before starting them."
+		label := "Start monitoring and prepare review"
+		if facts.MonitoringApproved && facts.MonitoringActive {
+			projection.StatusMessage = "Existing monitoring is active. Review the current watcher, settling delay, privacy, and daily scan before preparing the first review."
+			label = "Prepare first review"
+		} else if facts.MonitoringApproved && facts.Paused {
+			projection.StatusMessage = "Existing monitoring approval is saved, but monitoring is paused. Review the current settings before starting it for the first review."
+		}
+		switch run.FailedStep {
+		case StepMonitoring:
+			projection.ViewState = "needs_attention"
+			projection.StatusMessage = "Monitoring could not be started and remains off. Review the unchanged settings and try again."
+			label = "Try starting monitoring again"
+		case StepInitialScan:
+			projection.ViewState = "needs_attention"
+			if facts.MonitoringActive {
+				projection.StatusMessage = "The first metadata-only scan did not complete. Existing monitoring remains active; review the settings and try again."
+			} else {
+				projection.StatusMessage = "The first metadata-only scan did not complete. Monitoring was paused safely; review the settings and try again."
+			}
+			label = "Try preparing the review again"
+		}
+		projection.Actions = []Action{{ID: "prepare_review", Label: label, Enabled: true}, {ID: "finish_later", Label: "Finish later", Enabled: true}, {ID: "manual_takeover", Label: "Continue manually", Enabled: projection.Target != nil}}
 	default:
 		projection.ViewState = "setting_up"
 		projection.StatusMessage = "Preparing the reviewed File Janitor workspace."
 		projection.Actions = []Action{{ID: "finish_later", Label: "Finish later", Enabled: true}}
 	}
 	return projection, nil
+}
+
+func reviewBatchRoute(target *Target, batchID string) string {
+	route := targetRoute(target)
+	if route == "" || strings.TrimSpace(batchID) == "" {
+		return route
+	}
+	separator := "?"
+	if strings.Contains(route, "?") {
+		separator = "&"
+	}
+	return route + separator + "batch_id=" + strings.TrimSpace(batchID)
+}
+
+func targetTabRoute(target *Target, tab string) string {
+	route := targetRoute(target)
+	if route == "" || strings.TrimSpace(tab) == "" {
+		return route
+	}
+	separator := "?"
+	if strings.Contains(route, "?") {
+		separator = "&"
+	}
+	return route + separator + "tab=" + strings.TrimSpace(tab)
 }
 
 func targetRoute(target *Target) string {

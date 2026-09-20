@@ -1079,6 +1079,8 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET "+fileJanitorSetup, s.Handlers.PersonalAssistant.GetAssistantSetup)
 		mux.HandleFunc("POST "+fileJanitorSetup+"/accept", s.Handlers.PersonalAssistant.AcceptAssistantSetup)
 		mux.HandleFunc("POST "+fileJanitorSetup+"/defer", s.Handlers.PersonalAssistant.DeferAssistantSetupRecommendation)
+		mux.HandleFunc("POST "+fileJanitorSetup+"/runs/{runID}/folder-intent", s.Handlers.PersonalAssistant.BeginAssistantSetupFolderIntent)
+		mux.HandleFunc("POST "+fileJanitorSetup+"/runs/{runID}/prepare-review", s.Handlers.PersonalAssistant.PrepareAssistantSetupReview)
 		mux.HandleFunc("POST "+fileJanitorSetup+"/runs/{runID}/defer", s.Handlers.PersonalAssistant.DeferAssistantSetupRun)
 		mux.HandleFunc("POST "+fileJanitorSetup+"/runs/{runID}/resume", s.Handlers.PersonalAssistant.ResumeAssistantSetupRun)
 	}
