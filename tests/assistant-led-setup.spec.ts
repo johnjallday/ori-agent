@@ -88,6 +88,57 @@ test('no-model and pre-HQ setup reaches one real unselected review without movin
   expect(permission.run.team_role.model_configured).toBe(false);
   workspaceID = permission.run.target_workspace_id;
 
+  // #529: the sequence shown on the card and in the walkthrough is the server's
+  // receipts, with canonical IDs equal to the API projection.
+  expect(
+    permission.milestones.map((milestone: any) => [
+      milestone.id,
+      milestone.status,
+      milestone.ownership
+    ])
+  ).toEqual([
+    ['workspace', 'created', 'created'],
+    ['role:file-curator', 'created', 'created']
+  ]);
+  expect(permission.milestones[0].resource_id).toBe(workspaceID);
+  await expect(page.locator('#assistantLedSetupDialogMode')).toContainText('Receipt walkthrough');
+  const apiIDs = permission.milestones.map((milestone: any) => milestone.resource_id);
+  const shownIDs = await page
+    .locator('#assistantLedSetupMilestones li')
+    .evaluateAll(items => items.map(item => (item as HTMLElement).dataset.resourceId));
+  expect(shownIDs).toEqual(apiIDs);
+  await page.locator('#assistantLedSetupDialogClose').click();
+  await page.reload();
+  card = await openAssistantSetup(page);
+  const afterReload = await page
+    .locator('#assistantLedSetupMilestones li')
+    .evaluateAll(items => items.map(item => (item as HTMLElement).dataset.resourceId));
+  expect(afterReload).toEqual(apiIDs);
+  await card.getByRole('button', { name: 'View setup walkthrough' }).click();
+  await expect(page.locator('#assistantLedSetupDialogMode')).toContainText('Receipt walkthrough');
+  await page.keyboard.press('Escape');
+  const replayed = await setupProjection(request);
+  expect(replayed.run.id).toBe(permission.run.id);
+  expect(replayed.run.revision).toBe(permission.run.revision);
+  const workspaceOps = replayed.operations.filter(
+    (operation: any) => operation.kind === 'workspace'
+  );
+  expect(workspaceOps).toHaveLength(1);
+  expect(workspaceOps[0].attempt_count).toBe(1);
+
+  // #528 boundaries are unchanged by the presentation: no root, no automation
+  // approval, no scan, and the native picker was never opened.
+  const janitor = await request.get(`/api/workspaces/${workspaceID}/file-janitor`);
+  expect(janitor.ok(), await janitor.text()).toBeTruthy();
+  const status = await janitor.json();
+  expect(status.settings?.root_id ?? '').toBe('');
+  expect(status.settings?.automation_approved_at ?? '').toBe('');
+  expect(replayed.health?.root_generation_id ?? '').toBe('');
+  expect(replayed.operations.some((operation: any) => operation.kind === 'initial_scan')).toBe(
+    false
+  );
+  expect(browserWrites.some(write => write.includes('folder-picker'))).toBe(false);
+
   fixture = mkdtempSync(join(tmpdir(), 'assistant-led-setup-'));
   expect(fixture.startsWith(join(homedir(), 'Downloads'))).toBeFalsy();
   const report = join(fixture, 'report.pdf');
