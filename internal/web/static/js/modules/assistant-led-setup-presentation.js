@@ -269,6 +269,24 @@ export function createStepScheduler({
   };
 }
 
+// "Workspace", "Agent", or "Team" (an adopted team has no reviewed role).
+export function kindLabel(view) {
+  if (view?.kind === 'workspace') return 'Workspace';
+  if (view?.kind === 'existing_team') return 'Team';
+  return 'Agent';
+}
+
+// Up to two letters for an avatar; identity is never derived from them.
+export function initialsFor(name) {
+  const words = String(name || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!words.length) return '?';
+  const letters = words.length === 1 ? words[0].slice(0, 2) : words[0][0] + words[1][0];
+  return letters.toUpperCase();
+}
+
 function actionLabel(action) {
   return action === 'reuse' ? 'Reuse' : 'Create';
 }
@@ -396,29 +414,87 @@ export function createPresentation({
 
   const isOpen = () => dialog.open === true || dialog.hasAttribute('open');
 
+  // The picture for a receipt card: the workspace's building art when this page
+  // has it, otherwise a workspace glyph; an agent gets an initials avatar.
+  function kindVisual(view) {
+    const visual = doc.createElement('span');
+    visual.className = 'assistant-led-setup-dialog__visual';
+    visual.setAttribute('aria-hidden', 'true');
+    if (view.kind === 'workspace') {
+      const art = win?.OriWorkspaceBuildingArt;
+      const id = view.blueprint.split(' ')[0];
+      const variant = id ? art?.variantForBlueprint?.(id, true) : '';
+      const svg = variant ? art?.svgForVariant?.(variant, { context: 'catalog' }) : '';
+      if (svg) {
+        visual.classList.add('has-building-art');
+        visual.innerHTML = svg;
+      } else {
+        visual.textContent = '🏢';
+      }
+    } else {
+      visual.classList.add('is-avatar');
+      visual.textContent = initialsFor(view.name);
+    }
+    return visual;
+  }
+
+  // The receipt as a small tree: the workspace, with its team under it.
+  function receiptTree(entries) {
+    const tree = doc.createElement('div');
+    tree.className = 'assistant-led-setup-dialog__tree';
+    const workspaces = entries.filter(view => view.kind === 'workspace');
+    const team = entries.filter(view => view.kind !== 'workspace');
+    workspaces.forEach(view => tree.append(entryNode(view)));
+    if (team.length) {
+      const branch = doc.createElement('div');
+      branch.className = 'assistant-led-setup-dialog__tree-branch';
+      const label = doc.createElement('span');
+      label.className = 'assistant-led-setup-dialog__tree-label';
+      label.textContent = workspaces.length ? 'works in this workspace' : 'team';
+      branch.append(label);
+      team.forEach(view => branch.append(entryNode(view)));
+      tree.append(branch);
+    }
+    return tree;
+  }
+
   function entryNode(view) {
     const node = doc.createElement('div');
     node.className = 'assistant-led-setup-dialog__entry';
     node.dataset.milestoneId = view.key;
     node.dataset.status = view.status;
+    node.dataset.kind = view.kind;
+    // What this is, at a glance: a workspace shows its building, an agent shows
+    // an avatar, and a pill names the kind.
     const head = doc.createElement('div');
     head.className = 'assistant-led-setup-dialog__entry-head';
+    head.append(kindVisual(view));
+    const title = doc.createElement('div');
+    title.className = 'assistant-led-setup-dialog__entry-title';
+    const pill = doc.createElement('span');
+    pill.className = 'assistant-led-setup-dialog__kind';
+    pill.textContent = kindLabel(view);
     const name = doc.createElement('strong');
     name.textContent = view.name;
+    title.append(pill, name);
     const chip = doc.createElement('span');
     chip.className = 'assistant-led-setup-dialog__chip';
     chip.textContent = view.statusLabel;
-    head.append(name, ' ', chip);
+    head.append(title, chip);
     node.append(head);
     const list = doc.createElement('dl');
     list.className = 'assistant-led-setup-dialog__facts';
-    entryFacts(view, undefined).forEach(([term, value]) => {
-      const dt = doc.createElement('dt');
-      dt.textContent = term;
-      const dd = doc.createElement('dd');
-      dd.textContent = value;
-      list.append(dt, dd);
-    });
+    // The kind pill and the name already say what this is and what was asked.
+    const covered = new Set(['Reviewed action', 'Role', 'Blueprint']);
+    entryFacts(view, undefined)
+      .filter(([term]) => !covered.has(term))
+      .forEach(([term, value]) => {
+        const dt = doc.createElement('dt');
+        dt.textContent = term;
+        const dd = doc.createElement('dd');
+        dd.textContent = value;
+        list.append(dt, dd);
+      });
     view.details.forEach(detail => {
       const dt = doc.createElement('dt');
       dt.textContent = 'Model';
@@ -630,10 +706,10 @@ export function createPresentation({
         const host = doc.createElement('div');
         host.className = 'assistant-led-setup-dialog__stage';
         section.append(host);
+      } else if (panel.id === 'receipt') {
+        if (panel.entries.length) section.append(receiptTree(panel.entries));
       } else {
-        panel.entries.forEach(view =>
-          section.append(panel.id === 'receipt' ? entryNode(view) : windowNode(view, agents))
-        );
+        panel.entries.forEach(view => section.append(windowNode(view, agents)));
       }
       els.panels.append(section);
     });

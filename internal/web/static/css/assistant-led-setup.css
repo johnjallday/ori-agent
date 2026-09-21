@@ -644,6 +644,94 @@
   }
 }
 
+/* Receipt summary as a tree: a workspace card with its agents under it. */
+.assistant-led-setup-dialog__entry-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.assistant-led-setup-dialog__entry-title {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 0.15rem;
+}
+
+.assistant-led-setup-dialog__kind {
+  justify-self: start;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, #8b5cf6 18%, transparent);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.assistant-led-setup-dialog__entry[data-kind="workspace"] .assistant-led-setup-dialog__kind {
+  background: color-mix(in srgb, #d9a441 24%, transparent);
+}
+
+.assistant-led-setup-dialog__visual {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 3.4rem;
+  height: 3.4rem;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--text-secondary, #5b6475) 12%, transparent);
+  font-size: 1.6rem;
+  overflow: hidden;
+}
+
+.assistant-led-setup-dialog__visual svg {
+  width: 100%;
+  height: 100%;
+}
+
+.assistant-led-setup-dialog__visual.is-avatar {
+  border-radius: 50%;
+  background: linear-gradient(135deg, #7c3aed, #4f46e5);
+  color: #fff;
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+
+.assistant-led-setup-dialog__tree-branch {
+  position: relative;
+  margin: 0 0 0.5rem 1.7rem;
+  padding-left: 1.4rem;
+  border-left: 2px solid color-mix(in srgb, #8b5cf6 45%, transparent);
+}
+
+.assistant-led-setup-dialog__tree-branch > .assistant-led-setup-dialog__entry::before {
+  content: "";
+  position: absolute;
+  left: -2px;
+  width: 1.2rem;
+  height: 2px;
+  margin-top: 2.05rem;
+  background: color-mix(in srgb, #8b5cf6 45%, transparent);
+}
+
+.assistant-led-setup-dialog__tree-branch > .assistant-led-setup-dialog__entry {
+  position: relative;
+}
+
+.assistant-led-setup-dialog__tree-label {
+  display: block;
+  margin: 0 0 0.35rem -0.2rem;
+  color: var(--text-secondary, #5b6475);
+  font-size: 0.72rem;
+  font-style: italic;
+}
+
+.assistant-led-setup-dialog__tree > .assistant-led-setup-dialog__entry {
+  margin-bottom: 0.15rem;
+}
+
 /* The real modal, replayed. A step whose recorded state is Created plays the
    live Create Workspace / Create Agent modal being clicked through. It is a
    picture (inert, no controls); the dialog widens to give it room. */

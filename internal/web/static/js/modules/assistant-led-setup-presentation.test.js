@@ -8,6 +8,8 @@ import {
   buildPanels,
   createStepScheduler,
   entryFacts,
+  initialsFor,
+  kindLabel,
   modeLine,
   presentationMode,
   receiptTime,
@@ -272,6 +274,22 @@ test('reuse and adopt windows say Reuse, never Create', () => {
   assert.equal(existing.title, 'Existing team');
   assert.equal(existing.button, 'Keep team');
   assert.doesNotMatch(JSON.stringify([workspace, existing, reuseAgent]), /Create/);
+});
+
+test('receipt cards say what each thing is: a Workspace, an Agent, or a Team', () => {
+  const [workspace, agent] = assistantSetupMilestoneViews(receipted());
+  assert.equal(kindLabel(workspace), 'Workspace');
+  assert.equal(kindLabel(agent), 'Agent');
+  assert.equal(kindLabel({ kind: 'existing_team' }), 'Team');
+  assert.equal(kindLabel(undefined), 'Agent');
+});
+
+test('avatar initials are display only and always safe', () => {
+  assert.equal(initialsFor('File Curator'), 'FC');
+  assert.equal(initialsFor('Curator'), 'CU');
+  assert.equal(initialsFor('  a   very long name '), 'AV');
+  assert.equal(initialsFor(''), '?');
+  assert.equal(initialsFor(undefined), '?');
 });
 
 test('timers only move the view: advancing them never changes a status', () => {
