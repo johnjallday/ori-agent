@@ -10,13 +10,23 @@
       "optional_operations": ["create_event"]
     }
   ],
+  "directory_requirements": [
+    {
+      "key": "course-materials-folder",
+      "label": "Course materials folder",
+      "suggested_path": "~/Documents",
+      "access_disclosure": "Ori reads the contents of supported files directly inside this folder after you consent. It does not read subfolders, and it does not copy the source files into the workspace."
+    }
+  ],
   "intake_requirements": [
     {
       "key": "course-materials",
       "label": "Course materials",
       "skill": "syllabus-intake",
       "sources": {
-        "files": true
+        "files": true,
+        "url": true,
+        "directory_key": "course-materials-folder"
       },
       "accepted_extensions": [".pdf", ".docx", ".txt", ".md"],
       "proposal_kinds": ["ticket", "memory", "note", "calendar_event"]

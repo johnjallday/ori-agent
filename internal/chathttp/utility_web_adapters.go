@@ -6,9 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"os"
 	"regexp"
@@ -16,22 +14,20 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/urlsafety"
 	"golang.org/x/net/html"
 )
 
 const (
 	duckDuckGoSearchURL = "https://api.duckduckgo.com/"
 	braveSearchURL      = "https://api.search.brave.com/res/v1/web/search"
-	utilityDefaultUA    = "ori-agent/utility-tools"
+	utilityDefaultUA    = urlsafety.DefaultUserAgent
 )
 
 var pollenComBaseURL = "https://www.pollen.com"
 
 // URLSafetyPolicy controls URL-level access restrictions.
-type URLSafetyPolicy struct {
-	AllowedDomains    []string
-	BlockPrivateHosts bool
-}
+type URLSafetyPolicy = urlsafety.Policy
 
 // WebFetchAdapterConfig controls HTTP fetch behavior.
 type WebFetchAdapterConfig struct {
@@ -52,7 +48,7 @@ type BrowserAutomationPolicy struct {
 func DefaultWebFetchAdapterConfig() WebFetchAdapterConfig {
 	return WebFetchAdapterConfig{
 		UserAgent:        utilityDefaultUA,
-		MaxResponseBytes: 1 << 20, // 1 MiB
+		MaxResponseBytes: urlsafety.DefaultMaxResponseBytes,
 		Safety: URLSafetyPolicy{
 			AllowedDomains:    nil,
 			BlockPrivateHosts: true,
@@ -64,7 +60,7 @@ func DefaultWebFetchAdapterConfig() WebFetchAdapterConfig {
 func DefaultBrowserAutomationPolicy() BrowserAutomationPolicy {
 	return BrowserAutomationPolicy{
 		UserAgent:         utilityDefaultUA,
-		MaxResponseBytes:  1 << 20, // 1 MiB
+		MaxResponseBytes:  urlsafety.DefaultMaxResponseBytes,
 		AllowedDomains:    nil,
 		BlockPrivateHosts: true,
 	}
@@ -1025,95 +1021,16 @@ func doUtilityHTTPGetWithHeaders(ctx context.Context, client *http.Client, targe
 }
 
 func parseAndValidateUtilityURL(rawURL string, policy URLSafetyPolicy) (*url.URL, error) {
-	candidate := strings.TrimSpace(rawURL)
-	if candidate == "" {
-		return nil, fmt.Errorf("%w: url is required", ErrUtilityInvalidInput)
-	}
-	if !strings.Contains(candidate, "://") {
-		candidate = "https://" + candidate
-	}
-
-	parsed, err := url.Parse(candidate)
+	parsed, err := urlsafety.Parse(rawURL, policy)
 	if err != nil {
-		return nil, fmt.Errorf("%w: invalid url", ErrUtilityInvalidInput)
+		return nil, fmt.Errorf("%w: %v", ErrUtilityInvalidInput, err)
 	}
-	if !strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https") {
-		return nil, fmt.Errorf("%w: url must use http or https", ErrUtilityInvalidInput)
-	}
-
-	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
-	if host == "" {
-		return nil, fmt.Errorf("%w: url host is required", ErrUtilityInvalidInput)
-	}
-
-	if policy.BlockPrivateHosts && isPrivateUtilityHost(host) {
-		return nil, fmt.Errorf("%w: private or local hosts are blocked", ErrUtilityInvalidInput)
-	}
-	if len(policy.AllowedDomains) > 0 && !matchesAllowedUtilityDomain(host, policy.AllowedDomains) {
-		return nil, fmt.Errorf("%w: host %q is not in allowed domains", ErrUtilityInvalidInput, host)
-	}
-
 	return parsed, nil
 }
 
-func isPrivateUtilityHost(host string) bool {
-	if host == "" {
-		return true
-	}
-	if host == "localhost" || strings.HasSuffix(host, ".local") {
-		return true
-	}
-	addr, err := netip.ParseAddr(host)
-	if err != nil {
-		return false
-	}
-	return isPrivateIP(addr)
-}
-
-func isPrivateIP(addr netip.Addr) bool {
-	return addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() || addr.IsMulticast() || addr.IsUnspecified()
-}
-
-// newSSRFSafeTransport returns an http.Transport that rejects connections to
-// private/loopback IPs at dial time, preventing DNS rebinding SSRF attacks.
-func newSSRFSafeTransport() *http.Transport {
-	return &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			host, port, err := net.SplitHostPort(addr)
-			if err != nil {
-				return nil, fmt.Errorf("ssrf check: invalid address %q: %w", addr, err)
-			}
-
-			// Resolve the hostname to IPs and reject private addresses.
-			ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-			if err != nil {
-				return nil, fmt.Errorf("ssrf check: dns lookup failed for %q: %w", host, err)
-			}
-			for _, ip := range ips {
-				if isPrivateIP(ip) {
-					return nil, fmt.Errorf("ssrf check: resolved to private IP %s", ip)
-				}
-			}
-
-			// All IPs are public — proceed with the connection.
-			return (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, network, net.JoinHostPort(host, port))
-		},
-	}
-}
-
-func matchesAllowedUtilityDomain(host string, allowed []string) bool {
-	host = strings.ToLower(strings.TrimSpace(host))
-	for _, raw := range allowed {
-		domain := strings.ToLower(strings.TrimSpace(raw))
-		if domain == "" {
-			continue
-		}
-		if host == domain || strings.HasSuffix(host, "."+domain) {
-			return true
-		}
-	}
-	return false
-}
+// newSSRFSafeTransport preserves the package-local seam while sharing one SSRF
+// implementation with other host-owned fetchers.
+func newSSRFSafeTransport() *http.Transport { return urlsafety.NewSafeTransport() }
 
 func looksLikeHTML(contentType string, body []byte) bool {
 	ct := strings.ToLower(strings.TrimSpace(contentType))

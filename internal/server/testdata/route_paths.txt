@@ -279,6 +279,8 @@
 /api/workspaces/x/blueprint-intakes/materials/run/cancel
 /api/workspaces/x/blueprint-intakes/materials/skill/trust
 /api/workspaces/x/blueprint-intakes/materials/sources/files
+/api/workspaces/x/blueprint-intakes/materials/sources/folder
+/api/workspaces/x/blueprint-intakes/materials/sources/links
 /api/workspaces/x/canvas/store-nodes
 /api/workspaces/x/canvas/store-nodes/x
 /api/workspaces/x/directories

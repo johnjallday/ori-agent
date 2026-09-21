@@ -25,7 +25,7 @@
     const key = stateKey(ctx);
     let state = states.get(key);
     if (!state) {
-      state = { loaded: false, loading: false, uploading: false, files: [], consent: null };
+      state = { loaded: false, loading: false, uploading: false, sources: [], consent: null };
       states.set(key, state);
     }
     return state;
@@ -46,7 +46,11 @@
     ctx.setBusy(true, 'Loading intake…');
     try {
       const payload = await request(ctx);
-      state.files = Array.isArray(payload.files) ? payload.files : [];
+      state.sources = Array.isArray(payload.sources)
+        ? payload.sources
+        : Array.isArray(payload.files)
+          ? payload.files
+          : [];
       state.consent = payload.consent || null;
       state.loaded = true;
       draw(container, ctx, state);
@@ -65,6 +69,7 @@
       return;
     }
 
+    const actions = el('div', 'blueprint-intake-source-actions');
     if (ctx.step.intake_files) {
       const picker = document.createElement('input');
       picker.type = 'file';
@@ -86,19 +91,54 @@
           : 'PDF, Office documents, text, Markdown, HTML, JSON, XML, and CSV are supported.'
       );
       picker.addEventListener('change', () => uploadFiles(container, ctx, state, picker));
-      container.append(label, picker, hint);
+      actions.append(label, picker, hint);
     }
+    if (ctx.step.intake_url) {
+      const linkInput = document.createElement('input');
+      linkInput.type = 'url';
+      linkInput.placeholder = 'https://example.com/page';
+      linkInput.className = 'blueprint-intake-link-input';
+      linkInput.disabled = state.uploading || !state.consent?.accepted;
+      const addLink = el('button', 'modern-btn modern-btn-secondary', 'Add a link');
+      addLink.type = 'button';
+      addLink.disabled = linkInput.disabled;
+      addLink.addEventListener('click', () => addLinkSource(container, ctx, state, linkInput));
+      actions.append(linkInput, addLink);
+    }
+    if (ctx.step.intake_directory_key) {
+      const chooseFolder = el('button', 'modern-btn modern-btn-secondary', 'Choose a folder');
+      chooseFolder.type = 'button';
+      chooseFolder.disabled = state.uploading || !state.consent?.accepted;
+      chooseFolder.addEventListener('click', () => addFolderSource(container, ctx, state));
+      actions.appendChild(chooseFolder);
+    }
+    if (actions.children.length) container.appendChild(actions);
 
     const list = el('ul', 'blueprint-intake-source-list');
-    if (!state.files.length) {
-      list.appendChild(el('li', 'blueprint-intake-empty', 'No files added yet.'));
+    if (!state.sources.length) {
+      list.appendChild(el('li', 'blueprint-intake-empty', 'No sources added yet.'));
     } else {
-      state.files.forEach(file => {
-        const item = el('li', `blueprint-intake-source blueprint-intake-source-${file.status}`);
-        item.appendChild(el('span', 'blueprint-intake-source-name', file.name || 'Unnamed file'));
-        item.appendChild(el('span', 'blueprint-intake-source-status', statusLabel(file.status)));
-        if (file.message)
-          item.appendChild(el('span', 'blueprint-intake-source-message', file.message));
+      state.sources.forEach(source => {
+        const item = el('li', `blueprint-intake-source blueprint-intake-source-${source.status}`);
+        const kind = source.kind === 'link' ? 'Page' : source.kind === 'folder' ? 'Folder' : 'File';
+        item.appendChild(
+          el(
+            'span',
+            'blueprint-intake-source-name',
+            `${kind}: ${source.title || source.name || 'Unnamed source'}`
+          )
+        );
+        item.appendChild(el('span', 'blueprint-intake-source-status', statusLabel(source.status)));
+        if (source.message)
+          item.appendChild(el('span', 'blueprint-intake-source-message', source.message));
+        if (source.omitted && !source.message)
+          item.appendChild(
+            el(
+              'span',
+              'blueprint-intake-source-message',
+              `${source.omitted} immediate file(s) were left out.`
+            )
+          );
         list.appendChild(item);
       });
     }
@@ -135,13 +175,70 @@
     draw(container, ctx, state);
     try {
       const payload = await request(ctx, '/sources/files', { method: 'POST', body: form });
-      state.files = state.files.concat(Array.isArray(payload.files) ? payload.files : []);
+      state.sources = state.sources.concat(Array.isArray(payload.files) ? payload.files : []);
       ctx.announce('Files added. Review their status and the content-reading statement.');
     } catch (error) {
       ctx.setError(error.message || 'The files could not be added.');
     } finally {
       state.uploading = false;
       input.value = '';
+      draw(container, ctx, state);
+      ctx.setBusy(false);
+    }
+  }
+
+  async function addLinkSource(container, ctx, state, input) {
+    const url = input.value.trim();
+    if (!url) return;
+    state.uploading = true;
+    ctx.setBusy(true, 'Fetching page…');
+    try {
+      const payload = await request(ctx, '/sources/links', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      });
+      if (payload.source) state.sources.push(payload.source);
+      input.value = '';
+      ctx.announce('Page added. Review its status before continuing.');
+    } catch (error) {
+      ctx.setError(error.message || 'The page could not be added.');
+    } finally {
+      state.uploading = false;
+      draw(container, ctx, state);
+      ctx.setBusy(false);
+    }
+  }
+
+  async function addFolderSource(container, ctx, state) {
+    state.uploading = true;
+    ctx.setBusy(true, 'Choosing folder…');
+    try {
+      const pickerResponse = await fetch('/api/folder-picker/select-path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: ctx.workspaceId,
+          title: 'Choose the folder whose immediate files Ori may read'
+        })
+      });
+      const picked = await pickerResponse.json().catch(() => ({}));
+      if (!pickerResponse.ok) throw new Error(picked.error || 'The folder picker failed.');
+      if (!picked.selected) return;
+      if (!picked.selection_token)
+        throw new Error('Choose the folder again; its selection expired.');
+      await request(ctx, '/sources/folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ selection_token: picked.selection_token })
+      });
+      const refreshed = await request(ctx);
+      state.sources = Array.isArray(refreshed.sources) ? refreshed.sources : [];
+      ctx.announce('Folder added. Review each immediate file status before continuing.');
+    } catch (error) {
+      ctx.setError(error.message || 'The folder could not be added.');
+    } finally {
+      state.uploading = false;
       draw(container, ctx, state);
       ctx.setBusy(false);
     }
@@ -174,6 +271,8 @@
         return 'Too large';
       case 'unreadable':
         return 'Unreadable';
+      case 'selected':
+        return 'Selected';
       default:
         return 'Waiting';
     }
@@ -197,15 +296,15 @@
         !state.loaded ||
         state.loading ||
         state.uploading ||
-        !state.files.length ||
+        !state.sources.length ||
         !state.consent?.accepted
       );
     },
 
     async onPrimary(ctx) {
       const state = getState(ctx);
-      if (!state.files.length) {
-        ctx.setError('Add at least one file before continuing.');
+      if (!state.sources.length) {
+        ctx.setError('Add at least one source before continuing.');
         return;
       }
       if (!state.consent?.accepted) {

@@ -1,3 +1,20 @@
+.blueprint-intake-source-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.blueprint-intake-source-actions .blueprint-intake-hint {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.blueprint-intake-link-input {
+  min-width: min(22rem, 100%);
+  padding: 0.55rem 0.7rem;
+}
+
 .blueprint-intake-file-label {
   display: inline-flex;
   align-items: center;

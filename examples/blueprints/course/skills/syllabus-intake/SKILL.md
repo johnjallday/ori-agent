@@ -5,7 +5,9 @@ description: Extract course dates and administrative milestones from supplied ma
 
 Read only the material supplied by the Blueprint Intake host.
 
-Extract dated administrative work such as assignments, quizzes, exams, project milestones, registration deadlines, and other course logistics as tickets. Propose quizzes and project milestones with explicit times as single calendar events. Never propose recurring events.
+Extract every dated administrative work item—assignments, quizzes, exams, project milestones, registration deadlines, and other course logistics—as a ticket. A dated work item always needs a ticket, even when another kind also represents it.
+
+In addition to its ticket, propose each quiz and project milestone as one single calendar event. For a calendar event, use `start` and `end` when the source gives a time, or `all_day` in `YYYY-MM-DD` form when it gives only a date. Never put `due_at` on a calendar event and never propose recurring events.
 
 Propose concise course rules as memory entries when the source supports them, including the late-work policy, grading weights, and AI-use rule. Propose one note named "Course outline" that summarizes the course structure and key logistics without solving or explaining coursework.
 

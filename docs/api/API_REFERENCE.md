@@ -846,6 +846,8 @@ Proposals may contain `ticket`, `memory`, `note`, and `calendar_event` items. In
 | --- | --- | --- |
 | `GET` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}` | Read sources, consent, skill readiness, run progress, and the current proposal. |
 | `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/sources/files` | Add one multipart file source. |
+| `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/sources/links` | Fetch and snapshot one consented public HTTP(S) page. Body: `{"url":"https://…"}`. |
+| `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/sources/folder` | Read supported immediate files from a consented native-picker selection. Body: `{"selection_token":"…"}`. |
 | `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/consent` | Accept the host-authored provider disclosure. |
 | `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/skill/trust` | Trust and enable the reviewed bundled skill, with an explicit `existing` or `bundled` choice on collision. |
 | `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/run` | Start one tool-less entry-agent task per parsed source. |

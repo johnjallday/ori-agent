@@ -31,12 +31,17 @@ const (
 	SourceStatusSkipped    = "skipped"
 	SourceStatusTooLarge   = "too_large"
 	SourceStatusUnreadable = "unreadable"
+	SourceStatusSelected   = "selected"
 )
 
 var (
 	ErrIntakeNotFound = errors.New("intake requirement not found")
 	ErrFilesDisabled  = errors.New("file sources are not enabled for this intake")
 	ErrFileLimit      = errors.New("intake file limit reached")
+	ErrLinksDisabled  = errors.New("link sources are not enabled for this intake")
+	ErrLinkLimit      = errors.New("intake link limit reached")
+	ErrFolderDisabled = errors.New("folder sources are not enabled for this intake")
+	ErrConsentNeeded  = errors.New("content-reading consent is required")
 )
 
 type WorkspaceReader interface {
@@ -47,23 +52,36 @@ type WorkspaceReader interface {
 // relative to the package state directory; FilePath is relative to the
 // workspace root. Both are host-generated and never accepted from a request.
 type SourceRecord struct {
-	ID             string    `json:"id"`
-	IntakeKey      string    `json:"intake_key"`
-	Kind           string    `json:"kind"`
-	Name           string    `json:"name"`
-	FilePath       string    `json:"file_path,omitempty"`
-	ParsedTextFile string    `json:"parsed_text_file,omitempty"`
-	ContentHash    string    `json:"content_hash,omitempty"`
-	Status         string    `json:"status"`
-	Size           int64     `json:"size"`
-	AddedAt        time.Time `json:"added_at"`
+	ID             string     `json:"id"`
+	IntakeKey      string     `json:"intake_key"`
+	Kind           string     `json:"kind"`
+	Name           string     `json:"name"`
+	Title          string     `json:"title,omitempty"`
+	URL            string     `json:"url,omitempty"`
+	FilePath       string     `json:"file_path,omitempty"`
+	FolderPath     string     `json:"folder_path,omitempty"`
+	ParentID       string     `json:"parent_id,omitempty"`
+	ParsedTextFile string     `json:"parsed_text_file,omitempty"`
+	SnapshotFile   string     `json:"snapshot_file,omitempty"`
+	ContentType    string     `json:"content_type,omitempty"`
+	ContentHash    string     `json:"content_hash,omitempty"`
+	Status         string     `json:"status"`
+	Size           int64      `json:"size"`
+	Omitted        int        `json:"omitted,omitempty"`
+	Message        string     `json:"message,omitempty"`
+	AddedAt        time.Time  `json:"added_at"`
+	FetchedAt      *time.Time `json:"fetched_at,omitempty"`
 }
 
 type FileResult struct {
 	ID          string `json:"id,omitempty"`
+	Kind        string `json:"kind,omitempty"`
 	Name        string `json:"name"`
+	Title       string `json:"title,omitempty"`
+	URL         string `json:"url,omitempty"`
 	Status      string `json:"status"`
 	Size        int64  `json:"size,omitempty"`
+	Omitted     int    `json:"omitted,omitempty"`
 	ContentHash string `json:"content_hash,omitempty"`
 	Message     string `json:"message,omitempty"`
 }
@@ -77,10 +95,16 @@ type sourceState struct {
 }
 
 // SourceService owns workspace-scoped intake source storage.
+type PathSelectionResolver interface {
+	ResolveFor(token, scope string) (string, error)
+}
+
 type SourceService struct {
 	workspaces       WorkspaceReader
 	folders          workspace.FolderResolver
 	providerResolver ProviderResolver
+	fetcher          LinkFetcher
+	selections       PathSelectionResolver
 	now              func() time.Time
 
 	mu    sync.Mutex
@@ -88,7 +112,12 @@ type SourceService struct {
 }
 
 func NewSourceService(workspaces WorkspaceReader, folders workspace.FolderResolver) *SourceService {
-	return &SourceService{workspaces: workspaces, folders: folders, now: time.Now, locks: make(map[string]*sync.Mutex)}
+	return &SourceService{workspaces: workspaces, folders: folders, fetcher: NewHTTPLinkFetcher(nil), now: time.Now, locks: make(map[string]*sync.Mutex)}
+}
+
+func (s *SourceService) SetLinkFetcher(fetcher LinkFetcher) { s.fetcher = fetcher }
+func (s *SourceService) SetPathSelections(selections PathSelectionResolver) {
+	s.selections = selections
 }
 
 func (s *SourceService) SetProviderResolver(resolver ProviderResolver) {
@@ -210,6 +239,7 @@ func (s *SourceService) AddFile(ctx context.Context, workspaceID, intakeKey, fil
 		}
 	}
 
+	record.Message = message
 	state.Sources = append(state.Sources, record)
 	if err := saveSourceState(stateDir, state); err != nil {
 		return FileResult{}, err
@@ -222,7 +252,7 @@ func (s *SourceService) persistStatusOnly(state sourceState, stateDir, intakeKey
 	if err != nil {
 		return FileResult{}, err
 	}
-	record := SourceRecord{ID: id, IntakeKey: intakeKey, Kind: "file", Name: name, Status: status, Size: size, AddedAt: s.now().UTC()}
+	record := SourceRecord{ID: id, IntakeKey: intakeKey, Kind: "file", Name: name, Status: status, Size: size, Message: message, AddedAt: s.now().UTC()}
 	state.Sources = append(state.Sources, record)
 	if err := saveSourceState(stateDir, state); err != nil {
 		return FileResult{}, err
@@ -369,7 +399,7 @@ func saveSourceState(stateDir string, state sourceState) error {
 func countFiles(sources []SourceRecord, intakeKey string) int {
 	count := 0
 	for _, source := range sources {
-		if source.IntakeKey == intakeKey && source.Kind == "file" {
+		if source.IntakeKey == intakeKey && (source.Kind == "file" || source.Kind == "folder_file") {
 			count++
 		}
 	}
@@ -436,5 +466,8 @@ func newSourceID() (string, error) {
 }
 
 func fileResult(record SourceRecord, message string) FileResult {
-	return FileResult{ID: record.ID, Name: record.Name, Status: record.Status, Size: record.Size, ContentHash: record.ContentHash, Message: message}
+	if message == "" {
+		message = record.Message
+	}
+	return FileResult{ID: record.ID, Kind: record.Kind, Name: record.Name, Title: record.Title, URL: record.URL, Status: record.Status, Size: record.Size, Omitted: record.Omitted, ContentHash: record.ContentHash, Message: message}
 }

@@ -102,6 +102,13 @@ func (r *IntakeRunner) SetCharacterCap(limit int) {
 	}
 }
 
+// SetTaskExecutor completes startup wiring after the workspace task path exists.
+func (r *IntakeRunner) SetTaskExecutor(executor TaskExecutor) {
+	if r != nil {
+		r.executor = executor
+	}
+}
+
 func (r *IntakeRunner) SkillReadiness(workspaceID, intakeKey string) (SkillReadiness, error) {
 	if r == nil || r.workspaces == nil || r.sources == nil || r.skills == nil {
 		return SkillReadiness{}, errors.New("intake runner is unavailable")
@@ -253,6 +260,9 @@ func bundledSkillSnapshot(ws *workspace.Workspace, name string) (workspace.Bundl
 }
 
 func (r *IntakeRunner) Run(ctx context.Context, workspaceID, intakeKey string, progress func(SourceRunProgress)) ([]SourceRunResult, error) {
+	if r == nil || r.executor == nil {
+		return nil, errors.New("intake task executor is unavailable")
+	}
 	readiness, err := r.SkillReadiness(workspaceID, intakeKey)
 	if err != nil {
 		return nil, err

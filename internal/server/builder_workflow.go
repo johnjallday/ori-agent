@@ -554,6 +554,9 @@ func (b *ServerBuilder) initializeTaskExecution() {
 	if fn := b.buildRuntimeTaskToolFactory(); fn != nil {
 		b.taskHandler.SetRuntimeTaskToolFactory(fn)
 	}
+	if b.blueprintIntakeWorkflow != nil {
+		b.blueprintIntakeWorkflow.SetTaskExecutor(b.taskHandler)
+	}
 
 	taskRunner := b.directTaskRunner()
 	taskExecutionHandler := taskRunner

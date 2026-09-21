@@ -119,6 +119,70 @@ test('renders file statuses and the host consent statement as text', async () =>
   assert.equal(renderer.disablePrimary(ctx), true, 'consent is required before Continue');
 });
 
+test('shows only declared link and folder controls and keeps one safe combined source list', async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url, options });
+    if (url === '/api/folder-picker/select-path')
+      return response({ selected: true, selection_token: 'trusted', path: '/private/course' });
+    if (url.endsWith('/sources/links'))
+      return response({
+        source: {
+          kind: 'link',
+          title: '<script>Syllabus</script>',
+          name: 'Syllabus',
+          status: 'parsed'
+        }
+      });
+    if (url.endsWith('/sources/folder')) return response({ folder: {}, files: [] });
+    return response({
+      sources: [
+        { kind: 'file', name: 'notes.txt', status: 'parsed' },
+        { kind: 'folder', name: '<img> Course files', status: 'selected', omitted: 2 }
+      ],
+      consent: { statement: 'Reading approved sources.', accepted: true }
+    });
+  };
+  const host = new FakeElement('div');
+  const ctx = context('workspace-collectors', {
+    step: { intake_url: true, intake_directory_key: 'course-folder' }
+  });
+  renderer.render(host, ctx);
+  await tick();
+  await tick();
+
+  assert.match(host.textContent, /File: notes\.txtParsed/);
+  assert.match(host.textContent, /Folder: <img> Course filesSelected/);
+  assert.equal('innerHTML' in host, false);
+  const urlInput = host.all().find(node => node.type === 'url');
+  urlInput.value = 'https://example.com/syllabus';
+  const addLink = host.all().find(node => node.textContent === 'Add a link');
+  const chooseFolder = host.all().find(node => node.textContent === 'Choose a folder');
+  assert.ok(addLink && chooseFolder);
+  await addLink.fire('click');
+  assert.match(host.textContent, /Page: <script>Syllabus<\/script>Parsed/);
+  await chooseFolder.fire('click');
+  assert.ok(calls.some(call => call.url === '/api/folder-picker/select-path'));
+  assert.ok(calls.some(call => call.url.endsWith('/sources/folder')));
+});
+
+test('hides undeclared link and folder collectors', async () => {
+  globalThis.fetch = async () =>
+    response({ sources: [], consent: { statement: 'Review.', accepted: false } });
+  const host = new FakeElement('div');
+  renderer.render(host, context('workspace-files-only'));
+  await tick();
+  await tick();
+  assert.equal(
+    host.all().some(node => node.type === 'url'),
+    false
+  );
+  assert.equal(
+    host.all().some(node => node.textContent === 'Choose a folder'),
+    false
+  );
+});
+
 test('accepts consent before enabling Continue and then confirms through the wizard', async () => {
   let calls = 0;
   globalThis.fetch = async (_url, options = {}) => {

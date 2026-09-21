@@ -41,6 +41,14 @@ func NewService(sources *SourceService, runner *IntakeRunner, proposals *Proposa
 	return &Service{sources: sources, runner: runner, proposals: proposals, apply: apply, now: time.Now, runs: make(map[string]*activeRun)}
 }
 
+// SetTaskExecutor completes startup wiring after the ordinary workspace task
+// path has been constructed.
+func (s *Service) SetTaskExecutor(executor TaskExecutor) {
+	if s != nil && s.runner != nil {
+		s.runner.SetTaskExecutor(executor)
+	}
+}
+
 func (s *Service) BundledSkillReview(workspaceID, intakeKey string) (BundledSkillReview, bool, error) {
 	if s == nil || s.runner == nil {
 		return BundledSkillReview{}, false, errors.New("intake service is unavailable")

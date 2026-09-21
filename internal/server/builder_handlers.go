@@ -1150,6 +1150,7 @@ func (b *ServerBuilder) wireSetupWizard() {
 			}
 			return blueprintintake.ModelProvider{Name: provider, Local: llm.IsLocalProviderName(provider)}, nil
 		})
+		intakeService.SetPathSelections(b.pathSelectionStore)
 		b.blueprintIntakeService = intakeService
 		proposalStore := blueprintintake.NewProposalStore(b.workspaceFileStore)
 		runner := blueprintintake.NewIntakeRunner(folders, intakeService, b.skillsManager, b.taskHandler)

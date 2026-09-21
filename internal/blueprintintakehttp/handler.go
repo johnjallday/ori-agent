@@ -123,6 +123,60 @@ func (h *Handler) UploadFiles(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) AddLink(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, ok := h.resolveWorkspace(r.Context(), w, r)
+	if !ok {
+		return
+	}
+	var request struct {
+		URL string `json:"url"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &request) {
+		return
+	}
+	result, err := h.sources.AddLink(r.Context(), workspaceID, strings.TrimSpace(r.PathValue("intakeKey")), request.URL)
+	if err != nil {
+		status := http.StatusBadRequest
+		message := "The page could not be fetched safely."
+		switch {
+		case errors.Is(err, blueprintintake.ErrLinkLimit):
+			status, message = http.StatusConflict, "This intake already has 10 links."
+		case errors.Is(err, blueprintintake.ErrConsentNeeded):
+			message = "Accept the content-reading statement before adding a link."
+		case errors.Is(err, blueprintintake.ErrLinksDisabled):
+			message = "This intake does not accept links."
+		}
+		_ = orihttp.RespondError(w, status, message)
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"source": result, "limit": blueprintintake.MaxLinksPerIntake})
+}
+
+func (h *Handler) AddFolder(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, ok := h.resolveWorkspace(r.Context(), w, r)
+	if !ok {
+		return
+	}
+	var request struct {
+		SelectionToken string `json:"selection_token"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &request) {
+		return
+	}
+	result, err := h.sources.AddFolder(r.Context(), workspaceID, strings.TrimSpace(r.PathValue("intakeKey")), request.SelectionToken)
+	if err != nil {
+		message := "The selected folder could not be read."
+		if errors.Is(err, blueprintintake.ErrConsentNeeded) {
+			message = "Accept the content-reading statement before choosing a folder."
+		} else if errors.Is(err, blueprintintake.ErrFolderDisabled) {
+			message = "This intake does not accept a folder."
+		}
+		_ = orihttp.RespondError(w, http.StatusBadRequest, message)
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"folder": result.Folder, "files": result.Files, "omitted": result.Omitted})
+}
+
 func (h *Handler) GetIntake(w http.ResponseWriter, r *http.Request) {
 	workspaceID, _, ok := h.resolveWorkspace(r.Context(), w, r)
 	if !ok {
@@ -144,11 +198,11 @@ func (h *Handler) GetIntake(w http.ResponseWriter, r *http.Request) {
 		_ = orihttp.RespondError(w, http.StatusServiceUnavailable, "This workspace's model provider is unavailable.")
 		return
 	}
-	files := make([]blueprintintake.FileResult, 0, len(sources))
+	results := make([]blueprintintake.FileResult, 0, len(sources))
 	for _, source := range sources {
-		files = append(files, blueprintintake.FileResult{ID: source.ID, Name: source.Name, Status: source.Status, Size: source.Size, ContentHash: source.ContentHash})
+		results = append(results, blueprintintake.FileResult{ID: source.ID, Kind: source.Kind, Name: source.Name, Title: source.Title, URL: source.URL, Status: source.Status, Size: source.Size, Omitted: source.Omitted, ContentHash: source.ContentHash, Message: source.Message})
 	}
-	payload := map[string]any{"requirement": requirement, "files": files, "consent": consent}
+	payload := map[string]any{"requirement": requirement, "files": results, "sources": results, "consent": consent}
 	if h.workflow != nil {
 		if skill, skillErr := h.workflow.SkillReadiness(workspaceID, intakeKey); skillErr == nil {
 			payload["skill"] = skill

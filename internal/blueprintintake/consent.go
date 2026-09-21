@@ -36,9 +36,9 @@ type ConsentStatus struct {
 func ConsentStatement(provider ModelProvider) string {
 	name := strings.TrimSpace(provider.Name)
 	if provider.Local {
-		return fmt.Sprintf("Ori will read the contents of these files and pages. The text stays on this computer and is handled by %s. Nothing is created until you review it.", name)
+		return fmt.Sprintf("Ori will read the contents of these files, selected folders and pages. The text stays on this computer and is handled by %s. Nothing is created until you review it.", name)
 	}
-	return fmt.Sprintf("Ori will read the contents of these files and pages. The text is sent to %s, this workspace's model provider. Nothing is created until you review it.", name)
+	return fmt.Sprintf("Ori will read the contents of these files, selected folders and pages. The text is sent to %s, this workspace's model provider. Nothing is created until you review it.", name)
 }
 
 func (s *SourceService) ConsentStatus(ctx context.Context, workspaceID, intakeKey string) (ConsentStatus, error) {

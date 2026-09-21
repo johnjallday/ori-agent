@@ -70,6 +70,22 @@ func TestIntakeRunnerNeverCallsAgentWithoutReadySkillText(t *testing.T) {
 	}
 }
 
+func TestIntakeRunnerRefusesMissingTaskExecutorWithoutPanicking(t *testing.T) {
+	runner := runnerFixture(t, runnerSkillCatalog{skill: &skills.Skill{Name: "syllabus-intake", Prompt: "extract dates only", Enabled: true, Trusted: true}}, nil)
+	if _, err := runner.Run(context.Background(), "course", "materials", nil); err == nil || !strings.Contains(err.Error(), "task executor is unavailable") {
+		t.Fatalf("Run error = %v, want unavailable task executor", err)
+	}
+
+	executor := &recordingTaskExecutor{}
+	runner.SetTaskExecutor(executor)
+	if _, err := runner.Run(context.Background(), "course", "materials", nil); err != nil {
+		t.Fatalf("Run after startup wiring: %v", err)
+	}
+	if executor.calls != 1 {
+		t.Fatalf("executor calls = %d, want 1", executor.calls)
+	}
+}
+
 func TestIntakeRunnerUsesOneToollessTaskPerSourceWithPinnedSkill(t *testing.T) {
 	executor := &recordingTaskExecutor{}
 	runner := runnerFixture(t, runnerSkillCatalog{skill: &skills.Skill{Name: "syllabus-intake", Description: "Dates", Prompt: "extract dates only", Enabled: true, Trusted: true}}, executor)
